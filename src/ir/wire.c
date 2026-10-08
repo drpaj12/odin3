@@ -341,6 +341,45 @@ odin3_status odin3_wire_add_alias(odin3_module *module, odin3_wirebit wb, odin3_
     return ODIN3_OK;
 }
 
+/* --- wire delete -------------------------------------------------------------------------- */
+
+/* Net loses membership wb: its primary when that is wb, else the alias record (if it has one). */
+static void membership_drop(odin3_module *module, odin3_net_id net, odin3_wirebit wb) {
+    odin3_net_rec *rec = odin3_net_rec_at(module, net);
+    if (rec == NULL) {
+        return;
+    }
+    if (rec->wire.v == wb.wire.v && rec->wire_bit == wb.bit) {
+        rec->wire = (odin3_wire_id){0};
+        rec->wire_bit = 0;
+        return;
+    }
+    uint32_t prev = alias_find_prev(module, rec, wb);
+    if (prev != 0) {
+        (void)alias_unlink_after(module, rec, prev); /* the record stays unused until compact */
+    }
+}
+
+odin3_status odin3_wire_delete(odin3_module *module, odin3_wire_id wire) {
+    odin3_wire_rec *rec = odin3_wire_live_rec(module, wire, "wire_delete");
+    if (rec == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_node_valid(rec->port_node)) {
+        odin3_log(ODIN3_LOG_ERROR, "wire_delete: wire %u is a port; it follows the port node",
+                  wire.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    for (uint32_t k = 0; k < rec->width; k++) {
+        membership_drop(module, rec->nets[k], (odin3_wirebit){wire, k});
+    }
+    if (rec->name != 0) {
+        (void)odin3_u64map_remove(module->wire_names, rec->name);
+    }
+    rec->dead = true;
+    return ODIN3_OK;
+}
+
 odin3_wirebit odin3_net_primary(const odin3_module *module, odin3_net_id net) {
     const odin3_net_rec *rec = odin3_net_rec_cat(module, net);
     return rec != NULL ? (odin3_wirebit){rec->wire, rec->wire_bit} : (odin3_wirebit){{0}, 0};

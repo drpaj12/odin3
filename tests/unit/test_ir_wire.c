@@ -3,6 +3,7 @@
  * attributes (IR-2, IR-3, IR-7, IR-10, IR-14, IR-15).
  */
 #include "ir/celltype.h"
+#include "ir/check.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
@@ -544,6 +545,75 @@ static void test_net_delete_refuses_wire_membership(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_net_delete(module, loose));
     TEST_ASSERT_TRUE(odin3_net_live(module, loose));
     TEST_ASSERT_EQUAL_size_t(2, errors_logged);
+}
+
+/* --- wire delete -------------------------------------------------------------------------- */
+
+static void assert_full_check_clean(void) {
+    odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_module(module, full));
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/*
+ * b = {a1, a0, loose, loose} holds only aliases, two of them in the middle of loose's chain
+ * (d[0] after them); deleting b releases exactly those, then deleting a clears two primaries.
+ */
+static void test_wire_delete_releases_memberships(void) {
+    odin3_wire_id wire_a = wire_range("a", 1, 0, NULL);
+    odin3_net_id a0 = odin3_wire_net(module, wire_a, 0);
+    odin3_net_id a1 = odin3_wire_net(module, wire_a, 1);
+    odin3_net_id loose = net_named("loose");
+    odin3_wire_id wire_c = wire_range("c", 0, 0, &loose); /* primary of loose */
+    odin3_net_id nets[] = {a1, a0, loose, loose};
+    odin3_wire_id wire_b = wire_range("b", 3, 0, nets);
+    odin3_wire_id wire_d = wire_range("d", 0, 0, &loose);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){wire_c, 0}, a0));
+    odin3_net_alias before[] = {wb_alias(wire_b, 2), wb_alias(wire_b, 3), wb_alias(wire_d, 0)};
+    assert_aliases(loose, before, 3); /* c[0] moved to a0, so b[2] is an alias too */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(module, wire_b));
+    TEST_ASSERT_FALSE(odin3_wire_live(module, wire_b));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_module_find_wire(module, intern("b")).v);
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_wire_width(module, wire_b)); /* history stays readable */
+    TEST_ASSERT_EQUAL_UINT32(a1.v, odin3_wire_net(module, wire_b, 0).v);
+    assert_aliases(a1, NULL, 0);
+    odin3_net_alias c_only[] = {wb_alias(wire_c, 0)};
+    assert_aliases(a0, c_only, 1);
+    odin3_net_alias d_only[] = {wb_alias(wire_d, 0)};
+    assert_aliases(loose, d_only, 1);
+    TEST_ASSERT_TRUE(odin3_net_live(module, a0) && odin3_net_live(module, a1) &&
+                     odin3_net_live(module, loose)); /* nets stay */
+    assert_full_check_clean();
+    /* the primary case: deleting a clears both primaries; the name can be reused */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(module, wire_a));
+    assert_primary(a0, (odin3_wire_id){0}, 0);
+    assert_primary(a1, (odin3_wire_id){0}, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, a1));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(module, wire_d));
+    assert_aliases(loose, NULL, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, loose));
+    odin3_wire_id again = wire_range("b", 0, 0, NULL);
+    TEST_ASSERT_EQUAL_UINT32(again.v, odin3_module_find_wire(module, intern("b")).v);
+    assert_full_check_clean();
+}
+
+static void test_wire_delete_rejects(void) {
+    (void)add_port("p", ODIN3_DIR_IN, 2);
+    odin3_wire_id port_wire = odin3_module_port_wire(module, 0);
+    odin3_wire_id wire = wire_range("w", 0, 0, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(module, wire));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_wire_delete(module, port_wire));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_wire_delete(module, wire)); /* dead */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_wire_delete(module, (odin3_wire_id){99}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_wire_delete(module, (odin3_wire_id){0}));
+    TEST_ASSERT_EQUAL_size_t(4, errors_logged);
+    TEST_ASSERT_TRUE(odin3_wire_live(module, port_wire));
+    TEST_ASSERT_EQUAL_UINT32(port_wire.v, odin3_module_find_wire(module, intern("p")).v);
+    for (uint32_t k = 0; k < 2; k++) {
+        assert_primary(odin3_wire_net(module, port_wire, k), port_wire, k);
+    }
+    errors_logged = 0;
+    assert_full_check_clean();
 }
 
 /* --- merge --------------------------------------------------------------------------------- */
@@ -1326,6 +1396,8 @@ int main(void) {
     RUN_TEST(test_wire_add_alias_rebinds);
     RUN_TEST(test_wire_add_alias_rejects);
     RUN_TEST(test_net_delete_refuses_wire_membership);
+    RUN_TEST(test_wire_delete_releases_memberships);
+    RUN_TEST(test_wire_delete_rejects);
     RUN_TEST(test_merge_port_out_drop);
     RUN_TEST(test_merge_chains_names);
     RUN_TEST(test_merge_alias_order);

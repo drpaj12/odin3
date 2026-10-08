@@ -132,11 +132,13 @@ static const odin3_port_def k_link_ports[] = {
 static const odin3_celltype_def k_link = {
     "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL};
 
-/* --- simulated wire delete ------------------------------------------------------------------ */
+static void kill_wire(odin3_module *mod, odin3_wire_id wire) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod, wire));
+}
 
 /*
- * What a wire delete would do (the IR has no wire delete yet; compact must still handle dead
- * wires): drop the wire's primary memberships, free its name, mark it dead.
+ * A wire marked dead with its memberships left in place, which odin3_wire_delete never does:
+ * compact must still drop such memberships (test_compact_drops_dead_wire_memberships).
  */
 static void mark_wire_dead(odin3_module *mod, odin3_wire_id wire) {
     odin3_wire_rec *rec = odin3_wire_rec_at(mod, wire);
@@ -144,18 +146,6 @@ static void mark_wire_dead(odin3_module *mod, odin3_wire_id wire) {
         (void)odin3_u64map_remove(mod->wire_names, rec->name);
     }
     rec->dead = true;
-}
-
-static void kill_wire(odin3_module *mod, odin3_wire_id wire) {
-    const odin3_wire_rec *rec = odin3_wire_rec_cat(mod, wire);
-    for (uint32_t k = 0; k < rec->width; k++) {
-        odin3_net_rec *net = odin3_net_rec_at(mod, rec->nets[k]);
-        if (net->wire.v == wire.v && net->wire_bit == k) {
-            net->wire = (odin3_wire_id){0};
-            net->wire_bit = 0;
-        }
-    }
-    mark_wire_dead(mod, wire);
 }
 
 /* --- the chain ------------------------------------------------------------------------------ */

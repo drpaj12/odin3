@@ -263,6 +263,16 @@ typedef struct odin3_wire_spec {
 odin3_status odin3_wire_create(odin3_module *module, const odin3_wire_spec *spec,
                                const odin3_net_id *nets, odin3_wire_id *out);
 
+/*
+ * Deletes a live wire that is not a module port (a port wire is INVALID_ARG; it follows the port
+ * node): for each bit, the net that holds it loses that membership (its primary is cleared when
+ * it is this (wire, bit), else the alias leaves its chain; a membership the net does not record,
+ * a check rule 8 violation, is skipped), the name leaves the map and the wire dies. The nets stay
+ * (delete them separately); the dead wire keeps its fields and attributes for history. Costs
+ * O(width + aliases of its nets); never allocates.
+ */
+odin3_status odin3_wire_delete(odin3_module *module, odin3_wire_id wire);
+
 /* One past the last wire ID; the live wire named name_str, or none. */
 uint32_t odin3_module_wire_end(const odin3_module *module);
 odin3_wire_id odin3_module_find_wire(const odin3_module *module, uint32_t name_str);
