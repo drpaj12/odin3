@@ -7,6 +7,7 @@
 #include "util/alloc.h"
 #include "util/arena.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -144,32 +145,36 @@ static void test_equal_ints(void) {
 }
 
 static void test_value_valid(void) {
-    odin3_value i0 = odin3_value_int(0);
-    odin3_value str = i0;
+    odin3_value str = odin3_value_int(0);
     str.kind = ODIN3_VAL_STRING;
-    odin3_value bits = make_bits(k_bits);
     odin3_value empty_bits = make_bits(NULL);
     empty_bits.len = 0;
-    odin3_value cover = with_inputs(make_cover(k_cover, sizeof k_cover), 2);
-    odin3_value empty_cover = with_inputs(make_cover(NULL, 0), 2);
-    TEST_ASSERT_TRUE(odin3_value_valid(&i0));
-    TEST_ASSERT_TRUE(odin3_value_valid(&str));
-    TEST_ASSERT_TRUE(odin3_value_valid(&bits));
-    TEST_ASSERT_TRUE(odin3_value_valid(&empty_bits));
-    TEST_ASSERT_TRUE(odin3_value_valid(&cover));
-    TEST_ASSERT_TRUE(odin3_value_valid(&empty_cover));
+    const odin3_value good[] = {
+        odin3_value_int(0),
+        str,
+        make_bits(k_bits),
+        empty_bits,
+        with_inputs(make_cover(k_cover, sizeof k_cover), 2),
+        with_inputs(make_cover(NULL, 0), 2),
+    };
+    for (size_t i = 0; i < sizeof good / sizeof good[0]; i++) {
+        TEST_ASSERT_TRUE(odin3_value_valid(&good[i]));
+    }
+}
 
-    odin3_value no_bits = make_bits(NULL); /* len 4, no payload */
-    odin3_value no_rows = with_inputs(make_cover(NULL, sizeof k_cover), 2);
-    odin3_value ragged = with_inputs(make_cover(k_cover, sizeof k_cover - 1), 2);
-    odin3_value wide = with_inputs(make_cover(k_cover, sizeof k_cover), UINT32_MAX);
-    odin3_value bad_kind = i0;
+static void test_value_invalid(void) {
+    odin3_value bad_kind = odin3_value_int(0);
     bad_kind.kind = (odin3_value_kind)(ODIN3_VAL_COVER + 1);
-    TEST_ASSERT_FALSE(odin3_value_valid(&no_bits));
-    TEST_ASSERT_FALSE(odin3_value_valid(&no_rows));
-    TEST_ASSERT_FALSE(odin3_value_valid(&ragged));
-    TEST_ASSERT_FALSE(odin3_value_valid(&wide)); /* rows of 2^32 bytes: 6 is no multiple */
-    TEST_ASSERT_FALSE(odin3_value_valid(&bad_kind));
+    const odin3_value bad[] = {
+        make_bits(NULL),                                              /* len 4, no payload */
+        with_inputs(make_cover(NULL, sizeof k_cover), 2),             /* rows, no payload */
+        with_inputs(make_cover(k_cover, sizeof k_cover - 1), 2),      /* partial row */
+        with_inputs(make_cover(k_cover, sizeof k_cover), UINT32_MAX), /* rows of 2^32 bytes */
+        bad_kind,
+    };
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        TEST_ASSERT_FALSE(odin3_value_valid(&bad[i]));
+    }
     TEST_ASSERT_FALSE(odin3_value_valid(NULL));
 }
 
@@ -201,6 +206,7 @@ int main(void) {
     RUN_TEST(test_equal_kinds_and_ints);
     RUN_TEST(test_equal_ints);
     RUN_TEST(test_value_valid);
+    RUN_TEST(test_value_invalid);
     RUN_TEST(test_copy_oom);
     return UNITY_END();
 }

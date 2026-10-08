@@ -34,11 +34,11 @@ typedef struct odin3_value {
  */
 
 /*
- * True when v is well formed: a known kind; for BITS and COVER a payload (bits non-NULL) whenever
+ * True when val is well formed: a known kind; for BITS and COVER a payload (bits non-NULL) whenever
  * len > 0; for COVER a len that is a multiple of cover_inputs + 1 (whole rows). False for NULL.
  * Every API that stores a value (node parameters, cell-type defaults, attributes) checks it first.
  */
-bool odin3_value_valid(const odin3_value *v);
+bool odin3_value_valid(const odin3_value *val);
 
 /*
  * Deep-copies src into dst, placing any byte payload in the arena. ODIN3_ERR_NO_MEMORY on
