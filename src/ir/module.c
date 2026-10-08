@@ -17,8 +17,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Module arena chunk size: small enough for many small modules, large enough to batch mallocs. */
-enum { MODULE_ARENA_CHUNK_BYTES = 16384 };
+/* Small chunks keep an empty module cheap; oversize requests get a chunk of their own. */
+enum { MODULE_ARENA_CHUNK_BYTES = 2048 };
 
 /* --- stores -------------------------------------------------------------------------------- */
 

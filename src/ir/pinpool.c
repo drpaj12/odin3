@@ -7,8 +7,8 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Arena chunk size: small enough for many small modules, large enough to batch mallocs. */
-enum { PINPOOL_CHUNK_BYTES = 16384 };
+/* Small chunks keep an empty module cheap; oversize requests get a chunk of their own. */
+enum { PINPOOL_CHUNK_BYTES = 2048 };
 
 /* A free block stores the next free block's address in its first bytes (class 0 is 8 bytes). */
 _Static_assert(sizeof(void *) <= 2 * sizeof(odin3_pin_id), "class-0 block cannot hold a link");

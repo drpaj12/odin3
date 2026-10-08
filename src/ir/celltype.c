@@ -314,37 +314,48 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
     return entry != NULL ? entry->def : NULL;
 }
 
-static uint32_t int_width(const odin3_value *val, const char *param) {
+static odin3_status int_width(const odin3_value *val, const char *param, uint32_t *width) {
     if (val->kind != ODIN3_VAL_INT || val->i < 0 || val->i > (int64_t)UINT32_MAX) {
         odin3_log(ODIN3_LOG_ERROR, "port_width: parameter %s is not an int in 0..%u", param,
                   UINT32_MAX);
-        return 0;
+        return ODIN3_ERR_INVALID_ARG;
     }
-    return (uint32_t)val->i;
+    *width = (uint32_t)val->i;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
+                                               const odin3_port_query *query, uint32_t *width) {
+    const odin3_celltype_entry *entry = entry_at(design, query->type);
+    if (entry == NULL || query->port >= entry->def->n_ports) {
+        odin3_log(ODIN3_LOG_ERROR, "port_width: no port %u on cell type %u", query->port,
+                  query->type.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const odin3_celltype_def *def = entry->def;
+    const odin3_port_def *pdef = &def->ports[query->port];
+    if (query->params == NULL && def->n_params > 0) {
+        odin3_log(ODIN3_LOG_ERROR, "port_width: cell type '%s' needs parameter values", def->name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (pdef->width_fn != NULL) {
+        *width = pdef->width_fn(query->params, query->port);
+        return ODIN3_OK;
+    }
+    if (pdef->width_param == NULL) {
+        *width = pdef->width;
+        return ODIN3_OK;
+    }
+    int pidx = find_param(def, pdef->width_param);
+    assert(pidx != NO_PARAM); /* definitions are validated */
+    return int_width(&query->params[pidx], pdef->width_param, width);
 }
 
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port) {
-    const odin3_celltype_entry *entry = entry_at(design, id);
-    if (entry == NULL || port >= entry->def->n_ports) {
-        odin3_log(ODIN3_LOG_ERROR, "port_width: no port %u on cell type %u", port, id.v);
-        return 0;
-    }
-    const odin3_celltype_def *def = entry->def;
-    const odin3_port_def *pdef = &def->ports[port];
-    if (params == NULL && def->n_params > 0) {
-        odin3_log(ODIN3_LOG_ERROR, "port_width: cell type '%s' needs parameter values", def->name);
-        return 0;
-    }
-    if (pdef->width_fn != NULL) {
-        return pdef->width_fn(params, port);
-    }
-    if (pdef->width_param == NULL) {
-        return pdef->width;
-    }
-    int pidx = find_param(def, pdef->width_param);
-    assert(pidx != NO_PARAM); /* definitions are validated */
-    return int_width(&params[pidx], pdef->width_param);
+    odin3_port_query query = {id, params, port};
+    uint32_t width = 0;
+    return odin3_celltype_port_width_checked(design, &query, &width) == ODIN3_OK ? width : 0;
 }
 
 uint32_t odin3_celltype_instances(const odin3_design *design, odin3_celltype_id id) {

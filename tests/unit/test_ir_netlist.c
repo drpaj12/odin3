@@ -18,6 +18,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -31,7 +32,11 @@ enum {
     MIXED_A = 2,
     MIXED_Y = 3,
     OOM_LIMIT = 10000,
-    SMALL_MODULE_BYTES = 64 * 1024,
+    SMALL_MODULE_BYTES = 48 * 1024,
+    NAME_BUF = 32,
+    NAME_MAP_FULL = 13,     /* u64map: 16 slots at 85% load; the 14th entry grows it */
+    NODE_CREATE_ALLOCS = 4, /* arena chunk, node page, pin page, name-map growth */
+    NET_CREATE_ALLOCS = 2,  /* net page, name-map growth */
 };
 
 static odin3_design *design;
@@ -58,9 +63,9 @@ static odin3_celltype_id type_id(const char *name) {
     return id;
 }
 
-void setUp(void) {
-    errors_logged = 0;
-    odin3_log_set_sink(count_sink, NULL);
+/* A new design holding one empty module "top"; replaces the current one. */
+static void fresh_design(void) {
+    odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     odin3_module_id mid = {0};
@@ -68,6 +73,13 @@ void setUp(void) {
                           odin3_module_create(design, intern("top"), (odin3_prov_id){0}, &mid));
     module = odin3_module_get(design, mid);
     TEST_ASSERT_NOT_NULL(module);
+}
+
+void setUp(void) {
+    errors_logged = 0;
+    odin3_log_set_sink(count_sink, NULL);
+    design = NULL;
+    fresh_design();
 }
 
 void tearDown(void) {
@@ -424,6 +436,41 @@ static void test_delete_only_driver_keeps_sinks(void) {
     assert_sinks_intact(net, out, 3);
 }
 
+/* The net holds exactly the pins of want (any order), with `drivers` of them driving. */
+static void assert_net_exact(odin3_net_id net, odin3_pinlist want, uint32_t drivers) {
+    odin3_pinlist have = odin3_net_pins(module, net);
+    TEST_ASSERT_EQUAL_UINT32(want.count, have.count);
+    TEST_ASSERT_EQUAL_UINT32(drivers, odin3_net_driver_count(module, net));
+    for (uint32_t i = 0; i < want.count; i++) {
+        TEST_ASSERT_TRUE(net_has(net, want.pins[i]));
+    }
+    assert_partition(net);
+}
+
+/* The deleted node drives `shared` (Y0) and sinks it twice (A0, A1); Y1 is on `other`. */
+static void test_delete_node_with_driver_and_sinks(void) {
+    odin3_value width = odin3_value_int(2);
+    odin3_node_id mixed = node_named("test_t3_mixed", 0, &width);
+    odin3_node_id bus = port_node("$port_inout", 1);
+    odin3_node_id outs = port_node("$port_out", 3);
+    odin3_net_id shared = net_named("shared");
+    odin3_net_id other = net_named("other");
+    connect(pin_of(outs, 0), shared);
+    connect(pin_of(mixed, 0), shared); /* A0 */
+    connect(pin_of(mixed, 2), shared); /* Y0 */
+    connect(pin_of(bus, 0), shared);
+    connect(pin_of(mixed, 1), shared); /* A1 */
+    connect(pin_of(outs, 1), shared);
+    connect(pin_of(mixed, 3), other); /* Y1 */
+    connect(pin_of(outs, 2), other);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, mixed));
+    const odin3_pin_id shared_left[] = {pin_of(bus, 0), pin_of(outs, 0), pin_of(outs, 1)};
+    assert_net_exact(shared, (odin3_pinlist){shared_left, 3}, 1);
+    TEST_ASSERT_EQUAL_UINT32(pin_of(bus, 0).v, odin3_net_driver(module, shared).v);
+    const odin3_pin_id other_left[] = {pin_of(outs, 2)};
+    assert_net_exact(other, (odin3_pinlist){other_left, 1}, 0);
+}
+
 static void test_many_pins_remove_every_other(void) {
     odin3_node_id sinks = port_node("$port_out", MANY_SINKS);
     odin3_node_id drivers = port_node("$port_inout", FEW_DRIVERS);
@@ -565,18 +612,21 @@ static void test_out_of_range_accessors(void) {
 
 /* --- memory ------------------------------------------------------------------------------- */
 
-static size_t store_bytes(void) {
+/* Bytes a module has reserved: its three stores' pages and its two arenas. */
+static size_t module_bytes(void) {
     return odin3_pagevec_bytes_reserved(module->nodes) +
-           odin3_pagevec_bytes_reserved(module->pins) + odin3_pagevec_bytes_reserved(module->nets);
+           odin3_pagevec_bytes_reserved(module->pins) + odin3_pagevec_bytes_reserved(module->nets) +
+           odin3_arena_bytes_reserved(module->arena) +
+           odin3_pinpool_bytes_reserved(&module->pinpool);
 }
 
-static void test_small_module_stores_are_small(void) {
+static void test_small_module_is_small(void) {
     odin3_node_id one = node_of("$_CONST1_");
     connect(pin_of(one, 0), net_named("n"));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_module_node_end(module));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_module_net_end(module));
-    TEST_ASSERT_TRUE(store_bytes() > 0);
-    TEST_ASSERT_TRUE(store_bytes() < SMALL_MODULE_BYTES);
+    TEST_ASSERT_TRUE(module_bytes() > 0);
+    TEST_ASSERT_TRUE(module_bytes() < SMALL_MODULE_BYTES);
 }
 
 /* --- pin pool ------------------------------------------------------------------------------ */
@@ -624,7 +674,8 @@ typedef struct snapshot {
     uint32_t net_count[SNAP_MAX];
     uint32_t net_drivers[SNAP_MAX];
     uint32_t instances;
-    uint32_t found;
+    uint32_t found_node;
+    uint32_t found_net;
 } snapshot;
 
 static uint32_t min_u32(uint32_t lhs, uint32_t rhs) {
@@ -645,7 +696,8 @@ static snapshot take_snapshot(odin3_celltype_id type, uint32_t name) {
         snap.net_drivers[i] = odin3_net_driver_count(module, (odin3_net_id){i});
     }
     snap.instances = odin3_celltype_instances(design, type);
-    snap.found = odin3_module_find_node(module, name).v;
+    snap.found_node = odin3_module_find_node(module, name).v;
+    snap.found_net = odin3_module_find_net(module, name).v;
     return snap;
 }
 
@@ -661,21 +713,49 @@ static void build_small_netlist(odin3_net_id *net) {
     }
 }
 
-/* The swept node's pins straddle a pagevec page boundary, so its pin reservation allocates. */
-static void test_node_create_oom_sweep(void) {
-    odin3_net_id net = {0};
-    build_small_netlist(&net);
+/* Makes the arena's current chunk too small for `need` bytes (the arena has one chunk). */
+static void exhaust_arena(odin3_arena *arena, size_t need) {
+    while (odin3_arena_bytes_reserved(arena) - odin3_arena_bytes_used(arena) >= need) {
+        TEST_ASSERT_NOT_NULL(odin3_arena_alloc(arena, 1));
+    }
+}
+
+static uint32_t numbered_name(const char *prefix, uint32_t index) {
+    char buf[NAME_BUF];
+    (void)snprintf(buf, sizeof buf, "%s%u", prefix, (unsigned)index);
+    return intern(buf);
+}
+
+/*
+ * Fresh module where creating one more named, parameterised node must allocate at four points:
+ * the module arena (parameter copy), the node store (page boundary), the pin store (page
+ * boundary) and the node name map (at its growth threshold). Returns that node's spec.
+ */
+static odin3_node_spec prepare_node_oom(void) {
+    fresh_design();
     uint32_t page = UINT32_C(1) << ODIN3_MODULE_PAGE_SHIFT;
-    uint32_t filler = page - 1 - odin3_module_pin_end(module);
-    (void)port_node("$port_out", filler);
-    TEST_ASSERT_EQUAL_UINT32(page - 1, odin3_module_pin_end(module));
-    odin3_value width = odin3_value_int(3);
+    for (uint32_t i = 1; i < page; i++) { /* one pin each: node and pin stores end up full */
+        (void)node_named("$_CONST0_", i <= NAME_MAP_FULL ? numbered_name("g", i) : 0, NULL);
+    }
+    TEST_ASSERT_EQUAL_UINT32(page, odin3_module_node_end(module));
+    TEST_ASSERT_EQUAL_UINT32(page, odin3_module_pin_end(module));
+    exhaust_arena(module->arena, sizeof(odin3_value));
+    static odin3_value width;
+    width = odin3_value_int(3);
     odin3_node_spec spec = {type_id("test_t3_mixed"), intern("oom"), {0}, &width, 1};
-    snapshot before = take_snapshot(spec.type, spec.name);
+    return spec;
+}
+
+/* Each failure point is hit from a fresh module, so earlier allocations are not kept. */
+static void test_node_create_oom_sweep(void) {
+    odin3_node_spec spec = {0};
+    snapshot before;
     odin3_node_id node = {0};
     odin3_status st = ODIN3_ERR_NO_MEMORY;
-    long fail_at = 0;
-    for (; fail_at < OOM_LIMIT; fail_at++) {
+    uint32_t failures = 0;
+    for (long fail_at = 0; fail_at < OOM_LIMIT; fail_at++) {
+        spec = prepare_node_oom();
+        before = take_snapshot(spec.type, spec.name);
         odin3_util_set_alloc_fail_after(fail_at);
         st = odin3_node_create(module, &spec, &node);
         odin3_util_set_alloc_fail_after(-1);
@@ -683,11 +763,12 @@ static void test_node_create_oom_sweep(void) {
             break;
         }
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        failures++;
         snapshot now = take_snapshot(spec.type, spec.name);
-        assert_same(&before, &now);
+        assert_same(&before, &now); /* ends, pins and nets, instance count, name absent */
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
-    TEST_ASSERT_TRUE(fail_at > 0); /* at least one injected failure was exercised */
+    TEST_ASSERT_EQUAL_UINT32(NODE_CREATE_ALLOCS, failures);
     TEST_ASSERT_EQUAL_UINT32(before.node_end, node.v);
     TEST_ASSERT_EQUAL_UINT32(before.pin_end, odin3_node_pins(module, node).first.v);
     TEST_ASSERT_EQUAL_UINT32(before.pin_end + 3 + MIXED_Y + 1, odin3_module_pin_end(module));
@@ -697,11 +778,7 @@ static void test_node_create_oom_sweep(void) {
 
 /* Uses up the pool arena's current chunk so the next block of `cls` needs a new chunk. */
 static void exhaust_pool_chunk(uint32_t cls) {
-    odin3_pinpool *pool = &module->pinpool;
-    size_t need = odin3_pinpool_capacity(cls) * sizeof(odin3_pin_id);
-    while (odin3_arena_bytes_reserved(pool->arena) - odin3_arena_bytes_used(pool->arena) >= need) {
-        TEST_ASSERT_NOT_NULL(odin3_pinpool_alloc(pool, 0));
-    }
+    exhaust_arena(module->pinpool.arena, odin3_pinpool_capacity(cls) * sizeof(odin3_pin_id));
 }
 
 static void test_pin_connect_oom_sweep(void) {
@@ -731,24 +808,43 @@ static void test_pin_connect_oom_sweep(void) {
     assert_partition(net);
 }
 
+/* Fresh module whose next named net must allocate a net page and grow the net name map. */
+static uint32_t prepare_net_oom(void) {
+    fresh_design();
+    uint32_t page = UINT32_C(1) << ODIN3_MODULE_PAGE_SHIFT;
+    for (uint32_t i = 1; i < page; i++) {
+        odin3_net_id net = {0};
+        uint32_t name = i <= NAME_MAP_FULL ? numbered_name("w", i) : 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, name, (odin3_prov_id){0}, &net));
+    }
+    TEST_ASSERT_EQUAL_UINT32(page, odin3_module_net_end(module));
+    return intern("oom_net"); /* interned before the allocator is armed */
+}
+
 static void test_net_create_oom_sweep(void) {
-    snapshot before = take_snapshot(type_id("$port_in"), 0);
+    uint32_t name = 0;
+    snapshot before;
     odin3_net_id net = {0};
     odin3_status st = ODIN3_ERR_NO_MEMORY;
+    uint32_t failures = 0;
     for (long fail_at = 0; fail_at < OOM_LIMIT; fail_at++) {
+        name = prepare_net_oom();
+        before = take_snapshot(type_id("$port_in"), name);
         odin3_util_set_alloc_fail_after(fail_at);
-        st = odin3_net_create(module, intern("oom_net"), (odin3_prov_id){0}, &net);
+        st = odin3_net_create(module, name, (odin3_prov_id){0}, &net);
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {
             break;
         }
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        snapshot now = take_snapshot(type_id("$port_in"), 0);
-        assert_same(&before, &now);
-        TEST_ASSERT_FALSE(odin3_net_valid(odin3_module_find_net(module, intern("oom_net"))));
+        failures++;
+        snapshot now = take_snapshot(type_id("$port_in"), name);
+        assert_same(&before, &now); /* includes: the name is not found */
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
-    TEST_ASSERT_EQUAL_UINT32(net.v, odin3_module_find_net(module, intern("oom_net")).v);
+    TEST_ASSERT_EQUAL_UINT32(NET_CREATE_ALLOCS, failures);
+    TEST_ASSERT_EQUAL_UINT32(before.net_end, net.v);
+    TEST_ASSERT_EQUAL_UINT32(net.v, odin3_module_find_net(module, name).v);
 }
 
 static void test_module_create_oom_sweep(void) {
@@ -791,6 +887,7 @@ int main(void) {
     RUN_TEST(test_const_driver_and_sink);
     RUN_TEST(test_const_value_needs_one_driver);
     RUN_TEST(test_delete_only_driver_keeps_sinks);
+    RUN_TEST(test_delete_node_with_driver_and_sinks);
     RUN_TEST(test_many_pins_remove_every_other);
     RUN_TEST(test_connect_refuses_other_net);
     RUN_TEST(test_net_names);
@@ -798,7 +895,7 @@ int main(void) {
     RUN_TEST(test_dead_ids_rejected);
     RUN_TEST(test_out_of_range_ids);
     RUN_TEST(test_out_of_range_accessors);
-    RUN_TEST(test_small_module_stores_are_small);
+    RUN_TEST(test_small_module_is_small);
     RUN_TEST(test_pinpool_classes);
     RUN_TEST(test_pinpool_reuses_blocks);
     RUN_TEST(test_node_create_oom_sweep);

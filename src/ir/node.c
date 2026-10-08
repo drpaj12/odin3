@@ -12,7 +12,6 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <string.h>
 
 /* A node about to be created: its validated type and its parameters, copied into the module. */
 typedef struct node_plan {
@@ -64,30 +63,16 @@ static odin3_status copy_params(odin3_module *module, const odin3_node_spec *spe
     return ODIN3_OK;
 }
 
-/* A port whose width is an INT parameter needs that value in [0, UINT32_MAX]. */
-static bool width_param_ok(const node_plan *plan, uint32_t port) {
-    const odin3_port_def *pdef = &plan->def->ports[port];
-    if (pdef->width_fn != NULL || pdef->width_param == NULL) {
-        return true;
-    }
-    for (uint32_t i = 0; i < plan->def->n_params; i++) {
-        if (strcmp(plan->def->params[i].name, pdef->width_param) == 0) {
-            const odin3_value *val = &plan->params[i];
-            return val->kind == ODIN3_VAL_INT && val->i >= 0 && val->i <= (int64_t)UINT32_MAX;
-        }
-    }
-    return false; /* not reached: definitions are validated */
-}
-
 static odin3_status count_pins(const odin3_module *module, node_plan *plan) {
     uint64_t total = 0;
     for (uint32_t port = 0; port < plan->def->n_ports; port++) {
-        if (!width_param_ok(plan, port)) {
-            odin3_log(ODIN3_LOG_ERROR, "node_create: '%s' port %s: width is not an int in 0..%u",
-                      plan->def->name, plan->def->ports[port].name, UINT32_MAX);
-            return ODIN3_ERR_INVALID_ARG;
+        odin3_port_query query = {plan->type, plan->params, port};
+        uint32_t width = 0;
+        odin3_status st = odin3_celltype_port_width_checked(module->design, &query, &width);
+        if (st != ODIN3_OK) {
+            return st; /* logged */
         }
-        total += odin3_celltype_port_width(module->design, plan->type, plan->params, port);
+        total += width;
     }
     if (total > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY; /* more pins than IDs */

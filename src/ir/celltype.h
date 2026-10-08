@@ -102,6 +102,21 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port);
 
+/* A port of a cell type, with the parameter values it is sized by (as for port_width). */
+typedef struct odin3_port_query {
+    odin3_celltype_id type;
+    const odin3_value *params;
+    uint32_t port;
+} odin3_port_query;
+
+/*
+ * odin3_celltype_port_width with the failure reported: ODIN3_ERR_INVALID_ARG (logged) for the
+ * cases where port_width returns 0 as an error; *width is untouched then. A width of 0 from a
+ * valid rule is ODIN3_OK.
+ */
+odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
+                                               const odin3_port_query *query, uint32_t *width);
+
 /* Number of live nodes of type id (0 for an invalid ID). */
 uint32_t odin3_celltype_instances(const odin3_design *design, odin3_celltype_id id);
 
