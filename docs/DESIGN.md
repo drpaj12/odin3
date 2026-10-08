@@ -190,7 +190,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 ### 15.1 Language rules (C17)
 - `-std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Werror`.
 - No `goto` except the single `cleanup:` label pattern for error paths. No variable-length arrays. No recursion in IR traversals (use an explicit worklist) — the IR can be 2M nodes deep.
-- Memory: every IR object lives in storage owned by its `Module` (per-module paged arrays and arena; the string table and provenance are design-global — `docs/IR.md` IR-18); passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `hashmap`, `str`, `log`; nothing else in the tree defines a generic container.
+- Memory: every IR object lives in storage owned by its `Module` (per-module paged arrays and arena; the string table and provenance are design-global — `docs/IR.md` IR-18); passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `pagevec`, `u64map`, `idindex`, `str`, `log`; nothing else in the tree defines a generic container.
 - Errors: functions return `odin3_status` (an enum); no `exit()`/`_exit()`/`_Exit()`/`quick_exit()` outside `cli/`; no `abort()`, `raise(SIGABRT)` or `__builtin_trap()` outside `check` in debug builds. `assert()` is allowed (it compiles out of release builds). Checked by `tools/check_rules.py` and, at link level, `tools/check-symbols.sh`.
 - One header per module, `#include` only what you use (`include-what-you-use` advisory in CI, not blocking).
 - Every public function in `odin3.h` has a one-paragraph comment: purpose, ownership of returned memory, failure modes.
