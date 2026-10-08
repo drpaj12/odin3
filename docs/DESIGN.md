@@ -74,18 +74,18 @@ Every arrow is a *pass* registered with the pass manager; every pass runs `check
 - Storage: arena-allocated, dense integer IDs (`uint32_t`), stable across passes; name → ID maps kept per module. Objects are plain structs; all cross-references are IDs, never pointers, so the IR is trivially serializable and the C ABI can hand out IDs safely. Target: 2M nodes in < 2 GB (Titan).
 
 ### 5.2 Op registry (CIRCT-inspired, one file per cell type)
-Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`). Adding a cell type touches exactly one file; plugins can register cell types at load time.
+Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`, plus the structural `module` and `port` — `docs/IR.md` IR-9). Adding a cell type touches exactly one file; plugins can register cell types at load time.
 
-Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $and $or $xor $not $shl $shr $sshr $eq $ne $lt $le $gt $ge $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $concat $slice $reduce_*`.
-Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_LUT_K_` plus `$_HARD_<name>` instances.
+Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $and $or $xor $not $shl $shr $sshr $eq $ne $lt $le $gt $ge $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $reduce_*`. (`$concat`/`$slice` are not cells: nets are one bit and a port is a pin vector, so slicing and concatenation are which nets a port uses — `docs/IR.md` IR-1.)
+Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_DLATCH_* $_FF_ $_CONST*_ $sop` (BLIF `.names` covers) and `$_LUT_K_`. Structural: `$port_in/out/inout`. Hard and black-box cells keep their own names (e.g. VTR `adder`, `multiply`), registered by the tech library or declared by a netlist (`docs/IR.md` IR-7b).
 Hard set: generated from the VPR arch `<model>` list and from the Altera primitive library.
 
 ### 5.3 Provenance
-`struct odin3_prov { odin3_srcloc loc; odin3_ast_id ast; odin3_ir_id origin; const char *hier_path; }` on every node, pin, and net. Forward index AST → IR objects maintained incrementally by passes. Emitted names follow `hier/path/cellname@file:line`; a `--name-style` flag chooses between provenance names and short names.
+Every node, net and wire carries a provenance ID (pins inherit their node's) into an append-only, hash-consed lineage DAG: each record holds its kind (source, imported, derived), the pass run and operation that made it, source locations, AST node, hierarchical path, and parent records — the parents replace v0.2's `origin` field. Navigation runs backward (object → sources) and forward (location or record → objects, live or dead) on demand. Details: `docs/IR.md` §6 (IR-12, IR-13). Emitted names follow `hier/path/cellname@file:line`; a `--name-style` flag chooses between provenance names and short names.
 
 ### 5.4 Views
-- `rtlil view`: asserts all nodes are `word`/`hard`/`blackbox`; exposes a Yosys-like API for passes.
-- `netlist view`: asserts all nodes are `bit`/`hard`/`blackbox`.
+- `rtlil view`: asserts all nodes are `word`/`hard`/`blackbox`/`module`/`port`; exposes a Yosys-like API for passes.
+- `netlist view`: asserts all nodes are `bit`/`hard`/`blackbox`/`module`/`port`.
 - Mixed granularity is legal during `lower`/`raise` only.
 
 ## 6. Pass pipeline (forward)
@@ -190,7 +190,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 ### 15.1 Language rules (C17)
 - `-std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Werror`.
 - No `goto` except the single `cleanup:` label pattern for error paths. No variable-length arrays. No recursion in IR traversals (use an explicit worklist) — the IR can be 2M nodes deep.
-- Memory: every IR object lives in an arena owned by its `Module`; passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `hashmap`, `str`, `log`; nothing else in the tree defines a generic container.
+- Memory: every IR object lives in storage owned by its `Module` (per-module paged arrays and arena; the string table and provenance are design-global — `docs/IR.md` IR-18); passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `pagevec`, `u64map`, `idindex`, `str`, `log`; nothing else in the tree defines a generic container.
 - Errors: functions return `odin3_status` (an enum); no `exit()`/`_exit()`/`_Exit()`/`quick_exit()` outside `cli/`; no `abort()`, `raise(SIGABRT)` or `__builtin_trap()` outside `check` in debug builds. `assert()` is allowed (it compiles out of release builds). Checked by `tools/check_rules.py` and, at link level, `tools/check-symbols.sh`.
 - One header per module, `#include` only what you use (`include-what-you-use` advisory in CI, not blocking).
 - Every public function in `odin3.h` has a one-paragraph comment: purpose, ownership of returned memory, failure modes.

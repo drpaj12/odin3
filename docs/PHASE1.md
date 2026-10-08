@@ -51,6 +51,12 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 6. 1A gets a light review (agent merges after critique); 1B's `docs/IR.md` gets Peter's full
    review.
 
+9. **IR decisions delegated** (Peter, 2026-10-08 ~17:00): "Make your best decisions for the IR
+   and don't worry about the update — you should be able to push further." The agent writes
+   `docs/IR.md` (decisions IR-1…IR-18), has it critiqued, and implements 1B without waiting for
+   Peter's review; he reviews afterwards and may override any IR-n decision. Spec §12's human
+   review of IR changes is satisfied after the fact for Phase 1.
+
 Open for Peter (asked 2026-10-08, needed at 1G):
 
 7. Tech-library syntax: agent recommends an own small text format (cell function as a boolean
