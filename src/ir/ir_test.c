@@ -195,6 +195,39 @@ static bool dead_node_live_pin(odin3_module *module, uint32_t id) {
     return true;
 }
 
+/* Port id's pin 0 leaves the net at bit 0 of the port wire for a new unnamed net (via the API). */
+static odin3_status port_wire_mismatch(odin3_module *module, uint32_t id) {
+    const odin3_port_rec *port = id < module->ports.len ? odin3_vec_cat(&module->ports, id) : NULL;
+    odin3_pinslice pins = port != NULL ? odin3_node_pins(module, port->node) : (odin3_pinslice){0};
+    if (pins.count == 0 || !odin3_net_valid(odin3_pin_net(module, pins.first))) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_net_id fresh = {0};
+    odin3_status st = odin3_net_create(module, 0, odin3_node_prov(module, port->node), &fresh);
+    if (st == ODIN3_OK) {
+        (void)odin3_pin_disconnect(module, pins.first);
+        st = odin3_pin_connect(module, pins.first, fresh);
+    }
+    return st;
+}
+
+/* The faults that go through the API (and so may run out of memory). */
+static odin3_status api_fault(odin3_module *module, odin3_ir_test_target target) {
+    const char *name = "MULTI_DRIVER";
+    odin3_status st = ODIN3_OK;
+    if (target.fault == ODIN3_IR_TEST_MULTI_DRIVER) {
+        st = multi_driver(module, target.id);
+    } else {
+        name = "PORT_WIRE_MISMATCH";
+        st = port_wire_mismatch(module, target.id);
+    }
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "ir_test_corrupt: %s on %u failed (%s)", name, target.id,
+                  odin3_status_string(st));
+    }
+    return st;
+}
+
 typedef bool (*fault_fn)(odin3_module *module, uint32_t id);
 
 odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target target) {
@@ -212,14 +245,11 @@ odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target ta
         [ODIN3_IR_TEST_PORT_LIST] = port_list,
         [ODIN3_IR_TEST_VIEW] = view,
         [ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN] = dead_node_live_pin,
+        [ODIN3_IR_TEST_PORT_WIRE_MISMATCH] = NULL, /* goes through the API, may fail */
     };
-    if (module != NULL && target.fault == ODIN3_IR_TEST_MULTI_DRIVER) {
-        odin3_status st = multi_driver(module, target.id);
-        if (st != ODIN3_OK) {
-            odin3_log(ODIN3_LOG_ERROR, "ir_test_corrupt: MULTI_DRIVER on net %u failed (%s)",
-                      target.id, odin3_status_string(st));
-        }
-        return st;
+    if (module != NULL && (target.fault == ODIN3_IR_TEST_MULTI_DRIVER ||
+                           target.fault == ODIN3_IR_TEST_PORT_WIRE_MISMATCH)) {
+        return api_fault(module, target);
     }
     if (module == NULL || (unsigned)target.fault >= ODIN3_IR_TEST_FAULT_COUNT ||
         !faults[target.fault](module, target.id)) {

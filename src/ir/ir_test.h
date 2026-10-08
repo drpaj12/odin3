@@ -25,6 +25,7 @@ typedef enum odin3_ir_test_fault {
     ODIN3_IR_TEST_PORT_LIST,      /* rule 9: port entry id points at the next port's node */
     ODIN3_IR_TEST_VIEW,           /* rule 10: 1-bit $not node id becomes a $_NOT_ */
     ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN, /* rule 11: node id dies with its pins still connected */
+    ODIN3_IR_TEST_PORT_WIRE_MISMATCH, /* rule 9: port id's pin 0 moves to a new net */
     ODIN3_IR_TEST_FAULT_COUNT
 } odin3_ir_test_fault;
 
@@ -40,9 +41,10 @@ typedef struct odin3_ir_test_target {
  * and a sink; DRIVER_COUNT and MULTI_DRIVER a live net; PIN_COUNT a live node with a pin;
  * DUP_NAME a live node and another live named node; BAD_PROV a live node; WIRE_BACKREF a live
  * wire whose bit 0 is its net's primary; PORT_LIST a port index of a module with two or more
- * ports; VIEW a live $not node of width 1; DEAD_NODE_LIVE_PIN a live non-port node.
- * ODIN3_ERR_INVALID_ARG (logged) when they do not hold (nothing changes); ODIN3_ERR_NO_MEMORY from
- * MULTI_DRIVER's node creation.
+ * ports; VIEW a live $not node of width 1; DEAD_NODE_LIVE_PIN a live non-port node;
+ * PORT_WIRE_MISMATCH a port index whose pin 0 is connected. ODIN3_ERR_INVALID_ARG (logged) when
+ * they do not hold (nothing changes); ODIN3_ERR_NO_MEMORY from MULTI_DRIVER's node creation or
+ * PORT_WIRE_MISMATCH's net creation and connect (which goes through the API).
  */
 odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target target);
 

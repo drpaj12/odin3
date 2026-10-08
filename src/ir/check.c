@@ -242,8 +242,10 @@ static void pin_dangling(check_ctx *ctx, odin3_pin_id id, const odin3_pin_rec *p
     if (def == NULL) {
         return; /* rule 1, reported by the node sweep */
     }
-    const char *port = pin->port < def->n_ports ? def->ports[pin->port].name : "?";
-    if (def == &odin3_cell_port_out) {
+    const odin3_port_def *pdef = pin->port < def->n_ports ? &def->ports[pin->port] : NULL;
+    const char *port = pdef != NULL ? pdef->name : "?";
+    if (def->gran == ODIN3_GRAN_PORT && pdef != NULL && pdef->dir == ODIN3_DIR_IN) {
+        /* a $port_out: the cell sinks the net the module drives out */
         violation(ctx, R11_E, "pin %u of output port node %u is unconnected", id.v, pin->node.v);
     } else if (def->gran != ODIN3_GRAN_PORT) {
         violation(ctx, R11_W, "pin %u (node %u (%s) '%s', port %s bit %u) is unconnected", id.v,
@@ -610,24 +612,50 @@ static void check_wires(check_ctx *ctx, const check_marks *marks) {
 
 /* --- rule 9: ports ---------------------------------------------------------------------------- */
 
-static const odin3_celltype_def *port_type_for(odin3_dir dir) {
+/*
+ * True when def is a port cell type (granularity PORT, one port) for a module port of direction
+ * dir: the cell sees its pin the other way round ($port_in's pin is OUT, $port_out's IN).
+ */
+static bool port_type_fits(const odin3_celltype_def *def, odin3_dir dir) {
+    if (def->gran != ODIN3_GRAN_PORT || def->n_ports != 1) {
+        return false;
+    }
     switch (dir) {
     case ODIN3_DIR_IN:
-        return &odin3_cell_port_in;
+        return def->ports[0].dir == ODIN3_DIR_OUT;
     case ODIN3_DIR_OUT:
-        return &odin3_cell_port_out;
+        return def->ports[0].dir == ODIN3_DIR_IN;
     case ODIN3_DIR_INOUT:
-        return &odin3_cell_port_inout;
+        return def->ports[0].dir == ODIN3_DIR_INOUT;
     }
-    return NULL;
+    return false;
 }
 
-/* Port `index` against the module's cell type: node type and width, wire name and width. */
+/* Port pin k and port wire bit k hold the same net, for every k (first mismatch only). */
+static void port_bits_match(check_ctx *ctx, uint32_t index, const odin3_node_rec *node,
+                            const odin3_wire_rec *wire) {
+    const odin3_port_def *pdef = &ctx->module->type_def.ports[index];
+    for (uint32_t k = 0; k < node->pin_count && k < wire->width; k++) {
+        const odin3_pin_rec *pin =
+            odin3_pin_rec_cat(ctx->module, (odin3_pin_id){node->first_pin.v + k});
+        if (pin == NULL || pin->net.v != wire->nets[k].v) {
+            violation(ctx, R9, "port %u (%s): pin %u is on net %u but wire bit %u holds net %u",
+                      index, pdef->name, node->first_pin.v + k, pin != NULL ? pin->net.v : 0, k,
+                      wire->nets[k].v);
+            return;
+        }
+    }
+}
+
+/*
+ * Port `index` against the module's cell type: node type and width, wire name and width, and
+ * pin k on the net of wire bit k.
+ */
 static void port_matches(check_ctx *ctx, uint32_t index, const odin3_port_rec *port,
                          const odin3_celltype_def *node_def) {
     const odin3_port_def *pdef = &ctx->module->type_def.ports[index];
     const odin3_node_rec *node = odin3_node_rec_cat(ctx->module, port->node);
-    if (node_def != port_type_for(pdef->dir) || node->pin_count != pdef->width) {
+    if (!port_type_fits(node_def, pdef->dir) || node->pin_count != pdef->width) {
         violation(ctx, R9,
                   "port %u (%s): node %u is a %u-bit '%s'; the cell type says dir %u, "
                   "width %u",
@@ -639,7 +667,9 @@ static void port_matches(check_ctx *ctx, uint32_t index, const odin3_port_rec *p
         wire->width != pdef->width || strcmp(label(ctx, wire->name), pdef->name) != 0) {
         violation(ctx, R9, "port %u (%s): wire %u is not its live port wire of width %u", index,
                   pdef->name, port->wire.v, pdef->width);
+        return;
     }
+    port_bits_match(ctx, index, node, wire);
 }
 
 static void check_port(check_ctx *ctx, const check_marks *marks, uint32_t index) {

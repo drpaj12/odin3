@@ -284,6 +284,17 @@ static void test_fault_port_list(void) {
     expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_PORT_LIST, 1}, 9, false);
 }
 
+/* Rule 9: port pin k and port wire bit k must hold the same net (a and y, both directions). */
+static void test_fault_port_wire_mismatch(void) {
+    expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_PORT_WIRE_MISMATCH, 0}, 9, false);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("port 0 (a)"), log_text);
+}
+
+static void test_fault_port_wire_mismatch_out(void) {
+    expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_PORT_WIRE_MISMATCH, 2}, 9, false);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("port 2 (y)"), log_text);
+}
+
 static void test_fault_dead_node_live_pin(void) {
     expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN, g_buf.v}, 11, true);
 }
@@ -311,9 +322,13 @@ static void test_fault_view(void) {
 
 static void test_corrupt_rejects_bad_targets(void) {
     odin3_ir_test_target bad[] = {
-        {ODIN3_IR_TEST_PIN_BAD_PORT, 9999}, {ODIN3_IR_TEST_PARTITION, t1.v}, /* a driver, no sink */
-        {ODIN3_IR_TEST_PORT_LIST, 3},       {ODIN3_IR_TEST_VIEW, g_and.v},
-        {ODIN3_IR_TEST_WIRE_BACKREF, 9999}, {ODIN3_IR_TEST_FAULT_COUNT, 1},
+        {ODIN3_IR_TEST_PIN_BAD_PORT, 9999},
+        {ODIN3_IR_TEST_PARTITION, t1.v}, /* a driver, no sink */
+        {ODIN3_IR_TEST_PORT_LIST, 3},
+        {ODIN3_IR_TEST_VIEW, g_and.v},
+        {ODIN3_IR_TEST_WIRE_BACKREF, 9999},
+        {ODIN3_IR_TEST_FAULT_COUNT, 1},
+        {ODIN3_IR_TEST_PORT_WIRE_MISMATCH, 3},
     };
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ir_test_corrupt(module, bad[i]));
@@ -581,6 +596,8 @@ int main(void) {
     RUN_TEST(test_fault_bad_prov);
     RUN_TEST(test_fault_wire_backref);
     RUN_TEST(test_fault_port_list);
+    RUN_TEST(test_fault_port_wire_mismatch);
+    RUN_TEST(test_fault_port_wire_mismatch_out);
     RUN_TEST(test_fault_dead_node_live_pin);
     RUN_TEST(test_fault_view);
     RUN_TEST(test_corrupt_rejects_bad_targets);
