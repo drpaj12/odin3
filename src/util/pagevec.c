@@ -52,6 +52,9 @@ static bool table_has_room(odin3_pagevec *pv) {
     if (pv->npages < pv->table_cap) {
         return true;
     }
+    if (pv->table_cap > SIZE_MAX / 2) {
+        return false;
+    }
     size_t new_cap = pv->table_cap > 0 ? pv->table_cap * 2 : PAGEVEC_MIN_TABLE;
     if (new_cap > SIZE_MAX / sizeof *pv->pages) {
         return false;
@@ -83,14 +86,19 @@ void *odin3_pagevec_push(odin3_pagevec *pv, size_t *index) {
     return odin3_pagevec_at(pv, at);
 }
 
+/* Address of element idx: shift, mask, two loads. */
+static char *elem_ptr(pagevec_page *pages, size_t elem_size, size_t idx) {
+    return pages[idx >> ODIN3_PAGEVEC_PAGE_SHIFT].base + (idx & PAGEVEC_MASK) * elem_size;
+}
+
 void *odin3_pagevec_at(odin3_pagevec *pv, size_t idx) {
     assert(idx < pv->len);
-    return pv->pages[idx >> ODIN3_PAGEVEC_PAGE_SHIFT].base + (idx & PAGEVEC_MASK) * pv->elem_size;
+    return elem_ptr(pv->pages, pv->elem_size, idx);
 }
 
 const void *odin3_pagevec_cat(const odin3_pagevec *pv, size_t idx) {
     assert(idx < pv->len);
-    return pv->pages[idx >> ODIN3_PAGEVEC_PAGE_SHIFT].base + (idx & PAGEVEC_MASK) * pv->elem_size;
+    return elem_ptr(pv->pages, pv->elem_size, idx);
 }
 
 size_t odin3_pagevec_len(const odin3_pagevec *pv) {

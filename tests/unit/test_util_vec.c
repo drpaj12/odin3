@@ -66,6 +66,16 @@ static void test_reserve_overflow(void) {
     odin3_vec_free(&vec);
 }
 
+static void test_reserve_elem_size_overflow(void) {
+    odin3_vec vec;
+    odin3_vec_init(&vec, sizeof(big));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_vec_reserve(&vec, SIZE_MAX / 2));
+    TEST_ASSERT_NULL(vec.data);
+    TEST_ASSERT_EQUAL_UINT(0, vec.cap);
+    TEST_ASSERT_EQUAL_UINT(0, vec.len);
+    odin3_vec_free(&vec);
+}
+
 static void test_pop_and_clear_keep_capacity(void) {
     odin3_vec vec;
     odin3_vec_init(&vec, sizeof(int));
@@ -115,6 +125,7 @@ int main(void) {
     RUN_TEST(test_push_get_10000_ints);
     RUN_TEST(test_push_is_zeroed);
     RUN_TEST(test_reserve_overflow);
+    RUN_TEST(test_reserve_elem_size_overflow);
     RUN_TEST(test_pop_and_clear_keep_capacity);
     RUN_TEST(test_oom_on_growth);
     RUN_TEST(test_free_twice_safe);

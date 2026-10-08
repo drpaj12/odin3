@@ -17,7 +17,7 @@ typedef struct odin3_vec {
 /* Empty vec of elements of elem_size bytes (> 0); allocates nothing. */
 void odin3_vec_init(odin3_vec *vec, size_t elem_size);
 
-/* Frees storage and leaves a zeroed vec that is safe to free again. */
+/* Frees storage and empties the vec (elem_size retained); safe to free again. */
 void odin3_vec_free(odin3_vec *vec);
 
 /* Ensures room for cap elements (capacity stays a power of two, minimum 8). */
