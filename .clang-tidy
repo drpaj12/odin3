@@ -227,3 +227,7 @@ CheckOptions:
   # (loop counters i/j/k are exempt by the check's default).
   readability-identifier-length.MinimumVariableNameLength: 2
   readability-identifier-length.MinimumParameterNameLength: 2
+  # Decision 2026-10-08 (#11): i, j, k allowed as loop counters and plain variables; nothing else
+  # shorter than 2 characters.
+  readability-identifier-length.IgnoredLoopCounterNames: '^[ijk]$'
+  readability-identifier-length.IgnoredVariableNames: '^[ijk]$'

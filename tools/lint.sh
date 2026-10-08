@@ -140,7 +140,7 @@ tidy_step() {
     # (overriding the looser HeaderFilterRegex in .clang-tidy).
     local root_re
     root_re=$(printf '%s' "$ROOT" | sed 's/[][\.^$*+?(){}|]/\\&/g')
-    run_tool clang-tidy clang-tidy -p build/lint --quiet --config-file=.clang-tidy \
+    run_tool clang-tidy clang-tidy -p build/lint --quiet \
         "--header-filter=^${root_re}/(include|src|plugins|tests/unit)/" "${files[@]}"
 }
 if [ "$run_tidy" -eq 1 ]; then

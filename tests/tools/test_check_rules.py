@@ -55,6 +55,16 @@ class CheckRulesTest(unittest.TestCase):
         self.assertEqual(len(self.check("src/passes/opt.c", text)), 1)
         self.assertEqual(self.check("src/ir/check.c", text), [])
 
+    def test_trap_and_sigabrt_only_in_check(self) -> None:
+        for text in ("void f(void) { __builtin_trap(); }\n", "void f(void) { raise(SIGABRT); }\n"):
+            with self.subTest(text=text):
+                self.assertEqual(len(self.check("src/passes/opt.c", text)), 1)
+                self.assertEqual(self.check("src/ir/check.c", text), [])
+
+    def test_assert_and_other_signals_are_allowed(self) -> None:
+        text = "void f(int n) { assert(n > 0); raise(SIGINT); }\n"
+        self.assertEqual(self.check("src/passes/opt.c", text), [])
+
     def test_goto_other_label_is_flagged(self) -> None:
         found = self.check("src/util/vec.c", "void f(void) { goto out; out: ; }\n")
         self.assertEqual(found, ["src/util/vec.c:1: goto may only target the 'cleanup' label"])
@@ -65,7 +75,7 @@ class CheckRulesTest(unittest.TestCase):
 
     def test_line_numbers_survive_block_comments(self) -> None:
         text = "/*\n\n*/\nvoid f(void) { abort(); }\n"
-        expected = ["src/a.c:4: abort() is only allowed in src/ir/check*.c"]
+        expected = ["src/a.c:4: abort/trap is only allowed in src/ir/check*.c"]
         self.assertEqual(self.check("src/a.c", text), expected)
 
 

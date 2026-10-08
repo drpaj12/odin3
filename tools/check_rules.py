@@ -3,7 +3,8 @@
 
 - exit()/_exit()/_Exit()/quick_exit() only under src/cli/ (the bare name is matched, so function
   pointers and macro aliases are caught too);
-- abort() only in src/ir/check*.c (the debug-build `check`);
+- abort(), raise(SIGABRT) and __builtin_trap() only in src/ir/check*.c (the debug-build `check`);
+  assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6);
 - goto only to the single `cleanup` label.
 
 VLAs are rejected by -Wvla and recursion by clang-tidy misc-no-recursion. Token-pasting tricks
@@ -21,7 +22,7 @@ _TOKENS = re.compile(
     r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.DOTALL
 )
 _EXIT = re.compile(r"\b(?:exit|_exit|_Exit|quick_exit)\b")
-_ABORT = re.compile(r"\babort\b")
+_ABORT = re.compile(r"\babort\b|\b__builtin_trap\b|\braise\s*\(\s*SIGABRT\b")
 _GOTO = re.compile(r"\bgoto\s+(\w+)")
 
 
@@ -40,7 +41,7 @@ def violations(path: str, text: str) -> list[str]:
         if _EXIT.search(line) and not in_cli:
             found.append(f"{path}:{lineno}: exit() is only allowed under src/cli/")
         if _ABORT.search(line) and not is_check:
-            found.append(f"{path}:{lineno}: abort() is only allowed in src/ir/check*.c")
+            found.append(f"{path}:{lineno}: abort/trap is only allowed in src/ir/check*.c")
         for match in _GOTO.finditer(line):
             if match.group(1) != "cleanup":
                 found.append(f"{path}:{lineno}: goto may only target the 'cleanup' label")

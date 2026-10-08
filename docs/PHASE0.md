@@ -23,15 +23,34 @@ The main session is the **orchestrator**: it owns git, this checklist, GitHub se
 - **Implementer agents** — one per independent slice, each owning a disjoint set of files. Before dispatch the orchestrator writes the shared interface (directory layout, CMake preset and target names, CLI flags, file formats) into every implementer's prompt. Implementers never run git, never touch files outside their slice, never edit `~/odin3-ws/external/`.
 - **Critique agents** — fresh context, read-only, adversarial. Given the relevant spec sections and the diff, they hunt for spec violations, bugs, and claims nothing tests, and return findings ranked by severity. They do not fix. The orchestrator triages every finding (fix, or reject with a one-line reason) and lists rejected findings in the PR description. A critique runs before every PR is opened and before every `[REVIEW]` stop; findings rated high get one re-check after the fix.
 - **Not split:** git, branch protection and other GitHub settings, the long upstream builds (one background task), and anything whose pieces would edit the same files.
-- **Models:** implementers per §9 (Sonnet for mechanical slices, Opus for tools and harnesses); critics Opus at `high`, Fable for IR-design critiques from Phase 1 on.
+- **Models:** implementers per §9 (Sonnet for mechanical slices, Opus for tools and harnesses); critics Opus at `high`, except Fable for the §6 rules-file critique and for IR-design critiques from Phase 1 on.
 - **Budget:** at most 4 agents in flight; one critique pass per PR plus the re-check above.
 
 | § | Implementers (in parallel) | Critique |
 |---|---|---|
 | 5 | (a) C core — CMake, presets, `odin3.h`, `src/`, `plugins/`, Unity tests — orchestrator; (b) Python tools — `netlist-compare`, `equiv-check`, their tests, `pyproject.toml` — Opus; (c) gate and CI — `lint.sh`, `.clang-tidy`, pre-commit, `ci.yml`, `nightly.yml` — Sonnet. `run-oracle.sh` is the orchestrator's once §4's build exists | one critic over the whole PR #1 diff against spec §15 and this §5 before `gh pr create` |
-| 6 | (a) ADRs D1–D9 + D8′ from spec §2 — Sonnet; (b) the four skills — Sonnet; `CLAUDE.md` and `settings.json` — orchestrator | one critic: `CLAUDE.md` vs spec §12/§15; `settings.json` vs the current settings reference (hook stdin, deny-path syntax, sandbox network) |
+| 6 | (a) ADRs D1–D9 + D8′ from spec §2 — Sonnet; (b) the four skills — Sonnet; `CLAUDE.md` and `settings.json` — orchestrator | one critic (**Fable**, per decision #14): `CLAUDE.md` vs spec §12/§15; `settings.json` vs the current settings reference (hook stdin, deny-path syntax, sandbox network) |
 | 7 | none — one scripted loop | one critic independently re-runs a sample of goldens and the `blink` equiv-check and compares hashes |
 | 8 | none | the exit checklist is the critique |
+
+### A.2 Decisions log
+
+2026-10-08, Peter, on PR #1 (numbers match the question list):
+
+1. Unit tests: **Unity** (spec §13 #8 resolved).
+2. Keep `src/api/` for `odin3.h` entry points owned by no subsystem; added to the §5 tree.
+3. §6 files (`CLAUDE.md`, `.claude/`, ADRs) go in PR #2, separate from PR #1.
+4. Pre-commit runs `lint.sh --no-tidy`; clang-tidy runs in CI (required).
+5. CI's "netlist-compare on `tests/micro`" step is wired when Odin III first writes BLIF (Phase 1–2).
+6. Banned outside `check`: `abort()`, `raise(SIGABRT)`, `__builtin_trap()`; `assert()` allowed (compiles out of release). Spec §15.1 updated.
+7. `equiv-check` treats latch init 2/3 as 0 with a notice; `--strict-init` refuses.
+8. Add a functional `multiply` hard-block model to `equiv-check` in §7; memories wait for Phase 4.
+9. Keep the `ODIN3_WERROR` option (default ON; CI never disables it).
+10. Host-side plugin ABI check (exported `odin3_plugin_abi_version`) lands in Phase 1.
+11. One-letter names: only `i`, `j`, `k`.
+12. `readability-magic-numbers` off under `tests/` only.
+13. §7 runs **all** `.v` files under `odin_ii/regression_test/benchmark/` plus VTR-19; failures are recorded (`status=failed`), not skipped.
+14. Fable is the critic for §6.
 
 ## B. Who does what — summary
 
@@ -156,7 +175,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
     include/odin3/odin3.h          # the public C ABI: every plugin and Python tool uses only this
     src/    util/  (arena, vec, hashmap, str, log — the only generic containers in the tree)
             ir/  ast/  frontends/{verilog,blif,vqm,edif}/  passes/  backends/{blif,verilog,json,dot}/
-            sim/  cli/
+            sim/  cli/  api/ (odin3.h entry points owned by no subsystem — decision #2)
     adapters/slang/                # C++ shim exporting one C function; the only C++ allowed
     plugins/                       # example .so plugin + example Python (cffi) plugin
     tools/  netlist-compare/  equiv-check/  run-oracle.sh  lint.sh
@@ -208,7 +227,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 
 ## 7. Golden netlists
 
-- [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes.
+- [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes.
 - [ ] `[AGENT]` Sanity: `netlist-compare` of a golden against itself is identical; Parmys vs Odin II on `blink` is different but `equiv-check` proves them equivalent.
 - [ ] `[AGENT]` Copy the micro Verilog sources into `odin3/tests/micro/` with a `SOURCES.md` noting origin and VTR commit.
 

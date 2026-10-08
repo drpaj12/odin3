@@ -174,7 +174,7 @@ Agentic working rules: one pass per PR; golden test per pass; `check` on in debu
 5. Which Altera generation for `bind` output first (Cyclone IV/V for Quartus Lite vs. Stratix IV for Titan).
 6. Name-style policy for VTR: provenance names are long; measure VPR runtime impact.
 7. Whether `raise` should also target Yosys's internal cell names for interop.
-8. Unit-test framework for C: Unity vs. CMocka (decide in PR #1).
+8. ~~Unit-test framework for C: Unity vs. CMocka (decide in PR #1).~~ **Resolved 2026-10-08: Unity**, vendored as `third_party/unity`.
 
 ## 14. References
 - Jamieson & Rose, "A Verilog RTL Synthesis Tool for Heterogeneous FPGAs", FPL 2005.
@@ -191,7 +191,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 - `-std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Werror`.
 - No `goto` except the single `cleanup:` label pattern for error paths. No variable-length arrays. No recursion in IR traversals (use an explicit worklist) — the IR can be 2M nodes deep.
 - Memory: every IR object lives in an arena owned by its `Module`; passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `hashmap`, `str`, `log`; nothing else in the tree defines a generic container.
-- Errors: functions return `odin3_status` (an enum); no `exit()` outside `cli/`; no `abort()` outside `check` in debug builds.
+- Errors: functions return `odin3_status` (an enum); no `exit()`/`_exit()`/`_Exit()`/`quick_exit()` outside `cli/`; no `abort()`, `raise(SIGABRT)` or `__builtin_trap()` outside `check` in debug builds. `assert()` is allowed (it compiles out of release builds). Checked by `tools/check_rules.py` and, at link level, `tools/check-symbols.sh`.
 - One header per module, `#include` only what you use (`include-what-you-use` advisory in CI, not blocking).
 - Every public function in `odin3.h` has a one-paragraph comment: purpose, ownership of returned memory, failure modes.
 
@@ -199,6 +199,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 | Tool | Config | Blocking |
 |---|---|---|
 | clang-format | LLVM base, 100 cols, 4-space indent; applied by a Claude Code `PostToolUse` hook and checked with `--dry-run -Werror` | yes |
+| rules | `tools/check_rules.py` (exit/abort/goto per §15.1) + `-Wvla` | yes |
 | clang-tidy | `bugprone-*`, `cert-*`, `misc-*`, `performance-*`, `readability-*` (including `readability-function-size`, `readability-function-cognitive-complexity`), `modernize-*` **off** (C, not C++) | yes |
 | cppcheck | `--enable=warning,style,performance,portability --error-exitcode=1` | yes |
 | lizard | `-C 15` (cyclomatic complexity), `-L 60` (lines per function), `-a 5` (parameters) over `src/` | yes |
@@ -206,7 +207,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 | ruff + mypy --strict | `tools/`, `plugins/` Python | yes |
 | include-what-you-use | advisory | no |
 
-`tools/lint.sh` runs all of the above; `/lint` is its skill wrapper.
+`tools/lint.sh` runs all of the above; `/lint` is its skill wrapper. The pre-commit hook runs `tools/lint.sh --no-tidy` (clang-tidy is slow); CI runs the full gate, including clang-tidy, and is required to merge. Tests are exempt from `readability-magic-numbers`; `i`/`j`/`k` are the only allowed one-letter names.
 
 ### 15.3 Plugin and hook points (C ABI)
 `include/odin3/odin3.h` is the only header plugins see. It exposes opaque handles plus ID-based accessors: design/module/node/pin/net iteration and lookup, attribute get/set, cell-type registration, pass registration, reader/writer registration, matcher-pattern registration, and provenance queries. Plugins are:
