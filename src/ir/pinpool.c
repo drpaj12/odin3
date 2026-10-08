@@ -45,6 +45,24 @@ odin3_pin_id *odin3_pinpool_alloc(odin3_pinpool *pool, uint32_t cls) {
     return odin3_arena_alloc(pool->arena, cap * sizeof(odin3_pin_id));
 }
 
+odin3_status odin3_pinpool_reserve_class0(odin3_pinpool *pool, uint32_t count) {
+    uint32_t have = 0;
+    for (const void *block = pool->free_heads[0]; block != NULL && have < count; have++) {
+        void *next = NULL;
+        memcpy((void *)&next, block, sizeof next);
+        block = next;
+    }
+    for (; have < count; have++) {
+        odin3_pin_id *block =
+            odin3_arena_alloc(pool->arena, sizeof *block * odin3_pinpool_capacity(0));
+        if (block == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        odin3_pinpool_release(pool, block, 0);
+    }
+    return ODIN3_OK;
+}
+
 void odin3_pinpool_release(odin3_pinpool *pool, odin3_pin_id *block, uint32_t cls) {
     assert(cls < ODIN3_PINPOOL_CLASSES && block != NULL);
     void *next = pool->free_heads[cls];

@@ -36,6 +36,13 @@ uint32_t odin3_pinpool_capacity(uint32_t cls);
 /* A block of class cls, from the free list if one is there; NULL on out of memory. */
 odin3_pin_id *odin3_pinpool_alloc(odin3_pinpool *pool, uint32_t cls);
 
+/*
+ * Makes the next `count` odin3_pinpool_alloc calls for class 0 (a net's first pin) unable to fail
+ * by putting blocks on the free list. ODIN3_ERR_NO_MEMORY on out of memory; blocks already added
+ * stay free.
+ */
+odin3_status odin3_pinpool_reserve_class0(odin3_pinpool *pool, uint32_t count);
+
 /* Returns a block obtained from odin3_pinpool_alloc with the same class. */
 void odin3_pinpool_release(odin3_pinpool *pool, odin3_pin_id *block, uint32_t cls);
 

@@ -46,6 +46,9 @@ struct odin3_design {
  */
 enum { ODIN3_MODULE_PAGE_SHIFT = 8 };
 
+/* Wires are fewer than nets; smaller pages keep an empty module small. */
+enum { ODIN3_WIRE_PAGE_SHIFT = 6 };
+
 /*
  * Makes the next `count` pushes onto a module store unable to fail (reserve before mutate).
  * ODIN3_ERR_NO_MEMORY on out of memory or when the IDs would pass UINT32_MAX; length unchanged.
@@ -78,25 +81,68 @@ typedef struct odin3_net_rec {
     odin3_prov_id prov;
     uint32_t count;        /* pins in the array */
     uint32_t driver_count; /* pins[0 .. driver_count) drive, the rest are sinks */
-    odin3_wire_id wire;    /* primary (wire, bit); wires arrive with module ports */
+    odin3_wire_id wire;    /* primary (wire, bit); none when it has none */
     uint32_t wire_bit;
+    uint32_t alias_head; /* first record of the net's aliases in module->aliases; 0: none */
     uint8_t cls;
     bool dead;
 } odin3_net_rec;
+
+typedef struct odin3_wire_rec {
+    odin3_net_id *nets; /* width entries in the module arena, LSB first */
+    uint32_t name;
+    odin3_prov_id prov;
+    int32_t msb;
+    int32_t lsb;
+    uint32_t width;
+    odin3_node_id port_node; /* none unless the wire is a module port */
+    bool is_signed;
+    bool dead;
+} odin3_wire_rec;
+
+/* One alias of a net (IR-2): a (wire, bit) membership, or a bare name when wire is none. */
+typedef struct odin3_alias_rec {
+    odin3_net_id net;
+    odin3_wire_id wire;
+    uint32_t bit;
+    uint32_t name;
+    uint32_t next; /* next alias of the same net; 0 ends the chain */
+} odin3_alias_rec;
+
+/* A module port in declaration order: its node and its wire. */
+typedef struct odin3_port_rec {
+    odin3_node_id node;
+    odin3_wire_id wire;
+} odin3_port_rec;
+
+/* One attribute of an object (IR-10); the value lives in the module arena. */
+typedef struct odin3_attr_rec {
+    uint32_t key;
+    uint32_t next; /* next attribute of the same object; 0 ends the chain */
+    const odin3_value *value;
+} odin3_attr_rec;
 
 struct odin3_module {
     odin3_design *design;
     odin3_module_id id;
     uint32_t name;
     odin3_prov_id prov;
-    odin3_celltype_id type;   /* the module's cell type (IR-7) */
-    odin3_arena *arena;       /* parameter vectors and other small arrays */
-    odin3_pagevec *nodes;     /* odin3_node_rec */
-    odin3_pagevec *pins;      /* odin3_pin_rec */
-    odin3_pagevec *nets;      /* odin3_net_rec */
-    odin3_u64map *node_names; /* name strtab ID -> node ID (live nodes only) */
-    odin3_u64map *net_names;  /* name strtab ID -> net ID (live nets only) */
-    odin3_pinpool pinpool;    /* net pin arrays */
+    odin3_celltype_id type;      /* the module's cell type (IR-7) */
+    odin3_arena *arena;          /* parameter vectors and other small arrays */
+    odin3_pagevec *nodes;        /* odin3_node_rec */
+    odin3_pagevec *pins;         /* odin3_pin_rec */
+    odin3_pagevec *nets;         /* odin3_net_rec */
+    odin3_u64map *node_names;    /* name strtab ID -> node ID (live nodes only) */
+    odin3_u64map *net_names;     /* name and alias-name strtab ID -> net ID (live nets only) */
+    odin3_pinpool pinpool;       /* net pin arrays */
+    odin3_pagevec *wires;        /* odin3_wire_rec */
+    odin3_u64map *wire_names;    /* name strtab ID -> wire ID (live wires only) */
+    odin3_vec aliases;           /* odin3_alias_rec; slot 0 reserved once the table is used */
+    odin3_vec ports;             /* odin3_port_rec, declaration order */
+    odin3_vec port_defs;         /* odin3_port_def per port: type_def.ports points here */
+    odin3_celltype_def type_def; /* the module cell type's definition, updated in place (IR-7) */
+    odin3_u64map *attr_heads;    /* (kind << 32 | ID) -> first record in attrs */
+    odin3_vec attrs;             /* odin3_attr_rec; slot 0 reserved once the table is used */
 };
 
 /* Sets up the design's module list (design.c calls it); ODIN3_ERR_NO_MEMORY on out of memory. */
@@ -117,6 +163,9 @@ const odin3_net_rec *odin3_net_rec_cat(const odin3_module *module, odin3_net_id 
 odin3_node_rec *odin3_node_live_rec(odin3_module *module, odin3_node_id node, const char *what);
 odin3_pin_rec *odin3_pin_live_rec(odin3_module *module, odin3_pin_id pin, const char *what);
 odin3_net_rec *odin3_net_live_rec(odin3_module *module, odin3_net_id net, const char *what);
+odin3_wire_rec *odin3_wire_rec_at(odin3_module *module, odin3_wire_id wire);
+const odin3_wire_rec *odin3_wire_rec_cat(const odin3_module *module, odin3_wire_id wire);
+odin3_wire_rec *odin3_wire_live_rec(odin3_module *module, odin3_wire_id wire, const char *what);
 
 /* A name change in one of the module's name maps (IR-14); 0 means "no name". */
 typedef struct odin3_name_change {
@@ -138,6 +187,50 @@ odin3_status odin3_names_change(const odin3_module *module, const odin3_name_cha
 
 /* Removes a pin from its net's array (swap-remove within the partition); never fails. */
 void odin3_net_detach(odin3_module *module, odin3_pin_rec *pin);
+
+/*
+ * Puts pin `to` in the place of pin `from` on from's net (same slot; the two pins must have the
+ * same direction, so the partition holds); from ends unconnected, to must be unconnected.
+ */
+void odin3_net_handover(odin3_module *module, odin3_pin_rec *from, odin3_pin_id to);
+
+/* --- wires and aliases (wire.c) ------------------------------------------------------------ */
+
+/* A wire about to be created: odin3_wire_prepare fills it, odin3_wire_commit uses it. */
+typedef struct odin3_wire_plan {
+    const odin3_wire_spec *spec;
+    const odin3_net_id *given; /* NULL: create new nets */
+    odin3_net_id *nets;        /* width entries in the module arena */
+    uint32_t width;
+    odin3_wire_id id; /* the ID the wire will get */
+} odin3_wire_plan;
+
+/*
+ * Validates the spec and the given nets (INVALID_ARG, logged, for `what`) and reserves
+ * everything the commit needs except the name-map entry; nothing observable changes.
+ */
+odin3_status odin3_wire_prepare(odin3_module *module, odin3_wire_plan *plan, const char *what);
+
+/* Creates the planned wire (and its nets); never fails. The caller has put the name in the map. */
+void odin3_wire_commit(odin3_module *module, const odin3_wire_plan *plan);
+
+/* Makes the next `count` alias records unable to fail; ODIN3_ERR_NO_MEMORY otherwise. */
+odin3_status odin3_alias_reserve(odin3_module *module, uint32_t count);
+
+/*
+ * Merge's alias step (IR-15): every wire entry and name that pointed at drop now points at keep,
+ * drop's aliases join keep's, and drop's name and primary become aliases of keep. Needs two
+ * reserved alias records; never fails.
+ */
+void odin3_alias_absorb(odin3_module *module, odin3_net_id keep, odin3_net_id drop);
+
+/*
+ * Points local cell type id at def without copying (module types, IR-7): the caller owns def,
+ * keeps it valid by the definition rules and alive as long as the design, and may grow its port
+ * array in place. def must keep the type's name.
+ */
+void odin3_celltype_bind_local(odin3_design *design, odin3_celltype_id id,
+                               const odin3_celltype_def *def);
 
 /* Fills a fresh design's cell-type table with every global definition (design.c calls it). */
 odin3_status odin3_celltype_table_init(odin3_design *design);

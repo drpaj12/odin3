@@ -420,6 +420,14 @@ odin3_status odin3_celltype_replace_local(odin3_design *design, odin3_celltype_i
     return ODIN3_OK;
 }
 
+void odin3_celltype_bind_local(odin3_design *design, odin3_celltype_id id,
+                               const odin3_celltype_def *def) {
+    odin3_celltype_entry *entry = entry_mut(design, id);
+    assert(entry != NULL && entry->local && def_error(def) == NULL);
+    assert(strcmp(def->name, entry->def->name) == 0);
+    entry->def = def;
+}
+
 static bool fixed_width(const odin3_port_def *port) {
     return port->width_fn == NULL && port->width_param == NULL;
 }

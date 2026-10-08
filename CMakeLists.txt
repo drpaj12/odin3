@@ -51,6 +51,8 @@ add_library(odin3_core OBJECT
     src/ir/node.c
     src/ir/net.c
     src/ir/pinpool.c
+    src/ir/wire.c
+    src/ir/attr.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -144,6 +146,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_celltype)
     odin3_add_unit_test(test_ir_netlist)
     odin3_add_unit_test(test_ir_cells)
+    odin3_add_unit_test(test_ir_wire)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)

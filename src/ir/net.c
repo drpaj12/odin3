@@ -1,4 +1,4 @@
-/* net.c — nets, their partitioned pin arrays, and pin connect/disconnect (IR §3 Net, IR-15). */
+/* net.c — nets, their partitioned pin arrays, pin connect/disconnect and merge (IR §3, IR-15). */
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
@@ -20,17 +20,17 @@ static void put_at(odin3_module *module, odin3_net_rec *net, uint32_t slot, odin
     odin3_pin_rec_at(module, pin)->slot = slot;
 }
 
-/* Makes room for one more pin (a bigger block when full); the pins themselves do not change. */
-static odin3_status net_room(odin3_module *module, odin3_net_rec *net) {
+/* Makes the net's block hold at least `need` pins (a bigger block when not); pins unchanged. */
+static odin3_status net_fit(odin3_module *module, odin3_net_rec *net, uint64_t need) {
+    if (need <= (net->pins != NULL ? odin3_pinpool_capacity(net->cls) : 0)) {
+        return ODIN3_OK;
+    }
     uint32_t cls = 0;
-    if (net->pins != NULL) {
-        if (net->count < odin3_pinpool_capacity(net->cls)) {
-            return ODIN3_OK;
-        }
-        cls = net->cls + 1U;
-        if (cls >= ODIN3_PINPOOL_CLASSES) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
+    while (cls < ODIN3_PINPOOL_CLASSES && odin3_pinpool_capacity(cls) < need) {
+        cls++;
+    }
+    if (cls == ODIN3_PINPOOL_CLASSES) {
+        return ODIN3_ERR_NO_MEMORY;
     }
     odin3_pin_id *block = odin3_pinpool_alloc(&module->pinpool, cls);
     if (block == NULL) {
@@ -43,6 +43,11 @@ static odin3_status net_room(odin3_module *module, odin3_net_rec *net) {
     net->pins = block;
     net->cls = (uint8_t)cls;
     return ODIN3_OK;
+}
+
+/* Makes room for one more pin. */
+static odin3_status net_room(odin3_module *module, odin3_net_rec *net) {
+    return net_fit(module, net, (uint64_t)net->count + 1);
 }
 
 /* Appends pin to the net (room reserved): a driver goes to the end of the driver partition. */
@@ -61,6 +66,16 @@ static void attach(odin3_module *module, odin3_net_id net_id, odin3_pin_id pin_i
     }
     net->count++;
     pin->net = net_id;
+}
+
+void odin3_net_handover(odin3_module *module, odin3_pin_rec *from, odin3_pin_id to) {
+    odin3_net_rec *net = odin3_net_rec_at(module, from->net);
+    odin3_pin_rec *dst = odin3_pin_rec_at(module, to);
+    assert(net != NULL && dst != NULL && !odin3_net_valid(dst->net) && dst->dir == from->dir);
+    put_at(module, net, from->slot, to);
+    dst->net = from->net;
+    from->net = (odin3_net_id){0};
+    from->slot = 0;
 }
 
 void odin3_net_detach(odin3_module *module, odin3_pin_rec *pin) {
@@ -153,9 +168,9 @@ odin3_status odin3_net_delete(odin3_module *module, odin3_net_id net) {
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    /* Aliases join this check when the alias table exists (module ports and wires). */
-    if (rec->count > 0 || odin3_wire_valid(rec->wire)) {
-        odin3_log(ODIN3_LOG_ERROR, "net_delete: net %u still has pins or a wire", net.v);
+    if (rec->count > 0 || odin3_wire_valid(rec->wire) || rec->alias_head != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "net_delete: net %u still has pins, a wire bit or aliases",
+                  net.v);
         return ODIN3_ERR_INVALID_ARG;
     }
     if (rec->name != 0) {
@@ -170,12 +185,48 @@ odin3_status odin3_net_rename(odin3_module *module, odin3_net_id net, uint32_t n
     if (rec == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
+    if (name_str != 0 && name_str != rec->name &&
+        odin3_module_find_net(module, name_str).v == net.v) {
+        odin3_log(ODIN3_LOG_ERROR, "net_rename: name %u is already an alias of net %u", name_str,
+                  net.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_name_change name = {module->net_names, "net_rename", net.v, rec->name, name_str};
     odin3_status st = odin3_names_change(module, &name);
     if (st == ODIN3_OK) {
         rec->name = name_str;
     }
     return st;
+}
+
+/* --- merge (IR-15) ------------------------------------------------------------------------- */
+
+odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair) {
+    if (pair.keep.v == pair.drop.v) {
+        odin3_log(ODIN3_LOG_ERROR, "net_merge: cannot merge net %u into itself", pair.keep.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_net_rec *keep = odin3_net_live_rec(module, pair.keep, "net_merge");
+    odin3_net_rec *drop = keep != NULL ? odin3_net_live_rec(module, pair.drop, "net_merge") : NULL;
+    if (drop == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    uint32_t new_aliases = (drop->name != 0 ? 1U : 0U) + (odin3_wire_valid(drop->wire) ? 1U : 0U);
+    odin3_status st = net_fit(module, keep, (uint64_t)keep->count + drop->count);
+    if (st == ODIN3_OK) {
+        st = odin3_alias_reserve(module, new_aliases);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    while (drop->count > 0) { /* last pin first: each detach is O(1) */
+        odin3_pin_id pin = drop->pins[drop->count - 1];
+        odin3_net_detach(module, odin3_pin_rec_at(module, pin));
+        attach(module, pair.keep, pin);
+    }
+    odin3_alias_absorb(module, pair.keep, pair.drop);
+    drop->dead = true;
+    return ODIN3_OK;
 }
 
 /* --- net accessors ------------------------------------------------------------------------- */
