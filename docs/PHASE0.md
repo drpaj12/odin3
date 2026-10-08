@@ -146,7 +146,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 
 ## 5. Repo skeleton for `odin3` (PR #1)
 
-- [ ] `[AGENT]` On branch `feat/skeleton`, create:
+- [x] `[AGENT]` On branch `feat/skeleton`, create:
   ```
   odin3/
     CLAUDE.md  README.md  LICENSE  CMakeLists.txt  CMakePresets.json
@@ -165,13 +165,13 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
     .github/workflows/ci.yml  nightly.yml
     .claude/settings.json  .claude/skills/{new-pass,run-micro,oracle,lint}/SKILL.md
   ```
-- [ ] `[AGENT]` CMake: C17, `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Werror`; `debug` preset with ASan+UBSan; `release` preset; ccache; Unity or CMocka for unit tests; `odin3` CLI target; `libodin3` shared library exporting `odin3.h`.
-- [ ] `[AGENT]` Lint gate (`tools/lint.sh`, also run by pre-commit and CI): `clang-format --dry-run -Werror`; `clang-tidy` with the config in spec §15; `cppcheck --error-exitcode=1`; `lizard -C 15 -L 60 -a 5 src/` (cyclomatic complexity ≤ 15, function length ≤ 60 lines, ≤ 5 parameters); `ruff check` and `mypy --strict` on `tools/` and `plugins/`.
-- [ ] `[AGENT]` `tools/netlist-compare` (Python): canonicalize two BLIFs (sort models, sort `.names/.latch/.subckt` lines, rename internal nets by topological order) and diff; exit 0 on identical.
-- [ ] `[AGENT]` `tools/equiv-check` (Python): run ABC `cec` or `dsec` on two BLIFs; exit 0 on equivalent.
-- [ ] `[AGENT]` `tools/run-oracle.sh <design.v> <arch.xml>`: run Parmys and Odin II, store both BLIFs under `../golden/<arch>/<design>/` with the VTR commit hash.
-- [ ] `[AGENT]` CI `ci.yml`: build gcc and clang, run lint gate, run unit tests, run `netlist-compare` on `tests/micro`. `nightly.yml`: scheduled VTR-19 flow vs. golden QoR (stub until Phase 3).
-- [ ] `[AGENT]` Open PR #1 with `gh pr create`. No IR code in this PR.
+- [x] `[AGENT]` CMake: C17, `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Werror`; `debug` preset with ASan+UBSan; `release` preset; ccache; Unity or CMocka for unit tests; `odin3` CLI target; `libodin3` shared library exporting `odin3.h`.
+- [x] `[AGENT]` Lint gate (`tools/lint.sh`, also run by pre-commit and CI): `clang-format --dry-run -Werror`; `clang-tidy` with the config in spec §15; `cppcheck --error-exitcode=1`; `lizard -C 15 -L 60 -a 5 src/` (cyclomatic complexity ≤ 15, function length ≤ 60 lines, ≤ 5 parameters); `ruff check` and `mypy --strict` on `tools/` and `plugins/`.
+- [x] `[AGENT]` `tools/netlist-compare` (Python): canonicalize two BLIFs (sort models, sort `.names/.latch/.subckt` lines, rename internal nets by topological order) and diff; exit 0 on identical.
+- [x] `[AGENT]` `tools/equiv-check` (Python): run ABC `cec` or `dsec` on two BLIFs; exit 0 on equivalent.
+- [x] `[AGENT]` `tools/run-oracle.sh <design.v> <arch.xml>`: run Parmys and Odin II, store both BLIFs under `../golden/<arch>/<design>/` with the VTR commit hash.
+- [x] `[AGENT]` CI `ci.yml`: build gcc and clang, run lint gate, run unit tests, run `netlist-compare` on `tests/micro`. `nightly.yml`: scheduled VTR-19 flow vs. golden QoR (stub until Phase 3).
+- [x] `[AGENT]` Open PR #1 with `gh pr create`. No IR code in this PR. (https://github.com/drpaj12/odin3/pull/1; §6 files deferred to PR #2.)
 - [ ] `[REVIEW]` Peter reviews PR #1 line by line — it sets every convention the agent will copy for the next year — then merges.
 
 ## 6. Agent configuration
