@@ -195,7 +195,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 - [x] `[AGENT]` `tools/run-oracle.sh <design.v> <arch.xml>`: run Parmys and Odin II, store both BLIFs under `../golden/<arch>/<design>/` with the VTR commit hash.
 - [x] `[AGENT]` CI `ci.yml`: build gcc and clang, run lint gate, run unit tests, run `netlist-compare` on `tests/micro`. `nightly.yml`: scheduled VTR-19 flow vs. golden QoR (stub until Phase 3).
 - [x] `[AGENT]` Open PR #1 with `gh pr create`. No IR code in this PR. (https://github.com/drpaj12/odin3/pull/1; §6 files deferred to PR #2.)
-- [ ] `[REVIEW]` Peter reviews PR #1 line by line — it sets every convention the agent will copy for the next year — then merges.
+- [x] `[REVIEW]` Peter reviews PR #1 line by line — it sets every convention the agent will copy for the next year — then merges. (2026-10-08: decisions §A.2 #1–16; squash-merged as `cdf012f` by the agent at Peter's request.)
 
 ## 6. Agent configuration
 
