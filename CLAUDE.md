@@ -87,9 +87,10 @@ tools/golden-sample/golden-sample [--write]                  # pick the committe
 - **No VLAs. No `goto`** except the single `cleanup:` label for error paths.
 - **Errors:** return `odin3_status`. `exit()` only in `src/cli/`. `abort()`, `raise(SIGABRT)`,
   `__builtin_trap()` only in `check` (debug). `assert()` is allowed.
-- **Memory:** IR objects live in their Module's arena; passes never `malloc` IR objects.
-  Cross-references are `uint32_t` IDs, never pointers. Only `src/util/` defines containers
-  (`arena`, `vec`, `hashmap`, `str`, `log`).
+- **Memory:** IR objects live in their Module's storage (paged arrays + arena, `docs/IR.md`
+  IR-18); passes never `malloc` IR objects. Cross-references are typed `uint32_t` IDs, never
+  pointers. Only `src/util/` defines containers (`arena`, `vec`, `pagevec`, `u64map`,
+  `idindex`, `str`, `log`).
 - **Headers:** one per module; include what you use. Everything public goes through
   `include/odin3/odin3.h`, and every function there gets a paragraph: purpose, ownership of
   returned memory, failure modes.

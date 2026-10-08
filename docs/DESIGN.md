@@ -74,18 +74,18 @@ Every arrow is a *pass* registered with the pass manager; every pass runs `check
 - Storage: arena-allocated, dense integer IDs (`uint32_t`), stable across passes; name → ID maps kept per module. Objects are plain structs; all cross-references are IDs, never pointers, so the IR is trivially serializable and the C ABI can hand out IDs safely. Target: 2M nodes in < 2 GB (Titan).
 
 ### 5.2 Op registry (CIRCT-inspired, one file per cell type)
-Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`). Adding a cell type touches exactly one file; plugins can register cell types at load time.
+Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`, plus the structural `module` and `port` — `docs/IR.md` IR-9). Adding a cell type touches exactly one file; plugins can register cell types at load time.
 
 Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $and $or $xor $not $shl $shr $sshr $eq $ne $lt $le $gt $ge $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $reduce_*`. (`$concat`/`$slice` are not cells: nets are one bit and a port is a pin vector, so slicing and concatenation are which nets a port uses — `docs/IR.md` IR-1.)
-Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_LUT_K_` plus `$_HARD_<name>` instances.
+Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_DLATCH_* $_FF_ $_CONST*_ $sop` (BLIF `.names` covers) and `$_LUT_K_`. Structural: `$port_in/out/inout`. Hard and black-box cells keep their own names (e.g. VTR `adder`, `multiply`), registered by the tech library or declared by a netlist (`docs/IR.md` IR-7b).
 Hard set: generated from the VPR arch `<model>` list and from the Altera primitive library.
 
 ### 5.3 Provenance
 Every node, net and wire carries a provenance ID (pins inherit their node's) into an append-only, hash-consed lineage DAG: each record holds its kind (source, imported, derived), the pass run and operation that made it, source locations, AST node, hierarchical path, and parent records — the parents replace v0.2's `origin` field. Navigation runs backward (object → sources) and forward (location or record → objects, live or dead) on demand. Details: `docs/IR.md` §6 (IR-12, IR-13). Emitted names follow `hier/path/cellname@file:line`; a `--name-style` flag chooses between provenance names and short names.
 
 ### 5.4 Views
-- `rtlil view`: asserts all nodes are `word`/`hard`/`blackbox`; exposes a Yosys-like API for passes.
-- `netlist view`: asserts all nodes are `bit`/`hard`/`blackbox`.
+- `rtlil view`: asserts all nodes are `word`/`hard`/`blackbox`/`module`/`port`; exposes a Yosys-like API for passes.
+- `netlist view`: asserts all nodes are `bit`/`hard`/`blackbox`/`module`/`port`.
 - Mixed granularity is legal during `lower`/`raise` only.
 
 ## 6. Pass pipeline (forward)

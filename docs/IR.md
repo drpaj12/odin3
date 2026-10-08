@@ -36,7 +36,7 @@ them. The 2M-node spike (§10) shows the per-bit memory is a non-issue.
 range (`[msb:lsb]`, either direction) and a `signed` flag: the Verilog/RTLIL signal. Wires carry
 names, ranges, signedness and port membership for front ends and writers; connectivity lives
 only in pins and nets. A net has at most one **primary** `(wire, bit)` and any number of
-**aliases** in the module's alias side table (usually empty): `assign b = a;`, `flatten` joining
+**aliases** in the module's alias side table (usually empty; an alias is either a `(wire, bit)` membership or a bare net name): `assign b = a;`, `flatten` joining
 `top.x` with `u1.p`, and `opt` merging equivalent nets all keep every name. A net may also carry
 its own name (BLIF names every bit, e.g. `n~19`). Which name a writer prints is the writer's
 policy (BLIF: net name first; Verilog: primary wire bit first), not the IR's.
@@ -85,8 +85,9 @@ skip dead objects. Because churn (opt; lower → abc → read-back loops) leaves
   (so output order is unchanged) and frees dead slots;
 - it invalidates every module-local ID held outside the IR, including C ABI handles; only the
   pass manager calls it, at named pipeline points (after `opt`, after each ABC read-back);
-- before freeing, it appends one **tombstone** per dead node and net (kind, cell type, name,
-  prov) to a design-global tombstone table, so history keeps pointing at what existed (§6).
+- before freeing, it appends one **tombstone** per dead node, net and wire (module, kind, cell
+  type, name, prov) to a design-global tombstone table, so history keeps pointing at what existed
+  (§6).
 
 Provenance never refers to object IDs, so compaction cannot break lineage.
 
@@ -107,7 +108,8 @@ Direction comes from the cell type's port (`in`, `out`, `inout`).
 array**, partitioned: driver pins (`out`, `inout`, and pins of `tristate` types) in
 `[0, driver_count)`, sink pins after. Removal swaps with the last element of its partition (and
 moves the partition boundary when a driver leaves), so `odin3_net_driver(net)` is O(1) and
-"fanout of net" is a contiguous slice. Pin arrays are blocks from a per-module size-class pool
+"fanout of net" is a contiguous slice. `inout` pins sit in the driver partition only; "readers"
+of a net are its sinks plus its `inout` pins (`odin3_net_readers`). Pin arrays are blocks from a per-module size-class pool
 (capacities 2, 4, 8, …; freed blocks go to a free list per class); append is amortized O(1).
 Order within a partition is not significant and never reaches output.
 
@@ -139,7 +141,9 @@ without a body) is a cell type of granularity `blackbox` with declared ports and
 reader meets a black-box declaration whose name is **already registered** (e.g. the golden
 `.model adder .blackbox` when the 1G VTR library has registered `adder` as `hard`), it checks
 the declaration for port compatibility (same port names, directions, widths) and reuses the
-registered type; a mismatch is a reader error. Ports are scalar or vector: a reader groups
+registered type; a mismatch is a reader error. Either way the design records that the file *declared* that
+model (declared-model list: cell type + declaring reader run), so the BLIF writer reproduces the
+`.model … .blackbox` stanzas in their original order (PHASE1 #2). Ports are scalar or vector: a reader groups
 formals `a[0] … a[w-1]` into vector port `a` of width *w*, and the port records whether it was
 written with brackets so writers reproduce `a[k]` versus `a` byte-for-byte (PHASE1 #2).
 
@@ -234,14 +238,15 @@ created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from the record's first location (for `DERIVED`, the first leaf
 of the backward walk in parent order). `--name-style` (writers) chooses provenance names or
-short names; short names are the object's own name if set, else stable generated names
-`$n<ID>` / `$c<ID>`. Writers make names unique across kinds where the target language has one
+short names; short names are the object's own name if set, else generated names
+`$n<ID>` / `$c<ID>`, stable until the next `compact` (writers run after the last one). Writers make names unique across kinds where the target language has one
 namespace (Verilog).
 
 ## 7. Names
 
 **IR-14** Node, net and wire names are optional strtab IDs. Within a module, names are unique per
-kind (two nets cannot share a name; a net and a node can). Names from a reader are kept
+kind (two nets cannot share a name; a net and a node can); a net's alias names count, so a
+merged net is found under every name it ever had. Names from a reader are kept
 byte-for-byte (PHASE1 #2). Lookups go through per-module `u64map`s from str ID to object ID.
 Renaming updates the map; a dead object's name leaves the map.
 
@@ -250,13 +255,16 @@ Renaming updates the map; a dead object's name leaves the map.
 **IR-15 All access goes through `src/ir` functions; no code outside `src/ir` writes an IR
 struct field.** The API maintains both sides of every relation. Primitives:
 
-- module: create; `module_add_port(name, dir, width, scalar?)` (creates the port node, its
-  wire, appends to port order, updates the module's cell type; refused once instantiated);
+- module: create; `module_add_port(name, dir, width, scalar?, prov)` (creates the port node,
+  its wire, appends to port order, updates the module's cell type; refused once instantiated);
+  `$port_*` types have one port of width parameter `WIDTH`;
 - node: create (allocates pins); create-and-connect (type, params, per-port net vectors — the
   common case, so an `$add` is one call, not 97 `connect`s); delete (disconnects and kills its
   pins); replace by a node with the same port signature (pins re-attached by port/bit);
-- net: create; delete (must have no pins); `merge(keep, drop)` — every pin of `drop` moves to
-  `keep`; `drop`'s name, primary wire bit and aliases become aliases of `keep`; `drop` dies;
+- net: create; delete (must have no pins, no wire membership and no aliases); `merge(keep,
+  drop)` — every pin of `drop` moves to `keep`; every wire vector entry that held `drop` now
+  holds `keep`; `drop`'s name, primary `(wire, bit)` and aliases become aliases of `keep`, and the
+  name map sends `drop`'s name to `keep`; `drop` dies;
 - pin: connect / disconnect (updates the pin, the net's partitioned pin array and driver count);
 - wire: create (with its nets, or creating them), delete, add alias;
 - queries: node port slice, net driver, net sinks slice, net const value, name lookups.
@@ -283,8 +291,8 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
    O(pins)).
 3. **E** Partition: the first `driver_count` entries of a net's array are exactly its driver
    pins (`out`, `inout`, tristate-type outputs) and the rest are sinks.
-4. **E** More than one driver on a net unless every driver is `inout` or of a `tristate` type
-   (then **W**). **W** a net with sinks and no driver (undriven); **W** a live net with no pins.
+4. **E** Two or more drivers that are neither `inout` nor of a `tristate` type (`inout` and
+   tristate drivers are a bus: **W** when a bus net also has one ordinary driver). **W** a net with sinks and no driver (undriven); **W** a live net with no pins.
 5. **E** A node's pin count equals the sum of its type's port widths for its parameters, and
    `verify` (if any) accepts it.
 6. **E** Names are unique per kind per module, the name maps agree with the objects, and no dead
@@ -316,7 +324,8 @@ implementation and records the numbers in `docs/PHASE1.md`.
 
 ## 11. Spec amendments made with this document
 
-Under PHASE1 #9: spec §5.2 (`$concat`/`$slice` are not cells; IR-1), §5.3 (`origin` replaced by
+Under PHASE1 #9: spec §5.2 (`$concat`/`$slice` are not cells, IR-1; six granularity tags and the
+structural/BLIF cells, IR-4/IR-9/IR-10), §5.4 (both views also allow `module` and `port`), §5.3 (`origin` replaced by
 the lineage DAG; IR-12), §15.1 wording ("arena owned by its Module" → per-module pagevecs and
 arena; design-global strtab and provenance; IR-18); D1 (six granularity tags; IR-9); D9
 ("pointers in-process" → IDs and hashes; IR-12).
