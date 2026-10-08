@@ -23,7 +23,7 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 ## Checklist
 
 - [x] 1A spec approved (2026-10-08, PR #11), implemented, merged (benchmark, release build: 2M interns 0.36–0.45 s, 2M `u64map` puts 0.35–0.39 s, 2M `pagevec` pushes 0.01 s, max RSS 176 MiB)
-- [ ] 1B `docs/IR.md` approved by Peter; IR implemented; 2M-node benchmark recorded (`bench_ir`, release, 2M nodes / 2.2M nets: build 0.83 s, check FULL 0.74 s, fanout walk 0.30 s, delete 10% 0.07 s, compact 0.40 s, max RSS 780 MiB)
+- [ ] 1B `docs/IR.md` approved by Peter; IR implemented; 2M-node benchmark recorded (`bench_ir`, release, 2M nodes / 2.2M nets: build 0.80 s, check FULL 0.72 s, fanout walk 0.29 s, delete 10% 0.08 s, compact 0.38 s, max RSS 791.76 MiB)
 - [ ] 1G tech-library format approved; reader + generic gate library + VTR golden library
 - [ ] 1C BLIF round trip identical (`netlist-compare`) on every `ok` golden
 - [ ] 1D a Python plugin walks the IR through the C ABI

@@ -3,6 +3,8 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "util/alloc.h"
+#include "util/log.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,6 +21,7 @@ typedef struct bench_ctx {
     odin3_celltype_id dff_type;
     odin3_pass_ctx pass;
     uint64_t lcg;
+    odin3_node_id *ids; /* node ID returned at creation, by creation index */
 } bench_ctx;
 
 static double now_seconds(void) {
@@ -113,10 +116,18 @@ static int make_node(bench_ctx *ctx, uint32_t i, odin3_prov_id prov) {
     odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
     odin3_node_spec spec = {is_and ? ctx->and_type : ctx->dff_type, 0, prov, NULL, 0};
     odin3_node_id node = {0};
-    return odin3_node_create_connected(ctx->module, &spec, ports, &node) != ODIN3_OK;
+    if (odin3_node_create_connected(ctx->module, &spec, ports, &node) != ODIN3_OK) {
+        return 1;
+    }
+    ctx->ids[i] = node;
+    return 0;
 }
 
 static int build(bench_ctx *ctx) {
+    ctx->ids = odin3_util_calloc(BENCH_NODES * sizeof *ctx->ids);
+    if (ctx->ids == NULL) {
+        return 1;
+    }
     if (make_nets(ctx) != 0) {
         return 1;
     }
@@ -156,9 +167,13 @@ static uint64_t fanout_walk(const bench_ctx *ctx) {
 }
 
 static int delete_some(bench_ctx *ctx, uint32_t *nodes_deleted, uint32_t *nets_deleted) {
-    for (uint32_t i = 3; i <= BENCH_NODES; i += BENCH_DEL_EVERY) {
-        odin3_node_id node = {i};
-        if (odin3_node_delete(ctx->module, node) != ODIN3_OK) {
+    /* 2 of every 20 creation indices (3 and 10): 10%, one odd (AND) and one even (DFF). */
+    for (uint32_t i = 0; i < BENCH_NODES; i++) {
+        uint32_t r = i % (2 * BENCH_DEL_EVERY);
+        if (r != 3 && r != BENCH_DEL_EVERY) {
+            continue;
+        }
+        if (odin3_node_delete(ctx->module, ctx->ids[i]) != ODIN3_OK) {
             return 1;
         }
         (*nodes_deleted)++;
@@ -194,11 +209,22 @@ static int run(bench_ctx *ctx) {
     }
     report("build", start);
     start = now_seconds();
+    odin3_log_reset_counts();
+    odin3_log_set_level(ODIN3_LOG_ERROR);
     odin3_status check = odin3_check_module(ctx->module, full);
+    odin3_log_set_level(ODIN3_LOG_INFO);
     report("check FULL", start);
-    printf("check status  : %d\n", (int)check);
+    printf("check status  : %d  (%zu errors, %zu warnings logged)\n", (int)check,
+           odin3_log_count(ODIN3_LOG_ERROR), odin3_log_count(ODIN3_LOG_WARN));
+    if (check != ODIN3_OK) {
+        fprintf(stderr, "bench_ir: check FULL failed\n");
+        return 1;
+    }
     start = now_seconds();
-    fanout_walk(ctx);
+    if (fanout_walk(ctx) == 0) {
+        fprintf(stderr, "bench_ir: fanout walk visited no sinks\n");
+        return 1;
+    }
     report("fanout walk", start);
     uint32_t nodes_deleted = 0;
     uint32_t nets_deleted = 0;
@@ -216,7 +242,7 @@ static int run(bench_ctx *ctx) {
     }
     report("compact", start);
     odin3_compact_map_free(&map);
-    printf("final         : %u nodes, %u nodes ids, %u net ids, %u pin ids\n",
+    printf("final         : %u live nodes, %u node ids, %u net ids, %u pin ids\n",
            (unsigned)count_live_nodes(ctx), (unsigned)odin3_module_node_end(ctx->module) - 1,
            (unsigned)odin3_module_net_end(ctx->module) - 1,
            (unsigned)odin3_module_pin_end(ctx->module) - 1);
@@ -230,6 +256,7 @@ int main(void) {
         rc = run(&ctx);
     }
     printf("max RSS       : %ld KiB\n", max_rss_kib());
+    odin3_util_free(ctx.ids);
     odin3_design_destroy(ctx.design);
     if (rc != 0) {
         fprintf(stderr, "bench_ir: failed\n");
