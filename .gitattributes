@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.blif text eol=lf
+# verbatim upstream sources: byte-exact, no EOL conversion
+tests/micro/** -text
