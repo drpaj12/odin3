@@ -123,6 +123,10 @@ add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_util PRIVATE odin3_core odin3_flags)
 
+add_executable(bench_ir tests/bench/bench_ir.c)
+target_include_directories(bench_ir PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_ir PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
