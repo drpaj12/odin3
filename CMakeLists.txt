@@ -54,6 +54,8 @@ add_library(odin3_core OBJECT
     src/ir/wire.c
     src/ir/attr.c
     src/ir/prov.c
+    src/ir/check.c
+    src/ir/ir_test.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -149,6 +151,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_cells)
     odin3_add_unit_test(test_ir_wire)
     odin3_add_unit_test(test_ir_prov)
+    odin3_add_unit_test(test_ir_check)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -170,7 +173,7 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 0\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 1\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 

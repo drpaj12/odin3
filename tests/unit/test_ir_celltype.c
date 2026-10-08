@@ -94,6 +94,7 @@ static void test_fresh_design_has_const_cells(void) {
         const odin3_celltype_def *def = odin3_celltype_get(design, find_type(design, names[i]));
         TEST_ASSERT_NOT_NULL(def);
         TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BIT, def->gran);
+        TEST_ASSERT_EQUAL_UINT32(ODIN3_CT_ANYVIEW, def->flags); /* legal in every view (IR-9) */
         TEST_ASSERT_EQUAL_UINT32(1, def->n_ports);
         TEST_ASSERT_EQUAL_UINT32(0, def->n_params);
         TEST_ASSERT_EQUAL_STRING("Y", def->ports[0].name);

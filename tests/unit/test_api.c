@@ -1,5 +1,5 @@
 /*
- * test_api.c — unit tests for the ABI v0 entry points in odin3.h.
+ * test_api.c — unit tests for the ABI v1 entry points in odin3.h.
  */
 #include "odin3/odin3.h"
 #include "unity.h"
@@ -27,6 +27,13 @@ static void test_version_string_matches_macros(void) {
 
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_abi_version()); /* 1B added ODIN3_ERR_CHECK */
+}
+
+static void test_check_status_has_a_name(void) {
+    TEST_ASSERT_EQUAL_INT(6, ODIN3_ERR_CHECK);
+    TEST_ASSERT_EQUAL_INT(7, ODIN3_STATUS_COUNT);
+    TEST_ASSERT_EQUAL_STRING("ODIN3_ERR_CHECK", odin3_status_string(ODIN3_ERR_CHECK));
 }
 
 static void test_every_status_has_a_name(void) {
@@ -63,6 +70,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_version_string_matches_macros);
     RUN_TEST(test_abi_version_matches_header);
+    RUN_TEST(test_check_status_has_a_name);
     RUN_TEST(test_every_status_has_a_name);
     RUN_TEST(test_out_of_range_status_is_unknown);
     RUN_TEST(test_plugin_load_rejects_null);

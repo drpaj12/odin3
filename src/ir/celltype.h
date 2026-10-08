@@ -26,8 +26,12 @@ typedef enum odin3_granularity {
     ODIN3_GRAN_PORT
 } odin3_granularity;
 
-/* Definition flags. TRISTATE: output pins may share a net with other tristate/inout drivers. */
-enum { ODIN3_CT_TRISTATE = 1U << 0 };
+/*
+ * Definition flags. TRISTATE: output pins may share a net with other tristate/inout drivers (a
+ * bus, check rule 4). ANYVIEW: legal in every view whatever the granularity (constant cells, IR-9;
+ * check rule 10).
+ */
+enum { ODIN3_CT_TRISTATE = 1U << 0, ODIN3_CT_ANYVIEW = 1U << 1 };
 
 /*
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
