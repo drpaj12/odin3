@@ -51,6 +51,7 @@ The main session is the **orchestrator**: it owns git, this checklist, GitHub se
 12. `readability-magic-numbers` off under `tests/` only.
 13. §7 runs **all** `.v` files under `odin_ii/regression_test/benchmark/` plus VTR-19; failures are recorded (`status=failed`), not skipped.
 14. Fable is the critic for §6.
+15. **The repos are the source of truth; GitHub is the backup.** `docs/DESIGN.md` and `docs/PHASE0.md` are the only editable copies of the spec and this checklist, changed through PRs like any code. `~/odin3-ws/odin3-design-spec.md` and `~/odin3-ws/odin3-phase0-setup.md` are symlinks to them. The Claude project's copy of the spec and anything on Google Drive are read-only snapshots, refreshed from the repo, never edited.
 
 ## B. Who does what — summary
 
@@ -70,6 +71,8 @@ Peter's total hands-on time: roughly one hour plus one PR review.
 ## 0. Where code lives (and where it doesn't)
 
 **Not on Google Drive.** Git repos under a sync client get corrupted lock files and half-synced objects; WSL2 builds on a Windows-mounted path (`/mnt/c/...`, or a Drive folder) are 5–20× slower than the Linux filesystem; and Drive for Desktop can't see WSL's ext4 volume anyway. GitHub is the backup and the sync. Drive is fine for papers, notes, and the large golden-netlist archive.
+
+**Source of truth (decision #15):** the `odin3` and `odin3-golden` repos, backed up by GitHub. Docs live in `odin3/docs/`; the workspace-root `odin3-design-spec.md` and `odin3-phase0-setup.md` are symlinks into it. Push at the end of every section so GitHub always holds the latest state.
 
 Layout, all inside WSL2's own filesystem (`~`, not `/mnt/c`):
 
@@ -238,7 +241,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 - [ ] `[AGENT]` Standalone Yosys built.
 - [ ] `[AGENT]` `odin3`: PR #1 merged, CI green, lint gate green on the skeleton.
 - [ ] `[AGENT]` `odin3-golden`: micros + VTR-19 goldens for two arches with commit hashes.
-- [ ] `[AGENT]` `docs/DESIGN.md` matches the Claude project doc; ADRs written.
+- [ ] `[AGENT]` `docs/DESIGN.md` is the source of truth (decision #15), the Claude project's copy has been refreshed from it, and ADRs are written.
 - [ ] `[HUMAN]` Check `/usage` after the first two sessions and adjust the model table in §9.
 
 ## 9. Model and effort guide (for Phases 1–7)
