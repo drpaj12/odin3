@@ -2,12 +2,13 @@
  * plugin.c — loading shared-object plugins (odin3_plugin_load in odin3.h).
  */
 #include "odin3/odin3.h"
+#include "util/attr.h"
 
 #include <dlfcn.h>
 #include <stddef.h>
 #include <string.h>
 
-odin3_status odin3_plugin_load(const char *path) {
+ODIN3_EXPORT odin3_status odin3_plugin_load(const char *path) {
     if (path == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }

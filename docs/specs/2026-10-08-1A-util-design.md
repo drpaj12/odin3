@@ -35,7 +35,9 @@ to the per-kind accessors 1B writes. (b) hides control flow from clang-tidy and 
 container fields into IR structs.
 
 **Hash tables** — open addressing with Robin Hood probing and backward-shift deletion (chosen:
-flat, no per-entry allocation, no tombstones) vs separate chaining.
+flat, no per-entry allocation, no tombstones) vs separate chaining. `u64map` and `idindex` each
+carry their own Robin Hood code (different slot types); extract a shared core only if a third
+open-addressing table appears.
 
 **Where keys live** — a byte-string map that copies keys would store every name and provenance
 record twice and never reclaim removed keys. **Chosen:** an ID-only hash-cons index
@@ -125,10 +127,14 @@ business.
 typedef struct odin3_bytes { const void *ptr; size_t len; } odin3_bytes;
 uint64_t odin3_hash_bytes(odin3_bytes key, uint64_t seed);   /* FNV-1a 64 + fmix64 */
 uint64_t odin3_hash_u64(uint64_t x);                         /* fmix64 */
-enum { ODIN3_HASH_SEED = 0x6f64696e33 };                     /* fixed: "odin3" */
+uint64_t odin3_hash_combine(uint64_t hash, uint64_t value);       /* odin3_hash_u64(hash ^ value) */
+#define ODIN3_HASH_SEED UINT64_C(0x6f64696e33)               /* fixed: "odin3" */
 ```
 
-Short and dependency-free; swappable behind this header if the 1B benchmark says so.
+`ODIN3_HASH_SEED` is a macro, not an enum: an enum constant cannot exceed `int` in C17, so the
+seed is not usable as a case label or array size. `odin3_hash_combine` mixes record fields into
+one finalised hash (order-sensitive when chained). `odin3_hash_bytes` requires `ptr != NULL` when
+`len > 0`. Short and dependency-free; swappable behind this header if the 1B benchmark says so.
 
 ### `idindex.h` — ID-only hash-cons index
 
@@ -150,7 +156,7 @@ size_t odin3_idindex_count(const odin3_idindex *ix);
 
 Lookups and entries travel as structs, so no call has adjacent swappable parameters. The caller computes the hash from its
 own representation (the bytes of a string, or a provenance record's serialized fields) and owns
-the objects; the index stores 12 bytes per slot (ID + 64-bit hash, kept so growth never calls
+the objects; the index stores 16-byte slots `{hash, id, psl}` (ID + 64-bit hash, kept so growth never calls
 back). Load factor ≤ 0.85, then double.
 
 ### `u64map.h` — integer map
@@ -167,7 +173,7 @@ size_t odin3_u64map_count(const odin3_u64map *map);
 bool odin3_u64map_next(const odin3_u64map *map, size_t *cursor, odin3_kv *entry);
 ```
 
-Any key is valid, including 0 (occupancy is a separate per-slot byte). Iteration order is
+Any key is valid, including 0 (occupancy is `psl == 0`, the probe sequence length, not a separate per-slot byte). Iteration order is
 unspecified; a modification counter makes mutation during iteration a debug assert. Anything
 that writes files gets its order from insertion-ordered storage, never from map iteration.
 

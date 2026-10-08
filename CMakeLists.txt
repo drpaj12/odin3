@@ -30,16 +30,34 @@ if(ODIN3_SANITIZE)
 endif()
 
 # --- libodin3: the shared library behind include/odin3/odin3.h -----------------
-add_library(libodin3 SHARED
+# All of src/ except src/cli/ compiles into odin3_core; libodin3 re-links those objects and
+# exports only what carries ODIN3_EXPORT. To add a module, append its .c file to this list.
+add_library(odin3_core OBJECT
     src/api/version.c
-    src/api/plugin.c)
+    src/api/plugin.c
+    src/util/alloc.c
+    src/util/arena.c
+    src/util/hash.c
+    src/util/vec.c
+    src/util/pagevec.c
+    src/util/u64map.c
+    src/util/idindex.c
+    src/util/str.c
+    src/util/log.c)
+set_target_properties(odin3_core PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden)
+target_include_directories(odin3_core
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
+
+add_library(libodin3 SHARED $<TARGET_OBJECTS:odin3_core>)
 set_target_properties(libodin3 PROPERTIES
     OUTPUT_NAME odin3
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR})
-target_include_directories(libodin3
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
-    PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(libodin3 PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
 
 # --- odin3: the CLI -------------------------------------------------------------
@@ -71,11 +89,34 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- Benchmark (built by default, not a CTest) --------------------------------------
+add_executable(bench_util tests/bench/bench_util.c)
+target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_util PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
     add_library(unity STATIC third_party/unity/src/unity.c)
     target_include_directories(unity PUBLIC third_party/unity/src)
+
+    # odin3_add_unit_test(<name>): builds tests/unit/<name>.c against odin3_core (internals).
+    function(odin3_add_unit_test name)
+        add_executable(${name} tests/unit/${name}.c)
+        target_include_directories(${name} PRIVATE ${PROJECT_SOURCE_DIR}/src)
+        target_link_libraries(${name} PRIVATE odin3_core unity odin3_flags)
+        add_test(NAME ${name} COMMAND ${name})
+        set_tests_properties(${name} PROPERTIES LABELS unit)
+    endfunction()
+    odin3_add_unit_test(test_util_alloc)
+    odin3_add_unit_test(test_util_arena)
+    odin3_add_unit_test(test_util_hash)
+    odin3_add_unit_test(test_util_vec)
+    odin3_add_unit_test(test_util_pagevec)
+    odin3_add_unit_test(test_util_u64map)
+    odin3_add_unit_test(test_util_idindex)
+    odin3_add_unit_test(test_util_str)
+    odin3_add_unit_test(test_util_log)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -89,6 +130,11 @@ if(BUILD_TESTING)
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
                 $<TARGET_FILE:libodin3> $<TARGET_FILE:example_plugin>)
     set_tests_properties(symbol_rules PROPERTIES LABELS unit)
+
+    add_test(NAME abi_exports
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
+                --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
+    set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
