@@ -175,6 +175,16 @@ static void test_add_local_duplicate_name(void) {
     TEST_ASSERT_EQUAL_size_t(2, errors_logged);
 }
 
+/* A definition default with a NULL payload of nonzero length is refused, not copied. */
+static void test_add_local_rejects_null_payload(void) {
+    odin3_param_def params[1] = {{"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, NULL, 3, 0, 0}}};
+    odin3_celltype_def def = {"sub", ODIN3_GRAN_MODULE, 0, NULL, 0, params, 1, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_add_local(design, &def, &id));
+    TEST_ASSERT_FALSE(odin3_celltype_valid(find_type(design, "sub")));
+    TEST_ASSERT_EQUAL_size_t(1, errors_logged);
+}
+
 static void test_add_local_deep_copies(void) {
     char name[BUF_LEN] = "sub";
     char port[BUF_LEN] = "D";
@@ -344,6 +354,7 @@ int main(void) {
     RUN_TEST(test_port_width_fn);
     RUN_TEST(test_register_global_rejects_bad_defs);
     RUN_TEST(test_add_local_duplicate_name);
+    RUN_TEST(test_add_local_rejects_null_payload);
     RUN_TEST(test_add_local_deep_copies);
     RUN_TEST(test_blackbox_reuses_registered_type);
     RUN_TEST(test_blackbox_new_name);

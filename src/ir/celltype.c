@@ -1,6 +1,7 @@
 /* celltype.c — global cell-type registry, per-design table, black boxes (IR-7b, IR-11). */
 #include "ir/celltype.h"
 #include "ir/ir_internal.h"
+#include "ir/value.h"
 #include "util/arena.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -68,6 +69,9 @@ static const char *param_error(const odin3_celltype_def *def, uint32_t idx) {
     }
     if (!enum_ok((int)param->kind, ODIN3_VAL_COVER) || param->dflt.kind != param->kind) {
         return "parameter kind invalid or different from its default's";
+    }
+    if (!odin3_value_valid(&param->dflt)) {
+        return "parameter default is malformed (missing payload or partial cover rows)";
     }
     for (uint32_t i = 0; i < idx; i++) {
         if (strcmp(def->params[i].name, param->name) == 0) {

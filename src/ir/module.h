@@ -78,8 +78,9 @@ typedef struct odin3_pinslice {
 /*
  * Creates a node and its pins: contiguous IDs in port order, then bit order (LSB first), all
  * unconnected. The pin count follows from the type's port widths for the parameters and never
- * changes. INVALID_ARG also for an unknown type, mismatched parameters, a width parameter that is
- * not an int in [0, UINT32_MAX], or parameters the type's verify hook rejects, and for a port
+ * changes. INVALID_ARG also for an unknown type, mismatched parameters, a value
+ * odin3_value_valid rejects (checked before anything is copied), a width parameter that is not
+ * an int in [0, UINT32_MAX], or parameters the type's verify hook rejects, and for a port
  * cell type (granularity PORT: only odin3_module_add_port makes port nodes). Counts as an
  * instance of the type (odin3_celltype_instances).
  */
@@ -351,7 +352,8 @@ typedef struct odin3_objref {
 /*
  * Sets attribute key_str (a non-empty strtab ID) of a live object to a copy of value (payload
  * copied into the module), replacing any earlier value. INVALID_ARG for a dead or unknown object,
- * a bad key, or a value of unknown kind or with a NULL payload of nonzero length.
+ * a bad key, or a value odin3_value_valid rejects (unknown kind, a NULL payload of nonzero
+ * length, partial cover rows).
  */
 odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key_str,
                             const odin3_value *value);

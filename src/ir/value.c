@@ -14,6 +14,19 @@ static bool has_payload(const odin3_value *val) {
     return val->kind == ODIN3_VAL_BITS || val->kind == ODIN3_VAL_COVER;
 }
 
+bool odin3_value_valid(const odin3_value *v) {
+    if (v == NULL || (int)v->kind < ODIN3_VAL_INT || (int)v->kind > ODIN3_VAL_COVER) {
+        return false;
+    }
+    if (!has_payload(v)) {
+        return true;
+    }
+    if (v->len > 0 && v->bits == NULL) {
+        return false;
+    }
+    return v->kind != ODIN3_VAL_COVER || v->len % ((uint64_t)v->cover_inputs + 1) == 0;
+}
+
 odin3_status odin3_value_copy(odin3_arena *arena, const odin3_value *src, odin3_value *dst) {
     odin3_value out = *src;
     if (has_payload(src)) {

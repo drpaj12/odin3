@@ -65,8 +65,9 @@ typedef enum odin3_const {
 
 /*
  * A cell-type definition. Hooks receive one value per parameter definition, in order. Names must
- * be non-empty; port names are unique, parameter names are unique, and a width_param names an INT
- * parameter of the same definition.
+ * be non-empty; port names are unique, parameter names are unique, a width_param names an INT
+ * parameter of the same definition, and every default has its parameter's kind and passes
+ * odin3_value_valid.
  */
 typedef struct odin3_celltype_def {
     const char *name;

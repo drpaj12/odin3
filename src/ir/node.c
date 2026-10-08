@@ -31,8 +31,9 @@ static bool params_match(const odin3_celltype_def *def, const odin3_node_spec *s
         return false;
     }
     for (uint32_t i = 0; i < def->n_params; i++) {
-        if (spec->params[i].kind != def->params[i].kind) {
-            odin3_log(ODIN3_LOG_ERROR, "node_create: '%s' parameter %s has the wrong kind",
+        if (spec->params[i].kind != def->params[i].kind || !odin3_value_valid(&spec->params[i])) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "node_create: '%s' parameter %s has the wrong kind or a malformed value",
                       def->name, def->params[i].name);
             return false;
         }

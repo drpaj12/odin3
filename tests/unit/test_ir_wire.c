@@ -929,6 +929,8 @@ static void test_attr_rejects(void) {
     odin3_value one = odin3_value_int(1);
     odin3_value no_payload = {ODIN3_VAL_BITS, 0, NULL, 3, 0, 0};
     odin3_value bad_kind = {(odin3_value_kind)9, 0, NULL, 0, 0, 0};
+    static const uint8_t k_rows[3] = {'1', '1', '0'};
+    odin3_value ragged = {ODIN3_VAL_COVER, 0, k_rows, 3, 0, 1}; /* rows of 2 bytes */
     uint32_t key = intern("k");
     odin3_net_id net = net_named("n");
     odin3_objref net_ref = {ODIN3_OBJ_NET, net.v};
@@ -946,7 +948,8 @@ static void test_attr_rejects(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set(module, net_ref, key, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set(module, net_ref, key, &no_payload));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set(module, net_ref, key, &bad_kind));
-    TEST_ASSERT_EQUAL_size_t(9, errors_logged);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set(module, net_ref, key, &ragged));
+    TEST_ASSERT_EQUAL_size_t(10, errors_logged);
     TEST_ASSERT_NULL(odin3_attr_get(module, net_ref, key));
     TEST_ASSERT_NULL(odin3_attr_get(module, (odin3_objref){(odin3_objkind)9, 1}, key));
 }

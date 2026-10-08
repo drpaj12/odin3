@@ -33,14 +33,6 @@ static bool obj_live(const odin3_module *module, odin3_objref obj) {
     return false;
 }
 
-static bool value_ok(const odin3_value *value) {
-    if (value == NULL || (int)value->kind < ODIN3_VAL_INT || (int)value->kind > ODIN3_VAL_COVER) {
-        return false;
-    }
-    bool payload = value->kind == ODIN3_VAL_BITS || value->kind == ODIN3_VAL_COVER;
-    return !payload || value->len == 0 || value->bits != NULL;
-}
-
 /* NULL when the call is valid, else what is wrong. */
 static const char *set_error(const odin3_module *module, odin3_objref obj, uint32_t key_str,
                              const odin3_value *value) {
@@ -50,8 +42,8 @@ static const char *set_error(const odin3_module *module, odin3_objref obj, uint3
     if (key_str == 0 || key_str >= odin3_strtab_count(odin3_design_strtab(module->design))) {
         return "the key is not a non-empty string ID";
     }
-    if (!value_ok(value)) {
-        return "the value has an unknown kind or a missing payload";
+    if (!odin3_value_valid(value)) {
+        return "the value has an unknown kind, a missing payload or partial cover rows";
     }
     return NULL;
 }
