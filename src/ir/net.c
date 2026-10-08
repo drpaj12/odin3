@@ -5,6 +5,7 @@
 #include "ir/module.h"
 #include "ir/pinpool.h"
 #include "util/log.h"
+#include "util/pagevec.h"
 #include "util/u64map.h"
 
 #include <assert.h>
@@ -97,12 +98,14 @@ odin3_status odin3_pin_connect(odin3_module *module, odin3_pin_id pin, odin3_net
     if (pin_rec->net.v == net.v) {
         return ODIN3_OK;
     }
+    if (odin3_net_valid(pin_rec->net)) {
+        odin3_log(ODIN3_LOG_ERROR, "pin_connect: pin %u is on net %u; disconnect it first", pin.v,
+                  pin_rec->net.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_status st = net_room(module, net_rec);
     if (st != ODIN3_OK) {
         return st;
-    }
-    if (odin3_net_valid(pin_rec->net)) {
-        odin3_net_detach(module, pin_rec);
     }
     attach(module, net, pin);
     return ODIN3_OK;
@@ -123,19 +126,20 @@ odin3_status odin3_pin_disconnect(odin3_module *module, odin3_pin_id pin) {
 
 odin3_status odin3_net_create(odin3_module *module, uint32_t name_str, odin3_prov_id prov,
                               odin3_net_id *out) {
-    odin3_net_id id = {module->nets.len};
+    odin3_net_id id = {odin3_module_net_end(module)};
     odin3_name_change name = {module->net_names, "net_create", id.v, 0, name_str};
     if (!odin3_names_available(module, &name)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_status st = odin3_store_reserve(&module->nets, 1);
+    odin3_status st = odin3_module_reserve(module->nets, 1);
     if (st == ODIN3_OK) {
         st = odin3_names_change(module, &name); /* last fallible step */
     }
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_net_rec *rec = odin3_store_take(&module->nets);
+    odin3_net_rec *rec = odin3_pagevec_push(module->nets, NULL);
+    assert(rec != NULL); /* reserved above */
     rec->name = name_str;
     rec->prov = prov;
     if (out != NULL) {

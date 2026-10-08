@@ -122,8 +122,8 @@ bool odin3_pin_drives(const odin3_module *module, odin3_pin_id pin);
 bool odin3_pin_reads(const odin3_module *module, odin3_pin_id pin);
 
 /*
- * Connects a live pin to a live net. A pin already on that net is left alone; a pin on another
- * net moves (atomically: on failure it stays where it was). Drivers go to the driver partition.
+ * Connects a live, unconnected pin to a live net; drivers go to the driver partition. A pin
+ * already on that net is left alone (OK); a pin on another net is INVALID_ARG (disconnect first).
  */
 odin3_status odin3_pin_connect(odin3_module *module, odin3_pin_id pin, odin3_net_id net);
 

@@ -41,24 +41,16 @@ struct odin3_design {
 /* --- module stores (IR-18) ----------------------------------------------------------------- */
 
 /*
- * An object store: a pagevec plus its logical length. Slots in [len, pagevec length) are zeroed
- * spares that a reservation pushed before its operation failed; the next reservation reuses them.
- * This gives reserve-before-mutate on a pagevec, which has no pop. IDs are slot indices; slot 0 is
- * the reserved dummy.
+ * Each module keeps its nodes, pins and nets in pagevecs of 1 << ODIN3_MODULE_PAGE_SHIFT records,
+ * so a small module costs tens of KiB. IDs are indices; index 0 is the reserved dummy.
  */
-typedef struct odin3_store {
-    odin3_pagevec *pv;
-    uint32_t len;
-} odin3_store;
+enum { ODIN3_MODULE_PAGE_SHIFT = 8 };
 
-/* Creates the pagevec and takes slot 0; ODIN3_ERR_NO_MEMORY on out of memory. */
-odin3_status odin3_store_init(odin3_store *store, size_t elem_size);
-
-/* Ensures `count` zeroed slots exist past len; ODIN3_ERR_NO_MEMORY (len unchanged) otherwise. */
-odin3_status odin3_store_reserve(odin3_store *store, uint32_t count);
-
-/* Takes the next reserved slot (requires a reservation); returns it, its index is the old len. */
-void *odin3_store_take(odin3_store *store);
+/*
+ * Makes the next `count` pushes onto a module store unable to fail (reserve before mutate).
+ * ODIN3_ERR_NO_MEMORY on out of memory or when the IDs would pass UINT32_MAX; length unchanged.
+ */
+odin3_status odin3_module_reserve(odin3_pagevec *store, uint32_t count);
 
 typedef struct odin3_node_rec {
     odin3_celltype_id type;
@@ -99,9 +91,9 @@ struct odin3_module {
     odin3_prov_id prov;
     odin3_celltype_id type;   /* the module's cell type (IR-7) */
     odin3_arena *arena;       /* parameter vectors and other small arrays */
-    odin3_store nodes;        /* odin3_node_rec */
-    odin3_store pins;         /* odin3_pin_rec */
-    odin3_store nets;         /* odin3_net_rec */
+    odin3_pagevec *nodes;     /* odin3_node_rec */
+    odin3_pagevec *pins;      /* odin3_pin_rec */
+    odin3_pagevec *nets;      /* odin3_net_rec */
     odin3_u64map *node_names; /* name strtab ID -> node ID (live nodes only) */
     odin3_u64map *net_names;  /* name strtab ID -> net ID (live nets only) */
     odin3_pinpool pinpool;    /* net pin arrays */

@@ -22,66 +22,56 @@ enum { MODULE_ARENA_CHUNK_BYTES = 16384 };
 
 /* --- stores -------------------------------------------------------------------------------- */
 
-odin3_status odin3_store_init(odin3_store *store, size_t elem_size) {
-    store->len = 0;
-    store->pv = odin3_pagevec_create(elem_size);
-    if (store->pv == NULL || odin3_store_reserve(store, 1) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
+/* A store with the dummy record at index 0; NULL on out of memory. */
+static odin3_pagevec *store_create(size_t elem_size) {
+    odin3_pagevec_spec spec = {elem_size, ODIN3_MODULE_PAGE_SHIFT};
+    odin3_pagevec *store = odin3_pagevec_create_paged(spec);
+    if (store != NULL && odin3_pagevec_push(store, NULL) == NULL) {
+        odin3_pagevec_destroy(store);
+        return NULL;
     }
-    (void)odin3_store_take(store); /* slot 0: reserved dummy */
-    return ODIN3_OK;
+    return store;
 }
 
-odin3_status odin3_store_reserve(odin3_store *store, uint32_t count) {
-    uint64_t need = (uint64_t)store->len + count;
-    if (need > UINT32_MAX) {
+odin3_status odin3_module_reserve(odin3_pagevec *store, uint32_t count) {
+    if ((uint64_t)odin3_pagevec_len(store) + count > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY; /* ID space exhausted */
     }
-    while (odin3_pagevec_len(store->pv) < need) {
-        if (odin3_pagevec_push(store->pv, NULL) == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-    }
-    return ODIN3_OK;
+    return odin3_pagevec_reserve(store, count);
 }
 
-void *odin3_store_take(odin3_store *store) {
-    assert(store->len < odin3_pagevec_len(store->pv));
-    return odin3_pagevec_at(store->pv, store->len++);
+static void *store_at(odin3_pagevec *store, uint32_t idx) {
+    return idx != 0 && idx < odin3_pagevec_len(store) ? odin3_pagevec_at(store, idx) : NULL;
 }
 
-static void *store_at(odin3_store *store, uint32_t idx) {
-    return idx != 0 && idx < store->len ? odin3_pagevec_at(store->pv, idx) : NULL;
-}
-
-static const void *store_cat(const odin3_store *store, uint32_t idx) {
-    return idx != 0 && idx < store->len ? odin3_pagevec_cat(store->pv, idx) : NULL;
+static const void *store_cat(const odin3_pagevec *store, uint32_t idx) {
+    return idx != 0 && idx < odin3_pagevec_len(store) ? odin3_pagevec_cat(store, idx) : NULL;
 }
 
 /* --- records ------------------------------------------------------------------------------- */
 
 odin3_node_rec *odin3_node_rec_at(odin3_module *module, odin3_node_id node) {
-    return store_at(&module->nodes, node.v);
+    return store_at(module->nodes, node.v);
 }
 
 const odin3_node_rec *odin3_node_rec_cat(const odin3_module *module, odin3_node_id node) {
-    return store_cat(&module->nodes, node.v);
+    return store_cat(module->nodes, node.v);
 }
 
 odin3_pin_rec *odin3_pin_rec_at(odin3_module *module, odin3_pin_id pin) {
-    return store_at(&module->pins, pin.v);
+    return store_at(module->pins, pin.v);
 }
 
 const odin3_pin_rec *odin3_pin_rec_cat(const odin3_module *module, odin3_pin_id pin) {
-    return store_cat(&module->pins, pin.v);
+    return store_cat(module->pins, pin.v);
 }
 
 odin3_net_rec *odin3_net_rec_at(odin3_module *module, odin3_net_id net) {
-    return store_at(&module->nets, net.v);
+    return store_at(module->nets, net.v);
 }
 
 const odin3_net_rec *odin3_net_rec_cat(const odin3_module *module, odin3_net_id net) {
-    return store_cat(&module->nets, net.v);
+    return store_cat(module->nets, net.v);
 }
 
 odin3_node_rec *odin3_node_live_rec(odin3_module *module, odin3_node_id node, const char *what) {
@@ -172,9 +162,9 @@ static void module_destroy(odin3_module *module) {
     if (module == NULL) {
         return;
     }
-    odin3_pagevec_destroy(module->nodes.pv);
-    odin3_pagevec_destroy(module->pins.pv);
-    odin3_pagevec_destroy(module->nets.pv);
+    odin3_pagevec_destroy(module->nodes);
+    odin3_pagevec_destroy(module->pins);
+    odin3_pagevec_destroy(module->nets);
     odin3_u64map_destroy(module->node_names);
     odin3_u64map_destroy(module->net_names);
     odin3_pinpool_destroy(&module->pinpool);
@@ -192,10 +182,11 @@ static odin3_module *module_alloc(odin3_design *design) {
     module->arena = odin3_arena_create(MODULE_ARENA_CHUNK_BYTES);
     module->node_names = odin3_u64map_create(0);
     module->net_names = odin3_u64map_create(0);
+    module->nodes = store_create(sizeof(odin3_node_rec));
+    module->pins = store_create(sizeof(odin3_pin_rec));
+    module->nets = store_create(sizeof(odin3_net_rec));
     if (module->arena == NULL || module->node_names == NULL || module->net_names == NULL ||
-        odin3_store_init(&module->nodes, sizeof(odin3_node_rec)) != ODIN3_OK ||
-        odin3_store_init(&module->pins, sizeof(odin3_pin_rec)) != ODIN3_OK ||
-        odin3_store_init(&module->nets, sizeof(odin3_net_rec)) != ODIN3_OK ||
+        module->nodes == NULL || module->pins == NULL || module->nets == NULL ||
         odin3_pinpool_init(&module->pinpool) != ODIN3_OK) {
         module_destroy(module);
         return NULL;
@@ -299,13 +290,13 @@ odin3_celltype_id odin3_module_type(const odin3_module *module) {
 }
 
 uint32_t odin3_module_node_end(const odin3_module *module) {
-    return module->nodes.len;
+    return (uint32_t)odin3_pagevec_len(module->nodes);
 }
 
 uint32_t odin3_module_pin_end(const odin3_module *module) {
-    return module->pins.len;
+    return (uint32_t)odin3_pagevec_len(module->pins);
 }
 
 uint32_t odin3_module_net_end(const odin3_module *module) {
-    return module->nets.len;
+    return (uint32_t)odin3_pagevec_len(module->nets);
 }

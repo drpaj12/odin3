@@ -6,8 +6,10 @@
 #include "ir/value.h"
 #include "util/arena.h"
 #include "util/log.h"
+#include "util/pagevec.h"
 #include "util/u64map.h"
 
+#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -126,7 +128,8 @@ static void make_pins(odin3_module *module, const node_plan *plan, odin3_node_id
     for (uint32_t port = 0; port < plan->def->n_ports; port++) {
         uint32_t width = odin3_celltype_port_width(module->design, plan->type, plan->params, port);
         for (uint32_t bit = 0; bit < width; bit++) {
-            odin3_pin_rec *pin = odin3_store_take(&module->pins);
+            odin3_pin_rec *pin = odin3_pagevec_push(module->pins, NULL);
+            assert(pin != NULL); /* reserved by node_create */
             pin->node = node;
             pin->port = port;
             pin->bit = bit;
@@ -140,12 +143,12 @@ odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec
     node_plan plan = {0};
     odin3_status st = plan_node(module, spec, &plan);
     if (st == ODIN3_OK) {
-        st = odin3_store_reserve(&module->nodes, 1);
+        st = odin3_module_reserve(module->nodes, 1);
     }
     if (st == ODIN3_OK) {
-        st = odin3_store_reserve(&module->pins, plan.pin_count);
+        st = odin3_module_reserve(module->pins, plan.pin_count);
     }
-    odin3_node_id id = {module->nodes.len};
+    odin3_node_id id = {odin3_module_node_end(module)};
     odin3_name_change name = {module->node_names, "node_create", id.v, 0, 0};
     if (st == ODIN3_OK) {
         name.to = spec->name;
@@ -154,11 +157,12 @@ odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_node_rec *rec = odin3_store_take(&module->nodes);
+    odin3_node_rec *rec = odin3_pagevec_push(module->nodes, NULL);
+    assert(rec != NULL); /* reserved above */
     rec->type = plan.type;
     rec->name = spec->name;
     rec->prov = spec->prov;
-    rec->first_pin.v = module->pins.len;
+    rec->first_pin.v = odin3_module_pin_end(module);
     rec->pin_count = plan.pin_count;
     rec->n_params = plan.def->n_params;
     rec->params = plan.params;

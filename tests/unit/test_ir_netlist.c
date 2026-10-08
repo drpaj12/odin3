@@ -31,6 +31,7 @@ enum {
     MIXED_A = 2,
     MIXED_Y = 3,
     OOM_LIMIT = 10000,
+    SMALL_MODULE_BYTES = 64 * 1024,
 };
 
 static odin3_design *design;
@@ -464,17 +465,23 @@ static void test_many_pins_remove_every_other(void) {
     }
 }
 
-static void test_connect_moves_between_nets(void) {
+static void test_connect_refuses_other_net(void) {
     odin3_node_id in = port_node("$port_in", 1);
-    odin3_node_id out = port_node("$port_out", 2);
+    odin3_node_id out = port_node("$port_out", 1);
     odin3_net_id left = net_named("left");
     odin3_net_id right = net_named("right");
     connect(pin_of(in, 0), left);
     connect(pin_of(out, 0), left);
-    connect(pin_of(out, 1), left);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pin_connect(module, pin_of(in, 0), right));
+    TEST_ASSERT_EQUAL_size_t(1, errors_logged);
+    TEST_ASSERT_EQUAL_UINT32(left.v, odin3_pin_net(module, pin_of(in, 0)).v);
+    TEST_ASSERT_EQUAL_UINT32(pin_of(in, 0).v, odin3_net_driver(module, left).v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_pins(module, right).count);
+    assert_partition(left);
+    /* Explicit disconnect, then the connect succeeds. */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(module, pin_of(in, 0)));
     connect(pin_of(in, 0), right);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(module, left));
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_net_pins(module, left).count);
     TEST_ASSERT_EQUAL_UINT32(pin_of(in, 0).v, odin3_net_driver(module, right).v);
     assert_partition(left);
     assert_partition(right);
@@ -554,6 +561,22 @@ static void test_out_of_range_accessors(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_CONST_NONE, odin3_net_const_value(module, far_net));
     TEST_ASSERT_NULL(odin3_node_param(module, far_node, 0));
     TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/* --- memory ------------------------------------------------------------------------------- */
+
+static size_t store_bytes(void) {
+    return odin3_pagevec_bytes_reserved(module->nodes) +
+           odin3_pagevec_bytes_reserved(module->pins) + odin3_pagevec_bytes_reserved(module->nets);
+}
+
+static void test_small_module_stores_are_small(void) {
+    odin3_node_id one = node_of("$_CONST1_");
+    connect(pin_of(one, 0), net_named("n"));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_node_end(module));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_net_end(module));
+    TEST_ASSERT_TRUE(store_bytes() > 0);
+    TEST_ASSERT_TRUE(store_bytes() < SMALL_MODULE_BYTES);
 }
 
 /* --- pin pool ------------------------------------------------------------------------------ */
@@ -642,9 +665,10 @@ static void build_small_netlist(odin3_net_id *net) {
 static void test_node_create_oom_sweep(void) {
     odin3_net_id net = {0};
     build_small_netlist(&net);
-    uint32_t filler = ODIN3_PAGEVEC_PAGE_ELEMS - 1 - odin3_module_pin_end(module);
+    uint32_t page = UINT32_C(1) << ODIN3_MODULE_PAGE_SHIFT;
+    uint32_t filler = page - 1 - odin3_module_pin_end(module);
     (void)port_node("$port_out", filler);
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_PAGEVEC_PAGE_ELEMS - 1, odin3_module_pin_end(module));
+    TEST_ASSERT_EQUAL_UINT32(page - 1, odin3_module_pin_end(module));
     odin3_value width = odin3_value_int(3);
     odin3_node_spec spec = {type_id("test_t3_mixed"), intern("oom"), {0}, &width, 1};
     snapshot before = take_snapshot(spec.type, spec.name);
@@ -684,15 +708,13 @@ static void test_pin_connect_oom_sweep(void) {
     odin3_net_id net = {0};
     build_small_netlist(&net);
     odin3_node_id in = port_node("$port_in", 1);
-    odin3_net_id other = net_named("other");
-    connect(pin_of(in, 0), other);
     exhaust_pool_chunk(2);
     snapshot before = take_snapshot(type_id("$port_in"), 0);
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     long fail_at = 0;
     for (; fail_at < OOM_LIMIT; fail_at++) {
         odin3_util_set_alloc_fail_after(fail_at);
-        st = odin3_pin_connect(module, pin_of(in, 0), net); /* move: 4 sinks -> needs class 2 */
+        st = odin3_pin_connect(module, pin_of(in, 0), net); /* 5th pin: needs class 2 */
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {
             break;
@@ -701,12 +723,11 @@ static void test_pin_connect_oom_sweep(void) {
         snapshot now = take_snapshot(type_id("$port_in"), 0);
         assert_same(&before, &now);
         assert_partition(net);
-        assert_partition(other);
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
     TEST_ASSERT_TRUE(fail_at > 0);
     TEST_ASSERT_EQUAL_UINT32(pin_of(in, 0).v, odin3_net_driver(module, net).v);
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_pins(module, other).count);
+    TEST_ASSERT_EQUAL_UINT32(5, odin3_net_pins(module, net).count);
     assert_partition(net);
 }
 
@@ -771,12 +792,13 @@ int main(void) {
     RUN_TEST(test_const_value_needs_one_driver);
     RUN_TEST(test_delete_only_driver_keeps_sinks);
     RUN_TEST(test_many_pins_remove_every_other);
-    RUN_TEST(test_connect_moves_between_nets);
+    RUN_TEST(test_connect_refuses_other_net);
     RUN_TEST(test_net_names);
     RUN_TEST(test_net_delete);
     RUN_TEST(test_dead_ids_rejected);
     RUN_TEST(test_out_of_range_ids);
     RUN_TEST(test_out_of_range_accessors);
+    RUN_TEST(test_small_module_stores_are_small);
     RUN_TEST(test_pinpool_classes);
     RUN_TEST(test_pinpool_reuses_blocks);
     RUN_TEST(test_node_create_oom_sweep);
