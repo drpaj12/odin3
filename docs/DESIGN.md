@@ -1,0 +1,215 @@
+# Odin III — Design Specification (v0.2 skeleton)
+
+Status: draft, 2026-10-08. Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
+
+## 1. Purpose and positioning
+
+Odin III is an open-source (MIT) HDL elaboration and front-end synthesis framework for CAD research, the successor to Odin (FPL 2005) and Odin II (FCCM 2010). It reads Verilog, SystemVerilog, VHDL, and structural netlists (BLIF, VQM, EDIF) into one hierarchical, provenance-tracked IR; performs architecture-driven partial mapping; integrates ABC for soft-logic optimization; and writes netlists for the VTR flow, for Altera/Intel FPGAs, and for visualisation.
+
+Three research threads drive the design:
+
+1. **Forward synthesis** — a Parmys/Odin II-class front end for VTR with flexible, subgraph-based hard-block inference (multipliers, memories, DSP/MAC, and eventually tensor/matmul tiles).
+2. **Reverse engineering** — reading flat netlists and *raising* them: recovering adders, counters, muxes, FSMs, memories, and emitting higher-level Verilog/SV.
+3. **Agentic construction** — the project itself is a case study ("Odin III: a human's final frontier") in building a Yosys-class tool with an AI coding agent under human architectural control.
+
+Threads 1 and 2 share one engine: a subgraph matcher over the IR, run forward (bind generic cells to hard blocks) or backward (raise bit-level cones to word-level cells).
+
+## 2. Decisions already made
+
+| # | Decision | Rationale |
+|---|---|---|
+| D1 | One IR, two granularities (word-level "RTLIL view", bit-level "netlist view"), reached by passes `lower` / `raise`; `to_rtlil` and `to_netlist` are views/checks, not separate data structures | Every writer, reader, checker, simulator, and the matcher exist once |
+| D2 | Odin III owns a Bison/Flex Verilog-2005 grammar (evolved from Odin II's). SystemVerilog and VHDL arrive via adapters: slang → Odin III AST; GHDL via subprocess (`ghdl --synth`) → Verilog → Odin III | slang and GHDL are not Bison/Flex and would take years to re-create; adapters preserve the common-AST contract |
+| D3 | License: MIT. External tools are subprocesses (GHDL, Yosys for oracle, Quartus, VPR) **except ABC, which is linked** (`libabc`) | Keeps the core MIT; ABC's permissive license allows linking |
+| D4 | Both a built-in netlist simulator **and** equivalence checking (ABC `cec`/`dsec`, Verilator on emitted Verilog) | Simulator serves hard-block semantics and RE; equivalence is the regression oracle |
+| D5 | Hard-block inference is subgraph-isomorphism based over IR fragments, with a cost model; patterns are IR, not text macros | Must scale to DSP cascades, MACs, matmul tiles; same engine serves RE |
+| D6 | Altera primitives (LPM, `alt*`, `stratixiv_*`/`cycloneiv_*`) are first-class: a primitive library elaborates them to generic cells; `unbind`/`bind` passes move between generic and target-bound forms | LPM instances are pre-bound hard blocks; Titan is in scope early |
+| D7 | Not built on MLIR/CIRCT. Borrow: op registry, pass manager, verifiers, first-class attributes. Provide `write_circt` (hw/comb/seq) and, later, `read_circt` | LLVM dependency and SSA semantics fight the node/pin/net model needed for RE and in-place rewiring |
+| D8′ | **Core in structured C17** with a public C ABI (`include/odin3/odin3.h`). Plugins are `.so` files or executables speaking that ABI; Python tools and plugins use it through `cffi`. C++ is confined to `adapters/` (the slang shim) and `third_party/`. Platform: WSL2 Ubuntu, CMake, GitHub Actions CI, Claude Code as primary developer, human as architect/reviewer. Supersedes the C++20 choice in v0.1 | Simplest possible code for agent authorship and human review; stable plugin boundary; libabc is C; Odin II lineage; complexity is enforceable by lint in C |
+| D9 | Provenance on every IR object: pointers in-process plus stable string IDs that survive serialization and appear in emitted names | Source-line → VPR-block tracing without Odin III loaded |
+
+## 3. Architecture overview
+
+```
+ Verilog-2005 ─ Bison/Flex ─┐
+ SystemVerilog ─ slang ─────┤                      ┌─ write_blif (VTR, black-boxed) ─ ABC(linked) ─ read back
+ VHDL ─ ghdl --synth ─ Vlog ┼─► AST + Symbol Table ─► IR (word-level) ─► partial map ─► IR (bit-level) ─┼─ write_verilog (structural / Altera primitives)
+ BLIF / VQM / EDIF ─────────┘        │                      ▲                                            ├─ write_json, write_dot, write_circt
+                                     └── provenance ────────┘◄── raise (RE) ◄── BLIF/VQM/EDIF readers    └─ simulate / equiv
+```
+
+Every arrow is a *pass* registered with the pass manager; every pass runs `check` before and after in debug builds. Passes, readers, writers, and matcher patterns can be supplied by plugins through the C ABI (§15.3).
+
+## 4. Front ends
+
+### 4.1 Verilog-2005 (owned)
+- Preprocessor first: `define/`ifdef/`else/`endif/`include, macros with args, `` `timescale `` tolerated.
+- Bison/Flex grammar, location-tracked tokens; every AST node has `{file, line, col, end_line, end_col}` and an attribute list (`(* ... *)` and pragmas).
+- Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
+- Comments kept in a side table keyed by location (not a red/green tree).
+
+### 4.2 SystemVerilog (slang adapter)
+- slang is C++20 and MIT. `adapters/slang/` is a small C++ shim that links slang, walks its *elaborated* AST (post-parameter, post-generate), and emits the Odin III AST through the C ABI (`odin3_ast_*` builders). It exports exactly one C function, `odin3_read_slang(...)`, and is built as a separate shared library so the core stays pure C. slang handles packages, interfaces (flattened), structs, enums, `always_ff/comb/latch`, `logic`.
+- Source locations copied verbatim.
+
+### 4.3 VHDL (GHDL subprocess)
+- `ghdl --synth --out=verilog` per design unit → Odin III Verilog front end. GHDL's generated names are stable enough to keep provenance to the VHDL line via a name map GHDL emits. **OPEN:** confirm GHDL's `--out=verilog` coverage on the VTR benchmark set once converted.
+
+### 4.4 Netlist readers
+- BLIF (full: `.subckt`, `.latch` with init, `.names`, black-box `.model`s) — required for the ABC round-trip.
+- VQM (Quartus post-synthesis Verilog): the Verilog grammar plus the Altera primitive library; no new parser.
+- EDIF 2.0.0: S-expression reader, structural only.
+- These produce bit-level IR with structural-only provenance; the `raise` pass (§8) recovers word-level structure.
+
+### 4.5 Common AST and Symbol Table
+- Scoped symbol table (module → generate scope → block), each symbol with declaration location, type (net/var, width, signedness, array dims), and the list of AST nodes that assign it.
+- AST is the retained "high" layer: it is never discarded; IR objects back-point to it.
+
+## 5. The IR
+
+### 5.1 Object model (Odin II lineage)
+- `Design` → `Module`s (hierarchy kept until an explicit `flatten` pass).
+- `Module` owns `Node`s, `Pin`s, `Net`s as **peers** (Odin II's key property): a node has pin lists; a pin belongs to one node and attaches to one net; a net has one or more driver pins and any number of sink pins. Multi-driver and tristate are representable and flagged by `check`.
+- `Node` has a `CellType` from the **op registry** and an `Attributes` map.
+- Storage: arena-allocated, dense integer IDs (`uint32_t`), stable across passes; name → ID maps kept per module. Objects are plain structs; all cross-references are IDs, never pointers, so the IR is trivially serializable and the C ABI can hand out IDs safely. Target: 2M nodes in < 2 GB (Titan).
+
+### 5.2 Op registry (CIRCT-inspired, one file per cell type)
+Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`). Adding a cell type touches exactly one file; plugins can register cell types at load time.
+
+Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $and $or $xor $not $shl $shr $sshr $eq $ne $lt $le $gt $ge $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $concat $slice $reduce_*`.
+Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_LUT_K_` plus `$_HARD_<name>` instances.
+Hard set: generated from the VPR arch `<model>` list and from the Altera primitive library.
+
+### 5.3 Provenance
+`struct odin3_prov { odin3_srcloc loc; odin3_ast_id ast; odin3_ir_id origin; const char *hier_path; }` on every node, pin, and net. Forward index AST → IR objects maintained incrementally by passes. Emitted names follow `hier/path/cellname@file:line`; a `--name-style` flag chooses between provenance names and short names.
+
+### 5.4 Views
+- `rtlil view`: asserts all nodes are `word`/`hard`/`blackbox`; exposes a Yosys-like API for passes.
+- `netlist view`: asserts all nodes are `bit`/`hard`/`blackbox`.
+- Mixed granularity is legal during `lower`/`raise` only.
+
+## 6. Pass pipeline (forward)
+
+1. `read_*` → AST, symbol table
+2. `elaborate` → word-level IR with processes
+3. `proc` — predicate-tracked lowering of `always` blocks to mux trees + `$dff*`; blocking/non-blocking analysis; latch detection (warn)
+4. `opt` — constant folding, dead-node removal, CSE, algebraic simplification on arithmetic, mux collapsing (Odin I)
+5. `fsm_detect`, `fsm_recode` (one-hot by default; AST-assisted as in Odin II)
+6. `memory_infer` — `reg` arrays → `$mem` with port analysis; attribute overrides
+7. `read_arch` — VPR XML `<model>`s → hard set; Altera device → primitive hard set
+8. `partial_map` (§7)
+9. `lower` — word → bit; hard/blackbox nodes untouched
+10. `abc` — linked ABC on the soft-logic cone, black boxes preserved, results read back and re-stitched
+11. `write_*`
+
+## 7. Partial mapping
+
+Partial mapping binds *some* of the word-level IR to the target's hard circuits and leaves the remainder as soft logic for ABC. It runs before `lower` because word-level operators are the only place hard-block shape is visible.
+
+Components:
+- **Inference** — three tiers, as in Odin II: explicit instantiation (primitive library), coding-style rules (memory inference), and open-ended **subgraph matching** (Odin I, re-implemented generically).
+- **Binding/packing** — for each matched structure choose an implementation: hard block(s) + generated soft glue, or all-soft. Includes recursive multiplier splitting with the small-multiplier threshold auto-derived from the arch, signed multipliers, memory depth/width splitting with width-depth trading, carry chains (`adder` model), DFF feature matching (enable, sync/async reset) to what the arch's FF supports.
+- **Generic hard blocks** — any arch `<model>`; matched by exact port signature (Odin II) or by a user-supplied pattern.
+
+Matcher (§8) pattern format: an IR fragment in a small textual DSL (Verilog-like) with wildcard widths and optional ports, plus a cost. Overlap resolution: maximum-cover with cost tie-break (Odin I's rule generalized). **OPEN:** DSL syntax; whether patterns live in the arch file or beside it.
+
+## 8. Subgraph matcher and reverse engineering
+
+One matcher, two directions:
+- Forward: patterns = target hard blocks; candidates seeded at anchor cells (e.g. `$mul`) as in Odin I.
+- Backward (`raise`): patterns = generic word-level structures (ripple/CLA adders, comparators, mux trees, counters, shift registers, memories, FSM state registers); matched cones are replaced by word-level cells, so RE is literally `lower` run backwards.
+
+Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic verification of each candidate by local equivalence (ABC on the cone) before commit. Outputs for RE: raised IR → `write_verilog` at word level, plus a report mapping recovered structures to netlist regions.
+
+## 9. Writers and readers
+
+| Format | Read | Write | Notes |
+|---|---|---|---|
+| BLIF | yes | yes | VTR dialect; black boxes; `.latch` init |
+| Verilog | yes (front end) | structural (bit/word), Altera-primitive flavoured | the RE output |
+| SystemVerilog | via slang | word-level structural | |
+| VQM | yes | — | Titan |
+| EDIF | yes | later | |
+| JSON (Yosys schema) | later | yes | netlistsvg, nextpnr |
+| Graphviz dot | — | yes | hierarchy clusters; `--focus <hier-path | file:line | cone(net)>`; never renders > N nodes without a focus |
+| CIRCT MLIR | later | yes | hw/comb/seq |
+
+## 10. Verification
+
+- `simulate`: cycle-based event-free simulator over the netlist view using op-registry semantics; hard blocks simulate via their registry function; random or file vectors; VCD out.
+- `equiv`: ABC `cec` (combinational) / `dsec` (sequential) between any two IRs or BLIFs; Verilator harness comparing emitted Verilog against source.
+- `check`: structural invariants (no dangling pins, driver counts, width consistency, clock-domain attribute consistency, granularity view) — runs around every pass in debug.
+
+## 11. Testing and benchmarks
+
+- **Oracle**: Parmys (and Odin II via `WITH_ODIN=ON`) golden BLIFs, archived per VTR release.
+- **Microbenchmarks** (VTR `odin_ii/regression_test/benchmark/...`): required *identical* canonicalized netlist across Verilog, SV (converted), and VHDL (converted) front ends, and equivalent to Parmys.
+- **VTR 19**: full flow to P&R; QoR table (min W, critical path, LUTs, FFs, hard blocks) vs. Parmys.
+- **Titan**: smallest designs first; VQM path and source path both; must match Quartus-synthesized BLIF functionally.
+- **Fuzzing**: random Verilog generator with Yosys as differential oracle, from Phase 2.
+- **Reverse engineering**: round-trip test — Verilog → lower → BLIF → read → raise → Verilog → equiv, plus structure-recovery scorecard.
+- CI runs lint gate + unit + micro + fuzz on every push; VTR 19 nightly; Titan weekly.
+
+## 12. Development path
+
+| Phase | Deliverable | Exit test |
+|---|---|---|
+| 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
+| 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
+| 2 | Verilog-2005 front end + preprocessor + elaboration; `proc`, `opt`; smallest Titan design parsed; primitive library v0 | Micros identical/equivalent to Parmys |
+| 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
+| 4 | `read_arch`, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
+| 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist |
+| 6 | `raise`, RE scorecard, VQM/EDIF, Altera `bind` output, Titan subset | RE round-trip + Titan (paper 2) |
+| 7 | CIRCT writer, JSON reader, visual tooling polish, docs | Release |
+
+Agentic working rules: one pass per PR; golden test per pass; `check` on in debug; lint gate must pass before commit; agent reads `docs/DESIGN.md` and the op-registry file for any task; human reviews IR/invariant changes and all mapping algorithms; no PR merges red. Per-pass workflow: `/superpowers:brainstorm` → `write-plan` → human approves → `execute-plan` → `/run-micro` → PR.
+
+## 13. Open questions
+
+1. Matcher pattern DSL and where patterns live (arch file vs. sidecar).
+2. GHDL `--out=verilog` coverage; fallback is linking libghdl in a separately-licensed optional module.
+3. Primitive library v0 scope: exactly which `lpm_*`/`alt*`/`stratixiv_*` the smallest Titan designs need.
+4. Memory layout details (arena vs. SoA) — decide in Phase 1 with a 2M-node synthetic benchmark.
+5. Which Altera generation for `bind` output first (Cyclone IV/V for Quartus Lite vs. Stratix IV for Titan).
+6. Name-style policy for VTR: provenance names are long; measure VPR runtime impact.
+7. Whether `raise` should also target Yosys's internal cell names for interop.
+8. Unit-test framework for C: Unity vs. CMocka (decide in PR #1).
+
+## 14. References
+- Jamieson & Rose, "A Verilog RTL Synthesis Tool for Heterogeneous FPGAs", FPL 2005.
+- Jamieson, Kent, Gharibian, Shannon, "Odin II", FCCM 2010.
+- Luu et al., "VPR 5.0", FPGA 2009.
+- Rose et al., "The VTR Project", FPGA 2012.
+- VTR docs (Parmys default, Odin II deprecated); yosys-slang; ghdl-yosys-plugin; CIRCT.
+
+## 15. Code standard and lint gate
+
+The goal is code an agent can write and a human can review in one pass: small functions, no cleverness, every rule machine-checked. The gate runs as a pre-commit hook and as a required CI check; nothing merges with a violation.
+
+### 15.1 Language rules (C17)
+- `-std=c17 -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Werror`.
+- No `goto` except the single `cleanup:` label pattern for error paths. No variable-length arrays. No recursion in IR traversals (use an explicit worklist) — the IR can be 2M nodes deep.
+- Memory: every IR object lives in an arena owned by its `Module`; passes never `malloc` IR objects directly. `util/` provides `arena`, `vec`, `hashmap`, `str`, `log`; nothing else in the tree defines a generic container.
+- Errors: functions return `odin3_status` (an enum); no `exit()` outside `cli/`; no `abort()` outside `check` in debug builds.
+- One header per module, `#include` only what you use (`include-what-you-use` advisory in CI, not blocking).
+- Every public function in `odin3.h` has a one-paragraph comment: purpose, ownership of returned memory, failure modes.
+
+### 15.2 Tooling
+| Tool | Config | Blocking |
+|---|---|---|
+| clang-format | LLVM base, 100 cols, 4-space indent; applied by a Claude Code `PostToolUse` hook and checked with `--dry-run -Werror` | yes |
+| clang-tidy | `bugprone-*`, `cert-*`, `misc-*`, `performance-*`, `readability-*` (including `readability-function-size`, `readability-function-cognitive-complexity`), `modernize-*` **off** (C, not C++) | yes |
+| cppcheck | `--enable=warning,style,performance,portability --error-exitcode=1` | yes |
+| lizard | `-C 15` (cyclomatic complexity), `-L 60` (lines per function), `-a 5` (parameters) over `src/` | yes |
+| ASan + UBSan | `debug` CMake preset; all unit and micro tests run under it in CI | yes |
+| ruff + mypy --strict | `tools/`, `plugins/` Python | yes |
+| include-what-you-use | advisory | no |
+
+`tools/lint.sh` runs all of the above; `/lint` is its skill wrapper.
+
+### 15.3 Plugin and hook points (C ABI)
+`include/odin3/odin3.h` is the only header plugins see. It exposes opaque handles plus ID-based accessors: design/module/node/pin/net iteration and lookup, attribute get/set, cell-type registration, pass registration, reader/writer registration, matcher-pattern registration, and provenance queries. Plugins are:
+- **Shared objects** (`.so`) loaded with `--plugin foo.so`; they call `odin3_register_pass(...)` etc. from an `odin3_plugin_init` entry point.
+- **Executables** run at a hook point (`--hook after:partial_map ./myscript`); the IR is handed over as JSON on stdin and read back from stdout, so any language works and the hook can be a shell one-liner.
+- **Python** via `cffi` against `odin3.h` (`plugins/python/odin3.py` is the generated binding); the same accessors, so a Python pass is a function taking a module handle. Used for research scripts, QoR analysis, and prototyping a pass before porting it to C.
