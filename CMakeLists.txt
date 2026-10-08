@@ -53,7 +53,20 @@ add_library(odin3_core OBJECT
     src/ir/pinpool.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
-    src/ir/cells/const.c)
+    src/ir/cells/const.c
+    src/ir/cells/common.c
+    src/ir/cells/arith.c
+    src/ir/cells/logic.c
+    src/ir/cells/shift.c
+    src/ir/cells/compare.c
+    src/ir/cells/reduce.c
+    src/ir/cells/mux.c
+    src/ir/cells/ff.c
+    src/ir/cells/mem.c
+    src/ir/cells/tribuf.c
+    src/ir/cells/gates.c
+    src/ir/cells/dff.c
+    src/ir/cells/sop.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -130,6 +143,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_value)
     odin3_add_unit_test(test_ir_celltype)
     odin3_add_unit_test(test_ir_netlist)
+    odin3_add_unit_test(test_ir_cells)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
