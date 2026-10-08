@@ -13,14 +13,19 @@
 # Defaults: --tool both, --name = design basename without .v (NAME may contain '/' to group
 # designs, e.g. micro/bm_and), --golden = <repo>/../golden.
 # Env: VTR_ROOT (default ~/odin3-ws/external/vtr-verilog-to-routing), ODIN3_WORK (scratch run
-# directories, default <repo>/../work/oracle). Exit: 0 if every requested tool succeeded, 1 if any
-# failed, 2 on usage error.
+# directories, default <repo>/../work/oracle), ODIN3_ORACLE_MEM_MB (per-tool memory cap, default
+# 6144; some regression designs make Odin II grow without bound, and an uncapped run exhausts the
+# WSL VM and takes every session down). The cap is a cgroup limit (systemd-run --user --scope,
+# MemoryMax, no swap) on the whole flow process tree. run_vtr_flow.py -limit_memory_usage is NOT
+# used: VTR gates it on Path("ulimit").exists(), which is always false, so it is a silent no-op.
+# Exit: 0 if every requested tool succeeded, 1 if any failed, 2 on usage error.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 vtr_root=${VTR_ROOT:-$HOME/odin3-ws/external/vtr-verilog-to-routing}
 golden="$repo/../golden"
 work=${ODIN3_WORK:-$repo/../work/oracle}
+mem_mb=${ODIN3_ORACLE_MEM_MB:-6144}
 tool=both
 name=""
 
@@ -48,6 +53,9 @@ case $tool in parmys) tools=(parmys) ;; odin) tools=(odin) ;; both) tools=(parmy
 
 flow="$vtr_root/vtr_flow/scripts/run_vtr_flow.py"
 [[ -x $flow ]] || { echo "run-oracle: $flow not found; set VTR_ROOT" >&2; exit 2; }
+# never run uncapped: refuse if the cgroup memory cap cannot be applied
+systemd-run --user --scope --quiet -p MemoryMax="${mem_mb}M" true 2>/dev/null ||
+    { echo "run-oracle: cannot apply memory cap (systemd-run --user --scope failed)" >&2; exit 2; }
 # shellcheck disable=SC1091
 source "$vtr_root/.venv/bin/activate"
 
@@ -66,7 +74,8 @@ run_one() {
     local t=$1 run="$work/$arch_name/$name/$1"
     rm -rf "$run" && mkdir -p "$run"
     local status=ok
-    (cd "$run" && "$flow" "$design" "$arch" -start "$t" -end "$t" -temp_dir "$run/temp" \
+    (cd "$run" && systemd-run --user --scope --quiet -p MemoryMax="${mem_mb}M" -p MemorySwapMax=0 \
+        "$flow" "$design" "$arch" -start "$t" -end "$t" -temp_dir "$run/temp" \
         >"$run/flow.log" 2>&1) || status=failed
     local blif="$run/temp/$stem.$t.blif"
     [[ $status == ok && -s $blif ]] || status=failed
