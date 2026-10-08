@@ -15,13 +15,13 @@ path here matches its golden name in `odin3-golden` (`<arch>/regression/verilog/
 | `verilog/koios_dummy/*.v` (23 files) | Wrappers that `include` full Koios designs from `vtr_flow/benchmarks/verilog/koios/` outside this tree. They are not micros. |
 | `verilog/full/mcml.v` | 674 KB, over the 500 KB `check-added-large-files` limit. A full design that differs from VTR-19's `mcml.v` from line 492 on. |
 
-## Known upstream breakage, copied as-is
-
-- `verilog/large/arm_core.v` includes `a25/*.v` files that do not exist upstream.
+File modes are preserved from upstream (36 files are executable). `verilog/large/arm_core.v` has
+commented-out `include "a25/..."` lines whose targets do not exist upstream. They are inert.
 
 ## Refresh
 
-When `external/` moves to a new VTR commit, re-copy with the same filter and update the commit above:
+When `external/` moves to a new VTR commit, re-copy with the same filter (run from the `odin3` checkout)
+and update the commit above:
 
 ```sh
 B=../external/vtr-verilog-to-routing/odin_ii/regression_test/benchmark
