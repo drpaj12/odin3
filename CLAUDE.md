@@ -38,6 +38,7 @@ export VTR_ROOT=~/odin3-ws/external/vtr-verilog-to-routing
 tools/run-oracle.sh [--name group/leaf] design.v arch.xml   # goldens -> ~/odin3-ws/golden
 tools/netlist-compare/netlist-compare a.blif b.blif          # 0 identical, 1 differ, 2 error
 tools/equiv-check/equiv-check a.blif b.blif                  # 0 equivalent, 1 not, 2 error
+tools/golden-sample/golden-sample [--write]                  # pick the committed BLIF sample
 ```
 
 ## Working rules
@@ -61,7 +62,9 @@ tools/equiv-check/equiv-check a.blif b.blif                  # 0 equivalent, 1 n
 8. **Push early** (decision #16): commit and push the branch at every green checkpoint, before
    any risky step (large refactor, dispatching agents, regenerating goldens), and at session end.
 9. **The repo is the source of truth** (decision #15). Docs live only in `docs/`; never create
-   copies elsewhere. Goldens live in `~/odin3-ws/golden` (its own repo, BLIFs in Git LFS).
+   copies elsewhere. Goldens live in `~/odin3-ws/golden`: the full set on disk; its repo
+   (`odin3-golden`) commits every `.prov`/`.log` but only the BLIF sample `tools/golden-sample`
+   picks (decision #30). The full BLIF set is an archive hosted off GitHub.
 10. **Peter reviews** every IR/invariant change and every mapping algorithm (spec §12). No PR
     merges red.
 11. **Autonomy by default** (decision #17): act on your recommendation and log it in the current

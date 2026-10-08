@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# golden-sample: pick the representative golden BLIFs odin3-golden commits. See golden_sample.py.
+# Exit codes: 0 success, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/golden_sample.py" "$@"
