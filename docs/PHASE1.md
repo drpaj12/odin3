@@ -22,7 +22,7 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 
 ## Checklist
 
-- [ ] 1A spec approved (2026-10-08, PR #11), implemented, merged
+- [x] 1A spec approved (2026-10-08, PR #11), implemented, merged (benchmark, release build: 2M interns 0.36–0.45 s, 2M `u64map` puts 0.35–0.39 s, 2M `pagevec` pushes 0.01 s, max RSS 176 MiB)
 - [ ] 1B `docs/IR.md` approved by Peter; IR implemented; 2M-node benchmark recorded
 - [ ] 1G tech-library format approved; reader + generic gate library + VTR golden library
 - [ ] 1C BLIF round trip identical (`netlist-compare`) on every `ok` golden
