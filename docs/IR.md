@@ -164,7 +164,8 @@ spec §5.2. An entry declares:
 **IR-9 Granularity tags:** `word`, `bit`, `hard`, `blackbox`, `module`, `port` (D1's four plus
 the two structural tags; D1 amended). Views (spec §5.4): the *RTLIL view* allows `word`,
 `hard`, `blackbox`, `module`, `port`; the *netlist view* allows `bit`, `hard`, `blackbox`,
-`module`, `port`. Mixed is legal only inside `lower`/`raise`.
+`module`, `port`. Mixed is legal only inside `lower`/`raise`. Constant cells (`$_CONST*_`, flag `anyview`) are legal in every view: word-level
+front ends and bit-level netlists both use them.
 
 **IR-10 Parameters vs attributes.** Parameters are typed values a cell type declares, stored per
 node in declaration order. Attributes are free-form `name → value` on any object (Verilog
