@@ -1,0 +1,26 @@
+.model dff
+.inputs dff^clk dff^rst dff^d
+.outputs dff^q
+
+.names gnd
+.names unconn
+.names vcc
+1
+
+.names dff^bNOT~1^lNOT~4 dff^nMUX~0^lNOT~2 dff^d gnd dff^nMUX~0^MUX_2~3
+1-1- 1
+-1-1 1
+
+.latch dff^nMUX~0^MUX_2~3 dff^q_FF re dff^clk 3
+
+.names dff^rst dff^bNOT~1^lNOT~4
+0 1
+
+.names dff^bNOT~1^lNOT~4 dff^nMUX~0^lNOT~2
+0 1
+
+.names dff^q_FF dff^q
+1 1
+
+.end
+

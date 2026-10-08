@@ -45,6 +45,7 @@ add_library(odin3_core OBJECT
     src/util/str.c
     src/util/log.c
     src/frontends/blif/lexer.c
+    src/frontends/blif/reader.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -160,6 +161,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_blif_lexer)
+    odin3_add_unit_test(test_blif_reader)
+    target_compile_definitions(test_blif_reader PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
