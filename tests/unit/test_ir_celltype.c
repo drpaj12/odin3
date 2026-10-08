@@ -283,23 +283,18 @@ static void test_get_invalid_ids(void) {
     TEST_ASSERT_FALSE(odin3_celltype_find(design, UINT32_MAX, &out));
 }
 
-static void test_replace_local(void) {
+/* A module type's definition is owned by its module and bound without a copy (IR-7). */
+static void test_bind_local(void) {
     odin3_celltype_def def = {"mod_t2", ODIN3_GRAN_MODULE, 0, NULL, 0, NULL, 0, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
-    odin3_port_def ports[1] = {{"clk", ODIN3_DIR_IN, true, 1, NULL, NULL}};
-    def.ports = ports;
-    def.n_ports = 1;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_replace_local(design, id, &def));
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_get(design, id)->n_ports);
-    TEST_ASSERT_EQUAL_STRING("clk", odin3_celltype_get(design, id)->ports[0].name);
+    static const odin3_port_def ports[1] = {{"clk", ODIN3_DIR_IN, true, 1, NULL, NULL}};
+    static const odin3_celltype_def bound = {
+        "mod_t2", ODIN3_GRAN_MODULE, 0, ports, 1, NULL, 0, NULL, NULL};
+    odin3_celltype_bind_local(design, id, &bound);
+    TEST_ASSERT_EQUAL_PTR(&bound, odin3_celltype_get(design, id));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_port_width(design, id, NULL, 0));
     TEST_ASSERT_EQUAL_UINT32(id.v, find_type(design, "mod_t2").v);
-    def.name = "renamed_t2";
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_replace_local(design, id, &def));
-    def.name = "$port_in";
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_replace_local(
-                                                     design, find_type(design, "$port_in"), &def));
-    TEST_ASSERT_EQUAL_STRING("mod_t2", odin3_celltype_get(design, id)->name);
 }
 
 static void test_design_intern(void) {
@@ -354,7 +349,7 @@ int main(void) {
     RUN_TEST(test_blackbox_parametric_never_matches);
     RUN_TEST(test_instances_counter);
     RUN_TEST(test_get_invalid_ids);
-    RUN_TEST(test_replace_local);
+    RUN_TEST(test_bind_local);
     RUN_TEST(test_design_intern);
     RUN_TEST(test_design_create_oom_sweep);
     RUN_TEST(test_add_local_oom_sweep);

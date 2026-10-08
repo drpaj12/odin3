@@ -16,6 +16,7 @@
 #include "util/log.h"
 #include "util/pagevec.h"
 #include "util/str.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
@@ -116,6 +117,11 @@ static const odin3_port_def k_quad_ports[] = {
 static const odin3_celltype_def k_quad = {
     "test_t4_quad", ODIN3_GRAN_WORD, 0, k_quad_ports, 4, k_quad_params, 1, NULL, NULL};
 
+/* A one-port WIDTH-parameter sink shaped like $port_out (which node_create refuses). */
+static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL}};
+static const odin3_celltype_def k_sink = {
+    "test_t4_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_quad_params, 1, NULL, NULL};
+
 /* --- helpers ------------------------------------------------------------------------------- */
 
 static odin3_node_id node_named(const char *type, uint32_t name, const odin3_value *params) {
@@ -173,6 +179,22 @@ static bool has_alias(odin3_net_id net, odin3_net_alias want) {
         }
     }
     return false;
+}
+
+/* The net's aliases are exactly want[0 .. count), in this order (insertion order, oldest first). */
+static void assert_aliases(odin3_net_id net, const odin3_net_alias *want, uint32_t count) {
+    uint32_t cursor = 0;
+    uint32_t seen = 0;
+    odin3_net_alias alias;
+    while (odin3_net_alias_next(module, net, &cursor, &alias)) {
+        TEST_ASSERT_TRUE(seen < count);
+        TEST_ASSERT_EQUAL_UINT32(want[seen].wb.wire.v, alias.wb.wire.v);
+        TEST_ASSERT_EQUAL_UINT32(want[seen].wb.bit, alias.wb.bit);
+        TEST_ASSERT_EQUAL_UINT32(want[seen].name, alias.name);
+        seen++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(count, seen);
+    TEST_ASSERT_FALSE(odin3_net_alias_next(module, net, &cursor, &alias)); /* stays ended */
 }
 
 static odin3_net_alias wb_alias(odin3_wire_id wire, uint32_t bit) {
@@ -239,7 +261,6 @@ static void test_add_port_creates_node_wire_and_type_port(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_net_sinks(module, odin3_wire_net(module, wire_y, 0)).count);
     /* IR-7: the module's cell type mirrors the ports */
     odin3_celltype_id type = odin3_module_celltype(module);
-    TEST_ASSERT_EQUAL_UINT32(odin3_module_type(module).v, type.v);
     const odin3_celltype_def *def = odin3_celltype_get(design, type);
     TEST_ASSERT_EQUAL_UINT32(2, def->n_ports);
     TEST_ASSERT_EQUAL_STRING("a", def->ports[0].name);
@@ -416,6 +437,10 @@ static void test_wire_over_existing_nets(void) {
     assert_primary(loose, wire_b, 2); /* had none: b[2] becomes primary, b[3] an alias */
     TEST_ASSERT_EQUAL_UINT32(1, odin3_net_alias_count(module, loose));
     TEST_ASSERT_TRUE(has_alias(loose, wb_alias(wire_b, 3)));
+    odin3_net_id twice[] = {loose, loose};
+    odin3_wire_id wire_c = wire_range("c", 1, 0, twice);
+    odin3_net_alias want[] = {wb_alias(wire_b, 3), wb_alias(wire_c, 0), wb_alias(wire_c, 1)};
+    assert_aliases(loose, want, 3);                    /* insertion order */
     odin3_wire_id anon = wire_range(NULL, 0, 0, NULL); /* unnamed wires are allowed */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_wire_name(module, anon));
 }
@@ -443,25 +468,43 @@ static void test_wire_create_rejects(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_module_find_wire(module, intern("x")).v);
 }
 
+/* A net with a primary already (bit 0 of a new wire named name). */
+static odin3_net_id net_with_primary(const char *name) {
+    return odin3_wire_net(module, wire_range(name, 0, 0, NULL), 0);
+}
+
 static void test_wire_add_alias_rebinds(void) {
     odin3_wire_id wire = wire_range("w", 0, 0, NULL);
+    odin3_wirebit bit0 = {wire, 0};
     odin3_net_id own = odin3_wire_net(module, wire, 0);
-    odin3_net_id other = net_named("m");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){wire, 0}, other));
-    TEST_ASSERT_EQUAL_UINT32(other.v, odin3_wire_net(module, wire, 0).v);
-    TEST_ASSERT_TRUE(has_alias(other, wb_alias(wire, 0)));
-    assert_primary(own, (odin3_wire_id){0}, 0); /* lost its primary */
+    /* to a net without a primary: the bit becomes its primary (as in wire_create) */
+    odin3_net_id bare = net_named("m");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, bit0, bare));
+    TEST_ASSERT_EQUAL_UINT32(bare.v, odin3_wire_net(module, wire, 0).v);
+    assert_primary(bare, wire, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_alias_count(module, bare));
+    assert_primary(own, (odin3_wire_id){0}, 0);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, own));
-    /* again: a no-op */
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){wire, 0}, other));
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_net_alias_count(module, other));
-    /* an alias moves from one net to another */
-    odin3_net_id third = net_named("t");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){wire, 0}, third));
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_alias_count(module, other));
-    TEST_ASSERT_TRUE(has_alias(third, wb_alias(wire, 0)));
-    TEST_ASSERT_EQUAL_UINT32(third.v, odin3_wire_net(module, wire, 0).v);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, other));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, bit0, bare)); /* no-op */
+    assert_primary(bare, wire, 0);
+    /* primary -> alias of a net that has a primary */
+    odin3_net_id held = net_with_primary("h");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, bit0, held));
+    odin3_net_alias want[] = {wb_alias(wire, 0)};
+    assert_aliases(held, want, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, bare));
+    /* alias -> alias: the record moves */
+    odin3_net_id next = net_with_primary("n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, bit0, next));
+    assert_aliases(held, NULL, 0);
+    assert_aliases(next, want, 1);
+    /* alias -> primary of a net without one */
+    odin3_net_id last = net_named("l");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, bit0, last));
+    assert_aliases(next, NULL, 0);
+    assert_primary(last, wire, 0);
+    TEST_ASSERT_EQUAL_UINT32(last.v, odin3_wire_net(module, wire, 0).v);
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
 }
 
 static void test_wire_add_alias_rejects(void) {
@@ -559,13 +602,44 @@ static void test_merge_chains_names(void) {
     TEST_ASSERT_EQUAL_UINT32(n2.v, odin3_module_find_net(module, intern("c")).v);
     assert_wire_holds(wire, n2);
     assert_primary(n2, wire, 2);
-    /* a, (w,0), b, (w,1) */
-    odin3_net_alias want[] = {name_alias(intern("a")), wb_alias(wire, 0), name_alias(intern("b")),
-                              wb_alias(wire, 1)};
-    TEST_ASSERT_EQUAL_UINT32(4, odin3_net_alias_count(module, n2));
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_TRUE(has_alias(n2, want[i]));
+    /* n1 got [a, (w,0)]; n2 gets n1's name and primary, then n1's aliases */
+    odin3_net_alias want[] = {name_alias(intern("b")), wb_alias(wire, 1), name_alias(intern("a")),
+                              wb_alias(wire, 0)};
+    assert_aliases(n2, want, 4);
+}
+
+/* keep's own aliases first, then drop's name, drop's primary, drop's aliases oldest first. */
+static void test_merge_alias_order(void) {
+    odin3_wire_id wire_k = wire_range("k", 0, 0, NULL);
+    odin3_net_id keep = odin3_wire_net(module, wire_k, 0);
+    odin3_net_id keep_nets[] = {keep};
+    odin3_wire_id wire_x = wire_range("x", 0, 0, keep_nets);
+    odin3_wire_id wire_y = wire_range("y", 0, 0, NULL);
+    odin3_net_id drop = odin3_wire_net(module, wire_y, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(module, drop, intern("d")));
+    odin3_net_id drop_nets[] = {drop, drop};
+    odin3_wire_id wire_z = wire_range("z", 1, 0, drop_nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, (odin3_net_pair){keep, drop}));
+    odin3_net_alias want[] = {wb_alias(wire_x, 0), name_alias(intern("d")), wb_alias(wire_y, 0),
+                              wb_alias(wire_z, 0), wb_alias(wire_z, 1)};
+    assert_aliases(keep, want, 5);
+    assert_primary(keep, wire_k, 0);
+}
+
+/* Many merges into one net: each appends in O(1); the names stay in merge order. */
+static void test_merge_many_into_one(void) {
+    enum { MERGES = 200 };
+    odin3_net_id keep = net_named("keep");
+    static odin3_net_alias want[MERGES];
+    for (uint32_t i = 0; i < MERGES; i++) {
+        uint32_t name = numbered_name("m", i);
+        odin3_net_id drop = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, name, (odin3_prov_id){0}, &drop));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, (odin3_net_pair){keep, drop}));
+        want[i] = name_alias(name);
     }
+    assert_aliases(keep, want, MERGES);
+    TEST_ASSERT_EQUAL_UINT32(keep.v, odin3_module_find_net(module, numbered_name("m", 0)).v);
 }
 
 /* IR-14: alias names count for uniqueness; renaming keep leaves its aliases in the map. */
@@ -593,7 +667,12 @@ static void test_merge_unnamed_moves_pins(void) {
     connect(pin_of(out, 0), drop);
     connect(pin_of(out, 1), drop);
     connect(pin_of(out, 2), keep);
+    const odin3_net_rec *drop_rec = odin3_net_rec_cat(module, drop);
+    const void *block = drop_rec->pins;
+    uint8_t cls = drop_rec->cls;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, (odin3_net_pair){keep, drop}));
+    TEST_ASSERT_NULL(drop_rec->pins); /* drop's block is back on the pool's free list */
+    TEST_ASSERT_EQUAL_PTR(block, module->pinpool.free_heads[cls]);
     TEST_ASSERT_EQUAL_UINT32(3, odin3_net_pins(module, keep).count);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_net_alias_count(module, keep));
     assert_partition(keep);
@@ -754,8 +833,8 @@ static void test_replace_rejects(void) {
     odin3_node_id or_node = node_of("$_OR_");
     odin3_node_id not_node = node_of("$_NOT_");
     odin3_node_id port = add_port("p", ODIN3_DIR_IN, 1);
-    odin3_value width = odin3_value_int(1);
-    odin3_node_id loose_port = node_named("$port_in", 0, &width);
+    odin3_node_id other_port = add_port("q", ODIN3_DIR_IN, 1);
+    odin3_node_id driver = node_of("$_CONST0_"); /* one OUT pin, like a $port_in */
     odin3_net_id net = net_named("n");
     connect(pin_of(or_node, 0), net);
     odin3_node_pair bad[] = {
@@ -763,7 +842,9 @@ static void test_replace_rejects(void) {
         {and_node, or_node},  /* new node has a connected pin */
         {and_node, and_node}, /* same node */
         {and_node, {99}},     /* not a node */
-        {port, loose_port},   /* port nodes */
+        {port, other_port},   /* port nodes */
+        {port, driver},       /* port by non-port, same pins */
+        {driver, port},       /* non-port by port */
     };
     size_t count = sizeof bad / sizeof bad[0];
     for (size_t i = 0; i < count; i++) {
@@ -773,6 +854,26 @@ static void test_replace_rejects(void) {
     TEST_ASSERT_TRUE(odin3_node_live(module, and_node));
     TEST_ASSERT_TRUE(odin3_node_live(module, port));
     TEST_ASSERT_EQUAL_UINT32(net.v, odin3_pin_net(module, pin_of(or_node, 0)).v);
+}
+
+/* Port nodes exist only through module_add_port and are never deleted (IR-7). */
+static void test_port_nodes_only_via_add_port(void) {
+    odin3_node_id port = add_port("p", ODIN3_DIR_OUT, 1);
+    odin3_value one = odin3_value_int(1);
+    odin3_node_spec in_spec = {type_id("$port_in"), 0, {0}, &one, 1};
+    odin3_node_spec out_spec = {type_id("$port_out"), 0, {0}, &one, 1};
+    odin3_net_id nets[] = {net_named("n")};
+    odin3_netvec ports[] = {{nets, 1}};
+    uint32_t node_end = odin3_module_node_end(module);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_create(module, &in_spec, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_node_create_connected(module, &out_spec, ports, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_delete(module, port));
+    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
+    TEST_ASSERT_EQUAL_UINT32(node_end, odin3_module_node_end(module));
+    TEST_ASSERT_TRUE(odin3_node_live(module, port));
+    TEST_ASSERT_EQUAL_UINT32(port.v, odin3_module_port(module, 0).v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_pins(module, nets[0]).count);
 }
 
 /* --- attributes ---------------------------------------------------------------------------- */
@@ -1063,7 +1164,7 @@ static odin3_node_spec prepare_connected_oom(quad_nets *qn) {
     fresh_design();
     quad_nets_init(qn);
     odin3_value width = odin3_value_int((int64_t)2 * QUAD_W);
-    odin3_node_id spare = node_named("$port_out", 0, &width);
+    odin3_node_id spare = node_named("test_t4_sink", 0, &width);
     for (uint32_t k = 0; k < QUAD_W; k++) { /* A and B nets: one pin, room for one more */
         connect(pin_of(spare, k), qn->a[k]);
         connect(pin_of(spare, QUAD_W + k), qn->b[k]);
@@ -1072,7 +1173,7 @@ static odin3_node_spec prepare_connected_oom(quad_nets *qn) {
     uint32_t page = UINT32_C(1) << ODIN3_MODULE_PAGE_SHIFT;
     uint32_t singles = page - odin3_module_node_end(module) - 1;
     width = odin3_value_int(2 * page - odin3_module_pin_end(module) - singles);
-    (void)node_named("$port_out", 0, &width);
+    (void)node_named("test_t4_sink", 0, &width);
     for (uint32_t i = 1; i <= singles; i++) {
         (void)node_named("$_CONST0_", i <= NAME_MAP_FULL ? numbered_name("g", i) : 0, NULL);
     }
@@ -1131,6 +1232,24 @@ static odin3_net_id prepare_attr_oom(void) {
     return net;
 }
 
+/* The attribute table's observable state: map size, record count, node 1's attribute "a". */
+typedef struct attr_snapshot {
+    size_t heads;
+    size_t records;
+    const odin3_value *node_attr;
+    const odin3_value *net_attr;
+} attr_snapshot;
+
+static attr_snapshot take_attr_snapshot(odin3_objref net_ref, uint32_t key) {
+    attr_snapshot snap;
+    memset(&snap, 0, sizeof snap);
+    snap.heads = odin3_u64map_count(module->attr_heads);
+    snap.records = module->attrs.len;
+    snap.node_attr = odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_NODE, 1}, intern("a"));
+    snap.net_attr = odin3_attr_get(module, net_ref, key);
+    return snap;
+}
+
 static void test_attr_set_oom_sweep(void) {
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     uint32_t failures = 0;
@@ -1139,6 +1258,7 @@ static void test_attr_set_oom_sweep(void) {
         ref.id = prepare_attr_oom().v;
         uint32_t key = intern("oom_key");
         odin3_value val = odin3_value_int(7);
+        attr_snapshot before = take_attr_snapshot(ref, key);
         odin3_util_set_alloc_fail_after(fail_at);
         st = odin3_attr_set(module, ref, key, &val);
         odin3_util_set_alloc_fail_after(-1);
@@ -1147,7 +1267,9 @@ static void test_attr_set_oom_sweep(void) {
         }
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
         failures++;
-        TEST_ASSERT_NULL(odin3_attr_get(module, ref, key));
+        attr_snapshot now = take_attr_snapshot(ref, key);
+        TEST_ASSERT_EQUAL_MEMORY(&before, &now, sizeof before);
+        TEST_ASSERT_NULL(now.net_attr);
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
     TEST_ASSERT_EQUAL_UINT32(ATTR_ALLOCS, failures);
@@ -1162,7 +1284,7 @@ static void test_wire_add_alias_oom_sweep(void) {
     for (long fail_at = 0; fail_at < OOM_LIMIT; fail_at++) {
         fresh_design();
         wire = wire_range("w", 0, 0, NULL);
-        net = net_named("n");
+        net = net_with_primary("v"); /* so wb becomes an alias: a new record */
         snapshot before = take_snapshot(0);
         odin3_util_set_alloc_fail_after(fail_at);
         st = odin3_wire_add_alias(module, (odin3_wirebit){wire, 0}, net); /* first alias record */
@@ -1182,7 +1304,8 @@ static void test_wire_add_alias_oom_sweep(void) {
 }
 
 int main(void) {
-    if (odin3_celltype_register_global(&k_quad) != ODIN3_OK) {
+    if (odin3_celltype_register_global(&k_quad) != ODIN3_OK ||
+        odin3_celltype_register_global(&k_sink) != ODIN3_OK) {
         return EXIT_FAILURE;
     }
     UNITY_BEGIN();
@@ -1202,6 +1325,8 @@ int main(void) {
     RUN_TEST(test_net_delete_refuses_wire_membership);
     RUN_TEST(test_merge_port_out_drop);
     RUN_TEST(test_merge_chains_names);
+    RUN_TEST(test_merge_alias_order);
+    RUN_TEST(test_merge_many_into_one);
     RUN_TEST(test_alias_names_stay_unique);
     RUN_TEST(test_merge_unnamed_moves_pins);
     RUN_TEST(test_merge_rejects);
@@ -1210,6 +1335,7 @@ int main(void) {
     RUN_TEST(test_create_connected_rejects);
     RUN_TEST(test_replace_reattaches_by_port_and_bit);
     RUN_TEST(test_replace_rejects);
+    RUN_TEST(test_port_nodes_only_via_add_port);
     RUN_TEST(test_attr_set_get_overwrite);
     RUN_TEST(test_attr_payload_copied);
     RUN_TEST(test_attr_rejects);

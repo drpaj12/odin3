@@ -44,7 +44,6 @@ odin3_design *odin3_module_design(const odin3_module *module);
 odin3_module_id odin3_module_id_of(const odin3_module *module);
 uint32_t odin3_module_name(const odin3_module *module);
 odin3_prov_id odin3_module_prov(const odin3_module *module);
-odin3_celltype_id odin3_module_type(const odin3_module *module); /* instantiates the module */
 
 /* One past the last ID of each store (IDs start at 1; iterate in ID order, skip dead; IR-16). */
 uint32_t odin3_module_node_end(const odin3_module *module);
@@ -80,13 +79,16 @@ typedef struct odin3_pinslice {
  * Creates a node and its pins: contiguous IDs in port order, then bit order (LSB first), all
  * unconnected. The pin count follows from the type's port widths for the parameters and never
  * changes. INVALID_ARG also for an unknown type, mismatched parameters, a width parameter that is
- * not an int in [0, UINT32_MAX], or parameters the type's verify hook rejects. Counts as an
+ * not an int in [0, UINT32_MAX], or parameters the type's verify hook rejects, and for a port
+ * cell type (granularity PORT: only odin3_module_add_port makes port nodes). Counts as an
  * instance of the type (odin3_celltype_instances).
  */
 odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec,
                                odin3_node_id *out);
 
-/* Disconnects every pin, removes the node's name from the name map and marks node and pins dead.
+/*
+ * Disconnects every pin, removes the node's name from the name map and marks node and pins dead.
+ * INVALID_ARG for a port node (module ports are never removed in Phase 1; IR-7).
  */
 odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node);
 
@@ -201,7 +203,7 @@ uint32_t odin3_module_port_count(const odin3_module *module);
 odin3_node_id odin3_module_port(const odin3_module *module, uint32_t index);
 odin3_wire_id odin3_module_port_wire(const odin3_module *module, uint32_t index);
 
-/* The module's cell type (IR-7): always in sync with its ports. Same as odin3_module_type. */
+/* The module's cell type (IR-7): instantiates the module; always in sync with its ports. */
 odin3_celltype_id odin3_module_celltype(const odin3_module *module);
 
 /* --- creating connected nodes, replacing nodes --------------------------------------------- */
@@ -215,8 +217,9 @@ typedef struct odin3_netvec {
 /*
  * odin3_node_create plus connections in one call (IR-15): ports holds one netvec per port of the
  * type, in port order, whose count must equal that port's width for the parameters; every entry
- * is a live net or none. INVALID_ARG (nothing created) for a count mismatch, a dead or
- * out-of-range net, or ports NULL on a type with ports; NO_MEMORY leaves the IR unchanged too
+ * is a live net or none. INVALID_ARG (nothing created) as for odin3_node_create, for a count
+ * mismatch, a NULL nets array, a dead or out-of-range net, or ports NULL on a type with ports;
+ * NO_MEMORY leaves the IR unchanged too
  * (connections made before the failure are undone).
  */
 odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_spec *spec,
@@ -289,9 +292,11 @@ typedef struct odin3_wirebit {
 odin3_wirebit odin3_net_primary(const odin3_module *module, odin3_net_id net);
 
 /*
- * Makes wire bit wb an alias of net: the wire's vector entry at wb.bit becomes net, and the net
- * that held it loses that membership (its primary is cleared, or the alias leaves it). A no-op
- * when wb already holds net. INVALID_ARG for a bit of a port wire (it follows the port node).
+ * Rebinds wire bit wb to net: the wire's vector entry at wb.bit becomes net, and the net that held
+ * it loses that membership (its primary is cleared, or the alias leaves it). As in
+ * odin3_wire_create, wb becomes net's primary when net has none, else an alias (appended). A
+ * no-op when wb already holds net. INVALID_ARG for a bit of a port wire (it follows the port
+ * node), or when the old net does not record the membership (a check rule 8 violation).
  */
 odin3_status odin3_wire_add_alias(odin3_module *module, odin3_wirebit wb, odin3_net_id net);
 
@@ -302,7 +307,7 @@ typedef struct odin3_net_alias {
 } odin3_net_alias;
 
 /*
- * Iterates a net's aliases, most recently added first: start with *cursor = 0 and call until
+ * Iterates a net's aliases in insertion order, oldest first: start with *cursor = 0 and call until
  * false. The net's own name and primary are not aliases. Do not mutate the module in between.
  */
 bool odin3_net_alias_next(const odin3_module *module, odin3_net_id net, uint32_t *cursor,
@@ -317,10 +322,12 @@ typedef struct odin3_net_pair {
 } odin3_net_pair;
 
 /*
- * Merges drop into keep (IR-15): every pin of drop moves to keep (partition kept); every wire
- * vector entry that held drop now holds keep; drop's name, primary (wire, bit) and aliases become
- * aliases of keep, and the name map sends each of those names to keep; drop dies (its name field
- * stays for history, its primary is cleared). Attributes of drop stay with the dead net.
+ * Merges drop into keep (IR-15): every pin of drop moves to keep (partition kept) and drop's pin
+ * block returns to the pool; every wire vector entry that held drop now holds keep; drop's name,
+ * primary (wire, bit) and aliases become aliases of keep, appended after keep's own aliases in
+ * this order: drop's name, drop's primary, drop's aliases oldest first; the name map sends each of
+ * those names to keep. drop dies (its name field stays for history, its primary is cleared).
+ * Attributes of drop stay with the dead net. Costs O(pins of drop + aliases of drop).
  * INVALID_ARG unless keep and drop are distinct live nets.
  */
 odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);

@@ -37,40 +37,68 @@ odin3_status odin3_alias_reserve(odin3_module *module, uint32_t count) {
     return st;
 }
 
-/* Prepends a reserved alias record to net's chain. */
+/*
+ * Chains are circular and in insertion order: net->alias_head is the newest record (the tail),
+ * whose next is the oldest, so appending is O(1).
+ */
+static void alias_link(odin3_module *module, odin3_net_rec *net, uint32_t idx) {
+    odin3_alias_rec *rec = alias_at(module, idx);
+    if (net->alias_head == 0) {
+        rec->next = idx;
+    } else {
+        odin3_alias_rec *tail = alias_at(module, net->alias_head);
+        rec->next = tail->next;
+        tail->next = idx;
+    }
+    net->alias_head = idx;
+}
+
+/* Appends a reserved alias record to net's chain. */
 static void alias_push(odin3_module *module, odin3_net_id net, odin3_net_alias alias) {
     uint32_t idx = (uint32_t)module->aliases.len;
     odin3_alias_rec *rec = odin3_vec_push(&module->aliases);
     assert(rec != NULL); /* reserved by the caller */
-    odin3_net_rec *nrec = odin3_net_rec_at(module, net);
     rec->net = net;
     rec->wire = alias.wb.wire;
     rec->bit = alias.wb.bit;
     rec->name = alias.name;
-    rec->next = nrec->alias_head;
-    nrec->alias_head = idx;
+    alias_link(module, odin3_net_rec_at(module, net), idx);
 }
 
-/* Removes the (wire, bit) alias from the net's chain and returns its record (it must be there). */
-static uint32_t alias_unlink(odin3_module *module, odin3_net_rec *net, odin3_wirebit wb) {
-    uint32_t prev = 0;
-    uint32_t idx = net->alias_head;
-    while (idx != 0) {
-        odin3_alias_rec *rec = alias_at(module, idx);
+/* The record before the (wire, bit) alias in net's chain; 0 when the net has no such alias. */
+static uint32_t alias_find_prev(odin3_module *module, const odin3_net_rec *net, odin3_wirebit wb) {
+    uint32_t tail = net->alias_head;
+    if (tail == 0) {
+        return 0;
+    }
+    uint32_t prev = tail;
+    do {
+        uint32_t idx = alias_at(module, prev)->next;
+        const odin3_alias_rec *rec = alias_at(module, idx);
         if (rec->wire.v == wb.wire.v && rec->bit == wb.bit) {
-            if (prev == 0) {
-                net->alias_head = rec->next;
-            } else {
-                alias_at(module, prev)->next = rec->next;
-            }
-            rec->next = 0;
-            return idx;
+            return prev;
         }
         prev = idx;
-        idx = rec->next;
-    }
-    assert(0 && "a wire entry without its membership (check rule 8)");
+    } while (prev != tail);
     return 0;
+}
+
+/* Removes the record after prev (a record of net's chain) and returns it, unlinked. */
+static uint32_t alias_unlink_after(odin3_module *module, odin3_net_rec *net, uint32_t prev) {
+    odin3_alias_rec *before = alias_at(module, prev);
+    uint32_t idx = before->next;
+    odin3_alias_rec *rec = alias_at(module, idx);
+    if (idx == prev) { /* the only record */
+        net->alias_head = 0;
+    } else {
+        before->next = rec->next;
+        if (net->alias_head == idx) {
+            net->alias_head = prev;
+        }
+    }
+    rec->next = 0;
+    rec->net = (odin3_net_id){0};
+    return idx;
 }
 
 /* Points what the alias names (a wire entry or a name-map entry) at net. */
@@ -84,20 +112,36 @@ static void alias_repoint(odin3_module *module, const odin3_alias_rec *alias, od
     (void)st;
 }
 
+/* Appends the circular chain whose tail is `tail` after keep's aliases. */
+static void alias_splice(odin3_module *module, odin3_net_rec *keep, uint32_t tail) {
+    if (keep->alias_head != 0) {
+        odin3_alias_rec *keep_tail = alias_at(module, keep->alias_head);
+        odin3_alias_rec *drop_tail = alias_at(module, tail);
+        uint32_t keep_first = keep_tail->next;
+        keep_tail->next = drop_tail->next;
+        drop_tail->next = keep_first;
+    }
+    keep->alias_head = tail;
+}
+
 void odin3_alias_absorb(odin3_module *module, odin3_net_id keep, odin3_net_id drop) {
     odin3_net_rec *krec = odin3_net_rec_at(module, keep);
     odin3_net_rec *drec = odin3_net_rec_at(module, drop);
-    uint32_t tail = 0;
-    for (uint32_t idx = drec->alias_head; idx != 0; idx = alias_at(module, idx)->next) {
-        odin3_alias_rec *rec = alias_at(module, idx);
-        rec->net = keep;
-        alias_repoint(module, rec, keep);
-        tail = idx;
+    uint32_t tail = drec->alias_head;
+    drec->alias_head = 0;
+    if (tail != 0) {
+        uint32_t idx = tail;
+        do {
+            idx = alias_at(module, idx)->next;
+            odin3_alias_rec *rec = alias_at(module, idx);
+            rec->net = keep;
+            alias_repoint(module, rec, keep);
+        } while (idx != tail);
     }
-    if (tail != 0) { /* drop's chain goes in front of keep's */
-        alias_at(module, tail)->next = krec->alias_head;
-        krec->alias_head = drec->alias_head;
-        drec->alias_head = 0;
+    if (drec->name != 0) { /* order: drop's name, drop's primary, drop's aliases */
+        odin3_alias_rec name = {keep, {0}, 0, drec->name, 0};
+        alias_repoint(module, &name, keep);
+        alias_push(module, keep, (odin3_net_alias){{{0}, 0}, drec->name});
     }
     if (odin3_wire_valid(drec->wire)) {
         odin3_alias_rec primary = {keep, drec->wire, drec->wire_bit, 0, 0};
@@ -106,10 +150,8 @@ void odin3_alias_absorb(odin3_module *module, odin3_net_id keep, odin3_net_id dr
         drec->wire = (odin3_wire_id){0};
         drec->wire_bit = 0;
     }
-    if (drec->name != 0) {
-        odin3_alias_rec name = {keep, {0}, 0, drec->name, 0};
-        alias_repoint(module, &name, keep);
-        alias_push(module, keep, (odin3_net_alias){{{0}, 0}, drec->name});
+    if (tail != 0) {
+        alias_splice(module, krec, tail);
     }
 }
 
@@ -248,6 +290,16 @@ static odin3_wire_rec *alias_target(odin3_module *module, odin3_wirebit wb) {
     return wire;
 }
 
+/* Takes membership wb from net old: its primary, or the alias record after prev (returned). */
+static uint32_t membership_take(odin3_module *module, odin3_net_rec *old, uint32_t prev) {
+    if (prev == 0) {
+        old->wire = (odin3_wire_id){0};
+        old->wire_bit = 0;
+        return 0;
+    }
+    return alias_unlink_after(module, old, prev);
+}
+
 odin3_status odin3_wire_add_alias(odin3_module *module, odin3_wirebit wb, odin3_net_id net) {
     odin3_wire_rec *wire = alias_target(module, wb);
     odin3_net_rec *nrec = wire != NULL ? odin3_net_live_rec(module, net, "wire_add_alias") : NULL;
@@ -259,20 +311,31 @@ odin3_status odin3_wire_add_alias(odin3_module *module, odin3_wirebit wb, odin3_
         return ODIN3_OK;
     }
     odin3_net_rec *orec = odin3_net_rec_at(module, old);
-    if (orec->wire.v == wb.wire.v && orec->wire_bit == wb.bit) { /* old's primary moves */
+    bool old_primary = orec->wire.v == wb.wire.v && orec->wire_bit == wb.bit;
+    uint32_t prev = old_primary ? 0 : alias_find_prev(module, orec, wb);
+    if (!old_primary && prev == 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "wire_add_alias: net %u holds wire %u bit %u without the "
+                  "membership (check rule 8)",
+                  old.v, wb.wire.v, wb.bit);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    bool to_primary = !odin3_wire_valid(nrec->wire); /* same rule as wire_create */
+    if (old_primary && !to_primary) {
         odin3_status st = odin3_alias_reserve(module, 1);
         if (st != ODIN3_OK) {
             return st;
         }
-        orec->wire = (odin3_wire_id){0};
-        orec->wire_bit = 0;
+    }
+    uint32_t idx = membership_take(module, orec, prev); /* an alias record, or 0 */
+    if (to_primary) {
+        nrec->wire = wb.wire; /* a taken record stays unused until compact */
+        nrec->wire_bit = wb.bit;
+    } else if (idx != 0) {
+        alias_at(module, idx)->net = net;
+        alias_link(module, nrec, idx);
+    } else {
         alias_push(module, net, (odin3_net_alias){wb, 0});
-    } else { /* old's alias record moves to net */
-        uint32_t idx = alias_unlink(module, orec, wb);
-        odin3_alias_rec *rec = alias_at(module, idx);
-        rec->net = net;
-        rec->next = nrec->alias_head;
-        nrec->alias_head = idx;
     }
     wire->nets[wb.bit] = net;
     return ODIN3_OK;
@@ -286,18 +349,19 @@ odin3_wirebit odin3_net_primary(const odin3_module *module, odin3_net_id net) {
 bool odin3_net_alias_next(const odin3_module *module, odin3_net_id net, uint32_t *cursor,
                           odin3_net_alias *alias) {
     const odin3_net_rec *rec = odin3_net_rec_cat(module, net);
-    if (rec == NULL || *cursor == ALIAS_END) {
-        return false;
-    }
-    uint32_t idx = *cursor == 0 ? rec->alias_head : *cursor;
-    if (idx == 0) {
+    if (rec == NULL || rec->alias_head == 0 || *cursor == ALIAS_END) {
         *cursor = ALIAS_END;
         return false;
+    }
+    uint32_t tail = rec->alias_head;
+    uint32_t idx = *cursor;
+    if (idx == 0) { /* the oldest record follows the tail */
+        idx = ((const odin3_alias_rec *)odin3_vec_cat(&module->aliases, tail))->next;
     }
     const odin3_alias_rec *arec = odin3_vec_cat(&module->aliases, idx);
     alias->wb = (odin3_wirebit){arec->wire, arec->bit};
     alias->name = arec->name;
-    *cursor = arec->next != 0 ? arec->next : ALIAS_END;
+    *cursor = idx == tail ? ALIAS_END : arec->next;
     return true;
 }
 

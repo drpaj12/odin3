@@ -168,8 +168,27 @@ static void node_unmake(odin3_module *module, odin3_node_id node) {
     odin3_pagevec_truncate(module->nodes, node.v);
 }
 
+/* True (and logged) when the spec names a port cell type: only module_add_port makes those. */
+static bool port_type(const odin3_module *module, const odin3_node_spec *spec, const char *what) {
+    const odin3_celltype_def *def =
+        spec != NULL ? odin3_celltype_get(module->design, spec->type) : NULL;
+    if (def != NULL && def->gran == ODIN3_GRAN_PORT) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: '%s' nodes are made by module_add_port", what, def->name);
+        return true;
+    }
+    return false;
+}
+
 odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec,
                                odin3_node_id *out) {
+    if (port_type(module, spec, "node_create")) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_node_create_any(module, spec, out);
+}
+
+odin3_status odin3_node_create_any(odin3_module *module, const odin3_node_spec *spec,
+                                   odin3_node_id *out) {
     node_plan plan = {0};
     odin3_status st = plan_node(module, spec, &plan);
     if (st == ODIN3_OK) {
@@ -189,9 +208,14 @@ odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec
 
 static bool netvec_ok(const odin3_module *module, const odin3_netvec *vec, uint32_t width,
                       const char *port) {
-    if (vec->count != width || (width > 0 && vec->nets == NULL)) {
+    if (vec->count != width) {
         odin3_log(ODIN3_LOG_ERROR, "node_create_connected: port %s has width %u, got %u nets", port,
-                  width, vec->nets != NULL ? vec->count : 0);
+                  width, vec->count);
+        return false;
+    }
+    if (width > 0 && vec->nets == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "node_create_connected: port %s: count %u but nets is NULL",
+                  port, width);
         return false;
     }
     for (uint32_t k = 0; k < width; k++) {
@@ -245,6 +269,9 @@ static odin3_status connect_ports(odin3_module *module, odin3_node_id node,
 
 odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_spec *spec,
                                          const odin3_netvec *ports, odin3_node_id *out) {
+    if (port_type(module, spec, "node_create_connected")) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     node_plan plan = {0};
     odin3_status st = plan_node(module, spec, &plan);
     if (st == ODIN3_OK && !ports_ok(module, &plan, ports)) {
@@ -325,6 +352,11 @@ odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
 odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node) {
     odin3_node_rec *rec = odin3_node_live_rec(module, node, "node_delete");
     if (rec == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_celltype_get(module->design, rec->type)->gran == ODIN3_GRAN_PORT) {
+        odin3_log(ODIN3_LOG_ERROR, "node_delete: node %u is a module port (ports stay, IR-7)",
+                  node.v);
         return ODIN3_ERR_INVALID_ARG;
     }
     for (uint32_t i = 0; i < rec->pin_count; i++) {

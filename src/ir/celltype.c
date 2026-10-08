@@ -397,29 +397,6 @@ odin3_status odin3_celltype_add_local(odin3_design *design, const odin3_celltype
     return add_copy(design, def, out);
 }
 
-odin3_status odin3_celltype_replace_local(odin3_design *design, odin3_celltype_id id,
-                                          const odin3_celltype_def *def) {
-    odin3_celltype_entry *entry = entry_mut(design, id);
-    if (entry == NULL || !entry->local) {
-        odin3_log(ODIN3_LOG_ERROR, "replace_local: %u is not a local cell type", id.v);
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if (!def_check(def, "replace_local")) {
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if (strcmp(def->name, entry->def->name) != 0) {
-        odin3_log(ODIN3_LOG_ERROR, "replace_local: cannot rename '%s' to '%s'", entry->def->name,
-                  def->name);
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    const odin3_celltype_def *copy = copy_def(design->arena, def);
-    if (copy == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    entry->def = copy;
-    return ODIN3_OK;
-}
-
 void odin3_celltype_bind_local(odin3_design *design, odin3_celltype_id id,
                                const odin3_celltype_def *def) {
     odin3_celltype_entry *entry = entry_mut(design, id);

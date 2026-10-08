@@ -83,7 +83,7 @@ typedef struct odin3_net_rec {
     uint32_t driver_count; /* pins[0 .. driver_count) drive, the rest are sinks */
     odin3_wire_id wire;    /* primary (wire, bit); none when it has none */
     uint32_t wire_bit;
-    uint32_t alias_head; /* first record of the net's aliases in module->aliases; 0: none */
+    uint32_t alias_head; /* newest alias record (tail of a circular chain); 0: none */
     uint8_t cls;
     bool dead;
 } odin3_net_rec;
@@ -106,7 +106,7 @@ typedef struct odin3_alias_rec {
     odin3_wire_id wire;
     uint32_t bit;
     uint32_t name;
-    uint32_t next; /* next alias of the same net; 0 ends the chain */
+    uint32_t next; /* next (older-to-newer) alias of the same net; the tail's next is the head */
 } odin3_alias_rec;
 
 /* A module port in declaration order: its node and its wire. */
@@ -185,6 +185,10 @@ bool odin3_names_available(const odin3_module *module, const odin3_name_change *
  */
 odin3_status odin3_names_change(const odin3_module *module, const odin3_name_change *change);
 
+/* odin3_node_create without the port-type refusal (module_add_port makes port nodes). */
+odin3_status odin3_node_create_any(odin3_module *module, const odin3_node_spec *spec,
+                                   odin3_node_id *out);
+
 /* Removes a pin from its net's array (swap-remove within the partition); never fails. */
 void odin3_net_detach(odin3_module *module, odin3_pin_rec *pin);
 
@@ -241,15 +245,6 @@ void odin3_celltype_table_free(odin3_design *design);
 /* Instance counting (node creation and deletion). Require a valid ID; dec requires a count > 0. */
 void odin3_celltype_instances_inc(odin3_design *design, odin3_celltype_id id);
 void odin3_celltype_instances_dec(odin3_design *design, odin3_celltype_id id);
-
-/*
- * Replaces the definition of local type id with a deep copy of def (module ports, IR-7). def must
- * keep the same name. ODIN3_ERR_INVALID_ARG (logged) when id is not a local type, def is invalid or
- * renamed; ODIN3_ERR_NO_MEMORY on out of memory; the old definition stays on failure. The policy
- * "refuse once instantiated" belongs to the caller (odin3_celltype_instances).
- */
-odin3_status odin3_celltype_replace_local(odin3_design *design, odin3_celltype_id id,
-                                          const odin3_celltype_def *def);
 
 /* Built-in definitions (src/ir/cells/), listed in cells/builtin.c. */
 extern const odin3_celltype_def *const odin3_builtin_celltypes[];

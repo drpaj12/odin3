@@ -103,6 +103,26 @@ static const odin3_port_def k_mixed_ports[] = {
 static const odin3_celltype_def k_mixed = {
     "test_t3_mixed", ODIN3_GRAN_WORD, 0, k_mixed_ports, 4, k_mixed_params, 1, NULL, NULL};
 
+/*
+ * One-port WIDTH-parameter types shaped like the port cells, which node_create refuses (only
+ * module_add_port makes those): a sink (IN pins), a driver (OUT) and a bus (INOUT).
+ */
+static odin3_status width_verify(const odin3_value *params) {
+    return params[0].i >= 1 ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
+}
+static const odin3_param_def k_width_params[] = {
+    {"WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
+};
+static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL}};
+static const odin3_port_def k_drive_ports[] = {{"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL}};
+static const odin3_port_def k_bus_ports[] = {{"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL}};
+static const odin3_celltype_def k_sink = {
+    "test_t3_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_width_params, 1, width_verify, NULL};
+static const odin3_celltype_def k_drive = {
+    "test_t3_drive", ODIN3_GRAN_WORD, 0, k_drive_ports, 1, k_width_params, 1, width_verify, NULL};
+static const odin3_celltype_def k_bus = {
+    "test_t3_bus", ODIN3_GRAN_WORD, 0, k_bus_ports, 1, k_width_params, 1, width_verify, NULL};
+
 static odin3_node_id node_named(const char *type, uint32_t name, const odin3_value *params) {
     odin3_node_spec spec = {type_id(type), name, {0}, params, params != NULL ? 1 : 0};
     odin3_node_id id = {0};
@@ -170,7 +190,7 @@ static bool net_has(odin3_net_id net, odin3_pin_id pin) {
 /* --- modules ------------------------------------------------------------------------------- */
 
 static void test_module_create_registers_type(void) {
-    odin3_celltype_id type = odin3_module_type(module);
+    odin3_celltype_id type = odin3_module_celltype(module);
     TEST_ASSERT_EQUAL_UINT32(type_id("top").v, type.v);
     const odin3_celltype_def *def = odin3_celltype_get(design, type);
     TEST_ASSERT_NOT_NULL(def);
@@ -206,7 +226,7 @@ static void test_module_instance_counts(void) {
     odin3_module_id sub = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_module_create(design, intern("sub"), (odin3_prov_id){0}, &sub));
-    odin3_celltype_id sub_type = odin3_module_type(odin3_module_get(design, sub));
+    odin3_celltype_id sub_type = odin3_module_celltype(odin3_module_get(design, sub));
     odin3_node_id inst = node_of("sub");
     TEST_ASSERT_EQUAL_UINT32(sub_type.v, odin3_node_type(module, inst).v);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_node_pins(module, inst).count);
@@ -299,10 +319,12 @@ static void test_node_create_rejects_bad_specs(void) {
     odin3_node_spec bad_count = {type_id("test_t3_mixed"), 0, {0}, &zero, 2};
     odin3_node_spec bad_kind = {type_id("test_t3_mixed"), 0, {0}, &wrong_kind, 1};
     odin3_node_spec bad_width = {type_id("test_t3_mixed"), 0, {0}, &negative, 1};
-    odin3_node_spec verify_fails = {type_id("$port_in"), 0, {0}, &zero, 1};
+    odin3_node_spec verify_fails = {type_id("test_t3_drive"), 0, {0}, &zero, 1};
     odin3_node_spec bad_name = {type_id("$_CONST0_"), UINT32_MAX, {0}, NULL, 0};
+    odin3_value one = odin3_value_int(1);
+    odin3_node_spec port_cell = {type_id("$port_in"), 0, {0}, &one, 1}; /* add_port only */
     const odin3_node_spec *specs[] = {&bad_type,  &no_type,      &bad_count, &bad_kind,
-                                      &bad_width, &verify_fails, &bad_name};
+                                      &bad_width, &verify_fails, &bad_name,  &port_cell};
     for (size_t i = 0; i < sizeof specs / sizeof specs[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_create(module, specs[i], &node));
     }
@@ -367,7 +389,7 @@ static void test_node_delete_counts_instances(void) {
 
 static void test_const_driver_and_sink(void) {
     odin3_node_id one = node_of("$_CONST1_");
-    odin3_node_id out = port_node("$port_out", 1);
+    odin3_node_id out = port_node("test_t3_sink", 1);
     odin3_net_id net = net_named("n1");
     odin3_pin_id driver = pin_of(one, 0);
     odin3_pin_id sink = pin_of(out, 0);
@@ -400,7 +422,7 @@ static void test_const_driver_and_sink(void) {
 static void test_const_value_needs_one_driver(void) {
     odin3_net_id net = net_named(NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_CONST_NONE, odin3_net_const_value(module, net));
-    connect(pin_of(port_node("$port_in", 1), 0), net);
+    connect(pin_of(port_node("test_t3_drive", 1), 0), net);
     TEST_ASSERT_EQUAL_INT(ODIN3_CONST_NONE, odin3_net_const_value(module, net));
     connect(pin_of(node_of("$_CONSTZ_"), 0), net);
     TEST_ASSERT_EQUAL_UINT32(2, odin3_net_driver_count(module, net));
@@ -418,7 +440,7 @@ static void assert_sinks_intact(odin3_net_id net, odin3_node_id out, uint32_t co
 
 static void test_delete_only_driver_keeps_sinks(void) {
     odin3_node_id zero = node_of("$_CONST0_");
-    odin3_node_id out = port_node("$port_out", 3);
+    odin3_node_id out = port_node("test_t3_sink", 3);
     odin3_net_id net = net_named("n");
     connect(pin_of(zero, 0), net);
     for (uint32_t k = 0; k < 3; k++) {
@@ -430,7 +452,7 @@ static void test_delete_only_driver_keeps_sinks(void) {
     TEST_ASSERT_FALSE(odin3_net_valid(odin3_pin_net(module, pin_of(zero, 0))));
     assert_sinks_intact(net, out, 3);
 
-    odin3_node_id in = port_node("$port_in", 1);
+    odin3_node_id in = port_node("test_t3_drive", 1);
     connect(pin_of(in, 0), net);
     TEST_ASSERT_EQUAL_UINT32(pin_of(in, 0).v, odin3_net_driver(module, net).v);
     assert_sinks_intact(net, out, 3);
@@ -451,8 +473,8 @@ static void assert_net_exact(odin3_net_id net, odin3_pinlist want, uint32_t driv
 static void test_delete_node_with_driver_and_sinks(void) {
     odin3_value width = odin3_value_int(2);
     odin3_node_id mixed = node_named("test_t3_mixed", 0, &width);
-    odin3_node_id bus = port_node("$port_inout", 1);
-    odin3_node_id outs = port_node("$port_out", 3);
+    odin3_node_id bus = port_node("test_t3_bus", 1);
+    odin3_node_id outs = port_node("test_t3_sink", 3);
     odin3_net_id shared = net_named("shared");
     odin3_net_id other = net_named("other");
     connect(pin_of(outs, 0), shared);
@@ -472,8 +494,8 @@ static void test_delete_node_with_driver_and_sinks(void) {
 }
 
 static void test_many_pins_remove_every_other(void) {
-    odin3_node_id sinks = port_node("$port_out", MANY_SINKS);
-    odin3_node_id drivers = port_node("$port_inout", FEW_DRIVERS);
+    odin3_node_id sinks = port_node("test_t3_sink", MANY_SINKS);
+    odin3_node_id drivers = port_node("test_t3_bus", FEW_DRIVERS);
     odin3_net_id net = net_named("wide");
     /* Interleave: one inout driver after every 100 sinks, so the boundary moves often. */
     static odin3_pin_id order[MANY_SINKS + FEW_DRIVERS];
@@ -513,8 +535,8 @@ static void test_many_pins_remove_every_other(void) {
 }
 
 static void test_connect_refuses_other_net(void) {
-    odin3_node_id in = port_node("$port_in", 1);
-    odin3_node_id out = port_node("$port_out", 1);
+    odin3_node_id in = port_node("test_t3_drive", 1);
+    odin3_node_id out = port_node("test_t3_sink", 1);
     odin3_net_id left = net_named("left");
     odin3_net_id right = net_named("right");
     connect(pin_of(in, 0), left);
@@ -639,7 +661,7 @@ static void test_pinpool_classes(void) {
 
 static void test_pinpool_reuses_blocks(void) {
     odin3_node_id one = node_of("$_CONST1_");
-    odin3_node_id out = port_node("$port_out", GROW_PINS);
+    odin3_node_id out = port_node("test_t3_sink", GROW_PINS);
     odin3_net_id net = net_named(NULL);
     connect(pin_of(one, 0), net);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(module, pin_of(one, 0)));
@@ -707,7 +729,7 @@ static void assert_same(const snapshot *want, const snapshot *have) {
 
 static void build_small_netlist(odin3_net_id *net) {
     *net = net_named("n");
-    odin3_node_id out = port_node("$port_out", 4);
+    odin3_node_id out = port_node("test_t3_sink", 4);
     for (uint32_t k = 0; k < 4; k++) {
         connect(pin_of(out, k), *net);
     }
@@ -784,9 +806,9 @@ static void exhaust_pool_chunk(uint32_t cls) {
 static void test_pin_connect_oom_sweep(void) {
     odin3_net_id net = {0};
     build_small_netlist(&net);
-    odin3_node_id in = port_node("$port_in", 1);
+    odin3_node_id in = port_node("test_t3_drive", 1);
     exhaust_pool_chunk(2);
-    snapshot before = take_snapshot(type_id("$port_in"), 0);
+    snapshot before = take_snapshot(type_id("test_t3_drive"), 0);
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     long fail_at = 0;
     for (; fail_at < OOM_LIMIT; fail_at++) {
@@ -797,7 +819,7 @@ static void test_pin_connect_oom_sweep(void) {
             break;
         }
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        snapshot now = take_snapshot(type_id("$port_in"), 0);
+        snapshot now = take_snapshot(type_id("test_t3_drive"), 0);
         assert_same(&before, &now);
         assert_partition(net);
     }
@@ -829,7 +851,7 @@ static void test_net_create_oom_sweep(void) {
     uint32_t failures = 0;
     for (long fail_at = 0; fail_at < OOM_LIMIT; fail_at++) {
         name = prepare_net_oom();
-        before = take_snapshot(type_id("$port_in"), name);
+        before = take_snapshot(type_id("test_t3_drive"), name);
         odin3_util_set_alloc_fail_after(fail_at);
         st = odin3_net_create(module, name, (odin3_prov_id){0}, &net);
         odin3_util_set_alloc_fail_after(-1);
@@ -838,7 +860,7 @@ static void test_net_create_oom_sweep(void) {
         }
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
         failures++;
-        snapshot now = take_snapshot(type_id("$port_in"), name);
+        snapshot now = take_snapshot(type_id("test_t3_drive"), name);
         assert_same(&before, &now); /* includes: the name is not found */
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
@@ -868,7 +890,10 @@ static void test_module_create_oom_sweep(void) {
 }
 
 int main(void) {
-    if (odin3_celltype_register_global(&k_mixed) != ODIN3_OK) {
+    if (odin3_celltype_register_global(&k_mixed) != ODIN3_OK ||
+        odin3_celltype_register_global(&k_sink) != ODIN3_OK ||
+        odin3_celltype_register_global(&k_drive) != ODIN3_OK ||
+        odin3_celltype_register_global(&k_bus) != ODIN3_OK) {
         return EXIT_FAILURE;
     }
     UNITY_BEGIN();

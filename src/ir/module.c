@@ -326,10 +326,6 @@ odin3_prov_id odin3_module_prov(const odin3_module *module) {
     return module->prov;
 }
 
-odin3_celltype_id odin3_module_type(const odin3_module *module) {
-    return module->type;
-}
-
 uint32_t odin3_module_node_end(const odin3_module *module) {
     return (uint32_t)odin3_pagevec_len(module->nodes);
 }
@@ -424,7 +420,7 @@ static odin3_status make_port_node(odin3_module *module, const odin3_port_spec *
     (void)found;
     odin3_value width = odin3_value_int(spec->width);
     node_spec.params = &width;
-    return odin3_node_create(module, &node_spec, node);
+    return odin3_node_create_any(module, &node_spec, node);
 }
 
 /* The infallible part of add_port: connections, port order, the cell type's new port. */
