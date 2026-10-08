@@ -1,0 +1,22 @@
+# counter_parmys.blif with the carry into bit 1 removed (not equivalent). Hand-written fixture in the style of Parmys output: 2-bit counter with enable.
+# always @(posedge clk) if (en) q <= q + 1;
+.model counter
+.inputs clk en
+.outputs q[0] q[1]
+.names gnd
+.names vcc
+1
+.names unconn
+.names counter.q_r[0] en $abc$7$d[0]
+10 1
+01 1
+.names counter.q_r[0] counter.q_r[1] en $abc$7$d[1]
+-10 1
+01- 1
+.latch $abc$7$d[0] counter.q_r[0] re clk 0
+.latch $abc$7$d[1] counter.q_r[1] re clk 0
+.names counter.q_r[0] q[0]
+1 1
+.names counter.q_r[1] q[1]
+1 1
+.end

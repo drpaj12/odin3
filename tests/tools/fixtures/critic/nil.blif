@@ -1,0 +1,5 @@
+.model top
+.inputs d
+.outputs q
+.latch d q re NIL 0
+.end

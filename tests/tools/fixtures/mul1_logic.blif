@@ -1,0 +1,7 @@
+# 1x1-bit product as plain logic.
+.model mul1
+.inputs a b
+.outputs p
+.names a b p
+11 1
+.end

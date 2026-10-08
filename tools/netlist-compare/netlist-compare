@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# netlist-compare: structural BLIF comparison. See netlist_compare.py for details.
+# Exit codes: 0 identical, 1 different, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/netlist_compare.py" "$@"

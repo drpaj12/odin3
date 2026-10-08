@@ -1,0 +1,4 @@
+# Tests inherit the project config with one exception (decision 2026-10-08, #12): literals in
+# assertions are the clearest form of an expected value, so magic numbers are allowed here.
+InheritParentConfig: true
+Checks: '-readability-magic-numbers'

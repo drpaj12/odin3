@@ -1,0 +1,13 @@
+# Latch feedback ring with an inverter (r_a -> r_b -> ~ -> r_c -> r_a) and different
+# initial values.  Exercises termination of the latch refinement loop on a cycle.
+.model ring
+.inputs clk
+.outputs o
+.latch r_c r_a re clk 0
+.latch r_a r_b re clk 1
+.latch r_b_n r_c re clk 0
+.names r_b r_b_n
+0 1
+.names r_a r_c o
+11 1
+.end

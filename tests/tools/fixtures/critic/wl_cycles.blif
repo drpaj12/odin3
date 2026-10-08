@@ -1,0 +1,20 @@
+# Fuzz-found (critic fuzz.py seed 2582): a latch self-loop and a 2-cycle of identical
+# latches.  Colour refinement cannot tell q0 from q1/q2, but they are not interchangeable.
+.model top
+.inputs i0 i1 i2 clk
+.outputs o0 o1 o2
+.names w0
+.names w1
+.names w2
+.names w3
+1
+.latch q0 q0 re clk 1
+.latch q2 q1 re clk 1
+.latch q1 q2 re clk 1
+.names w1 o0
+1 1
+.names w1 o1
+1 1
+.names i2 o2
+1 1
+.end

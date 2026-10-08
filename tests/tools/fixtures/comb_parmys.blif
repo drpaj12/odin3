@@ -1,0 +1,24 @@
+# Hand-written fixture in the style of Yosys/Parmys `write_blif` output (VTR flow).
+# y[0] = a[0] ^ b[0];  y[1] = (a[1] & b[1]) | c;  z = ~(a[0] & b[0]) & c
+.model comb
+.inputs a[0] a[1] b[0] \
+ b[1] c
+.outputs y[0] y[1] z
+.names $false
+.names $true
+1
+.names a[0] b[0] $abc$42$new_n7_
+11 1
+.cname $abc$42$auto$blifparse.cc:396$11
+.names a[0] b[0] y[0]
+10 1
+01 1
+.attr src "comb.v:5.12-5.19"
+.names a[1] b[1] $abc$42$auto$alumacc.cc:485$7.Y[0]
+11 1
+.names $abc$42$auto$alumacc.cc:485$7.Y[0] c y[1]
+1- 1
+-1 1
+.names $abc$42$new_n7_ c z
+01 1
+.end

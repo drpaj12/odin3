@@ -1,0 +1,13 @@
+.model top
+.inputs x y
+.outputs o
+.subckt sink a=x
+.names y o
+1 1
+.end
+
+.model sink
+.inputs a
+.outputs z
+.blackbox
+.end

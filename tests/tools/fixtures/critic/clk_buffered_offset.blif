@@ -1,0 +1,8 @@
+# Buffered clock written as an off-set row (0 0): the latch control is an internal buffer of the clock port.
+.model top
+.inputs d clk1 clk2
+.outputs q
+.names clk1 top.clk
+0 0
+.latch d q re top.clk 0
+.end

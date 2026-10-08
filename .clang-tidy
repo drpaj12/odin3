@@ -1,0 +1,233 @@
+# clang-tidy configuration for Odin III (C17). Spec: docs/DESIGN.md section 15.2.
+# Enabled families: bugprone, cert, misc, performance, readability. modernize-* is OFF (C, not C++).
+# clang-analyzer-* is not requested by the spec and is not enabled (the leading -* clears defaults).
+#
+# Checks are a block scalar (comma separated), which cannot carry inline YAML comments, so the
+# reason for each disabled check is documented here, in the same order as in Checks below.
+#
+# Disabled -- C++-only: no analog in C (exceptions, classes, templates, std:: library, lambdas, move semantics, namespaces, smart pointers, virtual dispatch):
+#   -bugprone-compare-pointer-to-member-virtual-function
+#   -bugprone-copy-constructor-init
+#   -bugprone-dangling-handle
+#   -bugprone-empty-catch
+#   -bugprone-exception-escape
+#   -bugprone-fold-init-type
+#   -bugprone-forward-declaration-namespace
+#   -bugprone-forwarding-reference-overload
+#   -bugprone-inaccurate-erase
+#   -bugprone-incorrect-enable-if
+#   -bugprone-lambda-function-name
+#   -bugprone-move-forwarding-reference
+#   -bugprone-multiple-new-in-one-expression
+#   -bugprone-optional-value-conversion
+#   -bugprone-parent-virtual-call
+#   -bugprone-shared-ptr-array-mismatch
+#   -bugprone-sizeof-container
+#   -bugprone-standalone-empty
+#   -bugprone-string-constructor
+#   -bugprone-string-integer-assignment
+#   -bugprone-stringview-nullptr
+#   -bugprone-throw-keyword-missing
+#   -bugprone-unchecked-optional-access
+#   -bugprone-undelegated-constructor
+#   -bugprone-unhandled-exception-at-new
+#   -bugprone-unhandled-self-assignment
+#   -bugprone-unique-ptr-array-mismatch
+#   -bugprone-unused-local-non-trivial-variable
+#   -bugprone-unused-raii
+#   -bugprone-use-after-move
+#   -bugprone-virtual-near-miss
+#   -cert-con54-cpp
+#   -cert-dcl21-cpp
+#   -cert-dcl50-cpp
+#   -cert-dcl51-cpp
+#   -cert-dcl54-cpp
+#   -cert-dcl58-cpp
+#   -cert-dcl59-cpp
+#   -cert-err09-cpp
+#   -cert-err52-cpp
+#   -cert-err58-cpp
+#   -cert-err60-cpp
+#   -cert-err61-cpp
+#   -cert-mem57-cpp
+#   -cert-msc50-cpp
+#   -cert-msc51-cpp
+#   -cert-msc54-cpp
+#   -cert-oop11-cpp
+#   -cert-oop54-cpp
+#   -cert-oop57-cpp
+#   -cert-oop58-cpp
+#   -misc-coroutine-hostile-raii
+#   -misc-new-delete-overloads
+#   -misc-non-private-member-variables-in-classes
+#   -misc-throw-by-value-catch-by-reference
+#   -misc-unconventional-assign-operator
+#   -misc-uniqueptr-reset-release
+#   -misc-unused-alias-decls
+#   -misc-unused-using-decls
+#   -misc-use-anonymous-namespace
+#   -performance-avoid-endl
+#   -performance-faster-string-find
+#   -performance-for-range-copy
+#   -performance-implicit-conversion-in-loop
+#   -performance-inefficient-algorithm
+#   -performance-inefficient-string-concatenation
+#   -performance-inefficient-vector-operation
+#   -performance-move-const-arg
+#   -performance-move-constructor-init
+#   -performance-no-automatic-move
+#   -performance-noexcept-destructor
+#   -performance-noexcept-move-constructor
+#   -performance-noexcept-swap
+#   -performance-trivially-destructible
+#   -performance-unnecessary-copy-initialization
+#   -performance-unnecessary-value-param
+#   -readability-container-contains
+#   -readability-container-data-pointer
+#   -readability-container-size-empty
+#   -readability-convert-member-functions-to-static
+#   -readability-delete-null-pointer
+#   -readability-make-member-function-const
+#   -readability-qualified-auto
+#   -readability-redundant-access-specifiers
+#   -readability-redundant-member-init
+#   -readability-redundant-smartptr-get
+#   -readability-redundant-string-cstr
+#   -readability-redundant-string-init
+#   -readability-reference-to-constructed-temporary
+#   -readability-static-accessed-through-instance
+#   -readability-static-definition-in-anonymous-namespace
+#   -readability-string-compare
+#   -readability-uniqueptr-delete-release
+#   -readability-use-anyofallof
+#   -readability-operators-representation
+#
+# Disabled -- Include hygiene is advisory, not blocking, per DESIGN.md 15.1/15.2 (include-what-you-use row); include-cleaner would make it blocking:
+#   -misc-include-cleaner
+#
+# Deliberately left ON although strict: readability-magic-numbers, bugprone-easily-swappable-parameters,
+# readability-identifier-length, misc-no-recursion (DESIGN.md 15.1 forbids recursion).
+Checks: >-
+  -*,
+  bugprone-*,
+  cert-*,
+  misc-*,
+  performance-*,
+  readability-*,
+  -bugprone-compare-pointer-to-member-virtual-function,
+  -bugprone-copy-constructor-init,
+  -bugprone-dangling-handle,
+  -bugprone-empty-catch,
+  -bugprone-exception-escape,
+  -bugprone-fold-init-type,
+  -bugprone-forward-declaration-namespace,
+  -bugprone-forwarding-reference-overload,
+  -bugprone-inaccurate-erase,
+  -bugprone-incorrect-enable-if,
+  -bugprone-lambda-function-name,
+  -bugprone-move-forwarding-reference,
+  -bugprone-multiple-new-in-one-expression,
+  -bugprone-optional-value-conversion,
+  -bugprone-parent-virtual-call,
+  -bugprone-shared-ptr-array-mismatch,
+  -bugprone-sizeof-container,
+  -bugprone-standalone-empty,
+  -bugprone-string-constructor,
+  -bugprone-string-integer-assignment,
+  -bugprone-stringview-nullptr,
+  -bugprone-throw-keyword-missing,
+  -bugprone-unchecked-optional-access,
+  -bugprone-undelegated-constructor,
+  -bugprone-unhandled-exception-at-new,
+  -bugprone-unhandled-self-assignment,
+  -bugprone-unique-ptr-array-mismatch,
+  -bugprone-unused-local-non-trivial-variable,
+  -bugprone-unused-raii,
+  -bugprone-use-after-move,
+  -bugprone-virtual-near-miss,
+  -cert-con54-cpp,
+  -cert-dcl21-cpp,
+  -cert-dcl50-cpp,
+  -cert-dcl51-cpp,
+  -cert-dcl54-cpp,
+  -cert-dcl58-cpp,
+  -cert-dcl59-cpp,
+  -cert-err09-cpp,
+  -cert-err52-cpp,
+  -cert-err58-cpp,
+  -cert-err60-cpp,
+  -cert-err61-cpp,
+  -cert-mem57-cpp,
+  -cert-msc50-cpp,
+  -cert-msc51-cpp,
+  -cert-msc54-cpp,
+  -cert-oop11-cpp,
+  -cert-oop54-cpp,
+  -cert-oop57-cpp,
+  -cert-oop58-cpp,
+  -misc-coroutine-hostile-raii,
+  -misc-new-delete-overloads,
+  -misc-non-private-member-variables-in-classes,
+  -misc-throw-by-value-catch-by-reference,
+  -misc-unconventional-assign-operator,
+  -misc-uniqueptr-reset-release,
+  -misc-unused-alias-decls,
+  -misc-unused-using-decls,
+  -misc-use-anonymous-namespace,
+  -performance-avoid-endl,
+  -performance-faster-string-find,
+  -performance-for-range-copy,
+  -performance-implicit-conversion-in-loop,
+  -performance-inefficient-algorithm,
+  -performance-inefficient-string-concatenation,
+  -performance-inefficient-vector-operation,
+  -performance-move-const-arg,
+  -performance-move-constructor-init,
+  -performance-no-automatic-move,
+  -performance-noexcept-destructor,
+  -performance-noexcept-move-constructor,
+  -performance-noexcept-swap,
+  -performance-trivially-destructible,
+  -performance-unnecessary-copy-initialization,
+  -performance-unnecessary-value-param,
+  -readability-container-contains,
+  -readability-container-data-pointer,
+  -readability-container-size-empty,
+  -readability-convert-member-functions-to-static,
+  -readability-delete-null-pointer,
+  -readability-make-member-function-const,
+  -readability-qualified-auto,
+  -readability-redundant-access-specifiers,
+  -readability-redundant-member-init,
+  -readability-redundant-smartptr-get,
+  -readability-redundant-string-cstr,
+  -readability-redundant-string-init,
+  -readability-reference-to-constructed-temporary,
+  -readability-static-accessed-through-instance,
+  -readability-static-definition-in-anonymous-namespace,
+  -readability-string-compare,
+  -readability-uniqueptr-delete-release,
+  -readability-use-anyofallof,
+  -readability-operators-representation,
+  -misc-include-cleaner
+
+WarningsAsErrors: '*'
+# Only report diagnostics from our own headers. This relative pattern would also match
+# third_party/*/src/, so tools/lint.sh overrides it on the command line with a pattern anchored
+# on the absolute repo root (clang-tidy 18 has no ExcludeHeaderFilterRegex).
+HeaderFilterRegex: '(^|/)(include|src|plugins|tests/unit)/'
+FormatStyle: none
+
+CheckOptions:
+  # Mirrors lizard -L 60 -a 5 -C 15 in tools/lint.sh.
+  readability-function-size.LineThreshold: 60
+  readability-function-size.ParameterThreshold: 5
+  readability-function-cognitive-complexity.Threshold: 15
+  # Two-letter names such as "id", "fd", "rc" are idiomatic C; single letters stay flagged
+  # (loop counters i/j/k are exempt by the check's default).
+  readability-identifier-length.MinimumVariableNameLength: 2
+  readability-identifier-length.MinimumParameterNameLength: 2
+  # Decision 2026-10-08 (#11): i, j, k allowed as loop counters and plain variables; nothing else
+  # shorter than 2 characters.
+  readability-identifier-length.IgnoredLoopCounterNames: '^[ijk]$'
+  readability-identifier-length.IgnoredVariableNames: '^[ijk]$'

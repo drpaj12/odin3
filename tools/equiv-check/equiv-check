@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# equiv-check: functional BLIF equivalence via ABC cec/dsec. See equiv_check.py for details.
+# Exit codes: 0 equivalent, 1 not equivalent, 2 usage/input/ABC error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/equiv_check.py" "$@"
