@@ -10,9 +10,11 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/pinpool.h"
+#include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "util/arena.h"
+#include "util/idindex.h"
 #include "util/pagevec.h"
 #include "util/str.h"
 #include "util/u64map.h"
@@ -29,7 +31,27 @@ typedef struct odin3_celltype_entry {
     bool local;                    /* added by add_local/declare_blackbox; definition replaceable */
 } odin3_celltype_entry;
 
+/* The design's provenance store (prov.c; IR-12, IR-13, IR-6 tombstones). */
+typedef struct odin3_prov_store {
+    odin3_pagevec *records; /* odin3_prov_record; slot 0 reserved */
+    odin3_arena *arena;     /* locs and parents arrays of the records */
+    odin3_idindex *index;   /* hash-consing: record identity -> ID */
+    odin3_vec runs;         /* uint32_t pass name strtab ID per run; slot 0 reserved */
+    odin3_vec tombstones;   /* odin3_tombstone; slot 0 reserved */
+    odin3_vec marks;        /* uint32_t per record: walk generation that visited it */
+    uint32_t gen;           /* current walk generation */
+    odin3_vec stack;        /* uint32_t walk worklist */
+    odin3_vec scratch;      /* odin3_prov_id: derive's de-duplicated parents */
+} odin3_prov_store;
+
+/* Creates the design's provenance store (design.c calls it); ODIN3_ERR_NO_MEMORY on OOM. */
+odin3_status odin3_prov_store_init(odin3_design *design);
+
+/* Frees the provenance store (design.c calls it; safe on a partly initialised design). */
+void odin3_prov_store_free(odin3_design *design);
+
 struct odin3_design {
+    odin3_prov_store *prov;       /* provenance records, pass runs, tombstones */
     odin3_arena *arena;           /* local cell-type definitions */
     odin3_strtab *strtab;         /* design-global names and string values */
     odin3_vec celltypes;          /* odin3_celltype_entry; slot 0 reserved */
