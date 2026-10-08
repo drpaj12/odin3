@@ -83,6 +83,7 @@ odin3_status odin3_strtab_intern(odin3_strtab *tab, odin3_bytes str, uint32_t *i
     if (odin3_idindex_find(tab->index, &cmp, id)) {
         return ODIN3_OK;
     }
+    /* ID exhaustion (4 billion strings) cannot be exercised in a unit test. */
     if (tab->entries.len >= UINT32_MAX || str.len > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY;
     }

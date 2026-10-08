@@ -39,7 +39,11 @@ size_t odin3_strtab_len(const odin3_strtab *tab, uint32_t id);
 /* Number of interned strings, including the empty string. */
 size_t odin3_strtab_count(const odin3_strtab *tab);
 
-/* data is NUL-terminated after every successful append (NULL until the first allocation). */
+/*
+ * data is NUL-terminated after every successful append that adds bytes; it stays NULL on a fresh
+ * buffer after an empty append. Appending a buffer's own data to itself (append, or appendf with
+ * %s of buf.data) is unsupported: growth may free the source.
+ */
 typedef struct odin3_strbuf {
     char *data;
     size_t len, cap;

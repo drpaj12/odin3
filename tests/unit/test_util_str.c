@@ -107,38 +107,126 @@ static void test_long_string_100k(void) {
     odin3_strtab_destroy(tab);
 }
 
-static void test_oom_intern(void) {
-    odin3_strtab *tab = odin3_strtab_create();
-    uint32_t keep = intern_ok(tab, "keep");
-    for (long idx = 0; idx < 3; idx++) {
-        uint32_t id = 0;
-        odin3_util_set_alloc_fail_after(idx);
-        odin3_status st = odin3_strtab_intern(tab, odin3_bytes_cstr("fresh"), &id);
-        odin3_util_set_alloc_fail_after(-1);
-        if (st == ODIN3_OK) {
-            continue; /* fewer than n allocations needed */
-        }
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_FALSE(odin3_strtab_find(tab, odin3_bytes_cstr("fresh"), NULL));
-        TEST_ASSERT_EQUAL_size_t(2, odin3_strtab_count(tab));
-        TEST_ASSERT_EQUAL_STRING("keep", odin3_strtab_get(tab, keep));
+/* Interns name with the idx-th allocation failing. Returns true if that failed; then checks that
+ * the table is unchanged and a retry succeeds. */
+static bool intern_with_failure(odin3_strtab *tab, odin3_bytes name, long idx) {
+    const size_t before = odin3_strtab_count(tab);
+    uint32_t id = 0;
+    odin3_util_set_alloc_fail_after(idx);
+    const odin3_status st = odin3_strtab_intern(tab, name, &id);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st == ODIN3_OK) {
+        return false;
     }
-    TEST_ASSERT_EQUAL_UINT32(keep, intern_ok(tab, "keep"));
-    (void)intern_ok(tab, "fresh");
-    TEST_ASSERT_TRUE(odin3_strtab_find(tab, odin3_bytes_cstr("fresh"), NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_EQUAL_size_t(before, odin3_strtab_count(tab));
+    TEST_ASSERT_FALSE(odin3_strtab_find(tab, name, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strtab_intern(tab, name, &id));
+    TEST_ASSERT_EQUAL_UINT32((uint32_t)before, id);
+    TEST_ASSERT_EQUAL_size_t(before + 1, odin3_strtab_count(tab));
+    return true;
+}
+
+static void check_ids_intact(odin3_strtab *tab, uint32_t upto) {
+    for (uint32_t i = 1; i < upto; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "n%u", (unsigned)i);
+        TEST_ASSERT_EQUAL_STRING(name, odin3_strtab_get(tab, i));
+        uint32_t id = 0;
+        TEST_ASSERT_TRUE(odin3_strtab_find(tab, odin3_bytes_cstr(name), &id));
+        TEST_ASSERT_EQUAL_UINT32(i, id);
+    }
+}
+
+/* Each intern fails its first allocation (if it needs one): hits the vec growth boundaries
+ * (8, 16, ...) and the idindex growth boundaries (load limit) with real failures. */
+static void test_oom_intern(void) {
+    enum { COUNT = 200, MIN_HITS = 4 };
+    odin3_strtab *tab = odin3_strtab_create();
+    int hits = 0;
+    for (uint32_t i = 1; i < COUNT; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "n%u", (unsigned)i);
+        if (intern_with_failure(tab, odin3_bytes_cstr(name), 0)) {
+            hits++;
+        } else {
+            TEST_ASSERT_EQUAL_size_t(i + 1, odin3_strtab_count(tab));
+        }
+    }
+    TEST_ASSERT_TRUE(hits >= MIN_HITS);
+    TEST_ASSERT_EQUAL_size_t(COUNT, odin3_strtab_count(tab));
+    check_ids_intact(tab, COUNT);
+    odin3_strtab_destroy(tab);
+}
+
+static odin3_strtab *filled_table(uint32_t fill) {
+    odin3_strtab *tab = odin3_strtab_create();
+    for (uint32_t i = 1; i < fill; i++) {
+        char name[32];
+        (void)snprintf(name, sizeof name, "n%u", (unsigned)i);
+        (void)intern_ok(tab, name);
+    }
+    return tab;
+}
+
+/* For every fill level up to 40 (crossing the vec and idindex growth points), fails each
+ * allocation the next intern performs, in turn. */
+static void test_oom_intern_at_growth_boundaries(void) {
+    enum { MAX_FILL = 40, MAX_ALLOCS = 6, MIN_HITS = 4 };
+    int hits = 0;
+    for (uint32_t fill = 1; fill <= MAX_FILL; fill++) {
+        for (long idx = 0; idx < MAX_ALLOCS; idx++) {
+            odin3_strtab *tab = filled_table(fill);
+            char next[32];
+            (void)snprintf(next, sizeof next, "n%u", (unsigned)fill);
+            const bool failed = intern_with_failure(tab, odin3_bytes_cstr(next), idx);
+            if (failed) {
+                hits++;
+                check_ids_intact(tab, fill);
+            }
+            odin3_strtab_destroy(tab);
+            if (!failed) {
+                break;
+            }
+        }
+    }
+    TEST_ASSERT_TRUE(hits >= MIN_HITS);
+}
+
+static void test_oom_intern_larger_than_chunk(void) {
+    enum { HUGE_LEN = 200 * 1024 };
+    char *big = malloc(HUGE_LEN);
+    TEST_ASSERT_NOT_NULL(big);
+    memset(big, 'h', HUGE_LEN);
+    const odin3_bytes str = {big, HUGE_LEN};
+    odin3_strtab *tab = odin3_strtab_create();
+    (void)intern_ok(tab, "keep");
+    TEST_ASSERT_TRUE(intern_with_failure(tab, str, 0)); /* the arena chunk allocation fails */
+    TEST_ASSERT_EQUAL_STRING("keep", odin3_strtab_get(tab, 1));
+    TEST_ASSERT_EQUAL_size_t(HUGE_LEN, odin3_strtab_len(tab, 2));
+    free(big);
     odin3_strtab_destroy(tab);
 }
 
 static void test_oom_create(void) {
-    for (long idx = 0; idx < 8; idx++) {
+    enum { MAX_ALLOCS = 16 };
+    int nulls = 0;
+    bool succeeded = false;
+    for (long idx = 0; idx < MAX_ALLOCS && !succeeded; idx++) {
         odin3_util_set_alloc_fail_after(idx);
         odin3_strtab *tab = odin3_strtab_create();
         odin3_util_set_alloc_fail_after(-1);
-        if (tab != NULL) {
-            TEST_ASSERT_EQUAL_size_t(1, odin3_strtab_count(tab));
-            odin3_strtab_destroy(tab);
+        if (tab == NULL) {
+            nulls++;
+            continue;
         }
+        succeeded = true;
+        TEST_ASSERT_EQUAL_size_t(1, odin3_strtab_count(tab));
+        TEST_ASSERT_EQUAL_STRING("", odin3_strtab_get(tab, 0));
+        odin3_strtab_destroy(tab);
     }
+    TEST_ASSERT_TRUE(nulls >= 1);
+    TEST_ASSERT_TRUE(succeeded);
 }
 
 static void test_strbuf_append_and_appendf(void) {
@@ -224,6 +312,8 @@ int main(void) {
     RUN_TEST(test_embedded_nul_rejected);
     RUN_TEST(test_long_string_100k);
     RUN_TEST(test_oom_intern);
+    RUN_TEST(test_oom_intern_at_growth_boundaries);
+    RUN_TEST(test_oom_intern_larger_than_chunk);
     RUN_TEST(test_oom_create);
     RUN_TEST(test_strbuf_append_and_appendf);
     RUN_TEST(test_strbuf_appendf_grows);
