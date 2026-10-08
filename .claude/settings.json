@@ -1,0 +1,60 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake *)",
+      "Bash(ctest *)",
+      "Bash(ninja *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout -b *)",
+      "Bash(gh pr view *)",
+      "Bash(gh pr list *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr create *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(./tools/*)",
+      "Bash(tools/*)",
+      "Bash(python3 -m unittest *)",
+      "Bash(lizard *)",
+      "Bash(clang-tidy *)",
+      "Bash(clang-format *)"
+    ],
+    "ask": [
+      "Bash(git push *)",
+      "Bash(gh pr merge *)",
+      "Bash(git reset --hard *)",
+      "Bash(rm -rf *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Edit(~/odin3-ws/external/**)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyWrite": ["~/odin3-ws/external"]
+    },
+    "network": {
+      "allowedDomains": ["github.com", "api.github.com", "*.githubusercontent.com"]
+    }
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.c|*.h) clang-format -i \"$f\" ;; esac; true"
+          }
+        ]
+      }
+    ]
+  }
+}

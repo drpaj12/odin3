@@ -199,8 +199,8 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 
 ## 6. Agent configuration
 
-- [ ] `[AGENT]` Draft `CLAUDE.md` (under ~150 lines): what Odin III is; "read `docs/DESIGN.md` and `docs/IR.md` before touching `src/ir`"; build/test commands; working rules (one pass per PR; golden test per pass; `check` around passes in Debug; never edit `../external/`; never commit to `main`; run `/run-micro` before claiming a micro passes; run `/lint` before every commit); code standard summary from spec §15; "when unsure about an IR invariant, stop and ask; do not guess."
-- [ ] `[AGENT]` `.claude/settings.json` (shared):
+- [x] `[AGENT]` Draft `CLAUDE.md` (under ~150 lines): what Odin III is; "read `docs/DESIGN.md` and `docs/IR.md` before touching `src/ir`"; build/test commands; working rules (one pass per PR; golden test per pass; `check` around passes in Debug; never edit `../external/`; never commit to `main`; run `/run-micro` before claiming a micro passes; run `/lint` before every commit); code standard summary from spec §15; "when unsure about an IR invariant, stop and ask; do not guess."
+- [x] `[AGENT]` `.claude/settings.json` (shared) — as committed, corrected against the settings docs 2026-10-08: `Write(...)` rules are never consulted (Edit covers all edit tools); `~/` instead of a hard-coded `//home/...`; sandbox `filesystem.denyWrite` + `network.allowedDomains`; `autoContinueAtUsageLimit` is user-scope only (set it in `/config`). The block below is the original draft:
   ```json
   {
     "permissions": {
@@ -221,12 +221,12 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
   - Hooks get the tool call as JSON on **stdin**; there is no `$CLAUDE_FILE_PATH`. The hook formats only `.c`/`.h` so it never touches Markdown or Python.
   - Deny paths are absolute (`//` prefix = filesystem root); `../` is not a reliable rule pattern.
   - With the sandbox on, `gh` and `git push` need network access to `github.com`/`api.github.com`; configure the sandbox's allowed domains (or exclude `gh`/`git` from the sandbox) so PR creation works. Test with `gh pr list` after writing the file.
-- [ ] `[AGENT]` Project skills in `.claude/skills/`:
+- [x] `[AGENT]` Project skills in `.claude/skills/`:
   - `new-pass` — scaffold `src/passes/<name>.c`, its unit test, its golden test, and a `docs/PASSES.md` entry; opens a branch `feat/<name>`.
   - `run-micro` — build debug, run the microbenchmark suite through `netlist-compare` against golden, print a pass/fail table.
   - `oracle` — wrapper around `tools/run-oracle.sh` for one or many designs.
   - `lint` — run `tools/lint.sh` and summarize violations by file.
-- [ ] `[AGENT]` ADRs `docs/ADR/D1..D9.md` from spec §2, plus `D8-prime.md` (C17 core, C ABI plugins).
+- [x] `[AGENT]` ADRs `docs/ADR/D1..D9.md` from spec §2, plus `D8-prime.md` (C17 core, C ABI plugins).
 - [ ] `[REVIEW]` Peter edits `CLAUDE.md` and the ADRs — these encode his rules, not the agent's.
 
 ## 7. Golden netlists
