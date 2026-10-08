@@ -66,6 +66,13 @@ Agent defaults from the §6 critique (2026-10-08, Peter may override):
 24. CLAUDE.md follows spec §12 exactly on reading the op-registry file "for any task".
 25. Open for Peter, no hurry: D8.md's v0.1 rationale; "(interpretation — confirm)" markers in D5 and D9 (D9: how "pointers in-process" squares with §5.1's IDs-only cross-references).
 
+Agent defaults from §7 (2026-10-08, Peter may override):
+
+26. `tests/micro/` omits the 23 `koios_dummy/*.v` wrappers, which only `include` full Koios designs from outside the benchmark tree. Their goldens are still in `odin3-golden`.
+27. `tests/micro/` omits `full/mcml.v` (674 KB) instead of adding a `check-added-large-files` exception (rule: no gate weakening without Peter). Its golden is still in `odin3-golden`.
+28. `tests/micro/` is verbatim upstream: it is excluded from the `trailing-whitespace`/`end-of-file-fixer` hooks only (the large-file check still applies) and is `-text` in `.gitattributes`.
+29. Oracle runs on WSL: the memory cap kills report `status=capped`, not `failed` (PR #4). The batch keeps parallel caps ≤ 60% of VM RAM, deletes successful run dirs, and pauses below 20 GB free on C: (the ext4.vhdx grows into C: and never shrinks by itself). Two VM crashes on 2026-10-08 came from memory and disk exhaustion.
+
 ## B. Who does what — summary
 
 | Section | Agent | Human |
@@ -244,8 +251,8 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 ## 7. Golden netlists
 
 - [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes.
-- [ ] `[AGENT]` Sanity: `netlist-compare` of a golden against itself is identical; Parmys vs Odin II on `blink` is different but `equiv-check` proves them equivalent.
-- [ ] `[AGENT]` Copy the micro Verilog sources into `odin3/tests/micro/` with a `SOURCES.md` noting origin and VTR commit.
+- [x] `[AGENT]` Sanity: `netlist-compare` of a golden against itself is identical; Parmys vs Odin II on `blink` is different but `equiv-check` proves them equivalent. (2026-10-08: self-compare rc 0; blink Parmys vs Odin II differ, `equiv-check` → equivalent by `abc dsec`.)
+- [x] `[AGENT]` Copy the micro Verilog sources into `odin3/tests/micro/` with a `SOURCES.md` noting origin and VTR commit. (2026-10-08: 539 `.v` + 71 `.vh`; exclusions in decisions #26–28.)
 
 ## 8. Phase 0 exit checklist
 
