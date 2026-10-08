@@ -251,19 +251,19 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 
 ## 7. Golden netlists
 
-- [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes (all provenance + the BLIF sample; full set archived off GitHub, decision #30).
+- [x] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes (all provenance + the BLIF sample; full set archived off GitHub, decision #30). (2026-10-08: 595 designs × 2 arches × 2 tools = 2380 runs: 1846 ok, 522 failed, 12 capped at 16.8 GB (Parmys on `large/LargeRam`, Odin II on 5 `ifdef`/`include` syntax tests). `odin3-golden` `3931cf4`: every `.prov`/`.log` plus a 52-design BLIF sample (41 MB). The full set (4.9 GB) is packaged as `golden-full-3c9a4d23b27d.tar.gz` in `~/odin3-ws/work/golden-archive/`.)
 - [x] `[AGENT]` Sanity: `netlist-compare` of a golden against itself is identical; Parmys vs Odin II on `blink` is different but `equiv-check` proves them equivalent. (2026-10-08: self-compare rc 0; blink Parmys vs Odin II differ, `equiv-check` → equivalent by `abc dsec`.)
 - [x] `[AGENT]` Copy the micro Verilog sources into `odin3/tests/micro/` with a `SOURCES.md` noting origin and VTR commit. (2026-10-08: 539 `.v` + 71 `.vh`; exclusions in decisions #26–28.)
 
 ## 8. Phase 0 exit checklist
 
-- [ ] `[AGENT]` All repos under `~/odin3-ws` on the Linux filesystem; `nproc`/`free -g` match `.wslconfig`.
-- [ ] `[AGENT]` VTR built with Odin II; `blink.v` passes through Parmys→ABC→VPR and through Odin II.
-- [ ] `[AGENT]` Standalone Yosys built.
-- [ ] `[AGENT]` `odin3`: PR #1 merged, CI green, lint gate green on the skeleton.
-- [ ] `[AGENT]` `odin3-golden`: micros + VTR-19 goldens for two arches with commit hashes (provenance for all, BLIF sample per decision #30; full-set archive packaged).
+- [x] `[AGENT]` All repos under `~/odin3-ws` on the Linux filesystem; `nproc`/`free -g` match `.wslconfig`. (2026-10-08: ext4; `nproc` 12, `free -g` 23 ≈ 24 GB.)
+- [x] `[AGENT]` VTR built with Odin II; `blink.v` passes through Parmys→ABC→VPR and through Odin II. (2026-10-08: `EArch/blink OK` through the full flow; Odin II goldens for blink in `odin3-golden`.)
+- [x] `[AGENT]` Standalone Yosys built. (Yosys 0.69+270, `c4a0a2c48`.)
+- [x] `[AGENT]` `odin3`: PR #1 merged, CI green, lint gate green on the skeleton. (PR #1 merged 2026-10-08; `main` CI green at `337488a`.)
+- [x] `[AGENT]` `odin3-golden`: micros + VTR-19 goldens for two arches with commit hashes (provenance for all, BLIF sample per decision #30; full-set archive packaged). (`3931cf4`; the full archive is packaged, and hosting it is Peter's item below.)
 - [ ] `[HUMAN]` Host the full golden archive and record its location in the `odin3-golden` README.
-- [ ] `[AGENT]` `docs/DESIGN.md` is the source of truth (decision #15), the Claude project's copy has been refreshed from it, and ADRs are written.
+- [ ] `[AGENT]` `docs/DESIGN.md` is the source of truth (decision #15), the Claude project's copy has been refreshed from it, and ADRs are written. (ADRs and the repo copy are done; refreshing the claude.ai project copy needs Peter's hands.)
 - [ ] `[HUMAN]` Check `/usage` after the first two sessions and adjust the model table in §9.
 
 ## 9. Model and effort guide (for Phases 1–7)
