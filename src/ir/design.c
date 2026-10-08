@@ -1,4 +1,4 @@
-/* design.c — design create/destroy and the design-global string table. */
+/* design.c — design create/destroy, the design-global string table and the module list. */
 #include "ir/design.h"
 #include "ir/ir_internal.h"
 #include "util/alloc.h"
@@ -13,7 +13,8 @@ odin3_design *odin3_design_create(void) {
     design->arena = odin3_arena_create(0);
     design->strtab = odin3_strtab_create();
     if (design->arena == NULL || design->strtab == NULL ||
-        odin3_celltype_table_init(design) != ODIN3_OK) {
+        odin3_celltype_table_init(design) != ODIN3_OK ||
+        odin3_module_table_init(design) != ODIN3_OK) {
         odin3_design_destroy(design);
         return NULL;
     }
@@ -24,6 +25,7 @@ void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
     }
+    odin3_module_table_free(design);
     odin3_celltype_table_free(design);
     odin3_strtab_destroy(design->strtab);
     odin3_arena_destroy(design->arena);
