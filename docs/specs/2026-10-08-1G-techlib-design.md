@@ -1,7 +1,6 @@
 # 1G — Tech library: a target-agnostic cell library format
 
-Status: draft by the agent; PHASE1 #7 (syntax) taken as the agent default, **#8 (adding 1G to
-Phase 1 and amending spec §6/§7/§12/§13) waits for Peter** — this PR stays open for him.
+Status: approved by Peter 2026-10-08 (PHASE1 #7 confirmed, #8 yes); spec amended in the same PR.
 
 ## Purpose (Peter, PHASE1 #4)
 

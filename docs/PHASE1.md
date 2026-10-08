@@ -57,8 +57,17 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
    Peter's review; he reviews afterwards and may override any IR-n decision. Spec §12's human
    review of IR changes is satisfied after the fact for Phase 1.
 
-Open for Peter (asked 2026-10-08, needed at 1G):
+2026-10-08 evening, Peter (answers to the numbered list):
 
-7. Tech-library syntax: agent recommends an own small text format (cell function as a boolean
-   expression or an IR fragment), with Liberty/genlib and VPR-XML importers later.
-8. Spec change: add 1G to Phase 1; update `docs/DESIGN.md` §6, §7, §12 (and §13 #1).
+7. **Confirmed:** own text format `.o3lib`; cell functions are Verilog-like expressions compiled
+   to IR fragments; Liberty/genlib/VPR-XML importers later (`docs/specs/2026-10-08-1G-techlib-design.md`).
+8. **Yes:** 1G is part of Phase 1; spec §6 step 7, §7, §12 and §13 #1 amended (PR #15).
+10. Order: 1C (BLIF round trip, using the goldens' declared black boxes) before 1G; 1C adopts
+    `vtr.o3lib` when 1G lands.
+11. 1D (public C ABI for the IR) is delegated like the IR: the agent designs and merges it,
+    Peter reviews afterwards (ABI is 0.x, free to break before a release).
+12. The agent continues through 1C, 1E and 1F without stopping, with per-task reviews and
+    self-merge on green.
+13. 1E exit test: random input vectors; our simulator's outputs compared cycle by cycle against
+    Icarus Verilog running ABC's Verilog dump of the same BLIF; goldens with RAMs excluded until
+    Phase 4.

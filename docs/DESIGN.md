@@ -96,7 +96,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 4. `opt` — constant folding, dead-node removal, CSE, algebraic simplification on arithmetic, mux collapsing (Odin I)
 5. `fsm_detect`, `fsm_recode` (one-hot by default; AST-assisted as in Odin II)
 6. `memory_infer` — `reg` arrays → `$mem` with port analysis; attribute overrides
-7. `read_arch` — VPR XML `<model>`s → hard set; Altera device → primitive hard set
+7. `read_arch` — `.o3lib` tech libraries (target-agnostic: gates first, then FPGA hard cells; `docs/specs/2026-10-08-1G-techlib-design.md`) → hard/gate set; VPR XML `<model>`s and the Altera device via importers into the same form
 8. `partial_map` (§7)
 9. `lower` — word → bit; hard/blackbox nodes untouched
 10. `abc` — linked ABC on the soft-logic cone, black boxes preserved, results read back and re-stitched
@@ -111,7 +111,7 @@ Components:
 - **Binding/packing** — for each matched structure choose an implementation: hard block(s) + generated soft glue, or all-soft. Includes recursive multiplier splitting with the small-multiplier threshold auto-derived from the arch, signed multipliers, memory depth/width splitting with width-depth trading, carry chains (`adder` model), DFF feature matching (enable, sync/async reset) to what the arch's FF supports.
 - **Generic hard blocks** — any arch `<model>`; matched by exact port signature (Odin II) or by a user-supplied pattern.
 
-Matcher (§8) pattern format: an IR fragment in a small textual DSL (Verilog-like) with wildcard widths and optional ports, plus a cost. Overlap resolution: maximum-cover with cost tie-break (Odin I's rule generalized). **OPEN:** DSL syntax; whether patterns live in the arch file or beside it.
+Matcher (§8) pattern format: an IR fragment written as a tech-library cell function — the `.o3lib` expression language (Verilog-like, parametric widths) compiled to IR — plus a cost (resolved 2026-10-08, PHASE1 #7/#8). Patterns live in the tech library beside the cell they map to. Overlap resolution: maximum-cover with cost tie-break (Odin I's rule generalized).
 
 ## 8. Subgraph matcher and reverse engineering
 
@@ -155,10 +155,10 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | Phase | Deliverable | Exit test |
 |---|---|---|
 | 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
-| 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
+| 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
 | 2 | Verilog-2005 front end + preprocessor + elaboration; `proc`, `opt`; smallest Titan design parsed; primitive library v0 | Micros identical/equivalent to Parmys |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
-| 4 | `read_arch`, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
+| 4 | VPR-XML import into the tech library, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
 | 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist |
 | 6 | `raise`, RE scorecard, VQM/EDIF, Altera `bind` output, Titan subset | RE round-trip + Titan (paper 2) |
 | 7 | CIRCT writer, JSON reader, visual tooling polish, docs | Release |
@@ -167,7 +167,7 @@ Agentic working rules: one pass per PR; golden test per pass; `check` on in debu
 
 ## 13. Open questions
 
-1. Matcher pattern DSL and where patterns live (arch file vs. sidecar).
+1. ~~Matcher pattern DSL and where patterns live.~~ **Resolved 2026-10-08:** tech-library (`.o3lib`) cell functions compiled to IR fragments, living in the tech library (PHASE1 #7/#8).
 2. GHDL `--out=verilog` coverage; fallback is linking libghdl in a separately-licensed optional module.
 3. Primitive library v0 scope: exactly which `lpm_*`/`alt*`/`stratixiv_*` the smallest Titan designs need.
 4. Memory layout details (arena vs. SoA) — decide in Phase 1 with a 2M-node synthetic benchmark.
