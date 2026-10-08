@@ -23,7 +23,7 @@ typedef struct odin3_value {
     odin3_value_kind kind;
     int64_t i;             /* INT */
     const uint8_t *bits;   /* BITS: one odin3_bit per byte, LSB first; COVER: rows */
-    uint32_t len;          /* BITS: bit count; STRING/COVER: byte length */
+    uint32_t len;          /* BITS: bit count; COVER: byte length (STRING uses str) */
     uint32_t str;          /* STRING: strtab ID */
     uint32_t cover_inputs; /* COVER: inputs per row */
 } odin3_value;

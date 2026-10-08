@@ -39,7 +39,9 @@ only in pins and nets. A net has at most one **primary** `(wire, bit)` and any n
 **aliases** in the module's alias side table (usually empty; an alias is either a `(wire, bit)` membership or a bare net name): `assign b = a;`, `flatten` joining
 `top.x` with `u1.p`, and `opt` merging equivalent nets all keep every name. A net may also carry
 its own name (BLIF names every bit, e.g. `n~19`). Which name a writer prints is the writer's
-policy (BLIF: net name first; Verilog: primary wire bit first), not the IR's.
+policy (BLIF: net name first; Verilog: primary wire bit first), not the IR's. Aliases are kept
+in insertion order, oldest first; `merge` appends drop's name, drop's primary, then drop's
+aliases.
 
 **IR-3 Module boundaries are port nodes.** Each module port is one node of a built-in cell type
 `$port_in`, `$port_out` or `$port_inout` (granularity `port`) whose pins are the port's bits.
@@ -109,7 +111,7 @@ array**, partitioned: driver pins (`out`, `inout`, and pins of `tristate` types)
 `[0, driver_count)`, sink pins after. Removal swaps with the last element of its partition (and
 moves the partition boundary when a driver leaves), so `odin3_net_driver(net)` is O(1) and
 "fanout of net" is a contiguous slice. `inout` pins sit in the driver partition only; "readers"
-of a net are its sinks plus its `inout` pins (`odin3_net_readers`). Pin arrays are blocks from a per-module size-class pool
+of a net are its sinks plus its `inout` pins; `odin3_pin_reads(pin)` tests one pin. Pin arrays are blocks from a per-module size-class pool
 (capacities 2, 4, 8, …; freed blocks go to a free list per class); append is amortized O(1).
 Order within a partition is not significant and never reaches output.
 
@@ -142,7 +144,7 @@ reader meets a black-box declaration whose name is **already registered** (e.g. 
 `.model adder .blackbox` when the 1G VTR library has registered `adder` as `hard`), it checks
 the declaration for port compatibility (same port names, directions, widths) and reuses the
 registered type; a mismatch is a reader error. Either way the design records that the file *declared* that
-model (declared-model list: cell type + declaring reader run), so the BLIF writer reproduces the
+model (declared-model list: cell type; the declaring reader run is recorded from 1C on), so the BLIF writer reproduces the
 `.model … .blackbox` stanzas in their original order (PHASE1 #2). Ports are scalar or vector: a reader groups
 formals `a[0] … a[w-1]` into vector port `a` of width *w*, and the port records whether it was
 written with brackets so writers reproduce `a[k]` versus `a` byte-for-byte (PHASE1 #2).
@@ -222,9 +224,11 @@ so history outlives objects ("nothing is cleaned up", PHASE1 #3).
   Iterative worklist with a visited mark (no recursion, §15.1). Primitives:
   `odin3_prov_parents(design, id)`, `odin3_prov_sources(design, id, callback)`.
 - Forward ("everything that came from `foo.v:42`", "what did this `$add` become"): an index
-  built on demand by one sweep over **all** objects, live and dead, plus tombstones; each
-  record's leaf set is memoized; the result maps a location or a record to objects, flagged
-  live or dead. The dead `$add` (slot kept by IR-6, or its tombstone) is therefore reachable
+  (`odin3_prov_index_build`) built by one sweep over **all** objects, live and dead, plus module
+  records and tombstones, holding O(records + parent edges + objects): the objects carrying each
+  record, each record's children, and the leaf records per (file, line).
+  `odin3_prov_index_by_loc` / `odin3_prov_index_by_record` walk children breadth-first at query
+  time without allocating; hits are flagged live, dead, or tombstone. The dead `$add` (slot kept by IR-6, or its tombstone) is therefore reachable
   from its gates and vice versa.
 - Every step names its run, so the chain of passes that produced an object prints as history.
 
@@ -232,8 +236,11 @@ This replaces spec §5.3's `origin` field and D9's "pointers in-process": a reco
 are the origin, and everything is reached by ID or hash (spec §5.3 and D9 amended).
 
 **IR-13 Passes do not build records by hand.** A pass runs with a pass context that knows its
-run; `odin3_prov_begin_op(ctx)` starts an operation and `odin3_prov_derive(ctx, parents, n)`
-makes its record. Creating any node, net or wire requires a prov ID argument, so nothing is
+run; `odin3_prov_begin_op(ctx)` starts an operation and
+`odin3_prov_derive(ctx, odin3_prov_list parents, &id)` makes its record. Identity for
+hash-consing: every field including `run` and `op` for `DERIVED`; every field except `op` for
+`SOURCE`/`IMPORTED`, so one origin in one run is one record. Creating any node, net or wire
+requires a prov ID argument, so nothing is
 created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`.
 
 **Names in output (spec §5.3).** An object's provenance name is
@@ -261,13 +268,18 @@ struct field.** The API maintains both sides of every relation. Primitives:
   `$port_*` types have one port of width parameter `WIDTH`;
 - node: create (allocates pins); create-and-connect (type, params, per-port net vectors — the
   common case, so an `$add` is one call, not 97 `connect`s); delete (disconnects and kills its
-  pins); replace by a node with the same port signature (pins re-attached by port/bit);
+  pins); replace by a node with the same port signature (pins re-attached by port/bit); delete
+  and replace refuse port nodes (ports leave only through a module port API; none in Phase 1);
+  replace does not move attributes;
 - net: create; delete (must have no pins, no wire membership and no aliases); `merge(keep,
   drop)` — every pin of `drop` moves to `keep`; every wire vector entry that held `drop` now
   holds `keep`; `drop`'s name, primary `(wire, bit)` and aliases become aliases of `keep`, and the
   name map sends `drop`'s name to `keep`; `drop` dies;
 - pin: connect / disconnect (updates the pin, the net's partitioned pin array and driver count);
-- wire: create (with its nets, or creating them), delete, add alias;
+  `connect` on a pin already on another net is an error (disconnect first); on its own net a
+  no-op.
+- wire: create (with its nets, or creating them), delete (a live non-port wire: its (wire, bit)
+  memberships leave their nets, its name leaves the map; nets stay), add alias;
 - queries: node port slice, net driver, net sinks slice, net const value, name lookups.
 
 **IR-16 Iteration is in ID order (creation order), skipping dead objects.** Readers create
@@ -300,11 +312,12 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
    object is in a name map.
 7. **E** Every prov ID on a live object is a valid record; every `DERIVED` record has at least
    one parent and every parent has a smaller ID (a DAG by construction); every record's run
-   exists.
+   exists. Phase 1: a live object with prov 0 is a **W** (one line per module); a nonzero ID that
+   is not a record is **E**.
 8. **E** Every wire's nets are live, and each either has this (wire, bit) as its primary or
    lists it in the alias table; every primary/alias entry is matched by the wire's vector.
 9. **E** Port nodes appear in the module's port list once each and match the module's cell type
-   (IR-7).
+   (IR-7), and port pin *k* and port wire bit *k* hold the same net.
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.

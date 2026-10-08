@@ -130,7 +130,7 @@ per-module stores; `bytes_reserved` reflects the page size. `reserve` gives rese
 (on OOM len is unchanged; pages already allocated are kept), and `truncate` gives rollback without a
 wrapper container: a later push returns a zeroed slot at the same address.
 
-Fixed-size pages (`ODIN3_PAGEVEC_PAGE_ELEMS` = 4096) plus a growable page table: elements never
+Pages of `1 << page_shift` elements (default 4096) plus a growable page table: elements never
 move, lookup by index is a shift, a mask and two loads, and growth never
 copies elements, so a 2M-object kind needs no 3× peak. This is the storage 1B evaluates for IR
 objects (PHASE1 #5). No removal: the IR marks dead objects; compaction, if ever needed, is 1B's
