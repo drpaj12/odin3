@@ -8,9 +8,9 @@ Every step is tagged:
 
 - `[AGENT]` — Claude Code does it, then ticks the box and continues.
 - `[HUMAN]` — Claude Code stops, prints the exact instructions for Peter, and waits for "done" before continuing.
-- `[REVIEW]` — Claude Code does the work, then stops for Peter to review before moving on.
+- `[REVIEW]` — Claude Code does the work, then stops for Peter to review before moving on. (From decision #17 on: asynchronous — the agent runs a critique pass, merges on green, and Peter reviews when he likes.)
 
-Prompt to start the run (in `~/odin3-ws`, Opus, `high` effort, plan mode off for this one — it's a checklist, not a design task):
+Prompt to start the run (originally in `~/odin3-ws`; from §6 on start in `~/odin3-ws/odin3` — decision #18 — Opus, `high` effort, plan mode off for this one — it's a checklist, not a design task):
 
 > Read ~/odin3-ws/odin3-phase0-setup.md and execute it top to bottom, starting at §3 (§1–2 are done). Until §5 tick boxes in that file; in §5 it moves to odin3/docs/PHASE0.md and you tick boxes there from then on. At each `[HUMAN]` step, stop and tell me exactly what to do and wait for me to say done. At each `[REVIEW]` step, stop and summarize what you did and what I should look at. Commit at the end of each section once the repo exists. Never edit anything under ~/odin3-ws/external/.
 
@@ -53,6 +53,18 @@ The main session is the **orchestrator**: it owns git, this checklist, GitHub se
 14. Fable is the critic for §6.
 15. **The repos are the source of truth; GitHub is the backup.** `docs/DESIGN.md` and `docs/PHASE0.md` are the only editable copies of the spec and this checklist, changed through PRs like any code. `~/odin3-ws/odin3-design-spec.md` and `~/odin3-ws/odin3-phase0-setup.md` are symlinks to them. The Claude project's copy of the spec and anything on Google Drive are read-only snapshots, refreshed from the repo, never edited.
 16. **Push early so any state can be restored.** On a feature branch, commit and push at every green checkpoint (build + tests pass), before every risky step (a large refactor, dispatching agents that edit the tree, regenerating goldens), and at least at the end of every work session, not only at the end of a section. Branch pushes are safe because `main` is protected. Squash-merging keeps `main` linear, but every intermediate commit stays restorable from the PR (`git fetch origin pull/<N>/head`) after the branch is deleted. `odin3-golden` is pushed after each batch of goldens. To go back: `git revert <sha>` for anything already on `main`; on a branch, `git reset --hard <sha>` followed by a force-push of that branch, done only after you confirm.
+17. **Autonomy by default** (Peter, 2026-10-08): the agent proceeds on its own recommendations and logs each as an *agent default* here (Peter may override any time); it merges its own PRs when `ci` is green after a critique pass; `[REVIEW]` steps become asynchronous (Peter reads PRs when he likes and can revert). The agent stops only for steps needing Peter's hands, irreversible/outward-facing actions, design-rule changes (spec, ADRs, IR invariants — spec §12 human review of IR/invariant changes and mapping algorithms still stands), or when it has no clear recommendation. Branches + PRs stay (agent recommendation: CI before landing, one revert per change, PR history as the agentic-construction record).
+
+Agent defaults from the §6 critique (2026-10-08, Peter may override):
+
+18. Sessions start in `~/odin3-ws/odin3` (settings and skills load only from the starting directory); `golden/`, `work/`, `external/` are `additionalDirectories`.
+19. `git push` and `gh pr merge` are allowed without a prompt (server-side protection guards `main`); force-push, `reset --hard`, `rm -rf` still ask.
+20. "Never commit to `main`" is also enforced locally (pre-commit `no-commit-to-branch`).
+21. `external/` is read-only for the agent; rebuilding an oracle is Peter's call (it changes every golden) and runs outside the sandbox.
+22. Strict sandbox: `allowUnsandboxedCommands: false`; writes allowed to the repo, `golden/`, `work/`, ccache; network limited to GitHub and PyPI.
+23. The agent-added rules in CLAUDE.md stay: no `NOLINT`/suppressions or gate weakening without Peter's approval; never bypass `check`; `odin3_` prefix and snake_case; don't contradict an ADR (propose a change instead).
+24. CLAUDE.md follows spec §12 exactly on reading the op-registry file "for any task".
+25. Open for Peter, no hurry: D8.md's v0.1 rationale; "(interpretation — confirm)" markers in D5 and D9 (D9: how "pointers in-process" squares with §5.1's IDs-only cross-references).
 
 ## B. Who does what — summary
 
@@ -123,11 +135,11 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 - [x] `[HUMAN]` Install Claude Code **inside WSL** per the "Install in WSL" section of https://code.claude.com/docs/en/setup. Run `claude` in `~/odin3-ws` and log in with your claude.ai account.
 - [x] `[HUMAN]` `gh auth login` (GitHub.com, HTTPS, browser). The agent must never hold your GitHub credentials; `gh` holds them.
 - [x] `[HUMAN]` Plugins and skills, inside `claude`:
-  - Superpowers (already installed): `/superpowers:brainstorm`, `write-plan`, `execute-plan` are the per-pass workflow.
+  - Superpowers (already installed): `superpowers:brainstorming`, `superpowers:writing-plans`, `superpowers:executing-plans` are the per-pass workflow (skill names as shipped in superpowers 6.4.2).
   - `/plugin` → Anthropic marketplace → install the C/C++ code-intelligence (clangd-based) plugin, so the agent gets compiler diagnostics instead of guessing.
   - Nothing else yet; project-local skills are written in §6.
 - [x] `[HUMAN]` Model settings, inside `claude`: `/model` (Opus; note whether Fable is offered), `/effort high` as the default, `/advisor` → Opus. See §9 for when to raise to `xhigh`. (2026-10-08: Fable **is** offered — use it for the Phase 1 IR row in §9.)
-- [x] `[HUMAN]` Hand over: `cd ~/odin3-ws && claude`, paste the §A prompt. Everything below is the agent's unless tagged.
+- [x] `[HUMAN]` Hand over: `cd ~/odin3-ws && claude` (from §6 on: `cd ~/odin3-ws/odin3 && claude`, decision #18), paste the §A prompt. Everything below is the agent's unless tagged.
 
 ## 3. Repositories
 
@@ -195,12 +207,12 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 - [x] `[AGENT]` `tools/run-oracle.sh <design.v> <arch.xml>`: run Parmys and Odin II, store both BLIFs under `../golden/<arch>/<design>/` with the VTR commit hash.
 - [x] `[AGENT]` CI `ci.yml`: build gcc and clang, run lint gate, run unit tests, run `netlist-compare` on `tests/micro`. `nightly.yml`: scheduled VTR-19 flow vs. golden QoR (stub until Phase 3).
 - [x] `[AGENT]` Open PR #1 with `gh pr create`. No IR code in this PR. (https://github.com/drpaj12/odin3/pull/1; §6 files deferred to PR #2.)
-- [ ] `[REVIEW]` Peter reviews PR #1 line by line — it sets every convention the agent will copy for the next year — then merges.
+- [x] `[REVIEW]` Peter reviews PR #1 line by line — it sets every convention the agent will copy for the next year — then merges. (2026-10-08: decisions §A.2 #1–16; squash-merged as `cdf012f` by the agent at Peter's request.)
 
 ## 6. Agent configuration
 
-- [ ] `[AGENT]` Draft `CLAUDE.md` (under ~150 lines): what Odin III is; "read `docs/DESIGN.md` and `docs/IR.md` before touching `src/ir`"; build/test commands; working rules (one pass per PR; golden test per pass; `check` around passes in Debug; never edit `../external/`; never commit to `main`; run `/run-micro` before claiming a micro passes; run `/lint` before every commit); code standard summary from spec §15; "when unsure about an IR invariant, stop and ask; do not guess."
-- [ ] `[AGENT]` `.claude/settings.json` (shared):
+- [x] `[AGENT]` Draft `CLAUDE.md` (under ~150 lines): what Odin III is; "read `docs/DESIGN.md` and `docs/IR.md` before touching `src/ir`"; build/test commands; working rules (one pass per PR; golden test per pass; `check` around passes in Debug; never edit `../external/`; never commit to `main`; run `/run-micro` before claiming a micro passes; run `/lint` before every commit); code standard summary from spec §15; "when unsure about an IR invariant, stop and ask; do not guess."
+- [x] `[AGENT]` `.claude/settings.json` (shared) — as committed, corrected against the settings docs 2026-10-08: `Write(...)` rules are never consulted (Edit covers all edit tools); `~/` instead of a hard-coded `//home/...`; sandbox `filesystem.denyWrite` + `network.allowedDomains`; `autoContinueAtUsageLimit` is user-scope only (set it in `/config`). The block below is the original draft:
   ```json
   {
     "permissions": {
@@ -221,13 +233,13 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
   - Hooks get the tool call as JSON on **stdin**; there is no `$CLAUDE_FILE_PATH`. The hook formats only `.c`/`.h` so it never touches Markdown or Python.
   - Deny paths are absolute (`//` prefix = filesystem root); `../` is not a reliable rule pattern.
   - With the sandbox on, `gh` and `git push` need network access to `github.com`/`api.github.com`; configure the sandbox's allowed domains (or exclude `gh`/`git` from the sandbox) so PR creation works. Test with `gh pr list` after writing the file.
-- [ ] `[AGENT]` Project skills in `.claude/skills/`:
+- [x] `[AGENT]` Project skills in `.claude/skills/`:
   - `new-pass` — scaffold `src/passes/<name>.c`, its unit test, its golden test, and a `docs/PASSES.md` entry; opens a branch `feat/<name>`.
   - `run-micro` — build debug, run the microbenchmark suite through `netlist-compare` against golden, print a pass/fail table.
   - `oracle` — wrapper around `tools/run-oracle.sh` for one or many designs.
   - `lint` — run `tools/lint.sh` and summarize violations by file.
-- [ ] `[AGENT]` ADRs `docs/ADR/D1..D9.md` from spec §2, plus `D8-prime.md` (C17 core, C ABI plugins).
-- [ ] `[REVIEW]` Peter edits `CLAUDE.md` and the ADRs — these encode his rules, not the agent's.
+- [x] `[AGENT]` ADRs `docs/ADR/D1..D9.md` from spec §2, plus `D8-prime.md` (C17 core, C ABI plugins).
+- [x] `[REVIEW]` Peter edits `CLAUDE.md` and the ADRs — these encode his rules, not the agent's. (Asynchronous per decision #17: PR #2 is self-merged after a Fable critique; open points in #25.)
 
 ## 7. Golden netlists
 

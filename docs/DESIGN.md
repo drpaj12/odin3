@@ -163,7 +163,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | 6 | `raise`, RE scorecard, VQM/EDIF, Altera `bind` output, Titan subset | RE round-trip + Titan (paper 2) |
 | 7 | CIRCT writer, JSON reader, visual tooling polish, docs | Release |
 
-Agentic working rules: one pass per PR; golden test per pass; `check` on in debug; lint gate must pass before commit; agent reads `docs/DESIGN.md` and the op-registry file for any task; human reviews IR/invariant changes and all mapping algorithms; no PR merges red. Per-pass workflow: `/superpowers:brainstorm` → `write-plan` → human approves → `execute-plan` → `/run-micro` → PR.
+Agentic working rules: one pass per PR; golden test per pass; `check` on in debug; lint gate must pass before commit; agent reads `docs/DESIGN.md` and the op-registry file for any task; human reviews IR/invariant changes and all mapping algorithms; no PR merges red. Per-pass workflow: `superpowers:brainstorming` → `superpowers:writing-plans` → human approves → `superpowers:executing-plans` → `/run-micro` → PR.
 
 ## 13. Open questions
 

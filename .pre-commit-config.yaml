@@ -11,6 +11,9 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=500']
+      # main is protected on GitHub; this stops the commit locally too (CLAUDE.md rule 5).
+      - id: no-commit-to-branch
+        args: ['--branch', 'main']
   - repo: local
     hooks:
       # Fast gate: everything in tools/lint.sh except clang-tidy (slow; CI runs the full gate).
