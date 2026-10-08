@@ -22,6 +22,7 @@ typedef struct odin3_module odin3_module; /* opaque handle, owned by its design 
  * ODIN3_ERR_NO_MEMORY on out of memory; on any failure the IR is unchanged. Accessors take a
  * valid ID; for an out-of-range ID they return zero / none. Accessors on a dead object return
  * what it held when it died (tombstones need it). Provenance IDs are not validated (check rule 7).
+ * Handles (odin3_module *, odin3_design *) are never NULL unless a function says otherwise.
  */
 
 /* --- modules ------------------------------------------------------------------------------- */
@@ -238,7 +239,8 @@ typedef struct odin3_node_pair {
  * old_node is deleted (its name leaves the map; new_node keeps its own name). The two must be
  * distinct live nodes with the same port signature (port count, and per pin the same port, bit
  * and direction), new_node's pins must all be unconnected, and neither may be a port node
- * (granularity PORT), else INVALID_ARG. Never allocates.
+ * (granularity PORT), else INVALID_ARG. Attributes are not transferred: old_node's stay with
+ * the dead node, new_node keeps its own. Never allocates.
  */
 odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair);
 
@@ -400,10 +402,11 @@ typedef struct odin3_compact_map {
  * cell types are untouched. The module's containers are rebuilt, so the peak memory is the old
  * IR plus the live part.
  *
- * Invalidates every module-local ID, pinlist, parameter and attribute pointer held outside the
- * IR (only the pass manager calls it, at named pipeline points). *map (may be NULL) gets the
- * old->new maps; it is zeroed on failure. INVALID_ARG (logged) for a NULL module; NO_MEMORY on
- * out of memory, with the IR (and the tombstone table) unchanged. Linear in the module's size.
+ * Invalidates every module-local ID, pinlist, alias cursor, parameter and attribute pointer held
+ * outside the IR (only the pass manager calls it, at named pipeline points). *map (may be NULL)
+ * gets the old->new maps; it is zeroed on failure. INVALID_ARG (logged) for a NULL module;
+ * NO_MEMORY on out of memory, with the IR (and the tombstone table) unchanged. Linear in the
+ * module's size.
  */
 odin3_status odin3_module_compact(odin3_module *module, odin3_compact_map *map);
 
