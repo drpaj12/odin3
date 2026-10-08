@@ -17,9 +17,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Small chunks keep an empty module cheap; oversize requests get a chunk of their own. */
-enum { MODULE_ARENA_CHUNK_BYTES = 2048 };
-
 static const unsigned MODULE_SHIFT = ODIN3_MODULE_PAGE_SHIFT;
 static const unsigned WIRE_SHIFT = ODIN3_WIRE_PAGE_SHIFT;
 
@@ -216,7 +213,7 @@ static odin3_module *module_alloc(odin3_design *design) {
     odin3_vec_init(&module->ports, sizeof(odin3_port_rec));
     odin3_vec_init(&module->port_defs, sizeof(odin3_port_def));
     odin3_vec_init(&module->attrs, sizeof(odin3_attr_rec));
-    module->arena = odin3_arena_create(MODULE_ARENA_CHUNK_BYTES);
+    module->arena = odin3_arena_create(ODIN3_MODULE_ARENA_CHUNK_BYTES);
     module->node_names = odin3_u64map_create(0);
     module->net_names = odin3_u64map_create(0);
     module->wire_names = odin3_u64map_create(0);

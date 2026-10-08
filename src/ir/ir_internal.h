@@ -71,6 +71,9 @@ enum { ODIN3_MODULE_PAGE_SHIFT = 8 };
 /* Wires are fewer than nets; smaller pages keep an empty module small. */
 enum { ODIN3_WIRE_PAGE_SHIFT = 6 };
 
+/* Chunk size of a module's arena: small chunks keep an empty module cheap. */
+enum { ODIN3_MODULE_ARENA_CHUNK_BYTES = 2048 };
+
 /*
  * Makes the next `count` pushes onto a module store unable to fail (reserve before mutate).
  * ODIN3_ERR_NO_MEMORY on out of memory or when the IDs would pass UINT32_MAX; length unchanged.
@@ -136,6 +139,9 @@ typedef struct odin3_port_rec {
     odin3_node_id node;
     odin3_wire_id wire;
 } odin3_port_rec;
+
+/* The attr_heads key of an object: kind in the high 32 bits, ID in the low. */
+uint64_t odin3_attr_key(odin3_objref obj);
 
 /* One attribute of an object (IR-10); the value lives in the module arena. */
 typedef struct odin3_attr_rec {

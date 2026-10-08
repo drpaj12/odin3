@@ -15,7 +15,7 @@
 
 enum { OBJ_KIND_SHIFT = 32 };
 
-static uint64_t obj_key(odin3_objref obj) {
+uint64_t odin3_attr_key(odin3_objref obj) {
     return ((uint64_t)(uint32_t)obj.kind << OBJ_KIND_SHIFT) | obj.id;
 }
 
@@ -68,7 +68,7 @@ static uint32_t find_attr(const odin3_module *module, odin3_objref obj, uint32_t
                           uint32_t *last) {
     uint64_t head = 0;
     uint32_t prev = 0;
-    if (odin3_u64map_get(module->attr_heads, obj_key(obj), &head)) {
+    if (odin3_u64map_get(module->attr_heads, odin3_attr_key(obj), &head)) {
         for (uint32_t idx = (uint32_t)head; idx != 0; idx = attr_cat(module, idx)->next) {
             if (attr_cat(module, idx)->key == key) {
                 return idx;
@@ -104,7 +104,7 @@ static odin3_status attr_append(odin3_module *module, odin3_objref obj, uint32_t
     odin3_status st = attr_reserve(module);
     uint32_t idx = (uint32_t)module->attrs.len;
     if (st == ODIN3_OK && last == 0) {
-        st = odin3_u64map_put(module->attr_heads, (odin3_kv){obj_key(obj), idx}); /* last */
+        st = odin3_u64map_put(module->attr_heads, (odin3_kv){odin3_attr_key(obj), idx}); /* last */
     }
     if (st != ODIN3_OK) {
         return st;

@@ -104,7 +104,8 @@ odin3_pinslice odin3_node_pins(const odin3_module *module, odin3_node_id node);
 /* Pins of port `port` (LSB first); empty for a width-0 or out-of-range port. O(log pins). */
 odin3_pinslice odin3_node_port(const odin3_module *module, odin3_node_id node, uint32_t port);
 
-/* Parameter value `index` (definition order); NULL when out of range. Valid while the module is. */
+/* Parameter value `index` (definition order); NULL when out of range. Valid until the module is
+ * destroyed or compacted. */
 const odin3_value *odin3_node_param(const odin3_module *module, odin3_node_id node, uint32_t index);
 
 /* --- pins ---------------------------------------------------------------------------------- */
@@ -151,7 +152,7 @@ odin3_prov_id odin3_net_prov(const odin3_module *module, odin3_net_id net);
 
 /*
  * A view of part of a net's pin array. Valid until the next connect, disconnect or delete that
- * touches the net; order within a partition is not significant.
+ * touches the net, or the next compact; order within a partition is not significant.
  */
 typedef struct odin3_pinlist {
     const odin3_pin_id *pins;
@@ -357,8 +358,44 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
 
 /*
  * The value of attribute key_str of obj, NULL when it has none (or obj is invalid). The pointer
- * stays readable while the module lives; a later set of the same key does not change it.
+ * stays readable until the module is destroyed or compacted; a later set of the same key does not
+ * change it.
  */
 const odin3_value *odin3_attr_get(const odin3_module *module, odin3_objref obj, uint32_t key_str);
+
+/* --- compact (IR-6) ------------------------------------------------------------------------ */
+
+/*
+ * Old ID -> new ID per kind, indexed by the old ID (n_<kind> entries: the old store end, so index
+ * 0 is included and maps to 0); 0 means the object was dead and is gone. Arrays are heap-owned by
+ * the map: release them with odin3_compact_map_free.
+ */
+typedef struct odin3_compact_map {
+    uint32_t *node, *net, *wire, *pin;
+    uint32_t n_node, n_net, n_wire, n_pin;
+} odin3_compact_map;
+
+/*
+ * Compacts the module (IR-6): renumbers its live nodes, pins, nets and wires densely from 1 in
+ * their current ID order (so iteration order is unchanged) and frees every dead slot. Before
+ * freeing, appends one tombstone per dead node, then per dead net, then per dead wire (ID order;
+ * module, kind, cell type, name, prov; a prov that is not a record is written as 0) to the
+ * design's tombstone table. Everything that holds a module-local ID is remapped: pins' nodes and
+ * nets, nets' pin arrays (same order, so partitions and slots hold), primaries and aliases, wire
+ * net vectors and port nodes, the port list, the name maps (a merged-away net's names still find
+ * the kept net) and the attribute table. Dropped: alias records no chain uses, memberships of
+ * dead wires, attributes of dead objects and overwritten attribute values. Provenance records and
+ * cell types are untouched. The module's containers are rebuilt, so the peak memory is the old
+ * IR plus the live part.
+ *
+ * Invalidates every module-local ID, pinlist, parameter and attribute pointer held outside the
+ * IR (only the pass manager calls it, at named pipeline points). *map (may be NULL) gets the
+ * old->new maps; it is zeroed on failure. INVALID_ARG (logged) for a NULL module; NO_MEMORY on
+ * out of memory, with the IR (and the tombstone table) unchanged. Linear in the module's size.
+ */
+odin3_status odin3_module_compact(odin3_module *module, odin3_compact_map *map);
+
+/* Frees the map's arrays and zeroes it; NULL is a no-op. */
+void odin3_compact_map_free(odin3_compact_map *map);
 
 #endif
