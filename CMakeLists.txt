@@ -44,7 +44,12 @@ add_library(odin3_core OBJECT
     src/util/idindex.c
     src/util/str.c
     src/util/log.c
-    src/ir/value.c)
+    src/ir/value.c
+    src/ir/design.c
+    src/ir/celltype.c
+    src/ir/cells/builtin.c
+    src/ir/cells/port.c
+    src/ir/cells/const.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -119,6 +124,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_ir_value)
+    odin3_add_unit_test(test_ir_celltype)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
