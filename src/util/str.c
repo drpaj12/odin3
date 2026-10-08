@@ -178,7 +178,8 @@ odin3_status odin3_strbuf_appendf(odin3_strbuf *buf, const char *fmt, ...) {
     odin3_status st = need < 0 ? ODIN3_ERR_INVALID_ARG : strbuf_reserve(buf, (size_t)need);
     if (st == ODIN3_OK) {
         const int wrote = vsnprintf(buf->data + buf->len, buf->cap - buf->len, fmt, args);
-        if (wrote < 0) {
+        /* A mismatch between the two passes cannot be provoked portably, so it is untested. */
+        if (wrote < 0 || (size_t)wrote != (size_t)need) {
             st = ODIN3_ERR_INVALID_ARG;
             buf->data[buf->len] = '\0';
         } else {

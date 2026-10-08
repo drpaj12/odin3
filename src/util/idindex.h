@@ -16,6 +16,11 @@ typedef struct odin3_idindex odin3_idindex; /* opaque; slots hold uint32_t IDs +
 /* True when the object stored under id equals the probe bytes. */
 typedef bool (*odin3_id_equals)(const void *ctx, uint32_t id, odin3_bytes probe);
 
+/*
+ * Hashes passed in odin3_idcmp / odin3_identry must be finalised 64-bit hashes (odin3_hash_bytes,
+ * or odin3_hash_u64 / odin3_hash_combine over combined fields): the low bits choose the home slot.
+ */
+
 /* A lookup: hash + probe bytes + the caller's equality. */
 typedef struct odin3_idcmp {
     uint64_t hash;

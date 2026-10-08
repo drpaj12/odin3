@@ -38,3 +38,7 @@ uint64_t odin3_hash_bytes(odin3_bytes key, uint64_t seed) {
     }
     return odin3_hash_u64(state);
 }
+
+uint64_t odin3_hash_combine(uint64_t hash, uint64_t value) {
+    return odin3_hash_u64(hash ^ value);
+}

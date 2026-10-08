@@ -18,7 +18,8 @@ enum {
     RAND_KEYS = 4096,
     LCG_SEED = 987654321,
     DEFAULT_CAP = 16,
-    DEFAULT_MAX = 13 /* entries a default-capacity index holds before growing */
+    DEFAULT_MAX = 13, /* entries a default-capacity index holds before growing */
+    LARGE_CAP = 100
 };
 
 /* The fixture "store": name of ID n is "k<n>". */
@@ -170,6 +171,19 @@ static void test_growth(void) {
     odin3_idindex_destroy(ix);
 }
 
+static void test_create_large_initial_cap(void) {
+    odin3_idindex *ix = odin3_idindex_create(LARGE_CAP);
+    TEST_ASSERT_NOT_NULL(ix);
+    for (uint32_t id = 0; id < LARGE_CAP; id++) {
+        insert_ok(ix, real_hash(id), id);
+    }
+    TEST_ASSERT_EQUAL_UINT(LARGE_CAP, odin3_idindex_count(ix));
+    for (uint32_t id = 0; id < LARGE_CAP; id++) {
+        expect_found(ix, real_hash(id), id);
+    }
+    odin3_idindex_destroy(ix);
+}
+
 static void test_randomized_against_reference(void) {
     static bool present[RAND_KEYS];
     memset(present, 0, sizeof present);
@@ -233,6 +247,7 @@ int main(void) {
     RUN_TEST(test_forced_displacement);
     RUN_TEST(test_wraparound);
     RUN_TEST(test_growth);
+    RUN_TEST(test_create_large_initial_cap);
     RUN_TEST(test_randomized_against_reference);
     RUN_TEST(test_oom_insert);
     RUN_TEST(test_oom_create);

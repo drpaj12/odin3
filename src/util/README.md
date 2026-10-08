@@ -1,5 +1,5 @@
 # src/util — Phase 1
-The only generic containers in the tree (spec §15.1): `arena`, `vec`, `hashmap`, `str`, `log`. Nothing else may define a container.
+The only generic containers in the tree (spec §15.1): `arena`, `vec`, `pagevec`, `u64map`, `idindex`, `str`, `log`. Nothing else may define a container.
 
 ## Modules
 - `attr.h` — `ODIN3_EXPORT` (marks the four ABI definitions; everything else is hidden) and `ODIN3_PRINTF(f, a)`.

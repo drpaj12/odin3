@@ -20,10 +20,12 @@ void odin3_vec_init(odin3_vec *vec, size_t elem_size);
 /* Frees storage and empties the vec (elem_size retained); safe to free again. */
 void odin3_vec_free(odin3_vec *vec);
 
-/* Ensures room for cap elements (capacity stays a power of two, minimum 8). */
+/* Ensures room for cap elements (capacity stays a power of two, minimum 8). Growth invalidates
+ * pointers into data. */
 odin3_status odin3_vec_reserve(odin3_vec *vec, size_t cap);
 
-/* Appends a zeroed element and returns it; NULL on out of memory (vec unchanged). */
+/* Appends a zeroed element and returns it; NULL on out of memory (vec unchanged). Growth
+ * invalidates pointers into data. */
 void *odin3_vec_push(odin3_vec *vec);
 
 /* Element idx; requires idx < len. */

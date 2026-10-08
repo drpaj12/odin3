@@ -14,7 +14,11 @@ enum {
     RAND_OPS = 100000,
     RAND_KEYS = 4096,
     LCG_SEED = 12345,
-    OOM_FILL = 200
+    OOM_FILL = 200,
+    DISP_N = 60,
+    WRAP_N = 6,
+    WRAP_HOME = 15,
+    LARGE_CAP = 100
 };
 
 void setUp(void) {
@@ -89,6 +93,63 @@ static void test_collisions(void) {
         if (found) {
             TEST_ASSERT_EQUAL_UINT64(i * 3, val);
         }
+    }
+    odin3_u64map_destroy(map);
+}
+
+static uint64_t hash_two_buckets(uint64_t key) {
+    return key & 1;
+}
+
+static uint64_t hash_wrap(uint64_t key) {
+    (void)key;
+    return WRAP_HOME;
+}
+
+static void test_displacement_two_buckets(void) {
+    odin3_u64map_test_set_hash(hash_two_buckets);
+    odin3_u64map *map = odin3_u64map_create(0);
+    for (uint64_t i = 0; i < DISP_N; i++) {
+        put_ok(map, i, i + 100);
+    }
+    for (uint64_t i = 0; i < DISP_N; i++) {
+        expect_entry(map, (odin3_kv){i, i + 100});
+    }
+    for (uint64_t i = 0; i < DISP_N; i += 3) {
+        TEST_ASSERT_TRUE(odin3_u64map_remove(map, i));
+    }
+    for (uint64_t i = 0; i < DISP_N; i++) {
+        TEST_ASSERT_EQUAL(i % 3 != 0, odin3_u64map_get(map, i, NULL));
+        if (i % 3 != 0) {
+            expect_entry(map, (odin3_kv){i, i + 100});
+        }
+    }
+    odin3_u64map_destroy(map);
+}
+
+static void test_wraparound(void) {
+    odin3_u64map_test_set_hash(hash_wrap); /* home = last slot of the default 16-slot table */
+    odin3_u64map *map = odin3_u64map_create(0);
+    for (uint64_t i = 0; i < WRAP_N; i++) {
+        put_ok(map, i, i + 1);
+    }
+    TEST_ASSERT_TRUE(odin3_u64map_remove(map, 0));
+    put_ok(map, 0, 1);
+    for (uint64_t i = 0; i < WRAP_N; i++) {
+        expect_entry(map, (odin3_kv){i, i + 1});
+    }
+    odin3_u64map_destroy(map);
+}
+
+static void test_create_large_initial_cap(void) {
+    odin3_u64map *map = odin3_u64map_create(LARGE_CAP);
+    TEST_ASSERT_NOT_NULL(map);
+    for (uint64_t i = 0; i < LARGE_CAP; i++) {
+        put_ok(map, i, i);
+    }
+    TEST_ASSERT_EQUAL_UINT(LARGE_CAP, odin3_u64map_count(map));
+    for (uint64_t i = 0; i < LARGE_CAP; i++) {
+        expect_entry(map, (odin3_kv){i, i});
     }
     odin3_u64map_destroy(map);
 }
@@ -210,6 +271,9 @@ int main(void) {
     RUN_TEST(test_key_zero_valid);
     RUN_TEST(test_remove_then_reinsert);
     RUN_TEST(test_collisions);
+    RUN_TEST(test_displacement_two_buckets);
+    RUN_TEST(test_wraparound);
+    RUN_TEST(test_create_large_initial_cap);
     RUN_TEST(test_growth_keeps_entries);
     RUN_TEST(test_iteration_visits_each_once);
     RUN_TEST(test_empty_iteration);
