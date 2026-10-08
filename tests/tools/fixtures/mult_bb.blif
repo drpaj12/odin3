@@ -1,0 +1,12 @@
+# Uses a `multiply` hard block, which equiv-check does not model yet.
+.model mul1
+.inputs a b
+.outputs p
+.subckt multiply a[0]=a b[0]=b out[0]=p
+.end
+
+.model multiply
+.inputs a[0] b[0]
+.outputs out[0]
+.blackbox
+.end

@@ -1,0 +1,7 @@
+# Pinned development tools for the lint gate (tools/lint.sh) and CI.
+# Runtime tools under tools/ use the Python standard library only.
+ruff==0.16.10
+mypy==2.4.0
+lizard==1.24.1
+pre-commit==4.6.2
+cffi==2.1.1

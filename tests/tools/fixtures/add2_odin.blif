@@ -1,0 +1,32 @@
+# Hand-written fixture in the style of Odin II output: the same 2-bit adder, with Odin II
+# port names, a dummy chain-start adder (a=vcc b=gnd cin=gnd -> cout=0), bit-indexed
+# adder ports and buffers to the outputs.
+.model add2
+.inputs add2^a~0 add2^a~1 add2^b~0 add2^b~1
+.outputs add2^s~0 add2^s~1 add2^s~2
+
+.names gnd
+.names vcc
+1
+.names unconn
+
+.subckt adder a[0]=vcc b[0]=gnd cin[0]=gnd cout[0]=add2^ADD~2-0[1] \
+ sumout[0]=add2^ADD~2-0~dummy_output~0~1
+.subckt adder a[0]=add2^a~0 b[0]=add2^b~0 cin[0]=add2^ADD~2-0[1] \
+ cout[0]=add2^ADD~2-1[1] sumout[0]=add2^ADD~2-1[0]
+.subckt adder a[0]=add2^a~1 b[0]=add2^b~1 cin[0]=add2^ADD~2-1[1] \
+ cout[0]=add2^ADD~2-2[1] sumout[0]=add2^ADD~2-2[0]
+
+.names add2^ADD~2-1[0] add2^s~0
+1 1
+.names add2^ADD~2-2[0] add2^s~1
+1 1
+.names add2^ADD~2-2[1] add2^s~2
+1 1
+.end
+
+.model adder
+.inputs a[0] b[0] cin[0]
+.outputs cout[0] sumout[0]
+.blackbox
+.end

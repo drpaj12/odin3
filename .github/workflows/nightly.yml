@@ -1,0 +1,17 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 7 * * *'  # 07:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  qor-vs-golden:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: VTR-19 QoR comparison (stub)
+        run: echo "VTR-19 flow vs. golden QoR comparison is stubbed until Phase 3; nothing to do yet."

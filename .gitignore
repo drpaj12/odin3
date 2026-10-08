@@ -1,0 +1,22 @@
+# Build trees (CMake presets put everything under build/)
+build/
+compile_commands.json
+.cache/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.ruff_cache/
+
+# Scratch output from tools/run-oracle.sh and local experiments
+*.log
+/work/
+
+# Editors
+.vscode/
+*.swp
+
+# ABC writes its command history to the working directory
+abc.history

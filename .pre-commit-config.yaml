@@ -1,0 +1,22 @@
+# Install once with: pre-commit install
+# The hygiene hooks need the network only for the initial `pre-commit install`/first run (to
+# clone the pinned hooks repo); the local lint hook needs none.
+exclude: '^third_party/|\.blif$'
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+  - repo: local
+    hooks:
+      # Fast gate: everything in tools/lint.sh except clang-tidy (slow; CI runs the full gate).
+      - id: odin3-lint
+        name: tools/lint.sh --no-tidy
+        entry: tools/lint.sh --no-tidy
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,17 @@
+# add2_logic.blif with a broken carry out: s[2] = a[1] & b[1] (not equivalent).
+.model add2
+.inputs a[0] a[1] b[0] b[1]
+.outputs s[0] s[1] s[2]
+.names a[0] b[0] s[0]
+10 1
+01 1
+.names a[0] b[0] c0
+11 1
+.names a[1] b[1] c0 s[1]
+100 1
+010 1
+001 1
+111 1
+.names a[1] b[1] c0 s[2]
+11- 1
+.end

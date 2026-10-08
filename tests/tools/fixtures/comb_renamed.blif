@@ -1,0 +1,22 @@
+# Same circuit as comb_parmys.blif: internal nets renamed, lines and cover rows shuffled,
+# .names input columns permuted, port lists reordered, no .cname/.attr.
+.model comb
+.inputs c b[1] a[0]
+.inputs b[0] a[1]
+.outputs z y[1] y[0]
+.names c and_hi y[1]
+-1 1
+1- 1
+.names b[0] a[0] y[0]
+01 1
+10 1
+.names c and_lo z   # columns swapped relative to the original
+10 1
+.names one
+1
+.names b[1] a[1] and_hi
+11 1
+.names zero
+.names b[0] a[0] and_lo
+11 1
+.end

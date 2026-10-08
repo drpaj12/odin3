@@ -1,0 +1,34 @@
+# Hand-written fixture in the style of Odin II output: the same 2-bit counter with a
+# different decomposition of the next-state logic and Odin II port naming.
+.model counter
+
+.inputs counter^clk counter^en
+.outputs counter^q~0 counter^q~1
+
+.names gnd
+.names vcc
+1
+.names unconn
+
+# t0 = q0 & ~en, u0 = ~q0 & en, d0 = t0 | u0
+.names counter^q_r~0 counter^en counter^AND~3^LOGICAL~1
+10 1
+.names counter^q_r~0 counter^en counter^AND~4^LOGICAL~2
+01 1
+.names counter^AND~3^LOGICAL~1 counter^AND~4^LOGICAL~2 counter^MUX_2~5
+00 0
+# c1 = q0 & en, d1 = q1 ^ c1
+.names counter^q_r~0 counter^en counter^AND~6
+11 1
+.names counter^q_r~1 counter^AND~6 counter^XOR~7
+10 1
+01 1
+
+.latch counter^MUX_2~5 counter^q_r~0 re counter^clk 0
+.latch counter^XOR~7 counter^q_r~1 re counter^clk 0
+
+.names counter^q_r~0 counter^q~0
+1 1
+.names counter^q_r~1 counter^q~1
+1 1
+.end

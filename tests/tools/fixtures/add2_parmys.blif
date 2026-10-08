@@ -1,0 +1,19 @@
+# Hand-written fixture in the style of Parmys output for the k6_frac_N10 architecture:
+# s = a + b (2-bit operands, 3-bit result) on the `adder` carry-chain hard block.
+.model add2
+.inputs a[0] a[1] b[0] b[1]
+.outputs s[0] s[1] s[2]
+.names gnd
+.names vcc
+1
+.names unconn
+.subckt adder a=a[0] b=b[0] cin=gnd cout=$auto$alumacc.cc:485$3.CO[0] sumout=s[0]
+.subckt adder a=a[1] b=b[1] cin=$auto$alumacc.cc:485$3.CO[0] \
+ cout=s[2] sumout=s[1]
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

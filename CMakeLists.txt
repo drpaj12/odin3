@@ -1,0 +1,139 @@
+cmake_minimum_required(VERSION 3.25)
+project(odin3 VERSION 0.0.0 LANGUAGES C)
+
+# --- Options -----------------------------------------------------------------
+option(ODIN3_WITH_ABC "Build third_party/abc (abc executable now; libabc linked from Phase 3)" ON)
+option(ODIN3_SANITIZE "Build Odin III targets with ASan + UBSan" OFF)
+option(ODIN3_WERROR "Treat warnings as errors in Odin III targets" ON)
+
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif()
+
+# --- Warning and sanitizer flags (Odin III targets only; never third_party) ---
+add_library(odin3_flags INTERFACE)
+target_compile_options(odin3_flags INTERFACE
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes
+    $<$<BOOL:${ODIN3_WERROR}>:-Werror>)
+target_compile_definitions(odin3_flags INTERFACE _POSIX_C_SOURCE=200809L)
+if(ODIN3_SANITIZE)
+    target_compile_options(odin3_flags INTERFACE
+        -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+    target_link_options(odin3_flags INTERFACE -fsanitize=address,undefined)
+endif()
+
+# --- libodin3: the shared library behind include/odin3/odin3.h -----------------
+add_library(libodin3 SHARED
+    src/api/version.c
+    src/api/plugin.c)
+set_target_properties(libodin3 PROPERTIES
+    OUTPUT_NAME odin3
+    VERSION ${PROJECT_VERSION}
+    SOVERSION ${PROJECT_VERSION_MAJOR})
+target_include_directories(libodin3
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
+
+# --- odin3: the CLI -------------------------------------------------------------
+add_executable(odin3 src/cli/main.c)
+target_link_libraries(odin3 PRIVATE libodin3 odin3_flags)
+
+# --- Plugins --------------------------------------------------------------------
+add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
+set_target_properties(example_plugin PROPERTIES
+    PREFIX ""
+    LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/plugins/example_c)
+target_include_directories(example_plugin PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(example_plugin PRIVATE odin3_flags)
+
+# --- Third-party ----------------------------------------------------------------
+if(ODIN3_WITH_ABC)
+    # ABC's own CMake project enables C++ and drives its Makefile for flags; it
+    # builds the `abc` executable (used by tools/equiv-check) and, on demand, libabc.
+    # A function scope keeps our strict C17 settings out of ABC, which needs GNU extensions.
+    function(odin3_add_abc)
+        unset(CMAKE_C_STANDARD)
+        unset(CMAKE_C_EXTENSIONS)
+        set(READLINE_FOUND FALSE)
+        set(ABC_SKIP_TESTS ON CACHE BOOL "Skip ABC googletest suite (needs network at configure)")
+        add_subdirectory(third_party/abc EXCLUDE_FROM_ALL)
+    endfunction()
+    odin3_add_abc()
+    add_custom_target(abc_tool ALL DEPENDS abc)
+endif()
+
+# --- Tests ----------------------------------------------------------------------
+include(CTest)
+if(BUILD_TESTING)
+    add_library(unity STATIC third_party/unity/src/unity.c)
+    target_include_directories(unity PUBLIC third_party/unity/src)
+
+    add_executable(test_api tests/unit/test_api.c)
+    target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_api PRIVATE
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>")
+    add_dependencies(test_api example_plugin)
+    add_test(NAME test_api COMMAND test_api)
+    set_tests_properties(test_api PROPERTIES LABELS unit)
+
+    add_test(NAME cli_version COMMAND odin3 --version)
+    set_tests_properties(cli_version PROPERTIES
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 0\\)")
+    add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
+    set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+
+    find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    set(_tools_env "")
+    if(ODIN3_WITH_ABC)
+        set(_tools_env "ODIN3_ABC=$<TARGET_FILE:abc>")
+    endif()
+    add_test(NAME python_tools
+        COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+
+    # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
+    set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")
+    if(ODIN3_SANITIZE)
+        # gcc needs both runtimes; clang's ASan runtime includes UBSan. Clang names it with or
+        # without an arch suffix depending on the runtime-directory layout, so try both.
+        if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            set(_san_groups "libasan.so" "libubsan.so")
+        else()
+            set(_san_groups "libclang_rt.asan-${CMAKE_SYSTEM_PROCESSOR}.so|libclang_rt.asan.so")
+        endif()
+        set(_preload "")
+        foreach(_group IN LISTS _san_groups)
+            string(REPLACE "|" ";" _candidates "${_group}")
+            set(_found "")
+            foreach(_rt IN LISTS _candidates)
+                execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=${_rt}
+                    OUTPUT_VARIABLE _rt_path OUTPUT_STRIP_TRAILING_WHITESPACE)
+                if(NOT _found AND IS_ABSOLUTE "${_rt_path}" AND EXISTS "${_rt_path}")
+                    set(_found "${_rt_path}")
+                endif()
+            endforeach()
+            if(NOT _found)
+                message(FATAL_ERROR "sanitizer runtime not found (tried ${_group})")
+            endif()
+            list(APPEND _preload "${_found}")
+        endforeach()
+        list(JOIN _preload ":" _preload)
+        list(APPEND _python_env "LD_PRELOAD=${_preload}" "ASAN_OPTIONS=detect_leaks=0")
+    endif()
+    # The Python plugin needs cffi; skip (not fail) where it is not installed.
+    add_test(NAME python_example_plugin
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${Python3_EXECUTABLE} plugins/python/example_plugin.py
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_example_plugin PROPERTIES
+        LABELS unit SKIP_REGULAR_EXPRESSION "No module named 'cffi'")
+endif()
