@@ -85,6 +85,11 @@ if(BUILD_TESTING)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
 
+    add_test(NAME symbol_rules
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
+                $<TARGET_FILE:libodin3> $<TARGET_FILE:example_plugin>)
+    set_tests_properties(symbol_rules PROPERTIES LABELS unit)
+
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 0\\)")

@@ -33,6 +33,20 @@ class CheckRulesTest(unittest.TestCase):
         self.assertEqual(len(self.check("src/passes/opt.c", "void f(void) { exit(1); }\n")), 1)
         self.assertEqual(len(self.check("src/passes/opt.c", "void f(void) { _Exit(1); }\n")), 1)
 
+    def test_exit_aliases_are_flagged(self) -> None:
+        for text in (
+            "void (*quit_fn)(int) = exit;\n",
+            "#define QUIT exit\n",
+            "void f(void) { _exit(1); }\n",
+            "void f(void) { (exit)(1); }\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(len(self.check("src/passes/opt.c", text)), 1)
+
+    def test_identifiers_containing_exit_are_allowed(self) -> None:
+        text = "int exit_code; int on_exit_hook; void f(void) { abort_count++; }\n"
+        self.assertEqual(self.check("src/passes/opt.c", text), [])
+
     def test_exit_in_cli_is_allowed(self) -> None:
         self.assertEqual(self.check("src/cli/main.c", "void f(void) { exit(1); }\n"), [])
 

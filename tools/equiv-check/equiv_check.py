@@ -345,10 +345,22 @@ _UNSUPPORTED_LATCH_TYPES = {"ah": "level-sensitive", "al": "level-sensitive",
                             "as": "asynchronous"}
 
 
+def _is_buffer(cell: blif.Names) -> bool:
+    """True if a single-input cover computes the identity, however it is written."""
+    if len(cell.inputs) != 1 or not cell.rows:
+        return False
+    on_set = cell.rows[0][1] == "1"
+
+    def value(bit: str) -> bool:
+        matched = any(plane in (bit, "-") for plane, _ in cell.rows)
+        return matched if on_set else not matched
+
+    return not value("0") and value("1")
+
+
 def _clock_source(flat: Flat, net: str) -> str | None:
     """Follow single-input buffers back from ``net``; the primary input reached, or None."""
-    buffers = {n.output: n.inputs[0] for n in flat.names
-               if len(n.inputs) == 1 and n.rows == [("1", "1")]}
+    buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}
     inputs = set(flat.inputs)
     seen: set[str] = set()
     while net not in inputs and net in buffers and net not in seen:

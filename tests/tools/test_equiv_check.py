@@ -260,6 +260,8 @@ class EquivCheckAbcTest(unittest.TestCase):
         self.assertIn("treated as 0", err)
         code, out, err = check(cx("l_re.blif"), cx("clk_buffered.blif"))
         self.assertEqual(code, 0, out + err)
+        code, out, err = check(cx("l_re.blif"), cx("clk_buffered_offset.blif"))
+        self.assertEqual(code, 0, out + err)
 
     def test_latches_on_one_side_only(self) -> None:
         code, out, err = check(cx("mix_a.blif"), cx("mix_b.blif"))

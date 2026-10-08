@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Machine-check the spec §15.1 C rules that no compiler flag or linter covers.
 
-- exit()/_Exit()/quick_exit() only under src/cli/;
+- exit()/_exit()/_Exit()/quick_exit() only under src/cli/ (the bare name is matched, so function
+  pointers and macro aliases are caught too);
 - abort() only in src/ir/check*.c (the debug-build `check`);
 - goto only to the single `cleanup` label.
 
-VLAs are rejected by -Wvla and recursion by clang-tidy misc-no-recursion. Comments and string
+VLAs are rejected by -Wvla and recursion by clang-tidy misc-no-recursion. Token-pasting tricks
+are caught at link level by tools/check-symbols.sh (a CTest test). Comments and string
 literals are ignored. Usage: check_rules.py FILE...  Exit 0 clean, 1 on violations.
 """
 
@@ -18,8 +20,8 @@ from pathlib import PurePosixPath
 _TOKENS = re.compile(
     r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.DOTALL
 )
-_EXIT = re.compile(r"\b(?:exit|_Exit|quick_exit)\s*\(")
-_ABORT = re.compile(r"\babort\s*\(")
+_EXIT = re.compile(r"\b(?:exit|_exit|_Exit|quick_exit)\b")
+_ABORT = re.compile(r"\babort\b")
 _GOTO = re.compile(r"\bgoto\s+(\w+)")
 
 
