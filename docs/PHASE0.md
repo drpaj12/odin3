@@ -8,7 +8,7 @@ Every step is tagged:
 
 - `[AGENT]` — Claude Code does it, then ticks the box and continues.
 - `[HUMAN]` — Claude Code stops, prints the exact instructions for Peter, and waits for "done" before continuing.
-- `[REVIEW]` — Claude Code does the work, then stops for Peter to review before moving on.
+- `[REVIEW]` — Claude Code does the work, then stops for Peter to review before moving on. (From decision #17 on: asynchronous — the agent runs a critique pass, merges on green, and Peter reviews when he likes.)
 
 Prompt to start the run (originally in `~/odin3-ws`; from §6 on start in `~/odin3-ws/odin3` — decision #18 — Opus, `high` effort, plan mode off for this one — it's a checklist, not a design task):
 
@@ -139,7 +139,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
   - `/plugin` → Anthropic marketplace → install the C/C++ code-intelligence (clangd-based) plugin, so the agent gets compiler diagnostics instead of guessing.
   - Nothing else yet; project-local skills are written in §6.
 - [x] `[HUMAN]` Model settings, inside `claude`: `/model` (Opus; note whether Fable is offered), `/effort high` as the default, `/advisor` → Opus. See §9 for when to raise to `xhigh`. (2026-10-08: Fable **is** offered — use it for the Phase 1 IR row in §9.)
-- [x] `[HUMAN]` Hand over: `cd ~/odin3-ws && claude`, paste the §A prompt. Everything below is the agent's unless tagged.
+- [x] `[HUMAN]` Hand over: `cd ~/odin3-ws && claude` (from §6 on: `cd ~/odin3-ws/odin3 && claude`, decision #18), paste the §A prompt. Everything below is the agent's unless tagged.
 
 ## 3. Repositories
 
