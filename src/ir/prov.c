@@ -1,6 +1,7 @@
 /* prov.c — provenance lineage: records, pass runs, hash-consing, navigation, tombstones. */
 #include "ir/prov.h"
 
+#include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
@@ -19,6 +20,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* 1024 records (~56 KiB) per page of the record store. */
@@ -208,8 +210,9 @@ static odin3_status record_intern(odin3_prov_store *store, const odin3_prov_reco
 
 odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
                                   odin3_pass_ctx *ctx) {
-    if (ctx == NULL || pass_name_str == 0 || !is_str(design, pass_name_str)) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_pass_run_begin: no context or %u is not a pass name",
+    if (design == NULL || ctx == NULL || pass_name_str == 0 || !is_str(design, pass_name_str)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_pass_run_begin: no design, no context or %u is not a pass name",
                   pass_name_str);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -396,8 +399,12 @@ static odin3_status collect_leaf(void *user, uint32_t id) {
 
 odin3_status odin3_prov_sources(const odin3_design *design, odin3_prov_id id,
                                 odin3_prov_visit visit, void *user) {
+    if (design == NULL || visit == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_prov_sources: no design or no visit callback");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_prov_store *store = design->prov; /* walk scratch only (IR-17: one thread) */
-    if (record_cat(store, id.v) == NULL || visit == NULL) {
+    if (record_cat(store, id.v) == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_prov_sources: %u is not a record", id.v);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -471,15 +478,29 @@ odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parent
 
 /* --- tombstones ---------------------------------------------------------------------------- */
 
+/* A node's type must be a cell type of the design; nets and wires have none. */
+static bool tombstone_kind_valid(const odin3_design *design, const odin3_tombstone *tomb) {
+    switch (tomb->kind) {
+    case ODIN3_OBJ_NODE:
+        return odin3_celltype_get(design, tomb->type) != NULL;
+    case ODIN3_OBJ_NET:
+    case ODIN3_OBJ_WIRE:
+        return !odin3_celltype_valid(tomb->type);
+    default:
+        return false;
+    }
+}
+
 static bool tombstone_valid(const odin3_design *design, const odin3_tombstone *tomb) {
     if (tomb == NULL || tomb->module.v == 0 || tomb->module.v >= odin3_design_module_end(design)) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: no tombstone or unknown module");
         return false;
     }
-    if (tomb->kind != ODIN3_OBJ_NODE && tomb->kind != ODIN3_OBJ_NET &&
-        tomb->kind != ODIN3_OBJ_WIRE) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: kind %d is not a node, net or wire",
-                  (int)tomb->kind);
+    if (!tombstone_kind_valid(design, tomb)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_tombstone_add: kind %d with type %u is not a node of a known type, "
+                  "a net or a wire",
+                  (int)tomb->kind, tomb->type.v);
         return false;
     }
     if (tomb->prov.v != 0 && record_cat(design->prov, tomb->prov.v) == NULL) {
@@ -490,6 +511,10 @@ static bool tombstone_valid(const odin3_design *design, const odin3_tombstone *t
 }
 
 odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *tomb) {
+    if (design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: no design");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (!tombstone_valid(design, tomb)) {
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -517,18 +542,27 @@ uint32_t odin3_tombstone_end(const odin3_design *design) {
 /* --- forward index ------------------------------------------------------------------------- */
 
 /*
- * Compressed rows: row r's hits are hits[first[r] .. first[r + 1]). carried holds the objects
- * grouped by the record they carry; rec_* gives, per record, the objects whose ancestry includes
- * it; loc_* gives, per location key, the objects with that file and line among their leaves.
+ * Everything is O(records + parent edges + objects), sized exactly at build. Rows: row r of a
+ * (first, items) pair is items[first[r] .. first[r + 1]). Queries walk children breadth-first
+ * with generation marks and write into result; they never allocate.
  */
 struct odin3_prov_index {
-    odin3_vec carried_first; /* uint32_t, records + 1 */
-    odin3_vec carried;       /* odin3_prov_hit */
-    odin3_vec rec_first;     /* uint32_t, records + 1 */
-    odin3_vec rec_hits;      /* odin3_prov_hit */
-    odin3_u64map *loc_keys;  /* file << 32 | line -> row of loc_first */
-    odin3_vec loc_first;     /* uint32_t, keys + 1 */
-    odin3_vec loc_hits;      /* odin3_prov_hit */
+    uint32_t n_records;      /* record IDs 0 .. n_records - 1 at build time */
+    uint32_t n_hits;         /* swept objects with lineage */
+    uint32_t n_edges;        /* parent edges */
+    uint32_t n_keys;         /* distinct (file, line) of leaf locations */
+    uint32_t n_key_leaves;   /* (key, leaf) entries */
+    uint32_t gen;            /* current query generation */
+    uint32_t *carried_first; /* n_records + 1 */
+    odin3_prov_hit *carried; /* n_hits: objects by the record they carry, sweep order within */
+    uint32_t *child_first;   /* n_records + 1 */
+    uint32_t *children;      /* n_edges: child record IDs, ascending per parent */
+    uint64_t *keys;          /* n_keys: file << 32 | line, ascending */
+    uint32_t *key_first;     /* n_keys + 1 */
+    uint32_t *key_leaves;    /* n_key_leaves: leaf record IDs, ascending per key */
+    uint32_t *marks;         /* n_records: the query generation that reached the record */
+    uint32_t *queue;         /* n_records: query worklist, each record at most once */
+    odin3_prov_hit *result;  /* n_hits: the last query's hits */
 };
 
 /* A swept object and the record it carries. */
@@ -537,44 +571,49 @@ typedef struct swept_obj {
     uint32_t prov;
 } swept_obj;
 
-/* Row `row` of a compressed table receives the objects carrying record `rec`. */
-typedef struct row_pair {
-    uint32_t row;
-    uint32_t rec;
-} row_pair;
+/* A leaf location: (file, line) key and the leaf record. */
+typedef struct key_leaf {
+    uint64_t key;
+    uint32_t leaf;
+} key_leaf;
 
-typedef struct index_build {
-    odin3_prov_index *ix;
-    odin3_prov_store *store;
-    odin3_vec objs;       /* swept_obj in sweep order */
-    odin3_vec rec_pairs;  /* row_pair: ancestor <- carried record */
-    odin3_vec loc_pairs;  /* row_pair: location key <- carried record */
-    odin3_vec key_stamps; /* uint32_t per location key: the last carried record that added it */
-    uint32_t current;     /* the carried record being walked */
-} index_build;
-
-/* Grows vec to count zeroed elements (it holds at most count). */
-static odin3_status zero_fill(odin3_vec *vec, size_t count) {
-    if (odin3_vec_reserve(vec, count) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    while (vec->len < count) {
-        (void)odin3_vec_push(vec); /* reserved */
-    }
-    return ODIN3_OK;
+/* Index arrays: count elements of size bytes (at least one element), zeroed; NULL on OOM. */
+static void *array_new(size_t count, size_t size) {
+    return odin3_util_calloc((count > 0 ? count : 1) * size);
 }
 
-static odin3_status sweep_add(index_build *build, odin3_prov_hit hit, odin3_prov_id prov) {
-    if (record_cat(build->store, prov.v) == NULL) {
-        return ODIN3_OK; /* no lineage (0) or a bad ID (check rule 7 reports it) */
+static size_t array_bytes(size_t count, size_t size) {
+    return (count > 0 ? count : 1) * size;
+}
+
+static uint64_t loc_key(const odin3_srcloc *loc) {
+    return (uint64_t)loc->file << LOC_KEY_SHIFT | loc->line;
+}
+
+/* Slots the sweep visits: each module, its nodes, nets and wires, and every tombstone. */
+static size_t sweep_slots(odin3_design *design) {
+    size_t slots = design->prov->tombstones.len;
+    for (uint32_t i = 1; i < odin3_design_module_end(design); i++) {
+        const odin3_module *module = odin3_module_get(design, (odin3_module_id){i});
+        slots += 1 + (size_t)odin3_module_node_end(module) + odin3_module_net_end(module) +
+                 odin3_module_wire_end(module);
     }
-    swept_obj *slot = odin3_vec_push(&build->objs);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
+    return slots;
+}
+
+typedef struct sweep {
+    const odin3_prov_store *store;
+    swept_obj *objs; /* room for every slot */
+    uint32_t count;
+} sweep;
+
+static void sweep_add(sweep *sw, odin3_prov_hit hit, odin3_prov_id prov) {
+    if (record_cat(sw->store, prov.v) == NULL) {
+        return; /* no lineage (0) or a bad ID (check rule 7 reports it) */
     }
-    slot->hit = hit;
-    slot->prov = prov.v;
-    return ODIN3_OK;
+    sw->objs[sw->count].hit = hit;
+    sw->objs[sw->count].prov = prov.v;
+    sw->count++;
 }
 
 static odin3_prov_hit hit_of(odin3_module_id module, odin3_objref obj, bool live) {
@@ -583,276 +622,323 @@ static odin3_prov_hit hit_of(odin3_module_id module, odin3_objref obj, bool live
 }
 
 /* The module itself, then its nodes, nets and wires in ID order, live and dead (IR-6). */
-static odin3_status sweep_module(index_build *build, const odin3_module *module) {
+static void sweep_module(sweep *sw, const odin3_module *module) {
     odin3_module_id mid = odin3_module_id_of(module);
     odin3_objref self = {ODIN3_OBJ_MODULE, mid.v};
-    odin3_status status = sweep_add(build, hit_of(mid, self, true), odin3_module_prov(module));
-    for (uint32_t i = 1; status == ODIN3_OK && i < odin3_module_node_end(module); i++) {
+    sweep_add(sw, hit_of(mid, self, true), odin3_module_prov(module));
+    for (uint32_t i = 1; i < odin3_module_node_end(module); i++) {
         odin3_objref obj = {ODIN3_OBJ_NODE, i};
         odin3_node_id node = {i};
-        status = sweep_add(build, hit_of(mid, obj, odin3_node_live(module, node)),
-                           odin3_node_prov(module, node));
+        sweep_add(sw, hit_of(mid, obj, odin3_node_live(module, node)),
+                  odin3_node_prov(module, node));
     }
-    for (uint32_t i = 1; status == ODIN3_OK && i < odin3_module_net_end(module); i++) {
+    for (uint32_t i = 1; i < odin3_module_net_end(module); i++) {
         odin3_objref obj = {ODIN3_OBJ_NET, i};
         odin3_net_id net = {i};
-        status = sweep_add(build, hit_of(mid, obj, odin3_net_live(module, net)),
-                           odin3_net_prov(module, net));
+        sweep_add(sw, hit_of(mid, obj, odin3_net_live(module, net)), odin3_net_prov(module, net));
     }
-    for (uint32_t i = 1; status == ODIN3_OK && i < odin3_module_wire_end(module); i++) {
+    for (uint32_t i = 1; i < odin3_module_wire_end(module); i++) {
         odin3_objref obj = {ODIN3_OBJ_WIRE, i};
         odin3_wire_id wire = {i};
-        status = sweep_add(build, hit_of(mid, obj, odin3_wire_live(module, wire)),
-                           odin3_wire_prov(module, wire));
+        sweep_add(sw, hit_of(mid, obj, odin3_wire_live(module, wire)),
+                  odin3_wire_prov(module, wire));
     }
-    return status;
 }
 
-static odin3_status sweep_design(index_build *build, odin3_design *design) {
-    odin3_status status = ODIN3_OK;
-    for (uint32_t i = 1; status == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        status = sweep_module(build, odin3_module_get(design, (odin3_module_id){i}));
+static void sweep_design(sweep *sw, odin3_design *design) {
+    for (uint32_t i = 1; i < odin3_design_module_end(design); i++) {
+        sweep_module(sw, odin3_module_get(design, (odin3_module_id){i}));
     }
-    const odin3_vec *tombstones = &build->store->tombstones;
-    for (uint32_t i = 1; status == ODIN3_OK && i < tombstones->len; i++) {
+    const odin3_vec *tombstones = &sw->store->tombstones;
+    for (uint32_t i = 1; i < tombstones->len; i++) {
         const odin3_tombstone *tomb = odin3_vec_cat(tombstones, i);
         odin3_objref obj = {tomb->kind, 0};
         odin3_prov_hit hit = {tomb->module, obj, false, i};
-        status = sweep_add(build, hit, tomb->prov);
+        sweep_add(sw, hit, tomb->prov);
     }
-    return status;
 }
 
-static uint32_t row_start(const odin3_vec *first, uint32_t row) {
-    return *(const uint32_t *)odin3_vec_cat(first, row);
-}
-
-static uint32_t row_count(const odin3_vec *first, uint32_t row) {
-    return row_start(first, row + 1) - row_start(first, row);
-}
-
-/* Groups the swept objects by record (stable: sweep order within a record). */
-static odin3_status group_by_record(index_build *build) {
-    odin3_prov_index *ix = build->ix;
-    size_t count = build->objs.len;
-    if (count > UINT32_MAX ||
-        zero_fill(&ix->carried_first, (size_t)record_end(build->store) + 1) != ODIN3_OK ||
-        zero_fill(&ix->carried, count) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    uint32_t *first = ix->carried_first.data;
-    const swept_obj *objs = build->objs.data;
-    for (size_t i = 0; i < count; i++) {
-        first[objs[i].prov]++;
-    }
+/* Turns per-row counts in first[0 .. rows) into end offsets (first[rows] = total). */
+static void rows_end(uint32_t *first, uint32_t rows) {
     uint32_t sum = 0;
-    for (size_t row = 0; row < ix->carried_first.len; row++) {
-        sum += first[row];
-        first[row] = sum; /* end of the row; the fill below moves it to the start */
-    }
-    odin3_prov_hit *carried = ix->carried.data;
-    for (size_t i = count; i > 0; i--) {
-        carried[--first[objs[i - 1].prov]] = objs[i - 1].hit;
-    }
-    return ODIN3_OK;
-}
-
-static odin3_status push_pair(odin3_vec *pairs, row_pair pair) {
-    row_pair *slot = odin3_vec_push(pairs);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = pair;
-    return ODIN3_OK;
-}
-
-/* The row of a location (file and line), added on first sight; one pair per carried record. */
-static odin3_status index_loc(index_build *build, const odin3_srcloc *loc) {
-    uint64_t key = (uint64_t)loc->file << LOC_KEY_SHIFT | loc->line; /* a u64map key */
-    uint64_t row = 0;
-    if (!odin3_u64map_get(build->ix->loc_keys, key, &row)) {
-        row = build->key_stamps.len;
-        odin3_kv entry = {key, row};
-        if (row >= UINT32_MAX || odin3_vec_push(&build->key_stamps) == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        if (odin3_u64map_put(build->ix->loc_keys, entry) != ODIN3_OK) {
-            odin3_vec_pop(&build->key_stamps);
-            return ODIN3_ERR_NO_MEMORY;
-        }
-    }
-    uint32_t *stamp = odin3_vec_at(&build->key_stamps, row);
-    if (*stamp == build->current) {
-        return ODIN3_OK;
-    }
-    *stamp = build->current;
-    row_pair pair = {(uint32_t)row, build->current};
-    return push_pair(&build->loc_pairs, pair);
-}
-
-/* walk_visit: ancestor id of the carried record (and, for a leaf, its locations). */
-static odin3_status index_visit(void *user, uint32_t id) {
-    index_build *build = user;
-    row_pair pair = {id, build->current};
-    odin3_status status = push_pair(&build->rec_pairs, pair);
-    const odin3_prov_record *rec = record_cat(build->store, id);
-    if (rec->kind == ODIN3_PROV_DERIVED) {
-        return status;
-    }
-    for (uint32_t i = 0; status == ODIN3_OK && i < rec->n_locs; i++) {
-        status = index_loc(build, &rec->locs[i]);
-    }
-    return status;
-}
-
-/* Walks each carried record once (the memo: objects sharing a record share its walk). */
-static odin3_status walk_carried(index_build *build) {
-    odin3_status status = ODIN3_OK;
-    uint32_t end = record_end(build->store);
-    for (uint32_t rec = 1; status == ODIN3_OK && rec < end; rec++) {
-        if (row_count(&build->ix->carried_first, rec) > 0) {
-            build->current = rec;
-            status = walk(build->store, rec, index_visit, build);
-        }
-    }
-    return status;
-}
-
-/* A compressed table to fill from pairs: rows rows. */
-typedef struct row_table {
-    odin3_vec *first;
-    odin3_vec *hits;
-    uint32_t rows;
-} row_table;
-
-/* Fills the table: row r gets, pair by pair in order, the objects carrying the pair's record. */
-static odin3_status table_fill(const index_build *build, const odin3_vec *pairs, row_table out) {
-    const odin3_vec *carried_first = &build->ix->carried_first;
-    const row_pair *list = pairs->data;
-    if (zero_fill(out.first, (size_t)out.rows + 1) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    uint32_t *first = out.first->data;
-    uint64_t total = 0;
-    for (size_t i = 0; i < pairs->len; i++) {
-        uint32_t count = row_count(carried_first, list[i].rec);
-        first[list[i].row] += count;
-        total += count;
-    }
-    if (total > UINT32_MAX || zero_fill(out.hits, (size_t)total) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    uint32_t sum = 0;
-    for (uint32_t row = 0; row <= out.rows; row++) {
+    for (uint32_t row = 0; row <= rows; row++) {
         sum += first[row];
         first[row] = sum;
     }
-    const odin3_prov_hit *carried = build->ix->carried.data;
-    odin3_prov_hit *hits = out.hits->data;
-    for (size_t i = pairs->len; i > 0; i--) {
-        const row_pair *pair = &list[i - 1];
-        uint32_t start = row_start(carried_first, pair->rec);
-        for (uint32_t k = row_count(carried_first, pair->rec); k > 0; k--) {
-            hits[--first[pair->row]] = carried[start + k - 1];
+}
+
+/* Sweeps the design and groups the objects by record (stable: sweep order within a record). */
+static odin3_status index_carried(odin3_prov_index *ix, odin3_design *design) {
+    size_t slots = sweep_slots(design);
+    sweep sw = {design->prov, NULL, 0};
+    if (slots <= UINT32_MAX) {
+        sw.objs = array_new(slots, sizeof(swept_obj));
+    }
+    if (sw.objs == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    sweep_design(&sw, design);
+    ix->n_hits = sw.count;
+    ix->carried_first = array_new((size_t)ix->n_records + 1, sizeof(uint32_t));
+    ix->carried = array_new(ix->n_hits, sizeof(odin3_prov_hit));
+    if (ix->carried_first == NULL || ix->carried == NULL) {
+        odin3_util_free(sw.objs);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < sw.count; i++) {
+        ix->carried_first[sw.objs[i].prov]++;
+    }
+    rows_end(ix->carried_first, ix->n_records);
+    for (uint32_t i = sw.count; i > 0; i--) {
+        ix->carried[--ix->carried_first[sw.objs[i - 1].prov]] = sw.objs[i - 1].hit;
+    }
+    odin3_util_free(sw.objs);
+    return ODIN3_OK;
+}
+
+/* The children table: the reverse of every record's parents. */
+static odin3_status index_children(odin3_prov_index *ix, const odin3_prov_store *store) {
+    uint64_t edges = 0;
+    for (uint32_t rec = 1; rec < ix->n_records; rec++) {
+        edges += record_cat(store, rec)->parents.count;
+    }
+    if (edges > UINT32_MAX) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    ix->n_edges = (uint32_t)edges;
+    ix->child_first = array_new((size_t)ix->n_records + 1, sizeof(uint32_t));
+    ix->children = array_new(ix->n_edges, sizeof(uint32_t));
+    if (ix->child_first == NULL || ix->children == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t rec = 1; rec < ix->n_records; rec++) {
+        odin3_prov_list parents = record_cat(store, rec)->parents;
+        for (uint32_t k = 0; k < parents.count; k++) {
+            ix->child_first[parents.ids[k].v]++;
+        }
+    }
+    rows_end(ix->child_first, ix->n_records);
+    for (uint32_t rec = ix->n_records - 1; rec > 0; rec--) {
+        odin3_prov_list parents = record_cat(store, rec)->parents;
+        for (uint32_t k = 0; k < parents.count; k++) {
+            ix->children[--ix->child_first[parents.ids[k].v]] = rec;
         }
     }
     return ODIN3_OK;
 }
 
-static odin3_prov_index *index_new(void) {
-    odin3_prov_index *ix = odin3_util_calloc(sizeof *ix);
-    if (ix == NULL) {
-        return NULL;
+static int key_leaf_cmp(const void *lhs, const void *rhs) {
+    const key_leaf *one = lhs;
+    const key_leaf *other = rhs;
+    if (one->key != other->key) {
+        return one->key < other->key ? -1 : 1;
     }
-    odin3_vec_init(&ix->carried_first, sizeof(uint32_t));
-    odin3_vec_init(&ix->carried, sizeof(odin3_prov_hit));
-    odin3_vec_init(&ix->rec_first, sizeof(uint32_t));
-    odin3_vec_init(&ix->rec_hits, sizeof(odin3_prov_hit));
-    odin3_vec_init(&ix->loc_first, sizeof(uint32_t));
-    odin3_vec_init(&ix->loc_hits, sizeof(odin3_prov_hit));
-    ix->loc_keys = odin3_u64map_create(0);
-    if (ix->loc_keys == NULL) {
-        odin3_util_free(ix);
-        return NULL;
+    if (one->leaf != other->leaf) {
+        return one->leaf < other->leaf ? -1 : 1;
     }
-    return ix;
+    return 0;
 }
 
-static odin3_status index_fill(index_build *build, odin3_design *design) {
-    odin3_status status = sweep_design(build, design);
+/* Every (file, line) of a leaf location with a known file, and the leaf; count in *count. */
+static key_leaf *leaf_locations(const odin3_prov_index *ix, const odin3_prov_store *store,
+                                uint32_t *count) {
+    uint64_t total = 0;
+    for (uint32_t rec = 1; rec < ix->n_records; rec++) {
+        total += record_cat(store, rec)->n_locs;
+    }
+    key_leaf *list = total <= UINT32_MAX ? array_new(total, sizeof(key_leaf)) : NULL;
+    *count = 0;
+    for (uint32_t rec = 1; list != NULL && rec < ix->n_records; rec++) {
+        const odin3_prov_record *leaf = record_cat(store, rec);
+        for (uint32_t k = 0; k < leaf->n_locs; k++) {
+            if (leaf->locs[k].file != 0) {
+                list[*count].key = loc_key(&leaf->locs[k]);
+                list[(*count)++].leaf = rec;
+            }
+        }
+    }
+    return list;
+}
+
+/* Lays out sorted, de-duplicated (key, leaf) entries as keys and per-key leaf rows. */
+static odin3_status index_keys_fill(odin3_prov_index *ix, const key_leaf *list, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        ix->n_keys += i == 0 || list[i].key != list[i - 1].key ? 1U : 0U;
+    }
+    ix->keys = array_new(ix->n_keys, sizeof(uint64_t));
+    ix->key_first = array_new((size_t)ix->n_keys + 1, sizeof(uint32_t));
+    ix->key_leaves = array_new(count, sizeof(uint32_t));
+    if (ix->keys == NULL || ix->key_first == NULL || ix->key_leaves == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t key = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (i > 0 && list[i].key != list[i - 1].key) {
+            key++;
+        }
+        ix->keys[key] = list[i].key;
+        ix->key_leaves[i] = list[i].leaf;
+        ix->key_first[key + 1] = i + 1;
+    }
+    ix->n_key_leaves = count;
+    return ODIN3_OK;
+}
+
+/* The location table: (file, line) -> the leaf records with such a location. */
+static odin3_status index_keys(odin3_prov_index *ix, const odin3_prov_store *store) {
+    uint32_t count = 0;
+    key_leaf *list = leaf_locations(ix, store, &count);
+    if (list == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    qsort(list, count, sizeof *list, key_leaf_cmp);
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < count; i++) { /* one entry per (key, leaf) */
+        if (kept == 0 || key_leaf_cmp(&list[kept - 1], &list[i]) != 0) {
+            list[kept++] = list[i];
+        }
+    }
+    odin3_status status = index_keys_fill(ix, list, kept);
+    odin3_util_free(list);
+    return status;
+}
+
+static odin3_status index_fill(odin3_prov_index *ix, odin3_design *design) {
+    ix->n_records = record_end(design->prov);
+    odin3_status status = index_carried(ix, design);
     if (status == ODIN3_OK) {
-        status = group_by_record(build);
+        status = index_children(ix, design->prov);
     }
     if (status == ODIN3_OK) {
-        status = walk_carried(build);
+        status = index_keys(ix, design->prov);
     }
     if (status == ODIN3_OK) {
-        row_table recs = {&build->ix->rec_first, &build->ix->rec_hits, record_end(build->store)};
-        status = table_fill(build, &build->rec_pairs, recs);
-    }
-    if (status == ODIN3_OK) {
-        row_table locs = {&build->ix->loc_first, &build->ix->loc_hits,
-                          (uint32_t)build->key_stamps.len};
-        status = table_fill(build, &build->loc_pairs, locs);
+        ix->marks = array_new(ix->n_records, sizeof(uint32_t));
+        ix->queue = array_new(ix->n_records, sizeof(uint32_t));
+        ix->result = array_new(ix->n_hits, sizeof(odin3_prov_hit));
+        if (ix->marks == NULL || ix->queue == NULL || ix->result == NULL) {
+            status = ODIN3_ERR_NO_MEMORY;
+        }
     }
     return status;
 }
 
 odin3_prov_index *odin3_prov_index_build(odin3_design *design) {
-    index_build build = {index_new(), design->prov, {0}, {0}, {0}, {0}, 0};
-    if (build.ix == NULL) {
+    if (design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_prov_index_build: no design");
         return NULL;
     }
-    odin3_vec_init(&build.objs, sizeof(swept_obj));
-    odin3_vec_init(&build.rec_pairs, sizeof(row_pair));
-    odin3_vec_init(&build.loc_pairs, sizeof(row_pair));
-    odin3_vec_init(&build.key_stamps, sizeof(uint32_t));
-    odin3_status status = index_fill(&build, design);
-    odin3_vec_free(&build.objs);
-    odin3_vec_free(&build.rec_pairs);
-    odin3_vec_free(&build.loc_pairs);
-    odin3_vec_free(&build.key_stamps);
-    if (status != ODIN3_OK) {
-        odin3_prov_index_destroy(build.ix);
+    odin3_prov_index *ix = odin3_util_calloc(sizeof *ix);
+    if (ix == NULL) {
         return NULL;
     }
-    return build.ix;
-}
-
-static odin3_prov_hits table_row(const odin3_vec *first, const odin3_prov_hit *hits, uint64_t row) {
-    odin3_prov_hits out = {NULL, 0};
-    if (row + 1 < first->len) {
-        uint32_t row32 = (uint32_t)row;
-        out.count = row_count(first, row32);
-        out.hits = out.count > 0 ? hits + row_start(first, row32) : NULL;
+    if (index_fill(ix, design) != ODIN3_OK) {
+        odin3_prov_index_destroy(ix);
+        return NULL;
     }
-    return out;
+    return ix;
 }
 
-odin3_prov_hits odin3_prov_index_by_loc(const odin3_prov_index *ix, odin3_srcloc loc) {
-    uint64_t key = (uint64_t)loc.file << LOC_KEY_SHIFT | loc.line;
-    uint64_t row = 0;
-    if (!odin3_u64map_get(ix->loc_keys, key, &row)) {
+size_t odin3_prov_index_bytes(const odin3_prov_index *ix) {
+    size_t rows = (size_t)ix->n_records + 1;
+    return sizeof *ix + 2 * array_bytes(rows, sizeof(uint32_t)) +
+           2 * array_bytes(ix->n_hits, sizeof(odin3_prov_hit)) +
+           array_bytes(ix->n_edges, sizeof(uint32_t)) + array_bytes(ix->n_keys, sizeof(uint64_t)) +
+           array_bytes((size_t)ix->n_keys + 1, sizeof(uint32_t)) +
+           array_bytes(ix->n_key_leaves, sizeof(uint32_t)) +
+           2 * array_bytes(ix->n_records, sizeof(uint32_t));
+}
+
+/* --- forward queries ----------------------------------------------------------------------- */
+
+static void query_begin(odin3_prov_index *ix) {
+    ix->gen++;
+    if (ix->gen == 0) { /* wrapped: forget every old mark */
+        memset(ix->marks, 0, array_bytes(ix->n_records, sizeof(uint32_t)));
+        ix->gen = 1;
+    }
+}
+
+/* Queues rec unless this query reached it already; returns the new queue length. */
+static uint32_t query_enqueue(odin3_prov_index *ix, uint32_t rec, uint32_t tail) {
+    if (ix->marks[rec] == ix->gen) {
+        return tail;
+    }
+    ix->marks[rec] = ix->gen;
+    ix->queue[tail] = rec;
+    return tail + 1;
+}
+
+/* Breadth-first over children from the queued records; the hits of every record reached. */
+static odin3_prov_hits query_run(odin3_prov_index *ix, uint32_t tail) {
+    for (uint32_t head = 0; head < tail; head++) {
+        uint32_t rec = ix->queue[head];
+        for (uint32_t k = ix->child_first[rec]; k < ix->child_first[rec + 1]; k++) {
+            tail = query_enqueue(ix, ix->children[k], tail);
+        }
+    }
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < tail; i++) {
+        uint32_t rec = ix->queue[i];
+        for (uint32_t k = ix->carried_first[rec]; k < ix->carried_first[rec + 1]; k++) {
+            ix->result[count++] = ix->carried[k];
+        }
+    }
+    odin3_prov_hits hits = {count > 0 ? ix->result : NULL, count};
+    return hits;
+}
+
+/* Row of key in the sorted key table, or n_keys when absent. */
+static uint32_t key_row(const odin3_prov_index *ix, uint64_t key) {
+    uint32_t low = 0;
+    uint32_t high = ix->n_keys;
+    while (low < high) {
+        uint32_t mid = low + (high - low) / 2;
+        if (ix->keys[mid] < key) {
+            low = mid + 1;
+        } else {
+            high = mid;
+        }
+    }
+    return low < ix->n_keys && ix->keys[low] == key ? low : ix->n_keys;
+}
+
+odin3_prov_hits odin3_prov_index_by_loc(odin3_prov_index *ix, odin3_srcloc loc) {
+    odin3_prov_hits none = {NULL, 0};
+    uint32_t row = loc.file != 0 ? key_row(ix, loc_key(&loc)) : ix->n_keys;
+    if (row == ix->n_keys) {
+        return none;
+    }
+    query_begin(ix);
+    uint32_t tail = 0;
+    for (uint32_t k = ix->key_first[row]; k < ix->key_first[row + 1]; k++) {
+        tail = query_enqueue(ix, ix->key_leaves[k], tail);
+    }
+    return query_run(ix, tail);
+}
+
+odin3_prov_hits odin3_prov_index_by_record(odin3_prov_index *ix, odin3_prov_id rec) {
+    if (rec.v == 0 || rec.v >= ix->n_records) {
         odin3_prov_hits none = {NULL, 0};
         return none;
     }
-    return table_row(&ix->loc_first, ix->loc_hits.data, row);
-}
-
-odin3_prov_hits odin3_prov_index_by_record(const odin3_prov_index *ix, odin3_prov_id rec) {
-    return table_row(&ix->rec_first, ix->rec_hits.data, rec.v);
+    query_begin(ix);
+    return query_run(ix, query_enqueue(ix, rec.v, 0));
 }
 
 void odin3_prov_index_destroy(odin3_prov_index *ix) {
     if (ix == NULL) {
         return;
     }
-    odin3_vec_free(&ix->carried_first);
-    odin3_vec_free(&ix->carried);
-    odin3_vec_free(&ix->rec_first);
-    odin3_vec_free(&ix->rec_hits);
-    odin3_u64map_destroy(ix->loc_keys);
-    odin3_vec_free(&ix->loc_first);
-    odin3_vec_free(&ix->loc_hits);
+    odin3_util_free(ix->carried_first);
+    odin3_util_free(ix->carried);
+    odin3_util_free(ix->child_first);
+    odin3_util_free(ix->children);
+    odin3_util_free(ix->keys);
+    odin3_util_free(ix->key_first);
+    odin3_util_free(ix->key_leaves);
+    odin3_util_free(ix->marks);
+    odin3_util_free(ix->queue);
+    odin3_util_free(ix->result);
     odin3_util_free(ix);
 }

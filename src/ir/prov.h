@@ -11,6 +11,7 @@
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -45,8 +46,9 @@ typedef struct odin3_pass_ctx {
 
 /*
  * Starts a pass run named pass_name_str (a non-empty strtab ID): appends it to the design's
- * pass-run table (run IDs from 1, in order) and fills *ctx with op 0. Readers and front ends are
- * runs too.
+ * pass-run table and fills *ctx with op 0. The run ID is the run number: one global sequence
+ * from 1, in order; names may repeat across runs. Readers and front ends are runs too.
+ * INVALID_ARG for a NULL design or ctx.
  */
 odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
                                   odin3_pass_ctx *ctx);
@@ -117,7 +119,8 @@ uint32_t odin3_passrun_end(const odin3_design *design);
  * Backward navigation: calls visit once for each SOURCE or IMPORTED record reachable from id
  * (id itself included), in depth-first order following parents in order, so the first call is
  * the record that names the object (IR §6). Iterative, with a visited mark; visit is called after
- * the walk, so it may itself navigate. INVALID_ARG for an unknown id; NO_MEMORY before any call.
+ * the walk, so it may itself navigate. INVALID_ARG for an unknown id or a NULL design or visit;
+ * NO_MEMORY before any call.
  */
 typedef void (*odin3_prov_visit)(void *user, odin3_prov_id leaf);
 odin3_status odin3_prov_sources(const odin3_design *design, odin3_prov_id id,
@@ -126,12 +129,16 @@ odin3_status odin3_prov_sources(const odin3_design *design, odin3_prov_id id,
 /*
  * Forward navigation (IR §6). A snapshot built by one sweep over every node, net and wire of
  * every module, live and dead, plus each module itself and every tombstone; objects with prov 0
- * (none) or an unknown prov are skipped. Each record carried by some object is walked once
- * backward; memory is O(sum over objects of their ancestor count). NULL on out of memory. Later
- * changes to the design are not reflected; the design must outlive the index.
+ * (none) or an unknown prov are skipped. It stores O(records + parent edges + objects): the
+ * objects carrying each record, each record's children, and the leaf records of each (file,
+ * line). Queries walk children breadth-first and never allocate. NULL on out of memory or a NULL
+ * design. Later changes to the design are not reflected; the design must outlive the index.
  */
 typedef struct odin3_prov_index odin3_prov_index;
 odin3_prov_index *odin3_prov_index_build(odin3_design *design);
+
+/* Bytes the index holds (its struct and arrays). */
+size_t odin3_prov_index_bytes(const odin3_prov_index *ix);
 
 /*
  * One object found by the index: its module and kind/ID, whether it is live. A tombstone hit has
@@ -144,17 +151,22 @@ typedef struct odin3_prov_hit {
     uint32_t tombstone;
 } odin3_prov_hit;
 
-/* A view into the index, valid until it is destroyed. Order: by record ID, then sweep order. */
+/*
+ * A view of a query's result, owned by the index: valid until the next query on the same index
+ * or its destruction. Order: breadth-first over records from the start record(s) (each record's
+ * objects in sweep order), so an object's own record's objects come before its descendants'.
+ */
 typedef struct odin3_prov_hits {
     const odin3_prov_hit *hits;
     uint32_t count;
 } odin3_prov_hits;
 
-/* Objects with a source location of the same file and line among their leaves (col ignored). */
-odin3_prov_hits odin3_prov_index_by_loc(const odin3_prov_index *ix, odin3_srcloc loc);
+/* Objects with a source location of the same file and line among their leaves (col ignored;
+ * file 0, unknown, matches nothing). */
+odin3_prov_hits odin3_prov_index_by_loc(odin3_prov_index *ix, odin3_srcloc loc);
 
 /* Objects whose ancestry includes rec (rec itself included); empty for an unknown record. */
-odin3_prov_hits odin3_prov_index_by_record(const odin3_prov_index *ix, odin3_prov_id rec);
+odin3_prov_hits odin3_prov_index_by_record(odin3_prov_index *ix, odin3_prov_id rec);
 
 /* Frees the index; NULL is a no-op. */
 void odin3_prov_index_destroy(odin3_prov_index *ix);
@@ -173,8 +185,9 @@ typedef struct odin3_tombstone {
 } odin3_tombstone;
 
 /*
- * Appends a tombstone (IDs from 1). INVALID_ARG for an unknown module, a kind other than node,
- * net or wire, or a prov that is neither 0 nor an existing record.
+ * Appends a tombstone (IDs from 1). INVALID_ARG for a NULL design or tombstone, an unknown
+ * module, a kind other than node, net or wire, a node whose type is not a cell type of the design,
+ * a net or wire with a type, or a prov that is neither 0 nor an existing record.
  */
 odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *tomb);
 

@@ -29,9 +29,12 @@ enum {
     OOM_LIMIT = 10000,
     PROV_PAGE = 1 << 10, /* records per page of the store (prov.c) */
     INDEX_GROWS_AT = 14, /* idindex: 16 slots at 85% load hold 13; the 14th entry grows it */
-    /* chain scenario: index, key map, 3 sweep growths, carried rows and hits, marks, worklist,
-     * 2 ancestor-pair growths, key stamps, location pairs, 2 x (rows, hits) */
-    INDEX_BUILD_ALLOCS = 17,
+    /* chain scenario: index, sweep buffer, carried rows and hits, child rows and children,
+     * leaf locations, keys, key rows, key leaves, marks, queue, result */
+    INDEX_BUILD_ALLOCS = 13,
+    SAVE_MAX = 1024,
+    WIDE = 1000,
+    LINEAR_BYTES = 64, /* index bytes per (record + object slot) */
 };
 
 static odin3_design *design;
@@ -187,6 +190,18 @@ static uint32_t count_live(odin3_prov_hits hits, bool live) {
     return count;
 }
 
+/* A copy of a query result (a view lasts only until the next query on the index). */
+static odin3_prov_hit saved_hits[SAVE_MAX];
+
+static odin3_prov_hits save_hits(odin3_prov_hits hits) {
+    TEST_ASSERT_TRUE(hits.count <= SAVE_MAX);
+    if (hits.count > 0) {
+        memcpy(saved_hits, hits.hits, sizeof saved_hits[0] * hits.count);
+    }
+    odin3_prov_hits copy = {saved_hits, hits.count};
+    return copy;
+}
+
 static void assert_same_hits(odin3_prov_hits want, odin3_prov_hits got) {
     TEST_ASSERT_EQUAL_UINT32(want.count, got.count);
     for (uint32_t i = 0; i < want.count; i++) {
@@ -224,9 +239,10 @@ static void test_pass_run_invalid(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_run_begin(design, 0, &ctx));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_run_begin(design, past, &ctx));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_run_begin(design, 1, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_run_begin(NULL, 1, &ctx));
     TEST_ASSERT_EQUAL_UINT32(1, odin3_passrun_end(design));
     TEST_ASSERT_NULL(ctx.design);
-    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
+    TEST_ASSERT_EQUAL_size_t(4, errors_logged);
 }
 
 /* --- SOURCE / IMPORTED ---------------------------------------------------------------------- */
@@ -416,7 +432,7 @@ static void test_review_focus_3(void) {
     TEST_ASSERT_EQUAL_UINT32(sc.source.v, found.ids[0].v);
     odin3_prov_index *ix = odin3_prov_index_build(design);
     TEST_ASSERT_NOT_NULL(ix);
-    odin3_prov_hits by_loc = odin3_prov_index_by_loc(ix, sc.loc);
+    odin3_prov_hits by_loc = save_hits(odin3_prov_index_by_loc(ix, sc.loc));
     focus_check_hits(&sc, by_loc);
     assert_same_hits(by_loc, odin3_prov_index_by_record(ix, sc.source));
     odin3_prov_hits op3 = odin3_prov_index_by_record(ix, sc.op_rec[3]);
@@ -543,7 +559,7 @@ static void test_decompose_then_clump(void) {
     TEST_ASSERT_NOT_NULL(ix);
     odin3_srcloc other_col = sc.loc;
     other_col.col = 40; /* file + line match; column is ignored */
-    odin3_prov_hits hits = odin3_prov_index_by_loc(ix, other_col);
+    odin3_prov_hits hits = save_hits(odin3_prov_index_by_loc(ix, other_col));
     chain_check_forward(&sc, hits);
     assert_same_hits(hits, odin3_prov_index_by_record(ix, sc.source));
     odin3_prov_hits first = odin3_prov_index_by_record(ix, sc.first_op);
@@ -684,18 +700,30 @@ static void test_tombstones(void) {
     TEST_ASSERT_EQUAL_UINT32(intern("old_net"), got->name);
     TEST_ASSERT_NULL(odin3_tombstone_get(design, 0));
     TEST_ASSERT_NULL(odin3_tombstone_get(design, 2));
-    odin3_tombstone bad[4] = {
-        {{0}, ODIN3_OBJ_NODE, {0}, 0, {0}},         /* no module */
-        {{mid.v + 1}, ODIN3_OBJ_NODE, {0}, 0, {0}}, /* unknown module */
-        {mid, ODIN3_OBJ_MODULE, {0}, 0, {0}},       /* modules are not deleted */
-        {mid, ODIN3_OBJ_WIRE, {0}, 0, {1}},         /* no such record */
+}
+
+static void test_tombstone_invalid(void) {
+    odin3_module_id mid = odin3_module_id_of(module);
+    odin3_celltype_id and_type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_AND_"), &and_type));
+    odin3_tombstone gate = {mid, ODIN3_OBJ_NODE, and_type, 0, {0}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &gate));
+    odin3_tombstone bad[7] = {
+        {{0}, ODIN3_OBJ_NODE, and_type, 0, {0}},         /* no module */
+        {{mid.v + 1}, ODIN3_OBJ_NODE, and_type, 0, {0}}, /* unknown module */
+        {mid, ODIN3_OBJ_MODULE, {0}, 0, {0}},            /* modules are not deleted */
+        {mid, ODIN3_OBJ_WIRE, {0}, 0, {1}},              /* no such record */
+        {mid, ODIN3_OBJ_NODE, {0}, 0, {0}},              /* a node without a type */
+        {mid, ODIN3_OBJ_NODE, {UINT32_MAX}, 0, {0}},     /* an unknown type */
+        {mid, ODIN3_OBJ_NET, and_type, 0, {0}},          /* a net with a type */
     };
-    for (uint32_t i = 0; i < 4; i++) {
+    for (uint32_t i = 0; i < 7; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(design, &bad[i]));
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(design, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(NULL, &gate));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_tombstone_end(design));
-    TEST_ASSERT_EQUAL_size_t(5, errors_logged);
+    TEST_ASSERT_EQUAL_size_t(9, errors_logged);
 }
 
 static void test_lookups_out_of_range(void) {
@@ -708,6 +736,16 @@ static void test_lookups_out_of_range(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_prov_index_by_loc(ix, (odin3_srcloc){0}).count);
     odin3_prov_index_destroy(ix);
     odin3_prov_index_destroy(NULL);
+}
+
+static void test_null_arguments(void) {
+    TEST_ASSERT_NULL(odin3_prov_index_build(NULL));
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id src = source_at(&rd, loc_at("x.v", 1, 1), 0);
+    leaves none = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_sources(design, src, NULL, &none));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_sources(NULL, src, collect, &none));
+    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
 }
 
 static void test_module_prov_indexed(void) {
@@ -726,6 +764,70 @@ static void test_module_prov_indexed(void) {
     odin3_prov_index_destroy(ix);
 }
 
+/* --- forward index at scale: linear build ------------------------------------------------- */
+
+/* Index memory is linear: under LINEAR_BYTES per record plus object slot. */
+static void assert_index_linear(const odin3_prov_index *ix) {
+    size_t slots = (size_t)odin3_module_node_end(module) + odin3_module_net_end(module) +
+                   odin3_module_wire_end(module) + odin3_tombstone_end(design);
+    size_t bound = LINEAR_BYTES * (odin3_prov_end(design) + slots);
+    TEST_ASSERT_TRUE(odin3_prov_index_bytes(ix) < bound);
+}
+
+/* 100k operations deep, every step leaving a dead object behind (retained churn). */
+static void test_index_dead_chain(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_srcloc loc = loc_at("churn.v", 5, 1);
+    odin3_prov_id src = source_at(&rd, loc, 0);
+    odin3_pass_ctx pass = run_named("churn");
+    odin3_prov_id cur = src;
+    for (uint32_t i = 0; i < DEEP; i++) {
+        odin3_prov_begin_op(&pass);
+        cur = derive1(&pass, cur);
+        kill_node(node_with("$_NOT_", cur));
+    }
+    odin3_node_id last = node_with("$_NOT_", cur);
+    odin3_prov_index *ix = odin3_prov_index_build(design);
+    TEST_ASSERT_NOT_NULL(ix);
+    assert_index_linear(ix);
+    odin3_prov_hits hits = odin3_prov_index_by_record(ix, src);
+    TEST_ASSERT_EQUAL_UINT32(DEEP + 1, hits.count);
+    TEST_ASSERT_EQUAL_UINT32(1, count_live(hits, true));
+    assert_node_hit(hits, last, true);
+    TEST_ASSERT_EQUAL_UINT32(DEEP + 1, odin3_prov_index_by_loc(ix, loc).count);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_prov_index_by_record(ix, cur).count); /* last dead + last */
+    odin3_prov_index_destroy(ix);
+}
+
+/* 1000 sources clumped into one object, which is then decomposed into 1000 pieces. */
+static void test_index_clump_then_decompose(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_prov_id srcs[WIDE];
+    for (uint32_t i = 0; i < WIDE; i++) {
+        srcs[i] = source_at(&rd, loc_at("wide.v", i + 1, 1), 0);
+        kill_node(node_with("$_BUF_", srcs[i]));
+    }
+    odin3_pass_ctx clump = run_named("clump");
+    odin3_prov_begin_op(&clump);
+    odin3_prov_id whole = derive_n(&clump, srcs, WIDE);
+    kill_node(node_with("$_AND_", whole));
+    odin3_pass_ctx lower = run_named("lower");
+    odin3_prov_begin_op(&lower);
+    for (uint32_t i = 0; i < WIDE; i++) {
+        (void)node_with("$_OR_", derive1(&lower, whole));
+    }
+    odin3_prov_index *ix = odin3_prov_index_build(design);
+    TEST_ASSERT_NOT_NULL(ix);
+    assert_index_linear(ix);
+    odin3_prov_hits hits = odin3_prov_index_by_record(ix, srcs[0]);
+    TEST_ASSERT_EQUAL_UINT32(1 + 1 + WIDE, hits.count);
+    TEST_ASSERT_EQUAL_UINT32(2, count_live(hits, false));
+    TEST_ASSERT_EQUAL_UINT32(1 + 1 + WIDE,
+                             odin3_prov_index_by_loc(ix, loc_at("wide.v", 500, 9)).count);
+    TEST_ASSERT_EQUAL_UINT32(WIDE + 1, odin3_prov_index_by_record(ix, whole).count);
+    odin3_prov_index_destroy(ix);
+}
+
 /* --- out of memory -------------------------------------------------------------------------- */
 
 static void exhaust_prov_arena(size_t need) {
@@ -736,17 +838,16 @@ static void exhaust_prov_arena(size_t need) {
 }
 
 /* Sweeps fail points over one record creation; returns the number of injected failures. */
-static uint32_t record_oom_sweep(odin3_pass_ctx *ctx, odin3_prov_id parent, odin3_srcloc loc) {
+static uint32_t record_oom_sweep(odin3_pass_ctx *ctx, odin3_prov_list parents, odin3_srcloc loc) {
     uint32_t end = odin3_prov_end(design);
     uint32_t failures = 0;
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     odin3_prov_id id = {0};
     for (long fail_at = 0; fail_at < OOM_LIMIT && st != ODIN3_OK; fail_at++) {
         odin3_prov_origin origin = {&loc, 1, 0, 0};
-        odin3_prov_list list = {&parent, 1};
         odin3_util_set_alloc_fail_after(fail_at);
-        st = odin3_prov_valid(parent) ? odin3_prov_derive(ctx, list, &id)
-                                      : odin3_prov_source(ctx, &origin, &id);
+        st = parents.count > 0 ? odin3_prov_derive(ctx, parents, &id)
+                               : odin3_prov_source(ctx, &origin, &id);
         odin3_util_set_alloc_fail_after(-1);
         if (st != ODIN3_OK) {
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
@@ -760,21 +861,62 @@ static uint32_t record_oom_sweep(odin3_pass_ctx *ctx, odin3_prov_id parent, odin
     return failures;
 }
 
-/* The next derive needs a new record page and a new arena chunk. */
-static void test_derive_oom_sweep(void) {
+/* Fills the record store to a page boundary with source records; returns the last location. */
+static odin3_srcloc fill_record_page(void) {
     odin3_pass_ctx rd = run_named("read_verilog");
     odin3_srcloc loc = loc_at("oom.v", 0, 1);
     while (odin3_prov_end(design) < PROV_PAGE) {
         loc.line++;
         (void)source_at(&rd, loc, 0);
     }
+    return loc;
+}
+
+/* The next derive needs a new record page and a new arena chunk. */
+static void test_derive_oom_sweep(void) {
+    odin3_srcloc loc = fill_record_page();
     odin3_pass_ctx lower = run_named("lower");
     odin3_prov_begin_op(&lower);
     exhaust_prov_arena(sizeof(odin3_prov_id));
-    TEST_ASSERT_EQUAL_UINT32(2, record_oom_sweep(&lower, (odin3_prov_id){1}, loc));
+    odin3_prov_id parent = {1};
+    odin3_prov_list one = {&parent, 1};
+    TEST_ASSERT_EQUAL_UINT32(2, record_oom_sweep(&lower, one, loc));
     TEST_ASSERT_EQUAL_UINT32(1,
                              odin3_prov_get(design, (odin3_prov_id){PROV_PAGE})->parents.ids[0].v);
     TEST_ASSERT_EQUAL_UINT32(PROV_PAGE, derive1(&lower, (odin3_prov_id){1}).v); /* consed */
+}
+
+/*
+ * Two parents (one repeated): the de-duplication scratch, the visit marks, a new record page and
+ * a new arena chunk. Kept allocations would shift later fail points, so each try starts fresh.
+ */
+static void test_derive_parents_oom_sweep(void) {
+    odin3_prov_id parents[3] = {{2}, {1}, {2}};
+    odin3_prov_list list = {parents, 3};
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    uint32_t failures = 0;
+    odin3_prov_id id = {0};
+    for (long fail_at = 0; fail_at < OOM_LIMIT && st != ODIN3_OK; fail_at++) {
+        fresh_design();
+        (void)fill_record_page();
+        odin3_pass_ctx lower = run_named("lower");
+        odin3_prov_begin_op(&lower);
+        exhaust_prov_arena(2 * sizeof(odin3_prov_id));
+        odin3_util_set_alloc_fail_after(fail_at);
+        st = odin3_prov_derive(&lower, list, &id);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            TEST_ASSERT_EQUAL_UINT32(PROV_PAGE, odin3_prov_end(design));
+            failures++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(4, failures);
+    TEST_ASSERT_EQUAL_UINT32(PROV_PAGE, id.v);
+    const odin3_prov_record *rec = odin3_prov_get(design, id);
+    TEST_ASSERT_EQUAL_UINT32(2, rec->parents.count);
+    TEST_ASSERT_EQUAL_UINT32(2, rec->parents.ids[0].v);
+    TEST_ASSERT_EQUAL_UINT32(1, rec->parents.ids[1].v);
 }
 
 /* The next source record grows the hash-cons index and needs a new arena chunk. */
@@ -787,7 +929,8 @@ static void test_source_oom_sweep(void) {
     }
     exhaust_prov_arena(sizeof(odin3_srcloc));
     loc.line++;
-    TEST_ASSERT_EQUAL_UINT32(2, record_oom_sweep(&rd, (odin3_prov_id){0}, loc));
+    odin3_prov_list none = {NULL, 0};
+    TEST_ASSERT_EQUAL_UINT32(2, record_oom_sweep(&rd, none, loc));
     for (uint32_t line = 1; line <= loc.line; line++) { /* every record still found */
         odin3_srcloc probe = loc;
         probe.line = line;
@@ -800,22 +943,24 @@ static void test_run_and_tombstone_oom(void) {
     uint32_t name = intern("p");
     odin3_tombstone tomb = {odin3_module_id_of(module), ODIN3_OBJ_NET, {0}, 0, {0}};
     for (uint32_t i = 0; i < 2 * 8; i++) { /* vecs of 8 then 16 (slot 0 reserved) grow twice */
-        for (long fail_at = 0;; fail_at++) {
+        odin3_status tst = ODIN3_ERR_NO_MEMORY;
+        for (long fail_at = 0; fail_at < OOM_LIMIT && tst != ODIN3_OK; fail_at++) {
             odin3_pass_ctx ctx = {0};
             uint32_t runs = odin3_passrun_end(design);
             uint32_t tombs = odin3_tombstone_end(design);
             odin3_util_set_alloc_fail_after(fail_at);
             odin3_status st = odin3_pass_run_begin(design, name, &ctx);
-            odin3_status tst = st == ODIN3_OK ? odin3_tombstone_add(design, &tomb) : st;
+            tst = st == ODIN3_OK ? odin3_tombstone_add(design, &tomb) : st;
             odin3_util_set_alloc_fail_after(-1);
             if (tst == ODIN3_OK) {
-                break;
+                continue;
             }
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, tst);
             TEST_ASSERT_EQUAL_UINT32(st == ODIN3_OK ? runs + 1 : runs, odin3_passrun_end(design));
             TEST_ASSERT_EQUAL_UINT32(tombs, odin3_tombstone_end(design));
             failures++;
         }
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, tst);
     }
     TEST_ASSERT_EQUAL_UINT32(4, failures); /* two growths each */
     TEST_ASSERT_EQUAL_UINT32(2 * 8 + 1, odin3_tombstone_end(design));
@@ -886,9 +1031,14 @@ int main(void) {
     RUN_TEST(test_deep_chains);
     RUN_TEST(test_hash_consing_100k);
     RUN_TEST(test_tombstones);
+    RUN_TEST(test_tombstone_invalid);
     RUN_TEST(test_lookups_out_of_range);
+    RUN_TEST(test_null_arguments);
     RUN_TEST(test_module_prov_indexed);
+    RUN_TEST(test_index_dead_chain);
+    RUN_TEST(test_index_clump_then_decompose);
     RUN_TEST(test_derive_oom_sweep);
+    RUN_TEST(test_derive_parents_oom_sweep);
     RUN_TEST(test_source_oom_sweep);
     RUN_TEST(test_run_and_tombstone_oom);
     RUN_TEST(test_sources_oom_sweep);
