@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# token-cost: tokens, time and API-equivalent cost of building Odin III. See token_cost.py.
+# Exit codes: 0 success, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/token_cost.py" "$@"
