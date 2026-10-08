@@ -37,7 +37,9 @@ add_library(odin3_core OBJECT
     src/api/plugin.c
     src/util/alloc.c
     src/util/arena.c
-    src/util/hash.c)
+    src/util/hash.c
+    src/util/vec.c
+    src/util/pagevec.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -100,6 +102,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_alloc)
     odin3_add_unit_test(test_util_arena)
     odin3_add_unit_test(test_util_hash)
+    odin3_add_unit_test(test_util_vec)
+    odin3_add_unit_test(test_util_pagevec)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
