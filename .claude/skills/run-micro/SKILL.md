@@ -13,7 +13,7 @@ Never claim a micro passes unless this skill ran the comparison and you saw the 
 ## 2. Detect Phase 0 reality
 Run `.claude/skills/run-micro/run-micro.sh` (small bash driver, read it first). It checks, in order:
 1. `tests/micro/` has `.v` designs (otherwise: "no micro designs yet").
-2. `build/debug/odin3` can synthesize: `--help` offers a read/synth option (otherwise: "no Odin III output yet (Phase 0/1)").
+2. `build/debug/odin3` exists.
 3. `ODIN3_MICRO_CMD` is set: the exact command for one design, with `{design}`, `{arch}`, `{out}` placeholders (write BLIF to `{out}`). Odin III's CLI for this does not exist yet; set it once known (ask the human).
 If any check fails, print the matching message, report **no pass and no fail**, and stop. Do not fabricate output or compare goldens against themselves.
 
@@ -24,4 +24,4 @@ Golden: `~/odin3-ws/golden/<arch>/micro/<leaf>/<leaf>.parmys.blif` for `<arch>` 
 3. Odin III failing to produce a BLIF is a FAIL with the log tail as note.
 
 ## 4. Report
-Table: `design | arch | identical | equivalent | note` with yes/no/skipped/error. Then totals. "Identical" is the Phase 2 target; "equivalent but not identical" is a partial result, say so. Show the netlist-compare diff head for a few differing designs. Exit codes 2 are errors, not fails.
+Table: `design | arch | identical | equivalent | note` with yes/no/skipped/error. Then totals. "Identical" is the Phase 2 target; "equivalent but not identical" is a partial result, say so. Show the netlist-compare diff head for a few differing designs. Script exit: 0 all pass, 1 any fail, 2 a tool errored (an error is neither a pass nor a fail — report it), 3 nothing could be run (Phase 0/1: say so, claim nothing).

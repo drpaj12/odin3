@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # run-micro.sh: compare Odin III output on tests/micro against Parmys goldens.
 # Env: ODIN3_MICRO_CMD (template with {design} {arch} {out}), GOLDEN (default ~/odin3-ws/golden).
-# Exit: 0 all pass, 1 any fail, 3 nothing could be run (Phase 0/1), 2 usage error.
+# Exit: 0 all pass, 1 any fail, 2 a comparison tool errored (no fail), 3 nothing could be run
+# (Phase 0/1). Errors are never counted as passes or fails.
 set -uo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 cd "$repo" || exit 2
@@ -15,8 +16,8 @@ if [ "${#designs[@]}" -eq 0 ]; then
     echo "no micro designs in tests/micro yet (Phase 0): nothing run, nothing passed"
     exit 3
 fi
-if [ ! -x "$bin" ] || ! "$bin" --help 2>&1 | grep -qiE 'synth|read|--blif|--output'; then
-    echo "no Odin III output yet (Phase 0/1): $bin cannot synthesize; nothing run, nothing passed"
+if [ ! -x "$bin" ]; then
+    echo "no Odin III binary at $bin (build the debug preset first): nothing run, nothing passed"
     exit 3
 fi
 if [ -z "${ODIN3_MICRO_CMD:-}" ]; then
@@ -25,6 +26,7 @@ if [ -z "${ODIN3_MICRO_CMD:-}" ]; then
 fi
 
 fail=0
+err=0
 printf '%-28s %-36s %-10s %-10s %s\n' design arch identical equivalent note
 for d in "${designs[@]}"; do
     leaf=$(basename "$d" .v)
@@ -49,17 +51,24 @@ for d in "${designs[@]}"; do
                 if [ $rc -eq 0 ]; then
                     ident=yes equiv=yes
                 else
-                    [ $rc -eq 1 ] && ident=no || { ident=error; note="netlist-compare exit $rc"; }
+                    if [ $rc -ne 1 ]; then
+                    ident=error note="netlist-compare exit $rc" err=1
+                else
+                    ident=no
                     python3 tools/equiv-check/equiv_check.py "$out" "$gold" >"build/micro-out/$a/$leaf.equiv.log" 2>&1
                     case $? in
                     0) equiv=yes ;;
                     1) equiv=no fail=1 ;;
-                    *) equiv=error fail=1 note="$note equiv-check error: build/micro-out/$a/$leaf.equiv.log" ;;
+                    *) equiv=error err=1 note="equiv-check error: build/micro-out/$a/$leaf.equiv.log" ;;
                     esac
+                fi
                 fi
             fi
         fi
         printf '%-28s %-36s %-10s %-10s %s\n' "$leaf" "$a" "$ident" "$equiv" "$note"
     done
 done
-exit $fail
+if [ $fail -ne 0 ]; then
+    exit 1
+fi
+exit $((err ? 2 : 0))

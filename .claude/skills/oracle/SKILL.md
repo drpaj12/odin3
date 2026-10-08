@@ -25,6 +25,6 @@ tools/run-oracle.sh [--tool parmys|odin|both] --name <group>/<leaf> <design.v> "
 Print a table `design | arch | parmys | odin` with ok/failed, then totals (`N ok, M failed`). For each failure give the path `~/odin3-ws/golden/<arch>/<name>/<leaf>.<tool>.log`, plus the last error line from it. Check each `ok` has both `.blif` and `.prov`.
 
 ## Reminders (tell the human at the end)
-- Goldens are only real once committed and pushed to the odin3-golden repo: `cd ~/odin3-ws/golden && git add -A && git commit && git push`. `*.blif` is stored with Git LFS (`git lfs ls-files` should list the new blifs). Push after each batch (decision #16). Pushing needs human approval.
+- Goldens are only real once committed and pushed to the odin3-golden repo: `git -C ~/odin3-ws/golden add -A && git -C ~/odin3-ws/golden commit -m "goldens: <what> @ VTR <short sha>" && git -C ~/odin3-ws/golden push`. `*.blif` is stored with Git LFS (`git -C ~/odin3-ws/golden lfs ls-files` should list the new blifs). Push after each batch (decision #16).
 - `~/odin3-ws/external/` is read-only: never edit or write there; scratch runs go to `ODIN3_WORK` (`~/odin3-ws/work/oracle`).
 - Do not overwrite existing goldens with a different VTR commit without telling the human (check `vtr_commit` in the `.prov` and `docs/ORACLES.md`).

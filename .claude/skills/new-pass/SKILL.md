@@ -13,7 +13,7 @@ Argument: `<name>` (lowercase snake_case, a pass from spec section 6 such as `op
 - Working tree must be clean and not on `main` unless you are about to branch. Never commit to `main`.
 
 ## 2. Branch and PASSES.md row (always)
-1. `git switch -c feat/<name>` from an up-to-date `main`.
+1. `git switch main && git pull --ff-only && git switch -c feat/<name>`.
 2. Add a row to `docs/PASSES.md`, in pipeline order (spec section 6), replacing the "No passes yet" placeholder: `| <name> | <phase> | <input view -> output view> | src/passes/<name>.c | tests/golden/<name>/ | <notes> |`. Fill phase and views from spec section 6/12; write `TBD` rather than guess.
 
 ## 3. IR gate (hard stop)
@@ -29,12 +29,12 @@ Read the real IR headers and the pass-manager registration API first; copy an ex
 - Run `cmake --preset debug && cmake --build --preset debug && ctest --preset debug`; the new test must fail for the right reason, nothing else may break.
 
 ## 5. Per-pass workflow (spec section 12)
-`/superpowers:brainstorm` -> `write-plan` -> **human approves the plan** -> `execute-plan` -> `/run-micro` -> PR.
+`superpowers:brainstorming` -> `superpowers:writing-plans` -> **human approves the plan** -> `superpowers:executing-plans` -> `/run-micro` -> PR.
 
 ## Rules
 - One pass per PR. Every pass has a golden test.
-- Call IR `check` before and after the pass in debug builds.
+- The pass manager runs IR `check` before and after every pass in debug builds (spec §3/§10); never bypass it.
 - Functions return `odin3_status`; no `exit`/`abort`/`goto` (except `cleanup:`); no recursion in IR traversals; IR objects come from the Module arena.
 - Run `/lint` before every commit (it is the pre-commit gate).
-- Commit and push at every green checkpoint, before risky steps, and at session end (decision #16). `git push` needs human approval.
+- Commit and push at every green checkpoint, before risky steps, and at session end (decision #16).
 - Stop and ask on any IR-invariant doubt; IR/invariant changes and mapping algorithms need human review.

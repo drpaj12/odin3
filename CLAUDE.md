@@ -4,13 +4,18 @@ Odin III is an MIT-licensed HDL elaboration and front-end synthesis framework fo
 research, the successor to Odin and Odin II. It reads Verilog/SystemVerilog/VHDL and structural
 netlists into one hierarchical, provenance-tracked IR, does architecture-driven partial mapping,
 links ABC for soft logic, and writes netlists for VTR, Intel/Altera and visualisation.
-Peter is the architect and reviewer; you are the primary developer. He decides; you propose.
+Peter is the architect; you are the primary developer. You proceed on your own recommendations
+and ask him only when he is needed (rule 11).
+
+**Start sessions in this directory** (`cd ~/odin3-ws/odin3 && claude`): `.claude/settings.json`
+and the project skills load only from the session's starting directory. `~/odin3-ws/golden`,
+`work` and `external` are reachable as additional directories.
 
 ## Read first
 
 - `docs/DESIGN.md` — the spec. Read the relevant sections before any task.
 - `docs/DESIGN.md` §5 **and** `docs/IR.md` before touching anything in `src/ir/`.
-- The op-registry file for any task that touches cell types (Phase 1+).
+- The op-registry file (once it exists, Phase 1) for any task.
 - `docs/PHASE0.md` §A.1 (how work is split across agents) and §A.2 (decisions log).
 - `docs/ADR/` — the decisions behind the design. Do not contradict an ADR; propose a change.
 
@@ -39,12 +44,15 @@ tools/equiv-check/equiv-check a.blif b.blif                  # 0 equivalent, 1 n
 
 1. **One pass per PR.** Every pass has a unit test, a golden test, and a `docs/PASSES.md` row
    (`/new-pass` scaffolds them).
-2. **Per-pass workflow:** `/superpowers:brainstorm` → `write-plan` → Peter approves →
-   `execute-plan` → `/run-micro` → PR. No code before an approved plan.
+2. **Per-pass workflow:** `superpowers:brainstorming` → `superpowers:writing-plans` → Peter
+   approves → `superpowers:executing-plans` → `/run-micro` → PR. No code before an approved plan.
 3. **`check` runs before and after every pass in Debug.** Never disable it to get a pass through.
-4. **Never edit `~/odin3-ws/external/`** (upstream VTR, Yosys, …): read and build only.
-5. **Never commit to `main`.** It is protected (PR + green `ci` required, squash merge only).
-   Work on `feat/<name>` branches.
+4. **Never write to `~/odin3-ws/external/`** (upstream VTR, Yosys, …): read only. Rebuilding an
+   upstream oracle (docs/ORACLES.md) changes every golden, so it is Peter's call and runs outside
+   the sandbox.
+5. **Never commit to `main`.** It is protected on GitHub (PR + green `ci`, squash merge only) and
+   locally (pre-commit `no-commit-to-branch`). Work on `feat/<name>` branches; merge your own PR
+   when `ci` is green (decision #17).
 6. **Run `/lint` before every commit.** The pre-commit hook runs the gate without clang-tidy; CI
    runs all of it. Never weaken `.clang-tidy`, add `NOLINT`, or relax a gate without Peter's
    approval.
@@ -54,14 +62,18 @@ tools/equiv-check/equiv-check a.blif b.blif                  # 0 equivalent, 1 n
    any risky step (large refactor, dispatching agents, regenerating goldens), and at session end.
 9. **The repo is the source of truth** (decision #15). Docs live only in `docs/`; never create
    copies elsewhere. Goldens live in `~/odin3-ws/golden` (its own repo, BLIFs in Git LFS).
-10. **Peter reviews** every IR/invariant change and every mapping algorithm. No PR merges red.
-11. **Decisions for Peter** go in one numbered list, each with your recommendation; record his
-    answers in `docs/PHASE0.md` §A.2 (or the current phase's log) by number.
+10. **Peter reviews** every IR/invariant change and every mapping algorithm (spec §12). No PR
+    merges red.
+11. **Autonomy by default** (decision #17): act on your recommendation and log it in the current
+    phase's decisions log as an agent default he may override. Stop for Peter only when a step
+    needs his hands, is irreversible or outward-facing, changes a design rule (spec, ADRs, IR
+    invariants), or you have no clear recommendation — then ask in one numbered list.
 12. **Multi-agent work** follows `docs/PHASE0.md` §A.1: you orchestrate and own git; implementer
     agents get disjoint files and a written interface; a read-only critique agent reviews every
-    PR before it opens and you triage every finding.
+    PR before it opens; you triage every finding, list rejected ones in the PR description, and
+    get one re-check on each high finding after fixing it.
 
-## Code standard (spec §15 — every rule is machine-checked)
+## Code standard (spec §15; the gate checks most of it, the rest is on you)
 
 - **C17 only** in the core. Flags: `-Wall -Wextra -Wpedantic -Wshadow -Wconversion
   -Wstrict-prototypes -Wmissing-prototypes -Wvla -Werror`. C++ only in `adapters/` and
