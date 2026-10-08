@@ -89,6 +89,11 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- Benchmark (built by default, not a CTest) --------------------------------------
+add_executable(bench_util tests/bench/bench_util.c)
+target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_util PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
