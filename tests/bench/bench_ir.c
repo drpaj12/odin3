@@ -1,4 +1,7 @@
-/* bench_ir.c — times a 2,000,000-node IR module: build, check, fanout walk, delete, compact. */
+/*
+ * bench_ir.c — times a 2,000,000-node IR module: build, check, fanout walk, delete, compact, and
+ * provenance navigation (forward index build, one by-location query, backward walks).
+ */
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/module.h"
@@ -12,7 +15,16 @@
 #include <sys/resource.h>
 #include <time.h>
 
-enum { BENCH_NODES = 2000000, BENCH_NETS = 2200000, BENCH_PROV_EVERY = 1000, BENCH_DEL_EVERY = 10 };
+enum {
+    BENCH_NODES = 2000000,
+    BENCH_NETS = 2200000,
+    BENCH_PROV_EVERY = 1000,                       /* nodes (and their nets) per source line */
+    BENCH_GROUPS = BENCH_NODES / BENCH_PROV_EVERY, /* source lines 1 .. BENCH_GROUPS */
+    BENCH_DEL_EVERY = 10
+};
+
+/* Line of the record shared by the nets no node drives (the busiest line: 200,000 nets). */
+static const uint32_t BENCH_INPUT_LINE = BENCH_GROUPS + 1;
 
 typedef struct bench_ctx {
     odin3_design *design;
@@ -21,7 +33,9 @@ typedef struct bench_ctx {
     odin3_celltype_id dff_type;
     odin3_pass_ctx pass;
     uint64_t lcg;
-    odin3_node_id *ids; /* node ID returned at creation, by creation index */
+    odin3_node_id *ids;   /* node ID returned at creation, by creation index */
+    odin3_prov_id *provs; /* record per line - 1: node groups, then the input nets' line */
+    uint32_t file;        /* strtab ID of the source file of every record */
 } bench_ctx;
 
 static double now_seconds(void) {
@@ -72,6 +86,7 @@ static int setup(bench_ctx *ctx) {
     if (find_type(ctx, "$_AND_", &ctx->and_type) != 0 ||
         find_type(ctx, "$_DFF_P_", &ctx->dff_type) != 0 ||
         odin3_design_intern(ctx->design, (odin3_bytes){"top", 3}, &name) != ODIN3_OK ||
+        odin3_design_intern(ctx->design, (odin3_bytes){"bench.v", 7}, &ctx->file) != ODIN3_OK ||
         odin3_module_create(ctx->design, name, none, &id) != ODIN3_OK ||
         odin3_pass_run_begin(ctx->design, name, &ctx->pass) != ODIN3_OK) {
         return 1;
@@ -80,26 +95,33 @@ static int setup(bench_ctx *ctx) {
     return ctx->module == NULL;
 }
 
-static int make_nets(bench_ctx *ctx) {
-    odin3_prov_id none = {0};
-    for (uint32_t i = 0; i < BENCH_NETS; i++) {
-        odin3_net_id net = {0};
-        if (odin3_net_create(ctx->module, 0, none, &net) != ODIN3_OK) {
+/* One SOURCE record per line (one operation each): node groups, then the input nets' line. */
+static int make_provs(bench_ctx *ctx) {
+    ctx->provs = odin3_util_calloc((BENCH_GROUPS + 1) * sizeof *ctx->provs);
+    if (ctx->provs == NULL) {
+        return 1;
+    }
+    for (uint32_t line = 1; line <= BENCH_INPUT_LINE; line++) {
+        odin3_srcloc loc = {ctx->file, line, 1, line, 2};
+        odin3_prov_origin origin = {&loc, 1, 0, 0};
+        odin3_prov_begin_op(&ctx->pass);
+        if (odin3_prov_source(&ctx->pass, &origin, &ctx->provs[line - 1]) != ODIN3_OK) {
             return 1;
         }
     }
     return 0;
 }
 
-/* One source record per BENCH_PROV_EVERY nodes; updates *prov when i starts a new group. */
-static int node_prov(bench_ctx *ctx, uint32_t i, odin3_prov_id *prov) {
-    if (i % BENCH_PROV_EVERY != 0) {
-        return 0;
+/* Net i+1 gets the record of node i, which drives it; the nets no node drives share one. */
+static int make_nets(bench_ctx *ctx) {
+    for (uint32_t i = 0; i < BENCH_NETS; i++) {
+        uint32_t group = i < BENCH_NODES ? i / BENCH_PROV_EVERY : BENCH_GROUPS;
+        odin3_net_id net = {0};
+        if (odin3_net_create(ctx->module, 0, ctx->provs[group], &net) != ODIN3_OK) {
+            return 1;
+        }
     }
-    odin3_srcloc loc = {0, i / BENCH_PROV_EVERY + 1, 1, i / BENCH_PROV_EVERY + 1, 2};
-    odin3_prov_origin origin = {&loc, 1, 0, 0};
-    odin3_prov_begin_op(&ctx->pass);
-    return odin3_prov_source(&ctx->pass, &origin, prov) != ODIN3_OK;
+    return 0;
 }
 
 /*
@@ -128,12 +150,11 @@ static int build(bench_ctx *ctx) {
     if (ctx->ids == NULL) {
         return 1;
     }
-    if (make_nets(ctx) != 0) {
+    if (make_provs(ctx) != 0 || make_nets(ctx) != 0) {
         return 1;
     }
-    odin3_prov_id prov = {0};
     for (uint32_t i = 0; i < BENCH_NODES; i++) {
-        if (node_prov(ctx, i, &prov) != 0 || make_node(ctx, i, prov) != 0) {
+        if (make_node(ctx, i, ctx->provs[i / BENCH_PROV_EVERY]) != 0) {
             return 1;
         }
     }
@@ -201,6 +222,54 @@ static uint32_t count_live_nodes(const bench_ctx *ctx) {
     return live;
 }
 
+static void count_leaf(void *user, odin3_prov_id leaf) {
+    (void)leaf;
+    (*(uint64_t *)user)++;
+}
+
+/* Backward walk from every live node's record to its SOURCE leaves; returns the leaf count. */
+static int sources_all(const bench_ctx *ctx, uint64_t *leaves) {
+    uint32_t end = odin3_module_node_end(ctx->module);
+    for (uint32_t i = 1; i < end; i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(ctx->module, node) &&
+            odin3_prov_sources(ctx->design, odin3_node_prov(ctx->module, node), count_leaf,
+                               leaves) != ODIN3_OK) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* Forward index over every object and tombstone, one query on the busiest line, backward walks. */
+static int run_prov(bench_ctx *ctx) {
+    double start = now_seconds();
+    odin3_prov_index *ix = odin3_prov_index_build(ctx->design);
+    if (ix == NULL) {
+        return 1;
+    }
+    report("prov index", start);
+    printf("prov index    : %zu bytes, %u records, %u tombstones\n", odin3_prov_index_bytes(ix),
+           (unsigned)odin3_prov_end(ctx->design) - 1,
+           (unsigned)odin3_tombstone_end(ctx->design) - 1);
+    start = now_seconds();
+    odin3_srcloc busy = {ctx->file, BENCH_INPUT_LINE, 1, BENCH_INPUT_LINE, 2};
+    odin3_prov_hits hits = odin3_prov_index_by_loc(ix, busy);
+    double query_ms = (now_seconds() - start) * 1e3;
+    report("prov by_loc", start);
+    printf("by_loc hits   : %u objects on line %u in %.3f ms\n", (unsigned)hits.count,
+           (unsigned)BENCH_INPUT_LINE, query_ms);
+    odin3_prov_index_destroy(ix);
+    uint64_t leaves = 0;
+    start = now_seconds();
+    if (sources_all(ctx, &leaves) != 0) {
+        return 1;
+    }
+    report("prov sources", start);
+    printf("sources       : %" PRIu64 " leaves over all live nodes\n", leaves);
+    return hits.count == 0;
+}
+
 static int run(bench_ctx *ctx) {
     odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     double start = now_seconds();
@@ -246,7 +315,7 @@ static int run(bench_ctx *ctx) {
            (unsigned)count_live_nodes(ctx), (unsigned)odin3_module_node_end(ctx->module) - 1,
            (unsigned)odin3_module_net_end(ctx->module) - 1,
            (unsigned)odin3_module_pin_end(ctx->module) - 1);
-    return 0;
+    return run_prov(ctx);
 }
 
 int main(void) {
@@ -257,6 +326,7 @@ int main(void) {
     }
     printf("max RSS       : %ld KiB\n", max_rss_kib());
     odin3_util_free(ctx.ids);
+    odin3_util_free(ctx.provs);
     odin3_design_destroy(ctx.design);
     if (rc != 0) {
         fprintf(stderr, "bench_ir: failed\n");
