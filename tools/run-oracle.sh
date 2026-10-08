@@ -7,8 +7,8 @@
 # stores, under GOLDEN/<arch>/<NAME>/ (layout defined in the odin3-golden README), with <leaf> the
 # last component of NAME and <tool> the VTR stage name (parmys | odin):
 #   <leaf>.<tool>.blif   the netlist (only if the tool succeeded)
-#   <leaf>.<tool>.prov   provenance: VTR commit, arch, source, sha256s, status
-#   <leaf>.<tool>.log    flow-log tail and error lines (only if the tool failed)
+#   <leaf>.<tool>.prov   provenance: VTR commit, arch, source, sha256s, memory cap, status
+#   <leaf>.<tool>.log    flow-log tail and error lines (only if the tool failed or was capped)
 #
 # Defaults: --tool both, --name = design basename without .v (NAME may contain '/' to group
 # designs, e.g. micro/bm_and), --golden = <repo>/../golden.
@@ -18,7 +18,10 @@
 # WSL VM and takes every session down). The cap is a cgroup limit (systemd-run --user --scope,
 # MemoryMax, no swap) on the whole flow process tree. run_vtr_flow.py -limit_memory_usage is NOT
 # used: VTR gates it on Path("ulimit").exists(), which is always false, so it is a silent no-op.
-# Exit: 0 if every requested tool succeeded, 1 if any failed, 2 on usage error.
+# A run killed by the cap gets status=capped, not failed: it is no verdict on the design (rerun it
+# with a larger ODIN3_ORACLE_MEM_MB), whereas failed means the oracle itself rejected the design.
+# Exit: 0 if every requested tool succeeded, 1 if any failed, 2 on usage error, 3 if none failed
+# but at least one was capped.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -73,17 +76,23 @@ rel() { case $1 in "$vtr_root"/*) echo "${1#"$vtr_root"/}" ;; *) echo "$1" ;; es
 run_one() {
     local t=$1 run="$work/$arch_name/$name/$1"
     rm -rf "$run" && mkdir -p "$run"
-    local status=ok
-    (cd "$run" && systemd-run --user --scope --quiet -p MemoryMax="${mem_mb}M" -p MemorySwapMax=0 \
-        "$flow" "$design" "$arch" -start "$t" -end "$t" -temp_dir "$run/temp" \
+    local status=ok unit="run-oracle-$$-$t"
+    (cd "$run" && systemd-run --user --scope --quiet --unit="$unit" -p MemoryMax="${mem_mb}M" \
+        -p MemorySwapMax=0 "$flow" "$design" "$arch" -start "$t" -end "$t" -temp_dir "$run/temp" \
         >"$run/flow.log" 2>&1) || status=failed
     local blif="$run/temp/$stem.$t.blif"
     [[ $status == ok && -s $blif ]] || status=failed
+    # the cap kills only the biggest process, so the flow may exit normally; ask systemd instead
+    if [[ $(systemctl --user show -p Result --value "$unit.scope" 2>/dev/null) == oom-kill ]]; then
+        status=capped
+    fi
+    systemctl --user reset-failed "$unit.scope" 2>/dev/null || true
     rm -f "$out_dir/$leaf.$t.blif" "$out_dir/$leaf.$t.log"
     if [[ $status == ok ]]; then
         cp "$blif" "$out_dir/$leaf.$t.blif"
     else
         {
+            [[ $status == capped ]] && echo "run-oracle: killed at the ${mem_mb} MB memory cap"
             tail -n 20 "$run/flow.log"
             echo "--- error lines in $t.out ---"
             grep -i -E 'error|fail' "$run/temp/$t.out" 2>/dev/null | head -n 20 || echo "(none found)"
@@ -97,16 +106,21 @@ run_one() {
         echo "source=$(rel "$design")"
         echo "source_sha256=$(sha256sum "$design" | cut -d' ' -f1)"
         echo "tool=$t"
+        echo "mem_cap_mb=$mem_mb"
         echo "status=$status"
         [[ $status == ok ]] && echo "blif_sha256=$(sha256sum "$blif" | cut -d' ' -f1)"
         echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } >"$out_dir/$leaf.$t.prov"
     echo "run-oracle: $arch_name/$name $t $status"
-    [[ $status == ok ]]
+    statuses+=("$status")
 }
 
-rc=0
+statuses=()
 for t in "${tools[@]}"; do
-    run_one "$t" || rc=1
+    run_one "$t" || statuses+=(failed)  # an unexpected error inside run_one counts as failed
 done
-exit $rc
+case " ${statuses[*]} " in
+    *" failed "*) exit 1 ;;
+    *" capped "*) exit 3 ;;
+    *) exit 0 ;;
+esac
