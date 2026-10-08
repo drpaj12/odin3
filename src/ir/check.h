@@ -22,12 +22,14 @@ typedef struct odin3_check_opts {
 /*
  * Checks one module against the invariants of IR §9. Every violation is logged as
  * "check: <module>: rule <n>: <detail>", at ODIN3_LOG_ERROR for an E rule and ODIN3_LOG_WARN for
- * a W rule; per rule the first few violations are shown and the rest summed in one line (a
- * 2M-node module must not flood the log). Returns ODIN3_ERR_CHECK when any E rule is violated,
- * ODIN3_OK otherwise (warnings do not fail), ODIN3_ERR_NO_MEMORY when a FULL check cannot get its
- * mark arrays (nothing is logged as a violation then), ODIN3_ERR_INVALID_ARG for a NULL module.
- * Never changes the IR. Runs in time linear in nodes + pins + nets + wires + aliases + records,
- * without recursion. FULL also checks the design's provenance records (rule 7).
+ * a W rule; per rule and severity the first few violations are shown and the rest summed in one
+ * line (a 2M-node module must not flood the log, and warnings never hide an error). Returns
+ * ODIN3_ERR_CHECK when any E rule is violated, ODIN3_OK otherwise (warnings do not fail),
+ * ODIN3_ERR_NO_MEMORY when a FULL check cannot get its mark arrays (nothing is logged as a
+ * violation then), ODIN3_ERR_INVALID_ARG (logged) for a NULL module or a level or view outside its
+ * enum. Never changes the IR. Runs in time linear in nodes + pins + nets + wires + aliases, without
+ * recursion. Rule 7 here covers the module's objects' prov IDs only; the design-global provenance
+ * records are checked by odin3_check_design (once per design, not once per module).
  *
  * Rule 7 in Phase 1: a live object with prov 0 (made before provenance existed, or by a test) is
  * one WARNING per module giving the count; a nonzero prov that is not a record is an ERROR.
@@ -37,9 +39,11 @@ typedef struct odin3_check_opts {
 odin3_status odin3_check_module(odin3_module *module, odin3_check_opts opts);
 
 /*
- * odin3_check_module for every module in creation order, with the provenance records checked
- * once. ODIN3_ERR_CHECK when any module fails (every module is still checked); ODIN3_ERR_NO_MEMORY
- * as for a module; ODIN3_ERR_INVALID_ARG for a NULL design.
+ * odin3_check_module for every module in creation order; FULL then checks the provenance records
+ * once (rule 7: every run exists, every DERIVED record has parents with smaller IDs), logged as
+ * "check: design: ...". ODIN3_ERR_CHECK when any module or record fails (every module is still
+ * checked); ODIN3_ERR_NO_MEMORY as for a module; ODIN3_ERR_INVALID_ARG (logged) for a NULL design
+ * or invalid options.
  */
 odin3_status odin3_check_design(odin3_design *design, odin3_check_opts opts);
 

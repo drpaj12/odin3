@@ -38,7 +38,8 @@ enum check_rule_num {
 };
 
 enum {
-    SHOWN_MAX = 10,  /* violations logged per rule and module; the rest are summed */
+    SHOWN_MAX = 10,  /* violations logged per rule, severity and module; the rest are summed */
+    SEVERITIES = 2,  /* index 0: errors (E clauses), 1: warnings (W clauses) */
     DETAIL_BUF = 512 /* formatted detail of one violation */
 };
 
@@ -68,11 +69,10 @@ typedef struct check_ctx {
     const odin3_design *design;
     const char *where; /* the module name, or "design" */
     odin3_view view;
-    uint32_t shown[RULE_LAST + 1];
-    uint32_t hidden_errors[RULE_LAST + 1];
-    uint32_t hidden_warnings[RULE_LAST + 1];
-    uint32_t no_prov; /* live objects with prov 0 (rule 7, one warning) */
-    bool failed;      /* an E rule was violated */
+    uint32_t shown[RULE_LAST + 1][SEVERITIES];  /* by rule and severity_index */
+    uint32_t hidden[RULE_LAST + 1][SEVERITIES]; /* past the cap: counted, summed at the end */
+    uint32_t no_prov;                           /* live objects with prov 0 (rule 7, one warning) */
+    bool failed;                                /* an E rule was violated */
 } check_ctx;
 
 /* Mark arrays of a FULL check (rules 8 and 9), allocated before anything is checked. */
@@ -84,18 +84,22 @@ typedef struct check_marks {
 
 /* --- reporting ----------------------------------------------------------------------------- */
 
+/* 0 for an E clause, 1 for a W clause: the cap is per severity, so warnings never hide errors. */
+static unsigned severity_index(odin3_log_level level) {
+    return level == ODIN3_LOG_ERROR ? 0U : 1U;
+}
+
 ODIN3_PRINTF(3, 4)
 static void violation(check_ctx *ctx, check_rule rule, const char *fmt, ...) {
     if (rule.level == ODIN3_LOG_ERROR) {
         ctx->failed = true;
     }
-    if (ctx->shown[rule.num] >= SHOWN_MAX) {
-        uint32_t *hidden =
-            rule.level == ODIN3_LOG_ERROR ? ctx->hidden_errors : ctx->hidden_warnings;
-        hidden[rule.num]++;
+    unsigned sev = severity_index(rule.level);
+    if (ctx->shown[rule.num][sev] >= SHOWN_MAX) {
+        ctx->hidden[rule.num][sev]++;
         return;
     }
-    ctx->shown[rule.num]++;
+    ctx->shown[rule.num][sev]++;
     char detail[DETAIL_BUF];
     va_list args;
     va_start(args, fmt);
@@ -106,13 +110,15 @@ static void violation(check_ctx *ctx, check_rule rule, const char *fmt, ...) {
 
 static void summarize(const check_ctx *ctx) {
     for (uint32_t num = RULE_PINS; num <= RULE_LAST; num++) {
-        if (ctx->hidden_errors[num] > 0) {
-            odin3_log(ODIN3_LOG_ERROR, "check: %s: rule %u: %u more not shown", ctx->where, num,
-                      ctx->hidden_errors[num]);
+        uint32_t errors = ctx->hidden[num][severity_index(ODIN3_LOG_ERROR)];
+        uint32_t warnings = ctx->hidden[num][severity_index(ODIN3_LOG_WARN)];
+        if (errors > 0) {
+            odin3_log(ODIN3_LOG_ERROR, "check: %s: rule %u: %u more errors not shown", ctx->where,
+                      num, errors);
         }
-        if (ctx->hidden_warnings[num] > 0) {
-            odin3_log(ODIN3_LOG_WARN, "check: %s: rule %u: %u more not shown", ctx->where, num,
-                      ctx->hidden_warnings[num]);
+        if (warnings > 0) {
+            odin3_log(ODIN3_LOG_WARN, "check: %s: rule %u: %u more warnings not shown", ctx->where,
+                      num, warnings);
         }
     }
     if (ctx->no_prov > 0) {
@@ -717,32 +723,23 @@ static odin3_status marks_init(const odin3_module *module, check_marks *marks) {
     return marks->bits != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
 }
 
-/* How to check one module: the options, and whether the design's records are included. */
-typedef struct check_job {
-    odin3_check_opts opts;
-    bool records;
-} check_job;
-
-static void run_full(check_ctx *ctx, const check_marks *marks, const check_job *job) {
+static void run_full(check_ctx *ctx, const check_marks *marks) {
     check_nodes_full(ctx);
     check_nets_full(ctx);
     check_wires_full(ctx);
     check_prov_id(ctx, "module", ctx->module->id.v, ctx->module->prov);
     check_wires(ctx, marks);
     check_ports(ctx, marks);
-    if (job->records) {
-        check_records(ctx);
-    }
 }
 
-static odin3_status check_one(odin3_module *module, const check_job *job) {
+static odin3_status check_one(odin3_module *module, odin3_check_opts opts) {
     check_ctx ctx = {0};
     ctx.module = module;
     ctx.design = module->design;
     ctx.where = label(&ctx, module->name);
-    ctx.view = job->opts.view;
+    ctx.view = opts.view;
     check_marks marks = {0};
-    bool full = job->opts.level == ODIN3_CHECK_FULL;
+    bool full = opts.level == ODIN3_CHECK_FULL;
     if (full && marks_init(module, &marks) != ODIN3_OK) {
         marks_free(&marks);
         odin3_log(ODIN3_LOG_ERROR, "check: %s: out of memory", ctx.where);
@@ -752,7 +749,7 @@ static odin3_status check_one(odin3_module *module, const check_job *job) {
     check_pins(&ctx);
     check_nets(&ctx);
     if (full) {
-        run_full(&ctx, &marks, job);
+        run_full(&ctx, &marks);
     }
     summarize(&ctx);
     marks_free(&marks);
@@ -769,12 +766,11 @@ static bool opts_valid(odin3_check_opts opts) {
 }
 
 odin3_status odin3_check_module(odin3_module *module, odin3_check_opts opts) {
-    if (module == NULL || !opts_valid(opts)) {
-        odin3_log(ODIN3_LOG_ERROR, "check_module: no module or invalid options");
+    if (module == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "check: no module");
         return ODIN3_ERR_INVALID_ARG;
     }
-    check_job job = {opts, true};
-    return check_one(module, &job);
+    return opts_valid(opts) ? check_one(module, opts) : ODIN3_ERR_INVALID_ARG;
 }
 
 /* The worse of two results: NO_MEMORY, then CHECK, then OK. */
@@ -786,15 +782,17 @@ static odin3_status worse(odin3_status lhs, odin3_status rhs) {
 }
 
 odin3_status odin3_check_design(odin3_design *design, odin3_check_opts opts) {
-    if (design == NULL || !opts_valid(opts)) {
-        odin3_log(ODIN3_LOG_ERROR, "check_design: no design or invalid options");
+    if (design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "check: no design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    check_job job = {opts, false};
+    if (!opts_valid(opts)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_status result = ODIN3_OK;
     uint32_t end = odin3_design_module_end(design);
     for (uint32_t i = 1; i < end; i++) {
-        result = worse(result, check_one(odin3_module_get(design, (odin3_module_id){i}), &job));
+        result = worse(result, check_one(odin3_module_get(design, (odin3_module_id){i}), opts));
     }
     if (opts.level == ODIN3_CHECK_FULL) {
         check_ctx ctx = {0};

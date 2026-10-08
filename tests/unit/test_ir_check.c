@@ -23,12 +23,14 @@ enum {
     LOG_CAP = 1 << 16,
     NEEDLE_BUF = 64,
     MANY = 50,
+    UNDRIVEN = 12, /* more rule-4 warnings than the per-severity display cap (10) */
     OOM_LIMIT = 100,
 };
 
 static odin3_design *design;
 static odin3_module *module;
 static odin3_prov_id prov;
+static odin3_pass_ctx run_ctx; /* the test's pass run (setUp) */
 static char log_text[LOG_CAP];
 static size_t log_len;
 static size_t errors_logged;
@@ -168,11 +170,11 @@ void setUp(void) {
     odin3_log_set_sink(capture_sink, NULL);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
-    odin3_pass_ctx ctx = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("test"), &ctx));
+    run_ctx = (odin3_pass_ctx){0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("test"), &run_ctx));
     odin3_srcloc loc = {intern("t.v"), 1, 1, 1, 2};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &prov));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&run_ctx, &origin, &prov));
     build_top();
     reset_log();
 }
@@ -221,6 +223,14 @@ static void test_netlist_view_passes(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_check_module(module, opts(ODIN3_CHECK_FULL, ODIN3_VIEW_NETLIST)));
     TEST_ASSERT_EQUAL_size_t_MESSAGE(0, errors_logged, log_text);
+}
+
+static void test_invalid_options_logged_once(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_check_module(module, opts(2, 0)));
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1, errors_logged, log_text);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_check_design(design, opts(0, 3)));
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(1, errors_logged, log_text);
 }
 
 static void test_null_arguments(void) {
@@ -410,7 +420,8 @@ static void test_many_violations_are_summed(void) {
     }
     reset_log();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, fast(module));
-    TEST_ASSERT_TRUE_MESSAGE(log_has("more not shown"), log_text);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("W check: top: rule 11: 90 more warnings not shown"),
+                             log_text);
     TEST_ASSERT_TRUE(warnings_logged < MANY);
 }
 
@@ -447,6 +458,112 @@ static void test_full_check_out_of_memory(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, fast(module)); /* FAST allocates nothing */
 }
 
+/* Warnings past the display cap must not hide an error of the same rule. */
+static void test_warnings_never_hide_an_error(void) {
+    for (int i = 0; i < UNDRIVEN; i++) {
+        (void)gate(module, "$_NOT_", NULL,
+                   (odin3_net_id[]){new_net(module, NULL), new_net(module, NULL)});
+    }
+    odin3_net_id clash = new_net(module, "clash");
+    (void)gate(module, "$_CONST0_", NULL, (odin3_net_id[]){clash});
+    (void)gate(module, "$_CONST1_", NULL, (odin3_net_id[]){clash});
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, fast(module));
+    TEST_ASSERT_TRUE_MESSAGE(log_has("W check: top: rule 4: 2 more warnings not shown"), log_text);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("(clash) has 2 drivers"), log_text);
+}
+
+/* --- valid after every API path -------------------------------------------------------------- */
+
+/* A sub-module with ports a (in) and y (out), y = ~a; instanced in top. */
+static void add_instance(void) {
+    odin3_module *leaf = new_module("leaf");
+    odin3_net_id in = add_port(leaf, "a", ODIN3_DIR_IN);
+    odin3_net_id out = add_port(leaf, "y", ODIN3_DIR_OUT);
+    (void)gate(leaf, "$_NOT_", "inv", (odin3_net_id[]){in, out});
+    odin3_net_id inst_out = new_net(module, "inst_out");
+    odin3_netvec ports[] = {{&net_a, 1}, {&inst_out, 1}};
+    odin3_node_spec spec = {odin3_module_celltype(leaf), intern("u1"), prov, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, NULL));
+    (void)gate(module, "$_BUF_", "sink_u1", (odin3_net_id[]){inst_out, new_net(module, NULL)});
+}
+
+/* Merge of named nets that carry wire primaries and aliases. */
+static void merge_rich_nets(void) {
+    odin3_net_id keep = new_net(module, "keep");
+    odin3_net_id drop = new_net(module, "drop");
+    odin3_wire_id wk = {0};
+    odin3_wire_id wd = {0};
+    odin3_wire_spec ks = {intern("wk"), 0, 0, false, prov};
+    odin3_wire_spec ds = {intern("wd"), 1, 0, false, prov};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &ks, &keep, &wk));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_wire_create(module, &ds, (odin3_net_id[]){drop, drop}, &wd));
+    (void)gate(module, "$_BUF_", "drv_drop", (odin3_net_id[]){net_a, drop});
+    (void)gate(module, "$_NOT_", "use_keep", (odin3_net_id[]){keep, new_net(module, NULL)});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, (odin3_net_pair){keep, drop}));
+    TEST_ASSERT_EQUAL_UINT32(keep.v, odin3_module_find_net(module, intern("drop")).v);
+}
+
+/* wire_add_alias: a move to a net with a primary (alias), then back to a net without one. */
+static void move_wire_bits(void) {
+    odin3_wire_id w2 = {0};
+    odin3_wire_spec spec = {intern("w2"), 1, 0, false, prov};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &spec, NULL, &w2));
+    odin3_net_id old0 = odin3_wire_net(module, w2, 0);
+    odin3_net_id old1 = odin3_wire_net(module, w2, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){w2, 0}, mid));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, old0)); /* no pins, no membership */
+    odin3_net_id fresh = new_net(module, "fresh");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){w2, 0}, fresh));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_add_alias(module, (odin3_wirebit){w2, 1}, t1));
+    (void)gate(module, "$_BUF_", "drv_fresh", (odin3_net_id[]){net_b, fresh});
+    (void)gate(module, "$_BUF_", "drv_old1", (odin3_net_id[]){net_b, old1});
+}
+
+/* node_replace with DERIVED provenance; delete then reuse a name; net delete and re-create. */
+static void replace_and_reuse(void) {
+    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_id derived = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&run_ctx, (odin3_prov_list){&prov, 1}, &derived));
+    odin3_node_spec spec = {type_id("$_BUF_"), intern("g_buf2"), derived, NULL, 0};
+    odin3_node_id buf2 = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &buf2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_replace(module, (odin3_node_pair){g_buf, buf2}));
+    odin3_net_id tmp_out = new_net(module, NULL);
+    odin3_node_id tmp = gate(module, "$_NOT_", "tmp", (odin3_net_id[]){mid, tmp_out});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, tmp));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, tmp_out)); /* pinless now */
+    (void)gate(module, "$_NOT_", "tmp", (odin3_net_id[]){mid, new_net(module, NULL)});
+    (void)gate(module, "$_NOT_", "g_buf",
+               (odin3_net_id[]){mid, new_net(module, NULL)}); /* the replaced name */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, new_net(module, "gone")));
+    (void)gate(module, "$_BUF_", "use_gone", (odin3_net_id[]){mid, new_net(module, "gone")});
+}
+
+/* An inout port driven by a $tribuf: a bus of the port pin and the tristate output. */
+static void inout_bus(void) {
+    odin3_net_id io = add_port(module, "io", ODIN3_DIR_INOUT);
+    odin3_net_id ports_nets[] = {net_a, net_b, io};
+    odin3_netvec ports[] = {{&ports_nets[0], 1}, {&ports_nets[1], 1}, {&ports_nets[2], 1}};
+    odin3_node_spec spec = {type_id("$tribuf"), intern("tb"), prov, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, NULL));
+}
+
+static void test_valid_after_every_api_path(void) {
+    inout_bus(); /* ports first: instancing top's type would refuse add_port */
+    add_instance();
+    merge_rich_nets();
+    move_wire_bits();
+    replace_and_reuse();
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, opts(ODIN3_CHECK_FULL, 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, full(module));
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, errors_logged, log_text);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(0, warnings_logged, log_text);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid_module_passes_full_and_fast);
@@ -479,5 +596,8 @@ int main(void) {
     RUN_TEST(test_many_violations_are_summed);
     RUN_TEST(test_design_check_names_the_bad_module);
     RUN_TEST(test_full_check_out_of_memory);
+    RUN_TEST(test_invalid_options_logged_once);
+    RUN_TEST(test_warnings_never_hide_an_error);
+    RUN_TEST(test_valid_after_every_api_path);
     return UNITY_END();
 }

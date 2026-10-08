@@ -214,7 +214,12 @@ odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target ta
         [ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN] = dead_node_live_pin,
     };
     if (module != NULL && target.fault == ODIN3_IR_TEST_MULTI_DRIVER) {
-        return multi_driver(module, target.id);
+        odin3_status st = multi_driver(module, target.id);
+        if (st != ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR, "ir_test_corrupt: MULTI_DRIVER on net %u failed (%s)",
+                      target.id, odin3_status_string(st));
+        }
+        return st;
     }
     if (module == NULL || (unsigned)target.fault >= ODIN3_IR_TEST_FAULT_COUNT ||
         !faults[target.fault](module, target.id)) {

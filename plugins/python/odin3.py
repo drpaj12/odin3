@@ -41,7 +41,7 @@ def find_library() -> Path:
 
 
 class Odin3:
-    """A loaded libodin3 with typed wrappers for the ABI v0 functions."""
+    """A loaded libodin3 with typed wrappers for the ABI functions in odin3.h."""
 
     def __init__(self, library: Path | None = None) -> None:
         self.ffi = cffi.FFI()
