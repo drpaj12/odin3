@@ -113,7 +113,22 @@ void *odin3_pagevec_at(odin3_pagevec *pv, size_t i);          /* assert(i < len)
 const void *odin3_pagevec_cat(const odin3_pagevec *pv, size_t i);
 size_t odin3_pagevec_len(const odin3_pagevec *pv);
 size_t odin3_pagevec_bytes_reserved(const odin3_pagevec *pv);
+
+enum { ODIN3_PAGEVEC_MIN_SHIFT = 4, ODIN3_PAGEVEC_MAX_SHIFT = 16 };
+/* page of (1 << page_shift) elements; NULL on OOM or shift outside [MIN, MAX] */
+typedef struct odin3_pagevec_spec { size_t elem_size; unsigned page_shift; } odin3_pagevec_spec;
+odin3_pagevec *odin3_pagevec_create_paged(odin3_pagevec_spec spec);   /* struct: swappable-params rule */
+/* next `extra` pushes cannot fail (allocates pages/page table now); len unchanged */
+odin3_status odin3_pagevec_reserve(odin3_pagevec *pv, size_t extra);
+/* shrink len to new_len; elements past it are zeroed, pages kept */
+void odin3_pagevec_truncate(odin3_pagevec *pv, size_t new_len);
 ```
+
+`odin3_pagevec_create` is `create_paged` with shift 12. The shift and mask are stored in the struct, so
+indexing stays shift, mask and two loads. Small pages (e.g. shift 8) keep the first-page cost low for
+per-module stores; `bytes_reserved` reflects the page size. `reserve` gives reserve-before-mutate
+(on OOM len is unchanged; pages already allocated are kept), and `truncate` gives rollback without a
+wrapper container: a later push returns a zeroed slot at the same address.
 
 Fixed-size pages (`ODIN3_PAGEVEC_PAGE_ELEMS` = 4096) plus a growable page table: elements never
 move, lookup by index is a shift, a mask and two loads, and growth never
