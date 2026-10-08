@@ -4,12 +4,14 @@
 # usage: tools/run-oracle.sh [--tool parmys|odin|both] [--name NAME] [--golden DIR] DESIGN.v ARCH.xml
 #
 # Runs Yosys+Parmys and/or Odin II (each alone, via VTR's run_vtr_flow.py -start X -end X) and
-# stores, under GOLDEN/<arch>/<NAME>/:
-#   <stem>.<tool>.blif   the netlist
-#   <stem>.<tool>.prov   provenance: VTR commit, arch, source, hashes, status (see odin3-golden README)
-# A tool that fails still gets a .prov (status=failed) and its log tail, so failures are recorded.
+# stores, under GOLDEN/<arch>/<NAME>/ (layout defined in the odin3-golden README), with <leaf> the
+# last component of NAME and <tool> the VTR stage name (parmys | odin):
+#   <leaf>.<tool>.blif   the netlist (only if the tool succeeded)
+#   <leaf>.<tool>.prov   provenance: VTR commit, arch, source, sha256s, status
+#   <leaf>.<tool>.log    flow-log tail and error lines (only if the tool failed)
 #
-# Defaults: --tool both, --name = design basename without .v, --golden = <repo>/../golden.
+# Defaults: --tool both, --name = design basename without .v (NAME may contain '/' to group
+# designs, e.g. micro/bm_and), --golden = <repo>/../golden.
 # Env: VTR_ROOT (default ~/odin3-ws/external/vtr-verilog-to-routing), ODIN3_WORK (scratch run
 # directories, default <repo>/../work/oracle). Exit: 0 if every requested tool succeeded, 1 if any
 # failed, 2 on usage error.
@@ -23,7 +25,7 @@ tool=both
 name=""
 
 usage() {
-    sed -n '3p' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2
+    grep -m1 '^# usage:' "${BASH_SOURCE[0]}" | sed 's/^# //' >&2
     exit 2
 }
 
@@ -51,6 +53,7 @@ source "$vtr_root/.venv/bin/activate"
 
 stem=$(basename "$design" .v)
 name=${name:-$stem}
+leaf=$(basename "$name")
 arch_name=$(basename "$arch" .xml)
 out_dir="$golden/$arch_name/$name"
 mkdir -p "$out_dir"
@@ -67,15 +70,15 @@ run_one() {
         >"$run/flow.log" 2>&1) || status=failed
     local blif="$run/temp/$stem.$t.blif"
     [[ $status == ok && -s $blif ]] || status=failed
-    rm -f "$out_dir/$stem.$t.blif" "$out_dir/$stem.$t.log"
+    rm -f "$out_dir/$leaf.$t.blif" "$out_dir/$leaf.$t.log"
     if [[ $status == ok ]]; then
-        cp "$blif" "$out_dir/$stem.$t.blif"
+        cp "$blif" "$out_dir/$leaf.$t.blif"
     else
         {
             tail -n 20 "$run/flow.log"
             echo "--- error lines in $t.out ---"
             grep -i -E 'error|fail' "$run/temp/$t.out" 2>/dev/null | head -n 20 || echo "(none found)"
-        } >"$out_dir/$stem.$t.log"
+        } >"$out_dir/$leaf.$t.log"
     fi
     {
         echo "vtr_commit=$vtr_commit"
@@ -88,7 +91,7 @@ run_one() {
         echo "status=$status"
         [[ $status == ok ]] && echo "blif_sha256=$(sha256sum "$blif" | cut -d' ' -f1)"
         echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    } >"$out_dir/$stem.$t.prov"
+    } >"$out_dir/$leaf.$t.prov"
     echo "run-oracle: $arch_name/$name $t $status"
     [[ $status == ok ]]
 }

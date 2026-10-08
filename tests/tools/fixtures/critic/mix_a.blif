@@ -1,0 +1,7 @@
+.model top
+.inputs d
+.outputs o
+.latch d q 0
+.names d o
+1 1
+.end

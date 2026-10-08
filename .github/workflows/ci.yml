@@ -52,7 +52,7 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 500M
+      CCACHE_MAXSIZE: 1G
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
     steps:
@@ -80,7 +80,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}-${{ steps.submodules.outputs.shas }}
+          # github.sha makes every run save a fresh cache; restore-keys picks up the newest prior one.
+          key: ccache-${{ runner.os }}-${{ matrix.cc }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json') }}-${{ steps.submodules.outputs.shas }}-${{ github.sha }}
           restore-keys: |
             ccache-${{ runner.os }}-${{ matrix.cc }}-
       - name: Debug (ASan + UBSan) configure, build, test
@@ -88,9 +89,9 @@ jobs:
           cmake --preset debug
           cmake --build --preset debug
           ctest --preset debug --output-on-failure
-      - name: Release configure and build
+      - name: Release configure and build (ABC already covered by the debug build)
         run: |
-          cmake --preset release
+          cmake --preset release -DODIN3_WITH_ABC=OFF
           cmake --build --preset release
       - name: ccache statistics
         if: always()

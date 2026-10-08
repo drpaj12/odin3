@@ -20,7 +20,7 @@ endif()
 # --- Warning and sanitizer flags (Odin III targets only; never third_party) ---
 add_library(odin3_flags INTERFACE)
 target_compile_options(odin3_flags INTERFACE
-    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes
+    -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wstrict-prototypes -Wmissing-prototypes -Wvla
     $<$<BOOL:${ODIN3_WERROR}>:-Werror>)
 target_compile_definitions(odin3_flags INTERFACE _POSIX_C_SOURCE=200809L)
 if(ODIN3_SANITIZE)
@@ -51,8 +51,9 @@ add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
 set_target_properties(example_plugin PROPERTIES
     PREFIX ""
     LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/plugins/example_c)
-target_include_directories(example_plugin PRIVATE ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(example_plugin PRIVATE odin3_flags)
+# Linked against libodin3 so that, from Phase 1, its calls into the ABI resolve even when the host
+# (e.g. the cffi binding) loaded libodin3 with RTLD_LOCAL.
+target_link_libraries(example_plugin PRIVATE libodin3 odin3_flags)
 
 # --- Third-party ----------------------------------------------------------------
 if(ODIN3_WITH_ABC)
@@ -93,7 +94,8 @@ if(BUILD_TESTING)
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
     set(_tools_env "")
     if(ODIN3_WITH_ABC)
-        set(_tools_env "ODIN3_ABC=$<TARGET_FILE:abc>")
+        # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
+        set(_tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
     endif()
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .

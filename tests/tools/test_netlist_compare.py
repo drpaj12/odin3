@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 import subprocess
 import tempfile
 import time
@@ -13,12 +14,44 @@ import netlist_compare
 
 from . import helpers
 
-ALL_FIXTURES = sorted(p.name for p in helpers.FIXTURES.glob("*.blif"))
-# Fixtures whose internal nets are all structurally distinguishable, so any renaming and
-# reordering must give the identical canonical form.
-SCRAMBLE_FIXTURES = ["comb_parmys.blif", "counter_parmys.blif", "counter_odin.blif",
-                     "add2_odin.blif", "add2_hier.blif", "ring.blif", "blink.odin.blif",
-                     "blink.parmys.blif"]
+ALL_FIXTURES = sorted(str(p.relative_to(helpers.FIXTURES))
+                      for p in helpers.FIXTURES.glob("**/*.blif"))
+CRITIC = helpers.FIXTURES / "critic"
+
+
+def cx(name: str) -> str:
+    return str(CRITIC / name)
+
+
+def random_netlist(rng: random.Random) -> str:
+    """Small random sequential netlist with many structurally similar nets (constants,
+    duplicate gates, latch cycles, repeated input columns, multi-output black boxes)."""
+    ins = [f"i{k}" for k in range(rng.randint(0, 3))]
+    latches = [f"q{k}" for k in range(rng.randint(0, 6))]
+    avail = ins + latches + ["c0"]
+    body = [".names c0"]
+    for c in range(rng.randint(2, 20)):
+        k = rng.randint(0, 3)
+        src = [rng.choice(avail) for _ in range(k)]
+        body.append(" ".join([".names", *src, f"w{c}"]))
+        if k:
+            pol = rng.choice("01")
+            rows = rng.randint(0, 2)
+            planes = {"".join(rng.choice("01-") for _ in range(k)) for _ in range(rows)}
+            body += [f"{plane} {pol}" for plane in sorted(planes)]
+        elif rng.random() < 0.5:
+            body.append("1")
+        avail.append(f"w{c}")
+    for b in range(rng.randint(0, 2)):
+        body.append(f".subckt bb a={rng.choice(avail)} b={rng.choice(avail)} z=s{b}")
+        avail.append(f"s{b}")
+    body += [f".latch {rng.choice(avail)} {q} re clk {rng.choice('01')}" for q in latches]
+    outs = [f"o{j}" for j in range(rng.randint(0, 2))]
+    for out in outs:
+        body += [f".names {rng.choice(avail)} {out}", "1 1"]
+    head = [".model top", " ".join([".inputs", *ins, "clk"]), " ".join([".outputs", *outs])]
+    tail = [".end", ".model bb", ".inputs a b", ".outputs z", ".blackbox", ".end"]
+    return "\n".join(head + body + tail) + "\n"
 
 
 def compare(*argv: str) -> tuple[int, str, str]:
@@ -67,13 +100,41 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_random_scrambles(self) -> None:
-        for name in SCRAMBLE_FIXTURES:
+        for name in ALL_FIXTURES:
             original = blif.parse_file(helpers.fixture(name))
             expected = netlist_compare.canonicalize(original)
             for seed in range(5):
                 with self.subTest(name=name, seed=seed):
                     text = helpers.dump(helpers.scramble(original, seed))
                     self.assertEqual(canon_text(text), expected)
+
+    def test_random_netlists_scramble_invariant(self) -> None:
+        """Mini version of the review fuzzers: renaming/reordering never changes the form."""
+        for seed in range(300):
+            original = blif.parse_text(random_netlist(random.Random(seed)))
+            expected = netlist_compare.canonicalize(original)
+            for variant in range(2):
+                with self.subTest(seed=seed, variant=variant):
+                    text = helpers.dump(helpers.scramble(original, variant))
+                    self.assertEqual(canon_text(text), expected)
+
+    def test_symmetric_but_distinguishable_nets(self) -> None:
+        """Duplicate gates told apart only by their fan-out (review repro dup_a/dup_b)."""
+        self.assertEqual(compare(cx("dup_a.blif"), cx("dup_b.blif"))[0], 0)
+
+    def test_duplicate_cells_are_kept(self) -> None:
+        code, out, _ = compare(cx("sd_a.blif"), cx("sd_b.blif"))
+        self.assertEqual(code, 1)
+        self.assertIn("-.subckt sink a=x", out)
+
+    def test_individualization_is_structural(self) -> None:
+        """A latch self-loop vs a 2-cycle: colour refinement ties them, the trial
+        individualization must still pick structurally."""
+        text = Path(cx("wl_cycles.blif")).read_text(encoding="utf-8")
+        swapped = (text.replace("q0", "QA").replace("q1", "Q0").replace("q2", "q0")
+                   .replace("QA", "q2").replace("Q0", "q1"))
+        self.assertNotEqual(swapped, text)
+        self.assertEqual(canon_text(swapped), canon_text(text))
 
     def test_flipped_cover_row(self) -> None:
         code, out, _ = compare(helpers.fixture("comb_parmys.blif"),

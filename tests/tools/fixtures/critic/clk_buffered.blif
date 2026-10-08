@@ -1,0 +1,8 @@
+# Yosys-style buffered clock: the latch control is an internal buffer of the clock port.
+.model top
+.inputs d clk1 clk2
+.outputs q
+.names clk1 top.clk
+1 1
+.latch d q re top.clk 0
+.end

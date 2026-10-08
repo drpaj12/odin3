@@ -1,0 +1,7 @@
+# Two clock domains in one file (unsupported).
+.model top
+.inputs d clk1 clk2
+.outputs q
+.latch d r re clk1 0
+.latch r q re clk2 0
+.end

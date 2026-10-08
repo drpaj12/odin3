@@ -1,0 +1,16 @@
+.model top
+.inputs a b
+.outputs o1 o2
+.names a b x
+11 1
+.names a b y
+11 1
+.names x t1
+1 1
+.names y t2
+1 1
+.names t1 o1
+1 1
+.names t2 o2
+0 1
+.end

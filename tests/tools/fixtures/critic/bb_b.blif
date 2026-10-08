@@ -1,0 +1,10 @@
+.model top
+.inputs x y
+.outputs o
+.subckt multiply a=x b=x out=o
+.end
+
+.model multiply
+.inputs a b
+.outputs out
+.end

@@ -1,0 +1,13 @@
+# Fuzz-found: w1 and w2 are both constant 0 with identical column profiles in w5's cover,
+# but swapping them changes the cover.  Needs the role-in-cover use signature.
+.model top
+.inputs clk
+.outputs
+.names w0
+1
+.names w1
+.names w2
+.names w0 w2 w1 w5
+0-0 1
+10- 1
+.end

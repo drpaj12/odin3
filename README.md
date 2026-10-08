@@ -38,7 +38,7 @@ requirements-dev.txt`, then `pre-commit install` to run the gate on every commit
 | `tools/` | `netlist-compare`, `equiv-check`, `run-oracle.sh`, `lint.sh` |
 | `tests/` | `unit/` (Unity), `golden/`, `micro/`, `tools/` |
 | `third_party/` | `abc` (Berkeley ABC), `unity` (submodules) |
-| `docs/` | Design spec, ADRs, IR and pass docs, oracle versions, Phase 0 checklist |
+| `docs/` | Design spec, IR and pass docs, oracle versions, Phase 0 checklist (ADRs arrive in PR #2) |
 
 ## License
 

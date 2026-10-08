@@ -9,27 +9,33 @@ Canonical form (per model; the first model stays first, the rest are sorted by n
 
 * Primary I/O names (``.inputs``/``.outputs``/``.clock``) are kept verbatim and listed
   sorted, one per line.  Black-box models keep only their interface.
-* Every internal net is renamed ``n<k>``.  The order is derived from a structural
-  signature, not from the original names or line order: a Weisfeiler-Lehman style
-  refinement where a net's label hashes its driver kind, function and the labels of the
-  driver's inputs.  Combinational logic is labelled in one topological pass; latch
-  outputs (which break every sequential cycle) are seeded from latch type/init/control
-  and refined once per round from the labels of their D/control inputs, until no latch
-  class splits any more (or ``--max-rounds``); each round only recomputes the fan-out
-  cone of the latches that split.  A fan-out signature is a secondary key.  Nets are
-  then ordered by
-  (topological level, label, fan-out label) and only nets that are still tied -- which
-  happens only for structurally symmetric nets (e.g. duplicated logic, undriven nets,
-  combinational loops, or latch chains deeper than ``--max-rounds``) -- are ordered by
-  their original name.
+* Every internal net is renamed ``n<k>`` in an order derived from structure, not from
+  names or line order.  Seed labels come from one topological pass (a net's label hashes
+  its driver kind, function and input labels; latch outputs are seeded from latch
+  type/init/control, which breaks every sequential cycle).  The labels are then refined
+  in both directions -- by driver and by every use, including the net's exact role in
+  each consuming cover -- to a fixpoint (Weisfeiler-Lehman colour refinement,
+  Hopcroft-style so only the neighbourhood of a split is re-examined).  Nets still tied
+  after that are separated by individualization-refinement: the smallest tied class
+  (by size, then label) has one member individualized and refinement resumes.  The
+  member is chosen by trying each candidate and keeping the smallest resulting partition
+  (classes of up to MAX_TRIALS members), so the choice is structural.  Original names
+  are consulted only to pick among candidates that give identical partitions -- for an
+  automorphism orbit (e.g. duplicated logic) every pick gives the same canonical text.
+  Residual risk: a tied class that is not an orbit and that the trials cannot separate
+  (or that has more than MAX_TRIALS members) may still canonicalize name-dependently.
+  That can only produce a false "different" (exit 1), never a false "identical": the
+  canonical text is always a renaming of the input netlist (up to duplicate cover rows
+  and spelling out the default latch init).
+  Nets are finally ordered by (topological level, label).
 * ``.names`` covers are sets: input columns are sorted by canonical net name, the cover
   columns permuted to match, rows sorted and de-duplicated.
-* ``.subckt`` connections are sorted by formal name; cell blocks are sorted.
+* ``.subckt`` connections are sorted by formal name; cell blocks are sorted (duplicate
+  cells are kept).
 * ``.param`` is semantic and always kept; ``.cname``/``.attr`` are dropped unless
   ``--keep-attrs``.
 
-Everything is iterative (explicit worklists, no recursion); the initial pass is linear
-in the netlist size.
+Everything is iterative (explicit worklists, no recursion).
 """
 
 from __future__ import annotations
@@ -37,12 +43,13 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
+import heapq
 import itertools
 import math
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -50,11 +57,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blif"))
 import blif  # noqa: E402
 
 TOOL = "netlist-compare"
-DEFAULT_MAX_ROUNDS = 1000
 # Upper bound on column permutations tried when .names inputs have identical labels.
 MAX_TIE_PERMUTATIONS = 720
 # Above this many canonical lines (both sides) the diff falls back to a linear method.
 MAX_UNIFIED_DIFF_LINES = 40000
+# Largest tied class whose members are each trial-individualized before choosing one.
+MAX_TRIALS = 64
 
 
 def _h(*parts: str) -> str:
@@ -142,25 +150,32 @@ def _topo_order(g: _Graph) -> tuple[list[int], list[int], dict[str, int]]:
     return order, cyclic, level
 
 
-def _cover_key(columns: Sequence[str], rows: Sequence[tuple[str, str]]) -> str:
-    """Cover rendering independent of input-column order.
+def _column_order(columns: Sequence[str], rows: Sequence[tuple[str, str]]) -> list[int]:
+    """Input-column order for a cover that does not depend on the written column order.
 
-    Columns are ordered by ``columns`` (their labels).  Columns with equal labels are
-    interchangeable, so the lexicographically smallest rendering over their permutations
-    is used (bounded by MAX_TIE_PERMUTATIONS; beyond that the original order is kept).
+    Columns are sorted by ``columns`` (labels or canonical names).  Columns with equal keys
+    are interchangeable, so among their permutations the one giving the lexicographically
+    smallest sorted cover is chosen (bounded by MAX_TIE_PERMUTATIONS; beyond that the
+    written order is kept).
     """
     order = sorted(range(len(columns)), key=lambda i: columns[i])
     groups = [list(grp) for _, grp in itertools.groupby(order, key=lambda i: columns[i])]
     n_perm = math.prod(math.factorial(len(grp)) for grp in groups)
-
-    def render(perm: Sequence[int]) -> str:
-        cubes = {"".join(plane[i] for i in perm) + " " + out for plane, out in rows}
-        return ";".join(sorted(cubes))
-
     if n_perm == 1 or n_perm > MAX_TIE_PERMUTATIONS:
-        return render(order)
+        return order
     candidates = itertools.product(*(itertools.permutations(grp) for grp in groups))
-    return min(render([i for grp in combo for i in grp]) for combo in candidates)
+    perms = ([i for grp in combo for i in grp] for combo in candidates)
+    return min(perms, key=lambda perm: _render_cover(perm, rows))
+
+
+def _render_cover(perm: Sequence[int], rows: Sequence[tuple[str, str]]) -> list[str]:
+    """Sorted, de-duplicated cover rows with input columns taken in ``perm`` order."""
+    return sorted({("".join(plane[i] for i in perm) + " " + out).strip() for plane, out in rows})
+
+
+def _cover_key(columns: Sequence[str], rows: Sequence[tuple[str, str]]) -> str:
+    """Cover rendering independent of input-column order (see _column_order)."""
+    return ";".join(_render_cover(_column_order(columns, rows), rows))
 
 
 def _params(cell: blif.Cell) -> str:
@@ -197,90 +212,260 @@ def _latch_seed(latch: blif.Latch, primary: set[str]) -> str:
     return _h("latch", latch.ltype or "-", latch.init or "3", ctrl_key)
 
 
-def _cone(g: _Graph, nets: Iterable[str], pos: dict[int, int]) -> list[int]:
-    """Combinational cells in the transitive fan-out of ``nets``, in topological order."""
-    found: set[int] = set()
-    work = list(nets)
-    while work:
-        net = work.pop()
-        for idx in g.fanout.get(net, []):
-            if idx in pos and idx not in found:
-                found.add(idx)
-                work.extend(n for n in g.cell_outs[idx] if n not in g.primary)
-    return sorted(found, key=pos.__getitem__)
+def _forward_labels(g: _Graph) -> tuple[dict[str, str], dict[str, int]]:
+    """Seed labels and topological levels.
 
-
-def _refine_latches(g: _Graph, latches: list[blif.Latch], labels: dict[str, str]) -> list[str]:
-    """One WL round over latch outputs.  Returns the outputs whose class split (relabelled)."""
-    keys: dict[str, tuple[str, str, str]] = {}
-    for latch in latches:
-        ctrl = blif.latch_control(latch)
-        keys[latch.output] = (labels[latch.output], labels[latch.input],
-                              "-" if ctrl is None else labels[ctrl])
-    split: dict[str, set[tuple[str, str, str]]] = {}
-    for key in keys.values():
-        split.setdefault(key[0], set()).add(key)
-    dirty = [out for out, key in keys.items() if len(split[key[0]]) > 1]
-    for out in dirty:
-        labels[out] = _h(*keys[out])
-    return dirty
-
-
-def _label_nets(g: _Graph, max_rounds: int) -> tuple[dict[str, str], dict[str, int]]:
-    """WL refinement.  Returns (label per net, topological level per net).
-
-    Combinational labels are computed in one topological pass.  Each further round
-    refines latch-output labels by their D/control labels; only latch classes that split
-    are relabelled, and only their combinational fan-out cone is recomputed.  The loop
-    ends when no latch class splits (then no class anywhere can split) or after
-    ``max_rounds`` rounds.
+    One topological pass labels combinational logic from its inputs; latch outputs are
+    seeded from latch type/init/control, so every sequential cycle is broken.
     """
     order, cyclic, level = _topo_order(g)
     labels: dict[str, str] = {n: _h("io", n) for n in g.primary}
     for net in g.internal:
         labels[net] = _h("undriven")
-    latches = [c for c in g.model.cells
-               if isinstance(c, blif.Latch) and c.output not in g.primary]
-    for latch in latches:
-        labels[latch.output] = _latch_seed(latch, g.primary)
+    for cell in g.model.cells:
+        if isinstance(cell, blif.Latch) and cell.output not in g.primary:
+            labels[cell.output] = _latch_seed(cell, g.primary)
     for idx in cyclic:
         for net in g.cell_outs[idx]:
             if net not in g.primary:
                 labels[net] = _cyclic_label(g.model.cells[idx])
     for idx in order:
         _comb_labels(g.model.cells[idx], g, labels)
-    pos = {idx: i for i, idx in enumerate(order)}
-    for _ in range(max_rounds):
-        dirty = _refine_latches(g, latches, labels)
-        if not dirty:
-            break
-        for idx in _cone(g, dirty, pos):
-            _comb_labels(g.model.cells[idx], g, labels)
     return labels, level
 
 
-def _fanout_labels(g: _Graph, labels: dict[str, str]) -> dict[str, str]:
-    """Secondary key: hash of how each internal net is consumed."""
-    result: dict[str, str] = {}
-    for net in g.internal:
-        uses: list[str] = []
-        for idx in g.fanout.get(net, []):
-            cell = g.model.cells[idx]
-            outs = ",".join(sorted(labels[o] for o in g.cell_outs[idx]))
-            if isinstance(cell, blif.Subckt):
-                pins = ",".join(sorted(f for f, a in cell.conns if a == net))
-                uses.append(_h("subckt", cell.model, pins, outs))
-            elif isinstance(cell, blif.Latch):
-                pin = "D" if cell.input == net else "C"
-                uses.append(_h("latch", pin, outs))
+class _Refiner:
+    """Colour refinement over internal nets in both directions, then individualization.
+
+    A net's signature hashes its driver (cell kind, function and the labels of all the
+    driver's pins) and every use (the consumer's function with this net's columns marked,
+    or its subckt formals / latch pins, and the labels of the consumer's other pins).
+    Classes of equal labels are split until stable (Weisfeiler-Lehman / 1-dim colour
+    refinement).  Splitting is Hopcroft-style: the largest part of a split class keeps its
+    label, only nets adjacent to relabelled nets are re-examined, and the untouched rest of
+    a class is represented by one member, so total work is O(pins * log nets) rather than
+    proportional to rounds * class size.  If ties remain, the smallest tied class (by size,
+    then label) has one member individualized (see _choose) and refinement resumes, until
+    every internal net has a unique label.  All labels are content hashes, never names.
+    """
+
+    def __init__(self, g: _Graph, labels: dict[str, str]) -> None:
+        self.g = g
+        self.labels = labels
+        self.classes: dict[str, set[str]] = {}
+        for net in g.internal:
+            self.classes.setdefault(labels[net], set()).add(net)
+        self.heap: list[tuple[int, str]] = []
+        # While a trial individualization runs, every mutation is journalled for rollback.
+        self.journal: list[tuple[str, str, str]] | None = None
+        for lab in self.classes:
+            self._track(lab)
+
+    # -- bookkeeping ------------------------------------------------------------
+
+    def _log(self, op: str, key: str, value: str) -> None:
+        if self.journal is not None:
+            self.journal.append((op, key, value))
+
+    def _track(self, lab: str) -> None:
+        size = len(self.classes.get(lab, ()))
+        if size > 1 and self.journal is None:
+            heapq.heappush(self.heap, (size, lab))
+
+    def _relabel(self, net: str, new: str) -> None:
+        old = self.labels[net]
+        cls = self.classes[old]
+        cls.discard(net)
+        self._log("discard", old, net)
+        if not cls:
+            del self.classes[old]
+            self._log("delete", old, "")
+        self.labels[net] = new
+        self._log("label", net, old)
+        if new not in self.classes:
+            self.classes[new] = set()
+            self._log("create", new, "")
+        self.classes[new].add(net)
+        self._log("add", new, net)
+
+    def _rollback(self, journal: list[tuple[str, str, str]]) -> None:
+        for op, key, value in reversed(journal):
+            if op == "label":
+                self.labels[key] = value
+            elif op == "add":
+                self.classes[key].discard(value)
+            elif op == "create":
+                del self.classes[key]
+            elif op == "discard":
+                self.classes[key].add(value)
+            else:  # delete
+                self.classes[key] = set()
+
+    # -- signatures ---------------------------------------------------------------
+
+    def _driver_part(self, net: str) -> str:
+        idx = self.g.driver.get(net)
+        if idx is None:
+            return "undriven"
+        cell, lab = self.g.model.cells[idx], self.labels
+        if isinstance(cell, blif.Names):
+            cols = [lab[n] for n in cell.inputs]
+            return _h("names", ",".join(sorted(cols)), _cover_key(cols, cell.rows),
+                      _params(cell))
+        if isinstance(cell, blif.Latch):
+            ctrl = blif.latch_control(cell)
+            return _h("latch", cell.ltype or "-", cell.init or "3", lab[cell.input],
+                      "-" if ctrl is None else lab[ctrl])
+        formal = ",".join(sorted(f for f, a in cell.conns if a == net))
+        pins = ";".join(sorted(f"{f}={lab[a]}" for f, a in cell.conns))
+        return _h("subckt", cell.model, formal, pins, _params(cell))
+
+    def _use_part(self, idx: int, net: str) -> str:
+        cell, lab = self.g.model.cells[idx], self.labels
+        if isinstance(cell, blif.Names):
+            # The cover with this net's columns marked: exactly its role in the function.
+            marked = [lab[n] + ("*" if n == net else "") for n in cell.inputs]
+            return _h("names-in", ",".join(sorted(marked)), _cover_key(marked, cell.rows),
+                      lab[cell.output])
+        if isinstance(cell, blif.Latch):
+            pins = ("D" if cell.input == net else "") + ("C" if cell.control == net else "")
+            return _h("latch-in", pins, lab[cell.output])
+        formal = ",".join(sorted(f for f, a in cell.conns if a == net))
+        pins = ";".join(sorted(f"{f}={lab[a]}" for f, a in cell.conns))
+        return _h("subckt-in", cell.model, formal, pins)
+
+    def signature(self, net: str) -> str:
+        uses = sorted(self._use_part(i, net) for i in self.g.fanout.get(net, []))
+        return _h(self._driver_part(net), *uses)
+
+    def _neighbours(self, net: str) -> Iterator[str]:
+        idx = self.g.driver.get(net)
+        cells = self.g.fanout.get(net, []) if idx is None else [idx, *self.g.fanout.get(net, [])]
+        for c in cells:
+            for nb in itertools.chain(self.g.cell_ins[c], self.g.cell_outs[c]):
+                if nb != net:
+                    yield nb
+
+    def _tied_near(self, nets: Iterable[str]) -> dict[str, set[str]]:
+        """Tied classes with a member adjacent to ``nets`` -> those adjacent members."""
+        found: dict[str, set[str]] = {}
+        for net in nets:
+            for nb in self._neighbours(net):
+                lab = self.labels[nb]
+                if len(self.classes.get(lab, ())) > 1:
+                    found.setdefault(lab, set()).add(nb)
+        return found
+
+    # -- refinement -----------------------------------------------------------------
+
+    def _groups(self, lab: str, nets: set[str]) -> dict[str, set[str] | None]:
+        """Partition of class ``lab`` by signature.  ``nets`` are the members whose
+        neighbourhood changed; all other members share one signature (computed from a
+        representative) and appear as the value None (meaning "the untouched rest")."""
+        groups: dict[str, set[str] | None] = {}
+        members = self.classes[lab]
+        if len(nets) < len(members):
+            rep = next(n for n in members if n not in nets)  # any one: all share a signature
+            groups[self.signature(rep)] = None
+        for net in nets:
+            sig = self.signature(net)
+            if sig in groups and groups[sig] is None:
+                continue  # same as the untouched rest
+            group = groups.setdefault(sig, set())
+            assert group is not None
+            group.add(net)
+        return groups
+
+    def _apply(self, lab: str, groups: dict[str, set[str] | None]) -> list[str]:
+        """Split class ``lab``; the largest part keeps the label.  Returns relabelled nets."""
+        members = self.classes[lab]
+        moved: set[str] = set().union(*(g for g in groups.values() if g is not None))
+        sizes = {sig: (len(members) - len(moved) if g is None else len(g))
+                 for sig, g in groups.items()}
+        keeper = max(groups, key=lambda sig: (sizes[sig], sig))
+        rest = members - moved if keeper in groups and groups[keeper] is not None else set()
+        relabelled: list[str] = []
+        for sig, group in groups.items():
+            if sig == keeper:
+                continue
+            nets = rest if group is None else group
+            for net in sorted(nets):
+                self._relabel(net, _h(lab, sig))
+                relabelled.append(net)
+            self._track(_h(lab, sig))
+        self._track(lab)
+        return relabelled
+
+    def refine(self, adjacent: dict[str, set[str]]) -> None:
+        """Split classes to a fixpoint.  ``adjacent`` maps each class to the members whose
+        neighbourhood changed; all signatures of a round are computed before any label
+        changes, so the result does not depend on iteration order."""
+        while adjacent:
+            plan = {lab: self._groups(lab, nets) for lab, nets in adjacent.items()}
+            changed: list[str] = []
+            for lab, groups in plan.items():
+                if len(groups) > 1:
+                    changed += self._apply(lab, groups)
+            adjacent = self._tied_near(changed)
+
+    # -- individualization ------------------------------------------------------------
+
+    def _individualize(self, lab: str, member: str) -> None:
+        # The class size makes the label unique when the same class is individualized again.
+        self._relabel(member, _h(lab, "individualized", str(len(self.classes[lab]))))
+        self._track(lab)
+        self.refine(self._tied_near([member]))
+
+    def _trial(self, lab: str, member: str) -> list[tuple[str, int]]:
+        """Individualize ``member``, refine, and return a certificate of the resulting
+        partition (the classes it created, with sizes); then undo everything."""
+        self.journal = []
+        self._individualize(lab, member)
+        journal, self.journal = self.journal, None
+        cert = sorted((k, len(self.classes.get(k, ()))) for op, k, _ in journal
+                      if op == "create")
+        self._rollback(journal)
+        return cert
+
+    def _choose(self, lab: str) -> str:
+        """Member of tied class ``lab`` to individualize.
+
+        Each candidate is tried (individualize, refine, roll back) and the one giving the
+        smallest partition certificate wins, so the choice is structural even when the class
+        is not an automorphism orbit (a case colour refinement cannot detect, e.g. a latch
+        self-loop next to a 2-cycle of identical latches).  Candidates with equal
+        certificates and classes too large to try (MAX_TRIALS) fall back to the original
+        name; for an automorphism orbit any choice gives the same canonical form.
+        """
+        members = self.classes[lab]
+        if len(members) > MAX_TRIALS:
+            return min(members, key=_natural_key)
+        return min(members, key=lambda m: (self._trial(lab, m), _natural_key(m)))
+
+    def _individualize_all(self, lab: str) -> None:
+        """Individualize a whole class whose members have no tied neighbours.
+
+        Such members are interchangeable and individualizing one cannot affect the others,
+        so this gives exactly the labels of individualizing them one by one in name order.
+        """
+        order = sorted(self.classes[lab], key=_natural_key)
+        for j, member in enumerate(order[:-1]):
+            self._relabel(member, _h(lab, "individualized", str(len(order) - j)))
+
+    def run(self) -> None:
+        self.refine({lab: set(m) for lab, m in self.classes.items() if len(m) > 1})
+        while self.heap:
+            size, lab = heapq.heappop(self.heap)
+            if len(self.classes.get(lab, ())) != size:
+                continue  # stale heap entry
+            if not self._tied_near(self.classes[lab]):
+                self._individualize_all(lab)
             else:
-                uses.append(_h("names", str(cell.inputs.count(net)), outs))
-        result[net] = _h(*sorted(uses))
-    return result
+                self._individualize(lab, self._choose(lab))
 
 
 def _natural_key(name: str) -> tuple[tuple[int, str], ...]:
-    """Sort key that orders ``n9`` before ``n10`` (keeps --canon idempotent on ties)."""
+    """Sort key that orders ``n9`` before ``n10``."""
     parts = re.split(r"(\d+)", name)
     return tuple((1, p) if i % 2 == 0 else (0, p.zfill(20)) for i, p in enumerate(parts))
 
@@ -294,16 +479,12 @@ def _pick_prefix(primary: Iterable[str]) -> str:
     return prefix
 
 
-def canonical_names(
-    model: blif.Model, models: dict[str, blif.Model], max_rounds: int
-) -> dict[str, str]:
+def canonical_names(model: blif.Model, models: dict[str, blif.Model]) -> dict[str, str]:
     """Map every net of ``model`` to its canonical name (primary nets map to themselves)."""
     g = _build_graph(model, models)
-    labels, level = _label_nets(g, max_rounds)
-    fanout = _fanout_labels(g, labels)
-    ranked = sorted(
-        g.internal, key=lambda n: (level.get(n, 0), labels[n], fanout[n], _natural_key(n))
-    )
+    labels, level = _forward_labels(g)
+    _Refiner(g, labels).run()
+    ranked = sorted(g.internal, key=lambda n: (level.get(n, 0), labels[n]))
     prefix = _pick_prefix(g.primary)
     rename = {n: n for n in g.primary}
     rename.update({net: f"{prefix}{k}" for k, net in enumerate(ranked)})
@@ -319,10 +500,9 @@ def _attr_lines(cell: blif.Cell, keep_attrs: bool) -> list[str]:
 
 
 def _render_names(cell: blif.Names, rn: dict[str, str]) -> list[str]:
-    cols = sorted(range(len(cell.inputs)), key=lambda i: (rn[cell.inputs[i]], i))
+    cols = _column_order([rn[n] for n in cell.inputs], cell.rows)
     header = " ".join([".names", *(rn[cell.inputs[i]] for i in cols), rn[cell.output]])
-    rows = {("".join(p[i] for i in cols) + " " + o).strip() for p, o in cell.rows}
-    return [header, *sorted(rows)]
+    return [header, *_render_cover(cols, cell.rows)]
 
 
 def _render_cell(cell: blif.Cell, rn: dict[str, str], keep_attrs: bool) -> str:
@@ -341,7 +521,7 @@ def _render_cell(cell: blif.Cell, rn: dict[str, str], keep_attrs: bool) -> str:
 
 
 def canonicalize_model(
-    model: blif.Model, models: dict[str, blif.Model], keep_attrs: bool, max_rounds: int
+    model: blif.Model, models: dict[str, blif.Model], keep_attrs: bool
 ) -> list[str]:
     """Canonical text lines for one model."""
     lines = [f".model {model.name}"]
@@ -350,20 +530,19 @@ def canonicalize_model(
         lines += [f"{directive} {p}" for p in sorted(set(ports))]
     if model.blackbox:
         return [*lines, ".blackbox", ".end"]
-    rn = canonical_names(model, models, max_rounds)
-    blocks = sorted({_render_cell(c, rn, keep_attrs) for c in model.cells})
+    rn = canonical_names(model, models)
+    # A list, not a set: duplicate cells (e.g. two identical output-less subckts) count.
+    blocks = sorted(_render_cell(c, rn, keep_attrs) for c in model.cells)
     for block in blocks:
         lines += block.split("\n")
     return [*lines, ".end"]
 
 
-def canonicalize(
-    netlist: blif.Netlist, keep_attrs: bool = False, max_rounds: int = DEFAULT_MAX_ROUNDS
-) -> str:
+def canonicalize(netlist: blif.Netlist, keep_attrs: bool = False) -> str:
     """Canonical BLIF text for a whole netlist (models separated by a blank line)."""
     models = netlist.by_name()
     ordered = [netlist.top, *sorted(netlist.models[1:], key=lambda m: m.name)]
-    chunks = ["\n".join(canonicalize_model(m, models, keep_attrs, max_rounds)) for m in ordered]
+    chunks = ["\n".join(canonicalize_model(m, models, keep_attrs)) for m in ordered]
     return "\n\n".join(chunks) + "\n"
 
 
@@ -402,8 +581,6 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--canon", action="store_true", help="print the canonical form of one file")
     ap.add_argument("--keep-attrs", action="store_true", help="keep .cname/.attr lines")
     ap.add_argument("--quiet", action="store_true", help="no diff output, exit code only")
-    ap.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS,
-                    help="latch refinement rounds (default %(default)s)")
     return ap
 
 
@@ -414,8 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(files) != (1 if args.canon else 2):
         ap.error("--canon takes one file" if args.canon else "expected two files")
     try:
-        canon = [canonicalize(blif.parse_file(f), args.keep_attrs, args.max_rounds)
-                 for f in files]
+        canon = [canonicalize(blif.parse_file(f), args.keep_attrs) for f in files]
     except blif.BlifError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return 2

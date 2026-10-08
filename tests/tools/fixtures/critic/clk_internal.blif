@@ -1,0 +1,9 @@
+# Divided clock: the second latch is clocked by a latch output (unsupported by ABC dsec).
+.model top
+.inputs d clk1 clk2
+.outputs q
+.names div div_n
+0 1
+.latch div_n div re clk1 0
+.latch d q re div 0
+.end

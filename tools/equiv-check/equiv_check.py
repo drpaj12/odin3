@@ -11,8 +11,16 @@ Each netlist is flattened in Python into one model (``.subckt`` of models define
 same file are inlined; known VTR hard blocks are replaced by logic; other black boxes are
 rejected), primary I/O names are normalized so Parmys and Odin II spellings meet, internal
 nets get plain names, and ABC runs ``cec`` (no latches) or ``dsec`` (latches) on the two
-flat files.  Latch type and clock are not modelled: ABC treats all latches as clocked by
-one implicit global clock.
+flat files; if only one side has latches, the other gets a dangling const-0 latch.
+
+ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
+(edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
+both files must use the same pair (else exit 1).  Level-sensitive (ah/al) and asynchronous
+(as) latches, internal clocks and several clock domains are rejected (exit 2).  Latch init
+2/3 (don't care/unknown) or a missing init is treated as 0 with a notice (``--strict-init``
+makes it an error).  An undriven net that reaches a primary output or a latch input is an
+error (``--allow-undriven`` ties it to 0); a non-black-box model with ports but no cells is
+an error ("mark it .blackbox").
 
 ABC lookup order: ``--abc PATH``, ``$ODIN3_ABC``, ``build/*/third_party/abc/abc`` in the
 repository, ``$VTR_ROOT/build/abc/abc``, ``abc`` on ``PATH``.
@@ -177,10 +185,11 @@ def _adder_shape(model: blif.Model) -> tuple[list[str], list[str], str, list[str
 
 
 class _Flattener:
-    def __init__(self, netlist: blif.Netlist, strict_init: bool) -> None:
+    def __init__(self, netlist: blif.Netlist, strict_init: bool, allow_undriven: bool) -> None:
         self.netlist = netlist
         self.models = netlist.by_name()
         self.strict_init = strict_init
+        self.allow_undriven = allow_undriven
         self.counter = 0
         self.dc_inits = 0
         top = netlist.top
@@ -206,7 +215,7 @@ class _Flattener:
             frame = stack.pop()
             for cell in frame.model.cells:
                 self.add_cell(cell, frame, stack)
-        self.tie_undriven()
+        self.check_undriven()
         if self.dc_inits:
             notice(f"{self.netlist.path}: {self.dc_inits} latch(es) with init 2/3 "
                    "(don't care/unknown) treated as 0")
@@ -230,8 +239,11 @@ class _Flattener:
                                  f"has init {init} (rejected by --strict-init)")
             self.dc_inits += 1
             init = "0"
+        ctrl = blif.latch_control(cell)
         self.flat.latches.append(blif.Latch(
-            input=frame.resolve(cell.input), output=frame.resolve(cell.output), init=init))
+            input=frame.resolve(cell.input), output=frame.resolve(cell.output),
+            ltype=cell.ltype, control=cell.control if ctrl is None else frame.resolve(ctrl),
+            init=init, line=cell.line))
 
     def add_subckt(self, cell: blif.Subckt, frame: _Frame, stack: list[_Frame]) -> None:
         sub = self.models[cell.model]
@@ -242,6 +254,9 @@ class _Flattener:
                                  f"{sub.name}")
             self.expand_adder(sub, conns)
             return
+        if not sub.cells and (sub.inputs or sub.outputs or sub.clocks):
+            raise EquivError(f"{self.netlist.path}:{cell.line}: empty model {sub.name!r}; "
+                             "mark it .blackbox")
         if cell.model in frame.path or len(frame.path) > _MAX_DEPTH:
             raise EquivError(f"{self.netlist.path}:{cell.line}: recursive instantiation of "
                              f"model {cell.model!r}")
@@ -271,7 +286,10 @@ class _Flattener:
             self.flat.names.append(blif.Names(inputs=ins, output=carry_out, rows=list(MAJ3)))
             carry = carry_out
 
-    def tie_undriven(self) -> None:
+    def check_undriven(self) -> None:
+        """Undriven nets that reach a primary output or a latch D input are an error (they
+        would silently become constants); with --allow-undriven, and for undriven nets that
+        only feed dangling logic, they are tied to 0 with a notice."""
         flat = self.flat
         driven = set(flat.inputs)
         driven.update(c.output for c in flat.names)
@@ -280,16 +298,103 @@ class _Flattener:
         for names in flat.names:
             used.update(dict.fromkeys(names.inputs))
         used.update(dict.fromkeys(c.input for c in flat.latches))
-        undriven = [n for n in used if n not in driven]
+        undriven = sorted(n for n in used if n not in driven)
+        if not self.allow_undriven:
+            self._reject_observable(undriven)
         for net in undriven:
             flat.names.append(blif.Names(inputs=[], output=net))
         if undriven:
             notice(f"{flat.path}: {len(undriven)} undriven net(s) tied to 0")
 
+    def _reject_observable(self, undriven: list[str]) -> None:
+        flat = self.flat
+        fanout: dict[str, list[str]] = {}
+        for names in flat.names:
+            for net in names.inputs:
+                fanout.setdefault(net, []).append(names.output)
+        sinks = {n: "primary output" for n in flat.outputs}
+        sinks.update({c.input: f"the D input of latch {show(c.output)}" for c in flat.latches})
+        seen: set[str] = set()
+        for source in undriven:
+            work = [source]
+            while work:
+                net = work.pop()
+                if net in sinks:
+                    raise EquivError(f"{flat.path}: undriven net {show(source)} reaches "
+                                     f"{sinks[net]} {show(net)}; pass --allow-undriven to "
+                                     "tie it to 0")
+                if net not in seen:
+                    seen.add(net)
+                    work.extend(fanout.get(net, []))
 
-def flatten(netlist: blif.Netlist, strict_init: bool = False) -> Flat:
+
+def show(net: str) -> str:
+    """Printable flat net name (instance-path separators shown as '/')."""
+    return net.replace(_SEP, "/")
+
+
+def flatten(netlist: blif.Netlist, strict_init: bool = False,
+            allow_undriven: bool = False) -> Flat:
     """Flatten ``netlist`` into one model without black boxes (see module docstring)."""
-    return _Flattener(netlist, strict_init).run()
+    return _Flattener(netlist, strict_init, allow_undriven).run()
+
+
+# --------------------------------------------------------------------------- clocking
+
+_UNSUPPORTED_LATCH_TYPES = {"ah": "level-sensitive", "al": "level-sensitive",
+                            "as": "asynchronous"}
+
+
+def _clock_source(flat: Flat, net: str) -> str | None:
+    """Follow single-input buffers back from ``net``; the primary input reached, or None."""
+    buffers = {n.output: n.inputs[0] for n in flat.names
+               if len(n.inputs) == 1 and n.rows == [("1", "1")]}
+    inputs = set(flat.inputs)
+    seen: set[str] = set()
+    while net not in inputs and net in buffers and net not in seen:
+        seen.add(net)
+        net = buffers[net]
+    return net if net in inputs else None
+
+
+def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
+    """The single (latch type, I/O-normalized clock) of ``flat``, or None without latches.
+
+    ABC models every latch as a flip-flop on one implicit clock, so anything else is
+    rejected with EquivError: level-sensitive or asynchronous latches, clocks that are
+    not (buffered) primary inputs, and more than one (type, clock) pair.  Latches without
+    type/control form their own domain ("untyped", "-").
+    """
+    domains: set[tuple[str, str]] = set()
+    for latch in flat.latches:
+        if latch.ltype is None:
+            domains.add(("untyped", "-"))
+            continue
+        kind = _UNSUPPORTED_LATCH_TYPES.get(latch.ltype)
+        if kind:
+            raise EquivError(f"{flat.path}:{latch.line}: unsupported: {kind} latch type "
+                             f"{latch.ltype!r} (latch {show(latch.output)})")
+        if latch.control is None or latch.control == blif.NO_CONTROL:
+            domains.add((latch.ltype, blif.NO_CONTROL))
+            continue
+        source = _clock_source(flat, latch.control)
+        if source is None:
+            raise EquivError(f"{flat.path}:{latch.line}: unsupported: latch "
+                             f"{show(latch.output)} is clocked by internal net "
+                             f"{show(latch.control)}")
+        domains.add((latch.ltype, ports[source]))
+    if len(domains) > 1:
+        raise EquivError(f"{flat.path}: unsupported: more than one clock domain "
+                         f"(type, clock): {sorted(domains)}")
+    return next(iter(domains), None)
+
+
+def add_dangling_latch(flat: Flat) -> None:
+    """Give a latch-free netlist one const-0 latch driving nothing, so ABC dsec (which
+    refuses networks without latches) can compare it with a sequential one."""
+    const = f"dangling_d{_SEP}"
+    flat.names.append(blif.Names(inputs=[], output=const))
+    flat.latches.append(blif.Latch(input=const, output=f"dangling_q{_SEP}", init="0"))
 
 
 # --------------------------------------------------------------------------- writing
@@ -403,8 +508,9 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
 
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f) for f in args.files]
-    flats = [flatten(n, args.strict_init) for n in nets]
+    flats = [flatten(n, args.strict_init, args.allow_undriven) for n in nets]
     maps = [io_map(f, not args.no_io_normalize) for f in flats]
+    domains = [clock_domain(f, m) for f, m in zip(flats, maps, strict=True)]
     sets = [({m[p] for p in f.inputs}, {m[p] for p in f.outputs}) for f, m in zip(flats, maps,
                                                                                     strict=True)]
     mismatch = _io_mismatch(sets[0], sets[1])
@@ -413,8 +519,16 @@ def _check(args: argparse.Namespace) -> int:
         for line in mismatch:
             print(f"  {line}")
         return 1
+    if domains[0] is not None and domains[1] is not None and domains[0] != domains[1]:
+        print(f"{TOOL}: NOT equivalent: latch clocking differs: A is {domains[0]}, "
+              f"B is {domains[1]} (type, clock)")
+        return 1
     abc = find_abc(args.abc)
     verb = "dsec" if any(f.latches for f in flats) else "cec"
+    if verb == "dsec":
+        for flat in flats:
+            if not flat.latches:
+                add_dangling_latch(flat)
     tmp = Path(tempfile.mkdtemp(prefix="equiv-check-"))
     try:
         write_flat(flats[0], maps[0], tmp / "a.blif")
@@ -439,12 +553,20 @@ def _parser() -> argparse.ArgumentParser:
         prog=TOOL,
         description="Prove two BLIF netlists functionally equivalent with ABC cec/dsec. "
         "Exit 0 equivalent, 1 not equivalent, 2 usage/input/ABC error.",
+        epilog="Latches with init 2 (don't care) or 3 (unknown) are treated as starting at 0; "
+        "use --strict-init to reject them. Each file must clock all its latches with one "
+        "(edge type, primary-input clock) pair, the same in both files.",
     )
     ap.add_argument("files", nargs=2, metavar="FILE.blif")
     ap.add_argument("--abc", metavar="PATH", help="ABC binary to use")
     ap.add_argument("--keep-temp", action="store_true", help="keep the temp dir for ABC")
     ap.add_argument("--strict-init", action="store_true",
-                    help="reject latches with init 2/3 instead of treating them as 0")
+                    help="latch init 2 (don't care) and 3 (unknown), and a missing init, are "
+                    "treated as 0 by default (with a notice); this flag makes them an "
+                    "error (exit 2) instead")
+    ap.add_argument("--allow-undriven", action="store_true",
+                    help="tie undriven nets that reach an output or latch to 0 instead of "
+                    "failing (exit 2)")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,

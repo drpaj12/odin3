@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Odin III lint gate (docs/DESIGN.md section 15.2). Usage: tools/lint.sh [--no-tidy]
+# Odin III lint gate (docs/DESIGN.md sections 15.1-15.2). Usage: tools/lint.sh [--no-tidy]
 #
 # Runs every blocking tool, in order, never stopping at the first failure, then prints a
 # PASS/FAIL/SKIP table and exits nonzero if anything failed. A missing tool is a FAIL: the
@@ -94,6 +94,14 @@ read_list() {
         out+=("$f")
     done < <(list_files "$@")
 }
+
+# ---- 0. §15.1 rules no other tool checks (exit/abort/goto) ---------------------------------
+read_list rule_files 'src/*.c' 'src/*.h' 'plugins/*.c' 'plugins/*.h'
+if [ "${#rule_files[@]}" -eq 0 ]; then
+    record rules PASS
+else
+    run_tool rules python3 tools/check_rules.py "${rule_files[@]}"
+fi
 
 # ---- 1. clang-format -------------------------------------------------------------------------
 read_list c_h_files '*.c' '*.h'

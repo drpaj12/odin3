@@ -1,0 +1,5 @@
+.model top
+.inputs d clk1 clk2
+.outputs q
+.latch d q re clk1 0
+.end

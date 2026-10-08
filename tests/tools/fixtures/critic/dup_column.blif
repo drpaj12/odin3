@@ -1,0 +1,15 @@
+# Fuzz-found: the same net in two columns of one .names (c0 c0), and a net used twice in
+# a row-less cover; column order and multiplicity must be canonical.
+.model top
+.inputs i0 i1 i2 clk
+.outputs o0
+.names c0
+.names i1 c0 c0 w0
+001 1
+.names w0 w1
+0 1
+.names w0 o0
+1 1
+.names c0 w3 w3 w6
+.names w3
+.end

@@ -1,8 +1,9 @@
 """Tests for tools/equiv-check.
 
-Tests that need ABC are skipped (not failed) when no ABC binary is found; set ODIN3_ABC to
-point at one.  Tests that stop before ABC runs (input errors, interface mismatches) always
-run.
+Tests that need ABC are skipped (not failed) when no usable ABC binary is found; set
+ODIN3_ABC to point at one.  With ODIN3_REQUIRE_ABC=1 (set by the CTest run) a missing or
+unusable ABC makes those tests FAIL instead.  Tests that stop before ABC runs (input
+errors, interface or clocking mismatches) always run.
 """
 
 from __future__ import annotations
@@ -22,15 +23,31 @@ import equiv_check
 from . import helpers
 
 
-def _find_abc() -> str | None:
+def _find_abc() -> tuple[str | None, str]:
+    """(usable ABC path or None, reason it is unusable)."""
     try:
-        return equiv_check.find_abc()
-    except equiv_check.EquivError:
-        return None
+        path = equiv_check.find_abc()
+    except equiv_check.EquivError as exc:
+        return None, str(exc)
+    try:
+        proc = subprocess.run([path, "-q", "quit"], capture_output=True, text=True,
+                              timeout=60, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"{path}: {exc}"
+    if proc.returncode != 0:
+        return None, f"{path} -q quit exited with status {proc.returncode}"
+    return path, ""
 
 
-ABC = _find_abc()
-needs_abc = unittest.skipIf(ABC is None, "ABC not found (set ODIN3_ABC or build the repo)")
+ABC, ABC_PROBLEM = _find_abc()
+REQUIRE_ABC = os.environ.get("ODIN3_REQUIRE_ABC") == "1"
+needs_abc = unittest.skipIf(ABC is None and not REQUIRE_ABC,
+                            f"ABC not available ({ABC_PROBLEM}); set ODIN3_ABC")
+CRITIC = helpers.FIXTURES / "critic"
+
+
+def cx(name: str) -> str:
+    return str(CRITIC / name)
 
 
 def check(*argv: str) -> tuple[int, str, str]:
@@ -127,6 +144,42 @@ class EquivCheckNoAbcTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("not an executable", err)
 
+    def test_clocking_mismatch(self) -> None:
+        for other in ("l_fe.blif", "l_clk2.blif"):
+            with self.subTest(other):
+                code, out, _ = check(cx("l_re.blif"), cx(other))
+                self.assertEqual(code, 1, out)
+                self.assertIn("latch clocking differs", out)
+        code, out, _ = check(cx("nil.blif"), cx("noctl.blif"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("('untyped', '-')", out)
+
+    def test_unsupported_clocking(self) -> None:
+        cases = {"l_ah.blif": "level-sensitive latch type 'ah'",
+                 "clk_internal.blif": "clocked by internal net",
+                 "clk_two_domains.blif": "more than one clock domain"}
+        for name, message in cases.items():
+            with self.subTest(name):
+                code, _, err = check(cx("l_re.blif"), cx(name))
+                self.assertEqual(code, 2)
+                self.assertIn(message, err)
+
+    def test_empty_non_blackbox_model(self) -> None:
+        code, _, err = check(cx("bb_a.blif"), cx("bb_b.blif"))
+        self.assertEqual(code, 2)
+        self.assertIn("empty model 'multiply'; mark it .blackbox", err)
+
+    def test_undriven_output_is_error(self) -> None:
+        code, _, err = check(cx("ud_a.blif"), cx("ud_b.blif"))
+        self.assertEqual(code, 2)
+        self.assertIn("undriven net o reaches primary output o", err)
+
+    def test_help_documents_init_handling(self) -> None:
+        code, out, _ = check("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("init 2 (don't care) and 3 (unknown)", " ".join(out.split()))
+        self.assertIn("--strict-init", out)
+
     def test_unparseable_abc_output(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fake = Path(tmp) / "abc"
@@ -142,6 +195,8 @@ class EquivCheckNoAbcTest(unittest.TestCase):
 @needs_abc
 class EquivCheckAbcTest(unittest.TestCase):
     def setUp(self) -> None:
+        if ABC is None:
+            self.fail(f"ODIN3_REQUIRE_ABC=1 but no usable ABC: {ABC_PROBLEM}")
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
 
@@ -197,6 +252,25 @@ class EquivCheckAbcTest(unittest.TestCase):
         b = self.write("b.blif", head + ".names o\n1\n.names p\n.end\n")
         code, out, err = check(a, b)
         self.assertEqual(code, 0, out + err)
+
+    def test_latch_init_and_buffered_clock(self) -> None:
+        self.assertEqual(check(cx("l_re.blif"), cx("l_init1.blif"))[0], 1)
+        code, out, err = check(cx("l_re.blif"), cx("l_init3.blif"))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("treated as 0", err)
+        code, out, err = check(cx("l_re.blif"), cx("clk_buffered.blif"))
+        self.assertEqual(code, 0, out + err)
+
+    def test_latches_on_one_side_only(self) -> None:
+        code, out, err = check(cx("mix_a.blif"), cx("mix_b.blif"))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("(abc dsec)", out)
+        self.assertEqual(check(cx("mix_a.blif"), cx("mix_c.blif"))[0], 1)
+
+    def test_allow_undriven(self) -> None:
+        code, out, err = check("--allow-undriven", cx("ud_a.blif"), cx("ud_b.blif"))
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("undriven net(s) tied to 0", err)
 
     def test_wrapper_script(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "equiv-check" / "equiv-check"

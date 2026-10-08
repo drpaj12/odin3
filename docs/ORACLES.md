@@ -1,7 +1,7 @@
 # Oracles
 
 The upstream tools Odin III is measured against. Every golden in `odin3-golden` records the VTR
-commit that produced it (`<stem>.<tool>.prov`); this file records what that commit contains.
+commit that produced it (`<leaf>.<tool>.prov`, layout in the odin3-golden README); this file records what that commit contains.
 Update it whenever `external/` is moved to a new commit, and regenerate the goldens in the same
 change.
 
