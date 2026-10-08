@@ -72,6 +72,7 @@ Agent defaults from §7 (2026-10-08, Peter may override):
 27. `tests/micro/` omits `full/mcml.v` (674 KB) instead of adding a `check-added-large-files` exception (rule: no gate weakening without Peter). Its golden is still in `odin3-golden`.
 28. `tests/micro/` is verbatim upstream: it is excluded from the `trailing-whitespace`/`end-of-file-fixer` hooks only (the large-file check still applies) and is `-text` in `.gitattributes`.
 29. Oracle runs on WSL: the memory cap kills report `status=capped`, not `failed` (PR #4). The batch keeps parallel caps ≤ 60% of VM RAM, deletes successful run dirs, and pauses below 20 GB free on C: (the ext4.vhdx grows into C: and never shrinks by itself). Two VM crashes on 2026-10-08 came from memory and disk exhaustion.
+30. **Golden sample on GitHub, full set elsewhere** (Peter, 2026-10-08): the full BLIF set is too big for GitHub LFS (2.7 GB and growing), so Peter will host it off GitHub. `odin3-golden` commits every `.prov` and `.log` (the full verdict record; each `.prov` has `blif_sha256`, so any copy of the full set can be verified) plus a representative BLIF sample chosen by `tools/golden-sample`: per group (`regression/verilog/<category>`, `vtr`), up to 5 designs that are `ok` for both tools on both arches with BLIFs ≤ 2 MB, at evenly spaced size ranks, plus `quickstart/blink`. `~/odin3-ws/golden` still holds the full set on disk; its `.gitignore` ignores `*.blif` except the generated sample block. The full set is packaged as `golden-full-<vtr12>.tar.gz` with `SHA256SUMS`.
 
 ## B. Who does what — summary
 
@@ -250,7 +251,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 
 ## 7. Golden netlists
 
-- [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes.
+- [ ] `[AGENT]` Run `tools/run-oracle.sh` over every file in `$VTR_ROOT/odin_ii/regression_test/benchmark/` (micros; all 563 `.v`, failures recorded — decision #13) and `$VTR_ROOT/vtr_flow/benchmarks/verilog/` (VTR-19) against `EArch.xml` and `k6_frac_N10_frac_chain_mem32K_40nm.xml`; commit to `odin3-golden` with hashes (all provenance + the BLIF sample; full set archived off GitHub, decision #30).
 - [x] `[AGENT]` Sanity: `netlist-compare` of a golden against itself is identical; Parmys vs Odin II on `blink` is different but `equiv-check` proves them equivalent. (2026-10-08: self-compare rc 0; blink Parmys vs Odin II differ, `equiv-check` → equivalent by `abc dsec`.)
 - [x] `[AGENT]` Copy the micro Verilog sources into `odin3/tests/micro/` with a `SOURCES.md` noting origin and VTR commit. (2026-10-08: 539 `.v` + 71 `.vh`; exclusions in decisions #26–28.)
 
@@ -260,7 +261,8 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
 - [ ] `[AGENT]` VTR built with Odin II; `blink.v` passes through Parmys→ABC→VPR and through Odin II.
 - [ ] `[AGENT]` Standalone Yosys built.
 - [ ] `[AGENT]` `odin3`: PR #1 merged, CI green, lint gate green on the skeleton.
-- [ ] `[AGENT]` `odin3-golden`: micros + VTR-19 goldens for two arches with commit hashes.
+- [ ] `[AGENT]` `odin3-golden`: micros + VTR-19 goldens for two arches with commit hashes (provenance for all, BLIF sample per decision #30; full-set archive packaged).
+- [ ] `[HUMAN]` Host the full golden archive and record its location in the `odin3-golden` README.
 - [ ] `[AGENT]` `docs/DESIGN.md` is the source of truth (decision #15), the Claude project's copy has been refreshed from it, and ADRs are written.
 - [ ] `[HUMAN]` Check `/usage` after the first two sessions and adjust the model table in §9.
 
