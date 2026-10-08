@@ -44,6 +44,7 @@ add_library(odin3_core OBJECT
     src/util/idindex.c
     src/util/str.c
     src/util/log.c
+    src/frontends/blif/lexer.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -158,6 +159,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
+    odin3_add_unit_test(test_blif_lexer)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -179,7 +181,7 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 1\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 2\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 
