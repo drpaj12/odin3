@@ -20,7 +20,8 @@ void odin3_arena_destroy(odin3_arena *arena);
  */
 void *odin3_arena_alloc(odin3_arena *arena, size_t bytes);
 
-/* NUL-terminated copy of the first `len` bytes of `src`; NULL on overflow or OOM. */
+/* NUL-terminated copy of the first `len` bytes of `src` (src may be NULL when len is 0); NULL on
+ * overflow or OOM. */
 char *odin3_arena_strndup(odin3_arena *arena, const char *src, size_t len);
 
 /* Bytes handed out (after alignment rounding) and bytes of chunk payload reserved. */

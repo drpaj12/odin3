@@ -122,7 +122,9 @@ char *odin3_arena_strndup(odin3_arena *arena, const char *src, size_t len) {
     }
     char *copy = odin3_arena_alloc(arena, len + 1);
     if (copy != NULL) {
-        memcpy(copy, src, len);
+        if (len > 0) {
+            memcpy(copy, src, len);
+        }
         copy[len] = '\0';
     }
     return copy;
