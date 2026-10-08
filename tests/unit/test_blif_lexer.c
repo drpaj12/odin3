@@ -194,6 +194,125 @@ static void test_oom_sweep(void) {
     TEST_ASSERT_TRUE(completed);
 }
 
+/* Writes `prefix_len` filler bytes (a comment-free run of "x " tokens' worth of newlines is not
+ * needed: blank-padded with spaces) then `tail`, so that tail starts at offset prefix_len. */
+static void write_padded(size_t prefix_len, const char *tail) {
+    size_t tail_len = strlen(tail);
+    char *data = malloc(prefix_len + tail_len + 1);
+    TEST_ASSERT_NOT_NULL(data);
+    memset(data, ' ', prefix_len);
+    data[prefix_len - 1] = '\n';
+    memcpy(data + prefix_len, tail, tail_len + 1);
+    write_file(data, prefix_len + tail_len);
+    free(data);
+}
+
+enum { CHUNK = 64 * 1024 };
+
+static void test_token_straddles_chunk(void) {
+    write_padded(CHUNK - 3, "abcdef ghi\n.end\n"); /* "abc" | "def" */
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 2, "abcdef|ghi");
+    expect_line(lx, 3, ".end");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_backslash_last_byte_of_chunk(void) {
+    write_padded(CHUNK - 3, "a \\\nb\n.end\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 2, "a|b");
+    expect_line(lx, 4, ".end");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_cr_ends_chunk(void) {
+    write_padded(CHUNK - 3, "a \r\nb\r\n.end\n");
+    /* offset CHUNK-3: 'a',' ','\r' end the chunk exactly; "\n" starts the next */
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 2, "a");
+    expect_line(lx, 3, "b");
+    expect_line(lx, 4, ".end");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_comment_straddles_chunk(void) {
+    write_padded(CHUNK - 4, "a # comment text\nb\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 2, "a");
+    expect_line(lx, 3, "b");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_directory_is_io_error(void) {
+    odin3_blif_lexer *lx = odin3_blif_lexer_open(".");
+    TEST_ASSERT_NOT_NULL(lx);
+    odin3_blif_line got;
+    TEST_ASSERT_FALSE(odin3_blif_lexer_next(lx, &got));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_blif_lexer_status(lx));
+    TEST_ASSERT_FALSE(odin3_blif_lexer_next(lx, &got));
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_directory_error_is_logged(void) {
+    odin3_blif_lexer *lx = odin3_blif_lexer_open(".");
+    TEST_ASSERT_NOT_NULL(lx);
+    odin3_blif_line got;
+    TEST_ASSERT_FALSE(odin3_blif_lexer_next(lx, &got));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, ".:1: read error"));
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_backslash_blank_text(void) {
+    write_str("a\\ b\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 1, "a\\|b");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_nul_is_parse_error(void) {
+    write_file("a b\nc\0d\n", 9);
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 1, "a|b");
+    odin3_blif_line got;
+    TEST_ASSERT_FALSE(odin3_blif_lexer_next(lx, &got));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_lexer_status(lx));
+    TEST_ASSERT_EQUAL_STRING("odin3_lexer_test.blif:2: NUL byte in input", last_error);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_comment_after_continuation(void) {
+    write_str("a \\\n# note\nb\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 1, "a");
+    expect_line(lx, 3, "b");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_continuation_then_blank_line_ends(void) {
+    write_str("a \\\n\nb \\\r\n\r\nc\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 1, "a");
+    expect_line(lx, 3, "b");
+    expect_line(lx, 5, "c");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
+static void test_crlf_blank_line(void) {
+    write_str("a\r\n\r\n\r\nb\r\n");
+    odin3_blif_lexer *lx = open_ok();
+    expect_line(lx, 1, "a");
+    expect_line(lx, 4, "b");
+    expect_eof(lx);
+    odin3_blif_lexer_close(lx);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_tokens_and_lines);
@@ -206,5 +325,16 @@ int main(void) {
     RUN_TEST(test_two_megabyte_line);
     RUN_TEST(test_missing_file);
     RUN_TEST(test_oom_sweep);
+    RUN_TEST(test_token_straddles_chunk);
+    RUN_TEST(test_backslash_last_byte_of_chunk);
+    RUN_TEST(test_cr_ends_chunk);
+    RUN_TEST(test_comment_straddles_chunk);
+    RUN_TEST(test_directory_is_io_error);
+    RUN_TEST(test_directory_error_is_logged);
+    RUN_TEST(test_backslash_blank_text);
+    RUN_TEST(test_nul_is_parse_error);
+    RUN_TEST(test_comment_after_continuation);
+    RUN_TEST(test_continuation_then_blank_line_ends);
+    RUN_TEST(test_crlf_blank_line);
     return UNITY_END();
 }

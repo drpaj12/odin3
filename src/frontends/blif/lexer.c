@@ -18,7 +18,8 @@ struct odin3_blif_lexer {
     bool eof;
     uint32_t phys_line;  /* physical line of the next unread byte */
     uint32_t first_line; /* first physical line with a token of the current logical line */
-    bool in_comment, in_token, pending_bs;
+    bool in_comment, in_token, pending_bs, bs_blank;
+    char *path;
     odin3_status status;
     odin3_strbuf text; /* tokens of the current logical line, each NUL-terminated */
     odin3_vec starts;  /* size_t start offset per token */
@@ -33,7 +34,9 @@ odin3_blif_lexer *odin3_blif_lexer_open(const char *path) {
     }
     odin3_blif_lexer *lx = odin3_util_calloc(sizeof *lx);
     unsigned char *chunk = lx != NULL ? odin3_util_malloc(LEX_CHUNK) : NULL;
-    if (chunk == NULL) {
+    char *path_copy = chunk != NULL ? odin3_util_malloc(strlen(path) + 1) : NULL;
+    if (path_copy == NULL) {
+        odin3_util_free(chunk);
         odin3_util_free(lx);
         (void)fclose(file);
         odin3_log(ODIN3_LOG_ERROR, "%s: out of memory", path);
@@ -41,6 +44,7 @@ odin3_blif_lexer *odin3_blif_lexer_open(const char *path) {
     }
     lx->file = file;
     lx->chunk = chunk;
+    lx->path = strcpy(path_copy, path);
     lx->phys_line = 1;
     odin3_strbuf_init(&lx->text);
     odin3_vec_init(&lx->starts, sizeof(size_t));
@@ -54,6 +58,7 @@ void odin3_blif_lexer_close(odin3_blif_lexer *lx) {
     }
     (void)fclose(lx->file);
     odin3_util_free(lx->chunk);
+    odin3_util_free(lx->path);
     odin3_strbuf_free(&lx->text);
     odin3_vec_free(&lx->starts);
     odin3_vec_free(&lx->tokens);
@@ -78,7 +83,7 @@ static bool lex_fill(odin3_blif_lexer *lx) {
         lx->eof = true;
         if (ferror(lx->file) != 0) {
             lx->status = ODIN3_ERR_IO;
-            odin3_log(ODIN3_LOG_ERROR, "read error at line %u", (unsigned)lx->phys_line);
+            odin3_log(ODIN3_LOG_ERROR, "%s:%u: read error", lx->path, (unsigned)lx->phys_line);
         }
     }
     return lx->len > 0;
@@ -86,7 +91,7 @@ static bool lex_fill(odin3_blif_lexer *lx) {
 
 static void lex_fail_memory(odin3_blif_lexer *lx) {
     lx->status = ODIN3_ERR_NO_MEMORY;
-    odin3_log(ODIN3_LOG_ERROR, "out of memory reading line %u", (unsigned)lx->phys_line);
+    odin3_log(ODIN3_LOG_ERROR, "%s:%u: out of memory", lx->path, (unsigned)lx->phys_line);
 }
 
 /* Appends bytes to the current token, starting it if needed. */
@@ -122,27 +127,39 @@ static bool lex_is_blank(unsigned char chr) {
 }
 
 static bool lex_is_special(unsigned char chr) {
-    return lex_is_blank(chr) || chr == '\n' || chr == '\r' || chr == '#' || chr == '\\';
+    return lex_is_blank(chr) || chr == '\n' || chr == '\r' || chr == '#' || chr == '\\' ||
+           chr == '\0';
 }
 
 /* Handles a byte while a backslash is pending; returns true when the byte was consumed. */
 static bool lex_pending_byte(odin3_blif_lexer *lx, unsigned char chr) {
     if (lex_is_blank(chr) || chr == '\r') {
+        lx->bs_blank = lx->bs_blank || lex_is_blank(chr);
         return true;
     }
     if (chr == '\n') {
         lx->pending_bs = false;
+        lx->bs_blank = false;
         lx->phys_line++;
         lex_end_token(lx);
         return true;
     }
     lx->pending_bs = false;
     lex_add(lx, "\\", 1); /* a lone backslash is an ordinary character */
+    if (lx->bs_blank) {
+        lx->bs_blank = false;
+        lex_end_token(lx);
+    }
     return false;
 }
 
 /* Consumes one byte; returns true when it ended a non-empty logical line. */
 static bool lex_byte(odin3_blif_lexer *lx, unsigned char chr) {
+    if (chr == '\0') {
+        lx->status = ODIN3_ERR_PARSE;
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: NUL byte in input", lx->path, (unsigned)lx->phys_line);
+        return false;
+    }
     if (lx->in_comment) {
         if (chr == '\n') {
             lx->in_comment = false;
