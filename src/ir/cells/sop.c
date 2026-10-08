@@ -1,4 +1,9 @@
-/* sop.c — bit-level sum-of-products cell $sop (BLIF .names), zero inputs allowed. */
+/*
+ * sop.c — bit-level sum-of-products cell $sop (BLIF .names), zero inputs allowed.
+ *
+ * Deliberately not Yosys's $sop (DEPTH/TABLE): this one keeps the cover rows as written, with
+ * parameters WIDTH (inputs) and COVER, so the BLIF writer reproduces them (IR-10).
+ */
 #include "cells.h"
 #include "util/log.h"
 

@@ -25,13 +25,12 @@ static const odin3_param_def k_pmux_params[] = {ODIN3_P_INT("WIDTH", 1), ODIN3_P
 /* B carries one WIDTH-bit input per select bit; 0 when the product does not fit. */
 static uint32_t pmux_b_width(const odin3_value *params, uint32_t port) {
     (void)port;
-    uint64_t prod = (uint64_t)params[MUX_WIDTH].i * (uint64_t)params[MUX_S_WIDTH].i;
-    if (params[MUX_WIDTH].kind != ODIN3_VAL_INT || params[MUX_S_WIDTH].kind != ODIN3_VAL_INT ||
-        params[MUX_WIDTH].i < 0 || params[MUX_S_WIDTH].i < 0 || prod > UINT32_MAX) {
+    uint32_t width = 0;
+    if (!odin3_cells_product(&params[MUX_WIDTH], &params[MUX_S_WIDTH], &width)) {
         odin3_log(ODIN3_LOG_ERROR, "$pmux: B width WIDTH*S_WIDTH is not in 0..%u", UINT32_MAX);
         return 0;
     }
-    return (uint32_t)prod;
+    return width;
 }
 
 static const odin3_port_def k_pmux_ports[] = {
@@ -49,7 +48,7 @@ static odin3_status pmux_verify(const odin3_value *params) {
     if (odin3_cells_check_ints(params, k_ranges, ODIN3_NELEM(k_ranges)) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    if ((uint64_t)params[MUX_WIDTH].i * (uint64_t)params[MUX_S_WIDTH].i > UINT32_MAX) {
+    if (!odin3_cells_product(&params[MUX_WIDTH], &params[MUX_S_WIDTH], &(uint32_t){0})) {
         odin3_log(ODIN3_LOG_ERROR, "$pmux: WIDTH*S_WIDTH exceeds %u", UINT32_MAX);
         return ODIN3_ERR_INVALID_ARG;
     }

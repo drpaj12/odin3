@@ -31,6 +31,24 @@ odin3_status odin3_cells_check_bits(const odin3_value *val, const char *name, ui
     return ODIN3_OK;
 }
 
+bool odin3_cells_product(const odin3_value *lhs, const odin3_value *rhs, uint32_t *out) {
+    if (lhs->kind != ODIN3_VAL_INT || lhs->i < 0 || lhs->i > (int64_t)UINT32_MAX) {
+        return false;
+    }
+    uint64_t prod = (uint64_t)lhs->i;
+    if (rhs != NULL) {
+        if (rhs->kind != ODIN3_VAL_INT || rhs->i < 0 || rhs->i > (int64_t)UINT32_MAX) {
+            return false;
+        }
+        prod *= (uint64_t)rhs->i;
+    }
+    if (prod > UINT32_MAX) {
+        return false;
+    }
+    *out = (uint32_t)prod;
+    return true;
+}
+
 const odin3_port_def odin3_cells_binary_ports[3] = {
     ODIN3_PORT_VEC("A", ODIN3_DIR_IN, "A_WIDTH"),
     ODIN3_PORT_VEC("B", ODIN3_DIR_IN, "B_WIDTH"),

@@ -49,26 +49,23 @@ static const odin3_param_def k_mem_params[MEM_N_PARAMS] = {
     ODIN3_P_BITS("INIT", NULL, 0),
 };
 
+/* Per $mem port: the parameter holding its port count and the one holding its field width. */
+static const uint8_t k_port_count[MEM_N_PORTS] = {MEM_RD_PORTS, MEM_RD_PORTS, MEM_RD_PORTS,
+                                                  MEM_RD_PORTS, MEM_WR_PORTS, MEM_WR_PORTS,
+                                                  MEM_WR_PORTS, MEM_WR_PORTS};
+static const uint8_t k_port_field[MEM_N_PORTS] = {0, 0,         MEM_ABITS, MEM_WIDTH,
+                                                  0, MEM_WIDTH, MEM_ABITS, MEM_WIDTH};
+
 /* Width of a $mem port: a per-port count (RD_PORTS/WR_PORTS) times a per-port field width. */
 static uint32_t mem_port_width(const odin3_value *params, uint32_t port) {
-    static const uint8_t k_count[MEM_N_PORTS] = {MEM_RD_PORTS, MEM_RD_PORTS, MEM_RD_PORTS,
-                                                 MEM_RD_PORTS, MEM_WR_PORTS, MEM_WR_PORTS,
-                                                 MEM_WR_PORTS, MEM_WR_PORTS};
-    static const uint8_t k_field[MEM_N_PORTS] = {0, 0,         MEM_ABITS, MEM_WIDTH,
-                                                 0, MEM_WIDTH, MEM_ABITS, MEM_WIDTH};
-    const odin3_value *count = &params[k_count[port]];
-    const odin3_value *field = k_field[port] == 0 ? NULL : &params[k_field[port]];
-    uint64_t prod = count->kind == ODIN3_VAL_INT && count->i >= 0 ? (uint64_t)count->i : UINT64_MAX;
-    if (field != NULL) {
-        prod = field->kind == ODIN3_VAL_INT && field->i >= 0 && prod != UINT64_MAX
-                   ? prod * (uint64_t)field->i
-                   : UINT64_MAX;
-    }
-    if (prod > UINT32_MAX) {
+    const odin3_value *count = &params[k_port_count[port]];
+    const odin3_value *field = k_port_field[port] == 0 ? NULL : &params[k_port_field[port]];
+    uint32_t width = 0;
+    if (!odin3_cells_product(count, field, &width)) {
         odin3_log(ODIN3_LOG_ERROR, "$mem: port %u width is not in 0..%u", port, UINT32_MAX);
         return 0;
     }
-    return (uint32_t)prod;
+    return width;
 }
 
 static const odin3_port_def k_mem_ports[MEM_N_PORTS] = {
@@ -93,6 +90,14 @@ static odin3_status mem_verify_ints(const odin3_value *params) {
 static odin3_status mem_verify(const odin3_value *params) {
     if (params[MEM_MEMID].kind != ODIN3_VAL_STRING || mem_verify_ints(params) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
+    }
+    for (uint32_t i = 0; i < MEM_N_PORTS; i++) {
+        uint32_t width = 0;
+        if (!odin3_cells_product(&params[k_port_count[i]],
+                                 k_port_field[i] == 0 ? NULL : &params[k_port_field[i]], &width)) {
+            odin3_log(ODIN3_LOG_ERROR, "$mem: port %s width does not fit", k_mem_ports[i].name);
+            return ODIN3_ERR_INVALID_ARG;
+        }
     }
     uint32_t rd = (uint32_t)params[MEM_RD_PORTS].i;
     uint32_t wr = (uint32_t)params[MEM_WR_PORTS].i;

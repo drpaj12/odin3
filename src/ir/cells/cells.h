@@ -1,5 +1,9 @@
 /*
  * cells.h — declarations shared by the built-in cell-type sources (private to src/ir/cells).
+ *
+ * Names follow Yosys RTLIL, with two deliberate Odin III deviations: $sop takes WIDTH and a COVER
+ * of rows as written (BLIF .names), not Yosys's DEPTH/TABLE; and INIT (0..3) on the bit-level
+ * $_DFF_*, $_DLATCH_* and $_FF_ cells is Odin III's parameter (IR-10, BLIF .latch).
  */
 #ifndef ODIN3_IR_CELLS_H
 #define ODIN3_IR_CELLS_H
@@ -8,9 +12,10 @@
 
 #include <stdint.h>
 
-/* Parameter and port table entries; the value is an INT default or an empty value of that kind. */
 /* Element count of an array. */
 #define ODIN3_NELEM(arr) ((uint32_t)(sizeof(arr) / sizeof((arr)[0])))
+
+/* Parameter table entries: an INT default, or an empty value of the kind. */
 
 #define ODIN3_P_INT(pname, num)                                                                    \
     {                                                                                              \
@@ -58,6 +63,12 @@ odin3_status odin3_cells_check_ints(const odin3_value *params, const odin3_int_r
 
 /* ODIN3_OK when val is a BITS value of exactly width bits; else logs and returns INVALID_ARG. */
 odin3_status odin3_cells_check_bits(const odin3_value *val, const char *name, uint32_t width);
+
+/*
+ * Multiplies two INT values (rhs may be NULL for lhs alone) into *out; false (nothing logged)
+ * when either is not an INT in [0, UINT32_MAX] or the product exceeds UINT32_MAX.
+ */
+bool odin3_cells_product(const odin3_value *lhs, const odin3_value *rhs, uint32_t *out);
 
 /* Shared by $add/$and/$shl/$eq...: A_SIGNED B_SIGNED A_WIDTH B_WIDTH Y_WIDTH; ports A B Y. */
 extern const odin3_port_def odin3_cells_binary_ports[3];
@@ -119,5 +130,16 @@ extern const odin3_celltype_def odin3_cell_dlatch_p;
 extern const odin3_celltype_def odin3_cell_dlatch_n;
 extern const odin3_celltype_def odin3_cell_ff;
 extern const odin3_celltype_def odin3_cell_sop;
+
+/* Word-level cells sharing the binary / unary tables above. */
+#define ODIN3_BINARY(var, label)                                                                   \
+    const odin3_celltype_def var = {                                                               \
+        label, ODIN3_GRAN_WORD,           0, odin3_cells_binary_ports,                             \
+        3,     odin3_cells_binary_params, 5, odin3_cells_binary_verify,                            \
+        NULL}
+#define ODIN3_UNARY(var, label)                                                                    \
+    const odin3_celltype_def var = {label, ODIN3_GRAN_WORD,          0, odin3_cells_unary_ports,   \
+                                    2,     odin3_cells_unary_params, 3, odin3_cells_unary_verify,  \
+                                    NULL}
 
 #endif

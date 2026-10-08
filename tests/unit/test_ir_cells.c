@@ -4,6 +4,7 @@
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
+#include "ir/ir_internal.h"
 #include "ir/value.h"
 #include "unity.h"
 #include "util/hash.h"
@@ -13,17 +14,44 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { MAX_PORTS = 8, MAX_PARAMS = 16, BAD_INIT = 4, SOP_WIDTH = 3, ROW_LEN = 4, N_TYPES = 46 };
+enum {
+    MAX_PORTS = 8,
+    MAX_PARAMS = 16,
+    BAD_INIT = 4,
+    SOP_WIDTH = 3,
+    ROW_LEN = 4,
+    N_TYPES = 46,
+    STRUCTURAL_TYPES = 7
+};
 
 static odin3_design *design;
+static uint32_t errors_logged;
+
+static void count_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)msg;
+    (void)user;
+    if (level == ODIN3_LOG_ERROR) {
+        errors_logged++;
+    }
+}
+
+/* Asserts that verify rejected params with exactly one logged error, then resets the count. */
+static void assert_rejected(const odin3_celltype_def *def, const odin3_value *params) {
+    errors_logged = 0;
+    TEST_ASSERT_EQUAL_MESSAGE(ODIN3_ERR_INVALID_ARG, def->verify(params), def->name);
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, errors_logged, def->name);
+    errors_logged = 0;
+}
 
 void setUp(void) {
-    odin3_log_set_sink(NULL, NULL);
+    errors_logged = 0;
+    odin3_log_set_sink(count_sink, NULL);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
 }
 
 void tearDown(void) {
+    odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
     design = NULL;
 }
@@ -131,6 +159,8 @@ static void check_shape(const expect *exp) {
 
 static void test_every_builtin_has_expected_shape(void) {
     TEST_ASSERT_EQUAL_UINT32(N_TYPES, (uint32_t)N_EXPECT);
+    /* 7 structural/constant types (Task 2) + every table row = every built-in type. */
+    TEST_ASSERT_EQUAL_UINT32(odin3_builtin_celltype_count, STRUCTURAL_TYPES + (uint32_t)N_EXPECT);
     for (size_t i = 0; i < N_EXPECT; i++) {
         check_shape(&k_expect[i]);
     }
@@ -193,7 +223,7 @@ static void test_pmux_b_width_is_width_times_s_width(void) {
     TEST_ASSERT_EQUAL_UINT32(4, odin3_celltype_port_width(design, id, params, 3));
     set_int(def, params, "WIDTH", INT32_MAX);
     set_int(def, params, "S_WIDTH", 4);
-    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, def->verify(params));
+    assert_rejected(def, params);
 }
 
 static void test_mem_port_widths(void) {
@@ -216,24 +246,24 @@ static void test_verify_rejects_bad_parameters(void) {
     odin3_value params[MAX_PARAMS];
     defaults_of(latch, params);
     set_int(latch, params, "INIT", BAD_INIT);
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, latch->verify(params));
+    assert_rejected(latch, params);
     set_int(latch, params, "INIT", -1);
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, latch->verify(params));
+    assert_rejected(latch, params);
     set_int(latch, params, "INIT", 2);
     TEST_ASSERT_EQUAL(ODIN3_OK, latch->verify(params));
 
     const odin3_celltype_def *add = get_def("$add");
     defaults_of(add, params);
     set_int(add, params, "A_WIDTH", 0);
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, add->verify(params));
+    assert_rejected(add, params);
     defaults_of(add, params);
     set_int(add, params, "A_SIGNED", 2);
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, add->verify(params));
+    assert_rejected(add, params);
 
     const odin3_celltype_def *dff = get_def("$adff");
     defaults_of(dff, params);
     set_int(dff, params, "WIDTH", 2); /* ARST_VALUE still has 1 bit */
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, dff->verify(params));
+    assert_rejected(dff, params);
 }
 
 static odin3_value cover_value(const char *rows, uint32_t len, uint32_t inputs) {
@@ -246,15 +276,15 @@ static void test_sop_verify(void) {
     odin3_value params[2] = {odin3_value_int(SOP_WIDTH), cover_value("01-1", ROW_LEN, SOP_WIDTH)};
     TEST_ASSERT_EQUAL(ODIN3_OK, sop->verify(params));
     params[1] = cover_value("01-11", ROW_LEN + 1, SOP_WIDTH); /* not a whole number of rows */
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, sop->verify(params));
+    assert_rejected(sop, params);
     params[1] = cover_value("01", 2, 1); /* row width right for 1 input, WIDTH says 3 */
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, sop->verify(params));
+    assert_rejected(sop, params);
     params[1] = cover_value("0x-1", ROW_LEN, SOP_WIDTH); /* bad input char */
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, sop->verify(params));
+    assert_rejected(sop, params);
     params[1] = cover_value("01-2", ROW_LEN, SOP_WIDTH); /* bad output char */
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, sop->verify(params));
+    assert_rejected(sop, params);
     params[0] = odin3_value_int(-1);
-    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, sop->verify(params));
+    assert_rejected(sop, params);
 }
 
 static void test_sop_const_value(void) {
@@ -272,6 +302,100 @@ static void test_sop_const_value(void) {
     TEST_ASSERT_EQUAL(ODIN3_CONST_NONE, sop->const_value(params));
 }
 
+typedef struct name_case {
+    const char *type;
+    const char *const *ports;
+    const char *const *names;
+} name_case;
+
+static void check_names(const name_case *item) {
+    const char *type = item->type;
+    const char *const *ports = item->ports;
+    const char *const *names = item->names;
+    const odin3_celltype_def *def = get_def(type);
+    for (uint32_t i = 0; ports[i] != NULL; i++) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(ports[i], def->ports[i].name, type);
+    }
+    for (uint32_t i = 0; names[i] != NULL; i++) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(names[i], def->params[i].name, type);
+    }
+}
+
+static void test_names_of_other_types(void) {
+    const char *const pmux_p[] = {"A", "B", "S", "Y", NULL};
+    const char *const pmux_n[] = {"WIDTH", "S_WIDTH", NULL};
+    check_names(&(name_case){"$pmux", pmux_p, pmux_n});
+    const char *const tri_p[] = {"A", "EN", "Y", NULL};
+    const char *const tri_n[] = {"WIDTH", NULL};
+    check_names(&(name_case){"$tribuf", tri_p, tri_n});
+    const char *const sop_p[] = {"A", "Y", NULL};
+    const char *const sop_n[] = {"WIDTH", "COVER", NULL};
+    check_names(&(name_case){"$sop", sop_p, sop_n});
+    const char *const mem_p[] = {"RD_CLK", "RD_EN",   "RD_ADDR", "RD_DATA", "WR_CLK",
+                                 "WR_EN",  "WR_ADDR", "WR_DATA", NULL};
+    const char *const mem_n[] = {"MEMID",
+                                 "SIZE",
+                                 "OFFSET",
+                                 "ABITS",
+                                 "WIDTH",
+                                 "RD_PORTS",
+                                 "WR_PORTS",
+                                 "RD_CLK_ENABLE",
+                                 "RD_CLK_POLARITY",
+                                 "RD_TRANSPARENT",
+                                 "WR_CLK_ENABLE",
+                                 "WR_CLK_POLARITY",
+                                 "INIT",
+                                 NULL};
+    check_names(&(name_case){"$mem", mem_p, mem_n});
+}
+
+/* Sets one INT parameter of the named type to val (from defaults) and expects rejection. */
+typedef struct int_case {
+    const char *type;
+    const char *param;
+    int64_t val;
+} int_case;
+
+static void reject_int(const int_case *item) {
+    const char *type = item->type;
+    const char *param = item->param;
+    int64_t val = item->val;
+    const odin3_celltype_def *def = get_def(type);
+    odin3_value params[MAX_PARAMS];
+    defaults_of(def, params);
+    set_int(def, params, param, val);
+    assert_rejected(def, params);
+}
+
+static void test_verify_rejects_more_types(void) {
+    reject_int(&(int_case){"$mux", "WIDTH", 0});
+    reject_int(&(int_case){"$dffe", "EN_POLARITY", 2});
+    reject_int(&(int_case){"$dffe", "WIDTH", 0});
+    reject_int(&(int_case){"$sdff", "SRST_POLARITY", -1});
+    reject_int(&(int_case){"$sdff", "WIDTH", 2}); /* SRST_VALUE still 1 bit */
+    reject_int(&(int_case){"$tribuf", "WIDTH", 0});
+    reject_int(&(int_case){"$memrd", "ABITS", 0});
+    reject_int(&(int_case){"$memrd", "TRANSPARENT", 2});
+    reject_int(&(int_case){"$memwr", "WIDTH", 0});
+    reject_int(&(int_case){"$memwr", "CLK_POLARITY", 2});
+    reject_int(&(int_case){"$mem", "WIDTH", 0});
+    reject_int(&(int_case){"$mem", "RD_PORTS", 2}); /* bit vectors still 1 bit */
+    reject_int(&(int_case){"$pmux", "S_WIDTH", 0});
+}
+
+static void test_port_width_overflow_is_rejected(void) {
+    const odin3_celltype_def *def = get_def("$mem");
+    odin3_value params[MAX_PARAMS];
+    defaults_of(def, params);
+    set_int(def, params, "WIDTH", UINT32_MAX);
+    set_int(def, params, "WR_PORTS", 2);
+    assert_rejected(def, params);
+    errors_logged = 0;
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_celltype_port_width(design, find_type("$mem"), params, 7));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, errors_logged);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_builtin_has_expected_shape);
@@ -282,5 +406,8 @@ int main(void) {
     RUN_TEST(test_verify_rejects_bad_parameters);
     RUN_TEST(test_sop_verify);
     RUN_TEST(test_sop_const_value);
+    RUN_TEST(test_names_of_other_types);
+    RUN_TEST(test_verify_rejects_more_types);
+    RUN_TEST(test_port_width_overflow_is_rejected);
     return UNITY_END();
 }
