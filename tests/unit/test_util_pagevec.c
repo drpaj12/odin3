@@ -155,6 +155,95 @@ static void test_oom_page_alloc_on_first_push(void) {
     odin3_pagevec_destroy(pv);
 }
 
+static odin3_pagevec *paged(unsigned shift) {
+    odin3_pagevec_spec spec = {sizeof(uint64_t), shift};
+    return odin3_pagevec_create_paged(spec);
+}
+
+enum { SHIFT4_PAGE = 16, SHIFT4_COUNT = 100, SHIFT8_ELEMS = 256 };
+
+static void test_create_paged_shift4(void) {
+    odin3_pagevec *pv = paged(ODIN3_PAGEVEC_MIN_SHIFT);
+    TEST_ASSERT_NOT_NULL(pv);
+    uint64_t *addr[SHIFT4_COUNT];
+    for (size_t i = 0; i < SHIFT4_COUNT; i++) {
+        uint64_t *slot = odin3_pagevec_push(pv, NULL);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = i + 1;
+        addr[i] = slot;
+    }
+    TEST_ASSERT_EQUAL_UINT((SHIFT4_COUNT + SHIFT4_PAGE - 1) / SHIFT4_PAGE, 7);
+    TEST_ASSERT_EQUAL_UINT((size_t)7 * SHIFT4_PAGE * sizeof(uint64_t),
+                           odin3_pagevec_bytes_reserved(pv));
+    for (size_t i = 0; i < SHIFT4_COUNT; i++) {
+        TEST_ASSERT_EQUAL_PTR(addr[i], odin3_pagevec_at(pv, i));
+        TEST_ASSERT_EQUAL_UINT64(i + 1, *addr[i]);
+    }
+    odin3_pagevec_destroy(pv);
+}
+
+static void test_create_paged_bad_shift(void) {
+    TEST_ASSERT_NULL(paged(ODIN3_PAGEVEC_MIN_SHIFT - 1));
+    TEST_ASSERT_NULL(paged(ODIN3_PAGEVEC_MAX_SHIFT + 1));
+}
+
+static void test_reserve_then_push_no_alloc(void) {
+    odin3_pagevec *pv = paged(ODIN3_PAGEVEC_MIN_SHIFT);
+    TEST_ASSERT_NOT_NULL(pv);
+    fill(pv, 5);
+    enum { EXTRA = 200 };
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pagevec_reserve(pv, EXTRA));
+    TEST_ASSERT_EQUAL_UINT(5, odin3_pagevec_len(pv));
+    odin3_util_set_alloc_fail_after(0);
+    for (size_t i = 0; i < EXTRA; i++) {
+        TEST_ASSERT_NOT_NULL(odin3_pagevec_push(pv, NULL));
+    }
+    TEST_ASSERT_EQUAL_UINT(5 + EXTRA, odin3_pagevec_len(pv));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_pagevec_destroy(pv);
+}
+
+static void test_reserve_oom(void) {
+    odin3_pagevec *pv = paged(ODIN3_PAGEVEC_MIN_SHIFT);
+    TEST_ASSERT_NOT_NULL(pv);
+    fill(pv, 3);
+    for (long fail = 0; fail < 2; fail++) { /* table grow fails; page alloc fails */
+        odin3_util_set_alloc_fail_after(fail);
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_pagevec_reserve(pv, 500));
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_EQUAL_UINT(3, odin3_pagevec_len(pv));
+    }
+    TEST_ASSERT_NOT_NULL(odin3_pagevec_push(pv, NULL));
+    odin3_pagevec_destroy(pv);
+}
+
+static void test_truncate_zeroes_and_reuses(void) {
+    odin3_pagevec *pv = paged(ODIN3_PAGEVEC_MIN_SHIFT);
+    TEST_ASSERT_NOT_NULL(pv);
+    fill(pv, 40);
+    uint64_t *at10 = odin3_pagevec_at(pv, 10);
+    size_t bytes = odin3_pagevec_bytes_reserved(pv);
+    odin3_pagevec_truncate(pv, 10);
+    TEST_ASSERT_EQUAL_UINT(10, odin3_pagevec_len(pv));
+    TEST_ASSERT_EQUAL_UINT(bytes, odin3_pagevec_bytes_reserved(pv));
+    size_t index = 0;
+    uint64_t *slot = odin3_pagevec_push(pv, &index);
+    TEST_ASSERT_NOT_NULL(slot);
+    TEST_ASSERT_EQUAL_UINT(10, index);
+    TEST_ASSERT_EQUAL_PTR(at10, slot);
+    TEST_ASSERT_EQUAL_UINT64(0, *slot);
+    odin3_pagevec_truncate(pv, 11);
+    odin3_pagevec_destroy(pv);
+}
+
+static void test_bytes_reserved_shift8(void) {
+    odin3_pagevec *pv = paged(8);
+    TEST_ASSERT_NOT_NULL(pv);
+    fill(pv, 1);
+    TEST_ASSERT_EQUAL_UINT(SHIFT8_ELEMS * sizeof(uint64_t), odin3_pagevec_bytes_reserved(pv));
+    odin3_pagevec_destroy(pv);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_across_pages);
@@ -166,5 +255,11 @@ int main(void) {
     RUN_TEST(test_oom_page_alloc_after_table_grow);
     RUN_TEST(test_oom_page_alloc_on_first_push);
     RUN_TEST(test_oom_push_returns_null_and_len_unchanged);
+    RUN_TEST(test_create_paged_shift4);
+    RUN_TEST(test_create_paged_bad_shift);
+    RUN_TEST(test_reserve_then_push_no_alloc);
+    RUN_TEST(test_reserve_oom);
+    RUN_TEST(test_truncate_zeroes_and_reuses);
+    RUN_TEST(test_bytes_reserved_shift8);
     return UNITY_END();
 }

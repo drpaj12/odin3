@@ -43,7 +43,36 @@ add_library(odin3_core OBJECT
     src/util/u64map.c
     src/util/idindex.c
     src/util/str.c
-    src/util/log.c)
+    src/util/log.c
+    src/ir/value.c
+    src/ir/design.c
+    src/ir/celltype.c
+    src/ir/module.c
+    src/ir/node.c
+    src/ir/net.c
+    src/ir/pinpool.c
+    src/ir/wire.c
+    src/ir/attr.c
+    src/ir/prov.c
+    src/ir/check.c
+    src/ir/compact.c
+    src/ir/ir_test.c
+    src/ir/cells/builtin.c
+    src/ir/cells/port.c
+    src/ir/cells/const.c
+    src/ir/cells/common.c
+    src/ir/cells/arith.c
+    src/ir/cells/logic.c
+    src/ir/cells/shift.c
+    src/ir/cells/compare.c
+    src/ir/cells/reduce.c
+    src/ir/cells/mux.c
+    src/ir/cells/ff.c
+    src/ir/cells/mem.c
+    src/ir/cells/tribuf.c
+    src/ir/cells/gates.c
+    src/ir/cells/dff.c
+    src/ir/cells/sop.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -94,6 +123,10 @@ add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_util PRIVATE odin3_core odin3_flags)
 
+add_executable(bench_ir tests/bench/bench_ir.c)
+target_include_directories(bench_ir PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_ir PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
@@ -117,6 +150,14 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_util_log)
+    odin3_add_unit_test(test_ir_value)
+    odin3_add_unit_test(test_ir_celltype)
+    odin3_add_unit_test(test_ir_netlist)
+    odin3_add_unit_test(test_ir_cells)
+    odin3_add_unit_test(test_ir_wire)
+    odin3_add_unit_test(test_ir_prov)
+    odin3_add_unit_test(test_ir_check)
+    odin3_add_unit_test(test_ir_compact)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -138,7 +179,7 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 0\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 1\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 

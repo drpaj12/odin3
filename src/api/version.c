@@ -26,6 +26,7 @@ ODIN3_EXPORT const char *odin3_status_string(odin3_status status) {
         [ODIN3_ERR_IO] = "ODIN3_ERR_IO",
         [ODIN3_ERR_PLUGIN] = "ODIN3_ERR_PLUGIN",
         [ODIN3_ERR_ABI_MISMATCH] = "ODIN3_ERR_ABI_MISMATCH",
+        [ODIN3_ERR_CHECK] = "ODIN3_ERR_CHECK",
     };
     if ((unsigned)status >= (unsigned)ODIN3_STATUS_COUNT) {
         return "ODIN3_STATUS_UNKNOWN";
