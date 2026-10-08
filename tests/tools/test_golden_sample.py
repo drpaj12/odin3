@@ -94,6 +94,19 @@ class GoldenSampleTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("golden-sample:", err)
 
+    def test_malformed_prov_name_is_input_error(self) -> None:
+        _design(self.golden, "vtr/good")
+        (self.golden / "A" / "vtr" / "good" / "stray.prov").write_text("status=ok\n")
+        code, _, err = helpers.run_main(golden_sample.main, ["--golden", str(self.golden)])
+        self.assertEqual(code, 2)
+        self.assertIn("stray.prov", err)
+
+    def test_dirs_without_provs_are_not_archs(self) -> None:
+        _design(self.golden, "vtr/good")
+        (self.golden / "tmp").mkdir()
+        chosen = golden_sample.select(golden_sample.scan(self.golden), 5, 1000)
+        self.assertEqual([d.name for d in chosen["vtr"]], ["vtr/good"])
+
 
 if __name__ == "__main__":
     unittest.main()
