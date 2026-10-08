@@ -13,6 +13,7 @@ for _sub in (
     "tools/netlist-compare",
     "tools/equiv-check",
     "tools/golden-sample",
+    "tools/token-cost",
 ):
     _path = str(REPO_ROOT / _sub)
     if _path not in sys.path:
