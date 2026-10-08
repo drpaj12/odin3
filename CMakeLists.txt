@@ -36,6 +36,7 @@ add_library(odin3_core OBJECT
     src/api/version.c
     src/api/plugin.c
     src/util/alloc.c
+    src/util/arena.c
     src/util/hash.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
@@ -97,6 +98,7 @@ if(BUILD_TESTING)
         set_tests_properties(${name} PROPERTIES LABELS unit)
     endfunction()
     odin3_add_unit_test(test_util_alloc)
+    odin3_add_unit_test(test_util_arena)
     odin3_add_unit_test(test_util_hash)
 
     add_executable(test_api tests/unit/test_api.c)
