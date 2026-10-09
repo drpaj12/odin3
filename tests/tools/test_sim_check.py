@@ -92,7 +92,8 @@ class TbTest(unittest.TestCase):
         if flavor == "abc":
             res = run([ABC, "-q", f"read_blif {blif}; write_verilog {ref}"])
         else:
-            script = f"read_blif {'-sop ' if sop else ''}-wideports {blif}; write_verilog -noattr {ref}"
+            mode = "-sop -wideports" if sop else "-wideports"
+            script = f"read_blif {mode} {blif}; write_verilog -noattr {ref}"
             res = run([YOSYS, "-q", "-p", script])
             if sop:
                 self.assertIn("$sop", ref.read_text())
