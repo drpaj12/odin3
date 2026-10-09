@@ -824,6 +824,45 @@ static void test_compact_names_aliases_attrs(void) {
     odin3_compact_map_free(&map);
 }
 
+static odin3_status collect_key(void *ctx, uint32_t key_str, const odin3_value *value) {
+    (void)value;
+    odin3_vec *keys = ctx;
+    uint32_t *slot = odin3_vec_push(keys);
+    TEST_ASSERT_NOT_NULL(slot);
+    *slot = key_str;
+    return ODIN3_OK;
+}
+
+/* odin3_attr_foreach order (first-set order) survives compact's renumbering. */
+static void test_compact_keeps_attr_order(void) {
+    odin3_node_spec spec = {type_id("test_t7_link"), intern("dead"), src_prov(3), NULL, 0};
+    odin3_node_id dead = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &dead));
+    spec.name = intern("kept");
+    odin3_node_id kept = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &kept));
+    const char *const names[3] = {"zeta", "alpha", "mid"};
+    for (uint32_t i = 0; i < 3; i++) {
+        set_int_attr((odin3_objref){ODIN3_OBJ_NODE, kept.v}, names[i], i);
+    }
+    set_int_attr((odin3_objref){ODIN3_OBJ_NODE, kept.v}, "zeta", 9); /* keeps its place */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, dead));
+    odin3_compact_map map;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, &map));
+    odin3_objref now = {ODIN3_OBJ_NODE, map.node[kept.v]};
+    TEST_ASSERT_EQUAL_UINT32(1, now.id);
+    odin3_vec keys;
+    odin3_vec_init(&keys, sizeof(uint32_t));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, now, collect_key, &keys));
+    TEST_ASSERT_EQUAL_size_t(3, keys.len);
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_UINT32(intern(names[i]), *(const uint32_t *)odin3_vec_cat(&keys, i));
+    }
+    TEST_ASSERT_EQUAL_INT64(9, int_attr(now, "zeta"));
+    odin3_vec_free(&keys);
+    odin3_compact_map_free(&map);
+}
+
 /* A dead wire whose memberships were left in place: compact drops the primary and the alias. */
 static void test_compact_drops_dead_wire_memberships(void) {
     odin3_net_id net = make_net("m");
@@ -1159,6 +1198,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_compact_chain);
     RUN_TEST(test_compact_names_aliases_attrs);
+    RUN_TEST(test_compact_keeps_attr_order);
     RUN_TEST(test_compact_drops_dead_wire_memberships);
     RUN_TEST(test_compact_empty_module);
     RUN_TEST(test_compact_null_module);

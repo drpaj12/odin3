@@ -135,3 +135,22 @@ const odin3_value *odin3_attr_get(const odin3_module *module, odin3_objref obj, 
     uint32_t idx = find_attr(module, obj, key_str, NULL);
     return idx != 0 ? attr_cat(module, idx)->value : NULL;
 }
+
+odin3_status odin3_attr_foreach(const odin3_module *module, odin3_objref obj,
+                                odin3_attr_visit visit, void *ctx) {
+    if (module == NULL || visit == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "attr_foreach: NULL module or visit");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    uint64_t head = 0;
+    if (!odin3_u64map_get(module->attr_heads, odin3_attr_key(obj), &head)) {
+        return ODIN3_OK;
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t idx = (uint32_t)head; idx != 0 && st == ODIN3_OK;
+         idx = attr_cat(module, idx)->next) {
+        const odin3_attr_rec *rec = attr_cat(module, idx);
+        st = visit(ctx, rec->key, rec->value);
+    }
+    return st;
+}
