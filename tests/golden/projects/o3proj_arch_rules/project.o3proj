@@ -13,6 +13,7 @@ cell mult_27 from multiply param A_WIDTH=27 B_WIDTH=27
 map * $mul to multiply, mult_27 min_width 9
 map top $mul soft max_width 4           # module rule: tiny products stay soft
 map "top.u_*" $mem keep min_depth 64    # instance-path rule with a wildcard
+split $mem width depth max               # memory splitting (Odin II style)
 limit multiply 40
 patterns arch/patterns.o3lib
 

@@ -1,0 +1,12 @@
+{
+  "description": "A syntax error in each format, after a valid line.",
+  "features": ["negative", "syntax"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "error": {
+    "kind": "syntax",
+    "at": {"o3proj": "project.o3proj:2", "f": "files.f:2", "qsf": "top.qsf:2", "odin2": "odin2.xml:4"},
+    "names": []
+  }
+}

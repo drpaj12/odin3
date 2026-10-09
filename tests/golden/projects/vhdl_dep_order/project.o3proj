@@ -1,0 +1,4 @@
+# vhdl_dep_order: listed out of dependency order; the reader analyses VHDL by dependency.
+file vhdl src/top.vhd
+file vhdl src/inc.vhd
+file vhdl src/consts_pkg.vhd

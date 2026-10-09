@@ -1,4 +1,4 @@
 set_global_assignment -name TOP_LEVEL_ENTITY top
 set_global_assignment -name VHDL_FILE src/util/sat_pkg.vhd -library util
 set_global_assignment -name VHDL_FILE src/util/clip.vhd -library util
-set_global_assignment -name VHDL_FILE src/top.vhd
+set_global_assignment -name VHDL_FILE src/top.vhd -library app

@@ -1,4 +1,5 @@
 set_global_assignment -name TOP_LEVEL_ENTITY top
 set_global_assignment -name VERILOG_MACRO "USE_SUB"
 set_global_assignment -name VERILOG_MACRO "WIDTH=12"
+set_global_assignment -name VERILOG_MACRO "TAG=\"AB\""
 set_global_assignment -name VERILOG_FILE src/top.v

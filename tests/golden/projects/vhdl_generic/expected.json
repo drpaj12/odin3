@@ -1,0 +1,26 @@
+{
+  "description": "set_parameter / param as a VHDL generic override.",
+  "features": ["vhdl", "generic override"],
+  "phase": 5,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [{"path": "src/top.vhd", "language": "vhdl", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [{"scope": "top", "name": "W", "value": "6", "type": "number"}],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["src/top.vhd"], "order": ["src/top.vhd"]},
+  "oracle": "ghdl+yosys"
+}

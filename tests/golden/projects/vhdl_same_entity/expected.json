@@ -1,6 +1,7 @@
 {
   "description": "Entity core defined in both alpha and beta (and both files core.vhd).",
   "features": ["vhdl", "libraries", "same unit name"],
+  "phase": 5,
   "formats": ["o3proj", "qsf"],
   "project": {
     "files": [
@@ -13,7 +14,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": [],
+    "top": null,
     "params": [],
     "arch": [],
     "rules": [],
@@ -21,14 +22,16 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
-  "format_overrides": {"qsf": {"top": ["top"]}},
+  "format_overrides": {"qsf": {"top": "top"}},
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["alpha.core", "beta.core", "work.top"],
-    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
+    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"],
+    "order": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
   },
-  "oracle": null,
-  "oracle_reason": "GHDL 4.1 --synth --out=verilog writes both entities as `module core`, so Yosys cannot read the result; no oracle until Phase 5 has one."
+  "oracle": "hand+yosys",
+  "oracle_reason": "GHDL 4.1 --synth --out=verilog writes both entities as `module core`; the reference is the hand-written Verilog equivalent ref/equiv.v."
 }

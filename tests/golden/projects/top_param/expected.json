@@ -1,6 +1,7 @@
 {
   "description": "Top parameter overrides (o3proj param, qsf set_parameter with and without -entity).",
   "features": ["verilog", "top params", "generate"],
+  "phase": 2,
   "formats": ["o3proj", "qsf"],
   "project": {
     "files": [
@@ -12,10 +13,10 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": ["top"],
+    "top": "top",
     "params": [
-      {"module": "top", "name": "WIDTH", "value": "16"},
-      {"module": "top", "name": "DEPTH", "value": "3"}
+      {"scope": "top", "name": "WIDTH", "value": "16", "type": "number"},
+      {"scope": "top", "name": "DEPTH", "value": "3", "type": "number"}
     ],
     "arch": [],
     "rules": [],
@@ -23,12 +24,14 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["work.stage_reg", "work.top"],
-    "read": ["src/stage_reg.v", "src/top.v"]
+    "read": ["src/stage_reg.v", "src/top.v"],
+    "order": ["src/stage_reg.v", "src/top.v"]
   },
   "oracle": "yosys"
 }

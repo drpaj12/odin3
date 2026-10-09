@@ -1,6 +1,7 @@
 {
   "description": ".qsf with pin, timing, partition and other non-synthesis assignments (ignored, one info line) and FAMILY/DEVICE.",
   "features": ["verilog", "qsf ignored", "device", "Tcl syntax"],
+  "phase": 2,
   "formats": ["o3proj", "qsf"],
   "project": {
     "files": [{"path": "src/blink.v", "language": "verilog", "library": "work"}],
@@ -9,7 +10,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": ["blink"],
+    "top": "blink",
     "params": [],
     "arch": [{"kind": "device", "family": "Cyclone V", "device": "5CSEMA5F31C6"}],
     "rules": [],
@@ -17,7 +18,8 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "format_overrides": {
     "qsf": {
@@ -40,6 +42,11 @@
       ]
     }
   },
-  "resolved": {"top": ["blink"], "units": ["work.blink"], "read": ["src/blink.v"]},
+  "resolved": {
+    "top": "work.blink",
+    "units": ["work.blink"],
+    "read": ["src/blink.v"],
+    "order": ["src/blink.v"]
+  },
   "oracle": "yosys"
 }

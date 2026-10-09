@@ -1,0 +1,3 @@
+file vhdl src/top.vhd
+top top
+param top.W 6

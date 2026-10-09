@@ -1,0 +1,4 @@
+# Quartus orders VHDL files by dependency itself; so does Odin III.
+set_global_assignment -name VHDL_FILE src/top.vhd
+set_global_assignment -name VHDL_FILE src/inc.vhd
+set_global_assignment -name VHDL_FILE src/consts_pkg.vhd

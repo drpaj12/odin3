@@ -1,7 +1,9 @@
 {
-  "description": ".qpf naming two revisions; the first one's .qsf is read.",
+  "description": ".qpf naming two revisions; --revision fast selects one.",
   "features": ["verilog", "qpf revisions", "top params"],
+  "phase": 2,
   "formats": ["o3proj", "qsf"],
+  "options": {"qsf": {"revision": "fast"}},
   "project": {
     "files": [
       {"path": "src/mac.v", "language": "verilog", "library": "work"},
@@ -12,20 +14,23 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": ["top"],
-    "params": [{"module": "top", "name": "STAGES", "value": "1"}],
+    "top": "top",
+    "params": [{"scope": "top", "name": "STAGES", "value": "2", "type": "number"}],
     "arch": [],
     "rules": [],
     "inventory": [],
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["work.delay", "work.mac", "work.top"],
-    "read": ["src/mac.v", "src/top.v"]
+    "read": ["src/mac.v", "src/top.v"],
+    "order": ["src/mac.v", "src/top.v"]
   },
-  "oracle": "yosys"
+  "oracle": "yosys",
+  "unused": ["small.qsf"]
 }

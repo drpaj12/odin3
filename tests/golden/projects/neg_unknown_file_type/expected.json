@@ -1,0 +1,7 @@
+{
+  "description": "A file list names a file with no known language.",
+  "features": ["negative", "unknown file type"],
+  "phase": 2,
+  "formats": ["f"],
+  "error": {"kind": "unknown_file_type", "at": "files.f:2", "names": ["src/notes.txt"]}
+}

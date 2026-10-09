@@ -1,0 +1,7 @@
+QUARTUS_VERSION = "23.1"
+DATE = "12:00:00  October 09, 2026"
+
+# Revisions
+
+PROJECT_REVISION = "small"
+PROJECT_REVISION = "fast"

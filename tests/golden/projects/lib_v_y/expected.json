@@ -1,6 +1,7 @@
 {
   "description": "-v library file and -y library directory with +libext+; unused cells not read.",
   "features": ["verilog", "-v", "-y", "+libext+", "libfile/libdir"],
+  "phase": 2,
   "formats": ["o3proj", "f"],
   "project": {
     "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
@@ -9,7 +10,7 @@
     "libext": [".v"],
     "incdirs": [],
     "defines": [],
-    "top": [],
+    "top": null,
     "params": [],
     "arch": [],
     "rules": [],
@@ -17,12 +18,14 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["work.and2", "work.dff", "work.inv", "work.mux2", "work.top"],
-    "read": ["lib/cells/and2.v", "lib/cells/mux2.v", "lib/prims.v", "src/top.v"]
+    "read": ["lib/cells/and2.v", "lib/cells/mux2.v", "lib/prims.v", "src/top.v"],
+    "order": ["src/top.v"]
   },
   "oracle": "yosys",
   "unused": ["lib/cells/or2.v"]

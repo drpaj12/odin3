@@ -1,6 +1,8 @@
 {
   "description": "No top given and every module instantiated (mutual instantiation).",
   "features": ["negative", "no top"],
+  "phase": 2,
   "formats": ["o3proj", "f", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
   "error": {"kind": "no_top", "at": null, "names": []}
 }

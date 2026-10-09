@@ -1,0 +1,28 @@
+{
+  "description": ".qsf read directly (no .qpf) naming a VQM netlist.",
+  "features": ["vqm", "qsf entry", "VQM_FILE"],
+  "phase": 6,
+  "formats": ["o3proj", "qsf"],
+  "entry": {"qsf": "top.qsf"},
+  "project": {
+    "files": [{"path": "net/top.vqm", "language": "vqm", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["net/top.vqm"], "order": ["net/top.vqm"]},
+  "oracle": null,
+  "oracle_reason": "Yosys has no Cyclone V primitive library (cyclonev_lcell_comb); the VQM reader and its primitive library are Phase 6."
+}

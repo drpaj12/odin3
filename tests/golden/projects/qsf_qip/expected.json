@@ -1,0 +1,36 @@
+{
+  "description": ".qsf with an IP-style .qip (qip_path idiom) and a nested .qip.",
+  "features": ["verilog", "QIP_FILE", "qip_path idiom", "nested qip"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/top.v", "language": "verilog", "library": "work"},
+      {"path": "ip/fifo/fifo.v", "language": "verilog", "library": "work"},
+      {"path": "ip/fifo/sub/ram.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"ignored": ["IP_TOOL_NAME", "IP_TOOL_VERSION", "MISC_FILE"]}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.fifo2", "work.ram2", "work.top"],
+    "read": ["ip/fifo/fifo.v", "ip/fifo/sub/ram.v", "src/top.v"],
+    "order": ["src/top.v", "ip/fifo/fifo.v", "ip/fifo/sub/ram.v"]
+  },
+  "oracle": "yosys"
+}

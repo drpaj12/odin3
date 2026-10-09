@@ -1,5 +1,5 @@
-# qpf_revisions: what revision "small" says.
+# qpf_revisions: what revision "fast" says.
 file verilog src/mac.v
 file verilog src/top.v
 top top
-param top.STAGES 1
+param top.STAGES 2

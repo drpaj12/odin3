@@ -1,6 +1,7 @@
 {
   "description": "Two files named core.vhd in libraries alpha and beta.",
   "features": ["vhdl", "libraries", "same file name"],
+  "phase": 5,
   "formats": ["o3proj", "qsf"],
   "project": {
     "files": [
@@ -13,7 +14,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": [],
+    "top": null,
     "params": [],
     "arch": [],
     "rules": [],
@@ -21,13 +22,15 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
-  "format_overrides": {"qsf": {"top": ["top"]}},
+  "format_overrides": {"qsf": {"top": "top"}},
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["alpha.inv4", "beta.rot4", "work.top"],
-    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
+    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"],
+    "order": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
   },
   "oracle": "ghdl+yosys"
 }

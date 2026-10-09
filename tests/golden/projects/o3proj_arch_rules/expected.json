@@ -12,6 +12,7 @@
     "patterns",
     "flow"
   ],
+  "phase": 2,
   "formats": ["o3proj"],
   "project": {
     "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
@@ -20,7 +21,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": ["top"],
+    "top": "top",
     "params": [],
     "arch": [
       {"kind": "o3lib", "path": "arch/tiny.o3lib"},
@@ -51,6 +52,7 @@
         "cells": [],
         "min_depth": 64
       },
+      {"rule": "split", "subject": "$mem", "width": true, "depth": "max"},
       {"rule": "limit", "cell": "multiply", "count": 40},
       {"rule": "patterns", "path": "arch/patterns.o3lib"}
     ],
@@ -66,8 +68,9 @@
     ],
     "flow": "flow/synth.o3",
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
-  "resolved": {"top": ["top"], "units": ["work.top"], "read": ["src/top.v"]},
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["src/top.v"], "order": ["src/top.v"]},
   "oracle": "yosys"
 }

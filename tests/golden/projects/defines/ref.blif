@@ -2,7 +2,7 @@
 
 .model top
 .inputs a[0] a[1] a[2] a[3] a[4] a[5] a[6] a[7] a[8] a[9] a[10] a[11] b[0] b[1] b[2] b[3] b[4] b[5] b[6] b[7] b[8] b[9] b[10] b[11]
-.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7] y[8] y[9] y[10] y[11]
+.outputs y[0] y[1] y[2] y[3] y[4] y[5] y[6] y[7] y[8] y[9] y[10] y[11] tag[0] tag[1] tag[2] tag[3] tag[4] tag[5] tag[6] tag[7] tag[8] tag[9] tag[10] tag[11] tag[12] tag[13] tag[14] tag[15]
 .names $false
 .names $true
 1
@@ -169,4 +169,36 @@
 .names $abc$285$new_n43 $abc$285$new_n45 $abc$285$new_n46
 0- 1
 -0 1
+.names $false tag[0]
+1 1
+.names $true tag[1]
+1 1
+.names $false tag[2]
+1 1
+.names $false tag[3]
+1 1
+.names $false tag[4]
+1 1
+.names $false tag[5]
+1 1
+.names $true tag[6]
+1 1
+.names $false tag[7]
+1 1
+.names $true tag[8]
+1 1
+.names $false tag[9]
+1 1
+.names $false tag[10]
+1 1
+.names $false tag[11]
+1 1
+.names $false tag[12]
+1 1
+.names $false tag[13]
+1 1
+.names $true tag[14]
+1 1
+.names $false tag[15]
+1 1
 .end

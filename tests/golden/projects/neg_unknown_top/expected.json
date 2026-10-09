@@ -1,0 +1,7 @@
+{
+  "description": "The declared top does not exist.",
+  "features": ["negative", "unknown top"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf"],
+  "error": {"kind": "unknown_top", "at": null, "names": ["nope"]}
+}

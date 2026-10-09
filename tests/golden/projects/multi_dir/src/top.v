@@ -1,4 +1,4 @@
-// Adds a and b, then registers either the sum or a, chosen by sel.
+// Registers a + b (with carry) when sel is 1, else a zero-extended.
 module top (
     input  wire       clk,
     input  wire       sel,

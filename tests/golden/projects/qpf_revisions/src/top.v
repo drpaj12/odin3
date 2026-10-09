@@ -1,4 +1,4 @@
-// Multiply-accumulate with STAGES output registers; each revision picks its own STAGES.
+// Multiply-accumulate with STAGES output registers (default 1); each revision sets STAGES.
 module top #(parameter STAGES = 1) (
     input  wire       clk,
     input  wire [3:0] a,

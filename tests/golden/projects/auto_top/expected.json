@@ -1,7 +1,9 @@
 {
   "description": "No top given: the single uninstantiated module, neither first nor last.",
   "features": ["verilog", "auto top", "odin2 ignored elements"],
+  "phase": 2,
   "formats": ["o3proj", "f", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
   "project": {
     "files": [
       {"path": "src/leaf.v", "language": "verilog", "library": "work"},
@@ -13,7 +15,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": [],
+    "top": null,
     "params": [],
     "arch": [],
     "rules": [],
@@ -21,18 +23,17 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "format_overrides": {
-    "odin2": {
-      "output": {"path": "root.odin.blif", "format": "blif"},
-      "ignored": ["debug_outputs", "optimizations"]
-    }
+    "odin2": {"output": {"path": "root.odin.blif", "format": "blif"}, "ignored": ["debug_outputs"]}
   },
   "resolved": {
-    "top": ["root"],
+    "top": "work.root",
     "units": ["work.leaf", "work.mid", "work.root"],
-    "read": ["src/leaf.v", "src/mid.v", "src/root.v"]
+    "read": ["src/leaf.v", "src/mid.v", "src/root.v"],
+    "order": ["src/leaf.v", "src/root.v", "src/mid.v"]
   },
   "oracle": "yosys"
 }

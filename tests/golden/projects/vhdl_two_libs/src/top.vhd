@@ -1,4 +1,4 @@
--- Library work: instantiates util.clip and uses util.sat_pkg.
+-- Library app (not work): instantiates util.clip and uses util.sat_pkg.
 library ieee;
 use ieee.std_logic_1164.all;
 library util;

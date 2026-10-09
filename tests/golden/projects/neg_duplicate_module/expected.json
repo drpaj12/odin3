@@ -1,6 +1,8 @@
 {
   "description": "The same module defined in two files.",
   "features": ["negative", "duplicate module"],
+  "phase": 2,
   "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
   "error": {"kind": "duplicate_module", "at": "src/other.v:2", "names": ["helper"]}
 }

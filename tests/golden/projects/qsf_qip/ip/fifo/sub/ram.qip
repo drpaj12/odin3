@@ -1,0 +1,2 @@
+# A plain relative path in a .qip is relative to the .qip too.
+set_global_assignment -name VERILOG_FILE ram.v

@@ -1,6 +1,7 @@
 {
   "description": "A typo in an .o3proj key is an error.",
   "features": ["negative", "unknown key"],
+  "phase": 2,
   "formats": ["o3proj"],
   "error": {"kind": "unknown_key", "at": "project.o3proj:3", "names": ["toplevel"]}
 }

@@ -1,0 +1,5 @@
+# qsf_qip: the files top.qsf and its .qip files name.
+file verilog src/top.v
+file verilog ip/fifo/fifo.v
+file verilog ip/fifo/sub/ram.v
+top top

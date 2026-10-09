@@ -1,6 +1,6 @@
-# Revision "fast": not the current revision, never read (it would give STAGES 3 and a define).
+# Revision "fast", selected with --revision fast (proj.qpf lists two revisions, so a
+# revision must be chosen).
 set_global_assignment -name TOP_LEVEL_ENTITY top
 set_global_assignment -name VERILOG_FILE src/mac.v
 set_global_assignment -name VERILOG_FILE src/top.v
-set_global_assignment -name VERILOG_MACRO "FAST"
-set_parameter -name STAGES 3
+set_parameter -name STAGES 2

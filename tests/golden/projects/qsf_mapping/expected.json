@@ -1,6 +1,7 @@
 {
   "description": "Quartus synthesis assignments translated to partial-mapping rules.",
   "features": ["verilog", "mapping rules", "qsf translation"],
+  "phase": 2,
   "formats": ["o3proj", "qsf"],
   "project": {
     "files": [
@@ -12,7 +13,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": ["top"],
+    "top": "top",
     "params": [],
     "arch": [],
     "rules": [
@@ -23,9 +24,15 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
   "format_overrides": {"qsf": {"ignored": ["RAMSTYLE"]}},
-  "resolved": {"top": ["top"], "units": ["work.mul", "work.top"], "read": ["src/mul.v", "src/top.v"]},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.mul", "work.top"],
+    "read": ["src/mul.v", "src/top.v"],
+    "order": ["src/mul.v", "src/top.v"]
+  },
   "oracle": "yosys"
 }

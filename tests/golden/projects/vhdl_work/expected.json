@@ -1,6 +1,7 @@
 {
   "description": "Multi-file VHDL in library work, analysis order.",
   "features": ["vhdl", "multi-file", "work"],
+  "phase": 5,
   "formats": ["o3proj", "f", "qsf"],
   "project": {
     "files": [
@@ -13,7 +14,7 @@
     "libext": [],
     "incdirs": [],
     "defines": [],
-    "top": [],
+    "top": null,
     "params": [],
     "arch": [],
     "rules": [],
@@ -21,13 +22,15 @@
     "overrides": [],
     "flow": null,
     "output": null,
-    "ignored": []
+    "ignored": [],
+    "duplicates": []
   },
-  "format_overrides": {"qsf": {"top": ["top"]}},
+  "format_overrides": {"qsf": {"top": "top"}},
   "resolved": {
-    "top": ["top"],
+    "top": "work.top",
     "units": ["work.add4", "work.reg4", "work.top"],
-    "read": ["src/sub/add4.vhd", "src/sub/reg4.vhd", "src/top.vhd"]
+    "read": ["src/sub/add4.vhd", "src/sub/reg4.vhd", "src/top.vhd"],
+    "order": ["src/sub/add4.vhd", "src/sub/reg4.vhd", "src/top.vhd"]
   },
   "oracle": "ghdl+yosys"
 }
