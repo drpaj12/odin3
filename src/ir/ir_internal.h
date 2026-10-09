@@ -50,6 +50,20 @@ odin3_status odin3_prov_store_init(odin3_design *design);
 /* Frees the provenance store (design.c calls it; safe on a partly initialised design). */
 void odin3_prov_store_free(odin3_design *design);
 
+/*
+ * Points tomb's params and pin_nets at deep copies in the design's provenance arena (NULL when
+ * the count is 0). NO_MEMORY on out of memory, with tomb unchanged (arena bytes of a failure stay
+ * unused). Does not validate.
+ */
+odin3_status odin3_tombstone_own(odin3_design *design, odin3_tombstone *tomb);
+
+/*
+ * odin3_tombstone_add for a tombstone whose arrays the design already owns (odin3_tombstone_own):
+ * validates the same way and appends without copying. Cannot fail on memory once room for it was
+ * reserved in the tombstone table (compact reserves room for all of its tombstones).
+ */
+odin3_status odin3_tombstone_append(odin3_design *design, const odin3_tombstone *tomb);
+
 struct odin3_design {
     odin3_prov_store *prov;       /* provenance records, pass runs, tombstones */
     odin3_arena *arena;           /* local cell-type definitions */
@@ -171,7 +185,25 @@ struct odin3_module {
     odin3_celltype_def type_def; /* the module cell type's definition, updated in place (IR-7) */
     odin3_u64map *attr_heads;    /* (kind << 32 | ID) -> first record in attrs */
     odin3_vec attrs;             /* odin3_attr_rec; slot 0 reserved once the table is used */
+    /*
+     * Pin net names of the nodes deleted since the last compact, for their tombstones (IR-6,
+     * PHASE1 #14): dead node ID -> index of its first name in dead_pin_names, which holds one
+     * strtab ID per pin in pin order (0: unconnected or unnamed). dead_pins is NULL until the
+     * first delete; compact drops both.
+     */
+    odin3_u64map *dead_pins;
+    odin3_vec dead_pin_names; /* uint32_t */
 };
+
+/*
+ * Records node's pin net names in the module's dead-pin table (before its pins are disconnected
+ * or handed over). NO_MEMORY on out of memory, with nothing recorded; nothing to record for a
+ * node without pins.
+ */
+odin3_status odin3_node_record_pin_nets(odin3_module *module, odin3_node_id node);
+
+/* Drops the dead-pin table (compact, after writing the tombstones; module destruction). */
+void odin3_module_dead_pins_free(odin3_module *module);
 
 /* Sets up the design's module list (design.c calls it); ODIN3_ERR_NO_MEMORY on out of memory. */
 odin3_status odin3_module_table_init(odin3_design *design);

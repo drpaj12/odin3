@@ -6,6 +6,7 @@
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
+#include "ir/value.h"
 #include "util/alloc.h"
 #include "util/arena.h"
 #include "util/hash.h"
@@ -491,6 +492,28 @@ static bool tombstone_kind_valid(const odin3_design *design, const odin3_tombsto
     }
 }
 
+/* Nets and wires keep no arrays; a node's are present when counted, valid values and names. */
+static bool tombstone_arrays_valid(const odin3_design *design, const odin3_tombstone *tomb) {
+    if (tomb->kind != ODIN3_OBJ_NODE && (tomb->n_params != 0 || tomb->n_pins != 0)) {
+        return false;
+    }
+    if ((tomb->n_params > 0 && tomb->params == NULL) ||
+        (tomb->n_pins > 0 && tomb->pin_nets == NULL)) {
+        return false;
+    }
+    for (uint32_t i = 0; i < tomb->n_params; i++) {
+        if (!odin3_value_valid(&tomb->params[i])) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < tomb->n_pins; i++) {
+        if (!is_str(design, tomb->pin_nets[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool tombstone_valid(const odin3_design *design, const odin3_tombstone *tomb) {
     if (tomb == NULL || tomb->module.v == 0 || tomb->module.v >= odin3_design_module_end(design)) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: no tombstone or unknown module");
@@ -503,6 +526,13 @@ static bool tombstone_valid(const odin3_design *design, const odin3_tombstone *t
                   (int)tomb->kind, tomb->type.v);
         return false;
     }
+    if (!tombstone_arrays_valid(design, tomb)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_tombstone_add: kind %d with %u parameters and %u pin names: not a node, "
+                  "a missing array, an invalid value or a pin name that is not a strtab ID",
+                  (int)tomb->kind, tomb->n_params, tomb->n_pins);
+        return false;
+    }
     if (tomb->prov.v != 0 && record_cat(design->prov, tomb->prov.v) == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: prov %u is not a record", tomb->prov.v);
         return false;
@@ -510,7 +540,50 @@ static bool tombstone_valid(const odin3_design *design, const odin3_tombstone *t
     return true;
 }
 
-odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *tomb) {
+/* Copies count parameter values (and their payloads) into the arena; NULL on out of memory. */
+static const odin3_value *params_copy(odin3_arena *arena, const odin3_value *params,
+                                      uint32_t count) {
+    odin3_value *copy = odin3_arena_alloc(arena, sizeof *copy * count);
+    for (uint32_t i = 0; copy != NULL && i < count; i++) {
+        if (odin3_value_copy(arena, &params[i], &copy[i]) != ODIN3_OK) {
+            return NULL;
+        }
+    }
+    return copy;
+}
+
+odin3_status odin3_tombstone_own(odin3_design *design, odin3_tombstone *tomb) {
+    odin3_arena *arena = design->prov->arena;
+    const odin3_value *params = NULL;
+    uint32_t *pin_nets = NULL;
+    if (tomb->n_params > 0) {
+        params = params_copy(arena, tomb->params, tomb->n_params);
+        if (params == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    if (tomb->n_pins > 0) {
+        pin_nets = odin3_arena_alloc(arena, sizeof *pin_nets * tomb->n_pins);
+        if (pin_nets == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        memcpy(pin_nets, tomb->pin_nets, sizeof *pin_nets * tomb->n_pins);
+    }
+    tomb->params = params;
+    tomb->pin_nets = pin_nets;
+    return ODIN3_OK;
+}
+
+/* Room for one more tombstone (IDs stay below UINT32_MAX); NO_MEMORY otherwise. */
+static odin3_status tombstone_room(odin3_vec *tombstones) {
+    if (tombstones->len >= UINT32_MAX) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return odin3_vec_reserve(tombstones, tombstones->len + 1);
+}
+
+/* Checks the design and tombstone (INVALID_ARG, logged) and makes room for it. */
+static odin3_status tombstone_prepare(odin3_design *design, const odin3_tombstone *tomb) {
     if (design == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_tombstone_add: no design");
         return ODIN3_ERR_INVALID_ARG;
@@ -518,16 +591,36 @@ odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *to
     if (!tombstone_valid(design, tomb)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_vec *tombstones = &design->prov->tombstones;
-    if (tombstones->len >= UINT32_MAX) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    odin3_tombstone *slot = odin3_vec_push(tombstones);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
+    return tombstone_room(&design->prov->tombstones);
+}
+
+/* Appends a validated tombstone into reserved room. */
+static void tombstone_push(odin3_design *design, const odin3_tombstone *tomb) {
+    odin3_tombstone *slot = odin3_vec_push(&design->prov->tombstones);
+    assert(slot != NULL); /* reserved */
     *slot = *tomb;
+}
+
+odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *tomb) {
+    odin3_status st = tombstone_prepare(design, tomb);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_tombstone copy = *tomb;
+    st = odin3_tombstone_own(design, &copy); /* arena bytes of a failure stay unused */
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    tombstone_push(design, &copy);
     return ODIN3_OK;
+}
+
+odin3_status odin3_tombstone_append(odin3_design *design, const odin3_tombstone *tomb) {
+    odin3_status st = tombstone_prepare(design, tomb);
+    if (st == ODIN3_OK) {
+        tombstone_push(design, tomb);
+    }
+    return st;
 }
 
 const odin3_tombstone *odin3_tombstone_get(const odin3_design *design, uint32_t id) {

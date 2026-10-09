@@ -181,6 +181,12 @@ odin3_wire_id odin3_module_find_wire(const odin3_module *module, uint32_t name_s
 
 /* --- module lifetime ----------------------------------------------------------------------- */
 
+void odin3_module_dead_pins_free(odin3_module *module) {
+    odin3_u64map_destroy(module->dead_pins);
+    module->dead_pins = NULL;
+    odin3_vec_free(&module->dead_pin_names);
+}
+
 static void module_destroy(odin3_module *module) {
     if (module == NULL) {
         return;
@@ -198,6 +204,7 @@ static void module_destroy(odin3_module *module) {
     odin3_vec_free(&module->port_defs);
     odin3_u64map_destroy(module->attr_heads);
     odin3_vec_free(&module->attrs);
+    odin3_module_dead_pins_free(module);
     odin3_arena_destroy(module->arena);
     odin3_util_free(module);
 }
@@ -213,6 +220,7 @@ static odin3_module *module_alloc(odin3_design *design) {
     odin3_vec_init(&module->ports, sizeof(odin3_port_rec));
     odin3_vec_init(&module->port_defs, sizeof(odin3_port_def));
     odin3_vec_init(&module->attrs, sizeof(odin3_attr_rec));
+    odin3_vec_init(&module->dead_pin_names, sizeof(uint32_t));
     module->arena = odin3_arena_create(ODIN3_MODULE_ARENA_CHUNK_BYTES);
     module->node_names = odin3_u64map_create(0);
     module->net_names = odin3_u64map_create(0);

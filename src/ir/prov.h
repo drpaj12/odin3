@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/value.h"
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
@@ -174,7 +175,10 @@ void odin3_prov_index_destroy(odin3_prov_index *ix);
 /*
  * What a dead node, net or wire was, kept when compact frees its slot (IR-6): written by
  * odin3_module_compact so history keeps pointing at what existed. type is none for nets and
- * wires.
+ * wires. A node's tombstone also keeps its parameter values and, per pin in pin order, the
+ * strtab name of the net the pin was on when the node was deleted (0: unconnected, or a net
+ * without a name) (PHASE1 #14); nets and wires leave both arrays empty. A stored tombstone's
+ * arrays are owned by the design and never change.
  */
 typedef struct odin3_tombstone {
     odin3_module_id module;
@@ -182,12 +186,19 @@ typedef struct odin3_tombstone {
     odin3_celltype_id type;
     uint32_t name;
     odin3_prov_id prov;
+    const odin3_value *params; /* n_params values; NULL when n_params is 0 */
+    uint32_t n_params;
+    const uint32_t *pin_nets; /* n_pins net names (strtab IDs, 0 = none); NULL when n_pins is 0 */
+    uint32_t n_pins;
 } odin3_tombstone;
 
 /*
- * Appends a tombstone (IDs from 1). INVALID_ARG for a NULL design or tombstone, an unknown
- * module, a kind other than node, net or wire, a node whose type is not a cell type of the design,
- * a net or wire with a type, or a prov that is neither 0 nor an existing record.
+ * Appends a tombstone (IDs from 1), deep-copying its parameter values (payloads included) and pin
+ * net names into the design. INVALID_ARG for a NULL design or tombstone, an unknown module, a
+ * kind other than node, net or wire, a node whose type is not a cell type of the design, a net
+ * or wire with a type, parameters or pin names, a NULL array with a non-zero count, a parameter
+ * odin3_value_valid rejects, a pin name that is not a strtab ID, or a prov that is neither 0 nor
+ * an existing record. NO_MEMORY on out of memory; the table is unchanged on any failure.
  */
 odin3_status odin3_tombstone_add(odin3_design *design, const odin3_tombstone *tomb);
 
