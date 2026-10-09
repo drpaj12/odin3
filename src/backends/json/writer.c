@@ -225,19 +225,23 @@ typedef struct net_entry {
 
 static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     char tail[NAME_TAIL];
-    const char *text = odin3_strtab_get(out->strtab, entry->name);
     jw_list fields = {false, FIELD_DEPTH};
     netname_bits bits = {&entry->net, (odin3_wire_id){0}, 1};
     (void)snprintf(tail, sizeof tail, "%s%u", entry->clash ? "$net" : "", (unsigned)entry->net.v);
-    jw_name key = entry->name != 0 ? (jw_name){odin3_bytes_cstr(text),
-                                               odin3_bytes_cstr(entry->clash ? tail : "")}
-                                   : (jw_name){odin3_bytes_cstr("$n"), odin3_bytes_cstr(tail)};
+    jw_keyspec spec = {JW_KEY_NETNAME, entry->clash, odin3_strtab_get(out->strtab, entry->name),
+                       entry->clash ? tail : ""};
+    if (entry->name == 0) {
+        spec.generated = true;
+        spec.head = "$n";
+        spec.tail = tail;
+    }
+    const char *key = jw_make_key(out, &spec);
     jw_item(out, names);
-    jw_string2(out, &key);
+    jw_string(out, odin3_bytes_cstr(key));
     jw_raw(out, ": ");
     jw_open(out, &fields);
     jw_key(out, &fields, "hide_name");
-    jw_raw(out, entry->name == 0 || name_hidden(out, entry->name) ? "1" : "0");
+    jw_raw(out, key[0] == '$' ? "1" : "0");
     jw_key(out, &fields, "bits");
     jw_raw(out, "[ ");
     jw_bit(out, jw_net_code(out, entry->net));
@@ -365,30 +369,47 @@ static odin3_status write_design(jw *out) {
     return status != ODIN3_OK ? status : out->status;
 }
 
-odin3_status odin3_json_write(const odin3_design *design, const char *path) {
-    if (design == NULL || path == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    FILE *fp = fopen(path, "wb");
-    if (fp == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", path, strerror(errno));
+/* Writes beside the destination, then renames over it: a failure leaves the destination as it was
+ * and removes only the temporary file. */
+static odin3_status save_design(jw *state, const char *path, const char *tmp) {
+    state->fp = fopen(tmp, "wb");
+    if (state->fp == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", tmp, strerror(errno));
         return ODIN3_ERR_IO;
     }
-    /* odin3_module_get takes a mutable design; the writer never changes it. */
-    jw state = {.fp = fp,
-                .design = (odin3_design *)design,
-                .strtab = odin3_design_strtab(design),
-                .status = ODIN3_OK};
-    odin3_status status = write_design(&state);
-    if (fclose(fp) != 0 && status == ODIN3_OK) {
+    odin3_status status = write_design(state);
+    if (fclose(state->fp) != 0 && status == ODIN3_OK) {
+        status = ODIN3_ERR_IO;
+    }
+    if (status == ODIN3_OK && rename(tmp, path) != 0) {
         status = ODIN3_ERR_IO;
     }
     if (status != ODIN3_OK) {
         if (status == ODIN3_ERR_IO) {
             odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(errno));
         }
-        (void)remove(path);
+        (void)remove(tmp);
     }
+    return status;
+}
+
+odin3_status odin3_json_write(const odin3_design *design, const char *path) {
+    if (design == NULL || path == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_strbuf tmp;
+    odin3_strbuf_init(&tmp);
+    odin3_status status = odin3_strbuf_appendf(&tmp, "%s.tmp", path);
+    if (status == ODIN3_OK) {
+        /* odin3_module_get takes a mutable design; the writer never changes it. */
+        jw state = {.design = (odin3_design *)design,
+                    .strtab = odin3_design_strtab(design),
+                    .status = ODIN3_OK};
+        odin3_strbuf_init(&state.key);
+        status = save_design(&state, path, tmp.data);
+        odin3_strbuf_free(&state.key);
+    }
+    odin3_strbuf_free(&tmp);
     return status;
 }

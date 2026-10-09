@@ -55,10 +55,88 @@ static void put_escaped(jw *out, unsigned char chr) {
     }
 }
 
+/* --- UTF-8: invalid sequences are written as U+FFFD so the output is always valid JSON ------ */
+
+enum {
+    UTF8_ASCII_LIMIT = 0x80,
+    UTF8_CONT_MASK = 0xC0,
+    UTF8_CONT_TAG = 0x80,
+    UTF8_LEAD2_MIN = 0xC2,
+    UTF8_LEAD2_MAX = 0xDF,
+    UTF8_LEAD3_MIN = 0xE0,
+    UTF8_LEAD3_MAX = 0xEF,
+    UTF8_LEAD_ED = 0xED,
+    UTF8_LEAD4_MIN = 0xF0,
+    UTF8_LEAD4_MAX = 0xF4,
+    UTF8_E0_SECOND_MIN = 0xA0,
+    UTF8_ED_SECOND_MAX = 0x9F,
+    UTF8_F0_SECOND_MIN = 0x90,
+    UTF8_F4_SECOND_MAX = 0x8F,
+    UTF8_LEN2 = 2,
+    UTF8_LEN3 = 3,
+    UTF8_LEN4 = 4
+};
+
+/* Sequence length announced by a lead byte, 0 for a byte that cannot start one. */
+static size_t utf8_lead_len(unsigned char lead) {
+    if (lead >= UTF8_LEAD2_MIN && lead <= UTF8_LEAD2_MAX) {
+        return UTF8_LEN2;
+    }
+    if (lead >= UTF8_LEAD3_MIN && lead <= UTF8_LEAD3_MAX) {
+        return UTF8_LEN3;
+    }
+    return lead >= UTF8_LEAD4_MIN && lead <= UTF8_LEAD4_MAX ? UTF8_LEN4 : 0;
+}
+
+/* The second byte must exclude overlong forms, surrogates and values above U+10FFFF. */
+static bool utf8_second_ok(unsigned char lead, unsigned char second) {
+    if (lead == UTF8_LEAD3_MIN) {
+        return second >= UTF8_E0_SECOND_MIN;
+    }
+    if (lead == UTF8_LEAD_ED) {
+        return second <= UTF8_ED_SECOND_MAX;
+    }
+    if (lead == UTF8_LEAD4_MIN) {
+        return second >= UTF8_F0_SECOND_MIN;
+    }
+    return lead != UTF8_LEAD4_MAX || second <= UTF8_F4_SECOND_MAX;
+}
+
+/* Length of the valid sequence at src (left bytes remain), 0 when it is invalid. */
+static size_t utf8_valid_len(const unsigned char *src, size_t left) {
+    if (src[0] < UTF8_ASCII_LIMIT) {
+        return 1;
+    }
+    size_t len = utf8_lead_len(src[0]);
+    if (len == 0 || len > left || !utf8_second_ok(src[0], src[1])) {
+        return 0;
+    }
+    for (size_t i = 1; i < len; i++) {
+        if ((src[i] & UTF8_CONT_MASK) != UTF8_CONT_TAG) {
+            return 0;
+        }
+    }
+    return len;
+}
+
 static void put_bytes(jw *out, odin3_bytes text) {
     const unsigned char *src = text.ptr;
-    for (size_t i = 0; i < text.len; i++) {
-        put_escaped(out, src[i]);
+    size_t i = 0;
+    while (i < text.len) {
+        size_t len = utf8_valid_len(src + i, text.len - i);
+        if (len == 0) {
+            jw_raw(out, "\\ufffd");
+            i++;
+            continue;
+        }
+        if (len == 1) {
+            put_escaped(out, src[i]);
+        } else {
+            for (size_t j = 0; j < len; j++) {
+                jw_char(out, src[i + j]);
+            }
+        }
+        i += len;
     }
 }
 
@@ -273,4 +351,43 @@ void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
         jw_name name = {odin3_bytes_cstr(file != NULL ? file : ""), odin3_bytes_cstr(pos)};
         jw_string2(out, &name);
     }
+}
+
+/* --- unique keys --------------------------------------------------------------------------- */
+
+static bool key_taken(const jw *out, jw_keykind kind, const char *text) {
+    uint32_t str = 0;
+    if (!odin3_strtab_find(out->strtab, odin3_bytes_cstr(text), &str)) {
+        return false;
+    }
+    if (kind == JW_KEY_CELL) {
+        return odin3_node_valid(odin3_module_find_node(out->module, str));
+    }
+    return odin3_wire_valid(odin3_module_find_wire(out->module, str)) ||
+           odin3_net_valid(odin3_module_find_net(out->module, str));
+}
+
+static odin3_status build_key(jw *out, const jw_keyspec *spec, uint32_t bump) {
+    odin3_strbuf_clear(&out->key);
+    odin3_status status = odin3_strbuf_append(&out->key, odin3_bytes_cstr(spec->head));
+    if (status == ODIN3_OK) {
+        status = odin3_strbuf_append(&out->key, odin3_bytes_cstr(spec->tail));
+    }
+    if (status == ODIN3_OK && bump > 0) {
+        status = odin3_strbuf_appendf(&out->key, "$u%u", (unsigned)bump);
+    }
+    return status;
+}
+
+const char *jw_make_key(jw *out, const jw_keyspec *spec) {
+    uint32_t bump = 0;
+    odin3_status status = build_key(out, spec, bump);
+    while (status == ODIN3_OK && spec->generated && out->key.data != NULL &&
+           key_taken(out, spec->kind, out->key.data)) {
+        status = build_key(out, spec, ++bump);
+    }
+    if (status != ODIN3_OK) {
+        out->status = status;
+    }
+    return status == ODIN3_OK && out->key.data != NULL ? out->key.data : "";
 }

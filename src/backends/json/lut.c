@@ -69,7 +69,11 @@ static void write_lut_cell(jw *out, jw_list *cells, odin3_node_id node, const co
     jw_dir(out, &cell, "Y", ODIN3_DIR_OUT);
     jw_cell_conns(out, &cell);
     jw_key(out, &cell.conns, "A");
-    jw_pins(out, odin3_node_port(out->module, node, 0));
+    if (view->inputs == 0) {
+        jw_raw(out, "[  ]"); /* the constant-0 form of an empty wide cover has no inputs */
+    } else {
+        jw_pins(out, odin3_node_port(out->module, node, 0));
+    }
     jw_key(out, &cell.conns, "Y");
     jw_pins(out, odin3_node_port(out->module, node, 1));
     jw_cell_end(out, &cell);
@@ -161,6 +165,11 @@ void jw_sop_cell(jw *out, jw_list *list, odin3_node_id node) {
         return;
     }
     cover_view view = view_of(width, cover);
+    if (view.n_rows == 0 && view.inputs > LUT_MAX_INPUTS) {
+        /* An empty cover is constant 0, and Yosys's $sop needs DEPTH >= 1: a $lut with no inputs.
+         */
+        view.inputs = 0;
+    }
     if (view.inputs <= LUT_MAX_INPUTS) {
         write_lut_cell(out, list, node, &view);
         return;

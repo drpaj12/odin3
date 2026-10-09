@@ -92,6 +92,12 @@ static void add_node(odin3_module *mod, const odin3_node_spec *spec, const odin3
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, spec, ports, NULL));
 }
 
+static void add_named_gate(odin3_module *mod, const char *name, const odin3_net_id nets[3]) {
+    odin3_node_spec spec = {type_id("$_AND_"), intern(name), prov_at(4), NULL, 0};
+    odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
+    add_node(mod, &spec, ports);
+}
+
 static void add_gate(odin3_module *mod, const char *type, const odin3_net_id nets[3]) {
     odin3_node_spec spec = {type_id(type), 0, prov_at(4), NULL, 0};
     odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
@@ -391,6 +397,69 @@ static void test_wire_range_attributes(void) {
     (void)remove("t7.json");
 }
 
+static size_t count_of(const char *text, const char *needle) {
+    size_t count = 0;
+    for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
+}
+
+/* A user name equal to a generated key wins; the generated one gets a $u suffix. */
+static void test_cell_key_collision(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id nets[6];
+    for (int i = 0; i < 6; i++) {
+        nets[i] = new_net(mod, NULL);
+    }
+    add_named_gate(mod, "$c2", nets);  /* node 1 is literally named $c2 */
+    add_gate(mod, "$_AND_", nets + 3); /* node 2 is unnamed: generated key $c2 */
+    char *text = write_json("t12.json");
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, "\"$c2\": {"));
+    assert_has(text, "\"$c2$u1\": {");
+    odin3_util_free(text);
+    (void)remove("t12.json");
+}
+
+static void test_netname_key_collision(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id clk = new_net(mod, "clk");
+    odin3_net_id din = new_net(mod, "d");
+    odin3_net_id qnet = new_net(mod, NULL); /* net 3: generated netname $n3 for its init */
+    add_latch(mod, (odin3_net_id[3]){clk, din, qnet}, 1);
+    odin3_wire_spec ws = {intern("$n3"), 0, 0, false, prov_at(3)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(mod, &ws, NULL, NULL));
+    char *text = write_json("t13.json");
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, "\"$n3\": {"));
+    assert_has(text, "\"$n3$u1\": {");
+    odin3_util_free(text);
+    (void)remove("t13.json");
+}
+
+/* An empty cover is constant 0 whatever its width: a $lut with no inputs, never DEPTH 0. */
+static void test_empty_cover_is_const0(void) {
+    char *text = sop_json(SEVEN, "");
+    assert_has(text, "\"type\": \"$lut\"");
+    assert_has(text, "\"LUT\": \"0\"");
+    assert_has(text, "\"WIDTH\": \"00000000000000000000000000000000\"");
+    assert_has(text, "\"A\": [  ]");
+    assert_lacks(text, "DEPTH");
+    odin3_util_free(text);
+}
+
+/* Invalid UTF-8 in a name is replaced so the JSON stays valid. */
+static void test_invalid_utf8_name(void) {
+    odin3_module *mod = new_module("top");
+    (void)new_net(mod, "bad\xff\xc3(name");
+    (void)new_net(mod, "caf\xc3\xa9");
+    odin3_net_id clk = new_net(mod, NULL);
+    add_latch(mod, (odin3_net_id[3]){clk, clk, new_net(mod, "bad\xff\xc3(name2")}, 0);
+    char *text = write_json("t14.json");
+    assert_has(text, "\"bad\\ufffd\\ufffd(name2\"");
+    odin3_util_free(text);
+    (void)remove("t14.json");
+}
+
 static void test_deterministic(void) {
     odin3_module *mod = new_module("top");
     add_sop(mod, 3, "10-1");
@@ -415,8 +484,17 @@ static void test_io_failure(void) {
     }
 }
 
-/* One write with the fail_at-th allocation failing; true when it succeeded. */
-static bool write_failing_at(long fail_at) {
+static bool file_exists(const char *path) {
+    FILE *fp = fopen(path, "rb");
+    if (fp != NULL) {
+        (void)fclose(fp);
+    }
+    return fp != NULL;
+}
+
+/* One write with the fail_at-th allocation failing; true when it succeeded. A failed write must
+ * leave the existing destination (baseline) untouched and no temporary file behind. */
+static bool write_failing_at(const char *baseline, long fail_at) {
     odin3_util_set_alloc_fail_after(fail_at);
     odin3_status status = odin3_json_write(design, "t9.json");
     odin3_util_set_alloc_fail_after(-1);
@@ -424,12 +502,14 @@ static bool write_failing_at(long fail_at) {
         return true;
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, status);
-    FILE *left = fopen("t9.json", "rb"); /* a failed write leaves no file */
-    TEST_ASSERT_NULL(left);
+    char *left = slurp("t9.json");
+    TEST_ASSERT_EQUAL_STRING(baseline, left);
+    odin3_util_free(left);
+    TEST_ASSERT_FALSE(file_exists("t9.json.tmp"));
     return false;
 }
 
-/* Every allocation point fails once: NO_MEMORY with no file left behind, then OK and identical. */
+/* Every allocation point fails once: NO_MEMORY, destination and temp as expected, then OK. */
 static void test_oom_sweep(void) {
     odin3_module *mod = new_module("top");
     add_sop(mod, SEVEN,
@@ -438,7 +518,7 @@ static void test_oom_sweep(void) {
     char *baseline = write_json("t9.json");
     enum { SWEEP_LIMIT = 1000 };
     long fail_at = 0;
-    while (fail_at < SWEEP_LIMIT && !write_failing_at(fail_at)) {
+    while (fail_at < SWEEP_LIMIT && !write_failing_at(baseline, fail_at)) {
         fail_at++;
     }
     TEST_ASSERT_TRUE(fail_at > 0);
@@ -450,8 +530,7 @@ static void test_oom_sweep(void) {
     (void)remove("t9.json");
 }
 
-/* Runs `program -net_q -net_s script` without net_a shell; the exit status, or -1 if it cannot be
- * started. */
+/* Runs `program -q -s script` without a shell; the exit status, or -1 if it cannot be started. */
 static int run_program(const char *const command[2]) {
     enum { ARG_BUF = 512 };
     char prog_arg[ARG_BUF];
@@ -526,6 +605,8 @@ typedef struct sop_case {
 static const sop_case k_cases[] = {
     {2, "111"},
     {2, "110"},
+    {2, ""},
+    {SEVEN, ""},
     {3, "10-1--11"},
     {SEVEN, "1-0---11"
             "0------1"},
@@ -616,6 +697,10 @@ int main(void) {
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_wire_range_attributes);
+    RUN_TEST(test_cell_key_collision);
+    RUN_TEST(test_netname_key_collision);
+    RUN_TEST(test_empty_cover_is_const0);
+    RUN_TEST(test_invalid_utf8_name);
     RUN_TEST(test_deterministic);
     RUN_TEST(test_io_failure);
     RUN_TEST(test_oom_sweep);

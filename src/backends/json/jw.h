@@ -35,6 +35,7 @@ typedef struct jw {
     odin3_status status; /* first failure; later output is skipped */
     odin3_srcloc src;    /* scratch: first source location found by jw_src */
     bool have_src;
+    odin3_strbuf key; /* scratch: the key being built by jw_make_key */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */
@@ -51,6 +52,19 @@ void jw_fmt(jw *out, const char *fmt, ...) ODIN3_PRINTF(2, 3);
 void jw_string(jw *out, odin3_bytes text);
 void jw_char(jw *out, int chr);
 void jw_indent(jw *out, uint32_t depth);
+/* Keys of one JSON object must be unique. A user name always wins: a generated key (suffix or
+ * $c<ID>/$n<ID>) that equals a name of the same namespace gets "$u<n>" appended until it is free.
+ */
+typedef enum jw_keykind { JW_KEY_CELL, JW_KEY_NETNAME } jw_keykind;
+typedef struct jw_keyspec {
+    jw_keykind kind;
+    bool generated; /* false: head+tail is a user name, used as is */
+    const char *head;
+    const char *tail;
+} jw_keyspec;
+/* The unique key text (valid until the next call); "" after an out-of-memory status. */
+const char *jw_make_key(jw *out, const jw_keyspec *spec);
+
 /* A name in two parts (head then tail), written inside one pair of quotes. */
 typedef struct jw_name {
     odin3_bytes head;
