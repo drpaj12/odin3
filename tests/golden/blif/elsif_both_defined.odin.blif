@@ -1,0 +1,23 @@
+.model simple_op
+.inputs simple_op^in1 simple_op^in2 simple_op^in3
+.outputs simple_op^out
+
+.names gnd
+.names unconn
+.names vcc
+1
+
+.names simple_op^in1 simple_op^BUF~0
+1 1
+
+.names simple_op^in3 simple_op^BUF~1
+1 1
+
+.names simple_op^BUF~0 simple_op^out
+1 1
+
+.names simple_op^BUF~1 simple_op^out
+1 1
+
+.end
+
