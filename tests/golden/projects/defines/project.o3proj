@@ -1,0 +1,4 @@
+# defines: `define` lines; a name alone is defined without a value.
+define USE_SUB
+define WIDTH=12
+file verilog src/top.v

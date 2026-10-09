@@ -1,0 +1,13 @@
+<config>
+    <!-- Odin II's current config form: <inputs>/<input_path_and_name>. -->
+    <inputs>
+        <input_type>Verilog</input_type>
+        <input_path_and_name>src/arith/adder.v</input_path_and_name>
+        <input_path_and_name>src/ctrl/pick.v</input_path_and_name>
+        <input_path_and_name>src/top.v</input_path_and_name>
+    </inputs>
+    <output>
+        <output_type>blif</output_type>
+        <output_path_and_name>top.odin.blif</output_path_and_name>
+    </output>
+</config>

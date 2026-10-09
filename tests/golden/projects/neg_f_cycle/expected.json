@@ -1,0 +1,6 @@
+{
+  "description": "Nested -f lists that include each other.",
+  "features": ["negative", "-f cycle"],
+  "formats": ["f"],
+  "error": {"kind": "f_cycle", "at": "lists/more.f:2", "names": ["files.f", "lists/more.f", "files.f"]}
+}

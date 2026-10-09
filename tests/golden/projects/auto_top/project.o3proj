@@ -1,0 +1,4 @@
+# auto_top: no `top`; root is the single uninstantiated module.
+file verilog src/leaf.v
+file verilog src/root.v
+file verilog src/mid.v

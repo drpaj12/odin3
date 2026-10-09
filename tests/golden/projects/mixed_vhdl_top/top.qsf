@@ -1,0 +1,3 @@
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name VERILOG_FILE src/verilog/vadd.v
+set_global_assignment -name VHDL_FILE src/top.vhd

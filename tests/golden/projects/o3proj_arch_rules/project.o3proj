@@ -1,0 +1,19 @@
+# o3proj_arch_rules: architecture, inventory, overrides, mapping rules and flow (DESIGN 4.0).
+# Phase 2 reads and stores all of it; nothing here changes the elaborated design.
+file verilog src/top.v
+top top
+
+arch arch/tiny.o3lib
+arch arch/research.o3lib                # project-local .o3lib adding a hypothetical block
+available multiply 112
+available dual_port_ram 4
+hide dual_port_ram                      # pretend the target has no dual-port RAM
+cell mult_27 from multiply param A_WIDTH=27 B_WIDTH=27
+
+map * $mul to multiply, mult_27 min_width 9
+map top $mul soft max_width 4           # module rule: tiny products stay soft
+map "top.u_*" $mem keep min_depth 64    # instance-path rule with a wildcard
+limit multiply 40
+patterns arch/patterns.o3lib
+
+flow flow/synth.o3

@@ -1,0 +1,4 @@
+# vhdl_same_filename: two files named core.vhd, in libraries alpha and beta.
+file vhdl src/alpha/core.vhd library alpha
+file vhdl src/beta/core.vhd library beta
+file vhdl src/top.vhd

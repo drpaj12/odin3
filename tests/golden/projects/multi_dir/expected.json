@@ -1,0 +1,33 @@
+{
+  "description": "Three Verilog files in three directories, explicit top where a format has one.",
+  "features": ["verilog", "multi-file", "directories", "odin2 inputs form"],
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "project": {
+    "files": [
+      {"path": "src/arith/adder.v", "language": "verilog", "library": "work"},
+      {"path": "src/ctrl/pick.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "format_overrides": {"qsf": {"top": ["top"]}, "odin2": {"output": {"path": "top.odin.blif", "format": "blif"}}},
+  "resolved": {
+    "top": ["top"],
+    "units": ["work.adder", "work.pick", "work.top"],
+    "read": ["src/arith/adder.v", "src/ctrl/pick.v", "src/top.v"]
+  },
+  "oracle": "yosys"
+}

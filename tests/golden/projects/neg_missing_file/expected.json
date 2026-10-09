@@ -1,0 +1,10 @@
+{
+  "description": "A listed source file does not exist.",
+  "features": ["negative", "missing file"],
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "error": {
+    "kind": "missing_file",
+    "at": {"o3proj": "project.o3proj:3", "f": "files.f:2", "qsf": "top.qsf:3", "odin2": "odin2.xml:4"},
+    "names": ["src/missing.v"]
+  }
+}

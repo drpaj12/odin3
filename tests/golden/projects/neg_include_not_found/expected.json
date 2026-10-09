@@ -1,0 +1,6 @@
+{
+  "description": "`include of a file on no search path.",
+  "features": ["negative", "include not found"],
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "error": {"kind": "include_not_found", "at": "src/top.v:2", "names": ["missing_defs.vh"]}
+}

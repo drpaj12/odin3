@@ -1,0 +1,6 @@
+# qsf_mapping: the rules top.qsf translates to.
+file verilog src/mul.v
+file verilog src/top.v
+top top
+map * $mul soft
+map top.u_small $mul soft

@@ -1,0 +1,6 @@
+{
+  "description": "No top given and every module instantiated (mutual instantiation).",
+  "features": ["negative", "no top"],
+  "formats": ["o3proj", "f", "odin2"],
+  "error": {"kind": "no_top", "at": null, "names": []}
+}

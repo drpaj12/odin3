@@ -1,0 +1,6 @@
+{
+  "description": "The same module defined in two files.",
+  "features": ["negative", "duplicate module"],
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "error": {"kind": "duplicate_module", "at": "src/other.v:2", "names": ["helper"]}
+}

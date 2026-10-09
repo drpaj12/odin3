@@ -1,0 +1,22 @@
+# Registered full adder from two half adders (netlist input; the first model is the top).
+.model fa_reg
+.inputs clk a b cin
+.outputs s cout
+.subckt half_adder x=a y=b s=s1 c=c1
+.subckt half_adder x=s1 y=cin s=s2 c=c2
+.names c1 c2 co
+1- 1
+-1 1
+.latch s2 s re clk 0
+.latch co cout re clk 0
+.end
+
+.model half_adder
+.inputs x y
+.outputs s c
+.names x y s
+10 1
+01 1
+.names x y c
+11 1
+.end

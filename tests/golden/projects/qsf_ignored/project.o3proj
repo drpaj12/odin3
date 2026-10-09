@@ -1,0 +1,4 @@
+# qsf_ignored: the synthesis input of blink.qsf (FAMILY/DEVICE become the device entry).
+device "Cyclone V" 5CSEMA5F31C6
+file verilog src/blink.v
+top blink

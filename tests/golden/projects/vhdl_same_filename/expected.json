@@ -1,0 +1,33 @@
+{
+  "description": "Two files named core.vhd in libraries alpha and beta.",
+  "features": ["vhdl", "libraries", "same file name"],
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/alpha/core.vhd", "language": "vhdl", "library": "alpha"},
+      {"path": "src/beta/core.vhd", "language": "vhdl", "library": "beta"},
+      {"path": "src/top.vhd", "language": "vhdl", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "format_overrides": {"qsf": {"top": ["top"]}},
+  "resolved": {
+    "top": ["top"],
+    "units": ["alpha.inv4", "beta.rot4", "work.top"],
+    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
+  },
+  "oracle": "ghdl+yosys"
+}

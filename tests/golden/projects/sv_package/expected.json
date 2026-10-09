@@ -1,0 +1,33 @@
+{
+  "description": "SystemVerilog package used by wildcard import and by qualified name.",
+  "features": ["systemverilog", "package", "compile order"],
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/pkg/alu_pkg.sv", "language": "systemverilog", "library": "work"},
+      {"path": "src/alu.sv", "language": "systemverilog", "library": "work"},
+      {"path": "src/top.sv", "language": "systemverilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "format_overrides": {"qsf": {"top": ["top"]}},
+  "resolved": {
+    "top": ["top"],
+    "units": ["work.alu", "work.top"],
+    "read": ["src/alu.sv", "src/pkg/alu_pkg.sv", "src/top.sv"]
+  },
+  "oracle": "yosys"
+}

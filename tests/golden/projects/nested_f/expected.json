@@ -1,0 +1,39 @@
+{
+  "description": "Nested -f/-F lists, each relative to its own directory, plus +incdir+.",
+  "features": ["verilog", "nested -f", "-F", "incdir"],
+  "formats": ["o3proj", "f"],
+  "project": {
+    "files": [
+      {"path": "src/common/dffr.v", "language": "verilog", "library": "work"},
+      {"path": "src/core/alu.v", "language": "verilog", "library": "work"},
+      {"path": "src/core/regs.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": ["src/include"],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "resolved": {
+    "top": ["top"],
+    "units": ["work.alu", "work.dffr", "work.regs", "work.top"],
+    "read": [
+      "src/common/dffr.v",
+      "src/core/alu.v",
+      "src/core/regs.v",
+      "src/include/nf_width.vh",
+      "src/top.v"
+    ]
+  },
+  "oracle": "yosys"
+}

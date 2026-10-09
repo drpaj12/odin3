@@ -1,0 +1,31 @@
+{
+  "description": ".qpf naming two revisions; the first one's .qsf is read.",
+  "features": ["verilog", "qpf revisions", "top params"],
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/mac.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": ["top"],
+    "params": [{"module": "top", "name": "STAGES", "value": "1"}],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "resolved": {
+    "top": ["top"],
+    "units": ["work.delay", "work.mac", "work.top"],
+    "read": ["src/mac.v", "src/top.v"]
+  },
+  "oracle": "yosys"
+}

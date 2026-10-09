@@ -1,0 +1,38 @@
+{
+  "description": "No top given: the single uninstantiated module, neither first nor last.",
+  "features": ["verilog", "auto top", "odin2 ignored elements"],
+  "formats": ["o3proj", "f", "odin2"],
+  "project": {
+    "files": [
+      {"path": "src/leaf.v", "language": "verilog", "library": "work"},
+      {"path": "src/root.v", "language": "verilog", "library": "work"},
+      {"path": "src/mid.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "format_overrides": {
+    "odin2": {
+      "output": {"path": "root.odin.blif", "format": "blif"},
+      "ignored": ["debug_outputs", "optimizations"]
+    }
+  },
+  "resolved": {
+    "top": ["root"],
+    "units": ["work.leaf", "work.mid", "work.root"],
+    "read": ["src/leaf.v", "src/mid.v", "src/root.v"]
+  },
+  "oracle": "yosys"
+}

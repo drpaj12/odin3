@@ -1,0 +1,5 @@
+# The flow this project was run with (stored by Phase 2, not executed).
+read_project project.o3proj
+proc
+opt
+stats

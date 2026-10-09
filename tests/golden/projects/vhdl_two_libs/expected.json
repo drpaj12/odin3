@@ -1,0 +1,33 @@
+{
+  "description": "VHDL package and entity in library util, top in work.",
+  "features": ["vhdl", "libraries"],
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/util/sat_pkg.vhd", "language": "vhdl", "library": "util"},
+      {"path": "src/util/clip.vhd", "language": "vhdl", "library": "util"},
+      {"path": "src/top.vhd", "language": "vhdl", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": [],
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": []
+  },
+  "format_overrides": {"qsf": {"top": ["top"]}},
+  "resolved": {
+    "top": ["top"],
+    "units": ["util.clip", "work.top"],
+    "read": ["src/top.vhd", "src/util/clip.vhd", "src/util/sat_pkg.vhd"]
+  },
+  "oracle": "ghdl+yosys"
+}

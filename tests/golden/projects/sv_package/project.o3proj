@@ -1,0 +1,4 @@
+# sv_package: the package file comes first (compilation order matters).
+file systemverilog src/pkg/alu_pkg.sv
+file systemverilog src/alu.sv
+file systemverilog src/top.sv

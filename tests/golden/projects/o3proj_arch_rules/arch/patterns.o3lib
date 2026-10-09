@@ -1,0 +1,8 @@
+library project_patterns                # extra matcher patterns for this project only
+cell mul_add_pattern hard
+  in  a 9
+  in  b 9
+  in  c 18
+  out y 18
+  fn  y = a * b + c
+end

@@ -1,0 +1,6 @@
+{
+  "description": "No top given and two uninstantiated modules.",
+  "features": ["negative", "ambiguous top"],
+  "formats": ["o3proj", "f", "odin2"],
+  "error": {"kind": "ambiguous_top", "at": null, "names": ["alpha", "beta"]}
+}

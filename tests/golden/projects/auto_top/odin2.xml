@@ -1,0 +1,17 @@
+<config>
+    <verilog_files>
+        <verilog_file>src/leaf.v</verilog_file>
+        <verilog_file>src/root.v</verilog_file>
+        <verilog_file>src/mid.v</verilog_file>
+    </verilog_files>
+    <output>
+        <output_type>blif</output_type>
+        <output_path_and_name>root.odin.blif</output_path_and_name>
+    </output>
+    <optimizations>
+        <multiply size="3" fixed="1" fracture="0"/>
+    </optimizations>
+    <debug_outputs>
+        <debug_output_path>.</debug_output_path>
+    </debug_outputs>
+</config>

@@ -1,0 +1,4 @@
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name VHDL_FILE src/alpha/core.vhd -library alpha
+set_global_assignment -name VHDL_FILE src/beta/core.vhd -library beta
+set_global_assignment -name VHDL_FILE src/top.vhd
