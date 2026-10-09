@@ -42,6 +42,66 @@ Every arrow is a *pass* registered with the pass manager; every pass runs `check
 
 ## 4. Front ends
 
+### 4.0 Project input
+
+A design is described to Odin III by a **project**: one in-memory record that every reader gets,
+filled from a script or a project file (PHASE1 #18). It holds:
+
+- the source files, each with its language (Verilog-2005, SystemVerilog, VHDL, BLIF, VQM, EDIF)
+  and library (default `work`), in order;
+- include search paths and macro defines (global, and per file where a format allows it);
+- the top module(s) and top-level parameter overrides;
+- the **architecture**: tech libraries and architecture files (`read_arch`, §6 step 7: `.o3lib`,
+  later VPR XML or an Altera device), in load order;
+- **partial-mapping rules** (§7), so a project says how its design meets that architecture;
+- optionally the flow itself (a pass script, as `odin3 script.o3`), so one file reproduces a run.
+
+**Partial-mapping rules** steer §7 without code. Each rule has a scope (global, a module, or a
+hierarchical instance path, with `*` wildcards) and a subject (an operator or cell kind such as
+`$mul`, `$mem`, `$add`, or a tech-library cell); forms:
+- `map <scope> <subject> to <libcell>[, <libcell>…]` / `soft` / `keep` (leave as a black box);
+- thresholds: `min_width`, `max_width`, `min_depth` (e.g. multipliers under 9×9 stay soft; this
+  overrides the arch-derived small-multiplier threshold);
+- budgets: `limit <libcell> <count>` (e.g. at most 40 DSPs; the binder spills the rest to soft
+  logic, largest-savings-first);
+- extra patterns: `patterns <file.o3lib>` adds matcher patterns (§8) for this project only.
+
+Precedence, most specific first: an attribute in the source (`(* odin3_map = "soft" *)`) > an
+instance-path rule > a module rule > a global rule > the architecture's defaults. Every decision
+the binder makes records which rule (file:line) chose it, in the object's provenance run, so
+`stats` and the dot view can explain a mapping. Rule syntax and semantics are fixed with the
+Phase 4 partial mapper; Phase 2 reads and stores them (unknown keys are errors, so a typo never
+silently changes a mapping).
+
+Ways to fill it (all produce the same record; a script may also list files directly with
+`read_*`):
+
+- **native project file** `.o3proj` (`read_project <file>`): line-oriented like `.o3lib`
+  (`file verilog rtl/top.v`, `incdir rtl/include`, `define WIDTH=8`, `top top`,
+  `param top.WIDTH 16`, `arch k6_frac_N10_mem32K.o3lib`, `map * $mul to multiply min_width 9`,
+  `limit multiply 40`, `flow synth.o3`); relative paths resolve against the
+  project file's directory;
+- **EDA file list** (`-f files.f`): one file per line, `+incdir+<dir>`, `+define+<name>[=<v>]`,
+  `-v <file>` / `-y <dir>` library files and directories, nested `-f`;
+- **Quartus `.qsf` / `.qpf` import**: `VERILOG_FILE`, `SYSTEMVERILOG_FILE`, `VHDL_FILE` (with
+  `-library`), `TOP_LEVEL_ENTITY`, `SEARCH_PATH`, `VERILOG_MACRO`, `PARAMETER` assignments, `DEVICE`/`FAMILY` as
+  the architecture, and the synthesis assignments that are mapping rules in Quartus terms
+  (`AUTO_RAM_RECOGNITION`, `AUTO_DSP_RECOGNITION`, `DSP_BLOCK_BALANCING`, per-instance
+  `RAMSTYLE`/`MULTSTYLE`) translated to the rules below; the
+  `.qpf` names the revision, whose `.qsf` is read; every other assignment is ignored with one
+  info line listing the ignored names (timing, pin and device assignments are not synthesis
+  input in Phase 2);
+- **Odin II XML config** (`-c config.xml`: `<verilog_files>`, `<arch_file>`, `<output>`), for
+  users moving from Odin II (after Phase 2).
+
+**Top module.** `--top <name>` (or the project's `top`) wins. Otherwise the top is the single
+module no other module instantiates; zero or several candidates is an error that lists them.
+The chosen top is recorded in the IR (`odin3_design_set_top`, IR-11 design record) and reported
+by `stats`.
+
+**Provenance.** Each source record names its file through the project (path as given, library),
+so `file:line` queries stay unambiguous when two libraries hold files of the same name.
+
 ### 4.1 Verilog-2005 (owned)
 - Preprocessor first: `define/`ifdef/`else/`endif/`include, macros with args, `` `timescale `` tolerated.
 - Bison/Flex grammar, location-tracked tokens; every AST node has `{file, line, col, end_line, end_col}` and an attribute list (`(* ... *)` and pragmas).
@@ -110,6 +170,7 @@ Components:
 - **Inference** — three tiers, as in Odin II: explicit instantiation (primitive library), coding-style rules (memory inference), and open-ended **subgraph matching** (Odin I, re-implemented generically).
 - **Binding/packing** — for each matched structure choose an implementation: hard block(s) + generated soft glue, or all-soft. Includes recursive multiplier splitting with the small-multiplier threshold auto-derived from the arch, signed multipliers, memory depth/width splitting with width-depth trading, carry chains (`adder` model), DFF feature matching (enable, sync/async reset) to what the arch's FF supports.
 - **Generic hard blocks** — any arch `<model>`; matched by exact port signature (Odin II) or by a user-supplied pattern.
+- **Project rules** (§4.0) steer all three: per-scope `map … to/soft/keep`, width/depth thresholds, per-cell budgets, project-only patterns; each binding records the rule that chose it.
 
 Matcher (§8) pattern format: an IR fragment written as a tech-library cell function — the `.o3lib` expression language (Verilog-like, parametric widths) compiled to IR — plus a cost (resolved 2026-10-08, PHASE1 #7/#8). Patterns live in the tech library beside the cell they map to. Overlap resolution: maximum-cover with cost tie-break (Odin I's rule generalized).
 
@@ -156,7 +217,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 |---|---|---|
 | 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
 | 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
-| 2 | Verilog-2005 front end + preprocessor + elaboration; `proc`, `opt`; smallest Titan design parsed; primitive library v0 | Micros identical/equivalent to Parmys |
+| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
 | 4 | VPR-XML import into the tech library, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
 | 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist |
