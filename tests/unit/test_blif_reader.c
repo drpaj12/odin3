@@ -28,17 +28,20 @@ static const char *const PATH = "odin3_reader_test.blif";
 static const char *const HAND = ODIN3_BLIF_FIXTURES "/hand_ports.blif";
 static const char *const BODY = ODIN3_BLIF_FIXTURES "/hand_body.blif";
 static char last_error[MSG_MAX];
+static uint32_t error_count; /* error lines logged since setUp */
 static odin3_design *design;
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         (void)snprintf(last_error, sizeof last_error, "%s", msg);
+        error_count++;
     }
 }
 
 void setUp(void) {
     last_error[0] = '\0';
+    error_count = 0;
     odin3_log_set_sink(sink, NULL);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
@@ -46,6 +49,7 @@ void setUp(void) {
 
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
+    odin3_blif_test_set_between_passes(NULL, NULL);
     odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
     design = NULL;
@@ -308,7 +312,15 @@ static void test_blackbox_incompatible_with_registered_type(void) {
     register_hard_once();
     expect_parse_error(".model top\n.end\n.model o3test_hard_adder\n.inputs a[0] cin\n"
                        ".outputs s\n.blackbox\n.end\n",
-                       3, "conflicts with the cell type");
+                       3, "conflicts with the registered cell type");
+    TEST_ASSERT_EQUAL_UINT32(1, error_count); /* one located line, no unlocated IR log */
+}
+
+static void test_blackbox_repeats_a_port_name(void) {
+    expect_parse_error(".model top\n.end\n.model bb\n.inputs a[0] a[1] a\n.outputs y\n.blackbox\n"
+                       ".end\n",
+                       3, "repeats port name 'a'");
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
 }
 
 /* A net that is both a primary input and a primary output is one net shared by two ports. */
@@ -560,6 +572,14 @@ static const char *node_attr(odin3_module *module, odin3_node_id node, const cha
     return str_of(val->str);
 }
 
+static void test_attr_value_blank_runs_collapse(void) {
+    write_str(".model top\n.names a\n.attr src \"a   b\"\t c\n.end\n");
+    read_ok(PATH);
+    odin3_module *top = module_at(1);
+    TEST_ASSERT_EQUAL_STRING("\"a b\" c",
+                             node_attr(top, cell_at(top, 0), ODIN3_BLIF_ATTR_PREFIX "src"));
+}
+
 static void test_attr_and_param_on_the_previous_cell(void) {
     read_ok(BODY);
     odin3_module *top = module_at(1);
@@ -584,6 +604,13 @@ static void test_body_provenance(void) {
     expect_file_loc(dff, (loc_want){BODY, 12, 1, 6});
     TEST_ASSERT_NOT_EQUAL_UINT32(odin3_node_prov(top, cell_at(top, 0)).v,
                                  odin3_net_prov(top, n1).v);
+    /* nets first named on the directive right after a .names get their own line */
+    odin3_net_id k0 = odin3_module_find_net(top, intern("k0"));
+    expect_file_loc(odin3_prov_get(design, odin3_net_prov(top, k0)), (loc_want){BODY, 9, 2, 2});
+    odin3_net_id k1 = odin3_module_find_net(top, intern("k1"));
+    expect_file_loc(odin3_prov_get(design, odin3_net_prov(top, k1)), (loc_want){BODY, 10, 2, 2});
+    odin3_net_id m1 = odin3_module_find_net(top, intern("m1")); /* line 15, after a .latch */
+    expect_file_loc(odin3_prov_get(design, odin3_net_prov(top, m1)), (loc_want){BODY, 15, 3, 3});
     /* port nets were made in pass 1 and keep their records */
     odin3_net_id net_a = odin3_module_find_net(top, intern("a"));
     expect_file_loc(odin3_prov_get(design, odin3_net_prov(top, net_a)), (loc_want){BODY, 3, 2, 2});
@@ -651,6 +678,12 @@ static void test_cover_row_bad_characters(void) {
     odin3_design_destroy(design);
     design = odin3_design_create();
     expect_parse_error(".model top\n.names y\n1 1\n.end\n", 3, "cover row does not fit");
+}
+
+/* BLIF forbids mixing on-set (output 1) and off-set (output 0) rows in one cover. */
+static void test_cover_mixing_on_and_off_set(void) {
+    expect_parse_error(".model top\n.inputs a b\n.names a b y\n11 1\n00 0\n.end\n", 5,
+                       "mixes on-set and off-set");
 }
 
 static void test_cover_row_outside_names(void) {
@@ -731,7 +764,14 @@ static void test_subckt_unknown_formal(void) {
 static void test_subckt_wide_port_by_name(void) {
     expect_parse_error(".model top\n.inputs a\n.subckt m p=a\n.end\n"
                        ".model m\n.inputs p[0] p[1]\n.end\n",
-                       3, "width 2");
+                       3, "no port 'p'");
+}
+
+/* A bare formal binds only a scalar port: `o` does not name the width-1 vector `o[0]`. */
+static void test_subckt_bare_formal_of_width1_vector(void) {
+    expect_parse_error(".model top\n.inputs a\n.subckt m o=a\n.end\n"
+                       ".model m\n.outputs o[0]\n.end\n",
+                       3, "no port 'o'");
 }
 
 static void test_subckt_formal_twice(void) {
@@ -790,6 +830,43 @@ static void test_cname_does_not_cross_models(void) {
 static void test_first_model_must_be_a_module(void) {
     expect_parse_error(".model bb\n.inputs a\n.blackbox\n.end\n.model top\n.end\n", 1,
                        "the first model must be a module");
+}
+
+/* --- the file changing between the passes ------------------------------------------------ */
+
+static void rewrite_hook(void *user) {
+    write_str((const char *)user);
+}
+
+static void expect_changed(const char *second, uint32_t line) {
+    write_str(".model top\n.inputs a\n.end\n.model m\n.end\n");
+    odin3_blif_test_set_between_passes(rewrite_hook, (void *)second);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_read(design, PATH));
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want, "%s:%u: file changed during read", PATH, (unsigned)line);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+    odin3_blif_test_set_between_passes(NULL, NULL);
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+}
+
+static void test_file_changed_between_passes(void) {
+    expect_changed(".model top\n.end\n.model m\n.end\n.model extra\n.end\n", 5); /* more */
+    expect_changed(".model top\n.end\n.model n\n.end\n", 3);                     /* renamed */
+    expect_changed(".model top\n.names a\n.end\n", 3);                           /* fewer */
+    expect_changed(".names a\n.model top\n.end\n", 1); /* body before any .model */
+}
+
+/* Out of memory before any line is read is logged without a line number. */
+static void test_out_of_memory_before_reading(void) {
+    write_str(".model top\n.end\n");
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_blif_read(design, PATH));
+    odin3_util_set_alloc_fail_after(-1);
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want, "%s: out of memory", PATH);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
 }
 
 /* --- copied goldens ------------------------------------------------------------------------ */
@@ -913,6 +990,7 @@ static void run_pass1_tests(void) {
     RUN_TEST(test_blackbox_declared_with_grouped_formals);
     RUN_TEST(test_blackbox_reuses_compatible_registered_type);
     RUN_TEST(test_blackbox_incompatible_with_registered_type);
+    RUN_TEST(test_blackbox_repeats_a_port_name);
     RUN_TEST(test_input_and_output_of_the_same_name_share_a_net);
     RUN_TEST(test_mangled_name_skips_taken_names);
     RUN_TEST(test_duplicate_model);
@@ -954,6 +1032,11 @@ static void run_pass2_and_golden_tests(void) {
     RUN_TEST(test_implicit_black_box_malformed_connection);
     RUN_TEST(test_subckt_unknown_formal);
     RUN_TEST(test_subckt_wide_port_by_name);
+    RUN_TEST(test_subckt_bare_formal_of_width1_vector);
+    RUN_TEST(test_cover_mixing_on_and_off_set);
+    RUN_TEST(test_attr_value_blank_runs_collapse);
+    RUN_TEST(test_file_changed_between_passes);
+    RUN_TEST(test_out_of_memory_before_reading);
     RUN_TEST(test_subckt_formal_twice);
     RUN_TEST(test_subckt_malformed_connection);
     RUN_TEST(test_subckt_of_itself);

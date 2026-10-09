@@ -95,6 +95,7 @@ typedef struct blif_use {
     uint32_t model;
     uint32_t formal; /* strtab ID, 0 for the model's first-use entry */
     uint32_t next;   /* index of the model's next use, NO_USE at the end */
+    uint32_t line;   /* where the use is */
 } blif_use;
 
 /* A port made from one or more consecutive header names (IR-7b grouping). */
@@ -111,6 +112,7 @@ typedef struct blif_sop {
     uint32_t width; /* input count */
     uint32_t line;
     uint32_t end_col; /* token count of the .names line */
+    char out;         /* output character of the rows so far, '\0' before the first row */
 } blif_sop;
 
 typedef struct blif_reader {
@@ -132,6 +134,7 @@ typedef struct blif_reader {
     odin3_vec uses;         /* blif_use: distinct (model, formal) pairs, first-use order */
     odin3_u64map *use_keys; /* model << 32 | formal -> 1, for each entry of uses */
     odin3_u64map *use_tail; /* model -> index of its last entry in uses */
+    odin3_u64map *bb_ports; /* model index << 32 | port name -> 1, black-box ports */
     /* pass 2 */
     odin3_celltype_id builtin[BLIF_BUILTINS];
     odin3_module *module;  /* the module whose body is read; NULL in a black box */
@@ -312,7 +315,7 @@ static odin3_status scan_list(blif_reader *rd, const odin3_blif_line *ln, blif_k
 
 /* Records a use of model by .subckt with formal (0: the model itself), once per pair. */
 static odin3_status note_use(blif_reader *rd, uint32_t model, uint32_t formal) {
-    blif_use use = {.model = model, .formal = formal, .next = NO_USE};
+    blif_use use = {.model = model, .formal = formal, .next = NO_USE, .line = rd->line};
     uint64_t key = ((uint64_t)model << TYPE_SHIFT) | formal;
     uint64_t at = 0;
     if (odin3_u64map_get(rd->use_keys, key, &at)) {
@@ -614,7 +617,7 @@ static odin3_status check_formal(const blif_reader *rd, const blif_model *model,
     return ODIN3_OK;
 }
 
-/* Checks a black-box port's formals and appends its definition to rd->defs. */
+/* Checks a black-box port's formals and name and appends its definition to rd->defs. */
 static odin3_status add_formal(blif_reader *rd, const blif_model *model, const blif_group *group) {
     for (uint32_t k = 0; k < group->width; k++) {
         odin3_status st = check_formal(rd, model, &group->bits[k]);
@@ -622,8 +625,14 @@ static odin3_status add_formal(blif_reader *rd, const blif_model *model, const b
             return st;
         }
     }
+    uint64_t key = ((uint64_t)model->index << TYPE_SHIFT) | group->name;
+    uint64_t seen = 0;
+    if (odin3_u64map_get(rd->bb_ports, key, &seen)) {
+        return rd_error(rd, model->line, "black box '%s' repeats port name '%s'",
+                        rd_str(rd, model->name), rd_str(rd, group->name));
+    }
     odin3_port_def *port = odin3_vec_push(&rd->defs);
-    if (port == NULL) {
+    if (port == NULL || odin3_u64map_put(rd->bb_ports, (odin3_kv){key, 1}) != ODIN3_OK) {
         return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     *port = (odin3_port_def){.name = rd_str(rd, group->name),
@@ -631,6 +640,23 @@ static odin3_status add_formal(blif_reader *rd, const blif_model *model, const b
                              .scalar = group->scalar,
                              .width = group->width};
     return ODIN3_OK;
+}
+
+/* True when the declared ports match a registered type's as IR-7b requires: same count, and per
+ * port the same name, direction and constant width. */
+static bool same_ports(const odin3_celltype_def *have, const odin3_celltype_def *want) {
+    if (have->n_ports != want->n_ports) {
+        return false;
+    }
+    for (uint32_t port = 0; port < have->n_ports; port++) {
+        const odin3_port_def *lhs = &have->ports[port];
+        const odin3_port_def *rhs = &want->ports[port];
+        if (strcmp(lhs->name, rhs->name) != 0 || lhs->dir != rhs->dir || lhs->width_param != NULL ||
+            lhs->width_fn != NULL || lhs->width != rhs->width) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static odin3_status build_blackbox(blif_reader *rd, blif_model *model) {
@@ -650,15 +676,18 @@ static odin3_status build_blackbox(blif_reader *rd, blif_model *model) {
                               .ports = rd->defs.data,
                               .n_ports = (uint32_t)rd->defs.len};
     odin3_celltype_id type = {0};
+    if (st == ODIN3_OK && odin3_celltype_find(rd->design, model->name, &type) &&
+        !same_ports(odin3_celltype_get(rd->design, type), &def)) {
+        return rd_error(rd, model->line,
+                        "black box '%s' conflicts with the registered cell type of that name",
+                        def.name);
+    }
     if (st == ODIN3_OK) {
         st = odin3_celltype_declare_blackbox(rd->design, &def, &type);
     }
     model->id = type.v;
     if (st == ODIN3_ERR_INVALID_ARG) {
-        return rd_error(rd, model->line,
-                        "black box '%s' conflicts with the cell type of that name or repeats a "
-                        "port name",
-                        def.name);
+        return rd_error(rd, model->line, "black box '%s' cannot be declared", def.name);
     }
     return rd_fail(rd, st);
 }
@@ -682,7 +711,12 @@ static odin3_status add_implicit(blif_reader *rd, uint32_t model, uint32_t first
                               .gran = ODIN3_GRAN_BLACKBOX,
                               .ports = rd->defs.data,
                               .n_ports = (uint32_t)rd->defs.len};
-    return rd_fail(rd, odin3_celltype_add_local(rd->design, &def, NULL));
+    odin3_status st = odin3_celltype_add_local(rd->design, &def, NULL);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        const blif_use *use = odin3_vec_cat(&rd->uses, first);
+        return rd_error(rd, use->line, "cannot make the implicit black box '%s'", def.name);
+    }
+    return rd_fail(rd, st);
 }
 
 /* Implicit black boxes, in first-use order: every .subckt model that is neither a model of the
@@ -844,6 +878,12 @@ static odin3_status cover_row(blif_reader *rd, const odin3_blif_line *ln) {
         return rd_error(rd, ln->line, "cover row does not fit .names with %u inputs",
                         (unsigned)width);
     }
+    char set = ((const char *)out.ptr)[0];
+    if (rd->sop.out != '\0' && set != rd->sop.out) {
+        return rd_error(rd, ln->line, "cover mixes on-set and off-set rows (output %c after %c)",
+                        set, rd->sop.out);
+    }
+    rd->sop.out = set;
     if (rd->cover.len + width + 1 > UINT32_MAX) {
         return rd_error(rd, ln->line, "cover of .names too large");
     }
@@ -860,6 +900,7 @@ static odin3_status end_names(blif_reader *rd) {
         return ODIN3_OK;
     }
     rd->sop.open = false;
+    uint32_t line = rd->line; /* the directive that ends the rows; make_cell moves rd->line */
     uint32_t width = rd->sop.width;
     const odin3_net_id *nets = rd->nets.data;
     odin3_value params[SOP_PARAMS] = {odin3_value_int(width), {.kind = ODIN3_VAL_COVER}};
@@ -873,7 +914,9 @@ static odin3_status end_names(blif_reader *rd) {
                       .ports = ports,
                       .line = rd->sop.line,
                       .end_col = rd->sop.end_col};
-    return make_cell(rd, &cell);
+    odin3_status st = make_cell(rd, &cell);
+    rd->line = line;
+    return st;
 }
 
 /* --- .latch -------------------------------------------------------------------------------- */
@@ -1010,10 +1053,9 @@ static odin3_status match_formal(blif_reader *rd, const blif_inst *inst, odin3_b
     uint32_t port = find_port(inst->def, name, formal.len);
     uint32_t bit = 0;
     size_t base_len = 0;
-    if (port < n_ports && ports[port].count != 1) {
-        return rd_error(rd, rd->line, "formal '%.*s' of '%s' is a port of width %u (use %.*s[k])",
-                        (int)formal.len, name, inst->def->name, (unsigned)ports[port].count,
-                        (int)formal.len, name);
+    if (port < n_ports && !inst->def->ports[port].scalar) {
+        return rd_error(rd, rd->line, "model '%s' has no port '%.*s' (vector port: use %.*s[k])",
+                        inst->def->name, (int)formal.len, name, (int)formal.len, name);
     }
     if (port == n_ports && parse_bit(name, formal.len, &base_len, &bit)) {
         port = find_port(inst->def, name, base_len);
@@ -1316,6 +1358,15 @@ static odin3_status read_bodies(blif_reader *rd) {
 
 /* --- entry point --------------------------------------------------------------------------- */
 
+/* odin3_blif_test_set_between_passes (tests only; not thread-safe). */
+static void (*between_passes)(void *user);
+static void *between_passes_user;
+
+void odin3_blif_test_set_between_passes(void (*hook)(void *user), void *user) {
+    between_passes = hook;
+    between_passes_user = user;
+}
+
 static odin3_status rd_init(blif_reader *rd, odin3_design *design, const char *path) {
     *rd = (blif_reader){.design = design, .path = path};
     odin3_vec_init(&rd->models, sizeof(blif_model));
@@ -1334,8 +1385,10 @@ static odin3_status rd_init(blif_reader *rd, odin3_design *design, const char *p
     rd->formals = odin3_u64map_create(0);
     rd->use_keys = odin3_u64map_create(0);
     rd->use_tail = odin3_u64map_create(0);
+    rd->bb_ports = odin3_u64map_create(0);
     if (rd->model_lines == NULL || rd->port_lines == NULL || rd->base_bits == NULL ||
-        rd->formals == NULL || rd->use_keys == NULL || rd->use_tail == NULL) {
+        rd->formals == NULL || rd->use_keys == NULL || rd->use_tail == NULL ||
+        rd->bb_ports == NULL) {
         return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     return rd_fail(rd, odin3_design_intern(design, odin3_bytes_cstr(path), &rd->file));
@@ -1358,6 +1411,7 @@ static void rd_free(blif_reader *rd) {
     odin3_u64map_destroy(rd->formals);
     odin3_u64map_destroy(rd->use_keys);
     odin3_u64map_destroy(rd->use_tail);
+    odin3_u64map_destroy(rd->bb_ports);
 }
 
 odin3_status odin3_blif_read(odin3_design *design, const char *path) {
@@ -1376,6 +1430,9 @@ odin3_status odin3_blif_read(odin3_design *design, const char *path) {
     }
     if (st == ODIN3_OK) {
         st = build_all(&rd);
+    }
+    if (st == ODIN3_OK && between_passes != NULL) {
+        between_passes(between_passes_user);
     }
     if (st == ODIN3_OK) {
         st = read_bodies(&rd);

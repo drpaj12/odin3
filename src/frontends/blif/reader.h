@@ -18,9 +18,11 @@
  *   name;
  * - on a cell, for each Yosys `.attr key value` line after it: attribute
  *   ODIN3_BLIF_ATTR_PREFIX "key" (`blif.attr:key`), and for each `.param key value` line:
- *   ODIN3_BLIF_PARAM_PREFIX "key" (`blif.param:key`); the value is the line's tokens after the key
- *   joined by single spaces, kept verbatim (quotes included). A key repeated on the same cell keeps
- *   its last value;
+ *   ODIN3_BLIF_PARAM_PREFIX "key" (`blif.param:key`). `.param` lines are stored as these STRING
+ *   attributes, never as IR parameters of the node. The value is the line's tokens after the key
+ *   joined by single spaces, quotes kept: the lexer splits on blanks, so a run of blanks (spaces,
+ *   tabs) inside a value, even inside quotes, becomes one space. A key repeated on the same cell
+ *   keeps its last value;
  * - ODIN3_BLIF_ATTR_EXTRAS on a cell that has any of those: the full attribute keys
  *   (`blif.attr:src blif.param:INIT`) in the order of their first `.attr`/`.param` line, joined
  *   by single spaces (BLIF keys hold no blanks). The IR cannot list a node's attributes, so writers
@@ -52,19 +54,21 @@
  * (odin3_node_create_connected); a net is created on its first reference, named exactly as
  * written, unless a port net already has that name:
  * - `.names i1 … in y` + cover rows: `$sop` with WIDTH n and COVER the rows as written (input
- *   characters `0` `1` `-`, then the output character); `.names y` with no rows is constant 0,
- *   with the row `1` constant 1;
+ *   characters `0` `1` `-`, then the output character); all rows of one cover have the same output
+ *   character (BLIF forbids mixing on-set and off-set rows); `.names y` with no rows is constant
+ *   0, with the row `1` constant 1;
  * - `.latch in out [type ctrl] [init]`: type `re`/`fe` → `$_DFF_P_`/`$_DFF_N_` (C = ctrl),
  *   `ah`/`al` → `$_DLATCH_P_`/`$_DLATCH_N_` (E = ctrl), no type → `$_FF_`; INIT = init (0..3),
- *   default 3;
+ *   default 3. Known limitation: a control of `NIL` (SIS: no clock) is read as a net named NIL;
  * - `.subckt m f=a …`: a node of cell type m (a module of the file, a black box, or another
- *   registered type with its default parameters); formal f is a port name of width 1 or `p[k]` for
- *   bit k of a vector port p (an exact port name wins, so a scalar port `a[1]` is matched by
- *   name); formals not listed stay unconnected. A model that is neither in the file nor registered
- *   (Yosys writes `$pow`, `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit black box: a
- *   local cell type of granularity BLACKBOX that is not in the declared-model list (writers emit no
- *   `.model` for it), whose ports are the distinct formals used with it in the file, in order of
- *   first use, each scalar, width 1 and INOUT (the file does not give directions);
+ *   registered type with its default parameters); formal f is the name of a scalar port, or `p[k]`
+ *   for bit k of a vector port p (a scalar port's exact name wins, so a scalar port `a[1]` is
+ *   matched by name; a bare `o` never names the width-1 vector port `o[0]`); formals not listed
+ *   stay unconnected. A model that is neither in the file nor registered (Yosys writes `$pow`,
+ *   `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit black box: a local cell type of
+ *   granularity BLACKBOX that is not in the declared-model list (writers emit no `.model` for
+ *   it), whose ports are the distinct formals used with it in the file, in order of first use,
+ *   each scalar, width 1 and INOUT (the file does not give directions);
  * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
  * Several drivers on one net are read as written (odin3_check_design reports them, rule 4).
  * Provenance: every cell and every net created in pass 2 gets its own IMPORTED record, a cell
@@ -74,14 +78,18 @@
  * Errors are logged as "path:line: message". ODIN3_ERR_PARSE for malformed input (a directive
  * outside a model, a duplicate model, a model without `.end`, a port declared twice, a black-box
  * declaration that conflicts with a registered cell type, a black box with a body, a black box as
- * the first model, an unknown directive, a cover row that does not fit its `.names`, an
- * unsupported latch type (`as`) or init, a `.subckt` of its own model or of a port cell type, an
- * unknown formal, a formal connected twice, a duplicate `.cname`, `.cname`/`.attr`/`.param`
- * without a previous cell, a file that changed between the passes); ODIN3_ERR_IO when the file
- * cannot be read; ODIN3_ERR_NO_MEMORY on out of memory; ODIN3_ERR_INVALID_ARG (logged) for a NULL
- * argument or a design that already has modules. Reading stops at the first error; the design may
- * then hold part of the file, so the caller destroys it.
+ * the first model, a black box that repeats a port name, an unknown directive, a cover row that
+ * does not fit its `.names` or mixes on-set and off-set rows, an unsupported latch type (`as`) or
+ * init, a `.subckt` of its own model or of a port cell type, an unknown formal, a formal connected
+ * twice, a duplicate `.cname`, `.cname`/`.attr`/`.param` without a previous cell, a file that
+ * changed between the passes); ODIN3_ERR_IO when the file cannot be read; ODIN3_ERR_NO_MEMORY on
+ * out of memory; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or a design that already has
+ * modules. Reading stops at the first error; the design may then hold part of the file, so the
+ * caller destroys it.
  */
 odin3_status odin3_blif_read(odin3_design *design, const char *path);
+
+/* Test hook: hook(user) runs between pass 1 and pass 2 of every later read (NULL: none). */
+void odin3_blif_test_set_between_passes(void (*hook)(void *user), void *user);
 
 #endif
