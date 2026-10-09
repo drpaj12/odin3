@@ -2,6 +2,7 @@
  * test_blif_writer.c — unit tests for the BLIF writer (read → write → read round trips).
  */
 #include "backends/blif/writer.h"
+#include "frontends/blif/attrs.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -13,6 +14,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -287,6 +289,22 @@ static void round_trip(const char *path) {
     expect_same_designs();
     write_ok(design2, OUT2_PATH);
     TEST_ASSERT_EQUAL_STRING(slurp(OUT_PATH, text1), slurp(OUT2_PATH, text2));
+}
+
+/* The ports of design2's top module have exactly these names (NULL-terminated list). */
+static void expect_port_names(const char *first, ...) {
+    odin3_module *module = module_of(design2, 1);
+    const odin3_celltype_def *def = odin3_celltype_get(design2, odin3_module_celltype(module));
+    va_list args;
+    va_start(args, first);
+    uint32_t count = 0;
+    for (const char *name = first; name != NULL; name = va_arg(args, const char *)) {
+        TEST_ASSERT_TRUE(count < def->n_ports);
+        TEST_ASSERT_EQUAL_STRING(name, def->ports[count].name);
+        count++;
+    }
+    va_end(args);
+    TEST_ASSERT_EQUAL_UINT32(count, def->n_ports);
 }
 
 /* --- tests --------------------------------------------------------------------------------- */
@@ -596,8 +614,137 @@ static void test_wire_bit_name_taken(void) {
     new_buffer(module, a_net, other);
     write_ok(design, OUT_PATH);
     static char text[TEXT_MAX];
-    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs $n1\n.names $n1 a\n1 1\n.end\n",
+    /* the port keeps its name; the other net `a` (ID 2) is written as `$n2` */
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a\n.names a $n2\n1 1\n.end\n",
                              slurp(OUT_PATH, text));
+    read_into(design2, OUT_PATH);
+    expect_port_names("a", NULL);
+}
+
+/* A port net with its own name keeps it; a buffer joins it to the port bit. */
+static void test_port_net_with_another_name(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = new_port(module, "a", ODIN3_DIR_IN, 1);
+    odin3_wire_id out = new_port(module, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_id y_net = odin3_wire_net(module, out, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(module, y_net, intern_in(design, "inner")));
+    new_buffer(module, odin3_wire_net(module, in, 0), y_net);
+    write_ok(design, OUT_PATH);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a\n.outputs y\n.names a inner\n1 1\n"
+                             ".names inner y\n1 1\n.end\n",
+                             slurp(OUT_PATH, text));
+    read_into(design2, OUT_PATH);
+    expect_port_names("a", "y", NULL);
+}
+
+/* Two outputs on one net: the net takes the first port bit name, the second gets a buffer. */
+static void test_two_outputs_share_a_net(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = new_port(module, "a", ODIN3_DIR_IN, 1);
+    odin3_wire_id out_y = new_port(module, "y", ODIN3_DIR_OUT, 1);
+    odin3_wire_id out_z = new_port(module, "z", ODIN3_DIR_OUT, 1);
+    odin3_net_id y_net = odin3_wire_net(module, out_y, 0);
+    odin3_net_pair pair = {y_net, odin3_wire_net(module, out_z, 0)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, pair));
+    new_buffer(module, odin3_wire_net(module, in, 0), y_net);
+    write_ok(design, OUT_PATH);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a\n.outputs y z\n.names a y\n1 1\n"
+                             ".names y z\n1 1\n.end\n",
+                             slurp(OUT_PATH, text));
+    read_into(design2, OUT_PATH);
+    expect_port_names("a", "y", "z", NULL);
+}
+
+/* An input wired straight to an output (one net): the output gets a buffer from the input. */
+static void test_input_feeds_output(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = new_port(module, "a", ODIN3_DIR_IN, 1);
+    odin3_wire_id out = new_port(module, "y", ODIN3_DIR_OUT, 1);
+    odin3_net_pair pair = {odin3_wire_net(module, in, 0), odin3_wire_net(module, out, 0)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, pair));
+    write_ok(design, OUT_PATH);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n",
+                             slurp(OUT_PATH, text));
+    read_into(design2, OUT_PATH);
+    expect_port_names("a", "y", NULL);
+}
+
+/* A design listing one black box twice writes its model once. */
+static void test_declared_black_box_written_once(void) {
+    new_module(design, "top");
+    static const odin3_port_def ports[] = {{"i", ODIN3_DIR_IN, true, 1, NULL, NULL},
+                                           {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL}};
+    odin3_celltype_def def = {
+        .name = "bb", .gran = ODIN3_GRAN_BLACKBOX, .ports = ports, .n_ports = 2};
+    odin3_celltype_id first = {0};
+    odin3_celltype_id second = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &second));
+    TEST_ASSERT_EQUAL_UINT32(first.v, second.v);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_design_declared_model_count(design));
+    write_ok(design, OUT_PATH);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.end\n\n.model bb\n.inputs i\n.outputs o\n"
+                             ".blackbox\n.end\n",
+                             slurp(OUT_PATH, text));
+}
+
+static void set_node_attr(odin3_module *module, odin3_node_id node, const char *key,
+                          odin3_value value) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, (odin3_objref){ODIN3_OBJ_NODE, node.v},
+                                                   intern_in(design, key), &value));
+}
+
+/* blif_extras keys whose attribute is missing, not a string, or has no .attr/.param prefix are
+ * skipped with a warning each. */
+static void test_extras_without_a_string_attribute(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = new_port(module, "a", ODIN3_DIR_IN, 1);
+    odin3_node_id node = new_buffer(module, odin3_wire_net(module, in, 0), new_net(module, "b"));
+    odin3_value text = {.kind = ODIN3_VAL_STRING, .str = intern_in(design, "\"t.v:1\"")};
+    odin3_value list = {.kind = ODIN3_VAL_STRING,
+                        .str =
+                            intern_in(design, "blif.attr:src blif.attr:gone blif.param:P other")};
+    set_node_attr(module, node, "blif.attr:src", text);
+    set_node_attr(module, node, "blif.param:P", odin3_value_int(1));
+    set_node_attr(module, node, ODIN3_BLIF_ATTR_EXTRAS, list);
+    odin3_log_reset_counts();
+    write_ok(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_size_t(3, odin3_log_count(ODIN3_LOG_WARN));
+    static char text_out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a\n.names a b\n1 1\n.attr src \"t.v:1\"\n.end\n",
+                             slurp(OUT_PATH, text_out));
+}
+
+/* The first live cell of type `name` in module, or none. */
+static odin3_node_id find_cell(odin3_module *module, const char *name) {
+    for (uint32_t i = 1; i < odin3_module_node_end(module); i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(module, node) &&
+            strcmp(odin3_celltype_get(design, odin3_node_type(module, node))->name, name) == 0) {
+            return node;
+        }
+    }
+    return (odin3_node_id){0};
+}
+
+/* A .subckt of a model whose port is in both lists, with both pins connected to different nets:
+ * BLIF can name the formal only once, so the write is refused (and the file removed). */
+static void test_subckt_both_pins_of_one_blif_name(void) {
+    write_input(".model top\n.inputs a\n.outputs y\n.subckt sub x=a\n.names a y\n1 1\n.end\n"
+                ".model sub\n.inputs x\n.outputs x\n.end\n");
+    read_into(design, IN_PATH);
+    odin3_module *module = module_of(design, 1);
+    odin3_node_id cell = find_cell(module, "sub");
+    TEST_ASSERT_TRUE(odin3_node_valid(cell));
+    odin3_pin_id out = odin3_node_port(module, cell, 1).first;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(module, out, new_net(module, "c")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "both ports"), last_error);
+    TEST_ASSERT_NULL(fopen(OUT_PATH, "rb"));
 }
 
 /* --- errors -------------------------------------------------------------------------------- */
@@ -621,6 +768,9 @@ static void test_failed_write_is_io_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_blif_write(design, "/dev/full"));
     TEST_ASSERT_EQUAL_STRING_LEN("/dev/full:", last_error, strlen("/dev/full:"));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    probe = fopen("/dev/full", "wb"); /* a device is never removed */
+    TEST_ASSERT_NOT_NULL(probe);
+    (void)fclose(probe);
 }
 
 static void test_bad_arguments(void) {
@@ -628,11 +778,15 @@ static void test_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, NULL));
 }
 
+/* A refused write removes the file it had started, even one that existed before. */
 static void test_inout_port_is_refused(void) {
     odin3_module *module = new_module(design, "top");
     new_port(module, "io", ODIN3_DIR_INOUT, 1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    write_input("old contents\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, IN_PATH));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "inout"), last_error);
+    FILE *file = fopen(IN_PATH, "rb");
+    TEST_ASSERT_NULL(file);
 }
 
 /* A registered type with non-default parameters has no BLIF form. */
@@ -716,6 +870,12 @@ int main(void) {
     RUN_TEST(test_generated_names);
     RUN_TEST(test_generated_names_are_unique);
     RUN_TEST(test_wire_bit_name_taken);
+    RUN_TEST(test_port_net_with_another_name);
+    RUN_TEST(test_two_outputs_share_a_net);
+    RUN_TEST(test_input_feeds_output);
+    RUN_TEST(test_declared_black_box_written_once);
+    RUN_TEST(test_extras_without_a_string_attribute);
+    RUN_TEST(test_subckt_both_pins_of_one_blif_name);
     RUN_TEST(test_unwritable_path_is_io_error);
     RUN_TEST(test_failed_write_is_io_error);
     RUN_TEST(test_bad_arguments);

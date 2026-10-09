@@ -1,7 +1,7 @@
 /* writer.c — BLIF writer: modules, cells and declared black boxes of a design. */
 #include "backends/blif/writer.h"
 
-#include "frontends/blif/reader.h"
+#include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 
 enum {
     WRAP_COLUMN = 100, /* no wrapped line is longer */
@@ -53,6 +54,11 @@ typedef struct wr_keys {
     uint32_t clock, port_name, extras;
 } wr_keys;
 
+/* Bit `bit` of port `port` (index in port order). */
+typedef struct wr_portbit {
+    uint32_t port, bit;
+} wr_portbit;
+
 typedef struct blif_writer {
     const odin3_design *design;
     const odin3_strtab *tab;
@@ -63,6 +69,7 @@ typedef struct blif_writer {
     size_t col;      /* columns on the line being written */
     bool line_empty; /* nothing but the indent on the line being written */
     bool oom_logged;
+    bool opened;       /* path was opened (and truncated): a failure removes it */
     odin3_status st;   /* sticky: the first failure */
     const char *model; /* name of the model being written, for messages */
     odin3_celltype_id builtin[WR_BUILTINS];
@@ -73,9 +80,12 @@ typedef struct blif_writer {
     odin3_strbuf cand;         /* a candidate generated name */
     /* the module being written */
     const odin3_module *module;
-    odin3_strtab *gen_names; /* its generated names (NULL until the first) */
-    odin3_u64map *gen;       /* generated-name key -> gen_names ID (NULL until the first) */
-    odin3_u64map *port_of;   /* port wire -> port index (NULL until needed) */
+    odin3_strtab *gen_names; /* its port bit names, then its generated names */
+    odin3_u64map *claims;    /* gen_names ID of a port bit name -> the net on that port bit */
+    odin3_u64map *net_port;  /* net ID -> gen_names ID of the first port bit name on it */
+    odin3_u64map
+        *gen; /* net ID or 1 << 32 | pin ID -> gen_names ID it is written under (or NULL) */
+    odin3_u64map *port_of; /* port wire -> port index (NULL until needed) */
 } blif_writer;
 
 /* --- errors and output --------------------------------------------------------------------- */
@@ -102,9 +112,11 @@ static void wr_put(blif_writer *wr, odin3_bytes data) {
     if (wr->st != ODIN3_OK || data.len == 0) {
         return;
     }
+    errno = 0;
     if (fwrite(data.ptr, 1, data.len, wr->file) != data.len) {
+        int saved = errno != 0 ? errno : EIO;
         odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line + 1,
-                  strerror(errno));
+                  strerror(saved));
         (void)wr_fail(wr, ODIN3_ERR_IO);
     }
 }
@@ -160,7 +172,8 @@ static const odin3_value *string_attr(const odin3_module *module, odin3_objref o
     return val != NULL && val->kind == ODIN3_VAL_STRING ? val : NULL;
 }
 
-/* True when no net of the module but self has the name, and no generated name is it. */
+/* True when no net of the module but self has the name, and it is neither a port bit name nor
+ * an earlier generated name. */
 static bool name_free(const blif_writer *wr, odin3_bytes text, odin3_net_id self) {
     uint32_t str = 0;
     if (odin3_strtab_find(wr->tab, text, &str)) {
@@ -169,7 +182,7 @@ static bool name_free(const blif_writer *wr, odin3_bytes text, odin3_net_id self
             return false;
         }
     }
-    return wr->gen_names == NULL || !odin3_strtab_find(wr->gen_names, text, NULL);
+    return !odin3_strtab_find(wr->gen_names, text, NULL);
 }
 
 /* Index of the port whose wire is `wire`, through wr->port_of (built on first use). */
@@ -232,19 +245,23 @@ static odin3_status wire_bit_name(blif_writer *wr, odin3_net_id net, bool *found
     return st;
 }
 
-/* Interns wr->cand as the generated name of key. */
-static odin3_status take_name(blif_writer *wr, uint64_t key) {
-    if (wr->gen_names == NULL) {
-        wr->gen_names = odin3_strtab_create();
+/* Records gen_names ID id as the name key is written under. */
+static odin3_status set_gen(blif_writer *wr, uint64_t key, uint32_t id) {
+    if (wr->gen == NULL) {
         wr->gen = odin3_u64map_create(0);
-        if (wr->gen_names == NULL || wr->gen == NULL) {
+        if (wr->gen == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
+    return odin3_u64map_put(wr->gen, (odin3_kv){key, id});
+}
+
+/* Interns wr->cand as the generated name of key. */
+static odin3_status take_name(blif_writer *wr, uint64_t key) {
     uint32_t id = 0;
     odin3_status st =
         odin3_strtab_intern(wr->gen_names, (odin3_bytes){wr->cand.data, wr->cand.len}, &id);
-    return st == ODIN3_OK ? odin3_u64map_put(wr->gen, (odin3_kv){key, id}) : st;
+    return st == ODIN3_OK ? set_gen(wr, key, id) : st;
 }
 
 /* Takes the first free of `$n<ID>` (a net key) or `$p<ID>` (a pin key), `…$1`, `…$2`, … */
@@ -281,7 +298,7 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     return take_numbered(wr, key);
 }
 
-/* The generated name of key; it exists for every unnamed net and every pin name_pins covered. */
+/* The generated name of key; it exists for every pin name_pins covered. */
 static odin3_bytes gen_get(const blif_writer *wr, uint64_t key) {
     uint64_t id = 0;
     if (wr->gen == NULL || !odin3_u64map_get(wr->gen, key, &id)) {
@@ -291,9 +308,14 @@ static odin3_bytes gen_get(const blif_writer *wr, uint64_t key) {
                          odin3_strtab_len(wr->gen_names, (uint32_t)id)};
 }
 
+/* The name net is written under: its generated or port bit name when it has one, else its own. */
 static odin3_bytes net_name(const blif_writer *wr, odin3_net_id net) {
-    uint32_t name = odin3_net_name(wr->module, net);
-    return name != 0 ? str_bytes(wr, name) : gen_get(wr, net.v);
+    uint64_t id = 0;
+    if (wr->gen != NULL && odin3_u64map_get(wr->gen, net.v, &id)) {
+        return (odin3_bytes){odin3_strtab_get(wr->gen_names, (uint32_t)id),
+                             odin3_strtab_len(wr->gen_names, (uint32_t)id)};
+    }
+    return str_bytes(wr, odin3_net_name(wr->module, net));
 }
 
 static odin3_bytes pin_name(const blif_writer *wr, odin3_pin_id pin) {
@@ -333,14 +355,106 @@ static odin3_status name_pins(blif_writer *wr, odin3_node_id node) {
     return st;
 }
 
-/* Generates names for the module's unnamed nets (ID order), then its pins that need one. */
+/* wr->token = base, or base[k] when the port is not scalar. */
+static odin3_status bit_token(blif_writer *wr, const odin3_port_def *port, odin3_bytes base,
+                              uint32_t bit) {
+    odin3_strbuf_clear(&wr->token);
+    odin3_status st = odin3_strbuf_append(&wr->token, base);
+    if (st == ODIN3_OK && !port->scalar) {
+        st = odin3_strbuf_appendf(&wr->token, "[%u]", (unsigned)bit);
+    }
+    return st;
+}
+
+/* The BLIF base name of port `at` of module: its wire's ODIN3_BLIF_ATTR_PORT_NAME, else its name.
+ */
+static odin3_bytes port_base(const blif_writer *wr, const odin3_module *module, uint32_t at) {
+    odin3_wire_id wire = odin3_module_port_wire(module, at);
+    const odin3_value *blif =
+        string_attr(module, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, wr->keys.port_name);
+    if (blif != NULL) {
+        return str_bytes(wr, blif->str);
+    }
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, odin3_module_celltype(module));
+    return odin3_bytes_cstr(def->ports[at].name);
+}
+
+/* wr->token = the BLIF name of a port bit of the module being written: `base`, or `base[k]`. */
+static odin3_status port_bit_token(blif_writer *wr, wr_portbit where) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
+    return bit_token(wr, &def->ports[where.port], port_base(wr, wr->module, where.port), where.bit);
+}
+
+/* Reserves the port bit name in wr->token for net (none for an unconnected port pin); the first
+ * port bit on a net is the name an unnamed net takes. Two ports of one name on different nets
+ * cannot be written. */
+static odin3_status claim(blif_writer *wr, odin3_net_id net) {
+    uint32_t id = 0;
+    odin3_status st =
+        odin3_strtab_intern(wr->gen_names, (odin3_bytes){wr->token.data, wr->token.len}, &id);
+    uint64_t owner = 0;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (odin3_u64map_get(wr->claims, id, &owner)) {
+        return owner == net.v ? ODIN3_OK
+                              : wr_refuse(wr, "two ports on different nets have the BLIF name",
+                                          wr->token.data);
+    }
+    st = odin3_u64map_put(wr->claims, (odin3_kv){id, net.v});
+    if (st == ODIN3_OK && odin3_net_valid(net) && !odin3_u64map_get(wr->net_port, net.v, &owner)) {
+        st = odin3_u64map_put(wr->net_port, (odin3_kv){net.v, id});
+    }
+    return st;
+}
+
+/* Claims every port bit name of the module, in port order. */
+static odin3_status claim_ports(blif_writer *wr) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < odin3_module_port_count(wr->module); i++) {
+        odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
+        for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
+            st = port_bit_token(wr, (wr_portbit){i, k});
+            if (st == ODIN3_OK) {
+                st = claim(wr, odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k}));
+            }
+        }
+    }
+    return st;
+}
+
+/* Chooses the name net is written under: its own name unless a port bit of another net has it
+ * (then `$n<ID>`…); for an unnamed net the first port bit name on it, else a generated name. */
+static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
+    uint32_t real = odin3_net_name(wr->module, net);
+    uint32_t id = 0;
+    uint64_t owner = 0;
+    if (real != 0) {
+        bool reserved = odin3_strtab_find(wr->gen_names, str_bytes(wr, real), &id) &&
+                        odin3_u64map_get(wr->claims, id, &owner);
+        return reserved && owner != net.v ? take_numbered(wr, net.v) : ODIN3_OK;
+    }
+    if (odin3_u64map_get(wr->net_port, net.v, &owner)) {
+        return set_gen(wr, net.v, (uint32_t)owner);
+    }
+    return generate(wr, net.v);
+}
+
+/* Names the module: port bit names first, then every live net (ID order), then the unconnected
+ * pins of .names, .latch and port cells. */
 static odin3_status name_module(blif_writer *wr) {
     const odin3_module *module = wr->module;
-    odin3_status st = ODIN3_OK;
+    wr->gen_names = odin3_strtab_create();
+    wr->claims = odin3_u64map_create(0);
+    wr->net_port = odin3_u64map_create(0);
+    if (wr->gen_names == NULL || wr->claims == NULL || wr->net_port == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = claim_ports(wr);
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_net_end(module); i++) {
-        odin3_net_id net = {i};
-        if (odin3_net_live(module, net) && odin3_net_name(module, net) == 0) {
-            st = generate(wr, i);
+        if (odin3_net_live(module, (odin3_net_id){i})) {
+            st = name_net(wr, (odin3_net_id){i});
         }
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
@@ -377,33 +491,74 @@ static odin3_status port_line(blif_writer *wr, const odin3_celltype_def *def, ui
     return st;
 }
 
-/* The module's ports: each bit by the name of the net on its port pin. */
+/* The module's ports, each bit by its port bit name. */
 static odin3_status write_module_ports(blif_writer *wr) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
         st = port_line(wr, def, i);
-        odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
-        for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
-            wr_token(wr, pin_name(wr, (odin3_pin_id){pins.first.v + k}));
+        uint32_t width = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0).count;
+        for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
+            st = port_bit_token(wr, (wr_portbit){i, k});
+            if (st == ODIN3_OK) {
+                wr_token_built(wr);
+            }
         }
     }
-    if (st == ODIN3_OK && def->n_ports > 0) {
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    if (def->n_ports > 0) {
         wr_end(wr);
+    }
+    return wr->st;
+}
+
+/* A buffer `.names` joining a port bit (in wr->token) to its net, written under another name:
+ * port to net for an input, net to port for an output. */
+static void port_buffer(blif_writer *wr, odin3_dir dir, odin3_bytes net) {
+    wr_begin(wr, ".names");
+    if (dir == ODIN3_DIR_IN) {
+        wr_token_built(wr);
+        wr_token(wr, net);
+    } else {
+        wr_token(wr, net);
+        wr_token_built(wr);
+    }
+    wr_end(wr);
+    wr_put(wr, odin3_bytes_cstr("1 1"));
+    wr_newline(wr);
+}
+
+/* The buffer of the port bit at `pin` of port `at` when its net is written under another name. */
+static odin3_status port_bit_buffer(blif_writer *wr, uint32_t at, odin3_pin_id pin) {
+    odin3_net_id net = odin3_pin_net(wr->module, pin);
+    if (!odin3_net_valid(net)) {
+        return ODIN3_OK;
+    }
+    odin3_status st = port_bit_token(wr, (wr_portbit){at, odin3_pin_bit(wr->module, pin)});
+    odin3_bytes name = net_name(wr, net);
+    if (st == ODIN3_OK &&
+        (name.len != wr->token.len || memcmp(name.ptr, wr->token.data, name.len) != 0)) {
+        const odin3_celltype_def *def =
+            odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
+        port_buffer(wr, def->ports[at].dir, name);
     }
     return st;
 }
 
-/* wr->token = base, or base[k] when the port is not scalar. */
-static odin3_status bit_token(blif_writer *wr, const odin3_port_def *port, odin3_bytes base,
-                              uint32_t bit) {
-    odin3_strbuf_clear(&wr->token);
-    odin3_status st = odin3_strbuf_append(&wr->token, base);
-    if (st == ODIN3_OK && !port->scalar) {
-        st = odin3_strbuf_appendf(&wr->token, "[%u]", (unsigned)bit);
+/* After the cells: a buffer for each port bit whose net is written under another name (the net
+ * has its own name, or it is on several port bits). */
+static odin3_status write_port_buffers(blif_writer *wr) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < odin3_module_port_count(wr->module); i++) {
+        odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
+        for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
+            st = port_bit_buffer(wr, i, (odin3_pin_id){pins.first.v + k});
+        }
     }
-    return st;
+    return st != ODIN3_OK ? wr_fail(wr, st) : wr->st;
 }
 
 /* A black-box model's ports: bit k of port p is `p` (scalar) or `p[k]`. */
@@ -428,6 +583,19 @@ static odin3_status write_model_ports(blif_writer *wr, const odin3_celltype_def 
     return wr->st;
 }
 
+/* The next blank-separated word of *text, advancing *text past it; false at the end. */
+static bool next_word(const char **text, odin3_bytes *word) {
+    const char *at = *text;
+    while (*at == ' ') {
+        at++;
+    }
+    const char *end = strchr(at, ' ');
+    end = end != NULL ? end : at + strlen(at);
+    *word = (odin3_bytes){at, (size_t)(end - at)};
+    *text = end;
+    return end != at;
+}
+
 /* `.clock` with the names of the module's ODIN3_BLIF_ATTR_CLOCK attribute. */
 static void write_clock(blif_writer *wr) {
     const odin3_value *clock =
@@ -438,13 +606,9 @@ static void write_clock(blif_writer *wr) {
     }
     const char *text = odin3_strtab_get(wr->tab, clock->str);
     wr_begin(wr, ".clock");
-    while (*text != '\0') {
-        const char *space = strchr(text, ' ');
-        size_t len = space != NULL ? (size_t)(space - text) : strlen(text);
-        if (len > 0) {
-            wr_token(wr, (odin3_bytes){text, len});
-        }
-        text += len + (space != NULL ? 1 : 0);
+    odin3_bytes word = {NULL, 0};
+    while (next_word(&text, &word)) {
+        wr_token(wr, word);
     }
     wr_end(wr);
 }
@@ -500,22 +664,33 @@ static odin3_status write_latch(blif_writer *wr, odin3_node_id node, wr_builtin 
     return wr->st;
 }
 
-/* The formal base name of port p of type: a module port's ODIN3_BLIF_ATTR_PORT_NAME, else the
+/* The formal base name of port `at` of type: a module's port base name (port_base), else the
  * port's name. */
-static odin3_bytes formal_base(const blif_writer *wr, odin3_celltype_id type,
-                               const odin3_port_def *port, uint32_t index) {
+static odin3_bytes formal_base(const blif_writer *wr, odin3_celltype_id type, uint32_t at) {
     uint64_t id = 0;
-    if (wr->keys.port_name != 0 && odin3_u64map_get(wr->type_module, type.v, &id)) {
-        const odin3_module *module =
-            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){(uint32_t)id});
-        odin3_wire_id wire = odin3_module_port_wire(module, index);
-        const odin3_value *blif =
-            string_attr(module, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, wr->keys.port_name);
-        if (blif != NULL) {
-            return str_bytes(wr, blif->str);
+    if (odin3_u64map_get(wr->type_module, type.v, &id)) {
+        return port_base(
+            wr, odin3_module_get((odin3_design *)wr->design, (odin3_module_id){(uint32_t)id}), at);
+    }
+    return odin3_bytes_cstr(odin3_celltype_get(wr->design, type)->ports[at].name);
+}
+
+/* True when an earlier port of node's type has the formal base `base` and a connected pin at
+ * where.bit: a model with a name in both .inputs and .outputs has two ports of one BLIF name, and
+ * BLIF cannot connect both. */
+static bool formal_taken(const blif_writer *wr, odin3_node_id node, wr_portbit where,
+                         odin3_bytes base) {
+    odin3_celltype_id type = odin3_node_type(wr->module, node);
+    for (uint32_t j = 0; j < where.port; j++) {
+        odin3_bytes other = formal_base(wr, type, j);
+        odin3_pinslice pins = odin3_node_port(wr->module, node, j);
+        if (other.len == base.len && memcmp(other.ptr, base.ptr, base.len) == 0 &&
+            where.bit < pins.count &&
+            odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + where.bit}))) {
+            return true;
         }
     }
-    return odin3_bytes_cstr(port->name);
+    return false;
 }
 
 /* True when every parameter of node equals its default (BLIF .subckt cannot give one). */
@@ -533,13 +708,18 @@ static bool default_params(const blif_writer *wr, odin3_node_id node,
 static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
     const odin3_port_def *port = &odin3_celltype_get(wr->design, type)->ports[at];
-    odin3_bytes base = formal_base(wr, type, port, at);
+    odin3_bytes base = formal_base(wr, type, at);
+    bool renamed = base.len != strlen(port->name) || memcmp(base.ptr, port->name, base.len) != 0;
     odin3_pinslice pins = odin3_node_port(wr->module, node, at);
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k});
         if (!odin3_net_valid(net)) {
             continue;
+        }
+        if (renamed && formal_taken(wr, node, (wr_portbit){at, k}, base)) {
+            return wr_refuse(wr, "a .subckt cannot connect both ports of the BLIF name",
+                             (const char *)base.ptr);
         }
         st = bit_token(wr, port, base, k);
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, odin3_bytes_cstr("=")) : st;
@@ -579,11 +759,15 @@ static void write_extra(blif_writer *wr, odin3_node_id node, odin3_bytes key) {
     size_t param_len = strlen(ODIN3_BLIF_PARAM_PREFIX);
     bool attr = key.len > attr_len && memcmp(key.ptr, ODIN3_BLIF_ATTR_PREFIX, attr_len) == 0;
     bool param = key.len > param_len && memcmp(key.ptr, ODIN3_BLIF_PARAM_PREFIX, param_len) == 0;
-    if ((!attr && !param) || !odin3_strtab_find(wr->tab, key, &str)) {
-        return;
-    }
-    const odin3_value *value = string_attr(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, str);
+    const odin3_value *value =
+        (attr || param) && odin3_strtab_find(wr->tab, key, &str)
+            ? string_attr(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, str)
+            : NULL;
     if (value == NULL) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "%s: model '%s': blif_extras lists '%.*s', which is not a .attr/.param string "
+                  "attribute of the cell; skipped",
+                  wr->path, wr->model, (int)key.len, (const char *)key.ptr);
         return;
     }
     size_t skip = attr ? attr_len : param_len;
@@ -607,11 +791,9 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
         return;
     }
     const char *text = odin3_strtab_get(wr->tab, extras->str);
-    while (*text != '\0') {
-        const char *space = strchr(text, ' ');
-        size_t len = space != NULL ? (size_t)(space - text) : strlen(text);
-        write_extra(wr, node, (odin3_bytes){text, len});
-        text += len + (space != NULL ? 1 : 0);
+    odin3_bytes word = {NULL, 0};
+    while (next_word(&text, &word)) {
+        write_extra(wr, node, word);
     }
 }
 
@@ -639,9 +821,13 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
 
 static void end_module(blif_writer *wr) {
     odin3_strtab_destroy(wr->gen_names);
+    odin3_u64map_destroy(wr->claims);
+    odin3_u64map_destroy(wr->net_port);
     odin3_u64map_destroy(wr->gen);
     odin3_u64map_destroy(wr->port_of);
     wr->gen_names = NULL;
+    wr->claims = NULL;
+    wr->net_port = NULL;
     wr->gen = NULL;
     wr->port_of = NULL;
     wr->module = NULL;
@@ -665,6 +851,9 @@ static odin3_status write_module(blif_writer *wr, uint32_t id) {
         if (odin3_node_live(wr->module, (odin3_node_id){i})) {
             st = write_cell(wr, (odin3_node_id){i});
         }
+    }
+    if (st == ODIN3_OK) {
+        (void)write_port_buffers(wr);
     }
     wr_begin(wr, ".end");
     wr_end(wr);
@@ -745,6 +934,7 @@ static odin3_status wr_open(blif_writer *wr) {
         odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", wr->path, strerror(errno));
         return wr_fail(wr, ODIN3_ERR_IO);
     }
+    wr->opened = true;
     if (setvbuf(wr->file, wr->buffer, _IOFBF, IO_BUFFER) != 0) {
         odin3_log(ODIN3_LOG_ERROR, "%s: cannot set the output buffer", wr->path);
         return wr_fail(wr, ODIN3_ERR_IO);
@@ -752,19 +942,34 @@ static odin3_status wr_open(blif_writer *wr) {
     return ODIN3_OK;
 }
 
-/* Closes the file; a failure to flush is a located write error. */
+/* Closes the file; a failure to flush or close is a located write error. */
 static void wr_close(blif_writer *wr) {
     if (wr->file == NULL) {
         return;
     }
-    bool failed = fflush(wr->file) != 0 || ferror(wr->file) != 0;
+    errno = 0;
+    bool failed = fflush(wr->file) != 0;
     int saved = errno;
-    failed = fclose(wr->file) != 0 || failed;
+    failed = ferror(wr->file) != 0 || failed;
+    errno = 0;
+    if (fclose(wr->file) != 0) {
+        failed = true;
+        saved = saved != 0 ? saved : errno;
+    }
     wr->file = NULL;
     if (failed && wr->st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
-                  strerror(saved != 0 ? saved : errno));
+                  strerror(saved != 0 ? saved : EIO));
         (void)wr_fail(wr, ODIN3_ERR_IO);
+    }
+}
+
+/* After a failure, removes the partly written file when it is a regular file (never a device such
+ * as /dev/full). */
+static void wr_discard(const blif_writer *wr) {
+    struct stat info;
+    if (wr->opened && stat(wr->path, &info) == 0 && S_ISREG(info.st_mode)) {
+        (void)remove(wr->path);
     }
 }
 
@@ -795,6 +1000,9 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     }
     wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
     st = wr.st;
+    if (st != ODIN3_OK) {
+        wr_discard(&wr);
+    }
     wr_free(&wr);
     return st;
 }
