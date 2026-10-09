@@ -1,17 +1,15 @@
 /* width.c — compiled width expressions (the IR's fourth width rule) and the identifier walk. */
 #include "techlib/width.h"
 
-#include "util/log.h"
-
+#include <stdio.h>
 #include <string.h>
-
-enum { NO_PARAM = -1 };
 
 /* The producer data behind an odin3_width_expr: the tree and its distinct identifiers. */
 typedef struct width_impl {
     const odin3_expr *expr;
     const odin3_strtab *strtab;
     const uint32_t *idents; /* strtab IDs, first-occurrence order */
+    const uint32_t *params; /* per identifier: its parameter index in the definition */
     uint32_t n_idents;
 } width_impl;
 
@@ -60,73 +58,69 @@ odin3_status odin3_expr_collect_idents(const odin3_expr *root, odin3_vec *nodes)
     return st;
 }
 
-static int param_index(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        if (strcmp(def->params[i].name, name) == 0) {
-            return (int)i;
-        }
-    }
-    return NO_PARAM;
+static const char *ident_name(const width_impl *impl, uint32_t idx) {
+    return odin3_strtab_get(impl->strtab, impl->idents[idx]);
 }
 
-static const char *width_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def) {
+static bool width_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
+                        odin3_width_why *why) {
     const width_impl *impl = wexpr->impl;
     for (uint32_t i = 0; i < impl->n_idents; i++) {
-        int idx = param_index(def, odin3_strtab_get(impl->strtab, impl->idents[i]));
-        if (idx == NO_PARAM || def->params[idx].kind != ODIN3_VAL_INT) {
-            return "width expression names something that is not an int parameter of the type";
+        uint32_t idx = impl->params[i];
+        const char *name = ident_name(impl, i);
+        if (idx >= def->n_params || strcmp(def->params[idx].name, name) != 0 ||
+            def->params[idx].kind != ODIN3_VAL_INT) {
+            (void)snprintf(why->text, sizeof why->text,
+                           "width expression names '%s', which is not an int parameter of the type",
+                           name);
+            return false;
         }
     }
-    return NULL;
+    return true;
 }
 
-/* Lookup context of one evaluation: the definition and the node's parameter values. */
+/* Lookup context of one evaluation: the compiled identifiers and the node's parameter values. */
 typedef struct width_env {
-    const odin3_celltype_def *def;
+    const width_impl *impl;
     const odin3_value *params;
-    const odin3_strtab *strtab;
 } width_env;
 
 static bool width_lookup(const void *user, uint32_t ident, int64_t *value) {
     const width_env *env = user;
-    int idx = param_index(env->def, odin3_strtab_get(env->strtab, ident));
-    if (idx == NO_PARAM || env->params[idx].kind != ODIN3_VAL_INT) {
-        return false;
+    for (uint32_t i = 0; i < env->impl->n_idents; i++) {
+        if (env->impl->idents[i] == ident) {
+            *value = env->params[env->impl->params[i]].i;
+            return true;
+        }
     }
-    *value = env->params[idx].i;
-    return true;
+    return false;
 }
 
-/* ODIN3_OK when every parameter the expression reads holds an INT. */
-static odin3_status check_kinds(const width_impl *impl, const width_env *env) {
+static odin3_status width_eval(const odin3_width_expr *wexpr, const odin3_width_args *args,
+                               uint32_t *width) {
+    const width_impl *impl = wexpr->impl;
+    odin3_width_why *why = args->why;
     for (uint32_t i = 0; i < impl->n_idents; i++) {
-        const char *name = odin3_strtab_get(impl->strtab, impl->idents[i]);
-        int idx = param_index(env->def, name);
-        if (idx == NO_PARAM || env->params[idx].kind != ODIN3_VAL_INT) {
-            odin3_log(ODIN3_LOG_ERROR, "width: parameter '%s' of cell type '%s' is not an int",
-                      name, env->def->name);
+        if (args->params[impl->params[i]].kind != ODIN3_VAL_INT) {
+            (void)snprintf(why->text, sizeof why->text, "parameter '%s' is not an int",
+                           ident_name(impl, i));
             return ODIN3_ERR_INVALID_ARG;
         }
     }
-    return ODIN3_OK;
-}
-
-static odin3_status width_eval(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
-                               const odin3_value *params, uint32_t *width) {
-    const width_impl *impl = wexpr->impl;
-    const width_env env = {def, params, impl->strtab};
-    odin3_status st = check_kinds(impl, &env);
-    if (st != ODIN3_OK) {
-        return st;
-    }
+    const width_env env = {impl, args->params};
     const odin3_expr_env eval_env = {width_lookup, &env, impl->strtab};
+    odin3_expr_error err = {0, ""};
     int64_t value = 0;
-    st = odin3_expr_eval_int(impl->expr, &eval_env, &value);
+    odin3_status st = odin3_expr_eval_int_quiet(impl->expr, &eval_env, &value, &err);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        (void)snprintf(why->text, sizeof why->text, "%s", err.text);
+    }
     if (st != ODIN3_OK) {
         return st;
     }
     if (value < 0 || value > (int64_t)UINT32_MAX) {
-        odin3_log(ODIN3_LOG_ERROR, "width: %lld is outside 0..%u", (long long)value, UINT32_MAX);
+        (void)snprintf(why->text, sizeof why->text, "width %lld is outside 0..%u", (long long)value,
+                       UINT32_MAX);
         return ODIN3_ERR_INVALID_ARG;
     }
     *width = (uint32_t)value;
@@ -142,25 +136,41 @@ static bool seen(uint32_t id, const uint32_t *ids, uint32_t count) {
     return false;
 }
 
-/* Distinct identifier IDs of nodes (const odin3_expr *), copied into the arena. */
-static odin3_status distinct_idents(odin3_arena *arena, const odin3_vec *nodes, width_impl *impl) {
+/* The definition index of parameter name, or UINT32_MAX (rejected later by the check hook). */
+static uint32_t resolve(const odin3_width_source *src, uint32_t name) {
+    for (uint32_t i = 0; i < src->n_params; i++) {
+        if (src->param_names[i] == name) {
+            return i;
+        }
+    }
+    return UINT32_MAX;
+}
+
+/* Distinct identifier IDs of nodes (const odin3_expr *) and their parameter indices. */
+static odin3_status resolve_idents(const odin3_width_source *src, const odin3_vec *nodes,
+                                   width_impl *impl) {
     impl->idents = NULL;
+    impl->params = NULL;
     impl->n_idents = 0;
     if (nodes->len == 0) {
         return ODIN3_OK;
     }
-    uint32_t *ids = odin3_arena_alloc(arena, sizeof *ids * nodes->len);
-    if (ids == NULL) {
+    uint32_t *ids = odin3_arena_alloc(src->arena, sizeof *ids * nodes->len);
+    uint32_t *idx = odin3_arena_alloc(src->arena, sizeof *idx * nodes->len);
+    if (ids == NULL || idx == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     uint32_t count = 0;
     for (size_t i = 0; i < nodes->len; i++) {
         const odin3_expr *const *node = (const odin3_expr *const *)odin3_vec_cat(nodes, i);
         if (!seen((*node)->ident, ids, count)) {
-            ids[count++] = (*node)->ident;
+            ids[count] = (*node)->ident;
+            idx[count] = resolve(src, (*node)->ident);
+            count++;
         }
     }
     impl->idents = ids;
+    impl->params = idx;
     impl->n_idents = count;
     return ODIN3_OK;
 }
@@ -174,7 +184,7 @@ static odin3_status compile_into(const odin3_width_source *src, const odin3_vec 
     }
     impl->expr = src->expr;
     impl->strtab = src->strtab;
-    odin3_status st = distinct_idents(src->arena, nodes, impl);
+    odin3_status st = resolve_idents(src, nodes, impl);
     if (st != ODIN3_OK) {
         return st;
     }

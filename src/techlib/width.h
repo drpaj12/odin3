@@ -19,18 +19,26 @@
  */
 odin3_status odin3_expr_collect_idents(const odin3_expr *root, odin3_vec *nodes);
 
-/* What a width expression is compiled from; strtab holds the names of expr's identifiers. */
+/*
+ * What a width expression is compiled from: the tree, the strtab naming its identifiers, and the
+ * parameter names (strtab IDs) of the definition it will belong to, in definition order.
+ */
 typedef struct odin3_width_source {
     odin3_arena *arena; /* receives the compiled expression; must outlive its users */
     const odin3_strtab *strtab;
     const odin3_expr *expr;
+    const uint32_t *param_names;
+    uint32_t n_params;
 } odin3_width_source;
 
 /*
- * Compiles src->expr into a width expression allocated in src->arena: its check hook accepts a
- * definition when every identifier names an INT parameter of it; its eval hook evaluates the
- * expression with those parameters' values (64-bit, expr.h semantics) and requires a result in
- * [0, UINT32_MAX]. ODIN3_ERR_NO_MEMORY on out of memory; *out is untouched on failure.
+ * Compiles src->expr into a width expression allocated in src->arena. Identifiers are resolved to
+ * parameter indices here, so evaluation never compares names. Its check hook accepts a definition
+ * whose parameter at each resolved index has the identifier's name and kind INT (an identifier
+ * that is not a parameter fails the check, naming it); its eval hook evaluates with those
+ * parameters' values (64-bit, expr.h semantics; allocation-free unless the expression is very
+ * deep) and requires a result in [0, UINT32_MAX]. ODIN3_ERR_NO_MEMORY on out of memory; *out is
+ * untouched on failure.
  */
 odin3_status odin3_width_expr_compile(const odin3_width_source *src, const odin3_width_expr **out);
 

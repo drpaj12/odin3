@@ -11,46 +11,112 @@
 #include "util/log.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <string.h>
 
-enum { MSG_MAX = 256, MAX_KIDS = 3, I64_BITS = 64, MAX_SHIFT = 62, MAX_SLICE_WIDTH = 63 };
+enum { MAX_KIDS = 3, I64_BITS = 64, MAX_SHIFT = 62, MAX_SLICE_WIDTH = 63 };
 
 typedef struct frame {
     const odin3_expr *node;
     uint32_t stage;
 } frame;
 
+/*
+ * An evaluation stack: a fixed buffer on the C stack, moved into a heap vec (spill) only when it
+ * overflows. Each node has at most one frame and one pending value at a time, so expressions of
+ * up to ODIN3_EXPR_EVAL_INLINE nodes never allocate.
+ */
+typedef struct estack {
+    unsigned char *fixed;
+    size_t elem;
+    size_t len; /* entries in fixed (while not spilled) */
+    bool spilled;
+    odin3_vec spill;
+} estack;
+
 typedef struct estate {
     const odin3_expr_env *env;
-    odin3_vec frames; /* frame */
-    odin3_vec vals;   /* int64_t */
+    odin3_expr_error *err;
+    estack frames; /* frame */
+    estack vals;   /* int64_t */
+    frame frame_buf[ODIN3_EXPR_EVAL_INLINE];
+    int64_t val_buf[ODIN3_EXPR_EVAL_INLINE];
 } estate;
 
 typedef struct operands {
     int64_t lhs, rhs;
 } operands;
 
-static odin3_status eerr(const odin3_expr *node, const char *fmt, ...) ODIN3_PRINTF(2, 3);
+static odin3_status eerr(const estate *es, const odin3_expr *node, const char *fmt, ...)
+    ODIN3_PRINTF(3, 4);
 
-static odin3_status eerr(const odin3_expr *node, const char *fmt, ...) {
-    char msg[MSG_MAX];
+/* Records the error in *es->err (the caller decides whether to log it). */
+static odin3_status eerr(const estate *es, const odin3_expr *node, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    (void)vsnprintf(msg, sizeof msg, fmt, args);
+    (void)vsnprintf(es->err->text, sizeof es->err->text, fmt, args);
     va_end(args);
-    odin3_log(ODIN3_LOG_ERROR, "expression column %u: %s", node->col, msg);
+    es->err->col = node->col;
     return ODIN3_ERR_INVALID_ARG;
 }
 
-static odin3_status overflow(const odin3_expr *node) {
-    return eerr(node, "integer overflow");
+static odin3_status overflow(const estate *es, const odin3_expr *node) {
+    return eerr(es, node, "integer overflow");
 }
 
 /* ---- stacks --------------------------------------------------------------------------------- */
 
+static void estack_init(estack *stk, void *fixed, size_t elem) {
+    stk->fixed = fixed;
+    stk->elem = elem;
+    stk->len = 0;
+    stk->spilled = false;
+    odin3_vec_init(&stk->spill, elem);
+}
+
+static size_t estack_len(const estack *stk) {
+    return stk->spilled ? stk->spill.len : stk->len;
+}
+
+/* Moves the full fixed buffer into the heap vec; false on out of memory. */
+static bool estack_spill(estack *stk) {
+    if (odin3_vec_reserve(&stk->spill, 2 * (size_t)ODIN3_EXPR_EVAL_INLINE) != ODIN3_OK) {
+        return false;
+    }
+    for (size_t i = 0; i < stk->len; i++) {
+        void *slot = odin3_vec_push(&stk->spill);
+        assert(slot != NULL); /* reserved above */
+        memcpy(slot, stk->fixed + i * stk->elem, stk->elem);
+    }
+    stk->spilled = true;
+    return true;
+}
+
+static void *estack_push(estack *stk) {
+    if (!stk->spilled && stk->len < ODIN3_EXPR_EVAL_INLINE) {
+        return stk->fixed + stk->elem * stk->len++;
+    }
+    if (!stk->spilled && !estack_spill(stk)) {
+        return NULL;
+    }
+    return odin3_vec_push(&stk->spill);
+}
+
+/* Removes the top entry and copies it to out. Requires a non-empty stack. */
+static void estack_pop(estack *stk, void *out) {
+    if (stk->spilled) {
+        memcpy(out, odin3_vec_cat(&stk->spill, stk->spill.len - 1), stk->elem);
+        odin3_vec_pop(&stk->spill);
+        return;
+    }
+    stk->len--;
+    memcpy(out, stk->fixed + stk->len * stk->elem, stk->elem);
+}
+
 static odin3_status push_frame(estate *es, const odin3_expr *node, uint32_t stage) {
-    frame *slot = odin3_vec_push(&es->frames);
+    frame *slot = estack_push(&es->frames);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -60,7 +126,7 @@ static odin3_status push_frame(estate *es, const odin3_expr *node, uint32_t stag
 }
 
 static odin3_status push_int(estate *es, int64_t value) {
-    int64_t *slot = odin3_vec_push(&es->vals);
+    int64_t *slot = estack_push(&es->vals);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -69,8 +135,8 @@ static odin3_status push_int(estate *es, int64_t value) {
 }
 
 static int64_t pop_int(estate *es) {
-    const int64_t value = *(const int64_t *)odin3_vec_at(&es->vals, es->vals.len - 1);
-    odin3_vec_pop(&es->vals);
+    int64_t value = 0;
+    estack_pop(&es->vals, &value);
     return value;
 }
 
@@ -85,9 +151,9 @@ static odin3_status eval_ident(estate *es, const odin3_expr *node) {
     const char *name =
         env != NULL && env->strtab != NULL ? odin3_strtab_get(env->strtab, node->ident) : NULL;
     if (name != NULL) {
-        return eerr(node, "unknown identifier '%s'", name);
+        return eerr(es, node, "unknown identifier '%s'", name);
     }
-    return eerr(node, "unknown identifier (id %u)", node->ident);
+    return eerr(es, node, "unknown identifier (id %u)", node->ident);
 }
 
 static odin3_status eval_sized(estate *es, const odin3_expr *node) {
@@ -95,10 +161,10 @@ static odin3_status eval_sized(estate *es, const odin3_expr *node) {
     for (uint32_t i = 0; i < node->nbits; i++) {
         const uint8_t bit = node->bits[i];
         if (bit > ODIN3_BIT_1) {
-            return eerr(node, "sized literal contains x or z bits");
+            return eerr(es, node, "sized literal contains x or z bits");
         }
         if (bit == ODIN3_BIT_1 && i >= I64_BITS - 1) {
-            return overflow(node);
+            return overflow(es, node);
         }
         value |= (uint64_t)bit << (i < I64_BITS - 1 ? i : 0);
     }
@@ -107,30 +173,31 @@ static odin3_status eval_sized(estate *es, const odin3_expr *node) {
 
 /* ---- operators ------------------------------------------------------------------------------ */
 
-static odin3_status int_pow(const odin3_expr *node, operands ops, int64_t *out) {
+static odin3_status int_pow(const estate *es, const odin3_expr *node, operands ops, int64_t *out) {
     int64_t result = 1;
     int64_t base = ops.lhs;
     int64_t exp = ops.rhs;
     if (exp < 0) {
-        return eerr(node, "negative exponent");
+        return eerr(es, node, "negative exponent");
     }
     while (exp > 0) {
         if ((exp & 1) != 0 && __builtin_mul_overflow(result, base, &result)) {
-            return overflow(node);
+            return overflow(es, node);
         }
         exp >>= 1;
         if (exp > 0 && __builtin_mul_overflow(base, base, &base)) {
-            return overflow(node);
+            return overflow(es, node);
         }
     }
     *out = result;
     return ODIN3_OK;
 }
 
-static odin3_status int_shift(const odin3_expr *node, operands ops, int64_t *out) {
+static odin3_status int_shift(const estate *es, const odin3_expr *node, operands ops,
+                              int64_t *out) {
     const bool left = node->op == ODIN3_OP_SHL;
     if (ops.rhs < 0) {
-        return eerr(node, "negative shift count");
+        return eerr(es, node, "negative shift count");
     }
     if (left) {
         if (ops.lhs == 0) {
@@ -138,7 +205,7 @@ static odin3_status int_shift(const odin3_expr *node, operands ops, int64_t *out
             return ODIN3_OK;
         }
         if (ops.rhs > MAX_SHIFT || __builtin_mul_overflow(ops.lhs, (int64_t)1 << ops.rhs, out)) {
-            return overflow(node);
+            return overflow(es, node);
         }
         return ODIN3_OK;
     }
@@ -150,18 +217,20 @@ static odin3_status int_shift(const odin3_expr *node, operands ops, int64_t *out
     return ODIN3_OK;
 }
 
-static odin3_status int_divide(const odin3_expr *node, operands ops, int64_t *out) {
+static odin3_status int_divide(const estate *es, const odin3_expr *node, operands ops,
+                               int64_t *out) {
     if (ops.rhs == 0) {
-        return eerr(node, "division by zero");
+        return eerr(es, node, "division by zero");
     }
     if (ops.lhs == INT64_MIN && ops.rhs == -1) {
-        return overflow(node);
+        return overflow(es, node);
     }
     *out = node->op == ODIN3_OP_DIV ? ops.lhs / ops.rhs : ops.lhs % ops.rhs;
     return ODIN3_OK;
 }
 
-static odin3_status int_arith(const odin3_expr *node, operands ops, int64_t *out) {
+static odin3_status int_arith(const estate *es, const odin3_expr *node, operands ops,
+                              int64_t *out) {
     bool ovf = false;
     switch (node->op) {
     case ODIN3_OP_ADD:
@@ -175,13 +244,13 @@ static odin3_status int_arith(const odin3_expr *node, operands ops, int64_t *out
         break;
     case ODIN3_OP_DIV:
     case ODIN3_OP_MOD:
-        return int_divide(node, ops, out);
+        return int_divide(es, node, ops, out);
     case ODIN3_OP_POW:
-        return int_pow(node, ops, out);
+        return int_pow(es, node, ops, out);
     default:
-        return int_shift(node, ops, out);
+        return int_shift(es, node, ops, out);
     }
-    return ovf ? overflow(node) : ODIN3_OK;
+    return ovf ? overflow(es, node) : ODIN3_OK;
 }
 
 static int64_t int_compare(odin3_expr_op op, operands ops) {
@@ -235,7 +304,7 @@ static odin3_status eval_binary(estate *es, const odin3_expr *node) {
         value = int_compare(node->op, ops);
         break;
     default: {
-        const odin3_status st = int_arith(node, ops, &value);
+        const odin3_status st = int_arith(es, node, ops, &value);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -247,7 +316,7 @@ static odin3_status eval_binary(estate *es, const odin3_expr *node) {
 static odin3_status eval_unary(estate *es, const odin3_expr *node) {
     const int64_t value = pop_int(es);
     if (node->op == ODIN3_OP_NEG) {
-        return value == INT64_MIN ? overflow(node) : push_int(es, -value);
+        return value == INT64_MIN ? overflow(es, node) : push_int(es, -value);
     }
     return push_int(es, node->op == ODIN3_OP_NOT ? ~value : (value == 0));
 }
@@ -257,7 +326,7 @@ static odin3_status eval_bitsel(estate *es, const odin3_expr *node) {
     ops.rhs = pop_int(es);
     ops.lhs = pop_int(es);
     if (ops.rhs < 0 || ops.rhs >= I64_BITS) {
-        return eerr(node, "bit select index %lld out of range", (long long)ops.rhs);
+        return eerr(es, node, "bit select index %lld out of range", (long long)ops.rhs);
     }
     return push_int(es, (int64_t)(((uint64_t)ops.lhs >> ops.rhs) & 1U));
 }
@@ -267,7 +336,7 @@ static odin3_status eval_slice(estate *es, const odin3_expr *node) {
     const int64_t msb = pop_int(es);
     const uint64_t value = (uint64_t)pop_int(es);
     if (lsb < 0 || msb < lsb || msb >= I64_BITS || msb - lsb >= MAX_SLICE_WIDTH) {
-        return eerr(node, "slice [%lld:%lld] out of range", (long long)msb, (long long)lsb);
+        return eerr(es, node, "slice [%lld:%lld] out of range", (long long)msb, (long long)lsb);
     }
     const uint64_t mask = ((uint64_t)1 << (msb - lsb + 1)) - 1;
     return push_int(es, (int64_t)((value >> lsb) & mask));
@@ -339,8 +408,8 @@ static odin3_status step_combine(estate *es, const odin3_expr *node) {
 }
 
 static odin3_status step(estate *es) {
-    const frame fr = *(const frame *)odin3_vec_at(&es->frames, es->frames.len - 1);
-    odin3_vec_pop(&es->frames);
+    frame fr = {NULL, 0};
+    estack_pop(&es->frames, &fr);
     switch (fr.node->kind) {
     case ODIN3_EXPR_INT:
         return push_int(es, fr.node->ival);
@@ -349,9 +418,9 @@ static odin3_status step(estate *es) {
     case ODIN3_EXPR_SIZED:
         return eval_sized(es, fr.node);
     case ODIN3_EXPR_CONCAT:
-        return eerr(fr.node, "concatenation is not an integer expression");
+        return eerr(es, fr.node, "concatenation is not an integer expression");
     case ODIN3_EXPR_REPL:
-        return eerr(fr.node, "replication is not an integer expression");
+        return eerr(es, fr.node, "replication is not an integer expression");
     case ODIN3_EXPR_TERNARY:
         return step_ternary(es, fr);
     case ODIN3_EXPR_BINARY:
@@ -365,21 +434,33 @@ static odin3_status step(estate *es) {
     return fr.stage == 0 ? expand(es, fr.node) : step_combine(es, fr.node);
 }
 
-odin3_status odin3_expr_eval_int(const odin3_expr *expr, const odin3_expr_env *env, int64_t *out) {
-    if (expr == NULL || out == NULL) {
+odin3_status odin3_expr_eval_int_quiet(const odin3_expr *expr, const odin3_expr_env *env,
+                                       int64_t *out, odin3_expr_error *err) {
+    if (expr == NULL || out == NULL || err == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    estate es = {.env = env};
-    odin3_vec_init(&es.frames, sizeof(frame));
-    odin3_vec_init(&es.vals, sizeof(int64_t));
+    estate es;
+    es.env = env;
+    es.err = err;
+    estack_init(&es.frames, es.frame_buf, sizeof(frame));
+    estack_init(&es.vals, es.val_buf, sizeof(int64_t));
     odin3_status st = push_frame(&es, expr, 0);
-    while (st == ODIN3_OK && es.frames.len > 0) {
+    while (st == ODIN3_OK && estack_len(&es.frames) > 0) {
         st = step(&es);
     }
     if (st == ODIN3_OK) {
         *out = pop_int(&es);
     }
-    odin3_vec_free(&es.frames);
-    odin3_vec_free(&es.vals);
+    odin3_vec_free(&es.frames.spill);
+    odin3_vec_free(&es.vals.spill);
+    return st;
+}
+
+odin3_status odin3_expr_eval_int(const odin3_expr *expr, const odin3_expr_env *env, int64_t *out) {
+    odin3_expr_error err = {0, ""};
+    odin3_status st = odin3_expr_eval_int_quiet(expr, env, out, &err);
+    if (st == ODIN3_ERR_INVALID_ARG && err.text[0] != '\0') {
+        odin3_log(ODIN3_LOG_ERROR, "expression column %u: %s", err.col, err.text);
+    }
     return st;
 }

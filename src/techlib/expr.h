@@ -104,7 +104,25 @@ typedef struct odin3_expr_env {
  * sized literals must be free of x/z and below 2^63. Overflow, division by zero, a negative
  * shift count or exponent, an unknown identifier (env may be NULL), concatenation and
  * replication yield ODIN3_ERR_INVALID_ARG with a logged message; ?: && || evaluate lazily.
+ * The evaluation stacks live on the C stack up to ODIN3_EXPR_EVAL_INLINE entries (which covers
+ * any expression of that many nodes): only deeper evaluations allocate, so only they can return
+ * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_expr_eval_int(const odin3_expr *expr, const odin3_expr_env *env, int64_t *out);
+
+enum { ODIN3_EXPR_EVAL_INLINE = 64, ODIN3_EXPR_ERR_MAX = 160 };
+
+/* An evaluation error: the offending node's column and the message. */
+typedef struct odin3_expr_error {
+    uint32_t col;
+    char text[ODIN3_EXPR_ERR_MAX];
+} odin3_expr_error;
+
+/*
+ * odin3_expr_eval_int without logging: on ODIN3_ERR_INVALID_ARG the message goes to *err for the
+ * caller to report with its own location (*err is untouched otherwise).
+ */
+odin3_status odin3_expr_eval_int_quiet(const odin3_expr *expr, const odin3_expr_env *env,
+                                       int64_t *out, odin3_expr_error *err);
 
 #endif

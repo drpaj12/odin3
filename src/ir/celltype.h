@@ -37,20 +37,36 @@ enum { ODIN3_CT_TRISTATE = 1U << 0, ODIN3_CT_ANYVIEW = 1U << 1 };
 typedef struct odin3_celltype_def odin3_celltype_def;
 typedef struct odin3_width_expr odin3_width_expr;
 
+enum { ODIN3_WIDTH_WHY_MAX = 192 };
+
+/* Why a width expression was rejected or did not evaluate (filled by its hooks, never logged). */
+typedef struct odin3_width_why {
+    char text[ODIN3_WIDTH_WHY_MAX];
+} odin3_width_why;
+
+/* Arguments of a width expression's eval hook. */
+typedef struct odin3_width_args {
+    const odin3_celltype_def *def;
+    const odin3_value *params; /* one value per parameter of def */
+    odin3_width_why *why;      /* receives the reason of an ODIN3_ERR_INVALID_ARG */
+} odin3_width_args;
+
 /*
  * A compiled width expression (the fourth width rule), produced outside the IR (the tech library,
- * src/techlib). The IR only calls its hooks. check runs when a definition is registered: NULL when
- * every identifier of the expression names an INT parameter of def, else a description of the
- * problem. eval computes the width for params (one value per parameter of def):
- * ODIN3_ERR_INVALID_ARG (logged; the caller adds the location) when a parameter it reads is not
- * an INT or the result is not an integer in [0, UINT32_MAX]; *width is untouched then.
- * Registration never copies a width expression: it must live as long as every design holding a
- * type that uses it (a producer allocates it in odin3_celltype_arena).
+ * src/techlib). The IR only calls its hooks, which never log: the IR reports their reason with the
+ * port and cell type. check runs when a definition is registered: true when every identifier of
+ * the expression names an INT parameter of def, else false with the reason in *why. eval computes
+ * the width: ODIN3_ERR_INVALID_ARG when a parameter it reads is not an INT or the result is not an
+ * integer in [0, UINT32_MAX]; ODIN3_ERR_NO_MEMORY when an unusually deep expression cannot get
+ * evaluation memory (typical expressions evaluate without allocating); *width is untouched on
+ * failure. Registration never copies a width expression: it must live as long as every design
+ * holding a type that uses it (a producer allocates it in odin3_celltype_arena).
  */
 struct odin3_width_expr {
-    const char *(*check)(const odin3_width_expr *wexpr, const odin3_celltype_def *def);
-    odin3_status (*eval)(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
-                         const odin3_value *params, uint32_t *width);
+    bool (*check)(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
+                  odin3_width_why *why);
+    odin3_status (*eval)(const odin3_width_expr *wexpr, const odin3_width_args *args,
+                         uint32_t *width);
     const void *impl; /* the producer's compiled form */
 };
 
@@ -125,7 +141,8 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
 /*
  * Width of port `port` of type id for the given parameter values (one per parameter definition;
  * may be NULL only for a type without parameters). 0 when id or port is out of range, the width
- * parameter is not an INT in [0, UINT32_MAX], or the width expression fails to evaluate (logged).
+ * parameter is not an INT in [0, UINT32_MAX], or the width expression fails to evaluate (logged;
+ * also 0, unlogged, when a width expression runs out of memory).
  */
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port);
@@ -138,9 +155,10 @@ typedef struct odin3_port_query {
 } odin3_port_query;
 
 /*
- * odin3_celltype_port_width with the failure reported: ODIN3_ERR_INVALID_ARG (logged) for the
- * cases where port_width returns 0 as an error; *width is untouched then. A width of 0 from a
- * valid rule is ODIN3_OK.
+ * odin3_celltype_port_width with the failure reported: ODIN3_ERR_INVALID_ARG (logged, naming the
+ * port and cell type) for the cases where port_width returns 0 as an error; ODIN3_ERR_NO_MEMORY
+ * (not logged) when a width expression cannot get evaluation memory; *width is untouched then.
+ * A width of 0 from a valid rule is ODIN3_OK.
  */
 odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
                                                const odin3_port_query *query, uint32_t *width);

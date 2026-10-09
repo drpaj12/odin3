@@ -4,6 +4,7 @@
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "ir/value.h"
+#include "util/alloc.h"
 #include "util/arena.h"
 #include "util/log.h"
 #include "util/pagevec.h"
@@ -14,13 +15,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* A node about to be created: its validated type and its parameters, copied into the module. */
+enum { PLAN_INLINE_PORTS = 16 };
+
+/*
+ * A node about to be created: its validated type, its parameters (copied into the module) and its
+ * port widths, computed once in the fallible phase so that committing never evaluates a width.
+ */
 typedef struct node_plan {
     odin3_celltype_id type;
     const odin3_celltype_def *def;
     odin3_value *params; /* def->n_params values in the module arena (NULL when none) */
     uint32_t pin_count;
+    uint32_t *widths; /* def->n_ports widths: inline_widths or a heap block (plan_free) */
+    uint32_t inline_widths[PLAN_INLINE_PORTS];
 } node_plan;
+
+static void plan_free(node_plan *plan) {
+    if (plan->widths != plan->inline_widths) {
+        odin3_util_free(plan->widths);
+    }
+    plan->widths = NULL;
+}
 
 static bool params_match(const odin3_celltype_def *def, const odin3_node_spec *spec) {
     if (spec->params == NULL) {
@@ -65,16 +80,23 @@ static odin3_status copy_params(odin3_module *module, const odin3_node_spec *spe
     return ODIN3_OK;
 }
 
+/* Computes and stores every port width (the only width evaluation of a create) and the total. */
 static odin3_status count_pins(const odin3_module *module, node_plan *plan) {
+    uint32_t n_ports = plan->def->n_ports;
+    plan->widths = n_ports <= PLAN_INLINE_PORTS ? plan->inline_widths
+                                                : odin3_util_malloc(sizeof *plan->widths * n_ports);
+    if (plan->widths == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     uint64_t total = 0;
-    for (uint32_t port = 0; port < plan->def->n_ports; port++) {
+    for (uint32_t port = 0; port < n_ports; port++) {
         odin3_port_query query = {plan->type, plan->params, port};
-        uint32_t width = 0;
-        odin3_status st = odin3_celltype_port_width_checked(module->design, &query, &width);
+        odin3_status st =
+            odin3_celltype_port_width_checked(module->design, &query, &plan->widths[port]);
         if (st != ODIN3_OK) {
-            return st; /* logged */
+            return st; /* logged, or out of memory */
         }
-        total += width;
+        total += plan->widths[port];
     }
     if (total > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY; /* more pins than IDs */
@@ -113,8 +135,7 @@ static odin3_status plan_node(odin3_module *module, const odin3_node_spec *spec,
 /* Takes the reserved pin slots: port order, then bit order. */
 static void make_pins(odin3_module *module, const node_plan *plan, odin3_node_id node) {
     for (uint32_t port = 0; port < plan->def->n_ports; port++) {
-        uint32_t width = odin3_celltype_port_width(module->design, plan->type, plan->params, port);
-        for (uint32_t bit = 0; bit < width; bit++) {
+        for (uint32_t bit = 0; bit < plan->widths[port]; bit++) {
             odin3_pin_rec *pin = odin3_pagevec_push(module->pins, NULL);
             assert(pin != NULL); /* reserved by node_create */
             pin->node = node;
@@ -196,14 +217,14 @@ odin3_status odin3_node_create_any(odin3_module *module, const odin3_node_spec *
     if (st == ODIN3_OK) {
         st = node_reserve(module, spec, &plan);
     }
-    if (st != ODIN3_OK) {
-        return st;
+    if (st == ODIN3_OK) {
+        odin3_node_id id = node_commit(module, spec, &plan);
+        if (out != NULL) {
+            *out = id;
+        }
     }
-    odin3_node_id id = node_commit(module, spec, &plan);
-    if (out != NULL) {
-        *out = id;
-    }
-    return ODIN3_OK;
+    plan_free(&plan);
+    return st;
 }
 
 /* --- create-connected ---------------------------------------------------------------------- */
@@ -237,8 +258,7 @@ static bool ports_ok(const odin3_module *module, const node_plan *plan, const od
         return false;
     }
     for (uint32_t port = 0; port < def->n_ports; port++) {
-        uint32_t width = odin3_celltype_port_width(module->design, plan->type, plan->params, port);
-        if (!netvec_ok(module, &ports[port], width, def->ports[port].name)) {
+        if (!netvec_ok(module, &ports[port], plan->widths[port], def->ports[port].name)) {
             return false;
         }
     }
@@ -283,9 +303,11 @@ odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_
         st = node_reserve(module, spec, &plan);
     }
     if (st != ODIN3_OK) {
+        plan_free(&plan);
         return st;
     }
     odin3_node_id id = node_commit(module, spec, &plan);
+    plan_free(&plan);
     st = connect_ports(module, id, ports);
     if (st != ODIN3_OK) {
         node_unmake(module, id);

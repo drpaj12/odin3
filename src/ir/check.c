@@ -73,6 +73,7 @@ typedef struct check_ctx {
     uint32_t hidden[RULE_LAST + 1][SEVERITIES]; /* past the cap: counted, summed at the end */
     uint32_t no_prov;                           /* live objects with prov 0 (rule 7, one warning) */
     bool failed;                                /* an E rule was violated */
+    bool oom; /* a width expression ran out of memory: the result is NO_MEMORY */
 } check_ctx;
 
 /* Mark arrays of a FULL check (rules 8 and 9), allocated before anything is checked. */
@@ -181,7 +182,12 @@ static void node_pins(check_ctx *ctx, odin3_node_id id, const odin3_node_rec *re
     for (uint32_t port = 0; port < def->n_ports; port++) {
         odin3_port_query query = {rec->type, rec->params, port};
         uint32_t width = 0;
-        if (odin3_celltype_port_width_checked(ctx->design, &query, &width) != ODIN3_OK) {
+        odin3_status st = odin3_celltype_port_width_checked(ctx->design, &query, &width);
+        if (st == ODIN3_ERR_NO_MEMORY) {
+            ctx->oom = true;
+            return;
+        }
+        if (st != ODIN3_OK) {
             violation(ctx, R5, "node %u (%s): port %s of '%s' has no width for its parameters",
                       id.v, node_label(ctx, id), def->ports[port].name, def->name);
             return;
@@ -783,6 +789,10 @@ static odin3_status check_one(odin3_module *module, odin3_check_opts opts) {
     }
     summarize(&ctx);
     marks_free(&marks);
+    if (ctx.oom) {
+        odin3_log(ODIN3_LOG_ERROR, "check: %s: out of memory", ctx.where);
+        return ODIN3_ERR_NO_MEMORY;
+    }
     return ctx.failed ? ODIN3_ERR_CHECK : ODIN3_OK;
 }
 

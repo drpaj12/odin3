@@ -14,18 +14,20 @@
 #include "util/str.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
-enum { WIDTH8 = 8, NEG_WIDTH = -3, BUF_LEN = 16, PARAM_BITS = 3, FN_WIDTH = 5 };
+enum { WIDTH8 = 8, NEG_WIDTH = -3, BUF_LEN = 16, PARAM_BITS = 3, FN_WIDTH = 5, MSG_MAX = 512 };
 
 static odin3_design *design;
 static size_t errors_logged;
+static char last_error[MSG_MAX];
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)msg;
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors_logged++;
+        (void)snprintf(last_error, sizeof last_error, "%s", msg);
     }
 }
 
@@ -357,21 +359,24 @@ typedef struct fake_expr {
     bool fail_eval;
 } fake_expr;
 
-static const char *fake_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def) {
+static bool fake_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
+                       odin3_width_why *why) {
     const fake_expr *impl = wexpr->impl;
     (void)def;
-    return impl->fail_check ? "fake: unknown identifier" : NULL;
+    (void)snprintf(why->text, sizeof why->text, "fake: unknown identifier 'Q'");
+    return !impl->fail_check;
 }
 
-static odin3_status fake_eval(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
-                              const odin3_value *params, uint32_t *width) {
+static odin3_status fake_eval(const odin3_width_expr *wexpr, const odin3_width_args *args,
+                              uint32_t *width) {
     const fake_expr *impl = wexpr->impl;
     if (impl->fail_eval) {
+        (void)snprintf(args->why->text, sizeof args->why->text, "fake: too wide");
         return ODIN3_ERR_INVALID_ARG;
     }
     int64_t sum = 0;
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        sum += params[i].i;
+    for (uint32_t i = 0; i < args->def->n_params; i++) {
+        sum += args->params[i].i;
     }
     *width = (uint32_t)sum;
     return ODIN3_OK;
@@ -411,7 +416,9 @@ static void test_width_expr_eval_failure(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_celltype_port_width_checked(design, &query, &width));
     TEST_ASSERT_EQUAL_UINT32(WIDTH8, width);
-    TEST_ASSERT_TRUE(errors_logged > 0);
+    TEST_ASSERT_EQUAL_size_t(1, errors_logged); /* the hook does not log: one located line */
+    TEST_ASSERT_EQUAL_STRING("port_width: port 'y' of cell type 'wexpr_fail_t3': fake: too wide",
+                             last_error);
 }
 
 static void test_width_expr_validated_at_registration(void) {
@@ -420,6 +427,8 @@ static void test_width_expr_validated_at_registration(void) {
     static const odin3_width_expr no_eval = {fake_check, NULL, &bad};
     static const odin3_width_expr no_check = {NULL, fake_eval, &bad};
     (void)add_expr_type("wexpr_bad_t3", &failing, ODIN3_ERR_INVALID_ARG);
+    TEST_ASSERT_EQUAL_STRING("add_local: cell type 'wexpr_bad_t3': fake: unknown identifier 'Q'",
+                             last_error);
     (void)add_expr_type("wexpr_bad_t3", &no_eval, ODIN3_ERR_INVALID_ARG);
     (void)add_expr_type("wexpr_bad_t3", &no_check, ODIN3_ERR_INVALID_ARG);
     TEST_ASSERT_FALSE(odin3_celltype_valid(find_type(design, "wexpr_bad_t3")));

@@ -496,6 +496,56 @@ static void test_oom_sweep_eval(void) {
     TEST_ASSERT_EQUAL_INT64(201, value);
 }
 
+/* An expression of up to ODIN3_EXPR_EVAL_INLINE nodes evaluates without allocating. */
+static void test_eval_small_never_allocates(void) {
+    const odin3_expr *expr = parse_ok("(a + b) * (c << 2) - (w > 4 ? a / c : b % c) + 8'b101[2]");
+    char *deep = wrap("(", "1", " + 1)", 31); /* 63 nodes */
+    const odin3_expr *chain = parse_ok(deep);
+    free(deep);
+    const odin3_expr_env env = {lookup, NULL, g_tab};
+    int64_t value = 0;
+    odin3_util_set_alloc_fail_after(0);
+    odin3_status st = odin3_expr_eval_int(expr, &env, &value);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_EQUAL_INT64(17 * 12 - 4 + 1, value);
+    odin3_util_set_alloc_fail_after(0);
+    st = odin3_expr_eval_int(chain, NULL, &value);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_EQUAL_INT64(32, value);
+}
+
+/* Deeper evaluations spill to the heap, so they can run out of memory. */
+static void test_eval_deep_spills(void) {
+    char *text = wrap("(", "1", " + 1)", 100);
+    const odin3_expr *expr = parse_ok(text);
+    free(text);
+    int64_t value = 0;
+    odin3_util_set_alloc_fail_after(0);
+    odin3_status st = odin3_expr_eval_int(expr, NULL, &value);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_expr_eval_int(expr, NULL, &value));
+    TEST_ASSERT_EQUAL_INT64(101, value);
+}
+
+static void test_eval_quiet_reports_instead_of_logging(void) {
+    const odin3_expr *expr = parse_ok("1 + 4 / (2 - 2)");
+    odin3_expr_error err = {0, ""};
+    int64_t value = 0;
+    g_msgs = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_expr_eval_int_quiet(expr, NULL, &value, &err));
+    TEST_ASSERT_EQUAL_UINT(0, g_msgs);
+    TEST_ASSERT_EQUAL_STRING("division by zero", err.text);
+    TEST_ASSERT_EQUAL_UINT32(7, err.col);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_expr_eval_int(expr, NULL, &value));
+    TEST_ASSERT_EQUAL_STRING("expression column 7: division by zero", g_msg);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_expr_eval_int_quiet(expr, NULL, &value, NULL));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_primaries);
@@ -514,5 +564,8 @@ int main(void) {
     RUN_TEST(test_depth_chains);
     RUN_TEST(test_oom_sweep_parse);
     RUN_TEST(test_oom_sweep_eval);
+    RUN_TEST(test_eval_small_never_allocates);
+    RUN_TEST(test_eval_deep_spills);
+    RUN_TEST(test_eval_quiet_reports_instead_of_logging);
     return UNITY_END();
 }

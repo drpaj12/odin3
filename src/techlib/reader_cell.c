@@ -71,8 +71,17 @@ static odin3_rd_port *port_at(odin3_reader *rd, uint32_t idx) {
     return odin3_vec_at(&rd->cell.ports, idx);
 }
 
-/* Interns a new port or parameter name; an error if the cell already uses it. */
+/* Words that cannot name a port or parameter: modifiers and the `init x` value. */
+static bool reserved(odin3_span name) {
+    return odin3_rd_is(name, "signed") || odin3_rd_is(name, "clock") || odin3_rd_is(name, "x");
+}
+
+/* Interns a new port or parameter name; an error if reserved or the cell already uses it. */
 static odin3_status declare_name(odin3_reader *rd, odin3_span name, uint32_t *id) {
+    if (reserved(name)) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, name.col), "'%.*s' is a reserved word",
+                            (int)name.len, name.ptr);
+    }
     odin3_status st = odin3_rd_intern(rd, name, id);
     if (st != ODIN3_OK) {
         return st;
@@ -106,6 +115,17 @@ static odin3_status take_input(odin3_reader *rd, odin3_span name, uint32_t *idx)
     }
     *idx = (uint32_t)found;
     return ODIN3_OK;
+}
+
+/* An input declared with `clock` (seq clocks and the clocks of sync memory ports). */
+static odin3_status take_clock(odin3_reader *rd, odin3_span name, uint32_t *idx) {
+    odin3_status st = take_input(rd, name, idx);
+    if (st == ODIN3_OK && !port_at(rd, *idx)->mods.clock) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, name.col),
+                            "'%.*s' is not a clock input of cell '%s' (declare it with 'clock')",
+                            (int)name.len, name.ptr, odin3_rd_cell_name(rd));
+    }
+    return st;
 }
 
 /* The undriven output a fn or seq statement starts with. */
@@ -158,30 +178,40 @@ static bool default_lookup(const void *user, uint32_t ident, int64_t *value) {
     return true;
 }
 
-/* An integer expression over the parameters, in 1..rule->max with their defaults. */
+/* A parsed integer expression and its value with the default parameters. */
+typedef struct int_value {
+    const odin3_expr *expr;
+    int64_t value;
+} int_value;
+
+/*
+ * An integer expression over the parameters, in 1..rule->max with their defaults. Afterwards
+ * rd->idents holds its identifier nodes (empty for a constant expression).
+ */
 static odin3_status param_expr(odin3_reader *rd, odin3_span text, const int_rule *rule,
-                               const odin3_expr **out) {
+                               int_value *out) {
     const odin3_rd_loc loc = odin3_rd_at(rd, odin3_rd_trim(text).col);
-    odin3_status st = odin3_rd_expr(rd, text, out);
+    odin3_status st = odin3_rd_expr(rd, text, &out->expr);
     if (st == ODIN3_OK) {
-        st = check_idents(rd, *out, false);
+        st = check_idents(rd, out->expr, false);
     }
     if (st != ODIN3_OK) {
         return st;
     }
     const odin3_expr_env env = {default_lookup, &rd->cell, rd->strtab};
-    int64_t value = 0;
-    st = odin3_expr_eval_int(*out, &env, &value);
+    odin3_expr_error err = {0, ""};
+    st = odin3_expr_eval_int_quiet(out->expr, &env, &out->value, &err);
     if (st == ODIN3_ERR_NO_MEMORY) {
         return st;
     }
     if (st != ODIN3_OK) {
-        return odin3_rd_err(rd, loc, "%s does not evaluate with the default parameters",
-                            rule->what);
+        return odin3_rd_err(rd, odin3_rd_at(rd, err.col),
+                            "%s does not evaluate with the default parameters: %s", rule->what,
+                            err.text);
     }
-    if (value < 1 || value > rule->max) {
+    if (out->value < 1 || out->value > rule->max) {
         return odin3_rd_err(rd, loc, "%s must be in 1..%lld (is %lld with the default parameters)",
-                            rule->what, (long long)rule->max, (long long)value);
+                            rule->what, (long long)rule->max, (long long)out->value);
     }
     return ODIN3_OK;
 }
@@ -326,11 +356,12 @@ odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_span rest) {
     if (st != ODIN3_OK) {
         return st;
     }
-    st = odin3_expr_eval_int(expr, NULL, &value);
+    odin3_expr_error err = {0, ""};
+    st = odin3_expr_eval_int_quiet(expr, NULL, &value, &err);
     if (st != ODIN3_OK && st != ODIN3_ERR_NO_MEMORY) {
-        return odin3_rd_err(rd, odin3_rd_at(rd, odin3_rd_trim(rest).col),
-                            "the default of '%.*s' must be a constant integer", (int)name.len,
-                            name.ptr);
+        return odin3_rd_err(rd, odin3_rd_at(rd, err.col),
+                            "the default of '%.*s' must be a constant integer: %s", (int)name.len,
+                            name.ptr, err.text);
     }
     odin3_rd_param *param = st == ODIN3_OK ? odin3_vec_push(&rd->cell.params) : NULL;
     if (param == NULL) {
@@ -368,24 +399,46 @@ static odin3_status strip_mods(const odin3_reader *rd, odin3_span *rest, odin3_t
     }
 }
 
-/* The width rule of a port: constant, a parameter's name, or a compiled expression. */
+/* The cell's parameter names (strtab IDs, declaration order) into rd->ids. */
+static odin3_status param_names(odin3_reader *rd) {
+    odin3_vec_clear(&rd->ids);
+    for (size_t i = 0; i < rd->cell.params.len; i++) {
+        const odin3_rd_param *param = odin3_vec_cat(&rd->cell.params, i);
+        uint32_t *slot = odin3_vec_push(&rd->ids);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = param->name;
+    }
+    return ODIN3_OK;
+}
+
+/*
+ * The width rule of a port: a constant (any expression without identifiers, folded), a
+ * parameter's name, or a compiled expression.
+ */
 static odin3_status port_width(odin3_reader *rd, odin3_span text, odin3_port_def *def) {
     static const int_rule rule = {"width", UINT32_MAX};
-    const odin3_expr *expr = NULL;
-    odin3_status st = param_expr(rd, text, &rule, &expr);
+    int_value width = {NULL, 0};
+    odin3_status st = param_expr(rd, text, &rule, &width);
     if (st != ODIN3_OK) {
         return st;
     }
-    if (expr->kind == ODIN3_EXPR_INT) {
-        def->width = (uint32_t)expr->ival;
+    if (rd->idents.len == 0) {
+        def->width = (uint32_t)width.value;
         def->scalar = def->width == 1;
         return ODIN3_OK;
     }
-    if (expr->kind == ODIN3_EXPR_IDENT) {
-        def->width_param = odin3_strtab_get(rd->strtab, expr->ident);
+    if (width.expr->kind == ODIN3_EXPR_IDENT) {
+        def->width_param = odin3_strtab_get(rd->strtab, width.expr->ident);
         return ODIN3_OK;
     }
-    const odin3_width_source src = {rd->arena, rd->strtab, expr};
+    st = param_names(rd);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    const odin3_width_source src = {rd->arena, rd->strtab, width.expr, rd->ids.data,
+                                    (uint32_t)rd->ids.len};
     return odin3_width_expr_compile(&src, &def->width_expr);
 }
 
@@ -503,7 +556,7 @@ static odin3_status seq_trigger(odin3_reader *rd, odin3_span rest, odin3_techlib
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a clock port after '%.*s'",
                             (int)word.len, word.ptr);
     }
-    odin3_status st = take_input(rd, clock, &seq->clock);
+    odin3_status st = take_clock(rd, clock, &seq->clock);
     return st == ODIN3_OK ? seq_init(rd, rest, &seq->init) : st;
 }
 
@@ -556,7 +609,9 @@ odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_span rest) {
     if (!odin3_rd_word(&rest, &word) || !odin3_rd_is(word, "words")) {
         return odin3_rd_err(rd, odin3_rd_at(rd, word.col), "expected 'words' after 'memory'");
     }
-    st = param_expr(rd, rest, &rule, &rd->cell.memory.words);
+    int_value words = {NULL, 0};
+    st = param_expr(rd, rest, &rule, &words);
+    rd->cell.memory.words = words.expr;
     if (st == ODIN3_OK) {
         rd->cell.has_memory = true;
         rd->cell.memory.line = rd->line;
@@ -581,7 +636,10 @@ odin3_status odin3_rd_st_mem_width(odin3_reader *rd, odin3_span rest) {
     if (rd->cell.memory.width != NULL) {
         return odin3_rd_err(rd, odin3_rd_at(rd, 0), "'width' given twice");
     }
-    return param_expr(rd, rest, &rule, &rd->cell.memory.width);
+    int_value width = {NULL, 0};
+    st = param_expr(rd, rest, &rule, &width);
+    rd->cell.memory.width = st == ODIN3_OK ? width.expr : NULL;
+    return st;
 }
 
 /* Copies a vec's elements into the arena; NULL for an empty vec. *ok false on out of memory. */
@@ -598,13 +656,15 @@ static void *copy_array(odin3_arena *arena, const odin3_vec *vec, bool *ok) {
     return mem;
 }
 
-/* The input ports a `write`/`read` statement lists, into rd->ids. */
-static odin3_status mem_port_list(odin3_reader *rd, odin3_span rest) {
+/* The input ports a `write`/`read` statement lists, into rd->ids; a sync port's first is a clock.
+ */
+static odin3_status mem_port_list(odin3_reader *rd, odin3_span rest, bool sync) {
     odin3_vec_clear(&rd->ids);
     odin3_span name;
     while (odin3_rd_ident(&rest, &name)) {
         uint32_t idx = 0;
-        odin3_status st = take_input(rd, name, &idx);
+        odin3_status st =
+            sync && rd->ids.len == 0 ? take_clock(rd, name, &idx) : take_input(rd, name, &idx);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -630,7 +690,7 @@ static odin3_status mem_port(odin3_reader *rd, odin3_span rest, bool write) {
                             keyword);
     }
     odin3_techlib_memport port = {write, odin3_rd_is(mode, "sync"), NULL, 0, rd->line};
-    st = mem_port_list(rd, rest);
+    st = mem_port_list(rd, rest, port.sync);
     if (st != ODIN3_OK) {
         return st;
     }

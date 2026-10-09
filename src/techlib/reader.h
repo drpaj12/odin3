@@ -16,8 +16,10 @@
  * WIDTH, DEFAULT, words and width are integer expressions over the cell's parameters declared
  * before them; fn/seq expressions name ports and parameters declared before them. Every output is
  * driven by exactly one fn, seq or the cell's memory (which drives every output no fn or seq
- * drives); a blackbox cell has no fn, seq or memory. `clock` marks an input. Port and parameter
- * names share one namespace per cell. NUM is a decimal number (digits, optional fraction).
+ * drives); a blackbox cell has no fn, seq or memory. `clock` marks an input; a seq's CLK and the
+ * first port of a sync memory port must be such inputs. Port and parameter names share one
+ * namespace per cell and cannot be `signed`, `clock` or `x`. A width without identifiers is folded
+ * to a constant. NUM is a decimal number (digits, optional fraction).
  */
 #ifndef ODIN3_TECHLIB_READER_H
 #define ODIN3_TECHLIB_READER_H

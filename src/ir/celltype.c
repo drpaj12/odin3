@@ -81,8 +81,12 @@ static const char *param_error(const odin3_celltype_def *def, uint32_t idx) {
     return NULL;
 }
 
-/* NULL when the port's width rule (the first that applies, celltype.h) is valid for def. */
-static const char *width_rule_error(const odin3_celltype_def *def, const odin3_port_def *port) {
+/*
+ * NULL when the port's width rule (the first that applies, celltype.h) is valid for def. A width
+ * expression's reason is written to why, which the result then points to.
+ */
+static const char *width_rule_error(const odin3_celltype_def *def, const odin3_port_def *port,
+                                    odin3_width_why *why) {
     if (port->width_fn != NULL) {
         return NULL;
     }
@@ -91,7 +95,7 @@ static const char *width_rule_error(const odin3_celltype_def *def, const odin3_p
         if (wexpr->check == NULL || wexpr->eval == NULL) {
             return "width expression without its hooks";
         }
-        return wexpr->check(wexpr, def);
+        return wexpr->check(wexpr, def, why) ? NULL : why->text;
     }
     if (port->width_param != NULL) {
         int pidx = find_param(def, port->width_param);
@@ -102,7 +106,7 @@ static const char *width_rule_error(const odin3_celltype_def *def, const odin3_p
     return NULL;
 }
 
-static const char *port_error(const odin3_celltype_def *def, uint32_t idx) {
+static const char *port_error(const odin3_celltype_def *def, uint32_t idx, odin3_width_why *why) {
     const odin3_port_def *port = &def->ports[idx];
     if (!name_ok(port->name)) {
         return "port without a name";
@@ -115,11 +119,14 @@ static const char *port_error(const odin3_celltype_def *def, uint32_t idx) {
             return "duplicate port name";
         }
     }
-    return width_rule_error(def, port);
+    return width_rule_error(def, port, why);
 }
 
-/* NULL when def is valid (rules in celltype.h), else a description of the first problem. */
-static const char *def_error(const odin3_celltype_def *def) {
+/*
+ * NULL when def is valid (rules in celltype.h), else a description of the first problem (which
+ * may point into why).
+ */
+static const char *def_error(const odin3_celltype_def *def, odin3_width_why *why) {
     if (def == NULL || !name_ok(def->name)) {
         return "no definition or no name";
     }
@@ -134,13 +141,20 @@ static const char *def_error(const odin3_celltype_def *def) {
         err = param_error(def, i);
     }
     for (uint32_t i = 0; err == NULL && i < def->n_ports; i++) {
-        err = port_error(def, i);
+        err = port_error(def, i, why);
     }
     return err;
 }
 
+/* For assertions (inline: unused when they compile out). */
+static inline bool def_valid(const odin3_celltype_def *def) {
+    odin3_width_why why = {""};
+    return def_error(def, &why) == NULL;
+}
+
 static bool def_check(const odin3_celltype_def *def, const char *what) {
-    const char *err = def_error(def);
+    odin3_width_why why = {""};
+    const char *err = def_error(def, &why);
     if (err != NULL) {
         const char *name = def != NULL && def->name != NULL ? def->name : "";
         odin3_log(ODIN3_LOG_ERROR, "%s: cell type '%s': %s", what, name, err);
@@ -280,7 +294,7 @@ odin3_status odin3_celltype_table_init(odin3_design *design) {
     }
     (void)odin3_vec_push(&design->celltypes); /* slot 0: reserved dummy */
     for (uint32_t i = 0; i < count; i++) {
-        assert(def_error(global_at(i)) == NULL);
+        assert(def_valid(global_at(i)));
         odin3_status st = append_entry(design, global_at(i), false, NULL);
         if (st != ODIN3_OK) {
             return st;
@@ -344,6 +358,18 @@ static odin3_status int_width(const odin3_value *val, const char *param, uint32_
     return ODIN3_OK;
 }
 
+static odin3_status expr_width(const odin3_celltype_def *def, const odin3_port_def *pdef,
+                               const odin3_value *params, uint32_t *width) {
+    odin3_width_why why = {""};
+    const odin3_width_args args = {def, params, &why};
+    odin3_status st = pdef->width_expr->eval(pdef->width_expr, &args, width);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_log(ODIN3_LOG_ERROR, "port_width: port '%s' of cell type '%s': %s", pdef->name,
+                  def->name, why.text);
+    }
+    return st;
+}
+
 odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
                                                const odin3_port_query *query, uint32_t *width) {
     const odin3_celltype_entry *entry = entry_at(design, query->type);
@@ -363,13 +389,7 @@ odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
         return ODIN3_OK;
     }
     if (pdef->width_expr != NULL) {
-        odin3_status st = pdef->width_expr->eval(pdef->width_expr, def, query->params, width);
-        if (st != ODIN3_OK) {
-            odin3_log(ODIN3_LOG_ERROR,
-                      "port_width: width expression of port '%s' of cell type '%s' failed",
-                      pdef->name, def->name);
-        }
-        return st;
+        return expr_width(def, pdef, query->params, width);
     }
     if (pdef->width_param == NULL) {
         *width = pdef->width;
@@ -449,7 +469,7 @@ odin3_status odin3_celltype_add_local(odin3_design *design, const odin3_celltype
 void odin3_celltype_bind_local(odin3_design *design, odin3_celltype_id id,
                                const odin3_celltype_def *def) {
     odin3_celltype_entry *entry = entry_mut(design, id);
-    assert(entry != NULL && entry->local && def_error(def) == NULL);
+    assert(entry != NULL && entry->local && def_valid(def));
     assert(strcmp(def->name, entry->def->name) == 0);
     entry->def = def;
 }

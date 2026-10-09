@@ -2,8 +2,10 @@
  * test_techlib_reader.c — unit tests for the .o3lib reader and the width-expression rule.
  */
 #include "ir/celltype.h"
+#include "ir/check.h"
 #include "ir/design.h"
 #include "ir/ids.h"
+#include "ir/module.h"
 #include "ir/value.h"
 #include "techlib/expr.h"
 #include "techlib/reader.h"
@@ -20,7 +22,7 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { MSG_MAX = 1024, PATH_MAX_LEN = 64 };
+enum { MSG_MAX = 1024, PATH_MAX_LEN = 64, DEEP_TERMS = 80, WIDE_PORTS = 17, NAME_MAX_LEN = 32 };
 
 static odin3_design *g_design;
 static char g_msg[MSG_MAX]; /* last error logged since setUp (located context comes last) */
@@ -160,7 +162,7 @@ static void test_kinds_map_to_granularity(void) {
             "  fn cout = (a & b) | (a & cin) | (b & cin)\n"
             "end\n"
             "cell opaque blackbox delay 2.5\n"
-            "  in x 3 ; out y 4 ; inout z 2\n"
+            "  in w 3 ; out y 4 ; inout z 2\n"
             "end\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_HARD, def_of("adder")->gran);
     TEST_ASSERT_EQUAL_INT(ODIN3_TECHLIB_HARD, lib_of("adder")->kind);
@@ -213,24 +215,62 @@ static void test_parametric_width_evaluates(void) {
 }
 
 /* Width evaluation failures are reported to the caller (who adds the location). */
-static void test_parametric_width_rejects_bad_params(void) {
-    read_ok(k_multiply);
-    odin3_value params[2] = {odin3_value_int(-40), odin3_value_int(4)};
+/* One failing width query of multiply's port out: one error, located at the port and type. */
+static void expect_width_error(const odin3_value *params, const char *reason) {
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want, "port_width: port 'out' of cell type 'multiply': %s", reason);
+    unsigned before = g_errors;
     uint32_t width = 7;
-    odin3_port_query query = {type_of("multiply"), params, 2};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_celltype_port_width_checked(g_design, &query, &width));
-    params[0] = odin3_value_int(INT64_MAX);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_celltype_port_width_checked(g_design, &query, &width));
-    params[0] = odin3_value_int(UINT32_MAX);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_celltype_port_width_checked(g_design, &query, &width));
-    params[0].kind = ODIN3_VAL_STRING;
+    const odin3_port_query query = {type_of("multiply"), params, 2};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_celltype_port_width_checked(g_design, &query, &width));
     TEST_ASSERT_EQUAL_UINT32(7, width);
-    TEST_ASSERT_TRUE(g_errors >= 4);
+    TEST_ASSERT_EQUAL_UINT(before + 1, g_errors);
+    TEST_ASSERT_EQUAL_STRING(want, g_msg);
+}
+
+/* Width evaluation failures are reported once, with the port and cell type. */
+static void test_parametric_width_rejects_bad_params(void) {
+    read_ok(k_multiply);
+    odin3_value params[2] = {odin3_value_int(-40), odin3_value_int(4)};
+    expect_width_error(params, "width -36 is outside 0..4294967295");
+    params[0] = odin3_value_int(INT64_MAX);
+    expect_width_error(params, "integer overflow");
+    params[0] = odin3_value_int(UINT32_MAX);
+    expect_width_error(params, "width 4294967299 is outside 0..4294967295");
+    params[0].kind = ODIN3_VAL_STRING;
+    expect_width_error(params, "parameter 'A_WIDTH' is not an int");
+}
+
+/* A width without identifiers is folded to a constant, so an IR-7b declaration matches it. */
+static void test_constant_width_expression_folds(void) {
+    read_ok(
+        "library L\ncell cst hard ; in a 2 * 2 ; in b (8 >> 3) ; out y 1 ; fn y = a[0] ; end\n");
+    const odin3_celltype_def *def = def_of("cst");
+    TEST_ASSERT_NULL(def->ports[0].width_expr);
+    TEST_ASSERT_EQUAL_UINT32(4, def->ports[0].width);
+    TEST_ASSERT_TRUE(def->ports[1].scalar);
+    const odin3_port_def ports[3] = {{"a", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL},
+                                     {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+                                     {"y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    const odin3_celltype_def decl = {"cst", ODIN3_GRAN_BLACKBOX, 0, ports, 3, NULL, 0, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(g_design, &decl, &id));
+    TEST_ASSERT_EQUAL_UINT32(type_of("cst").v, id.v);
+}
+
+/* The check hook names the identifier that does not resolve against a definition. */
+static void test_width_check_names_identifier(void) {
+    read_ok(k_multiply);
+    const odin3_celltype_def *mul = def_of("multiply");
+    const odin3_param_def params[2] = {{"X", ODIN3_VAL_INT, odin3_value_int(1)},
+                                       {"Y", ODIN3_VAL_INT, odin3_value_int(1)}};
+    const odin3_celltype_def def = {"mult2", ODIN3_GRAN_HARD, 0, &mul->ports[2], 1, params, 2, NULL,
+                                    NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_add_local(g_design, &def, NULL));
+    TEST_ASSERT_EQUAL_STRING("add_local: cell type 'mult2': width expression names 'A_WIDTH', "
+                             "which is not an int parameter of the type",
+                             g_msg);
 }
 
 static void test_three_cells_register_three_types(void) {
@@ -289,8 +329,8 @@ static void test_seq_statements(void) {
             "  seq Q <= D @ posedge C init x\n"
             "end\n"
             "cell DFFN gate ; in D 1 ; in C 1 clock ; out Q 1 ; seq Q<=~D@negedge C init 1 ; end\n"
-            "cell DLATCHP gate ; in D 1 ; in E 1 ; out Q 1 ; seq Q <= D @ high E ; end\n"
-            "cell DLATCHN gate ; in D 1 ; in E 1 ; out Q 1 ; seq Q <= D @ low E init 1'b0\n"
+            "cell DLATCHP gate ; in D 1 ; in E 1 clock ; out Q 1 ; seq Q <= D @ high E ; end\n"
+            "cell DLATCHN gate ; in D 1 ; in E 1 clock ; out Q 1 ; seq Q <= D @ low E init 1'b0\n"
             "end\n");
     const odin3_techlib_cell *dffp = lib_of("DFFP");
     TEST_ASSERT_EQUAL_UINT32(0, dffp->n_fns);
@@ -373,7 +413,7 @@ static void test_memory_ports_and_widths(void) {
 /* fn and seq may drive some outputs; the memory drives the rest. */
 static void test_memory_drives_remaining_outputs(void) {
     read_ok("library L\n"
-            "cell rom hard ; in a 2 ; in clk 1 ; out q 8 ; out hit 1 ; out r 1\n"
+            "cell rom hard ; in a 2 ; in clk 1 clock ; out q 8 ; out hit 1 ; out r 1\n"
             "  fn hit = a == 0 ; seq r <= a[0] @ posedge clk\n"
             "  memory words 4 ; width 8 ; read sync clk\n"
             "end\n");
@@ -449,7 +489,7 @@ static const bad_case k_bad[] = {
     {CELL "  in A 1 ; out Y 1\nend\n", "t.o3lib:3:", "no fn, seq or memory"},
     {"library L\ncell H hard ; out Y 4 ; end\n", "t.o3lib:2:", "no fn, seq or memory"},
     {CELL "  out Y 1 ; fn Y = 1 ; fn Y = 0\nend\n", "t.o3lib:3:", "already driven"},
-    {CELL "  in C 1 ; out Y 1 ; fn Y = 1 ; seq Y <= 0 @ posedge C\nend\n",
+    {CELL "  in C 1 clock ; out Y 1 ; fn Y = 1 ; seq Y <= 0 @ posedge C\nend\n",
      "t.o3lib:3:", "already driven"},
     {"library L\ncell B blackbox ; out Y 1 ; fn Y = 1 ; end\n", "t.o3lib:2:", "blackbox"},
     {"library L\ncell B blackbox ; in c 1 ; out Y 1 ; seq Y <= 1 @ posedge c ; end\n",
@@ -471,8 +511,10 @@ static const bad_case k_bad[] = {
     {CELL "  in p 1 ; out y p\nend\n", "t.o3lib:3:18:", "'p'"},
     {CELL "  out y Q\n  param Q int 2\nend\n", "t.o3lib:3:9:", "'Q'"},
     {CELL "  in a 1 ; out y 1\n  fn y = a & b\nend\n", "t.o3lib:4:14:", "'b'"},
-    {CELL "  in a 1 ; out y 1 ; in c 1\n  seq y <= q @ posedge c\nend\n", "t.o3lib:4:12:", "'q'"},
-    {CELL "  in c 1 ; out y 1\n  seq y <= 1 @ posedge c init c\nend\n", "t.o3lib:4:31:", "'c'"},
+    {CELL "  in a 1 ; out y 1 ; in c 1 clock\n  seq y <= q @ posedge c\nend\n",
+     "t.o3lib:4:12:", "'q'"},
+    {CELL "  in c 1 clock ; out y 1\n  seq y <= 1 @ posedge c init c\nend\n",
+     "t.o3lib:4:31:", "'c'"},
     {CELL "  in a 1 ; out y 1 ; memory words N\nend\n", "t.o3lib:3:35:", "'N'"},
     /* library statement */
     {"cell C gate\nend\n", "t.o3lib:1:", "library"},
@@ -513,15 +555,16 @@ static const bad_case k_bad[] = {
     {CELL "  in A 1 clock clock\nend\n", "t.o3lib:3:", "twice"},
     {CELL "  in 1 1\nend\n", "t.o3lib:3:", "name"},
     /* seq */
-    {CELL "  in c 1 ; out y 1 ; seq y = 1 @ posedge c\nend\n", "t.o3lib:3:", "'<='"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= 1 posedge c\nend\n", "t.o3lib:3:", "'@'"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ rising c\nend\n", "t.o3lib:3:", "posedge"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ posedge\nend\n", "t.o3lib:3:", "clock"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y = 1 @ posedge c\nend\n", "t.o3lib:3:", "'<='"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= 1 posedge c\nend\n", "t.o3lib:3:", "'@'"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= 1 @ rising c\nend\n", "t.o3lib:3:", "posedge"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= 1 @ posedge\nend\n", "t.o3lib:3:", "clock"},
     {CELL "  out c 1 ; out y 1 ; fn c = 0 ; seq y <= 1 @ posedge c\nend\n",
      "t.o3lib:3:", "not an input"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ posedge c init\nend\n", "t.o3lib:3:", "expression"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ posedge c reset 0\nend\n", "t.o3lib:3:", "init"},
-    {CELL "  in c 1 ; out y 1 ; seq y <= @ posedge c\nend\n", "t.o3lib:3:", "expression"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= 1 @ posedge c init\nend\n",
+     "t.o3lib:3:", "expression"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= 1 @ posedge c reset 0\nend\n", "t.o3lib:3:", "init"},
+    {CELL "  in c 1 clock ; out y 1 ; seq y <= @ posedge c\nend\n", "t.o3lib:3:", "expression"},
     /* memory */
     {CELL "  out y 1 ; width 4\nend\n", "t.o3lib:3:", "memory"},
     {CELL "  out y 1 ; read sync c\nend\n", "t.o3lib:3:", "memory"},
@@ -543,6 +586,25 @@ static const bad_case k_bad[] = {
      "t.o3lib:3:", "drives no output"},
     {CELL "  in c 1 ; out y 1 ; memory words 0 ; width 1 ; read async\nend\n",
      "t.o3lib:3:", "words"},
+    /* reserved names */
+    {CELL "  param signed int 1\nend\n", "t.o3lib:3:9:", "reserved"},
+    {CELL "  in clock 1\nend\n", "t.o3lib:3:6:", "reserved"},
+    {CELL "  out x 1 ; fn x = 0\nend\n", "t.o3lib:3:7:", "reserved"},
+    /* clocks must be declared with `clock` */
+    {CELL "  in c 1 ; out y 1 ; seq y <= 1 @ posedge c\nend\n",
+     "t.o3lib:3:43:", "not a clock input"},
+    {CELL "  in e 1 ; out y 1 ; seq y <= 1 @ high e\nend\n", "t.o3lib:3:40:", "not a clock input"},
+    {CELL "  in c 1 ; out y 1 ; memory words 2 ; width 1 ; read sync c\nend\n",
+     "t.o3lib:3:59:", "not a clock input"},
+    {CELL "  in c 1 clock ; in w 1 ; out y 1 ; memory words 2 ; width 1 ; write sync w c\n"
+          "  read async\nend\n",
+     "t.o3lib:3:75:", "not a clock input"},
+    /* evaluation failures carry their reason in the located message */
+    {CELL "  in A 8'bx\nend\n", "t.o3lib:3:8:",
+     "width does not evaluate with the default "
+     "parameters: sized literal contains x or z bits"},
+    {CELL "  param W int 4 / 0\nend\n",
+     "t.o3lib:3:17:", "the default of 'W' must be a constant integer: division by zero"},
 };
 
 static void run_bad(size_t idx, const bad_case *bad) {
@@ -613,7 +675,7 @@ static const char k_full[] =
     "  in addr AW ; in data DW ; in we 1 ; in clk 1 clock ; out out DW\n"
     "  memory words 2 ** AW ; width DW ; write sync clk we ; read sync clk\n"
     "end\n"
-    "cell bb blackbox delay 3 ; in x 2 ; out y 2 ; end\n";
+    "cell bb blackbox delay 3 ; in w 2 ; out y 2 ; end\n";
 
 /* Checks a design that read k_full, then destroys it. */
 static void check_full(odin3_design *design) {
@@ -639,8 +701,8 @@ static void test_read_oom_sweep(void) {
             check_full(design);
             break;
         }
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
         odin3_design_destroy(design);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, g_msg);
     }
     TEST_ASSERT_TRUE(tries > 20);
 }
@@ -652,7 +714,10 @@ static void test_width_compile_oom_sweep(void) {
     const odin3_expr *expr = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_expr_parse(&parser, odin3_bytes_cstr("(A + B) * A"), &expr));
-    const odin3_width_source src = {arena, tab, expr};
+    uint32_t names[2] = {0, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strtab_intern(tab, odin3_bytes_cstr("B"), &names[0]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strtab_intern(tab, odin3_bytes_cstr("A"), &names[1]));
+    const odin3_width_source src = {arena, tab, expr, names, 2};
     const odin3_width_expr *wexpr = NULL;
     long tries = 0;
     for (;; tries++) {
@@ -669,6 +734,177 @@ static void test_width_compile_oom_sweep(void) {
     TEST_ASSERT_EQUAL_PTR(expr, odin3_width_expr_tree(wexpr));
 }
 
+/* --- nodes of reader-registered parametric cells ------------------------------------------- */
+
+/*
+ * multiply; shift and neg, whose output widths can overflow or go negative; deep, whose width
+ * expression is too deep to evaluate without allocating; wide, with more ports than node.c plans
+ * for inline.
+ */
+static void read_node_lib(void) {
+    odin3_strbuf lib;
+    odin3_strbuf_init(&lib);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&lib, "%s", k_multiply));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_strbuf_appendf(&lib, "cell shift hard ; param N int 4 ; param S int 2 ; in a N\n"
+                                   "  out y N << S ; fn y = a ; end\n"
+                                   "cell neg hard ; param N int 4 ; param S int 2 ; in a N\n"
+                                   "  out y N - S ; fn y = a ; end\n"
+                                   "cell deep hard ; param W int 2 ; in a W"));
+    for (int i = 0; i < DEEP_TERMS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&lib, " + 0"));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&lib, " ; out y 1 ; fn y = a[0] ; end\n"
+                                                               "cell wide hard ; param W int 2\n"));
+    for (int i = 0; i < WIDE_PORTS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&lib, "  in i%d W + %d\n", i, i));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_appendf(&lib, "  out y W * 2 ; fn y = i0 ; end\n"));
+    read_ok(lib.data);
+    odin3_strbuf_free(&lib);
+}
+
+static odin3_module *new_module(const char *name) {
+    uint32_t str = 0;
+    odin3_module_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(g_design, odin3_bytes_cstr(name), &str));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(g_design, str, (odin3_prov_id){0}, &id));
+    return odin3_module_get(g_design, id);
+}
+
+static odin3_status make_node(odin3_module *mod, const char *type, const odin3_value *params,
+                              odin3_node_id *out) {
+    const odin3_celltype_def *def = def_of(type);
+    const odin3_node_spec spec = {type_of(type), 0, {0}, params, def->n_params};
+    return odin3_node_create(mod, &spec, out);
+}
+
+static odin3_status check_full_module(odin3_module *mod) {
+    return odin3_check_module(mod, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE});
+}
+
+static void test_node_create_parametric(void) {
+    read_node_lib();
+    odin3_module *mod = new_module("top");
+    const odin3_value mul[2] = {odin3_value_int(3), odin3_value_int(5)};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, make_node(mod, "multiply", mul, &node));
+    TEST_ASSERT_EQUAL_UINT32(16, odin3_node_pins(mod, node).count);
+    TEST_ASSERT_EQUAL_UINT32(8, odin3_node_port(mod, node, 2).count);
+    const odin3_value two[1] = {odin3_value_int(2)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, make_node(mod, "deep", two, &node));
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_node_pins(mod, node).count);
+    const odin3_value three[1] = {odin3_value_int(3)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, make_node(mod, "wide", three, &node));
+    TEST_ASSERT_EQUAL_UINT32(WIDE_PORTS * 3 + (WIDE_PORTS - 1) * WIDE_PORTS / 2 + 6,
+                             odin3_node_pins(mod, node).count);
+    TEST_ASSERT_EQUAL_UINT32(3 + WIDE_PORTS - 1, odin3_node_port(mod, node, WIDE_PORTS - 1).count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full_module(mod));
+}
+
+/* One rejected create: INVALID_ARG, the reason located at port and type, the module unchanged. */
+static void expect_node_rejected(odin3_module *mod, const char *type, const odin3_value *params,
+                                 const char *message) {
+    uint32_t nodes = odin3_module_node_end(mod);
+    uint32_t pins = odin3_module_pin_end(mod);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, make_node(mod, type, params, NULL));
+    TEST_ASSERT_EQUAL_STRING(message, g_msg);
+    TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(mod));
+    TEST_ASSERT_EQUAL_UINT32(pins, odin3_module_pin_end(mod));
+}
+
+static void test_node_create_rejects_bad_widths(void) {
+    read_node_lib();
+    odin3_module *mod = new_module("top");
+    const odin3_value overflow[2] = {odin3_value_int(4), odin3_value_int(62)};
+    expect_node_rejected(mod, "shift", overflow,
+                         "port_width: port 'y' of cell type 'shift': integer overflow");
+    const odin3_value negative[2] = {odin3_value_int(2), odin3_value_int(5)};
+    expect_node_rejected(mod, "neg", negative,
+                         "port_width: port 'y' of cell type 'neg': width -3 is outside "
+                         "0..4294967295");
+    const odin3_value huge[2] = {odin3_value_int(UINT32_MAX), odin3_value_int(4)};
+    expect_node_rejected(mod, "multiply", huge,
+                         "port_width: port 'out' of cell type 'multiply': width 4294967299 is "
+                         "outside 0..4294967295");
+}
+
+static void test_node_create_connected_parametric(void) {
+    read_node_lib();
+    odin3_module *mod = new_module("top");
+    odin3_net_id nets[16];
+    for (int i = 0; i < 16; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, 0, (odin3_prov_id){0}, &nets[i]));
+    }
+    const odin3_value params[2] = {odin3_value_int(3), odin3_value_int(5)};
+    const odin3_node_spec spec = {type_of("multiply"), 0, {0}, params, 2};
+    odin3_netvec ports[3] = {{nets, 3}, {nets + 3, 5}, {nets + 8, 7}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_node_create_connected(mod, &spec, ports, NULL));
+    TEST_ASSERT_EQUAL_STRING("node_create_connected: port out has width 8, got 7 nets", g_msg);
+    ports[2].count = 8;
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, &node));
+    TEST_ASSERT_EQUAL_UINT32(16, odin3_node_pins(mod, node).count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full_module(mod));
+}
+
+/* Node creation under every allocation failure, a fresh module per try; returns the failures. */
+static long sweep_node_create(const char *type, const odin3_value *params, uint32_t pin_count) {
+    long tries = 0;
+    for (;; tries++) {
+        char name[NAME_MAX_LEN];
+        (void)snprintf(name, sizeof name, "%s_%ld", type, tries);
+        odin3_module *mod = new_module(name);
+        odin3_node_id node = {0};
+        odin3_util_set_alloc_fail_after(tries);
+        odin3_status st = make_node(mod, type, params, &node);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st == ODIN3_OK) {
+            TEST_ASSERT_EQUAL_UINT32(pin_count, odin3_node_pins(mod, node).count);
+            TEST_ASSERT_EQUAL_UINT32(pin_count + 1, odin3_module_pin_end(mod));
+            break;
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, g_msg);
+        TEST_ASSERT_EQUAL_UINT32(1, odin3_module_node_end(mod));
+        TEST_ASSERT_EQUAL_UINT32(1, odin3_module_pin_end(mod));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full_module(mod));
+    }
+    return tries;
+}
+
+static void test_node_create_oom_sweep(void) {
+    read_node_lib();
+    const odin3_value two[1] = {odin3_value_int(2)};
+    /* deep: its evaluation stacks spill to the heap; wide: its widths do not fit the plan */
+    TEST_ASSERT_TRUE(sweep_node_create("deep", two, 3) >= 2);
+    TEST_ASSERT_TRUE(sweep_node_create(
+                         "wide", two, WIDE_PORTS * 2 + (WIDE_PORTS - 1) * WIDE_PORTS / 2 + 4) >= 1);
+    const odin3_value mul[2] = {odin3_value_int(3), odin3_value_int(5)};
+    (void)sweep_node_create("multiply", mul, 16); /* a fresh module has room: may never fail */
+}
+
+/* A width expression that runs out of memory inside check is NO_MEMORY, never a violation. */
+static void test_check_oom_is_not_a_violation(void) {
+    read_node_lib();
+    odin3_module *mod = new_module("top");
+    const odin3_value two[1] = {odin3_value_int(2)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, make_node(mod, "deep", two, NULL));
+    long tries = 0;
+    for (;; tries++) {
+        odin3_util_set_alloc_fail_after(tries);
+        odin3_status st = check_full_module(mod);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st == ODIN3_OK) {
+            break;
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, g_msg);
+    }
+    TEST_ASSERT_TRUE(tries > 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_gate_cell);
@@ -679,6 +915,8 @@ int main(void) {
     RUN_TEST(test_parametric_width);
     RUN_TEST(test_parametric_width_evaluates);
     RUN_TEST(test_parametric_width_rejects_bad_params);
+    RUN_TEST(test_constant_width_expression_folds);
+    RUN_TEST(test_width_check_names_identifier);
     RUN_TEST(test_three_cells_register_three_types);
     RUN_TEST(test_clock_and_signed_modifiers);
     RUN_TEST(test_seq_statements);
@@ -697,5 +935,10 @@ int main(void) {
     RUN_TEST(test_collect_idents_order);
     RUN_TEST(test_read_oom_sweep);
     RUN_TEST(test_width_compile_oom_sweep);
+    RUN_TEST(test_node_create_parametric);
+    RUN_TEST(test_node_create_rejects_bad_widths);
+    RUN_TEST(test_node_create_connected_parametric);
+    RUN_TEST(test_node_create_oom_sweep);
+    RUN_TEST(test_check_oom_is_not_a_violation);
     return UNITY_END();
 }
