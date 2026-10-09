@@ -84,16 +84,19 @@ class TbTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp)
 
-    def reference(self, blif: Path, flavor: str, vectors: str) -> list[str]:
+    def reference(self, blif: Path, flavor: str, vectors: str, sop: bool = False) -> list[str]:
+        """The reference lines; sop: Yosys keeps .names as $sop cells, run by models/sop.v."""
         vec = self.tmp / "vec.txt"
         vec.write_text(vectors)
         ref = self.tmp / "ref.v"
         if flavor == "abc":
             res = run([ABC, "-q", f"read_blif {blif}; write_verilog {ref}"])
         else:
-            script = (f"read_blif -sop -wideports {blif}; simplemap t:$sop; "
-                      f"write_verilog -noattr {ref}")
+            script = f"read_blif {'-sop ' if sop else ''}-wideports {blif}; write_verilog -noattr {ref}"
             res = run([YOSYS, "-q", "-p", script])
+            if sop:
+                self.assertIn("$sop", ref.read_text())
+                ref.write_text(ref.read_text() + (HERE / "models" / "sop.v").read_text())
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref])
         self.assertEqual(tb.returncode, 0, tb.stderr)
@@ -126,6 +129,17 @@ class TbTest(unittest.TestCase):
         for flavor in ["abc", "yosys"]:
             with self.subTest(flavor=flavor):
                 self.assertEqual(self.reference(blif, flavor, vectors), data_lines(vectors))
+
+    def test_sop_model(self) -> None:
+        # models/sop.v (Yosys < 0.45 cannot simplemap $sop): ON-set, OFF-set, empty, wide covers.
+        ins = " ".join(f"i{k}" for k in range(14))
+        blif = self.tmp / "sop.blif"
+        blif.write_text(f".model w\n.inputs {ins}\n.outputs y n e b\n.names {ins} y\n"
+                        + "1" * 14 + " 1\n" + "0" * 13 + "- 1\n" + "-1-0" * 3 + "-1 1\n"
+                        ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
+                        ".names i7 b\n0 1\n.end\n")
+        vectors = self.ours(blif)
+        self.assertEqual(self.reference(blif, "yosys", vectors, sop=True), data_lines(vectors))
 
     def test_negedge_register_with_yosys(self) -> None:
         blif = self.tmp / "ports.blif"
@@ -231,11 +245,13 @@ class SimCheckTest(unittest.TestCase):
         self.assertRegex(res.stdout, r"pass\s+yosys\s.*toggle\.blif")
 
     def test_wide_cover_with_yosys(self) -> None:
-        # Yosys reads a .names of more than 12 inputs only as a $sop (read_blif -sop).
+        # Yosys reads a .names of more than 12 inputs only as a $sop (read_blif -sop), which
+        # Icarus runs from models/sop.v; an OFF-set cover and a DEPTH 0 cover too.
         ins = " ".join(f"i{k}" for k in range(14))
         blif = self.tmp / "wide.blif"
-        blif.write_text(f".model w\n.inputs {ins} c\n.outputs y s\n.names {ins} y\n"
+        blif.write_text(f".model w\n.inputs {ins} c\n.outputs y s n e\n.names {ins} y\n"
                         + "1" * 14 + " 1\n" + "0" * 13 + "- 1\n"
+                        ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
                         ".subckt adder a=i0 b=i1 cin=c sumout=s\n.end\n\n"
                         ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n")
         res = self.check("--fixtures", blif)

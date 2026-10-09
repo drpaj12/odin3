@@ -11,8 +11,9 @@
 #          edge (ABC drops the latch clocks and clocks every register on one rising `clock`, which
 #          the testbench toggles with every clock input), or
 #   yosys  Yosys `read_blif -sop -wideports; simplemap t:$sop; write_verilog -noattr` (-sop: Yosys
-#          reads a cover of more than 12 inputs only as a $sop, which simplemap turns into gates
-#          that write_verilog can print) plus models/adder.v and
+#          reads a cover of more than 12 inputs only as a $sop; simplemap makes gates of them
+#          from Yosys 0.45 on; for older Yosys, models/sop.v gives Icarus the $sop cell) plus
+#          models/adder.v and
 #          models/multiply.v, for BLIFs with `adder`/`multiply` instances (ABC cannot read black
 #          boxes), with falling-edge registers, or with a data input named `clock` (ABC's clock).
 # Before either reads it, every latch whose init is 2, 3 or absent gets init 0: the simulator
@@ -154,7 +155,7 @@ build_reference() {
         out=$(run_capped "$dir/yosys.log" "$dir/rss.yosys" "$SC_YOSYS" -q -p \
               "read_blif -sop -wideports $dir/ref.blif; simplemap t:\$sop; write_verilog -noattr $dir/ref.v")
         [ "$out" = ok ] || { echo "$out yosys"; return; }
-        cat "$HERE/models/adder.v" "$HERE/models/multiply.v" >>"$dir/ref.v"
+        cat "$HERE/models/adder.v" "$HERE/models/multiply.v" "$HERE/models/sop.v" >>"$dir/ref.v"
     fi
     "$HERE/tb.sh" --flavor "$flavor" --blif "$dir/ref.blif" --vectors "$dir/vec.1" \
         --ref "$dir/ref.v" >"$dir/tb.v" 2>"$dir/tb.log" || { echo "error tb.sh"; return; }
