@@ -14,6 +14,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -81,12 +82,10 @@ static void make_out_dir(void) {
     dir_file(vvp_path, "sim.vvp");
 }
 
-/* Removes every file a test may leave (and the writer's .tmp files), then the directory. */
+/* Removes every file a test may leave, then the directory (which must then be empty: the
+ * writer leaves no temporary behind). */
 static void remove_out_dir(void) {
     for (size_t i = 0; i < sizeof RUN_FILES / sizeof RUN_FILES[0]; i++) {
-        char tmp[PATH_BUF + 8];
-        (void)snprintf(tmp, sizeof tmp, "%s.tmp", RUN_FILES[i]);
-        (void)remove(tmp);
         (void)remove(RUN_FILES[i]);
     }
     TEST_ASSERT_EQUAL_INT(0, rmdir(out_dir));
@@ -1312,9 +1311,12 @@ static const char *const BASELINE = "previous contents\n";
 /* The destination still holds BASELINE and no temporary file is left. */
 static void expect_baseline_kept(void) {
     TEST_ASSERT_EQUAL_STRING(BASELINE, slurp(out_path, aux));
-    char tmp[PATH_BUF + 8];
-    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
-    TEST_ASSERT_FALSE(file_exists(tmp));
+    DIR *dir = opendir(out_dir);
+    TEST_ASSERT_NOT_NULL(dir);
+    for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+        TEST_ASSERT_NULL(strstr(ent->d_name, "out.v.")); /* the writer's "out.v.XXXXXX" */
+    }
+    (void)closedir(dir);
 }
 
 static void put_baseline(void) {

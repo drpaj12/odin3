@@ -12,6 +12,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <dirent.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -72,9 +73,6 @@ static void make_out_dir(void) {
 }
 
 static void remove_out_dir(void) {
-    char tmp[FILE_BUF + 8];
-    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
-    (void)remove(tmp);
     (void)remove(out_path);
     (void)rmdir(out_dir);
 }
@@ -588,10 +586,15 @@ static void write_old_destination(void) {
     TEST_ASSERT_EQUAL_INT(0, fclose(fp));
 }
 
+/* The run directory holds the destination only: the writer's temporary ("out.dot.XXXXXX") is gone.
+ */
 static void assert_no_temp_file(void) {
-    char tmp[FILE_BUF + 8];
-    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
-    TEST_ASSERT_NOT_EQUAL_INT(0, access(tmp, F_OK));
+    DIR *dir = opendir(out_dir);
+    TEST_ASSERT_NOT_NULL(dir);
+    for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+        TEST_ASSERT_NULL(strstr(ent->d_name, "out.dot."));
+    }
+    (void)closedir(dir);
 }
 
 /* A failed write leaves an existing destination untouched and no temporary file. */

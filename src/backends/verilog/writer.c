@@ -7,6 +7,7 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "util/alloc.h"
+#include "util/file.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -152,9 +153,8 @@ typedef struct verilog_writer {
     const odin3_strtab *tab;
     const char *path;
     odin3_verilog_name_style name_style;
-    odin3_strbuf tmp_path; /* path + ".tmp": written, then renamed over path */
-    FILE *file;
-    bool opened; /* tmp_path was created: a failure removes it */
+    odin3_atomic_file file; /* a temporary beside path, renamed over it on success */
+    bool opened;            /* file is open: wr_finish commits or removes it */
     bool oom_logged;
     size_t escaped_end; /* out.len just after an escaped identifier, SIZE_MAX otherwise */
     odin3_status st;    /* sticky: the first failure */
@@ -196,7 +196,7 @@ static void vw_flush(verilog_writer *wr) {
         return;
     }
     errno = 0;
-    if (fwrite(wr->out.data, 1, wr->out.len, wr->file) != wr->out.len) {
+    if (fwrite(wr->out.data, 1, wr->out.len, wr->file.fp) != wr->out.len) {
         int saved = errno != 0 ? errno : EIO;
         odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line + 1,
                   strerror(saved));
@@ -1663,12 +1663,10 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
                            .escaped_end = SIZE_MAX};
     odin3_strbuf_init(&wr->out);
     odin3_strbuf_init(&wr->cand);
-    odin3_strbuf_init(&wr->tmp_path);
     wr->builtin = odin3_u64map_create(0);
     wr->prov_leaf = odin3_u64map_create(0);
     wr->stubbed = odin3_u64map_create(0);
-    if (wr->builtin == NULL || wr->prov_leaf == NULL || wr->stubbed == NULL ||
-        odin3_strbuf_appendf(&wr->tmp_path, "%s.tmp", path) != ODIN3_OK) {
+    if (wr->builtin == NULL || wr->prov_leaf == NULL || wr->stubbed == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
     for (uint32_t i = 0; i < N_BUILTINS; i++) {
@@ -1683,45 +1681,28 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
     return ODIN3_OK;
 }
 
-/* Creates path.tmp beside the destination; the destination is untouched until the rename. */
+/* Creates a private temporary beside the destination; the destination is untouched until the
+ * rename. */
 static odin3_status wr_open(verilog_writer *wr) {
-    wr->file = fopen(wr->tmp_path.data, "wb");
-    if (wr->file == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open %s for writing: %s", wr->path,
-                  wr->tmp_path.data, strerror(errno));
-        return vw_fail(wr, ODIN3_ERR_IO);
+    odin3_status st = odin3_atomic_file_open(&wr->file, wr->path);
+    if (st != ODIN3_OK) {
+        return vw_fail(wr, st);
     }
     wr->opened = true;
     /* The writer buffers itself; unbuffered stdio reports a failed write at once. */
-    if (setvbuf(wr->file, NULL, _IONBF, 0) != 0) {
+    if (setvbuf(wr->file.fp, NULL, _IONBF, 0) != 0) {
         odin3_log(ODIN3_LOG_ERROR, "%s: cannot set the output buffer", wr->path);
         return vw_fail(wr, ODIN3_ERR_IO);
     }
     return ODIN3_OK;
 }
 
-/* Closes the temporary file (a failure is a located write error), then renames it over the
- * destination on success or removes it on any failure. */
+/* Renames the temporary over the destination on success or removes it on any failure; a close
+ * or rename failure becomes the sticky status. */
 static void wr_finish(verilog_writer *wr) {
-    if (wr->file != NULL) {
-        errno = 0;
-        bool failed = ferror(wr->file) != 0;
-        failed = fclose(wr->file) != 0 || failed;
-        int saved = errno != 0 ? errno : EIO;
-        wr->file = NULL;
-        if (failed && wr->st == ODIN3_OK) {
-            odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
-                      strerror(saved));
-            (void)vw_fail(wr, ODIN3_ERR_IO);
-        }
-    }
-    if (wr->opened && wr->st == ODIN3_OK && rename(wr->tmp_path.data, wr->path) != 0) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot rename %s over it: %s", wr->path, wr->tmp_path.data,
-                  strerror(errno));
-        (void)vw_fail(wr, ODIN3_ERR_IO);
-    }
-    if (wr->opened && wr->st != ODIN3_OK) {
-        (void)remove(wr->tmp_path.data);
+    if (wr->opened) {
+        wr->opened = false;
+        wr->st = odin3_atomic_file_close(&wr->file, wr->st);
     }
 }
 
@@ -1729,7 +1710,6 @@ static void wr_free(verilog_writer *wr) {
     end_module(wr);
     odin3_strbuf_free(&wr->out);
     odin3_strbuf_free(&wr->cand);
-    odin3_strbuf_free(&wr->tmp_path);
     odin3_u64map_destroy(wr->builtin);
     odin3_u64map_destroy(wr->prov_leaf);
     odin3_u64map_destroy(wr->stubbed);

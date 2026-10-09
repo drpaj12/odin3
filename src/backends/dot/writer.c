@@ -5,6 +5,7 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "util/alloc.h"
+#include "util/file.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -519,31 +520,19 @@ static odin3_status dot_emit(const dot_ctx *dc, odin3_strbuf *buf) {
     return st == ODIN3_OK ? dot_put_str(buf, "}\n") : st;
 }
 
-/* Writes beside the destination, then renames over it: a failure leaves the destination as it was.
- */
+/* Writes a private temporary beside the destination, then renames it over the destination: a
+ * failure leaves the destination as it was. */
 static odin3_status dot_save(const char *path, const odin3_strbuf *buf) {
-    odin3_strbuf tmp;
-    odin3_strbuf_init(&tmp);
-    odin3_status st = odin3_strbuf_appendf(&tmp, "%s.tmp", path);
+    odin3_atomic_file file;
+    odin3_status st = odin3_atomic_file_open(&file, path);
     if (st != ODIN3_OK) {
-        odin3_strbuf_free(&tmp);
         return st;
     }
-    FILE *fp = fopen(tmp.data, "wb");
-    bool ok = fp != NULL;
-    if (ok) {
-        ok = (buf->len == 0 || fwrite(buf->data, 1, buf->len, fp) == buf->len);
-        ok = (fclose(fp) == 0) && ok;
-        ok = ok && rename(tmp.data, path) == 0;
-        if (!ok) {
-            (void)remove(tmp.data);
-        }
-    }
-    if (!ok) {
+    if (buf->len != 0 && fwrite(buf->data, 1, buf->len, file.fp) != buf->len) {
         odin3_log(ODIN3_LOG_ERROR, "dot: cannot write '%s'", path);
+        st = ODIN3_ERR_IO;
     }
-    odin3_strbuf_free(&tmp);
-    return ok ? ODIN3_OK : ODIN3_ERR_IO;
+    return odin3_atomic_file_close(&file, st);
 }
 
 static odin3_status dot_check_budget(const dot_ctx *dc, const odin3_dot_opts *opts) {

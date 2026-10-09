@@ -4,6 +4,7 @@
 #include "backends/json/jw.h"
 #include "ir/celltype.h"
 #include "util/alloc.h"
+#include "util/file.h"
 #include "util/log.h"
 
 #include <errno.h>
@@ -369,28 +370,21 @@ static odin3_status write_design(jw *out) {
     return status != ODIN3_OK ? status : out->status;
 }
 
-/* Writes beside the destination, then renames over it: a failure leaves the destination as it was
- * and removes only the temporary file. */
-static odin3_status save_design(jw *state, const char *path, const char *tmp) {
-    state->fp = fopen(tmp, "wb");
-    if (state->fp == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", tmp, strerror(errno));
-        return ODIN3_ERR_IO;
-    }
-    odin3_status status = write_design(state);
-    if (fclose(state->fp) != 0 && status == ODIN3_OK) {
-        status = ODIN3_ERR_IO;
-    }
-    if (status == ODIN3_OK && rename(tmp, path) != 0) {
-        status = ODIN3_ERR_IO;
-    }
+/* Writes a private temporary beside the destination, then renames it over the destination: a
+ * failure leaves the destination as it was and removes only the temporary. */
+static odin3_status save_design(jw *state, const char *path) {
+    odin3_atomic_file file;
+    odin3_status status = odin3_atomic_file_open(&file, path);
     if (status != ODIN3_OK) {
-        if (status == ODIN3_ERR_IO) {
-            odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(errno));
-        }
-        (void)remove(tmp);
+        return status;
     }
-    return status;
+    state->fp = file.fp;
+    status = write_design(state);
+    if (status == ODIN3_ERR_IO) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(errno));
+    }
+    state->fp = NULL;
+    return odin3_atomic_file_close(&file, status);
 }
 
 odin3_status odin3_json_write(const odin3_design *design, const char *path) {
@@ -398,18 +392,12 @@ odin3_status odin3_json_write(const odin3_design *design, const char *path) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_strbuf tmp;
-    odin3_strbuf_init(&tmp);
-    odin3_status status = odin3_strbuf_appendf(&tmp, "%s.tmp", path);
-    if (status == ODIN3_OK) {
-        /* odin3_module_get takes a mutable design; the writer never changes it. */
-        jw state = {.design = (odin3_design *)design,
-                    .strtab = odin3_design_strtab(design),
-                    .status = ODIN3_OK};
-        odin3_strbuf_init(&state.key);
-        status = save_design(&state, path, tmp.data);
-        odin3_strbuf_free(&state.key);
-    }
-    odin3_strbuf_free(&tmp);
+    /* odin3_module_get takes a mutable design; the writer never changes it. */
+    jw state = {.design = (odin3_design *)design,
+                .strtab = odin3_design_strtab(design),
+                .status = ODIN3_OK};
+    odin3_strbuf_init(&state.key);
+    odin3_status status = save_design(&state, path);
+    odin3_strbuf_free(&state.key);
     return status;
 }
