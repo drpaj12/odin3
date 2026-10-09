@@ -549,25 +549,19 @@ static int run_program(const char *const command[2]) {
     return WEXITSTATUS(status);
 }
 
-/* Yosys on PATH, else the workspace build; NULL when neither runs. */
+/* $ODIN3_YOSYS (CMake sets it from find_program), else `yosys` on PATH; NULL when it does not run.
+ */
 static const char *find_yosys(void) {
-    static char path[512];
+    const char *env = getenv("ODIN3_YOSYS");
+    const char *yosys = env != NULL && env[0] != '\0' ? env : "yosys";
     FILE *probe = fopen("probe.ys", "wb");
     if (probe == NULL) {
         return NULL;
     }
     (void)fclose(probe);
-    const char *home = getenv("HOME");
-    (void)snprintf(path, sizeof path, "%s/odin3-ws/external/yosys/build/yosys",
-                   home != NULL ? home : "");
-    const char *found = NULL;
-    if (run_program((const char *const[2]){"yosys", "probe.ys"}) == 0) {
-        found = "yosys";
-    } else if (run_program((const char *const[2]){path, "probe.ys"}) == 0) {
-        found = path;
-    }
+    int rc = run_program((const char *const[2]){yosys, "probe.ys"});
     (void)remove("probe.ys");
-    return found;
+    return rc == 0 ? yosys : NULL;
 }
 
 /* Yosys must accept what we write (when it is installed). */

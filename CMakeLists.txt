@@ -198,6 +198,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
+    # The writers' Yosys checks run when Yosys is found (workspace build first, then PATH) and
+    # are ignored otherwise (CI has no Yosys).
+    find_program(ODIN3_YOSYS_EXE yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
+    if(ODIN3_YOSYS_EXE)
+        set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
+            ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
+    endif()
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
