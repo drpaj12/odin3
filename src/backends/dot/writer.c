@@ -9,7 +9,6 @@
 #include "util/str.h"
 #include "util/vec.h"
 
-#include <ctype.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -208,7 +207,7 @@ static bool dot_parse_loc(const char *text, odin3_bytes *file, uint32_t *line) {
     }
     uint64_t value = 0;
     for (const char *at = colon + 1; *at != '\0'; at++) {
-        if (!isdigit((unsigned char)*at)) {
+        if (*at < '0' || *at > '9') {
             return false;
         }
         value = value * DEC_BASE + (uint64_t)(*at - '0');
@@ -385,37 +384,42 @@ static odin3_status dot_put_str(odin3_strbuf *buf, const char *text) {
     return dot_put_bytes(buf, text, strlen(text));
 }
 
-/* Appends text as the inside of a dot quoted string: quote, backslash and newline escaped. */
-static odin3_status dot_put_escaped(odin3_strbuf *buf, const char *text) {
-    for (const char *at = text; *at != '\0'; at++) {
-        char piece[3] = {*at, '\0', '\0'};
-        size_t len = 1;
-        if (*at == '"' || *at == '\\') {
-            piece[0] = '\\';
-            piece[1] = *at;
-            len = 2;
-        } else if (*at == '\n') {
-            piece[0] = '\\';
-            piece[1] = 'n';
-            len = 2;
-        } else if ((unsigned char)*at < ' ') {
-            piece[0] = '?';
-        }
-        odin3_status st = dot_put_bytes(buf, piece, len);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    return ODIN3_OK;
+static bool dot_ordinary(char chr) {
+    return chr != '"' && chr != '\\' && (unsigned char)chr >= ' ';
 }
 
-static bool dot_plain_name(const char *name) {
-    for (const char *at = name; *at != '\0'; at++) {
-        if (!isalnum((unsigned char)*at) && *at != '_') {
-            return false;
+/* The replacement for one character that is not ordinary. */
+static const char *dot_replacement(char chr) {
+    switch (chr) {
+    case '"':
+        return "\\\"";
+    case '\\':
+        return "\\\\";
+    case '\n':
+        return "\\n";
+    default:
+        return "?";
+    }
+}
+
+/* Appends text as the inside of a dot quoted string: quote, backslash and newline escaped,
+ * other control characters replaced by '?'. Ordinary runs go in one append. */
+static odin3_status dot_put_escaped(odin3_strbuf *buf, const char *text) {
+    const char *at = text;
+    odin3_status st = ODIN3_OK;
+    while (st == ODIN3_OK && *at != '\0') {
+        size_t run = 0;
+        while (dot_ordinary(at[run])) {
+            run++;
+        }
+        st = run > 0 ? dot_put_bytes(buf, at, run) : ODIN3_OK;
+        at += run;
+        if (st == ODIN3_OK && *at != '\0') {
+            st = dot_put_str(buf, dot_replacement(*at));
+            at++;
         }
     }
-    return name[0] != '\0';
+    return st;
 }
 
 static odin3_status dot_emit_node(const dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
@@ -438,9 +442,8 @@ static odin3_status dot_emit_cluster(const dot_ctx *dc, odin3_strbuf *buf,
                                      const odin3_module *mod) {
     uint32_t id = odin3_module_id_of(mod).v;
     const char *name = odin3_strtab_get(dc->tab, odin3_module_name(mod));
-    odin3_status st = dot_plain_name(name)
-                          ? odin3_strbuf_appendf(buf, "  subgraph cluster_%s {\n", name)
-                          : odin3_strbuf_appendf(buf, "  subgraph cluster_m%u {\n", id);
+    /* The module ID alone names the cluster: injective whatever the module names look like. */
+    odin3_status st = odin3_strbuf_appendf(buf, "  subgraph cluster_%u {\n", id);
     st = st == ODIN3_OK ? dot_put_str(buf, "    label=\"") : st;
     st = st == ODIN3_OK ? dot_put_escaped(buf, name) : st;
     st = st == ODIN3_OK ? dot_put_str(buf, "\";\n") : st;
@@ -516,19 +519,31 @@ static odin3_status dot_emit(const dot_ctx *dc, odin3_strbuf *buf) {
     return st == ODIN3_OK ? dot_put_str(buf, "}\n") : st;
 }
 
+/* Writes beside the destination, then renames over it: a failure leaves the destination as it was.
+ */
 static odin3_status dot_save(const char *path, const odin3_strbuf *buf) {
-    FILE *fp = fopen(path, "wb");
-    if (fp == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "dot: cannot open '%s' for writing", path);
-        return ODIN3_ERR_IO;
+    odin3_strbuf tmp;
+    odin3_strbuf_init(&tmp);
+    odin3_status st = odin3_strbuf_appendf(&tmp, "%s.tmp", path);
+    if (st != ODIN3_OK) {
+        odin3_strbuf_free(&tmp);
+        return st;
     }
-    size_t put = buf->len > 0 ? fwrite(buf->data, 1, buf->len, fp) : 0;
-    int closed = fclose(fp);
-    if (put != buf->len || closed != 0) {
+    FILE *fp = fopen(tmp.data, "wb");
+    bool ok = fp != NULL;
+    if (ok) {
+        ok = (buf->len == 0 || fwrite(buf->data, 1, buf->len, fp) == buf->len);
+        ok = (fclose(fp) == 0) && ok;
+        ok = ok && rename(tmp.data, path) == 0;
+        if (!ok) {
+            (void)remove(tmp.data);
+        }
+    }
+    if (!ok) {
         odin3_log(ODIN3_LOG_ERROR, "dot: cannot write '%s'", path);
-        return ODIN3_ERR_IO;
     }
-    return ODIN3_OK;
+    odin3_strbuf_free(&tmp);
+    return ok ? ODIN3_OK : ODIN3_ERR_IO;
 }
 
 static odin3_status dot_check_budget(const dot_ctx *dc, const odin3_dot_opts *opts) {

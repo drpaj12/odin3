@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -29,13 +30,16 @@ enum {
     BUDGET_TEST = 2,
     MSG_MAX = 512,
     NAME_BUF = 32,
+    PATH_BUF = 256,
+    FILE_BUF = 512,
 };
 
 static odin3_design *design;
 static odin3_module *module;
 static odin3_pass_ctx ctx;
 static char last_error[MSG_MAX];
-static const char *out_path = "/tmp/odin3_test_dot_writer.dot";
+static char out_dir[PATH_BUF];
+static char out_path[FILE_BUF];
 
 static void capture_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
@@ -59,6 +63,22 @@ static odin3_module *make_module(const char *name) {
     return mod;
 }
 
+/* A private directory per run (under TMPDIR or /tmp), so concurrent test runs never share files. */
+static void make_out_dir(void) {
+    const char *base = getenv("TMPDIR");
+    (void)snprintf(out_dir, sizeof out_dir, "%s/odin3_dot_XXXXXX", base != NULL ? base : "/tmp");
+    TEST_ASSERT_NOT_NULL(mkdtemp(out_dir));
+    (void)snprintf(out_path, sizeof out_path, "%s/out.dot", out_dir);
+}
+
+static void remove_out_dir(void) {
+    char tmp[FILE_BUF + 8];
+    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
+    (void)remove(tmp);
+    (void)remove(out_path);
+    (void)rmdir(out_dir);
+}
+
 void setUp(void) {
     last_error[0] = '\0';
     odin3_log_set_sink(capture_sink, NULL);
@@ -66,7 +86,7 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("reader"), &ctx));
     module = make_module("top");
-    (void)remove(out_path);
+    make_out_dir();
 }
 
 void tearDown(void) {
@@ -75,7 +95,7 @@ void tearDown(void) {
     odin3_design_destroy(design);
     design = NULL;
     module = NULL;
-    (void)remove(out_path);
+    remove_out_dir();
 }
 
 /* --- IR builders --------------------------------------------------------------------------- */
@@ -271,8 +291,8 @@ static void test_clusters_per_module(void) {
     build_hier();
     char *text = render(ODIN3_DOT_FOCUS_NONE, NULL);
     TEST_ASSERT_TRUE(strncmp(text, "digraph", 7) == 0);
-    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_top {"));
-    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_sub {"));
+    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_1 {"));
+    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_2 {"));
     expect_in(text, "$_NOT_");
     expect_in(text, "inv");
     expect_in(text, "u1");
@@ -358,17 +378,17 @@ static void test_focus_lifts_budget(void) {
 static void test_focus_path(void) {
     build_hier();
     char *text = render(ODIN3_DOT_FOCUS_PATH, "top/u1");
-    expect_in(text, "cluster_sub");
-    expect_absent(text, "cluster_top");
+    expect_in(text, "label=\"sub\"");
+    expect_absent(text, "label=\"top\"");
     expect_in(text, "inv");
     expect_absent(text, "u1");
     odin3_util_free(text);
     text = render(ODIN3_DOT_FOCUS_PATH, "top");
-    expect_in(text, "cluster_top");
-    expect_in(text, "cluster_sub"); /* the subtree under top */
+    expect_in(text, "label=\"top\"");
+    expect_in(text, "label=\"sub\""); /* the subtree under top */
     odin3_util_free(text);
     text = render(ODIN3_DOT_FOCUS_PATH, "sub");
-    expect_absent(text, "cluster_top");
+    expect_absent(text, "label=\"top\"");
     odin3_util_free(text);
 }
 
@@ -522,7 +542,7 @@ static void test_odd_module_name_cluster_id(void) {
     odin3_module *odd = make_module("a.b c");
     add_port(odd, "p", ODIN3_DIR_IN);
     char *text = render(ODIN3_DOT_FOCUS_NONE, NULL);
-    expect_in(text, "subgraph cluster_m2 {");
+    expect_in(text, "subgraph cluster_2 {");
     expect_in(text, "label=\"a.b c\"");
     odin3_util_free(text);
 }
@@ -545,6 +565,54 @@ static void oom_sweep(const odin3_dot_opts *opts) {
         fail++;
     }
     TEST_ASSERT_TRUE(fail < OOM_LIMIT);
+}
+
+/* Old scheme: modules "m2" (ID 1) and "a.b" (ID 2) could both be cluster_m2. */
+static void test_cluster_ids_unique(void) {
+    odin3_module *plain = make_module("m3");
+    odin3_module *odd = make_module("a.b");
+    add_port(plain, "p", ODIN3_DIR_IN);
+    add_port(odd, "p", ODIN3_DIR_IN);
+    char *text = render(ODIN3_DOT_FOCUS_NONE, NULL);
+    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_2 {"));
+    TEST_ASSERT_EQUAL_UINT(1, count_of(text, "subgraph cluster_3 {"));
+    expect_in(text, "label=\"m3\"");
+    expect_in(text, "label=\"a.b\"");
+    odin3_util_free(text);
+}
+
+static void write_old_destination(void) {
+    FILE *fp = fopen(out_path, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    TEST_ASSERT_TRUE(fputs("old contents", fp) >= 0);
+    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
+}
+
+static void assert_no_temp_file(void) {
+    char tmp[FILE_BUF + 8];
+    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
+    TEST_ASSERT_NOT_EQUAL_INT(0, access(tmp, F_OK));
+}
+
+/* A failed write leaves an existing destination untouched and no temporary file. */
+static void test_failure_keeps_destination(void) {
+    build_hier();
+    write_old_destination();
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_dot_write(design, out_path, NULL));
+    odin3_util_set_alloc_fail_after(-1);
+    char *text = slurp(out_path);
+    TEST_ASSERT_EQUAL_STRING("old contents", text);
+    odin3_util_free(text);
+    assert_no_temp_file();
+}
+
+static void test_rename_failure_cleans_temp(void) {
+    build_hier();
+    TEST_ASSERT_EQUAL_INT(0, mkdir(out_path, 0700)); /* a directory cannot be renamed over */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_dot_write(design, out_path, NULL));
+    assert_no_temp_file();
+    TEST_ASSERT_EQUAL_INT(0, rmdir(out_path));
 }
 
 static void test_out_of_memory_sweep(void) {
@@ -618,6 +686,9 @@ int main(void) {
     RUN_TEST(test_unwritable_path);
     RUN_TEST(test_empty_design);
     RUN_TEST(test_odd_module_name_cluster_id);
+    RUN_TEST(test_cluster_ids_unique);
+    RUN_TEST(test_failure_keeps_destination);
+    RUN_TEST(test_rename_failure_cleans_temp);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_focus_oom_sweep);
     RUN_TEST(test_dot_accepts_output);
