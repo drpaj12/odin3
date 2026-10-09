@@ -82,6 +82,7 @@ add_library(odin3_core OBJECT
     src/techlib/reader.c
     src/techlib/reader_cell.c)
     src/backends/dot/writer.c)
+    src/backends/dot/writer.c
     src/backends/json/emit.c
     src/backends/json/cells.c
     src/backends/json/lut.c
