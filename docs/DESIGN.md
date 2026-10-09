@@ -124,11 +124,13 @@ design files. One top at most (`top` twice is an error).
 
 *Words* (`.o3proj` and `-f`). Words are separated by blanks. A word is bare, or wholly enclosed
 in double quotes; inside quotes the only escapes are `\"` and `\\` (any other backslash is an
-error), outside quotes a backslash is an ordinary character. A quote inside a bare word,
-characters right after a closing quote, an unterminated quote and an empty quoted word `""` are
-`syntax` errors. `#` outside quotes starts a comment; in `-f` lists so does `//` at the start of
-a word. A string macro keeps its quotes in its value: `define "MSG=\"hi\""` defines `MSG` as
-`"hi"`.
+error). Outside quotes a backslash is an ordinary character: Windows `\` paths are not
+translated. Characters right after a closing quote, an unterminated quote and an empty quoted
+word `""` are `syntax` errors; so is a quote inside a bare word in `.o3proj`, while in a `-f`
+list it is an ordinary character (`+define+TAG="AB"` defines `TAG` as `"AB"`, quotes
+included). `#` at the start of a word starts a comment, as does `//` in a `-f` list; inside a
+word both are ordinary (`+define+D=#1`). A string macro keeps its quotes in its value: `define
+"MSG=\"hi\""` defines `MSG` as `"hi"`.
 
 *`.o3proj`.* One statement per line; the first word is the key; unknown keys are `unknown_key`.
 - `file <lang> <path> [library <lib>]` (`lang`: verilog, systemverilog, vhdl, blif, vqm, edif;
@@ -152,20 +154,25 @@ of every list it reaches through `-f <list>`, resolve against the outermost list
 (what other tools do when run from there); entries of a `-F <list>` resolve against that list's
 own directory. Options: `-f`/`-F <list>` (a cycle is `f_cycle`), `-v <file>`, `-y <dir>`,
 `+incdir+<dir>[+<dir>…]`, `+define+<name>[=<v>][+…]`, `+libext+<ext>[+…]` (also without `-y`),
-`-top <name>` / `--top-module <name>`, `-sv` (Verilog files after it, in this list and the lists
-it reaches, are SystemVerilog). `$NAME` and `${NAME}` expand from the environment when the word
+`-top <name>` / `--top-module <name>`, `-sv` (Verilog files after it are SystemVerilog, to the
+end of the list that says it, including the lists it reaches; it does not leak out of a nested
+list). `$NAME` and `${NAME}` expand from the environment when the word
 is used; an unset name is `undefined_variable`, any other `$` a `syntax` error. Any other option
 is `unknown_option`. A file list has no parameters or libraries.
 
 *Quartus.* A `.qpf` holds `NAME = "value"` lines. With one `PROJECT_REVISION` (or none: the
 `.qpf`'s own name) that revision's `.qsf` is read; with several, `--revision <r>` (or
 `import … revision <r>`) chooses, and without it the error is `ambiguous_revision`, listing them;
-a revision not listed is `unknown_revision`. A `.qsf` may also be given directly (its name is
-the revision). A `.qsf` (and a `.qip`) is read as Tcl words: bare words, `"…"` (escapes `\"`,
+a revision not listed is `unknown_revision` (located at the `import` line; unlocated for
+`--revision`). A `.qsf` may also be given directly (its name is the revision). A `.qsf` (and a `.qip`) is read as Tcl words: bare words, `"…"` (escapes `\"`,
 `\\` only), `{…}` (verbatim, nested), `\`-newline continuation, `;` or newline between
-commands, `#` comments where a command starts; characters after a closing quote or brace,
-`$…` and `[…]` substitution are `syntax` errors, except in a `.qip` the idiom
+commands, `#` comments where a command starts. Inside a word, bare or quoted, `[` and `]` are
+ordinary characters (`-to LEDR[0]`, `-to "SW[1]"`); a word that starts with `[` is command
+substitution, a `syntax` error except, in a `.qip`, the idiom
 `[file join $::quartus(qip_path) "<path>"]`, which means `<path>` relative to the `.qip`.
+Characters after a closing quote or brace and `$` substitution are `syntax` errors. Plain
+relative paths in a `.qsf` and in every `.qip` resolve against the project directory (the
+`.qsf`'s), as in Quartus.
 - Commands: `set_global_assignment`, `set_instance_assignment`, `set_io_assignment` (`-name
   <N> … <value>`), `set_location_assignment <value> -to <pin>` (listed as `LOCATION`),
   `set_parameter -name <N> [-entity <top>] [-to <path>] <value>`; any other command is ignored
@@ -209,23 +216,31 @@ order (the first match wins; an include of a file already being included is `inc
 Macros stay defined for later files (one compilation unit). Design units are identified by
 library and name; VHDL names are case-insensitive, also across a Verilog/VHDL instantiation.
 VHDL files are analysed in dependency order (a file after the files defining the packages it
-`use`s and the entities it instantiates as `entity lib.e`; otherwise listing order; a cycle is
-`dependency_cycle`); Verilog keeps listing order. An instance resolves to a design unit (the
+`use`s, the entities it instantiates as `entity lib.e`, the entity of an architecture and the
+package of a package body it holds; otherwise listing order; a cycle is `dependency_cycle`);
+Verilog keeps listing order. The instances in an architecture belong to its entity, whichever
+file holds it. An instance resolves to a design unit (the
 instantiating unit's library first), else a `-v`/`libfile` module (first file wins), else a
 `-y`/`libdir` file `<dir>/<name><ext>` (directories in order, then `+libext+` extensions in
 order, default `.v`); library modules load only when instantiated, never shadow design units
-and are never top candidates. Unresolved is `unresolved_module`, except Altera primitives in a
-VQM netlist (the VQM reader's library, Phase 6).
+and are never top candidates. Instances of Altera megafunctions in RTL (`altsyncram`,
+`altdpram`, `altshift_taps`, `altmult_add`, `lpm_*`) resolve through the Phase 2 primitive
+library, not the project; in a VQM netlist, instances of the device primitives the VQM reader
+knows (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_obuf`,
+`cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library grows in
+Phase 6) resolve through that library. Any other unresolved instance is `unresolved_module`.
 
 *Errors* are located at the project-file or source line (`file:line`) where there is one:
 `missing_file`, `unknown_key`, `unknown_option`, `unknown_file_type`, `unsupported_input_type`,
-`unsupported_language`, `syntax`, `undefined_variable`, `f_cycle`, `qip_cycle`,
+`unsupported_language` (a design file in a language the build cannot elaborate yet, e.g.
+EDIF before Phase 6), `syntax`, `undefined_variable`, `f_cycle`, `qip_cycle`,
 `ambiguous_revision`, `unknown_revision`, `include_not_found`, `include_cycle`,
 `duplicate_module` (at the second definition), `dependency_cycle`, `ambiguous_top`, `no_top`,
 `unknown_top`, `unresolved_module`.
 
 **Top module.** `--top <name>` (or the project's `top`, `[<library>.]<module>`) wins; a name
-found in several libraries is `ambiguous_top`. Otherwise the top is the single design unit no
+found nowhere is `unknown_top`, one found in several libraries `ambiguous_top`, both located at
+the declaring line (`top`, `-top`, `TOP_LEVEL_ENTITY`). Otherwise the top is the single design unit no
 other unit instantiates; zero (`no_top`) or several (`ambiguous_top`) candidates is an error that
 lists them. A project whose files are all BLIF takes the first model of the first file (BLIF's
 rule). The chosen top is recorded in the IR (`odin3_design_set_top`, IR-11 design record) and
@@ -349,7 +364,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 |---|---|---|
 | 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
 | 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
-| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) parses to its expected record from `.o3proj`, `-f` and `.qsf`, and every phase-2 fixture elaborates to the same netlist from each of its formats, equivalent to its oracle (or fails with its located error) |
+| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) parses to its expected record from `.o3proj`, `-f` and `.qsf`, and every phase-2 fixture elaborates to the same netlist from each of those formats, equivalent to its oracle (or fails with its located error); the Odin II XML format is excluded until its reader lands |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
 | 4 | VPR-XML import into the tech library, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
 | 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist; phase-5 project fixtures (SV, VHDL, mixed) elaborate from each of their formats, equivalent to their oracle |

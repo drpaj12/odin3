@@ -100,7 +100,7 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     through the same call.
 19. **Project-input test corpus** (Peter, 2026-10-09: "make tests of different projects …
     multiple files, etc. to test the project path, also with the different formats that will
-    be supported"): `tests/golden/projects`, 45 small cases (31 positive, 14 negative), each in
+    be supported"): `tests/golden/projects`, 55 small cases (36 positive, 19 negative), each in
     every format that can express it (`.o3proj`, `-f`, `.qpf`/`.qsf`/`.qip`, Odin II XML), with
     the normalized record, the resolved design or located error, and a Yosys (GHDL for VHDL)
     `ref.blif`. `tools/project-fixtures` holds the stdlib reference parsers (the oracle for the
@@ -140,6 +140,31 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
       paths and style-assignment scopes are anchored at `-entity` or the top; `.o3proj` gains
       `split` and `import`; record `duplicates`; `resolved.order`; `ref.cmd` records tool
       versions; `vhdl_same_entity` uses a hand-written Verilog reference.
+    - Fix round 2 (controller rulings after re-review):
+      1. Real `.qsf` files parse: `[`/`]` inside a word (bare or quoted) are ordinary
+         (`-to LEDR[0]`); only a word starting with `[` is substitution (the `.qip` idiom,
+         else an error). Case `qsf_bus_pins`; a test parses Yosys's DE2i-150 `.qsf` when
+         `external/` is present.
+      2. `-sv` ends with the nested list that says it (restored after the nested parse).
+      3. `unknown_top`, and `ambiguous_top` for a declared top, are located at the declaring
+         line (`top`, `-top`, `TOP_LEVEL_ENTITY`).
+      4. `unsupported_language` is defined in §4.0; the §12 Phase 2 exit test excludes the
+         Odin II format, as the README does; `-top`, `$VAR` and CRLF moved to the phase-2
+         case `f_env_crlf` (`-sv` stays in the phase-5 `f_options`).
+      5. `#` starts a comment only at the start of a word (`+define+D=#1` keeps its value);
+         `-f` accepts `+define+TAG="AB"` (value `"AB"`, quotes kept); a backslash is ordinary,
+         Windows `\` paths are not translated.
+      6. Plain relative paths in a `.qip` resolve against the project directory (Quartus);
+         the `qip_path` idiom against the `.qip`.
+      7. VHDL order also counts an architecture or package body in another file than its
+         entity or package (case `vhdl_split_units`); VQM instances resolve only against a
+         small device-primitive list (else `unresolved_module`); RTL megafunctions
+         (`altsyncram`, `lpm_*`, …) resolve through the Phase 2 primitive library (§4.0).
+      8. Negatives for `include_cycle`, `qip_cycle`, `dependency_cycle`, `unknown_revision`,
+         `unsupported_input_type`; cases `param_instance` (instance-scoped) and
+         `param_string` (string parameter).
+      Agent detail: `unknown_revision` is located at the `import` line, unlocated for
+      `--revision`; files a scan read before an error count as used.
     Phase 2 exit test (§12) gains the project-fixture clause.
 
 ## 1C results: full golden round trip

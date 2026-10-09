@@ -19,7 +19,8 @@ Every case parses to its expected record from `.o3proj`, `-f` and `.qsf` in **Ph
 (records do not need a front end). Elaboration, the cross-format netlist comparison and the
 oracle are due in the case's `phase`: **2** Verilog/BLIF, **5** SystemVerilog, VHDL and mixed
 (slang, GHDL), **6** VQM. The `odin2` format (`"format_phase": {"odin2": "odin2-reader"}`)
-joins when the Odin II XML reader lands. Negative cases are phase 2.
+joins when the Odin II XML reader lands. Negative cases are phase 2, except
+`neg_dependency_cycle` (VHDL analysis order, phase 5).
 
 ## Case matrix
 
@@ -34,7 +35,8 @@ Verilog/BLIF files, an arch file, an output and optimizations).
 | `blif_netlist` | 2 | blif, netlist input, odin2 inputs form | o3proj -f odin2 | yosys |
 | `defines` | 2 | verilog, defines, +define+, VERILOG_MACRO, ifdef | o3proj -f qsf | yosys |
 | `f_diamond` | 2 | verilog, nested -f, duplicate listing | o3proj -f | yosys |
-| `f_options` | 5 | verilog, systemverilog, -top, $VAR, -sv, CRLF | o3proj -f | yosys |
+| `f_env_crlf` | 2 | verilog, -top, $VAR, +libext+, CRLF | o3proj -f | yosys |
+| `f_options` | 5 | verilog, systemverilog, -sv, nested -f | o3proj -f | yosys |
 | `f_vs_F` | 2 | verilog, -f, -F, nested lists | o3proj -f | yosys |
 | `include_dirs` | 2 | verilog, incdir, include search order | o3proj -f qsf | yosys |
 | `include_order` | 2 | verilog, incdir order, SEARCH_PATH | o3proj -f qsf | yosys |
@@ -45,7 +47,10 @@ Verilog/BLIF files, an arch file, an output and optimizations).
 | `nested_f` | 2 | verilog, nested -f, -F, incdir | o3proj -f | yosys |
 | `o3proj_arch_rules` | 2 | verilog, arch, available, hide, cell, map, thresholds, limit, patterns, flow | o3proj | yosys |
 | `odin2_arch` | 2 | verilog, odin2 arch_file, odin2 optimizations, split | o3proj odin2 | yosys |
+| `param_instance` | 2 | verilog, instance params | o3proj qsf | yosys |
+| `param_string` | 2 | verilog, string params | o3proj qsf | yosys |
 | `qpf_revisions` | 2 | verilog, qpf revisions, top params | o3proj qsf | yosys |
+| `qsf_bus_pins` | 2 | verilog, qsf ignored, bus bits | o3proj qsf | yosys |
 | `qsf_ignored` | 2 | verilog, qsf ignored, device, Tcl syntax | o3proj qsf | yosys |
 | `qsf_mapping` | 2 | verilog, mapping rules, qsf translation | o3proj qsf | yosys |
 | `qsf_qip` | 2 | verilog, QIP_FILE, qip_path idiom, nested qip | o3proj qsf | yosys |
@@ -59,22 +64,28 @@ Verilog/BLIF files, an arch file, an output and optimizations).
 | `vhdl_generic` | 5 | vhdl, generic override | o3proj qsf | ghdl+yosys |
 | `vhdl_same_entity` | 5 | vhdl, libraries, same unit name | o3proj qsf | hand+yosys |
 | `vhdl_same_filename` | 5 | vhdl, libraries, same file name | o3proj qsf | ghdl+yosys |
+| `vhdl_split_units` | 5 | vhdl, analysis order, secondary units | o3proj -f qsf | ghdl+yosys |
 | `vhdl_two_libs` | 5 | vhdl, libraries, top in a library | o3proj qsf | ghdl+yosys |
 | `vhdl_work` | 5 | vhdl, multi-file, work | o3proj -f qsf | ghdl+yosys |
 | `neg_ambiguous_revision` | 2 | negative, ambiguous revision, import | o3proj qsf | `ambiguous_revision` |
 | `neg_ambiguous_top` | 2 | negative, ambiguous top | o3proj -f odin2 | `ambiguous_top` |
+| `neg_dependency_cycle` | 5 | negative, dependency cycle, vhdl | o3proj -f qsf | `dependency_cycle` |
 | `neg_duplicate_module` | 2 | negative, duplicate module | o3proj -f qsf odin2 | `duplicate_module` |
 | `neg_f_cycle` | 2 | negative, -f cycle | -f | `f_cycle` |
+| `neg_include_cycle` | 2 | negative, include cycle | o3proj -f | `include_cycle` |
 | `neg_include_not_found` | 2 | negative, include not found | o3proj -f qsf odin2 | `include_not_found` |
 | `neg_missing_file` | 2 | negative, missing file | o3proj -f qsf odin2 | `missing_file` |
 | `neg_no_top` | 2 | negative, no top | o3proj -f odin2 | `no_top` |
+| `neg_qip_cycle` | 2 | negative, qip cycle | qsf | `qip_cycle` |
 | `neg_syntax` | 2 | negative, syntax | o3proj -f qsf odin2 | `syntax` |
 | `neg_undefined_variable` | 2 | negative, undefined variable | -f | `undefined_variable` |
 | `neg_unknown_file_type` | 2 | negative, unknown file type | -f | `unknown_file_type` |
 | `neg_unknown_key` | 2 | negative, unknown key | o3proj | `unknown_key` |
 | `neg_unknown_option` | 2 | negative, unknown option | -f qsf | `unknown_option` |
+| `neg_unknown_revision` | 2 | negative, unknown revision | o3proj qsf | `unknown_revision` |
 | `neg_unknown_top` | 2 | negative, unknown top | o3proj -f qsf | `unknown_top` |
 | `neg_unresolved_module` | 2 | negative, unresolved module | o3proj -f qsf odin2 | `unresolved_module` |
+| `neg_unsupported_input_type` | 2 | negative, unsupported input type | odin2 | `unsupported_input_type` |
 
 Oracles: `yosys`; `ghdl+yosys` (GHDL `--synth --out=verilog`, then Yosys); `hand+yosys`
 (`vhdl_same_entity`: GHDL writes both `core` entities as one module name, so `ref/equiv.v` is a
