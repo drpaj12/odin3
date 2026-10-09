@@ -81,6 +81,27 @@ static const char *param_error(const odin3_celltype_def *def, uint32_t idx) {
     return NULL;
 }
 
+/* NULL when the port's width rule (the first that applies, celltype.h) is valid for def. */
+static const char *width_rule_error(const odin3_celltype_def *def, const odin3_port_def *port) {
+    if (port->width_fn != NULL) {
+        return NULL;
+    }
+    if (port->width_expr != NULL) {
+        const odin3_width_expr *wexpr = port->width_expr;
+        if (wexpr->check == NULL || wexpr->eval == NULL) {
+            return "width expression without its hooks";
+        }
+        return wexpr->check(wexpr, def);
+    }
+    if (port->width_param != NULL) {
+        int pidx = find_param(def, port->width_param);
+        if (pidx == NO_PARAM || def->params[pidx].kind != ODIN3_VAL_INT) {
+            return "width parameter is not an int parameter of the type";
+        }
+    }
+    return NULL;
+}
+
 static const char *port_error(const odin3_celltype_def *def, uint32_t idx) {
     const odin3_port_def *port = &def->ports[idx];
     if (!name_ok(port->name)) {
@@ -94,13 +115,7 @@ static const char *port_error(const odin3_celltype_def *def, uint32_t idx) {
             return "duplicate port name";
         }
     }
-    if (port->width_fn == NULL && port->width_param != NULL) {
-        int pidx = find_param(def, port->width_param);
-        if (pidx == NO_PARAM || def->params[pidx].kind != ODIN3_VAL_INT) {
-            return "width parameter is not an int parameter of the type";
-        }
-    }
-    return NULL;
+    return width_rule_error(def, port);
 }
 
 /* NULL when def is valid (rules in celltype.h), else a description of the first problem. */
@@ -239,6 +254,7 @@ static odin3_status append_entry(odin3_design *design, const odin3_celltype_def 
     entry->def = def;
     entry->name = name;
     entry->local = local;
+    entry->lib = NULL;
     if (out != NULL) {
         out->v = (uint32_t)idx;
     }
@@ -346,6 +362,15 @@ odin3_status odin3_celltype_port_width_checked(const odin3_design *design,
         *width = pdef->width_fn(query->params, query->port);
         return ODIN3_OK;
     }
+    if (pdef->width_expr != NULL) {
+        odin3_status st = pdef->width_expr->eval(pdef->width_expr, def, query->params, width);
+        if (st != ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "port_width: width expression of port '%s' of cell type '%s' failed",
+                      pdef->name, def->name);
+        }
+        return st;
+    }
     if (pdef->width_param == NULL) {
         *width = pdef->width;
         return ODIN3_OK;
@@ -389,6 +414,26 @@ static odin3_status add_copy(odin3_design *design, const odin3_celltype_def *def
     return append_entry(design, copy, true, out);
 }
 
+odin3_arena *odin3_celltype_arena(const odin3_design *design) {
+    return design->arena;
+}
+
+odin3_status odin3_celltype_set_lib(odin3_design *design, odin3_celltype_id id,
+                                    const odin3_techlib_cell *lib) {
+    odin3_celltype_entry *entry = entry_mut(design, id);
+    if (entry == NULL || !entry->local) {
+        odin3_log(ODIN3_LOG_ERROR, "set_lib: cell type %u is not a local type", id.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    entry->lib = lib;
+    return ODIN3_OK;
+}
+
+const odin3_techlib_cell *odin3_celltype_lib(const odin3_design *design, odin3_celltype_id id) {
+    const odin3_celltype_entry *entry = entry_at(design, id);
+    return entry != NULL ? entry->lib : NULL;
+}
+
 odin3_status odin3_celltype_add_local(odin3_design *design, const odin3_celltype_def *def,
                                       odin3_celltype_id *out) {
     if (!def_check(def, "add_local")) {
@@ -410,7 +455,7 @@ void odin3_celltype_bind_local(odin3_design *design, odin3_celltype_id id,
 }
 
 static bool fixed_width(const odin3_port_def *port) {
-    return port->width_fn == NULL && port->width_param == NULL;
+    return port->width_fn == NULL && port->width_expr == NULL && port->width_param == NULL;
 }
 
 /* IR-7b: same port count, and per port the same name, direction and constant width. */

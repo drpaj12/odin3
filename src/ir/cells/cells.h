@@ -38,11 +38,11 @@
 
 /* A scalar (1-bit) port and a vector port whose width is the INT parameter wparam. */
 #define ODIN3_PORT_BIT(pname, pdir)                                                                \
-    { pname, pdir, true, 1, NULL, NULL }
+    { pname, pdir, true, 1, NULL, NULL, NULL }
 #define ODIN3_PORT_VEC(pname, pdir, wparam)                                                        \
-    { pname, pdir, false, 0, wparam, NULL }
+    { pname, pdir, false, 0, wparam, NULL, NULL }
 #define ODIN3_PORT_FN(pname, pdir, wfn)                                                            \
-    { pname, pdir, false, 0, NULL, wfn }
+    { pname, pdir, false, 0, NULL, wfn, NULL }
 
 /* Single-bit default value {0} for bit-vector parameters whose default width is 1. */
 extern const uint8_t odin3_cells_zero_bit[1];

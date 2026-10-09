@@ -9,6 +9,7 @@
 #include "ir/ids.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "util/arena.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -33,18 +34,40 @@ typedef enum odin3_granularity {
  */
 enum { ODIN3_CT_TRISTATE = 1U << 0, ODIN3_CT_ANYVIEW = 1U << 1 };
 
+typedef struct odin3_celltype_def odin3_celltype_def;
+typedef struct odin3_width_expr odin3_width_expr;
+
+/*
+ * A compiled width expression (the fourth width rule), produced outside the IR (the tech library,
+ * src/techlib). The IR only calls its hooks. check runs when a definition is registered: NULL when
+ * every identifier of the expression names an INT parameter of def, else a description of the
+ * problem. eval computes the width for params (one value per parameter of def):
+ * ODIN3_ERR_INVALID_ARG (logged; the caller adds the location) when a parameter it reads is not
+ * an INT or the result is not an integer in [0, UINT32_MAX]; *width is untouched then.
+ * Registration never copies a width expression: it must live as long as every design holding a
+ * type that uses it (a producer allocates it in odin3_celltype_arena).
+ */
+struct odin3_width_expr {
+    const char *(*check)(const odin3_width_expr *wexpr, const odin3_celltype_def *def);
+    odin3_status (*eval)(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
+                         const odin3_value *params, uint32_t *width);
+    const void *impl; /* the producer's compiled form */
+};
+
 /*
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
- * width_param (the name of an INT parameter of the same type), else the constant width.
- * scalar records whether the port is written without brackets (writers reproduce it).
+ * width_expr (an integer expression over INT parameters of the same type), else width_param (the
+ * name of an INT parameter of the same type), else the constant width. scalar records whether the
+ * port is written without brackets (writers reproduce it).
  */
 typedef struct odin3_port_def {
     const char *name;
     odin3_dir dir;
     bool scalar;
-    uint32_t width;          /* used when width_param == NULL and width_fn == NULL */
+    uint32_t width;          /* used when no other rule is set */
     const char *width_param; /* name of an INT parameter giving the width */
     uint32_t (*width_fn)(const odin3_value *params, uint32_t port);
+    const odin3_width_expr *width_expr; /* not copied; see odin3_width_expr */
 } odin3_port_def;
 
 /* One parameter: name, kind and default value (IR-10). */
@@ -66,10 +89,10 @@ typedef enum odin3_const {
 /*
  * A cell-type definition. Hooks receive one value per parameter definition, in order. Names must
  * be non-empty; port names are unique, parameter names are unique, a width_param names an INT
- * parameter of the same definition, and every default has its parameter's kind and passes
- * odin3_value_valid.
+ * parameter of the same definition, a width_expr has both hooks and passes its check, and every
+ * default has its parameter's kind and passes odin3_value_valid.
  */
-typedef struct odin3_celltype_def {
+struct odin3_celltype_def {
     const char *name;
     odin3_granularity gran;
     uint32_t flags;
@@ -79,7 +102,7 @@ typedef struct odin3_celltype_def {
     uint32_t n_params;
     odin3_status (*verify)(const odin3_value *params);     /* may be NULL */
     odin3_const (*const_value)(const odin3_value *params); /* may be NULL */
-} odin3_celltype_def;
+};
 
 /*
  * Adds a process-global definition (plugins; built-ins come from the static table in
@@ -101,8 +124,8 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
 
 /*
  * Width of port `port` of type id for the given parameter values (one per parameter definition;
- * may be NULL only for a type without parameters). 0 when id or port is out of range, or the width
- * parameter is not an INT in [0, UINT32_MAX] (logged).
+ * may be NULL only for a type without parameters). 0 when id or port is out of range, the width
+ * parameter is not an INT in [0, UINT32_MAX], or the width expression fails to evaluate (logged).
  */
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port);
@@ -136,11 +159,11 @@ odin3_status odin3_celltype_add_local(odin3_design *design, const odin3_celltype
 
 /*
  * IR-7b: declares a black box. If the name is already registered, the declaration must match the
- * registered type's ports (count, names, directions, constant widths; a width given by a parameter
- * or function never matches) and that type is reused; otherwise a new local type of granularity
- * BLACKBOX (whatever def->gran says) is added. Either way the type is appended to the design's
- * declared-model list. ODIN3_ERR_INVALID_ARG (logged) for an invalid definition or a mismatch;
- * ODIN3_ERR_NO_MEMORY on out of memory. Nothing changes on failure.
+ * registered type's ports (count, names, directions, constant widths; a width given by a parameter,
+ * function or expression never matches) and that type is reused; otherwise a new local type of
+ * granularity BLACKBOX (whatever def->gran says) is added. Either way the type is appended to the
+ * design's declared-model list. ODIN3_ERR_INVALID_ARG (logged) for an invalid definition or a
+ * mismatch; ODIN3_ERR_NO_MEMORY on out of memory. Nothing changes on failure.
  */
 odin3_status odin3_celltype_declare_blackbox(odin3_design *design, const odin3_celltype_def *def,
                                              odin3_celltype_id *out);
@@ -150,5 +173,26 @@ uint32_t odin3_design_declared_model_count(const odin3_design *design);
 
 /* Entry index of the declared-model list; {0} when index is out of range. */
 odin3_celltype_id odin3_design_declared_model(const odin3_design *design, uint32_t index);
+
+/*
+ * The arena local cell-type definitions live in. Data a local type points to without it being
+ * copied (width expressions, tech-library data) is allocated here so it lives as long as the
+ * design.
+ */
+odin3_arena *odin3_celltype_arena(const odin3_design *design);
+
+/* Tech-library data of a cell (fields in techlib/reader.h); opaque to the IR. */
+typedef struct odin3_techlib_cell odin3_techlib_cell;
+
+/*
+ * Attaches tech-library data to local type id, replacing any; lib (may be NULL) is not copied and
+ * must live as long as the design (odin3_celltype_arena). ODIN3_ERR_INVALID_ARG (logged) for an
+ * invalid ID or a type that is not local.
+ */
+odin3_status odin3_celltype_set_lib(odin3_design *design, odin3_celltype_id id,
+                                    const odin3_techlib_cell *lib);
+
+/* The tech-library data attached to id; NULL when none or for an invalid ID. */
+const odin3_techlib_cell *odin3_celltype_lib(const odin3_design *design, odin3_celltype_id id);
 
 #endif

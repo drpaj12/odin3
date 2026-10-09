@@ -134,9 +134,9 @@ static const odin3_param_def k_link_params[] = {
     {"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, k_init_bits, 3, 0, 0}},
 };
 static const odin3_port_def k_link_ports[] = {
-    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL},
-    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL},
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_link = {
     "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL};

@@ -29,6 +29,7 @@ typedef struct odin3_celltype_entry {
     uint32_t name;                 /* strtab ID of def->name; never changes */
     uint32_t instances;            /* live nodes of this type */
     bool local;                    /* added by add_local/declare_blackbox; definition replaceable */
+    const odin3_techlib_cell *lib; /* tech-library data (local types only), or NULL */
 } odin3_celltype_entry;
 
 /* The design's provenance store (prov.c; IR-12, IR-13, IR-6 tombstones). */

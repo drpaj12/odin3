@@ -18,10 +18,12 @@ static const odin3_param_def k_port_params[] = {
 };
 
 /* Directions are the cell's view: a $port_in pin drives the module net, a $port_out pin sinks. */
-static const odin3_port_def k_port_in_ports[] = {{"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL}};
-static const odin3_port_def k_port_out_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL}};
+static const odin3_port_def k_port_in_ports[] = {
+    {"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL}};
+static const odin3_port_def k_port_out_ports[] = {
+    {"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL}};
 static const odin3_port_def k_port_inout_ports[] = {
-    {"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL}};
+    {"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL, NULL}};
 
 const odin3_celltype_def odin3_cell_port_in = {
     "$port_in", ODIN3_GRAN_PORT, 0, k_port_in_ports, 1, k_port_params, 1, port_verify, NULL};
