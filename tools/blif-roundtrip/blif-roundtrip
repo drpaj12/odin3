@@ -12,7 +12,7 @@
 # Files with identical content (same sha256) run the structural gate once; the others reuse
 # that result (the writer is deterministic). Exceptions, listed and not failures:
 #   multi-driver originals (decision #15): netlist-compare refuses them, check errors allowed;
-#   timeouts: the structural gate hit the per-file time limit.
+#   timeouts and memory-limit stops: the structural gate hit the per-file time or memory cap.
 # Exit: 0 all gates pass, 1 any failure, 2 usage. See docs/PHASE1.md (1C) for the policy.
 set -euo pipefail
 
@@ -23,12 +23,13 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
-usage: blif-roundtrip [-j N] [-t SECONDS] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
+usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
                       [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed)
   -j N          parallel jobs (default 2; LargeRam needs about 2.5 GB per job)
   -t SECONDS    per-file netlist-compare timeout (default 600)
+  -m GB         per-job netlist-compare address-space cap (default 6; 2 jobs = 12 GB)
   --rt PATH     odin3-blif-rt binary (default build/release/odin3-blif-rt in the repo)
   --nc PATH     netlist-compare (default tools/netlist-compare/netlist-compare)
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
@@ -146,13 +147,18 @@ struct_gate() {
         a=$a.stub
         b=$b.stub
     fi
-    timeout -k 10 "$BRT_TIMEOUT" /usr/bin/time -f '%M' -o "$log.rss" \
-        "$BRT_NC" "$a" "$b" >"$log" 2>&1 || rc=$?
+    # The address-space cap turns a runaway netlist-compare into a MemoryError (a recorded
+    # "memlimit"), never an out-of-memory kill of the machine.
+    (ulimit -v "$BRT_NC_MEM_KB"
+     exec timeout -k 10 "$BRT_TIMEOUT" /usr/bin/time -f '%M' -o "$log.rss" \
+         "$BRT_NC" "$a" "$b") >"$log" 2>&1 || rc=$?
     if [ -n "$stub" ]; then rm -f "$a" "$b"; fi
     case $rc in
     0) if [ -n "$stub" ]; then echo "identical+stubs"; else echo "identical"; fi ;;
     124 | 137) echo "timeout" ;;
-    1) if grep -q '^--- ' "$log"; then echo "different"; else echo "error"; fi ;;
+    1) if grep -q '^--- ' "$log"; then echo "different"
+       elif grep -q 'MemoryError' "$log"; then echo "memlimit"
+       else echo "error"; fi ;;
     *) echo "error" ;;
     esac
 }
@@ -228,8 +234,8 @@ report() {
         print "SUMMARY"
         printf "files: %d (structural gate run on %d distinct contents)\n", tot, tot - dupn()
         printf "text gate: %d ok, %d FAIL, %d read/write failures\n", tx_ok, tx_fail, rtfail
-        printf "structural gate: identical %d, identical+stubs %d, refused (multi-driver original) %d, timeout %d, different %d, error %d, not run %d\n",
-            cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["different"], cnt["error"], cnt["-"]
+        printf "structural gate: identical %d, identical+stubs %d, refused (multi-driver original) %d, timeout %d, memlimit %d, different %d, error %d, not run %d\n",
+            cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["memlimit"], cnt["different"], cnt["error"], cnt["-"]
         printf "check FULL errors: %d files outside the multi-driver list, %d inside it\n", chk_bad, chk_exc
         printf "slowest file: %s (%.1f s total)\n", maxf, maxs
         printf "peak RSS: odin3-blif-rt %.0f MB (%s); netlist-compare %.0f MB (%s)\n", maxr / 1024, maxrf, maxn / 1024, maxnf
@@ -246,10 +252,12 @@ main() {
     BRT_RT=$repo/build/release/odin3-blif-rt
     BRT_NC=$HERE/../netlist-compare/netlist-compare
     BRT_TIMEOUT=600
+    BRT_NC_MEM_KB=$((6 * 1024 * 1024))
     while [ $# -gt 0 ]; do
         case $1 in
         -j) jobs=${2:?}; shift 2 ;;
         -t) BRT_TIMEOUT=${2:?}; shift 2 ;;
+        -m) BRT_NC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
         --rt) BRT_RT=${2:?}; shift 2 ;;
         --nc) BRT_NC=${2:?}; shift 2 ;;
         --out) out=${2:?}; shift 2 ;;
@@ -267,7 +275,7 @@ main() {
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/blif-roundtrip.XXXXXX")
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
-    export BRT_RT BRT_NC BRT_TIMEOUT BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
+    export BRT_RT BRT_NC BRT_TIMEOUT BRT_NC_MEM_KB BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
     export -f normalize stubs is_multi_driver now struct_gate worker
 
     # Work list: biggest first, one representative per content sha256, duplicates after.
