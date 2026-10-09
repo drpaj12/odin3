@@ -26,6 +26,7 @@ enum {
     FIRST_PRINTABLE = 0x20,
     LAST_PRINTABLE = 0x7e,
     OCTAL_DIGITS = 3,
+    NODE_ID_TEXT = 16, /* "$c" and a uint32_t */
 };
 
 /* --- built-in cell types with a Verilog form ----------------------------------------------- */
@@ -1019,8 +1020,11 @@ static void write_sop(verilog_writer *wr, odin3_node_id node, const vw_builtin *
     uint32_t rows = cover->len / row_len;
     int out = cover_output(cover, row_len);
     if (out < 0) {
+        char id[NODE_ID_TEXT];
+        uint32_t name = odin3_node_name(wr->mod.module, node);
+        (void)snprintf(id, sizeof id, "$c%u", (unsigned)node.v);
         (void)vw_refuse(wr, "$sop cover mixes ON-set and OFF-set rows in cell",
-                        str_bytes(wr, odin3_node_name(wr->mod.module, node)));
+                        name != 0 ? str_bytes(wr, name) : odin3_bytes_cstr(id));
         return;
     }
     begin_assign(wr, node);

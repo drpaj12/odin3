@@ -424,7 +424,8 @@ static void test_ident_append(void) {
     odin3_strbuf_free(&buf);
 }
 
-/* esc: a[1:0], \b.c -> nets `$add~5^ADD~5-1[0]` = a0 & ~a1, `n~19` = ~(that & b.c) -> y. */
+/* esc: a[1:0], \b.c -> nets `$add~5^ADD~5-1[0]` = a0 & ~a1, `n~19` = ~(that & b.c) -> y;
+ * wire `top/u1.v`[1:0] = ~a, w = its bit 1 & bit 0. */
 static void build_escapes(void) {
     new_module("esc");
     odin3_wire_id net_a = in_vec("a", 2);
@@ -442,12 +443,24 @@ static void build_escapes(void) {
               "0",
               n19);
     (void)gate1("$_BUF_", (io_pair){n19, net_y});
+    /* An escaped vector wire read bit by bit: \top/u1.v [1] & \top/u1.v [0] -> w. */
+    odin3_net_id net_w = out_bit("w");
+    odin3_wire_spec spec = {intern("top/u1.v"), 1, 0, false, {0}};
+    odin3_wire_id vec = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &spec, NULL, &vec));
+    odin3_net_id v_nets[2];
+    odin3_netvec inv[] = {wire_nets(net_a, a_nets), wire_nets(vec, v_nets)};
+    (void)unary("$not", inv);
+    (void)gate2("$_AND_", v_nets[1], v_nets[0], net_w);
 }
 
 static void test_escaped_names(void) {
     build_escapes();
     (void)write_ok();
-    expect_has("module esc (\n  input [1:0] a,\n  input \\b.c ,\n  output y\n);\n");
+    expect_has("module esc (\n  input [1:0] a,\n  input \\b.c ,\n  output y,\n  output w\n);\n");
+    expect_has("  wire [1:0] \\top/u1.v ;\n");
+    expect_has("  assign \\top/u1.v = ~a;\n");
+    expect_has("  assign w = \\top/u1.v [1] & \\top/u1.v [0];\n");
     expect_has("  wire \\$add~5^ADD~5-1[0] ;\n");
     expect_has("  wire \\n~19 ;\n");
     expect_has("  assign \\$add~5^ADD~5-1[0] = a[0] & ~a[1];\n");
@@ -468,6 +481,7 @@ static void test_escaped_names_yosys_round_trip(void) {
     expect_in(back, "\\$add~5^ADD~5-1[0] ");
     expect_in(back, "\\n~19 ");
     expect_in(back, "\\b.c ");
+    expect_in(back, "\\top/u1.v ");
 }
 
 /* --- bit-level gates ----------------------------------------------------------------------- */
@@ -604,6 +618,7 @@ static void test_sop_mixed_cover_refused(void) {
               net_y);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT_PATH));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "mixes"));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "'$c"));
     TEST_ASSERT_FALSE(file_exists(OUT_PATH));
 }
 
