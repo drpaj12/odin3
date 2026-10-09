@@ -1,0 +1,4 @@
+# vhdl_work: VHDL in the default library (work), in analysis order.
+file vhdl src/sub/add4.vhd
+file vhdl src/sub/reg4.vhd
+file vhdl src/top.vhd

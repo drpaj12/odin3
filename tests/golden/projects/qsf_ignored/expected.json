@@ -1,0 +1,52 @@
+{
+  "description": ".qsf with pin, timing, partition and other non-synthesis assignments (ignored, one info line) and FAMILY/DEVICE.",
+  "features": ["verilog", "qsf ignored", "device", "Tcl syntax"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [{"path": "src/blink.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "blink",
+    "params": [],
+    "arch": [{"kind": "device", "family": "Cyclone V", "device": "5CSEMA5F31C6"}],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {
+    "qsf": {
+      "ignored": [
+        "ERROR_CHECK_FREQUENCY_DIVISOR",
+        "IO_STANDARD",
+        "LAST_QUARTUS_VERSION",
+        "LOCATION",
+        "MAX_CORE_JUNCTION_TEMP",
+        "MIN_CORE_JUNCTION_TEMP",
+        "ORIGINAL_QUARTUS_VERSION",
+        "PARTITION_COLOR",
+        "PARTITION_FITTER_PRESERVATION_LEVEL",
+        "PARTITION_HIERARCHY",
+        "PARTITION_NETLIST_TYPE",
+        "POWER_PRESET_COOLING_SOLUTION",
+        "PROJECT_CREATION_TIME_DATE",
+        "PROJECT_OUTPUT_DIRECTORY",
+        "SDC_FILE"
+      ]
+    }
+  },
+  "resolved": {
+    "top": "work.blink",
+    "units": ["work.blink"],
+    "read": ["src/blink.v"],
+    "order": ["src/blink.v"]
+  },
+  "oracle": "yosys"
+}

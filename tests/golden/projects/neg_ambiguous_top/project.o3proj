@@ -1,0 +1,3 @@
+# neg_ambiguous_top: no top given, two candidates.
+file verilog src/alpha.v
+file verilog src/beta.v

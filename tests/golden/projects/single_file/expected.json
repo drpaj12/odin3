@@ -1,0 +1,36 @@
+{
+  "description": "One Verilog file; top is the only module (qsf: the revision name).",
+  "features": ["verilog", "single file", "auto top", "odin2 legacy form"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "project": {
+    "files": [{"path": "src/counter.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {
+    "qsf": {"top": "counter"},
+    "odin2": {"output": {"path": "out/counter.blif", "format": "blif"}}
+  },
+  "resolved": {
+    "top": "work.counter",
+    "units": ["work.counter"],
+    "read": ["src/counter.v"],
+    "order": ["src/counter.v"]
+  },
+  "oracle": "yosys"
+}

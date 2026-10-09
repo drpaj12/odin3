@@ -1,0 +1,8 @@
+{
+  "description": ".qpf with two revisions and none chosen (qsf, o3proj import).",
+  "features": ["negative", "ambiguous revision", "import"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "error": {"kind": "ambiguous_revision", "at": "proj.qpf:6", "names": ["small", "fast"]},
+  "unused": ["fast.qsf", "small.qsf"]
+}

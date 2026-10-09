@@ -1,0 +1,9 @@
+{
+  "description": "Odin II <input_type> other than verilog/blif.",
+  "features": ["negative", "unsupported input type"],
+  "phase": 2,
+  "formats": ["odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "error": {"kind": "unsupported_input_type", "at": "odin2.xml:3", "names": ["vhdl"]},
+  "unused": ["src/top.vhd"]
+}

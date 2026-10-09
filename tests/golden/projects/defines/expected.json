@@ -1,0 +1,31 @@
+{
+  "description": "Global macros, one without a value and one valued, in each format's syntax.",
+  "features": ["verilog", "defines", "+define+", "VERILOG_MACRO", "`ifdef"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [
+      {"name": "USE_SUB", "value": null},
+      {"name": "WIDTH", "value": "12"},
+      {"name": "TAG", "value": "\"AB\""}
+    ],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["src/top.v"], "order": ["src/top.v"]},
+  "oracle": "yosys"
+}

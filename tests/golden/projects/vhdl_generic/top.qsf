@@ -1,0 +1,3 @@
+set_global_assignment -name VHDL_FILE src/top.vhd
+# A VHDL generic is set like a Verilog parameter.
+set_parameter -name W 6

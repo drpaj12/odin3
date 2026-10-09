@@ -1,0 +1,7 @@
+{
+  "description": "An option the format does not have (-f, qsf).",
+  "features": ["negative", "unknown option"],
+  "phase": 2,
+  "formats": ["f", "qsf"],
+  "error": {"kind": "unknown_option", "at": {"f": "files.f:2", "qsf": "top.qsf:2"}, "names": ["-bogus"]}
+}

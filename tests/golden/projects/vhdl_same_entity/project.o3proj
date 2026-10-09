@@ -1,0 +1,4 @@
+# vhdl_same_entity: entity core in both alpha and beta (files also both core.vhd).
+file vhdl src/alpha/core.vhd library alpha
+file vhdl src/beta/core.vhd library beta
+file vhdl src/top.vhd

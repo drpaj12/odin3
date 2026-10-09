@@ -1,0 +1,7 @@
+{
+  "description": "$VAR in a file list with VAR unset.",
+  "features": ["negative", "undefined variable"],
+  "phase": 2,
+  "formats": ["f"],
+  "error": {"kind": "undefined_variable", "at": "files.f:2", "names": ["NOPE"]}
+}

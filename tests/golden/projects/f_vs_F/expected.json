@@ -1,0 +1,35 @@
+{
+  "description": "-f entries are relative to the outermost list, -F entries to their own list.",
+  "features": ["verilog", "-f", "-F", "nested lists"],
+  "phase": 2,
+  "formats": ["o3proj", "f"],
+  "project": {
+    "files": [
+      {"path": "rtl/leaf.v", "language": "verilog", "library": "work"},
+      {"path": "lists/rtl/leaf.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.leaf_lists", "work.leaf_root", "work.top"],
+    "read": ["lists/rtl/leaf.v", "rtl/leaf.v", "src/top.v"],
+    "order": ["rtl/leaf.v", "lists/rtl/leaf.v", "src/top.v"]
+  },
+  "oracle": "yosys"
+}

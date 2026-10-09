@@ -1,0 +1,6 @@
+# odin2_arch: what odin2.xml says, as rules.
+file verilog src/mac.v
+arch arch/k6_tiny.xml
+map * $mul to multiply min_width 9
+map * $add to adder min_width 4
+split $mem width depth max

@@ -239,6 +239,12 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # The project-input corpus (tests/golden/projects) parses to its expected records in every
+    # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.
+    add_test(NAME project_fixtures
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py check)
+    set_tests_properties(project_fixtures PROPERTIES LABELS tools)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")

@@ -1,0 +1,35 @@
+{
+  "description": "Verilog top instantiating a VHDL entity.",
+  "features": ["mixed", "verilog top", "vhdl"],
+  "phase": 5,
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/vhdl/scale.vhd", "language": "vhdl", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.scale", "work.top"],
+    "read": ["src/top.v", "src/vhdl/scale.vhd"],
+    "order": ["src/vhdl/scale.vhd", "src/top.v"]
+  },
+  "oracle": "ghdl+yosys"
+}

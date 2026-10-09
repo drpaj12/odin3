@@ -1,0 +1,34 @@
+{
+  "description": "-sv in a nested list: SystemVerilog for the rest of that list only.",
+  "features": ["verilog", "systemverilog", "-sv", "nested -f"],
+  "phase": 5,
+  "formats": ["o3proj", "f"],
+  "project": {
+    "files": [
+      {"path": "src/top.v", "language": "systemverilog", "library": "work"},
+      {"path": "src/leaf.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.leaf", "work.top"],
+    "read": ["src/leaf.v", "src/top.v"],
+    "order": ["src/top.v", "src/leaf.v"]
+  },
+  "oracle": "yosys"
+}

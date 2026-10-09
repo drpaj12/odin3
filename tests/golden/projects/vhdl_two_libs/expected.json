@@ -1,0 +1,36 @@
+{
+  "description": "VHDL package and entity in library util, top in library app (top app.top).",
+  "features": ["vhdl", "libraries", "top in a library"],
+  "phase": 5,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/util/sat_pkg.vhd", "language": "vhdl", "library": "util"},
+      {"path": "src/util/clip.vhd", "language": "vhdl", "library": "util"},
+      {"path": "src/top.vhd", "language": "vhdl", "library": "app"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "app.top",
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {
+    "top": "app.top",
+    "units": ["app.top", "util.clip"],
+    "read": ["src/top.vhd", "src/util/clip.vhd", "src/util/sat_pkg.vhd"],
+    "order": ["src/util/sat_pkg.vhd", "src/util/clip.vhd", "src/top.vhd"]
+  },
+  "oracle": "ghdl+yosys"
+}

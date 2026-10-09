@@ -1,0 +1,2 @@
+# Read as the entry directly (no .qpf): the revision is the file name, "top".
+set_global_assignment -name VQM_FILE net/top.vqm

@@ -1,0 +1,32 @@
+{
+  "description": "USER_LIBRARIES directory, VERILOG_INCLUDE_FILE and -hdl_version.",
+  "features": ["verilog", "USER_LIBRARIES", "VERILOG_INCLUDE_FILE", "-hdl_version"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": ["lib"],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"ignored": ["-hdl_version", "VERILOG_INCLUDE_FILE"]}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.sat4", "work.top"],
+    "read": ["lib/sat4.v", "src/defs.vh", "src/top.v"],
+    "order": ["src/top.v"]
+  },
+  "oracle": "yosys"
+}

@@ -1,0 +1,42 @@
+{
+  "description": "Project files in proj/ with ../ paths: relative to the project file, not the working directory.",
+  "features": ["verilog", "relative paths"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "entry": {
+    "o3proj": "proj/project.o3proj",
+    "f": "proj/files.f",
+    "qsf": "proj/top.qpf",
+    "odin2": "proj/odin2.xml"
+  },
+  "project": {
+    "files": [
+      {"path": "src/sub/parity.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}, "odin2": {"output": {"path": "out/top.blif", "format": "blif"}}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.parity", "work.top"],
+    "read": ["src/sub/parity.v", "src/top.v"],
+    "order": ["src/sub/parity.v", "src/top.v"]
+  },
+  "oracle": "yosys"
+}

@@ -1,0 +1,33 @@
+{
+  "description": "BLIF-only project (netlist input, first model is the top).",
+  "features": ["blif", "netlist input", "odin2 inputs form"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "project": {
+    "files": [{"path": "net/adder.blif", "language": "blif", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"odin2": {"output": {"path": "fa_reg.odin.blif", "format": "blif"}}},
+  "resolved": {
+    "top": "work.fa_reg",
+    "units": ["work.fa_reg", "work.half_adder"],
+    "read": ["net/adder.blif"],
+    "order": ["net/adder.blif"]
+  },
+  "oracle": "yosys"
+}

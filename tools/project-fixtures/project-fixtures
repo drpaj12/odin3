@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# project-fixtures: reference project parsers and corpus checker. See project_fixtures.py.
+# Exit codes: 0 success, 1 check failure or oracle mismatch, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/project_fixtures.py" "$@"

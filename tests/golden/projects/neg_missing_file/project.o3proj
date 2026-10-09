@@ -1,0 +1,3 @@
+# neg_missing_file: the second file does not exist.
+file verilog src/top.v
+file verilog src/missing.v

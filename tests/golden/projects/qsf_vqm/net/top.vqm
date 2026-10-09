@@ -1,0 +1,17 @@
+// Quartus post-fit netlist (abridged): one Cyclone V LUT primitive. Primitives are
+// resolved by the VQM reader's Altera primitive library (Phase 6), not by the project.
+module top (
+    a,
+    b,
+    y);
+input a;
+input b;
+output y;
+
+cyclonev_lcell_comb y_lut (
+    .dataa(a),
+    .datab(b),
+    .combout(y));
+defparam y_lut.lut_mask = 64'h8888888888888888;
+defparam y_lut.shared_arith = "off";
+endmodule

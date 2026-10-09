@@ -1,0 +1,4 @@
+# SEARCH_PATH is the include path.
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name SEARCH_PATH src/include
+set_global_assignment -name VERILOG_FILE src/top.v

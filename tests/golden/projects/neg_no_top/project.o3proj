@@ -1,0 +1,3 @@
+# neg_no_top: no top given and no candidate.
+file verilog src/ping.v
+file verilog src/pong.v

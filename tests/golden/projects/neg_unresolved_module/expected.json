@@ -1,0 +1,8 @@
+{
+  "description": "An instance of a module nobody defines.",
+  "features": ["negative", "unresolved module"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "error": {"kind": "unresolved_module", "at": "src/top.v:6", "names": ["missing_cell"]}
+}

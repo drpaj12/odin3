@@ -1,0 +1,34 @@
+{
+  "description": "A parameter override on an instance (param top.u_wide.W, set_parameter -to).",
+  "features": ["verilog", "instance params"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/inv.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [{"scope": "top.u_wide", "name": "W", "value": "4", "type": "number"}],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.inv", "work.sub", "work.top"],
+    "read": ["src/inv.v", "src/top.v"],
+    "order": ["src/inv.v", "src/top.v"]
+  },
+  "oracle": "yosys"
+}

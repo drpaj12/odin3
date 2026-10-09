@@ -1,0 +1,3 @@
+set_global_assignment -name SEARCH_PATH incA
+set_global_assignment -name SEARCH_PATH incB
+set_global_assignment -name VERILOG_FILE src/top.v

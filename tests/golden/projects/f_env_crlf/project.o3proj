@@ -1,0 +1,5 @@
+# f_env_crlf: what files.f says, with RTL=src.
+top top
+libext .v
+file verilog src/leaf.v
+file verilog src/top.v

@@ -1,0 +1,4 @@
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name SYSTEMVERILOG_FILE src/pkg/alu_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE src/alu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE src/top.sv

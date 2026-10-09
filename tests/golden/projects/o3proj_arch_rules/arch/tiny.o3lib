@@ -1,0 +1,17 @@
+library tiny_fpga                       # a two-cell hard-block library for the rules below
+cell multiply hard
+  param A_WIDTH int 18
+  param B_WIDTH int 18
+  in  a A_WIDTH
+  in  b B_WIDTH
+  out out A_WIDTH + B_WIDTH
+  fn  out = a * b
+end
+cell dual_port_ram hard
+  param ADDR_WIDTH int 9 ; param DATA_WIDTH int 8
+  in addr1 ADDR_WIDTH ; in addr2 ADDR_WIDTH
+  in data1 DATA_WIDTH ; in data2 DATA_WIDTH
+  in we1 1 ; in we2 1 ; in clk 1 clock
+  out out1 DATA_WIDTH ; out out2 DATA_WIDTH
+  memory words 2 ** ADDR_WIDTH ; width DATA_WIDTH ; write sync clk we1 ; read sync clk
+end

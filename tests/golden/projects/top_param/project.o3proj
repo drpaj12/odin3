@@ -1,0 +1,5 @@
+file verilog src/stage_reg.v
+file verilog src/top.v
+top top
+param top.WIDTH 16
+param top.DEPTH 3

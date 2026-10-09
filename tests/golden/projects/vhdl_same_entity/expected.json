@@ -1,0 +1,37 @@
+{
+  "description": "Entity core defined in both alpha and beta (and both files core.vhd).",
+  "features": ["vhdl", "libraries", "same unit name"],
+  "phase": 5,
+  "formats": ["o3proj", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/alpha/core.vhd", "language": "vhdl", "library": "alpha"},
+      {"path": "src/beta/core.vhd", "language": "vhdl", "library": "beta"},
+      {"path": "src/top.vhd", "language": "vhdl", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["alpha.core", "beta.core", "work.top"],
+    "read": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"],
+    "order": ["src/alpha/core.vhd", "src/beta/core.vhd", "src/top.vhd"]
+  },
+  "oracle": "hand+yosys",
+  "oracle_reason": "GHDL 4.1 --synth --out=verilog writes both entities as `module core`; the reference is the hand-written Verilog equivalent ref/equiv.v."
+}

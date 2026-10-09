@@ -1,0 +1,8 @@
+library research_blocks                 # project-local hypothetical hard block
+cell mac27 hard
+  in  a 27
+  in  b 27
+  in  c 54
+  out y 54
+  fn  y = a * b + c
+end

@@ -1,0 +1,6 @@
+# f_diamond: the same file listed twice is read once (and reported in an info line).
+file verilog src/shared.v
+file verilog src/a.v
+file verilog src/shared.v
+file verilog src/b.v
+file verilog src/top.v

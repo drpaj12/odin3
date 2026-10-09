@@ -1,0 +1,4 @@
+set_global_assignment -name VERILOG_FILE src/inv.v
+set_global_assignment -name VERILOG_FILE src/top.v
+# -to names an instance: the path is anchored at the top (top.u_wide).
+set_parameter -to u_wide -name W 4

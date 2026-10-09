@@ -1,0 +1,8 @@
+{
+  "description": "`include of a file on no search path.",
+  "features": ["negative", "include not found"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "error": {"kind": "include_not_found", "at": "src/top.v:2", "names": ["missing_defs.vh"]}
+}

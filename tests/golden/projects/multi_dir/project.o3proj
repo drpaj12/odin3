@@ -1,0 +1,4 @@
+# multi_dir: three files in three directories.
+file verilog src/arith/adder.v
+file verilog src/ctrl/pick.v
+file verilog src/top.v
