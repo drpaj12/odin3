@@ -15,18 +15,22 @@
 #include "util/str.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
-enum { OOM_SWEEP = 64 };
+enum { OOM_SWEEP = 64, MSG_BUF = 256, KEY_BUF = 32 };
 
 static odin3_design *design;
 static odin3_module *module;
 static uint32_t module_id;
 
+static char last_msg[MSG_BUF];
+
+/* Keeps the last message (for the log form of a failure) and prints nothing. */
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
     (void)level;
-    (void)msg;
     (void)user;
+    (void)snprintf(last_msg, sizeof last_msg, "%s", msg);
 }
 
 static uint32_t intern(const char *text) {
@@ -182,13 +186,17 @@ static void test_attr_set_out_of_memory(void) {
     odin3_obj obj = {module_id, ODIN3_OBJ_MODULE, 0};
     bool failed = false;
     for (long fail_after = 0; fail_after < OOM_SWEEP; fail_after++) {
+        char key[KEY_BUF]; /* fresh strings per try, so interning can fail every time */
+        char text[KEY_BUF];
+        (void)snprintf(key, sizeof key, "key %ld", fail_after);
+        (void)snprintf(text, sizeof text, "value %ld", fail_after);
         odin3_util_set_alloc_fail_after(fail_after);
-        odin3_status st = odin3_attr_set_string(design, obj, "fresh key", "fresh value");
+        odin3_status st = odin3_attr_set_string(design, obj, key, text);
         odin3_util_set_alloc_fail_after(-1);
         const char *value = NULL;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_get_string(design, obj, "fresh key", &value));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_get_string(design, obj, key, &value));
         if (st == ODIN3_OK) {
-            TEST_ASSERT_EQUAL_STRING("fresh value", value);
+            TEST_ASSERT_EQUAL_STRING(text, value);
             break;
         }
         failed = true;
@@ -209,6 +217,21 @@ static void test_attr_not_a_string(void) {
     TEST_ASSERT_EQUAL_STRING("keep", value);
 }
 
+/* Setting an attribute of a dead object fails, logged in the ABI's form. */
+static void test_attr_set_dead_object(void) {
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_create(module, intern("gone"), (odin3_prov_id){0}, &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, net));
+    odin3_obj obj = {module_id, ODIN3_OBJ_NET, net.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set_string(design, obj, "k", "v"));
+    TEST_ASSERT_EQUAL_INT(0, strncmp(last_msg, "odin3_attr_set_string: invalid argument",
+                                     strlen("odin3_attr_set_string: invalid argument")));
+    const char *value = "keep";
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_get_string(design, obj, "k", &value));
+    TEST_ASSERT_NULL(value); /* reading a dead object is allowed; nothing was set */
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bits_text_msb_first);
@@ -218,5 +241,6 @@ int main(void) {
     RUN_TEST(test_param_text_out_of_memory);
     RUN_TEST(test_attr_set_out_of_memory);
     RUN_TEST(test_attr_not_a_string);
+    RUN_TEST(test_attr_set_dead_object);
     return UNITY_END();
 }

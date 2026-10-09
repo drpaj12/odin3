@@ -225,6 +225,8 @@ typedef enum odin3_log_level { ODIN3_LOG_ERROR, ODIN3_LOG_WARN, ODIN3_LOG_INFO,
                                ODIN3_LOG_DEBUG, ODIN3_LOG_LEVEL_COUNT } odin3_log_level;
 typedef void (*odin3_log_sink)(odin3_log_level level, const char *msg, void *user);
 void odin3_log_set_level(odin3_log_level max_level);        /* default: INFO */
+/* 1D (ABI v3): set_level returns odin3_status (INVALID_ARG for an out-of-range level), the
+ * level enum, sink and set_level/set_sink live in odin3.h, and odin3_log_get_level is added. */
 void odin3_log_set_sink(odin3_log_sink sink, void *user);   /* NULL → stderr */
 void odin3_log(odin3_log_level level, const char *fmt, ...) ODIN3_PRINTF(2, 3);
 size_t odin3_log_count(odin3_log_level level);   /* per level, including filtered messages */

@@ -114,7 +114,7 @@ static void read_text(const char *text) {
 void setUp(void) {
     reset_log();
     odin3_log_set_sink(capture_sink, NULL);
-    odin3_log_set_level(ODIN3_LOG_DEBUG);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_DEBUG));
     saved_opts = odin3_pass_get_options();
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
@@ -124,13 +124,14 @@ void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_pass_set_options(saved_opts);
     odin3_log_set_sink(NULL, NULL);
-    odin3_log_set_level(ODIN3_LOG_INFO);
     odin3_design_destroy(design);
     design = NULL;
     (void)remove(BLIF_PATH);
     (void)remove(OUT_PATH);
     (void)remove(SCRIPT_PATH);
     (void)remove(SPACED_PATH);
+    /* last: after an ignored test, a Unity assertion ends tearDown at once */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_INFO));
 }
 
 /* --- test passes ----------------------------------------------------------------------------- */
@@ -331,7 +332,9 @@ static void test_check_warnings_once_per_pass(void) {
     reset_log();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("stats; stats"));
     TEST_ASSERT_EQUAL_UINT32(2, log_count_of("W check: top: rule 11:"));
-    odin3_log_set_level(ODIN3_LOG_ERROR); /* a quieter caller level is kept, not raised */
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_log_set_level(ODIN3_LOG_ERROR)); /* a quieter caller level is kept, not raised */
     reset_log();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("stats", ""));
     TEST_ASSERT_EQUAL_UINT32(0, log_count_of("W check:"));

@@ -62,7 +62,10 @@ odin3_pass_options odin3_pass_get_options(void);
 /*
  * Runs the pass named name on design: opens a provenance pass run named after the pass
  * (odin3_pass_run_begin), checks the design (FULL, when checking is on; see odin3_pass_options;
- * this check reports errors only, so the warnings of the check after a pass show once per pass),
+ * this check reports errors only, so the warnings of the check after a pass show once per pass;
+ * blind spots: a warning that first appears in this check, e.g. from IR changed outside a pass,
+ * is counted in odin3_log_count but never delivered, and while it runs the process-wide log level
+ * is lowered to ODIN3_LOG_ERROR, under any sink, then restored),
  * runs the pass, checks again (also after a failed pass: it must leave valid IR), and logs
  * "pass <name>: <ms> ms" at ODIN3_LOG_INFO (checks included). args must hold closed double quotes
  * (see odin3_pass_arg_next). Returns the pass's status when it fails ("pass <name>: failed:

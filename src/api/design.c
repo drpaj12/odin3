@@ -18,6 +18,9 @@
 
 ODIN3_EXPORT odin3_status odin3_design_run_pass(odin3_design *design, const char *name,
                                                 const char *args) {
+    if (design == NULL || name == NULL) {
+        return odin3_api_invalid(__func__);
+    }
     return odin3_pass_run(design, name, odin3_bytes_cstr(args));
 }
 
@@ -31,7 +34,7 @@ ODIN3_EXPORT odin3_status odin3_design_get_top_module(const odin3_design *design
 }
 
 ODIN3_EXPORT odin3_status odin3_design_set_top_module(odin3_design *design, uint32_t module) {
-    if (design == NULL) {
+    if (odin3_api_module(design, module) == NULL) {
         return odin3_api_invalid(__func__);
     }
     return odin3_design_set_top(design, (odin3_module_id){module});

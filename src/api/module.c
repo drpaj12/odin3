@@ -85,29 +85,35 @@ ODIN3_EXPORT odin3_status odin3_module_get_port_count(const odin3_design *design
     return ODIN3_OK;
 }
 
-/* The module of port when port.id is a port index of it, else NULL. */
-static const odin3_module *port_module(const odin3_design *design, odin3_ref port) {
+/* A port of a module: the module's ID and the port's index. */
+typedef struct port_at {
+    uint32_t module;
+    uint32_t index;
+} port_at;
+
+/* The module when port.index is one of its ports, else NULL. */
+static const odin3_module *port_module(const odin3_design *design, port_at port) {
     const odin3_module *mod = odin3_api_module(design, port.module);
-    return mod != NULL && port.id < odin3_module_port_count(mod) ? mod : NULL;
+    return mod != NULL && port.index < odin3_module_port_count(mod) ? mod : NULL;
 }
 
-ODIN3_EXPORT odin3_status odin3_module_get_port_node(const odin3_design *design, odin3_ref port,
-                                                     uint32_t *node) {
-    const odin3_module *mod = port_module(design, port);
+ODIN3_EXPORT odin3_status odin3_module_get_port_node(const odin3_design *design, uint32_t module,
+                                                     uint32_t index, uint32_t *node) {
+    const odin3_module *mod = port_module(design, (port_at){module, index});
     if (mod == NULL || node == NULL) {
         return odin3_api_invalid(__func__);
     }
-    *node = odin3_module_port(mod, port.id).v;
+    *node = odin3_module_port(mod, index).v;
     return ODIN3_OK;
 }
 
-ODIN3_EXPORT odin3_status odin3_module_get_port_wire(const odin3_design *design, odin3_ref port,
-                                                     uint32_t *wire) {
-    const odin3_module *mod = port_module(design, port);
+ODIN3_EXPORT odin3_status odin3_module_get_port_wire(const odin3_design *design, uint32_t module,
+                                                     uint32_t index, uint32_t *wire) {
+    const odin3_module *mod = port_module(design, (port_at){module, index});
     if (mod == NULL || wire == NULL) {
         return odin3_api_invalid(__func__);
     }
-    *wire = odin3_module_port_wire(mod, port.id).v;
+    *wire = odin3_module_port_wire(mod, index).v;
     return ODIN3_OK;
 }
 

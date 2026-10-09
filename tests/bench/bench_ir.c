@@ -279,9 +279,13 @@ static int run(bench_ctx *ctx) {
     report("build", start);
     start = now_seconds();
     odin3_log_reset_counts();
-    odin3_log_set_level(ODIN3_LOG_ERROR);
+    if (odin3_log_set_level(ODIN3_LOG_ERROR) != ODIN3_OK) {
+        return 1;
+    }
     odin3_status check = odin3_check_module(ctx->module, full);
-    odin3_log_set_level(ODIN3_LOG_INFO);
+    if (odin3_log_set_level(ODIN3_LOG_INFO) != ODIN3_OK) {
+        return 1;
+    }
     report("check FULL", start);
     printf("check status  : %d  (%zu errors, %zu warnings logged)\n", (int)check,
            odin3_log_count(ODIN3_LOG_ERROR), odin3_log_count(ODIN3_LOG_WARN));

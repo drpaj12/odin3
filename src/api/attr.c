@@ -23,15 +23,29 @@ static const odin3_module *resolve(const odin3_design *design, odin3_obj obj, od
         [ODIN3_OBJ_NET] = ODIN3_API_NET,
         [ODIN3_OBJ_WIRE] = ODIN3_API_WIRE,
     };
-    if ((int)obj.kind < 0 || obj.kind > ODIN3_OBJ_MODULE) {
+    if (obj.kind > (uint32_t)ODIN3_OBJ_MODULE) {
         return NULL;
     }
-    if (obj.kind == ODIN3_OBJ_MODULE) {
+    if (obj.kind == (uint32_t)ODIN3_OBJ_MODULE) {
         *ref = (odin3_objref){ODIN3_OBJ_MODULE, obj.module};
         return odin3_api_module(design, obj.module);
     }
-    *ref = (odin3_objref){obj.kind, obj.id};
+    *ref = (odin3_objref){(odin3_objkind)obj.kind, obj.id};
     return odin3_api_ref(design, (odin3_ref){obj.module, obj.id}, k_store[obj.kind]);
+}
+
+/* True when the object ref of mod is live (a module always is). */
+static bool live(const odin3_module *mod, odin3_objref ref) {
+    switch (ref.kind) {
+    case ODIN3_OBJ_NODE:
+        return odin3_node_live(mod, (odin3_node_id){ref.id});
+    case ODIN3_OBJ_NET:
+        return odin3_net_live(mod, (odin3_net_id){ref.id});
+    case ODIN3_OBJ_WIRE:
+        return odin3_wire_live(mod, (odin3_wire_id){ref.id});
+    default:
+        return true;
+    }
 }
 
 ODIN3_EXPORT odin3_status odin3_attr_get_string(const odin3_design *design, odin3_obj obj,
@@ -56,7 +70,8 @@ ODIN3_EXPORT odin3_status odin3_attr_get_string(const odin3_design *design, odin
 ODIN3_EXPORT odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj,
                                                 const char *key, const char *value) {
     odin3_objref ref = {ODIN3_OBJ_MODULE, 0};
-    if (resolve(design, obj, &ref) == NULL || key == NULL || key[0] == '\0' || value == NULL) {
+    const odin3_module *found = resolve(design, obj, &ref);
+    if (found == NULL || !live(found, ref) || key == NULL || key[0] == '\0' || value == NULL) {
         return odin3_api_invalid(__func__);
     }
     odin3_module *mod = odin3_module_get(design, (odin3_module_id){obj.module});

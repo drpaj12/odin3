@@ -97,11 +97,11 @@ odin3_status odin3_plugin_load(const char *path);
  * odin3_*_is_live. Accessors also answer for a dead object (what it held when it died).
  *
  * Failures. Every function below that takes a design (but odin3_design_destroy) returns
- * odin3_status. ODIN3_ERR_INVALID_ARG
- * (logged as "<function>: invalid argument …") for a NULL design or output pointer, a module ID
- * that is not a module of the design, or an object ID that is 0 or past its store's end; the
- * outputs are left unchanged on any failure. ODIN3_ERR_NO_MEMORY where a function says it can
- * allocate. Readers take a const design and never change the IR.
+ * odin3_status. ODIN3_ERR_INVALID_ARG, logged as "<function>: invalid argument …", for a NULL
+ * design, name or output pointer, a module ID that is not a module of the design, an object ID
+ * that is 0 or past its store's end, or an index out of range; the outputs are left unchanged on
+ * any failure. (A pass or script that runs logs its own errors.) ODIN3_ERR_NO_MEMORY where a
+ * function says it can allocate. Readers take a const design and never change the IR.
  *
  * Strings. A const char * returned through an output is owned by the design: never free it. It
  * is NUL-terminated and stays valid until the next IR mutation of the design (any pass run or
@@ -112,8 +112,7 @@ odin3_status odin3_plugin_load(const char *path);
 /* A design: modules, cell types, names, provenance. Opaque; create and destroy it here. */
 typedef struct odin3_design odin3_design;
 
-/* A module-local object (node, pin, net or wire): its module's ID and its own ID. A module's
- * port is addressed the same way, with id holding the port's index (0-based). */
+/* A module-local object (node, pin, net or wire): its module's ID and its own ID. */
 typedef struct odin3_ref {
     uint32_t module;
     uint32_t id;
@@ -127,10 +126,11 @@ typedef enum odin3_objkind {
     ODIN3_OBJ_MODULE
 } odin3_objkind;
 
-/* An object of any kind: module ID, kind and module-local ID (ignored for ODIN3_OBJ_MODULE). */
+/* An object of any kind: module ID, kind (an odin3_objkind value; uint32_t fixes the layout) and
+ * module-local ID (ignored for ODIN3_OBJ_MODULE). */
 typedef struct odin3_obj {
     uint32_t module;
-    odin3_objkind kind;
+    uint32_t kind;
     uint32_t id;
 } odin3_obj;
 
@@ -179,25 +179,30 @@ void odin3_design_destroy(odin3_design *design);
  * words split on blanks, "double quotes" keep blanks), e.g. ("read_blif", "a.blif"). The pass
  * manager opens a provenance run named after the pass, checks the IR before and after (Debug
  * builds, or odin3_pass_set_check), and logs its time. Returns the pass's own failure status
- * (logged); ODIN3_ERR_CHECK when a check around it fails; ODIN3_ERR_INVALID_ARG (logged) for a
- * NULL design or name, an unknown pass, bad arguments or an unclosed quote; ODIN3_ERR_NO_MEMORY.
+ * (logged); ODIN3_ERR_CHECK when a check around it fails; ODIN3_ERR_INVALID_ARG for a NULL design
+ * or name (as the conventions say), or (logged by the pass manager) an unknown pass, bad
+ * arguments or an unclosed quote; ODIN3_ERR_NO_MEMORY.
  * Mutates the IR (see Strings above). Nothing is returned for the caller to free.
  */
 odin3_status odin3_design_run_pass(odin3_design *design, const char *name, const char *args);
 
 /*
  * *module gets the design's top module (DESIGN §4.0; set by read_blif, hierarchy or
- * odin3_design_set_top_module), 0 when none is set. Fails only as the conventions say.
+ * odin3_design_set_top_module), 0 when none is set. Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say.
  */
 odin3_status odin3_design_get_top_module(const odin3_design *design, uint32_t *module);
 
 /*
- * Makes module the design's top module. ODIN3_ERR_INVALID_ARG (logged) for a NULL design or an ID
- * that is not a module of the design; the top is unchanged then. Counts as an IR mutation.
+ * Makes module the design's top module. Counts as an IR mutation. Fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say. The top is unchanged on failure.
  */
 odin3_status odin3_design_set_top_module(odin3_design *design, uint32_t module);
 
-/* *count gets the number of modules. Modules are never deleted, so their IDs are 1 .. count. */
+/*
+ * *count gets the number of modules. Modules are never deleted, so their IDs are 1 .. count.
+ * Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
 odin3_status odin3_design_get_module_count(const odin3_design *design, uint32_t *count);
 
 /*
@@ -216,7 +221,8 @@ odin3_status odin3_design_lookup_module(const odin3_design *design, const char *
 
 /* --- passes and pass scripts --------------------------------------------------------------- */
 
-/* Number of registered passes (built-ins first, then plugin passes in registration order). */
+/* Number of registered passes (built-ins first, then plugin passes in registration order).
+ * Never fails. */
 uint32_t odin3_pass_get_count(void);
 
 /*
@@ -226,7 +232,11 @@ uint32_t odin3_pass_get_count(void);
  */
 odin3_status odin3_pass_get_name(uint32_t index, const char **name);
 
-/* As odin3_pass_get_name, for the pass's one-line usage text (what `odin3 --help` prints). */
+/*
+ * *help gets the one-line usage text of pass `index` (what `odin3 --help` prints); it lives as
+ * long as the process. ODIN3_ERR_INVALID_ARG (logged) for an index >= odin3_pass_get_count() or a
+ * NULL help.
+ */
 odin3_status odin3_pass_get_help(uint32_t index, const char **help);
 
 /*
@@ -236,11 +246,12 @@ odin3_status odin3_pass_get_help(uint32_t index, const char **help);
 void odin3_pass_set_check(bool check);
 
 /*
- * Sets the requested top module name (the CLI's --top; DESIGN §4.0: it wins over a file's own
- * top): read_blif applies it after reading and `hierarchy` uses it when given no --top. NULL
- * clears it. The string is copied. Process-wide. ODIN3_ERR_NO_MEMORY (the old value is kept).
+ * Sets the requested top module name for later passes (the CLI's --top; DESIGN §4.0: it wins over
+ * a file's own top): read_blif applies it after reading and `hierarchy` uses it when given no
+ * --top. NULL clears it. The string is copied. Process-wide. To set a design's actual top, see
+ * odin3_design_set_top_module. Fails only with ODIN3_ERR_NO_MEMORY (the old name is kept).
  */
-odin3_status odin3_pass_set_top(const char *top);
+odin3_status odin3_pass_set_top_name(const char *name);
 
 /* How a script's errors are located: "origin:line: …" (a file) or "origin: command k: …". */
 typedef enum odin3_script_loc { ODIN3_SCRIPT_BY_LINE, ODIN3_SCRIPT_BY_COMMAND } odin3_script_loc;
@@ -278,12 +289,14 @@ odin3_status odin3_script_resolve_file(const char *path);
 
 /* --- modules ------------------------------------------------------------------------------- */
 
-/* *name gets the module's name (see Strings). Fails only as the conventions say. */
+/* *name gets the module's name (see Strings). Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say. */
 odin3_status odin3_module_get_name(const odin3_design *design, uint32_t module, const char **name);
 
 /*
  * *end gets one past the last node, net or wire ID of the module: iterate IDs 1 .. end - 1 and
- * skip dead objects (odin3_node_is_live, …). Fail only as the conventions say.
+ * skip dead objects (odin3_node_is_live, …). Each fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say.
  */
 odin3_status odin3_module_get_node_end(const odin3_design *design, uint32_t module, uint32_t *end);
 odin3_status odin3_module_get_net_end(const odin3_design *design, uint32_t module, uint32_t *end);
@@ -291,7 +304,8 @@ odin3_status odin3_module_get_wire_end(const odin3_design *design, uint32_t modu
 
 /*
  * *count gets the number of live nodes, nets or wires of the module (port nodes and port wires
- * included; what the `stats` pass prints). O(store size). Fail only as the conventions say.
+ * included; what the `stats` pass prints). O(store size). Each fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say.
  */
 odin3_status odin3_module_get_node_count(const odin3_design *design, uint32_t module,
                                          uint32_t *count);
@@ -300,23 +314,26 @@ odin3_status odin3_module_get_net_count(const odin3_design *design, uint32_t mod
 odin3_status odin3_module_get_wire_count(const odin3_design *design, uint32_t module,
                                          uint32_t *count);
 
-/* *count gets the number of module ports. Fails only as the conventions say. */
+/* *count gets the number of module ports. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions
+ * say. */
 odin3_status odin3_module_get_port_count(const odin3_design *design, uint32_t module,
                                          uint32_t *count);
 
 /*
- * For the module port port.id (0-based, declaration order) of module port.module: *node gets its
- * port node (cell type $port_in, $port_out or $port_inout), *wire the port's wire, which carries
- * the port's name. ODIN3_ERR_INVALID_ARG (logged) for an index >= the port count, besides the
- * conventions.
+ * For port `index` (0-based, declaration order) of the module: *node gets its port node (cell
+ * type $port_in, $port_out or $port_inout), *wire the port's wire, which carries the port's name.
+ * Each fails only with ODIN3_ERR_INVALID_ARG, as the conventions say (an index >= the port count
+ * included).
  */
-odin3_status odin3_module_get_port_node(const odin3_design *design, odin3_ref port, uint32_t *node);
-odin3_status odin3_module_get_port_wire(const odin3_design *design, odin3_ref port, uint32_t *wire);
+odin3_status odin3_module_get_port_node(const odin3_design *design, uint32_t module, uint32_t index,
+                                        uint32_t *node);
+odin3_status odin3_module_get_port_wire(const odin3_design *design, uint32_t module, uint32_t index,
+                                        uint32_t *wire);
 
 /*
  * *id gets the live node, net or wire of the module named name, 0 when there is none (a net is
- * also found by its alias names). ODIN3_ERR_INVALID_ARG (logged) for a NULL name, besides the
- * conventions. O(1).
+ * also found by its alias names). O(1). Each fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say (a NULL name included).
  */
 odin3_status odin3_module_lookup_node(const odin3_design *design, uint32_t module, const char *name,
                                       uint32_t *id);
@@ -327,21 +344,30 @@ odin3_status odin3_module_lookup_wire(const odin3_design *design, uint32_t modul
 
 /* --- nodes --------------------------------------------------------------------------------- */
 
-/* *live gets whether the node is live (not deleted). Fails only as the conventions say. */
+/* *live gets whether the node is live (not deleted). Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say. */
 odin3_status odin3_node_is_live(const odin3_design *design, odin3_ref node, bool *live);
 
-/* *name gets the name of the node's cell type, e.g. "$sop" or a module name (see Strings). */
+/*
+ * *name gets the name of the node's cell type, e.g. "$sop" or a module name (see Strings).
+ * Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
 odin3_status odin3_node_get_type_name(const odin3_design *design, odin3_ref node,
                                       const char **name);
 
-/* *gran gets the granularity of the node's cell type. Fails only as the conventions say. */
+/* *gran gets the granularity of the node's cell type. Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say. */
 odin3_status odin3_node_get_granularity(const odin3_design *design, odin3_ref node,
                                         odin3_granularity *gran);
 
-/* *name gets the node's instance name, "" when it has none (see Strings). */
+/* *name gets the node's instance name, "" when it has none (see Strings). Fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say. */
 odin3_status odin3_node_get_name(const odin3_design *design, odin3_ref node, const char **name);
 
-/* *count gets the number of parameters of the node's cell type (every node has them all). */
+/*
+ * *count gets the number of parameters of the node's cell type (every node has them all).
+ * Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
 odin3_status odin3_node_get_param_count(const odin3_design *design, odin3_ref node,
                                         uint32_t *count);
 
@@ -366,11 +392,12 @@ odin3_status odin3_node_get_param_text(const odin3_design *design, odin3_ref nod
 
 /*
  * *pins gets all pins of the node: consecutive IDs in port order, then bit order (LSB first).
- * Fails only as the conventions say.
+ * Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
  */
 odin3_status odin3_node_get_pins(const odin3_design *design, odin3_ref node, odin3_span *pins);
 
-/* *count gets the number of ports of the node's cell type. Fails only as the conventions say. */
+/* *count gets the number of ports of the node's cell type. Fails only with ODIN3_ERR_INVALID_ARG,
+ * as the conventions say. */
 odin3_status odin3_node_get_port_count(const odin3_design *design, odin3_ref node, uint32_t *count);
 
 /*
@@ -393,7 +420,7 @@ odin3_status odin3_node_get_port_width(const odin3_design *design, odin3_ref nod
 /*
  * For a pin: the node it belongs to, its port index on that node, its bit within the port (LSB
  * 0), and the net it is connected to (0 when unconnected). A pin lives while its node does.
- * Fail only as the conventions say.
+ * Each fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
  */
 odin3_status odin3_pin_get_node(const odin3_design *design, odin3_ref pin, uint32_t *node);
 odin3_status odin3_pin_get_port(const odin3_design *design, odin3_ref pin, uint32_t *port);
@@ -402,12 +429,13 @@ odin3_status odin3_pin_get_net(const odin3_design *design, odin3_ref pin, uint32
 
 /* --- nets ---------------------------------------------------------------------------------- */
 
-/* *live gets whether the net is live (not deleted or merged away). */
+/* *live gets whether the net is live (not deleted or merged away). Fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say. */
 odin3_status odin3_net_is_live(const odin3_design *design, odin3_ref net, bool *live);
 
 /*
  * *name gets the net's own name (see Strings), "" when it has none; names it was also known by
- * are its aliases. Fails only as the conventions say.
+ * are its aliases. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
  */
 odin3_status odin3_net_get_name(const odin3_design *design, odin3_ref net, const char **name);
 
@@ -415,8 +443,9 @@ odin3_status odin3_net_get_name(const odin3_design *design, odin3_ref net, const
  * A net's pins are its drivers (OUT and INOUT pins) first, then its sinks; the order within each
  * part is not significant. odin3_net_get_pin_count and odin3_net_get_driver_count give the number
  * of pins and of drivers (pins 0 .. drivers - 1 are the drivers); odin3_net_get_pin_at gives pin
- * `index` (ODIN3_ERR_INVALID_ARG, logged, for an index >= the pin count, besides the
- * conventions); odin3_net_get_driver gives the first driver, 0 when there is none.
+ * `index`; odin3_net_get_driver gives the first driver, 0 when there is none. Each fails only
+ * with ODIN3_ERR_INVALID_ARG, as the conventions say (for pin_at, an index >= the pin count
+ * included).
  */
 odin3_status odin3_net_get_pin_count(const odin3_design *design, odin3_ref net, uint32_t *count);
 odin3_status odin3_net_get_driver_count(const odin3_design *design, odin3_ref net, uint32_t *count);
@@ -427,9 +456,12 @@ odin3_status odin3_net_get_driver(const odin3_design *design, odin3_ref net, uin
 /*
  * The net's aliases, oldest first (IR-2: names it was also known by, e.g. after a merge; its own
  * name is not an alias): *count gets how many, *name alias `index` (see Strings): a bare name as
- * is, a wire bit as "wire[i]" with the bit's declared index i. O(aliases).
- * odin3_net_get_alias_name: ODIN3_ERR_INVALID_ARG (logged) for an index >= the alias count, and
- * ODIN3_ERR_NO_MEMORY (it may intern the "wire[i]" text, as odin3_node_get_param_text does).
+ * is, a wire bit as "wire[i]" with the bit's declared index i. Both are O(aliases):
+ * odin3_net_get_alias_name walks the alias chain from the start each call (O(index)), so reading
+ * every alias of a net costs O(aliases^2). odin3_net_get_alias_count fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say; odin3_net_get_alias_name also for an index >=
+ * the alias count, and with ODIN3_ERR_NO_MEMORY (it may intern the "wire[i]" text, as
+ * odin3_node_get_param_text does).
  */
 odin3_status odin3_net_get_alias_count(const odin3_design *design, odin3_ref net, uint32_t *count);
 odin3_status odin3_net_get_alias_name(const odin3_design *design, odin3_ref net, uint32_t index,
@@ -437,24 +469,28 @@ odin3_status odin3_net_get_alias_name(const odin3_design *design, odin3_ref net,
 
 /* --- wires --------------------------------------------------------------------------------- */
 
-/* *live gets whether the wire is live; *name gets its name, "" when it has none (see Strings). */
+/* *live gets whether the wire is live (not deleted). Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say. */
 odin3_status odin3_wire_is_live(const odin3_design *design, odin3_ref wire, bool *live);
+
+/* *name gets the wire's name, "" when it has none (see Strings). Fails only with
+ * ODIN3_ERR_INVALID_ARG, as the conventions say. */
 odin3_status odin3_wire_get_name(const odin3_design *design, odin3_ref wire, const char **name);
 
 /* --- attributes ---------------------------------------------------------------------------- */
 
 /*
  * *value gets the string attribute key of obj (a node, net, wire or module), NULL when obj has no
- * attribute key (see Strings). ODIN3_ERR_INVALID_ARG (logged) for a NULL key, an object kind out
- * of range, or an attribute that is not a string, besides the conventions.
+ * attribute key (see Strings). Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say:
+ * also for a NULL key, a kind out of range, or an attribute that is not a string.
  */
 odin3_status odin3_attr_get_string(const odin3_design *design, odin3_obj obj, const char *key,
                                    const char **value);
 
 /*
  * Sets the string attribute key (non-empty) of the live object obj to a copy of value, replacing
- * any earlier value. An IR mutation (see Strings). ODIN3_ERR_INVALID_ARG (logged) for a NULL or
- * empty key, a NULL value, a dead object or a kind out of range, besides the conventions;
+ * any earlier value. An IR mutation (see Strings). ODIN3_ERR_INVALID_ARG, as the conventions
+ * say, also for a NULL or empty key, a NULL value, a dead object or a kind out of range;
  * ODIN3_ERR_NO_MEMORY. The IR is unchanged on failure.
  */
 odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj, const char *key,

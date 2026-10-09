@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
         return EXIT_OK;
     }
     odin3_pass_set_check(state.check);
-    if (odin3_pass_set_top(state.top) != ODIN3_OK) {
+    if (odin3_pass_set_top_name(state.top) != ODIN3_OK) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }

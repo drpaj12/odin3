@@ -57,7 +57,7 @@ void tearDown(void) {
     design = NULL;
     odin3_log_set_sink(NULL, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_INFO));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top(NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
 }
 
 /* --- helpers over the ABI ------------------------------------------------------------------ */
@@ -187,12 +187,18 @@ static void test_design_null_and_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_set_top_module(NULL, 1));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_lookup_module(design, NULL, &out));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_lookup_module(NULL, "top", &out));
+    TEST_ASSERT_TRUE(log_has("odin3_design_set_top_module: invalid argument"));
+    TEST_ASSERT_TRUE(log_has("odin3_design_get_module_count: invalid argument"));
+    odin3_design_destroy(NULL); /* a no-op */
+}
+
+/* NULL arguments are logged in the ABI's form; an unknown pass by the pass manager. */
+static void test_run_pass_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(NULL, "stats", NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(design, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(design, "nope", NULL));
     TEST_ASSERT_TRUE(log_has("unknown pass 'nope'"));
-    TEST_ASSERT_TRUE(log_has("odin3_design_get_module_count: invalid argument"));
-    odin3_design_destroy(NULL); /* a no-op */
+    TEST_ASSERT_TRUE(log_has("odin3_design_run_pass: invalid argument"));
 }
 
 static void test_run_pass_without_arguments(void) {
@@ -255,10 +261,8 @@ static void test_module_ports(void) {
     for (uint32_t i = 0; i < 6; i++) {
         uint32_t node = 0;
         uint32_t wire = 0;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_module_get_port_node(design, (odin3_ref){top, i}, &node));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_module_get_port_wire(design, (odin3_ref){top, i}, &wire));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_node(design, top, i, &node));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_wire(design, top, i, &wire));
         const char *name = NULL;
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_get_name(design, (odin3_ref){top, wire}, &name));
         TEST_ASSERT_EQUAL_STRING(expected[i], name);
@@ -272,12 +276,10 @@ static void test_module_ports(void) {
     uint32_t wire = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_lookup_wire(design, top, "q", &wire));
     uint32_t q_wire = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_module_get_port_wire(design, (odin3_ref){top, 4}, &q_wire));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_wire(design, top, 4, &q_wire));
     TEST_ASSERT_EQUAL_UINT32(q_wire, wire);
     uint32_t keep = 9;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_module_get_port_node(design, (odin3_ref){top, 6}, &keep));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_module_get_port_node(design, top, 6, &keep));
     TEST_ASSERT_EQUAL_UINT32(9, keep);
 }
 
@@ -345,8 +347,7 @@ static void test_subckt_instance(void) {
     TEST_ASSERT_EQUAL_UINT32(1, pin_bit);
     TEST_ASSERT_EQUAL_UINT32(sub.id, pin_node(bit1));
     uint32_t a_node = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_module_get_port_node(design, (odin3_ref){top, 0}, &a_node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_node(design, top, 0, &a_node));
     odin3_span a_pins = {0, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_pins(design, (odin3_ref){top, a_node}, &a_pins));
     TEST_ASSERT_EQUAL_UINT32(pin_net((odin3_ref){top, a_pins.first}), pin_net(bit1));
@@ -465,7 +466,7 @@ static void test_unconnected_pin_and_port_net(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, gran);
     /* the BLIF reader names a port bit's net after the port */
     uint32_t clk = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_node(design, (odin3_ref){top, 2}, &clk));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_port_node(design, top, 2, &clk));
     odin3_span pins = {0, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_pins(design, (odin3_ref){top, clk}, &pins));
     const char *name = NULL;
@@ -538,7 +539,7 @@ static void test_attribute_set_and_kinds(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set_string(design, objs[0], NULL, "v"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set_string(design, objs[0], "k", NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set_string(NULL, objs[0], "k", "v"));
-    odin3_obj bad_kind = {top, (odin3_objkind)7, 1};
+    odin3_obj bad_kind = {top, 7, 1};
     odin3_obj bad_id = {top, ODIN3_OBJ_NET, 1000};
     odin3_obj bad_module = {0, ODIN3_OBJ_MODULE, 0};
     const char *value = "keep";
@@ -554,32 +555,48 @@ static void test_attribute_set_and_kinds(void) {
     TEST_ASSERT_EQUAL_STRING("keep", value);
 }
 
-/* Review Focus 2: strings stay valid until the next IR mutation; after one, fetch them again. */
+/* The u_sub node's type name, name and src attribute, each fetched now (never held across an IR
+ * mutation), compared with the expected values. */
+static void assert_u_sub(uint32_t top, const char *src) {
+    uint32_t node = node_named(top, "u_sub");
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, node);
+    TEST_ASSERT_EQUAL_STRING("sub", type_name((odin3_ref){top, node}));
+    const char *name = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_name(design, (odin3_ref){top, node}, &name));
+    TEST_ASSERT_EQUAL_STRING("u_sub", name);
+    TEST_ASSERT_EQUAL_STRING(src, attr((odin3_obj){top, ODIN3_OBJ_NODE, node}, "blif.attr:src"));
+}
+
+/*
+ * Review Focus 2: a string is valid until the next IR mutation, so after every mutation (ABI
+ * attribute sets, set_top_module, passes) each string is fetched again; no pointer is used across
+ * a mutation.
+ */
 static void test_strings_refetched_after_mutation(void) {
     uint32_t top = module_named("top");
-    odin3_obj sub = {top, ODIN3_OBJ_NODE, node_named(top, "u_sub")};
-    const char *before = attr(sub, "blif.attr:src");
-    const char *type_before = type_name((odin3_ref){top, sub.id});
-    TEST_ASSERT_EQUAL_STRING("\"top.v:4\"", before);
-    /* a mutation through the ABI: the old pointer is no longer promised; a re-fetch is current */
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set_string(design, sub, "blif.attr:src", "new.v:9"));
-    TEST_ASSERT_EQUAL_STRING("new.v:9", attr(sub, "blif.attr:src"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set_string(design, sub, "blif.attr:src", "v2"));
-    TEST_ASSERT_EQUAL_STRING("v2", attr(sub, "blif.attr:src"));
-    /* a mutation through passes: compact renumbers nothing here, hierarchy re-selects the top */
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "compact", NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "hierarchy", "--top sub"));
+    uint32_t sub = module_named("sub");
+    odin3_obj node = {top, ODIN3_OBJ_NODE, node_named(top, "u_sub")};
+    assert_u_sub(top, "\"top.v:4\"");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_attr_set_string(design, node, "blif.attr:src", "new.v:9"));
+    assert_u_sub(top, "new.v:9");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set_string(design, node, "blif.attr:src", "v2"));
+    assert_u_sub(top, "v2");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top_module(design, sub));
     TEST_ASSERT_EQUAL_STRING("sub", module_name(top_module()));
-    uint32_t again = node_named(top, "u_sub");
-    TEST_ASSERT_EQUAL_UINT32(sub.id, again);
-    TEST_ASSERT_EQUAL_STRING("sub", type_name((odin3_ref){top, again}));
-    TEST_ASSERT_EQUAL_STRING(type_before, type_name((odin3_ref){top, again}));
-    TEST_ASSERT_EQUAL_STRING("v2", attr(sub, "blif.attr:src"));
-    /* computed text is cached, so a second fetch gives an equal string */
+    assert_u_sub(top, "v2");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "compact", NULL));
+    TEST_ASSERT_EQUAL_STRING("sub", module_name(top_module()));
+    assert_u_sub(top, "v2");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "hierarchy", "--top top"));
+    TEST_ASSERT_EQUAL_STRING("top", module_name(top_module()));
+    assert_u_sub(top, "v2");
+    /* without a mutation in between, computed text fetched twice is equal (it is cached) */
     odin3_ref sop = {
         top, pin_node((odin3_ref){top, net_driver((odin3_ref){top, net_named(top, "n1")})})};
     const char *cover = param_text(sop, 1);
     TEST_ASSERT_EQUAL_STRING(cover, param_text(sop, 1));
+    TEST_ASSERT_EQUAL_STRING("11 1\n", cover);
 }
 
 /* --- passes and scripts -------------------------------------------------------------------- */
@@ -621,10 +638,19 @@ static void test_scripts(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_script_file(NULL, "x.o3"));
 }
 
+static void test_script_null_origin(void) {
+    odin3_script_src no_origin = {NULL, ODIN3_SCRIPT_BY_COMMAND};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_run_script(design, "stats", no_origin));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_script_resolve("stats", no_origin));
+    TEST_ASSERT_TRUE(log_has("odin3_design_run_script: invalid argument"));
+    TEST_ASSERT_TRUE(log_has("odin3_script_resolve: invalid argument"));
+}
+
 static void test_pass_top_option(void) {
     odin3_design *other = odin3_design_create();
     TEST_ASSERT_NOT_NULL(other);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top("sub"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name("sub"));
     char args[PATH_BUF];
     (void)snprintf(args, sizeof args, "%s/hand_body.blif", ODIN3_BLIF_FIXTURES);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(other, "read_blif", args));
@@ -634,9 +660,22 @@ static void test_pass_top_option(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(other, top, &name));
     TEST_ASSERT_EQUAL_STRING("sub", name);
     odin3_design_destroy(other);
-    odin3_pass_set_check(true); /* Release: check around passes; Debug always checks */
+}
+
+/* hand_body.blif leaves the black box's output open: the check after a pass warns (rule 11). */
+static void test_pass_check_option(void) {
+    odin3_pass_set_check(true); /* the check runs around every pass, in Release too */
+    reset_log();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "stats", NULL));
+    TEST_ASSERT_TRUE(log_has("check: top: rule 11:"));
     odin3_pass_set_check(false);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "stats", NULL));
+#ifdef NDEBUG
+    TEST_ASSERT_FALSE(log_has("check: top: rule 11:")); /* Release: the option turns it off */
+#else
+    TEST_ASSERT_TRUE(log_has("check: top: rule 11:")); /* Debug: always checks (rule 3) */
+#endif
 }
 
 /* --- logging ------------------------------------------------------------------------------- */
@@ -665,6 +704,7 @@ int main(void) {
     RUN_TEST(test_abi_version_is_3);
     RUN_TEST(test_design_modules_and_top);
     RUN_TEST(test_design_null_and_bad_arguments);
+    RUN_TEST(test_run_pass_bad_arguments);
     RUN_TEST(test_run_pass_without_arguments);
     RUN_TEST(test_module_counts_match_stats);
     RUN_TEST(test_walk_nodes_histogram);
@@ -682,7 +722,9 @@ int main(void) {
     RUN_TEST(test_strings_refetched_after_mutation);
     RUN_TEST(test_pass_listing);
     RUN_TEST(test_scripts);
+    RUN_TEST(test_script_null_origin);
     RUN_TEST(test_pass_top_option);
+    RUN_TEST(test_pass_check_option);
     RUN_TEST(test_logging);
     return UNITY_END();
 }
