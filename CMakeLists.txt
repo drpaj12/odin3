@@ -121,6 +121,11 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- odin3-blif-rt: BLIF round-trip driver (used by tools/blif-roundtrip/blif-roundtrip) --------
+add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
+target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
+
 # --- Benchmark (built by default, not a CTest) --------------------------------------
 add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -176,6 +181,12 @@ if(BUILD_TESTING)
     add_dependencies(test_api example_plugin)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
+
+    add_test(NAME blif_roundtrip_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
+                     --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
+                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_fixtures PROPERTIES LABELS unit)
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
