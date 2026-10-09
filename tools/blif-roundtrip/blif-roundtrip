@@ -3,10 +3,10 @@
 #
 # For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
 # directory: every *.blif) this runs odin3-blif-rt (read, check FULL, write), then
-#   TEXT gate        normalized original == normalized output (continuations joined,
-#                    comments stripped, .subckt formals sorted, repeated .attr/.param keys
-#                    reduced to the last, whitespace collapsed, blank lines dropped, default
-#                    latch init spelled out as 3), then
+#   TEXT gate        normalized original == normalized output: continuations joined, comments
+#                    stripped, whitespace collapsed, blank lines and empty .inputs/.outputs/
+#                    .clock lines dropped, .subckt formals sorted, repeated .attr/.param keys
+#                    reduced to the last, default latch init spelled out as 3; then
 #   STRUCTURAL gate  tools/netlist-compare original vs output, after adding stub .blackbox
 #                    models to both for .subckt models that have no .model (implicit cells).
 # Files with identical content (same sha256) run the structural gate once; the others reuse
@@ -41,7 +41,7 @@ USAGE
 normalize() {
     LC_ALL=C awk '
     function flush(   nt) {
-        if (acc == "") return
+        if (acc == "" || acc == ".inputs" || acc == ".outputs" || acc == ".clock") { acc = ""; return }
         if (substr(acc, 1, 7) == ".latch ") {
             nt = split(acc, tk, " ")
             if (nt == 3 || nt == 5) acc = acc " 3"
