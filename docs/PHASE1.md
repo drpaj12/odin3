@@ -83,3 +83,33 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     black boxes with ports from the file (scalar, width 1, inout); no `.model` is written for them.
 17. Order after 1C: 1G, then 1E, 1F, 1D. The full golden round trip runs locally (CI has no
     goldens) via a rerunnable script; CI checks the committed fixtures.
+
+## 1C results: full golden round trip
+
+Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build, writer at
+`b68d4c1`, script at `4f55d5a` (`tools/blif-roundtrip/blif-roundtrip -j 2 -t 600`), 51 min 29 s
+wall clock. Gates: normalized text identity (continuations joined, comments stripped, blanks
+collapsed, empty header lists dropped, `.subckt` formals sorted, repeated `.attr`/`.param` keys
+reduced to the last, default latch init explicit) and `netlist-compare` with stub `.blackbox`
+models for implicit cells. Files with identical content run `netlist-compare` once (724 distinct
+contents of 1846). `netlist-compare` runs under a 600 s timeout and a 6 GB address-space cap.
+
+```
+files: 1846 (structural gate run on 724 distinct contents)
+text gate: 1846 ok, 0 FAIL, 0 read/write failures
+structural gate: identical 1814, identical+stubs 10, refused (multi-driver original) 4, timeout 16, memlimit 2, different 0, error 0, not run 0
+check FULL errors: 0 files outside the multi-driver list, 4 inside it
+slowest file: EArch/regression/verilog/large/LU64PEEng/LU64PEEng.odin.blif (634.4 s total)
+peak RSS: odin3-blif-rt 2314 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif); netlist-compare 6061 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif)
+RESULT: PASS
+```
+
+Exception lists (reported, not failures):
+- Multi-driver originals, refused by `netlist-compare` (decision #15), 4 files: `elsif_both_defined`
+  and `multi_assignment`, `.odin.blif`, both architectures. These are also the only 4 with check errors.
+- Timeouts at 600 s, 16 files (6 distinct contents, repeated across architectures): Odin II
+  `LU8PEEng` (2 contents: `full`, `vtr`), `LU32PEEng`, `LU64PEEng`, `bgm` (`large` and `vtr`). All
+  pass the text gate.
+- Memory cap (6 GB), 2 files with one content: Odin II `LargeRam` (915 MB). Passes the text gate.
+- Implicit cells compared with stub models (identical): 10 files (`pow`, `pow_const`, `dffsre`,
+  `twobits_arithmetic_power`, `eightbit_arithmetic_power`, both architectures).
