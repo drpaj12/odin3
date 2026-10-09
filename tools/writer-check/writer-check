@@ -33,8 +33,8 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
-usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH] [--yosys PATH]
-                    [--max-nodes N] [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
+usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH] [--yosys PATH] [--nc PATH] [--ec PATH]
+                    [--max-nodes N] [--dot-timeout S] [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed); timeouts and caps are failures
   -j N          parallel jobs, 1 or 2 (default 2)
@@ -42,7 +42,9 @@ usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH]
   -m GB         per-tool address-space cap (default 6)
   --write PATH  odin3-write (default build/release/odin3-write, else build/debug/odin3-write)
   --yosys PATH  Yosys (default $ODIN3_YOSYS, else ~/odin3-ws/external/yosys/build/yosys, else PATH)
+  --nc PATH, --ec PATH  netlist-compare, equiv-check (default: the repository's tools/)
   --max-nodes N dot node budget (default 2000)
+  --dot-timeout S  dot -Tsvg layout timeout (default 120); past it, dot -Tcanon must accept the file
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
 USAGE
     exit 2
@@ -176,31 +178,95 @@ sort_statements() {
     mv "$1.sorted" "$1"
 }
 
-# JSON gate for golden $1, JSON $2, work prefix $3.
+# Rewrites every ON-set cover of at most 12 inputs as its minterms (row order is irrelevant to
+# netlist-compare). Yosys write_blif spells a $lut (read_blif makes one for up to 12 inputs; the
+# writer writes one for up to 6) as minterms but a $sop as cubes, so both sides are expanded.
+expand_covers() {
+    LC_ALL=C awk '
+    function flush(   i, j, c, d, n, row, bits, pos, out) {
+        if (hdr == "") return
+        print hdr
+        if (k < 1 || k > 12 || !onset) { for (i = 1; i <= nr; i++) print rows[i] }
+        else {
+            split("", seen)
+            for (i = 1; i <= nr; i++) {
+                row = substr(rows[i], 1, k); d = 0
+                for (j = 1; j <= k; j++) if (substr(row, j, 1) == "-") pos[++d] = j
+                n = 2 ^ d
+                for (c = 0; c < n; c++) {
+                    out = row
+                    for (j = 1; j <= d; j++)
+                        out = substr(out, 1, pos[j] - 1) (int(c / 2 ^ (j - 1)) % 2) substr(out, pos[j] + 1)
+                    if (!(out in seen)) { seen[out] = 1; print out " 1" }
+                }
+            }
+        }
+        hdr = ""; nr = 0
+    }
+    substr($0, 1, 1) == "." { flush()
+        if ($1 == ".names") { hdr = $0; k = NF - 2; onset = 1; next }
+        print; next }
+    hdr != "" { rows[++nr] = $0; if ($NF != "1") onset = 0; next }
+    { print }
+    END { flush() }' "$1" >"$1.exp" && mv "$1.exp" "$1"
+}
+
+# Yosys write_blif names the bit of a 1-bit wire without an index, so the IR's [0:0] vector
+# port `a` (a lone BLIF `a[0]`) comes back as `a`. In the JSON side's BLIF ($2) every name `t`
+# that the reference ($1) lacks while it has `t[0]` becomes `t[0]` (also as a .subckt formal).
+restore_bit0_names() {
+    LC_ALL=C awk '
+    FNR == NR { for (i = 1; i <= NF; i++) { n = split($i, p, "="); for (j = 1; j <= n; j++) ref[p[j]] = 1 }; next }
+    function fix(t) { return (!(t in ref) && ((t "[0]") in ref)) ? t "[0]" : t }
+    substr($1, 1, 1) == "." || NF > 0 {
+        if ($1 !~ /^\./ ) { print; next }
+        out = $1
+        for (i = 2; i <= NF; i++) {
+            if ($1 == ".subckt" && i > 2 && index($i, "=") > 0) {
+                f = substr($i, 1, index($i, "=") - 1); a = substr($i, index($i, "=") + 1)
+                out = out " " fix(f) "=" fix(a)
+            } else out = out " " fix($i)
+        }
+        print out; next
+    }
+    { print }' "$1" "$2" >"$2.fix" && mv "$2.fix" "$2"
+}
+
+# JSON gate for golden $1, JSON $2, work prefix $3. The reference runs first: a golden Yosys
+# cannot read (or crashes on) excludes the step.
 json_gate() {
     local gold=$1 json=$2 w=$3 rc=0 ref=$1
-    capped "$w.yj.log" "$w.yj.rss" "$WC_YOSYS" -q -p \
-        "read_json $json; opt_clean; write_blif $w.yj.blif" || rc=$?
-    note_rss "$w.yj.rss"
-    if [ "$rc" -ne 0 ]; then
-        fail_word "$rc" "$w.yj.log" yosys-error
-        return
-    fi
     # Yosys read_blif does not know `.clock` (a declaration without semantics): drop it.
     if grep -q '^[[:space:]]*\.clock' "$gold"; then
         grep -v '^[[:space:]]*\.clock' "$gold" >"$w.gold.blif" || true
         ref=$w.gold.blif
     fi
-    rc=0
     capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \
-        "read_blif $ref; opt_clean; write_blif $w.yr.blif" || rc=$?
+        "read_blif $ref; $WC_NORM; write_blif $w.yr.blif" || rc=$?
+    if [ "$rc" -ne 0 ] && grep -q 'must have fewer than 13 signals' "$w.yr.log"; then
+        # read_blif makes a $lut of at most 12 inputs; -sop takes any cover.
+        rc=0
+        capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \
+            "read_blif -sop $ref; $WC_NORM; write_blif $w.yr.blif" || rc=$?
+    fi
     note_rss "$w.yr.rss"
     if [ "$rc" -ne 0 ]; then
         echo "ref-$(fail_word "$rc" "$w.yr.log" excluded)"
         return
     fi
+    rc=0
+    capped "$w.yj.log" "$w.yj.rss" "$WC_YOSYS" -q -p \
+        "read_json $json; $WC_NORM; write_blif $w.yj.blif" || rc=$?
+    note_rss "$w.yj.rss"
+    if [ "$rc" -ne 0 ]; then
+        fail_word "$rc" "$w.yj.log" yosys-error
+        return
+    fi
     drop_self_buffers "$w.yr.blif"
     drop_self_buffers "$w.yj.blif"
+    expand_covers "$w.yr.blif"
+    expand_covers "$w.yj.blif"
+    restore_bit0_names "$w.yr.blif" "$w.yj.blif"
     sort_statements "$w.yr.blif"
     sort_statements "$w.yj.blif"
     compare "$w.yr.blif" "$w.yj.blif" "$w.jnc"
@@ -247,9 +313,19 @@ dot_gate() {
         grep -q 'refusing to draw [0-9]* nodes' "$log" && echo budget || echo FAIL
         return
     fi
-    capped "$w.dot.log" "$w.dot.rss" "$WC_DOT" -Tsvg -o /dev/null "$dotf" || rc=$?
+    WC_TIMEOUT=$WC_DOT_TIMEOUT capped "$w.dot.log" "$w.dot.rss" "$WC_DOT" -Tsvg -o /dev/null "$dotf" ||
+        rc=$?
     note_rss "$w.dot.rss"
-    if [ "$rc" -eq 0 ]; then echo ok; else fail_word "$rc" "$w.dot.log" FAIL; fi
+    case $rc in
+    0) echo ok ;;
+    124 | 137)
+        # Layout of up to --max-nodes nodes can take Graphviz many minutes: then check that dot
+        # accepts the file without laying it out (-Tcanon).
+        rc=0
+        capped "$w.dot.log" "$w.dot.rss" "$WC_DOT" -Tcanon -o /dev/null "$dotf" || rc=$?
+        if [ "$rc" -eq 0 ]; then echo ok-canon; else fail_word "$rc" "$w.dot.log" FAIL; fi ;;
+    *) fail_word "$rc" "$w.dot.log" FAIL ;;
+    esac
 }
 
 # Worker: one line "id<TAB>path<TAB>rep" (rep = "-" or the id whose result to reuse).
@@ -279,7 +355,7 @@ worker() {
         eq=${vres#* }
         dt=$(dot_gate "$w.dot" "$w.write.log" "$w")
         if [ "$json" = ref-excluded ]; then
-            jnote=$(grep -m 1 'ERROR' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
+            jnote=$(grep -m 1 -E 'ERROR|terminate|what\(\)' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
         fi
         if [ "$eq" = excluded ]; then
             note=$(grep '^equiv-check: ' "$w.ec.log" | grep -v '^equiv-check: notice' | head -n 1 | tr '\t' ' ' || true)
@@ -345,7 +421,7 @@ report() {
         printf "verilog iverilog: ok %d, FAIL %d, timeout %d, memlimit %d\n", ci["ok"], ci["FAIL"], ci["timeout"], ci["memlimit"]
         printf "verilog equiv: equivalent %d, excluded %d, NOT-equivalent %d, yosys-error %d, error %d, timeout %d, memlimit %d\n",
             ce["equivalent"], ce["excluded"], ce["NOT-equivalent"], ce["yosys-error"], ce["error"], ce["timeout"], ce["memlimit"]
-        printf "dot: ok %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
+        printf "dot: ok %d, ok-canon (accepted, layout over --dot-timeout) %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["ok-canon"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
         printf "slowest file: %s (%.1f s total)\n", maxf, maxs
         printf "odin3-write (read + three writers) slowest: %s (%.1f s)\n", maxwf, maxw
         printf "peak RSS: odin3-write %.0f MB (%s); tools %.0f MB (%s)\n", maxr / 1024, maxrf, maxt / 1024, maxtf
@@ -387,6 +463,10 @@ main() {
     WC_TIMEOUT=600
     WC_MEM_KB=$((6 * 1024 * 1024))
     WC_MAX_NODES=2000
+    WC_DOT_TIMEOUT=120
+    # Yosys normalization on both sides of the JSON step: read_blif turns an identity cover
+    # (`.names a b` / `1 1`) into a connection, so identity $luts become connections too.
+    WC_NORM="lut2mux t:\$lut r:WIDTH=1 %i r:LUT=2'b10 %i; opt_expr -mux_bool t:\$_MUX_; opt_clean"
     while [ $# -gt 0 ]; do
         case $1 in
         -j) jobs=${2:?}; shift 2 ;;
@@ -394,7 +474,10 @@ main() {
         -m) WC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
         --write) WC_WRITE=${2:?}; shift 2 ;;
         --yosys) WC_YOSYS=${2:?}; shift 2 ;;
+        --nc) WC_NC=${2:?}; shift 2 ;;
+        --ec) WC_EC=${2:?}; shift 2 ;;
         --max-nodes) WC_MAX_NODES=${2:?}; shift 2 ;;
+        --dot-timeout) WC_DOT_TIMEOUT=${2:?}; shift 2 ;;
         --out) out=${2:?}; shift 2 ;;
         --keep) keep=1; shift ;;
         --largest-first) order=nr; shift ;;
@@ -413,17 +496,18 @@ main() {
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
-    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_TIMEOUT WC_MEM_KB WC_MAX_NODES
+    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
+        WC_DOT_TIMEOUT WC_NORM
     export WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
     # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).
     if ldd "${WC_REAL_WRITE:-$WC_WRITE}" 2>/dev/null | grep -q -E 'libasan|libclang_rt.asan'; then
         WC_WRITE_ASAN=1
     fi
-    export -f now capped rss_of note_rss fail_word stubs is_multi_driver compare drop_self_buffers sort_statements json_gate \
+    export -f now capped rss_of note_rss fail_word stubs is_multi_driver compare drop_self_buffers sort_statements expand_covers restore_bit0_names json_gate \
         verilog_gate dot_gate worker
 
     local list=$out/list.tsv
-    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
+    find -L "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
         while IFS=$'\t' read -r _ path; do
             if [ -z "$fixtures" ]; then
                 grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
