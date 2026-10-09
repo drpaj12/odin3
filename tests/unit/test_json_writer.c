@@ -415,6 +415,20 @@ static void test_io_failure(void) {
     }
 }
 
+/* One write with the fail_at-th allocation failing; true when it succeeded. */
+static bool write_failing_at(long fail_at) {
+    odin3_util_set_alloc_fail_after(fail_at);
+    odin3_status status = odin3_json_write(design, "t9.json");
+    odin3_util_set_alloc_fail_after(-1);
+    if (status == ODIN3_OK) {
+        return true;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, status);
+    FILE *left = fopen("t9.json", "rb"); /* a failed write leaves no file */
+    TEST_ASSERT_NULL(left);
+    return false;
+}
+
 /* Every allocation point fails once: NO_MEMORY with no file left behind, then OK and identical. */
 static void test_oom_sweep(void) {
     odin3_module *mod = new_module("top");
@@ -423,22 +437,12 @@ static void test_oom_sweep(void) {
             "0");
     char *baseline = write_json("t9.json");
     enum { SWEEP_LIMIT = 1000 };
-    bool finished = false;
-    uint32_t failures = 0;
-    for (long fail_at = 0; fail_at < SWEEP_LIMIT && !finished; fail_at++) {
-        odin3_util_set_alloc_fail_after(fail_at);
-        odin3_status status = odin3_json_write(design, "t9.json");
-        odin3_util_set_alloc_fail_after(-1);
-        if (status == ODIN3_OK) {
-            finished = true;
-        } else {
-            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, status);
-            TEST_ASSERT_NULL(fopen("t9.json", "rb"));
-            failures++;
-        }
+    long fail_at = 0;
+    while (fail_at < SWEEP_LIMIT && !write_failing_at(fail_at)) {
+        fail_at++;
     }
-    TEST_ASSERT_TRUE(finished);
-    TEST_ASSERT_TRUE(failures > 0);
+    TEST_ASSERT_TRUE(fail_at > 0);
+    TEST_ASSERT_TRUE(fail_at < SWEEP_LIMIT);
     char *again = slurp("t9.json");
     TEST_ASSERT_EQUAL_STRING(baseline, again);
     odin3_util_free(baseline);
