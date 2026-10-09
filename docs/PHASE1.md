@@ -104,6 +104,13 @@ peak RSS: odin3-blif-rt 2314 MB (EArch/regression/verilog/large/LargeRam/LargeRa
 RESULT: PASS
 ```
 
+The "slowest file" above is the 600 s `netlist-compare` timeout, not reader/writer speed. The
+reader/writer alone (`odin3-blif-rt`: read, check FULL, write; release build, timed by hand
+afterwards, since the run did not record it separately): `LargeRam.odin.blif` (915 MB) 16.8 s at
+2.37 GB peak RSS, `LU64PEEng.odin.blif` (147 MB) 1.9 s at 311 MB, `mcml.odin.blif` (61 MB) 0.8 s at
+189 MB, `vtr/bgm.odin.blif` (34 MB) 0.4 s at 101 MB; time is linear in file size. Later runs of the
+script also report the `odin3-blif-rt` total and slowest file.
+
 Exception lists (reported, not failures):
 - Multi-driver originals, refused by `netlist-compare` (decision #15), 4 files: `elsif_both_defined`
   and `multi_assignment`, `.odin.blif`, both architectures. These are also the only 4 with check errors.

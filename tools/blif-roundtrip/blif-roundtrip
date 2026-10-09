@@ -14,7 +14,7 @@
 # Files with identical content (same sha256) run the structural gate once; the others reuse
 # that result (the writer is deterministic). Exceptions, listed and not failures:
 #   multi-driver originals (decision #15): netlist-compare refuses them, check errors allowed;
-#   timeouts and memory-limit stops: the structural gate hit the per-file time or memory cap.
+#   timeouts and memory-limit stops (failures in --fixtures mode): the structural gate hit the per-file time or memory cap.
 # Exit: 0 all gates pass, 1 any failure, 2 usage. See docs/PHASE1.md (1C) for the policy.
 set -euo pipefail
 
@@ -145,10 +145,11 @@ struct_gate() {
     local a=$1 b=$2 log=$3 stub rc=0
     stub=$(normalize <"$a" | stubs)
     if [ -n "$stub" ]; then
-        { cat "$a"; printf '\n%s\n' "$stub"; } >"$a.stub"
-        { cat "$b"; printf '\n%s\n' "$stub"; } >"$b.stub"
-        a=$a.stub
-        b=$b.stub
+        # Stub copies live next to the log under $BRT_TMP, never next to the inputs.
+        { cat "$a"; printf '\n%s\n' "$stub"; } >"$log.a.stub"
+        { cat "$b"; printf '\n%s\n' "$stub"; } >"$log.b.stub"
+        a=$log.a.stub
+        b=$log.b.stub
     fi
     # The address-space cap turns a runaway netlist-compare into a MemoryError (a recorded
     # "memlimit"), never an out-of-memory kill of the machine.
@@ -168,12 +169,13 @@ struct_gate() {
 
 # Worker: one line "id<TAB>path<TAB>rep" (rep = "-" or the id whose structural result to reuse).
 worker() {
-    local id path rep out errf rss=0 rc=0 t0 t2 text struct errs warns nc_rss=0 note=""
+    local id path rep out errf rt_secs rss=0 rc=0 t0 t2 text struct errs warns nc_rss=0 note=""
     IFS=$'\t' read -r id path rep <<<"$1"
     out=$BRT_TMP/$id.out.blif
     errf=$BRT_TMP/$id.err
     t0=$(now)
     /usr/bin/time -f '%M' -o "$errf.rss" "$BRT_RT" "$path" "$out" 2>"$errf" || rc=$?
+    rt_secs=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
     rss=$(tail -n 1 "$errf.rss" 2>/dev/null || echo 0)
     errs=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\1/p' "$errf" | head -n 1)
     warns=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\2/p' "$errf" | head -n 1)
@@ -191,7 +193,10 @@ worker() {
             struct=$(struct_gate "$path" "$out" "$BRT_TMP/$id.nc")
             nc_rss=$(tail -n 1 "$BRT_TMP/$id.nc.rss" 2>/dev/null || echo 0)
             case $nc_rss in '' | *[!0-9]*) nc_rss=0 ;; esac
-            if [ "$struct" = "error" ] && is_multi_driver "$path"; then struct="refused"; fi
+            if [ "$struct" = "error" ] && is_multi_driver "$path" &&
+                grep -q 'has more than one driver' "$BRT_TMP/$id.nc"; then
+                struct="refused"
+            fi
             if [ "$struct" = "error" ] || [ "$struct" = "different" ]; then
                 cp "$BRT_TMP/$id.nc" "$BRT_RES/$id.nc.log" 2>/dev/null || true
             fi
@@ -199,8 +204,8 @@ worker() {
     fi
     t2=$(now)
     case $rss in '' | *[!0-9]*) rss=0 ;; esac
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$path" "$text" "$struct" "$errs" \
-        "$warns" "$(echo "$t2 $t0" | awk '{printf "%.1f", $1 - $2}')" "$rss" "$nc_rss" "$note" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$path" "$text" "$struct" "$errs" \
+        "$warns" "$(echo "$t2 $t0" | awk '{printf "%.1f", $1 - $2}')" "$rss" "$nc_rss" "$note" "$rt_secs" \
         >"$BRT_RES/$id.tsv"
     if [ "$BRT_KEEP" != 1 ]; then rm -f "$out" "$errf" "$errf.rss" "$BRT_TMP/$id.nc" "$BRT_TMP/$id.nc.rss"; fi
 }
@@ -212,7 +217,7 @@ report() {
         LC_ALL=C awk -F '\t' '
     BEGIN { n = split(ENVIRON["MULTI"], ml, " "); for (i = 1; i <= n; i++) multi[ml[i]] = 1 }
     { id[NR] = $1; path[NR] = $2; text[NR] = $3; st[NR] = $4; er[NR] = $5; wr[NR] = $6
-      secs[NR] = $7; rss[NR] = $8; ncrss[NR] = $9; note[NR] = $10; byid[$1] = NR }
+      secs[NR] = $7; rss[NR] = $8; ncrss[NR] = $9; note[NR] = $10; rts[NR] = $11; byid[$1] = NR }
     END {
         root = ENVIRON["ROOT"]
         printf "%-8s %-16s %-6s %-6s %7s  %s\n", "text", "structural", "errs", "warns", "secs", "file"
@@ -228,6 +233,8 @@ report() {
             if (text[r] == "ok") tx_ok++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
             cnt[base]++
             if (er[r] != "-" && er[r] + 0 > 0) { if (b in multi) chk_exc++; else chk_bad++ }
+            rttot += rts[r]
+            if (rts[r] + 0 > maxrt) { maxrt = rts[r] + 0; maxrtf = p }
             if (secs[r] + 0 > maxs) { maxs = secs[r] + 0; maxf = p }
             if (rss[r] + 0 > maxr) { maxr = rss[r] + 0; maxrf = p }
             if (ncrss[r] + 0 > maxn) { maxn = ncrss[r] + 0; maxnf = p }
@@ -241,8 +248,10 @@ report() {
             cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["memlimit"], cnt["different"], cnt["error"], cnt["-"]
         printf "check FULL errors: %d files outside the multi-driver list, %d inside it\n", chk_bad, chk_exc
         printf "slowest file: %s (%.1f s total)\n", maxf, maxs
+        printf "odin3-blif-rt (read, check, write) time: %.1f s total, slowest %s (%.1f s)\n", rttot, maxrtf, maxrt
         printf "peak RSS: odin3-blif-rt %.0f MB (%s); netlist-compare %.0f MB (%s)\n", maxr / 1024, maxrf, maxn / 1024, maxnf
         fail = tx_fail + rtfail + cnt["different"] + cnt["error"] + chk_bad
+        if (ENVIRON["STRICT"] == "1") fail += cnt["timeout"] + cnt["memlimit"]
         print (fail ? "RESULT: FAIL (" fail " failing items)" : "RESULT: PASS")
         exit(fail ? 1 : 0)
     }
@@ -272,6 +281,7 @@ main() {
         *) [ -z "$root" ] || usage; root=$1; shift ;;
         esac
     done
+    [ -x /usr/bin/time ] || { echo "blif-roundtrip: needs GNU time at /usr/bin/time (apt install time)" >&2; exit 2; }
     [ -x "$BRT_RT" ] || { echo "blif-roundtrip: no driver at $BRT_RT (build odin3-blif-rt)" >&2; exit 2; }
     [ -z "$fixtures" ] || [ -z "$root" ] || usage
     if [ -n "$fixtures" ]; then root=$fixtures; else root=${root:-$HOME/odin3-ws/golden}; fi
@@ -301,7 +311,7 @@ main() {
     xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
     local rc=0
     set +e
-    report "$out/res" "$root" | tee "$out/report.txt"
+    STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0) report "$out/res" "$root" | tee "$out/report.txt"
     rc=${PIPESTATUS[0]}
     set -e
     [ "$keep" = 1 ] || rm -rf "$out/tmp"

@@ -187,6 +187,13 @@ if(BUILD_TESTING)
                      --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_fixtures PROPERTIES LABELS unit)
+    # Negative check: a deliberately corrupted output must make the gate fail.
+    add_test(NAME blif_roundtrip_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
+                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt --fixtures
+                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
+        ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh

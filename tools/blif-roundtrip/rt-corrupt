@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# rt-corrupt: odin3-blif-rt wrapper for the negative CTest; damages the written BLIF so that the
+# blif-roundtrip gates must fail. BRT_REAL_RT names the real driver.
+set -euo pipefail
+"${BRT_REAL_RT:?}" "$@"
+sed -i '0,/^\.names /s//.names zz /' "$2"
