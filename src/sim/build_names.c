@@ -11,19 +11,19 @@
 #include <string.h>
 
 /* Room for a location prefix, one name segment and a whole hierarchical name. */
-enum { LOC_MAX = 256, SEG_MAX = 192, NAME_MAX = 512 };
+enum { LOC_MAX = 256, SEG_MAX = 192, HIER_NAME_MAX = 512 };
 
 static const char k_ellipsis[] = "...";
 
 /* A name built right to left, from the leaf up the hierarchy: text + pos is the string. */
 typedef struct name_buf {
-    char text[NAME_MAX];
+    char text[HIER_NAME_MAX];
     size_t pos;
     bool full;
 } name_buf;
 
 static void name_init(name_buf *nb) {
-    nb->pos = NAME_MAX - 1;
+    nb->pos = HIER_NAME_MAX - 1;
     nb->text[nb->pos] = '\0';
     nb->full = false;
 }
@@ -60,15 +60,22 @@ static const odin3_module *frame_module(const odin3_sim_builder *bld, uint32_t f
     return odin3_module_get(bld->design, frame_at(bld, frame)->module);
 }
 
+/* A location buffer: "file:line: " or "". */
+typedef struct loc_buf {
+    char *text;
+    size_t size;
+} loc_buf;
+
 /* "file:line: " of the first source location behind prov (following derivations), or "". */
-static void loc_prefix(const odin3_sim_builder *bld, odin3_prov_id prov, char *buf) {
+static void loc_prefix(const odin3_sim_builder *bld, odin3_prov_id prov, loc_buf buf) {
     const odin3_prov_record *rec = odin3_prov_get(bld->design, prov);
     while (rec != NULL && rec->kind == ODIN3_PROV_DERIVED && rec->parents.count > 0) {
         rec = odin3_prov_get(bld->design, rec->parents.ids[0]);
     }
-    buf[0] = '\0';
+    buf.text[0] = '\0';
     if (rec != NULL && rec->n_locs > 0 && rec->locs[0].file != 0) {
-        (void)snprintf(buf, LOC_MAX, "%s:%u: ", strtab(bld, rec->locs[0].file), rec->locs[0].line);
+        (void)snprintf(buf.text, buf.size, "%s:%u: ", strtab(bld, rec->locs[0].file),
+                       rec->locs[0].line);
     }
 }
 
@@ -144,10 +151,10 @@ static bool slot_net(const odin3_sim_builder *bld, uint32_t slot, uint32_t *fram
 }
 
 /* The name of the net on final slot `slot` and the location of that net. */
-static void slot_name(const odin3_sim_builder *bld, uint32_t slot, name_buf *nb, char *loc) {
+static void slot_name(const odin3_sim_builder *bld, uint32_t slot, name_buf *nb, loc_buf loc) {
     uint32_t frame = 0;
     odin3_net_id net = {0};
-    loc[0] = '\0';
+    loc.text[0] = '\0';
     if (!slot_net(bld, slot, &frame, &net)) {
         name_init(nb);
         prepend(nb, slot == ODIN3_SIM_SLOT_ZERO ? "(unconnected)" : "(internal)");
@@ -162,7 +169,7 @@ void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odi
     const odin3_celltype_def *def = odin3_celltype_get(bld->design, odin3_node_type(mod, node));
     char loc[LOC_MAX];
     name_buf nb;
-    loc_prefix(bld, odin3_node_prov(mod, node), loc);
+    loc_prefix(bld, odin3_node_prov(mod, node), (loc_buf){loc, sizeof loc});
     node_name(bld, frame, node, &nb);
     odin3_log(ODIN3_LOG_ERROR, "%scannot simulate `%s` (node `%s`): %s", loc, def->name,
               name_str(&nb),
@@ -175,19 +182,35 @@ void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cel
     char net_loc[LOC_MAX];
     name_buf node;
     name_buf net;
-    loc_prefix(bld, odin3_node_prov(frame_module(bld, cell->frame), cell->node), loc);
+    loc_prefix(bld, odin3_node_prov(frame_module(bld, cell->frame), cell->node),
+               (loc_buf){loc, sizeof loc});
     node_name(bld, cell->frame, cell->node, &node);
-    slot_name(bld, slot, &net, net_loc);
+    if (slot == ODIN3_SIM_SLOT_ZERO) {
+        odin3_log(ODIN3_LOG_ERROR, "%scannot simulate: `%s` node `%s` has no clock connected", loc,
+                  cell->def->name, name_str(&node));
+        return;
+    }
+    slot_name(bld, slot, &net, (loc_buf){net_loc, sizeof net_loc});
     odin3_log(ODIN3_LOG_ERROR,
               "%scannot simulate: the clock of `%s` node `%s` is net `%s`, which is not a "
               "primary input (clocks must come from top-level input ports)",
               loc, cell->def->name, name_str(&node), name_str(&net));
 }
 
+void odin3_sim_err_drivers(const odin3_sim_builder *bld, uint32_t slot) {
+    char loc[LOC_MAX];
+    name_buf net;
+    slot_name(bld, slot, &net, (loc_buf){loc, sizeof loc});
+    odin3_log(ODIN3_LOG_ERROR,
+              "%scannot simulate: net `%s` has more than one driver that is neither an inout pin "
+              "nor a tristate output (primary inputs count as drivers)",
+              loc, name_str(&net));
+}
+
 void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot) {
     char loc[LOC_MAX];
     name_buf net;
-    slot_name(bld, slot, &net, loc);
+    slot_name(bld, slot, &net, (loc_buf){loc, sizeof loc});
     odin3_log(ODIN3_LOG_ERROR, "%scannot simulate: combinational loop through net `%s`", loc,
               name_str(&net));
 }

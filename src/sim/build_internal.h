@@ -19,6 +19,16 @@
 /* A net-map entry not yet given a slot, and "no frame" (the top's parent). */
 #define ODIN3_SIM_UNSET UINT32_MAX
 
+/* Appends val to vec (of uint32_t); ODIN3_ERR_NO_MEMORY on out of memory. */
+static inline odin3_status odin3_sim_push_u32(odin3_vec *vec, uint32_t val) {
+    uint32_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = val;
+    return ODIN3_OK;
+}
+
 /*
  * One expanded module instance: its module, its parent frame and instance node there (the top
  * frame has parent ODIN3_SIM_UNSET), and the offset of its net map in the builder's netmap (one
@@ -70,11 +80,17 @@ uint32_t odin3_sim_child_module(const odin3_sim_builder *bld, const odin3_module
 /* "cannot simulate `<type>`" for node of frame. */
 void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node);
 
-/* The clock pin of flat cell, on final slot `slot`, is not a primary input (slots renumbered). */
+/*
+ * The clock pin of flat cell, on final slot `slot`, is not a primary input (slots renumbered); for
+ * the ZERO slot, the clock pin is not connected.
+ */
 void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cell, uint32_t slot);
 
 /* A combinational loop through final slot `slot` (slots renumbered). */
 void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot);
+
+/* More than one ordinary (non-inout, non-tristate) driver on final slot `slot`. */
+void odin3_sim_err_drivers(const odin3_sim_builder *bld, uint32_t slot);
 
 /* An inout port of the top module. */
 void odin3_sim_err_inout(const odin3_sim_builder *bld, uint32_t port_name);

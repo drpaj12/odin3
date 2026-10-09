@@ -52,7 +52,9 @@ typedef struct odin3_sim_port {
  * spans / idx / state: the storage the views point into. Primary inputs (in_ports, n_in_ports)
  * and outputs, in port order; in_bits / out_bits hold the slot of each port bit, in port then bit
  * order; in_clock[k] is 1 when input bit k drives the clock pin of an edge-triggered cell (the
- * engine toggles it instead of driving it at random).
+ * engine toggles it instead of driving it at random). n_edge: the number of edge-triggered cells,
+ * which are order[0 .. n_edge). n_hook_calls counts every simulate hook call (a deterministic
+ * work measure for tests).
  */
 struct odin3_sim {
     odin3_design *design;
@@ -76,6 +78,8 @@ struct odin3_sim {
     uint32_t n_in_bits;
     uint32_t *out_bits;
     uint32_t n_out_bits;
+    uint32_t n_edge;
+    uint64_t n_hook_calls;
 };
 
 /* True when the cell type is edge-triggered storage (cuts the combinational graph). */
@@ -95,5 +99,11 @@ static inline bool odin3_sim_is_seq(const odin3_celltype_def *def) {
  * pin bits and slots. Needs the views' port spans final.
  */
 odin3_status odin3_sim_levelize(odin3_sim *sim, uint32_t *loop_slot);
+
+/*
+ * Starts a levelized program (eval.c): counts the edge-triggered cells, sends ODIN3_SIM_INIT to
+ * every sequential cell (state is zeroed already) and settles once. Allocates nothing.
+ */
+void odin3_sim_start(odin3_sim *sim);
 
 #endif

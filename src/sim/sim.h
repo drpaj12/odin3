@@ -7,6 +7,10 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "sim/prng.h"
+
+#include <stdbool.h>
+#include <stdint.h>
 
 typedef struct odin3_sim odin3_sim; /* opaque; fields in sim/sim_internal.h */
 
@@ -22,13 +26,72 @@ typedef struct odin3_sim odin3_sim; /* opaque; fields in sim/sim_internal.h */
  * ODIN3_ERR_INVALID_ARG (logged, located from provenance where it has a source location) for: an
  * invalid top; a recursive module hierarchy; a black box or a cell type without a simulate hook
  * ("cannot simulate `<type>`"); a clock pin of an edge-triggered cell whose net is not a primary
- * input of top; an inout port of top; a combinational loop (naming one net on it).
+ * input of top, or that is not connected ("has no clock connected"); an inout port of top; a net
+ * with more than one driver that is neither an inout pin nor an output of a tristate type (a
+ * primary input counts as a driver), naming the net; a combinational loop (naming one net on it).
  * ODIN3_ERR_NO_MEMORY on out of memory. The design is never changed. Memory and time are linear
  * in the size of the flattened design.
+ *
+ * On success every value and state bit is 0, every sequential cell has received the INIT event
+ * (cell.h: INIT 1 starts at 1; 0, 2 and 3 at 0), every clock input is low, and the combinational
+ * logic has settled once, so the outputs show the initial state.
  */
 odin3_status odin3_sim_build(odin3_design *design, odin3_module_id top, odin3_sim **out);
 
 /* Frees a simulator; NULL is a no-op. */
 void odin3_sim_destroy(odin3_sim *sim);
+
+/*
+ * Primary inputs and outputs are the top module's ports, in port order (inputs and outputs
+ * numbered separately from 0); bit 0 is a port's LSB. Names are the port names (owned by the
+ * design's string table); a name or width query out of range returns NULL or 0.
+ */
+typedef struct odin3_sim_bit {
+    uint32_t port;
+    uint32_t bit;
+} odin3_sim_bit;
+
+uint32_t odin3_sim_input_count(const odin3_sim *sim);
+uint32_t odin3_sim_output_count(const odin3_sim *sim);
+const char *odin3_sim_input_name(const odin3_sim *sim, uint32_t port);
+const char *odin3_sim_output_name(const odin3_sim *sim, uint32_t port);
+uint32_t odin3_sim_input_width(const odin3_sim *sim, uint32_t port);
+uint32_t odin3_sim_output_width(const odin3_sim *sim, uint32_t port);
+
+/*
+ * True when input bit `at` is a clock: it drives the clock pin of an edge-triggered cell, so the
+ * cycle toggles it and the caller never drives it. False for a non-clock bit or out of range.
+ */
+bool odin3_sim_input_is_clock(const odin3_sim *sim, odin3_sim_bit at);
+
+/*
+ * Sets non-clock input bit `at` to value for the next cycles (it keeps its value until set
+ * again). ODIN3_ERR_INVALID_ARG (not logged) for a bit out of range or a clock bit; nothing
+ * changes then.
+ */
+odin3_status odin3_sim_set_input(odin3_sim *sim, odin3_sim_bit at, bool value);
+
+/* *value gets input bit `at` (a clock reads low between cycles); ODIN3_ERR_INVALID_ARG (not
+ * logged, *value untouched) out of range. */
+odin3_status odin3_sim_get_input(const odin3_sim *sim, odin3_sim_bit at, bool *value);
+
+/*
+ * Drives every non-clock input bit, in port then bit order, with odin3_prng_bit(prng): one draw
+ * per bit, so a seed fixes the whole vector sequence. Clock bits draw nothing.
+ */
+void odin3_sim_drive_random(odin3_sim *sim, odin3_prng *prng);
+
+/*
+ * Runs one cycle with the inputs as set: settle the combinational logic; raise every clock input
+ * and send the rising edge (ODIN3_SIM_POSEDGE) to every edge-triggered cell; settle; lower the
+ * clocks and send the falling edge (ODIN3_SIM_NEGEDGE); settle. A settle runs each cell's COMB
+ * once, in level order (edge-triggered cells first). Allocates nothing and cannot fail; time is
+ * linear in the flattened design (three settles plus two edge events per edge-triggered cell).
+ */
+void odin3_sim_cycle(odin3_sim *sim);
+
+/* *value gets output bit `at` as of the last settle; ODIN3_ERR_INVALID_ARG (not logged, *value
+ * untouched) out of range. */
+odin3_status odin3_sim_get_output(const odin3_sim *sim, odin3_sim_bit at, bool *value);
 
 #endif

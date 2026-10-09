@@ -84,7 +84,9 @@ add_library(odin3_core OBJECT
     src/sim/build.c
     src/sim/build_hier.c
     src/sim/build_names.c
-    src/sim/levelize.c)
+    src/sim/eval.c
+    src/sim/levelize.c
+    src/sim/prng.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -191,6 +193,7 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_cells)
     odin3_add_unit_test(test_sim_build)
+    odin3_add_unit_test(test_sim_cycle)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)

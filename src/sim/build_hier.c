@@ -46,15 +46,6 @@ typedef struct hier_graph {
     uint32_t *indeg;
 } hier_graph;
 
-static odin3_status push_u32(odin3_vec *vec, uint32_t val) {
-    uint32_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = val;
-    return ODIN3_OK;
-}
-
 /* Appends the edges of module mod (instances in node order), reaching new children. */
 static odin3_status reach_children(const odin3_sim_builder *bld, hier_graph *graph,
                                    const odin3_module *mod) {
@@ -66,11 +57,11 @@ static odin3_status reach_children(const odin3_sim_builder *bld, hier_graph *gra
         }
         if (graph->pos[child] == 0) {
             graph->pos[child] = (uint32_t)graph->order.len + 1;
-            if (push_u32(&graph->order, child) != ODIN3_OK) {
+            if (odin3_sim_push_u32(&graph->order, child) != ODIN3_OK) {
                 return ODIN3_ERR_NO_MEMORY;
             }
         }
-        if (push_u32(&graph->edges, graph->pos[child] - 1) != ODIN3_OK) {
+        if (odin3_sim_push_u32(&graph->edges, graph->pos[child] - 1) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
@@ -79,18 +70,18 @@ static odin3_status reach_children(const odin3_sim_builder *bld, hier_graph *gra
 
 static odin3_status reach(odin3_sim_builder *bld, hier_graph *graph, odin3_module_id top) {
     graph->pos[top.v] = 1;
-    if (push_u32(&graph->order, top.v) != ODIN3_OK) {
+    if (odin3_sim_push_u32(&graph->order, top.v) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     for (size_t i = 0; i < graph->order.len; i++) {
         uint32_t mod_id = *(const uint32_t *)odin3_vec_cat(&graph->order, i);
-        if (push_u32(&graph->first, (uint32_t)graph->edges.len) != ODIN3_OK ||
+        if (odin3_sim_push_u32(&graph->first, (uint32_t)graph->edges.len) != ODIN3_OK ||
             reach_children(bld, graph, odin3_module_get(bld->design, (odin3_module_id){mod_id})) !=
                 ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
-    return push_u32(&graph->first, (uint32_t)graph->edges.len);
+    return odin3_sim_push_u32(&graph->first, (uint32_t)graph->edges.len);
 }
 
 static uint32_t at(const odin3_vec *vec, size_t index) {

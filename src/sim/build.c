@@ -13,21 +13,12 @@
 
 /* --- value slots: a union-find while instances are expanded ----------------------------------- */
 
-static odin3_status push_u32(odin3_vec *vec, uint32_t val) {
-    uint32_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = val;
-    return ODIN3_OK;
-}
-
 static odin3_status new_slot(odin3_sim_builder *bld, uint32_t *slot) {
     if (bld->uf.len >= ODIN3_SIM_UNSET) {
         return ODIN3_ERR_NO_MEMORY; /* the slot space (32 bits) is exhausted */
     }
     *slot = (uint32_t)bld->uf.len;
-    return push_u32(&bld->uf, *slot);
+    return odin3_sim_push_u32(&bld->uf, *slot);
 }
 
 static uint32_t uf_find(uint32_t *uf, uint32_t slot) {
@@ -85,7 +76,7 @@ static odin3_status add_frame(odin3_sim_builder *bld, odin3_module_id module, ui
     }
     *fr = (odin3_sim_frame){module, parent, inst, bld->netmap.len};
     for (uint32_t nid = 0; nid < end; nid++) {
-        (void)push_u32(&bld->netmap, ODIN3_SIM_UNSET); /* reserved: cannot fail */
+        (void)odin3_sim_push_u32(&bld->netmap, ODIN3_SIM_UNSET); /* reserved: cannot fail */
     }
     return ODIN3_OK;
 }
@@ -164,7 +155,8 @@ static odin3_status add_port_pins(odin3_sim_builder *bld, const odin3_sim_flat *
     span->width = pins.count;
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(mod, (odin3_pin_id){pins.first.v + k});
-        (void)push_u32(&bld->idx, odin3_net_valid(net) ? *map_at(bld, flat->frame, net) : open);
+        (void)odin3_sim_push_u32(&bld->idx,
+                                 odin3_net_valid(net) ? *map_at(bld, flat->frame, net) : open);
     }
     *width = pins.count;
     return ODIN3_OK;
@@ -283,7 +275,7 @@ static odin3_status add_top_port(odin3_sim_builder *bld, uint32_t index) {
         } else if (new_slot(bld, &slot) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        if (push_u32(bits, slot) != ODIN3_OK) {
+        if (odin3_sim_push_u32(bits, slot) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
@@ -397,6 +389,60 @@ static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
     return st;
 }
 
+/* --- drivers ---------------------------------------------------------------------------------- */
+
+/* True for the pins of port `port` of flat that drive their slots as ordinary drivers. */
+static bool ordinary_driver(const odin3_sim_flat *flat, uint32_t port) {
+    return flat->def->ports[port].dir == ODIN3_DIR_OUT &&
+           (flat->def->flags & ODIN3_CT_TRISTATE) == 0;
+}
+
+/* Counts one more driver of slot (saturating at 2); true when slot now has two. */
+static bool add_driver(uint8_t *count, uint32_t slot) {
+    if (slot == ODIN3_SIM_SLOT_DISCARD) {
+        return false; /* every open output pin writes here; nothing reads it */
+    }
+    count[slot] = count[slot] < 2 ? (uint8_t)(count[slot] + 1) : count[slot];
+    return count[slot] == 2;
+}
+
+/* Counts the ordinary drivers of flat; the first slot that reaches two, or ODIN3_SIM_UNSET. */
+static uint32_t cell_drivers(const odin3_sim_flat *flat, uint8_t *count) {
+    for (uint32_t port = 0; port < flat->view.n_ports; port++) {
+        const odin3_sim_span *span = &flat->view.ports[port];
+        for (uint32_t k = 0; ordinary_driver(flat, port) && k < span->width; k++) {
+            if (add_driver(count, span->idx[k])) {
+                return span->idx[k];
+            }
+        }
+    }
+    return ODIN3_SIM_UNSET;
+}
+
+/*
+ * Rejects a slot with two ordinary drivers: outputs of non-tristate cells and primary inputs
+ * (inout pins and tristate outputs form buses, which the IR allows to share a net).
+ */
+static odin3_status check_drivers(const odin3_sim_builder *bld, const odin3_sim *sim) {
+    uint8_t *count = odin3_util_calloc(sim->n_values);
+    if (count == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t clash = ODIN3_SIM_UNSET;
+    for (uint32_t k = 0; k < sim->n_in_bits && clash == ODIN3_SIM_UNSET; k++) {
+        clash = add_driver(count, sim->in_bits[k]) ? sim->in_bits[k] : clash;
+    }
+    for (uint32_t i = 0; i < sim->n_cells && clash == ODIN3_SIM_UNSET; i++) {
+        clash = cell_drivers(&sim->cells[i], count);
+    }
+    odin3_util_free(count);
+    if (clash != ODIN3_SIM_UNSET) {
+        odin3_sim_err_drivers(bld, clash);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 /* --- build ------------------------------------------------------------------------------------ */
 
 static odin3_status run(odin3_sim_builder *bld, odin3_module_id top, odin3_sim *sim) {
@@ -413,7 +459,8 @@ static odin3_status run(odin3_sim_builder *bld, odin3_module_id top, odin3_sim *
         return st;
     }
     point_views(sim);
-    st = find_clocks(bld, sim);
+    st = check_drivers(bld, sim);
+    st = st != ODIN3_OK ? st : find_clocks(bld, sim);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -421,6 +468,9 @@ static odin3_status run(odin3_sim_builder *bld, odin3_module_id top, odin3_sim *
     st = odin3_sim_levelize(sim, &loop_slot);
     if (st == ODIN3_ERR_INVALID_ARG) {
         odin3_sim_err_loop(bld, loop_slot);
+    }
+    if (st == ODIN3_OK) {
+        odin3_sim_start(sim);
     }
     return st;
 }

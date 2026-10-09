@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 enum { LOG_TEXT = 4096, MAX_BITS = 8, OOM_LIMIT = 100000, BIG = 200000, NAME_BUF = 32 };
 
@@ -478,12 +477,42 @@ static void test_recursive_hierarchy_is_rejected(void) {
     odin3_module *top = new_module("top");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(top, &spec, &node));
     build_fails(top, "recursive");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "module `self`"), log_text);
+}
+
+/* top -> A -> B -> A: the message names a module on the cycle (A or B), not top. */
+static void test_indirect_recursion_names_a_module_on_the_cycle(void) {
+    odin3_module *mod_a = new_module("mod_a");
+    odin3_module *mod_b = new_module("mod_b");
+    odin3_module *top = new_module("top");
+    odin3_node_spec spec_a = {odin3_module_celltype(mod_a), 0, (odin3_prov_id){0}, NULL, 0};
+    odin3_node_spec spec_b = {odin3_module_celltype(mod_b), 0, (odin3_prov_id){0}, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(top, &spec_a, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod_a, &spec_b, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod_b, &spec_a, &node));
+    build_fails(top, "recursive");
+    bool on_cycle =
+        strstr(log_text, "module `mod_a`") != NULL || strstr(log_text, "module `mod_b`") != NULL;
+    TEST_ASSERT_TRUE_MESSAGE(on_cycle, log_text);
+    TEST_ASSERT_NULL_MESSAGE(strstr(log_text, "`top`"), log_text);
+}
+
+/* A flop whose clock pin is open: its own wording, not "not a primary input". */
+static void test_unconnected_clock_is_rejected(void) {
+    odin3_module *top = new_module("top");
+    odin3_net_id d_in = add_port(top, "d", ODIN3_DIR_IN);
+    odin3_net_id net_q = add_port(top, "q", ODIN3_DIR_OUT);
+    odin3_node_id flop = cell(top, "$_DFF_P_", (odin3_net_id[]){{0}, d_in, net_q});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_rename(top, flop, intern("reg0")));
+    build_fails(top, "`$_DFF_P_` node `reg0` has no clock connected");
+    TEST_ASSERT_NULL_MESSAGE(strstr(log_text, "primary input"), log_text);
 }
 
 static void test_inout_top_port_is_rejected(void) {
     odin3_module *top = new_module("top");
     add_port(top, "bus", ODIN3_DIR_INOUT);
-    build_fails(top, "inout");
+    build_fails(top, "cannot simulate inout port `bus` of the top module");
 }
 
 static void test_bad_top_is_rejected(void) {
@@ -491,6 +520,11 @@ static void test_bad_top_is_rejected(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_sim_build(design, (odin3_module_id){42}, &sim));
     TEST_ASSERT_NULL(sim);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "no module 42 to simulate"), log_text);
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_sim_build(design, (odin3_module_id){1}, NULL));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "out is NULL"), log_text);
     odin3_sim_destroy(NULL);
 }
 
@@ -558,26 +592,55 @@ static odin3_module *make_chain(uint32_t n_cells) {
     return top;
 }
 
-static double timed_build(uint32_t n_cells) {
+/* True when building top succeeds with at most `allowed` allocations (the rest fail). */
+static bool builds_within(const odin3_module *top, long allowed) {
+    odin3_sim *sim = NULL;
+    odin3_util_set_alloc_fail_after(allowed);
+    odin3_status st = odin3_sim_build(design, odin3_module_id_of(top), &sim);
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_sim_destroy(sim);
+    return st == ODIN3_OK;
+}
+
+/*
+ * The number of allocations a build of a chain of n_cells makes (the least `allowed` with which
+ * it succeeds: exponential then binary search), after checking the chain simulates.
+ */
+static long build_allocations(uint32_t n_cells) {
     odin3_design_destroy(design);
     design = odin3_design_create();
     odin3_module *top = make_chain(n_cells);
-    clock_t start = clock();
     odin3_sim *sim = build_ok(top);
-    double secs = (double)(clock() - start) / CLOCKS_PER_SEC;
     TEST_ASSERT_EQUAL_UINT32(n_cells, sim->n_cells);
     TEST_ASSERT_EQUAL_UINT32(1, settle(sim, 1));
     TEST_ASSERT_EQUAL_UINT32(0, settle(sim, 0));
     odin3_sim_destroy(sim);
-    return secs;
+    long low = 0; /* fails with low allocations */
+    long high = 1;
+    while (!builds_within(top, high)) {
+        low = high;
+        high *= 2;
+        TEST_ASSERT_TRUE(high < OOM_LIMIT);
+    }
+    while (high - low > 1) {
+        long mid = low + (high - low) / 2;
+        *(builds_within(top, mid) ? &high : &low) = mid;
+    }
+    return high;
 }
 
+/*
+ * Deterministic stand-in for "time is linear": 4x the cells (and 4x the instance frames) adds
+ * only the few allocations of the growing arrays' doublings, so nothing is allocated per cell,
+ * frame or net; the work itself is single passes over cells, pins and slots (levelize.c).
+ */
 static void test_200k_cells_build_linear(void) {
-    double small = timed_build(BIG / 4);
-    double big = timed_build(BIG);
+    long small = build_allocations(BIG / 4);
+    long big = build_allocations(BIG);
     char msg[NAME_BUF * 4];
-    (void)snprintf(msg, sizeof msg, "50k: %.3fs, 200k: %.3fs", small, big);
-    TEST_ASSERT_TRUE_MESSAGE(big < 8.0 * small + 0.25, msg); /* 4x the cells: ~4x the time */
+    (void)snprintf(msg, sizeof msg, "50k: %ld allocations, 200k: %ld", small, big);
+    TEST_ASSERT_TRUE_MESSAGE(small < 200, msg);
+    TEST_ASSERT_TRUE_MESSAGE(big >= small && big - small <= 40, msg);
 }
 
 int main(void) {
@@ -596,6 +659,8 @@ int main(void) {
     RUN_TEST(test_black_box_is_rejected_with_location);
     RUN_TEST(test_type_without_hook_is_rejected);
     RUN_TEST(test_recursive_hierarchy_is_rejected);
+    RUN_TEST(test_indirect_recursion_names_a_module_on_the_cycle);
+    RUN_TEST(test_unconnected_clock_is_rejected);
     RUN_TEST(test_inout_top_port_is_rejected);
     RUN_TEST(test_bad_top_is_rejected);
     RUN_TEST(test_oom_sweep);
