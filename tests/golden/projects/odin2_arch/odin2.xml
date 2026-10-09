@@ -1,0 +1,20 @@
+<config>
+    <inputs>
+        <input_type>verilog</input_type>
+        <input_path_and_name>src/mac.v</input_path_and_name>
+    </inputs>
+    <output>
+        <output_type>blif</output_type>
+        <output_path_and_name>mac.odin.blif</output_path_and_name>
+        <target>
+            <arch_file>arch/k6_tiny.xml</arch_file>
+        </target>
+    </output>
+    <optimizations>
+        <!-- size: multipliers below 9 bits stay soft; fixed/fracture are not rules (ignored) -->
+        <multiply size="9" fixed="1" fracture="0"/>
+        <adder threshold_size="4"/>
+        <memory split_memory_width="1" split_memory_depth="max"/>
+        <mix_soft_hard_blocks mults_ratio="0.5"/>
+    </optimizations>
+</config>

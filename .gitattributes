@@ -2,3 +2,5 @@
 *.blif text eol=lf
 # verbatim upstream sources: byte-exact, no EOL conversion
 tests/micro/** -text
+# CRLF on purpose: the -f reader must accept CRLF line endings
+tests/golden/projects/f_env_crlf/files.f -text

@@ -1,0 +1,13 @@
+{
+  "description": "A revision the .qpf does not list (--revision, import).",
+  "features": ["negative", "unknown revision"],
+  "phase": 2,
+  "formats": ["o3proj", "qsf"],
+  "options": {"qsf": {"revision": "nope"}},
+  "error": {
+    "kind": "unknown_revision",
+    "at": {"o3proj": "project.o3proj:2", "qsf": null},
+    "names": ["nope"]
+  },
+  "unused": ["main.qsf"]
+}

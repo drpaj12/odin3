@@ -1,0 +1,5 @@
+<config>
+    <verilog_files>
+        <verilog_file>src/top.v</verilog_file>
+    </verilog_files>
+</config>

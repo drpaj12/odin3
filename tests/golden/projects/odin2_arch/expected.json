@@ -1,0 +1,55 @@
+{
+  "description": "Odin II config with an arch file and <optimizations> translated to rules.",
+  "features": ["verilog", "odin2 arch_file", "odin2 optimizations", "split"],
+  "phase": 2,
+  "formats": ["o3proj", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "project": {
+    "files": [{"path": "src/mac.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [{"kind": "vpr_xml", "path": "arch/k6_tiny.xml"}],
+    "rules": [
+      {
+        "rule": "map",
+        "scope": "*",
+        "subject": "$mul",
+        "action": "to",
+        "cells": ["multiply"],
+        "min_width": 9
+      },
+      {
+        "rule": "map",
+        "scope": "*",
+        "subject": "$add",
+        "action": "to",
+        "cells": ["adder"],
+        "min_width": 4
+      },
+      {"rule": "split", "subject": "$mem", "width": true, "depth": "max"}
+    ],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {
+    "odin2": {
+      "output": {"path": "mac.odin.blif", "format": "blif"},
+      "ignored": [
+        "optimizations/mix_soft_hard_blocks",
+        "optimizations/multiply@fixed",
+        "optimizations/multiply@fracture"
+      ]
+    }
+  },
+  "resolved": {"top": "work.mac", "units": ["work.mac"], "read": ["src/mac.v"], "order": ["src/mac.v"]},
+  "oracle": "yosys"
+}

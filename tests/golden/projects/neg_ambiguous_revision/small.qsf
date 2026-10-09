@@ -1,0 +1,2 @@
+# Never read: proj.qpf lists two revisions and none is chosen.
+set_global_assignment -name TOP_LEVEL_ENTITY top

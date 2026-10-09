@@ -1,0 +1,4 @@
+# f_vs_F: the files files.f resolves to.
+file verilog rtl/leaf.v
+file verilog lists/rtl/leaf.v
+file verilog src/top.v

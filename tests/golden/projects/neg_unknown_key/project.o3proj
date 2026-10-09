@@ -1,0 +1,3 @@
+# neg_unknown_key: a typo is an error, never silently skipped.
+file verilog src/top.v
+toplevel top

@@ -1,0 +1,36 @@
+{
+  "description": "VHDL listed out of dependency order; analysed by dependency.",
+  "features": ["vhdl", "analysis order"],
+  "phase": 5,
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/top.vhd", "language": "vhdl", "library": "work"},
+      {"path": "src/inc.vhd", "language": "vhdl", "library": "work"},
+      {"path": "src/consts_pkg.vhd", "language": "vhdl", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.inc", "work.top"],
+    "read": ["src/consts_pkg.vhd", "src/inc.vhd", "src/top.vhd"],
+    "order": ["src/consts_pkg.vhd", "src/inc.vhd", "src/top.vhd"]
+  },
+  "oracle": "ghdl+yosys"
+}

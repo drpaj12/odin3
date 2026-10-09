@@ -1,0 +1,8 @@
+{
+  "description": "No top given and two uninstantiated modules.",
+  "features": ["negative", "ambiguous top"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "odin2"],
+  "format_phase": {"odin2": "odin2-reader"},
+  "error": {"kind": "ambiguous_top", "at": null, "names": ["work.alpha", "work.beta"]}
+}

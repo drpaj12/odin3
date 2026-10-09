@@ -1,0 +1,2 @@
+# No TOP_LEVEL_ENTITY: Quartus uses the revision name ("counter") as the top.
+set_global_assignment -name VERILOG_FILE src/counter.v

@@ -1,0 +1,2 @@
+# Imports the Quartus project without choosing a revision.
+import proj.qpf

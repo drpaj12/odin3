@@ -1,0 +1,12 @@
+# Quartus synthesis assignments that are partial-mapping rules (DESIGN 4.0):
+#   AUTO_DSP_RECOGNITION OFF            -> map * $mul soft
+#   MULTSTYLE LOGIC -to <instance>      -> map <instance path> $mul soft
+#   AUTO_RAM_RECOGNITION ON             -> the default: no rule
+#   RAMSTYLE M10K (a device block name) -> not translated: ignored, listed in the info line
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name VERILOG_FILE src/mul.v
+set_global_assignment -name VERILOG_FILE src/top.v
+set_global_assignment -name AUTO_DSP_RECOGNITION OFF
+set_global_assignment -name AUTO_RAM_RECOGNITION ON
+set_instance_assignment -name MULTSTYLE LOGIC -to "top|mul:u_small"
+set_global_assignment -name RAMSTYLE M10K

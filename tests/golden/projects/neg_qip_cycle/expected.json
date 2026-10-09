@@ -1,0 +1,7 @@
+{
+  "description": ".qip files that include each other.",
+  "features": ["negative", "qip cycle"],
+  "phase": 2,
+  "formats": ["qsf"],
+  "error": {"kind": "qip_cycle", "at": "ip/b.qip:2", "names": ["ip/a.qip", "ip/b.qip", "ip/a.qip"]}
+}

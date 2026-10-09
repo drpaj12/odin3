@@ -1,0 +1,5 @@
+# lib_v_y: libfile/libdir/libext are the -v/-y/+libext+ of a file list.
+file verilog src/top.v
+libfile verilog lib/prims.v
+libdir lib/cells
+libext .v

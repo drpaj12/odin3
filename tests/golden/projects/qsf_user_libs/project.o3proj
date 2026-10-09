@@ -1,0 +1,4 @@
+# qsf_user_libs: USER_LIBRARIES is a library directory.
+file verilog src/top.v
+libdir lib
+top top

@@ -1,0 +1,6 @@
+<config>
+    <inputs>
+        <input_type>vhdl</input_type>
+        <input_path_and_name>src/top.vhd</input_path_and_name>
+    </inputs>
+</config>

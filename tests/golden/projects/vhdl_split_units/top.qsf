@@ -1,0 +1,5 @@
+set_global_assignment -name VHDL_FILE src/top.vhd
+set_global_assignment -name VHDL_FILE src/core_arch.vhd
+set_global_assignment -name VHDL_FILE src/pkg_body.vhd
+set_global_assignment -name VHDL_FILE src/core_ent.vhd
+set_global_assignment -name VHDL_FILE src/pkg.vhd

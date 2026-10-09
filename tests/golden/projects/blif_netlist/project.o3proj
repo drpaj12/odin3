@@ -1,0 +1,2 @@
+# blif_netlist: a BLIF-only project.
+file blif net/adder.blif

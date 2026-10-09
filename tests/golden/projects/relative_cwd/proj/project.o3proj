@@ -1,0 +1,3 @@
+# relative_cwd: paths are relative to this file's directory (proj/), not the working directory.
+file verilog ../src/sub/parity.v
+file verilog ../src/top.v

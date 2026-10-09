@@ -1,0 +1,76 @@
+{
+  "description": ".o3proj with arch, inventory, overrides, mapping rules, patterns and flow (stored, not applied).",
+  "features": [
+    "verilog",
+    "arch",
+    "available",
+    "hide",
+    "cell",
+    "map",
+    "thresholds",
+    "limit",
+    "patterns",
+    "flow"
+  ],
+  "phase": 2,
+  "formats": ["o3proj"],
+  "project": {
+    "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [],
+    "arch": [
+      {"kind": "o3lib", "path": "arch/tiny.o3lib"},
+      {"kind": "o3lib", "path": "arch/research.o3lib"}
+    ],
+    "rules": [
+      {
+        "rule": "map",
+        "scope": "*",
+        "subject": "$mul",
+        "action": "to",
+        "cells": ["multiply", "mult_27"],
+        "min_width": 9
+      },
+      {
+        "rule": "map",
+        "scope": "top",
+        "subject": "$mul",
+        "action": "soft",
+        "cells": [],
+        "max_width": 4
+      },
+      {
+        "rule": "map",
+        "scope": "top.u_*",
+        "subject": "$mem",
+        "action": "keep",
+        "cells": [],
+        "min_depth": 64
+      },
+      {"rule": "split", "subject": "$mem", "width": true, "depth": "max"},
+      {"rule": "limit", "cell": "multiply", "count": 40},
+      {"rule": "patterns", "path": "arch/patterns.o3lib"}
+    ],
+    "inventory": [{"cell": "multiply", "count": 112}, {"cell": "dual_port_ram", "count": 4}],
+    "overrides": [
+      {"override": "hide", "cell": "dual_port_ram"},
+      {
+        "override": "cell",
+        "name": "mult_27",
+        "from": "multiply",
+        "params": {"A_WIDTH": "27", "B_WIDTH": "27"}
+      }
+    ],
+    "flow": "flow/synth.o3",
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["src/top.v"], "order": ["src/top.v"]},
+  "oracle": "yosys"
+}

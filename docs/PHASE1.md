@@ -98,6 +98,74 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     (`--top`, else the single uninstantiated module, else an error listing the candidates); the
     BLIF reader's "first model is the top" stays the BLIF rule (BLIF defines it) but is recorded
     through the same call.
+19. **Project-input test corpus** (Peter, 2026-10-09: "make tests of different projects …
+    multiple files, etc. to test the project path, also with the different formats that will
+    be supported"): `tests/golden/projects`, 55 small cases (36 positive, 19 negative), each in
+    every format that can express it (`.o3proj`, `-f`, `.qpf`/`.qsf`/`.qip`, Odin II XML), with
+    the normalized record, the resolved design or located error, and a Yosys (GHDL for VHDL)
+    `ref.blif`. `tools/project-fixtures` holds the stdlib reference parsers (the oracle for the
+    C readers); CI runs its `check`, `oracle` runs locally. The grammar is normative in DESIGN
+    §4.0. Fix round 1 after review (controller rulings, agent defaults Peter may override;
+    **(P)** = flagged for Peter's review):
+    - Phases: every case parses to its record from `.o3proj`, `-f`, `.qsf` in Phase 2; it
+      elaborates and meets its oracle in its `phase` (2 Verilog/BLIF, 5 SV/VHDL/mixed, 6
+      VQM); the Odin II format joins when its reader lands. §12 Phase 2/5/6 exit tests say so.
+    - No leniency: double-quoted words with `\"`/`\\` escapes only, no word joining, no
+      empty quoted word; the `.qsf` reader is Tcl-exact for the subset (no `$`/`[...]`
+      substitution except the `.qip` `qip_path` idiom); per-assignment `.qsf` options
+      (`unknown_option` otherwise), one value per assignment; case-insensitive only where
+      Quartus is (assignment names, enumerated values).
+    - `VQM_FILE`/`EDIF_FILE` are design files; `QIP_FILE` is read (nested, `qip_cycle`).
+    - Closed behaviours: one `top` (`top lib.name` allowed; `TOP_LEVEL_ENTITY` repeated: last
+      wins); a file listed twice in one library is read once with an info line (a diamond of
+      nested lists is not a duplicate module); default `+libext+` is `.v`; unknown extensions
+      are errors; lookup design → `-v` (first file) → `-y` (first directory, then first
+      extension), library modules never shadow design units; Odin II `<input_type>` single,
+      `verilog`|`blif`; a `.qsf` can be the entry; `param` only on the top or an instance under
+      it, quoted = string, else a number literal; VHDL analysed by dependency; full error-kind
+      list in §4.0; readers record paths as given + absolute, the harness relativizes.
+    - **(P)** `-f <list>` entries resolve against the outermost list's directory (the standard
+      result when run from there, still CWD-independent); `-F <list>` against that list's
+      directory. Every other format resolves against the naming file's directory.
+    - **(P)** A `.qpf` with several revisions and no `--revision` is `ambiguous_revision`
+      (`.o3proj` `import <qpf> revision <r>` also chooses); `SEARCH_PATH` is an include and a
+      library directory; `USER_LIBRARIES` a library directory.
+    - **(P)** `-f` accepts `-top`/`--top-module`, `-sv`, `+libext+` without `-y`,
+      `$VAR`/`${VAR}` from the environment (`undefined_variable`), CRLF.
+    - **(P)** Odin II `<optimizations>`: `multiply size` → `map * $mul to multiply min_width`,
+      `adder threshold_size` → `map * $add to adder min_width`, `memory split_*` → the new
+      `split` rule; the rest ignored and listed.
+    - Agent decisions within the rulings: `.qsf` `-hdl_version` accepted and listed as ignored
+      (the standard follows the language); `VERILOG_INCLUDE_FILE` ignored; `set_parameter -to`
+      paths and style-assignment scopes are anchored at `-entity` or the top; `.o3proj` gains
+      `split` and `import`; record `duplicates`; `resolved.order`; `ref.cmd` records tool
+      versions; `vhdl_same_entity` uses a hand-written Verilog reference.
+    - Fix round 2 (controller rulings after re-review):
+      1. Real `.qsf` files parse: `[`/`]` inside a word (bare or quoted) are ordinary
+         (`-to LEDR[0]`); only a word starting with `[` is substitution (the `.qip` idiom,
+         else an error). Case `qsf_bus_pins`; a test parses Yosys's DE2i-150 `.qsf` when
+         `external/` is present.
+      2. `-sv` ends with the nested list that says it (restored after the nested parse).
+      3. `unknown_top`, and `ambiguous_top` for a declared top, are located at the declaring
+         line (`top`, `-top`, `TOP_LEVEL_ENTITY`).
+      4. `unsupported_language` is defined in §4.0; the §12 Phase 2 exit test excludes the
+         Odin II format, as the README does; `-top`, `$VAR` and CRLF moved to the phase-2
+         case `f_env_crlf` (`-sv` stays in the phase-5 `f_options`).
+      5. `#` starts a comment only at the start of a word (`+define+D=#1` keeps its value);
+         `-f` accepts `+define+TAG="AB"` (value `"AB"`, quotes kept); a backslash is ordinary,
+         Windows `\` paths are not translated.
+      6. Plain relative paths in a `.qip` resolve against the project directory (Quartus);
+         the `qip_path` idiom against the `.qip`.
+      7. VHDL order also counts an architecture or package body in another file than its
+         entity or package (case `vhdl_split_units`); VQM instances resolve only against a
+         small device-primitive list (else `unresolved_module`); RTL megafunctions
+         (`altsyncram`, `lpm_*`, …) resolve through the Phase 2 primitive library (§4.0).
+      8. Negatives for `include_cycle`, `qip_cycle`, `dependency_cycle`, `unknown_revision`,
+         `unsupported_input_type`; cases `param_instance` (instance-scoped) and
+         `param_string` (string parameter).
+      Agent detail: `unknown_revision` is located at the `import` line, unlocated for
+      `--revision`; files a scan read before an error count as used.
+    Phase 2 exit test (§12) gains the project-fixture clause.
 
 ## 1C results: full golden round trip
 

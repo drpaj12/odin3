@@ -1,0 +1,35 @@
+{
+  "description": "VHDL top instantiating a Verilog module through a component.",
+  "features": ["mixed", "vhdl top", "verilog"],
+  "phase": 5,
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [
+      {"path": "src/verilog/vadd.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.vhd", "language": "vhdl", "library": "work"}
+    ],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"top": "top"}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.top", "work.vadd"],
+    "read": ["src/top.vhd", "src/verilog/vadd.v"],
+    "order": ["src/verilog/vadd.v", "src/top.vhd"]
+  },
+  "oracle": "ghdl+yosys"
+}

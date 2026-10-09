@@ -1,0 +1,6 @@
+# defines: `define` lines; a name alone is defined without a value; a string macro's
+# value keeps its quotes (written escaped inside a quoted word).
+define USE_SUB
+define WIDTH=12
+define "TAG=\"AB\""
+file verilog src/top.v

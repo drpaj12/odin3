@@ -1,0 +1,6 @@
+# nested_f: the flattened equivalent of files.f.
+incdir src/include
+file verilog src/common/dffr.v
+file verilog src/core/alu.v
+file verilog src/core/regs.v
+file verilog src/top.v

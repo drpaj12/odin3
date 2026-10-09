@@ -1,0 +1,5 @@
+# vhdl_two_libs: a package and an entity in library util, the top in library app.
+file vhdl src/util/sat_pkg.vhd library util
+file vhdl src/util/clip.vhd library util
+file vhdl src/top.vhd library app
+top app.top

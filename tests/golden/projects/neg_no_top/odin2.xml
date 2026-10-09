@@ -1,0 +1,6 @@
+<config>
+    <verilog_files>
+        <verilog_file>src/ping.v</verilog_file>
+        <verilog_file>src/pong.v</verilog_file>
+    </verilog_files>
+</config>

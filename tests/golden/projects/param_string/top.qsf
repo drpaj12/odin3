@@ -1,0 +1,3 @@
+set_global_assignment -name VERILOG_FILE src/top.v
+# A value in literal double quotes is a string.
+set_parameter -name MODE "\"sub\""

@@ -1,0 +1,32 @@
+{
+  "description": "`include found on the include path and next to the including file.",
+  "features": ["verilog", "incdir", "`include search order"],
+  "phase": 2,
+  "formats": ["o3proj", "f", "qsf"],
+  "project": {
+    "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": ["src/include"],
+    "defines": [],
+    "top": null,
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "format_overrides": {"qsf": {"libdirs": ["src/include"], "top": "top"}},
+  "resolved": {
+    "top": "work.top",
+    "units": ["work.top"],
+    "read": ["src/include/widths.vh", "src/ops.vh", "src/top.v"],
+    "order": ["src/top.v"]
+  },
+  "oracle": "yosys"
+}
