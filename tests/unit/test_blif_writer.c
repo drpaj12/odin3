@@ -847,11 +847,11 @@ static void register_wpow_once(void) {
 }
 
 /* Review Focus 1: a declared parametric model is written as declared (port order, scalar
- * flags, widths from its parameters) and its instances with the declared spelling. */
+ * flags, widths from its parameters) and its instances with the declared spelling and order. */
 static void test_declared_parametric_model_written_as_declared(void) {
     register_wpow_once();
     static const char text[] =
-        ".model top\n.inputs a b\n.outputs y\n.subckt o3test_wpow A=a B[0]=b Y[1]=y\n.end\n\n"
+        ".model top\n.inputs a b\n.outputs y\n.subckt o3test_wpow B[0]=b A=a Y[1]=y\n.end\n\n"
         ".model o3test_wpow\n.inputs B[0] B[1] B[2] A\n.outputs Y[0] Y[1]\n.blackbox\n.end\n";
     write_input(text);
     round_trip(IN_PATH);

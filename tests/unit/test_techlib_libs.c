@@ -195,6 +195,33 @@ static void test_vtr_parameters(void) {
     TEST_ASSERT_NOT_NULL(odin3_techlib_cell_get(g_design, type_of("dual_port_ram"))->memory);
 }
 
+/* The name of port `port` of cell `cell`. */
+static const char *port_name(const char *cell, uint32_t port) {
+    return def_of(cell)->ports[port].name;
+}
+
+/* Read i drives the i-th memory-driven output (positional rule): dual_port_ram's reads are listed
+ * in its output order, out2 then out1, so each read's address is the one of its output. */
+static void test_vtr_reads_pair_with_outputs(void) {
+    load(VTR);
+    const odin3_techlib_memory *mem =
+        odin3_techlib_cell_get(g_design, type_of("dual_port_ram"))->memory;
+    TEST_ASSERT_EQUAL_UINT32(2, mem->n_outs);
+    uint32_t reads = 0;
+    for (uint32_t i = 0; i < mem->n_mports; i++) {
+        const odin3_techlib_memport *mport = &mem->mports[i];
+        if (mport->write) {
+            continue;
+        }
+        TEST_ASSERT_TRUE(reads < mem->n_outs);
+        const char *out = port_name("dual_port_ram", mem->outs[reads]);
+        const char *addr = port_name("dual_port_ram", mport->ports[1]);
+        TEST_ASSERT_EQUAL_STRING(out + strlen("out"), addr + strlen("addr"));
+        reads++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(mem->n_outs, reads);
+}
+
 /* --- the goldens' black boxes -------------------------------------------------------------- */
 
 /* The parameters every golden declaration implies, by model. */
@@ -286,7 +313,7 @@ static void test_multiply_parameters_from_declaration(void) {
     static char out[TEXT_MAX];
     int at = snprintf(text, sizeof text,
                       ".model top\n.inputs x y\n.outputs z\n"
-                      ".subckt multiply a[17]=x b[8]=y out[26]=z\n.end\n\n"
+                      ".subckt multiply b[8]=y a[17]=x out[26]=z\n.end\n\n"
                       ".model multiply\n.inputs");
     for (int k = 0; k < 9; k++) {
         at += snprintf(text + at, sizeof text - (size_t)at, " b[%d]", k);
@@ -378,6 +405,17 @@ static void test_implicit_and_inferred_with_library(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_msg, "no port 'out[6]'"), g_msg);
 }
 
+/* Inferred parameters whose width expression exceeds the cap (out = 2^20 + 2^20 bits) are a
+ * located parse error before any port is sized. */
+static void test_inferred_expression_width_is_capped(void) {
+    load(VTR);
+    write_input(".model top\n.inputs x\n.subckt multiply a[1048575]=x b[1048575]=x\n.end\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_read(g_design, IN_PATH));
+    TEST_ASSERT_EQUAL_STRING("odin3_libs_test_in.blif:3: the parameters inferred for 'multiply' "
+                             "give port 'out' 2097152 bits, above 1048576",
+                             g_msg);
+}
+
 static void test_missing_library_is_io_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_techlib_read(g_design, ODIN3_LIB_DIR "/none.o3lib"));
 }
@@ -387,10 +425,12 @@ int main(void) {
     RUN_TEST(test_generic_gates);
     RUN_TEST(test_vtr_ports);
     RUN_TEST(test_vtr_parameters);
+    RUN_TEST(test_vtr_reads_pair_with_outputs);
     RUN_TEST(test_every_golden_stanza_resolves);
     RUN_TEST(test_multiply_parameters_from_declaration);
     RUN_TEST(test_multiply_contradicting_width);
     RUN_TEST(test_implicit_and_inferred_with_library);
+    RUN_TEST(test_inferred_expression_width_is_capped);
     RUN_TEST(test_missing_library_is_io_error);
     return UNITY_END();
 }

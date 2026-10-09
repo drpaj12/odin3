@@ -165,8 +165,12 @@ writes a width-1 library port as `cin[0]`, Yosys+Parmys as `cin`).
 instance of a model the file declares gets the declaration's parameter values; an instance of a
 registered type the file does not declare gets the values its formals imply — each port's width
 seen as its largest bit index + 1 (`p[k]`), inferred as above (`odin3_celltype_infer_params`;
-types whose port widths are not parameters keep their defaults). A writer can therefore write a
-cell only when its parameters are the ones a reader would derive from what it writes.
+types whose port widths are not parameters keep their defaults). Only a parameter that is some
+port's width parameter is inferred: one used only inside width expressions keeps its default, and
+a declaration it contradicts is reported as a port-width mismatch. The BLIF reader caps inferred
+port widths at 2^20 bits. A writer can therefore write a cell only when its parameters are the
+ones a reader would derive from what it writes; it writes a declared type's formals in the
+declaration's port order.
 
 ## 5. Cell types (op registry)
 

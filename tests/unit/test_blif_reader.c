@@ -717,7 +717,6 @@ static void test_latch_token_count(void) {
     expect_parse_error(".model top\n.inputs d c\n.latch d q re c 1 x\n.end\n", 3, ".latch takes");
 }
 
-/* A model neither in the file nor registered (Yosys's `$pow`) is an implicit black box. */
 /* A Yosys-like parametric type: A A_WIDTH, B B_WIDTH, Y Y_WIDTH (all default 1). */
 static const odin3_param_def POW_PARAMS[] = {
     {"A_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
@@ -779,6 +778,16 @@ static void test_subckt_of_registered_parametric_type_needs_bit_formals(void) {
     expect_parse_error(".model top\n.inputs a\n.subckt o3test_pow A=a\n.end\n", 3, "no port 'A'");
 }
 
+/* An inferred width is capped (2^20 bits): a one-line .subckt cannot force a huge allocation. */
+static void test_inferred_width_is_capped(void) {
+    register_pow_once();
+    expect_parse_error(".model top\n.inputs a\n.subckt o3test_pow A[1048576]=a\n.end\n", 3,
+                       "formal 'A[1048576]' implies a port width above 1048576 bits");
+    register_pow_once();
+    expect_parse_error(".model top\n.inputs a\n.subckt o3test_pow Y[999999999]=a\n.end\n", 3,
+                       "above 1048576 bits");
+}
+
 /* Review Focus 1: a declared parametric model in another port order and other scalar flags; its
  * instances get the declared parameters and use the declared spelling of each port. */
 static void test_declared_parametric_model(void) {
@@ -817,7 +826,9 @@ static void test_declared_parametric_model_contradiction(void) {
     register_pow_once();
     expect_parse_error(".model top\n.end\n.model o3test_pow\n.inputs A B\n.outputs Y Z\n"
                        ".blackbox\n.end\n",
-                       3, "conflicts with the registered cell type of that name: 4 ports declared");
+                       3,
+                       "conflicts with the registered cell type of that name: the cell type has no "
+                       "port 'Z'");
     TEST_ASSERT_EQUAL_UINT32(1, error_count);
 }
 
@@ -836,6 +847,7 @@ static void test_declared_bracketed_scalar_port(void) {
     expect_check_clean();
 }
 
+/* A model neither in the file nor registered (Yosys's `$pow`) is an implicit black box. */
 static void test_subckt_of_an_undeclared_model_is_an_implicit_black_box(void) {
     write_str(".model top\n.inputs a b\n.outputs y\n.subckt $pow A[0]=a B[0]=b Y[0]=y\n"
               ".subckt $pow A[0]=b Z=y2\n.end\n");
@@ -1121,6 +1133,7 @@ static void run_pass1_tests(void) {
     RUN_TEST(test_blackbox_repeats_a_port_name);
     RUN_TEST(test_subckt_of_registered_parametric_type_infers_params);
     RUN_TEST(test_subckt_of_registered_parametric_type_needs_bit_formals);
+    RUN_TEST(test_inferred_width_is_capped);
     RUN_TEST(test_declared_parametric_model);
     RUN_TEST(test_declared_parametric_model_bounds_formals);
     RUN_TEST(test_declared_parametric_model_contradiction);

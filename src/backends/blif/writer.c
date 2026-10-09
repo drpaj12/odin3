@@ -13,6 +13,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -803,7 +804,20 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
     return st;
 }
 
-/* `.subckt type formal=actual …` in port order, unconnected pins skipped. */
+/* The port of def that is port `at` of its declaration (IR-7b: a bijection by name). */
+static uint32_t port_of_decl(const odin3_celltype_def *def, const odin3_celltype_def *decl,
+                             uint32_t at) {
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, decl->ports[at].name) == 0) {
+            return i;
+        }
+    }
+    assert(false); /* declare_blackbox checked the names */
+    return at;
+}
+
+/* `.subckt type formal=actual …` in port order (a declared type's: in declaration order),
+ * unconnected pins skipped. */
 static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
@@ -817,9 +831,11 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     }
     wr_begin(wr, ".subckt");
     wr_token(wr, odin3_bytes_cstr(def->name));
+    uint32_t index = 0;
+    const odin3_celltype_def *decl = declared_of(wr, odin3_node_type(wr->module, node), &index);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
-        st = subckt_port(wr, node, i);
+        st = subckt_port(wr, node, decl != NULL ? port_of_decl(def, decl, i) : i);
     }
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);

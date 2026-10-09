@@ -40,6 +40,10 @@ enum {
     EXTRA_MIN = 3, /* .attr key value */
 };
 
+/* The widest port a .subckt's formals may imply (inferred parameters, IR-7b): one short line
+ * must not force a huge allocation. Declared widths are bounded by the file itself. */
+static const uint32_t MAX_INFERRED_WIDTH = UINT32_C(1) << 20;
+
 /* The built-in cell types pass 2 makes (BLIF .names and .latch). */
 typedef enum blif_builtin {
     BLIF_SOP,
@@ -1043,8 +1047,9 @@ static bool port_scalar(const blif_inst *inst, uint32_t port) {
 }
 
 /* The width the formal `tok` (formal=actual) implies for its port: k + 1 for `p[k]`, 1 for an
- * exact port name; nothing for a formal that names no port (pass 2 reports it). */
-static void note_seen(blif_reader *rd, const blif_inst *inst, odin3_bytes tok) {
+ * exact port name; nothing for a formal that names no port (pass 2 reports it). A width above
+ * MAX_INFERRED_WIDTH is a parse error. */
+static odin3_status note_seen(blif_reader *rd, const blif_inst *inst, odin3_bytes tok) {
     const char *eq = memchr(tok.ptr, '=', tok.len);
     size_t len = eq != NULL ? (size_t)(eq - (const char *)tok.ptr) : tok.len;
     uint32_t port = find_port(inst->def, tok.ptr, len);
@@ -1053,10 +1058,38 @@ static void note_seen(blif_reader *rd, const blif_inst *inst, odin3_bytes tok) {
     if (port == inst->def->n_ports && parse_bit(tok.ptr, len, &base_len, &bit)) {
         port = find_port(inst->def, tok.ptr, base_len);
     }
+    if (port < inst->def->n_ports && bit >= MAX_INFERRED_WIDTH) {
+        return rd_error(rd, rd->line, "formal '%.*s' implies a port width above %u bits", (int)len,
+                        (const char *)tok.ptr, MAX_INFERRED_WIDTH);
+    }
     uint32_t *seen = rd->seen.data;
     if (port < inst->def->n_ports && bit >= seen[port]) {
         seen[port] = bit + 1;
     }
+    return ODIN3_OK;
+}
+
+/* Every port width the inferred rd->params give is at most MAX_INFERRED_WIDTH (a width expression
+ * such as A_WIDTH * B_WIDTH can exceed the formals' own bound). */
+static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
+    for (uint32_t port = 0; port < inst->def->n_ports; port++) {
+        uint32_t width = 0;
+        const odin3_port_query query = {inst->type, rd->params.data, port};
+        odin3_status st = odin3_celltype_port_width_checked(rd->design, &query, &width);
+        if (st == ODIN3_ERR_INVALID_ARG) {
+            return rd_error(rd, rd->line, "the parameters inferred for '%s' do not size port '%s'",
+                            inst->def->name, inst->def->ports[port].name);
+        }
+        if (st != ODIN3_OK) {
+            return rd_fail(rd, st);
+        }
+        if (width > MAX_INFERRED_WIDTH) {
+            return rd_error(
+                rd, rd->line, "the parameters inferred for '%s' give port '%s' %u bits, above %u",
+                inst->def->name, inst->def->ports[port].name, width, MAX_INFERRED_WIDTH);
+        }
+    }
+    return ODIN3_OK;
 }
 
 /* rd->params: a declared model's parameters; else, IR-7b, the parameters the formals' largest
@@ -1073,11 +1106,19 @@ static odin3_status inst_params(blif_reader *rd, const blif_inst *inst, const od
         memcpy(rd->params.data, declared, sizeof *declared * def->n_params);
         return ODIN3_OK;
     }
-    for (uint32_t i = 2; inst->decl == NULL && def->n_params > 0 && i < ln->count; i++) {
-        note_seen(rd, inst, ln->tokens[i]);
+    if (inst->decl != NULL || def->n_params == 0) {
+        return rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
+                                                       rd->params.data));
     }
-    return rd_fail(
-        rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data, rd->params.data));
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 2; st == ODIN3_OK && i < ln->count; i++) {
+        st = note_seen(rd, inst, ln->tokens[i]);
+    }
+    if (st == ODIN3_OK) {
+        st = rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
+                                                     rd->params.data));
+    }
+    return st == ODIN3_OK ? check_inferred(rd, inst) : st;
 }
 
 /* Fills rd->ports and rd->nets (every pin unconnected), sized by rd->params. */

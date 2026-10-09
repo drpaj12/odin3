@@ -49,12 +49,16 @@
  *   declared-model parameters; any other type gets the values its formals imply, each port seen
  *   as wide as its largest bit index + 1 (odin3_celltype_infer_params: a parameter that sizes a
  *   port takes that width; types sized otherwise keep their defaults), so `.subckt $pow A[1]=a
- *   Y[7]=y` of a registered parametric `$pow` has A_WIDTH 2 and Y_WIDTH 8. A bit beyond the
- *   instance's port width is an unknown formal. A model that is neither in the file nor
- *   registered (Yosys writes `$pow`, `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit
- *   black box: a local cell type of granularity BLACKBOX that is not in the declared-model list
- *   (writers emit no `.model` for it), whose ports are the distinct formals used with it in the
- *   file, in order of first use, each scalar, width 1 and INOUT (the file gives no directions);
+ *   Y[7]=y` of a registered parametric `$pow` has A_WIDTH 2 and Y_WIDTH 8; a formal implying a
+ *   port wider than 2^20 bits, or inferred parameters giving any port more, is a parse error. A
+ *   bit beyond the instance's port width is an unknown formal. Known limitation: without a
+ *   declaration the type's own scalar flags apply, so an undeclared `.subckt adder cin[0]=x`
+ *   (library port `cin` scalar) or `data=x` (vector `data`) is an unknown formal. A model that
+ *   is neither in the file nor registered (Yosys writes `$pow`, `$_DFFSR_PPP_`, … without a
+ *   `.model`) becomes an implicit black box: a local cell type of granularity BLACKBOX that is not
+ *   in the declared-model list (writers emit no `.model` for it), whose ports are the distinct
+ *   formals used with it in the file, in order of first use, each scalar, width 1 and INOUT (the
+ *   file gives no directions);
  * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
  * Several drivers on one net are read as written (odin3_check_design reports them, rule 4).
  * Provenance: every cell and every net created in pass 2 gets its own IMPORTED record, a cell

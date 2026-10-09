@@ -70,8 +70,13 @@ end
 `;` separates statements on one line. Expressions: identifiers (ports, parameters), integer and
 sized literals (`4'b10x1`), `~ ! & | ^ + - * << >> == != < <= > >= ?:`, slices `a[3:0]`, bit
 selects `a[2]`, concatenation `{a, b}`, replication `{4{a}}`, parentheses. Precedence and
-signedness follow Verilog-2005. Every `out` port needs exactly one `fn`, `seq` or `memory`
-driving it (or the cell is a black box: no functions at all, legal only with `blackbox` kind).
+signedness follow Verilog-2005. A `memory` drives every output no `fn` or `seq` drives; its
+`read` statements pair with those outputs by position: the i-th `read` drives the i-th
+memory-driven output in port order (so `dual_port_ram`, whose outputs are `out2 out1`, lists the
+read on `addr2` first). Follow-up: a later format change should let each `read` name the output it
+drives (e.g. `read sync clk addr1 -> out1`), removing the positional rule. Every `out` port
+needs exactly one `fn`, `seq` or `memory` driving it (or the cell is a black box: no functions at
+all, legal only with `blackbox` kind).
 
 ## Phase 1 scope
 

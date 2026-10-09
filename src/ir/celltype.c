@@ -556,23 +556,29 @@ static odin3_status why_fail(odin3_width_why *why, const char *fmt, ...) {
     return ODIN3_ERR_INVALID_ARG;
 }
 
-/* Same port count, and every declared port is a port of have with the same direction. */
+/* Every declared port is a port of have with the same direction and a constant width, and every
+ * port of have is declared (names are unique, so this is a bijection). */
 static odin3_status names_match(const odin3_celltype_def *have, const odin3_celltype_def *decl,
                                 odin3_width_why *why) {
     if (have->gran == ODIN3_GRAN_PORT) {
         return why_fail(why, "a port cell type is never a black box");
     }
-    if (decl->n_ports != have->n_ports) {
-        return why_fail(why, "%u ports declared, the cell type has %u", decl->n_ports,
-                        have->n_ports);
-    }
     for (uint32_t i = 0; i < decl->n_ports; i++) {
-        uint32_t at = port_named(have, decl->ports[i].name);
+        const odin3_port_def *port = &decl->ports[i];
+        uint32_t at = port_named(have, port->name);
         if (at == have->n_ports) {
-            return why_fail(why, "the cell type has no port '%s'", decl->ports[i].name);
+            return why_fail(why, "the cell type has no port '%s'", port->name);
         }
-        if (have->ports[at].dir != decl->ports[i].dir) {
-            return why_fail(why, "port '%s' has another direction", decl->ports[i].name);
+        if (have->ports[at].dir != port->dir) {
+            return why_fail(why, "port '%s' has another direction", port->name);
+        }
+        if (port->width_param != NULL || port->width_fn != NULL || port->width_expr != NULL) {
+            return why_fail(why, "declared port '%s' has no constant width", port->name);
+        }
+    }
+    for (uint32_t i = 0; i < have->n_ports; i++) {
+        if (port_named(decl, have->ports[i].name) == decl->n_ports) {
+            return why_fail(why, "port '%s' of the cell type is not declared", have->ports[i].name);
         }
     }
     return ODIN3_OK;
@@ -594,8 +600,8 @@ static odin3_status widths_match(const odin3_celltype_def *have, const odin3_cel
             return st;
         }
         if (width != want) {
-            return why_fail(why, "port '%s' has %u bits, the cell type gives it %u", name, want,
-                            width);
+            return why_fail(why, "port '%s' has %u bit%s, the cell type gives it %u", name, want,
+                            want == 1 ? "" : "s", width);
         }
     }
     return ODIN3_OK;

@@ -34,7 +34,8 @@
  * Cells: `$sop` → `.names` (its pins' nets, then the cover rows as stored; a zero-input cover is
  * one output character per row); `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_`/`$_DLATCH_N_` → `.latch in
  * out re|fe|ah|al ctrl init` and `$_FF_` → `.latch in out init` (init always written); any other
- * type → `.subckt type formal=actual …` in port order, unconnected pins skipped, formals by port
+ * type → `.subckt type formal=actual …` in port order (a declared type's in its declaration's
+ * order), unconnected pins skipped, formals by port
  * name (`p[k]` for bit k of a port that is not scalar — as the type's declaration writes it when
  * the design declares the type; a module port's ODIN3_BLIF_ATTR_PORT_NAME when it has one). BLIF
  * has no way to give parameters, so the node's must be those the reader derives (reader.h): the

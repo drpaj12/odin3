@@ -382,8 +382,37 @@ static void test_blackbox_match_is_quiet(void) {
     decl.n_ports = 2;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_celltype_blackbox_match(design, &match, &why));
-    TEST_ASSERT_EQUAL_STRING("2 ports declared, the cell type has 3", why.text);
+    TEST_ASSERT_EQUAL_STRING("port 'out' of the cell type is not declared", why.text);
+    decl.n_ports = 3;
+    g_decl_ports[0].width_fn = width_fn_five;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_STRING("declared port 'b' has no constant width", why.text);
     TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/* Two ports sized by one parameter: the largest declared width gives it, and the narrower port
+ * then contradicts it (a dual_port_ram with 2-bit data1 and 1-bit data2). */
+static void test_blackbox_shared_parameter_contradiction(void) {
+    static const odin3_param_def params[1] = {
+        {"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}}};
+    static const odin3_port_def ports[2] = {{"d1", ODIN3_DIR_IN, false, 0, "W", NULL, NULL},
+                                            {"d2", ODIN3_DIR_IN, false, 0, "W", NULL, NULL}};
+    const odin3_celltype_def def = {"shared_t4", ODIN3_GRAN_HARD, 0, ports, 2, params, 1, NULL,
+                                    NULL};
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
+    const odin3_port_def want[2] = {{"d1", ODIN3_DIR_IN, false, 2, NULL, NULL, NULL},
+                                    {"d2", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL}};
+    const odin3_celltype_def decl = {"shared_t4", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL,
+                                     NULL};
+    odin3_value got[1];
+    const odin3_blackbox_match match = {type, &decl, got};
+    odin3_width_why why = {""};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_INT64(2, got[0].i);
+    TEST_ASSERT_EQUAL_STRING("port 'd2' has 1 bit, the cell type gives it 2", why.text);
 }
 
 /* Inference: the largest width seen on a port sized by an INT parameter; others keep defaults. */
@@ -416,11 +445,15 @@ static void test_declared_model_of_a_new_black_box(void) {
     TEST_ASSERT_NULL(odin3_design_declared_model_decl(design, 1));
 }
 
-/* Declaring against a parametric type under every allocation failure: NO_MEMORY, list unchanged. */
+/* Declaring against a parametric type under every allocation failure, a fresh design per try (so
+ * the arena allocations of the entry fail too): NO_MEMORY and the list unchanged. */
 static void test_blackbox_parametric_oom_sweep(void) {
-    (void)add_pmul("pmul_oom_t4");
     const odin3_celltype_def decl = pmul_decl("pmul_oom_t4", DECL_A + DECL_B);
     for (long tries = 0;; tries++) {
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+        TEST_ASSERT_NOT_NULL(design);
+        (void)add_pmul("pmul_oom_t4");
         odin3_util_set_alloc_fail_after(tries);
         odin3_status st = odin3_celltype_declare_blackbox(design, &decl, NULL);
         odin3_util_set_alloc_fail_after(-1);
@@ -643,6 +676,7 @@ int main(void) {
     RUN_TEST(test_blackbox_infers_parameters);
     RUN_TEST(test_blackbox_contradicting_width);
     RUN_TEST(test_blackbox_match_is_quiet);
+    RUN_TEST(test_blackbox_shared_parameter_contradiction);
     RUN_TEST(test_infer_params);
     RUN_TEST(test_declared_model_accessors_out_of_range);
     RUN_TEST(test_declared_model_of_a_new_black_box);

@@ -27,7 +27,9 @@ cell multiply hard
   fn  out = a * b                    # unsigned
 end
 
-# Memory ports list the clock first, then the enable, address and data inputs they use.
+# Memory ports list the clock first, then the enable, address and data inputs they use. Read i
+# drives the i-th output the memory drives, in port order (dual_port_ram: addr2 → out2 first,
+# matching the outputs `out2 out1`).
 cell single_port_ram hard
   param ADDR_WIDTH int 15
   param DATA_WIDTH int 1
@@ -55,5 +57,5 @@ cell dual_port_ram hard
   out out1 DATA_WIDTH
   memory words 2 ** ADDR_WIDTH ; width DATA_WIDTH
   write sync clk we1 addr1 data1 ; write sync clk we2 addr2 data2
-  read sync clk addr1 ; read sync clk addr2
+  read sync clk addr2 ; read sync clk addr1
 end

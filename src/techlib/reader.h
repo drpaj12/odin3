@@ -80,7 +80,11 @@ typedef struct odin3_techlib_memport {
     uint32_t line;
 } odin3_techlib_memport;
 
-/* `memory words EXPR` with its `width`, `write` and `read` statements (semantics: Phase 4). */
+/*
+ * `memory words EXPR` with its `width`, `write` and `read` statements (semantics: Phase 4). The
+ * i-th read port (in statement order) drives outs[i], the i-th memory-driven output in port order
+ * (spec: the positional pairing rule).
+ */
 typedef struct odin3_techlib_memory {
     const odin3_expr *words;
     const odin3_expr *width;
