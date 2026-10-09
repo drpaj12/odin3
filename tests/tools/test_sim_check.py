@@ -91,7 +91,8 @@ class TbTest(unittest.TestCase):
         if flavor == "abc":
             res = run([ABC, "-q", f"read_blif {blif}; write_verilog {ref}"])
         else:
-            script = f"read_blif -wideports {blif}; write_verilog -noattr {ref}"
+            script = (f"read_blif -sop -wideports {blif}; simplemap t:$sop; "
+                      f"write_verilog -noattr {ref}")
             res = run([YOSYS, "-q", "-p", script])
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref])
@@ -215,6 +216,31 @@ class SimCheckTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertRegex(res.stdout, r"pass\s+abc\s.*re\.blif")
         self.assertRegex(res.stdout, r"pass\s+yosys\s.*fe\.blif")
+
+    def test_negedge_toggle_and_continued_subckt(self) -> None:
+        # A falling-edge toggle (x forever if the testbench's clock starts x: x -> 0 is a
+        # negedge) and an Odin II-style .subckt split over continuation lines.
+        blif = self.tmp / "toggle.blif"
+        blif.write_text(".model t\n.inputs clk a b\n.outputs q s\n"
+                        ".latch nq q fe clk 2\n.names q nq\n0 1\n"
+                        ".subckt adder a[0]=a b[0]=b cin[0]=q\\\n cout[0]=co\\\n sumout[0]=s\n"
+                        ".end\n\n.model adder\n.inputs a[0] b[0] cin[0]\n"
+                        ".outputs cout[0] sumout[0]\n.blackbox\n.end\n")
+        res = self.check("--fixtures", blif)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertRegex(res.stdout, r"pass\s+yosys\s.*toggle\.blif")
+
+    def test_wide_cover_with_yosys(self) -> None:
+        # Yosys reads a .names of more than 12 inputs only as a $sop (read_blif -sop).
+        ins = " ".join(f"i{k}" for k in range(14))
+        blif = self.tmp / "wide.blif"
+        blif.write_text(f".model w\n.inputs {ins} c\n.outputs y s\n.names {ins} y\n"
+                        + "1" * 14 + " 1\n" + "0" * 13 + "- 1\n"
+                        ".subckt adder a=i0 b=i1 cin=c sumout=s\n.end\n\n"
+                        ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n")
+        res = self.check("--fixtures", blif)
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertRegex(res.stdout, r"pass\s+yosys\s.*wide\.blif")
 
     def test_detects_a_wrong_output(self) -> None:
         liar = self.tmp / "liar"

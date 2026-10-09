@@ -10,7 +10,9 @@
 #   abc    ABC `read_blif; write_verilog`, for pure logic whose registers all clock on the rising
 #          edge (ABC drops the latch clocks and clocks every register on one rising `clock`, which
 #          the testbench toggles with every clock input), or
-#   yosys  Yosys `read_blif -wideports; write_verilog -noattr` plus models/adder.v and
+#   yosys  Yosys `read_blif -sop -wideports; simplemap t:$sop; write_verilog -noattr` (-sop: Yosys
+#          reads a cover of more than 12 inputs only as a $sop, which simplemap turns into gates
+#          that write_verilog can print) plus models/adder.v and
 #          models/multiply.v, for BLIFs with `adder`/`multiply` instances (ABC cannot read black
 #          boxes), with falling-edge registers, or with a data input named `clock` (ABC's clock).
 # Before either reads it, every latch whose init is 2, 3 or absent gets init 0: the simulator
@@ -58,7 +60,7 @@ classify() {
     { line = $0; sub(/#.*/, "", line) }
     acc != "" || line ~ /\\[ \t\r]*$/ {
         cont = sub(/\\[ \t\r]*$/, "", line)
-        acc = acc " " line
+        acc = (acc == "" ? line : acc " " line)
         if (cont) next
         line = acc; acc = ""
     }
@@ -87,7 +89,7 @@ zero_init() {
     LC_ALL=C awk '
     acc != "" || $0 ~ /\\[ \t\r]*$/ {
         line = $0; cont = sub(/\\[ \t\r]*$/, "", line)
-        acc = acc " " line
+        acc = (acc == "" ? line : acc " " line)
         if (cont) next
         $0 = acc; acc = ""
     }
@@ -150,7 +152,7 @@ build_reference() {
         [ "$out" = ok ] || { echo "$out abc"; return; }
     else
         out=$(run_capped "$dir/yosys.log" "$dir/rss.yosys" "$SC_YOSYS" -q -p \
-              "read_blif -wideports $dir/ref.blif; write_verilog -noattr $dir/ref.v")
+              "read_blif -sop -wideports $dir/ref.blif; simplemap t:\$sop; write_verilog -noattr $dir/ref.v")
         [ "$out" = ok ] || { echo "$out yosys"; return; }
         cat "$HERE/models/adder.v" "$HERE/models/multiply.v" >>"$dir/ref.v"
     fi
@@ -379,11 +381,11 @@ main() {
             else echo "sim-check: no such file or directory: $p" >&2; exit 2; fi
         done >"$cand"
     else
+        if [ -n "$list" ]; then root=$HOME/odin3-ws/golden; fi
+        root=${root:-$HOME/odin3-ws/golden}
         if [ -n "$list" ]; then
-            root=$HOME/odin3-ws/golden
             grep -v '^ *$' "$list" | while IFS= read -r p; do printf '%s\t%s\n' "$(stat -c %s "$p")" "$p"; done
         else
-            root=${root:-$HOME/odin3-ws/golden}
             [ -d "$root" ] || { echo "sim-check: not a directory: $root" >&2; exit 2; }
             find "$root" -name '*.blif' -printf '%s\t%p\n'
         fi | while IFS=$'\t' read -r size p; do

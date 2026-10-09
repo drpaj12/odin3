@@ -17,7 +17,8 @@
 #
 # The testbench reads the input bits of every cycle (field 2 of the driver's lines, one line per
 # cycle) from the file named by +vec=FILE and, per cycle: drives them, waits, raises every clock,
-# waits, lowers every clock, waits, and prints `=cycle inputs outputs` (the driver's cycle).
+# waits, lowers every clock, waits, and prints `=cycle inputs outputs` (the driver's cycle). The
+# clocks are one pulled-down net, forced to 1 and released, so it is 0 from time 0 with no edge.
 # Exit: 0 written, 1 the vectors and the BLIF ports disagree (message on stderr), 2 usage.
 set -euo pipefail
 
@@ -32,7 +33,7 @@ blif_ports() {
     { line = $0; sub(/#.*/, "", line) }
     acc != "" || line ~ /\\[ \t\r]*$/ {
         cont = sub(/\\[ \t\r]*$/, "", line)
-        acc = acc " " line
+        acc = (acc == "" ? line : acc " " line)
         if (cont) next
         line = acc; acc = ""
     }
@@ -155,7 +156,9 @@ main() {
         if (wi > 0) { print "  reg [" wi - 1 ":0] tb_mem [0:" (ncyc > 0 ? ncyc - 1 : 0) "];"; print "  reg [" wi - 1 ":0] tb_in;" }
         if (nbout > 0) print "  wire [" nbout - 1 ":0] tb_out;"
         if (nc > 0) print "  wire [" nc - 1 ":0] tb_nc;"
-        print "  reg tb_clk;"
+        # A pulled-down net starts at 0 with no event: a reg would step x -> 0 at time 0, a
+        # negedge that clocks falling-edge registers before the first cycle.
+        print "  tri0 tb_clk;"
         print "  reg [8*4096-1:0] tb_path;"
         print "  integer tb_cycle;"
         printf "  %s tb_dut (", ENVIRON["MODULE"]
@@ -169,11 +172,10 @@ main() {
             print "    end"
             print "    $readmemb(tb_path, tb_mem);"
         }
-        print "    tb_clk = 1'\''b0;"
         print "    for (tb_cycle = 0; tb_cycle < " ncyc "; tb_cycle = tb_cycle + 1) begin"
         if (wi > 0) print "      tb_in = tb_mem[tb_cycle];"
-        print "      #1 tb_clk = 1'\''b1;"
-        print "      #1 tb_clk = 1'\''b0;"
+        print "      #1 force tb_clk = 1'\''b1;"
+        print "      #1 release tb_clk;"
         printf "      #1 $display(\"=%%0d %s %s\", tb_cycle%s%s);\n", (wi > 0 ? "%b" : "-"), (nbout > 0 ? "%b" : "-"), (wi > 0 ? ", tb_in" : ""), (nbout > 0 ? ", tb_out" : "")
         print "    end"
         print "    $finish;"
