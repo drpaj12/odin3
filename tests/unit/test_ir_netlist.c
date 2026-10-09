@@ -101,7 +101,7 @@ static const odin3_port_def k_mixed_ports[] = {
     {"T", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_mixed = {
-    "test_t3_mixed", ODIN3_GRAN_WORD, 0, k_mixed_ports, 4, k_mixed_params, 1, NULL, NULL};
+    "test_t3_mixed", ODIN3_GRAN_WORD, 0, k_mixed_ports, 4, k_mixed_params, 1, NULL, NULL, NULL};
 
 /*
  * One-port WIDTH-parameter types shaped like the port cells, which node_create refuses (only
@@ -116,19 +116,35 @@ static const odin3_param_def k_width_params[] = {
 static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL}};
 static const odin3_port_def k_drive_ports[] = {{"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL}};
 static const odin3_port_def k_bus_ports[] = {{"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL, NULL}};
-static const odin3_celltype_def k_sink = {
-    "test_t3_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_width_params, 1, width_verify, NULL};
-static const odin3_celltype_def k_drive = {
-    "test_t3_drive", ODIN3_GRAN_WORD, 0, k_drive_ports, 1, k_width_params, 1, width_verify, NULL};
+static const odin3_celltype_def k_sink = {"test_t3_sink",
+                                          ODIN3_GRAN_WORD,
+                                          0,
+                                          k_sink_ports,
+                                          1,
+                                          k_width_params,
+                                          1,
+                                          width_verify,
+                                          NULL,
+                                          NULL};
+static const odin3_celltype_def k_drive = {"test_t3_drive",
+                                           ODIN3_GRAN_WORD,
+                                           0,
+                                           k_drive_ports,
+                                           1,
+                                           k_width_params,
+                                           1,
+                                           width_verify,
+                                           NULL,
+                                           NULL};
 static const odin3_celltype_def k_bus = {
-    "test_t3_bus", ODIN3_GRAN_WORD, 0, k_bus_ports, 1, k_width_params, 1, width_verify, NULL};
+    "test_t3_bus", ODIN3_GRAN_WORD, 0, k_bus_ports, 1, k_width_params, 1, width_verify, NULL, NULL};
 
 /* A type with one BITS parameter (no ports), for parameter-value validation. */
 static const odin3_param_def k_init_params[] = {
     {"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, NULL, 0, 0, 0}},
 };
 static const odin3_celltype_def k_init = {
-    "test_t3_init", ODIN3_GRAN_WORD, 0, NULL, 0, k_init_params, 1, NULL, NULL};
+    "test_t3_init", ODIN3_GRAN_WORD, 0, NULL, 0, k_init_params, 1, NULL, NULL, NULL};
 
 static odin3_node_id node_named(const char *type, uint32_t name, const odin3_value *params) {
     odin3_node_spec spec = {type_id(type), name, {0}, params, params != NULL ? 1 : 0};

@@ -18,7 +18,7 @@ static odin3_status mux_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_mux = {
-    "$mux", ODIN3_GRAN_WORD, 0, k_mux_ports, 4, k_mux_params, 1, mux_verify, NULL};
+    "$mux", ODIN3_GRAN_WORD, 0, k_mux_ports, 4, k_mux_params, 1, mux_verify, NULL, NULL};
 
 static const odin3_param_def k_pmux_params[] = {ODIN3_P_INT("WIDTH", 1), ODIN3_P_INT("S_WIDTH", 1)};
 
@@ -56,4 +56,4 @@ static odin3_status pmux_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_pmux = {
-    "$pmux", ODIN3_GRAN_WORD, 0, k_pmux_ports, 4, k_pmux_params, 2, pmux_verify, NULL};
+    "$pmux", ODIN3_GRAN_WORD, 0, k_pmux_ports, 4, k_pmux_params, 2, pmux_verify, NULL, NULL};

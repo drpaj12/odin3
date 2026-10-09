@@ -7,6 +7,8 @@
 #include "cells.h"
 #include "util/log.h"
 
+#include <assert.h>
+
 enum { SOP_WIDTH, SOP_COVER };
 
 static const odin3_param_def k_params[] = {
@@ -67,5 +69,44 @@ static odin3_const sop_const_value(const odin3_value *params) {
     return ODIN3_CONST_0;
 }
 
-const odin3_celltype_def odin3_cell_sop = {"$sop",     ODIN3_GRAN_BIT, 0, k_ports, 2, k_params, 2,
-                                           sop_verify, sop_const_value};
+/* True when every literal of row (width input chars) matches the input bits ('-' always does). */
+static bool row_matches(const odin3_sim_cell *cell, const uint8_t *row, uint32_t width) {
+    const odin3_sim_span *inputs = &cell->ports[0];
+    for (uint32_t i = 0; i < width; i++) {
+        if (row[i] != '-' && (row[i] == '1') != (cell->values[inputs->idx[i]] != 0)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * Simulate hook (sim/cell.h). Rows ending in 1 form the ON-set, rows ending in 0 the OFF-set; BLIF
+ * uses one kind per cover. ON-set: Y = 1 when a row matches. OFF-set: Y = 0 when a row matches.
+ * No rows: Y = 0. A cover mixing both (not legal BLIF) follows its ON rows and ignores the OFF
+ * rows, which agrees with sop_const_value for zero inputs.
+ */
+static void sop_sim(const odin3_sim_cell *cell) {
+    const odin3_value *cover = &cell->params[SOP_COVER];
+    uint32_t width = cover->cover_inputs;
+    assert(width == cell->ports[0].width);
+    uint64_t row_len = (uint64_t)width + 1;
+    bool has_on = false;
+    bool on_hit = false;
+    bool off_hit = false;
+    for (uint64_t off = 0; off + row_len <= cover->len; off += row_len) {
+        const uint8_t *row = cover->bits + off;
+        bool hit = row_matches(cell, row, width);
+        if (row[width] == '1') {
+            has_on = true;
+            on_hit = on_hit || hit;
+        } else {
+            off_hit = off_hit || hit;
+        }
+    }
+    bool off_only = !has_on && cover->len > 0;
+    odin3_cells_sim_out(cell, on_hit || (off_only && !off_hit));
+}
+
+const odin3_celltype_def odin3_cell_sop = {
+    "$sop", ODIN3_GRAN_BIT, 0, k_ports, 2, k_params, 2, sop_verify, sop_const_value, sop_sim};

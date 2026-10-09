@@ -139,7 +139,7 @@ static const odin3_port_def k_link_ports[] = {
     {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_link = {
-    "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL};
+    "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL, NULL};
 
 static void kill_wire(odin3_module *mod, odin3_wire_id wire) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod, wire));

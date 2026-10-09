@@ -47,11 +47,26 @@ typedef enum odin3_granularity {
  * Definition flags. TRISTATE: output pins may share a net with other tristate/inout drivers (a
  * bus, check rule 4). ANYVIEW: legal in every view whatever the granularity (constant cells, IR-9;
  * check rule 10).
+ *
+ * Simulation flags (1E; sim/cell.h has the hook contract). At most one of SEQ_EDGE and SEQ_LEVEL;
+ * either makes the type sequential: the simulator gives each cell one state byte per output bit
+ * and sends it the INIT and edge events. SEQ_EDGE: edge-triggered storage whose outputs depend
+ * only on its state, so it cuts the combinational graph ($_DFF_P_, $_DFF_N_, $_FF_). SEQ_LEVEL: a
+ * level-sensitive latch, transparent while enabled, whose outputs depend on its inputs during a
+ * settle ($_DLATCH_P_, $_DLATCH_N_). CLOCK_PIN0: port 0 is the cell's clock (edge) or enable
+ * (level) pin, whose net the simulator drives as a clock; $_FF_ has none (global clock).
  */
-enum { ODIN3_CT_TRISTATE = 1U << 0, ODIN3_CT_ANYVIEW = 1U << 1 };
+enum {
+    ODIN3_CT_TRISTATE = 1U << 0,
+    ODIN3_CT_ANYVIEW = 1U << 1,
+    ODIN3_CT_SEQ_EDGE = 1U << 2,
+    ODIN3_CT_SEQ_LEVEL = 1U << 3,
+    ODIN3_CT_CLOCK_PIN0 = 1U << 4
+};
 
 typedef struct odin3_celltype_def odin3_celltype_def;
 typedef struct odin3_width_expr odin3_width_expr;
+typedef struct odin3_sim_cell odin3_sim_cell; /* sim/cell.h */
 
 enum { ODIN3_WIDTH_WHY_MAX = 192 };
 
@@ -134,6 +149,8 @@ struct odin3_celltype_def {
     uint32_t n_params;
     odin3_status (*verify)(const odin3_value *params);     /* may be NULL */
     odin3_const (*const_value)(const odin3_value *params); /* may be NULL */
+    /* 1E: evaluates one cell (contract in sim/cell.h); NULL when the type cannot be simulated. */
+    void (*simulate)(const odin3_sim_cell *cell);
 };
 
 /*

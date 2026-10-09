@@ -9,7 +9,9 @@
 #define ODIN3_IR_CELLS_H
 
 #include "ir/ir_internal.h"
+#include "sim/cell.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* Element count of an array. */
@@ -43,6 +45,18 @@
     { pname, pdir, false, 0, wparam, NULL, NULL }
 #define ODIN3_PORT_FN(pname, pdir, wfn)                                                            \
     { pname, pdir, false, 0, NULL, wfn, NULL }
+
+/*
+ * Simulate-hook accessors for the bit-level types (sim/cell.h): the value of bit 0 of an input
+ * port, and writing the single output bit, which is bit 0 of the last port for every bit-level
+ * type.
+ */
+static inline bool odin3_cells_sim_in(const odin3_sim_cell *cell, uint32_t port) {
+    return cell->values[cell->ports[port].idx[0]] != 0;
+}
+static inline void odin3_cells_sim_out(const odin3_sim_cell *cell, bool val) {
+    cell->values[cell->ports[cell->n_ports - 1].idx[0]] = (uint8_t)(val ? 1 : 0);
+}
 
 /* Single-bit default value {0} for bit-vector parameters whose default width is 1. */
 extern const uint8_t odin3_cells_zero_bit[1];
@@ -133,13 +147,16 @@ extern const odin3_celltype_def odin3_cell_sop;
 
 /* Word-level cells sharing the binary / unary tables above. */
 #define ODIN3_BINARY(var, label)                                                                   \
-    const odin3_celltype_def var = {                                                               \
-        label, ODIN3_GRAN_WORD,           0, odin3_cells_binary_ports,                             \
-        3,     odin3_cells_binary_params, 5, odin3_cells_binary_verify,                            \
-        NULL}
+    const odin3_celltype_def var = {label, ODIN3_GRAN_WORD,                                        \
+                                    0,     odin3_cells_binary_ports,                               \
+                                    3,     odin3_cells_binary_params,                              \
+                                    5,     odin3_cells_binary_verify,                              \
+                                    NULL,  NULL}
 #define ODIN3_UNARY(var, label)                                                                    \
-    const odin3_celltype_def var = {label, ODIN3_GRAN_WORD,          0, odin3_cells_unary_ports,   \
-                                    2,     odin3_cells_unary_params, 3, odin3_cells_unary_verify,  \
-                                    NULL}
+    const odin3_celltype_def var = {label, ODIN3_GRAN_WORD,                                        \
+                                    0,     odin3_cells_unary_ports,                                \
+                                    2,     odin3_cells_unary_params,                               \
+                                    3,     odin3_cells_unary_verify,                               \
+                                    NULL,  NULL}
 
 #endif
