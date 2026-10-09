@@ -20,6 +20,10 @@
  * read_blif reads them; `blif_extras` is skipped. A user `src` replaces the provenance `src`;
  * the latch `init` wins over a user `init`; a repeated key keeps the first.
  *
+ * After the IR modules, each declared black-box or hard model (odin3_design_declared_model, once,
+ * names not starting with `$`) is a module with attribute `blackbox`, its ports (fresh bits from
+ * 2; a parameter-sized port at the type's defaults) and no cells, as Yosys write_json writes one.
+ *
  * ODIN3_ERR_INVALID_ARG for a NULL argument; ODIN3_ERR_IO (logged "path: reason") when the file
  * cannot be created or written, in which case a partial file is removed; ODIN3_ERR_NO_MEMORY on
  * out of memory. The design is not modified.

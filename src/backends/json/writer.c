@@ -358,6 +358,99 @@ static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     return out->status;
 }
 
+/* --- declared black boxes ------------------------------------------------------------------- */
+
+static const char *dir_text(odin3_dir dir) {
+    if (dir == ODIN3_DIR_IN) {
+        return "input";
+    }
+    return dir == ODIN3_DIR_OUT ? "output" : "inout";
+}
+
+/* A port's width; a width parameter or function is evaluated at the type's defaults. */
+static uint32_t blackbox_port_width(jw *out, odin3_celltype_id type, uint32_t port) {
+    const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    if (def->ports[port].width_param == NULL && def->ports[port].width_fn == NULL) {
+        return def->ports[port].width;
+    }
+    odin3_value *params = odin3_util_calloc(sizeof(odin3_value) * (def->n_params + 1));
+    if (params == NULL) {
+        out->status = out->status != ODIN3_OK ? out->status : ODIN3_ERR_NO_MEMORY;
+        return 0;
+    }
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        params[i] = def->params[i].dflt;
+    }
+    uint32_t width = odin3_celltype_port_width(out->design, type, params, port);
+    odin3_util_free(params);
+    return width;
+}
+
+static void write_blackbox_ports(jw *out, jw_list *entry, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    jw_list ports = {false, ENTRY_DEPTH};
+    uint32_t bit = 2;
+    jw_key(out, entry, "ports");
+    jw_open(out, &ports);
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        jw_list fields = {false, FIELD_DEPTH};
+        uint32_t width = blackbox_port_width(out, type, i);
+        jw_key(out, &ports, def->ports[i].name);
+        jw_open(out, &fields);
+        jw_key(out, &fields, "direction");
+        jw_string(out, odin3_bytes_cstr(dir_text(def->ports[i].dir)));
+        jw_key(out, &fields, "bits");
+        jw_raw(out, "[");
+        for (uint32_t j = 0; j < width; j++) {
+            jw_raw(out, j > 0 ? ", " : " ");
+            jw_bit(out, bit++);
+        }
+        jw_raw(out, width > 0 ? " ]" : "]");
+        jw_close(out, &fields);
+    }
+    jw_close(out, &ports);
+}
+
+/* A declared black-box or hard model (BLIF `.blackbox`) as a Yosys blackbox module: ports with
+ * fresh bits, no cells (Yosys write_json writes black boxes the same way). */
+static void write_blackbox(jw *out, jw_list *modules, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    jw_list entry = {false, SECTION_DEPTH};
+    jw_list attrs = {false, ENTRY_DEPTH};
+    jw_list empty = {false, ENTRY_DEPTH};
+    jw_key(out, modules, def->name);
+    jw_open(out, &entry);
+    jw_key(out, &entry, "attributes");
+    jw_open(out, &attrs);
+    jw_param_int(out, &attrs, "blackbox", 1);
+    jw_close(out, &attrs);
+    write_blackbox_ports(out, &entry, type);
+    jw_key(out, &entry, "cells");
+    jw_open(out, &empty);
+    jw_close(out, &empty);
+    jw_key(out, &entry, "netnames");
+    jw_open(out, &empty);
+    jw_close(out, &empty);
+    jw_close(out, &entry);
+}
+
+/* Declared models once each, in declaration order; `$` names are Yosys internal cells. */
+static void write_blackboxes(jw *out, jw_list *modules) {
+    const uint32_t count = odin3_design_declared_model_count(out->design);
+    for (uint32_t i = 0; i < count && out->status == ODIN3_OK; i++) {
+        odin3_celltype_id type = odin3_design_declared_model(out->design, i);
+        const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+        bool first = true;
+        for (uint32_t j = 0; j < i; j++) {
+            first = first && odin3_design_declared_model(out->design, j).v != type.v;
+        }
+        if (first && def != NULL && def->name[0] != '$' &&
+            (def->gran == ODIN3_GRAN_BLACKBOX || def->gran == ODIN3_GRAN_HARD)) {
+            write_blackbox(out, modules, type);
+        }
+    }
+}
+
 static odin3_status write_design(jw *out) {
     jw_list top = {false, 1};
     jw_list modules = {false, MODULE_DEPTH};
@@ -371,6 +464,9 @@ static odin3_status write_design(jw *out) {
     for (uint32_t i = 1; i < end && status == ODIN3_OK; i++) {
         odin3_module *mod = odin3_module_get(out->design, (odin3_module_id){i});
         status = mod != NULL ? write_module(out, &modules, mod) : ODIN3_OK;
+    }
+    if (status == ODIN3_OK) {
+        write_blackboxes(out, &modules);
     }
     jw_close(out, &modules);
     jw_close(out, &top);

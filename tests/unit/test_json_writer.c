@@ -378,6 +378,34 @@ static void test_user_attributes(void) {
     (void)remove("t13.json");
 }
 
+static const odin3_port_def BB_PORTS[] = {
+    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL},
+};
+
+/* A declared black-box model is a Yosys blackbox module: its ports with fresh bits, no cells. */
+static void test_declared_blackbox_module(void) {
+    odin3_celltype_def def = {"bb", ODIN3_GRAN_BLACKBOX, 0, BB_PORTS, 2, NULL, 0, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
+    (void)new_module("top");
+    char *text = write_json("t14.json");
+    assert_has(text, "\"bb\": {\n"
+                     "      \"attributes\": {\n"
+                     "        \"blackbox\": \"00000000000000000000000000000001\"\n"
+                     "      },\n"
+                     "      \"ports\": {\n"
+                     "        \"d\": {\n"
+                     "          \"direction\": \"input\",\n"
+                     "          \"bits\": [ 2, 3, 4 ]\n"
+                     "        },\n"
+                     "        \"q\": {\n"
+                     "          \"direction\": \"output\",\n"
+                     "          \"bits\": [ 5 ]\n");
+    odin3_util_free(text);
+    (void)remove("t14.json");
+}
+
 static void test_instance_and_parameters(void) {
     odin3_module *sub = new_module("sub");
     (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 2});
@@ -733,6 +761,7 @@ int main(void) {
     RUN_TEST(test_latch_init_unnamed_q);
     RUN_TEST(test_src_attribute_and_names);
     RUN_TEST(test_user_attributes);
+    RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_wire_range_attributes);
