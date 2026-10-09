@@ -660,9 +660,14 @@ static void test_registered_type_as_subckt(void) {
                              slurp(OUT_PATH, text));
 }
 
-/* Every allocation failure gives NO_MEMORY, never a crash or leak; then the write succeeds. */
-static void test_out_of_memory_sweep(void) {
-    read_into(design, ODIN3_BLIF_FIXTURES "/hand_body.blif");
+/* Writing design under every allocation failure gives NO_MEMORY, never a crash or a leak, and
+ * a write that succeeds gives the reference text. */
+static void oom_sweep(void) {
+    static char want[TEXT_MAX];
+    static char text[TEXT_MAX];
+    last_error[0] = '\0';
+    write_ok(design, OUT2_PATH);
+    (void)slurp(OUT2_PATH, want);
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         odin3_util_set_alloc_fail_after(fail_at);
@@ -670,11 +675,32 @@ static void test_out_of_memory_sweep(void) {
         odin3_util_set_alloc_fail_after(-1);
         if (st == ODIN3_OK) {
             done = true;
+            TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
         } else {
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
         }
     }
     TEST_ASSERT_TRUE(done);
+}
+
+static void test_out_of_memory_sweep(void) {
+    read_into(design, ODIN3_BLIF_FIXTURES "/hand_body.blif");
+    oom_sweep();
+}
+
+/* The same with generated names (wire bits, `$n`, `$p`) and a vector black box. */
+static void test_out_of_memory_sweep_generated_names(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = new_port(module, "a", ODIN3_DIR_IN, 2);
+    odin3_net_id mid = new_net(module, NULL);
+    new_buffer(module, odin3_wire_net(module, in, 0), mid);
+    new_buffer(module, mid, (odin3_net_id){0});
+    read_into(design2, ODIN3_BLIF_FIXTURES "/hand_ports.blif");
+    oom_sweep();
+    odin3_design *swap = design;
+    design = design2;
+    design2 = swap;
+    oom_sweep();
 }
 
 int main(void) {
@@ -697,5 +723,6 @@ int main(void) {
     RUN_TEST(test_non_default_parameters_are_refused);
     RUN_TEST(test_registered_type_as_subckt);
     RUN_TEST(test_out_of_memory_sweep);
+    RUN_TEST(test_out_of_memory_sweep_generated_names);
     return UNITY_END();
 }

@@ -419,10 +419,13 @@ static odin3_status write_model_ports(blif_writer *wr, const odin3_celltype_def 
             }
         }
     }
-    if (st == ODIN3_OK && def->n_ports > 0) {
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    if (def->n_ports > 0) {
         wr_end(wr);
     }
-    return st;
+    return wr->st;
 }
 
 /* `.clock` with the names of the module's ODIN3_BLIF_ATTR_CLOCK attribute. */
