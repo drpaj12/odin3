@@ -99,6 +99,9 @@ typedef struct odin3_techlib_memory {
     uint32_t line;
 } odin3_techlib_memory;
 
+/* A cell's fns compiled for the simulator (techlib/fnsim.h). */
+typedef struct odin3_fnsim_prog odin3_fnsim_prog;
+
 /*
  * The library data of a registered cell (the function table entry for 1E and Phase 4). Lives in
  * the design arena as long as the design; identifiers in its expressions are design strtab IDs.
@@ -117,6 +120,11 @@ struct odin3_techlib_cell {
     const odin3_techlib_seq *seqs;
     uint32_t n_seqs;
     const odin3_techlib_memory *memory; /* NULL when the cell has none */
+    /*
+     * 1E: the fns compiled for simulation, NULL when the cell cannot be simulated (fnsim.h).
+     * When set, the cell's type has the fnsim simulate and sim_scratch_bytes hooks.
+     */
+    const odin3_fnsim_prog *sim;
 };
 
 /* A library held in memory: name (used in messages and recorded per cell) and contents. */

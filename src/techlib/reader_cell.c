@@ -1,4 +1,5 @@
 /* reader_cell.c — .o3lib cell statements: cell, param, ports, fn, seq, memory, end. */
+#include "techlib/fnsim.h"
 #include "techlib/reader_internal.h"
 #include "techlib/width.h"
 
@@ -801,7 +802,7 @@ static odin3_granularity gran_of(odin3_techlib_kind kind) {
     }
 }
 
-static const odin3_celltype_def *build_def(odin3_reader *rd) {
+static odin3_celltype_def *build_def(odin3_reader *rd) {
     const odin3_rd_cell *cell = &rd->cell;
     odin3_celltype_def *def = odin3_arena_alloc(rd->arena, sizeof *def);
     odin3_port_def *ports = odin3_arena_alloc(rd->arena, sizeof *ports * (cell->ports.len + 1));
@@ -850,7 +851,11 @@ static bool build_memory(odin3_reader *rd, odin3_techlib_cell *lib) {
     return ok;
 }
 
-static const odin3_techlib_cell *build_lib(odin3_reader *rd) {
+/*
+ * The cell's library data, with its fns compiled for the simulator; a cell that compiles gets the
+ * simulate hooks on def (1E, fnsim.h).
+ */
+static const odin3_techlib_cell *build_lib(odin3_reader *rd, odin3_celltype_def *def) {
     const odin3_rd_cell *cell = &rd->cell;
     odin3_techlib_cell *lib = odin3_arena_alloc(rd->arena, sizeof *lib);
     odin3_techlib_port *mods = odin3_arena_alloc(rd->arena, sizeof *mods * (cell->ports.len + 1));
@@ -876,8 +881,20 @@ static const odin3_techlib_cell *build_lib(odin3_reader *rd) {
                                 .n_fns = (uint32_t)cell->fns.len,
                                 .seqs = seqs,
                                 .n_seqs = (uint32_t)cell->seqs.len,
-                                .memory = NULL};
-    return ok && build_memory(rd, lib) ? lib : NULL;
+                                .memory = NULL,
+                                .sim = NULL};
+    if (!ok || !build_memory(rd, lib)) {
+        return NULL;
+    }
+    const odin3_fnsim_source src = {rd->arena, rd->strtab, def, lib};
+    if (odin3_fnsim_compile(&src, &lib->sim) != ODIN3_OK) {
+        return NULL;
+    }
+    if (lib->sim != NULL) {
+        def->simulate = odin3_fnsim_simulate;
+        def->sim_scratch_bytes = odin3_fnsim_scratch;
+    }
+    return lib;
 }
 
 odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_span rest) {
@@ -889,7 +906,9 @@ odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_span rest) {
     if (st != ODIN3_OK) {
         return st;
     }
-    const odin3_rd_pending done = {rd->cell.name, rd->cell.line, build_def(rd), build_lib(rd)};
+    odin3_celltype_def *def = build_def(rd);
+    const odin3_rd_pending done = {rd->cell.name, rd->cell.line, def,
+                                   def != NULL ? build_lib(rd, def) : NULL};
     odin3_rd_pending *slot =
         done.def != NULL && done.lib != NULL ? odin3_vec_push(&rd->pending) : NULL;
     if (slot == NULL) {

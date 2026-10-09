@@ -816,6 +816,596 @@ static void test_word_hooks_do_not_allocate(void) {
     odin3_sim_destroy(sim);
 }
 
+/* --- tech-library hard cells: the fn interpreter ------------------------------------------------
+ */
+
+/* adder and multiply exactly as the 1G spec declares them (lib/vtr.o3lib is not written yet). */
+static const char k_vtr_lib[] = "library vtr_inline\n"
+                                "cell adder hard\n"
+                                "  in  a 1\n"
+                                "  in  b 1\n"
+                                "  in  cin 1\n"
+                                "  out cout 1\n"
+                                "  out sumout 1\n"
+                                "  fn  sumout = a ^ b ^ cin\n"
+                                "  fn  cout   = (a & b) | (a & cin) | (b & cin)\n"
+                                "end\n"
+                                "cell multiply hard\n"
+                                "  param A_WIDTH int 36\n"
+                                "  param B_WIDTH int 36\n"
+                                "  in  a A_WIDTH\n"
+                                "  in  b B_WIDTH\n"
+                                "  out out A_WIDTH + B_WIDTH\n"
+                                "  fn  out = a * b\n"
+                                "end\n";
+
+static void read_lib(const char *text) {
+    const odin3_techlib_text src = {"inline.o3lib", odin3_bytes_cstr(text)};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read_text(design, &src), log_text);
+}
+
+static void test_adder(void) {
+    read_lib(k_vtr_lib);
+    odin3_module *top = new_module();
+    bus port[5];
+    in_bus(top, "a", 1, &port[0]);
+    in_bus(top, "b", 1, &port[1]);
+    in_bus(top, "cin", 1, &port[2]);
+    out_bus(top, "cout", 1, &port[3]);
+    out_bus(top, "sumout", 1, &port[4]);
+    const bus *const buses[5] = {&port[0], &port[1], &port[2], &port[3], &port[4]};
+    add_cell(top, type_id("adder"), NULL, buses);
+    odin3_sim *sim = build_ok(top);
+    for (uint32_t combo = 0; combo < 8; combo++) {
+        uint32_t ones = 0;
+        for (uint32_t k = 0; k < 3; k++) {
+            bits in = from_u64((sized){(combo >> k) & 1U, 1});
+            set_port(sim, k, &in);
+            ones += in.bit[0];
+        }
+        odin3_sim_cycle(sim);
+        bits cout = get_port(sim, 0);
+        bits sum = get_port(sim, 1);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(ones >= 2 ? 1 : 0, cout.bit[0], "cout");
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(ones & 1U, sum.bit[0], "sumout");
+    }
+    odin3_sim_destroy(sim);
+}
+
+/* A non-negative big integer in base 2^16 (independent of the simulator's 64-bit limbs). */
+enum { BIG_DIGITS = 16, DIGIT_BITS = 16 };
+
+typedef struct big {
+    uint32_t digit[BIG_DIGITS];
+} big;
+
+typedef struct big_pair {
+    big lhs;
+    big rhs;
+} big_pair;
+
+static big big_of(const bits *val) {
+    big out;
+    memset(&out, 0, sizeof out);
+    for (uint32_t k = 0; k < val->width; k++) {
+        out.digit[k / DIGIT_BITS] |= (uint32_t)val->bit[k] << (k % DIGIT_BITS);
+    }
+    return out;
+}
+
+/* Schoolbook product, digit by digit with a running carry (exact while it fits 16 digits). */
+static big big_mul(const big_pair *pr) {
+    big out;
+    memset(&out, 0, sizeof out);
+    for (uint32_t i = 0; i < BIG_DIGITS; i++) {
+        uint64_t carry = 0;
+        for (uint32_t j = 0; i + j < BIG_DIGITS; j++) {
+            uint64_t cur = out.digit[i + j] + (uint64_t)pr->lhs.digit[i] * pr->rhs.digit[j] + carry;
+            out.digit[i + j] = (uint32_t)(cur & 0xffffU);
+            carry = cur >> DIGIT_BITS;
+        }
+    }
+    return out;
+}
+
+static bits bits_of(const big *val, uint32_t width) {
+    bits out = zeros(width);
+    for (uint32_t k = 0; k < width; k++) {
+        out.bit[k] = (uint8_t)((val->digit[k / DIGIT_BITS] >> (k % DIGIT_BITS)) & 1U);
+    }
+    return out;
+}
+
+/* One multiply cell (params NULL: the 36x36 defaults); every pattern pair plus random vectors. */
+static void check_multiply(const odin3_value *params, binary_widths wid) {
+    odin3_module *top = new_module();
+    bus port[3];
+    in_bus(top, "a", wid.aw, &port[0]);
+    in_bus(top, "b", wid.bw, &port[1]);
+    out_bus(top, "out", wid.aw + wid.bw, &port[2]);
+    const bus *const buses[3] = {&port[0], &port[1], &port[2]};
+    add_cell(top, type_id("multiply"), params, buses);
+    odin3_sim *sim = build_ok(top);
+    for (uint32_t vec = 0; vec < N_PATTERNS * N_PATTERNS + 100; vec++) {
+        uint32_t pa = vec < N_PATTERNS * N_PATTERNS ? vec % N_PATTERNS : N_PATTERNS - 1;
+        uint32_t pb = vec < N_PATTERNS * N_PATTERNS ? vec / N_PATTERNS : N_PATTERNS - 1;
+        bits a_val = pattern((sized){pa, wid.aw});
+        bits b_val = pattern((sized){pb, wid.bw});
+        set_port(sim, 0, &a_val);
+        set_port(sim, 1, &b_val);
+        odin3_sim_cycle(sim);
+        const big_pair ab = {big_of(&a_val), big_of(&b_val)};
+        big prod = big_mul(&ab);
+        bits want = bits_of(&prod, wid.aw + wid.bw);
+        bits got = get_port(sim, 0);
+        char what[64];
+        (void)snprintf(what, sizeof what, "multiply %ux%u vector %u", wid.aw, wid.bw, vec);
+        expect_bits(&want, &got, what);
+    }
+    odin3_sim_destroy(sim);
+}
+
+/* Review Focus 5: 36x36 -> 72 with the library defaults. */
+static void test_multiply_36x36(void) {
+    read_lib(k_vtr_lib);
+    check_multiply(NULL, (binary_widths){36, 36, 72});
+    /* the largest product: (2^36 - 1)^2 = 2^72 - 2^37 + 1 */
+    odin3_module *top = new_module();
+    bus port[3];
+    in_bus(top, "a", 36, &port[0]);
+    in_bus(top, "b", 36, &port[1]);
+    out_bus(top, "out", 72, &port[2]);
+    const bus *const buses[3] = {&port[0], &port[1], &port[2]};
+    add_cell(top, type_id("multiply"), NULL, buses);
+    odin3_sim *sim = build_ok(top);
+    bits ones = pattern((sized){1, 36});
+    set_port(sim, 0, &ones);
+    set_port(sim, 1, &ones);
+    odin3_sim_cycle(sim);
+    bits got = get_port(sim, 0);
+    for (uint32_t k = 0; k < 72; k++) {
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(k == 0 || k >= 37 ? 1 : 0, got.bit[k], "max product");
+    }
+    odin3_sim_destroy(sim);
+}
+
+/* Parametric widths, the wide path included (65x65 -> 130 bits, three limbs). */
+static void test_multiply_param_widths(void) {
+    read_lib(k_vtr_lib);
+    for (uint32_t i = 0; i < N_WIDTHS; i++) {
+        for (uint32_t j = 0; j < N_WIDTHS; j++) {
+            const odin3_value params[2] = {odin3_value_int(k_widths[i]),
+                                           odin3_value_int(k_widths[j])};
+            check_multiply(params, (binary_widths){k_widths[i], k_widths[j], 0});
+        }
+    }
+}
+
+/* Ports of a one-cell module: names and widths in port order, the first n_in are inputs. */
+typedef struct cell_ports {
+    const char *const *names;
+    const uint32_t *widths;
+    uint32_t n_in;
+    uint32_t n_ports;
+} cell_ports;
+
+/* Builds a module with those ports and one cell of type (params may be NULL) on them. */
+static odin3_sim *build_cell(const char *type, const odin3_value *params, const cell_ports *cp) {
+    odin3_module *top = new_module();
+    bus port[MAX_PORTS];
+    const bus *buses[MAX_PORTS];
+    TEST_ASSERT_LESS_OR_EQUAL_UINT32(MAX_PORTS, cp->n_ports);
+    for (uint32_t i = 0; i < cp->n_ports; i++) {
+        if (i < cp->n_in) {
+            in_bus(top, cp->names[i], cp->widths[i], &port[i]);
+        } else {
+            out_bus(top, cp->names[i], cp->widths[i], &port[i]);
+        }
+        buses[i] = &port[i];
+    }
+    add_cell(top, type_id(type), params, buses);
+    return build_ok(top);
+}
+
+/* Every operator of the brief at a width W, against the bit-array reference. */
+static const char k_ops_lib[] = "library ops_lib\n"
+                                "cell ops hard\n"
+                                "  param W int 8\n"
+                                "  in a W ; in b W ; in sh 7\n"
+                                "  out add W ; out sub W ; out mul W ; out band W ; out bor W\n"
+                                "  out bxor W ; out bnot W ; out shl W ; out shr W\n"
+                                "  out eq 1 ; out ne 1 ; out lt 1\n"
+                                "  fn add = a + b\n"
+                                "  fn sub = a - b\n"
+                                "  fn mul = a * b\n"
+                                "  fn band = a & b\n"
+                                "  fn bor = a | b\n"
+                                "  fn bxor = a ^ b\n"
+                                "  fn bnot = ~a\n"
+                                "  fn shl = a << sh\n"
+                                "  fn shr = a >> sh\n"
+                                "  fn eq = a == b\n"
+                                "  fn ne = a != b\n"
+                                "  fn lt = a < b\n"
+                                "end\n";
+
+enum { OPS_IN = 3, OPS_OUT = 12 };
+
+static int ref_ucmp(const pair *pr) {
+    for (uint32_t k = pr->lhs.width; k-- > 0;) {
+        if (pr->lhs.bit[k] != pr->rhs.bit[k]) {
+            return pr->lhs.bit[k] != 0 ? 1 : -1;
+        }
+    }
+    return 0;
+}
+
+/* The value shifted left (positive amount) or right (negative), zeros shifting in. */
+typedef struct shift {
+    const bits *val;
+    int64_t by;
+} shift;
+
+static bits ref_shift(shift sh) {
+    bits out = zeros(sh.val->width);
+    for (uint32_t k = 0; k < out.width; k++) {
+        int64_t from = (int64_t)k - sh.by;
+        out.bit[k] = from >= 0 && from < (int64_t)out.width ? sh.val->bit[(size_t)from] : 0;
+    }
+    return out;
+}
+
+/* The 12 outputs of ops for a, b and sh, in port order. */
+static void ops_reference(const pair *ab, uint64_t amount, bits *want) {
+    want[0] = ref_add(ab);
+    want[1] = ref_sub(ab);
+    want[2] = ref_mul(ab);
+    want[3] = ref_and(ab);
+    want[4] = ref_or(ab);
+    want[5] = ref_xor(ab);
+    want[6] = ref_not(&ab->lhs);
+    want[7] = ref_shift((shift){&ab->lhs, (int64_t)amount});
+    want[8] = ref_shift((shift){&ab->lhs, -(int64_t)amount});
+    int cmp = ref_ucmp(ab);
+    want[9] = from_u64((sized){cmp == 0 ? 1U : 0U, 1});
+    want[10] = from_u64((sized){cmp != 0 ? 1U : 0U, 1});
+    want[11] = from_u64((sized){cmp < 0 ? 1U : 0U, 1});
+}
+
+static void check_ops(uint32_t width) {
+    static const char *const k_names[OPS_IN + OPS_OUT] = {"a",   "b",    "sh",  "add",  "sub",
+                                                          "mul", "band", "bor", "bxor", "bnot",
+                                                          "shl", "shr",  "eq",  "ne",   "lt"};
+    uint32_t widths[OPS_IN + OPS_OUT];
+    for (uint32_t i = 0; i < OPS_IN + OPS_OUT; i++) {
+        widths[i] = i >= OPS_IN + 9 ? 1 : width; /* eq, ne, lt are one bit */
+    }
+    widths[2] = 7; /* sh */
+    const cell_ports cp = {k_names, widths, OPS_IN, OPS_IN + OPS_OUT};
+    const odin3_value params[1] = {odin3_value_int(width)};
+    odin3_sim *sim = build_cell("ops", params, &cp);
+    static const uint64_t k_amounts[] = {0, 1, 3, 63, 64, 65, 99, 127};
+    for (uint32_t vec = 0; vec < N_PATTERNS * N_PATTERNS; vec++) {
+        pair ab = {pattern((sized){vec % N_PATTERNS, width}),
+                   pattern((sized){vec / N_PATTERNS, width})};
+        uint64_t amount = k_amounts[vec % (sizeof k_amounts / sizeof k_amounts[0])];
+        bits sh_val = from_u64((sized){amount, 7});
+        set_port(sim, 0, &ab.lhs);
+        set_port(sim, 1, &ab.rhs);
+        set_port(sim, 2, &sh_val);
+        odin3_sim_cycle(sim);
+        bits want[OPS_OUT];
+        ops_reference(&ab, amount, want);
+        for (uint32_t i = 0; i < OPS_OUT; i++) {
+            char what[64];
+            (void)snprintf(what, sizeof what, "ops W=%u %s vector %u", width, k_names[OPS_IN + i],
+                           vec);
+            bits got = get_port(sim, i);
+            expect_bits(&want[i], &got, what);
+        }
+    }
+    odin3_sim_destroy(sim);
+}
+
+static void test_fn_operators(void) {
+    read_lib(k_ops_lib);
+    static const uint32_t k_ops_widths[] = {1, 7, 8, 64, 65, 100};
+    for (uint32_t i = 0; i < sizeof k_ops_widths / sizeof k_ops_widths[0]; i++) {
+        check_ops(k_ops_widths[i]);
+    }
+}
+
+/* Verilog-2005 sizing and signedness of fn expressions. */
+static const char k_sem_lib[] = "library sem_lib\n"
+                                "cell sem hard\n"
+                                "  param P int 5\n"
+                                "  in a 8 ; in b 8 ; in sa 8 signed ; in sb 8 signed ; in s 1\n"
+                                "  out avg 8 ; out avg9 8 ; out smul 16 ; out mmul 16\n"
+                                "  out slt 1 ; out mlt 1 ; out cat 12 ; out rep 8 ; out sel 1\n"
+                                "  out mux 8 ; out addp 8 ; out neg 8 ; out lnot 1 ; out land 1\n"
+                                "  out ge 1 ; out xnor 8 ; out lit 8 ; out cmpw 1\n"
+                                "  fn avg = (a + b) >> 1\n"
+                                "  fn avg9 = (a + b + 9'd0) >> 1\n"
+                                "  fn smul = sa * sb\n"
+                                "  fn mmul = sa * b\n"
+                                "  fn slt = sa < sb\n"
+                                "  fn mlt = sa < b\n"
+                                "  fn cat = {a[3:0], b}\n"
+                                "  fn rep = {{2{a[1:0]}}, b[7:4]}\n"
+                                "  fn sel = a[P]\n"
+                                "  fn mux = s ? a : b\n"
+                                "  fn addp = a + P\n"
+                                "  fn neg = -a\n"
+                                "  fn lnot = !a\n"
+                                "  fn land = a && b\n"
+                                "  fn ge = a >= b\n"
+                                "  fn xnor = a ~^ b\n"
+                                "  fn lit = 8'hA5 ^ a\n"
+                                "  fn cmpw = a + b == 9'd256\n"
+                                "end\n";
+
+enum { SEM_IN = 5, SEM_OUT = 18 };
+
+typedef struct sem_in {
+    uint32_t a, b, sa, sb, s;
+} sem_in;
+
+/* The 18 outputs of sem (P = param), computed with C integers. */
+static void sem_reference(const sem_in *in, int64_t param, uint32_t *want) {
+    int32_t sa = (int32_t)in->sa - (in->sa >= 0x80U ? 0x100 : 0); /* as 8-bit signed */
+    int32_t sb = (int32_t)in->sb - (in->sb >= 0x80U ? 0x100 : 0);
+    want[0] = ((in->a + in->b) & 0xffU) >> 1;
+    want[1] = ((in->a + in->b) >> 1) & 0xffU;
+    want[2] = (uint32_t)(sa * sb) & 0xffffU;
+    want[3] = (in->sa * in->b) & 0xffffU;
+    want[4] = sa < sb ? 1 : 0;
+    want[5] = in->sa < in->b ? 1 : 0;
+    want[6] = ((in->a & 0xfU) << 8) | in->b;
+    want[7] = ((in->a & 3U) << 6) | ((in->a & 3U) << 4) | (in->b >> 4);
+    want[8] = param >= 0 && param < 8 ? (in->a >> param) & 1U : 0;
+    want[9] = in->s != 0 ? in->a : in->b;
+    want[10] = (uint32_t)((int64_t)in->a + param) & 0xffU;
+    want[11] = (0x100U - in->a) & 0xffU;
+    want[12] = in->a == 0 ? 1 : 0;
+    want[13] = in->a != 0 && in->b != 0 ? 1 : 0;
+    want[14] = in->a >= in->b ? 1 : 0;
+    want[15] = ~(in->a ^ in->b) & 0xffU;
+    want[16] = 0xa5U ^ in->a;
+    want[17] = in->a + in->b == 256 ? 1 : 0;
+}
+
+static uint32_t port_u32(const odin3_sim *sim, uint32_t port) {
+    bits val = get_port(sim, port);
+    return (uint32_t)low_u64(&val);
+}
+
+static const char *const k_sem_names[SEM_IN + SEM_OUT] = {
+    "a",   "b",   "sa",  "sb",   "s",   "avg",  "avg9", "smul", "mmul", "slt", "mlt", "cat",
+    "rep", "sel", "mux", "addp", "neg", "lnot", "land", "ge",   "xnor", "lit", "cmpw"};
+
+/* Drives vector vec (four corners, then random) into sem and checks every output. */
+static void sem_vector(uint32_t vec, odin3_sim *sim, int64_t param) {
+    uint64_t draw = odin3_prng_next(&prng);
+    sem_in in = {(uint32_t)(draw & 0xffU), (uint32_t)((draw >> 8) & 0xffU),
+                 (uint32_t)((draw >> 16) & 0xffU), (uint32_t)((draw >> 24) & 0xffU),
+                 (uint32_t)((draw >> 32) & 1U)};
+    if (vec < 4) { /* corners: zero, all ones (carries), MSBs */
+        in.a = vec < 2 ? 0xffU * vec : 0x80U;
+        in.b = vec == 3 ? 0x80U : in.a;
+    }
+    const uint32_t ins[SEM_IN] = {in.a, in.b, in.sa, in.sb, in.s};
+    for (uint32_t i = 0; i < SEM_IN; i++) {
+        bits val = from_u64((sized){ins[i], i == 4 ? 1 : 8});
+        set_port(sim, i, &val);
+    }
+    odin3_sim_cycle(sim);
+    uint32_t want[SEM_OUT];
+    sem_reference(&in, param, want);
+    for (uint32_t i = 0; i < SEM_OUT; i++) {
+        char what[96];
+        (void)snprintf(what, sizeof what, "sem P=%lld %s a=%u b=%u sa=%u sb=%u s=%u",
+                       (long long)param, k_sem_names[SEM_IN + i], in.a, in.b, in.sa, in.sb, in.s);
+        TEST_ASSERT_EQUAL_HEX32_MESSAGE(want[i], port_u32(sim, i), what);
+    }
+}
+
+static void check_sem(int64_t param) {
+    static const uint32_t k_widths_sem[SEM_IN + SEM_OUT] = {8, 8, 8, 8, 1, 8, 8, 16, 16, 1, 1, 12,
+                                                            8, 1, 8, 8, 8, 1, 1, 1,  8,  8, 1};
+    const cell_ports cp = {k_sem_names, k_widths_sem, SEM_IN, SEM_IN + SEM_OUT};
+    const odin3_value params[1] = {odin3_value_int(param)};
+    odin3_sim *sim = build_cell("sem", params, &cp);
+    for (uint32_t vec = 0; vec < 400; vec++) {
+        sem_vector(vec, sim, param);
+    }
+    odin3_sim_destroy(sim);
+}
+
+static void test_fn_verilog_semantics(void) {
+    read_lib(k_sem_lib);
+    check_sem(5);
+    check_sem(7);
+    check_sem(9); /* a[9] is out of range: reads 0 */
+}
+
+/* Cells the interpreter cannot run get no hook, and the build names them. */
+static const char k_unsim_lib[] = "library unsim_lib\n"
+                                  "cell divc hard\n"
+                                  "  in a 8 ; in b 8 ; out y 8\n"
+                                  "  fn y = a / b\n"
+                                  "end\n"
+                                  "cell rdout hard\n"
+                                  "  in a 1 ; out y 1 ; out z 1\n"
+                                  "  fn y = a\n"
+                                  "  fn z = y\n"
+                                  "end\n"
+                                  "cell ffc gate\n"
+                                  "  in d 1 ; in c 1 clock ; out q 1\n"
+                                  "  seq q <= d @ posedge c\n"
+                                  "end\n"
+                                  "cell bbc blackbox\n"
+                                  "  in a 1 ; out y 1\n"
+                                  "end\n";
+
+/* A library cell that must be rejected, and the reason the build gives. */
+typedef struct rejected {
+    const char *type;
+    const char *needle;
+} rejected;
+
+static void expect_unsimulatable(rejected rej) {
+    const char *type = rej.type;
+    const char *needle = rej.needle;
+    const odin3_celltype_def *def = odin3_celltype_get(design, type_id(type));
+    TEST_ASSERT_NULL_MESSAGE(def->simulate, type);
+    odin3_module *top = new_module();
+    bus port[OPS_IN];
+    const bus *buses[OPS_IN];
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        char name[16];
+        (void)snprintf(name, sizeof name, "p%u", i);
+        uint32_t width = odin3_celltype_port_width(design, type_id(type), NULL, i);
+        if (def->ports[i].dir == ODIN3_DIR_IN) {
+            in_bus(top, name, width, &port[i]);
+        } else {
+            out_bus(top, name, width, &port[i]);
+        }
+        buses[i] = &port[i];
+    }
+    add_cell(top, type_id(type), NULL, buses);
+    char want[64];
+    (void)snprintf(want, sizeof want, "cannot simulate `%s`", type);
+    build_fails(top, want);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, needle), log_text);
+}
+
+static void test_unsimulatable_library_cells(void) {
+    read_lib(k_unsim_lib);
+    expect_unsimulatable((rejected){"divc", "no simulate hook"});
+    expect_unsimulatable((rejected){"rdout", "no simulate hook"});
+    expect_unsimulatable((rejected){"ffc", "no simulate hook"});
+    expect_unsimulatable((rejected){"bbc", "a black box has no semantics"});
+}
+
+/* A width that would take too much scratch is refused at build, naming the cell. */
+static void test_too_wide_is_rejected(void) {
+    read_lib("library wide_lib\n"
+             "cell widec hard\n"
+             "  param N int 1\n"
+             "  in a 1 ; out y 1\n"
+             "  fn y = {N{a}} == 0\n"
+             "end\n");
+    odin3_module *top = new_module();
+    bus port[2];
+    in_bus(top, "a", 1, &port[0]);
+    out_bus(top, "y", 1, &port[1]);
+    const bus *const buses[2] = {&port[0], &port[1]};
+    const odin3_value params[1] = {odin3_value_int((int64_t)1 << 40)};
+    add_cell(top, type_id("widec"), params, buses);
+    build_fails(top, "cannot simulate `widec`");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "too wide"), log_text);
+}
+
+/* Task 3a minor: a black box is simulated when its type has a hook (here $_AND_'s). */
+static void test_blackbox_with_hook_simulates(void) {
+    static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+                                             {"B", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    const odin3_celltype_def *and_def = odin3_celltype_get(design, type_id("$_AND_"));
+    const odin3_celltype_def def = {"bb_and", ODIN3_GRAN_BLACKBOX, 0,   k_ports, 3, NULL, 0, NULL,
+                                    NULL,     and_def->simulate,   NULL};
+    odin3_celltype_id bb = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &bb));
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, odin3_celltype_get(design, bb)->gran);
+    odin3_module *top = new_module();
+    bus port[3];
+    in_bus(top, "a", 1, &port[0]);
+    in_bus(top, "b", 1, &port[1]);
+    out_bus(top, "y", 1, &port[2]);
+    const bus *const buses[3] = {&port[0], &port[1], &port[2]};
+    add_cell(top, bb, NULL, buses);
+    odin3_sim *sim = build_ok(top);
+    for (uint32_t combo = 0; combo < 4; combo++) {
+        bits a_val = from_u64((sized){combo & 1U, 1});
+        bits b_val = from_u64((sized){combo >> 1, 1});
+        set_port(sim, 0, &a_val);
+        set_port(sim, 1, &b_val);
+        odin3_sim_cycle(sim);
+        TEST_ASSERT_EQUAL_UINT32(combo == 3 ? 1 : 0, port_u32(sim, 0));
+    }
+    odin3_sim_destroy(sim);
+}
+
+/* The interpreter allocates nothing per cycle (wide path: 65x65). */
+static void test_fn_hook_does_not_allocate(void) {
+    read_lib(k_vtr_lib);
+    odin3_module *top = new_module();
+    bus port[3];
+    in_bus(top, "a", 65, &port[0]);
+    in_bus(top, "b", 65, &port[1]);
+    out_bus(top, "out", 130, &port[2]);
+    const bus *const buses[3] = {&port[0], &port[1], &port[2]};
+    const odin3_value params[2] = {odin3_value_int(65), odin3_value_int(65)};
+    add_cell(top, type_id("multiply"), params, buses);
+    odin3_sim *sim = build_ok(top);
+    bits a_val = pattern((sized){4, 65});
+    bits b_val = pattern((sized){5, 65});
+    set_port(sim, 0, &a_val);
+    set_port(sim, 1, &b_val);
+    odin3_util_set_alloc_fail_after(0);
+    odin3_sim_cycle(sim);
+    void *probe = odin3_util_malloc(1);
+    TEST_ASSERT_NULL(probe);
+    const big_pair ab = {big_of(&a_val), big_of(&b_val)};
+    big prod = big_mul(&ab);
+    bits want = bits_of(&prod, 130);
+    bits got = get_port(sim, 0);
+    expect_bits(&want, &got, "multiply 65x65 under failing allocation");
+    odin3_sim_destroy(sim);
+}
+
+/* Out of memory at every allocation of a build with a tech-library cell (its sizing included). */
+static void test_build_oom_sweep(void) {
+    read_lib(k_vtr_lib);
+    odin3_module *top = new_module();
+    bus port[3];
+    in_bus(top, "a", 36, &port[0]);
+    in_bus(top, "b", 36, &port[1]);
+    out_bus(top, "out", 72, &port[2]);
+    const bus *const buses[3] = {&port[0], &port[1], &port[2]};
+    add_cell(top, type_id("multiply"), NULL, buses);
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    long fails = 0;
+    for (; st == ODIN3_ERR_NO_MEMORY; fails++) {
+        odin3_sim *sim = NULL;
+        odin3_util_set_alloc_fail_after(fails);
+        st = odin3_sim_build(design, odin3_module_id_of(top), &sim);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st == ODIN3_OK) {
+            odin3_sim_destroy(sim);
+        } else {
+            TEST_ASSERT_NULL(sim);
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_GREATER_THAN_INT32(5, (int32_t)fails);
+}
+
+/* Out of memory at every allocation of reading a library (fn compilation included). */
+static void test_read_oom_sweep(void) {
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (long fails = 0; st == ODIN3_ERR_NO_MEMORY; fails++) {
+        odin3_design *fresh = odin3_design_create();
+        TEST_ASSERT_NOT_NULL(fresh);
+        const odin3_techlib_text src = {"inline.o3lib", odin3_bytes_cstr(k_sem_lib)};
+        odin3_util_set_alloc_fail_after(fails);
+        st = odin3_techlib_read_text(fresh, &src);
+        odin3_util_set_alloc_fail_after(-1);
+        odin3_design_destroy(fresh);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_add);
@@ -840,5 +1430,16 @@ int main(void) {
     RUN_TEST(test_word_cells_have_hooks);
     RUN_TEST(test_div_is_rejected);
     RUN_TEST(test_word_hooks_do_not_allocate);
+    RUN_TEST(test_adder);
+    RUN_TEST(test_multiply_36x36);
+    RUN_TEST(test_multiply_param_widths);
+    RUN_TEST(test_fn_operators);
+    RUN_TEST(test_fn_verilog_semantics);
+    RUN_TEST(test_unsimulatable_library_cells);
+    RUN_TEST(test_too_wide_is_rejected);
+    RUN_TEST(test_blackbox_with_hook_simulates);
+    RUN_TEST(test_fn_hook_does_not_allocate);
+    RUN_TEST(test_build_oom_sweep);
+    RUN_TEST(test_read_oom_sweep);
     return UNITY_END();
 }

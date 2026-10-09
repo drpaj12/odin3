@@ -81,6 +81,8 @@ add_library(odin3_core OBJECT
     src/techlib/width.c
     src/techlib/reader.c
     src/techlib/reader_cell.c
+    src/techlib/fnsim_compile.c
+    src/techlib/fnsim_eval.c
     src/sim/build.c
     src/sim/build_hier.c
     src/sim/build_names.c
