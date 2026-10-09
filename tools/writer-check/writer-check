@@ -13,7 +13,9 @@
 #            written as minterms (a $lut is minterms, a $sop cubes), statements sorted, and a
 #            1-bit vector port's bit named `t[0]` as in the golden (Yosys drops the index of a
 #            1-bit wire); stub .blackbox models are added to both for models neither defines.
-#            A golden Yosys cannot read is excluded from this step ("ref-excluded", listed).
+#            A golden Yosys cannot read, or with a parameterless word-level internal cell such as
+#            `.subckt $pow` (write_blif drops it on both sides), is excluded from this step
+#            ("ref-excluded", listed).
 #   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog -noblackbox; hierarchy -top <first
 #            model>; proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
 #            (* blackbox *) stubs declare the black boxes) and tools/equiv-check
@@ -239,7 +241,15 @@ restore_bit0_names() {
 # JSON gate for golden $1, JSON $2, work prefix $3. The reference runs first: a golden Yosys
 # cannot read (or crashes on) excludes the step.
 json_gate() {
-    local gold=$1 json=$2 w=$3 rc=0 ref=$1 jnorm=$WC_NORM
+    local gold=$1 json=$2 w=$3 rc=0 ref=$1 jnorm=$WC_NORM cell
+    # A word-level Yosys internal cell without its parameters (`.subckt $pow`, an implicit cell
+    # of the golden) is dropped by Yosys write_blif on both sides: nothing to compare.
+    cell=$(grep -m 1 -o -E '^[[:space:]]*\.subckt[[:space:]]+\$[a-z][^[:space:]]*' "$gold" || true)
+    if [ -n "$cell" ]; then
+        echo "Yosys write_blif drops the golden's parameterless internal cell ${cell##* }" >"$w.yr.log"
+        echo "ref-excluded"
+        return
+    fi
     # Yosys read_blif does not know `.clock` (a declaration without semantics): drop it.
     if grep -q '^[[:space:]]*\.clock' "$gold"; then
         grep -v '^[[:space:]]*\.clock' "$gold" >"$w.gold.blif" || true
@@ -361,7 +371,7 @@ worker() {
         eq=${vres#* }
         dt=$(dot_gate "$w.dot" "$w.write.log" "$w")
         if [ "$json" = ref-excluded ]; then
-            jnote=$(grep -m 1 -E 'ERROR|terminate|what\(\)' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
+            jnote=$(grep -m 1 -E 'ERROR|terminate|what\(\)|drops' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
         fi
         if [ "$eq" = excluded ]; then
             note=$(grep '^equiv-check: ' "$w.ec.log" | grep -v '^equiv-check: notice' | head -n 1 | tr '\t' ' ' || true)
@@ -370,7 +380,7 @@ worker() {
     if [ "$eq" = error ] && is_multi_driver "$path" && grep -q 'more than one driver' "$w.ec.log"; then
         eq=excluded
     fi
-    for f in "$w".*.log; do
+    for f in "$w".*.log "$w".jnc; do
         case $json$iv$eq$dt in *FAIL* | *error* | *different* | *NOT* | *timeout* | *memlimit*)
             cp "$f" "$WC_RES/$id.${f#"$w".}" 2>/dev/null || true ;;
         esac
@@ -415,7 +425,7 @@ report() {
         for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
         for (i = 1; i <= n; i++) { m = excl[list[i]]; sub(/^equiv-check: [^ ]*: /, "", m); printf "  %s: %s\n", list[i], m }
         print ""
-        print "EXCLUDED FROM THE JSON STEP (Yosys read_blif cannot read the golden)"
+        print "EXCLUDED FROM THE JSON STEP (Yosys cannot read the golden or drops its cells)"
         n = 0; for (p in jexcl) list[++n] = p
         for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
         for (i = 1; i <= n; i++) printf "  %s: %s\n", list[i], jexcl[list[i]]
