@@ -14,6 +14,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/*
+ * The widest port a reader builds on its input's say-so: a tech-library width (constant or with
+ * the default parameters) or a width a BLIF `.subckt` implies through inferred parameters. One
+ * short line must not force a huge allocation; 2^20 bits is far above every real hard block (the
+ * goldens' widest port is 72 bits) while a maximal BLIF line still costs only about 70 MB of pins.
+ * The IR itself accepts widths up to UINT32_MAX (cells built by passes).
+ */
+enum { ODIN3_READER_MAX_WIDTH = 1 << 20 };
+
 /* Direction as seen from the cell: a $port_in's pin is OUT (it drives the module's net). */
 typedef enum odin3_dir { ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT } odin3_dir;
 

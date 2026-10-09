@@ -788,6 +788,19 @@ static void test_inferred_width_is_capped(void) {
                        "above 1048576 bits");
 }
 
+/* The cap covers constant widths too: a registered type with a huge constant port is refused on
+ * its first undeclared .subckt, before any pin is made. */
+static void test_constant_width_is_capped(void) {
+    static const odin3_port_def ports[] = {
+        {.name = "a", .dir = ODIN3_DIR_IN, .width = 4294967294U},
+        {.name = "Y", .dir = ODIN3_DIR_OUT, .scalar = true, .width = 1}};
+    const odin3_celltype_def def = {
+        .name = "o3test_big", .gran = ODIN3_GRAN_HARD, .ports = ports, .n_ports = 2};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, NULL));
+    expect_parse_error(".model top\n.inputs x\n.outputs y\n.subckt o3test_big a[0]=x Y=y\n.end\n",
+                       4, "gives port 'a' 4294967294 bits here, above the 1048576");
+}
+
 /* Review Focus 1: a declared parametric model in another port order and other scalar flags; its
  * instances get the declared parameters and use the declared spelling of each port. */
 static void test_declared_parametric_model(void) {
@@ -1134,6 +1147,7 @@ static void run_pass1_tests(void) {
     RUN_TEST(test_subckt_of_registered_parametric_type_infers_params);
     RUN_TEST(test_subckt_of_registered_parametric_type_needs_bit_formals);
     RUN_TEST(test_inferred_width_is_capped);
+    RUN_TEST(test_constant_width_is_capped);
     RUN_TEST(test_declared_parametric_model);
     RUN_TEST(test_declared_parametric_model_bounds_formals);
     RUN_TEST(test_declared_parametric_model_contradiction);

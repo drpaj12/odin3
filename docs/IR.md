@@ -167,10 +167,11 @@ registered type the file does not declare gets the values its formals imply — 
 seen as its largest bit index + 1 (`p[k]`), inferred as above (`odin3_celltype_infer_params`;
 types whose port widths are not parameters keep their defaults). Only a parameter that is some
 port's width parameter is inferred: one used only inside width expressions keeps its default, and
-a declaration it contradicts is reported as a port-width mismatch. The BLIF reader caps inferred
-port widths at 2^20 bits. A writer can therefore write a cell only when its parameters are the
-ones a reader would derive from what it writes; it writes a declared type's formals in the
-declaration's port order.
+a declaration it contradicts is reported as a port-width mismatch. Readers cap the widths their
+input alone decides at 2^20 bits (`ODIN3_READER_MAX_WIDTH`): a tech-library port width, and every
+port of an undeclared BLIF `.subckt` (inferred or constant); declared widths are bounded by the
+file. A writer can therefore write a cell only when its parameters are the ones a reader would
+derive from what it writes; it writes a declared type's formals in the declaration's port order.
 
 ## 5. Cell types (op registry)
 

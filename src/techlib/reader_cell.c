@@ -357,7 +357,8 @@ odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_span rest) {
         return st;
     }
     odin3_expr_error err = {0, ""};
-    st = odin3_expr_eval_int_quiet(expr, NULL, &value, &err);
+    const odin3_expr_env names = {NULL, NULL, rd->strtab}; /* names identifiers in messages */
+    st = odin3_expr_eval_int_quiet(expr, &names, &value, &err);
     if (st != ODIN3_OK && st != ODIN3_ERR_NO_MEMORY) {
         return odin3_rd_err(rd, odin3_rd_at(rd, err.col),
                             "the default of '%.*s' must be a constant integer: %s", (int)name.len,
@@ -418,7 +419,7 @@ static odin3_status param_names(odin3_reader *rd) {
  * parameter's name, or a compiled expression.
  */
 static odin3_status port_width(odin3_reader *rd, odin3_span text, odin3_port_def *def) {
-    static const int_rule rule = {"width", UINT32_MAX};
+    static const int_rule rule = {"width", ODIN3_READER_MAX_WIDTH};
     int_value width = {NULL, 0};
     odin3_status st = param_expr(rd, text, &rule, &width);
     if (st != ODIN3_OK) {

@@ -411,9 +411,40 @@ static void test_inferred_expression_width_is_capped(void) {
     load(VTR);
     write_input(".model top\n.inputs x\n.subckt multiply a[1048575]=x b[1048575]=x\n.end\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_blif_read(g_design, IN_PATH));
-    TEST_ASSERT_EQUAL_STRING("odin3_libs_test_in.blif:3: the parameters inferred for 'multiply' "
-                             "give port 'out' 2097152 bits, above 1048576",
-                             g_msg);
+    TEST_ASSERT_EQUAL_STRING(
+        "odin3_libs_test_in.blif:3: 'multiply' gives port 'out' 2097152 bits here, "
+        "above the 1048576 an undeclared .subckt may have",
+        g_msg);
+}
+
+/* Both shipped libraries load into one design; their cells coexist. */
+static void test_both_libraries_together(void) {
+    load(GATES);
+    load(VTR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BIT, def_of("AND2")->gran);
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_HARD, def_of("adder")->gran);
+    TEST_ASSERT_EQUAL_STRING(
+        "generic_gates",
+        odin3_strtab_get(odin3_design_strtab(g_design),
+                         odin3_techlib_cell_get(g_design, type_of("MUX2"))->library));
+}
+
+/* A constant-width library cell through an undeclared .subckt (Odin II's adder has a .model in
+ * every golden; here it has none): sized from the library, written back the same. */
+static void test_constant_width_cell_without_model(void) {
+    load(VTR);
+    static const char text[] = ".model top\n.inputs x y\n.outputs s\n"
+                               ".subckt adder a=x b=y sumout=s\n.end\n";
+    write_input(text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(g_design, IN_PATH), g_msg);
+    odin3_module *top = odin3_module_get(g_design, (odin3_module_id){1});
+    odin3_node_id node = {odin3_module_port_count(top) + 1};
+    TEST_ASSERT_EQUAL_UINT32(type_of("adder").v, odin3_node_type(top, node).v);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_node_port(top, node, 4).count);
+    expect_check_clean();
+    static char out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write(g_design, OUT_PATH), g_msg);
+    TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
 }
 
 static void test_missing_library_is_io_error(void) {
@@ -431,6 +462,8 @@ int main(void) {
     RUN_TEST(test_multiply_contradicting_width);
     RUN_TEST(test_implicit_and_inferred_with_library);
     RUN_TEST(test_inferred_expression_width_is_capped);
+    RUN_TEST(test_both_libraries_together);
+    RUN_TEST(test_constant_width_cell_without_model);
     RUN_TEST(test_missing_library_is_io_error);
     return UNITY_END();
 }

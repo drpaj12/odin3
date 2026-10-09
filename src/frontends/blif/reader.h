@@ -50,7 +50,9 @@
  *   as wide as its largest bit index + 1 (odin3_celltype_infer_params: a parameter that sizes a
  *   port takes that width; types sized otherwise keep their defaults), so `.subckt $pow A[1]=a
  *   Y[7]=y` of a registered parametric `$pow` has A_WIDTH 2 and Y_WIDTH 8; a formal implying a
- *   port wider than 2^20 bits, or inferred parameters giving any port more, is a parse error. A
+ *   port wider than ODIN3_READER_MAX_WIDTH (2^20 bits), or an undeclared instance whose type
+ *   gives any port more (inferred parameters, or a registered constant width), is a parse error:
+ *   one short line never allocates more (a maximal line costs about 70 MB of pins). A
  *   bit beyond the instance's port width is an unknown formal. Known limitation: without a
  *   declaration the type's own scalar flags apply, so an undeclared `.subckt adder cin[0]=x`
  *   (library port `cin` scalar) or `data=x` (vector `data`) is an unknown formal. A model that

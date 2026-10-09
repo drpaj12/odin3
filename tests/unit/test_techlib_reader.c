@@ -605,6 +605,13 @@ static const bad_case k_bad[] = {
      "parameters: sized literal contains x or z bits"},
     {CELL "  param W int 4 / 0\nend\n",
      "t.o3lib:3:17:", "the default of 'W' must be a constant integer: division by zero"},
+    {CELL "  param A int B\nend\n",
+     "t.o3lib:3:15:", "the default of 'A' must be a constant integer: unknown identifier 'B'"},
+    /* port widths are capped at 2^20 bits, constant or with the default parameters */
+    {CELL "  in a 1048577 ; out y 1 ; fn y = a[0]\nend\n",
+     "t.o3lib:3:", "width must be in 1..1048576 (is 1048577"},
+    {CELL "  param W int 2000000 ; in a W * 1 ; out y 1 ; fn y = a[0]\nend\n",
+     "t.o3lib:3:", "width must be in 1..1048576 (is 2000000"},
 };
 
 static void run_bad(size_t idx, const bad_case *bad) {

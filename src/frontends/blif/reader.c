@@ -40,9 +40,10 @@ enum {
     EXTRA_MIN = 3, /* .attr key value */
 };
 
-/* The widest port a .subckt's formals may imply (inferred parameters, IR-7b): one short line
- * must not force a huge allocation. Declared widths are bounded by the file itself. */
-static const uint32_t MAX_INFERRED_WIDTH = UINT32_C(1) << 20;
+/* The widest port an undeclared .subckt may get (ir/celltype.h): its widths come from the type,
+ * through parameters its formals imply, not from the file. Declared widths are bounded by the
+ * file itself. */
+static const uint32_t MAX_INFERRED_WIDTH = ODIN3_READER_MAX_WIDTH;
 
 /* The built-in cell types pass 2 makes (BLIF .names and .latch). */
 typedef enum blif_builtin {
@@ -1069,8 +1070,9 @@ static odin3_status note_seen(blif_reader *rd, const blif_inst *inst, odin3_byte
     return ODIN3_OK;
 }
 
-/* Every port width the inferred rd->params give is at most MAX_INFERRED_WIDTH (a width expression
- * such as A_WIDTH * B_WIDTH can exceed the formals' own bound). */
+/* Every port width of an undeclared instance is at most MAX_INFERRED_WIDTH: a width expression
+ * such as A_WIDTH * B_WIDTH can exceed the formals' own bound, and a registered type's constant
+ * width is not bounded by the file at all. */
 static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
     for (uint32_t port = 0; port < inst->def->n_ports; port++) {
         uint32_t width = 0;
@@ -1084,9 +1086,11 @@ static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
             return rd_fail(rd, st);
         }
         if (width > MAX_INFERRED_WIDTH) {
-            return rd_error(
-                rd, rd->line, "the parameters inferred for '%s' give port '%s' %u bits, above %u",
-                inst->def->name, inst->def->ports[port].name, width, MAX_INFERRED_WIDTH);
+            return rd_error(rd, rd->line,
+                            "'%s' gives port '%s' %u bits here, above the %u an undeclared "
+                            ".subckt may have",
+                            inst->def->name, inst->def->ports[port].name, width,
+                            MAX_INFERRED_WIDTH);
         }
     }
     return ODIN3_OK;
@@ -1106,12 +1110,12 @@ static odin3_status inst_params(blif_reader *rd, const blif_inst *inst, const od
         memcpy(rd->params.data, declared, sizeof *declared * def->n_params);
         return ODIN3_OK;
     }
-    if (inst->decl != NULL || def->n_params == 0) {
+    if (inst->decl != NULL) {
         return rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
                                                        rd->params.data));
     }
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 2; st == ODIN3_OK && i < ln->count; i++) {
+    for (uint32_t i = 2; st == ODIN3_OK && def->n_params > 0 && i < ln->count; i++) {
         st = note_seen(rd, inst, ln->tokens[i]);
     }
     if (st == ODIN3_OK) {
