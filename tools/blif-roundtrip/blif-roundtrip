@@ -9,6 +9,8 @@
 #                    reduced to the last, default latch init spelled out as 3; then
 #   STRUCTURAL gate  tools/netlist-compare original vs output, after adding stub .blackbox
 #                    models to both for .subckt models that have no .model (implicit cells).
+# Order: ascending file size (smallest first, so quick files surface bugs early); with
+# --largest-first, descending. Duplicates always come after their first occurrence.
 # Files with identical content (same sha256) run the structural gate once; the others reuse
 # that result (the writer is deterministic). Exceptions, listed and not failures:
 #   multi-driver originals (decision #15): netlist-compare refuses them, check errors allowed;
@@ -23,13 +25,14 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
-usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
+usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
                       [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed)
   -j N          parallel jobs (default 2; LargeRam needs about 2.5 GB per job)
   -t SECONDS    per-file netlist-compare timeout (default 600)
   -m GB         per-job netlist-compare address-space cap (default 6; 2 jobs = 12 GB)
+  --largest-first  process the biggest files first (default: smallest first)
   --rt PATH     odin3-blif-rt binary (default build/release/odin3-blif-rt in the repo)
   --nc PATH     netlist-compare (default tools/netlist-compare/netlist-compare)
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
@@ -247,7 +250,7 @@ report() {
 }
 
 main() {
-    local jobs=2 root="" fixtures="" out="" keep=0 repo
+    local jobs=2 root="" fixtures="" out="" keep=0 order=n repo
     repo=$(dirname "$(dirname "$HERE")")
     BRT_RT=$repo/build/release/odin3-blif-rt
     BRT_NC=$HERE/../netlist-compare/netlist-compare
@@ -262,6 +265,7 @@ main() {
         --nc) BRT_NC=${2:?}; shift 2 ;;
         --out) out=${2:?}; shift 2 ;;
         --keep) keep=1; shift ;;
+        --largest-first) order=nr; shift ;;
         --fixtures) fixtures=${2:?}; shift 2 ;;
         -h | --help) usage ;;
         -*) usage ;;
@@ -278,9 +282,9 @@ main() {
     export BRT_RT BRT_NC BRT_TIMEOUT BRT_NC_MEM_KB BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
     export -f normalize stubs is_multi_driver now struct_gate worker
 
-    # Work list: biggest first, one representative per content sha256, duplicates after.
+    # Work list: by size (see --largest-first), one representative per content sha256, duplicates after.
     local list=$out/list.tsv
-    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1nr -k2,2 |
+    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
         while IFS=$'\t' read -r _ path; do
             if [ -z "$fixtures" ]; then
                 grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
