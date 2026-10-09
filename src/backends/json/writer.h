@@ -14,6 +14,12 @@
  * one integer bit, net ID + 1 (so >= 2). $sop becomes $lut (at most 6 inputs) or $sop with
  * DEPTH/TABLE; latch INIT goes to an `init` attribute of the Q net (2 and 3 as "x").
  *
+ * Attributes (odin3_attr_foreach order, backends/common/attrs.h) of modules, cells, wires and
+ * nets with a netname entry are written to their "attributes" (values as parameters are); BLIF
+ * `.attr K` extras become attribute K and `.param K` extras cell parameter K, spelled as Yosys
+ * read_blif reads them; `blif_extras` is skipped. A user `src` replaces the provenance `src`;
+ * the latch `init` wins over a user `init`; a repeated key keeps the first.
+ *
  * ODIN3_ERR_INVALID_ARG for a NULL argument; ODIN3_ERR_IO (logged "path: reason") when the file
  * cannot be created or written, in which case a partial file is removed; ODIN3_ERR_NO_MEMORY on
  * out of memory. The design is not modified.

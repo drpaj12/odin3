@@ -335,6 +335,16 @@ static void src_visit(void *user, odin3_prov_id leaf) {
     }
 }
 
+bool jw_claim(jw *out, odin3_wattr_role role, const char *key) {
+    bool fresh = false;
+    odin3_wattr_claim_req req = {role, odin3_bytes_cstr(key)};
+    if (out->status == ODIN3_OK) {
+        odin3_status status = odin3_wattr_claim(&out->seen, req, &fresh);
+        out->status = status != ODIN3_OK ? status : out->status;
+    }
+    return fresh && out->status == ODIN3_OK;
+}
+
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
     if (odin3_prov_get(out->design, prov) == NULL || out->status != ODIN3_OK) {
         return;
@@ -343,7 +353,7 @@ void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
     odin3_status status = odin3_prov_sources(out->design, prov, src_visit, out);
     if (status != ODIN3_OK) {
         out->status = status;
-    } else if (out->have_src) {
+    } else if (out->have_src && jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "src")) {
         jw_key(out, list, "src");
         char pos[INT32_BITS];
         (void)snprintf(pos, sizeof pos, ":%u.%u", (unsigned)out->src.line, (unsigned)out->src.col);
@@ -351,6 +361,66 @@ void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
         jw_name name = {odin3_bytes_cstr(file != NULL ? file : ""), odin3_bytes_cstr(pos)};
         jw_string2(out, &name);
     }
+}
+
+/* --- user attributes (odin3_attr_foreach) ------------------------------------------------- */
+
+/* A string; one made only of 0/1/x/z (or blanks) gets a trailing space (see put_string_value). */
+static void put_text(jw *out, odin3_bytes text) {
+    const char *bytes = text.ptr;
+    size_t plain = 0;
+    while (plain < text.len && strchr("01xz ", bytes[plain]) != NULL && bytes[plain] != '\0') {
+        plain++;
+    }
+    jw_name name = {text, odin3_bytes_cstr(plain == text.len ? " " : "")};
+    jw_string2(out, &name);
+}
+
+/* Digits MSB first, any byte but '0' read as 1 (Yosys read_blif). */
+static void put_binary_text(jw *out, odin3_bytes digits) {
+    const char *bytes = digits.ptr;
+    jw_char(out, '"');
+    for (size_t i = 0; i < digits.len; i++) {
+        jw_char(out, bytes[i] == '0' ? '0' : '1');
+    }
+    jw_char(out, '"');
+}
+
+typedef struct user_attrs {
+    jw *out;
+    jw_list *list;
+    odin3_wattr_role role;
+} user_attrs;
+
+static odin3_status user_attr_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
+    const user_attrs *ua = ctx;
+    jw *out = ua->out;
+    odin3_wattr attr = odin3_wattr_classify(out->strtab, key_str, value);
+    /* attr.key ends where its strtab string ends, so it is NUL-terminated. */
+    const char *key = attr.key.ptr;
+    if (attr.role != ua->role || !jw_claim(out, attr.role, key)) {
+        return out->status;
+    }
+    if (attr.form == ODIN3_WATTR_VALUE) {
+        jw_param(out, ua->list, key, value);
+    } else {
+        jw_key(out, ua->list, key);
+        if (attr.form == ODIN3_WATTR_TEXT) {
+            put_text(out, attr.text);
+        } else {
+            put_binary_text(out, attr.text);
+        }
+    }
+    return out->status;
+}
+
+void jw_user_attrs(jw *out, jw_list *list, odin3_objref obj, odin3_wattr_role role) {
+    if (out->status != ODIN3_OK) {
+        return;
+    }
+    user_attrs ctx = {out, list, role};
+    odin3_status status = odin3_attr_foreach(out->module, obj, user_attr_visit, &ctx);
+    out->status = out->status != ODIN3_OK ? out->status : status;
 }
 
 /* --- unique keys --------------------------------------------------------------------------- */

@@ -4,6 +4,7 @@
 #ifndef ODIN3_BACKENDS_JSON_JW_H
 #define ODIN3_BACKENDS_JSON_JW_H
 
+#include "backends/common/attrs.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -35,7 +36,8 @@ typedef struct jw {
     odin3_status status; /* first failure; later output is skipped */
     odin3_srcloc src;    /* scratch: first source location found by jw_src */
     bool have_src;
-    odin3_strbuf key; /* scratch: the key being built by jw_make_key */
+    odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
+    odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */
@@ -91,8 +93,15 @@ void jw_pins(jw *out, odin3_pinslice pins);
 void jw_param_int(jw *out, jw_list *list, const char *key, int64_t num);
 /* `"key": <value>` for a cell parameter value as the next member. */
 void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val);
-/* Adds `"src": "file:line.col"` for prov's first source location, if it has one. */
+/* Adds `"src": "file:line.col"` for prov's first source location, if it has one and no "src"
+ * was written to this object yet (a user src attribute wins). */
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov);
+/* True (and recorded) when key is new in the current object; false after out of memory. */
+bool jw_claim(jw *out, odin3_wattr_role role, const char *key);
+/* The attributes of obj with the given role as members of list (odin3_attr_foreach order),
+ * skipping keys already written to this object. Call odin3_wattr_seen_clear(&out->seen) when a
+ * new attributes or parameters object starts. */
+void jw_user_attrs(jw *out, jw_list *list, odin3_objref obj, odin3_wattr_role role);
 
 /* --- cells.c ------------------------------------------------------------------------------------
  */

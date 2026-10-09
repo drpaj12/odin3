@@ -68,8 +68,13 @@ void jw_cell_begin(jw *out, jw_list *cells, const jw_cell_ref *ref, jw_cell *cel
 
 void jw_cell_attrs(jw *out, jw_cell *cell, odin3_node_id node) {
     jw_list attrs;
+    odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
+    odin3_wattr_seen_clear(&out->seen);
+    jw_user_attrs(out, &cell->params, obj, ODIN3_WATTR_PARAMETER);
     jw_close(out, &cell->params);
     open_member(out, cell, "attributes", &attrs);
+    odin3_wattr_seen_clear(&out->seen);
+    jw_user_attrs(out, &attrs, obj, ODIN3_WATTR_ATTRIBUTE);
     jw_src(out, &attrs, odin3_node_prov(out->module, node));
     jw_close(out, &attrs);
     open_member(out, cell, "port_directions", &cell->dirs);

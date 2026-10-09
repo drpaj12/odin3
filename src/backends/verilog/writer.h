@@ -24,8 +24,16 @@ typedef struct odin3_verilog_opts {
 /*
  * Writes design as structural Verilog-2005 to path. opts NULL means the defaults (SHORT names).
  * Nothing in the design changes. Output depends only on the IR and opts (deterministic). The text
- * goes to `<path>.tmp`, which is renamed over path on success; on any failure (refusal, out of
- * memory, I/O) only the temporary file is removed and an existing file at path is left as it was.
+ * goes to a private temporary beside path (util/file.h), which is renamed over path on success;
+ * on any failure (refusal, out of memory, I/O) only the temporary file is removed and an existing
+ * file at path is left as it was.
+ *
+ * Attributes (odin3_attr_foreach order, backends/common/attrs.h): `(* name = value, … *)` before
+ * a module, a port or wire or net declaration, an instance and a storage cell's `always`; before
+ * a cell written as an `assign` they are a `// (* … *)` comment (Icarus rejects attributes on
+ * continuous assigns). BLIF `.attr`/`.param` extras are written as attributes under their own
+ * names; `blif_extras` is skipped; a repeated name keeps the first; an unwritable name is skipped
+ * with a warning.
  *
  * One `module` per IR module in creation order, with an ANSI header: ports in port order, as
  * `input`/`output`/`inout`, `signed` when the port wire is, `[msb:lsb]` from the port wire unless

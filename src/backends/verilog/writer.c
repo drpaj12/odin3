@@ -1,6 +1,7 @@
 /* writer.c — structural Verilog writer: modules, cells, aliases and black-box stubs. */
 #include "backends/verilog/writer.h"
 
+#include "backends/common/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -165,6 +166,7 @@ typedef struct verilog_writer {
     odin3_u64map *builtin;   /* cell type ID -> BUILTINS index */
     odin3_u64map *prov_leaf; /* prov ID -> the record that names it (IR §6), 0 for none */
     odin3_u64map *stubbed;   /* cell type ID -> 1 once its stub is written */
+    odin3_wattr_seen seen;   /* attribute names written in the current (* … *) */
     vw_module mod;
 } verilog_writer;
 
@@ -1318,6 +1320,79 @@ static void put_value(verilog_writer *wr, const odin3_value *val) {
     }
 }
 
+/* --- attributes ---------------------------------------------------------------------------- */
+
+static void put_attr_value(verilog_writer *wr, const odin3_wattr *attr) {
+    const char *digits = attr->text.ptr;
+    if (attr->form == ODIN3_WATTR_VALUE) {
+        put_value(wr, attr->value);
+    } else if (attr->form == ODIN3_WATTR_TEXT || attr->text.len == 0) {
+        put_string(wr, attr->text, 0);
+    } else {
+        vw_u32(wr, (uint32_t)attr->text.len);
+        vw_puts(wr, "'b");
+        for (size_t i = 0; i < attr->text.len; i++) {
+            vw_char(wr, digits[i] == '0' ? '0' : '1');
+        }
+    }
+}
+
+/* What surrounds `(* … *)`: lead before it, after behind it. */
+typedef struct vw_attr_frame {
+    const char *lead;
+    const char *after;
+} vw_attr_frame;
+
+typedef struct vw_attrs {
+    verilog_writer *wr;
+    const char *lead; /* written before `(* ` */
+    bool any;
+} vw_attrs;
+
+/* One `name = value`; BLIF `.param` extras are attributes too (Verilog stubs declare only the
+ * type's parameters); a later attribute of the same name, or an unwritable name, is skipped. */
+static odin3_status attr_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
+    vw_attrs *va = ctx;
+    verilog_writer *wr = va->wr;
+    odin3_wattr attr = odin3_wattr_classify(wr->tab, key_str, value);
+    bool fresh = false;
+    if (attr.role == ODIN3_WATTR_SKIP || wr->st != ODIN3_OK) {
+        return wr->st;
+    }
+    if (odin3_verilog_ident_kind(attr.key) == ODIN3_VERILOG_UNWRITABLE) {
+        odin3_log(ODIN3_LOG_WARN, "%s: module '%s': attribute '%.*s' cannot be written; skipped",
+                  wr->path, wr->mod.name != NULL ? wr->mod.name : "", (int)attr.key.len,
+                  (const char *)attr.key.ptr);
+        return ODIN3_OK;
+    }
+    odin3_wattr_claim_req req = {ODIN3_WATTR_ATTRIBUTE, attr.key};
+    odin3_status st = odin3_wattr_claim(&wr->seen, req, &fresh);
+    if (st != ODIN3_OK || !fresh) {
+        return st != ODIN3_OK ? vw_fail(wr, st) : ODIN3_OK;
+    }
+    vw_puts(wr, va->any ? ", " : va->lead);
+    vw_puts(wr, va->any ? "" : "(* ");
+    va->any = true;
+    vw_ident(wr, attr.key, "attribute name");
+    vw_puts(wr, " = ");
+    put_attr_value(wr, &attr);
+    return wr->st;
+}
+
+/* `lead(* a = v, … *)after` when obj has attributes (odin3_attr_foreach order), else nothing. */
+static void put_attrs(verilog_writer *wr, odin3_objref obj, vw_attr_frame frame) {
+    vw_attrs ctx = {wr, frame.lead, false};
+    odin3_wattr_seen_clear(&wr->seen);
+    odin3_status st = odin3_attr_foreach(wr->mod.module, obj, attr_visit, &ctx);
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+    }
+    if (ctx.any) {
+        vw_puts(wr, " *)");
+        vw_puts(wr, frame.after);
+    }
+}
+
 /* --- instances ----------------------------------------------------------------------------- */
 
 static bool port_open(const verilog_writer *wr, odin3_pinslice pins) {
@@ -1374,11 +1449,26 @@ static void write_instance(verilog_writer *wr, odin3_node_id node) {
     vw_puts(wr, "  );\n");
 }
 
+/* A constant cell written as a literal wherever its net is read (no statement of its own). */
+static bool const_omitted(const verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    return bi->form == FORM_CONST &&
+           net_ref(wr, odin3_pin_net(wr->mod.module, out_port(wr, node).first)).kind == REF_CONST;
+}
+
+/* The cell's attributes on a line of their own (a comment before an `assign`), then its
+ * statement(s). */
 static void write_cell(verilog_writer *wr, odin3_node_id node) {
     const vw_builtin *bi = node_builtin(wr, node);
+    odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
     if (bi == NULL) {
+        put_attrs(wr, obj, (vw_attr_frame){"  ", "\n"});
         write_instance(wr, node);
     } else if (has_output(wr, node)) {
+        if (!const_omitted(wr, node, bi)) {
+            /* Icarus rejects attributes on a continuous assign: there they are a comment. */
+            bool always = bi->form == FORM_LATCH || bi->form == FORM_FF;
+            put_attrs(wr, obj, (vw_attr_frame){always ? "  " : "  // ", "\n"});
+        }
         CELL_WRITERS[bi->form](wr, node, bi);
     }
 }
@@ -1414,6 +1504,8 @@ static void write_header(verilog_writer *wr) {
     const odin3_module *module = wr->mod.module;
     uint32_t ports = odin3_module_port_count(module);
     begin_unit(wr);
+    put_attrs(wr, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(module).v},
+              (vw_attr_frame){"", "\n"});
     vw_puts(wr, "module ");
     vw_ident(wr, odin3_bytes_cstr(wr->mod.name), "module name cannot be written in Verilog:");
     vw_puts(wr, ports == 0 ? ";" : " (");
@@ -1421,6 +1513,7 @@ static void write_header(verilog_writer *wr) {
     for (uint32_t i = 0; i < ports; i++) {
         odin3_wire_id wire = odin3_module_port_wire(module, i);
         vw_puts(wr, "  ");
+        put_attrs(wr, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, (vw_attr_frame){"", " "});
         vw_puts(wr, dir_word(wr->mod.def->ports[i].dir));
         put_wire_range(wr, wire);
         vw_name(wr, OBJ_WIRE, wire.v);
@@ -1436,7 +1529,9 @@ static void declare_wires_and_nets(verilog_writer *wr) {
     for (uint32_t i = 1; i < odin3_module_wire_end(module); i++) {
         odin3_wire_id wire = {i};
         if (odin3_wire_live(module, wire) && wire_port(wr, wire) == 0) {
-            vw_puts(wr, "  wire ");
+            vw_puts(wr, "  ");
+            put_attrs(wr, (odin3_objref){ODIN3_OBJ_WIRE, i}, (vw_attr_frame){"", " "});
+            vw_puts(wr, "wire ");
             put_wire_range(wr, wire);
             vw_name(wr, OBJ_WIRE, i);
             vw_char(wr, ';');
@@ -1446,7 +1541,9 @@ static void declare_wires_and_nets(verilog_writer *wr) {
     for (uint32_t i = 1; i < odin3_module_net_end(module); i++) {
         odin3_net_id net = {i};
         if (odin3_net_live(module, net) && net_ref(wr, net).kind == REF_OWN) {
-            vw_puts(wr, net_ref(wr, net).reg ? "  reg " : "  wire ");
+            vw_puts(wr, "  ");
+            put_attrs(wr, (odin3_objref){ODIN3_OBJ_NET, i}, (vw_attr_frame){"", " "});
+            vw_puts(wr, net_ref(wr, net).reg ? "reg " : "wire ");
             vw_name(wr, OBJ_NET, i);
             vw_char(wr, ';');
             vw_eol(wr, odin3_net_prov(module, net));
@@ -1663,6 +1760,7 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
                            .escaped_end = SIZE_MAX};
     odin3_strbuf_init(&wr->out);
     odin3_strbuf_init(&wr->cand);
+    odin3_wattr_seen_init(&wr->seen);
     wr->builtin = odin3_u64map_create(0);
     wr->prov_leaf = odin3_u64map_create(0);
     wr->stubbed = odin3_u64map_create(0);
@@ -1710,6 +1808,7 @@ static void wr_free(verilog_writer *wr) {
     end_module(wr);
     odin3_strbuf_free(&wr->out);
     odin3_strbuf_free(&wr->cand);
+    odin3_wattr_seen_free(&wr->seen);
     odin3_u64map_destroy(wr->builtin);
     odin3_u64map_destroy(wr->prov_leaf);
     odin3_u64map_destroy(wr->stubbed);

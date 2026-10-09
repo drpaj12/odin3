@@ -338,6 +338,46 @@ static void test_src_attribute_and_names(void) {
     (void)remove("t5.json");
 }
 
+static void set_attr(odin3_module *mod, odin3_objref obj, const char *key, odin3_value val) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(mod, obj, intern(key), &val));
+}
+
+static odin3_value str_value(const char *text) {
+    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, 0, 0};
+    val.str = intern(text);
+    return val;
+}
+
+/* Every attribute is written (odin3_attr_foreach order) on cells, netnames and modules; BLIF
+ * reader keys are mapped back to Yosys names; a user src replaces the provenance one. */
+static void test_user_attributes(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_a = add_port(mod, (port_args){"a", ODIN3_DIR_IN, 1});
+    odin3_net_id net_y = add_port(mod, (port_args){"y", ODIN3_DIR_OUT, 1});
+    odin3_net_id net_n = new_net(mod, "n");
+    add_named_gate(mod, "g", (odin3_net_id[3]){net_a, net_n, net_y});
+    odin3_objref cell = {ODIN3_OBJ_NODE, odin3_module_find_node(mod, intern("g")).v};
+    set_attr(mod, cell, "keep", odin3_value_int(1));
+    set_attr(mod, cell, "blif.attr:src", str_value("\"top.v:7.3-7.9\""));
+    set_attr(mod, cell, "blif.attr:mask", str_value("0110"));
+    set_attr(mod, cell, "blif.param:WIDTH", str_value("\"0101\""));
+    set_attr(mod, cell, "blif_extras", str_value("blif.attr:src blif.attr:mask blif.param:WIDTH"));
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_NET, net_n.v}, "note", str_value("hi"));
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(mod).v}, "top",
+             odin3_value_int(1));
+    char *text = write_json("t13.json");
+    assert_has(text, "\"parameters\": {\n            \"WIDTH\": \"0101 \"\n          }");
+    assert_has(text, "\"keep\": \"00000000000000000000000000000001\",\n"
+                     "            \"src\": \"top.v:7.3-7.9\",\n"
+                     "            \"mask\": \"0110\"\n");
+    assert_lacks(text, "blif_extras");
+    assert_lacks(text, "\"src\": \"t.v:4.1\""); /* the user's src wins */
+    assert_has(text, "\"note\": \"hi\"");
+    assert_has(text, "\"attributes\": {\n        \"top\": \"00000000000000000000000000000001\"\n");
+    odin3_util_free(text);
+    (void)remove("t13.json");
+}
+
 static void test_instance_and_parameters(void) {
     odin3_module *sub = new_module("sub");
     (void)add_port(sub, (port_args){"i", ODIN3_DIR_IN, 2});
@@ -580,6 +620,10 @@ static void test_yosys_reads_output(void) {
     add_const(mod, "$_CONST0_", zero);
     add_gate(mod, "$_AND_", (odin3_net_id[3]){net_a, one, net_y});
     add_latch(mod, (odin3_net_id[3]){net_a, net_b, new_net(mod, "q")}, 1);
+    odin3_objref top = {ODIN3_OBJ_MODULE, odin3_module_id_of(mod).v};
+    set_attr(mod, top, "keep", odin3_value_int(1));
+    set_attr(mod, top, "blif.attr:note", str_value("\"0101\""));
+    set_attr(mod, (odin3_objref){ODIN3_OBJ_NET, net_b.v}, "blif.attr:mask", str_value("10"));
     odin3_util_free(write_json("t10.json"));
     FILE *script = fopen("t10.ys", "wb");
     TEST_ASSERT_NOT_NULL(script);
@@ -688,6 +732,7 @@ int main(void) {
     RUN_TEST(test_latch_init);
     RUN_TEST(test_latch_init_unnamed_q);
     RUN_TEST(test_src_attribute_and_names);
+    RUN_TEST(test_user_attributes);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_wire_range_attributes);

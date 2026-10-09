@@ -523,6 +523,67 @@ static void test_escaped_names_yosys_round_trip(void) {
     expect_in(back, "\\top/u1.v ");
 }
 
+/* --- attributes ---------------------------------------------------------------------------- */
+
+static void set_attr(odin3_objref obj, const char *key, odin3_value val) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, obj, intern(key), &val));
+}
+
+static odin3_value str_value(const char *str) {
+    odin3_value val = {ODIN3_VAL_STRING, 0, NULL, 0, 0, 0};
+    val.str = intern(str);
+    return val;
+}
+
+/* Every attribute is written as (* … *) on modules, ports, wires, nets and cells, in
+ * odin3_attr_foreach order; BLIF reader keys are mapped back; an unwritable key is skipped. */
+static void build_attrs(void) {
+    new_module("attrs");
+    odin3_wire_id wire_a = in_vec("a", 1);
+    odin3_net_id net_y = out_bit("y");
+    odin3_net_id net_n = new_net("n");
+    odin3_node_id cell = gate2("$_AND_", bit_of(wire_a, 0), net_n, net_y);
+    set_attr((odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(module).v}, "keep",
+             odin3_value_int(1));
+    set_attr((odin3_objref){ODIN3_OBJ_WIRE, wire_a.v}, "blif.attr:loc", str_value("\"pin 3\""));
+    set_attr((odin3_objref){ODIN3_OBJ_NET, net_n.v}, "note", str_value("hi"));
+    odin3_objref obj = {ODIN3_OBJ_NODE, cell.v};
+    set_attr(obj, "keep", odin3_value_int(1));
+    set_attr(obj, "blif.attr:src", str_value("\"top.v:7\""));
+    set_attr(obj, "blif.attr:mask", str_value("0110"));
+    set_attr(obj, "blif.param:WIDTH", str_value("\"0101\""));
+    set_attr(obj, "blif_extras", str_value("blif.attr:src blif.attr:mask blif.param:WIDTH"));
+    set_attr(obj, "bad key", odin3_value_int(2));
+    odin3_net_id clk = in_bit("clk");
+    odin3_node_id flop = storage((storage_args){"$_DFF_P_", clk, net_n, new_net("q"), 2});
+    set_attr((odin3_objref){ODIN3_OBJ_NODE, flop.v}, "keep", odin3_value_int(1));
+}
+
+static void test_attributes(void) {
+    build_attrs();
+    (void)write_ok();
+    expect_has("(* keep = 1 *)\nmodule attrs (\n");
+    expect_has("  (* loc = \"pin 3\" *) input [0:0] a,\n");
+    expect_has("  (* note = \"hi\" *) wire n;\n");
+    /* Icarus rejects attributes on a continuous assign: there they are a comment. */
+    expect_has("  // (* keep = 1, src = \"top.v:7\", mask = 4'b0110, WIDTH = \"0101\" *)\n"
+               "  assign y = a & n;\n");
+    expect_has("  (* keep = 1 *)\n  always @(posedge clk) q <= n;\n");
+    expect_not("blif_extras");
+    expect_not("bad key");
+}
+
+static void test_attributes_yosys_reads(void) {
+    build_attrs();
+    (void)write_ok();
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog %s; write_verilog %s", out_path, out2_path);
+    yosys_runs(script);
+    const char *back = slurp(out2_path, aux);
+    expect_in(back, "(* note = \"hi\" *)");
+    expect_in(back, "(* loc = \"pin 3\" *)");
+}
+
 /* --- bit-level gates ----------------------------------------------------------------------- */
 
 static void test_gates(void) {
@@ -1594,6 +1655,8 @@ int main(void) {
     RUN_TEST(test_ident_append);
     RUN_TEST(test_escaped_names);
     RUN_TEST(test_escaped_names_yosys_round_trip);
+    RUN_TEST(test_attributes);
+    RUN_TEST(test_attributes_yosys_reads);
     RUN_TEST(test_gates);
     RUN_TEST(test_sop_text);
     RUN_TEST(test_sop_simulates);

@@ -178,7 +178,7 @@ static void write_init(jw *out, jw_list *attrs, const netname_bits *bits) {
         odin3_net_id net = bit_net(out, bits, i);
         any = any || (odin3_net_valid(net) && out->init[net.v] != 0);
     }
-    if (!any) {
+    if (!any || !jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "init")) {
         return;
     }
     jw_key(out, attrs, "init");
@@ -191,12 +191,17 @@ static void write_init(jw *out, jw_list *attrs, const netname_bits *bits) {
     jw_char(out, '"');
 }
 
-static void write_attrs(jw *out, jw_list *entry, const netname_bits *bits, odin3_prov_id prov) {
+/* init (from the latches), the object's own attributes, then src (unless the object has one). */
+static void write_attrs(jw *out, jw_list *entry, const netname_bits *bits, odin3_objref obj) {
     jw_list attrs = {false, ATTR_DEPTH};
     jw_key(out, entry, "attributes");
     jw_open(out, &attrs);
+    odin3_wattr_seen_clear(&out->seen);
     write_init(out, &attrs, bits);
-    jw_src(out, &attrs, prov);
+    jw_user_attrs(out, &attrs, obj, ODIN3_WATTR_ATTRIBUTE);
+    jw_src(out, &attrs,
+           obj.kind == ODIN3_OBJ_WIRE ? odin3_wire_prov(out->module, (odin3_wire_id){obj.id})
+                                      : odin3_net_prov(out->module, (odin3_net_id){obj.id}));
     jw_close(out, &attrs);
 }
 
@@ -213,7 +218,7 @@ static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     jw_key(out, &fields, "bits");
     write_wire_bits(out, wire);
     write_wire_shape(out, &fields, wire);
-    write_attrs(out, &fields, &bits, odin3_wire_prov(out->module, wire));
+    write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_WIRE, wire.v});
     jw_close(out, &fields);
 }
 
@@ -247,7 +252,7 @@ static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     jw_raw(out, "[ ");
     jw_bit(out, jw_net_code(out, entry->net));
     jw_raw(out, " ]");
-    write_attrs(out, &fields, &bits, odin3_net_prov(out->module, entry->net));
+    write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_NET, entry->net.v});
     jw_close(out, &fields);
 }
 
@@ -320,6 +325,9 @@ static void write_module_body(jw *out, jw_list *entry) {
     jw_list attrs = {false, ENTRY_DEPTH};
     jw_key(out, entry, "attributes");
     jw_open(out, &attrs);
+    odin3_wattr_seen_clear(&out->seen);
+    jw_user_attrs(out, &attrs, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(out->module).v},
+                  ODIN3_WATTR_ATTRIBUTE);
     jw_close(out, &attrs);
     write_ports(out, entry);
     jw_key(out, entry, "cells");
@@ -397,7 +405,9 @@ odin3_status odin3_json_write(const odin3_design *design, const char *path) {
                 .strtab = odin3_design_strtab(design),
                 .status = ODIN3_OK};
     odin3_strbuf_init(&state.key);
+    odin3_wattr_seen_init(&state.seen);
     odin3_status status = save_design(&state, path);
+    odin3_wattr_seen_free(&state.seen);
     odin3_strbuf_free(&state.key);
     return status;
 }
