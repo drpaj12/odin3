@@ -33,7 +33,8 @@ the module passed alongside (IR-5); strings are `const char *` valid until the d
 NULL" rule is enforced here, not trusted); the cffi cdef block stays attribute- and
 preprocessor-free. Groups:
 
-- design: create, destroy, run pass, top module, module count/at, find module by name;
+- design: create, destroy, run pass, top module (get/set; PHASE1 #18), module count/at, find module
+  by name;
 - module: name, node/net/wire/port counts and ID ends (iteration in ID order with liveness),
   find node/net/wire by name;
 - node: type name, granularity, name, parameter count / name / value (int, bits as a string of
