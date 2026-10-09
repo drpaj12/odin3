@@ -194,7 +194,7 @@ if(BUILD_TESTING)
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_dot_writer)
-    odin3_add_unit_test(test_json_writer
+    odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
 
     add_executable(test_api tests/unit/test_api.c)
