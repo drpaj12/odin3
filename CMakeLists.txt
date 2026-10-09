@@ -140,6 +140,11 @@ add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
 
+# --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
+add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
+target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-sim-vectors PRIVATE odin3_core odin3_flags)
+
 # --- Benchmark (built by default, not a CTest) --------------------------------------
 add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -246,10 +251,10 @@ if(BUILD_TESTING)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
-    set(_tools_env "")
+    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
-        set(_tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
+        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
     endif()
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
