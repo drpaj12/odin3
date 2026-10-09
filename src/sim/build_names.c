@@ -164,7 +164,9 @@ static void slot_name(const odin3_sim_builder *bld, uint32_t slot, name_buf *nb,
     loc_prefix(bld, odin3_net_prov(frame_module(bld, frame), net), loc);
 }
 
-void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
+/* "cannot simulate `<type>` (node `<name>`): <why>" for node of frame. */
+static void err_cell(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                     const char *why) {
     const odin3_module *mod = frame_module(bld, frame);
     const odin3_celltype_def *def = odin3_celltype_get(bld->design, odin3_node_type(mod, node));
     char loc[LOC_MAX];
@@ -172,9 +174,19 @@ void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odi
     loc_prefix(bld, odin3_node_prov(mod, node), (loc_buf){loc, sizeof loc});
     node_name(bld, frame, node, &nb);
     odin3_log(ODIN3_LOG_ERROR, "%scannot simulate `%s` (node `%s`): %s", loc, def->name,
-              name_str(&nb),
-              def->gran == ODIN3_GRAN_BLACKBOX ? "a black box has no semantics"
-                                               : "the cell type has no simulate hook");
+              name_str(&nb), why);
+}
+
+void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
+    const odin3_module *mod = frame_module(bld, frame);
+    const odin3_celltype_def *def = odin3_celltype_get(bld->design, odin3_node_type(mod, node));
+    err_cell(bld, frame, node,
+             def->gran == ODIN3_GRAN_BLACKBOX ? "a black box has no semantics"
+                                              : "the cell type has no simulate hook");
+}
+
+void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
+    err_cell(bld, frame, node, "the cell is too wide to simulate");
 }
 
 void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cell, uint32_t slot) {

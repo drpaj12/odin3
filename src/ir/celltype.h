@@ -154,11 +154,15 @@ struct odin3_celltype_def {
     /* 1E: evaluates one cell (contract in sim/cell.h); NULL when the type cannot be simulated. */
     void (*simulate)(const odin3_sim_cell *cell);
     /*
-     * 1E, may be NULL (0 bytes): scratch bytes simulate needs for a cell with these parameters.
-     * The simulator sizes its one shared scratch buffer (odin3_sim_cell.scratch) to the maximum
-     * over all its cells.
+     * 1E, may be NULL (no scratch): *bytes gets the scratch bytes simulate needs for one cell. The
+     * builder calls it once per flat cell with a sizing view (sim/cell.h): ports carry their
+     * widths but no indices, params and type_data are set, values, state and scratch are NULL.
+     * It runs at build time, so unlike simulate it may allocate (and must free what it does). It
+     * returns ODIN3_ERR_INVALID_ARG (not logged; the builder reports the cell) when the cell is too
+     * large to simulate, ODIN3_ERR_NO_MEMORY on out of memory. The simulator sizes its one shared
+     * scratch buffer (odin3_sim_cell.scratch) to the maximum over all its cells.
      */
-    uint32_t (*sim_scratch_bytes)(const odin3_value *params);
+    odin3_status (*sim_scratch_bytes)(const odin3_sim_cell *cell, uint32_t *bytes);
 };
 
 /*

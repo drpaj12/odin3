@@ -24,8 +24,9 @@ typedef struct odin3_sim odin3_sim; /* opaque; fields in sim/sim_internal.h */
  * (odin3_sim_destroy), NULL on failure.
  *
  * ODIN3_ERR_INVALID_ARG (logged, located from provenance where it has a source location) for: an
- * invalid top; a recursive module hierarchy; a black box or a cell type without a simulate hook
- * ("cannot simulate `<type>`"); a clock pin of an edge-triggered cell whose net is not a primary
+ * invalid top; a recursive module hierarchy; a cell type without a simulate hook, such as a black
+ * box without semantics, or a cell whose type finds it too wide to simulate ("cannot simulate
+ * `<type>`"); a clock pin of an edge-triggered cell whose net is not a primary
  * input of top, or that is not connected ("has no clock connected"); an inout port of top; a net
  * with more than one driver that is neither an inout pin nor an output of a tristate type (a
  * primary input counts as a driver), naming the net; a combinational loop (naming one net on it).

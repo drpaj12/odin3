@@ -10,6 +10,7 @@
 
 #include "ir/ir_internal.h"
 #include "sim/cell.h"
+#include "sim/word.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -94,6 +95,41 @@ extern const odin3_port_def odin3_cells_unary_ports[2];
 extern const odin3_param_def odin3_cells_unary_params[3];
 odin3_status odin3_cells_unary_verify(const odin3_value *params);
 
+/*
+ * Simulate support for the binary and unary word cells above (sim/cell.h, sim/word.h). Operands
+ * are integers, each read under its own A_SIGNED / B_SIGNED parameter (Yosys's constant
+ * evaluator): an arithmetic or bitwise result is computed with both operands extended to Y_WIDTH,
+ * which is the exact result modulo 2^Y_WIDTH; a comparison compares the exact integers (both
+ * extended to max(A_WIDTH, B_WIDTH) + 1 bits) and writes 0 or 1 zero-extended to Y_WIDTH. Every
+ * hook keeps its words in the cell's scratch: three words (A, B, result) of the computing width.
+ */
+enum { ODIN3_CELLS_P_A_SIGNED, ODIN3_CELLS_P_B_SIGNED };
+
+/*
+ * Loads A (and B for a binary cell) into the first two scratch words at width bits, extended by
+ * their signedness parameters; dst is the third word.
+ */
+odin3_word_bin odin3_cells_word_load(const odin3_sim_cell *cell, uint32_t width);
+
+/* Y (the last port) = word (width bits), zero-extended or truncated to Y's width. */
+void odin3_cells_word_store(const odin3_sim_cell *cell, const uint64_t *word, uint32_t width);
+
+/* Y (the last port) = flag, zero-extended. */
+void odin3_cells_flag_store(const odin3_sim_cell *cell, bool flag);
+
+/* Y = fn(A, B) (or fn(A) for a unary cell), computed at Y_WIDTH. */
+void odin3_cells_word_sim(const odin3_sim_cell *cell, odin3_word_fn fn);
+
+/*
+ * The comparison of A and B as exact integers: -1, 0 or 1. Computed at max(A_WIDTH, B_WIDTH) + 1
+ * bits, which odin3_cells_cmp_scratch sized.
+ */
+int odin3_cells_word_compare(const odin3_sim_cell *cell);
+
+/* sim_scratch_bytes hooks: three words of Y_WIDTH, or of max(A_WIDTH, B_WIDTH) + 1 bits. */
+odin3_status odin3_cells_y_scratch(const odin3_sim_cell *cell, uint32_t *bytes);
+odin3_status odin3_cells_cmp_scratch(const odin3_sim_cell *cell, uint32_t *bytes);
+
 /* Shared by the bit-level latches/flip-flops: INT parameter INIT (0..3, default 3). */
 extern const odin3_param_def odin3_cells_init_params[1];
 odin3_status odin3_cells_init_verify(const odin3_value *params);
@@ -145,7 +181,7 @@ extern const odin3_celltype_def odin3_cell_dlatch_n;
 extern const odin3_celltype_def odin3_cell_ff;
 extern const odin3_celltype_def odin3_cell_sop;
 
-/* Word-level cells sharing the binary / unary tables above. */
+/* Word-level cells sharing the binary / unary tables above; the _SIM forms have hooks. */
 #define ODIN3_BINARY(var, label)                                                                   \
     const odin3_celltype_def var = {label, ODIN3_GRAN_WORD,                                        \
                                     0,     odin3_cells_binary_ports,                               \
@@ -160,5 +196,20 @@ extern const odin3_celltype_def odin3_cell_sop;
                                     3,     odin3_cells_unary_verify,                               \
                                     NULL,  NULL,                                                   \
                                     NULL}
+
+#define ODIN3_BINARY_SIM(var, label, sim, scratch)                                                 \
+    const odin3_celltype_def var = {label,  ODIN3_GRAN_WORD,                                       \
+                                    0,      odin3_cells_binary_ports,                              \
+                                    3,      odin3_cells_binary_params,                             \
+                                    5,      odin3_cells_binary_verify,                             \
+                                    NULL,   sim,                                                   \
+                                    scratch}
+#define ODIN3_UNARY_SIM(var, label, sim, scratch)                                                  \
+    const odin3_celltype_def var = {label,  ODIN3_GRAN_WORD,                                       \
+                                    0,      odin3_cells_unary_ports,                               \
+                                    2,      odin3_cells_unary_params,                              \
+                                    3,      odin3_cells_unary_verify,                              \
+                                    NULL,   sim,                                                   \
+                                    scratch}
 
 #endif

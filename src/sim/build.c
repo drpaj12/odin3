@@ -152,6 +152,7 @@ static odin3_status add_port_pins(odin3_sim_builder *bld, const odin3_sim_flat *
         odin3_vec_reserve(&bld->idx, bld->idx.len + pins.count) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    span->idx = NULL; /* pointed at sim->idx when the build is finalized */
     span->width = pins.count;
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(mod, (odin3_pin_id){pins.first.v + k});
@@ -180,10 +181,32 @@ static odin3_status add_pins(odin3_sim_builder *bld, const odin3_sim_flat *flat,
     return ODIN3_OK;
 }
 
+/*
+ * Grows the shared scratch to what flat's type asks for (its sizing view: the port widths, the
+ * parameters and the type data). A cell too large to simulate is reported.
+ */
+static odin3_status size_scratch(odin3_sim_builder *bld, const odin3_sim_flat *flat) {
+    if (flat->def->sim_scratch_bytes == NULL) {
+        return ODIN3_OK;
+    }
+    odin3_sim_cell sizing = flat->view;
+    sizing.ports = (const odin3_sim_span *)bld->spans.data + flat->span_first;
+    uint32_t bytes = 0;
+    odin3_status st = flat->def->sim_scratch_bytes(&sizing, &bytes);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_sim_err_too_large(bld, flat->frame, flat->node);
+    }
+    if (st == ODIN3_OK && bytes > bld->n_scratch) {
+        bld->n_scratch = bytes;
+    }
+    return st;
+}
+
+/* A black box is simulated like any other type when it has a simulate hook. */
 static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
                              const odin3_celltype_def *def) {
     const odin3_module *mod = frame_module(bld, frame);
-    if (def->gran == ODIN3_GRAN_BLACKBOX || def->simulate == NULL) {
+    if (def->simulate == NULL) {
         odin3_sim_err_unsupported(bld, frame, node);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -204,15 +227,14 @@ static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_
                              .state_first = bld->n_state};
     flat->view.n_ports = def->n_ports;
     flat->view.params = odin3_node_param(mod, node, 0);
+    flat->view.type_data = odin3_celltype_lib(bld->design, odin3_node_type(mod, node));
     uint32_t n_state = 0;
     if (add_pins(bld, flat, &n_state) != ODIN3_OK || UINT32_MAX - bld->n_state < n_state) {
         return ODIN3_ERR_NO_MEMORY;
     }
     flat->view.n_state = n_state;
     bld->n_state += n_state;
-    uint32_t scratch = def->sim_scratch_bytes ? def->sim_scratch_bytes(flat->view.params) : 0;
-    bld->n_scratch = scratch > bld->n_scratch ? scratch : bld->n_scratch;
-    return ODIN3_OK;
+    return size_scratch(bld, flat);
 }
 
 /* A node of frame: port nodes are the frame's boundary; an instance opens a frame. */
@@ -350,7 +372,6 @@ static void point_views(odin3_sim *sim) {
         flat->view.values = sim->values;
         flat->view.ports = spans;
         flat->view.state = flat->view.n_state > 0 ? sim->state + flat->state_first : NULL;
-        flat->view.type_data = NULL; /* tech-library cells: Task 4 */
         flat->view.scratch = sim->scratch;
         flat->view.n_scratch = sim->n_scratch;
     }

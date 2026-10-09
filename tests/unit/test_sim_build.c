@@ -456,17 +456,17 @@ static void test_black_box_is_rejected_with_location(void) {
     TEST_ASSERT_EQUAL_STRING_LEN("in.blif:7: ", log_text, strlen("in.blif:7: "));
 }
 
-/* A built-in type without a simulate hook (yet) is rejected the same way. */
+/* A built-in type without a simulate hook (yet: $div) is rejected the same way. */
 static void test_type_without_hook_is_rejected(void) {
     odin3_module *top = new_module("top");
     odin3_net_id net_a = add_port(top, "a", ODIN3_DIR_IN);
     odin3_net_id net_y = add_port(top, "y", ODIN3_DIR_OUT);
     odin3_netvec ports[] = {{&net_a, 1}, {&net_a, 1}, {&net_y, 1}};
-    odin3_node_spec spec = {type_id("$add"), intern("adder0"), (odin3_prov_id){0}, NULL, 0};
+    odin3_node_spec spec = {type_id("$div"), intern("divider0"), (odin3_prov_id){0}, NULL, 0};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, &node));
-    build_fails(top, "cannot simulate `$add`");
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "adder0"), log_text);
+    build_fails(top, "cannot simulate `$div`");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "divider0"), log_text);
 }
 
 static void test_recursive_hierarchy_is_rejected(void) {

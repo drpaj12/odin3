@@ -59,8 +59,9 @@ typedef struct odin3_sim_span {
  * tech-library hard cell, its odin3_techlib_cell, whose fn expressions the hook interprets); NULL
  * for the built-in types. scratch is one buffer shared by every cell of the simulator, which the
  * hook may use freely during one call (contents undefined on entry, not kept between calls); it
- * holds at least the type's sim_scratch_bytes(params) bytes (celltype.h), n_scratch in all, and is
- * NULL with n_scratch 0 when no type asks for any. Hooks never allocate.
+ * holds at least the bytes the type's sim_scratch_bytes asked for this cell (celltype.h), n_scratch
+ * in all, and is NULL with n_scratch 0 when no cell asks for any. Hooks never allocate. Word-level
+ * hooks compute on little-endian limb words in their scratch (sim/word.h).
  */
 typedef struct odin3_sim_cell {
     uint8_t *values;             /* the simulator's value array */
