@@ -90,7 +90,9 @@ odin3_status odin3_node_create(odin3_module *module, const odin3_node_spec *spec
 
 /*
  * Disconnects every pin, removes the node's name from the name map and marks node and pins dead.
- * INVALID_ARG for a port node (module ports are never removed in Phase 1; IR-7).
+ * First records, per pin, the name of the net it was on (0: unconnected or unnamed) for the
+ * node's tombstone (odin3_module_compact; PHASE1 #14). INVALID_ARG for a port node (module ports
+ * are never removed in Phase 1; IR-7); NO_MEMORY when the record cannot be stored.
  */
 odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node);
 
@@ -236,11 +238,13 @@ typedef struct odin3_node_pair {
 /*
  * Replaces old_node by new_node (IR-15): each pin of new_node takes the place of the pin of
  * old_node with the same port and bit on its net (same slot of the net's pin array), then
- * old_node is deleted (its name leaves the map; new_node keeps its own name). The two must be
- * distinct live nodes with the same port signature (port count, and per pin the same port, bit
- * and direction), new_node's pins must all be unconnected, and neither may be a port node
- * (granularity PORT), else INVALID_ARG. Attributes are not transferred: old_node's stay with
- * the dead node, new_node keeps its own. Never allocates.
+ * old_node is deleted (its name leaves the map; new_node keeps its own name; its tombstone will
+ * name the nets its pins were on before the hand-over). The two must be distinct live nodes with
+ * the same port signature (port count, and per pin the same port, bit and direction), new_node's
+ * pins must all be unconnected, and neither may be a port node (granularity PORT), else
+ * INVALID_ARG. Attributes are not transferred: old_node's stay with the dead node, new_node keeps
+ * its own. Allocates only old_node's pin-net record: NO_MEMORY, with nothing changed, when that
+ * fails.
  */
 odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair);
 
@@ -393,14 +397,15 @@ typedef struct odin3_compact_map {
  * Compacts the module (IR-6): renumbers its live nodes, pins, nets and wires densely from 1 in
  * their current ID order (so iteration order is unchanged) and frees every dead slot. Before
  * freeing, appends one tombstone per dead node, then per dead net, then per dead wire (ID order;
- * module, kind, cell type, name, prov; a prov that is not a record is written as 0) to the
- * design's tombstone table. Everything that holds a module-local ID is remapped: pins' nodes and
- * nets, nets' pin arrays (same order, so partitions and slots hold), primaries and aliases, wire
- * net vectors and port nodes, the port list, the name maps (a merged-away net's names still find
- * the kept net) and the attribute table. Dropped: alias records no chain uses, memberships of
- * dead wires, attributes of dead objects and overwritten attribute values. Provenance records and
- * cell types are untouched. The module's containers are rebuilt, so the peak memory is the old
- * IR plus the live part.
+ * module, kind, cell type, name, prov; a prov that is not a record is written as 0; for a node
+ * also copies of its parameter values and of the pin net names odin3_node_delete recorded, which
+ * are then dropped) to the design's tombstone table. Everything that holds a module-local ID is
+ * remapped: pins' nodes and nets, nets' pin arrays (same order, so partitions and slots hold),
+ * primaries and aliases, wire net vectors and port nodes, the port list, the name maps (a
+ * merged-away net's names still find the kept net) and the attribute table. Dropped: alias records
+ * no chain uses, memberships of dead wires, attributes of dead objects and overwritten attribute
+ * values. Provenance records and cell types are untouched. The module's containers are rebuilt, so
+ * the peak memory is the old IR plus the live part.
  *
  * Invalidates every module-local ID, pinlist, alias cursor, parameter and attribute pointer held
  * outside the IR (only the pass manager calls it, at named pipeline points). *map (may be NULL)

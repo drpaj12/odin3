@@ -1,0 +1,81 @@
+# generic_gates.o3lib — plain logic gates, flip-flops and latches: the target-agnostic library the
+# flow maps to first (docs/specs/2026-10-08-1G-techlib-design.md). Inputs A B C D (S selects,
+# C clocks, E enables), output Y (Q for state). Areas are relative, a 2-input gate being 1.
+library generic_gates
+
+cell BUF gate area 1
+  in A 1 ; out Y 1
+  fn Y = A
+end
+cell INV gate area 1
+  in A 1 ; out Y 1
+  fn Y = ~A
+end
+cell AND2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = A & B
+end
+cell AND3 gate area 2
+  in A 1 ; in B 1 ; in C 1 ; out Y 1
+  fn Y = A & B & C
+end
+cell AND4 gate area 2
+  in A 1 ; in B 1 ; in C 1 ; in D 1 ; out Y 1
+  fn Y = A & B & C & D
+end
+cell OR2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = A | B
+end
+cell OR3 gate area 2
+  in A 1 ; in B 1 ; in C 1 ; out Y 1
+  fn Y = A | B | C
+end
+cell OR4 gate area 2
+  in A 1 ; in B 1 ; in C 1 ; in D 1 ; out Y 1
+  fn Y = A | B | C | D
+end
+cell NAND2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = ~(A & B)
+end
+cell NOR2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = ~(A | B)
+end
+cell XOR2 gate area 2
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = A ^ B
+end
+cell XNOR2 gate area 2
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = ~(A ^ B)
+end
+cell MUX2 gate area 2
+  in A 1 ; in B 1 ; in S 1 ; out Y 1
+  fn Y = S ? B : A
+end
+cell DFFP gate area 4
+  in D 1 ; in C 1 clock ; out Q 1
+  seq Q <= D @ posedge C init x
+end
+cell DFFN gate area 4
+  in D 1 ; in C 1 clock ; out Q 1
+  seq Q <= D @ negedge C init x
+end
+cell DLATCHP gate area 3
+  in D 1 ; in E 1 clock ; out Q 1
+  seq Q <= D @ high E init x
+end
+cell DLATCHN gate area 3
+  in D 1 ; in E 1 clock ; out Q 1
+  seq Q <= D @ low E init x
+end
+cell TIE0 gate area 1
+  out Y 1
+  fn Y = 1'b0
+end
+cell TIE1 gate area 1
+  out Y 1
+  fn Y = 1'b1
+end

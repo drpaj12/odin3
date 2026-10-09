@@ -40,6 +40,11 @@ enum {
     EXTRA_MIN = 3, /* .attr key value */
 };
 
+/* The widest port an undeclared .subckt may get (ir/celltype.h): its widths come from the type,
+ * through parameters its formals imply, not from the file. Declared widths are bounded by the
+ * file itself. */
+static const uint32_t MAX_INFERRED_WIDTH = ODIN3_READER_MAX_WIDTH;
+
 /* The built-in cell types pass 2 makes (BLIF .names and .latch). */
 typedef enum blif_builtin {
     BLIF_SOP,
@@ -135,6 +140,7 @@ typedef struct blif_reader {
     odin3_u64map *use_keys; /* model << 32 | formal -> 1, for each entry of uses */
     odin3_u64map *use_tail; /* model -> index of its last entry in uses */
     odin3_u64map *bb_ports; /* model index << 32 | port name -> 1, black-box ports */
+    odin3_u64map *declared; /* cell type -> its declared-model index, for this file's models */
     /* pass 2 */
     odin3_celltype_id builtin[BLIF_BUILTINS];
     odin3_module *module;  /* the module whose body is read; NULL in a black box */
@@ -143,7 +149,8 @@ typedef struct blif_reader {
     blif_sop sop;          /* the .names whose cover rows are being read */
     odin3_vec nets;        /* odin3_net_id: the pins of the cell being built, port order */
     odin3_vec ports;       /* odin3_netvec: one per port of the cell being built */
-    odin3_vec dflts;       /* odin3_value: default parameters of a .subckt type */
+    odin3_vec params;      /* odin3_value: the parameters of the .subckt being built */
+    odin3_vec seen;        /* uint32_t per port: widths the formals of a .subckt imply */
     odin3_strbuf cover;    /* rows of the open .names */
     odin3_u64map *formals; /* formal key -> port << 32 | bit (see TYPE_SHIFT) */
 } blif_reader;
@@ -642,21 +649,34 @@ static odin3_status add_formal(blif_reader *rd, const blif_model *model, const b
     return ODIN3_OK;
 }
 
-/* True when the declared ports match a registered type's as IR-7b requires: same count, and per
- * port the same name, direction and constant width. */
-static bool same_ports(const odin3_celltype_def *have, const odin3_celltype_def *want) {
-    if (have->n_ports != want->n_ports) {
+/* vec holds count zeroed elements; false on out of memory. */
+static bool zeroed(odin3_vec *vec, uint32_t count) {
+    odin3_vec_clear(vec);
+    if (odin3_vec_reserve(vec, count) != ODIN3_OK) {
         return false;
     }
-    for (uint32_t port = 0; port < have->n_ports; port++) {
-        const odin3_port_def *lhs = &have->ports[port];
-        const odin3_port_def *rhs = &want->ports[port];
-        if (strcmp(lhs->name, rhs->name) != 0 || lhs->dir != rhs->dir || lhs->width_param != NULL ||
-            lhs->width_fn != NULL || lhs->width != rhs->width) {
-            return false;
-        }
+    for (uint32_t i = 0; i < count; i++) {
+        (void)odin3_vec_push(vec); /* reserved: cannot fail */
     }
     return true;
+}
+
+/* IR-7b: a declaration of a registered type must match it (odin3_celltype_blackbox_match); a
+ * mismatch is reported here, located, with the reason. */
+static odin3_status check_registered(blif_reader *rd, const blif_model *model,
+                                     const odin3_celltype_def *def, odin3_celltype_id type) {
+    if (!zeroed(&rd->params, odin3_celltype_get(rd->design, type)->n_params)) {
+        return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
+    }
+    odin3_width_why why = {""};
+    const odin3_blackbox_match match = {type, def, rd->params.data};
+    odin3_status st = odin3_celltype_blackbox_match(rd->design, &match, &why);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        return rd_error(rd, model->line,
+                        "black box '%s' conflicts with the registered cell type of that name: %s",
+                        def->name, why.text);
+    }
+    return rd_fail(rd, st);
 }
 
 static odin3_status build_blackbox(blif_reader *rd, blif_model *model) {
@@ -676,11 +696,8 @@ static odin3_status build_blackbox(blif_reader *rd, blif_model *model) {
                               .ports = rd->defs.data,
                               .n_ports = (uint32_t)rd->defs.len};
     odin3_celltype_id type = {0};
-    if (st == ODIN3_OK && odin3_celltype_find(rd->design, model->name, &type) &&
-        !same_ports(odin3_celltype_get(rd->design, type), &def)) {
-        return rd_error(rd, model->line,
-                        "black box '%s' conflicts with the registered cell type of that name",
-                        def.name);
+    if (st == ODIN3_OK && odin3_celltype_find(rd->design, model->name, &type)) {
+        st = check_registered(rd, model, &def, type);
     }
     if (st == ODIN3_OK) {
         st = odin3_celltype_declare_blackbox(rd->design, &def, &type);
@@ -688,6 +705,11 @@ static odin3_status build_blackbox(blif_reader *rd, blif_model *model) {
     model->id = type.v;
     if (st == ODIN3_ERR_INVALID_ARG) {
         return rd_error(rd, model->line, "black box '%s' cannot be declared", def.name);
+    }
+    uint32_t index = odin3_design_declared_model_count(rd->design) - 1;
+    uint64_t have = 0;
+    if (st == ODIN3_OK && !odin3_u64map_get(rd->declared, type.v, &have)) {
+        st = odin3_u64map_put(rd->declared, (odin3_kv){type.v, index});
     }
     return rd_fail(rd, st);
 }
@@ -992,31 +1014,137 @@ static odin3_status read_latch(blif_reader *rd, const odin3_blif_line *ln) {
 
 /* --- .subckt ------------------------------------------------------------------------------- */
 
-/* The instantiated type and its definition. */
+/* The instantiated type, its definition and, for a model this file declares, the declaration
+ * (whose scalar flags say how formals spell each port) and its entry in the declared-model list. */
 typedef struct blif_inst {
     odin3_celltype_id type;
     const odin3_celltype_def *def;
+    const odin3_celltype_def *decl; /* NULL: not declared in this file */
+    uint32_t declared;              /* declared-model index when decl is set */
 } blif_inst;
 
-/* Fills rd->dflts (default parameters), rd->ports and rd->nets (every pin unconnected). */
+/* Index of the port of def named exactly name[0, len), or n_ports when there is none. */
+static uint32_t find_port(const odin3_celltype_def *def, const char *name, size_t len) {
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        const char *have = def->ports[port].name;
+        if (strlen(have) == len && memcmp(have, name, len) == 0) {
+            return port;
+        }
+    }
+    return def->n_ports;
+}
+
+/* Whether formals name port `port` of the instance without brackets: as the file declared it,
+ * else as its cell type says. */
+static bool port_scalar(const blif_inst *inst, uint32_t port) {
+    const char *name = inst->def->ports[port].name;
+    if (inst->decl != NULL) {
+        uint32_t at = find_port(inst->decl, name, strlen(name));
+        if (at < inst->decl->n_ports) {
+            return inst->decl->ports[at].scalar;
+        }
+    }
+    return inst->def->ports[port].scalar;
+}
+
+/* The width the formal `tok` (formal=actual) implies for its port: k + 1 for `p[k]`, 1 for an
+ * exact port name; nothing for a formal that names no port (pass 2 reports it). A width above
+ * MAX_INFERRED_WIDTH is a parse error. */
+static odin3_status note_seen(blif_reader *rd, const blif_inst *inst, odin3_bytes tok) {
+    const char *eq = memchr(tok.ptr, '=', tok.len);
+    size_t len = eq != NULL ? (size_t)(eq - (const char *)tok.ptr) : tok.len;
+    uint32_t port = find_port(inst->def, tok.ptr, len);
+    uint32_t bit = 0;
+    size_t base_len = 0;
+    if (port == inst->def->n_ports && parse_bit(tok.ptr, len, &base_len, &bit)) {
+        port = find_port(inst->def, tok.ptr, base_len);
+    }
+    if (port < inst->def->n_ports && bit >= MAX_INFERRED_WIDTH) {
+        return rd_error(rd, rd->line, "formal '%.*s' implies a port width above %u bits", (int)len,
+                        (const char *)tok.ptr, MAX_INFERRED_WIDTH);
+    }
+    uint32_t *seen = rd->seen.data;
+    if (port < inst->def->n_ports && bit >= seen[port]) {
+        seen[port] = bit + 1;
+    }
+    return ODIN3_OK;
+}
+
+/* Every port width of an undeclared instance is at most MAX_INFERRED_WIDTH: a width expression
+ * such as A_WIDTH * B_WIDTH can exceed the formals' own bound, and a registered type's constant
+ * width is not bounded by the file at all. */
+static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
+    uint64_t total = 0;
+    for (uint32_t port = 0; port < inst->def->n_ports; port++) {
+        uint32_t width = 0;
+        const odin3_port_query query = {inst->type, rd->params.data, port};
+        odin3_status st = odin3_celltype_port_width_checked(rd->design, &query, &width);
+        if (st == ODIN3_ERR_INVALID_ARG) {
+            return rd_error(rd, rd->line, "the parameters inferred for '%s' do not size port '%s'",
+                            inst->def->name, inst->def->ports[port].name);
+        }
+        if (st != ODIN3_OK) {
+            return rd_fail(rd, st);
+        }
+        if (width > MAX_INFERRED_WIDTH) {
+            return rd_error(rd, rd->line,
+                            "'%s' gives port '%s' %u bits here, above the %u an undeclared "
+                            ".subckt may have",
+                            inst->def->name, inst->def->ports[port].name, width,
+                            MAX_INFERRED_WIDTH);
+        }
+        total += width;
+    }
+    if (total > ODIN3_READER_MAX_TOTAL_WIDTH) {
+        return rd_error(rd, rd->line,
+                        "'%s' gives its ports %llu bits in total here, above the %u an undeclared "
+                        ".subckt may have",
+                        inst->def->name, (unsigned long long)total, ODIN3_READER_MAX_TOTAL_WIDTH);
+    }
+    return ODIN3_OK;
+}
+
+/* rd->params: a declared model's parameters; else, IR-7b, the parameters the formals' largest
+ * bit indices imply (odin3_celltype_infer_params; the defaults for a type no port width of which
+ * is a parameter). */
+static odin3_status inst_params(blif_reader *rd, const blif_inst *inst, const odin3_blif_line *ln) {
+    const odin3_celltype_def *def = inst->def;
+    if (!zeroed(&rd->params, def->n_params) || !zeroed(&rd->seen, def->n_ports)) {
+        return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
+    }
+    const odin3_value *declared =
+        inst->decl != NULL ? odin3_design_declared_model_params(rd->design, inst->declared) : NULL;
+    if (declared != NULL) {
+        memcpy(rd->params.data, declared, sizeof *declared * def->n_params);
+        return ODIN3_OK;
+    }
+    if (inst->decl != NULL || def->gran == ODIN3_GRAN_MODULE) {
+        /* sized by the declaration or the module's own ports, both bounded by the file */
+        return rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
+                                                       rd->params.data));
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 2; st == ODIN3_OK && def->n_params > 0 && i < ln->count; i++) {
+        st = note_seen(rd, inst, ln->tokens[i]);
+    }
+    if (st == ODIN3_OK) {
+        st = rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
+                                                     rd->params.data));
+    }
+    return st == ODIN3_OK ? check_inferred(rd, inst) : st;
+}
+
+/* Fills rd->ports and rd->nets (every pin unconnected), sized by rd->params. */
 static odin3_status begin_inst(blif_reader *rd, const blif_inst *inst) {
     const odin3_celltype_def *def = inst->def;
-    odin3_vec_clear(&rd->dflts);
     odin3_vec_clear(&rd->ports);
     odin3_vec_clear(&rd->nets);
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        odin3_value *slot = odin3_vec_push(&rd->dflts);
-        if (slot == NULL) {
-            return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
-        }
-        *slot = def->params[i].dflt;
-    }
     for (uint32_t port = 0; port < def->n_ports; port++) {
         odin3_netvec *slot = odin3_vec_push(&rd->ports);
         if (slot == NULL) {
             return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
         }
-        slot->count = odin3_celltype_port_width(rd->design, inst->type, rd->dflts.data, port);
+        slot->count = odin3_celltype_port_width(rd->design, inst->type, rd->params.data, port);
         for (uint32_t k = 0; k < slot->count; k++) {
             odin3_net_id *net = odin3_vec_push(&rd->nets);
             if (net == NULL) {
@@ -1033,33 +1161,22 @@ static odin3_status begin_inst(blif_reader *rd, const blif_inst *inst) {
     return ODIN3_OK;
 }
 
-/* Index of the port of def named exactly name[0, len), or n_ports when there is none. */
-static uint32_t find_port(const odin3_celltype_def *def, const char *name, size_t len) {
-    for (uint32_t port = 0; port < def->n_ports; port++) {
-        const char *have = def->ports[port].name;
-        if (strlen(have) == len && memcmp(have, name, len) == 0) {
-            return port;
-        }
-    }
-    return def->n_ports;
-}
-
-/* The pin a formal names: an exact port name of width 1, else `p[k]` for bit k of vector p. */
-static odin3_status match_formal(blif_reader *rd, const blif_inst *inst, odin3_bytes formal,
+/* The pin a formal names: an exact port name of a scalar port, else `p[k]` for bit k of vector p
+ * (the bit is checked against the instance's width by formal_pin). */
+static odin3_status match_formal(const blif_reader *rd, const blif_inst *inst, odin3_bytes formal,
                                  uint64_t *where) {
     const char *name = formal.ptr;
-    const odin3_netvec *ports = rd->ports.data;
     uint32_t n_ports = inst->def->n_ports;
     uint32_t port = find_port(inst->def, name, formal.len);
     uint32_t bit = 0;
     size_t base_len = 0;
-    if (port < n_ports && !inst->def->ports[port].scalar) {
+    if (port < n_ports && !port_scalar(inst, port)) {
         return rd_error(rd, rd->line, "model '%s' has no port '%.*s' (vector port: use %.*s[k])",
                         inst->def->name, (int)formal.len, name, (int)formal.len, name);
     }
     if (port == n_ports && parse_bit(name, formal.len, &base_len, &bit)) {
         port = find_port(inst->def, name, base_len);
-        if (port < n_ports && (inst->def->ports[port].scalar || bit >= ports[port].count)) {
+        if (port < n_ports && port_scalar(inst, port)) {
             port = n_ports;
         }
     }
@@ -1091,6 +1208,10 @@ static odin3_status formal_pin(blif_reader *rd, const blif_inst *inst, odin3_byt
         }
     }
     const odin3_netvec *port = (const odin3_netvec *)rd->ports.data + (where >> TYPE_SHIFT);
+    if ((uint32_t)where >= port->count) {
+        return rd_error(rd, rd->line, "model '%s' has no port '%.*s'", inst->def->name,
+                        (int)formal.len, (const char *)formal.ptr);
+    }
     *index = (size_t)(port->nets - (const odin3_net_id *)rd->nets.data) + (uint32_t)where;
     return ODIN3_OK;
 }
@@ -1138,7 +1259,13 @@ static odin3_status read_subckt(blif_reader *rd, const odin3_blif_line *ln) {
     if (inst.type.v == odin3_module_celltype(rd->module).v) {
         return rd_error(rd, ln->line, "model '%s' instantiates itself", model);
     }
-    st = begin_inst(rd, &inst);
+    uint64_t declared = 0;
+    if (odin3_u64map_get(rd->declared, inst.type.v, &declared)) {
+        inst.declared = (uint32_t)declared;
+        inst.decl = odin3_design_declared_model_decl(rd->design, inst.declared);
+    }
+    st = inst_params(rd, &inst, ln);
+    st = st == ODIN3_OK ? begin_inst(rd, &inst) : st;
     for (uint32_t i = 2; st == ODIN3_OK && i < ln->count; i++) {
         st = connect_formal(rd, &inst, ln, i);
     }
@@ -1146,7 +1273,7 @@ static odin3_status read_subckt(blif_reader *rd, const odin3_blif_line *ln) {
         return st;
     }
     blif_cell cell = {.type = inst.type,
-                      .params = rd->dflts.data,
+                      .params = rd->params.data,
                       .n_params = inst.def->n_params,
                       .ports = rd->ports.data,
                       .line = ln->line,
@@ -1374,7 +1501,8 @@ static odin3_status rd_init(blif_reader *rd, odin3_design *design, const char *p
     odin3_vec_init(&rd->defs, sizeof(odin3_port_def));
     odin3_vec_init(&rd->nets, sizeof(odin3_net_id));
     odin3_vec_init(&rd->ports, sizeof(odin3_netvec));
-    odin3_vec_init(&rd->dflts, sizeof(odin3_value));
+    odin3_vec_init(&rd->params, sizeof(odin3_value));
+    odin3_vec_init(&rd->seen, sizeof(uint32_t));
     odin3_vec_init(&rd->uses, sizeof(blif_use));
     odin3_strbuf_init(&rd->scratch);
     odin3_strbuf_init(&rd->clocks);
@@ -1386,9 +1514,10 @@ static odin3_status rd_init(blif_reader *rd, odin3_design *design, const char *p
     rd->use_keys = odin3_u64map_create(0);
     rd->use_tail = odin3_u64map_create(0);
     rd->bb_ports = odin3_u64map_create(0);
+    rd->declared = odin3_u64map_create(0);
     if (rd->model_lines == NULL || rd->port_lines == NULL || rd->base_bits == NULL ||
         rd->formals == NULL || rd->use_keys == NULL || rd->use_tail == NULL ||
-        rd->bb_ports == NULL) {
+        rd->bb_ports == NULL || rd->declared == NULL) {
         return rd_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
     return rd_fail(rd, odin3_design_intern(design, odin3_bytes_cstr(path), &rd->file));
@@ -1400,7 +1529,8 @@ static void rd_free(blif_reader *rd) {
     odin3_vec_free(&rd->defs);
     odin3_vec_free(&rd->nets);
     odin3_vec_free(&rd->ports);
-    odin3_vec_free(&rd->dflts);
+    odin3_vec_free(&rd->params);
+    odin3_vec_free(&rd->seen);
     odin3_vec_free(&rd->uses);
     odin3_strbuf_free(&rd->scratch);
     odin3_strbuf_free(&rd->clocks);
@@ -1412,6 +1542,7 @@ static void rd_free(blif_reader *rd) {
     odin3_u64map_destroy(rd->use_keys);
     odin3_u64map_destroy(rd->use_tail);
     odin3_u64map_destroy(rd->bb_ports);
+    odin3_u64map_destroy(rd->declared);
 }
 
 odin3_status odin3_blif_read(odin3_design *design, const char *path) {

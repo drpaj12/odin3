@@ -75,7 +75,12 @@ add_library(odin3_core OBJECT
     src/ir/cells/tribuf.c
     src/ir/cells/gates.c
     src/ir/cells/dff.c
-    src/ir/cells/sop.c)
+    src/ir/cells/sop.c
+    src/techlib/expr.c
+    src/techlib/expr_eval.c
+    src/techlib/width.c
+    src/techlib/reader.c
+    src/techlib/reader_cell.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -173,6 +178,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_techlib_expr)
+    odin3_add_unit_test(test_techlib_reader)
+    odin3_add_unit_test(test_techlib_libs)
+    target_compile_definitions(test_techlib_libs PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -194,6 +206,12 @@ if(BUILD_TESTING)
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
+    # The goldens' distinct black-box stanzas (tools/golden-blackboxes) against lib/vtr.o3lib.
+    add_test(NAME blif_roundtrip_techlib
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
+                     --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                     --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/techlib)
+    set_tests_properties(blif_roundtrip_techlib PROPERTIES LABELS unit)
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh

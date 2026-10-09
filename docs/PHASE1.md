@@ -24,7 +24,9 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 
 - [x] 1A spec approved (2026-10-08, PR #11), implemented, merged (benchmark, release build: 2M interns 0.36–0.45 s, 2M `u64map` puts 0.35–0.39 s, 2M `pagevec` pushes 0.01 s, max RSS 176 MiB)
 - [x] 1B `docs/IR.md` (agent-decided, PHASE1 #9; Peter reviews afterwards); IR implemented; 2M-node benchmark recorded (`bench_ir`, release, 2M nodes / 2.2M nets, every node and net with a source record: build 0.835 s, check FULL 0.741 s, fanout walk 0.313 s, delete 10% 0.098 s, compact 0.393 s, `odin3_prov_index_build` 0.064 s (168,064,168 bytes; 2,001 records, 334,660 tombstones), one `odin3_prov_index_by_loc` on the busiest line 0.341 ms (200,000 hits), `odin3_prov_sources` over all 1.8M live nodes 0.060 s, max RSS 810,540 KiB = 791.54 MiB)
-- [ ] 1G tech-library format approved; reader + generic gate library + VTR golden library
+- [x] 1G tech-library format approved (PHASE1 #7/#8); reader + generic gate library + VTR golden library
+  (2026-10-09): golden round trip with `--techlib lib/vtr.o3lib` identical to 1C's (1846 text ok;
+  identical 1814 + stubs 10; exceptions as #15)
 - [x] 1C BLIF round trip identical on every `ok` golden (2026-10-09): normalized text identity
   1846/1846; `netlist-compare` identical 1824 (10 with stub models), exceptions per #15 and the
   results below
@@ -167,6 +169,22 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
       `--revision`; files a scan read before an error count as used.
     Phase 2 exit test (§12) gains the project-fixture clause.
 
+2026-10-09, agent defaults (1G Task 4; Peter may override):
+
+20. **IR-7b matches a black-box declaration to a registered type by port name, not position.**
+    The goldens hold 49 distinct `.model … .blackbox` stanzas for four models: Yosys+Parmys lists
+    one model's ports in a different order from file to file, and Odin II spells width-1 ports
+    `a[0]` where Parmys writes `a`, so no library port order can match positionally. Widths may be
+    parametric: the declared widths give the parameters (a port sized by `A_WIDTH` sets it), and
+    every port's width rule must then reproduce its declared width. The declared-model entry keeps
+    the declaration as written (port order, widths, scalar flags) and the inferred parameters;
+    instances use the declaration's spelling and parameters, and the writer reproduces both.
+    `lib/vtr.o3lib` lists ports in Odin II's order (the one fixed order in the goldens).
+21. **`.subckt` parameters without a `.model`:** an instance of a registered type the file does not
+    declare gets the parameters its formals imply (each port as wide as its largest bit index + 1);
+    implicit black boxes (#16) still apply only to names nothing registers. The writer refuses a
+    cell whose parameters the reader would not derive back.
+
 ## 1C results: full golden round trip
 
 Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build, writer at
@@ -203,6 +221,30 @@ Exception lists (reported, not failures):
 - Memory cap (6 GB), 2 files with one content: Odin II `LargeRam` (915 MB). Passes the text gate.
 - Implicit cells compared with stub models (identical): 10 files (`pow`, `pow_const`, `dffsre`,
   `twobits_arithmetic_power`, `eightbit_arithmetic_power`, both architectures).
+
+## 1G results: golden round trip with `lib/vtr.o3lib`
+
+Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build of the 1G Task 4
+tree, `tools/blif-roundtrip/blif-roundtrip -j 2 -t 600 -m 6 --techlib lib/vtr.o3lib` (smallest
+file first), 52 min 5 s wall clock. Every golden's `adder`, `multiply`, `single_port_ram` and
+`dual_port_ram` now resolve to the library's hard cells (IR-7b, decisions #18–#19) instead of
+local black boxes; the output must still be identical.
+
+```
+files: 1846 (structural gate run on 724 distinct contents)
+text gate: 1846 ok, 0 FAIL, 0 read/write failures
+structural gate: identical 1814, identical+stubs 10, refused (multi-driver original) 4, timeout 16, memlimit 2, different 0, error 0, not run 0
+check FULL errors: 0 files outside the multi-driver list, 4 inside it
+slowest file: EArch/regression/verilog/large/LU64PEEng/LU64PEEng.odin.blif (630.4 s total)
+odin3-blif-rt (read, check, write) time: 85.2 s total, slowest k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/large/LargeRam/LargeRam.odin.blif (17.3 s)
+peak RSS: odin3-blif-rt 2356 MB (k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/large/LargeRam/LargeRam.odin.blif); netlist-compare 6081 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif)
+RESULT: PASS
+```
+
+The exceptions are exactly 1C's (same 4 multi-driver files, 16 timeouts, 2 memory-cap stops); no
+other difference. The goldens' 49 distinct black-box stanzas are committed as fixtures
+(`tests/golden/techlib`, `tools/golden-blackboxes`) and round-trip in CTest
+`blif_roundtrip_techlib`.
 
 1C follow-ups (minor, from the task and final reviews; none changes a result on a golden):
 - Reader: `#` inside a quoted `.attr`/`.param` value is cut as a comment; an empty or

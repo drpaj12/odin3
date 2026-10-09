@@ -19,7 +19,7 @@ static odin3_const constz_value(const odin3_value *params) {
 }
 
 /* One scalar output Y, no parameters; legal in every view (IR-9). */
-static const odin3_port_def k_const_ports[] = {{"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL}};
+static const odin3_port_def k_const_ports[] = {{"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
 
 const odin3_celltype_def odin3_cell_const0 = {
     "$_CONST0_", ODIN3_GRAN_BIT, ODIN3_CT_ANYVIEW, k_const_ports, 1, NULL, 0, NULL, const0_value};

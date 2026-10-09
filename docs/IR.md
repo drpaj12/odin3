@@ -143,12 +143,36 @@ node keeps the source-level parameter values as attributes so writers can print 
 without a body) is a cell type of granularity `blackbox` with declared ports and no body. If a
 reader meets a black-box declaration whose name is **already registered** (e.g. the golden
 `.model adder .blackbox` when the 1G VTR library has registered `adder` as `hard`), it checks
-the declaration for port compatibility (same port names, directions, widths) and reuses the
-registered type; a mismatch is a reader error. Either way the design records that the file *declared* that
-model (declared-model list: cell type; the declaring reader run is recorded from 1C on), so the BLIF writer reproduces the
-`.model … .blackbox` stanzas in their original order (PHASE1 #2). Ports are scalar or vector: a reader groups
-formals `a[0] … a[w-1]` into vector port `a` of width *w*, and the port records whether it was
-written with brackets so writers reproduce `a[k]` versus `a` byte-for-byte (PHASE1 #2).
+the declaration for port compatibility and reuses the registered type; a mismatch is a reader
+error. Compatibility (1G): the same port names, matched **by name in any order** (Yosys+Parmys
+lists one model's ports in a different order from file to file), the same directions, and the
+same widths, where a registered width may be **parametric**: each INT parameter that is the
+width parameter of a port takes that port's declared width (the largest, if several ports name
+it), the other parameters keep their defaults, and then every port's width rule (constant,
+parameter, function or expression) evaluated with those values must equal its declared width
+(`odin3_celltype_blackbox_match`, quiet, for readers that report the reason themselves). Either
+way the design records that the file *declared* that model (declared-model list, the declaring
+reader run is recorded from 1C on): the cell type, the parameter values the declaration implies
+(`odin3_design_declared_model_params`), and the declaration as written — its ports in declared
+order with their widths and scalar flags (`odin3_design_declared_model_decl`) — so the BLIF writer
+reproduces the `.model … .blackbox` stanzas in their original order and spelling (PHASE1 #2).
+Ports are scalar or vector: a reader groups formals `a[0] … a[w-1]` into vector port `a` of
+width *w*, and the port records whether it was written with brackets so writers reproduce `a[k]`
+versus `a` byte-for-byte (PHASE1 #2). Instances use the spelling of the declaration (Odin II
+writes a width-1 library port as `cin[0]`, Yosys+Parmys as `cin`).
+
+**Parameters of a `.subckt` (1G).** BLIF cannot give parameters, so a reader derives them: an
+instance of a model the file declares gets the declaration's parameter values; an instance of a
+registered type the file does not declare gets the values its formals imply — each port's width
+seen as its largest bit index + 1 (`p[k]`), inferred as above (`odin3_celltype_infer_params`;
+types whose port widths are not parameters keep their defaults). Only a parameter that is some
+port's width parameter is inferred: one used only inside width expressions keeps its default, and
+a declaration it contradicts is reported as a port-width mismatch. Readers cap the widths their
+input alone decides at 2^20 bits per port (`ODIN3_READER_MAX_WIDTH`) and 2^22 bits per cell
+(`ODIN3_READER_MAX_TOTAL_WIDTH`): a tech-library cell's ports, and the ports of an undeclared BLIF
+`.subckt` of a registered type (inferred or constant); declared widths and modules of the file are
+bounded by the file. A writer can therefore write a cell only when its parameters are the ones a reader would
+derive from what it writes; it writes a declared type's formals in the declaration's port order.
 
 ## 5. Cell types (op registry)
 
@@ -158,11 +182,16 @@ spec §5.2. An entry declares:
 - `name` (Yosys spelling where one exists: `$add`, `$_AND_`, …), `granularity`, flags
   (`tristate`: output pins may legally share a net with other tristate/inout drivers);
 - ports: name, direction, scalar/vector, and a width rule — a constant, or the name of an
-  integer parameter (`A_WIDTH`), or a function pointer for anything else;
+  integer parameter (`A_WIDTH`), or a function pointer for anything else, or (1G) a compiled
+  width expression over integer parameters (`A_WIDTH + B_WIDTH`) supplied by the tech library:
+  the IR calls its `check` hook at registration and its `eval` hook to size ports, never parses
+  it;
 - parameters: name, kind, default. Signedness of word-level operands is a parameter
   (`A_SIGNED`, `B_SIGNED`), as in Yosys;
 - hooks, each may be NULL: `verify` (consistency beyond widths), `const_value` (IR-4),
   `simulate` (1E), writer hooks (1C/1F).
+- per type, a local type may carry opaque tech-library data (1G: `odin3_celltype_set_lib`; the
+  cell's `fn`/`seq`/`memory` functions, port modifiers, area/delay) for 1E and Phase 4.
 
 **IR-9 Granularity tags:** `word`, `bit`, `hard`, `blackbox`, `module`, `port` (D1's four plus
 the two structural tags; D1 amended). Views (spec §5.4): the *RTLIL view* allows `word`,

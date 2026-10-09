@@ -4,22 +4,38 @@
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "ir/value.h"
+#include "util/alloc.h"
 #include "util/arena.h"
 #include "util/log.h"
 #include "util/pagevec.h"
 #include "util/u64map.h"
+#include "util/vec.h"
 
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 
-/* A node about to be created: its validated type and its parameters, copied into the module. */
+enum { PLAN_INLINE_PORTS = 16 };
+
+/*
+ * A node about to be created: its validated type, its parameters (copied into the module) and its
+ * port widths, computed once in the fallible phase so that committing never evaluates a width.
+ */
 typedef struct node_plan {
     odin3_celltype_id type;
     const odin3_celltype_def *def;
     odin3_value *params; /* def->n_params values in the module arena (NULL when none) */
     uint32_t pin_count;
+    uint32_t *widths; /* def->n_ports widths: inline_widths or a heap block (plan_free) */
+    uint32_t inline_widths[PLAN_INLINE_PORTS];
 } node_plan;
+
+static void plan_free(node_plan *plan) {
+    if (plan->widths != plan->inline_widths) {
+        odin3_util_free(plan->widths);
+    }
+    plan->widths = NULL;
+}
 
 static bool params_match(const odin3_celltype_def *def, const odin3_node_spec *spec) {
     if (spec->params == NULL) {
@@ -64,16 +80,23 @@ static odin3_status copy_params(odin3_module *module, const odin3_node_spec *spe
     return ODIN3_OK;
 }
 
+/* Computes and stores every port width (the only width evaluation of a create) and the total. */
 static odin3_status count_pins(const odin3_module *module, node_plan *plan) {
+    uint32_t n_ports = plan->def->n_ports;
+    plan->widths = n_ports <= PLAN_INLINE_PORTS ? plan->inline_widths
+                                                : odin3_util_malloc(sizeof *plan->widths * n_ports);
+    if (plan->widths == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     uint64_t total = 0;
-    for (uint32_t port = 0; port < plan->def->n_ports; port++) {
+    for (uint32_t port = 0; port < n_ports; port++) {
         odin3_port_query query = {plan->type, plan->params, port};
-        uint32_t width = 0;
-        odin3_status st = odin3_celltype_port_width_checked(module->design, &query, &width);
+        odin3_status st =
+            odin3_celltype_port_width_checked(module->design, &query, &plan->widths[port]);
         if (st != ODIN3_OK) {
-            return st; /* logged */
+            return st; /* logged, or out of memory */
         }
-        total += width;
+        total += plan->widths[port];
     }
     if (total > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY; /* more pins than IDs */
@@ -112,8 +135,7 @@ static odin3_status plan_node(odin3_module *module, const odin3_node_spec *spec,
 /* Takes the reserved pin slots: port order, then bit order. */
 static void make_pins(odin3_module *module, const node_plan *plan, odin3_node_id node) {
     for (uint32_t port = 0; port < plan->def->n_ports; port++) {
-        uint32_t width = odin3_celltype_port_width(module->design, plan->type, plan->params, port);
-        for (uint32_t bit = 0; bit < width; bit++) {
+        for (uint32_t bit = 0; bit < plan->widths[port]; bit++) {
             odin3_pin_rec *pin = odin3_pagevec_push(module->pins, NULL);
             assert(pin != NULL); /* reserved by node_create */
             pin->node = node;
@@ -195,14 +217,14 @@ odin3_status odin3_node_create_any(odin3_module *module, const odin3_node_spec *
     if (st == ODIN3_OK) {
         st = node_reserve(module, spec, &plan);
     }
-    if (st != ODIN3_OK) {
-        return st;
+    if (st == ODIN3_OK) {
+        odin3_node_id id = node_commit(module, spec, &plan);
+        if (out != NULL) {
+            *out = id;
+        }
     }
-    odin3_node_id id = node_commit(module, spec, &plan);
-    if (out != NULL) {
-        *out = id;
-    }
-    return ODIN3_OK;
+    plan_free(&plan);
+    return st;
 }
 
 /* --- create-connected ---------------------------------------------------------------------- */
@@ -236,8 +258,7 @@ static bool ports_ok(const odin3_module *module, const node_plan *plan, const od
         return false;
     }
     for (uint32_t port = 0; port < def->n_ports; port++) {
-        uint32_t width = odin3_celltype_port_width(module->design, plan->type, plan->params, port);
-        if (!netvec_ok(module, &ports[port], width, def->ports[port].name)) {
+        if (!netvec_ok(module, &ports[port], plan->widths[port], def->ports[port].name)) {
             return false;
         }
     }
@@ -282,9 +303,11 @@ odin3_status odin3_node_create_connected(odin3_module *module, const odin3_node_
         st = node_reserve(module, spec, &plan);
     }
     if (st != ODIN3_OK) {
+        plan_free(&plan);
         return st;
     }
     odin3_node_id id = node_commit(module, spec, &plan);
+    plan_free(&plan);
     st = connect_ports(module, id, ports);
     if (st != ODIN3_OK) {
         node_unmake(module, id);
@@ -324,12 +347,50 @@ static const char *replace_error(const odin3_module *module, const odin3_node_re
     return NULL;
 }
 
+/* Disconnects every pin, frees the name, marks the node dead (callers record pin nets first). */
+static void node_kill(odin3_module *module, odin3_node_rec *rec) {
+    for (uint32_t i = 0; i < rec->pin_count; i++) {
+        odin3_pin_rec *pin = odin3_pin_rec_at(module, (odin3_pin_id){rec->first_pin.v + i});
+        if (odin3_net_valid(pin->net)) {
+            odin3_net_detach(module, pin);
+        }
+    }
+    if (rec->name != 0) {
+        (void)odin3_u64map_remove(module->node_names, rec->name);
+    }
+    rec->dead = true;
+    odin3_celltype_instances_dec(module->design, rec->type);
+}
+
+odin3_status odin3_node_record_pin_nets(odin3_module *module, odin3_node_id node) {
+    const odin3_node_rec *rec = odin3_node_rec_cat(module, node);
+    if (rec->pin_count == 0) {
+        return ODIN3_OK;
+    }
+    if (module->dead_pins == NULL) {
+        module->dead_pins = odin3_u64map_create(0);
+    }
+    odin3_vec *names = &module->dead_pin_names;
+    if (module->dead_pins == NULL ||
+        odin3_vec_reserve(names, names->len + rec->pin_count) != ODIN3_OK ||
+        odin3_u64map_put(module->dead_pins, (odin3_kv){node.v, names->len}) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < rec->pin_count; i++) {
+        odin3_net_id net = odin3_pin_rec_cat(module, (odin3_pin_id){rec->first_pin.v + i})->net;
+        uint32_t *slot = odin3_vec_push(names);
+        assert(slot != NULL); /* reserved */
+        *slot = odin3_net_valid(net) ? odin3_net_rec_cat(module, net)->name : 0;
+    }
+    return ODIN3_OK;
+}
+
 odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
     if (pair.old_node.v == pair.new_node.v) {
         odin3_log(ODIN3_LOG_ERROR, "node_replace: node %u cannot replace itself", pair.old_node.v);
         return ODIN3_ERR_INVALID_ARG;
     }
-    const odin3_node_rec *old_rec = odin3_node_live_rec(module, pair.old_node, "node_replace");
+    odin3_node_rec *old_rec = odin3_node_live_rec(module, pair.old_node, "node_replace");
     const odin3_node_rec *new_rec =
         old_rec != NULL ? odin3_node_live_rec(module, pair.new_node, "node_replace") : NULL;
     if (new_rec == NULL) {
@@ -341,13 +402,18 @@ odin3_status odin3_node_replace(odin3_module *module, odin3_node_pair pair) {
                   err);
         return ODIN3_ERR_INVALID_ARG;
     }
+    odin3_status st = odin3_node_record_pin_nets(module, pair.old_node); /* before the handover */
+    if (st != ODIN3_OK) {
+        return st;
+    }
     for (uint32_t i = 0; i < old_rec->pin_count; i++) {
         odin3_pin_rec *from = odin3_pin_rec_at(module, (odin3_pin_id){old_rec->first_pin.v + i});
         if (odin3_net_valid(from->net)) {
             odin3_net_handover(module, from, (odin3_pin_id){new_rec->first_pin.v + i});
         }
     }
-    return odin3_node_delete(module, pair.old_node);
+    node_kill(module, old_rec);
+    return ODIN3_OK;
 }
 
 odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node) {
@@ -360,17 +426,11 @@ odin3_status odin3_node_delete(odin3_module *module, odin3_node_id node) {
                   node.v);
         return ODIN3_ERR_INVALID_ARG;
     }
-    for (uint32_t i = 0; i < rec->pin_count; i++) {
-        odin3_pin_rec *pin = odin3_pin_rec_at(module, (odin3_pin_id){rec->first_pin.v + i});
-        if (odin3_net_valid(pin->net)) {
-            odin3_net_detach(module, pin);
-        }
+    odin3_status st = odin3_node_record_pin_nets(module, node);
+    if (st != ODIN3_OK) {
+        return st;
     }
-    if (rec->name != 0) {
-        (void)odin3_u64map_remove(module->node_names, rec->name);
-    }
-    rec->dead = true;
-    odin3_celltype_instances_dec(module->design, rec->type);
+    node_kill(module, rec);
     return ODIN3_OK;
 }
 

@@ -1,6 +1,7 @@
 /*
  * test_ir_compact.c — unit tests for odin3_module_compact (IR-6): dense renumbering in ID order,
- * old->new maps, tombstones, names, aliases, attributes, out of memory and linear cost.
+ * old->new maps, tombstones (with a dead node's parameters and pin net names), names, aliases,
+ * attributes, out of memory and linear cost.
  */
 #include "ir/celltype.h"
 #include "ir/check.h"
@@ -33,6 +34,7 @@ enum {
     OOM_CHAIN = 8,
     OOM_LIMIT = 100000,
     OOM_MIN_FAILURES = 20, /* allocation points a compact of the OOM scenario must pass through */
+    DELETE_OOM_MIN_FAILURES = 2, /* the first delete of a module: record table and name array */
     BIG_SMALL = 50000,
     BIG_LARGE = 200000,
     NAME_BUF = 32,
@@ -100,14 +102,21 @@ static odin3_module *new_module(const char *name) {
     return mod;
 }
 
+/* A new design (the old one destroyed) with the reader run and module `name`. */
+static void fresh_design(const char *name) {
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("reader"), &reader));
+    module = new_module(name);
+}
+
 void setUp(void) {
     errors_logged = 0;
     warnings_logged = 0;
     odin3_log_set_sink(count_sink, NULL);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("reader"), &reader));
-    module = new_module("top");
+    design = NULL;
+    fresh_design("top");
 }
 
 void tearDown(void) {
@@ -125,9 +134,9 @@ static const odin3_param_def k_link_params[] = {
     {"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, k_init_bits, 3, 0, 0}},
 };
 static const odin3_port_def k_link_ports[] = {
-    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL},
-    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL},
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_link = {
     "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL};
@@ -449,6 +458,12 @@ typedef struct obj_list {
     uint32_t count;
 } obj_list;
 
+/* A net or wire tombstone: parameters and pin names are a node's only. */
+static void verify_no_arrays(const odin3_tombstone *ts) {
+    TEST_ASSERT_TRUE(ts->params == NULL && ts->n_params == 0);
+    TEST_ASSERT_TRUE(ts->pin_nets == NULL && ts->n_pins == 0);
+}
+
 /* One tombstone per dead node, then net, then wire, each in old ID order. */
 static uint32_t verify_tombs_of(obj_list list, uint32_t tomb) {
     for (uint32_t i = 1; i < list.count; i++) {
@@ -463,8 +478,51 @@ static uint32_t verify_tombs_of(obj_list list, uint32_t tomb) {
         TEST_ASSERT_EQUAL_UINT32(obj->type.v, ts->type.v);
         TEST_ASSERT_EQUAL_UINT32(obj->name, ts->name);
         TEST_ASSERT_EQUAL_UINT32(obj->prov.v, ts->prov.v);
+        if (list.kind != ODIN3_OBJ_NODE) {
+            verify_no_arrays(ts);
+        }
     }
     return tomb;
+}
+
+/* Per chain node index i (odd: deleted), the names of the nets its A, Y, Z pins were on. */
+static uint32_t *chain_pin_names(const odin3_module *mod, const chain *ch) {
+    uint32_t *names = odin3_util_calloc(sizeof *names * LINK_PINS * ((size_t)ch->n + 1));
+    TEST_ASSERT_NOT_NULL(names);
+    for (uint32_t i = 1; i < ch->n; i += 2) {
+        uint32_t *at = &names[(size_t)LINK_PINS * i];
+        at[0] = odin3_net_name(mod, ch->chain[i - 1]);
+        at[1] = odin3_net_name(mod, ch->chain[i]);
+        at[2] = odin3_net_name(mod, ch->own[i]);
+    }
+    return names;
+}
+
+/*
+ * Every dead chain node's tombstone keeps LEVEL i and INIT's default and the names of the nets
+ * its pins were on, in pin order; the never-connected "pre" node has three unconnected pins.
+ */
+static void verify_chain_tombs(const snapshot *snap, const uint32_t *names, uint32_t n) {
+    uint32_t seen = 0;
+    for (uint32_t id = snap->tombstones; id < odin3_tombstone_end(design); id++) {
+        const odin3_tombstone *ts = odin3_tombstone_get(design, id);
+        if (ts->kind != ODIN3_OBJ_NODE) {
+            continue;
+        }
+        TEST_ASSERT_EQUAL_UINT32(LINK_PINS, ts->n_pins);
+        if (ts->name == intern("pre")) {
+            uint32_t none[LINK_PINS] = {0};
+            TEST_ASSERT_EQUAL_UINT32_ARRAY(none, ts->pin_nets, LINK_PINS);
+            continue;
+        }
+        TEST_ASSERT_EQUAL_UINT32(2, ts->n_params);
+        uint32_t i = (uint32_t)ts->params[LEVEL_PARAM].i;
+        TEST_ASSERT_EQUAL_UINT32(numbered_name("n", i), ts->name);
+        TEST_ASSERT_TRUE(odin3_value_equal(&k_link_params[1].dflt, &ts->params[1]));
+        TEST_ASSERT_EQUAL_UINT32_ARRAY(&names[(size_t)LINK_PINS * i], ts->pin_nets, LINK_PINS);
+        seen++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(n / 2, seen);
 }
 
 static void verify_tombstones(const snapshot *snap) {
@@ -509,6 +567,7 @@ static void test_compact_chain(void) {
     TEST_ASSERT_EQUAL_UINT32(CHAIN + 1, snap.dead_nets);
     TEST_ASSERT_EQUAL_UINT32(CHAIN / 2 + 1, snap.dead_wires);
     TEST_ASSERT_EQUAL_UINT32(2, snap.port_node[0].v); /* moves to 1 */
+    uint32_t *names = chain_pin_names(module, &ch);
 
     odin3_compact_map map;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, &map));
@@ -517,6 +576,8 @@ static void test_compact_chain(void) {
     verify_pins(module, &snap, &map);
     verify_nets_wires(module, &snap, &map);
     verify_tombstones(&snap);
+    verify_chain_tombs(&snap, names, CHAIN);
+    odin3_util_free(names);
     TEST_ASSERT_EQUAL_UINT32(1, odin3_module_port(module, 0).v);
     for (uint32_t k = 0; k < 2; k++) {
         TEST_ASSERT_EQUAL_UINT32(map.node[snap.port_node[k].v], odin3_module_port(module, k).v);
@@ -550,6 +611,107 @@ static odin3_wire_id make_wire(const char *name, const odin3_net_id *nets, uint3
     odin3_wire_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &spec, nets, &id));
     return id;
+}
+
+/* --- tombstones of dead nodes: parameters and pin net names (PHASE1 #14) ------------------- */
+
+static const uint8_t k_victim_init[] = {ODIN3_BIT_Z, ODIN3_BIT_1, ODIN3_BIT_0, ODIN3_BIT_X};
+
+/* A link node named `name` with LEVEL level and a 4-bit INIT, its pins on nets (or unconnected). */
+static odin3_node_id make_link(const char *name, int64_t level, const odin3_net_id *nets) {
+    odin3_value params[2] = {odin3_value_int(level), {ODIN3_VAL_BITS, 0, k_victim_init, 4, 0, 0}};
+    odin3_node_spec spec = {type_id("test_t7_link"), intern(name), src_prov(4), params, 2};
+    odin3_node_id id = {0};
+    if (nets == NULL) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &id));
+        return id;
+    }
+    odin3_netvec ports[LINK_PINS] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &id));
+    return id;
+}
+
+/* Three nets for a link's pins: "<prefix>a", an unnamed one, "<prefix>c". */
+static void make_link_nets(const char *prefix, odin3_net_id nets[LINK_PINS]) {
+    char name[NAME_BUF];
+    (void)snprintf(name, sizeof name, "%sa", prefix);
+    nets[0] = make_net(name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, src_prov(5), &nets[1]));
+    (void)snprintf(name, sizeof name, "%sc", prefix);
+    nets[2] = make_net(name);
+}
+
+/* Tombstone id is node `name`'s, with LEVEL level, the 4-bit INIT and these pin net names. */
+static void verify_link_tomb(uint32_t id, const char *name, int64_t level, const uint32_t *pins) {
+    const odin3_tombstone *ts = odin3_tombstone_get(design, id);
+    TEST_ASSERT_NOT_NULL(ts);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OBJ_NODE, ts->kind);
+    TEST_ASSERT_EQUAL_UINT32(intern(name), ts->name);
+    odin3_value want[2] = {odin3_value_int(level), {ODIN3_VAL_BITS, 0, k_victim_init, 4, 0, 0}};
+    TEST_ASSERT_EQUAL_UINT32(2, ts->n_params);
+    TEST_ASSERT_TRUE(odin3_value_equal(&want[0], &ts->params[0]));
+    TEST_ASSERT_TRUE(odin3_value_equal(&want[1], &ts->params[1]));
+    TEST_ASSERT_EQUAL_UINT32(LINK_PINS, ts->n_pins);
+    TEST_ASSERT_EQUAL_UINT32_ARRAY(pins, ts->pin_nets, LINK_PINS);
+}
+
+/* The pin-name records of dead nodes are gone after compact. */
+static void verify_side_table_dropped(const odin3_module *mod) {
+    TEST_ASSERT_TRUE(mod->dead_pins == NULL || odin3_u64map_count(mod->dead_pins) == 0);
+    TEST_ASSERT_EQUAL_size_t(0, mod->dead_pin_names.len);
+}
+
+/* A second round on the compacted module (the unnamed net is now net 2) works the same. */
+static void compact_again(uint32_t tomb) {
+    odin3_net_id after[LINK_PINS] = {{2},
+                                     odin3_module_find_net(module, intern("ta")),
+                                     odin3_module_find_net(module, intern("tc"))};
+    odin3_node_id again = make_link("again", 7, after);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, again));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
+    verify_link_tomb(tomb, "again", 7, (uint32_t[LINK_PINS]){0, intern("ta"), intern("tc")});
+    verify_side_table_dropped(module);
+}
+
+static void test_compact_tombstone_params_pin_nets(void) {
+    odin3_net_id nets[LINK_PINS];
+    make_link_nets("t", nets);
+    odin3_node_id victim = make_link("victim", 42, nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, victim));
+    odin3_net_id gone = make_net("gone");
+    kill_wire(module, make_wire("gw", &gone, 1));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_delete(module, gone));
+    uint32_t tombs = odin3_tombstone_end(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
+    TEST_ASSERT_EQUAL_UINT32(tombs + 3, odin3_tombstone_end(design));
+    uint32_t want[LINK_PINS] = {intern("ta"), 0, intern("tc")};
+    verify_link_tomb(tombs, "victim", 42, want);
+    const odin3_tombstone *net = odin3_tombstone_get(design, tombs + 1);
+    const odin3_tombstone *wire = odin3_tombstone_get(design, tombs + 2);
+    TEST_ASSERT_TRUE(net->kind == ODIN3_OBJ_NET && net->name == intern("gone"));
+    TEST_ASSERT_TRUE(wire->kind == ODIN3_OBJ_WIRE && wire->name == intern("gw"));
+    verify_no_arrays(net);
+    verify_no_arrays(wire);
+    verify_side_table_dropped(module);
+    verify_check_no_errors(module);
+    compact_again(tombs + 3);
+}
+
+/* A replaced node's tombstone names the nets its pins were on before the new node took them. */
+static void test_compact_replaced_node_pin_nets(void) {
+    odin3_net_id nets[LINK_PINS];
+    make_link_nets("r", nets);
+    odin3_node_id old = make_link("old", 3, nets);
+    odin3_node_id now = make_link("new", 4, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_replace(module, (odin3_node_pair){old, now}));
+    TEST_ASSERT_EQUAL_UINT32(nets[0].v,
+                             odin3_pin_net(module, odin3_node_port(module, now, 0).first).v);
+    uint32_t tombs = odin3_tombstone_end(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
+    TEST_ASSERT_EQUAL_UINT32(tombs + 1, odin3_tombstone_end(design));
+    verify_link_tomb(tombs, "old", 3, (uint32_t[LINK_PINS]){intern("ra"), 0, intern("rc")});
+    verify_side_table_dropped(module);
+    verify_check_no_errors(module);
 }
 
 static void set_int_attr(odin3_objref obj, const char *key, int64_t num) {
@@ -818,11 +980,12 @@ static uint64_t fingerprint(const odin3_module *mod) {
 /* --- out of memory -----------------------------------------------------------------------------
  */
 
-/* A fresh module with dead nodes, nets and wires, merged names, aliases and attributes. */
-static odin3_module *oom_module(long attempt) {
-    char name[NAME_BUF];
-    (void)snprintf(name, sizeof name, "oom%ld", attempt);
-    module = new_module(name);
+/*
+ * A fresh design and module with dead nodes, nets and wires, merged names, aliases and
+ * attributes (a fresh design, so its provenance arena is one chunk that exhaust_prov_arena fills).
+ */
+static odin3_module *oom_module(void) {
+    fresh_design("oom");
     chain ch = {OOM_CHAIN, true, true, NULL, NULL, NULL, NULL};
     dead_prefix(module);
     chain_build(module, &ch);
@@ -830,6 +993,19 @@ static odin3_module *oom_module(long attempt) {
     chain_free(&ch);
     (void)alias_build();
     return module;
+}
+
+/*
+ * Uses up the provenance arena's only chunk (a fresh design's), so the next tombstone copy needs
+ * a new one.
+ */
+static void exhaust_prov_arena(void) {
+    odin3_arena *arena = design->prov->arena;
+    size_t reserved = odin3_arena_bytes_reserved(arena);
+    while (odin3_arena_bytes_used(arena) < reserved) {
+        TEST_ASSERT_NOT_NULL(odin3_arena_alloc(arena, 1));
+        TEST_ASSERT_EQUAL_size_t(reserved, odin3_arena_bytes_reserved(arena)); /* no new chunk */
+    }
 }
 
 /* What a module was before a failing compact. */
@@ -850,10 +1026,12 @@ static void oom_verify_failed(odin3_module *mod, odin3_status st, const odin3_co
     verify_check_no_errors(mod);
 }
 
-/* One try: a fresh module, allocation `fail_at` fails. */
+/* One try: a fresh design and module, allocation `fail_at` fails. */
 static odin3_status oom_try(long fail_at) {
-    odin3_module *mod = oom_module(fail_at);
+    odin3_module *mod = oom_module();
     oom_before before = {fingerprint(mod), mod->nodes, mod->arena};
+    exhaust_prov_arena();
+    size_t prov_bytes = odin3_arena_bytes_reserved(design->prov->arena);
     odin3_compact_map map;
     odin3_util_set_alloc_fail_after(fail_at);
     odin3_status st = odin3_module_compact(mod, &map);
@@ -863,6 +1041,9 @@ static odin3_status oom_try(long fail_at) {
         return st;
     }
     TEST_ASSERT_TRUE(before.fingerprint != fingerprint(mod)); /* it did compact */
+    /* the dead nodes' tombstone arrays took a new arena chunk: the sweep failed that too */
+    TEST_ASSERT_TRUE(odin3_arena_bytes_reserved(design->prov->arena) > prov_bytes);
+    verify_side_table_dropped(mod);
     verify_check_no_errors(mod);
     odin3_compact_map_free(&map);
     return st;
@@ -877,6 +1058,56 @@ static void test_compact_oom_leaves_ir_unchanged(void) {
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(OOM_MIN_FAILURES, failures);
+}
+
+/*
+ * Deleting (or replacing) a node records its pins' net names; on out of memory the IR and the
+ * records are unchanged. Each try uses a fresh module, so the record table starts empty.
+ */
+static odin3_status delete_try(long fail_at, bool replace) {
+    char name[NAME_BUF];
+    (void)snprintf(name, sizeof name, "%s%ld", replace ? "rep" : "del", fail_at);
+    module = new_module(name);
+    odin3_net_id nets[LINK_PINS];
+    make_link_nets("d", nets);
+    odin3_node_id victim = make_link("victim", 1, nets);
+    odin3_node_id spare = make_link("spare", 2, NULL);
+    uint64_t before = fingerprint(module);
+    odin3_util_set_alloc_fail_after(fail_at);
+    odin3_status st = replace ? odin3_node_replace(module, (odin3_node_pair){victim, spare})
+                              : odin3_node_delete(module, victim);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_TRUE(before == fingerprint(module));
+        TEST_ASSERT_TRUE(odin3_node_live(module, victim));
+        verify_side_table_dropped(module); /* nothing recorded */
+        return st;
+    }
+    uint32_t tombs = odin3_tombstone_end(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
+    verify_link_tomb(tombs, "victim", 1, (uint32_t[LINK_PINS]){intern("da"), 0, intern("dc")});
+    verify_check_no_errors(module);
+    return st;
+}
+
+static void delete_oom_sweep(bool replace) {
+    uint32_t failures = 0;
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (long fail_at = 0; fail_at < OOM_LIMIT && st != ODIN3_OK; fail_at++) {
+        st = delete_try(fail_at, replace);
+        failures += st != ODIN3_OK ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(DELETE_OOM_MIN_FAILURES, failures);
+}
+
+static void test_node_delete_oom_records_nothing(void) {
+    delete_oom_sweep(false);
+}
+
+static void test_node_replace_oom_records_nothing(void) {
+    delete_oom_sweep(true);
 }
 
 /* --- linear cost -------------------------------------------------------------------------------
@@ -898,9 +1129,12 @@ static compact_cost big_compact(uint32_t count) {
     chain ch = {count, false, false, NULL, NULL, NULL, NULL};
     chain_build(module, &ch);
     chain_delete_odd(module, &ch);
+    size_t prov_bytes = odin3_arena_bytes_reserved(design->prov->arena);
     clock_t start = clock();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
-    compact_cost cost = {(double)(clock() - start) / CLOCKS_PER_SEC, module_bytes(module)};
+    compact_cost cost = {(double)(clock() - start) / CLOCKS_PER_SEC,
+                         module_bytes(module) +
+                             (odin3_arena_bytes_reserved(design->prov->arena) - prov_bytes)};
     TEST_ASSERT_EQUAL_UINT32(count / 2 + 2 + 1, odin3_module_node_end(module)); /* + 2 ports */
     odin3_node_id last = odin3_module_find_node(module, numbered_name("n", count));
     TEST_ASSERT_EQUAL_UINT32(odin3_module_node_end(module) - 1, last.v);
@@ -928,7 +1162,11 @@ int main(void) {
     RUN_TEST(test_compact_drops_dead_wire_memberships);
     RUN_TEST(test_compact_empty_module);
     RUN_TEST(test_compact_null_module);
+    RUN_TEST(test_compact_tombstone_params_pin_nets);
+    RUN_TEST(test_compact_replaced_node_pin_nets);
     RUN_TEST(test_compact_oom_leaves_ir_unchanged);
+    RUN_TEST(test_node_delete_oom_records_nothing);
+    RUN_TEST(test_node_replace_oom_records_nothing);
     RUN_TEST(test_compact_linear);
     return UNITY_END();
 }

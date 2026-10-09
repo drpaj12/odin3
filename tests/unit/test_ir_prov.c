@@ -7,6 +7,7 @@
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "ir/value.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/arena.h"
@@ -15,6 +16,7 @@
 #include "util/str.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +37,7 @@ enum {
     SAVE_MAX = 1024,
     WIDE = 1000,
     LINEAR_BYTES = 64, /* index bytes per (record + object slot) */
+    TOMB_BAD = 13,
 };
 
 static odin3_design *design;
@@ -486,8 +489,15 @@ static void chain_build(chain_scenario *sc) {
     kill_node(sc->gates[0][1]);
     kill_node(sc->gates[1][2]);
     /* compact (Task 7) would free the dead add's slot and leave this behind */
-    odin3_tombstone tomb = {odin3_module_id_of(module), ODIN3_OBJ_NODE,
-                            odin3_node_type(module, sc->add), 0, sc->source};
+    odin3_tombstone tomb = {odin3_module_id_of(module),
+                            ODIN3_OBJ_NODE,
+                            odin3_node_type(module, sc->add),
+                            0,
+                            sc->source,
+                            NULL,
+                            0,
+                            NULL,
+                            0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &tomb));
     sc->tomb = odin3_tombstone_end(design) - 1;
 }
@@ -692,7 +702,7 @@ static void test_hash_consing_100k(void) {
 static void test_tombstones(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_tombstone_end(design));
     odin3_module_id mid = odin3_module_id_of(module);
-    odin3_tombstone net = {mid, ODIN3_OBJ_NET, {0}, intern("old_net"), {0}};
+    odin3_tombstone net = {mid, ODIN3_OBJ_NET, {0}, intern("old_net"), {0}, NULL, 0, NULL, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &net));
     const odin3_tombstone *got = odin3_tombstone_get(design, 1);
     TEST_ASSERT_NOT_NULL(got);
@@ -706,24 +716,87 @@ static void test_tombstone_invalid(void) {
     odin3_module_id mid = odin3_module_id_of(module);
     odin3_celltype_id and_type = {0};
     TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_AND_"), &and_type));
-    odin3_tombstone gate = {mid, ODIN3_OBJ_NODE, and_type, 0, {0}};
+    odin3_tombstone gate = {mid, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 0, NULL, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &gate));
-    odin3_tombstone bad[7] = {
-        {{0}, ODIN3_OBJ_NODE, and_type, 0, {0}},         /* no module */
-        {{mid.v + 1}, ODIN3_OBJ_NODE, and_type, 0, {0}}, /* unknown module */
-        {mid, ODIN3_OBJ_MODULE, {0}, 0, {0}},            /* modules are not deleted */
-        {mid, ODIN3_OBJ_WIRE, {0}, 0, {1}},              /* no such record */
-        {mid, ODIN3_OBJ_NODE, {0}, 0, {0}},              /* a node without a type */
-        {mid, ODIN3_OBJ_NODE, {UINT32_MAX}, 0, {0}},     /* an unknown type */
-        {mid, ODIN3_OBJ_NET, and_type, 0, {0}},          /* a net with a type */
+    odin3_value one = odin3_value_int(1);
+    odin3_value broken = {(odin3_value_kind)99, 0, NULL, 0, 0, 0};
+    uint32_t pin = 0;
+    uint32_t not_str = UINT32_MAX;
+    odin3_tombstone bad[TOMB_BAD] = {
+        {{0}, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 0, NULL, 0},         /* no module */
+        {{mid.v + 1}, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 0, NULL, 0}, /* unknown module */
+        {mid, ODIN3_OBJ_MODULE, {0}, 0, {0}, NULL, 0, NULL, 0},        /* modules are not deleted */
+        {mid, ODIN3_OBJ_WIRE, {0}, 0, {1}, NULL, 0, NULL, 0},          /* no such record */
+        {mid, ODIN3_OBJ_NODE, {0}, 0, {0}, NULL, 0, NULL, 0},          /* a node without a type */
+        {mid, ODIN3_OBJ_NODE, {UINT32_MAX}, 0, {0}, NULL, 0, NULL, 0}, /* an unknown type */
+        {mid, ODIN3_OBJ_NET, and_type, 0, {0}, NULL, 0, NULL, 0},      /* a net with a type */
+        {mid, ODIN3_OBJ_NET, {0}, 0, {0}, &one, 1, NULL, 0},           /* a net with parameters */
+        {mid, ODIN3_OBJ_WIRE, {0}, 0, {0}, NULL, 0, &pin, 1},          /* a wire with pins */
+        {mid, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 1, NULL, 0},     /* parameters missing */
+        {mid, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 0, NULL, 1},     /* pin names missing */
+        {mid, ODIN3_OBJ_NODE, and_type, 0, {0}, &broken, 1, NULL, 0},  /* an invalid value */
+        {mid, ODIN3_OBJ_NODE, and_type, 0, {0}, NULL, 0, &not_str, 1}, /* not a strtab ID */
     };
-    for (uint32_t i = 0; i < 7; i++) {
+    for (uint32_t i = 0; i < TOMB_BAD; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(design, &bad[i]));
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(design, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_tombstone_add(NULL, &gate));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_tombstone_end(design));
-    TEST_ASSERT_EQUAL_size_t(9, errors_logged);
+    TEST_ASSERT_EQUAL_size_t(TOMB_BAD + 2, errors_logged);
+}
+
+/* A node tombstone with an int and a bits parameter and three pin net names (one unnamed). */
+static const uint8_t k_tomb_bits[] = {ODIN3_BIT_1, ODIN3_BIT_Z, ODIN3_BIT_0};
+
+static void tomb_arrays(odin3_value params[2], uint32_t pin_nets[3]) {
+    params[0] = odin3_value_int(-5);
+    params[1] = (odin3_value){ODIN3_VAL_BITS, 0, k_tomb_bits, 3, 0, 0};
+    pin_nets[0] = intern("a");
+    pin_nets[1] = 0;
+    pin_nets[2] = intern("c");
+}
+
+static odin3_tombstone node_tomb(const odin3_value *params, const uint32_t *pin_nets) {
+    odin3_celltype_id and_type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_AND_"), &and_type));
+    return (odin3_tombstone){
+        odin3_module_id_of(module), ODIN3_OBJ_NODE, and_type, 0, {0}, params, 2, pin_nets, 3};
+}
+
+/* The stored tombstone's arrays equal the originals and are the design's own copies. */
+static void verify_tomb_arrays(const odin3_tombstone *got, const odin3_value *params,
+                               const uint32_t *pin_nets) {
+    TEST_ASSERT_NOT_NULL(got);
+    TEST_ASSERT_EQUAL_UINT32(2, got->n_params);
+    TEST_ASSERT_EQUAL_UINT32(3, got->n_pins);
+    bool copied =
+        got->params != params && got->pin_nets != pin_nets && got->params[1].bits != k_tomb_bits;
+    TEST_ASSERT_TRUE(copied);
+    bool equal = odin3_value_equal(&params[0], &got->params[0]) &&
+                 odin3_value_equal(&params[1], &got->params[1]);
+    TEST_ASSERT_TRUE(equal);
+    TEST_ASSERT_EQUAL_UINT32_ARRAY(pin_nets, got->pin_nets, 3);
+}
+
+static void test_tombstone_arrays_copied(void) {
+    odin3_value params[2];
+    uint32_t pin_nets[3];
+    tomb_arrays(params, pin_nets);
+    odin3_tombstone tomb = node_tomb(params, pin_nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &tomb));
+    odin3_value want[2];
+    uint32_t want_nets[3];
+    tomb_arrays(want, want_nets);
+    params[0].i = 99; /* the caller's arrays are not kept */
+    pin_nets[2] = 0;
+    verify_tomb_arrays(odin3_tombstone_get(design, 1), want, want_nets);
+    odin3_tombstone net = {
+        odin3_module_id_of(module), ODIN3_OBJ_NET, {0}, 0, {0}, NULL, 0, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &net));
+    const odin3_tombstone *got = odin3_tombstone_get(design, 2);
+    TEST_ASSERT_TRUE(got->params == NULL && got->n_params == 0);
+    TEST_ASSERT_TRUE(got->pin_nets == NULL && got->n_pins == 0);
 }
 
 static void test_lookups_out_of_range(void) {
@@ -941,7 +1014,8 @@ static void test_source_oom_sweep(void) {
 static void test_run_and_tombstone_oom(void) {
     uint32_t failures = 0;
     uint32_t name = intern("p");
-    odin3_tombstone tomb = {odin3_module_id_of(module), ODIN3_OBJ_NET, {0}, 0, {0}};
+    odin3_tombstone tomb = {
+        odin3_module_id_of(module), ODIN3_OBJ_NET, {0}, 0, {0}, NULL, 0, NULL, 0};
     for (uint32_t i = 0; i < 2 * 8; i++) { /* vecs of 8 then 16 (slot 0 reserved) grow twice */
         odin3_status tst = ODIN3_ERR_NO_MEMORY;
         for (long fail_at = 0; fail_at < OOM_LIMIT && tst != ODIN3_OK; fail_at++) {
@@ -964,6 +1038,40 @@ static void test_run_and_tombstone_oom(void) {
     }
     TEST_ASSERT_EQUAL_UINT32(4, failures); /* two growths each */
     TEST_ASSERT_EQUAL_UINT32(2 * 8 + 1, odin3_tombstone_end(design));
+}
+
+/* Rounds bytes up to the arena's alignment (util/arena.c), as one arena allocation uses. */
+static size_t arena_rounded(size_t bytes) {
+    size_t align = _Alignof(max_align_t);
+    return (bytes + align - 1) / align * align;
+}
+
+/*
+ * Each of a node tombstone's three arena copies (parameter array, bits payload, pin names) in
+ * turn needs a new arena chunk: a fresh design whose provenance arena has exactly the room for
+ * the copies before it. The one allocation fails once and leaves the table unchanged.
+ */
+static void test_tombstone_arrays_oom(void) {
+    size_t room[3] = {0, arena_rounded(2 * sizeof(odin3_value)),
+                      arena_rounded(2 * sizeof(odin3_value)) + arena_rounded(3)};
+    for (uint32_t i = 0; i < 3; i++) {
+        fresh_design();
+        odin3_value params[2];
+        uint32_t pin_nets[3];
+        tomb_arrays(params, pin_nets);
+        odin3_tombstone tomb = node_tomb(params, pin_nets);
+        exhaust_prov_arena(room[i] + 1);
+        odin3_arena *arena = design->prov->arena;
+        TEST_ASSERT_EQUAL_size_t(room[i],
+                                 odin3_arena_bytes_reserved(arena) - odin3_arena_bytes_used(arena));
+        odin3_util_set_alloc_fail_after(0);
+        odin3_status st = odin3_tombstone_add(design, &tomb);
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_UINT32(1, odin3_tombstone_end(design));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_tombstone_add(design, &tomb));
+        verify_tomb_arrays(odin3_tombstone_get(design, 1), params, pin_nets);
+    }
 }
 
 /* A fresh design with a 100-deep chain over one source; returns the chain's last record. */
@@ -1032,6 +1140,7 @@ int main(void) {
     RUN_TEST(test_hash_consing_100k);
     RUN_TEST(test_tombstones);
     RUN_TEST(test_tombstone_invalid);
+    RUN_TEST(test_tombstone_arrays_copied);
     RUN_TEST(test_lookups_out_of_range);
     RUN_TEST(test_null_arguments);
     RUN_TEST(test_module_prov_indexed);
@@ -1041,6 +1150,7 @@ int main(void) {
     RUN_TEST(test_derive_parents_oom_sweep);
     RUN_TEST(test_source_oom_sweep);
     RUN_TEST(test_run_and_tombstone_oom);
+    RUN_TEST(test_tombstone_arrays_oom);
     RUN_TEST(test_sources_oom_sweep);
     RUN_TEST(test_index_oom_sweep);
     return UNITY_END();

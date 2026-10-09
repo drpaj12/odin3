@@ -21,9 +21,11 @@
 
 /*
  * Compact builds a complete new set of containers from the live objects while the module stays
- * untouched, reserves the tombstones, and only then (nothing left that can fail) appends the
- * tombstones, swaps the new containers in and frees the old ones. On out of memory the new
- * containers are freed and the module is as it was.
+ * untouched, reserves the tombstones and copies the dead nodes' tombstone arrays (parameters, pin
+ * net names) into the design, and only then (nothing left that can fail) appends the tombstones,
+ * swaps the new containers in, drops the dead-pin table and frees the old containers. On out of
+ * memory the new containers are freed and the module is as it was (copied tombstone arrays stay
+ * unused in the design's arena).
  */
 
 /* The containers compact fills; swapped into the module on success, freed on failure. */
@@ -47,7 +49,9 @@ typedef struct compact_ctx {
     odin3_compact_map map;
     compact_out out;
     uint32_t live_nodes, live_pins, live_nets, live_wires;
-    uint32_t dead; /* tombstones to write: dead nodes, nets and wires */
+    uint32_t dead;               /* tombstones to write: dead nodes, nets and wires */
+    uint32_t dead_nodes;         /* of which dead nodes */
+    odin3_tombstone *node_tombs; /* dead_nodes tombstones in ID order, arrays owned by the design */
 } compact_ctx;
 
 /* --- numbering ----------------------------------------------------------------------------- */
@@ -77,6 +81,7 @@ static void number_nodes(compact_ctx *ctx) {
         const odin3_node_rec *rec = odin3_node_rec_cat(module, (odin3_node_id){i});
         if (rec->dead) {
             ctx->dead++;
+            ctx->dead_nodes++;
             continue;
         }
         ctx->map.node[i] = ++ctx->live_nodes;
@@ -465,38 +470,74 @@ static odin3_status tombstones_reserve(const compact_ctx *ctx) {
     return odin3_vec_reserve(tombs, tombs->len + ctx->dead);
 }
 
+/* The tombstone of a dead net or wire (no type, no arrays). */
+static odin3_tombstone tombstone_of(const odin3_module *module, odin3_objkind kind, uint32_t name,
+                                    odin3_prov_id prov) {
+    return (odin3_tombstone){module->id, kind, {0}, name, prov, NULL, 0, NULL, 0};
+}
+
+/* The pin net names recorded when node `id` was deleted (none if nothing was recorded). */
+static void tombstone_pin_nets(const odin3_module *module, uint32_t id, odin3_tombstone *tomb) {
+    uint64_t first = 0;
+    if (module->dead_pins != NULL && odin3_u64map_get(module->dead_pins, id, &first)) {
+        tomb->pin_nets = odin3_vec_cat(&module->dead_pin_names, (size_t)first);
+        tomb->n_pins = odin3_node_rec_cat(module, (odin3_node_id){id})->pin_count;
+    }
+}
+
+/* Every dead node's tombstone, its parameter values and pin net names copied into the design. */
+static odin3_status tombstones_stage(compact_ctx *ctx) {
+    if (ctx->dead_nodes == 0) {
+        return ODIN3_OK;
+    }
+    ctx->node_tombs = odin3_util_calloc(sizeof *ctx->node_tombs * ctx->dead_nodes);
+    if (ctx->node_tombs == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    const odin3_module *module = ctx->module;
+    uint32_t k = 0;
+    for (uint32_t i = 1; i < ctx->map.n_node; i++) {
+        const odin3_node_rec *rec = odin3_node_rec_cat(module, (odin3_node_id){i});
+        if (!rec->dead) {
+            continue;
+        }
+        odin3_tombstone *tomb = &ctx->node_tombs[k++];
+        *tomb = (odin3_tombstone){module->id,  ODIN3_OBJ_NODE, rec->type, rec->name, rec->prov,
+                                  rec->params, rec->n_params,  NULL,      0};
+        tombstone_pin_nets(module, i, tomb);
+        odin3_status st = odin3_tombstone_own(module->design, tomb);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
 static void tombstone_write(const odin3_module *module, odin3_tombstone tomb) {
     if (odin3_prov_get(module->design, tomb.prov) == NULL) {
         tomb.prov = (odin3_prov_id){0}; /* not a record (check rule 7): keep the rest */
     }
-    tomb.module = module->id;
-    odin3_status st = odin3_tombstone_add(module->design, &tomb);
-    assert(st == ODIN3_OK); /* valid and reserved */
+    odin3_status st = odin3_tombstone_append(module->design, &tomb);
+    assert(st == ODIN3_OK); /* valid, owned and reserved */
     (void)st;
 }
 
-/* One tombstone per dead node, then net, then wire, each in ID order (IR-6). */
+/* One tombstone per dead node (staged), then net, then wire, each in ID order (IR-6). */
 static void tombstones_write(const compact_ctx *ctx) {
     const odin3_module *module = ctx->module;
-    for (uint32_t i = 1; i < ctx->map.n_node; i++) {
-        const odin3_node_rec *rec = odin3_node_rec_cat(module, (odin3_node_id){i});
-        if (rec->dead) {
-            tombstone_write(
-                module, (odin3_tombstone){{0}, ODIN3_OBJ_NODE, rec->type, rec->name, rec->prov});
-        }
+    for (uint32_t k = 0; k < ctx->dead_nodes; k++) {
+        tombstone_write(module, ctx->node_tombs[k]);
     }
     for (uint32_t i = 1; i < ctx->map.n_net; i++) {
         const odin3_net_rec *rec = odin3_net_rec_cat(module, (odin3_net_id){i});
         if (rec->dead) {
-            tombstone_write(module,
-                            (odin3_tombstone){{0}, ODIN3_OBJ_NET, {0}, rec->name, rec->prov});
+            tombstone_write(module, tombstone_of(module, ODIN3_OBJ_NET, rec->name, rec->prov));
         }
     }
     for (uint32_t i = 1; i < ctx->map.n_wire; i++) {
         const odin3_wire_rec *rec = odin3_wire_rec_cat(module, (odin3_wire_id){i});
         if (rec->dead) {
-            tombstone_write(module,
-                            (odin3_tombstone){{0}, ODIN3_OBJ_WIRE, {0}, rec->name, rec->prov});
+            tombstone_write(module, tombstone_of(module, ODIN3_OBJ_WIRE, rec->name, rec->prov));
         }
     }
 }
@@ -534,6 +575,7 @@ static void commit(compact_ctx *ctx) {
     }
     swap_in(ctx);
     out_free(&ctx->out);
+    odin3_module_dead_pins_free(module); /* every dead node is gone */
 }
 
 /* Every fallible step: numbering, the new containers, the copies, the tombstone room. */
@@ -563,7 +605,10 @@ static odin3_status build(compact_ctx *ctx) {
     if (st == ODIN3_OK) {
         st = copy_attrs(ctx);
     }
-    return st == ODIN3_OK ? tombstones_reserve(ctx) : st;
+    if (st == ODIN3_OK) {
+        st = tombstones_reserve(ctx);
+    }
+    return st == ODIN3_OK ? tombstones_stage(ctx) : st;
 }
 
 odin3_status odin3_module_compact(odin3_module *module, odin3_compact_map *map) {
@@ -581,9 +626,11 @@ odin3_status odin3_module_compact(odin3_module *module, odin3_compact_map *map) 
     if (st != ODIN3_OK) {
         out_free(&ctx.out);
         odin3_compact_map_free(&ctx.map);
+        odin3_util_free(ctx.node_tombs);
         return st;
     }
     commit(&ctx);
+    odin3_util_free(ctx.node_tombs);
     if (map != NULL) {
         *map = ctx.map;
     } else {

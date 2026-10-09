@@ -2,7 +2,8 @@
 # blif-roundtrip: BLIF round-trip gate over a golden tree or a fixture directory.
 #
 # For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
-# directory: every *.blif) this runs odin3-blif-rt (read, check FULL, write), then
+# directory: every *.blif) this runs odin3-blif-rt (load the --techlib libraries, read, check
+# FULL, write), then
 #   TEXT gate        normalized original == normalized output: continuations joined, comments
 #                    stripped, whitespace collapsed, blank lines and empty .inputs/.outputs/
 #                    .clock lines dropped, .subckt formals sorted, repeated .attr/.param keys
@@ -25,14 +26,15 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
-usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
-                      [--fixtures DIR | GOLDEN_ROOT]
+usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--techlib LIB]... [--rt PATH]
+                      [--nc PATH] [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed)
   -j N          parallel jobs (default 2; LargeRam needs about 2.5 GB per job)
   -t SECONDS    per-file netlist-compare timeout (default 600)
   -m GB         per-job netlist-compare address-space cap (default 6; 2 jobs = 12 GB)
   --largest-first  process the biggest files first (default: smallest first)
+  --techlib LIB tech library (.o3lib) loaded before each read, e.g. lib/vtr.o3lib (repeatable)
   --rt PATH     odin3-blif-rt binary (default build/release/odin3-blif-rt in the repo)
   --nc PATH     netlist-compare (default tools/netlist-compare/netlist-compare)
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
@@ -174,7 +176,11 @@ worker() {
     out=$BRT_TMP/$id.out.blif
     errf=$BRT_TMP/$id.err
     t0=$(now)
-    /usr/bin/time -f '%M' -o "$errf.rss" "$BRT_RT" "$path" "$out" 2>"$errf" || rc=$?
+    local -a libs=()
+    while IFS= read -r lib; do
+        if [ -n "$lib" ]; then libs+=(--techlib "$lib"); fi
+    done <<<"$BRT_TECHLIBS"
+    /usr/bin/time -f '%M' -o "$errf.rss" "$BRT_RT" "${libs[@]}" "$path" "$out" 2>"$errf" || rc=$?
     rt_secs=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
     rss=$(tail -n 1 "$errf.rss" 2>/dev/null || echo 0)
     errs=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\1/p' "$errf" | head -n 1)
@@ -259,7 +265,7 @@ report() {
 }
 
 main() {
-    local jobs=2 root="" fixtures="" out="" keep=0 order=n repo
+    local jobs=2 root="" fixtures="" out="" keep=0 order=n repo techlibs=
     repo=$(dirname "$(dirname "$HERE")")
     BRT_RT=$repo/build/release/odin3-blif-rt
     BRT_NC=$HERE/../netlist-compare/netlist-compare
@@ -275,6 +281,9 @@ main() {
         --out) out=${2:?}; shift 2 ;;
         --keep) keep=1; shift ;;
         --largest-first) order=nr; shift ;;
+        --techlib)
+            [ -f "${2:?}" ] || { echo "blif-roundtrip: no tech library at $2" >&2; exit 2; }
+            techlibs=$techlibs$(readlink -f "$2")$'\n'; shift 2 ;;
         --fixtures) fixtures=${2:?}; shift 2 ;;
         -h | --help) usage ;;
         -*) usage ;;
@@ -290,6 +299,7 @@ main() {
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
     export BRT_RT BRT_NC BRT_TIMEOUT BRT_NC_MEM_KB BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
+    export BRT_TECHLIBS=$techlibs
     export -f normalize stubs is_multi_driver now struct_gate worker
 
     # Work list: by size (see --largest-first), one representative per content sha256, duplicates after.
@@ -308,6 +318,7 @@ main() {
             }' >"$list"
     if [ ! -s "$list" ]; then echo "blif-roundtrip: no BLIF files under $root" >&2; exit 2; fi
     echo "blif-roundtrip: $(wc -l <"$list") files, -j $jobs, nc timeout ${BRT_TIMEOUT}s, work dir $out" >&2
+    if [ -n "$techlibs" ]; then echo "blif-roundtrip: tech libraries: $(echo "$techlibs" | xargs)" >&2; fi
     xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
     local rc=0
     set +e

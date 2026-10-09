@@ -1,4 +1,4 @@
-"""Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample,
+"""Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures and the BLIF reader.
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
@@ -14,6 +14,7 @@ for _sub in (
     "tools/netlist-compare",
     "tools/equiv-check",
     "tools/golden-sample",
+    "tools/golden-blackboxes",
     "tools/project-fixtures",
     "tools/token-cost",
 ):
