@@ -56,6 +56,21 @@ filled from a script or a project file (PHASE1 #18). It holds:
 - **partial-mapping rules** (§7), so a project says how its design meets that architecture;
 - optionally the flow itself (a pass script, as `odin3 script.o3`), so one file reproduces a run.
 
+**Architecture at the project level.** The project states what the target offers, not only
+which files describe it, so the mapper (and a reader of the project) sees the available hard
+resources in one place:
+- **inventory**: `available <libcell> <count>` per hard cell (DSPs, RAM blocks, carry-chain
+  adders, …); filled from the device (Quartus `DEVICE`, a VPR arch's grid/layout) when known,
+  overridable in the project; unlimited when neither says. Budgets (`limit`) are checked
+  against it, and `stats` reports used / available per cell after mapping;
+- **capability overrides** for architecture research without editing the shared library:
+  `hide <libcell>` (pretend the target lacks it), `cell <name> from <libcell> param …`
+  (a variant with other widths/modes, e.g. a 27×27 multiplier), or a project-local `.o3lib`
+  adding hypothetical hard blocks; all are scoped to the project and recorded in provenance;
+- **architecture summary**: `odin3 --arch-report` (and the `stats` pass) prints the loaded
+  architecture as the project sees it — each cell, its ports/parameter ranges, inventory and the
+  rules that apply — so "what is available" is visible before mapping runs.
+
 **Partial-mapping rules** steer §7 without code. Each rule has a scope (global, a module, or a
 hierarchical instance path, with `*` wildcards) and a subject (an operator or cell kind such as
 `$mul`, `$mem`, `$add`, or a tech-library cell); forms:
@@ -79,7 +94,7 @@ Ways to fill it (all produce the same record; a script may also list files direc
 - **native project file** `.o3proj` (`read_project <file>`): line-oriented like `.o3lib`
   (`file verilog rtl/top.v`, `incdir rtl/include`, `define WIDTH=8`, `top top`,
   `param top.WIDTH 16`, `arch k6_frac_N10_mem32K.o3lib`, `map * $mul to multiply min_width 9`,
-  `limit multiply 40`, `flow synth.o3`); relative paths resolve against the
+  `limit multiply 40`, `available multiply 112`, `hide dual_port_ram`, `flow synth.o3`); relative paths resolve against the
   project file's directory;
 - **EDA file list** (`-f files.f`): one file per line, `+incdir+<dir>`, `+define+<name>[=<v>]`,
   `-v <file>` / `-y <dir>` library files and directories, nested `-f`;

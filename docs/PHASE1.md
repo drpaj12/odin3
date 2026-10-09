@@ -87,7 +87,9 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     goldens) via a rerunnable script; CI checks the committed fixtures.
 18. **Project input** (Peter, 2026-10-09; DESIGN §4.0): one project record feeds every reader
     (files with language and library, include paths, defines, top and its parameter overrides,
-    the architecture (tech libraries / arch files), partial-mapping rules (scoped map/soft/keep,
+    the architecture (tech libraries / arch files, plus what it offers: per-cell inventory from the
+    device or the project, research overrides `hide`/variant cells/project-local `.o3lib`, an
+    architecture report), partial-mapping rules (scoped map/soft/keep,
     thresholds, budgets, project patterns; source attribute > instance > module > global > arch
     default), optionally the flow script), filled from a native `.o3proj`, an EDA `-f` file list, a Quartus `.qsf`/`.qpf`
     import, or (later) an Odin II XML config. `.o3proj`, `-f` and `.qsf` land in Phase 2 with the
