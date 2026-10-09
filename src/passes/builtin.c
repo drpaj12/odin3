@@ -1,4 +1,5 @@
 /* builtin.c — the built-in passes: read_blif, write_blif, check, compact, stats, hierarchy. */
+#include "passes/builtin.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -23,10 +24,10 @@
 
 /* --- argument helpers ----------------------------------------------------------------------- */
 
-/* The single word of args, NUL-terminated in buf. INVALID_ARG (logged) unless exactly one. */
+/* The single non-empty word of args, NUL-terminated in buf. INVALID_ARG (logged) otherwise. */
 static odin3_status one_path(const char *pass, odin3_bytes args, odin3_strbuf *buf) {
     odin3_bytes word = odin3_pass_arg_next(&args);
-    if (word.len == 0 || odin3_pass_arg_next(&args).len > 0) {
+    if (word.len == 0 || odin3_pass_arg_next(&args).ptr != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s: expects one path", pass);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -34,7 +35,7 @@ static odin3_status one_path(const char *pass, odin3_bytes args, odin3_strbuf *b
 }
 
 static odin3_status no_args(const char *pass, odin3_bytes args) {
-    if (odin3_pass_arg_next(&args).len > 0) {
+    if (odin3_pass_arg_next(&args).ptr != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s: takes no arguments", pass);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -57,17 +58,18 @@ static const char *module_name(odin3_design *design, odin3_module_id id) {
 
 /* --- top selection (DESIGN §4.0, PHASE1 #18) ------------------------------------------------ */
 
-/* Sets the top to the module named name. INVALID_ARG (logged) when there is none. */
-static odin3_status select_named(odin3_design *design, odin3_bytes name) {
+/* Sets the top to the module named name; who prefixes the log lines. INVALID_ARG (logged) when
+ * there is none. */
+static odin3_status select_named(odin3_design *design, odin3_bytes name, const char *who) {
     uint32_t str = 0;
     bool known = odin3_strtab_find(odin3_design_strtab(design), name, &str);
     for (uint32_t i = 1; known && i < odin3_design_module_end(design); i++) {
         if (odin3_module_name(odin3_module_get(design, (odin3_module_id){i})) == str) {
-            odin3_log(ODIN3_LOG_INFO, "hierarchy: top %s", str_of(design, str));
+            odin3_log(ODIN3_LOG_INFO, "%s: top %s", who, str_of(design, str));
             return odin3_design_set_top(design, (odin3_module_id){i});
         }
     }
-    odin3_log(ODIN3_LOG_ERROR, "hierarchy: no module named '%.*s'", (int)name.len,
+    odin3_log(ODIN3_LOG_ERROR, "%s: no module named '%.*s'", who, (int)name.len,
               (const char *)name.ptr);
     return ODIN3_ERR_INVALID_ARG;
 }
@@ -170,7 +172,7 @@ static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     }
     const char *top = odin3_pass_get_options().top;
     if (st == ODIN3_OK && top != NULL) {
-        st = select_named(design, odin3_bytes_cstr(top));
+        st = select_named(design, odin3_bytes_cstr(top), "read_blif: --top");
     }
     odin3_strbuf_free(&path);
     return st;
@@ -182,10 +184,9 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
     odin3_strbuf_init(&path);
     odin3_status st = one_path("write_blif", args, &path);
     odin3_module_id top = odin3_design_top(design);
-    if (st == ODIN3_OK && odin3_module_valid(top) && top.v != 1) {
-        odin3_log(ODIN3_LOG_WARN,
-                  "write_blif: the top '%s' is not the first module; BLIF reads '%s' as the top",
-                  module_name(design, top), module_name(design, (odin3_module_id){1}));
+    if (st == ODIN3_OK && odin3_module_valid(top)) {
+        odin3_log(ODIN3_LOG_DEBUG, "write_blif: %s: top %s first", path.data,
+                  module_name(design, top));
     }
     if (st == ODIN3_OK) {
         st = odin3_blif_write(design, path.data);
@@ -199,7 +200,7 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
 static odin3_status check_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
     (void)ctx;
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-    for (odin3_bytes word = odin3_pass_arg_next(&args); word.len > 0;
+    for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         if (!odin3_pass_arg_is(word, "--fast")) {
             return unknown_arg("check", word);
@@ -323,12 +324,12 @@ static odin3_status stats_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
 
 /* hierarchy's arguments: --top <name> and -auto. */
 typedef struct hier_args {
-    odin3_bytes top; /* len 0: not given */
+    odin3_bytes top; /* ptr NULL: not given */
     bool auto_top;
 } hier_args;
 
 static odin3_status parse_hier_args(odin3_bytes args, hier_args *out) {
-    for (odin3_bytes word = odin3_pass_arg_next(&args); word.len > 0;
+    for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         if (odin3_pass_arg_is(word, "-auto")) {
             out->auto_top = true;
@@ -336,7 +337,7 @@ static odin3_status parse_hier_args(odin3_bytes args, hier_args *out) {
             return unknown_arg("hierarchy", word);
         } else {
             out->top = odin3_pass_arg_next(&args);
-            if (out->top.len == 0) {
+            if (out->top.ptr == NULL) {
                 odin3_log(ODIN3_LOG_ERROR, "hierarchy: --top expects a module name");
                 return ODIN3_ERR_INVALID_ARG;
             }
@@ -361,11 +362,11 @@ static odin3_status hierarchy_run(odin3_pass_ctx *ctx, odin3_design *design, odi
         return ODIN3_ERR_INVALID_ARG;
     }
     const char *option_top = odin3_pass_get_options().top;
-    if (parsed.top.len == 0 && option_top != NULL) {
+    if (parsed.top.ptr == NULL && option_top != NULL) {
         parsed.top = odin3_bytes_cstr(option_top);
     }
-    if (parsed.top.len > 0) {
-        return select_named(design, parsed.top);
+    if (parsed.top.ptr != NULL) {
+        return select_named(design, parsed.top, "hierarchy");
     }
     odin3_module_id top = odin3_design_top(design);
     if (odin3_module_valid(top) && !parsed.auto_top) {
@@ -381,11 +382,14 @@ static const odin3_pass_def READ_BLIF = {
     "read_blif", "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
     read_blif_run};
 static const odin3_pass_def WRITE_BLIF = {
-    "write_blif", "write_blif <file>: write the design as BLIF", write_blif_run};
+    "write_blif", "write_blif <file>: write the design as BLIF (the top module first)",
+    write_blif_run};
 static const odin3_pass_def CHECK = {
     "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run};
 static const odin3_pass_def COMPACT = {
-    "compact", "compact: renumber every module densely, freeing dead objects (IR-6)", compact_run};
+    "compact",
+    "compact: renumber each module densely, freeing dead objects (IR-6; atomic per module only)",
+    compact_run};
 static const odin3_pass_def STATS = {
     "stats", "stats: log modules, top, and per module ports/nodes/nets/wires and cell types",
     stats_run};

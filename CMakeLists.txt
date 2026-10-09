@@ -316,8 +316,9 @@ if(BUILD_TESTING)
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
-    foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script top
-                           check_flag usage)
+    foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
+                           unknown_pass_later_script top top_written_first top_unapplied quoted
+                           help_runs_nothing check_flag usage)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

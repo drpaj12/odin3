@@ -62,13 +62,15 @@ odin3_pass_options odin3_pass_get_options(void);
 /*
  * Runs the pass named name on design: opens a provenance pass run named after the pass
  * (odin3_pass_run_begin), checks the design (FULL, when checking is on; see odin3_pass_options),
- * runs the pass, checks again, and logs "pass <name>: <ms> ms" at ODIN3_LOG_INFO.
- * Returns the pass's status when it fails ("pass <name>: failed: <status>" logged, no post-check);
+ * runs the pass, checks again (also after a failed pass: it must leave valid IR), and logs
+ * "pass <name>: <ms> ms" at ODIN3_LOG_INFO (checks included). args must hold closed double quotes
+ * (see odin3_pass_arg_next). Returns the pass's status when it fails ("pass <name>: failed:
+ * <status>" logged; a failing check after it is logged too but the pass's status wins);
  * ODIN3_ERR_CHECK when the check before or after fails (the checker logs each violated rule as
  * "check: <module>: rule <n>: …", then "pass <name>: check before|after the pass failed" is
  * logged; a failing pre-check does not run the pass); ODIN3_ERR_INVALID_ARG (logged) for a NULL
- * design or name, or an unknown pass ("unknown pass '<name>'"); ODIN3_ERR_NO_MEMORY when the run
- * cannot be opened.
+ * design or name, args {NULL, len > 0}, an unknown pass ("unknown pass '<name>'") or an
+ * unterminated quote in args; ODIN3_ERR_NO_MEMORY (logged) when the run cannot be opened.
  */
 odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes args);
 
@@ -82,15 +84,21 @@ typedef struct odin3_script_src {
 
 /*
  * Runs a pass script on design. Commands are separated by ';' or a newline; '#' starts a comment
- * that runs to the end of the line; blank commands are skipped. A command is a pass name followed
- * by its arguments (the rest of the command, trimmed). Commands are numbered from 1 in order.
+ * that runs to the end of the line; ';' and '#' inside double quotes are literal (a quote must
+ * close on its line, else "<loc>: unterminated quote", ODIN3_ERR_PARSE). Blank commands are
+ * skipped and not numbered: the others are commands 1, 2, … in order. A command is a pass name
+ * followed by its arguments (the rest of the command, trimmed; split by odin3_pass_arg_next).
  * Every pass name is looked up before anything runs, so a typo late in a script costs nothing:
  * an unknown name is logged as "<loc>: unknown pass '<name>'" and gives ODIN3_ERR_PARSE. Then the
  * commands run in order through odin3_pass_run until one fails; its status is returned and
  * "<loc>: pass '<name>' failed: <status>" is logged. ODIN3_ERR_INVALID_ARG (logged) for a NULL
- * design or origin; ODIN3_ERR_NO_MEMORY on out of memory.
+ * design or origin, or text {NULL, len > 0}; ODIN3_ERR_NO_MEMORY on out of memory.
  */
 odin3_status odin3_pass_run_script(odin3_design *design, odin3_bytes text, odin3_script_src src);
+
+/* As odin3_pass_run_script without a design: splits the script and looks up every pass name
+ * (same errors and statuses), running nothing. The CLI resolves every script before running any. */
+odin3_status odin3_pass_resolve_script(odin3_bytes text, odin3_script_src src);
 
 /*
  * Reads the script file at path and runs it (located by line, origin = path). ODIN3_ERR_IO
@@ -98,17 +106,19 @@ odin3_status odin3_pass_run_script(odin3_design *design, odin3_bytes text, odin3
  */
 odin3_status odin3_pass_run_script_file(odin3_design *design, const char *path);
 
+/* Reads the script file at path and resolves it (odin3_pass_resolve_script), running nothing. */
+odin3_status odin3_pass_resolve_script_file(const char *path);
+
 /*
  * Splits pass arguments: skips blanks (space, tab, CR, LF) at the front of *rest, returns the next
- * word and advances *rest past it; {NULL, 0} (len 0) when no word is left.
+ * word and advances *rest past it. A word is either a run of characters other than blanks and '"',
+ * or a double-quoted string ("a b": blanks, ';' and '#' kept; no escapes) returned without its
+ * quotes, which may be empty ("" gives a non-NULL ptr with len 0). An unclosed quote runs to the
+ * end. No word left: ptr NULL (and len 0).
  */
 odin3_bytes odin3_pass_arg_next(odin3_bytes *rest);
 
 /* True when word equals the NUL-terminated string text. */
 bool odin3_pass_arg_is(odin3_bytes word, const char *text);
-
-/* The built-in passes (builtin.c), in registry order; only the manager reads them. */
-extern const odin3_pass_def *const odin3_builtin_passes[];
-extern const uint32_t odin3_builtin_pass_count;
 
 #endif

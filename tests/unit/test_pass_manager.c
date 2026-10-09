@@ -31,6 +31,7 @@ enum { LOG_CAP = 1 << 16, PATH_BUF = 512, OOM_SWEEP = 4000 };
 static const char *const BLIF_PATH = "odin3_pm_test.blif";
 static const char *const OUT_PATH = "odin3_pm_test_out.blif";
 static const char *const SCRIPT_PATH = "odin3_pm_test.o3";
+static const char *const SPACED_PATH = "odin3 pm test;#.blif";
 
 /* leaf is the first model (the BLIF top) but root instantiates it: the auto top is root. */
 static const char *const LEAF_ROOT = ".model leaf\n.inputs i\n.outputs o\n.names i o\n1 1\n.end\n"
@@ -124,6 +125,7 @@ void tearDown(void) {
     (void)remove(BLIF_PATH);
     (void)remove(OUT_PATH);
     (void)remove(SCRIPT_PATH);
+    (void)remove(SPACED_PATH);
 }
 
 /* --- test passes ----------------------------------------------------------------------------- */
@@ -162,12 +164,22 @@ static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byte
 
 static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass};
 
+/* Breaks rule 4 like t_break, then fails: the check after it still runs. */
+static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, break_pass(ctx, des, args));
+    return ODIN3_ERR_IO;
+}
+
+static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail", "t_break_fail: breaks, then fails",
+                                               break_fail_pass};
+
 static void register_test_passes(void) {
     static bool done = false;
     if (!done) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&COUNT_PASS));
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&BREAK_PASS));
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&FAIL_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&BREAK_FAIL_PASS));
         done = true;
     }
     count_calls = 0;
@@ -198,7 +210,7 @@ static void test_builtins_registered(void) {
 static void test_register_and_run(void) {
     register_test_passes();
     TEST_ASSERT_EQUAL_PTR(&COUNT_PASS, odin3_pass_find(odin3_bytes_cstr("t_count")));
-    TEST_ASSERT_EQUAL_PTR(&COUNT_PASS, odin3_pass_at(odin3_pass_count() - 3));
+    TEST_ASSERT_EQUAL_PTR(&COUNT_PASS, odin3_pass_at(odin3_pass_count() - 4));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_count", "a  b"));
     TEST_ASSERT_EQUAL_INT(1, count_calls);
     TEST_ASSERT_EQUAL_STRING("a  b", count_args);
@@ -496,7 +508,7 @@ static void test_top_option_names_no_module(void) {
     odin3_pass_set_options((odin3_pass_options){.top = "nope"});
     put_text(fopen(BLIF_PATH, "w"), LEAF_ROOT);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("read_blif", BLIF_PATH));
-    TEST_ASSERT_TRUE(log_has("E hierarchy: no module named 'nope'"));
+    TEST_ASSERT_TRUE(log_has("E read_blif: --top: no module named 'nope'"));
 }
 
 static void test_top_option_used_by_hierarchy(void) {
@@ -575,6 +587,8 @@ static void test_script_empty_and_errors(void) {
 }
 
 /* One OOM try on a fresh design: the script with allocation fail_after failing. */
+static int oom_failures;
+
 static odin3_status script_try(long fail_after) {
     odin3_design_destroy(design);
     design = odin3_design_create();
@@ -584,16 +598,19 @@ static odin3_status script_try(long fail_after) {
     odin3_status st = run_p("t_count a; t_count b\nt_count c");
     odin3_util_set_alloc_fail_after(-1);
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    oom_failures += st == ODIN3_ERR_NO_MEMORY ? 1 : 0;
     return st;
 }
 
 static void test_script_out_of_memory(void) {
     register_test_passes();
     bool succeeded = false;
+    oom_failures = 0;
     for (long i = 0; i < OOM_SWEEP && !succeeded; i++) {
         succeeded = script_try(i) == ODIN3_OK;
     }
     TEST_ASSERT_TRUE(succeeded);
+    TEST_ASSERT_GREATER_THAN_INT(0, oom_failures); /* the sweep really hit allocations */
     TEST_ASSERT_EQUAL_INT(3, count_calls);
 }
 
@@ -607,14 +624,139 @@ static void test_arg_is(void) {
     TEST_ASSERT_FALSE(odin3_pass_arg_is(word, "abc"));
 }
 
+/* The next word of *rest is want (NULL: no word is left). */
+static void assert_next(odin3_bytes *rest, const char *want) {
+    odin3_bytes word = odin3_pass_arg_next(rest);
+    TEST_ASSERT_EQUAL_INT(want == NULL, word.ptr == NULL);
+    TEST_ASSERT_TRUE(want == NULL ? word.len == 0 : odin3_pass_arg_is(word, want));
+}
+
 static void test_arg_next(void) {
     odin3_bytes rest = odin3_bytes_cstr(" \tab  c\r\n d");
-    TEST_ASSERT_TRUE(odin3_pass_arg_is(odin3_pass_arg_next(&rest), "ab"));
-    TEST_ASSERT_TRUE(odin3_pass_arg_is(odin3_pass_arg_next(&rest), "c"));
-    TEST_ASSERT_TRUE(odin3_pass_arg_is(odin3_pass_arg_next(&rest), "d"));
-    TEST_ASSERT_EQUAL_UINT(0, odin3_pass_arg_next(&rest).len);
+    assert_next(&rest, "ab");
+    assert_next(&rest, "c");
+    assert_next(&rest, "d");
+    assert_next(&rest, NULL);
     rest = (odin3_bytes){0};
-    TEST_ASSERT_EQUAL_UINT(0, odin3_pass_arg_next(&rest).len);
+    assert_next(&rest, NULL);
+}
+
+/* --- follow-up: top written first, quoted arguments, failure post-check, resolve-only ----------
+ */
+
+/* The design read back from OUT_PATH has top `want` (BLIF: the first model). */
+static void assert_written_top(const char *want) {
+    odin3_design *back = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(back);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_read(back, OUT_PATH));
+    odin3_module_id top = odin3_design_top(back);
+    TEST_ASSERT_EQUAL_UINT32(1, top.v);
+    TEST_ASSERT_EQUAL_STRING(want,
+                             odin3_strtab_get(odin3_design_strtab(back),
+                                              odin3_module_name(odin3_module_get(back, top))));
+    TEST_ASSERT_EQUAL_UINT32(odin3_design_module_end(design), odin3_design_module_end(back));
+    odin3_design_destroy(back);
+}
+
+static void test_write_blif_auto_top_first(void) {
+    read_text(LEAF_ROOT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("hierarchy", "-auto"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_blif", OUT_PATH));
+    assert_written_top("root");
+    TEST_ASSERT_FALSE(log_has("W write_blif"));
+}
+
+static void test_write_blif_option_top_first(void) {
+    odin3_pass_set_options((odin3_pass_options){.top = "b"});
+    read_text(TWO_TOPS);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_blif", OUT_PATH));
+    odin3_pass_set_options((odin3_pass_options){0});
+    assert_written_top("b");
+}
+
+static void test_quoted_path(void) {
+    put_text(fopen(SPACED_PATH, "w"), LEAF_ROOT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("read_blif \"odin3 pm test;#.blif\" # comment"));
+    TEST_ASSERT_EQUAL_STRING("leaf", top_name());
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_blif", "\"\""));
+    TEST_ASSERT_TRUE(log_has("E write_blif: expects one path"));
+}
+
+static void test_quoted_args_reach_the_pass(void) {
+    register_test_passes();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("t_count \"a;b #c\" d; t_count"));
+    TEST_ASSERT_EQUAL_INT(2, count_calls);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("t_count \"a;b #c\" d"));
+    TEST_ASSERT_EQUAL_STRING("\"a;b #c\" d", count_args);
+}
+
+/* An unterminated quote is a located error, and nothing runs. */
+static void test_unterminated_quote(void) {
+    register_test_passes();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_p("t_count; ; t_count \"a b"));
+    TEST_ASSERT_TRUE_MESSAGE(log_has("E -p: command 2: unterminated quote"), log_text);
+    put_text(fopen(SCRIPT_PATH, "w"), "t_count\nt_count \"x\n\"\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_pass_run_script_file(design, SCRIPT_PATH));
+    TEST_ASSERT_TRUE_MESSAGE(log_has("E odin3_pm_test.o3:2: unterminated quote"), log_text);
+    TEST_ASSERT_EQUAL_INT(0, count_calls);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("t_count", "\"a"));
+    TEST_ASSERT_TRUE(log_has("E pass t_count: unterminated quote in the arguments"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_pass_run(design, "t_count", (odin3_bytes){NULL, 3}));
+    TEST_ASSERT_EQUAL_INT(0, count_calls);
+}
+
+static void test_arg_next_quoted(void) {
+    odin3_bytes rest = odin3_bytes_cstr(" \"a b\" c\"d e\" \"\"");
+    assert_next(&rest, "a b");
+    assert_next(&rest, "c");
+    assert_next(&rest, "d e");
+    assert_next(&rest, ""); /* "" is a word: ptr set, len 0 */
+    assert_next(&rest, NULL);
+}
+
+static void test_arg_next_unclosed(void) {
+    odin3_bytes rest = odin3_bytes_cstr("\"ab c");
+    assert_next(&rest, "ab c");
+    assert_next(&rest, NULL);
+}
+
+/* A failing pass still gets the check after it (it must leave valid IR); its status wins. */
+static void test_failed_pass_is_post_checked(void) {
+    register_test_passes();
+    odin3_pass_set_options((odin3_pass_options){.check = true});
+    read_text(LEAF_ROOT);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("t_break_fail", ""));
+    TEST_ASSERT_TRUE(log_has("E pass t_break_fail: failed: ODIN3_ERR_IO"));
+    TEST_ASSERT_TRUE(log_has("E pass t_break_fail: check after the pass failed"));
+    TEST_ASSERT_TRUE(log_has("I pass t_break_fail: "));
+}
+
+static void test_script_crlf(void) {
+    register_test_passes();
+    put_text(fopen(SCRIPT_PATH, "w"), "t_count a\r\n# c\r\n\r\nt_count b\r\nnope\r\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_pass_run_script_file(design, SCRIPT_PATH));
+    TEST_ASSERT_TRUE(log_has("E odin3_pm_test.o3:5: unknown pass 'nope'\n"));
+    put_text(fopen(SCRIPT_PATH, "w"), "t_count a\r\n# c\r\n\r\nt_count b\r\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_script_file(design, SCRIPT_PATH));
+    TEST_ASSERT_EQUAL_INT(2, count_calls);
+    TEST_ASSERT_EQUAL_STRING("b", count_args);
+}
+
+static void test_resolve_runs_nothing(void) {
+    register_test_passes();
+    odin3_script_src src = {"-p", ODIN3_SCRIPT_BY_COMMAND};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pass_resolve_script(odin3_bytes_cstr("t_count; t_fail"), src));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                          odin3_pass_resolve_script(odin3_bytes_cstr("t_count; nope"), src));
+    TEST_ASSERT_TRUE(log_has("E -p: command 2: unknown pass 'nope'"));
+    put_text(fopen(SCRIPT_PATH, "w"), "t_count\nt_fail\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_resolve_script_file(SCRIPT_PATH));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_pass_resolve_script_file("no_such.o3"));
+    TEST_ASSERT_EQUAL_INT(0, count_calls);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_passrun_end(design));
 }
 
 int main(void) {
@@ -658,5 +800,15 @@ int main(void) {
     RUN_TEST(test_script_out_of_memory);
     RUN_TEST(test_arg_is);
     RUN_TEST(test_arg_next);
+    RUN_TEST(test_write_blif_auto_top_first);
+    RUN_TEST(test_write_blif_option_top_first);
+    RUN_TEST(test_quoted_path);
+    RUN_TEST(test_quoted_args_reach_the_pass);
+    RUN_TEST(test_unterminated_quote);
+    RUN_TEST(test_arg_next_quoted);
+    RUN_TEST(test_arg_next_unclosed);
+    RUN_TEST(test_failed_pass_is_post_checked);
+    RUN_TEST(test_script_crlf);
+    RUN_TEST(test_resolve_runs_nothing);
     return UNITY_END();
 }

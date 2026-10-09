@@ -1082,6 +1082,19 @@ static void wr_free(blif_writer *wr) {
     odin3_vec_free(&wr->params);
 }
 
+/* The ID of the module written at position pos (from 1): the top first, then the rest in creation
+ * order. */
+static uint32_t written_module(const odin3_design *design, uint32_t pos) {
+    uint32_t top = odin3_design_top(design).v;
+    if (top == 0) {
+        return pos;
+    }
+    if (pos == 1) {
+        return top;
+    }
+    return pos <= top ? pos - 1 : pos;
+}
+
 odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "blif_write: NULL design or path");
@@ -1093,7 +1106,7 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
         st = wr_open(&wr);
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = write_module(&wr, i);
+        st = write_module(&wr, written_module(design, i));
     }
     if (st == ODIN3_OK) {
         (void)write_blackboxes(&wr);

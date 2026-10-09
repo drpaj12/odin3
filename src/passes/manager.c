@@ -1,6 +1,8 @@
 /* manager.c — the pass registry, pass runs (provenance run, check, timing) and pass scripts. */
 #include "passes/manager.h"
 
+#include "passes/builtin.h"
+
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/prov.h"
@@ -24,7 +26,8 @@ enum { ALWAYS_CHECK = 0 };
 enum { ALWAYS_CHECK = 1 };
 #endif
 
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000, LOC_BUF = 256, READ_CHUNK = 4096 };
+/* A location is part of one log message, so it never needs more than a message's bytes. */
+enum { MS_PER_S = 1000, NS_PER_MS = 1000000, LOC_BUF = ODIN3_LOG_BUF, READ_CHUNK = 4096 };
 
 /* Lowest and highest characters of a pass name (printable ASCII, no blank). */
 enum { NAME_CHAR_MIN = '!', NAME_CHAR_MAX = '~' };
@@ -141,34 +144,54 @@ static odin3_status open_run(odin3_design *design, const char *name, odin3_pass_
     return st;
 }
 
+/* The pass and the check after it; a failing pass keeps its status, the check still runs. */
+static odin3_status run_checked(odin3_pass_ctx *ctx, const odin3_pass_def *def, odin3_bytes args) {
+    odin3_status st = def->run(ctx, ctx->design, args);
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "pass %s: failed: %s", def->name, odin3_status_string(st));
+    }
+    odin3_status post = check_around(ctx->design, def->name, "after");
+    return st != ODIN3_OK ? st : post;
+}
+
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
     double start = now_ms();
     odin3_pass_ctx ctx = {0};
     odin3_status st = open_run(design, def->name, &ctx);
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "pass %s: cannot open its provenance run: %s", def->name,
+                  odin3_status_string(st));
+        return st;
+    }
+    st = check_around(design, def->name, "before");
     if (st == ODIN3_OK) {
-        st = check_around(design, def->name, "before");
+        st = run_checked(&ctx, def, args);
     }
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    st = def->run(&ctx, design, args);
-    if (st != ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR, "pass %s: failed: %s", def->name, odin3_status_string(st));
-        return st;
-    }
-    st = check_around(design, def->name, "after");
     odin3_log(ODIN3_LOG_INFO, "pass %s: %.3f ms", def->name, now_ms() - start);
     return st;
 }
 
+/* True when every double quote in args is closed. */
+static bool quotes_closed(odin3_bytes args) {
+    bool open = false;
+    for (size_t i = 0; i < args.len; i++) {
+        open = ((const char *)args.ptr)[i] == '"' ? !open : open;
+    }
+    return !open;
+}
+
 odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes args) {
-    if (design == NULL || name == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "pass_run: NULL design or pass name");
+    if (design == NULL || name == NULL || (args.ptr == NULL && args.len > 0)) {
+        odin3_log(ODIN3_LOG_ERROR, "pass_run: NULL design, pass name or arguments");
         return ODIN3_ERR_INVALID_ARG;
     }
     const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr(name));
     if (def == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "unknown pass '%s'", name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (!quotes_closed(args)) {
+        odin3_log(ODIN3_LOG_ERROR, "pass %s: unterminated quote in the arguments", name);
         return ODIN3_ERR_INVALID_ARG;
     }
     return run_def(design, def, args);
@@ -197,12 +220,19 @@ static odin3_bytes trim(odin3_bytes bytes) {
 odin3_bytes odin3_pass_arg_next(odin3_bytes *rest) {
     odin3_bytes left = trim(*rest);
     const char *at = left.ptr;
-    size_t len = 0;
-    while (len < left.len && !is_blank(at[len])) {
-        len++;
+    if (left.len == 0) {
+        *rest = (odin3_bytes){0};
+        return (odin3_bytes){0};
     }
-    *rest = (odin3_bytes){len < left.len ? at + len : NULL, left.len - len};
-    return (odin3_bytes){len > 0 ? at : NULL, len};
+    bool quoted = at[0] == '"';
+    size_t start = quoted ? 1 : 0;
+    size_t end = start;
+    while (end < left.len && (quoted ? at[end] != '"' : !is_blank(at[end]) && at[end] != '"')) {
+        end++;
+    }
+    size_t next = quoted && end < left.len ? end + 1 : end; /* past the closing quote */
+    *rest = (odin3_bytes){next < left.len ? at + next : NULL, left.len - next};
+    return (odin3_bytes){at + start, end - start};
 }
 
 /* --- scripts -------------------------------------------------------------------------------- */
@@ -241,32 +271,55 @@ static odin3_status add_cmd(odin3_vec *cmds, odin3_bytes text, uint32_t line) {
     return ODIN3_OK;
 }
 
-/* Index of the first ';', '\n' or '#' at or after pos (text.len when none). */
-static size_t segment_end(odin3_bytes text, size_t pos) {
+/*
+ * Index of the first ';', '\n' or '#' at or after pos outside double quotes (text.len when none);
+ * *open is set when a quote is still open at the newline or the end.
+ */
+static size_t segment_end(odin3_bytes text, size_t pos, bool *open) {
     const char *chars = text.ptr;
-    while (pos < text.len && chars[pos] != ';' && chars[pos] != '\n' && chars[pos] != '#') {
+    bool quoted = false;
+    for (; pos < text.len && chars[pos] != '\n'; pos++) {
+        if (chars[pos] == '"') {
+            quoted = !quoted;
+        } else if (!quoted && (chars[pos] == ';' || chars[pos] == '#')) {
+            break;
+        }
+    }
+    *open = quoted;
+    return pos;
+}
+
+/* Index of the newline ending the comment that starts at pos (text.len when none). */
+static size_t comment_end(odin3_bytes text, size_t pos) {
+    const char *chars = text.ptr;
+    while (pos < text.len && chars[pos] != '\n') {
         pos++;
     }
     return pos;
 }
 
+static odin3_status unterminated(const odin3_script_src *src, const odin3_vec *cmds,
+                                 uint32_t line) {
+    script_cmd cmd = {.line = line, .index = (uint32_t)cmds->len + 1};
+    char loc[LOC_BUF];
+    format_loc(src, &cmd, loc, sizeof loc);
+    odin3_log(ODIN3_LOG_ERROR, "%s: unterminated quote", loc);
+    return ODIN3_ERR_PARSE;
+}
+
 /* Splits text into commands (see odin3_pass_run_script). */
-static odin3_status split_script(odin3_bytes text, odin3_vec *cmds) {
+static odin3_status split_script(odin3_bytes text, const odin3_script_src *src, odin3_vec *cmds) {
     const char *chars = text.ptr;
     uint32_t line = 1;
     size_t pos = 0;
     odin3_status st = ODIN3_OK;
     while (st == ODIN3_OK && pos < text.len) {
-        size_t end = segment_end(text, pos);
-        st = add_cmd(cmds, (odin3_bytes){chars + pos, end - pos}, line);
-        if (end < text.len && chars[end] == '#') {
-            while (end < text.len && chars[end] != '\n') {
-                end++;
-            }
-        }
-        if (end < text.len && chars[end] == '\n') {
-            line++;
-        }
+        bool open = false;
+        size_t end = segment_end(text, pos, &open);
+        st = open ? unterminated(src, cmds, line)
+                  : add_cmd(cmds, (odin3_bytes){chars + pos, end - pos}, line);
+        end = end < text.len && chars[end] == '#' ? comment_end(text, end) : end;
+        line += end < text.len && chars[end] == '\n' ? 1 : 0;
         pos = end + 1;
     }
     return st;
@@ -305,22 +358,35 @@ static odin3_status run_cmds(odin3_design *design, const odin3_vec *cmds,
     return ODIN3_OK;
 }
 
-odin3_status odin3_pass_run_script(odin3_design *design, odin3_bytes text, odin3_script_src src) {
-    if (design == NULL || src.origin == NULL || (text.ptr == NULL && text.len > 0)) {
-        odin3_log(ODIN3_LOG_ERROR, "pass_run_script: NULL design, origin or text");
+/* Splits and resolves the script, then runs it on design (NULL: resolve only). */
+static odin3_status script_do(odin3_design *design, odin3_bytes text, const odin3_script_src *src) {
+    if (src->origin == NULL || (text.ptr == NULL && text.len > 0)) {
+        odin3_log(ODIN3_LOG_ERROR, "pass script: NULL origin or text");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_vec cmds;
     odin3_vec_init(&cmds, sizeof(script_cmd));
-    odin3_status st = split_script(text, &cmds);
+    odin3_status st = split_script(text, src, &cmds);
     if (st == ODIN3_OK) {
-        st = find_passes(&cmds, &src);
+        st = find_passes(&cmds, src);
     }
-    if (st == ODIN3_OK) {
-        st = run_cmds(design, &cmds, &src);
+    if (st == ODIN3_OK && design != NULL) {
+        st = run_cmds(design, &cmds, src);
     }
     odin3_vec_free(&cmds);
     return st;
+}
+
+odin3_status odin3_pass_run_script(odin3_design *design, odin3_bytes text, odin3_script_src src) {
+    if (design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "pass_run_script: NULL design");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return script_do(design, text, &src);
+}
+
+odin3_status odin3_pass_resolve_script(odin3_bytes text, odin3_script_src src) {
+    return script_do(NULL, text, &src);
 }
 
 /* Reads the whole file at path into buf. */
@@ -344,18 +410,31 @@ static odin3_status read_all(const char *path, odin3_strbuf *buf) {
     return st;
 }
 
-odin3_status odin3_pass_run_script_file(odin3_design *design, const char *path) {
-    if (design == NULL || path == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "pass_run_script_file: NULL design or path");
+/* Reads the script file at path, then script_do on it. */
+static odin3_status script_file_do(odin3_design *design, const char *path) {
+    if (path == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "pass script file: NULL path");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_strbuf buf;
     odin3_strbuf_init(&buf);
     odin3_status st = read_all(path, &buf);
     if (st == ODIN3_OK) {
-        st = odin3_pass_run_script(design, (odin3_bytes){buf.data, buf.len},
-                                   (odin3_script_src){path, ODIN3_SCRIPT_BY_LINE});
+        odin3_script_src src = {path, ODIN3_SCRIPT_BY_LINE};
+        st = script_do(design, (odin3_bytes){buf.data, buf.len}, &src);
     }
     odin3_strbuf_free(&buf);
     return st;
+}
+
+odin3_status odin3_pass_run_script_file(odin3_design *design, const char *path) {
+    if (design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "pass_run_script_file: NULL design");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return script_file_do(design, path);
+}
+
+odin3_status odin3_pass_resolve_script_file(const char *path) {
+    return script_file_do(NULL, path);
 }

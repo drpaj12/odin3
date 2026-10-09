@@ -3,8 +3,12 @@
 #
 # usage: tests/cli/test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR
 # Cases: script_roundtrip, p_roundtrip (read, check, write; netlist-compare identical),
-# unknown_pass_p, unknown_pass_script (located error, nonzero exit, nothing written), top (--top
-# wins over the BLIF first model), check_flag (--check accepted), usage (bad arguments exit 2).
+# unknown_pass_p, unknown_pass_script, unknown_pass_later_script (located error, nonzero exit,
+# nothing written, even when the typo is in a later -p), top (--top wins over the BLIF first
+# model), top_written_first (write_blif puts the top first, so it reads back as the top),
+# top_unapplied (an unused --top is a warning), quoted (quoted paths; an unterminated quote is a
+# located error), help_runs_nothing, check_flag (--check accepted; its Release semantics are unit
+# tested), usage (bad arguments exit 2).
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -59,7 +63,34 @@ unknown_pass_script)
 top)
     "$odin3" --top sub -p "read_blif $fixture; stats" 2>"$work/err" || fail "odin3 --top failed"
     grep -qF "stats: design: modules 2, top sub" "$work/err" || fail "top is not sub"
-    expect_fail "hierarchy: no module named 'nope'" --top nope -p "read_blif $fixture"
+    expect_fail "read_blif: --top: no module named 'nope'" --top nope -p "read_blif $fixture"
+    ;;
+unknown_pass_later_script)
+    expect_fail "-p: command 1: unknown pass 'nope'" \
+        -p "read_blif $fixture; write_blif $work/out.blif" -p "nope"
+    [[ ! -e $work/out.blif ]] || fail "a pass ran before the later script was rejected"
+    ;;
+top_written_first)
+    "$odin3" --top sub -p "read_blif $fixture; write_blif $work/out.blif" 2>"$work/err" ||
+        fail "odin3 --top sub write failed"
+    "$odin3" -p "read_blif $work/out.blif; stats" 2>"$work/err" || fail "read back failed"
+    grep -qF "stats: design: modules 2, top sub" "$work/err" || fail "read-back top is not sub"
+    ;;
+top_unapplied)
+    "$odin3" --top zzz -p "stats" 2>"$work/err" || fail "odin3 failed"
+    grep -qF "warning: --top zzz was not applied" "$work/err" || fail "no warning"
+    ;;
+quoted)
+    "$odin3" -p "read_blif \"$fixture\"; write_blif \"$work/out dir;#.blif\" # done" \
+        2>"$work/err" || fail "quoted paths failed"
+    "$compare" "$fixture" "$work/out dir;#.blif" || fail "netlist-compare: not identical"
+    expect_fail "-p: command 2: unterminated quote" -p "read_blif $fixture; write_blif \"x"
+    ;;
+help_runs_nothing)
+    "$odin3" --help -p "read_blif $fixture; write_blif $work/out.blif" >"$work/out" 2>"$work/err" ||
+        fail "odin3 --help failed"
+    grep -qF "hierarchy [--top <name>]" "$work/out" || fail "help lacks the pass list"
+    [[ ! -e $work/out.blif ]] || fail "--help ran the script"
     ;;
 check_flag)
     "$odin3" --check -p "read_blif $fixture; check --fast" 2>"$work/err" || fail "--check failed"
