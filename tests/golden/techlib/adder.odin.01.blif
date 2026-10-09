@@ -1,0 +1,13 @@
+# 'adder' as EArch/regression/verilog/common/sub/sub.odin.blif declares it (296 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_a[0] i_b[0] i_cin[0]
+.outputs o_cout[0] o_sumout[0]
+.subckt adder a[0]=i_a[0] b[0]=i_b[0] cin[0]=i_cin[0] cout[0]=o_cout[0] sumout[0]=o_sumout[0]
+.end
+
+.model adder
+.inputs a[0] b[0] cin[0]
+.outputs cout[0] sumout[0]
+.blackbox
+.end

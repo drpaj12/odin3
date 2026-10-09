@@ -1,0 +1,13 @@
+# 'dual_port_ram' as EArch/vtr/mkDelayWorker32B/mkDelayWorker32B.parmys.blif declares it (2 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_addr2[0] i_addr2[1] i_addr2[2] i_addr2[3] i_addr2[4] i_addr2[5] i_addr2[6] i_addr2[7] i_addr2[8] i_addr2[9] i_addr2[10] i_addr2[11] i_addr2[12] i_addr2[13] i_addr2[14] i_clk i_data1 i_data2 i_we2 i_we1 i_addr1[0] i_addr1[1] i_addr1[2] i_addr1[3] i_addr1[4] i_addr1[5] i_addr1[6] i_addr1[7] i_addr1[8] i_addr1[9] i_addr1[10] i_addr1[11] i_addr1[12] i_addr1[13] i_addr1[14]
+.outputs o_out2 o_out1
+.subckt dual_port_ram addr2[0]=i_addr2[0] addr2[1]=i_addr2[1] addr2[2]=i_addr2[2] addr2[3]=i_addr2[3] addr2[4]=i_addr2[4] addr2[5]=i_addr2[5] addr2[6]=i_addr2[6] addr2[7]=i_addr2[7] addr2[8]=i_addr2[8] addr2[9]=i_addr2[9] addr2[10]=i_addr2[10] addr2[11]=i_addr2[11] addr2[12]=i_addr2[12] addr2[13]=i_addr2[13] addr2[14]=i_addr2[14] clk=i_clk data1=i_data1 data2=i_data2 we2=i_we2 we1=i_we1 addr1[0]=i_addr1[0] addr1[1]=i_addr1[1] addr1[2]=i_addr1[2] addr1[3]=i_addr1[3] addr1[4]=i_addr1[4] addr1[5]=i_addr1[5] addr1[6]=i_addr1[6] addr1[7]=i_addr1[7] addr1[8]=i_addr1[8] addr1[9]=i_addr1[9] addr1[10]=i_addr1[10] addr1[11]=i_addr1[11] addr1[12]=i_addr1[12] addr1[13]=i_addr1[13] addr1[14]=i_addr1[14] out2=o_out2 out1=o_out1
+.end
+
+.model dual_port_ram
+.inputs addr2[0] addr2[1] addr2[2] addr2[3] addr2[4] addr2[5] addr2[6] addr2[7] addr2[8] addr2[9] addr2[10] addr2[11] addr2[12] addr2[13] addr2[14] clk data1 data2 we2 we1 addr1[0] addr1[1] addr1[2] addr1[3] addr1[4] addr1[5] addr1[6] addr1[7] addr1[8] addr1[9] addr1[10] addr1[11] addr1[12] addr1[13] addr1[14]
+.outputs out2 out1
+.blackbox
+.end

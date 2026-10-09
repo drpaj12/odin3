@@ -1,0 +1,13 @@
+# 'adder' as EArch/regression/verilog/syntax/mix_expression_in_module_port/mix_expression_in_module_port.parmys.blif declares it (14 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_b i_a i_cin
+.outputs o_sumout o_cout
+.subckt adder b=i_b a=i_a cin=i_cin sumout=o_sumout cout=o_cout
+.end
+
+.model adder
+.inputs b a cin
+.outputs sumout cout
+.blackbox
+.end

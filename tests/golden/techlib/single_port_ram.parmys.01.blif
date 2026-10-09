@@ -1,0 +1,13 @@
+# 'single_port_ram' as EArch/regression/verilog/syntax/constant_module_inst/constant_module_inst.parmys.blif declares it (2 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_clk i_we i_addr[0] i_addr[1] i_addr[2] i_addr[3] i_addr[4] i_addr[5] i_addr[6] i_addr[7] i_addr[8] i_addr[9] i_addr[10] i_addr[11] i_addr[12] i_addr[13] i_addr[14] i_data
+.outputs o_out
+.subckt single_port_ram clk=i_clk we=i_we addr[0]=i_addr[0] addr[1]=i_addr[1] addr[2]=i_addr[2] addr[3]=i_addr[3] addr[4]=i_addr[4] addr[5]=i_addr[5] addr[6]=i_addr[6] addr[7]=i_addr[7] addr[8]=i_addr[8] addr[9]=i_addr[9] addr[10]=i_addr[10] addr[11]=i_addr[11] addr[12]=i_addr[12] addr[13]=i_addr[13] addr[14]=i_addr[14] data=i_data out=o_out
+.end
+
+.model single_port_ram
+.inputs clk we addr[0] addr[1] addr[2] addr[3] addr[4] addr[5] addr[6] addr[7] addr[8] addr[9] addr[10] addr[11] addr[12] addr[13] addr[14] data
+.outputs out
+.blackbox
+.end

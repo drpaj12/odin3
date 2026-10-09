@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# golden-blackboxes: collect the goldens' distinct black-box stanzas. See golden_blackboxes.py.
+# Exit codes: 0 success, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/golden_blackboxes.py" "$@"

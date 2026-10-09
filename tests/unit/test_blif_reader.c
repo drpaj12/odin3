@@ -718,6 +718,124 @@ static void test_latch_token_count(void) {
 }
 
 /* A model neither in the file nor registered (Yosys's `$pow`) is an implicit black box. */
+/* A Yosys-like parametric type: A A_WIDTH, B B_WIDTH, Y Y_WIDTH (all default 1). */
+static const odin3_param_def POW_PARAMS[] = {
+    {"A_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
+    {"B_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
+    {"Y_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}}};
+static const odin3_port_def POW_PORTS[] = {
+    {.name = "A", .dir = ODIN3_DIR_IN, .width_param = "A_WIDTH"},
+    {.name = "B", .dir = ODIN3_DIR_IN, .width_param = "B_WIDTH"},
+    {.name = "Y", .dir = ODIN3_DIR_OUT, .width_param = "Y_WIDTH"},
+};
+static const odin3_celltype_def POW_DEF = {.name = "o3test_pow",
+                                           .gran = ODIN3_GRAN_HARD,
+                                           .ports = POW_PORTS,
+                                           .n_ports = 3,
+                                           .params = POW_PARAMS,
+                                           .n_params = 3};
+
+static void register_pow_once(void) {
+    static bool registered;
+    if (!registered) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register_global(&POW_DEF));
+        registered = true;
+    }
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+}
+
+static void expect_params(odin3_module *module, odin3_node_id node, const int64_t *want,
+                          uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        TEST_ASSERT_EQUAL_INT64(want[i], odin3_node_param(module, node, i)->i);
+    }
+}
+
+/* Review Focus 5: a registered parametric type with no .model takes its parameters from the
+ * largest bit index of each port's formals (per instance); unnamed ports keep the default. */
+static void test_subckt_of_registered_parametric_type_infers_params(void) {
+    register_pow_once();
+    write_str(".model top\n.inputs a b\n.outputs y\n"
+              ".subckt o3test_pow A[1]=a Y[7]=y\n"
+              ".subckt o3test_pow A[0]=a B[2]=b Y[0]=y2\n.end\n");
+    read_ok(PATH);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(design));
+    odin3_module *top = module_at(1);
+    odin3_node_id first = cell_at(top, 0);
+    TEST_ASSERT_EQUAL_STRING("o3test_pow", type_of(top, first));
+    expect_params(top, first, (const int64_t[]){2, 1, 8}, 3);
+    TEST_ASSERT_EQUAL_STRING("a", pin_net_at(top, first, (pin_at){0, 1}));
+    TEST_ASSERT_EQUAL_STRING("", pin_net_at(top, first, (pin_at){0, 0}));
+    TEST_ASSERT_EQUAL_STRING("y", pin_net_at(top, first, (pin_at){2, 7}));
+    expect_params(top, cell_at(top, 1), (const int64_t[]){1, 3, 1}, 3);
+    expect_check_clean();
+}
+
+/* A scalar formal never names a port sized by a parameter (no .model says it is scalar). */
+static void test_subckt_of_registered_parametric_type_needs_bit_formals(void) {
+    register_pow_once();
+    expect_parse_error(".model top\n.inputs a\n.subckt o3test_pow A=a\n.end\n", 3, "no port 'A'");
+}
+
+/* Review Focus 1: a declared parametric model in another port order and other scalar flags; its
+ * instances get the declared parameters and use the declared spelling of each port. */
+static void test_declared_parametric_model(void) {
+    register_pow_once();
+    write_str(".model top\n.inputs a b\n.outputs y\n"
+              ".subckt o3test_pow A=a B[0]=b Y[1]=y\n.end\n"
+              ".model o3test_pow\n.inputs B[0] B[1] B[2] A\n.outputs Y[0] Y[1]\n.blackbox\n.end\n");
+    read_ok(PATH);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_design_declared_model_count(design));
+    const odin3_value *params = odin3_design_declared_model_params(design, 0);
+    TEST_ASSERT_NOT_NULL(params);
+    TEST_ASSERT_EQUAL_INT64(1, params[0].i);
+    TEST_ASSERT_EQUAL_INT64(3, params[1].i);
+    TEST_ASSERT_EQUAL_INT64(2, params[2].i);
+    const odin3_celltype_def *decl = odin3_design_declared_model_decl(design, 0);
+    TEST_ASSERT_EQUAL_STRING("B", decl->ports[0].name);
+    TEST_ASSERT_TRUE(decl->ports[1].scalar);
+    odin3_module *top = module_at(1);
+    odin3_node_id node = cell_at(top, 0);
+    expect_params(top, node, (const int64_t[]){1, 3, 2}, 3);
+    TEST_ASSERT_EQUAL_STRING("a", pin_net_at(top, node, (pin_at){0, 0}));
+    TEST_ASSERT_EQUAL_STRING("y", pin_net_at(top, node, (pin_at){2, 1}));
+    expect_check_clean();
+}
+
+/* Instances of a declared model are sized by the declaration, not by their formals. */
+static void test_declared_parametric_model_bounds_formals(void) {
+    register_pow_once();
+    expect_parse_error(".model top\n.inputs a\n.subckt o3test_pow B[3]=a\n.end\n"
+                       ".model o3test_pow\n.inputs B[0] B[1] B[2] A\n.outputs Y\n.blackbox\n.end\n",
+                       3, "no port 'B[3]'");
+}
+
+/* Review Focus 2: declared widths the registered type cannot have: a located error with why. */
+static void test_declared_parametric_model_contradiction(void) {
+    register_pow_once();
+    expect_parse_error(".model top\n.end\n.model o3test_pow\n.inputs A B\n.outputs Y Z\n"
+                       ".blackbox\n.end\n",
+                       3, "conflicts with the registered cell type of that name: 4 ports declared");
+    TEST_ASSERT_EQUAL_UINT32(1, error_count);
+}
+
+/* Odin II spells a width-1 port `cin[0]`: the declaration says so, and instances follow it. */
+static void test_declared_bracketed_scalar_port(void) {
+    register_hard_once();
+    write_str(".model top\n.inputs x y\n.outputs s\n"
+              ".subckt o3test_hard_adder a[1]=x cin[0]=y s[0]=s\n.end\n"
+              ".model o3test_hard_adder\n.inputs cin[0] a[0] a[1]\n.outputs s[0]\n"
+              ".blackbox\n.end\n");
+    read_ok(PATH);
+    odin3_module *top = module_at(1);
+    odin3_node_id node = cell_at(top, 0);
+    TEST_ASSERT_EQUAL_STRING("y", pin_net_at(top, node, (pin_at){1, 0}));
+    TEST_ASSERT_FALSE(odin3_design_declared_model_decl(design, 0)->ports[0].scalar);
+    expect_check_clean();
+}
+
 static void test_subckt_of_an_undeclared_model_is_an_implicit_black_box(void) {
     write_str(".model top\n.inputs a b\n.outputs y\n.subckt $pow A[0]=a B[0]=b Y[0]=y\n"
               ".subckt $pow A[0]=b Z=y2\n.end\n");
@@ -979,6 +1097,16 @@ static void test_out_of_memory_sweep(void) {
     oom_sweep(ODIN3_BLIF_FIXTURES "/dffsre.parmys.blif");
 }
 
+/* The same through the parametric paths: a declared parametric model, then inferred parameters. */
+static void test_out_of_memory_sweep_parametric(void) {
+    register_pow_once();
+    write_str(".model top\n.inputs a b\n.outputs y\n.subckt o3test_pow A=a B[0]=b Y[1]=y\n.end\n"
+              ".model o3test_pow\n.inputs B[0] B[1] B[2] A\n.outputs Y[0] Y[1]\n.blackbox\n.end\n");
+    oom_sweep(PATH);
+    write_str(".model top\n.inputs a\n.outputs y\n.subckt o3test_pow A[1]=a Y[7]=y\n.end\n");
+    oom_sweep(PATH);
+}
+
 static void run_pass1_tests(void) {
     RUN_TEST(test_modules_in_file_order_first_is_top);
     RUN_TEST(test_nonconsecutive_bits_stay_scalar_in_order);
@@ -991,6 +1119,12 @@ static void run_pass1_tests(void) {
     RUN_TEST(test_blackbox_reuses_compatible_registered_type);
     RUN_TEST(test_blackbox_incompatible_with_registered_type);
     RUN_TEST(test_blackbox_repeats_a_port_name);
+    RUN_TEST(test_subckt_of_registered_parametric_type_infers_params);
+    RUN_TEST(test_subckt_of_registered_parametric_type_needs_bit_formals);
+    RUN_TEST(test_declared_parametric_model);
+    RUN_TEST(test_declared_parametric_model_bounds_formals);
+    RUN_TEST(test_declared_parametric_model_contradiction);
+    RUN_TEST(test_declared_bracketed_scalar_port);
     RUN_TEST(test_input_and_output_of_the_same_name_share_a_net);
     RUN_TEST(test_mangled_name_skips_taken_names);
     RUN_TEST(test_duplicate_model);
@@ -1054,6 +1188,7 @@ static void run_pass2_and_golden_tests(void) {
     RUN_TEST(test_golden_dffsre_implicit_cell);
     RUN_TEST(test_golden_multiple_drivers);
     RUN_TEST(test_out_of_memory_sweep);
+    RUN_TEST(test_out_of_memory_sweep_parametric);
 }
 
 int main(void) {

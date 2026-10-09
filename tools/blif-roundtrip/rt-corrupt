@@ -3,4 +3,4 @@
 # blif-roundtrip gates must fail. BRT_REAL_RT names the real driver.
 set -euo pipefail
 "${BRT_REAL_RT:?}" "$@"
-sed -i '0,/^\.names /s//.names zz /' "$2"
+sed -i '0,/^\.names /s//.names zz /' "${!#}" # the output is the last argument

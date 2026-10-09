@@ -177,20 +177,68 @@ odin3_status odin3_celltype_add_local(odin3_design *design, const odin3_celltype
 
 /*
  * IR-7b: declares a black box. If the name is already registered, the declaration must match the
- * registered type's ports (count, names, directions, constant widths; a width given by a parameter,
- * function or expression never matches) and that type is reused; otherwise a new local type of
- * granularity BLACKBOX (whatever def->gran says) is added. Either way the type is appended to the
- * design's declared-model list. ODIN3_ERR_INVALID_ARG (logged) for an invalid definition or a
- * mismatch; ODIN3_ERR_NO_MEMORY on out of memory. Nothing changes on failure.
+ * registered type (odin3_celltype_blackbox_match: the same port names in any order, the same
+ * directions, and the declared widths, which also give the type's parameters) and that type is
+ * reused; otherwise a new local type of granularity BLACKBOX (whatever def->gran says) is added.
+ * Either way the declared-model list gets an entry: the type, its parameter values (inferred, or
+ * the new type's defaults) and a copy of def as written (its port order and scalar flags, which
+ * writers reproduce). ODIN3_ERR_INVALID_ARG (logged with the reason) for an invalid definition or
+ * a mismatch; ODIN3_ERR_NO_MEMORY on out of memory. Nothing changes on failure (the design arena
+ * may have grown).
  */
 odin3_status odin3_celltype_declare_blackbox(odin3_design *design, const odin3_celltype_def *def,
                                              odin3_celltype_id *out);
+
+/*
+ * Parameters implied by port widths (IR-7b): params[i] is, for an INT parameter that is the
+ * width_param of at least one port with a nonzero seen width, the largest such width; every other
+ * parameter keeps its default (a BITS or STRING default shares the definition's payload). seen
+ * holds one width per port of type, 0 meaning not seen; params receives one value per parameter.
+ * Width functions and expressions never give a parameter (callers evaluate them afterwards).
+ * ODIN3_ERR_INVALID_ARG (logged) for an invalid type.
+ */
+odin3_status odin3_celltype_infer_params(const odin3_design *design, odin3_celltype_id type,
+                                         const uint32_t *seen, odin3_value *params);
+
+/* A black-box declaration checked against a registered type. */
+typedef struct odin3_blackbox_match {
+    odin3_celltype_id type;         /* the registered type */
+    const odin3_celltype_def *decl; /* the declaration (constant widths) */
+    odin3_value *params;            /* receives one value per parameter of type */
+} odin3_blackbox_match;
+
+/*
+ * IR-7b compatibility, without logging (a width function may log on its own): decl has as many
+ * ports as the type, each a port of the type of the same name and direction (order and scalar flags
+ * are free); the type's parameters are inferred from decl's widths (odin3_celltype_infer_params)
+ * into match->params; and every port of the type, sized by them, has its declared width. A type of
+ * granularity PORT never matches. ODIN3_OK; ODIN3_ERR_INVALID_ARG with the reason in *why
+ * (match->params may be partly written); ODIN3_ERR_NO_MEMORY when a width expression cannot get
+ * evaluation memory.
+ */
+odin3_status odin3_celltype_blackbox_match(const odin3_design *design,
+                                           const odin3_blackbox_match *match, odin3_width_why *why);
 
 /* Declared-model list (declaration order; a model declared twice appears twice). */
 uint32_t odin3_design_declared_model_count(const odin3_design *design);
 
 /* Entry index of the declared-model list; {0} when index is out of range. */
 odin3_celltype_id odin3_design_declared_model(const odin3_design *design, uint32_t index);
+
+/*
+ * The parameter values of entry index (one per parameter of its type: inferred from the declared
+ * widths, or the defaults of a new black box); NULL when index is out of range or the type has no
+ * parameters. Owned by the design.
+ */
+const odin3_value *odin3_design_declared_model_params(const odin3_design *design, uint32_t index);
+
+/*
+ * The declaration of entry index as written: its ports in declaration order with their
+ * directions, constant widths and scalar flags (a new black box's own definition); NULL when index
+ * is out of range. Owned by the design.
+ */
+const odin3_celltype_def *odin3_design_declared_model_decl(const odin3_design *design,
+                                                           uint32_t index);
 
 /*
  * The arena local cell-type definitions live in. Data a local type points to without it being

@@ -18,7 +18,11 @@
  *
  * Pass 1 reads every `.model` header: models become modules in file order (the first is the top),
  * `.inputs`/`.outputs` become ports in file order, and `.blackbox` models become black-box cell
- * types (odin3_celltype_declare_blackbox, IR-7b), also in file order. Port grouping: a run of
+ * types (odin3_celltype_declare_blackbox, IR-7b), also in file order. A black box whose name is a
+ * registered cell type (a tech library loaded beforehand, odin3_techlib_read) must match it by
+ * port name, direction and width, its declared widths giving the type's parameters
+ * (odin3_celltype_blackbox_match); the declared-model entry keeps those parameters and the
+ * declaration as written. Port grouping: a run of
  * names `a[0] a[1] … a[w-1]` that appear consecutively, in this order, in one directive is one
  * vector port `a` of width w (written with brackets); every other name is a scalar port with its
  * exact name; ports are never reordered. Every port net is named by its exact BLIF bit name
@@ -37,14 +41,20 @@
  *   `ah`/`al` → `$_DLATCH_P_`/`$_DLATCH_N_` (E = ctrl), no type → `$_FF_`; INIT = init (0..3),
  *   default 3. Known limitation: a control of `NIL` (SIS: no clock) is read as a net named NIL;
  * - `.subckt m f=a …`: a node of cell type m (a module of the file, a black box, or another
- *   registered type with its default parameters); formal f is the name of a scalar port, or `p[k]`
- *   for bit k of a vector port p (a scalar port's exact name wins, so a scalar port `a[1]` is
- *   matched by name; a bare `o` never names the width-1 vector port `o[0]`); formals not listed
- *   stay unconnected. A model that is neither in the file nor registered (Yosys writes `$pow`,
- *   `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit black box: a local cell type of
- *   granularity BLACKBOX that is not in the declared-model list (writers emit no `.model` for
- *   it), whose ports are the distinct formals used with it in the file, in order of first use,
- *   each scalar, width 1 and INOUT (the file does not give directions);
+ *   registered type); formal f is the name of a scalar port, or `p[k]` for bit k of a vector port
+ *   p (a scalar port's exact name wins, so a scalar port `a[1]` is matched by name; a bare `o`
+ *   never names the width-1 vector port `o[0]`; for a model the file declares, a port is scalar
+ *   or vector as the declaration writes it, so Odin II's `cin[0]` names a library port `cin` of
+ *   width 1); formals not listed stay unconnected. Parameters: a model the file declares gives its
+ *   declared-model parameters; any other type gets the values its formals imply, each port seen
+ *   as wide as its largest bit index + 1 (odin3_celltype_infer_params: a parameter that sizes a
+ *   port takes that width; types sized otherwise keep their defaults), so `.subckt $pow A[1]=a
+ *   Y[7]=y` of a registered parametric `$pow` has A_WIDTH 2 and Y_WIDTH 8. A bit beyond the
+ *   instance's port width is an unknown formal. A model that is neither in the file nor
+ *   registered (Yosys writes `$pow`, `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit
+ *   black box: a local cell type of granularity BLACKBOX that is not in the declared-model list
+ *   (writers emit no `.model` for it), whose ports are the distinct formals used with it in the
+ *   file, in order of first use, each scalar, width 1 and INOUT (the file gives no directions);
  * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
  * Several drivers on one net are read as written (odin3_check_design reports them, rule 4).
  * Provenance: every cell and every net created in pass 2 gets its own IMPORTED record, a cell
@@ -53,7 +63,8 @@
  *
  * Errors are logged as "path:line: message". ODIN3_ERR_PARSE for malformed input (a directive
  * outside a model, a duplicate model, a model without `.end`, a port declared twice, a black-box
- * declaration that conflicts with a registered cell type, a black box with a body, a black box as
+ * declaration that conflicts with a registered cell type (the reason follows), a black box with a
+ * body, a black box as
  * the first model, a black box that repeats a port name, an unknown directive, a cover row that
  * does not fit its `.names` or mixes on-set and off-set rows, an unsupported latch type (`as`) or
  * init, a `.subckt` of its own model or of a port cell type, an unknown formal, a formal connected

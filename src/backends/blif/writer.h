@@ -14,8 +14,10 @@
  * run of ports of one direction as one `.inputs` or `.outputs` line, then `.clock` from the
  * module's ODIN3_BLIF_ATTR_CLOCK attribute, then the cells in node ID order (port nodes skipped),
  * then the port buffers (below), then `.end`. Then every declared black-box model
- * (odin3_design_declared_model) in declaration order, once each even when listed twice: `.model`,
- * its ports as above, `.blackbox`, `.end`. Implicit black boxes (local BLACKBOX types that are not
+ * (odin3_design_declared_model) in declaration order, once each even when listed twice (the first
+ * declaration): `.model`, the ports of the declaration as written
+ * (odin3_design_declared_model_decl: its order, widths and scalar flags) as above, `.blackbox`,
+ * `.end`. Implicit black boxes (local BLACKBOX types that are not
  * declared models) get no `.model`.
  *
  * Ports keep their names: bit k of a port is written as its port bit name, the port wire's
@@ -33,14 +35,17 @@
  * one output character per row); `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_`/`$_DLATCH_N_` → `.latch in
  * out re|fe|ah|al ctrl init` and `$_FF_` → `.latch in out init` (init always written); any other
  * type → `.subckt type formal=actual …` in port order, unconnected pins skipped, formals by port
- * name (`p[k]` for bit k of a port that is not scalar; a module port's ODIN3_BLIF_ATTR_PORT_NAME
- * when it has one), which needs the node's parameters to equal the type's defaults (BLIF has no
- * way to give them). A model with a name in both `.inputs` and `.outputs` has two ports of one
- * BLIF name; BLIF can connect only one of them per instance (the reader binds the formal to the
- * input), so a cell with both connected is refused. After each cell: `.cname` with the node's
- * name, then each `.attr`/`.param` listed by its ODIN3_BLIF_ATTR_EXTRAS attribute, in that order;
- * a listed key without a `blif.attr:`/`blif.param:` prefix or without a STRING attribute on the
- * cell is skipped with a warning.
+ * name (`p[k]` for bit k of a port that is not scalar — as the type's declaration writes it when
+ * the design declares the type; a module port's ODIN3_BLIF_ATTR_PORT_NAME when it has one). BLIF
+ * has no way to give parameters, so the node's must be those the reader derives (reader.h): the
+ * declared-model parameters of a declared type, else those the connected formals imply
+ * (odin3_celltype_infer_params; the defaults for a type no port of which a parameter sizes). A
+ * model with a name in both `.inputs` and `.outputs` has two ports of one BLIF name; BLIF can
+ * connect only one of them per instance (the reader binds the formal to the input), so a cell with
+ * both connected is refused. After each cell: `.cname` with the node's name, then each
+ * `.attr`/`.param` listed by its ODIN3_BLIF_ATTR_EXTRAS attribute, in that order; a listed key
+ * without a `blif.attr:`/`blif.param:` prefix or without a STRING attribute on the cell is skipped
+ * with a warning.
  *
  * Other net names: the net's own name, unless it is a port bit name of another net; else its
  * primary wire bit (the wire's ODIN3_BLIF_ATTR_PORT_NAME or name, with `[index]` unless the wire
@@ -56,11 +61,11 @@
  *
  * Errors (logged): ODIN3_ERR_IO when path cannot be opened or a write fails ("path: cannot open
  * …", "path:line: write failed …"); ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction
- * INOUT, two ports of one BLIF name on different nets, a `.subckt` cell with non-default
- * parameters or with both ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out of memory.
- * On any failure after path was opened, the partly written file is removed when it is a regular
- * file (a device such as /dev/full is left alone). Names are written as they are: a name holding
- * blanks or other characters BLIF cannot carry is not escaped.
+ * INOUT, two ports of one BLIF name on different nets, a `.subckt` cell with parameters the
+ * reader would not derive or with both ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out
+ * of memory. On any failure after path was opened, the partly written file is removed when it is a
+ * regular file (a device such as /dev/full is left alone). Names are written as they are: a name
+ * holding blanks or other characters BLIF cannot carry is not escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 

@@ -11,6 +11,7 @@
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
+#include "util/vec.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -75,7 +76,9 @@ typedef struct blif_writer {
     odin3_celltype_id builtin[WR_BUILTINS];
     wr_keys keys;
     odin3_u64map *type_module; /* module cell type -> module ID */
-    odin3_u64map *written;     /* black-box cell types already written -> 1 */
+    odin3_u64map *declared;    /* declared cell type -> its first declared-model index */
+    odin3_vec seen;            /* uint32_t per port of a .subckt: highest connected bit + 1 */
+    odin3_vec params;          /* odin3_value: the parameters its formals imply */
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
     /* the module being written */
@@ -356,11 +359,10 @@ static odin3_status name_pins(blif_writer *wr, odin3_node_id node) {
 }
 
 /* wr->token = base, or base[k] when the port is not scalar. */
-static odin3_status bit_token(blif_writer *wr, const odin3_port_def *port, odin3_bytes base,
-                              uint32_t bit) {
+static odin3_status bit_token(blif_writer *wr, bool scalar, odin3_bytes base, uint32_t bit) {
     odin3_strbuf_clear(&wr->token);
     odin3_status st = odin3_strbuf_append(&wr->token, base);
-    if (st == ODIN3_OK && !port->scalar) {
+    if (st == ODIN3_OK && !scalar) {
         st = odin3_strbuf_appendf(&wr->token, "[%u]", (unsigned)bit);
     }
     return st;
@@ -383,7 +385,8 @@ static odin3_bytes port_base(const blif_writer *wr, const odin3_module *module, 
 static odin3_status port_bit_token(blif_writer *wr, wr_portbit where) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
-    return bit_token(wr, &def->ports[where.port], port_base(wr, wr->module, where.port), where.bit);
+    return bit_token(wr, def->ports[where.port].scalar, port_base(wr, wr->module, where.port),
+                     where.bit);
 }
 
 /* Reserves the port bit name in wr->token for net (none for an unconnected port pin); the first
@@ -568,7 +571,7 @@ static odin3_status write_model_ports(blif_writer *wr, const odin3_celltype_def 
         st = port_line(wr, def, i);
         const odin3_port_def *port = &def->ports[i];
         for (uint32_t k = 0; st == ODIN3_OK && k < port->width; k++) {
-            st = bit_token(wr, port, odin3_bytes_cstr(port->name), k);
+            st = bit_token(wr, port->scalar, odin3_bytes_cstr(port->name), k);
             if (st == ODIN3_OK) {
                 wr_token_built(wr);
             }
@@ -693,11 +696,79 @@ static bool formal_taken(const blif_writer *wr, odin3_node_id node, wr_portbit w
     return false;
 }
 
-/* True when every parameter of node equals its default (BLIF .subckt cannot give one). */
-static bool default_params(const blif_writer *wr, odin3_node_id node,
-                           const odin3_celltype_def *def) {
+/* The declaration of type the writer reproduces (its first declared-model entry), or NULL with
+ * *index untouched when the design does not declare type. */
+static const odin3_celltype_def *declared_of(const blif_writer *wr, odin3_celltype_id type,
+                                             uint32_t *index) {
+    uint64_t at = 0;
+    if (!odin3_u64map_get(wr->declared, type.v, &at)) {
+        return NULL;
+    }
+    *index = (uint32_t)at;
+    return odin3_design_declared_model_decl(wr->design, *index);
+}
+
+/* Whether formals spell port `at` of type without brackets: as declared, else as the type says. */
+static bool formal_scalar(const blif_writer *wr, odin3_celltype_id type, uint32_t at) {
+    const odin3_port_def *port = &odin3_celltype_get(wr->design, type)->ports[at];
+    uint32_t index = 0;
+    const odin3_celltype_def *decl = declared_of(wr, type, &index);
+    for (uint32_t i = 0; decl != NULL && i < decl->n_ports; i++) {
+        if (strcmp(decl->ports[i].name, port->name) == 0) {
+            return decl->ports[i].scalar;
+        }
+    }
+    return port->scalar;
+}
+
+/* wr->params: the parameters the BLIF reader gives node's .subckt (frontends/blif/reader.h): a
+ * declared model's, else those its connected formals imply. */
+static odin3_status implied_params(blif_writer *wr, odin3_node_id node,
+                                   const odin3_celltype_def *def) {
+    odin3_celltype_id type = odin3_node_type(wr->module, node);
+    odin3_vec_clear(&wr->params);
+    odin3_vec_clear(&wr->seen);
+    if (odin3_vec_reserve(&wr->params, def->n_params) != ODIN3_OK ||
+        odin3_vec_reserve(&wr->seen, def->n_ports) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     for (uint32_t i = 0; i < def->n_params; i++) {
-        if (!odin3_value_equal(odin3_node_param(wr->module, node, i), &def->params[i].dflt)) {
+        (void)odin3_vec_push(&wr->params); /* reserved */
+    }
+    uint32_t index = 0;
+    const odin3_value *declared = declared_of(wr, type, &index) != NULL
+                                      ? odin3_design_declared_model_params(wr->design, index)
+                                      : NULL;
+    if (declared != NULL) {
+        memcpy(wr->params.data, declared, sizeof *declared * def->n_params);
+        return ODIN3_OK;
+    }
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        uint32_t *seen = odin3_vec_push(&wr->seen); /* reserved */
+        odin3_pinslice pins = odin3_node_port(wr->module, node, port);
+        for (uint32_t k = pins.count; k > 0 && *seen == 0; k--) {
+            if (odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k - 1}))) {
+                *seen = k;
+            }
+        }
+    }
+    return odin3_celltype_infer_params(wr->design, type, wr->seen.data, wr->params.data);
+}
+
+/* True when node's parameters are those its .subckt reads back with (BLIF has no other way to
+ * give them); a failure (out of memory) is recorded. */
+static bool params_recoverable(blif_writer *wr, odin3_node_id node, const odin3_celltype_def *def) {
+    if (def->n_params == 0) {
+        return true;
+    }
+    odin3_status st = implied_params(wr, node, def);
+    if (st != ODIN3_OK) {
+        (void)wr_fail(wr, st);
+        return false;
+    }
+    const odin3_value *want = wr->params.data;
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (!odin3_value_equal(odin3_node_param(wr->module, node, i), &want[i])) {
             return false;
         }
     }
@@ -708,6 +779,7 @@ static bool default_params(const blif_writer *wr, odin3_node_id node,
 static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
     const odin3_port_def *port = &odin3_celltype_get(wr->design, type)->ports[at];
+    bool scalar = formal_scalar(wr, type, at);
     odin3_bytes base = formal_base(wr, type, at);
     bool renamed = base.len != strlen(port->name) || memcmp(base.ptr, port->name, base.len) != 0;
     odin3_pinslice pins = odin3_node_port(wr->module, node, at);
@@ -721,7 +793,7 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
             return wr_refuse(wr, "a .subckt cannot connect both ports of the BLIF name",
                              (const char *)base.ptr);
         }
-        st = bit_token(wr, port, base, k);
+        st = bit_token(wr, scalar, base, k);
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, odin3_bytes_cstr("=")) : st;
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, net_name(wr, net)) : st;
         if (st == ODIN3_OK) {
@@ -735,9 +807,13 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
 static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
-    if (!default_params(wr, node, def)) {
-        return wr_refuse(wr, "non-default parameters have no BLIF form; cannot write a cell of",
-                         def->name);
+    if (!params_recoverable(wr, node, def)) {
+        return wr->st != ODIN3_OK
+                   ? wr->st
+                   : wr_refuse(wr,
+                               "parameters neither declared nor implied by the connected formals "
+                               "have no BLIF form; cannot write a cell of",
+                               def->name);
     }
     wr_begin(wr, ".subckt");
     wr_token(wr, odin3_bytes_cstr(def->name));
@@ -861,25 +937,22 @@ static odin3_status write_module(blif_writer *wr, uint32_t id) {
     return wr->st;
 }
 
-/* Each declared black-box model once, in declaration order. */
+/* Each declared black-box model once (its first declaration), in declaration order. */
 static odin3_status write_blackboxes(blif_writer *wr) {
     uint32_t count = odin3_design_declared_model_count(wr->design);
     for (uint32_t i = 0; wr->st == ODIN3_OK && i < count; i++) {
-        odin3_celltype_id type = odin3_design_declared_model(wr->design, i);
-        uint64_t seen = 0;
-        if (odin3_u64map_get(wr->written, type.v, &seen)) {
+        uint32_t first = 0;
+        const odin3_celltype_def *decl =
+            declared_of(wr, odin3_design_declared_model(wr->design, i), &first);
+        if (decl == NULL || first != i) {
             continue;
         }
-        if (odin3_u64map_put(wr->written, (odin3_kv){type.v, 1}) != ODIN3_OK) {
-            return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
-        }
-        const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
-        wr->model = def->name;
+        wr->model = decl->name;
         wr_newline(wr);
         wr_begin(wr, ".model");
-        wr_token(wr, odin3_bytes_cstr(def->name));
+        wr_token(wr, odin3_bytes_cstr(decl->name));
         wr_end(wr);
-        if (write_model_ports(wr, def) == ODIN3_OK) {
+        if (write_model_ports(wr, decl) == ODIN3_OK) {
             wr_begin(wr, ".blackbox");
             wr_end(wr);
             wr_begin(wr, ".end");
@@ -909,10 +982,19 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
             wr->builtin[i] = (odin3_celltype_id){0};
         }
     }
+    odin3_vec_init(&wr->seen, sizeof(uint32_t));
+    odin3_vec_init(&wr->params, sizeof(odin3_value));
     wr->type_module = odin3_u64map_create(0);
-    wr->written = odin3_u64map_create(0);
-    if (wr->type_module == NULL || wr->written == NULL) {
+    wr->declared = odin3_u64map_create(0);
+    if (wr->type_module == NULL || wr->declared == NULL) {
         return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
+    for (uint32_t i = odin3_design_declared_model_count(design); i > 0; i--) {
+        /* backwards, so each type ends up mapped to its first entry */
+        odin3_kv entry = {odin3_design_declared_model(design, i - 1).v, i - 1};
+        if (odin3_u64map_put(wr->declared, entry) != ODIN3_OK) {
+            return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
+        }
     }
     for (uint32_t i = 1; i < odin3_design_module_end(design); i++) {
         const odin3_module *module = odin3_module_get((odin3_design *)design, (odin3_module_id){i});
@@ -979,7 +1061,9 @@ static void wr_free(blif_writer *wr) {
     odin3_strbuf_free(&wr->token);
     odin3_strbuf_free(&wr->cand);
     odin3_u64map_destroy(wr->type_module);
-    odin3_u64map_destroy(wr->written);
+    odin3_u64map_destroy(wr->declared);
+    odin3_vec_free(&wr->seen);
+    odin3_vec_free(&wr->params);
 }
 
 odin3_status odin3_blif_write(const odin3_design *design, const char *path) {

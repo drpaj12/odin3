@@ -1,0 +1,13 @@
+# 'adder' as EArch/quickstart/blink/blink.parmys.blif declares it (8 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_b i_cin i_a
+.outputs o_sumout o_cout
+.subckt adder b=i_b cin=i_cin a=i_a sumout=o_sumout cout=o_cout
+.end
+
+.model adder
+.inputs b cin a
+.outputs sumout cout
+.blackbox
+.end

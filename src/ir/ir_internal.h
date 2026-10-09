@@ -32,6 +32,13 @@ typedef struct odin3_celltype_entry {
     const odin3_techlib_cell *lib; /* tech-library data (local types only), or NULL */
 } odin3_celltype_entry;
 
+/* One entry of a design's declared-model list (IR-7b). */
+typedef struct odin3_declared_entry {
+    odin3_celltype_id type;
+    const odin3_value *params;      /* one per parameter of type (design arena), NULL when none */
+    const odin3_celltype_def *decl; /* the declaration as written (design arena) */
+} odin3_declared_entry;
+
 /* The design's provenance store (prov.c; IR-12, IR-13, IR-6 tombstones). */
 typedef struct odin3_prov_store {
     odin3_pagevec *records; /* odin3_prov_record; slot 0 reserved */
@@ -71,7 +78,7 @@ struct odin3_design {
     odin3_strtab *strtab;         /* design-global names and string values */
     odin3_vec celltypes;          /* odin3_celltype_entry; slot 0 reserved */
     odin3_u64map *celltype_names; /* name strtab ID -> celltype ID */
-    odin3_vec declared;           /* odin3_celltype_id, IR-7b declaration order */
+    odin3_vec declared;           /* odin3_declared_entry, IR-7b declaration order */
     odin3_vec modules;            /* odin3_module *, creation order; slot 0 NULL */
 };
 

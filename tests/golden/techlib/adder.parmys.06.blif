@@ -1,0 +1,13 @@
+# 'adder' as EArch/regression/verilog/syntax/bm_DL_4_bit_updown_counter/bm_DL_4_bit_updown_counter.parmys.blif declares it (94 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_a i_b i_cin
+.outputs o_cout o_sumout
+.subckt adder a=i_a b=i_b cin=i_cin cout=o_cout sumout=o_sumout
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

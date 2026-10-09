@@ -1,0 +1,13 @@
+# 'adder' as EArch/regression/verilog/micro/bm_add_lpm/bm_add_lpm.parmys.blif declares it (14 golden files declare this
+# stanza). Written by tools/golden-blackboxes --write; do not edit.
+.model top
+.inputs i_cin i_a i_b
+.outputs o_cout o_sumout
+.subckt adder cin=i_cin a=i_a b=i_b cout=o_cout sumout=o_sumout
+.end
+
+.model adder
+.inputs cin a b
+.outputs cout sumout
+.blackbox
+.end

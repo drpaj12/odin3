@@ -270,7 +270,8 @@ static void test_blackbox_new_name(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model(design, 2).v);
 }
 
-static void test_blackbox_parametric_never_matches(void) {
+/* A port cell type is never a black box, even when its parameters could fit the declaration. */
+static void test_blackbox_port_type_never_matches(void) {
     odin3_celltype_def decl = {"$port_in", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0, NULL, NULL};
     odin3_port_def ports[1] = {{"P", ODIN3_DIR_OUT, false, 1, NULL, NULL, NULL}};
     decl.ports = ports;
@@ -279,6 +280,158 @@ static void test_blackbox_parametric_never_matches(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_celltype_declare_blackbox(design, &decl, &id));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(design));
+}
+
+/* --- parametric black boxes (IR-7b) ---------------------------------------------------------- */
+
+enum { DECL_A = 10, DECL_B = 18, DFLT_AB = 36 };
+
+/* out = A_WIDTH + B_WIDTH (0 when a parameter is not an INT). */
+static uint32_t width_fn_sum(const odin3_value *params, uint32_t port) {
+    (void)port;
+    if (params[0].kind != ODIN3_VAL_INT || params[1].kind != ODIN3_VAL_INT) {
+        return 0;
+    }
+    return (uint32_t)(params[0].i + params[1].i);
+}
+
+/* A local parametric multiplier: a A_WIDTH, b B_WIDTH, out A_WIDTH + B_WIDTH; STR is a string. */
+static odin3_celltype_id add_pmul(const char *name) {
+    static const odin3_param_def params[3] = {
+        {"A_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, DFLT_AB, NULL, 0, 0, 0}},
+        {"B_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, DFLT_AB, NULL, 0, 0, 0}},
+        {"STR", ODIN3_VAL_STRING, {ODIN3_VAL_STRING, 0, NULL, 0, 0, 0}}};
+    static const odin3_port_def ports[3] = {
+        {"a", ODIN3_DIR_IN, false, 0, "A_WIDTH", NULL, NULL},
+        {"b", ODIN3_DIR_IN, false, 0, "B_WIDTH", NULL, NULL},
+        {"out", ODIN3_DIR_OUT, false, 0, NULL, width_fn_sum, NULL}};
+    const odin3_celltype_def def = {name, ODIN3_GRAN_HARD, 0, ports, 3, params, 3, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
+    return id;
+}
+
+/* A declaration in another port order, with b given first and out scalar-free. */
+static odin3_port_def g_decl_ports[3];
+static odin3_celltype_def pmul_decl(const char *name, uint32_t out_width) {
+    const odin3_port_def ports[3] = {{"b", ODIN3_DIR_IN, false, DECL_B, NULL, NULL, NULL},
+                                     {"a", ODIN3_DIR_IN, false, DECL_A, NULL, NULL, NULL},
+                                     {"out", ODIN3_DIR_OUT, false, out_width, NULL, NULL, NULL}};
+    memcpy(g_decl_ports, ports, sizeof ports);
+    const odin3_celltype_def decl = {name, ODIN3_GRAN_BLACKBOX, 0, g_decl_ports, 3, NULL, 0, NULL,
+                                     NULL};
+    return decl;
+}
+
+/* Review Focus 1 (IR side): parameters inferred from the declared widths, in any port order. */
+static void test_blackbox_infers_parameters(void) {
+    odin3_celltype_id type = add_pmul("pmul_t4");
+    const odin3_celltype_def decl = pmul_decl("pmul_t4", DECL_A + DECL_B);
+    odin3_celltype_id got = {0};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_celltype_declare_blackbox(design, &decl, &got),
+                                  last_error);
+    TEST_ASSERT_EQUAL_UINT32(type.v, got.v);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_design_declared_model_count(design));
+    const odin3_value *params = odin3_design_declared_model_params(design, 0);
+    TEST_ASSERT_NOT_NULL(params);
+    TEST_ASSERT_EQUAL_INT64(DECL_A, params[0].i);
+    TEST_ASSERT_EQUAL_INT64(DECL_B, params[1].i);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_STRING, params[2].kind);
+    const odin3_celltype_def *kept = odin3_design_declared_model_decl(design, 0);
+    TEST_ASSERT_NOT_NULL(kept);
+    TEST_ASSERT_TRUE(kept != &decl);
+    TEST_ASSERT_EQUAL_UINT32(3, kept->n_ports);
+    TEST_ASSERT_EQUAL_STRING("b", kept->ports[0].name);
+    TEST_ASSERT_EQUAL_UINT32(DECL_B, kept->ports[0].width);
+    TEST_ASSERT_EQUAL_STRING("out", kept->ports[2].name);
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/* Review Focus 2 (IR side): a declared width the inferred parameters contradict is refused. */
+static void test_blackbox_contradicting_width(void) {
+    (void)add_pmul("pmul_bad_t4");
+    const odin3_celltype_def decl = pmul_decl("pmul_bad_t4", DECL_A + DECL_B - 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_declare_blackbox(design, &decl, NULL));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(design));
+    TEST_ASSERT_EQUAL_size_t(1, errors_logged);
+    TEST_ASSERT_EQUAL_STRING("declare_blackbox: 'pmul_bad_t4' does not match the registered cell "
+                             "type: port 'out' has 27 bits, the cell type gives it 28",
+                             last_error);
+}
+
+/* The quiet check reports the reason without logging; a missing port is named. */
+static void test_blackbox_match_is_quiet(void) {
+    odin3_celltype_id type = add_pmul("pmul_q_t4");
+    odin3_celltype_def decl = pmul_decl("pmul_q_t4", DECL_A + DECL_B);
+    odin3_value params[3];
+    const odin3_blackbox_match match = {type, &decl, params};
+    odin3_width_why why = {""};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_INT64(DECL_B, params[1].i);
+    g_decl_ports[1].name = "c";
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_STRING("the cell type has no port 'c'", why.text);
+    g_decl_ports[1].name = "a";
+    g_decl_ports[1].dir = ODIN3_DIR_OUT;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_STRING("port 'a' has another direction", why.text);
+    g_decl_ports[1].dir = ODIN3_DIR_IN;
+    decl.n_ports = 2;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_celltype_blackbox_match(design, &match, &why));
+    TEST_ASSERT_EQUAL_STRING("2 ports declared, the cell type has 3", why.text);
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/* Inference: the largest width seen on a port sized by an INT parameter; others keep defaults. */
+static void test_infer_params(void) {
+    odin3_celltype_id type = add_pmul("pmul_i_t4");
+    const uint32_t seen[3] = {DECL_A, 0, DECL_B};
+    odin3_value params[3];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_infer_params(design, type, seen, params));
+    TEST_ASSERT_EQUAL_INT64(DECL_A, params[0].i);
+    TEST_ASSERT_EQUAL_INT64(DFLT_AB, params[1].i);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_STRING, params[2].kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_infer_params(
+                                                     design, (odin3_celltype_id){0}, seen, params));
+}
+
+static void test_declared_model_accessors_out_of_range(void) {
+    TEST_ASSERT_NULL(odin3_design_declared_model_params(design, 0));
+    TEST_ASSERT_NULL(odin3_design_declared_model_decl(design, 0));
+}
+
+/* A new black box: no parameters, and the declaration is the new type's own definition. */
+static void test_declared_model_of_a_new_black_box(void) {
+    odin3_celltype_def decl = {"plain_t4", ODIN3_GRAN_BLACKBOX, 0, k_adder_ports, 5, NULL, 0, NULL,
+                               NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &decl, &id));
+    TEST_ASSERT_NULL(odin3_design_declared_model_params(design, 0));
+    TEST_ASSERT_EQUAL_PTR(odin3_celltype_get(design, id),
+                          odin3_design_declared_model_decl(design, 0));
+    TEST_ASSERT_NULL(odin3_design_declared_model_decl(design, 1));
+}
+
+/* Declaring against a parametric type under every allocation failure: NO_MEMORY, list unchanged. */
+static void test_blackbox_parametric_oom_sweep(void) {
+    (void)add_pmul("pmul_oom_t4");
+    const odin3_celltype_def decl = pmul_decl("pmul_oom_t4", DECL_A + DECL_B);
+    for (long tries = 0;; tries++) {
+        odin3_util_set_alloc_fail_after(tries);
+        odin3_status st = odin3_celltype_declare_blackbox(design, &decl, NULL);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st == ODIN3_OK) {
+            break;
+        }
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(design));
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_design_declared_model_count(design));
+    TEST_ASSERT_EQUAL_INT64(DECL_A, odin3_design_declared_model_params(design, 0)[0].i);
 }
 
 static void test_instances_counter(void) {
@@ -435,17 +588,20 @@ static void test_width_expr_validated_at_registration(void) {
     TEST_ASSERT_EQUAL_size_t(3, errors_logged);
 }
 
-/* A width expression is parametric: an IR-7b declaration with constant widths never matches. */
-static void test_blackbox_width_expr_never_matches(void) {
+static void test_blackbox_width_expr_evaluated(void) {
     static const fake_expr impl = {false, false};
     static const odin3_width_expr wexpr = {fake_check, fake_eval, &impl};
-    const odin3_port_def have[1] = {{"y", ODIN3_DIR_OUT, false, 0, NULL, NULL, &wexpr}};
-    const odin3_port_def want[1] = {{"y", ODIN3_DIR_OUT, false, 0, NULL, NULL, NULL}};
-    odin3_celltype_def def = {"wexpr_bb_t3", ODIN3_GRAN_HARD, 0, have, 1, NULL, 0, NULL, NULL};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, NULL));
-    def.ports = want;
+    (void)add_expr_type("wexpr_bb_t3", &wexpr, ODIN3_OK);
+    odin3_port_def want[2] = {{"a", ODIN3_DIR_IN, false, 5, NULL, NULL, NULL},
+                              {"y", ODIN3_DIR_OUT, false, 9, NULL, NULL, NULL}};
+    odin3_celltype_def def = {"wexpr_bb_t3", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, NULL));
+    TEST_ASSERT_EQUAL_INT64(5, odin3_design_declared_model_params(design, 0)[0].i);
+    TEST_ASSERT_EQUAL_INT64(4, odin3_design_declared_model_params(design, 0)[1].i);
+    want[1].width = 10;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_celltype_declare_blackbox(design, &def, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_design_declared_model_count(design));
 }
 
 static void test_lib_data_attaches_to_local_types(void) {
@@ -483,7 +639,14 @@ int main(void) {
     RUN_TEST(test_add_local_deep_copies);
     RUN_TEST(test_blackbox_reuses_registered_type);
     RUN_TEST(test_blackbox_new_name);
-    RUN_TEST(test_blackbox_parametric_never_matches);
+    RUN_TEST(test_blackbox_port_type_never_matches);
+    RUN_TEST(test_blackbox_infers_parameters);
+    RUN_TEST(test_blackbox_contradicting_width);
+    RUN_TEST(test_blackbox_match_is_quiet);
+    RUN_TEST(test_infer_params);
+    RUN_TEST(test_declared_model_accessors_out_of_range);
+    RUN_TEST(test_declared_model_of_a_new_black_box);
+    RUN_TEST(test_blackbox_parametric_oom_sweep);
     RUN_TEST(test_instances_counter);
     RUN_TEST(test_get_invalid_ids);
     RUN_TEST(test_bind_local);
@@ -493,7 +656,7 @@ int main(void) {
     RUN_TEST(test_width_expr_evaluates);
     RUN_TEST(test_width_expr_eval_failure);
     RUN_TEST(test_width_expr_validated_at_registration);
-    RUN_TEST(test_blackbox_width_expr_never_matches);
+    RUN_TEST(test_blackbox_width_expr_evaluated);
     RUN_TEST(test_lib_data_attaches_to_local_types);
     RUN_TEST(test_lib_data_rejects_other_types);
     return UNITY_END();

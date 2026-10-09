@@ -814,6 +814,75 @@ static void test_registered_type_as_subckt(void) {
                              slurp(OUT_PATH, text));
 }
 
+/* A Yosys-like parametric type: A A_WIDTH, B B_WIDTH, Y Y_WIDTH (all default 1). */
+static const odin3_param_def WPOW_PARAMS[] = {
+    {"A_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
+    {"B_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
+    {"Y_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}}};
+static const odin3_port_def WPOW_PORTS[] = {
+    {.name = "A", .dir = ODIN3_DIR_IN, .width_param = "A_WIDTH"},
+    {.name = "B", .dir = ODIN3_DIR_IN, .width_param = "B_WIDTH"},
+    {.name = "Y", .dir = ODIN3_DIR_OUT, .width_param = "Y_WIDTH"},
+};
+static const odin3_celltype_def WPOW_DEF = {.name = "o3test_wpow",
+                                            .gran = ODIN3_GRAN_HARD,
+                                            .ports = WPOW_PORTS,
+                                            .n_ports = 3,
+                                            .params = WPOW_PARAMS,
+                                            .n_params = 3};
+
+/* Registers o3test_wpow once and gives both designs a fresh start that sees it. */
+static void register_wpow_once(void) {
+    static bool registered;
+    if (!registered) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register_global(&WPOW_DEF));
+        registered = true;
+    }
+    odin3_design_destroy(design);
+    odin3_design_destroy(design2);
+    design = odin3_design_create();
+    design2 = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_NOT_NULL(design2);
+}
+
+/* Review Focus 1: a declared parametric model is written as declared (port order, scalar
+ * flags, widths from its parameters) and its instances with the declared spelling. */
+static void test_declared_parametric_model_written_as_declared(void) {
+    register_wpow_once();
+    static const char text[] =
+        ".model top\n.inputs a b\n.outputs y\n.subckt o3test_wpow A=a B[0]=b Y[1]=y\n.end\n\n"
+        ".model o3test_wpow\n.inputs B[0] B[1] B[2] A\n.outputs Y[0] Y[1]\n.blackbox\n.end\n";
+    write_input(text);
+    round_trip(IN_PATH);
+    static char out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
+}
+
+/* An undeclared parametric instance is written when its formals imply its parameters. */
+static void test_inferred_parameters_written(void) {
+    register_wpow_once();
+    static const char text[] = ".model top\n.inputs a\n.outputs y\n"
+                               ".subckt o3test_wpow A[1]=a Y[7]=y\n.end\n";
+    write_input(text);
+    round_trip(IN_PATH);
+    static char out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
+}
+
+/* Parameters the connected formals do not imply cannot be written. */
+static void test_unrecoverable_parameters_are_refused(void) {
+    register_wpow_once();
+    odin3_module *module = new_module(design, "top");
+    const odin3_value params[3] = {odin3_value_int(4), odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec spec = {
+        .type = type_named(design, "o3test_wpow"), .params = params, .n_params = 3};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "o3test_wpow"), last_error);
+}
+
 /* Writing design under every allocation failure gives NO_MEMORY, never a crash or a leak, and
  * a write that succeeds gives the reference text. */
 static void oom_sweep(void) {
@@ -857,6 +926,14 @@ static void test_out_of_memory_sweep_generated_names(void) {
     oom_sweep();
 }
 
+/* The same with a .subckt whose parameters the writer infers from its connected formals. */
+static void test_out_of_memory_sweep_inferred_parameters(void) {
+    register_wpow_once();
+    write_input(".model top\n.inputs a\n.outputs y\n.subckt o3test_wpow A[1]=a Y[7]=y\n.end\n");
+    read_into(design, IN_PATH);
+    oom_sweep();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_round_trip_every_fixture);
@@ -882,7 +959,11 @@ int main(void) {
     RUN_TEST(test_inout_port_is_refused);
     RUN_TEST(test_non_default_parameters_are_refused);
     RUN_TEST(test_registered_type_as_subckt);
+    RUN_TEST(test_declared_parametric_model_written_as_declared);
+    RUN_TEST(test_inferred_parameters_written);
+    RUN_TEST(test_unrecoverable_parameters_are_refused);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);
+    RUN_TEST(test_out_of_memory_sweep_inferred_parameters);
     return UNITY_END();
 }

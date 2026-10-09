@@ -1,0 +1,59 @@
+# vtr.o3lib — the VTR hard blocks the goldens instantiate (EArch and
+# k6_frac_N10_frac_chain_mem32K_40nm), for the BLIF reader's IR-7b black-box check.
+#
+# Port names follow the goldens' `.model … .blackbox` stanzas, which both oracles write with the
+# same names. Port order is Odin II's (it never varies); Yosys+Parmys declares the same ports in
+# varying orders, which IR-7b accepts because ports match by name. The declared widths give the
+# parameters (36-bit multiplier inputs, 15 address bits and 1 data bit in every golden): the
+# defaults are those widths.
+library vtr
+
+cell adder hard
+  in  a 1
+  in  b 1
+  in  cin 1
+  out cout 1
+  out sumout 1
+  fn  sumout = a ^ b ^ cin
+  fn  cout   = (a & b) | (a & cin) | (b & cin)
+end
+
+cell multiply hard
+  param A_WIDTH int 36
+  param B_WIDTH int 36
+  in  a A_WIDTH
+  in  b B_WIDTH
+  out out A_WIDTH + B_WIDTH
+  fn  out = a * b                    # unsigned
+end
+
+# Memory ports list the clock first, then the enable, address and data inputs they use.
+cell single_port_ram hard
+  param ADDR_WIDTH int 15
+  param DATA_WIDTH int 1
+  in  clk 1 clock
+  in  data DATA_WIDTH
+  in  addr ADDR_WIDTH
+  in  we 1
+  out out DATA_WIDTH
+  memory words 2 ** ADDR_WIDTH ; width DATA_WIDTH
+  write sync clk we addr data
+  read sync clk addr
+end
+
+cell dual_port_ram hard
+  param ADDR_WIDTH int 15
+  param DATA_WIDTH int 1
+  in  clk 1 clock
+  in  data2 DATA_WIDTH
+  in  data1 DATA_WIDTH
+  in  addr2 ADDR_WIDTH
+  in  addr1 ADDR_WIDTH
+  in  we2 1
+  in  we1 1
+  out out2 DATA_WIDTH
+  out out1 DATA_WIDTH
+  memory words 2 ** ADDR_WIDTH ; width DATA_WIDTH
+  write sync clk we1 addr1 data1 ; write sync clk we2 addr2 data2
+  read sync clk addr1 ; read sync clk addr2
+end
