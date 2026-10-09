@@ -71,3 +71,15 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 13. 1E exit test: random input vectors; our simulator's outputs compared cycle by cycle against
     Icarus Verilog running ABC's Verilog dump of the same BLIF; goldens with RAMs excluded until
     Phase 4.
+
+14. **Tombstones keep more** (Peter): besides module, kind, cell type, name and provenance, a
+    tombstone keeps a dead node's parameters and the names of the nets its pins were connected
+    to (IR-6 amended; implemented in a small IR follow-up after 1C).
+15. 1C exit test: every `ok` golden reads, round-trips identical under `netlist-compare` with
+    names and order kept; `check` errors are allowed only on the four Odin II goldens whose
+    netlists drive one net from several cells (`elsif_both_defined`, `multi_assignment`, both
+    arches), listed explicitly in the round-trip script.
+16. Undeclared, unregistered `.subckt` cells (Yosys `$pow`, `$_DFFSR_PPP_`) become implicit
+    black boxes with ports from the file (scalar, width 1, inout); no `.model` is written for them.
+17. Order after 1C: 1G, then 1E, 1F, 1D. The full golden round trip runs locally (CI has no
+    goldens) via a rerunnable script; CI checks the committed fixtures.
