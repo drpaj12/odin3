@@ -4,21 +4,25 @@
 #
 # For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
 # directory: every *.blif) odin3-write reads it and writes JSON, Verilog and dot, then
-#   JSON     Yosys `read_json; opt_clean; write_blif` vs the golden through the same Yosys
-#            normalization (`read_blif; opt_clean; write_blif`), compared with
-#            netlist-compare (stub .blackbox models added to both for models neither side
-#            defines). Yosys write_blif spells every cover as minterms and opt_clean resolves
-#            constant aliases, so both sides go through it (its self-buffers `.names x x` are
-#            dropped on both). When Yosys cannot read the golden (implicit internal cells such as
-#            `$pow` without parameters) the JSON step is excluded ("ref-excluded", listed).
-#   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog; hierarchy -top <first model>;
-#            proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
+#   JSON     The golden through Yosys (`read_blif` (`-sop` when a cover has over 12 inputs);
+#            NORM; `write_blif`) is the reference; the JSON through Yosys (`read_json`; NORM;
+#            `write_blif`) must be identical to it under netlist-compare. NORM turns identity
+#            $luts into connections (as read_blif does for `.names a b` / `1 1`; not with
+#            -sop, which keeps them as cells) and runs opt_clean (constant aliases like `gnd`). Both outputs are then normalized the
+#            same way: Yosys self-buffers `.names x x` dropped, covers of at most 12 inputs
+#            written as minterms (a $lut is minterms, a $sop cubes), statements sorted, and a
+#            1-bit vector port's bit named `t[0]` as in the golden (Yosys drops the index of a
+#            1-bit wire); stub .blackbox models are added to both for models neither defines.
+#            A golden Yosys cannot read is excluded from this step ("ref-excluded", listed).
+#   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog -noblackbox; hierarchy -top <first
+#            model>; proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
 #            (* blackbox *) stubs declare the black boxes) and tools/equiv-check
 #            --allow-undriven against the golden. equiv-check cannot model black boxes other
 #            than the VTR adder (RAMs, multipliers, implicit cells), multi-driver nets, level
 #            latches or several clocks: such goldens are "excluded" (listed with the reason).
-#   DOT      dot -Tsvg accepts it, or the writer refused it for the node budget (--max-nodes,
-#            default 2000), which is the budget honoured ("budget").
+#   DOT      dot -Tsvg accepts it ("ok"); when the layout takes longer than --dot-timeout,
+#            Graphviz's parser (nop) must accept it ("ok-parse"); or the writer refused it for
+#            the node budget (--max-nodes, default 2000): the budget honoured ("budget").
 # Order: ascending file size (smallest first); --largest-first reverses it. Identical contents
 # run once (sha256); duplicates reuse the result. Every tool runs under a per-file timeout and an
 # address-space cap. Timeouts and memory-cap stops are reported, and are failures only in
@@ -44,7 +48,7 @@ usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH]
   --yosys PATH  Yosys (default $ODIN3_YOSYS, else ~/odin3-ws/external/yosys/build/yosys, else PATH)
   --nc PATH, --ec PATH  netlist-compare, equiv-check (default: the repository's tools/)
   --max-nodes N dot node budget (default 2000)
-  --dot-timeout S  dot -Tsvg layout timeout (default 120); past it, dot -Tcanon must accept the file
+  --dot-timeout S  dot -Tsvg layout timeout (default 120); past it, Graphviz nop must parse the file
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
 USAGE
     exit 2
@@ -235,7 +239,7 @@ restore_bit0_names() {
 # JSON gate for golden $1, JSON $2, work prefix $3. The reference runs first: a golden Yosys
 # cannot read (or crashes on) excludes the step.
 json_gate() {
-    local gold=$1 json=$2 w=$3 rc=0 ref=$1
+    local gold=$1 json=$2 w=$3 rc=0 ref=$1 jnorm=$WC_NORM
     # Yosys read_blif does not know `.clock` (a declaration without semantics): drop it.
     if grep -q '^[[:space:]]*\.clock' "$gold"; then
         grep -v '^[[:space:]]*\.clock' "$gold" >"$w.gold.blif" || true
@@ -244,8 +248,10 @@ json_gate() {
     capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \
         "read_blif $ref; $WC_NORM; write_blif $w.yr.blif" || rc=$?
     if [ "$rc" -ne 0 ] && grep -q 'must have fewer than 13 signals' "$w.yr.log"; then
-        # read_blif makes a $lut of at most 12 inputs; -sop takes any cover.
+        # read_blif makes a $lut of at most 12 inputs; -sop takes any cover, and then keeps
+        # identity covers as cells, so the JSON side keeps its identity $luts too.
         rc=0
+        jnorm=opt_clean
         capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \
             "read_blif -sop $ref; $WC_NORM; write_blif $w.yr.blif" || rc=$?
     fi
@@ -256,7 +262,7 @@ json_gate() {
     fi
     rc=0
     capped "$w.yj.log" "$w.yj.rss" "$WC_YOSYS" -q -p \
-        "read_json $json; $WC_NORM; write_blif $w.yj.blif" || rc=$?
+        "read_json $json; $jnorm; write_blif $w.yj.blif" || rc=$?
     note_rss "$w.yj.rss"
     if [ "$rc" -ne 0 ]; then
         fail_word "$rc" "$w.yj.log" yosys-error
@@ -319,11 +325,11 @@ dot_gate() {
     case $rc in
     0) echo ok ;;
     124 | 137)
-        # Layout of up to --max-nodes nodes can take Graphviz many minutes: then check that dot
-        # accepts the file without laying it out (-Tcanon).
+        # Layout of up to --max-nodes nodes can take Graphviz many minutes: then Graphviz's
+        # parser alone (nop, the canonical pretty-printer) must accept the file.
         rc=0
-        capped "$w.dot.log" "$w.dot.rss" "$WC_DOT" -Tcanon -o /dev/null "$dotf" || rc=$?
-        if [ "$rc" -eq 0 ]; then echo ok-canon; else fail_word "$rc" "$w.dot.log" FAIL; fi ;;
+        capped "$w.dot.log" "$w.dot.rss" "$WC_NOP" "$dotf" || rc=$?
+        if [ "$rc" -eq 0 ]; then echo ok-parse; else fail_word "$rc" "$w.dot.log" FAIL; fi ;;
     *) fail_word "$rc" "$w.dot.log" FAIL ;;
     esac
 }
@@ -421,7 +427,7 @@ report() {
         printf "verilog iverilog: ok %d, FAIL %d, timeout %d, memlimit %d\n", ci["ok"], ci["FAIL"], ci["timeout"], ci["memlimit"]
         printf "verilog equiv: equivalent %d, excluded %d, NOT-equivalent %d, yosys-error %d, error %d, timeout %d, memlimit %d\n",
             ce["equivalent"], ce["excluded"], ce["NOT-equivalent"], ce["yosys-error"], ce["error"], ce["timeout"], ce["memlimit"]
-        printf "dot: ok %d, ok-canon (accepted, layout over --dot-timeout) %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["ok-canon"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
+        printf "dot: ok %d, ok-parse (layout over --dot-timeout; Graphviz nop accepts it) %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["ok-parse"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
         printf "slowest file: %s (%.1f s total)\n", maxf, maxs
         printf "odin3-write (read + three writers) slowest: %s (%.1f s)\n", maxwf, maxw
         printf "peak RSS: odin3-write %.0f MB (%s); tools %.0f MB (%s)\n", maxr / 1024, maxrf, maxt / 1024, maxtf
@@ -442,9 +448,11 @@ find_tools() {
     fi
     WC_IVERILOG=$(command -v iverilog || true)
     WC_DOT=$(command -v dot || true)
+    WC_NOP=$(command -v nop || true)
     [ -n "$WC_YOSYS" ] && [ -x "$WC_YOSYS" ] || missing="$missing yosys"
     [ -n "$WC_IVERILOG" ] || missing="$missing iverilog"
     [ -n "$WC_DOT" ] || missing="$missing dot"
+    [ -n "$WC_NOP" ] || missing="$missing nop"
     [ -x /usr/bin/time ] || missing="$missing /usr/bin/time"
     if [ -n "$missing" ]; then
         echo "writer-check: missing tools:$missing" >&2
@@ -496,7 +504,7 @@ main() {
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
-    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
+    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
         WC_DOT_TIMEOUT WC_NORM
     export WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
     # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).
