@@ -1,0 +1,3 @@
+file verilog src/top.v
+top top
+param top.MODE "sub"

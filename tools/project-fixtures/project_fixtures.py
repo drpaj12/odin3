@@ -124,6 +124,7 @@ class Ctx:
         self.ignored: set[str] = set()
         self.dups: set[str] = set()
         self.params_at: list[str] = []  # .o3proj `param` lines, checked against the top
+        self.top_at: str | None = None  # where the top was declared
         self.f_root = self.case_dir
         self.f_sv = False
 
@@ -204,6 +205,7 @@ def set_top(ctx: Ctx, name: str, at: str | None) -> None:
     if ctx.record["top"] is not None:
         raise syntax(at, f"top given twice ({ctx.record['top']}, {name})", name)
     ctx.record["top"] = name
+    ctx.top_at = at
 
 
 def count_of(text: str, at: str) -> int:
@@ -237,31 +239,32 @@ def _quoted(line: str, i: int, at: str) -> tuple[str, int]:
         out.append(c)
         j += 1
     j += 1
-    if j < len(line) and line[j] not in " \t#":
+    if j < len(line) and line[j] not in " \t":
         raise syntax(at, "characters after a closing quote")
     if not out:
         raise syntax(at, "empty quoted word")
     return "".join(out), j
 
 
-def split_words(line: str, at: str, slash_comments: bool = False) -> list[Word]:
-    """Blank-separated words; a word is bare or wholly "double-quoted"; `#` (and, in -f, `//`
-    at a word start) begins a comment outside quotes."""
+def split_words(line: str, at: str, file_list: bool = False) -> list[Word]:
+    """Blank-separated words; a word is bare or wholly "double-quoted"; `#` (and, in a file
+    list, `//`) at the start of a word begins a comment.  Inside a bare word `#` and `\\` are
+    ordinary; so is `"` in a file list (`+define+TAG="AB"`), elsewhere it is an error."""
     words: list[Word] = []
     i = 0
     while i < len(line):
         c = line[i]
         if c in " \t":
             i += 1
-        elif c == "#" or (slash_comments and line.startswith("//", i)):
+        elif c == "#" or (file_list and line.startswith("//", i)):
             break
         elif c == '"':
             text, i = _quoted(line, i, at)
             words.append((text, True))
         else:
             j = i
-            while j < len(line) and line[j] not in " \t#":
-                if line[j] == '"':
+            while j < len(line) and line[j] not in " \t":
+                if line[j] == '"' and not file_list:
                     raise syntax(at, "quote inside a word")
                 j += 1
             words.append((line[i:j], False))
@@ -450,7 +453,7 @@ def o3_import(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
     if path.suffix not in (".qpf", ".qsf"):
         raise ProjectError("unknown_file_type", at, [a[0]], "import takes a .qpf or .qsf")
     ctx.resolve(base, a[0], at)
-    parse_quartus(ctx, path, a[2] if len(a) == 3 else None)
+    parse_quartus(ctx, path, a[2] if len(a) == 3 else None, at)
 
 
 O3PROJ_KEYS: dict[str, O3Handler] = {
@@ -538,7 +541,9 @@ def f_option(ctx: Ctx, base: Path, chain: list[Path], opt: str, arg: str, at: st
             names = [ctx.rel(p) for p in chain[chain.index(nested):]] + [ctx.rel(nested)]
             raise ProjectError("f_cycle", at, names, "file list cycle: " + " -> ".join(names))
         # -f: entries relative to the outermost list; -F: relative to the nested list.
+        sv = ctx.f_sv
         parse_f(ctx, nested, ctx.f_root if opt == "-f" else nested.parent, [*chain, nested])
+        ctx.f_sv = sv  # -sv inside a nested list ends with that list
     elif opt == "-v":
         add_libfile(ctx, base, arg, language_of(arg, at), at)
     elif opt == "-y":
@@ -592,13 +597,15 @@ class TclReader:
     """Splits a .qsf/.qip (a flat Tcl script) into commands of words, as Tcl would, for the
     subset Quartus writes: bare words, "quotes" (escapes \\" and \\\\ only), {braces} (nested,
     verbatim), `\\`-newline continuation, `;`/newline separators, `#` comments where a command
-    may start.  `$` and `[...]` substitution are errors, except the .qip idiom
-    `[file join $::quartus(qip_path) "<path>"]`, which reads as `<path>`."""
+    may start.  `[` and `]` inside a word are ordinary (`-to LEDR[0]`); a word that starts
+    with `[` is command substitution, an error except in a .qip the idiom
+    `[file join $::quartus(qip_path) "<path>"]`, which reads as <path> relative to the .qip
+    (returned absolute).  `$` substitution is an error."""
 
-    def __init__(self, text: str, where: Callable[[int], str], qip: bool) -> None:
+    def __init__(self, text: str, where: Callable[[int], str], qip_dir: Path | None) -> None:
         self.text = text
         self.where = where
-        self.qip = qip
+        self.qip_dir = qip_dir
         self.i = 0
         self.line = 1
 
@@ -642,8 +649,8 @@ class TclReader:
         while (c := self.take()) != '"':
             if c in ("", "\n"):
                 raise syntax(self.where(self.line - (c == "\n")), "unterminated quote")
-            if c in "$[":
-                raise self.error(f"substitution ({c}) is not supported")
+            if c == "$":
+                raise self.error("$ substitution is not supported")
             if c == "\\":
                 c = self.take()
                 if c not in ('"', "\\"):
@@ -667,20 +674,20 @@ class TclReader:
 
     def bracket(self) -> str:
         m = QIP_IDIOM.match(self.text, self.i)
-        if not self.qip or m is None:
+        if self.qip_dir is None or m is None:
             raise self.error("command substitution [...] is not supported (only the .qip "
                              "idiom [file join $::quartus(qip_path) \"<path>\"])")
         while self.i < m.end():
             self.take()
         self.end_of_word("close-bracket")
-        return m[1] or m[2]
+        return os.path.normpath(self.qip_dir / (m[1] or m[2]))
 
     def bare(self) -> str:
         out: list[str] = []
         while (c := self.peek()) and c not in " \t\r\n;":
             if self.continuation():
                 break
-            if c in "$[\\":
+            if c in "$\\":
                 raise self.error(f"{c} in a bare word is not supported")
             out.append(self.take())
         return "".join(out)
@@ -730,6 +737,7 @@ class QsfState:
     params: list[tuple[str | None, str | None, str, str, str]] = field(default_factory=list)
     rules: list[tuple[str | None, str | None, str]] = field(default_factory=list)
     qips: list[Path] = field(default_factory=list)
+    project_dir: Path = Path()
 
 
 def qsf_options(words: list[str], at: str, allowed: Sequence[str]) -> tuple[dict[str, str],
@@ -858,15 +866,17 @@ def qsf_command(st: QsfState, ctx: Ctx, base: Path, words: list[str], at: str) -
 
 
 def run_qsf(st: QsfState, ctx: Ctx, path: Path, qip: bool = False) -> None:
+    """Plain relative paths, in the .qsf and in every .qip, are relative to the project
+    directory (Quartus); the .qip idiom is relative to the .qip."""
     ctx.touch(path)
     reader = TclReader(path.read_text(encoding="utf-8").replace("\r\n", "\n"),
-                       lambda n: ctx.at(path, n), qip)
+                       lambda n: ctx.at(path, n), path.parent if qip else None)
     for words, n in list(reader.commands()):
-        qsf_command(st, ctx, path.parent, words, ctx.at(path, n))
+        qsf_command(st, ctx, st.project_dir, words, ctx.at(path, n))
 
 
 def parse_qsf(ctx: Ctx, path: Path, revision: str) -> None:
-    st = QsfState(revision)
+    st = QsfState(revision, project_dir=path.parent)
     run_qsf(st, ctx, path)
     top = st.top or st.revision  # Quartus: the top defaults to the revision name
     set_top(ctx, top, st.top_at or ctx.rel(path))
@@ -883,7 +893,7 @@ def parse_qsf(ctx: Ctx, path: Path, revision: str) -> None:
                                     "subject": subject, "action": "soft", "cells": []})
 
 
-def qpf_revision(ctx: Ctx, path: Path, wanted: str | None) -> str:
+def qpf_revision(ctx: Ctx, path: Path, wanted: str | None, wanted_at: str | None) -> str:
     revisions: list[tuple[str, int]] = []
     for n, line in enumerate(read_lines(path), 1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -896,7 +906,7 @@ def qpf_revision(ctx: Ctx, path: Path, wanted: str | None) -> str:
     names = [r for r, _ in revisions] or [path.stem]
     if wanted is not None:
         if wanted not in names:
-            raise ProjectError("unknown_revision", ctx.rel(path), [wanted],
+            raise ProjectError("unknown_revision", wanted_at, [wanted],
                                f"revision {wanted!r} not in {', '.join(names)}")
         return wanted
     if len(names) > 1:
@@ -905,23 +915,24 @@ def qpf_revision(ctx: Ctx, path: Path, wanted: str | None) -> str:
     return names[0]
 
 
-def parse_quartus(ctx: Ctx, path: Path, wanted: str | None) -> None:
-    """A .qpf (its revision's .qsf) or a .qsf directly (revision = its name)."""
+def parse_quartus(ctx: Ctx, path: Path, wanted: str | None, wanted_at: str | None) -> None:
+    """A .qpf (its revision's .qsf) or a .qsf directly (revision = its name).  `wanted_at`
+    locates the choice of revision: the `import` line, or None for --revision."""
     ctx.touch(path)
     if path.suffix == ".qpf":
-        revision = qpf_revision(ctx, path, wanted)
+        revision = qpf_revision(ctx, path, wanted, wanted_at)
         qsf = Path(os.path.normpath(path.parent / f"{revision}.qsf"))
         ctx.resolve(path.parent, qsf.name, ctx.rel(path))
     else:
         revision, qsf = path.stem, path
         if wanted is not None and wanted != revision:
-            raise ProjectError("unknown_revision", ctx.rel(path), [wanted],
+            raise ProjectError("unknown_revision", wanted_at, [wanted],
                                f"{path.name} is revision {revision}")
     parse_qsf(ctx, qsf, revision)
 
 
 def parse_qsf_entry(ctx: Ctx, path: Path) -> None:
-    parse_quartus(ctx, path, ctx.options.get("revision"))
+    parse_quartus(ctx, path, ctx.options.get("revision"), None)
 
 
 # ---- Odin II XML config -----------------------------------------------------------------------
@@ -1330,7 +1341,9 @@ def vhdl_ref(toks: list[tuple[str, str]], i: int, library: str) -> Ref | None:
 @dataclass
 class VhdlFile:
     units: list[Unit]
-    needs: list[Ref]  # analysis dependencies: `use lib.pkg`, `entity lib.e` instantiations
+    needs: list[Ref]  # analysis dependencies: `use lib.pkg`, `entity lib.e` instantiations,
+    #                   the entity of an architecture, the package of a package body
+    bodies: dict[str, list[Ref]]  # entity name -> instances in its architectures (this file)
 
 
 def vhdl_units(ctx: Ctx, path: Path, library: str) -> VhdlFile:
@@ -1345,8 +1358,12 @@ def vhdl_units(ctx: Ctx, path: Path, library: str) -> VhdlFile:
         if text in ("entity", "package") and prev not in (":", "end") and nxt != "body":
             units.append(Unit(nxt, library, text, "vhdl", at))
             owner = None
+        elif text == "package" and nxt == "body" and prev != "end" and i + 2 < len(toks):
+            needs.append(Ref(toks[i + 2][0], library, at, True))
+            owner = None
         elif text == "architecture" and prev != "end" and i + 3 < len(toks):
             owner = bodies.setdefault(toks[i + 3][0], [])
+            needs.append(Ref(toks[i + 3][0], library, at, True))
         elif text == "use" and i + 3 < len(toks) and toks[i + 2][0] == ".":
             lib = toks[i + 1][0]
             needs.append(Ref(toks[i + 3][0], library if lib == "work" else lib, at, True))
@@ -1356,9 +1373,7 @@ def vhdl_units(ctx: Ctx, path: Path, library: str) -> VhdlFile:
                 owner.append(ref)
                 if ref.library is not None:
                     needs.append(ref)
-    for unit in units:
-        unit.refs = bodies.get(unit.name, []) if unit.kind == "entity" else []
-    return VhdlFile(units, needs)
+    return VhdlFile(units, needs, bodies)
 
 
 def blif_units(ctx: Ctx, path: Path, library: str) -> list[Unit]:
@@ -1381,6 +1396,7 @@ class Scanner:
         self.ctx = ctx
         self.pre = Preprocessor(ctx, rec["incdirs"], rec["defines"])
         self.needs: dict[str, list[Ref]] = {}
+        self.bodies: dict[tuple[str, str], list[Ref]] = {}  # (library, entity) -> instances
 
     @property
     def read(self) -> set[str]:
@@ -1395,6 +1411,8 @@ class Scanner:
             vf = vhdl_units(self.ctx, path, library)
             units = vf.units
             self.needs[f"{library}:{rel}"] = vf.needs
+            for name, refs in vf.bodies.items():
+                self.bodies.setdefault((library, name), []).extend(refs)
         elif language == "blif":
             self.pre.read.add(rel)
             units = blif_units(self.ctx, path, library)
@@ -1434,16 +1452,16 @@ def analysis_order(record: dict[str, Any], scanner: Scanner, design: list[Unit])
     return [k.partition(":")[2] for k in order]
 
 
-def select_top(record: dict[str, Any], design: list[Unit]) -> Unit:
+def select_top(record: dict[str, Any], design: list[Unit], top_at: str | None) -> Unit:
     if record["top"] is not None:
         lib, _, name = record["top"].rpartition(".")
         ref = Ref(name, lib or None, "", from_vhdl=False)
         found = [u for u in design if u.instantiable and u.matches(ref)]
         if not found:
-            raise ProjectError("unknown_top", None, [record["top"]], "top not found")
+            raise ProjectError("unknown_top", top_at, [record["top"]], "top not found")
         if len(found) > 1:
             names = sorted(u.qualified for u in found)
-            raise ProjectError("ambiguous_top", None, names, "top in several libraries")
+            raise ProjectError("ambiguous_top", top_at, names, "top in several libraries")
         return found[0]
     if all(f["language"] == "blif" for f in record["files"]) and design:
         return design[0]  # BLIF: the first model of the first file is the top
@@ -1455,6 +1473,19 @@ def select_top(record: dict[str, Any], design: list[Unit]) -> Unit:
     if not cands:
         raise ProjectError("no_top", None, [], "no top candidate: every module is instantiated")
     raise ProjectError("ambiguous_top", None, names, "several top candidates: " + ", ".join(names))
+
+
+# Instances that are not project units: Altera device primitives in a VQM netlist (the VQM
+# reader's library, Phase 6), and Altera megafunctions in RTL (the Phase 2 primitive library).
+VQM_PRIMITIVES = ("dffeas", "cyclonev_lcell_comb", "cyclonev_io_ibuf", "cyclonev_io_obuf",
+                  "cycloneive_lcell_comb", "cycloneive_io_ibuf", "cycloneive_io_obuf")
+RTL_PRIMITIVE = re.compile(r"altsyncram|altdpram|altshift_taps|altmult_add|lpm_[a-z_]+")
+
+
+def is_primitive(name: str, language: str) -> bool:
+    if language == "vqm":
+        return name in VQM_PRIMITIVES
+    return RTL_PRIMITIVE.fullmatch(name.lower() if language == "vhdl" else name) is not None
 
 
 class Elaborator:
@@ -1487,7 +1518,7 @@ class Elaborator:
         found.sort(key=lambda u: u.library != owner.library)
         unit = (found[0] if found else
                 next((u for u in self.lib if u.matches(ref)), None) or self.from_libdirs(ref))
-        if unit is None and owner.language != "vqm":  # VQM: Altera primitives (Phase 6)
+        if unit is None and not is_primitive(ref.name, owner.language):
             raise ProjectError("unresolved_module", ref.at, [ref.name],
                                f"no module or entity {ref.name!r}")
         return unit
@@ -1507,15 +1538,24 @@ class Elaborator:
 def resolve(ctx: Ctx) -> dict[str, Any]:
     """Top selection and hierarchy resolution over the parsed record."""
     scanner = Scanner(ctx)
+    try:
+        return resolve_with(ctx, scanner)
+    finally:
+        ctx.touched |= scanner.read  # files read before an error count as used
+
+
+def resolve_with(ctx: Ctx, scanner: Scanner) -> dict[str, Any]:
     design: list[Unit] = []
     for f in ctx.record["files"]:
         design += scanner.scan(f["path"], f["language"], f["library"])
     check_duplicates(design)
+    for unit in design:  # an architecture may sit in another file than its entity
+        if unit.kind == "entity":
+            unit.refs = scanner.bodies.get((unit.library, unit.name), [])
     order = analysis_order(ctx.record, scanner, design)
     elab = Elaborator(scanner, design)
-    top = select_top(ctx.record, design)
+    top = select_top(ctx.record, design, ctx.top_at)
     reached = elab.walk(top)
-    ctx.touched |= scanner.read
     return {"top": top.qualified, "units": sorted(u.qualified for u in reached),
             "read": sorted(scanner.read), "order": order}
 

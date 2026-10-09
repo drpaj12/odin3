@@ -1,0 +1,6 @@
+# vhdl_split_units: an architecture and a package body apart from their entity/package.
+file vhdl src/top.vhd
+file vhdl src/core_arch.vhd
+file vhdl src/pkg_body.vhd
+file vhdl src/core_ent.vhd
+file vhdl src/pkg.vhd

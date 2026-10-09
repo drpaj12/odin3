@@ -1,0 +1,2 @@
+# Never read: the revision asked for is "nope".
+set_global_assignment -name TOP_LEVEL_ENTITY top

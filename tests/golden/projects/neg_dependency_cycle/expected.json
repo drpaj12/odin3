@@ -1,0 +1,7 @@
+{
+  "description": "VHDL packages that use each other.",
+  "features": ["negative", "dependency cycle", "vhdl"],
+  "phase": 5,
+  "formats": ["o3proj", "f", "qsf"],
+  "error": {"kind": "dependency_cycle", "at": null, "names": ["src/pkg_a.vhd", "src/pkg_b.vhd"]}
+}

@@ -65,12 +65,14 @@ class WordsTest(unittest.TestCase):
     def test_words(self) -> None:
         self.assertEqual(pf.split_words('a "b c" "d\\"e\\\\" # x', "p:1"),
                          [("a", False), ("b c", True), ('d"e\\', True)])
-        self.assertEqual(pf.split_words("a // b", "p:1", slash_comments=True), [("a", False)])
-        self.assertEqual(pf.split_words("a#b", "p:1"), [("a", False)])
-        self.assertEqual(pf.split_words("a\\b", "p:1"), [("a\\b", False)])
+        self.assertEqual(pf.split_words("a // b", "p:1", file_list=True), [("a", False)])
+        self.assertEqual(pf.split_words("+define+D=#1 #c", "p:1"), [("+define+D=#1", False)])
+        self.assertEqual(pf.split_words("C:\\rtl\\a.v", "p:1"), [("C:\\rtl\\a.v", False)])
+        self.assertEqual(pf.split_words('+define+TAG="AB"', "p:1", file_list=True),
+                         [('+define+TAG="AB"', False)])
 
     def test_word_errors(self) -> None:
-        for line in ('"a', '""', '"a"b', 'a"b"', '"a\\n"'):
+        for line in ('"a', '""', '"a"b', 'a"b"', '"a\\n"', '"a"#c'):
             with self.subTest(line=line), self.assertRaises(pf.ProjectError) as cm:
                 pf.split_words(line, "p:1")
             self.assertEqual(cm.exception.kind, "syntax")
@@ -211,6 +213,10 @@ class FileListTest(_TmpCase):
         err = self.error("f", "files.f")
         self.assertEqual(err.as_json(), {"kind": "undefined_variable", "at": "files.f:2",
                                          "names": ["D"]})
+        self.put("in.f", "-sv\nrtl/b.v\n")
+        self.put("files.f", "-f in.f\nrtl/a.v\n")
+        rec = self.record("f", "files.f")  # -sv ends with the list that says it
+        self.assertEqual([f["language"] for f in rec["files"]], ["systemverilog", "verilog"])
         self.put("files.f", "--top-module a\n-top b\n")
         self.assertEqual(self.error("f", "files.f").kind, "syntax")
 
@@ -235,7 +241,8 @@ class FileListTest(_TmpCase):
 
 class TclTest(unittest.TestCase):
     def cmds(self, text: str, qip: bool = False) -> list[tuple[list[str], int]]:
-        return list(pf.TclReader(text, lambda n: f"q:{n}", qip).commands())
+        qip_dir = Path("/q") if qip else None
+        return list(pf.TclReader(text, lambda n: f"q:{n}", qip_dir).commands())
 
     def test_words(self) -> None:
         text = ('# c\nset_a -name X "a \\"b\\""; set_b {x {y} z}\n'
@@ -247,7 +254,12 @@ class TclTest(unittest.TestCase):
     def test_qip_idiom(self) -> None:
         text = 'set -name F [file join $::quartus(qip_path) "x.v"]\nset [file join ' \
                "$::quartus(qip_path) y.v]\n"
-        self.assertEqual([w[-1] for w, _ in self.cmds(text, qip=True)], ["x.v", "y.v"])
+        self.assertEqual([w[-1] for w, _ in self.cmds(text, qip=True)], ["/q/x.v", "/q/y.v"])
+
+    def test_brackets_inside_words(self) -> None:
+        text = 'set_location_assignment PIN_A -to LEDR[0]\nset -to "SW[1]" {x[2]}\n'
+        self.assertEqual([w[-1] for w, _ in self.cmds(text)], ["LEDR[0]", "x[2]"])
+        self.assertEqual(self.cmds(text)[1][0][2], "SW[1]")
 
     def test_errors(self) -> None:
         for text in ('a "x"y', "a {x}y", 'a "\\n"', "a $x", "a [b]", 'a "x', "a {x",
@@ -320,8 +332,10 @@ source other.tcl
         self.assertEqual(self.error("qsf", "p.qpf").as_json(),
                          {"kind": "ambiguous_revision", "at": "p.qpf:2", "names": ["a", "b"]})
         self.assertEqual(self.record("qsf", "p.qpf", options={"revision": "b"})["top"], "b")
-        self.assertEqual(self.error("qsf", "p.qpf", options={"revision": "c"}).kind,
-                         "unknown_revision")
+        self.assertEqual(self.error("qsf", "p.qpf", options={"revision": "c"}).as_json(),
+                         {"kind": "unknown_revision", "at": None, "names": ["c"]})
+        self.put("i.o3proj", "\nimport p.qpf revision c\n")
+        self.assertEqual(self.error("o3proj", "i.o3proj").at, "i.o3proj:2")
         self.assertEqual(self.record("qsf", "a.qsf")["top"], "ta")  # a .qsf as the entry
         self.assertEqual(self.error("qsf", "a.qsf", options={"revision": "b"}).kind,
                          "unknown_revision")
@@ -342,10 +356,11 @@ source other.tcl
         self.put("ip/x.v", module("x"))
         self.put("ip/a.qip", "set_global_assignment -name QIP_FILE "
                              '[file join $::quartus(qip_path) "b.qip"]\n')
-        self.put("ip/b.qip", "set_global_assignment -name VERILOG_FILE x.v\n")
+        self.put("ip/b.qip", "# plain paths: relative to the project\n"
+                             "set_global_assignment -name VERILOG_FILE ip/x.v\n")
         self.put("t.qsf", "set_global_assignment -name QIP_FILE ip/a.qip\n")
         self.assertEqual(self.record("qsf", "t.qsf")["files"][0]["path"], "ip/x.v")
-        self.put("ip/b.qip", "set_global_assignment -name QIP_FILE a.qip\n")
+        self.put("ip/b.qip", "set_global_assignment -name QIP_FILE ip/a.qip\n")
         err = self.error("qsf", "t.qsf")
         self.assertEqual(err.as_json(), {"kind": "qip_cycle", "at": "ip/b.qip:1",
                                          "names": ["ip/a.qip", "ip/b.qip", "ip/a.qip"]})
@@ -451,9 +466,11 @@ class ResolveTest(_TmpCase):
         self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
                          {"kind": "ambiguous_top", "at": None, "names": ["work.a", "work.b"]})
         self.put("p.o3proj", "file verilog a.v\ntop nope\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").kind, "unknown_top")
+        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
+                         {"kind": "unknown_top", "at": "p.o3proj:2", "names": ["nope"]})
         self.put("p.o3proj", "file verilog a.v library l1\nfile verilog a.v library l2\ntop a\n")
-        self.assertEqual(self.error("o3proj", "p.o3proj").names, ["l1.a", "l2.a"])
+        self.assertEqual(self.error("o3proj", "p.o3proj").as_json(),
+                         {"kind": "ambiguous_top", "at": "p.o3proj:3", "names": ["l1.a", "l2.a"]})
         res = self.resolved("file verilog a.v library l1\nfile verilog a.v library l2\n"
                             "top l2.a\n")
         self.assertEqual(res["top"], "l2.a")
@@ -509,6 +526,18 @@ class ResolveTest(_TmpCase):
         self.assertIn("l1.core", res["units"])
         self.assertEqual(res["order"], ["x.vhd", "x.vhd", "h.vhd", "p.vhd", "top.vhd"])
 
+    def test_vhdl_secondary_units_in_other_files(self) -> None:
+        self.put("arch.vhd", "architecture a of e is begin\n  u : entity work.leaf;\nend;\n")
+        self.put("body.vhd", "package body p is end package body;\n")
+        self.put("ent.vhd", "entity e is end entity;\n")
+        self.put("pkg.vhd", "package p is end package;\n")
+        self.put("leaf.vhd", "entity leaf is end entity;\n")
+        res = self.resolved("file vhdl arch.vhd\nfile vhdl body.vhd\nfile vhdl ent.vhd\n"
+                            "file vhdl pkg.vhd\nfile vhdl leaf.vhd\n")
+        self.assertEqual(res["order"], ["ent.vhd", "pkg.vhd", "body.vhd", "leaf.vhd",
+                                        "arch.vhd"])
+        self.assertEqual(res["units"], ["work.e", "work.leaf"])  # arch.vhd's instance counts
+
     def test_vhdl_dependency_cycle(self) -> None:
         self.put("a.vhd", "use work.pb.all;\npackage pa is end package;\n")
         self.put("b.vhd", "use work.pa.all;\npackage pb is end package;\n")
@@ -524,6 +553,11 @@ class ResolveTest(_TmpCase):
     def test_vqm_primitives_and_edif(self) -> None:
         self.put("n.vqm", module("n", "cyclonev_lcell_comb"))
         self.assertEqual(self.resolved("file vqm n.vqm\n")["units"], ["work.n"])
+        self.put("n.vqm", module("n", "made_up_cell"))
+        self.put("p.o3proj", "file vqm n.vqm\n")
+        self.assertEqual(self.error("o3proj", "p.o3proj").kind, "unresolved_module")
+        self.put("r.v", module("r", "altsyncram", "lpm_mult"))  # megafunctions in RTL
+        self.assertEqual(self.resolved("file verilog r.v\n")["units"], ["work.r"])
         self.put("n.edf", "(edif n)")
         self.put("p.o3proj", "file edif n.edf\n")
         self.assertEqual(self.error("o3proj", "p.o3proj").kind, "unsupported_language")
@@ -534,6 +568,23 @@ class ResolveTest(_TmpCase):
         self.put("t.sv", "module t;\n  word_t w [1:0];\n  p::word_t v;\nendmodule\n")
         res = self.resolved("file systemverilog p.sv\nfile systemverilog t.sv\n")
         self.assertEqual(res["units"], ["work.t"])
+
+
+class RealQsfTest(_TmpCase):
+    """A Quartus project from the wild (Yosys's DE2i-150 example, read only), if present."""
+
+    def test_de2i_parses(self) -> None:
+        src = helpers.REPO_ROOT.parent / "external/yosys/examples/intel/DE2i-150/quartus_compile"
+        if not (src / "de2i.qsf").is_file():
+            self.skipTest(f"{src} not present")
+        (self.dir / "proj").mkdir()
+        for name in ("de2i.qsf", "de2i.qpf"):
+            shutil.copy(src / name, self.dir / "proj" / name)
+        self.put("top.vqm", module("top"))  # the .qsf names ../top.vqm
+        rec = self.record("qsf", "proj/de2i.qpf")
+        self.assertEqual((rec["top"], rec["files"][0]["language"]), ("top", "vqm"))
+        self.assertIn("LOCATION", rec["ignored"])
+        self.assertEqual(rec["arch"][0]["device"], "EP4CGX150DF31C7")
 
 
 class CorpusTest(unittest.TestCase):

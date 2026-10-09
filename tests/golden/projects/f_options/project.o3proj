@@ -1,5 +1,3 @@
-# f_options: what files.f says, with RTL=src.
-top top
-libext .v
-file verilog src/leaf.v
+# f_options: what files.f says.
 file systemverilog src/top.v
+file verilog src/leaf.v

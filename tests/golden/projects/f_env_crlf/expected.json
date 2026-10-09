@@ -1,19 +1,20 @@
 {
-  "description": "-sv in a nested list: SystemVerilog for the rest of that list only.",
-  "features": ["verilog", "systemverilog", "-sv", "nested -f"],
-  "phase": 5,
+  "description": "-top, $VAR and ${VAR}, +libext+ without -y, CRLF line endings.",
+  "features": ["verilog", "-top", "$VAR", "+libext+", "CRLF"],
+  "phase": 2,
   "formats": ["o3proj", "f"],
+  "env": {"RTL": "src"},
   "project": {
     "files": [
-      {"path": "src/top.v", "language": "systemverilog", "library": "work"},
-      {"path": "src/leaf.v", "language": "verilog", "library": "work"}
+      {"path": "src/leaf.v", "language": "verilog", "library": "work"},
+      {"path": "src/top.v", "language": "verilog", "library": "work"}
     ],
     "libfiles": [],
     "libdirs": [],
-    "libext": [],
+    "libext": [".v"],
     "incdirs": [],
     "defines": [],
-    "top": null,
+    "top": "top",
     "params": [],
     "arch": [],
     "rules": [],
@@ -28,7 +29,7 @@
     "top": "work.top",
     "units": ["work.leaf", "work.top"],
     "read": ["src/leaf.v", "src/top.v"],
-    "order": ["src/top.v", "src/leaf.v"]
+    "order": ["src/leaf.v", "src/top.v"]
   },
   "oracle": "yosys"
 }

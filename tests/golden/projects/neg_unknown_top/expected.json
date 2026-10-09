@@ -3,5 +3,9 @@
   "features": ["negative", "unknown top"],
   "phase": 2,
   "formats": ["o3proj", "f", "qsf"],
-  "error": {"kind": "unknown_top", "at": null, "names": ["nope"]}
+  "error": {
+    "kind": "unknown_top",
+    "at": {"o3proj": "project.o3proj:2", "f": "files.f:1", "qsf": "top.qsf:1"},
+    "names": ["nope"]
+  }
 }

@@ -1,2 +1,3 @@
-# A plain relative path in a .qip is relative to the .qip too.
-set_global_assignment -name VERILOG_FILE ram.v
+# A plain relative path in a .qip is relative to the PROJECT directory (Quartus), not
+# to the .qip; only the qip_path idiom is relative to the .qip.
+set_global_assignment -name VERILOG_FILE ip/fifo/sub/ram.v

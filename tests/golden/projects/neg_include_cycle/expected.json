@@ -1,0 +1,7 @@
+{
+  "description": "`include files that include each other.",
+  "features": ["negative", "include cycle"],
+  "phase": 2,
+  "formats": ["o3proj", "f"],
+  "error": {"kind": "include_cycle", "at": "src/b.vh:2", "names": ["a.vh"]}
+}

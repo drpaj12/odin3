@@ -1,0 +1,4 @@
+file verilog src/inv.v
+file verilog src/top.v
+top top
+param top.u_wide.W 4

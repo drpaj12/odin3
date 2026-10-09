@@ -1,0 +1,2 @@
+set_global_assignment -name VHDL_FILE src/pkg_a.vhd
+set_global_assignment -name VHDL_FILE src/pkg_b.vhd

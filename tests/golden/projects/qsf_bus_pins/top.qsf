@@ -1,0 +1,9 @@
+# Bus bits in -to: `[` and `]` inside a word are ordinary characters, bare or quoted.
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name VERILOG_FILE src/top.v
+set_location_assignment PIN_AB12 -to SW[0]
+set_location_assignment PIN_AC12 -to "SW[1]"
+set_location_assignment PIN_V16 -to LEDR[0]
+set_location_assignment PIN_W16 -to LEDR[1]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to SW[0]
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to "LEDR[1]"
