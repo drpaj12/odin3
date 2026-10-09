@@ -48,6 +48,8 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
+    src/passes/manager.c
+    src/passes/builtin.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -116,8 +118,11 @@ target_include_directories(libodin3 PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
 
 # --- odin3: the CLI -------------------------------------------------------------
+# Linked against the core objects (the pass manager is not in the public ABI yet; 1D T2 adds it,
+# and the CLI then moves back to libodin3 so plugins and the CLI share one pass registry).
 add_executable(odin3 src/cli/main.c)
-target_link_libraries(odin3 PRIVATE libodin3 odin3_flags)
+target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3 PRIVATE odin3_core odin3_flags)
 
 # --- Plugins --------------------------------------------------------------------
 add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
@@ -231,6 +236,9 @@ if(BUILD_TESTING)
         set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
     endif()
+    odin3_add_unit_test(test_pass_manager)
+    target_compile_definitions(test_pass_manager PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -307,6 +315,15 @@ if(BUILD_TESTING)
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 2\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+    # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
+    foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script top
+                           check_flag usage)
+        add_test(NAME cli_${_case}
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
+    endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
     set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")

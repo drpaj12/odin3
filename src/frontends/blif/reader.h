@@ -6,6 +6,7 @@
 
 #include "frontends/blif/attrs.h"
 #include "ir/design.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 
 /* The attributes the reader sets (blif_clock, blif_name, .attr/.param, blif_extras) and their keys
@@ -13,10 +14,12 @@
 
 /*
  * Reads the BLIF file at path into design, which must be fresh (no modules). One pass run
- * "read_blif"; every module, port node, port wire and port net gets an IMPORTED provenance record
- * {file = path, line, col = 1-based token index of its defining token, end_col}.
+ * "read_blif" (odin3_blif_read_in: the caller's run instead); every module, port node, port wire
+ * and port net gets an IMPORTED provenance record {file = path, line, col = 1-based token index of
+ * its defining token, end_col}.
  *
- * Pass 1 reads every `.model` header: models become modules in file order (the first is the top),
+ * Pass 1 reads every `.model` header: models become modules in file order (the first is the top,
+ * BLIF's rule, recorded with odin3_design_set_top),
  * `.inputs`/`.outputs` become ports in file order, and `.blackbox` models become black-box cell
  * types (odin3_celltype_declare_blackbox, IR-7b), also in file order. A black box whose name is a
  * registered cell type (a tech library loaded beforehand, odin3_techlib_read) must match it by
@@ -83,6 +86,14 @@
  * caller destroys it.
  */
 odin3_status odin3_blif_read(odin3_design *design, const char *path);
+
+/*
+ * odin3_blif_read into ctx->design inside the caller's pass run ctx (the pass manager's read_blif
+ * pass), so the records belong to that run and no second run is opened; ctx->op becomes the last
+ * operation the reader began. INVALID_ARG (logged) also for a NULL ctx or a ctx whose run is not
+ * a run of its design.
+ */
+odin3_status odin3_blif_read_in(odin3_pass_ctx *ctx, const char *path);
 
 /* Test hook: hook(user) runs between pass 1 and pass 2 of every later read (NULL: none). */
 void odin3_blif_test_set_between_passes(void (*hook)(void *user), void *user);
