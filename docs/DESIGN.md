@@ -224,7 +224,7 @@ instantiating unit's library first), else a `-v`/`libfile` module (first file wi
 `-y`/`libdir` file `<dir>/<name><ext>` (directories in order, then `+libext+` extensions in
 order, default `.v`); library modules load only when instantiated, never shadow design units
 and are never top candidates. Instances of Altera megafunctions in RTL (`altsyncram`,
-`altdpram`, `altshift_taps`, `altmult_add`, `lpm_*`) resolve through the Phase 2 primitive
+`altdpram`, `altshift_taps`, `altmult_add`, `lpm_*`) resolve through the (Phase 6, PHASE2 #2) primitive
 library, not the project; in a VQM netlist, instances of the device primitives the VQM reader
 knows (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_obuf`,
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library grows in
@@ -364,11 +364,11 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 |---|---|---|
 | 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
 | 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
-| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) parses to its expected record from `.o3proj`, `-f` and `.qsf`, and every phase-2 fixture elaborates to the same netlist from each of those formats, equivalent to its oracle (or fails with its located error); the Odin II XML format is excluded until its reader lands |
+| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; VTR benchmark set elaborated (PHASE2 #2) | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) parses to its expected record from `.o3proj`, `-f` and `.qsf`, and every phase-2 fixture elaborates to the same netlist from each of those formats, equivalent to its oracle (or fails with its located error); the Odin II XML format is excluded until its reader lands |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
 | 4 | VPR-XML import into the tech library, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
 | 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist; phase-5 project fixtures (SV, VHDL, mixed) elaborate from each of their formats, equivalent to their oracle |
-| 6 | `raise`, RE scorecard, VQM/EDIF, Altera `bind` output, Titan subset | RE round-trip + Titan (paper 2); the phase-6 (VQM) project fixtures elaborate |
+| 6 | `raise`, RE scorecard, VQM/EDIF, Altera `bind` output, primitive library v0, Titan subset (smallest design parsed from its `.qsf` first; PHASE2 #2) | RE round-trip + Titan (paper 2); the phase-6 (VQM) project fixtures elaborate |
 | 7 | CIRCT writer, JSON reader, visual tooling polish, docs | Release |
 
 Agentic working rules: one pass per PR; golden test per pass; `check` on in debug; lint gate must pass before commit; agent reads `docs/DESIGN.md` and the op-registry file for any task; human reviews IR/invariant changes and all mapping algorithms; no PR merges red. Per-pass workflow: `superpowers:brainstorming` → `superpowers:writing-plans` → human approves → `superpowers:executing-plans` → `/run-micro` → PR.
