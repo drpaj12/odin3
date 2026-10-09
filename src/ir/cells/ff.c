@@ -18,7 +18,7 @@ static odin3_status dff_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_dff = {
-    "$dff", ODIN3_GRAN_WORD, 0, k_dff_ports, 3, k_dff_params, 2, dff_verify, NULL, NULL};
+    "$dff", ODIN3_GRAN_WORD, 0, k_dff_ports, 3, k_dff_params, 2, dff_verify, NULL, NULL, NULL};
 
 /* $dffe adds EN / EN_POLARITY. */
 static const odin3_param_def k_dffe_params[] = {
@@ -37,7 +37,7 @@ static odin3_status dffe_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_dffe = {
-    "$dffe", ODIN3_GRAN_WORD, 0, k_dffe_ports, 4, k_dffe_params, 3, dffe_verify, NULL, NULL};
+    "$dffe", ODIN3_GRAN_WORD, 0, k_dffe_ports, 4, k_dffe_params, 3, dffe_verify, NULL, NULL, NULL};
 
 /* $adff / $sdff add a reset: ARST/SRST, its polarity and its value (WIDTH bits). */
 typedef struct reset_names {
@@ -83,6 +83,6 @@ static const odin3_port_def k_sdff_ports[] = {
 };
 
 const odin3_celltype_def odin3_cell_adff = {
-    "$adff", ODIN3_GRAN_WORD, 0, k_adff_ports, 4, k_adff_params, 4, adff_verify, NULL, NULL};
+    "$adff", ODIN3_GRAN_WORD, 0, k_adff_ports, 4, k_adff_params, 4, adff_verify, NULL, NULL, NULL};
 const odin3_celltype_def odin3_cell_sdff = {
-    "$sdff", ODIN3_GRAN_WORD, 0, k_sdff_ports, 4, k_sdff_params, 4, sdff_verify, NULL, NULL};
+    "$sdff", ODIN3_GRAN_WORD, 0, k_sdff_ports, 4, k_sdff_params, 4, sdff_verify, NULL, NULL, NULL};

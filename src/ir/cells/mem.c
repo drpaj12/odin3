@@ -113,8 +113,8 @@ static odin3_status mem_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_mem = {
-    "$mem",       ODIN3_GRAN_WORD, 0,          k_mem_ports, MEM_N_PORTS,
-    k_mem_params, MEM_N_PARAMS,    mem_verify, NULL,        NULL};
+    "$mem",       ODIN3_GRAN_WORD, 0,    k_mem_ports, MEM_N_PORTS, k_mem_params,
+    MEM_N_PARAMS, mem_verify,      NULL, NULL,        NULL};
 
 /* $memrd: one asynchronous or synchronous read port. */
 static const odin3_param_def k_memrd_params[] = {
@@ -140,7 +140,8 @@ static odin3_status memrd_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_memrd = {
-    "$memrd", ODIN3_GRAN_WORD, 0, k_memrd_ports, 4, k_memrd_params, 6, memrd_verify, NULL, NULL};
+    "$memrd", ODIN3_GRAN_WORD, 0,    k_memrd_ports, 4,   k_memrd_params,
+    6,        memrd_verify,    NULL, NULL,          NULL};
 
 /* $memwr: one write port; EN has one bit per data bit. */
 static const odin3_param_def k_memwr_params[] = {
@@ -166,4 +167,5 @@ static odin3_status memwr_verify(const odin3_value *params) {
 }
 
 const odin3_celltype_def odin3_cell_memwr = {
-    "$memwr", ODIN3_GRAN_WORD, 0, k_memwr_ports, 4, k_memwr_params, 6, memwr_verify, NULL, NULL};
+    "$memwr", ODIN3_GRAN_WORD, 0,    k_memwr_ports, 4,   k_memwr_params,
+    6,        memwr_verify,    NULL, NULL,          NULL};

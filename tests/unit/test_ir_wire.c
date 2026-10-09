@@ -116,12 +116,12 @@ static const odin3_port_def k_quad_ports[] = {
     {"C", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_quad = {
-    "test_t4_quad", ODIN3_GRAN_WORD, 0, k_quad_ports, 4, k_quad_params, 1, NULL, NULL, NULL};
+    "test_t4_quad", ODIN3_GRAN_WORD, 0, k_quad_ports, 4, k_quad_params, 1, NULL, NULL, NULL, NULL};
 
 /* A one-port WIDTH-parameter sink shaped like $port_out (which node_create refuses). */
 static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL}};
 static const odin3_celltype_def k_sink = {
-    "test_t4_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_quad_params, 1, NULL, NULL, NULL};
+    "test_t4_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_quad_params, 1, NULL, NULL, NULL, NULL};
 
 /* --- helpers ------------------------------------------------------------------------------- */
 

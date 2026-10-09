@@ -59,7 +59,7 @@ static void mux_sim(const odin3_sim_cell *cell) {
 
 #define ODIN3_GATE(var, label, ports, count, sim)                                                  \
     const odin3_celltype_def var = {label, ODIN3_GRAN_BIT, 0,    ports, count, NULL,               \
-                                    0,     NULL,           NULL, sim}
+                                    0,     NULL,           NULL, sim,   NULL}
 
 ODIN3_GATE(odin3_cell_g_buf, "$_BUF_", k_unary_ports, 2, buf_sim);
 ODIN3_GATE(odin3_cell_g_not, "$_NOT_", k_unary_ports, 2, not_sim);

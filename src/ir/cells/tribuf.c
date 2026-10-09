@@ -13,6 +13,14 @@ static odin3_status tribuf_verify(const odin3_value *params) {
     return odin3_cells_check_int(&params[0], &k_range);
 }
 
-const odin3_celltype_def odin3_cell_tribuf = {
-    "$tribuf", ODIN3_GRAN_WORD, ODIN3_CT_TRISTATE, k_ports, 3, k_params, 1, tribuf_verify, NULL,
-    NULL};
+const odin3_celltype_def odin3_cell_tribuf = {"$tribuf",
+                                              ODIN3_GRAN_WORD,
+                                              ODIN3_CT_TRISTATE,
+                                              k_ports,
+                                              3,
+                                              k_params,
+                                              1,
+                                              tribuf_verify,
+                                              NULL,
+                                              NULL,
+                                              NULL};

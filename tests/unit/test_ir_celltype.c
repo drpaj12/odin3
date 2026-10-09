@@ -63,7 +63,7 @@ static const odin3_port_def k_adder_ports[] = {
     {"sumout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
 };
 static const odin3_celltype_def k_adder = {
-    "adder", ODIN3_GRAN_HARD, 0, k_adder_ports, 5, NULL, 0, NULL, NULL, NULL};
+    "adder", ODIN3_GRAN_HARD, 0, k_adder_ports, 5, NULL, 0, NULL, NULL, NULL, NULL};
 
 static uint32_t width_fn_five(const odin3_value *params, uint32_t port) {
     (void)params;
@@ -136,7 +136,7 @@ static void test_port_width_fn(void) {
     static const odin3_port_def ports[] = {
         {"Q", ODIN3_DIR_OUT, false, 0, NULL, width_fn_five, NULL}};
     static const odin3_celltype_def def = {
-        "test_fn_t2", ODIN3_GRAN_WORD, 0, ports, 1, NULL, 0, NULL, NULL, NULL};
+        "test_fn_t2", ODIN3_GRAN_WORD, 0, ports, 1, NULL, 0, NULL, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register_global(&def));
     odin3_design *other = odin3_design_create();
     TEST_ASSERT_NOT_NULL(other);
@@ -153,13 +153,13 @@ static void test_register_global_rejects_bad_defs(void) {
                                                {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL}};
     static const odin3_port_def bad_param_port[] = {{"A", ODIN3_DIR_IN, false, 0, "W", NULL, NULL}};
     static const odin3_celltype_def dup_name = {
-        "$port_in", ODIN3_GRAN_PORT, 0, NULL, 0, NULL, 0, NULL, NULL, NULL};
-    static const odin3_celltype_def no_name = {NULL, ODIN3_GRAN_BIT, 0,    NULL, 0, NULL,
-                                               0,    NULL,           NULL, NULL};
+        "$port_in", ODIN3_GRAN_PORT, 0, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL};
+    static const odin3_celltype_def no_name = {NULL, ODIN3_GRAN_BIT, 0,    NULL, 0,   NULL,
+                                               0,    NULL,           NULL, NULL, NULL};
     static const odin3_celltype_def dup_port = {
-        "test_dup_port_t2", ODIN3_GRAN_BIT, 0, dup_ports, 2, NULL, 0, NULL, NULL, NULL};
+        "test_dup_port_t2", ODIN3_GRAN_BIT, 0, dup_ports, 2, NULL, 0, NULL, NULL, NULL, NULL};
     static const odin3_celltype_def bad_param = {
-        "test_bad_param_t2", ODIN3_GRAN_BIT, 0, bad_param_port, 1, NULL, 0, NULL, NULL, NULL};
+        "test_bad_param_t2", ODIN3_GRAN_BIT, 0, bad_param_port, 1, NULL, 0, NULL, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register_global(&dup_name));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register_global(&no_name));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register_global(&dup_port));
@@ -168,8 +168,53 @@ static void test_register_global_rejects_bad_defs(void) {
     TEST_ASSERT_EQUAL_size_t(5, errors_logged);
 }
 
+/* Simulation flags (1E): SEQ_EDGE and SEQ_LEVEL are exclusive; CLOCK_PIN0 needs a 1-bit input. */
+static void test_sim_flags_validated(void) {
+    static const odin3_port_def clocked[] = {{"C", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+                                             {"Q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def out_first[] = {{"Q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def wide_first[] = {{"C", ODIN3_DIR_IN, true, 2, NULL, NULL, NULL}};
+    static const odin3_port_def vec_first[] = {{"C", ODIN3_DIR_IN, false, 1, NULL, NULL, NULL}};
+    static const odin3_port_def param_first[] = {{"C", ODIN3_DIR_IN, true, 1, "W", NULL, NULL}};
+    static const odin3_param_def width_param[] = {
+        {"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}}};
+    const uint32_t both = ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL;
+    const uint32_t pin0 = ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0;
+    const odin3_celltype_def bad[] = {
+        {"sim_both_t1", ODIN3_GRAN_BIT, both, clocked, 2, NULL, 0, NULL, NULL, NULL, NULL},
+        {"sim_noport_t1", ODIN3_GRAN_BIT, pin0, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL},
+        {"sim_out_t1", ODIN3_GRAN_BIT, pin0, out_first, 1, NULL, 0, NULL, NULL, NULL, NULL},
+        {"sim_wide_t1", ODIN3_GRAN_BIT, pin0, wide_first, 1, NULL, 0, NULL, NULL, NULL, NULL},
+        {"sim_vec_t1", ODIN3_GRAN_BIT, pin0, vec_first, 1, NULL, 0, NULL, NULL, NULL, NULL},
+        {"sim_param_t1", ODIN3_GRAN_BIT, pin0, param_first, 1, width_param, 1, NULL, NULL, NULL,
+         NULL},
+    };
+    odin3_celltype_id id = {0};
+    for (uint32_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG,
+                                      odin3_celltype_add_local(design, &bad[i], &id), bad[i].name);
+    }
+    TEST_ASSERT_EQUAL_size_t(sizeof bad / sizeof bad[0], errors_logged);
+    const odin3_celltype_def good = {"sim_good_t1", ODIN3_GRAN_BIT, pin0, clocked, 2, NULL, 0,
+                                     NULL,          NULL,           NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &good, &id));
+    const odin3_celltype_def level = {"sim_level_t1",
+                                      ODIN3_GRAN_BIT,
+                                      ODIN3_CT_SEQ_LEVEL,
+                                      out_first,
+                                      1,
+                                      NULL,
+                                      0,
+                                      NULL,
+                                      NULL,
+                                      NULL,
+                                      NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &level, &id));
+}
+
 static void test_add_local_duplicate_name(void) {
-    odin3_celltype_def def = {"$port_in", ODIN3_GRAN_MODULE, 0, NULL, 0, NULL, 0, NULL, NULL, NULL};
+    odin3_celltype_def def = {"$port_in", ODIN3_GRAN_MODULE, 0, NULL, 0, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_add_local(design, &def, &id));
     def.name = "top";
@@ -184,7 +229,8 @@ static void test_add_local_duplicate_name(void) {
 /* A definition default with a NULL payload of nonzero length is refused, not copied. */
 static void test_add_local_rejects_null_payload(void) {
     odin3_param_def params[1] = {{"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, NULL, 3, 0, 0}}};
-    odin3_celltype_def def = {"sub", ODIN3_GRAN_MODULE, 0, NULL, 0, params, 1, NULL, NULL, NULL};
+    odin3_celltype_def def = {"sub", ODIN3_GRAN_MODULE, 0, NULL, 0, params, 1, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_add_local(design, &def, &id));
     TEST_ASSERT_FALSE(odin3_celltype_valid(find_type(design, "sub")));
@@ -202,7 +248,8 @@ static void test_add_local_deep_copies(void) {
     params[1].dflt.kind = ODIN3_VAL_BITS;
     params[1].dflt.bits = bits;
     params[1].dflt.len = PARAM_BITS;
-    odin3_celltype_def def = {name, ODIN3_GRAN_MODULE, 0, ports, 1, params, 2, NULL, NULL, NULL};
+    odin3_celltype_def def = {name, ODIN3_GRAN_MODULE, 0, ports, 1, params, 2, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     odin3_value expect = params[1].dflt;
@@ -234,7 +281,7 @@ static void test_blackbox_reuses_registered_type(void) {
     TEST_ASSERT_TRUE(odin3_celltype_valid(hard));
     odin3_port_def ports[5];
     memcpy(ports, k_adder_ports, sizeof ports);
-    odin3_celltype_def decl = {"adder", ODIN3_GRAN_BLACKBOX, 0, ports, 5, NULL, 0, NULL, NULL,
+    odin3_celltype_def decl = {"adder", ODIN3_GRAN_BLACKBOX, 0, ports, 5, NULL, 0, NULL, NULL, NULL,
                                NULL};
     odin3_celltype_id got = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(des, &decl, &got));
@@ -257,8 +304,8 @@ static void test_blackbox_reuses_registered_type(void) {
 }
 
 static void test_blackbox_new_name(void) {
-    odin3_celltype_def decl = {"mult_t2", ODIN3_GRAN_HARD, 0, k_adder_ports, 5, NULL, 0, NULL, NULL,
-                               NULL};
+    odin3_celltype_def decl = {
+        "mult_t2", ODIN3_GRAN_HARD, 0, k_adder_ports, 5, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id first = {0};
     odin3_celltype_id second = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &decl, &first));
@@ -273,8 +320,8 @@ static void test_blackbox_new_name(void) {
 
 /* A port cell type is never a black box, even when its parameters could fit the declaration. */
 static void test_blackbox_port_type_never_matches(void) {
-    odin3_celltype_def decl = {"$port_in", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0, NULL, NULL,
-                               NULL};
+    odin3_celltype_def decl = {
+        "$port_in", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_port_def ports[1] = {{"P", ODIN3_DIR_OUT, false, 1, NULL, NULL, NULL}};
     decl.ports = ports;
     decl.n_ports = 1;
@@ -307,7 +354,7 @@ static odin3_celltype_id add_pmul(const char *name) {
         {"a", ODIN3_DIR_IN, false, 0, "A_WIDTH", NULL, NULL},
         {"b", ODIN3_DIR_IN, false, 0, "B_WIDTH", NULL, NULL},
         {"out", ODIN3_DIR_OUT, false, 0, NULL, width_fn_sum, NULL}};
-    const odin3_celltype_def def = {name, ODIN3_GRAN_HARD, 0, ports, 3, params, 3, NULL, NULL,
+    const odin3_celltype_def def = {name, ODIN3_GRAN_HARD, 0, ports, 3, params, 3, NULL, NULL, NULL,
                                     NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
@@ -322,7 +369,7 @@ static odin3_celltype_def pmul_decl(const char *name, uint32_t out_width) {
                                      {"out", ODIN3_DIR_OUT, false, out_width, NULL, NULL, NULL}};
     memcpy(g_decl_ports, ports, sizeof ports);
     const odin3_celltype_def decl = {
-        name, ODIN3_GRAN_BLACKBOX, 0, g_decl_ports, 3, NULL, 0, NULL, NULL, NULL};
+        name, ODIN3_GRAN_BLACKBOX, 0, g_decl_ports, 3, NULL, 0, NULL, NULL, NULL, NULL};
     return decl;
 }
 
@@ -402,13 +449,13 @@ static void test_blackbox_shared_parameter_contradiction(void) {
     static const odin3_port_def ports[2] = {{"d1", ODIN3_DIR_IN, false, 0, "W", NULL, NULL},
                                             {"d2", ODIN3_DIR_IN, false, 0, "W", NULL, NULL}};
     const odin3_celltype_def def = {
-        "shared_t4", ODIN3_GRAN_HARD, 0, ports, 2, params, 1, NULL, NULL, NULL};
+        "shared_t4", ODIN3_GRAN_HARD, 0, ports, 2, params, 1, NULL, NULL, NULL, NULL};
     odin3_celltype_id type = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
     const odin3_port_def want[2] = {{"d1", ODIN3_DIR_IN, false, 2, NULL, NULL, NULL},
                                     {"d2", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL}};
     const odin3_celltype_def decl = {
-        "shared_t4", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL, NULL, NULL};
+        "shared_t4", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_value got[1];
     const odin3_blackbox_match match = {type, &decl, got};
     odin3_width_why why = {""};
@@ -439,7 +486,7 @@ static void test_declared_model_accessors_out_of_range(void) {
 /* A new black box: no parameters, and the declaration is the new type's own definition. */
 static void test_declared_model_of_a_new_black_box(void) {
     odin3_celltype_def decl = {
-        "plain_t4", ODIN3_GRAN_BLACKBOX, 0, k_adder_ports, 5, NULL, 0, NULL, NULL, NULL};
+        "plain_t4", ODIN3_GRAN_BLACKBOX, 0, k_adder_ports, 5, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &decl, &id));
     TEST_ASSERT_NULL(odin3_design_declared_model_params(design, 0));
@@ -491,12 +538,13 @@ static void test_get_invalid_ids(void) {
 
 /* A module type's definition is owned by its module and bound without a copy (IR-7). */
 static void test_bind_local(void) {
-    odin3_celltype_def def = {"mod_t2", ODIN3_GRAN_MODULE, 0, NULL, 0, NULL, 0, NULL, NULL, NULL};
+    odin3_celltype_def def = {"mod_t2", ODIN3_GRAN_MODULE, 0, NULL, 0, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     static const odin3_port_def ports[1] = {{"clk", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL}};
     static const odin3_celltype_def bound = {
-        "mod_t2", ODIN3_GRAN_MODULE, 0, ports, 1, NULL, 0, NULL, NULL, NULL};
+        "mod_t2", ODIN3_GRAN_MODULE, 0, ports, 1, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_bind_local(design, id, &bound);
     TEST_ASSERT_EQUAL_PTR(&bound, odin3_celltype_get(design, id));
     TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_port_width(design, id, NULL, 0));
@@ -525,7 +573,8 @@ static void test_design_create_oom_sweep(void) {
 
 static void test_add_local_oom_sweep(void) {
     odin3_port_def ports[1] = {{"x", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL}};
-    odin3_celltype_def def = {"oom_t2", ODIN3_GRAN_MODULE, 0, ports, 1, NULL, 0, NULL, NULL, NULL};
+    odin3_celltype_def def = {"oom_t2", ODIN3_GRAN_MODULE, 0, ports, 1, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     for (long tries = 0;; tries++) {
         odin3_util_set_alloc_fail_after(tries);
@@ -577,7 +626,7 @@ static odin3_celltype_id add_expr_type(const char *name, const odin3_width_expr 
                                        {"B_WIDTH", ODIN3_VAL_INT, odin3_value_int(4)}};
     const odin3_port_def ports[2] = {{"a", ODIN3_DIR_IN, false, 0, "A_WIDTH", NULL, NULL},
                                      {"y", ODIN3_DIR_OUT, false, 0, NULL, NULL, wexpr}};
-    const odin3_celltype_def def = {name, ODIN3_GRAN_HARD, 0, ports, 2, params, 2, NULL, NULL,
+    const odin3_celltype_def def = {name, ODIN3_GRAN_HARD, 0, ports, 2, params, 2, NULL, NULL, NULL,
                                     NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(want, odin3_celltype_add_local(design, &def, &id));
@@ -631,8 +680,8 @@ static void test_blackbox_width_expr_evaluated(void) {
     (void)add_expr_type("wexpr_bb_t3", &wexpr, ODIN3_OK);
     odin3_port_def want[2] = {{"a", ODIN3_DIR_IN, false, 5, NULL, NULL, NULL},
                               {"y", ODIN3_DIR_OUT, false, 9, NULL, NULL, NULL}};
-    odin3_celltype_def def = {"wexpr_bb_t3", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL, NULL,
-                              NULL};
+    odin3_celltype_def def = {
+        "wexpr_bb_t3", ODIN3_GRAN_BLACKBOX, 0, want, 2, NULL, 0, NULL, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, NULL));
     TEST_ASSERT_EQUAL_INT64(5, odin3_design_declared_model_params(design, 0)[0].i);
     TEST_ASSERT_EQUAL_INT64(4, odin3_design_declared_model_params(design, 0)[1].i);
@@ -643,7 +692,8 @@ static void test_blackbox_width_expr_evaluated(void) {
 }
 
 static void test_lib_data_attaches_to_local_types(void) {
-    odin3_celltype_def def = {"lib_t3", ODIN3_GRAN_HARD, 0, NULL, 0, NULL, 0, NULL, NULL, NULL};
+    odin3_celltype_def def = {"lib_t3", ODIN3_GRAN_HARD, 0, NULL, 0, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     TEST_ASSERT_NULL(odin3_celltype_lib(design, id));
@@ -672,6 +722,7 @@ int main(void) {
     RUN_TEST(test_port_verify_rejects_bad_width);
     RUN_TEST(test_port_width_fn);
     RUN_TEST(test_register_global_rejects_bad_defs);
+    RUN_TEST(test_sim_flags_validated);
     RUN_TEST(test_add_local_duplicate_name);
     RUN_TEST(test_add_local_rejects_null_payload);
     RUN_TEST(test_add_local_deep_copies);

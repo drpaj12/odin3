@@ -16,9 +16,12 @@
  * ignore the event. Sequential types receive:
  *   ODIN3_SIM_INIT     once, before the first cycle, with the state zeroed: set the initial state
  *                      from the parameters (write no outputs);
- *   ODIN3_SIM_COMB     during every settle, in level order: write the outputs (an edge-triggered
- *                      type from its state only; a level latch also from its inputs, updating its
- *                      state while transparent);
+ *   ODIN3_SIM_COMB     during every settle, in level order: write the outputs. An edge-triggered
+ *                      type (ODIN3_CT_SEQ_EDGE) writes Q = state from its state only: its inputs
+ *                      are cut from the levelization graph and its COMB runs at the start of each
+ *                      settle, before any cell that reads its outputs. A level latch
+ *                      (ODIN3_CT_SEQ_LEVEL) reads its inputs too, updating its state while
+ *                      transparent, and is levelized like a combinational cell;
  *   ODIN3_SIM_POSEDGE  at the rising edge of the clocks, after a settle: a type triggered on it
  *                      copies its inputs into its state and writes no outputs (so the order in
  *                      which the simulator visits the cells does not matter);
@@ -51,6 +54,13 @@ typedef struct odin3_sim_span {
  * definition order, each as wide as the port's width for these parameters. state is the cell's
  * storage: for a sequential type one byte (0 or 1) per bit of its output ports, in port then bit
  * order (n_state bytes); NULL and 0 for a combinational type.
+ *
+ * type_data is per-type data the simulator looks up once per cell type at build time (for a
+ * tech-library hard cell, its odin3_techlib_cell, whose fn expressions the hook interprets); NULL
+ * for the built-in types. scratch is one buffer shared by every cell of the simulator, which the
+ * hook may use freely during one call (contents undefined on entry, not kept between calls); it
+ * holds at least the type's sim_scratch_bytes(params) bytes (celltype.h), n_scratch in all, and is
+ * NULL with n_scratch 0 when no type asks for any. Hooks never allocate.
  */
 typedef struct odin3_sim_cell {
     uint8_t *values;             /* the simulator's value array */
@@ -60,6 +70,9 @@ typedef struct odin3_sim_cell {
     uint8_t *state;
     uint32_t n_state;
     odin3_sim_event event;
+    const void *type_data; /* NULL for built-in types */
+    uint8_t *scratch;
+    uint32_t n_scratch;
 } odin3_sim_cell;
 
 /*

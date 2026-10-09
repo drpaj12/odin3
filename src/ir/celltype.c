@@ -125,6 +125,22 @@ static const char *port_error(const odin3_celltype_def *def, uint32_t idx, odin3
     return width_rule_error(def, port, why);
 }
 
+/* NULL when the simulation flags are consistent (celltype.h); def's ports are present. */
+static const char *sim_flags_error(const odin3_celltype_def *def) {
+    if ((def->flags & ODIN3_CT_SEQ_EDGE) != 0 && (def->flags & ODIN3_CT_SEQ_LEVEL) != 0) {
+        return "SEQ_EDGE and SEQ_LEVEL are exclusive";
+    }
+    if ((def->flags & ODIN3_CT_CLOCK_PIN0) == 0) {
+        return NULL;
+    }
+    const odin3_port_def *pin = def->n_ports > 0 ? &def->ports[0] : NULL;
+    if (pin == NULL || pin->dir != ODIN3_DIR_IN || !pin->scalar || pin->width != 1 ||
+        pin->width_fn != NULL || pin->width_expr != NULL || pin->width_param != NULL) {
+        return "CLOCK_PIN0 needs port 0 to be a scalar 1-bit input";
+    }
+    return NULL;
+}
+
 /*
  * NULL when def is valid (rules in celltype.h), else a description of the first problem (which
  * may point into why).
@@ -146,7 +162,7 @@ static const char *def_error(const odin3_celltype_def *def, odin3_width_why *why
     for (uint32_t i = 0; err == NULL && i < def->n_ports; i++) {
         err = port_error(def, i, why);
     }
-    return err;
+    return err != NULL ? err : sim_flags_error(def);
 }
 
 /* For assertions (inline: unused when they compile out). */

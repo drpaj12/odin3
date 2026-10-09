@@ -58,9 +58,18 @@ static void setup(harness *hns, const char *name, const odin3_value *params, uin
         }
     }
     bool seq = is_sequential(hns->def);
-    hns->cell = (odin3_sim_cell){
-        hns->values, hns->spans,    hns->def->n_ports, params, seq ? hns->state : NULL,
-        seq ? 1 : 0, ODIN3_SIM_COMB};
+    /* Built-in types ask for no scratch and get no type data. */
+    TEST_ASSERT_NULL_MESSAGE(hns->def->sim_scratch_bytes, name);
+    hns->cell = (odin3_sim_cell){hns->values,
+                                 hns->spans,
+                                 hns->def->n_ports,
+                                 params,
+                                 seq ? hns->state : NULL,
+                                 seq ? 1 : 0,
+                                 ODIN3_SIM_COMB,
+                                 NULL,
+                                 NULL,
+                                 0};
 }
 
 /* Sets the input bits from bit k of combo (all bits before the single output bit). */

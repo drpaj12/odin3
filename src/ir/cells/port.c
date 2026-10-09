@@ -26,10 +26,19 @@ static const odin3_port_def k_port_inout_ports[] = {
     {"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL, NULL}};
 
 const odin3_celltype_def odin3_cell_port_in = {
-    "$port_in", ODIN3_GRAN_PORT, 0, k_port_in_ports, 1, k_port_params, 1, port_verify, NULL, NULL};
+    "$port_in", ODIN3_GRAN_PORT, 0, k_port_in_ports, 1, k_port_params, 1, port_verify, NULL, NULL,
+    NULL};
 const odin3_celltype_def odin3_cell_port_out = {
-    "$port_out", ODIN3_GRAN_PORT, 0, k_port_out_ports, 1, k_port_params, 1, port_verify, NULL,
+    "$port_out", ODIN3_GRAN_PORT, 0, k_port_out_ports, 1, k_port_params, 1, port_verify, NULL, NULL,
     NULL};
-const odin3_celltype_def odin3_cell_port_inout = {
-    "$port_inout", ODIN3_GRAN_PORT, 0, k_port_inout_ports, 1, k_port_params, 1, port_verify, NULL,
-    NULL};
+const odin3_celltype_def odin3_cell_port_inout = {"$port_inout",
+                                                  ODIN3_GRAN_PORT,
+                                                  0,
+                                                  k_port_inout_ports,
+                                                  1,
+                                                  k_port_params,
+                                                  1,
+                                                  port_verify,
+                                                  NULL,
+                                                  NULL,
+                                                  NULL};

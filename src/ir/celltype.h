@@ -54,7 +54,9 @@ typedef enum odin3_granularity {
  * only on its state, so it cuts the combinational graph ($_DFF_P_, $_DFF_N_, $_FF_). SEQ_LEVEL: a
  * level-sensitive latch, transparent while enabled, whose outputs depend on its inputs during a
  * settle ($_DLATCH_P_, $_DLATCH_N_). CLOCK_PIN0: port 0 is the cell's clock (edge) or enable
- * (level) pin, whose net the simulator drives as a clock; $_FF_ has none (global clock).
+ * (level) pin, a scalar input of constant width 1, whose net the simulator drives as a clock;
+ * $_FF_ has none (global clock). Registration rejects SEQ_EDGE with SEQ_LEVEL, and CLOCK_PIN0 on
+ * a type whose port 0 is not such a pin.
  */
 enum {
     ODIN3_CT_TRISTATE = 1U << 0,
@@ -151,6 +153,12 @@ struct odin3_celltype_def {
     odin3_const (*const_value)(const odin3_value *params); /* may be NULL */
     /* 1E: evaluates one cell (contract in sim/cell.h); NULL when the type cannot be simulated. */
     void (*simulate)(const odin3_sim_cell *cell);
+    /*
+     * 1E, may be NULL (0 bytes): scratch bytes simulate needs for a cell with these parameters.
+     * The simulator sizes its one shared scratch buffer (odin3_sim_cell.scratch) to the maximum
+     * over all its cells.
+     */
+    uint32_t (*sim_scratch_bytes)(const odin3_value *params);
 };
 
 /*

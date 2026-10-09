@@ -92,21 +92,22 @@ static void sop_sim(const odin3_sim_cell *cell) {
     assert(width == cell->ports[0].width);
     uint64_t row_len = (uint64_t)width + 1;
     bool has_on = false;
-    bool on_hit = false;
     bool off_hit = false;
     for (uint64_t off = 0; off + row_len <= cover->len; off += row_len) {
         const uint8_t *row = cover->bits + off;
         bool hit = row_matches(cell, row, width);
         if (row[width] == '1') {
+            if (hit) {
+                odin3_cells_sim_out(cell, true);
+                return;
+            }
             has_on = true;
-            on_hit = on_hit || hit;
         } else {
             off_hit = off_hit || hit;
         }
     }
-    bool off_only = !has_on && cover->len > 0;
-    odin3_cells_sim_out(cell, on_hit || (off_only && !off_hit));
+    odin3_cells_sim_out(cell, !has_on && cover->len > 0 && !off_hit);
 }
 
 const odin3_celltype_def odin3_cell_sop = {
-    "$sop", ODIN3_GRAN_BIT, 0, k_ports, 2, k_params, 2, sop_verify, sop_const_value, sop_sim};
+    "$sop", ODIN3_GRAN_BIT, 0, k_ports, 2, k_params, 2, sop_verify, sop_const_value, sop_sim, NULL};

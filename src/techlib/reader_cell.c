@@ -827,6 +827,7 @@ static const odin3_celltype_def *build_def(odin3_reader *rd) {
                                 (uint32_t)cell->params.len,
                                 NULL,
                                 NULL,
+                                NULL,
                                 NULL};
     return def;
 }

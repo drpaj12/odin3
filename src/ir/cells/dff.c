@@ -20,7 +20,9 @@ static const odin3_port_def k_ff_ports[] = {
  * Simulate hooks (sim/cell.h). State: one byte, the stored Q. D is the second-to-last port and Q
  * the last for every type here; INIT is parameter 0.
  */
-enum { SEQ_INIT, LATCH_E = 0, D_FROM_END = 2 };
+enum { SEQ_INIT };       /* parameter index */
+enum { LATCH_E };        /* port index */
+enum { D_FROM_END = 2 }; /* D's position counted from the last port */
 
 static bool in_d(const odin3_sim_cell *cell) {
     return odin3_cells_sim_in(cell, cell->n_ports - D_FROM_END);
@@ -67,9 +69,17 @@ static void dlatch_n_sim(const odin3_sim_cell *cell) {
 }
 
 #define ODIN3_STORAGE(var, label, flags, ports, sim)                                               \
-    const odin3_celltype_def var = {                                                               \
-        label, ODIN3_GRAN_BIT,          flags, ports, ODIN3_NELEM(ports), odin3_cells_init_params, \
-        1,     odin3_cells_init_verify, NULL,  sim}
+    const odin3_celltype_def var = {label,                                                         \
+                                    ODIN3_GRAN_BIT,                                                \
+                                    flags,                                                         \
+                                    ports,                                                         \
+                                    ODIN3_NELEM(ports),                                            \
+                                    odin3_cells_init_params,                                       \
+                                    1,                                                             \
+                                    odin3_cells_init_verify,                                       \
+                                    NULL,                                                          \
+                                    sim,                                                           \
+                                    NULL}
 
 enum {
     EDGE_CLOCKED = ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0,
