@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# write-corrupt: odin3-write wrapper for the negative CTest; damages the written JSON (one LUT
+# bit) and Verilog (one `&` becomes `|`) so that the writer-check gates must fail.
+# WC_REAL_WRITE names the real driver; arguments are those of odin3-write.
+set -euo pipefail
+"${WC_REAL_WRITE:?}" "$@"
+json="" vlog=""
+while [ $# -gt 0 ]; do
+    case $1 in
+    --json) json=$2; shift 2 ;;
+    --verilog) vlog=$2; shift 2 ;;
+    *) shift ;;
+    esac
+done
+[ -z "$json" ] || sed -i '0,/"LUT": "\([01]*\)0"/s//"LUT": "\11"/' "$json"
+[ -z "$vlog" ] || sed -i '0,/^\(  assign .*\) & /s//\1 | /' "$vlog"

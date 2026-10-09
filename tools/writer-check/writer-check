@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+# writer-check: validates the 1F writers (JSON, Verilog, dot) over a golden tree or a fixture
+# directory (docs/specs/2026-10-09-1F-writers-design.md, validation table).
+#
+# For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
+# directory: every *.blif) odin3-write reads it and writes JSON, Verilog and dot, then
+#   JSON     Yosys `read_json; opt_clean; write_blif` vs the golden through the same Yosys
+#            normalization (`read_blif; opt_clean; write_blif`), compared with
+#            netlist-compare (stub .blackbox models added to both for models neither side
+#            defines). Yosys write_blif spells every cover as minterms and opt_clean resolves
+#            constant aliases, so both sides go through it (its self-buffers `.names x x` are
+#            dropped on both). When Yosys cannot read the golden (implicit internal cells such as
+#            `$pow` without parameters) the JSON step is excluded ("ref-excluded", listed).
+#   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog; hierarchy -top <first model>;
+#            proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
+#            (* blackbox *) stubs declare the black boxes) and tools/equiv-check
+#            --allow-undriven against the golden. equiv-check cannot model black boxes other
+#            than the VTR adder (RAMs, multipliers, implicit cells), multi-driver nets, level
+#            latches or several clocks: such goldens are "excluded" (listed with the reason).
+#   DOT      dot -Tsvg accepts it, or the writer refused it for the node budget (--max-nodes,
+#            default 2000), which is the budget honoured ("budget").
+# Order: ascending file size (smallest first); --largest-first reverses it. Identical contents
+# run once (sha256); duplicates reuse the result. Every tool runs under a per-file timeout and an
+# address-space cap. Timeouts and memory-cap stops are reported, and are failures only in
+# --fixtures mode. Exit: 0 pass, 1 any failure, 2 usage, 77 a tool is missing (--fixtures).
+set -euo pipefail
+
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+HERE=$(dirname "$SELF")
+REPO=$(dirname "$(dirname "$HERE")")
+# Basenames whose original netlist drives one net from several cells (PHASE1 decision #15).
+export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
+
+usage() {
+    cat >&2 <<'USAGE'
+usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH] [--yosys PATH]
+                    [--max-nodes N] [--out DIR] [--keep] [--fixtures DIR | GOLDEN_ROOT]
+  GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
+  --fixtures D  every *.blif under D (no .prov needed); timeouts and caps are failures
+  -j N          parallel jobs, 1 or 2 (default 2)
+  -t SECONDS    per-tool timeout (default 600)
+  -m GB         per-tool address-space cap (default 6)
+  --write PATH  odin3-write (default build/release/odin3-write, else build/debug/odin3-write)
+  --yosys PATH  Yosys (default $ODIN3_YOSYS, else ~/odin3-ws/external/yosys/build/yosys, else PATH)
+  --max-nodes N dot node budget (default 2000)
+  --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
+USAGE
+    exit 2
+}
+
+now() { date +%s.%N; }
+
+# Runs a command under the time and address-space caps: capped LOG RSSFILE CMD...
+# Returns the command's status (124/137 on timeout).
+capped() {
+    local log=$1 rss=$2
+    shift 2
+    # A sanitized (ASan) driver reserves terabytes of shadow address space: time cap only.
+    (if [ "$1" != "$WC_WRITE" ] || [ "$WC_WRITE_ASAN" != 1 ]; then ulimit -v "$WC_MEM_KB"; fi
+     exec timeout -k 10 "$WC_TIMEOUT" /usr/bin/time -f '%M' -o "$rss" "$@") >"$log" 2>&1
+}
+
+# Peak RSS (KB) recorded in a /usr/bin/time file, 0 when unknown.
+rss_of() {
+    local v
+    v=$(tail -n 1 "$1" 2>/dev/null || echo 0)
+    case $v in '' | *[!0-9]*) v=0 ;; esac
+    echo "$v"
+}
+
+# Records a tool's peak RSS (KB) in the worker's $WC_PEAKS file (gates run in subshells).
+note_rss() {
+    rss_of "$1" >>"$WC_PEAKS"
+}
+
+# The result word of a failed capped run: timeout, memlimit or the given word.
+fail_word() {
+    local rc=$1 log=$2 word=$3
+    case $rc in
+    124 | 137) echo "timeout" ;;
+    *) if grep -q -E 'MemoryError|std::bad_alloc|out of memory|Cannot allocate|Out of memory' "$log"; then
+           echo "memlimit"
+       else
+           echo "$word"
+       fi ;;
+    esac
+}
+
+# Reads BLIF on stdin; prints a stub .blackbox model for every .subckt model that has no
+# .model (formals named Y or Q, with optional [k], are outputs, the rest inputs). Same rule as
+# tools/blif-roundtrip.
+stubs() {
+    LC_ALL=C awk '
+    { line = $0; sub(/#.*/, "", line)
+      if (substr(line, length(line)) == "\\") { acc = acc substr(line, 1, length(line) - 1) " "; next }
+      line = acc line; acc = ""; n = split(line, t, /[ \t]+/); k = 1; if (t[1] == "") k = 2
+      if (t[k] == ".model") def[t[k + 1]] = 1
+      if (t[k] == ".subckt") {
+          m = t[k + 1]
+          if (!(m in seen)) { seen[m] = 1; order[++nm] = m }
+          for (i = k + 2; i <= n; i++) {
+              f = t[i]; sub(/=.*/, "", f); if (f == "") continue
+              if (!((m SUBSEP f) in fs)) { fs[m SUBSEP f] = 1; nf[m]++; fl[m, nf[m]] = f }
+          }
+      }
+    }
+    END {
+        for (j = 1; j <= nm; j++) {
+            m = order[j]
+            if (m in def) continue
+            ins = ""; outs = ""
+            for (i = 1; i <= nf[m]; i++) {
+                f = fl[m, i]; b = f; sub(/\[.*/, "", b)
+                if (b == "Y" || b == "Q") outs = outs " " f; else ins = ins " " f
+            }
+            print ".model " m
+            if (ins != "") print ".inputs" ins
+            if (outs != "") print ".outputs" outs
+            print ".blackbox"
+            print ".end"
+        }
+    }'
+}
+
+is_multi_driver() {
+    local base=${1##*/} name
+    for name in $MULTI_DRIVER; do
+        [ "$base" = "$name" ] && return 0
+    done
+    return 1
+}
+
+# netlist-compare REF TEST LOG -> identical | different | timeout | memlimit | refused | error
+compare() {
+    local ref=$1 test=$2 log=$3 stub rc=0
+    stub=$(cat "$ref" | stubs)
+    if [ -n "$stub" ]; then
+        printf '\n%s\n' "$stub" >>"$ref"
+        printf '\n%s\n' "$stub" >>"$test"
+    fi
+    capped "$log" "$log.rss" "$WC_NC" "$ref" "$test" || rc=$?
+    note_rss "$log.rss"
+    case $rc in
+    0) echo "identical" ;;
+    1) if grep -q '^--- ' "$log"; then echo "different"; else fail_word 1 "$log" error; fi ;;
+    *) if grep -q 'has more than one driver' "$log"; then echo "refused"
+       else fail_word "$rc" "$log" error; fi ;;
+    esac
+}
+
+# Drops Yosys write_blif's self-buffers `.names x x` / `1 1`: with a vector wire w, the
+# netname `w[k]` of the same bit is written as an alias of itself (a no-op, both sides).
+drop_self_buffers() {
+    LC_ALL=C awk '
+    pending != "" { if ($0 == "1 1") { pending = ""; next } print pending; pending = "" }
+    $1 == ".names" && NF == 3 && $2 == $3 { pending = $0; next }
+    { print }
+    END { if (pending != "") print pending }' "$1" >"$1.tmp" && mv "$1.tmp" "$1"
+}
+
+# Sorts the statements of each model of a Yosys-written BLIF by their text (a `.names` with its
+# rows is one statement; headers keep their order). Yosys read_json does not keep the cell order
+# of the file, and netlist-compare can break a tie by line order; both sides are sorted.
+sort_statements() {
+    LC_ALL=C awk -v OFS='\t' '
+    function flush() { if (stmt != "") print m, 1, stmt; stmt = "" }
+    /^#/ || /^[[:space:]]*$/ { next }
+    $1 == ".model" { flush(); m++; h = 0; print m, 0, sprintf("%09d", h++), $0; next }
+    $1 == ".inputs" || $1 == ".outputs" || $1 == ".clock" { flush(); print m, 0, sprintf("%09d", h++), $0; next }
+    $1 == ".end" { flush(); print m, 2, "", $0; next }
+    substr($1, 1, 1) == "." { flush(); stmt = $0; next }
+    { stmt = stmt "\001" $0 }
+    END { flush() }' "$1" |
+        LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2n -k3,3 |
+        LC_ALL=C awk -F '\t' '{ t = ($2 == 1) ? $3 : $4; gsub(/\001/, "\n", t); print t }' >"$1.sorted"
+    mv "$1.sorted" "$1"
+}
+
+# JSON gate for golden $1, JSON $2, work prefix $3.
+json_gate() {
+    local gold=$1 json=$2 w=$3 rc=0 ref=$1
+    capped "$w.yj.log" "$w.yj.rss" "$WC_YOSYS" -q -p \
+        "read_json $json; opt_clean; write_blif $w.yj.blif" || rc=$?
+    note_rss "$w.yj.rss"
+    if [ "$rc" -ne 0 ]; then
+        fail_word "$rc" "$w.yj.log" yosys-error
+        return
+    fi
+    # Yosys read_blif does not know `.clock` (a declaration without semantics): drop it.
+    if grep -q '^[[:space:]]*\.clock' "$gold"; then
+        grep -v '^[[:space:]]*\.clock' "$gold" >"$w.gold.blif" || true
+        ref=$w.gold.blif
+    fi
+    rc=0
+    capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \
+        "read_blif $ref; opt_clean; write_blif $w.yr.blif" || rc=$?
+    note_rss "$w.yr.rss"
+    if [ "$rc" -ne 0 ]; then
+        echo "ref-$(fail_word "$rc" "$w.yr.log" excluded)"
+        return
+    fi
+    drop_self_buffers "$w.yr.blif"
+    drop_self_buffers "$w.yj.blif"
+    sort_statements "$w.yr.blif"
+    sort_statements "$w.yj.blif"
+    compare "$w.yr.blif" "$w.yj.blif" "$w.jnc"
+}
+
+# Verilog gate for golden $1, Verilog $2, work prefix $3: prints "<iverilog> <equiv>".
+verilog_gate() {
+    local gold=$1 vlog=$2 w=$3 rc=0 iv eq top msg
+    capped "$w.iv.log" "$w.iv.rss" "$WC_IVERILOG" -g2005 -o /dev/null "$vlog" || rc=$?
+    note_rss "$w.iv.rss"
+    if [ "$rc" -eq 0 ]; then iv=ok; else iv=$(fail_word "$rc" "$w.iv.log" FAIL); fi
+    top=$(LC_ALL=C awk '$1 == ".model" { print $2; exit }' "$gold")
+    rc=0
+    capped "$w.yv.log" "$w.yv.rss" "$WC_YOSYS" -q -p \
+        "read_verilog -noblackbox $vlog; hierarchy -top $top; proc; opt_clean; techmap; opt_clean; write_blif -blackbox $w.yv.blif" ||
+        rc=$?
+    note_rss "$w.yv.rss"
+    if [ "$rc" -ne 0 ]; then
+        echo "$iv $(fail_word "$rc" "$w.yv.log" yosys-error)"
+        return
+    fi
+    rc=0
+    capped "$w.ec.log" "$w.ec.rss" "$WC_EC" --allow-undriven "$gold" "$w.yv.blif" || rc=$?
+    note_rss "$w.ec.rss"
+    case $rc in
+    0) eq=equivalent ;;
+    1) eq=NOT-equivalent ;;
+    2) msg=$(grep '^equiv-check: ' "$w.ec.log" | grep -v '^equiv-check: notice' | head -n 1 || true)
+       # An error located in the golden (or naming what it uses) is a model limit: excluded.
+       case $msg in
+       "equiv-check: $gold"*) eq=excluded ;;
+       *"unsupported black box"*) eq=excluded ;;
+       *) eq=$(fail_word 2 "$w.ec.log" error) ;;
+       esac ;;
+    *) eq=$(fail_word "$rc" "$w.ec.log" error) ;;
+    esac
+    echo "$iv $eq"
+}
+
+# dot gate: $1 dot file, $2 driver log.
+dot_gate() {
+    local dotf=$1 log=$2 w=$3 rc=0
+    if grep -q '^odin3-write: dot over-budget' "$log"; then
+        grep -q 'refusing to draw [0-9]* nodes' "$log" && echo budget || echo FAIL
+        return
+    fi
+    capped "$w.dot.log" "$w.dot.rss" "$WC_DOT" -Tsvg -o /dev/null "$dotf" || rc=$?
+    note_rss "$w.dot.rss"
+    if [ "$rc" -eq 0 ]; then echo ok; else fail_word "$rc" "$w.dot.log" FAIL; fi
+}
+
+# Worker: one line "id<TAB>path<TAB>rep" (rep = "-" or the id whose result to reuse).
+worker() {
+    local id path rep w t0 rc=0 json="-" iv="-" eq="-" dt="-" wsec=0 note="" jnote="" vres
+    IFS=$'\t' read -r id path rep <<<"$1"
+    w=$WC_TMP/$id
+    t0=$(now)
+    WC_PEAKS=$w.peaks
+    : >"$WC_PEAKS"
+    if [ "$rep" != "-" ]; then
+        printf '%s\t%s\t=%s\n' "$id" "$path" "$rep" >"$WC_RES/$id.tsv"
+        return
+    fi
+    capped "$w.write.log" "$w.write.rss" "$WC_WRITE" "$path" --json "$w.json" \
+        --verilog "$w.v" --dot "$w.dot" --max-nodes "$WC_MAX_NODES" || rc=$?
+    local write_rss
+    write_rss=$(rss_of "$w.write.rss")
+    wsec=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
+    if [ "$rc" -ne 0 ]; then
+        json=$(fail_word "$rc" "$w.write.log" WRITEFAIL)
+        note=$(grep -v '^odin3-write: ' "$w.write.log" | tail -n 1 | tr '\t' ' ')
+    else
+        json=$(json_gate "$path" "$w.json" "$w")
+        vres=$(verilog_gate "$path" "$w.v" "$w")
+        iv=${vres% *}
+        eq=${vres#* }
+        dt=$(dot_gate "$w.dot" "$w.write.log" "$w")
+        if [ "$json" = ref-excluded ]; then
+            jnote=$(grep -m 1 'ERROR' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
+        fi
+        if [ "$eq" = excluded ]; then
+            note=$(grep '^equiv-check: ' "$w.ec.log" | grep -v '^equiv-check: notice' | head -n 1 | tr '\t' ' ' || true)
+        fi
+    fi
+    if [ "$eq" = error ] && is_multi_driver "$path" && grep -q 'more than one driver' "$w.ec.log"; then
+        eq=excluded
+    fi
+    for f in "$w".*.log; do
+        case $json$iv$eq$dt in *FAIL* | *error* | *different* | *NOT* | *timeout* | *memlimit*)
+            cp "$f" "$WC_RES/$id.${f#"$w".}" 2>/dev/null || true ;;
+        esac
+    done
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$path" "$json" "$iv" "$eq" "$dt" \
+        "$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')" "$write_rss" \
+        "$(sort -n "$WC_PEAKS" | tail -n 1)" "$note" \
+        "$wsec" "$jnote" >"$WC_RES/$id.tsv"
+    if [ "$WC_KEEP" != 1 ]; then rm -f "$w".*; fi
+}
+
+# Collects results; prints the table, the exclusion list and the summary; 1 on any failure.
+report() {
+    local res=$1 root=$2
+    cat "$res"/*.tsv | LC_ALL=C sort -t "$(printf '\t')" -k2,2 | ROOT="$root" LC_ALL=C awk -F '\t' '
+    { id[NR] = $1; path[NR] = $2; byid[$1] = NR
+      if (substr($3, 1, 1) == "=") { dup[NR] = substr($3, 2); next }
+      js[NR] = $3; iv[NR] = $4; eq[NR] = $5; dt[NR] = $6; secs[NR] = $7; wrss[NR] = $8
+      trss[NR] = $9; note[NR] = $10; wsec[NR] = $11; jnote[NR] = $12 }
+    function rel(p) { if (index(p, ENVIRON["ROOT"] "/") == 1) p = substr(p, length(ENVIRON["ROOT"]) + 2); return p }
+    END {
+        printf "%-14s %-9s %-15s %-11s %7s  %s\n", "json", "iverilog", "equiv", "dot", "secs", "file"
+        for (r = 1; r <= NR; r++) {
+            s = (r in dup) ? byid[dup[r]] : r
+            tag = (r in dup) ? " (dup)" : ""
+            printf "%-14s %-9s %-15s %-11s %7s  %s%s\n", js[s], iv[s], eq[s], dt[s], (r in dup) ? "-" : secs[r], rel(path[r]), tag
+            tot++
+            cj[js[s]]++; ci[iv[s]]++; ce[eq[s]]++; cd[dt[s]]++
+            if (eq[s] == "excluded") excl[rel(path[r])] = note[s]
+            if (js[s] == "ref-excluded") jexcl[rel(path[r])] = jnote[s]
+            if (!(r in dup)) {
+                distinct++
+                if (secs[r] + 0 > maxs) { maxs = secs[r] + 0; maxf = rel(path[r]) }
+                if (wsec[r] + 0 > maxw) { maxw = wsec[r] + 0; maxwf = rel(path[r]) }
+                if (wrss[r] + 0 > maxr) { maxr = wrss[r] + 0; maxrf = rel(path[r]) }
+                if (trss[r] + 0 > maxt) { maxt = trss[r] + 0; maxtf = rel(path[r]) }
+            }
+        }
+        print ""
+        print "EXCLUDED FROM THE EQUIVALENCE STEP (equiv-check cannot model the golden)"
+        n = 0; for (p in excl) list[++n] = p
+        for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
+        for (i = 1; i <= n; i++) { m = excl[list[i]]; sub(/^equiv-check: [^ ]*: /, "", m); printf "  %s: %s\n", list[i], m }
+        print ""
+        print "EXCLUDED FROM THE JSON STEP (Yosys read_blif cannot read the golden)"
+        n = 0; for (p in jexcl) list[++n] = p
+        for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
+        for (i = 1; i <= n; i++) printf "  %s: %s\n", list[i], jexcl[list[i]]
+        print ""
+        print "SUMMARY"
+        printf "files: %d (%d distinct contents)\n", tot, distinct
+        printf "json: identical %d, ref-excluded %d, refused (multi-driver) %d, different %d, yosys-error %d, error %d, timeout %d, memlimit %d, ref-timeout %d, ref-memlimit %d, write failures %d\n",
+            cj["identical"], cj["ref-excluded"], cj["refused"], cj["different"], cj["yosys-error"], cj["error"], cj["timeout"], cj["memlimit"], cj["ref-timeout"], cj["ref-memlimit"], cj["WRITEFAIL"]
+        printf "verilog iverilog: ok %d, FAIL %d, timeout %d, memlimit %d\n", ci["ok"], ci["FAIL"], ci["timeout"], ci["memlimit"]
+        printf "verilog equiv: equivalent %d, excluded %d, NOT-equivalent %d, yosys-error %d, error %d, timeout %d, memlimit %d\n",
+            ce["equivalent"], ce["excluded"], ce["NOT-equivalent"], ce["yosys-error"], ce["error"], ce["timeout"], ce["memlimit"]
+        printf "dot: ok %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
+        printf "slowest file: %s (%.1f s total)\n", maxf, maxs
+        printf "odin3-write (read + three writers) slowest: %s (%.1f s)\n", maxwf, maxw
+        printf "peak RSS: odin3-write %.0f MB (%s); tools %.0f MB (%s)\n", maxr / 1024, maxrf, maxt / 1024, maxtf
+        fail = cj["different"] + cj["yosys-error"] + cj["error"] + cj["WRITEFAIL"] + ci["FAIL"] + ce["NOT-equivalent"] + ce["yosys-error"] + ce["error"] + cd["FAIL"]
+        capped = cj["timeout"] + cj["memlimit"] + cj["ref-timeout"] + cj["ref-memlimit"] + ci["timeout"] + ci["memlimit"] + ce["timeout"] + ce["memlimit"] + cd["timeout"] + cd["memlimit"]
+        if (ENVIRON["STRICT"] == "1") fail += capped
+        print (fail ? "RESULT: FAIL (" fail " failing items)" : "RESULT: PASS")
+        exit(fail ? 1 : 0)
+    }'
+}
+
+find_tools() {
+    local fixtures=$1 missing=""
+    if [ -z "$WC_YOSYS" ]; then
+        if [ -n "${ODIN3_YOSYS:-}" ]; then WC_YOSYS=$ODIN3_YOSYS
+        elif [ -x "$HOME/odin3-ws/external/yosys/build/yosys" ]; then WC_YOSYS=$HOME/odin3-ws/external/yosys/build/yosys
+        else WC_YOSYS=$(command -v yosys || true); fi
+    fi
+    WC_IVERILOG=$(command -v iverilog || true)
+    WC_DOT=$(command -v dot || true)
+    [ -n "$WC_YOSYS" ] && [ -x "$WC_YOSYS" ] || missing="$missing yosys"
+    [ -n "$WC_IVERILOG" ] || missing="$missing iverilog"
+    [ -n "$WC_DOT" ] || missing="$missing dot"
+    [ -x /usr/bin/time ] || missing="$missing /usr/bin/time"
+    if [ -n "$missing" ]; then
+        echo "writer-check: missing tools:$missing" >&2
+        if [ -n "$fixtures" ]; then exit 77; fi
+        exit 2
+    fi
+}
+
+main() {
+    local jobs=2 root="" fixtures="" out="" keep=0 order=n
+    WC_WRITE=$REPO/build/release/odin3-write
+    [ -x "$WC_WRITE" ] || WC_WRITE=$REPO/build/debug/odin3-write
+    WC_YOSYS=""
+    WC_NC=$REPO/tools/netlist-compare/netlist-compare
+    WC_EC=$REPO/tools/equiv-check/equiv-check
+    WC_TIMEOUT=600
+    WC_MEM_KB=$((6 * 1024 * 1024))
+    WC_MAX_NODES=2000
+    while [ $# -gt 0 ]; do
+        case $1 in
+        -j) jobs=${2:?}; shift 2 ;;
+        -t) WC_TIMEOUT=${2:?}; shift 2 ;;
+        -m) WC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
+        --write) WC_WRITE=${2:?}; shift 2 ;;
+        --yosys) WC_YOSYS=${2:?}; shift 2 ;;
+        --max-nodes) WC_MAX_NODES=${2:?}; shift 2 ;;
+        --out) out=${2:?}; shift 2 ;;
+        --keep) keep=1; shift ;;
+        --largest-first) order=nr; shift ;;
+        --fixtures) fixtures=${2:?}; shift 2 ;;
+        -h | --help) usage ;;
+        -*) usage ;;
+        *) [ -z "$root" ] || usage; root=$1; shift ;;
+        esac
+    done
+    case $jobs in 1 | 2) ;; *) echo "writer-check: -j must be 1 or 2 (shared machine)" >&2; exit 2 ;; esac
+    [ -z "$fixtures" ] || [ -z "$root" ] || usage
+    find_tools "$fixtures"
+    [ -x "$WC_WRITE" ] || { echo "writer-check: no driver at $WC_WRITE (build odin3-write)" >&2; exit 2; }
+    if [ -n "$fixtures" ]; then root=$fixtures; else root=${root:-$HOME/odin3-ws/golden}; fi
+    [ -d "$root" ] || { echo "writer-check: not a directory: $root" >&2; exit 2; }
+    [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
+    mkdir -p "$out/res" "$out/tmp"
+    rm -f "$out"/res/* 2>/dev/null || true
+    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_TIMEOUT WC_MEM_KB WC_MAX_NODES
+    export WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
+    # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).
+    if ldd "${WC_REAL_WRITE:-$WC_WRITE}" 2>/dev/null | grep -q -E 'libasan|libclang_rt.asan'; then
+        WC_WRITE_ASAN=1
+    fi
+    export -f now capped rss_of note_rss fail_word stubs is_multi_driver compare drop_self_buffers sort_statements json_gate \
+        verilog_gate dot_gate worker
+
+    local list=$out/list.tsv
+    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
+        while IFS=$'\t' read -r _ path; do
+            if [ -z "$fixtures" ]; then
+                grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
+            fi
+            printf '%s\t%s\n' "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
+        done | awk -F '\t' '
+            { id = NR; sha[id] = $1; path[id] = $2; if (!($1 in first)) first[$1] = id }
+            END {
+                for (i = 1; i <= NR; i++) if (first[sha[i]] == i) print i "\t" path[i] "\t-"
+                for (i = 1; i <= NR; i++) if (first[sha[i]] != i) print i "\t" path[i] "\t" first[sha[i]]
+            }' >"$list"
+    if [ ! -s "$list" ]; then echo "writer-check: no BLIF files under $root" >&2; exit 2; fi
+    echo "writer-check: $(wc -l <"$list") files, -j $jobs, timeout ${WC_TIMEOUT}s, work dir $out" >&2
+    xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
+    local rc=0
+    set +e
+    STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0) report "$out/res" "$root" | tee "$out/report.txt"
+    rc=${PIPESTATUS[0]}
+    set -e
+    [ "$keep" = 1 ] || rm -rf "$out/tmp"
+    return "$rc"
+}
+
+main "$@"

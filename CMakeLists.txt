@@ -136,6 +136,11 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
+add_executable(odin3-write tools/writer-check/odin3-write.c)
+target_include_directories(odin3-write PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-write PRIVATE odin3_core odin3_flags)
+
 # --- odin3-blif-rt: BLIF round-trip driver (used by tools/blif-roundtrip/blif-roundtrip) --------
 add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -233,6 +238,29 @@ if(BUILD_TESTING)
                      --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                      --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/techlib)
     set_tests_properties(blif_roundtrip_techlib PROPERTIES LABELS unit)
+
+    # Writer validation over the fixtures (Yosys, Icarus, Graphviz, ABC); exit 77 (skipped)
+    # when a tool is missing, as in CI.
+    set(_wc_args --write $<TARGET_FILE:odin3-write> --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    if(ODIN3_YOSYS_EXE)
+        list(PREPEND _wc_args --yosys ${ODIN3_YOSYS_EXE})
+    endif()
+    set(_wc_env "")
+    if(ODIN3_WITH_ABC)
+        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:abc>")
+    endif()
+    add_test(NAME writer_check_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args})
+    set_tests_properties(writer_check_fixtures PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_wc_env}")
+    # Negative check: damaged JSON and Verilog must be caught by both gates.
+    add_test(NAME writer_check_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+    set_tests_properties(writer_check_detects_corruption PROPERTIES LABELS unit
+        SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
+        PASS_REGULAR_EXPRESSION "json: identical [0-9]+, ref-excluded [0-9]+, refused \\(multi-driver\\) [0-9]+, different [1-9][^\n]*\nverilog iverilog[^\n]*\nverilog equiv: equivalent [0-9]+, excluded [0-9]+, NOT-equivalent [1-9]"
+        ENVIRONMENT "${_wc_env};WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
