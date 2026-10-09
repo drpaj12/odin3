@@ -122,15 +122,25 @@ static double now_ms(void) {
     return (double)ts.tv_sec * MS_PER_S + (double)ts.tv_nsec / NS_PER_MS;
 }
 
-/* The design check around a pass; when names the side ("before" or "after"). */
-static odin3_status check_around(odin3_design *design, const char *pass, const char *when) {
+/*
+ * The design check before or after a pass. The check before reports errors only (its warnings are
+ * counted, not delivered): the check after the previous pass already showed them, so a warning is
+ * printed once per pass, not twice. The caller's log level is restored afterwards.
+ */
+static odin3_status check_around(odin3_design *design, const char *pass, bool before) {
     if (!ALWAYS_CHECK && !g_options.check) {
         return ODIN3_OK;
     }
+    odin3_log_level level = odin3_log_get_level();
+    if (before && level > ODIN3_LOG_ERROR) {
+        (void)odin3_log_set_level(ODIN3_LOG_ERROR);
+    }
     odin3_status st =
         odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE});
+    (void)odin3_log_set_level(level);
     if (st == ODIN3_ERR_CHECK) {
-        odin3_log(ODIN3_LOG_ERROR, "pass %s: check %s the pass failed", pass, when);
+        odin3_log(ODIN3_LOG_ERROR, "pass %s: check %s the pass failed", pass,
+                  before ? "before" : "after");
     }
     return st;
 }
@@ -150,7 +160,7 @@ static odin3_status run_checked(odin3_pass_ctx *ctx, const odin3_pass_def *def, 
     if (st != ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "pass %s: failed: %s", def->name, odin3_status_string(st));
     }
-    odin3_status post = check_around(ctx->design, def->name, "after");
+    odin3_status post = check_around(ctx->design, def->name, false);
     return st != ODIN3_OK ? st : post;
 }
 
@@ -163,7 +173,7 @@ static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odi
                   odin3_status_string(st));
         return st;
     }
-    st = check_around(design, def->name, "before");
+    st = check_around(design, def->name, true);
     if (st == ODIN3_OK) {
         st = run_checked(&ctx, def, args);
     }

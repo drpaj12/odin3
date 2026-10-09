@@ -1,15 +1,10 @@
 /*
  * main.c — the odin3 command-line driver. The only place exit codes and
  * process-level output policy live (spec §15.1: no exit() outside cli/).
+ * Uses only the public ABI (odin3.h): it links libodin3, so plugins it loads
+ * register into the same pass registry.
  */
-#include "ir/design.h"
-#include "ir/ids.h"
-#include "ir/module.h"
 #include "odin3/odin3.h"
-#include "passes/manager.h"
-#include "util/hash.h"
-#include "util/log.h"
-#include "util/str.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -18,6 +13,9 @@
 
 /* Process exit codes: success, a failed pass or script, a command-line error. */
 enum { EXIT_OK = 0, EXIT_FAIL = 1, EXIT_USAGE = 2 };
+
+/* A log message the CLI formats itself (odin3_log_write cuts longer ones the same way). */
+enum { MSG_BUF = 1024 };
 
 static void print_usage(FILE *out) {
     (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
@@ -34,8 +32,10 @@ static void print_usage(FILE *out) {
                 "\n"
                 "passes:\n",
                 out);
-    for (uint32_t i = 0; i < odin3_pass_count(); i++) {
-        (void)fprintf(out, "  %s\n", odin3_pass_at(i)->help);
+    for (uint32_t i = 0; i < odin3_pass_get_count(); i++) {
+        const char *help = "";
+        (void)odin3_pass_get_help(i, &help);
+        (void)fprintf(out, "  %s\n", help);
     }
 }
 
@@ -52,9 +52,10 @@ static int load_plugin(const char *path) {
 
 /* What the first argument scan found. */
 typedef struct cli_state {
-    odin3_pass_options opts;
-    bool scripts; /* a -p or a script file is given */
-    bool help;    /* --help: printed after the scan (plugin passes listed), nothing runs */
+    bool check;      /* --check */
+    const char *top; /* --top NAME, NULL for none */
+    bool scripts;    /* a -p or a script file is given */
+    bool help;       /* --help: printed after the scan (plugin passes listed), nothing runs */
 } cli_state;
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
@@ -85,13 +86,13 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
     } else if (strcmp(arg, "--help") == 0) {
         state->help = true;
     } else if (strcmp(arg, "--check") == 0) {
-        state->opts.check = true;
+        state->check = true;
     } else if (option_value(argv, argc, at, &value)) {
         if (strcmp(arg, "--plugin") == 0) {
             return load_plugin(value);
         }
         state->scripts |= strcmp(arg, "-p") == 0;
-        state->opts.top = strcmp(arg, "--top") == 0 ? value : state->opts.top;
+        state->top = strcmp(arg, "--top") == 0 ? value : state->top;
     } else if (arg[0] == '-') {
         return usage_error(arg);
     } else {
@@ -110,14 +111,14 @@ static odin3_status script_arg(char **argv, int argc, int *at, odin3_design *des
             return ODIN3_OK;
         }
         odin3_script_src src = {"-p", ODIN3_SCRIPT_BY_COMMAND};
-        return design == NULL ? odin3_pass_resolve_script(odin3_bytes_cstr(value), src)
-                              : odin3_pass_run_script(design, odin3_bytes_cstr(value), src);
+        return design == NULL ? odin3_script_resolve(value, src)
+                              : odin3_design_run_script(design, value, src);
     }
     if (arg[0] == '-') {
         return ODIN3_OK;
     }
-    return design == NULL ? odin3_pass_resolve_script_file(arg)
-                          : odin3_pass_run_script_file(design, arg);
+    return design == NULL ? odin3_script_resolve_file(arg)
+                          : odin3_design_run_script_file(design, arg);
 }
 
 /* Every -p and script file in command-line order (see script_arg); stops at the first failure. */
@@ -130,14 +131,17 @@ static odin3_status each_script(char **argv, int argc, odin3_design *design) {
 }
 
 /* A --top that no pass applied (no read_blif or hierarchy ran) is reported, not ignored. */
-static void warn_unapplied_top(odin3_design *design, const char *top) {
-    odin3_module_id id = odin3_design_top(design);
-    const char *name = odin3_module_valid(id)
-                           ? odin3_strtab_get(odin3_design_strtab(design),
-                                              odin3_module_name(odin3_module_get(design, id)))
-                           : NULL;
+static void warn_unapplied_top(const odin3_design *design, const char *top) {
+    uint32_t id = 0;
+    const char *name = NULL;
+    if (odin3_design_get_top_module(design, &id) == ODIN3_OK && id != 0) {
+        (void)odin3_module_get_name(design, id, &name);
+    }
     if (top != NULL && (name == NULL || strcmp(name, top) != 0)) {
-        odin3_log(ODIN3_LOG_WARN, "--top %s was not applied (no read_blif or hierarchy ran)", top);
+        char msg[MSG_BUF];
+        (void)snprintf(msg, sizeof msg, "--top %s was not applied (no read_blif or hierarchy ran)",
+                       top);
+        (void)odin3_log_write(ODIN3_LOG_WARN, msg);
     }
 }
 
@@ -174,6 +178,10 @@ int main(int argc, char **argv) {
     if (!state.scripts || state.help) {
         return EXIT_OK;
     }
-    odin3_pass_set_options(state.opts);
-    return run_scripts(argv, argc, state.opts.top);
+    odin3_pass_set_check(state.check);
+    if (odin3_pass_set_top(state.top) != ODIN3_OK) {
+        (void)fprintf(stderr, "odin3: out of memory\n");
+        return EXIT_FAIL;
+    }
+    return run_scripts(argv, argc, state.top);
 }

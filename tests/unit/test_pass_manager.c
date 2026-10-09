@@ -42,6 +42,11 @@ static const char *const TWO_TOPS = ".model a\n.inputs x\n.outputs y\n.names x y
 static const char *const CYCLE = ".model a\n.inputs x\n.outputs y\n.subckt b i=x o=y\n.end\n"
                                  ".model b\n.inputs i\n.outputs o\n.subckt a x=i y=o\n.end\n";
 
+/* A black box whose output z is left open: check rule 11 warns, nothing fails. */
+static const char *const OPEN_OUTPUT = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n"
+                                       ".subckt bb x=a\n.end\n"
+                                       ".model bb\n.inputs x\n.outputs z\n.blackbox\n.end\n";
+
 static odin3_design *design;
 static char log_text[LOG_CAP];
 static size_t log_len;
@@ -303,6 +308,34 @@ static void test_debug_always_checks(void) {
     read_text(LEAF_ROOT);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run("t_break", ""));
 #endif
+}
+
+/* Count of needle in the captured log. */
+static uint32_t log_count_of(const char *needle) {
+    uint32_t count = 0;
+    for (const char *at = strstr(log_text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
+}
+
+/* The pre-check reports only errors: a check warning is printed once per pass (by the check
+ * after it), not twice; the log level is restored after the pre-check. */
+static void test_check_warnings_once_per_pass(void) {
+    read_text(OPEN_OUTPUT);
+    odin3_pass_set_options((odin3_pass_options){.check = true});
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("stats", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, log_count_of("W check: top: rule 11:"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_LOG_DEBUG, odin3_log_get_level());
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("stats; stats"));
+    TEST_ASSERT_EQUAL_UINT32(2, log_count_of("W check: top: rule 11:"));
+    odin3_log_set_level(ODIN3_LOG_ERROR); /* a quieter caller level is kept, not raised */
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("stats", ""));
+    TEST_ASSERT_EQUAL_UINT32(0, log_count_of("W check:"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_LOG_ERROR, odin3_log_get_level());
 }
 
 static void test_no_check_when_off_in_release(void) {
@@ -810,5 +843,6 @@ int main(void) {
     RUN_TEST(test_failed_pass_is_post_checked);
     RUN_TEST(test_script_crlf);
     RUN_TEST(test_resolve_runs_nothing);
+    RUN_TEST(test_check_warnings_once_per_pass);
     return UNITY_END();
 }

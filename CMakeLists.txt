@@ -35,6 +35,14 @@ endif()
 add_library(odin3_core OBJECT
     src/api/version.c
     src/api/plugin.c
+    src/api/common.c
+    src/api/design.c
+    src/api/pass.c
+    src/api/module.c
+    src/api/node.c
+    src/api/net.c
+    src/api/attr.c
+    src/api/log.c
     src/util/alloc.c
     src/util/arena.c
     src/util/hash.c
@@ -118,11 +126,10 @@ target_include_directories(libodin3 PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
 
 # --- odin3: the CLI -------------------------------------------------------------
-# Linked against the core objects (the pass manager is not in the public ABI yet; 1D T2 adds it,
-# and the CLI then moves back to libodin3 so plugins and the CLI share one pass registry).
+# Linked against libodin3 and using only odin3.h, so plugins it loads and the CLI share one pass
+# registry (and one cell-type registry).
 add_executable(odin3 src/cli/main.c)
-target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(odin3 PRIVATE odin3_core odin3_flags)
+target_link_libraries(odin3 PRIVATE libodin3 odin3_flags)
 
 # --- Plugins --------------------------------------------------------------------
 add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
@@ -248,6 +255,15 @@ if(BUILD_TESTING)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
 
+    # The IR ABI walked like a plugin would: only libodin3.so and odin3.h.
+    add_executable(test_abi_ir tests/unit/test_abi_ir.c)
+    target_link_libraries(test_abi_ir PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_abi_ir PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    add_test(NAME test_abi_ir COMMAND test_abi_ir)
+    set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
+    odin3_add_unit_test(test_abi_values)
+
     add_test(NAME blif_roundtrip_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
                      --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
@@ -312,7 +328,7 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 2\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 3\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).

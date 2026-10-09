@@ -11,16 +11,11 @@
 
 #include <stdint.h>
 
-typedef struct odin3_design odin3_design; /* opaque */
-
 /*
- * New design whose cell-type table holds every process-global definition registered so far
- * (built-ins first, then plugin additions in registration order; IR-11). NULL on out of memory.
+ * odin3_design (opaque), odin3_design_create and odin3_design_destroy are part of the public ABI
+ * and declared in odin3.h: a new design's cell-type table holds every process-global definition
+ * registered so far (built-ins first, then plugin additions in registration order; IR-11).
  */
-odin3_design *odin3_design_create(void);
-
-/* Frees the design and everything it owns. NULL is a no-op. */
-void odin3_design_destroy(odin3_design *design);
 
 /* The design-global string table (names, string parameter values). */
 odin3_strtab *odin3_design_strtab(const odin3_design *design);

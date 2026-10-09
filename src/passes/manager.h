@@ -61,7 +61,8 @@ odin3_pass_options odin3_pass_get_options(void);
 
 /*
  * Runs the pass named name on design: opens a provenance pass run named after the pass
- * (odin3_pass_run_begin), checks the design (FULL, when checking is on; see odin3_pass_options),
+ * (odin3_pass_run_begin), checks the design (FULL, when checking is on; see odin3_pass_options;
+ * this check reports errors only, so the warnings of the check after a pass show once per pass),
  * runs the pass, checks again (also after a failed pass: it must leave valid IR), and logs
  * "pass <name>: <ms> ms" at ODIN3_LOG_INFO (checks included). args must hold closed double quotes
  * (see odin3_pass_arg_next). Returns the pass's status when it fails ("pass <name>: failed:
@@ -74,13 +75,8 @@ odin3_pass_options odin3_pass_get_options(void);
  */
 odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes args);
 
-/* How script errors are located: "origin:line: …" (a file) or "origin: command <k>: …" (-p). */
-typedef enum odin3_script_loc { ODIN3_SCRIPT_BY_LINE, ODIN3_SCRIPT_BY_COMMAND } odin3_script_loc;
-
-typedef struct odin3_script_src {
-    const char *origin; /* the script's path, or "-p" */
-    odin3_script_loc loc;
-} odin3_script_src;
+/* odin3_script_loc and odin3_script_src (where a script's errors are located) are public: see
+ * odin3.h. */
 
 /*
  * Runs a pass script on design. Commands are separated by ';' or a newline; '#' starts a comment

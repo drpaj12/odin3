@@ -30,18 +30,7 @@ enum { ODIN3_READER_MAX_WIDTH = 1 << 20 };
  */
 enum { ODIN3_READER_MAX_TOTAL_WIDTH = 1 << 22 };
 
-/* Direction as seen from the cell: a $port_in's pin is OUT (it drives the module's net). */
-typedef enum odin3_dir { ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT } odin3_dir;
-
-/* IR-9 granularity tags. */
-typedef enum odin3_granularity {
-    ODIN3_GRAN_WORD,
-    ODIN3_GRAN_BIT,
-    ODIN3_GRAN_HARD,
-    ODIN3_GRAN_BLACKBOX,
-    ODIN3_GRAN_MODULE,
-    ODIN3_GRAN_PORT
-} odin3_granularity;
+/* odin3_dir and odin3_granularity (IR-9) are public: see odin3.h. */
 
 /*
  * Definition flags. TRISTATE: output pins may share a net with other tristate/inout drivers (a

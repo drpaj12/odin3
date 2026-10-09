@@ -1,13 +1,14 @@
-/* design.c — design create/destroy, the design-global string table, top module, prov store. */
+/* design.c — design create/destroy (exported), the design-global strtab, top module, prov. */
 #include "ir/design.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "util/alloc.h"
 #include "util/arena.h"
+#include "util/attr.h"
 #include "util/log.h"
 #include "util/str.h"
 
-odin3_design *odin3_design_create(void) {
+ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     odin3_design *design = odin3_util_calloc(sizeof *design);
     if (design == NULL) {
         return NULL;
@@ -23,7 +24,7 @@ odin3_design *odin3_design_create(void) {
     return design;
 }
 
-void odin3_design_destroy(odin3_design *design) {
+ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
     }

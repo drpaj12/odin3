@@ -10,12 +10,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum odin3_value_kind {
-    ODIN3_VAL_INT,
-    ODIN3_VAL_BITS,
-    ODIN3_VAL_STRING,
-    ODIN3_VAL_COVER
-} odin3_value_kind;
+/* odin3_value_kind is public: see odin3.h. */
 
 typedef enum odin3_bit { ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_X, ODIN3_BIT_Z } odin3_bit;
 
