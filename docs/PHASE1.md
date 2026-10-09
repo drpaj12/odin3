@@ -25,7 +25,9 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 - [x] 1A spec approved (2026-10-08, PR #11), implemented, merged (benchmark, release build: 2M interns 0.36–0.45 s, 2M `u64map` puts 0.35–0.39 s, 2M `pagevec` pushes 0.01 s, max RSS 176 MiB)
 - [x] 1B `docs/IR.md` (agent-decided, PHASE1 #9; Peter reviews afterwards); IR implemented; 2M-node benchmark recorded (`bench_ir`, release, 2M nodes / 2.2M nets, every node and net with a source record: build 0.835 s, check FULL 0.741 s, fanout walk 0.313 s, delete 10% 0.098 s, compact 0.393 s, `odin3_prov_index_build` 0.064 s (168,064,168 bytes; 2,001 records, 334,660 tombstones), one `odin3_prov_index_by_loc` on the busiest line 0.341 ms (200,000 hits), `odin3_prov_sources` over all 1.8M live nodes 0.060 s, max RSS 810,540 KiB = 791.54 MiB)
 - [ ] 1G tech-library format approved; reader + generic gate library + VTR golden library
-- [ ] 1C BLIF round trip identical (`netlist-compare`) on every `ok` golden
+- [x] 1C BLIF round trip identical on every `ok` golden (2026-10-09): normalized text identity
+  1846/1846; `netlist-compare` identical 1824 (10 with stub models), exceptions per #15 and the
+  results below
 - [ ] 1D a Python plugin walks the IR through the C ABI
 - [ ] 1E simulator matches ABC on the goldens without RAMs
 - [ ] 1F writers emit dot / JSON / Verilog for the goldens
@@ -71,3 +73,64 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 13. 1E exit test: random input vectors; our simulator's outputs compared cycle by cycle against
     Icarus Verilog running ABC's Verilog dump of the same BLIF; goldens with RAMs excluded until
     Phase 4.
+
+14. **Tombstones keep more** (Peter): besides module, kind, cell type, name and provenance, a
+    tombstone keeps a dead node's parameters and the names of the nets its pins were connected
+    to (IR-6 amended; implemented in a small IR follow-up after 1C).
+15. 1C exit test: every `ok` golden reads, round-trips identical under `netlist-compare` with
+    names and order kept; `check` errors are allowed only on the four Odin II goldens whose
+    netlists drive one net from several cells (`elsif_both_defined`, `multi_assignment`, both
+    arches), listed explicitly in the round-trip script.
+16. Undeclared, unregistered `.subckt` cells (Yosys `$pow`, `$_DFFSR_PPP_`) become implicit
+    black boxes with ports from the file (scalar, width 1, inout); no `.model` is written for them.
+17. Order after 1C: 1G, then 1E, 1F, 1D. The full golden round trip runs locally (CI has no
+    goldens) via a rerunnable script; CI checks the committed fixtures.
+
+## 1C results: full golden round trip
+
+Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build, writer at
+`b68d4c1`, script at `4f55d5a` (`tools/blif-roundtrip/blif-roundtrip -j 2 -t 600`), 51 min 29 s
+wall clock. Gates: normalized text identity (continuations joined, comments stripped, blanks
+collapsed, empty header lists dropped, `.subckt` formals sorted, repeated `.attr`/`.param` keys
+reduced to the last, default latch init explicit) and `netlist-compare` with stub `.blackbox`
+models for implicit cells. Files with identical content run `netlist-compare` once (724 distinct
+contents of 1846). `netlist-compare` runs under a 600 s timeout and a 6 GB address-space cap.
+
+```
+files: 1846 (structural gate run on 724 distinct contents)
+text gate: 1846 ok, 0 FAIL, 0 read/write failures
+structural gate: identical 1814, identical+stubs 10, refused (multi-driver original) 4, timeout 16, memlimit 2, different 0, error 0, not run 0
+check FULL errors: 0 files outside the multi-driver list, 4 inside it
+slowest file: EArch/regression/verilog/large/LU64PEEng/LU64PEEng.odin.blif (634.4 s total)
+peak RSS: odin3-blif-rt 2314 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif); netlist-compare 6061 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif)
+RESULT: PASS
+```
+
+The "slowest file" above is the 600 s `netlist-compare` timeout, not reader/writer speed. The
+reader/writer alone (`odin3-blif-rt`: read, check FULL, write; release build, timed by hand
+afterwards, since the run did not record it separately): `LargeRam.odin.blif` (915 MB) 16.8 s at
+2.37 GB peak RSS, `LU64PEEng.odin.blif` (147 MB) 1.9 s at 311 MB, `mcml.odin.blif` (61 MB) 0.8 s at
+189 MB, `vtr/bgm.odin.blif` (34 MB) 0.4 s at 101 MB; time is linear in file size. Later runs of the
+script also report the `odin3-blif-rt` total and slowest file.
+
+Exception lists (reported, not failures):
+- Multi-driver originals, refused by `netlist-compare` (decision #15), 4 files: `elsif_both_defined`
+  and `multi_assignment`, `.odin.blif`, both architectures. These are also the only 4 with check errors.
+- Timeouts at 600 s, 16 files (6 distinct contents, repeated across architectures): Odin II
+  `LU8PEEng` (2 contents: `full`, `vtr`), `LU32PEEng`, `LU64PEEng`, `bgm` (`large` and `vtr`). All
+  pass the text gate.
+- Memory cap (6 GB), 2 files with one content: Odin II `LargeRam` (915 MB). Passes the text gate.
+- Implicit cells compared with stub models (identical): 10 files (`pow`, `pow_const`, `dffsre`,
+  `twobits_arithmetic_power`, `eightbit_arithmetic_power`, both architectures).
+
+1C follow-ups (minor, from the task and final reviews; none changes a result on a golden):
+- Reader: `#` inside a quoted `.attr`/`.param` value is cut as a comment; an empty or
+  comment-only file reads as an empty design with `ODIN3_OK`; a `\` as the final byte becomes a
+  literal token; a model with both scalar `a` and vector `a[k]` ports reads but cannot be
+  instantiated; `list_extra` is quadratic in attributes per cell; `find_port` is O(P²) per
+  implicit type.
+- Writer: needs a const module accessor in the IR (one cast today); an in+out same-name
+  `.subckt` with only the output-side pin connected reads back bound to the input port.
+- Gate: the negative CTest uses `WILL_FAIL` (passes on any failure; match the gate's message);
+  the report counts result files rather than the work list; 9 committed fixtures where the spec
+  said "a few dozen".

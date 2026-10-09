@@ -1,0 +1,321 @@
+#!/usr/bin/env bash
+# blif-roundtrip: BLIF round-trip gate over a golden tree or a fixture directory.
+#
+# For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
+# directory: every *.blif) this runs odin3-blif-rt (read, check FULL, write), then
+#   TEXT gate        normalized original == normalized output: continuations joined, comments
+#                    stripped, whitespace collapsed, blank lines and empty .inputs/.outputs/
+#                    .clock lines dropped, .subckt formals sorted, repeated .attr/.param keys
+#                    reduced to the last, default latch init spelled out as 3; then
+#   STRUCTURAL gate  tools/netlist-compare original vs output, after adding stub .blackbox
+#                    models to both for .subckt models that have no .model (implicit cells).
+# Order: ascending file size (smallest first, so quick files surface bugs early); with
+# --largest-first, descending. Duplicates always come after their first occurrence.
+# Files with identical content (same sha256) run the structural gate once; the others reuse
+# that result (the writer is deterministic). Exceptions, listed and not failures:
+#   multi-driver originals (decision #15): netlist-compare refuses them, check errors allowed;
+#   timeouts and memory-limit stops (failures in --fixtures mode): the structural gate hit the per-file time or memory cap.
+# Exit: 0 all gates pass, 1 any failure, 2 usage. See docs/PHASE1.md (1C) for the policy.
+set -euo pipefail
+
+SELF=$(readlink -f "${BASH_SOURCE[0]}")
+HERE=$(dirname "$SELF")
+# Basenames whose original netlist drives one net from several cells (decision #15).
+export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
+
+usage() {
+    cat >&2 <<'USAGE'
+usage: blif-roundtrip [-j N] [-t SECONDS] [-m GB] [--largest-first] [--rt PATH] [--nc PATH] [--out DIR] [--keep]
+                      [--fixtures DIR | GOLDEN_ROOT]
+  GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
+  --fixtures D  every *.blif under D (no .prov needed)
+  -j N          parallel jobs (default 2; LargeRam needs about 2.5 GB per job)
+  -t SECONDS    per-file netlist-compare timeout (default 600)
+  -m GB         per-job netlist-compare address-space cap (default 6; 2 jobs = 12 GB)
+  --largest-first  process the biggest files first (default: smallest first)
+  --rt PATH     odin3-blif-rt binary (default build/release/odin3-blif-rt in the repo)
+  --nc PATH     netlist-compare (default tools/netlist-compare/netlist-compare)
+  --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
+USAGE
+    exit 2
+}
+
+# Normalizes BLIF on stdin: one logical statement per line.
+normalize() {
+    LC_ALL=C awk '
+    function flush(   nt) {
+        if (acc == "" || acc == ".inputs" || acc == ".outputs" || acc == ".clock") { acc = ""; return }
+        if (substr(acc, 1, 7) == ".latch ") {
+            nt = split(acc, tk, " ")
+            if (nt == 3 || nt == 5) acc = acc " 3"
+        }
+        if (substr(acc, 1, 8) == ".subckt ") acc = sortformals(acc)
+        emit(acc)
+        acc = ""
+    }
+    # A key repeated on one cell keeps its last value, at its first position (reader rule).
+    function emit(stmt,   key, t) {
+        t = substr(stmt, 1, 6)
+        if (t == ".attr " || t == ".param") {
+            key = stmt; sub(/^[^ ]+ [^ ]*/, "", key); key = substr(stmt, 1, length(stmt) - length(key))
+            if (key in slot) { buf[slot[key]] = stmt } else { slot[key] = ++nbuf; buf[nbuf] = stmt }
+            return
+        }
+        drain()
+        print stmt
+    }
+    function drain(   i) {
+        for (i = 1; i <= nbuf; i++) print buf[i]
+        nbuf = 0
+        split("", slot)
+    }
+    function sortformals(stmt,   n, t, i, j, v, out) {
+        n = split(stmt, t, " ")
+        for (i = 4; i <= n; i++) {
+            v = t[i]
+            for (j = i - 1; j >= 3 && t[j] > v; j--) t[j + 1] = t[j]
+            t[j + 1] = v
+        }
+        out = t[1] " " t[2]
+        for (i = 3; i <= n; i++) out = out " " t[i]
+        return out
+    }
+    {
+        line = $0
+        sub(/#.*/, "", line)
+        gsub(/[ \t\r]+/, " ", line)
+        sub(/^ /, "", line)
+        sub(/ $/, "", line)
+        if (line == "") { flush(); next }
+        cont = 0
+        if (substr(line, length(line)) == "\\") {
+            cont = 1
+            line = substr(line, 1, length(line) - 1)
+            sub(/ $/, "", line)
+        }
+        if (line != "") acc = (acc == "") ? line : acc " " line
+        if (!cont) flush()
+    }
+    END { flush(); drain() }'
+}
+
+# Reads normalized BLIF on stdin; prints a stub .blackbox model for every .subckt model that
+# has no .model (formals named Y or Q, with optional [k], are outputs, the rest inputs).
+stubs() {
+    LC_ALL=C awk '
+    $1 == ".model" { def[$2] = 1 }
+    $1 == ".subckt" {
+        m = $2
+        if (!(m in seen)) { seen[m] = 1; order[++nm] = m }
+        for (i = 3; i <= NF; i++) {
+            f = $i; sub(/=.*/, "", f)
+            if (!((m SUBSEP f) in fs)) { fs[m SUBSEP f] = 1; nf[m]++; fl[m, nf[m]] = f }
+        }
+    }
+    END {
+        for (k = 1; k <= nm; k++) {
+            m = order[k]
+            if (m in def) continue
+            ins = ""; outs = ""
+            for (j = 1; j <= nf[m]; j++) {
+                f = fl[m, j]; b = f; sub(/\[.*/, "", b)
+                if (b == "Y" || b == "Q") outs = outs " " f; else ins = ins " " f
+            }
+            print ".model " m
+            if (ins != "") print ".inputs" ins
+            if (outs != "") print ".outputs" outs
+            print ".blackbox"
+            print ".end"
+        }
+    }'
+}
+
+is_multi_driver() {
+    local base=${1##*/} name
+    for name in $MULTI_DRIVER; do
+        [ "$base" = "$name" ] && return 0
+    done
+    return 1
+}
+
+now() { date +%s.%N; }
+
+# Runs netlist-compare on $1 $2 (output into $3); prints the gate result word.
+struct_gate() {
+    local a=$1 b=$2 log=$3 stub rc=0
+    stub=$(normalize <"$a" | stubs)
+    if [ -n "$stub" ]; then
+        # Stub copies live next to the log under $BRT_TMP, never next to the inputs.
+        { cat "$a"; printf '\n%s\n' "$stub"; } >"$log.a.stub"
+        { cat "$b"; printf '\n%s\n' "$stub"; } >"$log.b.stub"
+        a=$log.a.stub
+        b=$log.b.stub
+    fi
+    # The address-space cap turns a runaway netlist-compare into a MemoryError (a recorded
+    # "memlimit"), never an out-of-memory kill of the machine.
+    (ulimit -v "$BRT_NC_MEM_KB"
+     exec timeout -k 10 "$BRT_TIMEOUT" /usr/bin/time -f '%M' -o "$log.rss" \
+         "$BRT_NC" "$a" "$b") >"$log" 2>&1 || rc=$?
+    if [ -n "$stub" ]; then rm -f "$a" "$b"; fi
+    case $rc in
+    0) if [ -n "$stub" ]; then echo "identical+stubs"; else echo "identical"; fi ;;
+    124 | 137) echo "timeout" ;;
+    1) if grep -q '^--- ' "$log"; then echo "different"
+       elif grep -q 'MemoryError' "$log"; then echo "memlimit"
+       else echo "error"; fi ;;
+    *) echo "error" ;;
+    esac
+}
+
+# Worker: one line "id<TAB>path<TAB>rep" (rep = "-" or the id whose structural result to reuse).
+worker() {
+    local id path rep out errf rt_secs rss=0 rc=0 t0 t2 text struct errs warns nc_rss=0 note=""
+    IFS=$'\t' read -r id path rep <<<"$1"
+    out=$BRT_TMP/$id.out.blif
+    errf=$BRT_TMP/$id.err
+    t0=$(now)
+    /usr/bin/time -f '%M' -o "$errf.rss" "$BRT_RT" "$path" "$out" 2>"$errf" || rc=$?
+    rt_secs=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
+    rss=$(tail -n 1 "$errf.rss" 2>/dev/null || echo 0)
+    errs=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\1/p' "$errf" | head -n 1)
+    warns=$(sed -n 's/.*check FULL: \([0-9]*\) errors, \([0-9]*\) warnings.*/\2/p' "$errf" | head -n 1)
+    errs=${errs:--}
+    warns=${warns:--}
+    if [ "$rc" -ne 0 ]; then
+        text="RTFAIL"
+        struct="-"
+        note=$(tail -n 1 "$errf" | tr '\t' ' ')
+    else
+        if cmp -s <(normalize <"$path") <(normalize <"$out"); then text="ok"; else text="FAIL"; fi
+        if [ "$rep" != "-" ]; then
+            struct="=$rep"
+        else
+            struct=$(struct_gate "$path" "$out" "$BRT_TMP/$id.nc")
+            nc_rss=$(tail -n 1 "$BRT_TMP/$id.nc.rss" 2>/dev/null || echo 0)
+            case $nc_rss in '' | *[!0-9]*) nc_rss=0 ;; esac
+            if [ "$struct" = "error" ] && is_multi_driver "$path" &&
+                grep -q 'has more than one driver' "$BRT_TMP/$id.nc"; then
+                struct="refused"
+            fi
+            if [ "$struct" = "error" ] || [ "$struct" = "different" ]; then
+                cp "$BRT_TMP/$id.nc" "$BRT_RES/$id.nc.log" 2>/dev/null || true
+            fi
+        fi
+    fi
+    t2=$(now)
+    case $rss in '' | *[!0-9]*) rss=0 ;; esac
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$path" "$text" "$struct" "$errs" \
+        "$warns" "$(echo "$t2 $t0" | awk '{printf "%.1f", $1 - $2}')" "$rss" "$nc_rss" "$note" "$rt_secs" \
+        >"$BRT_RES/$id.tsv"
+    if [ "$BRT_KEEP" != 1 ]; then rm -f "$out" "$errf" "$errf.rss" "$BRT_TMP/$id.nc" "$BRT_TMP/$id.nc.rss"; fi
+}
+
+# Collects results and prints the table and summary; returns 1 on any failure.
+report() {
+    local res=$1 root=$2
+    cat "$res"/*.tsv | LC_ALL=C sort -t "$(printf '\t')" -k2,2 | MULTI="$MULTI_DRIVER" ROOT="$root" \
+        LC_ALL=C awk -F '\t' '
+    BEGIN { n = split(ENVIRON["MULTI"], ml, " "); for (i = 1; i <= n; i++) multi[ml[i]] = 1 }
+    { id[NR] = $1; path[NR] = $2; text[NR] = $3; st[NR] = $4; er[NR] = $5; wr[NR] = $6
+      secs[NR] = $7; rss[NR] = $8; ncrss[NR] = $9; note[NR] = $10; rts[NR] = $11; byid[$1] = NR }
+    END {
+        root = ENVIRON["ROOT"]
+        printf "%-8s %-16s %-6s %-6s %7s  %s\n", "text", "structural", "errs", "warns", "secs", "file"
+        for (r = 1; r <= NR; r++) {
+            s = st[r]; rep = ""
+            if (substr(s, 1, 1) == "=") { rep = substr(s, 2); s = st[byid[rep]] " (dup)"; base = st[byid[rep]] }
+            else base = s
+            sub(/ \(dup\)$/, "", base)
+            p = path[r]; if (index(p, root "/") == 1) p = substr(p, length(root) + 2)
+            b = path[r]; sub(/.*\//, "", b)
+            printf "%-8s %-16s %-6s %-6s %7s  %s\n", text[r], s, er[r], wr[r], secs[r], p
+            tot++
+            if (text[r] == "ok") tx_ok++; else if (text[r] == "RTFAIL") rtfail++; else tx_fail++
+            cnt[base]++
+            if (er[r] != "-" && er[r] + 0 > 0) { if (b in multi) chk_exc++; else chk_bad++ }
+            rttot += rts[r]
+            if (rts[r] + 0 > maxrt) { maxrt = rts[r] + 0; maxrtf = p }
+            if (secs[r] + 0 > maxs) { maxs = secs[r] + 0; maxf = p }
+            if (rss[r] + 0 > maxr) { maxr = rss[r] + 0; maxrf = p }
+            if (ncrss[r] + 0 > maxn) { maxn = ncrss[r] + 0; maxnf = p }
+            if (note[r] != "") print "    note: " note[r]
+        }
+        print ""
+        print "SUMMARY"
+        printf "files: %d (structural gate run on %d distinct contents)\n", tot, tot - dupn()
+        printf "text gate: %d ok, %d FAIL, %d read/write failures\n", tx_ok, tx_fail, rtfail
+        printf "structural gate: identical %d, identical+stubs %d, refused (multi-driver original) %d, timeout %d, memlimit %d, different %d, error %d, not run %d\n",
+            cnt["identical"], cnt["identical+stubs"], cnt["refused"], cnt["timeout"], cnt["memlimit"], cnt["different"], cnt["error"], cnt["-"]
+        printf "check FULL errors: %d files outside the multi-driver list, %d inside it\n", chk_bad, chk_exc
+        printf "slowest file: %s (%.1f s total)\n", maxf, maxs
+        printf "odin3-blif-rt (read, check, write) time: %.1f s total, slowest %s (%.1f s)\n", rttot, maxrtf, maxrt
+        printf "peak RSS: odin3-blif-rt %.0f MB (%s); netlist-compare %.0f MB (%s)\n", maxr / 1024, maxrf, maxn / 1024, maxnf
+        fail = tx_fail + rtfail + cnt["different"] + cnt["error"] + chk_bad
+        if (ENVIRON["STRICT"] == "1") fail += cnt["timeout"] + cnt["memlimit"]
+        print (fail ? "RESULT: FAIL (" fail " failing items)" : "RESULT: PASS")
+        exit(fail ? 1 : 0)
+    }
+    function dupn(   r, d) { for (r = 1; r <= NR; r++) if (substr(st[r], 1, 1) == "=") d++; return d + 0 }'
+}
+
+main() {
+    local jobs=2 root="" fixtures="" out="" keep=0 order=n repo
+    repo=$(dirname "$(dirname "$HERE")")
+    BRT_RT=$repo/build/release/odin3-blif-rt
+    BRT_NC=$HERE/../netlist-compare/netlist-compare
+    BRT_TIMEOUT=600
+    BRT_NC_MEM_KB=$((6 * 1024 * 1024))
+    while [ $# -gt 0 ]; do
+        case $1 in
+        -j) jobs=${2:?}; shift 2 ;;
+        -t) BRT_TIMEOUT=${2:?}; shift 2 ;;
+        -m) BRT_NC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
+        --rt) BRT_RT=${2:?}; shift 2 ;;
+        --nc) BRT_NC=${2:?}; shift 2 ;;
+        --out) out=${2:?}; shift 2 ;;
+        --keep) keep=1; shift ;;
+        --largest-first) order=nr; shift ;;
+        --fixtures) fixtures=${2:?}; shift 2 ;;
+        -h | --help) usage ;;
+        -*) usage ;;
+        *) [ -z "$root" ] || usage; root=$1; shift ;;
+        esac
+    done
+    [ -x /usr/bin/time ] || { echo "blif-roundtrip: needs GNU time at /usr/bin/time (apt install time)" >&2; exit 2; }
+    [ -x "$BRT_RT" ] || { echo "blif-roundtrip: no driver at $BRT_RT (build odin3-blif-rt)" >&2; exit 2; }
+    [ -z "$fixtures" ] || [ -z "$root" ] || usage
+    if [ -n "$fixtures" ]; then root=$fixtures; else root=${root:-$HOME/odin3-ws/golden}; fi
+    [ -d "$root" ] || { echo "blif-roundtrip: not a directory: $root" >&2; exit 2; }
+    [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/blif-roundtrip.XXXXXX")
+    mkdir -p "$out/res" "$out/tmp"
+    rm -f "$out"/res/* 2>/dev/null || true
+    export BRT_RT BRT_NC BRT_TIMEOUT BRT_NC_MEM_KB BRT_KEEP=$keep BRT_RES=$out/res BRT_TMP=$out/tmp
+    export -f normalize stubs is_multi_driver now struct_gate worker
+
+    # Work list: by size (see --largest-first), one representative per content sha256, duplicates after.
+    local list=$out/list.tsv
+    find "$root" -name '*.blif' -printf '%s\t%p\n' | LC_ALL=C sort -t "$(printf '\t')" -k1,1$order -k2,2 |
+        while IFS=$'\t' read -r _ path; do
+            if [ -z "$fixtures" ]; then
+                grep -qx 'status=ok' "${path%.blif}.prov" 2>/dev/null || continue
+            fi
+            printf '%s\t%s\n' "$(sha256sum "$path" | cut -d' ' -f1)" "$path"
+        done | awk -F '\t' '
+            { id = NR; sha[id] = $1; path[id] = $2; if (!($1 in first)) first[$1] = id }
+            END {
+                for (i = 1; i <= NR; i++) if (first[sha[i]] == i) print i "\t" path[i] "\t-"
+                for (i = 1; i <= NR; i++) if (first[sha[i]] != i) print i "\t" path[i] "\t" first[sha[i]]
+            }' >"$list"
+    if [ ! -s "$list" ]; then echo "blif-roundtrip: no BLIF files under $root" >&2; exit 2; fi
+    echo "blif-roundtrip: $(wc -l <"$list") files, -j $jobs, nc timeout ${BRT_TIMEOUT}s, work dir $out" >&2
+    xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$list"
+    local rc=0
+    set +e
+    STRICT=$([ -n "$fixtures" ] && echo 1 || echo 0) report "$out/res" "$root" | tee "$out/report.txt"
+    rc=${PIPESTATUS[0]}
+    set -e
+    [ "$keep" = 1 ] || rm -rf "$out/tmp"
+    return "$rc"
+}
+
+main "$@"

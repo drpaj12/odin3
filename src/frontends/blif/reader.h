@@ -1,0 +1,71 @@
+/*
+ * reader.h — BLIF reader: models, ports and black boxes (pass 1), bodies (pass 2), into the IR.
+ */
+#ifndef ODIN3_FRONTENDS_BLIF_READER_H
+#define ODIN3_FRONTENDS_BLIF_READER_H
+
+#include "frontends/blif/attrs.h"
+#include "ir/design.h"
+#include "odin3/odin3.h"
+
+/* The attributes the reader sets (blif_clock, blif_name, .attr/.param, blif_extras) and their keys
+ * are documented in frontends/blif/attrs.h. */
+
+/*
+ * Reads the BLIF file at path into design, which must be fresh (no modules). One pass run
+ * "read_blif"; every module, port node, port wire and port net gets an IMPORTED provenance record
+ * {file = path, line, col = 1-based token index of its defining token, end_col}.
+ *
+ * Pass 1 reads every `.model` header: models become modules in file order (the first is the top),
+ * `.inputs`/`.outputs` become ports in file order, and `.blackbox` models become black-box cell
+ * types (odin3_celltype_declare_blackbox, IR-7b), also in file order. Port grouping: a run of
+ * names `a[0] a[1] … a[w-1]` that appear consecutively, in this order, in one directive is one
+ * vector port `a` of width w (written with brackets); every other name is a scalar port with its
+ * exact name; ports are never reordered. Every port net is named by its exact BLIF bit name
+ * (`x`, or `a[k]` for bit k of vector `a`); a name in both `.inputs` and `.outputs` is one net
+ * shared by both ports. The first model must be a module (it is the top).
+ *
+ * Pass 2 reads the model bodies, so a `.subckt` may name a model defined later in the file. Cells
+ * are created in file order (node ID order = file order, IR-16), each with all its connections
+ * (odin3_node_create_connected); a net is created on its first reference, named exactly as
+ * written, unless a port net already has that name:
+ * - `.names i1 … in y` + cover rows: `$sop` with WIDTH n and COVER the rows as written (input
+ *   characters `0` `1` `-`, then the output character); all rows of one cover have the same output
+ *   character (BLIF forbids mixing on-set and off-set rows); `.names y` with no rows is constant
+ *   0, with the row `1` constant 1;
+ * - `.latch in out [type ctrl] [init]`: type `re`/`fe` → `$_DFF_P_`/`$_DFF_N_` (C = ctrl),
+ *   `ah`/`al` → `$_DLATCH_P_`/`$_DLATCH_N_` (E = ctrl), no type → `$_FF_`; INIT = init (0..3),
+ *   default 3. Known limitation: a control of `NIL` (SIS: no clock) is read as a net named NIL;
+ * - `.subckt m f=a …`: a node of cell type m (a module of the file, a black box, or another
+ *   registered type with its default parameters); formal f is the name of a scalar port, or `p[k]`
+ *   for bit k of a vector port p (a scalar port's exact name wins, so a scalar port `a[1]` is
+ *   matched by name; a bare `o` never names the width-1 vector port `o[0]`); formals not listed
+ *   stay unconnected. A model that is neither in the file nor registered (Yosys writes `$pow`,
+ *   `$_DFFSR_PPP_`, … without a `.model`) becomes an implicit black box: a local cell type of
+ *   granularity BLACKBOX that is not in the declared-model list (writers emit no `.model` for
+ *   it), whose ports are the distinct formals used with it in the file, in order of first use,
+ *   each scalar, width 1 and INOUT (the file does not give directions);
+ * - `.cname`, `.attr`, `.param` apply to the previous cell of the model (see above).
+ * Several drivers on one net are read as written (odin3_check_design reports them, rule 4).
+ * Provenance: every cell and every net created in pass 2 gets its own IMPORTED record, a cell
+ * {line of its directive, col 1, end_col = its token count}, a net {line, col = end_col = index
+ * of its token}.
+ *
+ * Errors are logged as "path:line: message". ODIN3_ERR_PARSE for malformed input (a directive
+ * outside a model, a duplicate model, a model without `.end`, a port declared twice, a black-box
+ * declaration that conflicts with a registered cell type, a black box with a body, a black box as
+ * the first model, a black box that repeats a port name, an unknown directive, a cover row that
+ * does not fit its `.names` or mixes on-set and off-set rows, an unsupported latch type (`as`) or
+ * init, a `.subckt` of its own model or of a port cell type, an unknown formal, a formal connected
+ * twice, a duplicate `.cname`, `.cname`/`.attr`/`.param` without a previous cell, a file that
+ * changed between the passes); ODIN3_ERR_IO when the file cannot be read; ODIN3_ERR_NO_MEMORY on
+ * out of memory; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or a design that already has
+ * modules. Reading stops at the first error; the design may then hold part of the file, so the
+ * caller destroys it.
+ */
+odin3_status odin3_blif_read(odin3_design *design, const char *path);
+
+/* Test hook: hook(user) runs between pass 1 and pass 2 of every later read (NULL: none). */
+void odin3_blif_test_set_between_passes(void (*hook)(void *user), void *user);
+
+#endif

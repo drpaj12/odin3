@@ -88,7 +88,8 @@ skip dead objects. Because churn (opt; lower → abc → read-back loops) leaves
 - it invalidates every module-local ID held outside the IR, including C ABI handles; only the
   pass manager calls it, at named pipeline points (after `opt`, after each ABC read-back);
 - before freeing, it appends one **tombstone** per dead node, net and wire (module, kind, cell
-  type, name, prov) to a design-global tombstone table, so history keeps pointing at what existed
+  type, name, prov; for a node also its parameters and the names of the nets its pins were last
+  connected to, PHASE1 #14) to a design-global tombstone table, so history keeps pointing at what existed
   (§6).
 
 Provenance never refers to object IDs, so compaction cannot break lineage.

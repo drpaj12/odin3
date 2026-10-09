@@ -1,0 +1,18 @@
+# hand_ports.blif - reader pass-1 cases: port grouping, Review Focus 2, .clock, black boxes.
+.model top
+.inputs a[0] b a[1] v[0] v[1] v[2] clk
+.outputs y[0] y[1] z d[1] d[2] e[1] e[0]
+.clock clk
+.end
+
+.model sub
+.inputs p[0] \
+  p[1] q
+.outputs r
+.end
+
+.model bb
+.inputs x[0] x[1] x[2] s
+.outputs o[0]
+.blackbox
+.end

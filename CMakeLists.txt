@@ -44,6 +44,9 @@ add_library(odin3_core OBJECT
     src/util/idindex.c
     src/util/str.c
     src/util/log.c
+    src/frontends/blif/lexer.c
+    src/frontends/blif/reader.c
+    src/backends/blif/writer.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -118,6 +121,11 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- odin3-blif-rt: BLIF round-trip driver (used by tools/blif-roundtrip/blif-roundtrip) --------
+add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
+target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
+
 # --- Benchmark (built by default, not a CTest) --------------------------------------
 add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -158,6 +166,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
+    odin3_add_unit_test(test_blif_lexer)
+    odin3_add_unit_test(test_blif_reader)
+    target_compile_definitions(test_blif_reader PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_blif_writer)
+    target_compile_definitions(test_blif_writer PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -166,6 +181,19 @@ if(BUILD_TESTING)
     add_dependencies(test_api example_plugin)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
+
+    add_test(NAME blif_roundtrip_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
+                     --rt $<TARGET_FILE:odin3-blif-rt> --fixtures
+                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_fixtures PROPERTIES LABELS unit)
+    # Negative check: a deliberately corrupted output must make the gate fail.
+    add_test(NAME blif_roundtrip_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
+                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt --fixtures
+                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
+        ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
@@ -179,7 +207,7 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 1\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 2\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 

@@ -6,7 +6,8 @@
  * private. Spec: docs/DESIGN.md §15.3.
  *
  * ABI v0 (Phase 0 skeleton): version queries, status codes, and plugin loading.
- * ABI v1 (Phase 1, 1B): adds ODIN3_ERR_CHECK. IR handles and accessors arrive in 1D.
+ * ABI v1 (Phase 1, 1B): adds ODIN3_ERR_CHECK.
+ * ABI v2 (Phase 1, 1C): adds ODIN3_ERR_PARSE. IR handles and accessors arrive in 1D.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -28,7 +29,7 @@ extern "C" {
 /* ODIN3_CDEF_BEGIN */
 
 /* Incremented on every incompatible change to this header. */
-enum { ODIN3_ABI_VERSION = 1 };
+enum { ODIN3_ABI_VERSION = 2 };
 
 /* Result of every fallible Odin III function. ODIN3_OK is always 0. */
 typedef enum odin3_status {
@@ -39,7 +40,8 @@ typedef enum odin3_status {
     ODIN3_ERR_PLUGIN = 4,
     ODIN3_ERR_ABI_MISMATCH = 5,
     ODIN3_ERR_CHECK = 6, /* the IR violates an invariant (docs/IR.md section 9) */
-    ODIN3_STATUS_COUNT = 7
+    ODIN3_ERR_PARSE = 7, /* malformed input file (logged as file:line: message) */
+    ODIN3_STATUS_COUNT = 8
 } odin3_status;
 
 /*
