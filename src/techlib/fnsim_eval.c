@@ -55,12 +55,11 @@ static bool lookup_param(const void *user, uint32_t ident, int64_t *value) {
     return false;
 }
 
-/* The value of a constant expression over the parameters; -1 when it does not evaluate. */
-static int64_t const_value(const run *rn, const odin3_expr *expr) {
+/* *value gets a constant expression over the parameters; false when it does not evaluate. */
+static bool const_value(const run *rn, const odin3_expr *expr, int64_t *value) {
     const odin3_expr_env env = {lookup_param, rn, NULL};
     odin3_expr_error err;
-    int64_t value = -1;
-    return odin3_expr_eval_int_quiet(expr, &env, &value, &err) == ODIN3_OK ? value : -1;
+    return odin3_expr_eval_int_quiet(expr, &env, value, &err) == ODIN3_OK;
 }
 
 /* --- pass 1: self-determined sizes ------------------------------------------------------------ */
@@ -127,26 +126,34 @@ static void size_op(run *rn, const odin3_fnsim_node *node, size_rec *rec) {
     }
 }
 
+/*
+ * A select's indices: lo..hi (in order; negative or too large indices read 0). An index that does
+ * not evaluate makes the select one bit that reads 0.
+ */
 static void size_select(run *rn, const odin3_fnsim_node *node, size_rec *rec) {
-    rec->lo = const_value(rn, node->expr->b);
-    rec->hi = rec->lo;
+    int64_t msb = 0;
+    int64_t lsb = 0;
+    bool ok = const_value(rn, node->expr->b, &msb);
     if (node->kind == ODIN3_FNSIM_SLICE) {
-        int64_t lsb = const_value(rn, node->expr->c);
-        rec->lo = lsb < rec->hi ? lsb : rec->hi;
-        rec->hi = lsb < rec->hi ? rec->hi : lsb;
-        if (rec->lo < 0 && rec->hi >= 0) {
-            rec->lo = -1; /* an index did not evaluate: one bit that reads 0 */
-            rec->hi = -1;
-        }
+        ok = ok && const_value(rn, node->expr->c, &lsb);
+    } else {
+        lsb = msb;
     }
-    set_self(rn, rec, (uint64_t)(rec->hi - rec->lo) + 1, false);
+    if (!ok) {
+        msb = -1;
+        lsb = -1;
+    }
+    rec->lo = lsb < msb ? lsb : msb;
+    rec->hi = lsb < msb ? msb : lsb;
+    uint64_t span = (uint64_t)rec->hi - (uint64_t)rec->lo; /* no signed overflow */
+    set_self(rn, rec, span >= MAX_WIDTH ? (uint64_t)MAX_WIDTH + 1 : span + 1, false);
 }
 
 static void size_concat(run *rn, const odin3_fnsim_node *node, size_rec *rec) {
     uint64_t width = 0;
     if (node->kind == ODIN3_FNSIM_REPL) {
-        int64_t count = const_value(rn, node->expr->a);
-        rec->lo = count > 0 ? count : 0;
+        int64_t count = 0;
+        rec->lo = const_value(rn, node->expr->a, &count) && count > 0 ? count : 0;
         uint64_t body = rn->rec[node->kid[0]].self;
         width = body != 0 && (uint64_t)rec->lo > MAX_WIDTH ? (uint64_t)MAX_WIDTH + 1
                                                            : (uint64_t)rec->lo * body;
@@ -444,8 +451,8 @@ static void eval_select(const run *rn, const odin3_fnsim_node *node, uint32_t id
     const uint64_t *src = node_value(rn, node->kid[0]);
     uint64_t *dst = node_value(rn, idx);
     odin3_word_zero(dst, rec->width);
-    for (uint32_t k = 0; k < rec->self; k++) {
-        int64_t pos = rec->lo + (int64_t)k;
+    for (uint32_t k = 0; rec->lo < (int64_t)base->width && k < rec->self; k++) {
+        int64_t pos = rec->lo + (int64_t)k; /* lo < 2^32 here: no overflow */
         if (pos >= 0 && pos < (int64_t)base->width && odin3_word_bit(src, (uint32_t)pos)) {
             odin3_word_set_bit(dst, k);
         }

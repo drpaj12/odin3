@@ -96,18 +96,20 @@ extern const odin3_param_def odin3_cells_unary_params[3];
 odin3_status odin3_cells_unary_verify(const odin3_value *params);
 
 /*
- * Simulate support for the binary and unary word cells above (sim/cell.h, sim/word.h). Operands
- * are integers, each read under its own A_SIGNED / B_SIGNED parameter (Yosys's constant
- * evaluator): an arithmetic or bitwise result is computed with both operands extended to Y_WIDTH,
- * which is the exact result modulo 2^Y_WIDTH; a comparison compares the exact integers (both
- * extended to max(A_WIDTH, B_WIDTH) + 1 bits) and writes 0 or 1 zero-extended to Y_WIDTH. Every
- * hook keeps its words in the cell's scratch: three words (A, B, result) of the computing width.
+ * Simulate support for the binary and unary word cells above (sim/cell.h, sim/word.h), following
+ * Yosys simlib exactly. A binary operation is signed only when both A_SIGNED and B_SIGNED are set;
+ * otherwise both operands are zero-extended (simlib's `A op B` branch). A unary operation is
+ * signed when A_SIGNED is set. An arithmetic or bitwise result is computed with both operands
+ * extended to Y_WIDTH (its low Y_WIDTH bits are those of simlib's wider context); a comparison
+ * extends both to max(A_WIDTH, B_WIDTH) + 1 bits, compares them as two's complement (so as
+ * unsigned when zero-extended) and writes 0 or 1 zero-extended to Y_WIDTH. Every hook keeps its
+ * words in the cell's scratch: three words (A, B, result) of the computing width.
  */
 enum { ODIN3_CELLS_P_A_SIGNED, ODIN3_CELLS_P_B_SIGNED };
 
 /*
- * Loads A (and B for a binary cell) into the first two scratch words at width bits, extended by
- * their signedness parameters; dst is the third word.
+ * Loads A (and B for a binary cell) into the first two scratch words at width bits, both
+ * extended by the operation's signedness (above); dst is the third word.
  */
 odin3_word_bin odin3_cells_word_load(const odin3_sim_cell *cell, uint32_t width);
 
@@ -121,8 +123,8 @@ void odin3_cells_flag_store(const odin3_sim_cell *cell, bool flag);
 void odin3_cells_word_sim(const odin3_sim_cell *cell, odin3_word_fn fn);
 
 /*
- * The comparison of A and B as exact integers: -1, 0 or 1. Computed at max(A_WIDTH, B_WIDTH) + 1
- * bits, which odin3_cells_cmp_scratch sized.
+ * The comparison of A and B (signed only when both are): -1, 0 or 1. Computed at max(A_WIDTH,
+ * B_WIDTH) + 1 bits, which odin3_cells_cmp_scratch sized.
  */
 int odin3_cells_word_compare(const odin3_sim_cell *cell);
 

@@ -100,21 +100,28 @@ odin3_status odin3_cells_init_verify(const odin3_value *params) {
 
 enum { WORD_A, WORD_B, WORD_DST, WORD_COUNT };
 
-static odin3_word_port word_port(const odin3_sim_cell *cell, uint32_t port) {
-    const odin3_word_port out = {cell->values, cell->ports[port],
-                                 cell->params[port].kind == ODIN3_VAL_INT &&
-                                     cell->params[port].i != 0};
-    return out;
+static bool param_set(const odin3_sim_cell *cell, uint32_t param) {
+    return cell->params[param].kind == ODIN3_VAL_INT && cell->params[param].i != 0;
+}
+
+/*
+ * The signedness of the operation (Yosys simlib): a unary cell is signed when A_SIGNED is set, a
+ * binary cell only when both A_SIGNED and B_SIGNED are (else both operands are zero-extended).
+ */
+static bool operation_signed(const odin3_sim_cell *cell) {
+    bool is_signed = param_set(cell, ODIN3_CELLS_P_A_SIGNED);
+    return cell->n_ports > 2 ? is_signed && param_set(cell, ODIN3_CELLS_P_B_SIGNED) : is_signed;
 }
 
 odin3_word_bin odin3_cells_word_load(const odin3_sim_cell *cell, uint32_t width) {
     uint64_t *words = (uint64_t *)cell->scratch;
     uint32_t stride = odin3_word_limbs(width);
     odin3_word_bin op = {words + (size_t)WORD_DST * stride, words, words + stride, width};
-    const odin3_word_port a_port = word_port(cell, WORD_A); /* A_SIGNED is parameter 0 */
+    bool is_signed = operation_signed(cell);
+    const odin3_word_port a_port = {cell->values, cell->ports[WORD_A], is_signed};
     odin3_word_load(words, width, &a_port);
     if (cell->n_ports > 2) {
-        const odin3_word_port b_port = word_port(cell, WORD_B); /* B_SIGNED is parameter 1 */
+        const odin3_word_port b_port = {cell->values, cell->ports[WORD_B], is_signed};
         odin3_word_load(words + stride, width, &b_port);
     } else {
         odin3_word_zero(words + stride, width);

@@ -14,10 +14,11 @@
  * decimals are signed 32-bit integers (64-bit when the value does not fit); sized literals are
  * unsigned, their x and z bits read 0. Supported: ~ ! unary -, & | ^ ~^ ^~ + - * << >> (logical),
  * == != < <= > >= && ||, ?:, bit selects and slices whose indices are constant expressions over
- * parameters (a bit outside the operand reads 0; a reversed slice reads the same bits as the
- * ordered one), concatenation and replication with a constant count. A cell using / % ** or a
- * non-constant index, or whose fn reads an output port, gets no hook (the simulator then rejects
- * it as having no simulate hook).
+ * parameters (a bit outside the operand, negative indices included, reads 0; a reversed slice
+ * reads the same bits as the ordered one; an index that does not evaluate gives one bit reading
+ * 0), concatenation and replication with a constant count (one that does not evaluate is 0). A cell
+ * using / % ** or a non-constant index, or whose fn reads an output port, gets no hook (the
+ * simulator then rejects it as having no simulate hook).
  *
  * Words are little-endian 64-bit limbs (sim/word.h): up to 64 bits every operation is one machine
  * operation; wider values loop over the limbs. The hook allocates nothing: its node records and

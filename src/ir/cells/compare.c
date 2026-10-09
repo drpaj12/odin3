@@ -2,9 +2,8 @@
 #include "cells.h"
 
 /*
- * Simulate hooks (cells.h): A and B compare as exact integers, each under its own signedness. For
- * $eq/$ne with mixed signedness this differs from Yosys's const_eq, which extends both operands
- * signed only when both are signed; Verilog front ends never produce mixed signedness.
+ * Simulate hooks (cells.h): as Yosys simlib, a signed comparison only when both A_SIGNED and
+ * B_SIGNED are set, else both operands are zero-extended and compared unsigned.
  */
 static void eq_sim(const odin3_sim_cell *cell) {
     odin3_cells_flag_store(cell, odin3_cells_word_compare(cell) == 0);
