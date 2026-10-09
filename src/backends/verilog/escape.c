@@ -308,7 +308,8 @@ odin3_verilog_ident odin3_verilog_ident_kind(odin3_bytes name) {
     }
     bool simple = is_letter(bytes[0]);
     for (size_t i = 0; i < name.len; i++) {
-        if (bytes[i] < FIRST_PRINTABLE || bytes[i] > LAST_PRINTABLE) {
+        /* A backtick would start a macro even inside an escaped name (Icarus expands it). */
+        if (bytes[i] < FIRST_PRINTABLE || bytes[i] > LAST_PRINTABLE || bytes[i] == '`') {
             return ODIN3_VERILOG_UNWRITABLE;
         }
         simple = simple && is_ident_char(bytes[i]);

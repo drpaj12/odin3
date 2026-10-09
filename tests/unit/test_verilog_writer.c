@@ -16,25 +16,39 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char **environ;
 
-enum { TEXT_MAX = 1 << 16, MSG_MAX = 512, NAME_BUF = 64, OOM_LIMIT = 20000, TOOL_MISSING = -1 };
+enum {
+    TEXT_MAX = 1 << 16,
+    MSG_MAX = 512,
+    NAME_BUF = 64,
+    DIR_BUF = 128,
+    PATH_BUF = 256,
+    SCRIPT_BUF = 1024,
+    OOM_LIMIT = 20000,
+    TOOL_MISSING = -1
+};
 
-static const char *const OUT_PATH = "odin3_vwriter_test_out.v";
-static const char *const OUT2_PATH = "odin3_vwriter_test_out2.v";
-static const char *const AUX_PATH = "odin3_vwriter_test_aux.txt";
-static const char *const TB_PATH = "odin3_vwriter_test_tb.v";
-static const char *const VVP_PATH = "odin3_vwriter_test.vvp";
+/* A private directory per run (under TMPDIR or /tmp) and the files the tests use in it. */
+static char out_dir[DIR_BUF];
+static char out_path[PATH_BUF];  /* the writer's output */
+static char out2_path[PATH_BUF]; /* a second output, or a tool's output file */
+static char aux_path[PATH_BUF];  /* a tool's stdout */
+static char tb_path[PATH_BUF];   /* a testbench */
+static char vvp_path[PATH_BUF];  /* a compiled simulation */
+static char *const RUN_FILES[] = {out_path, out2_path, aux_path, tb_path, vvp_path};
 
 static odin3_design *design;
 static odin3_module *module; /* the module being built */
@@ -51,6 +65,33 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
     }
 }
 
+static void dir_file(char *buf, const char *name) {
+    (void)snprintf(buf, PATH_BUF, "%s/%s", out_dir, name);
+}
+
+static void make_out_dir(void) {
+    const char *base = getenv("TMPDIR");
+    (void)snprintf(out_dir, sizeof out_dir, "%s/odin3_vwriter_XXXXXX",
+                   base != NULL && base[0] != '\0' ? base : "/tmp");
+    TEST_ASSERT_NOT_NULL(mkdtemp(out_dir));
+    dir_file(out_path, "out.v");
+    dir_file(out2_path, "out2.v");
+    dir_file(aux_path, "aux.txt");
+    dir_file(tb_path, "tb.v");
+    dir_file(vvp_path, "sim.vvp");
+}
+
+/* Removes every file a test may leave (and the writer's .tmp files), then the directory. */
+static void remove_out_dir(void) {
+    for (size_t i = 0; i < sizeof RUN_FILES / sizeof RUN_FILES[0]; i++) {
+        char tmp[PATH_BUF + 8];
+        (void)snprintf(tmp, sizeof tmp, "%s.tmp", RUN_FILES[i]);
+        (void)remove(tmp);
+        (void)remove(RUN_FILES[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(0, rmdir(out_dir));
+}
+
 void setUp(void) {
     last_error[0] = '\0';
     errors = 0;
@@ -58,6 +99,7 @@ void setUp(void) {
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     module = NULL;
+    make_out_dir();
 }
 
 void tearDown(void) {
@@ -65,23 +107,20 @@ void tearDown(void) {
     odin3_log_set_sink(NULL, NULL);
     odin3_design_destroy(design);
     design = NULL;
-    (void)remove(OUT_PATH);
-    (void)remove(OUT2_PATH);
-    (void)remove(AUX_PATH);
-    (void)remove(TB_PATH);
-    (void)remove(VVP_PATH);
+    remove_out_dir();
 }
 
 /* --- external tools ------------------------------------------------------------------------ */
 
-/* Runs argv (PATH search) with stdout to out_path (NULL: /dev/null); its exit status, or
+/* Runs argv (PATH search) with stdout to stdout_path (NULL: /dev/null); its exit status, or
  * TOOL_MISSING when argv[0] is not found. */
-static int run_tool(char *const argv[], const char *out_path) {
+static int run_tool(char *const argv[], const char *stdout_path) {
     posix_spawn_file_actions_t actions;
     TEST_ASSERT_EQUAL_INT(0, posix_spawn_file_actions_init(&actions));
-    TEST_ASSERT_EQUAL_INT(0, posix_spawn_file_actions_addopen(
-                                 &actions, STDOUT_FILENO, out_path != NULL ? out_path : "/dev/null",
-                                 O_WRONLY | O_CREAT | O_TRUNC, 0644));
+    TEST_ASSERT_EQUAL_INT(
+        0, posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO,
+                                            stdout_path != NULL ? stdout_path : "/dev/null",
+                                            O_WRONLY | O_CREAT | O_TRUNC, 0644));
     pid_t pid = 0;
     int rc = posix_spawnp(&pid, argv[0], &actions, NULL, argv, environ);
     (void)posix_spawn_file_actions_destroy(&actions);
@@ -112,10 +151,10 @@ static bool iverilog_compiles(const char *path) {
     return true;
 }
 
-/* Runs yosys with script, stdout to AUX_PATH; ignores the test when yosys is missing. */
+/* Runs yosys with script, stdout to aux_path; ignores the test when yosys is missing. */
 static void yosys_runs(const char *script) {
     char *argv[] = {yosys_path(), "-q", "-p", (char *)script, NULL};
-    int rc = run_tool(argv, AUX_PATH);
+    int rc = run_tool(argv, aux_path);
     if (rc == TOOL_MISSING) {
         TEST_IGNORE_MESSAGE("yosys not found (PATH or ODIN3_YOSYS): Yosys check skipped");
     }
@@ -134,9 +173,9 @@ static const char *slurp(const char *path, char *buf) {
     return buf;
 }
 
-/* Writes the testbench text to TB_PATH. */
+/* Writes the testbench text to tb_path. */
 static void put_testbench(const char *data) {
-    FILE *file = fopen(TB_PATH, "wb");
+    FILE *file = fopen(tb_path, "wb");
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(strlen(data), fwrite(data, 1, strlen(data), file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
@@ -147,17 +186,18 @@ static bool file_exists(const char *path) {
     return stat(path, &info) == 0;
 }
 
-/* Writes the design to OUT_PATH and loads it into text, without the iverilog check. */
+/* Writes the design to out_path and loads it into text, without the iverilog check. */
 static const char *write_text(void) {
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_verilog_write(design, OUT_PATH), last_error);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_verilog_write(design, out_path, NULL),
+                                  last_error);
     TEST_ASSERT_EQUAL_STRING("", last_error);
-    return slurp(OUT_PATH, text);
+    return slurp(out_path, text);
 }
 
 /* write_text, then iverilog must compile the output (when installed). */
 static const char *write_ok(void) {
     (void)write_text();
-    (void)iverilog_compiles(OUT_PATH);
+    (void)iverilog_compiles(out_path);
     return text;
 }
 
@@ -473,11 +513,11 @@ static void test_escaped_names(void) {
 static void test_escaped_names_yosys_round_trip(void) {
     build_escapes();
     (void)write_ok();
-    char script[MSG_MAX];
-    (void)snprintf(script, sizeof script, "read_verilog %s; write_verilog -noattr %s", OUT_PATH,
-                   OUT2_PATH);
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog %s; write_verilog -noattr %s", out_path,
+                   out2_path);
     yosys_runs(script);
-    const char *back = slurp(OUT2_PATH, aux);
+    const char *back = slurp(out2_path, aux);
     expect_in(back, "\\$add~5^ADD~5-1[0] ");
     expect_in(back, "\\n~19 ");
     expect_in(back, "\\b.c ");
@@ -587,22 +627,22 @@ static void test_sop_simulates(void) {
     build_sops();
     (void)write_ok();
     put_testbench(SOP3_TB);
-    char *compile[] = {"iverilog",      "-g2005",         "-o", (char *)VVP_PATH,
-                       (char *)TB_PATH, (char *)OUT_PATH, NULL};
+    char *compile[] = {"iverilog",      "-g2005",         "-o", (char *)vvp_path,
+                       (char *)tb_path, (char *)out_path, NULL};
     int rc = run_tool(compile, NULL);
     if (rc == TOOL_MISSING) {
         TEST_IGNORE_MESSAGE("iverilog not found: simulation skipped");
     }
     TEST_ASSERT_EQUAL_INT(0, rc);
-    char *sim[] = {"vvp", "-n", (char *)VVP_PATH, NULL};
-    TEST_ASSERT_EQUAL_INT(0, run_tool(sim, AUX_PATH));
+    char *sim[] = {"vvp", "-n", (char *)vvp_path, NULL};
+    TEST_ASSERT_EQUAL_INT(0, run_tool(sim, aux_path));
     char expected[MSG_MAX] = "";
     size_t len = 0;
     for (unsigned i = 0; i < 8; i++) {
         int on = sop3_on(i);
         len += (size_t)snprintf(expected + len, sizeof expected - len, "%u %d%d1000\n", i, on, !on);
     }
-    TEST_ASSERT_EQUAL_STRING(expected, slurp(AUX_PATH, aux));
+    TEST_ASSERT_EQUAL_STRING(expected, slurp(aux_path, aux));
 }
 
 static void test_sop_mixed_cover_refused(void) {
@@ -616,10 +656,10 @@ static void test_sop_mixed_cover_refused(void) {
               "01"
               "0",
               net_y);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT_PATH));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "mixes"));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "'$c"));
-    TEST_ASSERT_FALSE(file_exists(OUT_PATH));
+    TEST_ASSERT_FALSE(file_exists(out_path));
 }
 
 /* --- storage cells (Review Focus 5) -------------------------------------------------------- */
@@ -709,11 +749,11 @@ static bool has_global_latch(const char *blif, char init) {
 static void test_storage_yosys_latches(void) {
     (void)build_regs();
     (void)write_ok();
-    char script[MSG_MAX];
+    char script[SCRIPT_BUF];
     (void)snprintf(script, sizeof script,
-                   "read_verilog %s; proc; techmap; opt_clean; write_blif %s", OUT_PATH, OUT2_PATH);
+                   "read_verilog %s; proc; techmap; opt_clean; write_blif %s", out_path, out2_path);
     yosys_runs(script);
-    const char *blif = slurp(OUT2_PATH, aux);
+    const char *blif = slurp(out2_path, aux);
     expect_in(blif, ".latch d r0 re clk 0\n");
     expect_in(blif, " fe clk 1\n");
     expect_in(blif, " ah en 2\n");
@@ -926,7 +966,8 @@ static void test_word_logic(void) {
     expect_has("  assign red = |a;\n");
     expect_has("  assign inv = ~a;\n");
     expect_has("  assign mx = s ? b : a;\n");
-    expect_has("  assign pm = sel[0] ? b[1:0] : sel[1] ? b[3:2] : a[1:0];\n");
+    expect_has(
+        "  assign pm = |sel ? (({2{sel[0]}} & b[1:0]) | ({2{sel[1]}} & b[3:2])) : a[1:0];\n");
     expect_has("  assign tb = en ? a : 4'bzzzz;\n");
     expect_has("  wire signed [3:0] sw;\n");
     expect_has("  assign sum2 = sw[3:0] + a;\n");
@@ -959,8 +1000,8 @@ static void test_word_regs(void) {
 static void test_word_yosys_reads(void) {
     (void)build_words();
     (void)write_ok();
-    char script[MSG_MAX];
-    (void)snprintf(script, sizeof script, "read_verilog %s; proc; check -assert", OUT_PATH);
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog %s; proc; check -assert", out_path);
     yosys_runs(script);
 }
 
@@ -1114,15 +1155,15 @@ static void test_two_input_ports_on_one_net_refused(void) {
     odin3_net_id net_a = in_bit("a");
     odin3_net_id net_b = in_bit("b");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(module, (odin3_net_pair){net_a, net_b}));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT_PATH));
-    TEST_ASSERT_FALSE(file_exists(OUT_PATH));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
+    TEST_ASSERT_FALSE(file_exists(out_path));
 }
 
 static void test_unwritable_port_refused(void) {
     new_module("bad");
     (void)in_bit("a b");
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT_PATH));
-    TEST_ASSERT_FALSE(file_exists(OUT_PATH));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
+    TEST_ASSERT_FALSE(file_exists(out_path));
 }
 
 typedef struct names_fixture {
@@ -1227,8 +1268,8 @@ static void test_all_fixtures_compile_and_deterministic(void) {
     (void)write_ok();
     static char first[TEXT_MAX];
     memcpy(first, text, sizeof first);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, OUT2_PATH));
-    TEST_ASSERT_EQUAL_STRING(first, slurp(OUT2_PATH, text));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out2_path, NULL));
+    TEST_ASSERT_EQUAL_STRING(first, slurp(out2_path, text));
 }
 
 static void test_portless_module(void) {
@@ -1243,45 +1284,98 @@ static void test_empty_design(void) {
 }
 
 static void test_bad_arguments(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(NULL, OUT_PATH));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(NULL, out_path, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, NULL, NULL));
     TEST_ASSERT_EQUAL_size_t(2, errors);
 }
 
 static void test_io_errors(void) {
     build_escapes();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_verilog_write(design, "/nonexistent-dir/out.v"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO,
+                          odin3_verilog_write(design, "/nonexistent-dir/out.v", NULL));
     TEST_ASSERT_NOT_NULL(strstr(last_error, "/nonexistent-dir/out.v: cannot open"));
 }
 
-/* A device that refuses writes: IO with a located message; the device is left alone. */
+/* A destination whose directory refuses the temporary file: IO, and the device is left alone. */
 static void test_write_failure(void) {
     if (!file_exists("/dev/full")) {
         TEST_IGNORE_MESSAGE("/dev/full not available");
     }
     build_escapes();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_verilog_write(design, "/dev/full"));
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "/dev/full:"));
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_verilog_write(design, "/dev/full", NULL));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "/dev/full: cannot open"));
     TEST_ASSERT_TRUE(file_exists("/dev/full"));
 }
 
+static const char *const BASELINE = "previous contents\n";
+
+/* The destination still holds BASELINE and no temporary file is left. */
+static void expect_baseline_kept(void) {
+    TEST_ASSERT_EQUAL_STRING(BASELINE, slurp(out_path, aux));
+    char tmp[PATH_BUF + 8];
+    (void)snprintf(tmp, sizeof tmp, "%s.tmp", out_path);
+    TEST_ASSERT_FALSE(file_exists(tmp));
+}
+
+static void put_baseline(void) {
+    FILE *file = fopen(out_path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(strlen(BASELINE), fwrite(BASELINE, 1, strlen(BASELINE), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/* A refusal found halfway through leaves the existing destination as it was. */
+static void test_refusal_keeps_destination(void) {
+    build_escapes();
+    new_module("mixed");
+    odin3_wire_id net_a = in_vec("a", 2);
+    odin3_net_id a_nets[2];
+    (void)sop(wire_nets(net_a, a_nets),
+              "10"
+              "1"
+              "01"
+              "0",
+              out_bit("y"));
+    put_baseline();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
+    expect_baseline_kept();
+}
+
+/* A real write error (file size limit, EFBIG) is a located IO failure; the destination stays. */
+static void test_write_error_keeps_destination(void) {
+    build_all();
+    put_baseline();
+    struct rlimit old;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_FSIZE, &old));
+    void (*prev)(int) = signal(SIGXFSZ, SIG_IGN);
+    TEST_ASSERT_TRUE(prev != SIG_ERR);
+    struct rlimit small = {256, old.rlim_max};
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &small));
+    odin3_status st = odin3_verilog_write(design, out_path, NULL);
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &old));
+    TEST_ASSERT_TRUE(signal(SIGXFSZ, prev) != SIG_ERR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    expect_baseline_kept();
+}
+
 /* One write with the allocation after the first `allowed` failing; a failure must be NO_MEMORY
- * and leave no file. */
+ * and leave the destination as it was. */
 static odin3_status write_failing_after(long allowed) {
     odin3_util_set_alloc_fail_after(allowed);
-    odin3_status st = odin3_verilog_write(design, OUT_PATH);
+    odin3_status st = odin3_verilog_write(design, out_path, NULL);
     odin3_util_set_alloc_fail_after(-1);
     if (st != ODIN3_OK) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_FALSE(file_exists(OUT_PATH));
+        expect_baseline_kept();
     }
     return st;
 }
 
-/* Every allocation failure is NO_MEMORY with no file left behind; enough allocations succeed. */
+/* Every allocation failure is NO_MEMORY and keeps the old file; enough allocations succeed. */
 static void test_out_of_memory_sweep(void) {
     build_all();
+    put_baseline();
     long tries = 0;
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     for (; st != ODIN3_OK && tries < OOM_LIMIT; tries++) {
@@ -1290,9 +1384,204 @@ static void test_out_of_memory_sweep(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
     TEST_ASSERT_TRUE(tries > 10);
     static char first[TEXT_MAX];
-    memcpy(first, slurp(OUT_PATH, text), sizeof first);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, OUT2_PATH));
-    TEST_ASSERT_EQUAL_STRING(first, slurp(OUT2_PATH, text));
+    memcpy(first, slurp(out_path, text), sizeof first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out2_path, NULL));
+    TEST_ASSERT_EQUAL_STRING(first, slurp(out2_path, text));
+}
+
+/* --- fix round 1 --------------------------------------------------------------------------- */
+
+static const odin3_port_def HS_PORTS[] = {
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL},
+    {"Z", ODIN3_DIR_IN, false, 0, NULL, NULL}, /* zero-width */
+};
+
+/* String parameters are byte-exact: no blank is ever dropped inside a literal or a comment. */
+static void test_string_blanks_exact(void) {
+    odin3_param_def params[1] = {
+        {"TAG", ODIN3_VAL_STRING, {ODIN3_VAL_STRING, 0, NULL, 0, intern("dflt  two  spaces"), 0}},
+    };
+    odin3_celltype_def def = {"hs", ODIN3_GRAN_HARD, 0, HS_PORTS, 2, params, 1, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("r"), &ctx));
+    odin3_srcloc loc = {intern("s.v"), 3, 1, 3, 1};
+    odin3_prov_id prov = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &prov));
+    new_module("strs");
+    odin3_net_id net_a = in_bit("a");
+    (void)add_port_prov((port_args){"q.r", ODIN3_DIR_OUT, 1, true}, prov);
+    odin3_value tag = {ODIN3_VAL_STRING, 0, NULL, 0, intern(" x  y   z "), 0};
+    odin3_netvec ports[] = {NV1(net_a), {NULL, 0}};
+    (void)add_cell_args((cell_args){"hs", "u", &tag, 1, {0}}, ports);
+    (void)write_ok();
+    expect_has("  hs #(.TAG(\" x  y   z \")) u (\n    .A(a),\n    .Z()\n  );\n");
+    expect_has("  parameter TAG = \"dflt  two  spaces\"\n");
+    expect_has("  output \\q.r   // s.v:3\n");
+}
+
+/* A zero-width black-box port is declared without a range (never [-1:0]). */
+static void test_zero_width_stub_port(void) {
+    odin3_celltype_def def = {"zw", ODIN3_GRAN_BLACKBOX, 0, HS_PORTS, 2, NULL, 0, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
+    (void)write_ok();
+    expect_has("(* blackbox *)\nmodule zw (\n  input A,\n  input Z\n);\nendmodule\n");
+    expect_not("[-1:0]");
+}
+
+/* A backtick (Icarus expands macros inside escaped names) is unwritable: generated name for a
+ * net, refusal for a port. */
+static void test_backtick_names(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_VERILOG_UNWRITABLE, kind_of("m`define"));
+    new_module("bt");
+    odin3_net_id net_a = in_bit("a");
+    odin3_net_id tick = new_net("m`x");
+    (void)gate1("$_NOT_", (io_pair){net_a, tick});
+    (void)gate1("$_NOT_", (io_pair){tick, out_bit("y")});
+    (void)write_ok();
+    char line[MSG_MAX];
+    (void)snprintf(line, sizeof line, "  assign \\$n%u = ~a;\n", tick.v);
+    expect_has(line);
+    expect_not("`");
+    new_module("bt2");
+    (void)in_bit("p`q");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "cannot be written"));
+}
+
+/* A net named like a bit of a declared vector (`a[0]` beside port a[1:0]) gets a generated name:
+ * Yosys write_blif would flatten both to the same BLIF name. */
+static void test_bit_select_lookalike_renamed(void) {
+    new_module("lk");
+    odin3_wire_id net_a = in_vec("a", 2);
+    odin3_net_id look = new_net("a[0]");
+    odin3_net_id other = new_net("b[0]");
+    (void)gate1("$_NOT_", (io_pair){bit_of(net_a, 1), look});
+    (void)gate2("$_AND_", look, bit_of(net_a, 0), other);
+    (void)gate1("$_BUF_", (io_pair){other, out_bit("y")});
+    (void)write_ok();
+    char line[MSG_MAX];
+    (void)snprintf(line, sizeof line, "  assign \\$n%u = ~a[1];\n", look.v);
+    expect_has(line);
+    (void)snprintf(line, sizeof line, "  assign \\b[0] = \\$n%u & a[0];\n", look.v);
+    expect_has(line);
+}
+
+static const char *const PMUX_TB = "module tb;\n"
+                                   "  reg [1:0] a;\n"
+                                   "  reg [3:0] b;\n"
+                                   "  reg [1:0] s;\n"
+                                   "  wire [1:0] y;\n"
+                                   "  pmx dut(.a(a), .b(b), .s(s), .y(y));\n"
+                                   "  initial begin\n"
+                                   "    a = 2'b11; b = 4'b1001; s = 2'b00;\n"
+                                   "    #1 $display(\"%b\", y);\n"
+                                   "    a = 2'b00; s = 2'b01;\n"
+                                   "    #1 $display(\"%b\", y);\n"
+                                   "    s = 2'b10;\n"
+                                   "    #1 $display(\"%b\", y);\n"
+                                   "    s = 2'b11;\n"
+                                   "    #1 $display(\"%b\", y);\n"
+                                   "  end\n"
+                                   "endmodule\n";
+
+/* $pmux: no select bit -> A; one -> its B slice; several -> the OR of their slices (Yosys
+ * gate-level semantics, as the 1E simulator). */
+static void test_pmux_simulates(void) {
+    new_module("pmx");
+    odin3_net_id a_nets[2];
+    odin3_net_id b_nets[4];
+    odin3_net_id s_nets[2];
+    odin3_net_id y_nets[2];
+    odin3_netvec ports[] = {wire_nets(in_vec("a", 2), a_nets), wire_nets(in_vec("b", 4), b_nets),
+                            wire_nets(in_vec("s", 2), s_nets), wire_nets(out_vec("y", 2), y_nets)};
+    odin3_value params[2] = {odin3_value_int(2), odin3_value_int(2)};
+    (void)add_cell("$pmux", params, 2, ports);
+    (void)write_ok();
+    put_testbench(PMUX_TB);
+    char *compile[] = {"iverilog", "-g2005", "-o", vvp_path, tb_path, out_path, NULL};
+    int rc = run_tool(compile, NULL);
+    if (rc == TOOL_MISSING) {
+        TEST_IGNORE_MESSAGE("iverilog not found: simulation skipped");
+    }
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    char *sim[] = {"vvp", "-n", vvp_path, NULL};
+    TEST_ASSERT_EQUAL_INT(0, run_tool(sim, aux_path));
+    TEST_ASSERT_EQUAL_STRING("11\n01\n10\n11\n", slurp(aux_path, aux));
+}
+
+/* --- name styles ---------------------------------------------------------------------------- */
+
+typedef struct prov_fixture {
+    odin3_net_id unnamed;
+} prov_fixture;
+
+/* pn: net m (prov top/u1 @ in.v:7), an unnamed net (same prov), a net n without prov, an
+ * instance u2 of sub2 (prov in.v:9, no hierarchy). */
+static prov_fixture build_prov_names(void) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
+    odin3_srcloc loc7 = {intern("in.v"), 7, 1, 7, 1};
+    odin3_srcloc loc9 = {intern("in.v"), 9, 1, 9, 1};
+    odin3_prov_id p7 = {0};
+    odin3_prov_id p9 = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_prov_source(&ctx, &(odin3_prov_origin){&loc7, 1, 0, intern("top/u1")}, &p7));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_source(&ctx, &(odin3_prov_origin){&loc9, 1, 0, 0}, &p9));
+    new_module("sub2");
+    odin3_net_id sub_in = in_bit("i");
+    (void)gate1("$_BUF_", (io_pair){sub_in, out_bit("o")});
+    odin3_celltype_id sub = odin3_module_celltype(module);
+    new_module("pn");
+    odin3_net_id net_a = in_bit("a");
+    prov_fixture fix;
+    odin3_net_id named = new_net_prov("m", p7);
+    fix.unnamed = new_net_prov(NULL, p7);
+    odin3_net_id plain = new_net("n");
+    (void)gate1("$_NOT_", (io_pair){net_a, named});
+    (void)gate1("$_NOT_", (io_pair){named, fix.unnamed});
+    (void)gate1("$_NOT_", (io_pair){fix.unnamed, plain});
+    odin3_node_spec spec = {sub, intern("u2"), p9, NULL, 0};
+    odin3_netvec ports[] = {NV1(plain), NV1(out_bit("y"))};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    return fix;
+}
+
+static void test_name_style_short(void) {
+    prov_fixture fix = build_prov_names();
+    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_SHORT};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out_path, &opts));
+    (void)slurp(out_path, text);
+    (void)iverilog_compiles(out_path);
+    char line[MSG_MAX];
+    expect_has("  wire m;  // in.v:7\n");
+    (void)snprintf(line, sizeof line, "  wire \\$n%u ;  // in.v:7\n", fix.unnamed.v);
+    expect_has(line);
+    expect_has("  wire n;\n");
+    expect_has("  sub2 u2 (  // in.v:9\n");
+}
+
+/* PROVENANCE: hier/name@file:line for objects with a location; ports and the rest unchanged. */
+static void test_name_style_provenance(void) {
+    prov_fixture fix = build_prov_names();
+    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_PROVENANCE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out_path, &opts));
+    (void)slurp(out_path, text);
+    (void)iverilog_compiles(out_path);
+    char line[MSG_MAX];
+    expect_has("  wire \\top/u1/m@in.v:7 ;  // in.v:7\n");
+    (void)snprintf(line, sizeof line, "  wire \\top/u1/$n%u@in.v:7 ;  // in.v:7\n", fix.unnamed.v);
+    expect_has(line);
+    expect_has("  wire n;\n");
+    expect_has("  sub2 \\u2@in.v:9 (  // in.v:9\n");
+    expect_has("  assign \\top/u1/m@in.v:7 = ~a;\n");
+    expect_has("module pn (\n  input a,\n  output y\n);\n");
 }
 
 int main(void) {
@@ -1327,6 +1616,15 @@ int main(void) {
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_io_errors);
     RUN_TEST(test_write_failure);
+    RUN_TEST(test_refusal_keeps_destination);
+    RUN_TEST(test_write_error_keeps_destination);
     RUN_TEST(test_out_of_memory_sweep);
+    RUN_TEST(test_string_blanks_exact);
+    RUN_TEST(test_zero_width_stub_port);
+    RUN_TEST(test_backtick_names);
+    RUN_TEST(test_bit_select_lookalike_renamed);
+    RUN_TEST(test_pmux_simulates);
+    RUN_TEST(test_name_style_short);
+    RUN_TEST(test_name_style_provenance);
     return UNITY_END();
 }

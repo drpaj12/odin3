@@ -18,7 +18,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
 
 enum {
     FLUSH_AT = 1 << 16, /* pending output bytes that trigger a write */
@@ -143,6 +142,7 @@ typedef struct vw_module {
     const char *name;              /* for messages */
     odin3_strtab *names;           /* identifiers given out in this module */
     odin3_u64map *obj_names;       /* kind << 32 | ID -> names ID */
+    odin3_u64map *vectors;         /* names ID of a vector wire -> 1 */
     vw_ref *refs;                  /* by net ID */
     uint32_t *wire_port;           /* by wire ID: port index + 1, 0 for a non-port wire */
 } vw_module;
@@ -151,17 +151,20 @@ typedef struct verilog_writer {
     const odin3_design *design;
     const odin3_strtab *tab;
     const char *path;
+    odin3_verilog_name_style name_style;
+    odin3_strbuf tmp_path; /* path + ".tmp": written, then renamed over path */
     FILE *file;
-    bool opened; /* path was opened (and truncated): a failure removes it */
+    bool opened; /* tmp_path was created: a failure removes it */
     bool oom_logged;
-    odin3_status st; /* sticky: the first failure */
-    uint32_t line;   /* lines written to the file so far */
-    uint32_t units;  /* modules and stubs written (a blank line separates them) */
+    size_t escaped_end; /* out.len just after an escaped identifier, SIZE_MAX otherwise */
+    odin3_status st;    /* sticky: the first failure */
+    uint32_t line;      /* lines written to the file so far */
+    uint32_t units;     /* modules and stubs written (a blank line separates them) */
     odin3_strbuf out;
-    odin3_strbuf cand;      /* a candidate generated name */
-    odin3_u64map *builtin;  /* cell type ID -> BUILTINS index */
-    odin3_u64map *prov_loc; /* prov ID -> file << 32 | line, 0 for none */
-    odin3_u64map *stubbed;  /* cell type ID -> 1 once its stub is written */
+    odin3_strbuf cand;       /* a candidate generated name */
+    odin3_u64map *builtin;   /* cell type ID -> BUILTINS index */
+    odin3_u64map *prov_leaf; /* prov ID -> the record that names it (IR §6), 0 for none */
+    odin3_u64map *stubbed;   /* cell type ID -> 1 once its stub is written */
     vw_module mod;
 } verilog_writer;
 
@@ -204,23 +207,26 @@ static void vw_flush(verilog_writer *wr) {
         wr->line += wr->out.data[i] == '\n';
     }
     odin3_strbuf_clear(&wr->out);
+    wr->escaped_end = SIZE_MAX;
+}
+
+/* Appends text exactly (string literals, comments). */
+static void vw_raw(verilog_writer *wr, odin3_bytes text) {
+    if (wr->st == ODIN3_OK && text.len > 0 && odin3_strbuf_append(&wr->out, text) != ODIN3_OK) {
+        (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
 }
 
 /*
- * Appends text. A leading blank is dropped when the output already ends in one: an escaped
- * identifier ends with the blank that terminates it, so `\a ` then ` = b` gives `\a = b`.
+ * Appends Verilog syntax. Right after an escaped identifier (which ends with the blank that
+ * terminates it) a leading blank is dropped, so `\a ` then ` = b` gives `\a = b`; nowhere else.
  */
 static void vw_bytes(verilog_writer *wr, odin3_bytes text) {
-    if (wr->st != ODIN3_OK || text.len == 0) {
-        return;
-    }
     const char *chars = text.ptr;
-    if (chars[0] == ' ' && wr->out.len > 0 && wr->out.data[wr->out.len - 1] == ' ') {
+    if (text.len > 0 && chars[0] == ' ' && wr->out.len == wr->escaped_end) {
         text = (odin3_bytes){chars + 1, text.len - 1};
     }
-    if (odin3_strbuf_append(&wr->out, text) != ODIN3_OK) {
-        (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
-    }
+    vw_raw(wr, text);
 }
 
 static void vw_puts(verilog_writer *wr, const char *text) {
@@ -249,6 +255,9 @@ static void vw_ident(verilog_writer *wr, odin3_bytes name, const char *what) {
         return;
     }
     odin3_status st = odin3_verilog_append_ident(&wr->out, name);
+    if (st == ODIN3_OK && odin3_verilog_ident_kind(name) == ODIN3_VERILOG_ESCAPED) {
+        wr->escaped_end = wr->out.len;
+    }
     if (st == ODIN3_ERR_INVALID_ARG) {
         (void)vw_refuse(wr, what, name);
     } else if (st != ODIN3_OK) {
@@ -292,35 +301,40 @@ static uint64_t location_of(const verilog_writer *wr, const odin3_prov_record *r
     return (uint64_t)rec->locs[0].file << KEY_SHIFT | rec->locs[0].line;
 }
 
-/* The location an object with provenance prov is printed with (IR §6), cached per record. */
-static uint64_t prov_location(verilog_writer *wr, odin3_prov_id prov) {
-    uint64_t loc = 0;
-    if (prov.v == 0 || wr->st != ODIN3_OK || odin3_u64map_get(wr->prov_loc, prov.v, &loc)) {
-        return loc;
+/* The record that names an object with provenance prov (IR §6): prov itself, or for a DERIVED
+ * record the first leaf of the backward walk. Cached per record; NULL for none. */
+static const odin3_prov_record *prov_leaf(verilog_writer *wr, odin3_prov_id prov) {
+    uint64_t leaf = 0;
+    if (prov.v == 0 || wr->st != ODIN3_OK) {
+        return NULL;
     }
-    const odin3_prov_record *rec = odin3_prov_get(wr->design, prov);
-    if (rec != NULL && rec->kind == ODIN3_PROV_DERIVED) {
-        vw_leaf leaf = {{0}};
-        if (odin3_prov_sources(wr->design, prov, first_leaf, &leaf) != ODIN3_OK) {
-            (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
-            return 0;
+    if (!odin3_u64map_get(wr->prov_leaf, prov.v, &leaf)) {
+        const odin3_prov_record *rec = odin3_prov_get(wr->design, prov);
+        vw_leaf found = {rec != NULL ? prov : (odin3_prov_id){0}};
+        if (rec != NULL && rec->kind == ODIN3_PROV_DERIVED) {
+            found.first = (odin3_prov_id){0};
+            odin3_status st = odin3_prov_sources(wr->design, prov, first_leaf, &found);
+            if (st != ODIN3_OK) {
+                (void)vw_fail(wr, st);
+                return NULL;
+            }
         }
-        rec = odin3_prov_get(wr->design, leaf.first);
+        leaf = found.first.v;
+        if (odin3_u64map_put(wr->prov_leaf, (odin3_kv){prov.v, leaf}) != ODIN3_OK) {
+            (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+            return NULL;
+        }
     }
-    loc = location_of(wr, rec);
-    if (odin3_u64map_put(wr->prov_loc, (odin3_kv){prov.v, loc}) != ODIN3_OK) {
-        (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
-    }
-    return loc;
+    return odin3_prov_get(wr->design, (odin3_prov_id){(uint32_t)leaf});
 }
 
 /* Ends a line: `  // file:line` when prov has a location, then the newline. */
 static void vw_eol(verilog_writer *wr, odin3_prov_id prov) {
-    uint64_t loc = prov_location(wr, prov);
+    uint64_t loc = location_of(wr, prov_leaf(wr, prov));
     if (loc != 0) {
-        vw_puts(wr, "  // ");
-        vw_bytes(wr, str_bytes(wr, (uint32_t)(loc >> KEY_SHIFT)));
-        vw_char(wr, ':');
+        vw_raw(wr, odin3_bytes_cstr("  // "));
+        vw_raw(wr, str_bytes(wr, (uint32_t)(loc >> KEY_SHIFT)));
+        vw_raw(wr, odin3_bytes_cstr(":"));
         vw_u32(wr, (uint32_t)loc);
     }
     vw_char(wr, '\n');
@@ -384,10 +398,31 @@ static uint32_t name_of(const verilog_writer *wr, vw_obj kind, uint32_t id) {
     return odin3_u64map_get(wr->mod.obj_names, obj_key(kind, id), &str) ? (uint32_t)str : 0;
 }
 
-/* Gives the object the identifier text when it is writable and free; false otherwise. */
+/*
+ * True when text reads as a bit or part select of a vector wire named so far (`a[0]` beside
+ * `a[1:0]`): legal Verilog, but Yosys write_blif would give both the same BLIF name.
+ */
+static bool select_lookalike(const verilog_writer *wr, odin3_bytes text) {
+    const char *chars = text.ptr;
+    if (text.len < 2 || chars[text.len - 1] != ']') {
+        return false;
+    }
+    size_t open = text.len - 1;
+    while (open > 0 && chars[open] != '[') {
+        open--;
+    }
+    uint32_t base = 0;
+    return open > 0 && chars[open] == '[' &&
+           odin3_strtab_find(wr->mod.names, (odin3_bytes){chars, open}, &base) &&
+           odin3_u64map_get(wr->mod.vectors, base, NULL);
+}
+
+/* Gives an object without a name the identifier text when it is writable and free (not taken,
+ * not a select lookalike); false otherwise. */
 static bool claim(verilog_writer *wr, uint64_t key, odin3_bytes text) {
     if (wr->st != ODIN3_OK || odin3_verilog_ident_kind(text) == ODIN3_VERILOG_UNWRITABLE ||
-        odin3_strtab_find(wr->mod.names, text, NULL)) {
+        odin3_u64map_get(wr->mod.obj_names, key, NULL) ||
+        odin3_strtab_find(wr->mod.names, text, NULL) || select_lookalike(wr, text)) {
         return false;
     }
     uint32_t str = 0;
@@ -397,12 +432,6 @@ static bool claim(verilog_writer *wr, uint64_t key, odin3_bytes text) {
         return false;
     }
     return true;
-}
-
-static void claim_str(verilog_writer *wr, uint64_t key, uint32_t str) {
-    if (str != 0) {
-        (void)claim(wr, key, str_bytes(wr, str));
-    }
 }
 
 /* A generated name for an object that has none: prefix<id> (prefix alone for id 0), then
@@ -555,6 +584,15 @@ static bool needs_name(const verilog_writer *wr, odin3_node_id node) {
 
 /* --- module setup: references and the namespace -------------------------------------------- */
 
+/* Records a claimed vector wire's name for select_lookalike. */
+static void note_vector(verilog_writer *wr, odin3_wire_id wire) {
+    uint32_t str = name_of(wr, OBJ_WIRE, wire.v);
+    if (str != 0 && !wire_scalar(wr, wire) &&
+        odin3_u64map_put(wr->mod.vectors, (odin3_kv){str, 1}) != ODIN3_OK) {
+        (void)vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
+}
+
 /* Port names are the interface: each must be writable (they are unique among wires). */
 static odin3_status claim_ports(verilog_writer *wr) {
     const odin3_module *module = wr->mod.module;
@@ -566,7 +604,64 @@ static odin3_status claim_ports(verilog_writer *wr) {
             (void)vw_refuse(wr, "port name cannot be written in Verilog:", name);
         }
     }
+    /* After every port is named, so ports never count as each other's select lookalikes. */
+    for (uint32_t i = 0; wr->st == ODIN3_OK && i < odin3_module_port_count(module); i++) {
+        note_vector(wr, odin3_module_port_wire(module, i));
+    }
     return wr->st;
+}
+
+/* A wire, net or cell to name: its own name (0 = none), provenance and generated-name prefix. */
+typedef struct vw_named {
+    vw_obj kind;
+    uint32_t id;
+    uint32_t own;
+    odin3_prov_id prov;
+    const char *prefix;
+} vw_named;
+
+/* Appends the short name (own name, else prefix<id>) to wr->cand. */
+static odin3_status append_short(verilog_writer *wr, const vw_named *obj) {
+    if (obj->own != 0) {
+        return odin3_strbuf_append(&wr->cand, str_bytes(wr, obj->own));
+    }
+    return odin3_strbuf_appendf(&wr->cand, "%s%u", obj->prefix, (unsigned)obj->id);
+}
+
+/* PROVENANCE style (IR §6): tries hier/<short name>@file:line from the record naming the object;
+ * nothing when the record has neither a hierarchy nor a location. */
+static void claim_provenance(verilog_writer *wr, const vw_named *obj) {
+    const odin3_prov_record *rec = prov_leaf(wr, obj->prov);
+    uint64_t loc = location_of(wr, rec);
+    if (rec == NULL || (rec->hier == 0 && loc == 0)) {
+        return;
+    }
+    odin3_strbuf_clear(&wr->cand);
+    odin3_status st = ODIN3_OK;
+    if (rec->hier != 0) {
+        st = odin3_strbuf_appendf(&wr->cand, "%s/", odin3_strtab_get(wr->tab, rec->hier));
+    }
+    st = st == ODIN3_OK ? append_short(wr, obj) : st;
+    if (st == ODIN3_OK && loc != 0) {
+        st = odin3_strbuf_appendf(&wr->cand, "@%s:%u",
+                                  odin3_strtab_get(wr->tab, (uint32_t)(loc >> KEY_SHIFT)),
+                                  (unsigned)(uint32_t)loc);
+    }
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+        return;
+    }
+    (void)claim(wr, obj_key(obj->kind, obj->id), (odin3_bytes){wr->cand.data, wr->cand.len});
+}
+
+/* The object's provenance name (PROVENANCE style), else its own name when writable and free. */
+static void claim_object(verilog_writer *wr, vw_named obj) {
+    if (wr->name_style == ODIN3_VERILOG_NAMES_PROVENANCE) {
+        claim_provenance(wr, &obj);
+    }
+    if (obj.own != 0) {
+        (void)claim(wr, obj_key(obj.kind, obj.id), str_bytes(wr, obj.own));
+    }
 }
 
 /* Real names first (wires, nets, cells in ID order); generated names only for the rest. */
@@ -575,18 +670,23 @@ static void claim_names(verilog_writer *wr) {
     for (uint32_t i = 1; i < odin3_module_wire_end(module); i++) {
         odin3_wire_id wire = {i};
         if (odin3_wire_live(module, wire) && wire_port(wr, wire) == 0) {
-            claim_str(wr, obj_key(OBJ_WIRE, i), odin3_wire_name(module, wire));
+            claim_object(wr, (vw_named){OBJ_WIRE, i, odin3_wire_name(module, wire),
+                                        odin3_wire_prov(module, wire), "$w"});
+            note_vector(wr, wire);
         }
     }
     for (uint32_t i = 1; i < odin3_module_net_end(module); i++) {
-        if (odin3_net_live(module, (odin3_net_id){i}) && wr->mod.refs[i].kind == REF_OWN) {
-            claim_str(wr, obj_key(OBJ_NET, i), own_name(module, (odin3_net_id){i}));
+        odin3_net_id net = {i};
+        if (odin3_net_live(module, net) && wr->mod.refs[i].kind == REF_OWN) {
+            claim_object(wr, (vw_named){OBJ_NET, i, own_name(module, net),
+                                        odin3_net_prov(module, net), "$n"});
         }
     }
     for (uint32_t i = 1; i < odin3_module_node_end(module); i++) {
         odin3_node_id node = {i};
         if (odin3_node_live(module, node) && !is_port_node(wr, node) && needs_name(wr, node)) {
-            claim_str(wr, obj_key(OBJ_NODE, i), odin3_node_name(module, node));
+            claim_object(wr, (vw_named){OBJ_NODE, i, odin3_node_name(module, node),
+                                        odin3_node_prov(module, node), "$c"});
         }
     }
 }
@@ -648,6 +748,7 @@ static void generate_names(verilog_writer *wr) {
 static void end_module(verilog_writer *wr) {
     odin3_strtab_destroy(wr->mod.names);
     odin3_u64map_destroy(wr->mod.obj_names);
+    odin3_u64map_destroy(wr->mod.vectors);
     odin3_util_free(wr->mod.refs);
     odin3_util_free(wr->mod.wire_port);
     wr->mod = (vw_module){0};
@@ -660,9 +761,10 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
                        .name = odin3_strtab_get(wr->tab, odin3_module_name(module))};
     mod->names = odin3_strtab_create();
     mod->obj_names = odin3_u64map_create(0);
+    mod->vectors = odin3_u64map_create(0);
     mod->refs = odin3_util_calloc(sizeof(vw_ref) * odin3_module_net_end(module));
     mod->wire_port = odin3_util_calloc(sizeof(uint32_t) * odin3_module_wire_end(module));
-    if (mod->names == NULL || mod->obj_names == NULL || mod->refs == NULL ||
+    if (mod->names == NULL || mod->obj_names == NULL || mod->vectors == NULL || mod->refs == NULL ||
         mod->wire_port == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
@@ -928,7 +1030,10 @@ static void write_unary(verilog_writer *wr, odin3_node_id node, const vw_builtin
     end_stmt(wr, node);
 }
 
-/* $pmux (A B S Y): S[0] ? B[0] : S[1] ? B[1] : … : A (one-hot S; first set bit wins). */
+/*
+ * $pmux (A B S Y): |S ? (({W{S[0]}} & B[0]) | ({W{S[1]}} & B[1]) | …) : A. With several select
+ * bits set the selected slices are ORed (Yosys gate-level semantics, as the 1E simulator does).
+ */
 static void write_pmux(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
     (void)bi;
     const odin3_module *module = wr->mod.module;
@@ -936,13 +1041,20 @@ static void write_pmux(verilog_writer *wr, odin3_node_id node, const vw_builtin 
     odin3_pinslice b_pins = odin3_node_port(module, node, 1);
     odin3_pinslice s_pins = odin3_node_port(module, node, 2);
     begin_assign(wr, node);
+    vw_char(wr, '|');
+    put_port(wr, node, 2, false);
+    vw_puts(wr, " ? (");
     for (uint32_t i = 0; i < s_pins.count; i++) {
+        vw_puts(wr, i > 0 ? " | ({" : "({");
+        vw_u32(wr, width);
+        vw_char(wr, '{');
         put_pin(wr, (odin3_pin_id){s_pins.first.v + i});
-        vw_puts(wr, " ? ");
+        vw_puts(wr, "}} & ");
         vw_items slice = pin_items((odin3_pinslice){{b_pins.first.v + i * width}, width});
         put_items(wr, &slice, false);
-        vw_puts(wr, " : ");
+        vw_char(wr, ')');
     }
+    vw_puts(wr, ") : ");
     put_port(wr, node, 0, false);
     end_stmt(wr, node);
 }
@@ -1465,6 +1577,9 @@ static void put_stub_range(verilog_writer *wr, odin3_celltype_id type, uint32_t 
         vw_puts(wr, "-1:0] ");
     } else if (!def->scalar) {
         uint32_t width = def->width_fn != NULL ? default_width(wr, type, port) : def->width;
+        if (width == 0) {
+            return; /* Verilog has no zero-width port: declared 1 bit, left unconnected */
+        }
         vw_char(wr, '[');
         vw_i64(wr, (int64_t)width - 1);
         vw_puts(wr, ":0] ");
@@ -1542,13 +1657,18 @@ static odin3_status write_stubs(verilog_writer *wr) {
 /* --- entry point --------------------------------------------------------------------------- */
 
 static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, const char *path) {
-    *wr = (verilog_writer){.design = design, .tab = odin3_design_strtab(design), .path = path};
+    *wr = (verilog_writer){.design = design,
+                           .tab = odin3_design_strtab(design),
+                           .path = path,
+                           .escaped_end = SIZE_MAX};
     odin3_strbuf_init(&wr->out);
     odin3_strbuf_init(&wr->cand);
+    odin3_strbuf_init(&wr->tmp_path);
     wr->builtin = odin3_u64map_create(0);
-    wr->prov_loc = odin3_u64map_create(0);
+    wr->prov_leaf = odin3_u64map_create(0);
     wr->stubbed = odin3_u64map_create(0);
-    if (wr->builtin == NULL || wr->prov_loc == NULL || wr->stubbed == NULL) {
+    if (wr->builtin == NULL || wr->prov_leaf == NULL || wr->stubbed == NULL ||
+        odin3_strbuf_appendf(&wr->tmp_path, "%s.tmp", path) != ODIN3_OK) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
     for (uint32_t i = 0; i < N_BUILTINS; i++) {
@@ -1563,10 +1683,12 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
     return ODIN3_OK;
 }
 
+/* Creates path.tmp beside the destination; the destination is untouched until the rename. */
 static odin3_status wr_open(verilog_writer *wr) {
-    wr->file = fopen(wr->path, "wb");
+    wr->file = fopen(wr->tmp_path.data, "wb");
     if (wr->file == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", wr->path, strerror(errno));
+        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open %s for writing: %s", wr->path,
+                  wr->tmp_path.data, strerror(errno));
         return vw_fail(wr, ODIN3_ERR_IO);
     }
     wr->opened = true;
@@ -1578,30 +1700,28 @@ static odin3_status wr_open(verilog_writer *wr) {
     return ODIN3_OK;
 }
 
-/* Closes the file; a failure to close is a located write error. */
-static void wr_close(verilog_writer *wr) {
-    if (wr->file == NULL) {
-        return;
+/* Closes the temporary file (a failure is a located write error), then renames it over the
+ * destination on success or removes it on any failure. */
+static void wr_finish(verilog_writer *wr) {
+    if (wr->file != NULL) {
+        errno = 0;
+        bool failed = ferror(wr->file) != 0;
+        failed = fclose(wr->file) != 0 || failed;
+        int saved = errno != 0 ? errno : EIO;
+        wr->file = NULL;
+        if (failed && wr->st == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
+                      strerror(saved));
+            (void)vw_fail(wr, ODIN3_ERR_IO);
+        }
     }
-    errno = 0;
-    bool failed = ferror(wr->file) != 0;
-    if (fclose(wr->file) != 0) {
-        failed = true;
-    }
-    int saved = errno != 0 ? errno : EIO;
-    wr->file = NULL;
-    if (failed && wr->st == ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
-                  strerror(saved));
+    if (wr->opened && wr->st == ODIN3_OK && rename(wr->tmp_path.data, wr->path) != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: cannot rename %s over it: %s", wr->path, wr->tmp_path.data,
+                  strerror(errno));
         (void)vw_fail(wr, ODIN3_ERR_IO);
     }
-}
-
-/* After a failure, removes the partly written file when it is a regular file. */
-static void wr_discard(const verilog_writer *wr) {
-    struct stat info;
-    if (wr->opened && stat(wr->path, &info) == 0 && S_ISREG(info.st_mode)) {
-        (void)remove(wr->path);
+    if (wr->opened && wr->st != ODIN3_OK) {
+        (void)remove(wr->tmp_path.data);
     }
 }
 
@@ -1609,18 +1729,23 @@ static void wr_free(verilog_writer *wr) {
     end_module(wr);
     odin3_strbuf_free(&wr->out);
     odin3_strbuf_free(&wr->cand);
+    odin3_strbuf_free(&wr->tmp_path);
     odin3_u64map_destroy(wr->builtin);
-    odin3_u64map_destroy(wr->prov_loc);
+    odin3_u64map_destroy(wr->prov_leaf);
     odin3_u64map_destroy(wr->stubbed);
 }
 
-odin3_status odin3_verilog_write(const odin3_design *design, const char *path) {
-    if (design == NULL || path == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path");
+odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
+                                 const odin3_verilog_opts *opts) {
+    if (design == NULL || path == NULL ||
+        (opts != NULL && opts->name_style != ODIN3_VERILOG_NAMES_SHORT &&
+         opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE)) {
+        odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path, or an unknown name style");
         return ODIN3_ERR_INVALID_ARG;
     }
     verilog_writer wr;
     odin3_status st = wr_init(&wr, design, path);
+    wr.name_style = opts != NULL ? opts->name_style : ODIN3_VERILOG_NAMES_SHORT;
     if (st == ODIN3_OK) {
         st = wr_open(&wr);
     }
@@ -1631,11 +1756,8 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path) {
         (void)write_stubs(&wr);
     }
     vw_flush(&wr);
-    wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
+    wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
     st = wr.st;
-    if (st != ODIN3_OK) {
-        wr_discard(&wr);
-    }
     wr_free(&wr);
     return st;
 }
