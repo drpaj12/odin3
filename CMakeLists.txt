@@ -82,6 +82,10 @@ add_library(odin3_core OBJECT
     src/techlib/reader.c
     src/techlib/reader_cell.c)
     src/backends/dot/writer.c)
+    src/backends/json/emit.c
+    src/backends/json/cells.c
+    src/backends/json/lut.c
+    src/backends/json/writer.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -187,6 +191,7 @@ if(BUILD_TESTING)
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_dot_writer)
+    odin3_add_unit_test(test_json_writer)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
