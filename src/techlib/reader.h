@@ -121,10 +121,9 @@ typedef struct odin3_techlib_text {
  * Parses a whole library, then registers each cell as a design-local cell type (in file order)
  * with its library data attached (odin3_techlib_cell_get). A malformed library (syntax, duplicate
  * or unknown names, an undriven output, a cell name the design already has) is logged as
- * "name:line[:column]: message" and returns ODIN3_ERR_INVALID_ARG with no type registered (until
- * the 1C rebase, which switches it to ODIN3_ERR_PARSE). ODIN3_ERR_NO_MEMORY on out of memory; when
- * that happens while registering, the cells registered before stay. Either way the design's
- * strtab and arena may have grown.
+ * "name:line[:column]: message" and returns ODIN3_ERR_PARSE with no type registered.
+ * ODIN3_ERR_NO_MEMORY on out of memory; when that happens while registering, the cells registered
+ * before stay. Either way the design's strtab and arena may have grown.
  */
 odin3_status odin3_techlib_read_text(odin3_design *design, const odin3_techlib_text *src);
 

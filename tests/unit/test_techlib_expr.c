@@ -101,8 +101,8 @@ static void expect_eval_fail(fail_case fc) {
 static void expect_parse_error(fail_case fc) {
     const odin3_expr *expr = NULL;
     g_msgs = 0;
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG,
-                                  parse_bytes(odin3_bytes_cstr(fc.text), &expr), fc.text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, parse_bytes(odin3_bytes_cstr(fc.text), &expr),
+                                  fc.text);
     TEST_ASSERT_NULL(expr);
     TEST_ASSERT_EQUAL_UINT(1, g_msgs);
     TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(g_msg, fc.where, strlen(fc.where)), g_msg);
@@ -367,11 +367,10 @@ static void test_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_expr_eval_int(NULL, NULL, &got));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_expr_eval_int(parse_ok("1"), NULL, NULL));
     const odin3_expr_parser anon = {g_arena, g_tab, NULL, 2};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_expr_parse(&anon, odin3_bytes_cstr("+"), &expr));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_expr_parse(&anon, odin3_bytes_cstr("+"), &expr));
     TEST_ASSERT_NOT_NULL(strstr(g_msg, "<expr>:2:1:"));
     const odin3_bytes with_nul = {"a\0b", 3};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse_bytes(with_nul, &expr));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_bytes(with_nul, &expr));
 }
 
 /* text = repeat(open, n) + body + repeat(close, n) */

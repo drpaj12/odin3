@@ -84,8 +84,8 @@ typedef struct odin3_expr_parser {
 
 /*
  * Parses text (the whole span is one expression) into *out. Errors are logged as
- * "file:line:column: message" and return ODIN3_ERR_INVALID_ARG (the status enum has no parse
- * code); out of memory is ODIN3_ERR_NO_MEMORY. *out is untouched on failure.
+ * "file:line:column: message" and return ODIN3_ERR_PARSE; invalid arguments are
+ * ODIN3_ERR_INVALID_ARG and out of memory is ODIN3_ERR_NO_MEMORY. *out is untouched on failure.
  */
 odin3_status odin3_expr_parse(const odin3_expr_parser *parser, odin3_bytes text,
                               const odin3_expr **out);

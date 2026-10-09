@@ -19,11 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/*
- * The status of every malformed-library error, in this one place: ODIN3_ERR_INVALID_ARG until the
- * branch is rebased onto 1C, which adds ODIN3_ERR_PARSE and switches this line to it.
- */
-#define ODIN3_RD_PARSE_ERROR ODIN3_ERR_INVALID_ARG
+/* The status of every malformed-library error, in this one place. */
+#define ODIN3_RD_PARSE_ERROR ODIN3_ERR_PARSE
 
 enum { ODIN3_RD_MSG_MAX = 512 };
 

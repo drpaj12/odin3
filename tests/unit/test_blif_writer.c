@@ -675,8 +675,8 @@ static void test_input_feeds_output(void) {
 /* A design listing one black box twice writes its model once. */
 static void test_declared_black_box_written_once(void) {
     new_module(design, "top");
-    static const odin3_port_def ports[] = {{"i", ODIN3_DIR_IN, true, 1, NULL, NULL},
-                                           {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL}};
+    static const odin3_port_def ports[] = {{"i", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+                                           {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
     odin3_celltype_def def = {
         .name = "bb", .gran = ODIN3_GRAN_BLACKBOX, .ports = ports, .n_ports = 2};
     odin3_celltype_id first = {0};

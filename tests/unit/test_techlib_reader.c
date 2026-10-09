@@ -434,14 +434,14 @@ static void test_fn_expressions_name_ports_and_params(void) {
 }
 
 static void test_failed_read_registers_nothing(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, read_into(g_design, "library L\n"
-                                                                     "cell OK1 gate\n"
-                                                                     "  in A 1 ; out Y 1\n"
-                                                                     "  fn Y = A\n"
-                                                                     "end\n"
-                                                                     "cell BAD gate\n"
-                                                                     "  out Y 1\n"
-                                                                     "end\n"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_into(g_design, "library L\n"
+                                                               "cell OK1 gate\n"
+                                                               "  in A 1 ; out Y 1\n"
+                                                               "  fn Y = A\n"
+                                                               "end\n"
+                                                               "cell BAD gate\n"
+                                                               "  out Y 1\n"
+                                                               "end\n"));
     TEST_ASSERT_FALSE(odin3_celltype_valid(type_of("OK1")));
     TEST_ASSERT_FALSE(odin3_celltype_valid(type_of("BAD")));
 }
@@ -612,7 +612,7 @@ static void run_bad(size_t idx, const bad_case *bad) {
     setUp();
     odin3_status st = read_into(g_design, bad->text);
     (void)snprintf(label, sizeof label, "case %zu: got \"%s\"", idx, g_msg);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, st, label);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, st, label);
     TEST_ASSERT_TRUE_MESSAGE(strncmp(g_msg, bad->where, strlen(bad->where)) == 0, label);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(g_msg, bad->what), label);
     TEST_ASSERT_FALSE_MESSAGE(odin3_celltype_valid(type_of("C")), label);
@@ -630,14 +630,14 @@ static void test_malformed_libraries(void) {
 static void test_nul_byte(void) {
     static const char text[] = "library L\ncell C gate\0\nend\n";
     const odin3_techlib_text src = {"t.o3lib", {text, sizeof text - 1}};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_techlib_read_text(g_design, &src));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_techlib_read_text(g_design, &src));
     TEST_ASSERT_EQUAL_STRING("t.o3lib:2:12: NUL byte in the library", g_msg);
 }
 
 /* The same library read twice: the second read finds every cell already registered. */
 static void test_second_read_rejects_existing_cells(void) {
     read_ok(k_and2);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, read_into(g_design, k_and2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_into(g_design, k_and2));
     TEST_ASSERT_NOT_NULL(strstr(g_msg, "t.o3lib:2:"));
     TEST_ASSERT_NOT_NULL(strstr(g_msg, "AND2"));
 }

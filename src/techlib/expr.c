@@ -157,7 +157,7 @@ static odin3_status perr(const pstate *ps, uint32_t col, const char *fmt, ...) {
     va_end(args);
     const char *file = ps->cfg->file != NULL ? ps->cfg->file : "<expr>";
     odin3_log(ODIN3_LOG_ERROR, "%s:%u:%u: %s", file, ps->cfg->line, col, msg);
-    return ODIN3_ERR_INVALID_ARG;
+    return ODIN3_ERR_PARSE;
 }
 
 static bool is_digit(char ch) {
