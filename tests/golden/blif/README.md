@@ -35,3 +35,10 @@ drives one net from two `.names` (read as written; `check` reports rule 4).
 
 Error cases and one-off variants are written to a temporary file by the test itself, next to
 their assertions in `tests/unit/test_blif_reader.c`.
+
+## Round-trip gate
+
+CTest `blif_roundtrip_fixtures` runs `tools/blif-roundtrip/blif-roundtrip --fixtures` over every
+`*.blif` here (read, check FULL, write; normalized text identity; `netlist-compare`). No fixtures
+were added for it; `elsif_both_defined.odin.blif` is on the script's multi-driver list. The full
+golden run is `tools/blif-roundtrip/blif-roundtrip` with no arguments (see `docs/PHASE1.md`, 1C).
