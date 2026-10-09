@@ -63,6 +63,7 @@ typedef struct odin3_rd_cell {
     odin3_vec seqs;       /* odin3_techlib_seq */
     odin3_vec mports;     /* odin3_techlib_memport */
     bool has_memory;
+    uint64_t total_width;        /* port widths so far, with the default parameters */
     odin3_techlib_memory memory; /* words, width, line; the arrays are filled at `end` */
 } odin3_rd_cell;
 

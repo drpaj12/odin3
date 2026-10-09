@@ -23,6 +23,13 @@
  */
 enum { ODIN3_READER_MAX_WIDTH = 1 << 20 };
 
+/*
+ * The most bits all ports of one cell may have together under the same rule (a library cell with
+ * its default parameters, an undeclared BLIF instance): many ports each under
+ * ODIN3_READER_MAX_WIDTH must not add up to gigabytes. 2^22 bits is about 16 MB of pin IDs.
+ */
+enum { ODIN3_READER_MAX_TOTAL_WIDTH = 1 << 22 };
+
 /* Direction as seen from the cell: a $port_in's pin is OUT (it drives the module's net). */
 typedef enum odin3_dir { ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT } odin3_dir;
 

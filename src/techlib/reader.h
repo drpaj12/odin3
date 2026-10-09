@@ -20,8 +20,9 @@
  * first port of a sync memory port must be such inputs. Port and parameter names share one
  * namespace per cell and cannot be `signed`, `clock` or `x`. A width without identifiers is folded
  * to a constant; a port width (constant, or with the default parameters) is at most
- * ODIN3_READER_MAX_WIDTH (2^20). A memory port's list is checked only for input directions and
- * the clock: `read sync clk` without an address and `read async` with no inputs are accepted
+ * ODIN3_READER_MAX_WIDTH (2^20) and a cell's port widths together at most
+ * ODIN3_READER_MAX_TOTAL_WIDTH (2^22). A memory port's list is checked only for input directions
+ * and the clock: `read sync clk` without an address and `read async` with no inputs are accepted
  * (memory semantics arrive in Phase 4). NUM is a decimal number (digits, optional fraction).
  */
 #ifndef ODIN3_TECHLIB_READER_H

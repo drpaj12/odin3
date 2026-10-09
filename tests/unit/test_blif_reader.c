@@ -801,6 +801,36 @@ static void test_constant_width_is_capped(void) {
                        4, "gives port 'a' 4294967294 bits here, above the 1048576");
 }
 
+/* The total width of an undeclared instance is capped too (2^22 bits): many ports each under the
+ * per-port cap must not add up to gigabytes. */
+static void test_total_width_is_capped(void) {
+    static odin3_port_def ports[5];
+    for (uint32_t i = 0; i < 5; i++) {
+        static const char *const names[] = {"a", "b", "c", "d", "e"};
+        ports[i] = (odin3_port_def){.name = names[i], .dir = ODIN3_DIR_IN, .width = 1U << 20};
+    }
+    const odin3_celltype_def def = {
+        .name = "o3test_wide", .gran = ODIN3_GRAN_HARD, .ports = ports, .n_ports = 5};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, NULL));
+    expect_parse_error(".model top\n.inputs x\n.subckt o3test_wide a[0]=x\n.end\n", 3,
+                       "'o3test_wide' gives its ports 5242880 bits in total here, above the "
+                       "4194304");
+}
+
+/* A module of the file is sized by its own definition: no cap applies to its instances. */
+static void test_module_instance_not_capped(void) {
+    static char text[1U << 24];
+    int at = snprintf(text, sizeof text,
+                      ".model top\n.inputs x\n.subckt m w[1048576]=x\n.end\n"
+                      ".model m\n.inputs");
+    for (uint32_t k = 0; k <= (1U << 20); k++) {
+        at += snprintf(text + at, sizeof text - (size_t)at, " w[%u]", (unsigned)k);
+    }
+    (void)snprintf(text + at, sizeof text - (size_t)at, "\n.end\n");
+    write_str(text);
+    read_ok(PATH);
+}
+
 /* Review Focus 1: a declared parametric model in another port order and other scalar flags; its
  * instances get the declared parameters and use the declared spelling of each port. */
 static void test_declared_parametric_model(void) {
@@ -1148,6 +1178,8 @@ static void run_pass1_tests(void) {
     RUN_TEST(test_subckt_of_registered_parametric_type_needs_bit_formals);
     RUN_TEST(test_inferred_width_is_capped);
     RUN_TEST(test_constant_width_is_capped);
+    RUN_TEST(test_total_width_is_capped);
+    RUN_TEST(test_module_instance_not_capped);
     RUN_TEST(test_declared_parametric_model);
     RUN_TEST(test_declared_parametric_model_bounds_formals);
     RUN_TEST(test_declared_parametric_model_contradiction);

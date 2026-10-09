@@ -607,6 +607,10 @@ static const bad_case k_bad[] = {
      "t.o3lib:3:17:", "the default of 'W' must be a constant integer: division by zero"},
     {CELL "  param A int B\nend\n",
      "t.o3lib:3:15:", "the default of 'A' must be a constant integer: unknown identifier 'B'"},
+    /* a cell's port widths together are capped at 2^22 bits (with the default parameters) */
+    {CELL "  in a 1048576 ; in b 1048576 ; in c 1048576 ; in d 1048576 ; out y 1 ; fn y = a[0]\n"
+          "end\n",
+     "t.o3lib:3:", "ports of cell 'C' total 4194305 bits with the default parameters, above"},
     /* port widths are capped at 2^20 bits, constant or with the default parameters */
     {CELL "  in a 1048577 ; out y 1 ; fn y = a[0]\nend\n",
      "t.o3lib:3:", "width must be in 1..1048576 (is 1048577"},

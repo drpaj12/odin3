@@ -1074,6 +1074,7 @@ static odin3_status note_seen(blif_reader *rd, const blif_inst *inst, odin3_byte
  * such as A_WIDTH * B_WIDTH can exceed the formals' own bound, and a registered type's constant
  * width is not bounded by the file at all. */
 static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
+    uint64_t total = 0;
     for (uint32_t port = 0; port < inst->def->n_ports; port++) {
         uint32_t width = 0;
         const odin3_port_query query = {inst->type, rd->params.data, port};
@@ -1092,6 +1093,13 @@ static odin3_status check_inferred(blif_reader *rd, const blif_inst *inst) {
                             inst->def->name, inst->def->ports[port].name, width,
                             MAX_INFERRED_WIDTH);
         }
+        total += width;
+    }
+    if (total > ODIN3_READER_MAX_TOTAL_WIDTH) {
+        return rd_error(rd, rd->line,
+                        "'%s' gives its ports %llu bits in total here, above the %u an undeclared "
+                        ".subckt may have",
+                        inst->def->name, (unsigned long long)total, ODIN3_READER_MAX_TOTAL_WIDTH);
     }
     return ODIN3_OK;
 }
@@ -1110,7 +1118,8 @@ static odin3_status inst_params(blif_reader *rd, const blif_inst *inst, const od
         memcpy(rd->params.data, declared, sizeof *declared * def->n_params);
         return ODIN3_OK;
     }
-    if (inst->decl != NULL) {
+    if (inst->decl != NULL || def->gran == ODIN3_GRAN_MODULE) {
+        /* sized by the declaration or the module's own ports, both bounded by the file */
         return rd_fail(rd, odin3_celltype_infer_params(rd->design, inst->type, rd->seen.data,
                                                        rd->params.data));
     }

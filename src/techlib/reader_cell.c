@@ -38,6 +38,7 @@ static void cell_reset(odin3_rd_cell *cell) {
     cell->area = 0;
     cell->delay = 0;
     cell->has_memory = false;
+    cell->total_width = 0;
     memset(&cell->memory, 0, sizeof cell->memory);
 }
 
@@ -424,6 +425,14 @@ static odin3_status port_width(odin3_reader *rd, odin3_span text, odin3_port_def
     odin3_status st = param_expr(rd, text, &rule, &width);
     if (st != ODIN3_OK) {
         return st;
+    }
+    rd->cell.total_width += (uint64_t)width.value;
+    if (rd->cell.total_width > ODIN3_READER_MAX_TOTAL_WIDTH) {
+        return odin3_rd_err(rd, odin3_rd_at(rd, odin3_rd_trim(text).col),
+                            "the ports of cell '%s' total %llu bits with the default parameters, "
+                            "above %u",
+                            odin3_rd_cell_name(rd), (unsigned long long)rd->cell.total_width,
+                            ODIN3_READER_MAX_TOTAL_WIDTH);
     }
     if (rd->idents.len == 0) {
         def->width = (uint32_t)width.value;
