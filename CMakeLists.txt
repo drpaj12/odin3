@@ -256,6 +256,25 @@ if(BUILD_TESTING)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
         list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
     endif()
+    # sim-check (1E exit test, tools/sim-check) also needs Yosys and Icarus Verilog; without them
+    # sim_check_fixtures is not registered and the sim-check Python tests skip.
+    find_program(ODIN3_YOSYS yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
+    find_program(ODIN3_IVERILOG iverilog)
+    find_program(ODIN3_VVP vvp)
+    if(ODIN3_WITH_ABC AND ODIN3_YOSYS AND ODIN3_IVERILOG AND ODIN3_VVP)
+        list(APPEND _tools_env "ODIN3_YOSYS=${ODIN3_YOSYS}" "ODIN3_REQUIRE_SIM_CHECK=1")
+        file(GLOB _sim_fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif/*.*.blif
+                                ${PROJECT_SOURCE_DIR}/tests/golden/techlib/*.blif)
+        # -m 0: no address-space cap (the debug driver is an ASan build).
+        add_test(NAME sim_check_fixtures
+                 COMMAND ${PROJECT_SOURCE_DIR}/tools/sim-check/sim-check -m 0
+                         --driver $<TARGET_FILE:odin3-sim-vectors> --abc $<TARGET_FILE:abc>
+                         --yosys ${ODIN3_YOSYS} --iverilog ${ODIN3_IVERILOG} --vvp ${ODIN3_VVP}
+                         --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --fixtures ${_sim_fixtures})
+        set_tests_properties(sim_check_fixtures PROPERTIES LABELS tools)
+    else()
+        message(STATUS "sim_check_fixtures not registered: needs ABC, yosys, iverilog and vvp")
+    endif()
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
