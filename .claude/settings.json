@@ -38,7 +38,27 @@
       "Bash(python3 -m unittest *)",
       "Bash(lizard *)",
       "Bash(clang-tidy *)",
-      "Bash(clang-format *)"
+      "Bash(clang-format *)",
+      "Bash(rm -rf /tmp/claude-1000/*)",
+      "Bash(rm -rf /home/jamiespa/odin3-ws/work/*)",
+      "Bash(rm -rf ~/odin3-ws/work/*)",
+      "Bash(rm -rf /home/jamiespa/odin3-ws/rt-run*)",
+      "Bash(rm -rf ~/odin3-ws/rt-run*)",
+      "Bash(rm -fr /tmp/claude-1000/*)",
+      "Bash(rm -fr /home/jamiespa/odin3-ws/work/*)",
+      "Bash(rm -fr ~/odin3-ws/work/*)",
+      "Bash(rm -fr /home/jamiespa/odin3-ws/rt-run*)",
+      "Bash(rm -fr ~/odin3-ws/rt-run*)",
+      "Bash(rm -r /tmp/claude-1000/*)",
+      "Bash(rm -r /home/jamiespa/odin3-ws/work/*)",
+      "Bash(rm -r ~/odin3-ws/work/*)",
+      "Bash(rm -r /home/jamiespa/odin3-ws/rt-run*)",
+      "Bash(rm -r ~/odin3-ws/rt-run*)",
+      "Bash(rm -f /tmp/claude-1000/*)",
+      "Bash(rm -f /home/jamiespa/odin3-ws/work/*)",
+      "Bash(rm -f ~/odin3-ws/work/*)",
+      "Bash(rm -f /home/jamiespa/odin3-ws/rt-run*)",
+      "Bash(rm -f ~/odin3-ws/rt-run*)"
     ],
     "ask": [
       "Bash(git push --force*)",
@@ -50,11 +70,28 @@
       "Bash(git commit --no-verify*)",
       "Bash(git commit * --no-verify*)",
       "Bash(git reset --hard *)",
-      "Bash(rm -rf *)"
+      "Bash(rm * * *)"
     ],
     "deny": [
       "Read(./.env)",
-      "Edit(~/odin3-ws/external/**)"
+      "Edit(~/odin3-ws/external/**)",
+      "Bash(rm *..*)",
+      "Bash(rm * /)",
+      "Bash(rm * / *)",
+      "Bash(rm * ~)",
+      "Bash(rm * ~/)",
+      "Bash(rm * ~ *)",
+      "Bash(rm * ~/ *)",
+      "Bash(rm * /home/jamiespa)",
+      "Bash(rm * /home/jamiespa/)",
+      "Bash(rm * /home/jamiespa *)",
+      "Bash(rm * /home/jamiespa/ *)",
+      "Bash(rm *odin3-ws/external*)",
+      "Bash(rm *odin3-ws/golden*)",
+      "Bash(rm *ODIN_III_DATA*)",
+      "Bash(rm *.git)",
+      "Bash(rm *.git/*)",
+      "Bash(rm *.git *)"
     ]
   },
   "sandbox": {
