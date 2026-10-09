@@ -1,6 +1,7 @@
 /*
  * test_sim_cycle.c — the cycle engine: clock edges, settles, INIT, the port API, the PRNG.
  */
+#include "frontends/blif/reader.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -537,6 +538,80 @@ static void test_same_seed_same_outputs(void) {
     odin3_sim_destroy(two);
 }
 
+/* --- golden fixtures (one per oracle) -------------------------------------------------------- */
+
+/* rst, d and q of the flip-flop golden `ff`, one entry per cycle. */
+typedef struct ff_trace {
+    uint8_t rst[N_CYCLES];
+    uint8_t d[N_CYCLES];
+    uint8_t q[N_CYCLES];
+} ff_trace;
+
+/* Reads the BLIF fixture name into a fresh design and builds its top (the first model). */
+static odin3_sim *build_fixture(odin3_design *dsg, const char *name) {
+    char path[512];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_BLIF_FIXTURES, name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(dsg, path), log_text);
+    odin3_sim *sim = NULL;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_sim_build(dsg, (odin3_module_id){1}, &sim),
+                                  log_text);
+    return sim;
+}
+
+/*
+ * 64 random cycles of the golden `ff` (q <= rst ? 0 : d on the rising edge of clk) as the oracle
+ * wrote it, with the inputs named rst_name and d_name: the clock is never driven, and q after a
+ * cycle is the value the cycle's edge sampled.
+ */
+static void run_ff(const char *fixture, const char *const names[2], ff_trace *out) {
+    odin3_design *dsg = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(dsg);
+    odin3_sim *sim = build_fixture(dsg, fixture);
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_sim_input_count(sim));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_sim_output_count(sim));
+    uint32_t rst = input_port(sim, names[0]);
+    uint32_t dat = input_port(sim, names[1]);
+    odin3_prng prng;
+    odin3_prng_seed(&prng, 1);
+    for (uint32_t cyc = 0; cyc < N_CYCLES; cyc++) {
+        odin3_sim_drive_random(sim, &prng);
+        odin3_sim_cycle(sim);
+        out->rst[cyc] = (uint8_t)get_in(sim, rst);
+        out->d[cyc] = (uint8_t)get_in(sim, dat);
+        out->q[cyc] = (uint8_t)get_out(sim, 0);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(out->rst[cyc] ? 0 : out->d[cyc], out->q[cyc], fixture);
+    }
+    odin3_sim_destroy(sim);
+    odin3_design_destroy(dsg);
+}
+
+/* The same design from both oracles simulates 64 cycles and agrees cycle by cycle. */
+static void test_golden_ff_per_oracle(void) {
+    static const char *const k_odin_names[2] = {"dff^rst", "dff^d"};
+    static const char *const k_parmys_names[2] = {"rst", "d"};
+    ff_trace odin;
+    ff_trace parmys;
+    run_ff("ff.odin.blif", k_odin_names, &odin);
+    run_ff("ff.parmys.blif", k_parmys_names, &parmys);
+    /* both list the non-clock inputs as rst then d, so a seed drives them alike */
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(odin.rst, parmys.rst, N_CYCLES);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(odin.d, parmys.d, N_CYCLES);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(odin.q, parmys.q, N_CYCLES);
+    TEST_ASSERT_NOT_NULL(memchr(odin.q, 1, N_CYCLES)); /* q is not stuck at 0 */
+}
+
+/* An Odin II golden that drives one net from two covers is rejected, naming the net. */
+static void test_golden_multi_driver_rejected(void) {
+    char path[512];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_BLIF_FIXTURES, "elsif_both_defined.odin.blif");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(design, path), log_text);
+    odin3_sim *sim = (odin3_sim *)&sim;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_sim_build(design, (odin3_module_id){1}, &sim));
+    TEST_ASSERT_NULL(sim);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "driver"), log_text);
+}
+
 /* --- multiple drivers ------------------------------------------------------------------------- */
 
 static odin3_prov_id located(const char *file, uint32_t line) {
@@ -688,6 +763,8 @@ int main(void) {
     RUN_TEST(test_level_latch_on_the_clock);
     RUN_TEST(test_init_one_and_zero);
     RUN_TEST(test_same_seed_same_outputs);
+    RUN_TEST(test_golden_ff_per_oracle);
+    RUN_TEST(test_golden_multi_driver_rejected);
     RUN_TEST(test_two_cells_driving_a_net_are_rejected);
     RUN_TEST(test_input_and_cell_driving_a_net_are_rejected);
     RUN_TEST(test_drivers_across_hierarchy_are_rejected);

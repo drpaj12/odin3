@@ -1,6 +1,7 @@
 /*
  * test_sim_word.c — word cells and tech-library hard cells through odin3_sim_build, against
- * reference models computed here on one-byte-per-bit arrays and a base-2^16 big integer.
+ * reference models computed here on one-byte-per-bit arrays and a base-2^16 big integer. adder and
+ * multiply come from lib/vtr.o3lib itself (the library the goldens resolve against).
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -938,33 +939,19 @@ static void test_word_hooks_do_not_allocate(void) {
 /* --- tech-library hard cells: the fn interpreter ------------------------------------------------
  */
 
-/* adder and multiply exactly as the 1G spec declares them (lib/vtr.o3lib is not written yet). */
-static const char k_vtr_lib[] = "library vtr_inline\n"
-                                "cell adder hard\n"
-                                "  in  a 1\n"
-                                "  in  b 1\n"
-                                "  in  cin 1\n"
-                                "  out cout 1\n"
-                                "  out sumout 1\n"
-                                "  fn  sumout = a ^ b ^ cin\n"
-                                "  fn  cout   = (a & b) | (a & cin) | (b & cin)\n"
-                                "end\n"
-                                "cell multiply hard\n"
-                                "  param A_WIDTH int 36\n"
-                                "  param B_WIDTH int 36\n"
-                                "  in  a A_WIDTH\n"
-                                "  in  b B_WIDTH\n"
-                                "  out out A_WIDTH + B_WIDTH\n"
-                                "  fn  out = a * b\n"
-                                "end\n";
-
 static void read_lib(const char *text) {
     const odin3_techlib_text src = {"inline.o3lib", odin3_bytes_cstr(text)};
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read_text(design, &src), log_text);
 }
 
+/* lib/vtr.o3lib, the library the goldens' adder and multiply instances resolve against (1G). */
+static void read_vtr_lib(void) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read(design, ODIN3_LIB_DIR "/vtr.o3lib"),
+                                  log_text);
+}
+
 static void test_adder(void) {
-    read_lib(k_vtr_lib);
+    read_vtr_lib();
     odin3_module *top = new_module();
     bus port[5];
     in_bus(top, "a", 1, &port[0]);
@@ -1068,7 +1055,7 @@ static void check_multiply(const odin3_value *params, binary_widths wid) {
 static const char *const k_mul_names[3] = {"a", "b", "out"};
 
 static void test_multiply_36x36(void) {
-    read_lib(k_vtr_lib);
+    read_vtr_lib();
     check_multiply(NULL, (binary_widths){36, 36, 72});
     /* the largest product: (2^36 - 1)^2 = 2^72 - 2^37 + 1 */
     static const uint32_t k_w36[3] = {36, 36, 72};
@@ -1087,7 +1074,7 @@ static void test_multiply_36x36(void) {
 
 /* Parametric widths, the wide path included (65x65 -> 130 bits, three limbs). */
 static void test_multiply_param_widths(void) {
-    read_lib(k_vtr_lib);
+    read_vtr_lib();
     for (uint32_t i = 0; i < N_WIDTHS; i++) {
         for (uint32_t j = 0; j < N_WIDTHS; j++) {
             const odin3_value params[2] = {odin3_value_int(k_widths[i]),
@@ -1496,7 +1483,7 @@ static void test_blackbox_with_hook_simulates(void) {
 
 /* The interpreter allocates nothing per cycle (wide path: 65x65). */
 static void test_fn_hook_does_not_allocate(void) {
-    read_lib(k_vtr_lib);
+    read_vtr_lib();
     static const uint32_t k_w65[3] = {65, 65, 130};
     const cell_ports cp = {k_mul_names, k_w65, 2, 3};
     const odin3_value params[2] = {odin3_value_int(65), odin3_value_int(65)};
@@ -1519,7 +1506,7 @@ static void test_fn_hook_does_not_allocate(void) {
 
 /* Out of memory at every allocation of a build with a tech-library cell (its sizing included). */
 static void test_build_oom_sweep(void) {
-    read_lib(k_vtr_lib);
+    read_vtr_lib();
     odin3_module *top = new_module();
     bus port[3];
     in_bus(top, "a", 36, &port[0]);

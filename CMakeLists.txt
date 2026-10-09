@@ -197,7 +197,10 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_sim_cells)
     odin3_add_unit_test(test_sim_build)
     odin3_add_unit_test(test_sim_cycle)
+    target_compile_definitions(test_sim_cycle PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_word)
+    target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
