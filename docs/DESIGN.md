@@ -109,6 +109,45 @@ Ways to fill it (all produce the same record; a script may also list files direc
 - **Odin II XML config** (`-c config.xml`: `<verilog_files>`, `<arch_file>`, `<output>`), for
   users moving from Odin II (after Phase 2).
 
+**Project file syntax (normative).** Reference parsers: `tools/project-fixtures`; test corpus
+(every case in every format that can express it, expected records, oracle netlists, negatives):
+`tests/golden/projects` (PHASE1 #19).
+- All formats: relative paths resolve against the directory of the file that names them
+  (nested `-f` lists too; unlike Odin II and most `-f` tools, never the working directory);
+  every named file or directory must exist. Language by extension where a format has no
+  language: `.v .vh` Verilog, `.sv .svh` SystemVerilog, `.vhd .vhdl` VHDL, `.blif`, `.vqm`,
+  `.edf .edif`.
+- `.o3proj`: one statement per line, blank-separated words, `"…"` groups (backslash escapes),
+  `#` starts a comment outside quotes; unknown keys are errors. `file <lang> <path> [library
+  <lib>]`, `libfile <lang> <path>`, `libdir <dir>`, `libext <ext>…` (= `-v`/`-y`/`+libext+`),
+  `incdir <dir>`, `define <name>[=<value>]`, `top <module>` (repeatable), `param
+  <module>.<name> <value>`, `arch <file.o3lib|file.xml>`, `device <family> [<part>]`, `map
+  <scope> <subject> (to <cell>[, <cell>…] | soft | keep) [min_width|max_width|min_depth <n>]…`,
+  `limit <cell> <n>`, `available <cell> <n>`, `hide <cell>`, `cell <name> from <libcell>
+  [param <k>=<v>…]`, `patterns <file.o3lib>`, `flow <script.o3>` (once). Scopes use `.` as the
+  hierarchy separator.
+- `-f`: blank-separated words, `//` and `#` comments; a non-option word is a source file
+  (library `work`); `-f` and `-F` (same meaning), `-v <file>`, `-y <dir>`, `+incdir+`,
+  `+define+`, `+libext+` (several `+`-separated values each); any other option is an error. It
+  has no top (selected automatically), parameters or libraries.
+- `.qpf`: `NAME = "value"` lines; the first `PROJECT_REVISION` is read (none: the `.qpf`'s own
+  name). `.qsf`: Tcl words (quotes, braces, `\` continuation, `#` comments).
+  `TOP_LEVEL_ENTITY` defaults to the revision name (Quartus); `set_parameter -name N
+  [-entity E] V` (no `-entity`: the top); `SEARCH_PATH` is an include directory; `VHDL_FILE
+  -library`; `FAMILY`/`DEVICE` form one `device` entry; `AUTO_DSP_RECOGNITION OFF`,
+  `AUTO_RAM_RECOGNITION OFF`, `DSP_BLOCK_BALANCING "LOGIC ELEMENTS"`, and per instance
+  `MULTSTYLE LOGIC` / `RAMSTYLE LOGIC` (`-to a|b:c` → scope `a.c`) become `map <scope>
+  $mul|$mem soft`, their `ON`/`AUTO` is the default (no rule); any other value, assignment
+  (`QIP_FILE`, `SDC_FILE`, pins, timing, partitions, …) or command is ignored and named in one
+  line `info: <file>: ignored: A, B, …`.
+- Odin II XML: `<verilog_files><verilog_file>` (legacy) or `<inputs>` (`<input_type>`
+  verilog|systemverilog|blif, `<input_path_and_name>`…); `<output>` (`<output_type>`,
+  `<output_path_and_name>`, `<target><arch_file>`); other elements ignored and listed; no top.
+- Sources: `` `include `` searches the including file's directory, then the include path in
+  order; macros stay defined for later files (one compilation unit); `-v`/`-y` modules load
+  only when instantiated and are never top candidates; VHDL names are case-insensitive, also
+  across a Verilog/VHDL instantiation; units are identified by library and name.
+
 **Top module.** `--top <name>` (or the project's `top`) wins. Otherwise the top is the single
 module no other module instantiates; zero or several candidates is an error that lists them.
 The chosen top is recorded in the IR (`odin3_design_set_top`, IR-11 design record) and reported
@@ -232,7 +271,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 |---|---|---|
 | 0 | WSL2, builds of VTR/Yosys/Parmys/ABC/GHDL; golden BLIFs; `netlist-compare`, `equiv-check`; lint gate; skills; `docs/DESIGN.md`; CI | Oracles run green on all goldens; lint gate green (see `odin3-phase0-setup.md`) |
 | 1 | `util/`, core IR, op registry, pass manager, `check`, provenance, C ABI v0, BLIF read/write, dot/JSON/Verilog writers, simulator, tech-library format + reader + generic gate library | BLIF→IR→BLIF bit-identical on goldens; sim matches ABC on goldens; a Python plugin can walk the IR |
-| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys |
+| 2 | Verilog-2005 front end + preprocessor + elaboration; project input (§4.0: `.o3proj`, `-f` file lists, Quartus `.qsf`/`.qpf` import, top selection); `proc`, `opt`; smallest Titan design parsed from its `.qsf`; primitive library v0 | Micros identical/equivalent to Parmys; every project fixture (`tests/golden/projects`) reads identically in all its formats and matches its oracle |
 | 3 | `lower`, linked ABC, VTR flow hookup | VTR 19 through P&R; QoR table |
 | 4 | VPR-XML import into the tech library, partial mapping, memory inference, carry chains, FSM, mux collapsing, matcher v1 | QoR parity on arch sweep (paper 1) |
 | 5 | slang adapter, GHDL path, cross-language identical-netlist test | Three front ends, one netlist |

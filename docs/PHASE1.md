@@ -98,6 +98,27 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     (`--top`, else the single uninstantiated module, else an error listing the candidates); the
     BLIF reader's "first model is the top" stays the BLIF rule (BLIF defines it) but is recorded
     through the same call.
+19. **Project-input test corpus** (Peter, 2026-10-09: "make tests of different projects …
+    multiple files, etc. to test the project path, also with the different formats that will
+    be supported"): `tests/golden/projects`, 28 small cases (20 positive, 8 negative) covering
+    multi-file/multi-directory Verilog, include paths, defines, top parameters, auto top, SV
+    packages, VHDL in `work` and in other libraries (same file name, same entity name), mixed
+    Verilog/VHDL both ways, `-v`/`-y`, nested `-f`, `.qpf` revisions, ignored and translated
+    `.qsf` assignments, BLIF input, `.o3proj` arch/rules/flow, CWD independence, and the
+    negatives (missing file, unknown key, ambiguous/no top, `-f` cycle, missing include,
+    duplicate module). Each case is written in every format that can express it, with the
+    normalized record, the resolved design or located error, and a Yosys (GHDL for VHDL)
+    `ref.blif`. `tools/project-fixtures` holds the stdlib reference parsers (the oracle for
+    the Phase 2 C readers); CI runs its `check`, `oracle` runs locally. Agent defaults (Peter
+    may override), now normative in DESIGN §4.0: paths resolve against the naming file's
+    directory in every format (not the CWD, unlike Odin II and most `-f` tools); `-f` and
+    `-F` mean the same; `.o3proj` adds `libfile`/`libdir`/`libext`/`device` and takes
+    `file <lang> <path> library <lib>`; `#` comments, `"…"` quoting; the first
+    `PROJECT_REVISION` of a `.qpf` is read, `TOP_LEVEL_ENTITY` defaults to the revision name;
+    `SEARCH_PATH` is an include directory; the `.qsf` mapping assignments translate only their
+    "soft" values (other values are ignored and listed); Odin II `<output>` is recorded but is
+    not design input. Phase 2 exit test (§12) gains "every project fixture reads identically in
+    all its formats and matches its oracle".
 
 ## 1C results: full golden round trip
 
