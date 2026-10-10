@@ -37,4 +37,20 @@ void odin3_pp_test_set_limits(odin3_pp *pp, odin3_pp_limits limits);
 odin3_status odin3_pp_test_create(odin3_design *design, const odin3_pp_config *config,
                                   odin3_pp_limits limits, odin3_pp **out);
 
+/* One fault per odin3_pp_check rule (spec §7.8), made in the last stream by
+ * odin3_pp_test_corrupt. */
+typedef enum odin3_pp_test_target {
+    ODIN3_PP_CORRUPT_SEGMENT_START = 1, /* the first segment moved off output offset 0 */
+    ODIN3_PP_CORRUPT_SEGMENT_ORDER,     /* segment 1 repeats segment 0's output offset */
+    ODIN3_PP_CORRUPT_SEGMENT_LOC,       /* segment 0's loc beyond the location space */
+    ODIN3_PP_CORRUPT_BYTE,              /* the first output byte with a non-zero loc changed */
+    ODIN3_PP_CORRUPT_LOC0_BLANK,        /* the first loc-0 byte made a non-blank */
+    ODIN3_PP_CORRUPT_LOC0_ALONE,        /* the segment after the first loc-0 byte removed */
+    ODIN3_PP_CORRUPT_REACH              /* a zero-count EXPANSION/MACRO_ARG counted as reached */
+} odin3_pp_test_target;
+
+/* Makes target's fault in the last stream (its text, segment map or counters). ODIN3_OK, or
+ * ODIN3_ERR_INVALID_ARG (nothing changed) when the stream has nothing to corrupt that way. */
+odin3_status odin3_pp_test_corrupt(odin3_pp *pp, odin3_pp_test_target target);
+
 #endif

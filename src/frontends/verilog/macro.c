@@ -76,8 +76,9 @@ typedef struct def_state {
     odin3_bytes name;
     uint32_t name_id;
     odin3_loc name_loc;
-    uint32_t after_head; /* just after the name or the formal list's ')' */
-    odin3_vec formals;   /* odin3_pp_formal */
+    uint32_t after_head;  /* just after the name or the formal list's ')' */
+    uint32_t escaped_end; /* just after the last escaped identifier scanned */
+    odin3_vec formals;    /* odin3_pp_formal */
     bool has_formals;
 } def_state;
 
@@ -223,6 +224,7 @@ static odin3_status next_item(def_state *ds, item_kind *kind) {
         return scan_block(ds);
     } else if (ch == '\\' && next >= 0 && !odin3_pp_is_blank(next)) {
         skip_escaped(txt);
+        ds->escaped_end = txt->pos;
     } else if (ch == '`') {
         return scan_backtick(ds);
     } else {
@@ -459,6 +461,20 @@ static odin3_status store(def_state *ds, text_span body) {
     return ODIN3_OK;
 }
 
+/* The end of the body span with trailing blanks trimmed, except that a body ending in an
+ * escaped identifier keeps the space or tab that ended it (2B Task 8, Task 6 ruling), so the
+ * identifier never swallows what follows a use. */
+static uint32_t trimmed_end(const def_state *ds, text_span body) {
+    const odin3_pp_deftext *txt = ds->txt;
+    uint32_t end = body.end;
+    while (end > body.start && trims(txt->bytes[end - 1], false)) {
+        end--;
+    }
+    int after = byte_at(txt, end);
+    bool keep = end > body.start && end == ds->escaped_end && (after == ' ' || after == '\t');
+    return end + (keep ? 1 : 0);
+}
+
 /* The body: from the first non-blank to the end of the logical line, a // comment ending it,
  * trailing blanks trimmed; the cursor ends at the newline (before a CR that precedes it). */
 static odin3_status scan_body(def_state *ds) {
@@ -478,9 +494,7 @@ static odin3_status scan_body(def_state *ds) {
            byte_at(txt, txt->pos) != '\n') {
         txt->pos++;
     }
-    while (end > start && trims(txt->bytes[end - 1], false)) {
-        end--;
-    }
+    end = trimmed_end(ds, (text_span){start, end});
     if (byte_at(txt, txt->pos) == '\n' && txt->pos > end && txt->bytes[txt->pos - 1] == '\r') {
         txt->pos--;
     }
