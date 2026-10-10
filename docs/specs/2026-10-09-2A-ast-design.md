@@ -382,8 +382,22 @@ tokens with blanks or comments between (L8) — and stores the literal **as writ
 bits, no sizing); `odin3_ast_number_new` takes a ready struct (adapters). The §3.5.1 rules —
 zero-extend, or extend with `x`/`z` when the leading digit is one, truncate to `width` with a
 warning, unsized decimals signed 32-bit — live in `odin3_ast_number_value(ast, node, arena,
-&value, &is_signed)`, which writes an IR `odin3_value` of kind `BITS` with its bytes in the
-caller's arena and warns once per literal (`warned`), so a generate loop does not repeat it.
+&literal)`, which writes an IR `odin3_value` of kind `BITS` with its bytes in the caller's arena
+plus `is_signed` and `is_unsized` (`odin3_ast_literal`; one struct, the five-parameter rule) and
+warns once per literal (`warned`), so a generate loop does not repeat it.
+
+**2A amendment (Task 3 review, 2026-10-10): literal sizing follows Yosys `read_verilog`
+exactly** (`frontends/verilog/const2ast.cc`; the exit bar is Parmys/Yosys). Sized: the width,
+zero-extended or x/z-extended by the written leading digit; the truncation warning fires when the
+value needs more bits than the width (bits up to the highest 1, plus one when the leading digit
+is x/z), so `4'hx0` is silent. Unsized: every written bit is kept, leading zeros included
+(`'h0_0000_0001` is 36 bits), extended to 32 when fewer were written (decimals: the magnitude's
+bits); then any unsized *signed* literal whose top bit is 1 gains a 0 bit (`'sh8000_0000` is
++2^31 in 33 bits; `2147483648` is 33 bits). **For 2D:** when an unsized literal (`is_unsized`)
+is widened to its context, Yosys repeats its top bit even when the literal is unsigned
+(`AstNode::bitsAsUnsizedConst`, `ast.cc`): `'hFFFF_FFFF` in a 64-bit context is all ones and
+`a + 'h8000_0000` with a 40-bit `a` adds `40'hFF_8000_0000`. A sized literal is sign- or
+zero-extended as IEEE says. 2D must apply this rule wherever it extends a literal.
 `REAL` holds a `double`. **`TEXT`** holds the raw source bytes of an opaque construct
 (`SPECIFY_BLOCK`, `UDP_DECL`, `CONFIG_DECL`: from the keyword to its end keyword, copied into
 the arena) so these print back verbatim and the round-trip oracle holds on the specify micros.

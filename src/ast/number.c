@@ -418,32 +418,44 @@ typedef struct sizing {
     uint32_t size;
     uint32_t keep;
     uint8_t ext;
-    bool truncated; /* a dropped bit was not 0 */
+    uint32_t need; /* sized: the bits the value requires (Yosys's rule); warn when > size */
 } sizing;
 
-static sizing size_number(const odin3_ast_number *num, bool signed_decimal) {
+/* Yosys const2ast: the bits up to the highest 1, plus one more when the written MSB is x/z. */
+static uint32_t required_bits(const odin3_ast_number *num, uint8_t ext) {
+    uint32_t top = num->nbits;
+    while (top > 0 && num->bits[top - 1] != ODIN3_BIT_1) {
+        top--;
+    }
+    if (ext == ODIN3_BIT_0) {
+        return top;
+    }
+    return top + 1;
+}
+
+/*
+ * Yosys read_verilog sizing (the exit bar is Parmys/Yosys; const2ast.cc). Sized: the width, 0-
+ * or x/z-extended by the written MSB. Unsized: every written bit, extended to 32 when fewer;
+ * a signed literal whose top bit is 1 gains a 0 bit (const2ast.cc:260-263).
+ */
+static sizing size_number(const odin3_ast_number *num, bool is_signed) {
     uint8_t top = num->bits[num->nbits - 1];
     uint8_t ext = top == ODIN3_BIT_X || top == ODIN3_BIT_Z ? top : (uint8_t)ODIN3_BIT_0;
     if (num->width != 0) {
-        bool truncated = false;
-        for (uint32_t i = num->width; i < num->nbits; i++) {
-            truncated = truncated || num->bits[i] != ODIN3_BIT_0;
-        }
         uint32_t keep = num->nbits < num->width ? num->nbits : num->width;
-        return (sizing){num->width, keep, ext, truncated};
+        return (sizing){num->width, keep, ext, required_bits(num, ext)};
     }
-    uint32_t sig = num->nbits;
-    while (ext == ODIN3_BIT_0 && sig > 1 && num->bits[sig - 1] == ODIN3_BIT_0) {
-        sig--;
+    uint32_t size = num->nbits > UNSIZED_BITS ? num->nbits : UNSIZED_BITS;
+    uint8_t msb = num->nbits >= UNSIZED_BITS ? top : ext;
+    if (is_signed && msb == ODIN3_BIT_1) {
+        size++; /* a 0 sign bit (ext is 0) */
     }
-    uint32_t need = sig + (signed_decimal && ext == ODIN3_BIT_0 ? 1 : 0); /* a 0 sign bit */
-    uint32_t size = need > UNSIZED_BITS ? need : UNSIZED_BITS;
-    return (sizing){size, sig, ext, false};
+    return (sizing){size, num->nbits, ext, 0};
 }
 
 odin3_status odin3_ast_number_value(odin3_ast *ast, odin3_ast_id node, odin3_arena *arena,
-                                    odin3_value *value, bool *is_signed) {
-    if (ast == NULL || arena == NULL || value == NULL || is_signed == NULL) {
+                                    odin3_ast_literal *out) {
+    if (ast == NULL || arena == NULL || out == NULL) {
         return misuse("odin3_ast_number_value", "NULL argument");
     }
     const odin3_ast_number *num = odin3_ast_number_of(ast, node);
@@ -451,19 +463,21 @@ odin3_status odin3_ast_number_value(odin3_ast *ast, odin3_ast_id node, odin3_are
         return misuse("odin3_ast_number_value", "not a NUMBER node");
     }
     bool sgn = (odin3_ast_flags(ast, node) & ODIN3_AST_F_NUMBER_SIGNED) != 0;
-    sizing how = size_number(num, sgn && odin3_ast_sub(ast, node) == ODIN3_AST_NUMBER_DEC);
+    sizing how = size_number(num, sgn);
     uint8_t *bits = odin3_arena_alloc(arena, how.size);
     if (bits == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     memcpy(bits, num->bits, how.keep);
     memset(bits + how.keep, how.ext, how.size - how.keep);
-    if (how.truncated && !num->warned) {
+    if (how.need > how.size && !num->warned) {
         ((odin3_ast_number *)num)->warned = true; /* the arena record is writable */
         odin3_diag(ast->design, ODIN3_LOG_WARN, odin3_ast_loc(ast, node),
-                   "literal truncated to its size of %" PRIu32 " bits", how.size);
+                   "literal has a width of %" PRIu32 " bit, but value requires %" PRIu32 " bit",
+                   how.size, how.need);
     }
-    *value = (odin3_value){.kind = ODIN3_VAL_BITS, .bits = bits, .len = how.size};
-    *is_signed = sgn;
+    *out = (odin3_ast_literal){.value = {.kind = ODIN3_VAL_BITS, .bits = bits, .len = how.size},
+                               .is_signed = sgn,
+                               .is_unsized = num->width == 0};
     return ODIN3_OK;
 }

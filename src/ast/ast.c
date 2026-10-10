@@ -571,5 +571,6 @@ size_t odin3_ast_bytes_reserved(const odin3_ast *ast) {
         return 0;
     }
     return odin3_pagevec_bytes_reserved(ast->nodes) + ast->children.cap * ast->children.elem_size +
-           ast->payloads.cap * ast->payloads.elem_size + odin3_arena_bytes_reserved(ast->arena);
+           ast->payloads.cap * ast->payloads.elem_size +
+           ast->comments.cap * ast->comments.elem_size + odin3_arena_bytes_reserved(ast->arena);
 }
