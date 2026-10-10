@@ -150,9 +150,10 @@ word both are ordinary (`+define+D=#1`). A string macro keeps its quotes in its 
   project into this one (its top counts as this project's `top`).
 
 *`-f` lists.* A bare word is a source file (library `work`). Entries of the outermost list, and
-of every list it reaches through `-f <list>`, resolve against the outermost list's directory
-(what other tools do when run from there); entries of a `-F <list>` resolve against that list's
-own directory. Options: `-f`/`-F <list>` (a cycle is `f_cycle`), `-v <file>`, `-y <dir>`,
+of every list reached through `-f <list>` — from the outermost list or from any nested list,
+including one reached through `-F` — resolve against the outermost list's directory (what other
+tools do when run from there); entries of a `-F <list>` resolve against that list's own
+directory. Options: `-f`/`-F <list>` (a cycle is `f_cycle`), `-v <file>`, `-y <dir>`,
 `+incdir+<dir>[+<dir>…]`, `+define+<name>[=<v>][+…]`, `+libext+<ext>[+…]` (also without `-y`),
 `-top <name>` / `--top-module <name>`, `-sv` (Verilog files after it are SystemVerilog, to the
 end of the list that says it, including the lists it reaches; it does not leak out of a nested

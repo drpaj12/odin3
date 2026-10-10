@@ -1,10 +1,11 @@
 /*
  * design.c — design create/destroy (exported), the design-global strtab, top module, prov,
- * source manager and per-run AST stores.
+ * source manager, per-run AST stores, project record and diagnostic-path style.
  */
 #include "ir/design.h"
 #include "ast/ast.h"
 #include "ast/srcman.h"
+#include "frontends/project/project.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "util/alloc.h"
@@ -42,6 +43,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
         odin3_ast_destroy(*(odin3_ast **)odin3_vec_at(&design->asts, i));
     }
     odin3_vec_free(&design->asts);
+    odin3_project_destroy(design->project);
     odin3_srcman_destroy(design->srcman);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
@@ -174,4 +176,35 @@ ODIN3_EXPORT odin3_status odin3_design_set_keep_ast(odin3_design *design, odin3_
 
 odin3_keep_ast odin3_design_keep_ast(const odin3_design *design) {
     return design->keep_ast;
+}
+
+/* --- project record and diagnostic paths (PRJ-1, PRJ-18) ----------------------------------- */
+
+odin3_status odin3_design_get_project(odin3_design *design, odin3_project **out) {
+    if (design->project == NULL) {
+        design->project = odin3_project_create(design);
+        if (design->project == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    *out = design->project;
+    return ODIN3_OK;
+}
+
+odin3_project *odin3_design_project(const odin3_design *design) {
+    return design->project;
+}
+
+void odin3_design_drop_project(odin3_design *design) {
+    odin3_project_destroy(design->project);
+    design->project = NULL;
+}
+
+void odin3_design_set_diag_paths(odin3_design *design, odin3_srcfmt style) {
+    design->diag_paths =
+        style == ODIN3_SRCFMT_RESOLVED ? ODIN3_SRCFMT_RESOLVED : ODIN3_SRCFMT_GIVEN;
+}
+
+odin3_srcfmt odin3_design_diag_paths(const odin3_design *design) {
+    return design->diag_paths;
 }
