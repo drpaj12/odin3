@@ -439,6 +439,18 @@ odin3_status odin3_ast_intern(odin3_ast *ast, odin3_bytes str, uint32_t *name) {
     return odin3_design_intern(ast->design, str, name);
 }
 
+/* Shrinks a vec's allocation to its length; a failed realloc keeps the old block. */
+static void vec_trim(odin3_vec *vec) {
+    if (vec->len == 0 || vec->len == vec->cap) {
+        return;
+    }
+    void *fit = odin3_util_realloc(vec->data, vec->len * vec->elem_size);
+    if (fit != NULL) {
+        vec->data = fit;
+        vec->cap = vec->len;
+    }
+}
+
 odin3_status odin3_ast_finish(odin3_ast *ast) {
     const char *why = check_open(ast);
     if (why != NULL) {
@@ -447,6 +459,10 @@ odin3_status odin3_ast_finish(odin3_ast *ast) {
     odin3_ast_comments_sort(ast);
     odin3_vec_free(&ast->pending);
     odin3_vec_free(&ast->heights);
+    vec_trim(&ast->children);
+    vec_trim(&ast->payloads);
+    vec_trim(&ast->comments);
+    vec_trim(&ast->units);
     ast->finished = true;
     return ODIN3_OK;
 }
