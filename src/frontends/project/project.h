@@ -247,8 +247,10 @@ typedef struct odin3_proj_text {
 /*
  * Reads file->resolved whole (ODIN3_SRC_MAX_FILE_BYTES) and registers it as a FILE buffer
  * (name = file->given, resolved, library 0, parent) with every line start; lines are split at
- * '\n' only. IO (logged "cannot read '<path>': <reason>" at parent, unlocated when parent is 0)
- * when it cannot be read; PARSE (logged, `syntax`) over the size cap or from the source manager;
+ * '\n' only. IO (logged "cannot read '<file>': <reason>" at parent, unlocated when parent is 0,
+ * the file named in the design's diagnostic-path style) when it cannot be read; PARSE (logged,
+ * `syntax` "file '<file>' is N bytes, over the limit of M") over the size cap, or from the source
+ * manager;
  * NO_MEMORY. *out is empty on failure; free it with odin3_proj_text_free in every case.
  */
 odin3_status odin3_project_load(odin3_project *proj, const odin3_proj_path *file, odin3_loc parent,
@@ -284,6 +286,9 @@ odin3_status odin3_project_path(odin3_project *proj, const odin3_proj_path_req *
                                 odin3_proj_path *out);
 
 /* --- builders (each logs its own errors through odin3_project_fail) ------------------------ */
+/* A word holding a NUL byte is rejected before anything is interned: `syntax` "NUL byte in
+ * word", names [word], located at the builder's at (unlocated through odin3_project_intern for
+ * builders without one). No strtab string holds NUL (PRJ-4); the oracle would keep the byte. */
 
 typedef enum odin3_proj_dir_list { ODIN3_PROJ_LIBDIRS = 1, ODIN3_PROJ_INCDIRS } odin3_proj_dir_list;
 
@@ -299,7 +304,8 @@ typedef struct odin3_proj_kvs {
     uint32_t n;
 } odin3_proj_kvs;
 
-/* Interns bytes in the design's strtab (INVALID_ARG for a NUL byte, NO_MEMORY). */
+/* Interns bytes in the design's strtab: a NUL byte is an unlocated `syntax` (PARSE, logged);
+ * NO_MEMORY. */
 odin3_status odin3_project_intern(odin3_project *proj, odin3_bytes bytes, uint32_t *id);
 
 /* Appends file to files, or, when the same resolved path is already listed in the same library,

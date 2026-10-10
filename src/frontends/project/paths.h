@@ -44,13 +44,17 @@ odin3_status odin3_path_resolve(odin3_path_join join, odin3_strbuf *out);
 /* What path names, following symlinks (stat). */
 odin3_path_kind odin3_path_stat(const char *path);
 
-/* The directory part of path (everything before its last '/'; "/" for "/x"; "" for no '/'). */
+/* Python's os.path.dirname: everything before the last '/', trailing '/' stripped unless it is
+ * all slashes ("/" for "/x", "//" for "//x", "" for no '/'). */
 odin3_bytes odin3_path_dir(odin3_bytes path);
 
 /* The language of path's suffix, lower-cased (.v .vh .sv .svh .vhd .vhdl .blif .vqm .edf .edif);
- * the suffix is Python's Path.suffix (the last '.' of the last component, not at its start or
- * end). false when there is none. */
+ * the suffix is Python's Path.suffix (the last '.' of the last component, trailing "/" and "."
+ * components dropped, not at its start or end). false when there is none. */
 bool odin3_lang_of(odin3_bytes path, odin3_lang *out);
+
+/* The language of a libext: odin3_lang_of("x" + ext) without copying (§4.1). */
+bool odin3_lang_of_ext(odin3_bytes ext, odin3_lang *out);
 
 /* The language named by a project word ("verilog", "systemverilog", …); false otherwise. */
 bool odin3_lang_by_name(odin3_bytes name, odin3_lang *out);

@@ -27,7 +27,7 @@
 #error "ODIN3_PROJECT_FIXTURES must name tests/golden/projects"
 #endif
 
-enum { PATH_BUF = 512, MSG_MAX = 4096, OOM_LIMIT = 400, FIXTURE_MAX = 1 << 16 };
+enum { LONG_EXT = 4096, PATH_BUF = 512, MSG_MAX = 4096, OOM_LIMIT = 400, FIXTURE_MAX = 1 << 16 };
 
 static odin3_design *design;
 static odin3_project *proj;
@@ -316,27 +316,29 @@ static void test_load_unreadable_and_too_big(void) {
     odin3_proj_path file = tmp_path("none.f");
     odin3_proj_text loaded;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, (odin3_loc){0}, &loaded));
+    TEST_ASSERT_EQUAL_STRING("odin3: error: cannot read 'none.f': No such file or directory",
+                             captured);
+    TEST_ASSERT_NULL(loaded.bytes);
+    odin3_proj_text_free(&loaded);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, word_loc(), &loaded));
+    TEST_ASSERT_EQUAL_STRING("p.o3proj:2:5: error: cannot read 'none.f': No such file or directory",
+                             captured);
+    odin3_design_set_diag_paths(design, ODIN3_SRCFMT_RESOLVED);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, (odin3_loc){0}, &loaded));
     (void)snprintf(expected, sizeof expected,
                    "odin3: error: cannot read '%s': No such file or directory",
                    in_tmp("none.f", path));
     TEST_ASSERT_EQUAL_STRING(expected, captured);
-    TEST_ASSERT_NULL(loaded.bytes);
-    odin3_proj_text_free(&loaded);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, word_loc(), &loaded));
-    (void)snprintf(expected, sizeof expected,
-                   "p.o3proj:2:5: error: cannot read '%s': No such file or directory",
-                   in_tmp("none.f", path));
-    TEST_ASSERT_EQUAL_STRING(expected, captured);
+    odin3_design_set_diag_paths(design, ODIN3_SRCFMT_GIVEN);
     int fd = open(in_tmp("big.f", path), O_WRONLY | O_CREAT | O_TRUNC, 0600);
     TEST_ASSERT_TRUE(fd >= 0);
     TEST_ASSERT_EQUAL_INT(0, ftruncate(fd, (off_t)ODIN3_SRC_MAX_FILE_BYTES + 1));
     TEST_ASSERT_EQUAL_INT(0, close(fd));
     file = tmp_path("big.f");
     errors = 0;
-    (void)snprintf(expected, sizeof expected,
-                   "odin3: error: syntax: file '%s' is over the limit of 268435456 bytes",
-                   in_tmp("big.f", path));
-    expect_error(odin3_project_load(proj, &file, (odin3_loc){0}, &loaded), expected);
+    expect_error(odin3_project_load(proj, &file, (odin3_loc){0}, &loaded),
+                 "odin3: error: syntax: file 'big.f' is 268435457 bytes, over the limit of "
+                 "268435456");
     odin3_proj_text_free(&loaded);
 }
 
@@ -477,6 +479,39 @@ static void test_libext_checked(void) {
     TEST_ASSERT_EQUAL_size_t(2, proj->libext.len);
 }
 
+/* A NUL byte in a word is a located syntax error before anything is interned; builders without
+ * a location report it unlocated through odin3_project_intern. */
+static void test_nul_bytes_rejected(void) {
+    static const char define[] = "X=a\0b";
+    static const char ext[] = ".\0.v";
+    static const char ignored[] = "A\0B";
+    odin3_loc at = word_loc();
+    size_t strings = odin3_strtab_count(odin3_design_strtab(design));
+    expect_error(odin3_project_add_define(proj, (odin3_bytes){define, sizeof define - 1}, at),
+                 "p.o3proj:2:5: error: syntax: NUL byte in word: 'X=a\\0b'");
+    expect_error(odin3_project_add_libext(proj, (odin3_bytes){ext, sizeof ext - 1}, at),
+                 "p.o3proj:2:5: error: syntax: NUL byte in word: '.\\0.v'");
+    expect_error(odin3_project_add_ignored(proj, (odin3_bytes){ignored, sizeof ignored - 1}),
+                 "odin3: error: syntax: NUL byte in word: 'A\\0B'");
+    uint32_t got = 0;
+    expect_error(odin3_project_intern(proj, (odin3_bytes){ignored, sizeof ignored - 1}, &got),
+                 "odin3: error: syntax: NUL byte in word: 'A\\0B'");
+    TEST_ASSERT_EQUAL_size_t(strings, odin3_strtab_count(odin3_design_strtab(design)));
+    TEST_ASSERT_EQUAL_size_t(0, proj->defines.len);
+    TEST_ASSERT_EQUAL_size_t(0, proj->libext.len);
+    TEST_ASSERT_EQUAL_size_t(0, proj->ignored.len);
+}
+
+/* A libext is checked as "x" + ext with no length limit. */
+static void test_long_libext(void) {
+    static char ext[LONG_EXT];
+    memset(ext, 'a', sizeof ext - 1);
+    memcpy(ext + sizeof ext - 3, ".v", 3);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_project_add_libext(proj, odin3_bytes_cstr(ext), (odin3_loc){0}));
+    TEST_ASSERT_EQUAL_size_t(1, proj->libext.len);
+}
+
 /* --- errors -------------------------------------------------------------------------------- */
 
 static void test_fail_forms(void) {
@@ -504,6 +539,8 @@ static void test_fail_forms(void) {
                            .detail = "revision file not found"};
     expect_error(odin3_project_fail(proj, &err),
                  "p.qpf: error: missing_file: revision file not found");
+    err = (odin3_proj_err){.kind = ODIN3_PROJ_ERR_SYNTAX, .scope = ODIN3_PROJ_UNLOCATED};
+    expect_error(odin3_project_fail(proj, &err), "odin3: error: syntax");
 }
 
 static void test_error_kind_names(void) {
@@ -903,6 +940,98 @@ static void test_out_of_memory_drops_the_record(void) {
     TEST_ASSERT_EQUAL_INT(0, errors);
 }
 
+/* --- builder atomicity under NO_MEMORY ------------------------------------------------------ */
+
+enum { NVECS = 8 };
+
+static void vec_lengths(size_t lens[NVECS]) {
+    const odin3_vec *vecs[NVECS] = {&proj->files,           &proj->libfiles,   &proj->duplicates,
+                                    &proj->rules,           &proj->rule_cells, &proj->overrides,
+                                    &proj->override_params, &proj->defines};
+    for (size_t i = 0; i < NVECS; i++) {
+        lens[i] = vecs[i]->len;
+    }
+}
+
+/* One builder call with its fail_after-th allocation failing. */
+typedef struct oom_case {
+    int which; /* 0 add_file, 1 add_libfile, 2 add_rule, 3 add_override, 4 add_define */
+    long fail_after;
+} oom_case;
+
+/* Calls the builder (every argument interned before the failure window); returns its status. */
+static odin3_status one_builder(oom_case c_case) {
+    uint32_t cells[2] = {id("c1"), id("c2")};
+    odin3_proj_kv kvs[1] = {{id("k"), id("v")}};
+    odin3_proj_file file = a_file("/p/a.v", ODIN3_LANG_VERILOG, "work");
+    odin3_proj_rule rule = {.kind = ODIN3_PROJ_RULE_MAP};
+    odin3_proj_override ov = {.kind = ODIN3_PROJ_OVERRIDE_CELL, .name = id("n"), .from = id("f")};
+    odin3_util_set_alloc_fail_after(c_case.fail_after);
+    odin3_status st = ODIN3_OK;
+    if (c_case.which == 0) {
+        st = odin3_project_add_file(proj, &file);
+    } else if (c_case.which == 1) {
+        st = odin3_project_add_libfile(proj, &file);
+    } else if (c_case.which == 2) {
+        st = odin3_project_add_rule(proj, &rule, (odin3_proj_ids){cells, 2});
+    } else if (c_case.which == 3) {
+        st = odin3_project_add_override(proj, &ov, (odin3_proj_kvs){kvs, 1});
+    } else {
+        st = odin3_project_add_define(proj, odin3_bytes_cstr("NEWNAME=newvalue"), (odin3_loc){0});
+    }
+    odin3_util_set_alloc_fail_after(-1);
+    return st;
+}
+
+/* One try on a fresh record: true when the builder succeeded; on NO_MEMORY every list keeps
+ * its length. */
+static bool builder_try(oom_case c_case) {
+    odin3_design_drop_project(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
+    size_t before[NVECS];
+    size_t after[NVECS];
+    vec_lengths(before);
+    odin3_status st = one_builder(c_case);
+    vec_lengths(after);
+    if (st == ODIN3_OK) {
+        return true;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_EQUAL_MEMORY(before, after, sizeof before);
+    return false;
+}
+
+/* Sweeps one builder: it fails at least once, every failure leaves the lists unchanged, and it
+ * then succeeds. */
+static void sweep_builder(int which) {
+    long k = 0;
+    while (k < OOM_LIMIT && !builder_try((oom_case){which, k})) {
+        k++;
+    }
+    TEST_ASSERT_TRUE(k > 0);         /* an allocation point was really hit */
+    TEST_ASSERT_TRUE(k < OOM_LIMIT); /* and the builder then succeeded */
+}
+
+/* Every builder leaves every list unchanged when an allocation fails (reserve-before-mutate). */
+static void test_builders_unchanged_on_no_memory(void) {
+    for (int which = 0; which < 5; which++) {
+        sweep_builder(which);
+    }
+}
+
+/* The dump branches the full record does not take: a file without a library (key omitted) and
+ * an output without a format. */
+static void test_dump_rare_branches(void) {
+    odin3_proj_file file = a_file("/p/x.blif", ODIN3_LANG_BLIF, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_project_add_file(proj, &file));
+    proj->output.present = true;
+    proj->output.path = id("/p/o");
+    const char *got = dump();
+    TEST_ASSERT_NOT_NULL(
+        strstr(got, "  \"files\": [{\"path\": \"/p/x.blif\", \"language\": \"blif\"}],\n"));
+    TEST_ASSERT_NOT_NULL(strstr(got, "  \"output\": {\"path\": \"/p/o\", \"format\": null},\n"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_design_owns_and_drops_the_record);
@@ -920,12 +1049,16 @@ int main(void) {
     RUN_TEST(test_set_top_file_level);
     RUN_TEST(test_counts);
     RUN_TEST(test_libext_checked);
+    RUN_TEST(test_nul_bytes_rejected);
+    RUN_TEST(test_long_libext);
     RUN_TEST(test_fail_forms);
     RUN_TEST(test_error_kind_names);
     RUN_TEST(test_finish_sorts_and_uniques);
     RUN_TEST(test_dump_empty_record);
     RUN_TEST(test_dump_every_field);
     RUN_TEST(test_dump_escapes);
+    RUN_TEST(test_dump_rare_branches);
+    RUN_TEST(test_builders_unchanged_on_no_memory);
     RUN_TEST(test_dump_single_file_matches_corpus);
     RUN_TEST(test_out_of_memory_drops_the_record);
     return UNITY_END();

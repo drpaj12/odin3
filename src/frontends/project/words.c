@@ -83,6 +83,9 @@ static odin3_status scan_quoted(splitter *sp, quoted_span *span) {
     if (len == 0) {
         return syntax(sp, start, "empty quoted word");
     }
+    if (memchr(sp->bytes + start, '\0', j - start) != NULL) {
+        return syntax(sp, start, "NUL byte in word");
+    }
     *span = (quoted_span){j, len};
     return ODIN3_OK;
 }
@@ -119,6 +122,9 @@ static odin3_status bare_word(splitter *sp, odin3_vec *words) {
     if (sp->opts->mode == ODIN3_WORDS_O3PROJ &&
         memchr(sp->bytes + start, '"', end - start) != NULL) {
         return syntax(sp, start, "quote inside a word");
+    }
+    if (memchr(sp->bytes + start, '\0', end - start) != NULL) {
+        return syntax(sp, start, "NUL byte in word");
     }
     sp->i = end;
     return push_word(words, sp->opts->offset + (uint32_t)start,
