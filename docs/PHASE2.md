@@ -184,3 +184,25 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    module instances are an error; generated code not committed. Declared divergences: attributes on
    connections and ANSI subroutine ports, unary operators on primaries only, SV named-argument calls
    (Parmys exceptions).
+10. **2B declared divergences from both oracles** (spec §10.4, §13; logged with 2B Task 8,
+    2026-10-10). In the first four cases Icarus and Yosys agree, and 2B differs from them on
+    purpose; `pp-diff` expects 2B's behaviour there. The last case is a set of micros that
+    Parmys rejects.
+    - *Directives inside macro text* are `syntax: directive inside macro text` (PP-6). The cases
+      are a conditional, `` `define ``, `` `undef `` or `` `include `` in a body (probes t5, u3).
+      They also include a `` `define ``/`` `undef `` met while the actuals are collected, which
+      both oracles process there. A conditional in an actual is processed only while it is
+      collected from a file frame (probe w3).
+    - *Recursion is judged on the spelling ancestry* (PP-7). The use is rejected even where the
+      oracles terminate. In probe w1, `` `N(`KEEP) `` reaches `` `K ``, which uses `` `N ``
+      again inside its own argument chain. Both oracles expand it to nothing.
+    - *`translate_off` … `translate_on` is removed by the preprocessor* (PP-10). Icarus ignores
+      the pair. Yosys drops the region in its lexer, after directives have been processed.
+    - *A compiler directive name used as a macro name* is `syntax` (spec §7.3 row). For example,
+      `` `define timescale 1 `` is rejected, and both oracles accept it.
+    - *The splicing micros are Parmys-rejected* (PHASE2 #4). `syntax/preprocessor_define`,
+      `preprocessor_complex_define` and `preprocessor_define_with_comment` rely on
+      `` `ADDITION_num `` splicing a formal into a macro name. 2B reports `undefined macro
+      'ADDITION_num'`. Yosys and the Parmys goldens fail the same way, while Icarus warns and
+      substitutes nothing. The spec names only the last two; `preprocessor_define` fails
+      identically.
