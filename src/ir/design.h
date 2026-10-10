@@ -1,5 +1,6 @@
 /*
- * design.h — the design handle: owner of the design-global strtab and cell-type table.
+ * design.h — the design handle: owner of the design-global strtab, cell-type table and source
+ * manager.
  */
 #ifndef ODIN3_IR_DESIGN_H
 #define ODIN3_IR_DESIGN_H
@@ -26,5 +27,13 @@ odin3_strtab *odin3_design_strtab(const odin3_design *design);
 
 /* Interns bytes in the design's strtab; same contract as odin3_strtab_intern. */
 odin3_status odin3_design_intern(odin3_design *design, odin3_bytes bytes, uint32_t *str);
+
+struct odin3_srcman; /* src/ast/srcman.h */
+
+/*
+ * The design's source manager (AST-1), created on first use; it lives as long as the design,
+ * which destroys it. NO_MEMORY (with *out unchanged) when creating it fails.
+ */
+odin3_status odin3_design_get_srcman(odin3_design *design, struct odin3_srcman **out);
 
 #endif
