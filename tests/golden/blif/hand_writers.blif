@@ -1,0 +1,26 @@
+# hand_writers.blif - writer-check cases found on the goldens (1F Task 4).
+.model top
+.inputs a b c d e f g h
+.outputs y z w u
+.names gnd
+.names vcc
+1
+.names unconn
+.names undriven_n y
+1 1
+.names unconn dangling
+1 1
+.names a b c d e f g z
+1-1-1-1 1
+-1-1-1- 1
+.names vcc a h w
+111 1
+000 1
+.subckt bb1 x[0]=a o[0]=u
+.end
+
+.model bb1
+.inputs x[0]
+.outputs o[0]
+.blackbox
+.end
