@@ -30,7 +30,7 @@ static void reentrant_sink(odin3_log_level level, const char *msg, void *user) {
 }
 
 void setUp(void) {
-    odin3_log_set_level(ODIN3_LOG_INFO);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_INFO));
     odin3_log_set_sink(capture_sink, NULL);
     odin3_log_reset_counts();
     captured[0] = '\0';
@@ -68,10 +68,10 @@ static void test_counts_per_level_and_reset(void) {
 }
 
 static void test_set_level_debug_delivers_debug(void) {
-    odin3_log_set_level(ODIN3_LOG_ERROR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_ERROR));
     odin3_log(ODIN3_LOG_WARN, "no");
     TEST_ASSERT_EQUAL_INT(0, delivered);
-    odin3_log_set_level(ODIN3_LOG_DEBUG);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_DEBUG));
     odin3_log(ODIN3_LOG_DEBUG, "yes");
     TEST_ASSERT_EQUAL_INT(1, delivered);
     TEST_ASSERT_EQUAL_STRING("yes", captured);

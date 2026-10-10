@@ -80,6 +80,7 @@ struct odin3_design {
     odin3_u64map *celltype_names; /* name strtab ID -> celltype ID */
     odin3_vec declared;           /* odin3_declared_entry, IR-7b declaration order */
     odin3_vec modules;            /* odin3_module *, creation order; slot 0 NULL */
+    odin3_module_id top;          /* the top module (odin3_design_set_top); none until set */
 };
 
 /* --- module stores (IR-18) ----------------------------------------------------------------- */

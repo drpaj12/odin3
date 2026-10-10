@@ -25,11 +25,11 @@
 enum { ODIN3_RD_MSG_MAX = 512 };
 
 /* A byte range of the current line; col is the 1-based column of ptr[0]. */
-typedef struct odin3_span {
+typedef struct odin3_rd_span {
     const char *ptr;
     size_t len;
     uint32_t col;
-} odin3_span;
+} odin3_rd_span;
 
 /* A source location; col 0 prints "file:line:". */
 typedef struct odin3_rd_loc {
@@ -99,37 +99,37 @@ odin3_rd_loc odin3_rd_at(const odin3_reader *rd, uint32_t col);
 
 /* Space, tab, CR, VT or FF (newlines end lines before statements are split). */
 bool odin3_rd_space(char ch);
-void odin3_rd_advance(odin3_span *sp, size_t count);
-void odin3_rd_skip_ws(odin3_span *sp);
-odin3_span odin3_rd_trim(odin3_span sp);
+void odin3_rd_advance(odin3_rd_span *sp, size_t count);
+void odin3_rd_skip_ws(odin3_rd_span *sp);
+odin3_rd_span odin3_rd_trim(odin3_rd_span sp);
 /* Next whitespace-delimited word; false (word empty) at the end. */
-bool odin3_rd_word(odin3_span *sp, odin3_span *word);
-bool odin3_rd_is(odin3_span word, const char *keyword);
+bool odin3_rd_word(odin3_rd_span *sp, odin3_rd_span *word);
+bool odin3_rd_is(odin3_rd_span word, const char *keyword);
 /* Next identifier ([A-Za-z_][A-Za-z0-9_$]*) after optional whitespace; false if none starts. */
-bool odin3_rd_ident(odin3_span *sp, odin3_span *ident);
+bool odin3_rd_ident(odin3_rd_span *sp, odin3_rd_span *ident);
 /* Consumes lit after optional whitespace; false (nothing consumed but whitespace) if absent. */
-bool odin3_rd_lit(odin3_span *sp, const char *lit);
+bool odin3_rd_lit(odin3_rd_span *sp, const char *lit);
 /* Error at the first word of rest, if any. */
-odin3_status odin3_rd_end(const odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_intern(odin3_reader *rd, odin3_span sp, uint32_t *id);
+odin3_status odin3_rd_end(const odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_intern(odin3_reader *rd, odin3_rd_span sp, uint32_t *id);
 /* Parses text (one expression of the current line) into the design arena; located errors. */
-odin3_status odin3_rd_expr(odin3_reader *rd, odin3_span text, const odin3_expr **out);
+odin3_status odin3_rd_expr(odin3_reader *rd, odin3_rd_span text, const odin3_expr **out);
 
 /* reader_cell.c */
 void odin3_rd_cell_init(odin3_rd_cell *cell);
 void odin3_rd_cell_free(odin3_rd_cell *cell);
 const char *odin3_rd_cell_name(const odin3_reader *rd);
-odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_in(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_out(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_inout(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_fn(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_mem_width(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_mem_write(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_mem_read(odin3_reader *rd, odin3_span rest);
-odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_span rest);
+odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_in(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_out(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_inout(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_fn(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_mem_width(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_mem_write(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_mem_read(odin3_reader *rd, odin3_rd_span rest);
+odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_rd_span rest);
 
 #endif

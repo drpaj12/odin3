@@ -35,6 +35,16 @@ endif()
 add_library(odin3_core OBJECT
     src/api/version.c
     src/api/plugin.c
+    src/api/common.c
+    src/api/design.c
+    src/api/pass.c
+    src/api/celltype.c
+    src/api/prov.c
+    src/api/module.c
+    src/api/node.c
+    src/api/net.c
+    src/api/attr.c
+    src/api/log.c
     src/util/alloc.c
     src/util/arena.c
     src/util/hash.c
@@ -48,6 +58,10 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
+    src/passes/manager.c
+    src/passes/builtin.c
+    src/passes/write_formats.c
+    src/passes/sim_pass.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -90,6 +104,7 @@ add_library(odin3_core OBJECT
     src/sim/eval.c
     src/sim/levelize.c
     src/sim/prng.c
+    src/sim/vectors.c
     src/sim/word.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
@@ -116,6 +131,8 @@ target_include_directories(libodin3 PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
 
 # --- odin3: the CLI -------------------------------------------------------------
+# Linked against libodin3 and using only odin3.h, so plugins it loads and the CLI share one pass
+# registry (and one cell-type registry).
 add_executable(odin3 src/cli/main.c)
 target_link_libraries(odin3 PRIVATE libodin3 odin3_flags)
 
@@ -231,6 +248,14 @@ if(BUILD_TESTING)
         set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
     endif()
+    odin3_add_unit_test(test_pass_outputs)
+    target_compile_definitions(test_pass_outputs PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_pass_manager)
+    target_compile_definitions(test_pass_manager PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -239,6 +264,35 @@ if(BUILD_TESTING)
     add_dependencies(test_api example_plugin)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
+
+    # The IR ABI walked like a plugin would: only libodin3.so and odin3.h.
+    add_executable(test_abi_ir tests/unit/test_abi_ir.c)
+    target_link_libraries(test_abi_ir PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_abi_ir PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    add_test(NAME test_abi_ir COMMAND test_abi_ir)
+    set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
+    odin3_add_unit_test(test_abi_values)
+    # A plugin whose init registers, then fails (it must stay loaded: test_abi_ext).
+    add_library(plugin_bad_init MODULE tests/unit/plugin_bad_init.c)
+    set_target_properties(plugin_bad_init PROPERTIES PREFIX "")
+    target_link_libraries(plugin_bad_init PRIVATE libodin3 odin3_flags)
+    # Plugin cell types and passes, and the provenance visitors, through libodin3.so only.
+    add_executable(test_abi_ext tests/unit/test_abi_ext.c)
+    target_link_libraries(test_abi_ext PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_abi_ext PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli"
+        ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_abi_ext.blif"
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>"
+        BAD_INIT_PLUGIN_PATH="$<TARGET_FILE:plugin_bad_init>")
+    add_dependencies(test_abi_ext example_plugin plugin_bad_init)
+    add_test(NAME test_abi_ext COMMAND test_abi_ext)
+    set_tests_properties(test_abi_ext PROPERTIES LABELS unit)
+    odin3_add_unit_test(test_abi_core)
+    target_compile_definitions(test_abi_core PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli")
 
     add_test(NAME blif_roundtrip_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
@@ -304,9 +358,20 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 2\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 3\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+    # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
+    foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
+                           unknown_pass_later_script top top_written_first top_unapplied quoted
+                           help_runs_nothing check_flag usage techlib plugin writers sim)
+        add_test(NAME cli_${_case}
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        set_tests_properties(cli_${_case} PROPERTIES LABELS unit
+            ENVIRONMENT "ODIN3_EXAMPLE_PLUGIN=$<TARGET_FILE:example_plugin>;ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
+    endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
     set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
@@ -373,11 +438,26 @@ if(BUILD_TESTING)
         list(JOIN _preload ":" _preload)
         list(APPEND _python_env "LD_PRELOAD=${_preload}" "ASAN_OPTIONS=detect_leaks=0")
     endif()
-    # The Python plugin needs cffi; skip (not fail) where it is not installed.
+    # The Python plugin tests need cffi: the repo's .venv has it (requirements-dev.txt), so they
+    # use its Python when there is one (CI's Python3 has it too); skip (not fail) without cffi.
+    find_program(ODIN3_PLUGIN_PYTHON NAMES python3 python
+                 PATHS ${PROJECT_SOURCE_DIR}/.venv/bin NO_DEFAULT_PATH)
+    if(NOT ODIN3_PLUGIN_PYTHON)
+        set(ODIN3_PLUGIN_PYTHON ${Python3_EXECUTABLE})
+    endif()
     add_test(NAME python_example_plugin
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
-                ${Python3_EXECUTABLE} plugins/python/example_plugin.py
+                ${ODIN3_PLUGIN_PYTHON} plugins/python/example_plugin.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_example_plugin PROPERTIES
         LABELS unit SKIP_REGULAR_EXPRESSION "No module named 'cffi'")
+    # Phase 1 exit test (1D): Python walks every committed BLIF fixture through the C ABI and
+    # gets exactly the `stats` pass's counts and cell-type histogram. Any unittest skip (no cffi;
+    # no ODIN3_LIB) is reported as Skipped; with ODIN3_REQUIRE_CFFI=1 (CI) a missing cffi fails.
+    add_test(NAME python_walk
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_walk
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_walk PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
 endif()

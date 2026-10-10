@@ -4,6 +4,7 @@
 #ifndef ODIN3_UTIL_LOG_H
 #define ODIN3_UTIL_LOG_H
 
+#include "odin3/odin3.h"
 #include "util/attr.h"
 
 #include <stddef.h>
@@ -11,21 +12,11 @@
 /* Size of the stack buffer a message is formatted into, including the NUL. */
 enum { ODIN3_LOG_BUF = 1024 };
 
-typedef enum odin3_log_level {
-    ODIN3_LOG_ERROR,
-    ODIN3_LOG_WARN,
-    ODIN3_LOG_INFO,
-    ODIN3_LOG_DEBUG,
-    ODIN3_LOG_LEVEL_COUNT
-} odin3_log_level;
-
-typedef void (*odin3_log_sink)(odin3_log_level level, const char *msg, void *user);
-
-/* Messages above max_level are counted but not delivered. Default: ODIN3_LOG_INFO. */
-void odin3_log_set_level(odin3_log_level max_level);
-
-/* Replaces the destination of delivered messages; NULL restores stderr. */
-void odin3_log_set_sink(odin3_log_sink sink, void *user);
+/*
+ * odin3_log_level, odin3_log_sink, odin3_log_set_level, odin3_log_get_level and
+ * odin3_log_set_sink are part of the public ABI (odin3.h): messages above the level (default
+ * ODIN3_LOG_INFO) are counted but not delivered; a NULL sink restores stderr.
+ */
 
 /*
  * Counts the message, then delivers it if its level passes the filter. The text is formatted into

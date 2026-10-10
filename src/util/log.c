@@ -16,11 +16,19 @@ static bool g_in_sink = false;
 
 static const char *const level_names[ODIN3_LOG_LEVEL_COUNT] = {"error", "warning", "info", "debug"};
 
-void odin3_log_set_level(odin3_log_level max_level) {
+ODIN3_EXPORT odin3_status odin3_log_set_level(odin3_log_level max_level) {
+    if ((int)max_level < 0 || max_level >= ODIN3_LOG_LEVEL_COUNT) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     g_max_level = max_level;
+    return ODIN3_OK;
 }
 
-void odin3_log_set_sink(odin3_log_sink sink, void *user) {
+ODIN3_EXPORT odin3_log_level odin3_log_get_level(void) {
+    return g_max_level;
+}
+
+ODIN3_EXPORT void odin3_log_set_sink(odin3_log_sink sink, void *user) {
     g_sink = sink;
     g_user = user;
 }

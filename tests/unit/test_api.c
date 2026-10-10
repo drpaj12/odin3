@@ -1,5 +1,5 @@
 /*
- * test_api.c — unit tests for the ABI v1 entry points in odin3.h.
+ * test_api.c — unit tests for the version, status and plugin entry points in odin3.h.
  */
 #include "odin3/odin3.h"
 #include "unity.h"
@@ -27,7 +27,7 @@ static void test_version_string_matches_macros(void) {
 
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_abi_version()); /* 1C added ODIN3_ERR_PARSE */
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_abi_version()); /* 1D added the IR access functions */
 }
 
 static void test_check_status_has_a_name(void) {

@@ -21,7 +21,8 @@ args)` = begin a pass run named `name` → `check_design` FULL (Debug, or `--che
 run → `check_design` FULL → log `pass <name>: <ms> ms`; a failing post-check fails the pass.
 Built-in passes in Phase 1: `read_blif <path>`, `write_blif <path>`, `read_techlib <path>`,
 `check [--fast]`, `compact`, `write_json/verilog/dot <path> [opts]`, `stats`, `sim <cycles>
-<seed>` (when 1E lands). The CLI runs a script: `odin3 [--plugin x.so]… -p "read_blif a.blif;
+<seed> [<file>|-]` (when 1E lands; vectors in the `odin3-sim-vectors` format, or a logged
+summary without a file; docs/PASSES.md has the options). The CLI runs a script: `odin3 [--plugin x.so]… -p "read_blif a.blif;
 check; write_blif b.blif"` or `odin3 script.o3`.
 
 ## C ABI v0

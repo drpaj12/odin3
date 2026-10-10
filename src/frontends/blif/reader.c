@@ -757,21 +757,32 @@ static odin3_status build_implicit(blif_reader *rd) {
     return st;
 }
 
-/* Modules and black boxes in file order, after one pass run "read_blif" starts. */
-static odin3_status build_all(blif_reader *rd) {
+/* Starts the reader's own pass run "read_blif", unless it runs inside the caller's run. */
+static odin3_status begin_run(blif_reader *rd) {
+    if (odin3_passrun_valid(rd->ctx.run)) {
+        return ODIN3_OK;
+    }
     uint32_t run_name = 0;
-    rd->line = 1;
     odin3_status st = odin3_design_intern(rd->design, odin3_bytes_cstr("read_blif"), &run_name);
     if (st == ODIN3_OK) {
         st = odin3_pass_run_begin(rd->design, run_name, &rd->ctx);
     }
-    st = rd_fail(rd, st);
+    return rd_fail(rd, st);
+}
+
+/* Modules and black boxes in file order, inside the pass run; the first model is the top. */
+static odin3_status build_all(blif_reader *rd) {
+    rd->line = 1;
+    odin3_status st = begin_run(rd);
     if (st == ODIN3_OK && rd->models.len > 0 && rd_model(rd, 0)->blackbox) {
         st = rd_error(rd, rd_model(rd, 0)->line, "the first model must be a module (the top)");
     }
     for (uint32_t i = 0; st == ODIN3_OK && i < rd->models.len; i++) {
         blif_model *model = rd_model(rd, i);
         st = model->blackbox ? build_blackbox(rd, model) : build_module(rd, model);
+    }
+    if (st == ODIN3_OK && rd->models.len > 0) {
+        st = odin3_design_set_top(rd->design, (odin3_module_id){rd_model(rd, 0)->id});
     }
     return st == ODIN3_OK ? build_implicit(rd) : st;
 }
@@ -1545,7 +1556,9 @@ static void rd_free(blif_reader *rd) {
     odin3_u64map_destroy(rd->declared);
 }
 
-odin3_status odin3_blif_read(odin3_design *design, const char *path) {
+/* Reads path into design; ctx is the caller's pass run (its op is advanced), or NULL for the
+ * reader's own run. */
+static odin3_status read_file(odin3_design *design, const char *path, odin3_pass_ctx *ctx) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL design or path");
         return ODIN3_ERR_INVALID_ARG;
@@ -1556,6 +1569,9 @@ odin3_status odin3_blif_read(odin3_design *design, const char *path) {
     }
     blif_reader rd;
     odin3_status st = rd_init(&rd, design, path);
+    if (ctx != NULL) {
+        rd.ctx = *ctx;
+    }
     if (st == ODIN3_OK) {
         st = scan_file(&rd);
     }
@@ -1568,6 +1584,22 @@ odin3_status odin3_blif_read(odin3_design *design, const char *path) {
     if (st == ODIN3_OK) {
         st = read_bodies(&rd);
     }
+    if (ctx != NULL) {
+        ctx->op = rd.ctx.op;
+    }
     rd_free(&rd);
     return st;
+}
+
+odin3_status odin3_blif_read(odin3_design *design, const char *path) {
+    return read_file(design, path, NULL);
+}
+
+odin3_status odin3_blif_read_in(odin3_pass_ctx *ctx, const char *path) {
+    if (ctx == NULL || ctx->design == NULL || !odin3_passrun_valid(ctx->run) ||
+        ctx->run.v >= odin3_passrun_end(ctx->design)) {
+        odin3_log(ODIN3_LOG_ERROR, "blif_read: NULL or invalid pass context");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return read_file(ctx->design, path, ctx);
 }

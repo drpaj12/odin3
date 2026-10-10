@@ -352,12 +352,7 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);
 
 /* --- attributes (IR-10) -------------------------------------------------------------------- */
 
-typedef enum odin3_objkind {
-    ODIN3_OBJ_NODE,
-    ODIN3_OBJ_NET,
-    ODIN3_OBJ_WIRE,
-    ODIN3_OBJ_MODULE
-} odin3_objkind;
+/* odin3_objkind is public: see odin3.h. */
 
 /* An object of a module: kind and ID (for ODIN3_OBJ_MODULE, the module's own ID). */
 typedef struct odin3_objref {

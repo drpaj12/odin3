@@ -85,6 +85,8 @@ jobs:
           restore-keys: |
             ccache-${{ runner.os }}-${{ matrix.cc }}-
       - name: Debug (ASan + UBSan) configure, build, test
+        env:
+          ODIN3_REQUIRE_CFFI: '1'  # python_walk (the Phase 1 exit test) fails, not skips, without cffi
         run: |
           cmake --preset debug
           cmake --build --preset debug

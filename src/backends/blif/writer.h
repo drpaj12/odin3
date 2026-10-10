@@ -10,10 +10,11 @@
 /*
  * Writes design as BLIF to path (created or truncated). Nothing in the design changes.
  *
- * Modules in creation order (the first is the top): `.model`, then the ports in port order, each
- * run of ports of one direction as one `.inputs` or `.outputs` line, then `.clock` from the
- * module's ODIN3_BLIF_ATTR_CLOCK attribute, then the cells in node ID order (port nodes skipped),
- * then the port buffers (below), then `.end`. Then every declared black-box model
+ * Modules: the design's top (odin3_design_top) first, since BLIF's first model is the top, then
+ * the others in creation order (all in creation order when no top is set): `.model`, then the ports
+ * in port order, each run of ports of one direction as one `.inputs` or `.outputs` line, then
+ * `.clock` from the module's ODIN3_BLIF_ATTR_CLOCK attribute, then the cells in node ID order (port
+ * nodes skipped), then the port buffers (below), then `.end`. Then every declared black-box model
  * (odin3_design_declared_model) in declaration order, once each even when listed twice (the first
  * declaration): `.model`, the ports of the declaration as written
  * (odin3_design_declared_model_decl: its order, widths and scalar flags) as above, `.blackbox`,
