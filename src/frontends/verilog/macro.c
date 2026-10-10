@@ -20,41 +20,14 @@ enum { CAP_WHAT = 160, CRLF_CONT = 3, LF_CONT = 2 };
 
 /* --- the table ----------------------------------------------------------------------------- */
 
-static const char *const k_directive_names[] = {
-    "begin_keywords",
-    "celldefine",
-    "default_nettype",
-    "define",
-    "else",
-    "elsif",
-    "end_keywords",
-    "endcelldefine",
-    "endif",
-    "ifdef",
-    "ifndef",
-    "include",
-    "line",
-    "nounconnected_drive",
-    "pragma",
-    "resetall",
-    "timescale",
-    "unconnected_drive",
-    "undef",
-    "__FILE__", /* PP-9 at every use, so never a usable macro name */
-    "__LINE__",
-};
-
 static bool bytes_eq(odin3_bytes bytes, const char *str) {
     return strlen(str) == bytes.len && memcmp(str, bytes.ptr, bytes.len) == 0;
 }
 
+/* Every name in the scanner's directive table, `__FILE__`/`__LINE__` included (PP-9 at every
+ * use, so never a usable macro name). */
 bool odin3_pp_is_directive_name(odin3_bytes name) {
-    for (size_t i = 0; i < sizeof k_directive_names / sizeof k_directive_names[0]; i++) {
-        if (bytes_eq(name, k_directive_names[i])) {
-            return true;
-        }
-    }
-    return false;
+    return odin3_pp_dir_lookup(name) != NULL;
 }
 
 uint32_t odin3_pp_macro_find(const odin3_pp *pp, odin3_bytes name) {

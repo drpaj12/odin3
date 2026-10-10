@@ -11,7 +11,7 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { CRLF_CONT = 3, LF_CONT = 2, NAME_MAX = 32 };
+enum { CRLF_CONT = 3, LF_CONT = 2 };
 
 static const uint8_t k_space = ' ';
 
@@ -50,84 +50,6 @@ static void pop_exhausted(odin3_pp *pp) {
          frame = odin3_pp_top(pp)) {
         odin3_pp_pop_frame(pp);
     }
-}
-
-/* --- lexical helpers over the top frame ---------------------------------------------------- */
-
-/* A string literal at the cursor: to the closing quote, or up to an unescaped newline. */
-static uint32_t string_length(const odin3_pp *pp) {
-    uint32_t k = 1;
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0 && ch != '\n'; ch = odin3_pp_peek(pp, k)) {
-        k += ch == '\\' && odin3_pp_peek(pp, k + 1) >= 0 ? 2 : 1;
-        if (ch == '"') {
-            break;
-        }
-    }
-    return k;
-}
-
-/* An escaped identifier at the cursor: the backslash and every byte to the next blank. */
-static uint32_t escaped_length(const odin3_pp *pp) {
-    uint32_t k = 1;
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0 && !odin3_pp_is_blank(ch);
-         ch = odin3_pp_peek(pp, k)) {
-        k++;
-    }
-    return k;
-}
-
-/* A // comment (to the newline, which it excludes) or a block comment at the cursor. */
-static uint32_t comment_length(const odin3_pp *pp) {
-    uint32_t k = 2;
-    if (odin3_pp_peek(pp, 1) == '/') {
-        while (odin3_pp_peek(pp, k) >= 0 && odin3_pp_peek(pp, k) != '\n') {
-            k++;
-        }
-        return k;
-    }
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0; ch = odin3_pp_peek(pp, k)) {
-        k++;
-        if (ch == '*' && odin3_pp_peek(pp, k) == '/') {
-            return k + 1;
-        }
-    }
-    return k;
-}
-
-/* The IDENT after the backtick at the cursor, copied into name (at most NAME_MAX - 1 bytes; a
- * longer one is no directive); returns its length. */
-static uint32_t backtick_name(const odin3_pp *pp, char name[NAME_MAX]) {
-    uint32_t k = 0;
-    if (odin3_pp_is_ident_start(odin3_pp_peek(pp, 1))) {
-        while (odin3_pp_is_ident_char(odin3_pp_peek(pp, 1 + k))) {
-            if (k + 1 < NAME_MAX) {
-                name[k] = (char)odin3_pp_peek(pp, 1 + k);
-            }
-            k++;
-        }
-    }
-    name[k < NAME_MAX ? k : 0] = '\0';
-    return k;
-}
-
-typedef enum word_kind { WORD_OTHER, WORD_COND, WORD_INCLUDE, WORD_DEFINITION } word_kind;
-
-/* What a backtick word means to argument collection; *cond its conditional kind. */
-static word_kind classify(const char *name, odin3_pp_cond_kind *cond) {
-    static const char *const k_conds[] = {"ifdef", "ifndef", "elsif", "else", "endif"};
-    static const odin3_pp_cond_kind k_kinds[] = {ODIN3_PP_COND_IFDEF, ODIN3_PP_COND_IFNDEF,
-                                                 ODIN3_PP_COND_ELSIF, ODIN3_PP_COND_ELSE,
-                                                 ODIN3_PP_COND_ENDIF};
-    for (size_t i = 0; i < sizeof k_conds / sizeof k_conds[0]; i++) {
-        if (strcmp(name, k_conds[i]) == 0) {
-            *cond = k_kinds[i];
-            return WORD_COND;
-        }
-    }
-    if (strcmp(name, "include") == 0) {
-        return WORD_INCLUDE;
-    }
-    return strcmp(name, "define") == 0 || strcmp(name, "undef") == 0 ? WORD_DEFINITION : WORD_OTHER;
 }
 
 /* --- errors -------------------------------------------------------------------------------- */
@@ -228,7 +150,7 @@ static odin3_status take(collect *col, uint32_t n) {
 /* A comment in an actual: one loc-0 space (I4); nothing while skipping. */
 static odin3_status take_comment(collect *col) {
     odin3_pp *pp = col->pp;
-    odin3_pp_advance(pp, comment_length(pp));
+    odin3_pp_advance(pp, odin3_pp_comment_length(pp));
     if (!keeping(col)) {
         return ODIN3_OK;
     }
@@ -241,23 +163,21 @@ static odin3_status take_comment(collect *col) {
 static odin3_status collect_backtick(collect *col) {
     odin3_pp *pp = col->pp;
     odin3_loc at = odin3_pp_loc_here(pp);
-    char name[NAME_MAX];
-    uint32_t len = backtick_name(pp, name);
-    odin3_pp_cond_kind cond = ODIN3_PP_COND_IFDEF;
-    word_kind kind = classify(name, &cond);
-    if (pp->skipping || kind == WORD_COND) {
-        bool file = top_is_file(pp);
-        if (kind == WORD_COND && !file) {
+    odin3_bytes name = odin3_pp_ident_ahead(pp, 1);
+    const odin3_pp_dir *dir = odin3_pp_dir_lookup(name);
+    odin3_pp_dir_kind kind = dir == NULL ? ODIN3_PP_DIR_NONE : dir->kind;
+    if (pp->skipping || kind == ODIN3_PP_DIR_COND) {
+        if (kind == ODIN3_PP_DIR_COND && !top_is_file(pp)) {
             return odin3_pp_error(pp, at, "syntax: directive inside macro text");
         }
-        odin3_pp_advance(pp, 1 + len);
+        odin3_pp_advance(pp, 1 + (uint32_t)name.len);
         col->sep = true;
-        return kind == WORD_COND ? odin3_pp_cond_directive(pp, cond, at) : ODIN3_OK;
+        return kind == ODIN3_PP_DIR_COND ? odin3_pp_cond_directive(pp, dir->cond, at) : ODIN3_OK;
     }
-    if (kind == WORD_INCLUDE) {
+    if (kind == ODIN3_PP_DIR_INCLUDE) {
         return use_error(pp, col->use, "unterminated arguments of ", "");
     }
-    if (kind == WORD_DEFINITION) {
+    if (kind == ODIN3_PP_DIR_DEFINE || kind == ODIN3_PP_DIR_UNDEF) {
         return odin3_pp_error(pp, at, "syntax: directive inside macro text");
     }
     return take(col, 1);
@@ -280,19 +200,9 @@ static odin3_status next_actual(collect *col) {
     return ODIN3_OK;
 }
 
-static bool special(uint8_t ch) {
-    return strchr("()[]{},\"/\\`", ch) != NULL && ch != '\0';
-}
-
-/* Plain bytes up to the next special byte of the current run (at least one). */
+/* Plain bytes up to the next byte collection treats specially (at least one). */
 static odin3_status take_plain(collect *col) {
-    const odin3_pp_textrun *run = odin3_pp_cur_run(col->pp);
-    uint32_t start = odin3_pp_top(col->pp)->cur.offset;
-    uint32_t end = start + 1;
-    while (end < run->len && !special(run->bytes[end])) {
-        end++;
-    }
-    return take(col, end - start);
+    return take(col, odin3_pp_plain_length(col->pp, true));
 }
 
 /* A bracket or separator; *done after the closing ')'. */
@@ -330,9 +240,9 @@ static odin3_status collect_step(collect *col, bool *done) {
         odin3_pp_pop_frame(pp);
         return ODIN3_OK;
     case '"':
-        return take(col, string_length(pp));
+        return take(col, odin3_pp_string_length(pp));
     case '\\':
-        return take(col, escaped_length(pp));
+        return take(col, odin3_pp_escaped_length(pp));
     case '`':
         return collect_backtick(col);
     case '/':
@@ -508,17 +418,22 @@ static odin3_status flush(subst *sub, uint32_t to) {
                                             odin3_pp_loc_add(sub->base, from)});
 }
 
-/* One run of a substituted actual: a MACRO_ARG buffer for a spelled run, none for loc 0. */
-static odin3_status push_arg_run(subst *sub, odin3_pp_textrun run, odin3_range formal) {
+/* One run of a substituted actual or default: a MACRO_ARG buffer for a spelled run, none for
+ * loc 0. A default's buffer is macro text: its chain and ancestry run through the expansion
+ * (from_default, PP-7). */
+static odin3_status push_arg_run(subst *sub, odin3_pp_textrun run, odin3_range formal,
+                                 bool from_default) {
     odin3_pp *pp = sub->pp;
     odin3_status st = run.len == 0 ? ODIN3_OK : room(sub);
     if (st != ODIN3_OK || run.len == 0 || run.loc.v == 0) {
         return st != ODIN3_OK || run.len == 0 ? st : push_run(sub, run);
     }
-    if (1 + odin3_pp_chain_of(pp, run.loc) > pp->limits.expansion_chain) {
+    if (1 + odin3_pp_chain_of(pp, from_default ? formal.loc : run.loc) >
+        pp->limits.expansion_chain) {
         return chain_error(pp, sub->use->at);
     }
     odin3_pp_bufspec spec = {.kind = ODIN3_SRCBUF_MACRO_ARG,
+                             .from_default = from_default,
                              .expansion = {ODIN3_SRCBUF_MACRO_ARG,
                                            sub->mac->name,
                                            formal.loc.v,
@@ -541,7 +456,8 @@ static odin3_status substitute(subst *sub, uint32_t index, odin3_range formal) {
         actual_span span = span_of(pp, index);
         odin3_status st = ODIN3_OK;
         for (uint32_t k = span.first; k < span.last && st == ODIN3_OK; k++) {
-            st = push_arg_run(sub, *(const odin3_pp_textrun *)odin3_vec_cat(&pp->args, k), formal);
+            st = push_arg_run(sub, *(const odin3_pp_textrun *)odin3_vec_cat(&pp->args, k), formal,
+                              false);
         }
         return st;
     }
@@ -549,7 +465,7 @@ static odin3_status substitute(subst *sub, uint32_t index, odin3_range formal) {
     if (!spec->has_default) {
         return ODIN3_OK; /* an empty actual without a default: empty text (I1) */
     }
-    return push_arg_run(sub, (odin3_pp_textrun){spec->text, spec->len, spec->def}, formal);
+    return push_arg_run(sub, (odin3_pp_textrun){spec->text, spec->len, spec->def}, formal, true);
 }
 
 /* Index + 1 of the formal named by body bytes [start, end), 0 for none. */
@@ -667,8 +583,9 @@ static odin3_status substitute_body(subst *sub) {
 
 /* --- PP-7: recursion on the spelling ancestry ---------------------------------------------- */
 
-/* True when name was expanded on at's spelling ancestry: in a MACRO_ARG one spelling step, in
- * an EXPANSION record its name and go to parent, stop at a FILE (bounded by the chain cap). */
+/* True when name was expanded on at's spelling ancestry: in a MACRO_ARG one spelling step (to
+ * parent for a default's, which is macro text), in an EXPANSION record its name and go to
+ * parent, stop at a FILE (bounded by the chain cap). */
 static bool recursive(const odin3_pp *pp, odin3_loc at, uint32_t name) {
     odin3_loc loc = at;
     for (uint32_t steps = 0; steps <= pp->limits.expansion_chain; steps++) {
@@ -676,12 +593,15 @@ static bool recursive(const odin3_pp *pp, odin3_loc at, uint32_t name) {
         if (rec == NULL || rec->kind == ODIN3_SRCBUF_FILE) {
             return false;
         }
-        if (rec->kind != ODIN3_SRCBUF_EXPANSION) {
-            loc = odin3_srcman_spelling(pp->sm, loc);
-        } else if (rec->name == name) {
+        bool expansion = rec->kind == ODIN3_SRCBUF_EXPANSION;
+        if (expansion && rec->name == name) {
             return true;
-        } else {
+        }
+        const odin3_pp_bufrec *own = odin3_pp_bufrec_of(pp, loc);
+        if (expansion || (own != NULL && own->from_default)) {
             loc.v = rec->parent;
+        } else {
+            loc = odin3_srcman_spelling(pp->sm, loc);
         }
     }
     return false;

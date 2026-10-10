@@ -198,6 +198,9 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       again inside its own argument chain. Both oracles expand it to nothing.
     - *`translate_off` … `translate_on` is removed by the preprocessor* (PP-10). Icarus ignores
       the pair. Yosys drops the region in its lexer, after directives have been processed.
+      A `translate_off` comment inside a macro's actual is stripped to a space like any other
+      comment there and opens no region (agent default). A later `translate_on` is then a stray
+      `translate_on` warning, while Yosys's lexer would drop the region.
     - *A compiler directive name used as a macro name* is `syntax` (spec §7.3 row). For example,
       `` `define timescale 1 `` is rejected, and both oracles accept it.
     - *The splicing micros are Parmys-rejected* (PHASE2 #4). `syntax/preprocessor_define`,

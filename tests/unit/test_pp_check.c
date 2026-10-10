@@ -65,7 +65,7 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
 }
 
-/* Cleans up before asserting: after TEST_IGNORE every assertion aborts at once. */
+/* Cleans up before asserting, so a failed test leaves no temporary files. */
 void tearDown(void) {
     odin3_log_set_sink(NULL, NULL);
     odin3_pp_destroy(pp);
@@ -124,10 +124,6 @@ static void assert_checked(const char *text) {
     TEST_ASSERT_EQUAL_INT(0, errors);
 }
 
-static bool not_supported_yet(void) {
-    return strstr(captured, "not supported yet") != NULL;
-}
-
 /* A file to check: dir/file and the error it must stop at (NULL: none). */
 typedef struct file_case {
     const char *dir;
@@ -135,8 +131,8 @@ typedef struct file_case {
     const char *want;
 } file_case;
 
-/* Runs a file (a fresh preprocessor) and checks the stream; a PARSE error must contain want
- * or be a Task 7 stub's (skipped until Task 9). Returns true when the stream was checked. */
+/* Runs a file (a fresh preprocessor) and checks the stream, or requires a PARSE error that
+ * contains want. Returns true when the stream was checked. */
 static bool check_file(file_case fc) {
     char path[PATH_BUF];
     (void)snprintf(path, sizeof path, "%s/%s", fc.dir, fc.file);
@@ -144,9 +140,6 @@ static bool check_file(file_case fc) {
     errors = 0;
     captured[0] = '\0';
     odin3_status st = run_path(fc.file, path);
-    if (st == ODIN3_ERR_PARSE && not_supported_yet()) {
-        return false;
-    }
     if (fc.want != NULL) {
         TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, st, fc.file);
         TEST_ASSERT_NOT_NULL_MESSAGE(strstr(captured, fc.want), captured);
@@ -203,7 +196,7 @@ static void test_probes(void) {
     for (size_t i = 0; i < sizeof k_ok / sizeof k_ok[0]; i++) {
         checked += check_file((file_case){ODIN3_PP_PROBES, k_ok[i], NULL}) ? 1 : 0;
     }
-    TEST_ASSERT_TRUE(checked >= 8);
+    TEST_ASSERT_EQUAL_UINT32(sizeof k_ok / sizeof k_ok[0], checked);
     (void)check_file((file_case){ODIN3_PP_PROBES, "w1.v", "recursive macro 'N'"});
     (void)check_file((file_case){ODIN3_PP_PROBES, "rec.v", "recursive macro 'R'"});
 }
@@ -235,7 +228,7 @@ static void test_preprocessor_micros(void) {
         checked +=
             check_file((file_case){ODIN3_PP_MICROS "/preprocessor", k_micros[i], NULL}) ? 1 : 0;
     }
-    TEST_ASSERT_TRUE(checked >= 5);
+    TEST_ASSERT_EQUAL_UINT32(sizeof k_micros / sizeof k_micros[0], checked);
 }
 
 /* The Parmys-rejected splicing micros stop at `ADDITION_num (PP-6). */

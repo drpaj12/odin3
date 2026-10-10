@@ -66,7 +66,7 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
 }
 
-/* Cleans up before asserting: after TEST_IGNORE every assertion aborts at once. */
+/* Cleans up before asserting, so a failed test leaves no temporary files. */
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
@@ -241,16 +241,6 @@ static void assert_segs(uint32_t first, const seg_want *want, uint32_t n) {
 
 static odin3_loc none(void) {
     return (odin3_loc){0};
-}
-
-/* True once Task 7's conditionals are in (the stub rejects them); tests that mix conditionals
- * or includes with expansion are ignored until then (they land with Task 9). */
-static bool have_conditionals(void) {
-    odin3_status st = run("`ifdef X\n`endif\n");
-    bool have = st == ODIN3_OK;
-    errors = 0;
-    captured[0] = '\0';
-    return have;
 }
 
 /* --- the 2A §3.1 worked example ------------------------------------------------------------ */
@@ -586,6 +576,33 @@ static void test_probe_w1_rejected_as_declared(void) {
                                     "  expanded from macro 'N' at w1.v:3:20");
 }
 
+/* A default is macro text: its MACRO_ARG takes its ancestry from the expansion it is
+ * substituted into, so a cycle through a default is recursion (2B Task 8 fix round 1). */
+static void test_recursion_through_a_default(void) {
+    assert_error(run("`define A(x=`A()) x\nq = `A();\n"),
+                 "f.v:1:13: error: syntax: recursive macro 'A'\n"
+                 "  in argument of macro 'A' at f.v:1:19");
+}
+
+static void test_mutual_recursion_through_defaults(void) {
+    odin3_status st = run("`define A(x=`B()) x\n`define B(y=`A()) y\nq = `A();\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
+    const char *want = "f.v:2:13: error: syntax: recursive macro 'A'\n";
+    TEST_ASSERT_EQUAL_STRING_LEN(want, captured, strlen(want));
+}
+
+static void test_default_using_another_macro(void) {
+    assert_ok_text(run("`define B 7\n`define I(v) (v)\n`define A(x=`B+`I(1)) [x]\n"
+                       "q = `A(); r = `A(2);\n"),
+                   "\n\n\nq = [7+(1)]; r = [2];\n");
+    /* f.v, E(A), the default's MACRO_ARG (chain 1 + E(A)'s), E(B), E(I), ... */
+    const odin3_pp_bufrec *recs = pp->bufs.data;
+    TEST_ASSERT_EQUAL_UINT32(1, recs[1].chain);
+    TEST_ASSERT_EQUAL_UINT32(2, recs[2].chain);
+    TEST_ASSERT_TRUE(recs[2].from_default);
+    TEST_ASSERT_EQUAL_UINT32(3, recs[3].chain);
+}
+
 static void test_same_macro_twice_in_an_argument_is_fine(void) {
     assert_ok_text(run("`define I(x) (x)\nq = `I(`I(`I(a)));\n"), "\nq = (((a)));\n");
 }
@@ -689,19 +706,13 @@ static void test_cap_loc_bytes_unused_arguments(void) {
         strstr(captured, "location bytes exceeds ODIN3_PP_MAX_LOC_BYTES_PER_STREAM (200)"));
 }
 
-/* --- mixing with conditionals (Task 7; active once it is in) ------------------------------- */
+/* --- mixing with conditionals and include (Task 7) ------------------------------- */
 
 static void test_probe_w3_conditionals_while_collecting(void) {
-    if (!have_conditionals()) {
-        TEST_IGNORE_MESSAGE("needs Task 7's conditionals (Task 9)");
-    }
     assert_ok_text(run_probe("w3.v"), "\nmodule m(output [3:0] o); assign o = 1  + 3; endmodule\n");
 }
 
 static void test_probe_t7(void) {
-    if (!have_conditionals()) {
-        TEST_IGNORE_MESSAGE("needs Task 7's conditionals (Task 9)");
-    }
     assert_ok_text(run_probe("t7.v"),
                    "\n\nmodule m; wire a b; wire w = p   + r; wire v = 1  + 2  ; endmodule\n");
 }
@@ -711,9 +722,6 @@ static void test_include_end_stops_collection(void) {
     char path[PATH_BUF];
     put("inc.vh", odin3_bytes_cstr("`define ID(x) x\n`ID(a,\n"), path);
     odin3_status st = run("`include \"inc.vh\"\nb);\n");
-    if (st == ODIN3_ERR_PARSE && strstr(captured, "not supported yet") != NULL) {
-        TEST_IGNORE_MESSAGE("needs Task 7's include (Task 9)");
-    }
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
     const char *want = "inc.vh:2:1: error: syntax: unterminated arguments of macro 'ID'";
     TEST_ASSERT_EQUAL_STRING_LEN(want, captured, strlen(want));
@@ -851,6 +859,9 @@ static void run_more_tests(void) {
     RUN_TEST(test_probe_rec);
     RUN_TEST(test_recursion_through_an_argument);
     RUN_TEST(test_probe_w1_rejected_as_declared);
+    RUN_TEST(test_recursion_through_a_default);
+    RUN_TEST(test_mutual_recursion_through_defaults);
+    RUN_TEST(test_default_using_another_macro);
     RUN_TEST(test_same_macro_twice_in_an_argument_is_fine);
     RUN_TEST(test_chain_cap_with_few_live_frames);
     RUN_TEST(test_cap_expansion_depth);

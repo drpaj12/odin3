@@ -336,8 +336,12 @@ static const odin3_pp_bufrec *bufrec_of(const odin3_pp *pp, odin3_srcbuf_id buf)
     return odin3_vec_cat(&pp->bufs, buf.v - first);
 }
 
+const odin3_pp_bufrec *odin3_pp_bufrec_of(const odin3_pp *pp, odin3_loc loc) {
+    return bufrec_of(pp, odin3_srcman_buffer_of(pp->sm, loc));
+}
+
 uint32_t odin3_pp_chain_of(const odin3_pp *pp, odin3_loc loc) {
-    const odin3_pp_bufrec *rec = bufrec_of(pp, odin3_srcman_buffer_of(pp->sm, loc));
+    const odin3_pp_bufrec *rec = odin3_pp_bufrec_of(pp, loc);
     return rec == NULL ? 0 : rec->chain;
 }
 
@@ -374,7 +378,8 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odi
     bool file = spec->kind == ODIN3_SRCBUF_FILE;
     uint32_t chain = 0;
     if (!file) {
-        bool arg = spec->kind == ODIN3_SRCBUF_MACRO_ARG;
+        /* a default's MACRO_ARG is macro text: its ancestry is the expansion (PP-7) */
+        bool arg = spec->kind == ODIN3_SRCBUF_MACRO_ARG && !spec->from_default;
         odin3_loc from = {arg ? spec->expansion.def : spec->expansion.parent};
         chain = 1 + odin3_pp_chain_of(pp, from);
     }
@@ -386,7 +391,7 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odi
     if (pp->bufs.len == 0) {
         pp->first_buffer = *out;
     }
-    *(odin3_pp_bufrec *)odin3_vec_push(&pp->bufs) = (odin3_pp_bufrec){chain, 0};
+    *(odin3_pp_bufrec *)odin3_vec_push(&pp->bufs) = (odin3_pp_bufrec){chain, 0, spec->from_default};
     pp->nbuffers++;
     pp->nincludes += file ? 1 : 0;
     pp->loc_bytes += (uint64_t)(file ? spec->file.len : spec->expansion.len) + 1;
@@ -490,7 +495,8 @@ odin3_status odin3_pp_open_file(odin3_pp *pp, const odin3_pp_open *open, odin3_s
     odin3_pp_bufspec spec = {
         ODIN3_SRCBUF_FILE,
         {open->given, entry->resolved, open->library, open->parent.v, entry->len, {0, 0}},
-        {0, 0, 0, 0, 0, 0, {0, 0}}};
+        {0, 0, 0, 0, 0, 0, {0, 0}},
+        false};
     odin3_status st = odin3_pp_add_buffer(pp, &spec, open->at, out);
     if (st == ODIN3_OK) {
         st = add_lines(pp, out->v, entry);
@@ -513,48 +519,31 @@ odin3_status odin3_pp_open_file(odin3_pp *pp, const odin3_pp_open *open, odin3_s
 
 /* --- the scanner --------------------------------------------------------------------------- */
 
-typedef enum dir_kind {
-    DIR_NONE,
-    DIR_DEFINE,
-    DIR_UNDEF,
-    DIR_COND,
-    DIR_INCLUDE,
-    DIR_LINE,
-    DIR_PASS,
-    DIR_SV
-} dir_kind;
-
-typedef struct dir_entry {
-    const char *name;
-    dir_kind kind;
-    odin3_pp_cond_kind cond;
-} dir_entry;
-
-static const dir_entry k_dirs[] = {
-    {"define", DIR_DEFINE, 0},
-    {"undef", DIR_UNDEF, 0},
-    {"ifdef", DIR_COND, ODIN3_PP_COND_IFDEF},
-    {"ifndef", DIR_COND, ODIN3_PP_COND_IFNDEF},
-    {"elsif", DIR_COND, ODIN3_PP_COND_ELSIF},
-    {"else", DIR_COND, ODIN3_PP_COND_ELSE},
-    {"endif", DIR_COND, ODIN3_PP_COND_ENDIF},
-    {"include", DIR_INCLUDE, 0},
-    {"line", DIR_LINE, 0},
-    {"default_nettype", DIR_PASS, 0},
-    {"timescale", DIR_PASS, 0},
-    {"celldefine", DIR_PASS, 0},
-    {"endcelldefine", DIR_PASS, 0},
-    {"resetall", DIR_PASS, 0},
-    {"begin_keywords", DIR_PASS, 0},
-    {"end_keywords", DIR_PASS, 0},
-    {"unconnected_drive", DIR_PASS, 0},
-    {"nounconnected_drive", DIR_PASS, 0},
-    {"pragma", DIR_PASS, 0},
-    {"__FILE__", DIR_SV, 0},
-    {"__LINE__", DIR_SV, 0},
+static const odin3_pp_dir k_dirs[] = {
+    {"define", ODIN3_PP_DIR_DEFINE, 0},
+    {"undef", ODIN3_PP_DIR_UNDEF, 0},
+    {"ifdef", ODIN3_PP_DIR_COND, ODIN3_PP_COND_IFDEF},
+    {"ifndef", ODIN3_PP_DIR_COND, ODIN3_PP_COND_IFNDEF},
+    {"elsif", ODIN3_PP_DIR_COND, ODIN3_PP_COND_ELSIF},
+    {"else", ODIN3_PP_DIR_COND, ODIN3_PP_COND_ELSE},
+    {"endif", ODIN3_PP_DIR_COND, ODIN3_PP_COND_ENDIF},
+    {"include", ODIN3_PP_DIR_INCLUDE, 0},
+    {"line", ODIN3_PP_DIR_LINE, 0},
+    {"default_nettype", ODIN3_PP_DIR_PASS, 0},
+    {"timescale", ODIN3_PP_DIR_PASS, 0},
+    {"celldefine", ODIN3_PP_DIR_PASS, 0},
+    {"endcelldefine", ODIN3_PP_DIR_PASS, 0},
+    {"resetall", ODIN3_PP_DIR_PASS, 0},
+    {"begin_keywords", ODIN3_PP_DIR_PASS, 0},
+    {"end_keywords", ODIN3_PP_DIR_PASS, 0},
+    {"unconnected_drive", ODIN3_PP_DIR_PASS, 0},
+    {"nounconnected_drive", ODIN3_PP_DIR_PASS, 0},
+    {"pragma", ODIN3_PP_DIR_PASS, 0},
+    {"__FILE__", ODIN3_PP_DIR_SV, 0},
+    {"__LINE__", ODIN3_PP_DIR_SV, 0},
 };
 
-static const dir_entry *dir_lookup(odin3_bytes name) {
+const odin3_pp_dir *odin3_pp_dir_lookup(odin3_bytes name) {
     for (size_t i = 0; i < sizeof k_dirs / sizeof k_dirs[0]; i++) {
         if (strlen(k_dirs[i].name) == name.len && memcmp(k_dirs[i].name, name.ptr, name.len) == 0) {
             return &k_dirs[i];
@@ -563,8 +552,7 @@ static const dir_entry *dir_lookup(odin3_bytes name) {
     return NULL;
 }
 
-/* The IDENT starting k bytes ahead of the cursor, within its run (empty when none). */
-static odin3_bytes ident_ahead(const odin3_pp *pp, uint32_t ahead) {
+odin3_bytes odin3_pp_ident_ahead(const odin3_pp *pp, uint32_t ahead) {
     const odin3_pp_frame *frame = top_frame(pp);
     uint32_t run = frame->cur.run;
     uint64_t offset = (uint64_t)frame->cur.offset + ahead;
@@ -651,16 +639,16 @@ static odin3_status line_directive(odin3_pp *pp) {
     return ODIN3_OK;
 }
 
-static odin3_status consumed_directive(odin3_pp *pp, const dir_entry *dir, odin3_loc at) {
+static odin3_status consumed_directive(odin3_pp *pp, const odin3_pp_dir *dir, odin3_loc at) {
     if (odin3_pp_top(pp)->kind != ODIN3_PP_FRAME_FILE) {
         return odin3_pp_error(pp, at, "syntax: directive inside macro text");
     }
     switch (dir->kind) {
-    case DIR_DEFINE:
+    case ODIN3_PP_DIR_DEFINE:
         return odin3_pp_define_directive(pp, at);
-    case DIR_UNDEF:
+    case ODIN3_PP_DIR_UNDEF:
         return odin3_pp_undef_directive(pp, at);
-    case DIR_COND:
+    case ODIN3_PP_DIR_COND:
         return odin3_pp_cond_directive(pp, dir->cond, at);
     default:
         return odin3_pp_include_directive(pp, at);
@@ -669,13 +657,13 @@ static odin3_status consumed_directive(odin3_pp *pp, const dir_entry *dir, odin3
 
 /* `NAME outside skipped regions: a directive, a pass-through directive or a macro use. */
 static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
-    odin3_bytes name = ident_ahead(pp, 1);
-    const dir_entry *dir = dir_lookup(name);
-    dir_kind kind = dir == NULL ? DIR_NONE : dir->kind;
-    if (kind == DIR_PASS) {
+    odin3_bytes name = odin3_pp_ident_ahead(pp, 1);
+    const odin3_pp_dir *dir = odin3_pp_dir_lookup(name);
+    odin3_pp_dir_kind kind = dir == NULL ? ODIN3_PP_DIR_NONE : dir->kind;
+    if (kind == ODIN3_PP_DIR_PASS) {
         return odin3_pp_emit_next(pp, (uint32_t)name.len + 1);
     }
-    if (kind == DIR_SV) {
+    if (kind == ODIN3_PP_DIR_SV) {
         return odin3_pp_sv_operator(pp, at,
                                     name.len == strlen("__FILE__") &&
                                             memcmp(name.ptr, "__FILE__", name.len) == 0
@@ -683,10 +671,10 @@ static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
                                         : "`__LINE__");
     }
     odin3_pp_advance(pp, (uint32_t)name.len + 1);
-    if (kind == DIR_LINE) {
+    if (kind == ODIN3_PP_DIR_LINE) {
         return line_directive(pp);
     }
-    if (kind != DIR_NONE) {
+    if (kind != ODIN3_PP_DIR_NONE) {
         return consumed_directive(pp, dir, at);
     }
     odin3_pp_use use = {name, odin3_pp_macro_find(pp, name), at};
@@ -695,10 +683,10 @@ static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
 
 /* A backtick in a skipped region: only conditionals are interpreted. */
 static odin3_status skipped_backtick(odin3_pp *pp, odin3_loc at) {
-    odin3_bytes name = ident_ahead(pp, 1);
-    const dir_entry *dir = dir_lookup(name);
+    odin3_bytes name = odin3_pp_ident_ahead(pp, 1);
+    const odin3_pp_dir *dir = odin3_pp_dir_lookup(name);
     odin3_pp_advance(pp, (uint32_t)name.len + 1);
-    if (dir != NULL && dir->kind == DIR_COND) {
+    if (dir != NULL && dir->kind == ODIN3_PP_DIR_COND) {
         return odin3_pp_cond_directive(pp, dir->cond, at);
     }
     return ODIN3_OK;
@@ -729,8 +717,7 @@ static odin3_status scan_backtick(odin3_pp *pp) {
     return backtick_word(pp, at);
 }
 
-/* A string literal: to the closing quote, or up to (not including) an unescaped newline. */
-static odin3_status scan_string(odin3_pp *pp) {
+uint32_t odin3_pp_string_length(const odin3_pp *pp) {
     uint32_t k = 1;
     for (int ch = odin3_pp_peek(pp, k); ch >= 0 && ch != '\n'; ch = odin3_pp_peek(pp, k)) {
         k += ch == '\\' && odin3_pp_peek(pp, k + 1) >= 0 ? 2 : 1;
@@ -738,20 +725,19 @@ static odin3_status scan_string(odin3_pp *pp) {
             break;
         }
     }
-    return odin3_pp_emit_next(pp, k);
+    return k;
 }
 
-/* An escaped identifier: the backslash and every byte to the next blank. */
-static odin3_status scan_escaped(odin3_pp *pp) {
+uint32_t odin3_pp_escaped_length(const odin3_pp *pp) {
     uint32_t k = 1;
     for (int ch = odin3_pp_peek(pp, k); ch >= 0 && !odin3_pp_is_blank(ch);
          ch = odin3_pp_peek(pp, k)) {
         k++;
     }
-    return odin3_pp_emit_next(pp, k);
+    return k;
 }
 
-static uint32_t comment_length(const odin3_pp *pp) {
+uint32_t odin3_pp_comment_length(const odin3_pp *pp) {
     uint32_t k = 2;
     if (odin3_pp_peek(pp, 1) == '/') {
         while (odin3_pp_peek(pp, k) >= 0 && odin3_pp_peek(pp, k) != '\n') {
@@ -770,7 +756,7 @@ static uint32_t comment_length(const odin3_pp *pp) {
 
 /* A comment: copied through unless the translate_off hook drops it (PP-10). */
 static odin3_status scan_comment(odin3_pp *pp) {
-    uint32_t len = comment_length(pp);
+    uint32_t len = odin3_pp_comment_length(pp);
     if (pp->skipping) {
         odin3_pp_advance(pp, len);
         return ODIN3_OK;
@@ -790,19 +776,19 @@ static odin3_status scan_comment(odin3_pp *pp) {
     return odin3_pp_emit_next(pp, len);
 }
 
-static bool special(uint8_t ch) {
-    return ch == '`' || ch == '"' || ch == '/' || ch == '\\';
+static bool special(uint8_t ch, bool brackets) {
+    bool scanner = ch == '`' || ch == '"' || ch == '/' || ch == '\\';
+    return scanner || (brackets && ch != '\0' && strchr("()[]{},", ch) != NULL);
 }
 
-/* Plain bytes up to the next special byte of the current run (at least one). */
-static odin3_status scan_plain(odin3_pp *pp) {
+uint32_t odin3_pp_plain_length(const odin3_pp *pp, bool brackets) {
     const odin3_pp_textrun *run = odin3_pp_cur_run(pp);
-    uint32_t start = odin3_pp_top(pp)->cur.offset;
+    uint32_t start = top_frame(pp)->cur.offset;
     uint32_t end = start + 1;
-    while (end < run->len && !special(run->bytes[end])) {
+    while (end < run->len && !special(run->bytes[end], brackets)) {
         end++;
     }
-    return odin3_pp_emit_next(pp, end - start);
+    return end - start;
 }
 
 static odin3_status frame_end(odin3_pp *pp) {
@@ -825,9 +811,9 @@ static odin3_status scan_step(odin3_pp *pp) {
     case -1:
         return frame_end(pp);
     case '"':
-        return scan_string(pp);
+        return odin3_pp_emit_next(pp, odin3_pp_string_length(pp));
     case '\\':
-        return scan_escaped(pp);
+        return odin3_pp_emit_next(pp, odin3_pp_escaped_length(pp));
     case '`':
         return scan_backtick(pp);
     case '/': {
@@ -835,7 +821,7 @@ static odin3_status scan_step(odin3_pp *pp) {
         return next == '/' || next == '*' ? scan_comment(pp) : odin3_pp_emit_next(pp, 1);
     }
     default:
-        return scan_plain(pp);
+        return odin3_pp_emit_next(pp, odin3_pp_plain_length(pp, false));
     }
 }
 

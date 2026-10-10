@@ -612,7 +612,11 @@ one longer than the last) is stopped there, and no cap depends on frame popping.
 and Yosys loop forever on `rec.v` (measured 2026-10-10); where they terminate on a
 self-referential pattern that this rule rejects (probe w1: `` `N(`KEEP) `` through `` `K ``
 re-uses `N` inside its own argument chain) the rejection is a **declared divergence** (§10.4),
-not a disagreement to chase.
+not a disagreement to chase. A formal's **default** is macro text, not an actual: its
+`MACRO_ARG` takes its ancestry from the expansion it is substituted into, so the walk and the
+chain length go to its `parent`, not its `def`. A cycle through a default
+(`` `define A(x=`A()) x `` with `` `A() ``) is then "recursive macro 'A'" at the first rescan.
+It does not run to `MAX_BUFFERS_PER_STREAM` (agent default, 2B Task 8 fix round 1).
 
 ### 7.5 Pass-through directives and SystemVerilog forms (PP-8, PP-9)
 
@@ -742,7 +746,7 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | Cap | Value | Why |
 |---|---|---|
 | `ODIN3_PP_MAX_INCLUDE_DEPTH` | 64 | real designs nest 2–3; a cycle is caught earlier by name |
-| `ODIN3_PP_MAX_EXPANSION_CHAIN` | 1024 | the chain length recorded per buffer at creation (PP-7: 1 + that of its `def`/`parent` buffer); bounds the PP-7 walk and the `expanded from` chain, and stops argument-driven growth (`` `P(`P) ``) that keeps the live frame count small; recursion by name is caught first for every true cycle |
+| `ODIN3_PP_MAX_EXPANSION_CHAIN` | 1024 | the chain length recorded per buffer at creation (PP-7: 1 + that of its `def`/`parent` buffer; `parent` for a default's `MACRO_ARG`, agent default 2B Task 8 fix round 1); bounds the PP-7 walk and the `expanded from` chain, and stops argument-driven growth (`` `P(`P) ``) that keeps the live frame count small; recursion by name is caught first for every true cycle |
 | `ODIN3_PP_MAX_EXPANSION_DEPTH` | 1024 | live expansion frames (the input stack); with the chain cap this only bounds the stack's own records |
 | `ODIN3_PP_MAX_LIVE_RUNS` | 2^20 | run records over all live frames (frames are run lists, PP-2): bounds the input stack's memory (≈ 24 MB at the cap) whatever the actuals' sizes (I10a) |
 | `ODIN3_PP_MAX_COND_DEPTH` | 1024 | per file; `nested_ifdef` micros nest 3 |

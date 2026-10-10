@@ -94,8 +94,12 @@ typedef struct odin3_pp_cached {
 
 /* Per buffer created in the current run (index = buffer ID - pp->first_buffer). */
 typedef struct odin3_pp_bufrec {
-    uint32_t chain; /* PP-7: 0 for a FILE, 1 + that of its def (MACRO_ARG) or parent (EXPANSION) */
-    uint32_t reach; /* pp_check reachability counter (spec §7.8) */
+    /* PP-7: 0 for a FILE; 1 + that of its def's buffer for a MACRO_ARG of an actual, or of its
+     * parent's for an EXPANSION and for a MACRO_ARG of a default (from_default) */
+    uint32_t chain;
+    uint32_t reach;    /* spec §7.8: non-zero iff some emitted byte's walk passes the buffer */
+    bool from_default; /* a MACRO_ARG substituting a formal's default: macro text, whose
+                          ancestry is the EXPANSION it is substituted into (PP-7) */
 } odin3_pp_bufrec;
 
 /* A buffer to create through odin3_pp_add_buffer: a FILE (file filled) or another kind. */
@@ -103,6 +107,7 @@ typedef struct odin3_pp_bufspec {
     uint32_t kind; /* odin3_srcbuf_kind */
     odin3_srcfile_spec file;
     odin3_expansion_spec expansion;
+    bool from_default; /* a MACRO_ARG substituting a formal's default */
 } odin3_pp_bufspec;
 
 /* The macro arena's chunk size: ODIN3_PP_MAX_MACRO_BYTES leaves one chunk of headroom. */
@@ -213,20 +218,39 @@ bool odin3_pp_is_ident_char(int ch);
  * advances past it. */
 odin3_bytes odin3_pp_read_ident(odin3_pp *pp);
 
+/* The IDENT starting ahead bytes after the top frame's cursor, within its run (empty when
+ * none). */
+odin3_bytes odin3_pp_ident_ahead(const odin3_pp *pp, uint32_t ahead);
+
 /* Skips spaces and tabs at the top frame's cursor. */
 void odin3_pp_skip_spaces(odin3_pp *pp);
+
+/* Lexical lengths at the top frame's cursor, shared by the scanner and argument collection:
+ * a string literal (to the closing quote, or up to an unescaped newline); an escaped
+ * identifier (the backslash and every byte to the next blank); a // comment (to the newline,
+ * which it excludes) or a block comment (through its close, or to the frame's end). */
+uint32_t odin3_pp_string_length(const odin3_pp *pp);
+uint32_t odin3_pp_escaped_length(const odin3_pp *pp);
+uint32_t odin3_pp_comment_length(const odin3_pp *pp);
+
+/* The plain bytes at the cursor up to the next byte the scanner treats specially (a backtick,
+ * '"', '/', '\\'; with brackets also ( ) [ ] { } and ','), within the current run, at least
+ * one. */
+uint32_t odin3_pp_plain_length(const odin3_pp *pp, bool brackets);
 
 /*
  * Creates a source-manager buffer for the run after checking ODIN3_PP_MAX_BUFFERS_PER_STREAM,
  * ODIN3_PP_MAX_INCLUDES_PER_STREAM (a FILE) and ODIN3_PP_MAX_LOC_BYTES_PER_STREAM (located at
- * at); records its chain length (0 for a FILE, 1 + that of def's buffer for a MACRO_ARG or of
- * parent's for an EXPANSION) and stores the ID in *out.
+ * at); records its chain length (odin3_pp_bufrec) and stores the ID in *out.
  */
 odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odin3_loc at,
                                  odin3_srcbuf_id *out);
 
 /* The chain length of the buffer holding loc (0 for a FILE or a buffer of an earlier run). */
 uint32_t odin3_pp_chain_of(const odin3_pp *pp, odin3_loc loc);
+
+/* The record of the run's buffer holding loc, NULL for a buffer of an earlier run or none. */
+const odin3_pp_bufrec *odin3_pp_bufrec_of(const odin3_pp *pp, odin3_loc loc);
 
 /* The cached bytes of FILE buffer buf; false when it is not a FILE buffer this pp made. */
 bool odin3_pp_file_bytes(const odin3_pp *pp, odin3_srcbuf_id buf, odin3_bytes *out);
@@ -295,6 +319,27 @@ typedef enum odin3_pp_cond_kind {
     ODIN3_PP_COND_ELSE,
     ODIN3_PP_COND_ENDIF
 } odin3_pp_cond_kind;
+
+/* The compiler directives the scanner knows (preproc.c's table). */
+typedef enum odin3_pp_dir_kind {
+    ODIN3_PP_DIR_NONE,
+    ODIN3_PP_DIR_DEFINE,
+    ODIN3_PP_DIR_UNDEF,
+    ODIN3_PP_DIR_COND,
+    ODIN3_PP_DIR_INCLUDE,
+    ODIN3_PP_DIR_LINE,
+    ODIN3_PP_DIR_PASS,
+    ODIN3_PP_DIR_SV
+} odin3_pp_dir_kind;
+
+typedef struct odin3_pp_dir {
+    const char *name;
+    odin3_pp_dir_kind kind;
+    odin3_pp_cond_kind cond; /* ODIN3_PP_DIR_COND only */
+} odin3_pp_dir;
+
+/* The directive named name, NULL for a macro name. */
+const odin3_pp_dir *odin3_pp_dir_lookup(odin3_bytes name);
 
 /* A conditional directive whose backtick is at at; the cursor is just after its name. Called
  * also while skipping. Maintains pp->conds and pp->skipping. */
