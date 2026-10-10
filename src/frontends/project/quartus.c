@@ -823,7 +823,8 @@ static odin3_status revision_qsf(qsf_state *st, const odin3_proj_path *qpf, odin
     size_t base = name.len;
     res = res != ODIN3_OK ? res : odin3_strbuf_append(&name, st->revision);
     res = res != ODIN3_OK ? res : odin3_strbuf_append(&name, odin3_bytes_cstr(".qsf"));
-    odin3_bytes leaf = {name.data + base, name.len - base};
+    /* name.data is NULL when an append above failed: no NULL + 0 (UB) then */
+    odin3_bytes leaf = {res == ODIN3_OK ? name.data + base : NULL, name.len - base};
     odin3_path_join join = {odin3_path_dir(odin3_proj_str_bytes(st->proj, qpf->resolved)), leaf};
     res = res != ODIN3_OK ? res : odin3_path_resolve(join, &path);
     if (res == ODIN3_OK && odin3_path_stat(path.data) != ODIN3_PATH_FILE) {
