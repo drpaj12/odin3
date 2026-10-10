@@ -76,3 +76,12 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    elaboration (2D), the parser records names only. Agent defaults: comments in a side table keyed
    by location; `(* *)` attributes kept on AST nodes and carried to the IR; the AST is freed after
    elaboration unless a pass asks to keep it.
+8. **2A spec approved** (`docs/specs/2026-10-09-2A-ast-design.md`; agent default under Peter's
+   overnight rule, 2026-10-10, after three Opus review rounds): Clang-style location space with
+   EXPANSION / MACRO_ARG (one per spelled run) / SCRATCH buffers and expansion ranges; a 28-byte
+   node record, 68 kinds with a normative slot table and per-kind flags; builder-enforced depth cap
+   `ODIN3_AST_MAX_DEPTH` = 32768 (measured deepest real chain: 2,032 terms in Koios `lenet.v`).
+   Open questions decided as recommended: Q1 the design owns the source manager, per-run ASTs and
+   symbol tables, and `odin3_srcloc` gains the raw `loc` (1B struct change); Q2 AST strings in the
+   design strtab; Q3 2D in two stages with the elaborated AST as the seam (slang enters at stage 2);
+   Q4 the depth cap above; Q5 a Verilog printer in 2A (parse–print–parse oracle for 2C).
