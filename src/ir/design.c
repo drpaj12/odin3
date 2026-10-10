@@ -1,5 +1,9 @@
-/* design.c — design create/destroy (exported), the design-global strtab, top module, prov. */
+/*
+ * design.c — design create/destroy (exported), the design-global strtab, top module, prov and
+ * source manager.
+ */
 #include "ir/design.h"
+#include "ast/srcman.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "util/alloc.h"
@@ -28,6 +32,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
     }
+    odin3_srcman_destroy(design->srcman);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
     odin3_celltype_table_free(design);
@@ -59,4 +64,14 @@ odin3_status odin3_design_set_top(odin3_design *design, odin3_module_id module) 
 
 odin3_module_id odin3_design_top(const odin3_design *design) {
     return design->top;
+}
+odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **out) {
+    if (design->srcman == NULL) {
+        design->srcman = odin3_srcman_create(design->strtab);
+        if (design->srcman == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    *out = design->srcman;
+    return ODIN3_OK;
 }
