@@ -7,12 +7,12 @@
 
 #include "ast/srcman.h"
 #include "frontends/project/paths.h"
-#include "frontends/project/tcl.h"
 #include "frontends/project/words.h"
 #include "util/hash.h"
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -629,19 +629,40 @@ static odin3_status statement(o3_reader *rd) {
     return key->handler(rd, &st);
 }
 
+/* `syntax` at the word that crosses the per-line cap (ODIN3_PROJ_MAX_WORDS, §9). */
+static odin3_status word_cap(o3_reader *rd, uint32_t off) {
+    char detail[DETAIL_MAX];
+    (void)snprintf(detail, sizeof detail,
+                   "line has more than %" PRIu32 " words (ODIN3_PROJ_MAX_WORDS)",
+                   rd->proj->limits.words);
+    odin3_loc at = odin3_srcman_loc(rd->sm, rd->text.buffer, off);
+    return fail(rd, at, ODIN3_PROJ_ERR_SYNTAX, detail, NULL);
+}
+
+/* Splits one line (file offset offset) into rd->words, counting its words against the cap
+ * before any of them is stored. */
+static odin3_status split_line(o3_reader *rd, odin3_bytes line, uint32_t offset) {
+    odin3_words_opts opts = {offset, ODIN3_WORDS_O3PROJ, rd->proj->arena};
+    size_t over = 0;
+    if (odin3_words_count(line, &opts, rd->proj->limits.words, &over) > rd->proj->limits.words) {
+        return word_cap(rd, offset + (uint32_t)over);
+    }
+    odin3_words_err err = {0, {NULL, 0}, NULL};
+    odin3_vec_clear(&rd->words);
+    odin3_status res = odin3_words_split(line, &opts, &rd->words, &err);
+    if (res == ODIN3_ERR_PARSE) { /* the oracle names nothing for these */
+        odin3_loc at = odin3_srcman_loc(rd->sm, rd->text.buffer, err.off);
+        return fail(rd, at, ODIN3_PROJ_ERR_SYNTAX, err.what, NULL);
+    }
+    return res;
+}
+
 static odin3_status read_lines(o3_reader *rd) {
     odin3_status res = ODIN3_OK;
     for (uint32_t i = 0; res == ODIN3_OK && i < rd->text.lines.len; i++) {
         uint32_t offset = 0;
         odin3_bytes line = odin3_proj_text_line(&rd->text, i, &offset);
-        odin3_words_opts opts = {offset, ODIN3_WORDS_O3PROJ, rd->proj->arena};
-        odin3_words_err err = {0, {NULL, 0}, NULL};
-        odin3_vec_clear(&rd->words);
-        res = odin3_words_split(line, &opts, &rd->words, &err);
-        if (res == ODIN3_ERR_PARSE) { /* the oracle names nothing for these */
-            odin3_loc at = odin3_srcman_loc(rd->sm, rd->text.buffer, err.off);
-            return fail(rd, at, ODIN3_PROJ_ERR_SYNTAX, err.what, NULL);
-        }
+        res = split_line(rd, line, offset);
         if (res == ODIN3_OK && rd->words.len > 0) {
             res = statement(rd);
         }

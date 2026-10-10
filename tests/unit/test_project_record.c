@@ -1023,16 +1023,17 @@ static void test_builders_unchanged_on_no_memory(void) {
     }
 }
 
-/* The dump branches the full record does not take: a file without a library (key omitted) and
- * an output without a format. */
+/* The dump branches the full record does not take: a design file whose library is "" (ID 0:
+ * the key is still written, as the oracle records it) and an output without a format. */
 static void test_dump_rare_branches(void) {
     odin3_proj_file file = a_file("/p/x.blif", ODIN3_LANG_BLIF, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_project_add_file(proj, &file));
     proj->output.present = true;
     proj->output.path = id("/p/o");
     const char *got = dump();
-    TEST_ASSERT_NOT_NULL(
-        strstr(got, "  \"files\": [{\"path\": \"/p/x.blif\", \"language\": \"blif\"}],\n"));
+    TEST_ASSERT_NOT_NULL(strstr(got,
+                                "  \"files\": [{\"path\": \"/p/x.blif\", \"language\": \"blif\", "
+                                "\"library\": \"\"}],\n"));
     TEST_ASSERT_NOT_NULL(strstr(got, "  \"output\": {\"path\": \"/p/o\", \"format\": null},\n"));
 }
 

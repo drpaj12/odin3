@@ -83,7 +83,7 @@ enum { ODIN3_PROJ_HAS_MIN_WIDTH = 1, ODIN3_PROJ_HAS_MAX_WIDTH = 2, ODIN3_PROJ_HA
 typedef struct odin3_proj_limits {
     uint32_t flist_depth; /* nested -f/-F lists */
     uint32_t qip_depth;   /* nested .qip files */
-    uint32_t words;       /* words per file list */
+    uint32_t words;       /* words per file list, .o3proj line or Tcl file (.qsf/.qip) */
 } odin3_proj_limits;
 
 /* --- the record (PRJ-3) -------------------------------------------------------------------- */
@@ -344,6 +344,10 @@ odin3_status odin3_project_set_top_file(odin3_project *proj, odin3_bytes name,
 odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_loc at,
                                  uint32_t *out);
 
+/* The length of the character at text[pos] when Python's str.isspace() accepts it (ASCII
+ * whitespace, \x1c-\x1f, and the non-ASCII spaces in UTF-8), else 0 (also at the end). */
+size_t odin3_py_space_len(odin3_bytes text, size_t pos);
+
 /* Small byte helpers shared by the readers. bytes_is: bytes equal the C string text; bytes_eq:
  * the two spans hold the same bytes; str_bytes: the bytes of strtab ID str of proj's design. */
 bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text);
@@ -410,8 +414,8 @@ odin3_status odin3_read_quartus(odin3_project *proj, const odin3_proj_path *file
 /* Reads an .o3proj file (PRJ-10). */
 odin3_status odin3_read_o3proj(odin3_project *proj, const odin3_proj_path *file);
 
-/* Reads an Odin II XML configuration (PRJ-15). */
-odin3_status odin3_read_odin2(odin3_project *proj, const odin3_proj_path *file);
+/* The Odin II XML reader (PRJ-15, odin3_read_odin2) lands with 2B-4; until then the entry
+ * dispatch rejects that format (unknown_file_type). */
 
 /* --- entry dispatch (PRJ-16; entry.c) ------------------------------------------------------ */
 

@@ -480,6 +480,44 @@ static void test_qpf_nul_revision(void) {
     TEST_ASSERT_EQUAL_STRING("n.qpf:1:1: error: syntax: NUL byte in revision: 'a\\0b'", captured);
 }
 
+/* `-library ""` and `-library {}` name the library "", which the dump writes (oracle:
+ * "library": ""), not a libfile-like entry without one. */
+static void test_empty_library(void) {
+    tmp_spec spec = {
+        "e.qsf",
+        "set_global_assignment -name VERILOG_FILE -library \"\" " ODIN3_QUARTUS_DATA
+        "/src/a.v\nset_global_assignment -name VERILOG_FILE -library {} " ODIN3_QUARTUS_DATA
+        "/src/a.v\n",
+        0};
+    write_tmp(&spec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_tmp("e.qsf"));
+    TEST_ASSERT_EQUAL_STRING(
+        "[{\"path\": \"src/a.v\", \"language\": \"verilog\", \"library\": \"\"}]", field("files"));
+    TEST_ASSERT_EQUAL_STRING("[\"src/a.v\"]", field("duplicates"));
+}
+
+/* ODIN3_PROJ_MAX_WORDS caps the words of each Tcl file (here lowered to 7): the 8th word is a
+ * located error before it is stored; a .qip counts its own words. */
+static void test_word_cap(void) {
+    tmp_spec spec = {"w.qsf", "set_global_assignment -name FAMILY x\npost a b c\n", 0};
+    write_tmp(&spec);
+    odin3_project_test_set_limits(
+        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 7});
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_tmp("w.qsf"));
+    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_EQUAL_STRING(
+        "w.qsf:2:10: error: syntax: file has more than 7 words (ODIN3_PROJ_MAX_WORDS)", captured);
+    fresh_design();
+    odin3_project_test_set_limits(
+        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 8});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_tmp("w.qsf"));
+    fresh_design();
+    /* qip/top.qsf has 12 words and its .qip fewer: a per-file cap of 12 passes */
+    odin3_project_test_set_limits(
+        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 12});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry("qip/top.qsf"));
+}
+
 /* --- out of memory ------------------------------------------------------------------------- */
 
 static bool oom_try(const char *entry, long fail_after) {
@@ -536,6 +574,8 @@ int main(void) {
     RUN_TEST(test_crlf_qsf);
     RUN_TEST(test_qpf_blanks);
     RUN_TEST(test_qpf_nul_revision);
+    RUN_TEST(test_empty_library);
+    RUN_TEST(test_word_cap);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();
 }

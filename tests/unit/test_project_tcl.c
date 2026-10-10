@@ -4,6 +4,7 @@
  * unterminated brace, the next line for an escape before a newline), CRLF folding with offsets
  * into the text as given, the .qip idiom in both forms, and an OOM sweep.
  */
+#include "frontends/project/project.h"
 #include "frontends/project/tcl.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -23,11 +24,14 @@ static odin3_vec commands;
 static odin3_tcl_err err;
 static char out[OUT_MAX];
 
+static uint32_t max_words; /* odin3_tcl_opts.max_words for run() */
+
 void setUp(void) {
     arena = odin3_arena_create(0);
     TEST_ASSERT_NOT_NULL(arena);
     odin3_vec_init(&commands, sizeof(odin3_tcl_command));
-    err = (odin3_tcl_err){0, NULL};
+    err = (odin3_tcl_err){0, NULL, false};
+    max_words = UINT32_MAX;
 }
 
 void tearDown(void) {
@@ -46,7 +50,7 @@ static unsigned line_of(const char *text, uint32_t off) {
 }
 
 static odin3_status run(const char *text, bool qip, size_t len) {
-    odin3_tcl_opts opts = {arena, qip, odin3_bytes_cstr("/q/ip")};
+    odin3_tcl_opts opts = {arena, qip, odin3_bytes_cstr("/q/ip"), max_words};
     return odin3_tcl_tokenize((odin3_bytes){text, len}, &opts, &commands, &err);
 }
 
@@ -265,6 +269,19 @@ static void test_out_of_memory(void) {
     TEST_ASSERT_EQUAL_size_t(3, commands.len);
 }
 
+/* max_words caps the words of the whole text: the next word fails at its first byte, flagged
+ * over_cap, and commands keeps its old length. */
+static void test_word_cap(void) {
+    max_words = 3;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("a b\nc\n", false, 6));
+    TEST_ASSERT_FALSE(err.over_cap);
+    odin3_vec_clear(&commands);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("a b\nc {d}\n", false, 10));
+    TEST_ASSERT_TRUE(err.over_cap);
+    TEST_ASSERT_EQUAL_UINT32(6, err.off);
+    TEST_ASSERT_EQUAL_size_t(0, commands.len);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bare_words_and_separators);
@@ -281,6 +298,7 @@ int main(void) {
     RUN_TEST(test_qip_idiom);
     RUN_TEST(test_nul_byte_in_word);
     RUN_TEST(test_python_spaces);
+    RUN_TEST(test_word_cap);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();
 }

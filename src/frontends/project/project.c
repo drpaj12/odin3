@@ -485,6 +485,39 @@ static bool is_ident(const uint8_t *text, size_t len) {
     return true;
 }
 
+enum { PY_ASCII_LIMIT = 0x80 };
+
+/* --- Python's whitespace ------------------------------------------------------------------- */
+
+/* The UTF-8 encodings of the non-ASCII characters str.isspace() accepts. */
+static const char *const k_wide_spaces[] = {
+    "\xC2\x85",     "\xC2\xA0",     "\xE1\x9A\x80", "\xE2\x80\x80", "\xE2\x80\x81",
+    "\xE2\x80\x82", "\xE2\x80\x83", "\xE2\x80\x84", "\xE2\x80\x85", "\xE2\x80\x86",
+    "\xE2\x80\x87", "\xE2\x80\x88", "\xE2\x80\x89", "\xE2\x80\x8A", "\xE2\x80\xA8",
+    "\xE2\x80\xA9", "\xE2\x80\xAF", "\xE2\x81\x9F", "\xE3\x80\x80",
+};
+
+size_t odin3_py_space_len(odin3_bytes text, size_t pos) {
+    const uint8_t *bytes = text.ptr;
+    if (pos >= text.len) {
+        return 0;
+    }
+    uint8_t byte = bytes[pos];
+    if (byte == ' ' || (byte >= '\t' && byte <= '\r') || (byte >= '\x1c' && byte <= '\x1f')) {
+        return 1;
+    }
+    if (byte < PY_ASCII_LIMIT) {
+        return 0;
+    }
+    for (size_t k = 0; k < sizeof k_wide_spaces / sizeof k_wide_spaces[0]; k++) {
+        size_t len = strlen(k_wide_spaces[k]);
+        if (text.len - pos >= len && memcmp(bytes + pos, k_wide_spaces[k], len) == 0) {
+            return len;
+        }
+    }
+    return 0;
+}
+
 bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text) {
     size_t len = strlen(text);
     return bytes.len == len && (len == 0 || memcmp(bytes.ptr, text, len) == 0);
@@ -625,6 +658,9 @@ odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_lo
     bool large = false;
     for (size_t i = 0; i < text.len && digits; i++) {
         digits = digit[i] >= '0' && digit[i] <= '9';
+        if (!digits) {
+            break; /* no arithmetic on a non-digit */
+        }
         value = value * DECIMAL + (uint64_t)(digit[i] - '0');
         large = large || value > UINT32_MAX;
         value = large ? UINT32_MAX : value;

@@ -8,6 +8,7 @@
  */
 #include "ast/srcman.h"
 #include "frontends/project/project.h"
+#include "frontends/project/project_test.h"
 #include "ir/design.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -348,6 +349,20 @@ static void test_libext_ceiling(void) {
                 "p.o3proj:1:1: error: unknown_file_type: no language for extension: '.foo'");
 }
 
+/* ODIN3_PROJ_MAX_WORDS caps the words of each line (here lowered to 3), counted before they
+ * are stored: the 4th word is a located error; the cap is per line. */
+static void test_word_cap(void) {
+    odin3_proj_limits low = {ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 3};
+    odin3_project_test_set_limits(proj, low);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_text("libext .v .sv\nlibext .v .sv .vh\n"));
+    TEST_ASSERT_EQUAL_STRING(
+        "p.o3proj:2:15: error: syntax: line has more than 3 words (ODIN3_PROJ_MAX_WORDS)",
+        message());
+    fresh_design();
+    odin3_project_test_set_limits(proj, low);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_text("libext .v .sv\nlibext .v .sv # .vh .x\n"));
+}
+
 /* Word errors (§4.2) name nothing and are located at the word. */
 static void test_word_errors(void) {
     static const text_case cases[] = {
@@ -652,6 +667,7 @@ int main(void) {
     RUN_TEST(test_arity);
     RUN_TEST(test_arity_first);
     RUN_TEST(test_libext_ceiling);
+    RUN_TEST(test_word_cap);
     RUN_TEST(test_word_errors);
     RUN_TEST(test_file_errors);
     RUN_TEST(test_top_errors);

@@ -109,15 +109,22 @@ static odin3_status open_frame(qsf_state *st, const odin3_proj_path *path, odin3
     odin3_vec_init(&frame.commands, sizeof(odin3_tcl_command));
     odin3_status res = odin3_project_load(st->proj, path, parent, &frame.text);
     odin3_bytes resolved = odin3_proj_str_bytes(st->proj, path->resolved);
-    odin3_tcl_opts opts = {st->arena, qip, odin3_path_dir(resolved)};
-    odin3_tcl_err err = {0, NULL};
+    odin3_tcl_opts opts = {st->arena, qip, odin3_path_dir(resolved), st->proj->limits.words};
+    odin3_tcl_err err = {0, NULL, false};
     if (res == ODIN3_OK) {
         odin3_bytes text = {frame.text.bytes, frame.text.len};
         res = odin3_tcl_tokenize(text, &opts, &frame.commands, &err);
     }
     if (res == ODIN3_ERR_PARSE && err.what != NULL) {
+        char detail[DETAIL_MAX];
+        if (err.over_cap) {
+            (void)snprintf(detail, sizeof detail,
+                           "file has more than %u words (ODIN3_PROJ_MAX_WORDS)",
+                           (unsigned)st->proj->limits.words);
+        }
         odin3_loc at = odin3_srcman_loc(st->sm, frame.text.buffer, err.off);
-        res = fail_at(st->proj, at, (qsf_err){ODIN3_PROJ_ERR_SYNTAX, err.what}, NULL, 0);
+        qsf_err what = {ODIN3_PROJ_ERR_SYNTAX, err.over_cap ? detail : err.what};
+        res = fail_at(st->proj, at, what, NULL, 0);
     }
     qsf_frame *slot = res == ODIN3_OK ? odin3_vec_push(&st->stack) : NULL;
     if (slot == NULL) {

@@ -4,6 +4,7 @@
 #include "frontends/project/tcl.h"
 
 #include "frontends/project/paths.h"
+#include "frontends/project/project.h"
 #include "util/alloc.h"
 #include "util/arena.h"
 #include "util/str.h"
@@ -14,38 +15,7 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { NO_BYTE = -1, ASCII_LIMIT = 0x80 };
-
-/* --- Python's whitespace ------------------------------------------------------------------- */
-
-/* The UTF-8 encodings of the non-ASCII characters str.isspace() accepts. */
-static const char *const k_wide_spaces[] = {
-    "\xC2\x85",     "\xC2\xA0",     "\xE1\x9A\x80", "\xE2\x80\x80", "\xE2\x80\x81",
-    "\xE2\x80\x82", "\xE2\x80\x83", "\xE2\x80\x84", "\xE2\x80\x85", "\xE2\x80\x86",
-    "\xE2\x80\x87", "\xE2\x80\x88", "\xE2\x80\x89", "\xE2\x80\x8A", "\xE2\x80\xA8",
-    "\xE2\x80\xA9", "\xE2\x80\xAF", "\xE2\x81\x9F", "\xE3\x80\x80",
-};
-
-size_t odin3_py_space_len(odin3_bytes text, size_t pos) {
-    const uint8_t *bytes = text.ptr;
-    if (pos >= text.len) {
-        return 0;
-    }
-    uint8_t byte = bytes[pos];
-    if (byte == ' ' || (byte >= '\t' && byte <= '\r') || (byte >= '\x1c' && byte <= '\x1f')) {
-        return 1;
-    }
-    if (byte < ASCII_LIMIT) {
-        return 0;
-    }
-    for (size_t k = 0; k < sizeof k_wide_spaces / sizeof k_wide_spaces[0]; k++) {
-        size_t len = strlen(k_wide_spaces[k]);
-        if (text.len - pos >= len && memcmp(bytes + pos, k_wide_spaces[k], len) == 0) {
-            return len;
-        }
-    }
-    return 0;
-}
+enum { NO_BYTE = -1 };
 
 /* --- the reader ---------------------------------------------------------------------------- */
 
@@ -59,6 +29,7 @@ typedef struct reader {
     odin3_tcl_err *err;
     odin3_vec words;   /* odin3_tcl_word: the command being read */
     odin3_strbuf word; /* the word being read */
+    size_t nwords;     /* words read so far (capped by opts->max_words) */
 } reader;
 
 /* Copies text with every "\r\n" folded to "\n", recording where each fold happened. */
@@ -285,6 +256,10 @@ static odin3_status bare(reader *rd) {
 /* Reads one word at rd->i and appends it to rd->words (text copied into the arena). */
 static odin3_status word(reader *rd) {
     size_t start = rd->i;
+    if (rd->nwords >= rd->opts->max_words) { /* before the word grows anything */
+        rd->err->over_cap = true;
+        return fail(rd, start, "too many words");
+    }
     int byte = peek(rd, 0);
     odin3_strbuf_clear(&rd->word);
     odin3_status st = ODIN3_OK;
@@ -309,6 +284,7 @@ static odin3_status word(reader *rd) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *slot = (odin3_tcl_word){{text, rd->word.len}, given_off(rd, start)};
+    rd->nwords++;
     return ODIN3_OK;
 }
 
@@ -348,6 +324,7 @@ static odin3_status read_commands(reader *rd, odin3_vec *commands) {
 odin3_status odin3_tcl_tokenize(odin3_bytes text, const odin3_tcl_opts *opts, odin3_vec *commands,
                                 odin3_tcl_err *err) {
     reader rd = {.opts = opts, .err = err};
+    err->over_cap = false;
     odin3_vec_init(&rd.folds, sizeof(uint32_t));
     odin3_vec_init(&rd.words, sizeof(odin3_tcl_word));
     odin3_strbuf_init(&rd.word);

@@ -174,8 +174,9 @@ static void write_path(json *jw, const void *elem) {
     string_id(jw, ((const odin3_proj_path *)elem)->resolved);
 }
 
-static void write_file(json *jw, const void *elem) {
-    const odin3_proj_file *file = elem;
+/* A files entry always has its library ("" included: ID 0 is the empty string); a libfiles
+ * entry has none. */
+static void file_fields(json *jw, const odin3_proj_file *file, bool with_library) {
     const char *lang = odin3_lang_name((odin3_lang)file->lang);
     raw(jw, "{");
     key(jw, "path", true);
@@ -184,11 +185,19 @@ static void write_file(json *jw, const void *elem) {
     raw(jw, "\"");
     raw(jw, lang != NULL ? lang : "?");
     raw(jw, "\"");
-    if (file->library != 0) {
+    if (with_library) {
         key(jw, "library", false);
         string_id(jw, file->library);
     }
     raw(jw, "}");
+}
+
+static void write_file(json *jw, const void *elem) {
+    file_fields(jw, elem, true);
+}
+
+static void write_libfile(json *jw, const void *elem) {
+    file_fields(jw, elem, false);
 }
 
 static void write_define(json *jw, const void *elem) {
@@ -377,7 +386,7 @@ static void field_array(json *jw, const char *name, const odin3_vec *vec, elem_w
 static void dump_lists(json *jw) {
     const odin3_project *proj = jw->proj;
     field_array(jw, "files", &proj->files, write_file);
-    field_array(jw, "libfiles", &proj->libfiles, write_file);
+    field_array(jw, "libfiles", &proj->libfiles, write_libfile);
     field_array(jw, "libdirs", &proj->libdirs, write_path);
     field_array(jw, "libext", &proj->libext, write_id);
     field_array(jw, "incdirs", &proj->incdirs, write_path);

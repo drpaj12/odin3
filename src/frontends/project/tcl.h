@@ -17,6 +17,8 @@ typedef struct odin3_tcl_opts {
     odin3_arena *arena;  /* receives every word's text and each command's word array */
     bool qip;            /* a .qip: the qip_path idiom is allowed */
     odin3_bytes qip_dir; /* qip: the .qip's directory, the idiom's base */
+    uint32_t max_words;  /* words in the whole text (ODIN3_PROJ_MAX_WORDS, §9); one more is an
+                            error, raised before that word is stored */
 } odin3_tcl_opts;
 
 /* One word: its text (in opts->arena, NUL-terminated) and the offset of its first byte in the
@@ -39,6 +41,7 @@ typedef struct odin3_tcl_command {
 typedef struct odin3_tcl_err {
     uint32_t off;
     const char *what;
+    bool over_cap; /* the word cap (what is generic; the caller words the error) */
 } odin3_tcl_err;
 
 /*
@@ -60,9 +63,5 @@ typedef struct odin3_tcl_err {
  */
 odin3_status odin3_tcl_tokenize(odin3_bytes text, const odin3_tcl_opts *opts, odin3_vec *commands,
                                 odin3_tcl_err *err);
-
-/* The length of the character at text[pos] when Python's str.isspace() accepts it (ASCII
- * whitespace, \x1c-\x1f, and the non-ASCII spaces in UTF-8), else 0 (also at the end). */
-size_t odin3_py_space_len(odin3_bytes text, size_t pos);
 
 #endif
