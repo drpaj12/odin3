@@ -1,0 +1,12 @@
+# Design files, the top, and ignored assignments (2B 5.3, PRJ-14)
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_global_assignment -name verilog_file ../src/a.v
+set_global_assignment -name SYSTEMVERILOG_FILE ../src/b.sv -hdl_version SystemVerilog_2005
+set_global_assignment -name VHDL_FILE -library mylib ../src/c.vhd
+set_global_assignment -name VQM_FILE ../src/d.vqm
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_FILE ../src/a.v -library other
+set_location_assignment PIN_AF14 -to clk
+set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to clk -disable
+set_global_assignment -name sdc_file top.sdc; post_message hello
+set_global_assignment -name VERILOG_INCLUDE_FILE ../inc/x.vh

@@ -1,0 +1,9 @@
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_FILE -bogus x ../src/a.v
+# The word error on line 9 is reported first: the whole file is tokenized before
+# any command runs (the oracle's list(reader.commands())).
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_global_assignment -name VERILOG_MACRO $X

@@ -1,0 +1,2 @@
+# A plain path in a .qip is relative to the project directory, not to the .qip.
+set_global_assignment -name VERILOG_FILE ip/sub/b_ip.v

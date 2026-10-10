@@ -1,0 +1,1 @@
+set_global_assignment -name TOP_LEVEL_ENTITY top -entity top

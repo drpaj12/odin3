@@ -1,0 +1,37 @@
+# every key of the .o3proj grammar (DESIGN §4.0), each row once or more
+file verilog src/a.v
+file systemverilog src/b.sv library mylib
+file verilog src/a.v
+file vhdl "src/c.vhd" library other
+libfile verilog lib/l.v
+libdir lib
+libext .v .sv
+incdir inc
+define WIDTH=8
+define FLAG
+define "MSG=\"hi\""
+define EMPTY=
+top mylib.top
+param top.W 16
+param top.u1.S "hello world"
+param top.H 8'hFF
+param top.N -3
+param top.Q "8'hFF"
+arch t.o3lib
+arch k6.xml
+device "Cyclone V" 5CSEMA5
+device MAX10
+available multiply 112
+hide dual_port_ram
+cell mul27 from multiply param A=27 B=27 C=
+cell plain from multiply
+map * $mul to multiply min_width 9
+map top.u1 $mul to a, b ,c max_width 18 min_depth 2
+map * $mem soft
+map top $add keep min_width 4
+split $mem width
+split $mem depth max
+split $mem width depth 064
+limit multiply 40
+patterns pat.o3lib
+flow flow.o3

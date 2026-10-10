@@ -1,0 +1,5 @@
+QUARTUS_VERSION = "23.1"
+
+# Revisions
+PROJECT_REVISION = "small"
+	PROJECT_REVISION="fast"

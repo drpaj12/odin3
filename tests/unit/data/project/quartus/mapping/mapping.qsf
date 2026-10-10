@@ -1,0 +1,14 @@
+set_global_assignment -name TOP_LEVEL_ENTITY lib.top
+set_global_assignment -name AUTO_DSP_RECOGNITION OFF
+set_global_assignment -name AUTO_DSP_RECOGNITION on
+set_global_assignment -name AUTO_RAM_RECOGNITION Off -entity sub
+set_global_assignment -name AUTO_RAM_RECOGNITION ON
+set_instance_assignment -name DSP_BLOCK_BALANCING "logic elements" -to "u_a|b:c"
+set_global_assignment -name DSP_BLOCK_BALANCING AUTO
+set_instance_assignment -name MULTSTYLE LOGIC -entity e -to "a|b:c"
+set_instance_assignment -name multstyle auto
+set_instance_assignment -name RAMSTYLE logic -to "top|x"
+set_instance_assignment -name RAMSTYLE LOGIC -to ""
+set_instance_assignment -name RAMSTYLE M10K -to y
+set_global_assignment -name AUTO_DSP_RECOGNITION AUTO
+set_instance_assignment -name MULTSTYLE LOGIC -to "||e:|f:g"

@@ -5,6 +5,7 @@
 #ifndef ODIN3_AST_SRCMAN_H
 #define ODIN3_AST_SRCMAN_H
 
+#include "ast/srcfmt.h"
 #include "ir/design.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
@@ -53,10 +54,7 @@ typedef struct odin3_srcbuf_info {
     uint32_t lines; /* line count (1 + line starts added) */
 } odin3_srcbuf_info;
 
-typedef enum odin3_srcfmt {
-    ODIN3_SRCFMT_GIVEN,   /* the path as given */
-    ODIN3_SRCFMT_RESOLVED /* the absolute path, else the given name */
-} odin3_srcfmt;
+/* odin3_srcfmt (the print style: path as given or resolved) is in ast/srcfmt.h. */
 
 typedef enum odin3_srcchain_kind {
     ODIN3_SRCCHAIN_ARG = 1,   /* in argument of macro 'name' at <spelling of the formal> */

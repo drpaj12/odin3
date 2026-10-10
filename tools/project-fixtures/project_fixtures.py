@@ -123,7 +123,9 @@ class Ctx:
         self.touched: set[str] = set()
         self.ignored: set[str] = set()
         self.dups: set[str] = set()
-        self.params_at: list[str] = []  # .o3proj `param` lines, checked against the top
+        # .o3proj `param` lines as (index in record["params"], line), checked against the top;
+        # by index, since `import` adds Quartus parameters to the same list
+        self.params_at: list[tuple[int, str]] = []
         self.top_at: str | None = None  # where the top was declared
         self.f_root = self.case_dir
         self.f_sv = False
@@ -152,9 +154,19 @@ class Ctx:
         self.record["duplicates"] = sorted(self.dups)
 
 
+def read_text(path: Path) -> str:
+    """A project file's text: no newline translation, a CR before an LF dropped; a lone CR
+    stays an ordinary character."""
+    with path.open(encoding="utf-8", newline="") as fh:
+        return fh.read().replace("\r\n", "\n")
+
+
 def read_lines(path: Path) -> list[str]:
-    """Lines of a project file; LF and CRLF endings are both accepted."""
-    return path.read_text(encoding="utf-8").splitlines()
+    """Lines of a project file, split at LF only (CRLF accepted)."""
+    lines = read_text(path).split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def language_of(given: str, at: str | None) -> str:
@@ -188,7 +200,8 @@ def add_libfile(ctx: Ctx, base: Path, given: str, lang: str, at: str) -> None:
 
 
 def add_libext(ctx: Ctx, ext: str, at: str) -> None:
-    language_of("x" + ext, at)
+    if EXT_LANGUAGE.get(Path("x" + ext).suffix.lower()) is None:
+        raise ProjectError("unknown_file_type", at, [ext], f"no language for {ext}")
     ctx.record["libext"].append(ext)
 
 
@@ -208,9 +221,18 @@ def set_top(ctx: Ctx, name: str, at: str | None) -> None:
     ctx.top_at = at
 
 
+COUNT_MAX = 2**32 - 1
+
+
+def is_count(text: str) -> bool:
+    return re.fullmatch("[0-9]+", text) is not None
+
+
 def count_of(text: str, at: str) -> int:
-    if not text.isdigit():
+    if not is_count(text):
         raise syntax(at, f"expected a count, got {text!r}", text)
+    if int(text) > COUNT_MAX:
+        raise syntax(at, f"count too large: {text}", text)
     return int(text)
 
 
@@ -340,8 +362,8 @@ def o3_param(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
                                                                                        name):
         raise syntax(at, f"usage: {usage}", a[0])
     value, kind = param_value(args[1], at)
+    ctx.params_at.append((len(ctx.record["params"]), at))
     ctx.record["params"].append({"scope": scope, "name": name, "value": value, "type": kind})
-    ctx.params_at.append(at)
 
 
 def o3_arch(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
@@ -394,7 +416,7 @@ def o3_split(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
         width, rest = True, rest[1:]
     if rest:
         if len(rest) != 2 or rest[0] != "depth" or not (rest[1] in ("min", "max")
-                                                        or rest[1].isdigit()):
+                                                        or is_count(rest[1])):
             raise syntax(at, f"usage: {usage}")
         depth = rest[1]
     if not width and depth is None:
@@ -466,9 +488,11 @@ O3PROJ_KEYS: dict[str, O3Handler] = {
 
 
 def check_param_scopes(ctx: Ctx) -> None:
-    """Parameter overrides apply to the top or an instance path under it."""
+    """Parameter overrides apply to the top or an instance path under it.  Each `param` line is
+    checked against its own record entry (imported Quartus parameters are anchored already)."""
     top = ctx.record["top"]
-    for param, at in zip(ctx.record["params"], ctx.params_at, strict=False):
+    for index, at in ctx.params_at:
+        param = ctx.record["params"][index]
         root = param["scope"].split(".")[0]
         if top is None or root != top.rpartition(".")[2]:
             raise syntax(at, f"param scope {param['scope']!r} must start at the top "
@@ -747,7 +771,7 @@ def qsf_options(words: list[str], at: str, allowed: Sequence[str]) -> tuple[dict
     i = 0
     while i < len(words):
         w = words[i]
-        if w.startswith("-") and len(w) > 1 and not w[1].isdigit():
+        if w.startswith("-") and len(w) > 1 and not is_count(w[1]):
             if w not in QUARTUS_OPTIONS or w not in allowed:
                 raise ProjectError("unknown_option", at, [w], f"option {w} not allowed here")
             if w not in QSF_FLAGS:
@@ -869,7 +893,7 @@ def run_qsf(st: QsfState, ctx: Ctx, path: Path, qip: bool = False) -> None:
     """Plain relative paths, in the .qsf and in every .qip, are relative to the project
     directory (Quartus); the .qip idiom is relative to the .qip."""
     ctx.touch(path)
-    reader = TclReader(path.read_text(encoding="utf-8").replace("\r\n", "\n"),
+    reader = TclReader(read_text(path),
                        lambda n: ctx.at(path, n), path.parent if qip else None)
     for words, n in list(reader.commands()):
         qsf_command(st, ctx, st.project_dir, words, ctx.at(path, n))
@@ -1034,7 +1058,7 @@ def odin2_memory(ctx: Ctx, elem: XElem, at: str) -> None:
     width = elem.attrs.get("split_memory_width", "0")
     depth = elem.attrs.get("split_memory_depth")
     if width not in ("0", "1") or (depth is not None and depth not in ("min", "max")
-                                   and not depth.isdigit()):
+                                   and not is_count(depth)):
         raise syntax(at, "split_memory_width 0|1, split_memory_depth min|max|<n>")
     if width == "1" or depth is not None:
         ctx.record["rules"].append(split_rule("$mem", width == "1", depth))
@@ -1231,7 +1255,7 @@ class Preprocessor:
         self.read.add(self.ctx.rel(path))
         self.stack.append(path)
         cond: list[list[bool]] = []
-        text = strip_comments(path.read_text(encoding="utf-8"))
+        text = strip_comments(read_text(path))
         for n, line in enumerate(text.split("\n"), 1):
             at = self.ctx.at(path, n)
             m = re.match(r"\s*`(\w+)\s*(.*)", line)
