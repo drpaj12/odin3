@@ -135,9 +135,11 @@ typedef struct odin3_project {
 Values stay text (a `param` value `8'hFF`, a define value `"AB"` with its quotes): the record
 reports what was written; 2D converts when it applies them. The strtab pre-interns `""` as ID 0
 (`util/str.h`), so every field whose value may legally be the empty string (`define X=`,
-`+define+X=`, `VERILOG_MACRO X=`, `FAMILY ""`, `set_parameter … ""`, `--revision ""`, an Odin II
+`+define+X=`, `VERILOG_MACRO X=`, `FAMILY ""`, `--revision ""`, an Odin II
 `<output_type></output_type>`) carries a `has_*`/`present` flag and the dump distinguishes
-`""` from `null` by the flag, never by the ID. Counts (`available`, `limit`, `min_width`…,
+`""` from `null` by the flag, never by the ID (a `set_parameter … ""` value needs none: a
+param's value is always present, and `""` is the string `""`). Counts (`available`, `limit`,
+`min_width`…,
 `split … depth <n>`) are ASCII digits only, `uint32_t`; a count that does not fit is a `syntax`
 error ("count too large") — the oracle accepts any digit string (and crashes on Unicode digits);
 it gains the same rule (§10.1).
@@ -290,8 +292,9 @@ argument is expanded before use.
 ### 5.3 Quartus `.qpf` / `.qsf` / `.qip` (PRJ-12 … PRJ-14)
 
 **PRJ-12 `.qpf`.** Lines that are blank or start (after blanks) with `#` are skipped; every
-other line must be `NAME = "value"` (`[A-Z_]+`, blanks allowed around `=`, nothing after the
-closing quote) else `syntax`. The revisions are the `PROJECT_REVISION` values in order, or the
+other line must be `NAME = "value"` (`[A-Z_]+`; blanks allowed before `NAME`, around `=` and
+after the closing quote, nothing else: the oracle's `\s*([A-Z_]+)\s*=\s*"([^"]*)"\s*` as a
+whole-line match) else `syntax`. The revisions are the `PROJECT_REVISION` values in order, or the
 `.qpf`'s stem when there are none. With a wanted revision (`--revision`, or `import … revision`;
 `--revision` with a non-Quartus entry is an unlocated `syntax` error "--revision needs a .qpf
 or .qsf entry", as the oracle applies it to the `qsf` format only)
@@ -454,8 +457,10 @@ NAME value `` with the value bytes verbatim, in project order, LF-terminated; `n
 continuation and comment recognition **off** (each line is exactly one definition: a value
 ending in `\` or containing `//` is taken literally), so a bad project define (an unterminated
 string, a formal list that is not identifiers) is a located error (`<command line>:3:9: error:
-…`). `odin3_pp_run(pp, path, library, &stream)` preprocesses one source file (a design file in
-listing order, or a `-v`/`-y` library file when 2D resolves a module) and returns
+…`). `odin3_pp_run(pp, path, library, at, &stream)` preprocesses one source file (a design
+file in listing order, or a `-v`/`-y` library file when 2D resolves a module; `at` is the loc
+of the project word or instantiation that named it, so a root file that is missing, unreadable
+or over the size cap is a located error like an include's) and returns
 `odin3_pp_stream {odin3_bytes text; odin3_srcbuf_id stream; uint32_t nsegments}`; the stream
 text is owned by `pp` until the next run or destroy (2C scans it with `yy_scan_bytes` or a
 custom `YY_INPUT`). Macro bodies and defaults are **copied into the preprocessor's arena** at
@@ -542,10 +547,16 @@ ends first, from the enclosing frames** (ruling I11: `` `define CALL `ADD `` the
 and a body ending in an unbalanced `(`, are accepted by Icarus and Yosys; with run lists an
 actual spanning frames is just more runs), up to the matching `)`: `,` at nesting depth 0
 separates; `(`/`)`, `[`/`]`, `{`/`}` nest; strings are opaque; comments inside actuals are
-replaced by one space (a `loc` 0 run, §3.3); newlines are kept. Running off the outermost
-(file) frame is `syntax` "unterminated arguments of macro 'NAME'". Each actual is trimmed of
-leading and trailing blanks (space, tab, CR, LF). Counting: `()` is one empty actual. More
-actuals than formals: `syntax`. Fewer actuals than formals: the missing trailing ones take
+replaced by one space (a `loc` 0 run, §3.3); newlines are kept. While collecting from a
+`FILE` frame the conditional directives are processed as usual (`` `ID(1 `ifdef X + 2 `else + 3
+`endif) `` collects `1  + 3`, probe w3; inside an expansion frame they stay PP-6's error), and
+collection never crosses an `` `include `` boundary: the end of an included file, or an
+`` `include `` met while collecting, is `syntax` "unterminated arguments of macro 'NAME'", as
+is running off the outermost file frame. Each actual is trimmed of leading and trailing blanks
+(space, tab, CR, LF). Counting: `()` is one empty actual, except for a macro declared with an
+**empty formal list** (`` `define F() 5 ``), whose `()` is zero actuals (Yosys's behaviour;
+probe w2). More actuals than formals: `syntax`. Fewer actuals than formals: the missing trailing
+ones take
 their defaults, and a formal with neither an actual nor a default is `syntax` "macro 'NAME'
 expects N arguments, got M". An **empty actual** (`(,b)`, `(a,)`, `()`) is substituted as empty
 text when its formal has no default and as the default when it has one (ruling I1; 1800
@@ -591,10 +602,17 @@ ancestry**, not on the live expansion stack (ruling C1): from the backtick's loc
 `parent`; stop at a `FILE` — and the use is recursive iff its name was recorded. So
 `` `MAX(`MAX(x,y),z) `` is fine (the inner use is spelled in the file, reached through an
 argument buffer), while `` `define R `R + 1 `` and `` `define B `A(`B) `` are `syntax` "recursive
-macro 'NAME'" with the expansion chain printed (§8); `` `define P(x) x(x) `` with `` `P(`P) ``
-recurses only through its growing argument and stops at `ODIN3_PP_MAX_EXPANSION_DEPTH`. Both
-Icarus and Yosys loop forever on `rec.v` (measured 2026-10-10), so this is stricter than both
-oracles and never disagrees with a terminating one.
+macro 'NAME'" with the expansion chain printed (§8). The walk is bounded by the **chain
+length** every buffer records when it is created — 1 + the chain length of its `def` (a
+`MACRO_ARG`) or `parent` (an `EXPANSION`) buffer, 0 for a `FILE` — capped by
+`ODIN3_PP_MAX_EXPANSION_CHAIN` as a located error at the use that would exceed it: a chain that
+grows while the live frame count stays small (`` `define P(x) x(x) `` with `` `P(`P) ``: cross-frame
+collection pops each finished frame, so live depth stays near 1 while every use's ancestry is
+one longer than the last) is stopped there, and no cap depends on frame popping. Both Icarus
+and Yosys loop forever on `rec.v` (measured 2026-10-10); where they terminate on a
+self-referential pattern that this rule rejects (probe w1: `` `N(`KEEP) `` through `` `K ``
+re-uses `N` inside its own argument chain) the rejection is a **declared divergence** (§10.4),
+not a disagreement to chase.
 
 ### 7.5 Pass-through directives and SystemVerilog forms (PP-8, PP-9)
 
@@ -666,12 +684,17 @@ with one segment.
 fuzzers): segments strictly increasing and starting at 0; every segment loc decodes or is 0;
 for every output byte whose loc is not 0, the byte equals the byte at `odin3_srcman_spelling`
 chased to its `FILE` buffer (the file cache holds the bytes); every `loc` 0 byte is a blank and
-a segment of its own; every `EXPANSION`/`MACRO_ARG` buffer created in the run is **reachable
-from some segment's loc** by `def` (spelling) and `parent` steps, unless the expansion it
-belongs to emitted no byte (ruling I3: in the 2A example A1 is reached only as A2's `def`; an
-empty macro's buffer, or one whose output was wholly consumed as an argument of something that
-dropped it, is reachable from nothing) — the preprocessor counts emitted bytes per expansion so
-the exemption is exact. Violations are `ODIN3_ERR_CHECK`, logged.
+a segment of its own; **reachability per buffer**: for every output byte with a non-zero loc,
+the preprocessor walks `def` (in a `MACRO_ARG`) and `parent` (in an `EXPANSION`) steps to the
+`FILE` and increments a counter on every buffer the walk passes through; the check then
+requires that every `EXPANSION`/`MACRO_ARG` buffer created in the run whose counter is non-zero
+is reachable from some segment's loc by the same steps, and says nothing about buffers with a
+zero count (ruling I3, made exact per buffer: in the 2A example A1 is reached only as A2's
+`def` and counts; with `` `define DROP(x) `` and `` `define F(x) `DROP(x) z `` the use `` `F(a) ``
+emits only ` z`, so `DROP`'s expansion and the argument buffers of `a` count zero and are
+exempt while `F`'s buffer counts and must be reachable — a unit test). Violations are
+`ODIN3_ERR_CHECK`, logged; the fuzzers assert the check on every `OK` run (§10.5), so the rule
+must hold on every valid input.
 
 ## 8. Errors and diagnostics
 
@@ -719,7 +742,8 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | Cap | Value | Why |
 |---|---|---|
 | `ODIN3_PP_MAX_INCLUDE_DEPTH` | 64 | real designs nest 2–3; a cycle is caught earlier by name |
-| `ODIN3_PP_MAX_EXPANSION_DEPTH` | 1024 | live `EXPANSION` frames; recursion through the spelling ancestry is caught by name (PP-7), so depth measures distinct-macro chains and argument-driven growth (`` `P(`P) ``) |
+| `ODIN3_PP_MAX_EXPANSION_CHAIN` | 1024 | the chain length recorded per buffer at creation (PP-7: 1 + that of its `def`/`parent` buffer); bounds the PP-7 walk and the `expanded from` chain, and stops argument-driven growth (`` `P(`P) ``) that keeps the live frame count small; recursion by name is caught first for every true cycle |
+| `ODIN3_PP_MAX_EXPANSION_DEPTH` | 1024 | live expansion frames (the input stack); with the chain cap this only bounds the stack's own records |
 | `ODIN3_PP_MAX_LIVE_RUNS` | 2^20 | run records over all live frames (frames are run lists, PP-2): bounds the input stack's memory (≈ 24 MB at the cap) whatever the actuals' sizes (I10a) |
 | `ODIN3_PP_MAX_COND_DEPTH` | 1024 | per file; `nested_ifdef` micros nest 3 |
 | `ODIN3_PP_MAX_MACRO_ARGS` | 256 | formals per macro |
@@ -799,7 +823,11 @@ needed).
   a string or an escaped identifier untouched; `` `ADDITION_num `` undefined; the reviewer's
   probes `t1`–`t9`, `u1`–`u3`, `v1`, `v2`, `rec` (`scratchpad/r2b`, copied into the test
   tree): `` `MAX(`MAX(x,y),z) `` accepted, `rec.v` and `` `define B `A(`B) `` recursive with the
-  printed chain, `` `P(`P) `` stopping at the depth cap (C1); `` `CALL(x,y) `` with actuals from
+  printed chain, `` `P(`P) `` stopping at `MAX_EXPANSION_CHAIN` with the live frame count
+  asserted small (C1; the cap lowered by the hook); w1 rejected as declared; the
+  `DROP`/`F(a)` reachability example and w1–w5 under `pp_check`; `` `F() `` with an empty formal
+  list (w2); conditionals inside a file-spelled actual (w3) and collection stopped at an
+  `include` boundary; `` `CALL(x,y) `` with actuals from
   the enclosing frame and a body ending in `(` (I11); empty actuals and too few actuals (I1);
   `wire\⏎x;` on two lines (I2); too many actuals; `test_pp_cond`: every `nested_ifdef_*` micro's
   branch, mid-line conditionals, `elsif`
@@ -829,7 +857,8 @@ operators; whitespace and comments dropped), and compare Odin III against the tw
 strings, Icarus tolerates undefined macros) the file is listed under "oracles disagree" and not
 failed. **Declared divergences** (both oracles agree, 2B differs by design, so the tool expects
 the Odin III error and reports anything else): directives inside macro text (PP-6; probes t5,
-u3) and recursive macros (PP-7). Inputs: the preprocessor micros, every micro with a backtick
+u3) and recursion on the spelling ancestry (PP-7; probe w1, which both oracles expand).
+Inputs: the preprocessor micros, every micro with a backtick
 (`syntax/*`, `keywords/*/*.vh` through their includers), the VTR set ending with mcml.v;
 expected: zero undeclared disagreements with an agreeing pair, the lists of excluded and
 declared files recorded in `docs/PHASE2.md` under 2B's results.
@@ -881,7 +910,8 @@ bytes plus the srcman's records. Numbers go to `docs/PHASE2.md`.
    each has a plausible line-based implementation that passes the micros and fails Icarus's
    mid-line case.
 4. **Bombs and caps.** An exponential macro must stop at `MAX_STREAM_BYTES`,
-   `MAX_BUFFERS_PER_STREAM`, `MAX_LOC_BYTES_PER_STREAM` or `MAX_LIVE_RUNS` within the fuzzer's
+   `MAX_BUFFERS_PER_STREAM`, `MAX_LOC_BYTES_PER_STREAM`, `MAX_LIVE_RUNS` or
+   `MAX_EXPANSION_CHAIN` within the fuzzer's
    timeout, and recursion must be caught on the spelling ancestry before any cap; a cap checked
    after the allocation rather than before turns the bomb into an OOM, and a frame that copies
    its actuals instead of listing runs reintroduces the memory bomb the run lists remove.
@@ -925,7 +955,8 @@ The reviewer agreed with all six; the additions are theirs.
   that named a project-description file (PRJ-2); an `EXPANSION`'s `parent_end` may lie in
   another buffer than its `parent` when the actuals ran into an enclosing frame (PP-6, I11).
 - **`docs/PHASE2.md`** (2B's decisions-log entry): the declared divergences from both oracles —
-  directives inside macro text rejected (PP-6), recursive macros rejected (PP-7), `translate_off`
+  directives inside macro text rejected (PP-6), recursion on the spelling ancestry rejected
+  even where the oracles terminate (PP-7, probe w1), `translate_off`
   removed by the preprocessor (PP-10) — and the Parmys-rejected micros that rely on textual
   formal splicing (`preprocessor_complex_define`, `preprocessor_define_with_comment`).
 - **`docs/DESIGN.md` §4.0**: the `-f`-under-`-F` sentence made explicit (ruling I5), and
