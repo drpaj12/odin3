@@ -61,6 +61,9 @@ add_library(odin3_core OBJECT
     src/ir/check.c
     src/ir/compact.c
     src/ir/ir_test.c
+    src/ast/srcman.c
+    src/ast/srcman_decode.c
+    src/ast/srcman_print.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -186,6 +189,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
+    odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE

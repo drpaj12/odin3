@@ -1,5 +1,9 @@
-/* design.c — design create/destroy, the design-global string table, module list, prov store. */
+/*
+ * design.c — design create/destroy, the design-global string table, module list, prov store and
+ * source manager.
+ */
 #include "ir/design.h"
+#include "ast/srcman.h"
 #include "ir/ir_internal.h"
 #include "util/alloc.h"
 #include "util/arena.h"
@@ -25,6 +29,7 @@ void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
     }
+    odin3_srcman_destroy(design->srcman);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
     odin3_celltype_table_free(design);
@@ -39,4 +44,15 @@ odin3_strtab *odin3_design_strtab(const odin3_design *design) {
 
 odin3_status odin3_design_intern(odin3_design *design, odin3_bytes bytes, uint32_t *str) {
     return odin3_strtab_intern(design->strtab, bytes, str);
+}
+
+odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **out) {
+    if (design->srcman == NULL) {
+        design->srcman = odin3_srcman_create(design->strtab);
+        if (design->srcman == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    *out = design->srcman;
+    return ODIN3_OK;
 }
