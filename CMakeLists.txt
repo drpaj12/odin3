@@ -67,6 +67,8 @@ add_library(odin3_core OBJECT
     src/ast/kinds.c
     src/ast/ast.c
     src/ast/ast_test.c
+    src/ast/symtab.c
+    src/ast/symtab_lookup.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -194,6 +196,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_build)
+    odin3_add_unit_test(test_ast_symtab)
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE

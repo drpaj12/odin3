@@ -3,6 +3,7 @@
 #include "ast/ast_internal.h"
 #include "ast/kinds.h"
 #include "ast/srcman.h"
+#include "ast/symtab.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "util/alloc.h"
@@ -78,6 +79,7 @@ void odin3_ast_destroy(odin3_ast *ast) {
     if (ast == NULL) {
         return;
     }
+    odin3_symtab_destroy(ast->symtab);
     odin3_pagevec_destroy(ast->nodes);
     odin3_vec_free(&ast->children);
     odin3_vec_free(&ast->payloads);
