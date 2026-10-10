@@ -152,9 +152,19 @@ class Ctx:
         self.record["duplicates"] = sorted(self.dups)
 
 
+def read_text(path: Path) -> str:
+    """A project file's text: no newline translation, a CR before an LF dropped; a lone CR
+    stays an ordinary character."""
+    with path.open(encoding="utf-8", newline="") as fh:
+        return fh.read().replace("\r\n", "\n")
+
+
 def read_lines(path: Path) -> list[str]:
-    """Lines of a project file; LF and CRLF endings are both accepted."""
-    return path.read_text(encoding="utf-8").splitlines()
+    """Lines of a project file, split at LF only (CRLF accepted)."""
+    lines = read_text(path).split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def language_of(given: str, at: str | None) -> str:
@@ -188,7 +198,8 @@ def add_libfile(ctx: Ctx, base: Path, given: str, lang: str, at: str) -> None:
 
 
 def add_libext(ctx: Ctx, ext: str, at: str) -> None:
-    language_of("x" + ext, at)
+    if EXT_LANGUAGE.get(Path("x" + ext).suffix.lower()) is None:
+        raise ProjectError("unknown_file_type", at, [ext], f"no language for {ext}")
     ctx.record["libext"].append(ext)
 
 
@@ -208,9 +219,14 @@ def set_top(ctx: Ctx, name: str, at: str | None) -> None:
     ctx.top_at = at
 
 
+COUNT_MAX = 2**32 - 1
+
+
 def count_of(text: str, at: str) -> int:
-    if not text.isdigit():
+    if not re.fullmatch("[0-9]+", text):
         raise syntax(at, f"expected a count, got {text!r}", text)
+    if int(text) > COUNT_MAX:
+        raise syntax(at, f"count too large: {text}", text)
     return int(text)
 
 
@@ -869,7 +885,7 @@ def run_qsf(st: QsfState, ctx: Ctx, path: Path, qip: bool = False) -> None:
     """Plain relative paths, in the .qsf and in every .qip, are relative to the project
     directory (Quartus); the .qip idiom is relative to the .qip."""
     ctx.touch(path)
-    reader = TclReader(path.read_text(encoding="utf-8").replace("\r\n", "\n"),
+    reader = TclReader(read_text(path),
                        lambda n: ctx.at(path, n), path.parent if qip else None)
     for words, n in list(reader.commands()):
         qsf_command(st, ctx, st.project_dir, words, ctx.at(path, n))
@@ -1231,7 +1247,7 @@ class Preprocessor:
         self.read.add(self.ctx.rel(path))
         self.stack.append(path)
         cond: list[list[bool]] = []
-        text = strip_comments(path.read_text(encoding="utf-8"))
+        text = strip_comments(read_text(path))
         for n, line in enumerate(text.split("\n"), 1):
             at = self.ctx.at(path, n)
             m = re.match(r"\s*`(\w+)\s*(.*)", line)
