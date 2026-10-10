@@ -23,22 +23,34 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { OOM_LIMIT = 400, PROPERTY_LITERALS = 10000, TEXT_MAX = 128 };
+enum {
+    OOM_LIMIT = 400,
+    PROPERTY_LITERALS = 10000,
+    TEXT_MAX = 128,
+    CAP_BITS = 13607, /* bits of the largest decimal literal (10^4096 - 1) */
+    LONG_TEXT = 4200,
+    PRECEDENCE_TREES = 500,
+    POOL_MAX = 8,
+    REF_MAX = 1024
+};
 
 static odin3_design *design;
 static odin3_ast *ast;
 static odin3_strbuf out;
 static size_t errors_logged;
+static size_t warnings_logged;
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
     (void)msg;
     (void)user;
     errors_logged += level == ODIN3_LOG_ERROR;
+    warnings_logged += level == ODIN3_LOG_WARN;
 }
 
 void setUp(void) {
     odin3_log_set_sink(count_sink, NULL);
     errors_logged = 0;
+    warnings_logged = 0;
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     ast = NULL;
@@ -335,6 +347,52 @@ static void test_strings(void) {
            "\"a\\\"b\\\\c\\n\\td\\001\\177\\351\"");
 }
 
+/* A literal that parsed as a decimal prints as one, up to the 4096-digit cap (Yosys reads it). */
+static void expect_round_trip(odin3_ast_id first, const char *want) {
+    static char again[LONG_TEXT];
+    odin3_strbuf_clear(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_print(ast, first, &out));
+    TEST_ASSERT_EQUAL_STRING(want, out.data);
+    TEST_ASSERT_LESS_THAN_size_t(sizeof again, out.len);
+    memcpy(again, out.data, out.len + 1);
+    bool same = false;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_equal(ast, first, ast, num(again), &same));
+    TEST_ASSERT_TRUE(same);
+}
+
+/* A plain decimal 2^power from its bits (nbits = power + 1, as number_parse stores it). */
+static odin3_ast_id power_of_two(uint32_t power, uint8_t *bits) {
+    memset(bits, ODIN3_BIT_0, power + 1);
+    bits[power] = ODIN3_BIT_1;
+    odin3_ast_number lit = {.width = 0, .nbits = power + 1, .bits = bits};
+    odin3_ast_spec spec = with_flags(kd(ODIN3_AST_NUMBER), ODIN3_AST_F_NUMBER_SIGNED);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_new(ast, (odin3_loc){0}, &lit, &spec.payload));
+    return leaf(spec);
+}
+
+static void test_decimal_digit_cap(void) {
+    static char nines[ODIN3_AST_MAX_DECIMAL_DIGITS + 1];
+    static uint8_t bits[CAP_BITS + 1];
+    memset(nines, '9', ODIN3_AST_MAX_DECIMAL_DIGITS);
+    nines[ODIN3_AST_MAX_DECIMAL_DIGITS] = '\0';
+    TEST_ASSERT_EQUAL_UINT32(CAP_BITS, odin3_ast_number_of(ast, num(nines))->nbits);
+    expect_round_trip(num(nines), nines); /* 4096 digits, 13607 bits */
+    static char sized[LONG_TEXT];
+    (void)snprintf(sized, sizeof sized, "13607'd%s", nines);
+    expect_round_trip(num(sized), sized);
+    odin3_ast_id top = power_of_two(CAP_BITS - 1, bits); /* 2^13606: 4096 digits */
+    odin3_strbuf_clear(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_print(ast, top, &out));
+    TEST_ASSERT_EQUAL_size_t(ODIN3_AST_MAX_DECIMAL_DIGITS, out.len);
+    static char copy[LONG_TEXT];
+    memcpy(copy, out.data, out.len + 1);
+    expect_round_trip(top, copy);
+    odin3_ast_id over = power_of_two(CAP_BITS, bits); /* 2^13607: 4097 digits, no decimal */
+    odin3_strbuf_clear(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_print(ast, over, &out));
+    TEST_ASSERT_EQUAL_STRING_LEN("'sh8000", out.data, 7);
+}
+
 /* --- names (Review Focus 4) ----------------------------------------------------------------- */
 
 static void test_names(void) {
@@ -356,6 +414,9 @@ static void test_names(void) {
     expect(mk(hcall, (odin3_ast_id[]){id("a"), id("b")}, 2), "u.f(a, b)");
     expect(leaf(named(ODIN3_AST_CALL, "f")), "f()");
     expect(leaf(named(ODIN3_AST_CALL, "begin")), "\\begin ()");
+    size_t warnings = warnings_logged;
+    expect(id("a b"), "\\a b "); /* unwritable: as stored, with a warning */
+    TEST_ASSERT_EQUAL_size_t(warnings + 1, warnings_logged);
 }
 
 /* --- opaque text and directives ------------------------------------------------------------- */
@@ -753,6 +814,96 @@ static void test_expressions(void) {
     expect(odd_base, "(a | b)[0]");
 }
 
+/* --- precedence property ------------------------------------------------------------------ */
+
+/* A random operator tree built bottom-up beside an independent fully parenthesised text. */
+typedef struct pool {
+    odin3_ast_id ids[POOL_MAX];
+    char refs[POOL_MAX][REF_MAX];
+    bool is_op[POOL_MAX];
+    uint32_t n;
+} pool;
+
+typedef struct rng {
+    uint64_t state;
+} rng;
+
+static uint32_t next_rand(rng *gen, uint32_t bound) {
+    gen->state = gen->state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return (uint32_t)((gen->state >> 33) % bound);
+}
+
+/* dst = the pieces concatenated (they must fit in REF_MAX). */
+static void join(char *dst, const char *const *pieces, uint32_t n) {
+    size_t len = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        size_t piece = strlen(pieces[i]);
+        TEST_ASSERT_LESS_THAN_size_t(REF_MAX, len + piece);
+        memcpy(dst + len, pieces[i], piece);
+        len += piece;
+    }
+    dst[len] = '\0';
+}
+
+/* Removes a random entry; its text goes to ref, parenthesised when it is an operator. */
+static odin3_ast_id take(pool *pl, rng *gen, char *ref) {
+    uint32_t at = next_rand(gen, pl->n);
+    odin3_ast_id node = pl->ids[at];
+    bool op = pl->is_op[at];
+    join(ref, (const char *const[]){op ? "(" : "", pl->refs[at], op ? ")" : ""}, 3);
+    pl->n--;
+    pl->ids[at] = pl->ids[pl->n];
+    pl->is_op[at] = pl->is_op[pl->n];
+    memcpy(pl->refs[at], pl->refs[pl->n], REF_MAX);
+    return node;
+}
+
+static void combine(pool *pl, rng *gen) {
+    static char parts[3][REF_MAX];
+    static char ref[REF_MAX];
+    uint32_t pick = next_rand(gen, 3);
+    odin3_ast_id node = {0};
+    if (pick == 0 || pl->n < 2) {
+        uint32_t op = next_rand(gen, ODIN3_AST_UNARY_COUNT);
+        odin3_ast_id operand = take(pl, gen, parts[0]);
+        node = un(op, operand);
+        join(ref, (const char *const[]){odin3_ast_sub_name(ast, node), parts[0]}, 2);
+    } else if (pick == 1 || pl->n < 3) {
+        uint32_t op = next_rand(gen, ODIN3_AST_BINARY_COUNT);
+        odin3_ast_id lhs = take(pl, gen, parts[0]);
+        node = bin(lhs, op, take(pl, gen, parts[1]));
+        join(ref,
+             (const char *const[]){parts[0], " ", odin3_ast_sub_name(ast, node), " ", parts[1]}, 5);
+    } else {
+        odin3_ast_id ids[3] = {take(pl, gen, parts[0]), take(pl, gen, parts[1]),
+                               take(pl, gen, parts[2])};
+        node = mk(kd(ODIN3_AST_TERNARY), ids, 3);
+        join(ref, (const char *const[]){parts[0], " ? ", parts[1], " : ", parts[2]}, 5);
+    }
+    memcpy(pl->refs[pl->n], ref, REF_MAX);
+    pl->ids[pl->n] = node;
+    pl->is_op[pl->n] = true;
+    pl->n++;
+}
+
+static void test_precedence_property(void) {
+    static const char *const LEAVES[] = {"a", "b", "c", "d", "e"};
+    rng gen = {7};
+    for (uint32_t tree = 0; tree < PRECEDENCE_TREES; tree++) {
+        static pool pl;
+        pl.n = 0;
+        for (uint32_t i = 0; i < 5; i++) {
+            pl.ids[pl.n] = id(LEAVES[i]);
+            (void)snprintf(pl.refs[pl.n], REF_MAX, "%s", LEAVES[i]);
+            pl.is_op[pl.n++] = false;
+        }
+        while (pl.n > 1 || !pl.is_op[0]) {
+            combine(&pl, &gen);
+        }
+        expect(pl.ids[0], pl.refs[0]);
+    }
+}
+
 /* --- robustness ------------------------------------------------------------------------------ */
 
 static void test_chain_at_cap(void) {
@@ -816,15 +967,6 @@ static void test_oom_sweep(void) {
 }
 
 /* --- the property test ----------------------------------------------------------------------- */
-
-typedef struct rng {
-    uint64_t state;
-} rng;
-
-static uint32_t next_rand(rng *gen, uint32_t bound) {
-    gen->state = gen->state * 6364136223846793005ULL + 1442695040888963407ULL;
-    return (uint32_t)((gen->state >> 33) % bound);
-}
 
 /* A random size and base (`12'sh`, `'b`), or nothing for a plain decimal; the base index. */
 static uint32_t random_prefix(rng *gen, char *buf, size_t cap, size_t *len) {
@@ -901,6 +1043,7 @@ int main(void) {
     RUN_TEST(test_attributes);
     RUN_TEST(test_numbers);
     RUN_TEST(test_numbers_mixing_xz_print_in_binary);
+    RUN_TEST(test_decimal_digit_cap);
     RUN_TEST(test_strings);
     RUN_TEST(test_names);
     RUN_TEST(test_opaque_text_verbatim);
@@ -916,6 +1059,7 @@ int main(void) {
     RUN_TEST(test_functions_and_tasks);
     RUN_TEST(test_generate);
     RUN_TEST(test_expressions);
+    RUN_TEST(test_precedence_property);
     RUN_TEST(test_chain_at_cap);
     RUN_TEST(test_absent_slots_and_abandoned_roots);
     RUN_TEST(test_misuse);

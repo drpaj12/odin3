@@ -22,39 +22,30 @@ enum {
     LIMB_BITS = 32,
     CHUNK = 1000000000, /* 10^9: nine decimal digits per division */
     CHUNK_DIGITS = 9,
-    DEC_PRINT_MAX_BITS = 13606, /* ≤ ODIN3_AST_MAX_DECIMAL_DIGITS digits: wider prints in hex */
+    LOG2_10_MILLI = 3322, /* ⌈1000 · log2(10)⌉ */
+    MILLI = 1000,
+    /* ⌈ODIN3_AST_MAX_DECIMAL_DIGITS · log2(10)⌉: a wider value has more digits than the cap */
+    DEC_PRINT_MAX_BITS = (ODIN3_AST_MAX_DECIMAL_DIGITS * LOG2_10_MILLI + MILLI - 1) / MILLI,
     HEX_BITS = 4,
     DECIMAL_RADIX = 10,
     OCT_BITS = 3,
 };
 
-static odin3_ast_id kid(const odin3_printer *pr, const odin3_pr_task *task, uint32_t idx) {
-    return odin3_ast_child(pr->ast, (odin3_ast_id){task->node}, idx);
-}
-
-static odin3_ast_id self(const odin3_pr_task *task) {
-    return (odin3_ast_id){task->node};
-}
-
-static uint32_t flags_of(const odin3_printer *pr, const odin3_pr_task *task) {
-    return odin3_ast_flags(pr->ast, self(task));
-}
-
 /* --- expressions ----------------------------------------------------------------------------- */
 
 static void print_leaf(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_pr_leaf(pr, self(task));
+    odin3_pr_leaf(pr, odin3_pr_self(task));
 }
 
 static void print_ident(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_pr_name(pr, self(task));
+    odin3_pr_name(pr, odin3_pr_self(task));
 }
 
 static void print_hier(odin3_printer *pr, const odin3_pr_task *task) {
-    uint32_t count = odin3_ast_nchild(pr->ast, self(task));
+    uint32_t count = odin3_ast_nchild(pr->ast, odin3_pr_self(task));
     for (uint32_t i = 0; i < count; i++) {
         odin3_pr_text(pr, i > 0 ? "." : "");
-        odin3_pr_node(pr, kid(pr, task, i), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, i), ODIN3_PR_EXPR, 0);
     }
 }
 
@@ -64,50 +55,50 @@ static void print_select(odin3_printer *pr, const odin3_pr_task *task) {
         [ODIN3_AST_SELECT_PART] = ":",
         [ODIN3_AST_SELECT_PART_PLUS] = "+:",
         [ODIN3_AST_SELECT_PART_MINUS] = "-:"};
-    uint32_t sub = odin3_ast_sub(pr->ast, self(task));
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
+    uint32_t sub = odin3_ast_sub(pr->ast, odin3_pr_self(task));
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
     odin3_pr_text(pr, "[");
-    odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
     if (sub != ODIN3_AST_SELECT_BIT && sub < ODIN3_AST_SELECT_COUNT) {
         odin3_pr_text(pr, SEPARATOR[sub]);
-        odin3_pr_node(pr, kid(pr, task, 2), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 2), ODIN3_PR_EXPR, 0);
     }
     odin3_pr_text(pr, "]");
 }
 
 static void print_concat(odin3_printer *pr, const odin3_pr_task *task) {
     odin3_pr_text(pr, "{");
-    odin3_pr_list(pr, ODIN3_PR_EXPR, self(task), 0);
+    odin3_pr_list(pr, ODIN3_PR_EXPR, odin3_pr_self(task), 0);
     odin3_pr_text(pr, "}");
 }
 
 static void print_replicate(odin3_printer *pr, const odin3_pr_task *task) {
     odin3_pr_text(pr, "{");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
-    odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, "}");
 }
 
 /* An operator node: parenthesised as an operand; its attributes follow the operator. */
 static void print_operator(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_id node = self(task);
+    odin3_ast_id node = odin3_pr_self(task);
     odin3_ast_kind kind = odin3_ast_kind_of(pr->ast, node);
     bool parens = task->mode == ODIN3_PR_OPERAND;
     odin3_pr_text(pr, parens ? "(" : "");
     if (kind == ODIN3_AST_UNARY) {
         odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, node));
         odin3_pr_attrs(pr, node, false);
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
     } else {
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_OPERAND, 0);
         odin3_pr_text(pr, " ");
         odin3_pr_text(pr, kind == ODIN3_AST_BINARY ? odin3_ast_sub_name(pr->ast, node) : "?");
         odin3_pr_text(pr, " ");
         odin3_pr_attrs(pr, node, false);
-        odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_OPERAND, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_OPERAND, 0);
         if (kind == ODIN3_AST_TERNARY) {
             odin3_pr_text(pr, " : ");
-            odin3_pr_node(pr, kid(pr, task, 2), ODIN3_PR_OPERAND, 0);
+            odin3_pr_node(pr, odin3_pr_kid(pr, task, 2), ODIN3_PR_OPERAND, 0);
         }
     }
     odin3_pr_text(pr, parens ? ")" : "");
@@ -115,19 +106,19 @@ static void print_operator(odin3_printer *pr, const odin3_pr_task *task) {
 
 /* A `$`-name or a dotted HIER name as stored, any other name as an identifier. */
 static void print_callee(odin3_printer *pr, const odin3_pr_task *task, uint32_t system_or_hier) {
-    if ((flags_of(pr, task) & system_or_hier) != 0) {
-        odin3_pr_raw(pr, self(task));
+    if ((odin3_pr_flags(pr, task) & system_or_hier) != 0) {
+        odin3_pr_raw(pr, odin3_pr_self(task));
     } else {
-        odin3_pr_name(pr, self(task));
+        odin3_pr_name(pr, odin3_pr_self(task));
     }
 }
 
 static void print_call(odin3_printer *pr, const odin3_pr_task *task) {
     print_callee(pr, task, ODIN3_AST_F_CALL_SYSTEM | ODIN3_AST_F_CALL_HIER);
-    bool system = (flags_of(pr, task) & ODIN3_AST_F_CALL_SYSTEM) != 0;
-    if (!system || odin3_ast_nchild(pr->ast, self(task)) > 0) {
+    bool system = (odin3_pr_flags(pr, task) & ODIN3_AST_F_CALL_SYSTEM) != 0;
+    if (!system || odin3_ast_nchild(pr->ast, odin3_pr_self(task)) > 0) {
         odin3_pr_text(pr, "(");
-        odin3_pr_list(pr, ODIN3_PR_EXPR, self(task), 0);
+        odin3_pr_list(pr, ODIN3_PR_EXPR, odin3_pr_self(task), 0);
         odin3_pr_text(pr, ")");
     }
 }
@@ -135,39 +126,39 @@ static void print_call(odin3_printer *pr, const odin3_pr_task *task) {
 static void print_mintypmax(odin3_printer *pr, const odin3_pr_task *task) {
     for (uint32_t i = 0; i < 3; i++) {
         odin3_pr_text(pr, i > 0 ? ":" : "");
-        odin3_pr_node(pr, kid(pr, task, i), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, i), ODIN3_PR_EXPR, 0);
     }
 }
 
 /* --- fragments ------------------------------------------------------------------------------- */
 
 static void print_list(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), 0);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), 0);
 }
 
 static void print_range(odin3_printer *pr, const odin3_pr_task *task) {
     odin3_pr_text(pr, "[");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, ":");
-    odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, "]");
 }
 
 static void print_declarator(odin3_printer *pr, const odin3_pr_task *task) {
-    uint32_t count = odin3_ast_nchild(pr->ast, self(task));
-    odin3_pr_name(pr, self(task));
+    uint32_t count = odin3_ast_nchild(pr->ast, odin3_pr_self(task));
+    odin3_pr_name(pr, odin3_pr_self(task));
     for (uint32_t i = 1; i < count; i++) {
-        odin3_pr_node(pr, kid(pr, task, i), ODIN3_PR_LISTED, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, i), ODIN3_PR_LISTED, 0);
     }
-    if (kid(pr, task, 0).v != 0) {
+    if (odin3_pr_kid(pr, task, 0).v != 0) {
         odin3_pr_text(pr, " = ");
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     }
 }
 
 static void print_delay(odin3_printer *pr, const odin3_pr_task *task) {
     odin3_pr_text(pr, "#(");
-    odin3_pr_list(pr, ODIN3_PR_EXPR, self(task), 0);
+    odin3_pr_list(pr, ODIN3_PR_EXPR, odin3_pr_self(task), 0);
     odin3_pr_text(pr, ")");
 }
 
@@ -175,11 +166,11 @@ static void print_strength(odin3_printer *pr, const odin3_pr_task *task) {
     static const char *const DRIVE0[] = {"", "highz0", "weak0", "pull0", "strong0", "supply0"};
     static const char *const DRIVE1[] = {"", "highz1", "weak1", "pull1", "strong1", "supply1"};
     static const char *const CHARGE[] = {"", "small", "medium", "large"};
-    uint32_t flags = flags_of(pr, task);
+    uint32_t flags = odin3_pr_flags(pr, task);
     uint32_t s0 = (flags & ODIN3_AST_F_STRENGTH_S0_MASK) >> ODIN3_AST_F_STRENGTH_S0_SHIFT;
     uint32_t s1 = (flags & ODIN3_AST_F_STRENGTH_S1_MASK) >> ODIN3_AST_F_STRENGTH_S1_SHIFT;
     odin3_pr_text(pr, "(");
-    if (odin3_ast_sub(pr->ast, self(task)) == ODIN3_AST_STRENGTH_CHARGE) {
+    if (odin3_ast_sub(pr->ast, odin3_pr_self(task)) == ODIN3_AST_STRENGTH_CHARGE) {
         odin3_pr_text(pr, s0 < sizeof CHARGE / sizeof CHARGE[0] ? CHARGE[s0] : "");
     } else {
         bool both = s0 != 0 && s1 != 0;
@@ -191,69 +182,69 @@ static void print_strength(odin3_printer *pr, const odin3_pr_task *task) {
 }
 
 static void print_event_control(odin3_printer *pr, const odin3_pr_task *task) {
-    uint32_t flags = flags_of(pr, task);
+    uint32_t flags = odin3_pr_flags(pr, task);
     bool bare = (flags & ODIN3_AST_F_EVENT_CONTROL_NO_PARENS) != 0;
     if ((flags & ODIN3_AST_F_EVENT_CONTROL_STAR) != 0) {
         odin3_pr_text(pr, bare ? "@*" : "@(*)");
         return;
     }
-    if (kid(pr, task, 0).v != 0) {
+    if (odin3_pr_kid(pr, task, 0).v != 0) {
         odin3_pr_text(pr, "repeat (");
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
         odin3_pr_text(pr, ") ");
     }
     odin3_pr_text(pr, bare ? "@" : "@(");
-    uint32_t count = odin3_ast_nchild(pr->ast, self(task));
+    uint32_t count = odin3_ast_nchild(pr->ast, odin3_pr_self(task));
     for (uint32_t i = 1; i < count; i++) {
-        bool after_or =
-            (odin3_ast_flags(pr->ast, kid(pr, task, i)) & ODIN3_AST_F_EVENT_EXPR_AFTER_OR) != 0;
+        bool after_or = (odin3_ast_flags(pr->ast, odin3_pr_kid(pr, task, i)) &
+                         ODIN3_AST_F_EVENT_EXPR_AFTER_OR) != 0;
         if (i > 1) {
             odin3_pr_text(pr, after_or ? " or " : ", ");
         }
-        odin3_pr_node(pr, kid(pr, task, i), ODIN3_PR_LISTED, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, i), ODIN3_PR_LISTED, 0);
     }
     odin3_pr_text(pr, bare ? "" : ")");
 }
 
 static void print_event_expr(odin3_printer *pr, const odin3_pr_task *task) {
-    if (odin3_ast_sub(pr->ast, self(task)) != ODIN3_AST_EVENT_EXPR_NONE) {
-        odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
+    if (odin3_ast_sub(pr->ast, odin3_pr_self(task)) != ODIN3_AST_EVENT_EXPR_NONE) {
+        odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
         odin3_pr_text(pr, " ");
     }
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
 }
 
 /* `.name(e)` / `.name()` when named or dotted; otherwise the expression (or the bare name). */
 static void print_named_value(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_id node = self(task);
+    odin3_ast_id node = odin3_pr_self(task);
     bool dotted = odin3_ast_kind_of(pr->ast, node) == ODIN3_AST_CONNECTION
                       ? odin3_ast_name(pr->ast, node) != 0
-                      : (flags_of(pr, task) & ODIN3_AST_F_PORT_REF_DOTTED) != 0;
+                      : (odin3_pr_flags(pr, task) & ODIN3_AST_F_PORT_REF_DOTTED) != 0;
     if (dotted) {
         odin3_pr_text(pr, ".");
         odin3_pr_name(pr, node);
         odin3_pr_text(pr, "(");
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
         odin3_pr_text(pr, ")");
     } else if (odin3_ast_name(pr->ast, node) != 0) {
         odin3_pr_name(pr, node);
     } else {
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     }
 }
 
 static void print_net_assign(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, " = ");
-    odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
 }
 
 /* An attribute inside its `(* … *)` group: `key` or `key = value`. */
 static void print_attr(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_pr_name(pr, self(task));
-    if (kid(pr, task, 0).v != 0) {
+    odin3_pr_name(pr, odin3_pr_self(task));
+    if (odin3_pr_kid(pr, task, 0).v != 0) {
         odin3_pr_text(pr, " = ");
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     }
 }
 
@@ -381,16 +372,12 @@ static uint32_t significant_bits(const odin3_ast_number *num) {
     return top;
 }
 
-/* A decimal's digits: `x`/`z`/`?` when every bit is that one, else its value; false if mixed. */
-static bool fill_decimal_digits(const odin3_ast_number *num, uint32_t *limbs, char *digits) {
-    if (num->has_xz) {
-        char digit = group_digit(num, (bit_group){0, num->nbits});
-        digits[0] = digit;
-        digits[1] = '\0';
-        return digit != '\0';
-    }
-    fill_decimal(num, significant_bits(num), limbs, digits);
-    return true;
+/* An x/z decimal's one digit (`x`, `z` or `?`); false when its bits are not all one value. */
+static bool fill_decimal_xz(const odin3_ast_number *num, char *digits) {
+    char digit = group_digit(num, (bit_group){0, num->nbits});
+    digits[0] = digit;
+    digits[1] = '\0';
+    return digit != '\0';
 }
 
 typedef struct number_text {
@@ -401,17 +388,34 @@ typedef struct number_text {
     uint32_t *limbs; /* scratch for a decimal */
 } number_text;
 
-/* Fills nt->digits in nt->sub, falling back to binary when a digit mixes x/z with 0/1. */
+/*
+ * Writes a 0/1 decimal's value into nt->digits; false (digits unspecified) when it has more
+ * digits than a decimal literal may (ODIN3_AST_MAX_DECIMAL_DIGITS): every literal that parsed as a
+ * decimal prints as one.
+ */
+static bool fill_decimal_value(number_text *nt) {
+    uint32_t sig = significant_bits(nt->num);
+    if (sig > DEC_PRINT_MAX_BITS) { /* ≥ 2^DEC_PRINT_MAX_BITS > 10^cap: too many digits */
+        return false;
+    }
+    fill_decimal(nt->num, sig, nt->limbs, nt->digits);
+    return strlen(nt->digits) <= ODIN3_AST_MAX_DECIMAL_DIGITS;
+}
+
+/* Fills nt->digits in nt->sub: hex for an over-long decimal, binary when a digit mixes x/z. */
 static void fill_digits(number_text *nt) {
     static const uint32_t GROUP[ODIN3_AST_NUMBER_COUNT] = {[ODIN3_AST_NUMBER_BIN] = 1,
                                                            [ODIN3_AST_NUMBER_OCT] = OCT_BITS,
                                                            [ODIN3_AST_NUMBER_HEX] = HEX_BITS};
-    if (nt->sub == ODIN3_AST_NUMBER_DEC && !nt->num->has_xz &&
-        significant_bits(nt->num) > DEC_PRINT_MAX_BITS) {
-        nt->sub = ODIN3_AST_NUMBER_HEX; /* wider than any decimal literal can be */
+    bool ok = true;
+    if (nt->sub == ODIN3_AST_NUMBER_DEC && nt->num->has_xz) {
+        ok = fill_decimal_xz(nt->num, nt->digits);
+    } else if (nt->sub == ODIN3_AST_NUMBER_DEC && !fill_decimal_value(nt)) {
+        nt->sub = ODIN3_AST_NUMBER_HEX;
     }
-    bool ok = nt->sub == ODIN3_AST_NUMBER_DEC ? fill_decimal_digits(nt->num, nt->limbs, nt->digits)
-                                              : fill_groups(nt->num, GROUP[nt->sub], nt->digits);
+    if (nt->sub != ODIN3_AST_NUMBER_DEC) {
+        ok = fill_groups(nt->num, GROUP[nt->sub], nt->digits);
+    }
     if (!ok) {
         nt->sub = ODIN3_AST_NUMBER_BIN;
         fill_groups(nt->num, 1, nt->digits);

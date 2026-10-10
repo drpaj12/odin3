@@ -38,11 +38,13 @@ odin3_status odin3_ast_print(const odin3_ast *ast, odin3_ast_id root, odin3_strb
 
 /*
  * Appends the subtree of root as an s-expression to out, one node per line, 2-space indent per
- * level: `(KIND[.sub][:name] @file:line:col[ payload] children…)` — sub the sub-kind spelling,
- * name the name bytes (a STRING's as a C string), the location through the source manager
+ * level: `(KIND[.sub][:name][ [flags]] @file:line:col[ payload] children…)` — sub the sub-kind
+ * spelling, name the name bytes (a STRING's as a C string), flags (when non-zero) the kind's flag
+ * names of §4.4 in bit order, a field as NAME=value (`[SIGNED IN_HEADER DT=1 NET=2]`), and bits
+ * the kind does not define as one `0x…` token; the location through the source manager
  * (`<unknown>:0:0` for 0), payload a NUMBER or REAL as printed Verilog and a TEXT as a C string;
  * `_` for an absent slot; the node's attributes after its children as `{(ATTR:…) (ATTR:…)}` (the
- * first after `{`, the rest one column right of it, each on its own line). Flags are not shown.
+ * first after `{`, the rest one column right of it, each on its own line).
  * Indentation stops growing at 2 · ODIN3_PR_MAX_INDENT columns (a 32768-high chain would
  * otherwise need a gigabyte of blanks).
  * INVALID_ARG (logged) for a NULL argument or a root that is 0 or not made; NO_MEMORY. On failure
@@ -108,6 +110,15 @@ typedef void (*odin3_pr_handler)(odin3_printer *pr, const odin3_pr_task *task);
 /* The handler of an expression kind (print_expr.c) or of any other kind (print_stmt.c). */
 odin3_pr_handler odin3_pr_expr_handler(uint32_t kind);
 odin3_pr_handler odin3_pr_stmt_handler(uint32_t kind);
+
+/* The name bytes of node through its store's strtab ({"", 0} for none); never NULL. */
+odin3_bytes odin3_pr_name_bytes(const odin3_ast *ast, odin3_ast_id node);
+
+/* The task's node, its child idx (0 when absent), its flags and its kind. */
+odin3_ast_id odin3_pr_self(const odin3_pr_task *task);
+odin3_ast_id odin3_pr_kid(const odin3_printer *pr, const odin3_pr_task *task, uint32_t idx);
+uint32_t odin3_pr_flags(const odin3_printer *pr, const odin3_pr_task *task);
+odin3_ast_kind odin3_pr_kind(const odin3_printer *pr, const odin3_pr_task *task);
 
 /* Handler output, in print order (each records NO_MEMORY in pr->st on failure). */
 void odin3_pr_text(odin3_printer *pr, const char *text);

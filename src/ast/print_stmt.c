@@ -12,29 +12,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-static odin3_ast_id self(const odin3_pr_task *task) {
-    return (odin3_ast_id){task->node};
-}
-
-static odin3_ast_id kid(const odin3_printer *pr, const odin3_pr_task *task, uint32_t idx) {
-    return odin3_ast_child(pr->ast, self(task), idx);
-}
-
-static uint32_t flags_of(const odin3_printer *pr, const odin3_pr_task *task) {
-    return odin3_ast_flags(pr->ast, self(task));
-}
-
-static odin3_ast_kind kind_of(const odin3_printer *pr, const odin3_pr_task *task) {
-    return odin3_ast_kind_of(pr->ast, self(task));
-}
-
 /* An item's start: its indent on a fresh line, then its `(* … *)` group. */
 static void open_item(odin3_printer *pr, const odin3_pr_task *task) {
     if (task->mode == ODIN3_PR_ITEM) {
         odin3_pr_indent(pr, task->indent);
     }
-    odin3_ast_kind kind = kind_of(pr, task);
-    odin3_pr_attrs(pr, self(task), kind == ODIN3_AST_CASE || kind == ODIN3_AST_GEN_CASE);
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
+    odin3_pr_attrs(pr, odin3_pr_self(task), kind == ODIN3_AST_CASE || kind == ODIN3_AST_GEN_CASE);
 }
 
 /* An item's end: `;` and the newline, unless it sits in a list or header. */
@@ -91,6 +75,13 @@ static const char *const CLOSE_WORD[ODIN3_AST_KIND_COUNT] = {[ODIN3_AST_GENERATE
                                                                  "endfunction\n",
                                                              [ODIN3_AST_TASK_DECL] = "endtask\n"};
 
+/* Each kind's own bit for the one flag its handler shares with another kind. */
+static const uint16_t KIND_FLAG[ODIN3_AST_KIND_COUNT] = {
+    [ODIN3_AST_VAR_DECL] = ODIN3_AST_F_VAR_DECL_SIGNED,
+    [ODIN3_AST_PARAM_DECL] = ODIN3_AST_F_PARAM_DECL_SIGNED,
+    [ODIN3_AST_FUNCTION_DECL] = ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC,
+    [ODIN3_AST_TASK_DECL] = ODIN3_AST_F_TASK_DECL_AUTOMATIC};
+
 static const char *dt_name(uint32_t flags, uint32_t mask, uint32_t shift) {
     static const char *const DT[] = {"", " reg", " integer", " real", " realtime", " time"};
     uint32_t dt = (flags & mask) >> shift;
@@ -100,23 +91,23 @@ static const char *dt_name(uint32_t flags, uint32_t mask, uint32_t shift) {
 /* --- design units and modules ----------------------------------------------------------------- */
 
 static void print_unit(odin3_printer *pr, const odin3_pr_task *task) {
-    items(pr, task->indent, self(task), 0);
+    items(pr, task->indent, odin3_pr_self(task), 0);
 }
 
 static void print_directive(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
     odin3_pr_text(pr, "`");
-    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
-    if (odin3_ast_name(pr->ast, self(task)) != 0) {
+    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
+    if (odin3_ast_name(pr->ast, odin3_pr_self(task)) != 0) {
         odin3_pr_text(pr, " ");
-        odin3_pr_raw(pr, self(task));
+        odin3_pr_raw(pr, odin3_pr_self(task));
     }
     odin3_pr_text(pr, task->mode == ODIN3_PR_LISTED ? "" : "\n");
 }
 
 static void print_text_item(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    odin3_pr_leaf(pr, self(task));
+    odin3_pr_leaf(pr, odin3_pr_self(task));
     odin3_pr_text(pr, task->mode == ODIN3_PR_LISTED ? "" : "\n");
 }
 
@@ -138,19 +129,19 @@ static void header_list(odin3_printer *pr, odin3_ast_id list, uint32_t indent) {
 
 static void print_module(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    bool macro = (flags_of(pr, task) & ODIN3_AST_F_MODULE_MACROMODULE) != 0;
+    bool macro = (odin3_pr_flags(pr, task) & ODIN3_AST_F_MODULE_MACROMODULE) != 0;
     odin3_pr_text(pr, macro ? "macromodule " : "module ");
-    odin3_pr_name(pr, self(task));
-    if (kid(pr, task, 0).v != 0) {
+    odin3_pr_name(pr, odin3_pr_self(task));
+    if (odin3_pr_kid(pr, task, 0).v != 0) {
         odin3_pr_text(pr, " #");
-        header_list(pr, kid(pr, task, 0), task->indent);
+        header_list(pr, odin3_pr_kid(pr, task, 0), task->indent);
     }
-    if (kid(pr, task, 1).v != 0) {
+    if (odin3_pr_kid(pr, task, 1).v != 0) {
         odin3_pr_text(pr, " ");
-        header_list(pr, kid(pr, task, 1), task->indent);
+        header_list(pr, odin3_pr_kid(pr, task, 1), task->indent);
     }
     odin3_pr_text(pr, ";\n");
-    items(pr, task->indent + 1, self(task), 2);
+    items(pr, task->indent + 1, odin3_pr_self(task), 2);
     close_block(pr, task, "endmodule\n");
 }
 
@@ -158,10 +149,10 @@ static void print_module(odin3_printer *pr, const odin3_pr_task *task) {
 
 static void print_port_decl(odin3_printer *pr, const odin3_pr_task *task) {
     const odin3_ast_kind_info *nets = odin3_ast_kind_info_of(ODIN3_AST_NET_DECL);
-    uint32_t flags = flags_of(pr, task);
+    uint32_t flags = odin3_pr_flags(pr, task);
     uint32_t net = (flags & ODIN3_AST_F_PORT_DECL_NET_MASK) >> ODIN3_AST_F_PORT_DECL_NET_SHIFT;
     open_item(pr, task);
-    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
+    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
     if (net != 0 && net <= nets->sub_count) {
         odin3_pr_text(pr, " ");
         odin3_pr_text(pr, nets->sub_names[net - 1]);
@@ -169,41 +160,41 @@ static void print_port_decl(odin3_printer *pr, const odin3_pr_task *task) {
     odin3_pr_text(pr,
                   dt_name(flags, ODIN3_AST_F_PORT_DECL_DT_MASK, ODIN3_AST_F_PORT_DECL_DT_SHIFT));
     odin3_pr_text(pr, (flags & ODIN3_AST_F_PORT_DECL_SIGNED) != 0 ? " signed" : "");
-    spaced(pr, kid(pr, task, 0));
+    spaced(pr, odin3_pr_kid(pr, task, 0));
     odin3_pr_text(pr, " ");
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), 1);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), 1);
     close_item(pr, task);
 }
 
 static void print_net_decl(odin3_printer *pr, const odin3_pr_task *task) {
-    uint32_t flags = flags_of(pr, task);
+    uint32_t flags = odin3_pr_flags(pr, task);
     open_item(pr, task);
-    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
-    spaced(pr, kid(pr, task, 0));
+    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
+    spaced(pr, odin3_pr_kid(pr, task, 0));
     odin3_pr_text(pr, (flags & ODIN3_AST_F_NET_DECL_VECTORED) != 0 ? " vectored" : "");
     odin3_pr_text(pr, (flags & ODIN3_AST_F_NET_DECL_SCALARED) != 0 ? " scalared" : "");
     odin3_pr_text(pr, (flags & ODIN3_AST_F_NET_DECL_SIGNED) != 0 ? " signed" : "");
-    spaced(pr, kid(pr, task, 1));
-    spaced(pr, kid(pr, task, 2));
+    spaced(pr, odin3_pr_kid(pr, task, 1));
+    spaced(pr, odin3_pr_kid(pr, task, 2));
     odin3_pr_text(pr, " ");
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), 3);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), 3);
     close_item(pr, task);
 }
 
 /* VAR_DECL and PARAM_DECL: kind [type] [signed] [range] declarators. */
 static void print_var_or_param(odin3_printer *pr, const odin3_pr_task *task) {
-    uint32_t flags = flags_of(pr, task);
-    bool param = kind_of(pr, task) == ODIN3_AST_PARAM_DECL;
+    uint32_t flags = odin3_pr_flags(pr, task);
+    bool param = odin3_pr_kind(pr, task) == ODIN3_AST_PARAM_DECL;
     open_item(pr, task);
-    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
+    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
     if (param) {
         odin3_pr_text(
             pr, dt_name(flags, ODIN3_AST_F_PARAM_DECL_DT_MASK, ODIN3_AST_F_PARAM_DECL_DT_SHIFT));
     }
-    odin3_pr_text(pr, (flags & ODIN3_AST_F_VAR_DECL_SIGNED) != 0 ? " signed" : "");
-    spaced(pr, kid(pr, task, 0));
+    odin3_pr_text(pr, (flags & KIND_FLAG[odin3_pr_kind(pr, task)]) != 0 ? " signed" : "");
+    spaced(pr, odin3_pr_kid(pr, task, 0));
     odin3_pr_text(pr, " ");
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), 1);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), 1);
     close_item(pr, task);
 }
 
@@ -219,52 +210,53 @@ static void print_keyword_list(odin3_printer *pr, const odin3_pr_task *task) {
                                                               [ODIN3_AST_DEFPARAM] = "defparam ",
                                                               [ODIN3_AST_DISABLE] = "disable ",
                                                               [ODIN3_AST_EVENT_TRIGGER] = "-> "};
-    odin3_ast_kind kind = kind_of(pr, task);
-    uint32_t count = odin3_ast_nchild(pr->ast, self(task));
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
+    uint32_t count = odin3_ast_nchild(pr->ast, odin3_pr_self(task));
     open_item(pr, task);
     odin3_pr_text(pr, KEYWORD[kind]);
     for (uint32_t i = 0; i < count; i++) {
         odin3_pr_text(pr, i > 0 ? SEPARATOR[kind] : "");
-        odin3_pr_node(pr, kid(pr, task, i), ODIN3_PR_LISTED, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, i), ODIN3_PR_LISTED, 0);
     }
     close_item(pr, task);
 }
 
 /* CONT_ASSIGN, GATE_DECL, INSTANTIATION: head [strength] [delay | #(params)] list. */
 static void print_instances(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_kind kind = kind_of(pr, task);
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
     open_item(pr, task);
     uint32_t first = 2;
     if (kind == ODIN3_AST_INSTANTIATION) {
-        odin3_pr_name(pr, self(task));
-        if (kid(pr, task, 0).v != 0) {
+        odin3_pr_name(pr, odin3_pr_self(task));
+        if (odin3_pr_kid(pr, task, 0).v != 0) {
             odin3_pr_text(pr, " #(");
-            odin3_pr_list(pr, ODIN3_PR_LISTED, kid(pr, task, 0), 0);
+            odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_kid(pr, task, 0), 0);
             odin3_pr_text(pr, ")");
         }
         first = 1;
     } else {
-        odin3_pr_text(pr, kind == ODIN3_AST_CONT_ASSIGN ? "assign"
-                                                        : odin3_ast_sub_name(pr->ast, self(task)));
-        spaced(pr, kid(pr, task, 0));
-        spaced(pr, kid(pr, task, 1));
+        odin3_pr_text(pr, kind == ODIN3_AST_CONT_ASSIGN
+                              ? "assign"
+                              : odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
+        spaced(pr, odin3_pr_kid(pr, task, 0));
+        spaced(pr, odin3_pr_kid(pr, task, 1));
     }
     odin3_pr_text(pr, " ");
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), first);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), first);
     close_item(pr, task);
 }
 
 static void print_instance(odin3_printer *pr, const odin3_pr_task *task) {
-    if (odin3_ast_name(pr->ast, self(task)) != 0) {
-        odin3_pr_name(pr, self(task));
+    if (odin3_ast_name(pr->ast, odin3_pr_self(task)) != 0) {
+        odin3_pr_name(pr, odin3_pr_self(task));
         odin3_pr_text(pr, " ");
     }
-    if (kid(pr, task, 0).v != 0) {
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_LISTED, 0);
+    if (odin3_pr_kid(pr, task, 0).v != 0) {
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_LISTED, 0);
         odin3_pr_text(pr, " ");
     }
     odin3_pr_text(pr, "(");
-    odin3_pr_list(pr, ODIN3_PR_LISTED, self(task), 1);
+    odin3_pr_list(pr, ODIN3_PR_LISTED, odin3_pr_self(task), 1);
     odin3_pr_text(pr, ")");
 }
 
@@ -279,21 +271,21 @@ static bool header_ports(const odin3_printer *pr, odin3_ast_id ports) {
 
 /* FUNCTION_DECL (R? ports locals body) and TASK_DECL (ports locals body). */
 static void print_subroutine(odin3_printer *pr, const odin3_pr_task *task) {
-    bool fn = kind_of(pr, task) == ODIN3_AST_FUNCTION_DECL;
+    bool fn = odin3_pr_kind(pr, task) == ODIN3_AST_FUNCTION_DECL;
     uint32_t base = fn ? 1 : 0; /* index of the ports LIST */
-    uint32_t flags = flags_of(pr, task);
+    uint32_t flags = odin3_pr_flags(pr, task);
     open_item(pr, task);
-    odin3_pr_text(pr, OPEN_WORD[kind_of(pr, task)]);
-    odin3_pr_text(pr, (flags & ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC) != 0 ? " automatic" : "");
+    odin3_pr_text(pr, OPEN_WORD[odin3_pr_kind(pr, task)]);
+    odin3_pr_text(pr, (flags & KIND_FLAG[odin3_pr_kind(pr, task)]) != 0 ? " automatic" : "");
     if (fn) {
         odin3_pr_text(pr, dt_name(flags, ODIN3_AST_F_FUNCTION_DECL_DT_MASK,
                                   ODIN3_AST_F_FUNCTION_DECL_DT_SHIFT));
         odin3_pr_text(pr, (flags & ODIN3_AST_F_FUNCTION_DECL_SIGNED) != 0 ? " signed" : "");
-        spaced(pr, kid(pr, task, 0));
+        spaced(pr, odin3_pr_kid(pr, task, 0));
     }
     odin3_pr_text(pr, " ");
-    odin3_pr_name(pr, self(task));
-    odin3_ast_id ports = kid(pr, task, base);
+    odin3_pr_name(pr, odin3_pr_self(task));
+    odin3_ast_id ports = odin3_pr_kid(pr, task, base);
     bool in_header = header_ports(pr, ports);
     if (in_header) {
         odin3_pr_text(pr, "(");
@@ -304,75 +296,75 @@ static void print_subroutine(odin3_printer *pr, const odin3_pr_task *task) {
     if (!in_header) {
         items(pr, task->indent + 1, ports, 0);
     }
-    items(pr, task->indent + 1, kid(pr, task, base + 1), 0);
-    odin3_pr_node(pr, kid(pr, task, base + 2), ODIN3_PR_ITEM, task->indent + 1);
-    close_block(pr, task, CLOSE_WORD[kind_of(pr, task)]);
+    items(pr, task->indent + 1, odin3_pr_kid(pr, task, base + 1), 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, base + 2), ODIN3_PR_ITEM, task->indent + 1);
+    close_block(pr, task, CLOSE_WORD[odin3_pr_kind(pr, task)]);
 }
 
 /* --- blocks ----------------------------------------------------------------------------------- */
 
 /* GENERATE, GEN_BLOCK, SEQ_BLOCK, PAR_BLOCK: open word [: name[index]], items, close word. */
 static void print_block(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_kind kind = kind_of(pr, task);
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
     bool par = kind == ODIN3_AST_PAR_BLOCK;
     bool gen = kind == ODIN3_AST_GENERATE;
     open_item(pr, task);
     odin3_pr_text(pr, OPEN_WORD[kind]);
-    if (odin3_ast_name(pr->ast, self(task)) != 0) {
+    if (odin3_ast_name(pr->ast, odin3_pr_self(task)) != 0) {
         odin3_pr_text(pr, " : ");
-        odin3_pr_name(pr, self(task));
+        odin3_pr_name(pr, odin3_pr_self(task));
     }
-    if (kind == ODIN3_AST_GEN_BLOCK && kid(pr, task, 0).v != 0) {
+    if (kind == ODIN3_AST_GEN_BLOCK && odin3_pr_kid(pr, task, 0).v != 0) {
         odin3_pr_text(pr, "[");
-        odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
         odin3_pr_text(pr, "]");
     }
     odin3_pr_text(pr, "\n");
     if (kind == ODIN3_AST_SEQ_BLOCK || par) {
-        items(pr, task->indent + 1, kid(pr, task, 0), 0); /* the locals */
+        items(pr, task->indent + 1, odin3_pr_kid(pr, task, 0), 0); /* the locals */
     }
-    items(pr, task->indent + 1, self(task), gen ? 0 : 1);
+    items(pr, task->indent + 1, odin3_pr_self(task), gen ? 0 : 1);
     close_block(pr, task, CLOSE_WORD[kind]);
 }
 
 /* ALWAYS, INITIAL, FOREVER: keyword + statement. */
 static void print_keyword_stmt(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_kind kind = kind_of(pr, task);
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
     open_item(pr, task);
-    odin3_pr_text(pr, kind == ODIN3_AST_ALWAYS ? odin3_ast_sub_name(pr->ast, self(task))
+    odin3_pr_text(pr, kind == ODIN3_AST_ALWAYS ? odin3_ast_sub_name(pr->ast, odin3_pr_self(task))
                                                : OPEN_WORD[kind]);
     odin3_pr_text(pr, " ");
-    inline_stmt(pr, kid(pr, task, 0), task->indent);
+    inline_stmt(pr, odin3_pr_kid(pr, task, 0), task->indent);
 }
 
 /* WHILE, REPEAT, WAIT: keyword (e) statement (`;` for a WAIT without one). */
 static void print_cond_stmt(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_kind kind = kind_of(pr, task);
+    odin3_ast_kind kind = odin3_pr_kind(pr, task);
     open_item(pr, task);
     odin3_pr_text(pr, OPEN_WORD[kind]);
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
-    odin3_pr_text(pr, kid(pr, task, 1).v != 0 ? ") " : ")");
-    inline_stmt(pr, kid(pr, task, 1), task->indent);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_text(pr, odin3_pr_kid(pr, task, 1).v != 0 ? ") " : ")");
+    inline_stmt(pr, odin3_pr_kid(pr, task, 1), task->indent);
 }
 
 static void print_timing_stmt(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_LISTED, 0);
-    odin3_pr_text(pr, kid(pr, task, 1).v != 0 ? " " : "");
-    inline_stmt(pr, kid(pr, task, 1), task->indent);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_LISTED, 0);
+    odin3_pr_text(pr, odin3_pr_kid(pr, task, 1).v != 0 ? " " : "");
+    inline_stmt(pr, odin3_pr_kid(pr, task, 1), task->indent);
 }
 
 /* FOR and GEN_FOR: for (init; cond; step) body. */
 static void print_for(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
     odin3_pr_text(pr, "for (");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_LISTED, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_LISTED, 0);
     odin3_pr_text(pr, "; ");
-    odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, "; ");
-    odin3_pr_node(pr, kid(pr, task, 2), ODIN3_PR_LISTED, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 2), ODIN3_PR_LISTED, 0);
     odin3_pr_text(pr, ") ");
-    inline_stmt(pr, kid(pr, task, 3), task->indent);
+    inline_stmt(pr, odin3_pr_kid(pr, task, 3), task->indent);
 }
 
 /* True when stmt ends in an if without an else, which would capture a following `else`. */
@@ -397,11 +389,11 @@ static bool ends_open_if(const odin3_ast *ast, odin3_ast_id stmt) {
 
 /* IF and GEN_IF; a then-branch that would capture the else is wrapped in begin/end. */
 static void print_if(odin3_printer *pr, const odin3_pr_task *task) {
-    odin3_ast_id then = kid(pr, task, 1);
-    odin3_ast_id other = kid(pr, task, 2);
+    odin3_ast_id then = odin3_pr_kid(pr, task, 1);
+    odin3_ast_id other = odin3_pr_kid(pr, task, 2);
     open_item(pr, task);
     odin3_pr_text(pr, "if (");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, ") ");
     if (other.v != 0 && ends_open_if(pr->ast, then)) {
         odin3_pr_text(pr, "begin\n");
@@ -431,66 +423,67 @@ static void metacomments(odin3_printer *pr, odin3_ast_id node) {
 
 /* CASE and GEN_CASE. */
 static void print_case(odin3_printer *pr, const odin3_pr_task *task) {
-    bool gen = kind_of(pr, task) == ODIN3_AST_GEN_CASE;
+    bool gen = odin3_pr_kind(pr, task) == ODIN3_AST_GEN_CASE;
     open_item(pr, task);
-    odin3_pr_text(pr, gen ? "case" : odin3_ast_sub_name(pr->ast, self(task)));
+    odin3_pr_text(pr, gen ? "case" : odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
     odin3_pr_text(pr, " (");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
     odin3_pr_text(pr, ")");
-    metacomments(pr, self(task));
+    metacomments(pr, odin3_pr_self(task));
     odin3_pr_text(pr, "\n");
-    items(pr, task->indent + 1, self(task), 1);
+    items(pr, task->indent + 1, odin3_pr_self(task), 1);
     close_block(pr, task, "endcase\n");
 }
 
 /* A CASE_ITEM: its body is slot 0 but prints after the match expressions. */
 static void print_case_item(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    if ((flags_of(pr, task) & ODIN3_AST_F_CASE_ITEM_DEFAULT) != 0) {
+    if ((odin3_pr_flags(pr, task) & ODIN3_AST_F_CASE_ITEM_DEFAULT) != 0) {
         odin3_pr_text(pr, "default");
     } else {
-        odin3_pr_list(pr, ODIN3_PR_EXPR, self(task), 1);
+        odin3_pr_list(pr, ODIN3_PR_EXPR, odin3_pr_self(task), 1);
     }
     odin3_pr_text(pr, ": ");
-    inline_stmt(pr, kid(pr, task, 0), task->indent);
+    inline_stmt(pr, odin3_pr_kid(pr, task, 0), task->indent);
 }
 
 /* --- simple statements ------------------------------------------------------------------------ */
 
 static void print_assign(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
-    odin3_pr_text(pr, kind_of(pr, task) == ODIN3_AST_NONBLOCKING_ASSIGN ? " <= " : " = ");
-    if (kid(pr, task, 1).v != 0) {
-        odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_LISTED, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    odin3_pr_text(pr, odin3_pr_kind(pr, task) == ODIN3_AST_NONBLOCKING_ASSIGN ? " <= " : " = ");
+    if (odin3_pr_kid(pr, task, 1).v != 0) {
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_LISTED, 0);
         odin3_pr_text(pr, " ");
     }
-    odin3_pr_node(pr, kid(pr, task, 2), ODIN3_PR_EXPR, 0);
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 2), ODIN3_PR_EXPR, 0);
     close_item(pr, task);
 }
 
 static void print_proc_assign(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, self(task)));
+    odin3_pr_text(pr, odin3_ast_sub_name(pr->ast, odin3_pr_self(task)));
     odin3_pr_text(pr, " ");
-    odin3_pr_node(pr, kid(pr, task, 0), ODIN3_PR_EXPR, 0);
-    if (kid(pr, task, 1).v != 0) {
+    odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
+    if (odin3_pr_kid(pr, task, 1).v != 0) {
         odin3_pr_text(pr, " = ");
-        odin3_pr_node(pr, kid(pr, task, 1), ODIN3_PR_EXPR, 0);
+        odin3_pr_node(pr, odin3_pr_kid(pr, task, 1), ODIN3_PR_EXPR, 0);
     }
     close_item(pr, task);
 }
 
 static void print_task_call(odin3_printer *pr, const odin3_pr_task *task) {
     open_item(pr, task);
-    if ((flags_of(pr, task) & (ODIN3_AST_F_TASK_CALL_SYSTEM | ODIN3_AST_F_TASK_CALL_HIER)) != 0) {
-        odin3_pr_raw(pr, self(task));
+    if ((odin3_pr_flags(pr, task) & (ODIN3_AST_F_TASK_CALL_SYSTEM | ODIN3_AST_F_TASK_CALL_HIER)) !=
+        0) {
+        odin3_pr_raw(pr, odin3_pr_self(task));
     } else {
-        odin3_pr_name(pr, self(task));
+        odin3_pr_name(pr, odin3_pr_self(task));
     }
-    if (odin3_ast_nchild(pr->ast, self(task)) > 0) {
+    if (odin3_ast_nchild(pr->ast, odin3_pr_self(task)) > 0) {
         odin3_pr_text(pr, "(");
-        odin3_pr_list(pr, ODIN3_PR_EXPR, self(task), 0);
+        odin3_pr_list(pr, ODIN3_PR_EXPR, odin3_pr_self(task), 0);
         odin3_pr_text(pr, ")");
     }
     close_item(pr, task);

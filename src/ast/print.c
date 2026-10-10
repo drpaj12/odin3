@@ -137,19 +137,43 @@ odin3_status odin3_pr_append_cstring(odin3_strbuf *out, odin3_bytes bytes) {
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\"")) : st;
 }
 
-/* The name bytes of node through its store's strtab. */
-static odin3_bytes name_bytes(const odin3_ast *ast, odin3_ast_id node) {
+odin3_bytes odin3_pr_name_bytes(const odin3_ast *ast, odin3_ast_id node) {
     const odin3_strtab *tab = odin3_design_strtab(odin3_ast_design(ast));
     uint32_t name = odin3_ast_name(ast, node);
     const char *str = odin3_strtab_get(tab, name);
     return (odin3_bytes){(const uint8_t *)(str != NULL ? str : ""), odin3_strtab_len(tab, name)};
 }
 
-/* An identifier; a name Verilog cannot spell (a blank, a control byte) is escaped anyway. */
-static odin3_status append_name(odin3_strbuf *out, odin3_bytes name) {
+odin3_ast_id odin3_pr_self(const odin3_pr_task *task) {
+    return (odin3_ast_id){task->node};
+}
+
+odin3_ast_id odin3_pr_kid(const odin3_printer *pr, const odin3_pr_task *task, uint32_t idx) {
+    return odin3_ast_child(pr->ast, odin3_pr_self(task), idx);
+}
+
+uint32_t odin3_pr_flags(const odin3_printer *pr, const odin3_pr_task *task) {
+    return odin3_ast_flags(pr->ast, odin3_pr_self(task));
+}
+
+odin3_ast_kind odin3_pr_kind(const odin3_printer *pr, const odin3_pr_task *task) {
+    return odin3_ast_kind_of(pr->ast, odin3_pr_self(task));
+}
+
+/*
+ * node's name as an identifier. A name Verilog cannot spell (empty, a blank, a backtick, a control
+ * or non-ASCII byte; no parse stores one) is written `\name ` anyway, with a warning: the output
+ * then does not re-parse to the same tree.
+ */
+static odin3_status append_name(const odin3_ast *ast, odin3_ast_id node, odin3_strbuf *out) {
+    odin3_bytes name = odin3_pr_name_bytes(ast, node);
     if (odin3_verilog_ident_kind(name) != ODIN3_VERILOG_UNWRITABLE) {
         return odin3_verilog_append_ident(out, name);
     }
+    odin3_log(ODIN3_LOG_WARN,
+              "odin3_ast_print: the name of node %" PRIu32
+              " is not a writable Verilog identifier; written as stored",
+              node.v);
     if (name.len == 0) {
         return ODIN3_OK;
     }
@@ -163,7 +187,7 @@ static odin3_status append_leaf(const odin3_ast *ast, odin3_ast_id node, odin3_s
     case ODIN3_AST_REAL:
         return odin3_pr_append_real(out, odin3_ast_real(ast, node));
     case ODIN3_AST_STRING:
-        return odin3_pr_append_cstring(out, name_bytes(ast, node));
+        return odin3_pr_append_cstring(out, odin3_pr_name_bytes(ast, node));
     default: /* the TEXT kinds */
         return odin3_strbuf_append(out, odin3_ast_text(ast, node));
     }
@@ -216,10 +240,10 @@ static void run(odin3_printer *pr, const odin3_pr_task *task) {
         pr->st = odin3_strbuf_append(pr->out, odin3_bytes_cstr(task->text));
         return;
     case ODIN3_PR_OP_NAME:
-        pr->st = append_name(pr->out, name_bytes(pr->ast, node));
+        pr->st = append_name(pr->ast, node, pr->out);
         return;
     case ODIN3_PR_OP_RAW:
-        pr->st = odin3_strbuf_append(pr->out, name_bytes(pr->ast, node));
+        pr->st = odin3_strbuf_append(pr->out, odin3_pr_name_bytes(pr->ast, node));
         return;
     case ODIN3_PR_OP_INDENT:
         pr->st = append_indent(pr->out, task->indent);

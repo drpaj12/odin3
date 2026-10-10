@@ -1,9 +1,9 @@
 /*
  * test_ast_equal.c — unit tests for structural equality: the same tree built in two designs
- * with different locations, comments and warned flags is equal; ad change in each compared field
+ * with different locations, comments and warned flags is equal; a change in each compared field
  * (kind, sub, flags, name, NUMBER width/bits/nbits/has_question, REAL, TEXT, child count, an
- * absent slot, attribute count/name/value/flags) is not; the depth-cap chain; abandoned roots;
- * misuse; OOM.
+ * absent slot, attribute count/name/value/flags) is not; child and attribute order count; REAL
+ * -0.0 differs from 0.0; the depth-cap chain; abandoned roots; misuse; OOM.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -16,6 +16,7 @@
 #include "util/hash.h"
 #include "util/log.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -119,7 +120,7 @@ static odin3_ast_id number(const builder *bd, const char *size, const char *base
     return mk(bd, sp, NULL, 0);
 }
 
-/* 4'hff, or its mutation; and 4'bd? (has_question) unless M_QUESTION makes it 4'bz. */
+/* 4'hff, or its width, bits or nbits mutation. */
 static odin3_ast_id literal(const builder *bd) {
     switch (bd->mut) {
     case M_WIDTH:
@@ -191,7 +192,7 @@ static odin3_ast_id build(odin3_ast *ast, odin3_loc loc, mutation mut) {
     return mk(&bd, spec(&bd, ODIN3_AST_MODULE, "m"), items, 4);
 }
 
-/* A loc in ad 200-byte file of design_a, with ad comment recorded in ast_a. */
+/* A loc in a 200-byte file of design_a, with a comment recorded in ast_a. */
 static odin3_loc file_loc(void) {
     odin3_srcman *sm = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design_a, &sm));
@@ -289,6 +290,49 @@ static void test_absent_slots_and_abandoned_roots(void) {
     TEST_ASSERT_EQUAL_MEMORY(want, results, sizeof want);
 }
 
+/* Equality is positional: the same children or attributes in another order differ. */
+static void test_order_matters(void) {
+    builder ad = {ast_a, {0}, M_NONE};
+    builder bd = {ast_b, {0}, M_NONE};
+    odin3_ast_spec cat = spec(&ad, ODIN3_AST_CONCAT, NULL);
+    odin3_ast_id ab = mk(&ad, cat,
+                         (odin3_ast_id[]){mk(&ad, spec(&ad, ODIN3_AST_IDENT, "x"), NULL, 0),
+                                          mk(&ad, spec(&ad, ODIN3_AST_IDENT, "y"), NULL, 0)},
+                         2);
+    odin3_ast_id ba = mk(&bd, cat,
+                         (odin3_ast_id[]){mk(&bd, spec(&bd, ODIN3_AST_IDENT, "y"), NULL, 0),
+                                          mk(&bd, spec(&bd, ODIN3_AST_IDENT, "x"), NULL, 0)},
+                         2);
+    odin3_ast_id node_a = mk(&ad, spec(&ad, ODIN3_AST_NULL_STMT, NULL), NULL, 0);
+    odin3_ast_id node_b = mk(&bd, spec(&bd, ODIN3_AST_NULL_STMT, NULL), NULL, 0);
+    odin3_ast_id attrs_a[2] = {mk(&ad, spec(&ad, ODIN3_AST_ATTR, "p"), &NO, 1),
+                               mk(&ad, spec(&ad, ODIN3_AST_ATTR, "q"), &NO, 1)};
+    odin3_ast_id attrs_b[2] = {mk(&bd, spec(&bd, ODIN3_AST_ATTR, "q"), &NO, 1),
+                               mk(&bd, spec(&bd, ODIN3_AST_ATTR, "p"), &NO, 1)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_attach(ast_a, node_a, attrs_a, 2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_attach(ast_b, node_b, attrs_b, 2));
+    bool results[2] = {equal(ast_a, ab, ast_b, ba), equal(ast_a, node_a, ast_b, node_b)};
+    const bool want[2] = {false, false};
+    TEST_ASSERT_EQUAL_MEMORY(want, results, sizeof want);
+}
+
+static odin3_ast_id real_node(odin3_ast *ast, double value) {
+    odin3_ast_spec sp = {.kind = ODIN3_AST_REAL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_real_new(ast, value, &sp.payload));
+    odin3_ast_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &sp, NULL, 0, &id));
+    return id;
+}
+
+/* The printer writes -0.0 and 0.0 apart, so equality tells them apart too; NaN equals NaN. */
+static void test_real_signed_zero_and_nan(void) {
+    bool results[3] = {equal(ast_a, real_node(ast_a, 0.0), ast_b, real_node(ast_b, -0.0)),
+                       equal(ast_a, real_node(ast_a, -0.0), ast_b, real_node(ast_b, -0.0)),
+                       equal(ast_a, real_node(ast_a, NAN), ast_b, real_node(ast_b, NAN))};
+    const bool want[3] = {false, true, true};
+    TEST_ASSERT_EQUAL_MEMORY(want, results, sizeof want);
+}
+
 static void test_misuse(void) {
     builder ad = {ast_a, {0}, M_NONE};
     odin3_ast_id node = mk(&ad, spec(&ad, ODIN3_AST_IDENT, "x"), NULL, 0);
@@ -325,6 +369,8 @@ int main(void) {
     RUN_TEST(test_each_field_change_is_unequal);
     RUN_TEST(test_chain_at_cap);
     RUN_TEST(test_absent_slots_and_abandoned_roots);
+    RUN_TEST(test_order_matters);
+    RUN_TEST(test_real_signed_zero_and_nan);
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();
