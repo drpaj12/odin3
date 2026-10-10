@@ -20,7 +20,16 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { LOG_TEXT = 4096, MAX_BITS = 8, OOM_LIMIT = 100000, BIG = 200000, NAME_BUF = 32 };
+enum {
+    LOG_TEXT = 4096,
+    MAX_BITS = 8,
+    OOM_LIMIT = 100000,
+    BIG = 200000,
+    NAME_BUF = 32,
+    DEPTH = 40,
+    BUDGET = 4096,
+    MANY_NETS = 100
+};
 
 static odin3_design *design;
 static char log_text[LOG_TEXT];
@@ -469,6 +478,73 @@ static void test_type_without_hook_is_rejected(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "divider0"), log_text);
 }
 
+/* --- the flattening budget ---------------------------------------------------------------------
+ */
+
+static odin3_status build_capped(const odin3_module *top, uint32_t max_cells) {
+    odin3_sim *sim = NULL;
+    odin3_sim_options opts = {.max_cells = max_cells};
+    log_text[0] = '\0';
+    odin3_status st = odin3_sim_build_opts(design, odin3_module_id_of(top), &opts, &sim);
+    odin3_sim_destroy(sim);
+    return st;
+}
+
+/* top -> u (full) -> h1, h2 (half): 4 frames + 5 cells = 9 units; the 9th is h2's last cell. */
+static void test_cell_budget_names_the_instance(void) {
+    odin3_module *top = make_top(make_full(make_half()));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, build_capped(top, 9), log_text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, build_capped(top, 8));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "more than 8 cells and instances"), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "`u/h2/"), log_text);
+}
+
+/* m0 = NOT; m(k) = two m(k-1) in a chain: depth levels flatten to 2^depth cells. */
+static odin3_module *make_doubling(uint32_t depth) {
+    odin3_module *prev = new_module("m0");
+    odin3_net_id in0 = add_port(prev, "a", ODIN3_DIR_IN);
+    odin3_net_id out0 = add_port(prev, "y", ODIN3_DIR_OUT);
+    cell(prev, "$_NOT_", (odin3_net_id[]){in0, out0});
+    char name[NAME_BUF];
+    for (uint32_t k = 1; k <= depth; k++) {
+        (void)snprintf(name, sizeof name, "m%u", k);
+        odin3_module *mod = new_module(name);
+        odin3_net_id in = add_port(mod, "a", ODIN3_DIR_IN);
+        odin3_net_id out = add_port(mod, "y", ODIN3_DIR_OUT);
+        odin3_net_id mid = net(mod, "mid");
+        inst(mod, prev, "lo", (odin3_net_id[]){in, mid});
+        inst(mod, prev, "hi", (odin3_net_id[]){mid, out});
+        prev = mod;
+    }
+    return prev;
+}
+
+/* 2^40 cells from 41 small modules: the budget stops it before it allocates for them. */
+static void test_doubling_hierarchy_stops_at_the_budget(void) {
+    odin3_module *top = make_doubling(DEPTH);
+    odin3_util_set_alloc_fail_after(OOM_LIMIT); /* far below what 2^40 cells would need */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, build_capped(top, BUDGET));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "more than 4096 cells and instances"), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "crossed at `lo/"), log_text);
+    /* The default budget (0) applies too and is the documented one. */
+    TEST_ASSERT_EQUAL_UINT32(1U << 24, ODIN3_SIM_DEFAULT_MAX_CELLS);
+}
+
+/* Net-map entries and pin bits are budgeted too (8 x max_cells): a top with many nets. */
+static void test_bit_budget_counts_nets(void) {
+    odin3_module *top = new_module("wide");
+    odin3_net_id in = add_port(top, "a", ODIN3_DIR_IN);
+    odin3_net_id out = add_port(top, "y", ODIN3_DIR_OUT);
+    cell(top, "$_NOT_", (odin3_net_id[]){in, out});
+    for (uint32_t k = 0; k < MANY_NETS; k++) {
+        (void)net(top, NULL);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, build_capped(top, 4));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "more than 32 net and pin bits"), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, build_capped(top, MANY_NETS), log_text);
+}
+
 static void test_recursive_hierarchy_is_rejected(void) {
     odin3_module *self = new_module("self");
     odin3_node_spec spec = {odin3_module_celltype(self), 0, (odin3_prov_id){0}, NULL, 0};
@@ -646,6 +722,9 @@ static void test_200k_cells_build_linear(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_two_level_hierarchy_matches_flat);
+    RUN_TEST(test_cell_budget_names_the_instance);
+    RUN_TEST(test_doubling_hierarchy_stops_at_the_budget);
+    RUN_TEST(test_bit_budget_counts_nets);
     RUN_TEST(test_instance_pins_share_parent_slots);
     RUN_TEST(test_feedthrough_unifies_parent_nets);
     RUN_TEST(test_unconnected_pins_use_reserved_slots);

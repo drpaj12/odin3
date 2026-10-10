@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -40,6 +41,16 @@ def vectors(stdout: str) -> list[tuple[int, str, str]]:
 
 def header(stdout: str) -> list[str]:
     return [line for line in stdout.splitlines() if line.startswith("#")]
+
+
+def doubling_blif(depth: int) -> str:
+    """top -> m<depth>; m0 = NOT; m<k> = two m<k-1> in a chain (2^depth flat cells)."""
+    models = [f".model top\n.inputs a\n.outputs y\n.subckt m{depth} a=a y=y\n.end\n",
+              ".model m0\n.inputs a\n.outputs y\n.names a y\n0 1\n.end\n"]
+    for k in range(1, depth + 1):
+        models.append(f".model m{k}\n.inputs a\n.outputs y\n"
+                      f".subckt m{k - 1} a=a y=mid\n.subckt m{k - 1} a=mid y=y\n.end\n")
+    return "\n".join(models)
 
 
 @unittest.skipUnless(DRIVER, "ODIN3_SIM_VECTORS not set")
@@ -121,11 +132,27 @@ class SimVectorsTest(unittest.TestCase):
             (ff, ff, "--seed", "1", "--cycles", "4"),
             (ff, "--seed", "1", "--cycles", "4", "--bogus"),
             (ff, "--seed", "1", "--cycles"),
+            (ff, "--seed", "1", "--cycles", "4", "--max-cells", "0"),
+            (ff, "--seed", "1", "--cycles", "4", "--max-cells", "x"),
         ]:
             with self.subTest(args=args):
                 res = run(*args)
                 self.assertEqual(res.returncode, 2)
                 self.assertIn("usage:", res.stderr)
+
+    def test_flattening_budget(self) -> None:
+        # m0 = NOT; m(k) = two m(k-1): 30 levels flatten to 2^30 cells from a ~2 KB file.
+        with tempfile.TemporaryDirectory() as tmp:
+            blif = Path(tmp) / "doubling.blif"
+            blif.write_text(doubling_blif(30))
+            res = run(blif, "--seed", "1", "--cycles", "1", "--max-cells", "4096")
+            self.assertEqual(res.returncode, 1, res.stderr)
+            self.assertIn("doubling.blif:", res.stderr)
+            self.assertIn("flattens to more than 4096 cells and instances", res.stderr)
+            self.assertEqual(res.stdout, "")
+            # 8 levels (256 cells + 511 instances) fit a budget of 1000.
+            blif.write_text(doubling_blif(8))
+            self.ok(blif, "--seed", "1", "--cycles", "2", "--max-cells", "1000")
 
     def test_failures(self) -> None:
         cases: list[tuple[tuple[str | Path, ...], str]] = [

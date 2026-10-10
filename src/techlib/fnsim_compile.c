@@ -156,8 +156,12 @@ static odin3_status check_node(compiler *cc, const odin3_expr *node) {
     switch (node->kind) {
     case ODIN3_EXPR_IDENT: {
         int port = find_port(cc, node->ident);
+        int param = port != NOT_FOUND ? NOT_FOUND : find_param(cc, node->ident);
+        /* An operand is an input port or an integer parameter (a string has no value; the
+         * .o3lib reader admits only int parameters today, so this guards other sources). */
         cc->unsupported = port != NOT_FOUND ? cc->src->def->ports[port].dir == ODIN3_DIR_OUT
-                                            : find_param(cc, node->ident) == NOT_FOUND;
+                                            : param == NOT_FOUND ||
+                                                  cc->src->def->params[param].kind != ODIN3_VAL_INT;
         return ODIN3_OK;
     }
     case ODIN3_EXPR_BINARY:

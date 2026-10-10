@@ -59,7 +59,8 @@ USAGE
 # Prints the facts that pick the reference, one per line: `bb TYPE` per black-box type
 # instantiated, `implicit TYPE` per .subckt type with no .model, `edge E` per latch type,
 # `clockdata` when a top input named `clock` is not a latch clock while latches exist, `clk NET`
-# per latch clock net of the top model.
+# per latch clock net of the top model. Flat BLIF only (every golden is): a latch inside a
+# sub-model shows as a ref-error ("clock bits differ"), never as a false pass.
 classify() {
     LC_ALL=C awk '
     { line = $0; sub(/#.*/, "", line) }

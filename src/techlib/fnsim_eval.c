@@ -19,7 +19,18 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { INT_BITS = 32, WIDE_INT_BITS = 64, MAX_WIDTH = 1 << 24, LIMB_BYTES = 8 };
+/*
+ * MAX_WIDTH: the widest value an fn expression may compute (2^20 bits, the readers' per-port cap,
+ * ODIN3_READER_MAX_WIDTH; multiplication is quadratic, so wider values would take hours per
+ * cycle). MAX_SCRATCH: the most scratch one cell may ask for (256 MB).
+ */
+enum {
+    INT_BITS = 32,
+    WIDE_INT_BITS = 64,
+    MAX_WIDTH = 1 << 20,
+    MAX_SCRATCH = 1 << 28,
+    LIMB_BYTES = 8
+};
 
 /* Sizes and value of one node; lo/hi: a select's indices, a replication's count, an integer. */
 typedef struct size_rec {
@@ -303,7 +314,7 @@ odin3_status odin3_fnsim_scratch(const odin3_sim_cell *cell, uint32_t *bytes) {
     size_all(&rn);
     odin3_util_free(rec);
     uint64_t total = record_bytes(lib->sim) + rn.n_limbs * LIMB_BYTES;
-    if (rn.too_wide || total > UINT32_MAX) {
+    if (rn.too_wide || total > MAX_SCRATCH) {
         return ODIN3_ERR_INVALID_ARG;
     }
     *bytes = (uint32_t)total;

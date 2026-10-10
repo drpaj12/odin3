@@ -29,15 +29,38 @@ typedef struct odin3_sim odin3_sim; /* opaque; fields in sim/sim_internal.h */
  * `<type>`"); a clock pin of an edge-triggered cell whose net is not a primary
  * input of top, or that is not connected ("has no clock connected"); an inout port of top; a net
  * with more than one driver that is neither an inout pin nor an output of a tristate type (a
- * primary input counts as a driver), naming the net; a combinational loop (naming one net on it).
+ * primary input counts as a driver), naming the net; a combinational loop (naming one net on it);
+ * a design that flattens past the budget (odin3_sim_options below).
  * ODIN3_ERR_NO_MEMORY on out of memory. The design is never changed. Memory and time are linear
- * in the size of the flattened design.
+ * in the size of the flattened design, which the budget bounds.
  *
  * On success every value and state bit is 0, every sequential cell has received the INIT event
  * (cell.h: INIT 1 starts at 1; 0, 2 and 3 at 0), every clock input is low, and the combinational
  * logic has settled once, so the outputs show the initial state.
  */
 odin3_status odin3_sim_build(odin3_design *design, odin3_module_id top, odin3_sim **out);
+
+/*
+ * The flattening budget. A small hierarchical netlist can flatten to exponentially many cells
+ * (two instances per level: 2^levels), so the build counts what it expands and stops, before it
+ * allocates for more, at max_cells cells plus expanded instances, and at
+ * ODIN3_SIM_BITS_PER_CELL x max_cells net-map entries, value slots and pin bits together; it
+ * then fails with ODIN3_ERR_INVALID_ARG, logging "the design flattens to more than N …" located
+ * at the instance or cell where the budget is crossed. The default, 2^24, is 4.9 times the
+ * largest golden (Odin II LargeRam, 3.4M cells; the largest simulated one, LU64PEEng, has 0.38M)
+ * and a design at the budget needs about 4.4 GB (measured 273 MB per 2^20 cells), inside the
+ * 6 GB per-tool cap tools/sim-check applies.
+ */
+#define ODIN3_SIM_DEFAULT_MAX_CELLS (1U << 24)
+#define ODIN3_SIM_BITS_PER_CELL 8U
+
+typedef struct odin3_sim_options {
+    uint32_t max_cells; /* 0: ODIN3_SIM_DEFAULT_MAX_CELLS */
+} odin3_sim_options;
+
+/* odin3_sim_build with options (NULL: the defaults); the budget errors are described above. */
+odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
+                                  const odin3_sim_options *opts, odin3_sim **out);
 
 /* Frees a simulator; NULL is a no-op. */
 void odin3_sim_destroy(odin3_sim *sim);

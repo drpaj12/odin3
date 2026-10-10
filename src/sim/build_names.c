@@ -227,6 +227,25 @@ void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot) {
               name_str(&net));
 }
 
+void odin3_sim_err_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                          const char *what, uint64_t limit) {
+    char loc[LOC_MAX];
+    name_buf nb;
+    loc[0] = '\0';
+    name_init(&nb);
+    if (frame == ODIN3_SIM_UNSET) {
+        prepend(&nb, "(the top module)");
+    } else {
+        loc_prefix(bld, odin3_node_prov(frame_module(bld, frame), node),
+                   (loc_buf){loc, sizeof loc});
+        node_name(bld, frame, node, &nb);
+    }
+    odin3_log(ODIN3_LOG_ERROR,
+              "%scannot simulate: the design flattens to more than %llu %s (the budget is "
+              "crossed at `%s`; odin3_sim_options.max_cells, odin3-sim-vectors --max-cells)",
+              loc, (unsigned long long)limit, what, name_str(&nb));
+}
+
 void odin3_sim_err_inout(const odin3_sim_builder *bld, uint32_t port_name) {
     odin3_log(ODIN3_LOG_ERROR, "cannot simulate inout port `%s` of the top module",
               strtab(bld, port_name));

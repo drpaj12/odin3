@@ -192,6 +192,45 @@ spec §5.2. An entry declares:
   `simulate` (1E), writer hooks (1C/1F).
 - per type, a local type may carry opaque tech-library data (1G: `odin3_celltype_set_lib`; the
   cell's `fn`/`seq`/`memory` functions, port modifiers, area/delay) for 1E and Phase 4.
+- simulation flags (1E): `ODIN3_CT_SEQ_EDGE` (edge-triggered storage whose outputs depend only on
+  its state, so it cuts the simulator's combinational graph: `$_DFF_P_`, `$_DFF_N_`, `$_FF_`),
+  `ODIN3_CT_SEQ_LEVEL` (a level latch, transparent while enabled; it does *not* cut the graph, so
+  a loop through one is a combinational loop in Phase 1: `$_DLATCH_P_/N_`), `ODIN3_CT_CLOCK_PIN0`
+  (port 0 is the clock or enable pin: a scalar input of constant width 1). At most one SEQ flag;
+  registration rejects both together, and CLOCK_PIN0 on a type whose port 0 is not such a pin.
+  Only the clock pins of SEQ_EDGE cells must come from primary inputs; a latch enable may come
+  from logic.
+
+**The 1E hooks.** `simulate(const odin3_sim_cell *cell)` evaluates one cell; NULL means the type
+cannot be simulated. Its contract is in `src/sim/cell.h`:
+- values are 2-state, one byte per net bit;
+- the view `odin3_sim_cell` has one index span per port, the node's parameters, `state` (one byte
+  per output bit of a SEQ type), `event`, `type_data` and a shared `scratch` buffer;
+- `type_data` is the type's tech-library data, looked up once per type (NULL for built-ins); it
+  is how a hard cell's hook interprets its `fn` expressions;
+- events: `COMB` in every settle; for SEQ types also `INIT` (once, state zeroed: set it from the
+  parameters, INIT 1 starts at 1, 0/2/3 at 0) and `POSEDGE`/`NEGEDGE` (copy inputs into state and
+  write no outputs, so visit order does not matter);
+- a hook never allocates, logs or fails.
+
+`sim_scratch_bytes(const odin3_sim_cell *sizing_view, uint32_t *bytes)` (may be NULL: no scratch)
+tells the builder how much scratch one cell needs. It is called once per flat cell at build time,
+with a sizing view: port spans carry widths but no indices, `params` and `type_data` are set, and
+`values`, `state` and `scratch` are NULL. It may allocate (build time only) and returns a status:
+ODIN3_ERR_INVALID_ARG (the builder reports "cannot simulate … too wide") or
+ODIN3_ERR_NO_MEMORY. The builder allocates one scratch buffer, the maximum over all cells, so
+hooks never allocate.
+
+This signature replaced the planned `(params) → size` (agent decision, PHASE1 #9; for Peter's
+review), for two reasons:
+- the sizing view hands the hook the port widths the IR already computed from width rules and 1G
+  width expressions, so a hook never re-derives widths from parameters;
+- the status lets a type refuse a cell with a located message instead of clamping silently.
+
+Layering: `src/ir/cells/cells.h` includes `sim/cell.h` and `sim/word.h`, because the built-in
+types' simulate hooks live in their cell files. The IR layer therefore depends on these two
+headers, which are value types and inline helpers only with no link dependency. `src/sim`
+depends on the IR, not the other way round at link level.
 
 **IR-9 Granularity tags:** `word`, `bit`, `hard`, `blackbox`, `module`, `port` (D1's four plus
 the two structural tags; D1 amended). Views (spec §5.4): the *RTLIL view* allows `word`,

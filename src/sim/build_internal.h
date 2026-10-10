@@ -62,6 +62,8 @@ typedef struct odin3_sim_builder {
     odin3_vec out_bits;  /* uint32_t */
     uint32_t n_state;
     uint32_t n_scratch;
+    uint64_t max_units; /* cells + frames (odin3_sim_options.max_cells) */
+    uint64_t max_bits;  /* net-map entries + slots + pin bits (8 x max_cells) */
 } odin3_sim_builder;
 
 /*
@@ -94,6 +96,13 @@ void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot);
 
 /* More than one ordinary (non-inout, non-tristate) driver on final slot `slot`. */
 void odin3_sim_err_drivers(const odin3_sim_builder *bld, uint32_t slot);
+
+/*
+ * The flattened design would grow past the budget (what: "cells and instances" or "net and pin
+ * bits", limit) while adding node of frame (frame ODIN3_SIM_UNSET: the top module itself).
+ */
+void odin3_sim_err_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                          const char *what, uint64_t limit);
 
 /* An inout port of the top module. */
 void odin3_sim_err_inout(const odin3_sim_builder *bld, uint32_t port_name);

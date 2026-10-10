@@ -61,11 +61,43 @@ static const odin3_module *frame_module(const odin3_sim_builder *bld, uint32_t f
     return odin3_module_get(bld->design, fr->module);
 }
 
+/* --- the budget: checked before the flattened design grows -------------------------------------
+ */
+
+/* What one step of expansion adds: cells/frames, and net-map entries, slots or pin bits. */
+typedef struct odin3_sim_growth {
+    uint64_t units;
+    uint64_t bits;
+} odin3_sim_growth;
+
+/*
+ * False (and logged) when adding units cells/frames and bits net-map entries, slots or pin bits
+ * for node of frame would pass the budget.
+ */
+static bool within_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                          odin3_sim_growth grow) {
+    uint64_t units = (uint64_t)bld->cells.len + bld->frames.len + grow.units;
+    uint64_t bits = (uint64_t)bld->netmap.len + bld->uf.len + bld->idx.len + grow.bits;
+    if (units > bld->max_units) {
+        odin3_sim_err_budget(bld, frame, node, "cells and instances", bld->max_units);
+        return false;
+    }
+    if (bits > bld->max_bits) {
+        odin3_sim_err_budget(bld, frame, node, "net and pin bits", bld->max_bits);
+        return false;
+    }
+    return true;
+}
+
 /* --- frames: one per expanded module instance ------------------------------------------------- */
 
 static odin3_status add_frame(odin3_sim_builder *bld, odin3_module_id module, uint32_t parent,
                               odin3_node_id inst) {
     uint32_t end = odin3_module_net_end(odin3_module_get(bld->design, module));
+    /* Each net of the frame takes a net-map entry and, at most, one slot. */
+    if (!within_budget(bld, parent, inst, (odin3_sim_growth){1, 2 * (uint64_t)end})) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (bld->frames.len >= ODIN3_SIM_UNSET ||
         odin3_vec_reserve(&bld->netmap, bld->netmap.len + end) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
@@ -208,6 +240,9 @@ static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_
     const odin3_module *mod = frame_module(bld, frame);
     if (def->simulate == NULL) {
         odin3_sim_err_unsupported(bld, frame, node);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (!within_budget(bld, frame, node, (odin3_sim_growth){1, odin3_node_pins(mod, node).count})) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (bld->cells.len >= ODIN3_SIM_UNSET || bld->spans.len >= ODIN3_SIM_UNSET - def->n_ports ||
@@ -525,6 +560,11 @@ static void builder_free(odin3_sim_builder *bld) {
 }
 
 odin3_status odin3_sim_build(odin3_design *design, odin3_module_id top, odin3_sim **out) {
+    return odin3_sim_build_opts(design, top, NULL, out);
+}
+
+odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
+                                  const odin3_sim_options *opts, odin3_sim **out) {
     if (out == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_sim_build: out is NULL");
         return ODIN3_ERR_INVALID_ARG;
@@ -536,6 +576,10 @@ odin3_status odin3_sim_build(odin3_design *design, odin3_module_id top, odin3_si
     }
     odin3_sim_builder bld;
     builder_init(&bld, design);
+    uint32_t max_cells =
+        opts != NULL && opts->max_cells != 0 ? opts->max_cells : ODIN3_SIM_DEFAULT_MAX_CELLS;
+    bld.max_units = max_cells;
+    bld.max_bits = (uint64_t)max_cells * ODIN3_SIM_BITS_PER_CELL;
     odin3_sim *sim = odin3_util_calloc(sizeof *sim);
     odin3_status st = sim == NULL ? ODIN3_ERR_NO_MEMORY : run(&bld, top, sim);
     builder_free(&bld);

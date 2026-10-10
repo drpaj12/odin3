@@ -1,15 +1,18 @@
 /* odin3-sim-vectors.c — random-vector driver of the simulator: one line per simulated cycle. */
 /*
- * Usage: odin3-sim-vectors in.blif --seed S --cycles N [--techlib lib.o3lib]...
+ * Usage: odin3-sim-vectors in.blif --seed S --cycles N [--techlib lib.o3lib]... [--max-cells M]
  *
  * Loads the tech libraries (in order), reads in.blif, builds the simulator over its top model (the
- * first) and runs N cycles. Each cycle drives every non-clock input bit from the seeded PRNG
- * (odin3_sim_drive_random), runs odin3_sim_cycle and prints `cycle inputs outputs`: the cycle
- * number from 0, then the inputs it drove and the outputs after it, each field the bits of every
- * port in port order, each port MSB first, clock bits left out ("-" for an empty field). A header
- * of '#' lines comes first: `# odin3-sim-vectors in.blif seed S cycles N`, then one line per port
- * in port order: `# input NAME W` (W = its non-clock bits, omitted when it has none), `# clock NAME
- * K` per clock bit K of an input, `# output NAME W`. Output is a function of the netlist and S.
+ * first: the BLIF reader creates the file's models in file order, so module 1 is the first model)
+ * and runs N cycles. --max-cells sets the flattening budget (odin3_sim_options; default 2^24 cells
+ * and instances, sim/sim.h), so a small hierarchical file cannot expand past memory. Each cycle
+ * drives every non-clock input bit from the seeded PRNG (odin3_sim_drive_random), runs
+ * odin3_sim_cycle and prints `cycle inputs outputs`: the cycle number from 0, then the inputs it
+ * drove and the outputs after it, each field the bits of every port in port order, each port MSB
+ * first, clock bits left out ("-" for an empty field). A header of '#' lines comes first: `#
+ * odin3-sim-vectors in.blif seed S cycles N`, then one line per port in port order: `# input NAME
+ * W` (W = its non-clock bits, omitted when it has none), `# clock NAME K` per clock bit K of an
+ * input, `# output NAME W`. Output is a function of the netlist and S.
  *
  * Exit status: 0 on success; 1 when a library or the BLIF cannot be read or the design cannot be
  * simulated (the reason is logged on stderr); 2 on a usage error.
@@ -38,6 +41,7 @@ typedef struct sv_args {
     const char *in_path;
     uint64_t seed;
     uint32_t cycles;
+    uint32_t max_cells; /* 0: the default budget */
     bool has_seed;
     bool has_cycles;
 } sv_args;
@@ -84,10 +88,15 @@ static bool parse_option(char **argv, int argc, int *at, sv_args *args) {
         args->has_cycles = true;
         return true;
     }
+    if (strcmp(opt, "--max-cells") == 0 && parse_number((sv_number){val, UINT32_MAX}, &num) &&
+        num > 0) {
+        args->max_cells = (uint32_t)num;
+        return true;
+    }
     return false;
 }
 
-/* Parses `in.blif --seed S --cycles N [--techlib lib.o3lib]...` in any order. */
+/* Parses `in.blif --seed S --cycles N [--techlib lib.o3lib]... [--max-cells M]` in any order. */
 static bool parse_args(int argc, char **argv, sv_args *args) {
     *args = (sv_args){.libs = argv + 1};
     for (int i = 1; i < argc; i++) {
@@ -205,7 +214,8 @@ static int simulate(const sv_args *args) {
     int rc = SV_FAIL;
     odin3_sim *sim = NULL;
     if (read_design(design, args) == ODIN3_OK &&
-        odin3_sim_build(design, (odin3_module_id){1}, &sim) == ODIN3_OK) {
+        odin3_sim_build_opts(design, (odin3_module_id){1}, &(odin3_sim_options){args->max_cells},
+                             &sim) == ODIN3_OK) {
         run_cycles(sim, args);
         rc = fflush(stdout) == 0 ? SV_OK : SV_FAIL;
     }
@@ -218,7 +228,7 @@ int main(int argc, char **argv) {
     sv_args args;
     if (!parse_args(argc, argv, &args)) {
         (void)fprintf(stderr, "usage: odin3-sim-vectors in.blif --seed S --cycles N "
-                              "[--techlib lib.o3lib]...\n");
+                              "[--techlib lib.o3lib]... [--max-cells M]\n");
         return SV_USAGE;
     }
     return simulate(&args);

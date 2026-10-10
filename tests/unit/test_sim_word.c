@@ -1451,6 +1451,31 @@ static void test_too_wide_is_rejected(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "too wide"), log_text);
 }
 
+/* fn values are capped at 2^20 bits (the readers' per-port cap): 2^20 + 1 is refused. */
+static void test_fn_width_cap(void) {
+    read_lib("library cap_lib\n"
+             "cell capc hard\n"
+             "  param N int 1\n"
+             "  in a 1 ; out y 1\n"
+             "  fn y = {N{a}} == 0\n"
+             "end\n");
+    const int64_t widths[2] = {(int64_t)1 << 20, ((int64_t)1 << 20) + 1};
+    for (int i = 0; i < 2; i++) {
+        odin3_module *top = new_module();
+        bus port[2];
+        in_bus(top, "a", 1, &port[0]);
+        out_bus(top, "y", 1, &port[1]);
+        const bus *const buses[2] = {&port[0], &port[1]};
+        const odin3_value params[1] = {odin3_value_int(widths[i])};
+        add_cell(top, type_id("capc"), params, buses);
+        if (i == 0) {
+            odin3_sim_destroy(build_ok(top));
+        } else {
+            build_fails(top, "too wide");
+        }
+    }
+}
+
 /* Task 3a minor: a black box is simulated when its type has a hook (here $_AND_'s). */
 static void test_blackbox_with_hook_simulates(void) {
     static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
@@ -1581,6 +1606,7 @@ int main(void) {
     RUN_TEST(test_fn_wide_signed_and_shift);
     RUN_TEST(test_unsimulatable_library_cells);
     RUN_TEST(test_too_wide_is_rejected);
+    RUN_TEST(test_fn_width_cap);
     RUN_TEST(test_blackbox_with_hook_simulates);
     RUN_TEST(test_fn_hook_does_not_allocate);
     RUN_TEST(test_build_oom_sweep);
