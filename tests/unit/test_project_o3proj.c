@@ -367,20 +367,15 @@ static void test_word_cap(void) {
  * 2^20 + 1 values fail at the line's word 2^20 + 1. */
 static void test_default_word_cap(void) {
     TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 20, ODIN3_PROJ_MAX_WORDS);
-    size_t words = (size_t)ODIN3_PROJ_MAX_WORDS + 1;
-    size_t len = strlen("libext") + 2 * words + 1;
-    char *text = malloc(len);
-    TEST_ASSERT_NOT_NULL(text);
-    memcpy(text, "libext", strlen("libext"));
-    for (size_t i = 0; i < words; i++) {
-        memcpy(text + strlen("libext") + 2 * i, " x", 2);
-    }
-    text[len - 1] = '\n';
     FILE *fp = fopen(tmp_file, "wb");
     TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(len, fwrite(text, 1, len, fp));
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    free(text);
+    int failed = fputs("libext", fp) < 0;
+    for (uint32_t i = 0; i <= ODIN3_PROJ_MAX_WORDS; i++) {
+        failed |= fputs(" x", fp) < 0;
+    }
+    failed |= fputs("\n", fp) < 0;
+    failed |= fclose(fp) != 0;
+    TEST_ASSERT_EQUAL_INT(0, failed);
     odin3_proj_path file = {id("p.o3proj"), id(tmp_file), {0}};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_read_o3proj(proj, &file));
     TEST_ASSERT_EQUAL_STRING("p.o3proj:1:2097158: error: syntax: line has more than 1048576 "
