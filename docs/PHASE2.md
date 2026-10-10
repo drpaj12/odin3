@@ -85,3 +85,17 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    symbol tables, and `odin3_srcloc` gains the raw `loc` (1B struct change); Q2 AST strings in the
    design strtab; Q3 2D in two stages with the elaborated AST as the seam (slang enters at stage 2);
    Q4 the depth cap above; Q5 a Verilog printer in 2A (parse–print–parse oracle for 2C).
+9. **2B spec approved** (`docs/specs/2026-10-10-2B-project-preproc-design.md`; agent default under
+   Peter's overnight rule, 2026-10-10, after an Opus review and two re-reviews): project record owned
+   by the design, one C reader per format byte-identical to the corpus oracle (oracle wins where they
+   differed: `-f` inside `-F` resolves against the outermost list; oracle amended to read with
+   `newline=""` and to fix its Unicode-digit crash); a whole-file substitute-then-rescan
+   preprocessor emitting the 2A segment map (one EXPANSION per use, one MACRO_ARG per spelled run,
+   loc-0 bytes as their own segments, actuals collected across frames, recursion judged on the
+   spelling ancestry, a per-buffer chain-length cap); caps against include/expansion/location
+   bombs; corpus CTest, pp-diff against Icarus/Yosys where they agree, model-based and fuzz tests.
+   Open points as recommended: `--top` replaces the project top (info line); SV macro operators
+   are a located error until Phase 5; macro argument defaults and empty actuals accepted; an
+   undefined macro is an error; the Odin II XML reader lands in 2B (DESIGN §4.0 "after Phase 2"
+   becomes "with 2B"); the oracle is tightened where the corpus is silent. Declared divergences
+   (directives inside macro bodies, the w1 self-application case) are listed in the spec §10.4.
