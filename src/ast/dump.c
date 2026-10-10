@@ -37,11 +37,79 @@ typedef struct dumper {
     odin3_vec frames; /* dump_frame */
 } dumper;
 
-static odin3_bytes name_bytes(const odin3_ast *ast, odin3_ast_id node) {
-    const odin3_strtab *tab = odin3_design_strtab(ast->design);
-    uint32_t name = odin3_ast_name(ast, node);
-    const char *str = odin3_strtab_get(tab, name);
-    return (odin3_bytes){(const uint8_t *)(str != NULL ? str : ""), odin3_strtab_len(tab, name)};
+/* One flag or field of a kind (§4.4), in bit order; a field (mask wider than a bit) is NAME=v. */
+typedef struct flag_name {
+    uint8_t kind;
+    uint8_t shift;
+    uint16_t mask;
+    const char *name;
+} flag_name;
+
+#define FLAG_(KIND, NAME)                                                                          \
+    { ODIN3_AST_##KIND, 0, ODIN3_AST_F_##KIND##_##NAME, #NAME }
+#define FIELD_(KIND, NAME)                                                                         \
+    {                                                                                              \
+        ODIN3_AST_##KIND, ODIN3_AST_F_##KIND##_##NAME##_SHIFT, ODIN3_AST_F_##KIND##_##NAME##_MASK, \
+            #NAME                                                                                  \
+    }
+
+static const flag_name FLAG_NAMES[] = {
+    FLAG_(MODULE, MACROMODULE),
+    FLAG_(PORT_REF, DOTTED),
+    FLAG_(PORT_DECL, SIGNED),
+    FLAG_(PORT_DECL, IN_HEADER),
+    FIELD_(PORT_DECL, DT),
+    FIELD_(PORT_DECL, NET),
+    FLAG_(NET_DECL, SIGNED),
+    FLAG_(NET_DECL, VECTORED),
+    FLAG_(NET_DECL, SCALARED),
+    FLAG_(VAR_DECL, SIGNED),
+    FLAG_(PARAM_DECL, SIGNED),
+    FLAG_(PARAM_DECL, IN_HEADER),
+    FIELD_(PARAM_DECL, DT),
+    FIELD_(STRENGTH, S0),
+    FIELD_(STRENGTH, S1),
+    FLAG_(FUNCTION_DECL, AUTOMATIC),
+    FLAG_(FUNCTION_DECL, SIGNED),
+    FIELD_(FUNCTION_DECL, DT),
+    FLAG_(TASK_DECL, AUTOMATIC),
+    FLAG_(ATTR, METACOMMENT),
+    FLAG_(TASK_CALL, SYSTEM),
+    FLAG_(TASK_CALL, HIER),
+    FLAG_(CASE_ITEM, DEFAULT),
+    FLAG_(EVENT_CONTROL, STAR),
+    FLAG_(EVENT_CONTROL, NO_PARENS),
+    FLAG_(EVENT_EXPR, AFTER_OR),
+    FLAG_(NUMBER, SIGNED),
+    FLAG_(CALL, SYSTEM),
+    FLAG_(CALL, HIER),
+};
+
+#undef FLAG_
+#undef FIELD_
+
+/* ` [NAME NAME FIELD=v …]` for non-zero flags; bits the kind does not define as `0x…`. */
+static odin3_status append_flags(const dumper *dp, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(dp->ast, node);
+    uint32_t flags = odin3_ast_flags(dp->ast, node);
+    odin3_status st = odin3_strbuf_append(dp->out, odin3_bytes_cstr(" ["));
+    const char *sep = "";
+    for (size_t i = 0; i < sizeof FLAG_NAMES / sizeof FLAG_NAMES[0] && st == ODIN3_OK; i++) {
+        const flag_name *fl = &FLAG_NAMES[i];
+        uint32_t value = (flags & fl->mask) >> fl->shift;
+        if (fl->kind != kind || value == 0) {
+            continue;
+        }
+        flags &= ~(uint32_t)fl->mask;
+        bool field = (fl->mask & (fl->mask - 1U)) != 0; /* more than one bit */
+        st = field ? odin3_strbuf_appendf(dp->out, "%s%s=%u", sep, fl->name, (unsigned)value)
+                   : odin3_strbuf_appendf(dp->out, "%s%s", sep, fl->name);
+        sep = " ";
+    }
+    if (st == ODIN3_OK && flags != 0) {
+        st = odin3_strbuf_appendf(dp->out, "%s0x%x", sep, (unsigned)flags);
+    }
+    return st == ODIN3_OK ? odin3_strbuf_append(dp->out, odin3_bytes_cstr("]")) : st;
 }
 
 static odin3_status append_payload(const dumper *dp, odin3_ast_id node, uint32_t payload) {
@@ -69,11 +137,14 @@ static odin3_status append_head(const dumper *dp, odin3_ast_id node) {
     }
     if (st == ODIN3_OK && odin3_ast_name(dp->ast, node) != 0) {
         st = odin3_strbuf_append(dp->out, odin3_bytes_cstr(":"));
-        odin3_bytes name = name_bytes(dp->ast, node);
+        odin3_bytes name = odin3_pr_name_bytes(dp->ast, node);
         if (st == ODIN3_OK) {
             st = kind == ODIN3_AST_STRING ? odin3_pr_append_cstring(dp->out, name)
                                           : odin3_strbuf_append(dp->out, name);
         }
+    }
+    if (st == ODIN3_OK && odin3_ast_flags(dp->ast, node) != 0) {
+        st = append_flags(dp, node);
     }
     if (st == ODIN3_OK) {
         st = odin3_strbuf_append(dp->out, odin3_bytes_cstr(" @"));

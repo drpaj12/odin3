@@ -18,7 +18,7 @@
 #include <stdint.h>
 #include <string.h>
 
-/* One store'one side of ast_a comparison. */
+/* One store's side of a comparison. */
 typedef struct side {
     const odin3_ast *ast;
     odin3_ast_id node;
@@ -31,13 +31,6 @@ typedef struct node_pair {
 
 static bool same_bytes(odin3_bytes lhs, odin3_bytes rhs) {
     return lhs.len == rhs.len && (lhs.len == 0 || memcmp(lhs.ptr, rhs.ptr, lhs.len) == 0);
-}
-
-static odin3_bytes name_of(side one) {
-    const odin3_strtab *tab = odin3_design_strtab(odin3_ast_design(one.ast));
-    uint32_t name = odin3_ast_name(one.ast, one.node);
-    const char *str = odin3_strtab_get(tab, name);
-    return (odin3_bytes){(const uint8_t *)(str != NULL ? str : ""), odin3_strtab_len(tab, name)};
 }
 
 static bool same_number(const odin3_ast_number *lhs, const odin3_ast_number *rhs) {
@@ -56,7 +49,8 @@ static bool same_payload(side lhs, side rhs, uint32_t payload) {
     case ODIN3_AST_PAYLOAD_REAL: {
         double vx = odin3_ast_real(lhs.ast, lhs.node);
         double vy = odin3_ast_real(rhs.ast, rhs.node);
-        return vx == vy || (isnan(vx) && isnan(vy));
+        /* bit-exact in value: -0.0 differs from 0.0 (the printer writes them apart) */
+        return (vx == vy && signbit(vx) == signbit(vy)) || (isnan(vx) && isnan(vy));
     }
     case ODIN3_AST_PAYLOAD_TEXT:
         return same_bytes(odin3_ast_text(lhs.ast, lhs.node), odin3_ast_text(rhs.ast, rhs.node));
@@ -76,7 +70,9 @@ static bool same_record(side lhs, side rhs) {
         odin3_ast_attrs(lhs.ast, lhs.node).n != odin3_ast_attrs(rhs.ast, rhs.node).n) {
         return false;
     }
-    return same_bytes(name_of(lhs), name_of(rhs)) && same_payload(lhs, rhs, info->payload);
+    return same_bytes(odin3_pr_name_bytes(lhs.ast, lhs.node),
+                      odin3_pr_name_bytes(rhs.ast, rhs.node)) &&
+           same_payload(lhs, rhs, info->payload);
 }
 
 /* Pushes the pairs (xs[i], ys[i]); both spans have n entries. */

@@ -4,6 +4,7 @@
  * capped indentation); abandoned roots; misuse; OOM.
  */
 #include "ast/ast.h"
+#include "ast/ast_internal.h"
 #include "ast/kinds.h"
 #include "ast/print.h"
 #include "ast/srcman.h"
@@ -161,7 +162,7 @@ static void test_expression_golden(void) {
                  "      {(ATTR:keep @<unknown>:0:0\n"
                  "         _)\n"
                  "       (ATTR:max @<unknown>:0:0\n"
-                 "         (NUMBER.dec @<unknown>:0:0 3))})))");
+                 "         (NUMBER.dec [SIGNED] @<unknown>:0:0 3))})))");
 }
 
 static void test_strings_and_text(void) {
@@ -174,7 +175,47 @@ static void test_strings_and_text(void) {
     expect(mk(spec, NULL, 0), "(SPECIFY_BLOCK @t.v:3:5 \"specify\\n\\tendspecify\")");
     odin3_ast_spec gen = named_at(ODIN3_AST_GEN_BLOCK, "g", (odin3_loc){0});
     expect(mk(gen, (odin3_ast_id[]){three()}, 1),
-           "(GEN_BLOCK:g @<unknown>:0:0\n  (NUMBER.dec @<unknown>:0:0 3))");
+           "(GEN_BLOCK:g @<unknown>:0:0\n  (NUMBER.dec [SIGNED] @<unknown>:0:0 3))");
+}
+
+static odin3_ast_spec flagged(odin3_ast_spec spec, uint32_t flags) {
+    spec.flags = (uint16_t)flags;
+    return spec;
+}
+
+/* Flags by name in bit order, fields as NAME=value, undefined bits as one 0x token. */
+static void test_flags(void) {
+    uint32_t dt_reg = (uint32_t)ODIN3_AST_DT_REG << ODIN3_AST_F_PORT_DECL_DT_SHIFT;
+    uint32_t net_wire = (1U + ODIN3_AST_NET_DECL_WIRE) << ODIN3_AST_F_PORT_DECL_NET_SHIFT;
+    odin3_ast_id decl = mk(named_at(ODIN3_AST_DECLARATOR, "q", (odin3_loc){0}), &NO, 1);
+    odin3_ast_spec port =
+        flagged(spec_at(ODIN3_AST_PORT_DECL, at(1, 1)),
+                ODIN3_AST_F_PORT_DECL_SIGNED | ODIN3_AST_F_PORT_DECL_IN_HEADER | dt_reg | net_wire);
+    port.sub = ODIN3_AST_PORT_DECL_OUTPUT;
+    expect(mk(port, (odin3_ast_id[]){NO, decl}, 2),
+           "(PORT_DECL.output [SIGNED IN_HEADER DT=1 NET=1] @t.v:1:1\n"
+           "  _\n"
+           "  (DECLARATOR:q @<unknown>:0:0\n"
+           "    _))");
+    odin3_ast_spec str = flagged(spec_at(ODIN3_AST_STRENGTH, (odin3_loc){0}),
+                                 (ODIN3_AST_DRIVE_STRONG << ODIN3_AST_F_STRENGTH_S0_SHIFT) |
+                                     (ODIN3_AST_DRIVE_WEAK << ODIN3_AST_F_STRENGTH_S1_SHIFT));
+    expect(mk(str, NULL, 0), "(STRENGTH.drive [S0=4 S1=2] @<unknown>:0:0)");
+    odin3_ast_id null_stmt = mk(spec_at(ODIN3_AST_NULL_STMT, (odin3_loc){0}), NULL, 0);
+    odin3_ast_spec item =
+        flagged(spec_at(ODIN3_AST_CASE_ITEM, (odin3_loc){0}), ODIN3_AST_F_CASE_ITEM_DEFAULT);
+    expect(mk(item, &null_stmt, 1),
+           "(CASE_ITEM [DEFAULT] @<unknown>:0:0\n  (NULL_STMT @<unknown>:0:0))");
+    odin3_ast_spec star =
+        flagged(spec_at(ODIN3_AST_EVENT_CONTROL, (odin3_loc){0}),
+                ODIN3_AST_F_EVENT_CONTROL_STAR | ODIN3_AST_F_EVENT_CONTROL_NO_PARENS);
+    odin3_ast_id ctl = mk(star, &NO, 1);
+    expect(ctl, "(EVENT_CONTROL [STAR NO_PARENS] @<unknown>:0:0\n  _)");
+    odin3_ast_node *rec = (odin3_ast_node *)odin3_ast_rec(ast, ctl); /* corrupt: bit 4 */
+    rec->flags |= 0x10U;
+    expect(ctl, "(EVENT_CONTROL [STAR NO_PARENS 0x10] @<unknown>:0:0\n  _)");
+    rec->flags = 0x20U;
+    expect(ctl, "(EVENT_CONTROL [0x20] @<unknown>:0:0\n  _)");
 }
 
 /* Review Focus 5: an abandoned root dumps like any other subtree; a UNIT with no items. */
@@ -267,6 +308,7 @@ int main(void) {
     RUN_TEST(test_declaration_golden);
     RUN_TEST(test_expression_golden);
     RUN_TEST(test_strings_and_text);
+    RUN_TEST(test_flags);
     RUN_TEST(test_abandoned_root_and_empty_unit);
     RUN_TEST(test_chain_at_cap);
     RUN_TEST(test_misuse);
