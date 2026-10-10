@@ -38,4 +38,11 @@ void odin3_vec_pop(odin3_vec *vec);
 /* len = 0, keeps capacity. */
 void odin3_vec_clear(odin3_vec *vec);
 
+/*
+ * Shrinks the allocation to len elements (for a vec that stops growing, such as a finished AST
+ * table); cap becomes len, no longer a power of two, and a later reserve still grows by doubling.
+ * An empty vec and a failed realloc keep the vec as it was.
+ */
+void odin3_vec_shrink_to_fit(odin3_vec *vec);
+
 #endif

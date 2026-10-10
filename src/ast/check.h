@@ -8,6 +8,7 @@
 #include "ast/srcman.h"
 #include "ir/check.h"
 #include "odin3/odin3.h"
+#include "util/u64map.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,10 +25,10 @@
  * before finish too (stricter than §10's "after finish"; the builder keeps them true). Rule 3's
  * count of unreachable non-root nodes (an abandoned subtree's root, an unattached ATTR) is logged
  * at ODIN3_LOG_INFO, never an error. ODIN3_ERR_CHECK when any rule is violated; ODIN3_ERR_NO_MEMORY
- * when the scratch arrays (4 bytes per node, plus 1 under FULL) or the design's source manager
- * cannot be allocated (nothing is logged as a violation then); ODIN3_ERR_INVALID_ARG (logged) for a
- * NULL store or a level outside its enum. Never changes the store; iterative (one forward sweep
- * over node IDs, AST-5).
+ * when the scratch arrays (4 bytes per node, plus 1 per node and per payload under FULL) or the
+ * design's source manager cannot be allocated (nothing is logged as a violation then);
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL store or a level outside its enum. Never changes the
+ * store; iterative (one forward sweep over node IDs, AST-5).
  */
 odin3_status odin3_ast_check(const odin3_ast *ast, odin3_check_level level);
 
@@ -43,6 +44,8 @@ typedef struct odin3_ast_checker {
     uint32_t end;                               /* one past the last node ID */
     uint32_t *heights;                          /* rule 5: per node */
     uint8_t *refs;                              /* rule 3: per node (FULL only) */
+    uint8_t *payload_refs;                      /* rule 6: per payload ID (FULL only) */
+    odin3_u64map *udps;                         /* rule 4: UDP_DECL names (NULL: none) */
     uint32_t errors[ODIN3_AST_CHECK_RULES + 1]; /* per rule, [0] unused */
     odin3_ast_id id;                            /* the node being checked */
     const odin3_ast_node *rec;                  /* its record */
@@ -72,6 +75,10 @@ odin3_ast_id odin3_ast_check_kid(const odin3_ast_checker *cx, odin3_ast_id node,
 
 /* Rule 7 for the node being checked (check_elab.c): a known kind whose span is readable. */
 void odin3_ast_check_elab_node(odin3_ast_checker *cx);
+
+/* Node records read by rule 4's UDP lookup in the last odin3_ast_check (a test hook: one sweep
+ * builds the name set, so it is at most the node count, never unnamed instances × nodes). */
+uint64_t odin3_ast_check_udp_reads(void);
 
 /* Rule 7's store-level part: exactly one UNIT. */
 void odin3_ast_check_elab_store(odin3_ast_checker *cx);

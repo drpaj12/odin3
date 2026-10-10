@@ -18,6 +18,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -741,6 +742,11 @@ static void test_accessors(void) {
 
 static void test_payload_accessors(void) {
     uint32_t real = 0;
+    uint32_t bad = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_real_new(ast, INFINITY, &bad));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_real_new(ast, NAN, &bad));
+    TEST_ASSERT_EQUAL_UINT32(0, bad);
+    TEST_ASSERT_EQUAL_size_t(0, ast->payloads.len);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_real_new(ast, 0.25, &real));
     odin3_ast_spec rspec = {.kind = ODIN3_AST_REAL, .payload = real};
     odin3_ast_id real_node = make(rspec, NULL, 0);

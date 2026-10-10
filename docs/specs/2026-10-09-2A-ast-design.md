@@ -466,6 +466,8 @@ void         odin3_ast_unwind(odin3_ast *ast, uint32_t mark);            /* erro
 
 odin3_status odin3_ast_number_parse(odin3_ast *ast, odin3_loc loc, odin3_number_text pieces,
                                     uint32_t *payload);
+odin3_status odin3_ast_number_kind(odin3_number_text pieces, uint8_t *sub,
+                                   uint16_t *flags);      /* the NUMBER node's sub and flags */
 odin3_status odin3_ast_number_new(odin3_ast *ast, odin3_loc loc, const odin3_ast_number *num,
                                   uint32_t *payload);
 odin3_status odin3_ast_real_new(odin3_ast *ast, double value, uint32_t *payload);
@@ -531,7 +533,7 @@ The elaborated store is built from the parsed one with the same calls while walk
 cursor (§6); no clone primitive exists or is needed, since every node is rebuilt with its
 resolved children.
 
-### 5.3 C ABI mirror (the next ABI version)
+### 5.3 C ABI mirror (ABI v4)
 
 The mirror follows 1D (ABI v3) exactly: every function returns `odin3_status`, results come
 through out-pointers, readers are `odin3_ast_get_<field>(const odin3_ast *ast, uint32_t node,
@@ -552,12 +554,22 @@ Source-manager builders are exported so an adapter copies slang's locations verb
 the same chains. The Python layer gets read-side helpers only in 2A (`Design.ast()`,
 `node.kind`, `node.children()`, `node.loc`).
 
+*As shipped (ABI v4, 2A Task 8):* stores are created through the design,
+`odin3_design_new_ast(design, form, run, &ast)`, which hands the store to the design at once;
+`odin3_ast_destroy` is not exported (the design destroys its stores, or
+`odin3_design_drop_ast` at the end of a read). The held stores are enumerated with
+`odin3_design_get_ast_count`/`odin3_design_get_ast_at`; the keep level is
+`odin3_design_set_keep_ast(design, level)`/`odin3_design_get_keep_ast` with `odin3_keep_ast`
+levels `NONE`, `ELABORATED` (`--keep-ast`) and `ALL` (`--keep-ast=all`); an adapter stamps
+locations with `odin3_srcman_get_loc(sm, buffer, offset, &loc)`. A literal's sized value is
+§4.5's `odin3_ast_literal` (internal; the ABI reads bits as a string).
+
 ## 6. Read API and iteration (AST-12)
 
 Internal accessors return values (as the IR's internal accessors do; the ABI wraps them with
 status): `odin3_ast_kind`, `_sub`, `_flags`, `_loc`, `_end`, `_name` (strtab ID), `_name_str`,
 `_nchild`, `_child(ast, node, i)`, `_children(ast, node) → {const odin3_ast_id *ids, n}` (a view
-valid until the next make), `_payload` (index), `_number`, `_real`, `_text`, `_attrs(ast, node)
+valid until the next builder call), `_payload` (index), `_number`, `_real`, `_text`, `_attrs(ast, node)
 → span view`, `_node_end`, `_form`, `_run`, `_max_height`, `_kind_name`, `_sub_name`,
 `_slot_count(kind)`, `_has_tail(kind)`, `_root(ast, i)`/`_root_count` (the UNITs in order).
 Out-of-range IDs return `NONE`/0/empty, never fault.
@@ -678,7 +690,8 @@ read runs with two ASTs; provenance from each resolves in its own.
 flag `--keep-ast` (the debug form `--keep-ast=all` also keeps parsed stores, so a run then
 holds two), or any pass in the script whose
 registry definition (1D's pass registry) sets `wants_ast`, makes the pass manager set
-`odin3_design_set_keep_ast(design, true)` before the read. A kept AST lives until
+`odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ELABORATED)` before the read (`--keep-ast=all`
+sets `ODIN3_KEEP_AST_ALL`). A kept AST lives until
 `odin3_design_destroy`. This amends DESIGN §4.5 ("never discarded") per PHASE2 #7.
 
 **What survives into the IR**: `odin3_srcloc`s carrying the raw `loc` in SOURCE provenance

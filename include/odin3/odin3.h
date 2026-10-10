@@ -1400,7 +1400,7 @@ odin3_status odin3_ast_number_new_str(odin3_ast *ast, uint32_t loc, uint32_t wid
                                       const char *bits, uint32_t *payload);
 
 /* Stores a REAL payload and its payload ID in *payload. ODIN3_ERR_INVALID_ARG (logged) for a NULL
- * argument or a sealed store; ODIN3_ERR_NO_MEMORY. */
+ * argument, a sealed store or a non-finite value (inf or nan); ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_ast_build_real(odin3_ast *ast, double value, uint32_t *payload);
 
 /*

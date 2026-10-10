@@ -136,7 +136,8 @@ odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, u
 /* Pops the pending stack back to mark (error recovery); a mark at or above the top is a no-op. */
 void odin3_ast_unwind(odin3_ast *ast, uint32_t mark);
 
-/* Stores a REAL payload and its payload ID (from 1) in *payload. INVALID_ARG; NO_MEMORY. */
+/* Stores a REAL payload and its payload ID (from 1) in *payload. INVALID_ARG (logged) for a NULL
+ * argument, a sealed store or a non-finite value (inf or nan: not Verilog); NO_MEMORY. */
 odin3_status odin3_ast_real_new(odin3_ast *ast, double value, uint32_t *payload);
 
 /*
@@ -226,7 +227,7 @@ uint32_t odin3_ast_nchild(const odin3_ast *ast, odin3_ast_id node);
 /* Child idx (slots first, then the tail); 0 when idx ≥ nchild or the slot is absent. */
 odin3_ast_id odin3_ast_child(const odin3_ast *ast, odin3_ast_id node, uint32_t idx);
 
-/* The node's children as a view valid until the next make. */
+/* The node's children as a view valid until the next builder call (make or attach). */
 odin3_ast_span odin3_ast_children(const odin3_ast *ast, odin3_ast_id node);
 
 /* The payload ID of a NUMBER, REAL or TEXT node; 0 otherwise. */

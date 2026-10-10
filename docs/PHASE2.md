@@ -126,7 +126,37 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    literals: 278k NUMBERs x (24 B payload record + 64 B arena for an unsized decimal: a 24-byte
    `odin3_ast_number` plus 32 one-byte bits, rounded to 16) is about 12 B/node at 14% NUMBERs.
    The literal storage format is unchanged (a spec change). The real budget, mcml.v <= 20 MB, is
-   met with 2x headroom.
+   met with 2x headroom. Not counted: `odin3_ast_get_number_str` (ABI) interns each literal's
+   bit string in the design strtab for the design's life (the 1D text convention), so a plugin
+   that reads every `NUMBER` of a large AST grows the strtab by about one byte per literal bit.
+
+   **2A carry-overs that bind 2C/2D** (agent defaults ruled during 2A; final review 2026-10-10):
+   - *2C lexer:* a `_` right after the base (`'h_F`) is a syntax error (Yosys and IEEE agree);
+     the lexer rejects it, because `odin3_ast_number_parse` stays lenient on `_`.
+   - *Printer canonical forms that the 2C parser must map back to equal trees*, so the
+     parse–print–parse oracle holds: several `(* *)` groups print merged into one; a delay
+     prints as `#(5)`; a `METACOMMENT` attribute prints as `// synopsys …` after the
+     `case (…)` header; a system name prints raw (`$foo`); literal digits print normalised
+     (lower case; `'sd5` prints as a plain signed decimal).
+   - *Check rules derived from the normative §4.3/§4.4 tables* that 2C's builders must satisfy
+     (`odin3_ast_check` rejects their violation): the flag fields hold enum values (DT ≤ `time`,
+     NET ≤ the net-kind count, strength values in range, a charge strength in S0 only); LIST
+     contents per slot (MODULE params `PARAM_DECL`, ports `PORT_DECL`/`PORT_REF`, INSTANTIATION
+     params `CONNECTION`, FUNCTION/TASK ports `PORT_DECL` and locals D, SEQ/PAR locals D);
+     a `CASE_ITEM` body is S under `CASE` and I under `GEN_CASE`; `CASE_ITEM`'s tail is empty
+     exactly when `DEFAULT` is set, `EVENT_CONTROL`'s exactly when `STAR` is; a `HIER_NAME`
+     part is an `IDENT` or a bit `SELECT` over an `IDENT`; a `UNIT` is never in a span; a
+     `GEN_BLOCK` index only in the elaborated form; `SELECT`'s third slot is present exactly
+     for a part select; in the elaborated form a `PORT_DECL` sits only in the port LIST.
+   - *Rule 4 sees only this store:* an unnamed `INSTANCE` is legal under a `GATE_DECL` or under
+     an `INSTANTIATION` of a `UDP_DECL` in the same store. A UDP declared outside the store
+     (another read run, a library) makes the unnamed instance a check error; 2C/2D either keep
+     the UDP in the store or name the instance.
+   - *Plugin passes* cannot yet declare `wants_ast` or learn their pass-run ID through the ABI;
+     an ABI addition is due before the slang adapter (Phase 5).
+   - *`odin3_symtab_remap` is not yet called after `compact`* (spec §8): correct while no
+     symbol table is filled; 2D wires it into the pass manager's `compact` for a design that
+     keeps its symtab (see the `compact` row of `docs/PASSES.md`).
 9. **2B spec approved** (`docs/specs/2026-10-10-2B-project-preproc-design.md`; agent default under
    Peter's overnight rule, 2026-10-10, after an Opus review and two re-reviews): project record owned
    by the design, one C reader per format byte-identical to the corpus oracle (oracle wins where they

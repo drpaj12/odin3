@@ -29,6 +29,7 @@ enum {
     FILE_BYTES = 40,
     MANY_ERRORS = 30,
     MANY_SYMBOLS = 12,
+    MANY_UNNAMED = 500,
     BAD_DT = 6,    /* one past ODIN3_AST_DT_TIME */
     BAD_DRIVE = 6, /* one past ODIN3_AST_DRIVE_SUPPLY */
 };
@@ -689,6 +690,19 @@ static void test_rule4_unnamed_udp_instance(void) {
     expect_only(4); /* a module instance still needs a name */
 }
 
+/* Rule 4's UDP lookup is one sweep plus map lookups, not a sweep per unnamed instance. */
+static void test_rule4_udp_lookup_is_linear(void) {
+    for (uint32_t i = 0; i < MANY_UNNAMED; i++) {
+        NAMED(INSTANTIATION, "my_udp", NIL, NODE(INSTANCE, 0, NIL));
+    }
+    udp_decl("my_udp"); /* the highest ID: a per-instance scan would read every node each time */
+    assert_ok(ODIN3_CHECK_FULL);
+    uint64_t nodes = odin3_ast_node_end(ast).v - 1;
+    TEST_ASSERT_EQUAL_UINT64(nodes, odin3_ast_check_udp_reads());
+    assert_ok(ODIN3_CHECK_FAST);
+    TEST_ASSERT_EQUAL_UINT64(nodes, odin3_ast_check_udp_reads());
+}
+
 static void test_rule4_name_rules(void) {
     parsed fix = build_parsed();
     corrupt(ODIN3_AST_TEST_NAME_MISSING, fix.module.v, 0);
@@ -939,6 +953,18 @@ static void test_rule6_number_payloads(void) {
     odin3_ast_id with_z = number("4", "'b", "10z1");
     odin3_ast_test_target has_z = {ODIN3_AST_TEST_NUMBER_QUESTION, with_z.v, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, has_z));
+}
+
+static void test_rule6_shared_payload(void) {
+    odin3_ast_id first = dec("5");
+    odin3_ast_spec twin = {.kind = ODIN3_AST_NUMBER,
+                           .sub = (uint8_t)odin3_ast_sub(ast, first),
+                           .flags = odin3_ast_flags(ast, first),
+                           .payload = odin3_ast_payload(ast, first)};
+    make(twin, NULL, 0);
+    expect_only(6);
+    expect_text("payload shared with another node");
+    assert_ok(ODIN3_CHECK_FAST);
 }
 
 static void test_rule6_attribute_entries(void) {
@@ -1238,6 +1264,7 @@ static void run_first_half(void) {
     RUN_TEST(test_rule3_unit_in_span);
     RUN_TEST(test_rule4_instance_without_name);
     RUN_TEST(test_rule4_unnamed_udp_instance);
+    RUN_TEST(test_rule4_udp_lookup_is_linear);
     RUN_TEST(test_rule4_name_rules);
     RUN_TEST(test_rule5_wrong_height);
     RUN_TEST(test_rule6_unsorted_comments);
@@ -1264,6 +1291,7 @@ static void run_second_half(void) {
     RUN_TEST(test_rule5_depth_cap);
     RUN_TEST(test_rule6_number_payloads);
     RUN_TEST(test_rule6_attribute_entries);
+    RUN_TEST(test_rule6_shared_payload);
     RUN_TEST(test_rule7_constants);
     RUN_TEST(test_rule7_absent_forms);
     RUN_TEST(test_rule7_hierarchy_shapes);

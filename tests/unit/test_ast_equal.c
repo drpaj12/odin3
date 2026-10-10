@@ -324,13 +324,15 @@ static odin3_ast_id real_node(odin3_ast *ast, double value) {
     return id;
 }
 
-/* The printer writes -0.0 and 0.0 apart, so equality tells them apart too; NaN equals NaN. */
+/* The printer writes -0.0 and 0.0 apart, so equality tells them apart too; a NaN REAL cannot be
+ * made (odin3_ast_real_new rejects non-finite values). */
 static void test_real_signed_zero_and_nan(void) {
-    bool results[3] = {equal(ast_a, real_node(ast_a, 0.0), ast_b, real_node(ast_b, -0.0)),
-                       equal(ast_a, real_node(ast_a, -0.0), ast_b, real_node(ast_b, -0.0)),
-                       equal(ast_a, real_node(ast_a, NAN), ast_b, real_node(ast_b, NAN))};
-    const bool want[3] = {false, true, true};
+    bool results[2] = {equal(ast_a, real_node(ast_a, 0.0), ast_b, real_node(ast_b, -0.0)),
+                       equal(ast_a, real_node(ast_a, -0.0), ast_b, real_node(ast_b, -0.0))};
+    const bool want[2] = {false, true};
     TEST_ASSERT_EQUAL_MEMORY(want, results, sizeof want);
+    uint32_t payload = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_real_new(ast_a, NAN, &payload));
 }
 
 static void test_misuse(void) {

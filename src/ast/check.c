@@ -349,15 +349,33 @@ static void rule3_mark(odin3_ast_checker *cx, odin3_ast_span kids) {
     }
 }
 
-/* True when some UDP_DECL in the store is called name (an unnamed UDP instance is legal). */
-static bool udp_declared(const odin3_ast_checker *cx, uint32_t name) {
+static uint64_t udp_reads; /* odin3_ast_check_udp_reads */
+
+uint64_t odin3_ast_check_udp_reads(void) {
+    return udp_reads;
+}
+
+/* One sweep: the names of every UDP_DECL into cx->udps (left NULL when there is none). */
+static odin3_status collect_udps(odin3_ast_checker *cx) {
     for (uint32_t i = 1; i < cx->end; i++) {
         const odin3_ast_node *rec = odin3_ast_rec(cx->ast, (odin3_ast_id){i});
-        if (rec->kind == ODIN3_AST_UDP_DECL && rec->name == name) {
-            return true;
+        udp_reads++;
+        if (rec->kind != ODIN3_AST_UDP_DECL) {
+            continue;
+        }
+        if (cx->udps == NULL) {
+            cx->udps = odin3_u64map_create(0);
+        }
+        if (cx->udps == NULL || odin3_u64map_put(cx->udps, (odin3_kv){rec->name, 1}) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
         }
     }
-    return false;
+    return ODIN3_OK;
+}
+
+/* True when some UDP_DECL in the store is called name (an unnamed UDP instance is legal). */
+static bool udp_declared(const odin3_ast_checker *cx, uint32_t name) {
+    return cx->udps != NULL && odin3_u64map_get(cx->udps, name, NULL);
 }
 
 static void rule4_names(odin3_ast_checker *cx, const odin3_ast_kind_info *info,
@@ -428,6 +446,18 @@ static void rule6_number(odin3_ast_checker *cx) {
     }
 }
 
+/* A payload belongs to one node (two NUMBERs sharing one would share its warned flag). */
+static void rule6_payload_once(odin3_ast_checker *cx) {
+    uint32_t payload = cx->rec->child;
+    if (payload == 0 || payload > cx->ast->payloads.len) {
+        return; /* rule 1 reported it */
+    }
+    if (cx->payload_refs[payload] != 0) {
+        odin3_ast_check_node_fail(cx, RULE_TABLES, "payload shared with another node");
+    }
+    cx->payload_refs[payload] = 1;
+}
+
 /* --- the per-node sweep -------------------------------------------------------------------- */
 
 /* Rules 2–5 and 7 over a readable span. */
@@ -471,10 +501,14 @@ static void check_node(odin3_ast_checker *cx, uint32_t id) {
     }
     cx->heights[id] = 1;
     rule4_names(cx, info, (odin3_ast_span){NULL, 0});
-    if (cx->full && info->payload == ODIN3_AST_PAYLOAD_NUMBER) {
+    if (!cx->full) {
+        return;
+    }
+    rule6_payload_once(cx);
+    if (info->payload == ODIN3_AST_PAYLOAD_NUMBER) {
         rule6_number(cx);
     }
-    if (cx->full && odin3_ast_form_of(cx->ast) == ODIN3_AST_FORM_ELABORATED) {
+    if (odin3_ast_form_of(cx->ast) == ODIN3_AST_FORM_ELABORATED) {
         odin3_ast_check_elab_node(cx);
     }
 }
@@ -571,16 +605,19 @@ static void check_store(odin3_ast_checker *cx) {
 /* --- entry point ---------------------------------------------------------------------------- */
 
 static odin3_status checker_init(odin3_ast_checker *cx) {
+    udp_reads = 0;
     cx->heights = odin3_util_calloc((size_t)cx->end * sizeof *cx->heights);
-    if (cx->heights == NULL) {
+    if (cx->heights == NULL || collect_udps(cx) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     if (!cx->full) {
         return ODIN3_OK;
     }
     cx->refs = odin3_util_calloc(cx->end);
+    cx->payload_refs = odin3_util_calloc(cx->ast->payloads.len + 1);
     odin3_srcman *sm = NULL;
-    if (cx->refs == NULL || odin3_design_get_srcman(cx->ast->design, &sm) != ODIN3_OK) {
+    if (cx->refs == NULL || cx->payload_refs == NULL ||
+        odin3_design_get_srcman(cx->ast->design, &sm) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     cx->sm = sm;
@@ -617,5 +654,7 @@ odin3_status odin3_ast_check(const odin3_ast *ast, odin3_check_level level) {
     }
     odin3_util_free(cx.heights);
     odin3_util_free(cx.refs);
+    odin3_util_free(cx.payload_refs);
+    odin3_u64map_destroy(cx.udps);
     return status;
 }

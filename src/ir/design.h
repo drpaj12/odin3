@@ -5,7 +5,6 @@
 #ifndef ODIN3_IR_DESIGN_H
 #define ODIN3_IR_DESIGN_H
 
-#include "ast/kinds.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
