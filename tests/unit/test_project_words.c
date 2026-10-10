@@ -185,6 +185,35 @@ static void test_quote_inside_a_bare_word(void) {
     expect_ok(FL, (split_case){"+define+TAG=\"AB\" a\"", "+define+TAG=\"AB\"|a\""});
 }
 
+/* A NUL byte in a word is syntax after the oracle's own checks (no strtab string holds NUL);
+ * one inside a comment is ignored. */
+static void test_nul_byte_in_word(void) {
+    static const char bare[] = "a b\0c d";
+    static const char quoted[] = "\"b\0c\"";
+    static const char comment[] = "a #\0";
+    static const char after_quote[] = "a\"\0";
+    odin3_words_opts opts = {.offset = LINE_OFFSET, .mode = O3, .arena = arena};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_words_split((odin3_bytes){bare, sizeof bare - 1},
+                                                             &opts, &words, &err));
+    TEST_ASSERT_EQUAL_STRING("NUL byte in word", err.what);
+    TEST_ASSERT_EQUAL_UINT32(LINE_OFFSET + 2, err.off);
+    TEST_ASSERT_EQUAL_size_t(3, err.word.len);
+    opts.mode = FL;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_PARSE,
+        odin3_words_split((odin3_bytes){quoted, sizeof quoted - 1}, &opts, &words, &err));
+    TEST_ASSERT_EQUAL_STRING("NUL byte in word", err.what);
+    TEST_ASSERT_EQUAL_UINT32(LINE_OFFSET, err.off);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_words_split((odin3_bytes){comment, sizeof comment - 1},
+                                                      &opts, &words, &err));
+    expect_words("a");
+    opts.mode = O3;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_PARSE,
+        odin3_words_split((odin3_bytes){after_quote, sizeof after_quote - 1}, &opts, &words, &err));
+    TEST_ASSERT_EQUAL_STRING("quote inside a word", err.what);
+}
+
 /* Words append to what the vec holds; a failure leaves it as it was. */
 static void test_append_and_failure_atomicity(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, split(O3, "a b"));
@@ -232,6 +261,7 @@ int main(void) {
     RUN_TEST(test_unterminated_quote);
     RUN_TEST(test_bare_backslash_is_ordinary);
     RUN_TEST(test_quote_inside_a_bare_word);
+    RUN_TEST(test_nul_byte_in_word);
     RUN_TEST(test_append_and_failure_atomicity);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();

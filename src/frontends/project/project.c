@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LIBRARY_BITS = 32, DECIMAL = 10 };
+enum { LIBRARY_BITS = 32, DECIMAL = 10, SIZE_TEXT = 64 };
 
 /* --- lifetime ------------------------------------------------------------------------------ */
 
@@ -134,12 +134,31 @@ static void msg_str(msg_buf *msg, const char *str) {
     msg_add(msg, str, strlen(str));
 }
 
+/* A name as written, a NUL byte shown as \0 (the log line is a C string). */
+static void msg_name(msg_buf *msg, odin3_bytes name) {
+    if (name.len == 0) {
+        return;
+    }
+    const char *text = name.ptr;
+    size_t from = 0;
+    for (size_t i = 0; i < name.len; i++) {
+        if (text[i] == '\0') {
+            msg_add(msg, text + from, i - from);
+            msg_str(msg, "\\0");
+            from = i + 1;
+        }
+    }
+    msg_add(msg, text + from, name.len - from);
+}
+
 /* "<kind>: <detail>: 'n1', 'n2'" (point (g)). */
 static void format_err(msg_buf *msg, const odin3_proj_err *err) {
     msg->len = 0;
     msg->text[0] = '\0';
     msg_str(msg, odin3_proj_err_kind_name(err->kind));
-    msg_str(msg, ": ");
+    if (err->detail != NULL || err->nnames > 0) {
+        msg_str(msg, ": ");
+    }
     if (err->detail != NULL) {
         msg_str(msg, err->detail);
         if (err->nnames > 0) {
@@ -148,7 +167,7 @@ static void format_err(msg_buf *msg, const odin3_proj_err *err) {
     }
     for (uint32_t i = 0; i < err->nnames; i++) {
         msg_str(msg, i > 0 ? ", '" : "'");
-        msg_add(msg, err->names[i].ptr, err->names[i].len);
+        msg_name(msg, err->names[i]);
         msg_str(msg, "'");
     }
 }
@@ -204,32 +223,33 @@ static odin3_status syntax_at(odin3_project *proj, odin3_loc at, const char *det
 
 /* --- loading project files ----------------------------------------------------------------- */
 
-/* "cannot read '<path>': <reason>" at parent (unlocated at 0): IO, not one of the §8 kinds. */
-static odin3_status cannot_read(odin3_project *proj, const char *path, odin3_loc parent,
+/* A failed read, at parent (unlocated at 0), naming the file in the design's path style: IO
+ * "cannot read '<file>': <reason>", or over the size cap PARSE `syntax` in the source manager's
+ * words ("file '<file>' is N bytes, over the limit of M"). */
+static odin3_status cannot_read(odin3_project *proj, const odin3_proj_path *file, odin3_loc parent,
                                 const odin3_file_bytes *bytes) {
+    msg_buf msg = {{0}, 0};
+    const char *name = file_name(proj, file);
     if (bytes->too_big) {
-        char size[DECIMAL * 2];
-        (void)snprintf(size, sizeof size, "%" PRIu32, ODIN3_SRC_MAX_FILE_BYTES);
-        msg_buf msg = {{0}, 0};
+        char size[SIZE_TEXT];
+        (void)snprintf(size, sizeof size, "%zu bytes, over the limit of %" PRIu32, bytes->len,
+                       ODIN3_SRC_MAX_FILE_BYTES);
         msg_str(&msg, "syntax: file '");
-        msg_str(&msg, path);
-        msg_str(&msg, "' is over the limit of ");
+        msg_str(&msg, name);
+        msg_str(&msg, "' is ");
         msg_str(&msg, size);
-        msg_str(&msg, " bytes");
-        if (parent.v != 0) {
-            odin3_diag(proj->design, ODIN3_LOG_ERROR, parent, "%s", msg.text);
-        } else {
-            odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg.text);
-        }
-        return ODIN3_ERR_PARSE;
-    }
-    const char *reason = strerror(bytes->err);
-    if (parent.v != 0) {
-        odin3_diag(proj->design, ODIN3_LOG_ERROR, parent, "cannot read '%s': %s", path, reason);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: cannot read '%s': %s", path, reason);
+        msg_str(&msg, "cannot read '");
+        msg_str(&msg, name);
+        msg_str(&msg, "': ");
+        msg_str(&msg, strerror(bytes->err));
     }
-    return ODIN3_ERR_IO;
+    if (parent.v != 0) {
+        odin3_diag(proj->design, ODIN3_LOG_ERROR, parent, "%s", msg.text);
+    } else {
+        odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg.text);
+    }
+    return bytes->too_big ? ODIN3_ERR_PARSE : ODIN3_ERR_IO;
 }
 
 /* Registers every line start with the source manager and records the text's lines (a final
@@ -281,7 +301,7 @@ odin3_status odin3_project_load(odin3_project *proj, const odin3_proj_path *file
     odin3_file_bytes bytes;
     odin3_status st = odin3_file_read_all(path, ODIN3_SRC_MAX_FILE_BYTES, &bytes);
     if (st == ODIN3_ERR_IO || st == ODIN3_ERR_PARSE) {
-        st = cannot_read(proj, path, parent, &bytes);
+        st = cannot_read(proj, file, parent, &bytes);
     }
     if (st == ODIN3_OK) {
         out->bytes = bytes.data;
@@ -322,7 +342,20 @@ void odin3_proj_text_free(odin3_proj_text *text) {
 
 /* --- paths --------------------------------------------------------------------------------- */
 
+static bool has_nul(odin3_bytes bytes) {
+    return bytes.len > 0 && memchr(bytes.ptr, '\0', bytes.len) != NULL;
+}
+
+/* A word holding a NUL byte cannot be a strtab string (PRJ-4): `syntax` at at, names [word]. */
+static odin3_status reject_nul(odin3_project *proj, odin3_bytes word, odin3_loc at) {
+    return has_nul(word) ? syntax_at(proj, at, "NUL byte in word", word) : ODIN3_OK;
+}
+
 odin3_status odin3_project_intern(odin3_project *proj, odin3_bytes bytes, uint32_t *id) {
+    if (has_nul(bytes)) { /* callers with a location reject it first, located */
+        err_what what = {ODIN3_PROJ_ERR_SYNTAX, "NUL byte in word"};
+        return fail_one(proj, (err_site){{0}, NULL}, what, bytes);
+    }
     return odin3_design_intern(proj->design, bytes, id);
 }
 
@@ -341,6 +374,9 @@ static bool kind_ok(odin3_path_kind kind, odin3_proj_want want) {
 
 odin3_status odin3_project_path(odin3_project *proj, const odin3_proj_path_req *req,
                                 odin3_proj_path *out) {
+    if (has_nul(req->given)) {
+        return reject_nul(proj, req->given, req->at);
+    }
     odin3_strbuf resolved;
     odin3_strbuf_init(&resolved);
     odin3_status st = odin3_path_resolve((odin3_path_join){req->base, req->given}, &resolved);
@@ -417,20 +453,14 @@ odin3_status odin3_project_add_dir(odin3_project *proj, odin3_proj_dir_list list
 }
 
 odin3_status odin3_project_add_libext(odin3_project *proj, odin3_bytes ext, odin3_loc at) {
-    char name[ODIN3_LOG_BUF];
     odin3_lang lang = ODIN3_LANG_VERILOG;
-    bool known = ext.len + 2 <= sizeof name;
-    if (known) {
-        name[0] = 'x';
-        memcpy(name + 1, ext.ptr, ext.len);
-        known = odin3_lang_of((odin3_bytes){name, ext.len + 1}, &lang);
-    }
-    if (!known) {
+    odin3_status st = reject_nul(proj, ext, at);
+    if (st == ODIN3_OK && !odin3_lang_of_ext(ext, &lang)) {
         err_what what = {ODIN3_PROJ_ERR_UNKNOWN_FILE_TYPE, "no language for extension"};
-        return fail_one(proj, (err_site){at, NULL}, what, ext);
+        st = fail_one(proj, (err_site){at, NULL}, what, ext);
     }
     uint32_t str = 0;
-    odin3_status st = odin3_project_intern(proj, ext, &str);
+    st = st != ODIN3_OK ? st : odin3_project_intern(proj, ext, &str);
     return st != ODIN3_OK ? st : push_id(&proj->libext, str);
 }
 
@@ -461,6 +491,9 @@ odin3_status odin3_project_add_define(odin3_project *proj, odin3_bytes word, odi
     size_t name_len = eq != NULL ? (size_t)(eq - text) : word.len;
     if (!is_ident(text, name_len)) {
         return syntax_at(proj, at, "bad macro name", word);
+    }
+    if (has_nul(word)) {
+        return reject_nul(proj, word, at);
     }
     odin3_proj_define def = {0, 0, eq != NULL, at};
     odin3_status st = odin3_project_intern(proj, (odin3_bytes){text, name_len}, &def.name);

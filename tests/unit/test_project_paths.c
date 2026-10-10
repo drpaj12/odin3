@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PATH_BUF = 512, MSG_MAX = 2048, OOM_LIMIT = 64, DIR_MODE = 0700 };
+enum { LONG_EXT = 4096, PATH_BUF = 512, MSG_MAX = 2048, OOM_LIMIT = 64, DIR_MODE = 0700 };
 
 static odin3_design *design;
 static odin3_project *proj;
@@ -150,7 +150,8 @@ static void test_resolve(void) {
 
 static void test_path_dir(void) {
     static const char *const cases[][2] = {
-        {"/a/b/c.f", "/a/b"}, {"/c.f", "/"}, {"c.f", ""}, {"a/b", "a"}, {"//x", "/"},
+        {"/a/b/c.f", "/a/b"}, {"/c.f", "/"}, {"c.f", ""}, {"a/b", "a"}, {"//x", "//"},
+        {"///x", "///"},      {"a//b", "a"}, {"a/", "a"}, {"/", "/"},
     };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         odin3_bytes dir = odin3_path_dir(odin3_bytes_cstr(cases[i][0]));
@@ -247,14 +248,20 @@ static void test_missing_file_and_directory(void) {
     expect_missing("top.v", ODIN3_PROJ_WANT_DIR, "directory not found", "top.v");
 }
 
-/* A NUL byte can never name a file (stat would see a shorter path). */
-static void test_nul_in_path_is_missing(void) {
-    static const char given[] = "top.v\0x";
+/* A NUL byte in a path word is a located syntax error before anything is interned, even when
+ * normalization would fold it away. */
+static void test_nul_in_given_is_syntax(void) {
+    static const char given[] = "a\0/../top.v";
     odin3_proj_path_req req = {
         odin3_bytes_cstr(tmp), {given, sizeof given - 1}, word_loc(), ODIN3_PROJ_WANT_FILE};
-    odin3_proj_path got;
+    odin3_proj_path got = {7, 7, {7}};
+    size_t strings = odin3_strtab_count(odin3_design_strtab(design));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_project_path(proj, &req, &got));
-    TEST_ASSERT_NOT_NULL(strstr(captured, "missing_file: file not found"));
+    TEST_ASSERT_EQUAL_STRING("p.o3proj:2:5: error: syntax: NUL byte in word: 'a\\0/../top.v'",
+                             captured);
+    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_EQUAL_UINT32(7, got.given);
+    TEST_ASSERT_EQUAL_size_t(strings, odin3_strtab_count(odin3_design_strtab(design)));
 }
 
 /* --- extension tables ---------------------------------------------------------------------- */
@@ -284,6 +291,9 @@ static void test_language_table(void) {
     expect_lang("a.b.v", ODIN3_LANG_VERILOG);
     expect_lang(".x.v", ODIN3_LANG_VERILOG);
     expect_lang("x.v/", ODIN3_LANG_VERILOG);
+    expect_lang("x.v/.", ODIN3_LANG_VERILOG); /* pathlib drops "." components */
+    expect_lang("x.v/./", ODIN3_LANG_VERILOG);
+    expect_lang("a/.v/.", 0);
     expect_lang("x.foo", 0);
     expect_lang(".v", 0);
     expect_lang("x/.v", 0);
@@ -307,6 +317,30 @@ static void test_language_names(void) {
     expect_lang_name(ODIN3_LANG_BLIF, "blif");
     expect_lang_name(ODIN3_LANG_VQM, "vqm");
     expect_lang_name(ODIN3_LANG_EDIF, "edif");
+}
+
+/* A libext is looked up as "x" + ext (§4.1), without a length limit. */
+static void expect_ext(const char *ext, int lang) {
+    odin3_lang got = (odin3_lang)0;
+    bool ok = odin3_lang_of_ext(odin3_bytes_cstr(ext), &got);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(lang != 0, ok, ext);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(lang, ok ? got : 0, ext);
+}
+
+static void test_libext_languages(void) {
+    static char long_ext[LONG_EXT];
+    memset(long_ext, 'a', sizeof long_ext - 1);
+    memcpy(long_ext + sizeof long_ext - 4, ".sv", 4);
+    expect_ext(".v", ODIN3_LANG_VERILOG);
+    expect_ext(".SV", ODIN3_LANG_SYSTEMVERILOG);
+    expect_ext(".v/", ODIN3_LANG_VERILOG);
+    expect_ext("b.vhd", ODIN3_LANG_VHDL);
+    expect_ext(long_ext, ODIN3_LANG_SYSTEMVERILOG);
+    expect_ext("v", 0);
+    expect_ext("/.v", 0);
+    expect_ext("a/.v", 0);
+    expect_ext(".", 0);
+    expect_ext("", 0);
 }
 
 static void test_language_names_unknown(void) {
@@ -383,10 +417,11 @@ int main(void) {
     RUN_TEST(test_project_path_found);
     RUN_TEST(test_symlinked_directory_not_resolved);
     RUN_TEST(test_missing_file_and_directory);
-    RUN_TEST(test_nul_in_path_is_missing);
+    RUN_TEST(test_nul_in_given_is_syntax);
     RUN_TEST(test_language_table);
     RUN_TEST(test_language_names);
     RUN_TEST(test_language_names_unknown);
+    RUN_TEST(test_libext_languages);
     RUN_TEST(test_arch_kinds);
     RUN_TEST(test_out_of_memory);
     RUN_TEST(test_normalize_out_of_memory);

@@ -50,8 +50,10 @@ typedef struct odin3_words_err {
  * Blanks are space and tab; '#' (and "//" in FLIST) at the start of a word ends the line; a word
  * is bare (its backslashes ordinary) or wholly inside double quotes, where \" and \\ are the only
  * escapes. Errors (ODIN3_ERR_PARSE with *err filled, nothing logged): "unterminated quote", "bad
- * escape …", "characters after a closing quote", "empty quoted word", and in O3PROJ "quote inside
- * a word". NO_MEMORY. On failure words keeps its old length.
+ * escape …", "characters after a closing quote", "empty quoted word", in O3PROJ "quote inside a
+ * word", and "NUL byte in word" (after the others: no strtab string holds NUL, PRJ-4; the oracle
+ * would keep the byte — a declared divergence, no corpus file has one). NO_MEMORY. On failure words
+ * keeps its old length.
  */
 odin3_status odin3_words_split(odin3_bytes line, const odin3_words_opts *opts, odin3_vec *words,
                                odin3_words_err *err);
