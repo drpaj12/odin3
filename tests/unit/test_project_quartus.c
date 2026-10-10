@@ -337,7 +337,7 @@ static void test_top_rules(void) {
     /* an .o3proj top already set (import): the Quartus top is a second one */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_project_set_top(proj, odin3_bytes_cstr("x"), (odin3_loc){0}));
-    expect_error("top/last.qsf", "top/last.qsf:2:1: error: syntax: top given twice ('x', 'b')");
+    expect_error("top/last.qsf", "top/last.qsf:2:1: error: syntax: top given twice (first x): 'b'");
 }
 
 /* --- errors -------------------------------------------------------------------------------- */
