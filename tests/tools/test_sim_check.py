@@ -84,8 +84,10 @@ class TbTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp)
 
-    def reference(self, blif: Path, flavor: str, vectors: str, sop: bool = False) -> list[str]:
-        """The reference lines; sop: Yosys keeps .names as $sop cells, run by models/sop.v."""
+    def reference(self, blif: Path, flavor: str, vectors: str, sop: bool = False,
+                  old_yosys: bool = False) -> list[str]:
+        """The reference lines; sop: Yosys keeps .names as $sop cells, run by models/sop.v;
+        old_yosys: the dump spelled as Yosys 0.33 (CI's) spells an empty $sop TABLE."""
         vec = self.tmp / "vec.txt"
         vec.write_text(vectors)
         ref = self.tmp / "ref.v"
@@ -97,7 +99,12 @@ class TbTest(unittest.TestCase):
             res = run([YOSYS, "-q", "-p", script])
             if sop:
                 self.assertIn("$sop", ref.read_text())
-                ref.write_text(ref.read_text() + (HERE / "models" / "sop.v").read_text())
+                text = ref.read_text()
+                if old_yosys:  # what Yosys 0.33 writes for an empty TABLE (DEPTH 0)
+                    text = text.replace(".TABLE()", ".TABLE({0{1'b0}})")
+                ref.write_text(text + (HERE / "models" / "sop.v").read_text())
+                fix = run(["sed", "-i", "-f", HERE / "yosys-compat.sed", ref])
+                self.assertEqual(fix.returncode, 0, fix.stderr)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref,
                   "--cycles", str(len(data_lines(vectors)))])
@@ -142,6 +149,16 @@ class TbTest(unittest.TestCase):
                         ".names i7 b\n0 1\n.end\n")
         vectors = self.ours(blif)
         self.assertEqual(self.reference(blif, "yosys", vectors, sop=True), data_lines(vectors))
+
+    def test_sop_model_old_yosys_empty_table(self) -> None:
+        # CI regression (PR #29): Yosys 0.33 writes the empty TABLE of a DEPTH 0 $sop (a .names
+        # with inputs and no rows) as {0{1'b0}}, which Icarus refuses; yosys-compat.sed fixes it.
+        blif = self.tmp / "empty.blif"
+        blif.write_text(".model w\n.inputs i5 i6 i7\n.outputs e b\n.names i5 i6 e\n"
+                        ".names i7 b\n0 1\n.end\n")
+        vectors = self.ours(blif)
+        self.assertEqual(self.reference(blif, "yosys", vectors, sop=True, old_yosys=True),
+                         data_lines(vectors))
 
     def test_negedge_register_with_yosys(self) -> None:
         blif = self.tmp / "ports.blif"

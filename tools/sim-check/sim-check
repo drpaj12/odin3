@@ -160,6 +160,7 @@ build_reference() {
               "read_blif -sop -wideports $dir/ref.blif; simplemap t:\$sop; write_verilog -noattr $dir/ref.v")
         if [ "$out" = ok ] && [ ! -s "$dir/ref.v" ]; then out=error; fi
         [ "$out" = ok ] || { echo "$out yosys"; return; }
+        sed -i -f "$HERE/yosys-compat.sed" "$dir/ref.v"
         cat "$SC_MODELS/adder.v" "$SC_MODELS/multiply.v" "$SC_MODELS/sop.v" >>"$dir/ref.v"
     fi
     "$HERE/tb.sh" --flavor "$flavor" --blif "$dir/ref.blif" --vectors "$dir/vec.1" \
