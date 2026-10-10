@@ -1,9 +1,10 @@
 # 2A — Source manager, AST and symbol table: design
 
-Status: draft v2 for Peter's review (the AST is a design rule, PHASE2 #1); v2 applies the Opus
-review of a7e3c7f (2 critical, 14 important, minors, 7 non-representable constructs). Phase 2,
-sub-project 2A. Spec: `docs/DESIGN.md` §3, §4.0–4.2, §4.5, §5.3, §6 steps 1–2, §15. Inputs:
-PHASE2 #6 (coverage D1–D5) and #7 (the approved AST decisions); the construct table in
+Status: approved (agent default under Peter's overnight rule, 2026-10-10; open questions Q1–Q5
+decided as recommended). v4: v2–v4 applied the Opus reviews of a7e3c7f, 5733a29 and f9cdcfa
+(the AST is a design rule, PHASE2 #1). Phase 2, sub-project 2A. Spec: `docs/DESIGN.md` §3,
+§4.0–4.2, §4.5, §5.3, §6 steps 1–2, §15. Inputs: PHASE2 #6 (coverage D1–D5) and #7 (the
+approved AST decisions); the construct table in
 `docs/specs/2026-10-09-2C-verilog-coverage.md` (rows cited as `L1`, `M1`, …). Conventions follow
 `docs/IR.md`; each decision is numbered **AST-n**. Where this file and PHASE2 #7 disagree, #7
 wins and this file is corrected.
@@ -61,18 +62,21 @@ line starts, chain records and segment maps only.
 A location is one `uint32_t` offset into a virtual source space (`odin3_loc`, 0 = unknown).
 Every *buffer* occupies `[start, start + len]`; buffers are allocated in creation order from
 offset 1, each reserving `len + 1` so that one-past-the-end is a loc of its own buffer and no
-two buffers touch. A token's loc is its offset inside the buffer it was **spelled** in, and a
-token's `end` is `loc(last byte) + 1` **in the token's own buffer** (the lexer derives it from
-the start loc and the token length, never from the output end offset, which would land in the
-next segment). A node's range is two independent locs (`odin3_range {loc, end}`; `end` 0 =
-unknown) that may lie in different buffers (`assign `OUT = a;` starts in an expansion and ends
-in the file). Chosen over a `{file, line, col}` triple (12 bytes, no chains, no ordering) and
+two buffers touch. A token's loc is `cursor_loc` of the output offset of its **first** byte
+(the buffer it was spelled in), and its `end` is `cursor_loc(output offset of its last byte) + 1`
+— the loc of the last byte plus one, in whichever buffer that byte is spelled — never
+`loc + length`, because one token can span segments: `` x`S `` with `` `define S _y `` lexes as
+the one identifier `x_y`, and a hex literal's digits may come from adjacent macros. A stripped
+comment becomes an inserted space (a segment with `loc` 0), so `a/**/b` never merges into `ab`.
+A node's range is two independent locs (`odin3_range {loc, end}`; `end` 0 = unknown) that may
+lie in different buffers (the `NET_ASSIGN` of `assign `OUT = a;` starts in an expansion and
+ends in the file). Chosen over a `{file, line, col}` triple (12 bytes, no chains, no ordering) and
 over a hash-consed location table (a lookup per token): 4 bytes, decodes in
 O(log buffers + log lines), and the chains come free from the buffer graph.
 
 | field | `FILE` | `EXPANSION` | `MACRO_ARG` | `SCRATCH` |
 |---|---|---|---|---|
-| range covers | the file's bytes (also the `<command line>` buffer: the `+define+`/project `define` texts, one per line, so every macro has a defining buffer) | the macro's **body as spelled in its definition** (offset *k* ↔ `def + k`) | **one contiguous spelled run** of a substituted argument (offset *k* ↔ `def + k`) | pasted/stringified text that exists nowhere (SV `` `` ``/`` `" ``, Phase 5; never made by 2B) |
+| range covers | the file's bytes (also the **`<command line>` buffer**, `name` = `<command line>`, `resolved` and `library` 0: one `` `define NAME(args) body `` line per `+define+`/project `define`, in project order, LF-terminated, so every macro has a defining buffer and lines decode) | the macro's **body as spelled in its definition** (offset *k* ↔ `def + k`) | **one contiguous spelled run** of a substituted argument (offset *k* ↔ `def + k`) | pasted/stringified text that exists nowhere (SV `` `` ``/`` `" ``, Phase 5; never made by 2B) |
 | `name` | path as given (strtab) | macro name | macro name | 0 |
 | `resolved`, `library` | absolute path (0 for `<command line>`); library (`work` default; an included file inherits its includer's) | 0 | 0 | 0 |
 | `parent` | loc of the `` `include `` that opened it, 0 for a project file | the use site: loc of the macro name token | loc of the formal parameter's occurrence inside the `EXPANSION` body it was substituted into | loc of the operator inside the `EXPANSION` body |
@@ -105,29 +109,30 @@ from the file, `(` from E2+0, `xx` from A2, ` * 2` from A3, ` + 1)` from E2+2, `
 
 Every walk below is a loop over buffer records, never recursion.
 
-- **Spelling** of `loc`: in a `FILE`, itself; in an `EXPANSION` or `MACRO_ARG`,
-  `def + (loc − start)`, repeated until a `FILE` (an argument run's `def` may be in a body or
-  another run); `SCRATCH` has none. Example: `xx` (A2+0) → A1+0 → 3:19; `*` (A3+1) → E1+9 →
-  2:27.
-- **Presumed location** (`odin3_srcman_presumed`): follow `parent` while the buffer is not a
-  `FILE`. It is where the outermost macro was invoked: `xx`, `*` and `2` all → E2 → E1 → 3:12.
-  Used for range comparison, `locs[0]` ordering and hierarchical naming.
-- **File location** (`odin3_srcman_file_loc`, Clang's `getFileLoc`): in a `MACRO_ARG`, go to
-  the spelling; in an `EXPANSION`/`SCRATCH`, go to `parent`; repeat until a `FILE`. A token
-  from an argument therefore reports its own spelling, a token from a body the macro's use:
-  `xx` → 3:19; `*` → E1+9 → 3:12; `(` (E2+0) → E1+0 → 3:12. Diagnostics use it (§3.4).
+- **Spelling** of `loc` is **one step**: in a `FILE`, itself; in an `EXPANSION` or
+  `MACRO_ARG`, `def + (loc − start)`, which may itself lie in a body or in another argument
+  run (an argument run's `def` need not be a `FILE` loc); `SCRATCH` has none. The walks below
+  take further steps as they need them. Example: `xx` (A2+0) → A1+0; `*` (A3+1) → E1+9.
+- **Expansion location** (`odin3_srcman_expansion_loc`, Clang's `getExpansionLoc`): follow
+  `parent` while the buffer is not a `FILE`. It is where the outermost macro was invoked:
+  `xx`, `*` and `2` all → E2 → E1 → 3:12. Used for range comparison and `locs[0]` ordering.
+- **File location** (`odin3_srcman_file_loc`, Clang's `getFileLoc`): in a `MACRO_ARG`, take
+  one spelling step; in an `EXPANSION`/`SCRATCH`, go to `parent`; repeat until a `FILE`. A
+  token from an argument therefore reports its own spelling, a token from a body the macro's
+  use: `xx` → A1+0 → 3:19; `*` → E1+9 → 3:12; `(` (E2+0) → E1+0 → 3:12. Diagnostics use it
+  (§3.4).
 - **Line and column**: `odin3_srcman_decode(sm, loc, &pos)` gives `{buffer, line, col}` for a
   `FILE` loc: a binary search on `start`, one in `lines`, `col = 1 + offset − line_start` in
   **bytes** (tabs count 1, UTF-8 counts bytes; Clang's rule). A non-`FILE` loc decodes through
   its file location.
-- **Ends map through `parent_end`** (`odin3_srcman_presumed_end`): while the buffer is not a
+- **Ends map through `parent_end`** (`odin3_srcman_expansion_end`): while the buffer is not a
   `FILE`, `end = parent_end` of that buffer. **Ranges** compare only after both ends are
-  mapped: `odin3_srcman_presumed_range(sm, odin3_range r, &out)` returns `{presumed(loc),
-  presumed_end(end)}` when both are in one `FILE` buffer and ordered, else the start alone
+  mapped: `odin3_srcman_expansion_range(sm, odin3_range r, &out)` returns `{expansion_loc(loc),
+  expansion_end(end)}` when both are in one `FILE` buffer and ordered, else the start alone
   (`end` 0). `loc ≤ end` is required only when both lie in one buffer (§10, rule 1). Worked
   example, `` `define OUT y `` on line 1 (body at 1:13) and `assign `OUT = a;` on line 2
   (`` `OUT `` at 2:8–2:11, `a` at 2:15, `;` at 2:16); E = the expansion (len 1, `parent` 2:8,
-  `parent_end` 2:12): `IDENT y` has `{E+0, E+1}` → presumed range 2:8–2:12; `NET_ASSIGN` has
+  `parent_end` 2:12): `IDENT y` has `{E+0, E+1}` → expansion range 2:8–2:12; `NET_ASSIGN` has
   `{E+0, 2:16}` → 2:8–2:16; `CONT_ASSIGN` `{2:1, 2:17}` → 2:1–2:17. With `` `define W 8 `` and
   `assign x = `W;`, `NET_ASSIGN` ends at the expansion's end → its `parent_end`, one past
   `` `W ``, so the range covers the macro use. A node wholly inside one expansion gets the
@@ -138,7 +143,7 @@ Every walk below is a loop over buffer records, never recursion.
   design-owned source manager for the life of the design, and nothing else need be stored.
   `odin3_srcman_srcloc(sm, odin3_range r, &srcloc)` fills `loc` (raw), `file` (given path of
   the file location, strtab), `line`, `col` (of the file location), `end_line`, `end_col` (of
-  the presumed range; 0 when it is not in one file). A SOURCE record stores one `odin3_srcloc`
+  the expansion range; 0 when it is not in one file). A SOURCE record stores one `odin3_srcloc`
   per node it covers in `locs`; `locs[1..]` are **never** chain entries. The chain is derived
   on demand by `odin3_srcman_chain(sm, loc, visit, user)` (§3.4), which the provenance printer
   and `odin3_diag` call.
@@ -167,9 +172,11 @@ as it reads (`odin3_srcman_add_file`, `odin3_srcman_add_expansion` with a spec s
 `DIRECTIVE` node wherever it occurs (unit level or inside a module, L18/L21). Comments stay in
 the text so that one place, the 2C lexer, records them in the side table with locs from the
 segment map and recognises metacomments (§7); comments inside skipped `` `ifdef `` regions
-and inside macro definitions (a `//` ends a macro text, §19.3.1) are not in any stream and
-are not recorded. `// synopsys translate_off` … `translate_on` (L12, D1) is a skip at the
-same level as `` `ifdef `` and belongs to **2B**: the region leaves the stream and nothing in
+and inside macro definitions (a `//` ends a macro text, §19.3.1) are not in any stream, and
+2B strips a comment inside a macro argument to a space (a `loc` 0 segment), so the lexer
+records only comments whose `loc` is in a `FILE` buffer. `// synopsys translate_off` …
+`translate_on` (L12, D1) is a skip at the same level as `` `ifdef `` and belongs to **2B**:
+the region leaves the stream and nothing in
 it is recorded. The lexer converts a token's output offset to a loc with a monotone cursor
 (`odin3_srcman_cursor_loc`, amortized O(1)); Bison locations are `{loc, end}` pairs. `` `line ``
 never changes a loc. The `UNIT` name is the project file's given path; an included file's
@@ -179,11 +186,14 @@ tokens carry locs in that file's own buffer.
 
 `odin3_srcman_format(sm, loc, &strbuf, style)` writes `file:line:col` of the **file location**
 (§3.2) with the given path (default; tests compare paths relative to the case directory) or
-the resolved path; 0 prints `<unknown>:0:0`. `odin3_srcman_chain(sm, loc, visit, user)` walks
+the resolved path, falling back to the given name when `resolved` is 0 (`<command
+line>:3:9`); 0 prints `<unknown>:0:0`. `odin3_srcman_chain(sm, loc, visit, user)` walks
 outward from the token's own buffer: at a `MACRO_ARG` it reports
 `in argument of macro 'NAME' at <spelling of the formal>` and continues at the run's
-**spelling** (`def`); at an `EXPANSION` it reports `expanded from macro 'NAME' at <spelling of
-the current loc in the body>` and continues at `parent`; at a `SCRATCH` it reports
+spelling, **one `def` step** (`def + (loc − start)`); at an `EXPANSION` it reports
+`expanded from macro 'NAME' at <spelling of the current loc in the body>` (one `def` step,
+always a `FILE` loc since bodies are defined in files or on the command line) and continues
+at `parent`; at a `SCRATCH` it reports
 `pasted by macro 'NAME'` and continues at `parent`; it stops at a `FILE`, then reports one
 `included from file:line` per include level. `odin3_srcman_format_chain` prints those as
 indented lines. For the §3.1 example:
@@ -299,7 +309,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | *Statements* | | | | | | | |
 | `SEQ_BLOCK` | — | opt | — | L? locals (D*) | S* | — | T17, T18 |
 | `PAR_BLOCK` | — | opt | — | L? locals | S* | — | T15 REJECT |
-| `BLOCKING_ASSIGN` | — | — | — | E lhs, E rhs, (`DELAY`/`EVENT_CONTROL`)? | — | — | T7, T11 |
+| `BLOCKING_ASSIGN` | — | — | — | E lhs, (`DELAY`/`EVENT_CONTROL`)? intra-assignment control, E rhs (source order: `a = #1 b`) | — | — | T7, T11 |
 | `NONBLOCKING_ASSIGN` | — | — | — | as `BLOCKING_ASSIGN` | — | — | T8 |
 | `PROC_CONT_ASSIGN` | (4) `assign deassign force release` | — | — | E lhs, E? rhs | — | — | T16 REJECT |
 | `IF` | — | — | — | E, S, S? | — | — | C1, C2 |
@@ -472,7 +482,7 @@ Rules:
   entry before it writes anything (`make_marked` pops the pending stack only after that); the
   payload builders allocate the bytes first, then the record. On `ODIN3_ERR_NO_MEMORY` the
   store, the pending stack and every ID handed out are unchanged.
-- **Finish.** `odin3_ast_finish` sorts the comment table by presumed loc (stable; §7), frees
+- **Finish.** `odin3_ast_finish` sorts the comment table by expansion loc (stable; §7), frees
   the scratch, and seals the store: a later `make`, `attach` or `comment_add` is
   `INVALID_ARG`. The read API works before and after; `comments_in` only after.
 - **Ownership.** The AST owns its nodes, child table, payloads, bytes, comments and attribute
@@ -587,9 +597,9 @@ it; the construct's own warning covers them.
 
 **Comments** go to a side table keyed by location (DESIGN §4.1, PHASE2 #7): a vec of
 `{loc, end, kind LINE|BLOCK, flags METACOMMENT, text}` with text in the AST arena, appended in
-stream order and **sorted once by presumed loc at `finish`** (included files get their buffers
+stream order and **sorted once by expansion loc at `finish`** (included files get their buffers
 after the includer, so stream order is not loc order). `odin3_ast_comments_in(ast, odin3_range r)`
-maps the range to presumed locations and returns the comments inside it by binary search; a
+maps the range to expansion locs and returns the comments inside it by binary search; a
 range in an includer never covers an included file's comments (they live in another buffer),
 so a consumer that wants them asks per file (`odin3_ast_comments_of(ast, buffer)`). Comments
 are not nodes and never reach the IR.
@@ -718,7 +728,7 @@ Debug builds and on demand, like IR `check`; `ODIN3_ERR_CHECK` on an error; iter
    rule the table notes (an `INSTANCE` under an `INSTANTIATION` has a name); every name a
    strtab ID.
 5. **E** the store's recorded maximum height is correct and ≤ `ODIN3_AST_MAX_DEPTH`.
-6. **E** after `finish`: comments sorted by presumed loc; attribute spans valid; `NUMBER`
+6. **E** after `finish`: comments sorted by expansion loc; attribute spans valid; `NUMBER`
    payload agrees with `sub`/flags (`nbits` ≤ cap; `has_xz` matches the bits).
 7. **E** with form `ELABORATED`: the §4.6 subset.
 8. **E** symbol table (when present): every scope's parent and every symbol's scope exist,
@@ -728,11 +738,15 @@ Debug builds and on demand, like IR `check`; `ODIN3_ERR_CHECK` on an error; iter
 
 Unit tests, one file per area, `tests/unit/test_ast_<area>.c` (Unity, ASan/UBSan):
 
-- `srcman`: buffers of all four kinds; line maps; spelling/presumed decode; nested expansion
-  inside an include; an argument inside a nested expansion; a file included twice; the same
-  file in two libraries; cross-buffer ranges (`assign `OUT = a;`, `W + 1` with `W` a macro) through
-  `presumed_range` and `srcloc`; the chain printed exactly; the segment cursor; comments after
-  an include; the three limits; OOM injection; decode and `cursor_loc` throughput (≥ 10M/s in
+- `srcman`: buffers of all four kinds; line maps; spelling (one step, run-in-run), expansion
+  and file location of every token of the §3.1 example; nested expansion inside an include;
+  a file included twice; the same file in two libraries; cross-buffer ranges (`assign `OUT =
+  a;`, `W + 1` with `W` a macro) through `expansion_range` and `srcloc`; a token spanning
+  segments (`` x`S `` → one identifier ending at `cursor_loc(last byte) + 1`; hex digits from
+  two adjacent macros); `a/**/b` staying two tokens (the `loc` 0 space segment); a comment
+  inside a macro argument not recorded; the `<command line>` buffer's `def` and its `format`
+  output; the chain printed exactly (§3.4's four cases); the segment cursor; comments after an
+  include; the three limits; OOM injection; decode and `cursor_loc` throughput (≥ 10M/s in
   Release, recorded).
 - `build`: every kind at its minimum and maximum children; every shape rule of §5 rejected with
   `INVALID_ARG`; `make_marked`/`unwind` with nested marks; AST-5 ordering; attach once;
@@ -775,7 +789,7 @@ parse-only ≤ 1 s. Numbers go to `docs/PHASE2.md`.
 ## 12. Review focus
 
 1. **Locations through the preprocessor.** The segment map, the `MACRO_ARG` parent/def pair
-   and the presumed-location loop are where a diagnostic silently lands on the wrong column, on
+   and the expansion-loc loop are where a diagnostic silently lands on the wrong column, on
    the macro definition instead of its use, or on an include's parent. Reviewers should trace one
    `` `define F(x) (x + `W) `` used inside an included file through §3.1–3.2 by hand.
 2. **Slot-table drift.** A grammar action that fills `CASE_ITEM` expressions-first, or
@@ -808,9 +822,9 @@ handle gains the owned source manager, the per-run AST list with symbol tables, 
 flag. 1D's pass registry definition gains `wants_ast`. The ABI is bumped once, to the version
 after 1D's.
 
-## 14. Open questions for Peter
+## 14. Open questions (decided as recommended under the overnight rule, 2026-10-10)
 
-Everything else is decided. Recommendation first.
+Each was Peter's call; the recommendation stands as the decision, the alternative is recorded.
 
 1. **Design owns the source manager, the per-run ASTs and their symbol tables** (AST-1,
    AST-15), and `odin3_srcloc` gains the **raw** `loc` (a 1B struct change; chains are derived
