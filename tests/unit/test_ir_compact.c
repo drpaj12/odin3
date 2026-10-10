@@ -86,7 +86,7 @@ static odin3_celltype_id type_id(const char *name) {
 
 /* A SOURCE record at line `line` of t7.v in the reader run. */
 static odin3_prov_id src_prov(uint32_t line) {
-    odin3_srcloc loc = {intern("t7.v"), line, 1, line, 1};
+    odin3_srcloc loc = {intern("t7.v"), line, 1, line, 1, 0};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     odin3_prov_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&reader, &origin, &id));
