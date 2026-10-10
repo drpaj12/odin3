@@ -222,8 +222,12 @@ def set_top(ctx: Ctx, name: str, at: str | None) -> None:
 COUNT_MAX = 2**32 - 1
 
 
+def is_count(text: str) -> bool:
+    return re.fullmatch("[0-9]+", text) is not None
+
+
 def count_of(text: str, at: str) -> int:
-    if not re.fullmatch("[0-9]+", text):
+    if not is_count(text):
         raise syntax(at, f"expected a count, got {text!r}", text)
     if int(text) > COUNT_MAX:
         raise syntax(at, f"count too large: {text}", text)
@@ -410,7 +414,7 @@ def o3_split(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
         width, rest = True, rest[1:]
     if rest:
         if len(rest) != 2 or rest[0] != "depth" or not (rest[1] in ("min", "max")
-                                                        or rest[1].isdigit()):
+                                                        or is_count(rest[1])):
             raise syntax(at, f"usage: {usage}")
         depth = rest[1]
     if not width and depth is None:
@@ -763,7 +767,7 @@ def qsf_options(words: list[str], at: str, allowed: Sequence[str]) -> tuple[dict
     i = 0
     while i < len(words):
         w = words[i]
-        if w.startswith("-") and len(w) > 1 and not w[1].isdigit():
+        if w.startswith("-") and len(w) > 1 and not is_count(w[1]):
             if w not in QUARTUS_OPTIONS or w not in allowed:
                 raise ProjectError("unknown_option", at, [w], f"option {w} not allowed here")
             if w not in QSF_FLAGS:
@@ -1050,7 +1054,7 @@ def odin2_memory(ctx: Ctx, elem: XElem, at: str) -> None:
     width = elem.attrs.get("split_memory_width", "0")
     depth = elem.attrs.get("split_memory_depth")
     if width not in ("0", "1") or (depth is not None and depth not in ("min", "max")
-                                   and not depth.isdigit()):
+                                   and not is_count(depth)):
         raise syntax(at, "split_memory_width 0|1, split_memory_depth min|max|<n>")
     if width == "1" or depth is not None:
         ctx.record["rules"].append(split_rule("$mem", width == "1", depth))
