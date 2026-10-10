@@ -105,6 +105,11 @@ odin3_status odin3_api_invalid(const char *fn) {
     return ODIN3_ERR_INVALID_ARG;
 }
 
+odin3_status odin3_api_invalid_why(const char *fn, const char *why) {
+    odin3_log(ODIN3_LOG_ERROR, "%s: invalid argument: %s", fn, why);
+    return ODIN3_ERR_INVALID_ARG;
+}
+
 const char *odin3_api_str(const odin3_design *design, uint32_t str) {
     const char *text = odin3_strtab_get(odin3_design_strtab(design), str);
     return text != NULL ? text : "";

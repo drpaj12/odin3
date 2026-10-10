@@ -86,6 +86,7 @@ class Odin3:
         self._source_cb = self.ffi.callback("odin3_source_visit", _on_source(self))
         self._object_cb = self.ffi.callback("odin3_prov_object_visit", _on_object(self))
         self._log_cb = self.ffi.callback("odin3_log_sink", _on_log(self))
+        self._captures: list[Any] = []  # handles of the open capture_log blocks, innermost last
 
     def version(self) -> str:
         return str(self.ffi.string(self.lib.odin3_version_string()).decode())
@@ -133,16 +134,25 @@ class Odin3:
 
     @contextmanager
     def capture_log(self) -> Iterator[list[LogRecord]]:
-        """Collect the log's messages (INFO and above) while the block runs; stderr afterwards."""
+        """Collect the log's messages (INFO and above) while the block runs.
+
+        Nestable: an inner capture takes the messages while it runs, then the enclosing one
+        resumes. After the outermost block messages go to stderr again (the ABI has no sink
+        getter, so a sink installed outside this binding is not restored). The level is raised
+        to INFO for the block if it was lower, and restored after it.
+        """
         records: list[LogRecord] = []
         handle = self.ffi.new_handle(records)
         old_level = self.lib.odin3_log_get_level()
         self.call("odin3_log_set_level", max(int(old_level), int(self.lib.ODIN3_LOG_INFO)))
+        self._captures.append(handle)
         self.lib.odin3_log_set_sink(self._log_cb, handle)
         try:
             yield records
         finally:
-            self.lib.odin3_log_set_sink(self.ffi.NULL, self.ffi.NULL)
+            self._captures.remove(handle)
+            outer = self._captures[-1] if self._captures else self.ffi.NULL
+            self.lib.odin3_log_set_sink(self._log_cb if self._captures else self.ffi.NULL, outer)
             self.call("odin3_log_set_level", old_level)
 
 

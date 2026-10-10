@@ -46,7 +46,9 @@ static int load_plugin(const char *path) {
                       odin3_status_string(status));
         return EXIT_FAIL;
     }
-    (void)printf("odin3: loaded plugin %s\n", path);
+    char msg[MSG_BUF];
+    (void)snprintf(msg, sizeof msg, "loaded plugin %s", path);
+    (void)odin3_log_write(ODIN3_LOG_INFO, msg);
     return EXIT_OK;
 }
 
@@ -130,14 +132,15 @@ static odin3_status each_script(char **argv, int argc, odin3_design *design) {
     return st;
 }
 
-/* A --top that no pass applied (no read_blif or hierarchy ran) is reported, not ignored. */
+/*
+ * A --top that no pass applied is reported, not ignored. read_blif applies it after reading (or
+ * fails when the file has no such module), and only read_blif creates modules, so the option was
+ * applied exactly when the design has a module of that name; a later `hierarchy --top` may then
+ * have chosen another top on purpose, which is not warned about.
+ */
 static void warn_unapplied_top(const odin3_design *design, const char *top) {
     uint32_t id = 0;
-    const char *name = NULL;
-    if (odin3_design_get_top_module(design, &id) == ODIN3_OK && id != 0) {
-        (void)odin3_module_get_name(design, id, &name);
-    }
-    if (top != NULL && (name == NULL || strcmp(name, top) != 0)) {
+    if (top != NULL && odin3_design_lookup_module(design, top, &id) == ODIN3_OK && id == 0) {
         char msg[MSG_BUF];
         (void)snprintf(msg, sizeof msg, "--top %s was not applied (no read_blif or hierarchy ran)",
                        top);

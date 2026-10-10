@@ -78,7 +78,7 @@ static bool name_ok(const char *name) {
         return false;
     }
     for (const char *at = name; *at != '\0'; at++) {
-        if (*at < NAME_CHAR_MIN || *at > NAME_CHAR_MAX || *at == ';' || *at == '#') {
+        if (*at < NAME_CHAR_MIN || *at > NAME_CHAR_MAX || strchr(";#\"", *at) != NULL) {
             return false;
         }
     }

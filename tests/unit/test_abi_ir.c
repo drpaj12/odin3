@@ -377,6 +377,8 @@ static void test_sop_parameters(void) {
     TEST_ASSERT_EQUAL_STRING("2", param_text(sop, 0));
     TEST_ASSERT_EQUAL_STRING("11 1\n", param_text(sop, 1));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_int(design, sop, 1, &width));
+    TEST_ASSERT_TRUE(
+        log_has("odin3_node_get_param_int: invalid argument: the parameter is not an INT"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_text(design, sop, 2, NULL));
     const char *text = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_text(design, sop, 2, &text));

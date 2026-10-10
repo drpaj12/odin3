@@ -7,12 +7,9 @@
  * and runs N cycles. --max-cells sets the flattening budget (odin3_sim_options; default 2^24 cells
  * and instances, sim/sim.h), so a small hierarchical file cannot expand past memory. Each cycle
  * drives every non-clock input bit from the seeded PRNG (odin3_sim_drive_random), runs
- * odin3_sim_cycle and prints `cycle inputs outputs`: the cycle number from 0, then the inputs it
- * drove and the outputs after it, each field the bits of every port in port order, each port MSB
- * first, clock bits left out ("-" for an empty field). A header of '#' lines comes first: `#
- * odin3-sim-vectors in.blif seed S cycles N`, then one line per port in port order: `# input NAME
- * W` (W = its non-clock bits, omitted when it has none), `# clock NAME K` per clock bit K of an
- * input, `# output NAME W`. Output is a function of the netlist and S.
+ * odin3_sim_cycle and prints `cycle inputs outputs`, in the format of sim/vectors.h (shared with
+ * the `sim` pass) under the title `odin3-sim-vectors in.blif`. Output is a function of the
+ * netlist and S.
  *
  * Exit status: 0 on success; 1 when a library or the BLIF cannot be read or the design cannot be
  * simulated (the reason is logged on stderr); 2 on a usage error.
@@ -23,7 +20,9 @@
 #include "odin3/odin3.h"
 #include "sim/prng.h"
 #include "sim/sim.h"
+#include "sim/vectors.h"
 #include "techlib/reader.h"
+#include "util/str.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -125,84 +124,28 @@ static odin3_status read_design(odin3_design *design, const sv_args *args) {
     return odin3_blif_read(design, args->in_path);
 }
 
-static uint32_t non_clock_bits(const odin3_sim *sim, uint32_t port) {
-    uint32_t count = 0;
-    for (uint32_t k = 0; k < odin3_sim_input_width(sim, port); k++) {
-        count += odin3_sim_input_is_clock(sim, (odin3_sim_bit){port, k}) ? 0U : 1U;
+/* Prints the header and one line per cycle (sim/vectors.h); false on out of memory. */
+static bool run_cycles(odin3_sim *sim, const sv_args *args) {
+    odin3_strbuf title;
+    odin3_strbuf line;
+    odin3_strbuf_init(&title);
+    odin3_strbuf_init(&line);
+    odin3_status st = odin3_strbuf_appendf(&title, "odin3-sim-vectors %s", args->in_path);
+    if (st == ODIN3_OK) {
+        st = odin3_sim_vectors_header(
+            sim, &(odin3_sim_vectors){title.data, args->seed, args->cycles}, &line);
     }
-    return count;
-}
-
-static void print_header(const odin3_sim *sim, const sv_args *args) {
-    (void)printf("# odin3-sim-vectors %s seed %llu cycles %u\n", args->in_path,
-                 (unsigned long long)args->seed, args->cycles);
-    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
-        const char *name = odin3_sim_input_name(sim, port);
-        uint32_t width = non_clock_bits(sim, port);
-        if (width > 0) {
-            (void)printf("# input %s %u\n", name, width);
-        }
-        for (uint32_t k = 0; k < odin3_sim_input_width(sim, port); k++) {
-            if (odin3_sim_input_is_clock(sim, (odin3_sim_bit){port, k})) {
-                (void)printf("# clock %s %u\n", name, k);
-            }
-        }
-    }
-    for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
-        (void)printf("# output %s %u\n", odin3_sim_output_name(sim, port),
-                     odin3_sim_output_width(sim, port));
-    }
-}
-
-/* Prints the non-clock input bits, each port MSB first; '-' when there are none. */
-static void print_inputs(const odin3_sim *sim) {
-    bool any = false;
-    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
-        for (uint32_t k = odin3_sim_input_width(sim, port); k-- > 0;) {
-            const odin3_sim_bit at = {port, k};
-            bool bit = false;
-            if (!odin3_sim_input_is_clock(sim, at) &&
-                odin3_sim_get_input(sim, at, &bit) == ODIN3_OK) {
-                (void)putchar(bit ? '1' : '0');
-                any = true;
-            }
-        }
-    }
-    if (!any) {
-        (void)putchar('-');
-    }
-}
-
-/* Prints the output bits, each port MSB first; '-' when there are none. */
-static void print_outputs(const odin3_sim *sim) {
-    bool any = false;
-    for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
-        for (uint32_t k = odin3_sim_output_width(sim, port); k-- > 0;) {
-            bool bit = false;
-            if (odin3_sim_get_output(sim, (odin3_sim_bit){port, k}, &bit) == ODIN3_OK) {
-                (void)putchar(bit ? '1' : '0');
-                any = true;
-            }
-        }
-    }
-    if (!any) {
-        (void)putchar('-');
-    }
-}
-
-static void run_cycles(odin3_sim *sim, const sv_args *args) {
+    (void)fputs(st == ODIN3_OK ? line.data : "", stdout);
     odin3_prng prng;
     odin3_prng_seed(&prng, args->seed);
-    print_header(sim, args);
-    for (uint32_t cyc = 0; cyc < args->cycles; cyc++) {
-        odin3_sim_drive_random(sim, &prng);
-        odin3_sim_cycle(sim);
-        (void)printf("%u ", cyc);
-        print_inputs(sim);
-        (void)putchar(' ');
-        print_outputs(sim);
-        (void)putchar('\n');
+    for (uint32_t cyc = 0; st == ODIN3_OK && cyc < args->cycles; cyc++) {
+        odin3_strbuf_clear(&line);
+        st = odin3_sim_vectors_step(sim, &prng, cyc, &line);
+        (void)fputs(st == ODIN3_OK ? line.data : "", stdout);
     }
+    odin3_strbuf_free(&title);
+    odin3_strbuf_free(&line);
+    return st == ODIN3_OK;
 }
 
 static int simulate(const sv_args *args) {
@@ -216,8 +159,8 @@ static int simulate(const sv_args *args) {
     if (read_design(design, args) == ODIN3_OK &&
         odin3_sim_build_opts(design, (odin3_module_id){1}, &(odin3_sim_options){args->max_cells},
                              &sim) == ODIN3_OK) {
-        run_cycles(sim, args);
-        rc = fflush(stdout) == 0 ? SV_OK : SV_FAIL;
+        bool ran = run_cycles(sim, args);
+        rc = fflush(stdout) == 0 && ran ? SV_OK : SV_FAIL;
     }
     odin3_sim_destroy(sim);
     odin3_design_destroy(design);

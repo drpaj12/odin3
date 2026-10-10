@@ -43,7 +43,7 @@ ODIN3_EXPORT odin3_status odin3_attr_get_string(const odin3_design *design, odin
         val = odin3_attr_get(mod, ref, key_str);
     }
     if (val != NULL && val->kind != ODIN3_VAL_STRING) {
-        return odin3_api_invalid(__func__);
+        return odin3_api_invalid_why(__func__, "the attribute is not a string");
     }
     *value = val != NULL ? odin3_api_str(design, val->str) : NULL;
     return ODIN3_OK;

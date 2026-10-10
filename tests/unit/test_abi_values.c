@@ -216,6 +216,8 @@ static void test_attr_not_a_string(void) {
         ODIN3_ERR_INVALID_ARG,
         odin3_attr_get_string(design, (odin3_obj){module_id, ODIN3_OBJ_MODULE, 0}, "num", &value));
     TEST_ASSERT_EQUAL_STRING("keep", value);
+    TEST_ASSERT_EQUAL_STRING(
+        "odin3_attr_get_string: invalid argument: the attribute is not a string", last_msg);
 }
 
 /* Setting an attribute of a dead object fails, logged in the ABI's form. */

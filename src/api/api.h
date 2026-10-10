@@ -42,6 +42,10 @@ const odin3_module *odin3_api_obj(const odin3_design *design, odin3_obj obj, odi
 /* Logs "<fn>: invalid argument …" at ODIN3_LOG_ERROR and returns ODIN3_ERR_INVALID_ARG. */
 odin3_status odin3_api_invalid(const char *fn);
 
+/* Logs "<fn>: invalid argument: <why>" at ODIN3_LOG_ERROR and returns ODIN3_ERR_INVALID_ARG; for a
+ * well-formed request the object cannot answer (e.g. a parameter of another kind). */
+odin3_status odin3_api_invalid_why(const char *fn, const char *why);
+
 /* The design's string for strtab ID str ("" for 0); stable until the design is destroyed. */
 const char *odin3_api_str(const odin3_design *design, uint32_t str);
 

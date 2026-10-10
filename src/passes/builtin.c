@@ -1,4 +1,4 @@
-/* builtin.c — the built-in passes: read_blif, write_blif, check, compact, stats, hierarchy. */
+/* builtin.c — the pass table and the BLIF, techlib, check, compact, stats, hierarchy passes. */
 #include "passes/builtin.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
@@ -435,7 +435,16 @@ static const odin3_pass_def HIERARCHY = {
     hierarchy_run, NULL};
 
 /* Registry order. */
-const odin3_pass_def *const odin3_builtin_passes[] = {
-    &READ_BLIF, &READ_TECHLIB, &WRITE_BLIF, &CHECK, &COMPACT, &STATS, &HIERARCHY};
+const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
+                                                      &READ_TECHLIB,
+                                                      &WRITE_BLIF,
+                                                      &odin3_pass_write_json,
+                                                      &odin3_pass_write_verilog,
+                                                      &odin3_pass_write_dot,
+                                                      &CHECK,
+                                                      &COMPACT,
+                                                      &STATS,
+                                                      &odin3_pass_sim,
+                                                      &HIERARCHY};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

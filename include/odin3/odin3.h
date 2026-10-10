@@ -303,7 +303,7 @@ odin3_status odin3_script_resolve_file(const char *path);
 typedef odin3_status (*odin3_pass_run_fn)(odin3_design *design, const char *args, void *user);
 
 /*
- * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';' or '#'
+ * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';', '#' or '"'
  * (a script word); help: its one-line usage, shown by `odin3 --help`; run: its body; user:
  * passed to run as is. reserved: must be all NULL (later ABI versions give the slots a meaning).
  */

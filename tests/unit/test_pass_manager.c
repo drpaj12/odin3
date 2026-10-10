@@ -242,6 +242,7 @@ static void test_register_rejects(void) {
     static const odin3_pass_def dup_builtin = {"check", "x", count_pass, NULL};
     static const odin3_pass_def blank = {"a b", "x", count_pass, NULL};
     static const odin3_pass_def semi = {"a;b", "x", count_pass, NULL};
+    static const odin3_pass_def quote = {"a\"b", "x", count_pass, NULL}; /* opens a quote */
     static const odin3_pass_def empty = {"", "x", count_pass, NULL};
     static const odin3_pass_def no_run = {"t_no_run", "x", NULL, NULL};
     static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass, NULL};
@@ -250,6 +251,7 @@ static void test_register_rejects(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&dup_builtin));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&blank));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&semi));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&quote));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&empty));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&no_run));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&no_help));

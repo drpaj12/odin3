@@ -130,7 +130,7 @@ ODIN3_EXPORT odin3_status odin3_node_get_param_int(const odin3_design *design, o
     }
     const odin3_value *val = odin3_node_param(at.module, at.id, index);
     if (val->kind != ODIN3_VAL_INT) {
-        return odin3_api_invalid(__func__);
+        return odin3_api_invalid_why(__func__, "the parameter is not an INT");
     }
     *value = val->i;
     return ODIN3_OK;

@@ -4,8 +4,10 @@ Every committed BLIF fixture is read through the cffi binding and walked from Py
 per-module counts and the cell-type histogram must equal what the C `stats` pass logs for the
 same design (captured through the ABI's log sink, not re-implemented). Run through CTest
 `python_walk`, which sets ODIN3_LIB (and preloads the sanitizer runtime for a Debug library).
-Skipped where cffi is missing, or where ODIN3_LIB is unset (`python_tools` runs this directory
-without a library and without the sanitizer runtime).
+Skipped where cffi is missing, unless ODIN3_REQUIRE_CFFI=1 (CI sets it: there a missing cffi
+fails the test instead of hiding it), and where ODIN3_LIB is unset (`python_tools` runs this
+directory without a library and without the sanitizer runtime). CTest `python_walk` reports
+either skip as Skipped, never as Passed.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ try:
     HAVE_CFFI = True
 except ImportError:
     HAVE_CFFI = False
+REQUIRE_CFFI = os.environ.get("ODIN3_REQUIRE_CFFI") == "1"
 
 if TYPE_CHECKING or HAVE_CFFI:
     import walk
@@ -50,13 +53,15 @@ def techlibs_for(path: Path) -> list[Path]:
     return [VTR_LIB] if path.parent.name == "techlib" else []
 
 
-@unittest.skipUnless(HAVE_CFFI, "cffi not installed")
+@unittest.skipUnless(HAVE_CFFI or REQUIRE_CFFI, "cffi not installed")
 @unittest.skipUnless(os.environ.get("ODIN3_LIB"), "ODIN3_LIB not set (run CTest python_walk)")
 class PythonWalkTest(unittest.TestCase):
     odin3: Odin3
 
     @classmethod
     def setUpClass(cls) -> None:
+        if not HAVE_CFFI:
+            raise AssertionError("ODIN3_REQUIRE_CFFI=1 but cffi is not installed")
         cls.odin3 = Odin3()
         # Readers log timings and check warnings at INFO/WARN; keep the test output to errors.
         cls.odin3.call("odin3_log_set_level", cls.odin3.lib.ODIN3_LOG_ERROR)
@@ -212,6 +217,21 @@ class PythonWalkTest(unittest.TestCase):
             with self.assertRaises(Odin3Error) as ctx:
                 design.run_script("no_such_pass")
             self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_PARSE)
+
+    def test_capture_log_nests(self) -> None:
+        odin3 = self.odin3
+        with odin3.capture_log() as outer:
+            odin3.call("odin3_log_write", odin3.lib.ODIN3_LOG_INFO, b"before")
+            with odin3.capture_log() as inner:
+                odin3.call("odin3_log_write", odin3.lib.ODIN3_LOG_INFO, b"inside")
+            odin3.call("odin3_log_write", odin3.lib.ODIN3_LOG_INFO, b"after")
+            with self.read(HAND_BODY) as design:
+                self.assertGreater(len(walk.stats_lines(design)), 1)  # itself a capture
+            odin3.call("odin3_log_write", odin3.lib.ODIN3_LOG_INFO, b"last")
+        self.assertEqual([rec.message for rec in inner], ["inside"])
+        self.assertEqual([rec.message for rec in outer][:2], ["before", "after"])
+        self.assertEqual(outer[-1].message, "last")
+        self.assertEqual(int(odin3.lib.odin3_log_get_level()), int(odin3.lib.ODIN3_LOG_ERROR))
 
     def test_walk_script(self) -> None:
         out = io.StringIO()

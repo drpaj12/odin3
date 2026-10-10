@@ -361,10 +361,10 @@ static void test_pass_register_rejects(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(NULL));
     TEST_ASSERT_TRUE(log_has("odin3_pass_register: invalid argument"));
     const odin3_plugin_pass bad[] = {
-        {"abi_rej", "h", NULL, NULL, {NULL}},       {NULL, "h", echo_run, NULL, {NULL}},
-        {"abi_rej", NULL, echo_run, NULL, {NULL}},  {"abi rej", "h", echo_run, NULL, {NULL}},
-        {"", "h", echo_run, NULL, {NULL}},          {"check", "h", echo_run, NULL, {NULL}},
-        {"abi_rej", "h", echo_run, NULL, {&marker}}};
+        {"abi_rej", "h", NULL, NULL, {NULL}},      {NULL, "h", echo_run, NULL, {NULL}},
+        {"abi_rej", NULL, echo_run, NULL, {NULL}}, {"abi rej", "h", echo_run, NULL, {NULL}},
+        {"", "h", echo_run, NULL, {NULL}},         {"check", "h", echo_run, NULL, {NULL}},
+        {"abi\"rej", "h", echo_run, NULL, {NULL}}, {"abi_rej", "h", echo_run, NULL, {&marker}}};
     uint32_t before = odin3_pass_get_count();
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&bad[i]));

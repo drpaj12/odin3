@@ -23,8 +23,8 @@ typedef odin3_status (*odin3_pass_fn)(odin3_pass_ctx *ctx, odin3_design *design,
                                       void *user);
 
 /*
- * One pass. name: non-empty, printable ASCII without blanks, ';' or '#' (a script word); help: one
- * line, its usage (shown by `odin3 --help`); run: the body; user: handed to run on every call
+ * One pass. name: non-empty, printable ASCII without blanks, ';', '#' or '"' (a script word); help:
+ * one line, its usage (shown by `odin3 --help`); run: the body; user: handed to run on every call
  * (NULL for the built-ins; a plugin pass's own definition for the ABI's plugin passes).
  */
 typedef struct odin3_pass_def {

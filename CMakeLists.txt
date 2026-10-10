@@ -60,6 +60,8 @@ add_library(odin3_core OBJECT
     src/backends/blif/writer.c
     src/passes/manager.c
     src/passes/builtin.c
+    src/passes/write_formats.c
+    src/passes/sim_pass.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -102,6 +104,7 @@ add_library(odin3_core OBJECT
     src/sim/eval.c
     src/sim/levelize.c
     src/sim/prng.c
+    src/sim/vectors.c
     src/sim/word.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
@@ -245,6 +248,9 @@ if(BUILD_TESTING)
         set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
     endif()
+    odin3_add_unit_test(test_pass_outputs)
+    target_compile_definitions(test_pass_outputs PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_pass_manager)
     target_compile_definitions(test_pass_manager PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
@@ -358,13 +364,13 @@ if(BUILD_TESTING)
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage techlib plugin)
+                           help_runs_nothing check_flag usage techlib plugin writers sim)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
         set_tests_properties(cli_${_case} PROPERTIES LABELS unit
-            ENVIRONMENT "ODIN3_EXAMPLE_PLUGIN=$<TARGET_FILE:example_plugin>")
+            ENVIRONMENT "ODIN3_EXAMPLE_PLUGIN=$<TARGET_FILE:example_plugin>;ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
     endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
@@ -446,11 +452,12 @@ if(BUILD_TESTING)
     set_tests_properties(python_example_plugin PROPERTIES
         LABELS unit SKIP_REGULAR_EXPRESSION "No module named 'cffi'")
     # Phase 1 exit test (1D): Python walks every committed BLIF fixture through the C ABI and
-    # gets exactly the `stats` pass's counts and cell-type histogram.
+    # gets exactly the `stats` pass's counts and cell-type histogram. Any unittest skip (no cffi;
+    # no ODIN3_LIB) is reported as Skipped; with ODIN3_REQUIRE_CFFI=1 (CI) a missing cffi fails.
     add_test(NAME python_walk
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_walk
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_walk PROPERTIES
-        LABELS tools SKIP_REGULAR_EXPRESSION "skipped 'cffi not installed'")
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
 endif()
