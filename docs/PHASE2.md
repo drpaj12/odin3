@@ -56,3 +56,23 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    2^20 reader width cap, `odin3_attr_foreach` and `odin3_design_set_top`, ABI v3 naming and the
    enum move into `odin3.h`, the 1C BLIF rules, the project-grammar decisions of PHASE1 #19, and
    1G's decisions numbered #20/#21.
+6. **Coverage audit** (`docs/specs/2026-10-09-2C-verilog-coverage.md`, 159 constructs: 100 MUST, 25
+   SHOULD, 10 IGNORE, 24 REJECT) is the requirement list for 2C/2D; Odin II's grammar is a starting
+   point, not a spec. Its decisions (Peter, 2026-10-09):
+   - D1 `full_case`/`parallel_case` (attributes and `// synopsys` metacomments) honoured as Yosys
+     does, with a warning per use;
+   - D2 initial values: constant `initial` assignments, declaration initialisers and
+     `$readmemh/b` set FF/RAM init values; other `initial` content ignored with a warning;
+   - D3 tri-state: parse all; `z` drives elaborate to `$tribuf` only on top-level `inout`/output
+     ports; an internal tri-state net is a located error until the IR has a tri-state net model;
+   - D4 `wand/wor/triand/trior` resolve as AND/OR of their drivers; `uwire` is a `wire` with a
+     single-driver check;
+   - D5 illegal-but-Parmys-accepted forms (`input reg`, `input integer`) accepted with a located
+     warning.
+7. **AST (2A)** (Peter, 2026-10-09): arena storage with typed 32-bit IDs like the IR (compact node
+   records: kind, location, child span, per-kind payload; explicit-stack traversal); one AST for
+   parsed and elaborated forms (the slang adapter emits the elaborated subset); locations are
+   file/line/col plus the macro-expansion and include chain; the symbol table is built during
+   elaboration (2D), the parser records names only. Agent defaults: comments in a side table keyed
+   by location; `(* *)` attributes kept on AST nodes and carried to the IR; the AST is freed after
+   elaboration unless a pass asks to keep it.
