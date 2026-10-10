@@ -68,6 +68,7 @@ add_library(odin3_core OBJECT
     src/frontends/project/words.c
     src/frontends/project/paths.c
     src/frontends/project/dump.c
+    src/frontends/project/tcl.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -213,6 +214,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_project_record)
     target_compile_definitions(test_project_record PRIVATE
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    odin3_add_unit_test(test_project_tcl)
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE
