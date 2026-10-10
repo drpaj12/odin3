@@ -1101,16 +1101,18 @@ static odin3_celltype_id add_hmul(void) {
         {"MODE", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, MODE_DEFAULT, 2, 0, 0}},
         {"TAG", ODIN3_VAL_STRING, {ODIN3_VAL_STRING, 0, NULL, 0, 0, 0}},
     };
-    odin3_celltype_def def = {"hmul", ODIN3_GRAN_HARD, 0, HMUL_PORTS, 2, params, 3, NULL, NULL};
+    odin3_celltype_def def = {
+        "hmul", ODIN3_GRAN_HARD, 0, HMUL_PORTS, 2, params, 3, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     return id;
 }
 
 static odin3_node_id build_blackboxes(void) {
-    odin3_celltype_def adder = {"adder", ODIN3_GRAN_BLACKBOX, 0, ADDER_PORTS, 5, NULL, 0, NULL,
-                                NULL};
-    odin3_celltype_def bbv = {"bbv", ODIN3_GRAN_BLACKBOX, 0, BBV_PORTS, 2, NULL, 0, NULL, NULL};
+    odin3_celltype_def adder = {
+        "adder", ODIN3_GRAN_BLACKBOX, 0, ADDER_PORTS, 5, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_def bbv = {
+        "bbv", ODIN3_GRAN_BLACKBOX, 0, BBV_PORTS, 2, NULL, 0, NULL, NULL, NULL, NULL};
     (void)declare(&adder);
     (void)declare(&bbv);
     (void)declare(&adder);
@@ -1470,7 +1472,8 @@ static void test_string_blanks_exact(void) {
     odin3_param_def params[1] = {
         {"TAG", ODIN3_VAL_STRING, {ODIN3_VAL_STRING, 0, NULL, 0, intern("dflt  two  spaces"), 0}},
     };
-    odin3_celltype_def def = {"hs", ODIN3_GRAN_HARD, 0, HS_PORTS, 2, params, 1, NULL, NULL};
+    odin3_celltype_def def = {"hs", ODIN3_GRAN_HARD, 0, HS_PORTS, 2, params, 1, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     odin3_pass_ctx ctx;
@@ -1493,7 +1496,8 @@ static void test_string_blanks_exact(void) {
 
 /* A zero-width black-box port is declared without a range (never [-1:0]). */
 static void test_zero_width_stub_port(void) {
-    odin3_celltype_def def = {"zw", ODIN3_GRAN_BLACKBOX, 0, HS_PORTS, 2, NULL, 0, NULL, NULL};
+    odin3_celltype_def def = {"zw", ODIN3_GRAN_BLACKBOX, 0, HS_PORTS, 2, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
     (void)write_ok();

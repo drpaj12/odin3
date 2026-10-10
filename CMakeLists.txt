@@ -82,6 +82,15 @@ add_library(odin3_core OBJECT
     src/techlib/width.c
     src/techlib/reader.c
     src/techlib/reader_cell.c
+    src/techlib/fnsim_compile.c
+    src/techlib/fnsim_eval.c
+    src/sim/build.c
+    src/sim/build_hier.c
+    src/sim/build_names.c
+    src/sim/eval.c
+    src/sim/levelize.c
+    src/sim/prng.c
+    src/sim/word.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
@@ -145,6 +154,11 @@ add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
 
+# --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
+add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
+target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-sim-vectors PRIVATE odin3_core odin3_flags)
+
 # --- Benchmark (built by default, not a CTest) --------------------------------------
 add_executable(bench_util tests/bench/bench_util.c)
 target_include_directories(bench_util PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -200,6 +214,13 @@ if(BUILD_TESTING)
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_sim_cells)
+    odin3_add_unit_test(test_sim_build)
+    odin3_add_unit_test(test_sim_cycle)
+    target_compile_definitions(test_sim_cycle PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_sim_word)
+    target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
@@ -288,10 +309,29 @@ if(BUILD_TESTING)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
-    set(_tools_env "")
+    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
-        set(_tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
+        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
+    endif()
+    # sim-check (1E exit test, tools/sim-check) also needs Yosys and Icarus Verilog; without them
+    # sim_check_fixtures is not registered and the sim-check Python tests skip.
+    find_program(ODIN3_YOSYS yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
+    find_program(ODIN3_IVERILOG iverilog)
+    find_program(ODIN3_VVP vvp)
+    if(ODIN3_WITH_ABC AND ODIN3_YOSYS AND ODIN3_IVERILOG AND ODIN3_VVP)
+        list(APPEND _tools_env "ODIN3_YOSYS=${ODIN3_YOSYS}" "ODIN3_REQUIRE_SIM_CHECK=1")
+        file(GLOB _sim_fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif/*.*.blif
+                                ${PROJECT_SOURCE_DIR}/tests/golden/techlib/*.blif)
+        # -m 0: no address-space cap (the debug driver is an ASan build).
+        add_test(NAME sim_check_fixtures
+                 COMMAND ${PROJECT_SOURCE_DIR}/tools/sim-check/sim-check -m 0
+                         --driver $<TARGET_FILE:odin3-sim-vectors> --abc $<TARGET_FILE:abc>
+                         --yosys ${ODIN3_YOSYS} --iverilog ${ODIN3_IVERILOG} --vvp ${ODIN3_VVP}
+                         --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --fixtures ${_sim_fixtures})
+        set_tests_properties(sim_check_fixtures PROPERTIES LABELS tools)
+    else()
+        message(STATUS "sim_check_fixtures not registered: needs ABC, yosys, iverilog and vvp")
     endif()
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .

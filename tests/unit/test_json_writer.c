@@ -387,7 +387,8 @@ static const odin3_port_def BB_PORTS[] = {
 
 /* A declared black-box model is a Yosys blackbox module: its ports with fresh bits, no cells. */
 static void test_declared_blackbox_module(void) {
-    odin3_celltype_def def = {"bb", ODIN3_GRAN_BLACKBOX, 0, BB_PORTS, 2, NULL, 0, NULL, NULL};
+    odin3_celltype_def def = {"bb", ODIN3_GRAN_BLACKBOX, 0, BB_PORTS, 2, NULL, 0, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
     (void)new_module("top");

@@ -95,3 +95,88 @@ odin3_status odin3_cells_init_verify(const odin3_value *params) {
     static const odin3_int_range k_range = {"INIT", 0, 3};
     return odin3_cells_check_int(&params[0], &k_range);
 }
+
+/* --- word-level simulation (cells.h, sim/word.h) ---------------------------------------------- */
+
+enum { WORD_A, WORD_B, WORD_DST, WORD_COUNT };
+
+static bool param_set(const odin3_sim_cell *cell, uint32_t param) {
+    return cell->params[param].kind == ODIN3_VAL_INT && cell->params[param].i != 0;
+}
+
+/*
+ * The signedness of the operation (Yosys simlib): a unary cell is signed when A_SIGNED is set, a
+ * binary cell only when both A_SIGNED and B_SIGNED are (else both operands are zero-extended).
+ */
+static bool operation_signed(const odin3_sim_cell *cell) {
+    bool is_signed = param_set(cell, ODIN3_CELLS_P_A_SIGNED);
+    return cell->n_ports > 2 ? is_signed && param_set(cell, ODIN3_CELLS_P_B_SIGNED) : is_signed;
+}
+
+odin3_word_bin odin3_cells_word_load(const odin3_sim_cell *cell, uint32_t width) {
+    uint64_t *words = (uint64_t *)cell->scratch;
+    uint32_t stride = odin3_word_limbs(width);
+    odin3_word_bin op = {words + (size_t)WORD_DST * stride, words, words + stride, width};
+    bool is_signed = operation_signed(cell);
+    const odin3_word_port a_port = {cell->values, cell->ports[WORD_A], is_signed};
+    odin3_word_load(words, width, &a_port);
+    if (cell->n_ports > 2) {
+        const odin3_word_port b_port = {cell->values, cell->ports[WORD_B], is_signed};
+        odin3_word_load(words + stride, width, &b_port);
+    } else {
+        odin3_word_zero(words + stride, width);
+    }
+    return op;
+}
+
+void odin3_cells_word_store(const odin3_sim_cell *cell, const uint64_t *word, uint32_t width) {
+    const odin3_word_port y_port = {cell->values, cell->ports[cell->n_ports - 1], false};
+    odin3_word_store(word, width, &y_port);
+}
+
+void odin3_cells_flag_store(const odin3_sim_cell *cell, bool flag) {
+    const odin3_sim_span *y_span = &cell->ports[cell->n_ports - 1];
+    for (uint32_t k = 0; k < y_span->width; k++) {
+        cell->values[y_span->idx[k]] = (uint8_t)(k == 0 && flag ? 1 : 0);
+    }
+}
+
+void odin3_cells_word_sim(const odin3_sim_cell *cell, odin3_word_fn fn) {
+    uint32_t width = cell->ports[cell->n_ports - 1].width;
+    odin3_word_bin op = odin3_cells_word_load(cell, width);
+    fn(&op);
+    odin3_cells_word_store(cell, op.dst, width);
+}
+
+/* max(A_WIDTH, B_WIDTH) + 1: room for both operands as signed integers; 0 when it overflows. */
+static uint32_t cmp_width(const odin3_sim_cell *cell) {
+    uint32_t a_width = cell->ports[WORD_A].width;
+    uint32_t b_width = cell->ports[WORD_B].width;
+    uint32_t wider = a_width > b_width ? a_width : b_width;
+    return wider < UINT32_MAX ? wider + 1 : 0;
+}
+
+int odin3_cells_word_compare(const odin3_sim_cell *cell) {
+    odin3_word_bin op = odin3_cells_word_load(cell, cmp_width(cell));
+    return odin3_word_scmp(&op);
+}
+
+static odin3_status words_scratch(uint32_t width, uint32_t *bytes) {
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < WORD_COUNT; i++) {
+        if (!odin3_word_reserve(width, &total)) {
+            return ODIN3_ERR_INVALID_ARG;
+        }
+    }
+    *bytes = total;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_cells_y_scratch(const odin3_sim_cell *cell, uint32_t *bytes) {
+    return words_scratch(cell->ports[cell->n_ports - 1].width, bytes);
+}
+
+odin3_status odin3_cells_cmp_scratch(const odin3_sim_cell *cell, uint32_t *bytes) {
+    uint32_t width = cmp_width(cell);
+    return width == 0 ? ODIN3_ERR_INVALID_ARG : words_scratch(width, bytes);
+}

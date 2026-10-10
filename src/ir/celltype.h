@@ -47,11 +47,28 @@ typedef enum odin3_granularity {
  * Definition flags. TRISTATE: output pins may share a net with other tristate/inout drivers (a
  * bus, check rule 4). ANYVIEW: legal in every view whatever the granularity (constant cells, IR-9;
  * check rule 10).
+ *
+ * Simulation flags (1E; sim/cell.h has the hook contract). At most one of SEQ_EDGE and SEQ_LEVEL;
+ * either makes the type sequential: the simulator gives each cell one state byte per output bit
+ * and sends it the INIT and edge events. SEQ_EDGE: edge-triggered storage whose outputs depend
+ * only on its state, so it cuts the combinational graph ($_DFF_P_, $_DFF_N_, $_FF_). SEQ_LEVEL: a
+ * level-sensitive latch, transparent while enabled, whose outputs depend on its inputs during a
+ * settle ($_DLATCH_P_, $_DLATCH_N_). CLOCK_PIN0: port 0 is the cell's clock (edge) or enable
+ * (level) pin, a scalar input of constant width 1, whose net the simulator drives as a clock;
+ * $_FF_ has none (global clock). Registration rejects SEQ_EDGE with SEQ_LEVEL, and CLOCK_PIN0 on
+ * a type whose port 0 is not such a pin.
  */
-enum { ODIN3_CT_TRISTATE = 1U << 0, ODIN3_CT_ANYVIEW = 1U << 1 };
+enum {
+    ODIN3_CT_TRISTATE = 1U << 0,
+    ODIN3_CT_ANYVIEW = 1U << 1,
+    ODIN3_CT_SEQ_EDGE = 1U << 2,
+    ODIN3_CT_SEQ_LEVEL = 1U << 3,
+    ODIN3_CT_CLOCK_PIN0 = 1U << 4
+};
 
 typedef struct odin3_celltype_def odin3_celltype_def;
 typedef struct odin3_width_expr odin3_width_expr;
+typedef struct odin3_sim_cell odin3_sim_cell; /* sim/cell.h */
 
 enum { ODIN3_WIDTH_WHY_MAX = 192 };
 
@@ -134,6 +151,18 @@ struct odin3_celltype_def {
     uint32_t n_params;
     odin3_status (*verify)(const odin3_value *params);     /* may be NULL */
     odin3_const (*const_value)(const odin3_value *params); /* may be NULL */
+    /* 1E: evaluates one cell (contract in sim/cell.h); NULL when the type cannot be simulated. */
+    void (*simulate)(const odin3_sim_cell *cell);
+    /*
+     * 1E, may be NULL (no scratch): *bytes gets the scratch bytes simulate needs for one cell. The
+     * builder calls it once per flat cell with a sizing view (sim/cell.h): ports carry their
+     * widths but no indices, params and type_data are set, values, state and scratch are NULL.
+     * It runs at build time, so unlike simulate it may allocate (and must free what it does). It
+     * returns ODIN3_ERR_INVALID_ARG (not logged; the builder reports the cell) when the cell is too
+     * large to simulate, ODIN3_ERR_NO_MEMORY on out of memory. The simulator sizes its one shared
+     * scratch buffer (odin3_sim_cell.scratch) to the maximum over all its cells.
+     */
+    odin3_status (*sim_scratch_bytes)(const odin3_sim_cell *cell, uint32_t *bytes);
 };
 
 /*

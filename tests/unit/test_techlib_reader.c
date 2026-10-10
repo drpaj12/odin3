@@ -253,7 +253,8 @@ static void test_constant_width_expression_folds(void) {
     const odin3_port_def ports[3] = {{"a", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL},
                                      {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
                                      {"y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
-    const odin3_celltype_def decl = {"cst", ODIN3_GRAN_BLACKBOX, 0, ports, 3, NULL, 0, NULL, NULL};
+    const odin3_celltype_def decl = {
+        "cst", ODIN3_GRAN_BLACKBOX, 0, ports, 3, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(g_design, &decl, &id));
     TEST_ASSERT_EQUAL_UINT32(type_of("cst").v, id.v);
@@ -265,8 +266,8 @@ static void test_width_check_names_identifier(void) {
     const odin3_celltype_def *mul = def_of("multiply");
     const odin3_param_def params[2] = {{"X", ODIN3_VAL_INT, odin3_value_int(1)},
                                        {"Y", ODIN3_VAL_INT, odin3_value_int(1)}};
-    const odin3_celltype_def def = {"mult2", ODIN3_GRAN_HARD, 0, &mul->ports[2], 1, params, 2, NULL,
-                                    NULL};
+    const odin3_celltype_def def = {
+        "mult2", ODIN3_GRAN_HARD, 0, &mul->ports[2], 1, params, 2, NULL, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_add_local(g_design, &def, NULL));
     TEST_ASSERT_EQUAL_STRING("add_local: cell type 'mult2': width expression names 'A_WIDTH', "
                              "which is not an int parameter of the type",

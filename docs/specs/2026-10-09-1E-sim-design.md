@@ -23,14 +23,19 @@ reference on every primary output; CI runs the comparison on the committed BLIF 
   the rising edge of every clock (update `$_DFF_P_` and `$_FF_`), settle, apply the falling edge
   (update `$_DFF_N_`), settle, sample primary outputs. Level latches (`$_DLATCH_P_/N_`) are
   transparent while enabled and settle with the combinational logic. Clock nets are the nets
-  driving a latch's clock pin; they must be primary inputs (else the design is rejected with a
-  message) and the simulator toggles them, not the random driver.
+  driving an edge-triggered cell's clock pin; they must be primary inputs (else the design is
+  rejected with a message) and the simulator toggles them, not the random driver. (As built: a
+  level latch's enable may come from logic. Clocks change level before the edge event is sent,
+  so a flop sampling its own clock net sees the new level, as in Verilog.)
 - **Combinational order:** the flat netlist is levelized once (iterative topological sort over
-  driver → reader edges, latches cut the graph); a combinational loop is an error naming one net
-  of the loop.
+  driver → reader edges; edge-triggered cells cut the graph, level latches do not, so a loop
+  through a level latch is a loop error in Phase 1, and no golden has one); a combinational loop
+  is an error naming one net of the loop.
 - **Hierarchy:** module instances are expanded into the flat simulation program at build time
   (iterative, no recursion); black boxes without semantics are an error ("cannot simulate
-  `<type>`").
+  `<type>`"). As built: a flattening budget (`odin3_sim_options.max_cells`, default 2^24 cells
+  and instances, plus 8x that in net and pin bits; driver `--max-cells`) stops a small
+  hierarchical file from expanding exponentially, with a located error at the crossing instance.
 - **Cell semantics** come from each cell type's `simulate` hook, added now for: the bit gates
   (`$_BUF_ … $_MUX_`), constants, `$sop` (cover evaluation: ON-set or OFF-set), the latch family,
   and the word cells `$and $or $xor $not $add $sub $mul $eq $ne $lt $le $gt $ge $mux $pmux
@@ -57,7 +62,10 @@ one line per cycle (`cycle inputs outputs` in port order, binary), deterministic
   instances; behavioural Verilog models of `adder` and `multiply` (from the 1G library
   definitions, hand-checked) are appended; Icarus as above. This is an agent ruling extending
   PHASE1 #13 (ABC alone cannot reference these goldens); the reference stays independent of our
-  simulator.
+  simulator. As built (Task 5): Yosys also references goldens with falling-edge registers or a
+  data input named `clock` (ABC clocks every register on one rising `clock`), reads with `-sop`
+  (covers wider than 12 inputs) and runs `simplemap t:$sop` (`models/sop.v` for Yosys < 0.45);
+  the reference's copy of the BLIF has latch init 2/3/absent set to 0. Results: `docs/PHASE1.md`.
 - **Excluded:** goldens with RAM instances (206; Phase 4) and with implicit black boxes (`$pow`,
   `$_DFFSR_PPP_`), listed explicitly; the four multi-driver Odin II goldens (PHASE1 #15) if the
   reference refuses them.

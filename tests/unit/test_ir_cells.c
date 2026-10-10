@@ -117,11 +117,11 @@ static const expect k_expect[] = {
     {"$_NOR_", BIT, 0, "IIO", {1, 1, 1}},
     {"$_XNOR_", BIT, 0, "IIO", {1, 1, 1}},
     {"$_MUX_", BIT, 0, "IIIO", {1, 1, 1, 1}},
-    {"$_DFF_P_", BIT, 0, "IIO", {1, 1, 1}},
-    {"$_DFF_N_", BIT, 0, "IIO", {1, 1, 1}},
-    {"$_DLATCH_P_", BIT, 0, "IIO", {1, 1, 1}},
-    {"$_DLATCH_N_", BIT, 0, "IIO", {1, 1, 1}},
-    {"$_FF_", BIT, 0, "IO", {1, 1}},
+    {"$_DFF_P_", BIT, ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0, "IIO", {1, 1, 1}},
+    {"$_DFF_N_", BIT, ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0, "IIO", {1, 1, 1}},
+    {"$_DLATCH_P_", BIT, ODIN3_CT_SEQ_LEVEL | ODIN3_CT_CLOCK_PIN0, "IIO", {1, 1, 1}},
+    {"$_DLATCH_N_", BIT, ODIN3_CT_SEQ_LEVEL | ODIN3_CT_CLOCK_PIN0, "IIO", {1, 1, 1}},
+    {"$_FF_", BIT, ODIN3_CT_SEQ_EDGE, "IO", {1, 1}},
     {"$sop", BIT, 0, "IO", {0, 1}},
 };
 #define N_EXPECT (sizeof k_expect / sizeof k_expect[0])

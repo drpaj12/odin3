@@ -31,7 +31,9 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
   1846/1846; `netlist-compare` identical 1824 (10 with stub models), exceptions per #15 and the
   results below
 - [ ] 1D a Python plugin walks the IR through the C ABI
-- [ ] 1E simulator matches ABC on the goldens without RAMs
+- [x] 1E simulator matches ABC on the goldens without RAMs (2026-10-09): `tools/sim-check`, seeds
+  1–3 × 64 cycles, every simulated golden identical to the reference (1626 files, 626 distinct
+  contents: ABC 405, Yosys 221); 220 excluded (RAM 206, implicit black box 10, multi-driver 4)
 - [x] 1F writers emit dot / JSON / Verilog for the goldens (2026-10-09): JSON identical through
   Yosys on 1796/1846, Verilog equivalent 1428 (404 excluded, listed), Icarus parses every
   finished one, dot accepted or budget-refused on all; not validated at the per-tool caps: 38
@@ -292,6 +294,83 @@ other difference. The goldens' 49 distinct black-box stanzas are committed as fi
 - Gate: the negative CTest uses `WILL_FAIL` (passes on any failure; match the gate's message);
   the report counts result files rather than the work list; 9 committed fixtures where the spec
   said "a few dozen".
+
+## 1E results: simulator against the reference, every `ok` golden
+
+Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build at `144aad7`,
+`tools/sim-check/sim-check -j 2 -t 600 -m 6` (smallest file first; `--techlib lib/vtr.o3lib`
+by default), 33 min 9 s wall clock. Per golden and per seed 1, 2, 3, `odin3-sim-vectors` runs
+64 cycles of random vectors; the reference replays the same inputs on a Verilog dump of the same
+BLIF under Icarus Verilog 12.0 (testbench from `tools/sim-check/tb.sh`). The two outputs must be
+identical line by line (`cycle inputs outputs`, every primary output bit, every cycle). Files with
+identical content run once (724 distinct contents of 1846).
+
+The reference netlist: ABC `read_blif; write_verilog` (PHASE1 #13) for pure logic whose
+registers all clock on the rising edge; Yosys `read_blif -sop -wideports; simplemap t:$sop;
+write_verilog -noattr` plus behavioural models `tools/sim-check/models/{adder,multiply}.v`
+(written from the `lib/vtr.o3lib` definitions as `{cout,sumout} = a + b + cin` and unsigned
+`a * b`) for goldens with `adder`/`multiply` instances, falling-edge registers, or a data input
+named `clock` (agent ruling extending #13: ABC turns black boxes into cut points, drops the latch
+clocks and clocks every register on one rising `clock`). Latches with init 2/3 or none get init 0
+in the reference's copy of the BLIF, as the simulator starts them (PHASE0 #7).
+
+```
+files: 1846 (simulated or classified once per distinct content: 724)
+pass 1622, FAIL 0, sim-error 0, ref-error 0, timeout 4, memlimit 0, excluded 220
+excluded: implicit black box 10, multi-driver netlist 4, RAM 206
+reference (distinct contents run): abc 405, yosys 221
+slowest file: EArch/vtr/bgm/bgm.odin.blif (654.1 s total)
+peak RSS: odin3-sim-vectors 141 MB (EArch/vtr/bgm/bgm.parmys.blif); reference 2049 MB (iverilog, EArch/vtr/bgm/bgm.parmys.blif)
+RESULT: PASS
+```
+
+The 4 timeouts are Icarus compiling the Yosys dump of Odin II's `bgm` (2 distinct contents, `large`
+and `vtr`, each in both architectures; 54 MB of Verilog), not our simulator (4.6–5.0 s for three
+seeds). Rerun with a 1-hour cap (`-t 3600`), both pass (excerpt: the table header and the
+excluded/reference/slowest-file summary lines are omitted):
+
+```
+pass      yosys   1793.0  EArch/regression/verilog/large/bgm/bgm.odin.blif
+pass      yosys   1791.1  EArch/vtr/bgm/bgm.odin.blif
+pass 2, FAIL 0, sim-error 0, ref-error 0, timeout 0, memlimit 0, excluded 0
+peak RSS: odin3-sim-vectors 120 MB (EArch/vtr/bgm/bgm.odin.blif); reference 2676 MB (iverilog, EArch/vtr/bgm/bgm.odin.blif)
+```
+
+So every golden without RAMs or implicit cells simulates and matches, except the 4 multi-driver
+files. `odin3-sim-vectors` totals 67.2 s for all 626 simulated contents × 3 seeds (slowest
+`vtr/bgm.odin.blif`, 5.0 s; peak 141 MB). Exclusions (listed, not failures):
+- RAM instances (`single_port_ram`, `dual_port_ram`; Phase 4), 206 files.
+- Implicit black boxes (#16), 10 files: `$pow` (`pow`, `pow_const`, `twobits_arithmetic_power`,
+  `eightbit_arithmetic_power`) and `$_DFFSR_PPP_` (`dffsre`), both architectures.
+- Multi-driver Odin II netlists (#15), 4 files (`elsif_both_defined`, `multi_assignment`, both
+  architectures): the simulator refuses a net with two drivers, and so does the reference (ABC:
+  `Signal "simple_op^out" is defined more than once. Reading network from file has failed.`).
+
+Mismatches found while building the harness were all in the harness, none in the simulator (each
+is now a test in `tests/tools/test_sim_check.py`): latch init rewriting miscounted fields;
+Yosys refuses a `.names` of more than 12 inputs unless read with `-sop` (then `simplemap t:$sop`;
+`models/sop.v` stands in for Yosys < 0.45, e.g. CI's apt 0.33); joined continuation lines kept a
+leading blank Yosys rejects; a testbench clock `reg` steps x → 0 at time 0, a negedge that clocked
+falling-edge registers early (the clock is now a `tri0` net forced high and released). CTest
+`sim_check_fixtures` runs the comparison on `tests/golden/blif` and `tests/golden/techlib` (CI
+installs `iverilog`, `yosys` and `time`). On a machine without ABC, Yosys or Icarus the CTest is
+not registered (a CMake STATUS line says so) and the sim-check Python tests skip; CI is the guard.
+
+Gate fixes after the run (task review; the recorded outcomes do not change, since all 4 timeouts
+were Icarus): a timeout or memory-cap stop of `odin3-sim-vectors` is now a failure in every mode
+(only reference-tool timeouts are exceptions); both sides must print exactly 64 cycle lines per
+seed, and the testbench's cycle count comes from sim-check, not from the driver's header; the
+driver's clock bits must equal the BLIF's latch clock nets; multi-driver files are excluded when
+the simulator rejects them and ABC refuses them too (no basename list); `-j` is 1 or 2. The
+summary now reads `… reference timeout N, reference memlimit N, excluded N, missing N` and counts
+the references of compared contents only.
+
+`fn` cell cost (ruling: per-call resize measured here): callgrind on `vtr/stereovision2.odin.blif`
+(540 `multiply`, 14,347 `adder`, 12,103 `.names`), 16 cycles: 729,463 `fn` hook calls average
+3,418 instructions each (inclusive), of which `size_all` (re-sizing the expression nodes on every
+call) is 1,235 and `odin3_word_extend` 230, so about 43% of the call; a `.names` hook call averages
+128. The `fn` hooks are 59% of all instructions and 97% of the cycle time; 64 cycles take 0.66 s
+after a 0.16 s build. Worth caching the sizes at build time when simulation speed matters.
 
 ## 1F results: writers on the goldens
 
