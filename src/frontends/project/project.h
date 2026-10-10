@@ -329,7 +329,8 @@ odin3_status odin3_project_add_define(odin3_project *proj, odin3_bytes word, odi
 
 /*
  * Sets the top (§4.4): name must be IDENT or IDENT.IDENT (`syntax` "bad top name", names
- * [name]); a second top is `syntax` "top given twice ('a', 'b')". set_top_file is the same with
+ * [name]); a second top is `syntax` "top given twice (first a): 'b'", names [the second top]
+ * only, as the oracle. set_top_file is the same with
  * a file-level location (a Quartus default top): its errors print "<file>: error: …" and top_at
  * stays 0 with top_file set.
  */

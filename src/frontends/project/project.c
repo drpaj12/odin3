@@ -525,15 +525,11 @@ static odin3_status set_top(odin3_project *proj, odin3_bytes name, err_site site
     if (proj->top != 0) {
         const char *old = odin3_strtab_get(odin3_design_strtab(proj->design), proj->top);
         msg_buf detail = {{0}, 0};
-        msg_str(&detail, "top given twice ('");
+        msg_str(&detail, "top given twice (first ");
         msg_str(&detail, old);
-        msg_str(&detail, "', '");
-        msg_add(&detail, name.ptr, name.len);
-        msg_str(&detail, "')");
-        odin3_proj_scope scope = site.at.v != 0 ? ODIN3_PROJ_LOCATED : ODIN3_PROJ_FILE;
-        odin3_proj_err err = {ODIN3_PROJ_ERR_SYNTAX, scope, site.at, site.file,
-                              detail.text,           NULL,  0};
-        return odin3_project_fail(proj, &err);
+        msg_str(&detail, ")");
+        /* names [the second top] only, as the oracle's set_top */
+        return fail_one(proj, site, (err_what){ODIN3_PROJ_ERR_SYNTAX, detail.text}, name);
     }
     return odin3_project_intern(proj, name, &proj->top);
 }

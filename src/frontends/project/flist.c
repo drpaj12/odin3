@@ -87,47 +87,8 @@ static odin3_status fail_detail(flist_reader *rd, odin3_loc at, const char *deta
 
 /* --- words (§4.2, capped by ODIN3_PROJ_MAX_WORDS before they grow) ------------------------- */
 
-static bool is_blank(uint8_t byte) {
-    return byte == ' ' || byte == '\t';
-}
-
-/* The index just past the word starting at line[from], scanned as the splitter scans it. */
-static size_t word_stop(odin3_bytes line, size_t from) {
-    const uint8_t *text = line.ptr;
-    size_t len = line.len;
-    size_t j = from + 1;
-    if (text[from] == '"') {
-        while (j < len && text[j] != '"') {
-            j += text[j] == '\\' ? 2 : 1;
-        }
-        return j + 1;
-    }
-    while (j < len && !is_blank(text[j])) {
-        j++;
-    }
-    return j;
-}
-
-/* The words of line, counted up to room + 1 (exact for a line that splits); *over = the offset
- * in the line of the last word counted. */
-static size_t count_words(odin3_bytes line, size_t room, size_t *over) {
-    const uint8_t *text = line.ptr;
-    size_t count = 0;
-    size_t i = 0;
-    while (i < line.len && count <= room) {
-        if (is_blank(text[i])) {
-            i++;
-            continue;
-        }
-        if (text[i] == '#' || (text[i] == '/' && i + 1 < line.len && text[i + 1] == '/')) {
-            break;
-        }
-        *over = i;
-        count++;
-        i = word_stop(line, i);
-    }
-    return count;
-}
+/* The cap is per list (each frame's words; spec §9: "words per file list"), not per project:
+ * nested lists hold at most flist_depth + 1 such vectors at once. */
 
 static odin3_status word_cap(flist_reader *rd, const flist_frame *frame, uint32_t off) {
     char detail[CAP_TEXT];
@@ -142,16 +103,16 @@ static odin3_status split_line(flist_reader *rd, flist_frame *frame, odin3_bytes
                                uint32_t offset) {
     size_t limit = rd->proj->limits.words;
     size_t room = frame->words.len < limit ? limit - frame->words.len : 0;
+    odin3_words_opts opts = {offset, ODIN3_WORDS_FLIST, rd->proj->arena};
     size_t over = 0;
-    size_t count = count_words(line, room, &over);
+    size_t count = odin3_words_count(line, &opts, room, &over);
     if (count > room) {
         return word_cap(rd, frame, offset + (uint32_t)over);
     }
     odin3_status st = ODIN3_OK;
-    if (count > 0) {
+    if (count > 0) { /* exact for a line that splits: the split below never grows the vec */
         st = odin3_vec_reserve(&frame->words, frame->words.len + count);
     }
-    odin3_words_opts opts = {offset, ODIN3_WORDS_FLIST, rd->proj->arena};
     odin3_words_err err = {0, {NULL, 0}, NULL};
     st = st != ODIN3_OK ? st : odin3_words_split(line, &opts, &frame->words, &err);
     if (st == ODIN3_ERR_PARSE) { /* the oracle names nothing for these */

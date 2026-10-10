@@ -56,22 +56,33 @@ typedef struct quoted_span {
     size_t len;
 } quoted_span;
 
+/* The index of the '"' closing the quoted word whose opening '"' is at from (a backslash and
+ * the byte after it skipped), or the line's length when there is none. Shared by the splitter and
+ * the counter, so both end a quoted word at the same byte. */
+static size_t closing_quote(const splitter *sp, size_t from) {
+    size_t j = from + 1;
+    while (j < sp->len && sp->bytes[j] != '"') {
+        j += sp->bytes[j] == '\\' ? 2 : 1;
+    }
+    return j < sp->len ? j : sp->len;
+}
+
 /*
  * Checks the quoted word starting at the '"' at sp->i and measures its unescaped text. The
- * oracle's order: unterminated, bad escape (as met), characters after the closing quote, empty.
+ * oracle's order: bad escape (the first met), unterminated, characters after the closing quote,
+ * empty.
  */
 static odin3_status scan_quoted(splitter *sp, quoted_span *span) {
     size_t start = sp->i;
-    size_t j = start + 1;
+    size_t j = closing_quote(sp, start);
     size_t len = 0;
-    while (j < sp->len && sp->bytes[j] != '"') {
-        if (sp->bytes[j] == '\\') {
-            if (j + 1 >= sp->len || (sp->bytes[j + 1] != '"' && sp->bytes[j + 1] != '\\')) {
+    for (size_t k = start + 1; k < j; k++) {
+        if (sp->bytes[k] == '\\') {
+            if (k + 1 >= sp->len || (sp->bytes[k + 1] != '"' && sp->bytes[k + 1] != '\\')) {
                 return syntax(sp, start, "bad escape (only \\\" and \\\\ inside quotes)");
             }
-            j++;
+            k++;
         }
-        j++;
         len++;
     }
     if (j >= sp->len) {
@@ -137,6 +148,25 @@ static bool starts_comment(const splitter *sp) {
     }
     return sp->opts->mode == ODIN3_WORDS_FLIST && sp->bytes[sp->i] == '/' && sp->i + 1 < sp->len &&
            sp->bytes[sp->i + 1] == '/';
+}
+
+size_t odin3_words_count(odin3_bytes line, const odin3_words_opts *opts, size_t room,
+                         size_t *over) {
+    splitter sp = {line.ptr, line.len, 0, opts, NULL};
+    size_t count = 0;
+    while (sp.i < sp.len && count <= room) {
+        if (is_blank(sp.bytes[sp.i])) {
+            sp.i++;
+            continue;
+        }
+        if (starts_comment(&sp)) {
+            break;
+        }
+        *over = sp.i;
+        count++;
+        sp.i = sp.bytes[sp.i] == '"' ? closing_quote(&sp, sp.i) + 1 : word_end(&sp, sp.i);
+    }
+    return count;
 }
 
 odin3_status odin3_words_split(odin3_bytes line, const odin3_words_opts *opts, odin3_vec *words,

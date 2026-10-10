@@ -420,7 +420,7 @@ static void test_set_top(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_project_set_top(proj, odin3_bytes_cstr("a"), at));
     expect_error(odin3_project_set_top(proj, odin3_bytes_cstr("b"), at),
-                 "p.o3proj:2:5: error: syntax: top given twice ('a', 'b')");
+                 "p.o3proj:2:5: error: syntax: top given twice (first a): 'b'");
     TEST_ASSERT_EQUAL_STRING("a", str_of(proj->top));
     odin3_design_drop_project(design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
@@ -442,7 +442,7 @@ static void test_set_top_file_level(void) {
     TEST_ASSERT_EQUAL_UINT32(0, proj->top_at.v);
     TEST_ASSERT_EQUAL_UINT32(qsf.resolved, proj->top_file.resolved);
     expect_error(odin3_project_set_top(proj, odin3_bytes_cstr("y"), word_loc()),
-                 "p.o3proj:2:5: error: syntax: top given twice ('x', 'y')");
+                 "p.o3proj:2:5: error: syntax: top given twice (first x): 'y'");
 }
 
 static void test_counts(void) {
@@ -846,13 +846,17 @@ static void corpus_project(const char *case_dir, odin3_strbuf *out) {
     (void)snprintf(path, sizeof path, "%s/expected.json", case_dir);
     odin3_file_bytes bytes;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(path, FIXTURE_MAX, &bytes));
-    const char *json = (const char *)bytes.data;
-    const char *open = strstr(json, "\n  \"project\": {\n");
+    odin3_strbuf json; /* NUL-terminated: odin3_file_read_all's bytes are not */
+    odin3_strbuf_init(&json);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_append(&json, (odin3_bytes){bytes.data, bytes.len}));
+    odin3_file_bytes_free(&bytes);
+    const char *open = strstr(json.data, "\n  \"project\": {\n");
     TEST_ASSERT_NOT_NULL(open);
     const char *at = open + strlen("\n  \"project\": {\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("{\n")));
     while (strncmp(at, "  }", 3) != 0) {
-        const char *end = memchr(at, '\n', bytes.len - (size_t)(at - json));
+        const char *end = strchr(at, '\n');
         TEST_ASSERT_NOT_NULL(end);
         TEST_ASSERT_EQUAL_MEMORY("  ", at, 2);
         TEST_ASSERT_EQUAL_INT(
@@ -860,7 +864,7 @@ static void corpus_project(const char *case_dir, odin3_strbuf *out) {
         at = end + 1;
     }
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr("}\n")));
-    odin3_file_bytes_free(&bytes);
+    odin3_strbuf_free(&json);
 }
 
 /* Every "<case_dir>/" in text removed (the harness's relativizing, for this case). */

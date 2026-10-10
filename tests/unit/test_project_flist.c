@@ -43,6 +43,24 @@ static int errors;
 static char made[MAX_MADE][PATH_BUF]; /* files and directories made in tmp, in creation order */
 static int nmade;
 
+/* Variables the tests set: test-only names are unset after every test, the corpus's (RTL, NOPE)
+ * restored to what the process started with, even when a test fails midway. */
+static const char *const k_test_vars[] = {"ODIN3_T_UNSET", "ODIN3_T_RTL", "ODIN3_T$X",  "ODIN3_T_A",
+                                          "ODIN3_T_A$B",   "ODIN3_T_D",   "ODIN3_T_OPT"};
+static const char *const k_corpus_vars[] = {"RTL", "NOPE"};
+static char *saved_vars[sizeof k_corpus_vars / sizeof k_corpus_vars[0]];
+
+static void restore_env(void) {
+    for (size_t i = 0; i < sizeof k_test_vars / sizeof k_test_vars[0]; i++) {
+        TEST_ASSERT_EQUAL_INT(0, unsetenv(k_test_vars[i]));
+    }
+    for (size_t i = 0; i < sizeof k_corpus_vars / sizeof k_corpus_vars[0]; i++) {
+        int got = saved_vars[i] != NULL ? setenv(k_corpus_vars[i], saved_vars[i], 1)
+                                        : unsetenv(k_corpus_vars[i]);
+        TEST_ASSERT_EQUAL_INT(0, got);
+    }
+}
+
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
@@ -69,6 +87,7 @@ void setUp(void) {
 
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
+    restore_env();
     odin3_log_set_sink(NULL, NULL);
     for (int i = nmade - 1; i >= 0; i--) {
         TEST_ASSERT_EQUAL_INT(0, remove(made[i]));
@@ -298,7 +317,7 @@ static void test_top_errors(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
     errors = 0;
     expect_error(read_list("-top a\n--top-module b\n"),
-                 "files.f:2:1: error: syntax: top given twice ('a', 'b')");
+                 "files.f:2:1: error: syntax: top given twice (first a): 'b'");
 }
 
 static void test_option_at_the_end_needs_an_argument(void) {
@@ -857,6 +876,10 @@ static void test_out_of_memory(void) {
 }
 
 int main(void) {
+    for (size_t i = 0; i < sizeof k_corpus_vars / sizeof k_corpus_vars[0]; i++) {
+        const char *value = getenv(k_corpus_vars[i]);
+        saved_vars[i] = value != NULL ? strdup(value) : NULL;
+    }
     UNITY_BEGIN();
     RUN_TEST(test_bare_words_are_sources_in_work);
     RUN_TEST(test_bare_word_unknown_file_type);
@@ -904,5 +927,9 @@ int main(void) {
     RUN_TEST(test_corpus_table_is_complete);
     RUN_TEST(test_corpus_f_cases);
     RUN_TEST(test_out_of_memory);
-    return UNITY_END();
+    int failures = UNITY_END();
+    for (size_t i = 0; i < sizeof k_corpus_vars / sizeof k_corpus_vars[0]; i++) {
+        free(saved_vars[i]);
+    }
+    return failures;
 }

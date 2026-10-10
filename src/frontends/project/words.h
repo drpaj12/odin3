@@ -11,6 +11,7 @@
 #include "util/vec.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef enum odin3_words_mode {
@@ -57,5 +58,15 @@ typedef struct odin3_words_err {
  */
 odin3_status odin3_words_split(odin3_bytes line, const odin3_words_opts *opts, odin3_vec *words,
                                odin3_words_err *err);
+
+/*
+ * The number of words odin3_words_split would append for line, counted up to room + 1 (so a
+ * caller can check a cap before the words grow); *over = the offset in the line of the last word
+ * counted (the first one over room when the result passes it). It uses the splitter's own blank,
+ * comment, bare-word and closing-quote rules, so it is exact for every line that splits; for a
+ * line that does not, it is a bound and the split reports the error. opts->offset and
+ * opts->arena are unused.
+ */
+size_t odin3_words_count(odin3_bytes line, const odin3_words_opts *opts, size_t room, size_t *over);
 
 #endif

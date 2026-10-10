@@ -10,6 +10,7 @@
 #include "util/vec.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -245,6 +246,40 @@ static void test_out_of_memory(void) {
     TEST_ASSERT_TRUE(succeeded);
 }
 
+/* The counter agrees with the split on every line that splits, in both modes. */
+static void test_count_matches_split(void) {
+    static const char *const lines[] = {
+        "",           "   \t",       "a",         " a  b\tc ",
+        "a#b # c d",  "a//b // c d", "\"a b\" c", "\"a\\\"b\\\\c\" d",
+        "x\\y \"q\"", "a\"b c",      "#only",     "//x y",
+    };
+    static const odin3_words_mode modes[] = {ODIN3_WORDS_O3PROJ, ODIN3_WORDS_FLIST};
+    for (size_t j = 0; j < sizeof modes / sizeof modes[0]; j++) {
+        for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++) {
+            odin3_vec_clear(&words);
+            odin3_words_opts opts = {.offset = LINE_OFFSET, .mode = modes[j], .arena = arena};
+            size_t over = 0;
+            size_t count =
+                odin3_words_count(odin3_bytes_cstr(lines[i]), &opts, SIZE_MAX - 1, &over);
+            if (odin3_words_split(odin3_bytes_cstr(lines[i]), &opts, &words, &err) == ODIN3_OK) {
+                TEST_ASSERT_EQUAL_size_t_MESSAGE(words.len, count, lines[i]);
+            }
+        }
+    }
+}
+
+/* Counting stops at room + 1 and names the offset of the word over the cap. */
+static void test_count_stops_past_room(void) {
+    odin3_words_opts opts = {.offset = 0, .mode = FL, .arena = arena};
+    size_t over = 0;
+    TEST_ASSERT_EQUAL_size_t(
+        2, odin3_words_count(odin3_bytes_cstr("a \"b c\"  d e"), &opts, 1, &over));
+    TEST_ASSERT_EQUAL_size_t(2, over);
+    TEST_ASSERT_EQUAL_size_t(
+        3, odin3_words_count(odin3_bytes_cstr("a \"b c\"  d // e f"), &opts, 5, &over));
+    TEST_ASSERT_EQUAL_size_t(9, over);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_blanks_are_space_and_tab);
@@ -264,5 +299,7 @@ int main(void) {
     RUN_TEST(test_nul_byte_in_word);
     RUN_TEST(test_append_and_failure_atomicity);
     RUN_TEST(test_out_of_memory);
+    RUN_TEST(test_count_matches_split);
+    RUN_TEST(test_count_stops_past_room);
     return UNITY_END();
 }
