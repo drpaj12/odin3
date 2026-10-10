@@ -10,6 +10,7 @@
 #include "ir/design.h"
 #include "unity.h"
 #include "util/alloc.h"
+#include "util/arena.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -145,9 +146,9 @@ typedef struct line_col {
     uint32_t line, col;
 } line_col;
 
-static void assert_pos(uint32_t loc, line_col want) {
+static void assert_pos(odin3_loc loc, line_col want) {
     odin3_srcpos pos;
-    TEST_ASSERT_TRUE(odin3_srcman_decode(sm, (odin3_loc){loc}, &pos));
+    TEST_ASSERT_TRUE(odin3_srcman_decode(sm, loc, &pos));
     TEST_ASSERT_EQUAL_UINT32(want.line, pos.line);
     TEST_ASSERT_EQUAL_UINT32(want.col, pos.col);
 }
@@ -162,10 +163,9 @@ static void assert_body(const odin3_pp_macro *mac, const char *body) {
 static void assert_spelled(const odin3_pp_macro *mac, const char *file_text) {
     TEST_ASSERT_NOT_NULL(mac);
     odin3_srcbuf_info info;
-    TEST_ASSERT_TRUE(
-        odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, (odin3_loc){mac->def}), &info));
+    TEST_ASSERT_TRUE(odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, mac->def), &info));
     TEST_ASSERT_EQUAL_UINT32(ODIN3_SRCBUF_FILE, info.kind);
-    TEST_ASSERT_EQUAL_MEMORY(file_text + (mac->def - info.start), mac->body,
+    TEST_ASSERT_EQUAL_MEMORY(file_text + (mac->def.v - info.start), mac->body,
                              mac->len == 0 ? 0 : mac->len);
 }
 
@@ -342,13 +342,13 @@ static void test_probe_t3_body_spans_the_continuation(void) {
     assert_body(macro("M"), "wire\\\nx;");
     assert_pos(macro("M")->def, (line_col){1, 11});
     const odin3_pp_macro *mac = macro("M");
-    assert_pos(mac->def + mac->len - 1, (line_col){2, 2}); /* the ';' on line 2 */
+    assert_pos((odin3_loc){mac->def.v + mac->len - 1}, (line_col){2, 2}); /* the ';' on line 2 */
 }
 
 static void test_probe_t4_comment_continues_nothing(void) {
     (void)run_probe("t4.v");
-    assert_body(macro("A"), "a");
-    TEST_ASSERT_TRUE(stream.text.len == 0 || memcmp(stream.text.ptr, "\nwire b;\n", 9) == 0);
+    assert_body(macro("A"),
+                "a"); /* the emitted text is covered by test_line_comment_ends_the_text */
 }
 
 static void test_probe_u1_multi_line_comment_is_unterminated(void) {
@@ -501,7 +501,86 @@ static void test_cap_macros(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`undef A\n`define C 1\n"));
 }
 
+static void test_cap_definitions_counts_redefinitions(void) {
+    ensure_pp();
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    limits.definitions = 3;
+    odin3_pp_test_set_limits(pp, limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define A 1\n`undef A\n`define A 2\n`define A 3\n"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("`define A 4\n"));
+    assert_error("t.v:1:9: error: syntax: definitions exceeds ODIN3_PP_MAX_DEFINITIONS (3)");
+    assert_body(macro("A"), "3");
+}
+
+/* A file redefining one macro n times. */
+static odin3_status run_redefinitions(uint32_t n, const char *line) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    for (uint32_t i = 0; i < n; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(line)));
+    }
+    odin3_status st = run_bytes("loop.v", (odin3_bytes){text.data, text.len});
+    odin3_strbuf_free(&text);
+    return st;
+}
+
+static void test_redefinition_loop_is_bounded(void) {
+    static const char k_line[] = "`define a(b,c,d,e,f,g,h,i,j,k) b+c+d+e+f+g+h+i+j+k\n";
+    ensure_pp();
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    limits.definitions = 100;
+    odin3_pp_test_set_limits(pp, limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_redefinitions(2000, k_line));
+    assert_error("loop.v:101:9: error: syntax: definitions exceeds ODIN3_PP_MAX_DEFINITIONS (100)");
+    TEST_ASSERT_EQUAL_size_t(100, pp->macros.len);
+}
+
+static void test_cap_macro_bytes(void) {
+    static const char k_line[] = "`define a(b,c,d,e,f,g,h,i,j,k) b+c+d+e+f+g+h+i+j+k\n";
+    enum { CAP = 4 * ODIN3_PP_ARENA_CHUNK };
+    ensure_pp();
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    limits.macro_bytes = CAP;
+    odin3_pp_test_set_limits(pp, limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_redefinitions(4000, k_line));
+    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_NOT_NULL(strstr(captured, ": error: syntax: macro bytes exceeds "
+                                          "ODIN3_PP_MAX_MACRO_BYTES (262144)"));
+    TEST_ASSERT_TRUE(odin3_arena_bytes_reserved(pp->arena) <= CAP);
+    TEST_ASSERT_TRUE(pp->macros.len > 100 && pp->macros.len < 4000);
+}
+
+static void test_redefinitions_within_the_default_caps(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_redefinitions(3000, "`define a(b, c = 1) b + c\n"));
+    TEST_ASSERT_EQUAL_size_t(3000, pp->macros.len);
+    TEST_ASSERT_TRUE(odin3_arena_bytes_reserved(pp->arena) <= ODIN3_PP_MAX_MACRO_BYTES);
+}
+
+static void test_file_and_line_are_not_macro_names(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("`define __FILE__ 1\n"));
+    assert_error("t.v:1:9: error: syntax: compiler directive '__FILE__' cannot be a macro name");
+    errors = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("`undef __LINE__\n"));
+    assert_error("t.v:1:8: error: syntax: compiler directive '__LINE__' cannot be a macro name");
+}
+
 /* --- <command line> ------------------------------------------------------------------------ */
+
+static void lower_macro_text(odin3_pp_limits *limits) {
+    limits->macro_text = 2;
+}
+
+static void lower_macro_args(odin3_pp_limits *limits) {
+    limits->macro_args = 1;
+}
+
+static void lower_macros(odin3_pp_limits *limits) {
+    limits->macros = 2;
+}
+
+static void lower_definitions(odin3_pp_limits *limits) {
+    limits->definitions = 1;
+}
 
 static void test_command_line_defines(void) {
     odin3_pp_define defines[] = {
@@ -523,13 +602,13 @@ static void test_command_line_defines(void) {
     assert_pos(macro("D")->def, (line_col){4, 11});
     odin3_strbuf where;
     odin3_strbuf_init(&where);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_format(sm, (odin3_loc){macro("E")->def}, &where,
-                                                        ODIN3_SRCFMT_GIVEN));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_srcman_format(sm, macro("E")->def, &where, ODIN3_SRCFMT_GIVEN));
     TEST_ASSERT_EQUAL_STRING("<command line>:5:16", where.data);
     odin3_strbuf_free(&where);
     odin3_srcbuf_info info;
-    TEST_ASSERT_TRUE(odin3_srcman_buffer_info(
-        sm, odin3_srcman_buffer_of(sm, (odin3_loc){macro("A")->def}), &info));
+    TEST_ASSERT_TRUE(
+        odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, macro("A")->def), &info));
     TEST_ASSERT_EQUAL_UINT32(0, info.resolved);
     TEST_ASSERT_EQUAL_UINT32(0, info.library);
     TEST_ASSERT_EQUAL_UINT32(0, info.parent);
@@ -575,6 +654,38 @@ static void test_command_line_errors(void) {
                                       cases[i].name);
         TEST_ASSERT_NULL(bad);
         TEST_ASSERT_EQUAL_STRING_MESSAGE(cases[i].want, captured, cases[i].name);
+        TEST_ASSERT_EQUAL_INT(1, errors);
+    }
+}
+
+/* The definition caps apply to project defines too, through odin3_pp_test_create. */
+static void test_command_line_caps(void) {
+    static const struct {
+        void (*lower)(odin3_pp_limits *limits);
+        const char *want;
+    } cases[] = {
+        {lower_macro_text, "<command line>:2:11: error: syntax: text of macro 'B' exceeds "
+                           "ODIN3_PP_MAX_MACRO_TEXT (2)"},
+        {lower_macro_args, "<command line>:3:13: error: syntax: formals of macro 'C' exceeds "
+                           "ODIN3_PP_MAX_MACRO_ARGS (1)"},
+        {lower_macros, "<command line>:3:9: error: syntax: macros exceeds ODIN3_PP_MAX_MACROS (2)"},
+        {lower_definitions,
+         "<command line>:2:9: error: syntax: definitions exceeds ODIN3_PP_MAX_DEFINITIONS (1)"},
+    };
+    odin3_pp_define defines[] = {
+        {odin3_bytes_cstr("A"), odin3_bytes_cstr("1"), true},
+        {odin3_bytes_cstr("B"), odin3_bytes_cstr("123"), true},
+        {odin3_bytes_cstr("C(x,y)"), odin3_bytes_cstr("x"), true},
+    };
+    odin3_pp_config config = {defines, 3, NULL, 0};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        odin3_pp_limits limits = odin3_pp_default_limits();
+        cases[i].lower(&limits);
+        errors = 0;
+        odin3_pp *bad = NULL;
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_pp_test_create(design, &config, limits, &bad));
+        TEST_ASSERT_NULL(bad);
+        TEST_ASSERT_EQUAL_STRING(cases[i].want, captured);
         TEST_ASSERT_EQUAL_INT(1, errors);
     }
 }
@@ -677,8 +788,14 @@ int main(void) {
     RUN_TEST(test_cap_macro_args);
     RUN_TEST(test_cap_macro_text);
     RUN_TEST(test_cap_macros);
+    RUN_TEST(test_cap_definitions_counts_redefinitions);
+    RUN_TEST(test_redefinition_loop_is_bounded);
+    RUN_TEST(test_cap_macro_bytes);
+    RUN_TEST(test_redefinitions_within_the_default_caps);
+    RUN_TEST(test_file_and_line_are_not_macro_names);
     RUN_TEST(test_command_line_defines);
     RUN_TEST(test_command_line_errors);
+    RUN_TEST(test_command_line_caps);
     RUN_TEST(test_create_misuse);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();

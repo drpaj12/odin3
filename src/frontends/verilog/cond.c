@@ -7,7 +7,7 @@
 
 static const char *const k_cond_names[] = {"", "ifdef", "ifndef", "elsif", "else", "endif"};
 
-odin3_status odin3_pp_cond_directive(odin3_pp *pp, odin3_pp_cond_kind kind, uint32_t at) {
+odin3_status odin3_pp_cond_directive(odin3_pp *pp, odin3_pp_cond_kind kind, odin3_loc at) {
     return odin3_pp_error(pp, at, "syntax: `%s not supported yet", k_cond_names[kind]);
 }
 

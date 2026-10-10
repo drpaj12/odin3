@@ -40,6 +40,8 @@ odin3_pp_limits odin3_pp_default_limits(void) {
         .macro_args = ODIN3_PP_MAX_MACRO_ARGS,
         .macro_text = ODIN3_PP_MAX_MACRO_TEXT,
         .macros = ODIN3_PP_MAX_MACROS,
+        .definitions = ODIN3_PP_MAX_DEFINITIONS,
+        .macro_bytes = ODIN3_PP_MAX_MACRO_BYTES,
         .stream_bytes = ODIN3_PP_MAX_STREAM_BYTES,
         .buffers_per_stream = ODIN3_PP_MAX_BUFFERS_PER_STREAM,
         .includes_per_stream = ODIN3_PP_MAX_INCLUDES_PER_STREAM,
@@ -52,21 +54,21 @@ void odin3_pp_test_set_limits(odin3_pp *pp, odin3_pp_limits limits) {
     pp->limits = limits;
 }
 
-odin3_status odin3_pp_error(odin3_pp *pp, uint32_t loc, const char *fmt, ...) {
+odin3_status odin3_pp_error(odin3_pp *pp, odin3_loc loc, const char *fmt, ...) {
     char msg[ODIN3_LOG_BUF];
     va_list args;
     va_start(args, fmt);
     (void)vsnprintf(msg, sizeof msg, fmt, args);
     va_end(args);
-    if (loc != 0) {
-        odin3_diag(pp->design, ODIN3_LOG_ERROR, (odin3_loc){loc}, "%s", msg);
+    if (loc.v != 0) {
+        odin3_diag(pp->design, ODIN3_LOG_ERROR, loc, "%s", msg);
     } else {
         odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg);
     }
     return ODIN3_ERR_PARSE;
 }
 
-odin3_status odin3_pp_cap_error(odin3_pp *pp, uint32_t loc, odin3_pp_cap cap) {
+odin3_status odin3_pp_cap_error(odin3_pp *pp, odin3_loc loc, odin3_pp_cap cap) {
     return odin3_pp_error(pp, loc, "syntax: %s exceeds %s (%" PRIu32 ")", cap.what, cap.name,
                           cap.value);
 }
@@ -134,17 +136,17 @@ int odin3_pp_peek(const odin3_pp *pp, uint32_t ahead) {
     return run < frame->nruns ? frame_run(pp, frame, run)->bytes[offset] : -1;
 }
 
-uint32_t odin3_pp_loc_here(const odin3_pp *pp) {
+odin3_loc odin3_pp_loc_here(const odin3_pp *pp) {
     const odin3_pp_frame *frame = top_frame(pp);
     if (frame == NULL || frame->nruns == 0) {
-        return 0;
+        return (odin3_loc){0};
     }
     if (frame->cur.run < frame->nruns) {
         const odin3_pp_textrun *run = frame_run(pp, frame, frame->cur.run);
-        return run->loc == 0 ? 0 : run->loc + frame->cur.offset;
+        return odin3_pp_loc_add(run->loc, frame->cur.offset);
     }
     const odin3_pp_textrun *last = frame_run(pp, frame, frame->nruns - 1);
-    return last->loc == 0 ? 0 : last->loc + last->len;
+    return odin3_pp_loc_add(last->loc, last->len);
 }
 
 void odin3_pp_advance(odin3_pp *pp, uint32_t n) {
@@ -181,7 +183,7 @@ odin3_bytes odin3_pp_read_ident(odin3_pp *pp) {
 }
 
 odin3_status odin3_pp_push_frame(odin3_pp *pp, const odin3_pp_frame *frame,
-                                 const odin3_pp_textrun *runs, uint32_t at) {
+                                 const odin3_pp_textrun *runs, odin3_loc at) {
     if ((uint64_t)pp->runs.len + frame->nruns > pp->limits.live_runs) {
         odin3_pp_cap cap = {"live runs", "ODIN3_PP_MAX_LIVE_RUNS", pp->limits.live_runs};
         return odin3_pp_cap_error(pp, at, cap);
@@ -229,8 +231,8 @@ void odin3_pp_pop_frame(odin3_pp *pp) {
 
 /* --- output and segments ------------------------------------------------------------------- */
 
-static odin3_status add_segment(odin3_pp *pp, uint32_t out_offset, uint32_t loc) {
-    odin3_segment seg = {pp->stream, out_offset, loc, {0, 0}};
+static odin3_status add_segment(odin3_pp *pp, uint32_t out_offset, odin3_loc loc) {
+    odin3_segment seg = {pp->stream.v, out_offset, loc.v, {0, 0}};
     odin3_status st = odin3_srcman_add_segment(pp->sm, &seg);
     pp->nsegments += st == ODIN3_OK ? 1 : 0;
     return st;
@@ -240,8 +242,8 @@ static odin3_status add_segment(odin3_pp *pp, uint32_t out_offset, uint32_t loc)
  * inserted byte (loc 0). */
 static odin3_status append_piece(odin3_pp *pp, odin3_pp_text piece) {
     uint32_t out_offset = (uint32_t)pp->out.len;
-    bool fresh =
-        out_offset == 0 || piece.loc == 0 || pp->last_loc == 0 || piece.loc != pp->last_loc + 1;
+    bool fresh = out_offset == 0 || piece.loc.v == 0 || pp->last_loc.v == 0 ||
+                 piece.loc.v != pp->last_loc.v + 1;
     odin3_status st = odin3_strbuf_append(&pp->out, (odin3_bytes){piece.bytes, piece.len});
     if (st == ODIN3_OK && fresh) {
         st = add_segment(pp, out_offset, piece.loc);
@@ -249,8 +251,8 @@ static odin3_status append_piece(odin3_pp *pp, odin3_pp_text piece) {
     if (st != ODIN3_OK) {
         return st;
     }
-    pp->last_loc = piece.loc == 0 ? 0 : piece.loc + piece.len - 1;
-    if (piece.loc != 0) {
+    pp->last_loc = odin3_pp_loc_add(piece.loc, piece.len - 1);
+    if (piece.loc.v != 0) {
         odin3_pp_check_note(pp, piece.loc);
     }
     return ODIN3_OK;
@@ -261,16 +263,16 @@ static odin3_status append_piece(odin3_pp *pp, odin3_pp_text piece) {
 static odin3_status append(odin3_pp *pp, odin3_pp_text text) {
     if ((uint64_t)pp->out.len + text.len > pp->limits.stream_bytes) {
         uint32_t room = pp->limits.stream_bytes - (uint32_t)pp->out.len;
-        uint32_t at = text.loc != 0 ? text.loc + room : odin3_pp_loc_here(pp);
+        odin3_loc at = text.loc.v != 0 ? odin3_pp_loc_add(text.loc, room) : odin3_pp_loc_here(pp);
         odin3_pp_cap cap = {"stream bytes", "ODIN3_PP_MAX_STREAM_BYTES", pp->limits.stream_bytes};
         return odin3_pp_cap_error(pp, at, cap);
     }
-    if (text.loc != 0) {
+    if (text.loc.v != 0) {
         return append_piece(pp, text);
     }
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; i < text.len && st == ODIN3_OK; i++) {
-        st = append_piece(pp, (odin3_pp_text){text.bytes + i, 1, 0});
+        st = append_piece(pp, (odin3_pp_text){text.bytes + i, 1, {0}});
     }
     return st;
 }
@@ -283,7 +285,7 @@ static odin3_status protective_space(odin3_pp *pp, uint8_t next) {
         return ODIN3_OK;
     }
     static const uint8_t k_space = ' ';
-    return append(pp, (odin3_pp_text){&k_space, 1, 0});
+    return append(pp, (odin3_pp_text){&k_space, 1, {0}});
 }
 
 odin3_status odin3_pp_emit(odin3_pp *pp, odin3_pp_text text) {
@@ -300,7 +302,7 @@ odin3_status odin3_pp_emit(odin3_pp *pp, odin3_pp_text text) {
 }
 
 static bool suppressed(const odin3_pp *pp) {
-    return pp->skipping || pp->xoff_loc != 0;
+    return pp->skipping || pp->xoff_loc.v != 0;
 }
 
 odin3_status odin3_pp_emit_next(odin3_pp *pp, uint32_t n) {
@@ -312,7 +314,7 @@ odin3_status odin3_pp_emit_next(odin3_pp *pp, uint32_t n) {
         uint32_t offset = odin3_pp_top(pp)->cur.offset;
         uint32_t take = run->len - offset < n ? run->len - offset : n;
         if (!suppressed(pp)) {
-            odin3_pp_text text = {run->bytes + offset, take, run->loc == 0 ? 0 : run->loc + offset};
+            odin3_pp_text text = {run->bytes + offset, take, odin3_pp_loc_add(run->loc, offset)};
             odin3_status st = odin3_pp_emit(pp, text);
             if (st != ODIN3_OK) {
                 return st;
@@ -326,19 +328,20 @@ odin3_status odin3_pp_emit_next(odin3_pp *pp, uint32_t n) {
 
 /* --- buffers ------------------------------------------------------------------------------- */
 
-static const odin3_pp_bufrec *bufrec_of(const odin3_pp *pp, uint32_t buf) {
-    if (pp->bufs.len == 0 || buf < pp->first_buffer || buf - pp->first_buffer >= pp->bufs.len) {
+static const odin3_pp_bufrec *bufrec_of(const odin3_pp *pp, odin3_srcbuf_id buf) {
+    uint32_t first = pp->first_buffer.v;
+    if (pp->bufs.len == 0 || buf.v < first || buf.v - first >= pp->bufs.len) {
         return NULL;
     }
-    return odin3_vec_cat(&pp->bufs, buf - pp->first_buffer);
+    return odin3_vec_cat(&pp->bufs, buf.v - first);
 }
 
-uint32_t odin3_pp_chain_of(const odin3_pp *pp, uint32_t loc) {
-    const odin3_pp_bufrec *rec = bufrec_of(pp, odin3_srcman_buffer_of(pp->sm, (odin3_loc){loc}).v);
+uint32_t odin3_pp_chain_of(const odin3_pp *pp, odin3_loc loc) {
+    const odin3_pp_bufrec *rec = bufrec_of(pp, odin3_srcman_buffer_of(pp->sm, loc));
     return rec == NULL ? 0 : rec->chain;
 }
 
-static odin3_status buffer_caps(odin3_pp *pp, const odin3_pp_bufspec *spec, uint32_t at) {
+static odin3_status buffer_caps(odin3_pp *pp, const odin3_pp_bufspec *spec, odin3_loc at) {
     bool file = spec->kind == ODIN3_SRCBUF_FILE;
     uint32_t len = file ? spec->file.len : spec->expansion.len;
     if (pp->nbuffers >= pp->limits.buffers_per_stream) {
@@ -359,7 +362,7 @@ static odin3_status buffer_caps(odin3_pp *pp, const odin3_pp_bufspec *spec, uint
     return ODIN3_OK;
 }
 
-odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, uint32_t at,
+odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odin3_loc at,
                                  odin3_srcbuf_id *out) {
     odin3_status st = buffer_caps(pp, spec, at);
     if (st != ODIN3_OK) {
@@ -372,7 +375,8 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, uin
     uint32_t chain = 0;
     if (!file) {
         bool arg = spec->kind == ODIN3_SRCBUF_MACRO_ARG;
-        chain = 1 + odin3_pp_chain_of(pp, arg ? spec->expansion.def : spec->expansion.parent);
+        odin3_loc from = {arg ? spec->expansion.def : spec->expansion.parent};
+        chain = 1 + odin3_pp_chain_of(pp, from);
     }
     st = file ? odin3_srcman_add_file(pp->sm, &spec->file, out)
               : odin3_srcman_add_expansion(pp->sm, &spec->expansion, out);
@@ -380,7 +384,7 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, uin
         return st;
     }
     if (pp->bufs.len == 0) {
-        pp->first_buffer = out->v;
+        pp->first_buffer = *out;
     }
     *(odin3_pp_bufrec *)odin3_vec_push(&pp->bufs) = (odin3_pp_bufrec){chain, 0};
     pp->nbuffers++;
@@ -391,9 +395,9 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, uin
 
 /* --- file cache ---------------------------------------------------------------------------- */
 
-bool odin3_pp_file_bytes(const odin3_pp *pp, uint32_t buf, odin3_bytes *out) {
+bool odin3_pp_file_bytes(const odin3_pp *pp, odin3_srcbuf_id buf, odin3_bytes *out) {
     uint64_t index = 0;
-    if (!odin3_u64map_get(pp->cache_by_buffer, buf, &index)) {
+    if (!odin3_u64map_get(pp->cache_by_buffer, buf.v, &index)) {
         return false;
     }
     const odin3_pp_cached *entry = odin3_vec_cat(&pp->cache, (size_t)index);
@@ -416,7 +420,8 @@ static odin3_status cannot_read(odin3_pp *pp, const odin3_pp_load *load,
                               "syntax: file '%s' is %zu bytes, over the limit of %" PRIu32, name,
                               bytes->len, ODIN3_SRC_MAX_FILE_BYTES);
     }
-    if (bytes->err == ENOENT || bytes->err == ENOTDIR) {
+    /* PRJ-6 classes a path of the wrong kind (a directory) as missing too */
+    if (bytes->err == ENOENT || bytes->err == ENOTDIR || bytes->err == EISDIR) {
         return odin3_pp_error(pp, load->at, "missing_file: '%s'", name);
     }
     (void)odin3_pp_error(pp, load->at, "cannot read '%s': %s", name, strerror(bytes->err));
@@ -484,7 +489,7 @@ odin3_status odin3_pp_open_file(odin3_pp *pp, const odin3_pp_open *open, odin3_s
     const odin3_pp_cached *entry = odin3_vec_cat(&pp->cache, open->cache);
     odin3_pp_bufspec spec = {
         ODIN3_SRCBUF_FILE,
-        {open->given, entry->resolved, open->library, open->parent, entry->len, {0, 0}},
+        {open->given, entry->resolved, open->library, open->parent.v, entry->len, {0, 0}},
         {0, 0, 0, 0, 0, 0, {0, 0}}};
     odin3_status st = odin3_pp_add_buffer(pp, &spec, open->at, out);
     if (st == ODIN3_OK) {
@@ -496,10 +501,10 @@ odin3_status odin3_pp_open_file(odin3_pp *pp, const odin3_pp_open *open, odin3_s
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_pp_textrun run = {entry->bytes, entry->len, odin3_srcman_loc(pp->sm, *out, 0).v};
+    odin3_pp_textrun run = {entry->bytes, entry->len, odin3_srcman_loc(pp->sm, *out, 0)};
     odin3_pp_frame frame = {.kind = ODIN3_PP_FRAME_FILE,
                             .nruns = 1,
-                            .buffer = out->v,
+                            .buffer = *out,
                             .resolved = entry->resolved,
                             .library = open->library,
                             .cond_base = (uint32_t)pp->conds.len};
@@ -580,7 +585,7 @@ static odin3_bytes ident_ahead(const odin3_pp *pp, uint32_t ahead) {
     return (odin3_bytes){text->bytes + offset, end - (uint32_t)offset};
 }
 
-odin3_status odin3_pp_sv_operator(odin3_pp *pp, uint32_t at, const char *op) {
+odin3_status odin3_pp_sv_operator(odin3_pp *pp, odin3_loc at, const char *op) {
     return odin3_pp_error(pp, at,
                           "syntax: '%s' is a SystemVerilog macro operator; not Verilog-2005 "
                           "(Phase 5)",
@@ -618,7 +623,7 @@ static uint32_t quoted_length(const odin3_pp *pp) {
 /* `line n "file" level (spec §7.3): syntax-checked and dropped. */
 static odin3_status line_directive(odin3_pp *pp) {
     odin3_pp_skip_spaces(pp);
-    uint32_t at = odin3_pp_loc_here(pp);
+    odin3_loc at = odin3_pp_loc_here(pp);
     uint64_t number = 0;
     uint32_t k = 0;
     for (; is_digit(odin3_pp_peek(pp, k)) && number <= UINT32_MAX; k++) {
@@ -646,7 +651,7 @@ static odin3_status line_directive(odin3_pp *pp) {
     return ODIN3_OK;
 }
 
-static odin3_status consumed_directive(odin3_pp *pp, const dir_entry *dir, uint32_t at) {
+static odin3_status consumed_directive(odin3_pp *pp, const dir_entry *dir, odin3_loc at) {
     if (odin3_pp_top(pp)->kind != ODIN3_PP_FRAME_FILE) {
         return odin3_pp_error(pp, at, "syntax: directive inside macro text");
     }
@@ -663,7 +668,7 @@ static odin3_status consumed_directive(odin3_pp *pp, const dir_entry *dir, uint3
 }
 
 /* `NAME outside skipped regions: a directive, a pass-through directive or a macro use. */
-static odin3_status backtick_word(odin3_pp *pp, uint32_t at) {
+static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
     odin3_bytes name = ident_ahead(pp, 1);
     const dir_entry *dir = dir_lookup(name);
     dir_kind kind = dir == NULL ? DIR_NONE : dir->kind;
@@ -689,7 +694,7 @@ static odin3_status backtick_word(odin3_pp *pp, uint32_t at) {
 }
 
 /* A backtick in a skipped region: only conditionals are interpreted. */
-static odin3_status skipped_backtick(odin3_pp *pp, uint32_t at) {
+static odin3_status skipped_backtick(odin3_pp *pp, odin3_loc at) {
     odin3_bytes name = ident_ahead(pp, 1);
     const dir_entry *dir = dir_lookup(name);
     odin3_pp_advance(pp, (uint32_t)name.len + 1);
@@ -700,8 +705,8 @@ static odin3_status skipped_backtick(odin3_pp *pp, uint32_t at) {
 }
 
 static odin3_status scan_backtick(odin3_pp *pp) {
-    uint32_t at = odin3_pp_loc_here(pp);
-    if (pp->xoff_loc != 0) {
+    odin3_loc at = odin3_pp_loc_here(pp);
+    if (pp->xoff_loc.v != 0) {
         odin3_pp_advance(pp, 1);
         return ODIN3_OK;
     }
@@ -846,21 +851,21 @@ static void reset_run(odin3_pp *pp) {
     odin3_vec_clear(&pp->args);
     odin3_vec_clear(&pp->arg_starts);
     odin3_vec_clear(&pp->scratch);
-    pp->stream = 0;
-    pp->first_buffer = 0;
+    pp->stream = (odin3_srcbuf_id){0};
+    pp->first_buffer = (odin3_srcbuf_id){0};
     pp->nsegments = 0;
-    pp->last_loc = 0;
+    pp->last_loc = (odin3_loc){0};
     pp->nbuffers = 0;
     pp->nincludes = 0;
     pp->nexpansions = 0;
     pp->loc_bytes = 0;
-    pp->xoff_loc = 0;
+    pp->xoff_loc = (odin3_loc){0};
     pp->skipping = false;
     pp->gap = false;
 }
 
 static odin3_status start_stream(odin3_pp *pp, const odin3_pp_source *src) {
-    odin3_pp_load load = {src->given, src->resolved, src->at.v};
+    odin3_pp_load load = {src->given, src->resolved, src->at};
     uint32_t index = 0;
     odin3_status st = odin3_pp_cache_load(pp, &load, &index);
     if (st != ODIN3_OK) {
@@ -871,10 +876,10 @@ static odin3_status start_stream(odin3_pp *pp, const odin3_pp_source *src) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *path = src->resolved;
-    odin3_pp_open open = {index, src->given, src->library, 0, src->at.v};
+    odin3_pp_open open = {index, src->given, src->library, {0}, src->at};
     odin3_srcbuf_id buf = {0};
     st = odin3_pp_open_file(pp, &open, &buf);
-    pp->stream = buf.v;
+    pp->stream = buf;
     return st;
 }
 
@@ -890,14 +895,14 @@ odin3_status odin3_pp_run(odin3_pp *pp, const odin3_pp_source *src, odin3_pp_str
     }
 #ifndef NDEBUG
     if (st == ODIN3_OK) {
-        st = odin3_pp_check(pp, (odin3_srcbuf_id){pp->stream});
+        st = odin3_pp_check(pp, pp->stream);
     }
 #endif
     if (st != ODIN3_OK) {
         reset_run(pp);
         return st;
     }
-    *out = (odin3_pp_stream){{pp->out.data, pp->out.len}, {pp->stream}, pp->nsegments};
+    *out = (odin3_pp_stream){{pp->out.data, pp->out.len}, pp->stream, pp->nsegments};
     return ODIN3_OK;
 }
 
@@ -949,14 +954,14 @@ static odin3_status cmdline_buffer(odin3_pp *pp, odin3_strbuf *text) {
     if (st == ODIN3_OK) {
         st = odin3_u64map_put(pp->cache_by_buffer, (odin3_kv){buf.v, 0});
     }
-    pp->cmdline_buf = buf.v;
+    pp->cmdline_buf = buf;
     return st;
 }
 
 /* Defines every project define from its <command line> line (continuations and comments off). */
 static odin3_status cmdline_define(odin3_pp *pp, const odin3_pp_config *config) {
     const odin3_pp_cached *entry = odin3_vec_cat(&pp->cache, 0);
-    uint32_t base = odin3_srcman_loc(pp->sm, (odin3_srcbuf_id){pp->cmdline_buf}, 0).v;
+    odin3_loc base = odin3_srcman_loc(pp->sm, pp->cmdline_buf, 0);
     uint32_t start = 0;
     for (uint32_t i = 0; i < config->ndefines; i++) {
         const odin3_pp_define *def = &config->defines[i];
@@ -964,12 +969,17 @@ static odin3_status cmdline_define(odin3_pp *pp, const odin3_pp_config *config) 
             (uint32_t)(DEFINE_WORD + 1 + def->name.len + (def->has_value ? 1 + def->value.len : 0));
         const uint8_t *newline = memchr(entry->bytes + start, '\n', line_len);
         if (newline != NULL) {
-            return odin3_pp_error(pp, base + (uint32_t)(newline - entry->bytes),
+            return odin3_pp_error(pp, odin3_pp_loc_add(base, (uint32_t)(newline - entry->bytes)),
                                   "syntax: newline in the text of project define '%.*s'",
                                   (int)def->name.len, (const char *)def->name.ptr);
         }
-        odin3_pp_deftext text = {
-            entry->bytes, start + line_len, base, start + DEFINE_WORD, base + start, false, false};
+        odin3_pp_deftext text = {entry->bytes,
+                                 start + line_len,
+                                 base,
+                                 start + DEFINE_WORD,
+                                 odin3_pp_loc_add(base, start),
+                                 false,
+                                 false};
         odin3_status st = odin3_pp_define_scan(pp, &text);
         if (st != ODIN3_OK) {
             return st;
@@ -1001,7 +1011,6 @@ static odin3_status copy_incdirs(odin3_pp *pp, const odin3_pp_config *config) {
 static odin3_status init(odin3_pp *pp, odin3_design *design) {
     pp->design = design;
     pp->strtab = odin3_design_strtab(design);
-    pp->limits = odin3_pp_default_limits();
     odin3_vec_init(&pp->macros, sizeof(odin3_pp_macro));
     odin3_vec_init(&pp->cache, sizeof(odin3_pp_cached));
     odin3_vec_init(&pp->files_read, sizeof(uint32_t));
@@ -1018,7 +1027,7 @@ static odin3_status init(odin3_pp *pp, odin3_design *design) {
     if (st != ODIN3_OK) {
         return st;
     }
-    pp->arena = odin3_arena_create(0);
+    pp->arena = odin3_arena_create(ODIN3_PP_ARENA_CHUNK);
     pp->macro_by_name = odin3_u64map_create(0);
     pp->cache_by_path = odin3_u64map_create(0);
     pp->cache_by_buffer = odin3_u64map_create(0);
@@ -1027,7 +1036,8 @@ static odin3_status init(odin3_pp *pp, odin3_design *design) {
     return ok ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
 }
 
-odin3_status odin3_pp_create(odin3_design *design, const odin3_pp_config *config, odin3_pp **out) {
+static odin3_status create(odin3_design *design, const odin3_pp_config *config,
+                           const odin3_pp_limits *limits, odin3_pp **out) {
     if (out != NULL) {
         *out = NULL;
     }
@@ -1043,6 +1053,7 @@ odin3_status odin3_pp_create(odin3_design *design, const odin3_pp_config *config
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     odin3_status st = init(pp, design);
+    pp->limits = *limits;
     if (st == ODIN3_OK) {
         st = copy_incdirs(pp, config);
     }
@@ -1062,6 +1073,16 @@ odin3_status odin3_pp_create(odin3_design *design, const odin3_pp_config *config
     }
     *out = pp;
     return ODIN3_OK;
+}
+
+odin3_status odin3_pp_create(odin3_design *design, const odin3_pp_config *config, odin3_pp **out) {
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    return create(design, config, &limits, out);
+}
+
+odin3_status odin3_pp_test_create(odin3_design *design, const odin3_pp_config *config,
+                                  odin3_pp_limits limits, odin3_pp **out) {
+    return create(design, config, &limits, out);
 }
 
 void odin3_pp_destroy(odin3_pp *pp) {

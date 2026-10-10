@@ -749,17 +749,19 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | `ODIN3_PP_MAX_MACRO_ARGS` | 256 | formals per macro |
 | `ODIN3_PP_MAX_MACRO_TEXT` | 2^20 | body bytes; the largest VTR body is under 1 KB |
 | `ODIN3_PP_MAX_MACROS` | 2^20 | table entries; mcml.v defines 51 |
+| `ODIN3_PP_MAX_DEFINITIONS` | 2^18 | definitions made over the preprocessor's life, redefinitions and `` `undef `` + `` `define `` included (each keeps its record: the arena never frees); with the next cap it bounds the table at ≈ 85 MB whatever the input (agent default, 2B Task 6 fix round 1) |
+| `ODIN3_PP_MAX_MACRO_BYTES` | 2^26 | arena bytes reserved for bodies, defaults and formal lists over the preprocessor's life, checked with one 64 KiB chunk of headroom so the arena never exceeds it (agent default, as above) |
 | `ODIN3_PP_MAX_STREAM_BYTES` | 2^28 | output bytes per stream, same as the input cap: an expansion bomb (`` `define A B B B B `` …) stops here or at the caps below, whichever first |
 | `ODIN3_PP_MAX_BUFFERS_PER_STREAM` | 2^22 | every source-manager buffer the run creates: `EXPANSION`, `MACRO_ARG` **and `FILE`** (an include bomb of empty headers grows no output; I10b); the design-wide srcman cap is 2^24; mcml.v uses ≈ 5,000 |
 | `ODIN3_PP_MAX_INCLUDES_PER_STREAM` | 2^16 | `FILE` buffers per run; each re-registers its lines (4 bytes per line) even from the cache |
-| `ODIN3_PP_MAX_LOC_BYTES_PER_STREAM` | 2^28 | location-space bytes the run reserves (Σ `len + 1` over its buffers), so a bomb of `MACRO_ARG`s that never reach the output (`` `G(x) `` ignoring `x`, doubled per level) is stopped by 2B before the source manager's 2^32 space is (AST §3.5 expects 2B's caps first; I10c) |
+| `ODIN3_PP_MAX_LOC_BYTES_PER_STREAM` | 2^29 | location-space bytes the run reserves (Σ `len + 1` over its buffers, the stream's own file included — hence 2^29, not 2^28, so a 2^28-byte root fits; agent default, 2B Task 6 fix round 1), so a bomb of `MACRO_ARG`s that never reach the output (`` `G(x) `` ignoring `x`, doubled per level) is stopped by 2B before the source manager's 2^32 space is (AST §3.5 expects 2B's caps first; I10c) |
 | `ODIN3_PP_MAX_FILE_CACHE_BYTES` | 2^30 | bytes held by the file cache over the preprocessor's life (a VTR project holds under 5 MB) |
 | `ODIN3_PROJ_MAX_FLIST_DEPTH`, `_QIP_DEPTH` | 64 | nested lists; cycles are caught by name first |
 | `ODIN3_PROJ_MAX_WORDS` | 2^20 | words per file list, `.o3proj` line and `.qsf`/`.qip` file, counted before they are stored (agent default, PR 2B-1 final review: at 2^24 one Tcl file cost ≈ 1 GB, and an OOM kills the WSL VM; ≈ 60 MB now; real projects — the DE2i-150 `.qsf` is a few thousand lines — are far below it) |
 | source limits | AST §3.5 | file size 2^28, buffers 2^24, location space |
 
-Everything else is bounded by these (the macro table is at most `MAX_MACROS` × a bounded
-record plus `MAX_MACRO_TEXT` per body; an actual is at most `MAX_LIVE_RUNS` runs over cached or
+Everything else is bounded by these (the macro table is at most `MAX_DEFINITIONS` bounded
+records plus `MAX_MACRO_BYTES` of arena; an actual is at most `MAX_LIVE_RUNS` runs over cached or
 arena bytes). Every cap is checked before the allocation or buffer creation it guards, never
 after (Review focus 4). The test hook lowers any cap, and the fuzz harness (§10.5) lowers them
 all under libFuzzer's RSS limit.
@@ -857,7 +859,9 @@ operators; whitespace and comments dropped), and compare Odin III against the tw
 strings, Icarus tolerates undefined macros) the file is listed under "oracles disagree" and not
 failed. **Declared divergences** (both oracles agree, 2B differs by design, so the tool expects
 the Odin III error and reports anything else): directives inside macro text (PP-6; probes t5,
-u3) and recursion on the spelling ancestry (PP-7; probe w1, which both oracles expand).
+u3), recursion on the spelling ancestry (PP-7; probe w1, which both oracles expand), and a
+compiler directive name defined or undefined as a macro (§7.3 row; `` `define timescale 1 ``,
+which both oracles accept).
 Inputs: the preprocessor micros, every micro with a backtick
 (`syntax/*`, `keywords/*/*.vh` through their includers), the VTR set ending with mcml.v;
 expected: zero undeclared disagreements with an agreeing pair, the lists of excluded and

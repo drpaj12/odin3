@@ -40,6 +40,8 @@ static const char *const k_directive_names[] = {
     "timescale",
     "unconnected_drive",
     "undef",
+    "__FILE__", /* PP-9 at every use, so never a usable macro name */
+    "__LINE__",
 };
 
 static bool bytes_eq(odin3_bytes bytes, const char *str) {
@@ -73,7 +75,7 @@ typedef struct def_state {
     odin3_pp_deftext *txt;
     odin3_bytes name;
     uint32_t name_id;
-    uint32_t name_loc;
+    odin3_loc name_loc;
     uint32_t after_head; /* just after the name or the formal list's ')' */
     odin3_vec formals;   /* odin3_pp_formal */
     bool has_formals;
@@ -85,8 +87,8 @@ static int byte_at(const odin3_pp_deftext *txt, uint32_t pos) {
     return pos < txt->len ? txt->bytes[pos] : -1;
 }
 
-static uint32_t loc_of(const odin3_pp_deftext *txt, uint32_t pos) {
-    return txt->base + pos;
+static odin3_loc loc_of(const odin3_pp_deftext *txt, uint32_t pos) {
+    return (odin3_loc){txt->base.v + pos};
 }
 
 /* The length of a continuation (\ LF or \ CR LF) at pos; 0 when none or they are off. */
@@ -171,7 +173,7 @@ static odin3_status scan_block(def_state *ds) {
 /* PP-9: ``, `", `\`" and `__FILE__/`__LINE__ in a body are errors; any other backtick is text. */
 static odin3_status scan_backtick(def_state *ds) {
     odin3_pp_deftext *txt = ds->txt;
-    uint32_t at = loc_of(txt, txt->pos);
+    odin3_loc at = loc_of(txt, txt->pos);
     int next = byte_at(txt, txt->pos + 1);
     if (next == '`') {
         return odin3_pp_sv_operator(ds->pp, at, "``");
@@ -250,14 +252,29 @@ static odin3_status text_cap(def_state *ds, text_span span) {
     return odin3_pp_cap_error(ds->pp, loc_of(ds->txt, span.start), cap);
 }
 
-/* Copies the span's bytes into the arena. */
-static const uint8_t *copy_text(def_state *ds, text_span span) {
+/* bytes from the macro arena, checking ODIN3_PP_MAX_MACRO_BYTES first (located at at) with one
+ * chunk of headroom, so the arena never reserves more than the cap. */
+static odin3_status macro_alloc(def_state *ds, size_t bytes, odin3_loc at, void **out) {
+    odin3_pp *pp = ds->pp;
+    uint64_t reserved = odin3_arena_bytes_reserved(pp->arena);
+    if (reserved + bytes + ODIN3_PP_ARENA_CHUNK > pp->limits.macro_bytes) {
+        odin3_pp_cap cap = {"macro bytes", "ODIN3_PP_MAX_MACRO_BYTES", pp->limits.macro_bytes};
+        return odin3_pp_cap_error(pp, at, cap);
+    }
+    *out = odin3_arena_alloc(pp->arena, bytes);
+    return *out == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+}
+
+/* Copies the span's bytes into the macro arena. */
+static odin3_status copy_text(def_state *ds, text_span span, const uint8_t **out) {
     uint32_t len = span.end - span.start;
-    uint8_t *copy = odin3_arena_alloc(ds->pp->arena, len);
-    if (copy != NULL && len > 0) {
+    void *copy = NULL;
+    odin3_status st = macro_alloc(ds, len, loc_of(ds->txt, span.start), &copy);
+    if (st == ODIN3_OK && len > 0) {
         memcpy(copy, ds->txt->bytes + span.start, len);
     }
-    return copy;
+    *out = copy;
+    return st;
 }
 
 /* +1 for an opening bracket, -1 for a closing one, 0 otherwise. */
@@ -292,7 +309,9 @@ static odin3_status scan_to_separator(def_state *ds, bool *open) {
     return ODIN3_OK;
 }
 
-/* A formal's default: the text to the next top-level ',' or ')', trimmed. */
+/* A formal's default: the text to the next top-level ',' or ')', trimmed. Its spelled copy keeps
+ * any continuation: a default ending in `\`-newline keeps the `\` (the newline is trimmed), so
+ * the I2 rule (drop the `\`, keep the newline) never applies to defaults (Icarus keeps it too). */
 static odin3_status scan_default(def_state *ds, odin3_pp_formal *formal) {
     odin3_pp_deftext *txt = ds->txt;
     skip_blanks(txt);
@@ -318,11 +337,10 @@ static odin3_status scan_default(def_state *ds, odin3_pp_formal *formal) {
     formal->has_default = true;
     formal->def = loc_of(txt, span.start);
     formal->len = span.end - span.start;
-    formal->text = copy_text(ds, span);
-    return formal->text == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+    return copy_text(ds, span, &formal->text);
 }
 
-static odin3_status add_formal(def_state *ds, odin3_bytes name, uint32_t at,
+static odin3_status add_formal(def_state *ds, odin3_bytes name, odin3_loc at,
                                odin3_pp_formal **out) {
     if (ds->formals.len >= ds->pp->limits.macro_args) {
         char what[CAP_WHAT];
@@ -355,7 +373,7 @@ static odin3_status add_formal(def_state *ds, odin3_bytes name, uint32_t at,
 static odin3_status scan_formal(def_state *ds, bool *done) {
     odin3_pp_deftext *txt = ds->txt;
     skip_blanks(txt);
-    uint32_t at = loc_of(txt, txt->pos);
+    odin3_loc at = loc_of(txt, txt->pos);
     odin3_bytes name = read_ident(txt);
     if (name.len == 0) {
         return odin3_pp_error(ds->pp, at,
@@ -416,13 +434,19 @@ static odin3_status store(def_state *ds, text_span body) {
                           .at = ds->txt->at,
                           .def = loc_of(ds->txt, body_len == 0 ? ds->after_head : body.start),
                           .len = body_len,
-                          .body = copy_text(ds, body),
                           .nformals = (uint32_t)ds->formals.len,
                           .has_formals = ds->has_formals};
     size_t bytes = sizeof(odin3_pp_formal) * ds->formals.len;
-    mac.formals = odin3_arena_alloc(pp->arena, bytes);
-    if (mac.body == NULL || mac.formals == NULL ||
-        odin3_vec_reserve(&pp->macros, pp->macros.len + 1) != ODIN3_OK) {
+    void *formals = NULL;
+    odin3_status st = copy_text(ds, body, &mac.body);
+    if (st == ODIN3_OK) {
+        st = macro_alloc(ds, bytes, ds->name_loc, &formals);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    mac.formals = formals;
+    if (odin3_vec_reserve(&pp->macros, pp->macros.len + 1) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     if (bytes > 0) {
@@ -477,6 +501,11 @@ static odin3_status scan_head(def_state *ds) {
                               "syntax: compiler directive '%.*s' cannot be a macro name",
                               (int)ds->name.len, (const char *)ds->name.ptr);
     }
+    const odin3_pp_limits *limits = &ds->pp->limits;
+    if (ds->pp->macros.len >= limits->definitions) {
+        odin3_pp_cap cap = {"definitions", "ODIN3_PP_MAX_DEFINITIONS", limits->definitions};
+        return odin3_pp_cap_error(ds->pp, ds->name_loc, cap);
+    }
     odin3_status st = odin3_design_intern(ds->pp->design, ds->name, &ds->name_id);
     if (st == ODIN3_OK && byte_at(txt, txt->pos) == '(') {
         st = scan_formals(ds);
@@ -498,7 +527,7 @@ odin3_status odin3_pp_define_scan(odin3_pp *pp, odin3_pp_deftext *text) {
 
 /* --- the directives ------------------------------------------------------------------------ */
 
-odin3_status odin3_pp_define_directive(odin3_pp *pp, uint32_t at) {
+odin3_status odin3_pp_define_directive(odin3_pp *pp, odin3_loc at) {
     odin3_pp_frame *frame = odin3_pp_top(pp);
     const odin3_pp_textrun *run = odin3_vec_cat(&pp->runs, frame->first_run);
     uint32_t offset = frame->cur.run < frame->nruns ? frame->cur.offset : run->len;
@@ -511,10 +540,10 @@ odin3_status odin3_pp_define_directive(odin3_pp *pp, uint32_t at) {
     return st;
 }
 
-odin3_status odin3_pp_undef_directive(odin3_pp *pp, uint32_t at) {
+odin3_status odin3_pp_undef_directive(odin3_pp *pp, odin3_loc at) {
     (void)at;
     odin3_pp_skip_spaces(pp);
-    uint32_t loc = odin3_pp_loc_here(pp);
+    odin3_loc loc = odin3_pp_loc_here(pp);
     odin3_bytes name = odin3_pp_read_ident(pp);
     if (name.len == 0) {
         return odin3_pp_error(pp, loc, "syntax: expected a macro name after `undef");

@@ -23,10 +23,17 @@
 #define ODIN3_PP_MAX_MACRO_ARGS UINT32_C(256)
 #define ODIN3_PP_MAX_MACRO_TEXT (UINT32_C(1) << 20)
 #define ODIN3_PP_MAX_MACROS (UINT32_C(1) << 20)
+/* Definitions made over the preprocessor's life, redefinitions and `undef + `define included
+ * (agent default, spec §9): with ODIN3_PP_MAX_MACRO_BYTES it bounds the table's memory. */
+#define ODIN3_PP_MAX_DEFINITIONS (UINT32_C(1) << 18)
+/* Arena bytes reserved for macro bodies, defaults and formal lists over the preprocessor's life
+ * (agent default, spec §9). */
+#define ODIN3_PP_MAX_MACRO_BYTES (UINT32_C(1) << 26)
 #define ODIN3_PP_MAX_STREAM_BYTES (UINT32_C(1) << 28)
 #define ODIN3_PP_MAX_BUFFERS_PER_STREAM (UINT32_C(1) << 22)
 #define ODIN3_PP_MAX_INCLUDES_PER_STREAM (UINT32_C(1) << 16)
-#define ODIN3_PP_MAX_LOC_BYTES_PER_STREAM (UINT32_C(1) << 28)
+/* 2^29 (agent default, spec §9): the stream's own file, up to 2^28 bytes, counts towards it. */
+#define ODIN3_PP_MAX_LOC_BYTES_PER_STREAM (UINT32_C(1) << 29)
 #define ODIN3_PP_MAX_FILE_CACHE_BYTES (UINT32_C(1) << 30)
 
 /* --- configuration (spec §7.1, verbatim) --------------------------------------------------- */
