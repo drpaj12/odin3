@@ -79,8 +79,8 @@ O(log buffers + log lines), and the chains come free from the buffer graph.
 | range covers | the file's bytes (also the **`<command line>` buffer**, `name` = `<command line>`, `resolved` and `library` 0: one `` `define NAME(args) body `` line per `+define+`/project `define`, in project order, LF-terminated, so every macro has a defining buffer and lines decode) | the macro's **body as spelled in its definition** (offset *k* ↔ `def + k`) | **one contiguous spelled run** of a substituted argument (offset *k* ↔ `def + k`) | pasted/stringified text that exists nowhere (SV `` `` ``/`` `" ``, Phase 5; never made by 2B) |
 | `name` | path as given (strtab) | macro name | macro name | 0 |
 | `resolved`, `library` | absolute path (0 for `<command line>`); library (`work` default; an included file inherits its includer's) | 0 | 0 | 0 |
-| `parent` | loc of the `` `include `` that opened it, 0 for a project file | the use site: loc of the macro name token | loc of the formal parameter's occurrence inside the `EXPANSION` body it was substituted into | loc of the operator inside the `EXPANSION` body |
-| `parent_end` | 0 | one past the use (after `)` or the name) | one past the formal | one past the operator |
+| `parent` | loc of the `` `include `` that opened it; for a project-description file (`.o3proj`, `-f` list, `.qpf`/`.qsf`/`.qip`, `odin2.xml`), the loc of the `-f`/`-F`, `import` or `QIP_FILE` word that named it; 0 for the entry and for a project source file | the use site: loc of the macro name token | loc of the formal parameter's occurrence inside the `EXPANSION` body it was substituted into | loc of the operator inside the `EXPANSION` body |
+| `parent_end` | 0 | one past the use (after `)` or the name; in another buffer than `parent` when the actuals ran into an enclosing frame, 2B PP-6) | one past the formal | one past the operator |
 | `def` | 0 | loc of the body's first byte in the defining buffer | loc of the run's first byte as spelled: in a file, in an expansion body, or in another argument run | 0 |
 | `lines` | vec of line-start offsets, line 1 at 0 | — | — | — |
 
@@ -821,6 +821,12 @@ is held". 1B's design
 handle gains the owned source manager, the per-run AST list with symbol tables, and the keep
 flag. 1D's pass registry definition gains `wants_ast`. The ABI is bumped once, to the version
 after 1D's.
+
+Made with 2B (`docs/specs/2026-10-10-2B-project-preproc-design.md` §13, PR 2B-1): a `FILE`
+buffer's `parent` may also be the loc of the `-f`/`-F`, `import` or `QIP_FILE` word that named a
+project-description file (PRJ-2), so project errors print `included from files.f:3`; an
+`EXPANSION`'s `parent_end` may lie in another buffer than its `parent` when the actuals ran into
+an enclosing frame (PP-6, ruling I11) — §3.2's ranges already allow it.
 
 ## 14. Open questions (decided as recommended under the overnight rule, 2026-10-10)
 

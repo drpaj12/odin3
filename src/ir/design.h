@@ -1,10 +1,11 @@
 /*
- * design.h — the design handle: owner of the design-global strtab, cell-type table and source
- * manager.
+ * design.h — the design handle: owner of the design-global strtab, cell-type table, source
+ * manager and project record.
  */
 #ifndef ODIN3_IR_DESIGN_H
 #define ODIN3_IR_DESIGN_H
 
+#include "ast/srcfmt.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
 #include "util/str.h"
@@ -35,5 +36,26 @@ struct odin3_srcman; /* src/ast/srcman.h */
  * which destroys it. NO_MEMORY (with *out unchanged) when creating it fails.
  */
 odin3_status odin3_design_get_srcman(odin3_design *design, struct odin3_srcman **out);
+
+struct odin3_project; /* src/frontends/project/project.h */
+
+/*
+ * The design's project record (PRJ-1), created empty on first use; the design destroys it.
+ * NO_MEMORY (with *out unchanged) when creating it fails.
+ */
+odin3_status odin3_design_get_project(odin3_design *design, struct odin3_project **out);
+
+/* The design's project record, NULL when there is none. */
+struct odin3_project *odin3_design_project(const odin3_design *design);
+
+/* Destroys the design's project record (a failed read_project), so the next use starts clean. */
+void odin3_design_drop_project(odin3_design *design);
+
+/*
+ * How diagnostics name files (PRJ-18 --diag-paths): ODIN3_SRCFMT_GIVEN (the default) or
+ * ODIN3_SRCFMT_RESOLVED. Any other value is stored as GIVEN.
+ */
+void odin3_design_set_diag_paths(odin3_design *design, odin3_srcfmt style);
+odin3_srcfmt odin3_design_diag_paths(const odin3_design *design);
 
 #endif
