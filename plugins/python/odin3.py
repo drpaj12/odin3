@@ -13,11 +13,18 @@ The Pythonic layer (spec docs/specs/2026-10-09-1D-abi-design.md, "Python"):
         for node in module.nodes():
             print(node.type_name, [pin.net() for pin in node.pins()], node.sources())
 
-Objects (Module, Node, Pin, Net, Wire) are small value types naming an IR object by ID through
-the design that owns it; they compare equal when they name the same object. Every string is
-copied out of the library at once, so it outlives later mutations. IDs stay valid until a
-`compact` pass renumbers a module (ABI conventions in odin3.h). A failing ABI call raises
-Odin3Error carrying its odin3_status; the library has already logged why.
+The AST a read kept (ABI v4; read-side helpers only):
+
+    tree = design.ast()  # the latest read run's store, elaborated else parsed; None if none
+    for unit in tree.roots():
+        for child in unit.children():
+            print(child.kind, child.name, child.loc)  # e.g. MODULE top f.v:1:1
+
+Objects (Module, Node, Pin, Net, Wire; AstNode) are small value types naming an IR object (an
+AST node) by ID through the design that owns it; they compare equal when they name the same
+object. Every string is copied out of the library at once, so it outlives later mutations. IDs
+stay valid until a `compact` pass renumbers a module (ABI conventions in odin3.h). A failing ABI
+call raises Odin3Error carrying its odin3_status; the library has already logged why.
 """
 
 from __future__ import annotations
@@ -287,6 +294,18 @@ class Design:
     def module(self, name: str) -> Module | None:
         module = int(self.get("odin3_design_lookup_module", "uint32_t", name.encode()))
         return Module(self, module) if module else None
+
+    def ast(self) -> Ast | None:
+        """The AST of the latest read run that kept one: its elaborated store, else its parsed
+        one; None when the design holds no AST (odin3_design_get_ast_count / _at)."""
+        best: tuple[int, int, Any] | None = None
+        for i in range(int(self.get("odin3_design_get_ast_count", "uint32_t"))):
+            ptr = self.get("odin3_design_get_ast_at", "odin3_ast *", i)
+            run = int(self.odin3.get("odin3_ast_get_run", "uint32_t", ptr))
+            form = int(self.odin3.get("odin3_ast_get_form", "uint32_t", ptr))
+            if best is None or (run, form) > best[:2]:
+                best = (run, form, ptr)  # ELABORATED (2) > PARSED (1) within a run
+        return Ast(self, best[2]) if best is not None else None
 
     def objects_at(self, file: str, line: int) -> list[Found]:
         """Every object that comes from line `line` of file (odin3_prov_visit_objects)."""
@@ -608,3 +627,82 @@ class Wire(_Local):
     @property
     def name(self) -> str:
         return self._text("odin3_wire_get_name")
+
+
+class Ast:
+    """An AST store the design holds (odin3_ast): its run, form and UNIT roots."""
+
+    def __init__(self, design: Design, ptr: Any) -> None:
+        self.design = design  # keeps the owning design (and so the store) alive
+        self.ptr = ptr
+
+    def _get(self, function: str, *args: Any) -> int:
+        return int(self.design.odin3.get(function, "uint32_t", self.ptr, *args))
+
+    @property
+    def run(self) -> int:
+        """The pass run of the read that built it."""
+        return self._get("odin3_ast_get_run")
+
+    @property
+    def form(self) -> str:
+        """"parsed" or "elaborated"."""
+        parsed = self._get("odin3_ast_get_form") == self.design.odin3.lib.ODIN3_AST_FORM_PARSED
+        return "parsed" if parsed else "elaborated"
+
+    def roots(self) -> list[AstNode]:
+        """The UNIT nodes, in creation order."""
+        count = self._get("odin3_ast_get_root_count")
+        return [AstNode(self, self._get("odin3_ast_get_root_at", i)) for i in range(count)]
+
+    def node(self, ident: int) -> AstNode:
+        """The node with store-local ID ident (1 .. node end - 1)."""
+        return AstNode(self, ident)
+
+    def __len__(self) -> int:
+        """The number of nodes (IDs run from 1 to this)."""
+        return self._get("odin3_ast_get_node_end") - 1
+
+
+@dataclass(frozen=True)
+class AstNode:
+    """One AST node: a store and a node ID."""
+
+    tree: Ast = field(compare=False, repr=False)
+    id: int
+
+    def _get(self, function: str, ctype: str = "uint32_t", *args: Any) -> Any:
+        return self.tree.design.odin3.get(function, ctype, self.tree.ptr, self.id, *args)
+
+    def _text(self, function: str) -> str:
+        return self.tree.design.odin3.text(self._get(function, "const char *"))
+
+    @property
+    def kind(self) -> str:
+        """The kind's name, e.g. "MODULE" (odin3_ast_get_kind_name)."""
+        return self._text("odin3_ast_get_kind_name")
+
+    @property
+    def sub(self) -> str:
+        """The sub-kind's spelling ("+", "posedge", "input", …), "" when the kind has none."""
+        return self._text("odin3_ast_get_sub_name")
+
+    @property
+    def name(self) -> str:
+        """The node's name, "" when it has none."""
+        return self._text("odin3_ast_get_name")
+
+    @property
+    def loc(self) -> str:
+        """Where the node starts, as "file:line:col" ("<unknown>:0:0" when not recorded)."""
+        design = self.tree.design
+        odin3 = design.odin3
+        raw = int(self._get("odin3_ast_get_loc"))
+        srcman = design.get("odin3_design_get_srcman", "odin3_srcman *")
+        return odin3.text(odin3.get("odin3_srcman_get_format", "const char *", srcman, raw))
+
+    def children(self) -> list[AstNode]:
+        """The present children, slots first then the tail (absent optional slots skipped)."""
+        count = int(self._get("odin3_ast_get_nchild"))
+        kids = (int(self._get("odin3_ast_get_child", "uint32_t", i)) for i in range(count))
+        return [AstNode(self.tree, kid) for kid in kids if kid]

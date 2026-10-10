@@ -1,5 +1,6 @@
 /*
- * design.h — the design handle: owner of the design-global strtab and cell-type table.
+ * design.h — the design handle: owner of the design-global strtab, cell-type table, source
+ * manager and per-run AST stores.
  */
 #ifndef ODIN3_IR_DESIGN_H
 #define ODIN3_IR_DESIGN_H
@@ -34,5 +35,40 @@ odin3_status odin3_design_set_top(odin3_design *design, odin3_module_id module);
 
 /* The top module, none (ID 0) until one is set. */
 odin3_module_id odin3_design_top(const odin3_design *design);
+
+/*
+ * odin3_design_get_srcman (public, odin3.h): the design's source manager (AST-1), created on
+ * first use; it lives as long as the design, which destroys it.
+ */
+
+/* The keep levels (odin3_keep_ast) and odin3_ast are public: odin3.h. The design holds at most
+ * one store per (read run, form) (AST-15). */
+
+/*
+ * Hands ast (created on this design) to the design, which destroys it with itself or at
+ * odin3_design_drop_ast. INVALID_ARG (logged; the caller still owns ast) for a NULL argument, a
+ * store of another design or a held store with the same run and form; NO_MEMORY (likewise).
+ */
+odin3_status odin3_design_set_ast(odin3_design *design, odin3_ast *ast);
+
+/*
+ * The held store of pass run `run` and form in *out (borrowed; NULL when none is held). OK, or
+ * INVALID_ARG (logged) for a NULL design or out.
+ */
+odin3_status odin3_design_find_ast(const odin3_design *design, odin3_passrun_id run,
+                                   odin3_ast_form form, odin3_ast **out);
+
+/* Number of held stores, and store idx in the order they were handed over (NULL out of range). */
+uint32_t odin3_design_ast_count(const odin3_design *design);
+odin3_ast *odin3_design_ast_at(const odin3_design *design, uint32_t idx);
+
+/*
+ * The end of a read pass: destroys the held store of (run, form) unless the keep level retains
+ * that form; a store not held is a no-op.
+ */
+void odin3_design_drop_ast(odin3_design *design, odin3_passrun_id run, odin3_ast_form form);
+
+/* odin3_design_set_keep_ast (public, odin3.h) sets the level later drops apply; this reads it. */
+odin3_keep_ast odin3_design_keep_ast(const odin3_design *design);
 
 #endif

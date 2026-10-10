@@ -1,6 +1,8 @@
 /*
  * test_pass_manager.c — unit tests for the pass manager, the built-in passes and pass scripts.
  */
+#include "ast/ast.h"
+#include "ast/print.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -156,7 +158,7 @@ static odin3_status count_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byt
 }
 
 static const odin3_pass_def COUNT_PASS = {"t_count", "t_count [args]: counts its calls", count_pass,
-                                          &count_marker};
+                                          &count_marker, false};
 
 /* Breaks rule 4: a second driver on net 1 of module 1 (an input port's net). */
 static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
@@ -168,7 +170,8 @@ static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byt
     return odin3_ir_test_corrupt(module, (odin3_ir_test_target){ODIN3_IR_TEST_MULTI_DRIVER, 1});
 }
 
-static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4", break_pass, NULL};
+static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4", break_pass, NULL,
+                                          false};
 
 static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
                               void *user) {
@@ -179,7 +182,7 @@ static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byte
     return ODIN3_ERR_IO;
 }
 
-static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass, NULL};
+static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass, NULL, false};
 
 /* Breaks rule 4 like t_break, then fails: the check after it still runs. */
 static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
@@ -189,7 +192,7 @@ static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin
 }
 
 static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail", "t_break_fail: breaks, then fails",
-                                               break_fail_pass, NULL};
+                                               break_fail_pass, NULL, false};
 
 static void register_test_passes(void) {
     static bool done = false;
@@ -239,13 +242,13 @@ static void test_register_and_run(void) {
 
 static void test_register_rejects(void) {
     register_test_passes();
-    static const odin3_pass_def dup_builtin = {"check", "x", count_pass, NULL};
-    static const odin3_pass_def blank = {"a b", "x", count_pass, NULL};
-    static const odin3_pass_def semi = {"a;b", "x", count_pass, NULL};
-    static const odin3_pass_def quote = {"a\"b", "x", count_pass, NULL}; /* opens a quote */
-    static const odin3_pass_def empty = {"", "x", count_pass, NULL};
-    static const odin3_pass_def no_run = {"t_no_run", "x", NULL, NULL};
-    static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass, NULL};
+    static const odin3_pass_def dup_builtin = {"check", "x", count_pass, NULL, false};
+    static const odin3_pass_def blank = {"a b", "x", count_pass, NULL, false};
+    static const odin3_pass_def semi = {"a;b", "x", count_pass, NULL, false};
+    static const odin3_pass_def quote = {"a\"b", "x", count_pass, NULL, false}; /* opens a quote */
+    static const odin3_pass_def empty = {"", "x", count_pass, NULL, false};
+    static const odin3_pass_def no_run = {"t_no_run", "x", NULL, NULL, false};
+    static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass, NULL, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&COUNT_PASS));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&dup_builtin));
@@ -827,9 +830,123 @@ static void test_resolve_runs_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_passrun_end(design));
 }
 
+/* --- AST keep level and write_verilog_ast (2A Task 8) ----------------------------------------- */
+
+static odin3_keep_ast probe_level;
+
+/* Records the design's keep level when it runs. */
+static odin3_status keep_probe_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                                    void *user) {
+    (void)ctx;
+    (void)args;
+    (void)user;
+    probe_level = odin3_design_keep_ast(des);
+    return ODIN3_OK;
+}
+
+static const odin3_pass_def KEEP_PROBE_PASS = {
+    "t_keep_probe", "t_keep_probe: records the keep level", keep_probe_pass, NULL, false};
+static const odin3_pass_def WANTS_AST_PASS = {"t_wants_ast", "t_wants_ast: reads the AST",
+                                              keep_probe_pass, NULL, true};
+
+static void register_ast_passes(void) {
+    static bool done = false;
+    if (!done) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&KEEP_PROBE_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&WANTS_AST_PASS));
+        done = true;
+    }
+}
+
+static odin3_status script(const char *text) {
+    return odin3_pass_run_script(design, odin3_bytes_cstr(text),
+                                 (odin3_script_src){"-p", ODIN3_SCRIPT_BY_COMMAND});
+}
+
+static void test_wants_ast_raises_keep_level_before_the_script(void) {
+    register_ast_passes();
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_NONE, odin3_design_keep_ast(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, script("t_keep_probe"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_NONE, probe_level);
+    /* the probe runs first, yet sees the level the later pass asked for */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, script("t_keep_probe; t_wants_ast"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_ELABORATED, probe_level);
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_ELABORATED, odin3_design_keep_ast(design));
+    /* raised, never lowered */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ALL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, script("t_wants_ast"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_ALL, odin3_design_keep_ast(design));
+    /* a single pass run raises it too */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_NONE));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_wants_ast", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_ELABORATED, odin3_design_keep_ast(design));
+    TEST_ASSERT_TRUE(odin3_pass_find(odin3_bytes_cstr("write_verilog_ast"))->wants_ast);
+    TEST_ASSERT_FALSE(odin3_pass_find(odin3_bytes_cstr("write_blif"))->wants_ast);
+}
+
+/* A store of run `run` and form holding `module <name>; endmodule` in one UNIT. */
+static odin3_ast *module_store(uint32_t run, odin3_ast_form form, const char *name) {
+    odin3_ast *ast = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_create(design, form, (odin3_passrun_id){run}, &ast));
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast, odin3_bytes_cstr(name), &str));
+    odin3_ast_spec spec = {.kind = ODIN3_AST_MODULE, .name = str};
+    odin3_ast_id none[] = {{0}, {0}};
+    odin3_ast_id module = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &spec, none, 2, &module));
+    spec = (odin3_ast_spec){.kind = ODIN3_AST_UNIT, .name = str};
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &spec, &module, 1, &unit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_finish(ast));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_ast(design, ast));
+    return ast;
+}
+
+/* The pass's text for a held store: its header, then its one UNIT (no location: unknown). */
+static void append_printed(odin3_strbuf *want, const odin3_ast *ast, const char *header) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(want, odin3_bytes_cstr(header)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_appendf(want, "// unit %s at <unknown>:0:0\n",
+                                               odin3_ast_name_str(ast, odin3_ast_root(ast, 0))));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_print(ast, odin3_ast_root(ast, 0), want));
+}
+
+/* The first bytes of the file at path, NUL-terminated in buf; returns how many were read. */
+static size_t read_back(const char *path, char *buf, size_t cap) {
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    size_t len = fread(buf, 1, cap - 1, file);
+    buf[len] = '\0';
+    (void)fclose(file);
+    return len;
+}
+
+static void test_write_verilog_ast(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_verilog_ast", OUT_PATH));
+    TEST_ASSERT_TRUE(log_has("E write_verilog_ast: the design holds no AST"));
+    module_store(2, ODIN3_AST_FORM_ELABORATED, "old"); /* an earlier run: not printed */
+    odin3_ast *elab = module_store(5, ODIN3_AST_FORM_ELABORATED, "m_elab");
+    odin3_ast *parsed = module_store(5, ODIN3_AST_FORM_PARSED, "m");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_verilog_ast", OUT_PATH));
+    odin3_strbuf want;
+    odin3_strbuf_init(&want);
+    append_printed(&want, parsed, "// odin3 write_verilog_ast: run 5, parsed AST\n");
+    append_printed(&want, elab, "// odin3 write_verilog_ast: run 5, elaborated AST\n");
+    char got[1024];
+    TEST_ASSERT_EQUAL_size_t(want.len, read_back(OUT_PATH, got, sizeof got));
+    TEST_ASSERT_EQUAL_STRING(want.data, got);
+    TEST_ASSERT_NOT_NULL(strstr(got, "module m"));
+    TEST_ASSERT_NULL(strstr(got, "old"));
+    odin3_strbuf_free(&want);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_verilog_ast", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("write_verilog_ast", "/nonexistent/dir/x.v"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_builtins_registered);
+    RUN_TEST(test_wants_ast_raises_keep_level_before_the_script);
+    RUN_TEST(test_write_verilog_ast);
     RUN_TEST(test_register_and_run);
     RUN_TEST(test_register_rejects);
     RUN_TEST(test_unknown_pass);

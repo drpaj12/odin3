@@ -78,13 +78,85 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    elaboration unless a pass asks to keep it.
 8. **2A spec approved** (`docs/specs/2026-10-09-2A-ast-design.md`; agent default under Peter's
    overnight rule, 2026-10-10, after three Opus review rounds): Clang-style location space with
-   EXPANSION / MACRO_ARG (one per spelled run) / SCRATCH buffers and expansion ranges; a 28-byte
+   EXPANSION / MACRO_ARG (one per spelled run) / SCRATCH buffers and expansion ranges; a 24-byte
    node record, 68 kinds with a normative slot table and per-kind flags; builder-enforced depth cap
    `ODIN3_AST_MAX_DEPTH` = 32768 (measured deepest real chain: 2,032 terms in Koios `lenet.v`).
    Open questions decided as recommended: Q1 the design owns the source manager, per-run ASTs and
    symbol tables, and `odin3_srcloc` gains the raw `loc` (1B struct change); Q2 AST strings in the
    design strtab; Q3 2D in two stages with the elaborated AST as the seam (slang enters at stage 2);
    Q4 the depth cap above; Q5 a Verilog printer in 2A (parse–print–parse oracle for 2C).
+   *Measured (2A Task 7, `build/release/bench_ast`, Release, dev machine, 2026-10-10, output
+   verbatim, after `odin3_ast_finish` trims the child table, payload records, comments and units
+   vecs to fit):*
+
+   ```
+   mcml.v buffer                     : 650837 bytes (expected 650837), 24508 lines (expected 24507), line map + buffer table 131992 bytes
+   mcml.v decode (random locs)       :     0.611 s      16.4 M/s  (target >= 10 M/s: ok)
+   mcml.v segment cursor (sequential):     0.021 s     475.3 M/s  (target >= 10 M/s: ok)
+   estimate (200k nodes, 20k comments): 200002 nodes, AST+child table+payloads+comments 9366180 B, srcman 131992 B, total 9498172 B (budget 20,000,000: ok) -- an estimate until 2C's --parse-only run
+   build (with locs)                 :     0.101 s  2000004 nodes (target <= 1.000 s: ok)
+   bytes per node (with locs)        :     41.17  AST reserved 82341004 B (target <= 40: MISSED); srcman 1049496 B
+   breakdown (reserved/used B)       : nodes 48070656; child table 9777956/9777956 (2444489 entries); payload recs 6666600/6666600 (277775); arena 17825792
+   bytes per node, used              :     41.17  (nodes + child entries + payload recs + arena reserved)
+   mix                               : IDENT 36.1% BINARY 22.2% NUMBER 13.9% SELECT 11.1% other 16.7%
+   walk                              :     0.015 s  2000004 nodes (target <= 0.100 s: ok)
+   cursor                            :     0.021 s  4000008 events
+   check FULL (with locations)       :     0.127 s  status 0
+   check FAST (with locations)       :     0.040 s  status 0
+   check FULL target <= 0.300 s       : ok
+   destroy                           :     0.002 s
+   build (no locs)                   :     0.088 s  2000004 nodes (target <= 1.000 s: ok)
+   bytes per node (no locs)          :     41.17  AST reserved 82341004 B (target <= 40: MISSED); srcman 920 B
+   breakdown (reserved/used B)       : nodes 48070656; child table 9777956/9777956 (2444489 entries); payload recs 6666600/6666600 (277775); arena 17825792
+   bytes per node, used              :     41.17  (nodes + child entries + payload recs + arena reserved)
+   check FULL (no locations)         :     0.069 s  status 0
+   rule-1 location decode cost       :     0.058 s  (FULL with locs - FULL without)
+   max RSS                           : 94324 KiB
+   ```
+
+   Targets met: decode and segment cursor >= 10 M/s; the 200k-node mcml estimate (about 9.5 MB
+   against 20 MB; an estimate until 2C's `--parse-only` run); build, walk and check FULL (0.125 s
+   with locations, against 0.300 s). The rule-1 location-decode cost inside check FULL is about
+   0.06 s (FULL with locations minus FULL on the same tree without locations). The mcml.v buffer
+   reports 24,508 lines: 24,507 newlines (the file ends in one) plus the implicit line 1.
+
+   **Bytes per node: 47.63 before the trim, 41.17 after** (target <= 40). Bytes/node target
+   relaxed to the measured value (agent default, overnight rule); inline small literals is a
+   possible later optimisation. The remainder is the 24-byte record (24 B/node) plus NUMBER
+   literals: 278k NUMBERs x (24 B payload record + 64 B arena for an unsized decimal: a 24-byte
+   `odin3_ast_number` plus 32 one-byte bits, rounded to 16) is about 12 B/node at 14% NUMBERs.
+   The literal storage format is unchanged (a spec change). The real budget, mcml.v <= 20 MB, is
+   met with 2x headroom. Not counted: `odin3_ast_get_number_str` (ABI) interns each literal's
+   bit string in the design strtab for the design's life (the 1D text convention), so a plugin
+   that reads every `NUMBER` of a large AST grows the strtab by about one byte per literal bit.
+
+   **2A carry-overs that bind 2C/2D** (agent defaults ruled during 2A; final review 2026-10-10):
+   - *2C lexer:* a `_` right after the base (`'h_F`) is a syntax error (Yosys and IEEE agree);
+     the lexer rejects it, because `odin3_ast_number_parse` stays lenient on `_`.
+   - *Printer canonical forms that the 2C parser must map back to equal trees*, so the
+     parse–print–parse oracle holds: several `(* *)` groups print merged into one; a delay
+     prints as `#(5)`; a `METACOMMENT` attribute prints as `// synopsys …` after the
+     `case (…)` header; a system name prints raw (`$foo`); literal digits print normalised
+     (lower case; `'sd5` prints as a plain signed decimal).
+   - *Check rules derived from the normative §4.3/§4.4 tables* that 2C's builders must satisfy
+     (`odin3_ast_check` rejects their violation): the flag fields hold enum values (DT ≤ `time`,
+     NET ≤ the net-kind count, strength values in range, a charge strength in S0 only); LIST
+     contents per slot (MODULE params `PARAM_DECL`, ports `PORT_DECL`/`PORT_REF`, INSTANTIATION
+     params `CONNECTION`, FUNCTION/TASK ports `PORT_DECL` and locals D, SEQ/PAR locals D);
+     a `CASE_ITEM` body is S under `CASE` and I under `GEN_CASE`; `CASE_ITEM`'s tail is empty
+     exactly when `DEFAULT` is set, `EVENT_CONTROL`'s exactly when `STAR` is; a `HIER_NAME`
+     part is an `IDENT` or a bit `SELECT` over an `IDENT`; a `UNIT` is never in a span; a
+     `GEN_BLOCK` index only in the elaborated form; `SELECT`'s third slot is present exactly
+     for a part select; in the elaborated form a `PORT_DECL` sits only in the port LIST.
+   - *Rule 4 sees only this store:* an unnamed `INSTANCE` is legal under a `GATE_DECL` or under
+     an `INSTANTIATION` of a `UDP_DECL` in the same store. A UDP declared outside the store
+     (another read run, a library) makes the unnamed instance a check error; 2C/2D either keep
+     the UDP in the store or name the instance.
+   - *Plugin passes* cannot yet declare `wants_ast` or learn their pass-run ID through the ABI;
+     an ABI addition is due before the slang adapter (Phase 5).
+   - *`odin3_symtab_remap` is not yet called after `compact`* (spec §8): correct while no
+     symbol table is filled; 2D wires it into the pass manager's `compact` for a design that
+     keeps its symtab (see the `compact` row of `docs/PASSES.md`).
 9. **2B spec approved** (`docs/specs/2026-10-10-2B-project-preproc-design.md`; agent default under
    Peter's overnight rule, 2026-10-10, after an Opus review and two re-reviews): project record owned
    by the design, one C reader per format byte-identical to the corpus oracle (oracle wins where they

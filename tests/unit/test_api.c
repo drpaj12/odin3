@@ -27,7 +27,7 @@ static void test_version_string_matches_macros(void) {
 
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
-    TEST_ASSERT_EQUAL_UINT32(3, odin3_abi_version()); /* 1D added the IR access functions */
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version()); /* 2A added the AST and source manager */
 }
 
 static void test_check_status_has_a_name(void) {

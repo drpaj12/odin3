@@ -44,8 +44,12 @@ static void visit_leaf(void *user, odin3_prov_id leaf) {
     const odin3_prov_record *rec = odin3_prov_get(walk->design, leaf);
     for (uint32_t i = 0; rec != NULL && i < rec->n_locs; i++) {
         const odin3_srcloc *loc = &rec->locs[i];
-        odin3_source src = {odin3_api_str(walk->design, loc->file), loc->line, loc->col,
-                            loc->end_line, loc->end_col};
+        odin3_source src = {odin3_api_str(walk->design, loc->file),
+                            loc->line,
+                            loc->col,
+                            loc->end_line,
+                            loc->end_col,
+                            loc->loc};
         walk->visit(&src, walk->user);
     }
 }
@@ -81,7 +85,7 @@ ODIN3_EXPORT odin3_status odin3_prov_visit_objects(const odin3_design *design, c
     if (ix == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_srcloc loc = {file_str, line, 0, 0, 0};
+    odin3_srcloc loc = {file_str, line, 0, 0, 0, 0};
     odin3_prov_hits hits = odin3_prov_index_by_loc(ix, loc);
     for (uint32_t i = 0; i < hits.count; i++) {
         const odin3_prov_hit *hit = &hits.hits[i];

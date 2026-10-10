@@ -25,13 +25,17 @@ typedef odin3_status (*odin3_pass_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 /*
  * One pass. name: non-empty, printable ASCII without blanks, ';', '#' or '"' (a script word); help:
  * one line, its usage (shown by `odin3 --help`); run: the body; user: handed to run on every call
- * (NULL for the built-ins; a plugin pass's own definition for the ABI's plugin passes).
+ * (NULL for the built-ins; a plugin pass's own definition for the ABI's plugin passes);
+ * wants_ast: the pass reads the AST of an earlier read (AST-16), so a script that names it, or a
+ * run of it alone, first raises the design's keep level to ODIN3_KEEP_AST_ELABORATED (never
+ * lowering it).
  */
 typedef struct odin3_pass_def {
     const char *name;
     const char *help;
     odin3_pass_fn run;
     void *user;
+    bool wants_ast;
 } odin3_pass_def;
 
 /*
@@ -92,7 +96,8 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
  * skipped and not numbered: the others are commands 1, 2, … in order. A command is a pass name
  * followed by its arguments (the rest of the command, trimmed; split by odin3_pass_arg_next).
  * Every pass name is looked up before anything runs, so a typo late in a script costs nothing:
- * an unknown name is logged as "<loc>: unknown pass '<name>'" and gives ODIN3_ERR_PARSE. Then the
+ * an unknown name is logged as "<loc>: unknown pass '<name>'" and gives ODIN3_ERR_PARSE. A pass
+ * with wants_ast then raises the keep level (see odin3_pass_def) before anything runs. Then the
  * commands run in order through odin3_pass_run until one fails; its status is returned and
  * "<loc>: pass '<name>' failed: <status>" is logged. ODIN3_ERR_INVALID_ARG (logged) for a NULL
  * design or origin, or text {NULL, len > 0}; ODIN3_ERR_NO_MEMORY on out of memory.

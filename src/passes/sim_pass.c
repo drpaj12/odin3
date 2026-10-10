@@ -155,4 +155,4 @@ const odin3_pass_def odin3_pass_sim = {
     "sim",
     "sim <cycles> <seed> [<file>|-]: simulate the top with random inputs; write the vectors "
     "(odin3-sim-vectors format), or log a summary",
-    sim_run, NULL};
+    sim_run, NULL, false};

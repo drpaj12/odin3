@@ -147,7 +147,7 @@ static plugin_pass *copy_pass(const odin3_plugin_pass *pass) {
     }
     memcpy(copy->text, pass->name, name_len);
     memcpy(copy->text + name_len, pass->help, help_len);
-    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run, copy};
+    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run, copy, false};
     copy->run = pass->run;
     copy->user = pass->user;
     return copy;

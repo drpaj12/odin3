@@ -103,7 +103,7 @@ void tearDown(void) {
 /* --- IR builders --------------------------------------------------------------------------- */
 
 static odin3_prov_id source_at(const char *file, uint32_t line, uint32_t col) {
-    odin3_srcloc loc = {intern(file), line, col, line, col + 1};
+    odin3_srcloc loc = {intern(file), line, col, line, col + 1, 0};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     odin3_prov_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
@@ -456,7 +456,7 @@ static void test_focus_loc_matches_index(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, nodes[4])); /* dead: not drawn */
     odin3_prov_index *ix = odin3_prov_index_build(design);
     TEST_ASSERT_NOT_NULL(ix);
-    odin3_srcloc loc = {intern("x.v"), 10, 0, 0, 0};
+    odin3_srcloc loc = {intern("x.v"), 10, 0, 0, 0, 0};
     odin3_prov_hits hits = odin3_prov_index_by_loc(ix, loc);
     odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "x.v:10", 0};
     write_ok(&opts);

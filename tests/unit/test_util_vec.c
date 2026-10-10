@@ -120,6 +120,28 @@ static void test_free_twice_safe(void) {
     odin3_vec_free(&vec);
 }
 
+static void test_shrink_to_fit(void) {
+    odin3_vec vec;
+    odin3_vec_init(&vec, sizeof(int));
+    odin3_vec_shrink_to_fit(&vec); /* empty: nothing to do */
+    TEST_ASSERT_EQUAL_size_t(0, vec.cap);
+    for (int i = 0; i < FIRST_CAP + 1; i++) {
+        *(int *)odin3_vec_push(&vec) = i;
+    }
+    TEST_ASSERT_EQUAL_size_t(2 * FIRST_CAP, vec.cap);
+    odin3_util_set_alloc_fail_after(0);
+    odin3_vec_shrink_to_fit(&vec); /* a failed realloc keeps the vec */
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_size_t(2 * FIRST_CAP, vec.cap);
+    odin3_vec_shrink_to_fit(&vec);
+    TEST_ASSERT_EQUAL_size_t(FIRST_CAP + 1, vec.cap);
+    TEST_ASSERT_EQUAL_INT(FIRST_CAP, *(const int *)odin3_vec_cat(&vec, FIRST_CAP));
+    *(int *)odin3_vec_push(&vec) = -1; /* grows again by doubling */
+    TEST_ASSERT_EQUAL_size_t(2 * (FIRST_CAP + 1), vec.cap);
+    TEST_ASSERT_EQUAL_INT(-1, *(const int *)odin3_vec_cat(&vec, FIRST_CAP + 1));
+    odin3_vec_free(&vec);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_push_get_10000_ints);
@@ -129,5 +151,6 @@ int main(void) {
     RUN_TEST(test_pop_and_clear_keep_capacity);
     RUN_TEST(test_oom_on_growth);
     RUN_TEST(test_free_twice_safe);
+    RUN_TEST(test_shrink_to_fit);
     return UNITY_END();
 }

@@ -293,7 +293,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `ALWAYS` | (4) `always`, reserved `always_ff always_comb always_latch` | — | — | S | — | — | T1–T6 (T6: 2D rejects an `ALWAYS` whose S is not `TIMING_STMT`[`EVENT_CONTROL`, S]) |
 | `INITIAL` | — | — | — | S | — | — | T5 (D2) |
 | `INSTANTIATION` | — | req (module) | — | L? parameter `CONNECTION*` | `INSTANCE+` | — | I1–I7, P5 |
-| `INSTANCE` | — | opt (check rule 4: required under `INSTANTIATION`; 0 only under `GATE_DECL`) | — | R? array | C* | — | I5, I6, Q5 |
+| `INSTANCE` | — | opt (check rule 4: required under `INSTANTIATION` unless it instantiates a `UDP_DECL` of the store; 0 under `GATE_DECL`) | — | R? array | C* | — | I5, I6, Q5 |
 | `CONNECTION` | — | opt (0 = ordered) | — | E? (absent: `.p()` / empty slot) | — | — | I1–I3; mixing ordered and named: 2D (I2) |
 | `GATE_DECL` | gate kind (26) `and nand or nor xor xnor buf not bufif0 bufif1 notif0 notif1`, REJECT `nmos pmos cmos rnmos rpmos rcmos tran rtran tranif0 tranif1 rtranif0 rtranif1 pullup pulldown` | — | — | `STRENGTH`?, `DELAY`? | `INSTANCE+` | — | Q1–Q6 |
 | `FUNCTION_DECL` | — | req | `AUTOMATIC SIGNED`, `DT` field (return) | R? return, L ports (`PORT_DECL*`), L locals (D*), S body | — | — | K1–K8 |
@@ -382,8 +382,22 @@ tokens with blanks or comments between (L8) — and stores the literal **as writ
 bits, no sizing); `odin3_ast_number_new` takes a ready struct (adapters). The §3.5.1 rules —
 zero-extend, or extend with `x`/`z` when the leading digit is one, truncate to `width` with a
 warning, unsized decimals signed 32-bit — live in `odin3_ast_number_value(ast, node, arena,
-&value, &is_signed)`, which writes an IR `odin3_value` of kind `BITS` with its bytes in the
-caller's arena and warns once per literal (`warned`), so a generate loop does not repeat it.
+&literal)`, which writes an IR `odin3_value` of kind `BITS` with its bytes in the caller's arena
+plus `is_signed` and `is_unsized` (`odin3_ast_literal`; one struct, the five-parameter rule) and
+warns once per literal (`warned`), so a generate loop does not repeat it.
+
+**2A amendment (Task 3 review, 2026-10-10): literal sizing follows Yosys `read_verilog`
+exactly** (`frontends/verilog/const2ast.cc`; the exit bar is Parmys/Yosys). Sized: the width,
+zero-extended or x/z-extended by the written leading digit; the truncation warning fires when the
+value needs more bits than the width (bits up to the highest 1, plus one when the leading digit
+is x/z), so `4'hx0` is silent. Unsized: every written bit is kept, leading zeros included
+(`'h0_0000_0001` is 36 bits), extended to 32 when fewer were written (decimals: the magnitude's
+bits); then any unsized *signed* literal whose top bit is 1 gains a 0 bit (`'sh8000_0000` is
++2^31 in 33 bits; `2147483648` is 33 bits). **For 2D:** when an unsized literal (`is_unsized`)
+is widened to its context, Yosys repeats its top bit even when the literal is unsigned
+(`AstNode::bitsAsUnsizedConst`, `ast.cc`): `'hFFFF_FFFF` in a 64-bit context is all ones and
+`a + 'h8000_0000` with a 40-bit `a` adds `40'hFF_8000_0000`. A sized literal is sign- or
+zero-extended as IEEE says. 2D must apply this rule wherever it extends a literal.
 `REAL` holds a `double`. **`TEXT`** holds the raw source bytes of an opaque construct
 (`SPECIFY_BLOCK`, `UDP_DECL`, `CONFIG_DECL`: from the keyword to its end keyword, copied into
 the arena) so these print back verbatim and the round-trip oracle holds on the specify micros.
@@ -452,6 +466,8 @@ void         odin3_ast_unwind(odin3_ast *ast, uint32_t mark);            /* erro
 
 odin3_status odin3_ast_number_parse(odin3_ast *ast, odin3_loc loc, odin3_number_text pieces,
                                     uint32_t *payload);
+odin3_status odin3_ast_number_kind(odin3_number_text pieces, uint8_t *sub,
+                                   uint16_t *flags);      /* the NUMBER node's sub and flags */
 odin3_status odin3_ast_number_new(odin3_ast *ast, odin3_loc loc, const odin3_ast_number *num,
                                   uint32_t *payload);
 odin3_status odin3_ast_real_new(odin3_ast *ast, double value, uint32_t *payload);
@@ -517,7 +533,7 @@ The elaborated store is built from the parsed one with the same calls while walk
 cursor (§6); no clone primitive exists or is needed, since every node is rebuilt with its
 resolved children.
 
-### 5.3 C ABI mirror (the next ABI version)
+### 5.3 C ABI mirror (ABI v4)
 
 The mirror follows 1D (ABI v3) exactly: every function returns `odin3_status`, results come
 through out-pointers, readers are `odin3_ast_get_<field>(const odin3_ast *ast, uint32_t node,
@@ -538,12 +554,22 @@ Source-manager builders are exported so an adapter copies slang's locations verb
 the same chains. The Python layer gets read-side helpers only in 2A (`Design.ast()`,
 `node.kind`, `node.children()`, `node.loc`).
 
+*As shipped (ABI v4, 2A Task 8):* stores are created through the design,
+`odin3_design_new_ast(design, form, run, &ast)`, which hands the store to the design at once;
+`odin3_ast_destroy` is not exported (the design destroys its stores, or
+`odin3_design_drop_ast` at the end of a read). The held stores are enumerated with
+`odin3_design_get_ast_count`/`odin3_design_get_ast_at`; the keep level is
+`odin3_design_set_keep_ast(design, level)`/`odin3_design_get_keep_ast` with `odin3_keep_ast`
+levels `NONE`, `ELABORATED` (`--keep-ast`) and `ALL` (`--keep-ast=all`); an adapter stamps
+locations with `odin3_srcman_get_loc(sm, buffer, offset, &loc)`. A literal's sized value is
+§4.5's `odin3_ast_literal` (internal; the ABI reads bits as a string).
+
 ## 6. Read API and iteration (AST-12)
 
 Internal accessors return values (as the IR's internal accessors do; the ABI wraps them with
 status): `odin3_ast_kind`, `_sub`, `_flags`, `_loc`, `_end`, `_name` (strtab ID), `_name_str`,
 `_nchild`, `_child(ast, node, i)`, `_children(ast, node) → {const odin3_ast_id *ids, n}` (a view
-valid until the next make), `_payload` (index), `_number`, `_real`, `_text`, `_attrs(ast, node)
+valid until the next builder call), `_payload` (index), `_number`, `_real`, `_text`, `_attrs(ast, node)
 → span view`, `_node_end`, `_form`, `_run`, `_max_height`, `_kind_name`, `_sub_name`,
 `_slot_count(kind)`, `_has_tail(kind)`, `_root(ast, i)`/`_root_count` (the UNITs in order).
 Out-of-range IDs return `NONE`/0/empty, never fault.
@@ -664,7 +690,8 @@ read runs with two ASTs; provenance from each resolves in its own.
 flag `--keep-ast` (the debug form `--keep-ast=all` also keeps parsed stores, so a run then
 holds two), or any pass in the script whose
 registry definition (1D's pass registry) sets `wants_ast`, makes the pass manager set
-`odin3_design_set_keep_ast(design, true)` before the read. A kept AST lives until
+`odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ELABORATED)` before the read (`--keep-ast=all`
+sets `ODIN3_KEEP_AST_ALL`). A kept AST lives until
 `odin3_design_destroy`. This amends DESIGN §4.5 ("never discarded") per PHASE2 #7.
 
 **What survives into the IR**: `odin3_srcloc`s carrying the raw `loc` in SOURCE provenance

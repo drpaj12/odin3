@@ -75,3 +75,14 @@ void odin3_vec_pop(odin3_vec *vec) {
 void odin3_vec_clear(odin3_vec *vec) {
     vec->len = 0;
 }
+
+void odin3_vec_shrink_to_fit(odin3_vec *vec) {
+    if (vec->len == 0 || vec->len == vec->cap) {
+        return;
+    }
+    void *fit = odin3_util_realloc(vec->data, vec->len * vec->elem_size);
+    if (fit != NULL) {
+        vec->data = fit;
+        vec->cap = vec->len;
+    }
+}

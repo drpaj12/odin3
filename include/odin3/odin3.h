@@ -11,6 +11,8 @@
  * ABI v3 (Phase 1, 1D): design handles, passes and pass scripts, ID-based access to modules,
  * nodes, pins, nets and wires, string attributes, cell-type and pass registration (plugins),
  * provenance visitors, logging.
+ * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
+ * and build functions, keep levels); odin3_source gains the raw source-manager loc.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -33,7 +35,7 @@ extern "C" {
 /* ODIN3_CDEF_BEGIN */
 
 /* Incremented on every incompatible change to this header. */
-enum { ODIN3_ABI_VERSION = 3 };
+enum { ODIN3_ABI_VERSION = 4 };
 
 /* Result of every fallible Odin III function. ODIN3_OK is always 0. */
 typedef enum odin3_status {
@@ -637,7 +639,9 @@ odin3_status odin3_celltype_register(const odin3_plugin_celltype *def);
 
 /*
  * A source location: file as the reader recorded it ("" when unknown; see Strings), 1-based line
- * and column of the start, and of the end (end_line, end_col; 0 when not recorded).
+ * and column of the start, and of the end (end_line, end_col; 0 when not recorded), and (ABI v4)
+ * loc, the raw source-manager location (0 when unknown, e.g. from a BLIF reader): decode it, its
+ * macro and include chain included, with the odin3_srcman_* functions.
  */
 typedef struct odin3_source {
     const char *file;
@@ -645,6 +649,7 @@ typedef struct odin3_source {
     uint32_t col;
     uint32_t end_line;
     uint32_t end_col;
+    uint32_t loc;
 } odin3_source;
 
 /* Receives one source location (valid during the call only) with the user pointer given. */
@@ -724,6 +729,787 @@ void odin3_log_set_sink(odin3_log_sink sink, void *user);
  * level out of range (nothing is logged).
  */
 odin3_status odin3_log_write(odin3_log_level level, const char *msg);
+
+/* --- AST and source manager (ABI v4, 2A) ---------------------------------------------------- *
+ *
+ * A design owns one source manager (odin3_srcman, AST-1) and the AST stores (odin3_ast) of its
+ * read runs, at most one per (run, form) (docs/specs/2026-10-09-2A-ast-design.md §3, §4, §9).
+ * Both are opaque and owned by the design: there is no destroy call; they live until the design
+ * is destroyed (an AST may go earlier at the end of its read run, unless kept: keep levels below).
+ *
+ * Locations. A location (a "loc") is one uint32_t offset into the design's virtual source space;
+ * 0 is "unknown". Every buffer (a file, a macro expansion, a macro-argument run, scratch text)
+ * occupies [start, start + len]; a buffer ID is its creation index from 1.
+ *
+ * Nodes. A node is named by its store-local uint32_t ID, dense from 1 in creation order; every
+ * child ID is smaller than its parent's. A node's children are its positional slots first (an
+ * absent optional slot is 0), then its tail (spec §4.2, §4.3).
+ *
+ * Failures. As the IR functions above: ODIN3_ERR_INVALID_ARG, logged as "<function>: invalid
+ * argument …", for a NULL handle or output pointer, a node ID that is 0 or not below the store's
+ * node end, an index out of range, or a value out of its enum; the outputs are unchanged on any
+ * failure. Builders also return the internal builder's statuses (spec §5, §10): INVALID_ARG for
+ * misuse of the builder (a shape the slot table rejects, a sealed store), ODIN3_ERR_PARSE for a
+ * cap (logged, located through the source manager), ODIN3_ERR_NO_MEMORY with the store unchanged.
+ *
+ * Strings. A const char * output is owned by the design (names, kind spellings: until the design
+ * is destroyed) or by the handle that returned it where the function says so.
+ * ------------------------------------------------------------------------------------------- */
+
+/* An AST store and the design's source manager (opaque; owned by the design). */
+typedef struct odin3_ast odin3_ast;
+typedef struct odin3_srcman odin3_srcman;
+
+/* Node kinds (spec §4.3): NONE = 0, then the slot table's rows in order; Phase 5 appends. */
+typedef enum odin3_ast_kind {
+    ODIN3_AST_NONE = 0,
+    ODIN3_AST_UNIT = 1,
+    ODIN3_AST_DIRECTIVE = 2,
+    ODIN3_AST_MODULE = 3,
+    ODIN3_AST_UDP_DECL = 4,
+    ODIN3_AST_CONFIG_DECL = 5,
+    ODIN3_AST_LIST = 6,
+    ODIN3_AST_PORT_REF = 7,
+    ODIN3_AST_PORT_DECL = 8,
+    ODIN3_AST_DECLARATOR = 9,
+    ODIN3_AST_RANGE = 10,
+    ODIN3_AST_NET_DECL = 11,
+    ODIN3_AST_VAR_DECL = 12,
+    ODIN3_AST_PARAM_DECL = 13,
+    ODIN3_AST_DEFPARAM = 14,
+    ODIN3_AST_GENVAR_DECL = 15,
+    ODIN3_AST_EVENT_DECL = 16,
+    ODIN3_AST_STRENGTH = 17,
+    ODIN3_AST_DELAY = 18,
+    ODIN3_AST_CONT_ASSIGN = 19,
+    ODIN3_AST_NET_ASSIGN = 20,
+    ODIN3_AST_ALWAYS = 21,
+    ODIN3_AST_INITIAL = 22,
+    ODIN3_AST_INSTANTIATION = 23,
+    ODIN3_AST_INSTANCE = 24,
+    ODIN3_AST_CONNECTION = 25,
+    ODIN3_AST_GATE_DECL = 26,
+    ODIN3_AST_FUNCTION_DECL = 27,
+    ODIN3_AST_TASK_DECL = 28,
+    ODIN3_AST_SPECIFY_BLOCK = 29,
+    ODIN3_AST_ATTR = 30,
+    ODIN3_AST_GENERATE = 31,
+    ODIN3_AST_GEN_FOR = 32,
+    ODIN3_AST_GEN_IF = 33,
+    ODIN3_AST_GEN_CASE = 34,
+    ODIN3_AST_GEN_BLOCK = 35,
+    ODIN3_AST_SEQ_BLOCK = 36,
+    ODIN3_AST_PAR_BLOCK = 37,
+    ODIN3_AST_BLOCKING_ASSIGN = 38,
+    ODIN3_AST_NONBLOCKING_ASSIGN = 39,
+    ODIN3_AST_PROC_CONT_ASSIGN = 40,
+    ODIN3_AST_IF = 41,
+    ODIN3_AST_CASE = 42,
+    ODIN3_AST_CASE_ITEM = 43,
+    ODIN3_AST_FOR = 44,
+    ODIN3_AST_WHILE = 45,
+    ODIN3_AST_REPEAT = 46,
+    ODIN3_AST_FOREVER = 47,
+    ODIN3_AST_TIMING_STMT = 48,
+    ODIN3_AST_WAIT = 49,
+    ODIN3_AST_DISABLE = 50,
+    ODIN3_AST_EVENT_TRIGGER = 51,
+    ODIN3_AST_TASK_CALL = 52,
+    ODIN3_AST_NULL_STMT = 53,
+    ODIN3_AST_EVENT_CONTROL = 54,
+    ODIN3_AST_EVENT_EXPR = 55,
+    ODIN3_AST_NUMBER = 56,
+    ODIN3_AST_REAL = 57,
+    ODIN3_AST_STRING = 58,
+    ODIN3_AST_IDENT = 59,
+    ODIN3_AST_HIER_NAME = 60,
+    ODIN3_AST_SELECT = 61,
+    ODIN3_AST_CONCAT = 62,
+    ODIN3_AST_REPLICATE = 63,
+    ODIN3_AST_UNARY = 64,
+    ODIN3_AST_BINARY = 65,
+    ODIN3_AST_TERNARY = 66,
+    ODIN3_AST_CALL = 67,
+    ODIN3_AST_MINTYPMAX = 68,
+    ODIN3_AST_KIND_COUNT = 69 /* one past the last kind */
+} odin3_ast_kind;
+
+/* The two subsets of the one AST format (AST-9); fixed when a store is created. */
+typedef enum odin3_ast_form {
+    ODIN3_AST_FORM_PARSED = 1,
+    ODIN3_AST_FORM_ELABORATED = 2
+} odin3_ast_form;
+
+/* Sub-kinds (node sub field), per kind, in the slot table's order; each enum ends with its count.
+ */
+typedef enum odin3_ast_directive_kind {
+    ODIN3_AST_DIRECTIVE_DEFAULT_NETTYPE = 0,     /* default_nettype */
+    ODIN3_AST_DIRECTIVE_TIMESCALE = 1,           /* timescale */
+    ODIN3_AST_DIRECTIVE_CELLDEFINE = 2,          /* celldefine */
+    ODIN3_AST_DIRECTIVE_ENDCELLDEFINE = 3,       /* endcelldefine */
+    ODIN3_AST_DIRECTIVE_RESETALL = 4,            /* resetall */
+    ODIN3_AST_DIRECTIVE_BEGIN_KEYWORDS = 5,      /* begin_keywords */
+    ODIN3_AST_DIRECTIVE_END_KEYWORDS = 6,        /* end_keywords */
+    ODIN3_AST_DIRECTIVE_UNCONNECTED_DRIVE = 7,   /* unconnected_drive */
+    ODIN3_AST_DIRECTIVE_NOUNCONNECTED_DRIVE = 8, /* nounconnected_drive */
+    ODIN3_AST_DIRECTIVE_PRAGMA = 9,              /* pragma */
+    ODIN3_AST_DIRECTIVE_COUNT = 10
+} odin3_ast_directive_kind;
+typedef enum odin3_ast_direction {
+    ODIN3_AST_PORT_DECL_INPUT = 0,  /* input */
+    ODIN3_AST_PORT_DECL_OUTPUT = 1, /* output */
+    ODIN3_AST_PORT_DECL_INOUT = 2,  /* inout */
+    ODIN3_AST_PORT_DECL_COUNT = 3
+} odin3_ast_direction;
+typedef enum odin3_ast_net_kind {
+    ODIN3_AST_NET_DECL_WIRE = 0,     /* wire */
+    ODIN3_AST_NET_DECL_TRI = 1,      /* tri */
+    ODIN3_AST_NET_DECL_WAND = 2,     /* wand */
+    ODIN3_AST_NET_DECL_WOR = 3,      /* wor */
+    ODIN3_AST_NET_DECL_TRIAND = 4,   /* triand */
+    ODIN3_AST_NET_DECL_TRIOR = 5,    /* trior */
+    ODIN3_AST_NET_DECL_TRI0 = 6,     /* tri0 */
+    ODIN3_AST_NET_DECL_TRI1 = 7,     /* tri1 */
+    ODIN3_AST_NET_DECL_TRIREG = 8,   /* trireg */
+    ODIN3_AST_NET_DECL_UWIRE = 9,    /* uwire */
+    ODIN3_AST_NET_DECL_SUPPLY0 = 10, /* supply0 */
+    ODIN3_AST_NET_DECL_SUPPLY1 = 11, /* supply1 */
+    ODIN3_AST_NET_DECL_COUNT = 12
+} odin3_ast_net_kind;
+typedef enum odin3_ast_var_kind {
+    ODIN3_AST_VAR_DECL_REG = 0,      /* reg */
+    ODIN3_AST_VAR_DECL_INTEGER = 1,  /* integer */
+    ODIN3_AST_VAR_DECL_TIME = 2,     /* time */
+    ODIN3_AST_VAR_DECL_REAL = 3,     /* real */
+    ODIN3_AST_VAR_DECL_REALTIME = 4, /* realtime */
+    ODIN3_AST_VAR_DECL_COUNT = 5
+} odin3_ast_var_kind;
+typedef enum odin3_ast_param_kind {
+    ODIN3_AST_PARAM_DECL_PARAMETER = 0,  /* parameter */
+    ODIN3_AST_PARAM_DECL_LOCALPARAM = 1, /* localparam */
+    ODIN3_AST_PARAM_DECL_SPECPARAM = 2,  /* specparam */
+    ODIN3_AST_PARAM_DECL_COUNT = 3
+} odin3_ast_param_kind;
+typedef enum odin3_ast_strength_kind {
+    ODIN3_AST_STRENGTH_DRIVE = 0,  /* drive */
+    ODIN3_AST_STRENGTH_CHARGE = 1, /* charge */
+    ODIN3_AST_STRENGTH_COUNT = 2
+} odin3_ast_strength_kind;
+typedef enum odin3_ast_always_kind {
+    ODIN3_AST_ALWAYS_ALWAYS = 0,       /* always */
+    ODIN3_AST_ALWAYS_ALWAYS_FF = 1,    /* always_ff */
+    ODIN3_AST_ALWAYS_ALWAYS_COMB = 2,  /* always_comb */
+    ODIN3_AST_ALWAYS_ALWAYS_LATCH = 3, /* always_latch */
+    ODIN3_AST_ALWAYS_COUNT = 4
+} odin3_ast_always_kind;
+typedef enum odin3_ast_gate_kind {
+    ODIN3_AST_GATE_DECL_AND = 0,       /* and */
+    ODIN3_AST_GATE_DECL_NAND = 1,      /* nand */
+    ODIN3_AST_GATE_DECL_OR = 2,        /* or */
+    ODIN3_AST_GATE_DECL_NOR = 3,       /* nor */
+    ODIN3_AST_GATE_DECL_XOR = 4,       /* xor */
+    ODIN3_AST_GATE_DECL_XNOR = 5,      /* xnor */
+    ODIN3_AST_GATE_DECL_BUF = 6,       /* buf */
+    ODIN3_AST_GATE_DECL_NOT = 7,       /* not */
+    ODIN3_AST_GATE_DECL_BUFIF0 = 8,    /* bufif0 */
+    ODIN3_AST_GATE_DECL_BUFIF1 = 9,    /* bufif1 */
+    ODIN3_AST_GATE_DECL_NOTIF0 = 10,   /* notif0 */
+    ODIN3_AST_GATE_DECL_NOTIF1 = 11,   /* notif1 */
+    ODIN3_AST_GATE_DECL_NMOS = 12,     /* nmos */
+    ODIN3_AST_GATE_DECL_PMOS = 13,     /* pmos */
+    ODIN3_AST_GATE_DECL_CMOS = 14,     /* cmos */
+    ODIN3_AST_GATE_DECL_RNMOS = 15,    /* rnmos */
+    ODIN3_AST_GATE_DECL_RPMOS = 16,    /* rpmos */
+    ODIN3_AST_GATE_DECL_RCMOS = 17,    /* rcmos */
+    ODIN3_AST_GATE_DECL_TRAN = 18,     /* tran */
+    ODIN3_AST_GATE_DECL_RTRAN = 19,    /* rtran */
+    ODIN3_AST_GATE_DECL_TRANIF0 = 20,  /* tranif0 */
+    ODIN3_AST_GATE_DECL_TRANIF1 = 21,  /* tranif1 */
+    ODIN3_AST_GATE_DECL_RTRANIF0 = 22, /* rtranif0 */
+    ODIN3_AST_GATE_DECL_RTRANIF1 = 23, /* rtranif1 */
+    ODIN3_AST_GATE_DECL_PULLUP = 24,   /* pullup */
+    ODIN3_AST_GATE_DECL_PULLDOWN = 25, /* pulldown */
+    ODIN3_AST_GATE_DECL_COUNT = 26
+} odin3_ast_gate_kind;
+typedef enum odin3_ast_proc_assign_kind {
+    ODIN3_AST_PROC_CONT_ASSIGN_ASSIGN = 0,   /* assign */
+    ODIN3_AST_PROC_CONT_ASSIGN_DEASSIGN = 1, /* deassign */
+    ODIN3_AST_PROC_CONT_ASSIGN_FORCE = 2,    /* force */
+    ODIN3_AST_PROC_CONT_ASSIGN_RELEASE = 3,  /* release */
+    ODIN3_AST_PROC_CONT_ASSIGN_COUNT = 4
+} odin3_ast_proc_assign_kind;
+typedef enum odin3_ast_case_kind {
+    ODIN3_AST_CASE_CASE = 0,  /* case */
+    ODIN3_AST_CASE_CASEZ = 1, /* casez */
+    ODIN3_AST_CASE_CASEX = 2, /* casex */
+    ODIN3_AST_CASE_COUNT = 3
+} odin3_ast_case_kind;
+typedef enum odin3_ast_edge {
+    ODIN3_AST_EVENT_EXPR_NONE = 0,    /* none */
+    ODIN3_AST_EVENT_EXPR_POSEDGE = 1, /* posedge */
+    ODIN3_AST_EVENT_EXPR_NEGEDGE = 2, /* negedge */
+    ODIN3_AST_EVENT_EXPR_COUNT = 3
+} odin3_ast_edge;
+typedef enum odin3_ast_base {
+    ODIN3_AST_NUMBER_DEC = 0, /* dec */
+    ODIN3_AST_NUMBER_BIN = 1, /* bin */
+    ODIN3_AST_NUMBER_OCT = 2, /* oct */
+    ODIN3_AST_NUMBER_HEX = 3, /* hex */
+    ODIN3_AST_NUMBER_COUNT = 4
+} odin3_ast_base;
+typedef enum odin3_ast_select_kind {
+    ODIN3_AST_SELECT_BIT = 0,        /* bit */
+    ODIN3_AST_SELECT_PART = 1,       /* part */
+    ODIN3_AST_SELECT_PART_PLUS = 2,  /* part_plus */
+    ODIN3_AST_SELECT_PART_MINUS = 3, /* part_minus */
+    ODIN3_AST_SELECT_COUNT = 4
+} odin3_ast_select_kind;
+typedef enum odin3_ast_unary_op {
+    ODIN3_AST_UNARY_PLUS = 0,  /* + */
+    ODIN3_AST_UNARY_MINUS = 1, /* - */
+    ODIN3_AST_UNARY_LNOT = 2,  /* ! */
+    ODIN3_AST_UNARY_NOT = 3,   /* ~ */
+    ODIN3_AST_UNARY_AND = 4,   /* & */
+    ODIN3_AST_UNARY_NAND = 5,  /* ~& */
+    ODIN3_AST_UNARY_OR = 6,    /* | */
+    ODIN3_AST_UNARY_NOR = 7,   /* ~| */
+    ODIN3_AST_UNARY_XOR = 8,   /* ^ */
+    ODIN3_AST_UNARY_XNOR = 9,  /* ~^ */
+    ODIN3_AST_UNARY_COUNT = 10
+} odin3_ast_unary_op;
+typedef enum odin3_ast_binary_op {
+    ODIN3_AST_BINARY_ADD = 0,     /* + */
+    ODIN3_AST_BINARY_SUB = 1,     /* - */
+    ODIN3_AST_BINARY_MUL = 2,     /* * */
+    ODIN3_AST_BINARY_DIV = 3,     /* / */
+    ODIN3_AST_BINARY_MOD = 4,     /* % */
+    ODIN3_AST_BINARY_POW = 5,     /* ** */
+    ODIN3_AST_BINARY_EQ = 6,      /* == */
+    ODIN3_AST_BINARY_NE = 7,      /* != */
+    ODIN3_AST_BINARY_CASE_EQ = 8, /* === */
+    ODIN3_AST_BINARY_CASE_NE = 9, /* !== */
+    ODIN3_AST_BINARY_LAND = 10,   /* && */
+    ODIN3_AST_BINARY_LOR = 11,    /* || */
+    ODIN3_AST_BINARY_LT = 12,     /* < */
+    ODIN3_AST_BINARY_LE = 13,     /* <= */
+    ODIN3_AST_BINARY_GT = 14,     /* > */
+    ODIN3_AST_BINARY_GE = 15,     /* >= */
+    ODIN3_AST_BINARY_AND = 16,    /* & */
+    ODIN3_AST_BINARY_OR = 17,     /* | */
+    ODIN3_AST_BINARY_XOR = 18,    /* ^ */
+    ODIN3_AST_BINARY_XNOR = 19,   /* ~^ */
+    ODIN3_AST_BINARY_SHL = 20,    /* << */
+    ODIN3_AST_BINARY_SHR = 21,    /* >> */
+    ODIN3_AST_BINARY_ASHL = 22,   /* <<< */
+    ODIN3_AST_BINARY_ASHR = 23,   /* >>> */
+    ODIN3_AST_BINARY_COUNT = 24
+} odin3_ast_binary_op;
+
+/* Flags (AST-7): per kind, bits from 0 in the row's order; fields as _SHIFT/_MASK. */
+
+enum {
+    ODIN3_AST_F_MODULE_MACROMODULE = 1U << 0,
+
+    ODIN3_AST_F_PORT_REF_DOTTED = 1U << 0,
+
+    ODIN3_AST_F_PORT_DECL_SIGNED = 1U << 0,
+    ODIN3_AST_F_PORT_DECL_IN_HEADER = 1U << 1,
+    ODIN3_AST_F_PORT_DECL_DT_SHIFT = 2,
+    ODIN3_AST_F_PORT_DECL_DT_MASK = 0x7U << 2,
+    ODIN3_AST_F_PORT_DECL_NET_SHIFT = 5, /* 0 = unspecified, else 1 + odin3_ast_net_kind */
+    ODIN3_AST_F_PORT_DECL_NET_MASK = 0xFU << 5,
+
+    ODIN3_AST_F_NET_DECL_SIGNED = 1U << 0,
+    ODIN3_AST_F_NET_DECL_VECTORED = 1U << 1,
+    ODIN3_AST_F_NET_DECL_SCALARED = 1U << 2,
+
+    ODIN3_AST_F_VAR_DECL_SIGNED = 1U << 0,
+
+    ODIN3_AST_F_PARAM_DECL_SIGNED = 1U << 0,
+    ODIN3_AST_F_PARAM_DECL_IN_HEADER = 1U << 1,
+    ODIN3_AST_F_PARAM_DECL_DT_SHIFT = 2,
+    ODIN3_AST_F_PARAM_DECL_DT_MASK = 0x7U << 2,
+
+    ODIN3_AST_F_STRENGTH_S0_SHIFT = 0, /* odin3_ast_drive_value or odin3_ast_charge_value */
+    ODIN3_AST_F_STRENGTH_S0_MASK = 0xFU << 0,
+    ODIN3_AST_F_STRENGTH_S1_SHIFT = 4,
+    ODIN3_AST_F_STRENGTH_S1_MASK = 0xFU << 4,
+
+    ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC = 1U << 0,
+    ODIN3_AST_F_FUNCTION_DECL_SIGNED = 1U << 1,
+    ODIN3_AST_F_FUNCTION_DECL_DT_SHIFT = 2,
+    ODIN3_AST_F_FUNCTION_DECL_DT_MASK = 0x7U << 2,
+
+    ODIN3_AST_F_TASK_DECL_AUTOMATIC = 1U << 0,
+
+    ODIN3_AST_F_ATTR_METACOMMENT = 1U << 0,
+
+    ODIN3_AST_F_TASK_CALL_SYSTEM = 1U << 0,
+    ODIN3_AST_F_TASK_CALL_HIER = 1U << 1,
+
+    ODIN3_AST_F_CASE_ITEM_DEFAULT = 1U << 0,
+
+    ODIN3_AST_F_EVENT_CONTROL_STAR = 1U << 0,
+    ODIN3_AST_F_EVENT_CONTROL_NO_PARENS = 1U << 1,
+
+    ODIN3_AST_F_EVENT_EXPR_AFTER_OR = 1U << 0,
+
+    ODIN3_AST_F_NUMBER_SIGNED = 1U << 0,
+
+    ODIN3_AST_F_CALL_SYSTEM = 1U << 0,
+    ODIN3_AST_F_CALL_HIER = 1U << 1,
+};
+
+/* The defined-flag mask of each kind with flags (the F column); check rejects other bits. */
+enum {
+    ODIN3_AST_FM_MODULE = ODIN3_AST_F_MODULE_MACROMODULE,
+    ODIN3_AST_FM_PORT_REF = ODIN3_AST_F_PORT_REF_DOTTED,
+    ODIN3_AST_FM_PORT_DECL = ODIN3_AST_F_PORT_DECL_SIGNED | ODIN3_AST_F_PORT_DECL_IN_HEADER |
+                             ODIN3_AST_F_PORT_DECL_DT_MASK | ODIN3_AST_F_PORT_DECL_NET_MASK,
+    ODIN3_AST_FM_NET_DECL =
+        ODIN3_AST_F_NET_DECL_SIGNED | ODIN3_AST_F_NET_DECL_VECTORED | ODIN3_AST_F_NET_DECL_SCALARED,
+    ODIN3_AST_FM_VAR_DECL = ODIN3_AST_F_VAR_DECL_SIGNED,
+    ODIN3_AST_FM_PARAM_DECL = ODIN3_AST_F_PARAM_DECL_SIGNED | ODIN3_AST_F_PARAM_DECL_IN_HEADER |
+                              ODIN3_AST_F_PARAM_DECL_DT_MASK,
+    ODIN3_AST_FM_STRENGTH = ODIN3_AST_F_STRENGTH_S0_MASK | ODIN3_AST_F_STRENGTH_S1_MASK,
+    ODIN3_AST_FM_FUNCTION_DECL = ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC |
+                                 ODIN3_AST_F_FUNCTION_DECL_SIGNED |
+                                 ODIN3_AST_F_FUNCTION_DECL_DT_MASK,
+    ODIN3_AST_FM_TASK_DECL = ODIN3_AST_F_TASK_DECL_AUTOMATIC,
+    ODIN3_AST_FM_ATTR = ODIN3_AST_F_ATTR_METACOMMENT,
+    ODIN3_AST_FM_TASK_CALL = ODIN3_AST_F_TASK_CALL_SYSTEM | ODIN3_AST_F_TASK_CALL_HIER,
+    ODIN3_AST_FM_CASE_ITEM = ODIN3_AST_F_CASE_ITEM_DEFAULT,
+    ODIN3_AST_FM_EVENT_CONTROL =
+        ODIN3_AST_F_EVENT_CONTROL_STAR | ODIN3_AST_F_EVENT_CONTROL_NO_PARENS,
+    ODIN3_AST_FM_EVENT_EXPR = ODIN3_AST_F_EVENT_EXPR_AFTER_OR,
+    ODIN3_AST_FM_NUMBER = ODIN3_AST_F_NUMBER_SIGNED,
+    ODIN3_AST_FM_CALL = ODIN3_AST_F_CALL_SYSTEM | ODIN3_AST_F_CALL_HIER,
+};
+
+/* Values of the DT field (PORT_DECL, PARAM_DECL, FUNCTION_DECL). */
+typedef enum odin3_ast_dt {
+    ODIN3_AST_DT_NONE = 0,
+    ODIN3_AST_DT_REG,
+    ODIN3_AST_DT_INTEGER,
+    ODIN3_AST_DT_REAL,
+    ODIN3_AST_DT_REALTIME,
+    ODIN3_AST_DT_TIME
+} odin3_ast_dt;
+
+/* Values of STRENGTH's S0/S1 fields: drive strengths (sub DRIVE), charge (sub CHARGE, in S0). */
+typedef enum odin3_ast_drive_value {
+    ODIN3_AST_DRIVE_NONE = 0,
+    ODIN3_AST_DRIVE_HIGHZ,
+    ODIN3_AST_DRIVE_WEAK,
+    ODIN3_AST_DRIVE_PULL,
+    ODIN3_AST_DRIVE_STRONG,
+    ODIN3_AST_DRIVE_SUPPLY
+} odin3_ast_drive_value;
+typedef enum odin3_ast_charge_value {
+    ODIN3_AST_CHARGE_NONE = 0,
+    ODIN3_AST_CHARGE_SMALL,
+    ODIN3_AST_CHARGE_MEDIUM,
+    ODIN3_AST_CHARGE_LARGE
+} odin3_ast_charge_value;
+
+/*
+ * Caps (spec §3.5, §10): exceeding one is a located ODIN3_ERR_PARSE. Node and child-table
+ * counts are bounded by the 32-bit ID space (then ODIN3_ERR_NO_MEMORY).
+ */
+enum {
+    ODIN3_AST_MAX_DEPTH = 32768,          /* node height, builder-enforced */
+    ODIN3_AST_MAX_NUMBER_BITS = 1 << 20,  /* bits of one literal */
+    ODIN3_AST_MAX_DECIMAL_DIGITS = 4096,  /* digits of a decimal literal */
+    ODIN3_AST_MAX_STRING_BYTES = 1 << 17, /* a string literal (lexer-checked) */
+    ODIN3_AST_MAX_IDENT_BYTES = 4096,     /* an identifier (lexer-checked) */
+    ODIN3_AST_MAX_TEXT_BYTES = 1 << 20,   /* an opaque TEXT payload */
+    ODIN3_AST_MAX_CHILDREN = 1 << 24,     /* children of one node */
+    ODIN3_SRC_MAX_FILE_BYTES = 1 << 28,   /* one file buffer */
+    ODIN3_SRC_MAX_BUFFERS = 1 << 24       /* buffers of one source manager */
+};
+
+/* Which held stores the end of a read run keeps (AST-16; the CLI's --keep-ast[=all]). */
+typedef enum odin3_keep_ast {
+    ODIN3_KEEP_AST_NONE = 0,   /* the read destroys its stores when it ends */
+    ODIN3_KEEP_AST_ELABORATED, /* elaborated stores are kept (--keep-ast) */
+    ODIN3_KEEP_AST_ALL         /* parsed and elaborated stores are kept (--keep-ast=all) */
+} odin3_keep_ast;
+
+/* Source-manager buffer kinds (spec §3.1). */
+typedef enum odin3_srcbuf_kind {
+    ODIN3_SRCBUF_FILE = 1,  /* a file's bytes, or the <command line> buffer */
+    ODIN3_SRCBUF_EXPANSION, /* a macro body as spelled in its definition */
+    ODIN3_SRCBUF_MACRO_ARG, /* one contiguous spelled run of a substituted argument */
+    ODIN3_SRCBUF_SCRATCH    /* pasted or stringified text that exists nowhere */
+} odin3_srcbuf_kind;
+
+/*
+ * A FILE buffer (spec §3.1): name = path as given, resolved = absolute path, library (strtab IDs
+ * from odin3_ast_build_intern; resolved and library 0 for <command line>); parent = loc of the
+ * `include that opened it, 0 for a project file; len = bytes. reserved must be zero.
+ */
+typedef struct odin3_srcfile_spec {
+    uint32_t name;
+    uint32_t resolved;
+    uint32_t library;
+    uint32_t parent;
+    uint32_t len;
+    uint32_t reserved[2];
+} odin3_srcfile_spec;
+
+/*
+ * An EXPANSION, MACRO_ARG or SCRATCH buffer (spec §3.1 table): kind (odin3_srcbuf_kind); name =
+ * macro name (strtab; 0 for SCRATCH); parent = the use site (EXPANSION), the formal inside the
+ * body (MACRO_ARG) or the operator inside the body (SCRATCH); parent_end = one past it (0 =
+ * unknown); def = loc of the first byte as spelled (0 for SCRATCH; offset k <-> def + k, within
+ * def's buffer); len = bytes. reserved must be zero.
+ */
+typedef struct odin3_expansion_spec {
+    uint32_t kind;
+    uint32_t name;
+    uint32_t parent;
+    uint32_t parent_end;
+    uint32_t def;
+    uint32_t len;
+    uint32_t reserved[2];
+} odin3_expansion_spec;
+
+/*
+ * One segment of a stream's map (spec §3.3): output byte out_offset onward is spelled at loc
+ * onward until the next segment (loc 0: inserted bytes). stream = the buffer ID of the stream's
+ * project FILE buffer. reserved must be zero.
+ */
+typedef struct odin3_segment {
+    uint32_t stream;
+    uint32_t out_offset;
+    uint32_t loc;
+    uint32_t reserved[2];
+} odin3_segment;
+
+/* A decoded location: the FILE buffer ID, 1-based line and column in bytes (Clang's rule). */
+typedef struct odin3_srcpos {
+    uint32_t buffer;
+    uint32_t line;
+    uint32_t col;
+    uint32_t reserved[2];
+} odin3_srcpos;
+
+/*
+ * A node's scalar fields for a builder call (spec §5): kind (odin3_ast_kind), sub (the kind's
+ * sub-kind enum, 0 for none), flags (the kind's ODIN3_AST_F_* bits), loc and end (the source
+ * range; end 0 = unknown), name (strtab ID from odin3_ast_build_intern, 0 = none), payload (a
+ * payload ID from odin3_ast_number_new_str, odin3_ast_build_real or odin3_ast_build_text for the
+ * payload kinds NUMBER, REAL and the TEXT kinds; 0 otherwise). reserved must be zero.
+ */
+typedef struct odin3_ast_spec {
+    uint8_t kind;
+    uint8_t sub;
+    uint16_t flags;
+    uint32_t loc;
+    uint32_t end;
+    uint32_t name;
+    uint32_t payload;
+    uint32_t reserved[2];
+} odin3_ast_spec;
+
+/* Comment kinds and flags (spec §7). */
+typedef enum odin3_ast_comment_kind {
+    ODIN3_AST_COMMENT_LINE = 1, /* // ... */
+    ODIN3_AST_COMMENT_BLOCK     /* a block comment */
+} odin3_ast_comment_kind;
+
+enum { ODIN3_AST_COMMENT_METACOMMENT = 1 /* a synopsys/synthesis directive */ };
+
+/*
+ * A comment to record: loc/end (raw locs; loc in a FILE buffer, end 0 or in the same buffer and
+ * not before loc), kind (odin3_ast_comment_kind), flags (ODIN3_AST_COMMENT_*), the text bytes
+ * text_ptr[0 .. text_len) (copied). reserved must be zero.
+ */
+typedef struct odin3_ast_comment_spec {
+    uint32_t loc;
+    uint32_t end;
+    uint32_t kind;
+    uint32_t flags;
+    const char *text_ptr;
+    uint32_t text_len;
+    uint32_t reserved[2];
+} odin3_ast_comment_spec;
+
+/* --- the design's source manager and AST stores ------------------------------------------- */
+
+/*
+ * *sm gets the design's source manager, created on first use (AST-1); it lives as long as the
+ * design. ODIN3_ERR_INVALID_ARG as the conventions say; ODIN3_ERR_NO_MEMORY (*sm unchanged) when
+ * creating it fails.
+ */
+odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **sm);
+
+/*
+ * Creates an empty AST store of form (an odin3_ast_form value) for pass run `run` (non-zero),
+ * using the design's string table and source manager, and hands it to the design, which holds it
+ * as the store of (run, form) and destroys it with itself (or at the end of its read run, see the
+ * keep levels). *ast gets the store (borrowed). ODIN3_ERR_INVALID_ARG (logged) as the conventions
+ * say, also for an unknown form, run 0, or a store of the same run and form already held;
+ * ODIN3_ERR_NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_design_new_ast(odin3_design *design, uint32_t form, uint32_t run,
+                                  odin3_ast **ast);
+
+/*
+ * *ast gets the held store of pass run `run` and form (an odin3_ast_form value), NULL when the
+ * design holds none (borrowed). ODIN3_ERR_INVALID_ARG as the conventions say, also for an unknown
+ * form.
+ */
+odin3_status odin3_design_get_ast(const odin3_design *design, uint32_t run, uint32_t form,
+                                  odin3_ast **ast);
+
+/*
+ * The held stores, in the order the design received them: *count gets how many, *ast store
+ * `index` (borrowed; read its run and form with odin3_ast_get_run and odin3_ast_get_form). Each
+ * fails only with ODIN3_ERR_INVALID_ARG, as the conventions say (an index >= the count included).
+ */
+odin3_status odin3_design_get_ast_count(const odin3_design *design, uint32_t *count);
+odin3_status odin3_design_get_ast_at(const odin3_design *design, uint32_t index, odin3_ast **ast);
+
+/*
+ * Sets which stores the end of a read run keeps (default ODIN3_KEEP_AST_NONE; the CLI's
+ * --keep-ast and --keep-ast=all). A script that names a pass wanting the AST raises it to
+ * ODIN3_KEEP_AST_ELABORATED before it runs. Applies to later reads. ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL design or a level out of range (the level is unchanged then).
+ */
+odin3_status odin3_design_set_keep_ast(odin3_design *design, odin3_keep_ast level);
+
+/* *level gets the keep level. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say. */
+odin3_status odin3_design_get_keep_ast(const odin3_design *design, odin3_keep_ast *level);
+
+/* --- AST readers ----------------------------------------------------------------------------- */
+
+/*
+ * A node's fields: its kind (odin3_ast_kind), sub-kind, flags, source range (loc; end, 0 =
+ * unknown), name (the bytes as interned, "" for none; owned by the design), and child count
+ * (slots and tail; 0 for payload kinds). Each fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say.
+ */
+odin3_status odin3_ast_get_kind(const odin3_ast *ast, uint32_t node, uint32_t *kind);
+odin3_status odin3_ast_get_sub(const odin3_ast *ast, uint32_t node, uint32_t *sub);
+odin3_status odin3_ast_get_flags(const odin3_ast *ast, uint32_t node, uint32_t *flags);
+odin3_status odin3_ast_get_loc(const odin3_ast *ast, uint32_t node, uint32_t *loc);
+odin3_status odin3_ast_get_end(const odin3_ast *ast, uint32_t node, uint32_t *end);
+odin3_status odin3_ast_get_name(const odin3_ast *ast, uint32_t node, const char **name);
+odin3_status odin3_ast_get_nchild(const odin3_ast *ast, uint32_t node, uint32_t *nchild);
+
+/*
+ * *child gets child `index` of the node (slots first, then the tail), 0 for an absent optional
+ * slot. ODIN3_ERR_INVALID_ARG (logged) for an index >= the child count, besides the conventions.
+ */
+odin3_status odin3_ast_get_child(const odin3_ast *ast, uint32_t node, uint32_t index,
+                                 uint32_t *child);
+
+/*
+ * The node's spellings: *name gets its kind's name ("UNIT" … "MINTYPMAX"), or its sub-kind's
+ * spelling ("+", "posedge", "casez" …; "" when its kind has none). Static strings. Each fails
+ * only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
+odin3_status odin3_ast_get_kind_name(const odin3_ast *ast, uint32_t node, const char **name);
+odin3_status odin3_ast_get_sub_name(const odin3_ast *ast, uint32_t node, const char **name);
+
+/*
+ * A NUMBER node's literal as written (spec §4.5): *bits gets its bits as one character each from
+ * '0', '1', 'x', 'z' and '?', most significant first ('?' for every z bit when a ? digit was
+ * written: the store keeps one such flag per literal); *width gets its declared size, 0 when
+ * unsized. Base and signedness are the node's sub-kind and ODIN3_AST_F_NUMBER_SIGNED. The text
+ * is interned in the design's string table (not an IR change; it lives as long as the design).
+ * ODIN3_ERR_INVALID_ARG (logged) for a node that is not a NUMBER, besides the conventions;
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_ast_get_number_str(const odin3_ast *ast, uint32_t node, const char **bits,
+                                      uint32_t *width);
+
+/* A REAL node's value. ODIN3_ERR_INVALID_ARG (logged) for any other node, besides the
+ * conventions. */
+odin3_status odin3_ast_get_real(const odin3_ast *ast, uint32_t node, double *value);
+
+/*
+ * A TEXT-payload node's raw bytes (SPECIFY_BLOCK, UDP_DECL, CONFIG_DECL): *text gets them (not
+ * NUL-terminated; owned by the store), *len their count. ODIN3_ERR_INVALID_ARG (logged) for any
+ * other node, besides the conventions.
+ */
+odin3_status odin3_ast_get_text(const odin3_ast *ast, uint32_t node, const char **text,
+                                uint32_t *len);
+
+/*
+ * The ATTR nodes attached to the node (spec §7): *count gets how many, *attr attribute `index`.
+ * Each fails only with ODIN3_ERR_INVALID_ARG, as the conventions say (an index >= the count
+ * included).
+ */
+odin3_status odin3_ast_get_attr_count(const odin3_ast *ast, uint32_t node, uint32_t *count);
+odin3_status odin3_ast_get_attr_at(const odin3_ast *ast, uint32_t node, uint32_t index,
+                                   uint32_t *attr);
+
+/*
+ * Store-level fields: *end gets one past the last node ID (iterate 1 .. end - 1), *form its
+ * odin3_ast_form, *run the pass run that built it. The roots are its UNIT nodes in creation
+ * order: *count gets how many, *root root `index`. Each fails only with ODIN3_ERR_INVALID_ARG, as
+ * the conventions say (an index >= the root count included).
+ */
+odin3_status odin3_ast_get_node_end(const odin3_ast *ast, uint32_t *end);
+odin3_status odin3_ast_get_form(const odin3_ast *ast, uint32_t *form);
+odin3_status odin3_ast_get_run(const odin3_ast *ast, uint32_t *run);
+odin3_status odin3_ast_get_root_count(const odin3_ast *ast, uint32_t *count);
+odin3_status odin3_ast_get_root_at(const odin3_ast *ast, uint32_t index, uint32_t *root);
+
+/* --- AST builders (adapters; spec §5) ------------------------------------------------------- */
+
+/*
+ * Appends a node with fields *spec whose children are ids[0 .. n) (copied; 0 for an absent
+ * optional slot) and stores its ID in *node. The shape is validated against the slot table
+ * (INVALID_ARG, logged, for a violation or a sealed store); more children than
+ * ODIN3_AST_MAX_CHILDREN or a height above ODIN3_AST_MAX_DEPTH is ODIN3_ERR_PARSE located at
+ * spec->loc; ODIN3_ERR_NO_MEMORY. ids may be NULL when n is 0. Nothing changes on failure.
+ */
+odin3_status odin3_ast_build_node(odin3_ast *ast, const odin3_ast_spec *spec, const uint32_t *ids,
+                                  uint32_t n, uint32_t *node);
+
+/*
+ * List building on the store's pending stack (Bison list rules, visitor walks): *mark gets the
+ * stack's height; odin3_ast_build_push pushes a node (0 for an empty argument slot, or an ID made
+ * already); odin3_ast_build_marked appends a node with fields *spec whose children are the
+ * entries from mark to the top and pops them (as odin3_ast_build_node; the stack is unchanged on
+ * failure); odin3_ast_build_unwind pops back to mark (error recovery; a mark at or above the top
+ * changes nothing; a sealed store's mark is 0). Each fails with ODIN3_ERR_INVALID_ARG (logged)
+ * for a NULL argument; push and marked also for a sealed store, an ID not made yet (push) or a
+ * mark above the top (marked), and with ODIN3_ERR_NO_MEMORY; marked with ODIN3_ERR_PARSE as
+ * odin3_ast_build_node.
+ */
+odin3_status odin3_ast_build_mark(const odin3_ast *ast, uint32_t *mark);
+odin3_status odin3_ast_build_push(odin3_ast *ast, uint32_t node);
+odin3_status odin3_ast_build_marked(odin3_ast *ast, const odin3_ast_spec *spec, uint32_t mark,
+                                    uint32_t *node);
+odin3_status odin3_ast_build_unwind(odin3_ast *ast, uint32_t mark);
+
+/*
+ * Stores a NUMBER payload from bits, one character per bit from '0', '1', 'x', 'z' and '?' (a z
+ * written as ?), most significant first, at least one, and width (the declared size, 0 =
+ * unsized); *payload gets its payload ID, for a NUMBER node's spec. The bits are stored as
+ * written, LSB first, never sized (odin3_ast_get_number_str reads them back). ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL argument, a sealed store, an empty string or another character;
+ * ODIN3_ERR_PARSE located at loc for more than ODIN3_AST_MAX_NUMBER_BITS bits or a wider width;
+ * ODIN3_ERR_NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_ast_number_new_str(odin3_ast *ast, uint32_t loc, uint32_t width,
+                                      const char *bits, uint32_t *payload);
+
+/* Stores a REAL payload and its payload ID in *payload. ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * argument, a sealed store or a non-finite value (inf or nan); ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_ast_build_real(odin3_ast *ast, double value, uint32_t *payload);
+
+/*
+ * Copies text[0 .. len) (an opaque construct's raw source bytes) into the store as a TEXT payload
+ * and stores its payload ID in *payload. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument (text
+ * may be NULL when len is 0) or a sealed store; ODIN3_ERR_PARSE (logged) above
+ * ODIN3_AST_MAX_TEXT_BYTES; ODIN3_ERR_NO_MEMORY. Unchanged on failure.
+ */
+odin3_status odin3_ast_build_text(odin3_ast *ast, const char *text, uint32_t len,
+                                  uint32_t *payload);
+
+/*
+ * Attaches the ATTR nodes attrs[0 .. n) (n >= 1, copied) to node, once (spec §7).
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a sealed store, a node not made or itself an
+ * ATTR, an entry that is not a made ATTR, or a node already annotated; ODIN3_ERR_NO_MEMORY. Nothing
+ * changes on failure.
+ */
+odin3_status odin3_ast_build_attach(odin3_ast *ast, uint32_t node, const uint32_t *attrs,
+                                    uint32_t n);
+
+/*
+ * Records a comment in the store's side table (spec §7), in stream order; odin3_ast_finish sorts
+ * the table. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a sealed store, non-zero
+ * reserved fields, an unknown kind or flag, a loc not in a FILE buffer, or an end that is neither
+ * 0 nor a later loc of that buffer; ODIN3_ERR_NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_ast_build_comment(odin3_ast *ast, const odin3_ast_comment_spec *spec);
+
+/*
+ * Interns the NUL-terminated str in the design's string table (names, macro and file names of
+ * the source manager) and stores its ID in *name. ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * argument; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_ast_build_intern(odin3_ast *ast, const char *str, uint32_t *name);
+
+/*
+ * Seals the store: sorts the comment table, frees the build scratch; a later builder call is
+ * ODIN3_ERR_INVALID_ARG. ODIN3_ERR_INVALID_ARG (logged) for NULL or a store already sealed. The
+ * readers work before and after.
+ */
+odin3_status odin3_ast_finish(odin3_ast *ast);
+
+/* --- source manager -------------------------------------------------------------------------- */
+
+/*
+ * Adds a FILE buffer (line 1 at offset 0 is implicit) and stores its ID in *buffer.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a name that is 0 or not a string ID, a
+ * resolved or library that is not a string ID, a parent that is not a loc, or non-zero reserved
+ * fields; ODIN3_ERR_PARSE (located at parent) for a file over ODIN3_SRC_MAX_FILE_BYTES, too many
+ * buffers or an exhausted location space; ODIN3_ERR_NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_srcman_build_file(odin3_srcman *sm, const odin3_srcfile_spec *spec,
+                                     uint32_t *buffer);
+
+/*
+ * Adds an EXPANSION, MACRO_ARG or SCRATCH buffer and stores its ID in *buffer.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a bad kind, a missing name (SCRATCH takes
+ * 0), a parent that is 0 or not a loc, a parent_end that is neither 0 nor a loc, a def that is
+ * not a loc (0 for SCRATCH) or whose buffer cannot hold len bytes from it, or non-zero reserved
+ * fields; ODIN3_ERR_PARSE (located at parent) for too many buffers or an exhausted location
+ * space; ODIN3_ERR_NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_srcman_build_expansion(odin3_srcman *sm, const odin3_expansion_spec *spec,
+                                          uint32_t *buffer);
+
+/*
+ * Records that a line starts at offset of FILE buffer `buffer` (offsets strictly increasing per
+ * buffer, above 0, at most its length). ODIN3_ERR_INVALID_ARG (logged) otherwise or for a NULL
+ * sm; ODIN3_ERR_NO_MEMORY. Unchanged on failure.
+ */
+odin3_status odin3_srcman_build_line(odin3_srcman *sm, uint32_t buffer, uint32_t offset);
+
+/*
+ * Appends a segment to its stream's map (spec §3.3). ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * argument, a stream that is not a project FILE buffer, an out_offset that does not increase
+ * within the stream, a loc that is neither 0 nor a loc, or non-zero reserved fields;
+ * ODIN3_ERR_NO_MEMORY. Unchanged on failure.
+ */
+odin3_status odin3_srcman_build_segment(odin3_srcman *sm, const odin3_segment *seg);
+
+/*
+ * *loc gets the location of byte `offset` of buffer `buffer` (offset at most the buffer's length:
+ * one past its end is a loc of its own). Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say (an unknown buffer or an offset past its end included).
+ */
+odin3_status odin3_srcman_get_loc(const odin3_srcman *sm, uint32_t buffer, uint32_t offset,
+                                  uint32_t *loc);
+
+/*
+ * Decoding (spec §3.2). For loc, which must be 0 or a loc of a buffer made so far:
+ * odin3_srcman_get_position fills *pos with the buffer, line and column of its file location
+ * (ODIN3_ERR_INVALID_ARG for 0, which has none); odin3_srcman_get_file_loc gives its file
+ * location (Clang's getFileLoc: an argument token reports its spelling, a body token the macro's
+ * use), odin3_srcman_get_expansion_loc where the outermost macro was used (getExpansionLoc), and
+ * odin3_srcman_get_spelling one spelling step (0 in a SCRATCH buffer); 0 gives 0. Each fails only
+ * with ODIN3_ERR_INVALID_ARG, as the conventions say (a loc past the space made so far included).
+ */
+odin3_status odin3_srcman_get_position(const odin3_srcman *sm, uint32_t loc, odin3_srcpos *pos);
+odin3_status odin3_srcman_get_file_loc(const odin3_srcman *sm, uint32_t loc, uint32_t *out);
+odin3_status odin3_srcman_get_expansion_loc(const odin3_srcman *sm, uint32_t loc, uint32_t *out);
+odin3_status odin3_srcman_get_spelling(const odin3_srcman *sm, uint32_t loc, uint32_t *out);
+
+/*
+ * *text gets "file:line:col" of loc's file location with the path as given ("<unknown>:0:0" for
+ * 0), in a buffer of the source manager valid until the next odin3_srcman_get_format call on it
+ * or its next mutation. ODIN3_ERR_INVALID_ARG as for odin3_srcman_get_spelling;
+ * ODIN3_ERR_NO_MEMORY (*text unchanged).
+ */
+odin3_status odin3_srcman_get_format(odin3_srcman *sm, uint32_t loc, const char **text);
 
 /* ODIN3_CDEF_END */
 

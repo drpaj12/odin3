@@ -165,6 +165,20 @@ usage)
     [[ $rc -eq 2 && $rc2 -eq 2 ]] || fail "exit codes $rc $rc2, expected 2 2"
     expect_fail "cannot read the script" "$work/missing.o3"
     ;;
+keep_ast)
+    "$odin3" --keep-ast -p "read_blif $fixture; check" 2>"$work/err" || fail "--keep-ast failed"
+    "$odin3" --keep-ast=all -p "check" 2>"$work/err" || fail "--keep-ast=all failed"
+    "$odin3" --help >"$work/out" 2>"$work/err" || fail "--help failed"
+    grep -qF -- "--keep-ast=all" "$work/out" || fail "--help lacks --keep-ast=all"
+    grep -qF -- "write_verilog_ast <file>" "$work/out" || fail "--help lacks write_verilog_ast"
+    set +e
+    "$odin3" --keep-ast=bogus -p "check" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--keep-ast=bogus: exit code $rc, expected 2"
+    expect_fail "write_verilog_ast: the design holds no AST" \
+        --keep-ast -p "read_blif $fixture; write_verilog_ast $work/out.v"
+    ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2
     exit 2

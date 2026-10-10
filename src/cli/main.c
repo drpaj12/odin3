@@ -28,6 +28,8 @@ static void print_usage(FILE *out) {
                 "  --plugin FILE    load a shared-object plugin (repeatable)\n"
                 "  --top NAME       the top module (wins over the BLIF first model)\n"
                 "  --check          check the IR before and after every pass (always in Debug)\n"
+                "  --keep-ast       keep the elaborated AST of every read (write_verilog_ast)\n"
+                "  --keep-ast=all   keep the parsed AST too\n"
                 "  -p SCRIPT        run the passes given inline\n"
                 "\n"
                 "passes:\n",
@@ -54,10 +56,11 @@ static int load_plugin(const char *path) {
 
 /* What the first argument scan found. */
 typedef struct cli_state {
-    bool check;      /* --check */
-    const char *top; /* --top NAME, NULL for none */
-    bool scripts;    /* a -p or a script file is given */
-    bool help;       /* --help: printed after the scan (plugin passes listed), nothing runs */
+    bool check;          /* --check */
+    const char *top;     /* --top NAME, NULL for none */
+    bool scripts;        /* a -p or a script file is given */
+    bool help;           /* --help: printed after the scan (plugin passes listed), nothing runs */
+    odin3_keep_ast keep; /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
 } cli_state;
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
@@ -89,6 +92,9 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
         state->help = true;
     } else if (strcmp(arg, "--check") == 0) {
         state->check = true;
+    } else if (strcmp(arg, "--keep-ast") == 0 || strcmp(arg, "--keep-ast=all") == 0) {
+        state->keep =
+            arg[strlen("--keep-ast")] == '=' ? ODIN3_KEEP_AST_ALL : ODIN3_KEEP_AST_ELABORATED;
     } else if (option_value(argv, argc, at, &value)) {
         if (strcmp(arg, "--plugin") == 0) {
             return load_plugin(value);
@@ -150,7 +156,7 @@ static void warn_unapplied_top(const odin3_design *design, const char *top) {
 
 /* Resolves every -p and script file (a typo anywhere costs nothing), then runs them in
  * command-line order on one design. */
-static int run_scripts(char **argv, int argc, const char *top) {
+static int run_scripts(char **argv, int argc, const cli_state *state) {
     if (each_script(argv, argc, NULL) != ODIN3_OK) {
         return EXIT_FAIL;
     }
@@ -159,9 +165,12 @@ static int run_scripts(char **argv, int argc, const char *top) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }
-    odin3_status st = each_script(argv, argc, design);
+    odin3_status st = odin3_design_set_keep_ast(design, state->keep);
     if (st == ODIN3_OK) {
-        warn_unapplied_top(design, top);
+        st = each_script(argv, argc, design);
+    }
+    if (st == ODIN3_OK) {
+        warn_unapplied_top(design, state->top);
     }
     odin3_design_destroy(design);
     return st == ODIN3_OK ? EXIT_OK : EXIT_FAIL;
@@ -186,5 +195,5 @@ int main(int argc, char **argv) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }
-    return run_scripts(argv, argc, state.top);
+    return run_scripts(argv, argc, &state);
 }
