@@ -7,13 +7,23 @@
 #include "util/log.h"
 
 #include <dirent.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PATH_BUF = 512, MSG_MAX = 1024, TEXT_MAX = 256, MODE_BITS = 0777, PRIVATE_MODE = 0600 };
+enum {
+    PATH_BUF = 512,
+    MSG_MAX = 1024,
+    TEXT_MAX = 256,
+    MODE_BITS = 0777,
+    PRIVATE_MODE = 0600,
+    SMALL_LIMIT = 64, /* RLIMIT_FSIZE bytes for the write-failure test */
+    BIG_WRITE = 4096  /* bytes written past it (buffered: the failure shows at close) */
+};
 
 static char out_dir[PATH_BUF];
 static char out_path[PATH_BUF + 16];
@@ -160,6 +170,31 @@ static void test_old_tmp_name_untouched(void) {
     TEST_ASSERT_EQUAL_INT(0, remove(tmp));
 }
 
+/* A write past RLIMIT_FSIZE (EFBIG, SIGXFSZ ignored) fails at the flush in close: IO, logged
+ * "write failed", the temporary removed and the old destination intact. */
+static void test_write_failure_at_close(void) {
+    put_old("old");
+    odin3_atomic_file file;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_open(&file, out_path));
+    struct rlimit old;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_FSIZE, &old));
+    void (*prev)(int) = signal(SIGXFSZ, SIG_IGN);
+    struct rlimit small = {SMALL_LIMIT, old.rlim_max};
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &small));
+    for (int i = 0; i < BIG_WRITE; i++) {
+        (void)fputc('x', file.fp);
+    }
+    odin3_status st = odin3_atomic_file_close(&file, ODIN3_OK);
+    (void)setrlimit(RLIMIT_FSIZE, &old);
+    (void)signal(SIGXFSZ, prev);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    char text[TEXT_MAX];
+    slurp(out_path, text);
+    TEST_ASSERT_EQUAL_STRING("old", text);
+    TEST_ASSERT_EQUAL_INT(1, dir_entries(out_dir));
+}
+
 static void test_open_failure_is_located(void) {
     odin3_atomic_file file;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_atomic_file_open(&file, "/nonexistent-dir/out.txt"));
@@ -212,6 +247,7 @@ int main(void) {
     RUN_TEST(test_failure_status_discards);
     RUN_TEST(test_concurrent_temporaries_differ);
     RUN_TEST(test_old_tmp_name_untouched);
+    RUN_TEST(test_write_failure_at_close);
     RUN_TEST(test_open_failure_is_located);
     RUN_TEST(test_rename_failure_cleans_temp);
     RUN_TEST(test_bare_name);

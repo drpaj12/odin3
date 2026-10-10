@@ -24,6 +24,11 @@ typedef struct odin3_atomic_file {
 /*
  * Creates the temporary and opens it for binary writing. Its permissions become those of an
  * existing regular-file destination, otherwise 0666 minus the umask (as fopen would give).
+ * Reading the umask sets it briefly (POSIX has no getter): a thread creating a file at that
+ * moment would not see the umask, so a threaded host must not create files concurrently with an
+ * open. Replacing renames over the destination: a symlinked destination becomes a regular file,
+ * hard links to it break, owner and group are the writer's, and there is no fsync (atomic
+ * against a writer failure, not against a system crash).
  * ODIN3_ERR_INVALID_ARG for a NULL or empty path, ODIN3_ERR_NO_MEMORY, or ODIN3_ERR_IO (logged as
  * "<path>: cannot open ..."). On failure nothing is left on disk and file->fp is NULL.
  */

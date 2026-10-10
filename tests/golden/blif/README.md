@@ -42,10 +42,21 @@ their assertions in `tests/unit/test_blif_reader.c`.
 
 CTest `writer_check_fixtures` runs `tools/writer-check/writer-check --fixtures` over every
 `*.blif` here (JSON through Yosys vs the golden through Yosys under `netlist-compare`; Verilog
-through Icarus and Yosys + `equiv-check`; dot through Graphviz), and
-`writer_check_detects_corruption` checks that damaged JSON and Verilog fail it. Both are skipped
-when Yosys, Icarus or Graphviz is missing (CI). `hand_writers.blif` and `hand_wide.blif` keep
-the gate's Yosys-side normalizations honest: each fails when its normalization is removed.
+through Icarus and Yosys + `equiv-check`; dot through Graphviz).
+`writer_check_detects_corruption` checks that damaged JSON and Verilog fail it, and
+`writer_check_bbox_not_excluded` that a black box only the Verilog side has counts as an error,
+not an exclusion. All three are skipped when Yosys, Icarus or Graphviz is missing (CI).
+
+Each Yosys-side normalization of the JSON step has a fixture that fails without it:
+
+| normalization | fails without it |
+|---|---|
+| identity `$lut`s made connections (NORM) | `hand_writers.blif` (undriven net buffered to an output) |
+| covers of at most 12 inputs as minterms | `hand_writers.blif` (7-input cover with don't-cares) |
+| bit-0 names restored (JSON side) | `hand_writers.blif` (`x[0]`/`o[0]` formals) |
+| `read_blif -sop` for wide covers | `hand_wide.blif` (Yosys rejects a 13-input `$lut`) |
+| Yosys self-buffers `.names x x` dropped | `hand_ports.blif`, `hand_body.blif` (vector ports: netlist-compare refuses the self-loop as a second driver) |
+| statements sorted | `ansiportlist_2.parmys.blif` (Yosys `read_json` cell order breaks a netlist-compare tie differently) |
 
 ## Round-trip gate
 

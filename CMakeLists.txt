@@ -245,8 +245,10 @@ if(BUILD_TESTING)
         list(PREPEND _wc_args --yosys ${ODIN3_YOSYS_EXE})
     endif()
     set(_wc_env "")
+    set(_wc_env_list "")
     if(ODIN3_WITH_ABC)
         set(_wc_env "ODIN3_ABC=$<TARGET_FILE:abc>")
+        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:abc>;")
     endif()
     add_test(NAME writer_check_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args})
@@ -259,7 +261,15 @@ if(BUILD_TESTING)
     set_tests_properties(writer_check_detects_corruption PROPERTIES LABELS unit
         SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
         PASS_REGULAR_EXPRESSION "json: identical [0-9]+, ref-excluded [0-9]+, refused \\(multi-driver\\) [0-9]+, different [1-9][^\n]*\nverilog iverilog[^\n]*\nverilog equiv: equivalent [0-9]+, excluded [0-9]+, NOT-equivalent [1-9]"
-        ENVIRONMENT "${_wc_env};WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
+        ENVIRONMENT "${_wc_env_list}WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
+    # Negative check: a black box only the writer's side has is an error, not an exclusion.
+    add_test(NAME writer_check_bbox_not_excluded
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+    set_tests_properties(writer_check_bbox_not_excluded PROPERTIES LABELS unit
+        SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
+        PASS_REGULAR_EXPRESSION "verilog equiv: equivalent 0, excluded [0-9]+, NOT-equivalent 0, yosys-error 0, error [1-9]"
+        ENVIRONMENT "${_wc_env_list}WC_CORRUPT=bbox;WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh

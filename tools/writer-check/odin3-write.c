@@ -57,7 +57,12 @@ static bool parse_args(int argc, char **argv, wr_args *args) {
             if (num == NULL) {
                 return false;
             }
-            args->max_nodes = (size_t)strtoull(num, NULL, 10);
+            char *end = NULL;
+            args->max_nodes = (size_t)strtoull(num, &end, 10);
+            if (end == num || *end != '\0' || num[0] == '-') {
+                usage();
+                return false;
+            }
             continue;
         } else if (argv[i][0] != '-' && args->in == NULL) {
             args->in = argv[i];

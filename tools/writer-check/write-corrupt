@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# write-corrupt: odin3-write wrapper for the negative CTest; damages the written JSON (one LUT
-# bit) and Verilog (one `&` becomes `|`) so that the writer-check gates must fail.
-# WC_REAL_WRITE names the real driver; arguments are those of odin3-write.
+# write-corrupt: odin3-write wrapper for the negative CTests. WC_REAL_WRITE names the real driver;
+# arguments are those of odin3-write. WC_CORRUPT picks the damage:
+#   logic (default)  one JSON LUT bit flipped and one Verilog `&` made `|`: the JSON and the
+#                    equivalence gates must fail;
+#   bbox             the Verilog top instantiates an extra black box: equiv-check's
+#                    "unsupported black box" is then located in the Yosys netlist, not in the
+#                    golden, and must count as an error, not an exclusion.
 set -euo pipefail
 "${WC_REAL_WRITE:?}" "$@"
 json="" vlog=""
@@ -12,5 +16,15 @@ while [ $# -gt 0 ]; do
     *) shift ;;
     esac
 done
-[ -z "$json" ] || sed -i '0,/"LUT": "\([01]*\)0"/s//"LUT": "\11"/' "$json"
-[ -z "$vlog" ] || sed -i '0,/^\(  assign .*\) & /s//\1 | /' "$vlog"
+case ${WC_CORRUPT:-logic} in
+logic)
+    [ -z "$json" ] || sed -i '0,/"LUT": "\([01]*\)0"/s//"LUT": "\11"/' "$json"
+    [ -z "$vlog" ] || sed -i '0,/^\(  assign .*\) & /s//\1 | /' "$vlog"
+    ;;
+bbox)
+    if [ -n "$vlog" ]; then
+        sed -i '0,/^endmodule$/s//  (* keep *) wc_injected_bb wc_injected (.a(1'"'"'b0));\nendmodule/' "$vlog"
+        printf '\n(* blackbox *)\nmodule wc_injected_bb (\n  input a\n);\nendmodule\n' >>"$vlog"
+    fi
+    ;;
+esac

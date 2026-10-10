@@ -34,7 +34,9 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 - [ ] 1E simulator matches ABC on the goldens without RAMs
 - [x] 1F writers emit dot / JSON / Verilog for the goldens (2026-10-09): JSON identical through
   Yosys on 1796/1846, Verilog equivalent 1428 (404 excluded, listed), Icarus parses every
-  finished one, dot accepted or budget-refused on all; exceptions and results below
+  finished one, dot accepted or budget-refused on all; not validated at the per-tool caps: 38
+  files in the JSON step and 14 in the equivalence step (timeouts, memory caps, 2 Yosys
+  memory deaths; the large Odin II designs, named below); results below
 
 ## Decisions log
 
@@ -189,25 +191,32 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 
 2026-10-09, agent defaults (1F Task 4; Peter may override):
 
-22. **1F JSON validation compares through Yosys on both sides.** The spec's "Yosys `read_json;
-    write_blif` → `netlist-compare` identical to the golden" cannot hold literally: Yosys
-    `write_blif` spells every `$lut` as minterms, folds constant aliases and writes a 1-bit
-    wire's bit without its index. `tools/writer-check` therefore compares the JSON through Yosys
-    (`read_json`; NORM; `write_blif`) with the golden through Yosys (`read_blif`, `-sop` when a
-    cover has over 12 inputs; NORM; `write_blif`): NORM makes identity `$lut`s connections (as
-    `read_blif` does) and runs `opt_clean`; both outputs then get covers of at most 12 inputs as
-    minterms, statements sorted, Yosys self-buffers dropped and bit-0 names restored. Every
-    normalization has a fixture that fails without it (`hand_writers.blif`, `hand_wide.blif`).
-    Goldens Yosys cannot read, or whose parameterless `$pow` cells `write_blif` drops on both
-    sides, are excluded from the JSON step and listed.
-23. **1F Verilog validation exclusions.** `equiv-check` models no black box but the VTR `adder`,
-    no multi-driver net and one clock domain: goldens with RAMs, multipliers, implicit cells,
-    multi-driver nets or several clocks are excluded from the equivalence step (listed by
-    reason); Icarus still parses every Verilog output. Assign-form cells carry their attributes
-    as a `// (* … *)` comment (Icarus rejects attributes on continuous assigns).
-24. **dot validation:** `dot -Tsvg` within 120 s; a layout that takes longer (2000-node budget,
-    dense graphs) is checked with Graphviz's parser `nop` instead ("ok-parse"); a design over the
-    budget must be refused with its node count ("budget").
+22. **(P) 1F JSON validation compares through Yosys on both sides** (spec deviation, accepted by
+    the controller's ruling; for Peter's review). The spec's "Yosys `read_json; write_blif` →
+    `netlist-compare` identical to the golden" cannot hold literally: Yosys `write_blif` spells
+    every `$lut` as minterms, folds constant aliases and writes a 1-bit wire's bit without its
+    index. `tools/writer-check` therefore compares the JSON through Yosys (`read_json`; NORM;
+    `write_blif`) with the golden through Yosys (`read_blif`, `-sop` when a cover has over 12
+    inputs; NORM; `write_blif`): NORM makes identity `$lut`s connections (as `read_blif` does)
+    and runs `opt_clean`; both outputs then get covers of at most 12 inputs as minterms,
+    statements sorted and Yosys self-buffers dropped, and the JSON side's 1-bit names get their
+    `[0]` back. Each normalization has a fixture that fails without it (table in
+    `tests/golden/blif/README.md`). A multi-driver refusal is accepted only for the #15 list.
+    Goldens Yosys cannot read, or with a `.subckt $<lowercase…>` cell and no `.param` line (the
+    8 parameterless `$pow` goldens, which `write_blif` drops on both sides), are excluded from
+    the JSON step and listed.
+23. **(P) 1F Verilog validation exclusions** (spec deviation: the spec excludes only RAM goldens;
+    agent default accepted by the controller's ruling, for Peter's review). `equiv-check` models
+    no black box but the VTR `adder`, no multi-driver net and one clock domain: goldens with
+    RAMs, multipliers, implicit cells, multi-driver nets or several clocks are excluded from the
+    equivalence step (listed by reason). Only an `equiv-check` error located in the golden file
+    excludes; any other is an error (CTest `writer_check_bbox_not_excluded`). Icarus still
+    parses every Verilog output. Assign-form cells carry their attributes as a `// (* … *)`
+    comment (Icarus rejects attributes on continuous assigns).
+24. **(P) dot validation** (spec deviation for 92 goldens; agent default accepted by the
+    controller's ruling, for Peter's review): `dot -Tsvg` within 120 s; a layout that takes
+    longer (2000-node budget, dense graphs) is checked with Graphviz's parser `nop` instead
+    ("ok-parse"); a design over the budget must be refused with its node count ("budget").
 25. **IR follow-up `odin3_attr_foreach`** (read-only, first-set order; docs/IR.md IR-10) lands
     with 1F so the JSON and Verilog writers write every attribute; for Peter's review.
 
