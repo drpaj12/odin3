@@ -258,7 +258,7 @@ static void test_info_lines(void) {
 
 /* The "project" object of a case's expected.json, as the dump spells it. */
 static void corpus_project(const char *case_dir, odin3_strbuf *out) {
-    char path[PATH_BUF];
+    char path[PATH_BUF + sizeof "/expected.json"]; /* case_dir is a PATH_BUF buffer */
     (void)snprintf(path, sizeof path, "%s/expected.json", case_dir);
     odin3_file_bytes bytes;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(path, FIXTURE_MAX, &bytes));
