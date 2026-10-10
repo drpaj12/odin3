@@ -1,0 +1,14 @@
+set_global_assignment -name TOP_LEVEL_ENTITY top
+set_parameter -name W 8
+set_parameter -name N -1
+set_parameter -name S {"hi there"}
+set_parameter -name T abc
+set_parameter -name H 8'hFF
+set_parameter -name E -to "" 4
+set_parameter -name I -to "u1|m:u2" 3
+set_parameter -name J -entity top -to u 5
+set_parameter -name K -entity top 6
+set_parameter -name Q "\"q\""
+set_parameter -name U 1_0
+set_parameter -name V 'sb1x
+set_parameter -name X -2_

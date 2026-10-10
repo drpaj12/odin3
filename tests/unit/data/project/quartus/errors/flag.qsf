@@ -1,0 +1,1 @@
+set_global_assignment -name VERILOG_FILE -disable ../src/a.v

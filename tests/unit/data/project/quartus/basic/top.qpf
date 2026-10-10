@@ -1,0 +1,3 @@
+# A project with one revision (spaces around '=' and after the value are allowed)
+QUARTUS_VERSION = "23.1"
+  PROJECT_REVISION   =  "top"
