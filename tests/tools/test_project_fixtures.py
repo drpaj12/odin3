@@ -172,6 +172,29 @@ flow f.o3
                 self.put("p.o3proj", text + "\n")
                 self.assertEqual(self.error("o3proj", "p.o3proj").kind, "unknown_file_type")
 
+    def test_lone_cr_stays_in_the_word_and_crlf_is_lf(self) -> None:
+        (self.dir / "p.o3proj").write_bytes(b"define A=x\ry\r\ndefine B\r\n")
+        rec = self.record("o3proj", "p.o3proj")
+        self.assertEqual(rec["defines"], [{"name": "A", "value": "x\ry"},
+                                          {"name": "B", "value": None}])
+
+    def test_counts(self) -> None:
+        for text, kind in (("available c \u00b2", "syntax"),  # 4294967295: parsed, no top
+                           ("available c 4294967296", "syntax"),
+                           ("available c 4294967295", "no_top")):
+            with self.subTest(text=text):
+                self.put("p.o3proj", text + "\n")
+                res = self.load("o3proj", "p.o3proj")
+                self.assertEqual(res.error.kind if res.error else None, kind)  # no_top: parsed
+        self.put("p.o3proj", "available c 4294967296\n")
+        self.assertIn("count too large", self.error("o3proj", "p.o3proj").detail)
+
+    def test_libext_names_the_extension(self) -> None:
+        self.put("p.o3proj", "libext .foo\n")
+        self.assertEqual(self.error("o3proj", "p.o3proj").names, [".foo"])
+        self.put("f.f", "+libext+.foo\n")
+        self.assertEqual(self.error("f", "f.f").names, [".foo"])
+
     def test_import_quartus(self) -> None:
         self.put("a.v", module("a"))
         self.put("p.qpf", 'PROJECT_REVISION = "r1"\nPROJECT_REVISION = "r2"\n')
