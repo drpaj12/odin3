@@ -33,6 +33,9 @@ typedef struct odin3_ast_node {
     uint32_t nchild; /* span length (0 for payload kinds) */
 } odin3_ast_node;
 
+/* The record's size, a memory gate (§12.5); ast.c asserts it at compile time. */
+enum { ODIN3_AST_NODE_BYTES = 24 };
+
 /* odin3_ast (the store) is declared in ir/design.h; its fields are in ast_internal.h. */
 
 /* The record's scalar fields for a builder call; payload is a payload ID (0 = none). */

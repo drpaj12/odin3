@@ -158,82 +158,119 @@ static odin3_loc file_loc(void) {
 
 /* --- the table ----------------------------------------------------------------------------- */
 
-/* Spec §4.3 rows transcribed independently: name, slots, tail min, tail max (-1 none, -2 *). */
+/*
+ * Spec §4.3 rows transcribed independently: name, slots, tail min, tail max (-1 none, -2 *),
+ * name rule, optional-slot mask, payload.
+ */
 typedef struct row_want {
     const char *name;
     int slots, tail_min, tail_max;
+    char name_rule;    /* R req, O opt, N none */
+    unsigned optional; /* bit i: slot i is optional (`?`) */
+    char payload;      /* - none, U NUMBER, F REAL, T TEXT */
 } row_want;
 
 static const row_want rows[] = {
-    {"UNIT", 0, 0, -2},
-    {"DIRECTIVE", 0, 0, -1},
-    {"MODULE", 2, 0, -2},
-    {"UDP_DECL", 0, 0, -1},
-    {"CONFIG_DECL", 0, 0, -1},
-    {"LIST", 0, 0, -2},
-    {"PORT_REF", 1, 0, -1},
-    {"PORT_DECL", 1, 1, -2},
-    {"DECLARATOR", 1, 0, -2},
-    {"RANGE", 2, 0, -1},
-    {"NET_DECL", 3, 1, -2},
-    {"VAR_DECL", 1, 1, -2},
-    {"PARAM_DECL", 1, 1, -2},
-    {"DEFPARAM", 2, 0, -1},
-    {"GENVAR_DECL", 0, 1, -2},
-    {"EVENT_DECL", 0, 1, -2},
-    {"STRENGTH", 0, 0, -1},
-    {"DELAY", 0, 1, 3},
-    {"CONT_ASSIGN", 2, 1, -2},
-    {"NET_ASSIGN", 2, 0, -1},
-    {"ALWAYS", 1, 0, -1},
-    {"INITIAL", 1, 0, -1},
-    {"INSTANTIATION", 1, 1, -2},
-    {"INSTANCE", 1, 0, -2},
-    {"CONNECTION", 1, 0, -1},
-    {"GATE_DECL", 2, 1, -2},
-    {"FUNCTION_DECL", 4, 0, -1},
-    {"TASK_DECL", 3, 0, -1},
-    {"SPECIFY_BLOCK", 0, 0, -1},
-    {"ATTR", 1, 0, -1},
-    {"GENERATE", 0, 0, -2},
-    {"GEN_FOR", 4, 0, -1},
-    {"GEN_IF", 3, 0, -1},
-    {"GEN_CASE", 1, 1, -2},
-    {"GEN_BLOCK", 1, 0, -2},
-    {"SEQ_BLOCK", 1, 0, -2},
-    {"PAR_BLOCK", 1, 0, -2},
-    {"BLOCKING_ASSIGN", 3, 0, -1},
-    {"NONBLOCKING_ASSIGN", 3, 0, -1},
-    {"PROC_CONT_ASSIGN", 2, 0, -1},
-    {"IF", 3, 0, -1},
-    {"CASE", 1, 1, -2},
-    {"CASE_ITEM", 1, 0, -2},
-    {"FOR", 4, 0, -1},
-    {"WHILE", 2, 0, -1},
-    {"REPEAT", 2, 0, -1},
-    {"FOREVER", 1, 0, -1},
-    {"TIMING_STMT", 2, 0, -1},
-    {"WAIT", 2, 0, -1},
-    {"DISABLE", 1, 0, -1},
-    {"EVENT_TRIGGER", 1, 0, -1},
-    {"TASK_CALL", 0, 0, -2},
-    {"NULL_STMT", 0, 0, -1},
-    {"EVENT_CONTROL", 1, 0, -2},
-    {"EVENT_EXPR", 1, 0, -1},
-    {"NUMBER", 0, 0, -1},
-    {"REAL", 0, 0, -1},
-    {"STRING", 0, 0, -1},
-    {"IDENT", 0, 0, -1},
-    {"HIER_NAME", 0, 1, -2},
-    {"SELECT", 3, 0, -1},
-    {"CONCAT", 0, 1, -2},
-    {"REPLICATE", 2, 0, -1},
-    {"UNARY", 1, 0, -1},
-    {"BINARY", 2, 0, -1},
-    {"TERNARY", 3, 0, -1},
-    {"CALL", 0, 0, -2},
-    {"MINTYPMAX", 3, 0, -1},
+    {"UNIT", 0, 0, -2, 'R', 0, '-'},
+    {"DIRECTIVE", 0, 0, -1, 'O', 0, '-'},
+    {"MODULE", 2, 0, -2, 'R', 3, '-'},
+    {"UDP_DECL", 0, 0, -1, 'R', 0, 'T'},
+    {"CONFIG_DECL", 0, 0, -1, 'R', 0, 'T'},
+    {"LIST", 0, 0, -2, 'N', 0, '-'},
+    {"PORT_REF", 1, 0, -1, 'O', 1, '-'},
+    {"PORT_DECL", 1, 1, -2, 'N', 1, '-'},
+    {"DECLARATOR", 1, 0, -2, 'R', 1, '-'},
+    {"RANGE", 2, 0, -1, 'N', 0, '-'},
+    {"NET_DECL", 3, 1, -2, 'N', 7, '-'},
+    {"VAR_DECL", 1, 1, -2, 'N', 1, '-'},
+    {"PARAM_DECL", 1, 1, -2, 'N', 1, '-'},
+    {"DEFPARAM", 2, 0, -1, 'N', 0, '-'},
+    {"GENVAR_DECL", 0, 1, -2, 'N', 0, '-'},
+    {"EVENT_DECL", 0, 1, -2, 'N', 0, '-'},
+    {"STRENGTH", 0, 0, -1, 'N', 0, '-'},
+    {"DELAY", 0, 1, 3, 'N', 0, '-'},
+    {"CONT_ASSIGN", 2, 1, -2, 'N', 3, '-'},
+    {"NET_ASSIGN", 2, 0, -1, 'N', 0, '-'},
+    {"ALWAYS", 1, 0, -1, 'N', 0, '-'},
+    {"INITIAL", 1, 0, -1, 'N', 0, '-'},
+    {"INSTANTIATION", 1, 1, -2, 'R', 1, '-'},
+    {"INSTANCE", 1, 0, -2, 'O', 1, '-'},
+    {"CONNECTION", 1, 0, -1, 'O', 1, '-'},
+    {"GATE_DECL", 2, 1, -2, 'N', 3, '-'},
+    {"FUNCTION_DECL", 4, 0, -1, 'R', 1, '-'},
+    {"TASK_DECL", 3, 0, -1, 'R', 0, '-'},
+    {"SPECIFY_BLOCK", 0, 0, -1, 'N', 0, 'T'},
+    {"ATTR", 1, 0, -1, 'R', 1, '-'},
+    {"GENERATE", 0, 0, -2, 'N', 0, '-'},
+    {"GEN_FOR", 4, 0, -1, 'N', 0, '-'},
+    {"GEN_IF", 3, 0, -1, 'N', 4, '-'},
+    {"GEN_CASE", 1, 1, -2, 'N', 0, '-'},
+    {"GEN_BLOCK", 1, 0, -2, 'O', 1, '-'},
+    {"SEQ_BLOCK", 1, 0, -2, 'O', 1, '-'},
+    {"PAR_BLOCK", 1, 0, -2, 'O', 1, '-'},
+    {"BLOCKING_ASSIGN", 3, 0, -1, 'N', 2, '-'},
+    {"NONBLOCKING_ASSIGN", 3, 0, -1, 'N', 2, '-'},
+    {"PROC_CONT_ASSIGN", 2, 0, -1, 'N', 2, '-'},
+    {"IF", 3, 0, -1, 'N', 4, '-'},
+    {"CASE", 1, 1, -2, 'N', 0, '-'},
+    {"CASE_ITEM", 1, 0, -2, 'N', 0, '-'},
+    {"FOR", 4, 0, -1, 'N', 0, '-'},
+    {"WHILE", 2, 0, -1, 'N', 0, '-'},
+    {"REPEAT", 2, 0, -1, 'N', 0, '-'},
+    {"FOREVER", 1, 0, -1, 'N', 0, '-'},
+    {"TIMING_STMT", 2, 0, -1, 'N', 2, '-'},
+    {"WAIT", 2, 0, -1, 'N', 2, '-'},
+    {"DISABLE", 1, 0, -1, 'N', 0, '-'},
+    {"EVENT_TRIGGER", 1, 0, -1, 'N', 0, '-'},
+    {"TASK_CALL", 0, 0, -2, 'R', 0, '-'},
+    {"NULL_STMT", 0, 0, -1, 'N', 0, '-'},
+    {"EVENT_CONTROL", 1, 0, -2, 'N', 1, '-'},
+    {"EVENT_EXPR", 1, 0, -1, 'N', 0, '-'},
+    {"NUMBER", 0, 0, -1, 'N', 0, 'U'},
+    {"REAL", 0, 0, -1, 'N', 0, 'F'},
+    {"STRING", 0, 0, -1, 'R', 0, '-'},
+    {"IDENT", 0, 0, -1, 'R', 0, '-'},
+    {"HIER_NAME", 0, 1, -2, 'N', 0, '-'},
+    {"SELECT", 3, 0, -1, 'N', 4, '-'},
+    {"CONCAT", 0, 1, -2, 'N', 0, '-'},
+    {"REPLICATE", 2, 0, -1, 'N', 0, '-'},
+    {"UNARY", 1, 0, -1, 'N', 0, '-'},
+    {"BINARY", 2, 0, -1, 'N', 0, '-'},
+    {"TERNARY", 3, 0, -1, 'N', 0, '-'},
+    {"CALL", 0, 0, -2, 'R', 0, '-'},
+    {"MINTYPMAX", 3, 0, -1, 'N', 0, '-'},
 };
+
+static uint8_t want_name_rule(char code) {
+    if (code == 'R') {
+        return ODIN3_AST_NAME_REQ;
+    }
+    return code == 'O' ? ODIN3_AST_NAME_OPT : ODIN3_AST_NAME_NO;
+}
+
+static uint8_t want_payload(char code) {
+    switch (code) {
+    case 'U':
+        return ODIN3_AST_PAYLOAD_NUMBER;
+    case 'F':
+        return ODIN3_AST_PAYLOAD_REAL;
+    case 'T':
+        return ODIN3_AST_PAYLOAD_TEXT;
+    default:
+        return ODIN3_AST_PAYLOAD_NONE;
+    }
+}
+
+static void check_row_columns(const row_want *want, const odin3_ast_kind_info *info) {
+    TEST_ASSERT_EQUAL_UINT8(want_name_rule(want->name_rule), info->name_rule);
+    TEST_ASSERT_EQUAL_UINT8(want_payload(want->payload), info->payload);
+    unsigned optional = 0;
+    for (uint32_t i = 0; i < info->nslots; i++) {
+        TEST_ASSERT_NOT_EQUAL(ODIN3_AST_CLS_NONE, info->slots[i] & ODIN3_AST_SLOT_CLASS);
+        optional |= (info->slots[i] & ODIN3_AST_SLOT_OPT) != 0 ? 1U << i : 0U;
+    }
+    TEST_ASSERT_EQUAL_HEX(want->optional, optional);
+}
 
 static void check_row(uint32_t kind) {
     const row_want *want = &rows[kind - 1];
@@ -243,6 +280,7 @@ static void check_row(uint32_t kind) {
     TEST_ASSERT_EQUAL_STRING(want->name, odin3_ast_kind_name(kind));
     TEST_ASSERT_EQUAL_UINT32((uint32_t)want->slots, odin3_ast_slot_count(kind));
     TEST_ASSERT_EQUAL(want->tail_max != -1, odin3_ast_has_tail(kind));
+    check_row_columns(want, info);
     if (want->tail_max == -1) {
         return;
     }
@@ -650,6 +688,18 @@ static void test_finish_seals(void) {
     TEST_ASSERT_NOT_EQUAL(0, intern("still")); /* intern works after finish */
 }
 
+static void test_payload_push_sealed_and_marked_prefix(void) {
+    odin3_ast_spec binary = spec_of(ODIN3_AST_BINARY, 0);
+    odin3_ast_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_make_marked(ast, &binary, 0, &id));
+    TEST_ASSERT_NOT_NULL(strstr(captured, "odin3_ast_make_marked: fewer children than slots"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_finish(ast));
+    odin3_ast_payload_rec rec = {.kind = ODIN3_AST_PAYLOAD_REAL, .u.real = 1.0};
+    uint32_t payload = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_payload_push(ast, rec, &payload));
+    TEST_ASSERT_EQUAL_size_t(0, ast->payloads.len);
+}
+
 static void test_accessors(void) {
     odin3_loc at = file_loc();
     odin3_ast_spec yspec = {
@@ -726,6 +776,7 @@ static void test_null_store_getters(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_max_height(NULL));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_run(NULL).v);
     TEST_ASSERT_NULL(odin3_ast_design(NULL));
+    TEST_ASSERT_EQUAL_size_t(0, odin3_ast_bytes_reserved(NULL));
 }
 
 static void test_units_are_roots(void) {
@@ -1084,6 +1135,7 @@ int main(void) {
     RUN_TEST(test_make_from_own_children);
     RUN_TEST(test_ast5_random_build);
     RUN_TEST(test_finish_seals);
+    RUN_TEST(test_payload_push_sealed_and_marked_prefix);
     RUN_TEST(test_accessors);
     RUN_TEST(test_payload_accessors);
     RUN_TEST(test_out_of_range_ids);

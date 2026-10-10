@@ -22,6 +22,8 @@
 _Static_assert(ODIN3_AST_MAX_NUMBER_BITS == ODIN3_READER_MAX_WIDTH,
                "a literal is capped at the readers' width cap (PHASE2 #5)");
 _Static_assert(ODIN3_AST_MAX_DEPTH <= UINT16_MAX, "heights are uint16_t");
+_Static_assert(sizeof(odin3_ast_node) == ODIN3_AST_NODE_BYTES,
+               "AST-4: the node record is 24 bytes (§12.5 gate)");
 
 /* --- lifetime ------------------------------------------------------------------------------ */
 
@@ -108,8 +110,27 @@ const odin3_ast_payload_rec *odin3_ast_payload_rec_of(const odin3_ast *ast, uint
     return odin3_vec_cat(&ast->payloads, id - 1);
 }
 
+static const char *check_open(const odin3_ast *ast) {
+    if (ast == NULL) {
+        return "NULL argument";
+    }
+    return ast->finished ? "the store is finished" : NULL;
+}
+
+/* NO_MEMORY when the payload ID space is exhausted. */
+static odin3_status payload_room(const odin3_ast *ast) {
+    return ast->payloads.len >= UINT32_MAX - 1 ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+}
+
 odin3_status odin3_ast_payload_push(odin3_ast *ast, odin3_ast_payload_rec rec, uint32_t *payload) {
-    if (ast->payloads.len >= UINT32_MAX - 1) {
+    const char *why = check_open(ast);
+    if (why == NULL && payload == NULL) {
+        why = "NULL argument";
+    }
+    if (why != NULL) {
+        return misuse("odin3_ast_payload_push", why);
+    }
+    if (payload_room(ast) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_ast_payload_rec *slot = odin3_vec_push(&ast->payloads);
@@ -277,13 +298,13 @@ static size_t alias_offset(const odin3_ast *ast, odin3_ast_span kids) {
 }
 
 static odin3_status build(odin3_ast *ast, const odin3_ast_spec *spec, odin3_ast_span kids,
-                          odin3_ast_id *out) {
+                          odin3_ast_id *out, const char *fn) {
     const odin3_ast_kind_info *info = odin3_ast_kind_info_of(spec->kind);
     const char *why = check_scalars(ast, info, spec);
     why = why != NULL ? why : check_children(ast, info, spec->flags, kids);
     if (why != NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_ast_make: %s (kind %" PRIu32 " %s)", why,
-                  (uint32_t)spec->kind, odin3_ast_kind_name(spec->kind));
+        odin3_log(ODIN3_LOG_ERROR, "%s: %s (kind %" PRIu32 " %s)", fn, why, (uint32_t)spec->kind,
+                  odin3_ast_kind_name(spec->kind));
         return ODIN3_ERR_INVALID_ARG;
     }
     uint32_t height = 0;
@@ -303,13 +324,6 @@ static odin3_status build(odin3_ast *ast, const odin3_ast_spec *spec, odin3_ast_
 
 /* --- builders ------------------------------------------------------------------------------ */
 
-static const char *check_open(const odin3_ast *ast) {
-    if (ast == NULL) {
-        return "NULL argument";
-    }
-    return ast->finished ? "the store is finished" : NULL;
-}
-
 odin3_status odin3_ast_make(odin3_ast *ast, const odin3_ast_spec *spec, const odin3_ast_id *ids,
                             uint32_t n, odin3_ast_id *out) {
     const char *why = check_open(ast);
@@ -319,7 +333,7 @@ odin3_status odin3_ast_make(odin3_ast *ast, const odin3_ast_spec *spec, const od
     if (why != NULL) {
         return misuse("odin3_ast_make", why);
     }
-    return build(ast, spec, (odin3_ast_span){ids, n}, out);
+    return build(ast, spec, (odin3_ast_span){ids, n}, out, "odin3_ast_make");
 }
 
 uint32_t odin3_ast_mark(const odin3_ast *ast) {
@@ -359,7 +373,7 @@ odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, u
     }
     const odin3_ast_id *top = ast->pending.data;
     odin3_ast_span kids = {top + mark, (uint32_t)ast->pending.len - mark};
-    odin3_status st = build(ast, spec, kids, out);
+    odin3_status st = build(ast, spec, kids, out, "odin3_ast_make_marked");
     if (st == ODIN3_OK) {
         odin3_ast_unwind(ast, mark);
     }
@@ -400,7 +414,8 @@ odin3_status odin3_ast_text_new(odin3_ast *ast, odin3_bytes text, uint32_t *payl
                    "opaque text longer than %" PRIu32 " bytes", ODIN3_AST_MAX_TEXT_BYTES);
         return ODIN3_ERR_PARSE;
     }
-    if (odin3_vec_reserve(&ast->payloads, ast->payloads.len + 1) != ODIN3_OK) {
+    if (payload_room(ast) != ODIN3_OK ||
+        odin3_vec_reserve(&ast->payloads, ast->payloads.len + 1) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     uint8_t *bytes = odin3_arena_alloc(ast->arena, text.len);
@@ -548,6 +563,9 @@ const odin3_design *odin3_ast_design(const odin3_ast *ast) {
 }
 
 size_t odin3_ast_bytes_reserved(const odin3_ast *ast) {
+    if (ast == NULL) {
+        return 0;
+    }
     return odin3_pagevec_bytes_reserved(ast->nodes) + ast->children.cap * ast->children.elem_size +
            ast->payloads.cap * ast->payloads.elem_size + odin3_arena_bytes_reserved(ast->arena);
 }
