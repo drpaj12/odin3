@@ -46,7 +46,7 @@ struct odin3_ast {
     odin3_vec heights;           /* uint16_t per node, slot 0 = 0 (freed at finish) */
     uint32_t max_height;         /* running maximum, kept after finish */
     bool finished;               /* sealed */
-    odin3_vec comments;          /* comment.c's records (elem size set there; zeroed until then) */
+    odin3_vec comments;          /* odin3_ast_comment, stream order; sorted by loc at finish */
     odin3_u64map *attrs;         /* attr.c: node ID -> span; NULL until the first attach */
     struct odin3_symtab *symtab; /* symtab.c; NULL until built (owned) */
     uint32_t max_children;       /* ODIN3_AST_MAX_CHILDREN unless a test lowered it */
@@ -65,5 +65,8 @@ const odin3_ast_payload_rec *odin3_ast_payload_rec_of(const odin3_ast *ast, uint
  * INVALID_ARG (logged) for a NULL argument or a sealed store; NO_MEMORY with the table unchanged.
  */
 odin3_status odin3_ast_payload_push(odin3_ast *ast, odin3_ast_payload_rec rec, uint32_t *payload);
+
+/* Sorts the comment table by loc (comment.c; called by odin3_ast_finish; never allocates). */
+void odin3_ast_comments_sort(odin3_ast *ast);
 
 #endif
