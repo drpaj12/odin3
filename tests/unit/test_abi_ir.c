@@ -152,7 +152,7 @@ static uint32_t sink_of_type(odin3_ref net, const char *type) {
 /* --- design -------------------------------------------------------------------------------- */
 
 static void test_abi_version_is_3(void) {
-    TEST_ASSERT_EQUAL_UINT32(3, odin3_abi_version());
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version());
 }
 
 static void test_design_modules_and_top(void) {

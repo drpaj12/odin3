@@ -5,6 +5,8 @@
 #ifndef ODIN3_AST_KINDS_H
 #define ODIN3_AST_KINDS_H
 
+#include "odin3/odin3.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -93,19 +95,11 @@
     X(CALL, E, REQ, NOSUB, F, SL0, TLZ(E, CALL), NOPAY)                                            \
     X(MINTYPMAX, E, NO, NOSUB, NOF, SL3(E, E, E), NOTAIL, NOPAY)
 
-#define ODIN3_AST_KIND_ENUM_(KIND, MEMBER, NAME, SUB, FLAGS, SLOTS, TAIL, PAYLOAD) ODIN3_AST_##KIND,
-
-/* Node kinds: NONE = 0, UNIT = 1 … MINTYPMAX = 68. */
-typedef enum odin3_ast_kind {
-    ODIN3_AST_NONE = 0,
-    ODIN3_AST_KINDS(ODIN3_AST_KIND_ENUM_) ODIN3_AST_KIND_COUNT /* one past the last kind */
-} odin3_ast_kind;
-
-/* The two subsets of the one format (AST-9); fixed when a store is created. */
-typedef enum odin3_ast_form {
-    ODIN3_AST_FORM_PARSED = 1,
-    ODIN3_AST_FORM_ELABORATED = 2
-} odin3_ast_form;
+/*
+ * The node kinds (odin3_ast_kind), the store forms, the sub-kind enums, the flag bits, the DT and
+ * strength field values and the caps are public: odin3.h (ABI v4), written out there so cffi can
+ * read them. src/api/ast_abi.c asserts at compile time that they equal these tables' order.
+ */
 
 /* --- sub-kinds: one list per kind that has them, Y(KIND, NAME, "spelling") in order ---------- */
 
@@ -245,173 +239,9 @@ typedef enum odin3_ast_form {
     Y(BINARY, ASHL, "<<<")                                                                         \
     Y(BINARY, ASHR, ">>>")
 
-#define ODIN3_AST_SUB_ENUM_(KIND, NAME, TEXT) ODIN3_AST_##KIND##_##NAME,
-
-/* Each enum ends with ODIN3_AST_<KIND>_COUNT, the kind's sub-kind count. */
-typedef enum odin3_ast_directive_kind {
-    ODIN3_AST_SUBS_DIRECTIVE(ODIN3_AST_SUB_ENUM_) ODIN3_AST_DIRECTIVE_COUNT
-} odin3_ast_directive_kind;
-typedef enum odin3_ast_direction {
-    ODIN3_AST_SUBS_PORT_DECL(ODIN3_AST_SUB_ENUM_) ODIN3_AST_PORT_DECL_COUNT
-} odin3_ast_direction;
-typedef enum odin3_ast_net_kind {
-    ODIN3_AST_SUBS_NET_DECL(ODIN3_AST_SUB_ENUM_) ODIN3_AST_NET_DECL_COUNT
-} odin3_ast_net_kind;
-typedef enum odin3_ast_var_kind {
-    ODIN3_AST_SUBS_VAR_DECL(ODIN3_AST_SUB_ENUM_) ODIN3_AST_VAR_DECL_COUNT
-} odin3_ast_var_kind;
-typedef enum odin3_ast_param_kind {
-    ODIN3_AST_SUBS_PARAM_DECL(ODIN3_AST_SUB_ENUM_) ODIN3_AST_PARAM_DECL_COUNT
-} odin3_ast_param_kind;
-typedef enum odin3_ast_strength_kind {
-    ODIN3_AST_SUBS_STRENGTH(ODIN3_AST_SUB_ENUM_) ODIN3_AST_STRENGTH_COUNT
-} odin3_ast_strength_kind;
-typedef enum odin3_ast_always_kind {
-    ODIN3_AST_SUBS_ALWAYS(ODIN3_AST_SUB_ENUM_) ODIN3_AST_ALWAYS_COUNT
-} odin3_ast_always_kind;
-typedef enum odin3_ast_gate_kind {
-    ODIN3_AST_SUBS_GATE_DECL(ODIN3_AST_SUB_ENUM_) ODIN3_AST_GATE_DECL_COUNT
-} odin3_ast_gate_kind;
-typedef enum odin3_ast_proc_assign_kind {
-    ODIN3_AST_SUBS_PROC_CONT_ASSIGN(ODIN3_AST_SUB_ENUM_) ODIN3_AST_PROC_CONT_ASSIGN_COUNT
-} odin3_ast_proc_assign_kind;
-typedef enum odin3_ast_case_kind {
-    ODIN3_AST_SUBS_CASE(ODIN3_AST_SUB_ENUM_) ODIN3_AST_CASE_COUNT
-} odin3_ast_case_kind;
-typedef enum odin3_ast_edge {
-    ODIN3_AST_SUBS_EVENT_EXPR(ODIN3_AST_SUB_ENUM_) ODIN3_AST_EVENT_EXPR_COUNT
-} odin3_ast_edge;
-typedef enum odin3_ast_base {
-    ODIN3_AST_SUBS_NUMBER(ODIN3_AST_SUB_ENUM_) ODIN3_AST_NUMBER_COUNT
-} odin3_ast_base;
-typedef enum odin3_ast_select_kind {
-    ODIN3_AST_SUBS_SELECT(ODIN3_AST_SUB_ENUM_) ODIN3_AST_SELECT_COUNT
-} odin3_ast_select_kind;
-typedef enum odin3_ast_unary_op {
-    ODIN3_AST_SUBS_UNARY(ODIN3_AST_SUB_ENUM_) ODIN3_AST_UNARY_COUNT
-} odin3_ast_unary_op;
-typedef enum odin3_ast_binary_op {
-    ODIN3_AST_SUBS_BINARY(ODIN3_AST_SUB_ENUM_) ODIN3_AST_BINARY_COUNT
-} odin3_ast_binary_op;
-
-/* --- flags (AST-7): per kind, bits from 0 in row order; fields as _SHIFT/_MASK --------------- */
-
-enum {
-    ODIN3_AST_F_MODULE_MACROMODULE = 1U << 0,
-
-    ODIN3_AST_F_PORT_REF_DOTTED = 1U << 0,
-
-    ODIN3_AST_F_PORT_DECL_SIGNED = 1U << 0,
-    ODIN3_AST_F_PORT_DECL_IN_HEADER = 1U << 1,
-    ODIN3_AST_F_PORT_DECL_DT_SHIFT = 2,
-    ODIN3_AST_F_PORT_DECL_DT_MASK = 0x7U << 2,
-    ODIN3_AST_F_PORT_DECL_NET_SHIFT = 5, /* 0 = unspecified, else 1 + odin3_ast_net_kind */
-    ODIN3_AST_F_PORT_DECL_NET_MASK = 0xFU << 5,
-
-    ODIN3_AST_F_NET_DECL_SIGNED = 1U << 0,
-    ODIN3_AST_F_NET_DECL_VECTORED = 1U << 1,
-    ODIN3_AST_F_NET_DECL_SCALARED = 1U << 2,
-
-    ODIN3_AST_F_VAR_DECL_SIGNED = 1U << 0,
-
-    ODIN3_AST_F_PARAM_DECL_SIGNED = 1U << 0,
-    ODIN3_AST_F_PARAM_DECL_IN_HEADER = 1U << 1,
-    ODIN3_AST_F_PARAM_DECL_DT_SHIFT = 2,
-    ODIN3_AST_F_PARAM_DECL_DT_MASK = 0x7U << 2,
-
-    ODIN3_AST_F_STRENGTH_S0_SHIFT = 0, /* odin3_ast_drive_value or odin3_ast_charge_value */
-    ODIN3_AST_F_STRENGTH_S0_MASK = 0xFU << 0,
-    ODIN3_AST_F_STRENGTH_S1_SHIFT = 4,
-    ODIN3_AST_F_STRENGTH_S1_MASK = 0xFU << 4,
-
-    ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC = 1U << 0,
-    ODIN3_AST_F_FUNCTION_DECL_SIGNED = 1U << 1,
-    ODIN3_AST_F_FUNCTION_DECL_DT_SHIFT = 2,
-    ODIN3_AST_F_FUNCTION_DECL_DT_MASK = 0x7U << 2,
-
-    ODIN3_AST_F_TASK_DECL_AUTOMATIC = 1U << 0,
-
-    ODIN3_AST_F_ATTR_METACOMMENT = 1U << 0,
-
-    ODIN3_AST_F_TASK_CALL_SYSTEM = 1U << 0,
-    ODIN3_AST_F_TASK_CALL_HIER = 1U << 1,
-
-    ODIN3_AST_F_CASE_ITEM_DEFAULT = 1U << 0,
-
-    ODIN3_AST_F_EVENT_CONTROL_STAR = 1U << 0,
-    ODIN3_AST_F_EVENT_CONTROL_NO_PARENS = 1U << 1,
-
-    ODIN3_AST_F_EVENT_EXPR_AFTER_OR = 1U << 0,
-
-    ODIN3_AST_F_NUMBER_SIGNED = 1U << 0,
-
-    ODIN3_AST_F_CALL_SYSTEM = 1U << 0,
-    ODIN3_AST_F_CALL_HIER = 1U << 1,
-};
-
-/* The defined-flag mask of each kind with flags (the F column); check rejects other bits. */
-enum {
-    ODIN3_AST_FM_MODULE = ODIN3_AST_F_MODULE_MACROMODULE,
-    ODIN3_AST_FM_PORT_REF = ODIN3_AST_F_PORT_REF_DOTTED,
-    ODIN3_AST_FM_PORT_DECL = ODIN3_AST_F_PORT_DECL_SIGNED | ODIN3_AST_F_PORT_DECL_IN_HEADER |
-                             ODIN3_AST_F_PORT_DECL_DT_MASK | ODIN3_AST_F_PORT_DECL_NET_MASK,
-    ODIN3_AST_FM_NET_DECL =
-        ODIN3_AST_F_NET_DECL_SIGNED | ODIN3_AST_F_NET_DECL_VECTORED | ODIN3_AST_F_NET_DECL_SCALARED,
-    ODIN3_AST_FM_VAR_DECL = ODIN3_AST_F_VAR_DECL_SIGNED,
-    ODIN3_AST_FM_PARAM_DECL = ODIN3_AST_F_PARAM_DECL_SIGNED | ODIN3_AST_F_PARAM_DECL_IN_HEADER |
-                              ODIN3_AST_F_PARAM_DECL_DT_MASK,
-    ODIN3_AST_FM_STRENGTH = ODIN3_AST_F_STRENGTH_S0_MASK | ODIN3_AST_F_STRENGTH_S1_MASK,
-    ODIN3_AST_FM_FUNCTION_DECL = ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC |
-                                 ODIN3_AST_F_FUNCTION_DECL_SIGNED |
-                                 ODIN3_AST_F_FUNCTION_DECL_DT_MASK,
-    ODIN3_AST_FM_TASK_DECL = ODIN3_AST_F_TASK_DECL_AUTOMATIC,
-    ODIN3_AST_FM_ATTR = ODIN3_AST_F_ATTR_METACOMMENT,
-    ODIN3_AST_FM_TASK_CALL = ODIN3_AST_F_TASK_CALL_SYSTEM | ODIN3_AST_F_TASK_CALL_HIER,
-    ODIN3_AST_FM_CASE_ITEM = ODIN3_AST_F_CASE_ITEM_DEFAULT,
-    ODIN3_AST_FM_EVENT_CONTROL =
-        ODIN3_AST_F_EVENT_CONTROL_STAR | ODIN3_AST_F_EVENT_CONTROL_NO_PARENS,
-    ODIN3_AST_FM_EVENT_EXPR = ODIN3_AST_F_EVENT_EXPR_AFTER_OR,
-    ODIN3_AST_FM_NUMBER = ODIN3_AST_F_NUMBER_SIGNED,
-    ODIN3_AST_FM_CALL = ODIN3_AST_F_CALL_SYSTEM | ODIN3_AST_F_CALL_HIER,
-};
-
-/* Values of the DT field (PORT_DECL, PARAM_DECL, FUNCTION_DECL). */
-typedef enum odin3_ast_dt {
-    ODIN3_AST_DT_NONE = 0,
-    ODIN3_AST_DT_REG,
-    ODIN3_AST_DT_INTEGER,
-    ODIN3_AST_DT_REAL,
-    ODIN3_AST_DT_REALTIME,
-    ODIN3_AST_DT_TIME
-} odin3_ast_dt;
-
-/* Values of STRENGTH's S0/S1 fields: drive strengths (sub DRIVE), charge (sub CHARGE, in S0). */
-typedef enum odin3_ast_drive_value {
-    ODIN3_AST_DRIVE_NONE = 0,
-    ODIN3_AST_DRIVE_HIGHZ,
-    ODIN3_AST_DRIVE_WEAK,
-    ODIN3_AST_DRIVE_PULL,
-    ODIN3_AST_DRIVE_STRONG,
-    ODIN3_AST_DRIVE_SUPPLY
-} odin3_ast_drive_value;
-typedef enum odin3_ast_charge_value {
-    ODIN3_AST_CHARGE_NONE = 0,
-    ODIN3_AST_CHARGE_SMALL,
-    ODIN3_AST_CHARGE_MEDIUM,
-    ODIN3_AST_CHARGE_LARGE
-} odin3_ast_charge_value;
-
-/* --- caps (spec §10); each a located ODIN3_ERR_PARSE except the ID-space ones ---------------- */
-
-#define ODIN3_AST_MAX_DEPTH UINT32_C(32768)            /* node height, builder-enforced */
-#define ODIN3_AST_MAX_NUMBER_BITS (UINT32_C(1) << 20)  /* = ODIN3_READER_MAX_WIDTH */
-#define ODIN3_AST_MAX_DECIMAL_DIGITS UINT32_C(4096)    /* digits of a decimal literal */
-#define ODIN3_AST_MAX_STRING_BYTES (UINT32_C(1) << 17) /* lexer-checked */
-#define ODIN3_AST_MAX_IDENT_BYTES UINT32_C(4096)       /* lexer-checked */
-#define ODIN3_AST_MAX_TEXT_BYTES (UINT32_C(1) << 20)   /* an opaque TEXT payload */
-#define ODIN3_AST_MAX_CHILDREN (UINT32_C(1) << 24)     /* children of one node */
-#define ODIN3_AST_MAX_NODES (UINT32_MAX - 1)           /* nodes; then NO_MEMORY */
-#define ODIN3_AST_MAX_CHILD_TABLE (UINT32_MAX - 1)     /* child-table entries; then NO_MEMORY */
+/* ID-space bounds (the parse caps are in odin3.h): past these, NO_MEMORY. */
+#define ODIN3_AST_MAX_NODES (UINT32_MAX - 1)       /* nodes */
+#define ODIN3_AST_MAX_CHILD_TABLE (UINT32_MAX - 1) /* child-table entries */
 
 /* --- the generated slot table ------------------------------------------------------------- */
 

@@ -164,6 +164,13 @@ static odin3_status run_checked(odin3_pass_ctx *ctx, const odin3_pass_def *def, 
     return st != ODIN3_OK ? st : post;
 }
 
+/* AST-16: a pass that wants the AST keeps elaborated stores from the reads that follow. */
+static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
+    if (def->wants_ast && odin3_design_keep_ast(design) < ODIN3_KEEP_AST_ELABORATED) {
+        (void)odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ELABORATED);
+    }
+}
+
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
     double start = now_ms();
     odin3_pass_ctx ctx = {0};
@@ -204,6 +211,7 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
         odin3_log(ODIN3_LOG_ERROR, "pass %s: unterminated quote in the arguments", name);
         return ODIN3_ERR_INVALID_ARG;
     }
+    raise_keep(design, def);
     return run_def(design, def, args);
 }
 
@@ -354,6 +362,9 @@ static odin3_status find_passes(odin3_vec *cmds, const odin3_script_src *src) {
 
 static odin3_status run_cmds(odin3_design *design, const odin3_vec *cmds,
                              const odin3_script_src *src) {
+    for (size_t i = 0; i < cmds->len; i++) { /* every keep level is raised before any pass runs */
+        raise_keep(design, ((const script_cmd *)odin3_vec_cat(cmds, i))->def);
+    }
     for (size_t i = 0; i < cmds->len; i++) {
         const script_cmd *cmd = odin3_vec_cat(cmds, i);
         odin3_status st = run_def(design, cmd->def, cmd->args);

@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "util/alloc.h"
 #include "util/arena.h"
+#include "util/attr.h"
 #include "util/log.h"
 #include "util/pagevec.h"
 #include "util/str.h"
@@ -20,7 +21,7 @@
 #include <stdint.h>
 #include <string.h>
 
-_Static_assert(ODIN3_AST_MAX_NUMBER_BITS == ODIN3_READER_MAX_WIDTH,
+_Static_assert((uint32_t)ODIN3_AST_MAX_NUMBER_BITS == (uint32_t)ODIN3_READER_MAX_WIDTH,
                "a literal is capped at the readers' width cap (PHASE2 #5)");
 _Static_assert(ODIN3_AST_MAX_DEPTH <= UINT16_MAX, "heights are uint16_t");
 _Static_assert(sizeof(odin3_ast_node) == ODIN3_AST_NODE_BYTES,
@@ -235,14 +236,14 @@ static uint32_t height_of(const odin3_ast *ast, odin3_ast_span kids) {
 static odin3_status check_caps(odin3_ast *ast, const odin3_ast_spec *spec, odin3_ast_span kids,
                                uint32_t *height) {
     if (kids.n > ast->max_children) {
-        odin3_diag(ast->design, ODIN3_LOG_ERROR, spec->loc, "more than %" PRIu32 " children",
-                   ast->max_children);
+        odin3_diag(ast->design, ODIN3_LOG_ERROR, (odin3_loc){spec->loc},
+                   "more than %" PRIu32 " children", ast->max_children);
         return ODIN3_ERR_PARSE;
     }
     *height = height_of(ast, kids);
     if (*height > ast->max_depth) {
-        odin3_diag(ast->design, ODIN3_LOG_ERROR, spec->loc, "nesting deeper than %" PRIu32,
-                   ast->max_depth);
+        odin3_diag(ast->design, ODIN3_LOG_ERROR, (odin3_loc){spec->loc},
+                   "nesting deeper than %" PRIu32, ast->max_depth);
         return ODIN3_ERR_PARSE;
     }
     if (node_end(ast) - 1 >= ast->max_nodes ||
@@ -270,8 +271,8 @@ static odin3_ast_id append_node(odin3_ast *ast, const odin3_ast_spec *spec, odin
                                 uint32_t height) {
     size_t index = 0;
     odin3_ast_node *node = odin3_pagevec_push(ast->nodes, &index);
-    *node = (odin3_ast_node){spec->kind,  spec->sub,  spec->flags, spec->loc.v,
-                             spec->end.v, spec->name, 0,           kids.n};
+    *node = (odin3_ast_node){spec->kind, spec->sub,  spec->flags, spec->loc,
+                             spec->end,  spec->name, 0,           kids.n};
     if (spec->payload != 0) {
         node->child = spec->payload;
     } else if (kids.n > 0) {
@@ -451,7 +452,7 @@ static void vec_trim(odin3_vec *vec) {
     }
 }
 
-odin3_status odin3_ast_finish(odin3_ast *ast) {
+ODIN3_EXPORT odin3_status odin3_ast_finish(odin3_ast *ast) {
     const char *why = check_open(ast);
     if (why != NULL) {
         return misuse("odin3_ast_finish", why);

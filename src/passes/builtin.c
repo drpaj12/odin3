@@ -1,5 +1,11 @@
-/* builtin.c — the pass table and the BLIF, techlib, check, compact, stats, hierarchy passes. */
+/*
+ * builtin.c — the pass table and the BLIF, techlib, check, compact, stats, hierarchy and
+ * write_verilog_ast passes.
+ */
 #include "passes/builtin.h"
+#include "ast/ast.h"
+#include "ast/print.h"
+#include "ast/srcman.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -12,6 +18,7 @@
 #include "passes/manager.h"
 #include "techlib/reader.h"
 #include "util/alloc.h"
+#include "util/file.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -20,6 +27,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -407,32 +415,128 @@ static odin3_status read_techlib_run(odin3_pass_ctx *ctx, odin3_design *design, 
     return st;
 }
 
+/* --- write_verilog_ast ---------------------------------------------------------------------- */
+
+/* The latest read run with a held AST store (the highest run ID), 0 when none is held. */
+static uint32_t latest_ast_run(const odin3_design *design) {
+    uint32_t latest = 0;
+    for (uint32_t i = 0; i < odin3_design_ast_count(design); i++) {
+        uint32_t run = odin3_ast_run(odin3_design_ast_at(design, i)).v;
+        latest = run > latest ? run : latest;
+    }
+    return latest;
+}
+
+/*
+ * Appends every UNIT of ast as Verilog after a comment naming its run and form, each UNIT after a
+ * comment naming it and where its file is (the resolved path, through the source manager).
+ */
+static odin3_status print_store(const odin3_srcman *sm, const odin3_ast *ast, odin3_strbuf *out) {
+    const char *form = odin3_ast_form_of(ast) == ODIN3_AST_FORM_PARSED ? "parsed" : "elaborated";
+    odin3_status st = odin3_strbuf_appendf(out, "// odin3 write_verilog_ast: run %u, %s AST\n",
+                                           odin3_ast_run(ast).v, form);
+    for (uint32_t i = 0; st == ODIN3_OK && i < odin3_ast_root_count(ast); i++) {
+        odin3_ast_id unit = odin3_ast_root(ast, i);
+        st = odin3_strbuf_appendf(out, "// unit %s at ", odin3_ast_name_str(ast, unit));
+        if (st == ODIN3_OK) {
+            st = odin3_srcman_format(sm, odin3_ast_loc(ast, unit), out, ODIN3_SRCFMT_RESOLVED);
+        }
+        if (st == ODIN3_OK) {
+            st = odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
+        }
+        if (st == ODIN3_OK) {
+            st = odin3_ast_print(ast, unit, out);
+        }
+    }
+    return st;
+}
+
+/* The held stores of the latest run (parsed first) as Verilog, in out. */
+static odin3_status print_latest(odin3_design *design, odin3_strbuf *out) {
+    odin3_passrun_id run = {latest_ast_run(design)};
+    if (run.v == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_verilog_ast: the design holds no AST (a read keeps one "
+                                   "with --keep-ast, or when a script names this pass)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_srcman *sm = NULL;
+    odin3_status st = odin3_design_get_srcman(design, &sm);
+    static const odin3_ast_form k_forms[] = {ODIN3_AST_FORM_PARSED, ODIN3_AST_FORM_ELABORATED};
+    for (size_t i = 0; st == ODIN3_OK && i < sizeof k_forms / sizeof k_forms[0]; i++) {
+        odin3_ast *ast = NULL;
+        st = odin3_design_find_ast(design, run, k_forms[i], &ast);
+        if (st == ODIN3_OK && ast != NULL) {
+            st = print_store(sm, ast, out);
+        }
+    }
+    return st;
+}
+
+/* Writes text to path atomically (the destination keeps its old contents on failure). */
+static odin3_status write_text(const char *path, const odin3_strbuf *text) {
+    odin3_atomic_file file;
+    odin3_status st = odin3_atomic_file_open(&file, path);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (text->len > 0 && fwrite(text->data, 1, text->len, file.fp) != text->len) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: write failed", path);
+        st = ODIN3_ERR_IO;
+    }
+    return odin3_atomic_file_close(&file, st);
+}
+
+static odin3_status write_verilog_ast_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                          odin3_bytes args, void *user) {
+    (void)ctx;
+    (void)user;
+    odin3_strbuf path;
+    odin3_strbuf text;
+    odin3_strbuf_init(&path);
+    odin3_strbuf_init(&text);
+    odin3_status st = one_path("write_verilog_ast", args, &path);
+    if (st == ODIN3_OK) {
+        st = print_latest(design, &text);
+    }
+    if (st == ODIN3_OK) {
+        st = write_text(path.data, &text);
+    }
+    odin3_strbuf_free(&text);
+    odin3_strbuf_free(&path);
+    return st;
+}
+
 /* --- the table ------------------------------------------------------------------------------- */
 
 static const odin3_pass_def READ_BLIF = {
     "read_blif", "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
-    read_blif_run, NULL};
+    read_blif_run, NULL, false};
 static const odin3_pass_def READ_TECHLIB = {
     "read_techlib",
     "read_techlib <file>: read a tech library (.o3lib); its cells become cell types of the design",
-    read_techlib_run, NULL};
+    read_techlib_run, NULL, false};
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif", "write_blif <file>: write the design as BLIF (the top module first)",
-    write_blif_run, NULL};
+    write_blif_run, NULL, false};
 static const odin3_pass_def CHECK = {
-    "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run, NULL};
+    "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run, NULL, false};
 static const odin3_pass_def COMPACT = {
     "compact",
     "compact: renumber each module densely, freeing dead objects (IR-6; atomic per module only)",
-    compact_run, NULL};
+    compact_run, NULL, false};
 static const odin3_pass_def STATS = {
     "stats", "stats: log modules, top, and per module ports/nodes/nets/wires and cell types",
-    stats_run, NULL};
+    stats_run, NULL, false};
 static const odin3_pass_def HIERARCHY = {
     "hierarchy",
     "hierarchy [--top <name>] [-auto]: set the top module (named, or the one no module "
     "instantiates)",
-    hierarchy_run, NULL};
+    hierarchy_run, NULL, false};
+static const odin3_pass_def WRITE_VERILOG_AST = {
+    "write_verilog_ast",
+    "write_verilog_ast <file>: print the ASTs the latest read kept (parsed, then elaborated) as "
+    "Verilog",
+    write_verilog_ast_run, NULL, true};
 
 /* Registry order. */
 const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
@@ -445,6 +549,7 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &COMPACT,
                                                       &STATS,
                                                       &odin3_pass_sim,
-                                                      &HIERARCHY};
+                                                      &HIERARCHY,
+                                                      &WRITE_VERILOG_AST};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

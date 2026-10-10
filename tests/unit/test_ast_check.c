@@ -306,7 +306,7 @@ static parsed build_parsed(void) {
     odin3_ast_id kids[2 + sizeof items / sizeof items[0]] = {params, ports};
     memcpy(kids + 2, items, sizeof items);
     odin3_ast_spec mod = {
-        .kind = ODIN3_AST_MODULE, .loc = at, .end = {at.v + FILE_BYTES}, .name = intern("m")};
+        .kind = ODIN3_AST_MODULE, .loc = at.v, .end = at.v + FILE_BYTES, .name = intern("m")};
     out.module = make(mod, kids, sizeof kids / sizeof kids[0]);
     (void)ident("abandoned"); /* a syntax error's leftover: counted, not an error */
     out.unit = unit_of(out.module);
@@ -529,7 +529,7 @@ static void test_rule1_undecodable_loc(void) {
 static void test_rule1_loc_after_end(void) {
     odin3_loc at = file_loc();
     odin3_ast_spec spec = {
-        .kind = ODIN3_AST_IDENT, .loc = {at.v + 1}, .end = {at.v + 5}, .name = intern("v")};
+        .kind = ODIN3_AST_IDENT, .loc = at.v + 1, .end = at.v + 5, .name = intern("v")};
     odin3_ast_id leaf = make(spec, NULL, 0);
     assert_ok(ODIN3_CHECK_FULL);
     corrupt(ODIN3_AST_TEST_LOC_ORDER, leaf.v, 0);

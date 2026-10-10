@@ -80,7 +80,7 @@ static odin3_loc at(uint32_t line, uint32_t col) {
 }
 
 static odin3_ast_spec spec_at(odin3_ast_kind kind, odin3_loc loc) {
-    return (odin3_ast_spec){.kind = (uint8_t)kind, .loc = loc};
+    return (odin3_ast_spec){.kind = (uint8_t)kind, .loc = loc.v};
 }
 
 static odin3_ast_spec named_at(odin3_ast_kind kind, const char *name, odin3_loc loc) {
@@ -108,7 +108,8 @@ static odin3_ast_id three(void) {
     odin3_number_text pieces = {{NULL, 0}, {NULL, 0}, odin3_bytes_cstr("3")};
     odin3_ast_spec spec = spec_at(ODIN3_AST_NUMBER, (odin3_loc){0});
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_kind(pieces, &spec.sub, &spec.flags));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_parse(ast, spec.loc, pieces, &spec.payload));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_ast_number_parse(ast, (odin3_loc){spec.loc}, pieces, &spec.payload));
     return mk(spec, NULL, 0);
 }
 

@@ -245,8 +245,8 @@ static void range_of(bench *b, const odin3_ast_id *kids, uint32_t n, odin3_ast_s
         hi = lo + b->step;
         b->leaves++;
     }
-    spec->loc = (odin3_loc){lo};
-    spec->end = (odin3_loc){hi};
+    spec->loc = lo;
+    spec->end = hi;
 }
 
 static int emit(bench *b, nspec ns, const odin3_ast_id *kids, uint32_t n, odin3_ast_id *out) {

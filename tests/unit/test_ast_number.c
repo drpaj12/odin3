@@ -85,7 +85,7 @@ static odin3_number_text text3(const char *size, const char *base, const char *d
 
 /* A NUMBER node for the pieces, with the sub-kind and flags number_kind gives. */
 static odin3_ast_id number_node(odin3_number_text pieces) {
-    odin3_ast_spec spec = {.kind = ODIN3_AST_NUMBER, .loc = at};
+    odin3_ast_spec spec = {.kind = ODIN3_AST_NUMBER, .loc = at.v};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_kind(pieces, &spec.sub, &spec.flags));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_parse(ast, at, pieces, &spec.payload));
     odin3_ast_id id = {0};
@@ -461,7 +461,7 @@ static void test_sealed(void) {
 static void test_number_new(void) {
     uint8_t bits[4] = {ODIN3_BIT_Z, ODIN3_BIT_0, ODIN3_BIT_Z, ODIN3_BIT_1};
     odin3_ast_number num = {4, 4, bits, true, true, true};
-    odin3_ast_spec spec = {.kind = ODIN3_AST_NUMBER, .sub = ODIN3_AST_NUMBER_BIN, .loc = at};
+    odin3_ast_spec spec = {.kind = ODIN3_AST_NUMBER, .sub = ODIN3_AST_NUMBER_BIN, .loc = at.v};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_new(ast, at, &num, &spec.payload));
     bits[0] = ODIN3_BIT_1; /* copied, not aliased */
     odin3_ast_id node = {0};

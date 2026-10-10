@@ -195,13 +195,14 @@ static odin3_status write_dot_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 }
 
 const odin3_pass_def odin3_pass_write_json = {
-    "write_json", "write_json <file>: write the design as Yosys-schema JSON", write_json_run, NULL};
+    "write_json", "write_json <file>: write the design as Yosys-schema JSON", write_json_run, NULL,
+    false};
 const odin3_pass_def odin3_pass_write_verilog = {
     "write_verilog",
     "write_verilog <file> [--name-style short|provenance]: write structural Verilog",
-    write_verilog_run, NULL};
+    write_verilog_run, NULL, false};
 const odin3_pass_def odin3_pass_write_dot = {
     "write_dot",
     "write_dot <file> [--focus <path>|<file:line>|cone(<net>)] [--max-nodes N]: write Graphviz "
     "dot",
-    write_dot_run, NULL};
+    write_dot_run, NULL, false};

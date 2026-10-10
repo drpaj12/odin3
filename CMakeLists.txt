@@ -40,6 +40,8 @@ add_library(odin3_core OBJECT
     src/api/pass.c
     src/api/celltype.c
     src/api/prov.c
+    src/api/ast_abi.c
+    src/api/srcman_abi.c
     src/api/module.c
     src/api/node.c
     src/api/net.c
@@ -241,6 +243,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ast_srcman)
+    odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
     odin3_add_unit_test(test_ast_read)
     odin3_add_unit_test(test_ast_number)
@@ -307,6 +310,11 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    # The AST and source-manager ABI (v4) built and read like an adapter would: libodin3.so only.
+    add_executable(test_ast_abi tests/unit/test_ast_abi.c)
+    target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
+    add_test(NAME test_ast_abi COMMAND test_ast_abi)
+    set_tests_properties(test_ast_abi PROPERTIES LABELS unit)
     # A plugin whose init registers, then fails (it must stay loaded: test_abi_ext).
     add_library(plugin_bad_init MODULE tests/unit/plugin_bad_init.c)
     set_target_properties(plugin_bad_init PROPERTIES PREFIX "")
@@ -392,13 +400,13 @@ if(BUILD_TESTING)
 
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 3\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage techlib plugin writers sim)
+                           help_runs_nothing check_flag usage techlib plugin writers sim keep_ast)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -493,5 +501,12 @@ if(BUILD_TESTING)
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_walk
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_walk PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # 2A: the AST helpers (Design.ast, Ast, AstNode) walk a module built through the ABI.
+    add_test(NAME python_ast
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_ast
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
 endif()

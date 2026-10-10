@@ -23,6 +23,7 @@ odin3_srcman *odin3_srcman_create(odin3_strtab *strtab) {
     sm->strtab = strtab;
     odin3_vec_init(&sm->bufs, sizeof(odin3_srcbuf_rec));
     odin3_vec_init(&sm->files, sizeof(odin3_srcfile_rec));
+    odin3_strbuf_init(&sm->abi_text);
     sm->next = 1;
     sm->max_buffers = ODIN3_SRC_MAX_BUFFERS;
     sm->space_end = UINT32_MAX;
@@ -44,6 +45,7 @@ void odin3_srcman_destroy(odin3_srcman *sm) {
     }
     odin3_vec_free(&sm->bufs);
     odin3_vec_free(&sm->files);
+    odin3_strbuf_free(&sm->abi_text);
     odin3_util_free(sm);
 }
 
@@ -52,7 +54,7 @@ static size_t vec_bytes(const odin3_vec *vec) {
 }
 
 size_t odin3_srcman_bytes_reserved(const odin3_srcman *sm) {
-    size_t bytes = sizeof *sm + vec_bytes(&sm->bufs) + vec_bytes(&sm->files);
+    size_t bytes = sizeof *sm + vec_bytes(&sm->bufs) + vec_bytes(&sm->files) + sm->abi_text.cap;
     for (size_t i = 0; i < sm->files.len; i++) {
         const odin3_srcfile_rec *file = odin3_vec_cat(&sm->files, i);
         bytes += vec_bytes(&file->lines) + vec_bytes(&file->segs);

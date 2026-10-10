@@ -44,8 +44,12 @@ static void visit_leaf(void *user, odin3_prov_id leaf) {
     const odin3_prov_record *rec = odin3_prov_get(walk->design, leaf);
     for (uint32_t i = 0; rec != NULL && i < rec->n_locs; i++) {
         const odin3_srcloc *loc = &rec->locs[i];
-        odin3_source src = {odin3_api_str(walk->design, loc->file), loc->line, loc->col,
-                            loc->end_line, loc->end_col};
+        odin3_source src = {odin3_api_str(walk->design, loc->file),
+                            loc->line,
+                            loc->col,
+                            loc->end_line,
+                            loc->end_col,
+                            loc->loc};
         walk->visit(&src, walk->user);
     }
 }

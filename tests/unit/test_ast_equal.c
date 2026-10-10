@@ -101,7 +101,7 @@ static uint32_t intern(const builder *bd, const char *str) {
 
 static odin3_ast_spec spec(const builder *bd, odin3_ast_kind kind, const char *name) {
     return (odin3_ast_spec){
-        .kind = (uint8_t)kind, .loc = bd->loc, .name = name != NULL ? intern(bd, name) : 0};
+        .kind = (uint8_t)kind, .loc = bd->loc.v, .name = name != NULL ? intern(bd, name) : 0};
 }
 
 static odin3_ast_id mk(const builder *bd, odin3_ast_spec sp, const odin3_ast_id *ids, uint32_t n) {

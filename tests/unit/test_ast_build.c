@@ -719,7 +719,7 @@ static void test_payload_push_sealed_and_marked_prefix(void) {
 static void test_accessors(void) {
     odin3_loc at = file_loc();
     odin3_ast_spec yspec = {
-        .kind = ODIN3_AST_IDENT, .loc = at, .end = {at.v + 1}, .name = intern("y")};
+        .kind = ODIN3_AST_IDENT, .loc = at.v, .end = at.v + 1, .name = intern("y")};
     odin3_ast_id lhs = make(yspec, NULL, 0);
     odin3_ast_id rhs = ident("z");
     odin3_ast_id kids[2] = {lhs, rhs};
@@ -814,7 +814,7 @@ static void test_units_are_roots(void) {
 
 static void test_depth_cap(void) {
     odin3_loc at = file_loc();
-    odin3_ast_spec unary = {.kind = ODIN3_AST_UNARY, .sub = ODIN3_AST_UNARY_MINUS, .loc = at};
+    odin3_ast_spec unary = {.kind = ODIN3_AST_UNARY, .sub = ODIN3_AST_UNARY_MINUS, .loc = at.v};
     odin3_ast_id top = ident("x");
     for (uint32_t height = 2; height <= ODIN3_AST_MAX_DEPTH; height++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &unary, &top, 1, &top));
@@ -850,7 +850,7 @@ static void test_children_cap(void) {
     for (uint32_t i = 0; i <= HOOK_CHILDREN; i++) {
         kids[i] = ident("k");
     }
-    odin3_ast_spec concat = {.kind = ODIN3_AST_CONCAT, .loc = at};
+    odin3_ast_spec concat = {.kind = ODIN3_AST_CONCAT, .loc = at.v};
     make(concat, kids, HOOK_CHILDREN);
     assert_rejected(ODIN3_ERR_PARSE, concat, kids, HOOK_CHILDREN + 1);
     TEST_ASSERT_EQUAL_STRING("f.v:1:1: error: more than 6 children", captured);
@@ -1058,7 +1058,7 @@ static odin3_ast *new_store(odin3_ast_form form, uint32_t run) {
 static odin3_ast *held(odin3_ast_form form, uint32_t run) {
     odin3_ast *found = (odin3_ast *)&found; /* poisoned: get must overwrite it */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_design_get_ast(design, (odin3_passrun_id){run}, form, &found));
+                          odin3_design_find_ast(design, (odin3_passrun_id){run}, form, &found));
     return found;
 }
 
@@ -1090,9 +1090,10 @@ static void test_design_list_misuse(void) {
     odin3_ast *found = NULL;
     TEST_ASSERT_EQUAL_INT(
         ODIN3_ERR_INVALID_ARG,
-        odin3_design_get_ast(NULL, (odin3_passrun_id){5}, ODIN3_AST_FORM_PARSED, &found));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_ast(design, (odin3_passrun_id){5},
-                                                                      ODIN3_AST_FORM_PARSED, NULL));
+        odin3_design_find_ast(NULL, (odin3_passrun_id){5}, ODIN3_AST_FORM_PARSED, &found));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        odin3_design_find_ast(design, (odin3_passrun_id){5}, ODIN3_AST_FORM_PARSED, NULL));
     odin3_design *other = odin3_design_create();
     odin3_ast *foreign = NULL;
     TEST_ASSERT_EQUAL_INT(

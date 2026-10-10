@@ -40,17 +40,7 @@ enum { ODIN3_AST_NODE_BYTES = 24 };
 
 /* odin3_ast (the store) is declared in ir/design.h; its fields are in ast_internal.h. */
 
-/* The record's scalar fields for a builder call; payload is a payload ID (0 = none). */
-typedef struct odin3_ast_spec {
-    uint8_t kind;
-    uint8_t sub;
-    uint16_t flags;
-    odin3_loc loc;
-    odin3_loc end;
-    uint32_t name;
-    uint32_t payload;
-    uint32_t reserved[2]; /* must be zero */
-} odin3_ast_spec;
+/* odin3_ast_spec (a builder call's scalar fields) is public: odin3.h. */
 
 /* A read-only view of IDs; valid until the next builder call on the store. */
 typedef struct odin3_ast_span {
@@ -82,28 +72,8 @@ typedef struct odin3_number_text {
     odin3_bytes digits;
 } odin3_number_text;
 
-/* Comment kinds and flags (§7). */
-typedef enum odin3_ast_comment_kind {
-    ODIN3_AST_COMMENT_LINE = 1, /* // … */
-    ODIN3_AST_COMMENT_BLOCK     /* slash-star … star-slash */
-} odin3_ast_comment_kind;
-
-enum { ODIN3_AST_COMMENT_METACOMMENT = 1U << 0 /* a synopsys/synthesis directive */ };
-
-/*
- * A comment to record: loc/end (raw locs; loc in a FILE buffer, end 0 or in the same buffer and
- * not before loc), kind (odin3_ast_comment_kind), flags (ODIN3_AST_COMMENT_*), the text bytes
- * (copied into the AST arena). reserved must be zero.
+/* The comment kinds, ODIN3_AST_COMMENT_METACOMMENT and odin3_ast_comment_spec are public: odin3.h.
  */
-typedef struct odin3_ast_comment_spec {
-    uint32_t loc;
-    uint32_t end;
-    uint32_t kind;
-    uint32_t flags;
-    const char *text_ptr;
-    uint32_t text_len;
-    uint32_t reserved[2];
-} odin3_ast_comment_spec;
 
 /* A recorded comment; text is NUL-terminated and owned by the store. */
 typedef struct odin3_ast_comment {
@@ -226,11 +196,11 @@ odin3_status odin3_ast_attach(odin3_ast *ast, odin3_ast_id node, const odin3_ast
 odin3_status odin3_ast_comment_add(odin3_ast *ast, const odin3_ast_comment_spec *spec);
 
 /*
- * Seals the store: sorts the comment table by loc (stable for equal records), frees the build
- * scratch (pending stack, heights); a later builder call is INVALID_ARG. INVALID_ARG (logged)
- * for NULL or a store already sealed. The read API works before and after.
+ * odin3_ast_finish (public, odin3.h) seals the store: sorts the comment table by loc (stable for
+ * equal records), frees the build scratch (pending stack, heights); a later builder call is
+ * INVALID_ARG. INVALID_ARG (logged) for NULL or a store already sealed. The read API works before
+ * and after.
  */
-odin3_status odin3_ast_finish(odin3_ast *ast);
 
 /* --- reading (§6): values, never faulting; NONE / 0 / empty for an out-of-range ID ---------- */
 

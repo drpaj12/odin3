@@ -36,47 +36,8 @@ typedef struct odin3_range {
     odin3_loc end;
 } odin3_range;
 
-/* Source limits (spec §3.5); exceeding one is a located ODIN3_ERR_PARSE. */
-#define ODIN3_SRC_MAX_FILE_BYTES (UINT32_C(1) << 28)
-#define ODIN3_SRC_MAX_BUFFERS (UINT32_C(1) << 24)
-
-typedef enum odin3_srcbuf_kind {
-    ODIN3_SRCBUF_FILE = 1,  /* a file's bytes, or the <command line> buffer */
-    ODIN3_SRCBUF_EXPANSION, /* a macro body as spelled in its definition */
-    ODIN3_SRCBUF_MACRO_ARG, /* one contiguous spelled run of a substituted argument */
-    ODIN3_SRCBUF_SCRATCH    /* pasted or stringified text that exists nowhere */
-} odin3_srcbuf_kind;
-
-/*
- * A FILE buffer (spec §3.1): name = path as given, resolved = absolute path, library (strtab IDs;
- * resolved and library 0 for <command line>); parent = loc of the `include that opened it, 0 for
- * a project file; len = bytes. reserved must be zero.
- */
-typedef struct odin3_srcfile_spec {
-    uint32_t name;
-    uint32_t resolved;
-    uint32_t library;
-    uint32_t parent;
-    uint32_t len;
-    uint32_t reserved[2];
-} odin3_srcfile_spec;
-
-/*
- * An EXPANSION, MACRO_ARG or SCRATCH buffer (spec §3.1 table): kind; name = macro name (strtab;
- * 0 for SCRATCH); parent = the use site (EXPANSION), the formal inside the body (MACRO_ARG) or
- * the operator inside the body (SCRATCH); parent_end = one past it (0 = unknown); def = loc of
- * the first byte as spelled (0 for SCRATCH; offset k <-> def + k, within def's buffer);
- * len = bytes. reserved must be zero.
- */
-typedef struct odin3_expansion_spec {
-    uint32_t kind;
-    uint32_t name;
-    uint32_t parent;
-    uint32_t parent_end;
-    uint32_t def;
-    uint32_t len;
-    uint32_t reserved[2];
-} odin3_expansion_spec;
+/* The limits ODIN3_SRC_MAX_FILE_BYTES and ODIN3_SRC_MAX_BUFFERS, the buffer kinds and the
+ * build specs (odin3_srcfile_spec, odin3_expansion_spec, odin3_segment) are public: odin3.h. */
 
 /* A buffer as stored; resolved, library and lines are 0 except for a FILE. */
 typedef struct odin3_srcbuf_info {
@@ -91,26 +52,6 @@ typedef struct odin3_srcbuf_info {
     uint32_t len;
     uint32_t lines; /* line count (1 + line starts added) */
 } odin3_srcbuf_info;
-
-/*
- * One segment of a stream's map (spec §3.3): output byte out_offset onward is spelled at loc
- * onward until the next segment (loc 0: inserted bytes). stream = the srcbuf ID of the stream's
- * project FILE buffer. reserved must be zero.
- */
-typedef struct odin3_segment {
-    uint32_t stream;
-    uint32_t out_offset;
-    uint32_t loc;
-    uint32_t reserved[2];
-} odin3_segment;
-
-/* A decoded FILE location: buffer ID, 1-based line and column in bytes (Clang's rule). */
-typedef struct odin3_srcpos {
-    uint32_t buffer;
-    uint32_t line;
-    uint32_t col;
-    uint32_t reserved[2];
-} odin3_srcpos;
 
 typedef enum odin3_srcfmt {
     ODIN3_SRCFMT_GIVEN,   /* the path as given */
@@ -132,7 +73,7 @@ typedef struct odin3_srcchain_entry {
 
 typedef void (*odin3_srcchain_visit)(void *user, const odin3_srcchain_entry *entry);
 
-typedef struct odin3_srcman odin3_srcman; /* fields: internals section below */
+/* odin3_srcman (opaque in odin3.h): fields in the internals section below. */
 
 /* A monotone segment cursor over one stream; plain data, no cleanup. */
 typedef struct odin3_srcman_cursor {
@@ -307,12 +248,13 @@ typedef struct odin3_srcfile_rec {
 } odin3_srcfile_rec;
 
 struct odin3_srcman {
-    odin3_strtab *strtab; /* borrowed: the design's */
-    odin3_vec bufs;       /* odin3_srcbuf_rec; slot 0 reserved */
-    odin3_vec files;      /* odin3_srcfile_rec; slot 0 reserved */
-    uint64_t next;        /* first free loc */
-    uint32_t max_buffers; /* ODIN3_SRC_MAX_BUFFERS unless a test lowered it */
-    uint32_t space_end;   /* last usable loc */
+    odin3_strtab *strtab;  /* borrowed: the design's */
+    odin3_vec bufs;        /* odin3_srcbuf_rec; slot 0 reserved */
+    odin3_vec files;       /* odin3_srcfile_rec; slot 0 reserved */
+    uint64_t next;         /* first free loc */
+    uint32_t max_buffers;  /* ODIN3_SRC_MAX_BUFFERS unless a test lowered it */
+    uint32_t space_end;    /* last usable loc */
+    odin3_strbuf abi_text; /* odin3_srcman_get_format's text (src/api/srcman_abi.c) */
 };
 
 /* The record of the buffer holding loc, NULL when none. */

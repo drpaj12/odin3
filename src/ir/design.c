@@ -75,14 +75,19 @@ odin3_status odin3_design_set_top(odin3_design *design, odin3_module_id module) 
 odin3_module_id odin3_design_top(const odin3_design *design) {
     return design->top;
 }
-odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **out) {
+
+ODIN3_EXPORT odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **sm) {
+    if (design == NULL || sm == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_design_get_srcman: invalid argument (a NULL pointer)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (design->srcman == NULL) {
         design->srcman = odin3_srcman_create(design->strtab);
         if (design->srcman == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
-    *out = design->srcman;
+    *sm = design->srcman;
     return ODIN3_OK;
 }
 
@@ -121,10 +126,10 @@ odin3_status odin3_design_set_ast(odin3_design *design, odin3_ast *ast) {
     return ODIN3_OK;
 }
 
-odin3_status odin3_design_get_ast(const odin3_design *design, odin3_passrun_id run,
-                                  odin3_ast_form form, odin3_ast **out) {
+odin3_status odin3_design_find_ast(const odin3_design *design, odin3_passrun_id run,
+                                   odin3_ast_form form, odin3_ast **out) {
     if (design == NULL || out == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_design_get_ast: NULL argument");
+        odin3_log(ODIN3_LOG_ERROR, "odin3_design_find_ast: NULL argument");
         return ODIN3_ERR_INVALID_ARG;
     }
     size_t i = find_ast(design, run, form);
@@ -148,8 +153,23 @@ void odin3_design_drop_ast(odin3_design *design, odin3_passrun_id run, odin3_ast
     odin3_vec_pop(&design->asts);
 }
 
-void odin3_design_set_keep_ast(odin3_design *design, odin3_keep_ast level) {
+uint32_t odin3_design_ast_count(const odin3_design *design) {
+    return (uint32_t)design->asts.len;
+}
+
+odin3_ast *odin3_design_ast_at(const odin3_design *design, uint32_t idx) {
+    return idx < design->asts.len ? *(odin3_ast *const *)odin3_vec_cat(&design->asts, idx) : NULL;
+}
+
+ODIN3_EXPORT odin3_status odin3_design_set_keep_ast(odin3_design *design, odin3_keep_ast level) {
+    if (design == NULL || (unsigned)level > (unsigned)ODIN3_KEEP_AST_ALL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_design_set_keep_ast: invalid argument (a NULL design or a level out of "
+                  "range)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     design->keep_ast = level;
+    return ODIN3_OK;
 }
 
 odin3_keep_ast odin3_design_keep_ast(const odin3_design *design) {
