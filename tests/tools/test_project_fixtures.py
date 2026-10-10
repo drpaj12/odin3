@@ -189,6 +189,10 @@ flow f.o3
         self.put("p.o3proj", "available c 4294967296\n")
         self.assertIn("count too large", self.error("o3proj", "p.o3proj").detail)
 
+    def test_depth_is_ascii_digits(self) -> None:
+        self.put("p.o3proj", "split $mem depth \u00b2\n")
+        self.assertEqual(self.error("o3proj", "p.o3proj").kind, "syntax")
+
     def test_libext_names_the_extension(self) -> None:
         self.put("p.o3proj", "libext .foo\n")
         self.assertEqual(self.error("o3proj", "p.o3proj").names, [".foo"])
