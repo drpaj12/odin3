@@ -617,7 +617,7 @@ static void test_golden_multi_driver_rejected(void) {
 static odin3_prov_id located(const char *file, uint32_t line) {
     odin3_pass_ctx ctx = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("reader"), &ctx));
-    odin3_srcloc loc = {intern(file), line, 1, line, 9};
+    odin3_srcloc loc = {intern(file), line, 1, line, 9, 0};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     odin3_prov_id prov = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &origin, &prov));
