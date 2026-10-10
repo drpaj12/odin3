@@ -244,6 +244,10 @@ node in declaration order. Attributes are free-form `name → value` on any obje
 by (object kind, ID). Value kinds: `int` (int64), `bits` (4-state 0/1/x/z, any length),
 `string`, and `cover` (an SOP cover: rows of `0`/`1`/`-` input literals plus an output value,
 kept as written).
+Reading: `odin3_attr_get(module, obj, key)` for one key; `odin3_attr_foreach(module, obj,
+visit, ctx)` visits every attribute of one object in the order its keys were first set
+(overwriting a key keeps its place; compact keeps the order), so writers emit attributes
+deterministically. *(1F Task 4: agent-decided IR API addition, read-only; for Peter's review.)*
 
 **BLIF cells (used by 1C).** `.names` → `$sop` (bit granularity; *N* inputs, 1 output;
 parameter `COVER`; zero inputs allowed). `.latch` → `$_DFF_P_` (`re`) / `$_DFF_N_` (`fe`) with

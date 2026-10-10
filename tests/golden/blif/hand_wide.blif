@@ -1,0 +1,13 @@
+# hand_wide.blif - a cover over 13 inputs (Yosys read_blif -sop), with buffers (1F Task 4).
+.model wide
+.inputs i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 i10 i11 i12
+.outputs y q
+.names i0 i1 i2 i3 i4 i5 i6 i7 i8 i9 i10 i11 i12 n1
+1111111111111 1
+0------------ 1
+.names n1 y
+1 1
+.names i0 i1 q
+1- 1
+-1 1
+.end

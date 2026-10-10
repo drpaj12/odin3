@@ -1024,6 +1024,76 @@ static void test_attr_rejects(void) {
     TEST_ASSERT_NULL(odin3_attr_get(module, (odin3_objref){(odin3_objkind)9, 1}, key));
 }
 
+/* What odin3_attr_foreach reported: keys and int values in call order. */
+typedef struct attr_seen {
+    uint32_t keys[NAME_BUF];
+    int64_t values[NAME_BUF];
+    uint32_t count;
+    uint32_t stop_after; /* return INVALID_ARG from this call on (0: never) */
+} attr_seen;
+
+static odin3_status record_attr(void *ctx, uint32_t key_str, const odin3_value *value) {
+    attr_seen *seen = ctx;
+    TEST_ASSERT_TRUE(seen->count < NAME_BUF);
+    seen->keys[seen->count] = key_str;
+    seen->values[seen->count] = value->i;
+    seen->count++;
+    return seen->stop_after != 0 && seen->count >= seen->stop_after ? ODIN3_ERR_INVALID_ARG
+                                                                    : ODIN3_OK;
+}
+
+static void set_int(odin3_objref ref, const char *key, int64_t num) {
+    odin3_value val = odin3_value_int(num);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, ref, intern(key), &val));
+}
+
+/* Keys come in first-set order; an overwrite keeps the key's place; objects never mix. */
+static void test_attr_foreach_order(void) {
+    odin3_objref node_ref = {ODIN3_OBJ_NODE, node_of("$_AND_").v};
+    odin3_objref net_ref = {ODIN3_OBJ_NET, net_named("n").v};
+    uint32_t zeta = intern("zeta");
+    uint32_t alpha = intern("alpha");
+    uint32_t mid = intern("mid");
+    set_int(node_ref, "zeta", 1);
+    set_int(net_ref, "alpha", 9);
+    set_int(node_ref, "alpha", 2);
+    set_int(node_ref, "mid", 3);
+    set_int(node_ref, "zeta", 4); /* overwrite: stays first */
+    attr_seen seen = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, node_ref, record_attr, &seen));
+    TEST_ASSERT_EQUAL_UINT32(3, seen.count);
+    TEST_ASSERT_EQUAL_UINT32(zeta, seen.keys[0]);
+    TEST_ASSERT_EQUAL_UINT32(alpha, seen.keys[1]);
+    TEST_ASSERT_EQUAL_UINT32(mid, seen.keys[2]);
+    TEST_ASSERT_EQUAL_INT64(4, seen.values[0]);
+    TEST_ASSERT_EQUAL_INT64(2, seen.values[1]);
+    TEST_ASSERT_EQUAL_INT64(3, seen.values[2]);
+    attr_seen on_net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, net_ref, record_attr, &on_net));
+    TEST_ASSERT_EQUAL_UINT32(1, on_net.count);
+    TEST_ASSERT_EQUAL_INT64(9, on_net.values[0]);
+}
+
+/* No attributes, an unknown object: no calls. A failing visit stops the walk with its status. */
+static void test_attr_foreach_empty_stop_and_rejects(void) {
+    odin3_objref net_ref = {ODIN3_OBJ_NET, net_named("n").v};
+    attr_seen seen = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, net_ref, record_attr, &seen));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, (odin3_objref){(odin3_objkind)9, 1},
+                                                       record_attr, &seen));
+    TEST_ASSERT_EQUAL_UINT32(0, seen.count);
+    set_int(net_ref, "a", 1);
+    set_int(net_ref, "b", 2);
+    set_int(net_ref, "c", 3);
+    seen.stop_after = 2;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_attr_foreach(module, net_ref, record_attr, &seen));
+    TEST_ASSERT_EQUAL_UINT32(2, seen.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_foreach(module, net_ref, NULL, &seen));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_attr_foreach(NULL, net_ref, record_attr, &seen));
+}
+
 /* --- out of memory ------------------------------------------------------------------------- */
 
 /* Observable state: store ends, port count, the first SNAP_MAX nets, a name in every map. */
@@ -1414,6 +1484,8 @@ int main(void) {
     RUN_TEST(test_attr_set_get_overwrite);
     RUN_TEST(test_attr_payload_copied);
     RUN_TEST(test_attr_rejects);
+    RUN_TEST(test_attr_foreach_order);
+    RUN_TEST(test_attr_foreach_empty_stop_and_rejects);
     RUN_TEST(test_add_port_oom_sweep);
     RUN_TEST(test_wire_create_oom_sweep);
     RUN_TEST(test_merge_oom_sweep);

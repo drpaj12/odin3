@@ -34,7 +34,11 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 - [x] 1E simulator matches ABC on the goldens without RAMs (2026-10-09): `tools/sim-check`, seeds
   1–3 × 64 cycles, every simulated golden identical to the reference (1626 files, 626 distinct
   contents: ABC 405, Yosys 221); 220 excluded (RAM 206, implicit black box 10, multi-driver 4)
-- [ ] 1F writers emit dot / JSON / Verilog for the goldens
+- [x] 1F writers emit dot / JSON / Verilog for the goldens (2026-10-09): JSON identical through
+  Yosys on 1796/1846, Verilog equivalent 1428 (404 excluded, listed), Icarus parses every
+  finished one, dot accepted or budget-refused on all; not validated at the per-tool caps: 38
+  files in the JSON step and 14 in the equivalence step (timeouts, memory caps, 2 Yosys
+  memory deaths; the large Odin II designs, named below); results below
 
 ## Decisions log
 
@@ -187,6 +191,37 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
     implicit black boxes (#16) still apply only to names nothing registers. The writer refuses a
     cell whose parameters the reader would not derive back.
 
+2026-10-09, agent defaults (1F Task 4; Peter may override):
+
+22. **(P) 1F JSON validation compares through Yosys on both sides** (spec deviation, accepted by
+    the controller's ruling; for Peter's review). The spec's "Yosys `read_json; write_blif` →
+    `netlist-compare` identical to the golden" cannot hold literally: Yosys `write_blif` spells
+    every `$lut` as minterms, folds constant aliases and writes a 1-bit wire's bit without its
+    index. `tools/writer-check` therefore compares the JSON through Yosys (`read_json`; NORM;
+    `write_blif`) with the golden through Yosys (`read_blif`, `-sop` when a cover has over 12
+    inputs; NORM; `write_blif`): NORM makes identity `$lut`s connections (as `read_blif` does)
+    and runs `opt_clean`; both outputs then get covers of at most 12 inputs as minterms,
+    statements sorted and Yosys self-buffers dropped, and the JSON side's 1-bit names get their
+    `[0]` back. Each normalization has a fixture that fails without it (table in
+    `tests/golden/blif/README.md`). A multi-driver refusal is accepted only for the #15 list.
+    Goldens Yosys cannot read, or with a `.subckt $<lowercase…>` cell and no `.param` line (the
+    8 parameterless `$pow` goldens, which `write_blif` drops on both sides), are excluded from
+    the JSON step and listed.
+23. **(P) 1F Verilog validation exclusions** (spec deviation: the spec excludes only RAM goldens;
+    agent default accepted by the controller's ruling, for Peter's review). `equiv-check` models
+    no black box but the VTR `adder`, no multi-driver net and one clock domain: goldens with
+    RAMs, multipliers, implicit cells, multi-driver nets or several clocks are excluded from the
+    equivalence step (listed by reason). Only an `equiv-check` error located in the golden file
+    excludes; any other is an error (CTest `writer_check_bbox_not_excluded`). Icarus still
+    parses every Verilog output. Assign-form cells carry their attributes as a `// (* … *)`
+    comment (Icarus rejects attributes on continuous assigns).
+24. **(P) dot validation** (spec deviation for 92 goldens; agent default accepted by the
+    controller's ruling, for Peter's review): `dot -Tsvg` within 120 s; a layout that takes
+    longer (2000-node budget, dense graphs) is checked with Graphviz's parser `nop` instead
+    ("ok-parse"); a design over the budget must be refused with its node count ("budget").
+25. **IR follow-up `odin3_attr_foreach`** (read-only, first-set order; docs/IR.md IR-10) lands
+    with 1F so the JSON and Verilog writers write every attribute; for Peter's review.
+
 ## 1C results: full golden round trip
 
 Run 2026-10-09 on `~/odin3-ws/golden` (all `status=ok` BLIFs), release build, writer at
@@ -336,3 +371,70 @@ the references of compared contents only.
 call) is 1,235 and `odin3_word_extend` 230, so about 43% of the call; a `.names` hook call averages
 128. The `fn` hooks are 59% of all instructions and 97% of the cycle time; 64 cycles take 0.66 s
 after a 0.16 s build. Worth caching the sizes at build time when simulation speed matters.
+
+## 1F results: writers on the goldens
+
+Run 2026-10-09 16:16–19:54 (3 h 38 min wall clock) on `~/odin3-ws/golden` (all `status=ok`
+BLIFs), `tools/writer-check/writer-check -j 2 -t 600 -m 6` (script at `5f4e57e`, release
+`odin3-write` of the same tree, smallest file first, identical contents once), then the files
+the later script changes touch rerun with `--resume` (script `07ebc66`: the 8 `$pow` goldens
+move from "different" to "ref-excluded", decision #22). After the rebase onto 1G
+(`width_expr` ports; reader changes for registered types), the rebased `odin3-write` writes
+byte-identical JSON, Verilog and dot to the run's binary on every 4th golden under 20 MB. Validations per decisions #22–#24; per-tool cap 600 s and 6 GB address space.
+
+```
+files: 1846 (724 distinct contents)
+json: identical 1796, ref-excluded 8, refused (multi-driver) 4, different 0, yosys-error 0, error 0, timeout 32, memlimit 4, ref-timeout 0, ref-memlimit 2, write failures 0
+verilog iverilog: ok 1828, FAIL 0, timeout 16, memlimit 2
+verilog equiv: equivalent 1428, excluded 404, NOT-equivalent 0, yosys-error 2, error 0, timeout 4, memlimit 8
+dot: ok 1486, ok-parse (layout over --dot-timeout; Graphviz nop accepts it) 92, budget (refused over --max-nodes) 268, FAIL 0, timeout 0, memlimit 0
+slowest file: EArch/regression/verilog/large/LU64PEEng/LU64PEEng.odin.blif (1384.1 s total)
+odin3-write (read + three writers) slowest: EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif (46.5 s)
+peak RSS: odin3-write 3350 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif); tools 6141 MB (EArch/regression/verilog/large/LargeRam/LargeRam.odin.blif)
+RESULT: FAIL (2 failing items)
+```
+
+The two failing items are one content (`LU64PEEng.parmys.blif`, both architectures): Yosys
+`read_verilog … write_blif` on its 336 MB Verilog died without a message at the 6 GB address-space
+cap (worker peak 6.19 GB); under a 2 GB cap the same command ends in `std::bad_alloc`. The
+script now counts a signal death within 10% of the cap as `memlimit` (`07ebc66`); not a writer
+fault. Not failures (reported): timeouts and memory-cap stops are the large Odin II designs
+(`LU8/32/64PEEng`, `bgm`, `mcml`, `or1200`, `boundtop`, `paj_*_hierarchy_no_mem`, `sha`,
+`LargeRam`), as in 1C; JSON `refused` is the multi-driver list (#15); every Icarus parse that
+finished passed; no JSON comparison differed and no Verilog output was NOT equivalent.
+
+Excluded from the Verilog equivalence step (equiv-check cannot model the golden; 404 files, by
+reason, `.odin`/`.parmys` leaf names):
+- `multiply` black box (170): mult, mult_const, pow_const.odin, ansiportlist, ansiportlist_2,
+  binops, cf_fft_256_8, cf_fft_1024_16, cf_fir_24_16_16, cf_fir_3_8_8, diffeq1, diffeq2,
+  diffeq_f_systemC.odin, diffeq_paj_convert, fir_scu_rtl_restructured_for_cmm_exp, iir1,
+  iir_no_combinational, matmul.odin, oc54_cpu, stereovision1, stereovision2, bgm,
+  paj_raygentop_hierarchy_no_mem.odin, paj_top_hierarchy_no_mem.odin, raygentop.odin,
+  raygentop_nolatches.odin, sv_chip1/2_hierarchy_no_mem, bm_arithmetic_unused_bits,
+  bm_base_multiply, bm_functional_test, bm_match1..6_str_arch, param_override,
+  eightbit_arithmetic_power.odin, rs_decoder_1, rs_decoder_2.
+- `dual_port_ram` (110): 1r2w, 2r.odin, 2r1w, 2r2w, bram, dpram, mem, LU8PEEng, LU32PEEng,
+  bm_base_memory, bm_sfifo_rtl, matmul.parmys, mcml.parmys, mkPktMerge, mkDelayWorker32B,
+  mkSMAdapter4B, or1200, spree.parmys, bm_simple_memory, both_ram, inferred_DPram,
+  memory_combinational.parmys, multi_edge_reader_writer.
+- `single_port_ram` (78): 1r.odin, memrd.odin, rom.odin, spram, spram_big, ch_intrinsics,
+  ch_intrinsics_nolatches, mcml.odin, memory_controller, stereovision0, arm_core, boundtop,
+  boundtop_nolatches.parmys, raygentop.parmys, raygentop_nolatches.parmys, spree.odin,
+  constant_module_inst, inferred_ram_w_clog2, matrix_multiplication.odin, memlooptesting.
+- several clock domains (32): register, stereovision3, sv_chip3_hierarchy_no_mem,
+  multi_clock_reader_writer, multiclock_output_and_latch, multiclock_reader_writer,
+  multiclock_separate_and_latch.
+- implicit cells without a model (10): `$pow` (pow, pow_const, eightbit_arithmetic_power,
+  twobits_arithmetic_power, `.parmys`), `$_DFFSR_PPP_` (dffsre.parmys).
+- multi-driver nets (4): elsif_both_defined.odin, multi_assignment.odin.
+
+Excluded from the JSON step (8): the `$pow` goldens above (Yosys `write_blif` drops a
+parameterless `$pow` on both sides). dot: 268 designs over the 2000-node budget were refused
+with their node count; 92 within it took Graphviz over 120 s to lay out and were checked by its
+parser `nop`. Slowest `odin3-write` (read + JSON + Verilog + dot): LargeRam 46.5 s at 3.35 GB.
+Full table: `~/odin3-ws/work/writer-run/merged-report.txt` (not committed).
+
+Gate fixtures: CTest `writer_check_fixtures` (11 fixtures) and
+`writer_check_detects_corruption`; `hand_writers.blif` and `hand_wide.blif` were added for the
+Yosys-side differences the sample run found (none was a writer bug; the writer changes were
+declared black boxes as Yosys `blackbox` modules in the JSON and every attribute written).

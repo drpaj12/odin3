@@ -381,6 +381,22 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
  */
 const odin3_value *odin3_attr_get(const odin3_module *module, odin3_objref obj, uint32_t key_str);
 
+/*
+ * Visitor for odin3_attr_foreach: one attribute's key (a strtab ID) and value (readable as an
+ * odin3_attr_get result). Any status other than ODIN3_OK stops the walk.
+ */
+typedef odin3_status (*odin3_attr_visit)(void *ctx, uint32_t key_str, const odin3_value *value);
+
+/*
+ * Calls visit once per attribute of obj with its current value, in the order the keys were first
+ * set: overwriting a key keeps its place, and compact keeps the order, so the walk is
+ * deterministic. Never allocates; visit must not set attributes in this module. ODIN3_OK when obj
+ * has no attributes (or is no object) or every call returned ODIN3_OK, else the first other
+ * status visit returned. INVALID_ARG for a NULL module or visit.
+ */
+odin3_status odin3_attr_foreach(const odin3_module *module, odin3_objref obj,
+                                odin3_attr_visit visit, void *ctx);
+
 /* --- compact (IR-6) ------------------------------------------------------------------------ */
 
 /*

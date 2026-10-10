@@ -44,6 +44,7 @@ add_library(odin3_core OBJECT
     src/util/idindex.c
     src/util/str.c
     src/util/log.c
+    src/util/file.c
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
@@ -89,7 +90,15 @@ add_library(odin3_core OBJECT
     src/sim/eval.c
     src/sim/levelize.c
     src/sim/prng.c
-    src/sim/word.c)
+    src/sim/word.c
+    src/backends/common/attrs.c
+    src/backends/dot/writer.c
+    src/backends/json/emit.c
+    src/backends/json/cells.c
+    src/backends/json/lut.c
+    src/backends/json/writer.c
+    src/backends/verilog/escape.c
+    src/backends/verilog/writer.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -135,6 +144,11 @@ if(ODIN3_WITH_ABC)
     add_custom_target(abc_tool ALL DEPENDS abc)
 endif()
 
+# --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
+add_executable(odin3-write tools/writer-check/odin3-write.c)
+target_include_directories(odin3-write PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-write PRIVATE odin3_core odin3_flags)
+
 # --- odin3-blif-rt: BLIF round-trip driver (used by tools/blif-roundtrip/blif-roundtrip) --------
 add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -177,6 +191,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_idindex)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_util_log)
+    odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_ir_value)
     odin3_add_unit_test(test_ir_celltype)
     odin3_add_unit_test(test_ir_netlist)
@@ -206,6 +221,16 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_word)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_dot_writer)
+    odin3_add_unit_test(test_json_writer)
+    odin3_add_unit_test(test_verilog_writer)
+    # The writers' Yosys checks run when Yosys is found (workspace build first, then PATH) and
+    # are ignored otherwise (CI has no Yosys).
+    find_program(ODIN3_YOSYS_EXE yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
+    if(ODIN3_YOSYS_EXE)
+        set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
+            ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
+    endif()
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -233,6 +258,39 @@ if(BUILD_TESTING)
                      --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                      --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/techlib)
     set_tests_properties(blif_roundtrip_techlib PROPERTIES LABELS unit)
+
+    # Writer validation over the fixtures (Yosys, Icarus, Graphviz, ABC); exit 77 (skipped)
+    # when a tool is missing, as in CI.
+    set(_wc_args --write $<TARGET_FILE:odin3-write> --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    if(ODIN3_YOSYS_EXE)
+        list(PREPEND _wc_args --yosys ${ODIN3_YOSYS_EXE})
+    endif()
+    set(_wc_env "")
+    set(_wc_env_list "")
+    if(ODIN3_WITH_ABC)
+        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:abc>")
+        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:abc>;")
+    endif()
+    add_test(NAME writer_check_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args})
+    set_tests_properties(writer_check_fixtures PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+        ENVIRONMENT "${_wc_env}")
+    # Negative check: damaged JSON and Verilog must be caught by both gates.
+    add_test(NAME writer_check_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+    set_tests_properties(writer_check_detects_corruption PROPERTIES LABELS unit
+        SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
+        PASS_REGULAR_EXPRESSION "json: identical [0-9]+, ref-excluded [0-9]+, refused \\(multi-driver\\) [0-9]+, different [1-9][^\n]*\nverilog iverilog[^\n]*\nverilog equiv: equivalent [0-9]+, excluded [0-9]+, NOT-equivalent [1-9]"
+        ENVIRONMENT "${_wc_env_list}WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
+    # Negative check: a black box only the writer's side has is an error, not an exclusion.
+    add_test(NAME writer_check_bbox_not_excluded
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+    set_tests_properties(writer_check_bbox_not_excluded PROPERTIES LABELS unit
+        SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
+        PASS_REGULAR_EXPRESSION "verilog equiv: equivalent 0, excluded [0-9]+, NOT-equivalent 0, yosys-error 0, error [1-9]"
+        ENVIRONMENT "${_wc_env_list}WC_CORRUPT=bbox;WC_REAL_WRITE=$<TARGET_FILE:odin3-write>")
 
     add_test(NAME symbol_rules
         COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh
