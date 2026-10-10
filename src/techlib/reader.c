@@ -45,19 +45,19 @@ static bool is_ident_char(char ch) {
     return is_ident_start(ch) || (ch >= '0' && ch <= '9') || ch == '$';
 }
 
-void odin3_rd_advance(odin3_span *sp, size_t count) {
+void odin3_rd_advance(odin3_rd_span *sp, size_t count) {
     sp->ptr += count;
     sp->len -= count;
     sp->col += (uint32_t)count;
 }
 
-void odin3_rd_skip_ws(odin3_span *sp) {
+void odin3_rd_skip_ws(odin3_rd_span *sp) {
     while (sp->len > 0 && odin3_rd_space(sp->ptr[0])) {
         odin3_rd_advance(sp, 1);
     }
 }
 
-odin3_span odin3_rd_trim(odin3_span sp) {
+odin3_rd_span odin3_rd_trim(odin3_rd_span sp) {
     odin3_rd_skip_ws(&sp);
     while (sp.len > 0 && odin3_rd_space(sp.ptr[sp.len - 1])) {
         sp.len--;
@@ -65,23 +65,23 @@ odin3_span odin3_rd_trim(odin3_span sp) {
     return sp;
 }
 
-bool odin3_rd_word(odin3_span *sp, odin3_span *word) {
+bool odin3_rd_word(odin3_rd_span *sp, odin3_rd_span *word) {
     odin3_rd_skip_ws(sp);
     size_t count = 0;
     while (count < sp->len && !odin3_rd_space(sp->ptr[count])) {
         count++;
     }
-    *word = (odin3_span){sp->ptr, count, sp->col};
+    *word = (odin3_rd_span){sp->ptr, count, sp->col};
     odin3_rd_advance(sp, count);
     return count > 0;
 }
 
-bool odin3_rd_is(odin3_span word, const char *keyword) {
+bool odin3_rd_is(odin3_rd_span word, const char *keyword) {
     size_t len = strlen(keyword);
     return word.len == len && memcmp(word.ptr, keyword, len) == 0;
 }
 
-bool odin3_rd_ident(odin3_span *sp, odin3_span *ident) {
+bool odin3_rd_ident(odin3_rd_span *sp, odin3_rd_span *ident) {
     odin3_rd_skip_ws(sp);
     if (sp->len == 0 || !is_ident_start(sp->ptr[0])) {
         return false;
@@ -90,12 +90,12 @@ bool odin3_rd_ident(odin3_span *sp, odin3_span *ident) {
     while (count < sp->len && is_ident_char(sp->ptr[count])) {
         count++;
     }
-    *ident = (odin3_span){sp->ptr, count, sp->col};
+    *ident = (odin3_rd_span){sp->ptr, count, sp->col};
     odin3_rd_advance(sp, count);
     return true;
 }
 
-bool odin3_rd_lit(odin3_span *sp, const char *lit) {
+bool odin3_rd_lit(odin3_rd_span *sp, const char *lit) {
     odin3_rd_skip_ws(sp);
     size_t len = strlen(lit);
     if (sp->len < len || memcmp(sp->ptr, lit, len) != 0) {
@@ -105,8 +105,8 @@ bool odin3_rd_lit(odin3_span *sp, const char *lit) {
     return true;
 }
 
-odin3_status odin3_rd_end(const odin3_reader *rd, odin3_span rest) {
-    odin3_span word;
+odin3_status odin3_rd_end(const odin3_reader *rd, odin3_rd_span rest) {
+    odin3_rd_span word;
     if (odin3_rd_word(&rest, &word)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, word.col), "unexpected '%.*s'", (int)word.len,
                             word.ptr);
@@ -114,11 +114,11 @@ odin3_status odin3_rd_end(const odin3_reader *rd, odin3_span rest) {
     return ODIN3_OK;
 }
 
-odin3_status odin3_rd_intern(odin3_reader *rd, odin3_span sp, uint32_t *id) {
+odin3_status odin3_rd_intern(odin3_reader *rd, odin3_rd_span sp, uint32_t *id) {
     return odin3_strtab_intern(rd->strtab, (odin3_bytes){sp.ptr, sp.len}, id);
 }
 
-odin3_status odin3_rd_expr(odin3_reader *rd, odin3_span text, const odin3_expr **out) {
+odin3_status odin3_rd_expr(odin3_reader *rd, odin3_rd_span text, const odin3_expr **out) {
     text = odin3_rd_trim(text);
     if (text.len == 0) {
         return odin3_rd_err(rd, odin3_rd_at(rd, text.col), "expected an expression");
@@ -142,13 +142,13 @@ odin3_status odin3_rd_expr(odin3_reader *rd, odin3_span text, const odin3_expr *
 
 /* --- library statement and dispatch -------------------------------------------------------- */
 
-static odin3_status st_library(odin3_reader *rd, odin3_span rest) {
+static odin3_status st_library(odin3_reader *rd, odin3_rd_span rest) {
     if (rd->library != 0) {
         return odin3_rd_err(rd, odin3_rd_at(rd, 1),
                             "second 'library' statement (the first is on line %u)",
                             rd->library_line);
     }
-    odin3_span name;
+    odin3_rd_span name;
     if (!odin3_rd_word(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a library name");
     }
@@ -160,7 +160,7 @@ static odin3_status st_library(odin3_reader *rd, odin3_span rest) {
     return st;
 }
 
-typedef odin3_status (*stmt_fn)(odin3_reader *rd, odin3_span rest);
+typedef odin3_status (*stmt_fn)(odin3_reader *rd, odin3_rd_span rest);
 
 typedef struct stmt_kind {
     const char *keyword;
@@ -178,7 +178,7 @@ static const stmt_kind k_stmts[] = {
     {"end", true, odin3_rd_st_cell_end},
 };
 
-static const stmt_kind *find_stmt(odin3_span word) {
+static const stmt_kind *find_stmt(odin3_rd_span word) {
     for (size_t i = 0; i < sizeof k_stmts / sizeof k_stmts[0]; i++) {
         if (odin3_rd_is(word, k_stmts[i].keyword)) {
             return &k_stmts[i];
@@ -187,8 +187,8 @@ static const stmt_kind *find_stmt(odin3_span word) {
     return NULL;
 }
 
-static odin3_status statement(odin3_reader *rd, odin3_span stmt) {
-    odin3_span word;
+static odin3_status statement(odin3_reader *rd, odin3_rd_span stmt) {
+    odin3_rd_span word;
     if (!odin3_rd_word(&stmt, &word)) {
         return ODIN3_OK; /* empty statement */
     }
@@ -211,7 +211,7 @@ static odin3_status statement(odin3_reader *rd, odin3_span stmt) {
 }
 
 /* One line: '#' starts a comment, ';' separates statements. */
-static odin3_status do_line(odin3_reader *rd, odin3_span line) {
+static odin3_status do_line(odin3_reader *rd, odin3_rd_span line) {
     const char *nul = memchr(line.ptr, '\0', line.len);
     if (nul != NULL) {
         return odin3_rd_err(rd, odin3_rd_at(rd, (uint32_t)(nul - line.ptr) + 1U),
@@ -224,7 +224,7 @@ static odin3_status do_line(odin3_reader *rd, odin3_span line) {
     for (;;) {
         const char *semi = memchr(line.ptr, ';', line.len);
         size_t count = semi != NULL ? (size_t)(semi - line.ptr) : line.len;
-        odin3_status st = statement(rd, (odin3_span){line.ptr, count, line.col});
+        odin3_status st = statement(rd, (odin3_rd_span){line.ptr, count, line.col});
         if (st != ODIN3_OK || semi == NULL) {
             return st;
         }
@@ -240,7 +240,7 @@ static odin3_status parse_text(odin3_reader *rd, odin3_bytes text) {
         size_t count = newline != NULL ? (size_t)(newline - ptr) : left;
         rd->line++;
         rd->line_start = ptr;
-        odin3_status st = do_line(rd, (odin3_span){ptr, count, 1});
+        odin3_status st = do_line(rd, (odin3_rd_span){ptr, count, 1});
         if (st != ODIN3_OK) {
             return st;
         }

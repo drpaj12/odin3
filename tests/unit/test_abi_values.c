@@ -118,7 +118,8 @@ static void test_negative_int_text(void) {
     /* $_FF_ INIT must be 0..3, so use a design-local black box with one INT parameter */
     static const odin3_param_def k_params[] = {
         {"P", ODIN3_VAL_INT, {ODIN3_VAL_INT, 0, NULL, 0, 0, 0}}};
-    odin3_celltype_def def = {"bbp", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, k_params, 1, NULL, NULL};
+    odin3_celltype_def def = {"bbp", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, k_params, 1, NULL, NULL, NULL,
+                              NULL};
     odin3_celltype_id type = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
     odin3_node_spec spec = {type, 0, {0}, params, 1};

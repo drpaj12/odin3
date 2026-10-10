@@ -74,12 +74,12 @@ static odin3_rd_port *port_at(odin3_reader *rd, uint32_t idx) {
 }
 
 /* Words that cannot name a port or parameter: modifiers and the `init x` value. */
-static bool reserved(odin3_span name) {
+static bool reserved(odin3_rd_span name) {
     return odin3_rd_is(name, "signed") || odin3_rd_is(name, "clock") || odin3_rd_is(name, "x");
 }
 
 /* Interns a new port or parameter name; an error if reserved or the cell already uses it. */
-static odin3_status declare_name(odin3_reader *rd, odin3_span name, uint32_t *id) {
+static odin3_status declare_name(odin3_reader *rd, odin3_rd_span name, uint32_t *id) {
     if (reserved(name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, name.col), "'%.*s' is a reserved word",
                             (int)name.len, name.ptr);
@@ -96,7 +96,7 @@ static odin3_status declare_name(odin3_reader *rd, odin3_span name, uint32_t *id
 }
 
 /* The port called name, or NOT_FOUND. */
-static int find_port(const odin3_reader *rd, odin3_span name) {
+static int find_port(const odin3_reader *rd, odin3_rd_span name) {
     uint32_t id = 0;
     if (!odin3_strtab_find(rd->strtab, (odin3_bytes){name.ptr, name.len}, &id)) {
         return NOT_FOUND;
@@ -104,7 +104,7 @@ static int find_port(const odin3_reader *rd, odin3_span name) {
     return port_index(&rd->cell, id);
 }
 
-static odin3_status take_input(odin3_reader *rd, odin3_span name, uint32_t *idx) {
+static odin3_status take_input(odin3_reader *rd, odin3_rd_span name, uint32_t *idx) {
     int found = find_port(rd, name);
     const odin3_rd_loc loc = odin3_rd_at(rd, name.col);
     if (found == NOT_FOUND) {
@@ -120,7 +120,7 @@ static odin3_status take_input(odin3_reader *rd, odin3_span name, uint32_t *idx)
 }
 
 /* An input declared with `clock` (seq clocks and the clocks of sync memory ports). */
-static odin3_status take_clock(odin3_reader *rd, odin3_span name, uint32_t *idx) {
+static odin3_status take_clock(odin3_reader *rd, odin3_rd_span name, uint32_t *idx) {
     odin3_status st = take_input(rd, name, idx);
     if (st == ODIN3_OK && !port_at(rd, *idx)->mods.clock) {
         return odin3_rd_err(rd, odin3_rd_at(rd, name.col),
@@ -131,8 +131,8 @@ static odin3_status take_clock(odin3_reader *rd, odin3_span name, uint32_t *idx)
 }
 
 /* The undriven output a fn or seq statement starts with. */
-static odin3_status take_output(odin3_reader *rd, odin3_span *rest, uint32_t *idx) {
-    odin3_span name;
+static odin3_status take_output(odin3_reader *rd, odin3_rd_span *rest, uint32_t *idx) {
+    odin3_rd_span name;
     if (!odin3_rd_ident(rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest->col), "expected an output port name");
     }
@@ -190,7 +190,7 @@ typedef struct int_value {
  * An integer expression over the parameters, in 1..rule->max with their defaults. Afterwards
  * rd->idents holds its identifier nodes (empty for a constant expression).
  */
-static odin3_status param_expr(odin3_reader *rd, odin3_span text, const int_rule *rule,
+static odin3_status param_expr(odin3_reader *rd, odin3_rd_span text, const int_rule *rule,
                                int_value *out) {
     const odin3_rd_loc loc = odin3_rd_at(rd, odin3_rd_trim(text).col);
     odin3_status st = odin3_rd_expr(rd, text, &out->expr);
@@ -227,7 +227,7 @@ static odin3_status no_blackbox(const odin3_reader *rd) {
 
 /* --- cell ---------------------------------------------------------------------------------- */
 
-static bool kind_of(odin3_span word, odin3_techlib_kind *kind) {
+static bool kind_of(odin3_rd_span word, odin3_techlib_kind *kind) {
     static const char *const names[] = {"gate", "hard", "blackbox"};
     static const odin3_techlib_kind kinds[] = {ODIN3_TECHLIB_GATE, ODIN3_TECHLIB_HARD,
                                                ODIN3_TECHLIB_BLACKBOX};
@@ -240,7 +240,7 @@ static bool kind_of(odin3_span word, odin3_techlib_kind *kind) {
     return false;
 }
 
-static size_t digits(odin3_span word, size_t from) {
+static size_t digits(odin3_rd_span word, size_t from) {
     size_t end = from;
     while (end < word.len && word.ptr[end] >= '0' && word.ptr[end] <= '9') {
         end++;
@@ -249,7 +249,7 @@ static size_t digits(odin3_span word, size_t from) {
 }
 
 /* Digits with an optional fraction: 1, 0.25, 12.5. */
-static bool is_number(odin3_span word) {
+static bool is_number(odin3_rd_span word) {
     size_t whole = digits(word, 0);
     if (whole == 0) {
         return false;
@@ -265,7 +265,7 @@ static bool is_number(odin3_span word) {
 }
 
 /* `area NUM` or `delay NUM` on the cell line. */
-static odin3_status cell_option(odin3_reader *rd, odin3_span *rest, odin3_span key) {
+static odin3_status cell_option(odin3_reader *rd, odin3_rd_span *rest, odin3_rd_span key) {
     const odin3_rd_loc loc = odin3_rd_at(rd, key.col);
     uint32_t *slot = NULL;
     if (odin3_rd_is(key, "area")) {
@@ -278,7 +278,7 @@ static odin3_status cell_option(odin3_reader *rd, odin3_span *rest, odin3_span k
     if (*slot != 0) {
         return odin3_rd_err(rd, loc, "'%.*s' given twice", (int)key.len, key.ptr);
     }
-    odin3_span num;
+    odin3_rd_span num;
     if (!odin3_rd_word(rest, &num)) {
         return odin3_rd_err(rd, loc, "expected a number after '%.*s'", (int)key.len, key.ptr);
     }
@@ -289,7 +289,7 @@ static odin3_status cell_option(odin3_reader *rd, odin3_span *rest, odin3_span k
     return odin3_rd_intern(rd, num, slot);
 }
 
-static odin3_status check_cell_name(odin3_reader *rd, odin3_span name, uint32_t id) {
+static odin3_status check_cell_name(odin3_reader *rd, odin3_rd_span name, uint32_t id) {
     const odin3_rd_loc loc = odin3_rd_at(rd, name.col);
     for (size_t i = 0; i < rd->pending.len; i++) {
         const odin3_rd_pending *done = odin3_vec_cat(&rd->pending, i);
@@ -305,9 +305,9 @@ static odin3_status check_cell_name(odin3_reader *rd, odin3_span name, uint32_t 
     return ODIN3_OK;
 }
 
-odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_span rest) {
-    odin3_span name;
-    odin3_span kind_word;
+odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_rd_span rest) {
+    odin3_rd_span name;
+    odin3_rd_span kind_word;
     odin3_techlib_kind kind = ODIN3_TECHLIB_GATE;
     if (!odin3_rd_word(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a cell name");
@@ -328,7 +328,7 @@ odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_span rest) {
     rd->cell.name = id;
     rd->cell.line = rd->line;
     rd->cell.kind = kind;
-    odin3_span key;
+    odin3_rd_span key;
     while (st == ODIN3_OK && odin3_rd_word(&rest, &key)) {
         st = cell_option(rd, &rest, key);
     }
@@ -338,9 +338,9 @@ odin3_status odin3_rd_st_cell(odin3_reader *rd, odin3_span rest) {
 
 /* --- param and ports ----------------------------------------------------------------------- */
 
-odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_span rest) {
-    odin3_span name;
-    odin3_span kind;
+odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_rd_span rest) {
+    odin3_rd_span name;
+    odin3_rd_span kind;
     if (!odin3_rd_ident(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a parameter name");
     }
@@ -375,14 +375,15 @@ odin3_status odin3_rd_st_param(odin3_reader *rd, odin3_span rest) {
 }
 
 /* Strips trailing `signed` / `clock` words (any order, each once) off the end of rest. */
-static odin3_status strip_mods(const odin3_reader *rd, odin3_span *rest, odin3_techlib_port *mods) {
+static odin3_status strip_mods(const odin3_reader *rd, odin3_rd_span *rest,
+                               odin3_techlib_port *mods) {
     for (;;) {
-        odin3_span text = odin3_rd_trim(*rest);
+        odin3_rd_span text = odin3_rd_trim(*rest);
         size_t start = text.len;
         while (start > 0 && !odin3_rd_space(text.ptr[start - 1])) {
             start--;
         }
-        const odin3_span last = {text.ptr + start, text.len - start, text.col + (uint32_t)start};
+        const odin3_rd_span last = {text.ptr + start, text.len - start, text.col + (uint32_t)start};
         bool *flag = NULL;
         if (odin3_rd_is(last, "signed")) {
             flag = &mods->is_signed;
@@ -420,7 +421,7 @@ static odin3_status param_names(odin3_reader *rd) {
  * The width rule of a port: a constant (any expression without identifiers, folded), a
  * parameter's name, or a compiled expression.
  */
-static odin3_status port_width(odin3_reader *rd, odin3_span text, odin3_port_def *def) {
+static odin3_status port_width(odin3_reader *rd, odin3_rd_span text, odin3_port_def *def) {
     static const int_rule rule = {"width", ODIN3_READER_MAX_WIDTH};
     int_value width = {NULL, 0};
     odin3_status st = param_expr(rd, text, &rule, &width);
@@ -453,8 +454,8 @@ static odin3_status port_width(odin3_reader *rd, odin3_span text, odin3_port_def
     return odin3_width_expr_compile(&src, &def->width_expr);
 }
 
-static odin3_status declare_port(odin3_reader *rd, odin3_span rest, odin3_dir dir) {
-    odin3_span name;
+static odin3_status declare_port(odin3_reader *rd, odin3_rd_span rest, odin3_dir dir) {
+    odin3_rd_span name;
     if (!odin3_rd_ident(&rest, &name)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected a port name");
     }
@@ -485,21 +486,21 @@ static odin3_status declare_port(odin3_reader *rd, odin3_span rest, odin3_dir di
     return st == ODIN3_OK && slot == NULL ? ODIN3_ERR_NO_MEMORY : st;
 }
 
-odin3_status odin3_rd_st_in(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_in(odin3_reader *rd, odin3_rd_span rest) {
     return declare_port(rd, rest, ODIN3_DIR_IN);
 }
 
-odin3_status odin3_rd_st_out(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_out(odin3_reader *rd, odin3_rd_span rest) {
     return declare_port(rd, rest, ODIN3_DIR_OUT);
 }
 
-odin3_status odin3_rd_st_inout(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_inout(odin3_reader *rd, odin3_rd_span rest) {
     return declare_port(rd, rest, ODIN3_DIR_INOUT);
 }
 
 /* --- fn and seq ---------------------------------------------------------------------------- */
 
-odin3_status odin3_rd_st_fn(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_fn(odin3_reader *rd, odin3_rd_span rest) {
     odin3_techlib_fn fn = {0, NULL, rd->line};
     odin3_status st = no_blackbox(rd);
     if (st == ODIN3_OK) {
@@ -524,7 +525,7 @@ odin3_status odin3_rd_st_fn(odin3_reader *rd, odin3_span rest) {
     return ODIN3_OK;
 }
 
-static bool trigger_of(odin3_span word, odin3_techlib_trigger *trigger) {
+static bool trigger_of(odin3_rd_span word, odin3_techlib_trigger *trigger) {
     static const char *const names[] = {"posedge", "negedge", "high", "low"};
     static const odin3_techlib_trigger triggers[] = {ODIN3_TECHLIB_POSEDGE, ODIN3_TECHLIB_NEGEDGE,
                                                      ODIN3_TECHLIB_HIGH, ODIN3_TECHLIB_LOW};
@@ -538,8 +539,8 @@ static bool trigger_of(odin3_span word, odin3_techlib_trigger *trigger) {
 }
 
 /* Optional `init EXPR`; `init x` (or none) leaves *init NULL. */
-static odin3_status seq_init(odin3_reader *rd, odin3_span rest, const odin3_expr **init) {
-    odin3_span word;
+static odin3_status seq_init(odin3_reader *rd, odin3_rd_span rest, const odin3_expr **init) {
+    odin3_rd_span word;
     if (!odin3_rd_word(&rest, &word)) {
         return ODIN3_OK;
     }
@@ -547,7 +548,7 @@ static odin3_status seq_init(odin3_reader *rd, odin3_span rest, const odin3_expr
         return odin3_rd_err(rd, odin3_rd_at(rd, word.col), "unexpected '%.*s' (expected 'init')",
                             (int)word.len, word.ptr);
     }
-    odin3_span text = odin3_rd_trim(rest);
+    odin3_rd_span text = odin3_rd_trim(rest);
     if (odin3_rd_is(text, "x") || odin3_rd_is(text, "X")) {
         return ODIN3_OK;
     }
@@ -556,9 +557,9 @@ static odin3_status seq_init(odin3_reader *rd, odin3_span rest, const odin3_expr
 }
 
 /* `TRIGGER CLK [init EXPR]` after the '@'. */
-static odin3_status seq_trigger(odin3_reader *rd, odin3_span rest, odin3_techlib_seq *seq) {
-    odin3_span word;
-    odin3_span clock;
+static odin3_status seq_trigger(odin3_reader *rd, odin3_rd_span rest, odin3_techlib_seq *seq) {
+    odin3_rd_span word;
+    odin3_rd_span clock;
     if (!odin3_rd_word(&rest, &word) || !trigger_of(word, &seq->trigger)) {
         return odin3_rd_err(rd, odin3_rd_at(rd, word.col),
                             "expected posedge, negedge, high or low after '@'");
@@ -571,7 +572,7 @@ static odin3_status seq_trigger(odin3_reader *rd, odin3_span rest, odin3_techlib
     return st == ODIN3_OK ? seq_init(rd, rest, &seq->init) : st;
 }
 
-odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_rd_span rest) {
     odin3_techlib_seq seq;
     memset(&seq, 0, sizeof seq);
     seq.line = rd->line;
@@ -589,7 +590,7 @@ odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_span rest) {
     if (at_sign == NULL) {
         return odin3_rd_err(rd, odin3_rd_at(rd, rest.col), "expected '@' and a trigger");
     }
-    const odin3_span data = {rest.ptr, (size_t)(at_sign - rest.ptr), rest.col};
+    const odin3_rd_span data = {rest.ptr, (size_t)(at_sign - rest.ptr), rest.col};
     odin3_rd_advance(&rest, data.len + 1);
     st = odin3_rd_expr(rd, data, &seq.data);
     st = st == ODIN3_OK ? check_idents(rd, seq.data, true) : st;
@@ -605,7 +606,7 @@ odin3_status odin3_rd_st_seq(odin3_reader *rd, odin3_span rest) {
 
 /* --- memory -------------------------------------------------------------------------------- */
 
-odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_rd_span rest) {
     static const int_rule rule = {"memory words", INT64_MAX};
     odin3_status st = no_blackbox(rd);
     if (st != ODIN3_OK) {
@@ -616,7 +617,7 @@ odin3_status odin3_rd_st_memory(odin3_reader *rd, odin3_span rest) {
                             "a cell has at most one memory (the first is on line %u)",
                             rd->cell.memory.line);
     }
-    odin3_span word;
+    odin3_rd_span word;
     if (!odin3_rd_word(&rest, &word) || !odin3_rd_is(word, "words")) {
         return odin3_rd_err(rd, odin3_rd_at(rd, word.col), "expected 'words' after 'memory'");
     }
@@ -638,7 +639,7 @@ static odin3_status need_memory(const odin3_reader *rd, const char *keyword) {
     return ODIN3_OK;
 }
 
-odin3_status odin3_rd_st_mem_width(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_mem_width(odin3_reader *rd, odin3_rd_span rest) {
     static const int_rule rule = {"memory width", UINT32_MAX};
     odin3_status st = need_memory(rd, "width");
     if (st != ODIN3_OK) {
@@ -669,9 +670,9 @@ static void *copy_array(odin3_arena *arena, const odin3_vec *vec, bool *ok) {
 
 /* The input ports a `write`/`read` statement lists, into rd->ids; a sync port's first is a clock.
  */
-static odin3_status mem_port_list(odin3_reader *rd, odin3_span rest, bool sync) {
+static odin3_status mem_port_list(odin3_reader *rd, odin3_rd_span rest, bool sync) {
     odin3_vec_clear(&rd->ids);
-    odin3_span name;
+    odin3_rd_span name;
     while (odin3_rd_ident(&rest, &name)) {
         uint32_t idx = 0;
         odin3_status st =
@@ -688,13 +689,13 @@ static odin3_status mem_port_list(odin3_reader *rd, odin3_span rest, bool sync) 
     return odin3_rd_end(rd, rest);
 }
 
-static odin3_status mem_port(odin3_reader *rd, odin3_span rest, bool write) {
+static odin3_status mem_port(odin3_reader *rd, odin3_rd_span rest, bool write) {
     const char *keyword = write ? "write" : "read";
     odin3_status st = need_memory(rd, keyword);
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_span mode;
+    odin3_rd_span mode;
     if (!odin3_rd_word(&rest, &mode) ||
         (!odin3_rd_is(mode, "sync") && !odin3_rd_is(mode, "async"))) {
         return odin3_rd_err(rd, odin3_rd_at(rd, mode.col), "expected sync or async after '%s'",
@@ -720,11 +721,11 @@ static odin3_status mem_port(odin3_reader *rd, odin3_span rest, bool write) {
     return ODIN3_OK;
 }
 
-odin3_status odin3_rd_st_mem_write(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_mem_write(odin3_reader *rd, odin3_rd_span rest) {
     return mem_port(rd, rest, true);
 }
 
-odin3_status odin3_rd_st_mem_read(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_mem_read(odin3_reader *rd, odin3_rd_span rest) {
     return mem_port(rd, rest, false);
 }
 
@@ -897,7 +898,7 @@ static const odin3_techlib_cell *build_lib(odin3_reader *rd, odin3_celltype_def 
     return lib;
 }
 
-odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_span rest) {
+odin3_status odin3_rd_st_cell_end(odin3_reader *rd, odin3_rd_span rest) {
     odin3_status st = odin3_rd_end(rd, rest);
     if (st == ODIN3_OK && rd->cell.has_memory) {
         st = finish_memory(rd);
