@@ -12,7 +12,6 @@
 #include "util/attr.h"
 #include "util/hash.h"
 #include "util/log.h"
-#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -100,8 +99,8 @@ ODIN3_EXPORT odin3_status odin3_script_resolve_file(const char *path) {
 /* --- plugin passes ------------------------------------------------------------------------- */
 
 /*
- * A registered plugin pass: the pass manager's definition (its body is plugin_run for every
- * plugin pass), the plugin's body and user pointer, and the name and help strings it points to.
+ * A registered plugin pass: the pass manager's definition (body plugin_run, user pointer this
+ * plugin_pass), the plugin's body and user pointer, and the name and help strings it points to.
  */
 typedef struct plugin_pass {
     odin3_pass_def def;
@@ -110,37 +109,12 @@ typedef struct plugin_pass {
     char text[]; /* the name, then the help, each NUL-terminated */
 } plugin_pass;
 
-/* Every registered plugin pass (plugin_slot), in registration order; kept for the process. */
-typedef struct plugin_slot {
-    plugin_pass *pass;
-} plugin_slot;
-static odin3_vec g_plugins;
-static bool g_plugins_ready = false;
-
-/* The registered plugin pass named name, NULL when there is none. */
-static const plugin_pass *plugin_named(const char *name) {
-    for (size_t i = 0; g_plugins_ready && i < g_plugins.len; i++) {
-        const plugin_slot *slot = odin3_vec_cat(&g_plugins, i);
-        if (strcmp(slot->pass->def.name, name) == 0) {
-            return slot->pass;
-        }
-    }
-    return NULL;
-}
-
-/*
- * The manager's body of every plugin pass: finds the plugin pass by the name of the run the
- * manager opened for it (the design's latest run: ctx's, as nothing runs between opening it and
- * this call) and calls it with NUL-terminated arguments.
- */
-static odin3_status plugin_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+/* The manager's body of every plugin pass: user is its plugin_pass (odin3_pass_def.user). Calls
+ * the plugin with NUL-terminated arguments. */
+static odin3_status plugin_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                               void *user) {
     (void)ctx;
-    odin3_passrun_id run = {odin3_passrun_end(design) - 1};
-    const plugin_pass *pass = plugin_named(odin3_api_str(design, odin3_passrun_name(design, run)));
-    if (pass == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "plugin pass: no plugin pass is registered for this run");
-        return ODIN3_ERR_INVALID_ARG;
-    }
+    const plugin_pass *pass = user;
     char *text = odin3_util_malloc(args.len + 1);
     if (text == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -173,28 +147,10 @@ static plugin_pass *copy_pass(const odin3_plugin_pass *pass) {
     }
     memcpy(copy->text, pass->name, name_len);
     memcpy(copy->text + name_len, pass->help, help_len);
-    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run};
+    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run, copy};
     copy->run = pass->run;
     copy->user = pass->user;
     return copy;
-}
-
-/* Lists copy in g_plugins, then registers it with the manager; on failure neither keeps it. */
-static odin3_status add_plugin(plugin_pass *copy) {
-    if (!g_plugins_ready) {
-        odin3_vec_init(&g_plugins, sizeof(plugin_slot));
-        g_plugins_ready = true;
-    }
-    plugin_slot *slot = odin3_vec_push(&g_plugins);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    slot->pass = copy;
-    odin3_status st = odin3_pass_register_def(&copy->def);
-    if (st != ODIN3_OK) {
-        odin3_vec_pop(&g_plugins);
-    }
-    return st;
 }
 
 ODIN3_EXPORT odin3_status odin3_pass_register(const odin3_plugin_pass *pass) {
@@ -210,7 +166,8 @@ ODIN3_EXPORT odin3_status odin3_pass_register(const odin3_plugin_pass *pass) {
     if (copy == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st = add_plugin(copy);
+    /* The registry keeps the copy for the life of the process (a pass is never unregistered). */
+    odin3_status st = odin3_pass_register_def(&copy->def);
     if (st != ODIN3_OK) {
         odin3_util_free(copy);
     }

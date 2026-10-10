@@ -20,6 +20,8 @@ enum {
                 ODIN3_CT_CLOCK_PIN0
 };
 
+enum { NAME_CHAR_MIN = '!', NAME_CHAR_MAX = '~' };
+
 static const char k_fn[] = "odin3_celltype_register";
 
 /* Logs "odin3_celltype_register: cell type '<name>': <why>" and returns INVALID_ARG. */
@@ -34,13 +36,39 @@ static bool gran_ok(uint32_t gran) {
            gran == (uint32_t)ODIN3_GRAN_HARD || gran == (uint32_t)ODIN3_GRAN_BLACKBOX;
 }
 
-static const char *ports_error(const odin3_plugin_celltype *def) {
-    for (uint32_t i = 0; i < def->n_ports; i++) {
-        if (def->ports[i].dir > (uint32_t)ODIN3_DIR_INOUT) {
-            return "port direction out of range";
+/* True when name (NULL and "" are left to the IR's checks) is printable ASCII without blanks and,
+ * for a port (a BLIF formal), without '=', '[' or ']'. */
+static bool name_chars_ok(const char *name, bool port) {
+    for (const char *at = name; at != NULL && *at != '\0'; at++) {
+        if (*at < NAME_CHAR_MIN || *at > NAME_CHAR_MAX || (port && strchr("=[]", *at) != NULL)) {
+            return false;
         }
     }
+    return true;
+}
+
+static const char *port_error(const odin3_plugin_port *port) {
+    if (port->dir > (uint32_t)ODIN3_DIR_INOUT) {
+        return "port direction out of range";
+    }
+    if (!name_chars_ok(port->name, true)) {
+        return "a port name must be printable ASCII without blanks, '=', '[' or ']'";
+    }
+    if (port->width_param != NULL && port->width != 0) {
+        return "a port sized by width_param must have width 0";
+    }
+    if (port->scalar && (port->width_param != NULL || port->width != 1)) {
+        return "a scalar port must have the constant width 1";
+    }
     return NULL;
+}
+
+static const char *ports_error(const odin3_plugin_celltype *def) {
+    const char *err = NULL;
+    for (uint32_t i = 0; err == NULL && i < def->n_ports; i++) {
+        err = port_error(&def->ports[i]);
+    }
+    return err;
 }
 
 static const char *params_error(const odin3_plugin_celltype *def) {
@@ -52,6 +80,9 @@ static const char *params_error(const odin3_plugin_celltype *def) {
         if (param->kind != (uint32_t)ODIN3_VAL_INT && param->dflt != 0) {
             return "only an INT parameter has a default (dflt must be 0)";
         }
+        if (!name_chars_ok(param->name, false)) {
+            return "a parameter name must be printable ASCII without blanks";
+        }
     }
     return NULL;
 }
@@ -62,6 +93,9 @@ static const char *abi_error(const odin3_plugin_celltype *def) {
         if (def->reserved[i] != NULL) {
             return "reserved slot is set (built for a later ABI?)";
         }
+    }
+    if (!name_chars_ok(def->name, false)) {
+        return "the name must be printable ASCII without blanks";
     }
     if (!gran_ok(def->gran)) {
         return "granularity must be WORD, BIT, HARD or BLACKBOX";

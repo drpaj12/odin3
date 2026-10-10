@@ -15,19 +15,23 @@
 /*
  * A pass body. ctx is the pass run the manager opened for this call (named after the pass; ctx->op
  * is 0 until the pass begins an operation, IR-13); design is ctx->design; args is the text after
- * the pass name in the script (trimmed, not NUL-terminated; split it with odin3_pass_arg_next).
- * Returns ODIN3_OK or a failure status, logging why (ODIN3_ERR_INVALID_ARG for bad arguments).
+ * the pass name in the script (trimmed, not NUL-terminated; split it with odin3_pass_arg_next);
+ * user is the definition's user pointer (odin3_pass_def.user). Returns ODIN3_OK or a failure
+ * status, logging why (ODIN3_ERR_INVALID_ARG for bad arguments).
  */
-typedef odin3_status (*odin3_pass_fn)(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args);
+typedef odin3_status (*odin3_pass_fn)(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                      void *user);
 
 /*
  * One pass. name: non-empty, printable ASCII without blanks, ';' or '#' (a script word); help: one
- * line, its usage (shown by `odin3 --help`).
+ * line, its usage (shown by `odin3 --help`); run: the body; user: handed to run on every call
+ * (NULL for the built-ins; a plugin pass's own definition for the ABI's plugin passes).
  */
 typedef struct odin3_pass_def {
     const char *name;
     const char *help;
     odin3_pass_fn run;
+    void *user;
 } odin3_pass_def;
 
 /*

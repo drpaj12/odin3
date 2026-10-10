@@ -6,6 +6,7 @@
  */
 #include "ir/design.h"
 #include "ir/ids.h"
+#include "ir/module.h"
 #include "odin3/odin3.h"
 #include "sim/cell.h"
 #include "sim/sim.h"
@@ -17,6 +18,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifndef ODIN3_BLIF_FIXTURES
+#error "ODIN3_BLIF_FIXTURES must name tests/golden/blif"
+#endif
 #ifndef ODIN3_CLI_FIXTURES
 #error "ODIN3_CLI_FIXTURES must name tests/cli"
 #endif
@@ -70,7 +74,7 @@ static bool out_bit(const odin3_sim *sim, uint32_t port, uint32_t bit) {
 /* Registers example_and with both hooks through the ABI, reads the fixture into a new design
  * and builds its simulator (the scratch hook runs once per flat cell). */
 static odin3_sim *build_example(odin3_design **design) {
-    odin3_plugin_celltype def = {"example_and", ODIN3_GRAN_HARD, 0,     k_ports, 3, k_params, 1,
+    odin3_plugin_celltype def = {"example_and", ODIN3_GRAN_HARD, 0,     k_ports, k_params, 3, 1,
                                  and_simulate,  and_scratch,     {NULL}};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register(&def));
     *design = odin3_design_create();
@@ -116,7 +120,7 @@ static void test_registered_hooks_simulate(void) {
 /* Registration under every allocation failure: NO_MEMORY changes nothing, so the same
  * definition registers once allocation succeeds, and a second time is a duplicate. */
 static void test_celltype_register_oom_sweep(void) {
-    odin3_plugin_celltype def = {"oom_and", ODIN3_GRAN_HARD, 0, k_ports, 3, k_params, 1, NULL,
+    odin3_plugin_celltype def = {"oom_and", ODIN3_GRAN_HARD, 0, k_ports, k_params, 3, 1, NULL,
                                  NULL,      {NULL}};
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     long fail_after = 0;
@@ -166,10 +170,72 @@ static void test_pass_register_and_run_oom_sweep(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
 }
 
+/* --- odin3_prov_visit_objects on dead objects and tombstones ------------------------------- */
+
+enum { HAND_SUB_LINE = 18, MAX_FOUND = 32 };
+
+typedef struct found_list {
+    uint32_t count;
+    odin3_prov_object found[MAX_FOUND];
+} found_list;
+
+static void collect(const odin3_prov_object *found, void *user) {
+    found_list *list = user;
+    if (list->count < MAX_FOUND) {
+        list->found[list->count++] = *found;
+    }
+}
+
+/* The node hits of hand_body.blif line 18 (the cell u_sub's line). */
+static found_list sub_line_nodes(const odin3_design *design) {
+    found_list all = {0};
+    found_list nodes = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_visit_objects(design, ODIN3_BLIF_FIXTURES "/hand_body.blif",
+                                                   HAND_SUB_LINE, collect, &all));
+    for (uint32_t i = 0; i < all.count; i++) {
+        if (all.found[i].obj.kind == (uint32_t)ODIN3_OBJ_NODE) {
+            nodes.found[nodes.count++] = all.found[i];
+        }
+    }
+    return nodes;
+}
+
+/* list holds exactly one hit: object ID id, live as given. */
+static void expect_one(const found_list *list, uint32_t id, bool live) {
+    TEST_ASSERT_EQUAL_UINT32(1, list->count);
+    TEST_ASSERT_EQUAL_UINT32(id, list->found[0].obj.id);
+    TEST_ASSERT_EQUAL(live, list->found[0].live);
+}
+
+/* A deleted node is found with its own ID and live false; after compact, as its tombstone (ID 0,
+ * live false). */
+static void test_visit_objects_dead_and_tombstone(void) {
+    odin3_design *design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_blif",
+                                                          ODIN3_BLIF_FIXTURES "/hand_body.blif"));
+    odin3_module_id top = odin3_design_top(design);
+    uint32_t sub = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_lookup_node(design, top.v, "u_sub", &sub));
+    found_list live = sub_line_nodes(design);
+    expect_one(&live, sub, true);
+    odin3_module *module = odin3_module_get(design, top);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, (odin3_node_id){sub}));
+    found_list dead = sub_line_nodes(design);
+    expect_one(&dead, sub, false);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "compact", NULL));
+    found_list tomb = sub_line_nodes(design);
+    expect_one(&tomb, 0, false); /* the tombstone */
+    TEST_ASSERT_EQUAL_UINT32(top.v, tomb.found[0].obj.module);
+    odin3_design_destroy(design);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registered_hooks_simulate);
     RUN_TEST(test_celltype_register_oom_sweep);
     RUN_TEST(test_pass_register_and_run_oom_sweep);
+    RUN_TEST(test_visit_objects_dead_and_tombstone);
     return UNITY_END();
 }

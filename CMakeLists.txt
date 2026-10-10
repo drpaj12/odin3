@@ -247,7 +247,9 @@ if(BUILD_TESTING)
     endif()
     odin3_add_unit_test(test_pass_manager)
     target_compile_definitions(test_pass_manager PRIVATE
-        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -265,6 +267,10 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    # A plugin whose init registers, then fails (it must stay loaded: test_abi_ext).
+    add_library(plugin_bad_init MODULE tests/unit/plugin_bad_init.c)
+    set_target_properties(plugin_bad_init PROPERTIES PREFIX "")
+    target_link_libraries(plugin_bad_init PRIVATE libodin3 odin3_flags)
     # Plugin cell types and passes, and the provenance visitors, through libodin3.so only.
     add_executable(test_abi_ext tests/unit/test_abi_ext.c)
     target_link_libraries(test_abi_ext PRIVATE libodin3 unity odin3_flags)
@@ -272,12 +278,14 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli"
         ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_abi_ext.blif"
-        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>")
-    add_dependencies(test_abi_ext example_plugin)
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>"
+        BAD_INIT_PLUGIN_PATH="$<TARGET_FILE:plugin_bad_init>")
+    add_dependencies(test_abi_ext example_plugin plugin_bad_init)
     add_test(NAME test_abi_ext COMMAND test_abi_ext)
     set_tests_properties(test_abi_ext PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli")
 
     add_test(NAME blif_roundtrip_fixtures
@@ -347,21 +355,16 @@ if(BUILD_TESTING)
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 3\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
-    # A plugin pass and a plugin cell type from a CLI script (example_and cells read, counted).
-    add_test(NAME cli_plugin_pass
-        COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>
-                -p "read_blif ${PROJECT_SOURCE_DIR}/tests/cli/example_plugin.blif; check; example_count")
-    set_tests_properties(cli_plugin_pass PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "example_count: 2 example_and cells")
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage)
+                           help_runs_nothing check_flag usage techlib plugin)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                     ${PROJECT_SOURCE_DIR}/tests/golden/blif)
-        set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
+        set_tests_properties(cli_${_case} PROPERTIES LABELS unit
+            ENVIRONMENT "ODIN3_EXAMPLE_PLUGIN=$<TARGET_FILE:example_plugin>")
     endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)

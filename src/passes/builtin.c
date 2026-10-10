@@ -10,6 +10,7 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
+#include "techlib/reader.h"
 #include "util/alloc.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -163,7 +164,9 @@ static odin3_status select_auto(odin3_design *design) {
 
 /* --- read_blif, write_blif ------------------------------------------------------------------- */
 
-static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                  void *user) {
+    (void)user;
     odin3_strbuf path;
     odin3_strbuf_init(&path);
     odin3_status st = one_path("read_blif", args, &path);
@@ -178,7 +181,9 @@ static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     return st;
 }
 
-static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                   void *user) {
+    (void)user;
     (void)ctx;
     odin3_strbuf path;
     odin3_strbuf_init(&path);
@@ -197,7 +202,9 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
 
 /* --- check, compact -------------------------------------------------------------------------- */
 
-static odin3_status check_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status check_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                              void *user) {
+    (void)user;
     (void)ctx;
     odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
@@ -210,7 +217,9 @@ static odin3_status check_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     return odin3_check_design(design, opts);
 }
 
-static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                void *user) {
+    (void)user;
     (void)ctx;
     odin3_status st = no_args("compact", args);
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
@@ -291,7 +300,9 @@ static void log_module_counts(const odin3_module *module, const char *name) {
               odin3_module_port_count(module), nodes, nets, wires);
 }
 
-static odin3_status stats_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status stats_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                              void *user) {
+    (void)user;
     (void)ctx;
     odin3_status st = no_args("stats", args);
     if (st != ODIN3_OK) {
@@ -350,7 +361,9 @@ static odin3_status parse_hier_args(odin3_bytes args, hier_args *out) {
  * Top selection: hierarchy's --top, else the CLI's --top option, else the top already set (unless
  * -auto), else the single module no other module instantiates.
  */
-static odin3_status hierarchy_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args) {
+static odin3_status hierarchy_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                  void *user) {
+    (void)user;
     (void)ctx;
     hier_args parsed = {0};
     odin3_status st = parse_hier_args(args, &parsed);
@@ -376,34 +389,53 @@ static odin3_status hierarchy_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     return select_auto(design);
 }
 
+/* --- read_techlib ---------------------------------------------------------------------------- */
+
+/* Reads a tech library (1G): each cell becomes a local cell type of the design, so a netlist read
+ * afterwards instantiates it (a BLIF .subckt of the cell's name). */
+static odin3_status read_techlib_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                     void *user) {
+    (void)ctx;
+    (void)user;
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    odin3_status st = one_path("read_techlib", args, &path);
+    if (st == ODIN3_OK) {
+        st = odin3_techlib_read(design, path.data);
+    }
+    odin3_strbuf_free(&path);
+    return st;
+}
+
 /* --- the table ------------------------------------------------------------------------------- */
 
 static const odin3_pass_def READ_BLIF = {
     "read_blif", "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
-    read_blif_run};
+    read_blif_run, NULL};
+static const odin3_pass_def READ_TECHLIB = {
+    "read_techlib",
+    "read_techlib <file>: read a tech library (.o3lib); its cells become cell types of the design",
+    read_techlib_run, NULL};
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif", "write_blif <file>: write the design as BLIF (the top module first)",
-    write_blif_run};
+    write_blif_run, NULL};
 static const odin3_pass_def CHECK = {
-    "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run};
+    "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run, NULL};
 static const odin3_pass_def COMPACT = {
     "compact",
     "compact: renumber each module densely, freeing dead objects (IR-6; atomic per module only)",
-    compact_run};
+    compact_run, NULL};
 static const odin3_pass_def STATS = {
     "stats", "stats: log modules, top, and per module ports/nodes/nets/wires and cell types",
-    stats_run};
+    stats_run, NULL};
 static const odin3_pass_def HIERARCHY = {
     "hierarchy",
     "hierarchy [--top <name>] [-auto]: set the top module (named, or the one no module "
     "instantiates)",
-    hierarchy_run};
+    hierarchy_run, NULL};
 
-/*
- * Registry order. read_techlib registers here when the 1G tech library merges (ruling in the 1D
- * plan ledger): it reads a .o3lib through the 1G reader, like read_blif reads through 1C's.
- */
-const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF, &WRITE_BLIF, &CHECK,
-                                                      &COMPACT,   &STATS,      &HIERARCHY};
+/* Registry order. */
+const odin3_pass_def *const odin3_builtin_passes[] = {
+    &READ_BLIF, &READ_TECHLIB, &WRITE_BLIF, &CHECK, &COMPACT, &STATS, &HIERARCHY};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

@@ -23,6 +23,9 @@
 #ifndef EXAMPLE_PLUGIN_PATH
 #error "EXAMPLE_PLUGIN_PATH must name the example plugin"
 #endif
+#ifndef BAD_INIT_PLUGIN_PATH
+#error "BAD_INIT_PLUGIN_PATH must name tests/unit/plugin_bad_init.c's plugin"
+#endif
 
 enum { LOG_CAP = 1 << 14, PATH_BUF = 512, LINE_BUF = 2 * PATH_BUF, ARGS_BUF = 128 };
 enum { MAX_CALLS = 4, MAX_HITS = 64 };
@@ -206,15 +209,17 @@ static void test_celltype_reserved_slot_rejected(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register(&type.def));
 }
 
-/* Registers the one-field-broken copy of a valid definition; expects a logged refusal. */
-static void expect_refused(const or_type *type) {
+/* Registers the one-field-broken copy of a valid definition; expects a refusal logged for reason
+ * (and so for that field, not an earlier check). */
+static void expect_refused(const or_type *type, const char *reason) {
     log_text[0] = '\0';
     log_len = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register(&type->def));
-    TEST_ASSERT_TRUE(log_len > 0);
+    TEST_ASSERT_TRUE_MESSAGE(log_has(reason), reason);
 }
 
-static void test_celltype_rejects_bad_fields(void) {
+/* Fields the ABI layer checks itself. */
+static void test_celltype_rejects_bad_abi_fields(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_celltype_register(NULL));
     TEST_ASSERT_TRUE(log_has("odin3_celltype_register: invalid argument"));
     or_type type;
@@ -222,37 +227,56 @@ static void test_celltype_rejects_bad_fields(void) {
     for (size_t i = 0; i < sizeof k_bad_gran / sizeof k_bad_gran[0]; i++) {
         or_type_init(&type, "abi_bad");
         type.def.gran = k_bad_gran[i];
-        expect_refused(&type);
+        expect_refused(&type, "granularity must be");
     }
     or_type_init(&type, "abi_bad");
     type.def.flags = 1U << 5; /* not an ODIN3_CT_* flag */
-    expect_refused(&type);
-    or_type_init(&type, "abi_bad");
-    type.def.flags = ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL;
-    expect_refused(&type);
+    expect_refused(&type, "unknown flag bits");
     or_type_init(&type, "abi_bad");
     type.ports[1].dir = 3;
-    expect_refused(&type);
+    expect_refused(&type, "port direction out of range");
     or_type_init(&type, "abi_bad");
     type.params[1].kind = 4;
-    expect_refused(&type);
+    expect_refused(&type, "parameter kind out of range");
     or_type_init(&type, "abi_bad");
     type.params[1].dflt = 1; /* a STRING default cannot be given */
-    expect_refused(&type);
-    or_type_init(&type, "abi_bad");
-    type.ports[0].width_param = "TAG"; /* not an INT parameter */
-    expect_refused(&type);
-    or_type_init(&type, "abi_bad");
-    type.ports[1].name = "A";
-    expect_refused(&type);
-    or_type_init(&type, "abi_bad");
-    type.ports[1].name = NULL;
-    expect_refused(&type);
+    expect_refused(&type, "only an INT parameter has a default");
     or_type_init(&type, "abi_bad");
     type.def.ports = NULL;
-    expect_refused(&type);
+    expect_refused(&type, "NULL port or parameter array");
+    or_type_init(&type, "abi bad");
+    expect_refused(&type, "the name must be printable ASCII without blanks");
+    or_type_init(&type, "abi_bad");
+    type.ports[0].name = "A=1";
+    expect_refused(&type, "a port name must be printable ASCII");
+    or_type_init(&type, "abi_bad");
+    type.params[1].name = "T\nAG";
+    expect_refused(&type, "a parameter name must be printable ASCII");
+    or_type_init(&type, "abi_bad");
+    type.ports[0].width = 4; /* besides its width_param */
+    expect_refused(&type, "sized by width_param must have width 0");
+    or_type_init(&type, "abi_bad");
+    type.ports[1].width = 2;
+    expect_refused(&type, "a scalar port must have the constant width 1");
+}
+
+/* Fields the IR's own validation refuses; none of the refusals registers anything. */
+static void test_celltype_rejects_bad_ir_fields(void) {
+    or_type type;
+    or_type_init(&type, "abi_bad");
+    type.def.flags = ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL;
+    expect_refused(&type, "SEQ_EDGE and SEQ_LEVEL are exclusive");
+    or_type_init(&type, "abi_bad");
+    type.ports[0].width_param = "TAG"; /* not an INT parameter */
+    expect_refused(&type, "width parameter is not an int parameter");
+    or_type_init(&type, "abi_bad");
+    type.ports[1].name = "A";
+    expect_refused(&type, "duplicate port name");
+    or_type_init(&type, "abi_bad");
+    type.ports[1].name = NULL;
+    expect_refused(&type, "port without a name");
     or_type_init(&type, "$sop"); /* a built-in's name */
-    expect_refused(&type);
+    expect_refused(&type, "already registered");
     or_type_init(&type, "abi_bad"); /* none of the refusals registered it */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register(&type.def));
 }
@@ -381,6 +405,15 @@ static void test_example_plugin_pass_and_celltype(void) {
                           odin3_design_run_pass(design, "example_count", "extra"));
 }
 
+/* A plugin whose init registers a pass and a cell type, then fails: it stays loaded, so its pass
+ * (code and user data in the object) still runs safely (once crashed: dlclose after init). */
+static void test_failed_init_keeps_plugin_loaded(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PLUGIN, odin3_plugin_load(BAD_INIT_PLUGIN_PATH));
+    TEST_ASSERT_NOT_EQUAL_UINT32(UINT32_MAX, pass_index("bad_init_pass"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "bad_init_pass", NULL));
+    TEST_ASSERT_TRUE(log_has("bad_init_pass: ran"));
+}
+
 /* --- provenance ---------------------------------------------------------------------------- */
 
 typedef struct source_list {
@@ -438,6 +471,31 @@ static void test_prov_sources_of_objects(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_sources(design, top, collect_source, &mod));
     TEST_ASSERT_EQUAL_UINT32(1, mod.count);
     TEST_ASSERT_EQUAL_UINT32(HAND_TOP_LINE, mod.first.line);
+}
+
+/* A callback of the forward visitor that walks each object backward (nested visitor calls). */
+typedef struct nested_walk {
+    uint32_t objects;
+    uint32_t on_line; /* objects whose first source is the queried line */
+} nested_walk;
+
+static void walk_back(const odin3_prov_object *found, void *user) {
+    nested_walk *walk = user;
+    source_list src = {0};
+    walk->objects++;
+    if (odin3_prov_visit_sources(design, found->obj, collect_source, &src) == ODIN3_OK &&
+        src.first.line == HAND_SUB_LINE) {
+        walk->on_line++;
+    }
+}
+
+static void test_prov_nested_visits(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_path(hand_path()));
+    nested_walk walk = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_prov_visit_objects(design, hand_path(), HAND_SUB_LINE, walk_back, &walk));
+    TEST_ASSERT_TRUE(walk.objects >= 1);
+    TEST_ASSERT_EQUAL_UINT32(walk.objects, walk.on_line);
 }
 
 static void test_prov_objects_of_line(void) {
@@ -502,13 +560,16 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_celltype_register_copies_and_creates_nodes);
     RUN_TEST(test_celltype_reserved_slot_rejected);
-    RUN_TEST(test_celltype_rejects_bad_fields);
+    RUN_TEST(test_celltype_rejects_bad_abi_fields);
+    RUN_TEST(test_celltype_rejects_bad_ir_fields);
     RUN_TEST(test_pass_register_runs_from_script);
     RUN_TEST(test_pass_failure_is_returned);
     RUN_TEST(test_pass_register_rejects);
     RUN_TEST(test_example_plugin_pass_and_celltype);
+    RUN_TEST(test_failed_init_keeps_plugin_loaded);
     RUN_TEST(test_prov_sources_of_objects);
     RUN_TEST(test_prov_objects_of_line);
     RUN_TEST(test_prov_invalid_arguments);
+    RUN_TEST(test_prov_nested_visits);
     return UNITY_END();
 }

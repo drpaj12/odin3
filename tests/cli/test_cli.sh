@@ -8,7 +8,8 @@
 # model), top_written_first (write_blif puts the top first, so it reads back as the top),
 # top_unapplied (an unused --top is a warning), quoted (quoted paths; an unterminated quote is a
 # located error), help_runs_nothing, check_flag (--check accepted; its Release semantics are unit
-# tested), usage (bad arguments exit 2).
+# tested), usage (bad arguments exit 2), techlib (read_techlib, a BLIF using its multiply, write),
+# plugin (the example plugin's pass and cell type from a script; $ODIN3_EXAMPLE_PLUGIN names it).
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -91,6 +92,24 @@ help_runs_nothing)
         fail "odin3 --help failed"
     grep -qF "hierarchy [--top <name>]" "$work/out" || fail "help lacks the pass list"
     [[ ! -e $work/out.blif ]] || fail "--help ran the script"
+    ;;
+techlib)
+    # read_techlib, then a BLIF instantiating the library's multiply, then write: the round trip
+    # is identical, and a missing library is a nonzero exit.
+    lib=$fixtures/../../../lib/vtr.o3lib
+    mult=$fixtures/../techlib/multiply.parmys.01.blif
+    "$odin3" -p "read_techlib $lib; read_blif $mult; check; stats; write_blif $work/out.blif" \
+        2>"$work/err" || fail "odin3 read_techlib script failed"
+    grep -qF "pass read_techlib: " "$work/err" || fail "read_techlib did not run"
+    grep -qF "multiply 1" "$work/err" || fail "stats lacks the multiply cell"
+    "$compare" "$mult" "$work/out.blif" || fail "netlist-compare: not identical"
+    expect_fail "cannot open" -p "read_techlib $work/none.o3lib"
+    ;;
+plugin)
+    "$odin3" --plugin "${ODIN3_EXAMPLE_PLUGIN:?}" \
+        -p "read_blif $fixtures/../../cli/example_plugin.blif; check; example_count" \
+        2>"$work/err" || fail "odin3 with the example plugin failed"
+    grep -qF "example_count: 2 example_and cells" "$work/err" || fail "no example_count line"
     ;;
 check_flag)
     "$odin3" --check -p "read_blif $fixture; check --fast" 2>"$work/err" || fail "--check failed"

@@ -79,9 +79,12 @@ typedef odin3_status (*odin3_plugin_init_fn)(uint32_t host_abi_version);
 /*
  * Loads the shared object at `path` and calls its odin3_plugin_init.
  * Returns ODIN3_ERR_INVALID_ARG if `path` is NULL, ODIN3_ERR_IO if the file
- * cannot be loaded, ODIN3_ERR_PLUGIN if it does not export odin3_plugin_init,
- * or whatever status the plugin's init returns. The plugin stays loaded for
- * the life of the process; nothing is returned for the caller to free.
+ * cannot be loaded, ODIN3_ERR_PLUGIN if it does not export odin3_plugin_init
+ * (the object is unloaded then), or whatever status the plugin's init returns.
+ * Once init has been called the plugin stays loaded for the life of the
+ * process, even when init fails: registrations are not undone, so whatever it
+ * registered before failing (passes, cell types) remains in effect and
+ * usable. Nothing is returned for the caller to free.
  */
 odin3_status odin3_plugin_load(const char *path);
 
@@ -564,9 +567,10 @@ typedef void (*odin3_sim_fn)(const odin3_sim_cell *cell);
 typedef odin3_status (*odin3_sim_scratch_fn)(const odin3_sim_cell *cell, uint32_t *bytes);
 
 /*
- * One port of a plugin cell type. dir: an odin3_dir value. Width: the INT parameter named
- * width_param when it is not NULL (the node's value of it), else the constant width. scalar:
- * written without brackets by the writers (a 1-bit port that is not a vector).
+ * One port of a plugin cell type. name: printable ASCII without blanks, '=', '[' or ']' (a BLIF
+ * formal). dir: an odin3_dir value. Width: the INT parameter named width_param when it is not NULL
+ * (the node's value of it; width must then be 0), else the constant width. scalar: written without
+ * brackets by the writers (a 1-bit port that is not a vector: width 1 and no width_param).
  */
 typedef struct odin3_plugin_port {
     const char *name;
@@ -577,8 +581,13 @@ typedef struct odin3_plugin_port {
 } odin3_plugin_port;
 
 /*
- * One parameter of a plugin cell type. kind: an odin3_value_kind value. dflt: the default of an
- * INT parameter; any other kind defaults to empty (no bits, "", no cover rows), and dflt must be 0.
+ * One parameter of a plugin cell type. name: printable ASCII without blanks. kind: an
+ * odin3_value_kind value. dflt: the default of an INT parameter; any other kind defaults to empty
+ * (no bits, "", no cover rows), and dflt must be 0.
+ *
+ * Neither port nor parameter has reserved slots: a later ABI version that adds per-port width
+ * functions or expressions, or non-INT defaults, adds them as arrays parallel to ports or params
+ * reached through a reserved slot of odin3_plugin_celltype, so these layouts never change.
  */
 typedef struct odin3_plugin_param {
     const char *name;
@@ -587,7 +596,8 @@ typedef struct odin3_plugin_param {
 } odin3_plugin_param;
 
 /*
- * A cell type as a plugin describes it: plain data (docs/IR.md IR-8, IR-11). gran: an
+ * A cell type as a plugin describes it: plain data (docs/IR.md IR-8, IR-11). name: printable
+ * ASCII without blanks (a BLIF `.subckt` word). gran: an
  * odin3_granularity value, one of WORD, BIT, HARD or BLACKBOX (MODULE and PORT types belong to
  * the IR); flags: ODIN3_CT_* bits; ports and params: n_ports and n_params entries in definition
  * order (NULL only when the count is 0); names unique within each array, and every width_param
@@ -600,8 +610,8 @@ typedef struct odin3_plugin_celltype {
     uint32_t gran;
     uint32_t flags;
     const odin3_plugin_port *ports;
-    uint32_t n_ports;
     const odin3_plugin_param *params;
+    uint32_t n_ports;
     uint32_t n_params;
     odin3_sim_fn simulate;
     odin3_sim_scratch_fn sim_scratch_bytes;
@@ -614,10 +624,12 @@ typedef struct odin3_plugin_celltype {
  * afterwards hold the type (odin3_design_create) and their readers instantiate it by name (a BLIF
  * `.subckt`, its parameters derived from the connected pins as for any type); existing designs do
  * not see it. ODIN3_ERR_INVALID_ARG (logged) for a NULL definition, a reserved slot that is not
- * NULL, a granularity, direction, kind or flag out of range, a non-INT parameter with a non-zero
- * dflt, a definition the IR rejects (a missing or duplicate name, a width_param that names no INT
- * parameter, inconsistent simulation flags), or a name already registered; ODIN3_ERR_NO_MEMORY.
- * Nothing is registered on failure. Process-wide; not thread-safe; a type cannot be unregistered.
+ * NULL, a granularity, direction, kind or flag out of range, a name with a character it may not
+ * hold, a scalar port that is not 1 bit wide, a width_param with a non-zero width, a non-INT
+ * parameter with a non-zero dflt, a definition the IR rejects (a missing or duplicate name, a
+ * width_param that names no INT parameter, inconsistent simulation flags), or a name already
+ * registered; ODIN3_ERR_NO_MEMORY. Nothing is registered on failure. Process-wide; not thread-safe;
+ * a type cannot be unregistered.
  */
 odin3_status odin3_celltype_register(const odin3_plugin_celltype *def);
 
@@ -643,7 +655,8 @@ typedef void (*odin3_source_visit)(const odin3_source *src, void *user);
  * or imported record its provenance reaches through its parents, depth-first in parent order, so
  * the first call is the location that names the object; each record once. obj is a node, net or
  * wire (live or dead; a pin's is its node's) or a module; an object without provenance visits
- * nothing. visit runs after the walk, so it may call reader functions on design.
+ * nothing. visit runs after the walk, so it may call reader functions on design (the visitors
+ * included); it must not change the design.
  * ODIN3_ERR_INVALID_ARG as the conventions say (a NULL visit, a kind out of range included);
  * ODIN3_ERR_NO_MEMORY before any call.
  */
@@ -668,8 +681,8 @@ typedef void (*odin3_prov_object_visit)(const odin3_prov_object *found, void *us
  * them, breadth-first (IR §6 forward navigation), live and dead, modules included. A file the
  * design never read visits nothing. Builds a provenance index over the whole design on each call
  * (time and memory linear in the design); visit runs after the query and may call reader
- * functions on design. ODIN3_ERR_INVALID_ARG as the conventions say (a NULL file or visit
- * included); ODIN3_ERR_NO_MEMORY before any call.
+ * functions on design (the visitors included); it must not change the design. ODIN3_ERR_INVALID_ARG
+ * as the conventions say (a NULL file or visit included); ODIN3_ERR_NO_MEMORY before any call.
  */
 odin3_status odin3_prov_visit_objects(const odin3_design *design, const char *file, uint32_t line,
                                       odin3_prov_object_visit visit, void *user);

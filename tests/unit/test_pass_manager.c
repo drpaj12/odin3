@@ -22,6 +22,9 @@
 #include <stdio.h>
 #include <string.h>
 
+#if !defined(ODIN3_LIB_DIR) || !defined(ODIN3_TECHLIB_FIXTURES)
+#error "ODIN3_LIB_DIR and ODIN3_TECHLIB_FIXTURES must name lib/ and tests/golden/techlib"
+#endif
 #ifndef ODIN3_BLIF_FIXTURES
 #error "ODIN3_BLIF_FIXTURES must name tests/golden/blif"
 #endif
@@ -139,45 +142,54 @@ void tearDown(void) {
 static int count_calls;
 static odin3_pass_ctx count_ctx;
 static char count_args[PATH_BUF];
+static int count_marker; /* COUNT_PASS's user pointer */
+static const void *count_user;
 
-static odin3_status count_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args) {
+static odin3_status count_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                               void *user) {
     TEST_ASSERT_TRUE(des == ctx->design);
     count_calls++;
     count_ctx = *ctx;
+    count_user = user;
     (void)snprintf(count_args, sizeof count_args, "%.*s", (int)args.len, (const char *)args.ptr);
     return ODIN3_OK;
 }
 
-static const odin3_pass_def COUNT_PASS = {"t_count", "t_count [args]: counts its calls",
-                                          count_pass};
+static const odin3_pass_def COUNT_PASS = {"t_count", "t_count [args]: counts its calls", count_pass,
+                                          &count_marker};
 
 /* Breaks rule 4: a second driver on net 1 of module 1 (an input port's net). */
-static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args) {
+static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                               void *user) {
+    (void)user;
     (void)ctx;
     (void)args;
     odin3_module *module = odin3_module_get(des, (odin3_module_id){1});
     return odin3_ir_test_corrupt(module, (odin3_ir_test_target){ODIN3_IR_TEST_MULTI_DRIVER, 1});
 }
 
-static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4", break_pass};
+static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4", break_pass, NULL};
 
-static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args) {
+static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                              void *user) {
+    (void)user;
     (void)ctx;
     (void)des;
     (void)args;
     return ODIN3_ERR_IO;
 }
 
-static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass};
+static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass, NULL};
 
 /* Breaks rule 4 like t_break, then fails: the check after it still runs. */
-static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, break_pass(ctx, des, args));
+static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                                    void *user) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, break_pass(ctx, des, args, user));
     return ODIN3_ERR_IO;
 }
 
 static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail", "t_break_fail: breaks, then fails",
-                                               break_fail_pass};
+                                               break_fail_pass, NULL};
 
 static void register_test_passes(void) {
     static bool done = false;
@@ -202,8 +214,8 @@ static void assert_builtin(const char *name) {
 }
 
 static void test_builtins_registered(void) {
-    static const char *const names[] = {"read_blif", "write_blif", "check",
-                                        "compact",   "stats",      "hierarchy"};
+    static const char *const names[] = {"read_blif", "read_techlib", "write_blif", "check",
+                                        "compact",   "stats",        "hierarchy"};
     for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         assert_builtin(names[i]);
     }
@@ -220,18 +232,19 @@ static void test_register_and_run(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_count", "a  b"));
     TEST_ASSERT_EQUAL_INT(1, count_calls);
     TEST_ASSERT_EQUAL_STRING("a  b", count_args);
+    TEST_ASSERT_EQUAL_PTR(&count_marker, count_user); /* the definition's user pointer */
     TEST_ASSERT_TRUE(log_has("I pass t_count: "));
     TEST_ASSERT_TRUE(log_has(" ms\n"));
 }
 
 static void test_register_rejects(void) {
     register_test_passes();
-    static const odin3_pass_def dup_builtin = {"check", "x", count_pass};
-    static const odin3_pass_def blank = {"a b", "x", count_pass};
-    static const odin3_pass_def semi = {"a;b", "x", count_pass};
-    static const odin3_pass_def empty = {"", "x", count_pass};
-    static const odin3_pass_def no_run = {"t_no_run", "x", NULL};
-    static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass};
+    static const odin3_pass_def dup_builtin = {"check", "x", count_pass, NULL};
+    static const odin3_pass_def blank = {"a b", "x", count_pass, NULL};
+    static const odin3_pass_def semi = {"a;b", "x", count_pass, NULL};
+    static const odin3_pass_def empty = {"", "x", count_pass, NULL};
+    static const odin3_pass_def no_run = {"t_no_run", "x", NULL, NULL};
+    static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&COUNT_PASS));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&dup_builtin));
@@ -411,6 +424,23 @@ static void test_compact_pass(void) {
     TEST_ASSERT_EQUAL_UINT32(end - 1, odin3_module_node_end(leaf));
     TEST_ASSERT_EQUAL_UINT32(1, odin3_tombstone_end(design) - 1);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("compact", "x"));
+}
+
+/* read_techlib registers the library's cells, so a BLIF read afterwards instantiates `multiply`
+ * as the library's hard cell; bad arguments and a missing file fail. */
+static void test_read_techlib(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("read_techlib", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("read_techlib", ODIN3_LIB_DIR "/none.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("read_techlib " ODIN3_LIB_DIR
+                                          "/vtr.o3lib; read_blif " ODIN3_TECHLIB_FIXTURES
+                                          "/multiply.parmys.01.blif"));
+    odin3_celltype_id type = {0};
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("multiply"), &name));
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, name, &type));
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_HARD, odin3_celltype_get(design, type)->gran);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_celltype_instances(design, type));
 }
 
 static void test_stats_format(void) {
@@ -847,5 +877,6 @@ int main(void) {
     RUN_TEST(test_script_crlf);
     RUN_TEST(test_resolve_runs_nothing);
     RUN_TEST(test_check_warnings_once_per_pass);
+    RUN_TEST(test_read_techlib);
     return UNITY_END();
 }

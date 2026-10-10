@@ -25,9 +25,7 @@ ODIN3_EXPORT odin3_status odin3_plugin_load(const char *path) {
      * representations match, so copy the bits. */
     odin3_plugin_init_fn init = NULL;
     memcpy((void *)&init, (const void *)&sym, sizeof init);
-    odin3_status status = init((uint32_t)ODIN3_ABI_VERSION);
-    if (status != ODIN3_OK) {
-        dlclose(handle);
-    }
-    return status;
+    /* Never unloaded once init has run, even when it fails: whatever it registered before failing
+     * (passes, cell types and their hooks, user pointers) points into the shared object. */
+    return init((uint32_t)ODIN3_ABI_VERSION);
 }

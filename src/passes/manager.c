@@ -156,7 +156,7 @@ static odin3_status open_run(odin3_design *design, const char *name, odin3_pass_
 
 /* The pass and the check after it; a failing pass keeps its status, the check still runs. */
 static odin3_status run_checked(odin3_pass_ctx *ctx, const odin3_pass_def *def, odin3_bytes args) {
-    odin3_status st = def->run(ctx, ctx->design, args);
+    odin3_status st = def->run(ctx, ctx->design, args, def->user);
     if (st != ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "pass %s: failed: %s", def->name, odin3_status_string(st));
     }
