@@ -33,7 +33,7 @@ Design ─┬─ strtab (names, paths, string literals)                      des
         ├─ srcman ─┬─ buffers (FILE, EXPANSION, MACRO_ARG, SCRATCH)      design-owned (AST-1)
         │          ├─ per-FILE line maps
         │          └─ per-stream segment maps (preprocessed text → loc)
-        ├─ asts: at most one per read run (+ the parsed store when kept; AST-13/14)
+        ├─ asts: at most one per read run (+ the parsed store when kept; AST-15/16)
         │     ├─ nodes      (pagevec, 24-byte records)                   AST-local IDs
         │     ├─ children   (vec of node IDs; each node owns one span)
         │     ├─ payloads   (numbers, reals, opaque text) + arena for bytes
@@ -61,50 +61,87 @@ line starts, chain records and segment maps only.
 A location is one `uint32_t` offset into a virtual source space (`odin3_loc`, 0 = unknown).
 Every *buffer* occupies `[start, start + len]`; buffers are allocated in creation order from
 offset 1, each reserving `len + 1` so that one-past-the-end is a loc of its own buffer and no
-two buffers touch. A token's loc is its offset inside the buffer it was **spelled** in; a node's
-range is two independent locs `{loc, end}` (`end` one past the last byte, 0 = unknown), which
-may lie in different buffers (`assign `OUT = a;` starts in an expansion and ends in the file).
-Chosen over a `{file, line, col}` triple (12 bytes, no chains, no ordering) and over a
-hash-consed location table (a lookup per token): 4 bytes, decodes in O(log buffers + log lines),
-and the chains come free from the buffer graph.
+two buffers touch. A token's loc is its offset inside the buffer it was **spelled** in, and a
+token's `end` is `loc(last byte) + 1` **in the token's own buffer** (the lexer derives it from
+the start loc and the token length, never from the output end offset, which would land in the
+next segment). A node's range is two independent locs (`odin3_range {loc, end}`; `end` 0 =
+unknown) that may lie in different buffers (`assign `OUT = a;` starts in an expansion and ends
+in the file). Chosen over a `{file, line, col}` triple (12 bytes, no chains, no ordering) and
+over a hash-consed location table (a lookup per token): 4 bytes, decodes in
+O(log buffers + log lines), and the chains come free from the buffer graph.
 
 | field | `FILE` | `EXPANSION` | `MACRO_ARG` | `SCRATCH` |
 |---|---|---|---|---|
-| range covers | the file's bytes | the macro's **body as spelled in its definition** (offset *k* ↔ `def + k`) | the argument text **as spelled at the use site** | pasted/stringified text that exists nowhere (SV `` `` ``/`` `" ``, Phase 5; never made by 2B) |
+| range covers | the file's bytes (also the `<command line>` buffer: the `+define+`/project `define` texts, one per line, so every macro has a defining buffer) | the macro's **body as spelled in its definition** (offset *k* ↔ `def + k`) | **one contiguous spelled run** of a substituted argument (offset *k* ↔ `def + k`) | pasted/stringified text that exists nowhere (SV `` `` ``/`` `" ``, Phase 5; never made by 2B) |
 | `name` | path as given (strtab) | macro name | macro name | 0 |
-| `resolved`, `library` | absolute path; library (`work` default; an included file inherits its includer's) | 0 | 0 | 0 |
+| `resolved`, `library` | absolute path (0 for `<command line>`); library (`work` default; an included file inherits its includer's) | 0 | 0 | 0 |
 | `parent` | loc of the `` `include `` that opened it, 0 for a project file | the use site: loc of the macro name token | loc of the formal parameter's occurrence inside the `EXPANSION` body it was substituted into | loc of the operator inside the `EXPANSION` body |
 | `parent_end` | 0 | one past the use (after `)` or the name) | one past the formal | one past the operator |
-| `def` | 0 | loc of the body's first byte in the defining file | loc of the argument's first byte where the user wrote it (a file, or an enclosing expansion) | 0 |
+| `def` | 0 | loc of the body's first byte in the defining buffer | loc of the run's first byte as spelled: in a file, in an expansion body, or in another argument run | 0 |
 | `lines` | vec of line-start offsets, line 1 at 0 | — | — | — |
 
-Nested expansion: when A's body uses B, B's `parent` is inside A's buffer, so the walk below
-passes through A. Each expansion event costs its body length once, never the accumulated
-expanded text, so nesting does not multiply the space used.
+**Argument runs.** After substitution an argument's text may be spelled in several buffers, so
+2B makes one `MACRO_ARG` buffer per contiguous spelled run; the runs of one substitution share
+`parent`/`parent_end`, and a formal used twice in a body (`(x*x)`) gets its own buffers per
+occurrence. Each expansion event costs its body length once and each substitution its argument
+length once, so nesting does not multiply the space used. Worked example (`f.v`):
+
+```
+1  `define INNER(p) (p + 1)                  INNER body at 1:18
+2  `define OUTER(q) `INNER(q * 2)            OUTER body at 2:18; q at 2:25, * at 2:27, 2 at 2:29
+3  assign y = `OUTER(xx);                    `OUTER at 3:12, xx at 3:19, ) at 3:21
+```
+
+Buffers, in creation order: `E1` = `EXPANSION` of `OUTER` (len 13, `def` 2:18, `parent` 3:12,
+`parent_end` 3:22); `A1` = `MACRO_ARG` for `q` ← `xx` (len 2, `def` 3:19, `parent` E1+7 — the
+`q`, spelled 2:25 — `parent_end` E1+8); `E2` = `EXPANSION` of `INNER` (len 7, `def` 1:18,
+`parent` E1+0, spelled 2:18, `parent_end` E1+13). `INNER`'s argument after substitution is
+`xx * 2`, two spelled runs: `A2` = `xx` (len 2, `def` A1+0, `parent` E2+1 — the `p`, spelled
+1:19 — `parent_end` E2+2) and `A3` = ` * 2` (len 4, `def` E1+8, spelled 2:26, same
+`parent`/`parent_end`). Output text `assign y = (xx * 2 + 1);` with segments: `assign y = `
+from the file, `(` from E2+0, `xx` from A2, ` * 2` from A3, ` + 1)` from E2+2, `;` from 3:22.
 
 ### 3.2 Decoding
 
+Every walk below is a loop over buffer records, never recursion.
+
 - **Spelling** of `loc`: in a `FILE`, itself; in an `EXPANSION` or `MACRO_ARG`,
-  `def + (loc − start)` (then decode again: `def` of an argument may be in an expansion);
-  `SCRATCH` has none.
-- **Presumed location**: follow `parent` while the buffer is not a `FILE` (a loop). The first
-  `FILE` loc reached is where the user wrote the text that produced the token; a token from a
-  macro argument therefore reports the *invocation* of the macro, as Clang does.
+  `def + (loc − start)`, repeated until a `FILE` (an argument run's `def` may be in a body or
+  another run); `SCRATCH` has none. Example: `xx` (A2+0) → A1+0 → 3:19; `*` (A3+1) → E1+9 →
+  2:27.
+- **Presumed location** (`odin3_srcman_presumed`): follow `parent` while the buffer is not a
+  `FILE`. It is where the outermost macro was invoked: `xx`, `*` and `2` all → E2 → E1 → 3:12.
+  Used for range comparison, `locs[0]` ordering and hierarchical naming.
+- **File location** (`odin3_srcman_file_loc`, Clang's `getFileLoc`): in a `MACRO_ARG`, go to
+  the spelling; in an `EXPANSION`/`SCRATCH`, go to `parent`; repeat until a `FILE`. A token
+  from an argument therefore reports its own spelling, a token from a body the macro's use:
+  `xx` → 3:19; `*` → E1+9 → 3:12; `(` (E2+0) → E1+0 → 3:12. Diagnostics use it (§3.4).
 - **Line and column**: `odin3_srcman_decode(sm, loc, &pos)` gives `{buffer, line, col}` for a
   `FILE` loc: a binary search on `start`, one in `lines`, `col = 1 + offset − line_start` in
-  **bytes** (tabs count 1, UTF-8 counts bytes, Clang's rule). Non-`FILE` locs decode through
-  their presumed location.
-- **Ranges** compare only after both ends are mapped to presumed locations:
-  `odin3_srcman_presumed_range(sm, loc, end, &range)` returns the two presumed locs when they
-  are in the same `FILE` buffer and ordered, else the start alone (`end` 0). `loc ≤ end` is
-  required only when both are in one buffer (§10, rule 1).
-- **Provenance**: `odin3_srcloc` (IR-12) gains a `uint32_t loc` field — the raw presumed loc
-  (amendment, §13) — so the include chain and macro names are recoverable through the
-  design-owned source manager for the life of the design. `odin3_srcman_srcloc(sm, loc, end,
-  &srcloc)` fills `file` (given path, strtab), `line`, `col`, `end_line`, `end_col` (0 when the
-  presumed range is not in one file) and `loc`. `odin3_srcman_chain(sm, loc, visit, user)`
-  visits one `odin3_srcloc` per expansion level, innermost spelling first; 2D stores them as
-  `locs[1..]` of a SOURCE record (a design that never uses macros stores none).
+  **bytes** (tabs count 1, UTF-8 counts bytes; Clang's rule). A non-`FILE` loc decodes through
+  its file location.
+- **Ends map through `parent_end`** (`odin3_srcman_presumed_end`): while the buffer is not a
+  `FILE`, `end = parent_end` of that buffer. **Ranges** compare only after both ends are
+  mapped: `odin3_srcman_presumed_range(sm, odin3_range r, &out)` returns `{presumed(loc),
+  presumed_end(end)}` when both are in one `FILE` buffer and ordered, else the start alone
+  (`end` 0). `loc ≤ end` is required only when both lie in one buffer (§10, rule 1). Worked
+  example, `` `define OUT y `` on line 1 (body at 1:13) and `assign `OUT = a;` on line 2
+  (`` `OUT `` at 2:8–2:11, `a` at 2:15, `;` at 2:16); E = the expansion (len 1, `parent` 2:8,
+  `parent_end` 2:12): `IDENT y` has `{E+0, E+1}` → presumed range 2:8–2:12; `NET_ASSIGN` has
+  `{E+0, 2:16}` → 2:8–2:16; `CONT_ASSIGN` `{2:1, 2:17}` → 2:1–2:17. With `` `define W 8 `` and
+  `assign x = `W;`, `NET_ASSIGN` ends at the expansion's end → its `parent_end`, one past
+  `` `W ``, so the range covers the macro use. A node wholly inside one expansion gets the
+  non-empty range of that use.
+- **Provenance**: `odin3_srcloc` (IR-12) gains a `uint32_t loc` field holding the **raw loc**
+  of the node — any buffer, exactly as stored on the AST node (amendment, §13) — so the
+  expansion chain, the include chain and the macro names are all recoverable from the
+  design-owned source manager for the life of the design, and nothing else need be stored.
+  `odin3_srcman_srcloc(sm, odin3_range r, &srcloc)` fills `loc` (raw), `file` (given path of
+  the file location, strtab), `line`, `col` (of the file location), `end_line`, `end_col` (of
+  the presumed range; 0 when it is not in one file). A SOURCE record stores one `odin3_srcloc`
+  per node it covers in `locs`; `locs[1..]` are **never** chain entries. The chain is derived
+  on demand by `odin3_srcman_chain(sm, loc, visit, user)` (§3.4), which the provenance printer
+  and `odin3_diag` call.
 - **Twice-included file**: two `FILE` buffers with the same given path and different `parent`s;
   the raw `loc` tells them apart, the `file` string alone does not. The same file in two
   libraries is likewise two buffers (DESIGN §4.0).
@@ -113,11 +150,15 @@ expanded text, so nesting does not multiply the space used.
 
 A **stream** is the preprocessed output of one project source file together with everything it
 includes; one stream becomes one `UNIT`. For each stream 2B produces: (1) expanded text;
-(2) the **segment map**, `odin3_srcman_add_segment(sm, stream, out_offset, loc)`: output byte
-`out_offset` onward is spelled at `loc` onward until the next segment — at least one segment per
-macro expansion, per argument substitution (pointing into its `MACRO_ARG` buffer) and per
-return to the file; (3) buffers and lines as it reads (`odin3_srcman_add_file`,
-`odin3_srcman_add_expansion` with a spec struct each, `odin3_srcman_add_line`).
+(2) the **segment map**, `odin3_srcman_add_segment(sm, const odin3_segment *s)` with
+`odin3_segment {stream, out_offset, loc}`: output byte `out_offset` onward is spelled at `loc`
+onward until the next segment. A segment starts at every point where the output stops following
+the spelled bytes one for one: each macro expansion, each argument **run** (pointing into its
+`MACRO_ARG` buffer), each return to the enclosing buffer (the outer body for a nested
+expansion, the file at the end), each line continuation dropped from a multi-line macro body,
+each stripped comment, and any bytes 2B inserts (a segment with `loc` 0); (3) buffers and lines
+as it reads (`odin3_srcman_add_file`, `odin3_srcman_add_expansion` with a spec struct each,
+`odin3_srcman_add_line`), plus the `<command line>` buffer for macros defined by the project.
 
 2B consumes only the text directives (`` `define `undef `ifdef `ifndef `else `elsif `endif
 `include `line ``); every other directive (`` `default_nettype `timescale `celldefine
@@ -127,19 +168,34 @@ return to the file; (3) buffers and lines as it reads (`odin3_srcman_add_file`,
 the text so that one place, the 2C lexer, records them in the side table with locs from the
 segment map and recognises metacomments (§7); comments inside skipped `` `ifdef `` regions
 and inside macro definitions (a `//` ends a macro text, §19.3.1) are not in any stream and
-are not recorded. The lexer converts a token's output offset to a loc with a monotone cursor
+are not recorded. `// synopsys translate_off` … `translate_on` (L12, D1) is a skip at the
+same level as `` `ifdef `` and belongs to **2B**: the region leaves the stream and nothing in
+it is recorded. The lexer converts a token's output offset to a loc with a monotone cursor
 (`odin3_srcman_cursor_loc`, amortized O(1)); Bison locations are `{loc, end}` pairs. `` `line ``
 never changes a loc. The `UNIT` name is the project file's given path; an included file's
 tokens carry locs in that file's own buffer.
 
 ### 3.4 Printing and diagnostics
 
-`odin3_srcman_format(sm, loc, &strbuf, style)` writes `file:line:col` of the presumed location
-with the given path (default; tests compare paths relative to the case directory) or the
-resolved path; `SCRATCH` prints `<scratch>`; 0 prints `<unknown>:0:0`.
-`odin3_srcman_format_chain` appends one line per expansion level, inner to outer,
-`  expanded from macro 'NAME' at file:line:col` (an argument level reads `  in argument of
-macro 'NAME' at …`), then one per include level `  included from file:line`.
+`odin3_srcman_format(sm, loc, &strbuf, style)` writes `file:line:col` of the **file location**
+(§3.2) with the given path (default; tests compare paths relative to the case directory) or
+the resolved path; 0 prints `<unknown>:0:0`. `odin3_srcman_chain(sm, loc, visit, user)` walks
+outward from the token's own buffer: at a `MACRO_ARG` it reports
+`in argument of macro 'NAME' at <spelling of the formal>` and continues at the run's
+**spelling** (`def`); at an `EXPANSION` it reports `expanded from macro 'NAME' at <spelling of
+the current loc in the body>` and continues at `parent`; at a `SCRATCH` it reports
+`pasted by macro 'NAME'` and continues at `parent`; it stops at a `FILE`, then reports one
+`included from file:line` per include level. `odin3_srcman_format_chain` prints those as
+indented lines. For the §3.1 example:
+
+```
+f.v:3:19: error: … 'xx' …                    f.v:3:12: error: … '*' …
+  in argument of macro 'INNER' at f.v:1:19     in argument of macro 'INNER' at f.v:1:19
+  in argument of macro 'OUTER' at f.v:2:25     expanded from macro 'OUTER' at f.v:2:27
+```
+
+(`2` reads like `*` with 2:29; `+` reports at 3:12 with `expanded from macro 'INNER' at 1:21`
+then `expanded from macro 'OUTER' at 2:18`.)
 `odin3_diag(design, level, loc, fmt, ...)` formats `file:line:col: error|warning|info: message`
 plus the chain lines and delivers them through `util/log` as one message, so a located message
 is never split by another. A reader returns `ODIN3_ERR_PARSE` when it emitted an error.
@@ -209,11 +265,11 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `CONFIG_DECL` | — | req | — | — | — | TEXT | S2 REJECT |
 | `LIST` | — | — | — | — | X* | — | |
 | *Ports and declarations* | | | | | | | |
-| `PORT_REF` | — | opt (0 for `{a,b}`) | — | E? (present only for `.x(e)`/`{…}`) | — | — | M1; M6 REJECT when the slot is filled |
+| `PORT_REF` | — | opt (0 for `{a,b}`) | `DOTTED` (`.x(e)`, `.x()`) | E? (present for `.x(e)`/`{…}`) | — | — | M1; M6 REJECT when `DOTTED` or the name is 0 |
 | `PORT_DECL` | direction (3) `input output inout` | — | `SIGNED IN_HEADER`, `DT` field (3 bits), `NET` field (4 bits, 0 = unspecified) | R? | `DECLARATOR+` (`input [3:0] a, b` is one node with two) | — | M1–M3, M12 |
 | `DECLARATOR` | — | req | — | E? init/value | R* unpacked dims, outermost first | — | N7–N10, N12, P1 |
 | `RANGE` | — | — | — | E msb, E lsb | — | — | N2 |
-| `NET_DECL` | net kind (12) `wire tri wand wor triand trior tri0 tri1 trireg uwire supply0 supply1` | — | `SIGNED VECTORED SCALARED` | R?, `DELAY`?, `STRENGTH`? | `DECLARATOR+` | — | N1, N11, N14–N16, N19 |
+| `NET_DECL` | net kind (12) `wire tri wand wor triand trior tri0 tri1 trireg uwire supply0 supply1` | — | `SIGNED VECTORED SCALARED` | `STRENGTH`?, R?, `DELAY`? (source order, §4.2) | `DECLARATOR+` | — | N1, N11, N14–N16, N19 |
 | `VAR_DECL` | var kind (5) `reg integer time real realtime` | — | `SIGNED` | R? | `DECLARATOR+` | — | N3, N4, N9, N17 |
 | `PARAM_DECL` | (3) `parameter localparam specparam` | — | `SIGNED IN_HEADER`, `DT` field | R? | `DECLARATOR+` | — | P1–P4, P7 |
 | `DEFPARAM` | — | — | — | `HIER_NAME` target, E value | — | — | P6; one node per pair |
@@ -227,7 +283,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `ALWAYS` | (4) `always`, reserved `always_ff always_comb always_latch` | — | — | S | — | — | T1–T6 (T6: 2D rejects an `ALWAYS` whose S is not `TIMING_STMT`[`EVENT_CONTROL`, S]) |
 | `INITIAL` | — | — | — | S | — | — | T5 (D2) |
 | `INSTANTIATION` | — | req (module) | — | L? parameter `CONNECTION*` | `INSTANCE+` | — | I1–I7, P5 |
-| `INSTANCE` | — | opt (0 only for an unnamed gate) | — | R? array | C* | — | I5, I6, Q5 |
+| `INSTANCE` | — | opt (check rule 4: required under `INSTANTIATION`; 0 only under `GATE_DECL`) | — | R? array | C* | — | I5, I6, Q5 |
 | `CONNECTION` | — | opt (0 = ordered) | — | E? (absent: `.p()` / empty slot) | — | — | I1–I3; mixing ordered and named: 2D (I2) |
 | `GATE_DECL` | gate kind (26) `and nand or nor xor xnor buf not bufif0 bufif1 notif0 notif1`, REJECT `nmos pmos cmos rnmos rpmos rcmos tran rtran tranif0 tranif1 rtranif0 rtranif1 pullup pulldown` | — | — | `STRENGTH`?, `DELAY`? | `INSTANCE+` | — | Q1–Q6 |
 | `FUNCTION_DECL` | — | req | `AUTOMATIC SIGNED`, `DT` field (return) | R? return, L ports (`PORT_DECL*`), L locals (D*), S body | — | — | K1–K8 |
@@ -239,7 +295,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `GEN_FOR` | — | — | — | `BLOCKING_ASSIGN` init, E cond, `BLOCKING_ASSIGN` step, I body | — | — | G2–G4 |
 | `GEN_IF` | — | — | — | E, I then, I? else | — | — | G5 (`NULL_STMT` for `;`) |
 | `GEN_CASE` | — | — | — | E | `CASE_ITEM+` (bodies I) | — | G6 |
-| `GEN_BLOCK` | — | opt | — | — | I* | — | G2, G3, G7 |
+| `GEN_BLOCK` | — | opt | — | `NUMBER`? index (elaborated form only: the loop iteration, §4.6) | I* | — | G2, G3, G7 |
 | *Statements* | | | | | | | |
 | `SEQ_BLOCK` | — | opt | — | L? locals (D*) | S* | — | T17, T18 |
 | `PAR_BLOCK` | — | opt | — | L? locals | S* | — | T15 REJECT |
@@ -272,7 +328,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `CONCAT` | — | — | — | — | E+ | — | E12 |
 | `REPLICATE` | — | — | — | E count, `CONCAT` | — | — | E13 |
 | `UNARY` | op (10) `+ - ! ~ & ~& \| ~\| ^ ~^` (`^~` stored as `~^`) | — | — | E | — | — | E1–E4 |
-| `BINARY` | op (23) `+ - * / % ** == != === !== && \|\| < <= > >= & \| ^ ~^ << >> <<< >>>` | — | — | E, E | — | — | E1–E10 |
+| `BINARY` | op (24) `+ - * / % ** == != === !== && \|\| < <= > >= & \| ^ ~^ << >> <<< >>>` | — | — | E, E | — | — | E1–E10 |
 | `TERNARY` | — | — | — | E, E, E | — | — | E11 |
 | `CALL` | — | req (`$`-names kept; dotted names whole with `HIER`) | `SYSTEM HIER` | — | E*0 when `SYSTEM`, else E* | — | E18–E21, K6, K7 |
 | `MINTYPMAX` | — | — | — | E, E, E | — | — | A2, T11 |
@@ -293,8 +349,9 @@ compound assignment, multi-dimensional packed ranges as a `LIST` of `RANGE` in t
 Flags are **per kind**: each kind numbers its own bits from 0 in the order its row lists them
 (`ODIN3_AST_F_<KIND>_<NAME>`; fields: `ODIN3_AST_F_<KIND>_<FIELD>_SHIFT/_MASK`), so every kind
 keeps headroom to 16 bits for Phase 5 and nothing is shared across kinds. The widest row uses
-9 bits (`PORT_DECL`: two flags, a 3-bit and a 4-bit field). `check` rejects a set bit the kind
-does not define.
+9 bits (`PORT_DECL`: two flags, a 3-bit and a 4-bit field). The `DT` field's values are
+`none reg integer real realtime time` (`ODIN3_AST_DT_*`); the `NET` field's are 0 and the
+`NET_DECL` sub-kinds. `check` rejects a set bit the kind does not define.
 
 ### 4.5 Payloads (AST-8)
 
@@ -339,12 +396,16 @@ enforces:
   or `REAL` leaf. A genvar is replaced by a `NUMBER` wherever it was read.
 - **Expanded hierarchy**: one `MODULE` per parameter specialization, named as IR-7 requires
   (`sub$W=8`); every `INSTANTIATION` names the specialization **and keeps its resolved
-  parameters** as named `CONNECTION`s (every parameter the instance's module declares, in
-  declaration order, values resolved), so IR-7's source-parameter attributes and the parameters
-  of black-box and hard-cell instances (`single_port_ram`, `multiply`, Altera cells; I7, P5)
-  survive; generate constructs are `GEN_BLOCK`s with non-zero names — an unnamed block is
-  `genblk<n>`, a loop iteration is `name[index]` (`g[3]`, `genblk1[0]`) — so `HIER_NAME` with
-  constant indices stays expressible (G7); ports are ANSI: each `PORT_DECL` in the port
+  parameters** as `CONNECTION`s (every parameter the instance's module declares, in
+  declaration order, named, values resolved; for a black box with no module definition the
+  overrides stay as written — ordered ones keep name 0), so IR-7's source-parameter attributes
+  and the parameters of black-box and hard-cell instances (`single_port_ram`, `multiply`,
+  Altera cells; I7, P5) survive; generate constructs are `GEN_BLOCK`s with non-zero names — an
+  unnamed block is `genblk<n>`, and a loop iteration carries the **base name plus its index
+  slot** (`g` + `NUMBER 3`, printed `g[3]`), which is what the symbol table stores too (§8) and
+  what keeps it distinct from an escaped identifier whose bytes are `g[3]` (a plain name, no
+  index) — so `HIER_NAME` with constant indices stays expressible (G7) as `SELECT`(bit) over
+  `IDENT`; ports are ANSI: each `PORT_DECL` in the port
   `LIST` has exactly one `DECLARATOR`; implicit nets are declared; `ALWAYS` is `always` over
   `TIMING_STMT`[`EVENT_CONTROL`, S], or a Phase 5 sub.
 - **Kept**: exactly one `UNIT`; functions and tasks with bodies (2D inlines), `IDENT` leaves
@@ -432,8 +493,10 @@ A Bison semantic value is an `odin3_ast_id`; `@$` gives `{loc, end}`. A fixed-ar
 `make` with a small array; a list rule does `mark` at its first item, `push` per item,
 `make_marked` at the parent; nested lists are safe because LR reductions nest. Left-recursive
 operator rules reduce as they go, so a 2,000-term chain does not grow Bison's stack; right-deep
-forms (`else if` chains, parentheses) do, and 2C sets `YYMAXDEPTH` ≥ 4 × `ODIN3_AST_MAX_DEPTH`
-with `YYSTACK_USE_ALLOCA 0` (heap growth) and reports overflow as the same located error. On a
+forms (`else if` chains, parentheses) do, at up to ~6 stack symbols per level, so 2C sets
+`YYMAXDEPTH` ≥ 8 × `ODIN3_AST_MAX_DEPTH` (≈ 4 MB of heap at the limit, `YYSTACK_USE_ALLOCA 0`)
+so that the AST cap fires first for every right-recursive form, and reports a Bison overflow,
+should one still occur, as the same located error. On a
 syntax error the action unwinds to the enclosing mark; abandoned nodes stay as unreachable roots.
 `(* *)` instances reduce to `ATTR` nodes before the item they annotate; the item's rule attaches
 them. The lexer turns a metacomment into `ATTR` nodes flagged `METACOMMENT` (§7).
@@ -502,8 +565,10 @@ operator's `UNARY`/`BINARY`/`TERNARY` node.
 **Metacomments** (D1): `// synopsys full_case`, `// synopsys parallel_case`, both at once, the
 `synthesis` prefix, and the `/* */ form`, placed **after the `case (expr)` header** they modify
 (Yosys's rule). The lexer records the comment and emits `ATTR` nodes flagged `METACOMMENT`; the
-parser attaches them to the `CASE` being parsed when they lie between its header and `endcase`
-(elsewhere they are plain comments). 2E emits D1's per-use warning when it honours one. The
+parser attaches them to the `CASE` whose header they **immediately follow, before its first
+item** (so a nested case's metacomment never reaches the outer one; elsewhere they are plain
+comments), merged with that case's `(* *)` attributes into its single attach (§5). 2E emits
+D1's per-use warning when it honours one. The
 printer writes a `METACOMMENT` attribute back as the metacomment after the header, so the
 round trip holds.
 
@@ -523,9 +588,11 @@ it; the construct's own warning covers them.
 **Comments** go to a side table keyed by location (DESIGN §4.1, PHASE2 #7): a vec of
 `{loc, end, kind LINE|BLOCK, flags METACOMMENT, text}` with text in the AST arena, appended in
 stream order and **sorted once by presumed loc at `finish`** (included files get their buffers
-after the includer, so stream order is not loc order). `odin3_ast_comments_in(ast, loc, end)`
-maps the range to presumed locations and returns the comments inside it by binary search.
-Comments are not nodes and never reach the IR.
+after the includer, so stream order is not loc order). `odin3_ast_comments_in(ast, odin3_range r)`
+maps the range to presumed locations and returns the comments inside it by binary search; a
+range in an includer never covers an included file's comments (they live in another buffer),
+so a consumer that wants them asks per file (`odin3_ast_comments_of(ast, buffer)`). Comments
+are not nodes and never reach the IR.
 
 ## 8. Symbol table (AST-14)
 
@@ -584,13 +651,15 @@ unless kept. A mixed-language project (Verilog plus SystemVerilog, or VHDL throu
 read runs with two ASTs; provenance from each resolves in its own.
 
 **AST-16 ASTs and symbol tables are freed at the end of their read pass** unless kept: the CLI
-flag `--keep-ast` (`--keep-ast=all` also keeps parsed stores), or any pass in the script whose
+flag `--keep-ast` (the debug form `--keep-ast=all` also keeps parsed stores, so a run then
+holds two), or any pass in the script whose
 registry definition (1D's pass registry) sets `wants_ast`, makes the pass manager set
 `odin3_design_set_keep_ast(design, true)` before the read. A kept AST lives until
 `odin3_design_destroy`. This amends DESIGN §4.5 ("never discarded") per PHASE2 #7.
 
-**What survives into the IR**: decoded locations with their raw `loc` in SOURCE provenance
-records (§3.2), the source manager, names and string literals in the strtab, attributes copied
+**What survives into the IR**: `odin3_srcloc`s carrying the raw `loc` in SOURCE provenance
+records (§3.2; chains derived on demand through the source manager), the source manager
+itself, names and string literals in the strtab, attributes copied
 as IR attributes (§7), and `odin3_prov_record.ast` as above. Nothing in the IR holds a pointer
 into an AST (IR-5, spec §15.1).
 
@@ -616,7 +685,7 @@ AST depth of ≈ 2,050 with its leaf and statement nesting; the longest `else if
 
 | Cap | Value | Why |
 |---|---|---|
-| `ODIN3_AST_MAX_DEPTH` | **32768** | ≥ 10 × the measured 2,050 (above); builder-enforced in every build (§5); an explicit stack of 32768 frames is 512 KB; `uint16_t` heights suffice |
+| `ODIN3_AST_MAX_DEPTH` | **32768** | ≥ 10 × the measured 2,050 (above); builder-enforced in every build (§5); an explicit stack of 32768 8-byte frames is 256 KB; `uint16_t` heights suffice |
 | `ODIN3_AST_MAX_NUMBER_BITS` | `ODIN3_READER_MAX_WIDTH` (2^20) | the literal width the readers cap (PHASE2 #5), so a `1000000'b0` cannot later allocate gigabytes of pins |
 | `ODIN3_AST_MAX_DECIMAL_DIGITS` | 4096 | decimal-to-binary is O(n²); 4096 digits (13.6k bits) is already absurd for a decimal |
 | `ODIN3_AST_MAX_STRING_BYTES` | 2^17 | a string parameter (8 bits per byte) stays under the width cap (lexer-checked, §5) |
@@ -645,7 +714,9 @@ Debug builds and on demand, like IR `check`; `ODIN3_ERR_CHECK` on an error; iter
    tail entry only under `E*0`.
 3. **E** every node is referenced by at most one span; an `ATTR` only by the attribute map.
    **I** one count of unreachable non-root nodes.
-4. **E** `name` present or absent as the table says (`req`/`—`); every name a strtab ID.
+4. **E** `name` present or absent as the table says (`req`/`—`), plus the parent-dependent
+   rule the table notes (an `INSTANCE` under an `INSTANTIATION` has a name); every name a
+   strtab ID.
 5. **E** the store's recorded maximum height is correct and ≤ `ODIN3_AST_MAX_DEPTH`.
 6. **E** after `finish`: comments sorted by presumed loc; attribute spans valid; `NUMBER`
    payload agrees with `sub`/flags (`nbits` ≤ cap; `has_xz` matches the bits).
@@ -672,7 +743,7 @@ Unit tests, one file per area, `tests/unit/test_ast_<area>.c` (Unity, ASan/UBSan
   pruning; a chain at the cap walks with the pre-sized stack; the parent index.
 - `number`: every §3.5.1 case (`4'hFF` truncation, warned once; `8'bx` extension; `'hF`
   unsized; `4'sb1000`; `?`; `_`; `8 'h FF` pieces); a property test over random literals
-  (parse → value → print → parse is stable); `_new_str` bit order.
+  (parse → value → print → parse is stable); the ABI's `odin3_ast_number_new_str` bit order.
 - `check`: one negative test per rule through a test-only corruption hook
   (`src/ast/ast_test.h`, hidden) as 1B does.
 - `symtab`: library/module/generate-with-index scopes, outward lookup, shadowing, duplicates,
@@ -728,9 +799,11 @@ parse-only ≤ 1 s. Numbers go to `docs/PHASE2.md`.
 Under PHASE2 #7: DESIGN §4.5 ("never discarded; IR objects back-point to it" → freed after the
 read unless kept, AST-16; the back-pointer is the prov `ast` field resolved by run and form) and
 §4.1 (locations are `{loc, end}` offsets decoded through the source manager, not five fields on
-every node). `docs/IR.md` §6 / `src/ir/prov.h`: `odin3_srcloc` gains `uint32_t loc` (the raw
-presumed location, 0 = none) and the `ast` field reads "AST node ID in the elaborated (else
-parsed) store of the record's run, 0 = none, meaningful while that store is held". 1B's design
+every node). `docs/IR.md` §6 / `src/ir/prov.h`: `odin3_srcloc` gains `uint32_t loc` (the
+**raw** source-manager location of the node, any buffer, 0 = none; `locs[1..]` never hold
+chain entries, which `odin3_srcman_chain` derives) and the `ast` field reads "AST node ID in
+the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store
+is held". 1B's design
 handle gains the owned source manager, the per-run AST list with symbol tables, and the keep
 flag. 1D's pass registry definition gains `wants_ast`. The ABI is bumped once, to the version
 after 1D's.
@@ -740,10 +813,10 @@ after 1D's.
 Everything else is decided. Recommendation first.
 
 1. **Design owns the source manager, the per-run ASTs and their symbol tables** (AST-1,
-   AST-15), and `odin3_srcloc` gains the raw `loc` (a 1B struct change). Recommend yes: provenance
-   prints macro and include chains for the life of the design, and the run tag makes
-   `prov.ast` safe across reads. Alternative: the project record owns them, with borrowed
-   pointers and chains copied into every record.
+   AST-15), and `odin3_srcloc` gains the **raw** `loc` (a 1B struct change; chains are derived
+   from it on demand, never stored). Recommend yes: provenance prints macro and include chains
+   for the life of the design, and the run tag makes `prov.ast` safe across reads. Alternative:
+   the project record owns them, with borrowed pointers and chains copied into every record.
 2. **AST strings in the design strtab.** Recommend yes: names flow to IR wires and nodes
    without re-interning and the IR already keeps file paths there (IR-5); cost ≈ 1 MB of
    identifiers and literals retained for mcml.v. Alternative: an AST-local strtab plus a copy per
@@ -754,8 +827,8 @@ Everything else is decided. Recommendation first.
    the elaborated store. Recommend yes, fixed in the 2D spec. Alternative: one-stage 2D and a
    second elaborator over slang's output in Phase 5.
 4. **`ODIN3_AST_MAX_DEPTH` = 32768, builder-enforced in every build** (§10: ≥ 10 × the
-   measured 2,050 of Koios `lenet.v`, a power of two; 512 KB of explicit stack at the limit).
-   Recommend yes. Alternative: 65536 for another 2× of headroom at 1 MB.
+   measured 2,050 of Koios `lenet.v`, a power of two; 256 KB of explicit stack at the limit).
+   Recommend yes. Alternative: 65536 for another 2× of headroom at 512 KB.
 5. **Verilog printer in 2A** (~400 lines plus tests; opaque constructs print from their `TEXT`
    payload, metacomments print back). Recommend yes, for the parse-print-parse oracle 2C gets
    for free. Alternative: s-expression dump only, with hand-written goldens in 2C.
