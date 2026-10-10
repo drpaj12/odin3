@@ -172,7 +172,7 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(design);
     run_ctx = (odin3_pass_ctx){0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("test"), &run_ctx));
-    odin3_srcloc loc = {intern("t.v"), 1, 1, 1, 2};
+    odin3_srcloc loc = {intern("t.v"), 1, 1, 1, 2, 0};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&run_ctx, &origin, &prov));
     build_top();
