@@ -251,7 +251,7 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 
 ### 4.1 Verilog-2005 (owned)
 - Preprocessor first: `define/`ifdef/`else/`endif/`include, macros with args, `` `timescale `` tolerated.
-- Bison/Flex grammar, location-tracked tokens; every AST node has `{file, line, col, end_line, end_col}` and an attribute list (`(* ... *)` and pragmas).
+- Bison/Flex grammar, location-tracked tokens; every AST node has a source range `{loc, end}` of two 32-bit source-manager locations, decoded on demand to file, line, column and the macro/include chain (2A spec §3, AST-2), not five fields per node, and an attribute list (`(* ... *)` and pragmas).
 - Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
 - Comments kept in a side table keyed by location (not a red/green tree).
 
@@ -270,7 +270,7 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 
 ### 4.5 Common AST and Symbol Table
 - Scoped symbol table (module → generate scope → block), each symbol with declaration location, type (net/var, width, signedness, array dims), and the list of AST nodes that assign it.
-- AST is the retained "high" layer: it is never discarded; IR objects back-point to it.
+- AST is the "high" layer, one store per read run (2A spec §9, AST-15/16): it is freed at the end of its read pass unless kept (`--keep-ast`, or a pass whose registry entry sets `wants_ast`). IR objects reach it only through the SOURCE provenance record's `ast` node ID, resolved in the held store whose run and form match; locations survive in provenance and the source manager either way.
 
 ## 5. The IR
 
