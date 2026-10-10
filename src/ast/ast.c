@@ -377,7 +377,8 @@ odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, u
         return misuse("odin3_ast_make_marked", why);
     }
     const odin3_ast_id *top = ast->pending.data;
-    odin3_ast_span kids = {top + mark, (uint32_t)ast->pending.len - mark};
+    /* An empty pending stack has no buffer: offsetting NULL, even by 0, is undefined. */
+    odin3_ast_span kids = {top == NULL ? NULL : top + mark, (uint32_t)ast->pending.len - mark};
     odin3_status st = build(ast, spec, kids, out, "odin3_ast_make_marked");
     if (st == ODIN3_OK) {
         odin3_ast_unwind(ast, mark);
