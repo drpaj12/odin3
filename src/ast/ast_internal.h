@@ -62,7 +62,7 @@ const odin3_ast_payload_rec *odin3_ast_payload_rec_of(const odin3_ast *ast, uint
 
 /*
  * Appends a payload record (the caller allocated its bytes in the arena first) and stores its ID.
- * NO_MEMORY with the table unchanged; requires an unsealed store.
+ * INVALID_ARG (logged) for a NULL argument or a sealed store; NO_MEMORY with the table unchanged.
  */
 odin3_status odin3_ast_payload_push(odin3_ast *ast, odin3_ast_payload_rec rec, uint32_t *payload);
 
