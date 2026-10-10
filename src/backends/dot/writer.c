@@ -386,7 +386,7 @@ static odin3_status dot_put_str(odin3_strbuf *buf, const char *text) {
 }
 
 static bool dot_ordinary(char chr) {
-    return chr != '"' && chr != '\\' && (unsigned char)chr >= ' ';
+    return chr != '"' && chr != '\\' && chr != '&' && (unsigned char)chr >= ' ';
 }
 
 /* The replacement for one character that is not ordinary. */
@@ -398,6 +398,8 @@ static const char *dot_replacement(char chr) {
         return "\\\\";
     case '\n':
         return "\\n";
+    case '&':
+        return "&amp;"; /* Graphviz expands HTML entities inside quoted labels */
     default:
         return "?";
     }
@@ -423,10 +425,24 @@ static odin3_status dot_put_escaped(odin3_strbuf *buf, const char *text) {
     return st;
 }
 
+/* The name of the port wire whose port node is node, 0 if none. */
+static uint32_t dot_port_name(const odin3_module *mod, odin3_node_id node) {
+    const uint32_t ports = odin3_module_port_count(mod);
+    for (uint32_t i = 0; i < ports; i++) {
+        if (odin3_module_port(mod, i).v == node.v) {
+            return odin3_wire_name(mod, odin3_module_port_wire(mod, i));
+        }
+    }
+    return 0;
+}
+
 static odin3_status dot_emit_node(const dot_ctx *dc, odin3_strbuf *buf, const odin3_module *mod,
                                   odin3_node_id node) {
     const odin3_celltype_def *def = odin3_celltype_get(dc->design, odin3_node_type(mod, node));
     uint32_t name = odin3_node_name(mod, node);
+    if (name == 0 && def != NULL && def->gran == ODIN3_GRAN_PORT) {
+        name = dot_port_name(mod, node); /* a port node is labelled by its port */
+    }
     odin3_status st =
         odin3_strbuf_appendf(buf, "    m%un%u [label=\"", odin3_module_id_of(mod).v, node.v);
     st = st == ODIN3_OK ? dot_put_escaped(buf, def != NULL ? def->name : "?") : st;
@@ -554,6 +570,10 @@ static odin3_status dot_build(dot_ctx *dc, const odin3_dot_opts *opts, odin3_str
     }
     st = opts->focus_kind == ODIN3_DOT_FOCUS_NONE ? dot_check_budget(dc, opts)
                                                   : dot_apply_focus(dc, opts);
+    if (st == ODIN3_OK && opts->focus_kind != ODIN3_DOT_FOCUS_NONE && dot_masks_count(dc) == 0) {
+        odin3_log(ODIN3_LOG_WARN, "dot: focus '%s' selects no node; the graph is empty",
+                  opts->focus);
+    }
     return st == ODIN3_OK ? dot_emit(dc, buf) : st;
 }
 

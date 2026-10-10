@@ -56,7 +56,8 @@ typedef struct odin3_verilog_opts {
  * non-port wires) whose net is referenced elsewhere gets `assign w[i] = <reference>;` (runs of
  * bits are grouped). One namespace per module: port names first, then wire names, net names and
  * cell names in ID order keep their own name when it is writable and free; the rest get
- * generated names `$w<ID>` (wires), `$n<ID>` (nets), `$c<ID>` (cells), `$p<ID>` (a dangling
+ * generated names `$w<ID>` (wires), `$n<ID>` (nets), `$c<ID>` (cells; an object whose own
+ * name cannot be written gets one with a warning), `$p<ID>` (a dangling
  * output pin), `$gclk` (global clock), with `$1`, `$2`, ... appended while taken. A wire, net or
  * cell name that reads as a select of a vector port or earlier vector wire (`a[0]` beside
  * `a[1:0]`) counts as taken: Yosys write_blif would give both the same BLIF name. (A vector wire

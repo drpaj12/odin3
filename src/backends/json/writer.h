@@ -11,7 +11,10 @@
  * Writes every module of the design to path in the Yosys JSON netlist schema (read by netlistsvg,
  * nextpnr and `yosys read_json`). Modules, ports, cells and netnames come out in ID order, so the
  * output is deterministic. Constants are the bit strings "0", "1", "x", "z"; every other net is
- * one integer bit, net ID + 1 (so >= 2). $sop becomes $lut (at most 6 inputs) or $sop with
+ * one integer bit, net ID + 1 (so >= 2). Cell and netname keys share one namespace per module
+ * (Yosys RTLIL, IR-14): a netname keeps the user's name, a cell named like a net or wire, and a
+ * generated key that is taken, get "$u<n>" appended. Names are JSON strings; invalid UTF-8
+ * bytes become U+FFFD. $sop becomes $lut (at most 6 inputs) or $sop with
  * DEPTH/TABLE; latch INIT goes to an `init` attribute of the Q net (2 and 3 as "x").
  *
  * Attributes (odin3_attr_foreach order, backends/common/attrs.h) of modules, cells, wires and

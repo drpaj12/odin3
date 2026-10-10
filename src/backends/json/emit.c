@@ -2,6 +2,7 @@
 #include "backends/json/jw.h"
 #include "ir/prov.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -18,6 +19,7 @@ enum {
 void jw_raw(jw *out, const char *text) {
     if (out->status == ODIN3_OK && fputs(text, out->fp) == EOF) {
         out->status = ODIN3_ERR_IO;
+        out->write_errno = errno != 0 ? errno : EIO;
     }
 }
 
@@ -26,6 +28,7 @@ void jw_fmt(jw *out, const char *fmt, ...) {
     va_start(args, fmt);
     if (out->status == ODIN3_OK && vfprintf(out->fp, fmt, args) < 0) {
         out->status = ODIN3_ERR_IO;
+        out->write_errno = errno != 0 ? errno : EIO;
     }
     va_end(args);
 }
@@ -33,6 +36,7 @@ void jw_fmt(jw *out, const char *fmt, ...) {
 void jw_char(jw *out, int chr) {
     if (out->status == ODIN3_OK && fputc(chr, out->fp) == EOF) {
         out->status = ODIN3_ERR_IO;
+        out->write_errno = errno != 0 ? errno : EIO;
     }
 }
 
@@ -425,16 +429,21 @@ void jw_user_attrs(jw *out, jw_list *list, odin3_objref obj, odin3_wattr_role ro
 
 /* --- unique keys --------------------------------------------------------------------------- */
 
-static bool key_taken(const jw *out, jw_keykind kind, const char *text) {
+static bool key_taken(const jw *out, const jw_keyspec *spec, const char *text) {
     uint32_t str = 0;
+    if (odin3_strtab_find(out->written, odin3_bytes_cstr(text), NULL)) {
+        return true;
+    }
     if (!odin3_strtab_find(out->strtab, odin3_bytes_cstr(text), &str)) {
         return false;
     }
-    if (kind == JW_KEY_CELL) {
-        return odin3_node_valid(odin3_module_find_node(out->module, str));
+    bool net_name = odin3_wire_valid(odin3_module_find_wire(out->module, str)) ||
+                    odin3_net_valid(odin3_module_find_net(out->module, str));
+    bool node_name = odin3_node_valid(odin3_module_find_node(out->module, str));
+    if (spec->kind == JW_KEY_CELL) {
+        return net_name || (spec->generated && node_name);
     }
-    return odin3_wire_valid(odin3_module_find_wire(out->module, str)) ||
-           odin3_net_valid(odin3_module_find_net(out->module, str));
+    return spec->generated && (net_name || node_name);
 }
 
 static odin3_status build_key(jw *out, const jw_keyspec *spec, uint32_t bump) {
@@ -449,15 +458,25 @@ static odin3_status build_key(jw *out, const jw_keyspec *spec, uint32_t bump) {
     return status;
 }
 
+void jw_record_key(jw *out, const char *key) {
+    uint32_t id = 0;
+    odin3_status status = odin3_strtab_intern(out->written, odin3_bytes_cstr(key), &id);
+    if (status != ODIN3_OK && out->status == ODIN3_OK) {
+        out->status = status;
+    }
+}
+
 const char *jw_make_key(jw *out, const jw_keyspec *spec) {
     uint32_t bump = 0;
     odin3_status status = build_key(out, spec, bump);
-    while (status == ODIN3_OK && spec->generated && out->key.data != NULL &&
-           key_taken(out, spec->kind, out->key.data)) {
+    while (status == ODIN3_OK && out->key.data != NULL && key_taken(out, spec, out->key.data)) {
         status = build_key(out, spec, ++bump);
     }
     if (status != ODIN3_OK) {
         out->status = status;
+        return "";
     }
-    return status == ODIN3_OK && out->key.data != NULL ? out->key.data : "";
+    const char *key = out->key.data != NULL ? out->key.data : "";
+    jw_record_key(out, key);
+    return out->status == ODIN3_OK ? key : "";
 }

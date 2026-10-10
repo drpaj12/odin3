@@ -1,0 +1,14 @@
+# hand_cname.blif - cells named like nets (.cname), one namespace in Yosys (1F final review I1).
+.model top
+.inputs a b clk
+.outputs y q
+.names a b foo
+11 1
+.cname foo
+.names foo b y
+01 1
+10 1
+.cname a
+.latch foo q re clk 0
+.cname clk
+.end

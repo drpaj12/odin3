@@ -58,11 +58,15 @@ static char aux[TEXT_MAX];   /* a tool's output */
 static char last_error[MSG_MAX];
 static size_t errors;
 
+static char last_warning[MSG_MAX];
+
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors++;
         (void)snprintf(last_error, sizeof last_error, "%s", msg);
+    } else if (level == ODIN3_LOG_WARN) {
+        (void)snprintf(last_warning, sizeof last_warning, "%s", msg);
     }
 }
 
@@ -1511,6 +1515,7 @@ static void test_backtick_names(void) {
     (void)snprintf(line, sizeof line, "  assign \\$n%u = ~a;\n", tick.v);
     expect_has(line);
     expect_not("`");
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "name 'm`x' cannot be written in Verilog"));
     new_module("bt2");
     (void)in_bit("p`q");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));

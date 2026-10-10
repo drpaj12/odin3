@@ -33,9 +33,14 @@ typedef struct odin3_dot_opts {
  * (no focus, default budget). ODIN3_ERR_INVALID_ARG (logged) for a NULL design or path, a
  * malformed or unresolvable focus, or a design of more nodes than the budget without a focus
  * (the message gives the count); ODIN3_ERR_IO if path cannot be written; ODIN3_ERR_NO_MEMORY.
- * The file is written to a private temporary beside path (util/file.h) and renamed over it, so
- * on failure path is left as it was. Clusters are flat (cluster_<module ID>, the module name is the
- * label); a cone stops at module-instance nodes and does not descend into the submodule.
+ * A valid focus that selects no node (a file:line nothing came from, a cone of an undriven net)
+ * draws an empty graph with a warning. The file is written to a private temporary beside path
+ * (util/file.h) and renamed over it, so on failure path is left as it was. Clusters are flat
+ * (cluster_<module ID>, the module name is the label); a cone stops at module-instance nodes and
+ * does not descend into the submodule. A node's label is its cell type and name (a port node:
+ * its port's name; else $n<ID>). Names are written byte for byte inside quotes: `"`, `\` and
+ * newline escaped, `&` as `&amp;` (Graphviz expands HTML entities), other control bytes as `?`,
+ * non-UTF-8 bytes passed through (Graphviz reads them as Latin-1).
  */
 odin3_status odin3_dot_write(const odin3_design *design, const char *path,
                              const odin3_dot_opts *opts);

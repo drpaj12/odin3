@@ -4,7 +4,8 @@
 #
 # For every BLIF (golden root: every *.blif whose sibling .prov says status=ok; fixture
 # directory: every *.blif) odin3-write reads it and writes JSON, Verilog and dot, then
-#   JSON     The golden through Yosys (`read_blif` (`-sop` when a cover has over 12 inputs);
+#   JSON     The golden (without `.clock`/`.cname` lines, which Yosys read_blif rejects or
+#            asserts on) through Yosys (`read_blif` (`-sop` when a cover has over 12 inputs);
 #            NORM; `write_blif`) is the reference; the JSON through Yosys (`read_json`; NORM;
 #            `write_blif`) must be identical to it under netlist-compare. NORM turns identity
 #            $luts into connections (as read_blif does for `.names a b` / `1 1`; not with
@@ -261,9 +262,11 @@ json_gate() {
         echo "ref-excluded"
         return
     fi
-    # Yosys read_blif does not know `.clock` (a declaration without semantics): drop it.
-    if grep -q '^[[:space:]]*\.clock' "$gold"; then
-        grep -v '^[[:space:]]*\.clock' "$gold" >"$w.gold.blif" || true
+    # Yosys read_blif does not know `.clock` (a declaration without semantics), and asserts on a
+    # `.cname` equal to a net name (one RTLIL namespace); cell names are not compared (write_blif
+    # without -cname): drop both lines from the reference.
+    if grep -q -E '^[[:space:]]*\.(clock|cname)([[:space:]]|$)' "$gold"; then
+        grep -v -E '^[[:space:]]*\.(clock|cname)([[:space:]]|$)' "$gold" >"$w.gold.blif" || true
         ref=$w.gold.blif
     fi
     capped "$w.yr.log" "$w.yr.rss" "$WC_YOSYS" -q -p \

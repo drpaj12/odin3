@@ -42,10 +42,14 @@ static char last_error[MSG_MAX];
 static char out_dir[PATH_BUF];
 static char out_path[FILE_BUF];
 
+static char last_warning[MSG_MAX];
+
 static void capture_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         (void)snprintf(last_error, sizeof last_error, "%s", msg);
+    } else if (level == ODIN3_LOG_WARN) {
+        (void)snprintf(last_warning, sizeof last_warning, "%s", msg);
     }
 }
 
@@ -343,6 +347,18 @@ static void test_label_escaping(void) {
     odin3_util_free(text);
 }
 
+/* Port nodes are labelled by their port; `&` is escaped (Graphviz expands HTML entities). */
+static void test_port_labels_and_ampersand(void) {
+    build_hier();
+    not_gate(net_named(module, NULL), net_named(module, NULL), "a&amp;b");
+    write_ok(NULL);
+    char *text = slurp(out_path);
+    TEST_ASSERT_NOT_NULL(strstr(text, "label=\"$port_in\\ni\""));
+    TEST_ASSERT_NOT_NULL(strstr(text, "label=\"$port_out\\no\""));
+    TEST_ASSERT_NOT_NULL(strstr(text, "a&amp;amp;b"));
+    odin3_util_free(text);
+}
+
 static void test_budget_refusal_counts(void) {
     odin3_net_id last = {0};
     (void)build_chain(CHAIN, &last);
@@ -457,7 +473,9 @@ static void test_focus_loc_none_and_invalid(void) {
     odin3_net_id last = {0};
     (void)build_chain(2, &last);
     odin3_dot_opts opts = {ODIN3_DOT_FOCUS_LOC, "nowhere.v:3", 0};
-    write_ok(&opts); /* a valid location with no objects: an empty graph */
+    last_warning[0] = '\0';
+    write_ok(&opts); /* a valid location with no objects: an empty graph, with a warning */
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "focus 'nowhere.v:3' selects no node"));
     char *text = slurp(out_path);
     TEST_ASSERT_EQUAL_UINT(0, declared_nodes(text).count);
     odin3_util_free(text);
@@ -674,6 +692,7 @@ int main(void) {
     RUN_TEST(test_edges_per_pin_pair);
     RUN_TEST(test_deterministic);
     RUN_TEST(test_label_escaping);
+    RUN_TEST(test_port_labels_and_ampersand);
     RUN_TEST(test_budget_refusal_counts);
     RUN_TEST(test_default_budget);
     RUN_TEST(test_focus_lifts_budget);

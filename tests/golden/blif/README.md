@@ -34,6 +34,7 @@ drives one net from two `.names` (read as written; `check` reports rule 4).
 | `hand_body.blif` | `.names` covers (2-, 1- and 0-input, constant 0 and 1), every `.latch` form (`re` `fe` `ah` `al`, no type, with and without init), `.subckt` of a later model by bit formals across a continuation (Review Focus 1), `.subckt` of a black box with an unlisted formal, `.cname`, `.attr` (repeated key), `.param` with a multi-token value |
 | `hand_writers.blif` | 1F writer-check cases found on the goldens: an undriven net buffered to an output (Odin II `no_input`), a constant buffered to an unread net, a 7-input cover with don't-cares, a constant input to a cover, a black box with one-bit vector formals `x[0]`/`o[0]` |
 | `hand_wide.blif` | a 13-input cover (Yosys `read_blif` needs `-sop`) next to an identity buffer |
+| `hand_cname.blif` | cells named like nets and ports by `.cname` (`foo` on the cell driving `foo`, `a`, `clk`): Yosys has one namespace per module, so the JSON writer bumps the cell keys (`foo$u1`); writer-check drops `.cname` from the reference (Yosys `read_blif` asserts on it too) |
 
 Error cases and one-off variants are written to a temporary file by the test itself, next to
 their assertions in `tests/unit/test_blif_reader.c`.
@@ -57,6 +58,7 @@ Each Yosys-side normalization of the JSON step has a fixture that fails without 
 | `read_blif -sop` for wide covers | `hand_wide.blif` (Yosys rejects a 13-input `$lut`) |
 | Yosys self-buffers `.names x x` dropped | `hand_ports.blif`, `hand_body.blif` (vector ports: netlist-compare refuses the self-loop as a second driver) |
 | statements sorted | `ansiportlist_2.parmys.blif` (Yosys `read_json` cell order breaks a netlist-compare tie differently) |
+| `.cname` lines dropped from the reference | `hand_cname.blif` (Yosys `read_blif` asserts on a cell named like a net) |
 
 ## Round-trip gate
 

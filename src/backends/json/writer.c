@@ -209,6 +209,8 @@ static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     uint32_t name = odin3_wire_name(out->module, wire);
     jw_list fields = {false, FIELD_DEPTH};
     netname_bits bits = {NULL, wire, odin3_wire_width(out->module, wire)};
+    const char *text = odin3_strtab_get(out->strtab, name);
+    jw_record_key(out, text != NULL ? text : "");
     jw_item(out, names);
     jw_str_id(out, name);
     jw_raw(out, ": ");
@@ -345,6 +347,12 @@ static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     if (out->init == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    out->written = odin3_strtab_create();
+    if (out->written == NULL) {
+        odin3_util_free(out->init);
+        out->init = NULL;
+        return ODIN3_ERR_NO_MEMORY;
+    }
     out->extra_bit = net_end + 1;
     mark_inits(out);
     jw_item(out, modules);
@@ -355,6 +363,8 @@ static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     jw_close(out, &entry);
     odin3_util_free(out->init);
     out->init = NULL;
+    odin3_strtab_destroy(out->written);
+    out->written = NULL;
     return out->status;
 }
 
@@ -486,7 +496,7 @@ static odin3_status save_design(jw *state, const char *path) {
     state->fp = file.fp;
     status = write_design(state);
     if (status == ODIN3_ERR_IO) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(errno));
+        odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(state->write_errno));
     }
     state->fp = NULL;
     return odin3_atomic_file_close(&file, status);

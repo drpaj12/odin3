@@ -345,6 +345,15 @@ static void vw_eol(verilog_writer *wr, odin3_prov_id prov) {
     }
 }
 
+/* Ends a line written without provenance (`;\n` and the like) and drains a full buffer, as
+ * vw_eol does. */
+static void vw_line_end(verilog_writer *wr, const char *text) {
+    vw_puts(wr, text);
+    if (wr->out.len >= FLUSH_AT) {
+        vw_flush(wr);
+    }
+}
+
 /* --- cell types ---------------------------------------------------------------------------- */
 
 /* The built-in Verilog form of a cell type, NULL when it is written as an instance. */
@@ -661,8 +670,15 @@ static void claim_object(verilog_writer *wr, vw_named obj) {
     if (wr->name_style == ODIN3_VERILOG_NAMES_PROVENANCE) {
         claim_provenance(wr, &obj);
     }
-    if (obj.own != 0) {
-        (void)claim(wr, obj_key(obj.kind, obj.id), str_bytes(wr, obj.own));
+    if (obj.own != 0 && !claim(wr, obj_key(obj.kind, obj.id), str_bytes(wr, obj.own)) &&
+        wr->st == ODIN3_OK &&
+        odin3_verilog_ident_kind(str_bytes(wr, obj.own)) == ODIN3_VERILOG_UNWRITABLE) {
+        odin3_bytes own = str_bytes(wr, obj.own);
+        odin3_log(ODIN3_LOG_WARN,
+                  "%s: module '%s': name '%.*s' cannot be written in Verilog; a generated name "
+                  "(%s<ID>) is used",
+                  wr->path, wr->mod.name != NULL ? wr->mod.name : "", (int)own.len,
+                  (const char *)own.ptr, obj.prefix);
     }
 }
 
@@ -1172,7 +1188,7 @@ static void connect_reg(verilog_writer *wr, odin3_node_id node, bool q_reg) {
     put_port(wr, node, node_def(wr, node)->n_ports - 1, false);
     vw_puts(wr, " = ");
     vw_name(wr, OBJ_NODE, node.v);
-    vw_puts(wr, ";\n");
+    vw_line_end(wr, ";\n");
 }
 
 /* $_DFF_P_/N_ (C D Q), $_DLATCH_P_/N_ (E D Q), $_FF_ (D Q); INIT 0/1 -> initial, 2/3 -> none. */
@@ -1444,9 +1460,9 @@ static void write_instance(verilog_writer *wr, odin3_node_id node) {
             vw_items items = pin_items(pins);
             put_items(wr, &items, false);
         }
-        vw_puts(wr, port + 1 < def->n_ports ? "),\n" : ")\n");
+        vw_line_end(wr, port + 1 < def->n_ports ? "),\n" : ")\n");
     }
-    vw_puts(wr, "  );\n");
+    vw_line_end(wr, "  );\n");
 }
 
 /* A constant cell written as a literal wherever its net is read (no statement of its own). */
@@ -1558,7 +1574,7 @@ static void declare_cell_extras(verilog_writer *wr) {
         if (name_of(wr, OBJ_PIN, i) != 0) {
             vw_puts(wr, "  wire ");
             vw_name(wr, OBJ_PIN, i);
-            vw_puts(wr, ";\n");
+            vw_line_end(wr, ";\n");
         }
     }
     for (uint32_t i = 1; i < odin3_module_node_end(module); i++) {
@@ -1573,13 +1589,13 @@ static void declare_cell_extras(verilog_writer *wr) {
                 vw_puts(wr, ":0] ");
             }
             vw_name(wr, OBJ_NODE, i);
-            vw_puts(wr, ";\n");
+            vw_line_end(wr, ";\n");
         }
     }
     if (name_of(wr, OBJ_GCLK, 0) != 0) {
         vw_puts(wr, "  (* gclk *) wire ");
         vw_name(wr, OBJ_GCLK, 0);
-        vw_puts(wr, ";\n");
+        vw_line_end(wr, ";\n");
     }
 }
 
@@ -1605,7 +1621,7 @@ static void write_wire_aliases(verilog_writer *wr, odin3_wire_id wire) {
         vw_puts(wr, " = ");
         vw_items items = wire_items(wire, hi, bit);
         put_items(wr, &items, false);
-        vw_puts(wr, ";\n");
+        vw_line_end(wr, ";\n");
     }
 }
 

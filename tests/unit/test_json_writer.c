@@ -12,12 +12,14 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <signal.h>
 #include <spawn.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -504,6 +506,72 @@ static void test_netname_key_collision(void) {
     (void)remove("t13.json");
 }
 
+static const char *find_yosys(void);
+static int run_program(const char *const command[2]);
+
+/* IR-14: Yosys has one namespace per module, so a cell named like a net (BLIF `.cname foo` on
+ * the cell driving `foo`) is bumped; the netname keeps the user's name. */
+static void test_cell_named_like_net(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_a = add_port(mod, (port_args){"a", ODIN3_DIR_IN, 1});
+    odin3_net_id net_b = add_port(mod, (port_args){"b", ODIN3_DIR_IN, 1});
+    odin3_net_id foo = new_net(mod, "foo");
+    odin3_net_id net_y = add_port(mod, (port_args){"y", ODIN3_DIR_OUT, 1});
+    add_named_gate(mod, "foo", (odin3_net_id[3]){net_a, net_b, foo});
+    add_named_gate(mod, "a", (odin3_net_id[3]){foo, net_b, net_y}); /* named like a port */
+    char *text = write_json("t15.json");
+    assert_has(text, "\"foo$u1\": {\n          \"hide_name\": 0,\n          \"type\": \"$_AND_\"");
+    assert_has(text, "\"a$u1\": {\n          \"hide_name\": 0,\n          \"type\": \"$_AND_\"");
+    assert_has(text, "\"foo\": {\n          \"hide_name\": 0,\n          \"bits\"");
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, "\"foo\": {"));
+    odin3_util_free(text);
+    const char *yosys = find_yosys();
+    if (yosys != NULL) {
+        FILE *script = fopen("t15.ys", "wb");
+        TEST_ASSERT_NOT_NULL(script);
+        (void)fprintf(script, "read_json t15.json\nhierarchy -check\n");
+        (void)fclose(script);
+        TEST_ASSERT_EQUAL_INT(0, run_program((const char *const[2]){yosys, "t15.ys"}));
+        (void)remove("t15.ys");
+    }
+    (void)remove("t15.json");
+}
+
+/* A 7-input OFF-set $sop over fresh nets, named name (NULL: unnamed). */
+static void add_wide_offset_sop(odin3_module *mod, const char *name) {
+    odin3_net_id ins[SEVEN];
+    for (uint32_t i = 0; i < SEVEN; i++) {
+        ins[i] = new_net(mod, NULL);
+    }
+    odin3_net_id out = new_net(mod, NULL);
+    static const char k_cover[] = "1-0---10";
+    odin3_value params[2] = {
+        odin3_value_int(SEVEN),
+        {ODIN3_VAL_COVER, 0, (const uint8_t *)k_cover, (uint32_t)strlen(k_cover), 0, SEVEN}};
+    odin3_node_spec spec = {type_id("$sop"), name != NULL ? intern(name) : 0, prov_at(6), params,
+                            2};
+    odin3_netvec ports[2] = {{ins, SEVEN}, {&out, 1}};
+    add_node(mod, &spec, ports);
+}
+
+/* Two generated keys that coincide: a cell the user named $c<N+1> and the unnamed node N+1, both
+ * OFF-set wide covers, both want "$c<N+1>$sop". The second written is bumped. */
+static void test_generated_keys_coincide(void) {
+    odin3_module *mod = new_module("top");
+    char name[OUT_BUF];
+    (void)snprintf(name, sizeof name, "$c%u", (unsigned)odin3_module_node_end(mod) + 1);
+    add_wide_offset_sop(mod, name);
+    add_wide_offset_sop(mod, NULL);
+    char *text = write_json("t16.json");
+    char key[OUT_BUF * 2];
+    (void)snprintf(key, sizeof key, "\"%s$sop\": {", name);
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, key));
+    (void)snprintf(key, sizeof key, "\"%s$sop$u1\": {", name);
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, key));
+    odin3_util_free(text);
+    (void)remove("t16.json");
+}
+
 /* An empty cover is constant 0 whatever its width: a $lut with no inputs, never DEPTH 0. */
 static void test_empty_cover_is_const0(void) {
     char *text = sop_json(SEVEN, "");
@@ -538,6 +606,39 @@ static void test_deterministic(void) {
     odin3_util_free(second);
     (void)remove("t8a.json");
     (void)remove("t8b.json");
+}
+
+static char json_error[512];
+
+static void json_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)user;
+    if (level == ODIN3_LOG_ERROR) {
+        (void)snprintf(json_error, sizeof json_error, "%s", msg);
+    }
+}
+
+/* A write that fails mid-design (RLIMIT_FSIZE, SIGXFSZ ignored) logs the failing write's own
+ * reason (EFBIG), and the destination is not created. */
+static void test_write_failure_reason(void) {
+    odin3_module *mod = new_module("top");
+    for (int i = 0; i < 200; i++) {
+        odin3_net_id nets[3] = {new_net(mod, NULL), new_net(mod, NULL), new_net(mod, NULL)};
+        add_gate(mod, "$_AND_", nets);
+    }
+    json_error[0] = '\0';
+    odin3_log_set_sink(json_sink, NULL);
+    struct rlimit old;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_FSIZE, &old));
+    void (*prev)(int) = signal(SIGXFSZ, SIG_IGN);
+    struct rlimit small = {1024, old.rlim_max};
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &small));
+    odin3_status status = odin3_json_write(design, "t17.json");
+    (void)setrlimit(RLIMIT_FSIZE, &old);
+    (void)signal(SIGXFSZ, prev);
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, status);
+    TEST_ASSERT_NOT_NULL(strstr(json_error, "t17.json: write failed: File too large"));
+    TEST_ASSERT_NOT_EQUAL_INT(0, access("t17.json", F_OK));
 }
 
 static void test_io_failure(void) {
@@ -767,10 +868,13 @@ int main(void) {
     RUN_TEST(test_wire_range_attributes);
     RUN_TEST(test_cell_key_collision);
     RUN_TEST(test_netname_key_collision);
+    RUN_TEST(test_cell_named_like_net);
+    RUN_TEST(test_generated_keys_coincide);
     RUN_TEST(test_empty_cover_is_const0);
     RUN_TEST(test_invalid_utf8_name);
     RUN_TEST(test_deterministic);
     RUN_TEST(test_io_failure);
+    RUN_TEST(test_write_failure_reason);
     RUN_TEST(test_oom_sweep);
     RUN_TEST(test_yosys_reads_output);
     RUN_TEST(test_yosys_sop_equivalence);
