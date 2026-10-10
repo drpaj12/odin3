@@ -1,7 +1,7 @@
 /*
  * test_ast_read.c — unit tests for the AST read side: out-of-range accessors, walk and cursor
- * against a recursive reference (absent slots, abandoned roots), pruning, the depth-cap chain
- * with its single pre-sized allocation, and the parent index.
+ * against an independent iterative reference (absent slots, abandoned roots), pruning, the
+ * depth-cap chain with its single pre-sized allocation, and the parent index.
  */
 #include "ast/ast.h"
 #include "ast/ast_internal.h"

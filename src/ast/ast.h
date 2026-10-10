@@ -284,23 +284,37 @@ odin3_ast_id odin3_ast_root(const odin3_ast *ast, uint32_t idx);
 /* The design whose strtab and source manager the store uses. */
 const odin3_design *odin3_ast_design(const odin3_ast *ast);
 
-/* Bytes the store holds: nodes, child table, payload table and arena (strtab excluded). */
+/*
+ * Bytes the store holds: nodes, child table, payload table, comment table and arena (strtab,
+ * attribute map and symbol table excluded).
+ */
 size_t odin3_ast_bytes_reserved(const odin3_ast *ast);
 
 /* A NUMBER node's payload (§6 `_number`); NULL for any other node. */
 const odin3_ast_number *odin3_ast_number_of(const odin3_ast *ast, odin3_ast_id node);
 
+/* A literal's value (odin3_ast_number_value). */
+typedef struct odin3_ast_literal {
+    odin3_value value; /* BITS, LSB first; bytes in the caller's arena */
+    bool is_signed;    /* the node's SIGNED flag */
+    bool is_unsized;   /* no size was written: extend to context with the MSB (below) */
+} odin3_ast_literal;
+
 /*
- * The NUMBER node's value under IEEE 1364-2005 §3.5.1 as a BITS value whose bytes live in
- * arena, and its signedness (the node's SIGNED flag). Sized: zero-extended to the width, or
- * x/z-extended when the leading written digit is x/z; wider digits are truncated with one
- * warning per literal (only when a dropped bit is not 0). Unsized: at least 32 bits, all
- * significant bits kept (a signed decimal keeps a 0 sign bit above its magnitude). INVALID_ARG
- * (logged) for a NULL argument or a node without a NUMBER payload; NO_MEMORY (outputs
- * unchanged, no warning issued). Usable after finish (it only sets the payload's warned flag).
+ * The NUMBER node's value, sized exactly as Yosys read_verilog sizes it (const2ast.cc; the exit
+ * bar is Parmys/Yosys; §4.5 amendment). Sized: the width, zero-extended, or x/z-extended when
+ * the written leading digit is x/z; wider digits are truncated, with one warning per literal
+ * when the value requires more bits than the width (Yosys's rule and wording). Unsized: every
+ * written bit, leading zeros included, extended to 32 when fewer were written; a signed
+ * literal whose top bit is then 1 gains a 0 bit (`'sh8000_0000` is +2^31 in 33 bits; `5` is 32
+ * bits, `2147483648` 33). Context extension (2D): an unsized value (is_unsized) is widened to
+ * its context by repeating its top bit even when it is unsigned (Yosys bitsAsUnsizedConst:
+ * `'hFFFF_FFFF` in a 64-bit context is all ones); a sized one by sign or zero extension.
+ * INVALID_ARG (logged) for a NULL argument or a node without a NUMBER payload; NO_MEMORY (*out
+ * unchanged, no warning spent). Usable after finish (it only sets the payload's warned flag).
  */
 odin3_status odin3_ast_number_value(odin3_ast *ast, odin3_ast_id node, odin3_arena *arena,
-                                    odin3_value *value, bool *is_signed);
+                                    odin3_ast_literal *out);
 
 /* The ATTR nodes attached to node (a view valid until the next builder call); empty if none. */
 odin3_ast_span odin3_ast_attrs(const odin3_ast *ast, odin3_ast_id node);

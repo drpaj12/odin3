@@ -108,12 +108,19 @@ static const char *bits_text(const uint8_t *bits, uint32_t n) {
     return text;
 }
 
+static odin3_ast_literal literal_of(odin3_ast_id node) {
+    odin3_ast_literal lit = {{0}, false, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_value(ast, node, values, &lit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_BITS, lit.value.kind);
+    TEST_ASSERT_TRUE(odin3_value_valid(&lit.value));
+    TEST_ASSERT_EQUAL(odin3_ast_number_of(ast, node)->width == 0, lit.is_unsized);
+    return lit;
+}
+
 static odin3_value value_of(odin3_ast_id node, bool *is_signed) {
-    odin3_value value = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_value(ast, node, values, &value, is_signed));
-    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_BITS, value.kind);
-    TEST_ASSERT_TRUE(odin3_value_valid(&value));
-    return value;
+    odin3_ast_literal lit = literal_of(node);
+    *is_signed = lit.is_signed;
+    return lit.value;
 }
 
 /* The value's bits, LSB first, and its signedness. */
@@ -148,13 +155,19 @@ static void test_sized_hex_truncates_with_one_warning(void) {
     assert_stored(node, 4, "11111111");
     assert_value(node, "1111", false);
     TEST_ASSERT_EQUAL_size_t(1, warnings_logged);
-    TEST_ASSERT_EQUAL_STRING("f.v:1:1: warning: literal truncated to its size of 4 bits", captured);
+    TEST_ASSERT_EQUAL_STRING(
+        "f.v:1:1: warning: literal has a width of 4 bit, but value requires 8 bit", captured);
     TEST_ASSERT_TRUE(odin3_ast_number_of(ast, node)->warned);
     assert_value(node, "1111", false); /* a second evaluation (a generate loop) stays quiet */
     TEST_ASSERT_EQUAL_size_t(1, warnings_logged);
-    /* dropped leading zero digits are not a truncation */
+    /* Yosys's rule: dropped leading zeros, or x/z above the highest 1, are not a truncation */
     assert_value(number("8", "'h", "0FF"), "11111111", false);
+    assert_value(number("4", "'h", "x0"), "0000", false);
     TEST_ASSERT_EQUAL_size_t(1, warnings_logged);
+    assert_value(number("4", "'h", "zF"), "1111", false); /* the z above a 1 needs a bit */
+    TEST_ASSERT_EQUAL_size_t(2, warnings_logged);
+    TEST_ASSERT_EQUAL_STRING(
+        "f.v:1:1: warning: literal has a width of 4 bit, but value requires 5 bit", captured);
 }
 
 static void test_xz_extension(void) {
@@ -190,32 +203,68 @@ static void test_unsized(void) {
     assert_value(number("", "'b", "z"), padded("", 32, 'z'), false);
 }
 
-/* Review Focus 3: an unsized based literal wider than 32 bits keeps every bit, no warning. */
-static void test_unsized_wider_than_32(void) {
-    odin3_ast_id wide = number("", "'h", "1_0000_0000");
-    TEST_ASSERT_EQUAL_UINT32(36, odin3_ast_number_of(ast, wide)->nbits); /* as written */
-    bool is_signed = true;
-    odin3_value value = value_of(wide, &is_signed);
-    TEST_ASSERT_FALSE(is_signed);
-    TEST_ASSERT_EQUAL_UINT32(33, value.len);
-    TEST_ASSERT_EQUAL_STRING(padded("", 32, '0'), bits_text(value.bits, 32));
-    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, value.bits[32]);
+/* A literal and the value Yosys read_verilog gives it (probes rv2a3; const2ast.cc). */
+typedef struct yosys_case {
+    const char *size, *base, *digits;
+    uint32_t len;
+    bool is_signed;
+    uint64_t value; /* the bits as an unsigned number (len ≤ 64) */
+} yosys_case;
+
+static const yosys_case YOSYS_CASES[] = {
+    /* Review Focus 3 / I1: unsized based literals keep every written bit */
+    {"", "'h", "1_0000_0000", 36, false, 0x100000000ULL},
+    {"", "'h", "0_0000_0001", 36, false, 1},
+    {"", "'sh", "0_8000_0000", 36, true, 0x80000000ULL},
+    {"", "'so", "37777777777", 33, true, 0xFFFFFFFFULL},
+    /* I2: an unsized signed literal with its top bit 1 gains a 0 bit, any base */
+    {"", "'sh", "8000_0000", 33, true, 0x80000000ULL},
+    {"", "'sh", "FFFF_FFFF", 33, true, 0xFFFFFFFFULL},
+    {"", "'sh", "1_0000_0000", 36, true, 0x100000000ULL},
+    {"", "", "2147483648", 33, true, 0x80000000ULL},
+    {"", "", "4294967296", 34, true, 0x100000000ULL},
+    {"", "", "2147483647", 32, true, 0x7FFFFFFFULL},
+    {"", "'sd", "2147483648", 33, true, 0x80000000ULL},
+    {"", "'d", "4294967296", 33, false, 0x100000000ULL},
+    {"", "'d", "4294967295", 32, false, 0xFFFFFFFFULL},
+    {"", "'h", "FFFF_FFFF", 32, false, 0xFFFFFFFFULL}, /* MSB-extended in context (2D) */
+    {"", "'sd", "5", 32, true, 5},
+    {"", "'sb", "1", 32, true, 1},
+    {"", "'h", "F", 32, false, 15},
+    {"", "'d", "5", 32, false, 5},
+    {"", "'h", "8000_0000", 32, false, 0x80000000ULL},
+    {"64", "'d", "18446744073709551615", 64, false, UINT64_MAX},
+    {"8", "'sh", "F0", 8, true, 0xF0},
+};
+
+static uint64_t as_u64(const odin3_value *value) {
+    uint64_t sum = 0;
+    for (uint32_t i = 0; i < value->len; i++) {
+        TEST_ASSERT_LESS_OR_EQUAL_UINT8(ODIN3_BIT_1, value->bits[i]);
+        sum |= (uint64_t)value->bits[i] << i;
+    }
+    return sum;
+}
+
+static void check_yosys_case(const yosys_case *want) {
+    odin3_ast_literal lit = literal_of(number(want->size, want->base, want->digits));
+    TEST_ASSERT_EQUAL_UINT32(want->len, lit.value.len);
+    TEST_ASSERT_EQUAL(want->is_signed, lit.is_signed);
+    TEST_ASSERT_EQUAL(want->size[0] == '\0', lit.is_unsized);
+    TEST_ASSERT_EQUAL_UINT64(want->value, as_u64(&lit.value));
+}
+
+static void test_yosys_sizing(void) {
+    for (size_t i = 0; i < sizeof YOSYS_CASES / sizeof YOSYS_CASES[0]; i++) {
+        if (YOSYS_CASES[i].len != 0) {
+            check_yosys_case(&YOSYS_CASES[i]);
+        }
+    }
     TEST_ASSERT_EQUAL_size_t(0, warnings_logged);
-    /* x-led and zero-led unsized literals */
+    /* x/z-led unsized literals: x-filled to 32, or kept when wider */
     assert_value(number("", "'h", "x0"), padded("0000", 32, 'x'), false);
     assert_value(number("", "'h", "0x"), padded("xxxx", 32, '0'), false);
-    /* a decimal past 32 bits keeps its magnitude; signed ones gain a 0 sign bit */
-    odin3_ast_id big = number("", "", "4294967296"); /* 2^32 */
-    value = value_of(big, &is_signed);
-    TEST_ASSERT_EQUAL_UINT32(34, value.len);
-    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, value.bits[32]);
-    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, value.bits[33]);
-    TEST_ASSERT_TRUE(is_signed);
-    TEST_ASSERT_EQUAL_UINT32(33, value_of(number("", "", "2147483648"), &is_signed).len);
-    TEST_ASSERT_EQUAL_UINT32(32, value_of(number("", "", "2147483647"), &is_signed).len);
-    TEST_ASSERT_EQUAL_UINT32(32, value_of(number("", "'d", "4294967295"), &is_signed).len);
-    TEST_ASSERT_FALSE(is_signed);
-    TEST_ASSERT_EQUAL_size_t(0, warnings_logged);
+    TEST_ASSERT_EQUAL_UINT32(36, literal_of(number("", "'h", "x_0000_0000")).value.len);
 }
 
 static int64_t signed_value(const odin3_value *value) {
@@ -455,23 +504,15 @@ static void test_value_misuse(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast, odin3_bytes_cstr("a"), &ident.name));
     odin3_ast_id other = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &ident, NULL, 0, &other));
-    odin3_value value = {.len = 77};
-    bool is_signed = false;
+    odin3_ast_literal lit = {.value = {.len = 77}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_number_value(ast, other, values, &lit));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_ast_number_value(ast, other, values, &value, &is_signed));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_ERR_INVALID_ARG,
-        odin3_ast_number_value(ast, (odin3_ast_id){99}, values, &value, &is_signed));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_ast_number_value(NULL, node, values, &value, &is_signed));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_ast_number_value(ast, node, NULL, &value, &is_signed));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_ast_number_value(ast, node, values, NULL, &is_signed));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_ast_number_value(ast, node, values, &value, NULL));
-    TEST_ASSERT_EQUAL_UINT32(77, value.len);
-    TEST_ASSERT_EQUAL_size_t(6, errors_logged);
+                          odin3_ast_number_value(ast, (odin3_ast_id){99}, values, &lit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_number_value(NULL, node, values, &lit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_number_value(ast, node, NULL, &lit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_number_value(ast, node, values, NULL));
+    TEST_ASSERT_EQUAL_UINT32(77, lit.value.len);
+    TEST_ASSERT_EQUAL_size_t(5, errors_logged);
     /* works after finish */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_finish(ast));
     assert_value(node, padded("1", 32, '0'), true);
@@ -589,17 +630,15 @@ static void test_oom(void) {
     TEST_ASSERT_EQUAL_INT(2, oom_sweep(step_new));
     /* number_value: the caller's arena; nothing changes and no warning is spent */
     odin3_ast_id node = number("4", "'h", "FF");
-    odin3_value value = {.len = 77};
-    bool is_signed = true;
+    odin3_ast_literal lit = {.value = {.len = 77}, .is_signed = true};
     odin3_arena *tiny = odin3_arena_create(1); /* every request needs a new chunk */
     TEST_ASSERT_NOT_NULL(tiny);
     odin3_util_set_alloc_fail_after(0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY,
-                          odin3_ast_number_value(ast, node, tiny, &value, &is_signed));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_ast_number_value(ast, node, tiny, &lit));
     odin3_util_set_alloc_fail_after(-1);
     odin3_arena_destroy(tiny);
-    TEST_ASSERT_EQUAL_UINT32(77, value.len);
-    TEST_ASSERT_TRUE(is_signed);
+    TEST_ASSERT_EQUAL_UINT32(77, lit.value.len);
+    TEST_ASSERT_TRUE(lit.is_signed);
     TEST_ASSERT_FALSE(odin3_ast_number_of(ast, node)->warned);
     TEST_ASSERT_EQUAL_size_t(0, warnings_logged);
     assert_value(node, "1111", false);
@@ -611,7 +650,7 @@ int main(void) {
     RUN_TEST(test_sized_hex_truncates_with_one_warning);
     RUN_TEST(test_xz_extension);
     RUN_TEST(test_unsized);
-    RUN_TEST(test_unsized_wider_than_32);
+    RUN_TEST(test_yosys_sizing);
     RUN_TEST(test_signed);
     RUN_TEST(test_question_and_underscores);
     RUN_TEST(test_pieces_equal_one_token);
