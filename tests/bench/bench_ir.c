@@ -102,7 +102,7 @@ static int make_provs(bench_ctx *ctx) {
         return 1;
     }
     for (uint32_t line = 1; line <= BENCH_INPUT_LINE; line++) {
-        odin3_srcloc loc = {ctx->file, line, 1, line, 2};
+        odin3_srcloc loc = {ctx->file, line, 1, line, 2, 0};
         odin3_prov_origin origin = {&loc, 1, 0, 0};
         odin3_prov_begin_op(&ctx->pass);
         if (odin3_prov_source(&ctx->pass, &origin, &ctx->provs[line - 1]) != ODIN3_OK) {
@@ -253,7 +253,7 @@ static int run_prov(bench_ctx *ctx) {
            (unsigned)odin3_prov_end(ctx->design) - 1,
            (unsigned)odin3_tombstone_end(ctx->design) - 1);
     start = now_seconds();
-    odin3_srcloc busy = {ctx->file, BENCH_INPUT_LINE, 1, BENCH_INPUT_LINE, 2};
+    odin3_srcloc busy = {ctx->file, BENCH_INPUT_LINE, 1, BENCH_INPUT_LINE, 2, 0};
     odin3_prov_hits hits = odin3_prov_index_by_loc(ix, busy);
     double query_ms = (now_seconds() - start) * 1e3;
     report("prov by_loc", start);

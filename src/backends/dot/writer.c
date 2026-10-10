@@ -225,7 +225,7 @@ static bool dot_parse_loc(const char *text, odin3_bytes *file, uint32_t *line) {
 /* Selects exactly the live nodes the provenance forward index returns for the location. */
 static odin3_status dot_focus_loc(dot_ctx *dc, const char *text) {
     odin3_bytes file = {NULL, 0};
-    odin3_srcloc loc = {0, 0, 0, 0, 0};
+    odin3_srcloc loc = {0, 0, 0, 0, 0, 0};
     if (!dot_parse_loc(text, &file, &loc.line)) {
         return dot_invalid("focus is not file:line:", text);
     }

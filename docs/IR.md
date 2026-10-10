@@ -235,8 +235,8 @@ once, via `util/idindex`). A record holds:
 | `kind` | `SOURCE` (from source text), `IMPORTED` (from a netlist file; structural only, spec §4.4), `DERIVED` (made by a pass) |
 | `run` | the pass run that created it (pass-run table: pass name str + run number); readers and front ends are runs too |
 | `op` | operation sequence number within that run (`DERIVED`: one per decompose/clump operation) |
-| `locs` | zero or more source locations `{file str, line, col, end_line, end_col}` |
-| `ast` | AST node ID, 0 = none (Phase 2) |
+| `locs` | zero or more source locations `{file str, line, col, end_line, end_col, loc}`, one per node the record covers; `loc` is the **raw** source-manager location of the node (any buffer, 0 = none; 2A AST-2). `locs[1..]` never hold chain entries, which `odin3_srcman_chain` derives from `loc` |
+| `ast` | AST node ID in the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store is held (2A AST-15/16) |
 | `hier` | str ID of the hierarchical path at creation, including generate scopes (`top/u1/gen[3]`) |
 | `parents` | zero or more prov IDs (`DERIVED` only) |
 
@@ -377,6 +377,10 @@ structural/BLIF cells, IR-4/IR-9/IR-10), §5.4 (both views also allow `module` a
 the lineage DAG; IR-12), §15.1 wording ("arena owned by its Module" → per-module pagevecs and
 arena; design-global strtab and provenance; IR-18); D1 (six granularity tags; IR-9); D9
 ("pointers in-process" → IDs and hashes; IR-12).
+
+Under PHASE2 #7 (2A spec §13): `odin3_srcloc` gains `uint32_t loc`, the raw source-manager
+location (part of a record's identity; not of the forward index's (file, line) key), and the
+`ast` field is resolved by run and form (§6 table).
 
 ## 12. Out of scope for Phase 1
 

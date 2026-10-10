@@ -1287,8 +1287,8 @@ static void test_names_unique_across_kinds(void) {
 static void test_provenance_comments(void) {
     odin3_pass_ctx ctx;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("blif"), &ctx));
-    odin3_srcloc loc7 = {intern("in.blif"), 7, 1, 7, 1};
-    odin3_srcloc loc9 = {intern("in.blif"), 9, 1, 9, 1};
+    odin3_srcloc loc7 = {intern("in.blif"), 7, 1, 7, 1, 0};
+    odin3_srcloc loc9 = {intern("in.blif"), 9, 1, 9, 1, 0};
     odin3_prov_id p7 = {0};
     odin3_prov_id p9 = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
@@ -1475,7 +1475,7 @@ static void test_string_blanks_exact(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &id));
     odin3_pass_ctx ctx;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("r"), &ctx));
-    odin3_srcloc loc = {intern("s.v"), 3, 1, 3, 1};
+    odin3_srcloc loc = {intern("s.v"), 3, 1, 3, 1, 0};
     odin3_prov_id prov = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_prov_source(&ctx, &(odin3_prov_origin){&loc, 1, 0, 0}, &prov));
@@ -1594,8 +1594,8 @@ typedef struct prov_fixture {
 static prov_fixture build_prov_names(void) {
     odin3_pass_ctx ctx;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("fe"), &ctx));
-    odin3_srcloc loc7 = {intern("in.v"), 7, 1, 7, 1};
-    odin3_srcloc loc9 = {intern("in.v"), 9, 1, 9, 1};
+    odin3_srcloc loc7 = {intern("in.v"), 7, 1, 7, 1, 0};
+    odin3_srcloc loc9 = {intern("in.v"), 9, 1, 9, 1, 0};
     odin3_prov_id p7 = {0};
     odin3_prov_id p9 = {0};
     TEST_ASSERT_EQUAL_INT(

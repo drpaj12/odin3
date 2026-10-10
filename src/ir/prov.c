@@ -91,7 +91,8 @@ static uint64_t hash_loc(uint64_t hash, const odin3_srcloc *loc) {
     hash = odin3_hash_combine(hash, loc->line);
     hash = odin3_hash_combine(hash, loc->col);
     hash = odin3_hash_combine(hash, loc->end_line);
-    return odin3_hash_combine(hash, loc->end_col);
+    hash = odin3_hash_combine(hash, loc->end_col);
+    return odin3_hash_combine(hash, loc->loc);
 }
 
 /* The identity hash: every field, except op for SOURCE and IMPORTED (IR-12). */
@@ -118,7 +119,7 @@ static bool locs_equal(const odin3_srcloc *have, const odin3_srcloc *want, uint3
     for (uint32_t i = 0; i < count; i++) {
         if (have[i].file != want[i].file || have[i].line != want[i].line ||
             have[i].col != want[i].col || have[i].end_line != want[i].end_line ||
-            have[i].end_col != want[i].end_col) {
+            have[i].end_col != want[i].end_col || have[i].loc != want[i].loc) {
             return false;
         }
     }
@@ -679,6 +680,8 @@ static size_t array_bytes(size_t count, size_t size) {
     return (count > 0 ? count : 1) * size;
 }
 
+/* The forward index's (file, line) key; the raw loc is deliberately not part of it, so a query
+ * by file and line finds records whatever buffer their raw loc is in (IR §6). */
 static uint64_t loc_key(const odin3_srcloc *loc) {
     return (uint64_t)loc->file << LOC_KEY_SHIFT | loc->line;
 }

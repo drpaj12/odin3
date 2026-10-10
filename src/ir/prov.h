@@ -23,10 +23,15 @@
  * out of memory returns ODIN3_ERR_NO_MEMORY. On any failure nothing changes.
  */
 
-/* A source location: file is a strtab ID (0 = unknown), lines and columns as the reader saw. */
+/*
+ * A source location: file is a strtab ID (0 = unknown), lines and columns as the reader saw.
+ * loc is the raw source-manager location of the node (any buffer, 0 = none; src/ast/srcman.h),
+ * from which the macro and include chains are derived on demand; part of the record identity.
+ */
 typedef struct odin3_srcloc {
     uint32_t file;
     uint32_t line, col, end_line, end_col;
+    uint32_t loc;
 } odin3_srcloc;
 
 typedef enum odin3_prov_kind {
@@ -61,7 +66,7 @@ void odin3_prov_begin_op(odin3_pass_ctx *ctx);
 typedef struct odin3_prov_origin {
     const odin3_srcloc *locs; /* n_locs entries; may be NULL when n_locs is 0 */
     uint32_t n_locs;
-    uint32_t ast;  /* AST node ID, 0 = none */
+    uint32_t ast;  /* AST node ID in the elaborated (else parsed) store of the run, 0 = none */
     uint32_t hier; /* strtab ID of the hierarchical path (top/u1/gen[3]), 0 = none */
 } odin3_prov_origin;
 

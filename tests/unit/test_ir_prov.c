@@ -93,7 +93,7 @@ static odin3_pass_ctx run_named(const char *name) {
 }
 
 static odin3_srcloc loc_at(const char *file, uint32_t line, uint32_t col) {
-    odin3_srcloc loc = {intern(file), line, col, line, col + 3};
+    odin3_srcloc loc = {intern(file), line, col, line, col + 3, 0};
     return loc;
 }
 
@@ -279,6 +279,30 @@ static void test_source_hash_consing(void) {
     TEST_ASSERT_EQUAL_size_t(0, errors_logged);
 }
 
+/* 2A (spec §13): the raw source-manager loc is part of a SOURCE record's identity, but the
+ * forward index still finds the record by file and line alone. */
+static void test_source_raw_loc_identity(void) {
+    odin3_pass_ctx rd = run_named("read_verilog");
+    odin3_srcloc loc = loc_at("a.v", 42, 5);
+    odin3_srcloc raw = loc;
+    raw.loc = 1234;
+    odin3_srcloc other_raw = loc;
+    other_raw.loc = 1235;
+    odin3_prov_id plain = source_at(&rd, loc, 0);
+    odin3_prov_id with_loc = source_at(&rd, raw, 0);
+    assert_differs(plain, with_loc);
+    assert_differs(with_loc, source_at(&rd, other_raw, 0));
+    TEST_ASSERT_EQUAL_UINT32(with_loc.v, source_at(&rd, raw, 0).v);
+    TEST_ASSERT_EQUAL_UINT32(1234, odin3_prov_get(design, with_loc)->locs[0].loc);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_prov_get(design, plain)->locs[0].loc);
+    (void)node_with("$not", with_loc);
+    odin3_prov_index *ix = odin3_prov_index_build(design);
+    TEST_ASSERT_NOT_NULL(ix);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_prov_index_by_loc(ix, loc).count); /* loc 0 query */
+    odin3_prov_index_destroy(ix);
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
 static void test_source_record_fields(void) {
     odin3_pass_ctx rd = run_named("read_blif");
     odin3_srcloc locs[2] = {loc_at("n.blif", 10, 1), loc_at("n.blif", 12, 1)};
@@ -305,7 +329,7 @@ static void test_source_record_fields(void) {
 static void test_source_invalid(void) {
     odin3_pass_ctx rd = run_named("read_verilog");
     uint32_t past = (uint32_t)odin3_strtab_count(odin3_design_strtab(design));
-    odin3_srcloc bad_file = {past, 1, 1, 1, 1};
+    odin3_srcloc bad_file = {past, 1, 1, 1, 1, 0};
     odin3_prov_origin origins[3] = {{NULL, 1, 0, 0}, {&bad_file, 1, 0, 0}, {NULL, 0, 0, past}};
     odin3_prov_id id = {0};
     for (uint32_t i = 0; i < 3; i++) {
@@ -1129,6 +1153,7 @@ int main(void) {
     RUN_TEST(test_pass_runs);
     RUN_TEST(test_pass_run_invalid);
     RUN_TEST(test_source_hash_consing);
+    RUN_TEST(test_source_raw_loc_identity);
     RUN_TEST(test_source_record_fields);
     RUN_TEST(test_source_invalid);
     RUN_TEST(test_derive_invalid);
