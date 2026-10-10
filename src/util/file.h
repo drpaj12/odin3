@@ -1,5 +1,6 @@
 /*
- * file.h — atomic file output: a private temporary beside the destination, renamed over it.
+ * file.h — atomic file output (a private temporary beside the destination, renamed over it) and
+ * whole-file reads.
  */
 #ifndef ODIN3_UTIL_FILE_H
 #define ODIN3_UTIL_FILE_H
@@ -7,6 +8,9 @@
 #include "odin3/odin3.h"
 #include "util/str.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 
 /*
@@ -42,5 +46,27 @@ odin3_status odin3_atomic_file_open(odin3_atomic_file *file, const char *path);
  * final status (the given failure status unchanged). Frees the file's memory; fp becomes NULL.
  */
 odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status status);
+
+/* A whole file read into memory (odin3_file_read_all). */
+typedef struct odin3_file_bytes {
+    uint8_t *data; /* owned (odin3_util_*); NULL after a failure, possibly not when len is 0 */
+    size_t len;    /* bytes read; on too_big the size seen so far (at least max_bytes + 1) */
+    int err;       /* errno of the failing call when the status is ODIN3_ERR_IO, else 0 */
+    bool too_big;  /* the file holds more than max_bytes */
+} odin3_file_bytes;
+
+/*
+ * Reads the whole file at path (a regular file, a pipe or a device: anything read(2) can read)
+ * into out. A regular file larger than max_bytes is rejected from its size before any buffer of
+ * that size is allocated; any other source is read in growing chunks up to max_bytes + 1 bytes.
+ * Returns ODIN3_OK; ODIN3_ERR_IO with errno in out->err when the file cannot be opened or read
+ * (a directory gives EISDIR); ODIN3_ERR_PARSE with out->too_big over max_bytes;
+ * ODIN3_ERR_NO_MEMORY. Logs nothing: the caller reports the failure with its own location. On
+ * failure out->data is NULL; the caller frees out with odin3_file_bytes_free in every case.
+ */
+odin3_status odin3_file_read_all(const char *path, size_t max_bytes, odin3_file_bytes *out);
+
+/* Frees the bytes and resets *bytes to empty; safe to call twice. */
+void odin3_file_bytes_free(odin3_file_bytes *bytes);
 
 #endif
