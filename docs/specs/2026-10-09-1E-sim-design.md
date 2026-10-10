@@ -57,7 +57,10 @@ one line per cycle (`cycle inputs outputs` in port order, binary), deterministic
   instances; behavioural Verilog models of `adder` and `multiply` (from the 1G library
   definitions, hand-checked) are appended; Icarus as above. This is an agent ruling extending
   PHASE1 #13 (ABC alone cannot reference these goldens); the reference stays independent of our
-  simulator.
+  simulator. As built (Task 5): Yosys also references goldens with falling-edge registers or a
+  data input named `clock` (ABC clocks every register on one rising `clock`), reads with `-sop`
+  (covers wider than 12 inputs) and runs `simplemap t:$sop` (`models/sop.v` for Yosys < 0.45);
+  the reference's copy of the BLIF has latch init 2/3/absent set to 0. Results: `docs/PHASE1.md`.
 - **Excluded:** goldens with RAM instances (206; Phase 4) and with implicit black boxes (`$pow`,
   `$_DFFSR_PPP_`), listed explicitly; the four multi-driver Odin II goldens (PHASE1 #15) if the
   reference refuses them.
