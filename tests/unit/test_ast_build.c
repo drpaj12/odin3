@@ -6,8 +6,10 @@
 #include "ast/ast.h"
 #include "ast/ast_internal.h"
 #include "ast/ast_test.h"
+#include "ast/check.h"
 #include "ast/kinds.h"
 #include "ast/srcman.h"
+#include "ir/check.h"
 #include "ir/design.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -34,11 +36,17 @@ static odin3_design *design;
 static odin3_ast *ast;
 static char captured[CAPTURE];
 static size_t errors_logged;
+static size_t check_rule2;  /* "ast check: rule 2:" errors */
+static size_t check_others; /* other "ast check: rule <n>:" errors */
 
 static void capture_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors_logged++;
+        static const char prefix[] = "ast check: rule ";
+        if (strncmp(msg, prefix, sizeof prefix - 1) == 0) {
+            *(msg[sizeof prefix - 1] == '2' ? &check_rule2 : &check_others) += 1;
+        }
     }
     strncpy(captured, msg, sizeof captured - 1);
 }
@@ -47,6 +55,8 @@ void setUp(void) {
     odin3_log_set_sink(capture_sink, NULL);
     captured[0] = '\0';
     errors_logged = 0;
+    check_rule2 = 0;
+    check_others = 0;
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     ast = NULL;
@@ -87,11 +97,12 @@ static odin3_ast_spec spec_of(uint8_t kind, uint8_t sub) {
     return (odin3_ast_spec){.kind = kind, .sub = sub};
 }
 
+/* A real NUMBER payload (8'hA5), so check rule 6 can read it. */
 static uint32_t number_payload(void) {
-    static const int dummy = 0; /* number.c (Task 3) owns the record; nothing reads it here */
-    odin3_ast_payload_rec rec = {.kind = ODIN3_AST_PAYLOAD_NUMBER, .u.number = &dummy};
+    odin3_number_text text = {odin3_bytes_cstr("8"), odin3_bytes_cstr("'h"),
+                              odin3_bytes_cstr("A5")};
     uint32_t payload = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_payload_push(ast, rec, &payload));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_number_parse(ast, (odin3_loc){0}, text, &payload));
     return payload;
 }
 
@@ -453,6 +464,11 @@ static void test_every_kind_min_and_max(void) {
     for (uint32_t kind = 1; kind < ODIN3_AST_KIND_COUNT; kind++) {
         check_kind_bounds((uint8_t)kind);
     }
+    /* The builder and check agree on everything but classes (IDENT leaves fill every slot):
+     * check finds rule 2 class errors and nothing else, payloads included. */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_ast_check(ast, ODIN3_CHECK_FULL));
+    TEST_ASSERT_GREATER_THAN_size_t(0, check_rule2);
+    TEST_ASSERT_EQUAL_size_t(0, check_others);
 }
 
 static void test_list_and_delay_bounds(void) {
@@ -720,6 +736,7 @@ static void test_accessors(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_run(ast).v);
     TEST_ASSERT_TRUE(odin3_ast_design(ast) == design);
     TEST_ASSERT_TRUE(odin3_ast_bytes_reserved(ast) > 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(ast, ODIN3_CHECK_FULL));
 }
 
 static void test_payload_accessors(void) {
@@ -741,6 +758,9 @@ static void test_payload_accessors(void) {
     TEST_ASSERT_EQUAL_MEMORY("specify\nendspecify", bytes.ptr, 18);
     TEST_ASSERT_TRUE(odin3_ast_real(ast, text_node) == 0.0);
     TEST_ASSERT_NULL(odin3_ast_text(ast, real_node).ptr);
+    odin3_ast_id num_node = make(valid_spec(ODIN3_AST_NUMBER), NULL, 0);
+    TEST_ASSERT_EQUAL_UINT32(8, odin3_ast_number_of(ast, num_node)->width);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(ast, ODIN3_CHECK_FULL));
 }
 
 static void test_out_of_range_ids(void) {
@@ -787,6 +807,7 @@ static void test_units_are_roots(void) {
     TEST_ASSERT_EQUAL_UINT32(first.v, odin3_ast_root(ast, 0).v);
     TEST_ASSERT_EQUAL_UINT32(second.v, odin3_ast_root(ast, 1).v);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_root(ast, 2).v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(ast, ODIN3_CHECK_FULL));
 }
 
 /* --- caps ------------------------------------------------------------------------------------ */

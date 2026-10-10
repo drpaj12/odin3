@@ -186,8 +186,9 @@ typedef struct check_ctx {
     uint32_t errors;
 } check_ctx;
 
-static void bad(check_ctx *cx, const char *what, uint32_t id) {
-    odin3_log(ODIN3_LOG_ERROR, "symtab check: %s (%" PRIu32 ")", what, id);
+/* Logs one violation as "ast check: rule 8: <label> <id>: <what>" (label scope, symbol, symtab). */
+static void bad(check_ctx *cx, const char *label, uint32_t id, const char *what) {
+    odin3_log(ODIN3_LOG_ERROR, "ast check: rule 8: %s %" PRIu32 ": %s", label, id, what);
     cx->errors++;
 }
 
@@ -198,17 +199,17 @@ static bool node_in_range(const check_ctx *cx, odin3_ast_id node) {
 /* The record's own fields: kind, parent, node, index. */
 static void check_scope_rec(check_ctx *cx, uint32_t id, const odin3_scope *rec) {
     if (rec->kind < ODIN3_SCOPE_DESIGN || rec->kind >= ODIN3_SCOPE_KIND_END) {
-        bad(cx, "scope kind out of range", id);
+        bad(cx, "scope", id, "scope kind out of range");
     }
     bool root = rec->kind == ODIN3_SCOPE_DESIGN;
     if (root ? rec->parent.v != 0 : rec->parent.v == 0 || rec->parent.v >= id) {
-        bad(cx, "scope parent missing or not created before it", id);
+        bad(cx, "scope", id, "scope parent missing or not created before it");
     }
     if (!node_in_range(cx, rec->node)) {
-        bad(cx, "scope node out of the AST", id);
+        bad(cx, "scope", id, "scope node out of the AST");
     }
     if (!rec->has_index && rec->index != 0) {
-        bad(cx, "scope index without has_index", id);
+        bad(cx, "scope", id, "scope index without has_index");
     }
 }
 
@@ -224,7 +225,7 @@ static void check_scope_lists(check_ctx *cx, uint32_t id, list_counts *counts) {
     for (odin3_scope_id at = rec->first_child; at.v != 0; at = rec->next_sibling) {
         rec = odin3_scope_get(cx->st, at);
         if (rec == NULL || at.v <= prev || rec->parent.v != id) {
-            bad(cx, "scope child list broken", id);
+            bad(cx, "scope", id, "scope child list broken");
             break;
         }
         prev = at.v;
@@ -236,7 +237,7 @@ static void check_scope_lists(check_ctx *cx, uint32_t id, list_counts *counts) {
     for (odin3_sym_id at = rec->first_symbol; at.v != 0; at = sym->next_in_scope) {
         sym = odin3_symbol_get(cx->st, at);
         if (sym == NULL || at.v <= prev || sym->scope.v != id) {
-            bad(cx, "scope symbol list broken", id);
+            bad(cx, "scope", id, "scope symbol list broken");
             break;
         }
         prev = at.v;
@@ -254,10 +255,10 @@ static void check_scopes(check_ctx *cx) {
         check_scope_lists(cx, id, &counts);
     }
     if (roots > 1 || counts.children + roots != cx->n_scopes - 1) {
-        bad(cx, "scopes missing from their parents' child lists", counts.children);
+        bad(cx, "symtab", counts.children, "scopes missing from their parents' child lists");
     }
     if (counts.syms != cx->n_symbols - 1) {
-        bad(cx, "symbols missing from their scopes' lists", counts.syms);
+        bad(cx, "symtab", counts.syms, "symbols missing from their scopes' lists");
     }
 }
 
@@ -269,31 +270,31 @@ static void check_assigns(check_ctx *cx, uint32_t id, const odin3_symbol *rec) {
         as = odin3_assign_get(cx->st, at);
         if (as == NULL || at.v <= prev || as->node.v == 0 || !node_in_range(cx, as->node) ||
             as->kind < ODIN3_ASSIGN_BLOCKING || as->kind >= ODIN3_ASSIGN_KIND_END) {
-            bad(cx, "symbol assignment list broken", id);
+            bad(cx, "symbol", id, "symbol assignment list broken");
             return;
         }
         prev = at.v;
     }
     if (prev != rec->last_assign.v) {
-        bad(cx, "symbol assignment tail wrong", id);
+        bad(cx, "symbol", id, "symbol assignment tail wrong");
     }
 }
 
 static void check_symbol(check_ctx *cx, uint32_t id, const odin3_symbol *rec) {
     if (rec->name == 0 || odin3_scope_get(cx->st, rec->scope) == NULL) {
-        bad(cx, "symbol without a name or an existing scope", id);
+        bad(cx, "symbol", id, "symbol without a name or an existing scope");
     }
     if (rec->kind < ODIN3_SYM_NET || rec->kind >= ODIN3_SYM_KIND_END) {
-        bad(cx, "symbol kind out of range", id);
+        bad(cx, "symbol", id, "symbol kind out of range");
     }
     if (!node_in_range(cx, rec->decl) || !node_in_range(cx, rec->declarator)) {
-        bad(cx, "symbol decl or declarator out of the AST", id);
+        bad(cx, "symbol", id, "symbol decl or declarator out of the AST");
     }
     if ((uint64_t)rec->unpacked_first + rec->n_unpacked > cx->st->dims.len) {
-        bad(cx, "symbol unpacked dims out of the table", id);
+        bad(cx, "symbol", id, "symbol unpacked dims out of the table");
     }
     if (odin3_symtab_lookup_local(cx->st, rec->scope, rec->name).v != id) {
-        bad(cx, "symbol not found by its (scope, name): map disagrees or duplicate", id);
+        bad(cx, "symbol", id, "symbol not found by its (scope, name): map disagrees or duplicate");
     }
     check_assigns(cx, id, rec);
 }
@@ -312,7 +313,7 @@ static uint32_t check_chains(check_ctx *cx) {
              rec = odin3_scope_get(cx->st, at)) {
             if (rec == NULL || rec->parent.v != parent || rec->name != name ||
                 (prev != NULL && odin3_scope_order(prev) >= odin3_scope_order(rec))) {
-                bad(cx, "scope name chain broken", at.v);
+                bad(cx, "scope", at.v, "scope name chain broken");
                 break;
             }
             members++;
@@ -325,14 +326,14 @@ static uint32_t check_chains(check_ctx *cx) {
 
 static void check_maps(check_ctx *cx) {
     if (odin3_u64map_count(cx->st->by_name) != (size_t)cx->n_symbols - 1) {
-        bad(cx, "symbol map count differs from the symbols", cx->n_symbols - 1);
+        bad(cx, "symtab", cx->n_symbols - 1, "symbol map count differs from the symbols");
     }
     uint32_t named = 0;
     for (uint32_t id = 1; id < cx->n_scopes; id++) {
         named += odin3_scope_get(cx->st, (odin3_scope_id){id})->name != 0;
     }
     if (check_chains(cx) != named) {
-        bad(cx, "named scopes missing from or repeated in the child map", named);
+        bad(cx, "symtab", named, "named scopes missing from or repeated in the child map");
     }
 }
 
