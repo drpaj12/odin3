@@ -82,6 +82,8 @@ struct odin3_design {
     odin3_vec modules;            /* odin3_module *, creation order; slot 0 NULL */
     odin3_module_id top;          /* the top module (odin3_design_set_top); none until set */
     struct odin3_srcman *srcman;  /* owned; NULL until odin3_design_get_srcman (AST-1) */
+    odin3_vec asts;               /* odin3_ast *, owned, in set order (AST-15) */
+    odin3_keep_ast keep_ast;      /* what odin3_design_drop_ast keeps (AST-16) */
 };
 
 /* --- module stores (IR-18) ----------------------------------------------------------------- */
