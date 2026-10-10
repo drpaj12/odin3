@@ -48,6 +48,11 @@ odin3_path_kind odin3_path_stat(const char *path);
  * all slashes ("/" for "/x", "//" for "//x", "" for no '/'). */
 odin3_bytes odin3_path_dir(odin3_bytes path);
 
+/* Python's Path(path).suffix, case kept: the last component (trailing '/' and "." components
+ * dropped) from its last '.', when that '.' is neither its first nor its last byte; empty
+ * otherwise. A view into path. */
+odin3_bytes odin3_path_suffix(odin3_bytes path);
+
 /* The language of path's suffix, lower-cased (.v .vh .sv .svh .vhd .vhdl .blif .vqm .edf .edif);
  * the suffix is Python's Path.suffix (the last '.' of the last component, trailing "/" and "."
  * components dropped, not at its start or end). false when there is none. */

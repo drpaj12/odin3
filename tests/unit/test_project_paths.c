@@ -366,6 +366,30 @@ static void test_arch_kinds(void) {
     expect_arch("t.v", 0);
 }
 
+/* Python's Path(p).suffix, case kept (the import and entry tests are case-sensitive). */
+static void expect_suffix(const char *path, const char *suffix) {
+    odin3_bytes got = odin3_path_suffix(odin3_bytes_cstr(path));
+    char text[64];
+    TEST_ASSERT_TRUE(got.len < sizeof text);
+    (void)snprintf(text, sizeof text, "%.*s", (int)got.len, (const char *)got.ptr);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(suffix, text, path);
+}
+
+static void test_path_suffix(void) {
+    expect_suffix("/a/b.qsf", ".qsf");
+    expect_suffix("b.QPF", ".QPF");
+    expect_suffix("a.b/c", "");
+    expect_suffix("a.tar.gz", ".gz");
+    expect_suffix(".qsf", "");
+    expect_suffix("x.", "");
+    expect_suffix("x.qsf/", ".qsf");
+    expect_suffix("x.qsf/.", ".qsf");
+    expect_suffix("", "");
+    expect_suffix("/", "");
+    expect_suffix("..", "");
+    expect_suffix("a/..qsf", ".qsf");
+}
+
 /* --- out of memory ------------------------------------------------------------------------- */
 
 /* One try of odin3_project_path on a fresh design with the k-th allocation failing. */
@@ -423,6 +447,7 @@ int main(void) {
     RUN_TEST(test_language_names_unknown);
     RUN_TEST(test_libext_languages);
     RUN_TEST(test_arch_kinds);
+    RUN_TEST(test_path_suffix);
     RUN_TEST(test_out_of_memory);
     RUN_TEST(test_normalize_out_of_memory);
     return UNITY_END();

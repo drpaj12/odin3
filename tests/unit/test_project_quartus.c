@@ -422,11 +422,13 @@ static void test_qip_cycle_and_cap(void) {
 typedef struct tmp_spec {
     const char *name;
     const char *content;
+    size_t len; /* 0: strlen(content) */
 } tmp_spec;
 
 static const char *write_tmp(const tmp_spec *spec) {
     const char *name = spec->name;
     const char *content = spec->content;
+    size_t len = spec->len != 0 ? spec->len : strlen(content);
     const char *base = getenv("TMPDIR");
     (void)snprintf(tmp, sizeof tmp, "%s/odin3_quartus_XXXXXX",
                    base != NULL && base[0] != '\0' ? base : "/tmp");
@@ -434,7 +436,7 @@ static const char *write_tmp(const tmp_spec *spec) {
     (void)snprintf(tmp_file, sizeof tmp_file, "%s/%s", tmp, name);
     FILE *fp = fopen(tmp_file, "wb");
     TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(strlen(content), fwrite(content, 1, strlen(content), fp));
+    TEST_ASSERT_EQUAL_size_t(len, fwrite(content, 1, len, fp));
     TEST_ASSERT_EQUAL_INT(0, fclose(fp));
     return tmp_file;
 }
@@ -446,8 +448,10 @@ static odin3_status read_tmp(const char *given) {
 }
 
 static void test_crlf_qsf(void) {
-    tmp_spec spec = {"crlf.qsf", "set_global_assignment -name FAMILY \\\r\n  {Cyclone\r\nV}\r\n"
-                                 "set_global_assignment -name TOP_LEVEL_ENTITY t;post\r\n"};
+    tmp_spec spec = {"crlf.qsf",
+                     "set_global_assignment -name FAMILY \\\r\n  {Cyclone\r\nV}\r\n"
+                     "set_global_assignment -name TOP_LEVEL_ENTITY t;post\r\n",
+                     0};
     write_tmp(&spec);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_tmp("crlf.qsf"));
     TEST_ASSERT_EQUAL_STRING(
@@ -457,12 +461,23 @@ static void test_crlf_qsf(void) {
 
 /* .qpf lines: Python whitespace (here a no-break space) around the name, '=' and value. */
 static void test_qpf_blanks(void) {
-    tmp_spec spec = {"p.qpf", "\xc2\xa0 \t# x\n\v\n PROJECT_REVISION\t=\xc2\xa0\"a b\" \t\r\n"};
+    tmp_spec spec = {"p.qpf", "\xc2\xa0 \t# x\n\v\n PROJECT_REVISION\t=\xc2\xa0\"a b\" \t\r\n", 0};
     write_tmp(&spec);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_tmp("p.qpf"));
     /* the revision is chosen; its .qsf "a b.qsf" does not exist beside the .qpf */
     TEST_ASSERT_NOT_NULL(strstr(captured, "p.qpf: error: missing_file: file not found: '"));
     TEST_ASSERT_NOT_NULL(strstr(captured, "/a b.qsf'"));
+}
+
+/* A NUL byte in a PROJECT_REVISION value: located `syntax` at its line (no strtab string holds
+ * NUL, PRJ-4; a declared divergence — the oracle keeps the byte). */
+static void test_qpf_nul_revision(void) {
+    static const char text[] = "PROJECT_REVISION = \"a\0b\"\n";
+    tmp_spec spec = {"n.qpf", text, sizeof text - 1};
+    write_tmp(&spec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_tmp("n.qpf"));
+    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_EQUAL_STRING("n.qpf:1:1: error: syntax: NUL byte in revision: 'a\\0b'", captured);
 }
 
 /* --- out of memory ------------------------------------------------------------------------- */
@@ -520,6 +535,7 @@ int main(void) {
     RUN_TEST(test_qip_cycle_and_cap);
     RUN_TEST(test_crlf_qsf);
     RUN_TEST(test_qpf_blanks);
+    RUN_TEST(test_qpf_nul_revision);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();
 }

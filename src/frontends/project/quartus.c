@@ -33,10 +33,6 @@ static bool is_digit(uint8_t byte) {
     return byte >= '0' && byte <= '9';
 }
 
-static bool in_set(uint8_t byte, const char *set) {
-    return byte != '\0' && strchr(set, byte) != NULL;
-}
-
 /* The bytes of strtab ID str. */
 static odin3_bytes str_bytes(const odin3_project *proj, uint32_t str) {
     const odin3_strtab *tab = odin3_design_strtab(proj->design);
@@ -51,50 +47,6 @@ static odin3_bytes after_last(odin3_bytes text, char sep) {
         j--;
     }
     return (odin3_bytes){bytes + j, text.len - j};
-}
-
-/* Whether text is the oracle's NUMBER: -?[0-9][0-9_]* or ([0-9][0-9_]*)?'[sS]?[base][digits]+. */
-static bool is_plain_number(const uint8_t *text, size_t len) {
-    size_t j = len > 0 && text[0] == '-';
-    if (j >= len || !is_digit(text[j])) {
-        return false;
-    }
-    while (j < len && (is_digit(text[j]) || text[j] == '_')) {
-        j++;
-    }
-    return j == len;
-}
-
-/* The length of the run of bytes from set starting at word[from]. */
-static size_t run_of(odin3_bytes word, size_t from, const char *set) {
-    const uint8_t *text = word.ptr;
-    size_t j = from;
-    while (j < word.len && in_set(text[j], set)) {
-        j++;
-    }
-    return j - from;
-}
-
-static bool is_number(odin3_bytes word) {
-    const uint8_t *text = word.ptr;
-    size_t len = word.len;
-    if (is_plain_number(text, len)) {
-        return true;
-    }
-    size_t j = 0;
-    if (len > 0 && is_digit(text[0])) {
-        j = 1 + run_of(word, 1, "0123456789_");
-    }
-    if (j >= len || text[j] != '\'') {
-        return false;
-    }
-    j++;
-    j += run_of(word, j, "sS") > 0;
-    if (j >= len || !in_set(text[j], "bBoOdDhH")) {
-        return false;
-    }
-    size_t digits = run_of(word, j + 1, "0123456789abcdefABCDEFxXzZ_?");
-    return digits > 0 && j + 1 + digits == len;
 }
 
 /* --- state --------------------------------------------------------------------------------- */
@@ -662,7 +614,7 @@ static odin3_status add_param(qsf_state *st, const queued_param *param, odin3_by
     odin3_proj_param out = {.type = ODIN3_PARAM_STRING, .at = param->at};
     odin3_bytes value = param->value->text;
     const char *text = value.ptr;
-    if (is_number(value)) {
+    if (odin3_proj_is_number(value)) {
         out.type = ODIN3_PARAM_NUMBER;
     } else if (value.len >= 2 && text[0] == '"' && text[value.len - 1] == '"') {
         value = (odin3_bytes){text + 1, value.len - 2};
@@ -796,6 +748,11 @@ static odin3_status qpf_revisions(qsf_state *st, const odin3_proj_text *text, od
         }
         if (kind == QPF_ASSIGN && is_text(line.name, "PROJECT_REVISION")) {
             odin3_loc at = odin3_srcman_loc(st->sm, text->buffer, off + (uint32_t)line.name_at);
+            if (line.value.len > 0 && memchr(line.value.ptr, '\0', line.value.len) != NULL) {
+                /* no strtab string holds NUL (PRJ-4); the oracle keeps the byte */
+                qsf_err what = {ODIN3_PROJ_ERR_SYNTAX, "NUL byte in revision"};
+                return fail_at(st->proj, at, what, &line.value, 1);
+            }
             odin3_status res = add_revision(st, &line, at, revs);
             if (res != ODIN3_OK) {
                 return res;

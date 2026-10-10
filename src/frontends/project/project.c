@@ -485,6 +485,18 @@ static bool is_ident(const uint8_t *text, size_t len) {
     return true;
 }
 
+size_t odin3_proj_ident_len(odin3_bytes text, size_t from) {
+    const uint8_t *bytes = text.ptr;
+    if (from >= text.len || !ident_start(bytes[from])) {
+        return 0;
+    }
+    size_t j = from + 1;
+    while (j < text.len && ident_char(bytes[j])) {
+        j++;
+    }
+    return j - from;
+}
+
 odin3_status odin3_project_add_define(odin3_project *proj, odin3_bytes word, odin3_loc at) {
     const uint8_t *text = word.ptr;
     const uint8_t *eq = word.len > 0 ? memchr(text, '=', word.len) : NULL;
@@ -551,6 +563,44 @@ odin3_status odin3_project_set_top_file(odin3_project *proj, odin3_bytes name,
         proj->top_file = *file;
     }
     return st;
+}
+
+static bool is_digit(uint8_t byte) {
+    return byte >= '0' && byte <= '9';
+}
+
+static bool in_set(uint8_t byte, const char *set) {
+    return byte != '\0' && strchr(set, byte) != NULL;
+}
+
+/* The length of the run of bytes from set starting at word[from]. */
+static size_t run_of(odin3_bytes word, size_t from, const char *set) {
+    const uint8_t *text = word.ptr;
+    size_t j = from;
+    while (j < word.len && in_set(text[j], set)) {
+        j++;
+    }
+    return j - from;
+}
+
+bool odin3_proj_is_number(odin3_bytes word) {
+    const uint8_t *text = word.ptr;
+    size_t len = word.len;
+    size_t j = len > 0 && text[0] == '-';
+    if (j < len && is_digit(text[j]) && j + run_of(word, j, "0123456789_") == len) {
+        return true; /* -?[0-9][0-9_]* */
+    }
+    j = len > 0 && is_digit(text[0]) ? run_of(word, 0, "0123456789_") : 0;
+    if (j >= len || text[j] != '\'') {
+        return false;
+    }
+    j++;
+    j += run_of(word, j, "sS") > 0;
+    if (j >= len || !in_set(text[j], "bBoOdDhH")) {
+        return false;
+    }
+    size_t digits = run_of(word, j + 1, "0123456789abcdefABCDEFxXzZ_?");
+    return digits > 0 && j + 1 + digits == len;
 }
 
 odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_loc at,

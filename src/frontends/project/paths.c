@@ -168,6 +168,23 @@ static size_t name_end(const char *text, size_t end) {
     }
 }
 
+odin3_bytes odin3_path_suffix(odin3_bytes path) {
+    const char *text = path.ptr;
+    size_t end = path.len > 0 ? name_end(text, path.len) : 0;
+    size_t start = end;
+    while (start > 0 && text[start - 1] != '/') {
+        start--;
+    }
+    size_t dot = end;
+    while (dot > start && text[dot - 1] != '.') {
+        dot--;
+    }
+    if (dot <= start + 1 || dot == end) { /* no '.', a leading '.' or a trailing '.' */
+        return (odin3_bytes){"", 0};
+    }
+    return (odin3_bytes){text + dot - 1, end - dot + 1};
+}
+
 /*
  * Copies Python's Path(path).suffix, lower-cased (ASCII), into buf: the last component (trailing
  * '/' and "." components ignored) from its last '.', when that '.' is neither its first nor its

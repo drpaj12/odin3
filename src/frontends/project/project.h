@@ -15,6 +15,7 @@
 #include "util/vec.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* --- enumerations (stored as uint8_t in the record) ---------------------------------------- */
@@ -342,6 +343,14 @@ odin3_status odin3_project_set_top_file(odin3_project *proj, odin3_bytes name,
  * large" at at, names [text]. */
 odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_loc at,
                                  uint32_t *out);
+
+/* The length of the IDENT ([A-Za-z_][A-Za-z0-9_$]*) starting at text[from], 0 when none. */
+size_t odin3_proj_ident_len(odin3_bytes text, size_t from);
+
+/* Whether word is wholly the oracle's NUMBER: -?[0-9][0-9_]* or
+ * ([0-9][0-9_]*)?'[sS]?[bBoOdDhH][0-9a-fA-FxXzZ_?]+ (ASCII digits only). Shared by the .o3proj
+ * `param` and the Quartus `set_parameter` value typing. */
+bool odin3_proj_is_number(odin3_bytes word);
 
 /* Plain appends (NO_MEMORY). add_rule copies cells into rule_cells for a MAP rule and sets its
  * span; add_override copies params into override_params for a CELL override and sets its span. */
