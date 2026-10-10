@@ -43,6 +43,7 @@ static odin3_ast *ast_alloc(odin3_design *design) {
     odin3_vec_init(&ast->units, sizeof(odin3_ast_id));
     odin3_vec_init(&ast->pending, sizeof(odin3_ast_id));
     odin3_vec_init(&ast->heights, sizeof(uint16_t));
+    odin3_vec_init(&ast->comments, sizeof(odin3_ast_comment));
     ast->max_children = ODIN3_AST_MAX_CHILDREN;
     ast->max_nodes = ODIN3_AST_MAX_NODES;
     ast->max_depth = ODIN3_AST_MAX_DEPTH;
@@ -441,6 +442,7 @@ odin3_status odin3_ast_finish(odin3_ast *ast) {
     if (why != NULL) {
         return misuse("odin3_ast_finish", why);
     }
+    odin3_ast_comments_sort(ast);
     odin3_vec_free(&ast->pending);
     odin3_vec_free(&ast->heights);
     ast->finished = true;
