@@ -432,11 +432,25 @@ if(BUILD_TESTING)
         list(JOIN _preload ":" _preload)
         list(APPEND _python_env "LD_PRELOAD=${_preload}" "ASAN_OPTIONS=detect_leaks=0")
     endif()
-    # The Python plugin needs cffi; skip (not fail) where it is not installed.
+    # The Python plugin tests need cffi: the repo's .venv has it (requirements-dev.txt), so they
+    # use its Python when there is one (CI's Python3 has it too); skip (not fail) without cffi.
+    find_program(ODIN3_PLUGIN_PYTHON NAMES python3 python
+                 PATHS ${PROJECT_SOURCE_DIR}/.venv/bin NO_DEFAULT_PATH)
+    if(NOT ODIN3_PLUGIN_PYTHON)
+        set(ODIN3_PLUGIN_PYTHON ${Python3_EXECUTABLE})
+    endif()
     add_test(NAME python_example_plugin
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
-                ${Python3_EXECUTABLE} plugins/python/example_plugin.py
+                ${ODIN3_PLUGIN_PYTHON} plugins/python/example_plugin.py
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_example_plugin PROPERTIES
         LABELS unit SKIP_REGULAR_EXPRESSION "No module named 'cffi'")
+    # Phase 1 exit test (1D): Python walks every committed BLIF fixture through the C ABI and
+    # gets exactly the `stats` pass's counts and cell-type histogram.
+    add_test(NAME python_walk
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_walk
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_walk PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped 'cffi not installed'")
 endif()

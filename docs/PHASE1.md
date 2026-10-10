@@ -30,7 +30,10 @@ Each sub-project gets its own spec (`docs/specs/`), plan, and PRs. Model/effort 
 - [x] 1C BLIF round trip identical on every `ok` golden (2026-10-09): normalized text identity
   1846/1846; `netlist-compare` identical 1824 (10 with stub models), exceptions per #15 and the
   results below
-- [ ] 1D a Python plugin walks the IR through the C ABI
+- [x] 1D a Python plugin walks the IR through the C ABI (2026-10-10): CTest `python_walk` reads
+  all 141 committed BLIF fixtures through cffi; per-module counts and cell-type histograms
+  identical to the C `stats` pass on every one (Release 141/141; Debug 140, the multi-driver
+  original fails the always-on check); results below
 - [x] 1E simulator matches ABC on the goldens without RAMs (2026-10-09): `tools/sim-check`, seeds
   1–3 × 64 cycles, every simulated golden identical to the reference (1626 files, 626 distinct
   contents: ABC 405, Yosys 221); 220 excluded (RAM 206, implicit black box 10, multi-driver 4)
@@ -438,3 +441,21 @@ Gate fixtures: CTest `writer_check_fixtures` (11 fixtures) and
 `writer_check_detects_corruption`; `hand_writers.blif` and `hand_wide.blif` were added for the
 Yosys-side differences the sample run found (none was a writer bug; the writer changes were
 declared black boxes as Yosys `blackbox` modules in the JSON and every attribute written).
+
+## 1D results: Python walks the IR
+
+CTest `python_walk` (`tests/tools/test_python_walk.py`, 2026-10-10) reads every committed BLIF
+fixture under `tests/` through the cffi binding (`plugins/python/odin3.py`) — 141 files:
+`tests/golden/blif` 12, `tests/golden/techlib` 49 (after `read_techlib lib/vtr.o3lib`),
+`tests/golden/projects` 36, `tests/tools/fixtures` 43, `tests/cli` 1 — and walks each design from
+Python (`plugins/python/walk.py`: modules, live nodes, nets, wires, ports, cell-type histogram).
+The walk's lines equal, line for line, the messages the C `stats` pass logs for the same design,
+captured through the ABI log sink (not a re-implementation): identical on 141/141 against the
+Release library and on 140/141 against the Debug one, where `elsif_both_defined.odin.blif` (a
+multi-driver original, decision #15) fails the check after `read_blif` and is not compared. A
+walk with one count altered differs on all 11 fixtures it was tried on. The same test walks
+pins against nets on every fixture (each connected pin is on its net, each net pin points back,
+drivers are OUT/INOUT), provenance both ways (`node.sources()`, `design.objects_at(file, line)`),
+parameters, ports and string attributes. It takes about 1 s (Debug, ASan) and is skipped where
+cffi is missing; locally it uses the repository's `.venv` Python, and CI's Python has cffi from
+`requirements-dev.txt`.
