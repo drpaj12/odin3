@@ -363,6 +363,31 @@ static void test_word_cap(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_text("libext .v .sv\nlibext .v .sv # .vh .x\n"));
 }
 
+/* The default cap is 2^20 words per line (§9), counted before anything is stored: the key and
+ * 2^20 + 1 values fail at the line's word 2^20 + 1. */
+static void test_default_word_cap(void) {
+    TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 20, ODIN3_PROJ_MAX_WORDS);
+    size_t words = (size_t)ODIN3_PROJ_MAX_WORDS + 1;
+    size_t len = strlen("libext") + 2 * words + 1;
+    char *text = malloc(len);
+    TEST_ASSERT_NOT_NULL(text);
+    memcpy(text, "libext", strlen("libext"));
+    for (size_t i = 0; i < words; i++) {
+        memcpy(text + strlen("libext") + 2 * i, " x", 2);
+    }
+    text[len - 1] = '\n';
+    FILE *fp = fopen(tmp_file, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    TEST_ASSERT_EQUAL_size_t(len, fwrite(text, 1, len, fp));
+    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
+    free(text);
+    odin3_proj_path file = {id("p.o3proj"), id(tmp_file), {0}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_read_o3proj(proj, &file));
+    TEST_ASSERT_EQUAL_STRING("p.o3proj:1:2097158: error: syntax: line has more than 1048576 "
+                             "words (ODIN3_PROJ_MAX_WORDS)",
+                             message());
+}
+
 /* Word errors (§4.2) name nothing and are located at the word. */
 static void test_word_errors(void) {
     static const text_case cases[] = {
@@ -668,6 +693,7 @@ int main(void) {
     RUN_TEST(test_arity_first);
     RUN_TEST(test_libext_ceiling);
     RUN_TEST(test_word_cap);
+    RUN_TEST(test_default_word_cap);
     RUN_TEST(test_word_errors);
     RUN_TEST(test_file_errors);
     RUN_TEST(test_top_errors);

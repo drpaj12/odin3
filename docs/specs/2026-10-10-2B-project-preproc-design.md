@@ -755,7 +755,7 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | `ODIN3_PP_MAX_LOC_BYTES_PER_STREAM` | 2^28 | location-space bytes the run reserves (Σ `len + 1` over its buffers), so a bomb of `MACRO_ARG`s that never reach the output (`` `G(x) `` ignoring `x`, doubled per level) is stopped by 2B before the source manager's 2^32 space is (AST §3.5 expects 2B's caps first; I10c) |
 | `ODIN3_PP_MAX_FILE_CACHE_BYTES` | 2^30 | bytes held by the file cache over the preprocessor's life (a VTR project holds under 5 MB) |
 | `ODIN3_PROJ_MAX_FLIST_DEPTH`, `_QIP_DEPTH` | 64 | nested lists; cycles are caught by name first |
-| `ODIN3_PROJ_MAX_WORDS` | 2^24 | words per file list (a 2^28-byte list of one-byte words) |
+| `ODIN3_PROJ_MAX_WORDS` | 2^20 | words per file list, `.o3proj` line and `.qsf`/`.qip` file, counted before they are stored (agent default, PR 2B-1 final review: at 2^24 one Tcl file cost ≈ 1 GB, and an OOM kills the WSL VM; ≈ 60 MB now; real projects — the DE2i-150 `.qsf` is a few thousand lines — are far below it) |
 | source limits | AST §3.5 | file size 2^28, buffers 2^24, location space |
 
 Everything else is bounded by these (the macro table is at most `MAX_MACROS` × a bounded

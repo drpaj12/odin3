@@ -77,7 +77,9 @@ enum { ODIN3_PROJ_HAS_MIN_WIDTH = 1, ODIN3_PROJ_HAS_MAX_WIDTH = 2, ODIN3_PROJ_HA
 
 #define ODIN3_PROJ_MAX_FLIST_DEPTH UINT32_C(64)
 #define ODIN3_PROJ_MAX_QIP_DEPTH UINT32_C(64)
-#define ODIN3_PROJ_MAX_WORDS (UINT32_C(1) << 24)
+/* 2^20: ~60 MB worst case per Tcl file or .o3proj line (an OOM kills the WSL VM); agent
+ * default, real projects are far below it */
+#define ODIN3_PROJ_MAX_WORDS (UINT32_C(1) << 20)
 
 /* The caps a project enforces; tests lower them through project_test.h. */
 typedef struct odin3_proj_limits {
