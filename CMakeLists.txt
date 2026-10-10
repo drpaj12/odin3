@@ -103,6 +103,8 @@ add_library(odin3_core OBJECT
     src/frontends/project/flist.c
     src/frontends/project/tcl.c
     src/frontends/project/quartus.c
+    src/frontends/project/o3proj.c
+    src/frontends/project/entry.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -274,6 +276,13 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_project_quartus)
     target_compile_definitions(test_project_quartus PRIVATE
         ODIN3_QUARTUS_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/quartus")
+    odin3_add_unit_test(test_project_o3proj)
+    target_compile_definitions(test_project_o3proj PRIVATE
+        ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
+    odin3_add_unit_test(test_project_entry)
+    target_compile_definitions(test_project_entry PRIVATE
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"
+        ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE

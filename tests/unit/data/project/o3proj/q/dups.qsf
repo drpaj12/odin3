@@ -1,0 +1,5 @@
+set_global_assignment -name VERILOG_FILE ../src/a.v -hdl_version VERILOG_2001
+set_global_assignment -name VERILOG_FILE ../src/a.v
+set_location_assignment PIN_A1 -to clk
+set_global_assignment -name VERILOG_FILE ../lib/l.v
+set_global_assignment -name VERILOG_FILE ../lib/l.v

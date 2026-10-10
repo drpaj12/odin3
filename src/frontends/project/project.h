@@ -407,4 +407,31 @@ odin3_status odin3_read_o3proj(odin3_project *proj, const odin3_proj_path *file)
 /* Reads an Odin II XML configuration (PRJ-15). */
 odin3_status odin3_read_odin2(odin3_project *proj, const odin3_proj_path *file);
 
+/* --- entry dispatch (PRJ-16; entry.c) ------------------------------------------------------ */
+
+/* What read_project reads. */
+typedef struct odin3_project_request {
+    const char *entry;    /* as given; a relative entry resolves against the working directory */
+    uint8_t format;       /* odin3_proj_format; 0: from the entry's suffix */
+    const char *revision; /* --revision; NULL: none ("" is a revision) */
+    const char *top;      /* 1D's --top; NULL: none */
+} odin3_project_request;
+
+/*
+ * Fills the design's project record from req (PRJ-16). The entry is made absolute against the
+ * working directory and normalized (point (i)); it must be a regular file (unlocated
+ * `missing_file`, names [entry as given]). Format: req->format, else by the entry's suffix
+ * (case-sensitive): .o3proj, .qpf/.qsf (Quartus), .qip (`unknown_file_type`: not an entry), .xml
+ * (`unknown_file_type` "no Odin II XML reader yet", as is format ODIN2), anything else a file
+ * list. A revision with a non-Quartus entry is an unlocated `syntax` ("--revision needs a .qpf or
+ * .qsf entry"). Then the reader runs; then req->top replaces the project's top (an info line
+ * "<entry>: --top <new> replaces the project top <old>" when they differ; a bad name is an
+ * unlocated `syntax`); then finish and the info lines "<entry>: ignored: A, B, …" and "<entry>:
+ * listed more than once, read once: P, …" (resolved paths), each only when non-empty; <entry> is
+ * the entry as given. Errors: PARSE (logged once), IO, NO_MEMORY — each drops the record
+ * (odin3_design_drop_project); INVALID_ARG for a NULL req or entry, or when the record is already
+ * finished (logged "odin3: error: project already read from <entry>"; that record is kept).
+ */
+odin3_status odin3_project_read(odin3_design *design, const odin3_project_request *req);
+
 #endif
