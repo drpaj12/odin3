@@ -61,16 +61,6 @@ typedef enum flist_opt { OPT_NONE, OPT_F, OPT_V, OPT_Y, OPT_TOP } flist_opt;
 
 typedef enum flist_plus { PLUS_NONE, PLUS_INCDIR, PLUS_DEFINE, PLUS_LIBEXT } flist_plus;
 
-static bool bytes_is(odin3_bytes bytes, const char *str) {
-    size_t len = strlen(str);
-    return bytes.len == len && (len == 0 || memcmp(bytes.ptr, str, len) == 0);
-}
-
-static odin3_bytes strtab_bytes(const flist_reader *rd, uint32_t str) {
-    const odin3_strtab *tab = odin3_design_strtab(rd->proj->design);
-    return (odin3_bytes){odin3_strtab_get(tab, str), odin3_strtab_len(tab, str)};
-}
-
 static flist_frame *top_frame(flist_reader *rd) {
     return odin3_vec_at(&rd->frames, rd->frames.len - 1);
 }
@@ -165,26 +155,6 @@ static flist_word next_word(const flist_reader *rd, flist_frame *frame) {
 
 /* --- $NAME and ${NAME} --------------------------------------------------------------------- */
 
-static bool ident_start(uint8_t byte) {
-    return (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') || byte == '_';
-}
-
-static bool ident_char(uint8_t byte) {
-    return ident_start(byte) || (byte >= '0' && byte <= '9') || byte == '$';
-}
-
-/* The length of the IDENT ([A-Za-z_][A-Za-z0-9_$]*) at text[from, len), 0 when none. */
-static size_t ident_len(const uint8_t *text, size_t from, size_t len) {
-    if (from >= len || !ident_start(text[from])) {
-        return 0;
-    }
-    size_t j = from + 1;
-    while (j < len && ident_char(text[j])) {
-        j++;
-    }
-    return j - from;
-}
-
 /* A reference: the name's offset and length in the word, and the offset just past it. */
 typedef struct var_ref {
     size_t name, len, end;
@@ -195,11 +165,11 @@ typedef struct var_ref {
 static bool var_at(odin3_bytes word, size_t dollar, var_ref *ref) {
     const uint8_t *text = word.ptr;
     if (dollar + 1 < word.len && text[dollar + 1] == '{') {
-        size_t len = ident_len(text, dollar + 2, word.len);
+        size_t len = odin3_proj_ident_len(word, dollar + 2);
         *ref = (var_ref){dollar + 2, len, dollar + 3 + len};
         return len > 0 && dollar + 2 + len < word.len && text[dollar + 2 + len] == '}';
     }
-    size_t len = ident_len(text, dollar + 1, word.len);
+    size_t len = odin3_proj_ident_len(word, dollar + 1);
     *ref = (var_ref){dollar + 1, len, dollar + 1 + len};
     return len > 0;
 }
@@ -332,9 +302,9 @@ static odin3_status cycle(flist_reader *rd, size_t from, odin3_loc at, uint32_t 
     }
     for (size_t i = from; i < rd->frames.len; i++) {
         const flist_frame *frame = odin3_vec_cat(&rd->frames, i);
-        names[i - from] = strtab_bytes(rd, frame->list);
+        names[i - from] = odin3_proj_str_bytes(rd->proj, frame->list);
     }
-    names[count - 1] = strtab_bytes(rd, list);
+    names[count - 1] = odin3_proj_str_bytes(rd->proj, list);
     odin3_proj_err err = {
         ODIN3_PROJ_ERR_F_CYCLE, ODIN3_PROJ_LOCATED, at, NULL, "file list cycle", names,
         (uint32_t)count};
@@ -373,8 +343,8 @@ static odin3_status open_nested(flist_reader *rd, const flist_word *opt, odin3_b
         return too_deep(rd, opt->at, given);
     }
     odin3_bytes base = rd->root;
-    if (bytes_is(opt->text, "-F")) {
-        base = odin3_path_dir(strtab_bytes(rd, list.resolved));
+    if (odin3_proj_bytes_is(opt->text, "-F")) {
+        base = odin3_path_dir(odin3_proj_str_bytes(rd->proj, list.resolved));
     }
     return push_list(rd, &list, opt->at, base);
 }
@@ -382,16 +352,18 @@ static odin3_status open_nested(flist_reader *rd, const flist_word *opt, odin3_b
 /* --- options ------------------------------------------------------------------------------- */
 
 static flist_opt option_of(odin3_bytes word) {
-    if (bytes_is(word, "-f") || bytes_is(word, "-F")) {
+    if (odin3_proj_bytes_is(word, "-f") || odin3_proj_bytes_is(word, "-F")) {
         return OPT_F;
     }
-    if (bytes_is(word, "-v")) {
+    if (odin3_proj_bytes_is(word, "-v")) {
         return OPT_V;
     }
-    if (bytes_is(word, "-y")) {
+    if (odin3_proj_bytes_is(word, "-y")) {
         return OPT_Y;
     }
-    return bytes_is(word, "-top") || bytes_is(word, "--top-module") ? OPT_TOP : OPT_NONE;
+    return odin3_proj_bytes_is(word, "-top") || odin3_proj_bytes_is(word, "--top-module")
+               ? OPT_TOP
+               : OPT_NONE;
 }
 
 /* An option taking the next word (expanded, located at its own line) as its argument; errors
@@ -420,13 +392,13 @@ static odin3_status with_argument(flist_reader *rd, flist_opt opt, const flist_w
 }
 
 static flist_plus plus_of(odin3_bytes key) {
-    if (bytes_is(key, "incdir")) {
+    if (odin3_proj_bytes_is(key, "incdir")) {
         return PLUS_INCDIR;
     }
-    if (bytes_is(key, "define")) {
+    if (odin3_proj_bytes_is(key, "define")) {
         return PLUS_DEFINE;
     }
-    return bytes_is(key, "libext") ? PLUS_LIBEXT : PLUS_NONE;
+    return odin3_proj_bytes_is(key, "libext") ? PLUS_LIBEXT : PLUS_NONE;
 }
 
 static odin3_status plus_value(flist_reader *rd, flist_plus plus, odin3_bytes value, odin3_loc at) {
@@ -488,7 +460,7 @@ static odin3_status step(flist_reader *rd) {
     if (opt != OPT_NONE) {
         return with_argument(rd, opt, &word);
     }
-    if (bytes_is(word.text, "-sv")) {
+    if (odin3_proj_bytes_is(word.text, "-sv")) {
         rd->sv = true;
         return ODIN3_OK;
     }
@@ -512,7 +484,7 @@ odin3_status odin3_read_flist(odin3_project *proj, const odin3_proj_path *file) 
     odin3_status st = odin3_design_get_srcman(proj->design, &rd.sm);
     st = st != ODIN3_OK ? st : odin3_project_intern(proj, odin3_bytes_cstr("work"), &rd.work);
     if (st == ODIN3_OK) {
-        rd.root = odin3_path_dir(strtab_bytes(&rd, file->resolved));
+        rd.root = odin3_path_dir(odin3_proj_str_bytes(proj, file->resolved));
         st = push_list(&rd, file, (odin3_loc){0}, rd.root);
     }
     while (st == ODIN3_OK && rd.frames.len > 0) {

@@ -3,7 +3,8 @@
  * record (all.o3proj), every key's arity, every error with its names and exact located message,
  * `param` scopes checked after the file, `import` of a Quartus project (top given twice, a
  * revision, a param whose top comes from the import), and an OOM sweep with the record dropped.
- * Each tree file also matches the oracle (scratch harness, task-5 report).
+ * The expected values were checked against the oracle with an uncommitted scratch harness
+ * (task-5 report); the durable oracle comparison is project_corpus (Task 10).
  */
 #include "ast/srcman.h"
 #include "frontends/project/project.h"

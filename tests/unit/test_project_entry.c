@@ -166,6 +166,12 @@ static void test_entry_errors(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("ip", str(project()->top));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_project_read(design, NULL));
+    /* a format that is neither 0 nor an odin3_proj_format: misuse, no record touched */
+    fresh_design();
+    req = (odin3_project_request){D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2 + 1, NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, read_req(&req));
+    TEST_ASSERT_NULL(odin3_design_project(design));
+    TEST_ASSERT_EQUAL_INT(0, errors);
 }
 
 /* --revision needs a Quartus entry; it chooses among a .qpf's revisions ("" is one). */
@@ -214,9 +220,11 @@ static void test_top_replaces(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("other", str(project()->top));
     TEST_ASSERT_EQUAL_UINT32(0, project()->top_at.v);
-    TEST_ASSERT_EQUAL_INT(2, ninfos);
+    TEST_ASSERT_EQUAL_INT(2, ninfos); /* after finish, before the duplicates line */
     TEST_ASSERT_EQUAL_STRING(D "/all.o3proj: --top other replaces the project top mylib.top",
                              infos[0]);
+    TEST_ASSERT_EQUAL_STRING(D "/all.o3proj: listed more than once, read once: " D "/src/a.v",
+                             infos[1]);
     fresh_design();
     /* the same top: no info line, the declaring line kept */
     req.top = "mylib.top";

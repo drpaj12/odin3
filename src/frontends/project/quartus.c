@@ -21,22 +21,8 @@ enum { DETAIL_MAX = 128 };
 
 /* --- small helpers ------------------------------------------------------------------------- */
 
-static bool bytes_eq(odin3_bytes left, odin3_bytes right) {
-    return left.len == right.len && (left.len == 0 || memcmp(left.ptr, right.ptr, left.len) == 0);
-}
-
-static bool is_text(odin3_bytes bytes, const char *text) {
-    return bytes_eq(bytes, odin3_bytes_cstr(text));
-}
-
 static bool is_digit(uint8_t byte) {
     return byte >= '0' && byte <= '9';
-}
-
-/* The bytes of strtab ID str. */
-static odin3_bytes str_bytes(const odin3_project *proj, uint32_t str) {
-    const odin3_strtab *tab = odin3_design_strtab(proj->design);
-    return (odin3_bytes){odin3_strtab_get(tab, str), odin3_strtab_len(tab, str)};
 }
 
 /* Everything after the last sep in text (all of it when there is none). */
@@ -122,7 +108,7 @@ static odin3_status open_frame(qsf_state *st, const odin3_proj_path *path, odin3
     qsf_frame frame = {.path = *path, .next = 0};
     odin3_vec_init(&frame.commands, sizeof(odin3_tcl_command));
     odin3_status res = odin3_project_load(st->proj, path, parent, &frame.text);
-    odin3_bytes resolved = str_bytes(st->proj, path->resolved);
+    odin3_bytes resolved = odin3_proj_str_bytes(st->proj, path->resolved);
     odin3_tcl_opts opts = {st->arena, qip, odin3_path_dir(resolved)};
     odin3_tcl_err err = {0, NULL};
     if (res == ODIN3_OK) {
@@ -155,9 +141,9 @@ static odin3_status qip_cycle(qsf_state *st, const cmd_ctx *cc, size_t idx,
         return ODIN3_ERR_NO_MEMORY;
     }
     for (size_t k = idx; k < st->stack.len; k++) {
-        names[k - idx] = str_bytes(st->proj, frame_at(st, k)->path.resolved);
+        names[k - idx] = odin3_proj_str_bytes(st->proj, frame_at(st, k)->path.resolved);
     }
-    names[count - 1] = str_bytes(st->proj, qip->resolved);
+    names[count - 1] = odin3_proj_str_bytes(st->proj, qip->resolved);
     qsf_err what = {ODIN3_PROJ_ERR_QIP_CYCLE, "QIP_FILE cycle"};
     return fail_at(st->proj, cc->at, what, names, (uint32_t)count);
 }
@@ -177,7 +163,7 @@ static odin3_status push_qip(qsf_state *st, const cmd_ctx *cc, const odin3_tcl_w
         char detail[DETAIL_MAX];
         (void)snprintf(detail, sizeof detail, "nested .qip files exceed the depth limit of %u",
                        (unsigned)st->proj->limits.qip_depth);
-        odin3_bytes name = str_bytes(st->proj, qip.resolved);
+        odin3_bytes name = odin3_proj_str_bytes(st->proj, qip.resolved);
         return fail_at(st->proj, cc->at, (qsf_err){ODIN3_PROJ_ERR_SYNTAX, detail}, &name, 1);
     }
     odin3_loc parent = odin3_srcman_loc(st->sm, cc->buffer, value->off);
@@ -229,7 +215,7 @@ static bool is_option(const odin3_tcl_word *word) {
 
 static int option_index(const odin3_tcl_word *word) {
     for (int k = 0; k < OPT_COUNT; k++) {
-        if (is_text(word->text, k_options[k])) {
+        if (odin3_proj_bytes_is(word->text, k_options[k])) {
             return k;
         }
     }
@@ -325,17 +311,17 @@ typedef struct name_class {
 
 static name_class classify(odin3_bytes name) {
     for (size_t k = 0; k < sizeof k_files / sizeof k_files[0]; k++) {
-        if (is_text(name, k_files[k].name)) {
+        if (odin3_proj_bytes_is(name, k_files[k].name)) {
             return (name_class){NAME_FILE, k};
         }
     }
     for (size_t k = 0; k < SINGLE_COUNT; k++) {
-        if (is_text(name, k_singles[k])) {
+        if (odin3_proj_bytes_is(name, k_singles[k])) {
             return (name_class){NAME_SINGLE, k};
         }
     }
     for (size_t k = 0; k < sizeof k_rules / sizeof k_rules[0]; k++) {
-        if (is_text(name, k_rules[k].name)) {
+        if (odin3_proj_bytes_is(name, k_rules[k].name)) {
             return (name_class){NAME_RULE, k};
         }
     }
@@ -449,10 +435,10 @@ static odin3_status mapping(qsf_state *st, const cmd_ctx *cc, const rule_name *r
                             const qsf_opts *opts) {
     odin3_bytes value = {NULL, 0};
     odin3_status res = upper(st, opts->value->text, &value);
-    if (res != ODIN3_OK || is_text(value, rule->default_value)) {
+    if (res != ODIN3_OK || odin3_proj_bytes_is(value, rule->default_value)) {
         return res;
     }
-    if (!is_text(value, rule->rule_value)) {
+    if (!odin3_proj_bytes_is(value, rule->rule_value)) {
         return odin3_project_add_ignored(st->proj, odin3_bytes_cstr(rule->name));
     }
     queued_rule *slot = odin3_vec_push(&st->rules);
@@ -468,7 +454,7 @@ static odin3_status assignment_name(qsf_state *st, const cmd_ctx *cc, odin3_byte
     const odin3_tcl_word *words = cc->cmd->words;
     uint32_t count = 0;
     for (uint32_t j = 1; j + 1 < cc->cmd->nwords; j++) {
-        if (is_text(words[j].text, "-name")) {
+        if (odin3_proj_bytes_is(words[j].text, "-name")) {
             *name = words[j + 1].text;
             count++;
         }
@@ -521,17 +507,18 @@ static odin3_status set_parameter(qsf_state *st, const cmd_ctx *cc) {
 
 static odin3_status command(qsf_state *st, const cmd_ctx *cc) {
     odin3_bytes name = cc->cmd->words[0].text;
-    if (is_text(name, "set_global_assignment") || is_text(name, "set_instance_assignment") ||
-        is_text(name, "set_io_assignment")) {
+    if (odin3_proj_bytes_is(name, "set_global_assignment") ||
+        odin3_proj_bytes_is(name, "set_instance_assignment") ||
+        odin3_proj_bytes_is(name, "set_io_assignment")) {
         return assignment(st, cc);
     }
-    if (is_text(name, "set_location_assignment")) {
+    if (odin3_proj_bytes_is(name, "set_location_assignment")) {
         qsf_opts opts;
         odin3_status res = parse_options(st, cc, ALL_OPTIONS, &opts);
         return res != ODIN3_OK ? res
                                : odin3_project_add_ignored(st->proj, odin3_bytes_cstr("LOCATION"));
     }
-    if (is_text(name, "set_parameter")) {
+    if (odin3_proj_bytes_is(name, "set_parameter")) {
         return set_parameter(st, cc);
     }
     return odin3_project_add_ignored(st->proj, name);
@@ -594,7 +581,7 @@ static odin3_status anchored(const scope_req *req, odin3_strbuf *out) {
     odin3_bytes anchor = text_or(req->entity, req->top_mod);
     odin3_bytes part = {NULL, 0};
     size_t pos = 0;
-    bool prefix = !next_component(req->to->text, &pos, &part) || !bytes_eq(part, anchor);
+    bool prefix = !next_component(req->to->text, &pos, &part) || !odin3_proj_bytes_eq(part, anchor);
     odin3_status res = prefix ? odin3_strbuf_append(out, anchor) : ODIN3_OK;
     pos = 0;
     for (size_t count = prefix; res == ODIN3_OK && next_component(req->to->text, &pos, &part);
@@ -607,7 +594,7 @@ static odin3_status anchored(const scope_req *req, odin3_strbuf *out) {
 
 static odin3_status add_param(qsf_state *st, const queued_param *param, odin3_bytes top_mod,
                               odin3_strbuf *scope) {
-    if (param->entity != NULL && !bytes_eq(param->entity->text, top_mod)) {
+    if (param->entity != NULL && !odin3_proj_bytes_eq(param->entity->text, top_mod)) {
         return syntax_at(st->proj, param->at, "set_parameter -entity must name the top",
                          param->entity);
     }
@@ -746,7 +733,7 @@ static odin3_status qpf_revisions(qsf_state *st, const odin3_proj_text *text, od
             odin3_loc at = odin3_srcman_loc(st->sm, text->buffer, off);
             return syntax_at(st->proj, at, "expected NAME = \"value\"", NULL);
         }
-        if (kind == QPF_ASSIGN && is_text(line.name, "PROJECT_REVISION")) {
+        if (kind == QPF_ASSIGN && odin3_proj_bytes_is(line.name, "PROJECT_REVISION")) {
             odin3_loc at = odin3_srcman_loc(st->sm, text->buffer, off + (uint32_t)line.name_at);
             if (line.value.len > 0 && memchr(line.value.ptr, '\0', line.value.len) != NULL) {
                 /* no strtab string holds NUL (PRJ-4); the oracle keeps the byte */
@@ -772,9 +759,9 @@ static odin3_status choose_revision(qsf_state *st, const odin3_quartus_req *req,
                                     const odin3_vec *revs) {
     const qpf_revision *list = revs->data;
     if (req->has_revision) {
-        bool listed = revs->len == 0 && bytes_eq(req->revision, st->revision);
+        bool listed = revs->len == 0 && odin3_proj_bytes_eq(req->revision, st->revision);
         for (size_t k = 0; k < revs->len && !listed; k++) {
-            listed = bytes_eq(req->revision, list[k].name);
+            listed = odin3_proj_bytes_eq(req->revision, list[k].name);
         }
         st->revision = req->revision;
         return listed ? ODIN3_OK : unknown_revision(st, req);
@@ -820,7 +807,7 @@ static odin3_status revision_qsf(qsf_state *st, const odin3_proj_path *qpf, odin
     odin3_strbuf path;
     odin3_strbuf_init(&name);
     odin3_strbuf_init(&path);
-    odin3_bytes given_dir = odin3_path_dir(str_bytes(st->proj, qpf->given));
+    odin3_bytes given_dir = odin3_path_dir(odin3_proj_str_bytes(st->proj, qpf->given));
     const char *dir_text = given_dir.ptr;
     odin3_status res = odin3_strbuf_append(&name, given_dir);
     if (res == ODIN3_OK && given_dir.len > 0 && dir_text[given_dir.len - 1] != '/') {
@@ -830,7 +817,7 @@ static odin3_status revision_qsf(qsf_state *st, const odin3_proj_path *qpf, odin
     res = res != ODIN3_OK ? res : odin3_strbuf_append(&name, st->revision);
     res = res != ODIN3_OK ? res : odin3_strbuf_append(&name, odin3_bytes_cstr(".qsf"));
     odin3_bytes leaf = {name.data + base, name.len - base};
-    odin3_path_join join = {odin3_path_dir(str_bytes(st->proj, qpf->resolved)), leaf};
+    odin3_path_join join = {odin3_path_dir(odin3_proj_str_bytes(st->proj, qpf->resolved)), leaf};
     res = res != ODIN3_OK ? res : odin3_path_resolve(join, &path);
     if (res == ODIN3_OK && odin3_path_stat(path.data) != ODIN3_PATH_FILE) {
         odin3_bytes missing = {path.data, path.len};
@@ -867,15 +854,15 @@ static odin3_status from_qpf(qsf_state *st, const odin3_proj_path *qpf,
 /* A .qpf names the .qsf through its revision; any other entry is the .qsf (revision = its stem). */
 static odin3_status choose_qsf(qsf_state *st, const odin3_proj_path *file,
                                const odin3_quartus_req *req, odin3_proj_path *qsf) {
-    path_name name = name_of(str_bytes(st->proj, file->resolved));
+    path_name name = name_of(odin3_proj_str_bytes(st->proj, file->resolved));
     const char *text = name.name.ptr;
     st->revision = (odin3_bytes){text, name.dot};
     odin3_bytes suffix = {text + name.dot, name.name.len - name.dot};
-    if (is_text(suffix, ".qpf")) {
+    if (odin3_proj_bytes_is(suffix, ".qpf")) {
         return from_qpf(st, file, req, qsf);
     }
     *qsf = *file;
-    if (req->has_revision && !bytes_eq(req->revision, st->revision)) {
+    if (req->has_revision && !odin3_proj_bytes_eq(req->revision, st->revision)) {
         return unknown_revision(st, req);
     }
     return ODIN3_OK;
@@ -902,7 +889,7 @@ odin3_status odin3_read_quartus(odin3_project *proj, const odin3_proj_path *file
         st.arena != NULL ? odin3_design_get_srcman(proj->design, &st.sm) : ODIN3_ERR_NO_MEMORY;
     odin3_proj_path qsf = {0, 0, {0}};
     res = res != ODIN3_OK ? res : choose_qsf(&st, file, req, &qsf);
-    st.project_dir = odin3_path_dir(str_bytes(proj, qsf.resolved));
+    st.project_dir = odin3_path_dir(odin3_proj_str_bytes(proj, qsf.resolved));
     res = res != ODIN3_OK ? res : open_frame(&st, &qsf, req->at, false);
     res = res != ODIN3_OK ? res : run_frames(&st);
     res = res != ODIN3_OK ? res : finish_qsf(&st, &qsf);

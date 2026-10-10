@@ -21,16 +21,6 @@
 
 enum { CWD_FIRST = 256, CWD_MAX = 1 << 20 };
 
-static bool bytes_is(odin3_bytes bytes, const char *text) {
-    size_t len = strlen(text);
-    return bytes.len == len && (len == 0 || memcmp(bytes.ptr, text, len) == 0);
-}
-
-static odin3_bytes str_bytes(const odin3_project *proj, uint32_t str) {
-    const odin3_strtab *tab = odin3_design_strtab(proj->design);
-    return (odin3_bytes){odin3_strtab_get(tab, str), odin3_strtab_len(tab, str)};
-}
-
 static const char *str_text(const odin3_project *proj, uint32_t str) {
     return odin3_strtab_get(odin3_design_strtab(proj->design), str);
 }
@@ -89,16 +79,16 @@ static odin3_status format_of(odin3_project *proj, const odin3_project_request *
                               odin3_bytes resolved, uint8_t *format) {
     odin3_bytes given = odin3_bytes_cstr(req->entry);
     odin3_bytes suffix = odin3_path_suffix(resolved);
-    if (bytes_is(suffix, ".qip")) {
+    if (odin3_proj_bytes_is(suffix, ".qip")) {
         return unlocated(proj, ODIN3_PROJ_ERR_UNKNOWN_FILE_TYPE, "a .qip is not a project entry",
                          &given);
     }
     *format = ODIN3_PROJ_FORMAT_FLIST;
-    if (bytes_is(suffix, ".o3proj")) {
+    if (odin3_proj_bytes_is(suffix, ".o3proj")) {
         *format = ODIN3_PROJ_FORMAT_O3PROJ;
-    } else if (bytes_is(suffix, ".qpf") || bytes_is(suffix, ".qsf")) {
+    } else if (odin3_proj_bytes_is(suffix, ".qpf") || odin3_proj_bytes_is(suffix, ".qsf")) {
         *format = ODIN3_PROJ_FORMAT_QUARTUS;
-    } else if (bytes_is(suffix, ".xml")) {
+    } else if (odin3_proj_bytes_is(suffix, ".xml")) {
         *format = ODIN3_PROJ_FORMAT_ODIN2;
     }
     return ODIN3_OK;
@@ -168,23 +158,22 @@ static odin3_status run_reader(odin3_project *proj, const odin3_project_request 
     }
 }
 
-/* --top replaces the project's top (§4.4, §12 #1), with an info line when they differ. */
-static odin3_status apply_top(odin3_project *proj, const odin3_project_request *req) {
+/* --top replaces the project's top (§4.4, §12 #1); *replaced = the old top when they differ
+ * (0 otherwise), for the info line logged after finish. */
+static odin3_status apply_top(odin3_project *proj, const odin3_project_request *req,
+                              uint32_t *replaced) {
+    *replaced = 0;
     if (req->top == NULL) {
         return ODIN3_OK;
     }
     odin3_bytes name = odin3_bytes_cstr(req->top);
     uint32_t old = proj->top;
-    odin3_bytes old_name = old != 0 ? str_bytes(proj, old) : (odin3_bytes){"", 0};
-    if (old != 0 && old_name.len == name.len && memcmp(old_name.ptr, name.ptr, name.len) == 0) {
+    if (old != 0 && odin3_proj_bytes_eq(odin3_proj_str_bytes(proj, old), name)) {
         return ODIN3_OK; /* the same top: it keeps its declaring line */
     }
     proj->top = 0;
     odin3_status res = odin3_project_set_top(proj, name, (odin3_loc){0});
-    if (res == ODIN3_OK && old != 0) {
-        odin3_log(ODIN3_LOG_INFO, "%s: --top %s replaces the project top %s",
-                  str_text(proj, proj->entry.given), req->top, str_text(proj, old));
-    }
+    *replaced = res == ODIN3_OK ? old : 0;
     return res;
 }
 
@@ -199,7 +188,7 @@ static odin3_status info_line(const odin3_project *proj, const odin3_vec *ids, c
     for (size_t i = 0; res == ODIN3_OK && i < ids->len; i++) {
         res = i > 0 ? odin3_strbuf_append(&text, odin3_bytes_cstr(", ")) : ODIN3_OK;
         uint32_t str = *(const uint32_t *)odin3_vec_cat(ids, i);
-        res = res != ODIN3_OK ? res : odin3_strbuf_append(&text, str_bytes(proj, str));
+        res = res != ODIN3_OK ? res : odin3_strbuf_append(&text, odin3_proj_str_bytes(proj, str));
     }
     if (res == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "%s: %s: %s", str_text(proj, proj->entry.given), what, text.data);
@@ -209,18 +198,24 @@ static odin3_status info_line(const odin3_project *proj, const odin3_vec *ids, c
 }
 
 static odin3_status read_entry(odin3_project *proj, const odin3_project_request *req) {
+    uint32_t replaced = 0;
     odin3_status res = set_entry(proj, req);
     res = res != ODIN3_OK ? res : run_reader(proj, req);
-    res = res != ODIN3_OK ? res : apply_top(proj, req);
+    res = res != ODIN3_OK ? res : apply_top(proj, req, &replaced);
     res = res != ODIN3_OK ? res : odin3_project_finish(proj);
+    if (res == ODIN3_OK && replaced != 0) { /* logged once the read can no longer fail */
+        odin3_log(ODIN3_LOG_INFO, "%s: --top %s replaces the project top %s",
+                  str_text(proj, proj->entry.given), req->top, str_text(proj, replaced));
+    }
     res = res != ODIN3_OK ? res : info_line(proj, &proj->ignored, "ignored");
     return res != ODIN3_OK ? res
                            : info_line(proj, &proj->duplicates, "listed more than once, read once");
 }
 
 odin3_status odin3_project_read(odin3_design *design, const odin3_project_request *req) {
-    if (design == NULL || req == NULL || req->entry == NULL) {
-        return ODIN3_ERR_INVALID_ARG;
+    if (design == NULL || req == NULL || req->entry == NULL ||
+        req->format > ODIN3_PROJ_FORMAT_ODIN2) {
+        return ODIN3_ERR_INVALID_ARG; /* format: 0 (by suffix) or an odin3_proj_format */
     }
     odin3_project *proj = NULL;
     odin3_status res = odin3_design_get_project(design, &proj);

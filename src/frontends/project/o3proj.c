@@ -55,18 +55,8 @@ typedef struct o3_key {
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static bool bytes_is(odin3_bytes bytes, const char *text) {
-    size_t len = strlen(text);
-    return bytes.len == len && (len == 0 || memcmp(bytes.ptr, text, len) == 0);
-}
-
 static bool arg_is(const o3_stmt *st, uint32_t idx, const char *text) {
-    return idx < st->nargs && bytes_is(st->args[idx].text, text);
-}
-
-static odin3_bytes strtab_bytes(const o3_reader *rd, uint32_t str) {
-    const odin3_strtab *tab = odin3_design_strtab(rd->proj->design);
-    return (odin3_bytes){odin3_strtab_get(tab, str), odin3_strtab_len(tab, str)};
+    return idx < st->nargs && odin3_proj_bytes_is(st->args[idx].text, text);
 }
 
 /* An error at at naming name (none when name is NULL). */
@@ -228,7 +218,7 @@ static odin3_bytes top_module(const o3_reader *rd) {
     if (rd->proj->top == 0) {
         return (odin3_bytes){"", 0};
     }
-    odin3_bytes top = strtab_bytes(rd, rd->proj->top);
+    odin3_bytes top = odin3_proj_str_bytes(rd->proj, rd->proj->top);
     const char *text = top.ptr;
     size_t mod = top.len;
     while (mod > 0 && text[mod - 1] != '.') {
@@ -245,7 +235,7 @@ static odin3_status check_scopes(o3_reader *rd) {
     for (size_t i = 0; i < rd->params.len; i++) {
         size_t idx = *(const size_t *)odin3_vec_cat(&rd->params, i);
         const odin3_proj_param *param = odin3_vec_cat(&proj->params, idx);
-        odin3_bytes scope = strtab_bytes(rd, param->scope);
+        odin3_bytes scope = odin3_proj_str_bytes(rd->proj, param->scope);
         size_t root = odin3_proj_ident_len(scope, 0); /* a scope is IDENT(.IDENT)* */
         if (proj->top != 0 && root == top_mod.len && memcmp(scope.ptr, top_mod.ptr, root) == 0) {
             continue;
@@ -367,7 +357,7 @@ static const uint8_t k_threshold_bits[] = {ODIN3_PROJ_HAS_MIN_WIDTH, ODIN3_PROJ_
 /* The index of a threshold word in k_thresholds, -1 when it is none. */
 static int threshold_of(odin3_bytes word) {
     for (int k = 0; k < (int)(sizeof k_thresholds / sizeof k_thresholds[0]); k++) {
-        if (bytes_is(word, k_thresholds[k])) {
+        if (odin3_proj_bytes_is(word, k_thresholds[k])) {
             return k;
         }
     }
@@ -506,10 +496,10 @@ static bool is_digits(odin3_bytes text) {
 
 /* The depth after `depth`: min, max or digits (kept as written); NONE when it is none of them. */
 static odin3_proj_depth depth_of(odin3_bytes depth) {
-    if (bytes_is(depth, "min")) {
+    if (odin3_proj_bytes_is(depth, "min")) {
         return ODIN3_PROJ_DEPTH_MIN;
     }
-    if (bytes_is(depth, "max")) {
+    if (odin3_proj_bytes_is(depth, "max")) {
         return ODIN3_PROJ_DEPTH_MAX;
     }
     return is_digits(depth) ? ODIN3_PROJ_DEPTH_N : ODIN3_PROJ_DEPTH_NONE;
@@ -581,7 +571,7 @@ static odin3_status key_import(o3_reader *rd, const o3_stmt *st) {
         return res;
     }
     odin3_bytes suffix = odin3_path_suffix((odin3_bytes){rd->scratch.data, rd->scratch.len});
-    if (!bytes_is(suffix, ".qpf") && !bytes_is(suffix, ".qsf")) {
+    if (!odin3_proj_bytes_is(suffix, ".qpf") && !odin3_proj_bytes_is(suffix, ".qsf")) {
         return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_FILE_TYPE, "import takes a .qpf or .qsf",
                     &given);
     }
@@ -625,8 +615,9 @@ static odin3_status statement(o3_reader *rd) {
     const odin3_word *words = rd->words.data;
     odin3_loc at = odin3_srcman_loc(rd->sm, rd->text.buffer, words[0].off);
     const o3_key *key = NULL;
-    for (size_t k = 0; !words[0].quoted && k < sizeof k_keys / sizeof k_keys[0]; k++) {
-        key = bytes_is(words[0].text, k_keys[k].name) ? &k_keys[k] : key;
+    for (size_t k = 0; !words[0].quoted && key == NULL && k < sizeof k_keys / sizeof k_keys[0];
+         k++) {
+        key = odin3_proj_bytes_is(words[0].text, k_keys[k].name) ? &k_keys[k] : NULL;
     }
     if (key == NULL) {
         return fail(rd, at, ODIN3_PROJ_ERR_UNKNOWN_KEY, "unknown key", &words[0].text);
@@ -669,7 +660,7 @@ odin3_status odin3_read_o3proj(odin3_project *proj, const odin3_proj_path *file)
     odin3_status res = odin3_design_get_srcman(proj->design, &rd.sm);
     res = res != ODIN3_OK ? res : intern(&rd, odin3_bytes_cstr("work"), &rd.work);
     if (res == ODIN3_OK) {
-        rd.base = odin3_path_dir(strtab_bytes(&rd, file->resolved));
+        rd.base = odin3_path_dir(odin3_proj_str_bytes(proj, file->resolved));
         res = odin3_project_load(proj, file, (odin3_loc){0}, &rd.text);
     }
     res = res != ODIN3_OK ? res : read_lines(&rd);

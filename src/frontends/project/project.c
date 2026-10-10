@@ -485,6 +485,20 @@ static bool is_ident(const uint8_t *text, size_t len) {
     return true;
 }
 
+bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text) {
+    size_t len = strlen(text);
+    return bytes.len == len && (len == 0 || memcmp(bytes.ptr, text, len) == 0);
+}
+
+bool odin3_proj_bytes_eq(odin3_bytes left, odin3_bytes right) {
+    return left.len == right.len && (left.len == 0 || memcmp(left.ptr, right.ptr, left.len) == 0);
+}
+
+odin3_bytes odin3_proj_str_bytes(const odin3_project *proj, uint32_t str) {
+    const odin3_strtab *tab = odin3_design_strtab(proj->design);
+    return (odin3_bytes){odin3_strtab_get(tab, str), odin3_strtab_len(tab, str)};
+}
+
 size_t odin3_proj_ident_len(odin3_bytes text, size_t from) {
     const uint8_t *bytes = text.ptr;
     if (from >= text.len || !ident_start(bytes[from])) {

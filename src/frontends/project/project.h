@@ -344,6 +344,12 @@ odin3_status odin3_project_set_top_file(odin3_project *proj, odin3_bytes name,
 odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_loc at,
                                  uint32_t *out);
 
+/* Small byte helpers shared by the readers. bytes_is: bytes equal the C string text; bytes_eq:
+ * the two spans hold the same bytes; str_bytes: the bytes of strtab ID str of proj's design. */
+bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text);
+bool odin3_proj_bytes_eq(odin3_bytes left, odin3_bytes right);
+odin3_bytes odin3_proj_str_bytes(const odin3_project *proj, uint32_t str);
+
 /* The length of the IDENT ([A-Za-z_][A-Za-z0-9_$]*) starting at text[from], 0 when none. */
 size_t odin3_proj_ident_len(odin3_bytes text, size_t from);
 
@@ -428,8 +434,10 @@ typedef struct odin3_project_request {
  * "<entry>: --top <new> replaces the project top <old>" when they differ; a bad name is an
  * unlocated `syntax`); then finish and the info lines "<entry>: ignored: A, B, …" and "<entry>:
  * listed more than once, read once: P, …" (resolved paths), each only when non-empty; <entry> is
- * the entry as given. Errors: PARSE (logged once), IO, NO_MEMORY — each drops the record
- * (odin3_design_drop_project); INVALID_ARG for a NULL req or entry, or when the record is already
+ * the entry as given; every info line is logged after finish. Errors: PARSE (logged once), IO,
+ * NO_MEMORY — each drops the record (odin3_design_drop_project); INVALID_ARG for a NULL req or
+ * entry, a format that is neither 0 nor an odin3_proj_format (nothing logged, no record
+ * touched), or when the record is already
  * finished (logged "odin3: error: project already read from <entry>"; that record is kept).
  */
 odin3_status odin3_project_read(odin3_design *design, const odin3_project_request *req);

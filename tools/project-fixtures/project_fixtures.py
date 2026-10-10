@@ -123,7 +123,9 @@ class Ctx:
         self.touched: set[str] = set()
         self.ignored: set[str] = set()
         self.dups: set[str] = set()
-        self.params_at: list[str] = []  # .o3proj `param` lines, checked against the top
+        # .o3proj `param` lines as (index in record["params"], line), checked against the top;
+        # by index, since `import` adds Quartus parameters to the same list
+        self.params_at: list[tuple[int, str]] = []
         self.top_at: str | None = None  # where the top was declared
         self.f_root = self.case_dir
         self.f_sv = False
@@ -360,8 +362,8 @@ def o3_param(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
                                                                                        name):
         raise syntax(at, f"usage: {usage}", a[0])
     value, kind = param_value(args[1], at)
+    ctx.params_at.append((len(ctx.record["params"]), at))
     ctx.record["params"].append({"scope": scope, "name": name, "value": value, "type": kind})
-    ctx.params_at.append(at)
 
 
 def o3_arch(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
@@ -486,9 +488,11 @@ O3PROJ_KEYS: dict[str, O3Handler] = {
 
 
 def check_param_scopes(ctx: Ctx) -> None:
-    """Parameter overrides apply to the top or an instance path under it."""
+    """Parameter overrides apply to the top or an instance path under it.  Each `param` line is
+    checked against its own record entry (imported Quartus parameters are anchored already)."""
     top = ctx.record["top"]
-    for param, at in zip(ctx.record["params"], ctx.params_at, strict=False):
+    for index, at in ctx.params_at:
+        param = ctx.record["params"][index]
         root = param["scope"].split(".")[0]
         if top is None or root != top.rpartition(".")[2]:
             raise syntax(at, f"param scope {param['scope']!r} must start at the top "

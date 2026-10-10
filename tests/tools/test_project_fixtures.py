@@ -212,6 +212,22 @@ flow f.o3
         self.put("p.o3proj", "top a\nimport p.qpf revision r2\n")
         self.assertEqual(self.error("o3proj", "p.o3proj").kind, "syntax")
 
+    def test_param_scopes_are_checked_per_line_after_an_import(self) -> None:
+        """Imported parameters must not shift which `param` line is checked (DESIGN §4.0)."""
+        self.put("src/a.v", module("top"))
+        self.put("q/top.qsf", "set_global_assignment -name TOP_LEVEL_ENTITY top\n"
+                              "set_global_assignment -name VERILOG_FILE ../src/a.v\n"
+                              "set_parameter -name W 8\n")
+        self.put("p.o3proj", "import q/top.qsf\nparam x.W 1\n")
+        err = self.error("o3proj", "p.o3proj")
+        self.assertEqual(err.as_json(), {"kind": "syntax", "at": "p.o3proj:2", "names": ["x"]})
+        self.put("p.o3proj", "import q/top.qsf\nparam top.W 1\nparam lib.W 2\n")
+        err = self.error("o3proj", "p.o3proj")
+        self.assertEqual(err.as_json(), {"kind": "syntax", "at": "p.o3proj:3", "names": ["lib"]})
+        self.put("p.o3proj", "import q/top.qsf\nparam top.u.W 1\n")
+        self.assertEqual([p["scope"] for p in self.record("o3proj", "p.o3proj")["params"]],
+                         ["top", "top.u"])
+
 
 class FileListTest(_TmpCase):
     def test_plus_options_and_nesting(self) -> None:
