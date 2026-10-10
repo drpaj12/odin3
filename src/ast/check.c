@@ -349,6 +349,17 @@ static void rule3_mark(odin3_ast_checker *cx, odin3_ast_span kids) {
     }
 }
 
+/* True when some UDP_DECL in the store is called name (an unnamed UDP instance is legal). */
+static bool udp_declared(const odin3_ast_checker *cx, uint32_t name) {
+    for (uint32_t i = 1; i < cx->end; i++) {
+        const odin3_ast_node *rec = odin3_ast_rec(cx->ast, (odin3_ast_id){i});
+        if (rec->kind == ODIN3_AST_UDP_DECL && rec->name == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void rule4_names(odin3_ast_checker *cx, const odin3_ast_kind_info *info,
                         odin3_ast_span kids) {
     uint32_t name = cx->rec->name;
@@ -365,7 +376,7 @@ static void rule4_names(odin3_ast_checker *cx, const odin3_ast_kind_info *info,
     }
     for (uint32_t i = info->nslots; i < kids.n; i++) {
         if (kind_at(cx, kids.ids[i]) == ODIN3_AST_INSTANCE &&
-            odin3_ast_name(cx->ast, kids.ids[i]) == 0) {
+            odin3_ast_name(cx->ast, kids.ids[i]) == 0 && !udp_declared(cx, name)) {
             odin3_ast_check_node_fail(cx, RULE_NAME, "INSTANCE under INSTANTIATION without a name");
         }
     }

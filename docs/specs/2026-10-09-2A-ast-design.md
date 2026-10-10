@@ -293,7 +293,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `ALWAYS` | (4) `always`, reserved `always_ff always_comb always_latch` | — | — | S | — | — | T1–T6 (T6: 2D rejects an `ALWAYS` whose S is not `TIMING_STMT`[`EVENT_CONTROL`, S]) |
 | `INITIAL` | — | — | — | S | — | — | T5 (D2) |
 | `INSTANTIATION` | — | req (module) | — | L? parameter `CONNECTION*` | `INSTANCE+` | — | I1–I7, P5 |
-| `INSTANCE` | — | opt (check rule 4: required under `INSTANTIATION`; 0 only under `GATE_DECL`) | — | R? array | C* | — | I5, I6, Q5 |
+| `INSTANCE` | — | opt (check rule 4: required under `INSTANTIATION` unless it instantiates a `UDP_DECL` of the store; 0 under `GATE_DECL`) | — | R? array | C* | — | I5, I6, Q5 |
 | `CONNECTION` | — | opt (0 = ordered) | — | E? (absent: `.p()` / empty slot) | — | — | I1–I3; mixing ordered and named: 2D (I2) |
 | `GATE_DECL` | gate kind (26) `and nand or nor xor xnor buf not bufif0 bufif1 notif0 notif1`, REJECT `nmos pmos cmos rnmos rpmos rcmos tran rtran tranif0 tranif1 rtranif0 rtranif1 pullup pulldown` | — | — | `STRENGTH`?, `DELAY`? | `INSTANCE+` | — | Q1–Q6 |
 | `FUNCTION_DECL` | — | req | `AUTOMATIC SIGNED`, `DT` field (return) | R? return, L ports (`PORT_DECL*`), L locals (D*), S body | — | — | K1–K8 |

@@ -204,6 +204,10 @@ add_executable(bench_ir tests/bench/bench_ir.c)
 target_include_directories(bench_ir PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_ir PRIVATE odin3_core odin3_flags)
 
+add_executable(bench_ast tests/bench/bench_ast.c)
+target_include_directories(bench_ast PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_ast PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)

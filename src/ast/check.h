@@ -18,7 +18,9 @@
  * store, rule 8 only when odin3_ast_symtab(ast) is non-NULL). Each violation is logged at
  * ODIN3_LOG_ERROR as "ast check: rule <n>: <kind> <id>: <what>" (<kind> a node kind name, or
  * node / comment / attrs / store / ATTR / scope / symbol / symtab); per rule the first few
- * are shown and the rest summed in one line. Rule 6's NUMBER and attribute-span parts run
+ * are shown and the rest summed in one line. Rule 4 lets an INSTANCE under an INSTANTIATION go
+ * unnamed only when a UDP_DECL of the instantiated name is in the store (a UDP instance is
+ * legal unnamed). Rule 6's NUMBER and attribute-span parts run
  * before finish too (stricter than §10's "after finish"; the builder keeps them true). Rule 3's
  * count of unreachable non-root nodes (an abandoned subtree's root, an unattached ATTR) is logged
  * at ODIN3_LOG_INFO, never an error. ODIN3_ERR_CHECK when any rule is violated; ODIN3_ERR_NO_MEMORY

@@ -674,6 +674,21 @@ static void test_rule4_instance_without_name(void) {
     assert_ok(ODIN3_CHECK_FULL); /* a gate instance may be unnamed */
 }
 
+static odin3_ast_id udp_decl(const char *name) {
+    odin3_ast_spec spec = {.kind = ODIN3_AST_UDP_DECL, .name = intern(name)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_ast_text_new(ast, odin3_bytes_cstr("primitive"), &spec.payload));
+    return make(spec, NULL, 0);
+}
+
+static void test_rule4_unnamed_udp_instance(void) {
+    udp_decl("my_udp"); /* declared after use or before: the check scans the whole store */
+    NAMED(INSTANTIATION, "my_udp", NIL, NODE(INSTANCE, 0, NIL));
+    assert_ok(ODIN3_CHECK_FULL); /* an unnamed instance of a declared UDP is legal Verilog */
+    NAMED(INSTANTIATION, "other", NIL, NODE(INSTANCE, 0, NIL));
+    expect_only(4); /* a module instance still needs a name */
+}
+
 static void test_rule4_name_rules(void) {
     parsed fix = build_parsed();
     corrupt(ODIN3_AST_TEST_NAME_MISSING, fix.module.v, 0);
@@ -1222,6 +1237,7 @@ static void run_first_half(void) {
     RUN_TEST(test_rule3_attr_attached_twice);
     RUN_TEST(test_rule3_unit_in_span);
     RUN_TEST(test_rule4_instance_without_name);
+    RUN_TEST(test_rule4_unnamed_udp_instance);
     RUN_TEST(test_rule4_name_rules);
     RUN_TEST(test_rule5_wrong_height);
     RUN_TEST(test_rule6_unsorted_comments);
