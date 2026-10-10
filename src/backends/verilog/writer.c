@@ -1668,12 +1668,14 @@ static uint32_t default_width(verilog_writer *wr, odin3_celltype_id type, uint32
  * scalar). */
 static void put_stub_range(verilog_writer *wr, odin3_celltype_id type, uint32_t port) {
     const odin3_port_def *def = &odin3_celltype_get(wr->design, type)->ports[port];
-    if (def->width_fn == NULL && def->width_param != NULL) {
+    if (def->width_fn == NULL && def->width_expr == NULL && def->width_param != NULL) {
         vw_char(wr, '[');
         vw_ident(wr, odin3_bytes_cstr(def->width_param), "parameter name");
         vw_puts(wr, "-1:0] ");
     } else if (!def->scalar) {
-        uint32_t width = def->width_fn != NULL ? default_width(wr, type, port) : def->width;
+        uint32_t width = def->width_fn != NULL || def->width_expr != NULL
+                             ? default_width(wr, type, port)
+                             : def->width;
         if (width == 0) {
             return; /* Verilog has no zero-width port: declared 1 bit, left unconnected */
         }

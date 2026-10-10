@@ -379,8 +379,8 @@ static void test_user_attributes(void) {
 }
 
 static const odin3_port_def BB_PORTS[] = {
-    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL},
-    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL},
+    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
 };
 
 /* A declared black-box model is a Yosys blackbox module: its ports with fresh bits, no cells. */

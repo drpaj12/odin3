@@ -370,7 +370,8 @@ static const char *dir_text(odin3_dir dir) {
 /* A port's width; a width parameter or function is evaluated at the type's defaults. */
 static uint32_t blackbox_port_width(jw *out, odin3_celltype_id type, uint32_t port) {
     const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
-    if (def->ports[port].width_param == NULL && def->ports[port].width_fn == NULL) {
+    if (def->ports[port].width_param == NULL && def->ports[port].width_fn == NULL &&
+        def->ports[port].width_expr == NULL) {
         return def->ports[port].width;
     }
     odin3_value *params = odin3_util_calloc(sizeof(odin3_value) * (def->n_params + 1));
