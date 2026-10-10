@@ -1,5 +1,6 @@
 /*
- * test_util_file.c — unit tests for atomic file output (mkstemp beside the destination + rename).
+ * test_util_file.c — unit tests for atomic file output (mkstemp beside the destination + rename)
+ * and whole-file reads.
  */
 #include "unity.h"
 #include "util/alloc.h"
@@ -7,6 +8,8 @@
 #include "util/log.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +25,8 @@ enum {
     MODE_BITS = 0777,
     PRIVATE_MODE = 0600,
     SMALL_LIMIT = 64, /* RLIMIT_FSIZE bytes for the write-failure test */
-    BIG_WRITE = 4096  /* bytes written past it (buffered: the failure shows at close) */
+    BIG_WRITE = 4096, /* bytes written past it (buffered: the failure shows at close) */
+    READ_CAP = 16     /* max_bytes for the small read tests */
 };
 
 static char out_dir[PATH_BUF];
@@ -239,6 +243,119 @@ static void test_out_of_memory(void) {
     TEST_ASSERT_EQUAL_INT(0, dir_entries(out_dir));
 }
 
+/* --- odin3_file_read_all ------------------------------------------------------------------- */
+
+static void put_bytes(const char *text, size_t len) {
+    FILE *fp = fopen(out_path, "wb");
+    TEST_ASSERT_NOT_NULL(fp);
+    TEST_ASSERT_EQUAL_size_t(len, fwrite(text, 1, len, fp));
+    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
+}
+
+static void test_read_all_bytes(void) {
+    static const char text[] = "a\rb\r\nc\0d";
+    put_bytes(text, sizeof text - 1);
+    odin3_file_bytes bytes;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(out_path, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_size_t(sizeof text - 1, bytes.len);
+    TEST_ASSERT_EQUAL_MEMORY(text, bytes.data, sizeof text - 1);
+    TEST_ASSERT_FALSE(bytes.too_big);
+    TEST_ASSERT_EQUAL_INT(0, bytes.err);
+    odin3_file_bytes_free(&bytes);
+    TEST_ASSERT_NULL(bytes.data);
+    TEST_ASSERT_EQUAL_size_t(0, bytes.len);
+    odin3_file_bytes_free(&bytes); /* twice is harmless */
+}
+
+static void test_read_all_empty_file(void) {
+    put_bytes("", 0);
+    odin3_file_bytes bytes;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(out_path, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_size_t(0, bytes.len);
+    odin3_file_bytes_free(&bytes);
+}
+
+/* Exactly max_bytes is accepted; one more is PARSE with too_big, and nothing is logged. */
+static void test_read_all_cap(void) {
+    put_bytes("0123456789abcdef", READ_CAP);
+    odin3_file_bytes bytes;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(out_path, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_size_t(READ_CAP, bytes.len);
+    odin3_file_bytes_free(&bytes);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_file_read_all(out_path, READ_CAP - 1, &bytes));
+    TEST_ASSERT_TRUE(bytes.too_big);
+    TEST_ASSERT_NULL(bytes.data);
+    TEST_ASSERT_EQUAL_STRING("", last_error);
+}
+
+/* A sparse file of 2^28 + 1 bytes is rejected from its size alone: allocations are capped low
+ * so that a buffer of its size would fail as NO_MEMORY instead of PARSE. */
+static void test_read_all_sparse_over_limit(void) {
+    const off_t size = (off_t)((UINT64_C(1) << 28) + 1);
+    int fd = open(out_path, O_WRONLY | O_CREAT | O_TRUNC, PRIVATE_MODE);
+    TEST_ASSERT_TRUE(fd >= 0);
+    TEST_ASSERT_EQUAL_INT(0, ftruncate(fd, size));
+    TEST_ASSERT_EQUAL_INT(0, close(fd));
+    odin3_file_bytes bytes;
+    odin3_util_set_alloc_fail_after(0);
+    odin3_status st = odin3_file_read_all(out_path, (size_t)1 << 28, &bytes);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
+    TEST_ASSERT_TRUE(bytes.too_big);
+    TEST_ASSERT_EQUAL_size_t((size_t)size, bytes.len);
+    TEST_ASSERT_NULL(bytes.data);
+}
+
+static void test_read_all_directory_and_missing(void) {
+    odin3_file_bytes bytes;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_file_read_all(out_dir, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_INT(EISDIR, bytes.err);
+    TEST_ASSERT_NULL(bytes.data);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_file_read_all(out_path, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_INT(ENOENT, bytes.err);
+    TEST_ASSERT_EQUAL_STRING("", last_error);
+}
+
+/* An existing file without read permission is IO with EACCES (skipped when running as root,
+ * which reads it anyway). */
+static void test_read_all_unreadable(void) {
+    put_bytes("x", 1);
+    TEST_ASSERT_EQUAL_INT(0, chmod(out_path, 0));
+    odin3_file_bytes bytes;
+    odin3_status st = odin3_file_read_all(out_path, READ_CAP, &bytes);
+    if (geteuid() == 0) {
+        odin3_file_bytes_free(&bytes);
+        TEST_IGNORE_MESSAGE("root reads unreadable files");
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
+    TEST_ASSERT_EQUAL_INT(EACCES, bytes.err);
+}
+
+static void test_read_all_out_of_memory(void) {
+    put_bytes("abc", 3);
+    odin3_file_bytes bytes;
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_file_read_all(out_path, READ_CAP, &bytes));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_NULL(bytes.data);
+}
+
+/* A pipe has no size: read in growing chunks until EOF, still capped. */
+static void test_read_all_pipe(void) {
+    int fds[2];
+    TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+    TEST_ASSERT_EQUAL_INT(5, (int)write(fds[1], "hello", 5));
+    TEST_ASSERT_EQUAL_INT(0, close(fds[1]));
+    char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "/dev/fd/%d", fds[0]);
+    odin3_file_bytes bytes;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_file_read_all(path, READ_CAP, &bytes));
+    TEST_ASSERT_EQUAL_size_t(5, bytes.len);
+    TEST_ASSERT_EQUAL_MEMORY("hello", bytes.data, 5);
+    odin3_file_bytes_free(&bytes);
+    TEST_ASSERT_EQUAL_INT(0, close(fds[0]));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_commit_writes_destination_only);
@@ -252,5 +369,13 @@ int main(void) {
     RUN_TEST(test_rename_failure_cleans_temp);
     RUN_TEST(test_bare_name);
     RUN_TEST(test_out_of_memory);
+    RUN_TEST(test_read_all_bytes);
+    RUN_TEST(test_read_all_empty_file);
+    RUN_TEST(test_read_all_cap);
+    RUN_TEST(test_read_all_sparse_over_limit);
+    RUN_TEST(test_read_all_directory_and_missing);
+    RUN_TEST(test_read_all_unreadable);
+    RUN_TEST(test_read_all_out_of_memory);
+    RUN_TEST(test_read_all_pipe);
     return UNITY_END();
 }
