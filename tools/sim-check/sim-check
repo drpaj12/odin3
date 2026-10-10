@@ -18,36 +18,39 @@
 #          boxes), with falling-edge registers, or with a data input named `clock` (ABC's clock).
 # Before either reads it, every latch whose init is 2, 3 or absent gets init 0: the simulator
 # starts such registers at 0 (PHASE0 #7), and the reference must too.
+# Both sides must print exactly N lines per seed; the testbench runs N cycles because sim-check
+# says so, and the driver's clock bits must be the BLIF's latch clock nets.
 # Excluded, listed and not failures: RAM instances (Phase 4), implicit black boxes (a .subckt
-# with no .model: $pow, $_DFFSR_PPP_), other black boxes without a model, and the multi-driver
-# Odin II goldens (PHASE1 #15; the simulator rejects a net with two drivers).
+# with no .model: $pow, $_DFFSR_PPP_), other black boxes without a model, and multi-driver
+# netlists (PHASE1 #15) when the simulator rejects a net with two drivers and ABC refuses the
+# file too.
 # Order: ascending file size (smallest first); with --largest-first, descending. Files with
 # identical content run once; the others reuse that result.
-# Exit: 0 all pass, 1 any failure (in --fixtures mode timeouts and memory-cap stops are failures
-# too), 2 usage. See docs/PHASE1.md (1E) for the run and its exceptions.
+# Exit: 0 all pass, 1 any failure, 2 usage. Our simulator failing in any way (an error, a
+# timeout or the memory cap) is a failure; a reference tool's timeout or memory-cap stop is a
+# listed exception, except in --fixtures mode. See docs/PHASE1.md (1E) for the run.
 set -euo pipefail
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HERE=$(dirname "$SELF")
-# Basenames whose netlist drives one net from several cells (PHASE1 #15).
-export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 
 usage() {
     cat >&2 <<'USAGE'
 usage: sim-check [-j N] [-t SECONDS] [-m GB] [--seeds "1 2 3"] [--cycles N] [--largest-first]
                  [--techlib LIB]... [--driver PATH] [--abc PATH] [--yosys PATH] [--iverilog PATH]
-                 [--vvp PATH] [--out DIR] [--keep] [--list FILE | --fixtures PATH... | GOLDEN_ROOT]
+                 [--vvp PATH] [--models DIR] [--out DIR] [--keep] [--list FILE | --fixtures PATH... | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures P  the BLIF files and every *.blif under the directories given (no .prov needed);
                 must come last
   --list FILE   the BLIF paths in FILE, one per line (status=ok filter as for GOLDEN_ROOT)
-  -j N          parallel jobs (default 2)
+  -j N          parallel jobs, 1 or 2 (default 2; the WSL memory rule)
   -t SECONDS    per-tool timeout (default 600)
   -m GB         per-tool address-space cap (default 6; 0: none, e.g. for a sanitizer build)
   --techlib LIB passed to the driver (default lib/vtr.o3lib of this repo; repeatable)
   --driver PATH odin3-sim-vectors (default build/release/odin3-sim-vectors)
   --abc, --yosys, --iverilog, --vvp  the reference tools (defaults: build/release ABC, the
                 workspace Yosys build or yosys on PATH, iverilog and vvp on PATH)
+  --models DIR  the reference's Verilog models (default tools/sim-check/models)
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the work files
 USAGE
     exit 2
@@ -55,7 +58,8 @@ USAGE
 
 # Prints the facts that pick the reference, one per line: `bb TYPE` per black-box type
 # instantiated, `implicit TYPE` per .subckt type with no .model, `edge E` per latch type,
-# `clockdata` when a top input named `clock` is not a latch clock while latches exist.
+# `clockdata` when a top input named `clock` is not a latch clock while latches exist, `clk NET`
+# per latch clock net of the top model.
 classify() {
     LC_ALL=C awk '
     { line = $0; sub(/#.*/, "", line) }
@@ -75,12 +79,13 @@ classify() {
         if (d == ".inputs" && nmod == 1) { for (i = k + 1; i <= n; i++) if (t[i] == "clock") topclock = 1; next }
         if (d == ".latch") {
             nl++
-            if (n - k + 1 >= 5) { edge[t[k + 3]] = 1; clk[t[k + 4]] = 1 } else edge["none"] = 1
+            if (n - k + 1 >= 5) { edge[t[k + 3]] = 1; if (nmod == 1) clk[t[k + 4]] = 1 } else edge["none"] = 1
         }
     }
     END {
         for (m in used) if (!(m in models)) print "implicit", m; else if (m in bb) print "bb", m
         for (e in edge) print "edge", e
+        for (c in clk) print "clk", c
         if (topclock && nl > 0 && !("clock" in clk)) print "clockdata"
     }' "$1" | LC_ALL=C sort
 }
@@ -102,12 +107,10 @@ zero_init() {
     { print }' "$1" >"$2"
 }
 
-is_multi_driver() {
-    local base=${1##*/} name
-    for name in $MULTI_DRIVER; do
-        [ "$base" = "$name" ] && return 0
-    done
-    return 1
+# Whether ABC refuses BLIF $2 for a signal defined more than once (work files in $1).
+abc_refuses_multi_driver() {
+    run_capped "$1/abc-md.log" "$1/rss.abc-md" "$SC_ABC" -q "read_blif $2" >/dev/null || true
+    cat "$1/abc-md.log" "$1/abc-md.log.err" | grep -q 'is defined more than once'
 }
 
 now() { date +%s.%N; }
@@ -140,10 +143,10 @@ last_words() {
 # Largest RSS (KB) in the given /usr/bin/time output files.
 max_rss() { cat "$@" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ && $1 + 0 > m { m = $1 + 0 } END { print m + 0 }'; }
 
-# Builds the reference simulation in $1 (dir) from BLIF $2 with flavor $3; prints the outcome
-# (ok, or `<word> <tool>`).
+# Builds the reference simulation in $1 (dir) from BLIF $2 with flavor $3, latch clock nets $4;
+# prints the outcome (ok, or `<word> <tool>`).
 build_reference() {
-    local dir=$1 path=$2 flavor=$3 out
+    local dir=$1 path=$2 flavor=$3 clocks=$4 out
     zero_init "$path" "$dir/ref.blif"
     rm -f "$dir/ref.v"
     if [ "$flavor" = abc ]; then
@@ -154,11 +157,13 @@ build_reference() {
     else
         out=$(run_capped "$dir/yosys.log" "$dir/rss.yosys" "$SC_YOSYS" -q -p \
               "read_blif -sop -wideports $dir/ref.blif; simplemap t:\$sop; write_verilog -noattr $dir/ref.v")
+        if [ "$out" = ok ] && [ ! -s "$dir/ref.v" ]; then out=error; fi
         [ "$out" = ok ] || { echo "$out yosys"; return; }
-        cat "$HERE/models/adder.v" "$HERE/models/multiply.v" "$HERE/models/sop.v" >>"$dir/ref.v"
+        cat "$SC_MODELS/adder.v" "$SC_MODELS/multiply.v" "$SC_MODELS/sop.v" >>"$dir/ref.v"
     fi
     "$HERE/tb.sh" --flavor "$flavor" --blif "$dir/ref.blif" --vectors "$dir/vec.1" \
-        --ref "$dir/ref.v" >"$dir/tb.v" 2>"$dir/tb.log" || { echo "error tb.sh"; return; }
+        --ref "$dir/ref.v" --cycles "$SC_CYCLES" --clocks "$clocks" >"$dir/tb.v" 2>"$dir/tb.log" ||
+        { echo "error tb.sh"; return; }
     out=$(run_capped "$dir/iverilog.log" "$dir/rss.iverilog" "$SC_IVERILOG" -s sim_check_tb \
           -o "$dir/sim.vvp" "$dir/ref.v" "$dir/tb.v")
     [ "$out" = ok ] || { echo "$out iverilog"; return; }
@@ -185,6 +190,18 @@ run_ours() {
     echo ok
 }
 
+# Prints why seed $3's files ($1/vec.$2 header, ours.$2, ref.$2) do not each hold SC_CYCLES
+# cycles, or nothing.
+cycle_count_note() {
+    local dir=$1 k=$2 seed=$3 said ours ref
+    said=$(head -n 1 "$dir/vec.$k" | awk '{print $NF}')
+    ours=$(wc -l <"$dir/ours.$k")
+    ref=$(wc -l <"$dir/ref.$k")
+    if [ "$said" != "$SC_CYCLES" ] || [ "$ours" -ne "$SC_CYCLES" ] || [ "$ref" -ne "$SC_CYCLES" ]; then
+        echo "seed $seed: cycle lines: odin3-sim-vectors $ours (header says $said), reference $ref; expected $SC_CYCLES"
+    fi
+}
+
 # Replays every seed on the reference and compares; prints ok, `mismatch <note>` or `<word> vvp`.
 compare_all() {
     local dir=$1 k=0 seed out note
@@ -194,7 +211,9 @@ compare_all() {
         out=$(run_capped "$dir/vvp.log" "$dir/rss.vvp.$k" "$SC_VVP" -n "$dir/sim.vvp" "+vec=$dir/in.mem")
         [ "$out" = ok ] || { echo "$out vvp"; return; }
         grep '^=' "$dir/vvp.log" | cut -c2- >"$dir/ref.$k" || true
-        grep -v '^#' "$dir/vec.$k" >"$dir/ours.$k"
+        grep -v '^#' "$dir/vec.$k" >"$dir/ours.$k" || true
+        note=$(cycle_count_note "$dir" "$k" "$seed")
+        if [ -n "$note" ]; then echo "mismatch $note"; return; fi
         if ! cmp -s "$dir/ours.$k" "$dir/ref.$k"; then
             note=$(paste -d '\t' "$dir/ours.$k" "$dir/ref.$k" | awk -F '\t' -v s="$seed" '
                 $1 != $2 { split($1, o, " "); split($2, r, " ")
@@ -220,9 +239,7 @@ worker() {
         return
     fi
     facts=$(classify "$path")
-    if is_multi_driver "$path"; then
-        status=excluded note="multi-driver netlist (PHASE1 #15)"
-    elif grep -q '^implicit ' <<<"$facts"; then
+    if grep -q '^implicit ' <<<"$facts"; then
         status=excluded note="implicit black box: $(sed -n 's/^implicit //p' <<<"$facts" | xargs)"
     elif grep -qE '^bb (single_port_ram|dual_port_ram)$' <<<"$facts"; then
         status=excluded note="RAM (Phase 4): $(sed -n 's/^bb //p' <<<"$facts" | xargs)"
@@ -236,12 +253,16 @@ worker() {
         if grep -qE '^(bb |edge fe$|clockdata$)' <<<"$facts"; then flavor=yosys; fi
         out=$(run_ours "$dir" "$path")
         if [ "$out" != ok ]; then
-            case $out in error*) status=sim-error ;; *) status=${out%% *} ;; esac
-            note="${out#* }: $(last_words "$dir/ours.log")"
+            # Any failure of the simulator under test fails the gate, timeouts and OOM included.
+            status=sim-error note="$out: $(last_words "$dir/ours.log")"
+            if [ "${out%% *}" = error ] && grep -q 'more than one driver' "$dir/ours.log.err" &&
+                abc_refuses_multi_driver "$dir" "$path"; then
+                status=excluded flavor=- note="multi-driver netlist (PHASE1 #15): the simulator and ABC both refuse it"
+            fi
         fi
     fi
     if [ -z "$status" ]; then
-        out=$(build_reference "$dir" "$path" "$flavor")
+        out=$(build_reference "$dir" "$path" "$flavor" "$(sed -n 's/^clk //p' <<<"$facts" | xargs)")
         if [ "$out" != ok ]; then
             local tool=${out#* }
             case $out in error*) status=ref-error ;; *) status=${out%% *} ;; esac
@@ -279,8 +300,8 @@ worker() {
 
 # Collects results and prints the table and summary; returns 1 on any failure.
 report() {
-    local res=$1 root=$2
-    cat "$res"/*.tsv | LC_ALL=C sort -t "$(printf '\t')" -k2,2 | ROOT="$root" LC_ALL=C awk -F '\t' '
+    local res=$1 root=$2 expect=$3
+    cat "$res"/*.tsv | LC_ALL=C sort -t "$(printf '\t')" -k2,2 | ROOT="$root" EXPECT="$expect" LC_ALL=C awk -F '\t' '
     { id[NR] = $1; path[NR] = $2; st[NR] = $3; fl[NR] = $4; note[NR] = $5; secs[NR] = $6
       dsecs[NR] = $7; drss[NR] = $8; rrss[NR] = $9; rtool[NR] = $10; byid[$1] = NR }
     END {
@@ -288,13 +309,16 @@ report() {
         printf "%-9s %-6s %7s  %s\n", "status", "ref", "secs", "file"
         for (r = 1; r <= NR; r++) {
             s = st[r]; f = fl[r]; n = note[r]; dup = ""
-            if (substr(s, 1, 1) == "=") { q = byid[substr(s, 2)]; s = st[q]; f = fl[q]; n = note[q]; dup = " (dup)"; ndup++ }
+            if (substr(s, 1, 1) == "=") {
+                q = byid[substr(s, 2)]; dup = " (dup)"; ndup++
+                if (q == "") { s = "missing"; f = "-"; n = "no result for its first copy" } else { s = st[q]; f = fl[q]; n = note[q] }
+            }
             p = path[r]; if (index(p, root "/") == 1) p = substr(p, length(root) + 2)
             printf "%-9s %-6s %7s  %s%s\n", s, f, secs[r], p, dup
             if (n != "" && dup == "" && s != "pass") print "    " n
             tot++; cnt[s]++
             if (s == "excluded") { k = n; sub(/[:(].*/, "", k); sub(/ +$/, "", k); exc[k]++ }
-            if (dup == "" && s != "excluded") ref[f]++
+            if (dup == "" && (s == "pass" || s == "FAIL")) ref[f]++
             if (secs[r] + 0 > maxs) { maxs = secs[r] + 0; maxf = p }
             if (drss[r] + 0 > maxd) { maxd = drss[r] + 0; maxdf = p }
             if (rrss[r] + 0 > maxr) { maxr = rrss[r] + 0; maxrf = p; maxrt = rtool[r] }
@@ -302,15 +326,16 @@ report() {
         print ""
         print "SUMMARY"
         printf "files: %d (simulated or classified once per distinct content: %d)\n", tot, tot - ndup
-        printf "pass %d, FAIL %d, sim-error %d, ref-error %d, timeout %d, memlimit %d, excluded %d\n",
-            cnt["pass"], cnt["FAIL"], cnt["sim-error"], cnt["ref-error"], cnt["timeout"], cnt["memlimit"], cnt["excluded"]
+        missing = ENVIRON["EXPECT"] - tot + cnt["missing"]
+        printf "pass %d, FAIL %d, sim-error %d, ref-error %d, reference timeout %d, reference memlimit %d, excluded %d, missing %d\n",
+            cnt["pass"], cnt["FAIL"], cnt["sim-error"], cnt["ref-error"], cnt["timeout"], cnt["memlimit"], cnt["excluded"], missing
         line = ""
         for (k in exc) line = line (line == "" ? "" : ", ") k " " exc[k]
         printf "excluded: %s\n", (line == "" ? "none" : line)
-        printf "reference (distinct contents run): abc %d, yosys %d\n", ref["abc"], ref["yosys"]
+        printf "reference (distinct contents compared): abc %d, yosys %d\n", ref["abc"], ref["yosys"]
         printf "slowest file: %s (%.1f s total)\n", maxf, maxs
         printf "peak RSS: odin3-sim-vectors %.0f MB (%s); reference %.0f MB (%s, %s)\n", maxd / 1024, maxdf, maxr / 1024, maxrt, maxrf
-        fail = cnt["FAIL"] + cnt["sim-error"] + cnt["ref-error"]
+        fail = cnt["FAIL"] + cnt["sim-error"] + cnt["ref-error"] + missing
         if (ENVIRON["STRICT"] == "1") fail += cnt["timeout"] + cnt["memlimit"]
         print (fail ? "RESULT: FAIL (" fail " failing items)" : "RESULT: PASS")
         exit(fail ? 1 : 0)
@@ -331,9 +356,10 @@ main() {
     SC_MEM_KB=$((6 * 1024 * 1024))
     SC_SEEDS="1 2 3"
     SC_CYCLES=64
+    SC_MODELS=$HERE/models
     while [ $# -gt 0 ]; do
         case $1 in
-        -j) jobs=${2:?}; shift 2 ;;
+        -j) jobs=${2:?}; case $jobs in 1 | 2) ;; *) usage ;; esac; shift 2 ;;
         -t) SC_TIMEOUT=${2:?}; shift 2 ;;
         -m) SC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
         --seeds) SC_SEEDS=${2:?}; shift 2 ;;
@@ -343,6 +369,7 @@ main() {
         --yosys) SC_YOSYS=${2:?}; shift 2 ;;
         --iverilog) SC_IVERILOG=${2:?}; shift 2 ;;
         --vvp) SC_VVP=${2:?}; shift 2 ;;
+        --models) SC_MODELS=$(readlink -f "${2:?}"); shift 2 ;;
         --out) out=${2:?}; shift 2 ;;
         --keep) keep=1; shift ;;
         --largest-first) order=nr; shift ;;
@@ -367,9 +394,9 @@ main() {
     mkdir -p "$out/res" "$out/tmp"
     rm -rf "$out"/res/* 2>/dev/null || true
     export SC_DRIVER SC_ABC SC_YOSYS SC_IVERILOG SC_VVP SC_TIMEOUT SC_MEM_KB SC_SEEDS SC_CYCLES
-    export SC_KEEP=$keep SC_RES=$out/res SC_TMP=$out/tmp SC_TECHLIBS=$techlibs HERE
-    export -f classify zero_init is_multi_driver now run_capped last_words max_rss build_reference \
-        run_ours compare_all worker
+    export SC_KEEP=$keep SC_RES=$out/res SC_TMP=$out/tmp SC_TECHLIBS=$techlibs SC_MODELS HERE
+    export -f classify zero_init abc_refuses_multi_driver now run_capped last_words max_rss \
+        build_reference run_ours cycle_count_note compare_all worker
 
     # Candidates as "size<TAB>path", filtered to status=ok unless they are fixtures.
     local cand=$out/candidates.tsv
@@ -408,7 +435,7 @@ main() {
     xargs -d '\n' -P "$jobs" -n 1 bash -c 'worker "$1"' _ <"$work"
     local rc=0
     set +e
-    STRICT=$fixtures report "$out/res" "$root" | tee "$out/report.txt"
+    STRICT=$fixtures report "$out/res" "$root" "$(wc -l <"$work")" | tee "$out/report.txt"
     rc=${PIPESTATUS[0]}
     set -e
     [ "$keep" = 1 ] || rm -rf "$out/tmp"

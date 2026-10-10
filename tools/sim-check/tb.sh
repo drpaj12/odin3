@@ -3,12 +3,16 @@
 # Verilog netlist (ABC's or Yosys's dump of the same BLIF) and prints its outputs in the driver's
 # line format, so the two outputs compare line by line.
 #
-# usage: tb.sh --flavor abc|yosys --blif IN.blif --vectors V.txt --ref REF.v  > tb.v
+# usage: tb.sh --flavor abc|yosys --blif IN.blif --vectors V.txt --ref REF.v --cycles N
+#              [--clocks "NET..."]  > tb.v
 #
 #   --blif     the BLIF the reference was made from; its first model's .inputs/.outputs give the
 #              bit names, in order (the driver's ports are runs of consecutive header names, IR-7b)
-#   --vectors  odin3-sim-vectors output: its '#' header gives the port widths, the clock bits and
-#              the cycle count; only the header is read
+#   --vectors  odin3-sim-vectors output: its '#' header gives the port widths and the clock bits;
+#              only the header is read
+#   --cycles   the cycles the testbench runs (the caller's, never the driver's own count)
+#   --clocks   the BLIF's latch clock nets: the driver's clock bits must name exactly these (so a
+#              data input the simulator wrongly takes for a clock fails here, not on both sides)
 #   --ref      the reference netlist; its first module is instantiated (by name, every port bit
 #              connected by name)
 #   --flavor   abc:   every bit is an escaped scalar port `\name `; a register clock `clock` that
@@ -19,11 +23,11 @@
 # cycle) from the file named by +vec=FILE and, per cycle: drives them, waits, raises every clock,
 # waits, lowers every clock, waits, and prints `=cycle inputs outputs` (the driver's cycle). The
 # clocks are one pulled-down net, forced to 1 and released, so it is 0 from time 0 with no edge.
-# Exit: 0 written, 1 the vectors and the BLIF ports disagree (message on stderr), 2 usage.
+# Exit: 0 written, 1 the vectors and the BLIF ports or clocks disagree (message on stderr), 2 usage.
 set -euo pipefail
 
 usage() {
-    echo "usage: tb.sh --flavor abc|yosys --blif IN.blif --vectors V.txt --ref REF.v" >&2
+    echo "usage: tb.sh --flavor abc|yosys --blif IN.blif --vectors V.txt --ref REF.v --cycles N [--clocks \"NET...\"]" >&2
     exit 2
 }
 
@@ -47,18 +51,21 @@ blif_ports() {
 }
 
 main() {
-    local flavor="" blif="" vectors="" ref=""
+    local flavor="" blif="" vectors="" ref="" cycles="" clocks="" check_clocks=0
     while [ $# -gt 0 ]; do
         case $1 in
         --flavor) flavor=${2:-}; shift 2 || usage ;;
         --blif) blif=${2:-}; shift 2 || usage ;;
         --vectors) vectors=${2:-}; shift 2 || usage ;;
         --ref) ref=${2:-}; shift 2 || usage ;;
+        --cycles) cycles=${2:-}; shift 2 || usage ;;
+        --clocks) clocks=${2-}; check_clocks=1; shift 2 || usage ;;
         *) usage ;;
         esac
     done
     case $flavor in abc | yosys) ;; *) usage ;; esac
     [ -n "$blif" ] && [ -n "$vectors" ] && [ -n "$ref" ] || usage
+    case $cycles in '' | *[!0-9]*) usage ;; esac
     local module abc_clock=0
     module=$(LC_ALL=C awk '/^module / {
             m = substr($0, 8)
@@ -66,7 +73,8 @@ main() {
             print m; exit }' "$ref")
     [ -n "$module" ] || { echo "tb.sh: no module in $ref" >&2; exit 1; }
     if [ "$flavor" = abc ] && grep -q '^ *always @ (posedge clock)' "$ref"; then abc_clock=1; fi
-    grep '^#' "$vectors" | FLAVOR=$flavor MODULE=$module ABC_CLOCK=$abc_clock LC_ALL=C awk '
+    grep '^#' "$vectors" | FLAVOR=$flavor MODULE=$module ABC_CLOCK=$abc_clock CYCLES=$cycles \
+        CLOCKS=$clocks CHECK_CLOCKS=$check_clocks LC_ALL=C awk '
     function esc(name) { return "\\" name " " }
     # Yosys wideports_split (frontends/blif/blifparse.cc): sets wbase/widx when name is base[int].
     function wsplit(name,   len, i, pos, c, nx) {
@@ -86,7 +94,7 @@ main() {
     }
     function fail(msg) { print "tb.sh: " msg > "/dev/stderr"; bad = 1; exit 1 }
     FNR == NR {
-        if (FNR == 1) { ncyc = $NF + 0; next }
+        if (FNR == 1) { ncyc = ENVIRON["CYCLES"] + 0; next }
         if ($2 == "input" || $2 == "clock") {
             if ($3 != lastin) { nin++; inname[nin] = $3; lastin = $3 }
             if ($2 == "input") inw[nin] += $4; else { inw[nin]++; isclk[nin, $4] = 1 }
@@ -108,6 +116,17 @@ main() {
             at += inw[p]
         }
         for (j = 1; j <= wi; j++) sig[order[j]] = "tb_in[" (wi - j) "]"
+        if (ENVIRON["CHECK_CLOCKS"] == "1") {
+            nw = split(ENVIRON["CLOCKS"], want, " "); have = ""; miss = ""; nh = 0
+            for (k = 1; k <= nw; k++) wanted[want[k]] = 1
+            for (j = 1; j <= nbin; j++) if (sig[j] == "tb_clk") {
+                nh++; got[bin[j]] = 1
+                if (!(bin[j] in wanted)) have = have " " bin[j]
+            }
+            for (k = 1; k <= nw; k++) if (!(want[k] in got)) miss = miss " " want[k]
+            if (have != "" || miss != "")
+                fail("clock bits differ from the BLIF latch clocks (simulator only:" have "; BLIF only:" miss ")")
+        }
         at = 0; wo = 0
         for (p = 1; p <= nout; p++) at += outw[p]
         if (at != nbout) fail("vectors have " at " output bits, the BLIF top declares " nbout " output ports")

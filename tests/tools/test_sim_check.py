@@ -99,7 +99,8 @@ class TbTest(unittest.TestCase):
                 self.assertIn("$sop", ref.read_text())
                 ref.write_text(ref.read_text() + (HERE / "models" / "sop.v").read_text())
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref])
+        tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref,
+                  "--cycles", str(len(data_lines(vectors)))])
         self.assertEqual(tb.returncode, 0, tb.stderr)
         (self.tmp / "tb.v").write_text(tb.stdout)
         mem = self.tmp / "in.mem"
@@ -162,12 +163,31 @@ class TbTest(unittest.TestCase):
         blif.write_text(".model k\n.inputs a b\n.outputs o\n.names a b o\n11 1\n.end\n")
         ref = self.tmp / "ref.v"
         ref.write_text("module k(a, b, o);\nendmodule\n")
-        res = run([TB, "--flavor", "abc", "--blif", blif, "--vectors", vec, "--ref", ref])
+        res = run([TB, "--flavor", "abc", "--blif", blif, "--vectors", vec, "--ref", ref,
+                   "--cycles", "32"])
         self.assertEqual(res.returncode, 1)
         self.assertIn("ports", res.stderr)
 
+    def test_clock_bits_must_be_the_latch_clocks(self) -> None:
+        # The clock set comes from our simulator; tb.sh checks it against the BLIF's latches.
+        vec = self.tmp / "vec.txt"
+        vec.write_text(self.ours(BLIF / "ff.odin.blif"))
+        ref = self.tmp / "ref.v"
+        ref.write_text("module dff(clock);\nendmodule\n")
+        args: list[str | Path] = [TB, "--flavor", "abc", "--blif", BLIF / "ff.odin.blif",
+                                  "--vectors", vec, "--ref", ref, "--cycles", "32", "--clocks"]
+        self.assertEqual(run([*args, "dff^clk"]).returncode, 0)
+        for wrong in ["dff^d", "", "dff^clk dff^d"]:
+            with self.subTest(clocks=wrong):
+                res = run([*args, wrong])
+                self.assertEqual(res.returncode, 1)
+                self.assertIn("clock", res.stderr)
+
     def test_usage(self) -> None:
-        for args in [[], ["--flavor", "vcs"], ["--bogus"]]:
+        ff = str(BLIF / "ff.odin.blif")
+        no_cycles = ["--flavor", "abc", "--blif", ff, "--vectors", ff, "--ref", ff]
+        bad_cycles = [*no_cycles, "--cycles", "x"]
+        for args in [[], ["--flavor", "vcs"], ["--bogus"], no_cycles, bad_cycles]:
             with self.subTest(args=args):
                 res = run([TB, *args])
                 self.assertEqual(res.returncode, 2)
@@ -212,6 +232,8 @@ class SimCheckTest(unittest.TestCase):
             "pow.parmys.blif": "excluded",
         })
         self.assertIn("pass 4, FAIL 0", res.stdout)
+        self.assertIn("multi-driver netlist (PHASE1 #15): the simulator and ABC both refuse it",
+                      res.stdout)
         self.assertIn("RESULT: PASS", res.stdout)
 
     def test_techlib_fixtures(self) -> None:
@@ -259,6 +281,54 @@ class SimCheckTest(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertRegex(res.stdout, r"pass\s+yosys\s.*wide\.blif")
 
+    def fake_driver(self, body: str) -> Path:
+        driver = self.tmp / "driver"
+        driver.write_text(f"#!/usr/bin/env bash\n{body}\n")
+        driver.chmod(0o755)
+        return driver
+
+    def test_simulator_timeout_fails_in_golden_mode(self) -> None:
+        # Only reference-tool timeouts are exceptions; a hanging simulator fails the gate.
+        root = self.tmp / "golden"
+        (root / "a").mkdir(parents=True)
+        (root / "b").mkdir()
+        for name, status in [("a/ff", "ok"), ("b/skipped", "failed")]:
+            shutil.copy(BLIF / "ff.parmys.blif", root / f"{name}.parmys.blif")
+            (root / f"{name}.parmys.prov").write_text(f"tool=parmys\nstatus={status}\n")
+        res = self.check("-t", "2", root, driver=self.fake_driver("sleep 30"))
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertEqual(self.table(res.stdout), {"ff.parmys.blif": "sim-error"})
+        self.assertIn("timeout odin3-sim-vectors", res.stdout)
+        self.assertIn("RESULT: FAIL", res.stdout)
+
+    def test_missing_cycle_lines_fail(self) -> None:
+        # A driver that claims 0 cycles and prints no lines must not pass (both sides empty).
+        header = f"'{DRIVER}' \"$@\" | grep '^#' | sed '1s/cycles [0-9]*$/cycles 0/'"
+        res = self.check("--fixtures", BLIF / "ff.parmys.blif",
+                         driver=self.fake_driver(header))
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertIn("FAIL", res.stdout)
+        self.assertIn("expected 64", res.stdout)
+
+    def test_broken_reference_model_fails(self) -> None:
+        models = self.tmp / "models"
+        shutil.copytree(HERE / "models", models)
+        adder = models / "adder.v"
+        adder.write_text(adder.read_text().replace("a + b + cin", "a + b"))
+        res = self.check("--models", models, "--fixtures", BLIF / "adder_hard_block.parmys.blif")
+        self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
+        self.assertRegex(res.stdout, r"FAIL\s+yosys\s")
+
+    def test_identical_contents_run_once(self) -> None:
+        for name in ["one", "two"]:
+            shutil.copy(BLIF / "ff.parmys.blif", self.tmp / f"{name}.blif")
+        res = self.check("--largest-first", "--fixtures", self.tmp / "one.blif",
+                         self.tmp / "two.blif")
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("(dup)", res.stdout)
+        self.assertIn("files: 2 (simulated or classified once per distinct content: 1)",
+                      res.stdout)
+
     def test_detects_a_wrong_output(self) -> None:
         liar = self.tmp / "liar"
         # Flips the first output bit of cycle 5.
@@ -281,9 +351,11 @@ class SimCheckTest(unittest.TestCase):
         self.assertIn("sim-error", res.stdout)
 
     def test_usage(self) -> None:
-        res = run([SIM_CHECK, "--bogus"])
-        self.assertEqual(res.returncode, 2)
-        self.assertIn("usage:", res.stderr)
+        for args in [["--bogus"], ["-j", "3"], ["-j", "0"]]:
+            with self.subTest(args=args):
+                res = run([SIM_CHECK, *args])
+                self.assertEqual(res.returncode, 2)
+                self.assertIn("usage:", res.stderr)
 
 
 if __name__ == "__main__":

@@ -291,7 +291,8 @@ RESULT: PASS
 
 The 4 timeouts are Icarus compiling the Yosys dump of Odin II's `bgm` (2 distinct contents, `large`
 and `vtr`, each in both architectures; 54 MB of Verilog), not our simulator (4.6–5.0 s for three
-seeds). Rerun with a 1-hour cap (`-t 3600`), both pass:
+seeds). Rerun with a 1-hour cap (`-t 3600`), both pass (excerpt: the table header and the
+excluded/reference/slowest-file summary lines are omitted):
 
 ```
 pass      yosys   1793.0  EArch/regression/verilog/large/bgm/bgm.odin.blif
@@ -317,7 +318,17 @@ Yosys refuses a `.names` of more than 12 inputs unless read with `-sop` (then `s
 leading blank Yosys rejects; a testbench clock `reg` steps x → 0 at time 0, a negedge that clocked
 falling-edge registers early (the clock is now a `tri0` net forced high and released). CTest
 `sim_check_fixtures` runs the comparison on `tests/golden/blif` and `tests/golden/techlib` (CI
-installs `iverilog` and `yosys`).
+installs `iverilog`, `yosys` and `time`). On a machine without ABC, Yosys or Icarus the CTest is
+not registered (a CMake STATUS line says so) and the sim-check Python tests skip; CI is the guard.
+
+Gate fixes after the run (task review; the recorded outcomes do not change, since all 4 timeouts
+were Icarus): a timeout or memory-cap stop of `odin3-sim-vectors` is now a failure in every mode
+(only reference-tool timeouts are exceptions); both sides must print exactly 64 cycle lines per
+seed, and the testbench's cycle count comes from sim-check, not from the driver's header; the
+driver's clock bits must equal the BLIF's latch clock nets; multi-driver files are excluded when
+the simulator rejects them and ABC refuses them too (no basename list); `-j` is 1 or 2. The
+summary now reads `… reference timeout N, reference memlimit N, excluded N, missing N` and counts
+the references of compared contents only.
 
 `fn` cell cost (ruling: per-call resize measured here): callgrind on `vtr/stereovision2.odin.blif`
 (540 `multiply`, 14,347 `adder`, 12,103 `.names`), 16 cycles: 729,463 `fn` hook calls average
