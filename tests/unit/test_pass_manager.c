@@ -182,10 +182,10 @@ static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail", "t_break_fail: br
 static void register_test_passes(void) {
     static bool done = false;
     if (!done) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&COUNT_PASS));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&BREAK_PASS));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&FAIL_PASS));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&BREAK_FAIL_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&COUNT_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&BREAK_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&FAIL_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&BREAK_FAIL_PASS));
         done = true;
     }
     count_calls = 0;
@@ -232,14 +232,14 @@ static void test_register_rejects(void) {
     static const odin3_pass_def empty = {"", "x", count_pass};
     static const odin3_pass_def no_run = {"t_no_run", "x", NULL};
     static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&COUNT_PASS));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&dup_builtin));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&blank));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&semi));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&empty));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&no_run));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&no_help));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&COUNT_PASS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&dup_builtin));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&blank));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&semi));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&empty));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&no_run));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&no_help));
     TEST_ASSERT_TRUE(log_has("already registered"));
 }
 

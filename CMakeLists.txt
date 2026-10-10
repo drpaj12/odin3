@@ -38,6 +38,8 @@ add_library(odin3_core OBJECT
     src/api/common.c
     src/api/design.c
     src/api/pass.c
+    src/api/celltype.c
+    src/api/prov.c
     src/api/module.c
     src/api/node.c
     src/api/net.c
@@ -263,6 +265,20 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    # Plugin cell types and passes, and the provenance visitors, through libodin3.so only.
+    add_executable(test_abi_ext tests/unit/test_abi_ext.c)
+    target_link_libraries(test_abi_ext PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_abi_ext PRIVATE
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli"
+        ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_abi_ext.blif"
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>")
+    add_dependencies(test_abi_ext example_plugin)
+    add_test(NAME test_abi_ext COMMAND test_abi_ext)
+    set_tests_properties(test_abi_ext PROPERTIES LABELS unit)
+    odin3_add_unit_test(test_abi_core)
+    target_compile_definitions(test_abi_core PRIVATE
+        ODIN3_CLI_FIXTURES="${PROJECT_SOURCE_DIR}/tests/cli")
 
     add_test(NAME blif_roundtrip_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
@@ -331,6 +347,12 @@ if(BUILD_TESTING)
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 3\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+    # A plugin pass and a plugin cell type from a CLI script (example_and cells read, counted).
+    add_test(NAME cli_plugin_pass
+        COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>
+                -p "read_blif ${PROJECT_SOURCE_DIR}/tests/cli/example_plugin.blif; check; example_count")
+    set_tests_properties(cli_plugin_pass PROPERTIES
+        LABELS unit PASS_REGULAR_EXPRESSION "example_count: 2 example_and cells")
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted

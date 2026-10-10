@@ -80,6 +80,23 @@ const odin3_module *odin3_api_ref(const odin3_design *design, odin3_ref ref,
     return module;
 }
 
+const odin3_module *odin3_api_obj(const odin3_design *design, odin3_obj obj, odin3_objref *ref) {
+    static const odin3_api_store k_store[] = {
+        [ODIN3_OBJ_NODE] = ODIN3_API_NODE,
+        [ODIN3_OBJ_NET] = ODIN3_API_NET,
+        [ODIN3_OBJ_WIRE] = ODIN3_API_WIRE,
+    };
+    if (obj.kind > (uint32_t)ODIN3_OBJ_MODULE) {
+        return NULL;
+    }
+    if (obj.kind == (uint32_t)ODIN3_OBJ_MODULE) {
+        *ref = (odin3_objref){ODIN3_OBJ_MODULE, obj.module};
+        return odin3_api_module(design, obj.module);
+    }
+    *ref = (odin3_objref){(odin3_objkind)obj.kind, obj.id};
+    return odin3_api_ref(design, (odin3_ref){obj.module, obj.id}, k_store[obj.kind]);
+}
+
 odin3_status odin3_api_invalid(const char *fn) {
     odin3_log(ODIN3_LOG_ERROR,
               "%s: invalid argument (a NULL pointer, an unknown module, an ID or index out of "

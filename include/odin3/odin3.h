@@ -9,7 +9,8 @@
  * ABI v1 (Phase 1, 1B): adds ODIN3_ERR_CHECK.
  * ABI v2 (Phase 1, 1C): adds ODIN3_ERR_PARSE.
  * ABI v3 (Phase 1, 1D): design handles, passes and pass scripts, ID-based access to modules,
- * nodes, pins, nets and wires, string attributes, logging.
+ * nodes, pins, nets and wires, string attributes, cell-type and pass registration (plugins),
+ * provenance visitors, logging.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -70,8 +71,8 @@ const char *odin3_status_string(odin3_status status);
 /*
  * Entry point every shared-object plugin must export under the name
  * "odin3_plugin_init". The host passes its ODIN3_ABI_VERSION; a plugin built
- * for a different ABI returns ODIN3_ERR_ABI_MISMATCH. In Phase 1 the plugin
- * will register passes, cell types, readers and writers from here.
+ * for a different ABI returns ODIN3_ERR_ABI_MISMATCH. It registers its passes
+ * (odin3_pass_register) and cell types (odin3_celltype_register) from here.
  */
 typedef odin3_status (*odin3_plugin_init_fn)(uint32_t host_abi_version);
 
@@ -287,6 +288,41 @@ odin3_status odin3_script_resolve(const char *text, odin3_script_src src);
 /* As odin3_script_resolve for the script file at path (ODIN3_ERR_IO when it cannot be read). */
 odin3_status odin3_script_resolve_file(const char *path);
 
+/* --- plugin passes ------------------------------------------------------------------------- */
+
+/*
+ * The body of a plugin pass. design is the design the pass runs on; args is the text after the
+ * pass name in the script, trimmed, NUL-terminated and valid during the call only ("" for none;
+ * double quotes are kept as written); user is odin3_plugin_pass.user. The pass may call every
+ * reader function and odin3_attr_set_string on design. It returns ODIN3_OK or a failure status,
+ * logging why (odin3_log_write); ODIN3_ERR_INVALID_ARG for bad arguments.
+ */
+typedef odin3_status (*odin3_pass_run_fn)(odin3_design *design, const char *args, void *user);
+
+/*
+ * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';' or '#'
+ * (a script word); help: its one-line usage, shown by `odin3 --help`; run: its body; user:
+ * passed to run as is. reserved: must be all NULL (later ABI versions give the slots a meaning).
+ */
+typedef struct odin3_plugin_pass {
+    const char *name;
+    const char *help;
+    odin3_pass_run_fn run;
+    void *user;
+    void *reserved[4];
+} odin3_plugin_pass;
+
+/*
+ * Registers a pass (from odin3_plugin_init, typically), after the built-ins and every pass
+ * registered before it; scripts and odin3_design_run_pass then run it like a built-in: in its own
+ * provenance run, with the IR checked before and after (Debug builds, or odin3_pass_set_check),
+ * timed and logged. name and help are copied; user must stay valid while the pass can run.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL pass, name, help or run, a bad name, a name already
+ * registered (built-in or not) or a reserved slot that is not NULL; ODIN3_ERR_NO_MEMORY. Nothing
+ * is registered on failure. Process-wide; not thread-safe; a pass cannot be unregistered.
+ */
+odin3_status odin3_pass_register(const odin3_plugin_pass *pass);
+
 /* --- modules ------------------------------------------------------------------------------- */
 
 /* *name gets the module's name (see Strings). Fails only with ODIN3_ERR_INVALID_ARG, as the
@@ -495,6 +531,148 @@ odin3_status odin3_attr_get_string(const odin3_design *design, odin3_obj obj, co
  */
 odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj, const char *key,
                                    const char *value);
+
+/* --- cell types ---------------------------------------------------------------------------- */
+
+/*
+ * Cell-type flags (docs/IR.md IR-8). TRISTATE: output pins may share a net with other tristate
+ * or inout drivers (a bus). ANYVIEW: legal in every view whatever the granularity (constants).
+ * Simulation (1E): SEQ_EDGE, edge-triggered storage whose outputs depend only on its state (it
+ * cuts the simulator's combinational graph); SEQ_LEVEL, a level-sensitive latch; at most one of
+ * the two. CLOCK_PIN0: port 0 is the clock (edge) or enable (level) pin, a scalar input of
+ * constant width 1.
+ */
+enum {
+    ODIN3_CT_TRISTATE = 1,
+    ODIN3_CT_ANYVIEW = 2,
+    ODIN3_CT_SEQ_EDGE = 4,
+    ODIN3_CT_SEQ_LEVEL = 8,
+    ODIN3_CT_CLOCK_PIN0 = 16
+};
+
+/*
+ * The simulator's view of one cell (1E). Opaque in ABI v3: its layout and the hook contract are
+ * src/sim/cell.h's, not frozen here, so only a plugin built from this source tree can implement
+ * the simulation hooks below.
+ */
+typedef struct odin3_sim_cell odin3_sim_cell;
+
+/* Evaluates one cell (src/sim/cell.h: never allocates, logs or fails). */
+typedef void (*odin3_sim_fn)(const odin3_sim_cell *cell);
+
+/* *bytes gets the scratch bytes simulate needs for one cell (docs/IR.md, the 1E hooks). */
+typedef odin3_status (*odin3_sim_scratch_fn)(const odin3_sim_cell *cell, uint32_t *bytes);
+
+/*
+ * One port of a plugin cell type. dir: an odin3_dir value. Width: the INT parameter named
+ * width_param when it is not NULL (the node's value of it), else the constant width. scalar:
+ * written without brackets by the writers (a 1-bit port that is not a vector).
+ */
+typedef struct odin3_plugin_port {
+    const char *name;
+    uint32_t dir;
+    uint32_t width;
+    const char *width_param;
+    bool scalar;
+} odin3_plugin_port;
+
+/*
+ * One parameter of a plugin cell type. kind: an odin3_value_kind value. dflt: the default of an
+ * INT parameter; any other kind defaults to empty (no bits, "", no cover rows), and dflt must be 0.
+ */
+typedef struct odin3_plugin_param {
+    const char *name;
+    uint32_t kind;
+    int64_t dflt;
+} odin3_plugin_param;
+
+/*
+ * A cell type as a plugin describes it: plain data (docs/IR.md IR-8, IR-11). gran: an
+ * odin3_granularity value, one of WORD, BIT, HARD or BLACKBOX (MODULE and PORT types belong to
+ * the IR); flags: ODIN3_CT_* bits; ports and params: n_ports and n_params entries in definition
+ * order (NULL only when the count is 0); names unique within each array, and every width_param
+ * names an INT parameter. simulate and sim_scratch_bytes are the 1E simulation hooks, each may be
+ * NULL (no simulate: the simulator refuses the type; no sim_scratch_bytes: no scratch).
+ * reserved: must be all NULL, so a later ABI version can add hooks there without moving a field.
+ */
+typedef struct odin3_plugin_celltype {
+    const char *name;
+    uint32_t gran;
+    uint32_t flags;
+    const odin3_plugin_port *ports;
+    uint32_t n_ports;
+    const odin3_plugin_param *params;
+    uint32_t n_params;
+    odin3_sim_fn simulate;
+    odin3_sim_scratch_fn sim_scratch_bytes;
+    void *reserved[4];
+} odin3_plugin_celltype;
+
+/*
+ * Registers a process-global cell type (from odin3_plugin_init, typically). The definition and
+ * its strings and arrays are copied, so the caller may free them afterwards. Designs created
+ * afterwards hold the type (odin3_design_create) and their readers instantiate it by name (a BLIF
+ * `.subckt`, its parameters derived from the connected pins as for any type); existing designs do
+ * not see it. ODIN3_ERR_INVALID_ARG (logged) for a NULL definition, a reserved slot that is not
+ * NULL, a granularity, direction, kind or flag out of range, a non-INT parameter with a non-zero
+ * dflt, a definition the IR rejects (a missing or duplicate name, a width_param that names no INT
+ * parameter, inconsistent simulation flags), or a name already registered; ODIN3_ERR_NO_MEMORY.
+ * Nothing is registered on failure. Process-wide; not thread-safe; a type cannot be unregistered.
+ */
+odin3_status odin3_celltype_register(const odin3_plugin_celltype *def);
+
+/* --- provenance ---------------------------------------------------------------------------- */
+
+/*
+ * A source location: file as the reader recorded it ("" when unknown; see Strings), 1-based line
+ * and column of the start, and of the end (end_line, end_col; 0 when not recorded).
+ */
+typedef struct odin3_source {
+    const char *file;
+    uint32_t line;
+    uint32_t col;
+    uint32_t end_line;
+    uint32_t end_col;
+} odin3_source;
+
+/* Receives one source location (valid during the call only) with the user pointer given. */
+typedef void (*odin3_source_visit)(const odin3_source *src, void *user);
+
+/*
+ * Visits the source locations obj comes from (docs/IR.md IR-12): every location of every source
+ * or imported record its provenance reaches through its parents, depth-first in parent order, so
+ * the first call is the location that names the object; each record once. obj is a node, net or
+ * wire (live or dead; a pin's is its node's) or a module; an object without provenance visits
+ * nothing. visit runs after the walk, so it may call reader functions on design.
+ * ODIN3_ERR_INVALID_ARG as the conventions say (a NULL visit, a kind out of range included);
+ * ODIN3_ERR_NO_MEMORY before any call.
+ */
+odin3_status odin3_prov_visit_sources(const odin3_design *design, odin3_obj obj,
+                                      odin3_source_visit visit, void *user);
+
+/*
+ * An object found from a source location: the object, and whether it is live. An object that
+ * compact has since freed (its history survives as a tombstone, IR-6) has obj.id 0 and live false.
+ */
+typedef struct odin3_prov_object {
+    odin3_obj obj;
+    bool live;
+} odin3_prov_object;
+
+/* Receives one object found (valid during the call only) with the user pointer given. */
+typedef void (*odin3_prov_object_visit)(const odin3_prov_object *found, void *user);
+
+/*
+ * Visits every object that comes from line `line` of file (the reader's spelling of the path;
+ * columns ignored): the objects whose records have that location, then everything derived from
+ * them, breadth-first (IR §6 forward navigation), live and dead, modules included. A file the
+ * design never read visits nothing. Builds a provenance index over the whole design on each call
+ * (time and memory linear in the design); visit runs after the query and may call reader
+ * functions on design. ODIN3_ERR_INVALID_ARG as the conventions say (a NULL file or visit
+ * included); ODIN3_ERR_NO_MEMORY before any call.
+ */
+odin3_status odin3_prov_visit_objects(const odin3_design *design, const char *file, uint32_t line,
+                                      odin3_prov_object_visit visit, void *user);
 
 /* --- logging ------------------------------------------------------------------------------- */
 

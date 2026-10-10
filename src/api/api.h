@@ -32,6 +32,13 @@ uint32_t odin3_api_live_count(const odin3_module *module, odin3_api_store store)
 /* The module of ref when ref.id is an ID of store in it (1 .. end - 1), else NULL. */
 const odin3_module *odin3_api_ref(const odin3_design *design, odin3_ref ref, odin3_api_store store);
 
+/*
+ * The module of obj (a node, net or wire of that module, or the module itself) with *ref set to
+ * obj as the IR names it; NULL for a NULL design, an unknown module, a kind out of range or an ID
+ * that is 0 or past its store's end (*ref is then unspecified).
+ */
+const odin3_module *odin3_api_obj(const odin3_design *design, odin3_obj obj, odin3_objref *ref);
+
 /* Logs "<fn>: invalid argument …" at ODIN3_LOG_ERROR and returns ODIN3_ERR_INVALID_ARG. */
 odin3_status odin3_api_invalid(const char *fn);
 

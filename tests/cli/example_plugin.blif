@@ -1,0 +1,10 @@
+# example_plugin.blif - two cells of the example plugin's type example_and (plugins/example_c),
+# sized by its WIDTH parameter (2 and 1), for the plugin and cell-type ABI tests.
+.model top
+.inputs a[0] a[1] b[0] b[1] c
+.outputs y[0] y[1] z
+.subckt example_and A[0]=a[0] A[1]=a[1] B[0]=b[0] B[1]=b[1] Y[0]=y[0] Y[1]=y[1]
+.cname u_wide
+.subckt example_and A[0]=c B[0]=a[0] Y[0]=z
+.cname u_narrow
+.end

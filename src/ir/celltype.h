@@ -45,19 +45,12 @@ enum { ODIN3_READER_MAX_TOTAL_WIDTH = 1 << 22 };
  * settle ($_DLATCH_P_, $_DLATCH_N_). CLOCK_PIN0: port 0 is the cell's clock (edge) or enable
  * (level) pin, a scalar input of constant width 1, whose net the simulator drives as a clock;
  * $_FF_ has none (global clock). Registration rejects SEQ_EDGE with SEQ_LEVEL, and CLOCK_PIN0 on
- * a type whose port 0 is not such a pin.
+ * a type whose port 0 is not such a pin. The ODIN3_CT_* values themselves are public: see odin3.h.
  */
-enum {
-    ODIN3_CT_TRISTATE = 1U << 0,
-    ODIN3_CT_ANYVIEW = 1U << 1,
-    ODIN3_CT_SEQ_EDGE = 1U << 2,
-    ODIN3_CT_SEQ_LEVEL = 1U << 3,
-    ODIN3_CT_CLOCK_PIN0 = 1U << 4
-};
 
 typedef struct odin3_celltype_def odin3_celltype_def;
 typedef struct odin3_width_expr odin3_width_expr;
-typedef struct odin3_sim_cell odin3_sim_cell; /* sim/cell.h */
+/* odin3_sim_cell (sim/cell.h) is declared in odin3.h. */
 
 enum { ODIN3_WIDTH_WHY_MAX = 192 };
 

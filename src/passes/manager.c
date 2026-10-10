@@ -85,7 +85,7 @@ static bool name_ok(const char *name) {
     return true;
 }
 
-odin3_status odin3_pass_register(const odin3_pass_def *def) {
+odin3_status odin3_pass_register_def(const odin3_pass_def *def) {
     if (def == NULL || def->run == NULL || def->help == NULL || !name_ok(def->name)) {
         odin3_log(ODIN3_LOG_ERROR, "pass_register: NULL definition, run or help, or a bad name");
         return ODIN3_ERR_INVALID_ARG;

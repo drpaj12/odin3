@@ -16,24 +16,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The module of obj and its internal reference; NULL for a bad design, module, kind or ID. */
-static const odin3_module *resolve(const odin3_design *design, odin3_obj obj, odin3_objref *ref) {
-    static const odin3_api_store k_store[] = {
-        [ODIN3_OBJ_NODE] = ODIN3_API_NODE,
-        [ODIN3_OBJ_NET] = ODIN3_API_NET,
-        [ODIN3_OBJ_WIRE] = ODIN3_API_WIRE,
-    };
-    if (obj.kind > (uint32_t)ODIN3_OBJ_MODULE) {
-        return NULL;
-    }
-    if (obj.kind == (uint32_t)ODIN3_OBJ_MODULE) {
-        *ref = (odin3_objref){ODIN3_OBJ_MODULE, obj.module};
-        return odin3_api_module(design, obj.module);
-    }
-    *ref = (odin3_objref){(odin3_objkind)obj.kind, obj.id};
-    return odin3_api_ref(design, (odin3_ref){obj.module, obj.id}, k_store[obj.kind]);
-}
-
 /* True when the object ref of mod is live (a module always is). */
 static bool live(const odin3_module *mod, odin3_objref ref) {
     switch (ref.kind) {
@@ -51,7 +33,7 @@ static bool live(const odin3_module *mod, odin3_objref ref) {
 ODIN3_EXPORT odin3_status odin3_attr_get_string(const odin3_design *design, odin3_obj obj,
                                                 const char *key, const char **value) {
     odin3_objref ref = {ODIN3_OBJ_MODULE, 0};
-    const odin3_module *mod = resolve(design, obj, &ref);
+    const odin3_module *mod = odin3_api_obj(design, obj, &ref);
     if (mod == NULL || key == NULL || value == NULL) {
         return odin3_api_invalid(__func__);
     }
@@ -70,7 +52,7 @@ ODIN3_EXPORT odin3_status odin3_attr_get_string(const odin3_design *design, odin
 ODIN3_EXPORT odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj,
                                                 const char *key, const char *value) {
     odin3_objref ref = {ODIN3_OBJ_MODULE, 0};
-    const odin3_module *found = resolve(design, obj, &ref);
+    const odin3_module *found = odin3_api_obj(design, obj, &ref);
     if (found == NULL || !live(found, ref) || key == NULL || key[0] == '\0' || value == NULL) {
         return odin3_api_invalid(__func__);
     }

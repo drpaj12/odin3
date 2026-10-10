@@ -36,7 +36,7 @@ typedef struct odin3_pass_def {
  * process. ODIN3_ERR_INVALID_ARG (logged) for a NULL def or run, a bad name or help, or a name
  * already registered (built-in or not); ODIN3_ERR_NO_MEMORY on out of memory. Not thread-safe.
  */
-odin3_status odin3_pass_register(const odin3_pass_def *def);
+odin3_status odin3_pass_register_def(const odin3_pass_def *def);
 
 /* The pass named name (built-ins first, then registration order), NULL when there is none. */
 const odin3_pass_def *odin3_pass_find(odin3_bytes name);
