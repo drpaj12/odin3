@@ -12,7 +12,7 @@ odin3_status odin3_pp_check(const odin3_pp *pp, odin3_srcbuf_id stream) {
     return ODIN3_OK;
 }
 
-void odin3_pp_check_note(odin3_pp *pp, uint32_t loc) {
+void odin3_pp_check_note(odin3_pp *pp, odin3_loc loc) {
     (void)pp;
     (void)loc;
 }

@@ -18,6 +18,8 @@ typedef struct odin3_pp_limits {
     uint32_t macro_args;
     uint32_t macro_text;
     uint32_t macros;
+    uint32_t definitions;
+    uint32_t macro_bytes;
     uint32_t stream_bytes;
     uint32_t buffers_per_stream;
     uint32_t includes_per_stream;
@@ -30,5 +32,9 @@ odin3_pp_limits odin3_pp_default_limits(void);
 
 /* Replaces the preprocessor's caps so tests can hit them cheaply. */
 void odin3_pp_test_set_limits(odin3_pp *pp, odin3_pp_limits limits);
+
+/* odin3_pp_create with the given caps in force while the <command line> defines are scanned. */
+odin3_status odin3_pp_test_create(odin3_design *design, const odin3_pp_config *config,
+                                  odin3_pp_limits limits, odin3_pp **out);
 
 #endif
