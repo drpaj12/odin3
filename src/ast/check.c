@@ -320,6 +320,11 @@ static void rule2_context(odin3_ast_checker *cx, const odin3_ast_kind_info *info
         odin3_ast_form_of(cx->ast) == ODIN3_AST_FORM_PARSED) {
         odin3_ast_check_node_fail(cx, RULE_SLOTS, "GEN_BLOCK index in the parsed form");
     }
+    if (kind == ODIN3_AST_SELECT && kids.n == info->nslots &&
+        (cx->rec->sub == ODIN3_AST_SELECT_BIT) == (kids.ids[2].v != 0)) {
+        odin3_ast_check_node_fail(cx, RULE_SLOTS,
+                                  "SELECT's third slot is present exactly for a part select");
+    }
     rule2_lists(cx, info, kids);
 }
 

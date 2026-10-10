@@ -265,8 +265,9 @@ void odin3_symtab_remap(odin3_symtab *st, odin3_module_id module, const odin3_co
 /*
  * Check rule 8 (§10): every scope's parent and every symbol's scope exist, AST node IDs are below
  * ast's end, the maps and lists agree with the records, no duplicate (scope, name). Each error is
- * logged as "ast check: rule 8: <scope|symbol|symtab> <id>: <what>"; ODIN3_ERR_CHECK if any;
- * INVALID_ARG (logged) for NULL. odin3_ast_check (FULL) calls it when the AST has a table.
+ * logged as "ast check: rule 8: <scope|symbol|symtab> <id>: <what>" (the first 10; the rest are
+ * summed in one line); ODIN3_ERR_CHECK if any; INVALID_ARG (logged) for NULL. odin3_ast_check
+ * (FULL) calls it when the AST has a table.
  */
 odin3_status odin3_symtab_check(const odin3_symtab *st, const odin3_ast *ast);
 

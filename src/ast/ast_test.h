@@ -34,11 +34,14 @@ typedef enum odin3_ast_test_fault {
     ODIN3_AST_TEST_PAYLOAD_INDEX, /* rule 1: a payload node's payload = one past the last */
     ODIN3_AST_TEST_LOC,           /* rule 1: loc = UINT32_MAX, beyond every buffer */
     ODIN3_AST_TEST_LOC_ORDER,     /* rule 1: loc and end swap (needs 0 < loc < end) */
-    ODIN3_AST_TEST_COUNT,         /* rule 2: nchild drops by one (needs a child) */
+    ODIN3_AST_TEST_COUNT,         /* rule 2: nchild drops by one (needs no tail entries, or the
+                                     tail at its minimum, so a count rule breaks) */
     ODIN3_AST_TEST_MANDATORY,     /* rule 2: the first mandatory slot becomes 0 */
     ODIN3_AST_TEST_TAIL_ZERO,     /* rule 2: the first tail entry becomes 0 */
     ODIN3_AST_TEST_CHILD_ABOVE,   /* rule 2: the first non-zero child becomes arg (≥ id) */
-    ODIN3_AST_TEST_CHILD_SHARED,  /* rule 3: the first non-zero child becomes arg (< id) */
+    ODIN3_AST_TEST_CHILD_SHARED,  /* rule 3: the first non-zero child becomes arg (< id, not that
+                                     child): rule 3 when arg is in another span, else rule 5
+                                     when it changes the height */
     ODIN3_AST_TEST_NAME_MISSING,  /* rule 4: a named node loses its name */
     ODIN3_AST_TEST_NAME_BAD,      /* rule 4: name = the strtab's count (no such string) */
     ODIN3_AST_TEST_NAME_EXTRA,    /* rule 4: a kind without names gets name arg */
@@ -49,6 +52,21 @@ typedef enum odin3_ast_test_fault {
     ODIN3_AST_TEST_FORM,          /* rule 7: the store's form becomes ELABORATED (no id) */
     ODIN3_AST_TEST_SYMBOL_SCOPE,  /* rule 8: symbol id's scope = one past the last scope */
     ODIN3_AST_TEST_SYMBOL_NAME,   /* rule 8: symbol id's name becomes arg (the map disagrees) */
+    ODIN3_AST_TEST_SPAN_OUT,      /* rule 2: a node with children: its span starts at the end
+                                     of the child table */
+    ODIN3_AST_TEST_PAYLOAD_CHILDREN, /* rule 1: a payload node gets nchild 1 */
+    ODIN3_AST_TEST_END,              /* rule 1: end = UINT32_MAX, beyond every buffer */
+    ODIN3_AST_TEST_NOT_SYSTEM,       /* rule 2: a CALL/TASK_CALL loses SYSTEM (needs a 0 tail
+                                        entry, which then lies outside E*0) */
+    ODIN3_AST_TEST_NUMBER_BIT,       /* rule 6: NUMBER id's bit 0 becomes 4 (not 0 1 x z) */
+    ODIN3_AST_TEST_NUMBER_EMPTY,     /* rule 6: NUMBER id's nbits = 0 */
+    ODIN3_AST_TEST_NUMBER_WIDE,      /* rule 6: NUMBER id's width = the cap + 1 */
+    ODIN3_AST_TEST_NUMBER_QUESTION,  /* rule 6: NUMBER id (no z bit) gains has_question */
+    ODIN3_AST_TEST_ATTR_ENTRY,       /* rule 6: node id's first attribute becomes node arg (an
+                                        existing node that is not an ATTR) */
+    ODIN3_AST_TEST_ATTR_EMPTY,       /* rule 6: node id's attribute count = 0 */
+    ODIN3_AST_TEST_ATTR_KEY,         /* rule 6: node id's attributes move to key arg (an ATTR or
+                                        no node; it has no attributes yet) */
     ODIN3_AST_TEST_FAULT_END
 } odin3_ast_test_fault;
 
@@ -64,7 +82,7 @@ typedef struct odin3_ast_test_target {
  * ODIN3_ERR_INVALID_ARG (logged; nothing changes) when the store is NULL, the fault is unknown
  * or its precondition does not hold (an existing node of the right shape, a symbol table for
  * the rule 8 faults, two comments at different locs for COMMENT_ORDER, an annotated node for
- * ATTR_SPAN); ODIN3_ERR_NO_MEMORY from ATTR_SPAN's map update.
+ * the ATTR_* faults); ODIN3_ERR_NO_MEMORY (nothing changes) from an ATTR_* map update.
  */
 odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target);
 

@@ -6,6 +6,7 @@
 #include "ast/kinds.h"
 #include "ast/symtab.h"
 #include "ir/design.h"
+#include "ir/value.h"
 #include "odin3/odin3.h"
 #include "util/log.h"
 #include "util/pagevec.h"
@@ -123,6 +124,36 @@ static bool loc_fault(odin3_ast *ast, odin3_ast_test_target target) {
     return true;
 }
 
+/* SPAN_OUT, PAYLOAD_CHILDREN, END, NOT_SYSTEM: record fields the builder never writes so. */
+static bool record_fault(odin3_ast *ast, odin3_ast_test_target target) {
+    odin3_ast_node *rec = node_at(ast, target.id);
+    const odin3_ast_kind_info *info = info_of(rec);
+    if (info == NULL) {
+        return false;
+    }
+    bool payload = info->payload != ODIN3_AST_PAYLOAD_NONE;
+    switch (target.fault) {
+    case ODIN3_AST_TEST_SPAN_OUT:
+        if (payload || rec->nchild == 0) {
+            return false;
+        }
+        rec->child = (uint32_t)ast->children.len;
+        return true;
+    case ODIN3_AST_TEST_PAYLOAD_CHILDREN:
+        rec->nchild = payload ? 1 : rec->nchild;
+        return payload;
+    case ODIN3_AST_TEST_END:
+        rec->end = UINT32_MAX;
+        return true;
+    default: /* NOT_SYSTEM */
+        if (info->tail_zero == 0 || (rec->flags & info->tail_zero) == 0) {
+            return false;
+        }
+        rec->flags = (uint16_t)(rec->flags & ~info->tail_zero);
+        return true;
+    }
+}
+
 /* The first child index the fault applies to, or UINT32_MAX. */
 static uint32_t pick_child(const odin3_ast *ast, const odin3_ast_node *rec,
                            odin3_ast_test_fault fault) {
@@ -159,14 +190,20 @@ static bool child_fault(odin3_ast *ast, odin3_ast_test_target target) {
         return false;
     }
     if (target.fault == ODIN3_AST_TEST_COUNT) {
-        if (rec->nchild == 0) {
+        const odin3_ast_kind_info *info = info_of(rec);
+        bool at_min = info->tail == ODIN3_AST_CLS_NONE ||
+                      (uint64_t)rec->nchild == (uint64_t)info->nslots + info->tail_min;
+        if (rec->nchild == 0 || !at_min) {
             return false;
         }
         rec->nchild--;
+        rec->child = rec->nchild == 0 ? 0 : rec->child; /* as the builder stores an empty span */
         return true;
     }
     uint32_t idx = pick_child(ast, rec, target.fault);
-    if (idx == UINT32_MAX || !arg_ok(ast, target)) {
+    if (idx == UINT32_MAX || !arg_ok(ast, target) ||
+        (target.fault == ODIN3_AST_TEST_CHILD_SHARED &&
+         child_slot(ast, rec, idx)->v == target.arg)) {
         return false;
     }
     bool zero =
@@ -176,6 +213,31 @@ static bool child_fault(odin3_ast *ast, odin3_ast_test_target target) {
 }
 
 /* --- table and store faults ----------------------------------------------------------------- */
+
+static bool number_fault(odin3_ast_number *num, odin3_ast_test_fault fault) {
+    switch (fault) {
+    case ODIN3_AST_TEST_NUMBER_XZ:
+        num->has_xz = !num->has_xz;
+        return true;
+    case ODIN3_AST_TEST_NUMBER_BIT:
+        ((uint8_t *)num->bits)[0] = ODIN3_BIT_Z + 1; /* the arena bits are writable */
+        return true;
+    case ODIN3_AST_TEST_NUMBER_EMPTY:
+        num->nbits = 0;
+        return true;
+    case ODIN3_AST_TEST_NUMBER_WIDE:
+        num->width = ODIN3_AST_MAX_NUMBER_BITS + 1;
+        return true;
+    default: /* NUMBER_QUESTION */
+        for (uint32_t i = 0; i < num->nbits; i++) {
+            if (num->bits[i] == ODIN3_BIT_Z) {
+                return false;
+            }
+        }
+        num->has_question = true;
+        return true;
+    }
+}
 
 static bool table_fault(odin3_ast *ast, odin3_ast_test_target target) {
     if (target.fault == ODIN3_AST_TEST_COMMENT_ORDER) {
@@ -200,18 +262,40 @@ static bool table_fault(odin3_ast *ast, odin3_ast_test_target target) {
         return false;
     }
     odin3_ast_number *num = (odin3_ast_number *)pay->u.number; /* the arena record is writable */
-    num->has_xz = !num->has_xz;
-    return true;
+    return number_fault(num, target.fault);
 }
 
-static odin3_status attr_span_fault(odin3_ast *ast, uint32_t id) {
+static odin3_status attr_fault(odin3_ast *ast, odin3_ast_test_target target) {
     uint64_t span = 0;
-    if (ast->attrs == NULL || !odin3_u64map_get(ast->attrs, id, &span)) {
+    if (ast->attrs == NULL || !odin3_u64map_get(ast->attrs, target.id, &span)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    uint64_t count = ast->children.len + 1;
-    return odin3_u64map_put(ast->attrs,
-                            (odin3_kv){id, (count << ATTR_COUNT_SHIFT) | (uint32_t)span});
+    uint32_t start = (uint32_t)span;
+    const odin3_ast_node *arg = node_at(ast, target.arg);
+    switch (target.fault) {
+    case ODIN3_AST_TEST_ATTR_SPAN:
+        return odin3_u64map_put(
+            ast->attrs,
+            (odin3_kv){target.id, ((uint64_t)ast->children.len + 1) << ATTR_COUNT_SHIFT | start});
+    case ODIN3_AST_TEST_ATTR_EMPTY:
+        return odin3_u64map_put(ast->attrs, (odin3_kv){target.id, start});
+    case ODIN3_AST_TEST_ATTR_ENTRY:
+        if (arg == NULL || arg->kind == ODIN3_AST_ATTR) {
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        ((odin3_ast_id *)ast->children.data)[start].v = target.arg;
+        return ODIN3_OK;
+    default: /* ATTR_KEY: put the new key first, so a failure changes nothing */
+        if ((arg != NULL && arg->kind != ODIN3_AST_ATTR) ||
+            odin3_u64map_get(ast->attrs, target.arg, NULL)) {
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        odin3_status st = odin3_u64map_put(ast->attrs, (odin3_kv){target.arg, span});
+        if (st == ODIN3_OK) {
+            (void)odin3_u64map_remove(ast->attrs, target.id);
+        }
+        return st;
+    }
 }
 
 static bool symbol_fault(odin3_ast *ast, odin3_ast_test_target target) {
@@ -261,6 +345,14 @@ static const fault_fn FAULTS[ODIN3_AST_TEST_FAULT_END] = {
     [ODIN3_AST_TEST_FORM] = store_fault,
     [ODIN3_AST_TEST_SYMBOL_SCOPE] = symbol_fault,
     [ODIN3_AST_TEST_SYMBOL_NAME] = symbol_fault,
+    [ODIN3_AST_TEST_SPAN_OUT] = record_fault,
+    [ODIN3_AST_TEST_PAYLOAD_CHILDREN] = record_fault,
+    [ODIN3_AST_TEST_END] = record_fault,
+    [ODIN3_AST_TEST_NOT_SYSTEM] = record_fault,
+    [ODIN3_AST_TEST_NUMBER_BIT] = table_fault,
+    [ODIN3_AST_TEST_NUMBER_EMPTY] = table_fault,
+    [ODIN3_AST_TEST_NUMBER_WIDE] = table_fault,
+    [ODIN3_AST_TEST_NUMBER_QUESTION] = table_fault,
 };
 
 odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target) {
@@ -269,11 +361,11 @@ odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target
         odin3_log(ODIN3_LOG_ERROR, "odin3_ast_test_corrupt: NULL store or unknown fault");
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (target.fault == ODIN3_AST_TEST_ATTR_SPAN) {
-        odin3_status st = attr_span_fault(ast, target.id);
+    if (target.fault >= ODIN3_AST_TEST_ATTR_ENTRY || target.fault == ODIN3_AST_TEST_ATTR_SPAN) {
+        odin3_status st = attr_fault(ast, target);
         if (st == ODIN3_ERR_INVALID_ARG) {
-            odin3_log(ODIN3_LOG_ERROR, "odin3_ast_test_corrupt: node %u has no attributes",
-                      (unsigned)target.id);
+            odin3_log(ODIN3_LOG_ERROR, "odin3_ast_test_corrupt: precondition of fault %d fails",
+                      (int)target.fault);
         }
         return st;
     }

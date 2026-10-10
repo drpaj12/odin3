@@ -81,6 +81,10 @@ static bool one_declarator(const odin3_ast_checker *cx, odin3_ast_id port) {
            odin3_ast_nchild(cx->ast, port) == odin3_ast_slot_count(ODIN3_AST_PORT_DECL) + 1;
 }
 
+static bool not_port_decl(const odin3_ast_checker *cx, odin3_ast_id item) {
+    return odin3_ast_kind_of(cx->ast, item) != ODIN3_AST_PORT_DECL;
+}
+
 /* The entries of the LIST in slot idx of the current node. */
 static odin3_ast_span list_in_slot(const odin3_ast_checker *cx, uint32_t idx) {
     odin3_ast_id list = odin3_ast_check_kid(cx, cx->id, idx);
@@ -170,10 +174,14 @@ static void check_forms(odin3_ast_checker *cx) {
         if (rec->name == 0) {
             fail(cx, "unnamed GEN_BLOCK in the elaborated form");
         }
+        each_entry(cx, tail_from(cx, odin3_ast_slot_count(ODIN3_AST_GEN_BLOCK)), not_port_decl,
+                   "PORT_DECL outside the port LIST (ports are ANSI)");
         break;
     case ODIN3_AST_MODULE:
         each_entry(cx, list_in_slot(cx, 1), one_declarator,
                    "a port PORT_DECL must have exactly one DECLARATOR");
+        each_entry(cx, tail_from(cx, odin3_ast_slot_count(ODIN3_AST_MODULE)), not_port_decl,
+                   "PORT_DECL outside the port LIST (ports are ANSI)");
         break;
     case ODIN3_AST_ALWAYS:
         check_always(cx);

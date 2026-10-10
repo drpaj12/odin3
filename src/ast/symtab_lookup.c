@@ -178,6 +178,8 @@ void odin3_symtab_remap(odin3_symtab *st, odin3_module_id module, const odin3_co
 
 /* --- check rule 8 -------------------------------------------------------------------------- */
 
+enum { CHECK_SHOWN = 10 };
+
 typedef struct check_ctx {
     const odin3_symtab *st;
     uint32_t node_end;  /* the checked AST's end */
@@ -188,8 +190,9 @@ typedef struct check_ctx {
 
 /* Logs one violation as "ast check: rule 8: <label> <id>: <what>" (label scope, symbol, symtab). */
 static void bad(check_ctx *cx, const char *label, uint32_t id, const char *what) {
-    odin3_log(ODIN3_LOG_ERROR, "ast check: rule 8: %s %" PRIu32 ": %s", label, id, what);
-    cx->errors++;
+    if (++cx->errors <= CHECK_SHOWN) { /* the per-rule cap of odin3_ast_check */
+        odin3_log(ODIN3_LOG_ERROR, "ast check: rule 8: %s %" PRIu32 ": %s", label, id, what);
+    }
 }
 
 static bool node_in_range(const check_ctx *cx, odin3_ast_id node) {
@@ -349,5 +352,9 @@ odin3_status odin3_symtab_check(const odin3_symtab *st, const odin3_ast *ast) {
         check_symbol(&cx, id, odin3_symbol_get(st, (odin3_sym_id){id}));
     }
     check_maps(&cx);
+    if (cx.errors > CHECK_SHOWN) {
+        odin3_log(ODIN3_LOG_ERROR, "ast check: rule 8: %" PRIu32 " more errors not shown",
+                  cx.errors - CHECK_SHOWN);
+    }
     return cx.errors == 0 ? ODIN3_OK : ODIN3_ERR_CHECK;
 }

@@ -4,7 +4,6 @@
  * through the corruption hook), FAST's rule set, the log cap, misuse and OOM.
  */
 #include "ast/ast.h"
-#include "ast/ast_internal.h"
 #include "ast/ast_test.h"
 #include "ast/check.h"
 #include "ast/kinds.h"
@@ -29,6 +28,9 @@ enum {
     OOM_LIMIT = 64,
     FILE_BYTES = 40,
     MANY_ERRORS = 30,
+    MANY_SYMBOLS = 12,
+    BAD_DT = 6,    /* one past ODIN3_AST_DT_TIME */
+    BAD_DRIVE = 6, /* one past ODIN3_AST_DRIVE_SUPPLY */
 };
 
 static odin3_design *design;
@@ -186,6 +188,10 @@ static odin3_ast_id bit_select(const char *base, const char *index) {
 static odin3_ast_id posedge(const char *clock) {
     odin3_ast_id edge = NODE(EVENT_EXPR, ODIN3_AST_EVENT_EXPR_POSEDGE, ident(clock));
     return NODE(EVENT_CONTROL, 0, NIL, edge);
+}
+
+static odin3_ast_id unit_of_two(odin3_ast_id first, odin3_ast_id second) {
+    return NAMED(UNIT, "f.v", first, second);
 }
 
 static odin3_ast_id unit_of(odin3_ast_id module) {
@@ -385,9 +391,35 @@ static elaborated build_elaborated(void) {
     return out;
 }
 
+static void elab_wrap_item(odin3_ast_id item);
+
+static odin3_ast_id empty_list(void) {
+    return node(ODIN3_AST_LIST, 0, NULL, 0);
+}
+
+static odin3_ast_id null_stmt(void) {
+    return node(ODIN3_AST_NULL_STMT, 0, NULL, 0);
+}
+
+/* assign lhs = rhs; as a module item. */
+static odin3_ast_id assign_item(odin3_ast_id lhs, odin3_ast_id rhs) {
+    return NODE(CONT_ASSIGN, 0, NIL, NIL, NODE(NET_ASSIGN, 0, lhs, rhs));
+}
+
+/* assign w = rhs; inside UNIT[MODULE m] of a fresh ELABORATED store, then FULL fails rule 7
+ * only. rhs is made by the caller after new_store. */
+static void elab_assign_rejected(odin3_ast_id rhs) {
+    elab_wrap_item(assign_item(ident("w"), rhs));
+    expect_only(7);
+}
+
 /* An ELABORATED store holding UNIT[MODULE m[item]]; item is made by the caller first. */
 static void elab_wrap(odin3_ast_id item) {
     unit_of(NAMED(MODULE, "m", NIL, NIL, item));
+}
+
+static void elab_wrap_item(odin3_ast_id item) {
+    elab_wrap(item);
 }
 
 /* --- valid stores -------------------------------------------------------------------------- */
@@ -541,8 +573,7 @@ static void test_rule2_tail_zero_outside_e0(void) {
 
 static void test_rule2_tail_zero_needs_system(void) {
     parsed fix = build_parsed();
-    odin3_ast_node *rec = odin3_pagevec_at(ast->nodes, fix.display.v);
-    rec->flags = 0; /* a user task call: E*, not E*0 */
+    corrupt(ODIN3_AST_TEST_NOT_SYSTEM, fix.display.v, 0); /* a user task call: E*, not E*0 */
     expect_only(2);
 }
 
@@ -736,10 +767,6 @@ static void test_rule7_shapes(void) {
     odin3_ast_id two = make(in, KIDS(NIL, declarator("a", NIL), declarator("b", NIL)), 3);
     unit_of(NAMED(MODULE, "m", NIL, NODE(LIST, 0, two)));
     expect_only(7);
-    new_store(ODIN3_AST_FORM_ELABORATED);
-    elab_wrap(NODE(SEQ_BLOCK, 0, NIL)); /* not an I item: rule 2, and one UNIT is needed too */
-    unit_of(NAMED(MODULE, "n", NIL, NIL));
-    expect_rule(7);
 }
 
 static void test_rule7_form_flip(void) {
@@ -763,6 +790,363 @@ static void test_rule8_map_disagrees(void) {
     elaborated elab = build_elaborated();
     corrupt(ODIN3_AST_TEST_SYMBOL_NAME, elab.sym_w.v, elab.name_y);
     expect_only(8);
+}
+
+/* --- fix round 1: one negative per remaining check line ------------------------------------ */
+
+static void test_rule1_payload_children_and_end(void) {
+    parsed fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_PAYLOAD_CHILDREN, fix.number.v, 0);
+    expect_only(1);
+    expect_text("children on a payload kind");
+    new_store(ODIN3_AST_FORM_PARSED);
+    fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_END, fix.binary.v, 0);
+    expect_only(1);
+    expect_text("end does not decode");
+    assert_ok(ODIN3_CHECK_FAST);
+}
+
+static void test_rule1_dt_fields_and_drive(void) {
+    odin3_ast_spec param = {.kind = ODIN3_AST_PARAM_DECL,
+                            .sub = ODIN3_AST_PARAM_DECL_PARAMETER,
+                            .flags = BAD_DT << ODIN3_AST_F_PARAM_DECL_DT_SHIFT};
+    make(param, KIDS(NIL, declarator("W", dec("1"))), 2);
+    expect_only(1);
+    new_store(ODIN3_AST_FORM_PARSED);
+    odin3_ast_spec func = {.kind = ODIN3_AST_FUNCTION_DECL,
+                           .flags = BAD_DT << ODIN3_AST_F_FUNCTION_DECL_DT_SHIFT,
+                           .name = intern("f")};
+    make(func, KIDS(NIL, empty_list(), empty_list(), null_stmt()), 4);
+    expect_only(1);
+    uint16_t drives[2] = {BAD_DRIVE << ODIN3_AST_F_STRENGTH_S0_SHIFT,
+                          BAD_DRIVE << ODIN3_AST_F_STRENGTH_S1_SHIFT};
+    for (uint32_t i = 0; i < 2; i++) {
+        new_store(ODIN3_AST_FORM_PARSED);
+        make((odin3_ast_spec){.kind = ODIN3_AST_STRENGTH,
+                              .sub = ODIN3_AST_STRENGTH_DRIVE,
+                              .flags = drives[i]},
+             NULL, 0);
+        expect_only(1);
+    }
+}
+
+static void test_rule2_tail_bounds(void) {
+    NODE(UNARY, ODIN3_AST_UNARY_NOT, NODE(UNARY, ODIN3_AST_UNARY_NOT, ident("t"))); /* tallest */
+    odin3_ast_id cat = NODE(CONCAT, 0, ident("a"));
+    corrupt(ODIN3_AST_TEST_COUNT, cat.v, 0); /* CONCAT needs one entry */
+    expect_only(2);
+    expect_text("tail count out of bounds");
+    odin3_ast_id two = NODE(CONCAT, 0, ident("a"), ident("b"));
+    odin3_ast_test_target above_min = {ODIN3_AST_TEST_COUNT, two.v, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, above_min));
+}
+
+static void test_rule2_function_task_block_lists(void) {
+    odin3_ast_id var = NODE(VAR_DECL, ODIN3_AST_VAR_DECL_REG, NIL, declarator("v", NIL));
+    NAMED(FUNCTION_DECL, "f", NIL, NODE(LIST, 0, var), empty_list(), null_stmt());
+    expect_only(2); /* a VAR_DECL among the ports */
+    new_store(ODIN3_AST_FORM_PARSED);
+    odin3_ast_id stmt = NODE(NET_ASSIGN, 0, ident("a"), ident("b"));
+    NAMED(FUNCTION_DECL, "f", NIL, empty_list(), NODE(LIST, 0, stmt), null_stmt());
+    expect_only(2); /* not a declaration among the locals */
+    new_store(ODIN3_AST_FORM_PARSED);
+    NAMED(TASK_DECL, "t", NODE(LIST, 0, ident("p")), empty_list(), null_stmt());
+    expect_only(2);
+    new_store(ODIN3_AST_FORM_PARSED);
+    NAMED(TASK_DECL, "t", empty_list(), NODE(LIST, 0, ident("p")), null_stmt());
+    expect_only(2);
+    new_store(ODIN3_AST_FORM_PARSED);
+    NODE(SEQ_BLOCK, 0, NODE(LIST, 0, NODE(NET_ASSIGN, 0, ident("a"), ident("b"))));
+    expect_only(2);
+    new_store(ODIN3_AST_FORM_PARSED);
+    NODE(PAR_BLOCK, 0, NODE(LIST, 0, ident("a")));
+    expect_only(2);
+}
+
+static void test_rule2_span_outside_table(void) {
+    parsed fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_SPAN_OUT, fix.binary.v, 0);
+    expect_rule(2);
+    expect_text("span outside the child table");
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_ast_check(ast, ODIN3_CHECK_FAST));
+}
+
+static void test_rule2_select_third_slot(void) {
+    NODE(SELECT, ODIN3_AST_SELECT_BIT, ident("a"), dec("1"), dec("0"));
+    expect_only(2);
+    new_store(ODIN3_AST_FORM_PARSED);
+    NODE(SELECT, ODIN3_AST_SELECT_PART_PLUS, ident("a"), dec("1"), NIL);
+    expect_only(2);
+}
+
+static void test_hook_preconditions(void) {
+    parsed fix = build_parsed();
+    odin3_ast_id first = odin3_ast_child(ast, fix.module, 0);
+    odin3_ast_test_target same = {ODIN3_AST_TEST_CHILD_SHARED, fix.module.v, first.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, same));
+    uint32_t attr = odin3_ast_attrs(ast, fix.case_stmt).ids[0].v; /* an ATTR is no corruption */
+    odin3_ast_test_target not_attr = {ODIN3_AST_TEST_ATTR_ENTRY, fix.case_stmt.v, attr};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, not_attr));
+    odin3_ast_test_target taken = {ODIN3_AST_TEST_ATTR_KEY, fix.case_stmt.v, fix.binary.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, taken));
+    odin3_ast_test_target system = {ODIN3_AST_TEST_NOT_SYSTEM, fix.binary.v, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, system));
+    assert_ok(ODIN3_CHECK_FULL); /* nothing changed */
+}
+
+static void test_rule5_depth_cap(void) {
+    odin3_ast_id top = ident("x");
+    for (uint32_t height = 2; height <= ODIN3_AST_MAX_DEPTH; height++) {
+        top = NODE(UNARY, ODIN3_AST_UNARY_MINUS, top);
+    }
+    assert_ok(ODIN3_CHECK_FAST);
+    odin3_ast_id over = NODE(UNARY, ODIN3_AST_UNARY_MINUS, ident("y"));
+    corrupt(ODIN3_AST_TEST_CHILD_SHARED, over.v, top.v); /* height MAX_DEPTH + 1 */
+    expect_only(5);
+    expect_text("height above ODIN3_AST_MAX_DEPTH");
+}
+
+static void test_rule6_number_payloads(void) {
+    odin3_ast_test_fault faults[] = {ODIN3_AST_TEST_NUMBER_BIT, ODIN3_AST_TEST_NUMBER_EMPTY,
+                                     ODIN3_AST_TEST_NUMBER_WIDE, ODIN3_AST_TEST_NUMBER_QUESTION};
+    const char *texts[] = {"bit not 0 1 x z", "without bits", "wider than the cap",
+                           "has_question without a z bit"};
+    for (uint32_t i = 0; i < 4; i++) {
+        new_store(ODIN3_AST_FORM_PARSED);
+        parsed fix = build_parsed();
+        corrupt(faults[i], fix.number.v, 0);
+        expect_only(6);
+        expect_text(texts[i]);
+        assert_ok(ODIN3_CHECK_FAST);
+    }
+    odin3_ast_id with_z = number("4", "'b", "10z1");
+    odin3_ast_test_target has_z = {ODIN3_AST_TEST_NUMBER_QUESTION, with_z.v, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_test_corrupt(ast, has_z));
+}
+
+static void test_rule6_attribute_entries(void) {
+    parsed fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_ATTR_ENTRY, fix.case_stmt.v, fix.binary.v);
+    expect_only(6);
+    expect_text("attribute entry is not an ATTR");
+    new_store(ODIN3_AST_FORM_PARSED);
+    fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_ATTR_EMPTY, fix.case_stmt.v, 0);
+    expect_only(6);
+    expect_text("attribute span outside the child table");
+    new_store(ODIN3_AST_FORM_PARSED);
+    fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_ATTR_KEY, fix.case_stmt.v, odin3_ast_node_end(ast).v);
+    expect_only(6);
+    expect_text("attributes on a missing node or an ATTR");
+}
+
+static void test_rule7_constants(void) {
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_assign_rejected(NODE(REPLICATE, 0, ident("n"), NODE(CONCAT, 0, ident("a"))));
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_assign_rejected(NODE(SELECT, ODIN3_AST_SELECT_PART, ident("a"), ident("m"), dec("0")));
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_assign_rejected(NODE(SELECT, ODIN3_AST_SELECT_PART, ident("a"), dec("3"), ident("l")));
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_assign_rejected(
+        NODE(SELECT, ODIN3_AST_SELECT_PART_PLUS, ident("a"), ident("i"), ident("w")));
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_id varying = NODE(SELECT, ODIN3_AST_SELECT_BIT, ident("g"), ident("i"), NIL);
+    elab_assign_rejected(NODE(HIER_NAME, 0, varying, ident("w")));
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(INITIAL, 0, NODE(REPEAT, 0, ident("n"), null_stmt())));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_id params = NODE(LIST, 0, NAMED(CONNECTION, "W", ident("V")));
+    elab_wrap(NAMED(INSTANTIATION, "leaf", params, NAMED(INSTANCE, "u0", NIL)));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED); /* a part_plus start and a bit index may vary */
+    odin3_ast_id plus = NODE(SELECT, ODIN3_AST_SELECT_PART_PLUS, ident("a"), ident("i"), dec("2"));
+    odin3_ast_id bit = NODE(SELECT, ODIN3_AST_SELECT_BIT, ident("a"), ident("i"), NIL);
+    elab_wrap(assign_item(ident("w"), NODE(CONCAT, 0, plus, bit)));
+    assert_ok(ODIN3_CHECK_FULL);
+}
+
+static void test_rule7_absent_forms(void) {
+    for (uint32_t sub = ODIN3_AST_VAR_DECL_TIME; sub < ODIN3_AST_VAR_DECL_COUNT; sub++) {
+        new_store(ODIN3_AST_FORM_ELABORATED);
+        elab_wrap(NODE(VAR_DECL, (uint8_t)sub, NIL, declarator("t", NIL)));
+        expect_only(7);
+    }
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(PARAM_DECL, ODIN3_AST_PARAM_DECL_SPECPARAM, NIL, declarator("S", dec("1"))));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_spec call = {
+        .kind = ODIN3_AST_TASK_CALL, .flags = ODIN3_AST_F_TASK_CALL_HIER, .name = intern("u.t")};
+    elab_wrap(NODE(INITIAL, 0, make(call, NULL, 0)));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    unit_of(NAMED(MODULE, "m", NIL, NODE(LIST, 0, NAMED(PORT_REF, "a", NIL))));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_spec strong = {.kind = ODIN3_AST_STRENGTH, .sub = ODIN3_AST_STRENGTH_DRIVE};
+    elab_wrap(NODE(NET_DECL, ODIN3_AST_NET_DECL_WIRE, make(strong, NULL, 0), NIL, NIL,
+                   declarator("w", NIL)));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(NET_DECL, ODIN3_AST_NET_DECL_WIRE, NIL, NIL, NODE(DELAY, 0, dec("1")),
+                   declarator("w", NIL)));
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(EVENT_DECL, 0, declarator("e", NIL)));
+    expect_only(7);
+}
+
+static void test_rule7_hierarchy_shapes(void) {
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(ALWAYS, ODIN3_AST_ALWAYS_ALWAYS, NODE(TIMING_STMT, 0, posedge("clk"), NIL)));
+    expect_only(7); /* a TIMING_STMT without its statement */
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_spec in = {.kind = ODIN3_AST_PORT_DECL, .sub = ODIN3_AST_PORT_DECL_INPUT};
+    elab_wrap(make(in, KIDS(NIL, declarator("a", NIL)), 2)); /* a non-ANSI port */
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_id port = make(in, KIDS(NIL, declarator("a", NIL)), 2);
+    elab_wrap(make((odin3_ast_spec){.kind = ODIN3_AST_GEN_BLOCK, .name = intern("g")},
+                   KIDS(NIL, port), 2));
+    expect_only(7);
+}
+
+static void test_rule7_unit_count(void) {
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    NAMED(MODULE, "m", NIL, NIL); /* no UNIT at all */
+    expect_only(7);
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(net("a"));
+    unit_of(NAMED(MODULE, "n", NIL, NIL));
+    expect_only(7);
+}
+
+static void test_rule8_log_cap(void) {
+    elaborated elab = build_elaborated();
+    odin3_symtab *st = odin3_ast_symtab(ast);
+    odin3_scope_id scope = odin3_symbol_get(st, elab.sym_w)->scope;
+    char name[NEEDLE];
+    for (uint32_t i = 0; i < MANY_SYMBOLS; i++) {
+        (void)snprintf(name, sizeof name, "s%u", (unsigned)i);
+        odin3_symbol_spec spec = {.name = intern(name), .scope = scope, .kind = ODIN3_SYM_NET};
+        odin3_sym_id sym = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symbol_new(st, &spec, &sym));
+        corrupt(ODIN3_AST_TEST_SYMBOL_NAME, sym.v, elab.name_y);
+    }
+    expect_only(8);
+    expect_text("more errors not shown");
+}
+
+/* A TEXT-payload node of kind (an opaque construct). */
+static odin3_ast_id text_node(uint8_t kind, const char *name) {
+    odin3_ast_spec spec = {.kind = kind, .name = name != NULL ? intern(name) : 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_ast_text_new(ast, odin3_bytes_cstr("opaque"), &spec.payload));
+    return make(spec, NULL, 0);
+}
+
+static odin3_ast_id gen_body(void) {
+    return NAMED(GEN_BLOCK, "b", NIL);
+}
+
+/* A minimal well-formed module item of an absent kind (index which), for rule 7. */
+static odin3_ast_id absent_item(uint32_t which) {
+    odin3_ast_id init = NODE(BLOCKING_ASSIGN, 0, ident("i"), NIL, dec("0"));
+    switch (which) {
+    case 0:
+        return node(ODIN3_AST_DIRECTIVE, ODIN3_AST_DIRECTIVE_RESETALL, NULL, 0);
+    case 1:
+        return text_node(ODIN3_AST_SPECIFY_BLOCK, NULL);
+    case 2:
+        return node(ODIN3_AST_GENERATE, 0, NULL, 0);
+    case 3:
+        return NODE(GEN_FOR, 0, init, ident("c"),
+                    NODE(BLOCKING_ASSIGN, 0, ident("i"), NIL, dec("1")), gen_body());
+    case 4:
+        return NODE(GEN_IF, 0, ident("c"), gen_body(), NIL);
+    case 5:
+        return NODE(GEN_CASE, 0, ident("c"), NODE(CASE_ITEM, 0, gen_body(), dec("1")));
+    case 6:
+        return NODE(GENVAR_DECL, 0, declarator("i", NIL));
+    case 7:
+        return assign_item(ident("w"), NODE(MINTYPMAX, 0, dec("1"), dec("2"), dec("3")));
+    case 8:
+        return NODE(INITIAL, 0,
+                    NODE(PROC_CONT_ASSIGN, ODIN3_AST_PROC_CONT_ASSIGN_FORCE, ident("a"), dec("1")));
+    case 9:
+        return NODE(INITIAL, 0, NODE(WAIT, 0, ident("c"), NIL));
+    case 10:
+        return NODE(INITIAL, 0, NODE(DISABLE, 0, NODE(HIER_NAME, 0, ident("b"))));
+    case 11:
+        return NODE(INITIAL, 0, NODE(EVENT_TRIGGER, 0, NODE(HIER_NAME, 0, ident("e"))));
+    case 12:
+        return NODE(INITIAL, 0, NODE(FOREVER, 0, null_stmt()));
+    default:
+        return NODE(INITIAL, 0, NODE(PAR_BLOCK, 0, NIL));
+    }
+}
+
+enum { ABSENT_ITEMS = 14 };
+
+static void test_rule7_every_absent_kind(void) {
+    for (uint32_t k = 0; k < ABSENT_ITEMS; k++) {
+        new_store(ODIN3_AST_FORM_ELABORATED);
+        elab_wrap(absent_item(k));
+        expect_only(7);
+        expect_text("kind absent from the elaborated form");
+    }
+    uint8_t unit_kinds[2] = {ODIN3_AST_UDP_DECL, ODIN3_AST_CONFIG_DECL};
+    for (uint32_t i = 0; i < 2; i++) {
+        new_store(ODIN3_AST_FORM_ELABORATED);
+        odin3_ast_id module = NAMED(MODULE, "m", NIL, NIL);
+        unit_of_two(module, text_node(unit_kinds[i], "u"));
+        expect_only(7);
+    }
+}
+
+static void test_rule7_more_constants_and_always(void) {
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    elab_wrap(NODE(NET_DECL, ODIN3_AST_NET_DECL_WIRE, NIL, NODE(RANGE, 0, dec("7"), ident("L")),
+                   NIL, declarator("w", NIL)));
+    expect_only(7); /* a RANGE lsb */
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_id not_timing = NODE(IF, 0, posedge("clk"), null_stmt(), NIL);
+    elab_wrap(NODE(ALWAYS, ODIN3_AST_ALWAYS_ALWAYS, not_timing));
+    expect_rule(7); /* an EVENT_CONTROL where IF wants an E is rule 2 too */
+    expect_text("always is not over");
+    new_store(ODIN3_AST_FORM_ELABORATED);
+    odin3_ast_id delay = NODE(DELAY, 0, dec("1"));
+    elab_wrap(NODE(ALWAYS, ODIN3_AST_ALWAYS_ALWAYS, NODE(TIMING_STMT, 0, delay, null_stmt())));
+    expect_rule(7); /* DELAY is absent too */
+    expect_text("always is not over");
+}
+
+static void test_rule2_hier_number_and_param_list(void) {
+    NODE(HIER_NAME, 0, dec("1"), ident("w"));
+    expect_only(2);
+    new_store(ODIN3_AST_FORM_PARSED);
+    unit_of(NAMED(MODULE, "m", NODE(LIST, 0, net("n")), NIL));
+    expect_only(2);
+}
+
+static void test_rule4_payload_and_corrupt_span_names(void) {
+    parsed fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_NAME_EXTRA, fix.number.v, intern("x"));
+    expect_only(4);
+    new_store(ODIN3_AST_FORM_PARSED);
+    odin3_ast_id str = named(ODIN3_AST_STRING, "s", NULL, 0);
+    corrupt(ODIN3_AST_TEST_NAME_MISSING, str.v, 0);
+    expect_only(4);
+    new_store(ODIN3_AST_FORM_PARSED);
+    fix = build_parsed();
+    corrupt(ODIN3_AST_TEST_SPAN_OUT, fix.module.v, 0);
+    corrupt(ODIN3_AST_TEST_NAME_MISSING, fix.module.v, 0);
+    expect_rule(4);
 }
 
 /* --- FAST, the log cap, OOM ---------------------------------------------------------------- */
@@ -809,8 +1193,7 @@ static void test_oom(void) {
     TEST_ASSERT_TRUE(fail > 0 && fail < OOM_LIMIT);
 }
 
-int main(void) {
-    UNITY_BEGIN();
+static void run_first_half(void) {
     RUN_TEST(test_valid_parsed_module);
     RUN_TEST(test_valid_elaborated_module);
     RUN_TEST(test_empty_store);
@@ -842,6 +1225,9 @@ int main(void) {
     RUN_TEST(test_rule4_name_rules);
     RUN_TEST(test_rule5_wrong_height);
     RUN_TEST(test_rule6_unsorted_comments);
+}
+
+static void run_second_half(void) {
     RUN_TEST(test_rule6_bad_attribute_span);
     RUN_TEST(test_rule6_number_has_xz);
     RUN_TEST(test_rule7_defparam);
@@ -852,8 +1238,33 @@ int main(void) {
     RUN_TEST(test_rule7_form_flip);
     RUN_TEST(test_rule8_symbol_scope);
     RUN_TEST(test_rule8_map_disagrees);
+    RUN_TEST(test_rule1_payload_children_and_end);
+    RUN_TEST(test_rule1_dt_fields_and_drive);
+    RUN_TEST(test_rule2_tail_bounds);
+    RUN_TEST(test_rule2_function_task_block_lists);
+    RUN_TEST(test_rule2_span_outside_table);
+    RUN_TEST(test_rule2_select_third_slot);
+    RUN_TEST(test_hook_preconditions);
+    RUN_TEST(test_rule5_depth_cap);
+    RUN_TEST(test_rule6_number_payloads);
+    RUN_TEST(test_rule6_attribute_entries);
+    RUN_TEST(test_rule7_constants);
+    RUN_TEST(test_rule7_absent_forms);
+    RUN_TEST(test_rule7_hierarchy_shapes);
+    RUN_TEST(test_rule7_unit_count);
+    RUN_TEST(test_rule8_log_cap);
+    RUN_TEST(test_rule7_every_absent_kind);
+    RUN_TEST(test_rule7_more_constants_and_always);
+    RUN_TEST(test_rule2_hier_number_and_param_list);
+    RUN_TEST(test_rule4_payload_and_corrupt_span_names);
     RUN_TEST(test_fast_skips_full_rules);
     RUN_TEST(test_log_cap);
     RUN_TEST(test_oom);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    run_first_half();
+    run_second_half();
     return UNITY_END();
 }

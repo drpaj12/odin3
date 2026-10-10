@@ -17,13 +17,15 @@
  * FULL runs all eight (rule 6's comment order only after finish, rule 7 only on an ELABORATED
  * store, rule 8 only when odin3_ast_symtab(ast) is non-NULL). Each violation is logged at
  * ODIN3_LOG_ERROR as "ast check: rule <n>: <kind> <id>: <what>" (<kind> a node kind name, or
- * node / payload / comment / attrs / store / scope / symbol / symtab); per rule the first few
- * are shown and the rest summed in one line. Rule 3's count of unreachable non-root nodes (an
- * abandoned subtree's root, an unattached ATTR) is logged at ODIN3_LOG_INFO, never an error.
- * ODIN3_ERR_CHECK when any rule is violated; ODIN3_ERR_NO_MEMORY when the scratch arrays (4 bytes
- * per node, plus 1 under FULL) or the design's source manager cannot be allocated (nothing is
- * logged as a violation then); ODIN3_ERR_INVALID_ARG (logged) for a NULL store or a level outside
- * its enum. Never changes the store; iterative (one forward sweep over node IDs, AST-5).
+ * node / comment / attrs / store / ATTR / scope / symbol / symtab); per rule the first few
+ * are shown and the rest summed in one line. Rule 6's NUMBER and attribute-span parts run
+ * before finish too (stricter than §10's "after finish"; the builder keeps them true). Rule 3's
+ * count of unreachable non-root nodes (an abandoned subtree's root, an unattached ATTR) is logged
+ * at ODIN3_LOG_INFO, never an error. ODIN3_ERR_CHECK when any rule is violated; ODIN3_ERR_NO_MEMORY
+ * when the scratch arrays (4 bytes per node, plus 1 under FULL) or the design's source manager
+ * cannot be allocated (nothing is logged as a violation then); ODIN3_ERR_INVALID_ARG (logged) for a
+ * NULL store or a level outside its enum. Never changes the store; iterative (one forward sweep
+ * over node IDs, AST-5).
  */
 odin3_status odin3_ast_check(const odin3_ast *ast, odin3_check_level level);
 
