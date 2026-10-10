@@ -81,7 +81,7 @@ ODIN3_EXPORT odin3_status odin3_prov_visit_objects(const odin3_design *design, c
     if (ix == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_srcloc loc = {file_str, line, 0, 0, 0};
+    odin3_srcloc loc = {file_str, line, 0, 0, 0, 0};
     odin3_prov_hits hits = odin3_prov_index_by_loc(ix, loc);
     for (uint32_t i = 0; i < hits.count; i++) {
         const odin3_prov_hit *hit = &hits.hits[i];

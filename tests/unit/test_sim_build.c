@@ -447,7 +447,7 @@ static void test_loop_through_latch_is_rejected(void) {
 static void test_black_box_is_rejected_with_location(void) {
     odin3_pass_ctx ctx = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("reader"), &ctx));
-    odin3_srcloc loc = {intern("in.blif"), 7, 1, 7, 9};
+    odin3_srcloc loc = {intern("in.blif"), 7, 1, 7, 9, 0};
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     odin3_prov_id prov = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &origin, &prov));
