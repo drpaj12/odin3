@@ -56,7 +56,7 @@ Seven PRs, as spec §18:
 | PR | Branch | Base | Tasks | Waits for |
 |---|---|---|---|---|
 | 2D-1 IR | `feat/2D-ir` | `origin/main` now | 1–6 | **Nothing; Tasks 1–3 can start before 2C lands.** Details below the table. |
-| 2D-2 constants | `feat/2D-ceval` | `origin/main` now | 7–9 | Nothing for Tasks 7–8 (hand-built trees). Task 9's interpreter tests parse with 2C-1's `vt_parse` and its function grammar, so rebase onto `main` after 2C-1 merges, before Task 9. |
+| 2D-2 constants | `feat/2D-const` | `origin/main` now | 7–9 | Nothing for Tasks 7–8 (hand-built trees). Task 9's interpreter tests parse with 2C-1's `vt_parse` and its function grammar, so rebase onto `main` after 2C-1 merges, before Task 9. |
 | 2D-3 hierarchy | `feat/2D-hier` | `main` after 2C-2 and 2D-2 | 10–13 | 2C-2 merged (`odin3_read_verilog_files`, the pass, `elab.h`/`elab_stub.c`, `odin3_ast_library_units_from`, `run-reject`). Stage 1 never touches the IR, and the ABI stays v4 (point (c)), so 2D-1 is **not** required, nor is 2B-3. |
 | 2D-4 stage-1 content | `feat/2D-content` | `main` after 2D-3 | 14–16 | 2D-3 |
 | 2D-5 stage-2 module | `feat/2D-stage2` | `main` after 2D-1 and 2D-4 | 17–20 | 2D-1 (cells, ports, `write_rtlil`, the 0.55 CMake block) and 2D-4. 2B-3 only for the `--elab-only` + `--project` sugar (conflict note 9). |
@@ -265,14 +265,17 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 
   Of §14.6's items, 2D owns item 1 (x kept explicit, asserted by Task 18's `$shiftx` and wildcard `===`, and Tasks 21–22's x constant pins). Item 2 is 2F's; items 3–5 are 2H's.
 - (n) **Memory and sweeps** (WSL rule; ruling I12).
-  - Every child a sweep driver starts (odin3, Yosys, equiv-check, `bench_elab`) runs through `tools/elab-check/memcap.py` under `systemd-run --user --scope -q -p MemoryMax=<cap> -p MemorySwapMax=0`. This holds for ASan binaries too (verified working here).
+  - *Amended (2E/2F plans v2; controller ruling C1).* Every sweep runs through `tools/heavy-run` (2E plan point (p); created by 2E-1 Task 2, or identically by 2D-7 if it lands first). `heavy-run` takes `/tmp/claude-1000/odin3-heavy.lock` exclusively and starts the job in the named slice `odin3-heavy.slice` (MemoryMax=6G, MemorySwapMax=0), exporting `ODIN3_HEAVY_SLICE`.
+  - Every child a sweep driver starts (odin3, Yosys, equiv-check, `bench_elab`) runs through `tools/elab-check/memcap.py` under `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE -p MemoryMax=<cap> -p MemorySwapMax=0`, so the slice bounds the job and all its children together. Never a bare nested `--scope`: it lands in `app.slice`, outside the cap. Without `ODIN3_HEAVY_SLICE` (an ad hoc run), a child gets its own scope as before. This holds for ASan binaries too.
   - When `systemd-run --user` is unavailable: a Release child runs under `prlimit --as=<cap>`, and an ASan child makes the driver exit 77 (skip).
-  - `--jobs J` is refused when `J × cap` exceeds 60% of `MemTotal`. Defaults: J = 1, cap 4 GiB; `lenet.v` and its Yosys run get 8 GiB alone.
+  - `--jobs J` is refused when `J × cap` exceeds 60% of `MemTotal`, or exceeds the slice's MemoryMax inside a slice. Defaults: J = 1, cap 4 GiB; `lenet.v`'s Odin III child gets 5 GiB, alone, in the 6G slice.
+  - *Amended (ruling C1).* A run needing more than 6 GB carries the CTest label `sweep-xl` instead of `sweep`. That is every Yosys-side run on `lenet.v` (≈ 7 GB), so `elab_equiv_vtr`'s lenet leg becomes `elab_equiv_vtr_xl`. It runs through `tools/heavy-run --xl` in `odin3-heavy-xl.slice` (MemoryMax=9G, MemorySwapMax=0), with an 8 GiB child cap. The controller starts it by hand, only when no agent is running (Peter's rule), by exporting `ODIN3_HEAVY_XL_OK=1`.
+  - *Amended (ruling C1).* Every build takes the same lock shared, `flock -s /tmp/claude-1000/odin3-heavy.lock cmake --build …`, so no heavy run overlaps a build in any worktree.
   - A child killed by its cap is reported `out of memory (cap N)`, never retried in parallel.
   - Heavy sweeps carry the CTest label `sweep` and `RUN_SERIAL TRUE`:
     - `elab_coverage_equiv`, `verilog_micro_elab`, `elab_equiv_micro`, `verilog_vtr_elab`, `elab_equiv_vtr`, `elab_gen_vs_yosys`, `elab_const_diff` and `bench_elab_smoke`;
     - any ASan run touching `lenet.v`.
-  - `CMakePresets.json`'s `debug` and `release` test presets exclude `sweep` (`"filter": {"exclude": {"label": "sweep"}}`), so the `-j4` gate never runs them. A new `sweep` test preset (configure `release`, `"filter": {"include": {"label": "sweep"}}`, `"execution": {"jobs": 1}`) runs them. A `sweep` **workflow** preset (schema v6) runs configure `release` → build `release` → test `sweep`, so `cmake --workflow --preset sweep` builds its own Release binaries first (review R5).
+  - `CMakePresets.json`'s `debug` and `release` test presets exclude `sweep` and `sweep-xl` (`"filter": {"exclude": {"label": "sweep|sweep-xl"}}`), so the `-j4` gate never runs them; a heavy CTest reached anyway skips (exit 77) without `ODIN3_HEAVY_OK=1`. A new `sweep` test preset (configure `release`, `"filter": {"include": {"label": "^sweep$"}}`, `"execution": {"jobs": 1}`, `"environment": {"ODIN3_HEAVY_OK": "1"}`) runs them. A `sweep-xl` test preset (the same with `"include": {"label": "sweep-xl"}}`) runs the xl tests; `ODIN3_HEAVY_XL_OK` is never in a preset. Every heavy CTest is registered through `odin3_add_sweep_test()` (2E-1 Task 2). A `sweep` **workflow** preset (schema v6) runs configure `release` → build `release` → test `sweep`, so `cmake --workflow --preset sweep` builds its own Release binaries first (review R5).
   - The 64 VTR files (31 `verilog/*.v` + 33 `koios/*.v`) are one set, sorted by size together: `lenet.v` is last and `mcml.v` falls where its size puts it. Every runner says smallest first.
 - (o) **Micro `--top`** (EL-7, ruling 6) is the first `.model` of `~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`, read by `tools/elab-check/micro-top`.
 - (p) **Yosys 0.55 discovery** (Task 5 creates the block). `find_program(ODIN3_YOSYS055 yosys HINTS $ENV{VTR_ROOT}/build/bin $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin NO_DEFAULT_PATH)`, and `yosys -V` must contain `Yosys 0.55`. Without it no 0.55 CTest is registered: CI has none, so they run locally and nightly. 0.69 is the existing `ODIN3_YOSYS`, used only by the nightly drift job. Every generated table and golden records `yosys -V` in its header.
@@ -1607,11 +1610,12 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `odin3_status odin3_pg_stmt(odin3_pg *pg, odin3_ast_id stmt);` dispatches a statement through an explicit frame stack.
   - `typedef struct odin3_pg_assign_req { odin3_ast_id stmt, lhs; const odin3_sig *rhs; bool blocking; } odin3_pg_assign_req;`
   - `odin3_status odin3_pg_assign(odin3_pg *pg, const odin3_pg_assign_req *req);` (step 5)
+  - **Chunks** (spec v4.2, EL-35 steps 1, 3–5; amended with the 2E/2F plans v2, ruling I7). Every action the generator emits is one action per chunk of its left side, sorted, as Yosys's `addChunkActions` does: root defaults, sync actions and user assignments. A chunk is a maximal run of consecutive bits of one variable. Temporaries are grouped by the same chunks. Cost: one O(outputs) grouping per block.
   - `uint32_t odin3_pg_save(const odin3_pg *pg);` and `void odin3_pg_restore(odin3_pg *pg, uint32_t mark);` (the undo log)
   - `odin3_status odin3_pg_temp(odin3_pg *pg, uint32_t width, odin3_ast_id why, odin3_net_id *first);` makes fresh process-local nets.
   - `odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *out);` runs step 7:
     - renumber cases, switches and actions breadth-first into point (e)'s canonical layout (the builder may allocate);
-    - `O` pins and then `I` pins in net-ID order, constants as `I` pins on the shared constant nets;
+    - `O` pins and then `I` pins in net-ID order, constants as `I` pins on the shared constant nets, ordered by net ID among the other `I` pins (2E's decode→encode identity relies on this order);
     - the driver-table claim for every `O` net, dropping the actions of conflicting bits;
     - one `odin3_node_create_connected`, whose type is `odin3_elab2_type_id(e2, ODIN3_E2T_PROC)` from the stage-2 cache (review R6);
     - the `always`'s attributes on the node (`ODIN3_OBJ_NODE`).
@@ -1638,6 +1642,11 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `O` = [`r`, `t`, t0(`r`), t0(`t`)];
   - root actions `O3 ← I1`, `O2 ← I1`, in that order;
   - one `POSEDGE I0` sync with `O0 ← O2`, `O1 ← O3`.
+- **Chunks (v4.2).**
+  - `reg a, b; always @(posedge c) {a, b} <= {x, y};` → two sync actions (`a ← t0(a)`, `b ← t0(b)`), two root actions, and two `t0` groups, one per variable.
+  - `reg [7:0] q; always @(posedge c) q <= d8;` → one 8-bit sync action and one 8-bit root action, not eight 1-bit ones.
+  - `always @(posedge c) q[3:0] <= d4;` on 8-bit `q` → actions on the chunk `q[3:0]` only; the write splits at the chunk boundary.
+  - A constant `I` pin (`r <= 1'b0` beside `a`) sits at its net-ID position among the `I` pins.
 
   That is two outputs (§14.1). The `$and` has A=`a`, B=`b`.
 - **T8.** `r1 <= a; r2 <= r1;` gives `I` = [`clk`, `a`], `O` = [`r1`, `r2`, t0(`r1`), t0(`r2`)], root `O2 ← I1`, `O3 ← O0` (the held value, §8.1 N6), and the sync updating both.
@@ -1681,7 +1690,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 
 **Produces:**
 - `odin3_status odin3_pg_if(odin3_pg *pg, odin3_ast_id stmt);` and `odin3_status odin3_pg_case(odin3_pg *pg, odin3_ast_id stmt);` implement EL-36:
-  - case temporaries t1 for bits the branches assign by blocking assignment, with `lv`/`rv` saved and restored around each case;
+  - case temporaries t1 for bits the branches assign by blocking assignment, with `lv`/`rv` saved and restored around each case. Per v4.2 (EL-36; ruling I7), t1 is grouped by chunks, and every entry, default and exit action is one action per chunk;
   - the added default case (`t1 ← rv(bits)`, or x under `full_case`);
   - `casez`/`casex` `ANY` positions;
   - non-constant item expressions (C8) generated as compare signals;
@@ -1711,6 +1720,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 - **Nesting (internal risk §16 #3).** `if (a) begin y = 1; if (b) y = 2; end` → nested switches, each with its own t1, and outer state restored after the inner one.
 - **Variable-index write.** `always @(posedge c) y[s] <= d;` (`y` `[3:0]`, `s` 2 bits) → position temporary `p ← s`; a switch on `p` with cases `2'00`…`2'11`, each [`t0(y)[k] ← d`]; no default.
 - **Indexed part-select write.** `y[b +: 2] <= d2` (`b` 2 bits) → cases for positions 0–2 only.
+- **Chunks (v4.2).** `reg [7:0] y; always @* case (s) 2'd0: y = a8; 2'd1: y = b8; default: y = c8; endcase` → each case's `t1 ← …` is one 8-bit action, and so are the added default and the exit. The result is one 8-bit `$pmux` after `proc`, not eight 1-bit ones.
 - **Ascending target.** An ascending `[0:3]` target maps positions by EL-23.
 - **Bridge.** CTest `elab_case_bridge`: each test source passes `elab-equiv`.
 - OOM sweep.
