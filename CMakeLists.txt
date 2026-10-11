@@ -5,6 +5,18 @@ project(odin3 VERSION 0.0.0 LANGUAGES C)
 option(ODIN3_WITH_ABC "Build third_party/abc (abc executable now; libabc linked from Phase 3)" ON)
 option(ODIN3_SANITIZE "Build Odin III targets with ASan + UBSan" OFF)
 option(ODIN3_WERROR "Treat warnings as errors in Odin III targets" ON)
+# libFuzzer harnesses (tests/fuzz): clang only, in a build directory of their own
+# (cmake -S . -B build/fuzz -DCMAKE_C_COMPILER=clang -DODIN3_FUZZ=ON). Every Odin III target is
+# instrumented for coverage and built with ASan + UBSan.
+option(ODIN3_FUZZ "Build the libFuzzer harnesses in tests/fuzz (clang only; implies ODIN3_SANITIZE)"
+       OFF)
+if(ODIN3_FUZZ)
+    if(NOT CMAKE_C_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "ODIN3_FUZZ needs clang's libFuzzer: configure with "
+                            "-DCMAKE_C_COMPILER=clang")
+    endif()
+    set(ODIN3_SANITIZE ON)
+endif()
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_STANDARD 17)
@@ -27,6 +39,9 @@ if(ODIN3_SANITIZE)
     target_compile_options(odin3_flags INTERFACE
         -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
     target_link_options(odin3_flags INTERFACE -fsanitize=address,undefined)
+endif()
+if(ODIN3_FUZZ)
+    target_compile_options(odin3_flags INTERFACE -fsanitize=fuzzer-no-link)
 endif()
 
 # --- libodin3: the shared library behind include/odin3/odin3.h -----------------
@@ -230,6 +245,15 @@ add_executable(bench_pp tests/bench/bench_pp.c)
 target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
 
+# --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
+if(ODIN3_FUZZ)
+    # tests/fuzz/fuzz_pp.c: the preprocessor's crash fuzzer (2B §10.5).
+    add_executable(fuzz_pp tests/fuzz/fuzz_pp.c)
+    target_include_directories(fuzz_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_pp PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_pp PRIVATE -fsanitize=fuzzer)
+endif()
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
@@ -323,6 +347,12 @@ if(BUILD_TESTING)
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
     odin3_add_pp_test(test_pp_limits)
     odin3_add_pp_test(test_pp_mixed)
+    # 2B §10.5 properties: a file without directives is its own output; re-preprocessing an
+    # output gives the same tokens (micros, probes and seeded random files).
+    odin3_add_pp_test(test_pp_props)
+    target_compile_definitions(test_pp_props PRIVATE
+        ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
+        ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE
@@ -529,6 +559,39 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py compare
                 --odin3 $<TARGET_FILE:odin3>)
     set_tests_properties(project_corpus PROPERTIES LABELS tools)
+    # 2B §10.5: model-based fuzzing of the preprocessor through `preprocess --segments`
+    # (1,000 seeded cases here; run 100,000 locally with --cases), and the files-read property
+    # over the corpus's Phase 2 positive cases.
+    add_test(NAME pp_fuzz
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/pp-fuzz/pp_fuzz.py run
+                --odin3 $<TARGET_FILE:odin3> --seed 1 --cases 1000)
+    set_tests_properties(pp_fuzz PROPERTIES LABELS tools)
+    add_test(NAME pp_properties
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_pp_properties
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(pp_properties PROPERTIES LABELS tools)
+
+    if(ODIN3_FUZZ)
+        # A 10 s smoke run of fuzz_pp from the micros and the reviewer's probes (each seed after
+        # a zero options byte, written by `pp-fuzz seeds`); long runs are local. One worker,
+        # 2 GB RSS (the caps are lowered so every input fits).
+        set(_fuzz_seeds ${PROJECT_BINARY_DIR}/fuzz_pp_seeds)
+        set(_fuzz_corpus ${PROJECT_BINARY_DIR}/fuzz_pp_corpus)
+        file(MAKE_DIRECTORY ${_fuzz_corpus})
+        add_test(NAME fuzz_pp_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/pp-fuzz/pp_fuzz.py seeds
+                    ${_fuzz_seeds} ${PROJECT_SOURCE_DIR}/tests/micro/verilog/preprocessor
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes)
+        set_tests_properties(fuzz_pp_seeds PROPERTIES FIXTURES_SETUP fuzz_pp_seeds LABELS fuzz)
+        add_test(NAME fuzz_pp_smoke
+            COMMAND fuzz_pp -max_total_time=10 -timeout=10 -rss_limit_mb=2048
+                    -dict=${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_pp.dict -print_final_stats=1
+                    ${_fuzz_corpus} ${_fuzz_seeds})
+        set_tests_properties(fuzz_pp_smoke PROPERTIES FIXTURES_REQUIRED fuzz_pp_seeds
+                             LABELS fuzz TIMEOUT 120)
+    endif()
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")
