@@ -139,10 +139,11 @@ typedef struct odin3_proc_widths {
 /*
  * Checks body against the port widths (IR-19): every §8.1 rule (indices in range, a tree using
  * every case, switch and action exactly once, no compares on the root case, compare and signal
- * widths, lhs and rhs widths, lhs only OUT positions and none twice in one lhs, ANY only in
- * compares, sync signals, every OUT position assigned somewhere), the canonical layout and point
- * (h) (an edge or level sync may be on an OUT position). ODIN3_OK, or ODIN3_ERR_INVALID_ARG with
- * the first violation in *why (may be NULL), e.g. "action 0: lhs and rhs widths differ (1, 2)".
+ * widths, lhs and rhs widths, no empty action, lhs only OUT positions and none twice in one lhs,
+ * ANY only in compares, sync signals, every OUT position assigned somewhere), the canonical layout
+ * and point (h) (an edge or level sync may be on an OUT position). ODIN3_OK, or
+ * ODIN3_ERR_INVALID_ARG with the first violation in *why (may be NULL), e.g. "action 0: lhs and
+ * rhs widths differ (1, 2)".
  *
  * Never allocates (2D plan review I3), so out of memory can never be mistaken for a bad body. It
  * runs in time linear in the body plus O_WIDTH, times ceil(O_WIDTH / 8192) for the "assigned" check
@@ -160,6 +161,15 @@ bool odin3_design_has_processes(const odin3_design *design);
 
 /* The first module in creation order with a process; none (ID 0) when there is none. */
 odin3_module_id odin3_design_first_proc_module(const odin3_design *design);
+
+/*
+ * The refusal of a design that still has processes (2D EL-33): ODIN3_OK when no module has one;
+ * otherwise logs "pass '<pass>': module '<m>' has processes; run proc first" (the pass manager,
+ * for a REFUSE pass) or, with pass NULL, "module '<m>' has processes; run proc first" (a writer
+ * called directly), naming odin3_design_first_proc_module, and returns ODIN3_ERR_INVALID_ARG.
+ * O(modules); NULL design is ODIN3_OK (the caller reports it).
+ */
+odin3_status odin3_design_refuse_processes(const odin3_design *design, const char *pass);
 
 /*
  * Appends the RTLIL sigspec of n nets given LSB first (plan point (s)), as the body printer and
@@ -194,8 +204,10 @@ odin3_status odin3_proc_value_text(const odin3_design *design, const odin3_value
  * attribute \parallel_case 1, then switch, case <compares separated by " , ">, the case's body,
  * end); the syncs (sync posedge|negedge|low|high <signal>, or sync always) with their update lines;
  * then end. Each position is the net on its pin, spelled by odin3_proc_sigspec. No recursion.
- * ODIN3_ERR_INVALID_ARG (logged) when node is not a live node of a type with ODIN3_CT_PROCESS or
- * its body fails odin3_proc_body_verify; ODIN3_ERR_NO_MEMORY; out is unchanged on failure.
+ * ODIN3_ERR_INVALID_ARG (logged) when node is not a live node of a type with ODIN3_CT_PROCESS,
+ * its body fails odin3_proc_body_verify, or a position is on an unconnected pin ("proc_print: node
+ * N: position IN|k is on an unconnected pin"; spelled as none it would read as the wildcard '-');
+ * ODIN3_ERR_NO_MEMORY; out is unchanged on failure.
  */
 odin3_status odin3_proc_print(const odin3_module *module, odin3_node_id node, uint32_t indent,
                               odin3_strbuf *out);

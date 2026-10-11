@@ -356,7 +356,8 @@ in IR-3, IR-4, IR-6, IR-15 or check rule 4 changes.
 - **`verify`** (run by check rule 5, FAST and FULL, as for any type): `I_WIDTH` and `O_WIDTH` in
   range, the view, then `odin3_proc_body_verify`: the canonical layout; every span inside the
   position array; `IN | k` with k < `I_WIDTH` and `OUT | k` with k < `O_WIDTH`; no compares on the
-  root case; each compare as wide as its switch's signal; an action's two sides equally wide; an lhs
+  root case; each compare as wide as its switch's signal; an action's two sides equally wide and
+  not empty (Task 3 review M3; a switch signal may be empty, as 2E's `clean` leaves it); an lhs
   of `OUT` positions only, none twice in one lhs; `ANY` only in compares (and with no index bits); a
   switch's flags only the two; a sync's type one of the five, and its signal one `IN` or `OUT`
   position for edge and level types (an `OUT` position is a block clocked by a net it assigns,
@@ -376,14 +377,20 @@ in IR-3, IR-4, IR-6, IR-15 or check rule 4 changes.
   (IR-6; about 0.05 GB on lenet.v after `proc`, accepted for history: 2D re-review N7). The `always`
   block's attributes are the node's (`ODIN3_OBJ_NODE`); a switch's are its two flags.
 - **Passes.** A pass that may meet a process must treat a `$proc` node as opaque (no constant
-  propagation or CSE through it; its `O` pins are drivers like any cell's). The pass manager keeps
-  every other pass away from a design with processes through the passes' `processes` flag (2D
-  EL-33).
+  propagation or CSE through it; its `O` pins drive unknown values, its `I` pins read). Each pass
+  declares it through its `processes` flag (2D EL-33; mode P since 2D spec v4.2): `OK` passes
+  (readers, `check`, `stats`, `compact`, `hierarchy`, `proc`, `write_rtlil`, `write_verilog_ast`,
+  the project passes and the eight opt passes of 2F) may run on a design with processes;
+  `opt_muxtree` and `opt_clean` skip a module that still has any. The pass manager refuses every
+  `REFUSE` pass (`flatten`, `lower`, `abc`, `sim`, the netlist writers) on such a design before it
+  runs, and the netlist writers refuse it themselves when called directly (`docs/PASSES.md`,
+  "Processes").
 - **RTLIL spelling** (2D spec §13; plan points (r), (s)). `odin3_proc_sigspec` spells nets LSB
   first in, MSB first out: constants and `ANY` merge into `<n>'<bits>`, consecutive bits of a named
   wire into `\w [hi:lo]` (a whole wire `\w`, one bit `\w [k]`), another net is `\name` or `$n<ID>`,
   several chunks go in `{ … }`. `odin3_proc_print` writes a node as an RTLIL `process` block named
-  `$proc$<file>:<line>$<ID>` from its SOURCE record (else `$proc$<ID>`), its attributes first. The
+  `$proc$<file>:<line>$<ID>` from its SOURCE record (else `$proc$<ID>`), its attributes first; a
+  position on an unconnected pin fails the print rather than read as `-` (Task 3 review M1). The
   body printer, `write_rtlil` and the ABI's text of `BODY` share these, so one text serves every
   test.
 

@@ -169,6 +169,11 @@ static bool reserved_clear(const odin3_plugin_pass *pass) {
     return true;
 }
 
+/* The pass's processes value (2D EL-33): NULL, as plugins built before the slot pass, is REFUSE. */
+static uint8_t processes_of(const odin3_plugin_pass *pass) {
+    return pass->processes != NULL ? *pass->processes : (uint8_t)ODIN3_PASS_PROCESSES_REFUSE;
+}
+
 /* A heap copy of pass for the manager (odin3_util_free); NULL on out of memory. */
 static plugin_pass *copy_pass(const odin3_plugin_pass *pass) {
     size_t name_len = strlen(pass->name) + 1;
@@ -179,7 +184,8 @@ static plugin_pass *copy_pass(const odin3_plugin_pass *pass) {
     }
     memcpy(copy->text, pass->name, name_len);
     memcpy(copy->text + name_len, pass->help, help_len);
-    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run, copy, false};
+    copy->def = (odin3_pass_def){copy->text, copy->text + name_len, plugin_run, copy,
+                                 false,      processes_of(pass)};
     copy->run = pass->run;
     copy->user = pass->user;
     return copy;
@@ -192,6 +198,11 @@ ODIN3_EXPORT odin3_status odin3_pass_register(const odin3_plugin_pass *pass) {
     if (!reserved_clear(pass)) {
         odin3_log(ODIN3_LOG_ERROR, "%s: pass '%s': reserved slot is set (built for a later ABI?)",
                   __func__, pass->name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (processes_of(pass) > ODIN3_PASS_PROCESSES_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: pass '%s': processes must be 0 (REFUSE) or 1 (OK), not %u",
+                  __func__, pass->name, (unsigned)processes_of(pass));
         return ODIN3_ERR_INVALID_ARG;
     }
     plugin_pass *copy = copy_pass(pass);

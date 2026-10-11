@@ -333,16 +333,29 @@ odin3_status odin3_script_resolve_file(const char *path);
 typedef odin3_status (*odin3_pass_run_fn)(odin3_design *design, const char *args, void *user);
 
 /*
+ * Whether a pass may run on a design that still has processes ($proc nodes, before `proc`; 2D
+ * EL-33). REFUSE (the default) makes the pass manager fail the pass without running it, logging
+ * "pass '<name>': module '<m>' has processes; run proc first" (ODIN3_ERR_INVALID_ARG). OK lets it
+ * run; such a pass must then treat every $proc node as opaque (no constant propagation or CSE
+ * through it; its O pins drive unknown values, its I pins read).
+ */
+enum { ODIN3_PASS_PROCESSES_REFUSE = 0, ODIN3_PASS_PROCESSES_OK = 1 };
+
+/*
  * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';', '#' or '"'
  * (a script word); help: its one-line usage, shown by `odin3 --help`; run: its body; user:
- * passed to run as is. reserved: must be all NULL (later ABI versions give the slots a meaning).
+ * passed to run as is. processes: NULL (ODIN3_PASS_PROCESSES_REFUSE, what a plugin built before
+ * this slot had a meaning passes) or the address of ODIN3_PASS_PROCESSES_REFUSE or _OK, read once
+ * at registration (the plugin need not keep it). reserved: must be all NULL (later ABI versions
+ * give the slots a meaning). The layout is the one of four reserved slots: processes was the first.
  */
 typedef struct odin3_plugin_pass {
     const char *name;
     const char *help;
     odin3_pass_run_fn run;
     void *user;
-    void *reserved[4];
+    const uint8_t *processes;
+    void *reserved[3];
 } odin3_plugin_pass;
 
 /*
@@ -351,8 +364,10 @@ typedef struct odin3_plugin_pass {
  * provenance run, with the IR checked before and after (Debug builds, or odin3_pass_set_check),
  * timed and logged. name and help are copied; user must stay valid while the pass can run.
  * ODIN3_ERR_INVALID_ARG (logged) for a NULL pass, name, help or run, a bad name, a name already
- * registered (built-in or not) or a reserved slot that is not NULL; ODIN3_ERR_NO_MEMORY. Nothing
- * is registered on failure. Process-wide; not thread-safe; a pass cannot be unregistered.
+ * registered (built-in or not), a processes value above ODIN3_PASS_PROCESSES_OK or a reserved
+ * slot that is not NULL; ODIN3_ERR_NO_MEMORY. Nothing is registered on failure. A pass whose
+ * processes is NULL or REFUSE is refused on a design with processes (see
+ * ODIN3_PASS_PROCESSES_REFUSE). Process-wide; not thread-safe; a pass cannot be unregistered.
  */
 odin3_status odin3_pass_register(const odin3_plugin_pass *pass);
 

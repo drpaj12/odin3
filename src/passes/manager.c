@@ -5,6 +5,7 @@
 
 #include "ir/check.h"
 #include "ir/design.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
@@ -88,6 +89,12 @@ static bool name_ok(const char *name) {
 odin3_status odin3_pass_register_def(const odin3_pass_def *def) {
     if (def == NULL || def->run == NULL || def->help == NULL || !name_ok(def->name)) {
         odin3_log(ODIN3_LOG_ERROR, "pass_register: NULL definition, run or help, or a bad name");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (def->processes > ODIN3_PASS_PROCESSES_OK) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "pass_register: pass '%s': processes must be 0 (REFUSE) or 1 (OK), not %u",
+                  def->name, (unsigned)def->processes);
         return ODIN3_ERR_INVALID_ARG;
     }
     if (odin3_pass_find(odin3_bytes_cstr(def->name)) != NULL) {
@@ -174,8 +181,15 @@ static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
     double start = now_ms();
     odin3_design_set_diag_paths(design, g_options.diag_paths); /* PRJ-18 --diag-paths */
+    /* 2D EL-33: a REFUSE pass never meets a process; refused before its pass run opens. */
+    odin3_status st = def->processes == ODIN3_PASS_PROCESSES_OK
+                          ? ODIN3_OK
+                          : odin3_design_refuse_processes(design, def->name);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     odin3_pass_ctx ctx = {0};
-    odin3_status st = open_run(design, def->name, &ctx);
+    st = open_run(design, def->name, &ctx);
     if (st != ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "pass %s: cannot open its provenance run: %s", def->name,
                   odin3_status_string(st));

@@ -6,6 +6,7 @@
 #include "ast/ast.h"
 #include "ast/print.h"
 #include "ast/srcman.h"
+#include "ast/symtab.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -225,13 +226,31 @@ static odin3_status check_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     return odin3_check_design(design, opts);
 }
 
+/* After module was compacted: every held store's symbol table follows its wire renumbering (EL-2:
+ * a symbol's ir_wire is module-local). */
+static void remap_symtabs(const odin3_design *design, odin3_module_id module,
+                          const odin3_compact_map *map) {
+    for (uint32_t i = 0; i < odin3_design_ast_count(design); i++) {
+        odin3_symtab *st = odin3_ast_symtab(odin3_design_ast_at(design, i));
+        if (st != NULL) {
+            odin3_symtab_remap(st, module, map);
+        }
+    }
+}
+
 static odin3_status compact_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                 void *user) {
     (void)user;
     (void)ctx;
     odin3_status st = no_args("compact", args);
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = odin3_module_compact(odin3_module_get(design, (odin3_module_id){i}), NULL);
+        odin3_module_id id = {i};
+        odin3_compact_map map = {0};
+        st = odin3_module_compact(odin3_module_get(design, id), &map);
+        if (st == ODIN3_OK) {
+            remap_symtabs(design, id, &map);
+        }
+        odin3_compact_map_free(&map);
     }
     return st;
 }
@@ -508,34 +527,51 @@ static odin3_status write_verilog_ast_run(odin3_pass_ctx *ctx, odin3_design *des
 /* --- the table ------------------------------------------------------------------------------- */
 
 static const odin3_pass_def READ_BLIF = {
-    "read_blif", "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
-    read_blif_run, NULL, false};
+    "read_blif",   "read_blif <file>: read a BLIF netlist into an empty design (first model = top)",
+    read_blif_run, NULL,
+    false,         ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def READ_TECHLIB = {
     "read_techlib",
     "read_techlib <file>: read a tech library (.o3lib); its cells become cell types of the design",
-    read_techlib_run, NULL, false};
+    read_techlib_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def WRITE_BLIF = {
-    "write_blif", "write_blif <file>: write the design as BLIF (the top module first)",
-    write_blif_run, NULL, false};
+    "write_blif",   "write_blif <file>: write the design as BLIF (the top module first)",
+    write_blif_run, NULL,
+    false,          ODIN3_PASS_PROCESSES_REFUSE};
 static const odin3_pass_def CHECK = {
-    "check", "check [--fast]: check the IR invariants (IR.md section 9)", check_run, NULL, false};
+    "check",   "check [--fast]: check the IR invariants (IR.md section 9)",
+    check_run, NULL,
+    false,     ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def COMPACT = {
     "compact",
     "compact: renumber each module densely, freeing dead objects (IR-6; atomic per module only)",
-    compact_run, NULL, false};
+    compact_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def STATS = {
-    "stats", "stats: log modules, top, and per module ports/nodes/nets/wires and cell types",
-    stats_run, NULL, false};
+    "stats",   "stats: log modules, top, and per module ports/nodes/nets/wires and cell types",
+    stats_run, NULL,
+    false,     ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def HIERARCHY = {
     "hierarchy",
     "hierarchy [--top <name>] [-auto]: set the top module (named, or the one no module "
     "instantiates)",
-    hierarchy_run, NULL, false};
+    hierarchy_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def WRITE_VERILOG_AST = {
     "write_verilog_ast",
     "write_verilog_ast <file>: print the ASTs the latest read kept (parsed, then elaborated) as "
     "Verilog",
-    write_verilog_ast_run, NULL, true};
+    write_verilog_ast_run,
+    NULL,
+    true,
+    ODIN3_PASS_PROCESSES_OK};
 
 /* Registry order. */
 const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,

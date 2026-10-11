@@ -298,7 +298,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 ## 6. Pass pipeline (forward)
 
 1. `read_*` → AST, symbol table
-2. `elaborate` → word-level IR with processes: each process is a `$proc` node (`docs/IR.md` IR-19). `proc` runs before `opt`; the pass manager enforces that order through each pass's `processes` flag (2D EL-33)
+2. `elaborate` → word-level IR with processes: each process is a `$proc` node (`docs/IR.md` IR-19). The pass manager enforces the order through each pass's `processes` flag (2D EL-33, mode P since 2D spec v4.2): a `REFUSE` pass (`flatten`, `lower`, `abc`, `sim` and the netlist writers) fails on a design that still has processes (`pass '<name>': module '<m>' has processes; run proc first`), so `proc` runs before them. The opt family is `OK` and may run before `proc`, as Parmys runs `opt_expr; opt_clean; opt -nodffe -nosdff` (2F OP-3): `$proc` stays opaque to it, and `opt_muxtree`/`opt_clean` skip a module that still has processes
 3. `proc` — predicate-tracked lowering of `always` blocks to mux trees + `$dff*`; blocking/non-blocking analysis; latch detection (warn)
 4. `opt` — constant folding, dead-node removal, CSE, algebraic simplification on arithmetic, mux collapsing (Odin I)
 5. `fsm_detect`, `fsm_recode` (one-hot by default; AST-assisted as in Odin II)

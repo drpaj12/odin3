@@ -557,6 +557,9 @@ static odin3_status lhs_unique(vctx *ctx, uint32_t idx) {
 static odin3_status check_action(vctx *ctx, uint32_t idx) {
     const odin3_proc_action *act = &ctx->body->actions[idx];
     owner who = {"action", idx};
+    if (act->lhs.len == 0) {
+        return fail(ctx, "action %u: empty", idx); /* Task 3 review M3: it would say nothing */
+    }
     odin3_status st = check_span(ctx, who, "lhs", act->lhs);
     if (st == ODIN3_OK) {
         st = check_span(ctx, who, "rhs", act->rhs);
@@ -675,6 +678,23 @@ odin3_module_id odin3_design_first_proc_module(const odin3_design *design) {
 
 bool odin3_design_has_processes(const odin3_design *design) {
     return odin3_module_valid(odin3_design_first_proc_module(design));
+}
+
+odin3_status odin3_design_refuse_processes(const odin3_design *design, const char *pass) {
+    odin3_module_id first = odin3_design_first_proc_module(design);
+    if (!odin3_module_valid(first)) {
+        return ODIN3_OK;
+    }
+    const odin3_module *const *slot =
+        (const odin3_module *const *)odin3_vec_cat(&design->modules, first.v);
+    const char *name = odin3_strtab_get(design->strtab, (*slot)->name);
+    if (pass != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "pass '%s': module '%s' has processes; run proc first", pass,
+                  name);
+    } else {
+        odin3_log(ODIN3_LOG_ERROR, "module '%s' has processes; run proc first", name);
+    }
+    return ODIN3_ERR_INVALID_ARG;
 }
 
 /* --- RTLIL text ---------------------------------------------------------------------------- */
@@ -988,16 +1008,24 @@ static void pr_indent(proc_printer *pr, uint32_t indent) {
     }
 }
 
-static odin3_net_id pbit_net(const proc_printer *pr, odin3_pbit pbit) {
+/*
+ * The net at a position; none for ANY. A position on an unconnected pin fails the print (Task 3
+ * review M1): spelled as none it would read as the wildcard '-'.
+ */
+static odin3_net_id pbit_net(proc_printer *pr, odin3_pbit pbit) {
     uint32_t idx = pbit_index(pbit);
-    switch (pbit_tag(pbit)) {
-    case ODIN3_PBIT_IN:
-        return odin3_pin_net(pr->module, (odin3_pin_id){pr->in.first.v + idx});
-    case ODIN3_PBIT_OUT:
-        return odin3_pin_net(pr->module, (odin3_pin_id){pr->outs.first.v + idx});
-    default:
+    uint32_t tag = pbit_tag(pbit);
+    if (tag != ODIN3_PBIT_IN && tag != ODIN3_PBIT_OUT) {
         return (odin3_net_id){0}; /* ANY */
     }
+    odin3_pinslice port = tag == ODIN3_PBIT_IN ? pr->in : pr->outs;
+    odin3_net_id net = odin3_pin_net(pr->module, (odin3_pin_id){port.first.v + idx});
+    if (!odin3_net_valid(net) && pr->st == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "proc_print: node %u: position %s|%u is on an unconnected pin",
+                  pr->node.v, tag == ODIN3_PBIT_IN ? "IN" : "OUT", idx);
+        pr->st = ODIN3_ERR_INVALID_ARG;
+    }
+    return net;
 }
 
 static void pr_span(proc_printer *pr, odin3_pspan span) {

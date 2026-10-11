@@ -25,6 +25,14 @@ Built-in passes in Phase 1: `read_blif <path>`, `write_blif <path>`, `read_techl
 summary without a file; docs/PASSES.md has the options). The CLI runs a script: `odin3 [--plugin x.so]… -p "read_blif a.blif;
 check; write_blif b.blif"` or `odin3 script.o3`.
 
+*Amended (2D EL-33, Task 4; 2D spec v4.2 "mode P"):* `odin3_pass_def` gains a last member,
+`uint8_t processes` (`ODIN3_PASS_PROCESSES_REFUSE` = 0 or `ODIN3_PASS_PROCESSES_OK` = 1, public
+in `odin3.h`; registration refuses a larger value). Before a `REFUSE` pass runs, `odin3_pass_run`
+fails it when some module still has a process (`$proc` node), before the pass run is opened, so
+nothing runs and no run or check happens: `pass '<name>': module '<m>' has processes; run proc
+first` (`ODIN3_ERR_INVALID_ARG`, the first such module in creation order). Each built-in's value
+is in `docs/PASSES.md` ("Processes").
+
 ## C ABI v0
 
 Rules: only `odin3_` names; opaque `odin3_design`; IR IDs are plain `uint32_t` in the ABI with
@@ -44,7 +52,12 @@ preprocessor-free. Groups:
 - attributes: get/set string attributes on node/net/wire/module;
 - cell types: register a type from a plain-data definition struct with **reserved hook slots**
   (`void *reserved[4]`, per the 1B final review) so later hooks do not break the ABI;
-- passes: register a pass (plugin `odin3_plugin_init` calls it);
+- passes: register a pass (plugin `odin3_plugin_init` calls it). *Amended (2D EL-33, Task 4):*
+  `odin3_plugin_pass` had `void *reserved[4]`; the first slot is now `const uint8_t *processes`,
+  so the layout is unchanged and the ABI stays v4. NULL (what every plugin built earlier passes)
+  means `REFUSE`; otherwise the byte it points to is read once at registration and must be
+  `ODIN3_PASS_PROCESSES_REFUSE` or `_OK` (else `ODIN3_ERR_INVALID_ARG`, nothing registered). The
+  other three slots stay reserved (NULL);
 - provenance: for an object, visit its source locations (`file`, `line`, `col`) via callback;
   for a `file:line`, visit the objects (module, kind, ID, live) via callback;
 - logging: set level, set sink (forwarded from `util/log`).
