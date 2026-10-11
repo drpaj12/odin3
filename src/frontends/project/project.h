@@ -215,7 +215,7 @@ const char *odin3_proj_err_kind_name(odin3_proj_err_kind kind);
 typedef enum odin3_proj_scope {
     ODIN3_PROJ_LOCATED = 1, /* "file:line:col: error: …" at `at`, with the include chain */
     ODIN3_PROJ_FILE,        /* "<file>: error: …", the file named in the design's style */
-    ODIN3_PROJ_UNLOCATED    /* "odin3: error: …" */
+    ODIN3_PROJ_UNLOCATED    /* "<kind>: …" alone (the default sink prints "odin3: error: ") */
 } odin3_proj_scope;
 
 typedef struct odin3_proj_err {
@@ -232,8 +232,8 @@ typedef struct odin3_proj_err {
  * Emits the error once — "<kind>: <detail>: 'n1', 'n2'" (": <names>" only when there are names;
  * the detail alone when there are none; the names alone when detail is NULL) — through
  * odin3_diag (LOCATED), or odin3_log with "<file>: error: " (FILE; given or resolved path per
- * odin3_design_diag_paths) or "odin3: error: " (UNLOCATED). Allocates nothing (the text is cut at
- * ODIN3_LOG_BUF like any log message). Returns ODIN3_ERR_PARSE.
+ * odin3_design_diag_paths) or alone (UNLOCATED: the log sink supplies "odin3: error: "). Allocates
+ * nothing (the text is cut at ODIN3_LOG_BUF like any log message). Returns ODIN3_ERR_PARSE.
  */
 odin3_status odin3_project_fail(odin3_project *proj, const odin3_proj_err *err);
 
@@ -444,7 +444,7 @@ typedef struct odin3_project_request {
  * NO_MEMORY — each drops the record (odin3_design_drop_project); INVALID_ARG for a NULL req or
  * entry, a format that is neither 0 nor an odin3_proj_format (nothing logged, no record
  * touched), or when the record is already
- * finished (logged "odin3: error: project already read from <entry>"; that record is kept).
+ * finished (logged "project already read from <entry>"; that record is kept).
  */
 odin3_status odin3_project_read(odin3_design *design, const odin3_project_request *req);
 

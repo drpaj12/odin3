@@ -7,6 +7,7 @@
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +17,10 @@ enum { EXIT_OK = 0, EXIT_FAIL = 1, EXIT_USAGE = 2 };
 
 /* A log message the CLI formats itself (odin3_log_write cuts longer ones the same way). */
 enum { MSG_BUF = 1024 };
+
+/* read_project's arguments for a --project or -f path: the path (PATH_MAX on Linux) quoted,
+ * after "--format f ". */
+enum { PROJECT_ARGS_BUF = 4096 + 32 };
 
 static void print_usage(FILE *out) {
     (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
@@ -30,6 +35,12 @@ static void print_usage(FILE *out) {
                 "  --check          check the IR before and after every pass (always in Debug)\n"
                 "  --keep-ast       keep the elaborated AST of every read (write_verilog_ast)\n"
                 "  --keep-ast=all   keep the parsed AST too\n"
+                "  --project FILE   read a project first (read_project FILE, before every script)\n"
+                "  -f LIST          read a file list first (read_project --format f LIST)\n"
+                "  --revision R     the Quartus revision every read_project reads\n"
+                "  --dump-project   write the project record as JSON after the scripts\n"
+                "  --diag-paths given|resolved\n"
+                "                   name files in diagnostics as given (default) or absolute\n"
                 "  -p SCRIPT        run the passes given inline\n"
                 "\n"
                 "passes:\n",
@@ -56,18 +67,28 @@ static int load_plugin(const char *path) {
 
 /* What the first argument scan found. */
 typedef struct cli_state {
-    bool check;          /* --check */
-    const char *top;     /* --top NAME, NULL for none */
-    bool scripts;        /* a -p or a script file is given */
-    bool help;           /* --help: printed after the scan (plugin passes listed), nothing runs */
-    odin3_keep_ast keep; /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
+    bool check;           /* --check */
+    const char *top;      /* --top NAME, NULL for none */
+    const char *revision; /* --revision R, NULL for none */
+    bool resolved;        /* --diag-paths resolved */
+    bool scripts;         /* a -p or a script file is given */
+    bool project;         /* a --project or -f is given */
+    bool dump;            /* --dump-project */
+    bool help;            /* --help: printed after the scan (plugin passes listed), nothing runs */
+    odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
 } cli_state;
+
+/* The options that take a value. */
+static const char *const k_value_options[] = {"--plugin", "--top",      "-p",          "--project",
+                                              "-f",       "--revision", "--diag-paths"};
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
 static bool option_value(char **argv, int argc, int *at, const char **value) {
     const char *arg = argv[*at];
-    bool takes =
-        strcmp(arg, "--plugin") == 0 || strcmp(arg, "--top") == 0 || strcmp(arg, "-p") == 0;
+    bool takes = false;
+    for (size_t i = 0; i < sizeof k_value_options / sizeof k_value_options[0]; i++) {
+        takes |= strcmp(arg, k_value_options[i]) == 0;
+    }
     if (!takes || *at + 1 >= argc) {
         return false;
     }
@@ -76,37 +97,103 @@ static bool option_value(char **argv, int argc, int *at, const char **value) {
     return true;
 }
 
+/* --project FILE or -f LIST. */
+static bool is_project_option(const char *arg) {
+    return strcmp(arg, "--project") == 0 || strcmp(arg, "-f") == 0;
+}
+
 static int usage_error(const char *arg) {
     (void)fprintf(stderr, "odin3: unknown or incomplete argument: %s\n", arg);
     print_usage(stderr);
     return EXIT_USAGE;
 }
 
-/* Handles one option of the first scan (loads plugins, records options). */
-static int scan_one(char **argv, int argc, int *at, cli_state *state) {
-    const char *arg = argv[*at];
-    const char *value = NULL;
+static int bad_value(const char *option, const char *value, const char *why) {
+    (void)fprintf(stderr, "odin3: %s %s: %s\n", option, value, why);
+    print_usage(stderr);
+    return EXIT_USAGE;
+}
+
+/* A flag of the first scan: true when arg is one (recorded in state). */
+static bool scan_flag(const char *arg, cli_state *state) {
     if (strcmp(arg, "--version") == 0) {
         (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
     } else if (strcmp(arg, "--help") == 0) {
         state->help = true;
     } else if (strcmp(arg, "--check") == 0) {
         state->check = true;
+    } else if (strcmp(arg, "--dump-project") == 0) {
+        state->dump = true;
     } else if (strcmp(arg, "--keep-ast") == 0 || strcmp(arg, "--keep-ast=all") == 0) {
         state->keep =
             arg[strlen("--keep-ast")] == '=' ? ODIN3_KEEP_AST_ALL : ODIN3_KEEP_AST_ELABORATED;
-    } else if (option_value(argv, argc, at, &value)) {
-        if (strcmp(arg, "--plugin") == 0) {
-            return load_plugin(value);
-        }
-        state->scripts |= strcmp(arg, "-p") == 0;
-        state->top = strcmp(arg, "--top") == 0 ? value : state->top;
-    } else if (arg[0] == '-') {
-        return usage_error(arg);
     } else {
-        state->scripts = true;
+        return false;
     }
+    return true;
+}
+
+/* An option with its value (loads a plugin, records the rest). */
+static int scan_value(const char *arg, const char *value, cli_state *state) {
+    if (strcmp(arg, "--plugin") == 0) {
+        return load_plugin(value);
+    }
+    if (strcmp(arg, "--diag-paths") == 0) {
+        if (strcmp(value, "given") != 0 && strcmp(value, "resolved") != 0) {
+            return bad_value(arg, value, "expects given or resolved");
+        }
+        state->resolved = strcmp(value, "resolved") == 0;
+    }
+    if (is_project_option(arg) && strchr(value, '"') != NULL) {
+        return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
+    }
+    state->scripts |= strcmp(arg, "-p") == 0;
+    state->project |= is_project_option(arg);
+    state->top = strcmp(arg, "--top") == 0 ? value : state->top;
+    state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
     return EXIT_OK;
+}
+
+/* Handles one option of the first scan (loads plugins, records options). */
+static int scan_one(char **argv, int argc, int *at, cli_state *state) {
+    const char *arg = argv[*at];
+    const char *value = NULL;
+    if (scan_flag(arg, state)) {
+        return EXIT_OK;
+    }
+    if (option_value(argv, argc, at, &value)) {
+        return scan_value(arg, value, state);
+    }
+    if (arg[0] == '-') {
+        return usage_error(arg);
+    }
+    state->scripts = true;
+    return EXIT_OK;
+}
+
+/* read_project on a --project or -f path (PRJ-18: prepended to the scripts). */
+static odin3_status read_project(odin3_design *design, const char *option, const char *path) {
+    char args[PROJECT_ARGS_BUF];
+    int len = snprintf(args, sizeof args, "%s\"%s\"",
+                       strcmp(option, "-f") == 0 ? "--format f " : "", path);
+    if (len < 0 || (size_t)len >= sizeof args) {
+        (void)fprintf(stderr, "odin3: %s %s: path too long\n", option, path);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_design_run_pass(design, "read_project", args);
+}
+
+/* Every --project and -f in command-line order; stops at the first failure. */
+static odin3_status each_project(char **argv, int argc, odin3_design *design) {
+    odin3_status st = ODIN3_OK;
+    for (int i = 1; st == ODIN3_OK && i < argc; i++) {
+        const char *arg = argv[i];
+        const char *value = NULL;
+        if (option_value(argv, argc, &i, &value) && is_project_option(arg)) {
+            st = read_project(design, arg, value);
+        }
+    }
+    return st;
 }
 
 /* The -p or script file at argv[*at] (advancing past an option's value): run on design, or only
@@ -141,21 +228,25 @@ static odin3_status each_script(char **argv, int argc, odin3_design *design) {
 /*
  * A --top that no pass applied is reported, not ignored. read_blif applies it after reading (or
  * fails when the file has no such module), and only read_blif creates modules, so the option was
- * applied exactly when the design has a module of that name; a later `hierarchy --top` may then
- * have chosen another top on purpose, which is not warned about.
+ * applied when the design has a module of that name; a later `hierarchy --top` may then have
+ * chosen another top on purpose, which is not warned about. read_project applies it to the
+ * project's top (PRJ-18), so a project read counts too.
  */
 static void warn_unapplied_top(const odin3_design *design, const char *top) {
     uint32_t id = 0;
-    if (top != NULL && odin3_design_lookup_module(design, top, &id) == ODIN3_OK && id == 0) {
+    if (top != NULL && odin3_design_lookup_module(design, top, &id) == ODIN3_OK && id == 0 &&
+        !odin3_design_has_project(design)) {
         char msg[MSG_BUF];
-        (void)snprintf(msg, sizeof msg, "--top %s was not applied (no read_blif or hierarchy ran)",
+        (void)snprintf(msg, sizeof msg,
+                       "--top %s was not applied (no read_blif, read_project or hierarchy ran)",
                        top);
         (void)odin3_log_write(ODIN3_LOG_WARN, msg);
     }
 }
 
-/* Resolves every -p and script file (a typo anywhere costs nothing), then runs them in
- * command-line order on one design. */
+/* Resolves every -p and script file (a typo anywhere costs nothing), then runs on one design
+ * every --project and -f (read_project), the scripts in command-line order, and dump_project
+ * when --dump-project is given. */
 static int run_scripts(char **argv, int argc, const cli_state *state) {
     if (each_script(argv, argc, NULL) != ODIN3_OK) {
         return EXIT_FAIL;
@@ -167,7 +258,13 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
     }
     odin3_status st = odin3_design_set_keep_ast(design, state->keep);
     if (st == ODIN3_OK) {
+        st = each_project(argv, argc, design);
+    }
+    if (st == ODIN3_OK) {
         st = each_script(argv, argc, design);
+    }
+    if (st == ODIN3_OK && state->dump) {
+        st = odin3_design_run_pass(design, "dump_project", "");
     }
     if (st == ODIN3_OK) {
         warn_unapplied_top(design, state->top);
@@ -187,11 +284,13 @@ int main(int argc, char **argv) {
     if (argc == 1 || state.help) {
         print_usage(stdout);
     }
-    if (!state.scripts || state.help) {
+    if (!(state.scripts || state.project || state.dump) || state.help) {
         return EXIT_OK;
     }
     odin3_pass_set_check(state.check);
-    if (odin3_pass_set_top_name(state.top) != ODIN3_OK) {
+    odin3_pass_set_diag_paths(state.resolved);
+    if (odin3_pass_set_top_name(state.top) != ODIN3_OK ||
+        odin3_pass_set_revision(state.revision) != ODIN3_OK) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }

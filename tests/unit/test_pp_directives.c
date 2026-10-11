@@ -242,7 +242,7 @@ static void test_root_missing_is_located(void) {
     TEST_ASSERT_EQUAL_UINT32(0, stream.stream.v);
     errors = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_at("src/nope.v", path, (odin3_loc){0}));
-    TEST_ASSERT_EQUAL_STRING("odin3: error: missing_file: 'src/nope.v'", captured);
+    TEST_ASSERT_EQUAL_STRING("missing_file: 'src/nope.v'", captured);
 }
 
 /* PRJ-6: a path of the wrong kind is missing. */

@@ -188,7 +188,7 @@ odin3_status odin3_project_fail(odin3_project *proj, const odin3_proj_err *err) 
     } else if (err->scope == ODIN3_PROJ_FILE && err->file != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s: error: %s", file_name(proj, err->file), msg.text);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg.text);
+        odin3_log(ODIN3_LOG_ERROR, "%s", msg.text);
     }
     return ODIN3_ERR_PARSE;
 }
@@ -247,7 +247,7 @@ static odin3_status cannot_read(odin3_project *proj, const odin3_proj_path *file
     if (parent.v != 0) {
         odin3_diag(proj->design, ODIN3_LOG_ERROR, parent, "%s", msg.text);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg.text);
+        odin3_log(ODIN3_LOG_ERROR, "%s", msg.text);
     }
     return bytes->too_big ? ODIN3_ERR_PARSE : ODIN3_ERR_IO;
 }

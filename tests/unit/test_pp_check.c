@@ -417,37 +417,35 @@ static void assert_corrupt(odin3_pp_test_target target, const char *want) {
 
 static void test_corrupt_segment_start(void) {
     assert_corrupt(ODIN3_PP_CORRUPT_SEGMENT_START,
-                   "odin3: error: pp_check: the first segment starts at output offset 1, not 0");
+                   "pp_check: the first segment starts at output offset 1, not 0");
 }
 
 static void test_corrupt_segment_order(void) {
     assert_corrupt(ODIN3_PP_CORRUPT_SEGMENT_ORDER,
-                   "odin3: error: pp_check: segment 1 at output offset 0 does not follow output "
+                   "pp_check: segment 1 at output offset 0 does not follow output "
                    "offset 0");
 }
 
 static void test_corrupt_segment_loc(void) {
     assert_corrupt(ODIN3_PP_CORRUPT_SEGMENT_LOC,
-                   "odin3: error: pp_check: segment 0 has loc 4294967295, which does not decode");
+                   "pp_check: segment 0 has loc 4294967295, which does not decode");
 }
 
 static void test_corrupt_byte(void) {
-    assert_corrupt(ODIN3_PP_CORRUPT_BYTE,
-                   "odin3: error: pp_check: output byte 0 differs from its spelling");
+    assert_corrupt(ODIN3_PP_CORRUPT_BYTE, "pp_check: output byte 0 differs from its spelling");
 }
 
 static void test_corrupt_loc0_blank(void) {
     assert_corrupt(ODIN3_PP_CORRUPT_LOC0_BLANK,
-                   "odin3: error: pp_check: output byte 15 has loc 0 and is not a blank");
+                   "pp_check: output byte 15 has loc 0 and is not a blank");
 }
 
 static void test_corrupt_loc0_alone(void) {
-    assert_corrupt(ODIN3_PP_CORRUPT_LOC0_ALONE,
-                   "odin3: error: pp_check: loc-0 segment 7 is 3 bytes, not 1");
+    assert_corrupt(ODIN3_PP_CORRUPT_LOC0_ALONE, "pp_check: loc-0 segment 7 is 3 bytes, not 1");
 }
 
 static void test_corrupt_reach(void) {
-    assert_corrupt(ODIN3_PP_CORRUPT_REACH, "odin3: error: pp_check: buffer 2 of the run is "
+    assert_corrupt(ODIN3_PP_CORRUPT_REACH, "pp_check: buffer 2 of the run is "
                                            "reached by emitted bytes but from no segment");
 }
 

@@ -149,18 +149,16 @@ static void test_relative_entry(void) {
 
 static void test_entry_errors(void) {
     expect_failure(read_entry("nope.o3proj"), ODIN3_ERR_PARSE,
-                   "odin3: error: missing_file: project not found: 'nope.o3proj'");
+                   "missing_file: project not found: 'nope.o3proj'");
     expect_failure(read_entry(D "/q"), ODIN3_ERR_PARSE,
-                   "odin3: error: missing_file: project not found: '" D "/q'");
+                   "missing_file: project not found: '" D "/q'");
     expect_failure(read_entry(D "/q/ip.qip"), ODIN3_ERR_PARSE,
-                   "odin3: error: unknown_file_type: a .qip is not a project entry: '" D
-                   "/q/ip.qip'");
+                   "unknown_file_type: a .qip is not a project entry: '" D "/q/ip.qip'");
     expect_failure(read_entry(D "/k6.xml"), ODIN3_ERR_PARSE,
-                   "odin3: error: unknown_file_type: no Odin II XML reader yet: '" D "/k6.xml'");
+                   "unknown_file_type: no Odin II XML reader yet: '" D "/k6.xml'");
     odin3_project_request req = {D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2, NULL, NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE,
-                   "odin3: error: unknown_file_type: no Odin II XML reader yet: '" D
-                   "/all.o3proj'");
+                   "unknown_file_type: no Odin II XML reader yet: '" D "/all.o3proj'");
     /* a .qip with --format qsf is read as a .qsf */
     req = (odin3_project_request){D "/q/ip.qip", ODIN3_PROJ_FORMAT_QUARTUS, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
@@ -178,7 +176,7 @@ static void test_entry_errors(void) {
 static void test_revision(void) {
     odin3_project_request req = {D "/all.o3proj", 0, "fast", NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE,
-                   "odin3: error: syntax: --revision needs a .qpf or .qsf entry");
+                   "syntax: --revision needs a .qpf or .qsf entry");
     req = (odin3_project_request){D "/q/proj.qpf", 0, "small", NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("small", str(project()->top));
@@ -186,8 +184,7 @@ static void test_revision(void) {
     TEST_ASSERT_EQUAL_STRING("small", str(project()->revision));
     fresh_design();
     req = (odin3_project_request){D "/q/proj.qpf", 0, "", NULL};
-    expect_failure(read_req(&req), ODIN3_ERR_PARSE,
-                   "odin3: error: unknown_revision: no such revision: ''");
+    expect_failure(read_req(&req), ODIN3_ERR_PARSE, "unknown_revision: no such revision: ''");
     expect_failure(read_entry(D "/q/proj.qpf"), ODIN3_ERR_PARSE,
                    D "/q/proj.qpf:1:1: error: ambiguous_revision: several revisions; choose one "
                      "with --revision: 'fast', 'small'");
@@ -199,7 +196,7 @@ static void test_second_read(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(D "/q/top.qsf"));
     odin3_project *first = project();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, read_entry(D "/all.o3proj"));
-    TEST_ASSERT_EQUAL_STRING("odin3: error: project already read from " D "/q/top.qsf", captured);
+    TEST_ASSERT_EQUAL_STRING("project already read from " D "/q/top.qsf", captured);
     TEST_ASSERT_TRUE(first == project()); /* the first record stays */
     TEST_ASSERT_EQUAL_STRING("top", str(project()->top));
 }
@@ -239,7 +236,7 @@ static void test_top_replaces(void) {
     TEST_ASSERT_EQUAL_INT(0, ninfos);
     fresh_design();
     req = (odin3_project_request){D "/all.o3proj", 0, NULL, "a b"};
-    expect_failure(read_req(&req), ODIN3_ERR_PARSE, "odin3: error: syntax: bad top name: 'a b'");
+    expect_failure(read_req(&req), ODIN3_ERR_PARSE, "syntax: bad top name: 'a b'");
 }
 
 static void test_info_lines(void) {

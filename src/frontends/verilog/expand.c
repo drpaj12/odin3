@@ -452,6 +452,29 @@ static odin3_status push_arg_run(subst *sub, odin3_pp_textrun run, odin3_range f
     return push_run(sub, (odin3_pp_textrun){run.bytes, run.len, odin3_srcman_loc(pp->sm, buf, 0)});
 }
 
+/* A default's text at formal: each spelled run between its comments, and one loc-0 space for
+ * each comment (2A §3.3: a comment in a definition is in no stream; PP-6 for a body's). */
+static odin3_status substitute_default(subst *sub, const odin3_pp_formal *spec,
+                                       odin3_range formal) {
+    uint32_t from = 0;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; i < spec->len && st == ODIN3_OK;) {
+        bool comment = false;
+        uint32_t end = odin3_pp_def_item(spec->text, spec->len, i, &comment);
+        if (comment) {
+            odin3_pp_textrun run = {spec->text + from, i - from, odin3_pp_loc_add(spec->def, from)};
+            st = push_arg_run(sub, run, formal, true);
+            st = st != ODIN3_OK ? st : room(sub);
+            st = st != ODIN3_OK ? st : push_run(sub, (odin3_pp_textrun){&k_space, 1, {0}});
+            from = end;
+        }
+        i = end;
+    }
+    odin3_pp_textrun rest = {spec->text + from, spec->len - from,
+                             odin3_pp_loc_add(spec->def, from)};
+    return st != ODIN3_OK ? st : push_arg_run(sub, rest, formal, true);
+}
+
 /* Formal index's occurrence at formal: the actual's runs as collected, or the default's. */
 static odin3_status substitute(subst *sub, uint32_t index, odin3_range formal) {
     odin3_pp *pp = sub->pp;
@@ -468,7 +491,7 @@ static odin3_status substitute(subst *sub, uint32_t index, odin3_range formal) {
     if (!spec->has_default) {
         return ODIN3_OK; /* an empty actual without a default: empty text (I1) */
     }
-    return push_arg_run(sub, (odin3_pp_textrun){spec->text, spec->len, spec->def}, formal, true);
+    return substitute_default(sub, spec, formal);
 }
 
 /* Index + 1 of the formal named by body bytes [start, end), 0 for none. */

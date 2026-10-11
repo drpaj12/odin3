@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pp-diff: compare odin3's preprocessor with Icarus and Yosys (2B spec §10.4). See pp_diff.py.
+# Exit codes: 0 no undeclared disagreement, 1 a disagreement, 2 usage error, 77 tool absent.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/pp_diff.py" "$@"
