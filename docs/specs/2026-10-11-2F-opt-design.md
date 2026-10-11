@@ -171,6 +171,14 @@ dffunmap; opt -fast -noff; stat; hierarchy -check -auto-top -purge_lib
 write_blif -true + vcc -false + gnd -undef + unconn -blackbox out.blif
 ```
 
+**Why `--top` on one side and `-auto-top` on the other.** 2D elaborates only the modules
+reachable from the top (2D decision 12), and its own automatic top rule differs from Yosys's
+(2D §17 #9), so Odin III must be told the golden's top to elaborate the same hierarchy. Its
+`write_rtlil` output then holds just that tree (plus the `vtr_primitives.v` modules it
+instantiates), whose single root is that top, so Yosys's `hierarchy -check -auto-top -purge_lib`
+picks the same module and purges nothing more; keeping Parmys's spelling there keeps the
+remainder verbatim.
+
 Lines 2a/2b run in Parmys on the *pre-`proc`* cell graph, where a loop through an `always @*` block
 is not yet a cell loop, so they cannot move after `read_rtlil`. 2H runs them as a precondition on
 the source (`read_verilog -nomem2reg vtr_primitives.v; read_verilog -sv -nolatches F; scc -select;
