@@ -397,12 +397,10 @@ static void test_assign_hierarchical_and_mintypmax(void) {
                 "    (IDENT:x @x.v:1:44)))");
 }
 
-/* The lvalue grammar has no operator: the error is at the `+`. ('+' is in no rule until Task 5's
- * operators, so Bison names it "invalid token" for now.) */
+/* The lvalue grammar has no operator (§3.1 d): the error is at the `+`. */
 static void test_assign_to_an_expression_is_a_syntax_error(void) {
-    expect_error(
-        "module m; assign a + b = c; endmodule", ODIN3_ERR_PARSE,
-        "x.v:1:20: error: syntax: unexpected invalid token, expecting '.' or '=' or '['\n");
+    expect_error("module m; assign a + b = c; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:20: error: syntax: unexpected '+', expecting '.' or '=' or '['\n");
 }
 
 /* --- units, directives, opaque bodies ------------------------------------------------------- */

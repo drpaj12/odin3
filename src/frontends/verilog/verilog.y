@@ -97,6 +97,22 @@
  * with its rules (plan point (f)): Task 5 adds %right '?' and the eleven operator lines, Task 6
  * the two dangling-else lines. Nothing else ever gets a precedence (§3.1). ==== */
 
+/* Task 5: 1364-2005 §5.1.2 Table 5-4, lowest first. Every binary operator associates left to
+ * right, `**` included. Unary operators have none: they bind to a primary by the grammar's shape
+ * (A.8.3). ':' has none: ranges, case items and labels use it, so a conflict there surfaces. */
+%right '?'                              /* conditional: the rule's %prec '?' (§3.3)          */
+%left  OR_OR                            /* ||                                                */
+%left  AND_AND                          /* &&                                                */
+%left  '|'                              /* binary |                                          */
+%left  '^' XNOR                         /* ^  ^~  ~^                                         */
+%left  '&'                              /* binary &                                          */
+%left  EQ NE CASE_EQ CASE_NE            /* == != === !==                                     */
+%left  '<' '>' LE GE                    /* < <= > >=                                         */
+%left  SHL SHR ASHL ASHR                /* << >> <<< >>>                                     */
+%left  '+' '-'                          /* binary + -                                        */
+%left  '*' '/' '%'                      /* * / %                                             */
+%left  POW                              /* **                                                */
+
 /* ==== %type: Task 4 (source text, modules, ports, parameters, declarations, items, opaque
  * units, attributes) ==== */
 
@@ -118,9 +134,15 @@
 %type <node> port_entry port_or_empty empty_port port_declarator var_declarator dim_declarator
 %type <node> genvar_declarator param_assign defparam_assign range range_opt strength_opt
 %type <node> drive_strength charge_strength delay_opt delay3 delay_value mintypmax net_assign
-%type <node> lvalue lvalue_concat select attr_spec expression primary number
+%type <node> lvalue lvalue_concat select attr_spec number
 
 /* ==== %type: Task 5 (expressions and primaries) ==== */
+
+/* u: an `expr` (and an operand or argument list) is the mark below the node(s) it left on the
+ * pending stack; an operator's spec (VP_SPEC); a callee's strtab name. node: a made node. */
+%type <u> expr operand unary_op expr_list call_head hier_call_head system_head
+%type <u> sys_args sys_arg sys_empty
+%type <node> expression primary concat
 
 /* ==== %type: Task 6 (statements, timing, functions and tasks, case and metacomments) ==== */
 
@@ -511,16 +533,110 @@ net_assign: lvalue '=' expression      { VP($$, vp_net_assign(ctx, &@$, $1, $3, 
 
 /* ==== A.8 Expressions and primaries — Task 5 ==== */
 
-/* ---- placeholder (Task 4; Task 5 replaces it with the operator grammar) ---- */
+/* ---- A.8.3 expressions (Task 5) ---- */
 
-expression: primary ;
+/* An expression's node. Inside the operator rules an `expr` leaves its node on the pending stack
+ * and its value is the mark below it, so an operator node is made from one pending span:
+ * [left operand] [the operator's ATTRs] [right operands], in source order (plan point (s): a
+ * vp_* takes at most two values; §3.5: attributes follow the operator). */
+expression: expr                       { VP($$, vp_expr(ctx, $1, &$$)); } ;
 
+/* Each binary rule carries its operator token, so the rule has that token's precedence (§3.3);
+ * a unary operator takes a primary only: `- -a` is a syntax error, `-a ** b` is `(-a) ** b`. The
+ * conditional's last terminal is ':', which has no precedence, hence the explicit %prec. */
+expr: operand
+    | unary_op attrs_opt operand       { VP($$, vp_unary(ctx, &@$, $2, $1, &$$)); }
+    | expr OR_OR attrs_opt expr        { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LOR), &$$)); }
+    | expr AND_AND attrs_opt expr      { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LAND), &$$)); }
+    | expr '|' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(OR), &$$)); }
+    | expr '^' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(XOR), &$$)); }
+    | expr XNOR attrs_opt expr         { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(XNOR), &$$)); }
+    | expr '&' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(AND), &$$)); }
+    | expr EQ attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(EQ), &$$)); }
+    | expr NE attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(NE), &$$)); }
+    | expr CASE_EQ attrs_opt expr      { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(CASE_EQ), &$$)); }
+    | expr CASE_NE attrs_opt expr      { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(CASE_NE), &$$)); }
+    | expr '<' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LT), &$$)); }
+    | expr '>' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(GT), &$$)); }
+    | expr LE attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LE), &$$)); }
+    | expr GE attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(GE), &$$)); }
+    | expr SHL attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(SHL), &$$)); }
+    | expr SHR attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(SHR), &$$)); }
+    | expr ASHL attrs_opt expr         { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(ASHL), &$$)); }
+    | expr ASHR attrs_opt expr         { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(ASHR), &$$)); }
+    | expr '+' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(ADD), &$$)); }
+    | expr '-' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(SUB), &$$)); }
+    | expr '*' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(MUL), &$$)); }
+    | expr '/' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(DIV), &$$)); }
+    | expr '%' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(MOD), &$$)); }
+    | expr POW attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(POW), &$$)); }
+    | expr '?' attrs_opt expr ':' expr %prec '?'
+                                       { VP($$, vp_ternary(ctx, &@$, $1, &$$)); }
+    ;
+
+/* UNARY[op] (A.8.6): `^~` lexes as XNOR, so it is stored as `~^`; unary `+` is kept (E4). */
+unary_op: '+'                          { VP($$, vp_value(ctx, VP_UNARY(PLUS), &$$)); }
+        | '-'                          { VP($$, vp_value(ctx, VP_UNARY(MINUS), &$$)); }
+        | '!'                          { VP($$, vp_value(ctx, VP_UNARY(LNOT), &$$)); }
+        | '~'                          { VP($$, vp_value(ctx, VP_UNARY(NOT), &$$)); }
+        | '&'                          { VP($$, vp_value(ctx, VP_UNARY(AND), &$$)); }
+        | NAND                         { VP($$, vp_value(ctx, VP_UNARY(NAND), &$$)); }
+        | '|'                          { VP($$, vp_value(ctx, VP_UNARY(OR), &$$)); }
+        | NOR                          { VP($$, vp_value(ctx, VP_UNARY(NOR), &$$)); }
+        | '^'                          { VP($$, vp_value(ctx, VP_UNARY(XOR), &$$)); }
+        | XNOR                         { VP($$, vp_value(ctx, VP_UNARY(XNOR), &$$)); }
+        ;
+
+/* A primary as an operator operand: its node pushed, the mark below it its value. */
+operand: primary                       { VP($$, vp_list_first(ctx, $1, &$$)); } ;
+
+/* Expressions left on the pending stack in source order; the value is the first one's mark. */
+expr_list: expr
+         | expr_list ',' expr          { VP($$, vp_value(ctx, $1, &$$)); }
+         ;
+
+/* ---- A.8.4 primaries (Task 5) ---- */
+
+/* Parentheses make no node (§3.6). */
 primary: number
        | REAL_NUMBER                   { VP($$, vp_real(ctx, &@1, $1, &$$)); }
        | STRING                        { VP($$, vp_string(ctx, &@1, $1, &$$)); }
        | hier_ref                      { VP($$, vp_hier(ctx, $1, &$$)); }
+       | select
+       | concat
+       | '{' expr concat '}'           { VP($$, vp_replicate(ctx, &@$, $2, $3, &$$)); }
+       | call_head expr_list ')'       { VP($$, vp_call(ctx, $2, &@$, $1, &$$)); }
+       | hier_call_head expr_list ')'  { VP($$, vp_call_hier(ctx, $2, &@$, $1, &$$)); }
+       | SYSTEM_IDENT list_mark        { VP($$, vp_call_system(ctx, $2, &@$, $1, &$$)); }
+       | system_head list_mark ')'     { VP($$, vp_call_system(ctx, $2, &@$, $1, &$$)); }
+       | system_head sys_args ')'      { VP($$, vp_call_system(ctx, $2, &@$, $1, &$$)); }
        | '(' expression ')'            { VP($$, vp_pass(ctx, $2, &$$)); }
        ;
+
+/* CONCAT(E+); a replication's inner list is always a CONCAT (E12, E13). */
+concat: '{' expr_list '}'              { VP($$, vp_concat(ctx, $2, &@$, &$$)); } ;
+
+/* CALL(name; E+) (A.8.2: a user call has at least one argument, none empty, §3.1 j). The callee
+ * is taken from its tokens before any node is made for it: `IDENT (` is decided on the `(`. */
+call_head: IDENT '('                   { VP($$, vp_value(ctx, $1, &$$)); } ;
+
+/* CALL{HIER}: the components as the printer spells them, joined with `.` (§3.6). */
+hier_call_head: hier_ref '.' IDENT '('    { VP($$, vp_hier_call_name(ctx, $1, $3, &$$)); }
+              | hier_index '.' IDENT '('  { VP($$, vp_hier_call_name(ctx, $1, $3, &$$)); }
+              ;
+
+/* CALL{SYSTEM}(name with `$`; E*0): `$time`, `$random()` and `$f(a, , b)` (§3.1 k's list shape:
+ * the first argument may be empty only before a comma; an empty argument is a 0 entry). */
+system_head: SYSTEM_IDENT '('          { VP($$, vp_value(ctx, $1, &$$)); } ;
+
+sys_args: expr
+        | sys_empty ',' sys_arg        { VP($$, vp_value(ctx, $1, &$$)); }
+        | sys_args ',' sys_arg         { VP($$, vp_value(ctx, $1, &$$)); }
+        ;
+
+sys_arg: sys_empty | expr ;
+
+sys_empty: %empty                      { VP($$, vp_push_none(ctx, &$$)); } ;
 
 /* ---- A.8.5 names and lvalues (Task 4; Task 5's primaries reuse them) ---- */
 

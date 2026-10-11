@@ -478,13 +478,14 @@ static void test_end_of_input_with_expected_tokens(void) {
 }
 
 /* Three errors, one per line, each after Bison's three-token window: three diagnostics, no
- * builder misuse, no UNIT. */
+ * builder misuse, no UNIT. (After `0` any binary operator may follow, so Bison names no expected
+ * token at the third.) */
 static void test_recovery_reports_each_item(void) {
     expect_failure(
         "module m;\n  wire a b;\n  wire c d;\n  reg [3:0 r;\nendmodule\n", NULL, ODIN3_ERR_PARSE,
         "x.v:2:10: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or '['\n"
         "x.v:3:10: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or '['\n"
-        "x.v:4:12: error: syntax: unexpected identifier, expecting base or ']'\n");
+        "x.v:4:12: error: syntax: unexpected identifier\n");
     TEST_ASSERT_EQUAL_UINT32(3, captured.errors);
     TEST_ASSERT_EQUAL_UINT32(3, run.errors);
 }

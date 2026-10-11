@@ -320,7 +320,46 @@ odin3_status vp_mintypmax(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *
 odin3_status vp_net_assign(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
                            odin3_ast_id rhs, odin3_ast_id *out);
 
-/* --- Task 5: expressions and primaries (actions_expr.c) ------------------------------------ */
+/* --- Task 5: expressions and primaries (actions_expr.c) ------------------------------------
+ *
+ * Inside the operator grammar an `expr` leaves its node on the pending stack and its value is
+ * the mark below it; an operator's attributes follow its left operand there, so each operator
+ * node is made from one span in source order: [left] [ATTR*] [right…] (the unary operator has
+ * no left). Every function below that yields a mark leaves the new node in the span's place.
+ */
+
+/* An operator's spec: UNARY or BINARY with the sub-kind of its 2A enum name's suffix. */
+#define VP_UNARY(op) VP_SPEC(ODIN3_AST_UNARY, ODIN3_AST_UNARY_##op)
+#define VP_BINARY(op) VP_SPEC(ODIN3_AST_BINARY, ODIN3_AST_BINARY_##op)
+
+/* The node of the one expression pushed from mark (popped). */
+odin3_status vp_expr(odin3_vp_ctx *ctx, uint32_t mark, odin3_ast_id *out);
+/* UNARY[spec] over at from the span at mark: the operator's ATTRs, then the operand. NO_MEMORY;
+ * PARSE (make's caps, located). *out = mark. */
+odin3_status vp_unary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t spec,
+                      uint32_t *out);
+/* BINARY[spec] over at from the span at mark: left, the ATTRs, right. As vp_unary. */
+odin3_status vp_binary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t spec,
+                       uint32_t *out);
+/* TERNARY over at from the span at mark: condition, the `?`'s ATTRs, then and else. As
+ * vp_unary. */
+odin3_status vp_ternary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t *out);
+/* REPLICATE(count, concat) over at: the count is the expression pushed from mark. */
+odin3_status vp_replicate(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
+                          odin3_ast_id concat, odin3_ast_id *out);
+/* CALL named name over at (CALL{HIER}: the joined name of vp_hier_call_name; CALL{SYSTEM}: a
+ * `$` name), its arguments the expressions pushed from mark (0 entries for empty system-call
+ * arguments). NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_call(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                     odin3_ast_id *out);
+odin3_status vp_call_hier(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                          odin3_ast_id *out);
+odin3_status vp_call_system(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                            odin3_ast_id *out);
+/* A hierarchical callee's name (§3.6): the components pushed from mark (an IDENT, or a bit
+ * SELECT over one) as the printer writes them, then last, joined with `.` and interned; the
+ * components are popped, unreachable. NO_MEMORY. */
+odin3_status vp_hier_call_name(odin3_vp_ctx *ctx, uint32_t mark, uint32_t last, uint32_t *out);
 
 /* --- Task 6: statements, timing, functions and tasks, case and metacomments
  * (actions_stmt.c) ------------------------------------------------------------------------- */

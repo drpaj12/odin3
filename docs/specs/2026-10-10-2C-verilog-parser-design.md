@@ -479,9 +479,11 @@ message naming tokens as Verilog spells them through **string aliases**
 (`%token ATTR_OPEN "(*"`, `AT_STAR "@*"`, `IDENT "identifier"`, `ENDMODULE "endmodule"`, …: no
 separate name table), e.g. `unexpected 'endmodule', expected ';' or ','`; the end-of-input
 token is located at the last token's end (§2.2); the chain lines (`expanded from macro …`,
-`included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: three
+`included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: four
 `error` productions — `module_item: error ';'`, `statement: error ';'`, `description: error
-ENDMODULE` — resynchronise at the next `;` or `endmodule`, Bison's three-token rule
+ENDMODULE`, and `module_body: … module_items error` (an item missing its `;` before
+`endmodule`, so the next module is still parsed) — resynchronise at the next `;` or
+`endmodule`, Bison's three-token rule
 suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
 the flag is set, so no builder is ever called with the half-built children recovery leaves
 behind (a tree after an error is never used: the stream yields **no `UNIT`** and the pass
