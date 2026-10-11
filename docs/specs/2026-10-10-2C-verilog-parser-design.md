@@ -254,7 +254,7 @@ operators and undefined macros, PP-5/PP-9) is a located error "unknown directive
 ### 3.1 Form and conflict budget (VP-11)
 
 Bison ≥ 3.8, `%define api.pure full`, `%define api.prefix {odin3_vp_}`, `%locations` with
-`YYLTYPE = odin3_range`, `%define parse.error detailed`, `%define parse.lac full` (exact
+`%define api.location.type {odin3_vp_loc}` (§2.2), `%define parse.error detailed`, `%define parse.lac full` (exact
 expected-token lists, of at most four tokens, §3.4; the cost is a small table walk per error), `%define lr.type lalr`,
 `%expect 0` (no `%expect-rr`: it is GLR-only, and under `-Werror` Bison stops on its warning;
 in LALR mode `%expect 0` already rejects reduce/reduce conflicts). Semantic values are one
@@ -316,7 +316,8 @@ precedence:
 - (i) `IDENT`-led instantiation vs a UDP instance with `#delay2` or a drive strength:
   `m #(1, 2) u (…)` is always a parameter override (the values are expressions), as the
   standard itself prefers; a UDP-style instance with a strength (`m (strong0, strong1) u
-  (…)`) is a syntax error for now (`INSTANTIATION` has no slot for either; Q7 is REJECT);
+  (…)`) or a `#delay2` (`p #5 (y, a)`: `unexpected number, expecting '('`) is a syntax error
+  for now (`INSTANTIATION` has no slot for either; Q7 is REJECT);
 - (j) the empty-argument form `f(a, , b)` exists only in the system-call argument rule
   (`E*0`); a user call with an empty argument is a located syntax error, not a builder
   `INVALID_ARG`;
@@ -362,11 +363,13 @@ action to be exactly one `VP(` or `VP_ERR(` statement, so no action can reach a 
 outside the guards:
 
 ```c
-/* VP(out, call): the ordinary action. Inert in error mode; a non-OK status is fatal. */
+/* VP(out, call): the ordinary action. Inert in error mode (out zeroed with memset: a node
+ * value is the struct odin3_ast_id, which `(out) = 0` cannot assign); a non-OK status is
+ * fatal. */
 #define VP(out, call)                                                                    \
     do {                                                                                 \
         if (ctx->error_mode) {                                                           \
-            (out) = 0;                                                                   \
+            memset(&(out), 0, sizeof(out));                                              \
         } else {                                                                         \
             odin3_status vp_st_ = (call); /* vp_xxx stores its node in &(out) */         \
             if (vp_st_ != ODIN3_OK) {                                                    \
@@ -402,8 +405,8 @@ out-pointer, so no conversion happens inside the generated translation unit and 
   LR reductions nest, 2A §5.1). A kind with slots **before** a tail pushes the slot IDs first
   (0 for an absent optional slot: `odin3_ast_push` accepts 0 and `make` validates), e.g.
   `SEQ_BLOCK`: push the locals `LIST` (or 0), then the statements.
-- **Reordering at the reduction.** Three kinds are built from a pending span whose source
-  order is not the slot order, through one 2A accessor, `odin3_ast_pending_span(ast, mark)`
+- **Reordering at the reduction.** Five reductions build a node from a pending span whose
+  source order is not the slot order, through one 2A accessor, `odin3_ast_pending_span(ast, mark)`
   → the view `stack[mark..top]` (10 lines; §9 amendment), and the context's **two scratch
   vectors**, `span_scratch` (a copy of the span) and `part_scratch` (the partitioned prefix),
   both used only within one reduction, so nesting is safe (an inner block, case item or
@@ -425,13 +428,18 @@ out-pointer, so no conversion happens inside the generated translation unit and 
     function (zero or several is a located error, Annex A), zero or one for a task (zero →
     `NULL_STMT`); a declaration after the statement is the same located error. The
     printer writes ports then locals, which re-parses to the same two lists.
+  - `GATE_DECL` and the unnamed `INSTANCE` (2C Task 7): nothing nullable may precede a gate's
+    `(` (§3.1 g), so the optional slots cannot be pushed in order. `vp_gate` takes the span
+    `[ATTR*][STRENGTH?][DELAY?][INSTANCE+]` and `vp_instance_unnamed` the `CONNECTION`s; one
+    helper (`make_led`) copies the leading slots (0 when absent) then the span into
+    `span_scratch`, calls `odin3_ast_make` and unwinds; `vp_gate` then attaches the ATTRs.
 - Left recursion everywhere a list or operator chain is parsed (Bison's stack stays flat on a
   2,000-term `&` chain, 2A §10); right recursion only where the language is right-recursive
   (`else if`, nested parentheses, nested blocks), bounded by §5.
 - The context `odin3_vp_ctx` (one per stream) holds the design, the AST, the lexer state, the
-  two scratch vectors, the error count, the *error mode* flag and the fatal status (§3.4),
-  and the current module's metacomment list; the keyword-set stack lives in the per-run read
-  context (§2.5).
+  two scratch vectors, the *error mode* flag and the fatal status (§3.4), and the current
+  module's metacomment list; the keyword-set stack and the error count live in the per-run
+  read context `odin3_vl_run` (§2.5, §5).
 
 ### 3.3 Precedence and the dangling else (VP-13)
 
@@ -483,17 +491,19 @@ message naming tokens as Verilog spells them through **string aliases**
 (`%token ATTR_OPEN "(*"`, `AT_STAR "@*"`, `IDENT "identifier"`, `ENDMODULE "endmodule"`, …: no
 separate name table), e.g. `unexpected 'endmodule', expected ';' or ','`; the end-of-input
 token is located at the last token's end (§2.2); the chain lines (`expanded from macro …`,
-`included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: four
-`error` productions — `module_item: error ';'`, `statement: error ';'` (with its twin
-`block_item: error ';'` in the mixed block-item list of §3.1 e, whose statements are not
-`statement`s, and its closer twins `begin`/`fork`/`case`/`function`/`task … error`
-`end`/`join`/`endcase`/`endfunction`/`endtask`, so an item missing its `;` before a closer does
-not swallow the next item), `description: error ENDMODULE`, and `module_body: … module_items
-error` (an item missing its `;` before
-`endmodule`, so the next module is still parsed, with the same twins for the generate closers
-`generate`/`begin`/`case … error` `endgenerate`/`end`/`endcase`, 2C Task 7) — resynchronise at the next `;` or
-`endmodule`, Bison's three-token rule
-suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
+`included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: five
+base `error` productions and their closer twins — `module_item: error ';'`, `statement: error
+';'`, its twin `block_item: error ';'` in the mixed block-item list of §3.1 e (whose statements
+are not `statement`s), `description: error ENDMODULE`, and `module_body: … module_items error`
+(an item missing its `;` before `endmodule`, so the next module is still parsed); the closer
+twins `begin`/`fork`/`case`/`function`/`task … error` `end`/`join`/`endcase`/`endfunction`/
+`endtask` (2C Task 6) and `generate`/generate-block `begin`/generate `case … error`
+`endgenerate`/`end`/`endcase` (2C Task 7) make an item missing its `;` before a closer
+resynchronise there, so it does not swallow the next item. They resynchronise at the next `;`,
+closer or `endmodule` — at item depth only: inside an unclosed procedural block `endmodule` is
+not a sync point, so `always begin x = 1; endmodule` gives one error and the following modules
+of the file are consumed by the recovery (no `UNIT` results either way). Bison's three-token
+rule suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
 the flag is set, so no builder is ever called with the half-built children recovery leaves
 behind (a tree after an error is never used: the stream yields **no `UNIT`** and the pass
 destroys the store, §4.2, 2A §9). Bison's detailed message names at most four expected tokens
@@ -1120,7 +1130,7 @@ into `docs/PHASE2.md` under 2C's decisions-log entry, replacing 2A's "an estimat
   `syntax/*_expression_in_{function,task}_port.v` micros become Parmys exceptions under
   PHASE2 #4; `input reg` parsed without comment (D5 is 2D's); `localparam` and `#()`
   accepted in a parameter port list; `unsigned` accepted everywhere `signed` is; a UDP-style
-  instance with a drive strength is a syntax error (§3.1 i).
+  instance with a drive strength or a `#delay2` is a syntax error (§3.1 i).
 - **`docs/DESIGN.md` §4.1**: the "Bison/Flex grammar" bullet gains "LALR(1), zero conflicts;
   generated at build time (Bison ≥ 3.8, Flex ≥ 2.6.4)".
 - **`.github/workflows/ci.yml`**: `bison flex` in both apt lines; `nightly.yml`: the
