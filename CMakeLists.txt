@@ -521,6 +521,14 @@ if(BUILD_TESTING)
         COMMAND ${Python3_EXECUTABLE}
                 ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py check)
     set_tests_properties(project_fixtures PROPERTIES LABELS tools)
+    # 2B §10.2: odin3's read_project/dump_project (and preprocess for the include negatives)
+    # reproduce every case's record or located error in every format whose reader has landed;
+    # front-end negatives are skipped until read_verilog exists (--with-frontend).
+    add_test(NAME project_corpus
+        COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py compare
+                --odin3 $<TARGET_FILE:odin3>)
+    set_tests_properties(project_corpus PROPERTIES LABELS tools)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")

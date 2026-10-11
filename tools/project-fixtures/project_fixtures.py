@@ -5,6 +5,8 @@ Usage::
     project-fixtures check  [--root DIR] [--case NAME]...
     project-fixtures parse  CASE_DIR FORMAT [--entry FILE] [--revision REV]
     project-fixtures oracle [--root DIR] [--case NAME]... [--write] [--yosys PATH] [--ghdl PATH]
+    project-fixtures compare --odin3 BIN [--root DIR] [--case NAME]... [--format FMT]...
+                             [--with-frontend]
 
 The corpus (``tests/golden/projects/<case>/``, see its README) describes one small design per
 case in every project format that can express it: ``.o3proj``, an EDA ``-f`` file list, a
@@ -22,9 +24,15 @@ design or fails with the expected error, every file in a case is used (or listed
 and the oracle files are present.  ``parse`` prints what one format of one case parses to.
 ``oracle`` reruns each positive case's ``ref.cmd`` in a scratch copy of the case, smallest case
 first, checks the tool versions it records, and compares the result to the committed
-``ref.blif`` (``--write`` replaces both).
+``ref.blif`` (``--write`` replaces both).  ``compare`` (spec 2B §10.2, CTest ``project_corpus``)
+runs ``odin3 --diag-paths resolved -p "read_project --format FMT …; dump_project"`` on every
+case and format, smallest case first, from a temporary working directory with only PATH and the
+case's ``env``, and compares the dumped record (paths made relative to the case) and its info
+lines, or the located error, with ``expected.json``; include errors run ``preprocess`` instead
+of ``dump_project``, front-end errors ``read_verilog`` with ``--with-frontend`` (else skipped),
+and a format whose ``format_phase`` has not landed is skipped.
 
-Exit 0 success, 1 check failure / oracle mismatch, 2 usage or input error.
+Exit 0 success, 1 check failure / oracle or compare mismatch, 2 usage or input error.
 """
 
 from __future__ import annotations
@@ -1839,6 +1847,226 @@ def cmd_parse(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---- compare: odin3 against the corpus (spec 2B §10.2) ----------------------------------------
+
+# `format_phase` tags whose reader odin3 has; a format gated on any other tag is skipped, not
+# failed (2B plan point (m)). The Odin II XML reader adds ODIN2_READER (2B Task 14).
+LANDED_FORMAT_PHASES: frozenset[str] = frozenset()
+# Error kinds raised by the preprocessor, checked through `read_project; preprocess`, and by the
+# 2C/2D front end, checked through `read_project; read_verilog` only with --with-frontend.
+PREPROCESS_KINDS = frozenset({"include_not_found", "include_cycle"})
+FRONTEND_KINDS = frozenset({"duplicate_module", "unresolved_module", "dependency_cycle",
+                            "no_top", "ambiguous_top", "unknown_top"})
+ODIN3_TIMEOUT = 120  # seconds per run (a sanitizer build reads a case in well under one)
+# One diagnostic as odin3 logs it: the log sink's `odin3: error: ` prefix, then the message
+# `<file>:<line>:<col>: error: …`, `<file>: error: …` or, unlocated, `odin3: error: …` (§8).
+_ERROR_LINE = re.compile(r"(?:odin3: error: )?(?P<loc>.*?): error: (?P<kind>"
+                         + "|".join(ERROR_KINDS) + r"): (?P<detail>.*)")
+_LOC = re.compile(r"(?P<file>.+?):(?P<line>[0-9]+)(?::[0-9]+)?")
+_QUOTED = re.compile(r"'([^']*)'")
+_INFO = re.compile(r"(?:odin3: )?info: (?P<file>.+?): "
+                   r"(?P<what>ignored|listed more than once, read once): (?P<items>.*)")
+_INFO_KEYS = {"ignored": "ignored", "listed more than once, read once": "duplicates"}
+
+
+def script_word(word: str) -> str:
+    """`word` as one argument of an odin3 `-p` script: double-quoted when it is empty or holds a
+    blank, `;` or `#` (the script language has no escape, so a `"` cannot be passed)."""
+    if '"' in word:
+        raise UsageError(f"{word}: a double quote cannot be passed in an odin3 script")
+    return f'"{word}"' if not word or re.search(r"[\s;#]", word) else word
+
+
+def compare_script(fmt: str, exp: dict[str, Any], entry: Path, tail: str) -> str:
+    words = ["read_project", "--format", fmt]
+    revision = exp.get("options", {}).get(fmt, {}).get("revision")
+    if revision is not None:
+        words += ["--revision", script_word(str(revision))]
+    return " ".join([*words, script_word(str(entry))]) + "; " + tail
+
+
+def rel_to(case_dir: str, path: str) -> str:
+    """An absolute path relative to the case directory, as the oracle's `Ctx.rel` writes it."""
+    return Path(os.path.relpath(path, case_dir)).as_posix()
+
+
+def rel_if_abs(case_dir: str, path: str) -> str:
+    return rel_to(case_dir, path) if os.path.isabs(path) else path
+
+
+def relativize_record(rec: dict[str, Any], case_dir: str) -> tuple[dict[str, Any], list[str]]:
+    """odin3's record with every path made relative to the case directory and `duplicates`
+    re-sorted afterwards. odin3 dumps resolved (absolute) paths; a relative one is reported."""
+    out: dict[str, Any] = json.loads(json.dumps(rec))
+    probs: list[str] = []
+
+    def rel(value: Any, where: str) -> Any:
+        if not isinstance(value, str):
+            return value
+        if not os.path.isabs(value):
+            probs.append(f"record {where}: path {value!r} is not absolute")
+            return value
+        return rel_to(case_dir, value)
+
+    for key in ("files", "libfiles", "arch", "rules"):
+        for item in out[key]:
+            if "path" in item:
+                item["path"] = rel(item["path"], key)
+    for key in ("libdirs", "incdirs", "duplicates"):
+        out[key] = [rel(p, key) for p in out[key]]
+    out["duplicates"] = sorted(out["duplicates"])
+    out["flow"] = rel(out["flow"], "flow")
+    if isinstance(out["output"], dict):
+        out["output"]["path"] = rel(out["output"]["path"], "output")
+    return out, probs
+
+
+def info_problems(stderr: str, case_dir: str, entry_rel: str, want: dict[str, Any]) -> list[str]:
+    """The `ignored` and `duplicates` info lines: exactly one each when the list is non-empty,
+    naming the entry and the list (paths relativized and re-sorted), none when it is empty."""
+    found: dict[str, list[tuple[str, list[str]]]] = {"ignored": [], "duplicates": []}
+    for line in stderr.splitlines():
+        m = _INFO.fullmatch(line)
+        if m is not None:
+            found[_INFO_KEYS[m["what"]]].append((rel_if_abs(case_dir, m["file"]),
+                                                 m["items"].split(", ")))
+    probs = []
+    for key, lines in found.items():
+        if not want[key]:
+            probs += [f"unexpected info line '{f}: {key}: {', '.join(items)}'"
+                      for f, items in lines]
+            continue
+        if len(lines) != 1:
+            probs.append(f"expected one {key} info line, got {len(lines)}")
+            continue
+        file, items = lines[0]
+        if key == "duplicates":
+            items = sorted(rel_if_abs(case_dir, p) for p in items)
+        if (file, items) != (entry_rel, want[key]):
+            probs.append(f"{key} info line: expected '{entry_rel}: {', '.join(want[key])}', "
+                         f"got '{file}: {', '.join(items)}'")
+    return probs
+
+
+def record_problems(proc: subprocess.CompletedProcess[str], case_dir: str, entry_rel: str,
+                    want: dict[str, Any]) -> list[str]:
+    if proc.returncode != 0:
+        return [f"exit {proc.returncode}: {error_tail(proc.stderr)}"]
+    try:
+        rec = json.loads(proc.stdout)
+        if list(rec) != list(RECORD_KEYS):
+            return [f"record keys: expected {', '.join(RECORD_KEYS)}, got {', '.join(rec)}"]
+        rec, probs = relativize_record(rec, case_dir)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return ["stdout is not a JSON record"]
+    probs += [f"record {k}: expected {want[k]!r}, got {rec[k]!r}" for k in RECORD_KEYS
+              if rec[k] != want[k]]
+    return probs + info_problems(proc.stderr, case_dir, entry_rel, want)
+
+
+def error_tail(stderr: str) -> str:
+    lines = [ln for ln in stderr.splitlines() if "error" in ln] or stderr.splitlines()
+    return " | ".join(lines[-3:]) or "no output"
+
+
+def parse_error(stderr: str, case_dir: str) -> dict[str, Any] | None:
+    """The first `<kind>: <detail>` diagnostic on stderr as {kind, at, detail}: `at` as the
+    oracle writes it (`file:line`, the column dropped; `file`; None for `odin3:`), absolute
+    paths in `at` and in the detail's quoted names made relative to the case directory."""
+    for line in stderr.splitlines():
+        m = _ERROR_LINE.fullmatch(line)
+        if m is None:
+            continue
+        at: str | None = None
+        if m["loc"] != "odin3":
+            loc = _LOC.fullmatch(m["loc"])
+            file = rel_if_abs(case_dir, loc["file"] if loc else m["loc"])
+            at = f"{file}:{loc['line']}" if loc else file
+        detail = _QUOTED.sub(lambda q: f"'{rel_if_abs(case_dir, q[1])}'", m["detail"])
+        return {"kind": m["kind"], "at": at, "detail": detail}
+    return None
+
+
+def error_problems(want: dict[str, Any], proc: subprocess.CompletedProcess[str],
+                   case_dir: str) -> list[str]:
+    probs = [] if proc.returncode != 0 else ["expected a non-zero exit, got 0"]
+    got = parse_error(proc.stderr, case_dir)
+    if got is None:
+        return [*probs, f"no '<kind>: <detail>' error on stderr: {error_tail(proc.stderr)}"]
+    probs += [f"{k}: expected {want[k]!r}, got {got[k]!r}" for k in ("kind", "at")
+              if got[k] != want[k]]
+    return probs + [f"name {n!r} not in detail {got['detail']!r}" for n in want["names"]
+                    if f"'{n}'" not in got["detail"]]
+
+
+def run_odin3(binary: str, script: str, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    """odin3 on one script from a fresh temporary working directory, with only PATH and the
+    case's `env` in the environment (as `env -i PATH=… VAR=…`)."""
+    argv = [binary, "--diag-paths", "resolved", "-p", script]
+    run_env = {"PATH": os.environ.get("PATH", os.defpath), **env}
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            return subprocess.run(argv, cwd=tmp, env=run_env, capture_output=True, text=True,
+                                  encoding="utf-8", errors="replace", timeout=ODIN3_TIMEOUT,
+                                  check=False)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(argv, -1, "", f"timed out after {ODIN3_TIMEOUT}s")
+
+
+def compare_format(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
+                   with_frontend: bool) -> tuple[str, list[str]]:
+    """("ok" | "FAIL", problems) or ("skip", [reason]) for one format of one case."""
+    gate = exp.get("format_phase", {}).get(fmt)
+    if gate is not None and gate not in LANDED_FORMAT_PHASES:
+        return "skip", [f"format_phase {gate}"]
+    kind = exp.get("error", {}).get("kind")
+    tail = "dump_project"
+    if kind in FRONTEND_KINDS:
+        if not with_frontend:
+            return "skip", ["needs the front end: --with-frontend"]
+        tail = "read_verilog"
+    elif kind in PREPROCESS_KINDS:
+        tail = "preprocess"
+    case = os.path.abspath(case_dir)
+    entry = os.path.abspath(entry_of(case_dir, fmt, exp))
+    proc = run_odin3(binary, compare_script(fmt, exp, Path(entry), tail), exp.get("env", {}))
+    if "error" in exp:
+        probs = error_problems(expected_error(exp, fmt), proc, case)
+    else:
+        want = {**exp["project"], **exp.get("format_overrides", {}).get(fmt, {})}
+        probs = record_problems(proc, case, rel_to(case, entry), want)
+    return ("FAIL" if probs else "ok"), probs
+
+
+def cmd_compare(args: argparse.Namespace) -> int:
+    binary = shutil.which(args.odin3)
+    if binary is None:
+        raise UsageError(f"{args.odin3}: no such odin3 executable")
+    binary = os.path.abspath(binary)
+    dirs = sorted(case_dirs(args.root, args.case), key=lambda d: (source_bytes(d), d.name))
+    counts = {fmt: {"ok": 0, "FAIL": 0, "skip": 0} for fmt in FORMATS}
+    for d in dirs:  # smallest case first
+        exp = json.loads((d / "expected.json").read_text(encoding="utf-8"))
+        for fmt in exp["formats"]:
+            if args.format and fmt not in args.format:
+                continue
+            status, probs = compare_format(binary, d, fmt, exp, args.with_frontend)
+            counts[fmt][status] += 1
+            if status == "skip":
+                print(f"skip {d.name} {fmt} ({probs[0]})")
+                continue
+            print(f"{status:4} {d.name} {fmt}")
+            for p in probs:
+                print(f"     {fmt}: {p}")
+    print("project-fixtures compare: " + "; ".join(
+        f"{fmt} {c['ok']} ok, {c['FAIL']} failed, {c['skip']} skipped"
+        for fmt, c in counts.items()))
+    total = {s: sum(c[s] for c in counts.values()) for s in ("ok", "FAIL", "skip")}
+    print(f"project-fixtures compare: {total['ok']} ok, {total['FAIL']} failed, "
+          f"{total['skip']} skipped")
+    return 1 if total["FAIL"] else 0
+
+
 # ---- oracle -----------------------------------------------------------------------------------
 
 
@@ -1932,13 +2160,20 @@ def main(argv: Sequence[str]) -> int:
     sub.choices["oracle"].add_argument("--write", action="store_true")
     sub.choices["oracle"].add_argument("--yosys", default=default_yosys())
     sub.choices["oracle"].add_argument("--ghdl", default=os.environ.get("GHDL", "ghdl"))
+    p = sub.add_parser("compare")
+    p.add_argument("--odin3", required=True)
+    p.add_argument("--root", type=Path, default=DEFAULT_ROOT)
+    p.add_argument("--case", action="append", default=[])
+    p.add_argument("--format", action="append", default=[], choices=FORMATS)
+    p.add_argument("--with-frontend", action="store_true")
     p = sub.add_parser("parse")
     p.add_argument("case_dir")
     p.add_argument("format", choices=FORMATS)
     p.add_argument("--entry")
     p.add_argument("--revision")
     args = ap.parse_args(argv)
-    commands = {"check": cmd_check, "parse": cmd_parse, "oracle": cmd_oracle}
+    commands = {"check": cmd_check, "parse": cmd_parse, "oracle": cmd_oracle,
+                "compare": cmd_compare}
     try:
         return commands[args.cmd](args)
     except (UsageError, OSError, ValueError) as exc:
