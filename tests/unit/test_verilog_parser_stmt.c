@@ -579,6 +579,13 @@ static void test_metacomment_case(void) {
                 "{(ATTR:full_case [METACOMMENT] _) (ATTR:parallel_case [METACOMMENT] _)})");
 }
 
+/* A case that is a block item (§3.1 e) takes its metacomments into the same attach. */
+static void test_metacomment_case_in_a_block(void) {
+    expect_stmt("begin (* k *) case (s) // synopsys parallel_case\n0: ; endcase end",
+                "(SEQ_BLOCK _ (CASE.case (IDENT:s) (CASE_ITEM (NULL_STMT) (NUMBER.dec [SIGNED] 0))"
+                " {(ATTR:k _) (ATTR:parallel_case [METACOMMENT] _)}))");
+}
+
 /* `(* full_case *)` and the metacomments: one attach of three, the statement's first. */
 static void test_metacomment_merges_with_attributes(void) {
     vt_result res;
@@ -773,6 +780,7 @@ int main(void) {
     RUN_TEST(test_loops);
     RUN_TEST(test_always_and_initial);
     RUN_TEST(test_metacomment_case);
+    RUN_TEST(test_metacomment_case_in_a_block);
     RUN_TEST(test_metacomment_merges_with_attributes);
     RUN_TEST(test_metacomment_nested_cases);
     RUN_TEST(test_metacomment_between_items);

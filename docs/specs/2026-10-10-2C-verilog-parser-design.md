@@ -484,8 +484,10 @@ message naming tokens as Verilog spells them through **string aliases**
 separate name table), e.g. `unexpected 'endmodule', expected ';' or ','`; the end-of-input
 token is located at the last token's end (§2.2); the chain lines (`expanded from macro …`,
 `included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: four
-`error` productions — `module_item: error ';'`, `statement: error ';'`, `description: error
-ENDMODULE`, and `module_body: … module_items error` (an item missing its `;` before
+`error` productions — `module_item: error ';'`, `statement: error ';'` (with its twin
+`block_item: error ';'` in the mixed block-item list of §3.1 e, whose statements are not
+`statement`s), `description: error ENDMODULE`, and `module_body: … module_items error` (an item
+missing its `;` before
 `endmodule`, so the next module is still parsed) — resynchronise at the next `;` or
 `endmodule`, Bison's three-token rule
 suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
@@ -674,7 +676,10 @@ both only in illegal code, which 2D reports. `task [automatic] t; items stmt_or_
 `task t (input a, output [3:0] b);` → `TASK_DECL`(name; `{AUTOMATIC}`; L ports; L locals; S body
 — `NULL_STMT` when empty). Timing controls and nonblocking assignments inside a function (K12)
 parse with the one statement grammar; 2D rejects them. A function call is a `CALL`, a task
-enable a `TASK_CALL` (above).
+enable a `TASK_CALL` (above). Locations (2C Task 6 default): a partitioned `LIST` (function and
+task ports and locals, block locals) runs from its first element to its last; an empty one is
+zero-width one past the header's `;`, and a task's implicit `NULL_STMT` zero-width one past its
+last body item (the header's `;` when there is none).
 
 **Instantiation (I1–I7, P5).** `m #(8, .W(4)) u1 (a, .p(b), .q(), , c), u2 [3:0] (…);` →
 `INSTANTIATION`(name m; L? parameter `CONNECTION`s: name 0 + E for ordered, name + E? for
