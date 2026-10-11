@@ -1857,6 +1857,7 @@ LANDED_FORMAT_PHASES: frozenset[str] = frozenset()
 PREPROCESS_KINDS = frozenset({"include_not_found", "include_cycle"})
 FRONTEND_KINDS = frozenset({"duplicate_module", "unresolved_module", "dependency_cycle",
                             "no_top", "ambiguous_top", "unknown_top"})
+EXIT_FAIL = 1  # odin3's exit status when a pass fails (src/cli/main.c)
 ODIN3_TIMEOUT = 120  # seconds per run (a sanitizer build reads a case in well under one)
 # One diagnostic as odin3 logs it: the log sink's `odin3: error: ` prefix, then the message
 # `<file>:<line>:<col>: error: …`, `<file>: error: …` or, unlocated, `odin3: error: …` (§8).
@@ -1890,23 +1891,28 @@ def rel_to(case_dir: str, path: str) -> str:
     return Path(os.path.relpath(path, case_dir)).as_posix()
 
 
-def rel_if_abs(case_dir: str, path: str) -> str:
-    return rel_to(case_dir, path) if os.path.isabs(path) else path
+def resolved_path(case_dir: str, path: str, where: str, probs: list[str]) -> str:
+    """A path odin3 printed in resolved form, made relative to the case directory. It must be
+    absolute and already normalized (PRJ-6, point (h)): `relpath` normalizes, so a `./`, `..`,
+    `//` or trailing `/` would vanish here and is reported instead (the path is kept as is)."""
+    if not os.path.isabs(path):
+        probs.append(f"{where}: path {path!r} is not absolute")
+    elif os.path.normpath(path) != path or path.startswith("//"):
+        probs.append(f"{where}: path {path!r} is not normalized")
+    else:
+        return rel_to(case_dir, path)
+    return path
 
 
 def relativize_record(rec: dict[str, Any], case_dir: str) -> tuple[dict[str, Any], list[str]]:
-    """odin3's record with every path made relative to the case directory and `duplicates`
-    re-sorted afterwards. odin3 dumps resolved (absolute) paths; a relative one is reported."""
+    """odin3's record with every path made relative to the case directory (see resolved_path)
+    and `duplicates` re-sorted afterwards."""
     out: dict[str, Any] = json.loads(json.dumps(rec))
     probs: list[str] = []
 
     def rel(value: Any, where: str) -> Any:
-        if not isinstance(value, str):
-            return value
-        if not os.path.isabs(value):
-            probs.append(f"record {where}: path {value!r} is not absolute")
-            return value
-        return rel_to(case_dir, value)
+        return resolved_path(case_dir, value, f"record {where}", probs) if isinstance(
+            value, str) else value
 
     for key in ("files", "libfiles", "arch", "rules"):
         for item in out[key]:
@@ -1923,26 +1929,28 @@ def relativize_record(rec: dict[str, Any], case_dir: str) -> tuple[dict[str, Any
 
 def info_problems(stderr: str, case_dir: str, entry_rel: str, want: dict[str, Any]) -> list[str]:
     """The `ignored` and `duplicates` info lines: exactly one each when the list is non-empty,
-    naming the entry and the list (paths relativized and re-sorted), none when it is empty."""
+    naming the entry (as given: the absolute path the harness passed) and the list (paths
+    relativized and re-sorted), none when it is empty."""
+    probs: list[str] = []
     found: dict[str, list[tuple[str, list[str]]]] = {"ignored": [], "duplicates": []}
     for line in stderr.splitlines():
         m = _INFO.fullmatch(line)
         if m is not None:
-            found[_INFO_KEYS[m["what"]]].append((rel_if_abs(case_dir, m["file"]),
-                                                 m["items"].split(", ")))
-    probs = []
+            key = _INFO_KEYS[m["what"]]
+            file = resolved_path(case_dir, m["file"], f"{key} info line", probs)
+            items = m["items"].split(", ")
+            if key == "duplicates":
+                items = sorted(resolved_path(case_dir, p, "duplicates info line", probs)
+                               for p in items)
+            found[key].append((file, items))
     for key, lines in found.items():
         if not want[key]:
             probs += [f"unexpected info line '{f}: {key}: {', '.join(items)}'"
                       for f, items in lines]
-            continue
-        if len(lines) != 1:
+        elif len(lines) != 1:
             probs.append(f"expected one {key} info line, got {len(lines)}")
-            continue
-        file, items = lines[0]
-        if key == "duplicates":
-            items = sorted(rel_if_abs(case_dir, p) for p in items)
-        if (file, items) != (entry_rel, want[key]):
+        elif lines[0] != (entry_rel, want[key]):
+            file, items = lines[0]
             probs.append(f"{key} info line: expected '{entry_rel}: {', '.join(want[key])}', "
                          f"got '{file}: {', '.join(items)}'")
     return probs
@@ -1950,17 +1958,23 @@ def info_problems(stderr: str, case_dir: str, entry_rel: str, want: dict[str, An
 
 def record_problems(proc: subprocess.CompletedProcess[str], case_dir: str, entry_rel: str,
                     want: dict[str, Any]) -> list[str]:
+    """A positive run: exit 0 and the dumped record equal to `want` field by field as JSON text
+    (so types and nested key order count: `true` is not `1`), plus the info lines."""
     if proc.returncode != 0:
         return [f"exit {proc.returncode}: {error_tail(proc.stderr)}"]
     try:
         rec = json.loads(proc.stdout)
-        if list(rec) != list(RECORD_KEYS):
-            return [f"record keys: expected {', '.join(RECORD_KEYS)}, got {', '.join(rec)}"]
+    except ValueError:
+        return ["stdout is not JSON"]
+    if not isinstance(rec, dict) or list(rec) != list(RECORD_KEYS):
+        got = ", ".join(rec) if isinstance(rec, dict) else type(rec).__name__
+        return [f"record keys: expected {', '.join(RECORD_KEYS)}, got {got}"]
+    try:
         rec, probs = relativize_record(rec, case_dir)
-    except (ValueError, TypeError, AttributeError, KeyError):
-        return ["stdout is not a JSON record"]
-    probs += [f"record {k}: expected {want[k]!r}, got {rec[k]!r}" for k in RECORD_KEYS
-              if rec[k] != want[k]]
+    except (TypeError, AttributeError) as exc:
+        return [f"malformed record: {exc}"]
+    probs += [f"record {k}: expected {json.dumps(want[k])}, got {json.dumps(rec[k])}"
+              for k in RECORD_KEYS if json.dumps(rec[k]) != json.dumps(want[k])]
     return probs + info_problems(proc.stderr, case_dir, entry_rel, want)
 
 
@@ -1969,30 +1983,51 @@ def error_tail(stderr: str) -> str:
     return " | ".join(lines[-3:]) or "no output"
 
 
-def parse_error(stderr: str, case_dir: str) -> dict[str, Any] | None:
-    """The first `<kind>: <detail>` diagnostic on stderr as {kind, at, detail}: `at` as the
-    oracle writes it (`file:line`, the column dropped; `file`; None for `odin3:`), absolute
-    paths in `at` and in the detail's quoted names made relative to the case directory."""
+def quoted_paths(case_dir: str, detail: str, probs: list[str]) -> str:
+    """`detail` with each quoted absolute path made relative (names that are not paths stay)."""
+
+    def rel(q: re.Match[str]) -> str:
+        name = q[1]
+        return f"'{resolved_path(case_dir, name, 'detail', probs)}'" if os.path.isabs(
+            name) else q[0]
+
+    return _QUOTED.sub(rel, detail)
+
+
+def parse_errors(stderr: str, case_dir: str) -> list[dict[str, Any]]:
+    """Every `<kind>: <detail>` diagnostic on stderr as {kind, at, detail, probs}: `at` as the
+    oracle writes it (`file:line`, the column dropped; `file`; None for `odin3:`), the paths in
+    `at` and the detail's quoted absolute names made relative (see resolved_path, whose
+    complaints go to `probs`)."""
+    found = []
     for line in stderr.splitlines():
         m = _ERROR_LINE.fullmatch(line)
         if m is None:
             continue
+        probs: list[str] = []
         at: str | None = None
         if m["loc"] != "odin3":
             loc = _LOC.fullmatch(m["loc"])
-            file = rel_if_abs(case_dir, loc["file"] if loc else m["loc"])
+            file = resolved_path(case_dir, loc["file"] if loc else m["loc"], "at", probs)
             at = f"{file}:{loc['line']}" if loc else file
-        detail = _QUOTED.sub(lambda q: f"'{rel_if_abs(case_dir, q[1])}'", m["detail"])
-        return {"kind": m["kind"], "at": at, "detail": detail}
-    return None
+        detail = quoted_paths(case_dir, m["detail"], probs)
+        found.append({"kind": m["kind"], "at": at, "detail": detail, "probs": probs})
+    return found
 
 
 def error_problems(want: dict[str, Any], proc: subprocess.CompletedProcess[str],
                    case_dir: str) -> list[str]:
-    probs = [] if proc.returncode != 0 else ["expected a non-zero exit, got 0"]
-    got = parse_error(proc.stderr, case_dir)
-    if got is None:
+    """A negative run: exit EXIT_FAIL exactly (a sanitizer exit or a signal after the
+    diagnostic fails) and exactly one diagnostic, matching `kind`, `at` and every name."""
+    probs = [] if proc.returncode == EXIT_FAIL else [
+        f"exit: expected {EXIT_FAIL}, got {proc.returncode}"]
+    errors = parse_errors(proc.stderr, case_dir)
+    if not errors:
         return [*probs, f"no '<kind>: <detail>' error on stderr: {error_tail(proc.stderr)}"]
+    if len(errors) != 1:
+        probs.append(f"expected one error line, got {len(errors)}")
+    got = errors[0]
+    probs += got["probs"]
     probs += [f"{k}: expected {want[k]!r}, got {got[k]!r}" for k in ("kind", "at")
               if got[k] != want[k]]
     return probs + [f"name {n!r} not in detail {got['detail']!r}" for n in want["names"]
@@ -2064,6 +2099,9 @@ def cmd_compare(args: argparse.Namespace) -> int:
     total = {s: sum(c[s] for c in counts.values()) for s in ("ok", "FAIL", "skip")}
     print(f"project-fixtures compare: {total['ok']} ok, {total['FAIL']} failed, "
           f"{total['skip']} skipped")
+    if total["ok"] + total["FAIL"] == 0:
+        print("project-fixtures compare: no case was run (every format skipped or filtered)")
+        return 1
     return 1 if total["FAIL"] else 0
 
 

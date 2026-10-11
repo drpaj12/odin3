@@ -112,7 +112,7 @@ class CompareTest(unittest.TestCase):
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("FAIL pos o3proj", out)
-        self.assertIn("record top: expected 'top', got 'other'", out)
+        self.assertIn('record top: expected "top", got "other"', out)
 
     def test_positive_needs_exit_zero_and_json(self) -> None:
         d = self.case("pos", {"formats": ["o3proj", "f"], "project": RECORD})
@@ -121,7 +121,7 @@ class CompareTest(unittest.TestCase):
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("exit 1", out)
-        self.assertIn("f: stdout is not a JSON record", out)
+        self.assertIn("f: stdout is not JSON", out)
 
     def test_key_order(self) -> None:
         d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
@@ -259,10 +259,20 @@ class CompareTest(unittest.TestCase):
         self.assertIn("ok   neg o3proj", out)
         self.assertIn("; dump_project", self.runs()[0]["argv"][-1])
 
-    def test_negative_needs_non_zero_exit(self) -> None:
-        code, out = self.neg(self.MISSING, self.MISSING_ERR, exit_code=0)
+    def test_negative_needs_exit_one(self) -> None:
+        for status in (0, 2, 23):  # success, another failure, an ASan report after the diagnostic
+            with self.subTest(status=status):
+                self.tearDown()
+                self.setUp()
+                code, out = self.neg(self.MISSING, self.MISSING_ERR, exit_code=status)
+                self.assertEqual(code, 1)
+                self.assertIn(f"exit: expected 1, got {status}", out)
+
+    def test_exactly_one_error_line(self) -> None:
+        line = self.MISSING_ERR.splitlines()[0] + "\n"
+        code, out = self.neg(self.MISSING, line + line)
         self.assertEqual(code, 1)
-        self.assertIn("expected a non-zero exit", out)
+        self.assertIn("expected one error line, got 2", out)
 
     def test_wrong_kind(self) -> None:
         code, out = self.neg(self.MISSING, self.MISSING_ERR.replace("missing_file", "syntax"))
@@ -318,20 +328,109 @@ class CompareTest(unittest.TestCase):
         err = {"kind": "unresolved_module", "at": "src/top.v:6", "names": ["missing_cell"]}
         code, out = self.neg(err, "odin3: error: {CASE}/src/top.v:6:5: error: "
                              "unresolved_module: 'missing_cell'\n")
-        self.assertEqual(code, 0, out)
         self.assertIn("skip neg o3proj (needs the front end: --with-frontend)", out)
         self.assertEqual(self.runs(), [])
+        self.assertEqual(code, 1)  # nothing was run
+        self.assertIn("no case was run", out)
         code, out = self.compare("--with-frontend")
         self.assertEqual(code, 0, out)
         self.assertTrue(self.runs()[0]["argv"][-1].endswith("; read_verilog"))
 
     def test_usage_errors(self) -> None:
+        self.respond(self.root, [])
+        self.root.mkdir()
         code, out = self.compare()
-        self.assertEqual(code, 2)  # no cases under the root
+        self.assertEqual(code, 2)
+        self.assertIn("no cases", out)
         self.case("pos", {"formats": ["o3proj"], "project": RECORD})
+        self.fake.unlink()
         code, out = self.compare()
-        self.assertEqual(code, 2)  # the fake was never written: no such binary
-        self.assertIn("odin3", out)
+        self.assertEqual(code, 2)
+        self.assertIn("no such odin3 executable", out)
+
+    def test_nothing_run_is_a_failure(self) -> None:
+        d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
+        self.respond(d, [])
+        code, out = self.compare("--format", "f")
+        self.assertEqual(code, 1)
+        self.assertIn("no case was run", out)
+
+    # ---- strictness --------------------------------------------------------------------------
+
+    UNNORMALIZED = ("{CASE}/src/./top.v", "{CASE}//src/top.v", "{CASE}/src/../src/top.v",
+                    "{CASE}/inc/")
+
+    def test_unnormalized_record_path(self) -> None:
+        d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
+        for bad in self.UNNORMALIZED:
+            with self.subTest(bad=bad):
+                rec = absolute(RECORD)
+                rec["files" if "top.v" in bad else "incdirs"] = (
+                    [{**rec["files"][0], "path": bad}] if "top.v" in bad else [bad])
+                self.respond(d, [{"match": "o3proj", "stdout": json.dumps(rec)}])
+                code, out = self.compare()
+                self.assertEqual(code, 1)
+                self.assertIn("is not normalized", out)
+
+    def test_unnormalized_error_paths(self) -> None:
+        d = self.case("neg", {"formats": ["o3proj"], "error": self.MISSING})
+        for bad in ("{CASE}/./", "{CASE}//", "{CASE}/src/../"):
+            for place, err in (
+                    ("at", self.MISSING_ERR.replace("{CASE}/project", bad + "project")),
+                    ("name", self.MISSING_ERR.replace("{CASE}/src/missing", bad + "src/missing"))):
+                with self.subTest(bad=bad, place=place):
+                    self.respond(d, [{"match": "read_project", "stderr": err, "exit": 1}])
+                    code, out = self.compare()
+                    self.assertEqual(code, 1, err)
+                    self.assertIn("is not normalized", out)
+
+    def test_unnormalized_info_line_paths(self) -> None:
+        rec = {**RECORD, "duplicates": ["src/top.v"]}
+        d = self.case("pos", {"formats": ["f"], "project": rec})
+        entry = os.path.abspath(d / "files.f")
+        for bad in ("{CASE}/./", "{CASE}//", "{CASE}/src/../"):
+            for place, line in (
+                    ("file", f"{bad}files.f: listed more than once, read once: {{CASE}}/src/top.v"),
+                    ("item", f"{entry}: listed more than once, read once: {bad}src/top.v")):
+                with self.subTest(bad=bad, place=place):
+                    self.respond(d, [{"match": "files.f", "stdout": dump(rec),
+                                      "stderr": f"odin3: info: {line}\n"}])
+                    code, out = self.compare()
+                    self.assertEqual(code, 1, line)
+                    self.assertIn("is not normalized", out)
+
+    def test_info_line_entry_must_be_absolute(self) -> None:
+        rec = {**RECORD, "ignored": ["LOCATION"]}
+        d = self.case("pos", {"formats": ["f"], "project": rec})
+        self.respond(d, [{"match": "files.f", "stdout": dump(rec),
+                          "stderr": "odin3: info: files.f: ignored: LOCATION\n"}])
+        code, out = self.compare()
+        self.assertEqual(code, 1)
+        self.assertIn("ignored info line: path 'files.f' is not absolute", out)
+
+    def test_record_equality_is_type_strict(self) -> None:
+        rec = {**RECORD, "rules": [{"rule": "split", "subject": "$mem", "width": True,
+                                    "depth": "max"},
+                                   {"rule": "limit", "cell": "multiply", "count": 4}]}
+        d = self.case("pos", {"formats": ["o3proj"], "project": rec})
+        for field, value in (("width", 1), ("count", 4.0)):
+            with self.subTest(field=field):
+                dumped = absolute(rec)
+                dumped["rules"][0 if field == "width" else 1][field] = value
+                self.respond(d, [{"match": "o3proj", "stdout": json.dumps(dumped)}])
+                code, out = self.compare()
+                self.assertEqual(code, 1)
+                self.assertIn("record rules", out)
+
+    def test_nested_key_order(self) -> None:
+        d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
+        dumped = absolute(RECORD)
+        dumped["files"] = [{"language": "verilog", "path": "{CASE}/src/top.v",
+                            "library": "work"}]
+        self.respond(d, [{"match": "o3proj", "stdout": json.dumps(dumped)}])
+        code, out = self.compare()
+        self.assertEqual(code, 1)
+        self.assertIn("record files", out)
 
 
 class CorpusCompareTest(unittest.TestCase):
