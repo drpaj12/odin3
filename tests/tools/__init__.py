@@ -1,5 +1,6 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
-tools/project-fixtures, the BLIF reader and the Python plugin binding (plugins/python).
+tools/project-fixtures, tools/parse-check, the BLIF reader and the Python plugin binding
+(plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
 sys.path here so the test modules can import them.
@@ -18,6 +19,7 @@ for _sub in (
     "tools/project-fixtures",
     "tools/pp-fuzz",
     "tools/pp-diff",
+    "tools/parse-check",
     "tools/token-cost",
     "plugins/python",
 ):

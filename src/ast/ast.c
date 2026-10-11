@@ -386,6 +386,14 @@ odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, u
     return st;
 }
 
+odin3_ast_span odin3_ast_pending_span(const odin3_ast *ast, uint32_t mark) {
+    if (ast == NULL || mark >= ast->pending.len) {
+        return (odin3_ast_span){NULL, 0};
+    }
+    const odin3_ast_id *top = ast->pending.data;
+    return (odin3_ast_span){top + mark, (uint32_t)ast->pending.len - mark};
+}
+
 void odin3_ast_unwind(odin3_ast *ast, uint32_t mark) {
     if (ast == NULL) {
         return;

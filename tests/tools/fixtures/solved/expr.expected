@@ -1,0 +1,4 @@
+e: e '*' e :: '*' :: reduce (%left '*')
+e: e '*' e :: '+' :: reduce ('+' < '*')
+e: e '+' e :: '*' :: shift ('+' < '*')
+e: e '+' e :: '+' :: reduce (%left '+')

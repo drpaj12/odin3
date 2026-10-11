@@ -275,7 +275,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | `CONFIG_DECL` | — | req | — | — | — | TEXT | S2 REJECT |
 | `LIST` | — | — | — | — | X* | — | |
 | *Ports and declarations* | | | | | | | |
-| `PORT_REF` | — | opt (0 for `{a,b}`) | `DOTTED` (`.x(e)`, `.x()`) | E? (present for `.x(e)`/`{…}`) | — | — | M1; M6 REJECT when `DOTTED` or the name is 0 |
+| `PORT_REF` | — | opt (0 for `{a,b}`) | `DOTTED` (`.x(e)`, `.x()`) | E? (present for `.x(e)`/`{…}`) | — | — | M1; M6 REJECT when `DOTTED` or the name is 0 with an expression; name 0 without an expression is an empty port (2C §3.6, §9 amendment (e)) |
 | `PORT_DECL` | direction (3) `input output inout` | — | `SIGNED IN_HEADER`, `DT` field (3 bits), `NET` field (4 bits, 0 = unspecified) | R? | `DECLARATOR+` (`input [3:0] a, b` is one node with two) | — | M1–M3, M12 |
 | `DECLARATOR` | — | req | — | E? init/value | R* unpacked dims, outermost first | — | N7–N10, N12, P1 |
 | `RANGE` | — | — | — | E msb, E lsb | — | — | N2 |
@@ -463,6 +463,7 @@ odin3_status odin3_ast_push(odin3_ast *ast, odin3_ast_id node);          /* NO_M
 odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec,
                                    uint32_t mark, odin3_ast_id *out);    /* children = stack[mark..top] */
 void         odin3_ast_unwind(odin3_ast *ast, uint32_t mark);            /* error recovery */
+odin3_ast_span odin3_ast_pending_span(const odin3_ast *ast, uint32_t mark); /* stack[mark..top] */
 
 odin3_status odin3_ast_number_parse(odin3_ast *ast, odin3_loc loc, odin3_number_text pieces,
                                     uint32_t *payload);
@@ -517,7 +518,12 @@ Rules:
 
 A Bison semantic value is an `odin3_ast_id`; `@$` gives `{loc, end}`. A fixed-arity rule calls
 `make` with a small array; a list rule does `mark` at its first item, `push` per item,
-`make_marked` at the parent; nested lists are safe because LR reductions nest. Left-recursive
+`make_marked` at the parent; nested lists are safe because LR reductions nest. The three kinds
+whose source order is not their slot order (`CASE_ITEM`, `SEQ_BLOCK`/`PAR_BLOCK`,
+`FUNCTION_DECL`/`TASK_DECL`, 2C §3.2) read the pending span through
+`odin3_ast_pending_span(ast, mark)` — a view of the stack from `mark` to its top, valid until the
+next push, make or unwind; empty for a mark at or above the top — copy it, unwind, and build in
+slot order (2C §9 amendment (a)). Left-recursive
 operator rules reduce as they go, so a 2,000-term chain does not grow Bison's stack; right-deep
 forms (`else if` chains, parentheses) do, at up to ~6 stack symbols per level, so 2C sets
 `YYMAXDEPTH` ≥ 8 × `ODIN3_AST_MAX_DEPTH` (≈ 4 MB of heap at the limit, `YYSTACK_USE_ALLOCA 0`)
@@ -525,7 +531,8 @@ so that the AST cap fires first for every right-recursive form, and reports a Bi
 should one still occur, as the same located error. On a
 syntax error the action unwinds to the enclosing mark; abandoned nodes stay as unreachable roots.
 `(* *)` instances reduce to `ATTR` nodes before the item they annotate; the item's rule attaches
-them. The lexer turns a metacomment into `ATTR` nodes flagged `METACOMMENT` (§7).
+them. The lexer records a metacomment; the parser makes the `ATTR` nodes flagged `METACOMMENT`
+at the `CASE` reduction (§7; 2C §2.6, §9 amendment (d)).
 
 ### 5.2 How 2D stage 1 uses it
 
@@ -600,9 +607,9 @@ operator's `UNARY`/`BINARY`/`TERNARY` node.
 
 **Metacomments** (D1): `// synopsys full_case`, `// synopsys parallel_case`, both at once, the
 `synthesis` prefix, and the `/* */ form`, placed **after the `case (expr)` header** they modify
-(Yosys's rule). The lexer records the comment and emits `ATTR` nodes flagged `METACOMMENT`; the
-parser attaches them to the `CASE` whose header they **immediately follow, before its first
-item** (so a nested case's metacomment never reaches the outer one; elsewhere they are plain
+(Yosys's rule). The lexer records the comment and the metacomment; the parser makes the `ATTR`
+nodes flagged `METACOMMENT` at the `CASE` reduction (2C §2.6, §9 amendment (d)) and attaches them
+to the `CASE` whose header they **immediately follow, before its first item** (so a nested case's metacomment never reaches the outer one; elsewhere they are plain
 comments), merged with that case's `(* *)` attributes into its single attach (§5). 2E emits
 D1's per-use warning when it honours one. The
 printer writes a `METACOMMENT` attribute back as the metacomment after the header, so the
@@ -683,7 +690,8 @@ elaborated store — and `odin3_prov_record.ast` of a SOURCE record made in run 
 in run *R*'s elaborated store (the parsed store when the read had no stage 1, as a BLIF-style
 reader would); a consumer resolves it only in a store whose `run` and form match (the generation
 tag of the review's I12), never by index alone. The parsed store is destroyed when stage 1 ends,
-unless kept. A mixed-language project (Verilog plus SystemVerilog, or VHDL through GHDL) is two
+unless kept. A parse-only read (`read_verilog --parse-only`, 2C §4.1) holds its parsed store as
+the run's store until the design is destroyed (2C §9 amendment (c)). A mixed-language project (Verilog plus SystemVerilog, or VHDL through GHDL) is two
 read runs with two ASTs; provenance from each resolves in its own.
 
 **AST-16 ASTs and symbol tables are freed at the end of their read pass** unless kept: the CLI
@@ -692,7 +700,8 @@ holds two), or any pass in the script whose
 registry definition (1D's pass registry) sets `wants_ast`, makes the pass manager set
 `odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ELABORATED)` before the read (`--keep-ast=all`
 sets `ODIN3_KEEP_AST_ALL`). A kept AST lives until
-`odin3_design_destroy`. This amends DESIGN §4.5 ("never discarded") per PHASE2 #7.
+`odin3_design_destroy`; so does the parsed store of a parse-only read (AST-15). This amends
+DESIGN §4.5 ("never discarded") per PHASE2 #7.
 
 **What survives into the IR**: `odin3_srcloc`s carrying the raw `loc` in SOURCE provenance
 records (§3.2; chains derived on demand through the source manager), the source manager
@@ -854,6 +863,12 @@ buffer's `parent` may also be the loc of the `-f`/`-F`, `import` or `QIP_FILE` w
 project-description file (PRJ-2), so project errors print `included from files.f:3`; an
 `EXPANSION`'s `parent_end` may lie in another buffer than its `parent` when the actuals ran into
 an enclosing frame (PP-6, ruling I11) — §3.2's ranges already allow it.
+
+Made with 2C (`docs/specs/2026-10-10-2C-verilog-parser-design.md` §9, PR 2C-1): (a)
+`odin3_ast_pending_span` (§5, §5.1); (c) a parse-only read holds its parsed store (AST-15/16);
+(d) the parser, not the lexer, makes the metacomment `ATTR` nodes at the `CASE` reduction (§5.1,
+§7); (e) the `PORT_REF` row's REJECT note (§4.3). Amendment (b), `library_units_from`, lands with
+2C-2.
 
 ## 14. Open questions (decided as recommended under the overnight rule, 2026-10-10)
 

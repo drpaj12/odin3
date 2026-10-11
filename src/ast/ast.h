@@ -133,6 +133,13 @@ odin3_status odin3_ast_push(odin3_ast *ast, odin3_ast_id node);
 odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, uint32_t mark,
                                    odin3_ast_id *out);
 
+/*
+ * The pending stack from mark to its top, in push order: a view valid until the next push, make
+ * or unwind (the parser's reordered kinds copy it, 2C §3.2). Empty for a NULL store or a mark at
+ * or above the top.
+ */
+odin3_ast_span odin3_ast_pending_span(const odin3_ast *ast, uint32_t mark);
+
 /* Pops the pending stack back to mark (error recovery); a mark at or above the top is a no-op. */
 void odin3_ast_unwind(odin3_ast *ast, uint32_t mark);
 

@@ -620,6 +620,27 @@ static void test_unwind_and_marked_errors(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_nchild(ast, id));
 }
 
+/* The pending stack from a mark to its top, in push order; empty at or above the top. */
+static void test_pending_span(void) {
+    odin3_ast_id aa = ident("a");
+    odin3_ast_id bb = ident("b");
+    odin3_ast_id cc_id = ident("c");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_push(ast, aa));
+    uint32_t mark = odin3_ast_mark(ast);
+    TEST_ASSERT_EQUAL_UINT32(1, mark);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_push(ast, bb));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_push(ast, cc_id));
+    odin3_ast_span span = odin3_ast_pending_span(ast, mark);
+    TEST_ASSERT_EQUAL_UINT32(2, span.n);
+    TEST_ASSERT_EQUAL_UINT32(bb.v, span.ids[0].v);
+    TEST_ASSERT_EQUAL_UINT32(cc_id.v, span.ids[1].v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_pending_span(ast, odin3_ast_mark(ast)).n);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_pending_span(ast, odin3_ast_mark(ast) + 1).n);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_pending_span(NULL, 0).n);
+    odin3_ast_unwind(ast, 0);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_pending_span(ast, 0).n);
+}
+
 /* A view of the child table passed back to make is copied correctly even when it grows. */
 static void test_make_from_own_children(void) {
     odin3_ast_id kids[8];
@@ -1160,6 +1181,7 @@ int main(void) {
     RUN_TEST(test_null_arguments);
     RUN_TEST(test_nested_marks);
     RUN_TEST(test_unwind_and_marked_errors);
+    RUN_TEST(test_pending_span);
     RUN_TEST(test_make_from_own_children);
     RUN_TEST(test_ast5_random_build);
     RUN_TEST(test_finish_seals);

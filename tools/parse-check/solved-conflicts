@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# solved-conflicts: a Bison grammar's solved conflicts against the allowlist. See solved_conflicts.py.
+# Exit codes: 0 equal, 1 different, 2 usage/input error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/solved_conflicts.py" "$@"
