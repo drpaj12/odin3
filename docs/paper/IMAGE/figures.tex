@@ -1,0 +1,24 @@
+% Standalone build of every TikZ figure, one per page, at print size and in the paper's fonts
+% (Times, Helvetica, Courier as IEEEtran sets them). Not part of the paper or the Overleaf zip:
+% `make figures` compiles it and splits the pages into IMAGE/svg/*.svg and preview PNGs.
+% The [OT1]{fontenc} line is a no-op under pdfLaTeX and makes XeTeX/Tectonic use Times too.
+\documentclass[multi=odinfig, border=2pt]{standalone}
+\usepackage[OT1]{fontenc}
+\renewcommand{\rmdefault}{ptm}
+\renewcommand{\sfdefault}{phv}
+\renewcommand{\ttdefault}{pcr}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,shapes.geometric,backgrounds,calc,matrix}
+\input{odin3-tikz-styles}
+\begin{document}
+\begin{odinfig}\input{fig_pipeline}\end{odinfig}
+\begin{odinfig}\input{fig_project}\end{odinfig}
+\begin{odinfig}\input{fig_elab_seam}\end{odinfig}
+\begin{odinfig}\input{fig_util}\end{odinfig}
+\begin{odinfig}\input{fig_ir_model}\end{odinfig}
+\begin{odinfig}\input{fig_prov}\end{odinfig}
+\begin{odinfig}\input{fig_srcman}\end{odinfig}
+\begin{odinfig}\input{fig_techlib}\end{odinfig}
+\begin{odinfig}\input{fig_abi}\end{odinfig}
+\end{document}

@@ -1,7 +1,8 @@
 % Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
-% Figures are IMAGE/*.pdf, rendered from IMAGE/*.dot (see README.md). Every number below is
-% taken from the repository's docs (DESIGN.md, IR.md, PHASE0-2.md, specs/) as of 2026-10-11;
-% gaps are marked with \todo{}.
+% Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
+% hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
+% from the repository's docs (DESIGN.md, IR.md, PHASE0-3.md, specs/) as of 2026-10-11; gaps are
+% marked with \todo{}.
 \documentclass[conference]{IEEEtran}
 
 \usepackage{cite}
@@ -10,8 +11,12 @@
 \usepackage{booktabs}
 \usepackage{url}
 \usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,shapes.geometric,backgrounds,calc,matrix}
 
 \graphicspath{{IMAGE/}}
+% Shared figure palette and styles; each figure is IMAGE/fig_<name>.tex, pulled in with \input.
+\input{IMAGE/odin3-tikz-styles}
 
 % A visible marker for gaps: numbers not yet measured, text Peter must supply.
 \newcommand{\todo}[1]{\textbf{[TODO: #1]}}
@@ -48,7 +53,7 @@ internal data structures (ID-based paged netlist storage, a lineage DAG for prov
 Clang-style source manager, a 24-byte AST record), and explains how and why the design departs
 from Yosys and Odin~II. Phase~1 (core IR, BLIF round trip, simulator, writers, C ABI) is
 complete and was validated on 1,846 golden netlists; Phase~2 (the Verilog-2005 front end) is
-under way.
+under way, and the Phase~3 back end (ABC and the VTR flow) is decided.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -80,7 +85,8 @@ The contributions of this paper are:
 \item an architecture in which every stage is a registered pass over one IR with two
   granularities, project input that carries the architecture and mapping rules, and a two-stage
   elaboration whose seam lets a SystemVerilog front end reuse the back half (Sec.~\ref{sec:arch});
-\item a feature list with an honest built/specified/planned status (Sec.~\ref{sec:features});
+\item a feature list with an honest built/in-progress/specified/planned status
+  (Sec.~\ref{sec:features});
 \item the internal data structures, with their measured sizes and costs
   (Sec.~\ref{sec:data});
 \item a comparison with Yosys and Odin~II that explains the design reasoning behind each
@@ -88,8 +94,9 @@ The contributions of this paper are:
   agent-driven method (Sec.~\ref{sec:method}).
 \end{itemize}
 
-Odin III is young. Phase~1 is complete; Phase~2 has its project readers and preprocessor built
-and its parser and elaboration specified (Sec.~\ref{sec:status}). Quality-of-results numbers
+Odin III is young. Phase~1 is complete; Phase~2 has its project readers and preprocessor built,
+its parser and the first parts of elaboration in progress, and its process and optimisation
+passes specified; Phase~3's plan is approved (Sec.~\ref{sec:status}). Quality-of-results numbers
 await Phase~3 \todo{Phase 3 QoR against Parmys on the VTR benchmarks}; this paper reports
 the architecture and the measurements that exist.
 
@@ -122,11 +129,13 @@ SystemVerilog compiler that Odin III will use through an adapter.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig_pipeline}
-\caption{The Odin III pipeline. Every arrow inside the core is a pass registered with the
-pass manager, which runs \code{check} before and after each pass in Debug builds. Solid green:
-built and merged; dashed yellow: approved specification and plan; dotted: planned (Phases 3--7).
-The elaborated AST is the seam where the slang adapter enters.}
+\odinfit{\textwidth}{\input{IMAGE/fig_pipeline}}
+\caption{The Odin III pipeline and its status on 2026-10-11. Built: merged on the main branch;
+in progress: being implemented (the 2C parser, and 2D-1's IR changes and 2D-2's constant
+evaluator); specified: approved specification and plan; planned: Phases 3--7 (Phase~3's plan is
+approved). Every step inside the core is a pass registered with the pass manager, which runs
+\code{check} before and after each pass in Debug builds. The elaborated AST is the seam where the
+slang adapter enters; Phase~4's \code{partial\_map} replaces Phase~3's fixed \code{hardmap}.}
 \label{fig:pipeline}
 \end{figure*}
 
@@ -159,9 +168,10 @@ on a design that still holds \code{\$proc} cells (EL-33).
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_project}
-\caption{Project input: four formats fill one design-owned record. Mapping rules, inventory and
-overrides are read and stored in Phase~2 and interpreted by the Phase~4 partial mapper.}
+\odinfit{\columnwidth}{\input{IMAGE/fig_project}}
+\caption{Project input: four formats fill one design-owned record, which every reader shares.
+Mapping rules, inventory and overrides are read and stored in Phase~2 and interpreted by the
+Phase~4 partial mapper.}
 \label{fig:project}
 \end{figure}
 
@@ -199,7 +209,7 @@ with a stdlib Python reference parser as the oracle for the C readers.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig_elab_seam}
+\odinfit{\textwidth}{\input{IMAGE/fig_elab_seam}}
 \caption{Two-stage elaboration (2D spec). Stage~1 is Verilog-only and produces an elaborated
 AST; stage~2 is shared by every front end. The slang adapter builds the elaborated form through
 the C ABI and enters at stage~2. \code{write\_rtlil} hands the result to Parmys's Yosys~0.55 for
@@ -235,8 +245,10 @@ rule.
 \label{sec:features}
 
 Table~\ref{tab:features} lists the features and their status on 2026-10-11. ``Built'' means
-merged on the main branch with its exit test; ``specified'' means an approved specification and
-implementation plan; ``planned'' means scheduled in a later phase (DESIGN \S12).
+merged on the main branch with its exit test; ``in progress'' means being implemented against an
+approved plan, not yet merged; ``specified'' means an approved specification and implementation
+plan; ``planned'' means scheduled in a later phase (DESIGN \S12). The figures use the same four
+states.
 
 \begin{table*}[t]
 \caption{Odin III features and status (2026-10-11)}
@@ -261,16 +273,19 @@ Writers & Yosys-schema JSON, structural Verilog, Graphviz dot with focus and nod
 Simulator & cycle-based, event-free, 2-state; hard cells through their library functions & built (1E) \\
 C ABI, plugins & \code{odin3.h} ABI v4 (125 functions); \code{.so} plugins; Python via cffi;
   pass manager and script CLI & built (1D, 2A) \\
-Project input & \code{.o3proj}, \code{-f}/\code{-F} lists, Quartus \code{.qpf/.qsf/.qip};
-  \code{read\_project}, \code{dump\_project} & built (2B); Odin~II XML planned \\
+Project input & \code{.o3proj}, \code{-f}/\code{-F} lists, Quartus \code{.qpf/.qsf/.qip}, Odin~II
+  XML; \code{read\_project}, \code{dump\_project} & built (2B) \\
 Preprocessor & Verilog-2005 macros, conditionals, includes, \code{translate\_off}; segment map
   with macro and include chains; 16 caps & built (2B) \\
 Source manager, AST & Clang-style locations; 24-byte node record, 68 kinds; symbol table;
   printer; structural check & built (2A) \\
-Parser & reentrant Flex lexer, pure LALR(1) Bison grammar, \code{\%expect 0} & specified (2C) \\
-Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{write\_rtlil} & specified (2D) \\
-\code{proc}, \code{opt} & processes to mux trees and \code{\$dff*}; folding, dead nodes, CSE & planned (2E, 2F) \\
-Back end & \code{lower}, linked ABC, VTR flow hookup & planned (Phase 3) \\
+Parser & reentrant Flex lexer, pure LALR(1) Bison grammar, \code{\%expect 0}; grammar complete
+  except generate, instantiation and gates & in progress (2C) \\
+Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{write\_rtlil} & in
+  progress (2D-1 IR, 2D-2 constants); rest specified \\
+\code{proc}, \code{opt} & processes to mux trees and \code{\$dff*}; folding, dead nodes, CSE & specified (2E, 2F) \\
+Back end & \code{flatten}, \code{lower}, fixed \code{hardmap}, linked ABC, \code{write\_blif --vtr},
+  VTR flow hookup & planned (Phase 3; plan approved) \\
 Mapping & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & planned (Phase 4) \\
 Other languages & slang adapter (SV), GHDL path (VHDL) & planned (Phase 5) \\
 Reverse engineering & \code{raise}, VQM/EDIF readers, Altera \code{bind}, Titan & planned (Phase 6) \\
@@ -294,9 +309,9 @@ the development machine (Intel i7-13700 under WSL2) as recorded in the phase log
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_util}
+\odinfit{\columnwidth}{\input{IMAGE/fig_util}}
 \caption{\code{src/util}: the only generic containers in the tree, over one allocation wrapper
-whose test hook fails the $n$-th allocation.}
+whose test hook fails the $n$-th allocation. Arrows point from a container to what it uses.}
 \label{fig:util}
 \end{figure}
 
@@ -318,10 +333,11 @@ reaches output depends on hash-map iteration order. A benchmark interned 2M name
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.92\textwidth]{fig_ir_model}
+\odinfit{\textwidth}{\input{IMAGE/fig_ir_model}}
 \caption{The IR object model (IR.md). A module keeps nodes, pins, nets and wires in
-per-kind paged arrays; every reference is a typed 32-bit ID. A net owns a contiguous pin array,
-drivers first. Record sizes are \code{sizeof} on x86-64.}
+per-kind paged arrays; every reference is a typed 32-bit ID (blue; double-headed arrows are the
+two directions of one relation), and grey arrows are ownership. A node's pins are contiguous; a
+net owns a contiguous pin array, drivers first. Record sizes are \code{sizeof} on x86-64.}
 \label{fig:ir}
 \end{figure*}
 
@@ -385,7 +401,7 @@ mirror its port nodes, and each parameter specialisation is its own module (IR-7
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_prov}
+\odinfit{\columnwidth}{\input{IMAGE/fig_prov}}
 \caption{The provenance lineage DAG (illustrative run and operation numbers). Two \code{\$add}s
 from one line of a generate loop get two SOURCE records; lowering each is one operation with
 one DERIVED record; clumping two gates is one operation with two parents.}
@@ -416,11 +432,12 @@ loaded.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.88\columnwidth]{fig_srcman}
+\odinfit{\columnwidth}{\input{IMAGE/fig_srcman}}
 \caption{The location space for \code{`define INNER(p) (p + 1)},
-\code{`define OUTER(q) `INNER(q * 2)} and \code{assign y = `OUTER(xx);}. Solid edges: where a
-buffer was entered (\emph{parent}); dashed: where its bytes are spelled (\emph{def}). The
-segment map ties each run of the preprocessed stream to its buffer.}
+\code{`define OUTER(q) `INNER(q * 2)} and \code{assign y = `OUTER(xx);}: buffers in allocation
+order, left to right. Arcs above: where a buffer was entered (\emph{parent}); dashed arcs below:
+where its bytes are spelled (\emph{def}); both point to earlier buffers. The segment map ties
+each run of the preprocessed stream to a location.}
 \label{fig:srcman}
 \end{figure}
 
@@ -451,9 +468,10 @@ at 4\,MiB maximum RSS (PHASE2 \#12).
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{fig_ast}
-\caption{The 24-byte AST record and the stores for \code{assign y = a + 1;}. Nodes are made
-bottom-up, so every child ID is below its parent's. Each node owns one span of the shared child
-table; absent optional slots are ID~0; literals live in a payload table.}
+\caption{The 24-byte AST record (byte offsets above each field) and the stores for
+\code{assign y = a + 1;}. Nodes are made bottom-up, so every child ID is below its parent's. Each
+node owns one span of the shared child table (shaded alike); absent optional slots are ID~0;
+literals live in a payload table.}
 \label{fig:ast}
 \end{figure}
 
@@ -489,9 +507,10 @@ their read pass unless a pass asks to keep them; SOURCE records keep the raw loc
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_techlib}
-\caption{The \code{.o3lib} tech library: one text format read into local cell types whose
-widths may be parametric and whose functions are expressions over the ports.}
+\odinfit{\columnwidth}{\input{IMAGE/fig_techlib}}
+\caption{The \code{.o3lib} tech library: one text format (here the VTR \code{multiply} cell,
+verbatim) read into local cell types whose widths may be parametric and whose functions are
+expressions over the ports.}
 \label{fig:techlib}
 \end{figure}
 
@@ -513,7 +532,7 @@ order varies between files.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{fig_abi}
+\odinfit{\columnwidth}{\input{IMAGE/fig_abi}}
 \caption{The C ABI and plugin model. Everything outside the core sees only \code{odin3.h}.}
 \label{fig:abi}
 \end{figure}
@@ -535,7 +554,7 @@ ABI can hand them out safely and the IR serialises trivially.
 
 \begin{table}[t]
 \caption{Selected resource caps (named constants, each a located error with a test). The
-parser and elaboration caps are specified (2C, 2D), the others built.}
+parser and elaboration caps belong to work in progress (2C, 2D), the others are built.}
 \label{tab:caps}
 \centering
 \footnotesize
@@ -646,9 +665,10 @@ and run unattended on shared machines, a located error is better than a killed p
 file and an XML configuration; Yosys takes scripts. Odin III makes the project the unit of
 reproducibility: sources, defines, top and parameters, the architecture with its inventory and
 research overrides, the mapping rules, and the flow. The architect's decision for Phase~3 extends
-this to ABC: the project file names the ABC script, and a command-line option overrides it, so
-a soft-logic experiment is recorded with the design rather than in a wrapper script
-\todo{project-file syntax for the ABC script, fixed with Phase 3}. ABC is linked rather than
+this to ABC: the project file names the ABC script (\code{abc\_script <file>} in
+\code{.o3proj}), \code{--abc-script} on the command line overrides it, and the \code{abc} pass
+records the script's path and SHA-256 in provenance, so a soft-logic experiment is recorded with
+the design rather than in a wrapper script. ABC is linked rather than
 spawned (ADR D3: its permissive license allows linking into the MIT core), and the \code{abc}
 pass will hand it the soft-logic cone with black boxes preserved and stitch the result back.
 
@@ -721,8 +741,10 @@ Ph. & Deliverable & Exit test & Status \\
   matches ABC; a Python plugin walks the IR & done \\
 2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
   micros identical or equivalent to Parmys; every project fixture parses and elaborates from each
-  format & 2A, 2B built; 2C, 2D specified \\
-3 & \code{lower}, linked ABC, VTR flow hookup & VTR benchmarks through place and route; QoR table & planned \\
+  format & 2A, 2B built; 2C, 2D in progress; 2E, 2F specified \\
+3 & \code{flatten}, \code{lower}, fixed \code{hardmap}, linked ABC, \code{write\_blif --vtr}, VTR
+  flow hookup & the 19 VTR~7.0 benchmarks through place and route; QoR table against Parmys &
+  planned (plan approved) \\
 4 & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & QoR
   parity on an architecture sweep & planned \\
 5 & slang adapter, GHDL path & three front ends, one netlist & planned \\
@@ -748,11 +770,22 @@ committed fixtures.
 Phase~2 has built the source manager, AST and symbol table (2A), and the project readers and
 preprocessor (2B), whose differential check against Icarus and Yosys over 287 files gave 271
 agreements, 11 cases where the two oracles disagree (all as expected), 5 declared divergences and
-20 excluded files (headers read only through another micro), with no differences or crashes. The parser (2C) and
-elaboration (2D) are specified and planned; 2D's targets are \code{mcml.v} in at most 0.5\,s and
+20 excluded files (headers read only through another micro), with no differences or crashes. The
+Odin~II XML reader (2B-4) completed project input. The parser (2C) is in progress, with its
+grammar complete except generate constructs, instantiation and gates; elaboration (2D) is in
+progress with its IR changes and constant evaluator (2D-1, 2D-2); \code{proc} (2E) and
+\code{opt} (2F) are specified. 2D's targets are \code{mcml.v} in at most 0.5\,s and
 Koios \code{lenet.v} in at most 10\,s, against Yosys~0.55's measured 0.48\,s and 14.3\,s
 \todo{measured 2C parse-only and 2D elaboration results on mcml.v and lenet.v}
 \todo{Phase 2 exit-test results against Parmys}.
+
+Phase~3's plan and its twenty decisions are approved (PHASE3). Its exit test runs the 19 VTR~7.0
+benchmarks on \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm} with Odin III alone producing
+each netlist (\code{proc}, \code{opt}, \code{flatten}, \code{wreduce}, a fixed \code{hardmap}
+that copies Parmys's defaults, \code{lower}, linked ABC, \code{write\_blif --vtr}), routes them
+with VPR, passes VTR's functional check, and reports a QoR table against the Parmys flow with a
+loose gate: a geomean ratio of at most 1.20, and no design above 1.50, on CLB count, channel
+width, critical-path delay and routed wirelength.
 
 % ------------------------------------------------------------------------------------------
 \section{Conclusion}
