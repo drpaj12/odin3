@@ -4,6 +4,7 @@
 #ifndef ODIN3_PASSES_MANAGER_H
 #define ODIN3_PASSES_MANAGER_H
 
+#include "ast/srcfmt.h"
 #include "ir/design.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
@@ -57,26 +58,33 @@ const odin3_pass_def *odin3_pass_at(uint32_t index);
  * Process-level options the CLI sets. check: run odin3_check_design FULL before and after every
  * pass (always done in Debug builds, whatever this says; `--check` in Release). top: the requested
  * top module name (`--top`), NULL for none; caller-owned, must outlive every pass run; `read_blif`
- * applies it after reading and `hierarchy` uses it when given no `--top` (DESIGN §4.0: --top wins).
+ * applies it after reading, `read_project` replaces the project's top with it (2B §4.4) and
+ * `hierarchy` uses it when given no `--top` (DESIGN §4.0: --top wins). revision: `--revision`
+ * for `read_project` when has_revision ("" is a revision; NULL otherwise), caller-owned like top;
+ * a read_project's own --revision wins. diag_paths: how diagnostics name files (`--diag-paths`,
+ * PRJ-18), set on the design before each pass (odin3_design_set_diag_paths).
  */
 typedef struct odin3_pass_options {
     bool check;
     const char *top;
+    const char *revision;
+    bool has_revision;
+    odin3_srcfmt diag_paths;
 } odin3_pass_options;
 
 void odin3_pass_set_options(odin3_pass_options opts);
 odin3_pass_options odin3_pass_get_options(void);
 
 /*
- * Runs the pass named name on design: opens a provenance pass run named after the pass
- * (odin3_pass_run_begin), checks the design (FULL, when checking is on; see odin3_pass_options;
- * this check reports errors only, so the warnings of the check after a pass show once per pass;
- * blind spots: a warning that first appears in this check, e.g. from IR changed outside a pass,
- * is counted in odin3_log_count but never delivered, and while it runs the process-wide log level
- * is lowered to ODIN3_LOG_ERROR, under any sink, then restored),
- * runs the pass, checks again (also after a failed pass: it must leave valid IR), and logs
- * "pass <name>: <ms> ms" at ODIN3_LOG_INFO (checks included). args must hold closed double quotes
- * (see odin3_pass_arg_next). Returns the pass's status when it fails ("pass <name>: failed:
+ * Runs the pass named name on design: sets the design's diagnostic-path style from the options,
+ * opens a provenance pass run named after the pass (odin3_pass_run_begin), checks the design (FULL,
+ * when checking is on; see odin3_pass_options; this check reports errors only, so the warnings of
+ * the check after a pass show once per pass; blind spots: a warning that first appears in this
+ * check, e.g. from IR changed outside a pass, is counted in odin3_log_count but never delivered,
+ * and while it runs the process-wide log level is lowered to ODIN3_LOG_ERROR, under any sink, then
+ * restored), runs the pass, checks again (also after a failed pass: it must leave valid IR), and
+ * logs "pass <name>: <ms> ms" at ODIN3_LOG_INFO (checks included). args must hold closed double
+ * quotes (see odin3_pass_arg_next). Returns the pass's status when it fails ("pass <name>: failed:
  * <status>" logged; a failing check after it is logged too but the pass's status wins);
  * ODIN3_ERR_CHECK when the check before or after fails (the checker logs each violated rule as
  * "check: <module>: rule <n>: …", then "pass <name>: check before|after the pass failed" is

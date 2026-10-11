@@ -441,8 +441,9 @@ static void test_set_top_file_level(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_project_set_top_file(proj, odin3_bytes_cstr("x"), &qsf));
     TEST_ASSERT_EQUAL_UINT32(0, proj->top_at.v);
     TEST_ASSERT_EQUAL_UINT32(qsf.resolved, proj->top_file.resolved);
+    /* odin3_diag names located errors in the design's style too (PRJ-18) */
     expect_error(odin3_project_set_top(proj, odin3_bytes_cstr("y"), word_loc()),
-                 "p.o3proj:2:5: error: syntax: top given twice (first x): 'y'");
+                 "/abs/p.o3proj:2:5: error: syntax: top given twice (first x): 'y'");
 }
 
 static void test_counts(void) {

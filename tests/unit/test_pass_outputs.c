@@ -78,10 +78,11 @@ static void read_ff(void) {
 }
 
 static void test_registered_in_order(void) {
-    static const char *const names[] = {"read_blif",  "read_techlib",  "write_blif",
-                                        "write_json", "write_verilog", "write_dot",
-                                        "check",      "compact",       "stats",
-                                        "sim",        "hierarchy",     "write_verilog_ast"};
+    static const char *const names[] = {"read_blif",    "read_techlib",  "write_blif",
+                                        "write_json",   "write_verilog", "write_dot",
+                                        "check",        "compact",       "stats",
+                                        "sim",          "hierarchy",     "write_verilog_ast",
+                                        "read_project", "dump_project",  "preprocess"};
     for (uint32_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         TEST_ASSERT_EQUAL_STRING(names[i], odin3_pass_at(i)->name);
     }

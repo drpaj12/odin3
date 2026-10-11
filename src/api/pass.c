@@ -4,6 +4,7 @@
  */
 #include "api/api.h"
 
+#include "ast/srcfmt.h"
 #include "ir/design.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
@@ -18,8 +19,10 @@
 #include <stdint.h>
 #include <string.h>
 
-/* The heap copy of the --top name the pass options point at (odin3_pass_set_top_name). */
+/* The heap copies of the --top name and the --revision the pass options point at
+ * (odin3_pass_set_top_name, odin3_pass_set_revision). */
 static char *g_top_copy = NULL;
+static char *g_revision_copy = NULL;
 
 ODIN3_EXPORT uint32_t odin3_pass_get_count(void) {
     return odin3_pass_count();
@@ -49,15 +52,24 @@ ODIN3_EXPORT void odin3_pass_set_check(bool check) {
     odin3_pass_set_options(opts);
 }
 
-ODIN3_EXPORT odin3_status odin3_pass_set_top_name(const char *name) {
-    char *copy = NULL;
-    if (name != NULL) {
-        size_t len = strlen(name);
-        copy = odin3_util_malloc(len + 1);
-        if (copy == NULL) {
+/* A heap copy of text in *copy (NULL for NULL). NO_MEMORY. */
+static odin3_status copy_text(const char *text, char **copy) {
+    *copy = NULL;
+    if (text != NULL) {
+        size_t len = strlen(text);
+        *copy = odin3_util_malloc(len + 1);
+        if (*copy == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        memcpy(copy, name, len + 1);
+        memcpy(*copy, text, len + 1);
+    }
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_pass_set_top_name(const char *name) {
+    char *copy = NULL;
+    if (copy_text(name, &copy) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
     }
     odin3_pass_options opts = odin3_pass_get_options();
     opts.top = copy;
@@ -65,6 +77,26 @@ ODIN3_EXPORT odin3_status odin3_pass_set_top_name(const char *name) {
     odin3_util_free(g_top_copy);
     g_top_copy = copy;
     return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_pass_set_revision(const char *revision) {
+    char *copy = NULL;
+    if (copy_text(revision, &copy) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.revision = copy;
+    opts.has_revision = copy != NULL;
+    odin3_pass_set_options(opts);
+    odin3_util_free(g_revision_copy);
+    g_revision_copy = copy;
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT void odin3_pass_set_diag_paths(bool resolved) {
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.diag_paths = resolved ? ODIN3_SRCFMT_RESOLVED : ODIN3_SRCFMT_GIVEN;
+    odin3_pass_set_options(opts);
 }
 
 ODIN3_EXPORT odin3_status odin3_design_run_script(odin3_design *design, const char *text,
