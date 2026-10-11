@@ -182,6 +182,29 @@ class GeneratedSourceRulesTest(unittest.TestCase):
         )
         self.assert_rule(self.L, _scanner("x { return TOK_X; }\n"), "l-action")
 
+    def test_lexer_action_begin_only_passes(self) -> None:
+        text = _scanner('<CMT>"*"+"/" { BEGIN(INITIAL); }\n"/*" { BEGIN(CMT); }\n')
+        self.assertEqual(self.check(self.L, text), [])
+
+    def test_lexer_action_begin_only_means_one_begin(self) -> None:
+        for rule in (
+            "x { BEGIN(A); BEGIN(B); }\n",
+            "x { yyless(0); BEGIN(INITIAL); }\n",
+            "x { return BEGIN(A); }\n",
+        ):
+            with self.subTest(rule=rule):
+                self.assert_rule(self.L, _scanner(rule), "l-action")
+
+    def test_yyless_only_once_and_only_zero(self) -> None:
+        self.assert_rule(
+            self.L, _scanner("x { yyless(1); BEGIN(A); odin3_vl_x(yyextra); }\n"), "l-action"
+        )
+        twice = (
+            "<A>. { yyless(0); BEGIN(INITIAL); odin3_vl_x(yyextra); }\n"
+            "<B>. { yyless(0); BEGIN(INITIAL); odin3_vl_y(yyextra); }\n"
+        )
+        self.assert_rule(self.L, _scanner(twice), "yyless")
+
     def test_four_line_lexer_action_fails(self) -> None:
         text = _scanner("x {\n    return odin3_vl_x(yyextra,\n        yylval);\n}\n")
         self.assert_rule(self.L, text, "action-lines")

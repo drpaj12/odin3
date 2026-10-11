@@ -132,6 +132,9 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/parser.c
     src/frontends/verilog/actions.c
     src/frontends/verilog/lexer_support.c
+    src/frontends/verilog/lexer_tokens.c
+    src/frontends/verilog/lexer_trivia.c
+    src/frontends/verilog/keywords.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -201,7 +204,8 @@ target_sources(odin3_core PRIVATE ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog
 target_include_directories(odin3_core PRIVATE ${_gen})
 # The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
 # expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
-# the scanner needs nothing. One flag, for the parser only:
+# the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
+# trailing context, yyless(0), YY_DECL: no warning). One flag, for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
@@ -337,6 +341,9 @@ if(BUILD_TESTING)
     add_dependencies(test_verilog_parser verilog_generated)
     target_compile_definitions(test_verilog_parser PRIVATE
         ODIN3_VERILOG_DATA="${PROJECT_SOURCE_DIR}/tests/verilog")
+    odin3_add_unit_test(test_verilog_lexer)
+    target_include_directories(test_verilog_lexer PRIVATE ${_gen})
+    add_dependencies(test_verilog_lexer verilog_generated)
     odin3_add_unit_test(test_project_words)
     odin3_add_unit_test(test_project_paths)
     odin3_add_unit_test(test_project_record)

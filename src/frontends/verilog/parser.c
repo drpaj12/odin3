@@ -52,7 +52,6 @@ void odin3_vl_run_init(odin3_vl_run *run, odin3_design *design) {
     }
     memset(run, 0, sizeof *run);
     run->design = design;
-    run->kw_mask[0] = ODIN3_VL_KW_2005;
     run->limits = default_limits();
 }
 
@@ -139,6 +138,7 @@ static void ctx_init(odin3_vp_ctx *ctx, odin3_vl_run *run, odin3_ast *ast, odin3
     odin3_vec_init(&ctx->meta_scratch, sizeof(odin3_ast_id));
     odin3_vec_init(&ctx->headers, sizeof(odin3_vp_header));
     odin3_vec_init(&ctx->windows, sizeof(odin3_vp_window));
+    odin3_vl_bind_error_mode(lx, &ctx->error_mode); /* a lexer error makes the actions inert */
 }
 
 static void ctx_free(odin3_vp_ctx *ctx) {

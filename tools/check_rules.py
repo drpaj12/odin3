@@ -13,9 +13,11 @@ gate never sees (2C spec §6), so more rules keep hand-written logic out of them
 - y-action: every .y action is exactly one VP(out, vp_*(...)) or VP_ERR(vp_*(...)) statement
   (actions.h): one call each, nothing after its closing parenthesis;
 - l-action: every .l action is one call into lexer_support.c (an `odin3_vl_*` function, its
-  value optionally returned) beside Flex's own BEGIN(name) and yyless(name) macros, which
-  lexer_support.c cannot call; `|` (the next rule's action) is allowed. A rule is a line
-  starting in column 0; its pattern is read on the raw text (quotes, classes, braces);
+  value optionally returned) beside Flex's own BEGIN(name) and yyless(0) macros, which
+  lexer_support.c cannot call, or exactly one BEGIN(name) statement and nothing else; `|` (the
+  next rule's action) is allowed. A rule is a line starting in column 0; its pattern is read on
+  the raw text (quotes, classes, braces);
+- yyless: a scanner calls yyless at most once (the BASED exit, 2C spec §2.3);
 - action-lines: no .y or .l action spans more than three lines;
 - prologue: %{ %}, %code and %top blocks hold only #include lines and the YY_USER_ACTION,
   YYLLOC_DEFAULT, YYMAXDEPTH, YYINITDEPTH and YYSTACK_USE_ALLOCA macros, and the code section
@@ -91,8 +93,8 @@ _PLAIN_DIRECTIVES = ("define", "parse-param", "lex-param", "param")
 _PLAIN_BODY = re.compile(r"[\w\s*.]*")  # a type, a name, a value
 _UNION_MEMBER = re.compile(r"\s*\w+(?:\s+\w+)*[\s*]+\w+\s*")
 _CALL_HEAD = re.compile(r"\s*(return\s+)?(\w+)\s*\(")
-_FLEX_MACROS = ("BEGIN", "yyless")
-_FLEX_ARG = re.compile(r"\s*\w+\s*")
+_FLEX_ARG = {"BEGIN": re.compile(r"\s*\w+\s*"), "yyless": re.compile(r"\s*0\s*")}
+_YYLESS = re.compile(r"\byyless\b")
 _CLOSERS = {"(": ")", "[": "]", "{": "}"}
 _MESSAGES = {
     "prologue": "a prologue holds only #include lines and the YY* macros of 2C spec §6, and "
@@ -101,7 +103,9 @@ _MESSAGES = {
     "%printer, …) or a %union holding more than member declarations",
     "verbatim": "an indented .l line is code copied into the scanner",
     "action-lines": "an action spans more than three lines",
-    "l-action": "a .l action is one odin3_vl_* call (beside BEGIN/yyless of a name)",
+    "l-action": "a .l action is one odin3_vl_* call (beside BEGIN(name)/yyless(0)), or one "
+    "BEGIN(name) alone",
+    "yyless": "yyless is allowed once per scanner (the BASED exit of 2C spec §2.3)",
     "y-action": "a .y action is exactly one VP(out, vp_*(...)) or VP_ERR(vp_*(...)) statement",
 }
 
@@ -167,20 +171,23 @@ def _y_action_ok(body: str) -> bool:
 
 
 def _l_action_ok(body: str) -> bool:
-    """One odin3_vl_* call (optionally returned) beside BEGIN(name)/yyless(name) statements."""
+    """One odin3_vl_* call (optionally returned) beside BEGIN(name)/yyless(0) statements, or
+    exactly one BEGIN(name) statement."""
     *statements, rest = _split_top(body, ";")
-    calls = 0
+    calls, macros = 0, []
     for statement in statements:
         call = _call(statement)
         if call is None:
             return False
         name, args, returned = call
-        if name in _FLEX_MACROS and not returned and _FLEX_ARG.fullmatch(args):
+        if name in _FLEX_ARG and not returned and _FLEX_ARG[name].fullmatch(args):
+            macros.append(name)
             continue
         if not name.startswith("odin3_vl_"):
             return False
         calls += 1
-    return calls == 1 and rest.strip() == ""
+    begin_only = calls == 0 and macros == ["BEGIN"]
+    return (calls == 1 or begin_only) and rest.strip() == ""
 
 
 def _prologue_body(body: str, at: int) -> list[Finding]:
@@ -312,7 +319,7 @@ def _l_block(text: str, blank: str, start: int) -> tuple[int, list[Finding]] | N
 
 def _l_findings(text: str) -> list[Finding]:
     blank = strip_comments_and_strings(text)
-    found: list[Finding] = []
+    found: list[Finding] = [(m.start(), "yyless") for m in list(_YYLESS.finditer(blank))[1:]]
     section, offset, skip_to = 1, 0, 0
     for line in text.splitlines(keepends=True):
         start, offset = offset, offset + len(line)

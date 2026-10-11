@@ -77,10 +77,12 @@ typedef struct odin3_vp_limits {
 
 /*
  * The per-run read context (plan point (c)): one per read run, across its streams (a run is one
- * compilation unit, §2.5). kw_mask/kw_at are the `begin_keywords stack (the active masks and
- * where each was pushed); errors counts the error diagnostics (§3.4, point (r)); stop is set at
+ * compilation unit, §2.5). kw_mask[0 .. kw_depth) and kw_at are the `begin_keywords stack: the
+ * pushed sets (ODIN3_VL_KW_*, the innermost last) and where each directive was; with none the
+ * 1364-2005 set applies. errors counts the error diagnostics (§3.4, point (r)); stop is set at
  * the cap or by a fatal failure; tokens is NULL or a caller-owned vec of odin3_vp_loc to which
- * the lexer appends every token's location (the location oracle's map).
+ * the lexer appends every returned token's location, the end of input included (the location
+ * oracle's map).
  */
 typedef struct odin3_vl_run {
     odin3_design *design;
@@ -93,8 +95,8 @@ typedef struct odin3_vl_run {
 } odin3_vl_run;
 
 /*
- * Starts a run on design: the 1364-2005 keyword set in kw_mask[0] with an empty stack (depth 0),
- * no errors, the default limits, no token map. Never fails; NULL run is a no-op.
+ * Starts a run on design: an empty keyword stack (the 1364-2005 set), no errors, the default
+ * limits, no token map. Never fails; NULL run is a no-op.
  */
 void odin3_vl_run_init(odin3_vl_run *run, odin3_design *design);
 

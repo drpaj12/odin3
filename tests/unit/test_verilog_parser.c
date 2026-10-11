@@ -226,7 +226,6 @@ static void test_report_cap_ignores_warnings(void) {
 static void test_limits_hook_lowers_and_clamps(void) {
     odin3_vl_run fresh;
     odin3_vl_run_init(&fresh, design);
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_VL_KW_2005, fresh.kw_mask[0]);
     TEST_ASSERT_EQUAL_UINT32(0, fresh.kw_depth);
     TEST_ASSERT_FALSE(odin3_vl_in_error(&fresh));
     TEST_ASSERT_NULL(fresh.tokens);
@@ -269,8 +268,10 @@ static void test_lexer_eof_location(void) {
     ODIN3_VP_STYPE val;
     odin3_vp_loc loc = {{7}, {7}, 7};
     TEST_ASSERT_EQUAL_INT(TOK_YYEOF, odin3_vl_next(lx, &val, &loc));
-    TEST_ASSERT_EQUAL_UINT32(0, loc.loc.v);
-    TEST_ASSERT_EQUAL_UINT32(0, loc.end.v);
+    odin3_srcman *sm = NULL; /* no token: the stream's first byte */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
+    TEST_ASSERT_EQUAL_UINT32(odin3_srcman_loc(sm, empty.stream, 0).v, loc.loc.v);
+    TEST_ASSERT_EQUAL_UINT32(loc.loc.v, loc.end.v);
     TEST_ASSERT_EQUAL_UINT32(0, loc.off);
     TEST_ASSERT_EQUAL_UINT32(empty.name, odin3_vl_stream_name(lx));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_vl_fatal_status(lx));
