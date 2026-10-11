@@ -47,6 +47,7 @@ odin3_pp_limits odin3_pp_default_limits(void) {
         .includes_per_stream = ODIN3_PP_MAX_INCLUDES_PER_STREAM,
         .loc_bytes_per_stream = ODIN3_PP_MAX_LOC_BYTES_PER_STREAM,
         .file_cache_bytes = ODIN3_PP_MAX_FILE_CACHE_BYTES,
+        .srcman_bytes_per_stream = ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM,
     };
 }
 
@@ -132,8 +133,61 @@ int odin3_pp_peek(const odin3_pp *pp, uint32_t ahead) {
     while (run < frame->nruns && offset >= frame_run(pp, frame, run)->len) {
         offset -= frame_run(pp, frame, run)->len;
         run++;
+        ((odin3_pp *)pp)->run_hops++;
     }
     return run < frame->nruns ? frame_run(pp, frame, run)->bytes[offset] : -1;
+}
+
+/* --- the run iterator: reads the top frame from its cursor, O(1) amortised per byte --------- */
+
+typedef struct run_iter {
+    odin3_pp *pp;
+    const odin3_pp_frame *frame;
+    uint32_t run;
+    uint32_t offset;
+    uint32_t taken; /* bytes passed since the cursor */
+} run_iter;
+
+/* Moves it off the end of its run (and past empty runs). */
+static void iter_settle(run_iter *it) {
+    while (it->run < it->frame->nruns && it->offset >= frame_run(it->pp, it->frame, it->run)->len) {
+        it->offset -= frame_run(it->pp, it->frame, it->run)->len;
+        it->run++;
+        it->pp->run_hops++;
+    }
+}
+
+static run_iter iter_start(const odin3_pp *pp, uint32_t ahead) {
+    const odin3_pp_frame *frame = top_frame(pp);
+    run_iter it = {(odin3_pp *)pp, frame, frame->cur.run, frame->cur.offset, 0};
+    for (uint32_t i = 0; i < ahead && it.run < frame->nruns; i++) {
+        it.offset++;
+        it.taken++;
+        iter_settle(&it);
+    }
+    iter_settle(&it);
+    return it;
+}
+
+/* The byte at it, -1 at the frame's end. */
+static int iter_peek(const run_iter *it) {
+    return it->run < it->frame->nruns ? frame_run(it->pp, it->frame, it->run)->bytes[it->offset]
+                                      : -1;
+}
+
+static void iter_next(run_iter *it) {
+    if (it->run < it->frame->nruns) {
+        it->offset++;
+        it->taken++;
+        iter_settle(it);
+    }
+}
+
+/* The byte after it, -1 at the frame's end. */
+static int iter_peek_next(const run_iter *it) {
+    run_iter next = *it;
+    iter_next(&next);
+    return iter_peek(&next);
 }
 
 odin3_loc odin3_pp_loc_here(const odin3_pp *pp) {
@@ -231,6 +285,47 @@ void odin3_pp_pop_frame(odin3_pp *pp) {
 
 /* --- output and segments ------------------------------------------------------------------- */
 
+/* Bytes of source-manager records per line start and per segment (spec §9). */
+enum { LINE_RECORD_BYTES = 4, SEGMENT_RECORD_BYTES = 8 };
+
+/* Where an output cap error is reported for text at loc: loc itself, else the cursor, else (in an
+ * inserted run, such as a comment's space) the innermost macro use, so the error stays located. */
+static odin3_loc output_loc(const odin3_pp *pp, odin3_loc loc) {
+    if (loc.v != 0) {
+        return loc;
+    }
+    odin3_loc here = odin3_pp_loc_here(pp);
+    for (size_t i = pp->frames.len; here.v == 0 && i > 0; i--) {
+        here = ((const odin3_pp_frame *)odin3_vec_cat(&pp->frames, i - 1))->use_loc;
+    }
+    return here;
+}
+
+/* Charges bytes of source-manager records to the stream, before they are added
+ * (ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM, located at at). */
+static odin3_status srcman_charge(odin3_pp *pp, uint64_t bytes, odin3_loc at) {
+    if (pp->srcman_bytes + bytes > pp->limits.srcman_bytes_per_stream) {
+        odin3_pp_cap cap = {"source-manager bytes", "ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM",
+                            pp->limits.srcman_bytes_per_stream};
+        return odin3_pp_cap_error(pp, at, cap);
+    }
+    pp->srcman_bytes += bytes;
+    return ODIN3_OK;
+}
+
+/* Room for len more output bytes and the NUL, growing by doubling but never past the stream cap
+ * (ODIN3_PP_MAX_STREAM_BYTES + 1), so the text buffer stays bounded by the cap. */
+static odin3_status reserve_out(odin3_pp *pp, uint64_t len) {
+    uint64_t need = (uint64_t)pp->out.len + len + 1;
+    if (need <= pp->out.cap) {
+        return ODIN3_OK;
+    }
+    uint64_t grow = (uint64_t)pp->out.cap * 2 > need ? (uint64_t)pp->out.cap * 2 : need;
+    uint64_t most = (uint64_t)pp->limits.stream_bytes + 1;
+    grow = grow > most && need <= most ? most : grow;
+    return odin3_strbuf_reserve(&pp->out, (size_t)grow);
+}
+
 static odin3_status add_segment(odin3_pp *pp, uint32_t out_offset, odin3_loc loc) {
     odin3_segment seg = {pp->stream.v, out_offset, loc.v, {0, 0}};
     odin3_status st = odin3_srcman_add_segment(pp->sm, &seg);
@@ -244,7 +339,13 @@ static odin3_status append_piece(odin3_pp *pp, odin3_pp_text piece) {
     uint32_t out_offset = (uint32_t)pp->out.len;
     bool fresh = out_offset == 0 || piece.loc.v == 0 || pp->last_loc.v == 0 ||
                  piece.loc.v != pp->last_loc.v + 1;
-    odin3_status st = odin3_strbuf_append(&pp->out, (odin3_bytes){piece.bytes, piece.len});
+    odin3_status st = ODIN3_OK;
+    if (fresh) {
+        st = srcman_charge(pp, SEGMENT_RECORD_BYTES, output_loc(pp, piece.loc));
+    }
+    if (st == ODIN3_OK) {
+        st = odin3_strbuf_append(&pp->out, (odin3_bytes){piece.bytes, piece.len});
+    }
     if (st == ODIN3_OK && fresh) {
         st = add_segment(pp, out_offset, piece.loc);
     }
@@ -263,14 +364,18 @@ static odin3_status append_piece(odin3_pp *pp, odin3_pp_text piece) {
 static odin3_status append(odin3_pp *pp, odin3_pp_text text) {
     if ((uint64_t)pp->out.len + text.len > pp->limits.stream_bytes) {
         uint32_t room = pp->limits.stream_bytes - (uint32_t)pp->out.len;
-        odin3_loc at = text.loc.v != 0 ? odin3_pp_loc_add(text.loc, room) : odin3_pp_loc_here(pp);
+        odin3_loc at =
+            text.loc.v != 0 ? odin3_pp_loc_add(text.loc, room) : output_loc(pp, text.loc);
         odin3_pp_cap cap = {"stream bytes", "ODIN3_PP_MAX_STREAM_BYTES", pp->limits.stream_bytes};
         return odin3_pp_cap_error(pp, at, cap);
+    }
+    odin3_status st = reserve_out(pp, text.len);
+    if (st != ODIN3_OK) {
+        return st;
     }
     if (text.loc.v != 0) {
         return append_piece(pp, text);
     }
-    odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; i < text.len && st == ODIN3_OK; i++) {
         st = append_piece(pp, (odin3_pp_text){text.bytes + i, 1, {0}});
     }
@@ -445,7 +550,11 @@ static odin3_status cache_add(odin3_pp *pp, uint32_t resolved, odin3_file_bytes 
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_pp_cached *entry = odin3_vec_push(&pp->cache);
-    *entry = (odin3_pp_cached){resolved, (uint32_t)bytes->len, bytes->data};
+    uint32_t newlines = 0;
+    for (size_t i = 0; i < bytes->len; i++) {
+        newlines += bytes->data[i] == '\n' ? 1 : 0;
+    }
+    *entry = (odin3_pp_cached){resolved, (uint32_t)bytes->len, bytes->data, newlines};
     bytes->data = NULL;
     *(uint32_t *)odin3_vec_push(&pp->files_read) = resolved;
     pp->cache_bytes += entry->len;
@@ -497,7 +606,10 @@ odin3_status odin3_pp_open_file(odin3_pp *pp, const odin3_pp_open *open, odin3_s
         {open->given, entry->resolved, open->library, open->parent.v, entry->len, {0, 0}},
         {0, 0, 0, 0, 0, 0, {0, 0}},
         false};
-    odin3_status st = odin3_pp_add_buffer(pp, &spec, open->at, out);
+    odin3_status st = srcman_charge(pp, (uint64_t)entry->newlines * LINE_RECORD_BYTES, open->at);
+    if (st == ODIN3_OK) {
+        st = odin3_pp_add_buffer(pp, &spec, open->at, out);
+    }
     if (st == ODIN3_OK) {
         st = add_lines(pp, out->v, entry);
     }
@@ -593,16 +705,14 @@ static uint32_t quoted_length(const odin3_pp *pp) {
     if (odin3_pp_peek(pp, 0) != '"') {
         return 0;
     }
-    uint32_t k = 1;
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0 && ch != '\n'; ch = odin3_pp_peek(pp, k)) {
-        int next = odin3_pp_peek(pp, k + 1);
+    run_iter it = iter_start(pp, 1);
+    for (int ch = iter_peek(&it); ch >= 0 && ch != '\n'; ch = iter_peek(&it)) {
+        int next = iter_peek_next(&it);
+        iter_next(&it);
         if (ch == '\\' && next >= 0 && next != '\n') {
-            k += 2;
-            continue;
-        }
-        k++;
-        if (ch == '"') {
-            return k;
+            iter_next(&it);
+        } else if (ch == '"') {
+            return it.taken;
         }
     }
     return 0;
@@ -718,40 +828,42 @@ static odin3_status scan_backtick(odin3_pp *pp) {
 }
 
 uint32_t odin3_pp_string_length(const odin3_pp *pp) {
-    uint32_t k = 1;
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0 && ch != '\n'; ch = odin3_pp_peek(pp, k)) {
-        k += ch == '\\' && odin3_pp_peek(pp, k + 1) >= 0 ? 2 : 1;
-        if (ch == '"') {
+    run_iter it = iter_start(pp, 1);
+    for (int ch = iter_peek(&it); ch >= 0 && ch != '\n'; ch = iter_peek(&it)) {
+        bool escape = ch == '\\' && iter_peek_next(&it) >= 0;
+        iter_next(&it);
+        if (escape) {
+            iter_next(&it);
+        } else if (ch == '"') {
             break;
         }
     }
-    return k;
+    return it.taken < 1 ? 1 : it.taken;
 }
 
 uint32_t odin3_pp_escaped_length(const odin3_pp *pp) {
-    uint32_t k = 1;
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0 && !odin3_pp_is_blank(ch);
-         ch = odin3_pp_peek(pp, k)) {
-        k++;
+    run_iter it = iter_start(pp, 1);
+    while (iter_peek(&it) >= 0 && !odin3_pp_is_blank(iter_peek(&it))) {
+        iter_next(&it);
     }
-    return k;
+    return it.taken < 1 ? 1 : it.taken;
 }
 
 uint32_t odin3_pp_comment_length(const odin3_pp *pp) {
-    uint32_t k = 2;
+    run_iter it = iter_start(pp, 2);
     if (odin3_pp_peek(pp, 1) == '/') {
-        while (odin3_pp_peek(pp, k) >= 0 && odin3_pp_peek(pp, k) != '\n') {
-            k++;
+        while (iter_peek(&it) >= 0 && iter_peek(&it) != '\n') {
+            iter_next(&it);
         }
-        return k;
+        return it.taken < 2 ? 2 : it.taken;
     }
-    for (int ch = odin3_pp_peek(pp, k); ch >= 0; ch = odin3_pp_peek(pp, k)) {
-        k++;
-        if (ch == '*' && odin3_pp_peek(pp, k) == '/') {
-            return k + 1;
+    for (int ch = iter_peek(&it); ch >= 0; ch = iter_peek(&it)) {
+        iter_next(&it);
+        if (ch == '*' && iter_peek(&it) == '/') {
+            return it.taken + 1;
         }
     }
-    return k;
+    return it.taken < 2 ? 2 : it.taken;
 }
 
 /* A comment: copied through unless the translate_off hook drops it (PP-10). */
@@ -847,6 +959,7 @@ static void reset_run(odin3_pp *pp) {
     pp->nincludes = 0;
     pp->nexpansions = 0;
     pp->loc_bytes = 0;
+    pp->srcman_bytes = 0;
     pp->xoff_loc = (odin3_loc){0};
     pp->skipping = false;
     pp->gap = false;
@@ -858,6 +971,12 @@ static odin3_status start_stream(odin3_pp *pp, const odin3_pp_source *src) {
     odin3_status st = odin3_pp_cache_load(pp, &load, &index);
     if (st != ODIN3_OK) {
         return st;
+    }
+    /* the text is usually about the file's size: start there rather than double up to it */
+    const odin3_pp_cached *entry = odin3_vec_cat(&pp->cache, index);
+    uint32_t expect = entry->len < pp->limits.stream_bytes ? entry->len : pp->limits.stream_bytes;
+    if (reserve_out(pp, expect) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
     }
     uint32_t *path = odin3_vec_push(&pp->incstack);
     if (path == NULL) {
@@ -931,7 +1050,7 @@ static odin3_status cmdline_buffer(odin3_pp *pp, odin3_strbuf *text) {
         return st != ODIN3_OK ? st : ODIN3_ERR_NO_MEMORY;
     }
     odin3_pp_cached *entry = odin3_vec_push(&pp->cache);
-    *entry = (odin3_pp_cached){0, (uint32_t)text->len, (uint8_t *)text->data};
+    *entry = (odin3_pp_cached){0, (uint32_t)text->len, (uint8_t *)text->data, 0};
     odin3_strbuf_init(text); /* the cache owns the bytes now */
     odin3_srcfile_spec spec = {name, 0, 0, 0, entry->len, {0, 0}};
     odin3_srcbuf_id buf = {0};

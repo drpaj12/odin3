@@ -41,13 +41,14 @@ static odin3_status run_file(const char *name) {
     return run_path(name, path);
 }
 
-/* Nothing of the stream is left on the preprocessor's stacks once it ended (args and scratch
- * are work vectors, cleared at each use, not stacks). */
+/* Nothing of the stream is left on the preprocessor's stacks and work vectors once it ended. */
 static void assert_stacks_empty(void) {
     TEST_ASSERT_EQUAL_size_t(0, pp->frames.len);
     TEST_ASSERT_EQUAL_size_t(0, pp->runs.len);
     TEST_ASSERT_EQUAL_size_t(0, pp->conds.len);
     TEST_ASSERT_EQUAL_size_t(0, pp->incstack.len);
+    TEST_ASSERT_EQUAL_size_t(0, pp->args.len);
+    TEST_ASSERT_EQUAL_size_t(0, pp->scratch.len);
     TEST_ASSERT_EQUAL_UINT32(0, pp->nexpansions);
     TEST_ASSERT_EQUAL_UINT32(0, pp->xoff_loc.v);
     TEST_ASSERT_FALSE(pp->skipping);

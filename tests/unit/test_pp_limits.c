@@ -31,6 +31,9 @@ enum { PATH_BUF = PP_PATH_BUF, TEXT_MAX = 8192 };
 typedef struct snapshot {
     bool taken;
     size_t out_len;
+    size_t out_cap;
+    uint64_t srcman_bytes;
+    uint32_t nsegments;
     uint32_t nbuffers;
     uint32_t nincludes;
     uint32_t nexpansions;
@@ -63,6 +66,9 @@ static void take_snapshot(void) {
     snap = (snapshot){
         .taken = true,
         .out_len = state->out.len,
+        .out_cap = state->out.cap,
+        .srcman_bytes = state->srcman_bytes,
+        .nsegments = state->nsegments,
         .nbuffers = state->nbuffers,
         .nincludes = state->nincludes,
         .nexpansions = state->nexpansions,
@@ -166,6 +172,7 @@ static void test_default_limits_are_the_spec_values(void) {
     TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 16, got.includes_per_stream);
     TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 29, got.loc_bytes_per_stream);
     TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 30, got.file_cache_bytes);
+    TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 27, got.srcman_bytes_per_stream);
     TEST_ASSERT_EQUAL_UINT32(UINT32_C(1) << 28, ODIN3_SRC_MAX_FILE_BYTES);
 }
 
@@ -442,6 +449,21 @@ static void test_stream_bytes_bomb(void) {
                         "  expanded from macro 'B' at t.v:4:20\n"
                         "  expanded from macro 'A' at t.v:5:14");
     TEST_ASSERT_EQUAL_size_t(1000, snap.out_len);
+    TEST_ASSERT_TRUE(snap.out_cap <= 1001); /* the text buffer never grows past the cap */
+}
+
+/* A stream exactly at the cap fits, its text buffer exactly cap + 1 bytes. */
+static void test_stream_bytes_exactly_at_cap(void) {
+    put_text("t.v", "wire a;\n");
+    create_pp(NULL);
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    limits.stream_bytes = 8;
+    odin3_pp_test_set_limits(pp, limits);
+    char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/t.v", tmp);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_path("t.v", path));
+    assert_text("wire a;\n");
+    TEST_ASSERT_EQUAL_size_t(9, pp->out.cap);
 }
 
 static void lower_loc_bytes(odin3_pp_limits *limits) {
@@ -469,6 +491,54 @@ static void test_loc_bytes_unused_arguments(void) {
     TEST_ASSERT_TRUE(snap.out_len < 400); /* the text before the use only */
 }
 
+/* --- source-manager records (final review I2) ------------------------------------------------ */
+
+static void lower_srcman(odin3_pp_limits *limits) {
+    limits->srcman_bytes_per_stream = 4096;
+}
+
+/* A header of newlines inside a false `ifdef, included again and again: no output, but each
+ * FILE buffer re-registers 300 line records (1,200 bytes). */
+static void test_srcman_bytes_newline_header_bomb(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("`ifdef NOPE")));
+    for (int i = 0; i < 300; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("\n")));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("`endif")));
+    put("nl.vh", (odin3_bytes){text.data, text.len}, NULL);
+    odin3_strbuf_free(&text);
+    put_text("t.v", "`include \"nl.vh\"`include \"nl.vh\"`include \"nl.vh\"`include \"nl.vh\"\n");
+    lowered(lower_srcman);
+    size_t before = sm->bufs.len;
+    assert_stops("t.v", "t.v:1:49: error: syntax: source-manager bytes exceeds "
+                        "ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM (4096)");
+    TEST_ASSERT_TRUE(snap.srcman_bytes <= 4096);
+    TEST_ASSERT_EQUAL_size_t(before + 4, snap.sm_bufs); /* t.v and three headers, not a fourth */
+}
+
+/* A body of empty block comments, each a loc-0 space and so a segment of its own, expanded a
+ * few times. */
+static void test_srcman_bytes_comment_body_bomb(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("`define S ")));
+    for (int i = 0; i < 200; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("/**/")));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_append(&text, odin3_bytes_cstr("x\nq = `S `S `S `S;\n")));
+    put("t.v", (odin3_bytes){text.data, text.len}, NULL);
+    odin3_strbuf_free(&text);
+    lowered(lower_srcman);
+    /* located at the third use: a loc-0 space has no location of its own */
+    assert_stops("t.v", "t.v:2:11: error: syntax: source-manager bytes exceeds "
+                        "ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM (4096)");
+    TEST_ASSERT_TRUE(snap.srcman_bytes <= 4096);
+    TEST_ASSERT_TRUE((uint64_t)snap.nsegments * 8 <= 4096);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_limits_are_the_spec_values);
@@ -488,6 +558,9 @@ int main(void) {
     RUN_TEST(test_expansion_depth);
     RUN_TEST(test_live_runs);
     RUN_TEST(test_stream_bytes_bomb);
+    RUN_TEST(test_stream_bytes_exactly_at_cap);
+    RUN_TEST(test_srcman_bytes_newline_header_bomb);
+    RUN_TEST(test_srcman_bytes_comment_body_bomb);
     RUN_TEST(test_loc_bytes_unused_arguments);
     return UNITY_END();
 }

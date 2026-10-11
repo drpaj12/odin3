@@ -35,6 +35,10 @@
 /* 2^29 (agent default, spec §9): the stream's own file, up to 2^28 bytes, counts towards it. */
 #define ODIN3_PP_MAX_LOC_BYTES_PER_STREAM (UINT32_C(1) << 29)
 #define ODIN3_PP_MAX_FILE_CACHE_BYTES (UINT32_C(1) << 30)
+/* Source-manager record bytes a stream adds: 4 per line registered for each FILE buffer (an
+ * included file re-registers its lines) and 8 per segment, the stream's own file included (agent
+ * default, spec §9): with vector doubling a stream's records stay under 256 MB. */
+#define ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM (UINT32_C(1) << 27)
 
 /* --- configuration (spec §7.1, verbatim) --------------------------------------------------- */
 

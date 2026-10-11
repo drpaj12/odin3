@@ -676,6 +676,68 @@ static void test_failed_run_then_clean_run(void) {
     assert_ok_text(run("q = `F(2);\n"), "q = 2;\n");
 }
 
+/* --- NUL bytes in actuals (final review M1) -------------------------------------------------- */
+
+/* A NUL right after a bracket is plain text, not a closing bracket. */
+static void test_nul_after_bracket_in_actual(void) {
+    static const char k_text[] = "`define M(a,b) [a|b]\nq = `M((\0 1,2),3);\n";
+    static const char k_want[] = "\nq = [(\0 1,2)|3];\n";
+    ensure_pp();
+    odin3_status st = run_fresh("f.v", (odin3_bytes){k_text, sizeof k_text - 1});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, captured);
+    TEST_ASSERT_EQUAL_size_t(sizeof k_want - 1, stream.text.len);
+    TEST_ASSERT_EQUAL_MEMORY(k_want, stream.text.ptr, sizeof k_want - 1);
+}
+
+/* While a body is substituted, the actuals' runs count as live too (final review M3). */
+static void test_live_runs_count_actuals_while_substituting(void) {
+    ensure_pp();
+    odin3_pp_limits limits = odin3_pp_default_limits();
+    limits.live_runs = 8;
+    odin3_pp_test_set_limits(pp, limits);
+    /* 1 file run + 3 actual runs + 5 body runs (a, -, b, -, c) > 8 */
+    odin3_status st = run("`define N(a,b,c) a-b-c\nq = `N(1,2,3);\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
+    TEST_ASSERT_EQUAL_STRING("f.v:2:5: error: syntax: live runs exceeds ODIN3_PP_MAX_LIVE_RUNS (8)",
+                             captured);
+}
+
+/* --- scans across many runs (final review I1) ---------------------------------------------- */
+
+enum { MANY_RUNS = 5000 };
+
+/* Runs `define <head> x x ... (MANY_RUNS formals x) then use, and returns the run hops spent:
+ * the comment or escaped identifier starting in the actual spans 2 * MANY_RUNS runs, which a
+ * per-byte peek from the cursor crossed MANY_RUNS^2 times. */
+static uint64_t hops_for(const char *head, char sep, const char *use) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(head)));
+    char unit[3] = {sep, 'x', '\0'};
+    for (int i = 0; i < MANY_RUNS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(unit)));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(use)));
+    ensure_pp();
+    uint64_t before = pp->run_hops;
+    odin3_status st = run(text.data);
+    odin3_strbuf_free(&text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, captured);
+    return pp->run_hops - before;
+}
+
+/* A block comment opened by an actual and closed far into the body (b1). */
+static void test_comment_across_runs_is_linear(void) {
+    uint64_t hops = hops_for("`define M(s,x) s*", ' ', " */\nq = `M(/,y);\n");
+    TEST_ASSERT_TRUE_MESSAGE(hops < (uint64_t)20 * MANY_RUNS, "quadratic scan across runs");
+}
+
+/* An escaped identifier made of an actual's backslash and the body's formals (b1b). */
+static void test_escaped_identifier_across_runs_is_linear(void) {
+    uint64_t hops = hops_for("`define E(s,x) s", '.', " \nq = `E(\\ ,y);\n");
+    TEST_ASSERT_TRUE_MESSAGE(hops < (uint64_t)20 * MANY_RUNS, "quadratic scan across runs");
+}
+
 /* --- out of memory ------------------------------------------------------------------------- */
 
 static const char k_oom_text[] = "`define INNER(p) (p + 1)\n"
@@ -800,6 +862,10 @@ static void run_more_tests(void) {
     RUN_TEST(test_macros_from_an_earlier_run_expand);
     RUN_TEST(test_command_line_macros_expand);
     RUN_TEST(test_failed_run_then_clean_run);
+    RUN_TEST(test_nul_after_bracket_in_actual);
+    RUN_TEST(test_live_runs_count_actuals_while_substituting);
+    RUN_TEST(test_comment_across_runs_is_linear);
+    RUN_TEST(test_escaped_identifier_across_runs_is_linear);
     RUN_TEST(test_out_of_memory);
 }
 

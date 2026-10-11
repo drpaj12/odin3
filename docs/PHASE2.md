@@ -196,6 +196,11 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     - *Recursion is judged on the spelling ancestry* (PP-7). The use is rejected even where the
       oracles terminate. In probe w1, `` `N(`KEEP) `` reaches `` `K ``, which uses `` `N ``
       again inside its own argument chain. Both oracles expand it to nothing.
+    - *The include search never looks in the current directory* (PP-11; DESIGN §4.0, PHASE1
+      #19; ruled at 2B Task 7). It tries the including file's directory, then the include
+      directories in order. Icarus (`-E -I`) and Yosys (`read_verilog -I`) both search the
+      current directory first and include its copy of the file, even when the file also exists
+      in an include directory. `pp-diff` therefore runs the oracles from a neutral directory.
     - *`translate_off` … `translate_on` is removed by the preprocessor* (PP-10). Icarus ignores
       the pair. Yosys drops the region in its lexer, after directives have been processed.
       A `translate_off` comment inside a macro's actual is stripped to a space like any other
@@ -210,7 +215,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       substitutes nothing. The spec names only the last two; `preprocessor_define` fails
       identically.
 11. **2B preprocessor results** (2B Task 9, 2026-10-10; spec §9, §10.3, §10.6).
-    - *Caps.* `test_pp_limits` hits each of the 15 `ODIN3_PP_MAX_*` caps through
+    - *Caps.* `test_pp_limits` hits each of the 16 `ODIN3_PP_MAX_*` caps through
       `odin3_pp_test_set_limits`, and the 2^28 source-file cap at the root's `at` and at an
       `` `include `` (sparse files, so nothing is read). Each test asserts the exact located
       message. The log sink snapshots the guarded counter when the error is logged, which shows
@@ -234,62 +239,76 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - 16 of those 18 are read in context by an OK run of their includer (asserted). The other
         two, `ifdef-else-syntax/module_a_or.v` and `ifndef-else-syntax/module_a_and.v`, are the
         variants that their includer's conditional does not select.
+    - *Final-review fix round* (2026-10-10; `final-review-2B2.md`):
+      - *I1:* the lexical scanners (string, escaped identifier, comment, `` `line `` file name)
+        read the frame through a run iterator, O(1) amortised per byte. Before, a comment or
+        escaped identifier spread over many runs cost O(len × runs): a 600 KB input ran past
+        120 s. `test_pp_expand` counts run hops over 10,000 runs and fails on the old scanners.
+      - *I2:* new cap `ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM` = 2^27 (agent default, spec §9).
+        It is charged 4 B per registered line start and 8 B per segment, before they are added,
+        and tested with a newline-header include bomb and a `/**/` body bomb.
+      - *M4:* the text buffer starts at the stream file's size and never grows past
+        `MAX_STREAM_BYTES` + 1. This needed a new exact `odin3_strbuf_reserve` in `util/str`.
+      - *Other minors fixed:* a NUL right after a bracket in an actual (M1); the actuals' runs
+        now count as live while a body is substituted (M3); the cache-entry comment (M5); cap
+        errors on inserted bytes are now located at the innermost macro use.
+      - *Left:* M2 (the recursion walk does a binary search per ancestor: bounded by the chain
+        cap) and M6 (newlines between a macro name and its `(` are consumed with the use).
+      - *Oracles disagree (M7, for `pp-diff`'s exclusion list):*
+        - a comment between a macro name and `(`: Icarus expands, Yosys and 2B reject;
+        - a newline before `(`: Icarus and 2B accept, Yosys rejects;
+        - `` `line `` inside a macro body: Yosys applies it, Icarus and 2B drop it;
+        - a `//` comment ending a `` `define `` with a trailing `\`: Yosys and 2B end the
+          text, Icarus continues it;
+        - formals inside body strings (§10.4).
     - *Benchmark* (`build/release/bench_pp`, Release, dev machine (i7-13700, WSL2), 2026-10-10,
-      `$VTR_ROOT/vtr_flow/benchmarks/verilog`, output verbatim):
+      `$VTR_ROOT/vtr_flow/benchmarks/verilog`, after the fix round, output verbatim):
 
       ```
       file (smallest first)          bytes in      out   lines    segs   bufs  defs macros  srcman B pp heap B heap/in  best ms check
-      single_wire.v                        62       62       4       1      1     0      0      1040     67054 1081.52    0.002 ok
-      single_ff.v                          96       96       6       1      1     0      0      1040     67152  699.50    0.002 ok
-      and_latch.v                         260      260      22       1      1     0      0      1136     67700  260.38    0.003 ok
-      multiclock_separate_and_latch.v      702      702      54       1      1     0      0      1264     68654   97.80    0.004 ok
-      multiclock_output_and_latch.v       889      889      64       1      1     0      0      1264     68841   77.44    0.004 ok
-      multiclock_reader_writer.v         1021     1021      62       1      1     0      0      1264     68973   67.55    0.004 ok
-      diffeq1.v                          1409     1409      57       1      1     0      0      1264     70385   49.95    0.004 ok
-      diffeq2.v                          2131     2131      64       1      1     0      0      1264     73155   34.33    0.007 ok
-      ch_intrinsics.v                    4838     4283     293      36     16     5      5      4272     80582   16.66    0.019 ok
-      ch_intrinsics_nolatches.v          5005     4450     302      36     16     5      5      4272     80749   16.13    0.018 ok
-      stereovision3.v                   35847    35847    1062       1      1     0      0      9200    168311    4.70    0.060 ok
-      sha.v                             38061    37865    2172      38     15     9      9     18608    171533    4.51    0.100 ok
-      mkPktMerge.v                      39878    39690    1536     161     79     4      4     15024    174294    4.37    0.201 ok
-      blob_merge.v                      58879    55660    1618    1003    475    54     54     33456    200943    3.41    0.369 ok
-      stereovision2.v                   63099    61774    1847     270    110    51     51     17072    200507    3.18    0.193 ok
-      spree.v                           68099    65433    3073     392    160    73     73     29360    209955    3.08    0.315 ok
-      bgm.v                             71508    71298    2664      93     46     2      2     20144    270660    3.79    0.283 ok
-      boundtop.v                        72116    72116    2826       1      1     0      0     17392    270116    3.75    0.184 ok
-      boundtop_nolatches.v              81343    81343    3054       1      1     0      0     17392    279343    3.43    0.213 ok
-      raygentop.v                       84801    84801    2979       1      1     0      0     17392    282801    3.33    0.197 ok
-      raygentop_nolatches.v             92241    92241    3179       1      1     0      0     17392    290241    3.15    0.238 ok
-      stereovision1.v                  102964   102964    2554       1      1     0      0     17392    300964    2.92    0.219 ok
-      stereovision0.v                  131550   131550    3906       1      1     0      0     17392    460622    3.50    0.287 ok
-      or1200.v                         135776   105416    5238    2022    750   524    383     82608    393184    2.90    0.955 ok
-      mkSMAdapter4B.v                  137869   137559    4349     158     76     8      8     39600    468957    3.40    0.546 ok
-      LU8PEEng.v                       140203   132207    5034    2121    969   182    164     98992    494459    3.53    0.806 ok
-      LU32PEEng.v                      155750   147942    5498    2313   1065   182    164    131760    522294    3.35    0.873 ok
-      LU64PEEng.v                      176532   168880    6044    2569   1193   182    164    131760    543076    3.08    0.989 ok
-      mkDelayWorker32B.v               204602   204056    6629     329    160    11     10     45744    537578    2.63    0.848 ok
-      arm_core.v                       346864   336469    8212      43     13     7      7     67248    938800    2.71    1.303 ok
-      mcml.v                           650837   649054   24508    5590   2776    39     39    328368   1818709    2.79    2.898 ok
-      set: 31 files, 2905232 bytes in, 0.012 s (sum of best of 5; target <= 0.5 s: ok); pp heap over 3 x input in 26 files
-      mcml.v: 2.898 ms (target <= 50 ms: ok); pp heap 1818709 B = 2.79 x input (target <= 3 x: ok), srcman 328368 B beside it
-      max RSS: 4628 KiB
+      single_wire.v                        62       62       4       1      1     0      0      1040     67133 1082.79    0.002 ok
+      single_ff.v                          96       96       6       1      1     0      0      1040     67201  700.01    0.002 ok
+      and_latch.v                         260      260      22       1      1     0      0      1136     67529  259.73    0.002 ok
+      multiclock_separate_and_latch.v      702      702      54       1      1     0      0      1264     68413   97.45    0.003 ok
+      multiclock_output_and_latch.v       889      889      64       1      1     0      0      1264     68787   77.38    0.004 ok
+      multiclock_reader_writer.v         1021     1021      62       1      1     0      0      1264     69051   67.63    0.004 ok
+      diffeq1.v                          1409     1409      57       1      1     0      0      1264     69827   49.56    0.005 ok
+      diffeq2.v                          2131     2131      64       1      1     0      0      1264     71271   33.44    0.006 ok
+      ch_intrinsics.v                    4838     4283     293      36     16     5      5      4272     77309   15.98    0.019 ok
+      ch_intrinsics_nolatches.v          5005     4450     302      36     16     5      5      4272     77643   15.51    0.018 ok
+      stereovision3.v                   35847    35847    1062       1      1     0      0      9200    138703    3.87    0.059 ok
+      sha.v                             38061    37865    2172      38     15     9      9     18608    144139    3.79    0.093 ok
+      mkPktMerge.v                      39878    39690    1536     161     79     4      4     15024    148717    3.73    0.168 ok
+      blob_merge.v                      58879    55660    1618    1003    475    54     54     33456    194367    3.30    0.344 ok
+      stereovision2.v                   63099    61774    1847     270    110    51     51     17072    198151    3.14    0.195 ok
+      spree.v                           68099    65433    3073     392    160    73     73     29360    212599    3.12    0.295 ok
+      bgm.v                             71508    71298    2664      93     46     2      2     20144    211177    2.95    0.258 ok
+      boundtop.v                        72116    72116    2826       1      1     0      0     17392    211241    2.93    0.192 ok
+      boundtop_nolatches.v              81343    81343    3054       1      1     0      0     17392    229695    2.82    0.212 ok
+      raygentop.v                       84801    84801    2979       1      1     0      0     17392    236611    2.79    0.200 ok
+      raygentop_nolatches.v             92241    92241    3179       1      1     0      0     17392    251491    2.73    0.228 ok
+      stereovision1.v                  102964   102964    2554       1      1     0      0     17392    272937    2.65    0.217 ok
+      stereovision0.v                  131550   131550    3906       1      1     0      0     17392    330109    2.51    0.287 ok
+      or1200.v                         135776   105416    5238    2022    750   524    383     82608    397969    2.93    0.907 ok
+      mkSMAdapter4B.v                  137869   137559    4349     158     76     8      8     39600    344763    2.50    0.490 ok
+      LU8PEEng.v                       140203   132207    5034    2121    969   182    164     98992    372599    2.66    0.825 ok
+      LU32PEEng.v                      155750   147942    5498    2313   1065   182    164    131760    415981    2.67    0.891 ok
+      LU64PEEng.v                      176532   168880    6044    2569   1193   182    164    131760    457545    2.59    0.979 ok
+      mkDelayWorker32B.v               204602   204056    6629     329    160    11     10     45744    480117    2.35    0.739 ok
+      arm_core.v                       346864   336469    8212      43     13     7      7     67248    761457    2.20    1.089 ok
+      mcml.v                           650837   649054   24508    5590   2776    39     39    328368   1421051    2.18    2.751 ok
+      set: 31 files, 2905232 bytes in, 0.011 s (sum of best of 5; target <= 0.5 s: ok); pp heap over 3 x input in 16 files
+      mcml.v: 2.751 ms (target <= 50 ms: ok); pp heap 1421051 B = 2.18 x input (target <= 3 x: ok), srcman 328368 B beside it
+      max RSS: 4064 KiB
       ```
 
-      Targets met: mcml.v 2.9 ms against 50 ms; the VTR set 0.012 s against 0.5 s; mcml.v's
-      preprocessor heap is 2.79 x its input, with the srcman's 328 KB beside it. Run on its own,
-      mcml.v raises the process's peak RSS by 1,784 KiB (2.8 x input, srcman included).
+      Targets met: mcml.v 2.8 ms against 50 ms; the VTR set 0.011 s against 0.5 s; mcml.v's
+      preprocessor heap is 2.18 x its input (2.79 x before the text buffer started at the
+      file's size), with the srcman's 328 KB beside it.
 
-      **Missed target (investigated, not relaxed):** 26 of the 31 files have a preprocessor heap
-      above 3 x input. The heap is the file cache (1 x), plus the output strbuf, which grows by
-      doubling (1-2 x), plus a fixed ~67 KB (the 64 KiB macro-arena chunk that
-      `odin3_pp_create` allocates, plus the struct and vectors). The fixed part dominates small
-      files: a 62-byte file has a 67 KB heap. The doubling pushes medium files over, for example
-      stereovision0.v: 131,550 B in, a 262,144 B output buffer, 3.50 x.
-
-      Two fixes are possible, both left for review: reserve the output to the stream file's size
-      (this needs an exact `odin3_strbuf` reserve in `util/str`), and allocate the macro arena on
-      the first definition. Together they would bring the heap to about 2 x input plus a few KB
-      of vectors (not measured).
+      Per file, the ruling is <= 3 x input + 128 KiB. All 31 files are within it. The 16 files
+      above 3 x are small files dominated by the fixed ~67 KB: the 64 KiB macro-arena chunk
+      that `odin3_pp_create` allocates, plus the struct and vectors.
 
       The spec's "51 `define`s" for mcml.v counts 12 commented-out lines; 39 definitions are
       made. mcml.v needs 2,776 buffers (the spec estimated about 5,000).

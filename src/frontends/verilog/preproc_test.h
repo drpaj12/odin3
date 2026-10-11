@@ -25,6 +25,7 @@ typedef struct odin3_pp_limits {
     uint32_t includes_per_stream;
     uint32_t loc_bytes_per_stream;
     uint32_t file_cache_bytes;
+    uint32_t srcman_bytes_per_stream;
 } odin3_pp_limits;
 
 /* The default limits (every ODIN3_PP_MAX_* value). */

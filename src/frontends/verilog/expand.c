@@ -248,7 +248,9 @@ static odin3_status collect_step(collect *col, bool *done) {
     case '/':
         return next == '/' || next == '*' ? take_comment(col) : take(col, 1);
     default:
-        return strchr("()[]{},", ch) != NULL ? collect_bracket(col, ch, done) : take_plain(col);
+        /* ch != 0: strchr matches the terminator (a NUL byte is plain text) */
+        return ch != '\0' && strchr("()[]{},", ch) != NULL ? collect_bracket(col, ch, done)
+                                                           : take_plain(col);
     }
 }
 
@@ -388,7 +390,8 @@ typedef struct subst {
 
 static odin3_status room(const subst *sub) {
     odin3_pp *pp = sub->pp;
-    if ((uint64_t)pp->runs.len + pp->scratch.len + 1 > pp->limits.live_runs) {
+    /* the actuals in pp->args stay live while the body is substituted */
+    if ((uint64_t)pp->runs.len + pp->args.len + pp->scratch.len + 1 > pp->limits.live_runs) {
         return live_runs_error(pp, sub->use->at);
     }
     return ODIN3_OK;
@@ -638,7 +641,12 @@ static odin3_status expand(subst *sub, odin3_loc end) {
                             .buffer = buf,
                             .macro = use->macro - 1,
                             .use_loc = use->at};
-    return odin3_pp_push_frame(pp, &frame, pp->scratch.data, use->at);
+    st = odin3_pp_push_frame(pp, &frame, pp->scratch.data, use->at);
+    /* the work vectors are spent: only pp->runs counts as live from here */
+    odin3_vec_clear(&pp->args);
+    odin3_vec_clear(&pp->arg_starts);
+    odin3_vec_clear(&pp->scratch);
+    return st;
 }
 
 odin3_status odin3_pp_expand_use(odin3_pp *pp, const odin3_pp_use *use) {

@@ -84,12 +84,14 @@ typedef struct odin3_pp_macro {
     bool has_formals; /* '(' followed the name (`define F() has formals and nformals 0) */
 } odin3_pp_macro;
 
-/* One cached file: bytes owned by the cache (odin3_util_*), keyed by resolved path. Entry 0 is
- * the <command line> text (resolved 0, bytes in the arena). */
+/* One cached file: bytes owned by the cache (odin3_util_*, freed by odin3_pp_destroy), keyed by
+ * resolved path, and its newline count (the line records each FILE buffer of it registers).
+ * Entry 0 is the <command line> text (resolved 0; a strbuf's heap bytes handed over). */
 typedef struct odin3_pp_cached {
     uint32_t resolved;
     uint32_t len;
     uint8_t *bytes;
+    uint32_t newlines;
 } odin3_pp_cached;
 
 /* Per buffer created in the current run (index = buffer ID - pp->first_buffer). */
@@ -147,14 +149,16 @@ struct odin3_pp {
     odin3_vec arg_starts; /* uint32_t: index in args where each actual starts */
     odin3_vec scratch;    /* odin3_pp_textrun: a frame's runs being built */
     uint32_t nsegments;
-    odin3_loc last_loc;   /* loc of the last output byte (0 when inserted or none) */
-    uint32_t nbuffers;    /* buffers made in the run */
-    uint32_t nincludes;   /* FILE buffers made in the run (the stream's included) */
-    uint32_t nexpansions; /* live EXPANSION frames */
-    uint64_t loc_bytes;   /* location space reserved by the run (sum of len + 1) */
-    odin3_loc xoff_loc;   /* the open translate_off comment (PP-10), 0 none */
-    bool skipping;        /* inside a false conditional branch (PP-4) */
-    bool gap;             /* a directive, skipped region or include end was consumed: PP-3 space */
+    odin3_loc last_loc;    /* loc of the last output byte (0 when inserted or none) */
+    uint32_t nbuffers;     /* buffers made in the run */
+    uint32_t nincludes;    /* FILE buffers made in the run (the stream's included) */
+    uint32_t nexpansions;  /* live EXPANSION frames */
+    uint64_t loc_bytes;    /* location space reserved by the run (sum of len + 1) */
+    uint64_t srcman_bytes; /* line and segment record bytes the run added (spec §9) */
+    uint64_t run_hops;     /* run boundaries crossed by peeks and lexical scans (test probe) */
+    odin3_loc xoff_loc;    /* the open translate_off comment (PP-10), 0 none */
+    bool skipping;         /* inside a false conditional branch (PP-4) */
+    bool gap;              /* a directive, skipped region or include end was consumed: PP-3 space */
 };
 
 /* --- shared helpers (preproc.c) ------------------------------------------------------------ */
