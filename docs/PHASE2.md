@@ -184,7 +184,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    module instances are an error; generated code not committed. Declared divergences: attributes on
    connections and ANSI subroutine ports, unary operators on primaries only, SV named-argument calls
    (Parmys exceptions).
-10. **2B declared divergences from both oracles** (spec §10.4, §13; logged with 2B Task 8,
+11. **2B declared divergences from both oracles** (spec §10.4, §13; logged with 2B Task 8,
     2026-10-10). In the first four cases Icarus and Yosys agree, and 2B differs from them on
     purpose; `pp-diff` expects 2B's behaviour there. The last case is a set of micros that
     Parmys rejects.
@@ -214,7 +214,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       'ADDITION_num'`. Yosys and the Parmys goldens fail the same way, while Icarus warns and
       substitutes nothing. The spec names only the last two; `preprocessor_define` fails
       identically.
-11. **2B preprocessor results** (2B Task 9, 2026-10-10; spec §9, §10.3, §10.6).
+12. **2B preprocessor results** (2B Task 9, 2026-10-10; spec §9, §10.3, §10.6).
     - *Caps.* `test_pp_limits` hits each of the 16 `ODIN3_PP_MAX_*` caps through
       `odin3_pp_test_set_limits`, and the 2^28 source-file cap at the root's `at` and at an
       `` `include `` (sparse files, so nothing is read). Each test asserts the exact located

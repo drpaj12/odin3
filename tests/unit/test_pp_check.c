@@ -259,7 +259,7 @@ static const char k_bits[] = "syntax: undefined macro 'BITS'";
 static const char k_width[] = "syntax: undefined macro 'WIDTH'";
 static const rejected k_rejected[] = {
     /* the three splicing micros, which Parmys rejects too (its golden log: "undefined macro
-     * ADDITION_num"; PP-6, PHASE2 #10) */
+     * ADDITION_num"; PP-6, PHASE2 #11) */
     {"syntax/preprocessor_complex_define.v", k_addition, false},
     {"syntax/preprocessor_define.v", k_addition, false},
     {"syntax/preprocessor_define_with_comment.v", k_addition, false},
