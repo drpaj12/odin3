@@ -1,7 +1,14 @@
 # 3H — QoR harness and exit run: design
 
-Status: v1 (2026-10-11), agent draft for light review (PHASE3 3H row: light; Opus `high`, Sonnet
-for bulk). Phase 3, sub-project 3H, lane 3: it starts now with the Parmys baseline (the P leg) and
+Status: v2 (2026-10-11). v2 applies review 1 (`3EH-review1`: 7 important, 13 minor; dispositions
+in §21) and the controller's rulings: the nightly rotates the four biggest *designs* with a
+realistic budget and a 06:00 admission guard, and runs start by hand until Peter approves the
+timer (H1); a missing gated metric fails the gate (H2); the run directory is wiped before each
+attempt (H3); P's `pre-vpr.blif` is kept (H4); `equiv` is in the exit gate, with the Verilator
+check and a recorded exception for stereovision3 and the multiplier designs, and fcheck exit
+codes mapped (H5/H6); a first measurement of the unmeasured group B stages under the 6 GB scope
+(H7). v1 was the agent draft for light review (PHASE3 3H row: light; Opus `high`, Sonnet for
+bulk). Phase 3, sub-project 3H, lane 3: it starts now with the Parmys baseline (the P leg) and
 grows alongside 3A–3G until it runs the exit (M3). Spec: `docs/DESIGN.md` §11 ("VTR 19 … QoR
 table"), §12 (Phase 3 exit), §13 #6 (name style). Inputs: `docs/PHASE3.md` in full, especially the
 exit test (items 1–5) and decisions 2, 3, 5, 15, 16, 17, 18 (all approved 2026-10-11); PHASE0 #29
@@ -27,7 +34,7 @@ exit item 4, decision 3), under the WSL limits of decision 17 and the heavy-run 
 | The table (Markdown and CSV, geomean, gate, attribution) and the publish step | `tools/vtr-qor/qor_table.py` |
 | The functional check (decision 16), rerun determinism, `equiv-check` collection | `tools/vtr-qor/` |
 | Design sets, order, bands, explanations, declared divergences | `tests/vtr/qor/` |
-| Nightly local runs (a user systemd timer) | `tools/vtr-qor/systemd/` |
+| Nightly local runs (started by hand; systemd timer files for Peter to install when he approves) | `tools/vtr-qor/systemd/` |
 | CI scope (decision 18) | `.github/workflows/ci.yml` (unittest only), `tests/tools/test_vtr_qor*.py` |
 | The first P-leg run of the 19, now | §12 |
 
@@ -88,13 +95,18 @@ housekeeping:
 
 ```
 -track_memory_usage -crit_path_router_iterations 100        # vtr_reg_qor_chain script_params
--temp_dir <J>/run -timeout 7200 -delete_result_files        # harness (decision 17)
+-temp_dir <J>/run -timeout <T> -delete_intermediate_files -delete_result_files   # harness
 ```
 
-and runs as `cd <J> && $PY $V/vtr_flow/scripts/run_vtr_flow.py … > <J>/run/vtr_flow.out 2>&1`,
-with `PATH=$V/.venv/bin:$PATH`. `-delete_result_files` drops `.net/.place/.route` at the end;
-`run_vtr_flow` itself already deletes the copied `.v`/`.xml` and the last-stage netlist, and
-keeps `<d>.pre-vpr.blif` (the netlist VPR read), which §4.1 reads before §7.6 deletes it.
+`<T>` is 7,200 s for group A (decision 17) and 14,400 s for group B (review H20: mcml's ABC
+alone takes ≈ 57 min on VTR's runner, ≈ 85 min at × 1.5, and a timeout costs a 2 h+ rerun). Each
+attempt runs `safe_rmtree(<J>/run)`, `mkdir -p <J>/run`, then `cd <J> && $PY
+$V/vtr_flow/scripts/run_vtr_flow.py … > <J>/run/vtr_flow.out 2>&1`, with `PATH=$V/.venv/bin:$PATH`
+(§7.4 item 0). In `flow.py`, `delete_intermediate_files()` runs only with
+`-delete_intermediate_files` (`keep_intermediate_files` defaults to true); with that flag it
+deletes the last-stage netlist and the copied `.xml/.sdf/.v/.sv`, and with
+`-delete_result_files` also `.net/.place/.route`. It keeps `<d>.pre-vpr.blif` (the netlist VPR
+read), which §4.1 reads and §7.5 keeps for P (gzipped) and deletes for the other legs.
 
 ### 3.1 P — the Parmys baseline (decision 3, exit item 5)
 
@@ -176,12 +188,13 @@ net, so LU32PEEng's 380 k `.names` fit easily in the scope):
 
 | Metric | Definition |
 |---|---|
-| `luts` | `.names` with at least one input (constant generators excluded, exit item 4) |
+| `luts` | `.names` with at least one input, excluding constant generators (exit item 4) and identity buffers (one input, cover `1 1` or `0 0`), which VPR absorbs (`absorb_buffer_luts`) |
+| `buffers` | the identity buffers excluded above (ABC's `write_hie` PO buffers, 1C's port buffers), reported separately |
 | `ffs` | `.latch` lines |
 | `adders`, `mults` | `.subckt adder`, `.subckt multiply` |
 | `ram_slices` | `.subckt single_port_ram` + `.subckt dual_port_ram` |
-| `depth` | the longest path counted in `.names` with ≥ 1 input, from primary inputs, latch outputs, hard-block outputs and constants to primary outputs, latch inputs and hard-block inputs (hard blocks cut, as VTR's iterative black-boxing does); `-1` with a warning on a combinational loop |
-| `abc_depth` | VTR's own `abc_depth` (`abc0.out` `lev = N`) for P, O′ and R; empty for O and P′ |
+| `depth` | the longest path counted in `.names` with ≥ 1 input that are not identity buffers, from primary inputs, latch outputs, hard-block outputs and constants to primary outputs, latch inputs and hard-block inputs (hard blocks cut, as VTR's iterative black-boxing does); `-1` with a warning on a combinational loop |
+| `abc_depth` | VTR's own `abc_depth` (`abc0.out` `lev = N`) for P, O′ and R; for O and P′ the final depth line 3D is asked to log (3E §14.1 item 6), empty until it exists |
 | `blif_sha256` | of the pre-VPR BLIF (and of `<J>/<d>.blif`, which equals it for `-start vpr`) |
 
 `depth` is computed the same way for every leg, so it is the comparable column; `abc_depth` is
@@ -218,14 +231,17 @@ the per-job parse `run_vtr_task.py` performs (`task.py` `create_cmd`), so values
 
 ### 4.4 VTR stages
 
-`parmys.out` and every `abc<i>.out` carry `time -v` output (`-track_memory_usage`). Wall times are
-summed, peak RSS is the maximum. P: parmys + abc; O′ and R: odin3 + abc; P′: parmys (from the P
+`parmys.out`, every `abc<i>.out`, and the ABC stage's helper logs (`<i>_blackboxing_latch.out`,
+`restore_latch<i>.out`, `report_clocks.abc.out`: the Perl passes VTR runs over the whole BLIF for
+each clock domain) carry `time -v` output (`-track_memory_usage`). Wall times are summed over all
+of them, peak RSS is the maximum; a log without `time -v` lines is reported as
+`vtr-qor: <L> <d>: no time -v in <file>; stage cost incomplete` and the cost cell is marked `*`. P: parmys + abc; O′ and R: odin3 + abc; P′: parmys (from the P
 job of the same key family) + odin3.
 
 ### 4.5 Functional and structural verdicts (§8)
 
-`fcheck` (`pass|fail|missing|skipped`), `equiv` (`equivalent|differs|ram|skipped`), `rerun`
-(`same|differs|skipped`).
+`fcheck` (`pass|fail|error|skipped`, §8.1), `equiv` (`equivalent|differs|ram|multiclock|timeout|
+error|skipped`, §8.2), `rerun` (`same|differs|skipped`).
 
 ## 5. Where results live (QH-5)
 
@@ -233,7 +249,7 @@ job of the same key family) + odin3.
 
 | Place | What | Who writes |
 |---|---|---|
-| **odin3 repo** | inputs only: `tests/vtr/qor/{sets.json,bands.json,explanations.tsv,divergences.tsv}`, the harness, its tests; and **summaries** in `docs/PHASE3.md` (the P baseline once, M1, M2, and the M3 exit table verbatim, as the PHASE3 checklist requires) | agents, through PRs |
+| **odin3 repo** | inputs only: `tests/vtr/qor/{sets.json,bands.json,explanations.tsv,divergences.tsv,equiv-exceptions.tsv}`, the harness, its tests; and **summaries** in `docs/PHASE3.md` (the P baseline once, M1, M2, and the M3 exit table verbatim, as the PHASE3 checklist requires) | agents, through PRs |
 | **`~/odin3-ws/work/vtr-qor/`** (`$ODIN3_QOR_DIR`) | every job, cache, log, table draft, nightly report | the harness |
 | **odin3-golden** (`~/odin3-ws/golden/qor/`) | each *published* table (decision 18: "the QoR table is committed to odin3-golden") | the controller only, by `vtr-qor publish`; implementer agents never write `~/odin3-ws/golden` (standing rules) |
 
@@ -287,21 +303,31 @@ part, so P runs once per VTR commit and arch.
 
 Per `<vtr12>/<arch>/<leg>`: the 3 newest complete keys are kept; older ones are deleted by
 `vtr-qor clean` (and automatically after a run completes). Failed and capped jobs keep their full
-run directory for diagnosis, at most 5 per leg (oldest pruned). Disk per kept ok job: logs, parse
-files and `metrics.json`, about 1–20 MB.
+run directory for diagnosis, at most 5 per leg **and at most 2 GiB in total per leg** (oldest
+pruned first; a single failed mcml or LU32PEEng directory can hold several GiB). Disk per kept
+ok job: logs, parse files and `metrics.json`, about 1–20 MB; a P job also keeps
+`<d>.pre-vpr.blif.gz` (review H4; P is cached per VTR commit, so the functional check of P and
+P′'s cross-checks never need a 3–4 h rerun): about 120 MB gzipped for all 21.
 
 ## 6. The table (QH-6)
 
 `vtr-qor table` reads the `latest` key of each requested leg (or `--keys leg=key12,…`) and
 writes four files. Numbers: integers as is; `critical_path_delay_ns` 3 decimals; `fmax_mhz` 1;
-times 1 (s); memory 0 (MiB); ratios and geomeans 3; empty cell = not available. Rows follow the
-§2 order; extras after the 19.
+times 1 (s); memory 0 (MiB); ratios and geomeans 3, or 4 when the value lies within 0.005 of a
+gate bound (the gate compares unrounded values, so 1.2004 must not print as "1.200" next to a
+FAIL); empty cell = not available. Rows follow the §2 order; extras after the 19. The header's
+date and host come from the inputs (the newest job end time and the host recorded in
+`job.json`), never from the clock, so two runs give identical bytes (T7).
 
 ### 6.1 Ratios and geomean
 
 For a pair X/Y (pairs `O/P`, `O'/P`, `P'/P`, `O/O'`, `R/P`, `Oprov/O`) and a metric m, the ratio of
-design d is `m(X,d) / m(Y,d)`, defined when both jobs are `ok` and `m(Y,d) > 0`; when both values
-are 0 the ratio is 1. The **geomean** over a design set S is `exp(mean_{d∈S} ln r_d)` over the
+design d is `m(X,d) / m(Y,d)`. A value is **present** when its parse result is a finite number;
+VTR's parser prints the pattern default or `-1` for a missing key (and the last match wins), so
+`-1` and an absent key are "missing". For a **gated** metric (§6.2) the ratio is defined only when
+both values are present and > 0; otherwise it is undefined and the gate fails (§6.2 rule 2). For
+report-only metrics the ratio is defined when both are present, X ≥ 0 and Y > 0, and is 1 when
+both are 0. The **geomean** over a design set S is `exp(mean_{d∈S} ln r_d)` over the
 designs with a defined ratio, printed with `(n/|S|)` when n < |S|. S is the 19 for gate rows, the
 2 extras separately, never mixed. Lower is better for every gated metric.
 
@@ -314,12 +340,27 @@ designs with a defined ratio, printed with `(n/|S|)` when n < |S|. S is the 19 f
  "equal_or_explained": ["num_mult", "num_memories"]}
 ```
 
-PASS iff all of: every gate design's O and P jobs are `ok` with `vpr_status=success`; for each
-gated metric, geomean ≤ 1.20 (inclusive) over all 19 (n = 19) and every ratio ≤ 1.50 (inclusive);
-for `num_mult` and `num_memories`, O = P or a row `<design>\t<metric>\t<text>` exists in
-`tests/vtr/qor/explanations.tsv`; the functional check passes or every failure is declared
-(§8.1); every rerun is `same` (§8.3). Everything else is report-only (decision 3). The verdict is
-printed by `vtr-qor gate` and as the first section of `qor.md`.
+The verdict is one of **PASS**, **FAIL** or **INCOMPLETE** (review H13). It is INCOMPLETE (exit
+3) when a *reference* job (P, or P′/O′ for the attribution rows) is not `ok` — capped, timed out
+or failed — so a cap on the baseline is never reported as Odin III's failure; the table says
+which jobs to rerun. Otherwise PASS iff all of:
+
+1. every gate design's O job is `ok` with `vpr_status=success` (else FAIL);
+2. every gated metric is present and > 0 for O and P on every gate design (§6.1); a missing or
+   nonpositive value is `gate: FAIL: <metric> missing for <d> (<leg>)` (ruling H2);
+3. for each gated metric, geomean ≤ 1.20 (inclusive) over all 19 (n = 19) and every ratio ≤ 1.50
+   (inclusive), compared unrounded;
+4. for `num_mult` and `num_memories`, O = P or a row `<design>\t<metric>\t<text>` exists in
+   `tests/vtr/qor/explanations.tsv`;
+5. the functional check of every gate design is `pass`, or `fail` with a declared row in
+   `divergences.tsv` (§8.1); `error` fails;
+6. `equiv` (decision 16a, §8.2) is `equivalent` or `ram` on every gate design not listed in
+   `tests/vtr/qor/equiv-exceptions.tsv`; `differs` anywhere fails; a listed design's verdict is
+   reported, and its functional check (rule 5) stands in for it;
+7. every rerun is `same` (§8.3).
+
+Everything else is report-only (decision 3). The verdict is printed by `vtr-qor gate` and as the
+first section of `qor.md`.
 
 ### 6.3 `qor.md` (Markdown)
 
@@ -346,12 +387,19 @@ FAIL lines, one per violated rule (E-QH texts of §10).
 ## Routed — min W, CPD (ns), Fmax (MHz), wirelength per leg
 ## Cost — front-end wall (s) and peak RSS (MiB), VPR time (s) and memory (MiB) per leg, O/P
 ## Attribution — per gated metric, geomeans of O'/P (front end), P'/P and O/O' (ABC), O/P
-## Functional check and determinism — fcheck O and P, equiv, rerun, per design
+## Noise floor — R/P per gated metric (the same netlist up to names and order: VPR's own spread)
+## Functional check and determinism — fcheck O and P, equiv (with the recorded exceptions), rerun, per design
 ## Declared divergences — rows of divergences.tsv that apply
 ## Name style (when Oprov ran) — VPR time and memory, Oprov/O
 ```
 
 The gate table is the one PHASE3 records verbatim at M3.
+
+**Seeds** (review H12): one VPR seed per job, as VTR's own QoR task. At M3, every design whose
+gated ratio lies within 10 % of a bound (≥ 1.08 geomean contributor or ≥ 1.35 per design) is
+rerun with VPR seeds 2 and 3 (`--seed N` passed through `run_vtr_flow`) for O and P, and the
+table shows the three-seed mean beside the gating single-seed value; the gate itself stays on seed
+1 (decision 3 does not ask for seeds), and the spread goes to Peter with the exit table.
 
 ### 6.4 CSV
 
@@ -403,6 +451,12 @@ with no swap. Before blocking it probes with `flock -n`; when the lock is busy i
 `systemd-run` themselves: a new `--scope` is a sibling cgroup, not a child, and would escape the
 cap.
 
+**One convention for every heavy tool** (review H16). `qor_heavy.reexec_under_lock(argv)` and
+`qor_heavy.verify_scope()` are the only implementation: 3E's `vtr-read-check` and `blif-roundtrip
+--vtr` import them. A heavy tool that finds `ODIN3_HEAVY=1` does not call `flock` or
+`systemd-run` again (that would deadlock under `vtr-qor nightly`, which already holds the lock); it
+only verifies the scope and proceeds.
+
 This replaces decision 17's per-job `prlimit` RSS cap and `run_vtr_flow -limit_memory_usage`,
 which are no-ops here: Linux ignores `RLIMIT_RSS`, and VTR applies its `ulimit -Sv` only when
 `Path("ulimit").exists()` (`python_libs/vtr/util.py`, `check_cmd`), which is never true (recorded
@@ -410,6 +464,23 @@ in `tools/run-oracle.sh` in Phase 0). One 6 GiB scope for three concurrent jobs 
 than 3 × 6 GiB, which would exceed decision 17's 60 % of 24 GiB. Group A's largest concurrent
 peaks (stereovision2's VPR at 1.16 GiB plus two smaller jobs, §2) fit easily; each group B job
 gets the whole 6 GiB alone (LU32PEEng's VPR peak is 2.26 GiB).
+
+**What is not yet measured** (review H7; ruling: do not raise the cap). VTR's golden gives VPR's
+peaks and the Parmys stage's; three group B steps have no figure: VTR's ABC stage on mcml and
+LU32PEEng (`dch -f`, `mfs2`; `golden_results.txt` has no ABC-stage RSS), `odin3` with linked ABC
+on the same two designs (the IR and ABC's network in one process), and the Verilator build of RTL
+plus netlist. They are measured in this order, each solo under the scope:
+
+1. VTR's ABC stage: the first P run (§12) records the peak RSS of every `abc*.out` for all 21;
+2. the Verilator build: 3H-3 runs fcheck on `LU8PEEng` first, then `bgm`, then `mcml` and
+   `LU32PEEng`, as a separate step after VPR with `--verilator-j 1` (§8.1);
+3. `odin3`+ABC: the first P′ run (M1, 3H-3) on `LU8PEEng`, `bgm`, then `mcml` and `LU32PEEng`;
+   the first O run (M3) repeats it with the front end.
+
+If a step exceeds 6 GiB, the job is `capped` with the message `vtr-qor: <L> <d>: capped: stage
+<stage> exceeded the 6 GiB scope (peak ≥ <n> MiB at the kill)` (the stage is the newest log file
+being written; the peak is the scope's `memory.peak`), the gate cannot PASS (INCOMPLETE or FAIL,
+§6.2), and the measured numbers go to Peter; the cap is not raised by the agent.
 
 ### 7.2 Order and parallelism
 
@@ -422,33 +493,47 @@ job at a time. `--designs` and `--set` keep the §2 order whatever order they ar
 
 A job starts only when all hold, re-checked every 60 s while waiting:
 
-1. `C:` has ≥ 20 GB free (`df -B1G --output=avail /mnt/c`; PHASE0 #29: the ext4 VHDX grows into
-   `C:`). Below: `vtr-qor: paused: C: has <n> GB free (< 20 GB); checking every 60 s`; resuming
-   logs `vtr-qor: resumed: C: has <n> GB free`. Paused for 2 h in a row: stop, exit 5 (E-QH11).
+1. `C:` has ≥ 20 GiB free (`df -B1G --output=avail /mnt/c` reports GiB; 20 GiB ≥ decision 17's
+   20 GB; PHASE0 #29: the ext4 VHDX grows into `C:`). Below: `vtr-qor: paused: C: has <n> GiB
+   free (< 20 GiB); checking every 60 s`; resuming logs `vtr-qor: resumed: C: has <n> GiB free`.
+   Deleting files inside ext4 does not return space to `C:` (the VHDX never shrinks by itself), so
+   a pause rarely clears on its own: paused for 2 h in a row, the run stops with exit 5 (E-QH11)
+   and prints the hint `vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then
+   Optimize-VHD or diskpart compact vdisk; Peter's hands)`.
 2. `MemAvailable` (`/proc/meminfo`) ≥ 7 GiB (the cap plus 1 GiB), so other sessions cannot push
    the VM into OOM while our scope is within its limit. Below: `vtr-qor: waiting: <n> GiB
    available (< 7)`.
-3. A **hard floor**: if `C:` falls below 10 GB while jobs run, the running jobs are terminated
+3. A **hard floor**: if `C:` falls below 10 GiB while jobs run, the running jobs are terminated
    (`aborted`), and the run stops with exit 5.
 
 ### 7.4 Out of memory, timeouts
 
+- **Fresh attempt** (review H3; ruling): before every attempt (first run, capped retry,
+  `--rerun`) the harness deletes `<J>/metrics.json` and `<J>/status`, wipes the run directory with
+  `safe_rmtree(<J>/run)` and recreates it, and records the attempt's start time; the parser
+  accepts a log or parse file only if its mtime is ≥ that start time (else `vtr-qor: <L> <d>:
+  stale <file> from an earlier attempt; job failed`), so a retry that dies early can never be
+  scored with an earlier attempt's `vpr.out`.
 - **Capped**: the scope's `memory.events` `oom_kill` counter is read before and after each job;
   a job that fails while the counter rose during its life is `capped` (the kernel kills the
   largest process in the scope, usually VPR, and `run_vtr_flow` then exits with an error, so the
   exit code alone does not tell). A capped group A job is retried once alone after group A
   drains; capped again (or capped in group B) it stays `capped`: no verdict, as in
   `run-oracle.sh`.
-- **Timeouts**: VTR's `-timeout 7200` per stage (decision 17); the harness's own wall limit per
-  job is 14,400 s (`--job-timeout`). On expiry the job's process group (each job runs with
+- **Timeouts**: VTR's `-timeout` per stage, 7,200 s in group A (decision 17) and 14,400 s in
+  group B (§3); the harness's own wall limit per job is 14,400 s in group A and 21,600 s in group
+  B (`--job-timeout`). On expiry the job's process group (each job runs with
   `start_new_session=True`) gets SIGTERM, then SIGKILL after 30 s; status `timeout`.
 
 ### 7.5 Cleanup
 
 After an `ok` job (and after §4.1 has read the netlist and §8 has used it): everything under
 `<J>/run` is deleted except `vtr_flow.out output.txt parse_results.txt qor_results.txt vpr.out
-vpr.crit_path.out parmys.out abc*.out`; `<J>/<d>.blif` is replaced by its `.sha256` (kept with
-`--keep-netlists`, which the exit run sets for O so the functional check and reruns can use it).
+vpr.crit_path.out parmys.out abc*.out *_blackboxing_latch.out restore_latch*.out
+report_clocks.abc.out`, and, for **P always** (ruling H4), `<d>.pre-vpr.blif`, gzipped to
+`<d>.pre-vpr.blif.gz`, so fcheck on P never needs a rerun; for the other legs the pre-VPR
+netlist is deleted and `<J>/<d>.blif` is replaced by its `.sha256` (kept with `--keep-netlists`,
+which the exit run sets for O and O′ so the functional check, `equiv` and reruns can use them).
 Deletion goes through `safe_rmtree(path)`, which refuses (E-QH12) unless `realpath(path)` lies
 strictly under `realpath(~/odin3-ws/work/vtr-qor)` and no component is a symlink: the standing
 rule's "rm only under `~/odin3-ws/work`", enforced in code.
@@ -466,25 +551,57 @@ in <h:mm:ss>`.
 
 ```
 $PY $V/mosaic/verilator_check/run_random_check.py --rtl $V/vtr_flow/benchmarks/verilog/<d>.v \
-  --post-synth-blif <J>/run/<d>.pre-vpr.blif --work-dir <J>/fcheck \
-  --vectors 50000 --seed 1 --verilator-j 2
+  --post-synth-blif <netlist> --work-dir <J>/fcheck \
+  --vectors 50000 --seed 1 --verilator-j <n>
 ```
 
-run read-only from VTR's tree (`--work-dir` keeps every output in work; the script's default
-would write into the working directory). Verdict `pass` (exit 0), `fail`, or `missing` (the
-script's own `missing` class). It runs inline after a leg's VPR job when `--fcheck` is given
-(before cleanup), heavy (Verilator builds of group B designs are large). It runs on O for the
-gate and on P as the reference: a design that fails on P too fails for a reason that is not
-Odin III's (RTL heuristics, uninitialised RAM), which `divergences.tsv` records. `divergences.tsv`
-rows: `<design>\t<class>\t<text>` with class `mem-init-dropped` (decision 6 step 5;
-`ch_intrinsics`, and any design 3C lists) or `async-reset-made-sync` (decision 19). Gate: O is
-`pass`, or `fail` with a declared row.
+`<netlist>` is `<J>/run/<d>.pre-vpr.blif` (P: decompressed from the kept `.gz` into
+`<J>/fcheck/`). It runs read-only from VTR's tree (`--work-dir` keeps every output in work; the
+script's default would write into the working directory). Group A runs it inline after the leg's
+VPR job when `--fcheck` is given, with `--verilator-j 2`; group B runs it as **its own step after
+all VPR jobs**, one design at a time, with `--verilator-j 1` (review H7), heavy.
 
-### 8.2 `equiv-check` before and after `abc` (decision 16a, second check)
+**Verdicts** from the script's exit code (review H6): 0 → `pass`; 1 → `fail` (vectors mismatch);
+2 → `error` (Yosys or Verilator missing, a port it cannot parse, a build failure); a kill by the
+cap → `capped`; anything else → `error`. (`missing` is the batch runner's CSV class, not this
+script's.) It runs on O for the gate and on P as the reference.
 
-For each gate design whose O netlist has no RAM slice: `tools/equiv-check/equiv-check
-<O′ job's <d>.blif> <O job's <d>.blif>` (pre-ABC vs post-ABC, both `--vtr` from the same front
-end), heavy for group B. Verdicts as §4.5; `ram` when the netlist has RAMs (PHASE0 #8).
+`tests/vtr/qor/divergences.tsv` rows are `<design>\t<class>\t<text>`, with class:
+
+- `mem-init-dropped`: decision 6 step 5 (`ch_intrinsics`, and any design 3C lists);
+- `async-reset-made-sync`: decision 19;
+- `baseline-fails`: P's own fcheck is `fail` on this design too, for a reason outside Odin III
+  (RTL clock/reset heuristics of `port_parse.py`, uninitialised RAM); the row cites P's log.
+
+**Gate rule** (with §6.2 rule 5): O `pass` passes; O `fail` passes only with a row whose class is
+`mem-init-dropped` or `async-reset-made-sync` applying to the design, or `baseline-fails` **and**
+P's verdict in the same table is `fail`; O `error` or `capped` fails (or is INCOMPLETE when the
+cause is P's side); a P `error` makes the design's fcheck INCOMPLETE.
+
+### 8.2 `equiv-check` before and after `abc` (decision 16a, second check; in the gate)
+
+For each gate design without RAM slices: `tools/equiv-check/equiv-check --timeout 600 <O′ job's
+<d>.blif> <O job's <d>.blif>` (pre-ABC vs post-ABC, both `--vtr` from the same front end), heavy
+for group B. Verdicts: `equivalent` (exit 0), `differs` (exit 1), `ram` (the netlist has RAM
+slices: no RAM model, PHASE0 #8), `multiclock` (equiv-check's dsec has one implicit clock and
+exits 2 on two), `timeout`, `error` (any other exit 2).
+
+The RAM-free gate designs (Parmys counts, 2026-10-11) are `stereovision3`, `diffeq2`, `diffeq1`,
+`sha`, `stereovision0`, `stereovision1`, `stereovision2`, `blob_merge` and `bgm` (all 21 others,
+extras included, have RAMs). Of these, dsec cannot decide (ruling H5/H6):
+
+| Design | Reason | Recorded exception (`tests/vtr/qor/equiv-exceptions.tsv`) |
+|---|---|---|
+| `stereovision3` | two clocks (`tm3_clk_v0`, `tm3_clk_v2`) | `multiclock`: the Verilator check stands in |
+| `diffeq1`, `diffeq2` | 5 `multiply` each, inlined by equiv-check as 36×36 logic | `multiplier`: the Verilator check stands in |
+| `stereovision1` | 152 `multiply` | `multiplier`: as above |
+| `stereovision2` | 468 `multiply` | `multiplier`: as above |
+| `bgm` | 11 `multiply` | `multiplier`: as above |
+
+`equiv` still runs on the excepted designs (its verdict is reported; a `differs` there fails the
+gate like anywhere else). `sha`, `stereovision0` and `blob_merge` must be `equivalent`; a
+`timeout` or `error` on them fails until it is explained and added to the exceptions file in a
+reviewed PR.
 
 ### 8.3 Byte-identical reruns (exit item 3)
 
@@ -501,24 +618,24 @@ k6|earch`, `--no-wait`, `--allow-vtr-drift`, `-v`.
 
 | Subcommand | Arguments | Heavy | Does |
 |---|---|---|---|
-| `doctor` | — | no | checks VTR commit = ORACLES pin and clean (`git status --porcelain --untracked-files=no` empty), binaries (`vpr`, `abc`, `yosys`), the venv, `/usr/bin/time -v`, a `systemd-run --user --scope` probe, `/mnt/c` free space, `MemAvailable`, the heavy lock (free/busy), and which legs `odin3` can run; prints a checklist, exit 0/1 |
+| `doctor` | — | no | checks VTR commit = ORACLES pin and clean (`git status --porcelain --untracked-files=no` empty), binaries (`vpr`, `abc`, and `$V/build/bin/yosys`, which `run_random_check`'s `resolve_yosys` looks for), `verilator` on `PATH`, the venv, `/usr/bin/time -v`, a `systemd-run --user --scope` probe, `/mnt/c` free space, `MemAvailable`, the heavy lock (free/busy), and which legs `odin3` can run; prints a checklist, exit 0/1 |
 | `run` | `--leg L[,L…]` (`P O Oprime Pprime R Oprov`; `O'`/`P'` accepted), `--set gate,extra,smoke` or `--designs d,…`, `-j N`, `--rerun`, `--fcheck`, `--keep-netlists`, `--job-timeout S`, `--stage-timeout S`, `--dry-run` | yes | §3, §7; `--dry-run` prints the job list with keys and cache hits and runs nothing (not heavy) |
 | `table` | `--legs L,…`, `--keys L=key12,…`, `--label TEXT`, `--set …` | no | §6, into `tables/<stamp>-<label>/` |
-| `gate` | `<table dir>` | no | prints the verdict and violations; exit 0 PASS, 1 FAIL |
+| `gate` | `<table dir>` | no | prints the verdict and violations; exit 0 PASS, 1 FAIL, 3 INCOMPLETE |
 | `fcheck` | `--leg L`, set/designs | yes | §8.1 on existing jobs with kept netlists |
 | `equiv` | set/designs | yes for group B | §8.2 |
 | `rerun-check` | `--leg O`, set/designs | yes | §8.3 |
 | `crosscheck` | `--task DIR` | yes | runs 3F's task through `run_vtr_task.py <abs task> -temp_dir <out>/crosscheck -j 1` on the 3 smallest and requires `parse_results.txt` values equal to the harness's for every non-time key |
 | `check-lib` | — | no | `tools/vtr-models check-lib lib/vtr.o3lib` against the arch (decision 5; 3E §15.2) |
-| `exit-run` | `--label TEXT` | yes | M3: `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists`, the P fcheck, `equiv`, `rerun-check`, `run --arch earch --set smoke --leg P,Pprime,Oprime,O`, `table`, `gate` |
-| `nightly` | `[--with-big LEG]` | yes | §13 |
+| `exit-run` | `--label TEXT` | yes | M3: `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists` (group B fcheck as its own step), the P fcheck from the kept netlists, `equiv`, `rerun-check`, `run --arch earch --set smoke --leg P,Pprime,Oprime,O`, the M3 seed reruns (§6.3), `table`, `gate`. Estimated 14–18 h at WSL speed (P cached): it spans nights, each night bounded by the 06:00 admission deadline, and resumes through the cache (`exit-run` again continues where it stopped) |
+| `nightly` | `[--start-at HH:MM] [--now --budget H] [--slot N]` | yes | §13; `--slot` forces a rotation slot |
 | `publish` | `<table dir>` | no | copies the four files to `~/odin3-ws/golden/qor/<vtr12>/<label>/` (controller only; refuses unless `ODIN3_QOR_PUBLISH=1`) and prints the `git -C ~/odin3-ws/golden add/commit` lines to run |
 | `clean` | `[--keep N]` | no | §5.4 |
 | `status` | — | no | per leg and arch: latest key, ok/failed counts, age |
 
 **Exit codes** (as `run-oracle.sh` plus the lock and disk cases): 0 every job ok (or, for `gate`,
 PASS); 1 a job failed or the gate failed; 2 usage, configuration or environment error; 3 no
-failure but at least one `capped` or `timeout`; 4 the heavy lock was busy with `--no-wait`; 5
+failure but at least one `capped` or `timeout` (for `gate`: INCOMPLETE); 4 the heavy lock was busy with `--no-wait`; 5
 stopped for disk space.
 
 ### Leg availability
@@ -540,13 +657,13 @@ Prefix `vtr-qor: `; lower case; no final period; paths absolute.
 | E-QH5 | `leg <L> needs pass '<p>', which <odin3> does not register` | 2 |
 | E-QH6 | `<d>: Parmys golden <path>: <reason>` with reason `missing`, `status=<s>`, `vtr_commit <a> is not the pin <b>`, `arch <a> is not <b>`, `blif_sha256 does not match` (the job is `skipped`) | 1 |
 | E-QH7 | `unknown leg '<L>' (P, O, Oprime, Pprime, R, Oprov)` / `unknown design '<d>' (see tests/vtr/qor/sets.json)` / `unknown set '<s>' (gate, extra, smoke)` | 2 |
-| E-QH8 | `<L> <d>: vpr_status=<s>; see <J>/run/vtr_flow.out` / `<L> <d>: front end exited <rc>; see <J>/frontend.log` | 1 |
+| E-QH8 | `<L> <d>: vpr_status=<s>; see <J>/run/vtr_flow.out` / `<L> <d>: front end exited <rc>; see <J>/frontend.log` / `<L> <d>: stale <file> from an earlier attempt; job failed` | 1 |
 | E-QH9 | `-j <n> exceeds 3 (decision 17)` | 2 |
-| E-QH10 | `<L> <d>: capped (oom_kill in the 6 GiB scope)`; `retrying alone` or `no verdict` / `<L> <d>: timeout after <s> s` | 3 |
-| E-QH11 | `C: stayed below 20 GB free for 2 h; stopping (<n> jobs not started)` / `C: fell below 10 GB free; terminating <n> running jobs` / `cannot read free space of /mnt/c` | 5 |
+| E-QH10 | `<L> <d>: capped: stage <stage> exceeded the 6 GiB scope (peak ≥ <n> MiB at the kill)`; then `retrying alone` or `no verdict` / `<L> <d>: timeout after <s> s` / `nightly: <L> <d> not started: expected <m> min would pass 06:00` (exit 0 for that line alone) | 3 |
+| E-QH11 | `C: stayed below 20 GiB free for 2 h; stopping (<n> jobs not started)` / `C: fell below 10 GiB free; terminating <n> running jobs` / `cannot read free space of /mnt/c` | 5 |
 | E-QH12 | `refusing to delete <path>: not under <root>` / `refusing to delete <path>: <component> is a symlink` | 2 |
 | E-QH13 | `table: no complete key for leg <L> on <arch>` / `table: <d> has no ok <L> job` (a gate design: the gate fails) | 1 |
-| E-QH14 | `gate: FAIL: <metric> geomean O/P <x> > 1.20` / `gate: FAIL: <metric> <d> O/P <x> > 1.50` / `gate: FAIL: <metric> <d> O <a> != P <b> (no row in explanations.tsv)` / `gate: FAIL: <d> O fcheck fail (no row in divergences.tsv)` / `gate: FAIL: <d> rerun differs` / `gate: FAIL: <d> O vpr_status=<s>` | 1 |
+| E-QH14 | `gate: FAIL: <metric> missing for <d> (<leg>)` / `gate: FAIL: <metric> geomean O/P <x> > 1.20` / `gate: FAIL: <metric> <d> O/P <x> > 1.50` / `gate: FAIL: <metric> <d> O <a> != P <b> (no row in explanations.tsv)` / `gate: FAIL: <d> O fcheck fail (no row in divergences.tsv)` / `gate: FAIL: <d> O fcheck error` / `gate: FAIL: <d> equiv differs` / `gate: FAIL: <d> equiv <timeout\|error> (not in equiv-exceptions.tsv)` / `gate: FAIL: <d> rerun differs` / `gate: FAIL: <d> O vpr_status=<s>` / `gate: INCOMPLETE: <d> <leg> is <status> (reference); rerun it` (exit 3) | 1 |
 | E-QH15 | `publish: set ODIN3_QOR_PUBLISH=1 (controller only; agents never write ~/odin3-ws/golden)` | 2 |
 
 ## 11. Caps (QH-11)
@@ -556,14 +673,16 @@ Prefix `vtr-qor: `; lower case; no final period; paths absolute.
 | memory, the whole run | 6 GiB, no swap (one cgroup scope) | standing rules; decision 17 |
 | concurrency | `-j3` group A, `-j1` group B, `-j` ≤ 3 | decision 17 |
 | heavy runs machine-wide | 1 (`flock`) | standing rules |
-| job admission | `MemAvailable` ≥ 7 GiB; `C:` ≥ 20 GB free | PHASE0 #29, decision 17 |
-| disk floor | 10 GB on `C:` (terminate) | §7.3 |
+| job admission | `MemAvailable` ≥ 7 GiB; `C:` ≥ 20 GiB free | PHASE0 #29, decision 17 |
+| disk floor | 10 GiB on `C:` (terminate) | §7.3 |
 | pause limit | 2 h | §7.3 |
-| VTR stage timeout | 7,200 s (`-timeout`) | decision 17 |
-| job wall timeout | 14,400 s | §7.4 |
+| VTR stage timeout | 7,200 s group A (decision 17); 14,400 s group B | §3 |
+| job wall timeout | 14,400 s group A; 21,600 s group B | §7.4 |
+| nightly admission | no new job after 06:00 (or start + `--budget`) unless it fits | §13 |
 | retries | 1, alone, for capped group A jobs | §7.4 |
-| retention | 3 keys per (arch, leg); 5 failed run dirs per leg | §5.4 |
-| Verilator | 50,000 vectors, seed 1, `--verilator-j 2` | decision 16 |
+| retention | 3 keys per (arch, leg); 5 failed run dirs and 2 GiB per leg; P's pre-VPR netlist always (gzipped) | §5.4 |
+| Verilator | 50,000 vectors, seed 1, `--verilator-j 2` (group A), `1` (group B, own step) | decision 16, §8.1 |
+| equiv-check | 600 s per design | §8.2 |
 
 ## 12. The first P-leg run, now (QH-12)
 
@@ -589,10 +708,16 @@ controller's go-ahead if earlier). Solo: under the heavy lock, nothing else heav
    | **total** | 10,202 | **≈ 2 h 45 min** |
 
    On the WSL machine (i7-13700, 12 threads, 24 GiB) plan for **3–4 h** (× 1.5 margin, unmeasured
-   so far). The longest single stage, `mcml`'s ABC at ≈ 57 min on VTR's runner, is under the 2 h
-   stage cap with margin; if it is hit, rerun that design alone with `--stage-timeout 14400`.
-   Memory: peaks per VTR are 2.26 GiB (`LU32PEEng` VPR) and 1.19 GiB (`LU32PEEng` Parmys), far
-   under 6 GiB. Disk: up to ≈ 2 GB transient per group B job; ≈ 20 MB kept per design.
+   so far). Group B runs with `-timeout 14400` per stage and a 21,600 s job limit from the start
+   (§3, §7.4), so `mcml`'s ABC (≈ 57 min on VTR's runner, ≈ 85 min at × 1.5) has a 2.8× margin.
+   Memory: peaks per VTR are 2.26 GiB (`LU32PEEng` VPR) and 1.19 GiB (`LU32PEEng` Parmys); the
+   ABC stage's peak is not in VTR's golden, and this run is its **first measurement** (§7.1,
+   "what is not yet measured", step 1): the `abc*.out` peaks of `mcml` and `LU32PEEng` are copied
+   into the PHASE3 entry. A cap hit is reported with the stage and the peak, and goes to Peter;
+   the cap is not raised. Disk: up to ≈ 2 GiB transient per group B job; ≈ 20 MB kept per design
+   plus P's gzipped pre-VPR netlist (§5.4).
+   The run session (Sonnet `high`) starts the command in the background and watches it with
+   Monitor (until `harness.log` shows `done:`), rather than waiting 3–4 h in the foreground.
 5. **Acceptance**: 21 jobs `ok`, `vpr_status=success`. Cross-check against `golden_results.txt`
    with VTR's own `pass_requirements.txt` bands as a report (another machine and VPR revision,
    PHASE3 exit item 5): a metric outside its band is investigated, never a failure of the run.
@@ -605,28 +730,68 @@ controller's go-ahead if earlier). Solo: under the heavy lock, nothing else heav
 
 ## 13. Nightly local runs (QH-13; in scope)
 
-`vtr-qor nightly`, holding the heavy lock once for all its steps (inner commands see
-`ODIN3_HEAVY=1` and do not re-execute):
+**Starting.** Installing the systemd timer is Peter's call and is **not yet approved** (ruling
+H1/H14). Until he approves it, nightly runs **start by hand**: the controller runs
+`tools/vtr-qor/vtr-qor nightly --start-at 01:00` in the background at the end of a session (it
+sleeps holding nothing, then takes the heavy lock), or `vtr-qor nightly --now --budget 4h` for a
+daytime run on a free machine. The timer files ship in the repo
+(`tools/vtr-qor/systemd/odin3-vtr-qor-nightly.{service,timer}`, `OnCalendar=*-*-* 01:00`,
+`Persistent=false`); when Peter approves, he installs them with
+
+```
+mkdir -p ~/.config/systemd/user
+cp tools/vtr-qor/systemd/odin3-vtr-qor-nightly.* ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now odin3-vtr-qor-nightly.timer
+```
+
+and removes them with `systemctl --user disable --now odin3-vtr-qor-nightly.timer`.
+
+**Admission deadline** (ruling H1). Without `--now`, the deadline is 06:00 local: no new job
+starts after it, and a job starts only if its expected duration ends before it. The expected
+duration is the last measured elapsed time of the same (arch, leg, design), else VTR's golden flow
+time × 1.5 (§2) plus the front end's last time. A refused job logs `vtr-qor: nightly: <L> <d> not
+started: expected <m> min would pass 06:00`; jobs already running finish. With `--now` the
+deadline is the start time plus `--budget` (default 4 h). The lock and the scope are therefore
+released by about 06:00 even on a long night (a group B job admitted at 05:00 may run on; the
+admission rule makes that rare because its expected time would not fit).
+
+**Steps**, holding the heavy lock once (inner commands see `ODIN3_HEAVY=1` and do not
+re-execute):
 
 1. `doctor`; `vtr-models check --arch` (the committed models JSON is still the arch's) and
    `check-lib`.
 2. **EArch smoke**: ranks 1–5 on `earch`, every available leg.
 3. **k6, group A**: every available leg (P is a cache hit unless VTR moved), `--fcheck` on O,
    `equiv`, `rerun-check`.
-4. **k6, group B**: one leg per night in rotation (O, O′, P′; P when VTR moved), so each big leg
-   is at most three nights old; `--with-big all` forces all.
-5. When the odin3 build id changed: 3E's `blif-roundtrip --vtr` and `vtr-read-check` sweeps
-   (3E §16.3–16.4).
+4. **k6, group B: one design per night** (ruling H1), in a rotation of (design, leg) slots that
+   splits the two longest designs by leg:
+
+   | Night | Slot | Expected (WSL, × 1.5 of VTR's runner) |
+   |---|---|---|
+   | 1 | `LU8PEEng`: O, O′, P′ (+ fcheck O) | ≈ 1 h |
+   | 2 | `bgm`: O, O′, P′ (+ fcheck O, equiv) | ≈ 1 h |
+   | 3 | `mcml`: O | ≈ 2 h |
+   | 4 | `mcml`: O′ | ≈ 2 h |
+   | 5 | `mcml`: P′ | ≈ 2 h |
+   | 6 | `LU32PEEng`: O | ≈ 1.5 h |
+   | 7 | `LU32PEEng`: O′ | ≈ 1.5 h |
+   | 8 | `LU32PEEng`: P′ | ≈ 1.5 h |
+
+   An 8-night cycle; unavailable legs are skipped, and the rotation advances only when its slot
+   ran. P on group B runs only when VTR moved (a ≈ 2.5–4 h night of its own). fcheck for `mcml`
+   and `LU32PEEng` runs at M3 and on request, not nightly.
+5. **3E sweeps** (`blif-roundtrip --vtr`, `vtr-read-check`, ≈ 2 h): when `src/backends/blif/`
+   or `src/frontends/blif/` changed since the last sweep, else weekly (Saturday night). A sweep
+   night skips step 4 and does not advance the rotation.
 6. `table --label nightly-<date>` and a diff against the previous nightly: any (leg, design,
    gated metric) that moved by more than 2 % or changed status is listed in
    `nightly/<date>/summary.md`.
 
-Scheduling: a user systemd timer, `tools/vtr-qor/systemd/odin3-vtr-qor-nightly.{service,timer}`
-(`OnCalendar=*-*-* 01:30`, `Persistent=true`), installed with `systemctl --user enable --now
-…timer` (§20 question 1). Because WSL runs only while Windows does, a missed run starts at the
-next boot; `nightly` therefore refuses to start outside 00:00–06:00 local (`vtr-qor: nightly:
-outside the 00:00–06:00 window; skipped`) unless `--now`. Expected duration with group A for
-four legs and one big leg: about 1.5–2.5 h.
+**Budget** (unmeasured; VTR's runner times × 1.5): steps 1–3 ≈ 2–2.5 h (group A ≈ 15–20 min per
+leg for three legs; fcheck builds for 17 designs ≈ 30–45 min; `equiv` ≤ 3 × 600 s plus the
+excepted runs; reruns ≈ 10 min; smoke ≈ 10 min); step 4 ≤ 2 h; total **≈ 3–4.5 h**, inside a
+01:00–06:00 window. A sweep night is ≈ 4–4.5 h. The first hand-started nights measure the real
+figures, and the rotation table is updated from them.
 
 ## 14. CI scope (QH-14; decision 18a)
 
@@ -650,8 +815,8 @@ The QoR table goes to odin3-golden and its summary to PHASE3.md (decision 18a).
 |---|---|---|---|
 | T1 | metric parsers on committed logs (`tests/tools/fixtures/vtr_qor/<case>/`: `vpr.out`, `vpr.crit_path.out`, `output.txt`, `parmys.out`, `abc0.out`, `abc1.out`, `frontend.time`, trimmed from a real `stereovision3` P run and a two-clock run) | the values VTR's `parse_vtr_flow.py` printed for the same directory, recorded in `expected.json` when the fixture was made | CI |
 | T2 | `qor_netstats` | hand-counted fixtures; `depth` = ABC's `print_stats` `lev` on subckt-free single-clock fixtures; on the first P run, `depth` = VTR's `abc_depth` for the single-clock designs (a mismatch is investigated and explained in the PR) | CI; local |
-| T3 | table and gate | golden files: synthetic `runs.json` → expected `qor.md`, `runs.csv`, `ratios.csv` bytes; hand-computed geomeans; boundaries (1.200 passes, 1.2001 fails; 1.500 passes; a missing gate design fails; 0/0 → 1; explanations and divergences honoured) | CI |
-| T4 | scheduler | fake jobs (`sleep`, scripted exit codes, fake `memory.events`, fake `df` via `ODIN3_QOR_DF_CMD`, fake meminfo): order, group boundary, `-j3` → `-j1`, capped detection and single retry, timeout kill of a process group, pause/resume/stop, the 10 GB floor, `safe_rmtree` refusals | CI |
+| T3 | table and gate | golden files: synthetic `runs.json` → expected `qor.md`, `runs.csv`, `ratios.csv` bytes; hand-computed geomeans; boundaries (1.200 passes, 1.2001 fails and prints `1.2001`; 1.500 passes; a missing gate design fails; a gated value of `-1`, `0` or an absent key on O or P fails with `missing`; a non-`ok` P gives INCOMPLETE; report-only 0/0 → 1; explanations, divergences with `baseline-fails` only when P fails too, equiv exceptions honoured; fcheck exit 0/1/2 mapping) | CI |
+| T4 | scheduler | fake jobs (`sleep`, scripted exit codes, fake `memory.events`, fake `df` via `ODIN3_QOR_DF_CMD`, fake meminfo): order, group boundary, `-j3` → `-j1`, capped detection and single retry, the fresh-attempt wipe and the mtime check (a retry that dies early must not be scored with the first attempt's `vpr.out`), timeout kill of a process group, pause/resume/stop, the 10 GiB floor, the 06:00 admission deadline with a fake clock, `ODIN3_HEAVY=1` skipping the re-exec, `safe_rmtree` refusals | CI |
 | T5 | keys and cache | key changes with each input listed in §5.3 and with nothing else; a cached ok job is not rerun; `--rerun` reruns | CI |
 | T6 | heavy guard | the re-exec command line (exact argv); refusal outside a capped scope (fake cgroup files) | CI; local probe in `doctor` |
 | T7 | determinism | `table` twice → identical bytes; `run --dry-run` twice → identical job list | CI |
@@ -674,7 +839,7 @@ The QoR table goes to odin3-golden and its summary to PHASE3.md (decision 18a).
 | `tools/vtr-qor/qor_netstats.py` | `netstats(path) -> NetStats` (§4.1) |
 | `tools/vtr-qor/qor_table.py` | `load_runs`, `ratios`, `geomean`, `gate`, `write_md`, `write_csv` |
 | `tools/vtr-qor/systemd/odin3-vtr-qor-nightly.{service,timer}` | §13 |
-| `tests/vtr/qor/sets.json`, `bands.json`, `explanations.tsv`, `divergences.tsv` | §2, §6.2, §8.1 |
+| `tests/vtr/qor/sets.json`, `bands.json`, `explanations.tsv`, `divergences.tsv`, `equiv-exceptions.tsv` | §2, §6.2, §8.1, §8.2 |
 | `tests/tools/test_vtr_qor_{parse,netstats,table,sched,heavy}.py`, `tests/tools/fixtures/vtr_qor/` | §15 |
 
 All Python is stdlib-only, `ruff` and `mypy --strict` clean (CLAUDE.md). No C code: 3H adds
@@ -689,10 +854,10 @@ implementer runs at most T8 and says which sweeps it deferred.
 | PR / task | Content | Depends on | Model/effort |
 |---|---|---|---|
 | 3H-1 harness + P | `vtr_qor.py` (`doctor run status clean`), `qor_legs` (P only), `qor_sched`, `qor_heavy`, `qor_parse`, `qor_netstats`, `sets.json`, T1 T2 T4 T5 T6 T8 | nothing | Opus `high` |
-| 3H-run-P | the first P run (§12), controller, under the lock | 3H-1 | Sonnet `high` (operating the run, the report) |
+| 3H-run-P | the first P run (§12), controller, under the lock, started in the background and watched with Monitor | 3H-1 | Sonnet `high` (operating the run, the report) |
 | 3H-2 table + gate | `qor_table`, `table gate publish`, `bands.json`, `explanations.tsv`, T3 T7; P-baseline table rendered and published; PHASE3 entry | 3H-1 | Opus `high` |
-| 3H-3 control legs, checks, nightly | legs P′ and R, `fcheck` (P now; O later), `equiv`, `crosscheck`, `nightly` + timer files, EArch smoke, `divergences.tsv`; T9 T11; M1 run | 3E-1, 3D (P′), 3F (crosscheck) | Opus `high`; Sonnet `high` for runs and `divergences.tsv` research |
-| 3H-4 exit | legs O′, O, Oprov, `rerun-check`, `exit-run`; M2 and M3 runs; PHASE3 exit table verbatim; DESIGN §13 #6 answered with the Oprov numbers | 3A 3B 3C 3G, 3F | Opus `high`; Sonnet `high` for the runs |
+| 3H-3 control legs, checks, nightly | legs P′ and R, `fcheck` (on P from the kept netlists; O later), the group B Verilator and `odin3`+ABC measurements (§7.1), `equiv` and `equiv-exceptions.tsv`, `crosscheck`, `nightly` (hand-started) + timer files for Peter, EArch smoke, `divergences.tsv`; T9 T11; M1 run | 3E-1, 3E-5, 3D (P′), 3F (crosscheck) | Opus `high`; Sonnet `high` for runs (background + Monitor) and `divergences.tsv` research |
+| 3H-4 exit | legs O′, O, Oprov, `rerun-check`, M3 seed reruns, `exit-run`; M2 and M3 runs (the exit run spans nights, ≈ 14–18 h, resumed through the cache); PHASE3 exit table verbatim; DESIGN §13 #6 answered with the Oprov numbers | 2D, 2E, 2F (and 2H's VTR rows), 3A, 3B, 3C, 3G, 3D (`abc` for O), 3E-6 (Oprov), 3F | Opus `high`; Sonnet `high` for the runs (background + Monitor) |
 
 Lanes: 3H-1 → 3H-run-P ‖ 3H-2 → 3H-3 (when 3D/3E land) → 3H-4 (when the front-end lane lands). The
 agent says when to switch model: Opus `high` for 3H-1/2/3/4 code sessions, Sonnet `high` for run
@@ -727,11 +892,38 @@ sessions (PHASE0 §9).
 
 ## 20. Decisions for Peter (agent defaults; none blocks 3H-1)
 
-1. **Nightly timer installation.** *Recommended*: the agent installs the user systemd timer
-   (§13) once 3H-3 lands; it is local and reversible (`systemctl --user disable --now …`), and the
-   00:00–06:00 window keeps a missed run from starting while Peter works.
-2. **Big designs nightly in rotation** (§13 step 4). *Recommended*: one big leg per night; the
-   full four-leg set on group B takes about 8 h, too long for one night.
+1. **Nightly timer installation** (ruled: Peter's call, not yet approved). Until he approves,
+   nightly runs start by hand (§13). The unit files and the install commands are in §13; the
+   agent does not install them.
+2. **Big designs nightly in rotation** (ruled: one design per night, §13 step 4), with `mcml` and
+   `LU32PEEng` split by leg so no night exceeds ≈ 2 h for group B.
 3. **Where P′ reads Parmys's netlist.** *Recommended*: the verified golden (§3.4), not the P
    leg's own `parmys.blif`, so P′ does not depend on the P run's directory; the P run records
    whether its `parmys.blif` hash equals the golden's (Parmys determinism, report-only).
+
+## 21. Review dispositions (v2, `3EH-review1`)
+
+| # | Finding | Disposition |
+|---|---|---|
+| H1 | nightly rotation and budget | applied (ruling): one big design per night, `mcml`/`LU32PEEng` split by leg (8-night cycle), 06:00 admission deadline, budget ≈ 3–4.5 h, 3E sweeps only on change or weekly; hand-started until Peter approves the timer (§13) |
+| H2 | missing metrics | applied (ruling): a missing or nonpositive gated metric fails (§6.1, §6.2 rule 2, T3) |
+| H3 | stale run directories | applied (ruling): wipe and mtime check before every attempt (§7.4) |
+| H4 | P netlist deleted | applied (ruling): P's `pre-vpr.blif` kept gzipped (§5.4, §7.5) |
+| H5 | `equiv` not in the gate | applied (ruling): §6.2 rule 6, verdict set, recorded exceptions for `stereovision3` and the multiplier designs, the Verilator check standing in (§8.2) |
+| H6 | fcheck verdict mapping | applied (ruling): exit 0/1/2 → pass/fail/error, `baseline-fails` only when P fails too (§8.1) |
+| H7 | unmeasured group B stages | applied (ruling): measurement order and the capped message; the cap is not raised (§7.1, §12) |
+| H8 | `-delete_result_files` alone does nothing | applied: `-delete_intermediate_files` added, text corrected (§3) |
+| H9 | ABC-stage helper logs | applied: summed (§4.4) |
+| H10 | identity buffers | applied: excluded from `luts`/`depth`, reported as `buffers` (§4.1) |
+| H11 | ABC depth for O/P′ | applied: requested from 3D (3E §14.1 item 6; §4.1) |
+| H12 | seeds and rounding | applied: R/P noise floor section, M3 seed reruns near a bound, 4 decimals near a bound (§6) |
+| H13 | reference failures | applied: INCOMPLETE, exit 3 (§6.2) |
+| H14 | timer installation | applied (ruling): Peter installs; commands given (§13, §20) |
+| H15 | disk | applied: VHDX note and compaction hint, 2 GiB cap on failed dirs, GiB wording (§5.4, §7.3) |
+| H16 | heavy-lock nesting | applied: one `qor_heavy` convention imported by 3E's tools (§7.1) |
+| H17 | doctor, mkdir | applied: Verilator and VTR's Yosys checked; `mkdir -p <J>/run` (§3, §9) |
+| H18 | split, estimates | applied: 3H-4 dependencies, exit-run ≈ 14–18 h across nights, background + Monitor (§9, §17) |
+| H19 | table determinism | applied: date and host from the inputs (§6) |
+| H20 | mcml timeout margin | applied: group B `-timeout 14400`, job limit 21,600 s (§3, §7.4, §12) |
+
+No minor finding was rejected.
