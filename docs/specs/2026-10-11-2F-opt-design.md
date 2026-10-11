@@ -1,15 +1,15 @@
 # 2F — `opt`: design
 
 Status: v2.1 (2026-10-11): v2.1 aligns the hand-offs with 2E v2 (`5185ecc`: shared
-`src/passes/ffinit.[ch]` and `budget.[ch]`, `odin3_opt_expr_counts`, the step-F call site). v2 applies the joint 2E/2F Fable review (`2EF-review1`: 5 important, 9 minor,
-all applied) and the controller's rulings T1 (2E-1 owns IR change D), T2 (mode P; 2D EL-33 amended,
-v4.2), T3 (S-P is the exit splice), T5 (counts, `--noopt`). Phase 2, sub-project 2F (PHASE2 #1;
-light review; Opus `high`). Spec: `docs/DESIGN.md` §5, §6 step 4, §10. Inputs: PHASE2 #4, #5, #13;
-`docs/IR.md`; the op registry (`src/ir/cells/` plus 2D's IR change A); the 2D spec (EL-14 constants,
-EL-33 `$proc` and the `processes` flag, EL-40 `init`, EL-48 `write_rtlil`, §14.3 bridge, §14.6 x
-plan); the 1E and 1B specs. **Oracle: Yosys 0.55 as pinned by VTR**
-(`$VTR_ROOT/libs/EXTERNAL/yosys`, `60f126cd`; binary `$VTR_ROOT/build/bin/yosys`):
-`passes/opt/*.cc`, `kernel/ff.cc`, `passes/proc/proc.cc`, and Parmys's
+`src/passes/ffinit.[ch]` and `budget.[ch]`, `odin3_opt_expr_counts`, the step-F call site). v2
+applies the joint 2E/2F Fable review (`2EF-review1`: 5 important, 9 minor, all applied) and the
+controller's rulings T1 (2E-1 owns IR change D), T2 (mode P; 2D EL-33 amended, v4.2), T3 (S-P is the
+exit splice), T5 (counts, `--noopt`). Phase 2, sub-project 2F (PHASE2 #1; light review; Opus
+`high`). Spec: `docs/DESIGN.md` §5, §6 step 4, §10. Inputs: PHASE2 #4, #5, #13; `docs/IR.md`; the op
+registry (`src/ir/cells/` plus 2D's IR change A); the 2D spec (EL-14 constants, EL-33 `$proc` and
+the `processes` flag, EL-40 `init`, EL-48 `write_rtlil`, §14.3 bridge, §14.6 x plan); the 1E and 1B
+specs. **Oracle: Yosys 0.55 as pinned by VTR** (`$VTR_ROOT/libs/EXTERNAL/yosys`, `60f126cd`; binary
+`$VTR_ROOT/build/bin/yosys`): `passes/opt/*.cc`, `kernel/ff.cc`, `passes/proc/proc.cc`, and Parmys's
 `vtr_flow/misc/yosys/synthesis.tcl` at VTR `3c9a4d23`. Decisions are numbered **OP-n**. Where this
 file and `docs/IR.md` disagree, IR.md wins. IR change D (the word FF family, §9.2) is specified and
 landed by 2E-1; 2F-1 depends on it.
