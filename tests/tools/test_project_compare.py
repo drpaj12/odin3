@@ -162,6 +162,16 @@ class CompareTest(unittest.TestCase):
         code, out = self.compare()
         self.assertEqual(code, 0, out)
 
+    def test_output_without_path_is_reported(self) -> None:
+        d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
+        dumped = absolute(RECORD)
+        dumped["output"] = {"format": "blif"}
+        self.respond(d, [{"match": "o3proj", "stdout": json.dumps(dumped)}])
+        code, out = self.compare()
+        self.assertEqual(code, 1)
+        self.assertIn("malformed record: missing key 'path'", out)
+        self.assertNotIn("Traceback", out)
+
     def test_duplicates_resorted_after_relativizing(self) -> None:
         # Absolute: <root>/pos/src/a.v sorts before <root>/zz/d.v; relative: ../zz/d.v first.
         rec = {**RECORD, "duplicates": ["../zz/d.v", "src/a.v"]}
@@ -304,13 +314,26 @@ class CompareTest(unittest.TestCase):
             {"match": "o3proj", "exit": 1, "stderr": "odin3: error: {CASE}/project.o3proj:2:1: "
              "error: unknown_revision: no such revision: 'nope'\n"},
             {"match": "--format qsf", "exit": 1,
-             "stderr": "odin3: error: odin3: error: unknown_revision: no such revision: 'nope'\n"},
+             "stderr": "odin3: error: unknown_revision: no such revision: 'nope'\n"},
             {"match": "--format f", "exit": 1,
              "stderr": "odin3: error: {CASE}/top.qsf: error: unknown_revision: 'nope'\n"}])
         code, out = self.compare()
         self.assertEqual(code, 0, out)
         qsf = [r for r in self.runs() if "--format qsf" in r["argv"][-1]][0]
         self.assertIn("--revision nope", qsf["argv"][-1])
+
+    def test_doubled_prefix_rejected(self) -> None:
+        err = {"kind": "unknown_revision", "at": None, "names": ["nope"]}
+        code, out = self.neg(err, "odin3: error: odin3: error: unknown_revision: no such "
+                             "revision: 'nope'\n")
+        self.assertEqual(code, 1)
+        self.assertIn("doubled 'odin3: error: ' prefix", out)
+
+    def test_unprefixed_line_is_not_a_diagnostic(self) -> None:
+        code, out = self.neg(self.MISSING, "{CASE}/project.o3proj:3:14: error: missing_file: "
+                             "'{CASE}/src/missing.v'\n")
+        self.assertEqual(code, 1)
+        self.assertIn("no '<kind>: <detail>' error", out)
 
     def test_unlocated_where_a_line_is_expected(self) -> None:
         code, out = self.neg(self.MISSING, "odin3: error: missing_file: '{CASE}/src/missing.v'\n")

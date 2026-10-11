@@ -462,6 +462,21 @@ class FakeToolsTest(unittest.TestCase):
         self.assertEqual(Path(f"{self.log}.icarus-cwd").read_text(), "")
         self.assertEqual(Path(f"{self.log}.yosys-cwd").read_text(), "")
 
+    def test_double_quote_in_a_path_is_a_usage_error(self) -> None:
+        # final review parked minor 9: neither a Yosys script nor an .o3proj word can carry it
+        with self.assertRaises(pp_diff.UsageError):
+            pp_diff._word('/x/a"b.v')
+        self.assertEqual(pp_diff._word("/x/a b.v"), '"/x/a b.v"')
+        quoted = self.dir / 'q"uote.v'
+        quoted.write_text("module m; endmodule\n")
+        self.source = quoted
+        code, _ = self._main({})
+        self.assertEqual(code, pp_diff.EXIT_USAGE)
+        self.assertFalse(Path(f"{self.log}.o3proj").exists())  # nothing ran
+        self.source = self.dir / "a.v"
+        code, _ = self._main({}, "-I", str(self.dir / 'i"nc'))
+        self.assertEqual(code, pp_diff.EXIT_USAGE)
+
     def test_missing_odin3_is_an_error_missing_oracle_a_skip(self) -> None:
         # review minor 10
         self.bins["odin3"] = str(self.dir / "nope")

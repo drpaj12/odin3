@@ -3,8 +3,8 @@
 Test inputs for the project path (DESIGN §4.0 is the grammar; PHASE1 #18, #19): one small
 design per case, written once as sources and expressed in every project format that can
 express it, with the record each format must parse to, the design it resolves to, and an oracle
-netlist (or, for a negative case, the located error). Odin III cannot read these yet; the
-corpus is here so the readers have their tests waiting.
+netlist (or, for a negative case, the located error). Odin III's project readers (2B) read
+every Phase 2 record from it; elaboration and the netlist comparison wait for the front end.
 
 `tools/project-fixtures/project-fixtures check` keeps the corpus self-consistent and prints the
 counts per phase (CTest `project_fixtures`, and `python_tools` through
@@ -12,6 +12,23 @@ counts per phase (CTest `project_fixtures`, and `python_tools` through
 `ref.cmd` in a scratch copy of its case, smallest case first, checks the tool versions the
 `ref.cmd` records, and compares with the committed `ref.blif` (`--write` updates both); it needs
 Yosys and GHDL, so it runs locally, not in CI.
+
+`project-fixtures compare --odin3 <odin3>` checks Odin III against the corpus (2B §10.2; CTest
+`project_corpus`, so CI runs it): for every case and every format whose reader has landed
+(`format_phase`), smallest case first, it runs `odin3 --diag-paths resolved -p "read_project
+--format <fmt> <entry>; dump_project"` from an empty temporary directory with only `PATH` and the
+case's `env`. A positive case must exit 0 with the dumped record equal to `project` (plus the
+format's `format_overrides`) after its paths are made relative to the case, and print exactly the
+`ignored`/`duplicates` info lines the record implies. A negative case must exit 1 with exactly
+one `odin3: error: <kind>: <detail>` diagnostic (located, file-level or unlocated) matching
+`kind`, `at` and every name; the include kinds run `preprocess` instead of `dump_project`. The
+front-end kinds (`unresolved_module`, `no_top`, …) need `read_verilog` and are skipped unless
+`--with-frontend` is given. `--case` and `--format` narrow the run; it fails when no case runs.
+
+CTest `pp_properties` (`tests/tools/test_pp_properties.py`) runs the preprocessor's files-read
+property over every Phase 2 positive case: `read_project; preprocess --out DIR` reads a subset of
+`resolved.read` less its non-Verilog files, exactly that set when the record has no `libfiles`/`libdirs`
+(2B §10.5).
 
 ## Phases
 

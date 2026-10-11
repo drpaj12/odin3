@@ -1859,10 +1859,13 @@ FRONTEND_KINDS = frozenset({"duplicate_module", "unresolved_module", "dependency
                             "no_top", "ambiguous_top", "unknown_top"})
 EXIT_FAIL = 1  # odin3's exit status when a pass fails (src/cli/main.c)
 ODIN3_TIMEOUT = 120  # seconds per run (a sanitizer build reads a case in well under one)
-# One diagnostic as odin3 logs it: the log sink's `odin3: error: ` prefix, then the message
-# `<file>:<line>:<col>: error: …`, `<file>: error: …` or, unlocated, `odin3: error: …` (§8).
-_ERROR_LINE = re.compile(r"(?:odin3: error: )?(?P<loc>.*?): error: (?P<kind>"
+# One diagnostic as odin3 prints it: the log sink's `odin3: error: ` prefix, then the message
+# `<file>:<line>:<col>: error: <kind>: …`, `<file>: error: <kind>: …` or, unlocated,
+# `<kind>: …` alone (§8). A doubled prefix (`odin3: error: odin3: error: …`) parses with loc
+# `odin3` and is reported as a problem.
+_ERROR_LINE = re.compile(r"odin3: error: (?:(?P<loc>.*?): error: )?(?P<kind>"
                          + "|".join(ERROR_KINDS) + r"): (?P<detail>.*)")
+_DOUBLED = "odin3"
 _LOC = re.compile(r"(?P<file>.+?):(?P<line>[0-9]+)(?::[0-9]+)?")
 _QUOTED = re.compile(r"'([^']*)'")
 _INFO = re.compile(r"(?:odin3: )?info: (?P<file>.+?): "
@@ -1971,6 +1974,8 @@ def record_problems(proc: subprocess.CompletedProcess[str], case_dir: str, entry
         return [f"record keys: expected {', '.join(RECORD_KEYS)}, got {got}"]
     try:
         rec, probs = relativize_record(rec, case_dir)
+    except KeyError as exc:
+        return [f"malformed record: missing key {exc}"]
     except (TypeError, AttributeError) as exc:
         return [f"malformed record: {exc}"]
     probs += [f"record {k}: expected {json.dumps(want[k])}, got {json.dumps(rec[k])}"
@@ -1996,7 +2001,7 @@ def quoted_paths(case_dir: str, detail: str, probs: list[str]) -> str:
 
 def parse_errors(stderr: str, case_dir: str) -> list[dict[str, Any]]:
     """Every `<kind>: <detail>` diagnostic on stderr as {kind, at, detail, probs}: `at` as the
-    oracle writes it (`file:line`, the column dropped; `file`; None for `odin3:`), the paths in
+    oracle writes it (`file:line`, the column dropped; `file`; None when unlocated), the paths in
     `at` and the detail's quoted absolute names made relative (see resolved_path, whose
     complaints go to `probs`)."""
     found = []
@@ -2006,7 +2011,9 @@ def parse_errors(stderr: str, case_dir: str) -> list[dict[str, Any]]:
             continue
         probs: list[str] = []
         at: str | None = None
-        if m["loc"] != "odin3":
+        if m["loc"] == _DOUBLED:
+            probs.append("doubled 'odin3: error: ' prefix")
+        elif m["loc"] is not None:
             loc = _LOC.fullmatch(m["loc"])
             file = resolved_path(case_dir, loc["file"] if loc else m["loc"], "at", probs)
             at = f"{file}:{loc['line']}" if loc else file

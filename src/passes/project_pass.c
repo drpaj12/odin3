@@ -88,6 +88,12 @@ static odin3_status parse_format(odin3_bytes word, uint8_t *format) {
     return ODIN3_ERR_INVALID_ARG;
 }
 
+/* Whether word starts with "--" (an option, never a value or an entry). */
+static bool is_option(odin3_bytes word) {
+    return word.len >= 2 && ((const char *)word.ptr)[0] == '-' &&
+           ((const char *)word.ptr)[1] == '-';
+}
+
 /* One word of read_project's arguments (an option takes its value from *rest). */
 static odin3_status read_arg(odin3_bytes word, odin3_bytes *rest, read_args *out, bool *extra) {
     if (odin3_pass_arg_is(word, "--format")) {
@@ -95,13 +101,13 @@ static odin3_status read_arg(odin3_bytes word, odin3_bytes *rest, read_args *out
     }
     if (odin3_pass_arg_is(word, "--revision")) {
         out->revision = odin3_pass_arg_next(rest);
-        if (out->revision.ptr == NULL) {
+        if (out->revision.ptr == NULL || is_option(out->revision)) {
             odin3_log(ODIN3_LOG_ERROR, "read_project: --revision expects a revision name");
             return ODIN3_ERR_INVALID_ARG;
         }
         return ODIN3_OK;
     }
-    if (word.len >= 2 && ((const char *)word.ptr)[0] == '-' && ((const char *)word.ptr)[1] == '-') {
+    if (is_option(word)) {
         return unknown_arg("read_project", word);
     }
     *extra |= out->entry.ptr != NULL;
@@ -162,8 +168,12 @@ static odin3_status dump_project_run(odin3_pass_ctx *ctx, odin3_design *design, 
     (void)ctx;
     (void)user;
     odin3_bytes path = odin3_pass_arg_next(&args);
-    if (odin3_pass_arg_next(&args).ptr != NULL || (path.ptr != NULL && path.len == 0)) {
+    if (odin3_pass_arg_next(&args).ptr != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "dump_project: expects at most one path");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (path.ptr != NULL && path.len == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "dump_project: the path is empty");
         return ODIN3_ERR_INVALID_ARG;
     }
     const odin3_project *proj = finished_project(design, "dump_project");
@@ -456,6 +466,9 @@ static odin3_status run_streams(const pp_out *out, const odin3_project *proj, od
         st = odin3_pp_run(pp, &src, &stream);
         st = st != ODIN3_OK ? st : emit_stream(out, index++, &stream);
     }
+    if (st == ODIN3_OK && index == 0) {
+        odin3_log(ODIN3_LOG_INFO, "preprocess: no Verilog design files");
+    }
     if (st == ODIN3_OK && out->args.out.ptr != NULL) {
         st = emit_files_read(out, pp);
     }
@@ -519,5 +532,6 @@ const odin3_pass_def odin3_pass_dump_project = {
 const odin3_pass_def odin3_pass_preprocess = {
     "preprocess",
     "preprocess [--out <dir>] [--segments]: preprocess the project's Verilog files (debug): "
-    "<dir>/<n>.v, <n>.segments.json and files-read.txt, or the text on stdout",
+    "<dir>/<n>.v, <n>.segments.json and files-read.txt (use a fresh <dir>: files a previous run "
+    "left there are not removed), or the text on stdout",
     preprocess_run, NULL, false};

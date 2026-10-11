@@ -64,7 +64,7 @@ odin3_status odin3_pp_error(odin3_pp *pp, odin3_loc loc, const char *fmt, ...) {
     if (loc.v != 0) {
         odin3_diag(pp->design, ODIN3_LOG_ERROR, loc, "%s", msg);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: %s", msg);
+        odin3_log(ODIN3_LOG_ERROR, "%s", msg);
     }
     return ODIN3_ERR_PARSE;
 }

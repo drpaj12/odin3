@@ -578,6 +578,15 @@ if(BUILD_TESTING)
         # and 0xC3 (roomy caps, defines, include directory). fuzz_pp_default_caps runs each seed
         # once at the default §9 caps (no mutation: a mutated bomb needs the lowered caps);
         # fuzz_pp_smoke fuzzes for 10 s; long runs are local. One worker, 2 GB RSS.
+        # -print_funcs=0: libFuzzer symbolizes every NEW_FUNC line, and without an unversioned
+        # llvm-symbolizer ASan falls back to addr2line, which stalls the smoke ~90 s. Crash
+        # reports still symbolize; ASAN_SYMBOLIZER_PATH points at a versioned one when found.
+        find_program(ODIN3_LLVM_SYMBOLIZER NAMES llvm-symbolizer llvm-symbolizer-20
+                     llvm-symbolizer-19 llvm-symbolizer-18)
+        set(_fuzz_env "")
+        if(ODIN3_LLVM_SYMBOLIZER)
+            set(_fuzz_env "ASAN_SYMBOLIZER_PATH=${ODIN3_LLVM_SYMBOLIZER}")
+        endif()
         set(_fuzz_seeds ${PROJECT_BINARY_DIR}/fuzz_pp_seeds)
         set(_fuzz_corpus ${PROJECT_BINARY_DIR}/fuzz_pp_corpus)
         file(MAKE_DIRECTORY ${_fuzz_corpus})
@@ -593,11 +602,15 @@ if(BUILD_TESTING)
         set_tests_properties(fuzz_pp_default_caps PROPERTIES FIXTURES_REQUIRED fuzz_pp_seeds
                              LABELS fuzz TIMEOUT 300)
         add_test(NAME fuzz_pp_smoke
-            COMMAND fuzz_pp -max_total_time=10 -timeout=10 -rss_limit_mb=2048
+            COMMAND fuzz_pp -max_total_time=10 -timeout=10 -rss_limit_mb=2048 -print_funcs=0
                     -dict=${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_pp.dict -print_final_stats=1
                     ${_fuzz_corpus} ${_fuzz_seeds})
         set_tests_properties(fuzz_pp_smoke PROPERTIES FIXTURES_REQUIRED fuzz_pp_seeds
                              LABELS fuzz TIMEOUT 120)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_pp_default_caps fuzz_pp_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
     endif()
 
     # 2B §10.4: the preprocessor against Icarus and Yosys over the probes, the backtick micros

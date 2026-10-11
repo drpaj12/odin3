@@ -60,7 +60,7 @@ typedef struct odin3_pp_config {
  * One source file to preprocess (plan point (a)): given and resolved names and its library
  * (strtab IDs) for the stream's FILE buffer (parent 0); at = the loc of the project word or
  * instantiation that named it, which locates the root file's own errors (missing, unreadable,
- * over ODIN3_SRC_MAX_FILE_BYTES); at 0 reports them unlocated ("odin3: error: ...").
+ * over ODIN3_SRC_MAX_FILE_BYTES); at 0 reports them unlocated (no file:line:col).
  */
 typedef struct odin3_pp_source {
     uint32_t given, resolved, library;

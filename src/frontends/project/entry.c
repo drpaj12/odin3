@@ -25,7 +25,7 @@ static const char *str_text(const odin3_project *proj, uint32_t str) {
     return odin3_strtab_get(odin3_design_strtab(proj->design), str);
 }
 
-/* An unlocated error ("odin3: error: …") naming name (none when NULL). */
+/* An unlocated error ("<kind>: …", no location) naming name (none when NULL). */
 static odin3_status unlocated(odin3_project *proj, odin3_proj_err_kind kind, const char *detail,
                               const odin3_bytes *name) {
     odin3_proj_err err = {kind, ODIN3_PROJ_UNLOCATED, {0}, NULL, detail, name, name != NULL};
@@ -47,14 +47,12 @@ static odin3_status append_cwd(odin3_strbuf *out) {
         odin3_util_free(buf);
         if (got || err != ERANGE) {
             if (!got) {
-                odin3_log(ODIN3_LOG_ERROR, "odin3: error: cannot read the working directory: %s",
-                          strerror(err));
+                odin3_log(ODIN3_LOG_ERROR, "cannot read the working directory: %s", strerror(err));
             }
             return got ? res : ODIN3_ERR_IO;
         }
     }
-    odin3_log(ODIN3_LOG_ERROR, "odin3: error: cannot read the working directory: %s",
-              strerror(ERANGE));
+    odin3_log(ODIN3_LOG_ERROR, "cannot read the working directory: %s", strerror(ERANGE));
     return ODIN3_ERR_IO;
 }
 
@@ -223,7 +221,7 @@ odin3_status odin3_project_read(odin3_design *design, const odin3_project_reques
         return res;
     }
     if (proj->finished) { /* point (e): misuse, the record read first stays */
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: project already read from %s",
+        odin3_log(ODIN3_LOG_ERROR, "project already read from %s",
                   str_text(proj, proj->entry.given));
         return ODIN3_ERR_INVALID_ARG;
     }

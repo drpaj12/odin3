@@ -260,7 +260,12 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
         - `` `line `` inside a macro body: Yosys applies it, Icarus and 2B drop it;
         - a `//` comment ending a `` `define `` with a trailing `\`: Yosys and 2B end the
           text, Icarus continues it;
-        - formals inside body strings (§10.4).
+        - formals inside body strings (§10.4);
+        - a comment in a formal default (`` `define A(x=/*c*/ 3) [x] ``): Icarus keeps the
+          comment text in the expansion, Yosys and 2B drop it. The tokens are identical, so
+          pp-diff reports agree, not oracles disagree; the fixture
+          `tests/tools/fixtures/pp_diff/default_comment.v` pins it against both oracles (2B-3
+          final review).
     - *Benchmark* (`build/release/bench_pp`, Release, dev machine (i7-13700, WSL2), 2026-10-10,
       `$VTR_ROOT/vtr_flow/benchmarks/verilog`, after the fix round, output verbatim):
 
@@ -332,12 +337,13 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
         - Where the oracles disagree, the table `ORACLES_DISAGREE` names the oracle Odin III
           must match. A file with no row in the table, or one matching the other oracle,
           fails.
-      - *Input set:* `pp-diff --suite` takes 286 files, smallest first, mcml.v last: 20 reviewer
-        probes (`rec.v` included), 1 fixture, 234 micros that hold a backtick and are not
+      - *Input set:* `pp-diff --suite` takes 287 files, smallest first, mcml.v last: 20 reviewer
+        probes (`rec.v` included), 2 fixtures, 234 micros that hold a backtick and are not
         included by another micro, and 31 VTR files. The debug build runs it in 10 s, exit 0.
-      - *Result:* agree 270, oracles disagree 11 (all as the table expects), declared 5,
+      - *Result:* agree 271, oracles disagree 11 (all as the table expects), declared 5,
         excluded 20. DIFFER, CRASH, DECLARED NOT MET and DISAGREE NOT EXPECTED are all 0.
-        - The 270 are 8 probes (in v2 all three tools reject), 231 micros, and all 31 VTR files
+        - The 271 are 8 probes (in v2 all three tools reject), the fixture
+          `default_comment.v`, 231 micros, and all 31 VTR files
           (mcml.v: 133,191 tokens). The four `translate_off` benchmarks are among them.
       - *Declared:* the Odin III error is expected, and both oracles must accept alike.
         - probes t5 and u3: `directive inside macro text`;
@@ -371,3 +377,26 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
         - A pass-through directive is stripped from its backtick to the end of its line.
         - Based literals are compared without their inner blanks.
         - No C fix was needed.
+    - *2B-3 final-review fix round* (2026-10-11; `final-review-2B3.md`):
+      - *I1:* `fuzz_pp_smoke` passes `-print_funcs=0`. Without an unversioned `llvm-symbolizer`,
+        libFuzzer's `NEW_FUNC` lines made ASan fall back to `addr2line` and stalled the 10 s
+        smoke for about 90 s, against a 120 s timeout. It now takes 11 s. CMake also sets
+        `ASAN_SYMBOLIZER_PATH` to a versioned `llvm-symbolizer` when one is found, so a crash
+        report stays readable.
+      - *I2:* unlocated errors no longer print `odin3: error: odin3: error: …`. The seven call
+        sites log `<kind>: <detail>` alone and the log sink supplies the prefix. The corpus
+        harness requires the `odin3: error: ` prefix and reports a doubled one.
+      - *Minors fixed:*
+        - the corpus README covers `compare`, `project_corpus` and `pp_properties`;
+        - a dumped `output` without `path` is reported, not a traceback;
+        - `dump_project ""` reports an empty path;
+        - `read_project --revision` refuses a value starting with `--`;
+        - `preprocess` logs `preprocess: no Verilog design files`;
+        - an OOM test covers `odin3_pass_set_revision`;
+        - `test_project_pass` pins the whole `0.segments.json`;
+        - pp-diff refuses a path holding `"` (exit 2);
+        - the `default_comment.v` fixture (M7 list above);
+        - `preprocess --out` is documented to expect a fresh directory.
+      - *Kept parked:* `project_pass.c` reading srcman internals, the loose Icarus error regex,
+        and srcman-raised paths under `--diag-paths resolved`. Each waits for the 2A srcman
+        touch or the next pp-diff change.

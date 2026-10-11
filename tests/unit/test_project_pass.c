@@ -162,6 +162,8 @@ static void test_read_project_arguments(void) {
            run("read_project", "--format"));
     expect(ODIN3_ERR_INVALID_ARG, "read_project: --revision expects a revision name",
            run("read_project", P "/p.o3proj --revision"));
+    expect(ODIN3_ERR_INVALID_ARG, "read_project: --revision expects a revision name",
+           run("read_project", "--revision --format f " P "/files.f"));
     expect(ODIN3_ERR_INVALID_ARG, "read_project: unknown argument '--bogus'",
            run("read_project", "--bogus " P "/p.o3proj"));
     TEST_ASSERT_NULL(odin3_design_project(design)); /* nothing was read */
@@ -176,7 +178,7 @@ static void test_read_project_reads(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_design_module_end(design)); /* no front end ran */
     TEST_ASSERT_TRUE(odin3_design_has_project(design));
     TEST_ASSERT_FALSE(odin3_design_has_project(NULL));
-    expect(ODIN3_ERR_INVALID_ARG, "odin3: error: project already read from " P "/p.o3proj",
+    expect(ODIN3_ERR_INVALID_ARG, "project already read from " P "/p.o3proj",
            run("read_project", P "/p.o3proj"));
 }
 
@@ -192,7 +194,7 @@ static void test_read_project_format(void) {
 }
 
 static void test_read_project_missing_entry(void) {
-    expect(ODIN3_ERR_PARSE, "odin3: error: missing_file: project not found: '" P "/none.o3proj'",
+    expect(ODIN3_ERR_PARSE, "missing_file: project not found: '" P "/none.o3proj'",
            run("read_project", P "/none.o3proj"));
 }
 
@@ -224,6 +226,17 @@ static void test_revision_setter(void) {
     TEST_ASSERT_NULL(odin3_pass_get_options().revision);
 }
 
+/* Out of memory, the setter fails and the revision set before stays. */
+static void test_revision_setter_oom(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_revision("keep"));
+    odin3_util_set_alloc_fail_after(0);
+    odin3_status st = odin3_pass_set_revision("new");
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_TRUE(odin3_pass_get_options().has_revision);
+    TEST_ASSERT_EQUAL_STRING("keep", odin3_pass_get_options().revision);
+}
+
 /* 1D's --top replaces the project's top, with an info line. */
 static void test_top_option(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name("other"));
@@ -240,6 +253,7 @@ static void test_dump_project_misuse(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", P "/p.o3proj"));
     expect(ODIN3_ERR_INVALID_ARG, "dump_project: expects at most one path",
            run("dump_project", "a.json b.json"));
+    expect(ODIN3_ERR_INVALID_ARG, "dump_project: the path is empty", run("dump_project", "\"\""));
 }
 
 static void test_dump_project_file(void) {
@@ -331,20 +345,49 @@ static void test_preprocess_out(void) {
     TEST_ASSERT_FALSE(exists("1.v"));
 }
 
-/* The segment map of the same run: one segment per line, each decoded. */
+/* The whole segment map of the same run (given style), fully determined by k_top_expanded: each
+ * out_offset starts the run of bytes whose file location and spelling the record gives. */
+static const char k_top_segments[] =
+    "[\n"
+    "  {\"out_offset\": 0, \"file\": \"defs.vh\", \"line\": 1, \"col\": 20,"
+    " \"buffer_kind\": \"file\", \"macro\": null,"
+    " \"spell_file\": \"defs.vh\", \"spell_line\": 1, \"spell_col\": 20},\n"
+    "  {\"out_offset\": 1, \"file\": \"src/top.v\", \"line\": 1, \"col\": 19,"
+    " \"buffer_kind\": \"file\", \"macro\": null,"
+    " \"spell_file\": \"src/top.v\", \"spell_line\": 1, \"spell_col\": 19},\n"
+    "  {\"out_offset\": 26, \"file\": \"src/top.v\", \"line\": 2, \"col\": 25,"
+    " \"buffer_kind\": \"expansion\", \"macro\": \"WIDTH\","
+    " \"spell_file\": \"<command line>\", \"spell_line\": 1, \"spell_col\": 15},\n"
+    "  {\"out_offset\": 27, \"file\": \"src/top.v\", \"line\": 2, \"col\": 31,"
+    " \"buffer_kind\": \"file\", \"macro\": null,"
+    " \"spell_file\": \"src/top.v\", \"spell_line\": 2, \"spell_col\": 31},\n"
+    "  {\"out_offset\": 49, \"file\": \"src/top.v\", \"line\": 2, \"col\": 53,"
+    " \"buffer_kind\": \"expansion\", \"macro\": \"WIDTH\","
+    " \"spell_file\": \"<command line>\", \"spell_line\": 1, \"spell_col\": 15},\n"
+    "  {\"out_offset\": 50, \"file\": \"src/top.v\", \"line\": 2, \"col\": 59,"
+    " \"buffer_kind\": \"file\", \"macro\": null,"
+    " \"spell_file\": \"src/top.v\", \"spell_line\": 2, \"spell_col\": 59},\n"
+    "  {\"out_offset\": 75, \"file\": \"src/top.v\", \"line\": 3, \"col\": 16,"
+    " \"buffer_kind\": \"expansion\", \"macro\": \"INV\","
+    " \"spell_file\": \"defs.vh\", \"spell_line\": 1, \"spell_col\": 16},\n"
+    "  {\"out_offset\": 77, \"file\": \"src/top.v\", \"line\": 3, \"col\": 21,"
+    " \"buffer_kind\": \"macro_arg\", \"macro\": \"INV\","
+    " \"spell_file\": \"src/top.v\", \"spell_line\": 3, \"spell_col\": 21},\n"
+    "  {\"out_offset\": 78, \"file\": \"src/top.v\", \"line\": 3, \"col\": 16,"
+    " \"buffer_kind\": \"expansion\", \"macro\": \"INV\","
+    " \"spell_file\": \"defs.vh\", \"spell_line\": 1, \"spell_col\": 19},\n"
+    "  {\"out_offset\": 79, \"file\": \"src/top.v\", \"line\": 3, \"col\": 23,"
+    " \"buffer_kind\": \"file\", \"macro\": null,"
+    " \"spell_file\": \"src/top.v\", \"spell_line\": 3, \"spell_col\": 23}\n"
+    "]\n";
+
 static void test_preprocess_segments(void) {
     char args[2 * PATH_BUF];
     (void)snprintf(args, sizeof args, "read_project " P "/p.o3proj; preprocess --out %s --segments",
                    tmp);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, script(args));
     static char got[FILE_MAX];
-    slurp("0.segments.json", got);
-    TEST_ASSERT_EQUAL_STRING_LEN("[\n  {\"out_offset\": 0, \"file\": \"", got, 31);
-    TEST_ASSERT_NOT_NULL(strstr(got, "\"file\": \"src/top.v\", \"line\": 2, \"col\": 25, "
-                                     "\"buffer_kind\": \"expansion\", \"macro\": \"WIDTH\", "));
-    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"macro_arg\", \"macro\": \"INV\", "));
-    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"file\", \"macro\": null, "));
-    TEST_ASSERT_EQUAL_STRING("\n]\n", got + strlen(got) - 3);
+    TEST_ASSERT_EQUAL_STRING(k_top_segments, slurp("0.segments.json", got));
 }
 
 /* The segment map of p.o3proj's stream 0 (preprocess --out tmp --segments). */
@@ -396,6 +439,18 @@ static void test_preprocess_segments_resolved(void) {
     TEST_ASSERT_NOT_NULL(strstr(got, "\"spell_file\": \"" P "/inc/defs.vh\""));
 }
 
+/* A record without a Verilog design file: an info line, no stream, an empty files-read.txt. */
+static void test_preprocess_no_verilog(void) {
+    char args[2 * PATH_BUF];
+    (void)snprintf(args, sizeof args,
+                   "read_project " C "/sv_package/project.o3proj; preprocess --out %s", tmp);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, script(args));
+    TEST_ASSERT_EQUAL_STRING("preprocess: no Verilog design files", info);
+    static char got[FILE_MAX];
+    TEST_ASSERT_EQUAL_STRING("", slurp("files-read.txt", got));
+    TEST_ASSERT_FALSE(exists("0.v"));
+}
+
 static void test_preprocess_include_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", C "/neg_include_not_found/project.o3proj"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("preprocess", ""));
@@ -437,6 +492,7 @@ int main(void) {
     RUN_TEST(test_read_project_missing_entry);
     RUN_TEST(test_revision_option);
     RUN_TEST(test_revision_setter);
+    RUN_TEST(test_revision_setter_oom);
     RUN_TEST(test_top_option);
     RUN_TEST(test_dump_project_misuse);
     RUN_TEST(test_dump_project_file);
@@ -448,6 +504,7 @@ int main(void) {
     RUN_TEST(test_preprocess_segments_spelling);
     RUN_TEST(test_preprocess_segments_spelling_in_file);
     RUN_TEST(test_preprocess_segments_resolved);
+    RUN_TEST(test_preprocess_no_verilog);
     RUN_TEST(test_preprocess_include_error);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();

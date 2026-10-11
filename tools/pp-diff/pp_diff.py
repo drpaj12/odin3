@@ -447,8 +447,26 @@ def odin3_outcome(run: Run, stream: Path) -> Outcome:
     return Outcome.crash(f"{what}, no located error: {tail[-1] if tail else '(no stderr)'}")
 
 
+class UsageError(Exception):
+    """A command line pp-diff cannot run (exit EXIT_USAGE)."""
+
+
 def _word(path: str) -> str:
+    """``path`` as one word of a Yosys script or an ``.o3proj`` line: double-quoted when it holds
+    a blank, ``;`` or ``#``. Neither grammar has an escape, so a ``"`` is a usage error."""
+    if '"' in path:
+        raise UsageError(f"{path}: a path holding '\"' cannot be passed to Yosys or odin3")
     return f'"{path}"' if any(c.isspace() or c in ';#' for c in path) else path
+
+
+def _check_words(opts: Options, files: Sequence[Path]) -> str | None:
+    """The usage error for an include directory or input file _word cannot carry, if any."""
+    try:
+        for path in [*opts.incdirs, *map(str, files)]:
+            _word(path)
+    except UsageError as exc:
+        return str(exc)
+    return None
 
 
 def run_odin3(opts: Options, source: Path, work: Path) -> tuple[Outcome, list[Path] | None]:
@@ -700,6 +718,10 @@ def main(argv: Sequence[str]) -> int:
     files, included = inputs
     if not files:
         print("pp-diff: no input files", file=sys.stderr)
+        return EXIT_USAGE
+    unquotable = _check_words(opts, files)
+    if unquotable is not None:
+        print(f"pp-diff: {unquotable}", file=sys.stderr)
         return EXIT_USAGE
     results: list[tuple[Path, Kind, str]] = []
     reads: dict[Path, list[Path] | None] = {}

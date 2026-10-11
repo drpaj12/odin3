@@ -283,11 +283,11 @@ static void test_revision_errors(void) {
                                        "revisions; choose one with --revision: 'small', 'fast'");
     expect_error_req("revisions/proj.qpf",
                      &(odin3_quartus_req){odin3_bytes_cstr("nope"), true, {0}},
-                     "odin3: error: unknown_revision: no such revision: 'nope'");
+                     "unknown_revision: no such revision: 'nope'");
     expect_error_req("revisions/proj.qpf", &(odin3_quartus_req){odin3_bytes_cstr(""), true, {0}},
-                     "odin3: error: unknown_revision: no such revision: ''");
+                     "unknown_revision: no such revision: ''");
     expect_error_req("stem/stem.qsf", &(odin3_quartus_req){odin3_bytes_cstr("other"), true, {0}},
-                     "odin3: error: unknown_revision: no such revision: 'other'");
+                     "unknown_revision: no such revision: 'other'");
     expect_error(
         "missing_qsf/top.qpf",
         "missing_qsf/top.qpf: error: missing_file: file not found: '$D/missing_qsf/gone.qsf'");
