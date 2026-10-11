@@ -523,9 +523,9 @@ Rules:
 
 A Bison semantic value is an `odin3_ast_id`; `@$` gives `{loc, end}`. A fixed-arity rule calls
 `make` with a small array; a list rule does `mark` at its first item, `push` per item,
-`make_marked` at the parent; nested lists are safe because LR reductions nest. The three kinds
+`make_marked` at the parent; nested lists are safe because LR reductions nest. The kinds
 whose source order is not their slot order (`CASE_ITEM`, `SEQ_BLOCK`/`PAR_BLOCK`,
-`FUNCTION_DECL`/`TASK_DECL`, 2C §3.2) read the pending span through
+`FUNCTION_DECL`/`TASK_DECL`, `GATE_DECL` and the unnamed `INSTANCE`; 2C §3.2) read the pending span through
 `odin3_ast_pending_span(ast, mark)` — a view of the stack from `mark` to its top, valid until the
 next push, make or unwind; empty for a mark at or above the top — copy it, unwind, and build in
 slot order (2C §9 amendment (a)). Left-recursive
