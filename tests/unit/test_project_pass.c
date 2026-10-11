@@ -341,10 +341,42 @@ static void test_preprocess_segments(void) {
     slurp("0.segments.json", got);
     TEST_ASSERT_EQUAL_STRING_LEN("[\n  {\"out_offset\": 0, \"file\": \"", got, 31);
     TEST_ASSERT_NOT_NULL(strstr(got, "\"file\": \"src/top.v\", \"line\": 2, \"col\": 25, "
-                                     "\"buffer_kind\": \"expansion\", \"macro\": \"WIDTH\"}"));
-    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"macro_arg\", \"macro\": \"INV\"}"));
-    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"file\", \"macro\": null}"));
+                                     "\"buffer_kind\": \"expansion\", \"macro\": \"WIDTH\", "));
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"macro_arg\", \"macro\": \"INV\", "));
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"file\", \"macro\": null, "));
     TEST_ASSERT_EQUAL_STRING("\n]\n", got + strlen(got) - 3);
+}
+
+/* The segment map of p.o3proj's stream 0 (preprocess --out tmp --segments). */
+static const char *run_segments(void) {
+    char args[2 * PATH_BUF];
+    (void)snprintf(args, sizeof args, "read_project " P "/p.o3proj; preprocess --out %s --segments",
+                   tmp);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, script(args));
+    static char got[FILE_MAX];
+    return slurp("0.segments.json", got);
+}
+
+/* Each segment's spelling, chased to its FILE buffer (spell_* fields, 2B Task 13): WIDTH's body
+ * is spelled in the <command line> buffer ("`define WIDTH 4"), INV's in defs.vh ("`define
+ * INV(x) ~(x)"). */
+static void test_preprocess_segments_spelling(void) {
+    const char *got = run_segments();
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"macro\": \"WIDTH\", \"spell_file\": \"<command line>\", "
+                                     "\"spell_line\": 1, \"spell_col\": 15}"));
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"line\": 3, \"col\": 16, \"buffer_kind\": \"expansion\", "
+                                     "\"macro\": \"INV\", \"spell_file\": \"defs.vh\", "
+                                     "\"spell_line\": 1, \"spell_col\": 16}"));
+}
+
+/* INV's argument and the file text are spelled where they stand, in src/top.v. */
+static void test_preprocess_segments_spelling_in_file(void) {
+    const char *got = run_segments();
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"line\": 3, \"col\": 21, \"buffer_kind\": \"macro_arg\", "
+                                     "\"macro\": \"INV\", \"spell_file\": \"src/top.v\", "
+                                     "\"spell_line\": 3, \"spell_col\": 21}"));
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"buffer_kind\": \"file\", \"macro\": null, "
+                                     "\"spell_file\": \"src/top.v\""));
 }
 
 /* Segment file names follow --diag-paths too. */
@@ -361,6 +393,7 @@ static void test_preprocess_segments_resolved(void) {
     slurp("0.segments.json", got);
     TEST_ASSERT_NOT_NULL(strstr(got, "\"file\": \"" P "/src/top.v\""));
     TEST_ASSERT_NULL(strstr(got, "\"file\": \"src/top.v\""));
+    TEST_ASSERT_NOT_NULL(strstr(got, "\"spell_file\": \"" P "/inc/defs.vh\""));
 }
 
 static void test_preprocess_include_error(void) {
@@ -412,6 +445,8 @@ int main(void) {
     RUN_TEST(test_preprocess_misuse);
     RUN_TEST(test_preprocess_out);
     RUN_TEST(test_preprocess_segments);
+    RUN_TEST(test_preprocess_segments_spelling);
+    RUN_TEST(test_preprocess_segments_spelling_in_file);
     RUN_TEST(test_preprocess_segments_resolved);
     RUN_TEST(test_preprocess_include_error);
     RUN_TEST(test_oom_sweep);

@@ -274,25 +274,72 @@ static odin3_status append_name(odin3_strbuf *out, const odin3_srcman *sm, uint3
 /* Names of odin3_srcbuf_kind values (index = kind). */
 static const char *const k_kind_names[] = {"none", "file", "expansion", "macro_arg", "scratch"};
 
+/* loc chased by spelling steps to its FILE buffer (2B §7.8: where its bytes are spelled); 0 when
+ * the chase leaves the buffers or takes more steps than the expansion chain allows. */
+static odin3_loc spelled_loc(const odin3_srcman *sm, odin3_loc loc) {
+    for (uint32_t steps = 0; loc.v != 0 && steps <= ODIN3_PP_MAX_EXPANSION_CHAIN + 1; steps++) {
+        odin3_srcbuf_info info;
+        if (!odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, loc), &info)) {
+            return (odin3_loc){0};
+        }
+        if (info.kind == ODIN3_SRCBUF_FILE) {
+            return loc;
+        }
+        loc = odin3_srcman_spelling(sm, loc);
+    }
+    return (odin3_loc){0};
+}
+
+/* A decoded loc's file as named in style: the resolved path, or the given name when the buffer
+ * has none (the <command line>) or style is GIVEN. */
+static odin3_status append_file_name(odin3_strbuf *out, const odin3_srcman *sm,
+                                     const odin3_srcpos *pos, odin3_srcfmt style) {
+    odin3_srcbuf_info file;
+    if (!odin3_srcman_buffer_info(sm, (odin3_srcbuf_id){pos->buffer}, &file)) {
+        return odin3_strbuf_append(out, odin3_bytes_cstr("null"));
+    }
+    bool resolved = style == ODIN3_SRCFMT_RESOLVED && file.resolved != 0;
+    return append_name(out, sm, resolved ? file.resolved : file.name, true);
+}
+
+/* The segment's spelling (the extra fields spell_file, spell_line, spell_col): where the bytes
+ * of the segment are spelled, so the fuzzers check every output byte from the outside (2B
+ * §10.5, agent default 2B Task 13); null for a loc-0 segment. */
+static odin3_status append_spelling(odin3_strbuf *out, const odin3_srcman *sm, odin3_loc loc,
+                                    odin3_srcfmt style) {
+    odin3_srcpos pos;
+    odin3_loc spelled = spelled_loc(sm, loc);
+    if (spelled.v == 0 || !odin3_srcman_decode(sm, spelled, &pos)) {
+        return odin3_strbuf_append(
+            out,
+            odin3_bytes_cstr(", \"spell_file\": null, \"spell_line\": null, \"spell_col\": null"));
+    }
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(", \"spell_file\": "));
+    st = st != ODIN3_OK ? st : append_file_name(out, sm, &pos, style);
+    return st != ODIN3_OK
+               ? st
+               : odin3_strbuf_appendf(out, ", \"spell_line\": %" PRIu32 ", \"spell_col\": %" PRIu32,
+                                      pos.line, pos.col);
+}
+
 /* One segment's fields after out_offset: its file location (file, line, col, the file named in
- * style), the kind of the buffer the segment points into, and that buffer's macro; all null for
- * a loc-0 segment. */
+ * style), the kind of the buffer the segment points into, that buffer's macro, and the
+ * segment's spelling; all null for a loc-0 segment. */
 static odin3_status append_where(odin3_strbuf *out, const odin3_srcman *sm, odin3_loc loc,
                                  odin3_srcfmt style) {
     odin3_srcpos pos;
-    odin3_srcbuf_info file;
     odin3_srcbuf_info own;
     if (!odin3_srcman_decode(sm, loc, &pos) ||
-        !odin3_srcman_buffer_info(sm, (odin3_srcbuf_id){pos.buffer}, &file) ||
         !odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, loc), &own) ||
         own.kind >= sizeof k_kind_names / sizeof k_kind_names[0]) {
-        return odin3_strbuf_append(out, odin3_bytes_cstr("\"file\": null, \"line\": null, \"col\": "
-                                                         "null, \"buffer_kind\": null, \"macro\": "
-                                                         "null}"));
+        odin3_status st = odin3_strbuf_append(
+            out, odin3_bytes_cstr("\"file\": null, \"line\": null, \"col\": null, "
+                                  "\"buffer_kind\": null, \"macro\": null"));
+        st = st != ODIN3_OK ? st : append_spelling(out, sm, loc, style);
+        return st != ODIN3_OK ? st : odin3_strbuf_append(out, odin3_bytes_cstr("}"));
     }
-    bool resolved = style == ODIN3_SRCFMT_RESOLVED && file.resolved != 0;
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr("\"file\": "));
-    st = st != ODIN3_OK ? st : append_name(out, sm, resolved ? file.resolved : file.name, true);
+    st = st != ODIN3_OK ? st : append_file_name(out, sm, &pos, style);
     if (st == ODIN3_OK) {
         st = odin3_strbuf_appendf(out,
                                   ", \"line\": %" PRIu32 ", \"col\": %" PRIu32
@@ -301,10 +348,12 @@ static odin3_status append_where(odin3_strbuf *out, const odin3_srcman *sm, odin
     }
     bool macro = own.kind == ODIN3_SRCBUF_EXPANSION || own.kind == ODIN3_SRCBUF_MACRO_ARG;
     st = st != ODIN3_OK ? st : append_name(out, sm, own.name, macro);
+    st = st != ODIN3_OK ? st : append_spelling(out, sm, loc, style);
     return st != ODIN3_OK ? st : odin3_strbuf_append(out, odin3_bytes_cstr("}"));
 }
 
-/* The stream's segment map: [{out_offset, file, line, col, buffer_kind, macro}], one per line. */
+/* The stream's segment map: [{out_offset, file, line, col, buffer_kind, macro, spell_file,
+ * spell_line, spell_col}], one per line. */
 static odin3_status segments_json(const odin3_srcman *sm, odin3_srcbuf_id stream,
                                   odin3_srcfmt style, odin3_strbuf *out) {
     odin3_srcbuf_info info;

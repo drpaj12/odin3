@@ -249,6 +249,12 @@ project_preprocess)
     grep -qF "assign y = ~(a);" "$work/d/0.v" || fail "0.v is not expanded"
     grep -qF '"buffer_kind": "macro_arg", "macro": "INV"' "$work/d/0.segments.json" ||
         fail "0.segments.json lacks the argument segment"
+    # The spelling (spelling steps chased to the FILE buffer, 2B §7.8) of a body segment and of
+    # a project define's body, which the fuzzers check from the outside (§10.5).
+    grep -qF '"macro": "INV", "spell_file": "defs.vh", "spell_line": 1, "spell_col": 16}' \
+        "$work/d/0.segments.json" || fail "0.segments.json lacks the body's spelling"
+    grep -qF '"spell_file": "<command line>", "spell_line": 1, "spell_col": 15}' \
+        "$work/d/0.segments.json" || fail "0.segments.json lacks the define's spelling"
     printf '%s\n' "$(pwd -P)/src/top.v" "$(pwd -P)/inc/defs.vh" >"$work/want"
     diff "$work/want" "$work/d/files-read.txt" >/dev/null || fail "files-read.txt differs"
     "$odin3" -f files.f -p preprocess >"$work/out" 2>"$work/err" || fail "preprocess failed"
