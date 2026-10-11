@@ -107,12 +107,16 @@ typedef struct ct_frame {
     uint32_t expanded;
 } ct_frame;
 
-/* A context-sweep frame: the node and the type it inherits (inherit false: a self root). */
+/*
+ * A context-sweep frame: the node and the type it inherits (inherit false: a self root), and
+ * whether it is a zero-width node to warn about: the outermost one outside a concatenation.
+ */
 typedef struct ct_ctx_frame {
     uint32_t node;
     uint32_t width;
     bool is_signed;
     bool inherit;
+    bool warn_zero;
 } ct_ctx_frame;
 
 /* --- diagnostics --------------------------------------------------------------------------- */
@@ -410,10 +414,10 @@ typedef struct ct_ctx_push {
     odin3_vec *stack;  /* the context stack */
     odin3_etype final; /* the parent's */
     odin3_etype cmp;   /* its comparison operands' common type */
+    bool zero_ok;      /* the parent is a concatenation or itself zero-width: no warning */
 } ct_ctx_push;
 
 static odin3_status ct_push_ctx(const odin3_ctype *ty, odin3_ast_id kid, uint8_t role, void *arg) {
-    (void)ty;
     const ct_ctx_push *push = arg;
     if (role == CT_CONST) {
         return ODIN3_OK; /* finalised before it was evaluated */
@@ -423,7 +427,8 @@ static odin3_status ct_push_ctx(const odin3_ctype *ty, odin3_ast_id kid, uint8_t
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_etype from = role == CT_CMP ? push->cmp : push->final;
-    *fr = (ct_ctx_frame){kid.v, from.width, from.is_signed, role != CT_SELF};
+    bool warn_zero = !push->zero_ok && ct_self_of(ty, kid).width == 0;
+    *fr = (ct_ctx_frame){kid.v, from.width, from.is_signed, role != CT_SELF, warn_zero};
     return ODIN3_OK;
 }
 
@@ -436,11 +441,15 @@ static odin3_status ct_final_node(odin3_ctype *ty, ct_ctx_frame fr) {
         final.width = self.width > fr.width ? self.width : fr.width;
         final.is_signed = fr.is_signed;
     }
+    if (fr.warn_zero) {
+        ct_warn(ty, node, "zero-width concatenation"); /* accepted, as Yosys and Parmys do */
+    }
     odin3_status st = ct_set_final(ty, node, final);
     if (st != ODIN3_OK) {
         return st;
     }
-    ct_ctx_push push = {&ty->ctx_stack, final, {0, false, false}};
+    bool zero_ok = self.width == 0 || odin3_ast_kind_of(ty->ast, node) == ODIN3_AST_CONCAT;
+    ct_ctx_push push = {&ty->ctx_stack, final, {0, false, false}, zero_ok};
     if (odin3_ast_kind_of(ty->ast, node) == ODIN3_AST_BINARY &&
         BINARY_CLASS[odin3_ast_sub(ty->ast, node)] == CT_OP_CMP) {
         push.cmp = ct_compare_type(ty, node);
@@ -475,7 +484,8 @@ static odin3_status ct_final_sweep(odin3_ctype *ty, ct_ctx_frame start) {
 /* Finalises the self-determined constant at node, then asks the host for its value. */
 static odin3_status ct_constant(odin3_ctype *ty, odin3_ast_id node, const char *what,
                                 int64_t *out) {
-    odin3_status st = ct_final_sweep(ty, (ct_ctx_frame){node.v, 0, false, false});
+    bool zero = ct_self_of(ty, node).width == 0;
+    odin3_status st = ct_final_sweep(ty, (ct_ctx_frame){node.v, 0, false, false, zero});
     if (st != ODIN3_OK) {
         return st;
     }
@@ -539,14 +549,14 @@ static odin3_status ct_replicate_width(odin3_ctype *ty, odin3_ast_id node, uint6
 
 /* --- the self sweep ------------------------------------------------------------------------ */
 
-/* {…}: the sum of its parts; an unsized literal part warns (E12). */
+/* {…}: the sum of its parts; an unsized part (a literal or an EL-16 parameter) warns (E12). */
 static odin3_status ct_concat_width(const odin3_ctype *ty, odin3_ast_id node, uint64_t *width) {
     uint64_t sum = 0;
     odin3_ast_span parts = odin3_ast_children(ty->ast, node);
     for (uint32_t k = 0; k < parts.n; k++) {
         odin3_etype part = ct_self_of(ty, parts.ids[k]);
         sum += part.width;
-        if (part.is_unsized && odin3_ast_kind_of(ty->ast, parts.ids[k]) == ODIN3_AST_NUMBER) {
+        if (part.is_unsized) {
             ct_warn(ty, parts.ids[k],
                     "unsized constant in a concatenation is taken as %" PRIu32 " bits", part.width);
         }
@@ -616,28 +626,10 @@ static odin3_status ct_compute(odin3_ctype *ty, odin3_ast_id node, odin3_etype *
     return st;
 }
 
-/* A zero-width operand ({0{…}}) is legal only in a concatenation. */
-static odin3_status ct_no_zero_width(const odin3_ctype *ty, odin3_ast_id kid, uint8_t role,
-                                     void *arg) {
-    (void)role;
-    (void)arg;
-    if (ct_self_of(ty, kid).width != 0) {
-        return ODIN3_OK;
-    }
-    return ct_error(ty, kid, "zero-width concatenation");
-}
-
 /* The post-order step: node's self type, once its operands have theirs. */
 static odin3_status ct_post(odin3_ctype *ty, odin3_ast_id node) {
     if (ct_is_leaf(ty->ast, node)) {
         return ODIN3_OK; /* typed when entered */
-    }
-    if (odin3_ast_kind_of(ty->ast, node) != ODIN3_AST_CONCAT) {
-        const ct_visit visit = {ct_no_zero_width, NULL};
-        odin3_status st = ct_for_operands(ty, node, &visit);
-        if (st != ODIN3_OK) {
-            return st;
-        }
     }
     if (odin3_ast_kind_of(ty->ast, node) == ODIN3_AST_SELECT && ct_claimed(ty, node)) {
         return ODIN3_OK; /* a memory word: the host's type */
@@ -763,11 +755,8 @@ odin3_status odin3_ctype_expr(odin3_ctype *ty, odin3_ast_id root, odin3_etype co
         return st;
     }
     odin3_etype self = ct_self_of(ty, root);
-    if (self.width == 0) {
-        return ct_error(ty, root, "zero-width concatenation");
-    }
-    ct_ctx_frame start = {root.v, context.width, self.is_signed && context.is_signed, true};
-    start.inherit = context.width != 0;
+    ct_ctx_frame start = {root.v, context.width, self.is_signed && context.is_signed,
+                          context.width != 0, self.width == 0};
     return ct_final_sweep(ty, start);
 }
 

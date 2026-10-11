@@ -39,8 +39,11 @@ typedef struct odin3_etype {
  *    or HIER_NAME (directly or through further SELECTs), the typer asks leaf about the SELECT:
  *    the host fills a width of at least 1 when the SELECT is a memory word (the typer then types
  *    only its index expressions, as self-determined), and leaves width 0 for an ordinary bit or
- *    part select. For any other node a width of 0 is a host bug (INVALID_ARG). A host error is
- *    reported by the host and its status returned; the typer stops.
+ *    part select. The host decides by the depth of the select chain; it is asked about the
+ *    outermost SELECT first and then about each inner one it declined (O(depth²) walks, so a
+ *    host should reject an over-indexed name at the first ask). For any other node a width of 0
+ *    is a host bug (INVALID_ARG). A host error is reported by the host and its status returned;
+ *    the typer stops.
  *  - constant gives the value of a replication count, a part-select bound or a +:/-: width, all
  *    self-determined. The node's subtree is typed (self and final) before the call, so the host
  *    may read it with odin3_ctype_self/final; odin3_ctype_constant_what names the role for its
@@ -78,10 +81,14 @@ void odin3_ctype_destroy(odin3_ctype *ty);
  *  - error `width N exceeds the limit of M bits` (M = the width cap in force), at the node
  *    whose width exceeds it (or the root, for a context above the cap);
  *  - error `replication count N is negative` (at the count), `part-select width N is not
- *    positive` (at the width), `zero-width concatenation` (at a zero-width node that is not an
- *    operand of a concatenation: only {0{…}} and concatenations of them have width 0),
- *    `real number in an expression is not supported` (L9, at the REAL);
- *  - warning `unsized constant in a concatenation is taken as N bits` (E12, at the NUMBER).
+ *    positive` (at the width), `real number in an expression is not supported` (L9, at the
+ *    REAL);
+ *  - warning `unsized constant in a concatenation is taken as N bits` (E12, at each unsized
+ *    operand of a concatenation: a literal, or a parameter still unsized by EL-16);
+ *  - warning `zero-width concatenation`, at the outermost zero-width node outside a
+ *    concatenation (one whose parent is neither a concatenation nor zero-width, or the root).
+ *    Only {0{…}} and what is built from it have width 0; as Yosys and Parmys, it is accepted
+ *    anywhere with width 0, so its final width is that of its context (0 when self-determined).
  * Returns OK (warnings do not fail); PARSE after one of those errors; a host callback's failure
  * status; INVALID_ARG (logged) for a NULL typer, a root that is not an expression node or a host
  * leaf of width 0; NO_MEMORY. On failure the types of the subtree are unspecified. A host
@@ -94,7 +101,7 @@ odin3_status odin3_ctype_expr(odin3_ctype *ty, odin3_ast_id root, odin3_etype co
 /*
  * The node's self-determined / final type from the last odin3_ctype_expr that typed it;
  * {0, false, false} for a node not typed (a user call's arguments, the identifier and inner
- * selects of a memory word) and for a zero-width replication.
+ * selects of a memory word); a zero-width node typed self-determined also reads {0, …}.
  */
 odin3_etype odin3_ctype_self(const odin3_ctype *ty, odin3_ast_id node);
 odin3_etype odin3_ctype_final(const odin3_ctype *ty, odin3_ast_id node);

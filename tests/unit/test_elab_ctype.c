@@ -28,7 +28,7 @@
 enum {
     CAPTURE = 1024,
     MSG = 256,
-    CHAIN_TERMS = 10000,
+    CHAIN_TERMS = 30000, /* the AST height cap is 32768 */
     OOM_LIMIT = 4096,
     LOWERED_WIDTH = 16,
 };
@@ -46,6 +46,7 @@ static odin3_status nested_status;
 
 static const odin3_etype SELF_DET = {0, false, false};
 static const odin3_etype CTX8 = {8, true, false};
+static const odin3_etype CTX16 = {16, true, false};
 
 /* --- the test host ------------------------------------------------------------------------- */
 
@@ -324,6 +325,10 @@ static void test_e8_comparison(void) {
     EXPECT_FINAL(lt, 8, 'u');
     EXPECT_FINAL(ref_a, 8, 'u');
     EXPECT_FINAL(ref_t, 8, 'u');
+    type_ok(lt, CTX16);
+    EXPECT_FINAL(lt, 16, 'u');
+    EXPECT_FINAL(ref_a, 8, 'u'); /* sized together, not to the context (Yosys $lt A_WIDTH 8) */
+    EXPECT_FINAL(ref_t, 8, 'u');
 
     odin3_ast_id ref_s = id("s");
     odin3_ast_id t2 = id("t");
@@ -536,7 +541,7 @@ static void test_width_cap(void) {
     TEST_ASSERT_EQUAL_INT(1, errors_logged);
 }
 
-/* A 10,000-term left-deep + chain: every node typed, no recursion. */
+/* A 30,000-term left-deep + chain (brief: 10,000): every node typed, no recursion. */
 static void test_deep_chain(void) {
     static odin3_ast_id nodes[2 * CHAIN_TERMS];
     uint32_t made = 0;
@@ -554,6 +559,109 @@ static void test_deep_chain(void) {
         TEST_ASSERT_EQUAL_UINT32(16, got.width);
         TEST_ASSERT_FALSE(got.is_signed);
     }
+}
+
+/* --- every operator class and role in a context wider than the operands -------------------- */
+
+/* Expected finals in context 16 for s (8, signed) op t (4, signed), per operator class. */
+typedef struct class_expect {
+    const char *op; /* the operator's final kind (width 16) */
+    uint32_t lhs_width;
+    const char *lhs;
+    uint32_t rhs_width;
+    const char *rhs;
+} class_expect;
+
+enum { CLS_MAX, CLS_SHIFT, CLS_CMP, CLS_LOGIC };
+
+static const class_expect CLASS_EXPECT[] = {
+    [CLS_MAX] = {"s", 16, "s", 16, "s"},  /* both context-determined */
+    [CLS_SHIFT] = {"s", 16, "s", 4, "s"}, /* the amount / exponent self-determined */
+    [CLS_CMP] = {"u", 8, "s", 8, "s"},    /* sized together, not to the context */
+    [CLS_LOGIC] = {"u", 8, "s", 4, "s"},  /* both self-determined */
+};
+
+static void test_binary_classes(void) {
+    static const uint8_t cls[ODIN3_AST_BINARY_COUNT] = {
+        [ODIN3_AST_BINARY_ADD] = CLS_MAX,     [ODIN3_AST_BINARY_SUB] = CLS_MAX,
+        [ODIN3_AST_BINARY_MUL] = CLS_MAX,     [ODIN3_AST_BINARY_DIV] = CLS_MAX,
+        [ODIN3_AST_BINARY_MOD] = CLS_MAX,     [ODIN3_AST_BINARY_POW] = CLS_SHIFT,
+        [ODIN3_AST_BINARY_EQ] = CLS_CMP,      [ODIN3_AST_BINARY_NE] = CLS_CMP,
+        [ODIN3_AST_BINARY_CASE_EQ] = CLS_CMP, [ODIN3_AST_BINARY_CASE_NE] = CLS_CMP,
+        [ODIN3_AST_BINARY_LAND] = CLS_LOGIC,  [ODIN3_AST_BINARY_LOR] = CLS_LOGIC,
+        [ODIN3_AST_BINARY_LT] = CLS_CMP,      [ODIN3_AST_BINARY_LE] = CLS_CMP,
+        [ODIN3_AST_BINARY_GT] = CLS_CMP,      [ODIN3_AST_BINARY_GE] = CLS_CMP,
+        [ODIN3_AST_BINARY_AND] = CLS_MAX,     [ODIN3_AST_BINARY_OR] = CLS_MAX,
+        [ODIN3_AST_BINARY_XOR] = CLS_MAX,     [ODIN3_AST_BINARY_XNOR] = CLS_MAX,
+        [ODIN3_AST_BINARY_SHL] = CLS_SHIFT,   [ODIN3_AST_BINARY_SHR] = CLS_SHIFT,
+        [ODIN3_AST_BINARY_ASHL] = CLS_SHIFT,  [ODIN3_AST_BINARY_ASHR] = CLS_SHIFT,
+    };
+    for (uint32_t k = 0; k < ODIN3_AST_BINARY_COUNT; k++) {
+        uint8_t sub = (uint8_t)k;
+        const class_expect *want = &CLASS_EXPECT[cls[sub]];
+        odin3_ast_id lhs = id("s");
+        odin3_ast_id rhs = id("t");
+        odin3_ast_id op = bin(sub, lhs, rhs);
+        type_ok(op, CTX16);
+        expect_type(odin3_ctype_final(ty, op), 16, want->op, sub); /* "line" = the sub-kind */
+        expect_type(odin3_ctype_final(ty, lhs), want->lhs_width, want->lhs, sub);
+        expect_type(odin3_ctype_final(ty, rhs), want->rhs_width, want->rhs, sub);
+    }
+}
+
+/* Unary + - ~ are context-determined; ! and the reductions are 1 bit, operand self-determined. */
+static void test_unary_classes(void) {
+    for (uint32_t k = 0; k < ODIN3_AST_UNARY_COUNT; k++) {
+        uint8_t sub = (uint8_t)k;
+        bool same = sub == ODIN3_AST_UNARY_PLUS || sub == ODIN3_AST_UNARY_MINUS ||
+                    sub == ODIN3_AST_UNARY_NOT;
+        odin3_ast_id operand = id("t");
+        odin3_ast_id op = un(sub, operand);
+        type_ok(op, CTX16);
+        expect_type(odin3_ctype_final(ty, op), 16, same ? "s" : "u", sub);
+        expect_type(odin3_ctype_final(ty, operand), same ? 16 : 4, "s", sub);
+    }
+}
+
+/* $clog2's argument, a bit-select index and a replication body keep their own types. */
+static void test_self_determined_roles(void) {
+    odin3_ast_id arg = id("s");
+    odin3_ast_id clog_sum = bin(ODIN3_AST_BINARY_ADD, call1("$clog2", arg), id("a"));
+    type_ok(clog_sum, CTX16);
+    EXPECT_FINAL(clog_sum, 32, 'u');
+    EXPECT_FINAL(arg, 8, 's');
+
+    odin3_ast_id index = id("t");
+    odin3_ast_id bit = et_select(&tree, (et_sel){ODIN3_AST_SELECT_BIT, id("s"), index, {0}});
+    type_ok(bit, CTX16);
+    EXPECT_FINAL(bit, 16, 'u');
+    EXPECT_FINAL(index, 4, 's');
+
+    odin3_ast_id part = id("t");
+    odin3_ast_id body = et_concat(&tree, &part, 1);
+    odin3_ast_id three = et_replicate(&tree, num("3"), body);
+    odin3_ast_id plus = bin(ODIN3_AST_BINARY_ADD, three, id("i"));
+    type_ok(plus, CTX16);
+    EXPECT_FINAL(plus, 32, 'u');
+    EXPECT_FINAL(three, 32, 'u');
+    EXPECT_FINAL(body, 4, 'u'); /* the body is self-determined: {3{t}} replicates 4 bits */
+    EXPECT_FINAL(part, 4, 's');
+}
+
+/* E12 also covers an unsized parameter (EL-16); an operator result such as -1 is sized (EL-15). */
+static void test_concat_unsized_parameter(void) {
+    et_col(&tree, 6);
+    odin3_ast_id par = id("P");
+    et_col(&tree, 1);
+    odin3_ast_id cat = cat2(id("a"), par);
+    type_ok(cat, SELF_DET);
+    EXPECT_FINAL(cat, 40, 'u');
+    expect_line("x.v:1:6: warning: unsized constant in a concatenation is taken as 32 bits");
+
+    odin3_ast_id minus_one = cat2(id("a"), un(ODIN3_AST_UNARY_MINUS, num("1")));
+    type_ok(minus_one, SELF_DET);
+    EXPECT_FINAL(minus_one, 40, 'u');
+    TEST_ASSERT_EQUAL_INT(1, warnings_logged);
 }
 
 /* --- leaves -------------------------------------------------------------------------------- */
@@ -662,25 +770,60 @@ static void test_replication_errors(void) {
     TEST_ASSERT_EQUAL_INT(2, errors_logged);
 }
 
-/* {0{a}} has width 0: allowed only as an operand of a concatenation. */
+/*
+ * {0{a}} has width 0 (ruling, fix round 1): silent as a concatenation operand; anywhere else
+ * accepted with one warning at the outermost zero-width node, as Yosys and Parmys accept it.
+ */
 static void test_zero_width(void) {
     odin3_ast_id zero = rep(id("ZERO"), id("a"));
     odin3_ast_id ok = cat2(id("b"), zero);
     type_ok(ok, SELF_DET);
     EXPECT_FINAL(ok, 8, 'u');
     EXPECT_FINAL(zero, 0, 'u');
+    TEST_ASSERT_EQUAL_INT(0, warnings_logged);
 
     et_col(&tree, 5);
     odin3_ast_id alone = rep(id("ZERO"), id("a"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_ctype_expr(ty, alone, CTX8));
-    expect_line("x.v:1:5: error: zero-width concatenation");
+    type_ok(alone, CTX8);
+    expect_line("x.v:1:5: warning: zero-width concatenation");
+    EXPECT_FINAL(alone, 8, 'u');
+    EXPECT_SELF(alone, 0, 'u');
+    type_ok(alone, SELF_DET);
+    EXPECT_FINAL(alone, 0, 'u');
+    TEST_ASSERT_EQUAL_INT(2, warnings_logged);
 
     et_col(&tree, 7);
     odin3_ast_id inside = rep(id("ZERO"), id("a"));
     et_col(&tree, 1);
     odin3_ast_id sum = bin(ODIN3_AST_BINARY_ADD, inside, id("a"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_ctype_expr(ty, sum, CTX8));
-    expect_line("x.v:1:7: error: zero-width concatenation");
+    type_ok(sum, CTX8);
+    expect_line("x.v:1:7: warning: zero-width concatenation");
+    EXPECT_FINAL(sum, 8, 'u');
+    EXPECT_FINAL(inside, 8, 'u');
+    TEST_ASSERT_EQUAL_INT(3, warnings_logged);
+    TEST_ASSERT_EQUAL_INT(0, errors_logged);
+}
+
+/* Nested zero-width nodes warn once, at the outermost. */
+static void test_zero_width_nested(void) {
+    odin3_ast_id inner = rep(id("ZERO"), id("a"));
+    odin3_ast_id body = et_concat(&tree, &inner, 1);
+    et_col(&tree, 3);
+    odin3_ast_id twice = et_replicate(&tree, num("2"), body);
+    type_ok(twice, SELF_DET);
+    expect_line("x.v:1:3: warning: zero-width concatenation");
+    TEST_ASSERT_EQUAL_INT(1, warnings_logged);
+    EXPECT_FINAL(twice, 0, 'u');
+
+    et_col(&tree, 9);
+    odin3_ast_id neg = un(ODIN3_AST_UNARY_MINUS, rep(id("ZERO"), id("b")));
+    odin3_ast_id red = un(ODIN3_AST_UNARY_AND, neg);
+    type_ok(red, CTX8);
+    expect_line("x.v:1:9: warning: zero-width concatenation");
+    TEST_ASSERT_EQUAL_INT(2, warnings_logged);
+    EXPECT_FINAL(red, 8, 'u');
+    EXPECT_FINAL(neg, 0, 'u');
+    TEST_ASSERT_EQUAL_INT(0, errors_logged);
 }
 
 static void test_part_select_errors(void) {
@@ -873,12 +1016,17 @@ int main(void) {
     RUN_TEST(test_unsized_parameters);
     RUN_TEST(test_width_cap);
     RUN_TEST(test_deep_chain);
+    RUN_TEST(test_binary_classes);
+    RUN_TEST(test_unary_classes);
+    RUN_TEST(test_self_determined_roles);
+    RUN_TEST(test_concat_unsized_parameter);
     RUN_TEST(test_literal_types);
     RUN_TEST(test_string_types);
     RUN_TEST(test_memory_words);
     RUN_TEST(test_context_operators);
     RUN_TEST(test_replication_errors);
     RUN_TEST(test_zero_width);
+    RUN_TEST(test_zero_width_nested);
     RUN_TEST(test_part_select_errors);
     RUN_TEST(test_real_and_host_errors);
     RUN_TEST(test_lowered_cap);
