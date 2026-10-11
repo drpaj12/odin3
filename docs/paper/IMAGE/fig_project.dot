@@ -1,0 +1,23 @@
+// Project input (DESIGN.md section 4.0, 2B spec PRJ-1..PRJ-18): every format fills one
+// design-owned project record; readers and (Phase 4) the partial mapper only read it.
+digraph project {
+    graph [rankdir=LR, fontname="Helvetica", fontsize=9, nodesep=0.12, ranksep=0.35, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=8,
+           fillcolor="#eef6ee", margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    o3 [label=".o3proj\nfile, incdir, define, top, param,\narch, available, hide, cell,\nmap, split, limit, patterns, flow, import"];
+    fl [label="-f / -F list\n+incdir+ +define+ -v -y\n+libext+ -top -sv $VAR"];
+    qs [label="Quartus .qpf / .qsf / .qip\n*_FILE, TOP_LEVEL_ENTITY,\nSEARCH_PATH, VERILOG_MACRO,\nset_parameter, FAMILY/DEVICE,\nAUTO_*_RECOGNITION, *STYLE"];
+    ox [label="Odin II XML\n(reader planned)", style="rounded,filled,dotted", fillcolor="#ffffff"];
+
+    rec [shape=record, style=filled, fillcolor="#e8eef8", label="project record (design-owned)|files: path given + resolved + loc, lang, library|libfiles, libdirs, libext, incdirs, defines|top + loc, params (scope.name = value)|arch: .o3lib / VPR XML / device|rules: map, split, limit, patterns (stored)|inventory, overrides (hide, cell from)|flow script, ignored, duplicates"];
+
+    rv [label="read_verilog\n(preprocessor, parser,\nelaboration)"];
+    ra [label="read_arch / read_techlib"];
+    pm [label="partial_map, stats\n(Phase 4)", style="rounded,filled,dotted", fillcolor="#ffffff"];
+    dp [label="dump_project (JSON)\n= corpus oracle record"];
+
+    o3 -> rec; fl -> rec; qs -> rec; ox -> rec [style=dotted];
+    rec -> rv; rec -> ra; rec -> pm [style=dotted]; rec -> dp;
+}
