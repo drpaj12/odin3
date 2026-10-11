@@ -406,14 +406,16 @@ static void test_qip_cycle_and_cap(void) {
                  "  included from ip/a.qip:1\n"
                  "  included from qip_cycle/top.qsf:1");
     fresh_design();
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, 1, ODIN3_PROJ_MAX_WORDS});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, 1,
+                                                            ODIN3_PROJ_MAX_WORDS,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     expect_error("qip/top.qsf", "ip/a.qip:2:1: error: syntax: nested .qip files exceed the depth "
                                 "limit of 1: '$D/qip/ip/sub/b.qip'\n"
                                 "  included from qip/top.qsf:2");
     fresh_design();
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, 2, ODIN3_PROJ_MAX_WORDS});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, 2,
+                                                            ODIN3_PROJ_MAX_WORDS,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry("qip/top.qsf"));
 }
 
@@ -501,20 +503,23 @@ static void test_empty_library(void) {
 static void test_word_cap(void) {
     tmp_spec spec = {"w.qsf", "set_global_assignment -name FAMILY x\npost a b c\n", 0};
     write_tmp(&spec);
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 7});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH,
+                                                            ODIN3_PROJ_MAX_QIP_DEPTH, 7,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_tmp("w.qsf"));
     TEST_ASSERT_EQUAL_INT(1, errors);
     TEST_ASSERT_EQUAL_STRING(
         "w.qsf:2:10: error: syntax: file has more than 7 words (ODIN3_PROJ_MAX_WORDS)", captured);
     fresh_design();
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 8});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH,
+                                                            ODIN3_PROJ_MAX_QIP_DEPTH, 8,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_tmp("w.qsf"));
     fresh_design();
     /* qip/top.qsf has 12 words and its .qip fewer: a per-file cap of 12 passes */
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 12});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH,
+                                                            ODIN3_PROJ_MAX_QIP_DEPTH, 12,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry("qip/top.qsf"));
 }
 

@@ -364,21 +364,6 @@ static int threshold_of(odin3_bytes word) {
     return -1;
 }
 
-/* text without the leading and trailing characters Python's str.strip() removes. */
-static odin3_bytes py_strip(odin3_bytes text) {
-    size_t start = 0;
-    for (size_t len = odin3_py_space_len(text, 0); len > 0; len = odin3_py_space_len(text, start)) {
-        start += len;
-    }
-    size_t end = start;
-    for (size_t k = start; k < text.len;) {
-        size_t len = odin3_py_space_len(text, k);
-        k += len > 0 ? len : 1;
-        end = len > 0 ? end : k;
-    }
-    return (odin3_bytes){(const char *)text.ptr + start, end - start};
-}
-
 /* The next ','-separated part of text at or after *pos, stripped; false after the last one (a
  * text without ',' is one part, as Python's split). */
 static bool next_cell(odin3_bytes text, size_t *pos, odin3_bytes *cell) {
@@ -390,7 +375,7 @@ static bool next_cell(odin3_bytes text, size_t *pos, odin3_bytes *cell) {
     while (j < text.len && bytes[j] != ',') {
         j++;
     }
-    *cell = py_strip((odin3_bytes){bytes + *pos, j - *pos});
+    *cell = odin3_proj_py_strip((odin3_bytes){bytes + *pos, j - *pos});
     *pos = j + 1;
     return true;
 }

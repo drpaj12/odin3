@@ -382,6 +382,9 @@ min_width N`; `adder@threshold_size` → `map * $add to adder min_width N`; `mem
 `split_memory_width` 0|1 and `split_memory_depth` min|max|digits (else `syntax`) → `split $mem
 [width] [depth …]` when either is set; other attributes `ignored` += `optimizations/<tag>@<attr>`;
 other elements `optimizations/<tag>`); any other root child `ignored` += `<tag>`. No top.
+Lines count LF only, as in the other readers (§4.1), so a lone CR is not a line end; expat
+also counts a lone CR, so a file with one locates its errors on a different line than the
+oracle (agent default, 2B Task 14). A UTF-8 BOM is not a column on line 1.
 
 ### 5.5 What each format cannot say
 
@@ -766,6 +769,7 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | `ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM` | 2^27 | source-manager record bytes a stream adds: 4 per line start registered for each `FILE` buffer (an included file re-registers its lines, even from the cache; counted once per cached file) and 8 per segment (a loc-0 byte is a segment of its own), the stream's own file included; charged before the lines or the segment are added. Without it a newline header included under a false `` `ifdef `` or a body of `/**/` reached 0.5–2 GB through `MAX_LOC_BYTES_PER_STREAM` alone; with vector doubling a stream's records stay under 256 MB (agent default, 2B final review I2). mcml.v uses about 143 KB |
 | `ODIN3_PROJ_MAX_FLIST_DEPTH`, `_QIP_DEPTH` | 64 | nested lists; cycles are caught by name first |
 | `ODIN3_PROJ_MAX_WORDS` | 2^20 | words per file list, `.o3proj` line and `.qsf`/`.qip` file, counted before they are stored (agent default, PR 2B-1 final review: at 2^24 one Tcl file cost ≈ 1 GB, and an OOM kills the WSL VM; ≈ 60 MB now; real projects — the DE2i-150 `.qsf` is a few thousand lines — are far below it) |
+| `ODIN3_PROJ_MAX_XML_NODES` | 2^20 | elements, attributes and text runs per Odin II XML file, counted before each is stored (agent default, 2B Task 14: a 2^28-byte file of `<a/>` would need ≈ 3 GB; real configs hold under 100 nodes) |
 | source limits | AST §3.5 | file size 2^28, buffers 2^24, location space |
 
 Everything else is bounded by these (the macro table is at most `MAX_DEFINITIONS` bounded

@@ -121,6 +121,8 @@ add_library(odin3_core OBJECT
     src/frontends/project/quartus.c
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
+    src/frontends/project/xml.c
+    src/frontends/project/odin2.c
     src/frontends/verilog/preproc.c
     src/frontends/verilog/macro.c
     src/frontends/verilog/cond.c
@@ -314,6 +316,10 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_project_o3proj)
     target_compile_definitions(test_project_o3proj PRIVATE
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
+    odin3_add_unit_test(test_project_xml)
+    odin3_add_unit_test(test_project_odin2)
+    target_compile_definitions(test_project_odin2 PRIVATE
+        ODIN3_ODIN2_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/odin2")
     odin3_add_unit_test(test_project_entry)
     target_compile_definitions(test_project_entry PRIVATE
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"

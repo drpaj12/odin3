@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import project_fixtures as pf
 
@@ -224,15 +225,33 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(qsf[0]["argv"][-1],
                          f"read_project --format qsf --revision fast {qpf}; dump_project")
 
-    def test_odin2_skipped_until_its_phase_lands(self) -> None:
+    def test_format_skipped_until_its_phase_lands(self) -> None:
         d = self.case("pos", {"formats": ["o3proj", "odin2"], "project": RECORD,
                               "format_phase": {"odin2": "odin2-reader"}})
         self.respond(d, [{"match": "o3proj", "stdout": dump(RECORD)}])
-        code, out = self.compare()
+        with mock.patch.object(pf, "LANDED_FORMAT_PHASES", frozenset()):
+            code, out = self.compare()
         self.assertEqual(code, 0, out)
         self.assertIn("skip pos odin2 (format_phase odin2-reader)", out)
         self.assertEqual(len(self.runs()), 1)
         self.assertIn("odin2 0 ok, 0 failed, 1 skipped", out)
+
+    def test_odin2_runs_once_its_reader_lands(self) -> None:
+        over = {**RECORD, "output": {"path": "out.blif", "format": "blif"}}
+        d = self.case("pos", {"formats": ["o3proj", "odin2"], "project": RECORD,
+                              "format_phase": {"odin2": "odin2-reader"},
+                              "format_overrides": {"odin2": {"output": over["output"]}}})
+        got = absolute(over)
+        got["output"]["path"] = "{CASE}/out.blif"
+        self.respond(d, [{"match": "--format o3proj", "stdout": dump(RECORD)},
+                         {"match": "--format odin2", "stdout": json.dumps(got, indent=2) + "\n"}])
+        code, out = self.compare()
+        self.assertEqual(code, 0, out)
+        self.assertIn("ok   pos odin2", out)
+        self.assertIn("odin2 1 ok, 0 failed, 0 skipped", out)
+        xml = os.path.abspath(d / "odin2.xml")
+        self.assertEqual(self.runs()[-1]["argv"][-1],
+                         f"read_project --format odin2 {xml}; dump_project")
 
     def test_format_filter_and_case_filter(self) -> None:
         d = self.case("pos", {"formats": ["o3proj", "f"], "project": RECORD})
@@ -465,7 +484,7 @@ class CorpusCompareTest(unittest.TestCase):
 
     def test_frontend_kinds_are_error_kinds(self) -> None:
         self.assertLessEqual(pf.FRONTEND_KINDS | pf.PREPROCESS_KINDS, set(pf.ERROR_KINDS))
-        self.assertEqual(pf.LANDED_FORMAT_PHASES, frozenset())
+        self.assertEqual(pf.LANDED_FORMAT_PHASES, frozenset({pf.ODIN2_READER}))
 
 
 if __name__ == "__main__":

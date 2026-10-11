@@ -92,7 +92,7 @@ static odin3_status format_of(odin3_project *proj, const odin3_project_request *
     return ODIN3_OK;
 }
 
-/* The entry must be a regular file; its format must have a reader; a revision needs Quartus. */
+/* The entry must be a regular file; a revision needs Quartus. */
 static odin3_status check_entry(odin3_project *proj, const odin3_project_request *req,
                                 odin3_bytes resolved, uint8_t *format) {
     odin3_bytes given = odin3_bytes_cstr(req->entry);
@@ -101,10 +101,6 @@ static odin3_status check_entry(odin3_project *proj, const odin3_project_request
     }
     *format = req->format;
     odin3_status res = *format == 0 ? format_of(proj, req, resolved, format) : ODIN3_OK;
-    if (res == ODIN3_OK && *format == ODIN3_PROJ_FORMAT_ODIN2) {
-        return unlocated(proj, ODIN3_PROJ_ERR_UNKNOWN_FILE_TYPE, "no Odin II XML reader yet",
-                         &given);
-    }
     if (res == ODIN3_OK && req->revision != NULL && *format != ODIN3_PROJ_FORMAT_QUARTUS) {
         return unlocated(proj, ODIN3_PROJ_ERR_SYNTAX, "--revision needs a .qpf or .qsf entry",
                          NULL);
@@ -144,6 +140,8 @@ static odin3_status run_reader(odin3_project *proj, const odin3_project_request 
     switch (proj->format) {
     case ODIN3_PROJ_FORMAT_O3PROJ:
         return odin3_read_o3proj(proj, &proj->entry);
+    case ODIN3_PROJ_FORMAT_ODIN2:
+        return odin3_read_odin2(proj, &proj->entry);
     case ODIN3_PROJ_FORMAT_QUARTUS: {
         odin3_quartus_req quartus = {{"", 0}, req->revision != NULL, {0}};
         if (quartus.has_revision) {
