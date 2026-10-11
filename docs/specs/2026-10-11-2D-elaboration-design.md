@@ -1,10 +1,12 @@
 # 2D — Elaboration: design
 
-Status: v2 applies the Fable review (2026-10-11; `2D-review1`: 2 critical, 10 important, 17
-minor — all applied, none rejected; F17 is applied by F1's redesign, which makes it moot, and F20
-is applied as the documented divergence §17 #20, one of the two fixes the review offered).
-Decisions 1–12 ruled by the controller as agent defaults under Peter's overnight rule (§20), with
-the review's rulings on F1–F12. Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
+Status: approved (agent default under Peter's overnight rule, 2026-10-11); v2 applied the Fable
+review; v3 the re-review minors. (v2: `2D-review1`, 2 critical, 10 important, 17 minor, all
+applied; F17 made moot by F1's redesign, F20 applied as divergence §17 #20. v3: `2D-review2`
+approved v2 with minors N1–N7; N1–N3 and N5–N7 applied; N4 is not applied as asked — the review
+says no `hierarchy` pass exists, but it is a 1D built-in (`src/passes/builtin.c`, the
+`docs/PASSES.md` row), so it stays in EL-33's `OK` list, now with that citation.) Decisions 1–13
+ruled by the controller as agent defaults (§20). Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
 semantics). Spec: `docs/DESIGN.md` §4.0 (libraries, top), §4.1, §4.5, §5, §6 step 2, §12, §15.
 Inputs: PHASE2 #3, #4 (exit bar), #5, #6 (coverage, D1–D5), #7/#8 (the AST and its carry-overs),
 Q3 of #8 (two stages, the elaborated AST as the seam), #10–#12; the construct table in
@@ -772,9 +774,12 @@ and signedness in the IR, which IR-2 says every wire carries. `odin3_port_spec` 
 `bool has_range; int32_t msb, lsb; bool is_signed;`. Without `has_range`, the port is
 `[width−1:0]` as today, so existing callers are unchanged. With it, `width` is derived as
 `|msb − lsb| + 1` and a caller-supplied `width` that differs is `INVALID_ARG`, as is `scalar` with
-a range of more than one bit; `is_signed` applies in both cases. The module's cell-type port
-record gains the sign too, for writers and for EL-10's output extension. Writers and `check` are
-otherwise unaffected; no invariant changes. (A wire-range mutation after creation was rejected:
+a range of more than one bit; `is_signed` applies in both cases. The module's cell type records
+the sign too, for writers and for EL-10's output extension, **only internally**: the field is
+added to the core's `odin3_port_def` (`src/ir/celltype.h`), never to the ABI's
+`odin3_plugin_port`, whose layout `odin3.h` freezes (no reserved slots); if plugins ever need the
+sign, an accessor arrives behind a reserved `odin3_plugin_celltype` slot (the re-review's N3).
+Writers and `check` are otherwise unaffected; no invariant changes. (A wire-range mutation after creation was rejected:
 it would leave the cell type's port record without the sign.)
 
 ### 6.3 Implicit nets and `` `default_nettype `` (EL-25)
@@ -1073,7 +1078,7 @@ the node exists):
 typedef uint32_t odin3_pbit;
 enum {
     ODIN3_PBIT_IN = 0U << 30,     /* | k: the net on I pin k */
-    ODIN3_PBIT_OUT = 1U << 30,    /* | k: the net on O pin k, as this process drives it */
+    ODIN3_PBIT_OUT = 1U << 30,    /* | k: the net on O pin k (read: its current value) */
     ODIN3_PBIT_ANY = 2U << 30,    /* '-': matches any value; compare patterns only */
     ODIN3_PBIT_INDEX_MASK = (1U << 30) - 1
 };
@@ -1100,7 +1105,7 @@ typedef struct odin3_proc_switch {
 } odin3_proc_switch;
 typedef struct odin3_proc_sync {
     uint8_t type;                         /* odin3_sync_type */
-    odin3_pbit signal;                    /* IN | k for edge and level types; 0 for ALWAYS */
+    odin3_pbit signal;                    /* IN | k or OUT | k for edge and level types; 0 for ALWAYS */
     uint32_t first_action, n_actions;     /* in actions[] */
 } odin3_proc_sync;
 typedef struct odin3_proc_body {          /* the BODY parameter; cases[0] is the root */
@@ -1118,6 +1123,13 @@ touch a body. The only non-pin entry is `ANY`; every constant 0/1/x/z is an `I` 
 shared constant net (IR-4; the review's F8), so `odin3_net_const_value` stays the one constant
 predicate and `proc_arst` finds reset values the same way it finds any constant.
 
+**Reads of `OUT` positions** (the re-review's N6; 2E depends on this reading): in an action's
+`rhs`, a switch signal or a compare, `OUT | k` is the **current value of the net on that pin**,
+exactly as an RTLIL process reads a wire it assigns — for a sync output, the register's held
+value; for a temporary, the value the case tree computed for it — never "the value being assigned
+in this evaluation". So `q <= q + 1` reads the register, and the root hold action `t0(q) = q`
+reads it too.
+
 **Semantics** (RTLIL's): a case applies its actions in order, then its switches in order; a
 switch takes the first of its cases whose compare list has an entry equal to the switch signal
 (`ANY` bits match anything; a case with no compares is the default and always matches); a later
@@ -1132,8 +1144,10 @@ payload has kind `PROC`; every index is in range and every case, switch and acti
 exactly once (a tree); the root case has no compares; each compare and its switch signal have
 the same width; an action's `lhs` and `rhs` have the same width; `lhs` holds only `OUT`
 positions, none twice in one `lhs`; `ANY` appears only in compares; `IN | k` has `k < I_WIDTH`,
-`OUT | k` has `k < O_WIDTH`; a sync's signal is one `IN` position for edge and level types and 0
-for `ALWAYS`; every `OUT` position is the `lhs` of at least one action (a pin the body never
+`OUT | k` has `k < O_WIDTH`; a sync's signal is one `IN` or `OUT` position for edge and level
+types (an `OUT` position is a block clocked by a net it assigns, `always @(posedge a) a <= ~a;`,
+which Yosys accepts as a flip-flop clocked by its own output; the re-review's N1) and 0 for
+`ALWAYS`; every `OUT` position is the `lhs` of at least one action (a pin the body never
 drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nodes as to any node.
 
 **What the IR operations do with a `$proc` node** — all as for any cell, by construction:
@@ -1146,7 +1160,10 @@ drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nod
   `odin3_net_delete` needs a pinless net, so it can never delete a net a process uses.
 - `odin3_module_compact` renumbers the node and its pins like any node; the body needs no map. A
   dead `$proc` gets the usual tombstone (IR-6: kind node, type `$proc`, its parameters — the body
-  included — and the nets its pins were on).
+  included — and the nets its pins were on). IR-6's tombstones were sized for names and
+  parameters; a body is larger, and the cost is accepted: about 0.05 GB on lenet.v after `proc`
+  (16,314 bodies; §15), in exchange for history that still shows what each process was (the
+  re-review's N7).
 - Attributes use `ODIN3_OBJ_NODE` (the `always` block's `(* *)` attributes go there; a switch's
   are its two flags); provenance is the node's SOURCE record, with per-action, per-case and
   per-switch records inside the body (EL-45).
@@ -1165,9 +1182,10 @@ DESIGN §6 — `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `wr
 `write_dot`. The writers also refuse a `$proc` node themselves (`module 'm' has processes; run
 proc first`) for callers that bypass the pass manager. A pass marked `OK` that mutates the IR
 must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
-drivers like any cell's. ABI: the field takes one byte of `odin3_pass_def`'s reserved space when
-it has one, else the ABI version bump of EL-47 covers it; a plugin's zero-initialised definition
-means `REFUSE`.
+drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
+becomes `const uint8_t *processes` (NULL, as every existing plugin passes, means `REFUSE`), so no
+layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/builtin.c`,
+`docs/PASSES.md`).
 
 **ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
 `I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
@@ -1240,7 +1258,9 @@ creates the node at the end (step 7).
 6. **Removal** keeps, per target bit, the list of action slots that assign it, so "remove `x`
    from the current case and its nested switches" costs the number of earlier assignments to
    `x`, not the size of the tree (Yosys walks the tree; same result).
-7. **Emission.** Every net some action assigns — the outputs (sync-action `lhs`) and every
+7. **Emission.** A block with no outputs and no temporaries (`always @* ;`, or a block whose
+   only statements were system tasks S3 removed) creates **no node** and no warning beyond S3's
+   (the re-review's N2: `O_WIDTH` must be at least 1). Otherwise every net some action assigns — the outputs (sync-action `lhs`) and every
    temporary (`t0`, case temporaries, call-frame and memory-write variables, select positions) —
    becomes an `O` pin, in net-ID order; every other net the body reads becomes an `I` pin, in
    net-ID order; each constant 0/1/x/z the body uses becomes one `I` pin on the module's shared
@@ -1861,8 +1881,8 @@ matters there. Facts, checked on 2026-10-11:
   `unconn`, declared as `.names unconn` with **no cover rows** — which is BLIF's constant 0.
   `tools/equiv-check` reads it as such (a zero-row `.names` drives its output; verified:
   `equiv-check` of `syntax/not_enough_wires.parmys.blif`, whose output is `unconn`, against itself
-  is "equivalent (abc cec)", exit 0). 812 of the 934 k6_frac Parmys goldens declare `unconn`; 310
-  use it in logic. So `unconn` reaching an output does not stop the comparison; it fixes Parmys's
+  is "equivalent (abc cec)", exit 0). All 934 Parmys goldens (467 per arch, k6_frac and EArch)
+  declare `unconn`; 314 (157 per arch) use it in logic (recounted by the re-review). So `unconn` reaching an output does not stop the comparison; it fixes Parmys's
   x to 0 at the points where x survived.
 - Where Parmys's `opt` resolved an x *before* the netlist (`opt_expr -mux_undef` picking the other
   mux input, `$eqx` lowering, `-undriven`), the golden contains a choice, and 2D's netlist is
@@ -1886,6 +1906,12 @@ The plan, before 2H relies on it:
    x-cones** (listed outputs, each reviewed by hand and recorded with a reason), and **differs**.
    Only the first two satisfy PHASE2 #4 as written; the third is reported to Peter as a set, with
    the decision whether it counts (§20 item 13).
+5. **Follow-up in 2H's backlog: the defined-output miter** (the re-review's N5). `--x-report` is
+   coarse: an output that depends on x for one input vector is dropped entirely. On Odin III's
+   side x is known, so a precise, ABC-only check exists: write each x as a free input `u`,
+   duplicate the netlist for `u = 0` and `u = 1` (`d0`, `d1`), and prove
+   `∀in: d0(in) ≠ d1(in) ∨ d0(in) = g(in)` against the golden `g` — "Odin III's output agrees with
+   Parmys wherever Odin III's output is defined".
 
 ## 15. Performance (EL-50)
 
@@ -1918,7 +1944,8 @@ GB**; the 16,314 `$proc` nodes add their `I`/`O` pins (≈ 2M pins, ≈ 0.07 GB)
 GB); nodes 0.4M × 48 B ≈ 0.02 GB; wires 555k × 64 B + net vectors ≈ 0.04 GB; the two AST stores
 coexist during stage 1 (the parsed store, ≈ 3.4M nodes × 41 B ≈ 0.14 GB, is freed before stage
 2) and the elaborated store stays (≈ 0.14 GB); memories are not materialised (no `$readmem`
-outside `ifdef QUARTUS`). Total ≈ **1.5–1.6 GB** at the stage-2 peak, inside the 2.0 GB target
+outside `ifdef QUARTUS`). After `proc` (2E, not 2D) the dead `$proc` tombstones keep their bodies
+(≈ 0.05 GB, EL-33). Total ≈ **1.5–1.6 GB** at the stage-2 peak, inside the 2.0 GB target
 with ≈ 25% headroom; the byte budget (EL-46) is 60% of the dev machine's 23 GB, so it never
 fires on lenet.
 
