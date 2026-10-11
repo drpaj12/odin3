@@ -15,6 +15,7 @@
 #include "util/vec.h"
 #include "verilog_parser.h" /* generated (build tree): TOK_* */
 
+#include <locale.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -63,6 +64,21 @@ void odin3_vl_based_exit(odin3_vl_state *st) {
     }
 }
 
+/* strtod in the C locale whatever LC_NUMERIC the host process set (libodin3 is a shared library;
+ * a comma-decimal locale would read 1.5 as 1); the caller's thread locale is restored. False
+ * when the C locale object cannot be made. */
+static bool c_strtod(const char *text, double *value) {
+    locale_t c_numeric = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    if (c_numeric == (locale_t)0) {
+        return false;
+    }
+    locale_t caller = uselocale(c_numeric);
+    *value = strtod(text, NULL);
+    (void)uselocale(caller);
+    freelocale(c_numeric);
+    return true;
+}
+
 int odin3_vl_real(odin3_vl_state *st, YYSTYPE *val, odin3_vp_loc *loc) {
     if (vl_in_body(st)) {
         return VL_SKIP;
@@ -76,7 +92,10 @@ int odin3_vl_real(odin3_vl_state *st, YYSTYPE *val, odin3_vp_loc *loc) {
             return vl_fatal(st, ODIN3_ERR_NO_MEMORY);
         }
     }
-    double value = strtod(st->scratch.data, NULL);
+    double value = 0.0;
+    if (!c_strtod(st->scratch.data, &value)) {
+        return vl_fatal(st, ODIN3_ERR_NO_MEMORY);
+    }
     val->u = 0;
     if (!isfinite(value)) {
         vl_error(st, vl_loc(st, st->tok_start), "real literal out of range");
@@ -300,7 +319,12 @@ static bool string_escape(vl_string *str) {
     if (ch >= '0' && ch <= '7') {
         return string_octal(str);
     }
-    if (ch != 'n' && ch != 't' && ch != '\\' && ch != '"') {
+    unsigned int byte = (unsigned char)ch;
+    if (byte < VL_PRINTABLE_FIRST || byte > VL_PRINTABLE_LAST) {
+        vl_warn(str->st, string_loc(str),
+                "unknown escape '\\' before byte 0x%02x in a string (read as byte 0x%02x)", byte,
+                byte);
+    } else if (ch != 'n' && ch != 't' && ch != '\\' && ch != '"') {
         vl_warn(str->st, string_loc(str), "unknown escape '\\%c' in a string (read as '%c')", ch,
                 ch);
     }

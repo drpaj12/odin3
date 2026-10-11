@@ -186,6 +186,7 @@ target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
 find_package(BISON 3.8 REQUIRED)        # parse.error detailed, parse.lac, %precedence, -Wcex
 find_package(FLEX 2.6.4 REQUIRED)       # reentrant + bison-bridge without the 2.6.0–2.6.3 bugs
 set(_gen ${CMAKE_CURRENT_BINARY_DIR}/generated/verilog)
+file(MAKE_DIRECTORY ${_gen})  # Flex and Bison do not create it (Ninja does, Make does not)
 bison_target(verilog_parser src/frontends/verilog/verilog.y ${_gen}/verilog_parser.c
              DEFINES_FILE ${_gen}/verilog_parser.h
              COMPILE_FLAGS "-Wall -Wcounterexamples -Werror")

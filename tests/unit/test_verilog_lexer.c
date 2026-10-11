@@ -20,6 +20,7 @@
 #include "util/vec.h"
 #include "verilog_test.h"
 
+#include <locale.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -214,6 +215,57 @@ static void test_keyword_table_sorted_and_found(void) {
     TEST_ASSERT_EQUAL_INT(0, odin3_vl_keyword(odin3_bytes_cstr(""), ODIN3_VL_KW_2005));
 }
 
+/* The sets of a word per §2.5: the 2001 words, the config words among them, uwire, the rest. */
+static uint32_t expected_sets(const char *word) {
+    static const char *const new2001[] = {"automatic",
+                                          "endgenerate",
+                                          "generate",
+                                          "genvar",
+                                          "localparam",
+                                          "noshowcancelled",
+                                          "pulsestyle_ondetect",
+                                          "pulsestyle_onevent",
+                                          "showcancelled",
+                                          "signed",
+                                          "unsigned"};
+    static const char *const config[] = {"cell",    "config",   "design",  "endconfig", "incdir",
+                                         "include", "instance", "liblist", "library",   "use"};
+    for (size_t i = 0; i < sizeof new2001 / sizeof new2001[0]; i++) {
+        if (strcmp(word, new2001[i]) == 0) {
+            return ODIN3_VL_KW_2001_NOCONFIG | ODIN3_VL_KW_2001 | ODIN3_VL_KW_2005;
+        }
+    }
+    for (size_t i = 0; i < sizeof config / sizeof config[0]; i++) {
+        if (strcmp(word, config[i]) == 0) {
+            return ODIN3_VL_KW_2001 | ODIN3_VL_KW_2005;
+        }
+    }
+    if (strcmp(word, "uwire") == 0) {
+        return ODIN3_VL_KW_2005;
+    }
+    return ODIN3_VL_KW_1995 | ODIN3_VL_KW_2001_NOCONFIG | ODIN3_VL_KW_2001 | ODIN3_VL_KW_2005;
+}
+
+/* Every word of the table against every set: a keyword exactly in the sets §2.5 gives it. */
+static void test_keyword_masks_every_word(void) {
+    const uint32_t sets[] = {ODIN3_VL_KW_1995, ODIN3_VL_KW_2001_NOCONFIG, ODIN3_VL_KW_2001,
+                             ODIN3_VL_KW_2005};
+    size_t count = 0;
+    const odin3_vl_kw *table = odin3_vl_keywords(&count);
+    size_t in2001 = 0;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t want = expected_sets(table[i].word);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(want, table[i].mask, table[i].word);
+        in2001 += (want & ODIN3_VL_KW_1995) == 0 && want != ODIN3_VL_KW_2005;
+        for (size_t j = 0; j < sizeof sets / sizeof sets[0]; j++) {
+            int token = (want & sets[j]) != 0 ? table[i].token : 0;
+            TEST_ASSERT_EQUAL_INT_MESSAGE(
+                token, odin3_vl_keyword(odin3_bytes_cstr(table[i].word), sets[j]), table[i].word);
+        }
+    }
+    TEST_ASSERT_EQUAL_size_t(21, in2001); /* every 2001 word of §2.5 is in the table */
+}
+
 static void test_keyword_sets(void) {
     const uint32_t k95 = ODIN3_VL_KW_1995;
     const uint32_t knc = ODIN3_VL_KW_2001_NOCONFIG;
@@ -309,6 +361,32 @@ static void test_reals(void) {
 }
 
 /* 1. and .5 are not reals (1364-2005 §3.5.2). */
+/* A host's comma-decimal LC_NUMERIC must not change a real (the lexer parses in the C locale)
+ * and is still in force afterwards. Needs a comma locale (LOCPATH may point at one); without
+ * one only the restoration is checked. */
+static void test_reals_ignore_the_host_locale(void) {
+    const char *names[] = {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8", "de_DE"};
+    locale_t comma = (locale_t)0;
+    for (size_t i = 0; i < sizeof names / sizeof names[0] && comma == (locale_t)0; i++) {
+        comma = newlocale(LC_NUMERIC_MASK, names[i], (locale_t)0);
+    }
+    if (comma == (locale_t)0) {
+        TEST_MESSAGE("no comma-decimal locale installed: only the restoration is checked");
+        comma = newlocale(LC_NUMERIC_MASK, "C", (locale_t)0);
+    }
+    TEST_ASSERT_TRUE(comma != (locale_t)0);
+    locale_t before = uselocale(comma);
+    open_text("1.5 2.25e1");
+    TEST_ASSERT_EQUAL_INT(TOK_REAL_NUMBER, next());
+    expect_real(1.5);
+    TEST_ASSERT_EQUAL_INT(TOK_REAL_NUMBER, next());
+    expect_real(22.5);
+    TEST_ASSERT_TRUE(uselocale((locale_t)0) == comma);
+    (void)uselocale(before);
+    freelocale(comma);
+    TEST_ASSERT_EQUAL_STRING("", logged());
+}
+
 static void test_not_reals(void) {
     open_text("1. .5 a.5");
     expect_text(TOK_UNSIGNED_NUMBER, (tok_range){0, 1}, "1");
@@ -580,6 +658,19 @@ static void test_string_unknown_escape_warns(void) {
     TEST_ASSERT_FALSE(err_flag);
 }
 
+/* A byte outside 0x21..0x7e after a backslash is named, never echoed raw into the log. */
+static void test_string_unknown_escape_of_raw_byte(void) {
+    open_text("\"a\\\x01\" \"\\\xe9\" \"\\ \"");
+    expect_name(TOK_STRING, (tok_range){0, 5}, "a\001");
+    expect_name(TOK_STRING, (tok_range){6, 4}, "\xe9");
+    expect_name(TOK_STRING, (tok_range){11, 4}, " ");
+    TEST_ASSERT_EQUAL_STRING(
+        "t.v:1:3: warning: unknown escape '\\' before byte 0x01 in a string (read as byte 0x01)\n"
+        "t.v:1:8: warning: unknown escape '\\' before byte 0xe9 in a string (read as byte 0xe9)\n"
+        "t.v:1:13: warning: unknown escape '\\' before byte 0x20 in a string (read as byte 0x20)\n",
+        logged());
+}
+
 static void test_string_nul_escape(void) {
     open_text("\"a\\000b\" \"\\777\"");
     expect_name(TOK_STRING, (tok_range){0, 8}, "ab");
@@ -841,6 +932,16 @@ static void test_unconnected_drive(void) {
 }
 
 /* `pragma takes the rest of the line minus a trailing // comment, which is recorded. */
+/* A // inside a string of a `pragma argument is text; only a trailing // comment is cut. */
+static void test_pragma_string_with_slashes(void) {
+    open_text("`pragma key \"a//b\" c // d\n`pragma \"open // e");
+    expect_text(TOK_DIRECTIVE, (tok_range){0, 20}, "key \"a//b\" c");
+    expect_text(TOK_DIRECTIVE, (tok_range){26, 13}, "\"open");
+    expect_eof(39);
+    TEST_ASSERT_EQUAL_UINT32(2, comments().n);
+    TEST_ASSERT_EQUAL_STRING("", logged());
+}
+
 static void test_pragma(void) {
     open_text("`pragma foo bar // c\n`pragma\n`pragma a/b /\n`pragma x\r\n");
     expect_text(TOK_DIRECTIVE, (tok_range){0, 15}, "foo bar");
@@ -888,6 +989,18 @@ static void test_unknown_directive(void) {
 }
 
 /* --- opaque bodies (§2.8) ------------------------------------------------------------------ */
+
+/* A body's end keyword right after a base (BASED would take its 'e' as a digit) still ends it. */
+static void test_body_end_after_base(void) {
+    open_text("specify x = 'h endspecify y primitive p; 'b\nendprimitive 'h endspecifyx");
+    expect_tok(TOK_OPAQUE_SPECIFY, (tok_range){0, 25});
+    expect_name(TOK_IDENT, (tok_range){26, 1}, "y");
+    expect_tok(TOK_OPAQUE_PRIMITIVE, (tok_range){28, 28});
+    expect_text(TOK_BASE, (tok_range){57, 2}, "'h");
+    expect_name(TOK_IDENT, (tok_range){60, 11}, "endspecifyx"); /* outside a body: a word */
+    expect_eof(71);
+    TEST_ASSERT_EQUAL_STRING("", logged());
+}
 
 static void test_specify_body(void) {
     open_text("module m; specify\n // endspecify\n /* endspecify */\n $s(\"endspecify\", 'b_1, "
@@ -976,6 +1089,18 @@ static void test_bom_is_one_error(void) {
     TEST_ASSERT_EQUAL_STRING("t.v:1:1: error: unexpected byte 0xef\n"
                              "t.v:1:12: error: unexpected byte 0xc3\n",
                              logged());
+}
+
+/* Latin-1 (one byte 0xe9): kept verbatim in a comment and a string, one error in code. */
+static void test_latin1(void) {
+    open_text("// caf\xe9\n\"caf\xe9\" x\xe9 y");
+    expect_name(TOK_STRING, (tok_range){8, 6}, "caf\xe9");
+    expect_name(TOK_IDENT, (tok_range){15, 1}, "x");
+    expect_name(TOK_IDENT, (tok_range){18, 1}, "y");
+    TEST_ASSERT_EQUAL_STRING("t.v:2:9: error: unexpected byte 0xe9\n", logged());
+    odin3_ast_comment_span span = comments();
+    TEST_ASSERT_EQUAL_UINT32(1, span.n);
+    TEST_ASSERT_EQUAL_STRING(" caf\xe9", span.items[0].text);
 }
 
 static void test_non_ascii_in_comments_strings_and_escapes(void) {
@@ -1187,11 +1312,13 @@ static void test_lexer_oom_sweep(void) {
 static void run_tokens(void) {
     RUN_TEST(test_keyword_table_sorted_and_found);
     RUN_TEST(test_keyword_sets);
+    RUN_TEST(test_keyword_masks_every_word);
     RUN_TEST(test_based_underscore);
     RUN_TEST(test_spaced_number_with_comments);
     RUN_TEST(test_based_digits);
     RUN_TEST(test_base_at_end_of_input);
     RUN_TEST(test_reals);
+    RUN_TEST(test_reals_ignore_the_host_locale);
     RUN_TEST(test_not_reals);
     RUN_TEST(test_real_out_of_range);
     RUN_TEST(test_delay_and_size_lex_alike);
@@ -1213,6 +1340,7 @@ static void run_tokens(void) {
     RUN_TEST(test_keyword_depth_cap);
     RUN_TEST(test_string_escapes);
     RUN_TEST(test_string_unknown_escape_warns);
+    RUN_TEST(test_string_unknown_escape_of_raw_byte);
     RUN_TEST(test_string_nul_escape);
     RUN_TEST(test_string_unterminated);
     RUN_TEST(test_string_cap);
@@ -1235,10 +1363,12 @@ static void run_trivia_and_edges(void) {
     RUN_TEST(test_timescale);
     RUN_TEST(test_unconnected_drive);
     RUN_TEST(test_pragma);
+    RUN_TEST(test_pragma_string_with_slashes);
     RUN_TEST(test_directive_cap);
     RUN_TEST(test_directive_cap_default);
     RUN_TEST(test_unknown_directive);
     RUN_TEST(test_specify_body);
+    RUN_TEST(test_body_end_after_base);
     RUN_TEST(test_primitive_and_config_names);
     RUN_TEST(test_opaque_unterminated);
     RUN_TEST(test_opaque_cap);
@@ -1246,6 +1376,7 @@ static void run_trivia_and_edges(void) {
     RUN_TEST(test_unexpected_bytes);
     RUN_TEST(test_bom_is_one_error);
     RUN_TEST(test_non_ascii_in_comments_strings_and_escapes);
+    RUN_TEST(test_latin1);
     RUN_TEST(test_netlist_names);
     RUN_TEST(test_crlf_twins);
     RUN_TEST(test_empty_stream);

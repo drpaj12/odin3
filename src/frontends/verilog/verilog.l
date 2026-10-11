@@ -29,7 +29,7 @@ DEC         [0-9][0-9_]*
 EXP         [eE][+-]?{DEC}
 WORD        [a-zA-Z_][a-zA-Z0-9_$]*
 TSPART      [0-9]+[ \t]*[a-zA-Z]+
-PRAGMA_TEXT ([^/\n]|"/"[^/\n])*
+PRAGMA_TEXT ([^/\n]|"/"[^/\n]|\"[^"\n]*\")*
 
 %%
 
@@ -48,6 +48,7 @@ PRAGMA_TEXT ([^/\n]|"/"[^/\n])*
 <BASED>{BLANK}+             { odin3_vl_skip(yyextra); }
 <BASED>"//"[^\n]*           { odin3_vl_line_comment(yyextra); }
 <BASED>"/*"                 { BEGIN(BCMT); odin3_vl_comment_open(yyextra); }
+<BASED>"end"(specify|primitive|config){WORD}? { BEGIN(INITIAL); return odin3_vl_word(yyextra, yylval, yylloc); }
 <BASED>[0-9a-fA-FxXzZ?][0-9a-fA-FxXzZ?_]* { BEGIN(INITIAL); return odin3_vl_digits(yyextra, yylval, yylloc); }
 <BASED>.                    { yyless(0); BEGIN(INITIAL); odin3_vl_based_exit(yyextra); }
 
