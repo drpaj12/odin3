@@ -1,0 +1,45 @@
+# generated: odin3-parse-check --write
+(MODULE:t4_at_ident @T4_event_without_parens.v:2:1
+  _
+  (LIST @T4_event_without_parens.v:2:20
+    (PORT_DECL.input [IN_HEADER] @T4_event_without_parens.v:2:21
+      _
+      (DECLARATOR:clk @T4_event_without_parens.v:2:27
+        _)
+      (DECLARATOR:en @T4_event_without_parens.v:2:32
+        _)
+      (DECLARATOR:d @T4_event_without_parens.v:2:36
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T4_event_without_parens.v:2:39
+      _
+      (DECLARATOR:q @T4_event_without_parens.v:2:50
+        _)
+      (DECLARATOR:r @T4_event_without_parens.v:2:53
+        _)))
+  (ALWAYS.always @T4_event_without_parens.v:3:3
+    (TIMING_STMT @T4_event_without_parens.v:3:10
+      (EVENT_CONTROL [NO_PARENS] @T4_event_without_parens.v:3:10
+        _
+        (EVENT_EXPR.none @T4_event_without_parens.v:3:11
+          (IDENT:clk @T4_event_without_parens.v:3:11)))
+      (NONBLOCKING_ASSIGN @T4_event_without_parens.v:4:5
+        (IDENT:q @T4_event_without_parens.v:4:5)
+        _
+        (IDENT:d @T4_event_without_parens.v:4:10))))
+  (ALWAYS.always @T4_event_without_parens.v:5:3
+    (TIMING_STMT @T4_event_without_parens.v:5:10
+      (EVENT_CONTROL @T4_event_without_parens.v:5:10
+        _
+        (EVENT_EXPR.posedge @T4_event_without_parens.v:5:12
+          (IDENT:clk @T4_event_without_parens.v:5:20)))
+      (SEQ_BLOCK @T4_event_without_parens.v:5:25
+        _
+        (TIMING_STMT @T4_event_without_parens.v:6:5
+          (EVENT_CONTROL [NO_PARENS] @T4_event_without_parens.v:6:5
+            _
+            (EVENT_EXPR.none @T4_event_without_parens.v:6:6
+              (IDENT:en @T4_event_without_parens.v:6:6)))
+          (NONBLOCKING_ASSIGN @T4_event_without_parens.v:6:9
+            (IDENT:r @T4_event_without_parens.v:6:9)
+            _
+            (IDENT:d @T4_event_without_parens.v:6:14)))))))

@@ -1,0 +1,97 @@
+# generated: odin3-parse-check --write
+(MODULE:a1_assign @A1_continuous_assign.v:2:1
+  _
+  (LIST @A1_continuous_assign.v:2:18
+    (PORT_DECL.input [IN_HEADER] @A1_continuous_assign.v:2:19
+      (RANGE @A1_continuous_assign.v:2:25
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:26 3)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:28 0))
+      (DECLARATOR:a @A1_continuous_assign.v:2:31
+        _)
+      (DECLARATOR:b @A1_continuous_assign.v:2:34
+        _))
+    (PORT_DECL.output [IN_HEADER] @A1_continuous_assign.v:2:37
+      (RANGE @A1_continuous_assign.v:2:44
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:45 3)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:47 0))
+      (DECLARATOR:y @A1_continuous_assign.v:2:50
+        _))
+    (PORT_DECL.output [IN_HEADER] @A1_continuous_assign.v:2:53
+      (RANGE @A1_continuous_assign.v:2:60
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:61 7)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:63 0))
+      (DECLARATOR:w @A1_continuous_assign.v:2:66
+        _))
+    (PORT_DECL.output [IN_HEADER] @A1_continuous_assign.v:2:69
+      _
+      (DECLARATOR:c @A1_continuous_assign.v:2:76
+        _))
+    (PORT_DECL.output [IN_HEADER] @A1_continuous_assign.v:2:79
+      (RANGE @A1_continuous_assign.v:2:86
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:87 3)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:2:89 0))
+      (DECLARATOR:s @A1_continuous_assign.v:2:92
+        _))
+    (PORT_DECL.output [IN_HEADER] @A1_continuous_assign.v:2:95
+      _
+      (DECLARATOR:p @A1_continuous_assign.v:2:102
+        _)
+      (DECLARATOR:q @A1_continuous_assign.v:2:105
+        _)))
+  (CONT_ASSIGN @A1_continuous_assign.v:3:3
+    _
+    _
+    (NET_ASSIGN @A1_continuous_assign.v:3:10
+      (IDENT:y @A1_continuous_assign.v:3:10)
+      (IDENT:a @A1_continuous_assign.v:3:14)))
+  (CONT_ASSIGN @A1_continuous_assign.v:4:3
+    _
+    _
+    (NET_ASSIGN @A1_continuous_assign.v:4:10
+      (SELECT.bit @A1_continuous_assign.v:4:10
+        (IDENT:w @A1_continuous_assign.v:4:10)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:4:12 0)
+        _)
+      (SELECT.bit @A1_continuous_assign.v:4:17
+        (IDENT:a @A1_continuous_assign.v:4:17)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:4:19 0)
+        _)))
+  (CONT_ASSIGN @A1_continuous_assign.v:5:3
+    _
+    _
+    (NET_ASSIGN @A1_continuous_assign.v:5:10
+      (SELECT.part @A1_continuous_assign.v:5:10
+        (IDENT:w @A1_continuous_assign.v:5:10)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:5:12 7)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:5:14 1))
+      (CONCAT @A1_continuous_assign.v:5:19
+        (IDENT:b @A1_continuous_assign.v:5:20)
+        (SELECT.part @A1_continuous_assign.v:5:23
+          (IDENT:a @A1_continuous_assign.v:5:23)
+          (NUMBER.dec [SIGNED] @A1_continuous_assign.v:5:25 3)
+          (NUMBER.dec [SIGNED] @A1_continuous_assign.v:5:27 1)))))
+  (CONT_ASSIGN @A1_continuous_assign.v:6:3
+    _
+    _
+    (NET_ASSIGN @A1_continuous_assign.v:6:10
+      (CONCAT @A1_continuous_assign.v:6:10
+        (IDENT:c @A1_continuous_assign.v:6:11)
+        (IDENT:s @A1_continuous_assign.v:6:14))
+      (BINARY.+ @A1_continuous_assign.v:6:19
+        (IDENT:a @A1_continuous_assign.v:6:19)
+        (IDENT:b @A1_continuous_assign.v:6:23))))
+  (CONT_ASSIGN @A1_continuous_assign.v:7:3
+    _
+    _
+    (NET_ASSIGN @A1_continuous_assign.v:7:10
+      (IDENT:p @A1_continuous_assign.v:7:10)
+      (SELECT.bit @A1_continuous_assign.v:7:14
+        (IDENT:a @A1_continuous_assign.v:7:14)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:7:16 1)
+        _))
+    (NET_ASSIGN @A1_continuous_assign.v:7:20
+      (IDENT:q @A1_continuous_assign.v:7:20)
+      (SELECT.bit @A1_continuous_assign.v:7:24
+        (IDENT:b @A1_continuous_assign.v:7:24)
+        (NUMBER.dec [SIGNED] @A1_continuous_assign.v:7:26 1)
+        _))))

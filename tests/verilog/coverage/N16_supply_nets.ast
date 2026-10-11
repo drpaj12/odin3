@@ -1,0 +1,50 @@
+# generated: odin3-parse-check --write
+(MODULE:n16_supply @N16_supply_nets.v:2:1
+  _
+  (LIST @N16_supply_nets.v:2:19
+    (PORT_DECL.output [IN_HEADER] @N16_supply_nets.v:2:20
+      _
+      (DECLARATOR:y @N16_supply_nets.v:2:27
+        _)
+      (DECLARATOR:z @N16_supply_nets.v:2:30
+        _)))
+  (NET_DECL.supply0 @N16_supply_nets.v:3:3
+    _
+    _
+    _
+    (DECLARATOR:gnd @N16_supply_nets.v:3:11
+      _))
+  (NET_DECL.supply1 @N16_supply_nets.v:4:3
+    _
+    _
+    _
+    (DECLARATOR:vdd @N16_supply_nets.v:4:11
+      _))
+  (NET_DECL.supply1 @N16_supply_nets.v:5:3
+    _
+    (RANGE @N16_supply_nets.v:5:11
+      (NUMBER.dec [SIGNED] @N16_supply_nets.v:5:12 3)
+      (NUMBER.dec [SIGNED] @N16_supply_nets.v:5:14 0))
+    _
+    (DECLARATOR:vbus @N16_supply_nets.v:5:17
+      _))
+  (NET_DECL.supply0 @N16_supply_nets.v:6:3
+    _
+    _
+    _
+    (DECLARATOR:g1 @N16_supply_nets.v:6:11
+      _)
+    (DECLARATOR:g2 @N16_supply_nets.v:6:15
+      _))
+  (CONT_ASSIGN @N16_supply_nets.v:7:3
+    _
+    _
+    (NET_ASSIGN @N16_supply_nets.v:7:10
+      (IDENT:y @N16_supply_nets.v:7:10)
+      (IDENT:gnd @N16_supply_nets.v:7:14)))
+  (CONT_ASSIGN @N16_supply_nets.v:8:3
+    _
+    _
+    (NET_ASSIGN @N16_supply_nets.v:8:10
+      (IDENT:z @N16_supply_nets.v:8:10)
+      (IDENT:vdd @N16_supply_nets.v:8:14))))

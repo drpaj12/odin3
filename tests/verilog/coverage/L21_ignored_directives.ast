@@ -1,0 +1,77 @@
+# generated: odin3-parse-check --write
+(DIRECTIVE.celldefine @L21_ignored_directives.v:2:1)
+(MODULE:l21_cell @L21_ignored_directives.v:3:1
+  _
+  (LIST @L21_ignored_directives.v:3:17
+    (PORT_DECL.input [IN_HEADER] @L21_ignored_directives.v:3:18
+      _
+      (DECLARATOR:a @L21_ignored_directives.v:3:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @L21_ignored_directives.v:3:27
+      _
+      (DECLARATOR:y @L21_ignored_directives.v:3:34
+        _)))
+  (CONT_ASSIGN @L21_ignored_directives.v:4:3
+    _
+    _
+    (NET_ASSIGN @L21_ignored_directives.v:4:10
+      (IDENT:y @L21_ignored_directives.v:4:10)
+      (IDENT:a @L21_ignored_directives.v:4:14))))
+(DIRECTIVE.endcelldefine @L21_ignored_directives.v:6:1)
+(DIRECTIVE.unconnected_drive:pull1 @L21_ignored_directives.v:7:1)
+(MODULE:l21_pull1 @L21_ignored_directives.v:8:1
+  _
+  (LIST @L21_ignored_directives.v:8:18
+    (PORT_DECL.input [IN_HEADER] @L21_ignored_directives.v:8:19
+      _
+      (DECLARATOR:a @L21_ignored_directives.v:8:25
+        _))
+    (PORT_DECL.output [IN_HEADER] @L21_ignored_directives.v:8:28
+      _
+      (DECLARATOR:y @L21_ignored_directives.v:8:35
+        _)))
+  (CONT_ASSIGN @L21_ignored_directives.v:9:3
+    _
+    _
+    (NET_ASSIGN @L21_ignored_directives.v:9:10
+      (IDENT:y @L21_ignored_directives.v:9:10)
+      (IDENT:a @L21_ignored_directives.v:9:14))))
+(DIRECTIVE.nounconnected_drive @L21_ignored_directives.v:11:1)
+(DIRECTIVE.unconnected_drive:pull0 @L21_ignored_directives.v:12:1)
+(MODULE:l21_pull0 @L21_ignored_directives.v:13:1
+  _
+  (LIST @L21_ignored_directives.v:13:18
+    (PORT_DECL.input [IN_HEADER] @L21_ignored_directives.v:13:19
+      _
+      (DECLARATOR:a @L21_ignored_directives.v:13:25
+        _))
+    (PORT_DECL.output [IN_HEADER] @L21_ignored_directives.v:13:28
+      _
+      (DECLARATOR:y @L21_ignored_directives.v:13:35
+        _)))
+  (CONT_ASSIGN @L21_ignored_directives.v:14:3
+    _
+    _
+    (NET_ASSIGN @L21_ignored_directives.v:14:10
+      (IDENT:y @L21_ignored_directives.v:14:10)
+      (IDENT:a @L21_ignored_directives.v:14:14))))
+(DIRECTIVE.nounconnected_drive @L21_ignored_directives.v:16:1)
+(DIRECTIVE.pragma:my_tool option = 1 @L21_ignored_directives.v:17:1)
+(DIRECTIVE.pragma:reset @L21_ignored_directives.v:18:1)
+(MODULE:l21_pragma @L21_ignored_directives.v:19:1
+  _
+  (LIST @L21_ignored_directives.v:19:19
+    (PORT_DECL.input [IN_HEADER] @L21_ignored_directives.v:19:20
+      _
+      (DECLARATOR:a @L21_ignored_directives.v:19:26
+        _))
+    (PORT_DECL.output [IN_HEADER] @L21_ignored_directives.v:19:29
+      _
+      (DECLARATOR:y @L21_ignored_directives.v:19:36
+        _)))
+  (CONT_ASSIGN @L21_ignored_directives.v:20:3
+    _
+    _
+    (NET_ASSIGN @L21_ignored_directives.v:20:10
+      (IDENT:y @L21_ignored_directives.v:20:10)
+      (IDENT:a @L21_ignored_directives.v:20:14))))

@@ -1,0 +1,92 @@
+# generated: odin3-parse-check --write
+(MODULE:q4_gate_delays @Q4_gate_delay_strength.v:2:1
+  _
+  (LIST @Q4_gate_delay_strength.v:2:23
+    (PORT_DECL.input [IN_HEADER] @Q4_gate_delay_strength.v:2:24
+      _
+      (DECLARATOR:a @Q4_gate_delay_strength.v:2:30
+        _)
+      (DECLARATOR:b @Q4_gate_delay_strength.v:2:33
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q4_gate_delay_strength.v:2:36
+      _
+      (DECLARATOR:y1 @Q4_gate_delay_strength.v:2:43
+        _)
+      (DECLARATOR:y2 @Q4_gate_delay_strength.v:2:47
+        _)
+      (DECLARATOR:y3 @Q4_gate_delay_strength.v:2:51
+        _)
+      (DECLARATOR:y4 @Q4_gate_delay_strength.v:2:55
+        _)
+      (DECLARATOR:y5 @Q4_gate_delay_strength.v:2:59
+        _)
+      (DECLARATOR:y6 @Q4_gate_delay_strength.v:2:63
+        _)))
+  (GATE_DECL.and @Q4_gate_delay_strength.v:3:3
+    _
+    (DELAY @Q4_gate_delay_strength.v:3:7
+      (NUMBER.dec [SIGNED] @Q4_gate_delay_strength.v:3:8 1))
+    (INSTANCE:g1 @Q4_gate_delay_strength.v:3:10
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:3:14
+        (IDENT:y1 @Q4_gate_delay_strength.v:3:14))
+      (CONNECTION @Q4_gate_delay_strength.v:3:18
+        (IDENT:a @Q4_gate_delay_strength.v:3:18))
+      (CONNECTION @Q4_gate_delay_strength.v:3:21
+        (IDENT:b @Q4_gate_delay_strength.v:3:21))))
+  (GATE_DECL.or @Q4_gate_delay_strength.v:4:3
+    _
+    (DELAY @Q4_gate_delay_strength.v:4:6
+      (NUMBER.dec [SIGNED] @Q4_gate_delay_strength.v:4:8 1)
+      (NUMBER.dec [SIGNED] @Q4_gate_delay_strength.v:4:11 2))
+    (INSTANCE:g2 @Q4_gate_delay_strength.v:4:14
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:4:18
+        (IDENT:y2 @Q4_gate_delay_strength.v:4:18))
+      (CONNECTION @Q4_gate_delay_strength.v:4:22
+        (IDENT:a @Q4_gate_delay_strength.v:4:22))
+      (CONNECTION @Q4_gate_delay_strength.v:4:25
+        (IDENT:b @Q4_gate_delay_strength.v:4:25))))
+  (GATE_DECL.nand @Q4_gate_delay_strength.v:5:3
+    (STRENGTH.drive [S0=4 S1=2] @Q4_gate_delay_strength.v:5:8)
+    _
+    (INSTANCE:g3 @Q4_gate_delay_strength.v:5:25
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:5:29
+        (IDENT:y3 @Q4_gate_delay_strength.v:5:29))
+      (CONNECTION @Q4_gate_delay_strength.v:5:33
+        (IDENT:a @Q4_gate_delay_strength.v:5:33))
+      (CONNECTION @Q4_gate_delay_strength.v:5:36
+        (IDENT:b @Q4_gate_delay_strength.v:5:36))))
+  (GATE_DECL.nor @Q4_gate_delay_strength.v:6:3
+    (STRENGTH.drive [S0=3 S1=3] @Q4_gate_delay_strength.v:6:7)
+    (DELAY @Q4_gate_delay_strength.v:6:22
+      (NUMBER.dec [SIGNED] @Q4_gate_delay_strength.v:6:23 2))
+    (INSTANCE:g4 @Q4_gate_delay_strength.v:6:25
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:6:29
+        (IDENT:y4 @Q4_gate_delay_strength.v:6:29))
+      (CONNECTION @Q4_gate_delay_strength.v:6:33
+        (IDENT:a @Q4_gate_delay_strength.v:6:33))
+      (CONNECTION @Q4_gate_delay_strength.v:6:36
+        (IDENT:b @Q4_gate_delay_strength.v:6:36))))
+  (GATE_DECL.xor @Q4_gate_delay_strength.v:7:3
+    _
+    (DELAY @Q4_gate_delay_strength.v:7:7
+      (NUMBER.dec [SIGNED] @Q4_gate_delay_strength.v:7:8 3))
+    (INSTANCE @Q4_gate_delay_strength.v:7:10
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:7:11
+        (IDENT:y5 @Q4_gate_delay_strength.v:7:11))
+      (CONNECTION @Q4_gate_delay_strength.v:7:15
+        (IDENT:a @Q4_gate_delay_strength.v:7:15))
+      (CONNECTION @Q4_gate_delay_strength.v:7:18
+        (IDENT:b @Q4_gate_delay_strength.v:7:18)))
+    (INSTANCE @Q4_gate_delay_strength.v:7:22
+      _
+      (CONNECTION @Q4_gate_delay_strength.v:7:23
+        (IDENT:y6 @Q4_gate_delay_strength.v:7:23))
+      (CONNECTION @Q4_gate_delay_strength.v:7:27
+        (IDENT:a @Q4_gate_delay_strength.v:7:27))
+      (CONNECTION @Q4_gate_delay_strength.v:7:30
+        (IDENT:b @Q4_gate_delay_strength.v:7:30)))))

@@ -1,0 +1,40 @@
+# generated: odin3-parse-check --write
+(MODULE:t14_named_events @T14_named_events.v:2:1
+  _
+  (LIST @T14_named_events.v:2:25
+    (PORT_DECL.input [IN_HEADER] @T14_named_events.v:2:26
+      _
+      (DECLARATOR:clk @T14_named_events.v:2:32
+        _)
+      (DECLARATOR:a @T14_named_events.v:2:37
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T14_named_events.v:2:40
+      _
+      (DECLARATOR:y @T14_named_events.v:2:51
+        _)))
+  (EVENT_DECL @T14_named_events.v:3:3
+    (DECLARATOR:e @T14_named_events.v:3:9
+      _))
+  (ALWAYS.always @T14_named_events.v:4:3
+    (TIMING_STMT @T14_named_events.v:4:10
+      (EVENT_CONTROL @T14_named_events.v:4:10
+        _
+        (EVENT_EXPR.posedge @T14_named_events.v:4:12
+          (IDENT:clk @T14_named_events.v:4:20)))
+      (IF @T14_named_events.v:5:5
+        (IDENT:a @T14_named_events.v:5:9)
+        (EVENT_TRIGGER @T14_named_events.v:6:7
+          (HIER_NAME @T14_named_events.v:6:10
+            (IDENT:e @T14_named_events.v:6:10)))
+        _)))
+  (ALWAYS.always @T14_named_events.v:7:3
+    (TIMING_STMT @T14_named_events.v:7:10
+      (EVENT_CONTROL @T14_named_events.v:7:10
+        _
+        (EVENT_EXPR.none @T14_named_events.v:7:12
+          (IDENT:e @T14_named_events.v:7:12)))
+      (BLOCKING_ASSIGN @T14_named_events.v:8:5
+        (IDENT:y @T14_named_events.v:8:5)
+        _
+        (UNARY.~ @T14_named_events.v:8:9
+          (IDENT:y @T14_named_events.v:8:10))))))

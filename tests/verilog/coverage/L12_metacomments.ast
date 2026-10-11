@@ -1,0 +1,101 @@
+# generated: odin3-parse-check --write
+(MODULE:l12_metacomments @L12_metacomments.v:2:1
+  _
+  (LIST @L12_metacomments.v:2:25
+    (PORT_DECL.input [IN_HEADER] @L12_metacomments.v:2:26
+      (RANGE @L12_metacomments.v:2:32
+        (NUMBER.dec [SIGNED] @L12_metacomments.v:2:33 1)
+        (NUMBER.dec [SIGNED] @L12_metacomments.v:2:35 0))
+      (DECLARATOR:s @L12_metacomments.v:2:38
+        _))
+    (PORT_DECL.input [IN_HEADER] @L12_metacomments.v:2:41
+      _
+      (DECLARATOR:a @L12_metacomments.v:2:47
+        _)
+      (DECLARATOR:b @L12_metacomments.v:2:50
+        _)
+      (DECLARATOR:c @L12_metacomments.v:2:53
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @L12_metacomments.v:2:56
+      _
+      (DECLARATOR:x @L12_metacomments.v:2:67
+        _)
+      (DECLARATOR:y @L12_metacomments.v:2:70
+        _)
+      (DECLARATOR:z @L12_metacomments.v:2:73
+        _)))
+  (ALWAYS.always @L12_metacomments.v:3:3
+    (TIMING_STMT @L12_metacomments.v:3:10
+      (EVENT_CONTROL [STAR] @L12_metacomments.v:3:10
+        _)
+      (CASE.case @L12_metacomments.v:4:5
+        (IDENT:s @L12_metacomments.v:4:11)
+        (CASE_ITEM @L12_metacomments.v:5:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:5:13
+            (IDENT:x @L12_metacomments.v:5:13)
+            _
+            (IDENT:a @L12_metacomments.v:5:17))
+          (NUMBER.dec @L12_metacomments.v:5:7 2'd0))
+        (CASE_ITEM @L12_metacomments.v:6:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:6:13
+            (IDENT:x @L12_metacomments.v:6:13)
+            _
+            (IDENT:b @L12_metacomments.v:6:17))
+          (NUMBER.dec @L12_metacomments.v:6:7 2'd1))
+        (CASE_ITEM @L12_metacomments.v:7:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:7:13
+            (IDENT:x @L12_metacomments.v:7:13)
+            _
+            (IDENT:c @L12_metacomments.v:7:17))
+          (NUMBER.dec @L12_metacomments.v:7:7 2'd2))
+        {(ATTR:full_case [METACOMMENT] @L12_metacomments.v:4:14
+           _)
+         (ATTR:parallel_case [METACOMMENT] @L12_metacomments.v:4:14
+           _)})))
+  (ALWAYS.always @L12_metacomments.v:9:3
+    (TIMING_STMT @L12_metacomments.v:9:10
+      (EVENT_CONTROL [STAR] @L12_metacomments.v:9:10
+        _)
+      (CASE.case @L12_metacomments.v:10:5
+        (IDENT:s @L12_metacomments.v:10:11)
+        (CASE_ITEM @L12_metacomments.v:11:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:11:13
+            (IDENT:y @L12_metacomments.v:11:13)
+            _
+            (IDENT:a @L12_metacomments.v:11:17))
+          (NUMBER.dec @L12_metacomments.v:11:7 2'd0))
+        (CASE_ITEM [DEFAULT] @L12_metacomments.v:12:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:12:16
+            (IDENT:y @L12_metacomments.v:12:16)
+            _
+            (IDENT:b @L12_metacomments.v:12:20)))
+        {(ATTR:parallel_case [METACOMMENT] @L12_metacomments.v:10:14
+           _)})))
+  (ALWAYS.always @L12_metacomments.v:14:3
+    (TIMING_STMT @L12_metacomments.v:14:10
+      (EVENT_CONTROL [STAR] @L12_metacomments.v:14:10
+        _)
+      (CASE.casez @L12_metacomments.v:15:5
+        (IDENT:s @L12_metacomments.v:15:12)
+        (CASE_ITEM @L12_metacomments.v:16:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:16:14
+            (IDENT:z @L12_metacomments.v:16:14)
+            _
+            (IDENT:a @L12_metacomments.v:16:18))
+          (NUMBER.bin @L12_metacomments.v:16:7 2'b1?))
+        (CASE_ITEM @L12_metacomments.v:17:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:17:14
+            (IDENT:z @L12_metacomments.v:17:14)
+            _
+            (IDENT:b @L12_metacomments.v:17:18))
+          (NUMBER.bin @L12_metacomments.v:17:7 2'b01))
+        (CASE_ITEM @L12_metacomments.v:18:7
+          (BLOCKING_ASSIGN @L12_metacomments.v:18:14
+            (IDENT:z @L12_metacomments.v:18:14)
+            _
+            (IDENT:c @L12_metacomments.v:18:18))
+          (NUMBER.bin @L12_metacomments.v:18:7 2'b00))
+        {(ATTR:full_case [METACOMMENT] @L12_metacomments.v:15:15
+           _)
+         (ATTR:parallel_case [METACOMMENT] @L12_metacomments.v:15:15
+           _)}))))

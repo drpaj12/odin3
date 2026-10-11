@@ -1,0 +1,76 @@
+# generated: odin3-parse-check --write
+(MODULE:k5_func_extra @K5_function_casez_localparam_block.v:2:1
+  _
+  (LIST @K5_function_casez_localparam_block.v:2:22
+    (PORT_DECL.input [IN_HEADER] @K5_function_casez_localparam_block.v:2:23
+      (RANGE @K5_function_casez_localparam_block.v:2:29
+        (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:2:30 3)
+        (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:2:32 0))
+      (DECLARATOR:r @K5_function_casez_localparam_block.v:2:35
+        _))
+    (PORT_DECL.output [IN_HEADER] @K5_function_casez_localparam_block.v:2:38
+      (RANGE @K5_function_casez_localparam_block.v:2:45
+        (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:2:46 1)
+        (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:2:48 0))
+      (DECLARATOR:y @K5_function_casez_localparam_block.v:2:51
+        _)))
+  (FUNCTION_DECL:prio @K5_function_casez_localparam_block.v:3:3
+    (RANGE @K5_function_casez_localparam_block.v:3:12
+      (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:3:13 1)
+      (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:3:15 0))
+    (LIST @K5_function_casez_localparam_block.v:3:24
+      (PORT_DECL.input [IN_HEADER] @K5_function_casez_localparam_block.v:3:24
+        (RANGE @K5_function_casez_localparam_block.v:3:30
+          (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:3:31 3)
+          (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:3:33 0))
+        (DECLARATOR:x @K5_function_casez_localparam_block.v:3:36
+          _)))
+    (LIST @K5_function_casez_localparam_block.v:4:5
+      (PARAM_DECL.localparam @K5_function_casez_localparam_block.v:4:5
+        _
+        (DECLARATOR:NONE @K5_function_casez_localparam_block.v:4:16
+          (NUMBER.dec @K5_function_casez_localparam_block.v:4:23 2'd0))))
+    (SEQ_BLOCK:body @K5_function_casez_localparam_block.v:5:5
+      (LIST @K5_function_casez_localparam_block.v:6:7
+        (VAR_DECL.reg @K5_function_casez_localparam_block.v:6:7
+          (RANGE @K5_function_casez_localparam_block.v:6:11
+            (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:6:12 1)
+            (NUMBER.dec [SIGNED] @K5_function_casez_localparam_block.v:6:14 0))
+          (DECLARATOR:p @K5_function_casez_localparam_block.v:6:17
+            _)))
+      (CASE.casez @K5_function_casez_localparam_block.v:7:7
+        (IDENT:x @K5_function_casez_localparam_block.v:7:14)
+        (CASE_ITEM @K5_function_casez_localparam_block.v:8:9
+          (BLOCKING_ASSIGN @K5_function_casez_localparam_block.v:8:18
+            (IDENT:p @K5_function_casez_localparam_block.v:8:18)
+            _
+            (NUMBER.dec @K5_function_casez_localparam_block.v:8:22 2'd3))
+          (NUMBER.bin @K5_function_casez_localparam_block.v:8:9 4'b1???))
+        (CASE_ITEM @K5_function_casez_localparam_block.v:9:9
+          (BLOCKING_ASSIGN @K5_function_casez_localparam_block.v:9:18
+            (IDENT:p @K5_function_casez_localparam_block.v:9:18)
+            _
+            (NUMBER.dec @K5_function_casez_localparam_block.v:9:22 2'd2))
+          (NUMBER.bin @K5_function_casez_localparam_block.v:9:9 4'b01??))
+        (CASE_ITEM @K5_function_casez_localparam_block.v:10:9
+          (BLOCKING_ASSIGN @K5_function_casez_localparam_block.v:10:18
+            (IDENT:p @K5_function_casez_localparam_block.v:10:18)
+            _
+            (NUMBER.dec @K5_function_casez_localparam_block.v:10:22 2'd1))
+          (NUMBER.bin @K5_function_casez_localparam_block.v:10:9 4'b001?))
+        (CASE_ITEM [DEFAULT] @K5_function_casez_localparam_block.v:11:9
+          (BLOCKING_ASSIGN @K5_function_casez_localparam_block.v:11:18
+            (IDENT:p @K5_function_casez_localparam_block.v:11:18)
+            _
+            (IDENT:NONE @K5_function_casez_localparam_block.v:11:22))))
+      (BLOCKING_ASSIGN @K5_function_casez_localparam_block.v:13:7
+        (IDENT:prio @K5_function_casez_localparam_block.v:13:7)
+        _
+        (IDENT:p @K5_function_casez_localparam_block.v:13:14))))
+  (CONT_ASSIGN @K5_function_casez_localparam_block.v:16:3
+    _
+    _
+    (NET_ASSIGN @K5_function_casez_localparam_block.v:16:10
+      (IDENT:y @K5_function_casez_localparam_block.v:16:10)
+      (CALL:prio @K5_function_casez_localparam_block.v:16:14
+        (IDENT:r @K5_function_casez_localparam_block.v:16:19)))))

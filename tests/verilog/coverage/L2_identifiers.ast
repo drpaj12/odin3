@@ -1,0 +1,48 @@
+# generated: odin3-parse-check --write
+(MODULE:l2_identifiers @L2_identifiers.v:2:1
+  _
+  (LIST @L2_identifiers.v:2:23
+    (PORT_DECL.input [IN_HEADER] @L2_identifiers.v:2:24
+      _
+      (DECLARATOR:_start @L2_identifiers.v:2:30
+        _)
+      (DECLARATOR:a$b @L2_identifiers.v:2:38
+        _))
+    (PORT_DECL.output [IN_HEADER] @L2_identifiers.v:2:43
+      _
+      (DECLARATOR:y_1$ @L2_identifiers.v:2:50
+        _)
+      (DECLARATOR:Y @L2_identifiers.v:2:56
+        _)
+      (DECLARATOR:y @L2_identifiers.v:2:59
+        _)))
+  (NET_DECL.wire @L2_identifiers.v:3:3
+    _
+    _
+    _
+    (DECLARATOR:mixed_Case$9 @L2_identifiers.v:3:8
+      _))
+  (CONT_ASSIGN @L2_identifiers.v:4:3
+    _
+    _
+    (NET_ASSIGN @L2_identifiers.v:4:10
+      (IDENT:mixed_Case$9 @L2_identifiers.v:4:10)
+      (IDENT:a$b @L2_identifiers.v:4:25)))
+  (CONT_ASSIGN @L2_identifiers.v:5:3
+    _
+    _
+    (NET_ASSIGN @L2_identifiers.v:5:10
+      (IDENT:y_1$ @L2_identifiers.v:5:10)
+      (IDENT:_start @L2_identifiers.v:5:17)))
+  (CONT_ASSIGN @L2_identifiers.v:6:3
+    _
+    _
+    (NET_ASSIGN @L2_identifiers.v:6:10
+      (IDENT:Y @L2_identifiers.v:6:10)
+      (IDENT:mixed_Case$9 @L2_identifiers.v:6:14)))
+  (CONT_ASSIGN @L2_identifiers.v:7:3
+    _
+    _
+    (NET_ASSIGN @L2_identifiers.v:7:10
+      (IDENT:y @L2_identifiers.v:7:10)
+      (IDENT:_start @L2_identifiers.v:7:14))))

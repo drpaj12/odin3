@@ -1,0 +1,91 @@
+# generated: odin3-parse-check --write
+(MODULE:c8_non_constant_items @C8_non_constant_items.v:2:1
+  _
+  (LIST @C8_non_constant_items.v:2:30
+    (PORT_DECL.input [IN_HEADER] @C8_non_constant_items.v:2:31
+      (RANGE @C8_non_constant_items.v:2:37
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:38 3)
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:40 0))
+      (DECLARATOR:r @C8_non_constant_items.v:2:43
+        _))
+    (PORT_DECL.input [IN_HEADER] @C8_non_constant_items.v:2:46
+      (RANGE @C8_non_constant_items.v:2:52
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:53 1)
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:55 0))
+      (DECLARATOR:s @C8_non_constant_items.v:2:58
+        _)
+      (DECLARATOR:a @C8_non_constant_items.v:2:61
+        _)
+      (DECLARATOR:b @C8_non_constant_items.v:2:64
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @C8_non_constant_items.v:2:67
+      (RANGE @C8_non_constant_items.v:2:78
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:79 1)
+        (NUMBER.dec [SIGNED] @C8_non_constant_items.v:2:81 0))
+      (DECLARATOR:y @C8_non_constant_items.v:2:84
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @C8_non_constant_items.v:2:87
+      _
+      (DECLARATOR:z @C8_non_constant_items.v:2:98
+        _)))
+  (ALWAYS.always @C8_non_constant_items.v:3:3
+    (TIMING_STMT @C8_non_constant_items.v:3:10
+      (EVENT_CONTROL [STAR] @C8_non_constant_items.v:3:10
+        _)
+      (CASE.case @C8_non_constant_items.v:4:5
+        (NUMBER.bin @C8_non_constant_items.v:4:11 1'b1)
+        (CASE_ITEM @C8_non_constant_items.v:5:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:5:13
+            (IDENT:y @C8_non_constant_items.v:5:13)
+            _
+            (NUMBER.dec @C8_non_constant_items.v:5:17 2'd3))
+          (SELECT.bit @C8_non_constant_items.v:5:7
+            (IDENT:r @C8_non_constant_items.v:5:7)
+            (NUMBER.dec [SIGNED] @C8_non_constant_items.v:5:9 3)
+            _))
+        (CASE_ITEM @C8_non_constant_items.v:6:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:6:13
+            (IDENT:y @C8_non_constant_items.v:6:13)
+            _
+            (NUMBER.dec @C8_non_constant_items.v:6:17 2'd2))
+          (SELECT.bit @C8_non_constant_items.v:6:7
+            (IDENT:r @C8_non_constant_items.v:6:7)
+            (NUMBER.dec [SIGNED] @C8_non_constant_items.v:6:9 2)
+            _))
+        (CASE_ITEM @C8_non_constant_items.v:7:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:7:13
+            (IDENT:y @C8_non_constant_items.v:7:13)
+            _
+            (NUMBER.dec @C8_non_constant_items.v:7:17 2'd1))
+          (SELECT.bit @C8_non_constant_items.v:7:7
+            (IDENT:r @C8_non_constant_items.v:7:7)
+            (NUMBER.dec [SIGNED] @C8_non_constant_items.v:7:9 1)
+            _))
+        (CASE_ITEM [DEFAULT] @C8_non_constant_items.v:8:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:8:16
+            (IDENT:y @C8_non_constant_items.v:8:16)
+            _
+            (NUMBER.dec @C8_non_constant_items.v:8:20 2'd0))))))
+  (ALWAYS.always @C8_non_constant_items.v:10:3
+    (TIMING_STMT @C8_non_constant_items.v:10:10
+      (EVENT_CONTROL [STAR] @C8_non_constant_items.v:10:10
+        _)
+      (CASE.case @C8_non_constant_items.v:11:5
+        (IDENT:s @C8_non_constant_items.v:11:11)
+        (CASE_ITEM @C8_non_constant_items.v:12:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:12:10
+            (IDENT:z @C8_non_constant_items.v:12:10)
+            _
+            (NUMBER.bin @C8_non_constant_items.v:12:14 1'b1))
+          (IDENT:a @C8_non_constant_items.v:12:7))
+        (CASE_ITEM @C8_non_constant_items.v:13:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:13:10
+            (IDENT:z @C8_non_constant_items.v:13:10)
+            _
+            (NUMBER.bin @C8_non_constant_items.v:13:14 1'b0))
+          (IDENT:b @C8_non_constant_items.v:13:7))
+        (CASE_ITEM [DEFAULT] @C8_non_constant_items.v:14:7
+          (BLOCKING_ASSIGN @C8_non_constant_items.v:14:16
+            (IDENT:z @C8_non_constant_items.v:14:16)
+            _
+            (NUMBER.bin @C8_non_constant_items.v:14:20 1'bx)))))))

@@ -1,0 +1,44 @@
+# generated: odin3-parse-check --write
+(MODULE:q2_multi_output @Q2_multi_output_buf_not.v:2:1
+  _
+  (LIST @Q2_multi_output_buf_not.v:2:24
+    (PORT_DECL.input [IN_HEADER] @Q2_multi_output_buf_not.v:2:25
+      _
+      (DECLARATOR:a @Q2_multi_output_buf_not.v:2:31
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q2_multi_output_buf_not.v:2:34
+      _
+      (DECLARATOR:y1 @Q2_multi_output_buf_not.v:2:41
+        _)
+      (DECLARATOR:y2 @Q2_multi_output_buf_not.v:2:45
+        _)
+      (DECLARATOR:y3 @Q2_multi_output_buf_not.v:2:49
+        _)
+      (DECLARATOR:n1 @Q2_multi_output_buf_not.v:2:53
+        _)
+      (DECLARATOR:n2 @Q2_multi_output_buf_not.v:2:57
+        _)))
+  (GATE_DECL.buf @Q2_multi_output_buf_not.v:3:3
+    _
+    _
+    (INSTANCE:b1 @Q2_multi_output_buf_not.v:3:7
+      _
+      (CONNECTION @Q2_multi_output_buf_not.v:3:11
+        (IDENT:y1 @Q2_multi_output_buf_not.v:3:11))
+      (CONNECTION @Q2_multi_output_buf_not.v:3:15
+        (IDENT:y2 @Q2_multi_output_buf_not.v:3:15))
+      (CONNECTION @Q2_multi_output_buf_not.v:3:19
+        (IDENT:y3 @Q2_multi_output_buf_not.v:3:19))
+      (CONNECTION @Q2_multi_output_buf_not.v:3:23
+        (IDENT:a @Q2_multi_output_buf_not.v:3:23))))
+  (GATE_DECL.not @Q2_multi_output_buf_not.v:4:3
+    _
+    _
+    (INSTANCE:n @Q2_multi_output_buf_not.v:4:7
+      _
+      (CONNECTION @Q2_multi_output_buf_not.v:4:10
+        (IDENT:n1 @Q2_multi_output_buf_not.v:4:10))
+      (CONNECTION @Q2_multi_output_buf_not.v:4:14
+        (IDENT:n2 @Q2_multi_output_buf_not.v:4:14))
+      (CONNECTION @Q2_multi_output_buf_not.v:4:18
+        (IDENT:a @Q2_multi_output_buf_not.v:4:18)))))

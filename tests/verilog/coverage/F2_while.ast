@@ -1,0 +1,99 @@
+# generated: odin3-parse-check --write
+(MODULE:f2_while @F2_while.v:2:1
+  _
+  (LIST @F2_while.v:2:17
+    (PORT_DECL.input [IN_HEADER] @F2_while.v:2:18
+      _
+      (DECLARATOR:clk @F2_while.v:2:24
+        _))
+    (PORT_DECL.input [IN_HEADER] @F2_while.v:2:29
+      (RANGE @F2_while.v:2:35
+        (NUMBER.dec [SIGNED] @F2_while.v:2:36 3)
+        (NUMBER.dec [SIGNED] @F2_while.v:2:38 0))
+      (DECLARATOR:a @F2_while.v:2:41
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @F2_while.v:2:44
+      (RANGE @F2_while.v:2:55
+        (NUMBER.dec [SIGNED] @F2_while.v:2:56 3)
+        (NUMBER.dec [SIGNED] @F2_while.v:2:58 0))
+      (DECLARATOR:c @F2_while.v:2:61
+        _))
+    (PORT_DECL.output [IN_HEADER] @F2_while.v:2:64
+      (RANGE @F2_while.v:2:71
+        (NUMBER.dec [SIGNED] @F2_while.v:2:72 31)
+        (NUMBER.dec [SIGNED] @F2_while.v:2:75 0))
+      (DECLARATOR:y @F2_while.v:2:78
+        _)))
+  (FUNCTION_DECL:log2_floor [DT=2] @F2_while.v:3:3
+    _
+    (LIST @F2_while.v:3:32
+      (PORT_DECL.input [IN_HEADER DT=2] @F2_while.v:3:32
+        _
+        (DECLARATOR:n @F2_while.v:3:46
+          _)))
+    (LIST @F2_while.v:4:5
+      (VAR_DECL.integer @F2_while.v:4:5
+        _
+        (DECLARATOR:v @F2_while.v:4:13
+          _)))
+    (SEQ_BLOCK @F2_while.v:5:5
+      _
+      (BLOCKING_ASSIGN @F2_while.v:6:7
+        (IDENT:log2_floor @F2_while.v:6:7)
+        _
+        (NUMBER.dec [SIGNED] @F2_while.v:6:20 0))
+      (BLOCKING_ASSIGN @F2_while.v:7:7
+        (IDENT:v @F2_while.v:7:7)
+        _
+        (IDENT:n @F2_while.v:7:11))
+      (WHILE @F2_while.v:8:7
+        (BINARY.> @F2_while.v:8:14
+          (IDENT:v @F2_while.v:8:14)
+          (NUMBER.dec [SIGNED] @F2_while.v:8:18 1))
+        (SEQ_BLOCK @F2_while.v:8:21
+          _
+          (BLOCKING_ASSIGN @F2_while.v:9:9
+            (IDENT:v @F2_while.v:9:9)
+            _
+            (BINARY./ @F2_while.v:9:13
+              (IDENT:v @F2_while.v:9:13)
+              (NUMBER.dec [SIGNED] @F2_while.v:9:17 2)))
+          (BLOCKING_ASSIGN @F2_while.v:10:9
+            (IDENT:log2_floor @F2_while.v:10:9)
+            _
+            (BINARY.+ @F2_while.v:10:22
+              (IDENT:log2_floor @F2_while.v:10:22)
+              (NUMBER.dec [SIGNED] @F2_while.v:10:35 1)))))))
+  (PARAM_DECL.localparam @F2_while.v:14:3
+    _
+    (DECLARATOR:L @F2_while.v:14:14
+      (CALL:log2_floor @F2_while.v:14:18
+        (NUMBER.dec [SIGNED] @F2_while.v:14:29 16))))
+  (CONT_ASSIGN @F2_while.v:15:3
+    _
+    _
+    (NET_ASSIGN @F2_while.v:15:10
+      (IDENT:y @F2_while.v:15:10)
+      (IDENT:L @F2_while.v:15:14)))
+  (ALWAYS.always @F2_while.v:16:3
+    (TIMING_STMT @F2_while.v:16:10
+      (EVENT_CONTROL @F2_while.v:16:10
+        _
+        (EVENT_EXPR.posedge @F2_while.v:16:12
+          (IDENT:clk @F2_while.v:16:20)))
+      (SEQ_BLOCK @F2_while.v:16:25
+        _
+        (BLOCKING_ASSIGN @F2_while.v:17:5
+          (IDENT:c @F2_while.v:17:5)
+          _
+          (NUMBER.dec @F2_while.v:17:9 4'd0))
+        (WHILE @F2_while.v:18:5
+          (BINARY.< @F2_while.v:18:12
+            (IDENT:c @F2_while.v:18:12)
+            (IDENT:a @F2_while.v:18:16))
+          (BLOCKING_ASSIGN @F2_while.v:19:7
+            (IDENT:c @F2_while.v:19:7)
+            _
+            (BINARY.+ @F2_while.v:19:11
+              (IDENT:c @F2_while.v:19:11)
+              (NUMBER.dec [SIGNED] @F2_while.v:19:15 1))))))))

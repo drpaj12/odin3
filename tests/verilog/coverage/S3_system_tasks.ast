@@ -1,0 +1,43 @@
+# generated: odin3-parse-check --write
+(MODULE:s3_system_tasks @S3_system_tasks.v:2:1
+  _
+  (LIST @S3_system_tasks.v:2:24
+    (PORT_DECL.input [IN_HEADER] @S3_system_tasks.v:2:25
+      _
+      (DECLARATOR:clk @S3_system_tasks.v:2:31
+        _)
+      (DECLARATOR:a @S3_system_tasks.v:2:36
+        _)
+      (DECLARATOR:b @S3_system_tasks.v:2:39
+        _)))
+  (ALWAYS.always @S3_system_tasks.v:3:3
+    (TIMING_STMT @S3_system_tasks.v:3:10
+      (EVENT_CONTROL @S3_system_tasks.v:3:10
+        _
+        (EVENT_EXPR.posedge @S3_system_tasks.v:3:12
+          (IDENT:clk @S3_system_tasks.v:3:20)))
+      (SEQ_BLOCK @S3_system_tasks.v:3:25
+        _
+        (TASK_CALL:$display [SYSTEM] @S3_system_tasks.v:4:5
+          (STRING:"a=%b b=%b" @S3_system_tasks.v:4:14)
+          (IDENT:a @S3_system_tasks.v:4:27)
+          (IDENT:b @S3_system_tasks.v:4:30))
+        (TASK_CALL:$display [SYSTEM] @S3_system_tasks.v:5:5
+          (IDENT:a @S3_system_tasks.v:5:14)
+          _
+          (IDENT:b @S3_system_tasks.v:5:19))
+        (TASK_CALL:$write [SYSTEM] @S3_system_tasks.v:6:5
+          (STRING:"w" @S3_system_tasks.v:6:12))
+        (IF @S3_system_tasks.v:7:5
+          (IDENT:a @S3_system_tasks.v:7:9)
+          (TASK_CALL:$finish [SYSTEM] @S3_system_tasks.v:8:7)
+          _)
+        (IF @S3_system_tasks.v:9:5
+          (IDENT:b @S3_system_tasks.v:9:9)
+          (TASK_CALL:$stop [SYSTEM] @S3_system_tasks.v:10:7
+            (NUMBER.dec [SIGNED] @S3_system_tasks.v:10:13 1))
+          _))))
+  (INITIAL @S3_system_tasks.v:12:3
+    (TASK_CALL:$monitor [SYSTEM] @S3_system_tasks.v:12:11
+      (STRING:"%b" @S3_system_tasks.v:12:20)
+      (IDENT:a @S3_system_tasks.v:12:26))))

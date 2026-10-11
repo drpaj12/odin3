@@ -1,0 +1,84 @@
+# generated: odin3-parse-check --write
+(MODULE:n6_genvar @N6_genvar.v:2:1
+  _
+  (LIST @N6_genvar.v:2:18
+    (PORT_DECL.input [IN_HEADER] @N6_genvar.v:2:19
+      (RANGE @N6_genvar.v:2:25
+        (NUMBER.dec [SIGNED] @N6_genvar.v:2:26 3)
+        (NUMBER.dec [SIGNED] @N6_genvar.v:2:28 0))
+      (DECLARATOR:a @N6_genvar.v:2:31
+        _))
+    (PORT_DECL.output [IN_HEADER] @N6_genvar.v:2:34
+      (RANGE @N6_genvar.v:2:41
+        (NUMBER.dec [SIGNED] @N6_genvar.v:2:42 3)
+        (NUMBER.dec [SIGNED] @N6_genvar.v:2:44 0))
+      (DECLARATOR:y @N6_genvar.v:2:47
+        _)
+      (DECLARATOR:z @N6_genvar.v:2:50
+        _)))
+  (GENVAR_DECL @N6_genvar.v:3:3
+    (DECLARATOR:i @N6_genvar.v:3:10
+      _)
+    (DECLARATOR:j @N6_genvar.v:3:13
+      _))
+  (GEN_FOR @N6_genvar.v:4:3
+    (BLOCKING_ASSIGN @N6_genvar.v:4:8
+      (IDENT:i @N6_genvar.v:4:8)
+      _
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:12 0))
+    (BINARY.< @N6_genvar.v:4:15
+      (IDENT:i @N6_genvar.v:4:15)
+      (NUMBER.dec [SIGNED] @N6_genvar.v:4:19 4))
+    (BLOCKING_ASSIGN @N6_genvar.v:4:22
+      (IDENT:i @N6_genvar.v:4:22)
+      _
+      (BINARY.+ @N6_genvar.v:4:26
+        (IDENT:i @N6_genvar.v:4:26)
+        (NUMBER.dec [SIGNED] @N6_genvar.v:4:30 1)))
+    (GEN_BLOCK:g @N6_genvar.v:4:33
+      _
+      (CONT_ASSIGN @N6_genvar.v:5:5
+        _
+        _
+        (NET_ASSIGN @N6_genvar.v:5:12
+          (SELECT.bit @N6_genvar.v:5:12
+            (IDENT:y @N6_genvar.v:5:12)
+            (IDENT:i @N6_genvar.v:5:14)
+            _)
+          (SELECT.bit @N6_genvar.v:5:19
+            (IDENT:a @N6_genvar.v:5:19)
+            (IDENT:i @N6_genvar.v:5:21)
+            _)))))
+  (GENERATE @N6_genvar.v:7:3
+    (GENVAR_DECL @N6_genvar.v:8:5
+      (DECLARATOR:k @N6_genvar.v:8:12
+        _))
+    (GEN_FOR @N6_genvar.v:9:5
+      (BLOCKING_ASSIGN @N6_genvar.v:9:10
+        (IDENT:k @N6_genvar.v:9:10)
+        _
+        (NUMBER.dec [SIGNED] @N6_genvar.v:9:14 0))
+      (BINARY.< @N6_genvar.v:9:17
+        (IDENT:k @N6_genvar.v:9:17)
+        (NUMBER.dec [SIGNED] @N6_genvar.v:9:21 4))
+      (BLOCKING_ASSIGN @N6_genvar.v:9:24
+        (IDENT:k @N6_genvar.v:9:24)
+        _
+        (BINARY.+ @N6_genvar.v:9:28
+          (IDENT:k @N6_genvar.v:9:28)
+          (NUMBER.dec [SIGNED] @N6_genvar.v:9:32 1)))
+      (GEN_BLOCK:h @N6_genvar.v:9:35
+        _
+        (CONT_ASSIGN @N6_genvar.v:10:7
+          _
+          _
+          (NET_ASSIGN @N6_genvar.v:10:14
+            (SELECT.bit @N6_genvar.v:10:14
+              (IDENT:z @N6_genvar.v:10:14)
+              (IDENT:k @N6_genvar.v:10:16)
+              _)
+            (UNARY.~ @N6_genvar.v:10:21
+              (SELECT.bit @N6_genvar.v:10:22
+                (IDENT:a @N6_genvar.v:10:22)
+                (IDENT:k @N6_genvar.v:10:24)
+                _))))))))

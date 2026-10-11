@@ -1,0 +1,44 @@
+# generated: odin3-parse-check --write
+(MODULE:t19_disable @T19_disable.v:2:1
+  _
+  (LIST @T19_disable.v:2:20
+    (PORT_DECL.input [IN_HEADER] @T19_disable.v:2:21
+      _
+      (DECLARATOR:clk @T19_disable.v:2:27
+        _)
+      (DECLARATOR:a @T19_disable.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T19_disable.v:2:35
+      (RANGE @T19_disable.v:2:46
+        (NUMBER.dec [SIGNED] @T19_disable.v:2:47 3)
+        (NUMBER.dec [SIGNED] @T19_disable.v:2:49 0))
+      (DECLARATOR:c @T19_disable.v:2:52
+        _)))
+  (TASK_DECL:stop_t @T19_disable.v:3:3
+    (LIST @T19_disable.v:3:15)
+    (LIST @T19_disable.v:3:15)
+    (SEQ_BLOCK @T19_disable.v:4:5
+      _
+      (DISABLE @T19_disable.v:5:7
+        (HIER_NAME @T19_disable.v:5:15
+          (IDENT:stop_t @T19_disable.v:5:15)))))
+  (ALWAYS.always @T19_disable.v:8:3
+    (TIMING_STMT @T19_disable.v:8:10
+      (EVENT_CONTROL @T19_disable.v:8:10
+        _
+        (EVENT_EXPR.posedge @T19_disable.v:8:12
+          (IDENT:clk @T19_disable.v:8:20)))
+      (SEQ_BLOCK:blk @T19_disable.v:8:25
+        _
+        (IF @T19_disable.v:9:5
+          (IDENT:a @T19_disable.v:9:9)
+          (DISABLE @T19_disable.v:10:7
+            (HIER_NAME @T19_disable.v:10:15
+              (IDENT:blk @T19_disable.v:10:15)))
+          _)
+        (NONBLOCKING_ASSIGN @T19_disable.v:11:5
+          (IDENT:c @T19_disable.v:11:5)
+          _
+          (BINARY.+ @T19_disable.v:11:10
+            (IDENT:c @T19_disable.v:11:10)
+            (NUMBER.dec [SIGNED] @T19_disable.v:11:14 1)))))))

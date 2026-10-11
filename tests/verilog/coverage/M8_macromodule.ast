@@ -1,0 +1,39 @@
+# generated: odin3-parse-check --write
+(MODULE:m8_macro [MACROMODULE] @M8_macromodule.v:2:1
+  _
+  (LIST @M8_macromodule.v:2:22
+    (PORT_DECL.input [IN_HEADER] @M8_macromodule.v:2:23
+      _
+      (DECLARATOR:a @M8_macromodule.v:2:29
+        _))
+    (PORT_DECL.output [IN_HEADER] @M8_macromodule.v:2:32
+      _
+      (DECLARATOR:y @M8_macromodule.v:2:39
+        _)))
+  (CONT_ASSIGN @M8_macromodule.v:3:3
+    _
+    _
+    (NET_ASSIGN @M8_macromodule.v:3:10
+      (IDENT:y @M8_macromodule.v:3:10)
+      (IDENT:a @M8_macromodule.v:3:14))))
+(MODULE:m8_macro_nonansi [MACROMODULE] @M8_macromodule.v:6:1
+  _
+  (LIST @M8_macromodule.v:6:30
+    (PORT_REF:a @M8_macromodule.v:6:31
+      _)
+    (PORT_REF:y @M8_macromodule.v:6:34
+      _))
+  (PORT_DECL.input @M8_macromodule.v:7:3
+    _
+    (DECLARATOR:a @M8_macromodule.v:7:9
+      _))
+  (PORT_DECL.output @M8_macromodule.v:8:3
+    _
+    (DECLARATOR:y @M8_macromodule.v:8:10
+      _))
+  (CONT_ASSIGN @M8_macromodule.v:9:3
+    _
+    _
+    (NET_ASSIGN @M8_macromodule.v:9:10
+      (IDENT:y @M8_macromodule.v:9:10)
+      (IDENT:a @M8_macromodule.v:9:14))))

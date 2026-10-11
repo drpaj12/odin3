@@ -1,0 +1,56 @@
+# generated: odin3-parse-check --write
+(MODULE:n15_uwire_tri @N15_uwire_tri01_trireg.v:2:1
+  _
+  (LIST @N15_uwire_tri01_trireg.v:2:22
+    (PORT_DECL.input [IN_HEADER] @N15_uwire_tri01_trireg.v:2:23
+      _
+      (DECLARATOR:a @N15_uwire_tri01_trireg.v:2:29
+        _))
+    (PORT_DECL.output [IN_HEADER] @N15_uwire_tri01_trireg.v:2:32
+      _
+      (DECLARATOR:y @N15_uwire_tri01_trireg.v:2:39
+        _)))
+  (NET_DECL.uwire @N15_uwire_tri01_trireg.v:3:3
+    _
+    _
+    _
+    (DECLARATOR:u @N15_uwire_tri01_trireg.v:3:9
+      _))
+  (NET_DECL.uwire @N15_uwire_tri01_trireg.v:4:3
+    _
+    (RANGE @N15_uwire_tri01_trireg.v:4:9
+      (NUMBER.dec [SIGNED] @N15_uwire_tri01_trireg.v:4:10 3)
+      (NUMBER.dec [SIGNED] @N15_uwire_tri01_trireg.v:4:12 0))
+    _
+    (DECLARATOR:uv @N15_uwire_tri01_trireg.v:4:15
+      _))
+  (NET_DECL.tri0 @N15_uwire_tri01_trireg.v:5:3
+    _
+    _
+    _
+    (DECLARATOR:t0 @N15_uwire_tri01_trireg.v:5:8
+      _))
+  (NET_DECL.tri1 @N15_uwire_tri01_trireg.v:6:3
+    _
+    _
+    _
+    (DECLARATOR:t1 @N15_uwire_tri01_trireg.v:6:8
+      _))
+  (NET_DECL.trireg @N15_uwire_tri01_trireg.v:7:3
+    _
+    _
+    _
+    (DECLARATOR:tr @N15_uwire_tri01_trireg.v:7:10
+      _))
+  (CONT_ASSIGN @N15_uwire_tri01_trireg.v:8:3
+    _
+    _
+    (NET_ASSIGN @N15_uwire_tri01_trireg.v:8:10
+      (IDENT:u @N15_uwire_tri01_trireg.v:8:10)
+      (IDENT:a @N15_uwire_tri01_trireg.v:8:14)))
+  (CONT_ASSIGN @N15_uwire_tri01_trireg.v:9:3
+    _
+    _
+    (NET_ASSIGN @N15_uwire_tri01_trireg.v:9:10
+      (IDENT:y @N15_uwire_tri01_trireg.v:9:10)
+      (IDENT:u @N15_uwire_tri01_trireg.v:9:14))))

@@ -1,0 +1,42 @@
+# generated: odin3-parse-check --write
+(MODULE:t15_fork_join @T15_fork_join.v:2:1
+  _
+  (LIST @T15_fork_join.v:2:22
+    (PORT_DECL.input [IN_HEADER] @T15_fork_join.v:2:23
+      _
+      (DECLARATOR:clk @T15_fork_join.v:2:29
+        _)
+      (DECLARATOR:a @T15_fork_join.v:2:34
+        _)
+      (DECLARATOR:b @T15_fork_join.v:2:37
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T15_fork_join.v:2:40
+      _
+      (DECLARATOR:q @T15_fork_join.v:2:51
+        _)
+      (DECLARATOR:r @T15_fork_join.v:2:54
+        _)))
+  (ALWAYS.always @T15_fork_join.v:3:3
+    (TIMING_STMT @T15_fork_join.v:3:10
+      (EVENT_CONTROL @T15_fork_join.v:3:10
+        _
+        (EVENT_EXPR.posedge @T15_fork_join.v:3:12
+          (IDENT:clk @T15_fork_join.v:3:20)))
+      (SEQ_BLOCK @T15_fork_join.v:3:25
+        _
+        (PAR_BLOCK @T15_fork_join.v:4:5
+          _
+          (BLOCKING_ASSIGN @T15_fork_join.v:5:7
+            (IDENT:q @T15_fork_join.v:5:7)
+            _
+            (IDENT:a @T15_fork_join.v:5:11))
+          (BLOCKING_ASSIGN @T15_fork_join.v:6:7
+            (IDENT:r @T15_fork_join.v:6:7)
+            _
+            (IDENT:b @T15_fork_join.v:6:11)))
+        (PAR_BLOCK:par_blk @T15_fork_join.v:8:5
+          _
+          (BLOCKING_ASSIGN @T15_fork_join.v:9:7
+            (IDENT:q @T15_fork_join.v:9:7)
+            _
+            (IDENT:b @T15_fork_join.v:9:11)))))))

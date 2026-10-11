@@ -1,0 +1,65 @@
+# generated: odin3-parse-check --write
+(MODULE:m10_leaf @M10_implicit_nets.v:2:1
+  _
+  (LIST @M10_implicit_nets.v:2:17
+    (PORT_DECL.input [IN_HEADER] @M10_implicit_nets.v:2:18
+      _
+      (DECLARATOR:d @M10_implicit_nets.v:2:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @M10_implicit_nets.v:2:27
+      _
+      (DECLARATOR:e @M10_implicit_nets.v:2:34
+        _)))
+  (CONT_ASSIGN @M10_implicit_nets.v:3:3
+    _
+    _
+    (NET_ASSIGN @M10_implicit_nets.v:3:10
+      (IDENT:e @M10_implicit_nets.v:3:10)
+      (IDENT:d @M10_implicit_nets.v:3:14))))
+(MODULE:m10_implicit @M10_implicit_nets.v:6:1
+  _
+  (LIST @M10_implicit_nets.v:6:21
+    (PORT_DECL.input [IN_HEADER] @M10_implicit_nets.v:6:22
+      _
+      (DECLARATOR:a @M10_implicit_nets.v:6:28
+        _))
+    (PORT_DECL.output [IN_HEADER] @M10_implicit_nets.v:6:31
+      _
+      (DECLARATOR:y @M10_implicit_nets.v:6:38
+        _)
+      (DECLARATOR:z @M10_implicit_nets.v:6:41
+        _)))
+  (CONT_ASSIGN @M10_implicit_nets.v:7:3
+    _
+    _
+    (NET_ASSIGN @M10_implicit_nets.v:7:10
+      (IDENT:w @M10_implicit_nets.v:7:10)
+      (IDENT:a @M10_implicit_nets.v:7:14)))
+  (INSTANTIATION:m10_leaf @M10_implicit_nets.v:8:3
+    _
+    (INSTANCE:u1 @M10_implicit_nets.v:8:12
+      _
+      (CONNECTION:d @M10_implicit_nets.v:8:16
+        (IDENT:w @M10_implicit_nets.v:8:19))
+      (CONNECTION:e @M10_implicit_nets.v:8:23
+        (IDENT:n1 @M10_implicit_nets.v:8:26))))
+  (INSTANTIATION:m10_leaf @M10_implicit_nets.v:9:3
+    _
+    (INSTANCE:u2 @M10_implicit_nets.v:9:12
+      _
+      (CONNECTION @M10_implicit_nets.v:9:16
+        (IDENT:n1 @M10_implicit_nets.v:9:16))
+      (CONNECTION @M10_implicit_nets.v:9:20
+        (IDENT:n2 @M10_implicit_nets.v:9:20))))
+  (CONT_ASSIGN @M10_implicit_nets.v:10:3
+    _
+    _
+    (NET_ASSIGN @M10_implicit_nets.v:10:10
+      (IDENT:y @M10_implicit_nets.v:10:10)
+      (IDENT:n1 @M10_implicit_nets.v:10:14)))
+  (CONT_ASSIGN @M10_implicit_nets.v:11:3
+    _
+    _
+    (NET_ASSIGN @M10_implicit_nets.v:11:10
+      (IDENT:z @M10_implicit_nets.v:11:10)
+      (IDENT:n2 @M10_implicit_nets.v:11:14))))

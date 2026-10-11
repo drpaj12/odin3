@@ -1,0 +1,85 @@
+# generated: odin3-parse-check --write
+(MODULE:p8_constant_expressions @P8_constant_expressions.v:2:1
+  (LIST @P8_constant_expressions.v:2:32
+    (PARAM_DECL.parameter [IN_HEADER] @P8_constant_expressions.v:2:34
+      _
+      (DECLARATOR:W @P8_constant_expressions.v:2:44
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:48 4))))
+  (LIST @P8_constant_expressions.v:2:51
+    (PORT_DECL.input [IN_HEADER] @P8_constant_expressions.v:2:52
+      (RANGE @P8_constant_expressions.v:2:58
+        (BINARY.- @P8_constant_expressions.v:2:59
+          (BINARY.** @P8_constant_expressions.v:2:59
+            (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:59 2)
+            (IDENT:W @P8_constant_expressions.v:2:62))
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:64 1))
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:66 0))
+      (DECLARATOR:a @P8_constant_expressions.v:2:69
+        _))
+    (PORT_DECL.output [IN_HEADER] @P8_constant_expressions.v:2:72
+      (RANGE @P8_constant_expressions.v:2:79
+        (BINARY.- @P8_constant_expressions.v:2:80
+          (CALL:$clog2 [SYSTEM] @P8_constant_expressions.v:2:80
+            (IDENT:W @P8_constant_expressions.v:2:87))
+          (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:90 1))
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:92 0))
+      (DECLARATOR:y @P8_constant_expressions.v:2:95
+        _))
+    (PORT_DECL.output [IN_HEADER] @P8_constant_expressions.v:2:98
+      (RANGE @P8_constant_expressions.v:2:105
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:106 7)
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:2:108 0))
+      (DECLARATOR:z @P8_constant_expressions.v:2:111
+        _)))
+  (PARAM_DECL.localparam @P8_constant_expressions.v:3:3
+    _
+    (DECLARATOR:A @P8_constant_expressions.v:3:14
+      (BINARY.+ @P8_constant_expressions.v:3:18
+        (IDENT:B @P8_constant_expressions.v:3:18)
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:3:22 1))))
+  (PARAM_DECL.localparam @P8_constant_expressions.v:4:3
+    _
+    (DECLARATOR:B @P8_constant_expressions.v:4:14
+      (NUMBER.dec [SIGNED] @P8_constant_expressions.v:4:18 2)))
+  (PARAM_DECL.localparam @P8_constant_expressions.v:5:3
+    _
+    (DECLARATOR:N @P8_constant_expressions.v:5:14
+      (CALL:width_of @P8_constant_expressions.v:5:18
+        (IDENT:W @P8_constant_expressions.v:5:27))))
+  (FUNCTION_DECL:width_of [DT=2] @P8_constant_expressions.v:6:3
+    _
+    (LIST @P8_constant_expressions.v:6:29
+      (PORT_DECL.input [IN_HEADER DT=2] @P8_constant_expressions.v:6:29
+        _
+        (DECLARATOR:n @P8_constant_expressions.v:6:43
+          _)))
+    (LIST @P8_constant_expressions.v:6:46)
+    (BLOCKING_ASSIGN @P8_constant_expressions.v:7:5
+      (IDENT:width_of @P8_constant_expressions.v:7:5)
+      _
+      (BINARY.* @P8_constant_expressions.v:7:16
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:7:16 2)
+        (IDENT:n @P8_constant_expressions.v:7:20))))
+  (NET_DECL.wire @P8_constant_expressions.v:9:3
+    _
+    (RANGE @P8_constant_expressions.v:9:8
+      (BINARY.- @P8_constant_expressions.v:9:9
+        (CALL:width_of @P8_constant_expressions.v:9:9
+          (IDENT:W @P8_constant_expressions.v:9:18))
+        (NUMBER.dec [SIGNED] @P8_constant_expressions.v:9:21 1))
+      (NUMBER.dec [SIGNED] @P8_constant_expressions.v:9:23 0))
+    _
+    (DECLARATOR:t @P8_constant_expressions.v:9:26
+      _))
+  (CONT_ASSIGN @P8_constant_expressions.v:10:3
+    _
+    _
+    (NET_ASSIGN @P8_constant_expressions.v:10:10
+      (IDENT:y @P8_constant_expressions.v:10:10)
+      (IDENT:A @P8_constant_expressions.v:10:14)))
+  (CONT_ASSIGN @P8_constant_expressions.v:11:3
+    _
+    _
+    (NET_ASSIGN @P8_constant_expressions.v:11:10
+      (IDENT:z @P8_constant_expressions.v:11:10)
+      (IDENT:N @P8_constant_expressions.v:11:14))))

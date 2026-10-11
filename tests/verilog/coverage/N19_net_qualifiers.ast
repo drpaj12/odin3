@@ -1,0 +1,71 @@
+# generated: odin3-parse-check --write
+(MODULE:n19_qualifiers @N19_net_qualifiers.v:2:1
+  _
+  (LIST @N19_net_qualifiers.v:2:23
+    (PORT_DECL.input [IN_HEADER] @N19_net_qualifiers.v:2:24
+      _
+      (DECLARATOR:a @N19_net_qualifiers.v:2:30
+        _))
+    (PORT_DECL.output [IN_HEADER] @N19_net_qualifiers.v:2:33
+      _
+      (DECLARATOR:y @N19_net_qualifiers.v:2:40
+        _)))
+  (NET_DECL.wire [VECTORED] @N19_net_qualifiers.v:3:3
+    _
+    (RANGE @N19_net_qualifiers.v:3:17
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:3:18 3)
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:3:20 0))
+    _
+    (DECLARATOR:v @N19_net_qualifiers.v:3:23
+      _))
+  (NET_DECL.wire [SCALARED] @N19_net_qualifiers.v:4:3
+    _
+    (RANGE @N19_net_qualifiers.v:4:17
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:4:18 3)
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:4:20 0))
+    _
+    (DECLARATOR:s @N19_net_qualifiers.v:4:23
+      _))
+  (NET_DECL.wire @N19_net_qualifiers.v:5:3
+    (STRENGTH.drive [S0=4 S1=2] @N19_net_qualifiers.v:5:8)
+    _
+    _
+    (DECLARATOR:d @N19_net_qualifiers.v:5:25
+      (IDENT:a @N19_net_qualifiers.v:5:29)))
+  (NET_DECL.trireg @N19_net_qualifiers.v:6:3
+    (STRENGTH.charge [S0=1] @N19_net_qualifiers.v:6:10)
+    _
+    _
+    (DECLARATOR:t @N19_net_qualifiers.v:6:18
+      _))
+  (NET_DECL.wire @N19_net_qualifiers.v:7:3
+    _
+    _
+    (DELAY @N19_net_qualifiers.v:7:8
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:7:9 5))
+    (DECLARATOR:w @N19_net_qualifiers.v:7:11
+      _))
+  (NET_DECL.wire @N19_net_qualifiers.v:8:3
+    _
+    _
+    (DELAY @N19_net_qualifiers.v:8:8
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:8:10 1)
+      (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:8:13 2))
+    (DECLARATOR:w2 @N19_net_qualifiers.v:8:16
+      _))
+  (NET_DECL.wire @N19_net_qualifiers.v:9:3
+    _
+    _
+    (DELAY @N19_net_qualifiers.v:9:8
+      (MINTYPMAX @N19_net_qualifiers.v:9:10
+        (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:9:10 1)
+        (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:9:12 2)
+        (NUMBER.dec [SIGNED] @N19_net_qualifiers.v:9:14 3)))
+    (DECLARATOR:w3 @N19_net_qualifiers.v:9:17
+      _))
+  (CONT_ASSIGN @N19_net_qualifiers.v:10:3
+    _
+    _
+    (NET_ASSIGN @N19_net_qualifiers.v:10:10
+      (IDENT:y @N19_net_qualifiers.v:10:10)
+      (IDENT:d @N19_net_qualifiers.v:10:14))))

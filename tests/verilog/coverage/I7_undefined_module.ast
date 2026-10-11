@@ -1,0 +1,38 @@
+# generated: odin3-parse-check --write
+(MODULE:i7_black_box @I7_undefined_module.v:2:1
+  _
+  (LIST @I7_undefined_module.v:2:21
+    (PORT_DECL.input [IN_HEADER] @I7_undefined_module.v:2:22
+      _
+      (DECLARATOR:p @I7_undefined_module.v:2:28
+        _)
+      (DECLARATOR:q @I7_undefined_module.v:2:31
+        _))
+    (PORT_DECL.output [IN_HEADER] @I7_undefined_module.v:2:34
+      _
+      (DECLARATOR:r @I7_undefined_module.v:2:41
+        _)
+      (DECLARATOR:s @I7_undefined_module.v:2:44
+        _)))
+  (INSTANTIATION:black_box_cell @I7_undefined_module.v:3:3
+    _
+    (INSTANCE:u1 @I7_undefined_module.v:3:18
+      _
+      (CONNECTION:a @I7_undefined_module.v:3:22
+        (IDENT:p @I7_undefined_module.v:3:25))
+      (CONNECTION:b @I7_undefined_module.v:3:29
+        (IDENT:q @I7_undefined_module.v:3:32))
+      (CONNECTION:y @I7_undefined_module.v:3:36
+        (IDENT:r @I7_undefined_module.v:3:39))))
+  (INSTANTIATION:black_box_cell @I7_undefined_module.v:4:3
+    (LIST @I7_undefined_module.v:4:18
+      (CONNECTION @I7_undefined_module.v:4:20
+        (NUMBER.dec [SIGNED] @I7_undefined_module.v:4:20 4)))
+    (INSTANCE:u2 @I7_undefined_module.v:4:23
+      _
+      (CONNECTION @I7_undefined_module.v:4:27
+        (IDENT:p @I7_undefined_module.v:4:27))
+      (CONNECTION @I7_undefined_module.v:4:30
+        (IDENT:q @I7_undefined_module.v:4:30))
+      (CONNECTION @I7_undefined_module.v:4:33
+        (IDENT:s @I7_undefined_module.v:4:33)))))

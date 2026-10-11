@@ -1,0 +1,65 @@
+# generated: odin3-parse-check --write
+(MODULE:a2_assign_delay @A2_assign_delay.v:2:1
+  _
+  (LIST @A2_assign_delay.v:2:24
+    (PORT_DECL.input [IN_HEADER] @A2_assign_delay.v:2:25
+      _
+      (DECLARATOR:a @A2_assign_delay.v:2:31
+        _))
+    (PORT_DECL.output [IN_HEADER] @A2_assign_delay.v:2:34
+      _
+      (DECLARATOR:y1 @A2_assign_delay.v:2:41
+        _)
+      (DECLARATOR:y2 @A2_assign_delay.v:2:45
+        _)
+      (DECLARATOR:y3 @A2_assign_delay.v:2:49
+        _)
+      (DECLARATOR:y4 @A2_assign_delay.v:2:53
+        _)
+      (DECLARATOR:y5 @A2_assign_delay.v:2:57
+        _)))
+  (PARAM_DECL.parameter @A2_assign_delay.v:3:3
+    _
+    (DECLARATOR:D @A2_assign_delay.v:3:13
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:3:17 2)))
+  (CONT_ASSIGN @A2_assign_delay.v:4:3
+    _
+    (DELAY @A2_assign_delay.v:4:10
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:4:11 1))
+    (NET_ASSIGN @A2_assign_delay.v:4:13
+      (IDENT:y1 @A2_assign_delay.v:4:13)
+      (IDENT:a @A2_assign_delay.v:4:18)))
+  (CONT_ASSIGN @A2_assign_delay.v:5:3
+    _
+    (DELAY @A2_assign_delay.v:5:10
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:5:12 1)
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:5:15 2))
+    (NET_ASSIGN @A2_assign_delay.v:5:18
+      (IDENT:y2 @A2_assign_delay.v:5:18)
+      (IDENT:a @A2_assign_delay.v:5:23)))
+  (CONT_ASSIGN @A2_assign_delay.v:6:3
+    _
+    (DELAY @A2_assign_delay.v:6:10
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:6:12 1)
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:6:15 2)
+      (NUMBER.dec [SIGNED] @A2_assign_delay.v:6:18 3))
+    (NET_ASSIGN @A2_assign_delay.v:6:21
+      (IDENT:y3 @A2_assign_delay.v:6:21)
+      (IDENT:a @A2_assign_delay.v:6:26)))
+  (CONT_ASSIGN @A2_assign_delay.v:7:3
+    _
+    (DELAY @A2_assign_delay.v:7:10
+      (IDENT:D @A2_assign_delay.v:7:11))
+    (NET_ASSIGN @A2_assign_delay.v:7:13
+      (IDENT:y4 @A2_assign_delay.v:7:13)
+      (IDENT:a @A2_assign_delay.v:7:18)))
+  (CONT_ASSIGN @A2_assign_delay.v:8:3
+    _
+    (DELAY @A2_assign_delay.v:8:10
+      (MINTYPMAX @A2_assign_delay.v:8:12
+        (NUMBER.dec [SIGNED] @A2_assign_delay.v:8:12 1)
+        (NUMBER.dec [SIGNED] @A2_assign_delay.v:8:14 2)
+        (NUMBER.dec [SIGNED] @A2_assign_delay.v:8:16 3)))
+    (NET_ASSIGN @A2_assign_delay.v:8:19
+      (IDENT:y5 @A2_assign_delay.v:8:19)
+      (IDENT:a @A2_assign_delay.v:8:24))))

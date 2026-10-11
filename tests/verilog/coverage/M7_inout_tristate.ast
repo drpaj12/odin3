@@ -1,0 +1,97 @@
+# generated: odin3-parse-check --write
+(MODULE:m7_nonansi @M7_inout_tristate.v:2:1
+  _
+  (LIST @M7_inout_tristate.v:2:19
+    (PORT_REF:io @M7_inout_tristate.v:2:20
+      _)
+    (PORT_REF:oe @M7_inout_tristate.v:2:24
+      _)
+    (PORT_REF:d @M7_inout_tristate.v:2:28
+      _)
+    (PORT_REF:y @M7_inout_tristate.v:2:31
+      _))
+  (PORT_DECL.inout @M7_inout_tristate.v:3:3
+    _
+    (DECLARATOR:io @M7_inout_tristate.v:3:9
+      _))
+  (PORT_DECL.input @M7_inout_tristate.v:4:3
+    _
+    (DECLARATOR:oe @M7_inout_tristate.v:4:9
+      _)
+    (DECLARATOR:d @M7_inout_tristate.v:4:13
+      _))
+  (PORT_DECL.output @M7_inout_tristate.v:5:3
+    _
+    (DECLARATOR:y @M7_inout_tristate.v:5:10
+      _))
+  (CONT_ASSIGN @M7_inout_tristate.v:6:3
+    _
+    _
+    (NET_ASSIGN @M7_inout_tristate.v:6:10
+      (IDENT:io @M7_inout_tristate.v:6:10)
+      (TERNARY @M7_inout_tristate.v:6:15
+        (IDENT:oe @M7_inout_tristate.v:6:15)
+        (IDENT:d @M7_inout_tristate.v:6:20)
+        (NUMBER.bin @M7_inout_tristate.v:6:24 1'bz))))
+  (CONT_ASSIGN @M7_inout_tristate.v:7:3
+    _
+    _
+    (NET_ASSIGN @M7_inout_tristate.v:7:10
+      (IDENT:y @M7_inout_tristate.v:7:10)
+      (IDENT:io @M7_inout_tristate.v:7:14))))
+(MODULE:m7_ansi @M7_inout_tristate.v:10:1
+  _
+  (LIST @M7_inout_tristate.v:10:16
+    (PORT_DECL.inout [IN_HEADER] @M7_inout_tristate.v:10:17
+      (RANGE @M7_inout_tristate.v:10:23
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:24 3)
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:26 0))
+      (DECLARATOR:bus @M7_inout_tristate.v:10:29
+        _))
+    (PORT_DECL.inout [IN_HEADER NET=1] @M7_inout_tristate.v:10:34
+      _
+      (DECLARATOR:pin @M7_inout_tristate.v:10:45
+        _))
+    (PORT_DECL.input [IN_HEADER] @M7_inout_tristate.v:10:50
+      _
+      (DECLARATOR:oe @M7_inout_tristate.v:10:56
+        _))
+    (PORT_DECL.input [IN_HEADER] @M7_inout_tristate.v:10:60
+      (RANGE @M7_inout_tristate.v:10:66
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:67 3)
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:69 0))
+      (DECLARATOR:d @M7_inout_tristate.v:10:72
+        _))
+    (PORT_DECL.output [IN_HEADER] @M7_inout_tristate.v:10:75
+      (RANGE @M7_inout_tristate.v:10:82
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:83 3)
+        (NUMBER.dec [SIGNED] @M7_inout_tristate.v:10:85 0))
+      (DECLARATOR:y @M7_inout_tristate.v:10:88
+        _)))
+  (CONT_ASSIGN @M7_inout_tristate.v:11:3
+    _
+    _
+    (NET_ASSIGN @M7_inout_tristate.v:11:10
+      (IDENT:bus @M7_inout_tristate.v:11:10)
+      (TERNARY @M7_inout_tristate.v:11:16
+        (IDENT:oe @M7_inout_tristate.v:11:16)
+        (IDENT:d @M7_inout_tristate.v:11:21)
+        (NUMBER.bin @M7_inout_tristate.v:11:25 'bz))))
+  (CONT_ASSIGN @M7_inout_tristate.v:12:3
+    _
+    _
+    (NET_ASSIGN @M7_inout_tristate.v:12:10
+      (IDENT:pin @M7_inout_tristate.v:12:10)
+      (TERNARY @M7_inout_tristate.v:12:16
+        (IDENT:oe @M7_inout_tristate.v:12:16)
+        (SELECT.bit @M7_inout_tristate.v:12:21
+          (IDENT:d @M7_inout_tristate.v:12:21)
+          (NUMBER.dec [SIGNED] @M7_inout_tristate.v:12:23 0)
+          _)
+        (NUMBER.bin @M7_inout_tristate.v:12:28 1'bz))))
+  (CONT_ASSIGN @M7_inout_tristate.v:13:3
+    _
+    _
+    (NET_ASSIGN @M7_inout_tristate.v:13:10
+      (IDENT:y @M7_inout_tristate.v:13:10)
+      (IDENT:bus @M7_inout_tristate.v:13:14))))

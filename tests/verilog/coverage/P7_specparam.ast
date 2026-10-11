@@ -1,0 +1,29 @@
+# generated: odin3-parse-check --write
+(MODULE:p7_specparam @P7_specparam.v:2:1
+  _
+  (LIST @P7_specparam.v:2:21
+    (PORT_DECL.input [IN_HEADER] @P7_specparam.v:2:22
+      _
+      (DECLARATOR:a @P7_specparam.v:2:28
+        _))
+    (PORT_DECL.output [IN_HEADER] @P7_specparam.v:2:31
+      _
+      (DECLARATOR:y @P7_specparam.v:2:38
+        _)))
+  (PARAM_DECL.specparam @P7_specparam.v:3:3
+    _
+    (DECLARATOR:tRise @P7_specparam.v:3:13
+      (NUMBER.dec [SIGNED] @P7_specparam.v:3:21 2)))
+  (PARAM_DECL.specparam @P7_specparam.v:4:3
+    _
+    (DECLARATOR:tFall @P7_specparam.v:4:13
+      (NUMBER.dec [SIGNED] @P7_specparam.v:4:21 3))
+    (DECLARATOR:tHold @P7_specparam.v:4:24
+      (NUMBER.dec [SIGNED] @P7_specparam.v:4:32 1)))
+  (CONT_ASSIGN @P7_specparam.v:5:3
+    _
+    _
+    (NET_ASSIGN @P7_specparam.v:5:10
+      (IDENT:y @P7_specparam.v:5:10)
+      (IDENT:a @P7_specparam.v:5:14)))
+  (SPECIFY_BLOCK @P7_specparam.v:6:3 "specify\n    specparam tA = 1, tB = 2;\n    (a => y) = (tA, tB);\n  endspecify"))

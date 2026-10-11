@@ -1,0 +1,38 @@
+# generated: odin3-parse-check --write
+(MODULE:m11_duplicates @M11_duplicate_names.v:2:1
+  _
+  (LIST @M11_duplicate_names.v:2:23
+    (PORT_REF:a @M11_duplicate_names.v:2:24
+      _)
+    (PORT_REF:a @M11_duplicate_names.v:2:27
+      _)
+    (PORT_REF:y @M11_duplicate_names.v:2:30
+      _))
+  (PORT_DECL.input @M11_duplicate_names.v:3:3
+    _
+    (DECLARATOR:a @M11_duplicate_names.v:3:9
+      _))
+  (PORT_DECL.input @M11_duplicate_names.v:4:3
+    _
+    (DECLARATOR:a @M11_duplicate_names.v:4:9
+      _))
+  (PORT_DECL.output @M11_duplicate_names.v:5:3
+    _
+    (DECLARATOR:y @M11_duplicate_names.v:5:10
+      _))
+  (CONT_ASSIGN @M11_duplicate_names.v:6:3
+    _
+    _
+    (NET_ASSIGN @M11_duplicate_names.v:6:10
+      (IDENT:y @M11_duplicate_names.v:6:10)
+      (IDENT:a @M11_duplicate_names.v:6:14)))
+  (TASK_DECL:t @M11_duplicate_names.v:7:3
+    (LIST @M11_duplicate_names.v:7:10)
+    (LIST @M11_duplicate_names.v:7:10)
+    (SEQ_BLOCK @M11_duplicate_names.v:8:5
+      _))
+  (TASK_DECL:t @M11_duplicate_names.v:11:3
+    (LIST @M11_duplicate_names.v:11:10)
+    (LIST @M11_duplicate_names.v:11:10)
+    (SEQ_BLOCK @M11_duplicate_names.v:12:5
+      _)))

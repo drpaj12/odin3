@@ -1,0 +1,41 @@
+# generated: odin3-parse-check --write
+(MODULE:s1_specify @S1_specify.v:2:1
+  _
+  (LIST @S1_specify.v:2:19
+    (PORT_DECL.input [IN_HEADER] @S1_specify.v:2:20
+      _
+      (DECLARATOR:clk @S1_specify.v:2:26
+        _)
+      (DECLARATOR:a @S1_specify.v:2:31
+        _)
+      (DECLARATOR:b @S1_specify.v:2:34
+        _))
+    (PORT_DECL.input [IN_HEADER] @S1_specify.v:2:37
+      (RANGE @S1_specify.v:2:43
+        (NUMBER.dec [SIGNED] @S1_specify.v:2:44 1)
+        (NUMBER.dec [SIGNED] @S1_specify.v:2:46 0))
+      (DECLARATOR:v @S1_specify.v:2:49
+        _))
+    (PORT_DECL.output [IN_HEADER] @S1_specify.v:2:52
+      _
+      (DECLARATOR:y @S1_specify.v:2:59
+        _))
+    (PORT_DECL.output [IN_HEADER] @S1_specify.v:2:62
+      (RANGE @S1_specify.v:2:69
+        (NUMBER.dec [SIGNED] @S1_specify.v:2:70 1)
+        (NUMBER.dec [SIGNED] @S1_specify.v:2:72 0))
+      (DECLARATOR:w @S1_specify.v:2:75
+        _)))
+  (CONT_ASSIGN @S1_specify.v:3:3
+    _
+    _
+    (NET_ASSIGN @S1_specify.v:3:10
+      (IDENT:y @S1_specify.v:3:10)
+      (IDENT:a @S1_specify.v:3:14)))
+  (CONT_ASSIGN @S1_specify.v:4:3
+    _
+    _
+    (NET_ASSIGN @S1_specify.v:4:10
+      (IDENT:w @S1_specify.v:4:10)
+      (IDENT:v @S1_specify.v:4:14)))
+  (SPECIFY_BLOCK @S1_specify.v:5:3 "specify\n    specparam tA = 1, tB = 2;\n    (a => y) = 1;\n    (b *> y) = (1, 2);\n    (v *> w) = tA;\n    (posedge clk => (y +: a)) = (tB, tB);\n    if (a) (b => y) = 3;\n    ifnone (b => y) = 4;\n    $setup(a, posedge clk, 1);\n    $hold(posedge clk, a, 1);\n    // endspecify inside a comment does not end the body\n  endspecify"))

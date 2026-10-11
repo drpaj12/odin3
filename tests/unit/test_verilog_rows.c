@@ -3,7 +3,7 @@
  * plan point (p)): every tests/verilog/coverage/rows.txt line whose task is at most
  * ODIN3_VR_UPTO parses to a UNIT that passes odin3_ast_check FULL; the UNIT prints, the printed
  * text re-parses, and the two UNITs' children are pairwise odin3_ast_equal; where the row has a
- * hand-written .ast golden, the children's dumps equal it byte for byte.
+ * hand-written or generated .ast golden, the children's dumps equal it byte for byte.
  *
  * Each row runs as its own Unity test, named after the row.
  */
@@ -35,6 +35,8 @@
 enum { MAX_FILE = 1 << 20, MAX_ROWS = 256, NAME_BYTES = 64, PATH_BYTES = 512 };
 
 static const char HAND_WRITTEN[] = "# hand-written\n";
+/* The first line of a golden odin3-parse-check --write made (Task 9), compared the same way. */
+static const char GENERATED[] = "# generated: odin3-parse-check --write\n";
 
 /* One rows.txt line. */
 typedef struct row {
@@ -96,6 +98,16 @@ static void dump_children(const odin3_ast *ast, odin3_ast_id unit, odin3_strbuf 
     }
 }
 
+/* The golden's text after its first line, which marks it hand-written (*hand) or generated. */
+static const char *golden_body(const char *text, bool *hand) {
+    *hand = strncmp(text, HAND_WRITTEN, strlen(HAND_WRITTEN)) == 0;
+    if (*hand) {
+        return text + strlen(HAND_WRITTEN);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(text, GENERATED, strlen(GENERATED)), current->file);
+    return text + strlen(GENERATED);
+}
+
 /* The row's golden, when it has one, against the parse's dump. */
 static void compare_golden(const vt_result *res, odin3_ast_id unit) {
     char path[PATH_BYTES];
@@ -107,13 +119,14 @@ static void compare_golden(const vt_result *res, odin3_ast_id unit) {
     odin3_strbuf want;
     odin3_strbuf_init(&want);
     if (read_text(path, &want)) {
-        TEST_ASSERT_EQUAL_INT(0, strncmp(want.data, HAND_WRITTEN, strlen(HAND_WRITTEN)));
+        bool hand = false;
+        const char *body = golden_body(want.data, &hand);
         odin3_strbuf got;
         odin3_strbuf_init(&got);
         dump_children(res->ast, unit, &got);
-        TEST_ASSERT_EQUAL_STRING(want.data + strlen(HAND_WRITTEN), got.data);
+        TEST_ASSERT_EQUAL_STRING(body, got.data != NULL ? got.data : "");
         odin3_strbuf_free(&got);
-        goldens++;
+        goldens += hand ? 1U : 0U;
     }
     odin3_strbuf_free(&want);
 }

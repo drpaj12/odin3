@@ -1,0 +1,44 @@
+# generated: odin3-parse-check --write
+(DIRECTIVE.default_nettype:none @L19_default_nettype.v:2:1)
+(MODULE:l19_none @L19_default_nettype.v:3:1
+  _
+  (LIST @L19_default_nettype.v:3:17
+    (PORT_DECL.input [IN_HEADER NET=1] @L19_default_nettype.v:3:18
+      _
+      (DECLARATOR:a @L19_default_nettype.v:3:29
+        _))
+    (PORT_DECL.output [IN_HEADER NET=1] @L19_default_nettype.v:3:32
+      _
+      (DECLARATOR:y @L19_default_nettype.v:3:44
+        _)))
+  (CONT_ASSIGN @L19_default_nettype.v:4:3
+    _
+    _
+    (NET_ASSIGN @L19_default_nettype.v:4:10
+      (IDENT:y @L19_default_nettype.v:4:10)
+      (IDENT:a @L19_default_nettype.v:4:14))))
+(DIRECTIVE.default_nettype:tri @L19_default_nettype.v:6:1)
+(DIRECTIVE.default_nettype:tri0 @L19_default_nettype.v:7:1)
+(DIRECTIVE.default_nettype:tri1 @L19_default_nettype.v:8:1)
+(DIRECTIVE.default_nettype:wand @L19_default_nettype.v:9:1)
+(DIRECTIVE.default_nettype:triand @L19_default_nettype.v:10:1)
+(DIRECTIVE.default_nettype:wor @L19_default_nettype.v:11:1)
+(DIRECTIVE.default_nettype:trior @L19_default_nettype.v:12:1)
+(DIRECTIVE.default_nettype:wire @L19_default_nettype.v:13:1)
+(MODULE:l19_wire @L19_default_nettype.v:14:1
+  _
+  (LIST @L19_default_nettype.v:14:17
+    (PORT_DECL.input [IN_HEADER] @L19_default_nettype.v:14:18
+      _
+      (DECLARATOR:a @L19_default_nettype.v:14:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @L19_default_nettype.v:14:27
+      _
+      (DECLARATOR:y @L19_default_nettype.v:14:34
+        _)))
+  (CONT_ASSIGN @L19_default_nettype.v:15:3
+    _
+    _
+    (NET_ASSIGN @L19_default_nettype.v:15:10
+      (IDENT:y @L19_default_nettype.v:15:10)
+      (IDENT:a @L19_default_nettype.v:15:14))))

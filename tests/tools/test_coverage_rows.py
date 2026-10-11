@@ -135,10 +135,15 @@ class CoverageRowsTest(unittest.TestCase):
         self.assertEqual(len(marked), 46)
 
     def test_ast_references_name_their_own_source(self) -> None:
+        # A row's nodes are located in its own file, or in a header it includes (L17; the
+        # generated goldens of Task 9 carry the included file's path relative to the row).
         for path in COVERAGE.glob("*.ast"):
             with self.subTest(ast=path.name):
                 refs = set(_FILE_REF.findall(path.read_text(encoding="utf-8")))
-                self.assertEqual(refs, {path.with_suffix(".v").name})
+                own = path.with_suffix(".v").name
+                self.assertIn(own, refs)
+                for ref in refs - {own}:
+                    self.assertTrue(ref.endswith(".vh") and (COVERAGE / ref).is_file(), ref)
 
     def test_review_focus_forms_are_present(self) -> None:
         for row, form in FORMS:

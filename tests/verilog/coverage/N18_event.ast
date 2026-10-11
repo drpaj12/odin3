@@ -1,0 +1,12 @@
+# generated: odin3-parse-check --write
+(MODULE:n18_event @N18_event.v:2:1
+  _
+  _
+  (EVENT_DECL @N18_event.v:3:3
+    (DECLARATOR:e @N18_event.v:3:9
+      _))
+  (EVENT_DECL @N18_event.v:4:3
+    (DECLARATOR:go @N18_event.v:4:9
+      _)
+    (DECLARATOR:done @N18_event.v:4:13
+      _)))

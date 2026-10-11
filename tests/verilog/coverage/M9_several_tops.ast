@@ -1,0 +1,52 @@
+# generated: odin3-parse-check --write
+(MODULE:m9_first @M9_several_tops.v:2:1
+  _
+  (LIST @M9_several_tops.v:2:17
+    (PORT_DECL.input [IN_HEADER] @M9_several_tops.v:2:18
+      _
+      (DECLARATOR:a @M9_several_tops.v:2:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @M9_several_tops.v:2:27
+      _
+      (DECLARATOR:y @M9_several_tops.v:2:34
+        _)))
+  (CONT_ASSIGN @M9_several_tops.v:3:3
+    _
+    _
+    (NET_ASSIGN @M9_several_tops.v:3:10
+      (IDENT:y @M9_several_tops.v:3:10)
+      (IDENT:a @M9_several_tops.v:3:14))))
+(MODULE:m9_second @M9_several_tops.v:6:1
+  _
+  (LIST @M9_several_tops.v:6:18
+    (PORT_DECL.input [IN_HEADER] @M9_several_tops.v:6:19
+      _
+      (DECLARATOR:a @M9_several_tops.v:6:25
+        _))
+    (PORT_DECL.output [IN_HEADER] @M9_several_tops.v:6:28
+      _
+      (DECLARATOR:y @M9_several_tops.v:6:35
+        _)))
+  (CONT_ASSIGN @M9_several_tops.v:7:3
+    _
+    _
+    (NET_ASSIGN @M9_several_tops.v:7:10
+      (IDENT:y @M9_several_tops.v:7:10)
+      (IDENT:a @M9_several_tops.v:7:14))))
+(MODULE:m9_third @M9_several_tops.v:10:1
+  _
+  (LIST @M9_several_tops.v:10:17
+    (PORT_DECL.input [IN_HEADER] @M9_several_tops.v:10:18
+      _
+      (DECLARATOR:a @M9_several_tops.v:10:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @M9_several_tops.v:10:27
+      _
+      (DECLARATOR:y @M9_several_tops.v:10:34
+        _)))
+  (CONT_ASSIGN @M9_several_tops.v:11:3
+    _
+    _
+    (NET_ASSIGN @M9_several_tops.v:11:10
+      (IDENT:y @M9_several_tops.v:11:10)
+      (IDENT:a @M9_several_tops.v:11:14))))

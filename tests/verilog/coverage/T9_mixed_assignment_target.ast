@@ -1,0 +1,32 @@
+# generated: odin3-parse-check --write
+(MODULE:t9_mixed_target @T9_mixed_assignment_target.v:2:1
+  _
+  (LIST @T9_mixed_assignment_target.v:2:24
+    (PORT_DECL.input [IN_HEADER] @T9_mixed_assignment_target.v:2:25
+      _
+      (DECLARATOR:clk @T9_mixed_assignment_target.v:2:31
+        _)
+      (DECLARATOR:a @T9_mixed_assignment_target.v:2:36
+        _)
+      (DECLARATOR:b @T9_mixed_assignment_target.v:2:39
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T9_mixed_assignment_target.v:2:42
+      _
+      (DECLARATOR:q @T9_mixed_assignment_target.v:2:53
+        _)))
+  (ALWAYS.always @T9_mixed_assignment_target.v:3:3
+    (TIMING_STMT @T9_mixed_assignment_target.v:3:10
+      (EVENT_CONTROL @T9_mixed_assignment_target.v:3:10
+        _
+        (EVENT_EXPR.posedge @T9_mixed_assignment_target.v:3:12
+          (IDENT:clk @T9_mixed_assignment_target.v:3:20)))
+      (SEQ_BLOCK @T9_mixed_assignment_target.v:3:25
+        _
+        (BLOCKING_ASSIGN @T9_mixed_assignment_target.v:4:5
+          (IDENT:q @T9_mixed_assignment_target.v:4:5)
+          _
+          (IDENT:a @T9_mixed_assignment_target.v:4:9))
+        (NONBLOCKING_ASSIGN @T9_mixed_assignment_target.v:5:5
+          (IDENT:q @T9_mixed_assignment_target.v:5:5)
+          _
+          (IDENT:b @T9_mixed_assignment_target.v:5:10))))))

@@ -1,0 +1,35 @@
+# generated: odin3-parse-check --write
+(MODULE:t6_no_event @T6_always_without_event.v:2:1
+  _
+  (LIST @T6_always_without_event.v:2:20
+    (PORT_DECL.output [IN_HEADER DT=1] @T6_always_without_event.v:2:21
+      _
+      (DECLARATOR:clk @T6_always_without_event.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T6_always_without_event.v:2:37
+      (RANGE @T6_always_without_event.v:2:48
+        (NUMBER.dec [SIGNED] @T6_always_without_event.v:2:49 3)
+        (NUMBER.dec [SIGNED] @T6_always_without_event.v:2:51 0))
+      (DECLARATOR:n @T6_always_without_event.v:2:54
+        _)))
+  (INITIAL @T6_always_without_event.v:3:3
+    (BLOCKING_ASSIGN @T6_always_without_event.v:3:11
+      (IDENT:clk @T6_always_without_event.v:3:11)
+      _
+      (NUMBER.bin @T6_always_without_event.v:3:17 1'b0)))
+  (ALWAYS.always @T6_always_without_event.v:4:3
+    (TIMING_STMT @T6_always_without_event.v:4:10
+      (DELAY @T6_always_without_event.v:4:10
+        (NUMBER.dec [SIGNED] @T6_always_without_event.v:4:11 5))
+      (BLOCKING_ASSIGN @T6_always_without_event.v:4:13
+        (IDENT:clk @T6_always_without_event.v:4:13)
+        _
+        (UNARY.~ @T6_always_without_event.v:4:19
+          (IDENT:clk @T6_always_without_event.v:4:20)))))
+  (ALWAYS.always @T6_always_without_event.v:5:3
+    (SEQ_BLOCK @T6_always_without_event.v:5:10
+      _
+      (BLOCKING_ASSIGN @T6_always_without_event.v:6:5
+        (IDENT:n @T6_always_without_event.v:6:5)
+        _
+        (NUMBER.dec @T6_always_without_event.v:6:9 4'd0)))))

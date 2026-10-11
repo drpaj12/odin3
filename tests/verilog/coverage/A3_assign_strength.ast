@@ -1,0 +1,43 @@
+# generated: odin3-parse-check --write
+(MODULE:a3_assign_strength @A3_assign_strength.v:2:1
+  _
+  (LIST @A3_assign_strength.v:2:27
+    (PORT_DECL.input [IN_HEADER] @A3_assign_strength.v:2:28
+      _
+      (DECLARATOR:a @A3_assign_strength.v:2:34
+        _))
+    (PORT_DECL.output [IN_HEADER] @A3_assign_strength.v:2:37
+      _
+      (DECLARATOR:y1 @A3_assign_strength.v:2:44
+        _)
+      (DECLARATOR:y2 @A3_assign_strength.v:2:48
+        _)
+      (DECLARATOR:y3 @A3_assign_strength.v:2:52
+        _)
+      (DECLARATOR:y4 @A3_assign_strength.v:2:56
+        _)))
+  (CONT_ASSIGN @A3_assign_strength.v:3:3
+    (STRENGTH.drive [S0=4 S1=2] @A3_assign_strength.v:3:10)
+    _
+    (NET_ASSIGN @A3_assign_strength.v:3:27
+      (IDENT:y1 @A3_assign_strength.v:3:27)
+      (IDENT:a @A3_assign_strength.v:3:32)))
+  (CONT_ASSIGN @A3_assign_strength.v:4:3
+    (STRENGTH.drive [S0=5 S1=3] @A3_assign_strength.v:4:10)
+    _
+    (NET_ASSIGN @A3_assign_strength.v:4:27
+      (IDENT:y2 @A3_assign_strength.v:4:27)
+      (IDENT:a @A3_assign_strength.v:4:32)))
+  (CONT_ASSIGN @A3_assign_strength.v:5:3
+    (STRENGTH.drive [S0=1 S1=4] @A3_assign_strength.v:5:10)
+    _
+    (NET_ASSIGN @A3_assign_strength.v:5:28
+      (IDENT:y3 @A3_assign_strength.v:5:28)
+      (IDENT:a @A3_assign_strength.v:5:33)))
+  (CONT_ASSIGN @A3_assign_strength.v:6:3
+    (STRENGTH.drive [S0=2 S1=2] @A3_assign_strength.v:6:10)
+    (DELAY @A3_assign_strength.v:6:25
+      (NUMBER.dec [SIGNED] @A3_assign_strength.v:6:26 2))
+    (NET_ASSIGN @A3_assign_strength.v:6:28
+      (IDENT:y4 @A3_assign_strength.v:6:28)
+      (IDENT:a @A3_assign_strength.v:6:33))))

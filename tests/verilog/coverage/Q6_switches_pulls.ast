@@ -1,0 +1,182 @@
+# generated: odin3-parse-check --write
+(MODULE:q6_switches @Q6_switches_pulls.v:2:1
+  _
+  (LIST @Q6_switches_pulls.v:2:20
+    (PORT_DECL.input [IN_HEADER] @Q6_switches_pulls.v:2:21
+      _
+      (DECLARATOR:d @Q6_switches_pulls.v:2:27
+        _)
+      (DECLARATOR:c @Q6_switches_pulls.v:2:30
+        _)
+      (DECLARATOR:nc @Q6_switches_pulls.v:2:33
+        _))
+    (PORT_DECL.inout [IN_HEADER] @Q6_switches_pulls.v:2:37
+      _
+      (DECLARATOR:io1 @Q6_switches_pulls.v:2:43
+        _)
+      (DECLARATOR:io2 @Q6_switches_pulls.v:2:48
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q6_switches_pulls.v:2:53
+      _
+      (DECLARATOR:y1 @Q6_switches_pulls.v:2:60
+        _)
+      (DECLARATOR:y2 @Q6_switches_pulls.v:2:64
+        _)
+      (DECLARATOR:y3 @Q6_switches_pulls.v:2:68
+        _)
+      (DECLARATOR:y4 @Q6_switches_pulls.v:2:72
+        _)
+      (DECLARATOR:y5 @Q6_switches_pulls.v:2:76
+        _)
+      (DECLARATOR:y6 @Q6_switches_pulls.v:2:80
+        _)
+      (DECLARATOR:p @Q6_switches_pulls.v:2:84
+        _)
+      (DECLARATOR:n @Q6_switches_pulls.v:2:87
+        _)))
+  (GATE_DECL.nmos @Q6_switches_pulls.v:3:3
+    _
+    _
+    (INSTANCE:m1 @Q6_switches_pulls.v:3:8
+      _
+      (CONNECTION @Q6_switches_pulls.v:3:12
+        (IDENT:y1 @Q6_switches_pulls.v:3:12))
+      (CONNECTION @Q6_switches_pulls.v:3:16
+        (IDENT:d @Q6_switches_pulls.v:3:16))
+      (CONNECTION @Q6_switches_pulls.v:3:19
+        (IDENT:c @Q6_switches_pulls.v:3:19))))
+  (GATE_DECL.pmos @Q6_switches_pulls.v:4:3
+    _
+    _
+    (INSTANCE:m2 @Q6_switches_pulls.v:4:8
+      _
+      (CONNECTION @Q6_switches_pulls.v:4:12
+        (IDENT:y2 @Q6_switches_pulls.v:4:12))
+      (CONNECTION @Q6_switches_pulls.v:4:16
+        (IDENT:d @Q6_switches_pulls.v:4:16))
+      (CONNECTION @Q6_switches_pulls.v:4:19
+        (IDENT:c @Q6_switches_pulls.v:4:19))))
+  (GATE_DECL.rnmos @Q6_switches_pulls.v:5:3
+    _
+    _
+    (INSTANCE:m3 @Q6_switches_pulls.v:5:9
+      _
+      (CONNECTION @Q6_switches_pulls.v:5:13
+        (IDENT:y3 @Q6_switches_pulls.v:5:13))
+      (CONNECTION @Q6_switches_pulls.v:5:17
+        (IDENT:d @Q6_switches_pulls.v:5:17))
+      (CONNECTION @Q6_switches_pulls.v:5:20
+        (IDENT:c @Q6_switches_pulls.v:5:20))))
+  (GATE_DECL.rpmos @Q6_switches_pulls.v:6:3
+    _
+    _
+    (INSTANCE:m4 @Q6_switches_pulls.v:6:9
+      _
+      (CONNECTION @Q6_switches_pulls.v:6:13
+        (IDENT:y4 @Q6_switches_pulls.v:6:13))
+      (CONNECTION @Q6_switches_pulls.v:6:17
+        (IDENT:d @Q6_switches_pulls.v:6:17))
+      (CONNECTION @Q6_switches_pulls.v:6:20
+        (IDENT:c @Q6_switches_pulls.v:6:20))))
+  (GATE_DECL.cmos @Q6_switches_pulls.v:7:3
+    _
+    _
+    (INSTANCE:m5 @Q6_switches_pulls.v:7:8
+      _
+      (CONNECTION @Q6_switches_pulls.v:7:12
+        (IDENT:y5 @Q6_switches_pulls.v:7:12))
+      (CONNECTION @Q6_switches_pulls.v:7:16
+        (IDENT:d @Q6_switches_pulls.v:7:16))
+      (CONNECTION @Q6_switches_pulls.v:7:19
+        (IDENT:c @Q6_switches_pulls.v:7:19))
+      (CONNECTION @Q6_switches_pulls.v:7:22
+        (IDENT:nc @Q6_switches_pulls.v:7:22))))
+  (GATE_DECL.rcmos @Q6_switches_pulls.v:8:3
+    _
+    _
+    (INSTANCE:m6 @Q6_switches_pulls.v:8:9
+      _
+      (CONNECTION @Q6_switches_pulls.v:8:13
+        (IDENT:y6 @Q6_switches_pulls.v:8:13))
+      (CONNECTION @Q6_switches_pulls.v:8:17
+        (IDENT:d @Q6_switches_pulls.v:8:17))
+      (CONNECTION @Q6_switches_pulls.v:8:20
+        (IDENT:c @Q6_switches_pulls.v:8:20))
+      (CONNECTION @Q6_switches_pulls.v:8:23
+        (IDENT:nc @Q6_switches_pulls.v:8:23))))
+  (GATE_DECL.tran @Q6_switches_pulls.v:9:3
+    _
+    _
+    (INSTANCE:t1 @Q6_switches_pulls.v:9:8
+      _
+      (CONNECTION @Q6_switches_pulls.v:9:12
+        (IDENT:io1 @Q6_switches_pulls.v:9:12))
+      (CONNECTION @Q6_switches_pulls.v:9:17
+        (IDENT:io2 @Q6_switches_pulls.v:9:17))))
+  (GATE_DECL.rtran @Q6_switches_pulls.v:10:3
+    _
+    _
+    (INSTANCE:t2 @Q6_switches_pulls.v:10:9
+      _
+      (CONNECTION @Q6_switches_pulls.v:10:13
+        (IDENT:io1 @Q6_switches_pulls.v:10:13))
+      (CONNECTION @Q6_switches_pulls.v:10:18
+        (IDENT:io2 @Q6_switches_pulls.v:10:18))))
+  (GATE_DECL.tranif0 @Q6_switches_pulls.v:11:3
+    _
+    _
+    (INSTANCE:t3 @Q6_switches_pulls.v:11:11
+      _
+      (CONNECTION @Q6_switches_pulls.v:11:15
+        (IDENT:io1 @Q6_switches_pulls.v:11:15))
+      (CONNECTION @Q6_switches_pulls.v:11:20
+        (IDENT:io2 @Q6_switches_pulls.v:11:20))
+      (CONNECTION @Q6_switches_pulls.v:11:25
+        (IDENT:c @Q6_switches_pulls.v:11:25))))
+  (GATE_DECL.tranif1 @Q6_switches_pulls.v:12:3
+    _
+    _
+    (INSTANCE:t4 @Q6_switches_pulls.v:12:11
+      _
+      (CONNECTION @Q6_switches_pulls.v:12:15
+        (IDENT:io1 @Q6_switches_pulls.v:12:15))
+      (CONNECTION @Q6_switches_pulls.v:12:20
+        (IDENT:io2 @Q6_switches_pulls.v:12:20))
+      (CONNECTION @Q6_switches_pulls.v:12:25
+        (IDENT:c @Q6_switches_pulls.v:12:25))))
+  (GATE_DECL.rtranif0 @Q6_switches_pulls.v:13:3
+    _
+    _
+    (INSTANCE:t5 @Q6_switches_pulls.v:13:12
+      _
+      (CONNECTION @Q6_switches_pulls.v:13:16
+        (IDENT:io1 @Q6_switches_pulls.v:13:16))
+      (CONNECTION @Q6_switches_pulls.v:13:21
+        (IDENT:io2 @Q6_switches_pulls.v:13:21))
+      (CONNECTION @Q6_switches_pulls.v:13:26
+        (IDENT:c @Q6_switches_pulls.v:13:26))))
+  (GATE_DECL.rtranif1 @Q6_switches_pulls.v:14:3
+    _
+    _
+    (INSTANCE:t6 @Q6_switches_pulls.v:14:12
+      _
+      (CONNECTION @Q6_switches_pulls.v:14:16
+        (IDENT:io1 @Q6_switches_pulls.v:14:16))
+      (CONNECTION @Q6_switches_pulls.v:14:21
+        (IDENT:io2 @Q6_switches_pulls.v:14:21))
+      (CONNECTION @Q6_switches_pulls.v:14:26
+        (IDENT:c @Q6_switches_pulls.v:14:26))))
+  (GATE_DECL.pullup @Q6_switches_pulls.v:15:3
+    (STRENGTH.drive [S1=4] @Q6_switches_pulls.v:15:10)
+    _
+    (INSTANCE @Q6_switches_pulls.v:15:20
+      _
+      (CONNECTION @Q6_switches_pulls.v:15:21
+        (IDENT:p @Q6_switches_pulls.v:15:21))))
+  (GATE_DECL.pulldown @Q6_switches_pulls.v:16:3
+    _
+    _
+    (INSTANCE @Q6_switches_pulls.v:16:12
+      _
+      (CONNECTION @Q6_switches_pulls.v:16:13
+        (IDENT:n @Q6_switches_pulls.v:16:13)))))

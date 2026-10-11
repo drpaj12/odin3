@@ -1,0 +1,19 @@
+# generated: odin3-parse-check --write
+(MODULE:s2_top @S2_config.v:2:1
+  _
+  (LIST @S2_config.v:2:15
+    (PORT_DECL.input [IN_HEADER] @S2_config.v:2:16
+      _
+      (DECLARATOR:a @S2_config.v:2:22
+        _))
+    (PORT_DECL.output [IN_HEADER] @S2_config.v:2:25
+      _
+      (DECLARATOR:y @S2_config.v:2:32
+        _)))
+  (CONT_ASSIGN @S2_config.v:3:3
+    _
+    _
+    (NET_ASSIGN @S2_config.v:3:10
+      (IDENT:y @S2_config.v:3:10)
+      (IDENT:a @S2_config.v:3:14))))
+(CONFIG_DECL:s2_cfg @S2_config.v:6:1 "config s2_cfg;\n  design work.s2_top;\n  default liblist work;\n  instance s2_top use work.s2_top;\n  cell s2_top use work.s2_top;\nendconfig")
