@@ -601,7 +601,8 @@ static odin3_status build_function(odin3_vp_ctx *ctx, const odin3_vp_header *hea
     odin3_ast_id kids[VP_MAX_STMT_KIDS] = {lead > 0 ? span[0] : (odin3_ast_id){0}, {0}, {0}, body};
     const odin3_ast_id *parts = scratch_ids(&ctx->part_scratch);
     st = st == ODIN3_OK ? list_of(ctx, parts, ports, header->after_header, &kids[1]) : st;
-    st = st == ODIN3_OK ? list_of(ctx, ids_at(parts, ports), locals, header->after_header, &kids[2]) : st;
+    st = st == ODIN3_OK ? list_of(ctx, ids_at(parts, ports), locals, header->after_header, &kids[2])
+                        : st;
     if (st == ODIN3_OK && body.v == 0) { /* a task without a statement (§3.6) */
         odin3_loc where = after_body(ctx, header);
         odin3_vp_loc null_at = {where, where, 0};
