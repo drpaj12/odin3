@@ -452,3 +452,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
      default, and counts per design only when its excluded outputs are reviewed and recorded in
      the exceptions list (agent default; Peter may override). The defined-output miter of spec
      §14.6 item 5 is the follow-up in 2H's backlog.
+   - **Amendment (2D spec v4.2, EL-33):** the eight opt passes are `processes = OK` (`$proc`
+     opaque; `opt_muxtree`/`opt_clean` skip modules with processes), so Parmys's pre-`proc` opts
+     run in Parmys's order (2F mode P) — agent default for Peter's review; Fable-verified:
+     pre-proc opt order changes netlists, stereovision3 812 vs 792.

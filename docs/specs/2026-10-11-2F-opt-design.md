@@ -1,14 +1,17 @@
 # 2F — `opt`: design
 
-Status: draft v1 (2026-10-11), for review. Phase 2, sub-project 2F (PHASE2 #1; light review;
-Opus `high`). Spec: `docs/DESIGN.md` §5, §6 step 4, §10. Inputs: PHASE2 #4, #5, #13; `docs/IR.md`;
-the op registry (`src/ir/cells/` plus 2D's IR change A); the 2D spec (EL-14 constants, EL-33
-`$proc` and the `processes` flag, EL-40 `init`, EL-48 `write_rtlil`, §14.3 bridge, §14.6 x plan);
-the 1E and 1B specs. **Oracle: Yosys 0.55 as pinned by VTR** (`$VTR_ROOT/libs/EXTERNAL/yosys`,
-`60f126cd`; binary `$VTR_ROOT/build/bin/yosys`): `passes/opt/*.cc`, `kernel/ff.cc`,
-`passes/proc/proc.cc`, and Parmys's `vtr_flow/misc/yosys/synthesis.tcl` at VTR `3c9a4d23`.
-Decisions are numbered **OP-n**. Where this file and `docs/IR.md` disagree, IR.md wins, except
-**IR change D** (OP-9), which is for Peter (§24).
+Status: v2 (2026-10-11): applies the joint 2E/2F Fable review (`2EF-review1`: 5 important, 9 minor,
+all applied) and the controller's rulings T1 (2E-1 owns IR change D), T2 (mode P; 2D EL-33 amended,
+v4.2), T3 (S-P is the exit splice), T5 (counts, `--noopt`). Phase 2, sub-project 2F (PHASE2 #1;
+light review; Opus `high`). Spec: `docs/DESIGN.md` §5, §6 step 4, §10. Inputs: PHASE2 #4, #5, #13;
+`docs/IR.md`; the op registry (`src/ir/cells/` plus 2D's IR change A); the 2D spec (EL-14 constants,
+EL-33 `$proc` and the `processes` flag, EL-40 `init`, EL-48 `write_rtlil`, §14.3 bridge, §14.6 x
+plan); the 1E and 1B specs. **Oracle: Yosys 0.55 as pinned by VTR**
+(`$VTR_ROOT/libs/EXTERNAL/yosys`, `60f126cd`; binary `$VTR_ROOT/build/bin/yosys`):
+`passes/opt/*.cc`, `kernel/ff.cc`, `passes/proc/proc.cc`, and Parmys's
+`vtr_flow/misc/yosys/synthesis.tcl` at VTR `3c9a4d23`. Decisions are numbered **OP-n**. Where this
+file and `docs/IR.md` disagree, IR.md wins. IR change D (the word FF family, §9.2) is specified and
+landed by 2E-1; 2F-1 depends on it.
 
 **Oracle version note.** The brief's `~/odin3-ws/external/yosys` is the standalone Yosys
 **0.69+270** (`c4a0a2c4`), whose `opt` family differs (`opt_balance_tree`, `opt_hier`, new
@@ -26,7 +29,6 @@ leaves on the same input, cell for cell where possible, so that the Phase 2 exit
 | `opt_expr`, `opt_merge`, `opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean` and the driver `opt`, with Yosys's names, options, loop and modes | `src/passes/opt/*.c` |
 | The rewrite kit (connect, constant nets, rebuild with provenance), the FF model (`FfData`) and init values (`FfInitVals`) | `kit.c`, `ff.c`, `ffinit.c` |
 | Folding through 2D's evaluator (`odin3_cval`, EL-14 = Yosys `const_*`) | `fold.c` |
-| IR change D: the word FF cells (shared with 2E) | `src/ir/cells/ff.c` |
 | The Phase 2 opt script and the 2H splice (OP-3) | §3, `docs/PASSES.md` |
 | Per-rule goldens, per-sub-pass refinement, `opt-diff`, sweeps, fuzzing, `bench_opt` | `tests/opt/`, `tests/unit/test_opt_*.c`, `tools/opt-check/` |
 
@@ -58,13 +60,13 @@ nets that are merged (IR-1, IR-2, IR-15). The port is mechanical once these are 
 | `NEW_ID` wires and cells | unnamed nets and nodes (writers print `$n<ID>`/`$c<ID>`, IR §6) |
 | wire attribute `init` (FfInitVals) | the same: wire attribute `init` (BITS), read per net through its primary and alias memberships (§9.4) |
 | `keep` on a cell, wire or module | attribute `keep` (non-zero) on node, wire or module; an instance of a module that has `keep` or contains a `keep` node or wire counts as `keep` (Yosys `keep_cache`, iterative) |
-| "unknown" cell (user module, black box) | granularity `module`, `blackbox`, `hard`: every pin is treated as both input and output, as `ct_all.cell_known` false makes Yosys do |
+| cell types and port directions | every registry type, every module of the design (port nodes, IR-7) and every black box or hard cell (declared ports, IR-7b) has port directions: `opt_clean` uses them all, as Yosys's `ct_all.setup(design)` does; `opt_merge` and `opt_expr` act only on registry word/bit types (Yosys's internals + stdcells); a type with no definition (none exist after `hierarchy`) would be "unknown", every pin both ways |
 | `design->scratchpad "opt.did_something"` | a `changed` flag in the opt context, set by every mutating kit call |
 
-**Constant canonicalization.** Each sub-pass call starts by leaving one `$_CONST0_`,
-`$_CONST1_`, `$_CONSTX_`, `$_CONSTZ_` node per module (made on demand; lowest ID kept, duplicates
-merged in), so keys and rules compare constants by value. Constant `$sop`s are left alone (BLIF round trip, IR-4) but read as
-constants through `odin3_net_const_value`.
+**Constant canonicalization.** Each sub-pass call starts by leaving one `$_CONST0_`, `$_CONST1_`,
+`$_CONSTX_`, `$_CONSTZ_` node per module (made on demand; lowest ID kept, duplicates merged in), so
+keys and rules compare constants by value. Constant `$sop`s are left alone (BLIF round trip, IR-4)
+but read as constants through `odin3_net_const_value`.
 
 **Atomicity.** Each rewrite builds everything it needs (new nodes on fresh nets, the provenance
 record) before its first destructive step. `NO_MEMORY` during that phase leaves the rewrite
@@ -73,13 +75,17 @@ the module's function (refinement, §13). OOM tests inject a failure at every al
 
 ## 3. Which opt passes Parmys runs, and where Odin III runs them (OP-3)
 
-**Parmys's invocations** (VTR `synthesis.tcl`, `PARSER=default`; `parmys -nopass` skips the
-plugin's own pass list):
+**Parmys's invocations** (VTR `synthesis.tcl`, `PARSER=default`, after `plugin -i parmys`,
+`parmys_arch -a <arch>`, `read_verilog -nomem2reg +/parmys/vtr_primitives.v`, `setattr -mod -set
+keep_hierarchy 1 single_port_ram` / `dual_port_ram`, `read_verilog -sv -nolatches <files>` and
+`hierarchy -check -auto-top -purge_lib`; `parmys -nopass` skips the plugin's own pass list):
 
 | # | Parmys line | Notes |
 |---|---|---|
 | 1 | `opt_expr` | before `proc`: works on cells outside processes |
 | 2 | `opt_clean` | before `proc`: a no-op on every module that has processes (`opt_clean` skips them) |
+| 2a | `scc -select; select -assert-none %; select -clear` | a combinational loop is a Parmys rejection |
+| 2b | `check` | design check (warnings) |
 | 3 | `opt -nodffe -nosdff` | before `proc`: `opt_muxtree`/`opt_clean` skip modules with processes |
 | 4 | `procs -norom` | Tcl spelling of `proc -norom` (Yosys renames `proc`, a Tcl keyword); `proc` ends with **`opt_expr -keepdc`** |
 | 5 | `fsm` | calls `opt_clean` twice internally |
@@ -107,23 +113,22 @@ default:  opt_expr X; opt_merge -nomux M
 "changed" is any change by any sub-pass in the iteration (Yosys's `opt.did_something`); in
 `-fast` mode only `opt_dff`'s changes loop.
 
-**Odin III's Phase 2 opt script, two modes.** 2D ruled every `opt*` pass `processes = REFUSE`
-(EL-33), so as ruled Odin III cannot run lines 1–3 before `proc`. **Mode R** (as ruled) runs them
-right after `proc`, which already ended with `opt_expr -keepdc` (§4.8):
+**Odin III's Phase 2 opt script (mode P).** Odin III runs Parmys's lines in Parmys's order:
 
 ```
-proc; opt_expr; opt_clean; opt -nodffe -nosdff; opt          # mode R
-opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt          # mode P (Parmys's order)
+opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt
 ```
 
-**Mode P** (recommended, §24 item 2) runs Parmys's lines verbatim. The opt passes then accept
-modules with processes as Yosys does: `opt_expr`, `opt_merge`, `opt_reduce`, `opt_share` and
-`opt_dff` treat every `$proc` node as **opaque** (never evaluated, merged or deleted; `O` pins are
-drivers of unknown function, `I` pins readers, as EL-33 requires of an `OK` pass), and
-`opt_muxtree` and `opt_clean` **skip** a module with processes ("only operates on … modules
-without processes"). Body positions are pin indices, so merges never touch a body (EL-33). Both
-modes omit `fsm` (Phase 4); the later `opt -full`/`-fast` runs belong to Phase 3/4 pipelines
-(`wreduce`, `share`, `memory`, `flatten`, `techmap`), and §20.3 tests those modes already.
+(`proc` ends with `opt_expr -keepdc`, §4.8.) The opt passes therefore accept modules with
+processes as Yosys's do (2D EL-33 as amended in v4.2, ruling T2): `opt_expr`, `opt_merge`,
+`opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as **opaque** (never evaluated,
+merged or deleted; `O` pins drive unknown values, `I` pins read), and `opt_muxtree` and
+`opt_clean` **skip** a module with live `$proc` nodes with §16's info line (Yosys's
+`has_processes_warn`). Body positions are pin indices, so merges never touch a body (EL-33).
+Every opt pass registers `processes = OK`. `fsm` is omitted (Phase 4); the later `opt
+-full`/`-fast` runs belong to Phase 3/4 pipelines (`wreduce`, `share`, `memory`, `flatten`,
+`techmap`), and §20.3 tests those modes already. Running the trio after `proc` instead (v1's
+"mode R") is dropped: the evidence below shows it loses identity on the VTR set.
 
 *Evidence* (probes, Yosys 0.55, 2026-10-11; 2F-6 commits them as `tools/opt-check/order-probe.sh`;
 each variant is the rest of `synthesis.tcl`, without the `parmys` plugin pass, compared by
@@ -131,24 +136,51 @@ each variant is the rest of `synthesis.tcl`, without the `parmys` plugin pass, c
 
 | Variant (inside Yosys) | Micros (331 that compile both ways) | VTR, 24 smallest |
 |---|---|---|
-| mode R's order (`proc` first, then the trio) | 318 identical; 13 others hold `$pow`/`$mem_v2` (unmapped without the plugin) or multi-driver `inout`s | 8 identical (the smallest); 13 differ — 7 by `netlist-compare` (`sha` 6,785 vs 6,786 `.names`, `dsec`-equivalent; `stereovision3` 955 vs 942), 6 by `.names` count where unmapped `$mem_v2` stops `netlist-compare` (`raygentop` 22,949 vs 19,321: without hard-block mapping arithmetic becomes gates, magnifying word-level differences); 3 undecided (`$mem_v2`, equal counts) |
+| `proc` first, then the trio (v1's mode R) | 318 identical; 13 others hold `$pow`/`$mem_v2` (unmapped without the plugin) or multi-driver `inout`s | 8 identical (the smallest); 13 differ — 7 by `netlist-compare` (`sha` 6,785 vs 6,786 `.names`, `dsec`-equivalent; `stereovision3` 955 vs 942), 6 by `.names` count where unmapped `$mem_v2` stops `netlist-compare` (`raygentop` 22,949 vs 19,321: without hard-block mapping arithmetic becomes gates, magnifying word-level differences); 3 undecided (`$mem_v2`, equal counts) |
 | `proc`, then nothing or only `opt_expr; opt_clean`, then the rest | — | differs on all 4 designs tried |
-| mode P's order with the main `opt` moved **before** `fsm` | 316 of 318 identical (2 `dsec`-equivalent) | `diffeq1/2` identical; `stereovision3` 955 vs **1,288**, `sha`, `blob_merge` differ |
+| Parmys's order with the main `opt` moved **before** `fsm` | 316 of 318 identical (2 `dsec`-equivalent) | `diffeq1/2` identical; `stereovision3` 955 vs **1,288**, `sha`, `blob_merge` differ |
 
 Two conclusions: the opt passes are not confluent (`opt -nodffe -nosdff` run to its fixed point
 first changes which enables and resets `opt_dff` absorbs later), so only Parmys's own order
 reproduces Parmys on the VTR set; and `fsm` must see raw `proc` output.
 
-**2H splice (recommended, §24 item 3).** Phase 2 has no `fsm`, `wreduce`, `memory`, `flatten`,
-`techmap` or hard-block mapping, so the exit comparison runs the rest of Parmys's script in Yosys
-0.55 on Odin III's `write_rtlil` output (2D §14.3). **S-P** (mode P): Odin III runs lines 1–4
-(`read_verilog -nolatches; hierarchy; opt_expr; opt_clean; opt -nodffe -nosdff; proc`), Yosys
-line 5 (`fsm`) onwards; identity is possible wherever 2C–2E match, but only 2F's pre-`proc` work
-is exercised, so 2F's main `opt` is gated by the same-input differential `opt-diff` (§20.3).
-**S-R** (mode R): Odin III runs `proc` and the trio, Yosys from `fsm`; identical on the micros,
-not on most of the VTR set (equivalence verified where `equiv-check` reads the result, e.g.
-`sha`). **S-D** (Odin III through the main `opt`, Yosys from `fsm`) is reported for information:
-`fsm_detect` takes only `$dff`/`$adff`, so it misses the `$dffe`/`$sdff` registers `opt` made.
+**2H splice S-P (ruled, T3; §25 item 3).** Phase 2 has no `fsm`, `wreduce`, `memory`,
+`flatten`, `techmap` or hard-block mapping, so the exit comparison runs the rest of Parmys's
+script in Yosys 0.55 on Odin III's `write_rtlil` output (2D §13). The two halves, verbatim
+from `synthesis.tcl` apart from the hand-over:
+
+```
+# Odin III (lines 1–4)
+read_verilog --nomem2reg $VTR_ROOT/…/parmys/vtr_primitives.v      # 2D §17 #19
+read_verilog -nolatches <files>
+hierarchy --top <first .model of the golden>                       # 2D decision 6
+opt_expr; opt_clean; opt -nodffe -nosdff; proc; write_rtlil a.il
+
+# Yosys 0.55 (line 5 onwards)
+plugin -i parmys; yosys -import; parmys_arch -a <arch>
+read_rtlil a.il
+setattr -mod -set keep_hierarchy 1 single_port_ram
+setattr -mod -set keep_hierarchy 1 dual_port_ram
+hierarchy -check -auto-top -purge_lib
+fsm; opt; wreduce; peepopt; opt_clean; share; opt -full; memory -nomap; flatten; opt -full
+techmap -map +/parmys/adff2dff.v; techmap -map +/parmys/adffe2dff.v
+techmap -map +/parmys/aldff2dff.v; techmap -map +/parmys/aldffe2dff.v; opt -full
+parmys -a <arch> -nopass -c <config> <args>; opt -full; techmap; opt -fast
+dffunmap; opt -fast -noff; stat; hierarchy -check -auto-top -purge_lib
+write_blif -true + vcc -false + gnd -undef + unconn -blackbox out.blif
+```
+
+Lines 2a/2b run in Parmys on the *pre-`proc`* cell graph, where a loop through an `always @*` block
+is not yet a cell loop, so they cannot move after `read_rtlil`. 2H runs them as a precondition on
+the source (`read_verilog -nomem2reg vtr_primitives.v; read_verilog -sv -nolatches F; scc -select;
+select -assert-none %`, Parmys's order, Yosys 0.55): a design that fails is a Parmys rejection
+(PHASE2 #4 exception list); line 2b only warns. `out.blif` is compared with the Parmys golden by
+`netlist-compare`, then `equiv-check` (with `--x-report`, 2D §14.6, where needed). S-P makes
+identity possible wherever 2C–2E match, but it exercises only 2F's pre-`proc` work, so 2F's main
+`opt` is gated by the same-input differential `opt-diff` (§20.3). 2H also reports **S-D** (Odin III
+through the main `opt`, Yosys from `fsm`) for information: `fsm_detect` takes only `$dff`/`$adff`,
+so it misses the `$dffe`/`$sdff` registers `opt` made. S-P is the only splice 2H uses for the exit
+table (2E's `elab-equiv --pass proc` stays an equivalence oracle).
 
 ## 4. `opt_expr`: constant folding and expression rewriting (OP-4)
 
@@ -217,10 +249,11 @@ exactly as each Yosys rule tests (`== State::Sx` versus "not 0/1").
 
 ### 4.4 FF polarity folding
 
-Unless `-noclkinv`: a `CLK`, `EN`, `ARST`, `SRST`, `ALOAD`, `SET`, `CLR` input of a word FF
-(`$dff $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr $dffsre $dlatch $adlatch
-$dlatchsr $sr`) or a `$memrd`/`$memwr` `CLK` driven by an invert-map output takes the inverter's
-input and flips its `*_POLARITY` parameter (rebuild); `$_DFF_P_`↔`$_DFF_N_` and
+Unless `-noclkinv`: a `CLK`, `EN`, `ARST`, `SRST`, `ALOAD`, `SET`, `CLR` input of a word FF (`$dff
+$dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr $dffsre $dlatch $adlatch $dlatchsr
+$sr`) driven by an invert-map output takes the inverter's input and flips its `*_POLARITY` parameter
+(rebuild); likewise each bit of a `$mem`'s `RD_CLK`/`WR_CLK` (one `$mem` per array, 2D EL-27) flips
+that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY`; `$_DFF_P_`↔`$_DFF_N_` and
 `$_DLATCH_P_`↔`$_DLATCH_N_` swap types the same way.
 
 ### 4.5 `-fine` rules
@@ -249,11 +282,16 @@ cell inputs with x already (2D §17 #16); this catches wires declared and never 
 `$mux` rule require *defined* constants, and keeps x bits in `bitwise_logic_one_const` as cells.
 `proc`'s trailing `opt_expr -keepdc` (§4.8) is the only `-keepdc` run in Parmys's flow.
 
-### 4.8 Interface with 2E
+### 4.8 Interface with 2E (ruling T5)
 
-Yosys's `proc` ends with `opt_expr -keepdc` unless `-noopt`. 2F provides it as
-`odin3_opt_expr_run(ctx, module, &opts)`; 2E's `proc` calls it once 2F-2 has landed (§24 item 6).
-Until then the Phase 2 script writes `proc; opt_expr -keepdc` explicitly.
+Yosys's `proc` ends with `opt_expr -keepdc` unless `-noopt`. 2F exports
+`odin3_opt_expr_run(ctx, module, &opts, &counts)`: module scope (`opt_expr` is per module, so this
+equals Yosys's design-wide call), returns the §16 counts so `proc`'s own info line can report
+them, and in Debug runs the same `check --fast` 2F's loop runs after a sub-pass. 2E's `proc` calls
+it for every module it lowered completely (not for a module whose lowering failed and still holds
+`$proc` nodes), and skips it under `proc --noopt` (2E's option; `proc-diff` compares `proc
+--noopt` with Yosys `proc -norom -noopt`). The DEBUG lines and provenance `run` are then `proc`'s.
+Until 2F-2 lands, the script spells `proc; opt_expr -keepdc`.
 
 ## 5. Constant folding semantics and x (OP-5)
 
@@ -287,7 +325,8 @@ lands (PHASE2 #13, 2D §14.6; not 2F's change).
 
 ## 6. `opt_merge`: CSE keying (OP-6)
 
-**Candidates**: live word and bit nodes, except `$mem` (Yosys skips it), `$tribuf`, `$proc`,
+**Candidates**: live word and bit nodes, except `$mem` (Yosys skips it), `$tribuf` (`opt_merge.cc`
+erases `$tribuf`/`$_TBUF_` from its cell set), `$proc`,
 port and constant nodes (constants are canonical, OP-2), `$mux`/`$pmux` under `-nomux`, and
 `module`/`blackbox`/`hard` nodes (Yosys merges user cells only with `-share_all`, which Parmys
 never passes); with `-keepdc`, FFs whose init is not fully defined.
@@ -319,7 +358,7 @@ downstream keys equal). Count: `opt_merge: removed N cells`.
 **Provenance.** After the sweeps each class with drops is closed with one operation: the survivor
 is rebuilt (same type, parameters and nets) with a DERIVED record whose parents are the
 survivor's record followed by each dropped node's record in ID order (IR-12 "clumping"), so a
-provenance name still leads with the survivor's source (§24 item 4).
+provenance name still leads with the survivor's source (§25 item 4).
 
 ## 7. `opt_muxtree` (OP-7)
 
@@ -373,19 +412,18 @@ Q = init; else `$sr`, `$dlatch`/`$adlatch`/`$dlatchsr`, `$dffsr(e)`, `$adff(e)`,
 `$_DLATCH_P_/N_` load as fine FFs; the other fine types are not in the registry, so a fine FF only
 gets the type-preserving rules (removal, constant bits; §17 #5).
 
-### 9.2 IR change D — the FF cells (for Peter, §24 item 1)
+### 9.2 IR change D — the FF cells (owned by 2E-1, ruling T1)
 
-The registry has `$dff $dffe $adff $sdff`. `proc` (2E, Yosys `proc_dff`/`proc_dlatch`) emits `$dff`,
-`$adff`, `$aldff` (non-constant async value), `$dffsr` (several async rules), `$dlatch`; `opt_dff`
-emits `$dffe`, `$adffe`, `$aldffe`, `$sdff`, `$sdffe`, `$sdffce`, `$adlatch`, and
-`$dffsre`/`$dlatchsr`/`$sr` from SR forms. **IR change D adds eleven cells with Yosys's simlib ports
-and parameters**: `$adffe $sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr
-$sr`, one family file (`src/ir/cells/ff.c`, as `dff.c` groups the bit FFs), each with `verify`
-(widths, polarities 0/1, `*_VALUE` BITS of `WIDTH`) and no `const_value`. The purely synchronous
-ones (`$sdffe`, `$sdffce`, and the existing `$dff $dffe $sdff`) get `simulate` hooks (`SEQ_EDGE |
-CLOCK_PIN0`); 1E's cycle model has no asynchronous event, so the others stay `simulate = NULL` and
-are checked through the bridge (§20.2). 2E needs three first (`$aldff`, `$dffsr`, `$dlatch`);
-whichever of 2E-1 and 2F-1 lands first adds the family. DESIGN §5.2's word list is amended.
+The registry has `$dff $dffe $adff $sdff`. `proc` (2E) emits `$dff`, `$adff`, `$aldff`, `$dffsr`,
+`$dlatch`; `opt_dff`'s `FfData::emit` closure on that input adds `$dffe $adffe $aldffe $sdff
+$sdffe $sdffce $dffsre $sr`; `$adlatch` and `$dlatchsr` are unreachable in Phase 2 but needed
+for a closed `ff_emit` (later `read_blif`/tech-library inputs). **IR change D** — specified and
+landed by **2E-1 Task 1**, one Peter review — adds the eleven cells `$adffe $sdffe $sdffce $aldff
+$aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` in `src/ir/cells/ff.c` with Yosys simlib
+ports and parameters, `verify` only, **`simulate` NULL for all** (the existing `$dff $dffe $sdff`
+keep theirs NULL too; simulate hooks for word FFs are a 1E change in their own PR). The registry
+count becomes 74. **2F-1 depends on 2E-1.** Within Parmys's own flow only `$dff` (as `.latch`)
+and `$dffsr` reach the goldens (review evidence P4).
 
 ### 9.3 Rules, per FF (Yosys `OptDffWorker::run`, in order)
 
@@ -428,25 +466,34 @@ mcml.v, §19).
 ### 9.4 Init values
 
 2D stores initial values as the BITS attribute `init` on wires (EL-40, Yosys's convention).
-`ffinit.c` is `FfInitVals`: the init of a net is its bit in the `init` attribute of its primary
-wire or of any alias membership (first defined value; a conflict is opt_clean's warning, §10);
-`set_init`/`remove_init` rewrite those attribute bits (an attribute that becomes all x is
-removed). FFs read the init of their Q nets. This binds 2E: `proc` must leave init on the wires
-(as Yosys does), not move it into a parameter (§24 item 7).
+`ffinit.c` is `FfInitVals`: the init of a net is its bit in the `init` attribute of its primary wire
+or of any alias membership (first defined value; a conflict is opt_clean's warning, §10).
+`set_init(net, v)` writes **one** wire, as Yosys's `FfInitVals::set_init` does: the net's primary
+wire, else its first alias membership that is a wire bit, and clears that bit on every other
+membership; `remove_init` clears it everywhere (an attribute that becomes all x is removed); a net
+with no wire membership has no init and nothing to write. FFs read the init of their Q nets. This
+binds 2E: `proc` must leave init on the wires (as Yosys does), not move it into a parameter (§25
+item 7).
 
 Counts: `opt_dff: N flip-flops changed, M constant bits`.
 
 ## 10. `opt_clean` (OP-10)
 
-Per module, as `rmunused_module`:
+Per module without live `$proc` nodes (others are skipped, §3), as `rmunused_module`:
 
 1. `$_BUF_` nodes without `keep` become wiring (Yosys removes `$pos`/`$_BUF_` first).
-2. **Roots**: `$port_out` and `$port_inout` pins; nets of wires with `keep`; nodes with `keep`
-   (OP-2, including the module-type rule). **Liveness** spreads backwards from root nets to their
-   drivers and from a live node to the drivers of every input pin, with "unknown" nodes (module,
-   black box, hard) treated as Yosys does: all their pins count as both driver and reader, so an
-   unknown node that only *reads* a live net is live too. `$mem`: a live read port keeps the
-   memory. Mark-and-sweep with an explicit worklist, O(pins).
+2. **Roots**: `$port_out` and `$port_inout` pins; nets of wires with `keep`; nodes with `keep`,
+   including every instance of a module that has `keep` or (transitively, computed iteratively)
+   contains a `keep` node or wire (Yosys `keep_cache`). **Liveness** spreads backwards from root
+   nets to their drivers and from a live node to the drivers of its input pins. Port directions
+   come from the cell type for **every** node, as Yosys's `ct_all.setup(design)` knows every module
+   of the design: registry types from their definitions, module instances from the module's port
+   nodes (`$port_in` → input, `$port_out` → output, `$port_inout` → both; IR-7), black boxes and
+   hard cells from their declared ports (IR-7b). So an instance or black box whose outputs feed
+   nothing live is **removed** like any cell (a sub-block instantiated for an output the parent
+   ignores disappears, as in Yosys). Only a type with no definition would be "unknown" (every pin
+   both ways); none exists after `hierarchy`. `$mem`: a live read port keeps the memory.
+   Mark-and-sweep with an explicit worklist, O(pins).
 3. Dead nodes are deleted in ID order; a dead FF's Q init bits are removed.
 4. Nets left with no pins, no wire membership and no aliases are deleted.
 5. A wire is deleted when every one of its nets has no pins, unless it is a port wire, has `keep`
@@ -473,7 +520,7 @@ orders by (net ID) — deterministic, but where several merges compete the choic
 ## 12. The loop, the fixed point and termination (OP-12)
 
 **Loop.** As §3, per design (all modules per sub-pass, modules in creation order), never on a
-module twice per sub-pass call. In mode P a module with live `$proc` nodes is skipped by
+module twice per sub-pass call. A module with live `$proc` nodes is skipped by
 `opt_muxtree` and `opt_clean` and seen by the others with every `$proc` opaque (§3). In Debug the
 pass manager's `check` runs before and after `opt`; `opt` itself runs `check --fast` after every
 sub-pass call (agent default; Release: off).
@@ -482,17 +529,18 @@ sub-pass call (agent default; Release: off).
 shrinks or is refilled by strictly simplifying rewrites: `opt_expr`'s rounds stop when a round
 rewrites nothing, which the ranking below bounds; `opt_merge` sweeps strictly decrease the number of
 candidates; `opt_muxtree` is bounded by its evaluation budget; `opt_reduce`'s worker runs strictly
-decrease the total reduction-input count or the mux port count; `opt_dff`'s work list receives only
+decrease the number of reduction inputs driven by a same-type reduction (inlining adds inputs, so
+the total count is not the measure) or the mux port count; `opt_dff`'s work list receives only
 sliced FFs, whose bit count is smaller than the FF they came from, or FFs whose feature set strictly
 grew (≤ 6 features); `opt_clean` is one sweep.
 
 **Termination of the loop — ranking argument.** Measured at iteration boundaries (after
 `opt_clean`), let Φ = ⟨W, F, D⟩ lexicographically, where
 
-- W = Σ over live nodes other than ports, constants and FFs of `cost(type) × output bits`, where `cost`
-  strictly decreases along every strength reduction of §4, in the order `$pow`, `$mul`, `$div` and
-  `$mod`, `$add` and `$sub`, shifts, comparisons, `$pmux`, `$mux`, bitwise, `$logic_*` and
-  `$reduce_*`, `$not` (every cell costs more than wiring);
+- W = Σ over live nodes other than ports, constants and FFs of `cost(type) × output bits`, where
+  `cost` strictly decreases along every strength reduction of §4, in the order `$pow`, `$mul`,
+  `$div` and `$mod`, `$add` and `$sub`, shifts, comparisons, `$pmux`, `$mux`, bitwise, `$logic_*`
+  and `$reduce_*`, `$not` (every cell costs more than wiring);
 - F = Σ over FF bits of their controls (EN, SRST, ARST, ALOAD, SR, CLK) at a constant or x level;
 - D = Σ over FF D bits of the depth of D's single-user mux cone.
 
@@ -564,7 +612,7 @@ lines DEBUG.
 | INFO | `opt_clean: removed N unused cells, M unused nets and W unused wires` | each call |
 | INFO | `opt: fixed point after K iterations` / `opt: -fast: done after K iterations` | end of `opt` |
 | INFO | `opt_expr: module 'm': cells could not be sorted topologically; visiting them in ID order` | a combinational loop (Yosys: "Couldn't topologically sort cells…") |
-| INFO | `opt_muxtree: module 'm' has processes; skipped` (likewise `opt_clean`) | mode P (Yosys warns: "…contains processes") |
+| INFO | `opt_muxtree: module 'm' has processes; skipped` (likewise `opt_clean`) | before `proc` (Yosys's `has_processes_warn`) |
 | DEBUG | `opt_expr: module 'm': <rule> on <type> '<cell>'` (rule = §4 name) | every `opt_expr` rewrite |
 | DEBUG | `opt_merge: module 'm': '<cell>' is identical to '<cell>'` | every merge |
 | DEBUG | `opt_muxtree: module 'm': dead port K/N on <type> '<cell>'` | every dead port |
@@ -573,7 +621,6 @@ lines DEBUG.
 | WARN | `opt: module 'm': no fixed point after 10000 iterations; stopping` | the cap (OP-12) |
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
 | WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict" |
-| ERROR | `pass 'opt': module 'm' has processes; run proc first` | pass manager, EL-33, mode R only (each `opt*` pass `REFUSE`); in mode P the passes are `OK` |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
 
 Options are spelled as in Yosys (`-full`, `-nodffe`, …) so Parmys's lines run verbatim; `--full`
@@ -584,7 +631,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 
 | # | Odin III | Yosys/Parmys | Why / effect |
 |---|---|---|---|
-| 1 | mode R only: the pre-`proc` trio runs after `proc` | before `proc` | EL-33's `REFUSE`; identical on 318/331 micros, not on ≥ 13 of the 24 smallest VTR designs (§3); mode P removes it |
+| 1 | — (v1's "trio after `proc`" is gone: Odin III runs Parmys's order, §3) | | |
 | 2 | identities are wiring; no `$pos` | `$pos` until `techmap` | IR-1; same netlist after lowering |
 | 3 | used `$`-named wires keep their names | dropped by `opt_clean` | IR-2; names never reach `netlist-compare` |
 | 4 | ties and candidate order by node ID | by name or container order | determinism without names; may change which of two equal rewrites fires first |
@@ -607,7 +654,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | `src/passes/opt/expr*.c` | §4, one function per rule, a rule table per cell type (lizard: ≤ 60 lines, CCN ≤ 15) |
 | `src/passes/opt/{merge,muxtree,reduce,share,clean}.c` | §6, §7 (explicit frame stack), §8, §11, §10 |
 | `src/passes/opt/{ff,ffinit,dff}.c` | §9 |
-| `src/passes/opt/register.c` | the eight pass definitions and option parsing |
+| `src/passes/opt/register.c` | the eight pass definitions (`processes = OK`, EL-33 v4.2) and option parsing |
 | `src/ir/cells/ff.c` | IR change D |
 | `tools/opt-check/` | `opt-rules`, `opt-equiv`, `opt-diff`, `gen-fold-table`, `order-probe.sh` |
 | `tests/unit/test_opt_*.c`, `tests/opt/`, `tests/bench/bench_opt.c` | §20 |
@@ -620,7 +667,10 @@ is a `u64map` plus a chain `vec`; `fold.c` uses a per-call arena.
 ## 19. Performance (OP-18)
 
 **Yosys 0.55 measured** (i7-13700 WSL2, 2026-10-11; `synthesis.tcl` lines 1–9 with
-`vtr_primitives.v`; `yosys -d` per-pass totals):
+`vtr_primitives.v` and `setattr`, plugin absent; `yosys -d` per-pass totals). Cell counts are
+the top-level `stat` total over all modules after Parmys's lines 1–4 (the trio, then `proc -norom`
+with its `opt_expr -keepdc`); 2E's 784,457 for lenet.v is `proc -norom -noopt` without the trio,
+a different point of the same flow:
 
 - **mcml.v**: 14,817 cells after `proc` → 5,560 after `opt` → 5,335 → 4,154 after the last
   `opt -full`; 34.9 s wall, 259 MB peak. The `opt` family is **32.7 s** of it: `opt_clean`
@@ -635,21 +685,33 @@ is a `u64map` plus a chain `vec`; `fold.c` uses a per-call arena.
 
 Yosys's cost is whole-module rescans, with a SigMap rebuilt per call, times iterations. Odin III
 keeps the loop (same results) and makes each call cheap: no SigMap, O(1) drivers, contiguous
-fanout (IR-18), ID-indexed side arrays, and after the first iteration `opt_expr`, `opt_dff` and
-`opt_merge` start from a **dirty set** (nodes whose input nets were connected, merged or
-re-driven since that sub-pass last ran, plus their readers); `opt_muxtree`, `opt_reduce` and
-`opt_clean` stay O(pins) sweeps. A rule depends only on a node's inputs, their drivers and fanout
-counts, so a clean node cannot newly match; the Debug option `--opt-full-rescan` asserts that
-full sweeps give the same result.
+fanout (IR-18), ID-indexed side arrays. Only `opt_expr` is **incremental**: after the first
+iteration it starts from a dirty set (nodes whose input nets were connected, merged or re-driven
+since its last call, plus their readers), which is exact because every `opt_expr` rule reads only
+a node's inputs, their drivers and the invert map (itself made of drivers), never fanout.
+**Fanout-sensitive rules run as full sweeps** (review finding 2F-2): `opt_dff` (single-user muxes,
+`bitusers`), `opt_share` (operands used only by one mux port), `opt_muxtree` (roots), `opt_reduce`
+(`mem_wren_sigs`), and `opt_clean`; `opt_merge` is a full sweep too, since a clean node can newly
+collide with a dirty one. All are O(pins) per call (on lenet.v Yosys spends 29 s in `opt_dff` and
+`opt_share` together). The Debug option `--opt-full-rescan` runs `opt_expr` as a full sweep too
+and asserts the same result.
+
+**Memory.** Rebuilds and FF re-emission leave a dead node per rewrite until the pass manager
+compacts after `opt` (IR-6); mcml.v's 31 iterations re-emit constant-register pipelines each
+round. `bench_opt` reports dead objects at the peak; if the RSS target below slips, the remedy is
+a compact point per `opt` iteration — an IR-6 amendment, for Peter — never a relaxed target. 2F
+charges the run-level byte budget that 2D initialises and 2E continues (2E spec, finding 6) with
+the IR's live and dead objects plus its side arrays, and fails with that budget's message rather
+than starting a second one.
 
 | Measure (Release, dev machine, `tests/bench/bench_opt.c`, smallest first) | Target |
 |---|---|
-| mcml.v, the opt passes of the Phase 2 script (the trio and the main `opt`, either mode) | ≤ 1.0 s |
+| mcml.v, the opt passes of the Phase 2 script (the trio and the main `opt`) | ≤ 1.0 s |
 | mcml.v, `opt -full` on that result | ≤ 0.3 s |
-| lenet.v, the opt passes of the Phase 2 script (≈ 661k cells after `proc`) | ≤ 15 s |
+| lenet.v, the opt passes of the Phase 2 script (the trio, then the main `opt` on ≈ 661k cells) | ≤ 15 s |
 | lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before `compact`) | ≤ 25% |
 | the 31 VTR files, opt passes of the Phase 2 script, total | ≤ 3 s |
-| per sub-pass call | O(pins) full sweep; O(dirty pins) incremental; `opt_muxtree` O(mux ports × budget) worst case; `opt_merge` O(candidate pins) expected |
+| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(mux ports × budget) worst case; `opt_merge` O(candidate pins) expected |
 | per `opt` invocation | O(iterations × pins) worst case; iterations ≤ sequential depth of constant-register chains + a small constant on the corpus |
 
 The bench prints per file cells/nets/pins before and after, iterations, time per sub-pass, rewrites
@@ -685,7 +747,11 @@ input first** (memory rule); every Yosys run is 0.55 unless the line says 0.69.
 - `test_opt_dff.c`: `ff_emit` for all feature combinations against `FfData::emit`, every §9.3
   action, constbits with x init, init conflicts.
 - `test_opt_loop.c`: the call sequences of each mode, the iteration cap (warning, `ODIN3_OK`,
-  valid IR), mode R's refusal and mode P's skips with their exact messages.
+  valid IR), the `opt_muxtree`/`opt_clean` skips on a module with a `$proc` (exact info line) and
+  the opacity of `$proc` to the other sub-passes.
+- `test_opt_kit.c` also asserts that a wire bit folded into a constant net prints, through 2D's
+  `write_rtlil`, as Yosys's `connect \w [k] 1'0` (a constant net has no primary wire bit, and
+  `opt_expr` makes such aliases in bulk).
 
 ### 20.2 Refinement after every sub-pass (`opt-equiv`)
 
@@ -695,18 +761,18 @@ something; each pair goes through Yosys 0.55 `read_rtlil before.il; rename -top 
 after.il; rename -top gate; equiv_make gold gate eq; hierarchy -top eq; flatten; equiv_simple -undef
 -seq 4; equiv_induct -undef; equiv_status -assert` — a **refinement** check (x in the gold is a
 don't-care; probe: `s ? a : 4'bx` → `a` passes, the reverse and a wrong enable fail). Inputs holding
-processes (mode P) get Yosys `proc` on both sides first. A failing pair names the sub-pass call and
-rule counters. A cheaper in-process check runs alongside when the module has no x constant, no
-asynchronous FF and no cell without a `simulate` hook (`$shiftx`, `$pow`): 1E's simulator, 64 cycles
-× 3 seeds, before/after copies. Run on: every per-rule golden (CTest), the micros (CTest, label
-`opt_equiv`, smallest first), the VTR set (nightly).
+processes (the pre-`proc` trio) get Yosys `proc` on both sides first. A failing pair names the
+sub-pass call and rule counters. A cheaper in-process check runs alongside when the module has no x
+constant, no FF and no cell without a `simulate` hook (`$shiftx`, `$pow`; word FFs have none, IR
+change D): 1E's simulator, 64 cycles × 3 seeds, before/after copies. Run on: every per-rule golden
+(CTest), the micros (CTest, label `opt_equiv`, smallest first), the VTR set (nightly).
 
 ### 20.3 Differential against Yosys on the same input (`opt-diff`)
 
 `tools/opt-check/opt-diff <files> [--top T] [--script S]`, per design:
 
 1. Odin III: `read_verilog -nolatches; hierarchy; proc; opt_expr -keepdc; write_rtlil in.il; S;
-   write_rtlil odin.il` with `--opt-stats` (for mode P's trio, `in.il` is written before `proc`);
+   write_rtlil odin.il` with `--opt-stats` (for the trio, `in.il` is written before `proc`);
 2. Yosys 0.55: `read_rtlil in.il; S; write_rtlil yosys.il` with `YOSYS_COVER_DIR`;
 3. **per-module cell-type histograms** equal (Yosys `stat`, Odin III `stats`): the structural
    count target;
@@ -740,81 +806,90 @@ Two runs → byte-identical `write_rtlil`; a module built in reverse creation or
 
 ### 20.6 The 2H handover
 
-2F hands 2H the S-P splice (S-R if mode R stays; §3): Odin III's output through `write_rtlil` and
-Yosys 0.55's remainder of `synthesis.tcl` from `fsm`, compared with the Parmys golden by
-`netlist-compare`, then `equiv-check` (with `--x-report` from 2D §14.6 where needed); S-D is
-reported as information. 2F's own gate is §20.3; the exit-bar table is 2H's. In mode P,
-`opt-equiv` (§20.2) and `opt-diff` also run on the pre-`proc` calls (inputs with `$proc` nodes
-go to Yosys as RTLIL processes, EL-48).
+2F hands 2H the S-P splice of §3 (the complete script there); S-D is reported as information.
+2F's own gate is §20.3; the exit-bar table is 2H's. `opt-equiv` and `opt-diff` also run on the
+pre-`proc` calls (inputs with `$proc` nodes go to Yosys as RTLIL processes, EL-48).
 
 ## 21. Review focus and risks
 
-1. **Pass order** (§3, §17 #1): `opt` is not confluent, so identity with Parmys on the VTR set
-   needs Parmys's own order (mode P, which reopens EL-33's `REFUSE` for the opt passes) and a
-   splice before `fsm`; 2F's main `opt` is then proven by `opt-diff`, not by the exit test.
+1. **Pass order** (§3): `opt` is not confluent, so identity with Parmys on the VTR set needs
+   Parmys's own order (EL-33 v4.2) and a splice before `fsm`; 2F's main `opt` is then proven by
+   `opt-diff`, not by the exit test.
 2. **`opt_dff`'s feedback patterns** write x into mux inputs (§9.3 item 11); the refinement check
    must see Q's init.
 3. **`opt_muxtree`'s re-entrant evaluation** (pure/non-pure roots, depth 3) is the hardest code to
    make iterative faithfully; its tests replay Yosys's cases.
-4. **Dirty sets** (§19) could miss a rewrite; `--opt-full-rescan` guards them.
-5. **2E coupling**: IR change D, `init` on wires, and the trailing `opt_expr -keepdc` (§24 items
-   1, 6, 7) must match the 2E spec written in parallel.
+4. **`opt_expr`'s dirty set** (§19) could miss a rewrite; `--opt-full-rescan` guards it.
+5. **2E coupling**: IR change D (2E-1), `init` on wires, `odin3_opt_expr_run` and `--noopt`
+   (§25 items 1, 6, 7) must match the 2E spec.
 
 ## 22. Implementation split (OP-20)
 
-Six PRs; the plan fixes tasks and interfaces. PHASE2's 2F row: Opus `high` (IR change D: Opus
-`xhigh` for its review, then `high`).
+Six PRs; the plan fixes tasks and interfaces. PHASE2's 2F row: Opus `high`.
 
 | PR | Content | Depends on | Model/effort |
 |---|---|---|---|
-| 2F-1 kit | IR change D (if 2E has not landed it), opt context and kit, constant canonicalization, FF model and init, `opt_clean`, the eight pass registrations with options and `REFUSE`, `--opt-stats`, `--opt-snapshot` | 2D-1 (cells, `$proc` flag, `write_rtlil`) | Opus `xhigh` → `high` |
+| 2F-1 kit | opt context and kit, constant canonicalization, FF model and init, `opt_clean` (design-wide port directions, instance removal, the process skip), the eight pass registrations (`OK`) with options, `--opt-stats`, `--opt-snapshot` | 2D-1 (cells, `$proc` flag, `write_rtlil`); **2E-1** (IR change D) | Opus `high` |
 | 2F-2 expr | `fold.c` on 2D's evaluator, `opt_expr` §4 all rules, `replace_undriven`, polarity folding; `odin3_opt_expr_run` for 2E; per-rule goldens for §4 | 2F-1, 2D-2 | Opus `high` |
 | 2F-3 merge/reduce/muxtree | §6, §7, §8; goldens | 2F-1 | Opus `high` |
 | 2F-4 dff | §9: all actions, SRST/EN merging, feedback patterns, constbits; goldens | 2F-1, 2F-2 | Opus `high` |
-| 2F-5 loop | `opt` driver and modes, `opt_share`, dirty sets, caps, logs, compact point; mode P (process-opaque sub-passes, the two skips; dropped if §24 item 2 is declined); the Phase 2 script; `bench_opt` | 2F-2…4 | Opus `high` |
+| 2F-5 loop | `opt` driver and modes, `opt_share`, `opt_expr`'s dirty set, caps, logs, compact point, the run-level byte budget; `$proc` opacity across sub-passes; the Phase 2 script and the S-P splice script; `bench_opt` | 2F-2…4 | Opus `high` |
 | 2F-6 evidence | `opt-equiv`, `opt-diff`, `order-probe.sh`, fold table, corpus sweeps, fuzzers, the PHASE2 entry with bench output | grows from 2F-2; needs 2E for corpus runs | Opus `high`; Sonnet `high` for bulk goldens and bench runs |
 
 Lanes: 2F-1; 2F-2 ‖ 2F-3; 2F-4; 2F-5; 2F-6 alongside. Before 2E lands, tests start from hand-built
 IR, `read_blif`, or process-free Verilog. Each PR: tests first, `/lint`, a read-only critique
 (PHASE0 §A.1).
 
-## 23. Amendments to other documents (made when the PRs land)
+## 23. Amendments to other documents
 
-- `docs/IR.md` §5: the FF cells of IR change D; DESIGN §5.2 word list.
-- `docs/DESIGN.md` §6 step 4: `opt` is Yosys 0.55's `opt` family; arithmetic simplification is
-  `opt_expr`'s, mux collapsing `opt_muxtree` + `opt_reduce` + `opt_dff`'s.
-- `docs/PASSES.md`: eight rows (`opt` and the seven sub-passes; `REFUSE` or, in mode P, `OK`).
-- 2D spec EL-33 (mode P only): the opt passes move from the `REFUSE` list to `OK`, with the
-  process-opaque rules of OP-3; `docs/PHASE2.md` #13's "`opt` runs only after `proc`" is amended.
-- 2E spec: `proc` calls `odin3_opt_expr_run` with `keepdc` (or the script does), keeps `init` on
-  wires, emits the IR change D cells.
-- `docs/PHASE2.md`: 2F's entry (the controller writes the decision log).
+- Made with v2: 2D spec EL-33 (v4.2 status note: the opt passes are `OK`, `$proc` opaque,
+  `opt_muxtree`/`opt_clean` skip modules with processes) and `docs/PHASE2.md` #13 (one-line
+  amendment).
+- When the PRs land: DESIGN §6 step 4 (`opt` is Yosys 0.55's `opt` family; arithmetic
+  simplification is `opt_expr`'s, mux collapsing `opt_muxtree` + `opt_reduce` + `opt_dff`'s);
+  `docs/PASSES.md` (eight rows, `OK`); `docs/PHASE2.md` (2F's entry). IR change D's IR.md/DESIGN
+  §5.2 amendments travel with 2E-1.
+- 2E spec (its author): `proc` calls `odin3_opt_expr_run` unless `--noopt`, keeps `init` on wires,
+  owns IR change D, feeds its oracles the trio's output.
 
-## 24. Decisions for Peter
+## 24. Review dispositions (v2, `2EF-review1` §C)
 
-1. **IR change D — eleven word FF cells** (`$adffe $sdffe $sdffce $aldff $aldffe $dffsr $dffsre
-   $dlatch $adlatch $dlatchsr $sr`, Yosys simlib ports and parameters, `verify`, simulate hooks for
-   the synchronous ones; §9.2). *Recommended:* add the whole family in one PR (2E-1 or 2F-1,
-   whichever lands first); without them `opt_dff` cannot produce what Parmys's `opt` produces.
-2. **Opt before `proc` (mode P) — amends EL-33.** Mark the opt passes `processes = OK` and run
-   them as Yosys does on modules with processes (`$proc` opaque; `opt_muxtree`/`opt_clean` skip
-   such modules), so Odin III runs Parmys's `opt_expr; opt_clean; opt -nodffe -nosdff; proc; …`
-   verbatim (OP-3). *Recommended:* yes. Keeping `REFUSE` (mode R: the trio after `proc`) is
-   identical on 318/331 micros but changes at least 13 of the 24 smallest VTR designs (8
-   identical, 3 undecided), because the opt passes are not confluent; mode P costs two module skips and the opacity EL-33 already
-   requires of an `OK` pass.
-3. **2H splice point.** *Recommended:* **S-P** — Odin III runs Parmys's lines 1–4 (pre-`proc`
-   trio + `proc`), Yosys 0.55 runs `synthesis.tcl` from `fsm` on; S-P counts toward PHASE2 #4, and
-   2F's main `opt` is gated by the same-input `opt-diff` (§20.3). Splitting after the main `opt`
-   (S-D) is information only: it changes netlists even inside Yosys (`stereovision3` 955 →
-   1,288 `.names`) because `fsm` must see raw `proc` output. With mode R, the splice is S-R.
+| # | Finding | Disposition |
+|---|---|---|
+| I1 | `opt_clean` treats instances as unknown | applied: design-wide port directions, unused instances removed (§2, §10) |
+| I2 | dirty sets miss fanout-sensitive rules | applied: only `opt_expr` is incremental; `opt_dff`, `opt_share`, `opt_merge` full sweeps (§19) |
+| I3 | S-P under-specified | applied: complete two-sided script, `scc` precondition (§3) |
+| I4 | two modes | applied: mode R dropped; EL-33 and PHASE2 #13 amended (§3, §23) |
+| I5 | IR change D ownership and hooks | applied: 2E-1 owns it, `simulate` NULL, 2F-1 depends (§9.2, §22 table) |
+| M6 | `$memrd`/`$memwr` polarity | applied: `$mem` `RD_CLK`/`WR_CLK` bits (§4.4) |
+| M7 | include `$tribuf` in CSE | **rejected**: 0.55 `opt_merge.cc` erases `$tribuf` and `$_TBUF_` from its cell set, so Yosys never merges them |
+| M8 | `opt_reduce` measure | applied (§12) |
+| M9 | memory budget, dead objects | applied: shared run-level budget, compact-per-iteration as the escalation (§19) |
+| M10 | `scc`/`check` rows | applied (§3 rows 2a/2b) |
+| M11 | folded aliases in `write_rtlil` | applied: test asserts `connect \w [k] 1'0` (§20.1) |
+| M12 | `odin3_opt_expr_run` counts, Debug check | applied (§4.8) |
+| M13 | lenet count basis | applied: script stated (§19) |
+| M14 | `set_init` target wire | applied (§9.4) |
+
+## 25. Decisions for Peter
+
+1. **IR change D** (ruled T1): eleven word FF cells, `simulate` NULL, specified and landed by
+   2E-1 Task 1; 2F-1 depends on 2E-1. Peter reviews it once, in 2E's PR.
+2. **Opt before `proc`** (ruled T2; agent default for Peter's review): the opt passes are
+   `processes = OK` with `$proc` opaque and `opt_muxtree`/`opt_clean` skipping modules with
+   processes, so Odin III runs Parmys's `opt_expr; opt_clean; opt -nodffe -nosdff; proc; opt`
+   verbatim (2D EL-33 v4.2, PHASE2 #13 amended). Evidence: running the trio after `proc` changes at
+   least 13 of the 24 smallest VTR designs (Fable: `stereovision3` 812 vs 792 cells).
+3. **2H splice** (ruled T3): S-P, with §3's complete script; S-D is information only (it changes
+   netlists even inside Yosys, `stereovision3` 955 → 1,288 `.names`, because `fsm` must see raw
+   `proc` output).
 4. **Provenance of CSE survivors and rebuilt nodes** (OP-6, OP-15). *Recommended:* rebuild the
    node (`odin3_node_create` + `odin3_node_replace`, a DERIVED record with ordered parents) — no
    IR API change; the alternative `odin3_node_set_prov` would be an IR-15 change.
 5. **Loop cap.** *Recommended:* 10,000 iterations per `opt` invocation, a warning and `ODIN3_OK`
    when reached (Yosys has none; worst seen 31).
-6. **`proc`'s trailing `opt_expr -keepdc`.** *Recommended:* 2F exports `odin3_opt_expr_run`; 2E's
-   `proc` calls it once 2F-2 has landed, and until then the Phase 2 script spells
-   `proc; opt_expr -keepdc`.
+6. **`proc`'s trailing `opt_expr -keepdc`** (ruled T5): 2F exports `odin3_opt_expr_run`, which
+   returns its counts; 2E's `proc` calls it for every completely lowered module unless `--noopt`;
+   until 2F-2 lands the script spells `proc; opt_expr -keepdc`.
 7. **Where FF init values live.** *Recommended:* keep 2D's `init` wire attribute through `proc`
-   and `opt` (Yosys's convention, read per net by `ffinit.c`); no `INIT` parameter on word FFs.
+   and `opt` (read per net, written to one wire, §9.4); no `INIT` parameter on word FFs.

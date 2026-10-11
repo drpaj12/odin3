@@ -1188,14 +1188,26 @@ drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nod
 `uint8_t processes`: `ODIN3_PASS_PROCESSES_REFUSE` (0, the default, so every existing and plugin
 pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the pass manager calls
 `odin3_design_has_processes` and, when it is true, fails the pass without running it:
-`pass 'opt': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
+`pass 'flatten': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
 misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
 create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
-and `proc` (2E). Marked `REFUSE`: `opt` (2F) — so **`opt` runs only after `proc`**, the order of
-DESIGN §6 — `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
-`write_dot`. The writers also refuse a `$proc` node themselves (`module 'm' has processes; run
-proc first`) for callers that bypass the pass manager. A pass marked `OK` that mutates the IR
-must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
+and `proc` (2E), and (v4.2) the eight opt passes of 2F (`opt`, `opt_expr`, `opt_merge`,
+`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`). Marked `REFUSE`: `flatten`,
+`lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`, `write_dot`. The writers also
+refuse a `$proc` node themselves (`module 'm' has processes; run proc first`) for callers that
+bypass the pass manager.
+
+*Status note v4.2 (2026-10-11, the 2E/2F joint review's tension T2; agent default for Peter's
+review):* the opt passes run on modules with processes as Yosys 0.55's do, so Odin III can run
+Parmys's `opt_expr; opt_clean; opt -nodffe -nosdff` before `proc` (2F spec, OP-3, "mode P"):
+`opt_expr`, `opt_merge`, `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as
+opaque (never evaluated, merged or deleted; its `O` pins drive unknown values, its `I` pins
+read), and `opt_muxtree` and `opt_clean` skip a module that still has live `$proc` nodes, with an
+info line (Yosys's `has_processes_warn`). Reason (Fable-verified): the opt family is not
+confluent, and the pre-`proc` opt order changes netlists (`stereovision3` 812 versus 792 cells),
+so "`opt` only after `proc`" (v1–v4.1) could not reproduce Parmys.
+
+A pass marked `OK` that mutates the IR must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
 drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
 becomes `const uint8_t *processes` (NULL, as every existing plugin passes, means `REFUSE`), so no
 layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/builtin.c`,
