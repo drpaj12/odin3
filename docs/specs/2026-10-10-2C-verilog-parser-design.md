@@ -490,7 +490,8 @@ token is located at the last token's end (§2.2); the chain lines (`expanded fro
 `end`/`join`/`endcase`/`endfunction`/`endtask`, so an item missing its `;` before a closer does
 not swallow the next item), `description: error ENDMODULE`, and `module_body: … module_items
 error` (an item missing its `;` before
-`endmodule`, so the next module is still parsed) — resynchronise at the next `;` or
+`endmodule`, so the next module is still parsed, with the same twins for the generate closers
+`generate`/`begin`/`case … error` `endgenerate`/`end`/`endcase`, 2C Task 7) — resynchronise at the next `;` or
 `endmodule`, Bison's three-token rule
 suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
 the flag is set, so no builder is ever called with the half-built children recovery leaves
@@ -691,7 +692,11 @@ an empty positional slot; `u ()` has **zero** connections, `u (,)` two empty one
 and named connections may mix in one list (I2: 2D rejects).
 An expression on any port is an expression (I3). An instance without a name is accepted by the
 grammar for every module name (a UDP instance may be unnamed); the pass enforces 2A's rule 4
-(§4.2 step 5).
+(§4.2 step 5). `m #() u (…)` is an empty params `LIST` (printed back as `#()`, like a module
+header's). Locations (2C Task 7 default): `INSTANTIATION` from the module name to the `;`; the
+params `LIST` from `#` to `)`; an `INSTANCE` from its name, or its `(` when unnamed, to its
+`)`; a `CONNECTION` at its expression or its `.`; an empty slot zero width one past the
+preceding `(` or `,`.
 
 **Gates (Q1–Q6).** `and [(strength)] [#d] [g1] [[3:0]] (y, a, b), (z, c, d);` → `GATE_DECL[and]`
 (`STRENGTH`?, `DELAY`?; `INSTANCE+`(name opt; R? array (Q5); C*: one `CONNECTION`(name 0, E) per

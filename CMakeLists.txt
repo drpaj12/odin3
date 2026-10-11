@@ -212,8 +212,9 @@ target_include_directories(odin3_core PRIVATE ${_gen})
 # the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
 # trailing context, yyless(0), YY_DECL: no warning; with 2C Task 4's grammar core, 353
 # states, YYMALLOC/YYFREE through the allocation hook, with Task 5's expressions, 488
-# states and the precedence table, and with Task 6's statements, 763 states and the
-# dangling-else precedence: still none but the one below). One flag, for the parser only:
+# states and the precedence table, with Task 6's statements, 763 states and the
+# dangling-else precedence, and with Task 7's instantiation, gates and generate, 941 states:
+# still none but the one below). One flag, for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
