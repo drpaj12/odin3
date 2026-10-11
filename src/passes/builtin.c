@@ -1,6 +1,6 @@
 /*
  * builtin.c — the pass table and the BLIF, techlib, check, compact, stats, hierarchy and
- * write_verilog_ast passes.
+ * write_verilog_ast passes (the project passes are in project_pass.c).
  */
 #include "passes/builtin.h"
 #include "ast/ast.h"
@@ -472,8 +472,7 @@ static odin3_status print_latest(odin3_design *design, odin3_strbuf *out) {
     return st;
 }
 
-/* Writes text to path atomically (the destination keeps its old contents on failure). */
-static odin3_status write_text(const char *path, const odin3_strbuf *text) {
+odin3_status odin3_pass_write_text(const char *path, const odin3_strbuf *text) {
     odin3_atomic_file file;
     odin3_status st = odin3_atomic_file_open(&file, path);
     if (st != ODIN3_OK) {
@@ -499,7 +498,7 @@ static odin3_status write_verilog_ast_run(odin3_pass_ctx *ctx, odin3_design *des
         st = print_latest(design, &text);
     }
     if (st == ODIN3_OK) {
-        st = write_text(path.data, &text);
+        st = odin3_pass_write_text(path.data, &text);
     }
     odin3_strbuf_free(&text);
     odin3_strbuf_free(&path);
@@ -550,6 +549,9 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &STATS,
                                                       &odin3_pass_sim,
                                                       &HIERARCHY,
-                                                      &WRITE_VERILOG_AST};
+                                                      &WRITE_VERILOG_AST,
+                                                      &odin3_pass_read_project,
+                                                      &odin3_pass_dump_project,
+                                                      &odin3_pass_preprocess};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

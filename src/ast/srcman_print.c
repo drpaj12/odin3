@@ -102,13 +102,14 @@ odin3_status odin3_srcman_chain(const odin3_srcman *sm, odin3_loc loc, odin3_src
 
 typedef struct chain_text {
     const odin3_srcman *sm;
+    odin3_srcfmt style; /* how the entries name their files */
     odin3_strbuf buf;
     odin3_status st;
 } chain_text;
 
 static odin3_status append_entry(chain_text *text, const odin3_srcchain_entry *entry) {
     const char *name = odin3_strtab_get(text->sm->strtab, entry->name);
-    where at = where_of(text->sm, (odin3_loc){entry->at}, ODIN3_SRCFMT_GIVEN);
+    where at = where_of(text->sm, (odin3_loc){entry->at}, text->style);
     switch (entry->kind) {
     case ODIN3_SRCCHAIN_ARG:
         return odin3_strbuf_appendf(&text->buf,
@@ -132,12 +133,10 @@ static void visit_text(void *user, const odin3_srcchain_entry *entry) {
     }
 }
 
-odin3_status odin3_srcman_format_chain(const odin3_srcman *sm, odin3_loc loc, odin3_strbuf *out) {
-    if (sm == NULL || out == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_srcman_format_chain: NULL argument");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    chain_text text = {sm, {0}, ODIN3_OK};
+/* odin3_srcman_format_chain with the files named in style. */
+static odin3_status format_chain(const odin3_srcman *sm, odin3_loc loc, odin3_strbuf *out,
+                                 odin3_srcfmt style) {
+    chain_text text = {sm, style, {0}, ODIN3_OK};
     odin3_strbuf_init(&text.buf);
     odin3_status st = odin3_srcman_chain(sm, loc, visit_text, &text);
     st = st != ODIN3_OK ? st : text.st;
@@ -148,6 +147,14 @@ odin3_status odin3_srcman_format_chain(const odin3_srcman *sm, odin3_loc loc, od
     return st;
 }
 
+odin3_status odin3_srcman_format_chain(const odin3_srcman *sm, odin3_loc loc, odin3_strbuf *out) {
+    if (sm == NULL || out == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_srcman_format_chain: NULL argument");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return format_chain(sm, loc, out, ODIN3_SRCFMT_GIVEN);
+}
+
 /* --- located diagnostics ------------------------------------------------------------------- */
 
 static const char *level_word(odin3_log_level level) {
@@ -155,19 +162,29 @@ static const char *level_word(odin3_log_level level) {
     return level < ODIN3_LOG_LEVEL_COUNT ? words[level] : "error";
 }
 
-void odin3_srcman_vdiag(const odin3_srcman *sm, odin3_log_level level, odin3_loc loc,
-                        const char *fmt, va_list args) {
+/* One located diagnostic: where and its chain name their files in style. */
+typedef struct diag_site {
+    const odin3_srcman *sm;
+    odin3_srcfmt style;
+    odin3_log_level level;
+    odin3_loc loc;
+} diag_site;
+
+static void vdiag_styled(const diag_site *site, const char *fmt, va_list args) {
+    const odin3_srcman *sm = site->sm;
+    odin3_log_level level = site->level;
+    odin3_loc loc = site->loc;
     char msg[ODIN3_LOG_BUF];
     if (vsnprintf(msg, sizeof msg, fmt, args) < 0) {
         msg[0] = '\0';
     }
-    where at = where_of(sm, loc, ODIN3_SRCFMT_GIVEN);
+    where at = where_of(sm, loc, site->style);
     const char *word = level_word(level);
     odin3_strbuf buf;
     odin3_strbuf_init(&buf);
     bool full = odin3_strbuf_appendf(&buf, "%s:%" PRIu32 ":%" PRIu32 ": %s: %s", at.name, at.line,
                                      at.col, word, msg) == ODIN3_OK &&
-                (sm == NULL || odin3_srcman_format_chain(sm, loc, &buf) == ODIN3_OK);
+                (sm == NULL || format_chain(sm, loc, &buf, site->style) == ODIN3_OK);
     if (full) {
         odin3_log(level, "%s", buf.data);
     } else { /* out of memory: the header alone, formatted without allocating */
@@ -176,13 +193,22 @@ void odin3_srcman_vdiag(const odin3_srcman *sm, odin3_log_level level, odin3_loc
     odin3_strbuf_free(&buf);
 }
 
+void odin3_srcman_vdiag(const odin3_srcman *sm, odin3_log_level level, odin3_loc loc,
+                        const char *fmt, va_list args) {
+    diag_site site = {sm, ODIN3_SRCFMT_GIVEN, level, loc};
+    vdiag_styled(&site, fmt, args);
+}
+
+/* PRJ-18: a design's diagnostics name files in its --diag-paths style. */
 void odin3_diag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt, ...) {
     odin3_srcman *sm = NULL;
     if (design == NULL || odin3_design_get_srcman(design, &sm) != ODIN3_OK) {
         sm = NULL;
     }
+    diag_site site = {sm, design != NULL ? odin3_design_diag_paths(design) : ODIN3_SRCFMT_GIVEN,
+                      level, loc};
     va_list args;
     va_start(args, fmt);
-    odin3_srcman_vdiag(sm, level, loc, fmt, args);
+    vdiag_styled(&site, fmt, args);
     va_end(args);
 }

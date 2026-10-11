@@ -16,6 +16,8 @@ for _sub in (
     "tools/golden-sample",
     "tools/golden-blackboxes",
     "tools/project-fixtures",
+    "tools/pp-fuzz",
+    "tools/pp-diff",
     "tools/token-cost",
     "plugins/python",
 ):

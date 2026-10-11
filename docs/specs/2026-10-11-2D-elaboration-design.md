@@ -34,6 +34,20 @@ says which it follows and why, and §17 lists every divergence. Each decision is
 file is corrected — except the three changes marked **IR change** (§7.2, §8.1, §6.2), ruled as
 agent defaults (§20) and amending `docs/IR.md` when 2D-1 lands; Peter may still override them.
 
+v4.2 (2026-10-11; the joint 2E/2F review `2EF-review1`, controller rulings T6 and T2). First (T6):
+every action the process generator emits is **one action per chunk** of its left side, as Yosys's
+`addChunkActions` emits them: the root defaults and sync actions (EL-35 steps 3–4), user assignments
+(step 5) and the case temporaries' entries, defaults and exits (EL-36); temporaries are grouped by
+the same chunks. Per-bit actions gave per-bit `$dff`s and `$mux`es after `proc` (an 8-bit `case`
+became eight 1-bit `$pmux`es), and `fsm_detect` ignores a register whose `Q` is not a whole wire, so
+identity with Parmys needs the chunks. Cost: one O(outputs) grouping per block. Second (T2; agent
+default for Peter's review): the eight opt passes of 2F are `processes = OK` (EL-33), so Odin III
+runs Parmys's `opt_expr; opt_clean; opt -nodffe -nosdff` before `proc` (2F spec OP-3, "mode P");
+`$proc` stays opaque to them and `opt_muxtree`/`opt_clean` skip modules that still have processes.
+Reason (Fable-verified): the opt family is not confluent, and the pre-`proc` opt order changes
+netlists (`stereovision3` 812 versus 792 cells), so "`opt` only after `proc`" (v1–v4.1) could not
+reproduce Parmys.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1183,22 +1197,31 @@ drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nod
 `uint8_t processes`: `ODIN3_PASS_PROCESSES_REFUSE` (0, the default, so every existing and plugin
 pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the pass manager calls
 `odin3_design_has_processes` and, when it is true, fails the pass without running it:
-`pass 'opt': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
+`pass 'flatten': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
 misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
 create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
-and `proc` (2E). Marked `REFUSE`: `opt` (2F) — so **`opt` runs only after `proc`**, the order of
-DESIGN §6 — `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
-`write_dot`. The writers also refuse a `$proc` node themselves (`module 'm' has processes; run
-proc first`) for callers that bypass the pass manager. A pass marked `OK` that mutates the IR
-must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
-drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
+and `proc` (2E), and (v4.2) the eight opt passes of 2F (`opt`, `opt_expr`, `opt_merge`,
+`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`). Marked `REFUSE`: `flatten`,
+`lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`, `write_dot`. The writers also
+refuse a `$proc` node themselves (`module 'm' has processes; run proc first`) for callers that
+bypass the pass manager.
+
+The opt passes treat a module with processes as Yosys 0.55's do (v4.2): `opt_expr`,
+`opt_merge`, `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as opaque (never
+evaluated, merged or deleted; its `O` pins drive unknown values, its `I` pins read), and
+`opt_muxtree` and `opt_clean` skip a module that still has live `$proc` nodes, with an info line
+(Yosys's `has_processes_warn`).
+
+A pass marked `OK` that mutates the IR must treat a `$proc` node as opaque: no constant
+propagation or CSE through it, its `O` pins are drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
 becomes `const uint8_t *processes` (NULL, as every existing plugin passes, means `REFUSE`), so no
 layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/builtin.c`,
 `docs/PASSES.md`).
 
 **ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
 `I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
-(EL-48), so the Python walk and plugins can see it; structured body accessors wait for 2E.
+(EL-48), so the Python walk and plugins can see it; structured body accessors are deferred
+(2E §23).
 
 **Alternatives considered.** (a) v1's process objects over pinless nets (rejected by the review,
 F1: a second connectivity mechanism, broken driver queries, O(process) merges, `opt` unsafe);
@@ -1243,21 +1266,29 @@ creates the node at the end (step 7).
    block's **outputs**: the bits its sync actions drive (Yosys's `collect_lvalues(…, true,
    true)`, so a blocking-only temporary such as `t` in `t = a & b; r <= t;` is an output too,
    whose register is dead and removed by `opt`). For each output bit `b` create a fresh
-   temporary net `t0(b)` (Yosys's `$0\x`).
+   temporary net `t0(b)` (Yosys's `$0\x`). **Chunks** (v4.2): the sorted outputs split into
+   maximal runs of consecutive bits of one variable in increasing bit order (nets of one wire are
+   created consecutively, so a chunk is a run of the net-ID-sorted list broken at a change of
+   wire or a gap in bit position; O(outputs)); `t0` of a chunk is that chunk's temporary group
+   (Yosys's one `$0\x[h:l]` wire per chunk).
 2. **Substitutions.** `lv`: bit → the net an assignment writes (initially `b → t0(b)`).
    `rv`: bit → its current value for reads in this block (initially empty: a read sees the net
    itself). Both are maps with an undo log, so a branch can save and restore them in O(changes).
-3. **Root defaults.** For each output bit: the root action `t0(b) = b` (the value holds when no
-   path assigns it — a latch for a combinational block, a flip-flop hold for a clocked one) —
-   except when `--nolatches` is set and the block has no edge sync: then no root action, and
-   `rv(b) = x` (Yosys `-nolatches`: an unassigned path is x, never a latch).
-4. **Syncs.** EL-34's syncs, each with the actions `b ← t0(b)` for every output bit.
+3. **Root defaults.** For each output chunk `c`, one root action `t0(c) = c` (the value holds
+   when no path assigns it — a latch for a combinational block, a flip-flop hold for a clocked
+   one) — except when `--nolatches` is set and the block has no edge sync: then no root action,
+   and `rv(b) = x` for each output bit (Yosys `-nolatches`: an unassigned path is x, never a
+   latch).
+4. **Syncs.** EL-34's syncs, each with one action `c ← t0(c)` per output chunk, in the outputs'
+   order (v4.2; so `proc` builds one register per chunk, as Yosys does).
 5. **Statements**, in order, with a frame stack (`odin3_pg_frame`: block, case, loop, call):
    - **Blocking `lhs = rhs`**: `rhs` generated at `max(L(lhs), L(rhs))` with reads through `rv`,
      truncated or extended to `L(lhs)`; `lhs` resolved to bits (a bit written twice in one lvalue
      keeps its first occurrence, Yosys); for each bit `rv(bit) = rhs bit`; the target bits
      `lv(lhs)` are removed from the current case and the switches nested in it (below), then the
-     action `lv(lhs) = rhs` is appended to the current case.
+     action `lv(lhs) = rhs` is appended to the current case, split into one action per chunk of
+     `lv(lhs)`: a maximal run of its bits, in lvalue order, that are consecutive bits of one
+     temporary group (v4.2, Yosys's `addChunkActions`; `{a, b} = x` gives two actions).
    - **Non-blocking `lhs <= rhs`**: the same without updating `rv` (a later read still sees the
      value at the block's start, T8).
    - **`begin … end`**: its statements in order; a named block's locals are module-level
@@ -1309,9 +1340,15 @@ Cost: O(statements × lvalue bits) plus the removals; the generator's memory is 
   `t1 = rv(bits)` and runs with `lv(bits) = t1`, saving and restoring `lv`/`rv` around each case;
   after the switch, `rv(bits) = t1` and the current case gets `lv(bits) = t1` (after removing
   earlier assignments to `lv(bits)`). Non-blocking assignments in a branch write `lv` directly
-  (the root temporary), relying on "switch overrides action".
+  (the root temporary), relying on "switch overrides action". **Chunks** (v4.2): `bits` are
+  sorted (as the outputs, EL-35 step 1) and split into chunks, `t1` is one temporary group per
+  chunk (Yosys's `new_temp_signal`: one `$1\x[h:l]` wire per chunk), and the entry `t1 = rv(bits)`,
+  the exit `lv(bits) = t1` and the added default below are each one action per chunk
+  (`addChunkActions`). An 8-bit `q` assigned in a `case` gives one 8-bit action per case, so
+  `proc` builds one 8-bit `$pmux`, not eight 1-bit ones.
 - **Default**: when the case has no `default` item, a default case is added that assigns
-  `t1 = rv(bits)` (unchanged); with `full_case` and no `default`, it assigns x instead (Yosys).
+  `t1 = rv(bits)` (unchanged); with `full_case` and no `default`, it assigns x instead (Yosys);
+  one action per chunk either way (v4.2).
 - **`full_case` and `parallel_case`** (C10, D1), from `(* *)` attributes or `// synopsys`
   metacomments on the `CASE` (2A §7, 2C §2.6): they set the switch flags `FULL_CASE` and
   `PARALLEL_CASE` and are honoured as Yosys honours them (the x default above; `proc` builds

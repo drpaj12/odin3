@@ -105,8 +105,7 @@ Ways to fill it (all produce the same record; a script may also list files direc
   `MULTSTYLE`); every other assignment (pins, timing, partitions, …) is ignored and listed in one
   info line;
 - **Odin II XML config** (`-c config.xml`: `<verilog_files>` or `<inputs>`, `<output>` with
-  `<arch_file>`, `<optimizations>`), for users moving from Odin II (when its reader lands,
-  after Phase 2).
+  `<arch_file>`, `<optimizations>`), for users moving from Odin II (its reader lands with 2B).
 
 **Project file syntax (normative).** The reference parsers are `tools/project-fixtures`; the
 test corpus `tests/golden/projects` (PHASE1 #19) holds every case in every format that can

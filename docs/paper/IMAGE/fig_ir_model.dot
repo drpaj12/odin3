@@ -1,0 +1,36 @@
+// Odin III IR object model (docs/IR.md sections 1-6, src/ir/ir_internal.h).
+// Record sizes are sizeof() on x86-64 (gcc 13): node 40 B, pin 24 B, net 40 B, wire 40 B.
+digraph ir_model {
+    graph [rankdir=LR, fontname="Helvetica", fontsize=9, nodesep=0.15, ranksep=0.35, pad=0.05];
+    node  [shape=record, fontname="Helvetica", fontsize=8, height=0.2];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    design [label="Design|strtab (names, paths)|<pr>prov store (lineage DAG)|pass-run table|tombstones|<ct>cell-type table|<m>modules[ ]|top",
+            style=filled, fillcolor="#e8eef8"];
+
+    module [label="Module (IR-18)|<n>nodes: pagevec\<node 40 B\>|<p>pins: pagevec\<pin 24 B\>|<t>nets: pagevec\<net 40 B\>|<w>wires: pagevec\<wire 40 B\>|name maps: u64map|alias + attribute side tables|pinpool (2, 4, 8, ...)|arena (params, wire vectors)",
+            style=filled, fillcolor="#eef6ee"];
+
+    node_r [label="node|<ty>type: celltype_id|name: str id|<pv>prov: prov_id|<fp>first_pin, pin_count|params (arena)|dead"];
+    pin_r  [label="<h>pin|node: node_id|port, bit|<nt>net: net_id (0 = open)|slot in net array|dir"];
+    net_r  [label="<h>net|<pa>pins[ ]: drivers \| sinks|driver_count|name, prov|primary (wire, bit)|alias chain|dead"];
+    wire_r [label="wire|name, prov|[msb:lsb], signed|<wn>nets[ ] LSB first|port node"];
+    ct     [label="cell type (op registry, IR-8)|name ($add, $_AND_, adder ...)|granularity: word \| bit \| hard\n \| blackbox \| module \| port|ports + width rules|params + defaults|hooks: verify, const_value,\nsimulate, writers",
+            style=filled, fillcolor="#fbf3e0"];
+    prov   [label="prov record (IR-12)|kind: SOURCE \| IMPORTED \| DERIVED|run, op|locs[ ] (file:line, raw loc)|ast node id|hier path|parents[ ]",
+            style=filled, fillcolor="#f6e8f0"];
+
+    design:m -> module [label="owns"];
+    design:ct -> ct [label="table"];
+    design:pr -> prov [label="store"];
+    module:n -> node_r;
+    module:p -> pin_r;
+    module:t -> net_r;
+    module:w -> wire_r;
+    node_r:fp -> pin_r:h [label="pins contiguous"];
+    pin_r:nt -> net_r:h [label="net id"];
+    net_r:pa -> pin_r:h [label="pin ids", style=dashed];
+    wire_r:wn -> net_r:h [label="net ids", style=dashed];
+    node_r:ty -> ct [label="type id"];
+    node_r:pv -> prov [label="prov id"];
+}

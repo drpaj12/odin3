@@ -1,0 +1,38 @@
+// The source manager's location space for the worked example of the 2A spec section 3.1:
+//   1  `define INNER(p) (p + 1)
+//   2  `define OUTER(q) `INNER(q * 2)
+//   3  assign y = `OUTER(xx);
+// Buffers are allocated in creation order (F, E1, A1, E2, A2, A3) in one 32-bit location space.
+// parent (solid) = where the buffer was entered; def (dashed) = where its bytes are spelled.
+digraph srcman {
+    graph [rankdir=BT, fontname="Helvetica", fontsize=9, nodesep=0.25, ranksep=0.4, pad=0.05];
+    node  [shape=box, style="filled", fontname="Helvetica", fontsize=8, height=0.3,
+           margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    F  [label="FILE f.v\n(lines 1-3)", fillcolor="#e8eef8"];
+    E1 [label="EXPANSION E1\nOUTER body, 13 B", fillcolor="#fbf3e0"];
+    A1 [label="MACRO_ARG A1\nq <- xx, 2 B", fillcolor="#eef6ee"];
+    E2 [label="EXPANSION E2\nINNER body, 7 B", fillcolor="#fbf3e0"];
+    A2 [label="MACRO_ARG A2\np <- xx, 2 B", fillcolor="#eef6ee"];
+    A3 [label="MACRO_ARG A3\np <- ' * 2', 4 B", fillcolor="#eef6ee"];
+
+    E1 -> F  [label="parent 3:12"];
+    E1 -> F  [label="def 2:18", style=dashed];
+    A1 -> E1 [label="parent E1+7"];
+    A1 -> F  [label="def 3:19", style=dashed];
+    E2 -> E1 [label="parent E1+0"];
+    E2 -> F  [label="def 1:18", style=dashed];
+    A2 -> E2 [label="parent E2+1"];
+    A2 -> A1 [label="def A1+0", style=dashed];
+    A3 -> E2 [label="parent E2+1"];
+    A3 -> E1 [label="def E1+8", style=dashed];
+
+    out [shape=plaintext, style="", label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+        <TR><TD COLSPAN="6" BGCOLOR="#f2f2f2"><B>stream text and its segment map</B></TD></TR>
+        <TR><TD>assign y = </TD><TD>(</TD><TD>xx</TD><TD> * 2</TD><TD> + 1)</TD><TD>;</TD></TR>
+        <TR><TD>F 3:1</TD><TD>E2+0</TD><TD>A2+0</TD><TD>A3+0</TD><TD>E2+2</TD><TD>F 3:22</TD></TR>
+      </TABLE>>];
+    out -> A2 [style=invis]; out -> A3 [style=invis];
+}

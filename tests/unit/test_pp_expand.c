@@ -352,6 +352,35 @@ static void test_default_buffers(void) {
     assert_buf(2, (buf_want){ODIN3_SRCBUF_MACRO_ARG, "D", 2, file_loc("1:13"), in(1, 1), in(1, 2)});
 }
 
+/* 2A §3.3: a comment inside a macro definition is in no stream, defaults included. A comment at
+ * a default's edge trims like a blank; one inside it becomes one loc-0 space, like a body's,
+ * and splits the default's spelled runs (one MACRO_ARG buffer each). Yosys gives [3] and
+ * [1 + 2]; Icarus keeps the comments (2B Task 13 fix round 1). */
+static void test_comment_in_default_is_dropped(void) {
+    assert_ok_text(run("`define A(x=/*c*/ 3) [x]\nq = `A();\n"), "\nq = [3];\n");
+    assert_buf(2, (buf_want){ODIN3_SRCBUF_MACRO_ARG, "A", 1, file_loc("1:19"), in(1, 1), in(1, 2)});
+    assert_ok_text(run("`define B(x=1 /* c */+ 2 /**/, y=/*a*/ /*b*/) [x|y]\nq = `B();\n"),
+                   "\nq = [1  + 2|];\n");
+    TEST_ASSERT_EQUAL_UINT32(4, buffers_made()); /* f.v, E(B), the runs "1 " and "+ 2" */
+    assert_buf(2, (buf_want){ODIN3_SRCBUF_MACRO_ARG, "B", 2, file_loc("1:13"), in(1, 1), in(1, 2)});
+    assert_buf(3, (buf_want){ODIN3_SRCBUF_MACRO_ARG, "B", 3, file_loc("1:22"), in(1, 1), in(1, 2)});
+    uint32_t count = 0;
+    const odin3_srcseg_rec *segs = segments(&count);
+    TEST_ASSERT_EQUAL_UINT32(8, count); /* \nq =, [, 1, ' ', + 2, |, ], ;\n */
+    TEST_ASSERT_EQUAL_UINT32(0, segs[3].loc);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_check(pp, stream.stream));
+}
+
+/* A string or an escaped identifier holding comment marks keeps them; a // in a default ends
+ * the logical line, so the formal list is unterminated (a continuation inside it continues
+ * nothing). */
+static void test_comment_marks_in_default_strings_stay(void) {
+    assert_ok_text(run("`define S(x=\"/*s*/\" \\e/*f ) [x]\nq = `S();\n"),
+                   "\nq = [\"/*s*/\" \\e/*f];\n");
+    assert_error(run("`define A(x=1 // c \\\n ) [x]\n"),
+                 "f.v:1:13: error: syntax: unterminated default of formal 'x' of macro 'A'");
+}
+
 static void test_probe_w2_empty_formal_list(void) {
     assert_ok_text(run_probe("w2.v"), "\nmodule m(output [3:0] o); assign o = 5; endmodule\n");
 }
@@ -816,6 +845,8 @@ static void run_use_tests(void) {
     RUN_TEST(test_probe_v2_too_few);
     RUN_TEST(test_defaults);
     RUN_TEST(test_default_buffers);
+    RUN_TEST(test_comment_in_default_is_dropped);
+    RUN_TEST(test_comment_marks_in_default_strings_stay);
     RUN_TEST(test_probe_w2_empty_formal_list);
     RUN_TEST(test_empty_formal_list_rejects_actuals);
     RUN_TEST(test_probe_t6);

@@ -173,6 +173,7 @@ static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
 
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
     double start = now_ms();
+    odin3_design_set_diag_paths(design, g_options.diag_paths); /* PRJ-18 --diag-paths */
     odin3_pass_ctx ctx = {0};
     odin3_status st = open_run(design, def->name, &ctx);
     if (st != ODIN3_OK) {

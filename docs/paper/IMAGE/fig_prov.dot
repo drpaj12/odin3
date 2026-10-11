@@ -1,0 +1,27 @@
+// Provenance lineage DAG (IR-12, IR-13), an illustrative example: one source line inside a
+// generate loop elaborates to two $add cells (two SOURCE records, told apart by hier);
+// lowering each $add is one operation (one DERIVED record shared by its pieces); clumping two
+// gates is one operation with two parents. Records are immutable, hash-consed, design-global;
+// parents always have smaller IDs. Run and op numbers are illustrative.
+digraph prov {
+    graph [rankdir=BT, fontname="Helvetica", fontsize=9, nodesep=0.2, ranksep=0.3, pad=0.05];
+    node  [shape=box, style="filled", fontname="Helvetica", fontsize=8, fillcolor="#f6e8f0",
+           margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    r1 [label="#1 SOURCE, run 3\nf.v:42, top/g[0]"];
+    r2 [label="#2 SOURCE, run 3\nf.v:42, top/g[1]"];
+    r3 [label="#3 DERIVED\nrun 7 lower, op 15"];
+    r4 [label="#4 DERIVED\nrun 7 lower, op 16"];
+    r5 [label="#5 DERIVED\nrun 9 opt, op 2"];
+    a1 [label="$add (dead)", shape=ellipse, fillcolor="#ffffff"];
+    a2 [label="$add (tombstone)", shape=ellipse, fillcolor="#ffffff"];
+    g1 [label="gates of g[0]", shape=ellipse, fillcolor="#ffffff"];
+    g2 [label="gates of g[1]", shape=ellipse, fillcolor="#ffffff"];
+    g3 [label="merged gate", shape=ellipse, fillcolor="#ffffff"];
+
+    r3 -> r1 [label="parent"]; r4 -> r2 [label="parent"];
+    r5 -> r3 [label="parent"]; r5 -> r4 [label="parent"];
+    a1 -> r1 [style=dashed]; a2 -> r2 [style=dashed];
+    g1 -> r3 [style=dashed]; g2 -> r4 [style=dashed]; g3 -> r5 [style=dashed];
+}

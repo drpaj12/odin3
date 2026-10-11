@@ -25,7 +25,7 @@ static const char *str_text(const odin3_project *proj, uint32_t str) {
     return odin3_strtab_get(odin3_design_strtab(proj->design), str);
 }
 
-/* An unlocated error ("odin3: error: …") naming name (none when NULL). */
+/* An unlocated error ("<kind>: …", no location) naming name (none when NULL). */
 static odin3_status unlocated(odin3_project *proj, odin3_proj_err_kind kind, const char *detail,
                               const odin3_bytes *name) {
     odin3_proj_err err = {kind, ODIN3_PROJ_UNLOCATED, {0}, NULL, detail, name, name != NULL};
@@ -47,14 +47,12 @@ static odin3_status append_cwd(odin3_strbuf *out) {
         odin3_util_free(buf);
         if (got || err != ERANGE) {
             if (!got) {
-                odin3_log(ODIN3_LOG_ERROR, "odin3: error: cannot read the working directory: %s",
-                          strerror(err));
+                odin3_log(ODIN3_LOG_ERROR, "cannot read the working directory: %s", strerror(err));
             }
             return got ? res : ODIN3_ERR_IO;
         }
     }
-    odin3_log(ODIN3_LOG_ERROR, "odin3: error: cannot read the working directory: %s",
-              strerror(ERANGE));
+    odin3_log(ODIN3_LOG_ERROR, "cannot read the working directory: %s", strerror(ERANGE));
     return ODIN3_ERR_IO;
 }
 
@@ -94,7 +92,7 @@ static odin3_status format_of(odin3_project *proj, const odin3_project_request *
     return ODIN3_OK;
 }
 
-/* The entry must be a regular file; its format must have a reader; a revision needs Quartus. */
+/* The entry must be a regular file; a revision needs Quartus. */
 static odin3_status check_entry(odin3_project *proj, const odin3_project_request *req,
                                 odin3_bytes resolved, uint8_t *format) {
     odin3_bytes given = odin3_bytes_cstr(req->entry);
@@ -103,10 +101,6 @@ static odin3_status check_entry(odin3_project *proj, const odin3_project_request
     }
     *format = req->format;
     odin3_status res = *format == 0 ? format_of(proj, req, resolved, format) : ODIN3_OK;
-    if (res == ODIN3_OK && *format == ODIN3_PROJ_FORMAT_ODIN2) {
-        return unlocated(proj, ODIN3_PROJ_ERR_UNKNOWN_FILE_TYPE, "no Odin II XML reader yet",
-                         &given);
-    }
     if (res == ODIN3_OK && req->revision != NULL && *format != ODIN3_PROJ_FORMAT_QUARTUS) {
         return unlocated(proj, ODIN3_PROJ_ERR_SYNTAX, "--revision needs a .qpf or .qsf entry",
                          NULL);
@@ -146,6 +140,8 @@ static odin3_status run_reader(odin3_project *proj, const odin3_project_request 
     switch (proj->format) {
     case ODIN3_PROJ_FORMAT_O3PROJ:
         return odin3_read_o3proj(proj, &proj->entry);
+    case ODIN3_PROJ_FORMAT_ODIN2:
+        return odin3_read_odin2(proj, &proj->entry);
     case ODIN3_PROJ_FORMAT_QUARTUS: {
         odin3_quartus_req quartus = {{"", 0}, req->revision != NULL, {0}};
         if (quartus.has_revision) {
@@ -223,7 +219,7 @@ odin3_status odin3_project_read(odin3_design *design, const odin3_project_reques
         return res;
     }
     if (proj->finished) { /* point (e): misuse, the record read first stays */
-        odin3_log(ODIN3_LOG_ERROR, "odin3: error: project already read from %s",
+        odin3_log(ODIN3_LOG_ERROR, "project already read from %s",
                   str_text(proj, proj->entry.given));
         return ODIN3_ERR_INVALID_ARG;
     }

@@ -63,7 +63,7 @@ static odin3_status violation(const char *fmt, ...) {
     va_start(args, fmt);
     (void)vsnprintf(msg, sizeof msg, fmt, args);
     va_end(args);
-    odin3_log(ODIN3_LOG_ERROR, "odin3: error: pp_check: %s", msg);
+    odin3_log(ODIN3_LOG_ERROR, "pp_check: %s", msg);
     return ODIN3_ERR_CHECK;
 }
 

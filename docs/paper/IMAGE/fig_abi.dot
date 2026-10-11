@@ -1,0 +1,23 @@
+// The C ABI and plugin model (1D spec, DESIGN.md section 15.3, include/odin3/odin3.h ABI v4).
+digraph abi {
+    graph [rankdir=TB, fontname="Helvetica", fontsize=9, nodesep=0.2, ranksep=0.35, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=8,
+           fillcolor="#eef6ee", margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    cli  [label="odin3 CLI\n(scripts: -p \"...\" or .o3)"];
+    so   [label="C plugin .so\nodin3_plugin_init(abi)\nregisters passes, cell types"];
+    py   [label="Python (cffi, ABI mode)\nplugins/python/odin3.py"];
+    hook [label="executable hooks\nIR as JSON on stdin/stdout\n(Phase 7)", style="rounded,filled,dotted", fillcolor="#ffffff"];
+    sl   [label="slang adapter .so (C++)\nodin3_read_slang\n(Phase 5)", style="rounded,filled,dotted", fillcolor="#ffffff"];
+
+    hdr  [label="include/odin3/odin3.h: ABI v4, 125 functions\nopaque odin3_design; uint32_t IDs + module handle;\nodin3_status returns; out-pointers; no attributes in the cdef block",
+          shape=box, style=filled, fillcolor="#e8eef8"];
+    lib  [label="libodin3.so (hidden visibility; ODIN3_EXPORT on src/api definitions)\npass manager: provenance run, check before and after, timing",
+          shape=box, style=filled, fillcolor="#fbf3e0"];
+    core [label="odin3_core objects: util, ir, ast, frontends, passes, backends, sim, techlib",
+          shape=box, style=filled, fillcolor="#f2f2f2"];
+
+    cli -> hdr; so -> hdr; py -> hdr; hook -> hdr [style=dotted]; sl -> hdr [style=dotted];
+    hdr -> lib -> core;
+}

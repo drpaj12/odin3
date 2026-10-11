@@ -1,0 +1,7 @@
+# A tiny project for the read_project, dump_project and preprocess tests (test_project_pass,
+# cli_project_*): one Verilog file that includes a header from the include path and uses a
+# project define and a macro with an argument.
+incdir inc
+define WIDTH=4
+file verilog src/top.v
+top top

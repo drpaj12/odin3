@@ -284,7 +284,69 @@ static odin3_status scan_to_separator(def_state *ds, bool *open) {
     return ODIN3_OK;
 }
 
-/* A formal's default: the text to the next top-level ',' or ')', trimmed. Its spelled copy keeps
+/* A definition's text being walked by odin3_pp_def_item. */
+typedef struct def_view {
+    const uint8_t *text;
+    uint32_t len;
+} def_view;
+
+/* The end of the string opening at at (past its closing quote; the scanner saw it closed). */
+static uint32_t def_string_end(def_view view, uint32_t at) {
+    uint32_t end = at + 1;
+    while (end < view.len && view.text[end] != '"') {
+        end += view.text[end] == '\\' && end + 1 < view.len ? 2 : 1;
+    }
+    return end < view.len ? end + 1 : view.len;
+}
+
+/* The end of the block comment opening at at (past its closing star-slash). */
+static uint32_t def_comment_end(def_view view, uint32_t at) {
+    uint32_t end = at + 2;
+    while (end + 1 < view.len && !(view.text[end] == '*' && view.text[end + 1] == '/')) {
+        end++;
+    }
+    return end + 1 < view.len ? end + 2 : view.len;
+}
+
+uint32_t odin3_pp_def_item(const uint8_t *text, uint32_t len, uint32_t at, bool *comment) {
+    *comment = text[at] == '/' && at + 1 < len && text[at + 1] == '*';
+    if (*comment) {
+        return def_comment_end((def_view){text, len}, at);
+    }
+    if (text[at] == '"') {
+        return def_string_end((def_view){text, len}, at);
+    }
+    uint32_t end = at + 1;
+    if (text[at] == '\\' && end < len && !odin3_pp_is_blank(text[end])) {
+        while (end < len && !odin3_pp_is_blank(text[end])) {
+            end++;
+        }
+    }
+    return end;
+}
+
+/* span without the blanks and block comments at either end: a comment in a definition is in no
+ * stream (2A §3.3), so one at a default's edge trims like a blank. */
+static text_span trim_default(const odin3_pp_deftext *txt, text_span span) {
+    const uint8_t *text = txt->bytes + span.start;
+    uint32_t len = span.end - span.start;
+    uint32_t first = len;
+    uint32_t last = 0;
+    for (uint32_t i = 0; i < len;) {
+        bool comment = false;
+        uint32_t end = odin3_pp_def_item(text, len, i, &comment);
+        if (!comment && !(end == i + 1 && trims(text[i], true))) {
+            first = first < i ? first : i;
+            last = end;
+        }
+        i = end;
+    }
+    return first < last ? (text_span){span.start + first, span.start + last}
+                        : (text_span){span.start, span.start};
+}
+
+/* A formal's default: the text to the next top-level ',' or ')', trimmed of blanks and
+ * comments (its inner comments become loc-0 spaces at substitution). Its spelled copy keeps
  * any continuation: a default ending in `\`-newline keeps the `\` (the newline is trimmed), so
  * the I2 rule (drop the `\`, keep the newline) never applies to defaults (Icarus keeps it too). */
 static odin3_status scan_default(def_state *ds, odin3_pp_formal *formal) {
@@ -300,9 +362,7 @@ static odin3_status scan_default(def_state *ds, odin3_pp_formal *formal) {
                               (const char *)ds->name.ptr);
     }
     span.end = txt->pos;
-    while (span.end > span.start && trims(txt->bytes[span.end - 1], true)) {
-        span.end--;
-    }
+    span = trim_default(txt, span);
     if (st == ODIN3_OK) {
         st = text_cap(ds, span);
     }

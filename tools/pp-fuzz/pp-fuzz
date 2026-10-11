@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# pp-fuzz: model-based fuzzing of the Verilog preprocessor (2B §10.5). See pp_fuzz.py.
+# Exit codes: 0 every case passed, 1 a case failed, 2 usage error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/pp_fuzz.py" "$@"

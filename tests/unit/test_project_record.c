@@ -181,10 +181,12 @@ static void test_limits_hook(void) {
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_FLIST_DEPTH, proj->limits.flist_depth);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_QIP_DEPTH, proj->limits.qip_depth);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_WORDS, proj->limits.words);
-    odin3_project_test_set_limits(proj, (odin3_proj_limits){2, 3, 4});
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_XML_NODES, proj->limits.xml_nodes);
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){2, 3, 4, 5});
     TEST_ASSERT_EQUAL_UINT32(2, proj->limits.flist_depth);
     TEST_ASSERT_EQUAL_UINT32(3, proj->limits.qip_depth);
     TEST_ASSERT_EQUAL_UINT32(4, proj->limits.words);
+    TEST_ASSERT_EQUAL_UINT32(5, proj->limits.xml_nodes);
 }
 
 /* --- loading project files (PRJ-5) --------------------------------------------------------- */
@@ -316,8 +318,7 @@ static void test_load_unreadable_and_too_big(void) {
     odin3_proj_path file = tmp_path("none.f");
     odin3_proj_text loaded;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, (odin3_loc){0}, &loaded));
-    TEST_ASSERT_EQUAL_STRING("odin3: error: cannot read 'none.f': No such file or directory",
-                             captured);
+    TEST_ASSERT_EQUAL_STRING("cannot read 'none.f': No such file or directory", captured);
     TEST_ASSERT_NULL(loaded.bytes);
     odin3_proj_text_free(&loaded);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, word_loc(), &loaded));
@@ -325,8 +326,7 @@ static void test_load_unreadable_and_too_big(void) {
                              captured);
     odin3_design_set_diag_paths(design, ODIN3_SRCFMT_RESOLVED);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_project_load(proj, &file, (odin3_loc){0}, &loaded));
-    (void)snprintf(expected, sizeof expected,
-                   "odin3: error: cannot read '%s': No such file or directory",
+    (void)snprintf(expected, sizeof expected, "cannot read '%s': No such file or directory",
                    in_tmp("none.f", path));
     TEST_ASSERT_EQUAL_STRING(expected, captured);
     odin3_design_set_diag_paths(design, ODIN3_SRCFMT_GIVEN);
@@ -337,7 +337,7 @@ static void test_load_unreadable_and_too_big(void) {
     file = tmp_path("big.f");
     errors = 0;
     expect_error(odin3_project_load(proj, &file, (odin3_loc){0}, &loaded),
-                 "odin3: error: syntax: file 'big.f' is 268435457 bytes, over the limit of "
+                 "syntax: file 'big.f' is 268435457 bytes, over the limit of "
                  "268435456");
     odin3_proj_text_free(&loaded);
 }
@@ -441,8 +441,9 @@ static void test_set_top_file_level(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_project_set_top_file(proj, odin3_bytes_cstr("x"), &qsf));
     TEST_ASSERT_EQUAL_UINT32(0, proj->top_at.v);
     TEST_ASSERT_EQUAL_UINT32(qsf.resolved, proj->top_file.resolved);
+    /* odin3_diag names located errors in the design's style too (PRJ-18) */
     expect_error(odin3_project_set_top(proj, odin3_bytes_cstr("y"), word_loc()),
-                 "p.o3proj:2:5: error: syntax: top given twice (first x): 'y'");
+                 "/abs/p.o3proj:2:5: error: syntax: top given twice (first x): 'y'");
 }
 
 static void test_counts(void) {
@@ -492,10 +493,10 @@ static void test_nul_bytes_rejected(void) {
     expect_error(odin3_project_add_libext(proj, (odin3_bytes){ext, sizeof ext - 1}, at),
                  "p.o3proj:2:5: error: syntax: NUL byte in word: '.\\0.v'");
     expect_error(odin3_project_add_ignored(proj, (odin3_bytes){ignored, sizeof ignored - 1}),
-                 "odin3: error: syntax: NUL byte in word: 'A\\0B'");
+                 "syntax: NUL byte in word: 'A\\0B'");
     uint32_t got = 0;
     expect_error(odin3_project_intern(proj, (odin3_bytes){ignored, sizeof ignored - 1}, &got),
-                 "odin3: error: syntax: NUL byte in word: 'A\\0B'");
+                 "syntax: NUL byte in word: 'A\\0B'");
     TEST_ASSERT_EQUAL_size_t(strings, odin3_strtab_count(odin3_design_strtab(design)));
     TEST_ASSERT_EQUAL_size_t(0, proj->defines.len);
     TEST_ASSERT_EQUAL_size_t(0, proj->libext.len);
@@ -531,7 +532,7 @@ static void test_fail_forms(void) {
                            .scope = ODIN3_PROJ_UNLOCATED,
                            .names = names,
                            .nnames = 1};
-    expect_error(odin3_project_fail(proj, &err), "odin3: error: unknown_revision: 'files.f'");
+    expect_error(odin3_project_fail(proj, &err), "unknown_revision: 'files.f'");
     odin3_proj_path qpf = abs_path("p.qpf", "/abs/p.qpf");
     err = (odin3_proj_err){.kind = ODIN3_PROJ_ERR_MISSING_FILE,
                            .scope = ODIN3_PROJ_FILE,
@@ -540,7 +541,7 @@ static void test_fail_forms(void) {
     expect_error(odin3_project_fail(proj, &err),
                  "p.qpf: error: missing_file: revision file not found");
     err = (odin3_proj_err){.kind = ODIN3_PROJ_ERR_SYNTAX, .scope = ODIN3_PROJ_UNLOCATED};
-    expect_error(odin3_project_fail(proj, &err), "odin3: error: syntax");
+    expect_error(odin3_project_fail(proj, &err), "syntax");
 }
 
 static void test_error_kind_names(void) {

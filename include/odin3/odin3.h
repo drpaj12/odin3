@@ -230,6 +230,13 @@ odin3_status odin3_design_get_module_at(const odin3_design *design, uint32_t ind
 odin3_status odin3_design_lookup_module(const odin3_design *design, const char *name,
                                         uint32_t *module);
 
+/*
+ * True when a read_project pass has filled the design's project record (2B PRJ-1; the record
+ * itself leaves the process only through the dump_project pass). False for a NULL design, before
+ * any read_project and after a failed one. Never fails.
+ */
+bool odin3_design_has_project(const odin3_design *design);
+
 /* --- passes and pass scripts --------------------------------------------------------------- */
 
 /* Number of registered passes (built-ins first, then plugin passes in registration order).
@@ -263,6 +270,22 @@ void odin3_pass_set_check(bool check);
  * odin3_design_set_top_module. Fails only with ODIN3_ERR_NO_MEMORY (the old name is kept).
  */
 odin3_status odin3_pass_set_top_name(const char *name);
+
+/*
+ * Sets the requested Quartus revision for later read_project passes (the CLI's --revision; 2B
+ * PRJ-16), so the flag reaches a read_project inside a script; a read_project's own --revision
+ * wins. "" is a revision; NULL clears it. The string is copied. Process-wide. A revision with an
+ * entry that is not a .qpf/.qsf makes that read_project fail. Fails only with ODIN3_ERR_NO_MEMORY
+ * (the old revision is kept).
+ */
+odin3_status odin3_pass_set_revision(const char *revision);
+
+/*
+ * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false
+ * (the default) as the path was given, true as its absolute resolved path. Applied to the design
+ * before each pass runs. Process-wide. Never fails.
+ */
+void odin3_pass_set_diag_paths(bool resolved);
 
 /* How a script's errors are located: "origin:line: …" (a file) or "origin: command k: …". */
 typedef enum odin3_script_loc { ODIN3_SCRIPT_BY_LINE, ODIN3_SCRIPT_BY_COMMAND } odin3_script_loc;

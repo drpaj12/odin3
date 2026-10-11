@@ -352,7 +352,8 @@ static void test_libext_ceiling(void) {
 /* ODIN3_PROJ_MAX_WORDS caps the words of each line (here lowered to 3), counted before they
  * are stored: the 4th word is a located error; the cap is per line. */
 static void test_word_cap(void) {
-    odin3_proj_limits low = {ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 3};
+    odin3_proj_limits low = {ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 3,
+                             ODIN3_PROJ_MAX_XML_NODES};
     odin3_project_test_set_limits(proj, low);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_text("libext .v .sv\nlibext .v .sv .vh\n"));
     TEST_ASSERT_EQUAL_STRING(

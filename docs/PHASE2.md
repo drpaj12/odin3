@@ -28,7 +28,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 ## Checklist
 
 - [ ] 2A AST + symbol table spec approved, implemented, merged
-- [ ] 2B project readers pass the corpus (Phase 2 formats); preprocessor
+- [x] 2B project readers pass the corpus (Phase 2 formats); preprocessor
 - [ ] 2C parser covers the synthesizable Verilog-2005 subset (coverage table, #3)
 - [ ] 2D elaboration to word-level IR
 - [ ] 2E `proc`
@@ -260,7 +260,12 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
         - `` `line `` inside a macro body: Yosys applies it, Icarus and 2B drop it;
         - a `//` comment ending a `` `define `` with a trailing `\`: Yosys and 2B end the
           text, Icarus continues it;
-        - formals inside body strings (§10.4).
+        - formals inside body strings (§10.4);
+        - a comment in a formal default (`` `define A(x=/*c*/ 3) [x] ``): Icarus keeps the
+          comment text in the expansion, Yosys and 2B drop it. The tokens are identical, so
+          pp-diff reports agree, not oracles disagree; the fixture
+          `tests/tools/fixtures/pp_diff/default_comment.v` pins it against both oracles (2B-3
+          final review).
     - *Benchmark* (`build/release/bench_pp`, Release, dev machine (i7-13700, WSL2), 2026-10-10,
       `$VTR_ROOT/vtr_flow/benchmarks/verilog`, after the fix round, output verbatim):
 
@@ -312,6 +317,104 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 
       The spec's "51 `define`s" for mcml.v counts 12 commented-out lines; 39 definitions are
       made. mcml.v needs 2,776 buffers (the spec estimated about 5,000).
+    - *pp-diff* (2B Task 12, 2026-10-11; spec §10.4; `tools/pp-diff`, CTest `pp_diff`, label
+      `differential`, exit 77 and skipped without `iverilog`, Yosys or the VTR set, so not run
+      in CI). Odin III's `preprocess` is compared with `iverilog -E -g2005 -grelative-include`
+      and with Yosys `read_verilog -nosynthesis -ppdump`.
+      - *How it runs:* Odin III runs in its own directory. The oracles run from a separate empty
+        directory. `-I` directories are made absolute first. All three outputs are normalized
+        alike (PP-10 regions; pass-through, `` `line ``, `` `file_push `` and `` `file_pop ``
+        lines) and compared as tokens.
+      - *What the normalization hides:* normalizing Odin III's stream would hide a PP-10 or
+        pass-through bug. So its raw stream must also hold no `translate_off` comment.
+        Pass-through is covered by `test_pp_directives`.
+      - *Failure rules:*
+        - Odin III rejects only by exit 1 with an `error: kind: detail` line. A signal, a
+          sanitizer abort, a timeout, any other exit code or a missing diagnostic is CRASH.
+          So is an oracle signal or timeout.
+        - Icarus rejects by a nonzero exit or by an error line on stderr, since it exits 0
+          after some errors.
+        - Where the oracles disagree, the table `ORACLES_DISAGREE` names the oracle Odin III
+          must match. A file with no row in the table, or one matching the other oracle,
+          fails.
+      - *Input set:* `pp-diff --suite` takes 287 files, smallest first, mcml.v last: 20 reviewer
+        probes (`rec.v` included), 2 fixtures, 234 micros that hold a backtick and are not
+        included by another micro, and 31 VTR files. The debug build runs it in 10 s, exit 0.
+      - *Result:* agree 271, oracles disagree 11 (all as the table expects), declared 5,
+        excluded 20. DIFFER, CRASH, DECLARED NOT MET and DISAGREE NOT EXPECTED are all 0.
+        - The 271 are 8 probes (in v2 all three tools reject), the fixture
+          `default_comment.v`, 231 micros, and all 31 VTR files
+          (mcml.v: 133,191 tokens). The four `translate_off` benchmarks are among them.
+      - *Declared:* the Odin III error is expected, and both oracles must accept alike.
+        - probes t5 and u3: `directive inside macro text`;
+        - probe w1: `recursive macro 'N'`;
+        - the fixture `tests/tools/fixtures/pp_diff/directive_name.v` (`` `define timescale 1 ``);
+        - `rec.v`: `recursive macro 'R'`. Odin III runs alone here, because both oracles loop
+          forever on it.
+      - *Oracles disagree.* Each row below gives the oracle Odin III must match:
+        - Yosys:
+          - t8 and the 3 splicing micros: Icarus substitutes nothing for an undefined macro;
+          - t6: Icarus substitutes formals in a string;
+          - w2: `` `define F() ``, which Icarus rejects;
+          - t4: a `//` comment ending in `\`, after which Icarus continues the `define`;
+          - t7: a comment inside a body, where Icarus pastes `ab`.
+        - Icarus:
+          - t9 and w5: a newline before `(`, which Yosys rejects;
+          - u1: a multi-line `/* */` in a `define`. Icarus reports it, as Odin III does;
+            Yosys keeps it.
+      - *Excluded:* the 20 micros that another micro includes. They use their includer's
+        macros, so each is decided by Odin III's `files-read.txt`:
+        - 18 are compared through an includer.
+        - `ifdef-else-syntax/module_a_or.v` and `ifndef-else-syntax/module_a_and.v` are the
+          variants that their includer's conditional does not select, so no tool reads them.
+      - *Agent defaults:*
+        - `-grelative-include`, so Icarus searches the including file's directory first, as
+          Odin III (PP-11) and Yosys do.
+        - `-nosynthesis`, so Yosys does not define `SYNTHESIS`.
+        - A `` `NAME `` left in Yosys's dump counts as a Yosys rejection, because its lexer
+          reports "undefined macro" there. A Yosys parse error after the dump does not count.
+        - A declared divergence is checked by a substring of Odin III's error.
+        - A pass-through directive is stripped from its backtick to the end of its line.
+        - Based literals are compared without their inner blanks.
+        - No C fix was needed.
+    - *2B-3 final-review fix round* (2026-10-11; `final-review-2B3.md`):
+      - *I1:* `fuzz_pp_smoke` passes `-print_funcs=0`. Without an unversioned `llvm-symbolizer`,
+        libFuzzer's `NEW_FUNC` lines made ASan fall back to `addr2line` and stalled the 10 s
+        smoke for about 90 s, against a 120 s timeout. It now takes 11 s. CMake also sets
+        `ASAN_SYMBOLIZER_PATH` to a versioned `llvm-symbolizer` when one is found, so a crash
+        report stays readable.
+      - *I2:* unlocated errors no longer print `odin3: error: odin3: error: …`. The seven call
+        sites log `<kind>: <detail>` alone and the log sink supplies the prefix. The corpus
+        harness requires the `odin3: error: ` prefix and reports a doubled one.
+      - *Minors fixed:*
+        - the corpus README covers `compare`, `project_corpus` and `pp_properties`;
+        - a dumped `output` without `path` is reported, not a traceback;
+        - `dump_project ""` reports an empty path;
+        - `read_project --revision` refuses a value starting with `--`;
+        - `preprocess` logs `preprocess: no Verilog design files`;
+        - an OOM test covers `odin3_pass_set_revision`;
+        - `test_project_pass` pins the whole `0.segments.json`;
+        - pp-diff refuses a path holding `"` (exit 2);
+        - the `default_comment.v` fixture (M7 list above);
+        - `preprocess --out` is documented to expect a fresh directory.
+      - *Kept parked:* `project_pass.c` reading srcman internals, the loose Icarus error regex,
+        and srcman-raised paths under `--diag-paths resolved`. Each waits for the 2A srcman
+        touch or the next pp-diff change.
+    - *2B-4 Odin II XML reader* (2B Task 14, 2026-10-11; spec §5.4 PRJ-15; `xml.c`, `odin2.c`):
+      `.xml` entries and `--format odin2` read Odin II configs; `project_corpus` runs the
+      `odin2` format (`LANDED_FORMAT_PHASES` holds `odin2-reader`): 10 cases ok, the 4 whose
+      error needs the front end skipped as in the other formats. Agent defaults:
+      - a new cap `ODIN3_PROJ_MAX_XML_NODES` = 2^20 elements, attributes and text runs per XML
+        file, checked before each is stored (a 2^28-byte file of `<a/>` would otherwise need
+        about 3 GB; real configs hold under 100 nodes); it belongs in spec §9's table;
+      - the XML subset follows expat where the corpus is silent: a UTF-8 BOM and an XML
+        declaration at the start are skipped (its encoding ignored: UTF-8), newlines in text
+        and attribute values are normalized, C0 controls, invalid UTF-8, U+FFFE/U+FFFF and
+        `]]>` in text are `syntax`; lines count LF only (the source manager's lines), where
+        expat also counts a lone CR;
+      - `input_type` and `output_type` are lower-cased in ASCII only (Python's `str.lower()`
+        also folds non-ASCII letters); values are stripped as `str.strip()`
+        (`odin3_proj_py_strip`, now shared with `.o3proj` map cells).
 13. **2D spec approved** (`docs/specs/2026-10-11-2D-elaboration-design.md`; agent default under
    Peter's overnight rule, 2026-10-11, after a Fable review (2 critical, 10 important, 17 minor,
    all applied in v2) and a Fable re-review that approved v2 (minors N1–N7 applied in v3, N4 kept
@@ -349,3 +452,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
      default, and counts per design only when its excluded outputs are reviewed and recorded in
      the exceptions list (agent default; Peter may override). The defined-output miter of spec
      §14.6 item 5 is the follow-up in 2H's backlog.
+   - **Amendment (2D spec v4.2, EL-33):** the eight opt passes are `processes = OK` (`$proc`
+     opaque; `opt_muxtree`/`opt_clean` skip modules with processes), so Parmys's pre-`proc` opts
+     run in Parmys's order (2F mode P) — agent default for Peter's review; Fable-verified:
+     pre-proc opt order changes netlists, stereovision3 812 vs 792.

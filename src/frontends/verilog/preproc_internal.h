@@ -166,7 +166,7 @@ struct odin3_pp {
 /* The PP-9 error naming op ("syntax: '<op>' is a SystemVerilog macro operator; ..."). */
 odin3_status odin3_pp_sv_operator(odin3_pp *pp, odin3_loc at, const char *op);
 
-/* Logs "loc: error: msg" through odin3_diag (loc 0: "odin3: error: msg") and returns
+/* Logs "loc: error: msg" through odin3_diag (loc 0: msg alone, unlocated) and returns
  * ODIN3_ERR_PARSE. */
 odin3_status odin3_pp_error(odin3_pp *pp, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 
@@ -217,6 +217,11 @@ odin3_status odin3_pp_emit(odin3_pp *pp, odin3_pp_text text);
 bool odin3_pp_is_blank(int ch);
 bool odin3_pp_is_ident_start(int ch);
 bool odin3_pp_is_ident_char(int ch);
+
+/* The end of the item of a definition's text at at (text[0, len), already checked by the
+ * definition scanner): a string, a block comment (*comment set), an escaped identifier or one
+ * byte. Defaults are walked by it to drop their comments (2A §3.3). */
+uint32_t odin3_pp_def_item(const uint8_t *text, uint32_t len, uint32_t at, bool *comment);
 
 /* Reads an IDENT at the top frame's cursor within its current run (empty when none) and
  * advances past it. */
