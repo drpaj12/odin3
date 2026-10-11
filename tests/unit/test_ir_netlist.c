@@ -95,10 +95,10 @@ static const odin3_param_def k_mixed_params[] = {
     {"A_WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, MIXED_A, NULL, 0, 0, 0}},
 };
 static const odin3_port_def k_mixed_ports[] = {
-    {"A", ODIN3_DIR_IN, false, 0, "A_WIDTH", NULL, NULL},
-    {"B", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, false, MIXED_Y, NULL, NULL, NULL},
-    {"T", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL},
+    {"A", ODIN3_DIR_IN, false, 0, "A_WIDTH", NULL, NULL, false},
+    {"B", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, false, MIXED_Y, NULL, NULL, NULL, false},
+    {"T", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_celltype_def k_mixed = {"test_t3_mixed",
                                            ODIN3_GRAN_WORD,
@@ -122,9 +122,12 @@ static odin3_status width_verify(const odin3_value *params) {
 static const odin3_param_def k_width_params[] = {
     {"WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}},
 };
-static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL}};
-static const odin3_port_def k_drive_ports[] = {{"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL}};
-static const odin3_port_def k_bus_ports[] = {{"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL, NULL}};
+static const odin3_port_def k_sink_ports[] = {
+    {"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL, false}};
+static const odin3_port_def k_drive_ports[] = {
+    {"P", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL, false}};
+static const odin3_port_def k_bus_ports[] = {
+    {"P", ODIN3_DIR_INOUT, false, 0, "WIDTH", NULL, NULL, false}};
 static const odin3_celltype_def k_sink = {"test_t3_sink",
                                           ODIN3_GRAN_WORD,
                                           0,

@@ -250,9 +250,9 @@ static void test_constant_width_expression_folds(void) {
     TEST_ASSERT_NULL(def->ports[0].width_expr);
     TEST_ASSERT_EQUAL_UINT32(4, def->ports[0].width);
     TEST_ASSERT_TRUE(def->ports[1].scalar);
-    const odin3_port_def ports[3] = {{"a", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL},
-                                     {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                     {"y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    const odin3_port_def ports[3] = {{"a", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL, false},
+                                     {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                     {"y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     const odin3_celltype_def decl = {
         "cst", ODIN3_GRAN_BLACKBOX, 0, ports, 3, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};

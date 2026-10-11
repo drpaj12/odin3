@@ -134,9 +134,9 @@ static const odin3_param_def k_link_params[] = {
     {"INIT", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, k_init_bits, 3, 0, 0}},
 };
 static const odin3_port_def k_link_ports[] = {
-    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
-    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
+    {"Z", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_celltype_def k_link = {
     "test_t7_link", ODIN3_GRAN_WORD, 0, k_link_ports, 3, k_link_params, 2, NULL, NULL, NULL, NULL};
@@ -179,8 +179,10 @@ static odin3_prov_id chain_prov(const chain *ch, uint32_t line) {
 }
 
 static void chain_ports(odin3_module *mod, chain *ch) {
-    odin3_port_spec in = {intern("a"), ODIN3_DIR_IN, 1, true, chain_prov(ch, PORT_LINE)};
-    odin3_port_spec out = {intern("y"), ODIN3_DIR_OUT, 1, true, chain_prov(ch, PORT_LINE + 1)};
+    odin3_port_spec in = {intern("a"), ODIN3_DIR_IN, 1, true, chain_prov(ch, PORT_LINE), false, 0,
+                          0,           false};
+    odin3_port_spec out = {
+        intern("y"), ODIN3_DIR_OUT, 1, true, chain_prov(ch, PORT_LINE + 1), false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &in, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &out, NULL));
     ch->chain[0] = odin3_wire_net(mod, odin3_module_port_wire(mod, 0), 0);

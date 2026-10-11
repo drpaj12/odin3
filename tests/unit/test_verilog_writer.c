@@ -264,7 +264,8 @@ typedef struct port_args {
 } port_args;
 
 static odin3_wire_id add_port_prov(port_args args, odin3_prov_id prov) {
-    odin3_port_spec spec = {intern(args.name), args.dir, args.width, args.scalar, prov};
+    odin3_port_spec spec = {
+        intern(args.name), args.dir, args.width, args.scalar, prov, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, &node));
     return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
@@ -1072,19 +1073,19 @@ static void test_word_yosys_reads(void) {
 /* --- black boxes and hard cells ------------------------------------------------------------ */
 
 static const odin3_port_def ADDER_PORTS[] = {
-    {"a", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"cin", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"cout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
-    {"sumout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"a", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"cin", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"cout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
+    {"sumout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_port_def BBV_PORTS[] = {
-    {"d", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL},
-    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"d", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL, false},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_port_def HMUL_PORTS[] = {
-    {"A", ODIN3_DIR_IN, false, 0, "W", NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, false, 0, "W", NULL, NULL},
+    {"A", ODIN3_DIR_IN, false, 0, "W", NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, false, 0, "W", NULL, NULL, false},
 };
 static const uint8_t MODE_DEFAULT[2] = {1, 0}; /* 2'b01 */
 
@@ -1463,8 +1464,8 @@ static void test_out_of_memory_sweep(void) {
 /* --- fix round 1 --------------------------------------------------------------------------- */
 
 static const odin3_port_def HS_PORTS[] = {
-    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"Z", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL}, /* zero-width */
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"Z", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL, false}, /* zero-width */
 };
 
 /* String parameters are byte-exact: no blank is ever dropped inside a literal or a comment. */

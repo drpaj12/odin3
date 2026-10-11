@@ -283,12 +283,14 @@ static void add_bus(odin3_module *mod, const odin3_port_spec *spec, bus *out) {
 }
 
 static void in_bus(odin3_module *mod, const char *name, uint32_t width, bus *out) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_IN, width, false, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_IN, width, false, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, out);
 }
 
 static void out_bus(odin3_module *mod, const char *name, uint32_t width, bus *out) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_OUT, width, false, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_OUT, width, false, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, out);
 }
 
@@ -1478,9 +1480,10 @@ static void test_fn_width_cap(void) {
 
 /* Task 3a minor: a black box is simulated when its type has a hook (here $_AND_'s). */
 static void test_blackbox_with_hook_simulates(void) {
-    static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"B", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def k_ports[] = {
+        {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"B", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     const odin3_celltype_def *and_def = odin3_celltype_get(design, type_id("$_AND_"));
     const odin3_celltype_def def = {"bb_and", ODIN3_GRAN_BLACKBOX, 0,   k_ports, 3, NULL, 0, NULL,
                                     NULL,     and_def->simulate,   NULL};
