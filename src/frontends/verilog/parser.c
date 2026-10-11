@@ -166,7 +166,7 @@ static void ctx_init(odin3_vp_ctx *ctx, odin3_vl_run *run, odin3_ast *ast, odin3
                           .base = odin3_ast_mark(ast)};
     odin3_vec_init(&ctx->span_scratch, sizeof(odin3_ast_id));
     odin3_vec_init(&ctx->part_scratch, sizeof(odin3_ast_id));
-    odin3_vec_init(&ctx->meta_scratch, sizeof(odin3_ast_id));
+    odin3_vec_init(&ctx->meta_scratch, sizeof(odin3_vl_meta));
     odin3_vec_init(&ctx->headers, sizeof(odin3_vp_header));
     odin3_vec_init(&ctx->windows, sizeof(odin3_vp_window));
     odin3_vl_bind_error_mode(lx, &ctx->error_mode); /* a lexer error makes the actions inert */

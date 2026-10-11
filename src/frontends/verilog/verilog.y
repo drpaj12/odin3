@@ -113,6 +113,11 @@
 %left  '*' '/' '%'                      /* * / %                                             */
 %left  POW                              /* **                                                */
 
+/* Task 6: the dangling else (§3.3) — an `if` without `else` reduces below an `else`, so the
+ * inner `if` takes it (shift), as Verilog, C and the printer assume. */
+%precedence LOWER_THAN_ELSE
+%precedence ELSE
+
 /* ==== %type: Task 4 (source text, modules, ports, parameters, declarations, items, opaque
  * units, attributes) ==== */
 
@@ -145,6 +150,16 @@
 %type <node> expression primary concat
 
 /* ==== %type: Task 6 (statements, timing, functions and tasks, case and metacomments) ==== */
+
+/* u: a pending-stack mark; a spec (VP_SPEC) or flag set; a ctx->headers or ctx->windows index.
+ * node: a made node (0: none, or an absent optional statement). */
+%type <u> function_spec function_type task_spec automatic_opt function_header task_header
+%type <u> tf_items block_items case_head case_kw case_items if_head for_head for_cond for_step
+%type <u> assign_lhs assign_lhs_nb assign_ctl ev_none ev_repeat ev_tail ev_exprs ev_item
+%type <u> hier_task_name block_decl tf_ports tf_port_head tf_port_open
+%type <node> function_decl task_decl tf_item block_item seq_block par_block
+%type <node> statement stmt_or_null stmt_opt stmt_core case_stmt case_item for_assign
+%type <node> delay_control event_control repeat_control always_item initial_item
 
 /* ==== %type: Task 7 (instantiation, gates, generate) ==== */
 
@@ -501,7 +516,12 @@ module_item: attrs_opt item_decl       { VP($$, vp_item(ctx, $1, &@2, $2, &$$));
            | error ';'                 { VP($$, vp_none(ctx, &$$)); }
            ;
 
-item_node: OPAQUE_SPECIFY  { VP($$, vp_opaque(ctx, &@1, $1, ODIN3_AST_SPECIFY_BLOCK, &$$)); } ;
+item_node: OPAQUE_SPECIFY  { VP($$, vp_opaque(ctx, &@1, $1, ODIN3_AST_SPECIFY_BLOCK, &$$)); }
+         | always_item     /* Task 6 */
+         | initial_item    /* Task 6 */
+         | function_decl   /* Task 6 */
+         | task_decl       /* Task 6 */
+         ;
 
 /* A.6.1 continuous assignment: CONT_ASSIGN(STRENGTH?, DELAY?; NET_ASSIGN+) (A1–A4). */
 assign_item: ASSIGN assign_slots net_assigns ';'
@@ -522,6 +542,70 @@ net_assign: lvalue '=' expression      { VP($$, vp_net_assign(ctx, &@$, $1, $3, 
 
 /* ==== A.2.6–A.2.7 Functions and tasks — Task 6 ==== */
 
+/* FUNCTION_DECL(name; {AUTOMATIC SIGNED DT}; R? return; L ports; L locals; S) and TASK_DECL(name;
+ * {AUTOMATIC}; L ports; L locals; S). From the mark: the return range (functions), the ANSI
+ * header's PORT_DECL{IN_HEADER}s, then the body items in source order; vp_make_function
+ * partitions them (§3.2). The header record (name, flags, the header's end) is ctx->headers[$3]. */
+function_decl: FUNCTION list_mark function_header tf_items ENDFUNCTION
+                 { VP($$, vp_make_function(ctx, $2, &@$, $3, &$$)); }
+             ;
+
+task_decl: TASK list_mark task_header tf_items ENDTASK
+             { VP($$, vp_make_function(ctx, $2, &@$, $3, &$$)); }
+         ;
+
+function_header: function_spec IDENT ';'
+                   { VP($$, vp_tf_header(ctx, $1, &@3, $2, &$$)); }
+               | function_spec IDENT '(' tf_ports ')' ';'
+                   { VP($$, vp_tf_header_ansi(ctx, $1, &@6, $2, &$$)); }
+               ;
+
+task_header: task_spec IDENT ';'       { VP($$, vp_tf_header(ctx, $1, &@3, $2, &$$)); }
+           | task_spec IDENT '(' tf_ports ')' ';'
+                                       { VP($$, vp_tf_header_ansi(ctx, $1, &@6, $2, &$$)); }
+           ;
+
+/* The ANSI header ports (A.2.6 function_port_list, A.2.7 task_port_list): the module header's
+ * groups (Task 4) without attributes, which §3.5 does not support on a function or task port. */
+tf_ports: tf_port_head
+        | tf_ports ',' tf_port_head
+        | tf_ports ',' port_declarator         { VP($$, vp_group_join(ctx, $1, $3, &$$)); }
+        ;
+
+tf_port_head: tf_port_open range_opt port_declarator
+                { VP($$, vp_group_first(ctx, $2, $3, &$$)); }
+            ;
+
+tf_port_open: group_close list_mark port_spec
+                { VP($$, vp_group_open(ctx, $2, &@3, $3, &$$)); }
+            ;
+
+function_spec: automatic_opt function_type   { VP($$, vp_or(ctx, $1, $2, &$$)); } ;
+
+task_spec: automatic_opt   { VP($$, vp_or(ctx, VP_SPEC(ODIN3_AST_TASK_DECL, 0), $1, &$$)); } ;
+
+/* AUTOMATIC is bit 0 of FUNCTION_DECL and TASK_DECL alike (actions_stmt.c asserts it). */
+automatic_opt: %empty      { VP($$, vp_value(ctx, VP_NO_FLAGS, &$$)); }
+             | AUTOMATIC   { VP($$, vp_value(ctx, VP_FLAGS(ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC), &$$)); }
+             ;
+
+/* A.2.6 function_range_or_type: [signed] [range] (the range pushed, 0 when absent) or a type. */
+function_type: signed_opt range_opt    { VP($$, vp_function_range(ctx, $1, $2, &$$)); }
+             | INTEGER                 { VP($$, vp_function_dt(ctx, ODIN3_AST_DT_INTEGER, &$$)); }
+             | REAL                    { VP($$, vp_function_dt(ctx, ODIN3_AST_DT_REAL, &$$)); }
+             | REALTIME                { VP($$, vp_function_dt(ctx, ODIN3_AST_DT_REALTIME, &$$)); }
+             | TIME                    { VP($$, vp_function_dt(ctx, ODIN3_AST_DT_TIME, &$$)); }
+             ;
+
+/* Function and task body items: a port declaration (A.2.7 tf_*_declaration) or a block item. */
+tf_items: %empty                       { VP($$, vp_mark(ctx, &$$)); }
+        | tf_items tf_item             { VP($$, vp_item_next(ctx, $1, $2, &$$)); }
+        ;
+
+tf_item: block_item
+       | attrs_opt port_item           { VP($$, vp_item(ctx, $1, &@2, $2, &$$)); }
+       ;
+
 /* ==== A.5, A.7 UDP, config and specify (opaque tokens) — Task 4 ==== */
 
 /* The units are descriptions and SPECIFY_BLOCK an item_node above: each is one OPAQUE_* token
@@ -529,7 +613,175 @@ net_assign: lvalue '=' expression      { VP($$, vp_net_assign(ctx, &@$, $1, $3, 
 
 /* ==== A.6 Statements — Task 6 ==== */
 
+/* ALWAYS[always](S), INITIAL(S) (§3.6 "Procedural blocks and timing"). */
+always_item: ALWAYS statement          { VP($$, vp_always(ctx, &@$, $2, &$$)); } ;
+
+initial_item: INITIAL statement        { VP($$, vp_initial(ctx, &@$, $2, &$$)); } ;
+
+/* §3.1 e: one mixed list of block items, attributes first, for begin/fork (and, with port
+ * declarations, for function and task bodies); vp_make_block partitions it (§3.2). */
+block_items: %empty                    { VP($$, vp_mark(ctx, &$$)); }
+           | block_items block_item    { VP($$, vp_item_next(ctx, $1, $2, &$$)); }
+           ;
+
+block_item: attrs_opt block_decl       { VP($$, vp_item(ctx, $1, &@2, $2, &$$)); }
+          | attrs_opt stmt_core        { VP($$, vp_attrs(ctx, $1, $2, &$$)); }
+          | attrs_opt ';'              { VP($$, vp_null(ctx, $1, &@2, &$$)); }
+          | error ';'                  { VP($$, vp_none(ctx, &$$)); }
+          ;
+
+/* A.2.8 block_item_declaration: reg, integer, time, real, realtime, event, parameter. */
+block_decl: var_item | event_item | param_item ;
+
+/* SEQ_BLOCK / PAR_BLOCK(name; L? locals; S*). */
+seq_block: BEGIN block_items END              { VP($$, vp_make_block(ctx, $2, &@$, 0, &$$)); }
+         | BEGIN ':' IDENT block_items END    { VP($$, vp_make_block(ctx, $4, &@$, $3, &$$)); }
+         ;
+
+par_block: FORK block_items JOIN              { VP($$, vp_make_fork(ctx, $2, &@$, 0, &$$)); }
+         | FORK ':' IDENT block_items JOIN    { VP($$, vp_make_fork(ctx, $4, &@$, $3, &$$)); }
+         ;
+
+/* A statement and its attributes (§3.5): the node is made without them (point (g)). The error
+ * production resynchronises at the next `;` inside a procedural block (§3.4). */
+statement: attrs_opt stmt_core         { VP($$, vp_attrs(ctx, $1, $2, &$$)); }
+         | error ';'                   { VP($$, vp_none(ctx, &$$)); }
+         ;
+
+/* A.6.4 statement_or_null: `;` is a NULL_STMT (T20) ... */
+stmt_or_null: statement
+            | attrs_opt ';'            { VP($$, vp_null(ctx, $1, &@2, &$$)); }
+            ;
+
+/* ... except as the S? of TIMING_STMT and WAIT, where a bare `;` leaves it absent. */
+stmt_opt: statement
+        | attrs_opt ';'                { VP($$, vp_null_opt(ctx, $1, &@2, &$$)); }
+        ;
+
+stmt_core: assign_lhs assign_ctl expression ';'
+             { VP($$, vp_blocking(ctx, $1, &@$, $3, &$$)); }
+         | assign_lhs_nb assign_ctl expression ';'
+             { VP($$, vp_nonblocking(ctx, $1, &@$, $3, &$$)); }
+         | ASSIGN lvalue '=' expression ';'   { VP($$, vp_proc_assign(ctx, &@$, $2, $4, &$$)); }
+         | FORCE lvalue '=' expression ';'    { VP($$, vp_proc_force(ctx, &@$, $2, $4, &$$)); }
+         | DEASSIGN lvalue ';'                { VP($$, vp_proc_deassign(ctx, &@$, $2, &$$)); }
+         | RELEASE lvalue ';'                 { VP($$, vp_proc_release(ctx, &@$, $2, &$$)); }
+         | if_head %prec LOWER_THAN_ELSE      { VP($$, vp_if(ctx, $1, &@$, VP_NO_NODE, &$$)); }
+         | if_head ELSE stmt_or_null          { VP($$, vp_if(ctx, $1, &@$, $3, &$$)); }
+         | case_stmt
+         | for_step stmt_or_null              { VP($$, vp_for(ctx, $1, &@$, $2, &$$)); }
+         | WHILE '(' expression ')' stmt_or_null   { VP($$, vp_while(ctx, &@$, $3, $5, &$$)); }
+         | REPEAT '(' expression ')' stmt_or_null  { VP($$, vp_repeat(ctx, &@$, $3, $5, &$$)); }
+         | FOREVER stmt_or_null               { VP($$, vp_forever(ctx, &@$, $2, &$$)); }
+         | WAIT '(' expression ')' stmt_opt   { VP($$, vp_wait(ctx, &@$, $3, $5, &$$)); }
+         | delay_control stmt_opt             { VP($$, vp_timing(ctx, &@$, $1, $2, &$$)); }
+         | event_control stmt_opt             { VP($$, vp_timing(ctx, &@$, $1, $2, &$$)); }
+         | DISABLE hier_ref ';'               { VP($$, vp_disable(ctx, $2, &@$, &$$)); }
+         | TRIGGER hier_ref ';'               { VP($$, vp_trigger(ctx, $2, &@$, &$$)); }
+         | IDENT list_mark ';'                { VP($$, vp_task_call(ctx, $2, &@$, $1, &$$)); }
+         | call_head expr_list ')' ';'        { VP($$, vp_task_call(ctx, $2, &@$, $1, &$$)); }
+         | hier_task_name list_mark ';'       { VP($$, vp_task_call_hier(ctx, $2, &@$, $1, &$$)); }
+         | hier_call_head expr_list ')' ';'   { VP($$, vp_task_call_hier(ctx, $2, &@$, $1, &$$)); }
+         | SYSTEM_IDENT list_mark ';'         { VP($$, vp_task_call_system(ctx, $2, &@$, $1, &$$)); }
+         | system_head list_mark ')' ';'      { VP($$, vp_task_call_system(ctx, $2, &@$, $1, &$$)); }
+         | system_head sys_args ')' ';'       { VP($$, vp_task_call_system(ctx, $2, &@$, $1, &$$)); }
+         | seq_block
+         | par_block
+         ;
+
+/* §3.1 d: the targets are lvalues, never expressions, so `<=` after one is the assignment. The
+ * value is the mark below the lvalue; the intra-assignment control (or 0) follows it. */
+assign_lhs: lvalue '='                 { VP($$, vp_list_first(ctx, $1, &$$)); } ;
+
+assign_lhs_nb: lvalue LE               { VP($$, vp_list_first(ctx, $1, &$$)); } ;
+
+assign_ctl: %empty                     { VP($$, vp_push_none(ctx, &$$)); }
+          | delay_control              { VP($$, vp_push_slot(ctx, $1, &$$)); }
+          | event_control              { VP($$, vp_push_slot(ctx, $1, &$$)); }
+          | repeat_control             { VP($$, vp_push_slot(ctx, $1, &$$)); }
+          ;
+
+/* §3.1 h: a task enable is decided on the token after its name: `;`, `(`, or (a hierarchical
+ * one) after the last component. CALL{HIER}'s name rule (§3.6). */
+hier_task_name: hier_ref '.' IDENT     { VP($$, vp_hier_call_name(ctx, $1, $3, &$$)); }
+              | hier_index '.' IDENT   { VP($$, vp_hier_call_name(ctx, $1, $3, &$$)); }
+              ;
+
+/* IF(E, S, S?): the condition and the then-branch pushed; the dangling else by precedence. */
+if_head: IF '(' expression ')' stmt_or_null   { VP($$, vp_list_two(ctx, $3, $5, &$$)); } ;
+
+/* FOR(BLOCKING_ASSIGN, E, BLOCKING_ASSIGN, S) (F1); the three heads pushed in order. */
+for_head: FOR '(' for_assign ';'       { VP($$, vp_list_first(ctx, $3, &$$)); } ;
+
+for_cond: for_head expression ';'      { VP($$, vp_list_next(ctx, $1, $2, &$$)); } ;
+
+for_step: for_cond for_assign ')'      { VP($$, vp_list_next(ctx, $1, $2, &$$)); } ;
+
+for_assign: lvalue '=' expression      { VP($$, vp_assign_plain(ctx, &@$, $1, $3, &$$)); } ;
+
+/* CASE[case|casez|casex](E; CASE_ITEM+); the metacomment window (§2.6) runs from one past the
+ * header's `)` to the first item, recorded in ctx->windows[$2] by case_head and case_items. */
+case_stmt: case_head case_items ENDCASE
+             { VP($$, vp_make_case(ctx, $1, &@$, $2, &$$)); }
+         ;
+
+case_head: case_kw '(' expression ')'  { VP($$, vp_case_head(ctx, &@4, $1, $3, &$$)); } ;
+
+case_kw: CASE      { VP($$, vp_value(ctx, VP_SPEC(ODIN3_AST_CASE, ODIN3_AST_CASE_CASE), &$$)); }
+       | CASEZ     { VP($$, vp_value(ctx, VP_SPEC(ODIN3_AST_CASE, ODIN3_AST_CASE_CASEZ), &$$)); }
+       | CASEX     { VP($$, vp_value(ctx, VP_SPEC(ODIN3_AST_CASE, ODIN3_AST_CASE_CASEX), &$$)); }
+       ;
+
+case_items: case_item                  { VP($$, vp_case_first(ctx, &@1, $1, &$$)); }
+          | case_items case_item       { VP($$, vp_list_next(ctx, $1, $2, &$$)); }
+          ;
+
+/* CASE_ITEM{DEFAULT}(S; E*): the body first, then the match expressions (2A §4.2 convention 4);
+ * `default` with or without a colon has an empty tail (C6, C7). */
+case_item: expr_list ':' stmt_or_null          { VP($$, vp_make_case_item(ctx, &@$, $1, $3, &$$)); }
+         | DEFAULT list_mark stmt_or_null      { VP($$, vp_make_case_item(ctx, &@$, $2, $3, &$$)); }
+         | DEFAULT list_mark ':' stmt_or_null  { VP($$, vp_make_case_item(ctx, &@$, $2, $4, &$$)); }
+         ;
+
 /* ==== A.6.5 Timing controls — Task 6 ==== */
+
+/* §3.1 f: `#` takes a delay value (a number, a real, an identifier) or one parenthesised
+ * min:typ:max expression — never a bare expression. DELAY(E) over the `#` (A.6.5). */
+delay_control: '#' delay_value         { VP($$, vp_delay1(ctx, &@$, $2, &$$)); }
+             | '#' '(' mintypmax ')'   { VP($$, vp_delay1(ctx, &@$, $3, &$$)); }
+             ;
+
+/* EVENT_CONTROL{STAR NO_PARENS}(E? repeat count; EVENT_EXPR*): the slot pushed first (0, or the
+ * count of an intra-assignment `repeat (n)`), then the tail; ev_tail yields the flags. */
+event_control: ev_none ev_tail         { VP($$, vp_event_control(ctx, $1, &@$, $2, &$$)); } ;
+
+repeat_control: ev_repeat ev_tail      { VP($$, vp_event_control(ctx, $1, &@$, $2, &$$)); } ;
+
+ev_none: %empty                        { VP($$, vp_push_none(ctx, &$$)); } ;
+
+ev_repeat: REPEAT '(' expression ')'   { VP($$, vp_push_slot(ctx, $3, &$$)); } ;
+
+/* `@name` (T4, NO_PARENS), `@( list )`, and the implicit event: `@*` / `@(*)` as one token
+ * (§2.7) and the three forms a comment inside the parentheses defeats. */
+ev_tail: '@' hier_ref                  { VP($$, vp_event_name(ctx, $2, &$$)); }
+       | '@' '(' ev_exprs ')'          { VP($$, vp_value(ctx, VP_NO_FLAGS, &$$)); }
+       | AT_STAR                       { VP($$, vp_value(ctx, ODIN3_AST_F_EVENT_CONTROL_STAR, &$$)); }
+       | '@' '(' '*' ')'               { VP($$, vp_value(ctx, ODIN3_AST_F_EVENT_CONTROL_STAR, &$$)); }
+       | '@' ATTR_OPEN ')'             { VP($$, vp_value(ctx, ODIN3_AST_F_EVENT_CONTROL_STAR, &$$)); }
+       | '@' '(' ATTR_CLOSE            { VP($$, vp_value(ctx, ODIN3_AST_F_EVENT_CONTROL_STAR, &$$)); }
+       ;
+
+/* EVENT_EXPR[none|posedge|negedge]{AFTER_OR}(E), each at its own first token; AFTER_OR on an
+ * expression that followed `or` rather than `,` (T1, T2; printer only). */
+ev_exprs: ev_item                      { VP($$, vp_event_first(ctx, &@1, $1, &$$)); }
+        | ev_exprs ',' ev_item         { VP($$, vp_event_next(ctx, $1, &@3, $3, &$$)); }
+        | ev_exprs OR ev_item          { VP($$, vp_event_or(ctx, $1, &@3, $3, &$$)); }
+        ;
+
+ev_item: expression        { VP($$, vp_spec_slot(ctx, VP_SPEC(ODIN3_AST_EVENT_EXPR, ODIN3_AST_EVENT_EXPR_NONE), $1, &$$)); }
+       | POSEDGE expression { VP($$, vp_spec_slot(ctx, VP_SPEC(ODIN3_AST_EVENT_EXPR, ODIN3_AST_EVENT_EXPR_POSEDGE), $2, &$$)); }
+       | NEGEDGE expression { VP($$, vp_spec_slot(ctx, VP_SPEC(ODIN3_AST_EVENT_EXPR, ODIN3_AST_EVENT_EXPR_NEGEDGE), $2, &$$)); }
+       ;
 
 /* ==== A.8 Expressions and primaries — Task 5 ==== */
 

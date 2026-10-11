@@ -23,16 +23,25 @@
 #include <stdint.h>
 #include <string.h>
 
-/* A function or task header's record in ctx->headers (Task 6). */
+/*
+ * A function or task header's record in ctx->headers (Task 6): its name, its spec (VP_SPEC:
+ * FUNCTION_DECL or TASK_DECL with its flags), and body, one past the header's `;` (where an empty
+ * ports or locals LIST sits, zero width).
+ */
 typedef struct odin3_vp_header {
     uint32_t name;
     uint32_t flags;
+    odin3_loc body;
 } odin3_vp_header;
 
-/* A case header's metacomment window in ctx->windows: stream offsets [lo, hi) (§2.6, Task 6). */
+/*
+ * A case header's metacomment window in ctx->windows (§2.6, Task 6): stream offsets [lo, hi),
+ * lo one past the header's `)`, hi the first CASE_ITEM's; spec, the CASE's VP_SPEC.
+ */
 typedef struct odin3_vp_window {
     uint32_t lo;
     uint32_t hi;
+    uint32_t spec;
 } odin3_vp_window;
 
 /*
@@ -53,8 +62,9 @@ enum { ODIN3_VP_MAX_PIECES = 3 };
 
 /*
  * The parser context, one per stream (§3.2). span_scratch/part_scratch: the copy of a pending
- * span and its partitioned prefix during one reordering reduction; meta_scratch: the ATTR nodes
- * of one case's metacomments; headers: odin3_vp_header records of function and task headers;
+ * span and its partitioned prefix during one reordering reduction; meta_scratch: the
+ * odin3_vl_meta entries one case takes from the lexer; headers: odin3_vp_header records of
+ * function and task headers;
  * windows: odin3_vp_window metacomment windows of case headers (headers and windows are indexed by
  * a `u` value, so vp_* arity stays at five); error_mode: actions are inert (§3.4); fatal: the
  * status that aborted the parse. Task 4: base, the pending stack's height when the stream began
@@ -363,6 +373,145 @@ odin3_status vp_hier_call_name(odin3_vp_ctx *ctx, uint32_t mark, uint32_t last, 
 
 /* --- Task 6: statements, timing, functions and tasks, case and metacomments
  * (actions_stmt.c) ------------------------------------------------------------------------- */
+
+/* An absent optional node (an `if` without `else`). */
+#define VP_NO_NODE ((odin3_ast_id){0})
+
+/* actions_stmt.c — procedural items and blocks (§3.1 e, §3.2, §3.6). */
+
+/* ALWAYS[always](stmt) / INITIAL(stmt) over at. NO_MEMORY; PARSE (make's caps, located). */
+odin3_status vp_always(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id stmt,
+                       odin3_ast_id *out);
+odin3_status vp_initial(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id stmt,
+                        odin3_ast_id *out);
+/* NULL_STMT over at (the `;`), the ATTRs pushed since mark attached. vp_null_opt: none (*out 0)
+ * when no ATTR was pushed (the absent S? of TIMING_STMT and WAIT). NO_MEMORY. */
+odin3_status vp_null(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id *out);
+odin3_status vp_null_opt(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                         odin3_ast_id *out);
+/*
+ * SEQ_BLOCK / PAR_BLOCK named name (0: none) over at from the block items pushed since mark: the
+ * leading D-class items become the locals LIST (at its first element; none: slot 0), the rest
+ * the statements. A declaration after a statement is the located error "declaration after a
+ * statement in block" (1364-2005 §9.8.1; error mode, *out 0). NO_MEMORY; PARSE (make's caps).
+ */
+odin3_status vp_make_block(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                           odin3_ast_id *out);
+odin3_status vp_make_fork(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                          odin3_ast_id *out);
+
+/* actions_stmt.c — statements (§3.6). */
+
+/* BLOCKING_ASSIGN / NONBLOCKING_ASSIGN over at: the lvalue and the control (or 0) pushed from
+ * mark, then rhs. vp_assign_plain: BLOCKING_ASSIGN(lhs, 0, rhs) (a `for` head). */
+odin3_status vp_blocking(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id rhs,
+                         odin3_ast_id *out);
+odin3_status vp_nonblocking(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                            odin3_ast_id rhs, odin3_ast_id *out);
+odin3_status vp_assign_plain(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
+                             odin3_ast_id rhs, odin3_ast_id *out);
+/* PROC_CONT_ASSIGN[assign|force](lhs, rhs) / [deassign|release](lhs) over at (T16). */
+odin3_status vp_proc_assign(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
+                            odin3_ast_id rhs, odin3_ast_id *out);
+odin3_status vp_proc_force(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
+                           odin3_ast_id rhs, odin3_ast_id *out);
+odin3_status vp_proc_deassign(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
+                              odin3_ast_id *out);
+odin3_status vp_proc_release(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id lhs,
+                             odin3_ast_id *out);
+/* IF(cond, then pushed from mark; other) / FOR(init, cond, step pushed from mark; body). */
+odin3_status vp_if(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id other,
+                   odin3_ast_id *out);
+odin3_status vp_for(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id body,
+                    odin3_ast_id *out);
+/* WHILE / REPEAT(cond, body), FOREVER(body), WAIT(cond, stmt?) and TIMING_STMT(control, stmt?)
+ * over at. */
+odin3_status vp_while(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id cond,
+                      odin3_ast_id body, odin3_ast_id *out);
+odin3_status vp_repeat(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id cond,
+                       odin3_ast_id body, odin3_ast_id *out);
+odin3_status vp_forever(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id body,
+                        odin3_ast_id *out);
+odin3_status vp_wait(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id cond,
+                     odin3_ast_id stmt, odin3_ast_id *out);
+odin3_status vp_timing(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id control,
+                       odin3_ast_id stmt, odin3_ast_id *out);
+/* DISABLE / EVENT_TRIGGER(HIER_NAME of the name from mark) over at (T19, T14). */
+odin3_status vp_disable(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                        odin3_ast_id *out);
+odin3_status vp_trigger(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                        odin3_ast_id *out);
+/* TASK_CALL named name over at, its arguments the expressions pushed from mark; {HIER}: the
+ * joined name of vp_hier_call_name; {SYSTEM}: a `$` name, 0 entries for empty arguments. */
+odin3_status vp_task_call(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                          odin3_ast_id *out);
+odin3_status vp_task_call_hier(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                               uint32_t name, odin3_ast_id *out);
+odin3_status vp_task_call_system(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                                 uint32_t name, odin3_ast_id *out);
+
+/* actions_stmt.c — case and metacomments (§2.6, §3.5). */
+
+/* A case header (`)` at at): expr pushed, *out = the mark below it; a window opened in
+ * ctx->windows with lo one past the `)` and the CASE spec. NO_MEMORY. */
+odin3_status vp_case_head(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t spec,
+                          odin3_ast_id expr, uint32_t *out);
+/* The first CASE_ITEM (at at) pushed; the open window's hi = its offset; *out = its index. */
+odin3_status vp_case_first(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id item,
+                           uint32_t *out);
+/*
+ * CASE[spec of ctx->windows[window]] over at from mark (E; CASE_ITEM+), the window closed. The
+ * pending metacomments in it (odin3_vl_meta_take) become ATTR{METACOMMENT} nodes full_case then
+ * parallel_case (each once, no value), pushed for the statement rule's single attach after the
+ * (* *) attributes. NO_MEMORY; PARSE (make's caps).
+ */
+odin3_status vp_make_case(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t window,
+                          odin3_ast_id *out);
+/* CASE_ITEM over at: [body] ++ the expressions pushed from mark; DEFAULT when there are none. */
+odin3_status vp_make_case_item(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
+                               odin3_ast_id body, odin3_ast_id *out);
+
+/* actions_stmt.c — timing controls (§2.7, §3.6). */
+
+/* EVENT_CONTROL{flags} over at: the repeat slot and EVENT_EXPRs pushed from mark. */
+odin3_status vp_event_control(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                              uint32_t flags, odin3_ast_id *out);
+/* `@name`: EVENT_EXPR[none] of the name from mark pushed; *out = the NO_PARENS flag. */
+odin3_status vp_event_name(odin3_vp_ctx *ctx, uint32_t mark, uint32_t *out);
+/* EVENT_EXPR[spec] over at of the expression on top of the pending stack, in its place; *out =
+ * its mark (first) / list (next); vp_event_or adds AFTER_OR. */
+odin3_status vp_event_first(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t spec,
+                            uint32_t *out);
+odin3_status vp_event_next(odin3_vp_ctx *ctx, uint32_t list, const odin3_vp_loc *at, uint32_t spec,
+                           uint32_t *out);
+odin3_status vp_event_or(odin3_vp_ctx *ctx, uint32_t list, const odin3_vp_loc *at, uint32_t spec,
+                         uint32_t *out);
+
+/* actions_stmt.c — functions and tasks (§3.2, §3.6). */
+
+/* The return slot (range, or 0) pushed; *out = FUNCTION_DECL's spec with SIGNED when flags has
+ * VP_SIGNED / with DT = dt. */
+odin3_status vp_function_range(odin3_vp_ctx *ctx, uint32_t flags, odin3_ast_id range,
+                               uint32_t *out);
+odin3_status vp_function_dt(odin3_vp_ctx *ctx, uint32_t dt, uint32_t *out);
+/* A header record {name, spec, one past at (the `;`)} in ctx->headers; *out = its index. The
+ * ANSI form first closes the open port group (its PORT_DECL{IN_HEADER} pushed). NO_MEMORY. */
+odin3_status vp_tf_header(odin3_vp_ctx *ctx, uint32_t spec, const odin3_vp_loc *at, uint32_t name,
+                          uint32_t *out);
+odin3_status vp_tf_header_ansi(odin3_vp_ctx *ctx, uint32_t spec, const odin3_vp_loc *at,
+                               uint32_t name, uint32_t *out);
+/*
+ * FUNCTION_DECL / TASK_DECL of ctx->headers[header] over at, from the pending span at mark (the
+ * return slot for a function, the header ports, the body items in source order): ports LIST
+ * (every PORT_DECL, header ones first), locals LIST (the D-class items), each at its first
+ * element or zero width at the header's end, and the body: exactly one statement for a function
+ * ("function 'f' has no statement" at at, "… has more than one statement" at the second), at most
+ * one for a task (none: a zero-width NULL_STMT one past the last body item). A declaration after
+ * the statement is "declaration after a statement in block". Errors are located, counted, error
+ * mode (*out 0). NO_MEMORY; PARSE (make's caps).
+ */
+odin3_status vp_make_function(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                              uint32_t header, odin3_ast_id *out);
 
 /* --- Task 7: instantiation, gates, generate (actions_inst.c) ------------------------------- */
 

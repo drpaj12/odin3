@@ -133,6 +133,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/actions.c
     src/frontends/verilog/actions_decl.c
     src/frontends/verilog/actions_expr.c
+    src/frontends/verilog/actions_stmt.c
     src/frontends/verilog/lexer_support.c
     src/frontends/verilog/lexer_tokens.c
     src/frontends/verilog/lexer_trivia.c
@@ -209,9 +210,9 @@ target_include_directories(odin3_core PRIVATE ${_gen})
 # expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
 # the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
 # trailing context, yyless(0), YY_DECL: no warning; with 2C Task 4's grammar core, 353
-# states, YYMALLOC/YYFREE through the allocation hook, and with Task 5's expressions, 488
-# states and the precedence table: still none but the one below). One flag, for the parser
-# only:
+# states, YYMALLOC/YYFREE through the allocation hook, with Task 5's expressions, 488
+# states and the precedence table, and with Task 6's statements, 735 states and the
+# dangling-else precedence: still none but the one below). One flag, for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
@@ -356,12 +357,15 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_verilog_parser_expr)
     target_include_directories(test_verilog_parser_expr PRIVATE ${_gen})
     add_dependencies(test_verilog_parser_expr verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_stmt)
+    target_include_directories(test_verilog_parser_stmt PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_stmt verilog_generated)
     # The coverage rows as acceptance tests (plan point (p)): the rows of grammar tasks up to
     # ODIN3_VR_UPTO; each later grammar task raises it.
     odin3_add_unit_test(test_verilog_rows)
     target_include_directories(test_verilog_rows PRIVATE ${_gen})
     add_dependencies(test_verilog_rows verilog_generated)
-    target_compile_definitions(test_verilog_rows PRIVATE ODIN3_VR_UPTO=5
+    target_compile_definitions(test_verilog_rows PRIVATE ODIN3_VR_UPTO=6
         ODIN3_VERILOG_DATA="${PROJECT_SOURCE_DIR}/tests/verilog")
     odin3_add_unit_test(test_project_words)
     odin3_add_unit_test(test_project_paths)
