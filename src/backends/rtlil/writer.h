@@ -43,10 +43,25 @@
  *   net): `connect \w[ [hi:lo]] <sig of the run's nets>`;
  * then `end`.
  *
- * ODIN3_ERR_INVALID_ARG (logged "write_rtlil: module 'm': ...") for a NULL argument, a name RTLIL
- * cannot carry (empty, or holding a blank, tab, CR, LF or NUL: an RTLIL identifier ends at
- * whitespace), a net written as `\name` whose name a wire also has, or a $proc node
- * odin3_proc_print refuses; ODIN3_ERR_NO_MEMORY on out of memory. out is unchanged on failure.
+ * A module's own cell type (an instance) is always written \name, as its `module` line.
+ *
+ * Limitation (review I1; stubs are 2E-1's): black-box and hard cell types are not IR modules and
+ * get no `module` stub, so their instances are cells of a type Yosys does not know. read_rtlil,
+ * proc and opt accept that; `hierarchy -check` rejects it, and Yosys counts every connection of
+ * such a cell as a user (Cell::known() is false), where the JSON and Verilog writers emit stubs.
+ *
+ * ODIN3_ERR_INVALID_ARG for a NULL argument (logged "write_rtlil: no design or no output", or
+ * "... no path"), and, logged "write_rtlil: module 'm': ...", for:
+ * - a name RTLIL cannot carry (empty, or holding a blank, tab, CR, LF or NUL: an RTLIL identifier
+ *   ends at whitespace): "<what> '<name>' cannot be written in RTLIL";
+ * - a net written as `\name` whose name a wire also has: "net 'n' has the name of a wire";
+ * - a cell Yosys 0.55 rejects or asserts on as Odin III defines it (review I2): "cell '<name>' of
+ *   type '<t>' has no RTLIL form" for $_DFF_P_, $_DFF_N_, $_DLATCH_P_, $_DLATCH_N_ and $_FF_ (an
+ *   INIT parameter Yosys's have not), a non-constant $sop (WIDTH/COVER, not DEPTH/TABLE), $memrd
+ *   and $memwr (no `memory` record is written); "cell '<name>' of type '$mem' has an empty MEMID"
+ *   (<name> is the node's, else $c<ID>);
+ * - a $proc node odin3_proc_print refuses.
+ * ODIN3_ERR_NO_MEMORY on out of memory. out is unchanged on failure.
  */
 odin3_status odin3_rtlil_text(const odin3_design *design, odin3_strbuf *out);
 

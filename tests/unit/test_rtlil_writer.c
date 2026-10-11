@@ -46,21 +46,29 @@ static void error_sink(odin3_log_level level, const char *msg, void *user) {
     }
 }
 
+/* A SOURCE record at <file>:1 in a fresh pass run "test". */
+static odin3_prov_id source_prov(const char *file_name) {
+    odin3_pass_ctx run = {0};
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("test"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, name, &run));
+    uint32_t file = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr(file_name), &file));
+    odin3_srcloc loc = {file, 1, 1, 1, 2, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&run, &origin, &out));
+    return out;
+}
+
 void setUp(void) {
     last_error[0] = '\0';
     odin3_log_set_sink(error_sink, NULL);
     odin3_strbuf_init(&text);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
-    odin3_pass_ctx run = {0};
-    uint32_t name = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("test"), &name));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, name, &run));
-    uint32_t file = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("t.v"), &file));
-    odin3_srcloc loc = {file, 1, 1, 1, 2, 0};
-    odin3_prov_origin origin = {&loc, 1, 0, 0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&run, &origin, &prov));
+    prov = source_prov("t.v");
 }
 
 void tearDown(void) {
@@ -427,6 +435,81 @@ static void test_process_after_cells(void) {
     TEST_ASSERT_TRUE(at_cell < at_proc);
 }
 
+/* A process name never holds whitespace: a file name with a blank falls back to $proc$<ID>. */
+static void test_process_name_with_blank_path(void) {
+    odin3_module *mod = new_module("p");
+    prov = source_prov("my dir/t.v");
+    odin3_node_id node = build_sync_process(mod);
+    (void)rtlil();
+    char line[LOG_CAP];
+    (void)snprintf(line, sizeof line, "  process $proc$%u", node.v);
+    expect_line(line);
+    TEST_ASSERT_NULL(strstr(text.data, "my dir"));
+}
+
+/*
+ * A process with a full_case/parallel_case switch on s[1:0], a "2'-0" pattern, a default case and
+ * a temporary on a net of its own ($n<ID>): root t <- b; case 2'-0: t <- a; sync always y <- t.
+ * I = [s0, s1, a, b, 0], O = [y, t].
+ */
+static void test_switch_process(void) {
+    odin3_module *mod = new_module("sw");
+    odin3_wire_id s_wire = port(mod, "s", ODIN3_DIR_IN, 1, 0);
+    odin3_net_id a_net = bit_of(mod, port(mod, "a", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id b_net = bit_of(mod, port(mod, "b", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id y_net = bit_of(mod, port(mod, "y", ODIN3_DIR_OUT, 0, 0), 0);
+    odin3_net_id t_net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, 0, prov, &t_net));
+    consts cs = four_consts(mod);
+    odin3_net_id in[5] = {bit_of(mod, s_wire, 0), bit_of(mod, s_wire, 1), a_net, b_net, cs.c0};
+    odin3_net_id out[2] = {y_net, t_net};
+    const odin3_pbit pbits[] = {ODIN3_PBIT_OUT | 1, ODIN3_PBIT_IN | 3, ODIN3_PBIT_IN | 0,
+                                ODIN3_PBIT_IN | 1,  ODIN3_PBIT_IN | 4, ODIN3_PBIT_ANY,
+                                ODIN3_PBIT_OUT | 1, ODIN3_PBIT_IN | 2, ODIN3_PBIT_OUT | 0,
+                                ODIN3_PBIT_OUT | 1};
+    const odin3_pspan compares[1] = {{4, 2}};
+    const odin3_proc_action actions[3] = {
+        {{0, 1}, {1, 1}, {0}}, {{6, 1}, {7, 1}, {0}}, {{8, 1}, {9, 1}, {0}}};
+    const odin3_proc_case cases[3] = {
+        {0, 0, 0, 1, 0, 1, {0}}, {0, 1, 1, 1, 1, 0, {0}}, {1, 0, 2, 0, 1, 0, {0}}};
+    const odin3_proc_switch sw = {
+        {2, 2}, 1, 2, ODIN3_SWITCH_FULL_CASE | ODIN3_SWITCH_PARALLEL_CASE, {0}};
+    const odin3_proc_sync sync = {ODIN3_SYNC_ALWAYS, 0, 2, 1};
+    odin3_proc_body body = {pbits, 10, compares, 1, actions, 3, cases, 3, &sw, 1, &sync, 1};
+    odin3_arena *arena = odin3_arena_create(ARENA);
+    TEST_ASSERT_NOT_NULL(arena);
+    odin3_value params[3] = {odin3_value_int(5), odin3_value_int(2), {0}};
+    odin3_status st = odin3_proc_body_pack(arena, &body, &params[ODIN3_PROC_P_BODY]);
+    odin3_netvec ports[2] = {{in, 5}, {out, 2}};
+    odin3_node_spec spec = {type_named("$proc"), 0, prov, params, 3};
+    odin3_node_id node = {0};
+    if (st == ODIN3_OK) {
+        st = odin3_node_create_connected(mod, &spec, ports, &node);
+    }
+    odin3_arena_destroy(arena);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    char want[TEXT_MAX];
+    (void)snprintf(want, sizeof want,
+                   "  wire $n%u\n"
+                   "  process $proc$t.v:1$%u\n"
+                   "    assign $n%u \\b\n"
+                   "    attribute \\full_case 1\n"
+                   "    attribute \\parallel_case 1\n"
+                   "    switch \\s\n"
+                   "      case 2'-0\n"
+                   "        assign $n%u \\a\n"
+                   "      case\n"
+                   "    end\n"
+                   "    sync always\n"
+                   "      update \\y $n%u\n"
+                   "  end\n"
+                   "end\n",
+                   t_net.v, node.v, t_net.v, t_net.v, t_net.v);
+    const char *got = rtlil();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(got, want), got);
+    save_fixture("switch");
+}
+
 /* --- $mem ---------------------------------------------------------------------------------- */
 
 static const uint8_t k_bit0[1] = {ODIN3_BIT_0};
@@ -572,7 +655,9 @@ static void test_instances_and_names(void) {
     odin3_netvec ports[1] = {{x_nets, 2}};
     (void)cell(top, (cell_req){"sub", "u1", NULL, 0, ports});
     odin3_node_id clash = cell(top, (cell_req){"sub", "x", NULL, 0, ports});
+    (void)port(top, "io", ODIN3_DIR_INOUT, 0, 0);
     (void)rtlil();
+    expect_line("  wire width 2 input 1 \\x\n  wire inout 2 \\io");
     TEST_ASSERT_EQUAL_STRING_LEN("module \\sub\n  wire width 2 input 1 \\i\nend\nmodule \\top\n",
                                  text.data,
                                  strlen("module \\sub\n  wire width 2 input 1 \\i\n"
@@ -584,7 +669,99 @@ static void test_instances_and_names(void) {
     save_fixture("instances");
 }
 
+/* A module named like an RTLIL ID ($m, \q): its instances' type is spelled as its header. */
+static void test_module_names_like_ids(void) {
+    odin3_module *dollar = new_module("$m");
+    (void)port(dollar, "i", ODIN3_DIR_IN, 0, 0);
+    odin3_module *slash = new_module("\\q");
+    (void)port(slash, "i", ODIN3_DIR_IN, 0, 0);
+    odin3_module *top = new_module("top");
+    odin3_net_id x_net = bit_of(top, port(top, "x", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_netvec ports[1] = {{&x_net, 1}};
+    (void)cell(top, (cell_req){"$m", "u1", NULL, 0, ports});
+    (void)cell(top, (cell_req){"\\q", "u2", NULL, 0, ports});
+    (void)rtlil();
+    TEST_ASSERT_EQUAL_STRING_LEN("module \\$m\n", text.data, strlen("module \\$m\n"));
+    expect_line("module \\\\q");
+    expect_line("  cell \\$m \\u1");
+    expect_line("  cell \\\\q \\u2");
+    save_fixture("modnames");
+}
+
 /* --- refusals and the atomic write --------------------------------------------------------- */
+
+/* A node of type tname named u (params NULL: the defaults) in module r must be refused with
+ * "write_rtlil: module 'r': cell 'u' of type '<tname>' <why>", and out stays unchanged. */
+static void expect_cell_refused(const char *tname, const odin3_value *params, uint32_t n_params,
+                                const char *why) {
+    odin3_module *mod = new_module("r");
+    odin3_node_spec spec = {type_named(tname), intern("u"), prov, params, n_params};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, NULL));
+    odin3_strbuf_clear(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("keep")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_rtlil_text(design, &text));
+    TEST_ASSERT_EQUAL_STRING("keep", text.data);
+    char want[LOG_CAP];
+    (void)snprintf(want, sizeof want, "write_rtlil: module 'r': cell 'u' of type '%s' %s", tname,
+                   why);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+}
+
+static void test_refuses_dff_p(void) {
+    expect_cell_refused("$_DFF_P_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_dff_n(void) {
+    expect_cell_refused("$_DFF_N_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_dlatch_p(void) {
+    expect_cell_refused("$_DLATCH_P_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_dlatch_n(void) {
+    expect_cell_refused("$_DLATCH_N_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_ff(void) {
+    expect_cell_refused("$_FF_", NULL, 0, "has no RTLIL form");
+}
+
+/* A $sop that is not a constant (one input, cover "1 1"). */
+static void test_refuses_sop(void) {
+    static const uint8_t k_cover[2] = {'1', '1'};
+    odin3_value params[2] = {
+        odin3_value_int(1),
+        {.kind = ODIN3_VAL_COVER, .bits = k_cover, .len = 2, .cover_inputs = 1}};
+    expect_cell_refused("$sop", params, 2, "has no RTLIL form");
+}
+
+static void test_refuses_memrd(void) {
+    expect_cell_refused("$memrd", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_memwr(void) {
+    expect_cell_refused("$memwr", NULL, 0, "has no RTLIL form");
+}
+
+/* The registry's default $mem has an empty MEMID. */
+static void test_refuses_mem_with_empty_memid(void) {
+    expect_cell_refused("$mem", NULL, 0, "has an empty MEMID");
+}
+
+/* A refused unnamed node is named $c<ID>, as it would be written. */
+static void test_refusal_names_unnamed_cell(void) {
+    odin3_module *mod = new_module("r");
+    odin3_node_spec spec = {type_named("$memrd"), 0, prov, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_rtlil_text(design, &text));
+    char want[LOG_CAP];
+    (void)snprintf(want, sizeof want,
+                   "write_rtlil: module 'r': cell '$c%u' of type '$memrd' has no RTLIL form",
+                   node.v);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+}
 
 static void test_unwritable_name_is_refused(void) {
     odin3_module *mod = new_module("bad");
@@ -686,10 +863,23 @@ int main(void) {
     RUN_TEST(test_attributes);
     RUN_TEST(test_every_sync_type);
     RUN_TEST(test_process_after_cells);
+    RUN_TEST(test_process_name_with_blank_path);
+    RUN_TEST(test_switch_process);
     RUN_TEST(test_mem_parameters);
     RUN_TEST(test_nets_without_wires);
     RUN_TEST(test_unconnected_pins);
     RUN_TEST(test_instances_and_names);
+    RUN_TEST(test_module_names_like_ids);
+    RUN_TEST(test_refuses_dff_p);
+    RUN_TEST(test_refuses_dff_n);
+    RUN_TEST(test_refuses_dlatch_p);
+    RUN_TEST(test_refuses_dlatch_n);
+    RUN_TEST(test_refuses_ff);
+    RUN_TEST(test_refuses_sop);
+    RUN_TEST(test_refuses_memrd);
+    RUN_TEST(test_refuses_memwr);
+    RUN_TEST(test_refuses_mem_with_empty_memid);
+    RUN_TEST(test_refusal_names_unnamed_cell);
     RUN_TEST(test_unwritable_name_is_refused);
     RUN_TEST(test_net_named_like_wire_is_refused);
     RUN_TEST(test_null_arguments);

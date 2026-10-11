@@ -394,7 +394,8 @@ static void put_cell_head(rtl_writer *rw, odin3_node_id node, const odin3_cellty
         refuse_name(rw, "cell type", def->name);
         return;
     }
-    if (def->name[0] != '$' && def->name[0] != '\\') {
+    /* a module's type is its name, written \name as its `module` line (review M1) */
+    if (def->gran == ODIN3_GRAN_MODULE || (def->name[0] != '$' && def->name[0] != '\\')) {
         rw_put(rw, "\\");
     }
     rw_put(rw, def->name);
@@ -449,7 +450,55 @@ static void put_params(rtl_writer *rw, odin3_node_id node, const odin3_celltype_
     }
 }
 
+/*
+ * Built-in types Yosys 0.55's read_rtlil rejects or asserts on as Odin III defines them (review
+ * I2): the bit-level storage cells carry an INIT Yosys's have not, $sop has WIDTH/COVER where
+ * Yosys's has DEPTH/TABLE, and $memrd/$memwr need a `memory` record this writer does not make.
+ */
+static const char *const k_no_rtlil[] = {"$_DFF_P_", "$_DFF_N_", "$_DLATCH_P_", "$_DLATCH_N_",
+                                         "$_FF_",    "$sop",     "$memrd",      "$memwr"};
+
+/* Why node has no RTLIL form, or NULL: a type above, or a $mem with an empty MEMID. */
+static const char *no_rtlil_form(const rtl_writer *rw, odin3_node_id node,
+                                 const odin3_celltype_def *def) {
+    if (def->gran != ODIN3_GRAN_WORD && def->gran != ODIN3_GRAN_BIT) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof k_no_rtlil / sizeof k_no_rtlil[0]; i++) {
+        if (strcmp(def->name, k_no_rtlil[i]) == 0) {
+            return "has no RTLIL form";
+        }
+    }
+    for (uint32_t param = 0; strcmp(def->name, "$mem") == 0 && param < def->n_params; param++) {
+        const odin3_value *val = odin3_node_param(rw->module, node, param);
+        if (strcmp(def->params[param].name, "MEMID") == 0 && val->kind == ODIN3_VAL_STRING &&
+            odin3_strtab_len(rw->tab, val->str) == 0) {
+            return "has an empty MEMID";
+        }
+    }
+    return NULL;
+}
+
+/* Refuses (INVALID_ARG, logged at the module and cell) a node with no RTLIL form. */
+static bool refuse_cell(rtl_writer *rw, odin3_node_id node, const odin3_celltype_def *def) {
+    const char *why = no_rtlil_form(rw, node, def);
+    if (why == NULL) {
+        return false;
+    }
+    enum { CELL_NAME_BUF = 24 };
+    char generated[CELL_NAME_BUF];
+    uint32_t name = odin3_node_name(rw->module, node);
+    (void)snprintf(generated, sizeof generated, "$c%u", node.v);
+    odin3_log(ODIN3_LOG_ERROR, "write_rtlil: module '%s': cell '%s' of type '%s' %s",
+              rw->module_name, name != 0 ? str_of(rw, name) : generated, def->name, why);
+    rw->st = ODIN3_ERR_INVALID_ARG;
+    return true;
+}
+
 static void put_cell(rtl_writer *rw, odin3_node_id node, const odin3_celltype_def *def) {
+    if (refuse_cell(rw, node, def)) {
+        return;
+    }
     put_attrs(rw, (odin3_objref){ODIN3_OBJ_NODE, node.v}, CELL_INDENT);
     put_cell_head(rw, node, def);
     put_params(rw, node, def);

@@ -1166,7 +1166,15 @@ static odin3_status pr_attr(void *user, uint32_t key_str, const odin3_value *val
     return pr->st;
 }
 
-/* "process $proc$<file>:<line>$<ID>" from the node's SOURCE record, else "$proc$<ID>". */
+/* True when an RTLIL identifier can hold text: no blank, tab, CR or LF (the lexer ends an ID). */
+static bool id_text_ok(const char *text) {
+    return text[strcspn(text, " \t\r\n")] == '\0';
+}
+
+/*
+ * "process $proc$<file>:<line>$<ID>" from the node's SOURCE record, else "$proc$<ID>" (also when
+ * the file name holds whitespace, which would end the RTLIL identifier).
+ */
 static void pr_name(proc_printer *pr, uint32_t indent) {
     const odin3_design *design = odin3_module_design(pr->module);
     const odin3_prov_record *rec = odin3_prov_get(design, odin3_node_prov(pr->module, pr->node));
@@ -1175,7 +1183,7 @@ static void pr_name(proc_printer *pr, uint32_t indent) {
         return;
     }
     if (rec != NULL && rec->kind == ODIN3_PROV_SOURCE && rec->n_locs > 0 &&
-        rec->locs[0].file != 0) {
+        rec->locs[0].file != 0 && id_text_ok(name_of(pr->module, rec->locs[0].file))) {
         pr->st = odin3_strbuf_appendf(pr->out, "process $proc$%s:%u$%u\n",
                                       name_of(pr->module, rec->locs[0].file), rec->locs[0].line,
                                       pr->node.v);

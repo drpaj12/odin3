@@ -206,7 +206,8 @@ odin3_status odin3_proc_value_text(const odin3_design *design, const odin3_value
  * Appends live $proc node `node` as an RTLIL process block (2D spec §13), each line indented by
  * `indent` spaces plus its nesting: the node's attributes (attribute \key value), then
  * "process $proc$<file>:<line>$<ID>" with file and line from the node's SOURCE record (its first
- * location, the file as given), else "process $proc$<ID>" (plan point (r)); the root case's actions
+ * location, the file as given), else "process $proc$<ID>" (plan point (r); also when the file
+ * name holds a blank, tab, CR or LF, which would end the RTLIL identifier); the root case's actions
  * as assign lines and its switches (a switch's flags as attribute \full_case 1 and
  * attribute \parallel_case 1, then switch, case <compares separated by " , ">, the case's body,
  * end); the syncs (sync posedge|negedge|low|high <signal>, or sync always) with their update lines;
