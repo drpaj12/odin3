@@ -1,0 +1,83 @@
+# hand-written
+(MODULE:g4_gen_down @G4_loop_generate_down.v:2:1
+  _
+  (LIST @G4_loop_generate_down.v:2:20
+    (PORT_DECL.input [IN_HEADER] @G4_loop_generate_down.v:2:21
+      (RANGE @G4_loop_generate_down.v:2:27
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:28 7)
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:30 0))
+      (DECLARATOR:a @G4_loop_generate_down.v:2:33
+        _))
+    (PORT_DECL.output [IN_HEADER] @G4_loop_generate_down.v:2:36
+      (RANGE @G4_loop_generate_down.v:2:43
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:44 3)
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:46 0))
+      (DECLARATOR:y @G4_loop_generate_down.v:2:49
+        _))
+    (PORT_DECL.output [IN_HEADER] @G4_loop_generate_down.v:2:52
+      (RANGE @G4_loop_generate_down.v:2:59
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:60 7)
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:62 0))
+      (DECLARATOR:z @G4_loop_generate_down.v:2:65
+        _)))
+  (GENVAR_DECL @G4_loop_generate_down.v:3:3
+    (DECLARATOR:i @G4_loop_generate_down.v:3:10
+      _))
+  (GEN_FOR @G4_loop_generate_down.v:4:3
+    (BLOCKING_ASSIGN @G4_loop_generate_down.v:4:8
+      (IDENT:i @G4_loop_generate_down.v:4:8)
+      _
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:12 3))
+    (BINARY.>= @G4_loop_generate_down.v:4:15
+      (IDENT:i @G4_loop_generate_down.v:4:15)
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:20 0))
+    (BLOCKING_ASSIGN @G4_loop_generate_down.v:4:23
+      (IDENT:i @G4_loop_generate_down.v:4:23)
+      _
+      (BINARY.- @G4_loop_generate_down.v:4:27
+        (IDENT:i @G4_loop_generate_down.v:4:27)
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:31 1)))
+    (GEN_BLOCK:down @G4_loop_generate_down.v:4:34
+      _
+      (CONT_ASSIGN @G4_loop_generate_down.v:5:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:5:12
+          (SELECT.bit @G4_loop_generate_down.v:5:12
+            (IDENT:y @G4_loop_generate_down.v:5:12)
+            (IDENT:i @G4_loop_generate_down.v:5:14)
+            _)
+          (SELECT.bit @G4_loop_generate_down.v:5:19
+            (IDENT:a @G4_loop_generate_down.v:5:19)
+            (BINARY.- @G4_loop_generate_down.v:5:21
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:21 3)
+              (IDENT:i @G4_loop_generate_down.v:5:25))
+            _)))))
+  (GEN_FOR @G4_loop_generate_down.v:7:3
+    (BLOCKING_ASSIGN @G4_loop_generate_down.v:7:8
+      (IDENT:i @G4_loop_generate_down.v:7:8)
+      _
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:12 6))
+    (BINARY.>= @G4_loop_generate_down.v:7:15
+      (IDENT:i @G4_loop_generate_down.v:7:15)
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:20 0))
+    (BLOCKING_ASSIGN @G4_loop_generate_down.v:7:23
+      (IDENT:i @G4_loop_generate_down.v:7:23)
+      _
+      (BINARY.- @G4_loop_generate_down.v:7:27
+        (IDENT:i @G4_loop_generate_down.v:7:27)
+        (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:31 2)))
+    (GEN_BLOCK:by_two @G4_loop_generate_down.v:7:34
+      _
+      (CONT_ASSIGN @G4_loop_generate_down.v:8:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:8:12
+          (SELECT.part_plus @G4_loop_generate_down.v:8:12
+            (IDENT:z @G4_loop_generate_down.v:8:12)
+            (IDENT:i @G4_loop_generate_down.v:8:14)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:19 2))
+          (SELECT.part_plus @G4_loop_generate_down.v:8:24
+            (IDENT:a @G4_loop_generate_down.v:8:24)
+            (IDENT:i @G4_loop_generate_down.v:8:26)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:31 2)))))))

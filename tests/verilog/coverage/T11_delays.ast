@@ -1,0 +1,104 @@
+# hand-written
+(MODULE:t11_delays @T11_delays.v:2:1
+  _
+  (LIST @T11_delays.v:2:19
+    (PORT_DECL.input [IN_HEADER] @T11_delays.v:2:20
+      _
+      (DECLARATOR:clk @T11_delays.v:2:26
+        _)
+      (DECLARATOR:a @T11_delays.v:2:31
+        _)
+      (DECLARATOR:b @T11_delays.v:2:34
+        _)
+      (DECLARATOR:d @T11_delays.v:2:37
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T11_delays.v:2:40
+      _
+      (DECLARATOR:q1 @T11_delays.v:2:51
+        _)
+      (DECLARATOR:q2 @T11_delays.v:2:55
+        _)
+      (DECLARATOR:q3 @T11_delays.v:2:59
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T11_delays.v:2:63
+      (RANGE @T11_delays.v:2:74
+        (NUMBER.dec [SIGNED] @T11_delays.v:2:75 3)
+        (NUMBER.dec [SIGNED] @T11_delays.v:2:77 0))
+      (DECLARATOR:r @T11_delays.v:2:80
+        _)))
+  (PARAM_DECL.parameter @T11_delays.v:3:3
+    _
+    (DECLARATOR:D @T11_delays.v:3:13
+      (NUMBER.dec [SIGNED] @T11_delays.v:3:17 2)))
+  (ALWAYS.always @T11_delays.v:4:3
+    (TIMING_STMT @T11_delays.v:4:10
+      (EVENT_CONTROL @T11_delays.v:4:10
+        _
+        (EVENT_EXPR.posedge @T11_delays.v:4:12
+          (IDENT:clk @T11_delays.v:4:20)))
+      (NONBLOCKING_ASSIGN @T11_delays.v:5:5
+        (IDENT:q1 @T11_delays.v:5:5)
+        (DELAY @T11_delays.v:5:11
+          (NUMBER.dec [SIGNED] @T11_delays.v:5:12 1))
+        (IDENT:d @T11_delays.v:5:14))))
+  (ALWAYS.always @T11_delays.v:6:3
+    (TIMING_STMT @T11_delays.v:6:10
+      (EVENT_CONTROL @T11_delays.v:6:10
+        _
+        (EVENT_EXPR.posedge @T11_delays.v:6:12
+          (IDENT:clk @T11_delays.v:6:20)))
+      (BLOCKING_ASSIGN @T11_delays.v:7:5
+        (IDENT:q2 @T11_delays.v:7:5)
+        (DELAY @T11_delays.v:7:10
+          (NUMBER.dec [SIGNED] @T11_delays.v:7:12 2))
+        (IDENT:d @T11_delays.v:7:15))))
+  (ALWAYS.always @T11_delays.v:8:3
+    (TIMING_STMT @T11_delays.v:8:10
+      (EVENT_CONTROL @T11_delays.v:8:10
+        _
+        (EVENT_EXPR.posedge @T11_delays.v:8:12
+          (IDENT:clk @T11_delays.v:8:20)))
+      (TIMING_STMT @T11_delays.v:9:5
+        (DELAY @T11_delays.v:9:5
+          (IDENT:D @T11_delays.v:9:6))
+        (NONBLOCKING_ASSIGN @T11_delays.v:9:8
+          (IDENT:q3 @T11_delays.v:9:8)
+          _
+          (IDENT:d @T11_delays.v:9:14)))))
+  (INITIAL @T11_delays.v:10:3
+    (SEQ_BLOCK @T11_delays.v:10:11
+      _
+      (BLOCKING_ASSIGN @T11_delays.v:11:5
+        (IDENT:r @T11_delays.v:11:5)
+        _
+        (NUMBER.dec @T11_delays.v:11:9 4'd0))
+      (TIMING_STMT @T11_delays.v:12:5
+        (DELAY @T11_delays.v:12:5
+          (NUMBER.dec [SIGNED] @T11_delays.v:12:6 5))
+        (BLOCKING_ASSIGN @T11_delays.v:12:8
+          (IDENT:r @T11_delays.v:12:8)
+          _
+          (NUMBER.dec @T11_delays.v:12:12 4'd1)))
+      (TIMING_STMT @T11_delays.v:13:5
+        (DELAY @T11_delays.v:13:5
+          (BINARY.+ @T11_delays.v:13:7
+            (IDENT:a @T11_delays.v:13:7)
+            (IDENT:b @T11_delays.v:13:9)))
+        (BLOCKING_ASSIGN @T11_delays.v:13:12
+          (IDENT:r @T11_delays.v:13:12)
+          _
+          (NUMBER.dec @T11_delays.v:13:16 4'd2)))
+      (TIMING_STMT @T11_delays.v:14:5
+        (DELAY @T11_delays.v:14:5
+          (MINTYPMAX @T11_delays.v:14:7
+            (NUMBER.dec [SIGNED] @T11_delays.v:14:7 1)
+            (NUMBER.dec [SIGNED] @T11_delays.v:14:9 2)
+            (NUMBER.dec [SIGNED] @T11_delays.v:14:11 3)))
+        (BLOCKING_ASSIGN @T11_delays.v:14:14
+          (IDENT:r @T11_delays.v:14:14)
+          _
+          (NUMBER.dec @T11_delays.v:14:18 4'd3)))
+      (TIMING_STMT @T11_delays.v:15:5
+        (DELAY @T11_delays.v:15:5
+          (NUMBER.dec [SIGNED] @T11_delays.v:15:6 5))
+        _))))

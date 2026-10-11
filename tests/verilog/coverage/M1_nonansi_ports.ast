@@ -1,0 +1,68 @@
+# hand-written
+(MODULE:m1_nonansi @M1_nonansi_ports.v:2:1
+  _
+  (LIST @M1_nonansi_ports.v:2:19
+    (PORT_REF:a @M1_nonansi_ports.v:2:20
+      _)
+    (PORT_REF:b @M1_nonansi_ports.v:2:23
+      _)
+    (PORT_REF:y @M1_nonansi_ports.v:2:26
+      _)
+    (PORT_REF:q @M1_nonansi_ports.v:2:29
+      _)
+    (PORT_REF:r @M1_nonansi_ports.v:2:32
+      _))
+  (PORT_DECL.input @M1_nonansi_ports.v:3:3
+    _
+    (DECLARATOR:a @M1_nonansi_ports.v:3:9
+      _))
+  (PORT_DECL.input @M1_nonansi_ports.v:4:3
+    (RANGE @M1_nonansi_ports.v:4:9
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:4:10 3)
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:4:12 0))
+    (DECLARATOR:b @M1_nonansi_ports.v:4:15
+      _))
+  (PORT_DECL.output @M1_nonansi_ports.v:5:3
+    _
+    (DECLARATOR:y @M1_nonansi_ports.v:5:10
+      _))
+  (PORT_DECL.output @M1_nonansi_ports.v:6:3
+    (RANGE @M1_nonansi_ports.v:6:10
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:6:11 3)
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:6:13 0))
+    (DECLARATOR:q @M1_nonansi_ports.v:6:16
+      _))
+  (PORT_DECL.output @M1_nonansi_ports.v:7:3
+    _
+    (DECLARATOR:r @M1_nonansi_ports.v:7:10
+      _))
+  (NET_DECL.wire @M1_nonansi_ports.v:8:3
+    _
+    _
+    _
+    (DECLARATOR:y @M1_nonansi_ports.v:8:8
+      _))
+  (NET_DECL.wire @M1_nonansi_ports.v:9:3
+    _
+    (RANGE @M1_nonansi_ports.v:9:8
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:9:9 3)
+      (NUMBER.dec [SIGNED] @M1_nonansi_ports.v:9:11 0))
+    _
+    (DECLARATOR:q @M1_nonansi_ports.v:9:14
+      _))
+  (VAR_DECL.reg @M1_nonansi_ports.v:10:3
+    _
+    (DECLARATOR:r @M1_nonansi_ports.v:10:7
+      _))
+  (CONT_ASSIGN @M1_nonansi_ports.v:11:3
+    _
+    _
+    (NET_ASSIGN @M1_nonansi_ports.v:11:10
+      (IDENT:y @M1_nonansi_ports.v:11:10)
+      (IDENT:a @M1_nonansi_ports.v:11:14)))
+  (CONT_ASSIGN @M1_nonansi_ports.v:12:3
+    _
+    _
+    (NET_ASSIGN @M1_nonansi_ports.v:12:10
+      (IDENT:q @M1_nonansi_ports.v:12:10)
+      (IDENT:b @M1_nonansi_ports.v:12:14))))

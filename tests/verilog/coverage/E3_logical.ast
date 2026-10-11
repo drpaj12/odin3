@@ -1,0 +1,78 @@
+# hand-written
+(MODULE:e3_logical @E3_logical.v:2:1
+  _
+  (LIST @E3_logical.v:2:19
+    (PORT_DECL.input [IN_HEADER] @E3_logical.v:2:20
+      _
+      (DECLARATOR:a @E3_logical.v:2:26
+        _)
+      (DECLARATOR:b @E3_logical.v:2:29
+        _)
+      (DECLARATOR:c @E3_logical.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER] @E3_logical.v:2:35
+      _
+      (DECLARATOR:y1 @E3_logical.v:2:42
+        _)
+      (DECLARATOR:y2 @E3_logical.v:2:46
+        _)
+      (DECLARATOR:y3 @E3_logical.v:2:50
+        _)
+      (DECLARATOR:y4 @E3_logical.v:2:54
+        _)
+      (DECLARATOR:y5 @E3_logical.v:2:58
+        _)
+      (DECLARATOR:y6 @E3_logical.v:2:62
+        _)))
+  (CONT_ASSIGN @E3_logical.v:3:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:3:10
+      (IDENT:y1 @E3_logical.v:3:10)
+      (UNARY.! @E3_logical.v:3:15
+        (IDENT:a @E3_logical.v:3:16))))
+  (CONT_ASSIGN @E3_logical.v:4:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:4:10
+      (IDENT:y2 @E3_logical.v:4:10)
+      (BINARY.&& @E3_logical.v:4:15
+        (IDENT:a @E3_logical.v:4:15)
+        (IDENT:b @E3_logical.v:4:20))))
+  (CONT_ASSIGN @E3_logical.v:5:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:5:10
+      (IDENT:y3 @E3_logical.v:5:10)
+      (BINARY.|| @E3_logical.v:5:15
+        (IDENT:a @E3_logical.v:5:15)
+        (IDENT:b @E3_logical.v:5:20))))
+  (CONT_ASSIGN @E3_logical.v:6:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:6:10
+      (IDENT:y4 @E3_logical.v:6:10)
+      (BINARY.&& @E3_logical.v:6:15
+        (UNARY.! @E3_logical.v:6:15
+          (IDENT:a @E3_logical.v:6:16))
+        (IDENT:b @E3_logical.v:6:21))))
+  (CONT_ASSIGN @E3_logical.v:7:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:7:10
+      (IDENT:y5 @E3_logical.v:7:10)
+      (BINARY.|| @E3_logical.v:7:15
+        (IDENT:a @E3_logical.v:7:15)
+        (BINARY.&& @E3_logical.v:7:20
+          (IDENT:b @E3_logical.v:7:20)
+          (IDENT:c @E3_logical.v:7:25)))))
+  (CONT_ASSIGN @E3_logical.v:8:3
+    _
+    _
+    (NET_ASSIGN @E3_logical.v:8:10
+      (IDENT:y6 @E3_logical.v:8:10)
+      (BINARY.|| @E3_logical.v:8:15
+        (BINARY.&& @E3_logical.v:8:15
+          (IDENT:a @E3_logical.v:8:15)
+          (IDENT:b @E3_logical.v:8:20))
+        (IDENT:c @E3_logical.v:8:25)))))
