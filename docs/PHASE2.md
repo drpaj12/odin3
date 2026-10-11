@@ -171,3 +171,16 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    undefined macro is an error; the Odin II XML reader lands in 2B (DESIGN §4.0 "after Phase 2"
    becomes "with 2B"); the oracle is tightened where the corpus is silent. Declared divergences
    (directives inside macro bodies, the w1 self-application case) are listed in the spec §10.4.
+10. **2C spec approved** (`docs/specs/2026-10-10-2C-verilog-parser-design.md`; agent default under
+   Peter's overnight rule, 2026-10-11, after an Opus review and two re-reviews verified with Bison
+   3.8.2 toy grammars and a CMake test project): reentrant Flex lexer over the 2B stream (numbers as
+   three tokens, per-directive argument shapes, metacomments attached at the CASE reduction); pure
+   LALR(1) Bison with `%expect 0` and a committed allowlist of precedence-resolved conflicts checked
+   against `bison --report=solved`; restricted lvalue nonterminals; one mixed item list for
+   attributed declarations/statements; IEEE Table 5-4 precedence (`**` left, conditional `%prec '?'`);
+   statement-form `VP`/`VP_ERR` action guards; error recovery capped at 20; generated sources in
+   the build tree compiled inside `odin3_core` with `-Wno-*`-only source options. Open points
+   decided as recommended: recovery on; `**` left; `-v`/`-y` libraries resolved by 2C; unnamed
+   module instances are an error; generated code not committed. Declared divergences: attributes on
+   connections and ANSI subroutine ports, unary operators on primaries only, SV named-argument calls
+   (Parmys exceptions).
