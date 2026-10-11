@@ -228,7 +228,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `odin3_pp_check` on every OK stream):
       - `tests/micro/verilog/preprocessor`: all 22 files pass, including `nested_ifdef.vh`.
       - `syntax/*define*`: the 3 splicing micros stop at `undefined macro 'ADDITION_num'`
-        (entry 10).
+        (entry 11).
       - Whole tree, 610 `.v`/`.vh` files (`keywords/.generic` included): 589 pass and check;
         21 stop with a listed error. These are the 3 splicing micros, plus 18 files that use
         macros from their includer:
