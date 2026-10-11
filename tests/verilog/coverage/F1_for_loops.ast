@@ -1,0 +1,177 @@
+# hand-written
+(MODULE:f1_for @F1_for_loops.v:2:1
+  _
+  (LIST @F1_for_loops.v:2:15
+    (PORT_DECL.input [IN_HEADER] @F1_for_loops.v:2:16
+      (RANGE @F1_for_loops.v:2:22
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:23 7)
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:25 0))
+      (DECLARATOR:a @F1_for_loops.v:2:28
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @F1_for_loops.v:2:31
+      (RANGE @F1_for_loops.v:2:42
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:43 7)
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:45 0))
+      (DECLARATOR:y1 @F1_for_loops.v:2:48
+        _)
+      (DECLARATOR:y2 @F1_for_loops.v:2:52
+        _))
+    (PORT_DECL.output [IN_HEADER] @F1_for_loops.v:2:56
+      (RANGE @F1_for_loops.v:2:63
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:64 7)
+        (NUMBER.dec [SIGNED] @F1_for_loops.v:2:66 0))
+      (DECLARATOR:y3 @F1_for_loops.v:2:69
+        _)))
+  (VAR_DECL.integer @F1_for_loops.v:3:3
+    _
+    (DECLARATOR:i @F1_for_loops.v:3:11
+      _)
+    (DECLARATOR:k @F1_for_loops.v:3:14
+      _))
+  (VAR_DECL.reg @F1_for_loops.v:4:3
+    (RANGE @F1_for_loops.v:4:7
+      (NUMBER.dec [SIGNED] @F1_for_loops.v:4:8 3)
+      (NUMBER.dec [SIGNED] @F1_for_loops.v:4:10 0))
+    (DECLARATOR:j @F1_for_loops.v:4:13
+      _))
+  (ALWAYS.always @F1_for_loops.v:5:3
+    (TIMING_STMT @F1_for_loops.v:5:10
+      (EVENT_CONTROL [STAR] @F1_for_loops.v:5:10
+        _)
+      (FOR @F1_for_loops.v:6:5
+        (BLOCKING_ASSIGN @F1_for_loops.v:6:10
+          (IDENT:i @F1_for_loops.v:6:10)
+          _
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:6:14 0))
+        (BINARY.< @F1_for_loops.v:6:17
+          (IDENT:i @F1_for_loops.v:6:17)
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:6:21 8))
+        (BLOCKING_ASSIGN @F1_for_loops.v:6:24
+          (IDENT:i @F1_for_loops.v:6:24)
+          _
+          (BINARY.+ @F1_for_loops.v:6:28
+            (IDENT:i @F1_for_loops.v:6:28)
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:6:32 1)))
+        (BLOCKING_ASSIGN @F1_for_loops.v:7:7
+          (SELECT.bit @F1_for_loops.v:7:7
+            (IDENT:y1 @F1_for_loops.v:7:7)
+            (IDENT:i @F1_for_loops.v:7:10)
+            _)
+          _
+          (SELECT.bit @F1_for_loops.v:7:15
+            (IDENT:a @F1_for_loops.v:7:15)
+            (BINARY.- @F1_for_loops.v:7:17
+              (NUMBER.dec [SIGNED] @F1_for_loops.v:7:17 7)
+              (IDENT:i @F1_for_loops.v:7:21))
+            _)))))
+  (ALWAYS.always @F1_for_loops.v:8:3
+    (TIMING_STMT @F1_for_loops.v:8:10
+      (EVENT_CONTROL [STAR] @F1_for_loops.v:8:10
+        _)
+      (SEQ_BLOCK @F1_for_loops.v:8:13
+        _
+        (BLOCKING_ASSIGN @F1_for_loops.v:9:5
+          (IDENT:y2 @F1_for_loops.v:9:5)
+          _
+          (NUMBER.dec @F1_for_loops.v:9:10 8'd0))
+        (FOR @F1_for_loops.v:10:5
+          (BLOCKING_ASSIGN @F1_for_loops.v:10:10
+            (IDENT:k @F1_for_loops.v:10:10)
+            _
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:10:14 7))
+          (BINARY.>= @F1_for_loops.v:10:17
+            (IDENT:k @F1_for_loops.v:10:17)
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:10:22 0))
+          (BLOCKING_ASSIGN @F1_for_loops.v:10:25
+            (IDENT:k @F1_for_loops.v:10:25)
+            _
+            (BINARY.- @F1_for_loops.v:10:29
+              (IDENT:k @F1_for_loops.v:10:29)
+              (NUMBER.dec [SIGNED] @F1_for_loops.v:10:33 2)))
+          (BLOCKING_ASSIGN @F1_for_loops.v:11:7
+            (SELECT.bit @F1_for_loops.v:11:7
+              (IDENT:y2 @F1_for_loops.v:11:7)
+              (IDENT:k @F1_for_loops.v:11:10)
+              _)
+            _
+            (SELECT.bit @F1_for_loops.v:11:15
+              (IDENT:a @F1_for_loops.v:11:15)
+              (IDENT:k @F1_for_loops.v:11:17)
+              _)))
+        (FOR @F1_for_loops.v:12:5
+          (BLOCKING_ASSIGN @F1_for_loops.v:12:10
+            (IDENT:j @F1_for_loops.v:12:10)
+            _
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:12:14 0))
+          (BINARY.< @F1_for_loops.v:12:17
+            (IDENT:j @F1_for_loops.v:12:17)
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:12:21 8))
+          (BLOCKING_ASSIGN @F1_for_loops.v:12:24
+            (IDENT:j @F1_for_loops.v:12:24)
+            _
+            (BINARY.+ @F1_for_loops.v:12:28
+              (IDENT:j @F1_for_loops.v:12:28)
+              (NUMBER.dec [SIGNED] @F1_for_loops.v:12:32 2)))
+          (BLOCKING_ASSIGN @F1_for_loops.v:13:7
+            (SELECT.bit @F1_for_loops.v:13:7
+              (IDENT:y2 @F1_for_loops.v:13:7)
+              (BINARY.+ @F1_for_loops.v:13:10
+                (IDENT:j @F1_for_loops.v:13:10)
+                (NUMBER.dec [SIGNED] @F1_for_loops.v:13:14 1))
+              _)
+            _
+            (SELECT.bit @F1_for_loops.v:13:19
+              (IDENT:a @F1_for_loops.v:13:19)
+              (IDENT:j @F1_for_loops.v:13:21)
+              _))))))
+  (FUNCTION_DECL:rev @F1_for_loops.v:15:3
+    (RANGE @F1_for_loops.v:15:12
+      (NUMBER.dec [SIGNED] @F1_for_loops.v:15:13 7)
+      (NUMBER.dec [SIGNED] @F1_for_loops.v:15:15 0))
+    (LIST @F1_for_loops.v:15:23
+      (PORT_DECL.input [IN_HEADER] @F1_for_loops.v:15:23
+        (RANGE @F1_for_loops.v:15:29
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:15:30 7)
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:15:32 0))
+        (DECLARATOR:x @F1_for_loops.v:15:35
+          _)))
+    (LIST @F1_for_loops.v:16:5
+      (VAR_DECL.integer @F1_for_loops.v:16:5
+        _
+        (DECLARATOR:n @F1_for_loops.v:16:13
+          _)))
+    (SEQ_BLOCK @F1_for_loops.v:17:5
+      _
+      (FOR @F1_for_loops.v:18:7
+        (BLOCKING_ASSIGN @F1_for_loops.v:18:12
+          (IDENT:n @F1_for_loops.v:18:12)
+          _
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:18:16 0))
+        (BINARY.< @F1_for_loops.v:18:19
+          (IDENT:n @F1_for_loops.v:18:19)
+          (NUMBER.dec [SIGNED] @F1_for_loops.v:18:23 8))
+        (BLOCKING_ASSIGN @F1_for_loops.v:18:26
+          (IDENT:n @F1_for_loops.v:18:26)
+          _
+          (BINARY.+ @F1_for_loops.v:18:30
+            (IDENT:n @F1_for_loops.v:18:30)
+            (NUMBER.dec [SIGNED] @F1_for_loops.v:18:34 1)))
+        (BLOCKING_ASSIGN @F1_for_loops.v:19:9
+          (SELECT.bit @F1_for_loops.v:19:9
+            (IDENT:rev @F1_for_loops.v:19:9)
+            (IDENT:n @F1_for_loops.v:19:13)
+            _)
+          _
+          (SELECT.bit @F1_for_loops.v:19:18
+            (IDENT:x @F1_for_loops.v:19:18)
+            (BINARY.- @F1_for_loops.v:19:20
+              (NUMBER.dec [SIGNED] @F1_for_loops.v:19:20 7)
+              (IDENT:n @F1_for_loops.v:19:24))
+            _)))))
+  (CONT_ASSIGN @F1_for_loops.v:22:3
+    _
+    _
+    (NET_ASSIGN @F1_for_loops.v:22:10
+      (IDENT:y3 @F1_for_loops.v:22:10)
+      (CALL:rev @F1_for_loops.v:22:15
+        (IDENT:a @F1_for_loops.v:22:19)))))

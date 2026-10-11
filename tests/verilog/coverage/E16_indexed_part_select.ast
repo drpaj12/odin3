@@ -1,0 +1,82 @@
+# hand-written
+(MODULE:e16_indexed_part @E16_indexed_part_select.v:2:1
+  _
+  (LIST @E16_indexed_part_select.v:2:25
+    (PORT_DECL.input [IN_HEADER] @E16_indexed_part_select.v:2:26
+      (RANGE @E16_indexed_part_select.v:2:32
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:33 7)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:35 0))
+      (DECLARATOR:a @E16_indexed_part_select.v:2:38
+        _))
+    (PORT_DECL.input [IN_HEADER] @E16_indexed_part_select.v:2:41
+      (RANGE @E16_indexed_part_select.v:2:47
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:48 2)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:50 0))
+      (DECLARATOR:s @E16_indexed_part_select.v:2:53
+        _))
+    (PORT_DECL.input [IN_HEADER] @E16_indexed_part_select.v:2:56
+      (RANGE @E16_indexed_part_select.v:2:62
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:63 1)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:65 0))
+      (DECLARATOR:d @E16_indexed_part_select.v:2:68
+        _))
+    (PORT_DECL.output [IN_HEADER] @E16_indexed_part_select.v:2:71
+      (RANGE @E16_indexed_part_select.v:2:78
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:79 3)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:81 0))
+      (DECLARATOR:y1 @E16_indexed_part_select.v:2:84
+        _)
+      (DECLARATOR:y2 @E16_indexed_part_select.v:2:88
+        _)
+      (DECLARATOR:y3 @E16_indexed_part_select.v:2:92
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @E16_indexed_part_select.v:2:96
+      (RANGE @E16_indexed_part_select.v:2:107
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:108 7)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:2:110 0))
+      (DECLARATOR:r @E16_indexed_part_select.v:2:113
+        _)))
+  (CONT_ASSIGN @E16_indexed_part_select.v:3:3
+    _
+    _
+    (NET_ASSIGN @E16_indexed_part_select.v:3:10
+      (IDENT:y1 @E16_indexed_part_select.v:3:10)
+      (SELECT.part_plus @E16_indexed_part_select.v:3:15
+        (IDENT:a @E16_indexed_part_select.v:3:15)
+        (IDENT:s @E16_indexed_part_select.v:3:17)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:3:22 4))))
+  (CONT_ASSIGN @E16_indexed_part_select.v:4:3
+    _
+    _
+    (NET_ASSIGN @E16_indexed_part_select.v:4:10
+      (IDENT:y2 @E16_indexed_part_select.v:4:10)
+      (SELECT.part_minus @E16_indexed_part_select.v:4:15
+        (IDENT:a @E16_indexed_part_select.v:4:15)
+        (IDENT:s @E16_indexed_part_select.v:4:17)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:4:22 4))))
+  (CONT_ASSIGN @E16_indexed_part_select.v:5:3
+    _
+    _
+    (NET_ASSIGN @E16_indexed_part_select.v:5:10
+      (IDENT:y3 @E16_indexed_part_select.v:5:10)
+      (SELECT.part_plus @E16_indexed_part_select.v:5:15
+        (IDENT:a @E16_indexed_part_select.v:5:15)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:5:17 0)
+        (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:5:22 4))))
+  (ALWAYS.always @E16_indexed_part_select.v:6:3
+    (TIMING_STMT @E16_indexed_part_select.v:6:10
+      (EVENT_CONTROL [STAR] @E16_indexed_part_select.v:6:10
+        _)
+      (SEQ_BLOCK @E16_indexed_part_select.v:6:13
+        _
+        (BLOCKING_ASSIGN @E16_indexed_part_select.v:7:5
+          (IDENT:r @E16_indexed_part_select.v:7:5)
+          _
+          (NUMBER.dec @E16_indexed_part_select.v:7:9 8'd0))
+        (BLOCKING_ASSIGN @E16_indexed_part_select.v:8:5
+          (SELECT.part_plus @E16_indexed_part_select.v:8:5
+            (IDENT:r @E16_indexed_part_select.v:8:5)
+            (IDENT:s @E16_indexed_part_select.v:8:7)
+            (NUMBER.dec [SIGNED] @E16_indexed_part_select.v:8:12 2))
+          _
+          (IDENT:d @E16_indexed_part_select.v:8:17))))))

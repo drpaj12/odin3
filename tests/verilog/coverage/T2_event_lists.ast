@@ -1,0 +1,98 @@
+# hand-written
+(MODULE:t2_sensitivity @T2_event_lists.v:2:1
+  _
+  (LIST @T2_event_lists.v:2:23
+    (PORT_DECL.input [IN_HEADER] @T2_event_lists.v:2:24
+      _
+      (DECLARATOR:a @T2_event_lists.v:2:30
+        _)
+      (DECLARATOR:b @T2_event_lists.v:2:33
+        _)
+      (DECLARATOR:c @T2_event_lists.v:2:36
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T2_event_lists.v:2:39
+      _
+      (DECLARATOR:y1 @T2_event_lists.v:2:50
+        _)
+      (DECLARATOR:y2 @T2_event_lists.v:2:54
+        _)
+      (DECLARATOR:y3 @T2_event_lists.v:2:58
+        _)
+      (DECLARATOR:y4 @T2_event_lists.v:2:62
+        _)
+      (DECLARATOR:y5 @T2_event_lists.v:2:66
+        _)))
+  (ALWAYS.always @T2_event_lists.v:3:3
+    (TIMING_STMT @T2_event_lists.v:3:10
+      (EVENT_CONTROL [STAR] @T2_event_lists.v:3:10
+        _)
+      (BLOCKING_ASSIGN @T2_event_lists.v:4:5
+        (IDENT:y1 @T2_event_lists.v:4:5)
+        _
+        (BINARY.& @T2_event_lists.v:4:10
+          (IDENT:a @T2_event_lists.v:4:10)
+          (IDENT:b @T2_event_lists.v:4:14)))))
+  (ALWAYS.always @T2_event_lists.v:5:3
+    (TIMING_STMT @T2_event_lists.v:5:10
+      (EVENT_CONTROL [STAR] @T2_event_lists.v:5:10
+        _)
+      (BLOCKING_ASSIGN @T2_event_lists.v:6:5
+        (IDENT:y2 @T2_event_lists.v:6:5)
+        _
+        (BINARY.| @T2_event_lists.v:6:10
+          (IDENT:a @T2_event_lists.v:6:10)
+          (IDENT:b @T2_event_lists.v:6:14)))))
+  (ALWAYS.always @T2_event_lists.v:7:3
+    (TIMING_STMT @T2_event_lists.v:7:10
+      (EVENT_CONTROL @T2_event_lists.v:7:10
+        _
+        (EVENT_EXPR.none @T2_event_lists.v:7:12
+          (IDENT:a @T2_event_lists.v:7:12))
+        (EVENT_EXPR.none @T2_event_lists.v:7:15
+          (IDENT:b @T2_event_lists.v:7:15))
+        (EVENT_EXPR.none @T2_event_lists.v:7:18
+          (IDENT:c @T2_event_lists.v:7:18)))
+      (BLOCKING_ASSIGN @T2_event_lists.v:8:5
+        (IDENT:y3 @T2_event_lists.v:8:5)
+        _
+        (BINARY.^ @T2_event_lists.v:8:10
+          (BINARY.^ @T2_event_lists.v:8:10
+            (IDENT:a @T2_event_lists.v:8:10)
+            (IDENT:b @T2_event_lists.v:8:14))
+          (IDENT:c @T2_event_lists.v:8:18)))))
+  (ALWAYS.always @T2_event_lists.v:9:3
+    (TIMING_STMT @T2_event_lists.v:9:10
+      (EVENT_CONTROL @T2_event_lists.v:9:10
+        _
+        (EVENT_EXPR.none @T2_event_lists.v:9:12
+          (IDENT:a @T2_event_lists.v:9:12))
+        (EVENT_EXPR.none [AFTER_OR] @T2_event_lists.v:9:17
+          (IDENT:b @T2_event_lists.v:9:17))
+        (EVENT_EXPR.none [AFTER_OR] @T2_event_lists.v:9:22
+          (IDENT:c @T2_event_lists.v:9:22)))
+      (BLOCKING_ASSIGN @T2_event_lists.v:10:5
+        (IDENT:y4 @T2_event_lists.v:10:5)
+        _
+        (BINARY.| @T2_event_lists.v:10:10
+          (BINARY.& @T2_event_lists.v:10:10
+            (IDENT:a @T2_event_lists.v:10:10)
+            (IDENT:b @T2_event_lists.v:10:14))
+          (IDENT:c @T2_event_lists.v:10:18)))))
+  (ALWAYS.always @T2_event_lists.v:11:3
+    (TIMING_STMT @T2_event_lists.v:11:10
+      (EVENT_CONTROL @T2_event_lists.v:11:10
+        _
+        (EVENT_EXPR.none @T2_event_lists.v:11:12
+          (IDENT:a @T2_event_lists.v:11:12))
+        (EVENT_EXPR.none [AFTER_OR] @T2_event_lists.v:11:17
+          (IDENT:b @T2_event_lists.v:11:17))
+        (EVENT_EXPR.none @T2_event_lists.v:11:20
+          (IDENT:c @T2_event_lists.v:11:20)))
+      (BLOCKING_ASSIGN @T2_event_lists.v:12:5
+        (IDENT:y5 @T2_event_lists.v:12:5)
+        _
+        (BINARY.| @T2_event_lists.v:12:10
+          (IDENT:a @T2_event_lists.v:12:10)
+          (BINARY.& @T2_event_lists.v:12:14
+            (IDENT:b @T2_event_lists.v:12:14)
+            (IDENT:c @T2_event_lists.v:12:18)))))))

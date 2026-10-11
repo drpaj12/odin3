@@ -1,0 +1,82 @@
+# hand-written
+(MODULE:e21_sub @E21_hierarchical_references.v:2:1
+  _
+  (LIST @E21_hierarchical_references.v:2:16
+    (PORT_DECL.input [IN_HEADER] @E21_hierarchical_references.v:2:17
+      (RANGE @E21_hierarchical_references.v:2:23
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:2:24 3)
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:2:26 0))
+      (DECLARATOR:d @E21_hierarchical_references.v:2:29
+        _))
+    (PORT_DECL.output [IN_HEADER] @E21_hierarchical_references.v:2:32
+      (RANGE @E21_hierarchical_references.v:2:39
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:2:40 3)
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:2:42 0))
+      (DECLARATOR:q @E21_hierarchical_references.v:2:45
+        _)))
+  (NET_DECL.wire @E21_hierarchical_references.v:3:3
+    _
+    (RANGE @E21_hierarchical_references.v:3:8
+      (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:3:9 3)
+      (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:3:11 0))
+    _
+    (DECLARATOR:w @E21_hierarchical_references.v:3:14
+      _))
+  (CONT_ASSIGN @E21_hierarchical_references.v:4:3
+    _
+    _
+    (NET_ASSIGN @E21_hierarchical_references.v:4:10
+      (IDENT:w @E21_hierarchical_references.v:4:10)
+      (IDENT:d @E21_hierarchical_references.v:4:14)))
+  (CONT_ASSIGN @E21_hierarchical_references.v:5:3
+    _
+    _
+    (NET_ASSIGN @E21_hierarchical_references.v:5:10
+      (IDENT:q @E21_hierarchical_references.v:5:10)
+      (IDENT:w @E21_hierarchical_references.v:5:14))))
+(MODULE:e21_hier_ref @E21_hierarchical_references.v:8:1
+  _
+  (LIST @E21_hierarchical_references.v:8:21
+    (PORT_DECL.input [IN_HEADER] @E21_hierarchical_references.v:8:22
+      (RANGE @E21_hierarchical_references.v:8:28
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:8:29 3)
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:8:31 0))
+      (DECLARATOR:d @E21_hierarchical_references.v:8:34
+        _))
+    (PORT_DECL.output [IN_HEADER] @E21_hierarchical_references.v:8:37
+      (RANGE @E21_hierarchical_references.v:8:44
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:8:45 3)
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:8:47 0))
+      (DECLARATOR:y1 @E21_hierarchical_references.v:8:50
+        _))
+    (PORT_DECL.output [IN_HEADER] @E21_hierarchical_references.v:8:54
+      _
+      (DECLARATOR:y2 @E21_hierarchical_references.v:8:61
+        _)))
+  (INSTANTIATION:e21_sub @E21_hierarchical_references.v:9:3
+    _
+    (INSTANCE:u @E21_hierarchical_references.v:9:11
+      _
+      (CONNECTION:d @E21_hierarchical_references.v:9:14
+        (IDENT:d @E21_hierarchical_references.v:9:17))
+      (CONNECTION:q @E21_hierarchical_references.v:9:21
+        _)))
+  (CONT_ASSIGN @E21_hierarchical_references.v:10:3
+    _
+    _
+    (NET_ASSIGN @E21_hierarchical_references.v:10:10
+      (IDENT:y1 @E21_hierarchical_references.v:10:10)
+      (HIER_NAME @E21_hierarchical_references.v:10:15
+        (IDENT:u @E21_hierarchical_references.v:10:15)
+        (IDENT:w @E21_hierarchical_references.v:10:17))))
+  (CONT_ASSIGN @E21_hierarchical_references.v:11:3
+    _
+    _
+    (NET_ASSIGN @E21_hierarchical_references.v:11:10
+      (IDENT:y2 @E21_hierarchical_references.v:11:10)
+      (SELECT.bit @E21_hierarchical_references.v:11:15
+        (HIER_NAME @E21_hierarchical_references.v:11:15
+          (IDENT:u @E21_hierarchical_references.v:11:15)
+          (IDENT:w @E21_hierarchical_references.v:11:17))
+        (NUMBER.dec [SIGNED] @E21_hierarchical_references.v:11:19 1)
+        _))))

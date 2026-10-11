@@ -1,0 +1,62 @@
+# hand-written
+(MODULE:e18_signed_calls @E18_signed_unsigned_calls.v:2:1
+  _
+  (LIST @E18_signed_unsigned_calls.v:2:25
+    (PORT_DECL.input [IN_HEADER] @E18_signed_unsigned_calls.v:2:26
+      (RANGE @E18_signed_unsigned_calls.v:2:32
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:33 3)
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:35 0))
+      (DECLARATOR:a @E18_signed_unsigned_calls.v:2:38
+        _)
+      (DECLARATOR:b @E18_signed_unsigned_calls.v:2:41
+        _))
+    (PORT_DECL.input [SIGNED IN_HEADER] @E18_signed_unsigned_calls.v:2:44
+      (RANGE @E18_signed_unsigned_calls.v:2:57
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:58 3)
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:60 0))
+      (DECLARATOR:s @E18_signed_unsigned_calls.v:2:63
+        _))
+    (PORT_DECL.output [SIGNED IN_HEADER] @E18_signed_unsigned_calls.v:2:66
+      (RANGE @E18_signed_unsigned_calls.v:2:80
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:81 3)
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:83 0))
+      (DECLARATOR:y1 @E18_signed_unsigned_calls.v:2:86
+        _))
+    (PORT_DECL.output [SIGNED IN_HEADER] @E18_signed_unsigned_calls.v:2:90
+      (RANGE @E18_signed_unsigned_calls.v:2:104
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:105 4)
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:107 0))
+      (DECLARATOR:y2 @E18_signed_unsigned_calls.v:2:110
+        _))
+    (PORT_DECL.output [IN_HEADER] @E18_signed_unsigned_calls.v:2:114
+      (RANGE @E18_signed_unsigned_calls.v:2:121
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:122 3)
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:2:124 0))
+      (DECLARATOR:y3 @E18_signed_unsigned_calls.v:2:127
+        _)))
+  (CONT_ASSIGN @E18_signed_unsigned_calls.v:3:3
+    _
+    _
+    (NET_ASSIGN @E18_signed_unsigned_calls.v:3:10
+      (IDENT:y1 @E18_signed_unsigned_calls.v:3:10)
+      (CALL:$signed [SYSTEM] @E18_signed_unsigned_calls.v:3:15
+        (IDENT:a @E18_signed_unsigned_calls.v:3:23))))
+  (CONT_ASSIGN @E18_signed_unsigned_calls.v:4:3
+    _
+    _
+    (NET_ASSIGN @E18_signed_unsigned_calls.v:4:10
+      (IDENT:y2 @E18_signed_unsigned_calls.v:4:10)
+      (BINARY.+ @E18_signed_unsigned_calls.v:4:15
+        (CALL:$signed [SYSTEM] @E18_signed_unsigned_calls.v:4:15
+          (IDENT:a @E18_signed_unsigned_calls.v:4:23))
+        (CALL:$signed [SYSTEM] @E18_signed_unsigned_calls.v:4:28
+          (IDENT:b @E18_signed_unsigned_calls.v:4:36)))))
+  (CONT_ASSIGN @E18_signed_unsigned_calls.v:5:3
+    _
+    _
+    (NET_ASSIGN @E18_signed_unsigned_calls.v:5:10
+      (IDENT:y3 @E18_signed_unsigned_calls.v:5:10)
+      (BINARY.>> @E18_signed_unsigned_calls.v:5:15
+        (CALL:$unsigned [SYSTEM] @E18_signed_unsigned_calls.v:5:15
+          (IDENT:s @E18_signed_unsigned_calls.v:5:25))
+        (NUMBER.dec [SIGNED] @E18_signed_unsigned_calls.v:5:31 1)))))

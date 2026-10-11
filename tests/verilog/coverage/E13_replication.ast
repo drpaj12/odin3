@@ -1,0 +1,75 @@
+# hand-written
+(MODULE:e13_replicate @E13_replication.v:2:1
+  _
+  (LIST @E13_replication.v:2:22
+    (PORT_DECL.input [IN_HEADER] @E13_replication.v:2:23
+      _
+      (DECLARATOR:a @E13_replication.v:2:29
+        _)
+      (DECLARATOR:b @E13_replication.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER] @E13_replication.v:2:35
+      (RANGE @E13_replication.v:2:42
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:43 3)
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:45 0))
+      (DECLARATOR:y1 @E13_replication.v:2:48
+        _)
+      (DECLARATOR:y2 @E13_replication.v:2:52
+        _))
+    (PORT_DECL.output [IN_HEADER] @E13_replication.v:2:56
+      (RANGE @E13_replication.v:2:63
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:64 5)
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:66 0))
+      (DECLARATOR:y3 @E13_replication.v:2:69
+        _))
+    (PORT_DECL.output [IN_HEADER] @E13_replication.v:2:73
+      (RANGE @E13_replication.v:2:80
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:81 1)
+        (NUMBER.dec [SIGNED] @E13_replication.v:2:83 0))
+      (DECLARATOR:y4 @E13_replication.v:2:86
+        _)))
+  (PARAM_DECL.parameter @E13_replication.v:3:3
+    _
+    (DECLARATOR:W @E13_replication.v:3:13
+      (NUMBER.dec [SIGNED] @E13_replication.v:3:17 2)))
+  (CONT_ASSIGN @E13_replication.v:4:3
+    _
+    _
+    (NET_ASSIGN @E13_replication.v:4:10
+      (IDENT:y1 @E13_replication.v:4:10)
+      (REPLICATE @E13_replication.v:4:15
+        (NUMBER.dec [SIGNED] @E13_replication.v:4:16 4)
+        (CONCAT @E13_replication.v:4:17
+          (IDENT:a @E13_replication.v:4:18)))))
+  (CONT_ASSIGN @E13_replication.v:5:3
+    _
+    _
+    (NET_ASSIGN @E13_replication.v:5:10
+      (IDENT:y2 @E13_replication.v:5:10)
+      (REPLICATE @E13_replication.v:5:15
+        (NUMBER.dec [SIGNED] @E13_replication.v:5:16 2)
+        (CONCAT @E13_replication.v:5:17
+          (IDENT:a @E13_replication.v:5:18)
+          (IDENT:b @E13_replication.v:5:21)))))
+  (CONT_ASSIGN @E13_replication.v:6:3
+    _
+    _
+    (NET_ASSIGN @E13_replication.v:6:10
+      (IDENT:y3 @E13_replication.v:6:10)
+      (REPLICATE @E13_replication.v:6:15
+        (NUMBER.dec [SIGNED] @E13_replication.v:6:16 2)
+        (CONCAT @E13_replication.v:6:17
+          (IDENT:a @E13_replication.v:6:18)
+          (REPLICATE @E13_replication.v:6:21
+            (NUMBER.dec [SIGNED] @E13_replication.v:6:22 2)
+            (CONCAT @E13_replication.v:6:23
+              (IDENT:b @E13_replication.v:6:24)))))))
+  (CONT_ASSIGN @E13_replication.v:7:3
+    _
+    _
+    (NET_ASSIGN @E13_replication.v:7:10
+      (IDENT:y4 @E13_replication.v:7:10)
+      (REPLICATE @E13_replication.v:7:15
+        (IDENT:W @E13_replication.v:7:16)
+        (CONCAT @E13_replication.v:7:17
+          (IDENT:a @E13_replication.v:7:18))))))

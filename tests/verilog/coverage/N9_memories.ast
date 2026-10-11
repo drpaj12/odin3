@@ -1,0 +1,82 @@
+# hand-written
+(MODULE:n9_memory @N9_memories.v:2:1
+  _
+  (LIST @N9_memories.v:2:18
+    (PORT_DECL.input [IN_HEADER] @N9_memories.v:2:19
+      _
+      (DECLARATOR:clk @N9_memories.v:2:25
+        _)
+      (DECLARATOR:we @N9_memories.v:2:30
+        _))
+    (PORT_DECL.input [IN_HEADER] @N9_memories.v:2:34
+      (RANGE @N9_memories.v:2:40
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:41 3)
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:43 0))
+      (DECLARATOR:addr @N9_memories.v:2:46
+        _))
+    (PORT_DECL.input [IN_HEADER] @N9_memories.v:2:52
+      (RANGE @N9_memories.v:2:58
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:59 7)
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:61 0))
+      (DECLARATOR:d @N9_memories.v:2:64
+        _))
+    (PORT_DECL.output [IN_HEADER] @N9_memories.v:2:67
+      (RANGE @N9_memories.v:2:74
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:75 7)
+        (NUMBER.dec [SIGNED] @N9_memories.v:2:77 0))
+      (DECLARATOR:y1 @N9_memories.v:2:80
+        _)
+      (DECLARATOR:y2 @N9_memories.v:2:84
+        _)))
+  (VAR_DECL.reg @N9_memories.v:3:3
+    (RANGE @N9_memories.v:3:7
+      (NUMBER.dec [SIGNED] @N9_memories.v:3:8 7)
+      (NUMBER.dec [SIGNED] @N9_memories.v:3:10 0))
+    (DECLARATOR:mem @N9_memories.v:3:13
+      _
+      (RANGE @N9_memories.v:3:17
+        (NUMBER.dec [SIGNED] @N9_memories.v:3:18 15)
+        (NUMBER.dec [SIGNED] @N9_memories.v:3:21 0))))
+  (VAR_DECL.reg @N9_memories.v:4:3
+    (RANGE @N9_memories.v:4:7
+      (NUMBER.dec [SIGNED] @N9_memories.v:4:8 7)
+      (NUMBER.dec [SIGNED] @N9_memories.v:4:10 0))
+    (DECLARATOR:rom @N9_memories.v:4:13
+      _
+      (RANGE @N9_memories.v:4:17
+        (NUMBER.dec [SIGNED] @N9_memories.v:4:18 0)
+        (NUMBER.dec [SIGNED] @N9_memories.v:4:20 15))))
+  (ALWAYS.always @N9_memories.v:5:3
+    (TIMING_STMT @N9_memories.v:5:10
+      (EVENT_CONTROL @N9_memories.v:5:10
+        _
+        (EVENT_EXPR.posedge @N9_memories.v:5:12
+          (IDENT:clk @N9_memories.v:5:20)))
+      (IF @N9_memories.v:6:5
+        (IDENT:we @N9_memories.v:6:9)
+        (NONBLOCKING_ASSIGN @N9_memories.v:7:7
+          (SELECT.bit @N9_memories.v:7:7
+            (IDENT:mem @N9_memories.v:7:7)
+            (IDENT:addr @N9_memories.v:7:11)
+            _)
+          _
+          (IDENT:d @N9_memories.v:7:20))
+        _)))
+  (CONT_ASSIGN @N9_memories.v:8:3
+    _
+    _
+    (NET_ASSIGN @N9_memories.v:8:10
+      (IDENT:y1 @N9_memories.v:8:10)
+      (SELECT.bit @N9_memories.v:8:15
+        (IDENT:mem @N9_memories.v:8:15)
+        (IDENT:addr @N9_memories.v:8:19)
+        _)))
+  (CONT_ASSIGN @N9_memories.v:9:3
+    _
+    _
+    (NET_ASSIGN @N9_memories.v:9:10
+      (IDENT:y2 @N9_memories.v:9:10)
+      (SELECT.bit @N9_memories.v:9:15
+        (IDENT:rom @N9_memories.v:9:15)
+        (IDENT:addr @N9_memories.v:9:19)
+        _))))

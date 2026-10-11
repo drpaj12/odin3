@@ -1,0 +1,39 @@
+# hand-written
+(MODULE:e19_clog2 @E19_clog2.v:2:1
+  (LIST @E19_clog2.v:2:18
+    (PARAM_DECL.parameter [IN_HEADER] @E19_clog2.v:2:20
+      _
+      (DECLARATOR:N @E19_clog2.v:2:30
+        (NUMBER.dec [SIGNED] @E19_clog2.v:2:34 16))))
+  (LIST @E19_clog2.v:2:38
+    (PORT_DECL.output [IN_HEADER] @E19_clog2.v:2:39
+      (RANGE @E19_clog2.v:2:46
+        (NUMBER.dec [SIGNED] @E19_clog2.v:2:47 31)
+        (NUMBER.dec [SIGNED] @E19_clog2.v:2:50 0))
+      (DECLARATOR:y @E19_clog2.v:2:53
+        _)))
+  (PARAM_DECL.localparam @E19_clog2.v:3:3
+    _
+    (DECLARATOR:W @E19_clog2.v:3:14
+      (CALL:$clog2 [SYSTEM] @E19_clog2.v:3:18
+        (IDENT:N @E19_clog2.v:3:25))))
+  (NET_DECL.wire @E19_clog2.v:4:3
+    _
+    (RANGE @E19_clog2.v:4:8
+      (BINARY.- @E19_clog2.v:4:9
+        (CALL:$clog2 [SYSTEM] @E19_clog2.v:4:9
+          (IDENT:N @E19_clog2.v:4:16))
+        (NUMBER.dec [SIGNED] @E19_clog2.v:4:19 1))
+      (NUMBER.dec [SIGNED] @E19_clog2.v:4:21 0))
+    _
+    (DECLARATOR:c @E19_clog2.v:4:24
+      _))
+  (CONT_ASSIGN @E19_clog2.v:5:3
+    _
+    _
+    (NET_ASSIGN @E19_clog2.v:5:10
+      (IDENT:y @E19_clog2.v:5:10)
+      (CALL:$clog2 [SYSTEM] @E19_clog2.v:5:14
+        (BINARY.+ @E19_clog2.v:5:21
+          (IDENT:N @E19_clog2.v:5:21)
+          (NUMBER.dec [SIGNED] @E19_clog2.v:5:25 1))))))

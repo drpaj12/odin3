@@ -1,0 +1,70 @@
+# hand-written
+(MODULE:e6_div_mod @E6_div_mod_general.v:2:1
+  _
+  (LIST @E6_div_mod_general.v:2:19
+    (PORT_DECL.input [IN_HEADER] @E6_div_mod_general.v:2:20
+      (RANGE @E6_div_mod_general.v:2:26
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:2:27 7)
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:2:29 0))
+      (DECLARATOR:a @E6_div_mod_general.v:2:32
+        _)
+      (DECLARATOR:b @E6_div_mod_general.v:2:35
+        _)
+      (DECLARATOR:c @E6_div_mod_general.v:2:38
+        _))
+    (PORT_DECL.output [IN_HEADER] @E6_div_mod_general.v:2:41
+      (RANGE @E6_div_mod_general.v:2:48
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:2:49 7)
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:2:51 0))
+      (DECLARATOR:y1 @E6_div_mod_general.v:2:54
+        _)
+      (DECLARATOR:y2 @E6_div_mod_general.v:2:58
+        _)
+      (DECLARATOR:y3 @E6_div_mod_general.v:2:62
+        _)
+      (DECLARATOR:y4 @E6_div_mod_general.v:2:66
+        _)
+      (DECLARATOR:y5 @E6_div_mod_general.v:2:70
+        _)))
+  (CONT_ASSIGN @E6_div_mod_general.v:3:3
+    _
+    _
+    (NET_ASSIGN @E6_div_mod_general.v:3:10
+      (IDENT:y1 @E6_div_mod_general.v:3:10)
+      (BINARY./ @E6_div_mod_general.v:3:15
+        (IDENT:a @E6_div_mod_general.v:3:15)
+        (IDENT:b @E6_div_mod_general.v:3:19))))
+  (CONT_ASSIGN @E6_div_mod_general.v:4:3
+    _
+    _
+    (NET_ASSIGN @E6_div_mod_general.v:4:10
+      (IDENT:y2 @E6_div_mod_general.v:4:10)
+      (BINARY.% @E6_div_mod_general.v:4:15
+        (IDENT:a @E6_div_mod_general.v:4:15)
+        (IDENT:b @E6_div_mod_general.v:4:19))))
+  (CONT_ASSIGN @E6_div_mod_general.v:5:3
+    _
+    _
+    (NET_ASSIGN @E6_div_mod_general.v:5:10
+      (IDENT:y3 @E6_div_mod_general.v:5:10)
+      (BINARY./ @E6_div_mod_general.v:5:15
+        (IDENT:a @E6_div_mod_general.v:5:15)
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:5:19 3))))
+  (CONT_ASSIGN @E6_div_mod_general.v:6:3
+    _
+    _
+    (NET_ASSIGN @E6_div_mod_general.v:6:10
+      (IDENT:y4 @E6_div_mod_general.v:6:10)
+      (BINARY.% @E6_div_mod_general.v:6:15
+        (IDENT:a @E6_div_mod_general.v:6:15)
+        (NUMBER.dec [SIGNED] @E6_div_mod_general.v:6:19 3))))
+  (CONT_ASSIGN @E6_div_mod_general.v:7:3
+    _
+    _
+    (NET_ASSIGN @E6_div_mod_general.v:7:10
+      (IDENT:y5 @E6_div_mod_general.v:7:10)
+      (BINARY.- @E6_div_mod_general.v:7:15
+        (IDENT:a @E6_div_mod_general.v:7:15)
+        (BINARY.% @E6_div_mod_general.v:7:19
+          (IDENT:b @E6_div_mod_general.v:7:19)
+          (IDENT:c @E6_div_mod_general.v:7:23))))))
