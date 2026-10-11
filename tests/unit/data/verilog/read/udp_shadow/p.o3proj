@@ -1,0 +1,4 @@
+# A design module foo shadows the library primitive foo: foo is a module, so its unnamed
+# instance is an error (with or without the library).
+file verilog top.v
+libfile verilog lib.v

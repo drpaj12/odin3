@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef ODIN3_RV_DATA
@@ -36,7 +37,13 @@
 #define D ODIN3_RV_DATA
 #define C ODIN3_PROJECT_FIXTURES
 
-enum { PATH_BUF = 1024, FILE_MAX = 1 << 16, OOM_LIMIT = 100000, ERROR_LINES = 12 };
+enum {
+    PATH_BUF = 1024,
+    FILE_MAX = 1 << 16,
+    OOM_LIMIT = 100000,
+    ERROR_LINES = 12,
+    PP_FILES = 25 /* files of one preprocessor error each, p1.v .. p25.v */
+};
 
 static odin3_design *design;
 static odin3_strbuf logbuf; /* every message but the pass manager's own, each + '\n' */
@@ -77,8 +84,8 @@ void setUp(void) {
     odin3_pass_set_options(opts);
 }
 
-/* The files a test may leave in tmp. */
-static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v"};
+/* The files a test may leave in tmp (and p1.v .. p25.v). */
+static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v", "u.v", "f.v"};
 
 void tearDown(void) {
     char path[PATH_BUF];
@@ -86,6 +93,13 @@ void tearDown(void) {
         (void)snprintf(path, sizeof path, "%s/%s", tmp, k_outputs[i]);
         (void)unlink(path);
     }
+    for (int i = 1; i <= PP_FILES; i++) {
+        (void)snprintf(path, sizeof path, "%s/p%d.v", tmp, i);
+        (void)unlink(path);
+    }
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.diag_paths = ODIN3_SRCFMT_GIVEN;
+    odin3_pass_set_options(opts);
     (void)rmdir(tmp);
     odin3_util_set_alloc_fail_after(-1);
     odin3_rv_test_set_hook(NULL, NULL);
@@ -238,12 +252,30 @@ static void test_unsupported_language(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
 }
 
-/* A missing file: the preprocessor's error (unlocated: a direct file has no naming word). */
+/* A missing file: the preprocessor's error (unlocated: a direct file has no naming word); the
+ * run goes on to the next file, whose syntax error is reported too. */
 static void test_missing_file(void) {
     enter(D "/proj");
-    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only src/b.v src/nope.v"),
-               "missing_file: 'src/nope.v'\n");
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only src/nope.v ../dup/syntax.v"),
+               "missing_file: 'src/nope.v'\n"
+               "../dup/syntax.v:3:12: error: syntax: unexpected identifier, expecting ';' or ',' "
+               "or '=' or '['\n");
+    TEST_ASSERT_EQUAL_INT(2, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
+}
+
+/* A file that exists but cannot be read: its cause is logged, the status is PARSE (§4.2 step
+ * 6). */
+static void test_unreadable_file(void) {
+    if (geteuid() == 0) {
+        TEST_IGNORE_MESSAGE("root reads any file");
+    }
+    put_tmp("u.v", odin3_bytes_cstr("module u;\nendmodule\n"));
+    enter(tmp);
+    TEST_ASSERT_EQUAL_INT(0, chmod("u.v", 0));
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only u.v"),
+               "cannot read 'u.v': Permission denied\n");
+    TEST_ASSERT_EQUAL_INT(1, errors);
 }
 
 /* --- --parse-only and the 2D entry ------------------------------------------------------------ */
@@ -381,6 +413,51 @@ static void test_design_unit_shadows_library(void) {
         logged());
 }
 
+/* -y is directory-major: lib/d1 with every libext before lib/d2. */
+static void test_libdirs_before_libexts(void) {
+    enter(D "/lib_v_y");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "dirs.o3proj"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--parse-only"), logged());
+    static const char *const k_want[] = {"src/dirs_top.v", "lib/d1/x.vh"};
+    expect_units(k_want, 2);
+}
+
+/* -v before -y: a name both define comes from the -v file; the -y file is never read. */
+static void test_libfiles_before_libdirs(void) {
+    enter(D "/lib_v_y");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "order.o3proj"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--parse-only"), logged());
+    static const char *const k_want[] = {"src/order_top.v", "lib/vq.v"};
+    expect_units(k_want, 2);
+}
+
+/* -v files are read only when a name is undefined: here every name resolves in the design. */
+static void test_libfiles_read_lazily(void) {
+    enter(D "/lib_v_y");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "lazy.o3proj"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--parse-only"), logged());
+    static const char *const k_want[] = {"src/lazy_top.v"};
+    expect_units(k_want, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_library_units_from(held()));
+}
+
+/* A design module shadowing a library primitive of the same name is a module: its unnamed
+ * instance is an error with the library as without it. */
+static void test_design_module_shadows_library_udp(void) {
+    static const char k_error[] = "top.v:2:9: error: instance of 'foo' has no name (only gate and "
+                                  "UDP instances may be unnamed)\n";
+    enter(D "/udp_shadow");
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only top.v"), k_error);
+    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "p.o3proj"));
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only"), k_error);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(logged(), "lib.v:2:1: info: library primitive 'foo' ignored: a design unit "
+                         "defines it\n"),
+        logged());
+    TEST_ASSERT_EQUAL_INT(1, errors);
+}
+
 /* The hook's copy of odin3_pp_files_read, relative to the case directory and sorted. */
 static char files_read[8][PATH_BUF];
 static uint32_t nfiles_read;
@@ -449,6 +526,88 @@ static void test_error_cap_across_files(void) {
     TEST_ASSERT_NULL(strstr(logged(), "e3.v"));
 }
 
+/* Writes tmp/p1.v .. tmp/p<n>.v, each including a missing header (one preprocessor error). */
+static void put_pp_errors(int n) {
+    for (int i = 1; i <= n; i++) {
+        char name[PATH_BUF / 4];
+        char text[PATH_BUF / 4];
+        (void)snprintf(name, sizeof name, "p%d.v", i);
+        (void)snprintf(text, sizeof text, "`include \"nope%d.vh\"\nmodule m%d;\nendmodule\n", i, i);
+        put_tmp(name, odin3_bytes_cstr(text));
+    }
+}
+
+/* Appends " p1.v .. p<count>.v" to args (PATH_BUF bytes). */
+static void add_pp_files(char *args, int count) {
+    for (int i = 1; i <= count; i++) {
+        size_t len = strlen(args);
+        (void)snprintf(args + len, PATH_BUF - len, " p%d.v", i);
+    }
+}
+
+/* Preprocessor errors count against the run's cap: 20, then the stop line, nothing more. */
+static void test_error_cap_preprocessor(void) {
+    put_pp_errors(PP_FILES);
+    enter(tmp);
+    char args[PATH_BUF] = "--parse-only";
+    add_pp_files(args, PP_FILES);
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", args),
+               "p20.v:1:1: error: include_not_found: 'nope20.vh'\ntoo many errors; stopping\n");
+    TEST_ASSERT_EQUAL_INT(21, errors);
+    TEST_ASSERT_NULL(strstr(logged(), "nope21"));
+}
+
+/* Parser and preprocessor errors share the cap: 12 + 8, then the stop line. */
+static void test_error_cap_mixed(void) {
+    put_errors("e1.v");
+    put_pp_errors(PP_FILES);
+    enter(tmp);
+    char args[PATH_BUF] = "--parse-only e1.v";
+    add_pp_files(args, 10);
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", args),
+               "p8.v:1:1: error: include_not_found: 'nope8.vh'\ntoo many errors; stopping\n");
+    TEST_ASSERT_EQUAL_INT(21, errors);
+    TEST_ASSERT_NULL(strstr(logged(), "nope9"));
+}
+
+/* With --diag-paths resolved every diagnostic of the run names its file resolved: the
+ * preprocessor's, syntax errors, duplicate_module, unnamed instances and library info lines. */
+/* Enters dir and stores its absolute path (getcwd) in out (PATH_BUF bytes). */
+static void enter_abs(const char *dir, char *out) {
+    enter(dir);
+    TEST_ASSERT_NOT_NULL(getcwd(out, PATH_BUF));
+}
+
+static void set_resolved(void) {
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.diag_paths = ODIN3_SRCFMT_RESOLVED;
+    odin3_pass_set_options(opts);
+}
+
+static void test_diag_paths_resolved(void) {
+    set_resolved();
+    char proj[PATH_BUF];
+    char dir[PATH_BUF];
+    enter_abs(D "/proj", proj);
+    enter_abs(D "/dup", dir);
+    char want[PATH_BUF * 4];
+    (void)snprintf(want, sizeof want,
+                   "missing_file: '%s/src/nope.v'\n%s/syntax.v:3:12: error: syntax: unexpected "
+                   "identifier, expecting ';' or ',' or '=' or '['\n%s/one.v:5:1: error: "
+                   "duplicate_module: module 'm' is already defined\n",
+                   proj, dir, dir);
+    expect_log(ODIN3_ERR_PARSE,
+               run("read_verilog", "--parse-only ../proj/src/nope.v syntax.v one.v"), want);
+    TEST_ASSERT_EQUAL_INT(3, errors);
+    enter_abs(D "/unnamed", dir);
+    (void)snprintf(want, sizeof want, "%s/mod_bad.v:7:9: error: instance of 'sub'", dir);
+    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only mod_bad.v"), want);
+    enter_abs(D "/lib_v_y", dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "first.o3proj"));
+    (void)snprintf(want, sizeof want, "%s/lib/b.v:2:1: info: library module 'thru'", dir);
+    expect_log(ODIN3_OK, run("read_verilog", "--parse-only"), want);
+}
+
 /* Corrupts the first node of the sealed store, before the check. */
 static void corrupt_first_node(odin3_rv *rv, void *user) {
     (void)user;
@@ -464,28 +623,51 @@ static void test_check_runs(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
 }
 
-/* One step of the OOM sweep: a fresh design, the record, then the read with allocation limit
- * limit; NO_MEMORY or success, and the design holds the store exactly on success. */
-static odin3_status oom_step(int limit) {
+/* One OOM sweep: the project read first (NULL: none), then read_verilog with args, ending
+ * with status want (the store held exactly when want is OK). */
+typedef struct oom_case {
+    const char *project;
+    const char *args;
+    odin3_status want;
+} oom_case;
+
+/* One step: a fresh design, the record, then the read with allocation limit limit; NO_MEMORY or
+ * the case's own status, nothing held on failure. */
+static odin3_status oom_step(const oom_case *oc, int limit) {
     fresh_design();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "ext.o3proj"));
+    if (oc->project != NULL) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", oc->project));
+    }
     odin3_util_set_alloc_fail_after(limit);
-    odin3_status st = run("read_verilog", "--parse-only");
+    odin3_status st = run("read_verilog", oc->args);
     odin3_util_set_alloc_fail_after(-1);
-    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, logged());
+    TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY, logged());
     TEST_ASSERT_EQUAL_UINT32(st == ODIN3_OK ? 1 : 0, odin3_design_ast_count(design));
     return st;
 }
 
-/* Every allocation of a library run fails in turn: NO_MEMORY or success, nothing leaked. */
-static void test_oom_sweep(void) {
-    enter(D "/lib_v_y");
+/* Fails every allocation in turn until the case runs to its own status; returns the steps. */
+static int oom_sweep(const oom_case *oc) {
     int limit = 0;
-    while (limit < OOM_LIMIT && oom_step(limit) != ODIN3_OK) {
+    while (limit < OOM_LIMIT && oom_step(oc, limit) == ODIN3_ERR_NO_MEMORY) {
         limit++;
     }
     TEST_ASSERT_TRUE(limit < OOM_LIMIT);
-    TEST_ASSERT_TRUE(limit > 50); /* the read itself allocates, not only the pass run */
+    return limit;
+}
+
+/* Every allocation fails in turn: a library run, a duplicate_module run (its map, the error
+ * path) and a run through the 2D entry (set_ast, the stub, drop_ast); nothing leaked. */
+static void test_oom_sweep(void) {
+    enter(D "/lib_v_y");
+    oom_case lib = {"ext.o3proj", "--parse-only", ODIN3_OK};
+    TEST_ASSERT_TRUE(oom_sweep(&lib) > 50); /* the read itself allocates, not only the run */
+    enter(D "/dup");
+    oom_case dup = {NULL, "--parse-only one.v", ODIN3_ERR_PARSE};
+    (void)oom_sweep(&dup);
+    enter(D "/proj");
+    oom_case elab = {NULL, "src/b.v", ODIN3_ERR_INVALID_ARG};
+    (void)oom_sweep(&elab);
 }
 
 /* The store's accessor: an index at or past the root count is ignored. */
@@ -511,6 +693,7 @@ int main(void) {
     RUN_TEST(test_no_verilog_files);
     RUN_TEST(test_unsupported_language);
     RUN_TEST(test_missing_file);
+    RUN_TEST(test_unreadable_file);
     RUN_TEST(test_parse_only_printable);
     RUN_TEST(test_stub_without_parse_only);
     RUN_TEST(test_stub_keeps_parsed_under_all);
@@ -523,8 +706,15 @@ int main(void) {
     RUN_TEST(test_libfile_first_wins);
     RUN_TEST(test_libdir_libext_order);
     RUN_TEST(test_design_unit_shadows_library);
+    RUN_TEST(test_libdirs_before_libexts);
+    RUN_TEST(test_libfiles_before_libdirs);
+    RUN_TEST(test_libfiles_read_lazily);
+    RUN_TEST(test_design_module_shadows_library_udp);
     RUN_TEST(test_corpus_lib_v_y_files_read);
     RUN_TEST(test_error_cap_across_files);
+    RUN_TEST(test_error_cap_preprocessor);
+    RUN_TEST(test_error_cap_mixed);
+    RUN_TEST(test_diag_paths_resolved);
     RUN_TEST(test_check_runs);
     RUN_TEST(test_oom_sweep);
     RUN_TEST(test_library_units_from_accessor);

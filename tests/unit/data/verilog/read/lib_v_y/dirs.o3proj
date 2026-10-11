@@ -1,0 +1,6 @@
+# -y is directory-major: lib/d1 is searched with every libext before lib/d2, so d1/x.vh wins
+# over d2/x.v although .v comes first in libext.
+file verilog src/dirs_top.v
+libdir lib/d1
+libdir lib/d2
+libext .v .vh

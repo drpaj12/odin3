@@ -43,9 +43,9 @@ typedef struct odin3_rv_opts {
  * instances (step 5), both counted against the cap. On success the store is sealed, checked
  * FULL in Debug builds or under --check, the line "read_verilog: N units (L library), M nodes,
  * K comments, B bytes, T ms" is logged at ODIN3_LOG_INFO and *out receives it (owned by the
- * caller). Failures: ODIN3_ERR_PARSE after the located diagnostics; ODIN3_ERR_IO for a file that
- * exists but cannot be read (also counted); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_CHECK when the store
- * fails the check (a 2C bug, never user input); ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * caller). Failures: ODIN3_ERR_PARSE after the located diagnostics (a file that exists but
+ * cannot be read included: its cause is logged); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_CHECK when the
+ * store fails the check (a 2C bug, never user input); ODIN3_ERR_INVALID_ARG (logged) for a NULL
  * argument or no files. *out is NULL on failure and the store is destroyed (the IR is untouched,
  * 2A §9).
  */
@@ -69,7 +69,7 @@ typedef struct odin3_rv_want {
  * ODIN3_RV_* bits), wanted (odin3_rv_want, in order of first instantiation) with its set
  * wanted_set, libread (resolved paths of the library files read). swept is the first node ID
  * not yet swept for names; bytes the stream bytes parsed; ndesign the design UNITs' count;
- * libfiles_read: every -v file has been read; io: a file existed but could not be read.
+ * libfiles_read: every -v file has been read.
  */
 typedef struct odin3_rv {
     odin3_design *design;
@@ -84,13 +84,14 @@ typedef struct odin3_rv {
     uint32_t swept;
     uint64_t bytes;
     uint32_t ndesign;
-    bool libfiles_read, io;
+    bool libfiles_read;
 } odin3_rv;
 
 /*
  * Preprocesses and parses one file into rv's store. ODIN3_OK also when the file had errors
- * (logged and counted: a preprocessor error counts as one); the fatal statuses (NO_MEMORY, CHECK
- * from the preprocessor's Debug check, INVALID_ARG) stop the run and are returned.
+ * (logged and counted: a preprocessor error counts as one) or the run is at its error cap (then
+ * "too many errors; stopping" is logged once and the run stops); the fatal statuses (NO_MEMORY,
+ * CHECK from the preprocessor's Debug check, INVALID_ARG) stop the run and are returned.
  */
 odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src);
 

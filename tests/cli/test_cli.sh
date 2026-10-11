@@ -22,8 +22,8 @@
 # project_preprocess (preprocess --out d --segments writes 0.v, 0.segments.json and
 # files-read.txt; without --out the text goes to stdout), parse_only (--parse-only a.v b.v is
 # -p "read_verilog --parse-only a.v b.v"; with --project or -f it reads the record's files; a
-# syntax error fails), parse_only_with_script (--parse-only with -p exits 2: use the pass
-# option). The project cases run from the project's directory (tests/cli/project), so the paths
+# syntax error fails), parse_only_with_script (--parse-only with -p or a .o3 script exits 2:
+# use the pass option). The project cases run from the project's directory (tests/cli/project), so the paths
 # given are relative.
 set -euo pipefail
 
@@ -297,6 +297,14 @@ parse_only_with_script)
     [[ $rc -eq 2 ]] || fail "--parse-only with -p: exit code $rc, expected 2"
     grep -qF -- "--parse-only cannot be combined with a script: use the pass option" \
         "$work/err" || fail "stderr lacks the message"
+    # A script file (.o3) under --parse-only is refused the same way, not parsed as Verilog.
+    printf 'stats\n' >"$work/flow.o3"
+    set +e
+    "$odin3" --parse-only "$work/flow.o3" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--parse-only with a script file: exit code $rc, expected 2"
+    grep -qF -- "use the pass option" "$work/err" || fail "script file: stderr lacks the message"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

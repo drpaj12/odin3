@@ -1,0 +1,4 @@
+# -v before -y: q is in lib/vq.v (-v) and in lib/d2/q.v (-y); the -v file is read first.
+file verilog src/order_top.v
+libfile verilog lib/vq.v
+libdir lib/d2

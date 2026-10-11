@@ -29,6 +29,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -44,7 +45,8 @@ enum { RV_ALWAYS_CHECK = 0 };
 enum { RV_ALWAYS_CHECK = 1 };
 #endif
 
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000, CWD_BUF = 4096 };
+/* getcwd's buffer: first try and largest (a working directory deeper than 1 MB is refused). */
+enum { MS_PER_S = 1000, NS_PER_MS = 1000000, CWD_BUF = 4096, CWD_MAX = 1 << 20 };
 
 /* The library name of a file given directly to the pass (the record's default library). */
 static const char k_work[] = "work";
@@ -148,15 +150,31 @@ static odin3_status rv_open(odin3_rv *rv, odin3_design *design, const odin3_rv_o
     return st != ODIN3_OK ? st : create_pp(rv);
 }
 
+/* The run's error cap before a file (plan point (r)): the preprocessor logs its own error, so a
+ * run already at the cap stops here with the stop line (at the loc that named the file, else
+ * unlocated) instead of preprocessing a file whose error could not be replaced by it. True when
+ * the run has stopped. */
+static bool at_cap(odin3_rv *rv, odin3_loc at) {
+    if (rv->vl.stop || rv->vl.errors < rv->vl.limits.max_errors) {
+        return rv->vl.stop;
+    }
+    rv->vl.stop = true;
+    if (at.v != 0) {
+        odin3_diag(rv->design, ODIN3_LOG_ERROR, at, "too many errors; stopping");
+    } else {
+        odin3_log(ODIN3_LOG_ERROR, "too many errors; stopping");
+    }
+    return true;
+}
+
 odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
-    if (rv->vl.stop) {
+    if (at_cap(rv, src->at)) {
         return ODIN3_OK;
     }
     odin3_pp_stream stream;
     odin3_status st = odin3_pp_run(rv->pp, src, &stream);
     if (st == ODIN3_ERR_PARSE || st == ODIN3_ERR_IO) {
         rv->vl.errors++; /* the preprocessor logged it; it counts against the cap */
-        rv->io |= st == ODIN3_ERR_IO;
         return ODIN3_OK;
     }
     if (st != ODIN3_OK) {
@@ -276,7 +294,7 @@ static odin3_status read_all(odin3_rv *rv, const odin3_rv_opts *opts) {
         check_unnamed(rv);
     }
     if (st == ODIN3_OK && (rv->vl.errors > 0 || rv->vl.stop)) {
-        st = rv->io ? ODIN3_ERR_IO : ODIN3_ERR_PARSE;
+        st = ODIN3_ERR_PARSE; /* §4.2 step 6, an unreadable file included (logged as such) */
     }
     return st;
 }
@@ -347,21 +365,39 @@ static odin3_status direct_source(odin3_design *design, const char *cwd, odin3_b
     return st;
 }
 
-static odin3_status direct_sources(odin3_design *design, const odin3_vec *words, odin3_vec *srcs) {
-    char cwd[CWD_BUF];
-    if (getcwd(cwd, sizeof cwd) == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "read_verilog: cannot read the working directory");
-        return ODIN3_ERR_IO;
+/* The working directory into buf (any depth: the buffer grows until getcwd fits). */
+static odin3_status working_dir(odin3_strbuf *buf) {
+    for (size_t cap = CWD_BUF; cap <= CWD_MAX; cap *= 2) {
+        odin3_status st = odin3_strbuf_reserve(buf, cap);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        if (getcwd(buf->data, cap) != NULL) {
+            buf->len = strlen(buf->data);
+            return ODIN3_OK;
+        }
+        if (errno != ERANGE) {
+            break;
+        }
     }
-    odin3_status st = ODIN3_OK;
+    odin3_log(ODIN3_LOG_ERROR, "read_verilog: cannot read the working directory");
+    return ODIN3_ERR_IO;
+}
+
+static odin3_status direct_sources(odin3_design *design, const odin3_vec *words, odin3_vec *srcs) {
+    odin3_strbuf cwd;
+    odin3_strbuf_init(&cwd);
+    odin3_status st = working_dir(&cwd);
     for (size_t i = 0; st == ODIN3_OK && i < words->len; i++) {
         odin3_pp_source *src = odin3_vec_push(srcs);
         st = src == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
         if (st == ODIN3_OK) {
             *src = (odin3_pp_source){0};
-            st = direct_source(design, cwd, *(const odin3_bytes *)odin3_vec_cat(words, i), src);
+            st =
+                direct_source(design, cwd.data, *(const odin3_bytes *)odin3_vec_cat(words, i), src);
         }
     }
+    odin3_strbuf_free(&cwd);
     return st;
 }
 

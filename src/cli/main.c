@@ -77,6 +77,7 @@ typedef struct cli_state {
     bool resolved;        /* --diag-paths resolved */
     bool scripts;         /* a script file (or, with --parse-only, a Verilog file) is given */
     bool inline_script;   /* a -p is given */
+    bool script_file;     /* a positional argument ending in .o3 (a script) is given */
     bool parse_only;      /* --parse-only: the other arguments are Verilog files, not scripts */
     bool project;         /* a --project or -f is given */
     bool dump;            /* --dump-project */
@@ -179,16 +180,19 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
     if (strchr(arg, '"') != NULL) {
         state->quoted = arg; /* a Verilog file with '"' cannot be quoted for read_verilog */
     }
+    size_t len = strlen(arg);
+    state->script_file |= len > strlen(".o3") && strcmp(arg + len - strlen(".o3"), ".o3") == 0;
     state->scripts = true;
     return EXIT_OK;
 }
 
-/* --parse-only takes no script (2C §4.1): the files are its arguments. */
+/* --parse-only takes no script (2C §4.1): the files are its arguments; a -p or a positional
+ * argument ending in .o3 (the script suffix) is refused. */
 static int check_parse_only(const cli_state *state) {
     if (!state->parse_only) {
         return EXIT_OK;
     }
-    if (state->inline_script) {
+    if (state->inline_script || state->script_file) {
         (void)fputs("odin3: --parse-only cannot be combined with a script: use the pass option "
                     "(read_verilog --parse-only)\n",
                     stderr);
@@ -332,7 +336,7 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
     if (st == ODIN3_OK && state->dump) {
         st = odin3_design_run_pass(design, "dump_project", "");
     }
-    if (st == ODIN3_OK) {
+    if (st == ODIN3_OK && !state->parse_only) { /* --top means nothing to a parse (2D's) */
         warn_unapplied_top(design, state->top);
     }
     odin3_design_destroy(design);

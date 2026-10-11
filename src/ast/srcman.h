@@ -213,6 +213,11 @@ odin3_status odin3_srcman_format_chain(const odin3_srcman *sm, odin3_loc loc, od
 void odin3_diag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt, ...)
     ODIN3_PRINTF(4, 5);
 
+/* odin3_diag with a va_list (the parser's diagnostics, 2C §3.4): the design's --diag-paths
+ * style, as odin3_diag. */
+void odin3_vdiag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt,
+                 va_list args) ODIN3_PRINTF(4, 0);
+
 /* odin3_diag on a source manager with a va_list (the source manager's own located errors). */
 void odin3_srcman_vdiag(const odin3_srcman *sm, odin3_log_level level, odin3_loc loc,
                         const char *fmt, va_list args);

@@ -36,7 +36,8 @@ static const char *text_of(const odin3_rv *rv, uint32_t str) {
 /* --- the name sets -------------------------------------------------------------------------- */
 
 /* A MODULE or UDP_DECL: its name is defined. A library definition of a name a design unit or an
- * earlier library definition already has stays in the store, with an info line. */
+ * earlier library definition already has stays in the store, with an info line, and changes
+ * nothing about the name. */
 static odin3_status define(odin3_rv *rv, odin3_ast_id node, bool library) {
     uint32_t name = odin3_ast_name(rv->ast, node);
     bool udp = odin3_ast_kind_of(rv->ast, node) == ODIN3_AST_UDP_DECL;
@@ -49,7 +50,10 @@ static odin3_status define(odin3_rv *rv, odin3_ast_id node, bool library) {
                         (old & ODIN3_RV_DESIGN) != 0 ? "a design unit defines it"
                                                      : "an earlier library definition wins");
     }
-    uint64_t bits = old | (library ? ODIN3_RV_LIBRARY : ODIN3_RV_DESIGN) | (udp ? ODIN3_RV_UDP : 0);
+    /* UDP describes the definition that wins (the first: design units are swept before any
+     * library file), never an ignored one, so step 5 asks the right question. */
+    uint64_t bits =
+        old | (library ? ODIN3_RV_LIBRARY : ODIN3_RV_DESIGN) | (!had && udp ? ODIN3_RV_UDP : 0);
     return odin3_u64map_put(rv->defined, (odin3_kv){name, bits});
 }
 
