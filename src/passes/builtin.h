@@ -13,10 +13,12 @@
 extern const odin3_pass_def *const odin3_builtin_passes[];
 extern const uint32_t odin3_builtin_pass_count;
 
-/* Built-in passes defined outside builtin.c: write_formats.c, sim_pass.c and project_pass.c. */
+/* Built-in passes defined outside builtin.c: write_formats.c (write_json, write_verilog,
+ * write_dot, write_rtlil), sim_pass.c and project_pass.c. */
 extern const odin3_pass_def odin3_pass_write_json;
 extern const odin3_pass_def odin3_pass_write_verilog;
 extern const odin3_pass_def odin3_pass_write_dot;
+extern const odin3_pass_def odin3_pass_write_rtlil;
 extern const odin3_pass_def odin3_pass_sim;
 extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;

@@ -1,6 +1,10 @@
-/* write_formats.c — the write_json, write_verilog and write_dot passes over the 1F writers. */
+/*
+ * write_formats.c — the write_json, write_verilog and write_dot passes over the 1F writers, and
+ * write_rtlil (2D §13).
+ */
 #include "backends/dot/writer.h"
 #include "backends/json/writer.h"
+#include "backends/rtlil/writer.h"
 #include "backends/verilog/writer.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -144,9 +148,10 @@ static odin3_status parse_write_args(const char *pass, odin3_bytes args, write_a
     return st;
 }
 
-typedef enum write_format { WRITE_JSON, WRITE_VERILOG, WRITE_DOT } write_format;
+typedef enum write_format { WRITE_JSON, WRITE_VERILOG, WRITE_DOT, WRITE_RTLIL } write_format;
 
-static const char *const FORMAT_PASS[] = {"write_json", "write_verilog", "write_dot"};
+static const char *const FORMAT_PASS[] = {"write_json", "write_verilog", "write_dot",
+                                          "write_rtlil"};
 
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
@@ -165,6 +170,8 @@ static odin3_status write_format_run(odin3_design *design, odin3_bytes args, wri
         st = odin3_json_write(design, parsed.path.data);
     } else if (st == ODIN3_OK && format == WRITE_VERILOG) {
         st = odin3_verilog_write(design, parsed.path.data, &parsed.verilog);
+    } else if (st == ODIN3_OK && format == WRITE_RTLIL) {
+        st = odin3_rtlil_write(design, parsed.path.data);
     } else if (st == ODIN3_OK) {
         st = odin3_dot_write(design, parsed.path.data, &parsed.dot);
     }
@@ -194,6 +201,13 @@ static odin3_status write_dot_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     return write_format_run(design, args, WRITE_DOT);
 }
 
+static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                                    void *user) {
+    (void)ctx;
+    (void)user;
+    return write_format_run(design, args, WRITE_RTLIL);
+}
+
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",   "write_json <file>: write the design as Yosys-schema JSON",
     write_json_run, NULL,
@@ -213,3 +227,11 @@ const odin3_pass_def odin3_pass_write_dot = {
     NULL,
     false,
     ODIN3_PASS_PROCESSES_REFUSE};
+/* 2D EL-48: RTLIL is the word-level view with processes, so the pass runs on them (EL-33). */
+const odin3_pass_def odin3_pass_write_rtlil = {
+    "write_rtlil",
+    "write_rtlil <file>: write the design as Yosys RTLIL text (word level, processes included)",
+    write_rtlil_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};

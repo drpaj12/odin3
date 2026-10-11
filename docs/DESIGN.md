@@ -339,6 +339,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | VQM | yes | — | Titan |
 | EDIF | yes | later | |
 | JSON (Yosys schema) | later | yes | netlistsvg, nextpnr |
+| RTLIL (Yosys text) | — | yes | word level with processes; the Yosys bridge for 2D–2F tests |
 | Graphviz dot | — | yes | hierarchy clusters; `--focus <hier-path | file:line | cone(net)>`; never renders > N nodes without a focus |
 | CIRCT MLIR | later | yes | hw/comb/seq |
 

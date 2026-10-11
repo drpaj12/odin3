@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# yosys-roundtrip: Yosys reads Odin III's write_rtlil output back (2D spec §13, §14.3; plan
+# Task 5). For every DIR/*.il, smallest first, Yosys (the 0.55 that CMake's ODIN3_YOSYS055 block
+# found) runs
+#   read_rtlil F; write_rtlil G              (the text parses and passes Yosys's cell checks)
+#   read_rtlil F; proc; opt; write_blif H    (Yosys lowers it, processes included)
+# with G and H under DIR/yosys/. Each run must exit 0.
+# Usage: yosys-roundtrip <yosys> <dir>. Exit: 0 all passed, 1 any failure, 2 usage or no input.
+set -euo pipefail
+
+if [[ $# -ne 2 || ! -x "$1" || ! -d "$2" ]]; then
+    echo "usage: yosys-roundtrip <yosys> <dir>" >&2
+    exit 2
+fi
+yosys=$1
+dir=$2
+out=$dir/yosys
+mkdir -p "$out"
+
+mapfile -t files < <(find "$dir" -maxdepth 1 -name '*.il' -type f -printf '%s %p\n' |
+    sort -n -k1,1 -k2,2 | cut -d' ' -f2-)
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "yosys-roundtrip: no .il files in $dir (run test_rtlil_writer first)" >&2
+    exit 2
+fi
+
+failed=0
+for file in "${files[@]}"; do
+    name=$(basename "$file" .il)
+    for step in "read_rtlil $file; write_rtlil $out/$name.il" \
+        "read_rtlil $file; proc; opt; write_blif $out/$name.blif"; do
+        if "$yosys" -q -p "$step" >"$out/$name.log" 2>&1; then
+            echo "ok    $name: $step"
+        else
+            echo "FAIL  $name: $step"
+            sed 's/^/      /' "$out/$name.log"
+            failed=1
+        fi
+    done
+done
+exit $failed

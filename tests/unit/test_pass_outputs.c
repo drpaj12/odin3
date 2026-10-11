@@ -1,5 +1,6 @@
 /*
- * test_pass_outputs.c — unit tests for the write_json, write_verilog, write_dot and sim passes.
+ * test_pass_outputs.c — unit tests for the write_json, write_verilog, write_dot, write_rtlil and
+ * sim passes.
  */
 #include "backends/blif/writer.h"
 #include "backends/dot/writer.h"
@@ -84,11 +85,11 @@ static void read_ff(void) {
 }
 
 static void test_registered_in_order(void) {
-    static const char *const names[] = {"read_blif",    "read_techlib",  "write_blif",
-                                        "write_json",   "write_verilog", "write_dot",
-                                        "check",        "compact",       "stats",
-                                        "sim",          "hierarchy",     "write_verilog_ast",
-                                        "read_project", "dump_project",  "preprocess"};
+    static const char *const names[] = {
+        "read_blif",     "read_techlib", "write_blif", "write_json",
+        "write_verilog", "write_dot",    "check",      "compact",
+        "stats",         "sim",          "hierarchy",  "write_verilog_ast",
+        "read_project",  "dump_project", "preprocess", "write_rtlil"};
     for (uint32_t i = 0; i < sizeof names / sizeof names[0]; i++) {
         TEST_ASSERT_EQUAL_STRING(names[i], odin3_pass_at(i)->name);
     }
@@ -271,6 +272,24 @@ static void test_output_passes_refuse_processes(void) {
     TEST_ASSERT_FALSE(exists(OUT));
 }
 
+/* write_rtlil is OK on processes (EL-33, EL-48): the $proc node is an RTLIL process block. */
+static void test_write_rtlil_writes_processes(void) {
+    design_with_process();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_rtlil", OUT));
+    const char *text = slurp(OUT);
+    TEST_ASSERT_NOT_NULL(strstr(text, "module \\e\nend\nmodule \\m\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "  process $proc$t.v:1$"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "    sync posedge \\clk\n      update \\q \\t0\n"));
+}
+
+/* write_rtlil takes one path and no options. */
+static void test_write_rtlil_arguments(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_rtlil", "odin3_po_test.out --bad"));
+    TEST_ASSERT_TRUE(log_has("write_rtlil: unknown argument '--bad'"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_rtlil", ""));
+    TEST_ASSERT_TRUE(log_has("write_rtlil: expects one path (and its options)"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registered_in_order);
@@ -285,5 +304,7 @@ int main(void) {
     RUN_TEST(test_writers_refuse_processes);
     RUN_TEST(test_writer_refusal_leaves_the_path);
     RUN_TEST(test_output_passes_refuse_processes);
+    RUN_TEST(test_write_rtlil_writes_processes);
+    RUN_TEST(test_write_rtlil_arguments);
     return UNITY_END();
 }

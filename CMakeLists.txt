@@ -179,7 +179,8 @@ add_library(odin3_core OBJECT
     src/backends/json/lut.c
     src/backends/json/writer.c
     src/backends/verilog/escape.c
-    src/backends/verilog/writer.c)
+    src/backends/verilog/writer.c
+    src/backends/rtlil/writer.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -476,6 +477,13 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
+    # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
+    odin3_add_unit_test(test_rtlil_writer)
+    target_compile_definitions(test_rtlil_writer PRIVATE
+        ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
+    set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -775,4 +783,39 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+
+    # Yosys 0.55 as VTR pins it (2D plan point (p)): the oracle of every 2D-2F comparison. Found
+    # only in the VTR build (never PATH, which may hold another Yosys) and accepted only when
+    # `yosys -V` says 0.55; otherwise no 0.55 test is registered (CI has none: they run locally
+    # and nightly). Every later Yosys-0.55 CTest goes inside this block. ODIN3_YOSYS (above) is
+    # the workspace 0.69 build, used only by the nightly drift job; the two are never mixed.
+    find_program(ODIN3_YOSYS055 yosys
+        HINTS $ENV{VTR_ROOT}/build/bin
+              $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin
+        NO_DEFAULT_PATH)
+    set(ODIN3_YOSYS055_OK FALSE)
+    if(ODIN3_YOSYS055)
+        execute_process(COMMAND ${ODIN3_YOSYS055} -V
+            OUTPUT_VARIABLE _yosys055_version ERROR_QUIET RESULT_VARIABLE _yosys055_rc
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(_yosys055_rc EQUAL 0 AND _yosys055_version MATCHES "Yosys 0\\.55([^0-9]|$)")
+            set(ODIN3_YOSYS055_OK TRUE)
+            message(STATUS "Yosys 0.55: ${ODIN3_YOSYS055} (${_yosys055_version})")
+        else()
+            message(STATUS "Yosys 0.55: ${ODIN3_YOSYS055} is '${_yosys055_version}', not 0.55; "
+                           "no Yosys-0.55 tests")
+        endif()
+    else()
+        message(STATUS "Yosys 0.55: not found (VTR build); no Yosys-0.55 tests")
+    endif()
+    if(ODIN3_YOSYS055_OK)
+        # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
+        # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
+        # first.
+        add_test(NAME rtlil_yosys_roundtrip
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/rtlil-check/yosys-roundtrip
+                    ${ODIN3_YOSYS055} ${PROJECT_BINARY_DIR}/rtlil)
+        set_tests_properties(rtlil_yosys_roundtrip PROPERTIES
+            LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+    endif()
 endif()

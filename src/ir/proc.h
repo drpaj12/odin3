@@ -187,6 +187,13 @@ odin3_status odin3_proc_sigspec(const odin3_module *module, const odin3_net_id *
                                 odin3_strbuf *out);
 
 /*
+ * True when odin3_proc_sigspec spells net as a net of its own (\name for a named net, else
+ * $n<ID>): a live net that is neither a constant nor a bit of a named wire. write_rtlil declares
+ * exactly these nets as wires (2D plan review R4), so every spelling it prints is declared.
+ */
+bool odin3_proc_sig_is_net(const odin3_module *module, odin3_net_id net);
+
+/*
  * Appends the RTLIL spelling of a value, as an attribute or parameter value: an INT in the 32-bit
  * range in decimal, a wider one as 64 bits; BITS as <n>'<bits> MSB first (0, 1, x, z); a STRING or
  * a COVER as a quoted string with Yosys's escapes. ODIN3_ERR_INVALID_ARG (not logged) for a PROC

@@ -860,6 +860,11 @@ static sig_bit classify(const odin3_module *module, odin3_net_id net) {
     return bit;
 }
 
+bool odin3_proc_sig_is_net(const odin3_module *module, odin3_net_id net) {
+    return odin3_net_valid(net) && odin3_net_live(module, net) &&
+           classify(module, net).kind == SIG_NET;
+}
+
 /* The nets being spelled, LSB first. */
 typedef struct sig_src {
     const odin3_module *module;
