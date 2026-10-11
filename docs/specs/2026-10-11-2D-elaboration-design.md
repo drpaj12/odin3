@@ -1373,9 +1373,12 @@ For an array kept as a memory (EL-27):
 - **Write** `m[i] <= d` / `m[i] = d` (only in a block with one edge sync; elsewhere EL-27 made it
   registers): up to three process-local variables per write statement — `addr` (the wider of
   the index expression and `ABITS`), `data` (the memory's width) and `en` (the memory's width) —
-  with the root actions `addr = x`, `data = x` and `en = 0`, in that order (v4: Yosys 0.55
-  inserts all three at the block's start, `simplify.cc` 3167–3231, so every path assigns the
-  temporaries and `proc` builds no feedback loop through them); a constant index needs no `addr`
+  with the statements `addr = x`, `data = x` and `en = 0` inserted at the block's start, in that
+  order (v4: Yosys 0.55 inserts all three, `simplify.cc` 3167–3231, so every path assigns the
+  temporaries and `proc` builds no feedback loop through them). They are blocking assignments
+  processed like any other (EL-35/EL-36's removal rule), so under a conditional write the x/x/0
+  values end in the switch's default case and the root assigns the case temporaries, and an
+  unconditional write leaves the root with `en = all ones` alone; a constant index needs no `addr`
   variable and a constant full-word value no `data` variable (Yosys's `isConst` branches): the
   constant goes to the port directly. The write statement assigns `addr = i` (the raw index),
   `data = d`, `en = all ones`. The variables are process-local temporaries in EL-33's sense: `OUT` positions

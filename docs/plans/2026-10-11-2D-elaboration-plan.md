@@ -1,4 +1,4 @@
-# 2D Elaboration — Implementation Plan (v2)
+# 2D Elaboration — Implementation Plan (v3)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -12,6 +12,14 @@ v2 applies the Opus plan review (`2D-plan-review`: 3 critical, 14 important, 24 
 - I13: `--x-report` stays in 2H.
 
 The v1 plan had 29 tasks; v2 has 28.
+
+v3 applies the re-review (R1–R6):
+- R1: stage-2 pending entries land with their constructs: assignments in Task 18, instances, gates and A4 in Task 19, and the error-cap test moves to Task 19.
+- R2: Task 24's memory-write body follows the case-temporary removal rule, with the spec's EL-39 wording to match.
+- R3: the `duplicate_module` test moves to Task 17.
+- R4: `write_rtlil` declares named non-wire nets.
+- R5: a `sweep` workflow preset builds Release itself.
+- R6: the stage-2 type cache lists its types and supplies `$proc`'s ID.
 
 **Goal:** Turn the parsed store of one `read_verilog` run into word-level IR with processes. Stage 1 (Verilog only) builds the elaborated store: module lookup, top selection, parameters with Yosys's precedence, specializations, `generate`, constant functions, implicit nets, non-ANSI port merging and the REJECT/IGNORE diagnostics. Stage 2 (shared with the Phase 5 slang adapter) binds that store and emits wires, ports, word cells, instances, drivers, memories, `$proc` process cells, inlined functions and initial values. The IR changes A (nine registry cells), B (the `$proc` cell) and C (port range and sign) and `write_rtlil` land first. The evidence is per-row goldens in both latch modes, the Yosys 0.55 bridge, micro and VTR sweeps, fuzzers and the mcml.v/lenet.v benchmark. No `proc`, no `opt`, no `--x-report` (2H's).
 
@@ -238,7 +246,9 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
     - Task 15 lands `PORT_REF` merging, implicit nets, `FUNCTION_DECL`, `TASK_DECL`, `ALWAYS`, `INITIAL` and every statement kind.
     - Task 16 lands every REJECT/IGNORE kind; the stage-1 table is then empty.
     - In stage 2:
-      - Task 17 lands the module-level kinds;
+      - Task 17 lands declarations, `PARAM_DECL`, ports and the scope kinds (`MODULE`, `GEN_BLOCK`, named `SEQ_BLOCK`, `FUNCTION_DECL`/`TASK_DECL` as scopes);
+      - Task 18 lands `CONT_ASSIGN`/`NET_ASSIGN` (net declaration assignments included);
+      - Task 19 lands `INSTANTIATION`/`INSTANCE`/`CONNECTION`/`GATE_DECL`, the driver table and A4;
       - Task 21 lands `ALWAYS` with blocks and assignments;
       - Task 22 lands `IF` and `CASE`;
       - Task 23 lands `FOR`, `REPEAT`, `TASK_CALL`, calls in processes and the two read features;
@@ -262,7 +272,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - Heavy sweeps carry the CTest label `sweep` and `RUN_SERIAL TRUE`:
     - `elab_coverage_equiv`, `verilog_micro_elab`, `elab_equiv_micro`, `verilog_vtr_elab`, `elab_equiv_vtr`, `elab_gen_vs_yosys`, `elab_const_diff` and `bench_elab_smoke`;
     - any ASan run touching `lenet.v`.
-  - `CMakePresets.json`'s `debug` and `release` test presets exclude `sweep` (`"filter": {"exclude": {"label": "sweep"}}`), so the `-j4` gate never runs them. A new `sweep` test preset (configure `release`, `"filter": {"include": {"label": "sweep"}}`, `"execution": {"jobs": 1}`) runs them after the gate.
+  - `CMakePresets.json`'s `debug` and `release` test presets exclude `sweep` (`"filter": {"exclude": {"label": "sweep"}}`), so the `-j4` gate never runs them. A new `sweep` test preset (configure `release`, `"filter": {"include": {"label": "sweep"}}`, `"execution": {"jobs": 1}`) runs them. A `sweep` **workflow** preset (schema v6) runs configure `release` → build `release` → test `sweep`, so `cmake --workflow --preset sweep` builds its own Release binaries first (review R5).
   - The 64 VTR files (31 `verilog/*.v` + 33 `koios/*.v`) are one set, sorted by size together: `lenet.v` is last and `mcml.v` falls where its size puts it. Every runner says smallest first.
 - (o) **Micro `--top`** (EL-7, ruling 6) is the first `.model` of `~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`, read by `tools/elab-check/micro-top`.
 - (p) **Yosys 0.55 discovery** (Task 5 creates the block). `find_program(ODIN3_YOSYS055 yosys HINTS $ENV{VTR_ROOT}/build/bin $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin NO_DEFAULT_PATH)`, and `yosys -V` must contain `Yosys 0.55`. Without it no 0.55 CTest is registered: CI has none, so they run locally and nightly. 0.69 is the existing `ODIN3_YOSYS`, used only by the nightly drift job. Every generated table and golden records `yosys -V` in its header.
@@ -363,7 +373,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - **Tests first.**
   - Unity under ASan/UBSan.
   - An OOM sweep (`odin3_util_set_alloc_fail_after`) over each allocating entry point a task adds. It asserts `NO_MEMORY`, no leak, an unchanged store or valid IR.
-  - Gates: `cmake --build --preset debug -j6 && ctest --preset debug -j4` green. The preset excludes label `sweep` (point (n)); sweeps run from `ctest --preset sweep` after the gate.
+  - Gates: `cmake --build --preset debug -j6 && ctest --preset debug -j4` green. The preset excludes label `sweep` (point (n)); sweeps run from `cmake --workflow --preset sweep` after the gate, which builds Release first.
   - `/lint` before each commit; commit (and the controller pushes) at each green checkpoint.
   - `main` is green after every PR (point (l)).
   - A read-only critique per task; a **Fable** whole-branch review before each PR.
@@ -627,7 +637,7 @@ Cases:
 Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 - One `module \name` per module in creation order, with its attributes first.
 - Live wires in ID order: `wire [width W] [upto] [offset O] [input|output|inout K] [signed] \name`, K = the 1-based port index.
-- `wire $n<ID>` for each net that is no wire's bit.
+- For each net that is no wire's bit: `wire \name` when the net has a name, else `wire $n<ID>`. The width is 1, and the spelling matches point (s) (review R4).
 - Sigspecs are `odin3_proc_sigspec`'s.
 - Cells:
   - `cell <type> <name>`, where an unnamed node is `$c<ID>`, a type's name starting with neither `$` nor `\` gets `\`, and instance nodes use their module's name;
@@ -951,7 +961,6 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Taken names.**
   - After `read_techlib lib/vtr.o3lib`, `module adder` → `a.v:1:8: error: module 'adder' has the name of cell type 'adder' registered by an earlier read (hard cell); rename the module`.
   - After a `read_blif` declaring black box `bb`, `module bb` → `… (black box); rename the module`.
-  - `pre_script` `read_verilog first.v` and then the sources both defining `m` → `duplicate_module: module 'm' is already defined by an earlier read (run 1)`.
 - **Top.**
   - One candidate → info `top module 'work.t' chosen: the only module no other module instantiates`.
   - The corpus `neg_ambiguous_top` sources → `odin3: error: ambiguous_top: no top given and several modules are not instantiated: 'work.a', 'work.b'`.
@@ -1331,8 +1340,8 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - Create `src/api/elab_abi.c` and `tests/unit/test_elab_stage2_wires.c`.
 - Delete `src/frontends/elab/elab2_stub.c`.
 - Modify `elab_internal.h`, `elab.h`, `elab_test.h` (the `on_body_start` hook used) and `elab_pending.c`:
-  - stage-2 module-level kinds landed;
-  - the process kinds and the three features stay pending until Tasks 21–24 (point (l)).
+  - declarations, ports and scope kinds landed;
+  - assignments (Task 18), instances and gates (Task 19), the process kinds and the three features (Tasks 21–24) stay pending (point (l)).
 - Modify `src/frontends/verilog/elab1.c` (`odin3_elab_run` steps 4–7).
 - Modify `src/cli/main.c` (`--elab-only`) and `tests/cli/test_cli.sh` (`cli_elab_only`, `cli_elab_only_with_script`).
 - Modify `include/odin3/odin3.h`:
@@ -1347,7 +1356,9 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `typedef uint32_t odin3_sigbit;` is a net ID, `ODIN3_SB_CONST | odin3_bit`, or `ODIN3_SB_ANY`, with `enum { ODIN3_SB_CONST = 1U << 31, ODIN3_SB_ANY = (1U << 31) | 4U };`. This one encoding serves expressions and the process generator (review M21).
   - `typedef struct odin3_sig { odin3_sigbit *bits; uint32_t width; bool is_signed; } odin3_sig;` (LSB first, in the stage-2 scratch arena)
 - Context and module emission:
-  - `typedef struct odin3_elab2 odin3_elab2;` caches the `odin3_celltype_id` of every built-in type it emits, filled once at create (review M20).
+  - `typedef enum odin3_elab2_type { ODIN3_E2T_ADD, ODIN3_E2T_SUB, ODIN3_E2T_MUL, ODIN3_E2T_DIV, ODIN3_E2T_MOD, ODIN3_E2T_POW, ODIN3_E2T_AND, ODIN3_E2T_OR, ODIN3_E2T_XOR, ODIN3_E2T_XNOR, ODIN3_E2T_NOT, ODIN3_E2T_NEG, ODIN3_E2T_SHL, ODIN3_E2T_SHR, ODIN3_E2T_SSHR, ODIN3_E2T_SHIFTX, ODIN3_E2T_EQ, ODIN3_E2T_NE, ODIN3_E2T_LT, ODIN3_E2T_LE, ODIN3_E2T_GT, ODIN3_E2T_GE, ODIN3_E2T_REDUCE_AND, ODIN3_E2T_REDUCE_OR, ODIN3_E2T_REDUCE_XOR, ODIN3_E2T_REDUCE_XNOR, ODIN3_E2T_REDUCE_BOOL, ODIN3_E2T_LOGIC_NOT, ODIN3_E2T_LOGIC_AND, ODIN3_E2T_LOGIC_OR, ODIN3_E2T_MUX, ODIN3_E2T_TRIBUF, ODIN3_E2T_MEM, ODIN3_E2T_PROC, ODIN3_E2T_CONST0, ODIN3_E2T_CONST1, ODIN3_E2T_CONSTX, ODIN3_E2T_CONSTZ, ODIN3_E2T_COUNT } odin3_elab2_type;` lists exactly the built-in types 2D creates (review R6).
+  - `typedef struct odin3_elab2 odin3_elab2;` caches one `odin3_celltype_id` per `odin3_elab2_type`, filled once at create by `odin3_celltype_find` (review M20).
+  - `odin3_celltype_id odin3_elab2_type_id(const odin3_elab2 *e2, odin3_elab2_type type);`
   - `odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts, odin3_elab2 **out);`
   - `void odin3_elab2_destroy(odin3_elab2 *e2);`
   - `odin3_status odin3_elab2_ports(odin3_elab2 *e2, odin3_ast_id module_node);` creates the module and its ports, recording each port symbol's `ir_wire` (`odin3_symbol_set_ir`). It runs for every `MODULE` before any body. A module whose ports could not be built stops stage 2.
@@ -1374,20 +1385,19 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - Task 14's probe gives wires `genblk1.genblk1.x` and `genblk3[0].w`.
   - `g[-1].t` exists.
 - **Ports (IR change C).** `input signed [0:7] a` → port wire `[0:7]` signed. `input b` → `scalar`.
-- **Ports before bodies.** An `on_body_start` hook sees every module's port count final at the first body.
+- **Ports before bodies.** `top` instantiating `sub` twice with different parameters: an `on_body_start` hook sees every module's port count final at the first body. The `INSTANTIATION` itself is pending until Task 19, and the test asserts only the hook's observation.
 - **Provenance.**
   - Wire `w`'s record has `locs[0]` = its declarator (`t.v:2:15`–`2:16`), `ast` = the declarator's elaborated ID, `hier` = `top`.
   - `g[1].t` has `hier` `top/g[1]`.
   - A wire of `sub$W=8`'s `genblk1` has `sub$W=8/genblk1`.
 - **Attributes.** `(* keep *) wire w;` → wire attribute `keep` INT 1; `(* src = "x" *)` → STRING; `(* init = 4'b1010 *)` → BITS.
-- **Top.** `odin3_design_top` is `top`'s module. The summary line matches `^read_verilog: elaborated top 'top': 3 modules \(1 specializations\), 0 processes, [0-9]+ cells, [0-9]+ nets, [0-9.]+ \+ [0-9.]+ ms$`.
+- **Top.** For a one-module design with wires only, `odin3_design_top` is `top`'s module, and the summary line matches `^read_verilog: elaborated top 'top': 1 modules \(0 specializations\), 0 processes, 0 cells, [0-9]+ nets, [0-9.]+ \+ [0-9.]+ ms$`. Task 19 repeats it with three modules.
 - **Keep levels (review I10).**
   - `NONE` → no store held after the pass.
   - `ELABORATED` → the elaborated store held, with its symtab, and `write_verilog_ast` of it prints the elaborated `UNIT`.
   - `ALL` → both stores held.
-- **Failure paths (review M10).**
-  - 25 two-driver assignments → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`, `odin3_design_top` unset, IR check passes.
-  - A port the IR refuses (hook) stops stage 2 after that module, and no body runs.
+- **Second read (moved from Task 10; review R3).** `pre_script` `read_verilog first.v`, then sources that also define `m` → `duplicate_module: module 'm' is already defined by an earlier read (run 1)`. The first read now creates IR module `m`, so the check of Task 10's `collect_defs` can fire.
+- **Failure path (review M10).** A port the IR refuses (hook) stops stage 2 after that module; no body runs and `odin3_design_top` stays unset. The error-cap test is Task 19's (review R1).
 - **Caps (point (aa)).** The net-bits hook at 64 with a `wire [99:0] w;` → `t.v:2:15: error: elaboration needs more than 64 net bits`, fatal.
 - **Budget.** The hook at 65536 bytes → `elaboration needs more than 65536 bytes (the budget is 60% of physical memory)`, `PARSE`, IR check passes.
 - **ABI.**
@@ -1400,7 +1410,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - OOM sweep over stage 2 of a three-module design: `NO_MEMORY`, IR check passes, no leak.
 
 ### Task 18: Expressions and selects to word cells (EL-30, EL-31, EL-32 reads)
-**Files:** Create `src/frontends/elab/elab2_expr.c`, `elab2_select.c` and `tests/unit/test_elab_stage2_expr.c`; modify `elab_internal.h`.
+**Files:** Create `src/frontends/elab/elab2_expr.c`, `elab2_select.c`, `elab2_assign.c` and `tests/unit/test_elab_stage2_expr.c`; modify `elab_internal.h` and `elab_pending.c` (`CONT_ASSIGN`/`NET_ASSIGN` landed in stage 2; review R1).
 
 **Consumes:** Tasks 1, 8, 9, 13, 17.
 
@@ -1409,8 +1419,12 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab2_expr_req { odin3_ast_id expr; odin3_etype context; const odin3_net_id *dest; const odin3_elab2_reads *reads; } odin3_elab2_expr_req;`: `dest` is NULL, or `context.width` nets the outermost cell drives by construction (EL-28).
 - `odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);` types the expression and emits it post-order. All-constant operands fold through `odin3_cval_op`.
   - An unsized `localparam` read takes `UNSIZED` from its declarator's `NUMBER` (payload width 0), because the symtab value holds only bits and sign (review I11).
-- `typedef enum odin3_elab2_type odin3_elab2_type;` has one enumerator per registry type 2D emits, in registry order, from `ODIN3_E2T_ADD` to `ODIN3_E2T_POW`, then `ODIN3_E2T_COUNT`. It indexes the cached type IDs.
-- `typedef struct odin3_elab2_cell_req { uint8_t type; odin3_ast_id node; const odin3_sig *a, *b; uint32_t y_width; const odin3_net_id *dest; } odin3_elab2_cell_req;`
+- `odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);` (A1, moved here from Task 19; review R1):
+  - it assigns by construction (`dest`) or by merge (`odin3_net_merge`), with the same-net no-op;
+  - a net declaration assignment (`wire w = e;`, N7) goes through it at the declaration;
+  - a non-constant select target is EL-28's error, and out-of-range lhs bits are dropped with the warning;
+  - Task 19 adds the driver-table claim before each attach and merge.
+- `typedef struct odin3_elab2_cell_req { odin3_elab2_type type; odin3_ast_id node; const odin3_sig *a, *b; uint32_t y_width; const odin3_net_id *dest; } odin3_elab2_cell_req;` (the type is Task 17's enum)
 - `odin3_status odin3_elab2_cell(odin3_elab2 *e2, const odin3_elab2_cell_req *req, odin3_sig *y);` follows genrtlil's parameter rules: operand widths as generated, `*_SIGNED` = signed in context, the node's attributes, its provenance. The cell-pins cap of point (aa) applies.
 - `odin3_status odin3_elab2_to_nets(odin3_elab2 *e2, const odin3_sig *sig, odin3_net_id *nets);`
 - `odin3_status odin3_elab2_extend(odin3_elab2 *e2, const odin3_sig *in, uint32_t width, bool is_signed, odin3_sig *out);` is wiring only, never a cell.
@@ -1418,6 +1432,12 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 
 **Tests (`test_elab_stage2_expr.c`; every cell's type and every parameter asserted). Signals:** 8-bit `a`, `b`, `y`; `signed [7:0] s`; `signed [3:0] t`; `[3:0] u`; 64-bit `y64`.
 - **Assign by construction.** `y = a + b` → one `$add`: `A_WIDTH` 8, `B_WIDTH` 8, `Y_WIDTH` 8, `A_SIGNED` 0, `B_SIGNED` 0, its `Y` pins on `y`'s nets, no merge.
+- **Assignments (review R1).**
+  - `assign b2 = a;` → one net with alias count 1.
+  - `assign c = 1'b1;` → `c` merged onto the `$_CONST1_` net.
+  - `wire w = a & b;` (N7) → one `$and` driving `w`.
+  - `assign y[s] = d;` → `continuous assignment to 'y' with a non-constant index is not supported`.
+  - `assign y[9:6] = d4;` → `warning: assignment to bits outside 'y' [7:0] is ignored`.
 - **E22 (Review Focus 2).**
   - `y = (a + b) >> 1` → `$add` `Y_WIDTH` 8, then `$shr` with `A_WIDTH` 8, `B_WIDTH` 32 on the constant nets for 1, `Y_WIDTH` 8.
   - `y = (0 + a + b) >> 1` → two `$add`s with `Y_WIDTH` 32, then `$shr` `Y_WIDTH` 32, truncated to `y` by wiring.
@@ -1461,7 +1481,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - OOM sweep.
 
 ### Task 19: Instances, gates, continuous assignments, drivers, wired nets, tri-state (EL-10 widths, EL-11, EL-26, EL-28, EL-29)
-**Files:** Create `src/frontends/elab/elab2_inst.c`, `elab2_assign.c`, `elab2_drive.c` and `tests/unit/test_elab_stage2_drive.c`; modify `elab2.c` (steps 2, 4, 5, 7).
+**Files:** Create `src/frontends/elab/elab2_inst.c`, `elab2_drive.c` and `tests/unit/test_elab_stage2_drive.c`; modify `elab2_assign.c` (the claim before each attach), `elab2.c` (steps 2, 4, 7) and `elab_pending.c` (`INSTANTIATION`/`INSTANCE`/`CONNECTION`/`GATE_DECL` landed in stage 2; review R1).
 
 **Consumes:** Tasks 17–18; `odin3_net_merge`; `odin3_celltype_infer_params`; `odin3_celltype_declare_blackbox`; `odin3_node_create_connected`.
 
@@ -1471,7 +1491,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab2_claim_req { const odin3_net_id *nets; uint32_t n; uint8_t kind; odin3_ast_id node; } odin3_elab2_claim_req;`
 - `odin3_status odin3_elab2_claim(odin3_elab2 *e2, const odin3_elab2_claim_req *req, bool *granted);` checks every bit **before** attaching. It reports A4, `uwire`, `supply`, wired-net collection, the tri-state and `inout` rules, and leaves conflicting bits unattached.
 - `odin3_status odin3_elab2_prescan(odin3_elab2 *e2, odin3_ast_id module_node);` is step (2)'s always-assigned bit set (also used by EL-27) and the wired-net procedural check.
-- `odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);` (A1) assigns by construction or by merge, with the same-net no-op. A net declaration assignment (`wire w = e;`, N7) goes through it at the declaration.
+- Task 18's `odin3_elab2_assign` now claims every target bit before it attaches or merges, which gives A4, the variable-assigned warning and the self-loop warning.
 - `supply0`/`supply1` nets are driven by the shared constant nets.
 - Once per module, a wire with sinks and no driver warns `'w' is never driven`.
 - `odin3_status odin3_elab2_instance(odin3_elab2 *e2, odin3_ast_id instance);` (I4 resizing, unconnected inputs to `$_CONSTX_`, `parameter:<NAME>` attributes, cell types with inferred parameters, black boxes declared per specialization)
@@ -1483,15 +1503,9 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);` is step (7): `$and`/`$or` chains in source order, each with the net's declarator as provenance.
 
 **Tests (`test_elab_stage2_drive.c`):**
-- **Assignments.**
-  - `assign y = a + b;` → `$add` `Y` on `y`.
-  - `assign b2 = a;` → one net with alias count 1.
-  - `assign c = 1'b1;` → `c` merged onto the `$_CONST1_` net.
-  - `wire w = a & b;` (N7) → one `$and` driving `w`.
+- **Assignments with drivers.**
   - `assign p = q; assign q = p;` → no error, plus `warning: 'p' and 'q' are connected only to each other and are never driven`.
   - `wire w; assign y = w;` → `warning: 'w' is never driven`, once.
-  - `assign y[s] = d;` → `continuous assignment to 'y' with a non-constant index is not supported`.
-  - `assign y[9:6] = d4;` → `warning: assignment to bits outside 'y' [7:0] is ignored`.
 - **A4.**
   - `assign y = a; assign y = b;` → `t.v:4:10: error: 'y' has two drivers (also driven at t.v:3:10)`.
   - Whole then `assign y[3] = c;` → `'y[3]' has two drivers (also driven at t.v:3:10)`.
@@ -1526,6 +1540,9 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - Module instances carry `parameter:W` (BITS) for each overridden parameter.
   - `single_port_ram` (with `pre_script` `read_techlib lib/vtr.o3lib`) and 10/8-bit address/data connections → `ADDR_WIDTH` 10, `DATA_WIDTH` 8 by inference.
   - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` once per specialization. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`.
+- **Error cap and top (moved from Task 17; review R1).**
+  - 25 two-driver assignments → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`, `odin3_design_top` unset, IR check passes.
+  - A clean three-module design (one specialization) → `odin3_design_top` set, and the summary line `… 3 modules (1 specializations), …`.
 - **Gates.**
   - `and g (y1, a1, b1, c1);` → two `$and` (1/1/1), the second driving `y1`.
   - `nand` → plus `$not`. `xnor (y1, a1, b1)` → `$xor` + `$not`.
@@ -1596,7 +1613,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
     - renumber cases, switches and actions breadth-first into point (e)'s canonical layout (the builder may allocate);
     - `O` pins and then `I` pins in net-ID order, constants as `I` pins on the shared constant nets;
     - the driver-table claim for every `O` net, dropping the actions of conflicting bits;
-    - one `odin3_node_create_connected`;
+    - one `odin3_node_create_connected`, whose type is `odin3_elab2_type_id(e2, ODIN3_E2T_PROC)` from the stage-2 cache (review R6);
     - the `always`'s attributes on the node (`ODIN3_OBJ_NODE`).
 - Syncs (EL-34): one per edge event, or one `ALWAYS`. Errors:
   - `posedge on 'x', which is N bits; a 1-bit signal is needed` (and `negedge`);
@@ -1755,7 +1772,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 **Produces:**
 - `odin3_status odin3_pg_mem_write(odin3_pg *pg, const odin3_pg_assign_req *req);` (EL-39 **v4**, ruling C1):
   - Up to three process-local temporaries per write statement: `addr` (the wider of the index and `ABITS`), `data` (the memory's width) and `en`.
-  - Root actions `addr ← x`, `data ← x`, `en ← 0`, in that order, on the `$_CONSTX_`/`$_CONST0_` pins.
+  - The statements `addr = x`, `data = x`, `en = 0` are inserted at the block's start, in that order, on the `$_CONSTX_`/`$_CONST0_` pins. They are processed as blocking assignments, so EL-35/EL-36's removal rule shapes the final body (spec v4 EL-39; review R2).
   - No `addr` temporary for a constant index, and no `data` temporary for a constant full-word value: the constant goes to the port.
   - One write port per statement, in source order.
 - `odin3_status odin3_elab2_initials(odin3_elab2 *e2, odin3_ast_id module_node);` (EL-40) produces the three result kinds, the two D2 warnings and the ignored-value warning. The init-bits cap uses point (aa)'s text.
@@ -1766,10 +1783,11 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 - **Write ports (Review Focus 4; ruling C1).** `reg [7:0] m [1:4]; wire [2:0] wa, ra; always @(posedge c) if (we) m[wa] <= d; assign q = m[ra];` gives one `$mem` with:
   - `WR_PORTS` 1, `WR_CLK_ENABLE` `1'b1`, `WR_CLK_POLARITY` `1'b1`, `WR_CLK` = `c`;
   - `WR_ADDR`/`WR_DATA`/`WR_EN` = the `$proc`'s three `O`-pin temporaries, which have no sync action;
-  - the body: root actions [`addr ← 3'xxx`, `data ← 8'xxxxxxxx`, `en ← 8'h00`] in that order, and a switch on `we` whose case `1'1` assigns `addr ← wa`, `data ← d`, `en ← 8'hFF` (through EL-36's case temporaries);
-  - every one of the three temporaries is the `lhs` of a root action;
+  - the body has a root with actions [`addr ← t1a`, `data ← t1d`, `en ← t1e`] in that order, where t1a, t1d and t1e are the switch's case temporaries, and one switch on `we`;
+  - that switch has case `1'1` with [`t1a ← wa`, `t1d ← d`, `t1e ← 8'hFF`], and the added default case with [`t1a ← 3'xxx`, `t1d ← 8'xxxxxxxx`, `t1e ← 8'h00`] (the x/x/0 defaults, review R2);
+  - every one of the three temporaries is the `lhs` of a root action, so no path leaves them unassigned;
   - `RD_ADDR` = `ra` raw, `OFFSET` 1.
-- **Constant index and value.** `m[2] <= 8'h5A;` → no `addr` or `data` temporary. `WR_ADDR` and `WR_DATA` are pins on the constant nets for `3'b010` and `8'h5A`. Root has only `en ← 8'h00`.
+- **Constant index and value.** `m[2] <= 8'h5A;` → no `addr` or `data` temporary. `WR_ADDR` and `WR_DATA` are pins on the constant nets for `3'b010` and `8'h5A`. The root holds only [`en ← 8'hFF`]: the unconditional write's action removed the inserted `en ← 0` (review R2).
 - **Other bases.** `[4:1]` → `OFFSET` 1. `[-2:1]` → `OFFSET` −2.
 - **Bridge.** CTest `elab_mem_bridge` runs `elab-equiv` on all three ranges, each with a write then a read at the same index and with a cycle where `we` is 0 → equivalent (no feedback loop on side A).
 - **Partial and multiple writes.** `m[i][3:0] <= d4` → `en` `8'h0F`. Two write statements → two write ports in source order.
@@ -1815,7 +1833,7 @@ CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources �
 - Create `tests/elab/rows/<row>.il` (default mode) and `<row>.nolatches.il` for every `comb=1` row.
 - Create `tests/elab/equiv_expect_fail.txt` and `tests/tools/test_elab_rows.py`.
 - Modify `CMakeLists.txt`: CTest `elab_coverage` (label `elab`, in the gate); CTest `elab_coverage_equiv` (label `sweep`, `RUN_SERIAL`, in the 0.55 block).
-- Modify `CMakePresets.json`: `debug` and `release` test presets get `"filter": {"exclude": {"label": "sweep"}}`, and a new `sweep` test preset (configure `release`, include label `sweep`, `"execution": {"jobs": 1}`) (point (n), ruling I12).
+- Modify `CMakePresets.json`: `debug` and `release` test presets get `"filter": {"exclude": {"label": "sweep"}}`, a new `sweep` test preset (configure `release`, include label `sweep`, `"execution": {"jobs": 1}`), and a `sweep` workflow preset: configure `release`, build `release`, test `sweep` (point (n), ruling I12, review R5).
 
 **Consumes:** every earlier task; `odin3_ast_dump`; `odin3_rtlil_text`; Task 21's `elab-equiv` and `memcap.py`.
 
@@ -1834,7 +1852,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - exactly the 54 hand-written rows have an `.elab` starting `# hand-written`;
   - every `comb=1` row has `.nolatches.il`.
 - `elab_coverage`: green on all 125 rows, smallest first, in both modes.
-- `elab_coverage_equiv` (`ctest --preset sweep`): green except the rows in `equiv_expect_fail.txt`, each with its reason. Rows with `clocks` above 1 rely on their goldens (§14.2).
+- `elab_coverage_equiv` (`cmake --workflow --preset sweep`): green except the rows in `equiv_expect_fail.txt`, each with its reason. Rows with `clocks` above 1 rely on their goldens (§14.2).
 - `ctest --preset debug -N` lists no test labelled `sweep`.
 
 ### Task 26: Project corpus, the handover close-out and the micro sweeps (§14.4, §14.5)
@@ -1869,7 +1887,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - a child killed by its cap reported `out of memory (cap 4G)`;
   - an ASan binary without `systemd-run` → 77;
   - `--bench B` starts `B --one F` per file.
-- `verilog_micro_elab` (539 files, `ctest --preset sweep`): green with the list.
+- `verilog_micro_elab` (539 files, `cmake --workflow --preset sweep`): green with the list.
 - `elab_equiv_micro` (`sweep`): green with the list, its run log quoted in the PR.
 - `project_corpus_frontend`:
   - `auto_top`, `param_instance`, `param_string`, `top_param`, `single_file` and `multi_dir` are equivalent to their `ref.blif` through the bridge;
@@ -1900,7 +1918,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
 
 **Tests:**
 - `bench_elab_smoke` runs `--one` on two micros and checks every column is present.
-- `verilog_vtr_elab` (`ctest --preset sweep`): green locally on all 64 files, with the run log quoted in the PR.
+- `verilog_vtr_elab` (`cmake --workflow --preset sweep`): green locally on all 64 files, with the run log quoted in the PR.
 - Bench on the dev machine, targets from §15:
   - `mcml.v` stage 1 + stage 2 ≤ 0.5 s and peak RSS ≤ 200 MB;
   - `lenet.v` ≤ 10 s and ≤ 2.0 GB;
