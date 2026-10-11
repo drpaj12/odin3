@@ -1,11 +1,13 @@
 /*
- * module.c — the public ABI's module group: name, ID ends and live counts, ports, name lookups.
+ * module.c — the public ABI's module group: name, ID ends and live counts, process count, ports,
+ * name lookups.
  */
 #include "api/api.h"
 
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "odin3/odin3.h"
 #include "util/attr.h"
 #include "util/hash.h"
@@ -73,6 +75,16 @@ ODIN3_EXPORT odin3_status odin3_module_get_net_count(const odin3_design *design,
 ODIN3_EXPORT odin3_status odin3_module_get_wire_count(const odin3_design *design, uint32_t module,
                                                       uint32_t *count) {
     return logged_as(__func__, store_query(design, module, count, ODIN3_API_WIRE, Q_LIVE_COUNT));
+}
+
+ODIN3_EXPORT odin3_status odin3_module_get_proc_count(const odin3_design *design, uint32_t module,
+                                                      uint32_t *count) {
+    const odin3_module *mod = odin3_api_module(design, module);
+    if (mod == NULL || count == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    *count = odin3_module_proc_count(mod);
+    return ODIN3_OK;
 }
 
 ODIN3_EXPORT odin3_status odin3_module_get_port_count(const odin3_design *design, uint32_t module,

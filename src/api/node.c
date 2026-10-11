@@ -1,6 +1,6 @@
 /*
  * node.c — the public ABI's node group: liveness, cell type, name, parameters (as integers and as
- * text), pins and ports.
+ * text, a $proc BODY as its RTLIL process block), pins and ports.
  */
 #include "api/api.h"
 
@@ -8,11 +8,13 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
 #include "util/attr.h"
 #include "util/hash.h"
+#include "util/str.h"
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -190,6 +192,25 @@ static odin3_status payload_text(const odin3_design *design, const odin3_value *
     return st;
 }
 
+/*
+ * The text of a PROC value (the BODY of the $proc node at): the node's RTLIL process block as
+ * odin3_proc_print writes it, not indented, interned in the design. When the node cannot be
+ * printed (dead, or a position on an unconnected pin) proc_print logs why and the failure is also
+ * logged as fn's; NO_MEMORY. *text is unchanged on failure.
+ */
+static odin3_status proc_text(const char *fn, const odin3_design *design, const node_at *at,
+                              const char **text) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    odin3_status st = odin3_proc_print(at->module, at->id, 0, &buf);
+    if (st == ODIN3_OK) {
+        st = odin3_api_text(design, (odin3_bytes){buf.data, buf.len}, text);
+    }
+    odin3_strbuf_free(&buf);
+    return st == ODIN3_ERR_INVALID_ARG ? odin3_api_invalid_why(fn, "the process cannot be printed")
+                                       : st;
+}
+
 ODIN3_EXPORT odin3_status odin3_node_get_param_text(const odin3_design *design, odin3_ref node,
                                                     uint32_t index, const char **text) {
     node_at at;
@@ -197,6 +218,9 @@ ODIN3_EXPORT odin3_status odin3_node_get_param_text(const odin3_design *design, 
         return odin3_api_invalid(__func__);
     }
     const odin3_value *val = odin3_node_param(at.module, at.id, index);
+    if (val->kind == ODIN3_VAL_PROC) {
+        return proc_text(__func__, design, &at, text);
+    }
     if (val->kind == ODIN3_VAL_STRING) {
         *text = odin3_api_str(design, val->str);
         return ODIN3_OK;
