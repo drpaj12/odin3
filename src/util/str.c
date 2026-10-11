@@ -154,6 +154,22 @@ static odin3_status strbuf_reserve(odin3_strbuf *buf, size_t extra) {
     return ODIN3_OK;
 }
 
+odin3_status odin3_strbuf_reserve(odin3_strbuf *buf, size_t cap_bytes) {
+    if (cap_bytes <= buf->cap) {
+        return ODIN3_OK;
+    }
+    char *data = odin3_util_realloc(buf->data, cap_bytes);
+    if (data == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (buf->data == NULL) {
+        data[0] = '\0';
+    }
+    buf->data = data;
+    buf->cap = cap_bytes;
+    return ODIN3_OK;
+}
+
 odin3_status odin3_strbuf_append(odin3_strbuf *buf, odin3_bytes str) {
     if (str.len == 0) {
         return ODIN3_OK;

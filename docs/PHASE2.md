@@ -184,3 +184,131 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    module instances are an error; generated code not committed. Declared divergences: attributes on
    connections and ANSI subroutine ports, unary operators on primaries only, SV named-argument calls
    (Parmys exceptions).
+11. **2B declared divergences from both oracles** (spec §10.4, §13; logged with 2B Task 8,
+    2026-10-10). In the first four cases Icarus and Yosys agree, and 2B differs from them on
+    purpose; `pp-diff` expects 2B's behaviour there. The last case is a set of micros that
+    Parmys rejects.
+    - *Directives inside macro text* are `syntax: directive inside macro text` (PP-6). The cases
+      are a conditional, `` `define ``, `` `undef `` or `` `include `` in a body (probes t5, u3).
+      They also include a `` `define ``/`` `undef `` met while the actuals are collected, which
+      both oracles process there. A conditional in an actual is processed only while it is
+      collected from a file frame (probe w3).
+    - *Recursion is judged on the spelling ancestry* (PP-7). The use is rejected even where the
+      oracles terminate. In probe w1, `` `N(`KEEP) `` reaches `` `K ``, which uses `` `N ``
+      again inside its own argument chain. Both oracles expand it to nothing.
+    - *The include search never looks in the current directory* (PP-11; DESIGN §4.0, PHASE1
+      #19; ruled at 2B Task 7). It tries the including file's directory, then the include
+      directories in order. Icarus (`-E -I`) and Yosys (`read_verilog -I`) both search the
+      current directory first and include its copy of the file, even when the file also exists
+      in an include directory. `pp-diff` therefore runs the oracles from a neutral directory.
+    - *`translate_off` … `translate_on` is removed by the preprocessor* (PP-10). Icarus ignores
+      the pair. Yosys drops the region in its lexer, after directives have been processed.
+      A `translate_off` comment inside a macro's actual is stripped to a space like any other
+      comment there and opens no region (agent default). A later `translate_on` is then a stray
+      `translate_on` warning, while Yosys's lexer would drop the region.
+    - *A compiler directive name used as a macro name* is `syntax` (spec §7.3 row). For example,
+      `` `define timescale 1 `` is rejected, and both oracles accept it.
+    - *The splicing micros are Parmys-rejected* (PHASE2 #4). `syntax/preprocessor_define`,
+      `preprocessor_complex_define` and `preprocessor_define_with_comment` rely on
+      `` `ADDITION_num `` splicing a formal into a macro name. 2B reports `undefined macro
+      'ADDITION_num'`. Yosys and the Parmys goldens fail the same way, while Icarus warns and
+      substitutes nothing. The spec names only the last two; `preprocessor_define` fails
+      identically.
+12. **2B preprocessor results** (2B Task 9, 2026-10-10; spec §9, §10.3, §10.6).
+    - *Caps.* `test_pp_limits` hits each of the 16 `ODIN3_PP_MAX_*` caps through
+      `odin3_pp_test_set_limits`, and the 2^28 source-file cap at the root's `at` and at an
+      `` `include `` (sparse files, so nothing is read). Each test asserts the exact located
+      message. The log sink snapshots the guarded counter when the error is logged, which shows
+      that nothing was created past the cap. `MAX_LOC_BYTES_PER_STREAM` is 2^29, per the spec §9
+      amendment from Task 6's fix round.
+    - *Stacks.* The stream's own file now leaves the include stack when its frame ends. Frames,
+      runs, conditionals and the include stack are therefore empty after every stream; `test_pp_mixed`
+      asserts this (agent default).
+    - *Micro sweep* (`test_pp_check`, smallest first, a fresh preprocessor per file,
+      `odin3_pp_check` on every OK stream):
+      - `tests/micro/verilog/preprocessor`: all 22 files pass, including `nested_ifdef.vh`.
+      - `syntax/*define*`: the 3 splicing micros stop at `undefined macro 'ADDITION_num'`
+        (entry 11).
+      - Whole tree, 610 `.v`/`.vh` files (`keywords/.generic` included): 589 pass and check;
+        21 stop with a listed error. These are the 3 splicing micros, plus 18 files that use
+        macros from their includer:
+        - the 9 module files of the four multi-file `syntax/*-syntax` micros (`BITS`);
+        - the 4 `keywords/.generic` templates (`WIDTH`);
+        - `keywords/assign/assign.vh`, `keywords/for/generate_for.vh` and three
+          `generate_endgenerate/*.vh` headers.
+      - 16 of those 18 are read in context by an OK run of their includer (asserted). The other
+        two, `ifdef-else-syntax/module_a_or.v` and `ifndef-else-syntax/module_a_and.v`, are the
+        variants that their includer's conditional does not select.
+    - *Final-review fix round* (2026-10-10; `final-review-2B2.md`):
+      - *I1:* the lexical scanners (string, escaped identifier, comment, `` `line `` file name)
+        read the frame through a run iterator, O(1) amortised per byte. Before, a comment or
+        escaped identifier spread over many runs cost O(len × runs): a 600 KB input ran past
+        120 s. `test_pp_expand` counts run hops over 10,000 runs and fails on the old scanners.
+      - *I2:* new cap `ODIN3_PP_MAX_SRCMAN_BYTES_PER_STREAM` = 2^27 (agent default, spec §9).
+        It is charged 4 B per registered line start and 8 B per segment, before they are added,
+        and tested with a newline-header include bomb and a `/**/` body bomb.
+      - *M4:* the text buffer starts at the stream file's size and never grows past
+        `MAX_STREAM_BYTES` + 1. This needed a new exact `odin3_strbuf_reserve` in `util/str`.
+      - *Other minors fixed:* a NUL right after a bracket in an actual (M1); the actuals' runs
+        now count as live while a body is substituted (M3); the cache-entry comment (M5); cap
+        errors on inserted bytes are now located at the innermost macro use.
+      - *Left:* M2 (the recursion walk does a binary search per ancestor: bounded by the chain
+        cap) and M6 (newlines between a macro name and its `(` are consumed with the use).
+      - *Oracles disagree (M7, for `pp-diff`'s exclusion list):*
+        - a comment between a macro name and `(`: Icarus expands, Yosys and 2B reject;
+        - a newline before `(`: Icarus and 2B accept, Yosys rejects;
+        - `` `line `` inside a macro body: Yosys applies it, Icarus and 2B drop it;
+        - a `//` comment ending a `` `define `` with a trailing `\`: Yosys and 2B end the
+          text, Icarus continues it;
+        - formals inside body strings (§10.4).
+    - *Benchmark* (`build/release/bench_pp`, Release, dev machine (i7-13700, WSL2), 2026-10-10,
+      `$VTR_ROOT/vtr_flow/benchmarks/verilog`, after the fix round, output verbatim):
+
+      ```
+      file (smallest first)          bytes in      out   lines    segs   bufs  defs macros  srcman B pp heap B heap/in  best ms check
+      single_wire.v                        62       62       4       1      1     0      0      1040     67133 1082.79    0.002 ok
+      single_ff.v                          96       96       6       1      1     0      0      1040     67201  700.01    0.002 ok
+      and_latch.v                         260      260      22       1      1     0      0      1136     67529  259.73    0.002 ok
+      multiclock_separate_and_latch.v      702      702      54       1      1     0      0      1264     68413   97.45    0.003 ok
+      multiclock_output_and_latch.v       889      889      64       1      1     0      0      1264     68787   77.38    0.004 ok
+      multiclock_reader_writer.v         1021     1021      62       1      1     0      0      1264     69051   67.63    0.004 ok
+      diffeq1.v                          1409     1409      57       1      1     0      0      1264     69827   49.56    0.005 ok
+      diffeq2.v                          2131     2131      64       1      1     0      0      1264     71271   33.44    0.006 ok
+      ch_intrinsics.v                    4838     4283     293      36     16     5      5      4272     77309   15.98    0.019 ok
+      ch_intrinsics_nolatches.v          5005     4450     302      36     16     5      5      4272     77643   15.51    0.018 ok
+      stereovision3.v                   35847    35847    1062       1      1     0      0      9200    138703    3.87    0.059 ok
+      sha.v                             38061    37865    2172      38     15     9      9     18608    144139    3.79    0.093 ok
+      mkPktMerge.v                      39878    39690    1536     161     79     4      4     15024    148717    3.73    0.168 ok
+      blob_merge.v                      58879    55660    1618    1003    475    54     54     33456    194367    3.30    0.344 ok
+      stereovision2.v                   63099    61774    1847     270    110    51     51     17072    198151    3.14    0.195 ok
+      spree.v                           68099    65433    3073     392    160    73     73     29360    212599    3.12    0.295 ok
+      bgm.v                             71508    71298    2664      93     46     2      2     20144    211177    2.95    0.258 ok
+      boundtop.v                        72116    72116    2826       1      1     0      0     17392    211241    2.93    0.192 ok
+      boundtop_nolatches.v              81343    81343    3054       1      1     0      0     17392    229695    2.82    0.212 ok
+      raygentop.v                       84801    84801    2979       1      1     0      0     17392    236611    2.79    0.200 ok
+      raygentop_nolatches.v             92241    92241    3179       1      1     0      0     17392    251491    2.73    0.228 ok
+      stereovision1.v                  102964   102964    2554       1      1     0      0     17392    272937    2.65    0.217 ok
+      stereovision0.v                  131550   131550    3906       1      1     0      0     17392    330109    2.51    0.287 ok
+      or1200.v                         135776   105416    5238    2022    750   524    383     82608    397969    2.93    0.907 ok
+      mkSMAdapter4B.v                  137869   137559    4349     158     76     8      8     39600    344763    2.50    0.490 ok
+      LU8PEEng.v                       140203   132207    5034    2121    969   182    164     98992    372599    2.66    0.825 ok
+      LU32PEEng.v                      155750   147942    5498    2313   1065   182    164    131760    415981    2.67    0.891 ok
+      LU64PEEng.v                      176532   168880    6044    2569   1193   182    164    131760    457545    2.59    0.979 ok
+      mkDelayWorker32B.v               204602   204056    6629     329    160    11     10     45744    480117    2.35    0.739 ok
+      arm_core.v                       346864   336469    8212      43     13     7      7     67248    761457    2.20    1.089 ok
+      mcml.v                           650837   649054   24508    5590   2776    39     39    328368   1421051    2.18    2.751 ok
+      set: 31 files, 2905232 bytes in, 0.011 s (sum of best of 5; target <= 0.5 s: ok); pp heap over 3 x input in 16 files
+      mcml.v: 2.751 ms (target <= 50 ms: ok); pp heap 1421051 B = 2.18 x input (target <= 3 x: ok), srcman 328368 B beside it
+      max RSS: 4064 KiB
+      ```
+
+      Targets met: mcml.v 2.8 ms against 50 ms; the VTR set 0.011 s against 0.5 s; mcml.v's
+      preprocessor heap is 2.18 x its input (2.79 x before the text buffer started at the
+      file's size), with the srcman's 328 KB beside it.
+
+      Per file, the ruling is <= 3 x input + 128 KiB. All 31 files are within it. The 16 files
+      above 3 x are small files dominated by the fixed ~67 KB: the 64 KiB macro-arena chunk
+      that `odin3_pp_create` allocates, plus the struct and vectors.
+
+      The spec's "51 `define`s" for mcml.v counts 12 commented-out lines; 39 definitions are
+      made. mcml.v needs 2,776 buffers (the spec estimated about 5,000).

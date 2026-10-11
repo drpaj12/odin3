@@ -302,6 +302,25 @@ static void test_strbuf_oom_leaves_buffer_intact(void) {
     odin3_strbuf_free(&buf);
 }
 
+/* reserve grows to exactly the asked capacity, never shrinks, and fails without a change. */
+static void test_strbuf_reserve_exact(void) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_reserve(&buf, 100));
+    TEST_ASSERT_EQUAL_size_t(100, buf.cap);
+    TEST_ASSERT_EQUAL_size_t(0, buf.len);
+    TEST_ASSERT_EQUAL_STRING("", buf.data);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&buf, odin3_bytes_cstr("abc")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_reserve(&buf, 50));
+    TEST_ASSERT_EQUAL_size_t(100, buf.cap);
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_strbuf_reserve(&buf, 1000));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_size_t(100, buf.cap);
+    TEST_ASSERT_EQUAL_STRING("abc", buf.data);
+    odin3_strbuf_free(&buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_empty_string_is_id_zero);
@@ -320,5 +339,6 @@ int main(void) {
     RUN_TEST(test_strbuf_append_null_empty_noop);
     RUN_TEST(test_strbuf_always_nul_terminated);
     RUN_TEST(test_strbuf_oom_leaves_buffer_intact);
+    RUN_TEST(test_strbuf_reserve_exact);
     return UNITY_END();
 }

@@ -64,4 +64,11 @@ odin3_status odin3_strbuf_appendf(odin3_strbuf *buf, const char *fmt, ...) ODIN3
 /* len = 0, keeps capacity; data stays NUL-terminated. */
 void odin3_strbuf_clear(odin3_strbuf *buf);
 
+/*
+ * Ensures cap >= cap_bytes, growing to exactly cap_bytes (no rounding) so a caller can bound the
+ * buffer's size; a no-op when the capacity already suffices. NO_MEMORY on out of memory, the
+ * buffer unchanged.
+ */
+odin3_status odin3_strbuf_reserve(odin3_strbuf *buf, size_t cap_bytes);
+
 #endif

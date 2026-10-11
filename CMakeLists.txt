@@ -105,6 +105,12 @@ add_library(odin3_core OBJECT
     src/frontends/project/quartus.c
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
+    src/frontends/verilog/preproc.c
+    src/frontends/verilog/macro.c
+    src/frontends/verilog/cond.c
+    src/frontends/verilog/include.c
+    src/frontends/verilog/expand.c
+    src/frontends/verilog/pp_check.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -219,6 +225,10 @@ add_executable(bench_ast tests/bench/bench_ast.c)
 target_include_directories(bench_ast PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_ast PRIVATE odin3_core odin3_flags)
 
+add_executable(bench_pp tests/bench/bench_pp.c)
+target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
+
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 if(BUILD_TESTING)
@@ -283,6 +293,31 @@ if(BUILD_TESTING)
     target_compile_definitions(test_project_entry PRIVATE
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
+    # odin3_add_pp_test(<name>): a preprocessor unit test with the shared fixture (pp_fixture.c).
+    function(odin3_add_pp_test name)
+        odin3_add_unit_test(${name})
+        target_sources(${name} PRIVATE tests/unit/pp_fixture.c)
+    endfunction()
+    odin3_add_pp_test(test_pp_define)
+    target_compile_definitions(test_pp_define PRIVATE
+        ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes")
+    odin3_add_pp_test(test_pp_directives)
+    odin3_add_pp_test(test_pp_cond)
+    target_compile_definitions(test_pp_cond PRIVATE
+        ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
+        ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog/preprocessor")
+    odin3_add_pp_test(test_pp_include)
+    target_compile_definitions(test_pp_include PRIVATE
+        ODIN3_PP_INCLUDE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/include")
+    odin3_add_pp_test(test_pp_expand)
+    target_compile_definitions(test_pp_expand PRIVATE
+        ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes")
+    odin3_add_pp_test(test_pp_check)
+    target_compile_definitions(test_pp_check PRIVATE
+        ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
+        ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
+    odin3_add_pp_test(test_pp_limits)
+    odin3_add_pp_test(test_pp_mixed)
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE
