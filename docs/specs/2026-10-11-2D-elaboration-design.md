@@ -48,6 +48,10 @@ Reason (Fable-verified): the opt family is not confluent, and the pre-`proc` opt
 netlists (`stereovision3` 812 versus 792 cells), so "`opt` only after `proc`" (v1–v4.1) could not
 reproduce Parmys.
 
+v4.3 (2026-10-11; the 2E/2F plan re-review): EL-35 step 7 fixes the order of the constant `I`
+pins. They take their net-ID position among the other `I` pins, so a body that 2E decodes and
+re-encodes keeps its pins (2E §17).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1298,9 +1302,10 @@ creates the node at the end (step 7).
    only statements were system tasks S3 removed) creates **no node** and no warning beyond S3's
    (the re-review's N2: `O_WIDTH` must be at least 1). Otherwise every net some action assigns — the outputs (sync-action `lhs`) and every
    temporary (`t0`, case temporaries, call-frame and memory-write variables, select positions) —
-   becomes an `O` pin, in net-ID order; every other net the body reads becomes an `I` pin, in
-   net-ID order; each constant 0/1/x/z the body uses becomes one `I` pin on the module's shared
-   constant net for that value (IR-4; at most four); `ANY` stays in compares. The builder's bits
+   becomes an `O` pin, in net-ID order; every other net the body reads becomes an `I` pin, and
+   each constant 0/1/x/z the body uses becomes one `I` pin on the module's shared constant net
+   for that value (IR-4; at most four). The `I` pins, constant ones included, are in net-ID order
+   (v4.3), and `ANY` stays in compares. The builder's bits
    are renumbered to `IN | k` / `OUT | k`, and one `odin3_node_create_connected` creates the
    `$proc` node with `I_WIDTH`, `O_WIDTH`, `BODY` and the two net vectors. Before that call the
    driver table (EL-28) is checked for every `O` net (T10/A4 are reported and the conflicting
