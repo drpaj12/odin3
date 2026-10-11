@@ -380,6 +380,21 @@ static void test_root(void) {
     expect_field("<config/>", "files", "[]");
 }
 
+/* A UTF-8 BOM is not a column on line 1 (later lines are unaffected). */
+static void test_bom_columns(void) {
+    static const text_case cases[] = {
+        {"\xEF\xBB\xBF<project/>\n", "p.xml:1:1: error: syntax: root must be <config>: 'project'"},
+        {"\xEF\xBB\xBF<config><verilog_files><verilog_file>nope.v</verilog_file></verilog_files>"
+         "</config>",
+         "p.xml:1:24: error: missing_file: file not found: '$T/nope.v'"},
+        {"\xEF\xBB\xBF<config></c>", "p.xml:1:11: error: syntax: mismatched tag </c>, expected "
+                                     "</config>"},
+        {"\xEF\xBB\xBF<config>\n  </c>",
+         "p.xml:2:5: error: syntax: mismatched tag </c>, expected </config>"},
+    };
+    expect_cases(cases, sizeof cases / sizeof cases[0]);
+}
+
 /* XML errors are `syntax` at the offending byte's line, before anything is read. */
 static void test_xml_syntax(void) {
     static const text_case cases[] = {
@@ -497,6 +512,7 @@ int main(void) {
     RUN_TEST(test_ignored_forms);
     RUN_TEST(test_values);
     RUN_TEST(test_root);
+    RUN_TEST(test_bom_columns);
     RUN_TEST(test_xml_syntax);
     RUN_TEST(test_file_errors);
     RUN_TEST(test_unreadable);

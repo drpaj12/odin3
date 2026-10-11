@@ -19,7 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { DETAIL_MAX = 256 };
+enum { DETAIL_MAX = 256, BOM_LEN = 3 };
 
 typedef struct o2_reader {
     odin3_project *proj;
@@ -30,6 +30,7 @@ typedef struct o2_reader {
     uint32_t work;        /* "work" */
     odin3_strbuf value;   /* the element value being read */
     odin3_strbuf scratch; /* an ignored name, a lower-cased value, an output path */
+    uint32_t line1_end;   /* the offset of the first '\n' (the length when there is none) */
 } o2_reader;
 
 /* A <optimizations> element that is a map rule (Odin II's ODIN2_RULES row). */
@@ -52,8 +53,12 @@ static bool tag_is(const odin3_xml_elem *elem, const char *tag) {
     return odin3_proj_bytes_is(elem->tag, tag);
 }
 
+/* The loc of byte off. A UTF-8 BOM is not a column: a line-1 offset after it is located
+ * BOM_LEN bytes earlier, so its column counts from the first byte after the BOM. */
 static odin3_loc loc_of(const o2_reader *rd, uint32_t off) {
-    return odin3_srcman_loc(rd->sm, rd->text.buffer, off);
+    bool shift = off >= BOM_LEN && off <= rd->line1_end && rd->text.len >= BOM_LEN &&
+                 memcmp(rd->text.bytes, "\xEF\xBB\xBF", BOM_LEN) == 0;
+    return odin3_srcman_loc(rd->sm, rd->text.buffer, shift ? off - BOM_LEN : off);
 }
 
 /* An error at at naming name (none when name is NULL). */
@@ -401,6 +406,10 @@ odin3_status odin3_read_odin2(odin3_project *proj, const odin3_proj_path *file) 
     if (res == ODIN3_OK) {
         rd.base = odin3_path_dir(odin3_proj_str_bytes(proj, file->resolved));
         res = odin3_project_load(proj, file, (odin3_loc){0}, &rd.text);
+    }
+    if (res == ODIN3_OK) {
+        const uint8_t *newline = rd.text.len > 0 ? memchr(rd.text.bytes, '\n', rd.text.len) : NULL;
+        rd.line1_end = newline != NULL ? (uint32_t)(newline - rd.text.bytes) : rd.text.len;
     }
     res = res != ODIN3_OK ? res : parse(&rd);
     res = res != ODIN3_OK ? res : read_root(&rd);

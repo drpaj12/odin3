@@ -214,10 +214,15 @@ static void what_add(odin3_xml_err *err, odin3_bytes part) {
     err->what[used + len] = '\0';
 }
 
-/* Appends a name, cut at NAME_SHOWN bytes with "..." after it. */
+/* Appends a name, cut at NAME_SHOWN bytes (less to end on a character) with "..." after it. */
 static void what_name(odin3_xml_err *err, odin3_bytes name) {
+    const uint8_t *bytes = name.ptr;
     bool cut = name.len > NAME_SHOWN;
-    what_add(err, (odin3_bytes){name.ptr, cut ? (size_t)NAME_SHOWN : name.len});
+    size_t shown = cut ? (size_t)NAME_SHOWN : name.len;
+    while (cut && shown > 0 && (bytes[shown] & UTF8_CONT_MASK) == UTF8_CONT) {
+        shown--; /* cut on a character boundary: the message stays UTF-8 */
+    }
+    what_add(err, (odin3_bytes){name.ptr, shown});
     if (cut) {
         what_add(err, odin3_bytes_cstr("..."));
     }
@@ -531,7 +536,7 @@ static odin3_status cdata(xml_parser *xp) {
     }
     uint32_t end = find(xp, lt + CDATA_OPEN, "]]>");
     if (end == ODIN3_XML_NONE) {
-        return early_end(xp, xp->len, "unclosed CDATA section");
+        return early_end(xp, lt, "unclosed CDATA section");
     }
     xp->pos = end + CDATA_CLOSE;
     xml_span span = {lt + CDATA_OPEN, end};
@@ -602,8 +607,8 @@ static odin3_status check_repeat(xml_parser *xp, uint32_t index, odin3_bytes nam
 
 /* Stores attr (its name at attr.off) of element index, its value decoded from the span. */
 static odin3_status add_attr(xml_parser *xp, uint32_t index, odin3_xml_attr attr, xml_span value) {
-    odin3_status res = check_repeat(xp, index, attr.name, attr.off);
-    res = res != ODIN3_OK ? res : node_room(xp, attr.off);
+    odin3_status res = node_room(xp, attr.off); /* the cap before check_repeat's allocation */
+    res = res != ODIN3_OK ? res : check_repeat(xp, index, attr.name, attr.off);
     res = res != ODIN3_OK ? res : decode(xp, value, MODE_ATTR, &attr.value);
     odin3_xml_attr *slot = res == ODIN3_OK ? odin3_vec_push(&xp->doc->attrs) : NULL;
     if (slot == NULL) {

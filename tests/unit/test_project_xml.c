@@ -198,7 +198,8 @@ static const bad_case k_bad[] = {
     /* comments and CDATA */
     {"\n<!-- x\n\n", 2, 1, "unclosed comment"},
     {"<c>\n<!-- a -- b --></c>", 2, 8, "'--' inside a comment"},
-    {"<c>\n<![CDATA[x\n\n", 4, 1, "unclosed CDATA section"},
+    {"<c>\n<![CDATA[x\n\n", 2, 1, "unclosed CDATA section"},
+    {"<c>\n <![CDATA[x]]", 2, 2, "unclosed CDATA section"},
     {"<![CDATA[x]]><c/>", 1, 1, "CDATA outside the root element"},
     {"<c>\n ]]> </c>", 2, 2, "']]>' in character data"},
     /* tags and attributes */
@@ -279,6 +280,22 @@ static void test_long_names_cut(void) {
         err.what);
 }
 
+/* A name is cut on a character boundary: 30 three-byte characters show 21 (63 bytes). */
+static void test_long_names_cut_utf8(void) {
+    char text[TEXT_MAX] = "<c>&";
+    char shown[TEXT_MAX] = "undefined entity &";
+    for (int i = 0; i < 30; i++) {
+        strcat(text, "\xE2\x82\xAC");
+        if (i < 21) {
+            strcat(shown, "\xE2\x82\xAC");
+        }
+    }
+    strcat(text, ";</c>");
+    strcat(shown, "...;");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse(text));
+    TEST_ASSERT_EQUAL_STRING(shown, err.what);
+}
+
 /* --- caps and depth ------------------------------------------------------------------------ */
 
 static void test_node_cap(void) {
@@ -302,6 +319,33 @@ static void test_node_cap(void) {
     odin3_xml_doc_free(&doc);
     odin3_xml_doc_init(&doc, 4);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_xml_parse((odin3_bytes){text, strlen(text)}, &doc, &err));
+}
+
+/* The cap is checked before the attribute's own allocations (the duplicate-name map): once the
+ * root is stored, the attribute over the cap is refused by the cap, never by an allocation. */
+/* One parse with the k-th allocation failing; whether the cap refused the attribute. */
+static bool cap_try(long fail_after) {
+    const char *text = "<r a=\"1\"/>";
+    odin3_xml_doc_free(&doc);
+    odin3_xml_doc_init(&doc, 1);
+    odin3_util_set_alloc_fail_after(fail_after);
+    odin3_status st = odin3_xml_parse((odin3_bytes){text, strlen(text)}, &doc, &err);
+    odin3_util_set_alloc_fail_after(-1);
+    if (doc.elems.len == 0) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        return false;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
+    TEST_ASSERT_TRUE(err.over_cap);
+    return true;
+}
+
+static void test_node_cap_before_allocation(void) {
+    bool capped = false;
+    for (long k = 0; k < OOM_LIMIT && !capped; k++) {
+        capped = cap_try(k);
+    }
+    TEST_ASSERT_TRUE(capped);
 }
 
 static void test_deep_document(void) {
@@ -387,7 +431,9 @@ int main(void) {
     RUN_TEST(test_rejections);
     RUN_TEST(test_nul_byte);
     RUN_TEST(test_long_names_cut);
+    RUN_TEST(test_long_names_cut_utf8);
     RUN_TEST(test_node_cap);
+    RUN_TEST(test_node_cap_before_allocation);
     RUN_TEST(test_deep_document);
     RUN_TEST(test_many_attributes);
     RUN_TEST(test_out_of_memory);
