@@ -453,6 +453,39 @@ static void test_parameters_binary(void) {
     (void)remove("t6b.json");
 }
 
+/* The 2D word cells (IR change A, EL-31) are generic cells under their Yosys names, $shiftx and
+ * $pow included (they have no Verilog form, but JSON names any cell). */
+static void test_2d_word_cells(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_net_id net_s = add_port(mod, (port_args){"s", ODIN3_DIR_IN, 1});
+    odin3_net_id net_y = add_port(mod, (port_args){"y", ODIN3_DIR_OUT, 1});
+    odin3_net_id net_z = add_port(mod, (port_args){"z", ODIN3_DIR_OUT, 1});
+    odin3_net_id net_n = add_port(mod, (port_args){"n", ODIN3_DIR_OUT, 1});
+    odin3_net_id two[2] = {net_x, net_s};
+    odin3_value bin[5] = {odin3_value_int(0), odin3_value_int(1), odin3_value_int(2),
+                          odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec shiftx = {type_id("$shiftx"), intern("sx"), prov_at(9), bin, 5};
+    odin3_netvec sx_ports[3] = {{two, 2}, {&net_s, 1}, {&net_y, 1}};
+    add_node(mod, &shiftx, sx_ports);
+    odin3_node_spec pow = {type_id("$pow"), intern("pw"), prov_at(9), bin, 5};
+    odin3_netvec pw_ports[3] = {{two, 2}, {&net_s, 1}, {&net_z, 1}};
+    add_node(mod, &pow, pw_ports);
+    odin3_value un[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(1)};
+    odin3_node_spec neg = {type_id("$logic_not"), intern("ln"), prov_at(9), un, 3};
+    odin3_netvec ln_ports[2] = {{two, 2}, {&net_n, 1}};
+    add_node(mod, &neg, ln_ports);
+    char *text = write_json("t2d.json");
+    assert_has(text, "\"type\": \"$shiftx\"");
+    assert_has(text, "\"type\": \"$pow\"");
+    assert_has(text, "\"type\": \"$logic_not\"");
+    assert_has(text, "\"B_SIGNED\": \"00000000000000000000000000000001\"");
+    assert_has(text, "\"A_WIDTH\": \"00000000000000000000000000000010\"");
+    assert_has(text, "\"A\": [ 2, 3 ]");
+    odin3_util_free(text);
+    (void)remove("t2d.json");
+}
+
 /* A wire [5:2] has offset 2; [0:3] is upto; signedness is written. */
 static void test_wire_range_attributes(void) {
     odin3_module *mod = new_module("top");
@@ -904,6 +937,7 @@ int main(void) {
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
+    RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
     RUN_TEST(test_ranged_ports);
     RUN_TEST(test_cell_key_collision);

@@ -23,7 +23,10 @@ Verbatim oracle outputs from `~/odin3-ws/golden` (written by `tools/run-oracle.s
 `ansiportlist_2.parmys.blif` has three models: the top and the `.blackbox` models `adder`
 (scalar formals) and `multiply` (vector formals `b[0..35]`, `a[0..35]`, `out[0..71]`).
 `pow.parmys.blif` and `dffsre.parmys.blif` instantiate Yosys cells (`$pow`, `$_DFFSR_PPP_`) that
-no `.model` declares (the reader makes them implicit black boxes). `elsif_both_defined.odin.blif`
+no `.model` declares. `$_DFFSR_PPP_` is not registered, so the reader makes it an implicit black
+box; `$pow` is the registered word cell since 2D (IR change A, EL-31), its widths implied by the
+formals, and `write_verilog` refuses it (no structural Verilog form; writer-check counts the file
+"refused" in both Verilog columns and still runs the JSON and dot steps). `elsif_both_defined.odin.blif`
 drives one net from two `.names` (read as written; `check` reports rule 4).
 
 ## Hand-written fixtures

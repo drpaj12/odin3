@@ -3,9 +3,11 @@
 
 Usage: tools/sim-check/gen_simlib_cases.py [--simlib PATH] [--out PATH]
 
-Each case instantiates one simlib cell ($add ... $ge, $not) with fixed parameters and constant
-inputs; iverilog/vvp print Y. The header gives test_sim_word.c expected values that do not come
-from the simulator's own model. Deterministic (fixed seed). Needs iverilog, vvp and clang-format.
+Each case instantiates one simlib cell (BINARY, UNARY below) with fixed parameters and constant
+inputs; iverilog/vvp print Y. The simlib is Yosys 0.55's, as VTR pins it (the 2D oracle). The
+header gives test_sim_word.c expected values that do not come from the simulator's own model.
+Deterministic (fixed seed); appending a cell to BINARY or UNARY moves the RNG stream, so the rows
+of later cells change too. Needs iverilog, vvp and clang-format.
 """
 
 from __future__ import annotations
@@ -19,7 +21,11 @@ import tempfile
 from dataclasses import dataclass
 
 BINARY = ["$add", "$sub", "$mul", "$and", "$or", "$xor", "$eq", "$ne", "$lt", "$le", "$gt", "$ge"]
-UNARY = ["$not"]
+BINARY += ["$xnor", "$logic_and", "$logic_or"]  # 2D IR change A (EL-31)
+UNARY = ["$not", "$neg", "$reduce_xnor", "$reduce_bool", "$logic_not"]  # $neg...: 2D (EL-31)
+SIMLIB_055 = (
+    "~/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/techlibs/common/simlib.v"
+)
 WIDTHS = [1, 7, 64, 65]
 SIGNS = [(0, 0), (0, 1), (1, 0), (1, 1)]
 PER_COMBO = 5
@@ -114,7 +120,7 @@ def header(cases: list[Case], answers: list[str]) -> str:
 
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_simlib = os.path.expanduser("~/odin3-ws/external/yosys/techlibs/common/simlib.v")
+    default_simlib = os.path.expanduser(SIMLIB_055)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--simlib", default=default_simlib)
     parser.add_argument("--out", default=os.path.join(root, "tests/unit/simlib_word_cases.h"))

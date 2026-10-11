@@ -141,6 +141,15 @@ void odin3_cells_flag_store(const odin3_sim_cell *cell, bool flag) {
     }
 }
 
+uint32_t odin3_cells_port_ones(const odin3_sim_cell *cell, uint32_t port) {
+    const odin3_sim_span *span = &cell->ports[port];
+    uint32_t ones = 0;
+    for (uint32_t k = 0; k < span->width; k++) {
+        ones += cell->values[span->idx[k]];
+    }
+    return ones;
+}
+
 void odin3_cells_word_sim(const odin3_sim_cell *cell, odin3_word_fn fn) {
     uint32_t width = cell->ports[cell->n_ports - 1].width;
     odin3_word_bin op = odin3_cells_word_load(cell, width);

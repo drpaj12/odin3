@@ -959,6 +959,29 @@ static void test_unrecoverable_parameters_are_refused(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "o3test_wpow"), last_error);
 }
 
+/* The 2D word cells (IR change A, EL-31) take the generic path, as $add does: a .subckt when
+ * the connected formals imply the parameters (no decomposition in the writer: that is `lower`'s
+ * job, DESIGN D1), else the parameter refusal. */
+static void test_2d_word_cells_as_subckt(void) {
+    static const char text[] = ".model top\n.inputs a b c\n.outputs y z\n"
+                               ".subckt $logic_and A[0]=a A[1]=b B[0]=c Y[0]=y\n"
+                               ".subckt $shiftx A[0]=a A[1]=b B[0]=c Y[0]=z\n.end\n";
+    write_input(text);
+    round_trip(IN_PATH);
+    static char out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
+}
+
+static void test_2d_signed_word_cell_is_refused(void) {
+    odin3_module *module = new_module(design, "top");
+    const odin3_value params[3] = {odin3_value_int(1), odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec spec = {.type = type_named(design, "$neg"), .params = params, .n_params = 3};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "cannot write a cell of '$neg'"), last_error);
+}
+
 /* Writing design under every allocation failure gives NO_MEMORY, never a crash or a leak, and
  * a write that succeeds gives the reference text. */
 static void oom_sweep(void) {
@@ -1040,6 +1063,8 @@ int main(void) {
     RUN_TEST(test_declared_parametric_model_written_as_declared);
     RUN_TEST(test_inferred_parameters_written);
     RUN_TEST(test_unrecoverable_parameters_are_refused);
+    RUN_TEST(test_2d_word_cells_as_subckt);
+    RUN_TEST(test_2d_signed_word_cell_is_refused);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);
     RUN_TEST(test_out_of_memory_sweep_inferred_parameters);

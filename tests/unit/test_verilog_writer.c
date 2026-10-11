@@ -1235,6 +1235,125 @@ static void test_generic_builtin_instance(void) {
     expect_not("(* blackbox *)");
 }
 
+/* --- the 2D word cells (IR change A, EL-31; review M6) ------------------------------------- */
+
+/* ops: the seven 2D cells with a Verilog form, on a[3:0], b[2:0], c[1:0]. */
+static void build_ops(void) {
+    new_module("ops");
+    odin3_net_id a_nets[4];
+    odin3_net_id b_nets[3];
+    odin3_net_id c_nets[2];
+    odin3_netvec a_vec = wire_nets(in_vec("a", 4), a_nets);
+    odin3_netvec b_vec = wire_nets(in_vec("b", 3), b_nets);
+    odin3_netvec c_vec = wire_nets(in_vec("c", 2), c_nets);
+    odin3_net_id y_nets[7][4];
+    odin3_value neg_params[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(4)};
+    odin3_netvec neg[] = {c_vec, out_nets("yneg", 4, y_nets[0])};
+    (void)add_cell("$neg", neg_params, 3, neg);
+    odin3_netvec xnor[] = {c_vec, a_vec, out_nets("yxn", 4, y_nets[1])};
+    (void)binary("$xnor", false, xnor);
+    odin3_netvec rxn[] = {a_vec, out_nets("yrx", 3, y_nets[2])};
+    (void)unary("$reduce_xnor", rxn);
+    odin3_netvec rb[] = {a_vec, out_nets("yrb", 2, y_nets[3])};
+    (void)unary("$reduce_bool", rb);
+    odin3_netvec lnot[] = {a_vec, out_nets("yln", 2, y_nets[4])};
+    (void)unary("$logic_not", lnot);
+    odin3_netvec land[] = {c_vec, b_vec, NV1(out_bit("yla"))};
+    (void)binary("$logic_and", false, land);
+    odin3_netvec lor[] = {c_vec, b_vec, NV1(out_bit("ylo"))};
+    (void)binary("$logic_or", false, lor);
+}
+
+static void test_2d_word_cells_text(void) {
+    build_ops();
+    (void)write_ok();
+    expect_has("  assign yneg = -$signed(c);\n");
+    expect_has("  assign yxn = c ~^ a;\n");
+    expect_has("  assign yrx = ~^a;\n");
+    expect_has("  assign yrb = |a;\n");
+    expect_has("  assign yln = !a;\n");
+    expect_has("  assign yla = c && b;\n");
+    expect_has("  assign ylo = c || b;\n");
+}
+
+static const char *const OPS_TB =
+    "module tb;\n"
+    "  reg [3:0] a;\n"
+    "  reg [2:0] b;\n"
+    "  reg [1:0] c;\n"
+    "  wire [3:0] yneg, yxn;\n"
+    "  wire [2:0] yrx;\n"
+    "  wire [1:0] yrb, yln;\n"
+    "  wire yla, ylo;\n"
+    "  ops dut(.a(a), .b(b), .c(c), .yneg(yneg), .yxn(yxn), .yrx(yrx), .yrb(yrb), .yln(yln),\n"
+    "          .yla(yla), .ylo(ylo));\n"
+    "  initial begin\n"
+    "    a = 4'b1000; b = 3'b100; c = 2'b10;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo);\n"
+    "    a = 4'b0000; b = 3'b000; c = 2'b11;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo);\n"
+    "    a = 4'b0110; b = 3'b001; c = 2'b00;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo);\n"
+    "  end\n"
+    "endmodule\n";
+
+/* The written expressions simulate to the simlib answers (the 1E reference values): $neg of a
+ * signed 2-bit c sign-extends, $xnor zero-extends the unsigned c, the rest are one bit
+ * zero-extended. */
+static void test_2d_word_cells_simulate(void) {
+    build_ops();
+    (void)write_ok();
+    put_testbench(OPS_TB);
+    char *compile[] = {"iverilog", "-g2005", "-o", vvp_path, tb_path, out_path, NULL};
+    int rc = run_tool(compile, NULL);
+    if (rc == TOOL_MISSING) {
+        TEST_IGNORE_MESSAGE("iverilog not found: simulation skipped");
+    }
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    char *sim[] = {"vvp", "-n", vvp_path, NULL};
+    TEST_ASSERT_EQUAL_INT(0, run_tool(sim, aux_path));
+    TEST_ASSERT_EQUAL_STRING("0010 0101 000 01 00 1 1\n"
+                             "0001 1100 001 00 01 0 1\n"
+                             "0000 1001 001 01 00 0 1\n",
+                             slurp(aux_path, aux));
+}
+
+/* Yosys reads the 2D cells' expressions back (when installed). */
+static void test_2d_word_cells_yosys_reads(void) {
+    build_ops();
+    (void)write_ok();
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog %s; proc; check -assert", out_path);
+    yosys_runs(script);
+}
+
+/* $shiftx and $pow have no structural Verilog form: refused (plan point (w)), nothing written. */
+static void expect_no_form(const char *type) {
+    new_module("m");
+    odin3_value params[5] = {odin3_value_int(0), odin3_value_int(0), odin3_value_int(4),
+                             odin3_value_int(2), odin3_value_int(1)};
+    odin3_node_spec spec = {type_of(type), 0, (odin3_prov_id){0}, params, 5};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &node));
+    TEST_ASSERT_EQUAL_UINT32(1, node.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, out_path, NULL));
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want,
+                   "%s: module 'm': cell '$c1' of type '%s' has no structural "
+                   "Verilog form",
+                   out_path, type);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+    TEST_ASSERT_FALSE(file_exists(out_path));
+}
+
+static void test_shiftx_has_no_verilog_form(void) {
+    expect_no_form("$shiftx");
+}
+
+static void test_pow_has_no_verilog_form(void) {
+    expect_no_form("$pow");
+}
+
 /* --- aliases, feed-throughs and names ------------------------------------------------------ */
 
 /* ft: y is a (one net), z = ~a, z2 on z's net, wire t aliases a. */
@@ -1726,6 +1845,11 @@ int main(void) {
     RUN_TEST(test_word_yosys_reads);
     RUN_TEST(test_blackbox_stubs);
     RUN_TEST(test_generic_builtin_instance);
+    RUN_TEST(test_2d_word_cells_text);
+    RUN_TEST(test_2d_word_cells_simulate);
+    RUN_TEST(test_2d_word_cells_yosys_reads);
+    RUN_TEST(test_shiftx_has_no_verilog_form);
+    RUN_TEST(test_pow_has_no_verilog_form);
     RUN_TEST(test_aliases_and_feedthrough);
     RUN_TEST(test_two_input_ports_on_one_net_refused);
     RUN_TEST(test_unwritable_port_refused);
