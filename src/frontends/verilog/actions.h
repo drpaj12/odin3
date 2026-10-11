@@ -25,13 +25,13 @@
 
 /*
  * A function or task header's record in ctx->headers (Task 6): its name, its spec (VP_SPEC:
- * FUNCTION_DECL or TASK_DECL with its flags), and body, one past the header's `;` (where an empty
- * ports or locals LIST sits, zero width).
+ * FUNCTION_DECL or TASK_DECL with its flags), and after_header, one past the header's `;` (where
+ * an empty ports or locals LIST sits, zero width).
  */
 typedef struct odin3_vp_header {
     uint32_t name;
-    uint32_t flags;
-    odin3_loc body;
+    uint32_t spec;
+    odin3_loc after_header;
 } odin3_vp_header;
 
 /*
@@ -504,11 +504,11 @@ odin3_status vp_tf_header_ansi(odin3_vp_ctx *ctx, uint32_t spec, const odin3_vp_
  * FUNCTION_DECL / TASK_DECL of ctx->headers[header] over at, from the pending span at mark (the
  * return slot for a function, the header ports, the body items in source order): ports LIST
  * (every PORT_DECL, header ones first), locals LIST (the D-class items), each at its first
- * element or zero width at the header's end, and the body: exactly one statement for a function
- * ("function 'f' has no statement" at at, "… has more than one statement" at the second), at most
- * one for a task (none: a zero-width NULL_STMT one past the last body item). A declaration after
- * the statement is "declaration after a statement in block". Errors are located, counted, error
- * mode (*out 0). NO_MEMORY; PARSE (make's caps).
+ * element or zero width at the header's end, and the body: exactly one statement, not a null
+ * one (A.2.6), for a function ("function 'f' has no statement" at at, "… has more than one
+ * statement" at the second), at most one for a task (none: a zero-width NULL_STMT one past the
+ * last body item). A declaration after the statement is "declaration after a statement in
+ * block". Errors are located, counted, error mode (*out 0). NO_MEMORY; PARSE (make's caps).
  */
 odin3_status vp_make_function(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
                               uint32_t header, odin3_ast_id *out);

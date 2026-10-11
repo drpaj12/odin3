@@ -486,8 +486,10 @@ token is located at the last token's end (§2.2); the chain lines (`expanded fro
 `included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: four
 `error` productions — `module_item: error ';'`, `statement: error ';'` (with its twin
 `block_item: error ';'` in the mixed block-item list of §3.1 e, whose statements are not
-`statement`s), `description: error ENDMODULE`, and `module_body: … module_items error` (an item
-missing its `;` before
+`statement`s, and its closer twins `begin`/`fork`/`case`/`function`/`task … error`
+`end`/`join`/`endcase`/`endfunction`/`endtask`, so an item missing its `;` before a closer does
+not swallow the next item), `description: error ENDMODULE`, and `module_body: … module_items
+error` (an item missing its `;` before
 `endmodule`, so the next module is still parsed) — resynchronise at the next `;` or
 `endmodule`, Bison's three-token rule
 suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while

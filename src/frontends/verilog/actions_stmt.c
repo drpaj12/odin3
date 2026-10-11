@@ -34,7 +34,7 @@ enum { VP_MAX_STMT_KIDS = 4 };
 
 static const char DECL_AFTER_STMT[] = "declaration after a statement in block";
 
-/* A node of spec over at with the children kids[0..n). */
+/* A node of spec (its kind, flags and range already set) with the children kids[0..n). */
 static odin3_status make_n(odin3_vp_ctx *ctx, const odin3_ast_spec *spec, const odin3_ast_id *kids,
                            uint32_t n, odin3_ast_id *out) {
     return odin3_ast_make(ctx->ast, spec, kids, n, out);
@@ -521,8 +521,13 @@ static void count_statements(const odin3_ast *ast, const odin3_ast_id *items, ui
     }
 }
 
+/* A.2.6 function_statement ::= statement: a null statement is not one (Task 6 review #3). */
+static bool is_null(const odin3_ast *ast, odin3_ast_id stmt) {
+    return odin3_ast_kind_of(ast, stmt) == ODIN3_AST_NULL_STMT;
+}
+
 static bool is_function(const odin3_vp_header *header) {
-    return (header->flags & ODIN3_VP_SPEC_BYTE) == ODIN3_AST_FUNCTION_DECL;
+    return (header->spec & ODIN3_VP_SPEC_BYTE) == ODIN3_AST_FUNCTION_DECL;
 }
 
 /* The body's located error, if any (*reported): a declaration after the statement, a second
@@ -540,7 +545,7 @@ static void report_body(odin3_vp_ctx *ctx, const odin3_vp_header *header, const 
     } else if (parts->wrong.v != 0) {
         odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, odin3_ast_loc(ctx->ast, parts->wrong),
                         "%s '%s' has more than one statement", what, name);
-    } else if (parts->stmts == 0 && is_function(header)) {
+    } else if (is_function(header) && (parts->stmts == 0 || is_null(ctx->ast, parts->body))) {
         odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, at->loc, "%s '%s' has no statement", what, name);
     } else {
         *reported = false;
@@ -569,12 +574,12 @@ static odin3_loc after_body(const odin3_vp_ctx *ctx, const odin3_vp_header *head
     uint32_t count = (uint32_t)ctx->span_scratch.len;
     uint32_t lead = is_function(header) ? 1U : 0U;
     if (count <= lead) {
-        return header->body;
+        return header->after_header;
     }
     odin3_ast_id last = scratch_ids(&ctx->span_scratch)[count - 1U];
     bool header_port = odin3_ast_kind_of(ctx->ast, last) == ODIN3_AST_PORT_DECL &&
                        (odin3_ast_flags(ctx->ast, last) & ODIN3_AST_F_PORT_DECL_IN_HEADER) != 0;
-    return header_port ? header->body : odin3_ast_end(ctx->ast, last);
+    return header_port ? header->after_header : odin3_ast_end(ctx->ast, last);
 }
 
 /* The FUNCTION_DECL / TASK_DECL from span_scratch: [return,] ports LIST, locals LIST, body. */
@@ -590,14 +595,14 @@ static odin3_status build_function(odin3_vp_ctx *ctx, const odin3_vp_header *hea
     st = st == ODIN3_OK ? collect(ctx, ODIN3_AST_CLS_D, span + lead, items, &locals) : st;
     odin3_ast_id kids[VP_MAX_STMT_KIDS] = {lead > 0 ? span[0] : (odin3_ast_id){0}, {0}, {0}, body};
     const odin3_ast_id *parts = scratch_ids(&ctx->part_scratch);
-    st = st == ODIN3_OK ? list_of(ctx, parts, ports, header->body, &kids[1]) : st;
-    st = st == ODIN3_OK ? list_of(ctx, parts + ports, locals, header->body, &kids[2]) : st;
+    st = st == ODIN3_OK ? list_of(ctx, parts, ports, header->after_header, &kids[1]) : st;
+    st = st == ODIN3_OK ? list_of(ctx, parts + ports, locals, header->after_header, &kids[2]) : st;
     if (st == ODIN3_OK && body.v == 0) { /* a task without a statement (§3.6) */
         odin3_loc where = after_body(ctx, header);
         odin3_vp_loc null_at = {where, where, 0};
         st = vp_null(ctx, odin3_ast_mark(ctx->ast), &null_at, &kids[3]);
     }
-    odin3_ast_spec spec = vp_spec_at(header->flags, at);
+    odin3_ast_spec spec = vp_spec_at(header->spec, at);
     spec.name = header->name;
     return st == ODIN3_OK ? make_n(ctx, &spec, kids + 1U - lead, VP_MAX_STMT_KIDS - 1U + lead, out)
                           : st;

@@ -14,6 +14,7 @@
 #include "ast/ast.h"
 #include "ast/print.h"
 #include "frontends/verilog/parser.h"
+#include "frontends/verilog/parser_test.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "unity.h"
@@ -32,6 +33,12 @@
 enum {
     MODULE_SLOTS = 2,       /* MODULE's params and ports slots; its items follow */
     STMT_OOM_LIMIT = 16384, /* allocations of the sweep text, with headroom */
+    LOWERED_STACK = 256,    /* the stack-cap hook's floor, YYINITDEPTH */
+    ELSE_IF_CHAIN = 200,    /* `else if` levels past the lowered stack */
+    DEEP_BLOCKS = 32769,    /* nested `begin`s whose SEQ_BLOCK chain passes ODIN3_AST_MAX_DEPTH */
+    OOM_NESTED_CASES = 12,  /* more open case windows than the vector's first capacity */
+    OOM_BLOCK_ITEMS = 40,   /* block locals and statements: scratch and store growth */
+    OOM_TF_ITEMS = 30,      /* function body items */
     STMT_OOM_MESSAGE = 64   /* the sweep's count line */
 };
 
@@ -316,6 +323,11 @@ static void test_function_return_types(void) {
 static void test_function_statement_count(void) {
     expect_error("function f; input a; endfunction",
                  "x.v:2:1: error: function 'f' has no statement\n");
+    /* A.2.6 function_statement ::= statement: a null statement is not one (review #3). */
+    expect_error("function f; input a; ; endfunction",
+                 "x.v:2:1: error: function 'f' has no statement\n");
+    expect_error("function f; input a; (* x *) ; endfunction",
+                 "x.v:2:1: error: function 'f' has no statement\n");
     expect_error("function f; input a; f = a; f = 1; endfunction",
                  "x.v:2:29: error: function 'f' has more than one statement\n");
     expect_error("function f; input a; f = a; reg t; endfunction",
@@ -349,6 +361,18 @@ static void test_task_without_statement(void) {
     TEST_ASSERT_EQUAL_UINT32(odin3_ast_loc(res.ast, null).v, odin3_ast_end(res.ast, null).v);
     vt_free(&res);
     expect_item("task t; ; endtask", "(TASK_DECL:t (LIST) (LIST) (NULL_STMT))");
+}
+
+/* A.2.7: `task t ();` has no ports (an empty ports LIST, printed `task t;`); a function needs
+ * one (A.2.6 function_port_list). Header ports take no initialiser (tf_*_declaration). */
+static void test_task_empty_parentheses(void) {
+    expect_item("task t (); endtask", "(TASK_DECL:t (LIST) (LIST) (NULL_STMT))");
+    expect_error("function f (); f = 1; endfunction",
+                 "x.v:2:13: error: syntax: unexpected ')', expecting inout or input or output\n");
+    expect_error("function f (input a = 1); f = a; endfunction",
+                 "x.v:2:21: error: syntax: unexpected '=', expecting ')' or ','\n");
+    expect_error("task t (output b, c = 1); endtask",
+                 "x.v:2:21: error: syntax: unexpected '=', expecting ')' or ','\n");
 }
 
 /* §3.5: an attribute on an ANSI function or task port is not supported (a syntax error). */
@@ -475,6 +499,13 @@ static void test_delays_and_intra_assignment_controls(void) {
     expect_stmt("a <= repeat (2) @(posedge c) b;",
                 "(NONBLOCKING_ASSIGN (IDENT:a) (EVENT_CONTROL (NUMBER.dec [SIGNED] 2)"
                 " (EVENT_EXPR.posedge (IDENT:c))) (IDENT:b))");
+    /* The repeat count survives the printer before the implicit event too (review #1). */
+    expect_stmt("a = repeat (2) @(*) b;",
+                "(BLOCKING_ASSIGN (IDENT:a) (EVENT_CONTROL [STAR] (NUMBER.dec [SIGNED] 2))"
+                " (IDENT:b))");
+    expect_stmt("a <= repeat (n + 1) @* b;",
+                "(NONBLOCKING_ASSIGN (IDENT:a) (EVENT_CONTROL [STAR] (BINARY.+ (IDENT:n)"
+                " (NUMBER.dec [SIGNED] 1))) (IDENT:b))");
     expect_stmt("@(e);", "(TIMING_STMT (EVENT_CONTROL _ (EVENT_EXPR.none (IDENT:e))) _)");
 }
 
@@ -640,6 +671,20 @@ static void test_metacomment_between_items(void) {
     vt_free(&res);
 }
 
+/* The window's edges (§2.6): [one past the header's `)`, the first item). A metacomment touching
+ * both edges attaches; one inside the parentheses, before them or inside the first item does
+ * not (review #5). */
+static void test_metacomment_window_edges(void) {
+    static const char BARE[] =
+        "(CASE.case (IDENT:s) (CASE_ITEM (NULL_STMT) (NUMBER.dec [SIGNED] 0)))";
+    expect_stmt("case (s)/* synopsys full_case */0: ; endcase",
+                "(CASE.case (IDENT:s) (CASE_ITEM (NULL_STMT) (NUMBER.dec [SIGNED] 0)) "
+                "{(ATTR:full_case [METACOMMENT] _)})");
+    expect_stmt("case (s // synopsys full_case\n) 0: ; endcase", BARE);
+    expect_stmt("case /* synopsys full_case */ (s) 0: ; endcase", BARE);
+    expect_stmt("case (s) 0 /* synopsys full_case */ : ; endcase", BARE);
+}
+
 /* The printed metacomment (`// synopsys …` after the header) re-parses equal (§3.7): every
  * expect_* round-trips; here the printed text itself is pinned. */
 static void test_metacomment_printed_form(void) {
@@ -675,6 +720,63 @@ static void test_statement_recovery(void) {
                  "x.v:3:26: error: syntax: unexpected <=\n");
 }
 
+/* An error just before a closer without a `;` resynchronises at that closer, so the next item's
+ * error is still reported (review #8). */
+static void test_recovery_at_closers(void) {
+    expect_error("function f; input a; f = 1 endfunction\nwire w = = 1;",
+                 "x.v:2:28: error: syntax: unexpected endfunction\nx.v:3:10: error: syntax: "
+                 "unexpected '='\n");
+    expect_error(
+        "initial case (s) 0 +: x = 1; 1: y = = 2; endcase\nwire w = = 1;",
+        "x.v:2:20: error: syntax: unexpected +:\nx.v:3:10: error: syntax: unexpected '='\n");
+    expect_error(
+        "initial begin x = 1 end\ninitial begin y = = 2; end",
+        "x.v:2:21: error: syntax: unexpected end\nx.v:3:19: error: syntax: unexpected '='\n");
+    expect_error("initial fork x = 1 join\ntask t; y = 1 endtask\nwire w = = 1;",
+                 "x.v:2:20: error: syntax: unexpected join\nx.v:3:15: error: syntax: unexpected "
+                 "endtask\nx.v:4:10: error: syntax: unexpected '='\n");
+}
+
+/* --- nesting caps (§5) ------------------------------------------------------------------------ */
+
+/* Parses text with the run's caps lowered to limits (0: the default). */
+static void parse_with_limits(const char *text, odin3_vp_limits limits, vt_result *res);
+
+/* A right-recursive `else if` chain reaches Bison's stack cap; a `begin` nest the AST depth cap.
+ * Both are located, fatal and leave no UNIT (review #6). */
+static void test_statement_nesting_caps(void) {
+    odin3_strbuf text;
+    module_text("", &text);
+    odin3_strbuf_clear(&text);
+    append(&text, "module m;\ninitial if (a) ;");
+    for (int i = 0; i < ELSE_IF_CHAIN; i++) {
+        append(&text, " else if (a) ;");
+    }
+    append(&text, "\nendmodule\n");
+    vt_result res;
+    parse_with_limits(text.data, (odin3_vp_limits){.yymaxdepth = LOWERED_STACK}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, res.status);
+    TEST_ASSERT_EQUAL_STRING("x.v:2:1122: error: nesting deeper than the parser allows (256)\n",
+                             res.log.data);
+    vt_free(&res);
+    odin3_strbuf_clear(&text);
+    append(&text, "module m;\ninitial");
+    for (int i = 0; i < DEEP_BLOCKS; i++) {
+        append(&text, " begin");
+    }
+    for (int i = 0; i < DEEP_BLOCKS; i++) {
+        append(&text, " end");
+    }
+    append(&text, "\nendmodule\n");
+    parse_with_limits(text.data, (odin3_vp_limits){0}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, res.status);
+    TEST_ASSERT_EQUAL_UINT32(0, res.unit.v);
+    TEST_ASSERT_EQUAL_STRING("x.v:2:9: error: nesting deeper than 32768\n", res.log.data);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_mark(res.ast));
+    vt_free(&res);
+    odin3_strbuf_free(&text);
+}
+
 /* --- OOM -------------------------------------------------------------------------------------- */
 
 /* Every statement action: functions and tasks, blocks with locals, every control and statement
@@ -697,6 +799,36 @@ static const char OOM_TEXT[] =
     "  initial #5;\n"
     "endmodule\n";
 
+/* The sweep text: OOM_TEXT, then (review #7) nested metacomment cases past the window vector's
+ * first capacity, a named block and a function with tens of items (scratch-vector and store
+ * growth inside the reordering reductions). */
+static odin3_strbuf oom_text;
+
+static void build_oom_text(void) {
+    odin3_strbuf_init(&oom_text);
+    append(&oom_text, OOM_TEXT);
+    append(&oom_text, "module n (input a, output reg q);\n  initial begin : big\n");
+    for (int i = 0; i < OOM_BLOCK_ITEMS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&oom_text, "    reg r%d;\n", i));
+    }
+    for (int i = 0; i < OOM_NESTED_CASES; i++) {
+        append(&oom_text, "    case (a) // synopsys full_case parallel_case\n    0:\n");
+    }
+    append(&oom_text, "    q = 1;\n");
+    for (int i = 0; i < OOM_NESTED_CASES; i++) {
+        append(&oom_text, "    endcase\n");
+    }
+    for (int i = 0; i < OOM_BLOCK_ITEMS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&oom_text, "    r%d = a;\n", i));
+    }
+    append(&oom_text, "  end\n  function f;\n");
+    for (int i = 0; i < OOM_TF_ITEMS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_strbuf_appendf(&oom_text, "    input i%d; reg l%d;\n", i, i));
+    }
+    append(&oom_text, "    f = a;\n  endfunction\nendmodule\n");
+}
+
 static void fresh_store(vt_result *res) {
     memset(res, 0, sizeof *res);
     odin3_strbuf_init(&res->dump);
@@ -705,6 +837,18 @@ static void fresh_store(vt_result *res) {
     TEST_ASSERT_NOT_NULL(res->design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_create(res->design, ODIN3_AST_FORM_PARSED,
                                                      (odin3_passrun_id){1}, &res->ast));
+}
+
+static void parse_with_limits(const char *text, odin3_vp_limits limits, vt_result *res) {
+    fresh_store(res);
+    odin3_vp_stream stream;
+    vt_stream(res->design, "x.v", odin3_bytes_cstr(text), &stream);
+    odin3_vl_run run;
+    odin3_vl_run_init(&run, res->design);
+    odin3_verilog_test_set_limits(&run, limits);
+    odin3_log_set_sink(vt_sink, res);
+    res->status = odin3_verilog_parse_stream(&run, res->ast, &stream, &res->unit);
+    odin3_log_set_sink(NULL, NULL);
 }
 
 /* A parse that failed under the allocation hook: NO_MEMORY with nothing left behind. */
@@ -721,7 +865,7 @@ static odin3_status oom_step(long limit) {
     vt_result res;
     fresh_store(&res);
     odin3_vp_stream stream;
-    vt_stream(res.design, "x.v", odin3_bytes_cstr(OOM_TEXT), &stream);
+    vt_stream(res.design, "x.v", (odin3_bytes){oom_text.data, oom_text.len}, &stream);
     odin3_vl_run run;
     odin3_vl_run_init(&run, res.design);
     odin3_util_set_alloc_fail_after(limit);
@@ -737,6 +881,7 @@ static odin3_status oom_step(long limit) {
 }
 
 static void test_statement_oom_sweep(void) {
+    build_oom_text();
     long limit = 0;
     while (limit < STMT_OOM_LIMIT && oom_step(limit) != ODIN3_OK) {
         limit++;
@@ -744,6 +889,7 @@ static void test_statement_oom_sweep(void) {
     char text[STMT_OOM_MESSAGE];
     (void)snprintf(text, sizeof text, "%ld allocations swept", limit);
     TEST_MESSAGE(text);
+    odin3_strbuf_free(&oom_text);
     TEST_ASSERT_TRUE(limit > 0);
     TEST_ASSERT_TRUE(limit < STMT_OOM_LIMIT);
 }
@@ -760,6 +906,7 @@ int main(void) {
     RUN_TEST(test_task_without_statement);
     RUN_TEST(test_task_ansi_header);
     RUN_TEST(test_attribute_on_header_port);
+    RUN_TEST(test_task_empty_parentheses);
     RUN_TEST(test_block_attributes_on_both);
     RUN_TEST(test_declaration_after_statement);
     RUN_TEST(test_nested_blocks_and_cases);
@@ -784,8 +931,11 @@ int main(void) {
     RUN_TEST(test_metacomment_merges_with_attributes);
     RUN_TEST(test_metacomment_nested_cases);
     RUN_TEST(test_metacomment_between_items);
+    RUN_TEST(test_metacomment_window_edges);
     RUN_TEST(test_metacomment_printed_form);
     RUN_TEST(test_statement_recovery);
+    RUN_TEST(test_recovery_at_closers);
+    RUN_TEST(test_statement_nesting_caps);
     RUN_TEST(test_statement_oom_sweep);
     return UNITY_END();
 }

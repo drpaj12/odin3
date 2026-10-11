@@ -648,6 +648,7 @@ static void test_task_calls_and_event_controls(void) {
     expect(mk(named(ODIN3_AST_TASK_CALL, "t"), (odin3_ast_id[]){id("a")}, 1), "t(a);\n");
     odin3_ast_spec star = with_flags(kd(ODIN3_AST_EVENT_CONTROL), ODIN3_AST_F_EVENT_CONTROL_STAR);
     expect(mk(star, &NO, 1), "@(*)");
+    expect(mk(star, (odin3_ast_id[]){num("2")}, 1), "repeat (2) @(*)"); /* 2C Task 6 review #1 */
     odin3_ast_spec bare =
         with_flags(kd(ODIN3_AST_EVENT_CONTROL), ODIN3_AST_F_EVENT_CONTROL_NO_PARENS);
     expect(mk(bare, (odin3_ast_id[]){NO, event(ODIN3_AST_EVENT_EXPR_NONE, "clk", false)}, 2),

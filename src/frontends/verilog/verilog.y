@@ -154,9 +154,10 @@
 /* u: a pending-stack mark; a spec (VP_SPEC) or flag set; a ctx->headers or ctx->windows index.
  * node: a made node (0: none, or an absent optional statement). */
 %type <u> function_spec function_type task_spec automatic_opt function_header task_header
-%type <u> tf_items block_items case_head case_kw case_items if_head for_head for_cond for_step
+%type <u> tf_items block_items case_head case_kw case_items if_head for_head for_cond for_header
 %type <u> assign_lhs assign_lhs_nb assign_ctl ev_none ev_repeat ev_tail ev_exprs ev_item
 %type <u> hier_task_name block_decl tf_ports tf_port_head tf_port_open
+%type <node> tf_port_name
 %type <node> function_decl task_decl tf_item block_item seq_block par_block
 %type <node> statement stmt_or_null stmt_opt stmt_core case_stmt case_item for_assign
 %type <node> delay_control event_control repeat_control always_item initial_item
@@ -548,10 +549,14 @@ net_assign: lvalue '=' expression      { VP($$, vp_net_assign(ctx, &@$, $1, $3, 
  * partitions them (§3.2). The header record (name, flags, the header's end) is ctx->headers[$3]. */
 function_decl: FUNCTION list_mark function_header tf_items ENDFUNCTION
                  { VP($$, vp_make_function(ctx, $2, &@$, $3, &$$)); }
+             | FUNCTION list_mark function_header tf_items error ENDFUNCTION
+                 { VP($$, vp_none(ctx, &$$)); }
              ;
 
 task_decl: TASK list_mark task_header tf_items ENDTASK
              { VP($$, vp_make_function(ctx, $2, &@$, $3, &$$)); }
+         | TASK list_mark task_header tf_items error ENDTASK
+             { VP($$, vp_none(ctx, &$$)); }
          ;
 
 function_header: function_spec IDENT ';'
@@ -561,20 +566,25 @@ function_header: function_spec IDENT ';'
                ;
 
 task_header: task_spec IDENT ';'       { VP($$, vp_tf_header(ctx, $1, &@3, $2, &$$)); }
+           | task_spec IDENT '(' ')' ';'
+                                       { VP($$, vp_tf_header(ctx, $1, &@5, $2, &$$)); }
            | task_spec IDENT '(' tf_ports ')' ';'
                                        { VP($$, vp_tf_header_ansi(ctx, $1, &@6, $2, &$$)); }
            ;
 
-/* The ANSI header ports (A.2.6 function_port_list, A.2.7 task_port_list): the module header's
- * groups (Task 4) without attributes, which §3.5 does not support on a function or task port. */
+/* The ANSI header ports (A.2.6 function_port_list, A.2.7 task_port_list; `task t ();` has
+ * none): the module header's groups (Task 4) without attributes, which §3.5 does not support
+ * on a function or task port, and without initialisers (A.2.7 tf_*_declaration). */
 tf_ports: tf_port_head
         | tf_ports ',' tf_port_head
-        | tf_ports ',' port_declarator         { VP($$, vp_group_join(ctx, $1, $3, &$$)); }
+        | tf_ports ',' tf_port_name            { VP($$, vp_group_join(ctx, $1, $3, &$$)); }
         ;
 
-tf_port_head: tf_port_open range_opt port_declarator
+tf_port_head: tf_port_open range_opt tf_port_name
                 { VP($$, vp_group_first(ctx, $2, $3, &$$)); }
             ;
+
+tf_port_name: IDENT                    { VP($$, vp_decl_name(ctx, &@$, $1, &$$)); } ;
 
 tf_port_open: group_close list_mark port_spec
                 { VP($$, vp_group_open(ctx, $2, &@3, $3, &$$)); }
@@ -636,14 +646,21 @@ block_decl: var_item | event_item | param_item ;
 /* SEQ_BLOCK / PAR_BLOCK(name; L? locals; S*). */
 seq_block: BEGIN block_items END              { VP($$, vp_make_block(ctx, $2, &@$, 0, &$$)); }
          | BEGIN ':' IDENT block_items END    { VP($$, vp_make_block(ctx, $4, &@$, $3, &$$)); }
+         | BEGIN block_items error END        { VP($$, vp_none(ctx, &$$)); }
+         | BEGIN ':' IDENT block_items error END   { VP($$, vp_none(ctx, &$$)); }
          ;
 
 par_block: FORK block_items JOIN              { VP($$, vp_make_fork(ctx, $2, &@$, 0, &$$)); }
          | FORK ':' IDENT block_items JOIN    { VP($$, vp_make_fork(ctx, $4, &@$, $3, &$$)); }
+         | FORK block_items error JOIN        { VP($$, vp_none(ctx, &$$)); }
+         | FORK ':' IDENT block_items error JOIN   { VP($$, vp_none(ctx, &$$)); }
          ;
 
 /* A statement and its attributes (§3.5): the node is made without them (point (g)). The error
- * production resynchronises at the next `;` inside a procedural block (§3.4). */
+ * production resynchronises at the next `;` inside a procedural block (§3.4); an error just
+ * before a closer without a `;` (`end`, `join`, `endcase`, `endfunction`, `endtask`)
+ * resynchronises at that closer through the error alternatives of the block, case, function
+ * and task rules, so the item after it is still parsed (Task 6 review #8). */
 statement: attrs_opt stmt_core         { VP($$, vp_attrs(ctx, $1, $2, &$$)); }
          | error ';'                   { VP($$, vp_none(ctx, &$$)); }
          ;
@@ -669,7 +686,7 @@ stmt_core: assign_lhs assign_ctl expression ';'
          | if_head %prec LOWER_THAN_ELSE      { VP($$, vp_if(ctx, $1, &@$, VP_NO_NODE, &$$)); }
          | if_head ELSE stmt_or_null          { VP($$, vp_if(ctx, $1, &@$, $3, &$$)); }
          | case_stmt
-         | for_step stmt_or_null              { VP($$, vp_for(ctx, $1, &@$, $2, &$$)); }
+         | for_header stmt_or_null              { VP($$, vp_for(ctx, $1, &@$, $2, &$$)); }
          | WHILE '(' expression ')' stmt_or_null   { VP($$, vp_while(ctx, &@$, $3, $5, &$$)); }
          | REPEAT '(' expression ')' stmt_or_null  { VP($$, vp_repeat(ctx, &@$, $3, $5, &$$)); }
          | FOREVER stmt_or_null               { VP($$, vp_forever(ctx, &@$, $2, &$$)); }
@@ -715,7 +732,7 @@ for_head: FOR '(' for_assign ';'       { VP($$, vp_list_first(ctx, $3, &$$)); } 
 
 for_cond: for_head expression ';'      { VP($$, vp_list_next(ctx, $1, $2, &$$)); } ;
 
-for_step: for_cond for_assign ')'      { VP($$, vp_list_next(ctx, $1, $2, &$$)); } ;
+for_header: for_cond for_assign ')'      { VP($$, vp_list_next(ctx, $1, $2, &$$)); } ;
 
 for_assign: lvalue '=' expression      { VP($$, vp_assign_plain(ctx, &@$, $1, $3, &$$)); } ;
 
@@ -723,6 +740,8 @@ for_assign: lvalue '=' expression      { VP($$, vp_assign_plain(ctx, &@$, $1, $3
  * header's `)` to the first item, recorded in ctx->windows[$2] by case_head and case_items. */
 case_stmt: case_head case_items ENDCASE
              { VP($$, vp_make_case(ctx, $1, &@$, $2, &$$)); }
+         | case_head error ENDCASE              { VP($$, vp_none(ctx, &$$)); }
+         | case_head case_items error ENDCASE   { VP($$, vp_none(ctx, &$$)); }
          ;
 
 case_head: case_kw '(' expression ')'  { VP($$, vp_case_head(ctx, &@4, $1, $3, &$$)); } ;
