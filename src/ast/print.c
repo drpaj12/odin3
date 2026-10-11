@@ -161,9 +161,10 @@ odin3_ast_kind odin3_pr_kind(const odin3_printer *pr, const odin3_pr_task *task)
 }
 
 /*
- * node's name as an identifier. A name Verilog cannot spell (empty, a blank, a backtick, a control
- * or non-ASCII byte; no parse stores one) is written `\name ` anyway, with a warning: the output
- * then does not re-parse to the same tree.
+ * node's name as an identifier. A name the 1F writer cannot spell (empty, a blank, a backtick, a
+ * control or non-ASCII byte) is written `\name ` anyway, with a warning. Only a backtick reaches
+ * here from a parse (an escaped identifier may hold one, 2C §3.6), and that output re-parses to
+ * the same tree; the others do not.
  */
 static odin3_status append_name(const odin3_ast *ast, odin3_ast_id node, odin3_strbuf *out) {
     odin3_bytes name = odin3_pr_name_bytes(ast, node);

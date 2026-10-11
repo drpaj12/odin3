@@ -1,0 +1,51 @@
+# hand-written
+(MODULE:g6_case_gen @G6_case_generate.v:2:1
+  (LIST @G6_case_generate.v:2:20
+    (PARAM_DECL.parameter [IN_HEADER] @G6_case_generate.v:2:22
+      _
+      (DECLARATOR:M @G6_case_generate.v:2:32
+        (NUMBER.dec [SIGNED] @G6_case_generate.v:2:36 1))))
+  (LIST @G6_case_generate.v:2:39
+    (PORT_DECL.input [IN_HEADER] @G6_case_generate.v:2:40
+      (RANGE @G6_case_generate.v:2:46
+        (NUMBER.dec [SIGNED] @G6_case_generate.v:2:47 3)
+        (NUMBER.dec [SIGNED] @G6_case_generate.v:2:49 0))
+      (DECLARATOR:a @G6_case_generate.v:2:52
+        _))
+    (PORT_DECL.output [IN_HEADER] @G6_case_generate.v:2:55
+      (RANGE @G6_case_generate.v:2:62
+        (NUMBER.dec [SIGNED] @G6_case_generate.v:2:63 3)
+        (NUMBER.dec [SIGNED] @G6_case_generate.v:2:65 0))
+      (DECLARATOR:y @G6_case_generate.v:2:68
+        _)))
+  (GEN_CASE @G6_case_generate.v:3:3
+    (IDENT:M @G6_case_generate.v:3:9)
+    (CASE_ITEM @G6_case_generate.v:4:5
+      (GEN_BLOCK:low @G6_case_generate.v:4:11
+        _
+        (CONT_ASSIGN @G6_case_generate.v:5:7
+          _
+          _
+          (NET_ASSIGN @G6_case_generate.v:5:14
+            (IDENT:y @G6_case_generate.v:5:14)
+            (IDENT:a @G6_case_generate.v:5:18))))
+      (NUMBER.dec [SIGNED] @G6_case_generate.v:4:5 0)
+      (NUMBER.dec [SIGNED] @G6_case_generate.v:4:8 1))
+    (CASE_ITEM @G6_case_generate.v:7:5
+      (CONT_ASSIGN @G6_case_generate.v:7:8
+        _
+        _
+        (NET_ASSIGN @G6_case_generate.v:7:15
+          (IDENT:y @G6_case_generate.v:7:15)
+          (UNARY.~ @G6_case_generate.v:7:19
+            (IDENT:a @G6_case_generate.v:7:20))))
+      (NUMBER.dec [SIGNED] @G6_case_generate.v:7:5 2))
+    (CASE_ITEM [DEFAULT] @G6_case_generate.v:8:5
+      (GEN_BLOCK @G6_case_generate.v:8:14
+        _
+        (CONT_ASSIGN @G6_case_generate.v:9:7
+          _
+          _
+          (NET_ASSIGN @G6_case_generate.v:9:14
+            (IDENT:y @G6_case_generate.v:9:14)
+            (NUMBER.dec @G6_case_generate.v:9:18 4'd0)))))))

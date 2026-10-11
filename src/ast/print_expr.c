@@ -184,14 +184,14 @@ static void print_strength(odin3_printer *pr, const odin3_pr_task *task) {
 static void print_event_control(odin3_printer *pr, const odin3_pr_task *task) {
     uint32_t flags = odin3_pr_flags(pr, task);
     bool bare = (flags & ODIN3_AST_F_EVENT_CONTROL_NO_PARENS) != 0;
-    if ((flags & ODIN3_AST_F_EVENT_CONTROL_STAR) != 0) {
-        odin3_pr_text(pr, bare ? "@*" : "@(*)");
-        return;
-    }
-    if (odin3_pr_kid(pr, task, 0).v != 0) {
+    if (odin3_pr_kid(pr, task, 0).v != 0) { /* the repeat count, `@*` included (2C Task 6) */
         odin3_pr_text(pr, "repeat (");
         odin3_pr_node(pr, odin3_pr_kid(pr, task, 0), ODIN3_PR_EXPR, 0);
         odin3_pr_text(pr, ") ");
+    }
+    if ((flags & ODIN3_AST_F_EVENT_CONTROL_STAR) != 0) {
+        odin3_pr_text(pr, bare ? "@*" : "@(*)");
+        return;
     }
     odin3_pr_text(pr, bare ? "@" : "@(");
     uint32_t count = odin3_ast_nchild(pr->ast, odin3_pr_self(task));

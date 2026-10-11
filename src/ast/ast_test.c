@@ -69,13 +69,13 @@ static bool scalar_fault(odin3_ast *ast, odin3_ast_test_target target) {
     case ODIN3_AST_TEST_FLAG:
         return set_flag(rec);
     case ODIN3_AST_TEST_NAME_MISSING:
-        if (info->name_rule != ODIN3_AST_NAME_REQ) {
+        if (odin3_ast_name_rule_of(info, rec->flags) != ODIN3_AST_NAME_REQ) {
             return false;
         }
         rec->name = 0;
         return true;
     case ODIN3_AST_TEST_NAME_EXTRA:
-        if (info->name_rule != ODIN3_AST_NAME_NO || target.arg == 0) {
+        if (odin3_ast_name_rule_of(info, rec->flags) != ODIN3_AST_NAME_NO || target.arg == 0) {
             return false;
         }
         rec->name = target.arg;

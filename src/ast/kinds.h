@@ -83,7 +83,7 @@
     X(EVENT_EXPR, NO, NO, SUB(EVENT_EXPR), F, SL1(E), NOTAIL, NOPAY)                               \
     X(NUMBER, E, NO, SUB(NUMBER), F, SL0, NOTAIL, PNUM)                                            \
     X(REAL, E, NO, NOSUB, NOF, SL0, NOTAIL, PREAL)                                                 \
-    X(STRING, E, REQ, NOSUB, NOF, SL0, NOTAIL, NOPAY)                                              \
+    X(STRING, E, REQ, NOSUB, F, SL0, NOTAIL, NOPAY)                                                \
     X(IDENT, E, REQ, NOSUB, NOF, SL0, NOTAIL, NOPAY)                                               \
     X(HIER_NAME, E, NO, NOSUB, NOF, SL0, TL(HIER_PART, 1, MANY), NOPAY)                            \
     X(SELECT, E, NO, SUB(SELECT), NOF, SL3(E, E, E_OPT), NOTAIL, NOPAY)                            \
@@ -327,6 +327,13 @@ bool odin3_ast_class_has(odin3_ast_class cls, const odin3_ast_kind_info *info);
 
 /* "UNIT" … "MINTYPMAX"; "NONE" for 0 and "" for an unknown kind. Never NULL. */
 const char *odin3_ast_kind_name(uint32_t kind);
+
+/*
+ * The name rule of a node of info's kind carrying flags: the row's rule, except that a STRING
+ * flagged EMPTY has no name (the empty string is strtab ID 0; 2A §4.3 amendment, 2C Task 4).
+ * ODIN3_AST_NAME_NO for a NULL row.
+ */
+odin3_ast_name_rule odin3_ast_name_rule_of(const odin3_ast_kind_info *info, uint32_t flags);
 
 /* Positional slot count of kind; 0 for an unknown kind. */
 uint32_t odin3_ast_slot_count(uint32_t kind);

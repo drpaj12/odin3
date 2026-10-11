@@ -1,0 +1,69 @@
+# hand-written
+(MODULE:e15_var_bit_select @E15_variable_bit_select.v:2:1
+  _
+  (LIST @E15_variable_bit_select.v:2:27
+    (PORT_DECL.input [IN_HEADER] @E15_variable_bit_select.v:2:28
+      (RANGE @E15_variable_bit_select.v:2:34
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:35 7)
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:37 0))
+      (DECLARATOR:a @E15_variable_bit_select.v:2:40
+        _))
+    (PORT_DECL.input [IN_HEADER] @E15_variable_bit_select.v:2:43
+      (RANGE @E15_variable_bit_select.v:2:49
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:50 2)
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:52 0))
+      (DECLARATOR:s @E15_variable_bit_select.v:2:55
+        _))
+    (PORT_DECL.input [IN_HEADER] @E15_variable_bit_select.v:2:58
+      _
+      (DECLARATOR:d @E15_variable_bit_select.v:2:64
+        _))
+    (PORT_DECL.output [IN_HEADER] @E15_variable_bit_select.v:2:67
+      _
+      (DECLARATOR:y1 @E15_variable_bit_select.v:2:74
+        _)
+      (DECLARATOR:y2 @E15_variable_bit_select.v:2:78
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @E15_variable_bit_select.v:2:82
+      (RANGE @E15_variable_bit_select.v:2:93
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:94 7)
+        (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:2:96 0))
+      (DECLARATOR:r @E15_variable_bit_select.v:2:99
+        _)))
+  (CONT_ASSIGN @E15_variable_bit_select.v:3:3
+    _
+    _
+    (NET_ASSIGN @E15_variable_bit_select.v:3:10
+      (IDENT:y1 @E15_variable_bit_select.v:3:10)
+      (SELECT.bit @E15_variable_bit_select.v:3:15
+        (IDENT:a @E15_variable_bit_select.v:3:15)
+        (IDENT:s @E15_variable_bit_select.v:3:17)
+        _)))
+  (CONT_ASSIGN @E15_variable_bit_select.v:4:3
+    _
+    _
+    (NET_ASSIGN @E15_variable_bit_select.v:4:10
+      (IDENT:y2 @E15_variable_bit_select.v:4:10)
+      (SELECT.bit @E15_variable_bit_select.v:4:15
+        (IDENT:a @E15_variable_bit_select.v:4:15)
+        (BINARY.+ @E15_variable_bit_select.v:4:17
+          (IDENT:s @E15_variable_bit_select.v:4:17)
+          (NUMBER.dec [SIGNED] @E15_variable_bit_select.v:4:21 1))
+        _)))
+  (ALWAYS.always @E15_variable_bit_select.v:5:3
+    (TIMING_STMT @E15_variable_bit_select.v:5:10
+      (EVENT_CONTROL [STAR] @E15_variable_bit_select.v:5:10
+        _)
+      (SEQ_BLOCK @E15_variable_bit_select.v:5:13
+        _
+        (BLOCKING_ASSIGN @E15_variable_bit_select.v:6:5
+          (IDENT:r @E15_variable_bit_select.v:6:5)
+          _
+          (NUMBER.dec @E15_variable_bit_select.v:6:9 8'd0))
+        (BLOCKING_ASSIGN @E15_variable_bit_select.v:7:5
+          (SELECT.bit @E15_variable_bit_select.v:7:5
+            (IDENT:r @E15_variable_bit_select.v:7:5)
+            (IDENT:s @E15_variable_bit_select.v:7:7)
+            _)
+          _
+          (IDENT:d @E15_variable_bit_select.v:7:12))))))

@@ -1,0 +1,83 @@
+# hand-written
+(MODULE:e7_power @E7_power.v:2:1
+  _
+  (LIST @E7_power.v:2:17
+    (PORT_DECL.input [IN_HEADER] @E7_power.v:2:18
+      (RANGE @E7_power.v:2:24
+        (NUMBER.dec [SIGNED] @E7_power.v:2:25 3)
+        (NUMBER.dec [SIGNED] @E7_power.v:2:27 0))
+      (DECLARATOR:a @E7_power.v:2:30
+        _)
+      (DECLARATOR:b @E7_power.v:2:33
+        _)
+      (DECLARATOR:c @E7_power.v:2:36
+        _))
+    (PORT_DECL.output [IN_HEADER] @E7_power.v:2:39
+      (RANGE @E7_power.v:2:46
+        (NUMBER.dec [SIGNED] @E7_power.v:2:47 15)
+        (NUMBER.dec [SIGNED] @E7_power.v:2:50 0))
+      (DECLARATOR:y1 @E7_power.v:2:53
+        _)
+      (DECLARATOR:y2 @E7_power.v:2:57
+        _)
+      (DECLARATOR:y3 @E7_power.v:2:61
+        _)
+      (DECLARATOR:y4 @E7_power.v:2:65
+        _)
+      (DECLARATOR:y5 @E7_power.v:2:69
+        _)
+      (DECLARATOR:y6 @E7_power.v:2:73
+        _)))
+  (CONT_ASSIGN @E7_power.v:3:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:3:10
+      (IDENT:y1 @E7_power.v:3:10)
+      (BINARY.** @E7_power.v:3:15
+        (NUMBER.dec [SIGNED] @E7_power.v:3:15 2)
+        (NUMBER.dec [SIGNED] @E7_power.v:3:20 3))))
+  (CONT_ASSIGN @E7_power.v:4:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:4:10
+      (IDENT:y2 @E7_power.v:4:10)
+      (BINARY.** @E7_power.v:4:15
+        (IDENT:a @E7_power.v:4:15)
+        (IDENT:b @E7_power.v:4:20))))
+  (CONT_ASSIGN @E7_power.v:5:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:5:10
+      (IDENT:y3 @E7_power.v:5:10)
+      (BINARY.** @E7_power.v:5:15
+        (NUMBER.dec [SIGNED] @E7_power.v:5:15 2)
+        (IDENT:b @E7_power.v:5:20))))
+  (CONT_ASSIGN @E7_power.v:6:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:6:10
+      (IDENT:y4 @E7_power.v:6:10)
+      (BINARY.** @E7_power.v:6:15
+        (BINARY.** @E7_power.v:6:15
+          (IDENT:a @E7_power.v:6:15)
+          (IDENT:b @E7_power.v:6:20))
+        (IDENT:c @E7_power.v:6:25))))
+  (CONT_ASSIGN @E7_power.v:7:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:7:10
+      (IDENT:y5 @E7_power.v:7:10)
+      (BINARY.** @E7_power.v:7:15
+        (UNARY.- @E7_power.v:7:15
+          (IDENT:a @E7_power.v:7:16))
+        (IDENT:b @E7_power.v:7:21))))
+  (CONT_ASSIGN @E7_power.v:8:3
+    _
+    _
+    (NET_ASSIGN @E7_power.v:8:10
+      (IDENT:y6 @E7_power.v:8:10)
+      (BINARY.* @E7_power.v:8:15
+        (IDENT:a @E7_power.v:8:15)
+        (BINARY.** @E7_power.v:8:19
+          (IDENT:b @E7_power.v:8:19)
+          (IDENT:c @E7_power.v:8:24))))))

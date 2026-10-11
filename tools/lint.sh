@@ -95,8 +95,8 @@ read_list() {
     done < <(list_files "$@")
 }
 
-# ---- 0. §15.1 rules no other tool checks (exit/abort/goto) ---------------------------------
-read_list rule_files 'src/*.c' 'src/*.h' 'plugins/*.c' 'plugins/*.h'
+# ---- 0. §15.1 rules no other tool checks (exit/abort/goto; the .y/.l hygiene of 2C §6) ------
+read_list rule_files 'src/*.c' 'src/*.h' 'src/*.y' 'src/*.l' 'plugins/*.c' 'plugins/*.h'
 if [ "${#rule_files[@]}" -eq 0 ]; then
     record rules PASS
 else
@@ -134,6 +134,16 @@ tidy_step() {
             record clang-tidy FAIL
             return
         fi
+    fi
+    # The Verilog parser's sources include the Bison/Flex output, which lives only in the build
+    # tree (2C spec §6): generate it (a second or two). The generated directory is outside the
+    # git file lists and the header filter below, so nothing in it is linted.
+    local gen_log="$LOG_DIR/tidy-generate.log"
+    if ! cmake --build build/lint --target verilog_generated >"$gen_log" 2>&1; then
+        echo "==> clang-tidy" >&2
+        sed 's/^/    /' "$gen_log" >&2
+        record clang-tidy FAIL
+        return
     fi
     # clang-tidy 18 has no ExcludeHeaderFilterRegex, and third_party/unity/src/ would match a
     # relative "src/" pattern, so the header filter is anchored on the absolute repo root here

@@ -129,6 +129,16 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/include.c
     src/frontends/verilog/expand.c
     src/frontends/verilog/pp_check.c
+    src/frontends/verilog/parser.c
+    src/frontends/verilog/actions.c
+    src/frontends/verilog/actions_decl.c
+    src/frontends/verilog/actions_expr.c
+    src/frontends/verilog/actions_stmt.c
+    src/frontends/verilog/actions_inst.c
+    src/frontends/verilog/lexer_support.c
+    src/frontends/verilog/lexer_tokens.c
+    src/frontends/verilog/lexer_trivia.c
+    src/frontends/verilog/keywords.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -175,6 +185,40 @@ target_include_directories(odin3_core
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
+
+# --- The Verilog parser: Bison and Flex generated into the build tree (2C spec §6) ----------
+find_package(BISON 3.8 REQUIRED)        # parse.error detailed, parse.lac, %precedence, -Wcex
+find_package(FLEX 2.6.4 REQUIRED)       # reentrant + bison-bridge without the 2.6.0–2.6.3 bugs
+set(_gen ${CMAKE_CURRENT_BINARY_DIR}/generated/verilog)
+file(MAKE_DIRECTORY ${_gen})  # Flex and Bison do not create it (Ninja does, Make does not)
+bison_target(verilog_parser src/frontends/verilog/verilog.y ${_gen}/verilog_parser.c
+             DEFINES_FILE ${_gen}/verilog_parser.h
+             COMPILE_FLAGS "-Wall -Wcounterexamples -Werror")
+flex_target(verilog_lexer src/frontends/verilog/verilog.l ${_gen}/verilog_lexer.c
+            DEFINES_FILE ${_gen}/verilog_lexer.h COMPILE_FLAGS "--warn")
+add_flex_bison_dependency(verilog_lexer verilog_parser)
+add_custom_target(verilog_generated
+                  DEPENDS ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
+# The generated sources are ordinary members of odin3_core (PIC, hidden visibility,
+# odin3_flags, _POSIX_C_SOURCE: everything the other sources get), so libodin3 and the
+# unit tests link them as they link any core object. Only the warnings the skeletons cannot
+# satisfy are switched off, per generated file: a source-file COMPILE_OPTIONS list is placed
+# after the target's options on the command line, so "-Wconversion … -Wno-conversion" leaves
+# the warning off (verified with CMake 3.28 and both compilers).
+target_sources(odin3_core PRIVATE ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
+target_include_directories(odin3_core PRIVATE ${_gen})
+# The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
+# expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
+# the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
+# trailing context, yyless(0), YY_DECL: no warning; with 2C Task 4's grammar core, 353
+# states, YYMALLOC/YYFREE through the allocation hook, with Task 5's expressions, 488
+# states and the precedence table, with Task 6's statements, 763 states and the
+# dangling-else precedence, and with Task 7's instantiation, gates and generate, 941 states:
+# still none but the one below). One flag, for the parser only:
+#   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
+#                                 (clang; gcc does not warn)
+set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
+    PROPERTIES COMPILE_OPTIONS "-Wno-unused-but-set-variable")
 
 add_library(libodin3 SHARED $<TARGET_OBJECTS:odin3_core>)
 set_target_properties(libodin3 PROPERTIES
@@ -300,6 +344,34 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ast_print)
     odin3_add_unit_test(test_ast_dump)
     odin3_add_unit_test(test_ast_equal)
+    # 2C: the Verilog parser. Its tests include the generated parser header (lexer_support.h).
+    odin3_add_unit_test(test_verilog_parser)
+    target_include_directories(test_verilog_parser PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser verilog_generated)
+    target_compile_definitions(test_verilog_parser PRIVATE
+        ODIN3_VERILOG_DATA="${PROJECT_SOURCE_DIR}/tests/verilog")
+    odin3_add_unit_test(test_verilog_lexer)
+    target_include_directories(test_verilog_lexer PRIVATE ${_gen})
+    add_dependencies(test_verilog_lexer verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_decl)
+    target_include_directories(test_verilog_parser_decl PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_decl verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_expr)
+    target_include_directories(test_verilog_parser_expr PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_expr verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_stmt)
+    target_include_directories(test_verilog_parser_stmt PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_stmt verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_inst)
+    target_include_directories(test_verilog_parser_inst PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_inst verilog_generated)
+    # The coverage rows as acceptance tests (plan point (p)): the rows of grammar tasks up to
+    # ODIN3_VR_UPTO; each later grammar task raises it.
+    odin3_add_unit_test(test_verilog_rows)
+    target_include_directories(test_verilog_rows PRIVATE ${_gen})
+    add_dependencies(test_verilog_rows verilog_generated)
+    target_compile_definitions(test_verilog_rows PRIVATE ODIN3_VR_UPTO=7
+        ODIN3_VERILOG_DATA="${PROJECT_SOURCE_DIR}/tests/verilog")
     odin3_add_unit_test(test_project_words)
     odin3_add_unit_test(test_project_paths)
     odin3_add_unit_test(test_project_record)
@@ -629,6 +701,15 @@ if(BUILD_TESTING)
                 --yosys $<IF:$<BOOL:${ODIN3_YOSYS}>,${ODIN3_YOSYS},yosys>
                 --suite ${PROJECT_SOURCE_DIR})
     set_tests_properties(pp_diff PROPERTIES LABELS differential SKIP_RETURN_CODE 77)
+
+    # 2C §3.1: the conflicts Bison resolves by precedence are exactly the committed allowlist,
+    # and no operator token can follow an expression outside the operator rules (--operand).
+    add_test(NAME verilog_grammar_solved
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/solved_conflicts.py
+                --bison ${BISON_EXECUTABLE}
+                --grammar ${PROJECT_SOURCE_DIR}/src/frontends/verilog/verilog.y --operand expr
+                --expect ${PROJECT_SOURCE_DIR}/tests/verilog/solved_conflicts.txt)
+    set_tests_properties(verilog_grammar_solved PROPERTIES LABELS unit)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")

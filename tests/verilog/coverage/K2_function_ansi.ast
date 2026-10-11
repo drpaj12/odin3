@@ -1,0 +1,116 @@
+# hand-written
+(MODULE:k2_func_ansi @K2_function_ansi.v:2:1
+  _
+  (LIST @K2_function_ansi.v:2:21
+    (PORT_DECL.input [IN_HEADER] @K2_function_ansi.v:2:22
+      (RANGE @K2_function_ansi.v:2:28
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:29 3)
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:31 0))
+      (DECLARATOR:a @K2_function_ansi.v:2:34
+        _)
+      (DECLARATOR:b @K2_function_ansi.v:2:37
+        _))
+    (PORT_DECL.input [IN_HEADER] @K2_function_ansi.v:2:40
+      _
+      (DECLARATOR:s @K2_function_ansi.v:2:46
+        _))
+    (PORT_DECL.output [IN_HEADER] @K2_function_ansi.v:2:49
+      (RANGE @K2_function_ansi.v:2:56
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:57 3)
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:59 0))
+      (DECLARATOR:y1 @K2_function_ansi.v:2:62
+        _))
+    (PORT_DECL.output [IN_HEADER] @K2_function_ansi.v:2:66
+      (RANGE @K2_function_ansi.v:2:73
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:74 5)
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:2:76 0))
+      (DECLARATOR:y2 @K2_function_ansi.v:2:79
+        _)))
+  (FUNCTION_DECL:pick @K2_function_ansi.v:3:3
+    (RANGE @K2_function_ansi.v:3:12
+      (NUMBER.dec [SIGNED] @K2_function_ansi.v:3:13 3)
+      (NUMBER.dec [SIGNED] @K2_function_ansi.v:3:15 0))
+    (LIST @K2_function_ansi.v:3:24
+      (PORT_DECL.input [IN_HEADER] @K2_function_ansi.v:3:24
+        _
+        (DECLARATOR:sel @K2_function_ansi.v:3:30
+          _))
+      (PORT_DECL.input [IN_HEADER] @K2_function_ansi.v:3:35
+        (RANGE @K2_function_ansi.v:3:41
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:3:42 3)
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:3:44 0))
+        (DECLARATOR:x @K2_function_ansi.v:3:47
+          _)
+        (DECLARATOR:z @K2_function_ansi.v:3:50
+          _)))
+    (LIST @K2_function_ansi.v:4:5
+      (VAR_DECL.reg @K2_function_ansi.v:4:5
+        (RANGE @K2_function_ansi.v:4:9
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:4:10 3)
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:4:12 0))
+        (DECLARATOR:r @K2_function_ansi.v:4:15
+          _)))
+    (SEQ_BLOCK @K2_function_ansi.v:5:5
+      _
+      (BLOCKING_ASSIGN @K2_function_ansi.v:6:7
+        (IDENT:r @K2_function_ansi.v:6:7)
+        _
+        (TERNARY @K2_function_ansi.v:6:11
+          (IDENT:sel @K2_function_ansi.v:6:11)
+          (IDENT:x @K2_function_ansi.v:6:17)
+          (IDENT:z @K2_function_ansi.v:6:21)))
+      (BLOCKING_ASSIGN @K2_function_ansi.v:7:7
+        (IDENT:pick @K2_function_ansi.v:7:7)
+        _
+        (IDENT:r @K2_function_ansi.v:7:14))))
+  (FUNCTION_DECL:widen @K2_function_ansi.v:10:3
+    (RANGE @K2_function_ansi.v:10:12
+      (NUMBER.dec [SIGNED] @K2_function_ansi.v:10:13 5)
+      (NUMBER.dec [SIGNED] @K2_function_ansi.v:10:15 0))
+    (LIST @K2_function_ansi.v:10:25
+      (PORT_DECL.input [IN_HEADER] @K2_function_ansi.v:10:25
+        (RANGE @K2_function_ansi.v:10:31
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:10:32 3)
+          (NUMBER.dec [SIGNED] @K2_function_ansi.v:10:34 0))
+        (DECLARATOR:x @K2_function_ansi.v:10:37
+          _))
+      (PORT_DECL.input [IN_HEADER DT=2] @K2_function_ansi.v:10:40
+        _
+        (DECLARATOR:n @K2_function_ansi.v:10:54
+          _)))
+    (LIST @K2_function_ansi.v:11:5
+      (VAR_DECL.integer @K2_function_ansi.v:11:5
+        _
+        (DECLARATOR:k @K2_function_ansi.v:11:13
+          _)))
+    (SEQ_BLOCK @K2_function_ansi.v:12:5
+      _
+      (BLOCKING_ASSIGN @K2_function_ansi.v:13:7
+        (IDENT:k @K2_function_ansi.v:13:7)
+        _
+        (IDENT:n @K2_function_ansi.v:13:11))
+      (BLOCKING_ASSIGN @K2_function_ansi.v:14:7
+        (IDENT:widen @K2_function_ansi.v:14:7)
+        _
+        (BINARY.<< @K2_function_ansi.v:14:15
+          (CONCAT @K2_function_ansi.v:14:15
+            (NUMBER.bin @K2_function_ansi.v:14:16 2'b00)
+            (IDENT:x @K2_function_ansi.v:14:23))
+          (IDENT:k @K2_function_ansi.v:14:29)))))
+  (CONT_ASSIGN @K2_function_ansi.v:17:3
+    _
+    _
+    (NET_ASSIGN @K2_function_ansi.v:17:10
+      (IDENT:y1 @K2_function_ansi.v:17:10)
+      (CALL:pick @K2_function_ansi.v:17:15
+        (IDENT:s @K2_function_ansi.v:17:20)
+        (IDENT:a @K2_function_ansi.v:17:23)
+        (IDENT:b @K2_function_ansi.v:17:26))))
+  (CONT_ASSIGN @K2_function_ansi.v:18:3
+    _
+    _
+    (NET_ASSIGN @K2_function_ansi.v:18:10
+      (IDENT:y2 @K2_function_ansi.v:18:10)
+      (CALL:widen @K2_function_ansi.v:18:15
+        (IDENT:a @K2_function_ansi.v:18:21)
+        (NUMBER.dec [SIGNED] @K2_function_ansi.v:18:24 1)))))

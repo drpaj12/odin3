@@ -150,11 +150,13 @@ odin3_status odin3_ast_payload_push(odin3_ast *ast, odin3_ast_payload_rec rec, u
 /* --- shape checks (§5): a reason string, NULL when the spec fits the slot table ------------ */
 
 static const char *check_name(const odin3_ast *ast, const odin3_ast_kind_info *info,
-                              uint32_t name) {
-    if (info->name_rule == ODIN3_AST_NAME_NO && name != 0) {
+                              const odin3_ast_spec *spec) {
+    odin3_ast_name_rule rule = odin3_ast_name_rule_of(info, spec->flags);
+    uint32_t name = spec->name;
+    if (rule == ODIN3_AST_NAME_NO && name != 0) {
         return "name on a kind without one";
     }
-    if (info->name_rule == ODIN3_AST_NAME_REQ && name == 0) {
+    if (rule == ODIN3_AST_NAME_REQ && name == 0) {
         return "missing name";
     }
     if (name >= odin3_strtab_count(odin3_design_strtab(ast->design))) {
@@ -189,7 +191,7 @@ static const char *check_scalars(const odin3_ast *ast, const odin3_ast_kind_info
     if ((spec->flags & ~info->flags) != 0) {
         return "flag bit the kind does not define";
     }
-    const char *why = check_name(ast, info, spec->name);
+    const char *why = check_name(ast, info, spec);
     return why != NULL ? why : check_payload(ast, info, spec->payload);
 }
 
@@ -384,6 +386,14 @@ odin3_status odin3_ast_make_marked(odin3_ast *ast, const odin3_ast_spec *spec, u
         odin3_ast_unwind(ast, mark);
     }
     return st;
+}
+
+odin3_ast_span odin3_ast_pending_span(const odin3_ast *ast, uint32_t mark) {
+    if (ast == NULL || mark >= ast->pending.len) {
+        return (odin3_ast_span){NULL, 0};
+    }
+    const odin3_ast_id *top = ast->pending.data;
+    return (odin3_ast_span){top + mark, (uint32_t)ast->pending.len - mark};
 }
 
 void odin3_ast_unwind(odin3_ast *ast, uint32_t mark) {

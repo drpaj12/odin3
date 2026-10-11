@@ -343,6 +343,8 @@ static void test_numbers_mixing_xz_print_in_binary(void) {
 
 static void test_strings(void) {
     expect(leaf(named(ODIN3_AST_STRING, "x=%d")), "\"x=%d\"");
+    expect(leaf(with_flags((odin3_ast_spec){.kind = ODIN3_AST_STRING}, ODIN3_AST_F_STRING_EMPTY)),
+           "\"\""); /* the empty string: name 0 (2A §4.3 amendment) */
     expect(leaf(named(ODIN3_AST_STRING, "a\"b\\c\n\td\001\177\xe9")),
            "\"a\\\"b\\\\c\\n\\td\\001\\177\\351\"");
 }
@@ -646,6 +648,7 @@ static void test_task_calls_and_event_controls(void) {
     expect(mk(named(ODIN3_AST_TASK_CALL, "t"), (odin3_ast_id[]){id("a")}, 1), "t(a);\n");
     odin3_ast_spec star = with_flags(kd(ODIN3_AST_EVENT_CONTROL), ODIN3_AST_F_EVENT_CONTROL_STAR);
     expect(mk(star, &NO, 1), "@(*)");
+    expect(mk(star, (odin3_ast_id[]){num("2")}, 1), "repeat (2) @(*)"); /* 2C Task 6 review #1 */
     odin3_ast_spec bare =
         with_flags(kd(ODIN3_AST_EVENT_CONTROL), ODIN3_AST_F_EVENT_CONTROL_NO_PARENS);
     expect(mk(bare, (odin3_ast_id[]){NO, event(ODIN3_AST_EVENT_EXPR_NONE, "clk", false)}, 2),

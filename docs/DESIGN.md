@@ -251,7 +251,7 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 
 ### 4.1 Verilog-2005 (owned)
 - Preprocessor first: `define/`ifdef/`else/`endif/`include, macros with args, `` `timescale `` tolerated.
-- Bison/Flex grammar, location-tracked tokens; every AST node has a source range `{loc, end}` of two 32-bit source-manager locations, decoded on demand to file, line, column and the macro/include chain (2A spec §3, AST-2), not five fields per node, and an attribute list (`(* ... *)` and pragmas).
+- Bison/Flex grammar (LALR(1), zero conflicts; generated at build time (Bison ≥ 3.8, Flex ≥ 2.6.4)), location-tracked tokens; every AST node has a source range `{loc, end}` of two 32-bit source-manager locations, decoded on demand to file, line, column and the macro/include chain (2A spec §3, AST-2), not five fields per node, and an attribute list (`(* ... *)` and pragmas).
 - Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
 - Comments kept in a side table keyed by location (not a red/green tree).
 

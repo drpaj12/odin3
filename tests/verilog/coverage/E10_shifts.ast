@@ -1,0 +1,136 @@
+# hand-written
+(MODULE:e10_shifts @E10_shifts.v:2:1
+  _
+  (LIST @E10_shifts.v:2:19
+    (PORT_DECL.input [IN_HEADER] @E10_shifts.v:2:20
+      (RANGE @E10_shifts.v:2:26
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:27 7)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:29 0))
+      (DECLARATOR:a @E10_shifts.v:2:32
+        _)
+      (DECLARATOR:b @E10_shifts.v:2:35
+        _))
+    (PORT_DECL.input [SIGNED IN_HEADER] @E10_shifts.v:2:38
+      (RANGE @E10_shifts.v:2:51
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:52 7)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:54 0))
+      (DECLARATOR:s @E10_shifts.v:2:57
+        _))
+    (PORT_DECL.input [IN_HEADER] @E10_shifts.v:2:60
+      (RANGE @E10_shifts.v:2:66
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:67 2)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:69 0))
+      (DECLARATOR:n @E10_shifts.v:2:72
+        _))
+    (PORT_DECL.output [IN_HEADER] @E10_shifts.v:2:75
+      (RANGE @E10_shifts.v:2:82
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:83 7)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:2:85 0))
+      (DECLARATOR:y1 @E10_shifts.v:2:88
+        _)
+      (DECLARATOR:y2 @E10_shifts.v:2:92
+        _)
+      (DECLARATOR:y3 @E10_shifts.v:2:96
+        _)
+      (DECLARATOR:y4 @E10_shifts.v:2:100
+        _)
+      (DECLARATOR:y5 @E10_shifts.v:2:104
+        _)
+      (DECLARATOR:y6 @E10_shifts.v:2:108
+        _)
+      (DECLARATOR:y7 @E10_shifts.v:2:112
+        _)
+      (DECLARATOR:y8 @E10_shifts.v:2:116
+        _)
+      (DECLARATOR:y9 @E10_shifts.v:2:120
+        _))
+    (PORT_DECL.output [IN_HEADER] @E10_shifts.v:2:124
+      _
+      (DECLARATOR:y10 @E10_shifts.v:2:131
+        _)))
+  (CONT_ASSIGN @E10_shifts.v:3:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:3:10
+      (IDENT:y1 @E10_shifts.v:3:10)
+      (BINARY.<< @E10_shifts.v:3:15
+        (IDENT:a @E10_shifts.v:3:15)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:3:20 2))))
+  (CONT_ASSIGN @E10_shifts.v:4:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:4:10
+      (IDENT:y2 @E10_shifts.v:4:10)
+      (BINARY.>> @E10_shifts.v:4:15
+        (IDENT:a @E10_shifts.v:4:15)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:4:20 2))))
+  (CONT_ASSIGN @E10_shifts.v:5:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:5:10
+      (IDENT:y3 @E10_shifts.v:5:10)
+      (BINARY.<<< @E10_shifts.v:5:15
+        (IDENT:a @E10_shifts.v:5:15)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:5:21 2))))
+  (CONT_ASSIGN @E10_shifts.v:6:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:6:10
+      (IDENT:y4 @E10_shifts.v:6:10)
+      (BINARY.>>> @E10_shifts.v:6:15
+        (IDENT:s @E10_shifts.v:6:15)
+        (NUMBER.dec [SIGNED] @E10_shifts.v:6:21 2))))
+  (CONT_ASSIGN @E10_shifts.v:7:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:7:10
+      (IDENT:y5 @E10_shifts.v:7:10)
+      (BINARY.<< @E10_shifts.v:7:15
+        (IDENT:a @E10_shifts.v:7:15)
+        (IDENT:n @E10_shifts.v:7:20))))
+  (CONT_ASSIGN @E10_shifts.v:8:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:8:10
+      (IDENT:y6 @E10_shifts.v:8:10)
+      (BINARY.>> @E10_shifts.v:8:15
+        (IDENT:a @E10_shifts.v:8:15)
+        (IDENT:n @E10_shifts.v:8:20))))
+  (CONT_ASSIGN @E10_shifts.v:9:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:9:10
+      (IDENT:y7 @E10_shifts.v:9:10)
+      (BINARY.>>> @E10_shifts.v:9:15
+        (IDENT:s @E10_shifts.v:9:15)
+        (IDENT:n @E10_shifts.v:9:21))))
+  (CONT_ASSIGN @E10_shifts.v:10:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:10:10
+      (IDENT:y8 @E10_shifts.v:10:10)
+      (BINARY.<< @E10_shifts.v:10:15
+        (BINARY.+ @E10_shifts.v:10:15
+          (IDENT:a @E10_shifts.v:10:15)
+          (IDENT:b @E10_shifts.v:10:19))
+        (NUMBER.dec [SIGNED] @E10_shifts.v:10:24 1))))
+  (CONT_ASSIGN @E10_shifts.v:11:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:11:10
+      (IDENT:y9 @E10_shifts.v:11:10)
+      (BINARY.<< @E10_shifts.v:11:15
+        (IDENT:a @E10_shifts.v:11:15)
+        (BINARY.+ @E10_shifts.v:11:20
+          (IDENT:n @E10_shifts.v:11:20)
+          (NUMBER.dec [SIGNED] @E10_shifts.v:11:24 1)))))
+  (CONT_ASSIGN @E10_shifts.v:12:3
+    _
+    _
+    (NET_ASSIGN @E10_shifts.v:12:10
+      (IDENT:y10 @E10_shifts.v:12:10)
+      (BINARY.< @E10_shifts.v:12:16
+        (BINARY.<< @E10_shifts.v:12:16
+          (IDENT:a @E10_shifts.v:12:16)
+          (NUMBER.dec [SIGNED] @E10_shifts.v:12:21 1))
+        (IDENT:b @E10_shifts.v:12:25)))))

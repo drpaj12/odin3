@@ -381,9 +381,10 @@ static bool udp_declared(const odin3_ast_checker *cx, uint32_t name) {
 static void rule4_names(odin3_ast_checker *cx, const odin3_ast_kind_info *info,
                         odin3_ast_span kids) {
     uint32_t name = cx->rec->name;
-    if (info->name_rule == ODIN3_AST_NAME_NO && name != 0) {
+    odin3_ast_name_rule rule = odin3_ast_name_rule_of(info, cx->rec->flags);
+    if (rule == ODIN3_AST_NAME_NO && name != 0) {
         odin3_ast_check_node_fail(cx, RULE_NAME, "name on a kind without one");
-    } else if (info->name_rule == ODIN3_AST_NAME_REQ && name == 0) {
+    } else if (rule == ODIN3_AST_NAME_REQ && name == 0) {
         odin3_ast_check_node_fail(cx, RULE_NAME, "missing name");
     }
     if (name >= odin3_strtab_count(odin3_design_strtab(odin3_ast_design(cx->ast)))) {

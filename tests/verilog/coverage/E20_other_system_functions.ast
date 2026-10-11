@@ -1,0 +1,41 @@
+# hand-written
+(MODULE:e20_system_functions @E20_other_system_functions.v:2:1
+  _
+  (LIST @E20_other_system_functions.v:2:29
+    (PORT_DECL.output [IN_HEADER] @E20_other_system_functions.v:2:30
+      (RANGE @E20_other_system_functions.v:2:37
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:38 31)
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:41 0))
+      (DECLARATOR:y1 @E20_other_system_functions.v:2:44
+        _))
+    (PORT_DECL.output [IN_HEADER] @E20_other_system_functions.v:2:48
+      (RANGE @E20_other_system_functions.v:2:55
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:56 63)
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:59 0))
+      (DECLARATOR:y2 @E20_other_system_functions.v:2:62
+        _))
+    (PORT_DECL.output [IN_HEADER] @E20_other_system_functions.v:2:66
+      (RANGE @E20_other_system_functions.v:2:73
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:74 31)
+        (NUMBER.dec [SIGNED] @E20_other_system_functions.v:2:77 0))
+      (DECLARATOR:y3 @E20_other_system_functions.v:2:80
+        _)))
+  (CONT_ASSIGN @E20_other_system_functions.v:3:3
+    _
+    _
+    (NET_ASSIGN @E20_other_system_functions.v:3:10
+      (IDENT:y1 @E20_other_system_functions.v:3:10)
+      (CALL:$random [SYSTEM] @E20_other_system_functions.v:3:15)))
+  (CONT_ASSIGN @E20_other_system_functions.v:4:3
+    _
+    _
+    (NET_ASSIGN @E20_other_system_functions.v:4:10
+      (IDENT:y2 @E20_other_system_functions.v:4:10)
+      (CALL:$time [SYSTEM] @E20_other_system_functions.v:4:15)))
+  (CONT_ASSIGN @E20_other_system_functions.v:5:3
+    _
+    _
+    (NET_ASSIGN @E20_other_system_functions.v:5:10
+      (IDENT:y3 @E20_other_system_functions.v:5:10)
+      (CALL:$rtoi [SYSTEM] @E20_other_system_functions.v:5:15
+        (REAL @E20_other_system_functions.v:5:21 2.5)))))

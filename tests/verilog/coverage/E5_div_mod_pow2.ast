@@ -1,0 +1,72 @@
+# hand-written
+(MODULE:e5_div_mod_pow2 @E5_div_mod_pow2.v:2:1
+  _
+  (LIST @E5_div_mod_pow2.v:2:24
+    (PORT_DECL.input [IN_HEADER] @E5_div_mod_pow2.v:2:25
+      (RANGE @E5_div_mod_pow2.v:2:31
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:2:32 7)
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:2:34 0))
+      (DECLARATOR:a @E5_div_mod_pow2.v:2:37
+        _)
+      (DECLARATOR:b @E5_div_mod_pow2.v:2:40
+        _))
+    (PORT_DECL.output [IN_HEADER] @E5_div_mod_pow2.v:2:43
+      (RANGE @E5_div_mod_pow2.v:2:50
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:2:51 7)
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:2:53 0))
+      (DECLARATOR:y1 @E5_div_mod_pow2.v:2:56
+        _)
+      (DECLARATOR:y2 @E5_div_mod_pow2.v:2:60
+        _)
+      (DECLARATOR:y3 @E5_div_mod_pow2.v:2:64
+        _)
+      (DECLARATOR:y4 @E5_div_mod_pow2.v:2:68
+        _)
+      (DECLARATOR:y5 @E5_div_mod_pow2.v:2:72
+        _)))
+  (CONT_ASSIGN @E5_div_mod_pow2.v:3:3
+    _
+    _
+    (NET_ASSIGN @E5_div_mod_pow2.v:3:10
+      (IDENT:y1 @E5_div_mod_pow2.v:3:10)
+      (BINARY./ @E5_div_mod_pow2.v:3:15
+        (IDENT:a @E5_div_mod_pow2.v:3:15)
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:3:19 4))))
+  (CONT_ASSIGN @E5_div_mod_pow2.v:4:3
+    _
+    _
+    (NET_ASSIGN @E5_div_mod_pow2.v:4:10
+      (IDENT:y2 @E5_div_mod_pow2.v:4:10)
+      (BINARY.% @E5_div_mod_pow2.v:4:15
+        (IDENT:a @E5_div_mod_pow2.v:4:15)
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:4:19 4))))
+  (CONT_ASSIGN @E5_div_mod_pow2.v:5:3
+    _
+    _
+    (NET_ASSIGN @E5_div_mod_pow2.v:5:10
+      (IDENT:y3 @E5_div_mod_pow2.v:5:10)
+      (BINARY./ @E5_div_mod_pow2.v:5:15
+        (IDENT:a @E5_div_mod_pow2.v:5:15)
+        (NUMBER.dec @E5_div_mod_pow2.v:5:19 8'd8))))
+  (CONT_ASSIGN @E5_div_mod_pow2.v:6:3
+    _
+    _
+    (NET_ASSIGN @E5_div_mod_pow2.v:6:10
+      (IDENT:y4 @E5_div_mod_pow2.v:6:10)
+      (BINARY.% @E5_div_mod_pow2.v:6:15
+        (BINARY./ @E5_div_mod_pow2.v:6:15
+          (BINARY.* @E5_div_mod_pow2.v:6:15
+            (IDENT:a @E5_div_mod_pow2.v:6:15)
+            (IDENT:b @E5_div_mod_pow2.v:6:19))
+          (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:6:23 4))
+        (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:6:27 2))))
+  (CONT_ASSIGN @E5_div_mod_pow2.v:7:3
+    _
+    _
+    (NET_ASSIGN @E5_div_mod_pow2.v:7:10
+      (IDENT:y5 @E5_div_mod_pow2.v:7:10)
+      (BINARY.+ @E5_div_mod_pow2.v:7:15
+        (IDENT:a @E5_div_mod_pow2.v:7:15)
+        (BINARY./ @E5_div_mod_pow2.v:7:19
+          (IDENT:b @E5_div_mod_pow2.v:7:19)
+          (NUMBER.dec [SIGNED] @E5_div_mod_pow2.v:7:23 4))))))
