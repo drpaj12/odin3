@@ -5,7 +5,12 @@ review; v3 the re-review minors. (v2: `2D-review1`, 2 critical, 10 important, 17
 applied; F17 made moot by F1's redesign, F20 applied as divergence §17 #20. v3: `2D-review2`
 approved v2 with minors N1–N7; N1–N3 and N5–N7 applied; N4 is not applied as asked — the review
 says no `hierarchy` pass exists, but it is a 1D built-in (`src/passes/builtin.c`, the
-`docs/PASSES.md` row), so it stays in EL-33's `OK` list, now with that citation.) Decisions 1–13
+`docs/PASSES.md` row), so it stays in EL-33's `OK` list, now with that citation. v4: two
+amendments from the plan review (`2D-plan-review`, controller ruling C1 and minor M8), both
+following Yosys 0.55: EL-39's write temporaries start each block as `addr = x`, `data = x`,
+`en = 0` (was `en = 0` only: a path that never writes left `addr`/`data` unassigned, a
+combinational loop after `proc`); EL-30 lowers `~&a`/`~|a` to `$logic_not` of the reduction, as
+Yosys's parser does (was `$not`).) Decisions 1–13
 ruled by the controller as agent defaults (§20). Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
 semantics). Spec: `docs/DESIGN.md` §4.0 (libraries, top), §4.1, §4.5, §5, §6 step 2, §12, §15.
 Inputs: PHASE2 #3, #4 (exit bar), #5, #6 (coverage, D1–D5), #7/#8 (the AST and its carry-overs),
@@ -971,7 +976,7 @@ signed only if it is signed and its context is signed), so the cell extends its 
 | `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | `$add $sub $mul $div $mod`; `Y_WIDTH` = final width |
 | `a & b`, `a \| b`, `a ^ b`, `a ~^ b` | `$and $or $xor`, `$xnor`† |
 | `~a`, `-a`, `+a` | operand extended to the final width by wiring first, then `$not`, `$neg`†; `+a` is the extended operand (no cell) |
-| `&a ~&a \|a ~\|a ^a ~^a` | `$reduce_and`, `$reduce_and` + `$not` (1 bit), `$reduce_or`, `$reduce_or` + `$not`, `$reduce_xor`, `$reduce_xnor`†; `Y_WIDTH` = max(final, 1), operand self-determined |
+| `&a ~&a \|a ~\|a ^a ~^a` | `$reduce_and`, `$reduce_and` (1 bit) + `$logic_not`†, `$reduce_or`, `$reduce_or` (1 bit) + `$logic_not`†, `$reduce_xor`, `$reduce_xnor`†; `Y_WIDTH` = max(final, 1), operand self-determined (`~&`/`~\|` as Yosys's parser builds them, `verilog_parser.y` `OP_NAND`/`OP_NOR`: the reduction's `Y_WIDTH` is 1, the `$logic_not`'s is max(final, 1); v4) |
 | `!a`, `a && b`, `a \|\| b` | `$logic_not`†, `$logic_and`†, `$logic_or`†; operands self-determined; `Y_WIDTH` = max(final, 1) |
 | `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands generated at their common width and sign (EL-13), `Y_WIDTH` = max(final, 1) |
 | `a === b`, `a !== b` (E9) | both sides constant: folded exactly (4-state `===`); one side a constant with x/z bits (after both are brought to their common width and sign, EL-13): a **wildcard compare**, as in Parmys — `$eq`/`$ne` over only the bit positions where the constant is 0 or 1 (the other operand's bits at those positions, selected by wiring), so an x/z bit matches any value; no 0/1 position left → constant 1 (`===`) or 0 (`!==`); warning "'===' compares against x/z bits; they match any value". Verified on 0.55 through the Parmys script: `a !== 4'b1x00` becomes `~a[3] \| a[1] \| a[0]`, the x bit dropped. Neither side has x/z: `$eq`/`$ne` with "'===' is treated as '==' (synthesis has no x or z)" |
@@ -1366,10 +1371,17 @@ For an array kept as a memory (EL-27):
   `rv`; EL-27: `$mem` subtracts `OFFSET` itself); the expression reads the port's `RD_DATA`
   nets.
 - **Write** `m[i] <= d` / `m[i] = d` (only in a block with one edge sync; elsewhere EL-27 made it
-  registers): three process-local variables per write statement — `addr`, `data` (the memory's
-  width) and `en` (the memory's width) — with the root action `en = 0` (Yosys inserts it at the
-  block's start); the write statement assigns `addr = i` (the raw index), `data = d`,
-  `en = all ones`. The three are process-local temporaries in EL-33's sense: `OUT` positions
+  registers): up to three process-local variables per write statement — `addr` (the wider of
+  the index expression and `ABITS`), `data` (the memory's width) and `en` (the memory's width) —
+  with the statements `addr = x`, `data = x` and `en = 0` inserted at the block's start, in that
+  order (v4: Yosys 0.55 inserts all three, `simplify.cc` 3167–3231, so every path assigns the
+  temporaries and `proc` builds no feedback loop through them). They are blocking assignments
+  processed like any other (EL-35/EL-36's removal rule), so under a conditional write the x/x/0
+  values end in the switch's default case and the root assigns the case temporaries, and an
+  unconditional write leaves the root with `en = all ones` alone; a constant index needs no `addr`
+  variable and a constant full-word value no `data` variable (Yosys's `isConst` branches): the
+  constant goes to the port directly. The write statement assigns `addr = i` (the raw index),
+  `data = d`, `en = all ones`. The variables are process-local temporaries in EL-33's sense: `OUT` positions
   assigned in the case tree and by no sync action, so their nets are `O` pins of the `$proc`
   node that `proc` drives combinationally; the `$mem` write port's `WR_ADDR`, `WR_DATA`, `WR_EN`
   are those nets (their values at the end of the block), `WR_CLK` the sync's net,
