@@ -3,6 +3,7 @@
  */
 #include "ast/ast.h"
 #include "ast/print.h"
+#include "ast/symtab.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
 #include "ir/celltype.h"
@@ -11,8 +12,11 @@
 #include "ir/ids.h"
 #include "ir/ir_test.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
+#include "passes/builtin.h"
 #include "passes/manager.h"
+#include "proc_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/hash.h"
@@ -157,8 +161,9 @@ static odin3_status count_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byt
     return ODIN3_OK;
 }
 
-static const odin3_pass_def COUNT_PASS = {"t_count", "t_count [args]: counts its calls", count_pass,
-                                          &count_marker, false};
+static const odin3_pass_def COUNT_PASS = {"t_count",  "t_count [args]: counts its calls",
+                                          count_pass, &count_marker,
+                                          false,      ODIN3_PASS_PROCESSES_REFUSE};
 
 /* Breaks rule 4: a second driver on net 1 of module 1 (an input port's net). */
 static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
@@ -170,8 +175,8 @@ static odin3_status break_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byt
     return odin3_ir_test_corrupt(module, (odin3_ir_test_target){ODIN3_IR_TEST_MULTI_DRIVER, 1});
 }
 
-static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4", break_pass, NULL,
-                                          false};
+static const odin3_pass_def BREAK_PASS = {"t_break", "t_break: breaks rule 4",   break_pass, NULL,
+                                          false,     ODIN3_PASS_PROCESSES_REFUSE};
 
 static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
                               void *user) {
@@ -182,7 +187,8 @@ static odin3_status fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_byte
     return ODIN3_ERR_IO;
 }
 
-static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails", fail_pass, NULL, false};
+static const odin3_pass_def FAIL_PASS = {"t_fail", "t_fail: always fails",     fail_pass, NULL,
+                                         false,    ODIN3_PASS_PROCESSES_REFUSE};
 
 /* Breaks rule 4 like t_break, then fails: the check after it still runs. */
 static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
@@ -191,8 +197,9 @@ static odin3_status break_fail_pass(odin3_pass_ctx *ctx, odin3_design *des, odin
     return ODIN3_ERR_IO;
 }
 
-static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail", "t_break_fail: breaks, then fails",
-                                               break_fail_pass, NULL, false};
+static const odin3_pass_def BREAK_FAIL_PASS = {"t_break_fail",  "t_break_fail: breaks, then fails",
+                                               break_fail_pass, NULL,
+                                               false,           ODIN3_PASS_PROCESSES_REFUSE};
 
 static void register_test_passes(void) {
     static bool done = false;
@@ -242,13 +249,20 @@ static void test_register_and_run(void) {
 
 static void test_register_rejects(void) {
     register_test_passes();
-    static const odin3_pass_def dup_builtin = {"check", "x", count_pass, NULL, false};
-    static const odin3_pass_def blank = {"a b", "x", count_pass, NULL, false};
-    static const odin3_pass_def semi = {"a;b", "x", count_pass, NULL, false};
-    static const odin3_pass_def quote = {"a\"b", "x", count_pass, NULL, false}; /* opens a quote */
-    static const odin3_pass_def empty = {"", "x", count_pass, NULL, false};
-    static const odin3_pass_def no_run = {"t_no_run", "x", NULL, NULL, false};
-    static const odin3_pass_def no_help = {"t_no_help", NULL, count_pass, NULL, false};
+    static const odin3_pass_def dup_builtin = {"check", "x",   count_pass,
+                                               NULL,    false, ODIN3_PASS_PROCESSES_REFUSE};
+    static const odin3_pass_def blank = {"a b", "x",   count_pass,
+                                         NULL,  false, ODIN3_PASS_PROCESSES_REFUSE};
+    static const odin3_pass_def semi = {"a;b", "x",   count_pass,
+                                        NULL,  false, ODIN3_PASS_PROCESSES_REFUSE};
+    static const odin3_pass_def quote = {
+        "a\"b", "x", count_pass, NULL, false, ODIN3_PASS_PROCESSES_REFUSE}; /* opens a quote */
+    static const odin3_pass_def empty = {"",   "x",   count_pass,
+                                         NULL, false, ODIN3_PASS_PROCESSES_REFUSE};
+    static const odin3_pass_def no_run = {"t_no_run", "x",   NULL,
+                                          NULL,       false, ODIN3_PASS_PROCESSES_REFUSE};
+    static const odin3_pass_def no_help = {"t_no_help", NULL,  count_pass,
+                                           NULL,        false, ODIN3_PASS_PROCESSES_REFUSE};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&COUNT_PASS));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&dup_builtin));
@@ -845,9 +859,12 @@ static odin3_status keep_probe_pass(odin3_pass_ctx *ctx, odin3_design *des, odin
 }
 
 static const odin3_pass_def KEEP_PROBE_PASS = {
-    "t_keep_probe", "t_keep_probe: records the keep level", keep_probe_pass, NULL, false};
-static const odin3_pass_def WANTS_AST_PASS = {"t_wants_ast", "t_wants_ast: reads the AST",
-                                              keep_probe_pass, NULL, true};
+    "t_keep_probe",  "t_keep_probe: records the keep level",
+    keep_probe_pass, NULL,
+    false,           ODIN3_PASS_PROCESSES_REFUSE};
+static const odin3_pass_def WANTS_AST_PASS = {
+    "t_wants_ast", "t_wants_ast: reads the AST", keep_probe_pass, NULL,
+    true,          ODIN3_PASS_PROCESSES_REFUSE};
 
 static void register_ast_passes(void) {
     static bool done = false;
@@ -942,6 +959,221 @@ static void test_write_verilog_ast(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("write_verilog_ast", "/nonexistent/dir/x.v"));
 }
 
+/* --- processes (2D EL-33) -------------------------------------------------------------------- */
+
+static int refuse_calls;
+
+static odin3_status refuse_body(odin3_pass_ctx *ctx, odin3_design *des, odin3_bytes args,
+                                void *user) {
+    (void)ctx;
+    (void)des;
+    (void)args;
+    (void)user;
+    refuse_calls++;
+    return ODIN3_OK;
+}
+
+static const odin3_pass_def REFUSE_PASS = {"t_refuse",  "t_refuse: counts its calls",
+                                           refuse_body, NULL,
+                                           false,       ODIN3_PASS_PROCESSES_REFUSE};
+static const odin3_pass_def OK_PASS = {
+    "t_proc_ok", "t_proc_ok: counts its calls", refuse_body, NULL, false, ODIN3_PASS_PROCESSES_OK};
+
+static uint32_t plugin_calls;
+
+static odin3_status plugin_body(odin3_design *des, const char *args, void *user) {
+    (void)des;
+    (void)args;
+    (void)user;
+    plugin_calls++;
+    return ODIN3_OK;
+}
+
+static void register_process_passes(void) {
+    static bool done = false;
+    if (!done) {
+        static const uint8_t one = ODIN3_PASS_PROCESSES_OK;
+        odin3_plugin_pass refusing = {"t_plug_null", "h", plugin_body, NULL, NULL, {NULL}};
+        odin3_plugin_pass running = {"t_plug_ok", "h", plugin_body, NULL, &one, {NULL}};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&REFUSE_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register_def(&OK_PASS));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&refusing));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&running));
+        done = true;
+    }
+    refuse_calls = 0;
+    plugin_calls = 0;
+}
+
+/* A SOURCE record in a pass run of its own, so the module and its objects have provenance. */
+static odin3_prov_id source_prov(void) {
+    uint32_t test = 0;
+    uint32_t file = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("test"), &test));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("t.v"), &file));
+    odin3_pass_ctx ctx = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, test, &ctx));
+    odin3_srcloc loc = {file, 1, 1, 1, 2, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id prov = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &prov));
+    return prov;
+}
+
+static odin3_module *module_named(const char *name, odin3_prov_id prov) {
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(name), &str));
+    odin3_module_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, str, prov, &id));
+    return odin3_module_get(design, id);
+}
+
+/* proc_fixture_design: module "m" holding Task 3's P1, after an empty module "e". */
+static void design_with_process(void) {
+    (void)proc_fixture_design(design);
+    TEST_ASSERT_TRUE(odin3_design_has_processes(design));
+    reset_log();
+}
+
+static void test_refuse_pass_on_processes(void) {
+    register_process_passes();
+    design_with_process();
+    uint32_t runs = odin3_passrun_end(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("t_refuse", ""));
+    TEST_ASSERT_EQUAL_STRING("E pass 't_refuse': module 'm' has processes; run proc first\n",
+                             log_text);
+    TEST_ASSERT_EQUAL_INT(0, refuse_calls);
+    TEST_ASSERT_EQUAL_UINT32(runs, odin3_passrun_end(design)); /* no pass run was opened */
+    /* in a script: the refusal is the failing pass's status, located */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_p("t_proc_ok; t_refuse"));
+    TEST_ASSERT_EQUAL_INT(1, refuse_calls);
+    TEST_ASSERT_TRUE(log_has("E -p: command 2: pass 't_refuse' failed"));
+}
+
+static void test_refuse_pass_without_processes_runs(void) {
+    register_process_passes();
+    read_text(LEAF_ROOT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_refuse", ""));
+    TEST_ASSERT_EQUAL_INT(1, refuse_calls);
+}
+
+static void test_ok_passes_run_on_processes(void) {
+    register_process_passes();
+    design_with_process();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_proc_ok", ""));
+    TEST_ASSERT_EQUAL_INT(1, refuse_calls);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("stats", ""));
+    TEST_ASSERT_TRUE(log_has("$proc"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("check", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("compact", ""));
+    TEST_ASSERT_FALSE(log_has("has processes"));
+}
+
+static void test_write_blif_pass_refused(void) {
+    design_with_process();
+    (void)remove(OUT_PATH);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_blif", OUT_PATH));
+    TEST_ASSERT_EQUAL_STRING("E pass 'write_blif': module 'm' has processes; run proc first\n",
+                             log_text);
+    TEST_ASSERT_NULL(fopen(OUT_PATH, "r"));
+}
+
+/* A plugin pass with processes NULL is REFUSE; with &ODIN3_PASS_PROCESSES_OK it runs. */
+static void test_plugin_pass_processes(void) {
+    register_process_passes();
+    design_with_process();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("t_plug_null", ""));
+    TEST_ASSERT_TRUE(log_has("E pass 't_plug_null': module 'm' has processes; run proc first"));
+    TEST_ASSERT_EQUAL_UINT32(0, plugin_calls);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_plug_ok", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, plugin_calls);
+}
+
+static void test_register_rejects_bad_processes(void) {
+    static const odin3_pass_def two = {"t_two", "x", count_pass, NULL, false, 2};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register_def(&two));
+    TEST_ASSERT_TRUE(
+        log_has("pass_register: pass 't_two': processes must be 0 (REFUSE) or 1 (OK)"));
+    TEST_ASSERT_NULL(odin3_pass_find(odin3_bytes_cstr("t_two")));
+}
+
+/* Each built-in's value (2D EL-33 and plan point (x)). */
+static void test_builtin_processes_values(void) {
+    static const char *const ok[] = {
+        "read_blif", "read_techlib",      "check",        "stats",        "compact",
+        "hierarchy", "write_verilog_ast", "read_project", "dump_project", "preprocess"};
+    static const char *const refuse[] = {"write_blif", "write_json", "write_verilog", "write_dot",
+                                         "sim"};
+    for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) {
+        const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr(ok[i]));
+        TEST_ASSERT_NOT_NULL_MESSAGE(def, ok[i]);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(ODIN3_PASS_PROCESSES_OK, def->processes, ok[i]);
+    }
+    for (size_t i = 0; i < sizeof refuse / sizeof refuse[0]; i++) {
+        const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr(refuse[i]));
+        TEST_ASSERT_NOT_NULL_MESSAGE(def, refuse[i]);
+        TEST_ASSERT_EQUAL_UINT8_MESSAGE(ODIN3_PASS_PROCESSES_REFUSE, def->processes, refuse[i]);
+    }
+    /* every built-in is listed: a new one must choose */
+    TEST_ASSERT_EQUAL_UINT32(sizeof ok / sizeof ok[0] + sizeof refuse / sizeof refuse[0],
+                             odin3_builtin_pass_count);
+}
+
+/* compact remaps every held store's symbol table (EL-2; PHASE2 #8 carry-over). */
+static void test_compact_remaps_symtabs(void) {
+    odin3_prov_id prov = source_prov();
+    odin3_module *mod = module_named("m", prov);
+    odin3_wire_id wires[6] = {{0}};
+    for (uint32_t i = 1; i <= 5; i++) {
+        char name[8];
+        (void)snprintf(name, sizeof name, "w%u", i);
+        uint32_t str = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(name), &str));
+        odin3_wire_spec spec = {str, 0, 0, false, prov};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(mod, &spec, NULL, &wires[i]));
+        TEST_ASSERT_EQUAL_UINT32(i, wires[i].v);
+    }
+    odin3_ast *ast = NULL;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_ast_create(design, ODIN3_AST_FORM_ELABORATED, (odin3_passrun_id){1}, &ast));
+    uint32_t xname = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast, odin3_bytes_cstr("w5"), &xname));
+    odin3_ast_spec node_spec = {.kind = ODIN3_AST_IDENT, .name = xname};
+    odin3_ast_id decl = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &node_spec, NULL, 0, &decl));
+    odin3_symtab *st = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symtab_create(ast, &st));
+    odin3_scope_id top = {0};
+    odin3_scope_spec scope = {.kind = ODIN3_SCOPE_DESIGN};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
+    scope = (odin3_scope_spec){.kind = ODIN3_SCOPE_LIBRARY, .name = xname, .parent = top};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
+    scope = (odin3_scope_spec){.kind = ODIN3_SCOPE_MODULE, .name = xname, .parent = top};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
+    odin3_symbol_spec sym_spec = {.name = xname, .scope = top, .kind = ODIN3_SYM_NET, .decl = decl};
+    odin3_sym_id sym = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symbol_new(st, &sym_spec, &sym));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_symbol_set_ir(st, sym, odin3_module_id_of(mod), wires[5]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_ast(design, ast));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod, wires[3]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("compact", ""));
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_symbol_get(st, sym)->ir_wire.v);
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_id_of(mod).v, odin3_symbol_get(st, sym)->ir_module.v);
+}
+
+/* 2D EL-33 and the compact remap (kept out of main for its size). */
+static void run_process_tests(void) {
+    RUN_TEST(test_refuse_pass_on_processes);
+    RUN_TEST(test_refuse_pass_without_processes_runs);
+    RUN_TEST(test_ok_passes_run_on_processes);
+    RUN_TEST(test_write_blif_pass_refused);
+    RUN_TEST(test_plugin_pass_processes);
+    RUN_TEST(test_register_rejects_bad_processes);
+    RUN_TEST(test_builtin_processes_values);
+    RUN_TEST(test_compact_remaps_symtabs);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_builtins_registered);
@@ -997,5 +1229,6 @@ int main(void) {
     RUN_TEST(test_resolve_runs_nothing);
     RUN_TEST(test_check_warnings_once_per_pass);
     RUN_TEST(test_read_techlib);
+    run_process_tests();
     return UNITY_END();
 }

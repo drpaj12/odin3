@@ -623,6 +623,13 @@ Cases:
 - Remap: an elaborated store handed to the design with a symtab symbol whose `ir_wire` is wire 5 of `m`. Delete wire 3 and run `compact`: the symbol's `ir_wire` is 4.
 - Every existing pass-manager test still passes.
 
+*Amended (Task 4, agent defaults):*
+- `processes` follows the 2D spec v4.2 (EL-33, mode P), not this plan's older text: the opt passes are `OK` when 2F lands them. DESIGN §6 step 2, IR-19's "Passes" bullet and §8.1's lists (plus §9.1's example and §19) say so.
+- One helper, `odin3_design_refuse_processes(design, pass)` in `src/ir/proc.{h,c}`, logs both texts (pass name, or NULL for a writer); the manager and the four writers call it.
+- `odin3_pass_register_def` also refuses `processes` > 1 (`pass_register: pass '<p>': processes must be 0 (REFUSE) or 1 (OK), not N`), as the ABI does for its slot (`odin3_pass_register: …`).
+- `tests/unit/proc_fixture.{h,c}` hold P1 for `test_pass_manager` and `test_pass_outputs` (linked by `target_sources`).
+- Task 3 review minors folded in: M1 (`odin3_proc_print` fails on a position on an unconnected pin: `proc_print: node N: position IN|k is on an unconnected pin`), M3 (`verify` rejects an empty action: `action N: empty`), M5 (a printer test of multi-bit chunk actions).
+
 ### Task 5: `write_rtlil` and the Yosys-0.55 CMake block (EL-48, §13; ruling C2)
 **Files:**
 - Create `src/backends/rtlil/writer.h`, `writer.c` and `tests/unit/test_rtlil_writer.c`.

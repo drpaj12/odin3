@@ -3,6 +3,7 @@
 
 #include "backends/json/jw.h"
 #include "ir/celltype.h"
+#include "ir/proc.h"
 #include "util/alloc.h"
 #include "util/file.h"
 #include "util/log.h"
@@ -506,6 +507,9 @@ odin3_status odin3_json_write(const odin3_design *design, const char *path) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
+        return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     /* odin3_module_get takes a mutable design; the writer never changes it. */
     jw state = {.design = (odin3_design *)design,

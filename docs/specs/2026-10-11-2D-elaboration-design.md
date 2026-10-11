@@ -1165,7 +1165,7 @@ value the process computes (2D's temporaries, EL-35); `proc` drives its net with
 **`verify`** (run by check rule 5, IR §9, for every `$proc` node; FAST and FULL like rule 5): the
 payload has kind `PROC`; every index is in range and every case, switch and action is used
 exactly once (a tree); the root case has no compares; each compare and its switch signal have
-the same width; an action's `lhs` and `rhs` have the same width; `lhs` holds only `OUT`
+the same width; an action's `lhs` and `rhs` have the same width, not 0; `lhs` holds only `OUT`
 positions, none twice in one `lhs`; `ANY` appears only in compares; `IN | k` has `k < I_WIDTH`,
 `OUT | k` has `k < O_WIDTH`; a sync's signal is one `IN` or `OUT` position for edge and level
 types (an `OUT` position is a block clocked by a net it assigns, `always @(posedge a) a <= ~a;`,
@@ -1201,10 +1201,14 @@ pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the p
 misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
 create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
 and `proc` (2E), and (v4.2) the eight opt passes of 2F (`opt`, `opt_expr`, `opt_merge`,
-`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`). Marked `REFUSE`: `flatten`,
-`lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`, `write_dot`. The writers also
-refuse a `$proc` node themselves (`module 'm' has processes; run proc first`) for callers that
-bypass the pass manager.
+`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`), and 2B-3's project passes
+(`read_project`, `dump_project`, `preprocess`, which never read the IR as logic; plan point (x)).
+Marked `REFUSE`: `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
+`write_dot`, and every plugin pass that does not declare `OK`. The refusal comes before the pass
+run is opened, so a refused pass leaves no pass run (plan point (i)). The writers also refuse a
+design with processes themselves (`module 'm' has processes; run proc first`, before the path is
+opened) for callers that bypass the pass manager. (v4.2, mode P: v1–v4.1 also listed the opt
+passes as `REFUSE`, to keep `opt` after `proc`; that order is no longer enforced.)
 
 The opt passes treat a module with processes as Yosys 0.55's do (v4.2): `opt_expr`,
 `opt_merge`, `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as opaque (never
@@ -1579,7 +1583,7 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   arguments are not constant)`; `output argument N of task 't' must be a variable`; `cannot open
   'f' for $readmemh`; `bad address '@zz' in 'f' line N`; `bad word 'g' in 'f' line N`;
   `$readmemh is supported only in an initial block`.
-- **Passes and budget**: `pass 'opt': module 'm' has processes; run proc first` (the pass
+- **Passes and budget**: `pass 'flatten': module 'm' has processes; run proc first` (the pass
   manager, EL-33; `ODIN3_ERR_INVALID_ARG`); `elaboration needs more than N bytes (the budget is
   60% of physical memory)` (EL-46).
 
@@ -2084,8 +2088,9 @@ Made when the PRs land (not by this spec):
   tightened (IR change C): a port wire's sign must match its cell-type port's `is_signed`, and a
   scalar port is one bit wide.
 - `docs/DESIGN.md`: §5.2 word list (+ the nine cells, + `$proc` as the process cell); §6 step 2
-  ("processes" = `$proc` nodes) and the stated order `proc` before `opt`, enforced by the pass
-  flag; §9 (the RTLIL row); §4.0 (`--auto-blackbox`; the top rule unchanged).
+  ("processes" = `$proc` nodes) and the order the pass flag enforces (v4.2, mode P: `proc` before
+  the `REFUSE` passes; the opt family may run before `proc`); §9 (the RTLIL row); §4.0
+  (`--auto-blackbox`; the top rule unchanged).
 - 1D spec and `docs/PASSES.md`: `odin3_pass_def.processes` and each built-in's value;
   `read_verilog` options; `write_rtlil`; `compact` (the symtab remap wired).
 - 2A spec: §7's D1 warning is emitted by 2D, not 2E (EL-36); §4.6 points to EL-4 for the refined

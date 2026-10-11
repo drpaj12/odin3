@@ -146,7 +146,7 @@ static odin3_status oom_run(odin3_design *design, const char *args, void *user) 
 
 /* Pass registration, then a run of the pass, under every allocation failure. */
 static void test_pass_register_and_run_oom_sweep(void) {
-    odin3_plugin_pass pass = {"oom_pass", "oom_pass: counts its runs", oom_run, NULL, {NULL}};
+    odin3_plugin_pass pass = {"oom_pass", "oom_pass: counts its runs", oom_run, NULL, NULL, {NULL}};
     uint32_t before = odin3_pass_get_count();
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     for (long fail_after = 0; st == ODIN3_ERR_NO_MEMORY; fail_after++) {

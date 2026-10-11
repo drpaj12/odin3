@@ -5,6 +5,7 @@
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "util/alloc.h"
@@ -1865,6 +1866,9 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
          opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE)) {
         odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path, or an unknown name style");
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
+        return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     verilog_writer wr;
     odin3_status st = wr_init(&wr, design, path);

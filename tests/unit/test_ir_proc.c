@@ -33,7 +33,7 @@ enum {
     LOG_LINES = 16,
     LOG_TEXT = 256,
     OOM_LIMIT = 1000,
-    MAX_PINS = 8,
+    MAX_PINS = 16,
     PBITS_MAX = 16,
     ARR_MAX = 8,
     PROC_INDEX = 62, /* appended after the nine word cells (plan point (f)) */
@@ -558,6 +558,13 @@ static void fault_sync_any(body_buf *buf, proc_pins *pins, const p_nets *nets) {
     buf->syncs[0].signal = ANY;
 }
 
+/* Task 3 review M3: a zero-width action says nothing (t0 is still assigned by action 1). */
+static void fault_empty_action(body_buf *buf, proc_pins *pins, const p_nets *nets) {
+    (void)pins, (void)nets;
+    buf->actions[0].lhs.len = 0;
+    buf->actions[0].rhs.len = 0;
+}
+
 static const malformed k_malformed[] = {
     {"in range", false, fault_in_range, "IN position 2 is out of range (I_WIDTH 2)"},
     {"lhs IN", false, fault_lhs_in, "action 1: lhs holds a non-OUT position"},
@@ -574,6 +581,7 @@ static const malformed k_malformed[] = {
     {"cycle", true, fault_cycle, "switch 1: case 2 is not after its parent case 2"},
     {"ALWAYS signal", false, fault_always_signal, "sync 0: an ALWAYS sync has a signal"},
     {"sync ANY", false, fault_sync_any, "sync 0: the signal must be one IN or OUT position"},
+    {"empty action", false, fault_empty_action, "action 0: empty"},
 };
 
 /* The node and pin store ends of the module (nothing created between two readings). */
@@ -1178,6 +1186,79 @@ static void test_print_attributes_syncs_nesting(void) {
                  "end\n");
 }
 
+/* An 8-bit wire named name: its nets in bit order (vector position k = bit k). */
+static void wire8(const char *name, odin3_net_id *nets) {
+    odin3_wire_spec spec = {intern(name), 7, 0, false, prov};
+    odin3_wire_id wire = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &spec, NULL, &wire));
+    for (uint32_t k = 0; k < 8; k++) {
+        nets[k] = odin3_wire_net(module, wire, k);
+    }
+}
+
+/*
+ * Task 3 review M5: multi-bit (chunk) actions, as EL-35/36 v4.2 emit them. 8-bit q, t0, d;
+ * I = [clk, d[0..7]], O = [q[0..7], t0[0..7]]; t0 <- q, t0[3:0] <- d[3:0]; posedge clk: q <- t0.
+ */
+static void test_print_multibit_chunks(void) {
+    proc_pins pins = {{wire1("clk")}, 9, {{0}}, 16};
+    wire8("d", &pins.in[1]);
+    wire8("q", &pins.out[0]);
+    wire8("t0", &pins.out[8]);
+    odin3_pbit pbits[40];
+    for (uint32_t k = 0; k < 8; k++) {
+        pbits[k] = OUT | (8 + k);      /* a0 lhs: t0 */
+        pbits[8 + k] = OUT | k;        /* a0 rhs: q */
+        pbits[24 + k] = OUT | k;       /* a2 lhs: q */
+        pbits[32 + k] = OUT | (8 + k); /* a2 rhs: t0 */
+    }
+    for (uint32_t k = 0; k < 4; k++) {
+        pbits[16 + k] = OUT | (8 + k); /* a1 lhs: t0[3:0] */
+        pbits[20 + k] = IN | (1 + k);  /* a1 rhs: d[3:0] */
+    }
+    const odin3_proc_action actions[] = {
+        {{0, 8}, {8, 8}, {0}}, {{16, 4}, {20, 4}, {0}}, {{24, 8}, {32, 8}, {0}}};
+    const odin3_proc_case root = {0, 0, 0, 2, 0, 0, {0}};
+    const odin3_proc_sync sync = {ODIN3_SYNC_POSEDGE, IN | 0, 2, 1};
+    odin3_proc_body body = {pbits, 40, NULL, 0, actions, 3, &root, 1, NULL, 0, &sync, 1};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, create_proc(&pins, &body, &node));
+    expect_print(node, 0,
+                 "process $proc$t.v:1$1\n"
+                 "  assign \\t0 \\q\n"
+                 "  assign \\t0 [3:0] \\d [3:0]\n"
+                 "  sync posedge \\clk\n"
+                 "    update \\q \\t0\n"
+                 "end\n");
+    check_full_ok();
+}
+
+/*
+ * Task 3 review M1: a position on an unconnected pin is not the wildcard '-'. P1 with I pin 0
+ * (the clock) on no net is a valid node (rule 11 only warns), but it cannot be printed.
+ */
+static void test_print_unconnected_pin(void) {
+    p_nets nets = p1_nets();
+    body_buf buf;
+    p1_body(&buf);
+    proc_pins pins = p1_pins(&nets);
+    pins.in[0] = (odin3_net_id){0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, create_proc(&pins, &buf.body, &node));
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("kept")));
+    lines_clear();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_proc_print(module, node, 0, &text));
+    TEST_ASSERT_EQUAL_STRING("kept", text.data); /* unchanged on failure */
+    TEST_ASSERT_EQUAL_UINT32(1, n_lines);
+    char want[LOG_TEXT];
+    (void)snprintf(want, sizeof want, "proc_print: node %u: position IN|0 is on an unconnected pin",
+                   node.v);
+    TEST_ASSERT_EQUAL_STRING(want, lines[0]);
+    odin3_strbuf_free(&text);
+}
+
 /* The printer refuses a node that is not a live process; out stays as it was. */
 static void test_print_refuses(void) {
     p_nets nets = p1_nets();
@@ -1432,12 +1513,14 @@ static void test_writers_have_no_body_form(void) {
     p_nets nets = p1_nets();
     (void)p1_node(&nets);
     lines_clear();
+    /* Task 4: each writer refuses at its entry (2D EL-33), before the BODY arms are reached */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_json_write(design, k_json));
-    TEST_ASSERT_TRUE(line_has("is a process body, which has no JSON form; run proc first"));
+    TEST_ASSERT_TRUE(line_has("module 'm' has processes; run proc first"));
+    lines_clear();
     odin3_verilog_opts opts;
     memset(&opts, 0, sizeof opts);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, k_verilog, &opts));
-    TEST_ASSERT_TRUE(line_has("module 'm': a process body has no Verilog form; run proc first"));
+    TEST_ASSERT_TRUE(line_has("module 'm' has processes; run proc first"));
     TEST_ASSERT_FALSE(file_exists(k_json) || file_exists(k_verilog)); /* atomic: nothing left */
 }
 
@@ -1596,6 +1679,8 @@ int main(void) {
     RUN_TEST(test_print_p2);
     RUN_TEST(test_print_attributes_syncs_nesting);
     RUN_TEST(test_print_refuses);
+    RUN_TEST(test_print_multibit_chunks);
+    RUN_TEST(test_print_unconnected_pin);
     RUN_TEST(test_sigspec);
     RUN_TEST(test_sigspec_constant_wins);
     RUN_TEST(test_value_text);

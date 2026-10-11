@@ -1,9 +1,15 @@
 /*
  * test_pass_outputs.c — unit tests for the write_json, write_verilog, write_dot and sim passes.
  */
+#include "backends/blif/writer.h"
+#include "backends/dot/writer.h"
+#include "backends/json/writer.h"
+#include "backends/verilog/writer.h"
 #include "ir/design.h"
+#include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
+#include "proc_fixture.h"
 #include "unity.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -191,6 +197,80 @@ static void test_sim_arguments_and_refusals(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("sim", "4 1 /nonexistent/dir/a.vec"));
 }
 
+/* --- processes (2D EL-33) -------------------------------------------------------------------- */
+
+static bool exists(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file != NULL) {
+        (void)fclose(file);
+    }
+    return file != NULL;
+}
+
+/* proc_fixture_design, with m as the top (so sim would otherwise find its top). */
+static void design_with_process(void) {
+    odin3_module *module = proc_fixture_design(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, odin3_module_id_of(module)));
+    log_text[0] = '\0';
+    log_len = 0;
+}
+
+static void expect_only_line(const char *line) {
+    char want[LOG_CAP];
+    (void)snprintf(want, sizeof want, "%s\n", line);
+    TEST_ASSERT_EQUAL_STRING(want, log_text);
+    log_text[0] = '\0';
+    log_len = 0;
+}
+
+/* The writers called directly (no pass manager) refuse before opening the path. */
+static void test_writers_refuse_processes(void) {
+    static const char *const k_line = "module 'm' has processes; run proc first";
+    design_with_process();
+    (void)remove(OUT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT));
+    expect_only_line(k_line);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_json_write(design, OUT));
+    expect_only_line(k_line);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT, NULL));
+    expect_only_line(k_line);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_dot_write(design, OUT, NULL));
+    expect_only_line(k_line);
+    TEST_ASSERT_FALSE(exists(OUT));
+}
+
+/* An existing file at the path is left as it was. */
+static void test_writer_refusal_leaves_the_path(void) {
+    FILE *file = fopen(OUT, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_INT(0, fputs("keep", file) < 0);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    design_with_process();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_verilog_write(design, OUT, NULL));
+    TEST_ASSERT_EQUAL_STRING("keep", slurp(OUT));
+}
+
+/* The REFUSE passes of this file, through the pass manager. */
+static void test_output_passes_refuse_processes(void) {
+    static const char *const passes[][2] = {
+        {"write_json", "odin3_po_test.out"},
+        {"write_verilog", "odin3_po_test.out"},
+        {"write_dot", "odin3_po_test.out"},
+        {"sim", "4 1"},
+    };
+    design_with_process();
+    for (size_t i = 0; i < sizeof passes / sizeof passes[0]; i++) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, run(passes[i][0], passes[i][1]),
+                                      passes[i][0]);
+        char line[128];
+        (void)snprintf(line, sizeof line, "pass '%s': module 'm' has processes; run proc first",
+                       passes[i][0]);
+        expect_only_line(line);
+    }
+    TEST_ASSERT_FALSE(exists(OUT));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registered_in_order);
@@ -202,5 +282,8 @@ int main(void) {
     RUN_TEST(test_sim_writes_vectors_deterministically);
     RUN_TEST(test_sim_summary);
     RUN_TEST(test_sim_arguments_and_refusals);
+    RUN_TEST(test_writers_refuse_processes);
+    RUN_TEST(test_writer_refusal_leaves_the_path);
+    RUN_TEST(test_output_passes_refuse_processes);
     return UNITY_END();
 }

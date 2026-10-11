@@ -29,7 +29,12 @@ typedef odin3_status (*odin3_pass_fn)(odin3_pass_ctx *ctx, odin3_design *design,
  * (NULL for the built-ins; a plugin pass's own definition for the ABI's plugin passes);
  * wants_ast: the pass reads the AST of an earlier read (AST-16), so a script that names it, or a
  * run of it alone, first raises the design's keep level to ODIN3_KEEP_AST_ELABORATED (never
- * lowering it).
+ * lowering it); processes: ODIN3_PASS_PROCESSES_REFUSE or _OK (odin3.h; 2D EL-33). Before a
+ * REFUSE pass runs, odin3_pass_run fails it when some module still has a process ($proc node),
+ * without opening a pass run or running anything. An OK pass may meet $proc nodes and must treat
+ * them as opaque (docs/IR.md IR-19): the readers, check, stats, compact, hierarchy,
+ * write_verilog_ast, the project passes, and later proc, write_rtlil and the opt family (mode P).
+ * Every other pass is REFUSE (docs/PASSES.md "Processes").
  */
 typedef struct odin3_pass_def {
     const char *name;
@@ -37,13 +42,15 @@ typedef struct odin3_pass_def {
     odin3_pass_fn run;
     void *user;
     bool wants_ast;
+    uint8_t processes;
 } odin3_pass_def;
 
 /*
  * Adds a pass to the process-global registry (plugins; the built-ins of builtin.c are always
  * present, ahead of every registered pass). Copies nothing: def and its strings must outlive the
- * process. ODIN3_ERR_INVALID_ARG (logged) for a NULL def or run, a bad name or help, or a name
- * already registered (built-in or not); ODIN3_ERR_NO_MEMORY on out of memory. Not thread-safe.
+ * process. ODIN3_ERR_INVALID_ARG (logged) for a NULL def or run, a bad name or help, a processes
+ * value above ODIN3_PASS_PROCESSES_OK, or a name already registered (built-in or not);
+ * ODIN3_ERR_NO_MEMORY on out of memory. Not thread-safe.
  */
 odin3_status odin3_pass_register_def(const odin3_pass_def *def);
 
@@ -76,8 +83,11 @@ void odin3_pass_set_options(odin3_pass_options opts);
 odin3_pass_options odin3_pass_get_options(void);
 
 /*
- * Runs the pass named name on design: sets the design's diagnostic-path style from the options,
- * opens a provenance pass run named after the pass (odin3_pass_run_begin), checks the design (FULL,
+ * Runs the pass named name on design: sets the design's diagnostic-path style from the options;
+ * refuses a pass whose processes is REFUSE when some module has a process (2D EL-33: "pass
+ * '<name>': module '<m>' has processes; run proc first" logged, ODIN3_ERR_INVALID_ARG, nothing run,
+ * no pass run opened, no check, no timing line); opens a provenance pass run named after the pass
+ * (odin3_pass_run_begin), checks the design (FULL,
  * when checking is on; see odin3_pass_options; this check reports errors only, so the warnings of
  * the check after a pass show once per pass; blind spots: a warning that first appears in this
  * check, e.g. from IR changed outside a pass, is counted in odin3_log_count but never delivered,
