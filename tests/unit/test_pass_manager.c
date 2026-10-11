@@ -14,6 +14,7 @@
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/prov.h"
+#include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
 #include "proc_fixture.h"
@@ -1119,11 +1120,8 @@ static void test_builtin_processes_values(void) {
                              odin3_builtin_pass_count);
 }
 
-/* compact remaps every held store's symbol table (EL-2; PHASE2 #8 carry-over). */
-static void test_compact_remaps_symtabs(void) {
-    odin3_prov_id prov = source_prov();
-    odin3_module *mod = module_named("m", prov);
-    odin3_wire_id wires[6] = {{0}};
+/* Wires w1 .. w5 of mod (IDs 1 .. 5), in wires[1 .. 5]. */
+static void five_wires(odin3_module *mod, odin3_prov_id prov, odin3_wire_id wires[6]) {
     for (uint32_t i = 1; i <= 5; i++) {
         char name[8];
         (void)snprintf(name, sizeof name, "w%u", i);
@@ -1133,33 +1131,142 @@ static void test_compact_remaps_symtabs(void) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(mod, &spec, NULL, &wires[i]));
         TEST_ASSERT_EQUAL_UINT32(i, wires[i].v);
     }
-    odin3_ast *ast = NULL;
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_ast_create(design, ODIN3_AST_FORM_ELABORATED, (odin3_passrun_id){1}, &ast));
-    uint32_t xname = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast, odin3_bytes_cstr("w5"), &xname));
-    odin3_ast_spec node_spec = {.kind = ODIN3_AST_IDENT, .name = xname};
-    odin3_ast_id decl = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast, &node_spec, NULL, 0, &decl));
-    odin3_symtab *st = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symtab_create(ast, &st));
+}
+
+/* An elaborated store with a design and a library scope, for the remap test's symbols. */
+typedef struct remap_store {
+    odin3_ast *ast;
+    odin3_symtab *st;
+    odin3_scope_id lib;
+    odin3_ast_id decl;
+} remap_store;
+
+static uint32_t ast_name(odin3_ast *ast, const char *text) {
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast, odin3_bytes_cstr(text), &name));
+    return name;
+}
+
+static remap_store remap_store_new(void) {
+    remap_store rs = {NULL, NULL, {0}, {0}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_create(design, ODIN3_AST_FORM_ELABORATED,
+                                                     (odin3_passrun_id){1}, &rs.ast));
+    odin3_ast_spec node_spec = {.kind = ODIN3_AST_IDENT, .name = ast_name(rs.ast, "x")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(rs.ast, &node_spec, NULL, 0, &rs.decl));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symtab_create(rs.ast, &rs.st));
     odin3_scope_id top = {0};
     odin3_scope_spec scope = {.kind = ODIN3_SCOPE_DESIGN};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
-    scope = (odin3_scope_spec){.kind = ODIN3_SCOPE_LIBRARY, .name = xname, .parent = top};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
-    scope = (odin3_scope_spec){.kind = ODIN3_SCOPE_MODULE, .name = xname, .parent = top};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(st, &scope, &top));
-    odin3_symbol_spec sym_spec = {.name = xname, .scope = top, .kind = ODIN3_SYM_NET, .decl = decl};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(rs.st, &scope, &top));
+    scope = (odin3_scope_spec){
+        .kind = ODIN3_SCOPE_LIBRARY, .name = ast_name(rs.ast, "work"), .parent = top};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(rs.st, &scope, &rs.lib));
+    return rs;
+}
+
+/* A module scope for mod in the library scope. */
+static odin3_scope_id remap_scope(const remap_store *rs, const char *name) {
+    odin3_scope_spec scope = {
+        .kind = ODIN3_SCOPE_MODULE, .name = ast_name(rs->ast, name), .parent = rs->lib};
+    odin3_scope_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_new(rs->st, &scope, &out));
+    return out;
+}
+
+/* A net symbol named after wire `wire` of mod (w<wire>), in scope, bound to that wire. */
+static odin3_sym_id remap_symbol(const remap_store *rs, odin3_scope_id scope, odin3_module *mod,
+                                 uint32_t wire) {
+    char name[8];
+    (void)snprintf(name, sizeof name, "w%u", wire);
+    odin3_symbol_spec spec = {
+        .name = ast_name(rs->ast, name), .scope = scope, .kind = ODIN3_SYM_NET, .decl = rs->decl};
     odin3_sym_id sym = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symbol_new(st, &sym_spec, &sym));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_symbol_set_ir(st, sym, odin3_module_id_of(mod), wires[5]));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_ast(design, ast));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod, wires[3]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_symbol_new(rs->st, &spec, &sym));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_symbol_set_ir(rs->st, sym, odin3_module_id_of(mod), (odin3_wire_id){wire}));
+    return sym;
+}
+
+static void assert_bound(const remap_store *rs, odin3_sym_id sym, odin3_module *mod,
+                         uint32_t wire) {
+    TEST_ASSERT_EQUAL_UINT32(wire, odin3_symbol_get(rs->st, sym)->ir_wire.v);
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_id_of(mod).v, odin3_symbol_get(rs->st, sym)->ir_module.v);
+}
+
+/*
+ * compact remaps every held store's symbol table (EL-2; PHASE2 #8 carry-over), each module by its
+ * own map (Task 4 review minor 1): a loses w1 and b loses w2 and w3, so a's w5 -> 4, w2 -> 1 and
+ * b's w5 -> 3, w1 -> 1, and b's symbol on the dead w3 is unbound (0).
+ */
+static void test_compact_remaps_symtabs(void) {
+    odin3_prov_id prov = source_prov();
+    odin3_module *mod_a = module_named("a", prov);
+    odin3_module *mod_b = module_named("b", prov);
+    odin3_wire_id wa[6] = {{0}};
+    odin3_wire_id wb[6] = {{0}};
+    five_wires(mod_a, prov, wa);
+    five_wires(mod_b, prov, wb);
+    remap_store rs = remap_store_new();
+    odin3_scope_id sa = remap_scope(&rs, "a");
+    odin3_scope_id sb = remap_scope(&rs, "b");
+    odin3_sym_id a5 = remap_symbol(&rs, sa, mod_a, 5);
+    odin3_sym_id a2 = remap_symbol(&rs, sa, mod_a, 2);
+    odin3_sym_id b5 = remap_symbol(&rs, sb, mod_b, 5);
+    odin3_sym_id b1 = remap_symbol(&rs, sb, mod_b, 1);
+    odin3_sym_id b3 = remap_symbol(&rs, sb, mod_b, 3);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_ast(design, rs.ast));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod_a, wa[1]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod_b, wb[2]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(mod_b, wb[3]));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("compact", ""));
-    TEST_ASSERT_EQUAL_UINT32(4, odin3_symbol_get(st, sym)->ir_wire.v);
-    TEST_ASSERT_EQUAL_UINT32(odin3_module_id_of(mod).v, odin3_symbol_get(st, sym)->ir_module.v);
+    assert_bound(&rs, a5, mod_a, 4);
+    assert_bound(&rs, a2, mod_a, 1);
+    assert_bound(&rs, b5, mod_b, 3);
+    assert_bound(&rs, b1, mod_b, 1);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_symbol_get(rs.st, b3)->ir_wire.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("compact", "")); /* a second compact is the identity */
+    assert_bound(&rs, a5, mod_a, 4);
+    assert_bound(&rs, b5, mod_b, 3);
+}
+
+/*
+ * The refusal names the first module in creation order that has a process (Task 4 review minor
+ * 3): z_first, made before a_second, though a_second sorts first and is the later module.
+ */
+static void test_refusal_names_the_first_module(void) {
+    register_process_passes();
+    odin3_prov_id prov = source_prov();
+    odin3_module *first = module_named("z_first", prov);
+    odin3_module *second = module_named("a_second", prov);
+    (void)proc_fixture_p1(second, prov);
+    (void)proc_fixture_p1(first, prov);
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_get_proc_count(design, odin3_module_id_of(second).v, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("t_refuse", ""));
+    TEST_ASSERT_EQUAL_STRING("E pass 't_refuse': module 'z_first' has processes; run proc first\n",
+                             log_text);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("write_blif", OUT_PATH));
+    TEST_ASSERT_EQUAL_STRING(
+        "E pass 'write_blif': module 'z_first' has processes; run proc first\n", log_text);
+}
+
+/*
+ * The plugin's processes byte is read once, at registration (test_abi_ext's claim; Task 4 review
+ * minor 2): a pass registered OK still runs on a design with processes after its byte is set to
+ * REFUSE.
+ */
+static void test_plugin_processes_read_once(void) {
+    register_process_passes();
+    uint8_t byte = ODIN3_PASS_PROCESSES_OK;
+    odin3_plugin_pass once = {"t_plug_once", "h", plugin_body, NULL, &byte, {NULL}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&once));
+    byte = ODIN3_PASS_PROCESSES_REFUSE;
+    design_with_process();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("t_plug_once", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, plugin_calls);
 }
 
 /* 2D EL-33 and the compact remap (kept out of main for its size). */
@@ -1172,6 +1279,8 @@ static void run_process_tests(void) {
     RUN_TEST(test_register_rejects_bad_processes);
     RUN_TEST(test_builtin_processes_values);
     RUN_TEST(test_compact_remaps_symtabs);
+    RUN_TEST(test_refusal_names_the_first_module);
+    RUN_TEST(test_plugin_processes_read_once);
 }
 
 int main(void) {

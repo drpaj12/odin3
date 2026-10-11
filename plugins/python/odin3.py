@@ -231,9 +231,12 @@ def _quote(path: str | Path) -> str:
 class Design:
     """An odin3_design: create it empty, run passes on it, walk its modules."""
 
-    def __init__(self, odin3: Odin3 | None = None) -> None:
+    def __init__(self, odin3: Odin3 | None = None, *, handle: Any = None) -> None:
+        """A new empty design; or, given handle (an odin3_design * that C code made with the same
+        library, e.g. a host program or a test fixture), that design, which this object then owns
+        and destroys."""
         self.odin3 = odin3 or default()
-        ptr = self.odin3.lib.odin3_design_create()
+        ptr = self.odin3.lib.odin3_design_create() if handle is None else handle
         if ptr == self.odin3.ffi.NULL:
             raise MemoryError("odin3_design_create")
         self.ptr: Any = self.odin3.ffi.gc(ptr, self.odin3.lib.odin3_design_destroy)
@@ -406,6 +409,10 @@ class Module(_Named):
     def port_count(self) -> int:
         return self._get("odin3_module_get_port_count")
 
+    def proc_count(self) -> int:
+        """Live process ($proc) nodes, before the `proc` pass lowers them (ABI v4, 2D)."""
+        return self._get("odin3_module_get_proc_count")
+
     def ports(self) -> list[ModulePort]:
         """The module's ports in declaration order: each its port node and wire."""
         return [
@@ -511,8 +518,15 @@ class Node(_Local):
     def name(self) -> str:
         return self._text("odin3_node_get_name")
 
+    def param_kind(self, index: int) -> str:
+        """The value kind of parameter index: INT, BITS, STRING, COVER or PROC (a $proc's BODY;
+        ABI v4, 2D), the odin3_value_kind constant's name."""
+        kind = self._get("odin3_node_get_param_kind", "odin3_value_kind", index)
+        return self.design.odin3.enum_name("odin3_value_kind", kind).upper()
+
     def params(self) -> dict[str, int | str]:
-        """Parameter name -> value: an int for INT, else the ABI's text form."""
+        """Parameter name -> value: an int for INT, else the ABI's text form (a PROC's text is
+        its RTLIL process block)."""
         lib = self.design.odin3.lib
         out: dict[str, int | str] = {}
         for i in range(int(self._get("odin3_node_get_param_count"))):

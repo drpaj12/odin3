@@ -381,7 +381,9 @@ static void test_pass_register_rejects(void) {
 
 /* 2D EL-33: the processes slot (the first of the old reserved slots). NULL means REFUSE; the
  * address of ODIN3_PASS_PROCESSES_OK registers an OK pass; a value above OK is refused and
- * nothing is registered. The value is read at registration, so the plugin's byte may change. */
+ * nothing is registered. The value is read at registration, so the plugin's byte may change
+ * (test_pass_manager's test_plugin_processes_read_once runs such a pass on a design with
+ * processes: this file links only libodin3, which cannot make one). */
 static void test_pass_register_processes_slot(void) {
     uint8_t one = ODIN3_PASS_PROCESSES_OK;
     uint8_t two = 2;
@@ -400,7 +402,7 @@ static void test_pass_register_processes_slot(void) {
     TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, pass_index("abi_proc_bad"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&refuse));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&ok));
-    one = 2; /* read once: the registered pass keeps OK */
+    one = 2; /* read once (test_pass_manager runs such a pass on processes) */
     TEST_ASSERT_EQUAL_UINT32(before + 2, odin3_pass_get_count());
 }
 

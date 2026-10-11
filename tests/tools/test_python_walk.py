@@ -8,6 +8,10 @@ Skipped where cffi is missing, unless ODIN3_REQUIRE_CFFI=1 (CI sets it: there a 
 fails the test instead of hiding it), and where ODIN3_LIB is unset (`python_tools` runs this
 directory without a library and without the sanitizer runtime). CTest `python_walk` reports
 either skip as Skipped, never as Passed.
+
+ProcWalkTest (2D Task 6) walks Task 3's $proc node P1 through the ABI. No front end makes one
+yet, so it loads the test-only odin3_procfix library ($ODIN3_PROC_LIB: libodin3's objects plus
+odin3_test_proc_design, which builds P1) instead of libodin3.
 """
 
 from __future__ import annotations
@@ -36,6 +40,16 @@ try:
 except ImportError:
     HAVE_CFFI = False
 REQUIRE_CFFI = os.environ.get("ODIN3_REQUIRE_CFFI") == "1"
+PROC_LIB = os.environ.get("ODIN3_PROC_LIB")
+# Task 3's P1 as odin3_proc_print writes it: its SOURCE record is t.v line 1, and it is node 1.
+P1_TEXT = (
+    "process $proc$t.v:1$1\n"
+    "  assign \\t0 \\q\n"
+    "  assign \\t0 \\d\n"
+    "  sync posedge \\clk\n"
+    "    update \\q \\t0\n"
+    "end\n"
+)
 
 if TYPE_CHECKING or HAVE_CFFI:
     import walk
@@ -252,6 +266,58 @@ class PythonWalkTest(unittest.TestCase):
             self.assertEqual(first, again)
             self.assertEqual(len({first, again}), 1)
             self.assertIsInstance(first, Node)
+
+
+@unittest.skipUnless(HAVE_CFFI or REQUIRE_CFFI, "cffi not installed")
+@unittest.skipUnless(PROC_LIB, "ODIN3_PROC_LIB not set (run CTest python_walk)")
+class ProcWalkTest(unittest.TestCase):
+    """The $proc node through the ABI: the process count, value kind PROC and the BODY text."""
+
+    odin3: Odin3
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not HAVE_CFFI:
+            raise AssertionError("ODIN3_REQUIRE_CFFI=1 but cffi is not installed")
+        assert PROC_LIB is not None
+        cls.odin3 = Odin3(Path(PROC_LIB))
+        cls.odin3.ffi.cdef("odin3_design *odin3_test_proc_design(void);")
+        cls.odin3.call("odin3_log_set_level", cls.odin3.lib.ODIN3_LOG_ERROR)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.odin3.call("odin3_log_set_level", cls.odin3.lib.ODIN3_LOG_INFO)
+
+    def design(self) -> Design:
+        """A design of an empty module e and a module m holding P1 (proc_fixture_build_design)."""
+        return Design(self.odin3, handle=self.odin3.lib.odin3_test_proc_design())
+
+    def test_process_count_kind_and_text(self) -> None:
+        with self.design() as design:
+            empty = design.module("e")
+            module = design.module("m")
+            assert empty is not None and module is not None
+            self.assertEqual((empty.proc_count(), module.proc_count()), (0, 1))
+            procs = [node for node in module.nodes() if node.type_name == "$proc"]
+            self.assertEqual([node.id for node in procs], [1])
+            node = procs[0]
+            self.assertEqual([node.param_kind(i) for i in range(3)], ["INT", "INT", "PROC"])
+            self.assertEqual(node.params(), {"I_WIDTH": 2, "O_WIDTH": 2, "BODY": P1_TEXT})
+            with self.assertRaises(Odin3Error) as ctx:
+                node.design.get("odin3_node_get_param_int", "int64_t", node.ref(), 2)
+            self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_INVALID_ARG)
+
+    def test_walk_prints_the_process(self) -> None:
+        with self.design() as design:
+            lines = walk.param_lines(design)
+            head = "module m: node 1 $proc: BODY PROC"
+            self.assertIn("module m: node 1 $proc: I_WIDTH INT 2", lines)
+            self.assertIn(head, lines)
+            at = lines.index(head) + 1
+            body = [f"    {row}" for row in P1_TEXT.splitlines()]
+            self.assertEqual(lines[at : at + len(body)], body)
+            self.assertEqual(walk.walk_lines(design), walk.stats_lines(design))
+            self.assertIn("module m: cell $proc 1", walk.walk_lines(design))
 
 
 if __name__ == "__main__":

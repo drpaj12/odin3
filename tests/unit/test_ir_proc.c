@@ -1233,30 +1233,50 @@ static void test_print_multibit_chunks(void) {
     check_full_ok();
 }
 
+/* P1 on pins (one of them on no net) fails to print, logging that position; out is unchanged. */
+static void expect_unconnected(const proc_pins *pins, const char *position) {
+    body_buf buf;
+    p1_body(&buf);
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, create_proc(pins, &buf.body, &node));
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st = odin3_strbuf_append(&text, odin3_bytes_cstr("kept"));
+    lines_clear();
+    if (st == ODIN3_OK) {
+        st = odin3_proc_print(module, node, 0, &text);
+    }
+    bool kept = text.data != NULL && strcmp(text.data, "kept") == 0;
+    odin3_strbuf_free(&text); /* before any assertion, so a failure reports instead of leaking */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
+    TEST_ASSERT_TRUE_MESSAGE(kept, "out changed on failure");
+    TEST_ASSERT_EQUAL_UINT32(1, n_lines);
+    char want[LOG_TEXT];
+    (void)snprintf(want, sizeof want, "proc_print: node %u: position %s is on an unconnected pin",
+                   node.v, position);
+    TEST_ASSERT_EQUAL_STRING(want, lines[0]);
+}
+
 /*
  * Task 3 review M1: a position on an unconnected pin is not the wildcard '-'. P1 with I pin 0
  * (the clock) on no net is a valid node (rule 11 only warns), but it cannot be printed.
  */
 static void test_print_unconnected_pin(void) {
     p_nets nets = p1_nets();
-    body_buf buf;
-    p1_body(&buf);
     proc_pins pins = p1_pins(&nets);
     pins.in[0] = (odin3_net_id){0};
-    odin3_node_id node = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, create_proc(&pins, &buf.body, &node));
-    odin3_strbuf text;
-    odin3_strbuf_init(&text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("kept")));
-    lines_clear();
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_proc_print(module, node, 0, &text));
-    TEST_ASSERT_EQUAL_STRING("kept", text.data); /* unchanged on failure */
-    TEST_ASSERT_EQUAL_UINT32(1, n_lines);
-    char want[LOG_TEXT];
-    (void)snprintf(want, sizeof want, "proc_print: node %u: position IN|0 is on an unconnected pin",
-                   node.v);
-    TEST_ASSERT_EQUAL_STRING(want, lines[0]);
-    odin3_strbuf_free(&text);
+    expect_unconnected(&pins, "IN|0");
+}
+
+/*
+ * Task 4 review minor 5: OUT positions are checked too, here reached through an action span: P1
+ * with O pin 1 (t0) on no net fails at the first root action's lhs.
+ */
+static void test_print_unconnected_out_pin(void) {
+    p_nets nets = p1_nets();
+    proc_pins pins = p1_pins(&nets);
+    pins.out[1] = (odin3_net_id){0};
+    expect_unconnected(&pins, "OUT|1");
 }
 
 /* The printer refuses a node that is not a live process; out stays as it was. */
@@ -1681,6 +1701,7 @@ int main(void) {
     RUN_TEST(test_print_refuses);
     RUN_TEST(test_print_multibit_chunks);
     RUN_TEST(test_print_unconnected_pin);
+    RUN_TEST(test_print_unconnected_out_pin);
     RUN_TEST(test_sigspec);
     RUN_TEST(test_sigspec_constant_wins);
     RUN_TEST(test_value_text);

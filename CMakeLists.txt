@@ -395,11 +395,13 @@ if(BUILD_TESTING)
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
     endif()
     odin3_add_unit_test(test_pass_outputs)
-    target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c)
+    target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c
+                                             tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_pass_outputs PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_pass_manager)
-    target_sources(test_pass_manager PRIVATE tests/unit/proc_fixture.c)
+    target_sources(test_pass_manager PRIVATE tests/unit/proc_fixture.c
+                                             tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_pass_manager PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
@@ -421,6 +423,16 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    target_sources(test_abi_values PRIVATE tests/unit/proc_fixture.c
+                                           tests/unit/proc_fixture_core.c)
+    # Test-only, never installed: libodin3's objects plus odin3_test_proc_design (Task 3's P1), so
+    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6).
+    add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
+                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c)
+    set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
+    target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
+                                                     ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(odin3_procfix PRIVATE odin3_flags ${CMAKE_DL_LIBS})
     # The AST and source-manager ABI (v4) built and read like an adapter would: libodin3.so only.
     add_executable(test_ast_abi tests/unit/test_ast_abi.c)
     target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
@@ -509,6 +521,7 @@ if(BUILD_TESTING)
                 --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
     set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
+    # The ABI stays v4 through 2D (ruling I1): 2D's additions are additive.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
@@ -637,7 +650,8 @@ if(BUILD_TESTING)
     set_tests_properties(pp_diff PROPERTIES LABELS differential SKIP_RETURN_CODE 77)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
-    set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")
+    set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
+                    "ODIN3_PROC_LIB=$<TARGET_FILE:odin3_procfix>")
     if(ODIN3_SANITIZE)
         # gcc needs both runtimes; clang's ASan runtime includes UBSan. Clang names it with or
         # without an arch suffix depending on the runtime-directory layout, so try both.

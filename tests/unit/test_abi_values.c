@@ -8,6 +8,7 @@
 #include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "proc_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/hash.h"
@@ -235,6 +236,100 @@ static void test_attr_set_dead_object(void) {
     TEST_ASSERT_NULL(value); /* reading a dead object is allowed; nothing was set */
 }
 
+/* --- $proc: the process count and the BODY parameter (2D Task 6, EL-47) ---------------------- */
+
+/* Task 3's P1 text (test_ir_proc.c test_print_p1): no SOURCE record, so the name is $proc$<ID>. */
+static const char *const P1_TEXT = "process $proc$1\n"
+                                   "  assign \\t0 \\q\n"
+                                   "  assign \\t0 \\d\n"
+                                   "  sync posedge \\clk\n"
+                                   "    update \\q \\t0\n"
+                                   "end\n";
+
+/* P1 in module m, without provenance (as test_print_p1 builds it). */
+static odin3_ref make_p1(void) {
+    odin3_node_id node = proc_fixture_p1(module, (odin3_prov_id){0});
+    TEST_ASSERT_EQUAL_UINT32(1, node.v);
+    return (odin3_ref){module_id, node.v};
+}
+
+static uint32_t proc_count(uint32_t mod) {
+    uint32_t count = UINT32_MAX;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_proc_count(design, mod, &count));
+    return count;
+}
+
+static void test_proc_count(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, proc_count(module_id));
+    odin3_ref p1 = make_p1();
+    TEST_ASSERT_EQUAL_UINT32(1, proc_count(module_id));
+    uint32_t count = 7;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_module_get_proc_count(design, 99, &count));
+    TEST_ASSERT_EQUAL_UINT32(7, count); /* unchanged on failure */
+    TEST_ASSERT_EQUAL_STRING("odin3_module_get_proc_count: invalid argument (a NULL pointer, an "
+                             "unknown module, an ID or index out of range, or a bad kind)",
+                             last_msg);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_module_get_proc_count(design, module_id, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_module_get_proc_count(NULL, module_id, &count));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, (odin3_node_id){p1.id}));
+    TEST_ASSERT_EQUAL_UINT32(0, proc_count(module_id)); /* live processes only */
+}
+
+/* BODY (index 2) is kind PROC (4); its text is the process block; it is not an INT. */
+static void test_proc_body_kind_and_text(void) {
+    odin3_ref p1 = make_p1();
+    odin3_value_kind kind = ODIN3_VAL_INT;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_param_kind(design, p1, 2, &kind));
+    TEST_ASSERT_EQUAL_INT(4, kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_PROC, kind);
+    const char *name = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_param_name(design, p1, 2, &name));
+    TEST_ASSERT_EQUAL_STRING("BODY", name);
+    TEST_ASSERT_EQUAL_STRING(P1_TEXT, text_of(p1, 2));
+    TEST_ASSERT_EQUAL_STRING("2", text_of(p1, 0)); /* I_WIDTH */
+    int64_t value = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_int(design, p1, 2, &value));
+    /* interned: a second read gives the same string */
+    TEST_ASSERT_EQUAL_PTR(text_of(p1, 2), text_of(p1, 2));
+}
+
+/* A process with a position on an unconnected pin, or a dead one, has no text; logged as ours. */
+static void test_proc_body_text_refused(void) {
+    odin3_ref p1 = make_p1();
+    odin3_pin_id clk_pin = odin3_node_pins(module, (odin3_node_id){p1.id}).first;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(module, clk_pin));
+    const char *text = "keep";
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_text(design, p1, 2, &text));
+    TEST_ASSERT_EQUAL_STRING("keep", text);
+    TEST_ASSERT_EQUAL_STRING(
+        "odin3_node_get_param_text: invalid argument: the process cannot be printed", last_msg);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, (odin3_node_id){p1.id}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_text(design, p1, 2, &text));
+    TEST_ASSERT_EQUAL_STRING("keep", text);
+}
+
+/* The process text is printed then interned: on out of memory the call fails, text unchanged. */
+static void test_proc_body_text_out_of_memory(void) {
+    odin3_ref p1 = make_p1();
+    bool failed = false;
+    for (long fail_after = 0; fail_after < OOM_SWEEP; fail_after++) {
+        const char *text = "keep";
+        odin3_util_set_alloc_fail_after(fail_after);
+        odin3_status st = odin3_node_get_param_text(design, p1, 2, &text);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st == ODIN3_OK) {
+            TEST_ASSERT_EQUAL_STRING(P1_TEXT, text);
+            break;
+        }
+        failed = true;
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_STRING("keep", text);
+    }
+    TEST_ASSERT_TRUE(failed);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bits_text_msb_first);
@@ -245,5 +340,9 @@ int main(void) {
     RUN_TEST(test_attr_set_out_of_memory);
     RUN_TEST(test_attr_not_a_string);
     RUN_TEST(test_attr_set_dead_object);
+    RUN_TEST(test_proc_count);
+    RUN_TEST(test_proc_body_kind_and_text);
+    RUN_TEST(test_proc_body_text_refused);
+    RUN_TEST(test_proc_body_text_out_of_memory);
     return UNITY_END();
 }

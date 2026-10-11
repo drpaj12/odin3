@@ -124,7 +124,7 @@ static uint32_t spelling(uint32_t loc) {
 /* --- version ------------------------------------------------------------------------------- */
 
 static void test_abi_version_is_4(void) {
-    TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version()); /* 2A added the AST and source manager */
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version()); /* 2A's AST; 2D's additions stay v4 (I1) */
     TEST_ASSERT_EQUAL_INT(69, ODIN3_AST_KIND_COUNT);
     TEST_ASSERT_EQUAL_INT(1, ODIN3_AST_UNIT);
     TEST_ASSERT_EQUAL_INT(68, ODIN3_AST_MINTYPMAX);

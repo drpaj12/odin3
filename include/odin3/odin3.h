@@ -13,6 +13,7 @@
  * provenance visitors, logging.
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
+ * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -164,7 +165,8 @@ typedef enum odin3_granularity {
 /*
  * Kind of a parameter value (IR-10): integer, 4-state bit vector, string, SOP cover, and (2D) a
  * process body: the BODY parameter of a built-in $proc node (docs/IR.md IR-19), an opaque blob
- * only the core reads. A plugin cell type cannot declare a PROC parameter.
+ * only the core reads (odin3_node_get_param_text gives its text). A plugin cell type cannot
+ * declare a PROC parameter.
  */
 typedef enum odin3_value_kind {
     ODIN3_VAL_INT,
@@ -345,9 +347,10 @@ enum { ODIN3_PASS_PROCESSES_REFUSE = 0, ODIN3_PASS_PROCESSES_OK = 1 };
  * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';', '#' or '"'
  * (a script word); help: its one-line usage, shown by `odin3 --help`; run: its body; user:
  * passed to run as is. processes: NULL (ODIN3_PASS_PROCESSES_REFUSE, what a plugin built before
- * this slot had a meaning passes) or the address of ODIN3_PASS_PROCESSES_REFUSE or _OK, read once
- * at registration (the plugin need not keep it). reserved: must be all NULL (later ABI versions
- * give the slots a meaning). The layout is the one of four reserved slots: processes was the first.
+ * this slot had a meaning passes) or the address of a uint8_t holding ODIN3_PASS_PROCESSES_REFUSE
+ * or _OK (an enumeration constant has no address), read once at registration (the plugin need not
+ * keep the byte). reserved: must be all NULL (later ABI versions give the slots a meaning). The
+ * layout is the one of four reserved slots: processes was the first.
  */
 typedef struct odin3_plugin_pass {
     const char *name;
@@ -396,6 +399,15 @@ odin3_status odin3_module_get_node_count(const odin3_design *design, uint32_t mo
 odin3_status odin3_module_get_net_count(const odin3_design *design, uint32_t module,
                                         uint32_t *count);
 odin3_status odin3_module_get_wire_count(const odin3_design *design, uint32_t module,
+                                         uint32_t *count);
+
+/*
+ * *count gets the number of live process nodes ($proc, before the `proc` pass lowers them; 2D
+ * EL-33) of the module. O(1): the IR keeps the count. A module with a nonzero count makes every
+ * pass registered as ODIN3_PASS_PROCESSES_REFUSE fail on the design. Nothing is returned for the
+ * caller to free. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
+odin3_status odin3_module_get_proc_count(const odin3_design *design, uint32_t module,
                                          uint32_t *count);
 
 /* *count gets the number of module ports. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions
@@ -461,9 +473,13 @@ odin3_status odin3_node_get_param_count(const odin3_design *design, odin3_ref no
  * its value as text (see Strings): an INT in decimal; BITS as one character per bit from '0',
  * '1', 'x', 'z', most significant bit first ("" for no bits); a STRING as is; a COVER as BLIF
  * .names rows, each its input characters ('0', '1', '-'), a space when it has inputs, its
- * output character and '\n'. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count,
- * besides the conventions. odin3_node_get_param_text may intern the text in the design's string
- * table (not an IR change; other strings stay valid): ODIN3_ERR_NO_MEMORY then.
+ * output character and '\n'; a PROC (the BODY of a $proc node) as the RTLIL process block the
+ * core prints for the node (2D spec section 13: "process ...", its assign, switch and sync lines,
+ * "end", each line ending in '\n', not indented), with each position spelled as the net on its
+ * pin. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count, besides the
+ * conventions, and for a PROC that cannot be printed (the node is dead, unlike the other kinds,
+ * or a position is on an unconnected pin). odin3_node_get_param_text may intern the text in the
+ * design's string table (not an IR change; other strings stay valid): ODIN3_ERR_NO_MEMORY then.
  */
 odin3_status odin3_node_get_param_name(const odin3_design *design, odin3_ref node, uint32_t index,
                                        const char **name);
