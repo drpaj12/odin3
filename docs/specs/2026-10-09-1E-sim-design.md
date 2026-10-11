@@ -67,7 +67,8 @@ one line per cycle (`cycle inputs outputs` in port order, binary), deterministic
   (covers wider than 12 inputs) and runs `simplemap t:$sop` (`models/sop.v` for Yosys < 0.45);
   the reference's copy of the BLIF has latch init 2/3/absent set to 0. Results: `docs/PHASE1.md`.
 - **Excluded:** goldens with RAM instances (206; Phase 4) and with implicit black boxes (`$pow`,
-  `$_DFFSR_PPP_`), listed explicitly; the four multi-driver Odin II goldens (PHASE1 #15) if the
+  `$_DFFSR_PPP_`; since 2D, EL-31, `$pow` is a registered word cell without a simulate hook, still
+  excluded), listed explicitly; the four multi-driver Odin II goldens (PHASE1 #15) if the
   reference refuses them.
 - `tools/sim-check/sim-check` (bash): per golden, run our driver and the reference for seeds
   1..3, 64 cycles, compare line by line; a table and summary; exit 1 on any mismatch; `-j` bounded

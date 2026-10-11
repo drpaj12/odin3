@@ -241,8 +241,14 @@ worker() {
         return
     fi
     facts=$(classify "$path")
-    if grep -q '^implicit ' <<<"$facts"; then
-        status=excluded note="implicit black box: $(sed -n 's/^implicit //p' <<<"$facts" | xargs)"
+    # Built-in word cells the BLIF reader resolves to registered types that have no simulate
+    # hook (since 2D, EL-31, `$pow` and `$shiftx` are registered): not black boxes.
+    nohook=$(sed -n 's/^implicit \(\$pow\|\$shiftx\|\$div\|\$mod\|\$shl\|\$shr\|\$sshr\)$/\1/p' <<<"$facts" | xargs)
+    implicit=$(sed -n 's/^implicit //p' <<<"$facts" | grep -vxE '\$(pow|shiftx|div|mod|shl|shr|sshr)' | xargs || true)
+    if [ -n "$implicit" ]; then
+        status=excluded note="implicit black box: $implicit"
+    elif [ -n "$nohook" ]; then
+        status=excluded note="built-in cell without a simulate hook: $nohook"
     elif grep -qE '^bb (single_port_ram|dual_port_ram)$' <<<"$facts"; then
         status=excluded note="RAM (Phase 4): $(sed -n 's/^bb //p' <<<"$facts" | xargs)"
     elif grep -E '^bb ' <<<"$facts" | grep -qvE '^bb (adder|multiply)$'; then

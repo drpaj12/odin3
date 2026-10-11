@@ -970,6 +970,19 @@ static void test_2d_word_cells_as_subckt(void) {
     round_trip(IN_PATH);
     static char out[TEXT_MAX];
     TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
+    /* both read as the registered word cells (not implicit black boxes), widths implied */
+    odin3_module *top = module_of(design, 1);
+    static const char *const types[2] = {"$logic_and", "$shiftx"};
+    for (uint32_t i = 0; i < 2; i++) {
+        odin3_node_id node = {odin3_module_port_count(top) + 1 + i};
+        const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(top, node));
+        TEST_ASSERT_EQUAL_STRING(types[i], def->name);
+        TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_WORD, def->gran);
+        static const int64_t want[5] = {0, 0, 2, 1, 1}; /* A_SIGNED B_SIGNED A_W B_W Y_W */
+        for (uint32_t k = 0; k < 5; k++) {
+            TEST_ASSERT_EQUAL_INT64(want[k], odin3_node_param(top, node, k)->i);
+        }
+    }
 }
 
 static void test_2d_signed_word_cell_is_refused(void) {

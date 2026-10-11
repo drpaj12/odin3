@@ -4,10 +4,11 @@
 Usage: tools/sim-check/gen_simlib_cases.py [--simlib PATH] [--out PATH]
 
 Each case instantiates one simlib cell (BINARY, UNARY below) with fixed parameters and constant
-inputs; iverilog/vvp print Y. The simlib is Yosys 0.55's, as VTR pins it (the 2D oracle). The
-header gives test_sim_word.c expected values that do not come from the simulator's own model.
-Deterministic (fixed seed); appending a cell to BINARY or UNARY moves the RNG stream, so the rows
-of later cells change too. Needs iverilog, vvp and clang-format.
+inputs; iverilog/vvp print Y. The simlib is Yosys 0.55's, as VTR pins it ($VTR_ROOT, the 2D
+oracle). The header gives test_sim_word.c expected values that do not come from the simulator's
+own model. Deterministic (fixed seed); appending a cell to BINARY or UNARY moves the RNG stream,
+so the rows of later cells change too; the fixed edge rows come last. Needs iverilog, vvp and
+clang-format.
 """
 
 from __future__ import annotations
@@ -23,9 +24,15 @@ from dataclasses import dataclass
 BINARY = ["$add", "$sub", "$mul", "$and", "$or", "$xor", "$eq", "$ne", "$lt", "$le", "$gt", "$ge"]
 BINARY += ["$xnor", "$logic_and", "$logic_or"]  # 2D IR change A (EL-31)
 UNARY = ["$not", "$neg", "$reduce_xnor", "$reduce_bool", "$logic_not"]  # $neg...: 2D (EL-31)
-SIMLIB_055 = (
-    "~/odin3-ws/external/vtr-verilog-to-routing/libs/EXTERNAL/yosys/techlibs/common/simlib.v"
-)
+VTR_DEFAULT = "~/odin3-ws/external/vtr-verilog-to-routing"
+SIMLIB_IN_VTR = "libs/EXTERNAL/yosys/techlibs/common/simlib.v"
+# Fixed rows after the random ones (so those do not move): zero and MSB-only operands at the
+# widths past one word, which random values never hit (a truth value tested only in the low word
+# would pass every random row).
+EDGE_UNARY = ["$reduce_bool", "$logic_not", "$reduce_xnor"]
+EDGE_BINARY = ["$logic_and", "$logic_or"]
+EDGE_WIDTHS = [64, 65]
+EDGE_Y_WIDTH = 7
 WIDTHS = [1, 7, 64, 65]
 SIGNS = [(0, 0), (0, 1), (1, 0), (1, 1)]
 PER_COMBO = 5
@@ -66,6 +73,21 @@ def make_cases() -> list[Case]:
                 cases.append(
                     Case(cell, a_signed, b_signed, aw, bw, yw, value(rng, aw), value(rng, bw))
                 )
+    return cases + edge_cases()
+
+
+def edge_cases() -> list[Case]:
+    cases: list[Case] = []
+    for width in EDGE_WIDTHS:
+        vals = [0, 1 << (width - 1)]
+        for cell in EDGE_UNARY:
+            for a_signed in (0, 1):
+                for a_val in vals:
+                    cases.append(Case(cell, a_signed, 0, width, 1, EDGE_Y_WIDTH, a_val, 0))
+        for cell in EDGE_BINARY:
+            for a_val in vals:
+                for b_val in vals:
+                    cases.append(Case(cell, 1, 1, width, width, EDGE_Y_WIDTH, a_val, b_val))
     return cases
 
 
@@ -120,7 +142,8 @@ def header(cases: list[Case], answers: list[str]) -> str:
 
 def main() -> int:
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    default_simlib = os.path.expanduser(SIMLIB_055)
+    vtr_root = os.environ.get("VTR_ROOT") or os.path.expanduser(VTR_DEFAULT)
+    default_simlib = os.path.join(vtr_root, SIMLIB_IN_VTR)
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--simlib", default=default_simlib)
     parser.add_argument("--out", default=os.path.join(root, "tests/unit/simlib_word_cases.h"))

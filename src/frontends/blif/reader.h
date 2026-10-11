@@ -46,7 +46,9 @@
  * - `.subckt m f=a …`: a node of cell type m (a module of the file, a black box, or another
  *   registered type); formal f is the name of a scalar port, or `p[k]` for bit k of a vector port
  *   p (a scalar port's exact name wins, so a scalar port `a[1]` is matched by name; a bare `o`
- *   never names the width-1 vector port `o[0]`; for a model the file declares, a port is scalar
+ *   never names the width-1 vector port `o[0]`, except on an undeclared built-in `$` word cell
+ *   (`$pow`, `$add`, …), whose width-parameter port `P` may be written bare for `P[0]` when it is
+ *   1 bit wide here, as Yosys write_blif writes it; for a model the file declares, a port is scalar
  *   or vector as the declaration writes it, so Odin II's `cin[0]` names a library port `cin` of
  *   width 1); formals not listed stay unconnected. Parameters: a model the file declares gives its
  *   declared-model parameters; any other type gets the values its formals imply, each port seen
