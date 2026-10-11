@@ -111,7 +111,7 @@ static odin3_module *new_module(const char *name) {
 }
 
 static odin3_net_id add_port(odin3_module *mod, const char *name, odin3_dir dir) {
-    odin3_port_spec spec = {intern(name), dir, 1, true, prov};
+    odin3_port_spec spec = {intern(name), dir, 1, true, prov, false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
     uint32_t index = odin3_module_port_count(mod) - 1;
     return odin3_wire_net(mod, odin3_module_port_wire(mod, index), 0);

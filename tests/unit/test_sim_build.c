@@ -79,7 +79,7 @@ static odin3_module *new_module(const char *name) {
 
 /* A one-bit port; returns its net. */
 static odin3_net_id add_port(odin3_module *mod, const char *name, odin3_dir dir) {
-    odin3_port_spec spec = {intern(name), dir, 1, true, (odin3_prov_id){0}};
+    odin3_port_spec spec = {intern(name), dir, 1, true, (odin3_prov_id){0}, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, &node));
     return odin3_pin_net(mod, odin3_node_pins(mod, node).first);
@@ -451,8 +451,9 @@ static void test_black_box_is_rejected_with_location(void) {
     odin3_prov_origin origin = {&loc, 1, 0, 0};
     odin3_prov_id prov = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &origin, &prov));
-    static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def k_ports[] = {
+        {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     odin3_celltype_def def = {
         "mystery", ODIN3_GRAN_BLACKBOX, 0, k_ports, 2, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id bb = {0};

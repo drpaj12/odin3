@@ -41,11 +41,11 @@
 
 /* A scalar (1-bit) port and a vector port whose width is the INT parameter wparam. */
 #define ODIN3_PORT_BIT(pname, pdir)                                                                \
-    { pname, pdir, true, 1, NULL, NULL, NULL }
+    { pname, pdir, true, 1, NULL, NULL, NULL, false }
 #define ODIN3_PORT_VEC(pname, pdir, wparam)                                                        \
-    { pname, pdir, false, 0, wparam, NULL, NULL }
+    { pname, pdir, false, 0, wparam, NULL, NULL, false }
 #define ODIN3_PORT_FN(pname, pdir, wfn)                                                            \
-    { pname, pdir, false, 0, NULL, wfn, NULL }
+    { pname, pdir, false, 0, NULL, wfn, NULL, false }
 
 /*
  * Simulate-hook accessors for the bit-level types (sim/cell.h): the value of bit 0 of an input

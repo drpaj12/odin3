@@ -135,6 +135,26 @@ Hierarchy stays until an explicit `flatten` pass (spec §5.1). Changing a module
 instances exist is an error in Phase 1 (`module_add_port` refuses once the module's cell type is
 instantiated).
 
+**Port range and sign** (2D IR change C: 2D spec EL-24, §6.2; PHASE2 #13). A port carries the
+range and sign of its declaration, as IR-2 says every wire does. `odin3_port_spec` has
+`has_range`, `msb`, `lsb` and `is_signed`:
+- Without `has_range`, the port's wire is `[width−1:0]`, the Phase 1 form, and `msb`/`lsb` are
+  ignored. Readers that know no range (BLIF) are unchanged.
+- With `has_range`, the wire is `[msb:lsb]` in either direction (`[0:7]` stays ascending, `[-1:2]`
+  keeps its negative bound), and the port's width is derived as `|msb − lsb| + 1`; `width` 0 asks
+  for that width. A port has 1 .. 2^31 bits either way.
+- Two refusals, both `INVALID_ARG` with nothing changed: a nonzero `width` that differs from the
+  derived width, and `scalar` with a range wider than one bit (`scalar` with `[5:5]` is a one-bit
+  port).
+- `is_signed` applies in both forms: the port wire is signed, and the module's cell type records it
+  in that port's `odin3_port_def.is_signed` (false on every other type), for writers and for the
+  elaborator's output extension (2D EL-10).
+
+The sign is internal to the core: the ABI's `odin3_plugin_port`, whose layout `odin3.h` freezes,
+does not carry it, and the ABI stays at v4. A port's range and sign are fixed at creation (2D
+rejected a wire-range mutation after creation: it would leave the cell type's port record without
+the sign). `check` is unchanged: rule 9 compares widths, not ranges or signs.
+
 **Parameterized modules:** each distinct parameter specialization (`sub #(.W(8))`) is its own
 Module and cell type (the front end names them deterministically, e.g. `sub$W=8`); the instance
 node keeps the source-level parameter values as attributes so writers can print them.

@@ -20,7 +20,7 @@
 static const unsigned MODULE_SHIFT = ODIN3_MODULE_PAGE_SHIFT;
 static const unsigned WIRE_SHIFT = ODIN3_WIRE_PAGE_SHIFT;
 
-/* Widest port: its wire is [width-1:0] with an int32 msb. */
+/* Widest port: a wire [width-1:0] has an int32 msb; a ranged port has the same cap (IR-7). */
 static const uint32_t MAX_PORT_WIDTH = UINT32_C(1) << 31;
 
 /* --- stores -------------------------------------------------------------------------------- */
@@ -371,8 +371,47 @@ odin3_wire_id odin3_module_port_wire(const odin3_module *module, uint32_t index)
     return port != NULL ? port->wire : (odin3_wire_id){0};
 }
 
-/* NULL when the spec can be a new port (the name is checked by the wire), else the problem. */
-static const char *port_spec_error(const odin3_module *module, const odin3_port_spec *spec) {
+/* Bits of the range [msb:lsb] in either direction: |msb - lsb| + 1, which may reach 2^32. */
+static uint64_t range_width(int32_t msb, int32_t lsb) {
+    int64_t span = (int64_t)msb - (int64_t)lsb;
+    return (uint64_t)(span < 0 ? -span : span) + 1;
+}
+
+/*
+ * NULL when the spec's width, range and scalar flag fit (module.h), with *shape the port as it is
+ * created: spec's fields, its width (derived from the range when has_range) and its wire's range
+ * ([width-1:0] without has_range). Else the problem.
+ */
+static const char *port_shape_error(const odin3_port_spec *spec, odin3_port_spec *shape) {
+    *shape = *spec;
+    if (spec->has_range) {
+        uint64_t width = range_width(spec->msb, spec->lsb);
+        if (width > MAX_PORT_WIDTH) {
+            return "the range must span 1 .. 2^31 bits";
+        }
+        if (spec->width != 0 && spec->width != width) {
+            return "the width differs from the width of the range";
+        }
+        shape->width = (uint32_t)width;
+    } else {
+        if (spec->width == 0 || spec->width > MAX_PORT_WIDTH) {
+            return "the width must be 1 .. 2^31";
+        }
+        shape->msb = (int32_t)(spec->width - 1);
+        shape->lsb = 0;
+    }
+    if (spec->scalar && shape->width != 1) {
+        return "a scalar port has width 1";
+    }
+    return NULL;
+}
+
+/*
+ * NULL when the spec can be a new port (the name is checked by the wire), with *shape the port as
+ * created (port_shape_error); else the problem.
+ */
+static const char *port_spec_error(const odin3_module *module, const odin3_port_spec *spec,
+                                   odin3_port_spec *shape) {
     if (spec == NULL) {
         return "no spec";
     }
@@ -382,11 +421,9 @@ static const char *port_spec_error(const odin3_module *module, const odin3_port_
     if ((int)spec->dir < ODIN3_DIR_IN || (int)spec->dir > ODIN3_DIR_INOUT) {
         return "invalid direction";
     }
-    if (spec->width == 0 || spec->width > MAX_PORT_WIDTH) {
-        return "the width must be 1 .. 2^31";
-    }
-    if (spec->scalar && spec->width != 1) {
-        return "a scalar port has width 1";
+    const char *err = port_shape_error(spec, shape);
+    if (err != NULL) {
+        return err;
     }
     if (odin3_celltype_instances(module->design, module->type) > 0) {
         return "the module's cell type has instances (IR-7)";
@@ -449,39 +486,42 @@ static void link_port(odin3_module *module, const odin3_port_spec *spec, odin3_n
     pdef->dir = spec->dir;
     pdef->scalar = spec->scalar;
     pdef->width = spec->width;
+    pdef->is_signed = spec->is_signed;
     module->type_def.ports = module->port_defs.data;
     module->type_def.n_ports++;
 }
 
 odin3_status odin3_module_add_port(odin3_module *module, const odin3_port_spec *spec,
                                    odin3_node_id *port_node) {
-    const char *err = port_spec_error(module, spec);
+    odin3_port_spec port = {0}; /* spec as created: width and range resolved */
+    const char *err = port_spec_error(module, spec, &port);
     if (err != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "module_add_port: %s", err);
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_wire_spec wire_spec = {spec->name, (int32_t)(spec->width - 1), 0, false, spec->prov};
+    odin3_wire_spec wire_spec = {port.name, port.msb, port.lsb, port.is_signed, port.prov};
     odin3_wire_plan plan = {&wire_spec, NULL, NULL, 0, {0}};
     odin3_status st = odin3_wire_prepare(module, &plan, "module_add_port");
+    assert(st != ODIN3_OK || plan.width == port.width);
     if (st == ODIN3_OK) {
-        st = port_reserve(module, spec->width);
+        st = port_reserve(module, port.width);
     }
-    odin3_name_change name = {module->wire_names, "module_add_port", plan.id.v, 0, spec->name};
+    odin3_name_change name = {module->wire_names, "module_add_port", plan.id.v, 0, port.name};
     if (st == ODIN3_OK) {
         st = odin3_names_change(module, &name);
     }
     odin3_node_id node = {0};
     if (st == ODIN3_OK) {
-        st = make_port_node(module, spec, &node); /* last fallible step */
+        st = make_port_node(module, &port, &node); /* last fallible step */
         if (st != ODIN3_OK) {
-            (void)odin3_u64map_remove(module->wire_names, spec->name);
+            (void)odin3_u64map_remove(module->wire_names, port.name);
         }
     }
     if (st != ODIN3_OK) {
         return st;
     }
     odin3_wire_commit(module, &plan);
-    link_port(module, spec, node, plan.id);
+    link_port(module, &port, node, plan.id);
     if (port_node != NULL) {
         *port_node = node;
     }

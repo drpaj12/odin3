@@ -110,16 +110,17 @@ static const odin3_param_def k_quad_params[] = {
     {"WIDTH", ODIN3_VAL_INT, {ODIN3_VAL_INT, QUAD_W, NULL, 0, 0, 0}},
 };
 static const odin3_port_def k_quad_ports[] = {
-    {"A", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL},
-    {"B", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL},
-    {"C", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
+    {"A", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL, false},
+    {"B", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, false, 0, "WIDTH", NULL, NULL, false},
+    {"C", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_celltype_def k_quad = {
     "test_t4_quad", ODIN3_GRAN_WORD, 0, k_quad_ports, 4, k_quad_params, 1, NULL, NULL, NULL, NULL};
 
 /* A one-port WIDTH-parameter sink shaped like $port_out (which node_create refuses). */
-static const odin3_port_def k_sink_ports[] = {{"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL}};
+static const odin3_port_def k_sink_ports[] = {
+    {"P", ODIN3_DIR_IN, false, 0, "WIDTH", NULL, NULL, false}};
 static const odin3_celltype_def k_sink = {
     "test_t4_sink", ODIN3_GRAN_WORD, 0, k_sink_ports, 1, k_quad_params, 1, NULL, NULL, NULL, NULL};
 
@@ -154,7 +155,7 @@ static void connect(odin3_pin_id pin, odin3_net_id net) {
 }
 
 static odin3_node_id add_port(const char *name, odin3_dir dir, uint32_t width) {
-    odin3_port_spec spec = {intern(name), dir, width, width == 1, {0}};
+    odin3_port_spec spec = {intern(name), dir, width, width == 1, {0}, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, &node));
     TEST_ASSERT_TRUE(odin3_node_live(module, node));
@@ -304,7 +305,7 @@ static void test_add_port_refused_once_instantiated(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(parent, &spec, &inst));
     uint32_t node_end = odin3_module_node_end(module);
     uint32_t wire_end = odin3_module_wire_end(module);
-    odin3_port_spec port = {intern("b"), ODIN3_DIR_IN, 1, true, {0}};
+    odin3_port_spec port = {intern("b"), ODIN3_DIR_IN, 1, true, {0}, false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_module_add_port(module, &port, NULL));
     TEST_ASSERT_EQUAL_size_t(1, errors_logged);
     TEST_ASSERT_EQUAL_UINT32(1, odin3_module_port_count(module));
@@ -323,13 +324,14 @@ static void test_add_port_rejects_bad_specs(void) {
     uint32_t net_end = odin3_module_net_end(module);
     uint32_t wire_end = odin3_module_wire_end(module);
     odin3_port_spec bad[] = {
-        {0, ODIN3_DIR_IN, 1, true, {0}},                     /* no name */
-        {UINT32_MAX, ODIN3_DIR_IN, 1, true, {0}},            /* not a string ID */
-        {intern("a"), ODIN3_DIR_IN, 1, true, {0}},           /* a wire has the name */
-        {intern("b"), ODIN3_DIR_IN, 0, false, {0}},          /* width 0 */
-        {intern("b"), ODIN3_DIR_IN, 2, true, {0}},           /* scalar but wide */
-        {intern("b"), (odin3_dir)7, 1, true, {0}},           /* bad direction */
-        {intern("b"), ODIN3_DIR_IN, UINT32_MAX, false, {0}}, /* wider than 2^31 */
+        {0, ODIN3_DIR_IN, 1, true, {0}, false, 0, 0, false},            /* no name */
+        {UINT32_MAX, ODIN3_DIR_IN, 1, true, {0}, false, 0, 0, false},   /* not a string ID */
+        {intern("a"), ODIN3_DIR_IN, 1, true, {0}, false, 0, 0, false},  /* a wire has the name */
+        {intern("b"), ODIN3_DIR_IN, 0, false, {0}, false, 0, 0, false}, /* width 0 */
+        {intern("b"), ODIN3_DIR_IN, 2, true, {0}, false, 0, 0, false},  /* scalar but wide */
+        {intern("b"), (odin3_dir)7, 1, true, {0}, false, 0, 0, false},  /* bad direction */
+        /* wider than 2^31 */
+        {intern("b"), ODIN3_DIR_IN, UINT32_MAX, false, {0}, false, 0, 0, false},
     };
     size_t count = sizeof bad / sizeof bad[0];
     for (size_t i = 0; i < count; i++) {
@@ -361,12 +363,14 @@ static void test_add_port_memory_linear(void) {
     size_t design_bytes = odin3_arena_bytes_reserved(design->arena);
     size_t start = module_bytes(module);
     for (uint32_t i = 0; i < MANY_PORTS / 2; i++) {
-        odin3_port_spec spec = {numbered_name("p", i), ODIN3_DIR_IN, 1, true, {0}};
+        odin3_port_spec spec = {
+            numbered_name("p", i), ODIN3_DIR_IN, 1, true, {0}, false, 0, 0, false};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
     }
     size_t half = module_bytes(module);
     for (uint32_t i = MANY_PORTS / 2; i < MANY_PORTS; i++) {
-        odin3_port_spec spec = {numbered_name("p", i), ODIN3_DIR_OUT, 1, true, {0}};
+        odin3_port_spec spec = {
+            numbered_name("p", i), ODIN3_DIR_OUT, 1, true, {0}, false, 0, 0, false};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
     }
     size_t full = module_bytes(module);
@@ -1185,7 +1189,7 @@ static odin3_port_spec prepare_add_port_oom(void) {
     fill_nodes();
     exhaust_arena(module->arena, sizeof(odin3_value));
     exhaust_arena(module->pinpool.arena, 2 * sizeof(odin3_pin_id));
-    odin3_port_spec spec = {intern("oom_port"), ODIN3_DIR_OUT, 2, false, {0}};
+    odin3_port_spec spec = {intern("oom_port"), ODIN3_DIR_OUT, 2, false, {0}, false, 0, 0, false};
     return spec;
 }
 

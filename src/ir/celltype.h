@@ -89,7 +89,9 @@ struct odin3_width_expr {
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
  * width_expr (an integer expression over INT parameters of the same type), else width_param (the
  * name of an INT parameter of the same type), else the constant width. scalar records whether the
- * port is written without brackets (writers reproduce it).
+ * port is written without brackets (writers reproduce it). is_signed records a signed module port
+ * (odin3_module_add_port sets it; IR-7, 2D IR change C) for writers and the elaborator; it is
+ * false on every other type. It is internal: the ABI's odin3_plugin_port has no sign.
  */
 typedef struct odin3_port_def {
     const char *name;
@@ -99,6 +101,7 @@ typedef struct odin3_port_def {
     const char *width_param; /* name of an INT parameter giving the width */
     uint32_t (*width_fn)(const odin3_value *params, uint32_t port);
     const odin3_width_expr *width_expr; /* not copied; see odin3_width_expr */
+    bool is_signed;
 } odin3_port_def;
 
 /* One parameter: name, kind and default value (IR-10). */

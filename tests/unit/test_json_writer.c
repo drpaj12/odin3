@@ -77,7 +77,8 @@ typedef struct port_args {
 
 /* Adds net_a port; returns the net of its bit 0. */
 static odin3_net_id add_port(odin3_module *mod, port_args args) {
-    odin3_port_spec spec = {intern(args.name), args.dir, args.width, args.width == 1, prov_at(2)};
+    odin3_port_spec spec = {
+        intern(args.name), args.dir, args.width, args.width == 1, prov_at(2), false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
     uint32_t idx = odin3_module_port_count(mod) - 1;
     return odin3_wire_net(mod, odin3_module_port_wire(mod, idx), 0);
@@ -381,8 +382,8 @@ static void test_user_attributes(void) {
 }
 
 static const odin3_port_def BB_PORTS[] = {
-    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL},
-    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL, false},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 
 /* A declared black-box model is a Yosys blackbox module: its ports with fresh bits, no cells. */
