@@ -1,6 +1,8 @@
 # 3E — `write_blif --vtr`: design
 
-Status: v2 (2026-10-11). v2 applies review 1 (`3EH-review1`: 5 important, 12 minor; dispositions
+Status: v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (§14.1 item 6 marked a
+3H request; constant LUT objects return as `$_CONST0_`/`$_CONST1_`, §4.2; constants are not traced
+through buffers, §9.1). v2: v2 applies review 1 (`3EH-review1`: 5 important, 12 minor; dispositions
 in §22) and the controller's rulings: constants as zero-input generators plus checker rule C5b
 (E1/E2); the 3D exchange text matched to PHASE3 decisions 9, 12 and 13, with hard-block inputs on
 `unconn`/x passing through `abc` unchanged as a requirement on 3D (E3/E4, §14.1); the `$lut`/ISOP
@@ -212,7 +214,9 @@ odin3_status odin3_blif_isop(const uint64_t *tt, uint32_t k, odin3_strbuf *cover
 The `$lut` cell's name, parameter names, port names and mask encoding are 3D's (PHASE3 decision
 9; DESIGN §5.2 also mentions `$_LUT_K_`, and 3D's spec settles the spelling). 3E-5 requires only:
 
-1. a bit-granularity registry cell with k inputs (1 ≤ k ≤ 16) and one output;
+1. a bit-granularity registry cell with k inputs (1 ≤ k ≤ 16) and one output; a **constant**
+   object (0 fan-in, which MiniLUT can return) comes back as `$_CONST0_`/`$_CONST1_`, never as
+   a k = 0 `$lut` (§9 then writes it as `gnd`/`vcc`);
 2. a way to read its function as a 2^k-bit truth table, with a stated correspondence between
    truth-table index bits and input pins.
 
@@ -395,6 +399,11 @@ Each input pin of a written cell, and each output-port bit, has one source class
 | no net (unconnected pin), or a net with no driver that is not a `$port_in` bit | **x** (undriven) |
 | a net named `unconn` driven by a zero-row `$sop` (read from a Parmys golden) | **U** |
 | anything else | **signal** |
+
+Only the **driving cell's own function** counts: a net driven by a buffer (or any non-constant
+cell) whose input is a constant is class *signal*, not 0/1. Constants are not traced through
+buffers, so Parmys's `.names vcc d` / `1 1` stays a buffer and is not rewritten as `.names d` /
+`1` (`netlist-compare` identity on the goldens, §16.3).
 
 ### 9.2 What each class is written as
 
@@ -585,8 +594,9 @@ temporary directory as `--via-blif`). Whatever 3D chooses, 3E's output is only c
 4. **No `.names`/`.latch` pin is left on `unconn` after `abc`** (every in-domain cone goes through
    ABC, which folds `unconn` as constant 0), so class U (§9.2) never warns on the O and P′ legs.
 5. **The recorded script path is as given or repo-relative**, with its SHA-256 (§5).
-6. **A fixed log line with ABC's final depth** (e.g. `abc: final: lev = <N>`; spelling 3D's), so
-   3H can fill `abc_depth` for every leg (3H review H11).
+6. *Request from 3H, not a correctness requirement:* a fixed log line with ABC's final depth
+   (e.g. `abc: final: lev = <N>`; spelling 3D's), so 3H can fill `abc_depth` for every leg (3H
+   review H11).
 
 ## 15. Tools (VB-15, VB-16)
 

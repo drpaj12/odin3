@@ -1,6 +1,8 @@
 # 3H — QoR harness and exit run: design
 
-Status: v2 (2026-10-11). v2 applies review 1 (`3EH-review1`: 7 important, 13 minor; dispositions
+Status: v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (exit estimate ≈ 20–30 h
+with its breakdown, a starvation guard on the group B slot, hand starts as a transient user
+service, the `stereovision0` equiv fallback, wording). v2: v2 applies review 1 (`3EH-review1`: 7 important, 13 minor; dispositions
 in §21) and the controller's rulings: the nightly rotates the four biggest *designs* with a
 realistic budget and a 06:00 admission guard, and runs start by hand until Peter approves the
 timer (H1); a missing gated metric fails the gate (H2); the run directory is wiped before each
@@ -455,7 +457,8 @@ cap.
 `qor_heavy.verify_scope()` are the only implementation: 3E's `vtr-read-check` and `blif-roundtrip
 --vtr` import them. A heavy tool that finds `ODIN3_HEAVY=1` does not call `flock` or
 `systemd-run` again (that would deadlock under `vtr-qor nightly`, which already holds the lock); it
-only verifies the scope and proceeds.
+only verifies the scope and proceeds. Under a hand-started nightly service (`ODIN3_HEAVY_SERVICE=1`, §13) it takes the
+lock with `flock` but creates no scope, since the service's cgroup already carries the cap.
 
 This replaces decision 17's per-job `prlimit` RSS cap and `run_vtr_flow -limit_memory_usage`,
 which are no-ops here: Linux ignores `RLIMIT_RSS`, and VTR applies its `ulimit -Sv` only when
@@ -587,8 +590,8 @@ slices: no RAM model, PHASE0 #8), `multiclock` (equiv-check's dsec has one impli
 exits 2 on two), `timeout`, `error` (any other exit 2).
 
 The RAM-free gate designs (Parmys counts, 2026-10-11) are `stereovision3`, `diffeq2`, `diffeq1`,
-`sha`, `stereovision0`, `stereovision1`, `stereovision2`, `blob_merge` and `bgm` (all 21 others,
-extras included, have RAMs). Of these, dsec cannot decide (ruling H5/H6):
+`sha`, `stereovision0`, `stereovision1`, `stereovision2`, `blob_merge` and `bgm` (the other 10 gate designs and both
+extras have RAMs). Of these, dsec cannot decide (ruling H5/H6):
 
 | Design | Reason | Recorded exception (`tests/vtr/qor/equiv-exceptions.tsv`) |
 |---|---|---|
@@ -602,6 +605,13 @@ extras included, have RAMs). Of these, dsec cannot decide (ruling H5/H6):
 gate like anywhere else). `sha`, `stereovision0` and `blob_merge` must be `equivalent`; a
 `timeout` or `error` on them fails until it is explained and added to the exceptions file in a
 reviewed PR.
+
+**`stereovision0`** (11,673 latches) is the likely exception: dsec within 600 s is doubtful. Its
+stated fallback: if `equiv` gives `timeout` (or `error` from resource limits), the Verilator check
+(§8.1) stands in for it, exactly as for the listed exceptions, and the case is recorded as an
+`equiv-exceptions.tsv` row with class `timeout` and the measured time. It is measured on the first
+O run (M3; the O′ and P′ netlists do not share a front end, so no earlier pair exists), and the
+exceptions PR is expected. `sha` and `blob_merge` have no such fallback.
 
 ### 8.3 Byte-identical reruns (exit item 3)
 
@@ -627,7 +637,7 @@ k6|earch`, `--no-wait`, `--allow-vtr-drift`, `-v`.
 | `rerun-check` | `--leg O`, set/designs | yes | §8.3 |
 | `crosscheck` | `--task DIR` | yes | runs 3F's task through `run_vtr_task.py <abs task> -temp_dir <out>/crosscheck -j 1` on the 3 smallest and requires `parse_results.txt` values equal to the harness's for every non-time key |
 | `check-lib` | — | no | `tools/vtr-models check-lib lib/vtr.o3lib` against the arch (decision 5; 3E §15.2) |
-| `exit-run` | `--label TEXT` | yes | M3: `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists` (group B fcheck as its own step), the P fcheck from the kept netlists, `equiv`, `rerun-check`, `run --arch earch --set smoke --leg P,Pprime,Oprime,O`, the M3 seed reruns (§6.3), `table`, `gate`. Estimated 14–18 h at WSL speed (P cached): it spans nights, each night bounded by the 06:00 admission deadline, and resumes through the cache (`exit-run` again continues where it stopped) |
+| `exit-run` | `--label TEXT` | yes | M3: `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists` (group B fcheck as its own step), the P fcheck from the kept netlists, `equiv`, `rerun-check`, `run --arch earch --set smoke --leg P,Pprime,Oprime,O`, the M3 seed reruns (§6.3), `table`, `gate`. Estimated ≈ 20–30 h at WSL speed with P cached (breakdown below): 5–7 nights of ≈ 5 h each under the 06:00 admission deadline, resumed through the cache (`exit-run` again continues where it stopped) |
 | `nightly` | `[--start-at HH:MM] [--now --budget H] [--slot N]` | yes | §13; `--slot` forces a rotation slot |
 | `publish` | `<table dir>` | no | copies the four files to `~/odin3-ws/golden/qor/<vtr12>/<label>/` (controller only; refuses unless `ODIN3_QOR_PUBLISH=1`) and prints the `git -C ~/odin3-ws/golden add/commit` lines to run |
 | `clean` | `[--keep N]` | no | §5.4 |
@@ -637,6 +647,19 @@ k6|earch`, `--no-wait`, `--allow-vtr-drift`, `-v`.
 PASS); 1 a job failed or the gate failed; 2 usage, configuration or environment error; 3 no
 failure but at least one `capped` or `timeout` (for `gate`: INCOMPLETE); 4 the heavy lock was busy with `--no-wait`; 5
 stopped for disk space.
+
+**Exit-run estimate** (VTR's runner times × 1.5, P cached; review 2). The first M1/M2 runs
+replace these figures with measured ones:
+
+| Part | Estimate | Basis |
+|---|---|---|
+| three legs (O′, P′, O) on 21 designs | ≈ 12–13 h | per leg: group A ≈ 16 min, `LU8PEEng` + `bgm` ≈ 0.5 h, `mcml` ≈ 2 h, `LU32PEEng` ≈ 1.5 h |
+| fcheck on P and O | ≈ 3–6 h | group A ≈ 1–1.5 h; group B Verilator builds at `-j1`, 4 designs × 2 legs, unmeasured |
+| `rerun-check` on the 19 O front ends | ≈ 3–4 h | `mcml` and `LU32PEEng` repeat linked ABC (≈ 1.5 h for `mcml`) |
+| `equiv` | ≈ 1–1.5 h | 9 designs × ≤ 600 s |
+| EArch smoke | ≈ 0.3 h | 5 designs × 4 legs |
+| M3 seed reruns | 0–6+ h | 4 full runs per big design near a bound |
+| **total** | **≈ 20–30 h** | **5–7 nights** with the 06:00 cutoff |
 
 ### Leg availability
 
@@ -732,8 +755,19 @@ controller's go-ahead if earlier). Solo: under the heavy lock, nothing else heav
 
 **Starting.** Installing the systemd timer is Peter's call and is **not yet approved** (ruling
 H1/H14). Until he approves it, nightly runs **start by hand**: the controller runs
-`tools/vtr-qor/vtr-qor nightly --start-at 01:00` in the background at the end of a session (it
-sleeps holding nothing, then takes the heavy lock), or `vtr-qor nightly --now --budget 4h` for a
+
+```
+systemd-run --user --unit=odin3-vtr-qor-nightly-<YYYYMMDD> --slice=odin3-heavy.slice --collect \
+  -p MemoryMax=6G -p MemorySwapMax=0 --setenv=ODIN3_HEAVY_SERVICE=1 \
+  <repo>/tools/vtr-qor/vtr-qor nightly --start-at 01:00
+```
+
+at the end of a session: a transient user service in the heavy slice, so it survives the Claude
+session that started it (a plain background process may be killed with the session). It is not a
+timer (no `--on-calendar`): the process itself sleeps until 01:00 holding nothing. With
+`ODIN3_HEAVY_SERVICE=1`, `qor_heavy.reexec_under_lock` takes the heavy lock with `flock` only and
+does not create a new scope: the service's own cgroup already carries the 6 GiB, no-swap cap,
+which `verify_scope` checks as usual. Or `vtr-qor nightly --now --budget 4h` for a
 daytime run on a free machine. The timer files ship in the repo
 (`tools/vtr-qor/systemd/odin3-vtr-qor-nightly.{service,timer}`, `OnCalendar=*-*-* 01:00`,
 `Persistent=false`); when Peter approves, he installs them with
@@ -778,7 +812,11 @@ re-execute):
    | 8 | `LU32PEEng`: P′ | ≈ 1.5 h |
 
    An 8-night cycle; unavailable legs are skipped, and the rotation advances only when its slot
-   ran. P on group B runs only when VTR moved (a ≈ 2.5–4 h night of its own). fcheck for `mcml`
+   ran. **Starvation guard**: if the slot was not admitted on the previous night (the 06:00
+   deadline refused it after an overrunning step 3), the next night runs step 4 **before** step 3;
+   a slot not run for two consecutive nights is listed at the top of `summary.md` as
+   `vtr-qor: nightly: group B slot <n> (<d> <legs>) starved for <k> nights`, and group A then
+   runs only the legs whose odin3 build changed. P on group B runs only when VTR moved (a ≈ 2.5–4 h night of its own). fcheck for `mcml`
    and `LU32PEEng` runs at M3 and on request, not nightly.
 5. **3E sweeps** (`blif-roundtrip --vtr`, `vtr-read-check`, ≈ 2 h): when `src/backends/blif/`
    or `src/frontends/blif/` changed since the last sweep, else weekly (Saturday night). A sweep
@@ -857,7 +895,7 @@ implementer runs at most T8 and says which sweeps it deferred.
 | 3H-run-P | the first P run (§12), controller, under the lock, started in the background and watched with Monitor | 3H-1 | Sonnet `high` (operating the run, the report) |
 | 3H-2 table + gate | `qor_table`, `table gate publish`, `bands.json`, `explanations.tsv`, T3 T7; P-baseline table rendered and published; PHASE3 entry | 3H-1 | Opus `high` |
 | 3H-3 control legs, checks, nightly | legs P′ and R, `fcheck` (on P from the kept netlists; O later), the group B Verilator and `odin3`+ABC measurements (§7.1), `equiv` and `equiv-exceptions.tsv`, `crosscheck`, `nightly` (hand-started) + timer files for Peter, EArch smoke, `divergences.tsv`; T9 T11; M1 run | 3E-1, 3E-5, 3D (P′), 3F (crosscheck) | Opus `high`; Sonnet `high` for runs (background + Monitor) and `divergences.tsv` research |
-| 3H-4 exit | legs O′, O, Oprov, `rerun-check`, M3 seed reruns, `exit-run`; M2 and M3 runs (the exit run spans nights, ≈ 14–18 h, resumed through the cache); PHASE3 exit table verbatim; DESIGN §13 #6 answered with the Oprov numbers | 2D, 2E, 2F (and 2H's VTR rows), 3A, 3B, 3C, 3G, 3D (`abc` for O), 3E-6 (Oprov), 3F | Opus `high`; Sonnet `high` for the runs (background + Monitor) |
+| 3H-4 exit | legs O′, O, Oprov, `rerun-check`, M3 seed reruns, `exit-run`; M2 and M3 runs (the exit run spans 5–7 nights, ≈ 20–30 h, resumed through the cache); PHASE3 exit table verbatim; DESIGN §13 #6 answered with the Oprov numbers | 2D, 2E, 2F (and 2H's VTR rows), 3A, 3B, 3C, 3G, 3D (`abc` for O), 3E-6 (Oprov), 3F | Opus `high`; Sonnet `high` for the runs (background + Monitor) |
 
 Lanes: 3H-1 → 3H-run-P ‖ 3H-2 → 3H-3 (when 3D/3E land) → 3H-4 (when the front-end lane lands). The
 agent says when to switch model: Opus `high` for 3H-1/2/3/4 code sessions, Sonnet `high` for run
@@ -922,7 +960,7 @@ sessions (PHASE0 §9).
 | H15 | disk | applied: VHDX note and compaction hint, 2 GiB cap on failed dirs, GiB wording (§5.4, §7.3) |
 | H16 | heavy-lock nesting | applied: one `qor_heavy` convention imported by 3E's tools (§7.1) |
 | H17 | doctor, mkdir | applied: Verilator and VTR's Yosys checked; `mkdir -p <J>/run` (§3, §9) |
-| H18 | split, estimates | applied: 3H-4 dependencies, exit-run ≈ 14–18 h across nights, background + Monitor (§9, §17) |
+| H18 | split, estimates | applied: 3H-4 dependencies, exit-run ≈ 20–30 h (5–7 nights; restated in review 2), background + Monitor (§9, §17) |
 | H19 | table determinism | applied: date and host from the inputs (§6) |
 | H20 | mcml timeout margin | applied: group B `-timeout 14400`, job limit 21,600 s (§3, §7.4, §12) |
 
