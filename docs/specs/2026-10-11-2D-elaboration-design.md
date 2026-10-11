@@ -34,14 +34,19 @@ says which it follows and why, and §17 lists every divergence. Each decision is
 file is corrected — except the three changes marked **IR change** (§7.2, §8.1, §6.2), ruled as
 agent defaults (§20) and amending `docs/IR.md` when 2D-1 lands; Peter may still override them.
 
-v4.2 (2026-10-11; the joint 2E/2F review `2EF-review1`, T6, controller ruling): every action the
-process generator emits is **one action per chunk** of its left side, as Yosys's
-`addChunkActions` emits them: the root defaults and sync actions (EL-35 steps 3–4), user
-assignments (step 5) and the case temporaries' entries, defaults and exits (EL-36); temporaries
-are grouped by the same chunks. Per-bit actions gave per-bit `$dff`s and `$mux`es after `proc`
-(an 8-bit `case` became eight 1-bit `$pmux`es), and `fsm_detect` ignores a register whose `Q`
-is not a whole wire, so identity with Parmys needs the chunks. Cost: one O(outputs) grouping per
-block.
+v4.2 (2026-10-11; the joint 2E/2F review `2EF-review1`, controller rulings T6 and T2). First (T6):
+every action the process generator emits is **one action per chunk** of its left side, as Yosys's
+`addChunkActions` emits them: the root defaults and sync actions (EL-35 steps 3–4), user assignments
+(step 5) and the case temporaries' entries, defaults and exits (EL-36); temporaries are grouped by
+the same chunks. Per-bit actions gave per-bit `$dff`s and `$mux`es after `proc` (an 8-bit `case`
+became eight 1-bit `$pmux`es), and `fsm_detect` ignores a register whose `Q` is not a whole wire, so
+identity with Parmys needs the chunks. Cost: one O(outputs) grouping per block. Second (T2; agent
+default for Peter's review): the eight opt passes of 2F are `processes = OK` (EL-33), so Odin III
+runs Parmys's `opt_expr; opt_clean; opt -nodffe -nosdff` before `proc` (2F spec OP-3, "mode P");
+`$proc` stays opaque to them and `opt_muxtree`/`opt_clean` skip modules that still have processes.
+Reason (Fable-verified): the opt family is not confluent, and the pre-`proc` opt order changes
+netlists (`stereovision3` 812 versus 792 cells), so "`opt` only after `proc`" (v1–v4.1) could not
+reproduce Parmys.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -1188,22 +1193,31 @@ drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nod
 `uint8_t processes`: `ODIN3_PASS_PROCESSES_REFUSE` (0, the default, so every existing and plugin
 pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the pass manager calls
 `odin3_design_has_processes` and, when it is true, fails the pass without running it:
-`pass 'opt': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
+`pass 'flatten': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
 misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
 create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
-and `proc` (2E). Marked `REFUSE`: `opt` (2F) — so **`opt` runs only after `proc`**, the order of
-DESIGN §6 — `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
-`write_dot`. The writers also refuse a `$proc` node themselves (`module 'm' has processes; run
-proc first`) for callers that bypass the pass manager. A pass marked `OK` that mutates the IR
-must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
-drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
+and `proc` (2E), and (v4.2) the eight opt passes of 2F (`opt`, `opt_expr`, `opt_merge`,
+`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`). Marked `REFUSE`: `flatten`,
+`lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`, `write_dot`. The writers also
+refuse a `$proc` node themselves (`module 'm' has processes; run proc first`) for callers that
+bypass the pass manager.
+
+The opt passes treat a module with processes as Yosys 0.55's do (v4.2): `opt_expr`,
+`opt_merge`, `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as opaque (never
+evaluated, merged or deleted; its `O` pins drive unknown values, its `I` pins read), and
+`opt_muxtree` and `opt_clean` skip a module that still has live `$proc` nodes, with an info line
+(Yosys's `has_processes_warn`).
+
+A pass marked `OK` that mutates the IR must treat a `$proc` node as opaque: no constant
+propagation or CSE through it, its `O` pins are drivers like any cell's. ABI: `odin3_plugin_pass` has `void *reserved[4]`; the first slot
 becomes `const uint8_t *processes` (NULL, as every existing plugin passes, means `REFUSE`), so no
 layout changes. `hierarchy` in the `OK` list is the 1D built-in (`src/passes/builtin.c`,
 `docs/PASSES.md`).
 
 **ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
 `I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
-(EL-48), so the Python walk and plugins can see it; structured body accessors wait for 2E.
+(EL-48), so the Python walk and plugins can see it; structured body accessors are deferred
+(2E §23).
 
 **Alternatives considered.** (a) v1's process objects over pinless nets (rejected by the review,
 F1: a second connectivity mechanism, broken driver queries, O(process) merges, `opt` unsafe);
