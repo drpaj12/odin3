@@ -24,6 +24,7 @@ typedef struct odin3_elab_limits {
     uint32_t max_net_bits;         /* ODIN3_ELAB_MAX_NET_BITS */
     uint32_t max_init_bits;        /* ODIN3_ELAB_MAX_INIT_BITS */
     uint32_t max_readmem_bytes;    /* ODIN3_ELAB_MAX_READMEM_BYTES */
+    uint32_t max_pow_work;         /* ODIN3_ELAB_MAX_POW_WORK */
     uint64_t max_memory_bits;      /* ODIN3_ELAB_MAX_MEMORY_BITS */
     uint64_t max_bytes;            /* odin3_elab_default_max_bytes() */
 } odin3_elab_limits;

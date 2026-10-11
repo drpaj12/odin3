@@ -14,7 +14,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* The caps of §11, exact. */
+/*
+ * The caps of §11, exact, plus ODIN3_ELAB_MAX_POW_WORK: a constant `**` costs up to
+ * (width - 2) square-and-multiply steps of ceil(width / 64)^2 word products each, O(w^3), which
+ * the width cap alone does not bound (2D Task 9 ruling); its estimate is checked before the
+ * operation (`constant '**' of N bits exceeds the limit of M word operations`).
+ */
 enum {
     ODIN3_ELAB_MAX_ERRORS = 20,                /* errors per run; then elaboration stops */
     ODIN3_ELAB_MAX_WIDTH = 1 << 20,            /* bits of one object, expression or value */
@@ -32,6 +37,7 @@ enum {
     ODIN3_ELAB_MAX_INIT_BITS = 1 << 26,        /* initial-value bits materialised per run */
     ODIN3_ELAB_MAX_READMEM_BYTES = 1 << 28,    /* one $readmem file */
     ODIN3_ELAB_MAX_MODULE_NAME = 128,          /* longer specialization names are hashed */
+    ODIN3_ELAB_MAX_POW_WORK = 1 << 30,         /* word products of one constant '**' (Task 9) */
     ODIN3_ELAB_MAX_BYTES_PERCENT = 60          /* the byte budget: this % of physical RAM */
 };
 

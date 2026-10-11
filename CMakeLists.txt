@@ -144,6 +144,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/cval.c
     src/frontends/elab/cval_arith.c
     src/frontends/elab/ctype.c
+    src/frontends/elab/ceval.c
+    src/frontends/elab/ceval_expr.c
+    src/frontends/elab/ceval_interp.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -494,6 +497,10 @@ if(BUILD_TESTING)
     target_compile_definitions(test_elab_cval PRIVATE
         ODIN3_ELAB_DATA="${PROJECT_SOURCE_DIR}/tests/elab")
     odin3_add_unit_test(test_elab_ctype)
+    # 2D Task 9: the evaluator and interpreter, on sources parsed by 2C (verilog_test.h).
+    odin3_add_unit_test(test_elab_interp)
+    target_include_directories(test_elab_interp PRIVATE ${_gen})
+    add_dependencies(test_elab_interp verilog_generated)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
