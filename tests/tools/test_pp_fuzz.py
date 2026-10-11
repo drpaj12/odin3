@@ -45,6 +45,18 @@ def at(tree: str, rel: str, line: int, col: int) -> pf.Origin:
     return (path, sum(len(x) + 1 for x in lines[:line - 1]) + col - 1)
 
 
+def definitions(text: str) -> list[tuple[str, list[str]]]:
+    """(name, macros used) per `define of a generated macro, in order: strings and comments
+    removed, continuations joined."""
+    text = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', text)
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text).replace("\\\r\n", " ").replace("\\\n", " ")
+    out = []
+    for m in re.finditer(r"`define (M[0-9]+)([^\n]*)", text):
+        out.append((m.group(1), re.findall(r"`(M[0-9]+)", m.group(2))))
+    return out
+
+
 class GeneratorTest(unittest.TestCase):
     def test_same_seed_same_project(self) -> None:
         self.assertEqual(pf.generate(1, 7), pf.generate(1, 7))
@@ -89,13 +101,34 @@ class GeneratorTest(unittest.TestCase):
                     ref.stream(str(root / r))  # raises RefError on a generator bug
                 self.assertEqual(os.path.normpath(root / proj.roots[0]), ref.files_read[0])
 
+    def test_macro_nesting_is_bounded(self) -> None:
+        """Every definition (bodies and defaults, redefinitions included) uses only macros of a
+        lower level, so expansion through bodies nests at most MAX_LEVEL deep; file actuals add
+        at most two levels (Gen.actual's nest < 2): six in all (§10.5)."""
+        for case in range(80):
+            proj = pf.generate(5, case)
+            defs = definitions("".join(proj.files.values()))
+            depth: dict[str, int] = {}
+            for _ in defs:  # a fixpoint: the files are not in definition order
+                for name, refs in defs:
+                    used = max([depth.get(r, 1) for r in refs] or [0])
+                    depth[name] = max(depth.get(name, 0), 1 + used)
+            self.assertLessEqual(max(depth.values(), default=0), pf.MAX_LEVEL, case)
+
     def test_generator_covers_the_features(self) -> None:
         seen: set[str] = set()
         for case in range(80):
             proj = pf.generate(1, case)
             body = "".join(proj.files.values())
             gen = pf.Gen(random.Random(f"pp-fuzz/1/{case}"))
+            defines = "\n".join(line for line in body.splitlines() if line.startswith("`define M"))
+            uses = "\n".join(line for line in body.splitlines() if not line.startswith("`define"))
             seen |= {k for k, hit in {
+                "default": any(m.formals and any(m.formals) for m in gen.macros),
+                "comment in default": "=/*c*/ 3" in body or "= 1 /* c */+ 2" in body,
+                "string in body": '"' in defines, "comment in body": "/* c pa */" in defines,
+                "nested use in actual": re.search(r"[(,]\s*`M[0-9]", uses) is not None,
+                "escaped actual": ",)q +1" in body,
                 "include": "`include" in body, "elsif": "`elsif" in body,
                 "translate_off": "translate_off" in body, "crlf": "\r\n" in body,
                 "continuation": "\\\n" in body or "\\\r\n" in body, "line": "`line" in body,
@@ -104,10 +137,20 @@ class GeneratorTest(unittest.TestCase):
                 "open tail": any(m.tail and m.tail[1] for m in gen.macros),
                 "cond in actual": "+ (2, 3) `else" in body, "escaped": "\\bus" in body,
             }.items() if hit}
-        self.assertEqual(12, len(seen), seen)
+        self.assertEqual(18, len(seen), seen)
 
 
 class ReferenceTest(unittest.TestCase):
+    def test_comment_in_default_is_dropped(self) -> None:
+        src = "`define A(x=/*c*/ 3) [x]\n`A()\n`define B(x=1 /* c */+ 2 /**/) [x]\n`B()\n"
+        out, _ = run_ref({"src/t.v": src})
+        self.assertEqual("\n[3]\n\n[1  + 2]\n", text(out))
+        self.assertIsNone(out[9][1])
+
+    def test_escaped_identifier_in_an_actual_is_opaque(self) -> None:
+        out, _ = run_ref({"src/t.v": "`define A(x) [x]\n`A(\\a,b )\n"})
+        self.assertEqual("\n[\\a,b]\n", text(out))
+
     def test_mid_line_conditional(self) -> None:
         out, _ = run_ref({"src/t.v": "a `ifdef X b `endif c\n"})
         self.assertEqual("a  c\n", text(out))
@@ -209,8 +252,9 @@ class CheckTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def seg(self, offset: int, line: int | None, col: int | None) -> dict[str, object]:
-        return {"out_offset": offset, "spell_file": None if line is None else self.src,
-                "spell_line": line, "spell_col": col}
+        where = None if line is None else self.src
+        return {"out_offset": offset, "file": where, "spell_file": where, "spell_line": line,
+                "spell_col": col}
 
     def origins(self, text: str, segs: list[dict[str, object]]) -> tuple[list[pf.Origin],
                                                                          list[str]]:
@@ -232,6 +276,16 @@ class CheckTest(unittest.TestCase):
         self.assertIn("loc-0 segment at 0", probs[0])
         _, probs = self.origins("y", [self.seg(0, None, None)])
         self.assertIn("loc-0 segment at 0", probs[0])
+
+    def test_a_loc_without_a_spelling_fails(self) -> None:
+        """A non-zero loc whose spelling chase failed (spell_file null, file not) is not a
+        loc-0 blank; nor is the reverse."""
+        bad = {**self.seg(0, None, None), "file": self.src}
+        _, probs = self.origins(" ", [bad])
+        self.assertIn("a loc without a spelling", probs[0])
+        bad = {**self.seg(0, 1, 1), "file": None}
+        _, probs = self.origins("x", [bad])
+        self.assertIn("a loc without a spelling", probs[0])
 
     def test_segments_must_start_at_0_and_increase(self) -> None:
         _, probs = self.origins("xy", [self.seg(1, 1, 2)])
@@ -260,16 +314,23 @@ class CheckTest(unittest.TestCase):
 
 
 class SeedsTest(unittest.TestCase):
-    def test_seeds_get_a_zero_options_byte(self) -> None:
+    def test_seeds_get_both_options_bytes_smallest_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "src").mkdir()
-            Path(tmp, "src", "a.v").write_bytes(b"module a;")
-            Path(tmp, "src", "notes.txt").write_bytes(b"x")
-            code, out, _ = helpers.run_main(pf.main, ["seeds", os.path.join(tmp, "out"),
-                                                      os.path.join(tmp, "src")])
-            self.assertEqual((0, "pp-fuzz: 1 seeds in"), (code, out[:19]))
-            self.assertEqual([b"\0module a;"],
-                             [p.read_bytes() for p in Path(tmp, "out").iterdir()])
+            for rel, data in (("src/a.v", b"module a;"), ("src/b.vh", b"`x"),
+                              ("src/notes.txt", b"x"), ("micro/plain.v", b"module p;"),
+                              ("micro/tick.v", b"`define A")):
+                Path(tmp, rel).parent.mkdir(parents=True, exist_ok=True)
+                Path(tmp, rel).write_bytes(data)
+            code, out, _ = helpers.run_main(pf.main, [
+                "seeds", os.path.join(tmp, "out"), os.path.join(tmp, "src"),
+                "--backtick", os.path.join(tmp, "micro")])
+            self.assertEqual((0, "pp-fuzz: 6 seeds from 3 files"), (code, out[:29]))
+            got = {p.name: p.read_bytes() for p in Path(tmp, "out").iterdir()}
+            self.assertEqual({"0000_b.vh.00": b"\0`x", "0000_b.vh.c3": b"\xc3`x",
+                              "0001_tick.v.00": b"\0`define A",  # same size: by path
+                              "0001_tick.v.c3": b"\xc3`define A",
+                              "0002_a.v.00": b"\0module a;", "0002_a.v.c3": b"\xc3module a;"},
+                             got)
 
 
 if __name__ == "__main__":

@@ -218,6 +218,11 @@ bool odin3_pp_is_blank(int ch);
 bool odin3_pp_is_ident_start(int ch);
 bool odin3_pp_is_ident_char(int ch);
 
+/* The end of the item of a definition's text at at (text[0, len), already checked by the
+ * definition scanner): a string, a block comment (*comment set), an escaped identifier or one
+ * byte. Defaults are walked by it to drop their comments (2A §3.3). */
+uint32_t odin3_pp_def_item(const uint8_t *text, uint32_t len, uint32_t at, bool *comment);
+
 /* Reads an IDENT at the top frame's cursor within its current run (empty when none) and
  * advances past it. */
 odin3_bytes odin3_pp_read_ident(odin3_pp *pp);

@@ -573,18 +573,25 @@ if(BUILD_TESTING)
     set_tests_properties(pp_properties PROPERTIES LABELS tools)
 
     if(ODIN3_FUZZ)
-        # A 10 s smoke run of fuzz_pp from the micros and the reviewer's probes (each seed after
-        # a zero options byte, written by `pp-fuzz seeds`); long runs are local. One worker,
-        # 2 GB RSS (the caps are lowered so every input fits).
+        # The seeds (`pp-fuzz seeds`): the preprocessor micros, every micro holding a backtick
+        # and the reviewer's probes, smallest first, each after options byte 0x00 (tight caps)
+        # and 0xC3 (roomy caps, defines, include directory). fuzz_pp_default_caps runs each seed
+        # once at the default §9 caps (no mutation: a mutated bomb needs the lowered caps);
+        # fuzz_pp_smoke fuzzes for 10 s; long runs are local. One worker, 2 GB RSS.
         set(_fuzz_seeds ${PROJECT_BINARY_DIR}/fuzz_pp_seeds)
         set(_fuzz_corpus ${PROJECT_BINARY_DIR}/fuzz_pp_corpus)
         file(MAKE_DIRECTORY ${_fuzz_corpus})
         add_test(NAME fuzz_pp_seeds
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/pp-fuzz/pp_fuzz.py seeds
                     ${_fuzz_seeds} ${PROJECT_SOURCE_DIR}/tests/micro/verilog/preprocessor
-                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax
-                    ${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes)
+                    ${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes
+                    --backtick ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
         set_tests_properties(fuzz_pp_seeds PROPERTIES FIXTURES_SETUP fuzz_pp_seeds LABELS fuzz)
+        add_test(NAME fuzz_pp_default_caps
+            COMMAND ${CMAKE_COMMAND} -E env FUZZ_PP_DEFAULT_CAPS=1
+                    $<TARGET_FILE:fuzz_pp> -runs=0 -timeout=60 -rss_limit_mb=2048 ${_fuzz_seeds})
+        set_tests_properties(fuzz_pp_default_caps PROPERTIES FIXTURES_REQUIRED fuzz_pp_seeds
+                             LABELS fuzz TIMEOUT 300)
         add_test(NAME fuzz_pp_smoke
             COMMAND fuzz_pp -max_total_time=10 -timeout=10 -rss_limit_mb=2048
                     -dict=${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_pp.dict -print_final_stats=1

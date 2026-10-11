@@ -4,7 +4,7 @@ Usage::
 
     pp-fuzz run   --odin3 BIN [--seed S] [--cases N] [--first I] [--jobs J] [--keep DIR]
     pp-fuzz show  [--seed S] [--case I]
-    pp-fuzz seeds OUT_DIR SOURCE...
+    pp-fuzz seeds OUT_DIR [SOURCE...] [--backtick DIR]...
 
 ``run`` generates N random projects from the seed (macros with up to four formals and
 defaults, macro nesting up to six, conditionals up to four deep, includes in a temporary tree
@@ -16,7 +16,9 @@ reference says (the segments' ``spell_*`` fields chased to a file), every output
 non-zero loc equals the source byte its spelling names, every loc-0 byte is a blank segment of
 its own (§7.8 checked from the outside), and ``files-read.txt`` equals the reference's
 first-read order.  ``show`` prints one generated project.  ``seeds`` writes a libFuzzer seed
-corpus for ``tests/fuzz/fuzz_pp.c``: each source file prefixed with a zero options byte.
+corpus for ``tests/fuzz/fuzz_pp.c``: each source file (under ``--backtick`` directories only
+those holding a backtick), smallest first, twice: after options byte 0x00 (tight caps) and
+0xC3 (roomy caps, project defines, the include directory).
 
 The reference expander is written from spec 2B §7 alone (it is not a port of the C): it works
 on lists of (character, origin) pairs, origin = (file, byte offset) or None for an inserted
@@ -124,6 +126,11 @@ def escaped_end(s: Text, i: int) -> int:
     return i
 
 
+def escaped_at(s: Text, i: int) -> bool:
+    """An escaped identifier starts at s[i]: a backslash, then a non-blank."""
+    return peek(s, i) == "\\" and peek(s, i + 1) not in ("", *BLANKS)
+
+
 def pragma(comment: str) -> str | None:
     """'off' or 'on' for a translate_off/translate_on comment (§7.6), else None."""
     inner = comment[2:-2] if comment.startswith("/*") else comment[2:]
@@ -156,6 +163,10 @@ def collect(s: Text, k: int) -> tuple[Text, int]:
         elif is_comment(s, k):
             k = comment_end(s, k)
             part.append((" ", None))
+        elif escaped_at(s, k):
+            e = escaped_end(s, k)  # an escaped identifier swallows ',' and ')' (§7.2)
+            part += s[k:e]
+            k = e
         elif depth == 0 and c in ",)":
             return part, k
         else:
@@ -417,9 +428,10 @@ class Reference:
             elif in_file and is_comment(s, k):
                 k = comment_end(s, k)
                 part.append((" ", None))
-            elif c == '"':
-                part += s[k:string_end(s, k)]
-                k = string_end(s, k)
+            elif c == '"' or escaped_at(s, k):
+                e = string_end(s, k) if c == '"' else escaped_end(s, k)  # §7.2: both opaque
+                part += s[k:e]
+                k = e
             elif depth == 0 and c in ",)":
                 parts.append(trim(part))
                 part, k = [], k + 1
@@ -587,7 +599,9 @@ class Gen:
         elif r < 0.55:
             text = self.pick("[w:0]", "{a, b}", "{2{x}}") + self.pick("", " - 1")
         elif r < 0.62:
-            text = self.string()
+            # an escaped identifier swallows ',' and ')'; its blank stays inside the actual, as
+            # trimming would let it swallow what follows the formal in the body
+            text = self.string() if rng.random() < 0.7 else f"\\{rng.choice(names or IDENTS)},)q +1"
         elif r < 0.7 and ctx is None:
             text = self.pick("/*c,)*/ w", "x // c, )" + self.nl + " + 1", "a" + self.nl + "+ b",
                              f"1 `ifdef {rng.choice(FLAGS)} + (2, 3) `else - 3 `endif",
@@ -641,9 +655,10 @@ class Gen:
             formals = []
             for n, has in enumerate(spec.formals):
                 default = ""
-                if has:
-                    objects = [m.name for m in self.objects(i)]
-                    default = self.pick("=3", " = (1, 2)", '="d,s)"', "= w ",
+                if has:  # comments in a default are in no stream (2A §3.3)
+                    objects = [m.name for m in self.objects(i) if m.level < spec.level]
+                    default = self.pick("=3", " = (1, 2)", '="d,s)"', "= w ", "=/*c*/ 3",
+                                        "= 1 /* c */+ 2 /**/", "=/*,)*/", "= ( 1 /*a,)*/, 2)",
                                         *[f"=`{o}" for o in objects])
                 formals.append(self.pick("", " ") + FORMALS[n] + default)
             head += "(" + ",".join(formals) + ")"
@@ -805,6 +820,10 @@ def stream_origins(text: str, segs: list[dict[str, object]], src: Sources,
         return origins
     for n, seg in enumerate(segs):
         end = starts[n + 1] if n + 1 < len(segs) else len(text)
+        if (seg["spell_file"] is None) != (seg.get("file") is None):
+            probs.append(f"segment at {starts[n]}: a loc without a spelling, or the reverse "
+                         f"(file {seg.get('file')!r}, spell_file {seg['spell_file']!r})")
+            return origins
         if seg["spell_file"] is None:
             if end - starts[n] != 1 or text[starts[n]] not in BLANKS:
                 probs.append(f"loc-0 segment at {starts[n]} is {text[starts[n]:end]!r}")
@@ -942,18 +961,32 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_seeds(args: argparse.Namespace) -> int:
-    """A libFuzzer seed corpus: every .v/.vh under the sources, after a zero options byte."""
-    args.out.mkdir(parents=True, exist_ok=True)
-    count = 0
-    for source in args.sources:
+SEED_OPTIONS = (0x00, 0xC3)  # tight caps alone; roomy caps with defines and the include dir
+
+
+def seed_paths(args: argparse.Namespace) -> list[Path]:
+    """Every .v/.vh under the sources, and under each --backtick directory those holding a
+    backtick; smallest first, each once."""
+    found: set[Path] = set()
+    for source, backtick_only in [(p, False) for p in args.sources] + [
+            (p, True) for p in args.backtick]:
         paths = sorted(source.rglob("*.v*")) if source.is_dir() else [source]
-        for path in (p for p in paths if p.suffix in (".v", ".vh") and p.is_file()):
-            name = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{count}_{path.name}")
-            (args.out / name).write_bytes(b"\0" + path.read_bytes())
-            count += 1
-    print(f"pp-fuzz: {count} seeds in {args.out}")
-    return 0 if count else 1
+        found |= {p.resolve() for p in paths if p.suffix in (".v", ".vh") and p.is_file() and
+                  (not backtick_only or b"`" in p.read_bytes())}
+    return sorted(found, key=lambda p: (p.stat().st_size, str(p)))
+
+
+def cmd_seeds(args: argparse.Namespace) -> int:
+    """A libFuzzer seed corpus: each file twice, after options byte 0x00 and 0xC3."""
+    args.out.mkdir(parents=True, exist_ok=True)
+    paths = seed_paths(args)
+    for n, path in enumerate(paths):
+        stem = re.sub(r"[^A-Za-z0-9_.-]", "_", f"{n:04d}_{path.name}")
+        for opts in SEED_OPTIONS:
+            (args.out / f"{stem}.{opts:02x}").write_bytes(bytes([opts]) + path.read_bytes())
+    print(f"pp-fuzz: {len(paths) * len(SEED_OPTIONS)} seeds from {len(paths)} files in "
+          f"{args.out}")
+    return 0 if paths else 1
 
 
 def main(argv: Sequence[str]) -> int:
@@ -971,7 +1004,8 @@ def main(argv: Sequence[str]) -> int:
     p.add_argument("--case", type=int, default=0)
     p = sub.add_parser("seeds")
     p.add_argument("out", type=Path)
-    p.add_argument("sources", type=Path, nargs="+")
+    p.add_argument("sources", type=Path, nargs="*")
+    p.add_argument("--backtick", type=Path, action="append", default=[])
     args = ap.parse_args(argv)
     commands = {"run": cmd_run, "show": cmd_show, "seeds": cmd_seeds}
     return commands[args.cmd](args)

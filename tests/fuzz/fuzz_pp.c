@@ -12,6 +12,10 @@
  * Options byte: bit 0 project defines; bit 1 an include directory; bit 2 run the file twice
  * (macros persist, the file comes from the cache); bits 3-5 inject an allocation failure (0:
  * none); bits 6-7 the cap profile (tight or roomy, both far below the defaults).
+ *
+ * With FUZZ_PP_DEFAULT_CAPS=1 in the environment every input runs at the default §9 caps; the
+ * CTest fuzz_pp_default_caps does that over the seeds alone (-runs=0), since a mutated input
+ * may be a bomb only the lowered caps bound within the RSS limit.
  */
 #include "frontends/verilog/preproc.h"
 #include "frontends/verilog/preproc_test.h"
@@ -42,8 +46,11 @@ enum {
     OPT_CAPS_SHIFT = 6,
     OPT_CAPS_ROOMY = 2, /* profiles 2 and 3 */
     FAIL_SCALE = 4,     /* the injected failure: after FAIL_SCALE * n^3 allocations */
-    DIR_MODE = 0700
+    DIR_MODE = 0700,
+    CHAIN_LEN = 20 /* c1.vh includes c2.vh ... c20.vh: deeper than both profiles' include caps */
 };
+
+static bool default_caps;
 
 static char dir[PATH_MAX_LEN];
 static char input[PATH_MAX_LEN];
@@ -91,6 +98,11 @@ static void remove_files(void) {
         (void)snprintf(path, sizeof path, "%s/%s", dir, k_headers[i][0]);
         (void)remove(path);
     }
+    for (int i = 1; i <= CHAIN_LEN; i++) {
+        char path[PATH_MAX_LEN];
+        (void)snprintf(path, sizeof path, "%s/c%d.vh", dir, i);
+        (void)remove(path);
+    }
     (void)remove(input);
     (void)rmdir(incdir);
     (void)rmdir(dir);
@@ -115,6 +127,17 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
         (void)snprintf(path, sizeof path, "%s/%s", dir, k_headers[i][0]);
         write_file(path, k_headers[i][1], strlen(k_headers[i][1]));
     }
+    for (int i = 1; i <= CHAIN_LEN; i++) { /* a chain of distinct files reaches the depth cap */
+        char path[PATH_MAX_LEN];
+        char text[PATH_MAX_LEN];
+        (void)snprintf(path, sizeof path, "%s/c%d.vh", dir, i);
+        int len = i < CHAIN_LEN
+                      ? snprintf(text, sizeof text, "`include \"c%d.vh\"\nwire c%d;\n", i + 1, i)
+                      : snprintf(text, sizeof text, "wire c%d;\n", i);
+        write_file(path, text, (size_t)len);
+    }
+    const char *caps = getenv("FUZZ_PP_DEFAULT_CAPS");
+    default_caps = caps != NULL && strcmp(caps, "1") == 0;
     (void)atexit(remove_files);
     return 0;
 }
@@ -123,6 +146,9 @@ int LLVMFuzzerInitialize(int *argc, char ***argv) {
  * libFuzzer's RSS limit and timeout; the tight profile hits the caps often. */
 static odin3_pp_limits limits_for(unsigned profile) {
     odin3_pp_limits lim = odin3_pp_default_limits();
+    if (default_caps) {
+        return lim;
+    }
     bool roomy = profile >= OPT_CAPS_ROOMY;
     lim.include_depth = roomy ? 16 : 4;
     lim.expansion_chain = roomy ? 128 : 8;
