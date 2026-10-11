@@ -146,6 +146,23 @@ static void make_pins(odin3_module *module, const node_plan *plan, odin3_node_id
     }
 }
 
+/*
+ * The module's process counter (IR-19) follows a node of type `type` coming alive (live) or dying:
+ * only types with ODIN3_CT_PROCESS count. Paired with odin3_celltype_instances_inc/dec.
+ */
+static void count_process(odin3_module *module, odin3_celltype_id type, bool live) {
+    if ((odin3_celltype_get(module->design, type)->flags & ODIN3_CT_PROCESS) == 0) {
+        return;
+    }
+    if (live) {
+        assert(module->proc_count < UINT32_MAX); /* fewer than UINT32_MAX nodes */
+        module->proc_count++;
+    } else {
+        assert(module->proc_count > 0);
+        module->proc_count--;
+    }
+}
+
 /* Reserves the node and its pins, then takes the name: afterwards node_commit cannot fail. */
 static odin3_status node_reserve(odin3_module *module, const odin3_node_spec *spec,
                                  const node_plan *plan) {
@@ -175,6 +192,7 @@ static odin3_node_id node_commit(odin3_module *module, const odin3_node_spec *sp
     rec->params = plan->params;
     make_pins(module, plan, id);
     odin3_celltype_instances_inc(module->design, plan->type);
+    count_process(module, plan->type, true);
     return id;
 }
 
@@ -187,6 +205,7 @@ static void node_unmake(odin3_module *module, odin3_node_id node) {
         (void)odin3_u64map_remove(module->node_names, rec->name);
     }
     odin3_celltype_instances_dec(module->design, rec->type);
+    count_process(module, rec->type, false);
     odin3_pagevec_truncate(module->pins, rec->first_pin.v);
     odin3_pagevec_truncate(module->nodes, node.v);
 }
@@ -360,6 +379,7 @@ static void node_kill(odin3_module *module, odin3_node_rec *rec) {
     }
     rec->dead = true;
     odin3_celltype_instances_dec(module->design, rec->type);
+    count_process(module, rec->type, false);
 }
 
 odin3_status odin3_node_record_pin_nets(odin3_module *module, odin3_node_id node) {

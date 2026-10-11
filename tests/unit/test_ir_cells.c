@@ -25,12 +25,13 @@ enum {
     BAD_INIT = 4,
     SOP_WIDTH = 3,
     ROW_LEN = 4,
-    N_TYPES = 55,
+    N_TYPES = 56,
     STRUCTURAL_TYPES = 7,
-    SOP_INDEX = 52, /* the last 1B type; 2D appends after it (plan point (f)) */
-    NEG_INDEX = 53, /* the first of the nine 2D word cells (IR change A, EL-31) */
-    POW_INDEX = 61, /* the last of the nine */
-    BUILTIN_COUNT = 62,
+    SOP_INDEX = 52,  /* the last 1B type; 2D appends after it (plan point (f)) */
+    NEG_INDEX = 53,  /* the first of the nine 2D word cells (IR change A, EL-31) */
+    POW_INDEX = 61,  /* the last of the nine */
+    PROC_INDEX = 62, /* the process cell (IR change B, EL-33), after the nine */
+    BUILTIN_COUNT = 63,
     POW_A_WIDTH = 4,
     POW_B_WIDTH = 3,
     POW_Y_WIDTH = 5,
@@ -146,6 +147,7 @@ static const expect k_expect[] = {
     {"$logic_or", WORD, 0, "IIO", {1, 1, 1}},
     {"$shiftx", WORD, 0, "IIO", {1, 1, 1}},
     {"$pow", WORD, 0, "IIO", {1, 1, 1}},
+    {"$proc", WORD, ODIN3_CT_PROCESS, "IO", {0, 1}},
 };
 #define N_EXPECT (sizeof k_expect / sizeof k_expect[0])
 
@@ -176,7 +178,9 @@ static void check_shape(const expect *exp) {
             exp->widths[i], odin3_celltype_port_width(design, id, params, i), exp->name);
     }
     if (def->verify != NULL) {
-        TEST_ASSERT_EQUAL_MESSAGE(ODIN3_OK, def->verify(params), exp->name);
+        /* $proc's empty default BODY is rejected: a default process cannot exist (IR-19). */
+        odin3_status want = (def->flags & ODIN3_CT_PROCESS) != 0 ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
+        TEST_ASSERT_EQUAL_MESSAGE(want, def->verify(params), exp->name);
     }
 }
 
@@ -426,12 +430,13 @@ static const char *const k_nine[] = {"$neg",         "$xnor",      "$reduce_xnor
                                      "$logic_or",    "$shiftx",    "$pow"};
 enum { N_NINE = sizeof k_nine / sizeof k_nine[0] };
 
-/* Appended after $sop in point (f)'s order; built-in IDs 0..52 do not move. */
+/* Appended after $sop in point (f)'s order, then $proc; built-in IDs 0..52 do not move. */
 static void test_nine_cells_appended_in_order(void) {
     TEST_ASSERT_EQUAL_UINT32(BUILTIN_COUNT, odin3_builtin_celltype_count);
     TEST_ASSERT_EQUAL_PTR(&odin3_cell_sop, odin3_builtin_celltypes[SOP_INDEX]);
     TEST_ASSERT_EQUAL_PTR(&odin3_cell_neg, odin3_builtin_celltypes[NEG_INDEX]);
     TEST_ASSERT_EQUAL_PTR(&odin3_cell_pow, odin3_builtin_celltypes[POW_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_proc, odin3_builtin_celltypes[PROC_INDEX]);
     for (uint32_t i = 0; i < N_NINE; i++) {
         TEST_ASSERT_EQUAL_STRING(k_nine[i], odin3_builtin_celltypes[NEG_INDEX + i]->name);
         odin3_celltype_id id = find_type(k_nine[i]); /* a fresh design has every built-in */

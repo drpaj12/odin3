@@ -70,7 +70,7 @@ static const char *param_error(const odin3_celltype_def *def, uint32_t idx) {
     if (!name_ok(param->name)) {
         return "parameter without a name";
     }
-    if (!enum_ok((int)param->kind, ODIN3_VAL_COVER) || param->dflt.kind != param->kind) {
+    if (!enum_ok((int)param->kind, ODIN3_VAL_PROC) || param->dflt.kind != param->kind) {
         return "parameter kind invalid or different from its default's";
     }
     if (!odin3_value_valid(&param->dflt)) {
@@ -142,6 +142,28 @@ static const char *sim_flags_error(const odin3_celltype_def *def) {
 }
 
 /*
+ * NULL unless def has a PROC parameter or the ODIN3_CT_PROCESS flag without being the built-in
+ * $proc itself (2D plan point (g), review I14): process bodies and the process counter belong to
+ * $proc alone (docs/IR.md IR-19). Identity, not shape: a copy of $proc's definition is refused.
+ */
+static const char *process_error(const odin3_celltype_def *def) {
+    if (def == &odin3_cell_proc) {
+        return NULL;
+    }
+    bool process = (def->flags & ODIN3_CT_PROCESS) != 0;
+    for (uint32_t i = 0; !process && i < def->n_params; i++) {
+        process = def->params[i].kind == ODIN3_VAL_PROC;
+    }
+    return process ? "only the built-in $proc may have a PROC parameter or ODIN3_CT_PROCESS" : NULL;
+}
+
+/* NULL when the flags are consistent: the process rule, then the simulation flags. */
+static const char *flags_error(const odin3_celltype_def *def) {
+    const char *err = process_error(def);
+    return err != NULL ? err : sim_flags_error(def);
+}
+
+/*
  * NULL when def is valid (rules in celltype.h), else a description of the first problem (which
  * may point into why).
  */
@@ -162,7 +184,7 @@ static const char *def_error(const odin3_celltype_def *def, odin3_width_why *why
     for (uint32_t i = 0; err == NULL && i < def->n_ports; i++) {
         err = port_error(def, i, why);
     }
-    return err != NULL ? err : sim_flags_error(def);
+    return err != NULL ? err : flags_error(def);
 }
 
 /* For assertions (inline: unused when they compile out). */

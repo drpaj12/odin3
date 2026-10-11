@@ -207,6 +207,12 @@ struct odin3_module {
      */
     odin3_u64map *dead_pins;
     odin3_vec dead_pin_names; /* uint32_t */
+    /*
+     * Live nodes whose type has ODIN3_CT_PROCESS ($proc; docs/IR.md IR-19): node creation adds
+     * one, delete and replace (of the old node) and the undo of a failed create_connected take
+     * one away; compact keeps it (only live nodes survive).
+     */
+    uint32_t proc_count;
 };
 
 /*
@@ -337,5 +343,7 @@ extern const odin3_celltype_def odin3_cell_const0;
 extern const odin3_celltype_def odin3_cell_const1;
 extern const odin3_celltype_def odin3_cell_constx;
 extern const odin3_celltype_def odin3_cell_constz;
+/* The process cell (cells/proc.c; IR-19): celltype.c lets only this definition be a process. */
+extern const odin3_celltype_def odin3_cell_proc;
 
 #endif

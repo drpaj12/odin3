@@ -1141,6 +1141,10 @@ typedef struct odin3_proc_body {          /* the BODY parameter; cases[0] is the
 } odin3_proc_body;
 ```
 
+(Implementation note: `src/ir/proc.h` defines the four `ODIN3_PBIT_*` values as macros with
+exactly these values, because a C17 enumeration constant must fit an `int` and `2U << 30` does
+not.)
+
 Body positions are pin positions, never net IDs, so merging, renaming and compacting nets never
 touch a body. The only non-pin entry is `ANY`; every constant 0/1/x/z is an `I` pin on the
 shared constant net (IR-4; the review's F8), so `odin3_net_const_value` stays the one constant
@@ -2053,6 +2057,7 @@ and reported, never relaxed (2A's rule).
 | 21 | an unsized constant in a concatenation is accepted at its stored width, with a warning | accepted silently (verified on 0.55) | illegal | the exit bar is Parmys |
 | 22 | an unsized literal of exactly a ranged parameter's width stays unsized (extends by its top bit) | same (`simplify.cc` 2381–2390, verified) | sized to the range | matches Yosys's values |
 | 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
+| 24 | a `$pow` read from BLIF (a `.subckt $pow`, as Yosys's `write_blif` writes it) is unsigned: `A_SIGNED` = `B_SIGNED` = 0, the widths implied by the formals | `write_blif` writes `.subckt $pow` with no parameters (unless `-param`, which the Parmys script does not use), so its own BLIF loses the operands' signedness too | — | BLIF carries no sign; no Parmys golden has a negative exponent (controller ruling on the Task 1 review) |
 
 ## 18. Implementation split (EL-51)
 

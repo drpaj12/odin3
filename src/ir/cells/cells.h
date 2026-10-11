@@ -199,6 +199,10 @@ extern const odin3_celltype_def odin3_cell_logic_and;
 extern const odin3_celltype_def odin3_cell_logic_or;
 extern const odin3_celltype_def odin3_cell_shiftx;
 extern const odin3_celltype_def odin3_cell_pow;
+/*
+ * 2D IR change B (EL-33, spec §8.1): the process cell, appended after $pow. odin3_cell_proc is
+ * declared in ir/ir_internal.h, because celltype.c lets only that definition be a process.
+ */
 
 /* Word-level cells sharing the binary / unary tables above; the _SIM forms have hooks. */
 #define ODIN3_BINARY(var, label)                                                                   \
