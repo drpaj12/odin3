@@ -109,8 +109,9 @@ odin3_status vp_unit(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, o
 /*
  * YYLLOC_DEFAULT (§2.2): rhs[1..n] are the right-hand symbols' locations, rhs[0] the symbol's
  * before them. loc and off come from the first non-empty symbol (loc != end), end from the last
- * non-empty one; with none (an empty rule, or only empty symbols) *cur is {rhs[0].end,
- * rhs[0].end, rhs[0].off}.
+ * non-empty one. An empty rule (n 0) gives {rhs[0].end, rhs[0].end, rhs[0].off}; a rule of only
+ * empty symbols gives {rhs[1].loc, rhs[1].loc, rhs[1].off} and never reads rhs[0] (Bison's
+ * error recovery passes yyerror_range, whose [0] is unset).
  */
 void odin3_vp_lloc(odin3_vp_loc *cur, const odin3_vp_loc *rhs, int n);
 

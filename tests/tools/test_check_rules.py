@@ -186,6 +186,90 @@ class GeneratedSourceRulesTest(unittest.TestCase):
         text = _scanner("x {\n    return odin3_vl_x(yyextra,\n        yylval);\n}\n")
         self.assert_rule(self.L, text, "action-lines")
 
+    def test_quoted_and_bracket_patterns_are_checked(self) -> None:
+        for rule in (
+            '"module" { yyextra->offset = 99; int k = 3; k++; }\n',
+            '"&&" { yyextra->based = 1; }\n',
+            '"(*"|"*)" { return odin3_vl_x(yyextra); evil(); }\n',
+            "[{] { evil(yyextra); }\n",
+            '[^"\\n]+ { evil(yyextra); }\n',
+            '"x"   evil(yyextra);\n',
+        ):
+            with self.subTest(rule=rule):
+                self.assert_rule(self.L, _scanner(rule), "l-action")
+
+    def test_quoted_pattern_with_one_call_passes(self) -> None:
+        text = _scanner('"{"|[{]  { odin3_vl_unexpected(yyextra, yytext); }\n')
+        self.assertEqual(self.check(self.L, text), [])
+
+    def test_indented_lines_fail(self) -> None:
+        definitions = (
+            "%option reentrant\n    yyextra->offset = 0;\n%%\nx { odin3_vl_x(yyextra); }\n"
+        )
+        self.assert_rule(self.L, definitions, "verbatim")
+        top_of_rules = _scanner(
+            "  static int evil(void) { return 1; }\nx { odin3_vl_x(yyextra); }\n"
+        )
+        self.assert_rule(self.L, top_of_rules, "verbatim")
+
+    def test_indented_comments_pass(self) -> None:
+        text = "/*\n * a header\n */\n%option reentrant\n    /* note */\n%%\n  // why\n"
+        self.assertEqual(self.check(self.L, text + "x { odin3_vl_x(yyextra); }\n%%\n"), [])
+
+    def test_lexer_code_section_fails(self) -> None:
+        self.assert_rule(
+            self.L, _scanner("x { odin3_vl_x(yyextra); }\n") + "int f(void);\n", "prologue"
+        )
+
+    def test_one_call_means_nothing_else(self) -> None:
+        for rule in (
+            "x { return odin3_vl_x(yyextra) + evil(yyextra); }\n",
+            "x { return odin3_vl_x(yyextra), evil(yyextra); }\n",
+            "x { odin3_vl_x(yyextra)[evil()]; }\n",
+            "x { BEGIN(evil()); return odin3_vl_x(yyextra); }\n",
+            "x { return BEGIN(B); odin3_vl_x(yyextra); }\n",
+        ):
+            with self.subTest(rule=rule):
+                self.assert_rule(self.L, _scanner(rule), "l-action")
+        for action in (
+            "{ VP($$, vp_x(ctx, &$$) + evil()); }",
+            "{ VP($$, (ctx->error_mode = 0, vp_x(ctx, &$$))); }",
+            "{ VP($$, odin3_ast_push(ctx->ast, $1)); }",
+            "{ VP_ERR(evil(ctx)); }",
+            "{ VP($$, vp_x(ctx, &$$))(); }",
+        ):
+            with self.subTest(action=action):
+                self.assert_rule(self.Y, _grammar(f"e: N {action} ;\n"), "y-action")
+
+    def test_bison_code_blocks_fail(self) -> None:
+        for prologue in (
+            "%initial-action { evil(); }\n",
+            "%destructor { free($$); } <node>\n",
+            '%printer { fprintf(yyo, "x"); } <node>\n',
+            "%union { int a; }; static int evil(void) { return 1; } union z { int b; }\n",
+            "%union { int a; int f(void) { return 0; } }\n",
+            "%parse-param {int *p = evil()}\n",
+        ):
+            with self.subTest(prologue=prologue):
+                found = self.check(self.Y, _grammar("e: N ;\n", prologue))
+                self.assertTrue(found)
+                self.assertTrue(all(": code-block: " in line for line in found), found)
+
+    def test_union_and_plain_directives_pass(self) -> None:
+        prologue = (
+            "%define api.location.type {odin3_vp_loc}\n%parse-param {odin3_vp_ctx *ctx}\n"
+            "%lex-param {void *ODIN3_VP_SCANNER}\n"
+            "%union {\n    odin3_ast_id node;\n    uint32_t u;\n    const char *text;\n}\n"
+        )
+        self.assertEqual(self.check(self.Y, _grammar("e: N ;\n", prologue)), [])
+
+    def test_repository_grammar_files_pass(self) -> None:
+        root = Path(__file__).resolve().parents[2] / "src" / "frontends" / "verilog"
+        for name in ("verilog.y", "verilog.l"):
+            with self.subTest(name=name):
+                path = root / name
+                self.assertEqual(self.check(f"src/frontends/verilog/{name}", path.read_text()), [])
+
     def test_goto_in_grammar_still_fails(self) -> None:
         found = self.check(self.Y, _grammar("e: N { VP($$, vp_x(ctx, &$$)); goto x; } ;\n"))
         self.assertIn(f"{self.Y}:3: goto may only target the 'cleanup' label", found)

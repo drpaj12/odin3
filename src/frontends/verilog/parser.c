@@ -67,7 +67,9 @@ void odin3_verilog_test_set_limits(odin3_vl_run *run, odin3_vp_limits limits) {
     }
     odin3_vp_limits def = default_limits();
     run->limits = (odin3_vp_limits){
-        .yymaxdepth = clamp_limit(limits.yymaxdepth, def.yymaxdepth),
+        .yymaxdepth = limits.yymaxdepth != 0 && limits.yymaxdepth < ODIN3_VP_YYINITDEPTH
+                          ? ODIN3_VP_YYINITDEPTH
+                          : clamp_limit(limits.yymaxdepth, def.yymaxdepth),
         .max_errors = clamp_limit(limits.max_errors, def.max_errors),
         .keyword_depth = clamp_limit(limits.keyword_depth, def.keyword_depth),
         .ident_bytes = clamp_limit(limits.ident_bytes, def.ident_bytes),
@@ -87,6 +89,12 @@ void odin3_vp_lloc(odin3_vp_loc *cur, const odin3_vp_loc *rhs, int n) {
             first = first == 0 ? i : first;
             last = i;
         }
+    }
+    if (first == 0 && n > 0) {
+        /* Only empty symbols: an empty symbol's loc is still a real position. rhs[0] is not
+         * read here: on error recovery Bison passes yyerror_range, whose [0] it never sets. */
+        *cur = (odin3_vp_loc){rhs[1].loc, rhs[1].loc, rhs[1].off};
+        return;
     }
     if (first == 0) {
         *cur = (odin3_vp_loc){rhs[0].end, rhs[0].end, rhs[0].off};

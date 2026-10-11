@@ -38,7 +38,10 @@
  * import). Its argument is evaluated first and never returns: odin3_vl_flex_fatal records the
  * fatal status and returns to the lexer entry point that armed the escape, so the exit() call is
  * dead and the compilers drop it. With the input in memory and the setup allocations reserved
- * (lexer_support.c), no fatal error is reachable in practice.
+ * (lexer_support.c), no fatal error is reachable in practice. Should one become reachable, an
+ * escape out of the parser (odin3_vl_guard around yyparse) skips Bison's cleanup and leaks its
+ * grown stacks and message buffer (never memory corruption); the setup paths leak nothing.
+ * Flex's own fprintf(stderr, msg) before the handler stays (an unreachable path).
  */
 #define YY_EXIT_FAILURE ((void)odin3_vl_flex_fatal(msg, yyscanner), 2)
 

@@ -8,16 +8,22 @@
 - goto only to the single `cleanup` label.
 
 Bison (.y) and Flex (.l) sources compile inside generated translation units that the rest of the
-gate never sees (2C spec §6), so three more rules keep hand-written logic out of them:
+gate never sees (2C spec §6), so more rules keep hand-written logic out of them:
 
-- y-action: every .y action is exactly one VP(...) or VP_ERR(...) statement (actions.h);
+- y-action: every .y action is exactly one VP(out, vp_*(...)) or VP_ERR(vp_*(...)) statement
+  (actions.h): one call each, nothing after its closing parenthesis;
 - l-action: every .l action is one call into lexer_support.c (an `odin3_vl_*` function, its
-  value optionally returned) beside Flex's own BEGIN(...) and yyless(...) macros, which
-  lexer_support.c cannot call; `|` (the next rule's action) is allowed;
+  value optionally returned) beside Flex's own BEGIN(name) and yyless(name) macros, which
+  lexer_support.c cannot call; `|` (the next rule's action) is allowed. A rule is a line
+  starting in column 0; its pattern is read on the raw text (quotes, classes, braces);
 - action-lines: no .y or .l action spans more than three lines;
 - prologue: %{ %}, %code and %top blocks hold only #include lines and the YY_USER_ACTION,
   YYLLOC_DEFAULT, YYMAXDEPTH, YYINITDEPTH and YYSTACK_USE_ALLOCA macros, and the code section
-  after the second %% is empty.
+  after the second %% is empty;
+- code-block: no other .y block holds code: %initial-action, %destructor, %printer and any
+  brace outside a directive are rejected, %union holds member declarations only, and
+  %define/%param/%parse-param/%lex-param hold a plain value or declaration;
+- verbatim: no indented .l line (Flex copies it into the scanner) other than a comment.
 
 VLAs are rejected by -Wvla and recursion by clang-tidy misc-no-recursion. Token-pasting tricks
 are caught at link level by tools/check-symbols.sh (a CTest test). Comments and string
@@ -78,47 +84,163 @@ _ALLOWED_DEFINES = (
     "YYSTACK_USE_ALLOCA",
 )
 _PROLOGUE_LINE = re.compile(r"\s*(?:#\s*include\b.*|#\s*define\s+(\w+)\b.*|)$")
-_BLOCK_OPEN = re.compile(r"%\{|%(?:code(?:\s+\w+)?|top)\s*\{")
 _SECTION = re.compile(r"^%%", re.MULTILINE)
-_Y_ACTION = re.compile(r"\s*(?:VP|VP_ERR)\s*\(.*\)\s*;\s*", re.DOTALL)
-_L_STATEMENT = re.compile(r"\s*(?:return\s+)?(\w+)\s*\(.*\)\s*", re.DOTALL)
+_DIRECTIVE = re.compile(r"%([\w-]+)")
+_BETWEEN = re.compile(r"[\w\s.\-<>]*")  # a directive's words before its brace
+_PLAIN_DIRECTIVES = ("define", "parse-param", "lex-param", "param")
+_PLAIN_BODY = re.compile(r"[\w\s*.]*")  # a type, a name, a value
+_UNION_MEMBER = re.compile(r"\s*\w+(?:\s+\w+)*[\s*]+\w+\s*")
+_CALL_HEAD = re.compile(r"\s*(return\s+)?(\w+)\s*\(")
 _FLEX_MACROS = ("BEGIN", "yyless")
+_FLEX_ARG = re.compile(r"\s*\w+\s*")
+_CLOSERS = {"(": ")", "[": "]", "{": "}"}
+_MESSAGES = {
+    "prologue": "a prologue holds only #include lines and the YY* macros of 2C spec §6, and "
+    "the code section after the second %% is empty",
+    "code-block": "a code block other than %{ %}/%code (%initial-action, %destructor, "
+    "%printer, …) or a %union holding more than member declarations",
+    "verbatim": "an indented .l line is code copied into the scanner",
+    "action-lines": "an action spans more than three lines",
+    "l-action": "a .l action is one odin3_vl_* call (beside BEGIN/yyless of a name)",
+    "y-action": "a .y action is exactly one VP(out, vp_*(...)) or VP_ERR(vp_*(...)) statement",
+}
+
+Finding = tuple[int, str]  # (offset in the file, rule)
 
 
 def _line_of(text: str, offset: int) -> int:
     return text.count("\n", 0, offset) + 1
 
 
-def _brace_end(blank: str, start: int) -> int:
-    """The offset just past the brace that closes the one at start (len(blank) if none)."""
-    depth = 0
-    for i in range(start, len(blank)):
-        if blank[i] == "{":
-            depth += 1
-        elif blank[i] == "}":
-            depth -= 1
-            if depth == 0:
+def _matching(text: str, start: int) -> int:
+    """The offset just past the bracket closing the one at start (len(text) if none)."""
+    stack: list[str] = []
+    for i in range(start, len(text)):
+        char = text[i]
+        if char in _CLOSERS:
+            stack.append(_CLOSERS[char])
+        elif stack and char == stack[-1]:
+            stack.pop()
+            if not stack:
                 return i + 1
-    return len(blank)
+    return len(text)
 
 
-def _prologue_violations(text: str, blank: str, end: int) -> list[tuple[int, str]]:
-    """%{ %}, %code and %top blocks before offset end: only #include and the allowed macros."""
-    found: list[tuple[int, str]] = []
+def _split_top(text: str, sep: str) -> list[str]:
+    """text split at sep outside every bracket."""
+    parts, depth, last = [], 0, 0
+    for i, char in enumerate(text):
+        depth += 1 if char in _CLOSERS else -1 if char in ")]}" else 0
+        if char == sep and depth == 0:
+            parts.append(text[last:i])
+            last = i + 1
+    parts.append(text[last:])
+    return parts
+
+
+def _call(stmt: str) -> tuple[str, str, bool] | None:
+    """(name, arguments, returned) when stmt is exactly `[return] name(arguments)`."""
+    head = _CALL_HEAD.match(stmt)
+    if head is None:
+        return None
+    close = _matching(stmt, head.end() - 1)
+    if stmt[close:].strip() or close > len(stmt) or stmt[close - 1 : close] != ")":
+        return None
+    return head.group(2), stmt[head.end() : close - 1], head.group(1) is not None
+
+
+def _is_vp_call(text: str) -> bool:
+    call = _call(text)
+    return call is not None and call[0].startswith("vp_") and not call[2]
+
+
+def _y_action_ok(body: str) -> bool:
+    """Exactly one VP(out, vp_*(...)) or VP_ERR(vp_*(...)) statement."""
+    statements = _split_top(body, ";")
+    call = _call(statements[0]) if len(statements) == 2 else None
+    if call is None or call[2] or statements[1].strip():
+        return False
+    args = _split_top(call[1], ",")
+    if call[0] == "VP":
+        return len(args) == 2 and _is_vp_call(args[1])
+    return call[0] == "VP_ERR" and len(args) == 1 and _is_vp_call(args[0])
+
+
+def _l_action_ok(body: str) -> bool:
+    """One odin3_vl_* call (optionally returned) beside BEGIN(name)/yyless(name) statements."""
+    *statements, rest = _split_top(body, ";")
+    calls = 0
+    for statement in statements:
+        call = _call(statement)
+        if call is None:
+            return False
+        name, args, returned = call
+        if name in _FLEX_MACROS and not returned and _FLEX_ARG.fullmatch(args):
+            continue
+        if not name.startswith("odin3_vl_"):
+            return False
+        calls += 1
+    return calls == 1 and rest.strip() == ""
+
+
+def _prologue_body(body: str, at: int) -> list[Finding]:
+    """A %{ %} or %code/%top body: only #include and the allowed macros."""
+    for line in body.split("\n"):
+        ok = _PROLOGUE_LINE.match(line)
+        if ok is None or (ok.group(1) is not None and ok.group(1) not in _ALLOWED_DEFINES):
+            return [(at, "prologue")]
+    return []
+
+
+def _y_block(name: str, between: str, body: str, at: int) -> list[Finding]:
+    """One braced block of a .y declarations section, opened after directive %name."""
+    if not _BETWEEN.fullmatch(between):
+        return [(at, "code-block")]  # code outside any directive
+    if name in ("code", "top"):
+        return _prologue_body(body, at)
+    if name == "union":
+        *members, rest = _split_top(body, ";")
+        ok = rest.strip() == "" and all(_UNION_MEMBER.fullmatch(m) for m in members)
+        return [] if ok else [(at, "code-block")]
+    if name in _PLAIN_DIRECTIVES and _PLAIN_BODY.fullmatch(body):
+        return []
+    return [(at, "code-block")]
+
+
+def _y_declarations(blank: str, end: int) -> list[Finding]:
+    """Every braced block before the rules section: %{ %}, %code, %union, %define, … ."""
+    found: list[Finding] = []
+    directives = list(_DIRECTIVE.finditer(blank, 0, end))
     pos = 0
-    while (match := _BLOCK_OPEN.search(blank, pos, end)) is not None:
-        if match.group(0) == "%{":
-            close = blank.find("%}", match.end())
-            close = len(blank) if close < 0 else close
-            body_end, pos = close, close + 2
-        else:
-            pos = _brace_end(blank, match.end() - 1)
-            body_end = pos - 1
-        for line in blank[match.end() : body_end].split("\n"):
-            ok = _PROLOGUE_LINE.match(line)
-            if ok is None or (ok.group(1) is not None and ok.group(1) not in _ALLOWED_DEFINES):
-                found.append((_line_of(text, match.start()), "prologue"))
-                break
+    while (brace := blank.find("{", pos, end)) >= 0:
+        if blank[brace - 1 : brace] == "%":
+            close = blank.find("%}", brace, end)
+            close = end if close < 0 else close
+            found += _prologue_body(blank[brace + 1 : close], brace - 1)
+            pos = close + 2
+            continue
+        stop = _matching(blank, brace)
+        owner = [d for d in directives if d.end() <= brace]
+        name, after = (owner[-1].group(1), owner[-1].end()) if owner else ("", 0)
+        found += _y_block(name, blank[after:brace], blank[brace + 1 : stop - 1], brace)
+        pos = stop
+    return found
+
+
+def _y_findings(text: str) -> list[Finding]:
+    blank = strip_comments_and_strings(text)
+    sections = [m.start() for m in _SECTION.finditer(blank)] + [len(blank)] * 2
+    found = _y_declarations(blank, sections[0])
+    if blank[sections[1] + 2 :].strip():
+        found.append((sections[1], "prologue"))
+    pos = sections[0] + 2
+    while (brace := blank.find("{", pos, sections[1])) >= 0:
+        stop = _matching(blank, brace)
+        if blank.count("\n", brace, stop) >= _ACTION_LINES:
+            found.append((brace, "action-lines"))
+        elif not _y_action_ok(blank[brace + 1 : stop - 1]):
+            found.append((brace, "y-action"))
+        pos = stop
     return found
 
 
@@ -148,76 +270,76 @@ def _pattern_end(line: str) -> int:
     return i
 
 
-def _y_action_ok(body: str) -> bool:
-    """Exactly one VP(...) or VP_ERR(...) statement."""
-    inner = body.strip().removeprefix("{").removesuffix("}")
-    return inner.count(";") == 1 and _Y_ACTION.fullmatch(inner) is not None
+def _l_rule(text: str, start: int, line: str) -> tuple[int, list[Finding]]:
+    """One rule line of a .l rules section (raw text): where it ends, and its findings."""
+    at = start + _pattern_end(line.rstrip("\n"))
+    while at < len(text) and text[at] in " \t":
+        at += 1
+    line_end = start + len(line)
+    if at >= line_end - 1 or text[at] == "|":
+        tail = text[at + 1 : line_end] if text[at : at + 1] == "|" else ""
+        return line_end, [] if not tail.strip() else [(at, "l-action")]
+    window_end = at
+    for _ in range(_ACTION_LINES + 1):  # an action is never longer
+        nl = text.find("\n", window_end)
+        window_end = len(text) if nl < 0 else nl + 1
+    action = strip_comments_and_strings(text[at:window_end])
+    if action[0] != "{":  # a bare statement up to the end of the line
+        body = action[: line_end - at]
+        return line_end, [] if _l_action_ok(body) else [(at, "l-action")]
+    close = _matching(action, 0)
+    nl = action.find("\n", close)
+    stop = at + (len(action) if nl < 0 else nl + 1)
+    if action.count("\n", 0, close) >= _ACTION_LINES or close == len(action):
+        return stop, [(at, "action-lines")]
+    trailing = action[close : stop - at].strip()
+    ok = _l_action_ok(action[1 : close - 1]) and not trailing
+    return stop, [] if ok else [(at, "l-action")]
 
 
-def _l_action_ok(body: str) -> bool:
-    """One odin3_vl_* call (optionally returned) beside BEGIN/yyless statements."""
-    *statements, rest = body.strip().removeprefix("{").removesuffix("}").split(";")
-    calls = 0
-    for statement in statements:
-        match = _L_STATEMENT.fullmatch(statement)
-        if match is None:
-            return False
-        if match.group(1) not in _FLEX_MACROS:
-            calls += 1 if match.group(1).startswith("odin3_vl_") else 2
-    return calls == 1 and rest.strip() == ""
+def _l_block(text: str, blank: str, start: int) -> tuple[int, list[Finding]] | None:
+    """A %{ %} or %top{ } block starting at start (column 0), or None."""
+    if blank.startswith("%{", start):
+        close = blank.find("%}", start)
+        close = len(blank) if close < 0 else close
+        return close + 2, _prologue_body(blank[start + 2 : close], start)
+    if blank.startswith("%top", start) and blank[start + 4 :].lstrip(" \t").startswith("{"):
+        brace = blank.index("{", start)
+        stop = _matching(blank, brace)
+        return stop, _prologue_body(blank[brace + 1 : stop - 1], start)
+    return None
 
 
-def _actions(blank: str, start: int, end: int, lexer: bool) -> list[tuple[int, int]]:
-    """(start, end) offsets of every action in the rules section [start, end)."""
-    found: list[tuple[int, int]] = []
-    pos = start
-    while pos < end:
-        if lexer:
-            line_end = blank.find("\n", pos, end)
-            line_end = end if line_end < 0 else line_end
-            line = blank[pos:line_end]
-            at = pos + _pattern_end(line) if line[:1].strip() else line_end
-            at += len(blank[at:line_end]) - len(blank[at:line_end].lstrip(" \t"))
-            if at < line_end and blank[at] != "|":
-                stop = _brace_end(blank, at) if blank[at] == "{" else line_end
-                found.append((at, stop))
-                line_end = max(line_end, stop)
-            pos = line_end + 1
+def _l_findings(text: str) -> list[Finding]:
+    blank = strip_comments_and_strings(text)
+    found: list[Finding] = []
+    section, offset, skip_to = 1, 0, 0
+    for line in text.splitlines(keepends=True):
+        start, offset = offset, offset + len(line)
+        if start < skip_to:
             continue
-        brace = blank.find("{", pos, end)
-        if brace < 0:
-            break
-        stop = _brace_end(blank, brace)
-        found.append((brace, stop))
-        pos = stop
+        if line.startswith("%%"):
+            section += 1
+            continue
+        code = blank[start:offset].strip()
+        block = _l_block(text, blank, start)
+        if block is not None:
+            skip_to, more = block
+            found += more
+        elif section >= 3 or line[:1].isspace():
+            found += [(start, "prologue" if section >= 3 else "verbatim")] if code else []
+        elif section == 2 and code:
+            skip_to, more = _l_rule(text, start, line)
+            found += more
     return found
 
 
 def grammar_violations(path: str, text: str) -> list[str]:
     """The .y/.l hygiene rules (2C spec §6) for one Bison or Flex file."""
-    lexer = path.endswith(".l")
-    blank = strip_comments_and_strings(text)
-    sections = [m.start() for m in _SECTION.finditer(blank)]
-    rules_start = sections[0] + 2 if sections else len(blank)
-    rules_end = sections[1] if len(sections) > 1 else len(blank)
-    found = _prologue_violations(text, blank, rules_start)
-    if blank[rules_end + 2 :].strip() if len(sections) > 1 else False:
-        found.append((_line_of(text, rules_end), "prologue"))
-    for start, stop in _actions(blank, rules_start, rules_end, lexer):
-        body = blank[start:stop]
-        if body.count("\n") >= _ACTION_LINES:
-            found.append((_line_of(text, start), "action-lines"))
-        elif lexer and not _l_action_ok(body):
-            found.append((_line_of(text, start), "l-action"))
-        elif not lexer and not _y_action_ok(body):
-            found.append((_line_of(text, start), "y-action"))
-    messages = {
-        "prologue": "a prologue holds only #include lines and the YY* macros of 2C spec §6",
-        "action-lines": "an action spans more than three lines",
-        "l-action": "a .l action is one odin3_vl_* call (beside BEGIN/yyless)",
-        "y-action": "a .y action is exactly one VP(...) or VP_ERR(...) statement",
-    }
-    return [f"{path}:{line}: {rule}: {messages[rule]}" for line, rule in found]
+    found = _l_findings(text) if path.endswith(".l") else _y_findings(text)
+    return [
+        f"{path}:{_line_of(text, at)}: {rule}: {_MESSAGES[rule]}" for at, rule in sorted(found)
+    ]
 
 
 def main(argv: list[str]) -> int:

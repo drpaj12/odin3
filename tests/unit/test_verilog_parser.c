@@ -130,12 +130,28 @@ static void test_lloc_skips_empty_symbols(void) {
     TEST_ASSERT_EQUAL_UINT32(10, cur.loc.v);
     TEST_ASSERT_EQUAL_UINT32(14, cur.end.v);
     TEST_ASSERT_EQUAL_UINT32(7, cur.off);
-    /* only empty symbols: as an empty rule */
+    /* only empty symbols: the first one's position (rhs[0] is not read) */
     const odin3_vp_loc none[3] = {{{1}, {5}, 2}, {{8}, {8}, 6}, {{9}, {9}, 7}};
     odin3_vp_lloc(&cur, none, 2);
-    TEST_ASSERT_EQUAL_UINT32(5, cur.loc.v);
-    TEST_ASSERT_EQUAL_UINT32(5, cur.end.v);
-    TEST_ASSERT_EQUAL_UINT32(2, cur.off);
+    TEST_ASSERT_EQUAL_UINT32(8, cur.loc.v);
+    TEST_ASSERT_EQUAL_UINT32(8, cur.end.v);
+    TEST_ASSERT_EQUAL_UINT32(6, cur.off);
+}
+
+/* Error recovery at end of input (Bison's YYLLOC_DEFAULT(*yylsp, yyerror_range, 2)): [0] is
+ * never set, [1] and [2] are the empty end-of-input token; the error token is located there. */
+static void test_lloc_error_at_end_of_input(void) {
+    const odin3_vp_loc eof = {at(20), at(20), 20};
+    const odin3_vp_loc range[3] = {{{0xDEADBEEF}, {0xDEADBEEF}, 0xDEADBEEF}, eof, eof};
+    odin3_vp_loc cur = {{0}, {0}, 0};
+    odin3_vp_lloc(&cur, range, 2);
+    TEST_ASSERT_EQUAL_UINT32(at(20).v, cur.loc.v);
+    TEST_ASSERT_EQUAL_UINT32(at(20).v, cur.end.v);
+    TEST_ASSERT_EQUAL_UINT32(20, cur.off);
+    odin3_vp_ctx ctx = {.run = &run, .ast = ast};
+    odin3_vp_error(&cur, &ctx, "syntax error, unexpected end of file, expecting endmodule");
+    TEST_ASSERT_EQUAL_STRING(
+        "t.v:3:1: error: syntax: unexpected end of file, expecting endmodule\n", logged());
 }
 
 /* --- yyerror (§3.4, plan points (d), (e)) ------------------------------------------------------
@@ -235,6 +251,14 @@ static void test_limits_hook_lowers_and_clamps(void) {
     odin3_vl_run_init(NULL, design);
 }
 
+/* Bison checks YYMAXDEPTH only when its stack grows past YYINITDEPTH: a lower cap is raised. */
+static void test_limits_hook_stack_floor(void) {
+    odin3_verilog_test_set_limits(&run, (odin3_vp_limits){.yymaxdepth = 16});
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_VP_YYINITDEPTH, run.limits.yymaxdepth);
+    odin3_verilog_test_set_limits(&run, (odin3_vp_limits){.yymaxdepth = 1000});
+    TEST_ASSERT_EQUAL_UINT32(1000, run.limits.yymaxdepth);
+}
+
 /* --- the lexer object ------------------------------------------------------------------------ */
 
 static void test_lexer_eof_location(void) {
@@ -266,7 +290,9 @@ static int fail_internal(void *arg) {
     odin3_vl_flex_fatal("flex scanner jammed", odin3_vl_scanner(fatal_lexer));
 }
 
-/* Flex's fatal errors return to the guarded entry point with a status instead of exiting. */
+/* Flex's fatal errors return to the guarded entry point with a status instead of exiting. This
+ * calls the handler directly; that YY_EXIT_FAILURE routes the generated yy_fatal_error to it is
+ * proven by the symbol_rules CTest (libodin3 imports no exit). */
 static void test_flex_fatal_escape(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_vl_open(&run, ast, &stream, &fatal_lexer));
     TEST_ASSERT_EQUAL_INT(-1, odin3_vl_guard(fatal_lexer, fail_memory, NULL));
@@ -351,12 +377,14 @@ int main(void) {
     RUN_TEST(test_unexpected_byte_gives_no_unit);
     RUN_TEST(test_lloc_empty_rule);
     RUN_TEST(test_lloc_skips_empty_symbols);
+    RUN_TEST(test_lloc_error_at_end_of_input);
     RUN_TEST(test_yyerror_messages);
     RUN_TEST(test_yyerror_stack_exhausted_is_fatal);
     RUN_TEST(test_report_cap_stops_after_20_errors);
     RUN_TEST(test_report_cap_logs_the_first_20);
     RUN_TEST(test_report_cap_ignores_warnings);
     RUN_TEST(test_limits_hook_lowers_and_clamps);
+    RUN_TEST(test_limits_hook_stack_floor);
     RUN_TEST(test_lexer_eof_location);
     RUN_TEST(test_flex_fatal_escape);
     RUN_TEST(test_parse_stream_misuse);
