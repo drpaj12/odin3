@@ -9,6 +9,7 @@
  */
 #include "frontends/elab/cval.h"
 
+#include "frontends/elab/cval_internal.h"
 #include "frontends/elab/elab_test.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
@@ -92,31 +93,6 @@ static uint64_t *scratch_words(const op_ctx *ctx, size_t words) {
     return odin3_arena_alloc(ctx->arena, words * sizeof(uint64_t));
 }
 
-/* The used bits of the top word of a width-bit value. */
-static uint64_t top_mask(uint32_t width) {
-    uint32_t used = width % WORD_BITS;
-    return used == 0 ? UINT64_MAX : ((uint64_t)1 << used) - 1;
-}
-
-static void mask_top(const odin3_cval *val) {
-    uint32_t top = odin3_cval_words(val->width) - 1;
-    val->aval[top] &= top_mask(val->width);
-    val->bval[top] &= top_mask(val->width);
-}
-
-/* Bits [from, width) become `bit` (the fill of >>>). */
-static void fill_top(const odin3_cval *val, uint32_t from, odin3_bit bit) {
-    uint64_t fill_a = bit == ODIN3_BIT_1 || bit == ODIN3_BIT_X ? UINT64_MAX : 0;
-    uint64_t fill_b = bit == ODIN3_BIT_X || bit == ODIN3_BIT_Z ? UINT64_MAX : 0;
-    uint32_t words = odin3_cval_words(val->width);
-    for (uint32_t word = from / WORD_BITS; word < words; word++) {
-        uint64_t keep = word == from / WORD_BITS ? ((uint64_t)1 << (from % WORD_BITS)) - 1 : 0;
-        val->aval[word] = (val->aval[word] & keep) | (fill_a & ~keep);
-        val->bval[word] = (val->bval[word] & keep) | (fill_b & ~keep);
-    }
-    mask_top(val);
-}
-
 /* --- bitwise (word-parallel IEEE 4-state tables; z reads as x) ------------------------------ */
 
 typedef struct word4 {
@@ -174,7 +150,7 @@ static odin3_status op_bitwise(const op_ctx *ctx, odin3_cval *out) {
         lhs.aval[i] = res.aval;
         lhs.bval[i] = res.bval;
     }
-    mask_top(&lhs); /* ~ and ~^ set the bits above the width */
+    cval_mask_top(&lhs); /* ~ and ~^ set the bits above the width */
     *out = lhs;
     return ODIN3_OK;
 }
@@ -611,7 +587,7 @@ static odin3_status op_shift(const op_ctx *ctx, odin3_cval *out) {
         odin3_word_shr(&plane_b, amount);
     }
     if (fill != ODIN3_BIT_0 && amount > 0) {
-        fill_top(&lhs, amount >= lhs.width ? 0 : lhs.width - (uint32_t)amount, fill);
+        cval_fill_from(&lhs, amount >= lhs.width ? 0 : lhs.width - (uint32_t)amount, fill);
     }
     *out = lhs;
     return ODIN3_OK;
@@ -627,6 +603,12 @@ static odin3_status common(const op_ctx *ctx, odin3_cval *lhs, odin3_cval *rhs) 
     bool is_signed = (left->flags & right->flags & ODIN3_CVAL_SIGNED) != 0;
     odin3_status st = odin3_cval_resize(ctx->arena, left, width, is_signed, lhs);
     return st == ODIN3_OK ? odin3_cval_resize(ctx->arena, right, width, is_signed, rhs) : st;
+}
+
+/* const_eqx: the same four-state bits (two values of one width; flags are not compared). */
+static bool same_bits(const odin3_cval *lhs, const odin3_cval *rhs) {
+    size_t bytes = (size_t)odin3_cval_words(lhs->width) * sizeof *lhs->aval;
+    return memcmp(lhs->aval, rhs->aval, bytes) == 0 && memcmp(lhs->bval, rhs->bval, bytes) == 0;
 }
 
 /* const_eq: 0 on any 0/1 mismatch, else x when a bit is x/z, else 1. */
@@ -666,7 +648,7 @@ static odin3_bit compare_bit(odin3_cop op, const odin3_cval *lhs, const odin3_cv
         return invert(equal_bit(lhs, rhs));
     case ODIN3_COP_EQX:
     case ODIN3_COP_NEX: {
-        bool same = odin3_cval_equal(lhs, rhs);
+        bool same = same_bits(lhs, rhs);
         return same == (op == ODIN3_COP_EQX) ? ODIN3_BIT_1 : ODIN3_BIT_0;
     }
     default:
@@ -713,7 +695,7 @@ static odin3_bit reduce_and(const odin3_cval *val) {
     uint32_t words = odin3_cval_words(val->width);
     bool unknown = false;
     for (uint32_t i = 0; i < words; i++) {
-        uint64_t used = i + 1 == words ? top_mask(val->width) : UINT64_MAX;
+        uint64_t used = i + 1 == words ? cval_top_mask(val->width) : UINT64_MAX;
         if ((~val->aval[i] & ~val->bval[i] & used) != 0) {
             return ODIN3_BIT_0;
         }

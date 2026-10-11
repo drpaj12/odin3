@@ -2,8 +2,9 @@
 
 A fake `yosys` stands in for the real one: `-V` prints a canned version, and a run reads `b.v`
 and writes `b.il` whose `connect \\y<k>` lines (in reverse order, to check that results are
-matched by name, not by position) give each output the bits of its first operand, or all x
-(`<w>'x`) for every fifth output. Each run is logged, so the batching is visible.
+matched by name, not by position) give each output the bits of its first operand when that is a
+sized literal of the output's width, all x (`<w>'x`) for every fifth output, else zeros. Each
+run is logged, so the batching is visible.
 """
 
 from __future__ import annotations
@@ -20,24 +21,31 @@ import gen_const_table as gct
 
 from . import helpers
 
-FAKE_YOSYS = """\
-#!/usr/bin/env python3
+FAKE_YOSYS = r"""#!/usr/bin/env python3
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 if sys.argv[1:] == ["-V"]:
-    print("{version}")
+    print("@VERSION@")
     sys.exit(0)
 with open(HERE / "runs.log", "a") as log:
-    log.write(" ".join(sys.argv[1:]) + "\\n")
+    log.write(" ".join(sys.argv[1:]) + "\n")
 text = Path("b.v").read_text()
+widths = {k: int(top) + 1 for top, k in re.findall(r"output \[(\d+):0\] y(\d+)", text)}
 lines = []
-for k, width, rhs in re.findall(r"assign y(\\d+) = (?:[^0-9]*)(\\d+)'s?b([01xz]+)", text):
-    bits = "{{}}'x".format(width) if int(k) % 5 == 0 else "{{}}'{{}}".format(width, rhs)
-    lines.append("  connect \\\\y{{}} {{}}".format(k, bits))
-Path("b.il").write_text("module \\\\b\\n" + "\\n".join(reversed(lines)) + "\\nend\\n")
+for k, rhs in re.findall(r"assign y(\d+) = (.*);", text):
+    width = widths[k]
+    first = re.match(r"[^0-9']*(\d+)'s?b([01xz]+)", rhs)
+    if int(k) % 5 == 0:
+        bits = str(width) + "'x"
+    elif first is not None and int(first.group(1)) == width:
+        bits = str(width) + "'" + first.group(2)
+    else:
+        bits = str(width) + "'" + "0" * width
+    lines.append("  connect \\y" + k + " " + bits)
+Path("b.il").write_text("module \\b\n" + "\n".join(reversed(lines)) + "\nend\n")
 """
 
 VERSION_055 = "Yosys 0.55 (git sha1 60f126cd0, fake)"
@@ -54,7 +62,7 @@ class GenConstTableTest(unittest.TestCase):
 
     def _fake(self, version: str) -> Path:
         path = self.root / "yosys"
-        path.write_text(FAKE_YOSYS.format(version=version))
+        path.write_text(FAKE_YOSYS.replace("@VERSION@", version))
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
 
@@ -135,6 +143,54 @@ class GenConstTableTest(unittest.TestCase):
                                           case.a, case.b or "-"])
             want = "x" * case.width if (i % gct.BATCH) % 5 == 0 else case.a
             self.assertEqual(fields[5], want, line)
+
+    def test_mixed_operands_and_context(self) -> None:
+        signed_one = gct.Operand("1" + "0" * 31, True, True)
+        self.assertEqual(signed_one.bits, "0" + signed_one.digits)  # const2ast's extra 0
+        self.assertEqual(signed_one.flags, "S")
+        self.assertEqual(signed_one.literal(), "'sb1" + "0" * 31)
+        self.assertEqual(gct.Operand("1" * 32, False, True).bits, "1" * 32)
+        self.assertEqual(gct.Operand("101", False, False).flags, "u")
+        sa = gct.Operand("1000", True, False)
+        ub = gct.Operand("1", False, False)
+        shift = gct.MixedCase("SSHR", 4, False, sa, ub)
+        self.assertFalse(shift.signed)  # the unsigned wrapper makes the context unsigned
+        self.assertTrue(gct.MixedCase("SSHR", 4, True, sa, ub).signed)
+        self.assertFalse(gct.MixedCase("ADD", 4, True, sa, ub).signed)
+        self.assertFalse(gct.MixedCase("LT", 4, True, sa, sa).signed)
+        self.assertEqual(gct.mixed_expression(shift), "1'b1 ? (4'sb1000 >>> 1'b1) : 1'b0")
+        self.assertEqual(gct.MixedCase("ADD", 1, True, sa, signed_one).self_width, 33)
+        self.assertEqual(gct.MixedCase("SHL", 1, True, sa, signed_one).self_width, 4)
+
+    def test_mixed_mix(self) -> None:
+        cases = gct.make_mixed_cases(2026, gct.DEFAULT_MIXED_COUNT)
+        self.assertEqual(cases, gct.make_mixed_cases(2026, gct.DEFAULT_MIXED_COUNT))
+        self.assertEqual({c.op for c in cases}, set(gct.OPS))
+        binary = [c for c in cases if c.b is not None]
+        self.assertTrue(any(len(c.a.bits) != len(c.b.bits) for c in binary if c.b))
+        self.assertTrue(any(c.a.signed != c.b.signed for c in binary if c.b))
+        self.assertTrue(any(c.a.unsized for c in cases))
+        self.assertTrue(any(c.op in gct.A_SIGN and c.a.signed and not c.signed for c in cases))
+        tight_sshr = [c for c in cases if c.op == "SSHR" and c.a.signed and not c.signed
+                      and c.width == len(c.a.bits)]
+        self.assertTrue(tight_sshr)
+        for case in cases:
+            self.assertGreaterEqual(case.width, case.self_width)
+            self.assertEqual(case.b is None, gct.OPS[case.op].arity == 1)
+
+    def test_mixed_table_lines(self) -> None:
+        code, err, out = self._run(VERSION_055, "--mixed", "--count", "300")
+        self.assertEqual(code, 0, err)
+        lines = out.read_text().splitlines()
+        self.assertEqual(lines[0], "# gen-const-table mixed seed 2026 count 300")
+        body = [line for line in lines if not line.startswith("#")]
+        for case, line in zip(gct.make_mixed_cases(2026, 300), body, strict=True):
+            fields = line.split()
+            self.assertEqual(len(fields), 8, line)
+            want = [case.op, str(case.width), "1" if case.signed else "0", case.a.bits,
+                    case.a.flags]
+            self.assertEqual(fields[:5], want)
+            self.assertEqual(len(fields[7]), case.width)
 
     def test_refuses_a_yosys_that_is_not_0_55(self) -> None:
         code, err, out = self._run(VERSION_069, "--count", "10")

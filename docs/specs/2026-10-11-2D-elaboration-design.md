@@ -10,7 +10,10 @@ amendments from the plan review (`2D-plan-review`, controller ruling C1 and mino
 following Yosys 0.55: EL-39's write temporaries start each block as `addr = x`, `data = x`,
 `en = 0` (was `en = 0` only: a path that never writes left `addr`/`data` unassigned, a
 combinational loop after `proc`); EL-30 lowers `~&a`/`~|a` to `$logic_not` of the reduction, as
-Yosys's parser does (was `$not`).) Decisions 1–13
+Yosys's parser does (was `$not`). v4.1: EL-14's `==`/`!=` and `**` text corrected to Yosys
+0.55's `const_eq`/`const_pow`, as found by 2D Task 7's constant table and probes: `==` is 0 on any
+0/1 mismatch even beside an x/z bit (was "x when any compared bit is x or z"), and `0 ** positive`
+is 0 even when x/z bits read as 0 make the base or exponent so.) Decisions 1–13
 ruled by the controller as agent defaults (§20). Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
 semantics). Spec: `docs/DESIGN.md` §4.0 (libraries, top), §4.1, §4.5, §5, §6 step 2, §12, §15.
 Inputs: PHASE2 #3, #4 (exit bar), #5, #6 (coverage, D1–D5), #7/#8 (the AST and its carry-overs),
@@ -566,13 +569,20 @@ semantics of the word cells (simlib, 1E), so folding in 2D and evaluation in a c
   toward zero, `%` takes the dividend's sign. `**`: `0 ** negative` is x, `0 ** positive` is 0,
   a negative exponent gives 0 except for bases 1 and −1 (`(−1) ** b` is ±1 by parity), and a
   positive exponent is computed by square-and-multiply modulo 2^width (`const_pow`); the
-  exponent's own signedness decides whether it is negative.
+  exponent's own signedness decides whether it is negative. As in `const_pow`, the two zero-base
+  cases are decided **before** the x/z check, with x and z bits reading as 0 (only a known-1 top
+  bit makes a signed value negative): `8'b0000000x ** 3`, `8'bxxxxxxxx ** 3` and
+  `0 ** 8'b0000001x` are 0, and `0 ** 8'sb1x00000x` (negative) is x; otherwise an x or z bit in
+  either operand makes the result x (verified on 0.55, v4.1).
 - **Bitwise** `& | ^ ~^ ~`: per bit with the IEEE 4-state tables (`0 & x = 0`, `1 | x = 1`, z
   reads as x).
 - **Reductions** and **logical** `! && ||`: an operand is true if any bit is 1, false if all bits
   are 0, else x (`0 && x = 0`, `1 || x = 1`).
-- **Comparisons** `== != < <= > >=`: x when any compared bit is x or z; else 0/1. `=== !==`:
-  bit-exact 4-state comparison (constants only, EL-30 says what happens with a signal).
+- **Comparisons** `== !=` (`const_eq`/`const_ne`): 0 (`!=`: 1) when any bit pair is a known 0
+  against a known 1, **even beside an x or z bit**; otherwise x when any compared bit is x or z;
+  else 1 (`!=`: 0). Verified on 0.55 (v4.1): `4'b1x01 == 4'b1000` is 0, `4'b1x00 == 4'b1000` is x.
+  `< <= > >=`: x when any compared bit is x or z; else 0/1. `=== !==`: bit-exact 4-state
+  comparison (constants only, EL-30 says what happens with a signal).
 - **Shifts**: `<< <<<` fill 0; `>>` fills 0; `>>>` fills the sign bit when the left operand is
   signed in context, else 0; a shift amount with an x/z bit makes the result all x; an amount
   ≥ width gives all fill bits.

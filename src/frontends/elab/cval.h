@@ -113,8 +113,11 @@ odin3_status odin3_cval_to_number(odin3_arena *arena, const odin3_cval *val, odi
 /*
  * val at `width` bits (EL-13): an UNSIZED value repeats its top bit (Yosys bitsAsConst), a sized
  * one is sign-extended when is_signed and zero-extended otherwise (x and z top bits repeat too);
- * truncation keeps the low bits. The result is sized and not STRING, with SIGNED = is_signed.
- * INVALID_ARG (logged) for NULL or a width of 0 or above the cap; NO_MEMORY.
+ * truncation keeps the low bits. The result is sized and not STRING, with SIGNED = is_signed,
+ * even at the same width. EL-16's typed-parameter conversion must therefore not call this when
+ * the widths are equal: Yosys keeps the constant, UNSIZED and STRING included (simplify.cc
+ * 2381-2390), so the caller copies it (odin3_cval_copy) and sets only SIGNED. INVALID_ARG
+ * (logged) for NULL or a width of 0 or above the cap; NO_MEMORY.
  */
 odin3_status odin3_cval_resize(odin3_arena *arena, const odin3_cval *val, uint32_t width,
                                bool is_signed, odin3_cval *out);
@@ -142,7 +145,8 @@ uint64_t odin3_cval_hash(const odin3_cval *val, uint64_t seed);
 
 /*
  * Appends EL-9's spelling: a plain decimal for a 32-bit SIGNED value without x/z (`8`, `-3`); a
- * STRING value (whole bytes, no x/z) as "text", NUL bytes skipped and `"` and `\` escaped;
+ * STRING value as "text" with `"` and `\` escaped when every byte is printable (no NUL, control
+ * byte or DEL; the empty string "" is its one NUL byte), so distinct values never print alike;
  * otherwise `<width>'<s>b<bits>` MSB first (`4'b10x0`, `8'sb11110000`). INVALID_ARG (logged) for
  * NULL; NO_MEMORY (the buffer is unchanged).
  */

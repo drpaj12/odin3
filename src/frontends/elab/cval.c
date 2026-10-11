@@ -5,6 +5,7 @@
 #include "frontends/elab/cval.h"
 
 #include "ast/ast.h"
+#include "frontends/elab/cval_internal.h"
 #include "frontends/elab/elab_test.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
@@ -26,6 +27,8 @@ enum {
     DECIMAL_WIDTH = 32, /* EL-9: a 32-bit signed known value prints as a decimal */
     FLAGS_ALL = ODIN3_CVAL_SIGNED | ODIN3_CVAL_UNSIZED | ODIN3_CVAL_STRING,
     PRINT_CHUNK = 64,
+    FIRST_PRINTABLE = 0x20, /* bytes below are control bytes */
+    DEL = 0x7F,
     HIGH_SHIFT = 32, /* where the flags go in the hashed header word */
 };
 
@@ -36,22 +39,6 @@ static odin3_status misuse(const char *fn, const char *why) {
 
 static bool width_ok(uint64_t width) {
     return width >= 1 && width <= odin3_elab_limits_get()->max_width;
-}
-
-static uint64_t low_mask(uint32_t count) {
-    return count >= WORD_BITS ? UINT64_MAX : ((uint64_t)1 << count) - 1;
-}
-
-/* The used bits of the top word of a width-bit value. */
-static uint64_t top_mask(uint32_t width) {
-    uint32_t used = width % WORD_BITS;
-    return used == 0 ? UINT64_MAX : low_mask(used);
-}
-
-static void mask_top(odin3_cval *val) {
-    uint32_t top = odin3_cval_words(val->width) - 1;
-    val->aval[top] &= top_mask(val->width);
-    val->bval[top] &= top_mask(val->width);
 }
 
 /* Zeroed planes for `width` bits (already checked), flags 0. *out unchanged on failure. */
@@ -78,25 +65,6 @@ static void set_bit(const odin3_cval *val, uint32_t pos, odin3_bit bit) {
     uint32_t word = pos / WORD_BITS;
     val->aval[word] = plane_a(bit) ? val->aval[word] | mask : val->aval[word] & ~mask;
     val->bval[word] = plane_b(bit) ? val->bval[word] | mask : val->bval[word] & ~mask;
-}
-
-/* Bits [from, width) become `bit`. */
-static void fill_from(odin3_cval *val, uint32_t from, odin3_bit bit) {
-    uint32_t words = odin3_cval_words(val->width);
-    uint32_t word = from / WORD_BITS;
-    if (from >= val->width) {
-        return;
-    }
-    uint64_t keep = low_mask(from % WORD_BITS);
-    uint64_t fill_a = plane_a(bit) ? UINT64_MAX : 0;
-    uint64_t fill_b = plane_b(bit) ? UINT64_MAX : 0;
-    val->aval[word] = (val->aval[word] & keep) | (fill_a & ~keep);
-    val->bval[word] = (val->bval[word] & keep) | (fill_b & ~keep);
-    for (word++; word < words; word++) {
-        val->aval[word] = fill_a;
-        val->bval[word] = fill_b;
-    }
-    mask_top(val);
 }
 
 /* --- copying bit ranges word by word ------------------------------------------------------- */
@@ -130,7 +98,7 @@ typedef struct plane_slot {
 static void write_word(const plane_slot *slot, uint64_t bits) {
     uint32_t word = slot->pos / WORD_BITS;
     uint32_t off = slot->pos % WORD_BITS;
-    uint64_t mask = low_mask(slot->count);
+    uint64_t mask = cval_low_mask(slot->count);
     bits &= mask;
     slot->words[word] = (slot->words[word] & ~(mask << off)) | (bits << off);
     if (off != 0 && off + slot->count > WORD_BITS) {
@@ -176,7 +144,7 @@ odin3_status odin3_cval_new(odin3_arena *arena, const odin3_cval_spec *spec, odi
         return st;
     }
     val.flags = spec->flags;
-    fill_from(&val, 0, spec->fill);
+    cval_fill_from(&val, 0, spec->fill);
     *out = val;
     return ODIN3_OK;
 }
@@ -259,7 +227,7 @@ odin3_status odin3_cval_from_i64(odin3_arena *arena, const odin3_cval_int *num, 
     for (uint32_t i = 1; i < words; i++) {
         val.aval[i] = num->value < 0 ? UINT64_MAX : 0;
     }
-    mask_top(&val);
+    cval_mask_top(&val);
     val.flags = num->is_signed ? ODIN3_CVAL_SIGNED : 0;
     *out = val;
     return ODIN3_OK;
@@ -343,7 +311,7 @@ odin3_status odin3_cval_resize(odin3_arena *arena, const odin3_cval *val, uint32
     const bit_copy copy = {&res, val, 0, 0, keep};
     copy_bits(&copy);
     bool repeat = is_signed || (val->flags & ODIN3_CVAL_UNSIZED) != 0;
-    fill_from(&res, keep, repeat ? odin3_cval_bit(val, val->width - 1) : ODIN3_BIT_0);
+    cval_fill_from(&res, keep, repeat ? odin3_cval_bit(val, val->width - 1) : ODIN3_BIT_0);
     res.flags = is_signed ? ODIN3_CVAL_SIGNED : 0;
     *out = res;
     return ODIN3_OK;
@@ -387,7 +355,7 @@ bool odin3_cval_is_known(const odin3_cval *val) {
 static bool high_words_are(const odin3_cval *val, bool ones) {
     uint32_t words = odin3_cval_words(val->width);
     for (uint32_t i = 1; i < words; i++) {
-        uint64_t used = i + 1 == words ? top_mask(val->width) : UINT64_MAX;
+        uint64_t used = i + 1 == words ? cval_top_mask(val->width) : UINT64_MAX;
         if (val->aval[i] != (ones ? used : 0)) {
             return false;
         }
@@ -403,7 +371,7 @@ bool odin3_cval_to_i64(const odin3_cval *val, int64_t *out) {
         (val->flags & ODIN3_CVAL_SIGNED) != 0 && odin3_cval_bit(val, val->width - 1) == ODIN3_BIT_1;
     uint64_t low = val->aval[0];
     if (val->width < WORD_BITS) {
-        low |= negative ? ~low_mask(val->width) : 0;
+        low |= negative ? ~cval_low_mask(val->width) : 0;
     } else if ((low >> (WORD_BITS - 1) != 0) != negative || !high_words_are(val, negative)) {
         return false;
     }
@@ -428,9 +396,26 @@ uint64_t odin3_cval_hash(const odin3_cval *val, uint64_t seed) {
 
 /* --- printing (EL-9) ----------------------------------------------------------------------- */
 
+/*
+ * A STRING value prints as "text" when every byte is printable (no NUL or control byte, which
+ * would make two values print alike or put a raw control byte into a name), or as "" when it is
+ * the empty string's single NUL byte; otherwise it prints as bits.
+ */
 static bool prints_as_string(const odin3_cval *val) {
-    return (val->flags & ODIN3_CVAL_STRING) != 0 && val->width % BYTE_BITS == 0 &&
-           odin3_cval_is_known(val);
+    if ((val->flags & ODIN3_CVAL_STRING) == 0 || val->width % BYTE_BITS != 0 ||
+        !odin3_cval_is_known(val)) {
+        return false;
+    }
+    if (val->width == BYTE_BITS && val->aval[0] == 0) {
+        return true; /* "" */
+    }
+    for (uint32_t pos = 0; pos < val->width; pos += BYTE_BITS) {
+        uint64_t byte = (val->aval[pos / WORD_BITS] >> (pos % WORD_BITS)) & BYTE_MASK;
+        if (byte < FIRST_PRINTABLE || byte == DEL) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static odin3_status print_string(const odin3_cval *val, odin3_strbuf *out) {
@@ -441,7 +426,7 @@ static odin3_status print_string(const odin3_cval *val, odin3_strbuf *out) {
         if (ch == '"' || ch == '\\') {
             st = odin3_strbuf_append(out, (odin3_bytes){"\\", 1});
         }
-        if (ch != '\0' && st == ODIN3_OK) {
+        if (ch != '\0' && st == ODIN3_OK) { /* only the empty string's NUL reaches here */
             st = odin3_strbuf_append(out, (odin3_bytes){&ch, 1});
         }
     }
@@ -500,7 +485,7 @@ odin3_status odin3_cval_select(odin3_arena *arena, const odin3_cval_part *part, 
     if (st != ODIN3_OK) {
         return st;
     }
-    fill_from(&res, 0, ODIN3_BIT_X);
+    cval_fill_from(&res, 0, ODIN3_BIT_X);
     int64_t lo = part->lo;
     if (lo < (int64_t)part->val->width && lo > -(int64_t)part->width) {
         int64_t from = lo > 0 ? lo : 0;

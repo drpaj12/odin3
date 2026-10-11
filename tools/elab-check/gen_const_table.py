@@ -2,7 +2,7 @@
 
 Usage::
 
-    gen-const-table --yosys Y --out F [--seed S] [--count N]
+    gen-const-table --yosys Y --out F [--seed S] [--count N] [--mixed]
 
 Makes N random cases (deterministic per seed) covering every operator of ``odin3_cop`` at the
 widths 1, 7, 64, 65 and 200 (200 at half weight, ``WIDTH_CYCLE``), unsigned and signed, with about
@@ -18,6 +18,13 @@ one line ``<op> <width> <s> <a> <b> <result>``: the operator's ``odin3_cop`` nam
 for signed, and the operands and the result MSB first in 0 1 x z (``-`` for a unary operator's
 missing b). ``test_elab_cval`` replays every line through ``odin3_cval_op``.
 
+``--mixed`` (``tests/elab/const_table_mixed.txt``) draws each operand's width and sign on its own,
+makes a fifth of the operands unsized 32-digit literals, and sets the context: the output is at
+least as wide as the expression, which is written ``1'b1 ? (<expr>) : 1'sb0`` (keeping its own
+context sign) or ``1'b1 ? (<expr>) : 1'b0`` (an unsigned context, so >>> fills 0 even for a
+signed a). Its lines are ``<op> <width> <s> <a> <a-flags> <b> <b-flags> <result>``: the context
+width and sign, then each operand as Yosys sizes it with its flags (u s sized, U S unsized).
+
 Exit 0 on success, 1 when Yosys fails, 2 on a usage error or a refused Yosys.
 """
 
@@ -30,7 +37,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 BATCH = 256
@@ -42,6 +49,19 @@ WIDTH_CYCLE = (1, 7, 64, 65, 200, 1, 7, 64, 65)
 DEFAULT_SEED = 2026
 DEFAULT_COUNT = 3060  # 90 cases per operator
 MIN_COUNT = 3000  # test_elab_cval's floor
+
+# --mixed: each operand's width and sign drawn on its own, a fifth of the operands unsized.
+MIXED_WIDTHS = (1, 2, 3, 7, 31, 32, 33, 63, 64, 65, 127, 128, 129, 200, 256)
+AMOUNT_WIDTHS = (1, 2, 3, 7, 8, 32, 64, 65, 72)  # shift amounts
+UNSIZED_DIGITS = 32  # an unsized operand is written with this many binary digits
+UNSIZED_SHARE = 5  # one operand in UNSIZED_SHARE is an unsized literal
+TIGHT_SHARE = 3  # one case in TIGHT_SHARE has the context of the expression's own width, so a
+#                 signed a in an unsigned context keeps its top bit (>>> then fills by the context)
+DEFAULT_MIXED_COUNT = 2040  # 60 cases per operator; about 450 KB
+# Operators whose context sign is s(a) && s(b), and those whose context sign is s(a) (Table
+# 5-22); comparisons, logical operators and reductions give an unsigned 1-bit result.
+BOTH_SIGNS = frozenset({"ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR", "XNOR"})
+A_SIGN = frozenset({"POW", "SHL", "SHR", "SSHL", "SSHR", "NEG", "POS", "NOT"})
 XZ_SHARE = 3  # one operand in XZ_SHARE gets x/z bits
 YOSYS_TIMEOUT = 600
 
@@ -113,6 +133,60 @@ class Case:
     b: str | None
 
 
+@dataclass(frozen=True)
+class Operand:
+    """A --mixed operand: its digits as written (MSB first), its sign, and whether it is unsized."""
+
+    digits: str
+    signed: bool
+    unsized: bool
+
+    @property
+    def bits(self) -> str:
+        """The value as Yosys sizes it: an unsized signed literal whose top digit is 1 gains a 0
+        bit above it (const2ast.cc 238-240; 2A's odin3_ast_number_value)."""
+        grow = self.unsized and self.signed and self.digits[0] == "1"
+        return "0" + self.digits if grow else self.digits
+
+    @property
+    def flags(self) -> str:
+        """u/s sized unsigned/signed, U/S unsized unsigned/signed."""
+        return ("S" if self.signed else "U") if self.unsized else ("s" if self.signed else "u")
+
+    def literal(self) -> str:
+        size = "" if self.unsized else str(len(self.digits))
+        return f"{size}'{'s' if self.signed else ''}b{self.digits}"
+
+
+@dataclass(frozen=True)
+class MixedCase:
+    """A --mixed case. The expression is wrapped as `1'b1 ? (<expr>) : 1'sb0` (keeping its context
+    sign) or `1'b1 ? (<expr>) : 1'b0` (an unsigned context), so the context sign can differ from
+    a's. A constant conditional passes the branch's x and z bits through; an arithmetic wrapper such
+    as `+ 1'b0` would turn every result with an x into all x."""
+
+    op: str
+    width: int  # the context width, which is the output's
+    wrap_signed: bool
+    a: Operand
+    b: Operand | None
+
+    @property
+    def signed(self) -> bool:
+        """The context sign (IEEE Table 5-22) the operator is folded with."""
+        if self.op in BOTH_SIGNS:
+            natural = self.a.signed and self.b is not None and self.b.signed
+        else:
+            natural = self.op in A_SIGN and self.a.signed
+        return natural and self.wrap_signed
+
+    @property
+    def self_width(self) -> int:
+        if self.op in BOTH_SIGNS and self.b is not None:
+            return max(len(self.a.bits), len(self.b.bits))
+        return len(self.a.bits) if self.op in A_SIGN else 1
+
+
 def _bits(value: int, width: int) -> str:
     return format(value & ((1 << width) - 1), f"0{width}b")
 
@@ -164,6 +238,30 @@ def make_cases(seed: int, count: int) -> list[Case]:
     return cases
 
 
+def _mixed_operand(rng: random.Random, kind: str) -> Operand:
+    signed = rng.random() < 0.5
+    if rng.randrange(UNSIZED_SHARE) == 0:
+        return Operand(_operand(rng, UNSIZED_DIGITS, kind), signed, True)
+    width = rng.choice(AMOUNT_WIDTHS if kind == "amount" else MIXED_WIDTHS)
+    return Operand(_operand(rng, width, kind), signed, False)
+
+
+def make_mixed_cases(seed: int, count: int) -> list[MixedCase]:
+    """count --mixed cases, cycling the operator; widths, signs and operands from the seed."""
+    rng = random.Random(seed)
+    names = list(OPS)
+    cases: list[MixedCase] = []
+    for i in range(count):
+        name = names[i % len(names)]
+        op = OPS[name]
+        a = _mixed_operand(rng, "any")
+        b = _mixed_operand(rng, op.b_kind) if op.arity == 2 else None
+        draft = MixedCase(name, 1, rng.random() < 0.5, a, b)
+        width = rng.choice(MIXED_WIDTHS) if rng.randrange(TIGHT_SHARE) != 0 else 1
+        cases.append(replace(draft, width=max(width, draft.self_width)))
+    return cases
+
+
 def literal(bits: str, signed: bool) -> str:
     return f"{len(bits)}'{'s' if signed else ''}b{bits}"
 
@@ -176,9 +274,20 @@ def expression(case: Case) -> str:
     return f"{a} {op.symbol} {literal(case.b, case.signed)}"
 
 
-def module_text(cases: Sequence[Case]) -> str:
+def mixed_expression(case: MixedCase) -> str:
+    op = OPS[case.op]
+    a = case.a.literal()
+    inner = f"{op.symbol}{a}" if case.b is None else f"{a} {op.symbol} {case.b.literal()}"
+    return f"1'b1 ? ({inner}) : 1'{'s' if case.wrap_signed else ''}b0"
+
+
+def any_expression(case: Case | MixedCase) -> str:
+    return expression(case) if isinstance(case, Case) else mixed_expression(case)
+
+
+def module_text(cases: Sequence[Case | MixedCase]) -> str:
     ports = ",\n".join(f"  output [{c.width - 1}:0] y{k}" for k, c in enumerate(cases))
-    body = "\n".join(f"assign y{k} = {expression(c)};" for k, c in enumerate(cases))
+    body = "\n".join(f"assign y{k} = {any_expression(c)};" for k, c in enumerate(cases))
     return f"module b(\n{ports}\n);\n{body}\nendmodule\n"
 
 
@@ -233,7 +342,7 @@ def yosys_version(yosys: str) -> str:
     return version
 
 
-def run_batch(yosys: str, cases: Sequence[Case], workdir: Path) -> list[str]:
+def run_batch(yosys: str, cases: Sequence[Case | MixedCase], workdir: Path) -> list[str]:
     """The results of one batch, in case order."""
     (workdir / "b.v").write_text(module_text(cases))
     script = "read_verilog -sv b.v; write_rtlil b.il"
@@ -246,29 +355,45 @@ def run_batch(yosys: str, cases: Sequence[Case], workdir: Path) -> list[str]:
     for k, case in enumerate(cases):
         bits = found.get(k)
         if bits is None or len(bits) != case.width:
-            raise GenError(f"y{k} ({expression(case)}): no {case.width}-bit constant in b.il")
+            raise GenError(f"y{k} ({any_expression(case)}): no {case.width}-bit constant")
         results.append(bits)
     return results
 
 
-def table_text(header: Sequence[str], cases: Sequence[Case], results: Sequence[str]) -> str:
+def case_line(case: Case | MixedCase, result: str) -> str:
+    sign = "1" if case.signed else "0"
+    if isinstance(case, Case):
+        return f"{case.op} {case.width} {sign} {case.a} {case.b or '-'} {result}"
+    b = f"{case.b.bits} {case.b.flags}" if case.b is not None else "- -"
+    return f"{case.op} {case.width} {sign} {case.a.bits} {case.a.flags} {b} {result}"
+
+
+def table_text(header: Sequence[str], cases: Sequence[Case | MixedCase],
+               results: Sequence[str]) -> str:
     lines = list(header)
-    for case, result in zip(cases, results, strict=True):
-        sign = "1" if case.signed else "0"
-        lines.append(f"{case.op} {case.width} {sign} {case.a} {case.b or '-'} {result}")
+    lines += [case_line(case, result) for case, result in zip(cases, results, strict=True)]
     return "\n".join(lines) + "\n"
 
 
-def generate(yosys: str, seed: int, count: int) -> str:
+def _header(mixed: bool, seed: int, count: int, version: str) -> list[str]:
+    if not mixed:
+        return [f"# gen-const-table seed {seed} count {count}", f"# yosys: {version}",
+                "# <op> <width> <s> <a> <b> <result>: MSB first in 0 1 x z, '-' for no b"]
+    return [f"# gen-const-table mixed seed {seed} count {count}", f"# yosys: {version}",
+            "# <op> <width> <s> <a> <a-flags> <b> <b-flags> <result>: the context width and",
+            "# sign, then each operand (MSB first, as Yosys sizes it) with its flags: u s sized",
+            "# unsigned/signed, U S unsized unsigned/signed; '- -' for no b"]
+
+
+def generate(yosys: str, seed: int, count: int, mixed: bool = False) -> str:
     version = yosys_version(yosys)
-    cases = make_cases(seed, count)
+    cases: Sequence[Case | MixedCase] = (
+        make_mixed_cases(seed, count) if mixed else make_cases(seed, count))
     results: list[str] = []
     with tempfile.TemporaryDirectory(prefix="gen-const-table-") as tmp:
         for start in range(0, len(cases), BATCH):
             results += run_batch(yosys, cases[start:start + BATCH], Path(tmp))
-    header = [f"# gen-const-table seed {seed} count {count}", f"# yosys: {version}",
-              "# <op> <width> <s> <a> <b> <result>: MSB first in 0 1 x z, '-' for no b"]
-    return table_text(header, cases, results)
+    return table_text(_header(mixed, seed, count, version), cases, results)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -276,12 +401,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--yosys", required=True, help="the Yosys 0.55 binary")
     parser.add_argument("--out", required=True, type=Path, help="the table to write")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
+    parser.add_argument("--count", type=int, default=None,
+                        help=f"cases (default {DEFAULT_COUNT}, --mixed {DEFAULT_MIXED_COUNT})")
+    parser.add_argument("--mixed", action="store_true",
+                        help="operand widths, signs and sizes drawn independently")
     args = parser.parse_args(argv)
+    if args.count is None:
+        args.count = DEFAULT_MIXED_COUNT if args.mixed else DEFAULT_COUNT
     if args.count < 1:
         parser.error("--count must be at least 1")
     try:
-        text = generate(args.yosys, args.seed, args.count)
+        text = generate(args.yosys, args.seed, args.count, args.mixed)
     except YosysRefused as exc:
         print(f"gen-const-table: {exc}", file=sys.stderr)
         return 2

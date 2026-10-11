@@ -33,7 +33,9 @@
 enum {
     TEXT = 1 << 12,
     LINE = 1 << 11,
-    TABLE_FIELDS = 6,
+    PLAIN_FIELDS = 6,
+    MIXED_FIELDS = 8,
+    MIN_MIXED = 2000,
     MIN_TABLE = 3000,
     MAX_REPORTED = 20,
     OOM_LIMIT = 64,
@@ -196,18 +198,18 @@ static odin3_cop op_named(const char *name) {
     return ODIN3_COP_COUNT;
 }
 
-/* A table line's six fields: op, width, sign, a, b ("-" for none), result. */
+/* A table line's fields: six in const_table.txt, eight in const_table_mixed.txt. */
 typedef struct table_line {
     char text[LINE];
-    const char *field[TABLE_FIELDS];
+    const char *field[MIXED_FIELDS];
 } table_line;
 
-static void split_line(table_line *row, const char *line) {
+static void split_line(table_line *row, const char *line, int fields) {
     TEST_ASSERT_LESS_THAN_size_t(LINE, strlen(line));
     strcpy(row->text, line);
     char *save = NULL;
     char *word = strtok_r(row->text, " ", &save);
-    for (int i = 0; i < TABLE_FIELDS; i++) {
+    for (int i = 0; i < fields; i++) {
         TEST_ASSERT_NOT_NULL_MESSAGE(word, line);
         row->field[i] = word;
         word = strtok_r(NULL, " ", &save);
@@ -215,29 +217,73 @@ static void split_line(table_line *row, const char *line) {
     TEST_ASSERT_NULL_MESSAGE(word, line);
 }
 
-/* One table line: false (reported) when odin3_cval_op disagrees with Yosys. */
-static bool table_case(const char *line) {
+/* A mixed table's operand flags: u s sized unsigned/signed, U S unsized unsigned/signed. */
+static uint8_t flags_of(const char *code) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strchr("usUS", code[0]), code);
+    uint8_t flags = code[0] == 's' || code[0] == 'S' ? ODIN3_CVAL_SIGNED : 0;
+    return (uint8_t)(flags | (code[0] == 'U' || code[0] == 'S' ? ODIN3_CVAL_UNSIZED : 0));
+}
+
+/* EL-14's result flags: the context sign for arithmetic, bitwise, shifts and **; unsigned for
+ * comparisons, logical operators and reductions; never UNSIZED or STRING. */
+static uint8_t result_flags(odin3_cop op, bool is_signed) {
+    bool by_context =
+        op <= ODIN3_COP_SSHR || op == ODIN3_COP_NEG || op == ODIN3_COP_POS || op == ODIN3_COP_NOT;
+    return by_context && is_signed ? ODIN3_CVAL_SIGNED : 0;
+}
+
+/* One case of a table: false (reported) when odin3_cval_op disagrees with Yosys. */
+typedef struct table_case {
+    const odin3_cop_args *args;
+    const char *want;
+    const char *line;
+} table_case;
+
+static bool check_case(const table_case *tc) {
+    odin3_cval out = op_at(tc->args);
+    uint8_t flags = result_flags(tc->args->op, tc->args->is_signed);
+    if (strcmp(tc->want, text_of(&out)) == 0 && out.flags == flags) {
+        return true;
+    }
+    printf("const_table: %s  got %s (flags %u)\n", tc->line, text_of(&out), out.flags);
+    return false;
+}
+
+/* <op> <width> <s> <a> <b> <result>: both operands at the width and sign. */
+static bool plain_line(const char *line) {
     static table_line row;
-    split_line(&row, line);
-    uint32_t width = (uint32_t)strtoul(row.field[1], NULL, 10);
+    split_line(&row, line, PLAIN_FIELDS);
     bool is_signed = strcmp(row.field[2], "1") == 0;
     bool unary = strcmp(row.field[4], "-") == 0;
     uint8_t flags = is_signed ? ODIN3_CVAL_SIGNED : 0;
     odin3_cval left = cv(row.field[3], flags);
     odin3_cval right = cv(unary ? "0" : row.field[4], flags);
-    const odin3_cop_args args = {op_named(row.field[0]), &left, unary ? NULL : &right, width,
-                                 is_signed};
-    odin3_cval out = op_at(&args);
-    if (strcmp(row.field[5], text_of(&out)) == 0) {
-        return true;
-    }
-    printf("const_table: %s  got %s\n", line, text_of(&out));
-    return false;
+    const odin3_cop_args args = {op_named(row.field[0]), &left, unary ? NULL : &right,
+                                 (uint32_t)strtoul(row.field[1], NULL, 10), is_signed};
+    const table_case tc = {&args, row.field[5], line};
+    return check_case(&tc);
 }
 
-static void test_const_table(void) {
-    FILE *file = fopen(ODIN3_ELAB_DATA "/const_table.txt", "r");
-    TEST_ASSERT_NOT_NULL_MESSAGE(file, ODIN3_ELAB_DATA "/const_table.txt");
+/* <op> <width> <s> <a> <a-flags> <b> <b-flags> <result>: the context, then each operand. */
+static bool mixed_line(const char *line) {
+    static table_line row;
+    split_line(&row, line, MIXED_FIELDS);
+    bool unary = strcmp(row.field[5], "-") == 0;
+    odin3_cval left = cv(row.field[3], flags_of(row.field[4]));
+    odin3_cval right = cv(unary ? "0" : row.field[5], unary ? 0 : flags_of(row.field[6]));
+    const odin3_cop_args args = {op_named(row.field[0]), &left, unary ? NULL : &right,
+                                 (uint32_t)strtoul(row.field[1], NULL, 10),
+                                 strcmp(row.field[2], "1") == 0};
+    const table_case tc = {&args, row.field[7], line};
+    return check_case(&tc);
+}
+
+typedef bool (*line_check)(const char *line);
+
+/* Replays every case line of a table; returns how many there were. */
+static uint32_t replay(const char *path, line_check check) {
+    FILE *file = fopen(path, "r");
+    TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
     char line[LINE];
     uint32_t cases = 0;
     uint32_t wrong = 0;
@@ -249,13 +295,68 @@ static void test_const_table(void) {
             continue;
         }
         cases++;
-        wrong += table_case(line) ? 0 : 1;
+        wrong += check(line) ? 0 : 1;
         TEST_ASSERT_LESS_THAN_UINT32(MAX_REPORTED, wrong);
     }
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     TEST_ASSERT_TRUE_MESSAGE(header, "the table names Yosys 0.55");
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(MIN_TABLE, cases);
     TEST_ASSERT_EQUAL_UINT32(0, wrong);
+    return cases;
+}
+
+static void test_const_table(void) {
+    uint32_t cases = replay(ODIN3_ELAB_DATA "/const_table.txt", plain_line);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(MIN_TABLE, cases);
+}
+
+/* Operand widths, signs and sizes drawn independently of each other and of the context. */
+static void test_const_table_mixed(void) {
+    uint32_t cases = replay(ODIN3_ELAB_DATA "/const_table_mixed.txt", mixed_line);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(MIN_MIXED, cases);
+}
+
+/* The context sign is not an operand's (the review's three mutants; Yosys 0.55 probe p2.v). */
+static void test_context_sign(void) {
+    /* ** reads b's own SIGNED: 8'sd3 ** 8'b11111111 is 3^255 mod 256 */
+    odin3_cval base = cv("00000011", ODIN3_CVAL_SIGNED);
+    odin3_cval power = cv("11111111", 0);
+    odin3_cop_args args = {ODIN3_COP_POW, &base, &power, 8, true};
+    odin3_cval out = op_at(&args);
+    TEST_ASSERT_EQUAL_STRING("10101011", text_of(&out));
+    /* an unsigned / zero-extends a signed divisor: 8'd7 / 8'sb11111110 is 7 / 254 */
+    odin3_cval seven = cv("00000111", 0);
+    odin3_cval divisor = cv("11111110", ODIN3_CVAL_SIGNED);
+    args = (odin3_cop_args){ODIN3_COP_DIV, &seven, &divisor, 8, false};
+    out = op_at(&args);
+    TEST_ASSERT_EQUAL_STRING("00000000", text_of(&out));
+    /* >>> fills by the context sign: (4'sb1000 >>> 1) + 1'b0 */
+    odin3_cval negative = cv("1000", ODIN3_CVAL_SIGNED);
+    odin3_cval one = cv("1", 0);
+    args = (odin3_cop_args){ODIN3_COP_SSHR, &negative, &one, 4, false};
+    out = op_at(&args);
+    TEST_ASSERT_EQUAL_STRING("0100", text_of(&out));
+    TEST_ASSERT_EQUAL_UINT8(0, out.flags);
+}
+
+static void test_result_flags(void) {
+    odin3_cval three = cv("0011", ODIN3_CVAL_SIGNED);
+    odin3_cval four = cv("0100", ODIN3_CVAL_SIGNED);
+    odin3_cop_args args = {ODIN3_COP_LT, &three, &four, 4, true};
+    odin3_cval out = op_at(&args);
+    TEST_ASSERT_EQUAL_STRING("0001", text_of(&out));
+    TEST_ASSERT_EQUAL_UINT8(0, out.flags); /* a comparison is unsigned in any context */
+    odin3_cval wide = lit("", "'h", "FFFF_FFFF");
+    args = (odin3_cop_args){ODIN3_COP_POS, &wide, NULL, 32, false};
+    out = op_at(&args);
+    TEST_ASSERT_EQUAL_UINT8(0, out.flags); /* an operator's result is sized (EL-15) */
+    args.is_signed = true;
+    out = op_at(&args);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_SIGNED, out.flags);
+    odin3_cval text = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr("A"), &text));
+    args = (odin3_cop_args){ODIN3_COP_NOT, &text, NULL, 8, false};
+    out = op_at(&args);
+    TEST_ASSERT_EQUAL_UINT8(0, out.flags); /* and never STRING */
 }
 
 /* --- the brief's corner cases -------------------------------------------------------------- */
@@ -890,17 +991,78 @@ static void test_oom(void) {
     for (size_t i = 0; i < sizeof steps / sizeof steps[0]; i++) {
         oom_sweep(steps[i]);
     }
-    g_a = cv("0110000000000000000000000000000000000000000000000000000000000000000111",
-             ODIN3_CVAL_SIGNED);
+}
+
+/* Every operator over one pair of (signed) operands, each allocation failing in turn. */
+static void sweep_ops(const char *lhs, const char *rhs) {
+    g_a = cv(lhs, ODIN3_CVAL_SIGNED);
+    g_b = cv(rhs, ODIN3_CVAL_SIGNED);
     for (int op = 0; op < ODIN3_COP_COUNT; op++) {
         g_op = (odin3_cop)op;
         oom_sweep(step_op);
     }
 }
 
+static void test_oom_operators(void) {
+    sweep_ops("0110000000000000000000000000000000000000000000000000000000000000000111",
+              "0110000000000000000000000000000000000000000000000000000000000000000011");
+    sweep_ops("01x0", "0011"); /* the all-x results */
+    sweep_ops("0111", "0000"); /* division by zero */
+    sweep_ops("1111", "1101"); /* (-1) ** negative */
+    sweep_ops("0001", "1101"); /* 1 ** negative */
+    sweep_ops("0110", "1101"); /* 6 ** negative */
+    sweep_ops("1000000000000000000000000000000000000000000000000000000000000000000000", "11");
+}
+
+/* print with allocation `fail_at` failing: NO_MEMORY with the buffer as it was, or OK (true). */
+static bool print_oom_step(const odin3_cval *val, long fail_at) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&buf, odin3_bytes_cstr("W=")));
+    odin3_util_set_alloc_fail_after(fail_at);
+    odin3_status st = odin3_cval_print(val, &buf);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_size_t(2, buf.len);
+        TEST_ASSERT_EQUAL_STRING("W=", buf.data);
+    }
+    odin3_strbuf_free(&buf);
+    return st == ODIN3_OK;
+}
+
+static void test_oom_print(void) {
+    odin3_cval val = cv(repeat('1', 300), 0);
+    TEST_ASSERT_FALSE(print_oom_step(&val, 0));
+    for (long k = 1; k < OOM_LIMIT; k++) {
+        if (print_oom_step(&val, k)) {
+            return;
+        }
+    }
+    TEST_FAIL_MESSAGE("no success within OOM_LIMIT allocations");
+}
+
+/* Strings print as text only when every byte is printable (distinct values, safe names). */
+static void test_print_strings(void) {
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, (odin3_bytes){"a\0b", 3}, &val));
+    TEST_ASSERT_EQUAL_STRING("24'b011000010000000001100010", printed(&val));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr("a\nb"), &val));
+    TEST_ASSERT_EQUAL_STRING("24'b011000010000101001100010", printed(&val));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr("ab"), &val));
+    TEST_ASSERT_EQUAL_STRING("\"ab\"", printed(&val));
+    val = cv("0110000101100010", ODIN3_CVAL_STRING | ODIN3_CVAL_SIGNED);
+    TEST_ASSERT_EQUAL_STRING("\"ab\"", printed(&val));
+    val = cv("0110000x01100010", ODIN3_CVAL_STRING);
+    TEST_ASSERT_EQUAL_STRING("16'b0110000x01100010", printed(&val));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_const_table);
+    RUN_TEST(test_const_table_mixed);
+    RUN_TEST(test_context_sign);
+    RUN_TEST(test_result_flags);
     RUN_TEST(test_division);
     RUN_TEST(test_power);
     RUN_TEST(test_bitwise);
@@ -912,6 +1074,7 @@ int main(void) {
     RUN_TEST(test_resize);
     RUN_TEST(test_strings);
     RUN_TEST(test_print);
+    RUN_TEST(test_print_strings);
     RUN_TEST(test_to_number);
     RUN_TEST(test_hash);
     RUN_TEST(test_wide_division);
@@ -925,5 +1088,7 @@ int main(void) {
     RUN_TEST(test_limits_hook);
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom);
+    RUN_TEST(test_oom_operators);
+    RUN_TEST(test_oom_print);
     return UNITY_END();
 }
