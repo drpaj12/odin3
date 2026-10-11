@@ -195,6 +195,27 @@ static bool dead_node_live_pin(odin3_module *module, uint32_t id) {
     return true;
 }
 
+/* Port id's wire flips its sign; the cell type's port keeps its is_signed. */
+static bool port_sign(odin3_module *module, uint32_t id) {
+    const odin3_port_rec *port = id < module->ports.len ? odin3_vec_cat(&module->ports, id) : NULL;
+    odin3_wire_rec *wire = port != NULL ? odin3_wire_rec_at(module, port->wire) : NULL;
+    if (wire == NULL) {
+        return false;
+    }
+    wire->is_signed = !wire->is_signed;
+    return true;
+}
+
+/* Port id's cell-type port (wider than one bit) is marked scalar. */
+static bool port_scalar(odin3_module *module, uint32_t id) {
+    odin3_port_def *pdef = id < module->port_defs.len ? odin3_vec_at(&module->port_defs, id) : NULL;
+    if (pdef == NULL || pdef->width < 2) {
+        return false;
+    }
+    pdef->scalar = true;
+    return true;
+}
+
 /* Port id's pin 0 leaves the net at bit 0 of the port wire for a new unnamed net (via the API). */
 static odin3_status port_wire_mismatch(odin3_module *module, uint32_t id) {
     const odin3_port_rec *port = id < module->ports.len ? odin3_vec_cat(&module->ports, id) : NULL;
@@ -246,6 +267,8 @@ odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target ta
         [ODIN3_IR_TEST_VIEW] = view,
         [ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN] = dead_node_live_pin,
         [ODIN3_IR_TEST_PORT_WIRE_MISMATCH] = NULL, /* goes through the API, may fail */
+        [ODIN3_IR_TEST_PORT_SIGN] = port_sign,
+        [ODIN3_IR_TEST_PORT_SCALAR] = port_scalar,
     };
     if (module != NULL && (target.fault == ODIN3_IR_TEST_MULTI_DRIVER ||
                            target.fault == ODIN3_IR_TEST_PORT_WIRE_MISMATCH)) {

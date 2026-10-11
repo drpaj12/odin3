@@ -129,7 +129,8 @@ creation order; top module (optional, 0 = none).
 ## 4. Hierarchy
 
 **IR-7 Instances are nodes.** Creating a module registers a cell type of granularity `module`
-whose ports mirror the module's port nodes (names, directions, widths, order). An instance is a
+whose ports mirror the module's port nodes (names, directions, widths, scalar flags, signs,
+order). An instance is a
 node of that type; pin *k* of port *p* corresponds to bit *k* of the module's *p*-th port node.
 Hierarchy stays until an explicit `flatten` pass (spec §5.1). Changing a module's ports after
 instances exist is an error in Phase 1 (`module_add_port` refuses once the module's cell type is
@@ -149,11 +150,19 @@ range and sign of its declaration, as IR-2 says every wire does. `odin3_port_spe
 - `is_signed` applies in both forms: the port wire is signed, and the module's cell type records it
   in that port's `odin3_port_def.is_signed` (false on every other type), for writers and for the
   elaborator's output extension (2D EL-10).
+- `scalar` with a one-bit range other than `[0:0]` (`[5:5]`) is accepted and keeps its range in
+  the IR and JSON, but writers that honour `scalar` (Verilog, BLIF) write the port without an
+  index, so the index does not survive a round trip through them. EL-24 sets `scalar` only for a
+  port declared without a range, so the elaborator never makes one.
+- Writers name a port's bits by declared index, as Yosys does: `input [0:7] a` is `a[7] … a[0]`
+  in BLIF (`.inputs`, and the formals of an instance), and `output [-1:2] n` is
+  `n[2] n[1] n[0] n[-1]`.
 
 The sign is internal to the core: the ABI's `odin3_plugin_port`, whose layout `odin3.h` freezes,
 does not carry it, and the ABI stays at v4. A port's range and sign are fixed at creation (2D
 rejected a wire-range mutation after creation: it would leave the cell type's port record without
-the sign). `check` is unchanged: rule 9 compares widths, not ranges or signs.
+the sign). `check` rule 9 ties the cell type's port to its wire: same width, same sign, and a
+scalar port is one bit (2D Task 2 review). Ranges are not compared: the cell type records none.
 
 **Parameterized modules:** each distinct parameter specialization (`sub #(.W(8))`) is its own
 Module and cell type (the front end names them deterministically, e.g. `sub$W=8`); the instance
@@ -356,8 +365,9 @@ Renaming updates the map; a dead object's name leaves the map.
 **IR-15 All access goes through `src/ir` functions; no code outside `src/ir` writes an IR
 struct field.** The API maintains both sides of every relation. Primitives:
 
-- module: create; `module_add_port(name, dir, width, scalar?, prov)` (creates the port node,
-  its wire, appends to port order, updates the module's cell type; refused once instantiated);
+- module: create; `module_add_port(name, dir, width | has_range [msb:lsb], scalar?, signed?,
+  prov)` (creates the port node, its wire, appends to port order, updates the module's cell type;
+  refused once instantiated; IR-7);
   `$port_*` types have one port of width parameter `WIDTH`;
 - node: create (allocates pins); create-and-connect (type, params, per-port net vectors — the
   common case, so an `$add` is one call, not 97 `connect`s); delete (disconnects and kills its
@@ -410,7 +420,8 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 8. **E** Every wire's nets are live, and each either has this (wire, bit) as its primary or
    lists it in the alias table; every primary/alias entry is matched by the wire's vector.
 9. **E** Port nodes appear in the module's port list once each and match the module's cell type
-   (IR-7), and port pin *k* and port wire bit *k* hold the same net.
+   (IR-7), and port pin *k* and port wire bit *k* hold the same net. The port wire's sign is its
+   cell-type port's `is_signed`, and a scalar port is one bit wide.
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.

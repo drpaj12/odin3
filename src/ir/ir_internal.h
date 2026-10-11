@@ -274,6 +274,12 @@ void odin3_net_handover(odin3_module *module, odin3_pin_rec *from, odin3_pin_id 
 
 /* --- wires and aliases (wire.c) ------------------------------------------------------------ */
 
+/* Bits of the range [msb:lsb] in either direction: |msb - lsb| + 1, which may reach 2^32. */
+static inline uint64_t odin3_range_width(int32_t msb, int32_t lsb) {
+    int64_t span = (int64_t)msb - (int64_t)lsb;
+    return (uint64_t)(span < 0 ? -span : span) + 1;
+}
+
 /* A wire about to be created: odin3_wire_prepare fills it, odin3_wire_commit uses it. */
 typedef struct odin3_wire_plan {
     const odin3_wire_spec *spec;

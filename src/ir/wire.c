@@ -157,11 +157,6 @@ void odin3_alias_absorb(odin3_module *module, odin3_net_id keep, odin3_net_id dr
 
 /* --- wire creation ------------------------------------------------------------------------- */
 
-static uint64_t range_width(const odin3_wire_spec *spec) {
-    int64_t diff = (int64_t)spec->msb - (int64_t)spec->lsb;
-    return (uint64_t)(diff < 0 ? -diff : diff) + 1;
-}
-
 static bool given_live(const odin3_module *module, const odin3_wire_plan *plan, const char *what) {
     for (uint32_t k = 0; k < plan->width; k++) {
         if (!odin3_net_live(module, plan->given[k])) {
@@ -179,7 +174,7 @@ static bool plan_valid(odin3_module *module, odin3_wire_plan *plan, const char *
         odin3_log(ODIN3_LOG_ERROR, "%s: no wire spec", what);
         return false;
     }
-    uint64_t width = range_width(spec);
+    uint64_t width = odin3_range_width(spec->msb, spec->lsb);
     if (width > UINT32_MAX) {
         odin3_log(ODIN3_LOG_ERROR, "%s: range [%d:%d] is wider than %u bits", what, spec->msb,
                   spec->lsb, UINT32_MAX);

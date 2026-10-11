@@ -101,6 +101,16 @@ typedef struct port_want {
     bool scalar;
 } port_want;
 
+/* BLIF has no sign or range (IR-7): the port is unsigned and its wire [width-1:0], unsigned. */
+static void expect_unsigned_plain(const odin3_module *module, const odin3_port_def *port,
+                                  odin3_wire_id wire, uint32_t width) {
+    TEST_ASSERT_FALSE(port->is_signed);
+    TEST_ASSERT_EQUAL_UINT32(width, odin3_wire_width(module, wire));
+    TEST_ASSERT_FALSE(odin3_wire_signed(module, wire));
+    TEST_ASSERT_EQUAL_INT32((int32_t)width - 1, odin3_wire_msb(module, wire));
+    TEST_ASSERT_EQUAL_INT32(0, odin3_wire_lsb(module, wire));
+}
+
 /* Port `index` of module: cell-type port, wire name and per-bit net names. */
 static void expect_port(odin3_module *module, uint32_t index, port_want want) {
     const odin3_celltype_def *def = odin3_celltype_get(design, odin3_module_celltype(module));
@@ -113,7 +123,7 @@ static void expect_port(odin3_module *module, uint32_t index, port_want want) {
     TEST_ASSERT_EQUAL(want.scalar, port->scalar);
     odin3_wire_id wire = odin3_module_port_wire(module, index);
     TEST_ASSERT_EQUAL_STRING(want.name, str_of(odin3_wire_name(module, wire)));
-    TEST_ASSERT_EQUAL_UINT32(want.width, odin3_wire_width(module, wire));
+    expect_unsigned_plain(module, port, wire, want.width);
     for (uint32_t k = 0; k < want.width; k++) {
         char bit[NAME_MAX_LEN];
         if (want.scalar) {
@@ -258,6 +268,9 @@ static const odin3_celltype_def *declared_bb(void) {
     const odin3_celltype_def *def = odin3_celltype_get(design, bb);
     TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, def->gran);
     TEST_ASSERT_EQUAL_UINT32(3, def->n_ports);
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        TEST_ASSERT_FALSE(def->ports[i].is_signed); /* only module ports carry a sign (IR-7) */
+    }
     return def;
 }
 
