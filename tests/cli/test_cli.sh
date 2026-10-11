@@ -14,7 +14,14 @@
 # the load notice is logged on stderr, stdout stays empty), writers (write_json, write_verilog and
 # write_dot from one script, their options and refusals), sim (the sim pass's vectors equal
 # odin3-sim-vectors' for the same file and seed, title line aside; $ODIN3_SIM_VECTORS names it;
-# the same seed gives the same file; without a file a summary is logged).
+# the same seed gives the same file; without a file a summary is logged), project_dump
+# (--project and -f with --dump-project print the record; a --project without a script runs
+# read_project alone and exits with its status), project_top (--top replaces the project's top
+# with an info line and counts as applied), project_revision (--revision reaches read_project),
+# project_diag_paths (--diag-paths given|resolved names the file of a located error),
+# project_preprocess (preprocess --out d --segments writes 0.v, 0.segments.json and
+# files-read.txt; without --out the text goes to stdout). The project cases run from the
+# project's directory (tests/cli/project), so the paths given are relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -26,6 +33,9 @@ fixture=$fixtures/hand_body.blif
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/odin3-cli.XXXXXX")
 trap 'rm -rf "$work"' EXIT
+
+project=$fixtures/../../cli/project
+corpus=$fixtures/../projects
 
 fail() {
     echo "test_cli $case_name: FAIL: $*" >&2
@@ -178,6 +188,73 @@ keep_ast)
     [[ $rc -eq 2 ]] || fail "--keep-ast=bogus: exit code $rc, expected 2"
     expect_fail "write_verilog_ast: the design holds no AST" \
         --keep-ast -p "read_blif $fixture; write_verilog_ast $work/out.v"
+    ;;
+project_dump)
+    cd "$project"
+    "$odin3" --project p.o3proj --dump-project >"$work/out" 2>"$work/err" ||
+        fail "--project --dump-project failed"
+    grep -qF '"top": "top",' "$work/out" || fail "the record lacks its top"
+    grep -qF "\"files\": [{\"path\": \"$(pwd -P)/src/top.v\", \"language\": \"verilog\"" \
+        "$work/out" || fail "the record lacks the resolved file"
+    "$odin3" -f files.f --dump-project >"$work/out_f" 2>"$work/err" || fail "-f --dump-project failed"
+    grep -qF '"top": null,' "$work/out_f" || fail "a file list has no top"
+    grep -qF '"defines": [{"name": "WIDTH", "value": "4"}],' "$work/out_f" ||
+        fail "the list's define is missing"
+    "$odin3" --project p.o3proj >"$work/out" 2>"$work/err" || fail "--project alone failed"
+    grep -qF "pass read_project: " "$work/err" || fail "read_project did not run"
+    [[ ! -s $work/out ]] || fail "--project alone printed something"
+    expect_fail "odin3: error: missing_file: project not found: 'none.o3proj'" --project none.o3proj
+    expect_fail "dump_project: no project was read" -p "check" --dump-project
+    ;;
+project_top)
+    cd "$project"
+    "$odin3" --top other --project p.o3proj --dump-project >"$work/out" 2>"$work/err" ||
+        fail "--top --project failed"
+    grep -qF "info: p.o3proj: --top other replaces the project top top" "$work/err" ||
+        fail "no replacement info line"
+    grep -qF '"top": "other",' "$work/out" || fail "--top did not replace the top"
+    ! grep -qF "was not applied" "$work/err" || fail "spurious --top warning"
+    "$odin3" --top other -p "read_project p.o3proj" 2>"$work/err" || fail "-p read_project failed"
+    ! grep -qF "was not applied" "$work/err" || fail "spurious --top warning (script)"
+    "$odin3" --top other -p "stats" 2>"$work/err" || fail "stats failed"
+    grep -qF "warning: --top other was not applied" "$work/err" || fail "no unapplied warning"
+    ! grep -qF "error" "$work/err" || fail "an error was logged"
+    ;;
+project_revision)
+    cd "$corpus/qpf_revisions"
+    "$odin3" --revision fast -p "read_project proj.qpf; dump_project" >"$work/out" \
+        2>"$work/err" || fail "--revision fast failed"
+    grep -qF '"value": "2"' "$work/out" || fail "revision fast's parameter is missing"
+    expect_fail "ambiguous_revision" -p "read_project proj.qpf"
+    ;;
+project_diag_paths)
+    cd "$project"
+    expect_fail "bad.o3proj:1:1: error: unknown_key: unknown key: 'nonsense'" --project bad.o3proj
+    grep -qF "/bad.o3proj:1:1:" "$work/err" && fail "given style printed an absolute path"
+    expect_fail "$(pwd -P)/bad.o3proj:1:1: error: unknown_key: unknown key: 'nonsense'" \
+        --diag-paths resolved --project bad.o3proj
+    expect_fail "bad.o3proj:1:1: error: unknown_key" --diag-paths given --project bad.o3proj
+    set +e
+    "$odin3" --diag-paths sideways --project p.o3proj 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--diag-paths sideways: exit code $rc, expected 2"
+    ;;
+project_preprocess)
+    cd "$project"
+    "$odin3" --project p.o3proj -p "preprocess --out $work/d --segments" 2>"$work/err" ||
+        fail "preprocess --out --segments failed"
+    [[ -s $work/d/0.v && -s $work/d/0.segments.json && -s $work/d/files-read.txt ]] ||
+        fail "missing preprocess outputs"
+    grep -qF "assign y = ~(a);" "$work/d/0.v" || fail "0.v is not expanded"
+    grep -qF '"buffer_kind": "macro_arg", "macro": "INV"' "$work/d/0.segments.json" ||
+        fail "0.segments.json lacks the argument segment"
+    printf '%s\n' "$(pwd -P)/src/top.v" "$(pwd -P)/inc/defs.vh" >"$work/want"
+    diff "$work/want" "$work/d/files-read.txt" >/dev/null || fail "files-read.txt differs"
+    "$odin3" -f files.f -p preprocess >"$work/out" 2>"$work/err" || fail "preprocess failed"
+    cmp -s "$work/out" "$work/d/0.v" || fail "stdout differs from 0.v"
+    expect_fail "include_not_found" --project "$corpus/neg_include_not_found/project.o3proj" \
+        -p preprocess
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

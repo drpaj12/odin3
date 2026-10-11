@@ -4,6 +4,7 @@
  */
 #include "api/api.h"
 
+#include "frontends/project/project.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -13,6 +14,7 @@
 #include "util/hash.h"
 #include "util/str.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,6 +24,11 @@ ODIN3_EXPORT odin3_status odin3_design_run_pass(odin3_design *design, const char
         return odin3_api_invalid(__func__);
     }
     return odin3_pass_run(design, name, odin3_bytes_cstr(args));
+}
+
+ODIN3_EXPORT bool odin3_design_has_project(const odin3_design *design) {
+    const odin3_project *proj = design != NULL ? odin3_design_project(design) : NULL;
+    return proj != NULL && proj->finished;
 }
 
 ODIN3_EXPORT odin3_status odin3_design_get_top_module(const odin3_design *design,

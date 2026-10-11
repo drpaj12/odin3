@@ -64,6 +64,7 @@ add_library(odin3_core OBJECT
     src/passes/builtin.c
     src/passes/write_formats.c
     src/passes/sim_pass.c
+    src/passes/project_pass.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -293,6 +294,10 @@ if(BUILD_TESTING)
     target_compile_definitions(test_project_entry PRIVATE
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
+    odin3_add_unit_test(test_project_pass)
+    target_compile_definitions(test_project_pass PRIVATE
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"
+        ODIN3_CLI_PROJECT="${PROJECT_SOURCE_DIR}/tests/cli/project")
     # odin3_add_pp_test(<name>): a preprocessor unit test with the shared fixture (pp_fixture.c).
     function(odin3_add_pp_test name)
         odin3_add_unit_test(${name})
@@ -470,7 +475,9 @@ if(BUILD_TESTING)
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage techlib plugin writers sim keep_ast)
+                           help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
+                           project_dump project_top project_revision project_diag_paths
+                           project_preprocess)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

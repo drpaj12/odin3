@@ -664,6 +664,41 @@ static void test_pass_top_option(void) {
     odin3_design_destroy(other);
 }
 
+/* read_project with the ABI's --revision setter (2B PRJ-16). */
+static void test_pass_revision_option(void) {
+    char qpf[PATH_BUF];
+    (void)snprintf(qpf, sizeof qpf, "%s/../projects/qpf_revisions/proj.qpf", ODIN3_BLIF_FIXTURES);
+    odin3_design *other = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(other);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_revision("fast"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(other, "read_project", qpf));
+    odin3_design_destroy(other);
+    other = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(other);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_revision(NULL));
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_design_run_pass(other, "read_project", qpf));
+    TEST_ASSERT_TRUE(log_has("ambiguous_revision"));
+    odin3_design_destroy(other);
+}
+
+/* read_project's located errors name the file as given, then resolved (--diag-paths, PRJ-18). */
+static void test_pass_diag_paths_option(void) {
+    char bad[PATH_BUF];
+    (void)snprintf(bad, sizeof bad, "%s/../../cli/project/bad.o3proj", ODIN3_BLIF_FIXTURES);
+    odin3_design *other = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(other);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_design_run_pass(other, "read_project", bad));
+    TEST_ASSERT_TRUE(log_has("blif/../../cli/project/bad.o3proj:1:1: error: unknown_key"));
+    odin3_pass_set_diag_paths(true);
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_design_run_pass(other, "read_project", bad));
+    TEST_ASSERT_TRUE(log_has("tests/cli/project/bad.o3proj:1:1: error: unknown_key")); /* no .. */
+    odin3_pass_set_diag_paths(false);
+    odin3_design_destroy(other);
+}
+
 /* hand_body.blif leaves the black box's output open: the check after a pass warns (rule 11). */
 static void test_pass_check_option(void) {
     odin3_pass_set_check(true); /* the check runs around every pass, in Release too */
@@ -726,6 +761,8 @@ int main(void) {
     RUN_TEST(test_scripts);
     RUN_TEST(test_script_null_origin);
     RUN_TEST(test_pass_top_option);
+    RUN_TEST(test_pass_revision_option);
+    RUN_TEST(test_pass_diag_paths_option);
     RUN_TEST(test_pass_check_option);
     RUN_TEST(test_logging);
     return UNITY_END();
