@@ -106,6 +106,15 @@ static const vw_builtin BUILTINS[] = {
     {"$reduce_and", FORM_UNARY, "&", 0},
     {"$reduce_or", FORM_UNARY, "|", 0},
     {"$reduce_xor", FORM_UNARY, "^", 0},
+    /* 2D word cells (EL-31): simlib's own expressions; a reduction or logical result is one bit,
+     * zero-extended by the assignment, and its operand is self-determined. */
+    {"$neg", FORM_UNARY, "-", 0},
+    {"$reduce_xnor", FORM_UNARY, "~^", 0},
+    {"$reduce_bool", FORM_UNARY, "|", 0},
+    {"$logic_not", FORM_UNARY, "!", 0},
+    {"$xnor", FORM_BINARY, "~^", 0},
+    {"$logic_and", FORM_BINARY, "&&", 0},
+    {"$logic_or", FORM_BINARY, "||", 0},
     {"$mux", FORM_MUX, NULL, 0},
     {"$pmux", FORM_PMUX, NULL, 0},
     {"$tribuf", FORM_TRIBUF, NULL, 0},
@@ -115,6 +124,14 @@ static const vw_builtin BUILTINS[] = {
     {"$sdff", FORM_FF, NULL, VB_SRST},
 };
 enum { N_BUILTINS = sizeof BUILTINS / sizeof BUILTINS[0] };
+
+/*
+ * Built-in word cells with no structural Verilog form (2D spec §7.2): $shiftx reads x outside A,
+ * and $pow has no hook or lowering yet. Refused rather than written as an instance of a module
+ * nobody defines.
+ */
+static const char *const NO_FORM[] = {"$shiftx", "$pow"};
+enum { N_NO_FORM = sizeof NO_FORM / sizeof NO_FORM[0] };
 
 /* Parameter indices: word cells (A_SIGNED B_SIGNED …), $sop, word flip-flops, bit storage. */
 enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1 };
@@ -972,6 +989,42 @@ static void put_bits(verilog_writer *wr, const uint8_t *bits, uint32_t len) {
 
 /* --- built-in cells ------------------------------------------------------------------------ */
 
+/* A cell's name for a message: its own, else `$c<ID>` (formatted into id). */
+static odin3_bytes cell_label(const verilog_writer *wr, odin3_node_id node, char id[NODE_ID_TEXT]) {
+    uint32_t name = odin3_node_name(wr->mod.module, node);
+    if (name != 0) {
+        return str_bytes(wr, name);
+    }
+    (void)snprintf(id, NODE_ID_TEXT, "$c%u", (unsigned)node.v);
+    return odin3_bytes_cstr(id);
+}
+
+/* True when def is a built-in word cell with no Verilog form (NO_FORM). */
+static bool lacks_form(const odin3_celltype_def *def) {
+    if (def->gran != ODIN3_GRAN_WORD) {
+        return false;
+    }
+    for (uint32_t i = 0; i < N_NO_FORM; i++) {
+        if (strcmp(def->name, NO_FORM[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* "path: module 'm': cell '<name>' of type '<type>' has no structural Verilog form" (point (w)). */
+static void refuse_no_form(verilog_writer *wr, odin3_node_id node) {
+    if (wr->st == ODIN3_OK) {
+        char id[NODE_ID_TEXT];
+        odin3_bytes label = cell_label(wr, node, id);
+        odin3_log(ODIN3_LOG_ERROR,
+                  "%s: module '%s': cell '%.*s' of type '%s' has no structural Verilog form",
+                  wr->path, wr->mod.name != NULL ? wr->mod.name : "", (int)label.len,
+                  (const char *)label.ptr, node_def(wr, node)->name);
+    }
+    (void)vw_fail(wr, ODIN3_ERR_INVALID_ARG);
+}
+
 /* `  assign <output port> = ` */
 static void begin_assign(verilog_writer *wr, odin3_node_id node) {
     vw_puts(wr, "  assign ");
@@ -1151,10 +1204,8 @@ static void write_sop(verilog_writer *wr, odin3_node_id node, const vw_builtin *
     int out = cover_output(cover, row_len);
     if (out < 0) {
         char id[NODE_ID_TEXT];
-        uint32_t name = odin3_node_name(wr->mod.module, node);
-        (void)snprintf(id, sizeof id, "$c%u", (unsigned)node.v);
         (void)vw_refuse(wr, "$sop cover mixes ON-set and OFF-set rows in cell",
-                        name != 0 ? str_bytes(wr, name) : odin3_bytes_cstr(id));
+                        cell_label(wr, node, id));
         return;
     }
     begin_assign(wr, node);
@@ -1476,7 +1527,9 @@ static bool const_omitted(const verilog_writer *wr, odin3_node_id node, const vw
 static void write_cell(verilog_writer *wr, odin3_node_id node) {
     const vw_builtin *bi = node_builtin(wr, node);
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
-    if (bi == NULL) {
+    if (bi == NULL && lacks_form(node_def(wr, node))) {
+        refuse_no_form(wr, node);
+    } else if (bi == NULL) {
         put_attrs(wr, obj, (vw_attr_frame){"  ", "\n"});
         write_instance(wr, node);
     } else if (has_output(wr, node)) {

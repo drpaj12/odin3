@@ -2037,8 +2037,10 @@ Made when the PRs land (not by this spec):
 - `docs/IR.md`: IR-19 (the `$proc` cell, EL-33: ports, parameters, the `ODIN3_VAL_PROC` value
   kind in IR-10, the `ODIN3_CT_PROCESS` type flag and the per-module counter); IR-9 (the RTLIL
   view allows `$proc`, the netlist view does not); IR-12's note that `hier` is module-relative;
-  `odin3_port_spec`'s `has_range`/`msb`/`lsb`/`is_signed` (IR change C). IR-3, IR-4, IR-6, IR-15
-  and the §9 check rules are unchanged.
+  `odin3_port_spec`'s `has_range`/`msb`/`lsb`/`is_signed` (IR change C; IR-15's `module_add_port`
+  summary names them). IR-3, IR-4 and IR-6 are unchanged; of the §9 check rules only rule 9 is
+  tightened (IR change C): a port wire's sign must match its cell-type port's `is_signed`, and a
+  scalar port is one bit wide.
 - `docs/DESIGN.md`: §5.2 word list (+ the nine cells, + `$proc` as the process cell); §6 step 2
   ("processes" = `$proc` nodes) and the stated order `proc` before `opt`, enforced by the pass
   flag; §9 (the RTLIL row); §4.0 (`--auto-blackbox`; the top rule unchanged).

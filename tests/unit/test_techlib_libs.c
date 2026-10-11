@@ -374,13 +374,43 @@ static void test_multiply_contradicting_width(void) {
     TEST_ASSERT_EQUAL_UINT(1, g_errors);
 }
 
-/* Review Focus 5: with vtr.o3lib loaded, `$pow` (not in the library) stays an implicit black
- * box, and `multiply` used without a `.model` takes its parameters from its formals. */
+/* The Parmys golden's `.subckt $pow A[0..1] B[0..2] Y[0..7]` read as the registered cell: the
+ * formals imply A_WIDTH 2, B_WIDTH 3, Y_WIDTH 8, both unsigned (BLIF cannot say otherwise). */
+static void expect_pow_widths(void) {
+    const odin3_module *top = odin3_module_get(g_design, (odin3_module_id){1});
+    uint32_t found = 0;
+    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        if (!odin3_node_live(top, node) ||
+            strcmp(odin3_celltype_get(g_design, odin3_node_type(top, node))->name, "$pow") != 0) {
+            continue;
+        }
+        found++;
+        static const int64_t want[5] = {0, 0, 2, 3,
+                                        8}; /* A_SIGNED B_SIGNED A_WIDTH B_WIDTH Y_WIDTH */
+        for (uint32_t k = 0; k < 5; k++) {
+            TEST_ASSERT_EQUAL_INT64(want[k], odin3_node_param(top, node, k)->i);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, found);
+    expect_check_clean();
+}
+
+/* Review Focus 5: with vtr.o3lib loaded, `$_DFFSR_PPP_` (neither in the library nor registered)
+ * stays an implicit black box, `$pow` is the registered word cell (2D IR change A, EL-31), and
+ * `multiply` used without a `.model` takes its parameters from its formals. */
 static void test_implicit_and_inferred_with_library(void) {
     load(VTR);
     TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_blif_read(g_design, ODIN3_BLIF_FIXTURES "/dffsre.parmys.blif"), g_msg);
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, def_of("$_DFFSR_PPP_")->gran);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(g_design));
+    fresh_design();
+    load(VTR);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK, odin3_blif_read(g_design, ODIN3_BLIF_FIXTURES "/pow.parmys.blif"), g_msg);
-    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, def_of("$pow")->gran);
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_WORD, def_of("$pow")->gran);
+    expect_pow_widths();
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(g_design));
     fresh_design();
     load(VTR);

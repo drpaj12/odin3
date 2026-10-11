@@ -903,16 +903,17 @@ static void test_declared_bracketed_scalar_port(void) {
     expect_check_clean();
 }
 
-/* A model neither in the file nor registered (Yosys's `$pow`) is an implicit black box. */
+/* A model neither in the file nor registered (Yosys's `$divfloor`, which Odin III's registry does
+ * not have; `$pow` was the example until 2D registered it, EL-31) is an implicit black box. */
 static void test_subckt_of_an_undeclared_model_is_an_implicit_black_box(void) {
-    write_str(".model top\n.inputs a b\n.outputs y\n.subckt $pow A[0]=a B[0]=b Y[0]=y\n"
-              ".subckt $pow A[0]=b Z=y2\n.end\n");
+    write_str(".model top\n.inputs a b\n.outputs y\n.subckt $divfloor A[0]=a B[0]=b Y[0]=y\n"
+              ".subckt $divfloor A[0]=b Z=y2\n.end\n");
     read_ok(PATH);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_declared_model_count(design));
     odin3_module *top = module_at(1);
     odin3_node_id first = cell_at(top, 0);
     const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(top, first));
-    TEST_ASSERT_EQUAL_STRING("$pow", def->name);
+    TEST_ASSERT_EQUAL_STRING("$divfloor", def->name);
     TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, def->gran);
     static const char *const formals[] = {"A[0]", "B[0]", "Y[0]", "Z"};
     TEST_ASSERT_EQUAL_UINT32(4, def->n_ports);

@@ -22,11 +22,13 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
     CAPTURE = 4096,
     OOM_LIMIT = 64,
+    FRESH_LIMIT = 1 << 16, /* fresh names before the string table must grow */
     HOOK_CHILDREN = 6,
     MAX_KIDS = 16,
     RANDOM_NODES = 10000,
@@ -1027,6 +1029,26 @@ static void test_oom_builders(void) {
     TEST_ASSERT_EQUAL_INT(2, oom_sweep(step_text, prep_payloads)); /* payload table, arena chunk */
 }
 
+/*
+ * Fresh names under a failing allocator: those that fit the string table's spare capacity are
+ * interned; the first that needs memory fails with NO_MEMORY and leaves the table unchanged.
+ */
+static void expect_intern_oom_unchanged(void) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < FRESH_LIMIT; i++) {
+        char fresh[32];
+        (void)snprintf(fresh, sizeof fresh, "fresh_name%u", i);
+        size_t before = odin3_strtab_count(odin3_design_strtab(design));
+        uint32_t name = 0;
+        odin3_util_set_alloc_fail_after(0);
+        st = odin3_ast_intern(ast, odin3_bytes_cstr(fresh), &name);
+        odin3_util_set_alloc_fail_after(-1);
+        size_t want = st == ODIN3_OK ? before + 1 : before;
+        TEST_ASSERT_EQUAL_size_t(want, odin3_strtab_count(odin3_design_strtab(design)));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+}
+
 static void test_oom_create_and_intern(void) {
     long points = 0;
     for (; points < OOM_LIMIT; points++) {
@@ -1043,13 +1065,7 @@ static void test_oom_create_and_intern(void) {
         TEST_ASSERT_NULL(made);
     }
     TEST_ASSERT_TRUE(points >= 4); /* struct, page table/page, arena, heights */
-    size_t before = odin3_strtab_count(odin3_design_strtab(design));
-    uint32_t name = 0;
-    odin3_util_set_alloc_fail_after(0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY,
-                          odin3_ast_intern(ast, odin3_bytes_cstr("fresh_name"), &name));
-    odin3_util_set_alloc_fail_after(-1);
-    TEST_ASSERT_EQUAL_size_t(before, odin3_strtab_count(odin3_design_strtab(design)));
+    expect_intern_oom_unchanged();
 }
 
 /* --- the design's AST list ---------------------------------------------------------------------
