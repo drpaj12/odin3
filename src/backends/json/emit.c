@@ -1,6 +1,7 @@
 /* emit.c — low-level text, bit, value and provenance output for the Yosys JSON writer. */
 #include "backends/json/jw.h"
 #include "ir/prov.h"
+#include "util/log.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -320,6 +321,15 @@ void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val) {
         break;
     case ODIN3_VAL_STRING:
         put_string_value(out, val->str);
+        break;
+    case ODIN3_VAL_PROC:
+        /* A $proc BODY has no JSON form; the writer refuses processes before reaching here. */
+        if (out->status == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "write_json: '%s' is a process body, which has no JSON form; run proc first",
+                      key);
+            out->status = ODIN3_ERR_INVALID_ARG;
+        }
         break;
     case ODIN3_VAL_COVER:
     default:

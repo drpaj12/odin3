@@ -10,12 +10,14 @@ odin3_value odin3_value_int(int64_t num) {
     return val;
 }
 
+/* BITS, COVER and PROC (a $proc body blob, IR-19) keep bytes in bits/len. */
 static bool has_payload(const odin3_value *val) {
-    return val->kind == ODIN3_VAL_BITS || val->kind == ODIN3_VAL_COVER;
+    return val->kind == ODIN3_VAL_BITS || val->kind == ODIN3_VAL_COVER ||
+           val->kind == ODIN3_VAL_PROC;
 }
 
 bool odin3_value_valid(const odin3_value *val) {
-    if (val == NULL || (int)val->kind < ODIN3_VAL_INT || (int)val->kind > ODIN3_VAL_COVER) {
+    if (val == NULL || (int)val->kind < ODIN3_VAL_INT || (int)val->kind > ODIN3_VAL_PROC) {
         return false;
     }
     if (!has_payload(val)) {
@@ -59,6 +61,7 @@ bool odin3_value_equal(const odin3_value *lhs, const odin3_value *rhs) {
         }
         break;
     case ODIN3_VAL_BITS:
+    case ODIN3_VAL_PROC: /* packed with zero padding (proc.h), so equal bodies are equal bytes */
         break;
     }
     return lhs->len == rhs->len && (lhs->len == 0 || memcmp(lhs->bits, rhs->bits, lhs->len) == 0);

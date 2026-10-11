@@ -26,6 +26,11 @@
  * swaps the new containers in, drops the dead-pin table and frees the old containers. On out of
  * memory the new containers are freed and the module is as it was (copied tombstone arrays stay
  * unused in the design's arena).
+ *
+ * Processes (IR-19): a $proc node is renumbered like any node, and its parameters, the BODY blob
+ * included, are copied byte for byte (a body holds pin positions, never IDs, so it needs no map);
+ * a dead one's tombstone copies its BODY like any parameter. The module's process counter counts
+ * live nodes, which all survive, so compact keeps it (and asserts that it matches them).
  */
 
 /* The containers compact fills; swapped into the module on success, freed on failure. */
@@ -49,6 +54,7 @@ typedef struct compact_ctx {
     odin3_compact_map map;
     compact_out out;
     uint32_t live_nodes, live_pins, live_nets, live_wires;
+    uint32_t live_procs;         /* live nodes whose type has ODIN3_CT_PROCESS */
     uint32_t dead;               /* tombstones to write: dead nodes, nets and wires */
     uint32_t dead_nodes;         /* of which dead nodes */
     odin3_tombstone *node_tombs; /* dead_nodes tombstones in ID order, arrays owned by the design */
@@ -85,6 +91,8 @@ static void number_nodes(compact_ctx *ctx) {
             continue;
         }
         ctx->map.node[i] = ++ctx->live_nodes;
+        const odin3_celltype_def *def = odin3_celltype_get(module->design, rec->type);
+        ctx->live_procs += def != NULL && (def->flags & ODIN3_CT_PROCESS) != 0 ? 1U : 0U;
         for (uint32_t k = 0; k < rec->pin_count; k++) {
             ctx->map.pin[rec->first_pin.v + k] = ++ctx->live_pins;
         }
@@ -568,6 +576,7 @@ static void swap_in(compact_ctx *ctx) {
 static void commit(compact_ctx *ctx) {
     tombstones_write(ctx); /* reads the old records: before anything is freed */
     odin3_module *module = ctx->module;
+    assert(ctx->live_procs == module->proc_count); /* kept: every counted node is live */
     for (size_t k = 0; k < module->ports.len; k++) {
         odin3_port_rec *port = odin3_vec_at(&module->ports, k);
         port->node.v = ctx->map.node[port->node.v];

@@ -526,6 +526,12 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - a count whose array overruns `len`.
 - `typedef struct odin3_proc_why { char text[ODIN3_WIDTH_WHY_MAX]; } odin3_proc_why;`
 - `odin3_status odin3_proc_body_verify(const odin3_proc_body *body, uint32_t i_width, uint32_t o_width, odin3_proc_why *why)` checks every §8.1 rule, point (e)'s canonical layout and point (h). It runs in O(body) with running counters and **never allocates** (review I3).
+  - *Amended (Task 3, agent defaults):*
+    - The widths are one argument, `odin3_proc_widths widths` (`{i_width, o_width}`), because lint (`bugprone-easily-swappable-parameters`) refuses two adjacent `uint32_t`s.
+    - The "assigned" and "twice" checks cannot be O(body) without memory, so they mark positions in a fixed 8192-bit stack bitmap: one pass for up to 8192 outputs (or an lhs spanning that many), else one pass per 8192.
+    - The four `ODIN3_PBIT_*` values are macros, because a C17 enumerator must fit an `int`.
+    - `odin3_proc_value_text` (the RTLIL spelling of an attribute or parameter value) is added for the printer and `write_rtlil`.
+    - `odin3_attr_set` refuses a `PROC` value.
 - `uint32_t odin3_module_proc_count(const odin3_module *module);`
 - `bool odin3_design_has_processes(const odin3_design *design);`
 - `odin3_module_id odin3_design_first_proc_module(const odin3_design *design);` (0 when none)

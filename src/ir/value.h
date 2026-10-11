@@ -1,5 +1,5 @@
 /*
- * value.h — typed parameter values (IR-10): int, 4-state bits, string, SOP cover.
+ * value.h — typed parameter values (IR-10): int, 4-state bits, string, SOP cover, process body.
  */
 #ifndef ODIN3_IR_VALUE_H
 #define ODIN3_IR_VALUE_H
@@ -17,8 +17,8 @@ typedef enum odin3_bit { ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_X, ODIN3_BIT_Z } od
 typedef struct odin3_value {
     odin3_value_kind kind;
     int64_t i;             /* INT */
-    const uint8_t *bits;   /* BITS: one odin3_bit per byte, LSB first; COVER: rows */
-    uint32_t len;          /* BITS: bit count; COVER: byte length (STRING uses str) */
+    const uint8_t *bits;   /* BITS: one odin3_bit per byte, LSB first; COVER: rows; PROC: blob */
+    uint32_t len;          /* BITS: bit count; COVER, PROC: byte length (STRING uses str) */
     uint32_t str;          /* STRING: strtab ID */
     uint32_t cover_inputs; /* COVER: inputs per row */
 } odin3_value;
@@ -29,9 +29,16 @@ typedef struct odin3_value {
  */
 
 /*
- * True when val is well formed: a known kind; for BITS and COVER a payload (bits non-NULL) whenever
- * len > 0; for COVER a len that is a multiple of cover_inputs + 1 (whole rows). False for NULL.
- * Every API that stores a value (node parameters, cell-type defaults, attributes) checks it first.
+ * PROC (2D, docs/IR.md IR-19): a $proc node's BODY, one blob packed by odin3_proc_body_pack
+ * (ir/proc.h; len bytes, 8-byte aligned in an arena). Only the IR reads it, through
+ * odin3_proc_body_view; copies and comparisons treat it as bytes.
+ */
+
+/*
+ * True when val is well formed: a known kind; for BITS, COVER and PROC a payload (bits non-NULL)
+ * whenever len > 0; for COVER a len that is a multiple of cover_inputs + 1 (whole rows). False for
+ * NULL. Every API that stores a value (node parameters, cell-type defaults, attributes) checks it
+ * first. A PROC value's contents are the $proc type's verify's business (IR-19).
  */
 bool odin3_value_valid(const odin3_value *val);
 
@@ -41,7 +48,10 @@ bool odin3_value_valid(const odin3_value *val);
  */
 odin3_status odin3_value_copy(odin3_arena *arena, const odin3_value *src, odin3_value *dst);
 
-/* Structural equality: same kind and same contents (payload bytes compared, not pointers). */
+/*
+ * Structural equality: same kind and same contents (payload bytes compared, not pointers; for
+ * PROC the whole blob, so two bodies are equal when their records and positions are).
+ */
 bool odin3_value_equal(const odin3_value *lhs, const odin3_value *rhs);
 
 odin3_value odin3_value_int(int64_t num);

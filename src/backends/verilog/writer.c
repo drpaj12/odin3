@@ -1346,6 +1346,15 @@ static void put_value(verilog_writer *wr, const odin3_value *val) {
     case ODIN3_VAL_STRING:
         put_string(wr, str_bytes(wr, val->str), 0);
         break;
+    case ODIN3_VAL_PROC:
+        /* A $proc BODY has no Verilog form; the writer refuses processes before reaching here. */
+        if (wr->st == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s: module '%s': a process body has no Verilog form; run proc first",
+                      wr->path, wr->mod.name != NULL ? wr->mod.name : "");
+        }
+        (void)vw_fail(wr, ODIN3_ERR_INVALID_ARG);
+        break;
     case ODIN3_VAL_COVER:
     default:
         put_string(wr, (odin3_bytes){val->bits, val->len}, val->cover_inputs + 1);

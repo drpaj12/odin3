@@ -161,12 +161,17 @@ typedef enum odin3_granularity {
     ODIN3_GRAN_PORT
 } odin3_granularity;
 
-/* Kind of a parameter value (IR-10): integer, 4-state bit vector, string, SOP cover. */
+/*
+ * Kind of a parameter value (IR-10): integer, 4-state bit vector, string, SOP cover, and (2D) a
+ * process body: the BODY parameter of a built-in $proc node (docs/IR.md IR-19), an opaque blob
+ * only the core reads. A plugin cell type cannot declare a PROC parameter.
+ */
 typedef enum odin3_value_kind {
     ODIN3_VAL_INT,
     ODIN3_VAL_BITS,
     ODIN3_VAL_STRING,
-    ODIN3_VAL_COVER
+    ODIN3_VAL_COVER,
+    ODIN3_VAL_PROC
 } odin3_value_kind;
 
 /* --- design -------------------------------------------------------------------------------- */
@@ -545,14 +550,16 @@ odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj, const ch
  * Simulation (1E): SEQ_EDGE, edge-triggered storage whose outputs depend only on its state (it
  * cuts the simulator's combinational graph); SEQ_LEVEL, a level-sensitive latch; at most one of
  * the two. CLOCK_PIN0: port 0 is the clock (edge) or enable (level) pin, a scalar input of
- * constant width 1.
+ * constant width 1. PROCESS (2D): the type is the built-in process cell $proc, whose live nodes
+ * the IR counts per module (docs/IR.md IR-19); no other type, and no plugin type, may have it.
  */
 enum {
     ODIN3_CT_TRISTATE = 1,
     ODIN3_CT_ANYVIEW = 2,
     ODIN3_CT_SEQ_EDGE = 4,
     ODIN3_CT_SEQ_LEVEL = 8,
-    ODIN3_CT_CLOCK_PIN0 = 16
+    ODIN3_CT_CLOCK_PIN0 = 16,
+    ODIN3_CT_PROCESS = 32
 };
 
 /*
@@ -626,7 +633,8 @@ typedef struct odin3_plugin_celltype {
  * afterwards hold the type (odin3_design_create) and their readers instantiate it by name (a BLIF
  * `.subckt`, its parameters derived from the connected pins as for any type); existing designs do
  * not see it. ODIN3_ERR_INVALID_ARG (logged) for a NULL definition, a reserved slot that is not
- * NULL, a granularity, direction, kind or flag out of range, a name with a character it may not
+ * NULL, a granularity, direction, kind or flag out of range (ODIN3_VAL_PROC and ODIN3_CT_PROCESS
+ * belong to the built-in $proc and are out of range here), a name with a character it may not
  * hold, a scalar port that is not 1 bit wide, a width_param with a non-zero width, a non-INT
  * parameter with a non-zero dflt, a definition the IR rejects (a missing or duplicate name, a
  * width_param that names no INT parameter, inconsistent simulation flags), or a name already

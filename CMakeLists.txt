@@ -76,6 +76,7 @@ add_library(odin3_core OBJECT
     src/ir/prov.c
     src/ir/check.c
     src/ir/compact.c
+    src/ir/proc.c
     src/ir/ir_test.c
     src/ast/srcman.c
     src/ast/srcman_decode.c
@@ -127,6 +128,7 @@ add_library(odin3_core OBJECT
     src/ir/cells/gates.c
     src/ir/cells/dff.c
     src/ir/cells/sop.c
+    src/ir/cells/proc.c
     src/techlib/expr.c
     src/techlib/expr_eval.c
     src/techlib/width.c
@@ -262,6 +264,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ir_module)
+    odin3_add_unit_test(test_ir_proc)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
