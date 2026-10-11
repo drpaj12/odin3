@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# gen-const-table: the Yosys 0.55 constant table for 2D's operators. See gen_const_table.py.
+# Exit codes: 0 success, 1 Yosys failed, 2 usage error or a Yosys that is not 0.55.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/gen_const_table.py" "$@"
