@@ -17,6 +17,7 @@
 #include "util/hash.h"
 #include "util/str.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 

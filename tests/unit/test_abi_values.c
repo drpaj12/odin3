@@ -306,8 +306,11 @@ static void test_proc_body_text_refused(void) {
     TEST_ASSERT_EQUAL_STRING(
         "odin3_node_get_param_text: invalid argument: the process cannot be printed", last_msg);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, (odin3_node_id){p1.id}));
+    last_msg[0] = '\0';
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_node_get_param_text(design, p1, 2, &text));
     TEST_ASSERT_EQUAL_STRING("keep", text);
+    TEST_ASSERT_EQUAL_STRING(
+        "odin3_node_get_param_text: invalid argument: the process cannot be printed", last_msg);
 }
 
 /* The process text is printed then interned: on out of memory the call fails, text unchanged. */

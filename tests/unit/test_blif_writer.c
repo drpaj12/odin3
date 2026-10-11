@@ -683,6 +683,27 @@ static void test_ranged_port_formals(void) {
                           ".names i[1] o[0]\n1 1\n.names i[0] o[-1]\n1 1\n.end\n");
 }
 
+/* A top that is not module 1 is written first, with no leading blank line, and one blank line
+ * separates it from the next model (final review M9: the separator was keyed on the module ID). */
+static void test_top_first_model_spacing(void) {
+    odin3_module *sub = new_module(design, "sub");
+    odin3_wire_id sub_in = new_port(sub, "i", ODIN3_DIR_IN, 1);
+    odin3_wire_id sub_out = new_port(sub, "o", ODIN3_DIR_OUT, 1);
+    new_buffer(sub, odin3_wire_net(sub, sub_in, 0), odin3_wire_net(sub, sub_out, 0));
+    odin3_module *top = new_module(design, "top");
+    odin3_net_id x_net = odin3_wire_net(top, new_port(top, "x", ODIN3_DIR_IN, 1), 0);
+    odin3_net_id y_net = odin3_wire_net(top, new_port(top, "y", ODIN3_DIR_OUT, 1), 0);
+    const odin3_netvec ports[] = {{&x_net, 1}, {&y_net, 1}};
+    odin3_node_spec spec = {.type = odin3_module_celltype(sub), .name = intern_in(design, "u")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){2}));
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(
+        ".model top\n.inputs x\n.outputs y\n.subckt sub i=x o=y\n.cname u\n.end\n\n"
+        ".model sub\n.inputs i\n.outputs o\n.names i o\n1 1\n.end\n",
+        write_stable(text));
+}
+
 /* A wire bit name that another net already has falls back to `$n<ID>`. */
 static void test_wire_bit_name_taken(void) {
     odin3_module *module = new_module(design, "top");
@@ -1124,6 +1145,7 @@ int main(void) {
     RUN_TEST(test_unrecoverable_parameters_are_refused);
     RUN_TEST(test_2d_word_cells_as_subckt);
     RUN_TEST(test_2d_signed_word_cell_is_refused);
+    RUN_TEST(test_top_first_model_spacing);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);
     RUN_TEST(test_out_of_memory_sweep_inferred_parameters);

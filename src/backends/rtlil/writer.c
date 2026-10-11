@@ -13,6 +13,7 @@
 #include "ir/value.h"
 #include "util/alloc.h"
 #include "util/file.h"
+#include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -256,6 +257,10 @@ static void put_port_sig(rtl_writer *rw, odin3_pinslice slice) {
 }
 
 /* --- wires --------------------------------------------------------------------------------- */
+
+/* put_wire_options indexes its direction keywords by odin3_dir (review M8). */
+_Static_assert(ODIN3_DIR_IN == 0 && ODIN3_DIR_OUT == 1 && ODIN3_DIR_INOUT == 2,
+               "k_dirs is indexed by odin3_dir");
 
 static void put_wire_options(rtl_writer *rw, odin3_wire_id wire) {
     const odin3_module *module = rw->module;
@@ -616,6 +621,20 @@ static void map_ports(rtl_writer *rw) {
     }
 }
 
+/* "attribute \top 1" on the design's top module, as Yosys's write_rtlil writes it (read_rtlil
+ * takes it as Design::top_module()), unless the module already carries a top attribute. */
+static void put_top_attr(rtl_writer *rw, uint32_t id) {
+    if (odin3_design_top(rw->design).v != id) {
+        return;
+    }
+    uint32_t key = 0;
+    if (odin3_strtab_find(rw->tab, odin3_bytes_cstr("top"), &key) &&
+        odin3_attr_get(rw->module, (odin3_objref){ODIN3_OBJ_MODULE, id}, key) != NULL) {
+        return;
+    }
+    rw_put(rw, "attribute \\top 1\n");
+}
+
 static void put_module(rtl_writer *rw, uint32_t id) {
     const odin3_module *module =
         odin3_module_get((odin3_design *)rw->design, (odin3_module_id){id});
@@ -623,6 +642,7 @@ static void put_module(rtl_writer *rw, uint32_t id) {
     rw->module_name = str_of(rw, odin3_module_name(module));
     rw->module_def = odin3_celltype_get(rw->design, odin3_module_celltype(module));
     put_attrs(rw, (odin3_objref){ODIN3_OBJ_MODULE, id}, 0);
+    put_top_attr(rw, id);
     rw_put(rw, "module ");
     rw_name(rw, "module", odin3_module_name(module));
     rw_put(rw, "\n");

@@ -972,11 +972,26 @@ static void end_module(blif_writer *wr) {
     wr->module = NULL;
 }
 
-static odin3_status write_module(blif_writer *wr, uint32_t id) {
+/* The ID of the module written at position pos (from 1): the top first, then the rest in creation
+ * order. */
+static uint32_t written_module(const odin3_design *design, uint32_t pos) {
+    uint32_t top = odin3_design_top(design).v;
+    if (top == 0) {
+        return pos;
+    }
+    if (pos == 1) {
+        return top;
+    }
+    return pos <= top ? pos - 1 : pos;
+}
+
+/* Writes the pos-th model (from 1); models after the first follow a blank line. */
+static odin3_status write_module(blif_writer *wr, uint32_t pos) {
+    uint32_t id = written_module(wr->design, pos);
     wr->module = odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id});
     wr->model = odin3_strtab_get(wr->tab, odin3_module_name(wr->module));
     odin3_status st = wr_fail(wr, name_module(wr));
-    if (id > 1) {
+    if (pos > 1) {
         wr_newline(wr);
     }
     wr_begin(wr, ".model");
@@ -1121,19 +1136,6 @@ static void wr_free(blif_writer *wr) {
     odin3_vec_free(&wr->params);
 }
 
-/* The ID of the module written at position pos (from 1): the top first, then the rest in creation
- * order. */
-static uint32_t written_module(const odin3_design *design, uint32_t pos) {
-    uint32_t top = odin3_design_top(design).v;
-    if (top == 0) {
-        return pos;
-    }
-    if (pos == 1) {
-        return top;
-    }
-    return pos <= top ? pos - 1 : pos;
-}
-
 odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "blif_write: NULL design or path");
@@ -1148,7 +1150,7 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
         st = wr_open(&wr);
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = write_module(&wr, written_module(design, i));
+        st = write_module(&wr, i);
     }
     if (st == ODIN3_OK) {
         (void)write_blackboxes(&wr);

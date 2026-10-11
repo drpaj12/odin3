@@ -101,7 +101,8 @@ odin3_status odin3_plugin_load(const char *path);
  *
  * Iteration. Module-local IDs run from 1 to one before the store's end (odin3_module_get_*_end),
  * in creation order; deleted ("dead") objects keep their ID until compact, so skip them with
- * odin3_*_is_live. Accessors also answer for a dead object (what it held when it died).
+ * odin3_*_is_live. Accessors also answer for a dead object (what it held when it died), with one
+ * exception: the text of a dead $proc node's PROC parameter (odin3_node_get_param_text) is refused.
  *
  * Failures. Every function below that takes a design (but odin3_design_destroy) returns
  * odin3_status. ODIN3_ERR_INVALID_ARG, logged as "<function>: invalid argument …", for a NULL
@@ -474,9 +475,13 @@ odin3_status odin3_node_get_param_count(const odin3_design *design, odin3_ref no
  * '1', 'x', 'z', most significant bit first ("" for no bits); a STRING as is; a COVER as BLIF
  * .names rows, each its input characters ('0', '1', '-'), a space when it has inputs, its
  * output character and '\n'; a PROC (the BODY of a $proc node) as the RTLIL process block the
- * core prints for the node (2D spec section 13: "process ...", its assign, switch and sync lines,
- * "end", each line ending in '\n', not indented), with each position spelled as the net on its
- * pin. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count, besides the
+ * core prints for the node (2D spec section 13): first the node's attributes, one
+ * "attribute \key value" line each, then "process <name>", its assign lines, its switches
+ * ("switch <sig>" preceded by "attribute \full_case 1" / "attribute \parallel_case 1" lines when
+ * flagged, then each "case <patterns>" line with the case's body, and "end"), its sync lines with
+ * their update lines, and "end"; each line ends in '\n', the attribute, process and final end lines
+ * at no indent and the lines inside indented two spaces per level; each position is spelled as the
+ * net on its pin. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count, besides the
  * conventions, and for a PROC that cannot be printed (the node is dead, unlike the other kinds,
  * or a position is on an unconnected pin). odin3_node_get_param_text may intern the text in the
  * design's string table (not an IR change; other strings stay valid): ODIN3_ERR_NO_MEMORY then.

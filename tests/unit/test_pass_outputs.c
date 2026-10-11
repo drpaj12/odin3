@@ -277,7 +277,7 @@ static void test_write_rtlil_writes_processes(void) {
     design_with_process();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("write_rtlil", OUT));
     const char *text = slurp(OUT);
-    TEST_ASSERT_NOT_NULL(strstr(text, "module \\e\nend\nmodule \\m\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "module \\e\nend\nattribute \\top 1\nmodule \\m\n"));
     TEST_ASSERT_NOT_NULL(strstr(text, "  process $proc$t.v:1$"));
     TEST_ASSERT_NOT_NULL(strstr(text, "    sync posedge \\clk\n      update \\q \\t0\n"));
 }

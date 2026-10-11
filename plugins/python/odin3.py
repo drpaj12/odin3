@@ -234,11 +234,17 @@ class Design:
     def __init__(self, odin3: Odin3 | None = None, *, handle: Any = None) -> None:
         """A new empty design; or, given handle (an odin3_design * that C code made with the same
         library, e.g. a host program or a test fixture), that design, which this object then owns
-        and destroys."""
+        and destroys. MemoryError when a new design cannot be created, ValueError for a NULL
+        handle."""
         self.odin3 = odin3 or default()
-        ptr = self.odin3.lib.odin3_design_create() if handle is None else handle
-        if ptr == self.odin3.ffi.NULL:
-            raise MemoryError("odin3_design_create")
+        if handle is None:
+            ptr = self.odin3.lib.odin3_design_create()
+            if ptr == self.odin3.ffi.NULL:
+                raise MemoryError("odin3_design_create")
+        elif handle == self.odin3.ffi.NULL:
+            raise ValueError("Design: the adopted handle is NULL")
+        else:
+            ptr = handle
         self.ptr: Any = self.odin3.ffi.gc(ptr, self.odin3.lib.odin3_design_destroy)
 
     @classmethod

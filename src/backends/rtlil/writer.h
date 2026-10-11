@@ -15,7 +15,9 @@
  * order), so two calls give the same bytes. Processes are written (no refusal).
  *
  * Per module, in creation order, at no indent: the module's attributes (`attribute \key value`),
- * `module \name`, then at indent 2:
+ * then `attribute \top 1` when it is the design's top (odin3_design_top) and has no `top`
+ * attribute of its own (as Yosys's write_rtlil; read_rtlil takes it as the top), `module \name`,
+ * then at indent 2:
  * - each live named wire in ID order, after its attributes: `wire [width W] [upto] [offset O]
  *   [input|output|inout K] [signed] \name` (W when not 1; upto for an ascending range [msb:lsb]
  *   with msb < lsb; O = the lower declared index when not 0; K = the 1-based port index; signed

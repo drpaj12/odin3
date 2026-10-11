@@ -1962,6 +1962,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - the bench output verbatim and the sweeps' summaries;
   - the divergence list §17 by reference, and the v4 spec amendments (EL-39 x defaults, EL-30 `~&`);
   - the erratum of point (h) (§14.1's stale OUT-sync phrase);
+  - the spec v4.4 errata from the 2D-1 final review: §13's implementation note (the `write_rtlil` text 2D-1 ships, with `attribute \top 1`) and EL-47's ABI line (v4 kept, no bump);
   - the Parmys exceptions added to PHASE2 #4;
   - this plan's points (a)–(bb) as agent defaults;
   - ABI v4 kept unreleased, with the bump deferred to the first release or Phase-2 close as a decision item;

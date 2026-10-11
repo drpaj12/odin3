@@ -2,7 +2,8 @@
  * test_rtlil_writer.c — write_rtlil (2D spec §13, EL-48; plan Task 5): the exact text of the plan's
  * fixture, wires and sigspecs, every sync type, $mem parameters, nets that are no wire's bit
  * (review R4), unconnected pins, instances and names, refusals, the atomic write, determinism and
- * out of memory. Each design is also written to ODIN3_RTLIL_OUT/<name>.il for the Yosys 0.55
+ * out of memory, the design's top, and one cell of every registered `$` type the writer does not
+ * refuse (review M5). Each design is also written to ODIN3_RTLIL_OUT/<name>.il for the Yosys 0.55
  * round trip (CTest rtlil_yosys_roundtrip).
  */
 #include "backends/rtlil/writer.h"
@@ -10,6 +11,7 @@
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/ids.h"
+#include "ir/ir_internal.h"
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/prov.h"
@@ -31,7 +33,9 @@
 #error "ODIN3_RTLIL_OUT must name the directory the .il fixtures are written to"
 #endif
 
-enum { LOG_CAP = 4096, TEXT_MAX = 1 << 14, PATH_MAX_LEN = 512, OOM_LIMIT = 4000, ARENA = 1024 };
+enum { LOG_CAP = 4096, TEXT_MAX = 1 << 16, PATH_MAX_LEN = 512, OOM_LIMIT = 4000, ARENA = 1024 };
+/* EVERY_CELL_MIN: the `$` types 2D-1 registers that test_every_cell writes (review probe A). */
+enum { CELL_PORTS_MAX = 16, CELL_PINS_MAX = 64, NAME_MAX_LEN = 64, EVERY_CELL_MIN = 46 };
 
 static odin3_design *design;
 static odin3_prov_id prov;
@@ -329,12 +333,15 @@ static void test_attributes(void) {
     odin3_value init = bits_value(k_zero, 1);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(mod, (odin3_objref){ODIN3_OBJ_WIRE, x_wire.v},
                                                    intern("init"), &init));
-    TEST_ASSERT_EQUAL_STRING("attribute \\top 1\n"
-                             "module \\top\n"
-                             "  attribute \\init 1'0\n"
-                             "  wire input 1 \\x\n"
-                             "end\n",
-                             rtlil());
+    static const char *const k_want = "attribute \\top 1\n"
+                                      "module \\top\n"
+                                      "  attribute \\init 1'0\n"
+                                      "  wire input 1 \\x\n"
+                                      "end\n";
+    TEST_ASSERT_EQUAL_STRING(k_want, rtlil());
+    /* As the design's top it keeps its own top attribute, not a second one (review M4). */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){1}));
+    TEST_ASSERT_EQUAL_STRING(k_want, rtlil());
 }
 
 /* --- processes ----------------------------------------------------------------------------- */
@@ -688,6 +695,114 @@ static void test_module_names_like_ids(void) {
     save_fixture("modnames");
 }
 
+/* --- the design's top (review M4) --------------------------------------------------------- */
+
+/* The top gets "attribute \top 1" before its module line, as Yosys's write_rtlil writes it. */
+static void test_top_attribute(void) {
+    odin3_module *sub = new_module("sub");
+    (void)port(sub, "i", ODIN3_DIR_IN, 0, 0);
+    odin3_module *top = new_module("t");
+    odin3_net_id x_net = bit_of(top, port(top, "x", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_netvec ports[1] = {{&x_net, 1}};
+    (void)cell(top, (cell_req){"sub", "u", NULL, 0, ports});
+    TEST_ASSERT_NULL(strstr(rtlil(), "attribute \\top"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){2}));
+    (void)rtlil();
+    TEST_ASSERT_EQUAL_STRING_LEN("module \\sub\n", text.data, strlen("module \\sub\n"));
+    expect_line("end\nattribute \\top 1\nmodule \\t");
+    save_fixture("top");
+}
+
+/* --- every cell type (review M5) ----------------------------------------------------------- */
+
+/* The types written as cells that the writer refuses as Odin III defines them (writer.c's
+ * k_no_rtlil, less $sop, which has a const_value hook), and $mem and $proc, whose fixtures are
+ * test_mem_parameters and the process tests. */
+static const char *const k_not_every[] = {"$_DFF_P_",    "$_DFF_N_", "$_DLATCH_P_",
+                                          "$_DLATCH_N_", "$_FF_",    "$memrd",
+                                          "$memwr",      "$mem",     "$proc"};
+
+/* True for a built-in `$` type the every-cell fixture writes as one cell. */
+static bool in_every_cell(const odin3_celltype_def *def) {
+    if (def->name[0] != '$' || def->gran == ODIN3_GRAN_PORT || def->const_value != NULL) {
+        return false; /* ports, and constants and $sop (written as constants or refused) */
+    }
+    for (size_t i = 0; i < sizeof k_not_every / sizeof k_not_every[0]; i++) {
+        if (strcmp(def->name, k_not_every[i]) == 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* def's defaults with every INT *WIDTH* parameter 1, into params. */
+static void every_params(const odin3_celltype_def *def, odin3_value *params) {
+    for (uint32_t idx = 0; idx < def->n_params; idx++) {
+        params[idx] = def->params[idx].dflt;
+        if (params[idx].kind == ODIN3_VAL_INT && strstr(def->params[idx].name, "WIDTH") != NULL) {
+            params[idx] = odin3_value_int(1);
+        }
+    }
+}
+
+/* Each port of a node of type with params on fresh unnamed nets from nets (CELL_PINS_MAX). */
+static void every_ports(odin3_module *mod, odin3_celltype_id type, const odin3_value *params,
+                        odin3_netvec *ports, odin3_net_id *nets) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, type);
+    uint32_t used = 0;
+    for (uint32_t idx = 0; idx < def->n_ports; idx++) {
+        uint32_t width = odin3_celltype_port_width(design, type, params, idx);
+        TEST_ASSERT_TRUE_MESSAGE(used + width <= CELL_PINS_MAX, def->name);
+        ports[idx] = (odin3_netvec){&nets[used], width};
+        for (uint32_t bit = 0; bit < width; bit++) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, 0, prov, &nets[used++]));
+        }
+    }
+}
+
+/* One node of def's type named c_<type without $>: its defaults, every INT *WIDTH* parameter 1,
+ * each pin on a fresh unnamed net. */
+static void add_every_cell(odin3_module *mod, const odin3_celltype_def *def) {
+    TEST_ASSERT_TRUE_MESSAGE(def->n_params <= CELL_PORTS_MAX && def->n_ports <= CELL_PORTS_MAX,
+                             def->name);
+    odin3_celltype_id type = type_named(def->name);
+    odin3_value params[CELL_PORTS_MAX];
+    every_params(def, params);
+    odin3_net_id nets[CELL_PINS_MAX];
+    odin3_netvec ports[CELL_PORTS_MAX];
+    every_ports(mod, type, params, ports, nets);
+    char name[NAME_MAX_LEN];
+    (void)snprintf(name, sizeof name, "c_%s", def->name + 1);
+    odin3_node_spec spec = {type, intern(name), prov, params, def->n_params};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_node_create_connected(mod, &spec, ports, NULL),
+                                  def->name);
+}
+
+/* Every registered built-in `$` type that write_rtlil writes as a cell, one cell each, so the
+ * Yosys 0.55 round trip checks each definition against Yosys's internal cell checker and grows
+ * with the registry (2E-1's flip-flops, 3D's $lut). */
+static void test_every_cell(void) {
+    odin3_module *mod = new_module("cells");
+    uint32_t made = 0;
+    for (uint32_t idx = 0; idx < odin3_builtin_celltype_count; idx++) {
+        if (in_every_cell(odin3_builtin_celltypes[idx])) {
+            add_every_cell(mod, odin3_builtin_celltypes[idx]);
+            made++;
+        }
+    }
+    (void)rtlil();
+    for (uint32_t idx = 0; idx < odin3_builtin_celltype_count; idx++) {
+        const odin3_celltype_def *def = odin3_builtin_celltypes[idx];
+        char line[LOG_CAP];
+        (void)snprintf(line, sizeof line, "  cell %s \\c_%s", def->name, def->name + 1);
+        if (in_every_cell(def)) {
+            expect_line(line);
+        }
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(EVERY_CELL_MIN, made);
+    save_fixture("every_cell");
+}
+
 /* --- refusals and the atomic write --------------------------------------------------------- */
 
 /* A node of type tname named u (params NULL: the defaults) in module r must be refused with
@@ -870,6 +985,8 @@ int main(void) {
     RUN_TEST(test_unconnected_pins);
     RUN_TEST(test_instances_and_names);
     RUN_TEST(test_module_names_like_ids);
+    RUN_TEST(test_top_attribute);
+    RUN_TEST(test_every_cell);
     RUN_TEST(test_refuses_dff_p);
     RUN_TEST(test_refuses_dff_n);
     RUN_TEST(test_refuses_dlatch_p);
