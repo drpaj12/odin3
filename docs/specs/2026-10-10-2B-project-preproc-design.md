@@ -1,6 +1,7 @@
 # 2B — Project readers and the Verilog-2005 preprocessor: design
 
-Status: approved (agent default under Peter's overnight rule, 2026-10-10). v2 applied the Opus
+Status: approved (agent default under Peter's overnight rule, 2026-10-10). v3 (2026-10-11):
+implementation touch-ups, rulings from the 2B ledger. v2 applied the Opus
 review of dd8cd45 (rulings C1, I1–I12 and the minors; 2B is a light review, PHASE2 #1); every
 decision below is an agent default Peter may override, and §12 lists the points that are
 genuinely his. Phase 2, sub-project 2B. Spec: `docs/DESIGN.md` §4.0 (the normative project
@@ -570,9 +571,9 @@ inside skipped regions are not reported.
 whose run list is the body with every formal occurrence — an `IDENT` token of the body equal to a
 formal, outside strings, comments and escaped identifiers, and not immediately after a
 backtick (`` `ADDITION_num `` is
-the macro name `ADDITION_num`, never `ADDITION` + `_num`: Yosys and Icarus agree, and the two
-micros that rely on textual splicing, `preprocessor_complex_define` and
-`preprocessor_define_with_comment`, are Parmys-rejected exceptions under PHASE2 #4) — replaced by
+the macro name `ADDITION_num`, never `ADDITION` + `_num`: Yosys and Icarus agree, and the three
+micros that rely on textual splicing, `preprocessor_define`, `preprocessor_complex_define` and
+`preprocessor_define_with_comment`, are Parmys-rejected exceptions under PHASE2 #4 and #11) — replaced by
 the actual's runs **as collected**, not pre-expanded; `/* */` comments in the body become one
 space (`loc` 0). Buffers are created exactly as AST-2/§3.1 prescribe: one `EXPANSION` buffer per
 use (`def` = the body's first byte in its defining buffer, `len` = the body's spelled length,
@@ -613,8 +614,9 @@ and Yosys loop forever on `rec.v` (measured 2026-10-10); where they terminate on
 self-referential pattern that this rule rejects (probe w1: `` `N(`KEEP) `` through `` `K ``
 re-uses `N` inside its own argument chain) the rejection is a **declared divergence** (§10.4),
 not a disagreement to chase. A formal's **default** is macro text, not an actual: its
-`MACRO_ARG` takes its ancestry from the expansion it is substituted into, so the walk and the
-chain length go to its `parent`, not its `def`. A cycle through a default
+`MACRO_ARG` counts as macro text for recursion and the chain cap, taking its ancestry from the
+expansion it is substituted into, so the walk and the chain length go to its `parent`, not its
+`def`. A cycle through a default
 (`` `define A(x=`A()) x `` with `` `A() ``) is then "recursive macro 'A'" at the first rescan.
 It does not run to `MAX_BUFFERS_PER_STREAM` (agent default, 2B Task 8 fix round 1).
 
@@ -659,7 +661,8 @@ oracle outputs itself (§10.4). Six VTR benchmarks carry the pair (`LU*PEEng`, `
 `` `include "name" ``: an absolute `name` stands; else the including file's directory, then
 the config's `incdirs` in order; the first regular file wins (lexical normalization as §4.1).
 None: `include_not_found`, names [name as written]. A candidate already on this stream's
-include stack — which starts with the stream's own source file — (resolved path):
+include stack — which starts with the stream's own source file, and which that file leaves when
+its frame ends, so the stack is empty after every stream — (resolved path):
 `include_cycle` at the `include`, names [name as written]. The file gets a `FILE` buffer
 (`name` = the text as written, `resolved`, `library` = the includer's, `parent` = the loc of the
 directive's backtick), its lines are registered for that buffer as it is loaded (from the
@@ -752,7 +755,7 @@ that lowers it, as 2A's `odin3_srcman_test_set_limits` does, so the test runs in
 | `ODIN3_PP_MAX_COND_DEPTH` | 1024 | per file; `nested_ifdef` micros nest 3 |
 | `ODIN3_PP_MAX_MACRO_ARGS` | 256 | formals per macro |
 | `ODIN3_PP_MAX_MACRO_TEXT` | 2^20 | body bytes; the largest VTR body is under 1 KB |
-| `ODIN3_PP_MAX_MACROS` | 2^20 | table entries; mcml.v defines 51 |
+| `ODIN3_PP_MAX_MACROS` | 2^20 | table entries; mcml.v makes 39 definitions |
 | `ODIN3_PP_MAX_DEFINITIONS` | 2^18 | definitions made over the preprocessor's life, redefinitions and `` `undef `` + `` `define `` included (each keeps its record: the arena never frees); with the next cap it bounds the table at ≈ 85 MB whatever the input (agent default, 2B Task 6 fix round 1) |
 | `ODIN3_PP_MAX_MACRO_BYTES` | 2^26 | arena bytes reserved for bodies, defaults and formal lists over the preprocessor's life, checked with one 64 KiB chunk of headroom so the arena never exceeds it (agent default, as above) |
 | `ODIN3_PP_MAX_STREAM_BYTES` | 2^28 | output bytes per stream, same as the input cap: an expansion bomb (`` `define A B B B B `` …) stops here or at the caps below, whichever first; the text buffer starts at the stream file's size and grows by doubling but never past cap + 1 bytes (2B final review M4) |
@@ -783,7 +786,9 @@ accident of Python): read every project file with `newline=""` and split at `\n`
 a `\r` before it (`read_text`'s universal newlines turned lone `\r` into line ends in the
 `.o3proj`, `-f`, `.qpf`, Tcl and source readers alike; §4.1); counts parsed with `[0-9]+`
 instead of `str.isdigit` (a Unicode digit such as `²` crashed `int()`) and limited to 2^32 − 1;
-`+libext+.foo` reports names [`.foo`] rather than `x.foo`. **Copied into the C** (harmless
+`+libext+.foo` reports names [`.foo`] rather than `x.foo`; `check_param_scopes` records each
+param line's index and location (it paired lines by position, which an `import` shifted; DESIGN
+§4.0 is the rule). **Copied into the C** (harmless
 rules): the 99-word ceilings (§5.1); `IDENT` allowing `$` in `$VAR` names; quoting forgotten in
 file-list words; `$VAR` errors located at the argument's line and the `$` check on the word's
 own text (§5.2); Tcl: whole-file tokenizing before any command, the EOF line for an unterminated
@@ -869,10 +874,19 @@ compiler directive name defined or undefined as a macro (§7.3 row; `` `define t
 which both oracles accept), and the include search (PP-11: the including file's directory, then
 the include directories in order, never the current directory — DESIGN §4.0, PHASE1 #19; Icarus
 and Yosys both search the current directory first and take its copy, so `pp-diff` runs the
-oracles from a neutral directory).
+oracles from a neutral directory). `translate_off` removal (PP-10) is also expected as declared
+(PHASE2 #11). The project readers add four divergences from the oracle
+(`tools/project-fixtures`), none exercised by the corpus: a NUL in a project word or Tcl word is
+a located `syntax` error (the oracle keeps it; the string table cannot hold NUL, PRJ-4);
+Quartus assignment names and values are upper-cased ASCII-only; revision names containing `/`
+check and read the same file; and the include search above. The three splicing micros (§7.4)
+are Parmys-rejected, not oracle disagreements.
 Inputs: the preprocessor micros, every micro with a backtick
-(`syntax/*`, `keywords/*/*.vh` through their includers), the VTR set ending with mcml.v;
-expected: zero undeclared disagreements with an agreeing pair, the lists of excluded and
+(`syntax/*`, `keywords/*/*.vh` through their includers), the VTR set ending with mcml.v. Headers that use macros from their includer (the nine
+module files of the four multi-file `syntax/*-syntax` micros, the four `keywords/.generic`
+templates, `keywords/assign/assign.vh`, `keywords/for/generate_for.vh` and three
+`generate_endgenerate/*.vh`) are checked in context through their includers; run alone they stop
+at `undefined macro`. Expected: zero undeclared disagreements with an agreeing pair, the lists of excluded and
 declared files recorded in `docs/PHASE2.md` under 2B's results.
 
 ### 10.5 Fuzz and property tests
@@ -901,11 +915,13 @@ declared files recorded in `docs/PHASE2.md` under 2B's results.
 
 ### 10.6 Benchmark (`tests/bench/bench_pp.c`, built, not in CTest)
 
-Preprocess every VTR benchmark smallest first and mcml.v last (636 KB, 24,507 lines, 51
-`define`s, ≈ 2,950 directive lines); report bytes out, segments, buffers, srcman bytes, and time.
+Preprocess every VTR benchmark smallest first and mcml.v last (636 KB, 24,507 lines, 39
+`define`s made (51 `define` lines, 12 of them commented out), ≈ 2,950 directive lines); report bytes out, segments, buffers, srcman bytes, and time.
 Targets in Release on the dev machine: mcml.v ≤ 50 ms (the 2A parse-only budget is 1 s; the
 preprocessor should be a twentieth of it), the whole VTR set ≤ 0.5 s, peak memory ≤ 3 × input
-bytes plus the srcman's records. Numbers go to `docs/PHASE2.md`.
+bytes + 128 KiB fixed overhead (the 64 KiB macro-arena chunk, the struct and vectors), with the
+srcman's records beside it. Scope: the VTR set only; the rest of the micro tree is covered by
+`test_pp_check` (PHASE2 #12). Numbers go to `docs/PHASE2.md`.
 
 ## 11. Review focus
 
@@ -970,6 +986,8 @@ The reviewer agreed with all six; the additions are theirs.
   directives inside macro text rejected (PP-6), recursion on the spelling ancestry rejected
   even where the oracles terminate (PP-7, probe w1), `translate_off`
   removed by the preprocessor (PP-10) — and the Parmys-rejected micros that rely on textual
-  formal splicing (`preprocessor_complex_define`, `preprocessor_define_with_comment`).
+  formal splicing (`preprocessor_define`, `preprocessor_complex_define`,
+  `preprocessor_define_with_comment`); the NUL, ASCII-case, revision-name and include-search
+  divergences of §10.4.
 - **`docs/DESIGN.md` §4.0**: the `-f`-under-`-F` sentence made explicit (ruling I5), and
   "after Phase 2" for the Odin II XML reader amended if §12 #5 stands.
