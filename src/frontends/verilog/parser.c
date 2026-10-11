@@ -12,6 +12,7 @@
 #include "frontends/verilog/parser_test.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/vec.h"
 #include "verilog_parser.h" /* generated (build tree): odin3_vp_parse */
@@ -27,6 +28,13 @@
  * IR-17).
  */
 static long vp_stack_cap = ODIN3_VP_YYMAXDEPTH;
+
+/*
+ * Set when one of Bison's allocations (YYMALLOC: its stacks, LAC stack or message buffer) fails
+ * during the current parse, so the "memory exhausted" that follows is a NO_MEMORY, not the cap
+ * (Task 1 review M6). Bison's YYMALLOC sees no parse parameter; single-threaded, IR-17.
+ */
+static bool vp_stack_failed;
 
 static odin3_status misuse(const char *fn, const char *why) {
     odin3_log(ODIN3_LOG_ERROR, "%s: %s", fn, why);
@@ -106,11 +114,31 @@ long odin3_vp_yymaxdepth(void) {
     return vp_stack_cap;
 }
 
+void *odin3_vp_stack_alloc(size_t bytes) {
+    void *ptr = odin3_util_malloc(bytes);
+    vp_stack_failed = vp_stack_failed || ptr == NULL;
+    return ptr;
+}
+
+void odin3_vp_stack_free(void *ptr) {
+    odin3_util_free(ptr);
+}
+
+void odin3_vp_enter_error(odin3_vp_ctx *ctx) {
+    ctx->error_mode = true;
+    odin3_ast_unwind(ctx->ast, ctx->base); /* nothing built after the first error is used */
+}
+
 void odin3_vp_error(const odin3_vp_loc *at, odin3_vp_ctx *ctx, const char *msg) {
+    odin3_vp_enter_error(ctx);
     if (ctx->fatal != ODIN3_OK) {
         return; /* the lexer's or an action's fatal path already ended the parse */
     }
-    ctx->error_mode = true;
+    if (vp_stack_failed) { /* a failed YYMALLOC: the message, if any, is Bison's fallback */
+        ctx->fatal = ODIN3_ERR_NO_MEMORY;
+        ctx->run->stop = true;
+        return;
+    }
     if (strcmp(msg, "memory exhausted") == 0) {
         odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, at->loc,
                         "nesting deeper than the parser allows (%ld)", odin3_vp_yymaxdepth());
@@ -132,7 +160,8 @@ static void ctx_init(odin3_vp_ctx *ctx, odin3_vl_run *run, odin3_ast *ast, odin3
                           .ast = ast,
                           .lexer = lx,
                           .error_mode = odin3_vl_in_error(run),
-                          .fatal = ODIN3_OK};
+                          .fatal = ODIN3_OK,
+                          .base = odin3_ast_mark(ast)};
     odin3_vec_init(&ctx->span_scratch, sizeof(odin3_ast_id));
     odin3_vec_init(&ctx->part_scratch, sizeof(odin3_ast_id));
     odin3_vec_init(&ctx->meta_scratch, sizeof(odin3_ast_id));
@@ -198,6 +227,7 @@ odin3_status odin3_verilog_parse_stream(odin3_vl_run *run, odin3_ast *ast,
     odin3_vp_ctx ctx;
     ctx_init(&ctx, run, ast, lx);
     vp_stack_cap = (long)run->limits.yymaxdepth;
+    vp_stack_failed = false;
     int rc = odin3_vl_guard(lx, run_parser, &ctx);
     st = finish_stream(&ctx, rc, errors_before);
     if (st == ODIN3_OK) {

@@ -1,9 +1,13 @@
 /*
- * test_verilog_parser.c — the Verilog parser's driver (2C Task 1 skeleton): an empty stream to an
- * empty UNIT, YYLLOC_DEFAULT's ranges, yyerror's messages, the error cap of odin3_vl_report, the
- * flex fatal escape, misuse, the test limits hook and an OOM sweep.
+ * test_verilog_parser.c — the Verilog parser's driver: an empty stream to an empty UNIT,
+ * YYLLOC_DEFAULT's ranges, yyerror's messages, the error cap of odin3_vl_report, the flex fatal
+ * escape, misuse, the test limits hook and OOM sweeps (Task 1); edge-of-file shapes, located
+ * syntax errors, recovery, the error cap, the stack and AST caps, error mode and literal errors
+ * through the grammar (Task 4).
  */
 #include "ast/ast.h"
+#include "ast/ast_test.h"
+#include "ast/kinds.h"
 #include "ast/srcman.h"
 #include "frontends/verilog/actions.h"
 #include "frontends/verilog/lexer_support.h"
@@ -23,7 +27,20 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { OOM_LIMIT = 64, REPORTS = 25, LOWERED_ERRORS = 3 };
+enum {
+    OOM_LIMIT = 64,
+    REPORTS = 25,
+    LOWERED_ERRORS = 3,
+    MODULE_OOM_LIMIT = 4096,
+    LOWERED_DEPTH = 16,
+    NESTED_RANGE = 20,
+    LOWERED_CHILDREN = 8,
+    BAD_ITEMS = 25,
+    STACK_PARENS = 300,
+    DEFAULT_STACK_PARENS = 270000,
+    DIGITS = 4097,
+    TEXT_BYTES = 1 << 20,
+};
 
 /* A design with one stream (for tests that drive the run, lexer or yyerror directly). */
 static odin3_design *design;
@@ -372,6 +389,291 @@ static void test_parse_stream_oom(void) {
     TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
 }
 
+/* --- Task 4: whole streams through the grammar ------------------------------------------ */
+
+/* The caps a Task 4 test lowers (0 keeps a default). */
+typedef struct hooks {
+    odin3_vp_limits parser;
+    uint32_t max_depth;
+    uint32_t max_children;
+} hooks;
+
+/* Parses text as x.v in the setUp design, store and run with the hooks applied and the sink
+ * capturing; *unit gets the UNIT (0 on failure). */
+static odin3_vp_stream last_x; /* the stream parse_x parsed last */
+
+static odin3_status parse_x(const char *text, const hooks *caps, odin3_ast_id *unit) {
+    vt_stream(design, "x.v", odin3_bytes_cstr(text), &last_x);
+    if (caps != NULL) {
+        odin3_verilog_test_set_limits(&run, caps->parser);
+        odin3_ast_test_set_limits(
+            ast, (odin3_ast_limits){caps->max_children != 0 ? caps->max_children
+                                                            : ODIN3_AST_MAX_CHILDREN,
+                                    ODIN3_AST_MAX_NODES,
+                                    caps->max_depth != 0 ? caps->max_depth : ODIN3_AST_MAX_DEPTH});
+    }
+    *unit = (odin3_ast_id){0};
+    return odin3_verilog_parse_stream(&run, ast, &last_x, unit);
+}
+
+/* text must fail with status and exactly the log want, leaving no UNIT and the pending stack
+ * where it was. */
+static void expect_failure(const char *text, const hooks *caps, odin3_status status,
+                           const char *want) {
+    odin3_ast_id unit = {7};
+    TEST_ASSERT_EQUAL_INT(status, parse_x(text, caps, &unit));
+    TEST_ASSERT_EQUAL_UINT32(0, unit.v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_root_count(ast));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_mark(ast));
+    TEST_ASSERT_EQUAL_STRING(want, logged());
+    TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
+}
+
+/* head, count copies of piece, then tail (freed by the caller with odin3_util_free). */
+static char *repeat_around(const char *head, const char *piece, uint32_t count, const char *tail) {
+    size_t step = strlen(piece);
+    size_t len = strlen(head) + (size_t)count * step + strlen(tail);
+    char *text = odin3_util_malloc(len + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t used = strlen(head);
+    memcpy(text, head, used + 1); /* each copy brings its NUL; the next one overwrites it */
+    for (uint32_t i = 0; i < count; i++, used += step) {
+        memcpy(text + used, piece, step + 1);
+    }
+    memcpy(text + used, tail, strlen(tail) + 1);
+    return text;
+}
+
+/* Review Focus 3: a comment-only stream is a UNIT without children. */
+static void test_comment_only_stream(void) {
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_x("// a comment\n/* and a block */", NULL, &unit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_UNIT, odin3_ast_kind_of(ast, unit));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_nchild(ast, unit));
+    TEST_ASSERT_EQUAL_STRING("", logged());
+}
+
+/* Review Focus 3: a stream holding only `timescale is one DIRECTIVE. */
+static void test_timescale_only_stream(void) {
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_x("`timescale 1ns/1ps", NULL, &unit));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(ast, unit));
+    odin3_ast_id dir = odin3_ast_child(ast, unit, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_DIRECTIVE, odin3_ast_kind_of(ast, dir));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_AST_DIRECTIVE_TIMESCALE, odin3_ast_sub(ast, dir));
+    TEST_ASSERT_EQUAL_STRING("1ns/1ps", odin3_ast_name_str(ast, dir));
+}
+
+/* Review Focus 3, Task 1 review: a missing endmodule is "unexpected end of file" at the last
+ * token's end, through the real parser. */
+static void test_end_of_input_inside_a_module(void) {
+    expect_failure("module m;", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:10: error: syntax: unexpected end of file\n");
+}
+
+static void test_end_of_input_with_expected_tokens(void) {
+    expect_failure(
+        "module m (a\n", NULL, ODIN3_ERR_PARSE,
+        "x.v:1:12: error: syntax: unexpected end of file, expecting ')' or ',' or '.' or '['\n");
+}
+
+/* Three errors, one per line, each after Bison's three-token window: three diagnostics, no
+ * builder misuse, no UNIT. */
+static void test_recovery_reports_each_item(void) {
+    expect_failure(
+        "module m;\n  wire a b;\n  wire c d;\n  reg [3:0 r;\nendmodule\n", NULL, ODIN3_ERR_PARSE,
+        "x.v:2:10: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or '['\n"
+        "x.v:3:10: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or '['\n"
+        "x.v:4:12: error: syntax: unexpected identifier, expecting base or ']'\n");
+    TEST_ASSERT_EQUAL_UINT32(3, captured.errors);
+    TEST_ASSERT_EQUAL_UINT32(3, run.errors);
+}
+
+/* description: error ENDMODULE — an error in one module still lets the next one report. */
+static void test_recovery_across_modules(void) {
+    expect_failure(
+        "module a (x y);\nendmodule\nmodule b;\n  wire c d;\nendmodule\n", NULL, ODIN3_ERR_PARSE,
+        "x.v:1:13: error: syntax: unexpected identifier, expecting ')' or ',' or '.' or '['\n"
+        "x.v:4:10: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or '['\n");
+}
+
+/* 25 bad items: 20 errors, then the stop line, and the run stops. */
+static void test_error_cap_through_the_grammar(void) {
+    char *text = repeat_around("module m;\n", "  wire a b;\n", BAD_ITEMS, "endmodule\n");
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x(text, NULL, &unit));
+    TEST_ASSERT_EQUAL_UINT32(0, unit.v);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_VP_MAX_ERRORS + 1, captured.errors);
+    TEST_ASSERT_EQUAL_size_t(ODIN3_VP_MAX_ERRORS, count_of(logged(), "syntax: unexpected"));
+    TEST_ASSERT_NOT_NULL(strstr(logged(), "x.v:22:10: error: too many errors; stopping\n"));
+    TEST_ASSERT_TRUE(run.stop);
+    TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
+    odin3_util_free(text);
+}
+
+/* The stack cap (plan point (d)): nesting past YYMAXDEPTH is the located fatal message naming
+ * the run's cap, never a NO_MEMORY. The hook's floor is YYINITDEPTH (256). */
+static void test_stack_cap_is_located_and_fatal(void) {
+    char *text = repeat_around("module m; wire [", "(", STACK_PARENS, "0");
+    hooks caps = {.parser = {.yymaxdepth = LOWERED_DEPTH}};
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x(text, &caps, &unit));
+    TEST_ASSERT_EQUAL_UINT32(0, unit.v);
+    TEST_ASSERT_EQUAL_STRING("x.v:1:259: error: nesting deeper than the parser allows (256)\n",
+                             logged());
+    TEST_ASSERT_TRUE(run.stop);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_mark(ast));
+    odin3_util_free(text);
+}
+
+/* The default cap, ODIN3_VP_YYMAXDEPTH, reached by nested parentheses (they make no node). */
+static void test_default_stack_cap(void) {
+    char *text = repeat_around("module m; wire [", "(", DEFAULT_STACK_PARENS, "0");
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x(text, NULL, &unit));
+    TEST_ASSERT_NOT_NULL(
+        strstr(logged(), "error: nesting deeper than the parser allows (262144)\n"));
+    TEST_ASSERT_EQUAL_UINT32(1, captured.errors);
+    TEST_ASSERT_TRUE(run.stop);
+    odin3_util_free(text);
+}
+
+/*
+ * One step of an OOM sweep over text: a fresh run, the limit-th allocation failing. A failure is
+ * NO_MEMORY with no UNIT, the pending stack and the UNIT count unchanged and the run stopped.
+ */
+static odin3_status oom_text_step(const char *text, long limit, odin3_ast_id *unit) {
+    odin3_vl_run_init(&run, design);
+    odin3_vp_stream xs;
+    vt_stream(design, "x.v", odin3_bytes_cstr(text), &xs);
+    uint32_t roots = odin3_ast_root_count(ast);
+    uint32_t mark = odin3_ast_mark(ast);
+    odin3_util_set_alloc_fail_after(limit);
+    odin3_status st = odin3_verilog_parse_stream(&run, ast, &xs, unit);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_UINT32(0, unit->v);
+        TEST_ASSERT_TRUE(run.stop);
+        TEST_ASSERT_EQUAL_UINT32(mark, odin3_ast_mark(ast));
+        TEST_ASSERT_EQUAL_UINT32(roots, odin3_ast_root_count(ast));
+    }
+    return st;
+}
+
+/* Fails every allocation of text's parse in turn until it succeeds; the number of steps. */
+static long oom_sweep(const char *text, odin3_ast_id *unit) {
+    long limit = 0;
+    while (limit < MODULE_OOM_LIMIT && oom_text_step(text, limit, unit) != ODIN3_OK) {
+        limit++;
+    }
+    TEST_ASSERT_TRUE(limit < MODULE_OOM_LIMIT);
+    return limit;
+}
+
+/* Task 1 review M6: a failed allocation while Bison's stack grows is NO_MEMORY, never the depth
+ * message. Every allocation of a parse that grows the stack (past YYINITDEPTH) fails in turn. */
+static void test_stack_growth_oom_is_no_memory(void) {
+    char *open = repeat_around("module m; wire [", "(", STACK_PARENS, "0");
+    char *full = repeat_around(open, ")", STACK_PARENS, ":0] w; endmodule");
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_TRUE(oom_sweep(full, &unit) > 0);
+    TEST_ASSERT_NULL(strstr(logged(), "nesting deeper"));
+    TEST_ASSERT_EQUAL_UINT32(0, captured.errors);
+    odin3_util_free(full);
+    odin3_util_free(open);
+}
+
+/* odin3_ast_make's depth cap on a deep range expression: located PARSE, fatal. */
+static void test_ast_depth_cap(void) {
+    char *head = repeat_around("module m; wire [", "x[", NESTED_RANGE, "0");
+    char *text = repeat_around(head, "].y", NESTED_RANGE, ":0] w; endmodule");
+    hooks caps = {.max_depth = LOWERED_DEPTH};
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x(text, &caps, &unit));
+    TEST_ASSERT_EQUAL_UINT32(0, unit.v);
+    TEST_ASSERT_EQUAL_STRING("x.v:1:41: error: nesting deeper than 16\n", logged());
+    TEST_ASSERT_TRUE(run.stop);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_mark(ast));
+    TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
+    odin3_util_free(text);
+    odin3_util_free(head);
+}
+
+/* odin3_ast_make's child cap on a nine-port list: located at the LIST, fatal. */
+static void test_child_cap(void) {
+    hooks caps = {.max_children = LOWERED_CHILDREN};
+    expect_failure("module m (a, b, c, d, e, f, g, h, i); endmodule", &caps, ODIN3_ERR_PARSE,
+                   "x.v:1:10: error: more than 8 children\n");
+    TEST_ASSERT_TRUE(run.stop);
+}
+
+/* No node is made at or after the first error (syntax or lexical): the actions are inert. */
+static void assert_nothing_made_after(uint32_t offset) {
+    odin3_srcman *sm = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
+    odin3_loc first_error = odin3_srcman_loc(sm, last_x.stream, offset);
+    TEST_ASSERT_TRUE(odin3_ast_node_end(ast).v > 1); /* something was made before the error */
+    for (uint32_t id = 1; id < odin3_ast_node_end(ast).v; id++) {
+        odin3_loc loc = odin3_ast_loc(ast, (odin3_ast_id){id});
+        TEST_ASSERT_TRUE_MESSAGE(loc.v < first_error.v, "a node was made after the first error");
+    }
+}
+
+static void test_actions_inert_after_a_syntax_error(void) {
+    expect_failure("module m; wire a; wire b c; wire d; assign d = a; endmodule", NULL,
+                   ODIN3_ERR_PARSE,
+                   "x.v:1:26: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or "
+                   "'['\n");
+    assert_nothing_made_after(25);
+}
+
+static void test_actions_inert_after_a_lexer_error(void) {
+    expect_failure("module m; wire a; \x01 wire c; assign c = a; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:19: error: unexpected byte 0x01\n");
+    assert_nothing_made_after(18);
+}
+
+/* Literals: number_parse's own located errors are recoverable, counted errors. */
+static void test_literal_digit_error(void) {
+    expect_failure("module m(input['b12:0] a); endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:16: error: invalid digit '2' in a binary literal\n");
+    TEST_ASSERT_EQUAL_UINT32(1, run.errors);
+    TEST_ASSERT_FALSE(run.stop);
+}
+
+/* A base without digits is reported at the base, as written, and nothing after it. */
+static void test_literal_without_digits(void) {
+    expect_failure("module m; assign x = 4'h; wire 3 4; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:23: error: expected digits after 'h\n");
+    TEST_ASSERT_EQUAL_UINT32(1, run.errors);
+}
+
+static void test_literal_too_many_digits(void) {
+    char *text = repeat_around("module m; assign x = ", "9", DIGITS, "; endmodule");
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x(text, NULL, &unit));
+    TEST_ASSERT_EQUAL_STRING("x.v:1:22: error: decimal literal longer than 4096 digits\n",
+                             logged());
+    TEST_ASSERT_EQUAL_UINT32(1, run.errors);
+    odin3_util_free(text);
+}
+
+/* Every allocation of a module's parse fails in turn: NO_MEMORY with no UNIT, the pending stack
+ * where it was, the run stopped, no misuse and (under ASan) no leak; then the parse succeeds. */
+static void test_module_parse_oom(void) {
+    static const char text[] =
+        "`timescale 1ns/1ps\n(* a *) module m #(parameter P = 1) (input [3:0] a, output y);\n"
+        "  wire (strong0, pull1) #(1:2:3) w = a, v [0:1];\n  assign {y, v[0]} = 4'hF;\n"
+        "  defparam u.W = 2;\n  specify (a => y) = 1; endspecify\nendmodule\n"
+        "primitive p (y, a); endprimitive\n";
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_TRUE(oom_sweep(text, &unit) > 1);
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_ast_nchild(ast, unit));
+    TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
+    TEST_ASSERT_EQUAL_UINT32(0, captured.errors);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_empty_stream_gives_empty_unit);
@@ -390,5 +692,23 @@ int main(void) {
     RUN_TEST(test_flex_fatal_escape);
     RUN_TEST(test_parse_stream_misuse);
     RUN_TEST(test_parse_stream_oom);
+    RUN_TEST(test_comment_only_stream);
+    RUN_TEST(test_timescale_only_stream);
+    RUN_TEST(test_end_of_input_inside_a_module);
+    RUN_TEST(test_end_of_input_with_expected_tokens);
+    RUN_TEST(test_recovery_reports_each_item);
+    RUN_TEST(test_recovery_across_modules);
+    RUN_TEST(test_error_cap_through_the_grammar);
+    RUN_TEST(test_stack_cap_is_located_and_fatal);
+    RUN_TEST(test_default_stack_cap);
+    RUN_TEST(test_stack_growth_oom_is_no_memory);
+    RUN_TEST(test_ast_depth_cap);
+    RUN_TEST(test_child_cap);
+    RUN_TEST(test_actions_inert_after_a_syntax_error);
+    RUN_TEST(test_actions_inert_after_a_lexer_error);
+    RUN_TEST(test_literal_digit_error);
+    RUN_TEST(test_literal_without_digits);
+    RUN_TEST(test_literal_too_many_digits);
+    RUN_TEST(test_module_parse_oom);
     return UNITY_END();
 }
