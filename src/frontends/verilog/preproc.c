@@ -796,6 +796,8 @@ static odin3_status frame_end(odin3_pp *pp) {
         odin3_status st = odin3_pp_cond_file_end(pp);
         if (st == ODIN3_OK && pp->frames.len > 1) {
             st = odin3_pp_include_end(pp);
+        } else if (st == ODIN3_OK) {
+            odin3_vec_pop(&pp->incstack); /* the stream's own file: the stack ends empty */
         }
         if (st != ODIN3_OK) {
             return st;

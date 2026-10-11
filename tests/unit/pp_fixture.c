@@ -135,9 +135,12 @@ odin3_status run_fresh(const char *shown, odin3_bytes text) {
 }
 
 void assert_text(const char *want) {
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(strlen(want), stream.text.len, want);
+    char got[PP_MSG_MAX];
+    (void)snprintf(got, sizeof got, "got: %.*s", (int)stream.text.len,
+                   stream.text.ptr != NULL ? (const char *)stream.text.ptr : "");
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(strlen(want), stream.text.len, got);
     TEST_ASSERT_EQUAL_MEMORY_MESSAGE(want, stream.text.ptr, strlen(want) == 0 ? 1 : strlen(want),
-                                     want);
+                                     got);
 }
 
 const odin3_srcseg_rec *segments(uint32_t *count) {

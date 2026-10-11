@@ -312,6 +312,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pp_check PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
+    odin3_add_pp_test(test_pp_limits)
+    odin3_add_pp_test(test_pp_mixed)
     odin3_add_unit_test(test_blif_lexer)
     odin3_add_unit_test(test_blif_reader)
     target_compile_definitions(test_blif_reader PRIVATE

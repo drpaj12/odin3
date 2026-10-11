@@ -176,7 +176,7 @@ static void test_included_twice(void) {
         TEST_ASSERT_EQUAL_UINT32(odin3_srcman_loc(sm, stream.stream, (i - 1) * 16).v, info.parent);
     }
     TEST_ASSERT_EQUAL_size_t(3, pp->cache.len);    /* <command line>, top.v, w.vh */
-    TEST_ASSERT_EQUAL_size_t(1, pp->incstack.len); /* only the stream's own file is left */
+    TEST_ASSERT_EQUAL_size_t(0, pp->incstack.len); /* every file popped, the stream's own too */
 }
 
 /* --- buffers, segments, the protective space ----------------------------------------------- */
