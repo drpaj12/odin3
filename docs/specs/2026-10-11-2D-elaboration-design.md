@@ -1831,7 +1831,7 @@ bullets above differ from it, this note and `writer.h` win. The eight difference
    `RD_CLK_ENABLE`, `RD_CLK_POLARITY` and `RD_TRANSPARENT` with `RD_PORTS` 0, and
    `WR_CLK_ENABLE` and `WR_CLK_POLARITY` with `WR_PORTS` 0. `MEMID` is a quoted string, with `\`
    prepended unless it starts with `$` or `\`. Other parameter values are written as follows:
-   - INT in decimal;
+   - INT in decimal when it fits int32, otherwise as `64'<bits>` (`proc.h`);
    - BITS as `<n>'<bits>`, MSB first;
    - STRING quoted, with Yosys's escapes.
 6. **Nine refusals.** In these cases `write_rtlil` fails with `ODIN3_ERR_INVALID_ARG` and the
