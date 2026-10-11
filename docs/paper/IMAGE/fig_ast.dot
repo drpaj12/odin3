@@ -1,0 +1,59 @@
+// The 24-byte AST node record, the child table and the payload table for
+//   assign y = a + 1;
+// (2A spec AST-4..AST-8, src/ast/ast.h), and the symbol table's scope tree (AST-14).
+// Nodes are made bottom-up, so every child ID is smaller than its parent's (AST-5).
+digraph ast {
+    graph [rankdir=TB, fontname="Helvetica", fontsize=9, nodesep=0.25, ranksep=0.3, pad=0.05];
+    node  [shape=plaintext, fontname="Helvetica", fontsize=8];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    rec [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+        <TR><TD COLSPAN="8" BGCOLOR="#e8eef8"><B>odin3_ast_node: 24 bytes (pagevec, IDs from 1)</B></TD></TR>
+        <TR><TD>kind</TD><TD>sub</TD><TD>flags</TD><TD>loc</TD><TD>end</TD><TD>name</TD><TD>child</TD><TD>nchild</TD></TR>
+        <TR><TD>u8</TD><TD>u8</TD><TD>u16</TD><TD>u32</TD><TD>u32</TD><TD>u32 str</TD><TD>u32</TD><TD>u32</TD></TR>
+        <TR><TD>0</TD><TD>1</TD><TD>2</TD><TD>4</TD><TD>8</TD><TD>12</TD><TD>16</TD><TD>20</TD></TR>
+      </TABLE>>];
+
+    nodes [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="2">
+        <TR><TD COLSPAN="5" BGCOLOR="#eef6ee"><B>node store</B></TD></TR>
+        <TR><TD>ID</TD><TD>kind.sub</TD><TD>name</TD><TD>child</TD><TD>nchild</TD></TR>
+        <TR><TD>1</TD><TD>IDENT</TD><TD>y</TD><TD>0</TD><TD>0</TD></TR>
+        <TR><TD>2</TD><TD>IDENT</TD><TD>a</TD><TD>0</TD><TD>0</TD></TR>
+        <TR><TD>3</TD><TD>NUMBER.dec</TD><TD>-</TD><TD>1 (payload ID)</TD><TD>0</TD></TR>
+        <TR><TD>4</TD><TD>BINARY.+</TD><TD>-</TD><TD PORT="b">0</TD><TD>2</TD></TR>
+        <TR><TD>5</TD><TD>NET_ASSIGN</TD><TD>-</TD><TD PORT="n">2</TD><TD>2</TD></TR>
+        <TR><TD>6</TD><TD>CONT_ASSIGN</TD><TD>-</TD><TD PORT="c">4</TD><TD>3</TD></TR>
+      </TABLE>>];
+
+    kids [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+        <TR><TD COLSPAN="7" BGCOLOR="#fbf3e0"><B>child table (one vec of u32 IDs)</B></TD></TR>
+        <TR><TD>0</TD><TD>1</TD><TD>2</TD><TD>3</TD><TD>4</TD><TD>5</TD><TD>6</TD></TR>
+        <TR><TD PORT="k0">2</TD><TD>3</TD><TD PORT="k2">1</TD><TD>4</TD><TD PORT="k4">0</TD><TD>0</TD><TD>5</TD></TR>
+        <TR><TD COLSPAN="2">E lhs, E rhs</TD><TD COLSPAN="2">E lhs, E rhs</TD><TD>STRENGTH?</TD><TD>DELAY?</TD><TD>NET_ASSIGN+</TD></TR>
+      </TABLE>>];
+
+    pay [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+        <TR><TD BGCOLOR="#f6e8f0"><B>payload table</B></TD></TR>
+        <TR><TD>1: NUMBER {width 0, nbits 32, bits[]}</TD></TR>
+        <TR><TD>bits in the store's arena</TD></TR>
+      </TABLE>>];
+
+    sym [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="3">
+        <TR><TD COLSPAN="2" BGCOLOR="#eeeeee"><B>symbol table (built by 2D)</B></TD></TR>
+        <TR><TD>scopes</TD><TD>DESIGN / LIBRARY work / MODULE top / GENERATE g[3] / BLOCK</TD></TR>
+        <TR><TD>u64map</TD><TD>(scope &lt;&lt; 32 | name) -&gt; symbol</TD></TR>
+        <TR><TD>symbol</TD><TD>kind, net/var kind, flags, dir, decl node,<BR/>packed/unpacked dims, value, assigns, ir_wire</TD></TR>
+      </TABLE>>];
+
+    rec -> nodes [style=invis];
+    nodes:b -> kids:k0 [label="span 0..1"];
+    nodes:n -> kids:k2 [label="span 2..3"];
+    nodes:c -> kids:k4 [label="span 4..6"];
+    nodes -> pay [style=dashed, label="NUMBER"];
+    kids -> sym [style=invis];
+}

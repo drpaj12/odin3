@@ -1,0 +1,26 @@
+// Two-stage elaboration with the elaborated AST as the seam (2D spec section 2, EL-2, EL-4).
+// Stage 1 is Verilog-only; stage 2 is shared by every front end. The slang adapter (Phase 5)
+// builds the elaborated form through the C ABI and enters at stage 2.
+digraph elab_seam {
+    graph [rankdir=LR, fontname="Helvetica", fontsize=9, nodesep=0.2, ranksep=0.3, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=8,
+           fillcolor="#ffffff", margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    v   [label="Verilog-2005\nfiles (2B, 2C)"];
+    ps  [label="parsed store\n(form PARSED)", shape=cylinder, style=filled, fillcolor="#eef6ee"];
+    s1  [label="stage 1 (Verilog only)\nlookup, top, #() / defparam /\nproject params, specialization,\ngenerate, constant functions,\nimplicit nets", fillcolor="#e8eef8"];
+    es  [label="elaborated store\n(form ELABORATED)\nno generate, no defparam,\nconstants resolved,\none MODULE per specialization",
+         shape=cylinder, style=filled, fillcolor="#fbf3e0", penwidth=1.6];
+    s2  [label="stage 2 (any front end)\nbinding (symbol table),\nYosys widths and signedness,\nword cells, drivers, $mem,\nalways -> $proc, inlining", fillcolor="#e8eef8"];
+    ir  [label="word-level IR\n+ $proc cells", shape=cylinder, style=filled, fillcolor="#eef6ee"];
+    sl  [label="slang adapter (C++)\nodin3_ast_* builders\n(Phase 5)", style="rounded,filled,dotted"];
+    rt  [label="write_rtlil", fillcolor="#ffffff"];
+    yo  [label="Yosys 0.55\n(Parmys's)\nequivalence oracle", style="rounded,filled,dashed", fillcolor="#f2f2f2"];
+    chk [label="odin3_ast_check\nrule 7: the subset", shape=note, style=filled, fillcolor="#ffffff"];
+
+    v -> ps -> s1 -> es -> s2 -> ir;
+    sl -> es [style=dotted, label="odin3_ast_elaborate"];
+    ir -> rt -> yo;
+    es -> chk [style=dashed, arrowhead=none];
+}

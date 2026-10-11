@@ -1,0 +1,20 @@
+// The tech library (1G spec): one .o3lib text format, read into design-local cell types whose
+// port widths may be parametric and whose functions are expressions over the ports.
+digraph techlib {
+    graph [rankdir=LR, fontname="Helvetica", fontsize=9, nodesep=0.15, ranksep=0.3, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=8,
+           fillcolor="#eef6ee", margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    src [shape=note, fillcolor="#ffffff", style=filled, fontname="Courier", fontsize=7,
+         label="cell multiply hard\l  param A_WIDTH int 36\l  param B_WIDTH int 36\l  in  a A_WIDTH\l  in  b B_WIDTH\l  out out A_WIDTH + B_WIDTH\l  fn  out = a * b\lend\l"];
+    rd  [label="read_techlib\n(located errors)"];
+    ct  [shape=record, style=filled, fillcolor="#fbf3e0",
+         label="local cell type (hard / gate / blackbox)|ports: width rule = constant, param,\nfunction or compiled expression|params + defaults|attrs: area, delay|lib data: fn / seq / memory ASTs"];
+    blif [label="BLIF reader (IR-7b)\n.model ... .blackbox matched by\nport name; params inferred"];
+    sim  [label="simulator\nfn hooks interpret\nthe expressions"];
+    pat  [label="Phase 4: matcher\npatterns = fn compiled\nto IR fragments", style="rounded,filled,dotted", fillcolor="#ffffff"];
+
+    src -> rd -> ct;
+    ct -> blif; ct -> sim; ct -> pat [style=dotted];
+}

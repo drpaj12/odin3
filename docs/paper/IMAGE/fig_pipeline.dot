@@ -1,0 +1,75 @@
+// Odin III system pipeline (DESIGN.md sections 3, 4.0, 6, 9, 12).
+// Fill: built (merged on main) = solid green; specified (approved spec and plan) = light
+// yellow, dashed; planned (Phases 3-7) = white, dotted.
+digraph pipeline {
+    graph [rankdir=TB, fontname="Helvetica", fontsize=10, nodesep=0.22, ranksep=0.30,
+           newrank=true, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=9,
+           fillcolor="#cfe8cf", height=0.32, margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=8, arrowsize=0.6];
+
+    subgraph cluster_in {
+        label="Project input"; style="rounded"; color="#888888"; fontsize=9;
+        o3proj [label=".o3proj"];
+        flist  [label="-f / -F list"];
+        qsf    [label="Quartus .qpf/.qsf/.qip"];
+        odin2  [label="Odin II XML", fillcolor="white", style="rounded,filled,dotted"];
+    }
+    record [label="project record\nfiles, incdirs, defines, top,\nparams, arch, rules, flow"];
+
+    pp     [label="preprocessor\n(segment map)"];
+    parser [label="Bison/Flex parser\n(2C)", fillcolor="#fff6c8", style="rounded,filled,dashed"];
+    past   [label="parsed AST", shape=cylinder, fillcolor="#fff6c8", style="filled,dashed"];
+    st1    [label="elaboration\nstage 1", fillcolor="#fff6c8", style="rounded,filled,dashed"];
+    east   [label="elaborated AST\n(the seam)", shape=cylinder, fillcolor="#fff6c8",
+            style="filled,dashed", penwidth=1.6];
+    st2    [label="elaboration\nstage 2", fillcolor="#fff6c8", style="rounded,filled,dashed"];
+    slang  [label="slang adapter\n(SV, Phase 5)", fillcolor="white", style="rounded,filled,dotted"];
+    ghdl   [label="GHDL --synth\n(VHDL, Phase 5)", fillcolor="white", style="rounded,filled,dotted"];
+
+    ir     [label="word-level IR\n+ $proc cells", shape=cylinder, fillcolor="#cfe8cf", penwidth=1.6];
+    pm     [label="pass manager\ncheck before/after", fillcolor="#cfe8cf"];
+    proc   [label="proc, opt\n(2E, 2F)", fillcolor="white", style="rounded,filled,dotted"];
+    pmap   [label="read_arch + partial_map\n(.o3lib; Phase 4)", fillcolor="white", style="rounded,filled,dotted"];
+    lower  [label="lower\n(Phase 3)", fillcolor="white", style="rounded,filled,dotted"];
+    abc    [label="linked ABC\n(Phase 3)", fillcolor="white", style="rounded,filled,dotted"];
+    bitir  [label="bit-level IR", shape=cylinder, fillcolor="#cfe8cf"];
+
+    subgraph cluster_out {
+        label="Writers and readers"; style="rounded"; color="#888888"; fontsize=9;
+        wblif [label="BLIF r/w"];
+        wjson [label="JSON (Yosys)"];
+        wdot  [label="dot"];
+        wver  [label="Verilog"];
+        wrtl  [label="RTLIL bridge", fillcolor="#fff6c8", style="rounded,filled,dashed"];
+    }
+    sim [label="simulator", fillcolor="#cfe8cf"];
+
+    o3proj -> record; flist -> record; qsf -> record; odin2 -> record [style=dotted];
+    record -> pp -> parser -> past -> st1 -> east -> st2 -> ir;
+    slang -> east [style=dotted];
+    ghdl -> pp [style=dotted, label="Verilog"];
+    ir -> pm [dir=both];
+    pm -> proc [dir=both, style=dotted];
+    pm -> pmap [dir=both, style=dotted];
+    pm -> lower [style=dotted];
+    lower -> abc [style=dotted];
+    abc -> bitir [style=dotted];
+    bitir -> wblif; bitir -> wjson; bitir -> wdot; bitir -> wver; bitir -> sim;
+    ir -> wrtl [style=dashed];
+    wblif -> bitir [label="read_blif", constraint=false];
+
+    { rank=same; o3proj; flist; qsf; odin2; k1; k2; k3; }
+    { rank=same; record; pp; parser; past; st1; }
+    { rank=same; ghdl; slang; east; st2; ir; }
+    { rank=same; pm; proc; pmap; lower; abc; }
+    { rank=same; bitir; sim; wrtl; }
+    subgraph cluster_key {
+        label="Key"; style="rounded"; color="#bbbbbb"; fontsize=8;
+        k1 [label="built", fontsize=8];
+        k2 [label="specified", fillcolor="#fff6c8", style="rounded,filled,dashed", fontsize=8];
+        k3 [label="planned", fillcolor="white", style="rounded,filled,dotted", fontsize=8];
+        { rank=same; k1; k2; k3; }
+        k1 -> k2 -> k3 [style=invis];
+    }
+}

@@ -1,0 +1,11 @@
+# LaTeX build products and the Overleaf upload zip (made from the sources here).
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+odin3.pdf
+odin3-paper.zip

@@ -1,0 +1,26 @@
+// src/util containers (1A spec): the only generic containers in the tree, all built on one
+// allocation wrapper whose test hook fails the n-th allocation.
+digraph util {
+    graph [rankdir=BT, fontname="Helvetica", fontsize=9, nodesep=0.15, ranksep=0.35, pad=0.05];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=8,
+           fillcolor="#eef6ee", margin="0.06,0.03"];
+    edge  [fontname="Helvetica", fontsize=7, arrowsize=0.5];
+
+    alloc [label="alloc\nmalloc wrapper,\nfail-after-n hook", fillcolor="#e8eef8"];
+    hash  [label="hash\nFNV-1a 64 + fmix64,\nfixed seed", fillcolor="#e8eef8"];
+    arena [label="arena\nbump allocator,\nnever moves"];
+    vec   [label="vec\ncontiguous, doubles"];
+    pv    [label="pagevec\npages of 2^k elements,\nstable addresses"];
+    u64   [label="u64map\nRobin Hood,\nu64 -> u64"];
+    idx   [label="idindex\nRobin Hood hash-cons,\n16-byte {hash, id} slots"];
+    str   [label="strtab / strbuf\nbytes <-> u32 ID,\nID 0 = empty"];
+    log   [label="log\nlevels, sink, counts"];
+
+    ir    [label="IR stores, name maps,\nprovenance hash-consing", shape=box, style="filled", fillcolor="#fbf3e0"];
+    ast   [label="AST nodes, child table,\nattribute map, symbol table", shape=box, style="filled", fillcolor="#fbf3e0"];
+
+    arena -> alloc; vec -> alloc; pv -> alloc; u64 -> alloc; idx -> alloc;
+    u64 -> hash; idx -> hash; str -> idx; str -> arena; str -> hash;
+    ir -> pv; ir -> u64; ir -> idx; ir -> arena; ir -> str; ir -> vec;
+    ast -> pv; ast -> vec; ast -> u64; ast -> arena; ast -> str;
+}

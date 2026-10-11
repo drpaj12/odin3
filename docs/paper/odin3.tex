@@ -1,0 +1,776 @@
+% Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
+% Figures are IMAGE/*.pdf, rendered from IMAGE/*.dot (see README.md). Every number below is
+% taken from the repository's docs (DESIGN.md, IR.md, PHASE0-2.md, specs/) as of 2026-10-11;
+% gaps are marked with \todo{}.
+\documentclass[conference]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{listings}
+
+\graphicspath{{IMAGE/}}
+
+% A visible marker for gaps: numbers not yet measured, text Peter must supply.
+\newcommand{\todo}[1]{\textbf{[TODO: #1]}}
+% Names from the code base.
+\newcommand{\code}[1]{\texttt{#1}}
+
+\lstset{basicstyle=\ttfamily\scriptsize, columns=fullflexible, keepspaces=true,
+        frame=single, framesep=2pt, xleftmargin=3pt, xrightmargin=3pt,
+        aboveskip=4pt, belowskip=4pt}
+
+\begin{document}
+
+\title{Odin III: A Provenance-Tracked HDL Elaboration\\
+and Front-End Synthesis Framework for FPGA CAD Research}
+
+\author{\IEEEauthorblockN{Peter Jamieson}
+\IEEEauthorblockA{\todo{affiliation}\\
+\todo{city, country}\\
+\todo{email}}}
+
+\maketitle
+
+\begin{abstract}
+Odin III is an MIT-licensed HDL elaboration and front-end synthesis framework for FPGA CAD
+research, the successor to Odin and Odin~II. It reads a design through a project description
+(a native project file, an EDA file list or a Quartus project) into one hierarchical IR in
+which every node, net and wire carries a provenance record, and it is planned to perform
+architecture-driven partial mapping, link ABC for soft logic, and write netlists for the VTR
+flow, for Intel/Altera devices and for visualisation. The core is structured C17 behind a
+stable C ABI, with no recursion, explicit resource caps and out-of-memory-safe operations, and
+it was built by an AI coding agent under human architectural control, specification first and
+against external oracles. This paper describes the architecture, the feature set, and the
+internal data structures (ID-based paged netlist storage, a lineage DAG for provenance, a
+Clang-style source manager, a 24-byte AST record), and explains how and why the design departs
+from Yosys and Odin~II. Phase~1 (core IR, BLIF round trip, simulator, writers, C ABI) is
+complete and was validated on 1,846 golden netlists; Phase~2 (the Verilog-2005 front end) is
+under way.
+\end{abstract}
+
+\begin{IEEEkeywords}
+FPGA CAD, logic synthesis, HDL elaboration, intermediate representation, provenance, VTR
+\end{IEEEkeywords}
+
+% ------------------------------------------------------------------------------------------
+\section{Introduction}
+
+Academic FPGA CAD research needs a front end it can change. Odin~\cite{jamieson2005odin}
+synthesised Verilog RTL for heterogeneous FPGAs, and Odin~II~\cite{jamieson2010odin2} became
+the Verilog front end of the VTR flow~\cite{rose2012vtr,luu2009vpr5,murray2020vtr8}, mapping multipliers,
+memories and adders onto the hard blocks an architecture file describes. VTR has since moved
+its default front end to Parmys~\cite{parmys}, a Yosys~\cite{yosys} plugin that carries Odin~II's
+partial mapping onto Yosys's coarse-grained netlists, and the VTR documentation now marks
+Odin~II as deprecated.
+
+Odin III starts from the research questions that remain open with either tool. Three threads
+drive the design (DESIGN \S1): \emph{forward synthesis}, a Parmys/Odin~II-class front end with
+flexible, subgraph-based hard-block inference (multipliers, memories, DSP/MAC and eventually
+tensor tiles); \emph{reverse engineering}, reading flat netlists and raising them back to
+word-level structure; and \emph{agentic construction}, the project as a case study in building a
+Yosys-class tool with an AI coding agent~\cite{claudecode} under human architectural control.
+The first two share one engine, a VF2-style~\cite{cordella2004vf2} subgraph matcher run forward (bind cells to hard blocks) or
+backward (raise bit-level cones to word-level cells).
+
+The contributions of this paper are:
+\begin{itemize}
+\item an architecture in which every stage is a registered pass over one IR with two
+  granularities, project input that carries the architecture and mapping rules, and a two-stage
+  elaboration whose seam lets a SystemVerilog front end reuse the back half (Sec.~\ref{sec:arch});
+\item a feature list with an honest built/specified/planned status (Sec.~\ref{sec:features});
+\item the internal data structures, with their measured sizes and costs
+  (Sec.~\ref{sec:data});
+\item a comparison with Yosys and Odin~II that explains the design reasoning behind each
+  difference (Sec.~\ref{sec:compare}), and a short account of the spec-first, oracle-checked,
+  agent-driven method (Sec.~\ref{sec:method}).
+\end{itemize}
+
+Odin III is young. Phase~1 is complete; Phase~2 has its project readers and preprocessor built
+and its parser and elaboration specified (Sec.~\ref{sec:status}). Quality-of-results numbers
+await Phase~3 \todo{Phase 3 QoR against Parmys on the VTR benchmarks}; this paper reports
+the architecture and the measurements that exist.
+
+% ------------------------------------------------------------------------------------------
+\section{Background}
+\label{sec:background}
+
+\emph{Odin and Odin~II.} Odin~II reads Verilog with a Bison/Flex grammar into an AST of
+\code{ast\_node\_t} records, elaborates it and builds a pointer netlist of nodes, pins and nets
+(\code{nnode\_t}, \code{npin\_t}, \code{nnet\_t}) in which nets and nodes are peers. It reads a
+VPR architecture file to decide which multipliers, adders and memories become hard blocks, and
+it includes a netlist simulator. Its node/pin/net model is the one Odin III keeps.
+
+\emph{Yosys and Parmys.} Yosys~\cite{yosys} is the reference open synthesis suite: a large,
+mature pass library over RTLIL, a word-level netlist of wires, cells and processes, with
+SystemVerilog through yosys-slang~\cite{yosysslang} and VHDL through GHDL~\cite{ghdl} plugins.
+Parmys runs inside VTR's pinned Yosys~0.55 and is the oracle for Odin III's goldens and
+semantics.
+
+\emph{Other infrastructure.} ABC~\cite{brayton2010abc} provides logic optimisation and
+equivalence checking. CIRCT~\cite{circt} builds hardware IRs on MLIR~\cite{lattner2021mlir};
+Odin III borrows its op registry, pass manager, verifiers and first-class attributes but does not
+build on it (ADR D7): the LLVM dependency and SSA semantics fight the node/pin/net model needed
+for in-place rewiring and reverse engineering. slang~\cite{slang} is an MIT-licensed
+SystemVerilog compiler that Odin III will use through an adapter.
+
+% ------------------------------------------------------------------------------------------
+\section{Architecture}
+\label{sec:arch}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_pipeline}
+\caption{The Odin III pipeline. Every arrow inside the core is a pass registered with the
+pass manager, which runs \code{check} before and after each pass in Debug builds. Solid green:
+built and merged; dashed yellow: approved specification and plan; dotted: planned (Phases 3--7).
+The elaborated AST is the seam where the slang adapter enters.}
+\label{fig:pipeline}
+\end{figure*}
+
+Figure~\ref{fig:pipeline} shows the forward flow (DESIGN \S3, \S6). A design is described by a
+\emph{project}; the preprocessor and parser build a parsed AST; elaboration runs in two stages
+through an elaborated AST to word-level IR in which \code{always} blocks are \code{\$proc}
+cells; \code{proc} and \code{opt} turn processes into mux trees and flip-flops and clean up;
+the tech library and the partial mapper bind some word-level cells to hard blocks; \code{lower}
+takes the rest to bit level, where linked ABC optimises the soft logic with hard and black-box
+cells preserved; writers emit BLIF for VPR, JSON, Graphviz, structural Verilog and, as a bridge
+to Yosys, RTLIL. Reverse engineering runs the same IR backwards: BLIF, VQM or EDIF readers make
+bit-level IR, and \code{raise} recovers word-level cells (Phase~6).
+
+\subsection{One IR, two granularities, passes everywhere}
+
+There is one IR (ADR D1). Each cell type carries a granularity tag---\code{word},
+\code{bit}, \code{hard}, \code{blackbox}, plus the structural \code{module} and
+\code{port}---and two \emph{views} are assertions over that tag: the RTLIL view admits word,
+hard and black-box cells; the netlist view admits bit, hard and black-box cells; mixed
+granularity is legal only inside \code{lower} and \code{raise} (IR-9). Every reader, writer,
+checker, the simulator and the matcher therefore exist once.
+
+Every reader, writer and transformation is a pass. Running a pass opens a provenance pass run,
+runs the full structural \code{check} before and after it in Debug builds (or with
+\code{--check} in Release), times it and logs it (1D spec). Under the 2D specification a pass
+also declares whether it handles processes (refusal is the default), so \code{opt} cannot run
+on a design that still holds \code{\$proc} cells (EL-33).
+
+\subsection{Project input}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_project}
+\caption{Project input: four formats fill one design-owned record. Mapping rules, inventory and
+overrides are read and stored in Phase~2 and interpreted by the Phase~4 partial mapper.}
+\label{fig:project}
+\end{figure}
+
+A design reaches Odin III as one project record that every reader shares
+(Fig.~\ref{fig:project}; DESIGN \S4.0). It holds the source files with language and library,
+include paths and defines, the top and its parameter overrides, and---unusually for a
+synthesis front end---the \emph{architecture} and \emph{partial-mapping rules}: tech libraries
+or architecture files, a per-cell inventory (\code{available multiply 112}), research overrides
+(\code{hide} a cell, a variant \code{cell ... from ...}), scoped mapping rules with thresholds
+and budgets, and optionally the flow script, so that one file reproduces a run:
+
+\begin{lstlisting}
+file verilog rtl/top.v
+incdir rtl/include
+define WIDTH=8
+top top
+param top.WIDTH 16
+arch k6_frac_N10_mem32K.o3lib
+map * $mul to multiply min_width 9
+limit multiply 40
+flow synth.o3
+\end{lstlisting}
+
+The same record is filled from an EDA file list (\code{-f}/\code{-F}, \code{+incdir+},
+\code{+define+}, \code{-v}/\code{-y}) or a Quartus \code{.qpf}/\code{.qsf}/\code{.qip} project,
+whose synthesis assignments (\code{AUTO\_DSP\_RECOGNITION}, \code{MULTSTYLE}, \ldots) become
+mapping rules. Rule precedence is source attribute, instance path, module, global, then
+architecture default, and each binding the mapper makes will record the rule (file and line)
+that chose it in provenance. Unknown keys are errors, so a typo never silently changes a
+mapping. The grammar of all formats is normative in DESIGN \S4.0 and pinned by a corpus of 55
+project cases (36 positive, 19 negative), each written in every format that can express it,
+with a stdlib Python reference parser as the oracle for the C readers.
+
+\subsection{Two-stage elaboration and the seam}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_elab_seam}
+\caption{Two-stage elaboration (2D spec). Stage~1 is Verilog-only and produces an elaborated
+AST; stage~2 is shared by every front end. The slang adapter builds the elaborated form through
+the C ABI and enters at stage~2. \code{write\_rtlil} hands the result to Parmys's Yosys~0.55 for
+equivalence checking.}
+\label{fig:seam}
+\end{figure*}
+
+Elaboration is split at an \emph{elaborated AST} (Fig.~\ref{fig:seam}; PHASE2 \#8 Q3, 2D
+EL-2). Stage~1 is Verilog-specific: module lookup, top selection, parameter overrides
+(\code{\#()}, \code{defparam}, project \code{param}), specialisation, \code{generate} and
+constant functions. Its output is a second AST store in the same format, restricted to a
+subset that \code{odin3\_ast\_check} enforces: no generate constructs or \code{defparam}, every
+range and parameter a constant leaf, one \code{MODULE} per parameter specialisation, generate
+scopes named with their indices. Stage~2 is language-neutral: binding through the symbol table,
+widths and signedness, word cells, drivers, memories, processes, inlining and initial values.
+
+The seam exists for SystemVerilog. slang already elaborates SV; its adapter (a small C++ shim,
+the only C++ outside \code{third\_party}) will emit the elaborated subset through the C ABI and
+call stage~2. Without the seam, Phase~5 would need a second elaborator over slang's output and
+the two would drift. VHDL takes a different path, \code{ghdl --synth} to Verilog
+(ADR D2).
+
+Stage~2 represents an \code{always} block as a \code{\$proc} cell: a word-level node whose
+\code{I} pins are every net the process reads and whose \code{O} pins are every net it drives,
+with Yosys's decision structure (switches, cases, actions, syncs) stored as an opaque, validated
+parameter whose positions are pin indices (EL-33). Because the connectivity is ordinary pins,
+every IR invariant, driver query and fanout walk holds unchanged; a first design that referenced
+nets by ID without pins was rejected in review because it broke the ``every driver is a pin''
+rule.
+
+% ------------------------------------------------------------------------------------------
+\section{Features}
+\label{sec:features}
+
+Table~\ref{tab:features} lists the features and their status on 2026-10-11. ``Built'' means
+merged on the main branch with its exit test; ``specified'' means an approved specification and
+implementation plan; ``planned'' means scheduled in a later phase (DESIGN \S12).
+
+\begin{table*}[t]
+\caption{Odin III features and status (2026-10-11)}
+\label{tab:features}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.20\textwidth}p{0.57\textwidth}p{0.16\textwidth}@{}}
+\toprule
+Area & Feature & Status \\
+\midrule
+Core containers & arena, vec, pagevec, u64map, idindex, strtab/strbuf, log; OOM injection hook & built (1A) \\
+IR & ID-based paged netlist; ports as nodes; constants as cells; wires as names with aliases;
+  \code{check} (11 rules); \code{compact} with tombstones & built (1B) \\
+Op registry & 53 built-in cell types with Yosys names; verify, const, simulate and writer hooks;
+  plugin registration & built (1B, 1E) \\
+Provenance & lineage DAG on every node, net and wire; backward walk; forward index by
+  \code{file:line}; provenance names in output & built (1B) \\
+Tech library & \code{.o3lib} format: gates and hard cells, parametric widths, functions as
+  expressions; generic gate and VTR libraries & built (1G) \\
+Netlist I/O & BLIF reader/writer (VTR dialect, black boxes, Yosys \code{.cname/.attr/.param}) & built (1C) \\
+Writers & Yosys-schema JSON, structural Verilog, Graphviz dot with focus and node budget & built (1F) \\
+Simulator & cycle-based, event-free, 2-state; hard cells through their library functions & built (1E) \\
+C ABI, plugins & \code{odin3.h} ABI v4 (125 functions); \code{.so} plugins; Python via cffi;
+  pass manager and script CLI & built (1D, 2A) \\
+Project input & \code{.o3proj}, \code{-f}/\code{-F} lists, Quartus \code{.qpf/.qsf/.qip};
+  \code{read\_project}, \code{dump\_project} & built (2B); Odin~II XML planned \\
+Preprocessor & Verilog-2005 macros, conditionals, includes, \code{translate\_off}; segment map
+  with macro and include chains; 16 caps & built (2B) \\
+Source manager, AST & Clang-style locations; 24-byte node record, 68 kinds; symbol table;
+  printer; structural check & built (2A) \\
+Parser & reentrant Flex lexer, pure LALR(1) Bison grammar, \code{\%expect 0} & specified (2C) \\
+Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{write\_rtlil} & specified (2D) \\
+\code{proc}, \code{opt} & processes to mux trees and \code{\$dff*}; folding, dead nodes, CSE & planned (2E, 2F) \\
+Back end & \code{lower}, linked ABC, VTR flow hookup & planned (Phase 3) \\
+Mapping & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & planned (Phase 4) \\
+Other languages & slang adapter (SV), GHDL path (VHDL) & planned (Phase 5) \\
+Reverse engineering & \code{raise}, VQM/EDIF readers, Altera \code{bind}, Titan & planned (Phase 6) \\
+Interop & CIRCT writer, JSON reader & planned (Phase 7) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+% ------------------------------------------------------------------------------------------
+\section{Internal Data Structures}
+\label{sec:data}
+
+All data structures follow four rules from the code standard (DESIGN \S15): cross-references
+are typed 32-bit IDs, never pointers; IR objects live in their module's paged storage and passes
+never allocate them; traversals use explicit worklists, never recursion; and every fallible
+operation reserves before it mutates, so an out-of-memory failure leaves the structure
+unchanged. Sizes below are \code{sizeof} on x86-64 with gcc, and timings are Release builds on
+the development machine (Intel i7-13700 under WSL2) as recorded in the phase logs.
+
+\subsection{Containers}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_util}
+\caption{\code{src/util}: the only generic containers in the tree, over one allocation wrapper
+whose test hook fails the $n$-th allocation.}
+\label{fig:util}
+\end{figure}
+
+\code{src/util} is the only place allowed to define a container (Fig.~\ref{fig:util}; 1A
+spec). Containers are \code{void*} plus an element size, typed at the per-kind accessors,
+rather than macro-generated (which hides control flow from the linters) or intrusive (which leaks
+container fields into IR structs). \code{pagevec} stores pages of $2^k$ elements
+($4 \le k \le 16$) behind a growable page table, so elements never move, lookup is a shift, a
+mask and two loads, and growth never copies elements. Both hash tables use open addressing with
+Robin Hood probing~\cite{celis1986robinhood} and backward-shift deletion. \code{idindex} is an
+ID-only hash-cons index: its 16-byte slots hold a hash and an ID, and the caller supplies
+equality, so interned strings and provenance records are stored once. String ID~0 is the empty
+string, so a zeroed field means ``no name''. The hash seed is a fixed constant; nothing that
+reaches output depends on hash-map iteration order. A benchmark interned 2M names in
+0.36--0.45\,s, made 2M \code{u64map} insertions in 0.35--0.39\,s and 2M \code{pagevec} pushes in
+0.01\,s, at 176\,MiB maximum RSS.
+
+\subsection{The IR}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.92\textwidth]{fig_ir_model}
+\caption{The IR object model (IR.md). A module keeps nodes, pins, nets and wires in
+per-kind paged arrays; every reference is a typed 32-bit ID. A net owns a contiguous pin array,
+drivers first. Record sizes are \code{sizeof} on x86-64.}
+\label{fig:ir}
+\end{figure*}
+
+A design holds a string table, the provenance store, the cell-type table and its modules
+(Fig.~\ref{fig:ir}). A module owns nodes, pins and nets as peers, Odin~II's model: a node has
+pins, a pin belongs to one node and attaches to one net, and a net has driver and sink pins.
+The key decisions, numbered as in IR.md:
+
+\emph{Every net is one bit (IR-1).} A port of width $w$ is $w$ consecutive pins, so a port is a
+slice of its node's pins and word structure stays visible; word- and bit-level cells differ only
+in type. Slicing and concatenation are which nets a pin vector uses, so there are no
+\code{\$concat} or \code{\$slice} cells, and \code{lower}/\code{raise} replace cells without
+splitting nets.
+
+\emph{Wires are names, not connectivity (IR-2).} A wire is a named, ordered vector of nets with
+a range and signedness. A net has at most one primary (wire, bit) and any number of aliases, so
+\code{assign b = a;}, flattening and net merging keep every name.
+
+\emph{Ports are nodes and constants are cells (IR-3, IR-4).} Each port is a \code{\$port\_in},
+\code{\$port\_out} or \code{\$port\_inout} node, and constant bits come from shared constant
+cells, so every driver is a pin and \code{check} has one driver rule.
+
+\emph{Typed IDs, stable until \code{compact} (IR-5, IR-6).} Each kind has its own
+\code{struct \{uint32\_t v;\}}, so the compiler rejects a net ID passed as a node ID; slot~0 is a
+reserved dummy, so zero means ``none''. Deleting marks an object dead and keeps its slot.
+\code{compact} renumbers live objects in ID order, frees dead slots and writes a tombstone per
+dead object (module, kind, cell type, name, provenance, parameters, last connected net names) so
+history still resolves.
+
+\emph{Storage (IR-18).} Records are arrays of structs in per-module \code{pagevec}s: node
+40\,B, pin 24\,B, net 40\,B, wire 40\,B. A throwaway spike (2M nodes, 4 pins each, 2.2M nets)
+decided the layout: the whole IR took about 260\,MB, and a fanout walk took 2.8\,s with
+intrusive linked pin lists, 0.85\,s with struct-of-arrays link fields and 0.24\,s with
+contiguous per-net pin arrays. The net-to-pin representation, not AoS versus SoA, decides
+traversal speed, so a net owns a pin array from a size-class pool (capacities 2, 4, 8,
+\ldots), partitioned drivers-first so the driver lookup is O(1) and fanout is a slice.
+
+\emph{Invariants (IR \S9).} \code{check} verifies eleven rules: pin ownership and index ranges,
+pin--net agreement, the driver/sink partition, single drivers except declared tristate buses,
+pin counts against port widths, unique names and agreeing name maps, valid provenance, wire
+membership, port consistency, the granularity view, and dangling pins. The 1B benchmark on the
+real implementation (2M nodes, 2.2M nets, each with a source record) measured build 0.835\,s,
+full \code{check} 0.741\,s, fanout walk 0.313\,s, deleting 10\% 0.098\,s and \code{compact}
+0.393\,s at 792\,MiB maximum RSS, inside the 2\,GB budget for Titan-scale designs.
+
+\subsection{Op registry and cell types}
+
+Each cell type is one table entry in one file (IR-8): name (Yosys spelling where one exists),
+granularity, flags, ports with a width rule (a constant, an integer parameter, a function, or a
+compiled expression supplied by the tech library), parameters with defaults, and hooks that may
+be NULL: \code{verify}, \code{const\_value} (one predicate for ``is this net constant''),
+\code{simulate} with its scratch-sizing hook, and writer hooks. Simulation flags distinguish
+edge-triggered storage, which cuts the simulator's combinational graph, from level latches, which
+do not. 53 types are built in: ports, constants, the BLIF \code{\$sop} cover and latch family,
+bit gates, and the word set (\code{\$add}, \ldots, \code{\$pmux}, \code{\$dff}, \code{\$mem},
+\code{\$reduce\_*}); the 2D specification adds nine Yosys simlib cells and \code{\$proc}. Plugins register types
+at load time. Each module instantiates as a cell type of granularity \code{module} whose ports
+mirror its port nodes, and each parameter specialisation is its own module (IR-7).
+
+\subsection{Provenance}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_prov}
+\caption{The provenance lineage DAG (illustrative run and operation numbers). Two \code{\$add}s
+from one line of a generate loop get two SOURCE records; lowering each is one operation with
+one DERIVED record; clumping two gates is one operation with two parents.}
+\label{fig:prov}
+\end{figure}
+
+Every node, net and wire carries one 32-bit provenance ID into an append-only, hash-consed
+lineage DAG (Fig.~\ref{fig:prov}; IR-12, IR-13). A record holds its kind (SOURCE, IMPORTED from a
+netlist, or DERIVED by a pass), the pass run and the operation number within that run, source
+locations (file, line, column and the raw source-manager location from which macro and include
+chains are derived on demand), the AST node, the hierarchical path, and parent records. The
+run and operation fields are what keep lineage precise: without them, 100 \code{\$add}s from one
+line of a generate loop would share a record and the gates their lowering produces would be
+indistinguishable. Decomposing one object is one operation whose pieces share a record with a
+single parent; clumping $N$ objects is one operation with $N$ parents; a pass that only rewires
+keeps the records. Records are never edited or deleted, and provenance never names object IDs,
+so \code{compact} cannot break lineage.
+
+Navigation runs both ways without recursion. The backward walk visits the SOURCE and IMPORTED
+leaves of a record. The forward index, built by one sweep over every live and dead object and
+tombstone, answers ``everything that came from \code{foo.v:42}''. On the 2M-node benchmark it
+was built in 0.064\,s (168\,MB), a query on the busiest line returned 200,000 hits in
+0.341\,ms, and a backward walk over all 1.8M live nodes took 0.060\,s. Writers can name objects
+\code{hier/path/cell@file:line}, so a VPR block can be traced to its source line without Odin III
+loaded.
+
+\subsection{Source manager}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.88\columnwidth]{fig_srcman}
+\caption{The location space for \code{`define INNER(p) (p + 1)},
+\code{`define OUTER(q) `INNER(q * 2)} and \code{assign y = `OUTER(xx);}. Solid edges: where a
+buffer was entered (\emph{parent}); dashed: where its bytes are spelled (\emph{def}). The
+segment map ties each run of the preprocessed stream to its buffer.}
+\label{fig:srcman}
+\end{figure}
+
+A location is one 32-bit offset into a virtual source space, as in Clang~\cite{clangsm}
+(Fig.~\ref{fig:srcman}; 2A AST-1--AST-3). Buffers are allocated in creation order, each
+reserving its length plus one: FILE buffers for source and project files (and a
+\code{<command line>} buffer for project defines), an EXPANSION buffer per macro use, a
+MACRO\_ARG buffer per contiguous spelled run of a substituted argument, and SCRATCH for pasted
+text (Phase~5). Each buffer records its \emph{parent} (the macro use, the formal, the
+\code{`include} or the project word that opened it) and its \emph{def} (where its bytes are
+spelled). From these, three loops over buffer records give the spelling, the expansion location
+(Clang's \code{getExpansionLoc}) and the file location, and a chain walk prints
+``in argument of macro'', ``expanded from macro'' and ``included from'' lines. Each expansion
+costs its body length once and each substitution its argument length once, so nesting does not
+multiply space. The design owns the source manager, so provenance prints full chains for the
+design's life while storing one 32-bit location per source record.
+
+The preprocessor emits a \emph{segment map}: a new segment wherever the output stops following
+the spelled bytes one for one, and a location-0 segment of its own for every inserted byte. The
+lexer turns output offsets into locations with a monotone cursor. On \code{mcml.v} (650,837
+bytes, 24,508 lines), location decode ran at 16.4\,M/s and the sequential cursor at 475\,M/s.
+Preprocessing \code{mcml.v} produced 5,590 segments in 2,776 buffers and took 2.751\,ms (target
+50\,ms) with a heap of 2.18 times the input; all 31 VTR benchmark files took 0.011\,s in total
+at 4\,MiB maximum RSS (PHASE2 \#12).
+
+\subsection{AST and symbol table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_ast}
+\caption{The 24-byte AST record and the stores for \code{assign y = a + 1;}. Nodes are made
+bottom-up, so every child ID is below its parent's. Each node owns one span of the shared child
+table; absent optional slots are ID~0; literals live in a payload table.}
+\label{fig:ast}
+\end{figure}
+
+The AST mirrors the IR's storage discipline (Fig.~\ref{fig:ast}; 2A AST-4--AST-16). A node is
+24 bytes: kind and sub-kind (one byte each), 16 per-kind flag bits, a source range of two
+32-bit locations, a string-table name, and a span (first index, count) into one shared child
+table; payload kinds (numbers, reals, opaque text) reuse the span field as a payload index. A
+normative \emph{slot table} fixes, for each of 68 kinds, its sub-kinds, whether it has a name,
+its flags, its positional slots (absent optional slots are ID~0, so a slot's index never
+moves) and its tail class and bounds; the builder validates every node against it, and
+\code{check} verifies child classes. Nodes are built bottom-up, so every child ID is smaller
+than its parent's: a forward sweep over IDs visits children first, and the store is
+append-only and immutable once finished. Literals are stored as written and sized later
+following Yosys's \code{read\_verilog} rules exactly. Comments go to a side table sorted by
+location; attributes attach through a map from node to a span of attribute nodes.
+
+A builder-enforced depth cap of 32,768 (ten times the deepest real expression found, a
+2,032-term chain in Koios~\cite{arora2021koios} \code{lenet.v}) bounds every explicit stack.
+On a synthetic 2M-node AST the store measured 41.17 bytes per node against a 40-byte target,
+which was missed and relaxed (the 24-byte record plus number payloads); building took 0.101\,s,
+a walk 0.015\,s and a full check 0.127\,s at 94,324\,KiB maximum RSS. A Verilog printer gives the
+parser a parse--print--parse oracle.
+
+The symbol table (AST-14) is a scope tree---design, one scope per library, one per module
+specialisation, then generate (with loop index), block, function and task scopes---with one
+\code{u64map} keyed \code{(scope << 32) | name} for Verilog's single namespace per scope.
+Symbols record kind, net or variable kind, flags (signed, implicit, port, overridden, how
+assigned), direction, declaration node, packed and unpacked dimensions, parameter value, every
+assigning node, and the IR wire they became. ASTs and symbol tables are freed at the end of
+their read pass unless a pass asks to keep them; SOURCE records keep the raw location either way.
+
+\subsection{Tech library}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_techlib}
+\caption{The \code{.o3lib} tech library: one text format read into local cell types whose
+widths may be parametric and whose functions are expressions over the ports.}
+\label{fig:techlib}
+\end{figure}
+
+The tech library is Odin III's own line-oriented text format, \code{.o3lib}
+(Fig.~\ref{fig:techlib}; 1G spec), target-agnostic so that a flow can map to plain gates
+first and FPGA targeting grows from the same format. Liberty is ASIC-timing-centric with no
+word-level functions, genlib covers only combinational gates, and VPR XML has no functions and
+keeps widths in \code{pb\_type}s, so importers for those formats will produce \code{.o3lib}
+cells instead. A cell is \code{gate}, \code{hard} or \code{blackbox}; port widths may be integer
+expressions over parameters (\code{A\_WIDTH + B\_WIDTH}); outputs are driven by \code{fn}
+expressions, \code{seq} statements or a \code{memory} description; \code{area} and \code{delay}
+are stored for later cost models. One function serves as simulation semantics today and as
+matcher patterns compiled to IR fragments in Phase~4. When a netlist declares a library cell
+as a \code{.blackbox}, the reader matches its ports by name in any order and infers the
+parameters from the declared widths: the goldens hold 49 distinct black-box stanzas whose port
+order varies between files.
+
+\subsection{C ABI and plugins}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{fig_abi}
+\caption{The C ABI and plugin model. Everything outside the core sees only \code{odin3.h}.}
+\label{fig:abi}
+\end{figure}
+
+\code{include/odin3/odin3.h} is the only header plugins see (Fig.~\ref{fig:abi}; 1D spec,
+DESIGN \S15.3). ABI version~4 declares 125 functions over an opaque design handle; IR objects
+are raw 32-bit IDs passed with their module handle, every function returns
+\code{odin3\_status} with results through out-pointers, NULL handles are rejected at the
+boundary, and every declaration has a paragraph on purpose, ownership and failure modes.
+\code{libodin3.so} is built with hidden visibility and exports only the definitions in
+\code{src/api}; a script checks that the exported symbols equal the header's declarations.
+Plugins are shared objects with an \code{odin3\_plugin\_init(abi\_version)} entry point that
+registers passes and cell types (a mismatched ABI is refused); cell-type structs reserve hook
+slots so later hooks do not break the ABI. Python uses the same header through cffi in ABI
+mode, and executable hooks exchanging JSON are planned for Phase~7. Because the IR is IDs, the
+ABI can hand them out safely and the IR serialises trivially.
+
+\subsection{Caps and out-of-memory safety}
+
+\begin{table}[t]
+\caption{Selected resource caps (named constants, each a located error with a test). The
+parser and elaboration caps are specified (2C, 2D), the others built.}
+\label{tab:caps}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Cap & Value \\
+\midrule
+Reader port width / cell width & $2^{20}$ / $2^{22}$ bits \\
+Source file / buffers per design & $2^{28}$ B / $2^{24}$ \\
+AST depth / children per node & 32,768 / $2^{24}$ \\
+Literal bits / decimal digits & $2^{20}$ / 4,096 \\
+Include depth / expansion chain & 64 / 1,024 \\
+Preprocessed stream & $2^{28}$ B \\
+Parser stack (\code{YYMAXDEPTH}) & 262,144 \\
+Errors per run (parser, elaboration) & 20 \\
+Loop iterations: one / all & $2^{20}$ / $2^{24}$ \\
+Elaboration byte budget & 60\% of physical memory \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every input-driven quantity has a named cap, checked before the allocation it guards and
+reported as a located error (Table~\ref{tab:caps}). The motivation is practical: on the
+development platform an out-of-memory condition kills the whole virtual machine (PHASE0 \#29),
+and fuzzers produce macro, include and literal ``bombs''. A one-line BLIF \code{.subckt} must
+not force gigabytes of pins; an exponential macro must stop at a stream, buffer or
+location-space cap before memory runs out. Out of memory is a status, not a crash:
+every container and IR operation reserves first, and unit tests fail every allocation in turn
+through the \code{util} hook and assert that nothing changed and nothing leaked.
+
+% ------------------------------------------------------------------------------------------
+\section{Comparison with Yosys and Odin II}
+\label{sec:compare}
+
+\begin{table*}[t]
+\caption{Odin II, Yosys (with Parmys) and Odin III compared}
+\label{tab:compare}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.15\textwidth}p{0.25\textwidth}p{0.25\textwidth}p{0.28\textwidth}@{}}
+\toprule
+ & Odin II (VTR) & Yosys + Parmys & Odin III \\
+\midrule
+Core language & C-style code, built as C++ & C++ & C17; C++ only in adapters \\
+Netlist & pointer graph: nodes hold pin-pointer arrays, nets hold driver and fanout pin pointers &
+  RTLIL: wires and cells in name-keyed dictionaries; connections are SigSpecs of wire slices &
+  per-module paged records; typed 32-bit IDs; one-bit nets; net-owned pin arrays \\
+Granularity & bit-level netlist & word-level cells and processes; bit-level after techmap &
+  one IR, word and bit views (Sec.~\ref{sec:arch}) \\
+AST & \code{ast\_node\_t} with pointer children, \code{\{file, line, col\}} & \code{AstNode}
+  with owned children, attribute map & 24-byte records, ID spans, slot table, 32-bit locations \\
+Provenance & AST pointer on nodes; names & \code{src} attribute (\code{file:line.col}) &
+  lineage DAG on every node, net and wire, with macro and include chains \\
+Traversal & recursive (e.g.\ expression reduction) & recursive (e.g.\ AST simplification) & iterative only; capped \\
+Resource limits & implicit & implicit & named caps; OOM is a status \\
+Input & command line, XML config & scripts, command line & project record: \code{.o3proj},
+  \code{-f}, Quartus; includes architecture and mapping rules \\
+Architecture & VPR XML hard blocks & Parmys reads VPR XML & \code{.o3lib} (VPR XML import planned) \\
+ABC & separate step in the VTR flow & external process with a script & linked \code{libabc}
+  (planned); project-chosen script \\
+SV / VHDL & no & yosys-slang, GHDL plugins & slang adapter at the seam; GHDL (planned) \\
+Simulator & yes & \code{sim}, \code{eval}, SAT-based passes & yes, registry semantics \\
+Extension & source changes & C++ passes and plugins & C ABI \code{.so}, Python cffi \\
+License & MIT (VTR) & ISC & MIT \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:compare} summarises the differences. Yosys is the more complete and more mature
+tool by a wide margin, with a pass library, formal flows and language coverage Odin III will not
+match for years; Odin~II pioneered architecture-aware hard-block mapping for VTR. The
+differences below are choices made for Odin III's research goals and its development method,
+not claims of general superiority.
+
+\emph{C17, a lint gate and no recursion.} The core is structured C17 (ADR D8$'$), replacing an
+earlier C++20 plan, for five reasons: code an agent writes and a human reviews in one pass,
+a stable language-neutral plugin boundary, ABC being C, the Odin~II lineage, and complexity
+that a linter can enforce. The gate is blocking in pre-commit and CI: clang-format, clang-tidy, cppcheck, lizard
+(cyclomatic complexity at most 15, functions at most 60 lines and 5 parameters), a rules script
+(no \code{exit} outside the CLI, no \code{abort} outside \code{check}, \code{goto} only to a
+single \code{cleanup:} label), \code{-Wvla} under \code{-Werror}, and ASan with UBSan on every
+unit test. Recursion is
+banned in traversals because the IR can be 2M nodes deep; Yosys's AST simplification and Odin
+II's expression reduction are recursive, which is reasonable for hand-written RTL but is a stack
+risk for machine-generated designs such as Koios's 2,032-term chains.
+
+\emph{IDs and paged storage instead of pointer graphs.} RTLIL's SigSpec, a list of wire slices
+per connection, is expressive but makes every rewrite split slices; Odin~II's pointer graph
+makes serialisation and safe external handles hard. Odin III's one-bit nets with contiguous
+pin arrays keep rewiring a matter of pin moves, give O(1) drivers and slice fanout, make
+\code{compact} and the ABI straightforward, and cost little: the spike measured 260\,MB for 2M
+nodes. The price is per-bit storage for wide buses, which the 2M-node benchmarks show is within
+budget.
+
+\emph{Provenance as a first-class structure.} Yosys keeps a \code{src} string attribute that
+passes propagate where they choose; Odin~II keeps a pointer to the AST node that made a netlist
+node. Neither records which pass made an object from which others. Odin III's lineage DAG
+records every decomposition and clump, survives deletion through tombstones, and is queried in
+both directions, because the research threads need it: reverse engineering reports which
+netlist region became which recovered structure, mapping explains which rule chose a binding,
+and a user can trace a VPR block to a source line.
+
+\emph{Explicit caps and OOM safety.} Section~\ref{sec:data} explains the caps. Neither Yosys
+nor Odin~II defines input-driven limits; both rely on the host. For a tool meant to be fuzzed
+and run unattended on shared machines, a located error is better than a killed process.
+
+\emph{Project files carry the architecture and the ABC script.} Odin~II took an architecture
+file and an XML configuration; Yosys takes scripts. Odin III makes the project the unit of
+reproducibility: sources, defines, top and parameters, the architecture with its inventory and
+research overrides, the mapping rules, and the flow. The architect's decision for Phase~3 extends
+this to ABC: the project file names the ABC script, and a command-line option overrides it, so
+a soft-logic experiment is recorded with the design rather than in a wrapper script
+\todo{project-file syntax for the ABC script, fixed with Phase 3}. ABC is linked rather than
+spawned (ADR D3: its permissive license allows linking into the MIT core), and the \code{abc}
+pass will hand it the soft-logic cone with black boxes preserved and stitch the result back.
+
+\emph{Yosys~0.55 semantics as the oracle, with declared divergences.} Rather than reinterpret
+IEEE~1364-2005~\cite{ieee1364} independently, Odin III adopts the semantics of the Yosys inside
+Parmys (0.55) as its oracle for literal sizing, widths and signedness, parameter precedence and
+process generation, and checks against it through \code{write\_rtlil} and equivalence checking.
+Where it differs, the difference is declared and tested: the 2D specification lists 23
+divergences (for example, automatic top selection requires a single uninstantiated module,
+\code{\$readmem} files are never searched in the working directory, and unconnected inputs are
+driven by \code{x}), and the preprocessor declares its own (for example, directives inside
+macro text are errors, recursion is judged on the spelling ancestry, and includes never search
+the working directory). Odin~II is kept as a
+read-only reference: a coverage audit of 159 synthesizable Verilog-2005
+constructs~\cite{ieee13641} (100 required, 25 recommended, 10 ignored, 24 rejected) probed
+Odin~II and Yosys with about 340 one-module tests and found constructs Odin~II's grammar lacks
+(e.g.\ \code{casez}, attributes, ANSI function headers) and constructs it elaborates
+differently from Yosys (e.g.\ dropped signedness), shown with equivalence checking.
+
+\emph{The elaboration seam.} Yosys gains SystemVerilog by translating slang's elaborated design
+into RTLIL inside a plugin; Odin~II has no SV path. Odin III's seam
+(Fig.~\ref{fig:seam}) puts the shared work---widths, signedness, drivers, memories,
+processes---in one stage~2 that both the Verilog stage~1 and the slang adapter feed, so the
+Phase~5 test that three front ends give one netlist has one place to fail.
+
+\emph{Agentic, spec-first development with oracles.} Odin~II and Yosys grew through human
+contributions. Odin III is written by an AI coding agent under an architect's control, so its
+correctness evidence must come from outside the code: golden BLIFs from Parmys and Odin~II on
+two architectures (2,380 oracle runs: 1,846 succeeded, 522 failed and 12 hit the memory cap),
+\code{netlist-compare} (canonicalised identity), \code{equiv-check} (ABC \code{cec}/\code{dsec}),
+a differential preprocessor check against Icarus Verilog~\cite{icarus} and Yosys, the project
+corpus, and fuzzers. Section~\ref{sec:method} describes the method.
+
+% ------------------------------------------------------------------------------------------
+\section{Development Methodology}
+\label{sec:method}
+
+Every sub-project follows the same path: a specification in \code{docs/specs} with numbered
+decisions, an independent critique by a fresh read-only agent, an implementation plan, tasks
+dispatched to implementer agents with disjoint files and a written interface, a critique of every
+pull request before it opens, and a merge only on a green CI gate (PHASE0 \S A.1). Decisions are
+logged per phase; the architect makes or reviews every design-rule decision (specification, ADRs,
+IR invariants, mapping algorithms), in some phases after the fact, and the agent proceeds on its
+own recommendations elsewhere, logging each as a default he may override. Exit tests are external: the Phase~1 BLIF round trip
+ran over every successful golden, the simulator was compared cycle by cycle with Icarus running
+an independent dump of the same netlist, and the writers were validated through Yosys.
+
+Cost is logged from the agent's transcripts (\code{docs/log\_cost\_of\_tokens\_and\_time.md}).
+From 2026-10-08 to 2026-10-11 (60.2\,h wall clock, 27.0\,h active), 9,115 API requests used
+1.99 billion tokens, 96\% of them prompt-cache reads, across 6 main sessions and 201 subagent
+runs, mostly with Claude Opus~5.5. \todo{update the token log at submission time}
+
+% ------------------------------------------------------------------------------------------
+\section{Status and Roadmap}
+\label{sec:status}
+
+\begin{table*}[t]
+\caption{Development phases (DESIGN \S12) and status on 2026-10-11}
+\label{tab:phases}
+\centering
+\footnotesize
+\begin{tabular}{@{}p{0.03\textwidth}p{0.36\textwidth}p{0.36\textwidth}p{0.18\textwidth}@{}}
+\toprule
+Ph. & Deliverable & Exit test & Status \\
+\midrule
+0 & environment, oracle builds, golden BLIFs, \code{netlist-compare}, \code{equiv-check}, lint gate, CI &
+  oracles green on all goldens; gate green & done \\
+1 & \code{util}, IR, op registry, pass manager, \code{check}, provenance, C ABI, BLIF I/O,
+  writers, simulator, tech library & BLIF$\to$IR$\to$BLIF identical on goldens; simulation
+  matches ABC; a Python plugin walks the IR & done \\
+2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
+  micros identical or equivalent to Parmys; every project fixture parses and elaborates from each
+  format & 2A, 2B built; 2C, 2D specified \\
+3 & \code{lower}, linked ABC, VTR flow hookup & VTR benchmarks through place and route; QoR table & planned \\
+4 & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & QoR
+  parity on an architecture sweep & planned \\
+5 & slang adapter, GHDL path & three front ends, one netlist & planned \\
+6 & \code{raise}, VQM/EDIF, Altera \code{bind}, primitive library, Titan subset~\cite{murray2013titan} &
+  reverse-engineering round trip; Titan & planned \\
+7 & CIRCT writer, JSON reader, visual tooling, documentation & release & planned \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:phases} lists the phases. Phase~1's exit tests passed on the goldens: every one of
+the 1,846 successful golden BLIFs read and wrote back identically under the text gate, and 1,824
+were also identical under \code{netlist-compare} (10 with stub models for implicit cells), with
+the remaining 22 being 4 multi-driver Odin~II originals the comparator refuses and 18 comparator
+timeouts or memory-cap stops on the largest Odin~II netlists; the reader and writer handled the
+915\,MB \code{LargeRam} netlist in 16.8\,s. The simulator matched the reference on all 1,626
+simulated goldens (4 of them after rerunning the reference simulator with a longer timeout;
+220 excluded: 206 with RAMs, 10 implicit black boxes, 4 multi-driver), the
+JSON writer was identical through Yosys on 1,796 goldens, structural Verilog was equivalent on
+1,428 with none non-equivalent, and the Python walk agreed with the C \code{stats} pass on all 141
+committed fixtures.
+
+Phase~2 has built the source manager, AST and symbol table (2A), and the project readers and
+preprocessor (2B), whose differential check against Icarus and Yosys over 287 files gave 271
+agreements, 11 cases where the two oracles disagree (all as expected), 5 declared divergences and
+20 excluded files (headers read only through another micro), with no differences or crashes. The parser (2C) and
+elaboration (2D) are specified and planned; 2D's targets are \code{mcml.v} in at most 0.5\,s and
+Koios \code{lenet.v} in at most 10\,s, against Yosys~0.55's measured 0.48\,s and 14.3\,s
+\todo{measured 2C parse-only and 2D elaboration results on mcml.v and lenet.v}
+\todo{Phase 2 exit-test results against Parmys}.
+
+% ------------------------------------------------------------------------------------------
+\section{Conclusion}
+
+Odin III is a research front end designed around three needs that existing tools serve only in
+part: architecture and mapping rules carried with the design, lineage from every netlist object
+back to its source and through every transformation, and a core simple and checked enough for an
+AI agent to build and a human to review. Its IR keeps Odin~II's node/pin/net model in ID-based
+paged storage; its front end follows Yosys's semantics, declaring every divergence; and its
+elaboration seam prepares one back half for Verilog and SystemVerilog alike. Phase~1 is complete
+and validated on 1,846 golden netlists. The next milestones are the parser, elaboration and the
+Phase~2 exit test against Parmys, then ABC and the VTR flow in Phase~3, where the first
+quality-of-results comparison will be made \todo{QoR summary once Phase 3 lands}.
+
+\section*{Acknowledgment}
+\todo{acknowledgments and funding}
+
+\bibliographystyle{IEEEtran}
+\bibliography{odin3}
+
+\end{document}
