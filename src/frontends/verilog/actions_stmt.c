@@ -25,6 +25,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* `base + off`, or NULL when the array is empty: offsetting NULL, even by 0, is undefined. */
+static const odin3_ast_id *ids_at(const odin3_ast_id *base, uint32_t off) {
+    return base == NULL ? NULL : base + off;
+}
+
 /* One automatic_opt serves functions and tasks (VP_FLAGS of FUNCTION_DECL's bit). */
 _Static_assert(ODIN3_AST_F_FUNCTION_DECL_AUTOMATIC == ODIN3_AST_F_TASK_DECL_AUTOMATIC,
                "2A §4.4: AUTOMATIC is bit 0 of FUNCTION_DECL and TASK_DECL");
@@ -170,7 +175,7 @@ static odin3_status make_block(odin3_vp_ctx *ctx, uint32_t mark, const odin3_ast
         st = list_of(ctx, items, decls, (odin3_loc){0}, &locals);
     }
     st = st == ODIN3_OK ? odin3_ast_push(ctx->ast, locals) : st;
-    st = st == ODIN3_OK ? push_all(ctx, items + decls, count - decls) : st;
+    st = st == ODIN3_OK ? push_all(ctx, ids_at(items, decls), count - decls) : st;
     return st == ODIN3_OK ? odin3_ast_make_marked(ctx->ast, spec, mark, out) : st;
 }
 
@@ -591,12 +596,12 @@ static odin3_status build_function(odin3_vp_ctx *ctx, const odin3_vp_header *hea
     uint32_t ports = 0;
     uint32_t locals = 0;
     odin3_vec_clear(&ctx->part_scratch);
-    odin3_status st = collect(ctx, ODIN3_AST_CLS_NONE, span + lead, items, &ports);
-    st = st == ODIN3_OK ? collect(ctx, ODIN3_AST_CLS_D, span + lead, items, &locals) : st;
+    odin3_status st = collect(ctx, ODIN3_AST_CLS_NONE, ids_at(span, lead), items, &ports);
+    st = st == ODIN3_OK ? collect(ctx, ODIN3_AST_CLS_D, ids_at(span, lead), items, &locals) : st;
     odin3_ast_id kids[VP_MAX_STMT_KIDS] = {lead > 0 ? span[0] : (odin3_ast_id){0}, {0}, {0}, body};
     const odin3_ast_id *parts = scratch_ids(&ctx->part_scratch);
     st = st == ODIN3_OK ? list_of(ctx, parts, ports, header->after_header, &kids[1]) : st;
-    st = st == ODIN3_OK ? list_of(ctx, parts + ports, locals, header->after_header, &kids[2]) : st;
+    st = st == ODIN3_OK ? list_of(ctx, ids_at(parts, ports), locals, header->after_header, &kids[2]) : st;
     if (st == ODIN3_OK && body.v == 0) { /* a task without a statement (§3.6) */
         odin3_loc where = after_body(ctx, header);
         odin3_vp_loc null_at = {where, where, 0};
@@ -626,7 +631,7 @@ odin3_status vp_make_function(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_l
         return st != ODIN3_OK ? st : ODIN3_ERR_INVALID_ARG; /* a function pushed its return */
     }
     tf_parts parts = {0};
-    count_statements(ctx->ast, scratch_ids(&ctx->span_scratch) + lead,
+    count_statements(ctx->ast, ids_at(scratch_ids(&ctx->span_scratch), lead),
                      (uint32_t)ctx->span_scratch.len - lead, &parts);
     bool reported = false;
     report_body(ctx, &head, at, &parts, &reported);
