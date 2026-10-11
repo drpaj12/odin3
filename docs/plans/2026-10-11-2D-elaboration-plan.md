@@ -294,7 +294,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - `implicit black box 'foo': port 'a' is 4 bits at its first instance; this connection is 8 bits` (error)
   - `value of parameter 'P' of cell type 't' is not an integer` (error)
   - `--elab-only cannot be combined with a script; use read_verilog in the script` (CLI)
-  - `module 'm': cell '<name>' of type '$shiftx' has no structural Verilog form` (`write_verilog`, also `$pow`)
+  - ~~`module 'm': cell '<name>' of type '$shiftx' has no structural Verilog form` (`write_verilog`, also `$pow`)~~ — *Amended (Task 1 fix round, controller ruling):* `write_verilog` writes `$shiftx` and `$pow` as generic instances with every parameter, as `$memrd`; there is no refusal and no text.
 - (x) **`processes` values for other branches' passes.** `read_project`, `dump_project`, `preprocess` and `read_verilog` are `OK` (they never read the IR as logic). Every other existing pass is as §8.1 lists.
 - (y) **`$readmem` paths.** A relative path resolves against the directory of the resolved path of the `FILE` buffer holding the call's `loc`. An absolute path is used as given (DESIGN §4.0).
 - (z) **Text and count fixes.**
@@ -417,7 +417,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Modify `src/ir/cells/reduce.c` (`$reduce_xnor`, `$reduce_bool`, with hooks).
 - Modify `src/ir/cells/shift.c` (`$shiftx` binary, `simulate` NULL).
 - Modify `src/ir/cells/cells.h` (nine `extern`s) and `builtin.c` (append in point (f)'s order).
-- Modify `src/backends/verilog/writer.c` (review M6): `BUILTINS` gains `$neg` (`FORM_UNARY`, `-`), `$reduce_xnor` (`~^`), `$reduce_bool` (`|`), `$logic_not` (`!`), `$xnor` (`FORM_BINARY`, `~^`), `$logic_and` (`&&`) and `$logic_or` (`||`). `$shiftx` and `$pow` are refused with point (w)'s text.
+- Modify `src/backends/verilog/writer.c` (review M6): `BUILTINS` gains `$neg` (`FORM_UNARY`, `-`), `$reduce_xnor` (`~^`), `$reduce_bool` (`|`), `$logic_not` (`!`), `$xnor` (`FORM_BINARY`, `~^`), `$logic_and` (`&&`) and `$logic_or` (`||`). `$shiftx` and `$pow` are refused with point (w)'s text (superseded: generic instances, see (w)).
 - Modify `tests/unit/test_ir_cells.c`, `test_sim_word.c` and `test_verilog_writer.c`.
 - Modify `tools/sim-check/gen_simlib_cases.py`: `BINARY` gains `$xnor $logic_and $logic_or`, `UNARY` gains `$neg $reduce_xnor $reduce_bool $logic_not`. Regenerate `tests/unit/simlib_word_cases.h`. The existing rows change too, because the lists feed the RNG stream (review M7); the commit says so.
 - Modify `docs/DESIGN.md` §5.2: the word list gains the nine cells.
@@ -455,7 +455,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Every `simlib_word_cases.h` row equal.
 - `test_verilog_writer`:
   - a module with one `$logic_and` (`A_WIDTH` 2, `B_WIDTH` 3, `Y_WIDTH` 1) writes `assign … = … && …;`;
-  - a `$shiftx` node → `INVALID_ARG` with `module 'm': cell '$c1' of type '$shiftx' has no structural Verilog form`.
+  - a `$shiftx` node → `INVALID_ARG` with `module 'm': cell '$c1' of type '$shiftx' has no structural Verilog form` (superseded by (w)'s amendment: the exact generic-instance text).
 
 ### Task 2: IR change C — port range and signedness (EL-24, §6.2)
 **Files:**

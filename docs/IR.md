@@ -193,7 +193,8 @@ writes a width-1 library port as `cin[0]`, Yosys+Parmys as `cin`).
 **Parameters of a `.subckt` (1G).** BLIF cannot give parameters, so a reader derives them: an
 instance of a model the file declares gets the declaration's parameter values; an instance of a
 registered type the file does not declare gets the values its formals imply — each port's width
-seen as its largest bit index + 1 (`p[k]`), inferred as above (`odin3_celltype_infer_params`;
+seen as its largest bit index + 1 (`p[k]`; a built-in `$` word cell's bare `P`, Yosys's spelling
+of a 1-bit connection, is `P[0]`), inferred as above (`odin3_celltype_infer_params`;
 types whose port widths are not parameters keep their defaults). Only a parameter that is some
 port's width parameter is inferred: one used only inside width expressions keeps its default, and
 a declaration it contradicts is reported as a port-width mismatch. Readers cap the widths their

@@ -1172,8 +1172,24 @@ static odin3_status begin_inst(blif_reader *rd, const blif_inst *inst) {
     return ODIN3_OK;
 }
 
+/* The bit recorded for a bare formal `P` of a vector port (formal_pin resolves it to P[0] of a
+ * 1-bit port). Bits are below MAX_INFERRED_WIDTH, so it never names a real bit. */
+static const uint32_t BARE_BIT = UINT32_MAX;
+
+/*
+ * True when the vector port of an undeclared instance may be written bare (`P=` for `P[0]` of a
+ * 1-bit port), as Yosys write_blif writes a built-in word cell's 1-bit connection: the type is a
+ * `$`-named word cell and the port is sized by a width parameter.
+ */
+static bool bare_formal_ok(const blif_inst *inst, uint32_t port) {
+    const odin3_celltype_def *def = inst->def;
+    return inst->decl == NULL && def->gran == ODIN3_GRAN_WORD && def->name[0] == '$' &&
+           def->ports[port].width_param != NULL;
+}
+
 /* The pin a formal names: an exact port name of a scalar port, else `p[k]` for bit k of vector p
- * (the bit is checked against the instance's width by formal_pin). */
+ * (the bit is checked against the instance's width by formal_pin), or bare `p` for a built-in
+ * word cell's 1-bit port (bare_formal_ok; BARE_BIT, which formal_pin resolves). */
 static odin3_status match_formal(const blif_reader *rd, const blif_inst *inst, odin3_bytes formal,
                                  uint64_t *where) {
     const char *name = formal.ptr;
@@ -1181,6 +1197,10 @@ static odin3_status match_formal(const blif_reader *rd, const blif_inst *inst, o
     uint32_t port = find_port(inst->def, name, formal.len);
     uint32_t bit = 0;
     size_t base_len = 0;
+    if (port < n_ports && !port_scalar(inst, port) && bare_formal_ok(inst, port)) {
+        *where = ((uint64_t)port << TYPE_SHIFT) | BARE_BIT;
+        return ODIN3_OK;
+    }
     if (port < n_ports && !port_scalar(inst, port)) {
         return rd_error(rd, rd->line, "model '%s' has no port '%.*s' (vector port: use %.*s[k])",
                         inst->def->name, (int)formal.len, name, (int)formal.len, name);
@@ -1219,6 +1239,16 @@ static odin3_status formal_pin(blif_reader *rd, const blif_inst *inst, odin3_byt
         }
     }
     const odin3_netvec *port = (const odin3_netvec *)rd->ports.data + (where >> TYPE_SHIFT);
+    if ((uint32_t)where == BARE_BIT) {
+        if (port->count != 1) {
+            return rd_error(rd, rd->line,
+                            "model '%s' has no port '%.*s' (vector port of %u bits here: use "
+                            "%.*s[k])",
+                            inst->def->name, (int)formal.len, (const char *)formal.ptr,
+                            (unsigned)port->count, (int)formal.len, (const char *)formal.ptr);
+        }
+        where = (where >> TYPE_SHIFT) << TYPE_SHIFT; /* bit 0 */
+    }
     if ((uint32_t)where >= port->count) {
         return rd_error(rd, rd->line, "model '%s' has no port '%.*s'", inst->def->name,
                         (int)formal.len, (const char *)formal.ptr);

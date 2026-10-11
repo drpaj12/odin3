@@ -23,7 +23,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-enum { OUT_BUF = 64, MAX_COVER = 64, SEVEN = 7 };
+enum { OUT_BUF = 64, MAX_COVER = 64, SEVEN = 7, CELL_TEXT = 4096 };
 
 extern char **environ;
 
@@ -453,8 +453,34 @@ static void test_parameters_binary(void) {
     (void)remove("t6b.json");
 }
 
+/* A cell's JSON object to find: the whole text and the cell's key. */
+typedef struct cell_query {
+    const char *text;
+    const char *key;
+} cell_query;
+
+/* The cell object of query.key in query.text: from `"key": {` to the end of its "connections"
+ * member, copied into buf. */
+static const char *cell_object(cell_query query, char *buf, size_t size) {
+    const char *key = query.key;
+    const char *text = query.text;
+    char head[OUT_BUF];
+    (void)snprintf(head, sizeof head, "\"%s\": {", key);
+    const char *start = strstr(text, head);
+    TEST_ASSERT_NOT_NULL_MESSAGE(start, key);
+    const char *conn = strstr(start, "\"connections\"");
+    TEST_ASSERT_NOT_NULL_MESSAGE(conn, key);
+    const char *end = strchr(conn, '}');
+    TEST_ASSERT_NOT_NULL_MESSAGE(end, key);
+    size_t len = (size_t)(end - start);
+    TEST_ASSERT_LESS_THAN_size_t(size, len);
+    memcpy(buf, start, len);
+    buf[len] = '\0';
+    return buf;
+}
+
 /* The 2D word cells (IR change A, EL-31) are generic cells under their Yosys names, $shiftx and
- * $pow included (they have no Verilog form, but JSON names any cell). */
+ * $pow included; each cell's own object has its type, parameters and connections. */
 static void test_2d_word_cells(void) {
     odin3_module *mod = new_module("top");
     odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
@@ -472,16 +498,31 @@ static void test_2d_word_cells(void) {
     odin3_netvec pw_ports[3] = {{two, 2}, {&net_s, 1}, {&net_z, 1}};
     add_node(mod, &pow, pw_ports);
     odin3_value un[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(1)};
-    odin3_node_spec neg = {type_id("$logic_not"), intern("ln"), prov_at(9), un, 3};
+    odin3_node_spec lnot = {type_id("$logic_not"), intern("ln"), prov_at(9), un, 3};
     odin3_netvec ln_ports[2] = {{two, 2}, {&net_n, 1}};
-    add_node(mod, &neg, ln_ports);
+    add_node(mod, &lnot, ln_ports);
     char *text = write_json("t2d.json");
-    assert_has(text, "\"type\": \"$shiftx\"");
-    assert_has(text, "\"type\": \"$pow\"");
-    assert_has(text, "\"type\": \"$logic_not\"");
-    assert_has(text, "\"B_SIGNED\": \"00000000000000000000000000000001\"");
-    assert_has(text, "\"A_WIDTH\": \"00000000000000000000000000000010\"");
-    assert_has(text, "\"A\": [ 2, 3 ]");
+    static char cell[CELL_TEXT];
+    static const char *const keys[2] = {"sx", "pw"};
+    static const char *const types[2] = {"\"type\": \"$shiftx\"", "\"type\": \"$pow\""};
+    static const char *const outs[2] = {"\"Y\": [ 4 ]", "\"Y\": [ 5 ]"};
+    for (uint32_t i = 0; i < 2; i++) {
+        (void)cell_object((cell_query){text, keys[i]}, cell, sizeof cell);
+        assert_has(cell, types[i]);
+        assert_has(cell, "\"A_SIGNED\": \"00000000000000000000000000000000\"");
+        assert_has(cell, "\"B_SIGNED\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"A_WIDTH\": \"00000000000000000000000000000010\"");
+        assert_has(cell, "\"B_WIDTH\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"Y_WIDTH\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"A\": [ 2, 3 ]");
+        assert_has(cell, "\"B\": [ 3 ]");
+        assert_has(cell, outs[i]);
+    }
+    (void)cell_object((cell_query){text, "ln"}, cell, sizeof cell);
+    assert_has(cell, "\"type\": \"$logic_not\"");
+    assert_has(cell, "\"A_SIGNED\": \"00000000000000000000000000000001\"");
+    assert_lacks(cell, "B_SIGNED");
+    assert_has(cell, "\"Y\": [ 6 ]");
     odin3_util_free(text);
     (void)remove("t2d.json");
 }

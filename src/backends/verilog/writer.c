@@ -125,14 +125,6 @@ static const vw_builtin BUILTINS[] = {
 };
 enum { N_BUILTINS = sizeof BUILTINS / sizeof BUILTINS[0] };
 
-/*
- * Built-in word cells with no structural Verilog form (2D spec §7.2): $shiftx reads x outside A,
- * and $pow has no hook or lowering yet. Refused rather than written as an instance of a module
- * nobody defines.
- */
-static const char *const NO_FORM[] = {"$shiftx", "$pow"};
-enum { N_NO_FORM = sizeof NO_FORM / sizeof NO_FORM[0] };
-
 /* Parameter indices: word cells (A_SIGNED B_SIGNED …), $sop, word flip-flops, bit storage. */
 enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1 };
 enum { SOP_WIDTH = 0, SOP_COVER = 1 };
@@ -999,32 +991,6 @@ static odin3_bytes cell_label(const verilog_writer *wr, odin3_node_id node, char
     return odin3_bytes_cstr(id);
 }
 
-/* True when def is a built-in word cell with no Verilog form (NO_FORM). */
-static bool lacks_form(const odin3_celltype_def *def) {
-    if (def->gran != ODIN3_GRAN_WORD) {
-        return false;
-    }
-    for (uint32_t i = 0; i < N_NO_FORM; i++) {
-        if (strcmp(def->name, NO_FORM[i]) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/* "path: module 'm': cell '<name>' of type '<type>' has no structural Verilog form" (point (w)). */
-static void refuse_no_form(verilog_writer *wr, odin3_node_id node) {
-    if (wr->st == ODIN3_OK) {
-        char id[NODE_ID_TEXT];
-        odin3_bytes label = cell_label(wr, node, id);
-        odin3_log(ODIN3_LOG_ERROR,
-                  "%s: module '%s': cell '%.*s' of type '%s' has no structural Verilog form",
-                  wr->path, wr->mod.name != NULL ? wr->mod.name : "", (int)label.len,
-                  (const char *)label.ptr, node_def(wr, node)->name);
-    }
-    (void)vw_fail(wr, ODIN3_ERR_INVALID_ARG);
-}
-
 /* `  assign <output port> = ` */
 static void begin_assign(verilog_writer *wr, odin3_node_id node) {
     vw_puts(wr, "  assign ");
@@ -1527,9 +1493,7 @@ static bool const_omitted(const verilog_writer *wr, odin3_node_id node, const vw
 static void write_cell(verilog_writer *wr, odin3_node_id node) {
     const vw_builtin *bi = node_builtin(wr, node);
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
-    if (bi == NULL && lacks_form(node_def(wr, node))) {
-        refuse_no_form(wr, node);
-    } else if (bi == NULL) {
+    if (bi == NULL) {
         put_attrs(wr, obj, (vw_attr_frame){"  ", "\n"});
         write_instance(wr, node);
     } else if (has_output(wr, node)) {

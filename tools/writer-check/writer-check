@@ -20,16 +20,14 @@
 #            A golden Yosys cannot read, or with a word-level internal cell such as `.subckt $pow`
 #            and no `.param` line (write_blif drops a parameterless one on both sides), is
 #            excluded from this step ("ref-excluded", listed).
-#   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog -noblackbox; hierarchy -top <first
+#   VERILOG  iverilog -g2005 parses it, with Yosys 0.55 simlib.v as a library (-l), which defines
+#            the built-in cells written as instances (`$pow`, `$shiftx`, `$mem*`); Yosys `read_verilog -noblackbox; hierarchy -top <first
 #            model>; proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
 #            (* blackbox *) stubs declare the black boxes) and tools/equiv-check
 #            --allow-undriven against the golden. equiv-check cannot model black boxes other
 #            than the VTR adder (RAMs, multipliers, implicit cells), multi-driver nets, level
 #            latches or several clocks: an equiv-check error located in the golden file makes
-#            it "excluded" (listed with the reason); any other error is an error. A golden with
-#            a built-in word cell that has no structural Verilog form (`$shiftx`, `$pow`: 2D
-#            spec §7.2, plan point (w)) is refused by the writer: both Verilog columns read
-#            "refused" (listed with the message) while the JSON and dot steps still run.
+#            it "excluded" (listed with the reason); any other error is an error.
 #   DOT      dot -Tsvg accepts it ("ok"); when the layout takes longer than --dot-timeout,
 #            Graphviz's parser (nop) must accept it ("ok-parse"); or the writer refused it for
 #            the node budget (--max-nodes, default 2000): the budget honoured ("budget").
@@ -48,7 +46,8 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 usage() {
     cat >&2 <<'USAGE'
 usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH] [--yosys PATH] [--nc PATH] [--ec PATH]
-                    [--max-nodes N] [--dot-timeout S] [--out DIR] [--keep] [--resume] [--fixtures DIR | GOLDEN_ROOT]
+                    [--max-nodes N] [--dot-timeout S] [--simlib PATH] [--out DIR] [--keep] [--resume]
+                    [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed); timeouts and caps are failures
   -j N          parallel jobs, 1 or 2 (default 2)
@@ -57,6 +56,8 @@ usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH]
   --write PATH  odin3-write (default build/release/odin3-write, else build/debug/odin3-write)
   --yosys PATH  Yosys (default $ODIN3_YOSYS, else ~/odin3-ws/external/yosys/build/yosys, else PATH)
   --nc PATH, --ec PATH  netlist-compare, equiv-check (default: the repository's tools/)
+  --simlib PATH Yosys simlib.v for iverilog -l (default: $VTR_ROOT's Yosys 0.55, else
+                ~/odin3-ws/external/vtr-verilog-to-routing's, else the --yosys installation's)
   --max-nodes N dot node budget (default 2000)
   --dot-timeout S  dot -Tsvg layout timeout (default 120); past it, Graphviz nop must parse the file
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
@@ -308,7 +309,8 @@ json_gate() {
 # Verilog gate for golden $1, Verilog $2, work prefix $3: prints "<iverilog> <equiv>".
 verilog_gate() {
     local gold=$1 vlog=$2 w=$3 rc=0 iv eq top msg
-    capped "$w.iv.log" "$w.iv.rss" "$WC_IVERILOG" -g2005 -o /dev/null "$vlog" || rc=$?
+    capped "$w.iv.log" "$w.iv.rss" "$WC_IVERILOG" -g2005 -o /dev/null -l "$WC_SIMLIB" "$vlog" ||
+        rc=$?
     note_rss "$w.iv.rss"
     if [ "$rc" -eq 0 ]; then iv=ok; else iv=$(fail_word "$rc" "$w.iv.log" FAIL); fi
     top=$(LC_ALL=C awk '$1 == ".model" { print $2; exit }' "$gold")
@@ -362,14 +364,6 @@ dot_gate() {
     esac
 }
 
-# True when the driver log $1 shows only the Verilog writer's point-(w) refusal: read, JSON and
-# dot succeeded (or dot honoured its budget) and Verilog failed with "no structural Verilog form".
-no_form_refusal() {
-    grep -q '^odin3-write: verilog FAIL' "$1" &&
-        grep -q 'has no structural Verilog form$' "$1" &&
-        ! grep -q -E '^odin3-write: (read|json|dot) FAIL' "$1"
-}
-
 # Worker: one line "id<TAB>path<TAB>rep" (rep = "-" or the id whose result to reuse).
 worker() {
     local id path rep w t0 rc=0 json="-" iv="-" eq="-" dt="-" wsec=0 note="" jnote="" vres
@@ -390,13 +384,7 @@ worker() {
     local write_rss
     write_rss=$(rss_of "$w.write.rss")
     wsec=$(echo "$(now) $t0" | awk '{printf "%.1f", $1 - $2}')
-    if [ "$rc" -eq 1 ] && no_form_refusal "$w.write.log"; then
-        json=$(json_gate "$path" "$w.json" "$w")
-        iv=refused
-        eq=refused
-        dt=$(dot_gate "$w.dot" "$w.write.log" "$w")
-        note=$(grep -m 1 'has no structural Verilog form$' "$w.write.log" | tr '\t' ' ')
-    elif [ "$rc" -ne 0 ]; then
+    if [ "$rc" -ne 0 ]; then
         json=$(fail_word "$rc" "$w.write.log" WRITEFAIL)
         note=$(grep -v '^odin3-write: ' "$w.write.log" | tail -n 1 | tr '\t' ' ')
     else
@@ -405,12 +393,12 @@ worker() {
         iv=${vres% *}
         eq=${vres#* }
         dt=$(dot_gate "$w.dot" "$w.write.log" "$w")
+        if [ "$json" = ref-excluded ]; then
+            jnote=$(grep -m 1 -E 'ERROR|terminate|what\(\)|drops' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
+        fi
         if [ "$eq" = excluded ]; then
             note=$(grep '^equiv-check: ' "$w.ec.log" | grep -v '^equiv-check: notice' | head -n 1 | tr '\t' ' ' || true)
         fi
-    fi
-    if [ "$json" = ref-excluded ]; then
-        jnote=$(grep -m 1 -E 'ERROR|terminate|what\(\)|drops' "$w.yr.log" | cut -c 1-160 | tr '\t' ' ' || true)
     fi
     if [ "$eq" = error ] && is_multi_driver "$path" && grep -q 'more than one driver' "$w.ec.log"; then
         eq=excluded
@@ -445,7 +433,6 @@ report() {
             tot++
             cj[js[s]]++; ci[iv[s]]++; ce[eq[s]]++; cd[dt[s]]++
             if (eq[s] == "excluded") excl[rel(path[r])] = note[s]
-            if (iv[s] == "refused") vref[rel(path[r])] = note[s]
             if (js[s] == "ref-excluded") jexcl[rel(path[r])] = jnote[s]
             if (!(r in dup)) {
                 distinct++
@@ -461,11 +448,6 @@ report() {
         for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
         for (i = 1; i <= n; i++) { m = excl[list[i]]; sub(/^equiv-check: [^ ]*: /, "", m); printf "  %s: %s\n", list[i], m }
         print ""
-        print "REFUSED BY THE VERILOG WRITER (a built-in cell with no structural Verilog form)"
-        n = 0; for (p in vref) list[++n] = p
-        for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
-        for (i = 1; i <= n; i++) { m = vref[list[i]]; sub(/^.*: module /, "module ", m); printf "  %s: %s\n", list[i], m }
-        print ""
         print "EXCLUDED FROM THE JSON STEP (Yosys cannot read the golden or drops its cells)"
         n = 0; for (p in jexcl) list[++n] = p
         for (i = 2; i <= n; i++) { v = list[i]; for (j = i - 1; j >= 1 && list[j] > v; j--) list[j + 1] = list[j]; list[j + 1] = v }
@@ -475,7 +457,7 @@ report() {
         printf "files: %d (%d distinct contents)\n", tot, distinct
         printf "json: identical %d, ref-excluded %d, refused (multi-driver) %d, different %d, yosys-error %d, error %d, timeout %d, memlimit %d, ref-timeout %d, ref-memlimit %d, write failures %d\n",
             cj["identical"], cj["ref-excluded"], cj["refused"], cj["different"], cj["yosys-error"], cj["error"], cj["timeout"], cj["memlimit"], cj["ref-timeout"], cj["ref-memlimit"], cj["WRITEFAIL"]
-        printf "verilog iverilog: ok %d, FAIL %d, timeout %d, memlimit %d, refused (no Verilog form) %d\n", ci["ok"], ci["FAIL"], ci["timeout"], ci["memlimit"], ci["refused"]
+        printf "verilog iverilog: ok %d, FAIL %d, timeout %d, memlimit %d\n", ci["ok"], ci["FAIL"], ci["timeout"], ci["memlimit"]
         printf "verilog equiv: equivalent %d, excluded %d, NOT-equivalent %d, yosys-error %d, error %d, timeout %d, memlimit %d\n",
             ce["equivalent"], ce["excluded"], ce["NOT-equivalent"], ce["yosys-error"], ce["error"], ce["timeout"], ce["memlimit"]
         printf "dot: ok %d, ok-parse (layout over --dot-timeout; Graphviz nop accepts it) %d, budget (refused over --max-nodes) %d, FAIL %d, timeout %d, memlimit %d\n", cd["ok"], cd["ok-parse"], cd["budget"], cd["FAIL"], cd["timeout"], cd["memlimit"]
@@ -498,6 +480,16 @@ find_tools() {
         else WC_YOSYS=$(command -v yosys || true); fi
     fi
     WC_IVERILOG=$(command -v iverilog || true)
+    if [ -z "$WC_SIMLIB" ]; then
+        # The 0.55 oracle's simlib, else the one installed with the Yosys in use.
+        local cand
+        for cand in \
+            "${VTR_ROOT:-$HOME/odin3-ws/external/vtr-verilog-to-routing}/libs/EXTERNAL/yosys/techlibs/common/simlib.v" \
+            "$(dirname "${WC_YOSYS:-/usr/bin/yosys}")/../share/yosys/simlib.v" /usr/share/yosys/simlib.v; do
+            if [ -f "$cand" ]; then WC_SIMLIB=$cand; break; fi
+        done
+    fi
+    [ -f "$WC_SIMLIB" ] || missing="$missing simlib.v($WC_SIMLIB)"
     WC_DOT=$(command -v dot || true)
     WC_NOP=$(command -v nop || true)
     [ -n "$WC_YOSYS" ] && [ -x "$WC_YOSYS" ] || missing="$missing yosys"
@@ -517,6 +509,7 @@ main() {
     WC_WRITE=$REPO/build/release/odin3-write
     [ -x "$WC_WRITE" ] || WC_WRITE=$REPO/build/debug/odin3-write
     WC_YOSYS=""
+    WC_SIMLIB=""
     WC_NC=$REPO/tools/netlist-compare/netlist-compare
     WC_EC=$REPO/tools/equiv-check/equiv-check
     WC_TIMEOUT=600
@@ -533,6 +526,7 @@ main() {
         -m) WC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
         --write) WC_WRITE=${2:?}; shift 2 ;;
         --yosys) WC_YOSYS=${2:?}; shift 2 ;;
+        --simlib) WC_SIMLIB=${2:?}; shift 2 ;;
         --nc) WC_NC=${2:?}; shift 2 ;;
         --ec) WC_EC=${2:?}; shift 2 ;;
         --max-nodes) WC_MAX_NODES=${2:?}; shift 2 ;;
@@ -556,14 +550,14 @@ main() {
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
     mkdir -p "$out/res" "$out/tmp"
     if [ "$resume" != 1 ]; then rm -f "$out"/res/* 2>/dev/null || true; fi
-    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
+    export WC_WRITE WC_YOSYS WC_SIMLIB WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
         WC_DOT_TIMEOUT WC_NORM
     export WC_RESUME=$resume WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
     # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).
     if ldd "${WC_REAL_WRITE:-$WC_WRITE}" 2>/dev/null | grep -q -E 'libasan|libclang_rt.asan'; then
         WC_WRITE_ASAN=1
     fi
-    export -f now capped rss_of note_rss fail_word stubs is_multi_driver no_form_refusal compare drop_self_buffers sort_statements expand_covers restore_bit0_names json_gate \
+    export -f now capped rss_of note_rss fail_word stubs is_multi_driver compare drop_self_buffers sort_statements expand_covers restore_bit0_names json_gate \
         verilog_gate dot_gate worker
 
     local list=$out/list.tsv

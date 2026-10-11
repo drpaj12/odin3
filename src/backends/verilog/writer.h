@@ -74,21 +74,23 @@ typedef struct odin3_verilog_opts {
  * Cells. `$sop`: `assign y = <products>;` over the ON-set rows (output 1), or `~(<products>)`
  * over the OFF-set rows (output 0); a row with only `-` is `1'b1`, no rows is `1'b0`; a cover
  * mixing output values is refused. Gates `$_BUF_` … `$_MUX_` and word cells `$add` … `$tribuf`
- * are `assign`s with Verilog operators (the operands `$signed(…)` when A_SIGNED/B_SIGNED is
- * set, matching Yosys simlib semantics). `$pmux` is `|S ? (({W{S[0]}} & B0) | …) : A`: with
- * several select bits set the selected slices are ORed (Yosys gate-level semantics, as the 1E
- * simulator; Yosys simlib gives x there). Storage cells write
+ * (with 2D's `$neg` `-`, `$xnor` `~^`, `$reduce_xnor` `~^`, `$reduce_bool` `|`, `$logic_not` `!`,
+ * `$logic_and` `&&` and `$logic_or` `||`) are `assign`s with Verilog operators (the operands
+ * `$signed(…)` when A_SIGNED/B_SIGNED is set, matching Yosys simlib semantics). `$pmux` is `|S ?
+ * (({W{S[0]}} & B0) | …) : A`: with several select bits set the selected slices are ORed (Yosys
+ * gate-level semantics, as the 1E simulator; Yosys simlib gives x there). Storage cells write
  * `always` blocks on a `reg`: the Q net itself when it is declared as its own scalar net (bit
  * cells), else a reg named after the cell with `assign Q = <reg>;`. `$_DFF_P_`/`$_DFF_N_`:
  * `always @(posedge|negedge C) q <= D;`; `$_DLATCH_P_`/`$_DLATCH_N_`: `always @* if (E|!E) q <=
  * D;`; `$_FF_`: clocked by `(* gclk *) wire $gclk` (Yosys global clock); INIT 0/1 add `initial
  * q = 1'b0|1'b1;`, INIT 2/3 add nothing (undefined start value). `$dff`/`$dffe`/`$adff`/`$sdff`
  * likewise, with enable, async or sync reset. A built-in cell whose outputs are all unconnected is
- * omitted. Any other cell (module, hard, black-box, `$mem*`, plugin types) is a module instance
- * with named port connections in port order and, unless it instantiates a module, every parameter
- * as `#(.P(value))` (INT decimal, BITS `N'b…` MSB first, STRING quoted byte-exact, COVER rows
- * quoted). A zero-length BITS value has no Verilog literal and is written `""` (which tools read as
- * 8 zero bits).
+ * omitted. Any other cell (module, hard, black-box, `$mem*`, `$shiftx`, `$pow`, plugin types) is
+ * a module instance with named port connections in port order and, unless it instantiates a
+ * module, every parameter as `#(.P(value))` (INT decimal, BITS `N'b…` MSB first, STRING quoted
+ * byte-exact, COVER rows quoted); Yosys reads a built-in one as its internal cell only with
+ * `read_verilog -icells`, Icarus with Yosys simlib.v as a library. A zero-length BITS value has no
+ * Verilog literal and is written `""` (which tools read as 8 zero bits).
  *
  * Provenance: a declaration or statement whose object has a provenance location ends with
  * `// file:line` (the record's first location; for a DERIVED record, the first leaf of the
