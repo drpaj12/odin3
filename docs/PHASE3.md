@@ -143,10 +143,12 @@ tri-state or a multi-driver net is a located error.
      allow-list (decision 11). Each command runs through `Cmd_CommandExecute`, and a nonzero
      return is `abc: <file>:<line>: command '<cmd>' failed`.
 
-## Decisions for Peter
+## Decisions 2–20 (approved)
 
-The numbers continue the log above. Each item gives the recommendation first, then the
-options.
+Peter approved every recommendation below on 2026-10-11 ("For all the questions - sounds good
+and your ideas decisions seem fine"), together with the agent defaults in decision 1. The
+numbers continue the log above. Each item gives the recommendation (now the decision) first,
+then the options considered.
 
 2. **Set and arch.** Recommend (a), because it is what DESIGN §11 names and what VTR itself
    tracks for QoR.

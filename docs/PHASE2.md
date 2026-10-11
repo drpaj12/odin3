@@ -456,3 +456,9 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
      opaque; `opt_muxtree`/`opt_clean` skip modules with processes), so Parmys's pre-`proc` opts
      run in Parmys's order (2F mode P) — agent default for Peter's review; Fable-verified:
      pre-proc opt order changes netlists, stereovision3 812 vs 792.
+14. **Peter confirmed the agent defaults** (2026-10-11: "For all the questions - sounds good and
+   your ideas decisions seem fine"): the 2D rulings of #13 including IR changes A, B and C and
+   decision 13 (x-report), the EL-33 mode P and EL-35/36 chunking amendments (2D spec v4.2),
+   IR change D (eleven FF/latch cells, 2E-1), the 2E decisions 1–8 and 2F decisions 1–7 as
+   ruled after the joint Fable review, and the S-P exit splice (Odin III through `proc`, Yosys
+   0.55 from `fsm` on).
