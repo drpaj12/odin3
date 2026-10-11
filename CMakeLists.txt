@@ -134,6 +134,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/actions_decl.c
     src/frontends/verilog/actions_expr.c
     src/frontends/verilog/actions_stmt.c
+    src/frontends/verilog/actions_inst.c
     src/frontends/verilog/lexer_support.c
     src/frontends/verilog/lexer_tokens.c
     src/frontends/verilog/lexer_trivia.c
@@ -360,12 +361,15 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_verilog_parser_stmt)
     target_include_directories(test_verilog_parser_stmt PRIVATE ${_gen})
     add_dependencies(test_verilog_parser_stmt verilog_generated)
+    odin3_add_unit_test(test_verilog_parser_inst)
+    target_include_directories(test_verilog_parser_inst PRIVATE ${_gen})
+    add_dependencies(test_verilog_parser_inst verilog_generated)
     # The coverage rows as acceptance tests (plan point (p)): the rows of grammar tasks up to
     # ODIN3_VR_UPTO; each later grammar task raises it.
     odin3_add_unit_test(test_verilog_rows)
     target_include_directories(test_verilog_rows PRIVATE ${_gen})
     add_dependencies(test_verilog_rows verilog_generated)
-    target_compile_definitions(test_verilog_rows PRIVATE ODIN3_VR_UPTO=6
+    target_compile_definitions(test_verilog_rows PRIVATE ODIN3_VR_UPTO=7
         ODIN3_VERILOG_DATA="${PROJECT_SOURCE_DIR}/tests/verilog")
     odin3_add_unit_test(test_project_words)
     odin3_add_unit_test(test_project_paths)

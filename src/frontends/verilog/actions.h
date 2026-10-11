@@ -515,6 +515,52 @@ odin3_status vp_make_function(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_l
 
 /* --- Task 7: instantiation, gates, generate (actions_inst.c) ------------------------------- */
 
+/* A gate keyword's spec: GATE_DECL with the sub-kind of its 2A enum name's suffix. */
+#define VP_GATE(kind) VP_SPEC(ODIN3_AST_GATE_DECL, ODIN3_AST_GATE_DECL_##kind)
+
+/* actions_inst.c — instantiation and gates (§3.1 g, i, k; §3.6 "Instantiation", "Gates"). */
+
+/* CONNECTION named name (0: ordered or an empty slot) over at with expr (0: `.q()`, an empty
+ * slot) as its E?. NO_MEMORY. */
+odin3_status vp_connection(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t name,
+                           odin3_ast_id expr, odin3_ast_id *out);
+/* INSTANCE named name over at: its array slot (or 0) and CONNECTIONs pushed from mark.
+ * vp_instance_unnamed: no name and no array, the CONNECTIONs pushed from mark (an unnamed module
+ * or UDP instance, an unnamed gate). NO_MEMORY; PARSE (make's caps, located). */
+odin3_status vp_instance(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                         odin3_ast_id *out);
+odin3_status vp_instance_unnamed(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                                 odin3_ast_id *out);
+/* INSTANTIATION of module name over at: the params slot (or 0) and the INSTANCEs pushed from
+ * mark. NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_instantiation(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                              uint32_t name, odin3_ast_id *out);
+/* GATE_DECL[spec] over at from the pending span at mark, in source order: its ATTRs, then a
+ * STRENGTH and a DELAY when written, then the INSTANCEs; the two slots are placed (0 when absent)
+ * and the ATTRs attached in one attach. NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_gate(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t spec,
+                     odin3_ast_id *out);
+
+/* actions_inst.c — generate (§3.6 "Generate"). */
+
+/* GENERATE(I*) over at, its items pushed from mark. NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_generate(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at,
+                         odin3_ast_id *out);
+/* GEN_BLOCK named name (0: unnamed; never numbered here, 2D names it) over at: the absent index
+ * slot and the items pushed from mark. NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_gen_block(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, uint32_t name,
+                          odin3_ast_id *out);
+/* GEN_FOR(init, cond, step pushed from mark; body) / GEN_IF(cond, then pushed from mark; other)
+ * over at. NO_MEMORY; PARSE (make's caps). */
+odin3_status vp_gen_for(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id body,
+                        odin3_ast_id *out);
+odin3_status vp_gen_if(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, odin3_ast_id other,
+                       odin3_ast_id *out);
+/* A case generate's header (`)` at at): vp_case_head with the GEN_CASE spec, so the reduction
+ * (vp_make_case) makes a GEN_CASE and takes the window's metacomments as CASE does. NO_MEMORY. */
+odin3_status vp_gen_case(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id expr,
+                         uint32_t *out);
+
 /* --- parser.c: called by the generated parser ---------------------------------------------- */
 
 /*

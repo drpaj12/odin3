@@ -164,6 +164,15 @@
 
 /* ==== %type: Task 7 (instantiation, gates, generate) ==== */
 
+/* u: a pending-stack mark (a list, an instance's array slot, the params slot); a spec (VP_SPEC:
+ * GATE_DECL with its sub-kind); a ctx->windows index (the case generate). node: a made node. */
+%type <u> inst_params instances inst_range inst_conns conns param_conns gate_item gate_kind
+%type <u> pull_kind gate_strength gate_delay pull_strength gate_instances gate_terms gen_open
+%type <u> gen_if_head gen_case_head gen_case_items
+%type <node> instantiation module_instance connection conn_empty conn_or_empty gate_instance
+%type <node> gate_term pull_one generate_region gen_block gen_body gen_body_or_null gen_item
+%type <node> gen_for gen_if gen_case gen_case_item
+
 %start source_text
 
 %%
@@ -512,6 +521,7 @@ module_items: %empty                   { VP($$, vp_mark(ctx, &$$)); }
 
 module_item: attrs_opt item_decl       { VP($$, vp_item(ctx, $1, &@2, $2, &$$)); }
            | attrs_opt item_node       { VP($$, vp_attrs(ctx, $1, $2, &$$)); }
+           | attrs_opt gate_item       { VP($$, vp_gate(ctx, $1, &@2, $2, &$$)); }  /* Task 7 */
            | defparam_list ';'         { VP($$, vp_none(ctx, &$$)); }
            | directive
            | error ';'                 { VP($$, vp_none(ctx, &$$)); }
@@ -522,6 +532,11 @@ item_node: OPAQUE_SPECIFY  { VP($$, vp_opaque(ctx, &@1, $1, ODIN3_AST_SPECIFY_BL
          | initial_item    /* Task 6 */
          | function_decl   /* Task 6 */
          | task_decl       /* Task 6 */
+         | instantiation   /* Task 7 */
+         | generate_region /* Task 7 */
+         | gen_for         /* Task 7 */
+         | gen_if          /* Task 7 */
+         | gen_case        /* Task 7 */
          ;
 
 /* A.6.1 continuous assignment: CONT_ASSIGN(STRENGTH?, DELAY?; NET_ASSIGN+) (A1–A4). */
@@ -539,7 +554,211 @@ net_assign: lvalue '=' expression      { VP($$, vp_net_assign(ctx, &@$, $1, $3, 
 
 /* ==== A.3–A.4 Instantiation and gates — Task 7 ==== */
 
+/* INSTANTIATION(name m; L? parameter CONNECTIONs; INSTANCE+) (I1–I7, P5). After the module name
+ * the token decides: `#` a parameter override (always: §3.1 i, its values are expressions), `(`
+ * an unnamed instance, an identifier a named one. A strength (`m (strong0, strong1) u (…)`) is
+ * a syntax error: INSTANTIATION has no slot for it. */
+instantiation: IDENT inst_params instances ';'
+                 { VP($$, vp_instantiation(ctx, $2, &@$, $1, &$$)); }
+             ;
+
+/* The params slot: none, or a LIST of CONNECTIONs at `#` … `)` (`#()`: an empty one, printed
+ * back as `#()`); ordered and named values may mix (2D judges, I2). */
+inst_params: %empty                    { VP($$, vp_push_none(ctx, &$$)); }
+           | '#' '(' list_mark ')'     { VP($$, vp_list_slot(ctx, &@$, $3, &$$)); }
+           | '#' '(' list_mark param_conns ')'
+                                       { VP($$, vp_list_slot(ctx, &@$, $3, &$$)); }
+           ;
+
+param_conns: connection                { VP($$, vp_list_first(ctx, $1, &$$)); }
+           | param_conns ',' connection { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+           ;
+
+instances: module_instance             { VP($$, vp_list_first(ctx, $1, &$$)); }
+         | instances ',' module_instance { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+         ;
+
+/* INSTANCE(name or 0; R? array (I6); C*): the array slot pushed, then the connections. An
+ * unnamed instance is parsed for every module (a UDP instance may be unnamed); the pass enforces
+ * 2A's rule 4 (§4.2 step 5). */
+module_instance: IDENT inst_range '(' inst_conns ')'
+                   { VP($$, vp_instance(ctx, $2, &@$, $1, &$$)); }
+               | '(' list_mark inst_conns ')'
+                   { VP($$, vp_instance_unnamed(ctx, $2, &@$, &$$)); }
+               ;
+
+inst_range: range_opt                  { VP($$, vp_push_slot(ctx, $1, &$$)); } ;
+
+/* §3.1 k: `()` is zero connections, `(,)` two empty ones; the first entry may be empty only
+ * before a comma. An empty slot is CONNECTION(0; none), zero width one past the `(` or `,`. */
+inst_conns: %empty                     { VP($$, vp_mark(ctx, &$$)); }
+          | conns
+          ;
+
+conns: connection                      { VP($$, vp_list_first(ctx, $1, &$$)); }
+     | conn_empty ',' conn_or_empty    { VP($$, vp_list_two(ctx, $1, $3, &$$)); }
+     | conns ',' conn_or_empty         { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+     ;
+
+conn_or_empty: conn_empty | connection ;
+
+conn_empty: %empty           { VP($$, vp_connection(ctx, &@$, 0, VP_NO_NODE, &$$)); } ;
+
+/* CONNECTION(name 0, E) ordered; (p, E) for `.p(e)`; (q; none) for `.q()` (I1). No attribute
+ * (§3.5: CONNECTION has no attach in 2A §7). */
+connection: expression                 { VP($$, vp_connection(ctx, &@$, 0, $1, &$$)); }
+          | '.' IDENT '(' ')'          { VP($$, vp_connection(ctx, &@$, $2, VP_NO_NODE, &$$)); }
+          | '.' IDENT '(' expression ')'
+                                       { VP($$, vp_connection(ctx, &@$, $2, $4, &$$)); }
+          ;
+
+/* GATE_DECL[kind](STRENGTH?, DELAY?; INSTANCE+) (Q1–Q6), the §3.1 g expanded form: nothing
+ * nullable precedes a `(`, so after `kind (` a strength keyword or an expression decides. The
+ * strength, delay and instances are pushed in source order; vp_gate places the two slots. */
+gate_item: gate_kind gate_instances ';'                     { VP($$, vp_value(ctx, $1, &$$)); }
+         | gate_kind gate_delay gate_instances ';'          { VP($$, vp_value(ctx, $1, &$$)); }
+         | gate_kind gate_strength gate_instances ';'       { VP($$, vp_value(ctx, $1, &$$)); }
+         | gate_kind gate_strength gate_delay gate_instances ';'
+                                                            { VP($$, vp_value(ctx, $1, &$$)); }
+         | pull_kind gate_instances ';'                     { VP($$, vp_value(ctx, $1, &$$)); }
+         | pull_kind pull_strength gate_instances ';'       { VP($$, vp_value(ctx, $1, &$$)); }
+         ;
+
+gate_strength: drive_strength          { VP($$, vp_push_slot(ctx, $1, &$$)); } ;
+
+gate_delay: delay3                     { VP($$, vp_push_slot(ctx, $1, &$$)); } ;
+
+/* A.3.1 pullup_strength / pulldown_strength: a pair or one strength (the other field 0). */
+pull_strength: drive_strength          { VP($$, vp_push_slot(ctx, $1, &$$)); }
+             | pull_one                { VP($$, vp_push_slot(ctx, $1, &$$)); }
+             ;
+
+pull_one: '(' strength0 ')'            { VP($$, vp_leaf(ctx, &@$, $2, &$$)); }
+        | '(' strength1 ')'            { VP($$, vp_leaf(ctx, &@$, $2, &$$)); }
+        ;
+
+gate_instances: gate_instance          { VP($$, vp_list_first(ctx, $1, &$$)); }
+              | gate_instances ',' gate_instance { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+              ;
+
+/* INSTANCE(name opt; R? array (Q5); one CONNECTION(0, E) per terminal); terminals are never
+ * empty (A.3.3). */
+gate_instance: IDENT inst_range '(' gate_terms ')'
+                 { VP($$, vp_instance(ctx, $2, &@$, $1, &$$)); }
+             | '(' list_mark gate_terms ')'
+                 { VP($$, vp_instance_unnamed(ctx, $2, &@$, &$$)); }
+             ;
+
+gate_terms: gate_term                  { VP($$, vp_list_first(ctx, $1, &$$)); }
+          | gate_terms ',' gate_term   { VP($$, vp_list_next(ctx, $1, $3, &$$)); }
+          ;
+
+gate_term: expression                  { VP($$, vp_connection(ctx, &@$, 0, $1, &$$)); } ;
+
+gate_kind: AND      { VP($$, vp_value(ctx, VP_GATE(AND), &$$)); }
+         | KW_NAND  { VP($$, vp_value(ctx, VP_GATE(NAND), &$$)); }
+         | OR       { VP($$, vp_value(ctx, VP_GATE(OR), &$$)); }
+         | KW_NOR   { VP($$, vp_value(ctx, VP_GATE(NOR), &$$)); }
+         | XOR      { VP($$, vp_value(ctx, VP_GATE(XOR), &$$)); }
+         | KW_XNOR  { VP($$, vp_value(ctx, VP_GATE(XNOR), &$$)); }
+         | BUF      { VP($$, vp_value(ctx, VP_GATE(BUF), &$$)); }
+         | NOT      { VP($$, vp_value(ctx, VP_GATE(NOT), &$$)); }
+         | BUFIF0   { VP($$, vp_value(ctx, VP_GATE(BUFIF0), &$$)); }
+         | BUFIF1   { VP($$, vp_value(ctx, VP_GATE(BUFIF1), &$$)); }
+         | NOTIF0   { VP($$, vp_value(ctx, VP_GATE(NOTIF0), &$$)); }
+         | NOTIF1   { VP($$, vp_value(ctx, VP_GATE(NOTIF1), &$$)); }
+         | NMOS     { VP($$, vp_value(ctx, VP_GATE(NMOS), &$$)); }
+         | PMOS     { VP($$, vp_value(ctx, VP_GATE(PMOS), &$$)); }
+         | CMOS     { VP($$, vp_value(ctx, VP_GATE(CMOS), &$$)); }
+         | RNMOS    { VP($$, vp_value(ctx, VP_GATE(RNMOS), &$$)); }
+         | RPMOS    { VP($$, vp_value(ctx, VP_GATE(RPMOS), &$$)); }
+         | RCMOS    { VP($$, vp_value(ctx, VP_GATE(RCMOS), &$$)); }
+         | TRAN     { VP($$, vp_value(ctx, VP_GATE(TRAN), &$$)); }
+         | RTRAN    { VP($$, vp_value(ctx, VP_GATE(RTRAN), &$$)); }
+         | TRANIF0  { VP($$, vp_value(ctx, VP_GATE(TRANIF0), &$$)); }
+         | TRANIF1  { VP($$, vp_value(ctx, VP_GATE(TRANIF1), &$$)); }
+         | RTRANIF0 { VP($$, vp_value(ctx, VP_GATE(RTRANIF0), &$$)); }
+         | RTRANIF1 { VP($$, vp_value(ctx, VP_GATE(RTRANIF1), &$$)); }
+         ;
+
+pull_kind: PULLUP   { VP($$, vp_value(ctx, VP_GATE(PULLUP), &$$)); }
+         | PULLDOWN { VP($$, vp_value(ctx, VP_GATE(PULLDOWN), &$$)); }
+         ;
+
 /* ==== A.4.2 Generate — Task 7 ==== */
+
+/* GENERATE(I*): any number of items, genvar declarations included (G1); the region's items are
+ * the module's (2D judges the ones Annex A leaves out of a region). The error alternative, like
+ * the closer twins of §3.4, resynchronises an item missing its `;` at `endgenerate`. */
+generate_region: GENERATE module_items ENDGENERATE
+                   { VP($$, vp_generate(ctx, $2, &@$, &$$)); }
+               | GENERATE module_items error ENDGENERATE
+                   { VP($$, vp_none(ctx, &$$)); }
+               ;
+
+/* GEN_FOR(BLOCKING_ASSIGN, E, BLOCKING_ASSIGN, I) (G2–G4): Task 6's `for` header; the body is a
+ * block or one bare item, never null (A.4.2 generate_block). */
+gen_for: for_header gen_body           { VP($$, vp_gen_for(ctx, $1, &@$, $2, &$$)); } ;
+
+/* GEN_IF(E, I, I?) (G5); the dangling else by precedence, as the statement `if` (§3.3). */
+gen_if: gen_if_head %prec LOWER_THAN_ELSE   { VP($$, vp_gen_if(ctx, $1, &@$, VP_NO_NODE, &$$)); }
+      | gen_if_head ELSE gen_body_or_null   { VP($$, vp_gen_if(ctx, $1, &@$, $3, &$$)); }
+      ;
+
+gen_if_head: IF '(' expression ')' gen_body_or_null
+               { VP($$, vp_list_two(ctx, $3, $5, &$$)); }
+           ;
+
+/* GEN_CASE(E; CASE_ITEM+ with item bodies) (G6): `case` only (A.4.2), the header's metacomment
+ * window and the item reduction as CASE's (§2.6, §3.2). */
+gen_case: gen_case_head gen_case_items ENDCASE
+            { VP($$, vp_make_case(ctx, $1, &@$, $2, &$$)); }
+        | gen_case_head error ENDCASE             { VP($$, vp_none(ctx, &$$)); }
+        | gen_case_head gen_case_items error ENDCASE  { VP($$, vp_none(ctx, &$$)); }
+        ;
+
+gen_case_head: CASE '(' expression ')' { VP($$, vp_gen_case(ctx, &@4, $3, &$$)); } ;
+
+gen_case_items: gen_case_item          { VP($$, vp_case_first(ctx, &@1, $1, &$$)); }
+              | gen_case_items gen_case_item { VP($$, vp_list_next(ctx, $1, $2, &$$)); }
+              ;
+
+gen_case_item: expr_list ':' gen_body_or_null
+                 { VP($$, vp_make_case_item(ctx, &@$, $1, $3, &$$)); }
+             | DEFAULT list_mark gen_body_or_null
+                 { VP($$, vp_make_case_item(ctx, &@$, $2, $3, &$$)); }
+             | DEFAULT list_mark ':' gen_body_or_null
+                 { VP($$, vp_make_case_item(ctx, &@$, $2, $4, &$$)); }
+             ;
+
+/* A.4.2 generate_block_or_null: `;` is a NULL_STMT (G5). */
+gen_body_or_null: gen_body
+                | ';'                  { VP($$, vp_leaf(ctx, &@1, VP_SPEC(ODIN3_AST_NULL_STMT, 0), &$$)); }
+                ;
+
+/* A.4.2 generate_block: GEN_BLOCK(name or 0; no index in the parsed form, 2A §4.6; I*), or one
+ * bare item. No name is made up here: 2D numbers the unnamed blocks (genblk<n>). */
+gen_body: gen_item
+        | gen_block
+        ;
+
+gen_block: BEGIN gen_open module_items END
+             { VP($$, vp_gen_block(ctx, $2, &@$, 0, &$$)); }
+         | BEGIN ':' IDENT gen_open module_items END
+             { VP($$, vp_gen_block(ctx, $4, &@$, $3, &$$)); }
+         | BEGIN gen_open module_items error END            { VP($$, vp_none(ctx, &$$)); }
+         | BEGIN ':' IDENT gen_open module_items error END  { VP($$, vp_none(ctx, &$$)); }
+         ;
+
+gen_open: %empty                       { VP($$, vp_push_none(ctx, &$$)); } ;
+
+/* One bare item (a module item's forms with its attributes; a defparam of one pair, since the
+ * body is one node). */
+gen_item: attrs_opt item_decl          { VP($$, vp_item(ctx, $1, &@2, $2, &$$)); }
+        | attrs_opt item_node          { VP($$, vp_attrs(ctx, $1, $2, &$$)); }
+        | attrs_opt gate_item          { VP($$, vp_gate(ctx, $1, &@2, $2, &$$)); }
+        | attrs_opt DEFPARAM defparam_assign ';'   { VP($$, vp_attrs(ctx, $1, $3, &$$)); }
+        ;
 
 /* ==== A.2.6–A.2.7 Functions and tasks — Task 6 ==== */
 
