@@ -199,7 +199,8 @@ odin3_status vp_number(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
 /* A base without digits (VP_ERR): "expected digits after '<base as written>" at base, then error
  * mode. */
 odin3_status vp_digitless(odin3_vp_ctx *ctx, const odin3_vp_loc *base);
-/* REAL (the lexer's payload; 0 after its range error), STRING and IDENT leaves over at. */
+/* REAL (the lexer's payload; 0 after its range error), STRING and IDENT leaves over at. The
+ * empty string (strtab ID 0) is a located error: a STRING's name is required (2A §4.3). */
 odin3_status vp_real(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t payload,
                      odin3_ast_id *out);
 odin3_status vp_string(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t name, odin3_ast_id *out);

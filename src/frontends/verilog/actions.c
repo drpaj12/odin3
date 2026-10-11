@@ -262,6 +262,13 @@ odin3_status vp_real(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t payload
 
 odin3_status vp_string(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t name,
                        odin3_ast_id *out) {
+    if (name == 0) { /* "" interns as strtab ID 0, which a STRING (name required) cannot hold */
+        odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, at->loc,
+                        "empty string literal \"\" is not supported");
+        odin3_vp_enter_error(ctx);
+        *out = (odin3_ast_id){0};
+        return ODIN3_OK;
+    }
     odin3_ast_spec spec = vp_spec_at(VP_SPEC(ODIN3_AST_STRING, 0), at);
     spec.name = name;
     return odin3_ast_make(ctx->ast, &spec, NULL, 0, out);
@@ -292,6 +299,10 @@ odin3_status vp_hier_index(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc 
                            odin3_ast_id index, uint32_t *out) {
     *out = mark;
     uint32_t top = odin3_ast_mark(ctx->ast);
+    if (top <= mark) { /* the name has no component: not reachable from the grammar */
+        odin3_log(ODIN3_LOG_ERROR, "vp_hier_index: a name without components");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_ast_id last = odin3_ast_pending_span(ctx->ast, top - 1).ids[0];
     odin3_vp_loc range = {odin3_ast_loc(ctx->ast, last), at->end, 0};
     odin3_ast_spec spec = vp_spec_at(VP_SPEC(ODIN3_AST_SELECT, ODIN3_AST_SELECT_BIT), &range);

@@ -659,6 +659,24 @@ static void test_literal_too_many_digits(void) {
     odin3_util_free(text);
 }
 
+/* The empty string interns as strtab ID 0, which a STRING (name required, 2A §4.3) cannot hold:
+ * a located, counted error rather than a builder misuse (agent default, see the Task 4 report). */
+static void test_empty_string_is_a_located_error(void) {
+    expect_failure("module m; parameter p = \"\"; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:25: error: empty string literal \"\" is not supported\n");
+    TEST_ASSERT_EQUAL_UINT32(1, run.errors);
+}
+
+/* Review Focus 3: a last line without a newline (endmodule, a comment) parses. */
+static void test_last_line_without_newline(void) {
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_x("module m; endmodule", NULL, &unit));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(ast, unit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_x("module m;\nendmodule\n// c", NULL, &unit));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(ast, unit));
+    TEST_ASSERT_EQUAL_STRING("", logged());
+}
+
 /* Every allocation of a module's parse fails in turn: NO_MEMORY with no UNIT, the pending stack
  * where it was, the run stopped, no misuse and (under ASan) no leak; then the parse succeeds. */
 static void test_module_parse_oom(void) {
@@ -709,6 +727,8 @@ int main(void) {
     RUN_TEST(test_literal_digit_error);
     RUN_TEST(test_literal_without_digits);
     RUN_TEST(test_literal_too_many_digits);
+    RUN_TEST(test_empty_string_is_a_located_error);
+    RUN_TEST(test_last_line_without_newline);
     RUN_TEST(test_module_parse_oom);
     return UNITY_END();
 }

@@ -207,7 +207,9 @@ target_include_directories(odin3_core PRIVATE ${_gen})
 # The list as measured with Bison 3.8.2, Flex 2.6.4, gcc 13 and clang 18 at -O0 and -O2: the
 # expected conversion, sign, unused-parameter and missing-prototypes warnings do not occur, and
 # the scanner needs nothing (re-measured with the full lexer of 2C Task 3: start conditions,
-# trailing context, yyless(0), YY_DECL: no warning). One flag, for the parser only:
+# trailing context, yyless(0), YY_DECL: no warning; and with 2C Task 4's grammar core, 353
+# states, YYMALLOC/YYFREE through the allocation hook: still none but the one below). One flag,
+# for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
