@@ -312,3 +312,37 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 
       The spec's "51 `define`s" for mcml.v counts 12 commented-out lines; 39 definitions are
       made. mcml.v needs 2,776 buffers (the spec estimated about 5,000).
+    - *pp-diff* (2B Task 12, 2026-10-11; spec §10.4; `tools/pp-diff`, CTest `pp_diff`, label
+      `differential`, exit 77 and skipped without `iverilog`, Yosys or the VTR set, so not run
+      in CI). Odin III's `preprocess` against `iverilog -E -g2005 -grelative-include` and Yosys
+      `read_verilog -nosynthesis -ppdump`, all run from an empty directory. Outputs are
+      normalized alike (PP-10 regions; pass-through, `` `line ``, `` `file_push `` and
+      `` `file_pop `` lines) and compared as tokens. `pp-diff --suite` takes 285 files, smallest
+      first, mcml.v last: 20 reviewer probes (not `rec.v`), 1 fixture, 234 micros holding a
+      backtick, and 31 VTR files. Run with the debug build: 9.6 s, exit 0.
+      - *Result:* agree 270, oracles disagree 11, declared 4, undeclared disagreements 0,
+        excluded 21. The 270 are 8 probes (v2: all three reject), 231 micros and all 31 VTR
+        files (mcml.v: 133,191 tokens). The four `translate_off` benchmarks are among them.
+      - *Declared (Odin III's error expected; both oracles accept):* probes t5 and u3 (`directive
+        inside macro text`), w1 (`recursive macro 'N'`), and the fixture
+        `tests/tools/fixtures/pp_diff/directive_name.v` (`` `define timescale 1 ``).
+      - *Oracles disagree (listed, not failed):* t8 and the 3 splicing micros (Icarus
+        substitutes nothing for an undefined macro); t6 (Icarus substitutes formals in a
+        string); t9 and w5 (a newline before `(`: Yosys rejects); w2 (`` `define F() ``: Icarus
+        rejects); t4 (a `//` comment ending in `\`: Icarus continues the `define`); t7 (a
+        comment inside a body: Icarus pastes `ab`); u1 (a multi-line `/* */` in a `define`:
+        Yosys keeps it; Icarus reports "Unterminated comment in define", exits 0 and goes on;
+        Odin III rejects it). Odin III matches Yosys in 8 of these, Icarus in 2 and neither in
+        u1.
+      - *Excluded:* `probes/rec.v`, where both oracles loop forever (PP-7; Odin III's rejection
+        is unit-tested). The 20 micros that another micro includes are compared through that
+        includer: the `keywords/.generic` templates, `assign.vh`, `generate_for.vh`, the three
+        `generate_endgenerate/*.vh`, `nested_ifdef.vh` and the module files of the
+        `*-syntax` micros.
+      - *Agent defaults:* `-grelative-include`, so Icarus searches the including file's
+        directory first, as Odin III (PP-11) and Yosys do. `-nosynthesis`, so Yosys does not
+        define `SYNTHESIS`. A `` `NAME `` left in Yosys's dump counts as a Yosys rejection,
+        because its lexer errors there ("undefined macro"). A Yosys parse error after the dump
+        does not count. A declared divergence is checked by a substring of Odin III's error.
+        A pass-through directive is stripped from its backtick to the end of its line. Based
+        literals are compared without their inner blanks. No C fix was needed.

@@ -529,6 +529,16 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py compare
                 --odin3 $<TARGET_FILE:odin3>)
     set_tests_properties(project_corpus PROPERTIES LABELS tools)
+    # 2B §10.4: the preprocessor against Icarus and Yosys over the probes, the backtick micros
+    # and the VTR set (local only: skipped, exit 77, when iverilog, Yosys or the VTR set is
+    # absent, as in CI).
+    add_test(NAME pp_diff
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/pp-diff/pp_diff.py
+                --odin3 $<TARGET_FILE:odin3>
+                --iverilog $<IF:$<BOOL:${ODIN3_IVERILOG}>,${ODIN3_IVERILOG},iverilog>
+                --yosys $<IF:$<BOOL:${ODIN3_YOSYS}>,${ODIN3_YOSYS},yosys>
+                --suite ${PROJECT_SOURCE_DIR})
+    set_tests_properties(pp_diff PROPERTIES LABELS differential SKIP_RETURN_CODE 77)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")
