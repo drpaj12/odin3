@@ -1,6 +1,7 @@
 # 2F — `opt`: design
 
-Status: v2 (2026-10-11): applies the joint 2E/2F Fable review (`2EF-review1`: 5 important, 9 minor,
+Status: v2.1 (2026-10-11): v2.1 aligns the hand-offs with 2E v2 (`5185ecc`: shared
+`src/passes/ffinit.[ch]` and `budget.[ch]`, `odin3_opt_expr_counts`, the step-F call site). v2 applies the joint 2E/2F Fable review (`2EF-review1`: 5 important, 9 minor,
 all applied) and the controller's rulings T1 (2E-1 owns IR change D), T2 (mode P; 2D EL-33 amended,
 v4.2), T3 (S-P is the exit splice), T5 (counts, `--noopt`). Phase 2, sub-project 2F (PHASE2 #1;
 light review; Opus `high`). Spec: `docs/DESIGN.md` §5, §6 step 4, §10. Inputs: PHASE2 #4, #5, #13;
@@ -27,7 +28,7 @@ leaves on the same input, cell for cell where possible, so that the Phase 2 exit
 | Delivered by 2F | Where |
 |---|---|
 | `opt_expr`, `opt_merge`, `opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean` and the driver `opt`, with Yosys's names, options, loop and modes | `src/passes/opt/*.c` |
-| The rewrite kit (connect, constant nets, rebuild with provenance), the FF model (`FfData`) and init values (`FfInitVals`) | `kit.c`, `ff.c`, `ffinit.c` |
+| The rewrite kit (connect, constant nets, rebuild with provenance) and the FF model (`FfData`); init values (`FfInitVals`) through 2E-1's shared helpers | `kit.c`, `ff.c`; `src/passes/ffinit.[ch]` (2E-1) |
 | Folding through 2D's evaluator (`odin3_cval`, EL-14 = Yosys `const_*`) | `fold.c` |
 | The Phase 2 opt script and the 2H splice (OP-3) | §3, `docs/PASSES.md` |
 | Per-rule goldens, per-sub-pass refinement, `opt-diff`, sweeps, fuzzing, `bench_opt` | `tests/opt/`, `tests/unit/test_opt_*.c`, `tools/opt-check/` |
@@ -282,16 +283,27 @@ cell inputs with x already (2D §17 #16); this catches wires declared and never 
 `$mux` rule require *defined* constants, and keeps x bits in `bitwise_logic_one_const` as cells.
 `proc`'s trailing `opt_expr -keepdc` (§4.8) is the only `-keepdc` run in Parmys's flow.
 
-### 4.8 Interface with 2E (ruling T5)
+### 4.8 Interface with 2E (ruling T5; 2E v2 §2.2 step F)
 
-Yosys's `proc` ends with `opt_expr -keepdc` unless `-noopt`. 2F exports
-`odin3_opt_expr_run(ctx, module, &opts, &counts)`: module scope (`opt_expr` is per module, so this
-equals Yosys's design-wide call), returns the §16 counts so `proc`'s own info line can report
-them, and in Debug runs the same `check --fast` 2F's loop runs after a sub-pass. 2E's `proc` calls
-it for every module it lowered completely (not for a module whose lowering failed and still holds
-`$proc` nodes), and skips it under `proc --noopt` (2E's option; `proc-diff` compares `proc
---noopt` with Yosys `proc -norom -noopt`). The DEBUG lines and provenance `run` are then `proc`'s.
-Until 2F-2 lands, the script spells `proc; opt_expr -keepdc`.
+Yosys's `proc` ends with `opt_expr -keepdc` unless `-noopt`. 2F exports, in
+`src/passes/opt/opt.h`:
+
+```c
+odin3_status odin3_opt_expr_run(odin3_pass_ctx *ctx, odin3_module *module,
+                                const odin3_opt_opts *opts, odin3_opt_expr_counts *counts);
+```
+
+`odin3_opt_opts` has one `bool` per §3 option (`keepdc` among them), so 2E's call
+`odin3_opt_expr_run(ctx, module, &(odin3_opt_opts){.keepdc = true}, &counts)` is the whole
+contract; `odin3_opt_expr_counts` holds the §16 counts (`rewritten`, `folded`, and the per-rule
+counters of `--opt-stats`), which 2E stores in `odin3_proc_stats.opt_expr`. Module scope equals
+Yosys's design-wide call (`opt_expr` is per module). In Debug it runs the same `check --fast`
+2F's loop runs after a sub-pass. 2E's `proc` calls it for every module it lowered completely, not
+for a module that failed (it still holds `$proc` nodes), and not under `--noopt` or
+`--stop-after` (which implies `--noopt`); records and messages are then `proc`'s. Call site:
+2E-3 Task 9 adds it in `proc_pass.c` if 2F-2 has merged; otherwise 2F-2 adds that one call
+site. Until then `proc` behaves as with `--noopt`, and the Phase 2 script spells `proc;
+opt_expr -keepdc`. `proc-diff` compares `proc --noopt` with Yosys `proc -norom -noopt`.
 
 ## 5. Constant folding semantics and x (OP-5)
 
@@ -465,15 +477,20 @@ mcml.v, §19).
 
 ### 9.4 Init values
 
-2D stores initial values as the BITS attribute `init` on wires (EL-40, Yosys's convention).
-`ffinit.c` is `FfInitVals`: the init of a net is its bit in the `init` attribute of its primary wire
-or of any alias membership (first defined value; a conflict is opt_clean's warning, §10).
-`set_init(net, v)` writes **one** wire, as Yosys's `FfInitVals::set_init` does: the net's primary
-wire, else its first alias membership that is a wire bit, and clears that bit on every other
-membership; `remove_init` clears it everywhere (an attribute that becomes all x is removed); a net
-with no wire membership has no init and nothing to write. FFs read the init of their Q nets. This
-binds 2E: `proc` must leave init on the wires (as Yosys does), not move it into a parameter (§25
-item 7).
+2D stores initial values as the BITS attribute `init` on wires (EL-40, Yosys's convention); 2E
+keeps them there (no `INIT` parameter, 2E v2 §10). 2F uses the **shared helpers of
+`src/passes/ffinit.[ch]`**, created by 2E-1 Task 3 with these rules (Yosys `FfInitVals`):
+
+- `odin3_ffinit_set(module, net, v)` (`set_init`) writes **one** wire: the net's primary wire bit,
+  else its first alias membership that is a wire bit, and clears the bit on every other
+  membership;
+- `odin3_ffinit_remove(module, net)` (`remove_init`) clears it on every membership; an attribute
+  left all x is removed;
+- a net with no wire membership has no init and nothing to write.
+
+2F-1 adds the read side to the same file, `odin3_ffinit_get(module, net)`: the first defined bit
+among the net's primary and alias memberships, x when none (a conflict is `opt_clean`'s warning,
+§10). FFs read the init of their Q nets through it. There is no 2F-private `ffinit.c`.
 
 Counts: `opt_dff: N flip-flops changed, M constant bits`.
 
@@ -622,6 +639,7 @@ lines DEBUG.
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
 | WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict" |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
+| ERROR | `opt needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (§19; `ODIN3_ERR_PARSE`) |
 
 Options are spelled as in Yosys (`-full`, `-nodffe`, …) so Parmys's lines run verbatim; `--full`
 is accepted too (agent default). `--opt-stats` prints one `opt: rule <name> N` line per non-zero
@@ -648,12 +666,13 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 
 | File | Content |
 |---|---|
-| `src/passes/opt/opt.h` | `odin3_opt_opts` (§3 flags), `odin3_opt_run` (the loop), `odin3_opt_<sub>_run(ctx, design, &opts, &counts)` per sub-pass, `odin3_opt_expr_run` (module scope, for 2E) |
+| `src/passes/opt/opt.h` | `odin3_opt_opts` (§3 flags), `odin3_opt_expr_counts`, `odin3_opt_run` (the loop), `odin3_opt_<sub>_run(ctx, design, &opts, &counts)` per sub-pass, `odin3_opt_expr_run` (module scope, for 2E, §4.8) |
 | `src/passes/opt/kit.c/.h` | opt context (`changed`, counters, caps), constant nets, `kit_connect`, `kit_rebuild`, `kit_new_cell`, fanout counts, invert map, topological order (Kahn, explicit queue), dirty sets |
 | `src/passes/opt/fold.c` | pins ↔ `odin3_cval`, dispatch to 2D's operators |
 | `src/passes/opt/expr*.c` | §4, one function per rule, a rule table per cell type (lizard: ≤ 60 lines, CCN ≤ 15) |
 | `src/passes/opt/{merge,muxtree,reduce,share,clean}.c` | §6, §7 (explicit frame stack), §8, §11, §10 |
-| `src/passes/opt/{ff,ffinit,dff}.c` | §9 |
+| `src/passes/opt/{ff,dff}.c` | §9 (init through `src/passes/ffinit.[ch]`, 2E-1; 2F-1 adds `odin3_ffinit_get`) |
+| `src/passes/budget.[ch]` (2E-1) | `odin3_budget_check`, used, not owned (§19) |
 | `src/passes/opt/register.c` | the eight pass definitions (`processes = OK`, EL-33 v4.2) and option parsing |
 | `src/ir/cells/ff.c` | IR change D |
 | `tools/opt-check/` | `opt-rules`, `opt-equiv`, `opt-diff`, `gen-fold-table`, `order-probe.sh` |
@@ -700,9 +719,12 @@ and asserts the same result.
 compacts after `opt` (IR-6); mcml.v's 31 iterations re-emit constant-register pipelines each
 round. `bench_opt` reports dead objects at the peak; if the RSS target below slips, the remedy is
 a compact point per `opt` iteration — an IR-6 amendment, for Peter — never a relaxed target. 2F
-charges the run-level byte budget that 2D initialises and 2E continues (2E spec, finding 6) with
-the IR's live and dead objects plus its side arrays, and fails with that budget's message rather
-than starting a second one.
+uses the design-wide byte budget of 2E-1's `src/passes/budget.[ch]` (2E v2 §16): it calls
+`odin3_budget_check(ctx, design, extra_bytes)` at the start of each sub-pass call (`extra_bytes` =
+its side arrays and CSE table) and every 2^16 created pins; the check measures what the design
+holds (`odin3_design_bytes_reserved`, dead objects included), so 2D's, 2E's and 2F's checks share
+one 60% limit. Exceeding it is fatal with `opt needs more than N bytes (the design's budget is
+60% of physical memory)` (status `ODIN3_ERR_PARSE`, 2D's cap style), the IR left valid.
 
 | Measure (Release, dev machine, `tests/bench/bench_opt.c`, smallest first) | Target |
 |---|---|
@@ -829,7 +851,7 @@ Six PRs; the plan fixes tasks and interfaces. PHASE2's 2F row: Opus `high`.
 
 | PR | Content | Depends on | Model/effort |
 |---|---|---|---|
-| 2F-1 kit | opt context and kit, constant canonicalization, FF model and init, `opt_clean` (design-wide port directions, instance removal, the process skip), the eight pass registrations (`OK`) with options, `--opt-stats`, `--opt-snapshot` | 2D-1 (cells, `$proc` flag, `write_rtlil`); **2E-1** (IR change D) | Opus `high` |
+| 2F-1 kit | opt context and kit, constant canonicalization, FF model, `odin3_ffinit_get` in the shared `ffinit.[ch]`, budget calls, `opt_clean` (design-wide port directions, instance removal, the process skip), the eight pass registrations (`OK`) with options, `--opt-stats`, `--opt-snapshot` | 2D-1 (cells, `$proc` flag, `write_rtlil`); **2E-1** (IR change D, `ffinit.[ch]`, `budget.[ch]`) | Opus `high` |
 | 2F-2 expr | `fold.c` on 2D's evaluator, `opt_expr` §4 all rules, `replace_undriven`, polarity folding; `odin3_opt_expr_run` for 2E; per-rule goldens for §4 | 2F-1, 2D-2 | Opus `high` |
 | 2F-3 merge/reduce/muxtree | §6, §7, §8; goldens | 2F-1 | Opus `high` |
 | 2F-4 dff | §9: all actions, SRST/EN merging, feedback patterns, constbits; goldens | 2F-1, 2F-2 | Opus `high` |
@@ -849,7 +871,8 @@ IR, `read_blif`, or process-free Verilog. Each PR: tests first, `/lint`, a read-
   simplification is `opt_expr`'s, mux collapsing `opt_muxtree` + `opt_reduce` + `opt_dff`'s);
   `docs/PASSES.md` (eight rows, `OK`); `docs/PHASE2.md` (2F's entry). IR change D's IR.md/DESIGN
   §5.2 amendments travel with 2E-1.
-- 2E spec (its author): `proc` calls `odin3_opt_expr_run` unless `--noopt`, keeps `init` on wires,
+- 2E spec (its author; matched by 2E v2 `5185ecc`): `proc` calls `odin3_opt_expr_run` unless
+  `--noopt`/`--stop-after`, owns `src/passes/ffinit.[ch]` and `budget.[ch]`, keeps `init` on wires,
   owns IR change D, feeds its oracles the trio's output.
 
 ## 24. Review dispositions (v2, `2EF-review1` §C)
