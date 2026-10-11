@@ -8,6 +8,7 @@
 #include "ir/proc.h"
 #include "ir/value.h"
 #include "util/alloc.h"
+#include "util/file.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -21,7 +22,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/stat.h>
 
 enum {
     WRAP_COLUMN = 100, /* no wrapped line is longer */
@@ -66,13 +66,13 @@ typedef struct blif_writer {
     const odin3_design *design;
     const odin3_strtab *tab;
     const char *path;
-    FILE *file;
-    char *buffer;    /* the stdio buffer of file */
-    uint32_t line;   /* complete lines written so far */
-    size_t col;      /* columns on the line being written */
-    bool line_empty; /* nothing but the indent on the line being written */
+    odin3_atomic_file file; /* a private temporary beside path, renamed over it on success */
+    char *buffer;           /* the stdio buffer of file.fp */
+    uint32_t line;          /* complete lines written so far */
+    size_t col;             /* columns on the line being written */
+    bool line_empty;        /* nothing but the indent on the line being written */
     bool oom_logged;
-    bool opened;       /* path was opened (and truncated): a failure removes it */
+    bool opened;       /* the temporary is open: wr_close commits or removes it */
     odin3_status st;   /* sticky: the first failure */
     const char *model; /* name of the model being written, for messages */
     odin3_celltype_id builtin[WR_BUILTINS];
@@ -118,7 +118,7 @@ static void wr_put(blif_writer *wr, odin3_bytes data) {
         return;
     }
     errno = 0;
-    if (fwrite(data.ptr, 1, data.len, wr->file) != data.len) {
+    if (fwrite(data.ptr, 1, data.len, wr->file.fp) != data.len) {
         int saved = errno != 0 ? errno : EIO;
         odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line + 1,
                   strerror(saved));
@@ -1069,53 +1069,45 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     return ODIN3_OK;
 }
 
+/* Creates a private temporary beside the destination; the destination is untouched until the
+ * rename. */
 static odin3_status wr_open(blif_writer *wr) {
     wr->buffer = odin3_util_malloc(IO_BUFFER);
     if (wr->buffer == NULL) {
         return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
-    wr->file = fopen(wr->path, "wb");
-    if (wr->file == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: cannot open for writing: %s", wr->path, strerror(errno));
-        return wr_fail(wr, ODIN3_ERR_IO);
+    odin3_status st = odin3_atomic_file_open(&wr->file, wr->path);
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
     }
     wr->opened = true;
-    if (setvbuf(wr->file, wr->buffer, _IOFBF, IO_BUFFER) != 0) {
+    if (setvbuf(wr->file.fp, wr->buffer, _IOFBF, IO_BUFFER) != 0) {
         odin3_log(ODIN3_LOG_ERROR, "%s: cannot set the output buffer", wr->path);
         return wr_fail(wr, ODIN3_ERR_IO);
     }
     return ODIN3_OK;
 }
 
-/* Closes the file; a failure to flush or close is a located write error. */
+/*
+ * Flushes the temporary (a failure is a located write error), then renames it over the destination
+ * on success or removes it on any failure, so a failed write leaves an existing file as it was.
+ */
 static void wr_close(blif_writer *wr) {
-    if (wr->file == NULL) {
+    if (!wr->opened) {
         return;
     }
-    errno = 0;
-    bool failed = fflush(wr->file) != 0;
-    int saved = errno;
-    failed = ferror(wr->file) != 0 || failed;
-    errno = 0;
-    if (fclose(wr->file) != 0) {
-        failed = true;
-        saved = saved != 0 ? saved : errno;
+    wr->opened = false;
+    if (wr->st == ODIN3_OK) {
+        errno = 0;
+        bool failed = fflush(wr->file.fp) != 0;
+        int saved = errno;
+        if (failed || ferror(wr->file.fp) != 0) {
+            odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
+                      strerror(saved != 0 ? saved : EIO));
+            (void)wr_fail(wr, ODIN3_ERR_IO);
+        }
     }
-    wr->file = NULL;
-    if (failed && wr->st == ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: write failed: %s", wr->path, (unsigned)wr->line,
-                  strerror(saved != 0 ? saved : EIO));
-        (void)wr_fail(wr, ODIN3_ERR_IO);
-    }
-}
-
-/* After a failure, removes the partly written file when it is a regular file (never a device such
- * as /dev/full). */
-static void wr_discard(const blif_writer *wr) {
-    struct stat info;
-    if (wr->opened && stat(wr->path, &info) == 0 && S_ISREG(info.st_mode)) {
-        (void)remove(wr->path);
-    }
+    wr->st = odin3_atomic_file_close(&wr->file, wr->st);
 }
 
 static void wr_free(blif_writer *wr) {
@@ -1163,9 +1155,6 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     }
     wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
     st = wr.st;
-    if (st != ODIN3_OK) {
-        wr_discard(&wr);
-    }
     wr_free(&wr);
     return st;
 }

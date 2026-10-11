@@ -14,12 +14,15 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <dirent.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 
 #ifndef ODIN3_BLIF_FIXTURES
 #error "ODIN3_BLIF_FIXTURES must name tests/golden/blif"
@@ -833,7 +836,7 @@ static void test_unwritable_path_is_io_error(void) {
     TEST_ASSERT_NOT_NULL(strstr(last_error, "cannot open"));
 }
 
-/* A write that fails (no space left on /dev/full) is IO with a located message. */
+/* A destination whose directory refuses the private temporary (/dev) is IO; the device stays. */
 static void test_failed_write_is_io_error(void) {
     FILE *probe = fopen("/dev/full", "wb");
     if (probe == NULL) {
@@ -842,11 +845,52 @@ static void test_failed_write_is_io_error(void) {
     (void)fclose(probe);
     read_into(design, FIXTURES[1]);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_blif_write(design, "/dev/full"));
-    TEST_ASSERT_EQUAL_STRING_LEN("/dev/full:", last_error, strlen("/dev/full:"));
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "/dev/full: cannot open"), last_error);
     probe = fopen("/dev/full", "wb"); /* a device is never removed */
     TEST_ASSERT_NOT_NULL(probe);
     (void)fclose(probe);
+}
+
+static const char *const BASELINE = "previous contents\n";
+
+static void put_baseline(const char *path) {
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(strlen(BASELINE), fwrite(BASELINE, 1, strlen(BASELINE), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/* path still holds BASELINE, and no "<path>.XXXXXX" temporary is left in the directory. */
+static void expect_baseline(const char *path) {
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(BASELINE, slurp(path, text));
+    char prefix[MSG_MAX];
+    (void)snprintf(prefix, sizeof prefix, "%s.", path);
+    DIR *dir = opendir(".");
+    TEST_ASSERT_NOT_NULL(dir);
+    for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+        TEST_ASSERT_NULL_MESSAGE(strstr(ent->d_name, prefix), ent->d_name);
+    }
+    (void)closedir(dir);
+}
+
+/* A write that fails part way (file size limit, EFBIG) is IO and leaves an existing file as it
+ * was: the writer writes a private temporary and renames it only on success. */
+static void test_failed_write_keeps_destination(void) {
+    read_into(design, FIXTURES[0]);
+    put_baseline(OUT_PATH);
+    struct rlimit old;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_FSIZE, &old));
+    void (*prev)(int) = signal(SIGXFSZ, SIG_IGN);
+    TEST_ASSERT_TRUE(prev != SIG_ERR);
+    struct rlimit small = {256, old.rlim_max};
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &small));
+    odin3_status st = odin3_blif_write(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &old));
+    TEST_ASSERT_TRUE(signal(SIGXFSZ, prev) != SIG_ERR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "write failed"), last_error);
+    expect_baseline(OUT_PATH);
 }
 
 static void test_bad_arguments(void) {
@@ -854,15 +898,14 @@ static void test_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, NULL));
 }
 
-/* A refused write removes the file it had started, even one that existed before. */
+/* A refused write leaves an existing file as it was (the write is atomic). */
 static void test_inout_port_is_refused(void) {
     odin3_module *module = new_module(design, "top");
     new_port(module, "io", ODIN3_DIR_INOUT, 1);
-    write_input("old contents\n");
+    put_baseline(IN_PATH);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, IN_PATH));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "inout"), last_error);
-    FILE *file = fopen(IN_PATH, "rb");
-    TEST_ASSERT_NULL(file);
+    expect_baseline(IN_PATH);
 }
 
 /* A registered type with non-default parameters has no BLIF form. */
@@ -1003,6 +1046,7 @@ static void oom_sweep(void) {
     last_error[0] = '\0';
     write_ok(design, OUT2_PATH);
     (void)slurp(OUT2_PATH, want);
+    put_baseline(OUT_PATH);
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         odin3_util_set_alloc_fail_after(fail_at);
@@ -1013,6 +1057,7 @@ static void oom_sweep(void) {
             TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
         } else {
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            expect_baseline(OUT_PATH); /* a failed write keeps the old file */
         }
     }
     TEST_ASSERT_TRUE(done);
@@ -1069,6 +1114,7 @@ int main(void) {
     RUN_TEST(test_subckt_both_pins_of_one_blif_name);
     RUN_TEST(test_unwritable_path_is_io_error);
     RUN_TEST(test_failed_write_is_io_error);
+    RUN_TEST(test_failed_write_keeps_destination);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_inout_port_is_refused);
     RUN_TEST(test_non_default_parameters_are_refused);

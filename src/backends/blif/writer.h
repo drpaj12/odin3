@@ -61,13 +61,15 @@
  * are indented by two spaces); a single longer token stays whole, and cover rows never wrap.
  * Output is deterministic.
  *
- * Errors (logged): ODIN3_ERR_IO when path cannot be opened or a write fails ("path: cannot open
- * …", "path:line: write failed …"); ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction
- * INOUT, two ports of one BLIF name on different nets, a `.subckt` cell with parameters the
- * reader would not derive or with both ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out
- * of memory. On any failure after path was opened, the partly written file is removed when it is a
- * regular file (a device such as /dev/full is left alone). Names are written as they are: a name
- * holding blanks or other characters BLIF cannot carry is not escaped.
+ * Errors (logged): ODIN3_ERR_IO when the temporary cannot be created, a write fails or the rename
+ * fails ("path: cannot open …", "path:line: write failed …", "path: cannot rename …");
+ * ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction INOUT, two ports of one BLIF name
+ * on different nets, a `.subckt` cell with parameters the reader would not derive or with both
+ * ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out of memory. The text goes to a
+ * private temporary beside path (util/file.h), renamed over path on success; on any failure only
+ * the temporary is removed, so an existing file at path keeps its old contents (a write into a
+ * directory that refuses the temporary, such as /dev, is "cannot open"). Names are written as they
+ * are: a name holding blanks or other characters BLIF cannot carry is not escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 
