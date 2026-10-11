@@ -1,0 +1,2 @@
+undefined_macro.v:3:14: error:
+syntax: undefined macro 'L14_NOT_DEFINED'

@@ -1,0 +1,2 @@
+directive_too_long.v:2:1: error:
+directive argument longer than 4096 bytes

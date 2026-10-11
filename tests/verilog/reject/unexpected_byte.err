@@ -1,0 +1,2 @@
+unexpected_byte.v:3:16: error:
+unexpected byte 0x01

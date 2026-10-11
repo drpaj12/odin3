@@ -1,0 +1,2 @@
+default_nettype_bad.v:2:1: error:
+`default_nettype 'foo' is not one of wire tri tri0 tri1 wand triand wor trior trireg uwire none

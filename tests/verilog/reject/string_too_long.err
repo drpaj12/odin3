@@ -1,0 +1,2 @@
+string_too_long.v:3:18: error:
+string longer than 131072 bytes

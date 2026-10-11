@@ -65,6 +65,9 @@ PRAGMA_TEXT ([^/\n]|"/"[^/\n]|\"[^"\n]*\")*
 "*)"                        { return odin3_vl_op(yyextra, yylloc, TOK_ATTR_CLOSE); }
 "@"{BLANK}*("*"|"("{BLANK}*"*"{BLANK}*")") { return odin3_vl_op(yyextra, yylloc, TOK_AT_STAR); }
 
+    /* --- SystemVerilog's implicit port connection: one located error, not a bad '*)' */
+".*"                        { odin3_vl_implicit_ports(yyextra); }
+
     /* --- operators (§2.4) */
 "||"                        { return odin3_vl_op(yyextra, yylloc, TOK_OR_OR); }
 "&&"                        { return odin3_vl_op(yyextra, yylloc, TOK_AND_AND); }

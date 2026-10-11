@@ -988,6 +988,24 @@ static void test_unknown_directive(void) {
     TEST_ASSERT_TRUE(err_flag);
 }
 
+/* SystemVerilog's `.*` is one located error at its '.', both bytes dropped: `(.*)` is '(' ')'
+ * (not '(' '.' ATTR_CLOSE), and `. *` (two tokens) is left to the parser. */
+static void test_implicit_port_connection(void) {
+    open_text("u (.*); v (. *)");
+    expect_ident("u");
+    expect_tok('(', (tok_range){2, 1});
+    expect_tok(')', (tok_range){5, 1});
+    expect_tok(';', (tok_range){6, 1});
+    expect_ident("v");
+    expect_tok('(', (tok_range){10, 1});
+    expect_tok('.', (tok_range){11, 1});
+    expect_tok(TOK_ATTR_CLOSE, (tok_range){13, 2});
+    TEST_ASSERT_EQUAL_STRING(
+        "t.v:1:4: error: '.*' (implicit port connections) is SystemVerilog, not Verilog-2005\n",
+        logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
 /* --- opaque bodies (§2.8) ------------------------------------------------------------------ */
 
 /* A body's end keyword right after a base (BASED would take its 'e' as a digit) still ends it. */
@@ -1367,6 +1385,7 @@ static void run_trivia_and_edges(void) {
     RUN_TEST(test_directive_cap);
     RUN_TEST(test_directive_cap_default);
     RUN_TEST(test_unknown_directive);
+    RUN_TEST(test_implicit_port_connection);
     RUN_TEST(test_specify_body);
     RUN_TEST(test_body_end_after_base);
     RUN_TEST(test_primitive_and_config_names);

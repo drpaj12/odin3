@@ -380,6 +380,14 @@ int odin3_vl_directive(odin3_vl_state *st, YYSTYPE *val, odin3_vp_loc *loc) {
     return vl_token_at(st, loc, (vl_span){st->tok_start, end}, TOK_DIRECTIVE);
 }
 
+void odin3_vl_implicit_ports(odin3_vl_state *st) {
+    if (vl_in_body(st)) {
+        return;
+    }
+    vl_error(st, vl_loc(st, st->tok_start),
+             "'.*' (implicit port connections) is SystemVerilog, not Verilog-2005");
+}
+
 void odin3_vl_unknown_directive(odin3_vl_state *st) {
     if (vl_in_body(st)) {
         return;

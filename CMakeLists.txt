@@ -299,6 +299,12 @@ add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
 
+# --- odin3-parse-check: the Verilog coverage-row driver and location oracle (2C §7.2) ----------
+add_executable(odin3-parse-check tools/parse-check/odin3-parse-check.c
+                                 tools/parse-check/parse_check.c)
+target_include_directories(odin3-parse-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-parse-check PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -488,6 +494,10 @@ if(BUILD_TESTING)
     odin3_add_pp_test(test_verilog_lexer_pp)
     target_include_directories(test_verilog_lexer_pp PRIVATE ${_gen})
     add_dependencies(test_verilog_lexer_pp verilog_generated)
+    # 2C Task 9: the location oracle of odin3-parse-check on seeded faults.
+    odin3_add_unit_test(test_parse_check)
+    target_sources(test_parse_check PRIVATE tools/parse-check/parse_check.c)
+    target_include_directories(test_parse_check PRIVATE ${PROJECT_SOURCE_DIR}/tools/parse-check)
     odin3_add_pp_test(test_pp_limits)
     odin3_add_pp_test(test_pp_mixed)
     # 2B §10.5 properties: a file without directives is its own output; re-preprocessing an
@@ -745,7 +755,8 @@ if(BUILD_TESTING)
     endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
-    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
+    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>"
+                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
         list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
@@ -871,6 +882,33 @@ if(BUILD_TESTING)
                 --grammar ${PROJECT_SOURCE_DIR}/src/frontends/verilog/verilog.y --operand expr
                 --expect ${PROJECT_SOURCE_DIR}/tests/verilog/solved_conflicts.txt)
     set_tests_properties(verilog_grammar_solved PROPERTIES LABELS unit)
+
+    # 2C §7.2: every coverage row through read → check → print → re-read → equal, its .ast golden
+    # and the location oracle, smallest file first.
+    file(GLOB _coverage_rows CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/coverage/*.v)
+    add_test(NAME verilog_coverage
+        COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_coverage_rows})
+    set_tests_properties(verilog_coverage PROPERTIES LABELS verilog)
+    # 2C §7.3: the negative cases (odin3 --parse-only in the case directory), and the 2D handover
+    # cases (read_verilog without --parse-only; pending, exit 77, while 2D's entry is the stub).
+    add_test(NAME verilog_reject
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
+                $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/reject)
+    set_tests_properties(verilog_reject PROPERTIES LABELS verilog)
+    # The handover cases must parse (2C §7.3: 2D reports them, not the parser): read, round
+    # trip and location oracle, with no golden.
+    file(GLOB _handover_cases CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/reject-2d/*.v
+                                                ${PROJECT_SOURCE_DIR}/tests/verilog/ignore-2d/*.v)
+    add_test(NAME verilog_handover_parse
+        COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
+    set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
+    foreach(_handover reject-2d ignore-2d)
+        string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
+        add_test(NAME ${_handover_test}
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
+                    --elaborate $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
+        set_tests_properties(${_handover_test} PROPERTIES LABELS verilog SKIP_RETURN_CODE 77)
+    endforeach()
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"

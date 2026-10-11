@@ -1,0 +1,2 @@
+T6.v:4:3: error:
+always block without an event control is not supported

@@ -1,0 +1,2 @@
+unknown_directive.v:3:1: error:
+syntax: undefined macro 'frobnicate'

@@ -355,6 +355,17 @@ static const fault_fn FAULTS[ODIN3_AST_TEST_FAULT_END] = {
     [ODIN3_AST_TEST_NUMBER_QUESTION] = table_fault,
 };
 
+odin3_status odin3_ast_test_set_range(odin3_ast *ast, odin3_ast_id node, odin3_range range) {
+    odin3_ast_node *rec = ast != NULL ? node_at(ast, node.v) : NULL;
+    if (rec == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_ast_test_set_range: NULL store or no such node");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    rec->loc = range.loc.v;
+    rec->end = range.end.v;
+    return ODIN3_OK;
+}
+
 odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target) {
     if (ast == NULL || target.fault < ODIN3_AST_TEST_KIND ||
         target.fault >= ODIN3_AST_TEST_FAULT_END) {

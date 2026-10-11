@@ -1,0 +1,2 @@
+directive_in_statement.v:4:5: error:
+syntax: unexpected directive

@@ -86,4 +86,11 @@ typedef struct odin3_ast_test_target {
  */
 odin3_status odin3_ast_test_corrupt(odin3_ast *ast, odin3_ast_test_target target);
 
+/*
+ * Writes node's loc and end directly (the location oracle's seeded faults, odin3-parse-check:
+ * a range the check accepts but the oracle must not). ODIN3_ERR_INVALID_ARG (logged; nothing
+ * changes) for a NULL store or a node not made.
+ */
+odin3_status odin3_ast_test_set_range(odin3_ast *ast, odin3_ast_id node, odin3_range range);
+
 #endif

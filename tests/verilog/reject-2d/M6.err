@@ -1,0 +1,2 @@
+M6.v:2:11: error:
+port expression in a module port list is not supported
