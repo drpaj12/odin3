@@ -123,6 +123,14 @@ static void test_format_by_suffix(void) {
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PROJ_FORMAT_FLIST, project()->format);
     TEST_ASSERT_EQUAL_STRING(D "/q/proj.qpf.f", str(project()->entry.resolved));
     TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)project()->files.len);
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(ODIN3_PROJECT_FIXTURES "/single_file/odin2.xml"));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_PROJ_FORMAT_ODIN2, project()->format);
+    TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)project()->files.len);
+    TEST_ASSERT_TRUE(project()->output.present);
+    TEST_ASSERT_EQUAL_STRING(ODIN3_PROJECT_FIXTURES "/single_file/out/counter.blif",
+                             str(project()->output.path));
+    TEST_ASSERT_EQUAL_STRING("blif", str(project()->output.format));
 }
 
 /* --format overrides the suffix: a list named .o3proj. */
@@ -154,11 +162,12 @@ static void test_entry_errors(void) {
                    "missing_file: project not found: '" D "/q'");
     expect_failure(read_entry(D "/q/ip.qip"), ODIN3_ERR_PARSE,
                    "unknown_file_type: a .qip is not a project entry: '" D "/q/ip.qip'");
+    /* .xml is an Odin II config (2B-4), as is any entry with format ODIN2 */
     expect_failure(read_entry(D "/k6.xml"), ODIN3_ERR_PARSE,
-                   "unknown_file_type: no Odin II XML reader yet: '" D "/k6.xml'");
+                   D "/k6.xml:1:1: error: syntax: root must be <config>: 'architecture'");
     odin3_project_request req = {D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2, NULL, NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE,
-                   "unknown_file_type: no Odin II XML reader yet: '" D "/all.o3proj'");
+                   D "/all.o3proj:1:1: error: syntax: text before the root element");
     /* a .qip with --format qsf is read as a .qsf */
     req = (odin3_project_request){D "/q/ip.qip", ODIN3_PROJ_FORMAT_QUARTUS, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
@@ -358,6 +367,7 @@ static void test_out_of_memory(void) {
         {D "/all.o3proj", 0, NULL, "other"},
         {D "/q/proj.qpf", 0, "fast", NULL},
         {D "/q/dups.qsf", 0, NULL, NULL},
+        {ODIN3_PROJECT_FIXTURES "/odin2_arch/odin2.xml", 0, NULL, NULL},
     };
     for (size_t i = 0; i < sizeof reqs / sizeof reqs[0]; i++) {
         sweep(&reqs[i]);

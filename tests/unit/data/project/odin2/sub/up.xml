@@ -1,0 +1,10 @@
+<config>
+    <inputs>
+        <input_type>Verilog</input_type>
+        <input_path_and_name>../src/a.v</input_path_and_name>
+    </inputs>
+    <output>
+        <output_type></output_type>
+        <output_path_and_name></output_path_and_name>
+    </output>
+</config>

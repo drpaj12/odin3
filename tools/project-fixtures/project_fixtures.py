@@ -1850,8 +1850,8 @@ def cmd_parse(args: argparse.Namespace) -> int:
 # ---- compare: odin3 against the corpus (spec 2B §10.2) ----------------------------------------
 
 # `format_phase` tags whose reader odin3 has; a format gated on any other tag is skipped, not
-# failed (2B plan point (m)). The Odin II XML reader adds ODIN2_READER (2B Task 14).
-LANDED_FORMAT_PHASES: frozenset[str] = frozenset()
+# failed (2B plan point (m)). The Odin II XML reader landed with 2B Task 14 (PR 2B-4).
+LANDED_FORMAT_PHASES: frozenset[str] = frozenset({ODIN2_READER})
 # Error kinds raised by the preprocessor, checked through `read_project; preprocess`, and by the
 # 2C/2D front end, checked through `read_project; read_verilog` only with --with-frontend.
 PREPROCESS_KINDS = frozenset({"include_not_found", "include_cycle"})

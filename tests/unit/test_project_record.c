@@ -181,10 +181,12 @@ static void test_limits_hook(void) {
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_FLIST_DEPTH, proj->limits.flist_depth);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_QIP_DEPTH, proj->limits.qip_depth);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_WORDS, proj->limits.words);
-    odin3_project_test_set_limits(proj, (odin3_proj_limits){2, 3, 4});
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROJ_MAX_XML_NODES, proj->limits.xml_nodes);
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){2, 3, 4, 5});
     TEST_ASSERT_EQUAL_UINT32(2, proj->limits.flist_depth);
     TEST_ASSERT_EQUAL_UINT32(3, proj->limits.qip_depth);
     TEST_ASSERT_EQUAL_UINT32(4, proj->limits.words);
+    TEST_ASSERT_EQUAL_UINT32(5, proj->limits.xml_nodes);
 }
 
 /* --- loading project files (PRJ-5) --------------------------------------------------------- */

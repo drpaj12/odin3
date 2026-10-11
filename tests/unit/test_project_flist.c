@@ -599,14 +599,16 @@ static void test_depth_cap(void) {
     put("one.f", odin3_bytes_cstr("-f two.f\n"));
     put("two.f", odin3_bytes_cstr("// deeper\n-f three.f\n"));
     touch("three.f");
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){3, ODIN3_PROJ_MAX_QIP_DEPTH, ODIN3_PROJ_MAX_WORDS});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){3, ODIN3_PROJ_MAX_QIP_DEPTH,
+                                                            ODIN3_PROJ_MAX_WORDS,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     put("files.f", odin3_bytes_cstr("-f one.f\n"));
     expect_ok(read_in(tmp, "files.f")); /* three.f is nested 3 deep */
     odin3_design_drop_project(design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){2, ODIN3_PROJ_MAX_QIP_DEPTH, ODIN3_PROJ_MAX_WORDS});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){2, ODIN3_PROJ_MAX_QIP_DEPTH,
+                                                            ODIN3_PROJ_MAX_WORDS,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     expect_error(read_in(tmp, "files.f"),
                  "two.f:2:1: error: syntax: file lists nested more than 2 deep "
                  "(ODIN3_PROJ_MAX_FLIST_DEPTH): 'three.f'\n"
@@ -616,14 +618,16 @@ static void test_depth_cap(void) {
 
 static void test_word_cap(void) {
     touch("a.v");
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 3});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH,
+                                                            ODIN3_PROJ_MAX_QIP_DEPTH, 3,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     put("files.f", odin3_bytes_cstr("a.v a.v # x y z\n\"a.v\" // q r\n"));
     expect_ok(read_in(tmp, "files.f")); /* exactly 3 words */
     odin3_design_drop_project(design);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
-    odin3_project_test_set_limits(
-        proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH, 3});
+    odin3_project_test_set_limits(proj, (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH,
+                                                            ODIN3_PROJ_MAX_QIP_DEPTH, 3,
+                                                            ODIN3_PROJ_MAX_XML_NODES});
     expect_error(read_list("a.v\n\"a b\" c.v  d.v e.v\n"),
                  "files.f:2:12: error: syntax: file list has more than 3 words "
                  "(ODIN3_PROJ_MAX_WORDS)");

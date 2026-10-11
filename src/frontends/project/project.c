@@ -62,7 +62,7 @@ odin3_project *odin3_project_create(odin3_design *design) {
         odin3_vec_init(vec_at(proj, i), k_vecs[i].elem_size);
     }
     proj->limits = (odin3_proj_limits){ODIN3_PROJ_MAX_FLIST_DEPTH, ODIN3_PROJ_MAX_QIP_DEPTH,
-                                       ODIN3_PROJ_MAX_WORDS};
+                                       ODIN3_PROJ_MAX_WORDS, ODIN3_PROJ_MAX_XML_NODES};
     proj->arena = odin3_arena_create(0);
     proj->file_keys = odin3_u64map_create(0);
     proj->lib_keys = odin3_u64map_create(0);
@@ -516,6 +516,20 @@ size_t odin3_py_space_len(odin3_bytes text, size_t pos) {
         }
     }
     return 0;
+}
+
+odin3_bytes odin3_proj_py_strip(odin3_bytes text) {
+    size_t start = 0;
+    for (size_t len = odin3_py_space_len(text, 0); len > 0; len = odin3_py_space_len(text, start)) {
+        start += len;
+    }
+    size_t end = start;
+    for (size_t k = start; k < text.len;) {
+        size_t len = odin3_py_space_len(text, k);
+        k += len > 0 ? len : 1;
+        end = len > 0 ? end : k;
+    }
+    return (odin3_bytes){(const char *)text.ptr + start, end - start};
 }
 
 bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text) {

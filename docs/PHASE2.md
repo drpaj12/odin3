@@ -28,7 +28,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
 ## Checklist
 
 - [ ] 2A AST + symbol table spec approved, implemented, merged
-- [ ] 2B project readers pass the corpus (Phase 2 formats); preprocessor
+- [x] 2B project readers pass the corpus (Phase 2 formats); preprocessor
 - [ ] 2C parser covers the synthesizable Verilog-2005 subset (coverage table, #3)
 - [ ] 2D elaboration to word-level IR
 - [ ] 2E `proc`
@@ -400,6 +400,21 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - *Kept parked:* `project_pass.c` reading srcman internals, the loose Icarus error regex,
         and srcman-raised paths under `--diag-paths resolved`. Each waits for the 2A srcman
         touch or the next pp-diff change.
+    - *2B-4 Odin II XML reader* (2B Task 14, 2026-10-11; spec §5.4 PRJ-15; `xml.c`, `odin2.c`):
+      `.xml` entries and `--format odin2` read Odin II configs; `project_corpus` runs the
+      `odin2` format (`LANDED_FORMAT_PHASES` holds `odin2-reader`): 10 cases ok, the 4 whose
+      error needs the front end skipped as in the other formats. Agent defaults:
+      - a new cap `ODIN3_PROJ_MAX_XML_NODES` = 2^20 elements, attributes and text runs per XML
+        file, checked before each is stored (a 2^28-byte file of `<a/>` would otherwise need
+        about 3 GB; real configs hold under 100 nodes); it belongs in spec §9's table;
+      - the XML subset follows expat where the corpus is silent: a UTF-8 BOM and an XML
+        declaration at the start are skipped (its encoding ignored: UTF-8), newlines in text
+        and attribute values are normalized, C0 controls, invalid UTF-8, U+FFFE/U+FFFF and
+        `]]>` in text are `syntax`; lines count LF only (the source manager's lines), where
+        expat also counts a lone CR;
+      - `input_type` and `output_type` are lower-cased in ASCII only (Python's `str.lower()`
+        also folds non-ASCII letters); values are stripped as `str.strip()`
+        (`odin3_proj_py_strip`, now shared with `.o3proj` map cells).
 13. **2D spec approved** (`docs/specs/2026-10-11-2D-elaboration-design.md`; agent default under
    Peter's overnight rule, 2026-10-11, after a Fable review (2 critical, 10 important, 17 minor,
    all applied in v2) and a Fable re-review that approved v2 (minors N1–N7 applied in v3, N4 kept

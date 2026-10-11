@@ -80,12 +80,17 @@ enum { ODIN3_PROJ_HAS_MIN_WIDTH = 1, ODIN3_PROJ_HAS_MAX_WIDTH = 2, ODIN3_PROJ_HA
 /* 2^20: ~60 MB worst case per Tcl file or .o3proj line (an OOM kills the WSL VM); agent
  * default, real projects are far below it */
 #define ODIN3_PROJ_MAX_WORDS (UINT32_C(1) << 20)
+/* 2^20: elements, attributes and text runs of one Odin II XML file, counted before each is
+ * stored (≈ 100 MB worst case; a 2^28-byte file of `<a/>` would otherwise need ≈ 3 GB); agent
+ * default 2B Task 14, real configs hold under 100 */
+#define ODIN3_PROJ_MAX_XML_NODES (UINT32_C(1) << 20)
 
 /* The caps a project enforces; tests lower them through project_test.h. */
 typedef struct odin3_proj_limits {
     uint32_t flist_depth; /* nested -f/-F lists */
     uint32_t qip_depth;   /* nested .qip files */
     uint32_t words;       /* words per file list, .o3proj line or Tcl file (.qsf/.qip) */
+    uint32_t xml_nodes;   /* elements, attributes and text runs per Odin II XML file */
 } odin3_proj_limits;
 
 /* --- the record (PRJ-3) -------------------------------------------------------------------- */
@@ -350,6 +355,9 @@ odin3_status odin3_project_count(odin3_project *proj, odin3_bytes text, odin3_lo
  * whitespace, \x1c-\x1f, and the non-ASCII spaces in UTF-8), else 0 (also at the end). */
 size_t odin3_py_space_len(odin3_bytes text, size_t pos);
 
+/* text without the leading and trailing characters Python's str.strip() removes (a view). */
+odin3_bytes odin3_proj_py_strip(odin3_bytes text);
+
 /* Small byte helpers shared by the readers. bytes_is: bytes equal the C string text; bytes_eq:
  * the two spans hold the same bytes; str_bytes: the bytes of strtab ID str of proj's design. */
 bool odin3_proj_bytes_is(odin3_bytes bytes, const char *text);
@@ -416,8 +424,10 @@ odin3_status odin3_read_quartus(odin3_project *proj, const odin3_proj_path *file
 /* Reads an .o3proj file (PRJ-10). */
 odin3_status odin3_read_o3proj(odin3_project *proj, const odin3_proj_path *file);
 
-/* The Odin II XML reader (PRJ-15, odin3_read_odin2) lands with 2B-4; until then the entry
- * dispatch rejects that format (unknown_file_type). */
+/* Reads an Odin II XML config (PRJ-15, §5.4): the whole file is parsed first (an XML error is
+ * `syntax` at its line, as is a node count over ODIN3_PROJ_MAX_XML_NODES), then the root's
+ * children in document order. */
+odin3_status odin3_read_odin2(odin3_project *proj, const odin3_proj_path *file);
 
 /* --- entry dispatch (PRJ-16; entry.c) ------------------------------------------------------ */
 
@@ -434,9 +444,9 @@ typedef struct odin3_project_request {
  * working directory and normalized (point (i)); it must be a regular file (unlocated
  * `missing_file`, names [entry as given]). Format: req->format, else by the entry's suffix
  * (case-sensitive): .o3proj, .qpf/.qsf (Quartus), .qip (`unknown_file_type`: not an entry), .xml
- * (`unknown_file_type` "no Odin II XML reader yet", as is format ODIN2), anything else a file
- * list. A revision with a non-Quartus entry is an unlocated `syntax` ("--revision needs a .qpf or
- * .qsf entry"). Then the reader runs; then req->top replaces the project's top (an info line
+ * (Odin II), anything else a file list. A revision with a non-Quartus entry is an unlocated
+ * `syntax` ("--revision needs a .qpf or .qsf entry"). Then the reader runs; then req->top replaces
+ * the project's top (an info line
  * "<entry>: --top <new> replaces the project top <old>" when they differ; a bad name is an
  * unlocated `syntax`); then finish and the info lines "<entry>: ignored: A, B, …" and "<entry>:
  * listed more than once, read once: P, …" (resolved paths), each only when non-empty; <entry> is
