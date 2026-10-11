@@ -143,6 +143,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab_limits.c
     src/frontends/elab/cval.c
     src/frontends/elab/cval_arith.c
+    src/frontends/elab/ctype.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -492,6 +493,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_elab_cval)
     target_compile_definitions(test_elab_cval PRIVATE
         ODIN3_ELAB_DATA="${PROJECT_SOURCE_DIR}/tests/elab")
+    odin3_add_unit_test(test_elab_ctype)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
