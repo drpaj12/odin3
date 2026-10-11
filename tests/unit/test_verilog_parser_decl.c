@@ -13,6 +13,7 @@
 #include "util/str.h"
 #include "verilog_test.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -476,22 +477,26 @@ static void test_attribute_on_a_declarator_is_a_syntax_error(void) {
                  "x.v:1:19: error: syntax: unexpected (*, expecting identifier\n");
 }
 
-/* "loc end" of the first module's child index, each as file:line:col. */
+/* "loc end" of node, each as file:line:col. */
+static void expect_range(const vt_result *res, odin3_ast_id node, const char *want) {
+    odin3_srcman *sm = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(res->design, &sm));
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_format(sm, odin3_ast_loc(res->ast, node), &text,
+                                                        ODIN3_SRCFMT_GIVEN));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(" ")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_format(sm, odin3_ast_end(res->ast, node), &text,
+                                                        ODIN3_SRCFMT_GIVEN));
+    TEST_ASSERT_EQUAL_STRING(want, text.data);
+    odin3_strbuf_free(&text);
+}
+
+/* "loc end" of the first module's child index. */
 static void expect_item_range(const char *src, uint32_t index, const char *want) {
     vt_result res;
     parse_ok(src, &res);
-    odin3_ast_id item = odin3_ast_child(res.ast, first_module(&res), index);
-    odin3_srcman *sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(res.design, &sm));
-    odin3_strbuf text;
-    odin3_strbuf_init(&text);
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_srcman_format(sm, odin3_ast_loc(res.ast, item), &text, ODIN3_SRCFMT_GIVEN));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(" ")));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_srcman_format(sm, odin3_ast_end(res.ast, item), &text, ODIN3_SRCFMT_GIVEN));
-    TEST_ASSERT_EQUAL_STRING(want, text.data);
-    odin3_strbuf_free(&text);
+    expect_range(&res, odin3_ast_child(res.ast, first_module(&res), index), want);
     vt_free(&res);
 }
 
@@ -500,6 +505,21 @@ static void expect_item_range(const char *src, uint32_t index, const char *want)
 static void test_item_range_ignores_its_attributes(void) {
     expect_item_range("module m; wire a; (* k *) wire b; endmodule", 3, "x.v:1:27 x.v:1:34");
     expect_item_range("module m; wire a; wire b; endmodule", 3, "x.v:1:19 x.v:1:26");
+}
+
+/* Minor 5 of the review: the ends of header groups and LISTs (the dump shows starts only). */
+static void test_header_group_and_list_ends(void) {
+    vt_result res;
+    parse_ok("module m #(parameter A = 1, B = 2) (input a, output reg b, c, inout d); endmodule",
+             &res);
+    odin3_ast_id module = first_module(&res);
+    odin3_ast_id params = odin3_ast_child(res.ast, module, 0);
+    odin3_ast_id ports = odin3_ast_child(res.ast, module, 1);
+    expect_range(&res, params, "x.v:1:10 x.v:1:35");
+    expect_range(&res, odin3_ast_child(res.ast, params, 0), "x.v:1:12 x.v:1:34");
+    expect_range(&res, ports, "x.v:1:36 x.v:1:71");
+    expect_range(&res, odin3_ast_child(res.ast, ports, 1), "x.v:1:46 x.v:1:61");
+    vt_free(&res);
 }
 
 /* --- numbers --------------------------------------------------------------------------------- */
@@ -513,6 +533,28 @@ static void test_spaced_sized_literal(void) {
                 "  (NET_ASSIGN @x.v:1:18\n"
                 "    (IDENT:x @x.v:1:18)\n"
                 "    (NUMBER.bin @x.v:1:22 5'b1)))");
+}
+
+/* The empty string (controller ruling): a STRING flagged EMPTY with name 0, printed `""`, and the
+ * printed text re-parses to an equal tree (2A §4.3 amendment). */
+static void test_empty_string(void) {
+    expect_item("module m; parameter p = \"\"; endmodule", 2,
+                "(PARAM_DECL.parameter @x.v:1:11\n"
+                "  _\n"
+                "  (DECLARATOR:p @x.v:1:21\n"
+                "    (STRING:\"\" [EMPTY] @x.v:1:25)))");
+    expect_printed("module m; parameter p = \"\"; endmodule", 0,
+                   "module m;\n  parameter p = \"\";\nendmodule\n");
+    vt_result first;
+    vt_result again;
+    parse_ok("module m; parameter p = \"\"; endmodule", &first);
+    parse_ok("module m;\n  parameter p = \"\";\nendmodule\n", &again);
+    bool equal = false;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_equal(first.ast, first_module(&first), again.ast,
+                                                    first_module(&again), &equal));
+    TEST_ASSERT_TRUE(equal);
+    vt_free(&again);
+    vt_free(&first);
 }
 
 /* Review Focus 4: words reserved only in later standards are identifiers. */
@@ -559,6 +601,8 @@ int main(void) {
     RUN_TEST(test_attribute_on_a_declarator_is_a_syntax_error);
     RUN_TEST(test_item_range_ignores_its_attributes);
     RUN_TEST(test_spaced_sized_literal);
+    RUN_TEST(test_header_group_and_list_ends);
+    RUN_TEST(test_empty_string);
     RUN_TEST(test_later_keywords_are_names);
     return UNITY_END();
 }

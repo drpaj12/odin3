@@ -127,6 +127,7 @@ void odin3_vp_stack_free(void *ptr) {
 void odin3_vp_enter_error(odin3_vp_ctx *ctx) {
     ctx->error_mode = true;
     odin3_ast_unwind(ctx->ast, ctx->base); /* nothing built after the first error is used */
+    ctx->npieces = 0;
 }
 
 void odin3_vp_error(const odin3_vp_loc *at, odin3_vp_ctx *ctx, const char *msg) {
@@ -159,7 +160,8 @@ static void ctx_init(odin3_vp_ctx *ctx, odin3_vl_run *run, odin3_ast *ast, odin3
     *ctx = (odin3_vp_ctx){.run = run,
                           .ast = ast,
                           .lexer = lx,
-                          .error_mode = odin3_vl_in_error(run),
+                          .error_mode = run->stop, /* an earlier stream's error leaves this
+                                                      one live: its own errors still report */
                           .fatal = ODIN3_OK,
                           .base = odin3_ast_mark(ast)};
     odin3_vec_init(&ctx->span_scratch, sizeof(odin3_ast_id));

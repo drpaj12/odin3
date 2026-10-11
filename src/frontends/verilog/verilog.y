@@ -156,7 +156,11 @@ module_decl: MODULE IDENT module_body ENDMODULE
                { VP($$, vp_macromodule(ctx, $3, &@$, $2, &$$)); }
            ;
 
+/* The fourth error production (review of Task 4): an item missing its `;` before `endmodule`
+ * recovers at the `endmodule`, so the next module's header is parsed, not discarded. */
 module_body: list_mark module_params module_ports ';' module_items
+               { VP($$, vp_value(ctx, $1, &$$)); }
+           | list_mark module_params module_ports ';' module_items error
                { VP($$, vp_value(ctx, $1, &$$)); }
            ;
 

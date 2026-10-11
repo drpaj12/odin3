@@ -335,6 +335,22 @@ static void test_real_signed_zero_and_nan(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_real_new(ast_a, NAN, &payload));
 }
 
+/* The empty string (STRING{EMPTY}, name 0) equals itself across designs and differs from a named
+ * STRING (2A §4.3 amendment). */
+static void test_empty_string(void) {
+    odin3_ast_spec empty = {.kind = ODIN3_AST_STRING, .flags = ODIN3_AST_F_STRING_EMPTY};
+    odin3_ast_id ea = {0};
+    odin3_ast_id eb = {0};
+    odin3_ast_id sa = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast_a, &empty, NULL, 0, &ea));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast_b, &empty, NULL, 0, &eb));
+    odin3_ast_spec text = {.kind = ODIN3_AST_STRING};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(ast_a, odin3_bytes_cstr("a"), &text.name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(ast_a, &text, NULL, 0, &sa));
+    TEST_ASSERT_TRUE(equal(ast_a, ea, ast_b, eb));
+    TEST_ASSERT_FALSE(equal(ast_a, ea, ast_a, sa));
+}
+
 static void test_misuse(void) {
     builder ad = {ast_a, {0}, M_NONE};
     odin3_ast_id node = mk(&ad, spec(&ad, ODIN3_AST_IDENT, "x"), NULL, 0);
@@ -373,6 +389,7 @@ int main(void) {
     RUN_TEST(test_absent_slots_and_abandoned_roots);
     RUN_TEST(test_order_matters);
     RUN_TEST(test_real_signed_zero_and_nan);
+    RUN_TEST(test_empty_string);
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom_sweep);
     return UNITY_END();

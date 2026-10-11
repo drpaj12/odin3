@@ -343,6 +343,8 @@ static void test_numbers_mixing_xz_print_in_binary(void) {
 
 static void test_strings(void) {
     expect(leaf(named(ODIN3_AST_STRING, "x=%d")), "\"x=%d\"");
+    expect(leaf(with_flags((odin3_ast_spec){.kind = ODIN3_AST_STRING}, ODIN3_AST_F_STRING_EMPTY)),
+           "\"\""); /* the empty string: name 0 (2A §4.3 amendment) */
     expect(leaf(named(ODIN3_AST_STRING, "a\"b\\c\n\td\001\177\xe9")),
            "\"a\\\"b\\\\c\\n\\td\\001\\177\\351\"");
 }

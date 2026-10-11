@@ -35,8 +35,8 @@ odin3_status vp_build(odin3_vp_ctx *ctx, uint32_t mark, const odin3_vp_loc *at, 
  */
 odin3_status vp_name(odin3_vp_ctx *ctx, uint32_t mark, bool always_hier, odin3_ast_id *out);
 
-/* A recoverable error a builder has already logged, located (number_parse): counted against the
- * run's cap, then error mode. */
-void vp_logged_error(odin3_vp_ctx *ctx);
+/* A recoverable error a builder has already logged at at (number_parse): counted against the
+ * run's cap (past it, the stop line at at and run->stop), then error mode. */
+void vp_logged_error(odin3_vp_ctx *ctx, odin3_loc at);
 
 #endif

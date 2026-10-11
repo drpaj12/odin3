@@ -158,6 +158,16 @@ bool odin3_ast_class_has(odin3_ast_class cls, const odin3_ast_kind_info *info) {
            info->kind == rule->kind_b;
 }
 
+odin3_ast_name_rule odin3_ast_name_rule_of(const odin3_ast_kind_info *info, uint32_t flags) {
+    if (info == NULL) {
+        return ODIN3_AST_NAME_NO;
+    }
+    if (info->kind == ODIN3_AST_STRING && (flags & ODIN3_AST_F_STRING_EMPTY) != 0) {
+        return ODIN3_AST_NAME_NO;
+    }
+    return (odin3_ast_name_rule)info->name_rule;
+}
+
 const char *odin3_ast_kind_name(uint32_t kind) {
     const odin3_ast_kind_info *info = odin3_ast_kind_info_of(kind);
     if (info != NULL) {

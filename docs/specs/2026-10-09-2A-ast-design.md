@@ -331,7 +331,7 @@ One row per kind; `make` and `check` enforce it from a generated table (`kinds.c
 | *Expressions* | | | | | | | |
 | `NUMBER` | base (4) `dec bin oct hex` | — | `SIGNED` | — | — | NUMBER | L4–L8 |
 | `REAL` | — | — | — | — | — | REAL | L9 REJECT in expressions |
-| `STRING` | — | req (unescaped bytes) | — | — | — | — | L10 |
+| `STRING` | — | req (unescaped bytes); 0 exactly when `EMPTY` | `EMPTY` (the empty string `""`, whose bytes are strtab ID 0) | — | — | — | L10 |
 | `IDENT` | — | req | — | — | — | — | L2, L3 (escaped identifiers are stored by their bytes without `\`; the printer re-escapes any name that is not a plain identifier) |
 | `HIER_NAME` | — | — | — | — | (`IDENT`/`SELECT`(bit over `IDENT`))+ (one component allowed) | — | E21, G7, P6 |
 | `SELECT` | (4) `bit part part_plus part_minus` | — | — | E base, E a, E? b | — | — | E14–E16, N13; chains nest, base first |
@@ -361,7 +361,9 @@ Flags are **per kind**: each kind numbers its own bits from 0 in the order its r
 keeps headroom to 16 bits for Phase 5 and nothing is shared across kinds. The widest row uses
 9 bits (`PORT_DECL`: two flags, a 3-bit and a 4-bit field). The `DT` field's values are
 `none reg integer real realtime time` (`ODIN3_AST_DT_*`); the `NET` field's are 0 and the
-`NET_DECL` sub-kinds. `check` rejects a set bit the kind does not define.
+`NET_DECL` sub-kinds. `check` rejects a set bit the kind does not define. A flag may change a
+row's name rule: `STRING`'s `EMPTY` makes the name absent (§13, made with 2C), which `make`,
+`check`, the printer (`""`), the dump (`(STRING:"" [EMPTY] …)`) and `equal` honour.
 
 ### 4.5 Payloads (AST-8)
 
@@ -867,8 +869,10 @@ an enclosing frame (PP-6, ruling I11) — §3.2's ranges already allow it.
 Made with 2C (`docs/specs/2026-10-10-2C-verilog-parser-design.md` §9, PR 2C-1): (a)
 `odin3_ast_pending_span` (§5, §5.1); (c) a parse-only read holds its parsed store (AST-15/16);
 (d) the parser, not the lexer, makes the metacomment `ATTR` nodes at the `CASE` reduction (§5.1,
-§7); (e) the `PORT_REF` row's REJECT note (§4.3). Amendment (b), `library_units_from`, lands with
-2C-2.
+§7); (e) the `PORT_REF` row's REJECT note (§4.3); and, from the Task 4 review (controller ruling),
+`STRING{EMPTY}` with name 0 for `""`, which the strtab's ID 0 made unstorable under "name req"
+(§4.3, §4.4; `ODIN3_AST_F_STRING_EMPTY` appended to `odin3.h`, no renumbering). Amendment (b),
+`library_units_from`, lands with 2C-2.
 
 ## 14. Open questions (decided as recommended under the overnight rule, 2026-10-10)
 

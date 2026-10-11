@@ -717,6 +717,24 @@ static void test_rule4_name_rules(void) {
     expect_only(4);
 }
 
+/* The empty STRING (flag EMPTY, name 0) passes; a STRING without the flag needs its name, and one
+ * with the flag may not have one (2A §4.3 amendment, 2C Task 4). */
+static void test_rule4_empty_string(void) {
+    odin3_ast_id empty = make(
+        (odin3_ast_spec){.kind = ODIN3_AST_STRING, .flags = ODIN3_AST_F_STRING_EMPTY}, NULL, 0);
+    odin3_ast_id text = named(ODIN3_AST_STRING, "s", NULL, 0);
+    assert_ok(ODIN3_CHECK_FULL);
+    corrupt(ODIN3_AST_TEST_NAME_MISSING, text.v, 0);
+    expect_only(4);
+    expect_text("missing name");
+    new_store(ODIN3_AST_FORM_PARSED);
+    empty = make((odin3_ast_spec){.kind = ODIN3_AST_STRING, .flags = ODIN3_AST_F_STRING_EMPTY},
+                 NULL, 0);
+    corrupt(ODIN3_AST_TEST_NAME_EXTRA, empty.v, intern("x"));
+    expect_only(4);
+    expect_text("name on a kind without one");
+}
+
 /* --- rule 5 -------------------------------------------------------------------------------- */
 
 static void test_rule5_wrong_height(void) {
@@ -1266,6 +1284,7 @@ static void run_first_half(void) {
     RUN_TEST(test_rule4_unnamed_udp_instance);
     RUN_TEST(test_rule4_udp_lookup_is_linear);
     RUN_TEST(test_rule4_name_rules);
+    RUN_TEST(test_rule4_empty_string);
     RUN_TEST(test_rule5_wrong_height);
     RUN_TEST(test_rule6_unsorted_comments);
 }

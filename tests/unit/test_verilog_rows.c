@@ -193,12 +193,17 @@ static void test_rows_file(void) {
     TEST_ASSERT_TRUE(row_count > 0);
 }
 
-/* At least one row had a golden, and the count is reported. */
+/* The hand-written goldens of the rows up to each grammar task (rows.txt and the .ast files of
+ * tests/verilog/coverage): a golden that goes missing fails here instead of being skipped. */
+static const uint32_t GOLDENS_UPTO[] = {[4] = 4, [5] = 25, [6] = 39, [7] = 46};
+
+/* Every golden of the rows run was compared, and the count is reported. */
 static void test_goldens_compared(void) {
     char text[NAME_BYTES];
     (void)snprintf(text, sizeof text, "%u hand-written goldens equal", (unsigned)goldens);
     TEST_MESSAGE(text);
-    TEST_ASSERT_TRUE(goldens > 0);
+    TEST_ASSERT_TRUE(ODIN3_VR_UPTO < sizeof GOLDENS_UPTO / sizeof GOLDENS_UPTO[0]);
+    TEST_ASSERT_EQUAL_UINT32(GOLDENS_UPTO[ODIN3_VR_UPTO], goldens);
 }
 
 int main(void) {

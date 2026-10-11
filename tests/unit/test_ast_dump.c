@@ -169,6 +169,9 @@ static void test_expression_golden(void) {
 static void test_strings_and_text(void) {
     odin3_ast_id str = mk(named_at(ODIN3_AST_STRING, "a \"b\"\n", at(3, 1)), NULL, 0);
     expect(str, "(STRING:\"a \\\"b\\\"\\n\" @t.v:3:1)");
+    odin3_ast_spec empty = spec_at(ODIN3_AST_STRING, at(3, 9));
+    empty.flags = ODIN3_AST_F_STRING_EMPTY;
+    expect(mk(empty, NULL, 0), "(STRING:\"\" [EMPTY] @t.v:3:9)");
     odin3_ast_spec spec = spec_at(ODIN3_AST_SPECIFY_BLOCK, at(3, 5));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,

@@ -659,12 +659,61 @@ static void test_literal_too_many_digits(void) {
     odin3_util_free(text);
 }
 
-/* The empty string interns as strtab ID 0, which a STRING (name required, 2A §4.3) cannot hold:
- * a located, counted error rather than a builder misuse (agent default, see the Task 4 report). */
-static void test_empty_string_is_a_located_error(void) {
-    expect_failure("module m; parameter p = \"\"; endmodule", NULL, ODIN3_ERR_PARSE,
-                   "x.v:1:25: error: empty string literal \"\" is not supported\n");
+/* Review finding 1: an error in one stream leaves the next one live, so the literal errors only
+ * actions report (number_parse, a base without digits) are still reported in later files. */
+static void test_later_streams_still_report(void) {
+    expect_failure("module n; wire a b; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:18: error: syntax: unexpected identifier, expecting ';' or ',' or '=' or "
+                   "'['\n");
+    odin3_strbuf_clear(&captured.log);
+    expect_failure("module n; wire ['b12:0] a; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:17: error: invalid digit '2' in a binary literal\n");
+    odin3_strbuf_clear(&captured.log);
+    expect_failure("module n; assign x = 4'h; endmodule", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:23: error: expected digits after 'h\n");
+    TEST_ASSERT_EQUAL_UINT32(3, run.errors);
+    TEST_ASSERT_FALSE(run.stop);
+}
+
+/* A clean stream after a failed one yields its UNIT; the run still has its error (the pass fails
+ * it at §4.2 step 6). */
+static void test_clean_stream_after_a_failed_one(void) {
+    odin3_ast_id unit = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_x("module n; wire a b; endmodule", NULL, &unit));
+    TEST_ASSERT_EQUAL_UINT32(0, unit.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_x("module m (input a); endmodule", NULL, &unit));
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_UNIT, odin3_ast_kind_of(ast, unit));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(ast, unit));
     TEST_ASSERT_EQUAL_UINT32(1, run.errors);
+    TEST_ASSERT_TRUE(odin3_vl_in_error(&run));
+}
+
+/* Review finding 3: a literal error past the cap is followed by the stop line, and stops. */
+static void test_literal_error_at_the_cap(void) {
+    hooks caps = {.parser = {.max_errors = LOWERED_ERRORS}};
+    odin3_ast_id unit = {0};
+    for (uint32_t i = 0; i < LOWERED_ERRORS; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                              parse_x("module n; wire a b; endmodule", &caps, &unit));
+    }
+    odin3_strbuf_clear(&captured.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                          parse_x("module n; wire ['b12:0] a; endmodule", &caps, &unit));
+    TEST_ASSERT_EQUAL_STRING("x.v:1:17: error: invalid digit '2' in a binary literal\n"
+                             "x.v:1:17: error: too many errors; stopping\n",
+                             logged());
+    TEST_ASSERT_TRUE(run.stop);
+    TEST_ASSERT_EQUAL_UINT32(LOWERED_ERRORS, run.errors);
+}
+
+/* Review finding 2: an item without its `;` recovers at `endmodule` (the fourth error
+ * production), so the next module's header error is reported. */
+static void test_missing_semicolon_before_endmodule(void) {
+    expect_failure("module m; wire a endmodule\nmodule n (x y); endmodule\n", NULL, ODIN3_ERR_PARSE,
+                   "x.v:1:18: error: syntax: unexpected endmodule, expecting ';' or ',' or '=' or "
+                   "'['\n"
+                   "x.v:2:13: error: syntax: unexpected identifier, expecting ')' or ',' or '.' or "
+                   "'['\n");
 }
 
 /* Review Focus 3: a last line without a newline (endmodule, a comment) parses. */
@@ -684,10 +733,13 @@ static void test_module_parse_oom(void) {
         "`timescale 1ns/1ps\n(* a *) module m #(parameter P = 1) (input [3:0] a, output y);\n"
         "  wire (strong0, pull1) #(1:2:3) w = a, v [0:1];\n  assign {y, v[0]} = 4'hF;\n"
         "  defparam u.W = 2;\n  specify (a => y) = 1; endspecify\nendmodule\n"
-        "primitive p (y, a); endprimitive\n";
+        "primitive p (y, a); endprimitive\n"
+        "module n (.p(x), , {q, r[1:0]}, .e());\n  (* k = 1.5 *) trireg (small) #(1, 2) t;\n"
+        "  assign #(1, 2, 3) s[3-:2] = x, g[0].u.w[1+:2] = x, m[1][3:0] = x;\n"
+        "  parameter z = \"s\", e = \"\";\n  `default_nettype none\nendmodule\n";
     odin3_ast_id unit = {0};
     TEST_ASSERT_TRUE(oom_sweep(text, &unit) > 1);
-    TEST_ASSERT_EQUAL_UINT32(3, odin3_ast_nchild(ast, unit));
+    TEST_ASSERT_EQUAL_UINT32(4, odin3_ast_nchild(ast, unit));
     TEST_ASSERT_EQUAL_UINT32(0, captured.invalid_args);
     TEST_ASSERT_EQUAL_UINT32(0, captured.errors);
 }
@@ -727,7 +779,10 @@ int main(void) {
     RUN_TEST(test_literal_digit_error);
     RUN_TEST(test_literal_without_digits);
     RUN_TEST(test_literal_too_many_digits);
-    RUN_TEST(test_empty_string_is_a_located_error);
+    RUN_TEST(test_later_streams_still_report);
+    RUN_TEST(test_clean_stream_after_a_failed_one);
+    RUN_TEST(test_literal_error_at_the_cap);
+    RUN_TEST(test_missing_semicolon_before_endmodule);
     RUN_TEST(test_last_line_without_newline);
     RUN_TEST(test_module_parse_oom);
     return UNITY_END();

@@ -1167,6 +1167,26 @@ static void test_design_list_oom(void) {
     TEST_ASSERT_TRUE(held(ODIN3_AST_FORM_PARSED, 20) == store);
 }
 
+/* 2A §4.3 amendment (2C Task 4): the empty string is a STRING flagged EMPTY with name 0 (strtab ID
+ * 0 is ""); without the flag the name is required, with it no name is allowed. */
+static void test_string_empty_flag(void) {
+    odin3_ast_spec empty = {.kind = ODIN3_AST_STRING, .flags = ODIN3_AST_F_STRING_EMPTY};
+    odin3_ast_id id = make(empty, NULL, 0);
+    TEST_ASSERT_EQUAL_UINT16(ODIN3_AST_F_STRING_EMPTY, odin3_ast_flags(ast, id));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_name(ast, id));
+    TEST_ASSERT_EQUAL_STRING("", odin3_ast_name_str(ast, id));
+    assert_rejected(ODIN3_ERR_INVALID_ARG, spec_of(ODIN3_AST_STRING, 0), NULL, 0);
+    TEST_ASSERT_NOT_NULL(strstr(captured, "missing name"));
+    empty.name = intern("a");
+    assert_rejected(ODIN3_ERR_INVALID_ARG, empty, NULL, 0);
+    TEST_ASSERT_NOT_NULL(strstr(captured, "name on a kind without one"));
+    odin3_ast_spec ident_flag = {.kind = ODIN3_AST_IDENT, .flags = 1, .name = intern("a")};
+    assert_rejected(ODIN3_ERR_INVALID_ARG, ident_flag, NULL, 0); /* the flag is STRING's only */
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_NAME_REQ,
+                          odin3_ast_name_rule_of(odin3_ast_kind_info_of(ODIN3_AST_STRING), 0));
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_NAME_NO, odin3_ast_name_rule_of(NULL, 0));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_table_matches_spec);
@@ -1203,5 +1223,6 @@ int main(void) {
     RUN_TEST(test_design_list_misuse);
     RUN_TEST(test_drop_keep_levels);
     RUN_TEST(test_design_list_oom);
+    RUN_TEST(test_string_empty_flag);
     return UNITY_END();
 }

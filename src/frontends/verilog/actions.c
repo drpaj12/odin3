@@ -6,6 +6,7 @@
 #include "frontends/verilog/actions.h"
 
 #include "ast/ast.h"
+#include "ast/srcman.h"
 #include "frontends/verilog/actions_internal.h"
 #include "frontends/verilog/lexer_support.h"
 #include "frontends/verilog/parser.h"
@@ -95,12 +96,13 @@ odin3_status vp_name(odin3_vp_ctx *ctx, uint32_t mark, bool always_hier, odin3_a
     return vp_marked(ctx, mark, &at, VP_SPEC(ODIN3_AST_HIER_NAME, 0), out);
 }
 
-void vp_logged_error(odin3_vp_ctx *ctx) {
+void vp_logged_error(odin3_vp_ctx *ctx, odin3_loc at) {
     odin3_vl_run *run = ctx->run;
     if (run->errors < run->limits.max_errors) {
         run->errors++;
-    } else {
+    } else if (!run->stop) { /* the builder has printed it already: the stop line follows */
         run->stop = true;
+        odin3_diag(run->design, ODIN3_LOG_ERROR, at, "too many errors; stopping");
     }
     odin3_vp_enter_error(ctx);
 }
@@ -238,7 +240,7 @@ odin3_status vp_number(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
     odin3_ast_spec spec = vp_spec_at(VP_SPEC(ODIN3_AST_NUMBER, 0), at);
     odin3_status st = odin3_ast_number_parse(ctx->ast, at->loc, pieces, &spec.payload);
     if (st == ODIN3_ERR_PARSE) { /* located by number_parse: `'b12`, too many digits */
-        vp_logged_error(ctx);
+        vp_logged_error(ctx, at->loc);
         return ODIN3_OK;
     }
     st = st == ODIN3_OK ? odin3_ast_number_kind(pieces, &spec.sub, &spec.flags) : st;
@@ -247,6 +249,7 @@ odin3_status vp_number(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
 
 odin3_status vp_digitless(odin3_vp_ctx *ctx, const odin3_vp_loc *base) {
     odin3_bytes text = ctx->npieces > 0 ? ctx->pieces[ctx->npieces - 1] : (odin3_bytes){NULL, 0};
+    ctx->npieces = 0; /* the literal is abandoned: no piece outlives it */
     odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, base->loc, "expected digits after %.*s",
                     (int)text.len, (const char *)text.ptr);
     odin3_vp_enter_error(ctx);
@@ -262,15 +265,9 @@ odin3_status vp_real(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t payload
 
 odin3_status vp_string(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t name,
                        odin3_ast_id *out) {
-    if (name == 0) { /* "" interns as strtab ID 0, which a STRING (name required) cannot hold */
-        odin3_vl_report(ctx->run, ODIN3_LOG_ERROR, at->loc,
-                        "empty string literal \"\" is not supported");
-        odin3_vp_enter_error(ctx);
-        *out = (odin3_ast_id){0};
-        return ODIN3_OK;
-    }
     odin3_ast_spec spec = vp_spec_at(VP_SPEC(ODIN3_AST_STRING, 0), at);
     spec.name = name;
+    spec.flags = name == 0 ? ODIN3_AST_F_STRING_EMPTY : 0; /* "" is strtab ID 0 (2A §4.3) */
     return odin3_ast_make(ctx->ast, &spec, NULL, 0, out);
 }
 

@@ -81,6 +81,7 @@ static const flag_name FLAG_NAMES[] = {
     FLAG_(EVENT_CONTROL, NO_PARENS),
     FLAG_(EVENT_EXPR, AFTER_OR),
     FLAG_(NUMBER, SIGNED),
+    FLAG_(STRING, EMPTY),
     FLAG_(CALL, SYSTEM),
     FLAG_(CALL, HIER),
 };
@@ -127,6 +128,21 @@ static odin3_status append_payload(const dumper *dp, odin3_ast_id node, uint32_t
     }
 }
 
+/* `:name` when the node has one; a STRING always shows its value (`:""` for the empty string,
+ * whose name is 0). */
+static odin3_status append_name(const dumper *dp, odin3_ast_id node, odin3_ast_kind kind) {
+    if (odin3_ast_name(dp->ast, node) == 0 && kind != ODIN3_AST_STRING) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_strbuf_append(dp->out, odin3_bytes_cstr(":"));
+    odin3_bytes name = odin3_pr_name_bytes(dp->ast, node);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return kind == ODIN3_AST_STRING ? odin3_pr_append_cstring(dp->out, name)
+                                    : odin3_strbuf_append(dp->out, name);
+}
+
 /* `(KIND[.sub][:name] @file:line:col[ payload]`. */
 static odin3_status append_head(const dumper *dp, odin3_ast_id node) {
     odin3_ast_kind kind = odin3_ast_kind_of(dp->ast, node);
@@ -135,13 +151,8 @@ static odin3_status append_head(const dumper *dp, odin3_ast_id node) {
     if (st == ODIN3_OK && info->sub_count > 0) {
         st = odin3_strbuf_appendf(dp->out, ".%s", odin3_ast_sub_name(dp->ast, node));
     }
-    if (st == ODIN3_OK && odin3_ast_name(dp->ast, node) != 0) {
-        st = odin3_strbuf_append(dp->out, odin3_bytes_cstr(":"));
-        odin3_bytes name = odin3_pr_name_bytes(dp->ast, node);
-        if (st == ODIN3_OK) {
-            st = kind == ODIN3_AST_STRING ? odin3_pr_append_cstring(dp->out, name)
-                                          : odin3_strbuf_append(dp->out, name);
-        }
+    if (st == ODIN3_OK) {
+        st = append_name(dp, node, kind);
     }
     if (st == ODIN3_OK && odin3_ast_flags(dp->ast, node) != 0) {
         st = append_flags(dp, node);
