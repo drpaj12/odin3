@@ -400,3 +400,40 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - *Kept parked:* `project_pass.c` reading srcman internals, the loose Icarus error regex,
         and srcman-raised paths under `--diag-paths resolved`. Each waits for the 2A srcman
         touch or the next pp-diff change.
+13. **2D spec approved** (`docs/specs/2026-10-11-2D-elaboration-design.md`; agent default under
+   Peter's overnight rule, 2026-10-11, after a Fable review (2 critical, 10 important, 17 minor,
+   all applied in v2) and a Fable re-review that approved v2 (minors N1–N7 applied in v3, N4 kept
+   because `hierarchy` is a 1D built-in)): two stages with the elaborated AST as the seam (stage 1
+   Verilog-only: lookup, top, parameters, `defparam`, specialization, generate, constant
+   functions; stage 2 shared with slang: binding, Yosys `genrtlil` widths and signedness, drivers,
+   memories, processes, inlining, initial values); `write_rtlil` as the bridge to Yosys.
+   **Parmys's Yosys 0.55 is the semantic oracle** for every verified claim, the constant table,
+   the bridge and the exit test; Yosys 0.69 only as a nightly drift check.
+   - **IR change A — agent default for Peter's review:** nine registry cells with Yosys simlib
+     semantics, `$neg $xnor $reduce_xnor $reduce_bool $logic_not $logic_and $logic_or $shiftx
+     $pow` (no `$shift`: nothing emits it).
+   - **IR change B — agent default for Peter's review:** processes are `$proc` cells with real
+     `I`/`O` ports and an opaque `BODY` (`ODIN3_VAL_PROC`; positions are pin indices, constants are
+     pins on the shared constant nets), validated by `verify`; IR-3, IR-4, IR-6, IR-15 and check
+     rule 4 unchanged; passes declare `processes` (default `REFUSE`), so `opt` runs only after
+     `proc`.
+   - **IR change C — agent default for Peter's review:** `odin3_port_spec` gains `has_range`,
+     `msb`, `lsb`, `is_signed` (the sign is internal to `odin3_port_def`, not the frozen ABI port
+     struct).
+   - Decisions as ruled (spec §20): 1 `$proc` cell (above); 2 nine cells (above); 3 port range and
+     sign (above); 4 `--nolatches` off by default, passed by the 2H harness and the VTR scripts as
+     Parmys does; 5 parameter precedence project > named `#()` > first `defparam` > ordered `#()`
+     (Yosys, verified), warning when a `defparam` loses; 6 DESIGN §4.0's top rule kept, the 2H
+     micro harness passes `--top` from the Parmys golden; 7 undefined modules are
+     `unresolved_module`, `--auto-blackbox` opt-in; 8 Yosys's mem2reg-as-needed rules and one
+     collected `$mem` per remaining array with raw-index ports; 9 `write_rtlil` in 2D; 10 a failed
+     stage 2 leaves valid but incomplete modules; 11 Parmys leniency with warnings (implicit nets
+     anywhere, unnamed-block declarations, unsized constants in concatenations); 12 modules not
+     reachable from the top are not elaborated; 13 don't-cares (§14.6): x kept explicit through
+     2D, Yosys's x rules mirrored in 2F, surviving x written as Parmys's `unconn` (= 0; all 934
+     goldens declare it, 314 use it), and `equiv-check --x-report` in 2H.
+   - **Exit-bar ruling on x (decision 13):** 2H reports identical / equivalent / equivalent
+     outside x-cones / differs; "equivalent outside x-cones" does not count toward PHASE2 #4 by
+     default, and counts per design only when its excluded outputs are reviewed and recorded in
+     the exceptions list (agent default; Peter may override). The defined-output miter of spec
+     §14.6 item 5 is the follow-up in 2H's backlog.
