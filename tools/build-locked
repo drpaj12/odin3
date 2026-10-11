@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# build-locked: `cmake --build` that never overlaps a heavy run (2E plan point (p), ruling C1).
+#
+# Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
+#
+# Writer preference first: while any $DIR/odin3-heavy.queued.<pid> names a live PID (a
+# tools/heavy-run waiting for the lock), it waits, so a stream of overlapping builds cannot starve
+# a queued heavy job; a flag naming a dead PID (a heavy-run killed with SIGKILL) is ignored. Then
+# it runs `exec flock -s $DIR/odin3-heavy.lock cmake --build <args>`: builds share the lock with
+# each other and exclude a heavy run, which takes it exclusively. Exits with cmake's status.
+#
+# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only); the flags are polled
+# every ODIN3_HEAVY_POLL seconds (default 5). Never run a build under tools/heavy-run.
+set -uo pipefail
+
+dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
+poll=${ODIN3_HEAVY_POLL:-5}
+mkdir -p "$dir" || exit 2
+
+# The PID of the first queued heavy run that is still alive, or nothing.
+queued_pid() {
+    local flag pid
+    for flag in "$dir"/odin3-heavy.queued.*; do
+        [[ -e $flag ]] || continue
+        pid=${flag##*.}
+        if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "$pid"
+            return
+        fi
+    done
+}
+
+said=0
+while pid=$(queued_pid) && [[ -n $pid ]]; do
+    if [[ $said -eq 0 ]]; then
+        echo "build-locked: waiting for queued heavy run $pid" >&2
+        said=1
+    fi
+    sleep "$poll"
+done
+exec flock -s "$dir/odin3-heavy.lock" cmake --build "$@"

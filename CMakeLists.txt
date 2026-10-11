@@ -80,6 +80,10 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
+    src/passes/proc/pw.c
+    src/passes/proc/pw_sig.c
+    src/passes/proc/pw_encode.c
+    src/passes/proc/proc_emit.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -312,6 +316,11 @@ endif()
 
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
+# Heavy runs (2E plan point (p), ruling C1): every sweep and sweep-xl CTest goes through
+# odin3_add_sweep_test(), which runs it via tools/heavy-run (one heavy job machine-wide, inside
+# the odin3-heavy.slice memory cap). Builds go through tools/build-locked.
+set(ODIN3_HEAVY_RUN "${PROJECT_SOURCE_DIR}/tools/heavy-run")
+include(${PROJECT_SOURCE_DIR}/cmake/Odin3Sweep.cmake)
 if(BUILD_TESTING)
     add_library(unity STATIC third_party/unity/src/unity.c)
     target_include_directories(unity PUBLIC third_party/unity/src)
@@ -344,6 +353,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ir_module)
     odin3_add_unit_test(test_ir_proc)
+    # 2E: the proc working form. Every later test_proc_* and test_opt_* links proc_build.c too.
+    odin3_add_unit_test(test_proc_pw)
+    target_sources(test_proc_pw PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -664,6 +676,8 @@ if(BUILD_TESTING)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
+    list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
     # The project-input corpus (tests/golden/projects) parses to its expected records in every
     # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.

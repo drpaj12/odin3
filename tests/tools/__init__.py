@@ -2,6 +2,8 @@
 tools/project-fixtures, tools/parse-check, the BLIF reader and the Python plugin binding
 tools/project-fixtures, tools/elab-check, the BLIF reader and the Python plugin binding
 (plugins/python).
+tools/project-fixtures, tools/parse-check, tools/proc-check, tools/heavy-run, the BLIF reader and
+the Python plugin binding (plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
 sys.path here so the test modules can import them.
@@ -23,6 +25,7 @@ for _sub in (
     "tools/parse-check",
     "tools/token-cost",
     "tools/elab-check",
+    "tools/proc-check",
     "plugins/python",
 ):
     _path = str(REPO_ROOT / _sub)

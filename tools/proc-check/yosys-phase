@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# yosys-phase: Yosys 0.55's proc sub-passes on an RTLIL file, up to a phase. See yosys_phase.py.
+# Exit codes: 0 ok (Yosys's RTLIL on stdout), 1 Yosys failed, 2 usage or a refused Yosys version.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/yosys_phase.py" "$@"
