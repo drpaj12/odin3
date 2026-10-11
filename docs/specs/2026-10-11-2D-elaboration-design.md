@@ -1,6 +1,10 @@
 # 2D — Elaboration: design
 
-Status: agent draft for review (2026-10-11). Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
+Status: v2 applies the Fable review (2026-10-11; `2D-review1`: 2 critical, 10 important, 17
+minor — all applied, none rejected; F17 is applied by F1's redesign, which makes it moot, and F20
+is applied as the documented divergence §17 #20, one of the two fixes the review offered).
+Decisions 1–12 ruled by the controller as agent defaults under Peter's overnight rule (§20), with
+the review's rulings on F1–F12. Phase 2, sub-project 2D (PHASE2 #1; review: Peter,
 semantics). Spec: `docs/DESIGN.md` §4.0 (libraries, top), §4.1, §4.5, §5, §6 step 2, §12, §15.
 Inputs: PHASE2 #3, #4 (exit bar), #5, #6 (coverage, D1–D5), #7/#8 (the AST and its carry-overs),
 Q3 of #8 (two stages, the elaborated AST as the seam), #10–#12; the construct table in
@@ -12,12 +16,16 @@ op registry (`src/ir/cells/`); 1D (pass manager), 1E (simlib semantics). Oracles
 pinned by VTR (`$VTR_ROOT/libs/EXTERNAL/yosys`, the Yosys inside Parmys: `frontends/ast/
 simplify.cc`, `genrtlil.cc`, `ast.cc`, `passes/hierarchy/hierarchy.cc`) and the Parmys script
 (`vtr_flow/misc/yosys/synthesis.tcl`: `read_verilog -sv -nolatches`, `hierarchy -check
--auto-top -purge_lib`); Odin II (`ODIN_II/SRC`) is a read-only reference. IEEE 1364-2005 is not
+-auto-top -purge_lib`); Odin II (`ODIN_II/SRC`) is a read-only reference. **The semantic oracle
+is Parmys's Yosys 0.55** (`$VTR_ROOT/build/bin/yosys`): every "verified" claim, the constant
+table, the Yosys bridge and the exit test use it; the standalone Yosys 0.69 (ORACLES.md) is used
+only where this file says so explicitly (§14.4's rerun of the fixtures' 0.69 oracles and §14.5's drift check), never mixed with 0.55 in one
+comparison (ORACLES.md). IEEE 1364-2005 is not
 in the workspace: clause numbers are from memory; where Yosys and the standard differ this file
 says which it follows and why, and §17 lists every divergence. Each decision is numbered
 **EL-n**. Where this file and the 2A slot table or `docs/IR.md` disagree, those win and this
-file is corrected — except the three changes marked **IR change for Peter's review** (§7.2,
-§8.1, §6.2), which do not take effect until he approves them.
+file is corrected — except the three changes marked **IR change** (§7.2, §8.1, §6.2), ruled as
+agent defaults (§20) and amending `docs/IR.md` when 2D-1 lands; Peter may still override them.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -28,9 +36,9 @@ AST as the seam (PHASE2 #8 Q3).
 | Delivered by 2D | Where |
 |---|---|
 | **Stage 1** (Verilog only): parsed store → elaborated store. Module lookup, top selection, parameters (`#()`, `defparam`, project `param`), specialization, `generate`, constant evaluation including constant functions, implicit nets, non-ANSI port merging, the IGNORE warnings and the REJECT errors that need semantics | `src/frontends/verilog/elab.h` (the `odin3_elab_run` entry 2C calls), `elab1_*.c` |
-| **Stage 2** (any front end): elaborated store → IR. Binding (the 2A symbol table), widths and signedness, expressions → word cells, continuous assignments and drivers, instances, memories, `always` → IR processes, function and task inlining, loop unrolling, initial values | `src/frontends/elab/` (shared with the Phase 5 slang adapter) |
+| **Stage 2** (any front end): elaborated store → IR. Binding (the 2A symbol table), widths and signedness, expressions → word cells, continuous assignments and drivers, instances, memories, `always` → `$proc` process cells (EL-33), function and task inlining, loop unrolling, initial values | `src/frontends/elab/` (shared with the Phase 5 slang adapter) |
 | The constant evaluator and statement interpreter used by both stages | `src/frontends/elab/ceval*.c` |
-| IR additions (**for Peter's review**): process objects (IR-19), ten registry cells, port range and signedness | `src/ir/proc.[ch]`, `src/ir/cells/*.c`, `src/ir/module.c` |
+| IR additions (**ruled**, §20): the `$proc` process cell with an opaque body (IR-19), nine registry cells, port range and signedness; the pass flag that keeps processes away from passes that cannot handle them | `src/ir/cells/proc.c`, `src/ir/proc.[ch]`, `src/ir/value.c`, `src/ir/cells/*.c`, `src/ir/module.c`, `src/passes/manager.c` |
 | `write_rtlil` (Yosys RTLIL text, processes included): the bridge to the Yosys oracle | `src/backends/rtlil/` |
 | `read_verilog --nolatches --nomem2reg --auto-blackbox`; CLI `--elab-only`; ABI `odin3_ast_elaborate`, `odin3_ast_get_library_units_from`, process read accessors | `src/passes/builtin.c`, `src/cli/main.c`, `src/api/` |
 | Tests: one case per coverage row (stage-1 golden, stage-2 golden, Yosys equivalence), the 2C handover (`reject-2d/`, `ignore-2d/`), micro and VTR sweeps, a differential fuzzer, the mcml.v and lenet.v benchmarks | `tests/elab/`, `tests/unit/test_elab_*.c`, `tools/elab-check/` |
@@ -43,7 +51,7 @@ inside modules (D3), and everything the 2A/2B/2C specs own.
 Success: every MUST and SHOULD row elaborates and is equivalent to Yosys on its coverage case
 (§14.2); every REJECT row gives the located error of §9 and every IGNORE row the warning; every
 micro and VTR benchmark elaborates under `--elab-only` (expected failures listed with reasons)
-and, through `write_rtlil`, is equivalent to `read_verilog -sv -nolatches` in Yosys; the §15
+and, through `write_rtlil`, is equivalent to `read_verilog -sv -nolatches` in Yosys 0.55; the §15
 targets are met on mcml.v and lenet.v; the gate passes.
 
 ## 2. Two stages and the seam
@@ -120,7 +128,10 @@ see Decisions for Peter, item 4.
   `read_verilog` is fit only for destruction (documented in `odin3.h`; Decisions for Peter,
   item 10). Stage 2 checks every rule that can fail on user input before it attaches the object
   concerned (EL-28), so it never builds a multi-driven net, a cyclic hierarchy or an over-wide
-  cell.
+  cell. "Valid" holds in the strong sense: every specialization's ports are created, with their
+  port nodes connected to their nets, before any module body (EL-24), so an unfinished module has
+  every `$port_out` pin connected (rule 11's E cannot fire) and at worst undriven nets, which
+  `check` reports only as W (rule 4).
 - The **elaborated store** owns the symbol table stage 2 builds (2A AST-14). A design that keeps
   it gets `odin3_symtab_remap` after each `compact` (PHASE2 #8 carry-over; 2D wires it into the
   `compact` pass and fixes the `docs/PASSES.md` row).
@@ -136,7 +147,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
 | `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; never a `(* blackbox *)` module (those become black-box types, EL-11); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24) |
-| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` (width = the value's width, `SIGNED` = its signedness, never unsized) or `STRING`; `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type) |
+| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
 | `VAR_DECL` | sub `reg` or `integer`; a declarator's `E?` is a variable initialiser (N8: `initial name = e`, EL-40) |
 | implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25) |
@@ -226,6 +237,23 @@ Names beginning with `$` never resolve to built-in cell types (`$add` cannot be 
 from Verilog; Yosys allows it only under `-icells`). A `MODULE` carrying `(* blackbox *)` is a
 definition of kind black box (EL-11).
 
+**Names already taken in the design** (IR-11: a module registers a cell type under its own
+name, and `odin3_module_create` refuses a name that is already a cell type). Stage 1 checks
+every definition it is about to specialize, before stage 2 creates anything, so the IR call can
+never fail with `INVALID_ARG` on user input:
+
+- a design or library `MODULE` (not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
+  registered cell type of granularity `hard` or `blackbox` — a tech library's `adder`,
+  `multiply`, `single_port_ram`, or a model a BLIF read declared — is the located error, at the
+  `MODULE`'s name: `module 'adder' has the name of cell type 'adder' registered by an earlier
+  read (hard cell); rename the module` (`(black box)` for a declared model). The design unit
+  does not shadow the cell type: an instance `adder u(…)` in the same design would otherwise mean
+  two things. Parmys fails the same way ("Re-definition of module" against its
+  `vtr_primitives.v`);
+- a `MODULE` whose name is a module created by an earlier `read_verilog` run of the same design
+  (a second read in one script) is `duplicate_module: module 'm' is already defined by an
+  earlier read (run N)` at the `MODULE`'s name (2C's kind, F27).
+
 ### 3.2 Top selection (EL-7)
 
 The top is chosen before anything is elaborated, from the parsed store:
@@ -236,7 +264,9 @@ The top is chosen before anything is elaborated, from the parsed store:
 - **Automatic** (DESIGN §4.0, kept): the candidates are the design-unit `MODULE`s that are not
   black boxes and that no design-unit or library-unit `MODULE` instantiates, by name, anywhere
   in its body (every generate branch counts; the parsed form is all there is before
-  elaboration). One candidate → the top, with the info line `top module 'work.T' chosen: the
+  elaboration — so a module instantiated only in a branch that is never selected is not a
+  candidate here, while Yosys and IEEE, which look at the elaborated design, would count it:
+  divergence §17 #20). One candidate → the top, with the info line `top module 'work.T' chosen: the
   only module no other module instantiates`. None → `no_top` (unlocated: `no top given and every
   module is instantiated by another`, or `no top given and no module is defined`). Several →
   `ambiguous_top` (unlocated), naming each candidate as `lib.mod` in definition order.
@@ -298,6 +328,12 @@ Rules:
   `defparam`. A path that never reaches a parameter is an error at the project line
   (`param 'top.u_wide.X' does not name a parameter`). Values are numbers (`16`, `-3`, `8'hFF`,
   through `odin3_ast_number_parse`, sized as a literal of that text) or strings.
+- **Paths that end at a cell-type instance** (a `defparam` or project `param` whose instance is a
+  hard or black-box cell, EL-11, such as `defparam ram.ADDR_WIDTH = 10` on a `single_port_ram`)
+  set that node's parameter, converted to the type's parameter kind (INT: the value as a signed
+  64-bit integer, an error when it does not fit or has x/z bits; BITS: the bits; STRING: the
+  string); a name the type does not declare is "cell type 't' has no parameter 'P'". Nothing is
+  pushed further down: a cell type has no hierarchy.
 
 ### 3.4 Specialization key and naming (EL-9)
 
@@ -319,8 +355,10 @@ plain decimal when it is a 32-bit signed value without x/z (`W=8`, `W=-3`); othe
 `<width>'<s>b<bits>` (`INIT=4'b10x0`, `S=8'sb11110000`); a string as `"text"` with `"` and `\`
 escaped. A name longer than `ODIN3_ELAB_MAX_MODULE_NAME` (128 bytes) becomes
 `base$h<16 hex digits of the key hash>`. A name already taken by another definition or
-specialization gets `$2`, `$3`, … appended (checked against every definition name of the store
-and every specialization made so far), so names are deterministic for a given input.
+specialization, or by a registered cell type of the design (`odin3_celltype_find`; EL-6's
+"names already taken"), gets `$2`, `$3`, … appended (checked against every definition name of
+the store, every specialization made so far and the design's cell-type table), so names are
+deterministic for a given input and `odin3_module_create` never sees a taken name.
 
 **Algorithm** (stage 1, worklist, no recursion):
 
@@ -379,7 +417,9 @@ and makes one specialization per level.
   extension when the expression is signed, else zero), wider it is truncated; an output
   connection narrower than the port leaves the extra port bits on fresh nets, wider has its extra
   high bits driven by the extension of the port's value (sign when the port is declared signed in
-  the child, else zero; EL-28). Every resize warns, except a constant input:
+  the child, else zero; EL-28). A cell type or a black box has no port signedness in the IR
+  (IR-7b), so its wider output connections are zero-extended, where Yosys would sign-extend a
+  `(* blackbox *)` module's `output signed` port (divergence §17 #23). Every resize warns, except a constant input:
   `port 'p' of instance 'u' (module 'm') is P bits; the connection of W bits is extended` /
   `… is truncated`.
 
@@ -455,7 +495,7 @@ its subtree with explicit stacks (no recursion, CLAUDE.md):
 | sized literal | its width | its `'s` flag | — |
 | unsized literal | its stored width (2A §4.5: 32, or more when written) | signed for decimals and `'s` | — |
 | string | 8 × length (8 for `""`) | unsigned | — |
-| parameter / localparam | its value's width (or range) | its signedness | — |
+| parameter / localparam | its value's width (or range) | its signedness; `UNSIZED` carried when the value is still unsized (EL-16), so it extends like an unsized literal | — |
 | genvar (a `NUMBER` after stage 1) | 32 | signed | — |
 | net / variable `x` | declared width (`integer`: 32) | declared `signed` (`integer`: signed) | — |
 | `x[i]`, `x[m:l]`, `x[b+:w]`, `x[b-:w]`, memory word `m[i]` | 1, `\|m−l\|+1`, `w`, `w`, word width | **unsigned** (a select is unsigned even of a signed object); a memory word: the memory's sign | index, bounds, base: self-determined |
@@ -476,8 +516,11 @@ context. A context wider than an operand extends it **before** the operation: si
 when the operation is signed (all context operands signed), zero extension otherwise. An unsized
 literal widened to its context repeats its top bit even when unsigned (Yosys
 `bitsAsUnsizedConst`, 2A §4.5 amendment): `'hFFFF_FFFF` in a 64-bit context is all ones. A
-concatenation operand may not be unsized: "unsized constant in a concatenation" (E12, as
-Odin II and IEEE; Yosys warns). A width above `ODIN3_ELAB_MAX_WIDTH` (2^20) anywhere is an error
+concatenation operand that is unsized (E12: illegal in IEEE 1364-2005, a located error in
+Odin II) is accepted as Yosys and Parmys accept it — silently there (verified on 0.55: `{a, 'h1}`
+is `{a, 32'h00000001}`) — at its stored width (32 bits for a short literal, 2A §4.5), with the
+warning "unsized constant in a concatenation is taken as N bits" (the exit bar is Parmys,
+PHASE2 #4; divergence §17 #21). A width above `ODIN3_ELAB_MAX_WIDTH` (2^20) anywhere is an error
 (EL-46). The typing pass costs O(nodes) of the expression.
 
 ### 4.3 Operator semantics on constants (EL-14)
@@ -516,15 +559,18 @@ Yosys (§14.5).
   sized literals at their width, unsized ones with `UNSIZED` set; the truncation warning is 2A's,
   once per literal.
 - `UNSIZED` survives only until the value is extended to a context (then the top bit repeats,
-  EL-13) or enters an operator (whose result is sized). A parameter's value is sized when the
-  parameter is (EL-16), so an untyped `parameter P = 'hFF` keeps `UNSIZED` and extends like the
-  literal (Yosys keeps `is_unsized` on the parameter's constant).
+  EL-13) or enters an operator (whose result is sized). A parameter keeps it in the cases EL-16
+  lists (Yosys keeps `is_unsized` on the parameter's constant), and it crosses the EL-4 seam as a
+  `NUMBER` whose payload `width` is 0. Verified on 0.55: `parameter P = 'hFFFFFFFF;` assigned to a
+  64-bit output gives all ones.
 - Strings (L10): 8 bits per byte, the first character most significant; `""` is 8'h00 (IEEE
   §5.2.3.3, Yosys `mkconst_str`). Comparisons and bit/part selects of a string parameter work on
   those bits.
 - `x` and `z` in values are 4-state everywhere in the evaluator. Where a constant reaches a cell
-  input or a process signal (stage 2), x and z bits become the shared `$_CONSTX_` / `$_CONSTZ_`
-  nets (IR-4); x is a don't-care for later passes, z means tri-state only under EL-29.
+  input or a process (stage 2), each bit becomes a pin on the module's shared `$_CONST0_`,
+  `$_CONST1_`, `$_CONSTX_` or `$_CONSTZ_` net (IR-4) — a `$proc` node included (EL-33), so there
+  is one constant representation; x is a don't-care for later passes, z means tri-state only
+  under EL-29.
 - A `REAL` in an expression is L9's error ("real number in an expression is not supported");
   in a delay it was dropped with the delay's warning.
 
@@ -534,9 +580,9 @@ Typing of a `parameter` or `localparam` (IEEE §12.2; Yosys `simplify` for `AST_
 
 | Declared as | Value |
 |---|---|
-| untyped (`parameter P = e`) | the value of `e` (self-determined), its width and sign (and `UNSIZED`) |
+| untyped (`parameter P = e`) | the value of `e` (self-determined), its width and sign, and `UNSIZED` when `e` is an unsized literal (or a parameter that is) |
 | `signed` without a range | `e`'s width, signed |
-| `[m:l]` (with or without `signed`) | `e` evaluated self-determined, then extended (by `e`'s own signedness) or truncated to `\|m−l\|+1` bits; signed iff `signed` is written |
+| `[m:l]` (with or without `signed`) | `e` evaluated self-determined, then extended (by `e`'s own signedness) or truncated to `\|m−l\|+1` bits; signed iff `signed` is written; sized — **except** when `e` is unsized and its stored width already equals `\|m−l\|+1`: Yosys only rebuilds the constant when the widths differ (`simplify.cc` 2381–2390), so `UNSIZED` survives (verified on 0.55: `localparam [31:0] Q = 'hFFFFFFFF;` into 64 bits is all ones; divergence from IEEE, §17 #22) |
 | `integer` | 32 bits, signed (`e` converted as for a range `[31:0] signed`) |
 | `real`, `realtime`, `time` | P4's error ("parameter type 'real' is not supported") |
 
@@ -547,7 +593,7 @@ cycle is "parameter 'P' depends on itself" at `P`'s declaration. A parameter val
 net or variable is "parameter 'P' is not constant (it reads 'x')". In a generate block (and in
 an `INSTANTIATION` override list) `parameter` declarations behave as `localparam`s
 (IEEE 1364-2005 §12.4: they cannot be overridden). Stage 1 writes every final value as a
-`localparam` with a sized `NUMBER` or a `STRING` (EL-4).
+`localparam` with a `NUMBER` (unsized only in the cases above) or a `STRING` (EL-4).
 
 ### 4.6 Constant functions and the interpreter (EL-17)
 
@@ -635,16 +681,22 @@ bare item in an unnamed `GENBLOCK`). Unnamed blocks are named with Yosys's `labe
 (1364-2005 §12.4.3 numbering), which 2D reproduces exactly:
 
 - In each scope (the module, or a generate block), a counter starts at 0 and increments once per
-  `GEN_IF`, `GEN_FOR` or `GEN_CASE` met in a pre-order walk of that scope's items, including such
-  constructs nested directly inside another construct's bare (unbracketed) branch.
-- An unnamed block gets `genblk<counter>`; if that name is already used in the scope by a user
-  identifier that starts with `genblk`, zeros are inserted (`genblk01`, `genblk001`, …) until it
-  is free.
-- Inside a block the counter restarts at 0 with a copy of the outer scope's set of used names.
-- `if (a) … else if (b) …`: the else branch is a block of its own containing the nested
-  `GEN_IF`, so names nest as `genblk2.genblk1.x` — Yosys's behaviour (verified on Yosys 0.55),
-  not IEEE's (§12.4.2: a directly nested conditional is not a separate scope, giving
-  `genblk2.x`). 2D follows Yosys (divergence §17 #3).
+  `GEN_IF`, `GEN_FOR` or `GEN_CASE` met in a pre-order walk of that scope's items (a construct
+  inside a branch is inside that branch's block, where the counter restarts).
+- Every unnamed block **of one construct** gets the same name, `genblk<counter>` of that
+  construct: the then-block and the else-block of a `GEN_IF` (only one is ever selected), every
+  item of a `GEN_CASE`, the body of a `GEN_FOR` (indexed per iteration). If that name was **seen
+  earlier in the pre-order walk of the scope** as a user identifier starting with `genblk`, zeros
+  are inserted (`genblk01`, `genblk001`, …) until it is not; a user `genblk1` declared *after*
+  the construct does not pad it (Yosys inserts a name into its set only when the walk reaches it;
+  verified on 0.55 that `wire genblk1;` after the first `if` coexists with block `genblk1`).
+- Inside a block the counter restarts at 0 with a copy of the outer scope's set of seen names.
+- `if (A) … else if (B) …`: the else branch is a block of its own (Yosys wraps the bare nested
+  `if`), named like the then-block, and the nested `GEN_IF` inside it is the first construct of a
+  fresh scope. Verified on 0.55 with this as the module's first construct, `A` = 0, `B` = 1: the
+  wire is `genblk1.genblk1.x` (and a bare `if (B) assign y = a;` consumes a counter value; a
+  following `for` was `genblk3[0].w`). IEEE §12.4.2 does not make a directly nested conditional a
+  scope (`genblk1.x`); 2D follows Yosys (divergence §17 #3).
 
 Hierarchical names of objects inside generate scopes join the scope path with `.` and loop
 indices as `[i]`: `g[0].t`, `genblk1[3].u_reg`, `named.v`. These strings are the IR names of the
@@ -714,12 +766,16 @@ one per bit, unless it is a memory (EL-27):
   for every specialization before any module body (IR-7: a module's ports must exist before
   instances of it), `scalar` set for a port declared without a range.
 
-**IR change C (for Peter's review).** `odin3_module_add_port` creates the port's wire as
+**IR change C (ruled, §20 item 3).** `odin3_module_add_port` creates the port's wire as
 `[width−1:0]`, unsigned (`src/ir/module.h`), so a port `input signed [0:7] a` loses its range
 and signedness in the IR, which IR-2 says every wire carries. `odin3_port_spec` gains
-`int32_t msb, lsb; bool is_signed;` (a spec with `msb == lsb == 0` and `width > 1` keeps today's
-`[width−1:0]`, so existing callers are unchanged); writers and `check` are unaffected. No
-invariant changes. Alternative: a separate `odin3_wire_set_range` mutation.
+`bool has_range; int32_t msb, lsb; bool is_signed;`. Without `has_range`, the port is
+`[width−1:0]` as today, so existing callers are unchanged. With it, `width` is derived as
+`|msb − lsb| + 1` and a caller-supplied `width` that differs is `INVALID_ARG`, as is `scalar` with
+a range of more than one bit; `is_signed` applies in both cases. The module's cell-type port
+record gains the sign too, for writers and for EL-10's output extension. Writers and `check` are
+otherwise unaffected; no invariant changes. (A wire-range mutation after creation was rejected:
+it would leave the cell type's port record without the sign.)
 
 ### 6.3 Implicit nets and `` `default_nettype `` (EL-25)
 
@@ -780,7 +836,12 @@ elaborated module by stage 2 before it emits anything):
 6. **initial-only init with `nomeminit`**: written in `initial` and elsewhere while `nomeminit` is
    set (never set by 2D; listed for completeness).
 
-`(* nomem2reg *)` on the array exempts it from 2–6; `--nomem2reg` exempts every array from 2–6.
+`(* nomem2reg *)` on the array exempts it from 2–6. `--nomem2reg` disables mem2reg entirely,
+rule 1 included, as Yosys's `-nomem2reg` does (its whole `mem2reg_as_needed` block is guarded by
+the flag, `simplify.cc` 1072); an array that then cannot be a memory — written by a continuous
+assignment, or in a block without exactly one edge event — is "array 'w' cannot be a memory
+(it is written in a combinational block) and --nomem2reg is set" (Yosys fails later, in
+`genrtlil`, on such designs; Parmys uses `-nomem2reg` only on `vtr_primitives.v`).
 Rules 2–5 warn as Yosys does ("replacing memory 'm' with list of registers; see f.v:12, f.v:20",
 the places that triggered it); rule 1 is silent.
 
@@ -793,13 +854,19 @@ the places that triggered it); rule 1 is silent.
   its own whose result is a temporary (Yosys's `$mem2reg_rd` block).
 - **Memories**: one `$mem` cell per array (EL-39), created at the end of the module's stage 2
   with every access as a port: `MEMID` = the array's IR name; `WIDTH`; `SIZE` = the number of
-  words; `OFFSET` = the lowest index of the (flattened) range; `ABITS` = the width of the widest
+  words; `OFFSET` = the lowest declared index of a one-dimensional array (`[1:4]` and `[4:1]` →
+  1, `[-2:1]` → −2), 0 for a flattened multi-dimensional one; `ABITS` = the width of the widest
   address expression (at least 1); read ports asynchronous (`RD_CLK_ENABLE` 0, `RD_CLK` = x,
   `RD_EN` = 1, `RD_TRANSPARENT` 0), one per read in source order; write ports clocked
   (`WR_CLK_ENABLE` 1, `WR_CLK_POLARITY` from the edge), one per write statement in source
   order, so a later write port wins a same-address conflict as a later statement does; `INIT` =
   the initial contents (EL-40), empty when there are none (all x). The address on each port is
-  the index expression minus `OFFSET`, generated at its self-determined width; the
+  the **raw index** expression, generated at its self-determined width, with no subtraction:
+  `$mem` has simlib's semantics, which subtract `OFFSET` themselves (`memory[RD_ADDR − OFFSET]`,
+  `simlib.v` `$mem`), and Yosys's front end puts the raw index on its ports (verified on 0.55:
+  `reg [7:0] m [1:4]` gives `OFFSET 1` and `RD_ADDR \i`). The only address arithmetic 2D emits is
+  a multi-dimensional array's row-major flattening (`(i − low_i) × n_j + (j − low_j)`, with
+  `OFFSET` 0). The
   `memory_infer` pass of Phase 4 later merges flip-flops into synchronous read ports and maps
   the cell. `SIZE × WIDTH` above `ODIN3_ELAB_MAX_MEMORY_BITS` (2^30) is an error.
 
@@ -826,8 +893,12 @@ becomes the right-side bit by construction —
   output) the two nets are **merged** (`odin3_net_merge`, IR-15): `assign b = a;` keeps both
   names (IR-2), the constant case aliases the wire bit into the module's shared constant net.
 
-Merges happen only in this phase of a module's emission, before any process of the module exists
-(EL-35), so no process ever refers to a merged-away net.
+A merge is pin-based (IR-15) and therefore safe at any time, `$proc` nodes included (their
+reads and writes are pins, EL-33); 2D still merges only in this phase, so the nets it hands to
+processes and cells are final. When both sides are already **the same net** (`assign a = b;
+assign b = a;`, a legal loop of wires; Yosys makes a self-connection), the assignment is a no-op:
+no merge (which would be `INVALID_ARG`, keep == drop), no driver, and the warning "'a' and 'b'
+are connected only to each other and are never driven" when nothing else drives the net.
 
 **Driver accounting.** Stage 2 keeps, per net it has created, the driver attached so far (kind:
 port input, constant, cell output, instance output, gate, continuous assignment, process; and
@@ -864,6 +935,15 @@ Anywhere else (an internal net, a port of a module that is not the top) a `z` dr
 `bufif`/`notif` is "tri-state driver on 'x' is supported only on a top-level output or inout port
 (D3)". An `inout` port read inside the module reads its net.
 
+**`inout` ports of instantiated modules** (the review's F22). An instance's `inout` pin is a
+driver of the connected net (IR-3, driver partition) and may share it with other `inout` pins and
+`$tribuf` outputs (a bus, rule 4). 2D accepts such a connection when the net has no other kind of
+driver — the net is the child's to drive, and when it reaches a top-level `inout` the bus is D3's
+legal case. A net driven both by an `inout` pin and by ordinary logic (an `assign`, a cell, a
+process, an instance output) is an internal tri-state bus: "net 'x' is driven by inout port 'p'
+of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)". (The
+three corpus micros with `inout` are Parmys-rejected, PHASE2 #6 D3.)
+
 ## 7. Expressions to word cells
 
 ### 7.1 The mapping (EL-30)
@@ -889,7 +969,7 @@ signed only if it is signed and its context is signed), so the cell extends its 
 | `&a ~&a \|a ~\|a ^a ~^a` | `$reduce_and`, `$reduce_and` + `$not` (1 bit), `$reduce_or`, `$reduce_or` + `$not`, `$reduce_xor`, `$reduce_xnor`†; `Y_WIDTH` = max(final, 1), operand self-determined |
 | `!a`, `a && b`, `a \|\| b` | `$logic_not`†, `$logic_and`†, `$logic_or`†; operands self-determined; `Y_WIDTH` = max(final, 1) |
 | `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands generated at their common width and sign (EL-13), `Y_WIDTH` = max(final, 1) |
-| `a === b`, `a !== b` (E9) | as `==`/`!=` with the warning "'===' is treated as '==' (synthesis has no x or z)" when neither side has a constant x/z bit; when a constant side has one, the result is the constant 0 (`===`) or 1 (`!==`) with "'===' compares a signal with x/z bits; the result is constant" (a signal is never x in hardware; Yosys's `$eqx` folds the same way); both constant: folded exactly |
+| `a === b`, `a !== b` (E9) | both sides constant: folded exactly (4-state `===`); one side a constant with x/z bits (after both are brought to their common width and sign, EL-13): a **wildcard compare**, as in Parmys — `$eq`/`$ne` over only the bit positions where the constant is 0 or 1 (the other operand's bits at those positions, selected by wiring), so an x/z bit matches any value; no 0/1 position left → constant 1 (`===`) or 0 (`!==`); warning "'===' compares against x/z bits; they match any value". Verified on 0.55 through the Parmys script: `a !== 4'b1x00` becomes `~a[3] \| a[1] \| a[0]`, the x bit dropped. Neither side has x/z: `$eq`/`$ne` with "'===' is treated as '==' (synthesis has no x or z)" |
 | `a << b`, `a <<< b`, `a >> b`, `a >>> b` | `$shl` (both left shifts: `$sshl` ≡ `$shl` in simlib), `$shr`, `$sshr`; `A` at the context width and sign, `B` self-determined unsigned (`B_SIGNED` 0) |
 | `a ** b` | `$shl(1, b)` when `a` is the constant 2 and `b` is unsigned (Yosys's rewrite), else `$pow`†; `B_SIGNED` = `b`'s own sign |
 | `c ? a : b` | `c` constant and fully 0/1: the chosen branch only (Yosys); else `$mux(A = b, B = a, S = c')` with `WIDTH` = final width, where `c'` = `c` if 1 bit else `$reduce_bool`†(`c`) |
@@ -903,30 +983,35 @@ Attributes on an operator node (`(* … *)` on a `BINARY`) go to every cell that
 §7). The emitted structure is the same as Yosys's `genRTLIL` cell for cell (minus `$pos`, plus
 folding), so a 2D netlist and Yosys's differ only where §17 says.
 
-### 7.2 Registry additions (EL-31) — IR change A, for Peter's review
+### 7.2 Registry additions (EL-31) — IR change A (ruled: nine cells, §20 item 2)
 
-The registry (`src/ir/cells/`, IR-8) has the Yosys word set of DESIGN §5.2. Verilog-2005 needs ten
-more Yosys word cells; 2D emits only registered ops, so they are added, each one file entry with
+The registry (`src/ir/cells/`, IR-8) has the Yosys word set of DESIGN §5.2. 2D emits only
+registered ops, and Verilog-2005 needs **nine** more Yosys word cells, each one file entry with
 Yosys's ports, parameters and simlib semantics:
 
-| Cell | Shape | Semantics (simlib) | Why it cannot be composed away |
+| Cell | Shape | Semantics (simlib) | Need |
 |---|---|---|---|
-| `$neg` | unary | `Y = −A` | composable (`$sub(0, A)`); added for 1:1 genrtlil |
+| `$neg` | unary | `Y = −A` | composable (`$sub(0, A)`) |
 | `$xnor` | binary | `Y = ~(A ^ B)` | composable (`$not($xor)`) |
-| `$reduce_xnor` | unary | `Y = ~^A`, 1 bit zero-extended | composable only with care (a `$not` of width 1, then zero-extension) |
-| `$reduce_bool` | unary | `Y = \|A`, 1 bit zero-extended | identical to `$reduce_or`; Yosys keeps it for clarity |
+| `$reduce_xnor` | unary | `Y = ~^A`, 1 bit zero-extended | composable with care (a 1-bit `$not`, then zero-extension by wiring) |
+| `$reduce_bool` | unary | `Y = \|A`, 1 bit zero-extended | identical to `$reduce_or` |
 | `$logic_not` | unary | `Y = !A`, 1 bit zero-extended | composable (`$eq(A, 0)`) |
-| `$logic_and`, `$logic_or` | binary | `Y = A && B`, `A \|\| B`, 1 bit zero-extended | composable (`$and` of two `$reduce_bool`s) |
-| `$shiftx` | binary | `Y = A >> B` (B signed: negative shifts left), filling with **x** | **required**: a non-constant select reads x out of range (E17); `$shr` would read 0, and Parmys's later don't-care choices differ from 0 (§16 concern 1) |
-| `$shift` | binary | as `$shiftx`, filling with 0 | used for signed shift amounts in index arithmetic (EL-32) |
+| `$logic_and`, `$logic_or` | binary | `Y = A && B`, `A \|\| B`, 1 bit zero-extended | composable (`$and` of two `$reduce_or`s) |
+| `$shiftx` | binary | `Y = A >> B` (B signed: negative shifts left), filling with **x** | **required**: a non-constant select reads x out of range (E17); `$shr` would read 0, which is a different don't-care resolution from Parmys's (§14.6) |
 | `$pow` | binary | `Y = A ** B` (`const_pow` above) | **required**: E7's variable exponent (micros `common/pow`, `twobits_arithmetic_power`) has no other registered form short of 2D lowering it to a multiplier chain |
 
-All ten reuse `odin3_cells_binary_*`/`odin3_cells_unary_*` (the `ODIN3_BINARY`/`ODIN3_UNARY`
-macros); simulate hooks follow 1E's rules for the eight that are cheap (`$shiftx` and `$pow` get
-`simulate = NULL` until a pass needs them). DESIGN §5.2's word list is amended. The alternative,
-compositions from today's cells for the eight composable ones and 2D-side lowering for `$pow`
-(and `$shr` plus a range-check `$mux` with an x constant for `$shiftx`), is given in Appendix A
-so the choice can be made without reopening the spec (Decisions for Peter, item 2).
+The honest trade-off for the seven composable cells: they buy nothing in the exit test, which
+compares after `opt` and `abc`; they keep EL-30 one cell per operator (simpler code and review),
+keep `stats` comparable with Yosys's cell counts, and let 2F port `opt_expr`'s rules per cell
+type. Appendix A's compositions cost about two cells per use. No `$shift` is added: nothing in 2D
+emits it (EL-32 writes non-constant selects with the case method; Yosys emits `$shift` only for
+its mask-and-shift lvalue method, §17 #4).
+
+All nine reuse `odin3_cells_binary_*`/`odin3_cells_unary_*` (the `ODIN3_BINARY`/`ODIN3_UNARY`
+macros); simulate hooks follow 1E's rules for the seven that are cheap (`$shiftx` and `$pow` get
+`simulate = NULL` until a pass needs them). DESIGN §5.2's word list is amended. The alternative
+that was considered — compositions from today's cells for the seven composable ones and 2D-side
+lowering for `$pow` and `$shiftx` — stays in Appendix A for reference (§20 item 2).
 
 ### 7.3 Identifiers and selects (EL-32)
 
@@ -945,7 +1030,7 @@ so the choice can be made without reopening the spec (Decisions for Peter, item 
 - **Non-constant writes** in a process (`y[s] = d`, `y[b +: 4] <= d`) are rewritten to a `case`
   over the position with one item per in-range position, each assigning that constant slice,
   no default (an out-of-range write changes nothing): Yosys's case method (`nowrshmsk`), chosen
-  over its default mask-and-shift method because it needs no `$shift` in the process and maps to
+  over its default mask-and-shift method because it needs no `$shift` cell (none is registered, EL-31) and maps to
   the same mux structure after `proc`; equivalent in every case (§17 #4). The position is a
   temporary assigned once before the case. Outside processes, a non-constant select target is
   EL-28's error.
@@ -953,110 +1038,147 @@ so the choice can be made without reopening the spec (Decisions for Peter, item 
 
 ## 8. Processes
 
-### 8.1 Process objects in the IR (EL-33) — IR change B, for Peter's review
+### 8.1 Processes in the IR: the `$proc` cell (EL-33) — IR change B (ruled, §20 item 1)
 
-DESIGN §6 step 2 says "word-level IR with processes", but `docs/IR.md` has no process object.
-2D needs one: `proc` (2E) must see the decision structure of an `always` block (which branch
-assigns what, which edge clocks it, `full_case`/`parallel_case`) to build mux trees, flip-flops
-and latches. The proposal is Yosys's `RTLIL::Process` on IR nets, as **IR-19**:
+DESIGN §6 step 2 says "word-level IR with processes", but `docs/IR.md` has no process. `proc`
+(2E) must see the decision structure of an `always` block — which branch assigns what, which
+edge clocks it, `full_case`/`parallel_case` — to build mux trees, flip-flops and latches. A
+process is therefore a **node** of a new built-in cell type `$proc` whose connectivity is
+ordinary pins and whose decision structure (Yosys's `RTLIL::Process`) is an opaque parameter.
+v1 proposed process objects that referred to nets by ID without pins; the review (F1) showed that
+this breaks IR-3 (every driver is a pin) and every query built on it, so v2 adopts its
+representation. Nothing in IR-3, IR-4, IR-6, IR-15 or check rule 4 changes.
+
+**The cell type** (`src/ir/cells/proc.c`, IR-19):
+
+| Item | Definition |
+|---|---|
+| name, granularity | `$proc`, `word` (the RTLIL view allows it; the netlist view, which needs `bit`, does not, so `lower` cannot meet one) |
+| flags | `ODIN3_CT_PROCESS` (new type flag: the IR keeps a per-module count of live nodes whose type has it) |
+| ports | `I` (input, width `I_WIDTH`): every net the process reads and does not drive — action right sides, switch signals, compare operands, sync signals, and the constants it uses (pins on the module's shared `$_CONST0_/1/X/Z_` nets, IR-4); `O` (output, width `O_WIDTH`): every net the process drives |
+| parameters | `I_WIDTH` (INT ≥ 0), `O_WIDTH` (INT ≥ 1), `BODY` (a new value kind `ODIN3_VAL_PROC`, below) |
+| hooks | `verify` validates `BODY` against the widths (below); `const_value`, `simulate` and the netlist writer hooks are NULL |
+
+Each net appears on at most one `I` pin and at most one `O` pin of one `$proc`; a net never
+appears on both (reading a net the process drives is written `OUT | k` in the body, not as a
+self-loop pin). So `odin3_net_driver` of a process-driven net is its `O` pin, `odin3_net_sinks`
+of a net the process reads include its `I` pin, fanout walks and `odin3_net_const_value` work
+unchanged, and a second driver (another process, a cell) is rule 4's error as for any cell.
+
+**The body** (`ODIN3_VAL_PROC`, stored in the module arena like `COVER`, IR-10; immutable once
+the node exists):
 
 ```c
-typedef struct { uint32_t v; } odin3_proc_id;        /* module-local, 0 = none (IR-5) */
-
-/* A process signal bit: a net ID (< 2^31), or a constant. */
-typedef uint32_t odin3_sigbit;
+/* A position in a process body: an input pin, an output pin, or "anything" (compares only). */
+typedef uint32_t odin3_pbit;
 enum {
-    ODIN3_SIGBIT_CONST = 1U << 31,
-    ODIN3_SIGBIT_0 = ODIN3_SIGBIT_CONST | 0, ODIN3_SIGBIT_1 = ODIN3_SIGBIT_CONST | 1,
-    ODIN3_SIGBIT_X = ODIN3_SIGBIT_CONST | 2, ODIN3_SIGBIT_Z = ODIN3_SIGBIT_CONST | 3,
-    ODIN3_SIGBIT_ANY = ODIN3_SIGBIT_CONST | 4   /* '-': compare patterns only */
+    ODIN3_PBIT_IN = 0U << 30,     /* | k: the net on I pin k */
+    ODIN3_PBIT_OUT = 1U << 30,    /* | k: the net on O pin k, as this process drives it */
+    ODIN3_PBIT_ANY = 2U << 30,    /* '-': matches any value; compare patterns only */
+    ODIN3_PBIT_INDEX_MASK = (1U << 30) - 1
 };
-
-typedef struct odin3_sigspan { uint32_t first, len; } odin3_sigspan;  /* into the process bits */
+typedef struct odin3_pspan { uint32_t first, len; } odin3_pspan;        /* into pbits[] */
 
 typedef enum odin3_sync_type {
     ODIN3_SYNC_POSEDGE = 1, ODIN3_SYNC_NEGEDGE,   /* edge of one net */
-    ODIN3_SYNC_LEVEL0, ODIN3_SYNC_LEVEL1,         /* while the net is 0 / 1 (made by 2E, Yosys ST0/ST1) */
+    ODIN3_SYNC_LEVEL0, ODIN3_SYNC_LEVEL1,         /* while the net is 0 / 1 (made by 2E; Yosys ST0/ST1) */
     ODIN3_SYNC_ALWAYS                              /* combinational (Yosys STa) */
 } odin3_sync_type;
 
-typedef struct odin3_proc_action_spec { odin3_sigspan lhs, rhs; odin3_prov_id prov; } odin3_proc_action_spec;
-typedef struct odin3_proc_case_spec {
-    uint32_t first_compare, n_compares;  /* sigspans in compares[], each the switch's width */
-    uint32_t first_action, n_actions;    /* in actions[] */
-    uint32_t first_switch, n_switches;   /* in switches[] */
+typedef struct odin3_proc_action { odin3_pspan lhs, rhs; odin3_prov_id prov; } odin3_proc_action;
+typedef struct odin3_proc_case {
+    uint32_t first_compare, n_compares;   /* pspans in compares[], each the switch's width */
+    uint32_t first_action, n_actions;     /* in actions[] */
+    uint32_t first_switch, n_switches;    /* in switches[] */
     odin3_prov_id prov;
-} odin3_proc_case_spec;
-typedef struct odin3_proc_switch_spec {
-    odin3_sigspan signal;
-    uint32_t first_case, n_cases;        /* in cases[] */
-    uint16_t flags;                      /* ODIN3_SWITCH_FULL_CASE | ODIN3_SWITCH_PARALLEL_CASE */
+} odin3_proc_case;
+typedef struct odin3_proc_switch {
+    odin3_pspan signal;
+    uint32_t first_case, n_cases;         /* in cases[] */
+    uint16_t flags;                       /* ODIN3_SWITCH_FULL_CASE | ODIN3_SWITCH_PARALLEL_CASE */
     odin3_prov_id prov;
-} odin3_proc_switch_spec;
-typedef struct odin3_proc_sync_spec {
-    uint8_t type;                        /* odin3_sync_type */
-    odin3_sigbit signal;                 /* a net for edge and level types, 0 for ALWAYS */
-    uint32_t first_action, n_actions;
-} odin3_proc_sync_spec;
-typedef struct odin3_proc_spec {         /* a whole process, built off-IR and copied in once */
-    uint32_t name;                       /* strtab ID, 0 = unnamed */
-    odin3_prov_id prov;
-    const odin3_sigbit *bits; uint32_t n_bits;
-    const odin3_sigspan *compares; uint32_t n_compares;
-    const odin3_proc_action_spec *actions; uint32_t n_actions;
-    const odin3_proc_case_spec *cases; uint32_t n_cases;      /* cases[0] is the root */
-    const odin3_proc_switch_spec *switches; uint32_t n_switches;
-    const odin3_proc_sync_spec *syncs; uint32_t n_syncs;
-} odin3_proc_spec;
+} odin3_proc_switch;
+typedef struct odin3_proc_sync {
+    uint8_t type;                         /* odin3_sync_type */
+    odin3_pbit signal;                    /* IN | k for edge and level types; 0 for ALWAYS */
+    uint32_t first_action, n_actions;     /* in actions[] */
+} odin3_proc_sync;
+typedef struct odin3_proc_body {          /* the BODY parameter; cases[0] is the root */
+    const odin3_pbit *pbits; uint32_t n_pbits;
+    const odin3_pspan *compares; uint32_t n_compares;
+    const odin3_proc_action *actions; uint32_t n_actions;
+    const odin3_proc_case *cases; uint32_t n_cases;
+    const odin3_proc_switch *switches; uint32_t n_switches;
+    const odin3_proc_sync *syncs; uint32_t n_syncs;
+} odin3_proc_body;
 ```
 
+Body positions are pin positions, never net IDs, so merging, renaming and compacting nets never
+touch a body. The only non-pin entry is `ANY`; every constant 0/1/x/z is an `I` pin on the
+shared constant net (IR-4; the review's F8), so `odin3_net_const_value` stays the one constant
+predicate and `proc_arst` finds reset values the same way it finds any constant.
+
 **Semantics** (RTLIL's): a case applies its actions in order, then its switches in order; a
-switch evaluates its cases in order and takes the first whose compare list has an entry equal to
-the switch signal (`ANY` bits match anything; a case with no compares is the default and matches
-always); a later assignment to a bit overrides an earlier one. The root case runs whenever the
-process is evaluated; on each sync event (an edge of its net, a level, or `ALWAYS`: continuously)
-the sync's actions copy `rhs` into `lhs` — they are the storage (or, for `ALWAYS`, the
-combinational outputs). Bits assigned in the case tree but by no sync action are combinational
-values the process computes and other objects read (2D's temporaries); `proc` drives them.
+switch takes the first of its cases whose compare list has an entry equal to the switch signal
+(`ANY` bits match anything; a case with no compares is the default and always matches); a later
+assignment to an `OUT` position overrides an earlier one. The root case runs whenever the process
+is evaluated; on each sync event (an edge of its signal, a level, or `ALWAYS`: continuously) the
+sync's actions copy `rhs` into `lhs` — they are the storage (or, for `ALWAYS`, the combinational
+outputs). An `OUT` position assigned in the case tree but by no sync action is a combinational
+value the process computes (2D's temporaries, EL-35); `proc` drives its net with the mux tree.
 
-**API** (`src/ir/proc.h`, IR-15 style): `odin3_proc_create(module, const odin3_proc_spec *spec,
-odin3_proc_id *out)` validates and copies the spec into the module (one arena block per process,
-so a process is immutable); `odin3_proc_delete(module, proc)` (2E, after lowering);
-`odin3_proc_replace(module, proc, spec)` (2E's `proc_clean`/`proc_arst` style rewrites);
-read accessors `odin3_proc_count`, `odin3_proc_live`, `odin3_proc_name`, `odin3_proc_prov`,
-`odin3_proc_root`, `odin3_proc_case_get`, `odin3_proc_switch_get`, `odin3_proc_sync_get`,
-`odin3_proc_action_get`, `odin3_proc_bits(module, proc, span) → const odin3_sigbit *`; iteration
-in ID order skipping dead processes (IR-16). Attributes take `ODIN3_OBJ_PROC` (a new
-`odin3_objref` kind: the `always` block's `(* *)` attributes go there; switch attributes are the
-two flags). Costs: create O(spec), accessors O(1).
+**`verify`** (run by check rule 5, IR §9, for every `$proc` node; FAST and FULL like rule 5): the
+payload has kind `PROC`; every index is in range and every case, switch and action is used
+exactly once (a tree); the root case has no compares; each compare and its switch signal have
+the same width; an action's `lhs` and `rhs` have the same width; `lhs` holds only `OUT`
+positions, none twice in one `lhs`; `ANY` appears only in compares; `IN | k` has `k < I_WIDTH`,
+`OUT | k` has `k < O_WIDTH`; a sync's signal is one `IN` position for edge and level types and 0
+for `ALWAYS`; every `OUT` position is the `lhs` of at least one action (a pin the body never
+drives is rejected). No new check rule exists; rules 1–11 apply to `$proc` nodes as to any node.
 
-**Invariants** (new `check` rules, IR §9):
+**What the IR operations do with a `$proc` node** — all as for any cell, by construction:
 
-12. **E** (FAST and FULL) Every process is well formed: indices in range and each case, switch and
-    action used once; the root case has no compares; every compare and the switch signal have
-    the same width; `lhs` and `rhs` of an action have the same width; `lhs` bits are nets (no
-    constants), no net twice in one `lhs`; `ANY` only in compares; a sync's signal is one net
-    for edge and level types and 0 for `ALWAYS`; every net is live and belongs to the module.
-13. **E** Drivers: a net in some sync action's `lhs` is driven by that process. Rule 4 counts it
-    as a driver: a second process driving it, or a driver pin on it, is the multi-driver error;
-    such a net is not "undriven"; a net read only by processes is not "a live net with no pins".
+- `odin3_node_create_connected` creates it (2D builds the body off-IR, then calls once);
+  `odin3_node_delete` removes it (2E, after lowering); `odin3_node_replace` replaces it by one
+  with the same port widths (2E's `proc_clean`/`proc_arst`-style rewrites; different widths:
+  delete and create).
+- `odin3_net_merge` moves pins, and a body refers to pins: nothing to rewrite.
+  `odin3_net_delete` needs a pinless net, so it can never delete a net a process uses.
+- `odin3_module_compact` renumbers the node and its pins like any node; the body needs no map. A
+  dead `$proc` gets the usual tombstone (IR-6: kind node, type `$proc`, its parameters — the body
+  included — and the nets its pins were on).
+- Attributes use `ODIN3_OBJ_NODE` (the `always` block's `(* *)` attributes go there; a switch's
+  are its two flags); provenance is the node's SOURCE record, with per-action, per-case and
+  per-switch records inside the body (EL-45).
+- `odin3_module_proc_count(module)` and `odin3_design_has_processes(design)` read the counter
+  (O(1) and O(modules)).
 
-**Mutation rules.** `odin3_net_delete` refuses a net a live process refers to;
-`odin3_net_merge(keep, drop)` rewrites `drop` to `keep` in the module's processes (a scan of
-their bits; 2D merges before it creates processes, EL-28, so the scan is empty in practice);
-`odin3_module_compact` renumbers process bits with the net map and drops dead processes
-(tombstones: kind `PROC`, name, prov). Views (IR-9): the RTLIL view allows processes, the netlist
-view requires none. Writers that cannot express a process (`write_blif`, `write_json`,
-`write_verilog`, `write_dot`) and `sim` refuse a module with processes: "module 'm' has
-processes; run proc first". `write_rtlil` prints them (EL-48). ABI: read accessors
-(`odin3_module_get_proc_count`, `odin3_proc_get_*`), for the Python walk and plugins; `stats`
-prints the process count per module.
+**Passes and processes** (the review's F10; amends 1D). `odin3_pass_def` gains
+`uint8_t processes`: `ODIN3_PASS_PROCESSES_REFUSE` (0, the default, so every existing and plugin
+pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the pass manager calls
+`odin3_design_has_processes` and, when it is true, fails the pass without running it:
+`pass 'opt': module 'm' has processes; run proc first` (`ODIN3_ERR_INVALID_ARG`, the script's
+misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
+create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
+and `proc` (2E). Marked `REFUSE`: `opt` (2F) — so **`opt` runs only after `proc`**, the order of
+DESIGN §6 — `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
+`write_dot`. The writers also refuse a `$proc` node themselves (`module 'm' has processes; run
+proc first`) for callers that bypass the pass manager. A pass marked `OK` that mutates the IR
+must treat a `$proc` node as opaque: no constant propagation or CSE through it, its `O` pins are
+drivers like any cell's. ABI: the field takes one byte of `odin3_pass_def`'s reserved space when
+it has one, else the ABI version bump of EL-47 covers it; a plugin's zero-initialised definition
+means `REFUSE`.
 
-Alternatives considered: (a) keep `always` bodies in the elaborated AST and let `proc` read AST
-and symbol table — the IR then depends on a store that AST-16 frees and that slang builds
-differently, and `proc` would redo 2D's width and blocking analysis; (b) have 2D lower processes
-to muxes itself — merges 2D and 2E and loses the structure `proc_arst`, `full_case` and latch
-detection need (Decisions for Peter, item 1).
+**ABI.** The `$proc` node is visible through the existing node accessors (type `$proc`, ports
+`I`/`O`, `I_WIDTH`/`O_WIDTH`); `odin3_node_get_param_text` prints `BODY` as RTLIL `process` text
+(EL-48), so the Python walk and plugins can see it; structured body accessors wait for 2E.
+
+**Alternatives considered.** (a) v1's process objects over pinless nets (rejected by the review,
+F1: a second connectivity mechanism, broken driver queries, O(process) merges, `opt` unsafe);
+(b) keeping `always` bodies in the elaborated AST for `proc` to read (the IR would depend on a
+store AST-16 frees, and `proc` would redo 2D's width and blocking analysis); (c) 2D lowering
+processes to muxes itself (merges 2D and 2E and loses the structure `proc_arst`, `full_case` and
+latch detection need).
 
 ### 8.2 Event controls and syncs (EL-34)
 
@@ -1070,8 +1192,9 @@ From the `ALWAYS`'s `EVENT_CONTROL`:
 - `@*`, `@(*)` (T2), and any list of level events (`@(a or b)`, `@(a, b)`, `@a`, T4): one
   `ALWAYS` sync. A level list that omits a signal the block reads (bits read before assignment,
   computed by the generator) is T3: "incomplete sensitivity list: 'x' is read but not listed; the
-  block is built as @*" (once per block, naming the first such signal by name order; Yosys's note
-  says the same).
+  block is built as @*" (once per block, naming the first such signal by name order). This
+  analysis is 2D's own: Yosys prints a generic note for **every** level-event list ("Assuming
+  pure combinatorial block … use of @* instead of @(...)") and never names a missing signal.
 - Edge and level events in one list: "edge and level events in one event list are not supported"
   (Yosys: "Found non-synthesizable event list").
 - `always` with no event control (T6), an event control inside the body (T12), `wait` (T13),
@@ -1080,16 +1203,20 @@ From the `ALWAYS`'s `EVENT_CONTROL`:
 
 ### 8.3 The process generator (EL-35)
 
-`odin3_pg` builds one IR process per `always` block (and per continuous-context function call,
-EL-38, and per mem2reg read outside a process, EL-27), following Yosys's `ProcessGenerator`
-step for step so that blocking and non-blocking semantics, and the structure `proc` sees, are
-Yosys's (T7, T8; coverage §7 note 3). It works on an off-IR builder (cases, switches, actions in
-vectors) and creates the IR process at the end with `odin3_proc_create`.
+`odin3_pg` builds one `$proc` node (EL-33) per `always` block (and per continuous-context
+function call, EL-38, and per mem2reg read outside a process, EL-27), following Yosys's
+`ProcessGenerator` step for step so that blocking and non-blocking semantics, and the structure
+`proc` sees, are Yosys's (T7, T8; coverage §7 note 3). It works on an off-IR builder (cases,
+switches, actions in vectors, whose signal bits are nets or the constants 0/1/x/z/`ANY`) and
+creates the node at the end (step 7).
 
 1. **Outputs.** Collect the block's lvalue bits (every bit any blocking or non-blocking
    assignment in it can write, selects resolved; a `case`-rewritten non-constant select counts
-   all its positions), excluding process-local variables (below); sort by net ID. For each output
-   bit `b` create a fresh temporary net `t0(b)` (Yosys's `$0\x`).
+   all its positions), excluding process-local variables (below); sort by net ID. These are the
+   block's **outputs**: the bits its sync actions drive (Yosys's `collect_lvalues(…, true,
+   true)`, so a blocking-only temporary such as `t` in `t = a & b; r <= t;` is an output too,
+   whose register is dead and removed by `opt`). For each output bit `b` create a fresh
+   temporary net `t0(b)` (Yosys's `$0\x`).
 2. **Substitutions.** `lv`: bit → the net an assignment writes (initially `b → t0(b)`).
    `rv`: bit → its current value for reads in this block (initially empty: a read sees the net
    itself). Both are maps with an undo log, so a branch can save and restore them in O(changes).
@@ -1113,10 +1240,21 @@ vectors) and creates the IR process at the end with `odin3_proc_create`.
 6. **Removal** keeps, per target bit, the list of action slots that assign it, so "remove `x`
    from the current case and its nested switches" costs the number of earlier assignments to
    `x`, not the size of the tree (Yosys walks the tree; same result).
+7. **Emission.** Every net some action assigns — the outputs (sync-action `lhs`) and every
+   temporary (`t0`, case temporaries, call-frame and memory-write variables, select positions) —
+   becomes an `O` pin, in net-ID order; every other net the body reads becomes an `I` pin, in
+   net-ID order; each constant 0/1/x/z the body uses becomes one `I` pin on the module's shared
+   constant net for that value (IR-4; at most four); `ANY` stays in compares. The builder's bits
+   are renumbered to `IN | k` / `OUT | k`, and one `odin3_node_create_connected` creates the
+   `$proc` node with `I_WIDTH`, `O_WIDTH`, `BODY` and the two net vectors. Before that call the
+   driver table (EL-28) is checked for every `O` net (T10/A4 are reported and the conflicting
+   bit's actions dropped, so the node never makes a second driver).
 
-**Process-local variables** never become outputs: temporaries 2D creates (case temporaries,
-EL-36; call frames, EL-38; select positions, EL-32; memory write ports, EL-39), and **loop
-variables** — a variable whose every assignment in the block is a `for` initialisation or step
+**Process-local variables** never become outputs (they have no sync action): temporaries 2D
+creates (case temporaries, EL-36; call frames, EL-38; select positions, EL-32; memory write
+ports, EL-39) — whose nets are still `O` pins, because the process drives them and cells read
+them — and **loop variables**, which the process does not drive at all (their values live only in
+`rv`) — a variable whose every assignment in the block is a `for` initialisation or step
 (EL-37) — unless something outside the block reads it, in which case it is an ordinary output.
 Yosys makes loop counters outputs (a dead register `opt` removes) and so drives a shared
 `integer i` from every block that loops on it; 2D's rule avoids that false T10 conflict and is
@@ -1204,14 +1342,17 @@ Non-constant calls are **inlined** (K1–K11), as Yosys's `simplify` does:
 
 For an array kept as a memory (EL-27):
 
-- **Read** `m[i]` (anywhere, rvalue): a `$mem` read port with `ADDR` = the index (through `rv`)
-  minus `OFFSET`; the expression reads the port's `RD_DATA` nets.
+- **Read** `m[i]` (anywhere, rvalue): a `$mem` read port with `ADDR` = the raw index (through
+  `rv`; EL-27: `$mem` subtracts `OFFSET` itself); the expression reads the port's `RD_DATA`
+  nets.
 - **Write** `m[i] <= d` / `m[i] = d` (only in a block with one edge sync; elsewhere EL-27 made it
   registers): three process-local variables per write statement — `addr`, `data` (the memory's
   width) and `en` (the memory's width) — with the root action `en = 0` (Yosys inserts it at the
-  block's start); the write statement assigns `addr = i − OFFSET`, `data = d`, `en = all ones`.
-  The `$mem` write port's `WR_ADDR`, `WR_DATA`, `WR_EN` are the *final* values of those
-  variables (their `t0` nets, which `proc` drives from the case tree), `WR_CLK` the sync's net,
+  block's start); the write statement assigns `addr = i` (the raw index), `data = d`,
+  `en = all ones`. The three are process-local temporaries in EL-33's sense: `OUT` positions
+  assigned in the case tree and by no sync action, so their nets are `O` pins of the `$proc`
+  node that `proc` drives combinationally; the `$mem` write port's `WR_ADDR`, `WR_DATA`, `WR_EN`
+  are those nets (their values at the end of the block), `WR_CLK` the sync's net,
   `WR_CLK_POLARITY` its edge. A partial write `m[i][3:0] <= d` sets `en` on those bits only
   (its other bits of `data` are don't-care x).
 
@@ -1326,7 +1467,10 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   hierarchy deeper than 1024 at 'u'; recursive instantiation of 'm'?`; `cell type 't' has no
   parameter 'P'`; `implicit black box 'm' needs named connections`; `output port 'p' of instance
   'u' must be connected to a net`; `output port 'p' of instance 'u' is connected to a constant`;
-  `connection of 'p' to instance array 'u' is W bits; expected P or N×P`.
+  `connection of 'p' to instance array 'u' is W bits; expected P or N×P`; `module 'adder' has the
+  name of cell type 'adder' registered by an earlier read (hard cell); rename the module` (or
+  `(black box)`), at the `MODULE`'s name (EL-6, F9); `duplicate_module: module 'm' is already
+  defined by an earlier read (run N)` (EL-6, F27).
 - **Constants (EL-12–EL-18)**: `<what> is not constant (it reads 'x')` where `<what>` is one of
   `range bound`, `replication count`, `parameter 'P'`, `generate condition`, `generate loop
   condition`, `for-loop condition`, `case item in a generate case`, `attribute value`, `$clog2
@@ -1334,8 +1478,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   (reasons: `it reads module variable 'x'`, `it calls task 't'`, `it calls system task '$x'`, `it
   assigns 'x', which is not local`); `constant evaluation of 'f' exceeds 67108864 steps`;
   `constant function recursion deeper than 1024 in 'f'`; `replication count N is negative`;
-  `replication count has x or z bits`; `zero-width concatenation`; `unsized constant in a
-  concatenation`; `width N exceeds the limit of 1048576 bits`.
+  `replication count has x or z bits`; `zero-width concatenation`; `width N exceeds the limit of
+  1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
 - **Generate (EL-19–EL-22)**: `'i' is not a genvar`; `generate loop must assign genvar 'i' in its
   initialisation and step`; `genvar 'i' is already used by an enclosing loop`; `generate loop of
   'i' repeats the value N`; `port declarations are not allowed in a generate block`; `'g[5].t'
@@ -1346,7 +1490,10 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
   f.v:L:C)`; `memory 'm' of N bits exceeds the limit of 1073741824 bits`; `'m' is a memory; select
   a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `tri-state
-  driver on 'x' is supported only on a top-level output or inout port (D3)`.
+  driver on 'x' is supported only on a top-level output or inout port (D3)`; `net 'x' is driven by
+  inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not
+  supported (D3)`; `array 'w' cannot be a memory (it is written in a combinational block) and
+  --nomem2reg is set`.
 - **Expressions (EL-30–EL-32)**: `part-select [0:3] of 'x' is reversed relative to its
   declaration [7:0]`; `'f' is not a function`; `'t' is not a task`; `function 'f' has N inputs; M
   arguments given`.
@@ -1359,6 +1506,9 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   arguments are not constant)`; `output argument N of task 't' must be a variable`; `cannot open
   'f' for $readmemh`; `bad address '@zz' in 'f' line N`; `bad word 'g' in 'f' line N`;
   `$readmemh is supported only in an initial block`.
+- **Passes and budget**: `pass 'opt': module 'm' has processes; run proc first` (the pass
+  manager, EL-33; `ODIN3_ERR_INVALID_ARG`); `elaboration needs more than N bytes (the budget is
+  60% of physical memory)` (EL-46).
 
 ### 9.2 Warnings and infos (EL-43)
 
@@ -1380,7 +1530,10 @@ specialized twice — warns once, keyed by its parsed node):
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
 
 Other warnings: D1's two (EL-36); D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
-declared`; T3 (EL-34); E9's two (EL-30); I4's resize warnings (EL-10); E17 and out-of-range
+declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
+`'===' compares against x/z bits; they match any value`); E12's `unsized constant in a
+concatenation is taken as N bits` (EL-13); `'a' and 'b' are connected only to each other and are
+never driven` (EL-28); I4's resize warnings (EL-10); E17 and out-of-range
 selects (EL-32); the mem2reg note (EL-27); `defparam of 'u1.W' is overridden by the named
 parameter assignment of 'u1'`; `connection N of instance 'u' goes to an unnamed port position and
 is ignored`; `'r' is a variable assigned by a continuous assignment; treated as a net`; `'w' is a
@@ -1416,7 +1569,7 @@ the final summary line (EL-2).
 - **Which node**: a wire → its `DECLARATOR` (an implicit net → its first use); a port node → its
   `PORT_DECL`; an instance → its `INSTANCE`; a cell → the expression node that made it (an
   operator's `BINARY`, a select's `SELECT`, a ternary's `TERNARY`); a constant cell → none needed
-  beyond the module's (shared, IR-4); a process → its `ALWAYS`, and each action, case and switch
+  beyond the module's (shared, IR-4); a `$proc` node → its `ALWAYS` (or the `CALL` or memory read it was made for), and each action, case and switch
   → its statement (`BLOCKING_ASSIGN`, `IF`, `CASE`, `CASE_ITEM`); a temporary → the statement
   that needed it; a `$mem` → the array's `DECLARATOR`; the cells of an inlined function or task
   body → two locs, the body node first and the call (`CALL`/`TASK_CALL`) second, so two call
@@ -1433,7 +1586,7 @@ the final summary line (EL-2).
   each wire of its declarators (and port node); an instantiation → each instance node; a
   statement or expression → every cell its operation creates; `CASE` attributes → the switch
   (`full_case`/`parallel_case` as flags, others as attributes on the process); an `always` → the
-  process (`ODIN3_OBJ_PROC`). Values: none → INT 1, `NUMBER` → BITS, `STRING` → STRING. 2D adds
+  `$proc` node (`ODIN3_OBJ_NODE`). Values: none → INT 1, `NUMBER` → BITS, `STRING` → STRING. 2D adds
   `init` (BITS, EL-40) on wires and `parameter:<NAME>` on module instances (EL-11). Attributes on
   a dropped construct are dropped with it.
 
@@ -1462,6 +1615,7 @@ guards, reported as a located `ODIN3_ERR_PARSE` naming the cap, and lowered in t
 | `ODIN3_ELAB_MAX_READMEM_BYTES` | 2^28 | a `$readmem` file (= `ODIN3_SRC_MAX_FILE_BYTES`) |
 | `ODIN3_ELAB_MAX_MODULE_NAME` | 128 bytes | longer specialization names are hashed (EL-9) |
 | AST depth | `ODIN3_AST_MAX_DEPTH` (32768) | the builders enforce it on the elaborated store, as on the parsed one |
+| `ODIN3_ELAB_MAX_BYTES` | 60% of physical memory (`sysconf(_SC_PHYS_PAGES) × _SC_PAGESIZE × 0.6`), lowered by the test hook | **one run-level byte budget** (the review's F24): the per-kind caps above are independent and their sum exceeds the machine (nodes + nets + pins + both stores), while a host OOM kills the WSL VM (memory rule, ≤ 60%). Checked at every module boundary of both stages and every 2^16 IR objects, against `odin3_ast_bytes_reserved` of the parsed and elaborated stores plus 2D's running estimate of the IR it built (48 B per node, 28 B per pin including the net's pin-array slot, 48 B per net, 64 B per wire, plus arena bytes for parameters and process bodies); over budget is "elaboration needs more than N bytes (the budget is 60% of physical memory)", fatal |
 
 **Out of memory.** Every builder and IR call reserves before it mutates (1A, 2A, IR-15). On
 `ODIN3_ERR_NO_MEMORY` 2D stops at once: stage 1 frees its environments, arenas and the partial
@@ -1481,8 +1635,8 @@ allocation (`odin3_util_set_alloc_fail_after`) and assert the status, no leak an
 | `src/frontends/elab/bind.c` | the binder (EL-5) |
 | `src/frontends/elab/elab2.c`, `elab2_wires.c`, `elab2_inst.c`, `elab2_assign.c`, `elab2_expr.c`, `elab2_select.c`, `elab2_mem.c`, `elab2_drive.c` | stage 2 module emission (EL-23–EL-32) |
 | `src/frontends/elab/pg.c`, `pg_case.c`, `pg_loop.c`, `pg_call.c`, `pg_init.c` | the process generator and initial values (EL-35–EL-40) |
-| `src/ir/proc.[ch]`, `src/ir/check.c`, `src/ir/compact.c`, `src/ir/net.c` | IR change B |
-| `src/ir/cells/arith.c`, `logic.c`, `reduce.c`, `shift.c`, `builtin.c` | IR change A |
+| `src/ir/cells/proc.c`, `src/ir/proc.[ch]` (body types, `verify`, body text), `src/ir/value.[ch]` (`ODIN3_VAL_PROC`), `src/ir/node.c` (the process counter), `src/passes/manager.[ch]` (the `processes` flag) | IR change B |
+| `src/ir/cells/arith.c`, `logic.c`, `reduce.c`, `shift.c`, `builtin.c` | IR change A (nine cells) |
 | `src/ir/module.[ch]` | IR change C |
 | `src/backends/rtlil/writer.[ch]` | `write_rtlil` |
 | `src/api/elab_abi.c`, `include/odin3/odin3.h` | ABI additions |
@@ -1503,10 +1657,11 @@ undo logs, the frame stack). All containers are `src/util`'s (CLAUDE.md); every 
 explicit stack (lizard: no recursion).
 
 **ABI** (one bump, after 2C's): `odin3_ast_elaborate` (EL-2) with `odin3_elab_options`;
-`odin3_ast_get_library_units_from` (2C §9 (b)); `ODIN3_OBJ_PROC`, `odin3_module_get_proc_count`,
-`odin3_proc_get_name`, `odin3_proc_get_prov`, `odin3_proc_get_sync_count`, `odin3_proc_get_sync`
-(type, signal net); the `odin3_port_spec` fields of IR change C mirrored where ports are created
-through the ABI. Each with the purpose/ownership/failure paragraph (CLAUDE.md); cffi cdef updated.
+`odin3_ast_get_library_units_from` (2C §9 (b)); `odin3_module_get_proc_count`; the `$proc`
+node through the existing node accessors, with `BODY` as text through `odin3_node_get_param_text`
+(EL-33); `odin3_pass_def`'s `processes` flag (EL-33); the `odin3_port_spec` fields of IR change C
+mirrored where ports are created through the ABI. No new object kind (v1's `ODIN3_OBJ_PROC` is
+gone with F1). Each with the purpose/ownership/failure paragraph (CLAUDE.md); cffi cdef updated.
 
 ## 13. `write_rtlil` (EL-48)
 
@@ -1525,10 +1680,12 @@ reads with `read_rtlil`): the bridge that lets the Yosys flow lower 2D's output,
 - Cells with `parameter \P <value>` and `connect \PORT { … }` (MSB first, RTLIL's order);
   instance nodes as cells of the module's type; `$mem` as written (Yosys's `$mem` v1); names of
   unnamed objects: `$c<ID>`, processes `$proc$<file>:<line>$<ID>`, from provenance.
-- Processes as RTLIL `process` blocks: root actions as `assign`, switches as `switch` / `case
-  <patterns>` (`-` for `ANY`) / `end` with `attribute \full_case 1` and `\parallel_case 1` from
-  the flags, syncs as `sync posedge \clk` / `negedge` / `low` / `high` / `always` with `update`
-  lines.
+- A `$proc` node (EL-33) as an RTLIL `process` block, not a cell: each body position is printed
+  as the net on that pin (`IN | k` → the net on `I` pin k, `OUT | k` → the net on `O` pin k,
+  constants as above because their pins sit on the constant nets, `ANY` as `-`); root actions as
+  `assign`, switches as `switch` / `case <patterns>` / `end` with `attribute \full_case 1` and
+  `\parallel_case 1` from the flags, syncs as `sync posedge \clk` / `negedge` / `low` / `high` /
+  `always` with `update` lines. The node's attributes become the process's.
 - Deterministic (IR-16 order), written atomically like the other writers. A Yosys round trip
   (`read_rtlil; write_rtlil`) is a test (§14.3).
 
@@ -1540,53 +1697,80 @@ word level with processes; the Yosys bridge for 2D–2F tests".
 All tests run under ASan/UBSan in Debug; every store 2D builds passes `odin3_ast_check` FULL and
 every IR it builds passes `odin3_check` FULL (the pass manager runs it after `read_verilog`).
 Located-error tests assert the exact `file:line:col: error: …` line through a capturing log
-sink. Every sweep runs smallest input first (memory rule).
+sink. Every sweep runs smallest input first (memory rule). **Oracle binary** (the review's F11):
+every Yosys run below is Parmys's Yosys 0.55 (`$VTR_ROOT/build/bin/yosys`) unless a line names
+0.69; every golden and generated table records the Yosys version in its header.
 
 ### 14.1 Unit tests (Unity)
 
 - `test_elab_cval.c`: every operator of EL-14 at widths 1, 7, 64, 65, 200 and with x/z operands,
-  against a table generated once from Yosys (`tools/elab-check/gen-const-table`: random operands,
-  `localparam P = <expr>;` read back from Yosys's `write_rtlil`; the table is committed with the
-  Yosys version in its header), plus division by zero, `**` corner cases, unsized extension
+  against a table generated once from Yosys 0.55 (`tools/elab-check/gen-const-table`: random
+  operands, `localparam P = <expr>;` read back from Yosys's `write_rtlil`; committed with the
+  version in its header), plus division by zero, `**` corner cases, unsized extension
   (`'hFFFF_FFFF` in 64 bits), strings, `""`.
 - `test_elab_ctype.c`: one case per row of the EL-13 table, Chu p.45's `(a+b)>>1` versus
   `(0+a+b)>>1` (E22), mixed signedness (E23), comparison operand sizing (E8), shift amounts,
-  ternary, concatenation, function results.
+  ternary, concatenation (an unsized operand: the E12 warning and its stored width), function
+  results; the unsized-parameter cases of EL-15/EL-16 (`parameter P = 'hFFFFFFFF` and
+  `localparam [31:0] Q = 'hFFFFFFFF` into 64 bits: all ones; `localparam [35:0] R = 'hFFFFFFFF`:
+  sized, zero-extended), also in the generated constant table.
 - `test_elab_interp.c`: constant functions (loops, `while`, `case`, recursion to the depth cap,
   the step cap with `while (1)`), every "not a constant function" reason, `$clog2` 0/1/2/3/2^31.
 - `test_elab_stage1_*.c` (on parsed stores built by 2C from small sources): lookup order across
-  libraries and library units; top selection (one candidate, `no_top`, `ambiguous_top`,
-  `unknown_top`, `--top` over the project top); parameter precedence (the five levels, the three
-  Yosys-verified cases of EL-8, the defparam-loses warning); nested and generate-scoped
-  `defparam` push-down; project `param` paths (`param_instance`'s); specialization sharing and
-  names (decimal, bit-string, string, hashed, `$2` collision); recursion and the depth cap; the
-  `label_genblks` naming of EL-21 (counter per construct, padding against a user `genblk1`, the
-  else-if nesting, bare items); generate loops counting down, negative indices, a repeated value;
-  instance and gate arrays with sliced connections; port merging (M1, M12); implicit nets under
-  each `` `default_nettype ``; every §9.1 REJECT and §9.2 IGNORE through stage 1.
-- `test_elab_bind.c`: scopes and symbols of hand-built elaborated stores, outward lookup,
-  `g[0].t` and `blk.x` references, every binder error.
+  libraries and library units; a design module named like a registered cell type (EL-6's exact
+  error) and a second `read_verilog` redefining a module (`duplicate_module`); top selection (one
+  candidate, `no_top`, `ambiguous_top`, `unknown_top`, `--top` over the project top); parameter
+  precedence (the five levels, the three Yosys-verified cases of EL-8, the defparam-loses
+  warning); nested and generate-scoped `defparam` push-down, a `defparam` and a project `param`
+  ending at a cell-type instance; project `param` paths (`param_instance`'s); specialization
+  sharing and names (decimal, bit-string, string, hashed, `$2` collision, a collision with a
+  registered cell type); recursion and the depth cap; the `label_genblks` naming of EL-21 — the
+  review's probe as a case: `if (A) … else if (B) …` as the first construct with `A` = 0, `B` = 1
+  gives `genblk1.genblk1.x`, a bare `if (B) assign …` consumes a counter value, a following `for`
+  is `genblk3[0].w`, a user `genblk1` declared after the first `if` does not pad it and one
+  declared before does; generate loops counting down, negative indices, a repeated value; instance
+  and gate arrays with sliced connections; port merging (M1, M12); implicit nets under each
+  `` `default_nettype ``; every §9.1 REJECT and §9.2 IGNORE through stage 1.
+- `test_elab_bind.c`: scopes and symbols of hand-built elaborated stores (including an unsized
+  `localparam` `NUMBER`), outward lookup, `g[0].t` and `blk.x` references, every binder error.
 - `test_elab_stage2_*.c` (on **hand-built elaborated stores**, the slang seam, and on stage-1
-  output): wire ranges and signedness, every row of the EL-30 table (cell type and every
-  parameter asserted), selects (constant, out of range, `$shiftx` offsets for descending,
-  ascending and negative ranges), continuous assignments by construction and by merge, the
-  driver table (A4, uwire, supply, wand/wor gates), tri-state (D3), port connection resizing (I4),
-  memories (mem2reg rules 1–5 each, `$mem` ports and `OFFSET`), and the process generator: the
-  exact cases, switches, actions and syncs for T7 (`t = a & b; r <= t;`: one output), T8, `if`
-  chains, `case`/`casez`/`casex` patterns, `full_case`/`parallel_case`, `--nolatches`, loops,
-  task and function inlining (nested, in a loop, in a continuous context), memory writes,
-  `initial` (constants, loops, `$readmemh` with `@` addresses and comments, the non-constant
-  statement warning, the three result kinds), T9/T10 per bit.
-- `test_ir_proc.c` (IR change B): create/validate (each malformation rejected), accessors, check
-  rules 12–13 through `ir_test.h` corruption hooks, `net_merge` rewriting, `net_delete` refusal,
-  `compact` renumbering and tombstones, writer refusals, attributes on `ODIN3_OBJ_PROC`.
-  `test_ir_cells.c` gains the ten new cells (ports, parameters, verify, the eight simulate hooks
-  against simlib truth tables). `test_ir_module.c` gains IR change C.
+  output): wire ranges and signedness (ports through IR change C), every row of the EL-30 table
+  (cell type and every parameter asserted), `===`/`!==` in its three cases (exact fold; wildcard
+  compare over the 0/1 positions, `a !== 4'b1x00` → a `$ne` over bits 3, 1, 0; plain `$eq`),
+  selects (constant, out of range, `$shiftx` offsets for descending, ascending and negative
+  ranges), continuous assignments by construction, by merge and the same-net no-op
+  (`assign a = b; assign b = a;`), the driver table (A4, uwire, supply, wand/wor gates, a child's
+  `inout` pin with and without logic on the net), tri-state (D3), port connection resizing (I4),
+  memories — mem2reg rules 1–5 each, `--nomem2reg` with a net array, and **`$mem` addressing with
+  `[1:4]`, `[4:1]` and `[-2:1]` ranges** (raw index on every port, `OFFSET` 1/1/−2; a write then a
+  read of `m[i]` through `sim`-free evaluation of the bridge; the corpus has only `[0:N]`/`[N:0]`
+  memories, so only these cases catch an offset bug) — and the process generator: the exact body
+  of each `$proc` node (positions, cases, switches, actions, syncs, `I`/`O` pin nets, the
+  constant pins on the shared constant nets) for T7 (`t = a & b; r <= t;`: **two** outputs, `t`
+  and `r`, `t`'s register dead after `opt`, Yosys's `collect_lvalues`), T8, `if` chains,
+  `case`/`casez`/`casex` patterns, `full_case`/`parallel_case`, both latch modes (default: root
+  hold actions; `--nolatches`: x substitutions, no root actions), loops, task and function
+  inlining (nested, in a loop, in a continuous context), memory writes (the three write-port
+  variables as `O` pins with no sync action), `initial` (constants, loops, `$readmemh` with `@`
+  addresses and comments, the non-constant statement warning, the three result kinds), T9/T10
+  per bit.
+- `test_ir_proc.c` (IR change B): the `$proc` type's ports and parameters; `verify` rejecting
+  each malformed body (an index out of range, a constant or `ANY` in an `lhs`, an `OUT` position
+  twice in one `lhs`, mismatched widths, an `OUT` pin never assigned, a sync signal that is an
+  `OUT` position); rule 4 seeing an `O` pin as the driver and an `I` pin as a sink;
+  `odin3_net_merge` moving a `$proc` pin with the body untouched; `odin3_module_compact`
+  renumbering a module with a live and a dead `$proc` (tombstone with the body); the process
+  counter across create/delete/replace; the pass manager refusing a `REFUSE` pass with the exact
+  message and running an `OK` one; the writers' refusals; `odin3_node_get_param_text` of a body.
+  `test_ir_cells.c` gains the nine new cells (ports, parameters, verify, the seven simulate hooks
+  against simlib truth tables). `test_ir_module.c` gains IR change C (`has_range`, the derived
+  width, the two `INVALID_ARG` cases, the signed port record).
 - `test_rtlil_writer.c`: exact text for small modules (aliases, constants, ports with offsets and
-  `upto`, processes with every sync type, `$mem`).
-- Caps: each §11 cap hit through `odin3_elab_test_set_limits` with its exact message. OOM: an
-  injected failure at every allocation of both stages, asserting `NO_MEMORY`, no leak, a valid
-  IR. Determinism: two runs give byte-identical `write_rtlil` output.
+  `upto`, a `$proc` node with every sync type and constant pins, `$mem`).
+- Caps: each §11 cap hit through `odin3_elab_test_set_limits` with its exact message, the byte
+  budget included. OOM: an injected failure at every allocation of both stages, asserting
+  `NO_MEMORY`, no leak, a valid IR. Determinism: two runs give byte-identical `write_rtlil`
+  output.
 
 ### 14.2 Coverage rows (`elab_coverage`)
 
@@ -1596,33 +1780,37 @@ parse-only variants that do not elaborate), with:
 
 - `<row>.elab`: the stage-1 golden, `odin3_ast_dump` of the elaborated store. Hand-written
   (`# hand-written`, `--write` refuses it) for the ≈ 40 semantics-heavy rows: M1, M2, M12, P1–P6,
-  P8, N2, N7–N13, E8, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6; generated and
-  reviewed once for the rest.
-- `<row>.il`: the stage-2 golden, `write_rtlil` output.
-- an equivalence check against Yosys through the bridge (§14.3), unless the row is listed as
-  non-synthesizable for equivalence (latches and several clocks are outside `equiv-check`,
-  PHASE0 #7; those rows rely on the goldens).
+  P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6;
+  generated and reviewed once for the rest.
+- `<row>.il`: the stage-2 golden, `write_rtlil` output **without** `--nolatches` (the default
+  path: root hold actions), and `<row>.nolatches.il` for every row with a combinational `always`
+  (the review's F25: both latch modes are 2D's to get right; 2E's latch tests cover what `proc`
+  then does with the default path).
+- an equivalence check against Yosys 0.55 through the bridge (§14.3), in the `--nolatches` mode on
+  both sides (`equiv-check` cannot model latches, PHASE0 #7); rows with several clocks rely on
+  the goldens.
 
 Runner `tools/elab-check/elab-check [--write] <file>…` (C, links `odin3_core`): elaborate, check,
 dump, compare goldens; exit 0/1/2.
 
 ### 14.3 The Yosys bridge (`tools/elab-check/elab-equiv`)
 
-For a design `F` with top `T` (Python, stdlib):
+For a design `F` with top `T` (Python, stdlib), always with **Yosys 0.55** (`$VTR_ROOT/build/
+bin/yosys`, Parmys's; 0.69 `read_rtlil` was also verified to accept the format):
 
 - **A** (2D under test): `odin3 -p "read_verilog --nolatches F; write_rtlil a.il"`, then
   `yosys -p "read_rtlil a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt;
   memory_map; opt -full; techmap; opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean;
-  write_blif -gates a.blif"`;
-- **B** (oracle): the same Yosys script with `read_verilog -sv -nolatches F` in place of
+  write_blif -gates -undef + unconn a.blif"`;
+- **B** (oracle): the same script with `read_verilog -sv -nolatches F` in place of
   `read_rtlil a.il`;
 - `tools/equiv-check/equiv-check a.blif b.blif` (exit 0 equivalent).
 
-Both sides go through the same Yosys back end (the standalone Yosys of ORACLES.md, recorded in
-each result), so a difference is 2D's (or a documented divergence). `--top` for a micro is the
-first `.model` of its Parmys golden (EL-7). A second check, `read_rtlil a.il; write_rtlil
-b.il` in Yosys, asserts the writer's text is valid RTLIL. The bridge is also 2E's and 2F's
-oracle later (their output through `write_rtlil` against Yosys's `proc`/`opt`).
+Both sides go through one Yosys back end, so x is resolved by the same `opt` on both, and a
+difference is 2D's (or a documented divergence). `--top` for a micro is the first `.model` of its
+Parmys golden (EL-7). A second check, `read_rtlil a.il; write_rtlil b.il` in Yosys, asserts the
+writer's text is valid RTLIL. The bridge is also 2E's and 2F's oracle later (their output through
+`write_rtlil` against Yosys's `proc`/`opt`).
 
 ### 14.4 The 2C handover
 
@@ -1632,7 +1820,9 @@ turn on with 2D; their `.err`/`.warn` texts are §9's tables. The project corpus
 (2B §10.2 `--with-frontend`) run: the positive phase-2 cases (`auto_top`, `param_instance`,
 `param_string`, `top_param`, `single_file`, `multi_dir`, …) are equivalent to their `ref.blif`
 through the bridge, the negative ones (`neg_unresolved_module`, `neg_unknown_top`,
-`neg_ambiguous_top`, `neg_no_top`) give their kind, location and names.
+`neg_ambiguous_top`, `neg_no_top`) give their kind, location and names. (The fixtures' own
+`ref.cmd` oracles were recorded with Yosys 0.69; the bridge reruns them with 0.55 and a
+disagreement between the two is reported as oracle drift, not as a 2D failure.)
 
 ### 14.5 Corpus sweeps and fuzzing
 
@@ -1641,21 +1831,61 @@ through the bridge, the negative ones (`neg_unresolved_module`, `neg_unknown_top
   smallest first; failures allowed only when listed in `tests/elab/micro_expect_fail.txt` with a
   reason (Parmys-rejected micros, PHASE2 #4; the 2C list's entries). `verilog_vtr_elab`: the 31
   VTR and 33 Koios files, lenet.v last, when `VTR_ROOT` is set.
-- `elab_equiv_micro` / `elab_equiv_vtr`: the bridge on the same sets (VTR ones nightly); a
-  non-equivalent result fails unless listed in `tests/elab/equiv_expect_fail.txt` with a reason.
+- `elab_equiv_micro` / `elab_equiv_vtr`: the bridge (Yosys 0.55) on the same sets (VTR ones
+  nightly); a non-equivalent result fails unless listed in `tests/elab/equiv_expect_fail.txt`
+  with a reason.
 - **Crash fuzz** `tests/fuzz/fuzz_elab.c` (libFuzzer, `-DODIN3_FUZZ=ON`): bytes → preprocess →
   parse → elaborate with every cap lowered; invariants: status OK, PARSE (with a located
   diagnostic, at most 20, no `INVALID_ARG` logged) or injected NO_MEMORY; on OK `check` passes.
 - **Differential generator**: `tools/verilog-gen --elab` (2C's generator, extended) emits random
   valid modules weighted toward 2D's traps — expression trees with random widths and signedness
-  assigned to random-width targets (E22/E23), parameterized instances with `#()`/`defparam`,
-  generate loops and conditionals, `always` blocks mixing `=`/`<=`, `case`/`casez`, loops,
-  functions and tasks, memories — and runs the bridge on each: 200 seeds in CTest when Yosys is
-  found, 5,000 nightly; a non-equivalence is a failure with the seed and file kept.
-- **Constant evaluator differential**: random constant expressions, 2D's value against Yosys's
-  (as in §14.1, generated per run), 10,000 per nightly run.
+  assigned to random-width targets (E22/E23), unsized parameters and literals, `===` against x
+  patterns, parameterized instances with `#()`/`defparam`, generate loops and conditionals,
+  `always` blocks mixing `=`/`<=`, `case`/`casez`, loops, functions and tasks, memories with
+  non-zero low indices — and runs the bridge on each with **Yosys 0.55**: 200 seeds in CTest when
+  it is found, 5,000 nightly; a non-equivalence is a failure with the seed and file kept. Nightly
+  only, the same files also go through the bridge with **Yosys 0.69**; a file where 0.55 and 0.69
+  disagree with each other is reported as **oracle drift** (a list for the next oracle update,
+  ORACLES.md), never as a 2D failure.
+- **Constant evaluator differential**: random constant expressions, 2D's value against Yosys
+  0.55's (as in §14.1, generated per run), 10,000 per nightly run.
 - **Cell consistency**: the evaluator against each word cell's simulate hook on random inputs
   (the two must agree on 0/1 inputs, since both are simlib).
+
+### 14.6 Don't-cares and the comparison with Parmys goldens (the review's F12)
+
+The exit test (PHASE2 #4) compares against Parmys BLIF goldens, not through the bridge, so x
+matters there. Facts, checked on 2026-10-11:
+
+- Parmys writes `write_blif -undef + unconn`: x bits that survive its `opt` are wired to the net
+  `unconn`, declared as `.names unconn` with **no cover rows** — which is BLIF's constant 0.
+  `tools/equiv-check` reads it as such (a zero-row `.names` drives its output; verified:
+  `equiv-check` of `syntax/not_enough_wires.parmys.blif`, whose output is `unconn`, against itself
+  is "equivalent (abc cec)", exit 0). 812 of the 934 k6_frac Parmys goldens declare `unconn`; 310
+  use it in logic. So `unconn` reaching an output does not stop the comparison; it fixes Parmys's
+  x to 0 at the points where x survived.
+- Where Parmys's `opt` resolved an x *before* the netlist (`opt_expr -mux_undef` picking the other
+  mux input, `$eqx` lowering, `-undriven`), the golden contains a choice, and 2D's netlist is
+  equivalent only if Odin III resolves the same x the same way.
+
+The plan, before 2H relies on it:
+
+1. **Keep x explicit until `opt`** (2D: `$shiftx`, `$_CONSTX_` pins, the `full_case` and
+   `--nolatches` x values, the wildcard `===` of EL-30 matching Parmys's bitwise `$eqx`).
+2. **2F mirrors Yosys's x rules** (`opt_expr`'s `-mux_undef`, `-undriven`, its `$eq`/`$mux`
+   constant rules) cell type by cell type, so the common cases become identical, not merely
+   equivalent; 2F's spec owns the list.
+3. **Odin III's BLIF writer adopts the same convention**: an x constant net that reaches the
+   netlist is written as `unconn` (`.names unconn` with no rows, i.e. 0), so the residual x is 0
+   on both sides.
+4. **`equiv-check --x-report`** (a new mode, owned by 2H): when two netlists are not equivalent,
+   it recomputes the check with every primary output and latch input whose (sequential) fan-in
+   cone in *either* netlist reaches `unconn` or an x constant removed from the comparison, and
+   reports the removed outputs by name. The 2H table then has four outcomes per design:
+   **identical** (`netlist-compare`), **equivalent** (`equiv-check`), **equivalent outside
+   x-cones** (listed outputs, each reviewed by hand and recorded with a reason), and **differs**.
+   Only the first two satisfy PHASE2 #4 as written; the third is reported to Peter as a set, with
+   the decision whether it counts (§20 item 13).
 
 ## 15. Performance (EL-50)
 
@@ -1678,29 +1908,42 @@ of both stores, IR objects, `odin3_ast_bytes_reserved`, peak RSS):
 | the 31 VTR files, total elaboration | ≤ 3 s |
 | complexity | stage 1 O(parsed nodes × specializations + evaluation steps); stage 2 O(elaborated nodes + IR objects + Σ process statements × output bits) |
 
+**lenet.v estimate** (the review's F28; the bench reports each term so a miss is explainable).
+IR record sizes from `src/ir/ir_internal.h`: a pin record is 24 B plus 4 B in its net's pin array
+(28 B); a net record ≈ 48 B; a node record ≈ 48 B plus its parameters in the arena; pin arrays
+round up to their size class (×≈ 1.3 on average). Yosys's 381k cells at ≈ 60 pins each (a 16-bit
+binary word cell has 48–49) are ≈ 23M pins → 23M × 28 B × 1.3 ≈ **0.84 GB**; nets: 2.0M wire bits
+plus ≈ 6M cell-output and temporary nets (381k cells × ≈ 16 output bits) ≈ 8M × 48 B ≈ **0.38
+GB**; the 16,314 `$proc` nodes add their `I`/`O` pins (≈ 2M pins, ≈ 0.07 GB) and bodies (≈ 0.05
+GB); nodes 0.4M × 48 B ≈ 0.02 GB; wires 555k × 64 B + net vectors ≈ 0.04 GB; the two AST stores
+coexist during stage 1 (the parsed store, ≈ 3.4M nodes × 41 B ≈ 0.14 GB, is freed before stage
+2) and the elaborated store stays (≈ 0.14 GB); memories are not materialised (no `$readmem`
+outside `ifdef QUARTUS`). Total ≈ **1.5–1.6 GB** at the stage-2 peak, inside the 2.0 GB target
+with ≈ 25% headroom; the byte budget (EL-46) is 60% of the dev machine's 23 GB, so it never
+fires on lenet.
+
 The output goes verbatim into `docs/PHASE2.md` with 2D's entry; a missed target is investigated
 and reported, never relaxed (2A's rule).
 
 ## 16. Review focus and concerns
 
-1. **Don't-care resolution against Parmys.** Out-of-range selects, `full_case`, `-nolatches` and
-   x constants leave x in the netlist; Parmys resolves each x through `opt`'s choices, so an
-   equivalence check against a Parmys golden can fail even when 2D is right. 2D keeps every x
-   explicit (`$shiftx`, `$_CONSTX_`) so 2F can follow Yosys's rules; the bridge (§14.3) avoids the
-   problem for 2D's own tests because both sides go through one Yosys. 2H must decide how to
-   compare designs whose outputs are don't-care on some inputs.
+1. **Don't-care resolution against Parmys** (§14.6). The bridge avoids it for 2D's own tests
+   because both sides go through one Yosys; the exit test does not, and depends on 2F mirroring
+   Yosys's x rules and on the `--x-report` outcome Peter rules on (§20 item 13).
 2. **Width and sign typing.** EL-13 is the rule most likely to be subtly wrong (context through a
-   ternary, a comparison inside an addition, a function result). The typing table tests, Chu's
-   examples and the differential generator are the guard; reviewers should trace three
-   expressions by hand through both sweeps.
+   ternary, a comparison inside an addition, a function result, an unsized parameter). The typing
+   table tests, Chu's examples and the differential generator are the guard; reviewers should
+   trace three expressions by hand through both sweeps.
 3. **Blocking substitution.** The `lv`/`rv` maps with case temporaries reproduce Yosys's
    `ProcessGenerator`; a missing save/restore around a case branch gives a netlist that is wrong
-   only on some paths. The exact-structure tests of §14.1 pin it.
+   only on some paths. The exact-body tests of §14.1 pin it.
 4. **Two passes per specialization.** Pass W must replay pass E's decisions exactly; any
    divergence makes `INSTANTIATION` names or generate blocks inconsistent. Pass W asserts the log
    is consumed in order and completely.
-5. **IR changes.** The process object adds check rules and mutation rules; `merge` and
-   `compact` must keep processes consistent. These are Peter's review items (§20).
+5. **The `$proc` cell.** It keeps every IR invariant by construction, but its `verify` hook is the
+   only guard on the body; a body position off by one points at the wrong pin and still passes
+   rule 5. The malformed-body tests of §14.1 and the round trip through `write_rtlil` and Yosys
+   are the guards.
 
 ## 17. Divergences (from Yosys/Parmys, or from IEEE 1364-2005)
 
@@ -1708,22 +1951,27 @@ and reported, never relaxed (2A's rule).
 |---|---|---|---|---|
 | 1 | names may be used before their declaration in the scope | same | declare before use | Parmys compatibility |
 | 2 | modules not reachable from the top are not elaborated | elaborates every module at read time (errors in unused modules fail) | — | elaboration is per specialization; accepting more is harmless |
-| 3 | `else if` generate nests a scope (`genblk2.genblk1.x`) | same | not a separate scope | names match Yosys's |
-| 4 | non-constant lvalue selects use the case method | mask-and-shift (`$shift`) unless `nowrshmsk` | — | no `$shift` in processes; equivalent |
+| 3 | `if (A) … else if (B) …` generate: the else branch is a scope, named like the then-branch; names nest as `genblk1.genblk1.x` for a first construct | same (verified on 0.55) | a directly nested conditional is not a separate scope (`genblk1.x`) | names match Yosys's |
+| 4 | non-constant lvalue selects use the case method | mask-and-shift (`$shift`) unless `nowrshmsk` | — | no `$shift` cell needed; equivalent |
 | 5 | loop variables are process-local unless read elsewhere | outputs (dead registers) | — | avoids a false T10 on a shared `integer i`; equivalent |
 | 6 | `$readmem` files relative to the source file only | working directory first | tool-defined | DESIGN §4.0: never the working directory |
-| 7 | named `#()` > first `defparam` > ordered `#()`; ordered `#()` with `defparam` accepted | same order; ordered + defparam is an error | `defparam` wins; last `defparam` wins | the exit bar is Parmys; the ordered case is undefined in Yosys |
+| 7 | project > named `#()` > first `defparam` > ordered `#()`; ordered `#()` with `defparam` accepted | same order; ordered + defparam is an error | `defparam` wins; last `defparam` wins | the exit bar is Parmys; the ordered case is undefined in Yosys |
 | 8 | a specialization is keyed by resolved values; overrides equal to defaults share the base module; names `base$P=v` | `$paramod\base\P=…` whenever any override is given | — | fewer modules, IR-7 naming |
 | 9 | automatic top = the single uninstantiated module, else an error | deepest hierarchy, ties to the last defined | — | DESIGN §4.0 and the project corpus; the micro harness passes `--top` |
 | 10 | any undeclared identifier is an implicit net (warning) | same | only net lvalues and port connections | Parmys compatibility |
 | 11 | an edge on a multi-bit signal is an error | same | uses the LSB | Yosys |
-| 12 | T9, T10, A4 are errors | accepted (A4/T10 later flagged by `check`) | T9/T10 legal in simulation | the coverage audit's REJECT verdicts |
-| 13 | `===`/`!==` folded at elaboration (E9) | `$eqx`/`$nex`, folded by `opt` | — | the coverage audit's E9 decision |
+| 12 | T9, T10, A4 are errors | accepted (A4/T10 later flagged by `check`; T9 silently, verified) | T9/T10 legal in simulation | the coverage audit's REJECT verdicts |
+| 13 | `===`/`!==`: exact fold when both constant; a wildcard compare over the 0/1 positions when one side has x/z constant bits (warning); `$eq`/`$ne` otherwise | `$eqx`/`$nex`; `techmap` drops the x bits, giving the same wildcard compare (verified through the Parmys script) | x/z compared literally (always false against a signal in hardware) | matches Parmys's netlist |
 | 14 | no `$pos` or `$sshl`; extension is wiring; constants folded at elaboration | `$pos`, `$sshl`; folding in `opt` | — | IR-1; same netlist after `opt` |
-| 15 | memories are collected into one `$mem` at elaboration | `$memrd`/`$memwr`/`$meminit` + `memory_collect` | — | the IR has no memory record |
+| 15 | memories are collected into one `$mem` at elaboration (raw-index ports, simlib applies `OFFSET`) | `$memrd`/`$memwr`/`$meminit` + `memory_collect` (raw-index ports) | — | the IR has no memory record |
 | 16 | an unconnected input is driven by x | left undriven | floats (z) | an explicit don't-care, no undriven-net warning |
 | 17 | a call's result width is its declared width everywhere | an unevaluated call's width is `\|l − r\|` (no +1) in `detectSignWidth` | declared width | a Yosys quirk, visible only for calls in untaken ternary branches |
 | 18 | `$unnamed_block$<k>` numbered per module | global counter | — | determinism |
+| 19 | `--nomem2reg` disables every mem2reg rule, rule 1 (net arrays) included, and errors on an array that then cannot be a memory | `-nomem2reg` skips the same rules; such designs fail later in `genrtlil` | — | follows Yosys; an earlier, located error |
+| 20 | top candidates count instantiations in every generate branch, selected or not | counts the elaborated design | counts the elaborated design | the top is chosen before elaboration; only a module instantiated solely in a never-selected branch differs |
+| 21 | an unsized constant in a concatenation is accepted at its stored width, with a warning | accepted silently (verified on 0.55) | illegal | the exit bar is Parmys |
+| 22 | an unsized literal of exactly a ranged parameter's width stays unsized (extends by its top bit) | same (`simplify.cc` 2381–2390, verified) | sized to the range | matches Yosys's values |
+| 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
 
 ## 18. Implementation split (EL-51)
 
@@ -1732,74 +1980,85 @@ PHASE2's 2D row (Opus `xhigh` for semantics, `high` once settled; the agent says
 
 | PR | Content | Depends on | Model/effort |
 |---|---|---|---|
-| 2D-1 IR | IR changes A, B, C (registry cells, process objects with check/merge/compact/writer rules, port range), `write_rtlil`, ABI process accessors | Peter's approval of §20 items 1–3 | Opus `xhigh` (IR) |
-| 2D-2 constants | `odin3_cval`, operators, typing (EL-13), the interpreter, `$clog2`; the Yosys constant table | — (parallel with 2D-1) | Opus `xhigh` → `high` |
-| 2D-3 stage 1 hierarchy | run context, lookup, top, parameters and precedence, `defparam`/project push-down, specializations, pass E/W skeleton, connections, black boxes; the binder | 2D-2, 2C merged | Opus `xhigh` |
+| 2D-1 IR | IR changes A (nine cells), B (the `$proc` cell: type, `ODIN3_VAL_PROC` body, `verify`, process counter, pass-manager `processes` flag and writer refusals), C (port range and sign); `write_rtlil`; ABI additions | the §20 rulings (made) | Opus `xhigh` (IR) |
+| 2D-2 constants | `odin3_cval`, operators, typing (EL-13) with `UNSIZED` through parameters, the interpreter, `$clog2`; the Yosys 0.55 constant table | — (parallel with 2D-1) | Opus `xhigh` → `high` |
+| 2D-3 stage 1 hierarchy | run context, lookup (and the taken-name checks), top, parameters and precedence, `defparam`/project push-down (cell-type targets included), specializations, pass E/W skeleton, connections, black boxes; the binder | 2D-2, 2C merged | Opus `xhigh` |
 | 2D-4 stage 1 content | generate and naming, declarations and ports, implicit nets, `default_nettype`, IGNORE/REJECT diagnostics; `reject-2d`/`ignore-2d` on | 2D-3 | Opus `high` |
-| 2D-5 stage 2 module | wires, ports, instances, gates, continuous assignments, expressions and selects, drivers, wired nets, tri-state, memories, provenance, attributes; `--elab-only` | 2D-1, 2D-4 | Opus `xhigh` |
-| 2D-6 stage 2 processes | the process generator, `case`, loops, inlining, memory writes, mem2reg, initial values, T9/T10 | 2D-5 | Opus `xhigh` |
-| 2D-7 evidence | coverage rows and goldens, the bridge, sweeps, fuzzers, `bench_elab`, the PHASE2 entry | grows from 2D-3; closes last | Opus `high`; Sonnet `high` for bulk goldens and bench runs |
+| 2D-5 stage 2 module | wires, ports, instances, gates, continuous assignments, expressions and selects, drivers, wired nets, tri-state and child `inout`s, memories, provenance, attributes, the byte budget; `--elab-only` | 2D-1, 2D-4 | Opus `xhigh` |
+| 2D-6 stage 2 processes | the process generator and `$proc` emission, `case`, loops, inlining, memory writes, mem2reg, initial values, T9/T10 | 2D-5 | Opus `xhigh` |
+| 2D-7 evidence | coverage rows and goldens (both latch modes), the bridge on Yosys 0.55, sweeps, fuzzers (0.55, nightly drift check against 0.69), `bench_elab`, `equiv-check --x-report` handed to 2H's backlog, the PHASE2 entry | grows from 2D-3; closes last | Opus `high`; Sonnet `high` for bulk goldens and bench runs |
 
 Lanes: 2D-1 ‖ 2D-2, then 2D-3 → 2D-4 → 2D-5 → 2D-6 serially (they share the stage contexts),
-2D-7 alongside. Each PR: tests first, `/lint`, a read-only critique before it opens (PHASE0 §A.1);
-the IR PR waits for Peter.
+2D-7 alongside. Each PR: tests first, `/lint`, a read-only critique before it opens (PHASE0 §A.1).
 
 ## 19. Amendments to other documents
 
 Made when the PRs land (not by this spec):
 
-- `docs/IR.md`: IR-19 (process objects, EL-33), check rules 12–13, IR-15's mutation rules for
-  processes, IR-9 (the RTLIL view allows processes), IR-6 (process tombstones), the IR-12 note on
-  module-relative `hier`, `odin3_port_spec`'s range and sign (IR change C).
-- `docs/DESIGN.md`: §5.2 word list (+ the ten cells), §6 step 2 ("processes" = IR-19), §9 (the
-  RTLIL row), §4.0 (`--auto-blackbox`, the top rule unchanged).
-- 2A spec: §7's D1 warning is emitted by 2D, not 2E (EL-36); §4.6 points to EL-4 for the
-  refined elaborated form.
-- `docs/PASSES.md`: `read_verilog` options, `write_rtlil`, `compact` (remap wired).
+- `docs/IR.md`: IR-19 (the `$proc` cell, EL-33: ports, parameters, the `ODIN3_VAL_PROC` value
+  kind in IR-10, the `ODIN3_CT_PROCESS` type flag and the per-module counter); IR-9 (the RTLIL
+  view allows `$proc`, the netlist view does not); IR-12's note that `hier` is module-relative;
+  `odin3_port_spec`'s `has_range`/`msb`/`lsb`/`is_signed` (IR change C). IR-3, IR-4, IR-6, IR-15
+  and the §9 check rules are unchanged.
+- `docs/DESIGN.md`: §5.2 word list (+ the nine cells, + `$proc` as the process cell); §6 step 2
+  ("processes" = `$proc` nodes) and the stated order `proc` before `opt`, enforced by the pass
+  flag; §9 (the RTLIL row); §4.0 (`--auto-blackbox`; the top rule unchanged).
+- 1D spec and `docs/PASSES.md`: `odin3_pass_def.processes` and each built-in's value;
+  `read_verilog` options; `write_rtlil`; `compact` (the symtab remap wired).
+- 2A spec: §7's D1 warning is emitted by 2D, not 2E (EL-36); §4.6 points to EL-4 for the refined
+  elaborated form, including the unsized `PARAM_DECL` value.
+- `docs/specs/2026-10-09-2C-verilog-coverage.md`, row E12: 2D accepts an unsized constant in a
+  concatenation at its stored width with a warning (Yosys and Parmys accept it; F6 ruling), instead
+  of the located error the row describes.
+- `tools/equiv-check`: `--x-report` (2H, §14.6).
 - `docs/PHASE2.md`: 2D's entry (the controller writes the decision log).
 
 ## 20. Decisions for Peter
 
-Numbered; the recommendation first.
+Ruled by the controller as agent defaults under Peter's overnight rule (2026-10-11), after the
+Fable review; Peter may override any of them.
 
-1. **IR change B: process objects (IR-19, EL-33).** Recommend: approve RTLIL-style processes on
-   IR nets, created whole and immutable, removed by `proc`, with check rules 12–13 and the merge/
-   delete/compact rules. Alternative: keep `always` bodies in the elaborated AST for `proc` to
-   read (the IR then depends on a store AST-16 frees).
-2. **IR change A: ten registry cells (EL-31).** Recommend: add `$neg $xnor $reduce_xnor
-   $reduce_bool $logic_not $logic_and $logic_or $shiftx $shift $pow` with Yosys semantics.
-   Alternative: Appendix A's compositions (only `$shiftx`'s x fill and `$pow` lose something).
-3. **IR change C: port range and signedness (EL-24).** Recommend: add `msb, lsb, is_signed` to
-   `odin3_port_spec`. Alternative: a wire-range mutation call.
-4. **Latches.** Recommend: `--nolatches` off by default (Yosys's default, coverage C2's latch
-   with 2E's warning); the 2H harness and the Phase 3 VTR scripts pass it, as Parmys does.
-   Alternative: on by default, matching Parmys out of the box.
-5. **Parameter precedence (EL-8).** Recommend: project > named `#()` > first `defparam` > ordered
-   `#()` (Yosys, verified), warning when a `defparam` loses. Alternative: IEEE (`defparam` over
-   `#()`, last `defparam` wins), at the risk of micro mismatches.
-6. **Top selection (EL-7).** Recommend: keep DESIGN §4.0's rule (the project corpus requires it)
-   and have the 2H micro harness pass `--top` from the Parmys golden's first model.
-   Alternative: Yosys's deepest-hierarchy rule, which breaks `neg_ambiguous_top`/`neg_no_top`.
-7. **Undefined modules (EL-11).** Recommend: `unresolved_module` (DESIGN, Parmys), with
-   `--auto-blackbox` for coverage I7's book case. Alternative: implicit black boxes by default.
-8. **Memories (EL-27).** Recommend: Yosys's mem2reg-as-needed rules, and one collected `$mem` per
-   remaining array with asynchronous read ports, made by 2D. Alternative: `$memrd`/`$memwr`
-   cells linked by `MEMID` to a port-less `$mem`, collected later by Phase 4.
-9. **`write_rtlil` in 2D (EL-48).** Recommend: yes — it is the only oracle for 2D before 2E
-   exists, and serves 2E/2F later. Alternative: goldens only until 2E.
-10. **Stage-2 failure (EL-2).** Recommend: accept that a failed stage 2 leaves valid but
-    incomplete modules in the design (no module-delete primitive). Alternative: add
-    `odin3_module_destroy` (another IR change) and make stage 2 atomic.
-11. **Parmys leniency (EL-25, EL-23).** Recommend: implicit nets for any undeclared identifier
-    and declarations in unnamed blocks, each with a warning (Parmys reads `-sv`). Alternative:
-    IEEE errors, listing the affected micros as exceptions.
-12. **Unreachable modules (EL-7).** Recommend: not elaborated (an info line lists them).
-    Alternative: elaborate every module with default parameters, as Yosys does, so errors in
-    unused modules are reported.
+1. **IR change B — processes (EL-33).** *Ruled:* the review's representation: a `$proc` cell
+   with real `I`/`O` ports and an opaque `BODY` payload (positions are pin indices; constants are
+   pins on the shared constant nets), so IR-3's driver/sink queries and check rule 4 stay intact;
+   `verify` validates the body; merge, delete and compact need nothing new; passes declare
+   `processes = OK` or are refused. (v1's pinless process objects are withdrawn.)
+2. **IR change A — registry cells (EL-31).** *Ruled:* add nine cells, `$neg $xnor $reduce_xnor
+   $reduce_bool $logic_not $logic_and $logic_or $shiftx $pow`; `$shift` is dropped (nothing emits
+   it). Appendix A keeps the compositions for reference.
+3. **IR change C — port range and signedness (EL-24).** *Ruled as recommended,* with the
+   review's `has_range` form.
+4. **Latches.** *Ruled as recommended:* `--nolatches` off by default; the 2H harness and the Phase
+   3 VTR scripts pass it, as Parmys does; both modes are tested (§14.2).
+5. **Parameter precedence (EL-8).** *Ruled as recommended:* project > named `#()` > first
+   `defparam` > ordered `#()` (Yosys, verified), with a warning when a `defparam` loses.
+6. **Top selection (EL-7).** *Ruled as recommended:* DESIGN §4.0's rule; the 2H micro harness
+   passes `--top` from the Parmys golden's first model.
+7. **Undefined modules (EL-11).** *Ruled as recommended:* `unresolved_module`, with
+   `--auto-blackbox` opt-in.
+8. **Memories (EL-27).** *Ruled as recommended,* with the review's correction: Yosys's
+   mem2reg-as-needed rules; one collected `$mem` per remaining array, asynchronous read ports,
+   raw-index addresses (simlib applies `OFFSET`).
+9. **`write_rtlil` in 2D (EL-48).** *Ruled as recommended,* on Yosys 0.55 for every comparison.
+10. **Stage-2 failure (EL-2).** *Ruled as recommended:* a failed stage 2 leaves valid but
+    incomplete modules (every port connected, undriven nets at worst); no module-delete primitive.
+11. **Parmys leniency (EL-25, EL-23).** *Ruled as recommended:* implicit nets for any undeclared
+    identifier and declarations in unnamed blocks, each with a warning; likewise (F6) an unsized
+    constant in a concatenation is accepted with a warning.
+12. **Unreachable modules (EL-7).** *Ruled as recommended:* not elaborated (an info line lists
+    them).
+13. **New (the review's F12): don't-cares in the exit comparison (§14.6).** *Agent default under
+    the controller's F12 ruling:* keep x explicit through 2D, mirror Yosys's x rules in 2F, write
+    surviving x as Parmys's `unconn`, and add `equiv-check --x-report` so 2H reports
+    identical / equivalent / equivalent outside x-cones / differs. *For Peter:* whether
+    "equivalent outside x-cones" (outputs listed and reviewed) may count toward PHASE2 #4's exit
+    bar; recommended: no by default, yes per design when its listed outputs are reviewed and
+    recorded in the exceptions list.
 
-## Appendix A. Compositions if IR change A is declined
+## Appendix A. Compositions considered for IR change A
 
-Each uses only today's registry; `w` = the node's final width, operands as in EL-30.
+Kept for reference (§20 item 2 adds the cells). Each uses only the pre-2D registry; `w` = the
+node's final width, operands as in EL-30.
 
 | Cell | Composition |
 |---|---|
@@ -1811,5 +2070,4 @@ Each uses only today's registry; `w` = the node's final width, operands as in EL
 | `$logic_and(A, B)` | `$and($reduce_or(A), $reduce_or(B))` with `A_WIDTH` = `B_WIDTH` = 1, `Y_WIDTH` = w |
 | `$logic_or(A, B)` | as `$logic_and` with `$or` |
 | `$shiftx(A, B)` | `$mux(A = $shr(A, B'), B = all-x constant, S = out_of_range)` where `B'` is `B` made non-negative and `out_of_range` = `B < 0` (signed B) or `B > width(A) − w` (`$lt`/`$gt` cells); x stays explicit |
-| `$shift(A, B)` | not needed (EL-32 uses the case method) |
 | `$pow(A, B)` | constant base 2: `$shl` (as now); otherwise square-and-multiply over B's bits: for bit k, `p_k = $mux(1, a_k, b[k])`, `a_{k+1} = $mul(a_k, a_k)`, product of the `p_k` with `$mul`, all at w; a negative signed exponent selects Yosys's special values with a final `$mux` |
