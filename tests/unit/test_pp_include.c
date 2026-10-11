@@ -9,6 +9,7 @@
 #include "frontends/verilog/preproc_internal.h"
 #include "frontends/verilog/preproc_test.h"
 #include "ir/design.h"
+#include "pp_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/hash.h"
@@ -23,86 +24,29 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PATH_BUF = 1024, DIR_BUF = 512, MSG_MAX = 4096, MAX_MADE = 64, OOM_LIMIT = 6000 };
-
-static odin3_design *design;
-static odin3_srcman *sm;
-static odin3_pp *pp;
-static odin3_pp_stream stream;
-static char tmp[PATH_BUF / 2];
-static char captured[MSG_MAX];
-static int errors;
-static char made[MAX_MADE][PATH_BUF];
-static int nmade;
-
-static void sink(odin3_log_level level, const char *msg, void *user) {
-    (void)user;
-    if (level == ODIN3_LOG_ERROR) {
-        errors++;
-        (void)snprintf(captured, sizeof captured, "%s", msg);
-    }
-}
+enum { PATH_BUF = PP_PATH_BUF, DIR_BUF = 512, OOM_LIMIT = 6000 };
 
 void setUp(void) {
-    odin3_log_set_sink(sink, NULL);
-    captured[0] = '\0';
-    errors = 0;
-    nmade = 0;
-    pp = NULL;
-    memset(&stream, 0, sizeof stream);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_ppinc_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    pp_fixture_set_up();
 }
 
 void tearDown(void) {
-    odin3_util_set_alloc_fail_after(-1);
-    odin3_log_set_sink(NULL, NULL);
-    odin3_pp_destroy(pp);
-    for (int i = nmade - 1; i >= 0; i--) {
-        TEST_ASSERT_EQUAL_INT(0, remove(made[i]));
-    }
-    TEST_ASSERT_EQUAL_INT(0, rmdir(tmp));
-    odin3_design_destroy(design);
+    pp_fixture_tear_down();
 }
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static uint32_t id(const char *str) {
-    uint32_t got = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(str), &got));
-    return got;
-}
-
 /* Writes tmp/name (a fresh path each time, so the file cache never holds an older copy). */
-static void put(const char *name, const char *text) {
+static void put_new(const char *name, const char *text) {
     char path[PATH_BUF];
     (void)snprintf(path, sizeof path, "%s/%s", tmp, name);
     TEST_ASSERT_TRUE(access(path, F_OK) != 0);
-    FILE *fp = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(strlen(text), fwrite(text, 1, strlen(text), fp), name);
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    TEST_ASSERT_TRUE(nmade < MAX_MADE);
-    (void)snprintf(made[nmade++], PATH_BUF, "%s", path);
+    put(name, odin3_bytes_cstr(text), NULL);
 }
 
 static void make_pp(const char *const *incdirs, uint32_t nincdirs) {
     odin3_pp_config config = {NULL, 0, incdirs, nincdirs};
-    odin3_pp_destroy(pp);
-    pp = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_create(design, &config, &pp));
-}
-
-static void ensure_pp(void) {
-    if (pp == NULL) {
-        make_pp(NULL, 0);
-    }
+    create_pp(&config);
 }
 
 static void set_limits(odin3_pp_limits limits) {
@@ -117,11 +61,6 @@ static odin3_status run_file(const char *dir, const char *name) {
     (void)snprintf(path, sizeof path, "%s/%s", dir != NULL ? dir : tmp, name);
     odin3_pp_source src = {id(name), id(path), id("work"), {0}};
     return odin3_pp_run(pp, &src, &stream);
-}
-
-static void assert_text(const char *want) {
-    TEST_ASSERT_EQUAL_size_t_MESSAGE(strlen(want), stream.text.len, want);
-    TEST_ASSERT_EQUAL_MEMORY(want, stream.text.ptr, strlen(want) == 0 ? 1 : strlen(want));
 }
 
 static void assert_error(const char *dir, const char *name, const char *want) {
@@ -195,8 +134,8 @@ static void test_includer_directory(void) {
 static void test_absolute_name_stands(void) {
     char text[PATH_BUF * 2];
     (void)snprintf(text, sizeof text, "`include \"%s/abs.vh\"\n", tmp);
-    put("abs.vh", "abs\n");
-    put("t.v", text);
+    put_new("abs.vh", "abs\n");
+    put_new("t.v", text);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("abs\n\n");
 }
@@ -208,7 +147,7 @@ static void test_not_found(void) {
     make_pp(incdirs, 1);
     assert_error(dir, "top.v", "top.v:2:1: error: include_not_found: 'missing.vh'");
     /* a directory is not a regular file */
-    put("t.v", "x `include \"..\"\n");
+    put_new("t.v", "x `include \"..\"\n");
     assert_error(NULL, "t.v", "t.v:1:3: error: include_not_found: '..'");
 }
 
@@ -219,7 +158,7 @@ static void test_cycle(void) {
                  "b.vh:2:1: error: include_cycle: 'a.vh'\n"
                  "  included from a.vh:2\n"
                  "  included from top.v:2");
-    put("self.v", "\n\n`include \"self.v\"\n");
+    put_new("self.v", "\n\n`include \"self.v\"\n");
     assert_error(NULL, "self.v", "self.v:3:1: error: include_cycle: 'self.v'");
 }
 
@@ -243,8 +182,8 @@ static void test_included_twice(void) {
 /* --- buffers, segments, the protective space ----------------------------------------------- */
 
 static void test_include_buffer_and_segments(void) {
-    put("nonl.vh", "endmodule");
-    put("t.v", "x`include \"nonl.vh\"y\n`include \"nonl.vh\"\nmodule");
+    put_new("nonl.vh", "endmodule");
+    put_new("t.v", "x`include \"nonl.vh\"y\n`include \"nonl.vh\"\nmodule");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("x endmodule y\nendmodule\nmodule");
     odin3_srcbuf_info info;
@@ -278,16 +217,16 @@ static void test_include_buffer_and_segments(void) {
 }
 
 static void test_empty_include(void) {
-    put("empty.vh", "");
-    put("t.v", "a`include \"empty.vh\"b");
+    put_new("empty.vh", "");
+    put_new("t.v", "a`include \"empty.vh\"b");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("a b");
 }
 
 /* An error inside an included file prints the include chain. */
 static void test_error_chain(void) {
-    put("e.vh", "\n x `endif\n");
-    put("t.v", "a\n`include \"e.vh\"\n");
+    put_new("e.vh", "\n x `endif\n");
+    put_new("t.v", "a\n`include \"e.vh\"\n");
     assert_error(NULL, "t.v",
                  "e.vh:2:4: error: syntax: `endif without `ifdef\n  included from t.v:2");
 }
@@ -295,16 +234,16 @@ static void test_error_chain(void) {
 /* --- conditionals and translate_off across files (PP-4, PP-10) ----------------------------- */
 
 static void test_endif_cannot_close_includer(void) {
-    put("e.vh", "b `endif\n");
-    put("t.v", "`ifndef X\n`include \"e.vh\"\n`endif\n");
+    put_new("e.vh", "b `endif\n");
+    put_new("t.v", "`ifndef X\n`include \"e.vh\"\n`endif\n");
     assert_error(NULL, "t.v",
                  "e.vh:1:3: error: syntax: `endif without `ifdef in this file (conditionals do "
                  "not cross `include boundaries)\n  included from t.v:2");
 }
 
 static void test_unterminated_in_included_file(void) {
-    put("o.vh", "`ifdef A\n");
-    put("t.v", "`include \"o.vh\"\nx\n`endif\n");
+    put_new("o.vh", "`ifdef A\n");
+    put_new("t.v", "`include \"o.vh\"\nx\n`endif\n");
     assert_error(NULL, "t.v",
                  "o.vh:1:1: error: syntax: unterminated `ifdef\n  included from t.v:1");
 }
@@ -314,26 +253,26 @@ static void test_cond_depth_per_file(void) {
     odin3_pp_limits limits = odin3_pp_default_limits();
     limits.cond_depth = 1;
     set_limits(limits);
-    put("c.vh", "`ifndef B\nb\n`endif\n");
-    put("t.v", "`ifndef A\n`include \"c.vh\"\n`endif\n");
+    put_new("c.vh", "`ifndef B\nb\n`endif\n");
+    put_new("t.v", "`ifndef A\n`include \"c.vh\"\n`endif\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("\n\nb\n\n\n\n");
 }
 
 static void test_include_in_skipped_region(void) {
-    put("t.v", "`ifdef X `include \"nowhere.vh\" `include <bad> `endif.");
+    put_new("t.v", "`ifdef X `include \"nowhere.vh\" `include <bad> `endif.");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text(".");
 }
 
 /* PP-10's region is the stream's text: it may end in the includer. */
 static void test_translate_off_across_include_end(void) {
-    put("x.vh", "a\n// synopsys translate_off\nb\n");
-    put("t.v", "`include \"x.vh\"\nc\n// synopsys translate_on\nd\n");
+    put_new("x.vh", "a\n// synopsys translate_off\nb\n");
+    put_new("t.v", "`include \"x.vh\"\nc\n// synopsys translate_on\nd\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("a\n\nd\n");
-    put("y.vh", "a\n// synopsys translate_off\nb\n");
-    put("u.v", "`include \"y.vh\"\nc\n");
+    put_new("y.vh", "a\n// synopsys translate_off\nb\n");
+    put_new("u.v", "`include \"y.vh\"\nc\n");
     assert_error(NULL, "u.v",
                  "y.vh:2:1: error: syntax: unterminated translate_off\n  included from u.v:1");
 }
@@ -358,15 +297,15 @@ static void test_file_name_syntax(void) {
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         char name[PATH_BUF / 4];
         (void)snprintf(name, sizeof name, "t%zu.v", i);
-        put(name, cases[i].text);
+        put_new(name, cases[i].text);
         assert_error(NULL, name, cases[i].want);
     }
 }
 
 static void test_files_read_first_read_order(void) {
-    put("b.vh", "b\n");
-    put("a.vh", "`include \"b.vh\"a\n");
-    put("t.v", "`include \"a.vh\"\n`include \"b.vh\"\n");
+    put_new("b.vh", "b\n");
+    put_new("a.vh", "`include \"b.vh\"a\n");
+    put_new("t.v", "`include \"a.vh\"\n`include \"b.vh\"\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "t.v"));
     assert_text("b\na\n\nb\n\n");
     char want[3][PATH_BUF];
@@ -383,11 +322,11 @@ static void test_cap_include_depth(void) {
     odin3_pp_limits limits = odin3_pp_default_limits();
     limits.include_depth = 1;
     set_limits(limits);
-    put("b.vh", "b\n");
-    put("a.vh", "`include \"b.vh\"\n");
-    put("ok.v", "`include \"b.vh\"\n");
+    put_new("b.vh", "b\n");
+    put_new("a.vh", "`include \"b.vh\"\n");
+    put_new("ok.v", "`include \"b.vh\"\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_file(NULL, "ok.v"));
-    put("t.v", "`include \"a.vh\"\n");
+    put_new("t.v", "`include \"a.vh\"\n");
     assert_error(NULL, "t.v",
                  "a.vh:1:1: error: syntax: include depth exceeds ODIN3_PP_MAX_INCLUDE_DEPTH (1)\n"
                  "  included from t.v:1");
@@ -397,8 +336,8 @@ static void test_cap_includes_per_stream(void) {
     odin3_pp_limits limits = odin3_pp_default_limits();
     limits.includes_per_stream = 2; /* the stream's own file counts */
     set_limits(limits);
-    put("w.vh", "w\n");
-    put("t.v", "`include \"w.vh\"\n`include \"w.vh\"\n");
+    put_new("w.vh", "w\n");
+    put_new("t.v", "`include \"w.vh\"\n`include \"w.vh\"\n");
     assert_error(NULL, "t.v",
                  "t.v:2:1: error: syntax: files exceeds ODIN3_PP_MAX_INCLUDES_PER_STREAM (2)");
 }
@@ -407,8 +346,8 @@ static void test_cap_file_cache_bytes(void) {
     odin3_pp_limits limits = odin3_pp_default_limits();
     limits.file_cache_bytes = 24;
     set_limits(limits);
-    put("big.vh", "0123456789\n");
-    put("t.v", "\n\n`include \"big.vh\"\n"); /* 20 bytes */
+    put_new("big.vh", "0123456789\n");
+    put_new("t.v", "\n\n`include \"big.vh\"\n"); /* 20 bytes */
     assert_error(NULL, "t.v",
                  "t.v:3:1: error: syntax: file cache bytes exceeds ODIN3_PP_MAX_FILE_CACHE_BYTES "
                  "(24)");
@@ -449,14 +388,14 @@ static bool oom_try(long fail_after, const char *path) {
 }
 
 static void test_out_of_memory(void) {
-    put("b.vh", "b\n");
-    put("a.vh", "`include \"b.vh\"a\n");
+    put_new("b.vh", "b\n");
+    put_new("a.vh", "`include \"b.vh\"a\n");
     char incd[PATH_BUF];
     (void)snprintf(incd, sizeof incd, "%s/incd", tmp);
     TEST_ASSERT_EQUAL_INT(0, mkdir(incd, 0700));
-    (void)snprintf(made[nmade++], PATH_BUF, "%s", incd);
-    put("incd/inc.vh", "inc\n");
-    put("t.v", "`include \"a.vh\"\n`include \"b.vh\"\n`include \"inc.vh\"\n");
+    remember(incd);
+    put_new("incd/inc.vh", "inc\n");
+    put_new("t.v", "`include \"a.vh\"\n`include \"b.vh\"\n`include \"inc.vh\"\n");
     char path[PATH_BUF];
     (void)snprintf(path, sizeof path, "%s/t.v", tmp);
     bool succeeded = false;

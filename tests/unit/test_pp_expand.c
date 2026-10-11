@@ -9,6 +9,7 @@
 #include "frontends/verilog/preproc_internal.h"
 #include "frontends/verilog/preproc_test.h"
 #include "ir/design.h"
+#include "pp_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/hash.h"
@@ -27,103 +28,24 @@
 #error "ODIN3_PP_PROBES must name tests/unit/data/pp/probes"
 #endif
 
-enum { PATH_BUF = 1024, MSG_MAX = 4096, MAX_MADE = 256, OOM_LIMIT = 6000 };
-
-static odin3_design *design;
-static odin3_srcman *sm;
-static odin3_pp *pp;
-static odin3_pp_stream stream;
-static char tmp[PATH_BUF / 2];
-static char captured[MSG_MAX];
-static int errors;
-static char made[MAX_MADE][PATH_BUF];
-static int nmade;
-static const char *source; /* the text of the last run() */
-
-static void sink(odin3_log_level level, const char *msg, void *user) {
-    (void)user;
-    if (level == ODIN3_LOG_ERROR) {
-        errors++;
-        (void)snprintf(captured, sizeof captured, "%s", msg);
-    }
-}
+enum { PATH_BUF = PP_PATH_BUF, MSG_MAX = PP_MSG_MAX, OOM_LIMIT = 6000 };
 
 void setUp(void) {
-    odin3_log_set_sink(sink, NULL);
-    captured[0] = '\0';
-    errors = 0;
-    nmade = 0;
-    pp = NULL;
-    source = NULL;
-    memset(&stream, 0, sizeof stream);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_ppexp_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    pp_fixture_set_up();
 }
 
-/* Cleans up before asserting, so a failed test leaves no temporary files. */
 void tearDown(void) {
-    odin3_util_set_alloc_fail_after(-1);
-    odin3_log_set_sink(NULL, NULL);
-    odin3_pp_destroy(pp);
-    odin3_design_destroy(design);
-    int failed = 0;
-    for (int i = nmade - 1; i >= 0; i--) {
-        failed += remove(made[i]) != 0;
-    }
-    failed += rmdir(tmp) != 0;
-    TEST_ASSERT_EQUAL_INT(0, failed);
+    pp_fixture_tear_down();
 }
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static uint32_t id(const char *str) {
-    uint32_t got = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(str), &got));
-    return got;
-}
-
-/* Writes tmp/name and stores its path in path. */
-static void put(const char *name, odin3_bytes text, char *path) {
-    (void)snprintf(path, PATH_BUF, "%s/%s", tmp, name);
-    bool fresh = access(path, F_OK) != 0;
-    FILE *fp = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(text.len, fwrite(text.ptr, 1, text.len, fp));
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    if (fresh) {
-        TEST_ASSERT_TRUE(nmade < MAX_MADE);
-        (void)snprintf(made[nmade++], PATH_BUF, "%s", path);
-    }
-}
-
-static void ensure_pp(void) {
-    if (pp == NULL) {
-        odin3_pp_config none = {NULL, 0, NULL, 0};
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_create(design, &none, &pp));
-    }
-}
-
-static odin3_status run_path(const char *name, const char *path) {
-    ensure_pp();
-    odin3_pp_source src = {id(name), id(path), id("work"), {0}};
-    return odin3_pp_run(pp, &src, &stream);
-}
+static const char *source; /* the text of the last run() */
 
 /* Runs text as a fresh file (the cache keeps every path it read) given as "f.v". */
 static odin3_status run(const char *text) {
-    static int serial;
-    char file[PATH_BUF / 4];
-    char path[PATH_BUF];
-    (void)snprintf(file, sizeof file, "f%d.v", serial++);
-    put(file, odin3_bytes_cstr(text), path);
     source = text;
-    return run_path("f.v", path);
+    return run_fresh("f.v", odin3_bytes_cstr(text));
 }
 
 static odin3_status run_probe(const char *probe) {
@@ -133,7 +55,7 @@ static odin3_status run_probe(const char *probe) {
     return run_path(probe, path);
 }
 
-static void assert_text(const char *want) {
+static void assert_out(const char *want) {
     TEST_ASSERT_EQUAL_INT(0, errors);
     TEST_ASSERT_NOT_NULL(stream.text.ptr);
     char got[MSG_MAX];
@@ -146,7 +68,7 @@ static void assert_ok_text(odin3_status st, const char *want) {
     if (st != ODIN3_OK) {
         TEST_FAIL_MESSAGE(captured);
     }
-    assert_text(want);
+    assert_out(want);
 }
 
 static void assert_error(odin3_status st, const char *want) {
@@ -767,7 +689,7 @@ static bool oom_check(odin3_status st) {
         TEST_ASSERT_NULL(stream.text.ptr);
         return false;
     }
-    assert_text("\n\n\nassign y = (xx   * 2 + 1) + (0   * 2 + 1) + ((z + 1) + 1);\n");
+    assert_out("\n\n\nassign y = (xx   * 2 + 1) + (0   * 2 + 1) + ((z + 1) + 1);\n");
     return true;
 }
 

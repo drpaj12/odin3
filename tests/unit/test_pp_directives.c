@@ -9,6 +9,7 @@
 #include "frontends/verilog/preproc_internal.h"
 #include "frontends/verilog/preproc_test.h"
 #include "ir/design.h"
+#include "pp_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/hash.h"
@@ -23,124 +24,25 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-enum { PATH_BUF = 1024, MSG_MAX = 4096, MAX_MADE = 256, OOM_LIMIT = 4000 };
-
-static odin3_design *design;
-static odin3_srcman *sm;
-static odin3_pp *pp;
-static odin3_pp_stream stream;
-static char tmp[PATH_BUF / 2];
-static char captured[MSG_MAX];
-static int errors;
-static char made[MAX_MADE][PATH_BUF];
-static int nmade;
-
-static void sink(odin3_log_level level, const char *msg, void *user) {
-    (void)user;
-    if (level == ODIN3_LOG_ERROR) {
-        errors++;
-        (void)snprintf(captured, sizeof captured, "%s", msg);
-    }
-}
+enum { PATH_BUF = PP_PATH_BUF, MSG_MAX = PP_MSG_MAX, OOM_LIMIT = 4000 };
 
 void setUp(void) {
-    odin3_log_set_sink(sink, NULL);
-    captured[0] = '\0';
-    errors = 0;
-    nmade = 0;
-    pp = NULL;
-    memset(&stream, 0, sizeof stream);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_ppdir_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    pp_fixture_set_up();
 }
 
 void tearDown(void) {
-    odin3_util_set_alloc_fail_after(-1);
-    odin3_log_set_sink(NULL, NULL);
-    odin3_pp_destroy(pp);
-    for (int i = nmade - 1; i >= 0; i--) {
-        TEST_ASSERT_EQUAL_INT(0, remove(made[i]));
-    }
-    TEST_ASSERT_EQUAL_INT(0, rmdir(tmp));
-    odin3_design_destroy(design);
+    pp_fixture_tear_down();
 }
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static uint32_t id(const char *str) {
-    uint32_t got = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(str), &got));
-    return got;
-}
-
-static void remember(const char *path) {
-    TEST_ASSERT_TRUE(nmade < MAX_MADE);
-    (void)snprintf(made[nmade++], PATH_BUF, "%s", path);
-}
-
-static void put(const char *name, odin3_bytes text, char *path) {
-    (void)snprintf(path, PATH_BUF, "%s/%s", tmp, name);
-    bool fresh = access(path, F_OK) != 0;
-    FILE *fp = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(text.len, fwrite(text.ptr, 1, text.len, fp));
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    if (fresh) {
-        remember(path);
-    }
-}
-
-static void ensure_pp(void) {
-    if (pp == NULL) {
-        odin3_pp_config none = {NULL, 0, NULL, 0};
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_create(design, &none, &pp));
-    }
-}
-
-static odin3_status run_at(const char *name, const char *path, odin3_loc at) {
-    ensure_pp();
-    odin3_pp_source src = {id(name), id(path), id("work"), at};
-    return odin3_pp_run(pp, &src, &stream);
-}
-
 /* Runs text as a fresh file (the cache keeps every path it read) given as "t.v". */
 static odin3_status run_bytes(odin3_bytes text) {
-    static int serial;
-    char file[PATH_BUF / 4];
-    char path[PATH_BUF];
-    (void)snprintf(file, sizeof file, "t%d.v", serial++);
-    put(file, text, path);
-    return run_at("t.v", path, (odin3_loc){0});
+    return run_fresh("t.v", text);
 }
 
 static odin3_status run(const char *text) {
     return run_bytes(odin3_bytes_cstr(text));
-}
-
-static void assert_text(const char *want) {
-    TEST_ASSERT_EQUAL_size_t(strlen(want), stream.text.len);
-    TEST_ASSERT_EQUAL_MEMORY(want, stream.text.ptr, strlen(want) == 0 ? 1 : strlen(want));
-}
-
-/* The stream's segment map as stored by the source manager. */
-static const odin3_srcseg_rec *segments(uint32_t *count) {
-    odin3_srcbuf_info info;
-    TEST_ASSERT_TRUE(odin3_srcman_buffer_info(sm, stream.stream, &info));
-    const odin3_srcbuf_rec *rec = odin3_srcman_rec_of(sm, (odin3_loc){info.start});
-    const odin3_srcfile_rec *file = odin3_srcman_file_of(sm, rec);
-    *count = (uint32_t)file->segs.len;
-    return (const odin3_srcseg_rec *)file->segs.data;
-}
-
-/* The loc of offset in the stream's own file. */
-static uint32_t at_offset(uint32_t offset) {
-    return odin3_srcman_loc(sm, stream.stream, offset).v;
 }
 
 /* The output equals the file and the map is one segment at the file's first byte. */

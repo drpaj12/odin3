@@ -8,6 +8,7 @@
 #include "frontends/verilog/preproc_internal.h"
 #include "frontends/verilog/preproc_test.h"
 #include "ir/design.h"
+#include "pp_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/arena.h"
@@ -26,93 +27,17 @@
 #error "ODIN3_PP_PROBES must name tests/unit/data/pp/probes"
 #endif
 
-enum { PATH_BUF = 1024, MSG_MAX = 4096, MAX_MADE = 256, OOM_LIMIT = 4000 };
-
-static odin3_design *design;
-static odin3_srcman *sm;
-static odin3_pp *pp;
-static odin3_pp_stream stream;
-static char tmp[PATH_BUF / 2];
-static char captured[MSG_MAX];
-static int errors;
-static char made[MAX_MADE][PATH_BUF];
-static int nmade;
-
-static void sink(odin3_log_level level, const char *msg, void *user) {
-    (void)user;
-    if (level == ODIN3_LOG_ERROR) {
-        errors++;
-        (void)snprintf(captured, sizeof captured, "%s", msg);
-    }
-}
+enum { PATH_BUF = PP_PATH_BUF, OOM_LIMIT = 4000 };
 
 void setUp(void) {
-    odin3_log_set_sink(sink, NULL);
-    captured[0] = '\0';
-    errors = 0;
-    nmade = 0;
-    pp = NULL;
-    memset(&stream, 0, sizeof stream);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_ppdef_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    pp_fixture_set_up();
 }
 
 void tearDown(void) {
-    odin3_util_set_alloc_fail_after(-1);
-    odin3_log_set_sink(NULL, NULL);
-    odin3_pp_destroy(pp);
-    for (int i = nmade - 1; i >= 0; i--) {
-        TEST_ASSERT_EQUAL_INT(0, remove(made[i]));
-    }
-    TEST_ASSERT_EQUAL_INT(0, rmdir(tmp));
-    odin3_design_destroy(design);
+    pp_fixture_tear_down();
 }
 
 /* --- helpers ------------------------------------------------------------------------------- */
-
-static uint32_t id(const char *str) {
-    uint32_t got = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(str), &got));
-    return got;
-}
-
-/* Writes tmp/name and stores its path in path. */
-static void put(const char *name, odin3_bytes text, char *path) {
-    (void)snprintf(path, PATH_BUF, "%s/%s", tmp, name);
-    bool fresh = access(path, F_OK) != 0;
-    FILE *fp = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(text.len, fwrite(text.ptr, 1, text.len, fp));
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    if (fresh) {
-        TEST_ASSERT_TRUE(nmade < MAX_MADE);
-        (void)snprintf(made[nmade++], PATH_BUF, "%s", path);
-    }
-}
-
-static void create_with(const odin3_pp_config *config) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_create(design, config, &pp));
-}
-
-static void ensure_pp(void) {
-    if (pp == NULL) {
-        odin3_pp_config none = {NULL, 0, NULL, 0};
-        create_with(&none);
-    }
-}
-
-/* Runs the preprocessor over the file at path, named name. */
-static odin3_status run_path(const char *name, const char *path) {
-    ensure_pp();
-    odin3_pp_source src = {id(name), id(path), id("work"), {0}};
-    return odin3_pp_run(pp, &src, &stream);
-}
 
 /* Writes text to tmp/name and runs the preprocessor over it. */
 static odin3_status run_bytes(const char *name, odin3_bytes text) {
@@ -123,12 +48,7 @@ static odin3_status run_bytes(const char *name, odin3_bytes text) {
 
 /* Runs text as a fresh file (the cache keeps every path it read) given as "t.v". */
 static odin3_status run(const char *text) {
-    static int serial;
-    char file[PATH_BUF / 4];
-    char path[PATH_BUF];
-    (void)snprintf(file, sizeof file, "t%d.v", serial++);
-    put(file, odin3_bytes_cstr(text), path);
-    return run_path("t.v", path);
+    return run_fresh("t.v", odin3_bytes_cstr(text));
 }
 
 static odin3_status run_probe(const char *probe) {
@@ -185,11 +105,6 @@ static void assert_formal(const odin3_pp_macro *mac, uint32_t index, formal_want
         TEST_ASSERT_EQUAL_UINT32(strlen(want.deflt), formal->len);
         TEST_ASSERT_EQUAL_MEMORY(want.deflt, formal->text, formal->len == 0 ? 1 : formal->len);
     }
-}
-
-static void assert_text(const char *want) {
-    TEST_ASSERT_EQUAL_size_t(strlen(want), stream.text.len);
-    TEST_ASSERT_EQUAL_MEMORY(want, stream.text.ptr, strlen(want) == 0 ? 1 : strlen(want));
 }
 
 static void assert_error(const char *want) {
@@ -591,7 +506,7 @@ static void test_command_line_defines(void) {
         {odin3_bytes_cstr("E(x,y)"), odin3_bytes_cstr("x /* y"), true},
     };
     odin3_pp_config config = {defines, 5, NULL, 0};
-    create_with(&config);
+    create_pp(&config);
     assert_body(macro("A"), "1");
     assert_body(macro("B"), "");
     assert_body(macro("C"), "");

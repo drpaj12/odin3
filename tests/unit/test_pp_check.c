@@ -8,6 +8,7 @@
 #include "frontends/verilog/preproc_internal.h"
 #include "frontends/verilog/preproc_test.h"
 #include "ir/design.h"
+#include "pp_fixture.h"
 #include "unity.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -28,89 +29,24 @@
 #error "ODIN3_PP_MICROS must name tests/micro/verilog"
 #endif
 
-enum { PATH_BUF = 1024, MSG_MAX = 4096, MAX_MADE = 64 };
-
-static odin3_design *design;
-static odin3_srcman *sm;
-static odin3_pp *pp;
-static odin3_pp_stream stream;
-static char tmp[PATH_BUF / 2];
-static char captured[MSG_MAX];
-static int errors;
-static char made[MAX_MADE][PATH_BUF];
-static int nmade;
-
-static void sink(odin3_log_level level, const char *msg, void *user) {
-    (void)user;
-    if (level == ODIN3_LOG_ERROR) {
-        errors++;
-        (void)snprintf(captured, sizeof captured, "%s", msg);
-    }
-}
+enum { PATH_BUF = PP_PATH_BUF };
 
 void setUp(void) {
-    odin3_log_set_sink(sink, NULL);
-    captured[0] = '\0';
-    errors = 0;
-    nmade = 0;
-    pp = NULL;
-    memset(&stream, 0, sizeof stream);
-    design = odin3_design_create();
-    TEST_ASSERT_NOT_NULL(design);
-    sm = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_ppchk_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    pp_fixture_set_up();
 }
 
-/* Cleans up before asserting, so a failed test leaves no temporary files. */
 void tearDown(void) {
-    odin3_log_set_sink(NULL, NULL);
-    odin3_pp_destroy(pp);
-    odin3_design_destroy(design);
-    int failed = 0;
-    for (int i = nmade - 1; i >= 0; i--) {
-        failed += remove(made[i]) != 0;
-    }
-    failed += rmdir(tmp) != 0;
-    TEST_ASSERT_EQUAL_INT(0, failed);
+    pp_fixture_tear_down();
 }
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static uint32_t id(const char *str) {
-    uint32_t got = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(str), &got));
-    return got;
-}
-
 static void fresh_pp(void) {
-    odin3_pp_destroy(pp);
-    odin3_pp_config none = {NULL, 0, NULL, 0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pp_create(design, &none, &pp));
-}
-
-static odin3_status run_path(const char *name, const char *path) {
-    if (pp == NULL) {
-        fresh_pp();
-    }
-    odin3_pp_source src = {id(name), id(path), id("work"), {0}};
-    return odin3_pp_run(pp, &src, &stream);
+    create_pp(NULL);
 }
 
 static odin3_status run(const char *text) {
-    static int serial;
-    char path[PATH_BUF];
-    (void)snprintf(path, sizeof path, "%s/c%d.v", tmp, serial++);
-    FILE *fp = fopen(path, "wb");
-    TEST_ASSERT_NOT_NULL(fp);
-    TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), fp));
-    TEST_ASSERT_EQUAL_INT(0, fclose(fp));
-    TEST_ASSERT_TRUE(nmade < MAX_MADE);
-    (void)snprintf(made[nmade++], PATH_BUF, "%s", path);
-    return run_path("c.v", path);
+    return run_fresh("c.v", odin3_bytes_cstr(text));
 }
 
 /* Runs text (a fresh preprocessor) and checks the stream explicitly. */

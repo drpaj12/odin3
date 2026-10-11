@@ -289,21 +289,26 @@ if(BUILD_TESTING)
     target_compile_definitions(test_project_entry PRIVATE
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects"
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
-    odin3_add_unit_test(test_pp_define)
+    # odin3_add_pp_test(<name>): a preprocessor unit test with the shared fixture (pp_fixture.c).
+    function(odin3_add_pp_test name)
+        odin3_add_unit_test(${name})
+        target_sources(${name} PRIVATE tests/unit/pp_fixture.c)
+    endfunction()
+    odin3_add_pp_test(test_pp_define)
     target_compile_definitions(test_pp_define PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes")
-    odin3_add_unit_test(test_pp_directives)
-    odin3_add_unit_test(test_pp_cond)
+    odin3_add_pp_test(test_pp_directives)
+    odin3_add_pp_test(test_pp_cond)
     target_compile_definitions(test_pp_cond PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog/preprocessor")
-    odin3_add_unit_test(test_pp_include)
+    odin3_add_pp_test(test_pp_include)
     target_compile_definitions(test_pp_include PRIVATE
         ODIN3_PP_INCLUDE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/include")
-    odin3_add_unit_test(test_pp_expand)
+    odin3_add_pp_test(test_pp_expand)
     target_compile_definitions(test_pp_expand PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes")
-    odin3_add_unit_test(test_pp_check)
+    odin3_add_pp_test(test_pp_check)
     target_compile_definitions(test_pp_check PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
