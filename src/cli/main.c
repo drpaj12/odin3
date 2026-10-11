@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Process exit codes: success, a failed pass or script, a command-line error. */
@@ -24,6 +25,7 @@ enum { PROJECT_ARGS_BUF = 4096 + 32 };
 
 static void print_usage(FILE *out) {
     (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
+                "       odin3 [options] --parse-only [file.v]...\n"
                 "\n"
                 "Runs pass scripts on one design, in command-line order, after looking up\n"
                 "every pass name in all of them. A script holds commands separated by ';' or\n"
@@ -42,6 +44,8 @@ static void print_usage(FILE *out) {
                 "  --diag-paths given|resolved\n"
                 "                   name files in diagnostics as given (default) or absolute\n"
                 "  -p SCRIPT        run the passes given inline\n"
+                "  --parse-only     parse the files given (else the project's) and stop:\n"
+                "                   read_verilog --parse-only FILE... (no script allowed)\n"
                 "\n"
                 "passes:\n",
                 out);
@@ -71,10 +75,13 @@ typedef struct cli_state {
     const char *top;      /* --top NAME, NULL for none */
     const char *revision; /* --revision R, NULL for none */
     bool resolved;        /* --diag-paths resolved */
-    bool scripts;         /* a -p or a script file is given */
+    bool scripts;         /* a script file (or, with --parse-only, a Verilog file) is given */
+    bool inline_script;   /* a -p is given */
+    bool parse_only;      /* --parse-only: the other arguments are Verilog files, not scripts */
     bool project;         /* a --project or -f is given */
     bool dump;            /* --dump-project */
     bool help;            /* --help: printed after the scan (plugin passes listed), nothing runs */
+    const char *quoted;   /* a positional argument holding '"' (refused under --parse-only) */
     odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
 } cli_state;
 
@@ -124,6 +131,8 @@ static bool scan_flag(const char *arg, cli_state *state) {
         state->check = true;
     } else if (strcmp(arg, "--dump-project") == 0) {
         state->dump = true;
+    } else if (strcmp(arg, "--parse-only") == 0) {
+        state->parse_only = true;
     } else if (strcmp(arg, "--keep-ast") == 0 || strcmp(arg, "--keep-ast=all") == 0) {
         state->keep =
             arg[strlen("--keep-ast")] == '=' ? ODIN3_KEEP_AST_ALL : ODIN3_KEEP_AST_ELABORATED;
@@ -147,7 +156,7 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (is_project_option(arg) && strchr(value, '"') != NULL) {
         return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
     }
-    state->scripts |= strcmp(arg, "-p") == 0;
+    state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);
     state->top = strcmp(arg, "--top") == 0 ? value : state->top;
     state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
@@ -167,7 +176,29 @@ static int scan_one(char **argv, int argc, int *at, cli_state *state) {
     if (arg[0] == '-') {
         return usage_error(arg);
     }
+    if (strchr(arg, '"') != NULL) {
+        state->quoted = arg; /* a Verilog file with '"' cannot be quoted for read_verilog */
+    }
     state->scripts = true;
+    return EXIT_OK;
+}
+
+/* --parse-only takes no script (2C §4.1): the files are its arguments. */
+static int check_parse_only(const cli_state *state) {
+    if (!state->parse_only) {
+        return EXIT_OK;
+    }
+    if (state->inline_script) {
+        (void)fputs("odin3: --parse-only cannot be combined with a script: use the pass option "
+                    "(read_verilog --parse-only)\n",
+                    stderr);
+        print_usage(stderr);
+        return EXIT_USAGE;
+    }
+    if (state->quoted != NULL) {
+        return bad_value("--parse-only", state->quoted,
+                         "a path holding '\"' cannot be passed to read_verilog");
+    }
     return EXIT_OK;
 }
 
@@ -197,8 +228,10 @@ static odin3_status each_project(char **argv, int argc, odin3_design *design) {
 }
 
 /* The -p or script file at argv[*at] (advancing past an option's value): run on design, or only
- * resolved when design is NULL. OK for every other argument. */
-static odin3_status script_arg(char **argv, int argc, int *at, odin3_design *design) {
+ * resolved when design is NULL. OK for every other argument, and for every positional argument
+ * under --parse-only (a Verilog file, not a script). */
+static odin3_status script_arg(char **argv, int argc, int *at, odin3_design *design,
+                               bool parse_only) {
     const char *arg = argv[*at];
     const char *value = NULL;
     if (option_value(argv, argc, at, &value)) {
@@ -209,7 +242,7 @@ static odin3_status script_arg(char **argv, int argc, int *at, odin3_design *des
         return design == NULL ? odin3_script_resolve(value, src)
                               : odin3_design_run_script(design, value, src);
     }
-    if (arg[0] == '-') {
+    if (arg[0] == '-' || parse_only) {
         return ODIN3_OK;
     }
     return design == NULL ? odin3_script_resolve_file(arg)
@@ -217,11 +250,42 @@ static odin3_status script_arg(char **argv, int argc, int *at, odin3_design *des
 }
 
 /* Every -p and script file in command-line order (see script_arg); stops at the first failure. */
-static odin3_status each_script(char **argv, int argc, odin3_design *design) {
+static odin3_status each_script(char **argv, int argc, odin3_design *design, bool parse_only) {
     odin3_status st = ODIN3_OK;
     for (int i = 1; st == ODIN3_OK && i < argc; i++) {
-        st = script_arg(argv, argc, &i, design);
+        st = script_arg(argv, argc, &i, design, parse_only);
     }
+    return st;
+}
+
+/* The positional argument at argv[*at] (advancing past an option's value), else NULL. */
+static const char *positional(char **argv, int argc, int *at) {
+    const char *value = NULL;
+    if (option_value(argv, argc, at, &value) || argv[*at][0] == '-') {
+        return NULL;
+    }
+    return argv[*at];
+}
+
+/* --parse-only: read_verilog --parse-only "file"... (2C §4.1), after any --project/-f. */
+static odin3_status run_parse_only(char **argv, int argc, odin3_design *design) {
+    size_t len = strlen("--parse-only") + 1;
+    for (int i = 1; i < argc; i++) {
+        const char *file = positional(argv, argc, &i);
+        len += file != NULL ? strlen(file) + strlen(" \"\"") : 0;
+    }
+    char *args = malloc(len);
+    if (args == NULL) {
+        (void)fprintf(stderr, "odin3: out of memory\n");
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    size_t used = (size_t)snprintf(args, len, "--parse-only");
+    for (int i = 1; i < argc; i++) {
+        const char *file = positional(argv, argc, &i);
+        used += file != NULL ? (size_t)snprintf(args + used, len - used, " \"%s\"", file) : 0;
+    }
+    odin3_status st = odin3_design_run_pass(design, "read_verilog", args);
+    free(args);
     return st;
 }
 
@@ -245,10 +309,11 @@ static void warn_unapplied_top(const odin3_design *design, const char *top) {
 }
 
 /* Resolves every -p and script file (a typo anywhere costs nothing), then runs on one design
- * every --project and -f (read_project), the scripts in command-line order, and dump_project
- * when --dump-project is given. */
+ * every --project and -f (read_project), the scripts in command-line order (with --parse-only:
+ * read_verilog --parse-only on the files given instead), and dump_project when --dump-project
+ * is given. */
 static int run_scripts(char **argv, int argc, const cli_state *state) {
-    if (each_script(argv, argc, NULL) != ODIN3_OK) {
+    if (each_script(argv, argc, NULL, state->parse_only) != ODIN3_OK) {
         return EXIT_FAIL;
     }
     odin3_design *design = odin3_design_create();
@@ -261,7 +326,8 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
         st = each_project(argv, argc, design);
     }
     if (st == ODIN3_OK) {
-        st = each_script(argv, argc, design);
+        st = state->parse_only ? run_parse_only(argv, argc, design)
+                               : each_script(argv, argc, design, false);
     }
     if (st == ODIN3_OK && state->dump) {
         st = odin3_design_run_pass(design, "dump_project", "");
@@ -284,7 +350,13 @@ int main(int argc, char **argv) {
     if (argc == 1 || state.help) {
         print_usage(stdout);
     }
-    if (!(state.scripts || state.project || state.dump) || state.help) {
+    int rc = check_parse_only(&state);
+    if (rc != EXIT_OK) {
+        return rc;
+    }
+    if (!(state.scripts || state.inline_script || state.project || state.dump ||
+          state.parse_only) ||
+        state.help) {
         return EXIT_OK;
     }
     odin3_pass_set_check(state.check);

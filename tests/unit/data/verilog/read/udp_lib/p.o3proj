@@ -1,0 +1,3 @@
+# An unnamed instance of a UDP read from a -v file.
+file verilog top.v
+libfile verilog udps.v

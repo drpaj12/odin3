@@ -1,0 +1,3 @@
+# A SystemVerilog file has no reader yet: unsupported_language.
+file verilog src/a.v
+file systemverilog src/b.sv

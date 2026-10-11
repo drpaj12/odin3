@@ -163,6 +163,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval.c
     src/frontends/elab/ceval_expr.c
     src/frontends/elab/ceval_interp.c
+    src/frontends/verilog/read_verilog.c
+    src/frontends/verilog/read_verilog_lib.c
+    src/frontends/verilog/elab_stub.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -476,6 +479,15 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pp_check PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
+    # 2C Task 8: the read_verilog pass on temporary and committed trees, and the lexer cases
+    # that need the preprocessor (macros, includes).
+    odin3_add_unit_test(test_read_verilog)
+    target_compile_definitions(test_read_verilog PRIVATE
+        ODIN3_RV_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/verilog/read"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    odin3_add_pp_test(test_verilog_lexer_pp)
+    target_include_directories(test_verilog_lexer_pp PRIVATE ${_gen})
+    add_dependencies(test_verilog_lexer_pp verilog_generated)
     odin3_add_pp_test(test_pp_limits)
     odin3_add_pp_test(test_pp_mixed)
     # 2B §10.5 properties: a file without directives is its own output; re-preprocessing an
@@ -723,7 +735,7 @@ if(BUILD_TESTING)
                            unknown_pass_later_script top top_written_first top_unapplied quoted
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
-                           project_preprocess)
+                           project_preprocess parse_only parse_only_with_script)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

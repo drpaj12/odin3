@@ -1,0 +1,110 @@
+/*
+ * read_verilog.h — the read_verilog pass's reader (2C spec §4.2 steps 1–7, VP-19): every design
+ * file of a read run through the 2B preprocessor and the parser into one parsed store, the -v/-y
+ * library files it needs (read_verilog_lib.c), the duplicate_module and unnamed-instance checks,
+ * then the sealed and checked store. The pass (step 8) and odin3-parse-check share it.
+ */
+#ifndef ODIN3_FRONTENDS_VERILOG_READ_VERILOG_H
+#define ODIN3_FRONTENDS_VERILOG_READ_VERILOG_H
+
+#include "ast/ast.h"
+#include "frontends/project/project.h"
+#include "frontends/verilog/parser.h"
+#include "frontends/verilog/preproc.h"
+#include "ir/design.h"
+#include "ir/ids.h"
+#include "odin3/odin3.h"
+#include "passes/manager.h"
+#include "util/u64map.h"
+#include "util/vec.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+
+/*
+ * One read: the design files in order (borrowed; given, resolved and library names, and the loc
+ * that named each), the pass run the store belongs to, and NULL or a caller-owned vec of
+ * odin3_vp_loc the lexer appends every token's location to (the location oracle, parser.h).
+ */
+typedef struct odin3_rv_opts {
+    const odin3_pp_source *files;
+    uint32_t nfiles;
+    odin3_passrun_id run;
+    odin3_vec *tokens;
+} odin3_rv_opts;
+
+/*
+ * Steps 1–7 of §4.2 on design: one parsed store for opts->run, one preprocessor configured from
+ * the design's finished project record (its defines and include directories; none without a
+ * record), one odin3_vl_run across every stream. Each file goes odin3_pp_run → parse; a stream
+ * with errors yields no UNIT and the run goes on to the next file until the error cap (20,
+ * counted across the files, preprocessor errors included) stops it. Then the record's -v/-y
+ * libraries (step 3), duplicate_module over the design units (step 4) and unnamed module
+ * instances (step 5), both counted against the cap. On success the store is sealed, checked
+ * FULL in Debug builds or under --check, the line "read_verilog: N units (L library), M nodes,
+ * K comments, B bytes, T ms" is logged at ODIN3_LOG_INFO and *out receives it (owned by the
+ * caller). Failures: ODIN3_ERR_PARSE after the located diagnostics; ODIN3_ERR_IO for a file that
+ * exists but cannot be read (also counted); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_CHECK when the store
+ * fails the check (a 2C bug, never user input); ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * argument or no files. *out is NULL on failure and the store is destroyed (the IR is untouched,
+ * 2A §9).
+ */
+odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts *opts,
+                                      odin3_ast **out);
+
+/* --- internals (read_verilog.c and read_verilog_lib.c only) ---------------------------------- */
+
+/* What a name is known as (odin3_rv.defined values, bits). */
+enum { ODIN3_RV_DESIGN = 1, ODIN3_RV_LIBRARY = 2, ODIN3_RV_UDP = 4 };
+
+/* An instantiated module name and the loc of its first instantiation (odin3_rv.wanted). */
+typedef struct odin3_rv_want {
+    uint32_t name;
+    odin3_loc at;
+} odin3_rv_want;
+
+/*
+ * One read run: the design, the store being built, the preprocessor, the parser's run context,
+ * the finished project record (NULL: none) and the name sets: defined (module or UDP name →
+ * ODIN3_RV_* bits), wanted (odin3_rv_want, in order of first instantiation) with its set
+ * wanted_set, libread (resolved paths of the library files read). swept is the first node ID
+ * not yet swept for names; bytes the stream bytes parsed; ndesign the design UNITs' count;
+ * libfiles_read: every -v file has been read; io: a file existed but could not be read.
+ */
+typedef struct odin3_rv {
+    odin3_design *design;
+    odin3_ast *ast;
+    odin3_pp *pp;
+    odin3_vl_run vl;
+    const odin3_project *proj;
+    odin3_u64map *defined;
+    odin3_vec wanted;
+    odin3_u64map *wanted_set;
+    odin3_u64map *libread;
+    uint32_t swept;
+    uint64_t bytes;
+    uint32_t ndesign;
+    bool libfiles_read, io;
+} odin3_rv;
+
+/*
+ * Preprocesses and parses one file into rv's store. ODIN3_OK also when the file had errors
+ * (logged and counted: a preprocessor error counts as one); the fatal statuses (NO_MEMORY, CHECK
+ * from the preprocessor's Debug check, INVALID_ARG) stop the run and are returned.
+ */
+odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src);
+
+/*
+ * Step 3 (DESIGN §4.0; read_verilog_lib.c): records the module and UDP names defined and the
+ * module names instantiated by the design UNITs; while some instantiated name is undefined,
+ * reads every -v file of the record at once (the first time), else looks for
+ * <dir>/<name><ext> over the record's libdirs in order and its libext in order (default ".v"),
+ * reading the first regular file found, and repeats (a library file may instantiate further
+ * modules). Library UNITs follow every design UNIT; odin3_ast_set_library_units_from records
+ * where they begin. A library module or UDP whose name a design unit or an earlier library
+ * definition already has stays in the store with an info line. What stays undefined is left to
+ * 2D. Returns OK, or a fatal status (odin3_rv_read; NO_MEMORY).
+ */
+odin3_status odin3_rv_resolve_libraries(odin3_rv *rv);
+
+#endif

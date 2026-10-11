@@ -1,0 +1,3 @@
+# A design unit shadows a library module: inv is defined by src/shadow_top.v and by lib/a.v.
+file verilog src/shadow_top.v
+libfile verilog lib/a.v

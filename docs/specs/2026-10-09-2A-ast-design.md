@@ -696,7 +696,13 @@ in run *R*'s elaborated store (the parsed store when the read had no stage 1, as
 reader would); a consumer resolves it only in a store whose `run` and form match (the generation
 tag of the review's I12), never by index alone. The parsed store is destroyed when stage 1 ends,
 unless kept. A parse-only read (`read_verilog --parse-only`, 2C §4.1) holds its parsed store as
-the run's store until the design is destroyed (2C §9 amendment (c)). A mixed-language project (Verilog plus SystemVerilog, or VHDL through GHDL) is two
+the run's store until the design is destroyed (2C §9 amendment (c)). The store records where its
+library `UNIT`s begin (2C §9 amendment (b)): `odin3_ast_set_library_units_from(ast, idx)` /
+`odin3_ast_library_units_from(ast)`, a `uint32_t` root index of the first `UNIT` read from a
+`-v` library file or a `-y` library directory, 0 = none (a run always has a design `UNIT`
+first); `read_verilog` sets it after library resolution (2C §4.2 step 3), so 2D's top
+selection never picks a library module and its lookup lets a design unit shadow one. The ABI
+mirror `odin3_ast_get_library_units_from` lands with 2D's ABI additions. A mixed-language project (Verilog plus SystemVerilog, or VHDL through GHDL) is two
 read runs with two ASTs; provenance from each resolves in its own.
 
 **AST-16 ASTs and symbol tables are freed at the end of their read pass** unless kept: the CLI

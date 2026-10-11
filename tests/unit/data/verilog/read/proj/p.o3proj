@@ -1,0 +1,5 @@
+# A project: its define W sets a.v's width, its include directory holds w.vh.
+incdir inc
+define W=8
+file verilog src/a.v
+file verilog src/b.v

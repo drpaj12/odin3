@@ -1,0 +1,4 @@
+# -v first file wins: lib/a.v and lib/b.v both define thru; b.v's stays, with an info line.
+file verilog src/first_top.v
+libfile verilog lib/a.v
+libfile verilog lib/b.v

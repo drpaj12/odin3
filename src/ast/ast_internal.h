@@ -52,6 +52,7 @@ struct odin3_ast {
     uint32_t max_children;       /* ODIN3_AST_MAX_CHILDREN unless a test lowered it */
     uint32_t max_nodes;          /* ODIN3_AST_MAX_NODES unless a test lowered it */
     uint32_t max_depth;          /* ODIN3_AST_MAX_DEPTH unless a test lowered it */
+    uint32_t library_units_from; /* root index of the first library UNIT; 0 = none (2C §9 b) */
 };
 
 /* The record of node, NULL for 0 or an ID at or past the end. */

@@ -582,6 +582,20 @@ odin3_ast_id odin3_ast_root(const odin3_ast *ast, uint32_t idx) {
                : (odin3_ast_id){0};
 }
 
+void odin3_ast_set_library_units_from(odin3_ast *ast, uint32_t root_idx) {
+    if (ast != NULL && root_idx < ast->units.len) {
+        ast->library_units_from = root_idx;
+    }
+}
+
+uint32_t odin3_ast_library_units_from(const odin3_ast *ast) {
+    return ast != NULL ? ast->library_units_from : 0;
+}
+
+uint32_t odin3_ast_comment_count(const odin3_ast *ast) {
+    return ast != NULL ? (uint32_t)ast->comments.len : 0;
+}
+
 const odin3_design *odin3_ast_design(const odin3_ast *ast) {
     return ast != NULL ? ast->design : NULL;
 }
