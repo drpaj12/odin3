@@ -1,0 +1,112 @@
+% Shared TikZ styles for the Odin III paper figures (IMAGE/fig_*.tex).
+% Needs: \usepackage{tikz} and
+%   \usetikzlibrary{positioning,fit,arrows.meta,shapes.geometric,backgrounds,calc,matrix}
+% loaded first (odin3.tex and IMAGE/figures.tex both do). Input this file once, in the preamble.
+%
+% Palette: ColorBrewer "Blues" and "Greys", colourblind-safe and distinct in greyscale. Build
+% status is coded twice, by fill and by border, so it survives a black-and-white print:
+%   built        mid-blue fill,   solid dark-blue border
+%   in progress  pale-blue fill,  solid blue border
+%   specified    white fill,      dashed blue border
+%   planned      white fill,      dotted grey border
+
+% ---- colours ------------------------------------------------------------------------------
+\definecolor{o3ink}{HTML}{252525}      % text and arrows
+\definecolor{o3sub}{HTML}{525252}      % secondary text (sub-project tags, notes)
+\definecolor{o3blue9}{HTML}{08306B}
+\definecolor{o3blue8}{HTML}{08519C}
+\definecolor{o3blue7}{HTML}{2171B5}
+\definecolor{o3blue5}{HTML}{6BAED6}
+\definecolor{o3blue4}{HTML}{9ECAE1}
+\definecolor{o3blue3}{HTML}{C6DBEF}
+\definecolor{o3blue2}{HTML}{DEEBF7}
+\definecolor{o3blue1}{HTML}{F7FBFF}
+\definecolor{o3grey7}{HTML}{525252}
+\definecolor{o3grey6}{HTML}{737373}
+\definecolor{o3grey5}{HTML}{969696}
+\definecolor{o3grey4}{HTML}{BDBDBD}
+\definecolor{o3grey3}{HTML}{D9D9D9}
+\definecolor{o3grey2}{HTML}{F0F0F0}
+\definecolor{o3grey1}{HTML}{F7F7F7}
+
+% ---- text helpers -------------------------------------------------------------------------
+% A second, smaller line in a node: \odinsub{2C}.
+\newcommand{\odinsub}[1]{{\scriptsize\color{o3sub}#1}}
+% Code names inside figures (the paper's \code is not defined in the standalone build).
+\newcommand{\odintt}[1]{\texttt{#1}}
+
+% Scale a figure down only if it is wider than #1 (it never scales up). Each figure is drawn
+% at its print size, so this is a safety net; a scaled figure writes "ODINFIT" to the log.
+\newsavebox{\odinfigbox}
+\newcommand{\odinfit}[2]{%
+  \sbox{\odinfigbox}{\ignorespaces#2\unskip}%
+  \ifdim\wd\odinfigbox>#1\relax
+    \typeout{ODINFIT: figure scaled from \the\wd\odinfigbox\space to \the#1}%
+    \resizebox{#1}{!}{\usebox{\odinfigbox}}%
+  \else
+    \usebox{\odinfigbox}%
+  \fi}
+
+% ---- TikZ styles --------------------------------------------------------------------------
+\tikzset{
+  % every figure
+  odin/.style={font=\footnotesize, color=o3ink, line join=round,
+               >={Stealth[length=3.4pt, width=2.8pt]},
+               % node text breaks the same way in any class: no hyphens, loose lines rather than overfull
+               execute at begin node={\hyphenpenalty=10000\exhyphenpenalty=10000%
+                 \tolerance=9999\emergencystretch=10pt}},
+  % shapes
+  box/.style={draw, rectangle, rounded corners=1.6pt, align=center, line width=0.55pt,
+              inner xsep=2.5pt, inner ysep=2pt, minimum height=6.5mm},
+  store/.style={draw, cylinder, shape border rotate=90, aspect=0.16, align=center,
+                line width=0.55pt, inner xsep=2pt, inner ysep=1pt, minimum height=8mm},
+  plain/.style={align=center, inner sep=1pt},
+  % build status (combine with a shape: [box, built])
+  built/.style={fill=o3blue4, draw=o3blue8, solid},
+  inprog/.style={fill=o3blue2, draw=o3blue7, solid},
+  spec/.style={fill=white, draw=o3blue7, dash pattern=on 2.4pt off 1.4pt},
+  planned/.style={fill=white, draw=o3grey5, dash pattern=on 0.6pt off 1.3pt,
+                  line width=0.75pt},
+  % neutral fills for structure figures
+  neutral/.style={fill=o3grey2, draw=o3grey6, solid},
+  light/.style={fill=o3blue1, draw=o3blue7, solid},
+  external/.style={fill=o3grey2, draw=o3grey6, dash pattern=on 3pt off 1.2pt on 0.6pt off 1.2pt},
+  emph/.style={line width=1.3pt},
+  % grouped regions, drawn on the background layer
+  region/.style={draw=o3grey4, fill=o3grey1, rounded corners=3pt, line width=0.5pt,
+                 inner sep=4pt},
+  bluregion/.style={draw=o3blue3, fill=o3blue1, rounded corners=3pt, line width=0.5pt,
+                    inner sep=4pt},
+  regionlabel/.style={font=\scriptsize\bfseries, color=o3grey7, inner sep=1.5pt},
+  % arrows
+  flow/.style={->, line width=0.55pt, draw=o3ink},
+  flowplanned/.style={->, line width=0.6pt, draw=o3grey6, dash pattern=on 0.6pt off 1.3pt},
+  ref/.style={->, line width=0.5pt, draw=o3blue8, dash pattern=on 2.4pt off 1.4pt},
+  edgelabel/.style={font=\scriptsize, color=o3sub, inner sep=1pt, fill=white},
+  % records: a header row and field rows, built with \matrix (see fig_ir_model.tex)
+  record/.style={matrix of nodes, ampersand replacement=\&, row sep=-\pgflinewidth,
+                 inner sep=0pt, nodes={draw=o3grey6, line width=0.5pt, fill=white,
+                 font=\scriptsize, anchor=center, align=left, inner xsep=2.5pt,
+                 inner ysep=1.2pt, minimum height=4.4mm}},
+  rechead/.style={fill=o3blue3, font=\scriptsize\bfseries, align=center},
+  % legend keys
+  legendkey/.style={box, minimum width=4.2mm, minimum height=2.6mm, inner sep=0pt},
+  legendtext/.style={font=\scriptsize, inner sep=1pt, text height=1.5ex, text depth=0.3ex},
+}
+
+% \odinlegend{<node options, e.g. anchor=north east, at={(x,y)}>}
+% The build-status key, one row, as a single node so figures can place it like any node.
+\newcommand{\odinlegend}[1]{%
+  \matrix[ampersand replacement=\&, column sep=1.2pt, inner sep=2pt, draw=o3grey4,
+          rounded corners=2pt, fill=white, line width=0.4pt, #1]{%
+    \node[legendkey, built]{};   \& \node[legendtext]{built};       \& \node{\hspace{3pt}}; \&
+    \node[legendkey, inprog]{};  \& \node[legendtext]{in progress}; \& \node{\hspace{3pt}}; \&
+    \node[legendkey, spec]{};    \& \node[legendtext]{specified};   \& \node{\hspace{3pt}}; \&
+    \node[legendkey, planned]{}; \& \node[legendtext]{planned};     \\
+  };}
+
+% \odinrecord{<name>}{<matrix options: position, nodes={text width=...}>}{<header>}{<rows>}
+% A record (struct) as a one-column matrix: a header cell, then one cell per field, rows
+% separated by \\ and ended by \\. Cells are <name>-<row>-1, so edges can leave from a field.
+\newcommand{\odinrecord}[4]{%
+  \matrix[record, #2] (#1) {|[rechead]| #3 \\ #4};}

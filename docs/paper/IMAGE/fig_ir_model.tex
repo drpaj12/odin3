@@ -1,0 +1,62 @@
+% Odin III IR object model (docs/IR.md sections 1-6, src/ir/ir_internal.h). Record sizes are
+% sizeof() on x86-64 (gcc 13): node 40 B, pin 24 B, net 40 B, wire 40 B. Wide: \textwidth.
+% Solid arrows are typed 32-bit ID references; double-headed arrows are the two directions of
+% one relation; grey arrows are ownership.
+\begin{tikzpicture}[odin,
+  idref/.style={flow, draw=o3blue8},
+  idref2/.style={idref, <->},
+  owns/.style={flow, draw=o3grey6},
+  lab/.style={edgelabel, fill=none, inner sep=1pt}]
+  % ---- design and module -------------------------------------------------------------------
+  \odinrecord{design}{anchor=north, nodes={text width=26mm},
+              row 1/.style={nodes={fill=o3blue4}}, at={(1.39, 0)}}{Design}{
+    strings (names, paths) \\ provenance store \\ pass-run table \\ tombstones \\
+    cell-type table \\ modules[\,] \\ top \\}
+  \odinrecord{module}{anchor=north, nodes={text width=31mm},
+              row 1/.style={nodes={fill=o3blue4}}, at={(4.92, 0)}}{Module (IR-18)}{
+    nodes: \odintt{pagevec} of node \\ pins: \odintt{pagevec} of pin \\
+    nets: \odintt{pagevec} of net \\ wires: \odintt{pagevec} of wire \\
+    name maps: \odintt{u64map} \\ alias, attribute side tables \\
+    pin pool (sizes 2, 4, 8, \ldots) \\ arena (params, wire vectors) \\}
+  % ---- per-module records ------------------------------------------------------------------
+  \odinrecord{pin}{anchor=north, nodes={text width=27mm}, at={(8.70, 0)}}{pin \textmd{(24 B)}}{
+    node: node ID \\ port, bit \\ net: net ID (0 = open) \\ slot in the net's pin array \\
+    direction \\}
+  \odinrecord{node}{anchor=north, nodes={text width=27mm}, at={(12.23, 0)}}{node \textmd{(40 B)}}{
+    type: cell-type ID \\ name: string ID \\ prov: provenance ID \\ first\_pin, pin\_count \\
+    params (in the arena) \\ dead flag \\}
+  \odinrecord{net}{anchor=north, nodes={text width=27mm}, at={(8.70, -3.25)}}{net \textmd{(40 B)}}{
+    pins[\,]: drivers, then sinks \\ driver\_count \\ name, prov \\ primary (wire, bit) \\
+    alias chain \\ dead flag \\}
+  \odinrecord{wire}{anchor=north, nodes={text width=27mm}, at={(12.23, -3.25)}}{wire \textmd{(40 B)}}{
+    name, prov \\ {[}msb:lsb{]}, signed \\ nets[\,], LSB first \\ port node \\}
+  % ---- design-wide records -----------------------------------------------------------------
+  \odinrecord{ct}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3grey3}},
+              at={(15.96, 0)}}{cell type (IR-8)}{
+    name: \odintt{\$add}, \odintt{\$\_AND\_}, \odintt{adder}, \ldots \\
+    granularity: word, bit, hard, black box, module, port \\ ports and width rules \\
+    params and defaults \\ hooks: verify, const\_value, simulate, writers \\}
+  \odinrecord{prov}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3grey3}},
+              at={(15.96, -3.25)}}{provenance record (IR-12)}{
+    kind: SOURCE, IMPORTED, DERIVED \\ pass run, operation \\ locations (file:line, raw) \\
+    AST node ID \\ hierarchical path \\ parents[\,] \\}
+
+  % ---- per-module storage region -----------------------------------------------------------
+  \begin{scope}[on background layer]
+    \node[bluregion, fit=(pin)(node)(net)(wire), inner sep=5pt,
+          label={[regionlabel, anchor=south west]north west:per-module paged storage}] (store) {};
+  \end{scope}
+
+  % ---- ownership ---------------------------------------------------------------------------
+  \draw[owns] (design-7-1.east) -- ++(0.35,0) |- (module-1-1.west);
+  \draw[owns] (module-3-1.east) -- (module-3-1.east -| store.west);
+  \draw[owns] (design-1-1.north) -- ++(0, 0.62) -| node[lab, above, pos=0.25] {cell-type table} (ct.north);
+  \draw[owns] (design.south) -- (design.south |- 0,-7.15) -| node[lab, above, pos=0.25]
+       {provenance store: append-only, hash-consed, design-wide} (prov.south);
+  % ---- ID references -----------------------------------------------------------------------
+  \draw[idref] (node-5-1.west) -- ++(-0.22,0) |- (pin-1-1.east);
+  \draw[idref2] (pin-4-1.east) -- ++(0.2,0) |- (net-2-1.east);
+  \draw[idref2] (wire-4-1.west) -- ++(-0.3,0) |- (net-5-1.east);
+  \draw[idref] (node-2-1.east) -- ++(0.3,0) |- (ct-1-1.west);
+  \draw[idref] (node-4-1.east) -- ++(0.45,0) |- (prov-1-1.west);
+\end{tikzpicture}

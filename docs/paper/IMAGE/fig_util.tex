@@ -1,0 +1,41 @@
+% src/util containers (1A spec): the only generic containers in the tree, all built on one
+% allocation wrapper whose test hook fails the n-th allocation. Arrows point from a container to
+% what it uses. Single column: \columnwidth.
+\begin{tikzpicture}[odin,
+  c/.style={box, built, text width=12.3mm, minimum height=10mm, inner xsep=1.2pt},
+  wide/.style={box, built, minimum height=7mm}]
+  % ---- containers (tier 1) -----------------------------------------------------------------
+  \node[c] (arena) at (0.667, 0) {\odintt{arena}\\\odinsub{bump allocator}};
+  \node[c] (vec)   at (2.097, 0) {\odintt{vec}\\\odinsub{growable array}};
+  \node[c] (pv)    at (3.527, 0) {\odintt{pagevec}\\\odinsub{stable pages\\[-2pt]of $2^k$ items}};
+  \node[c] (u64)   at (4.957, 0) {\odintt{u64map}\\\odinsub{Robin Hood\\[-2pt]u64$\to$u64}};
+  \node[c, fill=o3blue3] (hash) at (6.387, 0) {\odintt{hash}\\\odinsub{FNV-1a\\[-2pt]+ fmix64}};
+  \node[c] (idx)   at (7.817, 0) {\odintt{idindex}\\\odinsub{hash-cons\\[-2pt]index}};
+  % ---- foundation (tier 0) and strings / log (tier 2) ----------------------------------------
+  \node[wide, fill=o3blue3, text width=82mm] (alloc) at (4.242, -1.3)
+       {\odintt{alloc}: \odinsub{the one \odintt{malloc} wrapper; a test hook fails the $n$-th allocation}};
+  \node[wide, text width=26mm] (str) at (7.102, 1.35)
+       {\odintt{strtab} / \odintt{strbuf}\\\odinsub{bytes $\leftrightarrow$ u32 ID; ID 0 is empty}};
+  \node[wide, text width=24mm] (log) at (1.382, 1.35) {\odintt{log}\\\odinsub{levels, sink, counts}};
+
+  % ---- uses ----------------------------------------------------------------------------------
+  \foreach \n in {arena, vec, pv, u64, idx} \draw[flow] (\n.south) -- (\n.south |- alloc.north);
+  \draw[flow] (u64) -- (hash);
+  \draw[flow] (idx) -- (hash);
+  \draw[flow] (str.south -| hash) -- (hash.north);
+  \draw[flow] (str.south -| idx) -- (idx.north);
+  \coordinate (corr) at ($(str.south)!0.5!(str.south |- idx.north)$);
+  \draw[flow] ($(str.south west)+(4mm,0)$) |- (corr -| arena) -- (arena.north);
+
+  % ---- the users ---------------------------------------------------------------------------
+  \begin{scope}[on background layer]
+    \node[region, fit=(alloc)(arena)(idx)(str)(log), inner sep=4pt,
+          label={[regionlabel, anchor=north east]south east:\odintt{src/util}}] (util) {};
+  \end{scope}
+  \node[box, light, text width=38mm] (ir) at (2.092, 3.0)
+       {IR\\\odinsub{module stores, name maps,\\[-2pt]provenance hash-consing}};
+  \node[box, light, text width=38mm] (ast) at (6.392, 3.0)
+       {AST\\\odinsub{nodes, child table,\\[-2pt]attributes, symbol table}};
+  \draw[flow] (ir.south) -- (ir.south |- util.north);
+  \draw[flow] (ast.south) -- (ast.south |- util.north);
+\end{tikzpicture}

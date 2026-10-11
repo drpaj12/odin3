@@ -1,56 +1,114 @@
 # Odin III paper (IEEE conference draft)
 
 `odin3.tex` is the paper in the IEEEtran conference class, `odin3.bib` its references, and
-`IMAGE/` its figures: each figure is a Graphviz source `IMAGE/<name>.dot` with the rendered
-`IMAGE/<name>.pdf` (included by the paper) and `IMAGE/<name>.png` (for quick previews), all
-committed. Gaps that need measurements or Peter's input are marked `\todo{…}` in the text and
-print as **[TODO: …]**.
-
-## Build on Overleaf (primary)
-
-1. Make the upload zip from this directory:
-
-   ```bash
-   cd docs/paper && zip -r odin3-paper.zip odin3.tex odin3.bib IMAGE
-   ```
-
-   (`make zip` does the same.)
-2. In Overleaf: *New Project → Upload Project*, choose `odin3-paper.zip`.
-3. *Menu → Compiler*: **pdfLaTeX**. Main document: `odin3.tex`.
-
-No shell-escape is needed. The paper uses only packages Overleaf ships (IEEEtran, cite, amsmath,
-graphicx, booktabs, url, listings), relative paths only, and `\graphicspath{{IMAGE/}}`;
-Overleaf runs BibTeX itself. Overleaf cannot run `dot`, so the rendered PDFs in `IMAGE/` are
-what it uses: re-render and re-upload them after changing a `.dot` file.
-
-## Build locally (optional)
-
-```bash
-sudo apt install texlive-latex-extra texlive-publishers latexmk   # once (IEEEtran is in texlive-publishers)
-make            # latexmk: pdfLaTeX + BibTeX -> odin3.pdf
-make figures    # re-render every IMAGE/*.dot to .pdf and .png (needs graphviz)
-make clean      # remove LaTeX build products
-```
+`IMAGE/` its figures. Gaps that need measurements or Peter's input are marked `\todo{…}` in the
+text and print as **[TODO: …]**.
 
 ## Figures
 
-| File | Shows |
-|---|---|
-| `fig_pipeline` | the system pipeline, built / specified / planned |
-| `fig_project` | project-file formats filling the project record |
-| `fig_elab_seam` | two-stage elaboration and the elaborated-AST seam |
-| `fig_util` | the `src/util` containers |
-| `fig_ir_model` | the IR object model and record sizes |
-| `fig_prov` | the provenance lineage DAG (illustrative) |
-| `fig_srcman` | the source manager's location space (2A spec §3.1 example) |
-| `fig_ast` | the 24-byte AST record, child table, payloads, symbol table |
-| `fig_techlib` | the `.o3lib` tech library and its users |
-| `fig_abi` | the C ABI and plugin model |
+Nine figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
+is a hand-drawn SVG.
+
+- `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
+  Blues and Greys, which is colourblind-safe. It also holds the build-status key and two
+  helpers: `\odinrecord`, a struct drawn as a matrix, and `\odinfit`, a safety net that scales a
+  figure down only if it is wider than the column and writes `ODINFIT` to the log when it does.
+- `IMAGE/fig_<name>.tex` holds one `tikzpicture` per figure. The paper pulls each one in with
+  `\odinfit{\columnwidth}{\input{IMAGE/fig_<name>}}`, or `\textwidth` inside `figure*`. The
+  preamble loads `tikz` with the `positioning`, `fit`, `arrows.meta`, `shapes.geometric`,
+  `backgrounds`, `calc` and `matrix` libraries, then inputs the styles file.
+- `IMAGE/fig_ast.svg` is the source of the AST figure. The paper includes `IMAGE/fig_ast.pdf`,
+  converted from the SVG with CairoSVG (`make fig-ast`), because the `svg` package needs
+  shell-escape and Inkscape. Commit both files.
+- `IMAGE/svg/fig_<name>.svg` are SVG exports of the TikZ figures for READMEs and the web
+  (`make figures`). They are generated files, and the paper does not use them.
+- `IMAGE/figures.tex` builds every TikZ figure standalone, one per page, for previews and the
+  SVG export. It is not part of the paper.
+- `IMAGE/graphviz/` keeps the original Graphviz sources and PDFs as a fallback. To go back to
+  one, replace its `\odinfit{…}{\input{…}}` line with
+  `\includegraphics[width=\columnwidth]{graphviz/fig_<name>}`.
+
+Build status is coded by fill and by border, so it survives greyscale printing:
+
+| State | Look | Meaning |
+|---|---|---|
+| built | mid-blue fill, solid border | merged on `main` with its exit test |
+| in progress | pale-blue fill, solid border | being implemented against an approved plan |
+| specified | white fill, dashed blue border | approved specification and plan |
+| planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
+
+The status shown is as of 2026-10-11:
+
+- **Built:** Phases 0–1, 2A and all of 2B, including the Odin II XML reader.
+- **In progress:** 2C, whose grammar is complete except generate, instantiation and gates, and
+  2D-1/2D-2.
+- **Specified:** the rest of 2D, plus 2E and 2F.
+- **Planned:** Phases 3–7.
+
+When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
+features table and the phases table together.
+
+| File | Shows | Kind | Width |
+|---|---|---|---|
+| `fig_pipeline` | the system pipeline, with build status | TikZ | `\textwidth` |
+| `fig_project` | four project formats filling one record | TikZ | `\columnwidth` |
+| `fig_elab_seam` | two-stage elaboration and the elaborated-AST seam | TikZ | `\textwidth` |
+| `fig_util` | the `src/util` containers and what each uses | TikZ | `\columnwidth` |
+| `fig_ir_model` | the IR object model, record sizes and ID references | TikZ | `\textwidth` |
+| `fig_prov` | the provenance lineage DAG (illustrative) | TikZ | `\columnwidth` |
+| `fig_srcman` | the source manager's location space as an arc diagram (2A spec §3.1 example) | TikZ | `\columnwidth` |
+| `fig_ast` | the 24-byte AST record, node, child and payload tables | SVG → PDF | `\columnwidth` |
+| `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
+| `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
+
+## Build on Overleaf (primary)
+
+1. Make the upload zip from this directory with `make zip`, or `make zip ZIP=/some/path.zip`.
+   It uses Python's `zipfile`, so `zip` is not needed. The zip holds:
+   - `odin3.tex` and `odin3.bib`;
+   - `IMAGE/odin3-tikz-styles.tex`;
+   - every `IMAGE/fig_*.tex`;
+   - `IMAGE/fig_ast.pdf`.
+
+   It leaves out `figures.tex`, `svg/` and `graphviz/`.
+2. In Overleaf, choose *New Project → Upload Project* and pick the zip.
+3. Under *Menu → Compiler*, choose **pdfLaTeX**. The main document is `odin3.tex`.
+
+No shell-escape is needed. The paper uses only packages that Overleaf ships: IEEEtran, cite,
+amsmath, graphicx, booktabs, url, listings and tikz. It uses relative paths only, and Overleaf
+runs BibTeX itself. pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
+
+## Build locally (optional)
+
+No TeX Live is installed here. The local path is [Tectonic](https://tectonic-typesetting.github.io)
+0.17.0: the static `x86_64-unknown-linux-musl` release, with its SHA-256 checked against the
+GitHub release. It lives at `~/odin3-ws/work/tools/tectonic/tectonic` and fetches TeX packages on
+demand. Tectonic is XeTeX-based, so the Makefile compiles through a wrapper that loads
+`[OT1]{fontenc}`. That makes Tectonic use the same Times/Courier Type 1 fonts as pdfLaTeX, so
+line breaks, page count and figure fits match Overleaf.
+
+The figure helpers run from a venv at `~/odin3-ws/work/tools/venv` with `pymupdf` and
+`cairosvg` installed. CairoSVG also needs the system `libcairo2`.
+
+```bash
+make                  # build/odin3.pdf (Tectonic); make LATEX=latexmk for a TeX Live install
+make figures          # standalone figures -> build/figures.pdf -> IMAGE/svg/*.svg
+make fig-ast          # IMAGE/fig_ast.svg -> IMAGE/fig_ast.pdf
+make zip              # odin3-paper.zip for Overleaf
+make graphviz         # re-render IMAGE/graphviz/*.pdf (needs graphviz)
+make clean            # remove build/
+```
+
+`figtool.py` holds the Python behind `figures`, `fig-ast` and `zip`.
 
 ## Sources
 
-Every claim is taken from the repository: `docs/DESIGN.md`, `docs/IR.md`, `docs/ADR/`,
-`docs/PHASE0.md`–`PHASE2.md`, `docs/specs/`, `docs/log_cost_of_tokens_and_time.md`, the headers
-under `include/odin3/` and `src/`, and (for the comparison) the read-only Yosys and Odin II trees
-under `~/odin3-ws/external`. Record sizes are `sizeof` on x86-64 with gcc. Bibliographic details
-were written from memory and need checking before submission.
+Every claim is taken from the repository:
+
+- `docs/DESIGN.md`, `docs/IR.md`, `docs/ADR/` and `docs/PHASE0.md`–`PHASE3.md`;
+- `docs/specs/` and `docs/log_cost_of_tokens_and_time.md`;
+- the headers under `include/odin3/` and `src/`;
+- for the comparison, the read-only Yosys and Odin II trees under `~/odin3-ws/external`.
+
+Record sizes are `sizeof` on x86-64 with gcc. The bibliographic details were written from memory
+and need checking before submission.

@@ -1,0 +1,66 @@
+% Two-stage elaboration with the elaborated AST as the seam (2D spec section 2, EL-2, EL-4).
+% Stage 1 is Verilog-only; stage 2 is shared by every front end. The slang adapter (Phase 5)
+% builds the elaborated form through the C ABI and enters at stage 2. Wide: \textwidth.
+\begin{tikzpicture}[odin,
+  stage/.style={box, text width=34mm, align=left, minimum height=21mm},
+  list/.style={font=\scriptsize, align=left}]
+  % ---- the main row ------------------------------------------------------------------------
+  \node[box, neutral, text width=15mm, minimum height=12mm] (vf) at (0.95, 0)
+       {Verilog-2005\\files\\[-1pt]\odinsub{preprocessed, 2B}};
+  \node[store, inprog, text width=14mm, minimum height=14mm] (ps) at (2.95, 0)
+       {parsed\\store\\[-1pt]\odinsub{form \odintt{PARSED}}\\[-2pt]\odinsub{2C}};
+  \node[stage, spec] (s1) at (5.84, 0)
+       {\textbf{stage 1} (Verilog only)\\[1pt]
+        \scriptsize module lookup, top selection\\
+        \scriptsize \odintt{\#()}, \odintt{defparam}, project params\\
+        \scriptsize specialisation\\
+        \scriptsize \odintt{generate}\\
+        \scriptsize constant functions\\
+        \scriptsize implicit nets};
+  \node[store, spec, emph, text width=30mm, inner xsep=4pt, inner ysep=0pt, minimum height=20mm] (es) at (9.81, 0)
+       {\textbf{elaborated store}\\[-1pt]\odinsub{the seam, form}\\[-2pt]\odinsub{\odintt{ELABORATED}}\\[1pt]
+        \scriptsize no \odintt{generate} or \odintt{defparam}\\
+        \scriptsize constants resolved\\
+        \scriptsize one \odintt{MODULE} per\\
+        \scriptsize specialisation};
+  \node[stage, spec] (s2) at (13.78, 0)
+       {\textbf{stage 2} (every front end)\\[1pt]
+        \scriptsize binding (symbol table)\\
+        \scriptsize Yosys widths and signedness\\
+        \scriptsize word cells, drivers, \odintt{\$mem}\\
+        \scriptsize \odintt{always} $\rightarrow$ \odintt{\$proc} cells\\
+        \scriptsize inlining, initial values};
+  \node[store, built, text width=16mm, minimum height=14mm] (ir) at (16.94, 0)
+       {word-level\\IR\\[-1pt]\odinsub{+ \odintt{\$proc} (2D-1)}};
+
+  % ---- around the seam -----------------------------------------------------------------------
+  \node[box, light, text width=40mm, align=center] (chk) at (9.81, 2.0)
+       {\odintt{odin3\_ast\_check}, rule 7\\\odinsub{enforces the elaborated subset}};
+  \node[box, planned, text width=36mm] (sl) at (9.81, -2.35)
+       {slang adapter (C++)\\\odinsub{\odintt{odin3\_ast\_*} builders; Phase 5}};
+  \node[box, inprog, text width=19.5mm] (rt) at (16.94, -2.35)
+       {\odintt{write\_rtlil}\\\odinsub{2D-1}};
+  \node[box, external, text width=28mm] (yo) at (13.6, -2.35)
+       {Yosys 0.55 (Parmys's)\\\odinsub{equivalence oracle}};
+
+  % ---- edges ---------------------------------------------------------------------------------
+  \draw[flow] (vf) -- (ps);
+  \draw[flow] (ps) -- (s1);
+  \draw[flow] (s1) -- (es);
+  \draw[flow] (es) -- (s2);
+  \draw[flow] (s2) -- (ir);
+  \draw[flow] (ir) -- (rt);
+  \draw[flow] (rt) -- (yo);
+  \draw[flowplanned] (sl) -- node[edgelabel, right] {\odintt{odin3\_ast\_elaborate} (C ABI)} (es);
+  \draw[line width=0.5pt, draw=o3blue7, dash pattern=on 2.4pt off 1.4pt] (chk) -- (es);
+
+  % ---- regions -------------------------------------------------------------------------------
+  \begin{scope}[on background layer]
+    \node[region, fit=(vf)(ps)(s1), inner sep=5pt,
+          label={[regionlabel, anchor=south west]north west:stage 1: Verilog-specific}] {};
+    \node[region, fit=(s2)(ir), inner sep=5pt,
+          label={[regionlabel, anchor=south east]north east:stage 2: shared by every front end}] {};
+  \end{scope}
+
+  \odinlegend{anchor=west, at={(0.0, -2.35)}}
+\end{tikzpicture}

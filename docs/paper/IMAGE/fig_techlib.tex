@@ -1,0 +1,48 @@
+% The tech library (1G spec): one .o3lib text format, read into design-local cell types whose
+% port widths may be parametric and whose functions are expressions over the ports. The source
+% is lib/vtr.o3lib's multiply cell, verbatim. Single column: \columnwidth.
+\begin{tikzpicture}[odin,
+  fld/.style={draw=o3grey6, fill=white, line width=0.5pt, font=\scriptsize, align=left,
+              text width=36.5mm, minimum height=4.4mm, inner xsep=2.2pt, inner ysep=1.2pt},
+  use/.style={box, text width=24mm, minimum height=11mm}]
+  % ---- source --------------------------------------------------------------------------------
+  \node[draw=o3grey6, fill=o3grey1, line width=0.5pt, align=left, anchor=north west,
+        inner xsep=3pt, inner ysep=2.5pt, font=\scriptsize\ttfamily,
+        label={[font=\scriptsize\bfseries, color=o3grey7, anchor=south west, inner sep=1pt]
+               north west:\odintt{lib/vtr.o3lib}}] (src) at (0, 0)
+       {cell multiply hard\\
+        \ \ param A\_WIDTH int 36\\
+        \ \ param B\_WIDTH int 36\\
+        \ \ in\ \ a A\_WIDTH\\
+        \ \ in\ \ b B\_WIDTH\\
+        \ \ out out A\_WIDTH + B\_WIDTH\\
+        \ \ fn\ \ out = a * b\\
+        end};
+  % ---- reader and cell type ------------------------------------------------------------------
+  \node[box, built, text width=36.5mm, anchor=north east] (rd) at (8.75, 0)
+       {\odintt{read\_techlib}\\\odinsub{errors are located \odintt{file:line}}};
+  \node[fld, fill=o3blue3, font=\scriptsize\bfseries, align=center, anchor=north]
+       (h) at ($(rd.south)+(0,-0.42)$) {local cell type};
+  \node[fld, anchor=north] (c1) at ($(h.south)+(0,\pgflinewidth)$) {kind: \odintt{hard}, \odintt{gate} or \odintt{blackbox}};
+  \node[fld, anchor=north] (c2) at ($(c1.south)+(0,\pgflinewidth)$) {ports: width = constant, parameter or a compiled expression};
+  \node[fld, anchor=north] (c3) at ($(c2.south)+(0,\pgflinewidth)$) {params and defaults};
+  \node[fld, anchor=north] (c4) at ($(c3.south)+(0,\pgflinewidth)$) {attributes: area, delay};
+  \node[fld, anchor=north] (c5) at ($(c4.south)+(0,\pgflinewidth)$) {\odintt{fn} / \odintt{seq} / \odintt{memory} as ASTs};
+  \node[fit=(h)(c5), inner sep=0pt, draw=o3blue8, line width=0.7pt] (ct) {};
+  % ---- users ---------------------------------------------------------------------------------
+  \node[use, built, anchor=north west] (blif) at (0, -4.25)
+       {BLIF reader\\\odinsub{\odintt{.blackbox}: ports matched by name, params inferred}};
+  \node[use, built, anchor=north] (sim) at (4.375, -4.25)
+       {simulator\\\odinsub{hooks interpret the \odintt{fn} expressions}};
+  \node[use, planned, anchor=north east] (pat) at (8.75, -4.25)
+       {matcher\\\odinsub{\odintt{fn} compiled to IR patterns; Phase 4}};
+  % ---- edges ---------------------------------------------------------------------------------
+  \draw[flow] (src.east |- rd) -- (rd.west);
+  \draw[flow] (rd) -- (ct);
+  \coordinate (rail) at ($(blif.north)+(0,0.25)$);
+  \draw[line width=0.55pt, draw=o3ink] (ct.south) -- (ct.south |- rail);
+  \draw[line width=0.55pt, draw=o3ink] (rail -| blif) -- (rail -| pat);
+  \draw[flow] (rail -| blif) -- (blif.north);
+  \draw[flow] (rail -| sim) -- (sim.north);
+  \draw[flowplanned] (rail -| pat) -- (pat.north);
+\end{tikzpicture}

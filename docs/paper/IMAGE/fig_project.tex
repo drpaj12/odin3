@@ -1,0 +1,50 @@
+% Project input (DESIGN.md section 4.0, 2B spec PRJ-1..PRJ-18): every format fills one
+% design-owned project record; read_verilog, the tech library, dump_project and (Phase 4) the
+% partial mapper only read it. Single column: \columnwidth.
+\begin{tikzpicture}[odin,
+  fmt/.style={box, built, text width=18mm, minimum height=10.5mm},
+  use/.style={box, text width=18.4mm, minimum height=11mm, inner xsep=1.5pt},
+  fld/.style={draw=o3grey6, fill=white, line width=0.5pt, font=\scriptsize, align=left,
+              text width=40mm, minimum height=5.6mm, inner xsep=2.2pt, inner ysep=1pt},
+  fldh/.style={fld, fill=o3blue4, draw=o3blue8, font=\footnotesize, align=center,
+               text width=80mm+3.9pt, minimum height=5mm}]
+  % ---- the four formats --------------------------------------------------------------------
+  \foreach \n/\x/\t/\s in {
+      o3/1.05/\odintt{.o3proj}/{native; arch,\\rules and flow},
+      fl/3.25/file list/{EDA style:\\\odintt{-f}, \odintt{-F}},
+      qs/5.45/Quartus/{\odintt{.qpf}, \odintt{.qsf},\\\odintt{.qip}},
+      ox/7.65/Odin~II XML/{the \odintt{config}\\file}}
+    \node[fmt] (\n) at (\x, 0) {\t\\\odinsub{\s}};
+
+  % ---- the record: a header and two columns of fields ---------------------------------------
+  \node[fldh] (rh) at (4.35, -1.45) {project record \odinsub{(design-owned; 2B)}};
+  \node[fld, anchor=north west] (f1) at ($(rh.south west)+(0,\pgflinewidth)$)
+       {files: path as given and resolved, location, language, library};
+  \node[fld, anchor=north west] (f3) at ($(f1.south west)+(0,\pgflinewidth)$)
+       {top and its location; params \odintt{scope.name = value}};
+  \node[fld, anchor=north west] (f5) at ($(f3.south west)+(0,\pgflinewidth)$)
+       {mapping rules: \odintt{map}, \odintt{split}, \odintt{limit}, patterns (stored)};
+  \node[fld, anchor=north west] (f7) at ($(f5.south west)+(0,\pgflinewidth)$)
+       {flow script; ignored keys; duplicates};
+  \node[fld, anchor=north west] (f2) at ($(f1.north east)+(-\pgflinewidth,0)$)
+       {library files and directories, \odintt{libext}, include directories, defines};
+  \node[fld, anchor=north west] (f4) at ($(f2.south west)+(0,\pgflinewidth)$)
+       {architecture: \odintt{.o3lib}, VPR XML or device};
+  \node[fld, anchor=north west] (f6) at ($(f4.south west)+(0,\pgflinewidth)$)
+       {inventory (\odintt{available}); overrides (\odintt{hide}, \odintt{cell from})};
+  \node[fld, anchor=north west] (f8) at ($(f6.south west)+(0,\pgflinewidth)$)
+       {revision; output (Odin~II XML)};
+  \node[fit=(rh)(f1)(f8), inner sep=0pt, draw=o3blue8, line width=0.7pt] (rec) {};
+
+  % ---- the readers of the record ------------------------------------------------------------
+  \node[use, inprog]  (rv) at (1.05, -5.0) {{\scriptsize\odintt{read\_verilog}}\\\odinsub{preprocess, parse,\\[-2pt]elaborate}};
+  \node[use, built]   (rt) at (3.25, -5.0) {{\scriptsize\odintt{read\_techlib}}\\\odinsub{\odintt{.o3lib}, 1G}};
+  \node[use, planned] (pm) at (5.45, -5.0) {{\scriptsize\odintt{partial\_map}}\\\odinsub{Phase 4}};
+  \node[use, built]   (dp) at (7.65, -5.0) {{\scriptsize\odintt{dump\_project}}\\\odinsub{JSON: the corpus\\[-2pt]oracle record}};
+
+  \foreach \n in {o3, fl, qs, ox} \draw[flow] (\n.south) -- (\n.south |- rec.north);
+  \foreach \n in {rv, rt, dp}     \draw[flow] (\n.north |- rec.south) -- (\n.north);
+  \draw[flowplanned] (pm.north |- rec.south) -- (pm.north);
+
+  \odinlegend{anchor=north, at={(4.35, -5.75)}}
+\end{tikzpicture}

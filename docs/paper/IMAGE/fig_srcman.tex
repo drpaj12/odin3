@@ -1,0 +1,67 @@
+% The source manager's location space for the worked example of the 2A spec section 3.1:
+%   1  `define INNER(p) (p + 1)
+%   2  `define OUTER(q) `INNER(q * 2)
+%   3  assign y = `OUTER(xx);
+% Buffers are allocated in creation order (F, E1, A1, E2, A2, A3) in one 32-bit location space,
+% drawn left to right. Arcs above the strip: parent (where the buffer was entered); arcs below:
+% def (where its bytes are spelled). Both always point to an earlier buffer. Single column.
+\begin{tikzpicture}[odin,
+  cell/.style={draw=o3grey6, line width=0.5pt, minimum height=9mm, align=center,
+               inner sep=1pt, font=\footnotesize},
+  kfile/.style={fill=o3blue4},
+  kexp/.style={fill=o3blue2},
+  karg/.style={fill=o3grey2},
+  par/.style={flow, draw=o3blue8},
+  def/.style={flow, draw=o3grey7, dash pattern=on 2.2pt off 1.3pt},
+  arclab/.style={font=\scriptsize, fill=white, inner sep=0.8pt},
+  seg/.style={draw=o3grey6, line width=0.5pt, minimum height=4.6mm, inner sep=1.5pt,
+              font=\scriptsize, anchor=north west}]
+  % ---- the strip: buffers in allocation order ----------------------------------------------
+  \node[cell, kfile, minimum width=20mm] (F)  at (1.00, 0) {F\\\odinsub{\odintt{f.v}}\\[-2pt]\odinsub{lines 1--3}};
+  \node[cell, kexp,  minimum width=13mm] (E1) at (2.65, 0) {E1\\\odinsub{OUTER}\\[-2pt]\odinsub{13 B}};
+  \node[cell, karg,  minimum width=13mm] (A1) at (3.95, 0) {A1\\\odinsub{$q \leftarrow$ \odintt{xx}}\\[-2pt]\odinsub{2 B}};
+  \node[cell, kexp,  minimum width=13mm] (E2) at (5.25, 0) {E2\\\odinsub{INNER}\\[-2pt]\odinsub{7 B}};
+  \node[cell, karg,  minimum width=13mm] (A2) at (6.55, 0) {A2\\\odinsub{$p \leftarrow$ \odintt{xx}}\\[-2pt]\odinsub{2 B}};
+  \node[cell, karg,  minimum width=13mm] (A3) at (7.85, 0) {A3\\\odinsub{$p \leftarrow$ \odintt{\textvisiblespace*\textvisiblespace2}}\\[-2pt]\odinsub{4 B}};
+
+  % ---- parent arcs (above): apex height grows with the span --------------------------------
+  \foreach \c/\p/\co/\po/\h/\l in {E1/F/-0.15/0.45/0.62/3:12, A1/E1/-0.15/0.12/0.62/E1+7,
+                                   E2/E1/-0.3/0.36/1.3/E1+0, A2/E2/-0.15/0.12/0.62/E2+1,
+                                   A3/E2/-0.3/0.36/1.3/E2+1}
+    \draw[par] ($(\c.north)+(\co,0)$) .. controls +(0,\h) and +(0,\h) ..
+          node[arclab, pos=0.5] {\l} ($(\p.north)+(\po,0)$);
+
+  % ---- def arcs (below) --------------------------------------------------------------------
+  \foreach \c/\p/\co/\po/\h/\l in {E1/F/-0.2/0.6/-0.62/2:18, A1/F/-0.2/0.3/-1.15/3:19,
+                                   E2/F/-0.2/0.0/-1.68/1:18, A2/A1/-0.2/0.2/-1.15/A1+0,
+                                   A3/E1/0.0/0.3/-2.2/E1+8}
+    \draw[def] ($(\c.south)+(\co,0)$) .. controls +(0,\h) and +(0,\h) ..
+          node[arclab, pos=0.5] {\l} ($(\p.south)+(\po,0)$);
+
+  % ---- the preprocessed stream and its segment map -----------------------------------------
+  \coordinate (s0) at (0.35, -2.95);
+  \node[font=\scriptsize\bfseries, color=o3grey7, anchor=south west, inner sep=1pt] at (s0)
+       {stream text and its segment map};
+  \foreach \t/\l/\k/\w [count=\i, remember=\i as \j (initially 0)] in {
+      {assign y =\textvisiblespace}/{F 3:1}/kfile/16.5mm,
+      {(}/{E2+0}/kexp/8.6mm,
+      {xx}/{A2+0}/karg/8.6mm,
+      {\textvisiblespace*\textvisiblespace2}/{A3+0}/karg/10.6mm,
+      {\textvisiblespace+\textvisiblespace1)}/{E2+2}/kexp/12.4mm,
+      {;}/{F 3:22}/kfile/9.6mm} {
+    \ifnum\i=1 \coordinate (at) at (s0); \else \coordinate (at) at (t\j.north east); \fi
+    \node[seg, \k, minimum width=\w, font=\scriptsize\ttfamily] (t\i) at (at) {\strut\t};
+    \node[seg, fill=white, minimum width=\w] (m\i) at (t\i.south west) {\strut\l};
+  }
+  \node[font=\scriptsize, color=o3sub, anchor=west, inner sep=1pt] at (m6.east) {\ location};
+  \node[font=\scriptsize, color=o3sub, anchor=west, inner sep=1pt] at (t6.east) {\ text};
+
+  % ---- key ---------------------------------------------------------------------------------
+  \begin{scope}[shift={(0.35, -4.35)}, every node/.style={font=\scriptsize, anchor=west, inner sep=1pt}]
+    \draw[kfile, draw=o3grey6] (0, -0.08) rectangle +(0.32, 0.22); \node at (0.36, 0.03) {FILE};
+    \draw[kexp,  draw=o3grey6] (1.05, -0.08) rectangle +(0.32, 0.22); \node at (1.41, 0.03) {EXPANSION};
+    \draw[karg,  draw=o3grey6] (3.15, -0.08) rectangle +(0.32, 0.22); \node at (3.51, 0.03) {MACRO\_ARG};
+    \draw[par] (5.35, 0.03) -- +(0.4, 0); \node at (5.8, 0.03) {parent};
+    \draw[def] (6.85, 0.03) -- +(0.4, 0); \node at (7.3, 0.03) {def};
+  \end{scope}
+\end{tikzpicture}
