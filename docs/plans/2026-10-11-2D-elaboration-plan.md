@@ -1,46 +1,75 @@
-# 2D Elaboration — Implementation Plan
+# 2D Elaboration — Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the parsed store of one `read_verilog` run into word-level IR with processes. Stage 1 (Verilog only) builds the elaborated store: module lookup, top selection, parameters with Yosys's precedence, specializations, `generate`, constant functions, implicit nets, non-ANSI port merging and the REJECT/IGNORE diagnostics. Stage 2 (shared with the Phase 5 slang adapter) binds that store and emits wires, ports, word cells, instances, drivers, memories, `$proc` process cells, inlined functions and initial values. The IR changes A (nine registry cells), B (the `$proc` cell) and C (port range and sign) and `write_rtlil` land first. The evidence is per-row goldens in both latch modes, the Yosys 0.55 bridge, micro and VTR sweeps, fuzzers, the mcml.v/lenet.v benchmark and the 2H `--x-report` mode. No `proc`, no `opt`.
+v2 applies the Opus plan review (`2D-plan-review`: 3 critical, 14 important, 24 minor) and the controller's rulings on it:
+- C1: EL-39's x defaults, made in the spec (v4).
+- C2: CMake block and bridge ownership.
+- C3: unhandled items get a located "not available yet" error.
+- I1: stay on the unreleased ABI v4.
+- I7: reductions take the context width.
+- I12: a `sweep` label.
+- I13: `--x-report` stays in 2H.
 
-**Architecture:** `src/frontends/verilog/elab1*.c` is stage 1: a run context (`odin3_elab1`) with a definition table, a specialization table keyed by resolved parameter values, and a FIFO worklist. Each specialization is walked twice: pass E evaluates and records every generate decision in a log, and pass W replays the log and emits the elaborated nodes bottom-up through the 2A builders. `src/frontends/elab/` holds what both front ends share:
+The v1 plan had 29 tasks; v2 has 28.
+
+**Goal:** Turn the parsed store of one `read_verilog` run into word-level IR with processes. Stage 1 (Verilog only) builds the elaborated store: module lookup, top selection, parameters with Yosys's precedence, specializations, `generate`, constant functions, implicit nets, non-ANSI port merging and the REJECT/IGNORE diagnostics. Stage 2 (shared with the Phase 5 slang adapter) binds that store and emits wires, ports, word cells, instances, drivers, memories, `$proc` process cells, inlined functions and initial values. The IR changes A (nine registry cells), B (the `$proc` cell) and C (port range and sign) and `write_rtlil` land first. The evidence is per-row goldens in both latch modes, the Yosys 0.55 bridge, micro and VTR sweeps, fuzzers and the mcml.v/lenet.v benchmark. No `proc`, no `opt`, no `--x-report` (2H's).
+
+**Architecture:** `src/frontends/verilog/elab1*.c` is stage 1: a run context (`odin3_elab1`) with a definition table, a specialization table keyed by resolved parameter values, and a FIFO worklist. Each specialization is walked twice. Pass E evaluates the module, records every declaration in an environment and every generate decision in a log. Pass W replays the log and emits the elaborated nodes bottom-up through the 2A builders. `src/frontends/elab/` holds what both front ends share:
 - the 4-state constant values (`cval*.c`), the two-sweep EL-13 typer (`ctype.c`), and the evaluator and statement interpreter behind a host callback interface (`ceval*.c`);
-- the binder, which fills the 2A symbol table (`bind.c`);
+- the binder, which fills the 2A symbol table and validates the EL-4 form (`bind.c`);
 - stage 2's module emitter (`elab2*.c`): ports for every specialization before any body, then per module wires → mem2reg decision → initial values → instances → assignments → processes → wired-net gates → `$mem`, with a driver table checked before anything is attached;
 - the process generator (`pg*.c`). It follows Yosys's `ProcessGenerator`, builds each body off-IR with `lv`/`rv` maps and undo logs, and makes one `$proc` node per block with `odin3_node_create_connected`.
 
-`src/ir` gains the nine word cells and the `$proc` type: real `I`/`O` ports, an opaque `ODIN3_VAL_PROC` body blob checked by `verify`, and a per-module counter. It also gains the port fields of change C. The pass manager refuses `processes = REFUSE` passes on a design with processes. `src/backends/rtlil` writes RTLIL, processes included, so Yosys 0.55 can lower 2D's output for comparison.
+`src/ir` gains the nine word cells and the `$proc` type: real `I`/`O` ports, an opaque `ODIN3_VAL_PROC` body blob in canonical layout checked by an allocation-free `verify`, and a per-module counter. It also gains the port fields of change C and one RTLIL sigspec spelling. The pass manager refuses `processes = REFUSE` passes on a design with processes. `src/backends/rtlil` writes RTLIL, processes included, so Yosys 0.55 can lower 2D's output for comparison.
 
-**Tech Stack:** C17, `src/util`, `src/ir` (+ IR changes A/B/C), `src/ast` (store, builders, number values, symbol table, check, dump, print), 2C (`odin3_read_verilog_files`, the `read_verilog` pass, `tests/unit/verilog_test.h`), 2B-1 project record (`top`, `top_at`, `params`), the 1D pass manager, CLI and ABI, 1E simlib word helpers (`sim/word.h`), Unity, Python 3 stdlib (bridge, sweeps, generators, `--x-report`), libFuzzer (clang, optional), Yosys 0.55 (`$VTR_ROOT/build/bin/yosys`; 0.69 only for the nightly drift job), ABC through `tools/equiv-check`, Icarus (simlib cases).
+**Tech Stack:** C17, `src/util`, `src/ir` (+ IR changes A/B/C), `src/ast` (store, builders, number values, symbol table, check, dump, print), 2C (`odin3_read_verilog_files`, the `read_verilog` pass, `tests/unit/verilog_test.h`), 2B-1 project record (`top`, `top_at`, `params`), the 1D pass manager, CLI and ABI, 1E simlib word helpers (`sim/word.h`), Unity, Python 3 stdlib (bridge, sweeps, generators), libFuzzer (clang, optional), Yosys 0.55 (`$VTR_ROOT/build/bin/yosys`; 0.69 only for the nightly drift job), ABC through `tools/equiv-check`, Icarus (simlib cases), `systemd-run --user` (memory caps).
 
-**Spec:** `docs/specs/2026-10-11-2D-elaboration-design.md` v3. It is binding: EL-n and § numbers below refer to it, IR changes A/B/C (§7.2, §8.1, §6.2) are part of it, and its §9 message texts are verbatim requirements. Also:
+**Spec:** `docs/specs/2026-10-11-2D-elaboration-design.md` **v4**. It is binding: EL-n and § numbers below refer to it, IR changes A/B/C (§7.2, §8.1, §6.2) are part of it, and its §9 message texts are verbatim requirements.
+- v4, made on this branch with v2, amends EL-39 (ruling C1: the write temporaries start each block as `addr = x`, `data = x`, `en = 0`, as in Yosys 0.55 `simplify.cc` 3167–3231).
+- v4 also amends EL-30's `~&`/`~|` row (minor M8: `$logic_not` of the reduction, as Yosys's parser builds them).
+
+Also:
 - `docs/PHASE2.md` #13: the rulings, decisions 1–13 and the x exit-bar ruling. #4: the exit bar. #6: D1–D5. #8: the 2A carry-overs, among them `odin3_symtab_remap` in `compact`.
 - `docs/IR.md` (IR-1…IR-18, §9 rules) and the op registry `src/ir/cells/`.
 - The 2A spec: §4.3 slot table, §4.4 flags, §4.5 numbers, §4.6 elaborated form, §7 attributes and §8 symbol table. Also `src/ast/*.h`.
 - What 2C hands over: its spec §3.6, §4.2 and §7.3, its plan points (i), (l) and (m), and `tests/verilog/reject-2d/`/`ignore-2d/`.
 - `docs/specs/2026-10-09-2C-verilog-coverage.md` (rows `L1`…`S4`: 100 MUST, 25 SHOULD, 10 IGNORE, 24 REJECT).
-- 1E (`docs/specs/2026-10-09-1E-sim-design.md`: simlib semantics, the `simulate`/`sim_scratch_bytes` contract) and 1D (`docs/specs/2026-10-09-1D-abi-design.md`).
-- The oracle is Yosys 0.55 as pinned by VTR (`frontends/ast/simplify.cc`, `genrtlil.cc`, `backends/rtlil/rtlil_backend.cc`).
+- 1E (`docs/specs/2026-10-09-1E-sim-design.md`: simlib semantics, the hook contract) and 1D (`docs/specs/2026-10-09-1D-abi-design.md`).
+- The oracle is Yosys 0.55 as pinned by VTR (`frontends/ast/simplify.cc`, `genrtlil.cc`, `frontends/verilog/verilog_parser.y`, `backends/rtlil/rtlil_backend.cc`).
 
-**Ordering and bases.** `main` has 2A (#33), 2B-1 (#34), 2B-2 (#36) and the 2C spec and plan (#35, #37). Three branches are in flight:
+**Ordering and bases.** `main` (92abc75) has 2A (#33), 2B-1 (#34), 2B-2 (#36), the 2C spec and plan (#35, #37) and the 2D spec (#40). This branch is rebased onto it. Three branches are in flight:
 - 2C-1 (`feat/2C-parser`): the lexer and grammar, Tasks 1–3 of 7 done.
-- 2C-2 (`feat/2C-read`, not started): `read_verilog`, `--parse-only` and the stub `odin3_elab_run` in `src/frontends/verilog/elab.h` with `elab_stub.c`.
-- 2B-3 (`feat/2B-passes`): the passes and CLI, Tasks 10–11 done.
+- 2C-2 (`feat/2C-read`, not started): `read_verilog`, `--parse-only`, `tests/unit/test_read_verilog.c`, `run-reject`, and the stub `odin3_elab_run` in `src/frontends/verilog/elab.h` with `elab_stub.c`.
+- 2B-3 (`feat/2B-passes`): the passes and CLI, Tasks 10–11 done; ABI v4 additive (ca6ff1c).
 
 Seven PRs, as spec §18:
 
 | PR | Branch | Base | Tasks | Waits for |
 |---|---|---|---|---|
-| 2D-1 IR | `feat/2D-ir` | `origin/main` now | 1–6 | **Nothing.** Tasks 1–3 (the IR changes) touch only `src/ir`, `docs/IR.md`, `docs/DESIGN.md` §5.2/§6 and their tests. The only exceptions are Task 2's mechanical initializer fixes in test files and Task 3's two public enum values in `odin3.h` plus one-line `ODIN3_VAL_PROC` switch arms. None of these files is touched by 2C-1, 2C-2 or 2B-3, so they start **before 2C lands**. Tasks 4–6 touch the pass manager, `builtin.c`, the writers, `src/api` and `odin3.h`, which 2B-3 and 2C-2 also edit (conflict notes 4–8). Rebase onto whichever of them has merged before Task 4 starts; otherwise whichever lands second rebases. |
-| 2D-2 constants | `feat/2D-ceval` | `origin/main` now | 7–9 | Nothing for Tasks 7–8 (hand-built trees). Task 9's interpreter tests parse sources with 2C-1's `vt_parse`, so rebase onto `main` after 2C-1 merges, before Task 9. |
-| 2D-3 hierarchy | `feat/2D-hier` | `main` after 2C-2 and 2D-2 | 10–13 | 2C-2 merged (`odin3_read_verilog_files`, the pass, `elab.h`/`elab_stub.c`, `odin3_ast_library_units_from`). Stage 1 never touches the IR, so 2D-1 is **not** required, and neither is 2B-3. |
+| 2D-1 IR | `feat/2D-ir` | `origin/main` now | 1–6 | **Nothing; Tasks 1–3 can start before 2C lands.** Details below the table. |
+| 2D-2 constants | `feat/2D-ceval` | `origin/main` now | 7–9 | Nothing for Tasks 7–8 (hand-built trees). Task 9's interpreter tests parse with 2C-1's `vt_parse` and its function grammar, so rebase onto `main` after 2C-1 merges, before Task 9. |
+| 2D-3 hierarchy | `feat/2D-hier` | `main` after 2C-2 and 2D-2 | 10–13 | 2C-2 merged (`odin3_read_verilog_files`, the pass, `elab.h`/`elab_stub.c`, `odin3_ast_library_units_from`, `run-reject`). Stage 1 never touches the IR, and the ABI stays v4 (point (c)), so 2D-1 is **not** required, nor is 2B-3. |
 | 2D-4 stage-1 content | `feat/2D-content` | `main` after 2D-3 | 14–16 | 2D-3 |
-| 2D-5 stage-2 module | `feat/2D-stage2` | `main` after 2D-1 and 2D-4 | 17–20 | 2D-1 (cells, ports, `write_rtlil`) and 2D-4. 2B-3 only for the `--elab-only` + `--project` sugar (conflict note 9). |
+| 2D-5 stage-2 module | `feat/2D-stage2` | `main` after 2D-1 and 2D-4 | 17–20 | 2D-1 (cells, ports, `write_rtlil`, the 0.55 CMake block) and 2D-4. 2B-3 only for the `--elab-only` + `--project` sugar (conflict note 9). |
 | 2D-6 processes | `feat/2D-proc` | `main` after 2D-5 | 21–24 | 2D-5 |
-| 2D-7 evidence | `feat/2D-evidence` | `origin/main` now; rebased after each 2D PR merges | 25–29 | It grows from 2D-3 and opens last, after 2D-6. Task 26's corpus run needs 2B-3's `project-fixtures compare`. Task 28's fuzz target needs the `ODIN3_FUZZ` block that 2B-3 or 2C-2 creates. |
+| 2D-7 evidence | `feat/2D-evidence` | `origin/main` now; rebased after each 2D PR merges | 25–28 | It grows from 2D-3 and opens last, after 2D-6. Task 26's corpus run needs 2B-3's `project-fixtures compare`. Task 28's fuzz target needs the `ODIN3_FUZZ` block that 2B-3 or 2C-2 creates. |
 
-"Grows from 2D-3" works like this. The row sources and hand-written stage-1 goldens (Task 25, no code) are written on `feat/2D-evidence` while 2D-3 is in review. Before each of 2D-3…2D-6 opens, the controller runs the evidence branch's runners against that PR's head and quotes the result in its description. The evidence CTests themselves land with 2D-7. Task 25's Python bridge `elab-equiv` is written first on the evidence branch and cherry-picked into 2D-6 for Tasks 21, 22 and 24's bridge CTests, as 2B did with its Python harness.
+Why 2D-1 waits for nothing:
+- Tasks 1–3 (the IR changes) touch `src/ir`, `docs/IR.md`, `docs/DESIGN.md` §5.2/§6 and their tests.
+- They also touch:
+  - mechanical initializer fixes in test files (Task 2);
+  - two public enum values in `odin3.h`, in hunks other than 2B-3's (Task 3);
+  - the `ODIN3_VAL_PROC` arms of the JSON and Verilog writers and the Verilog writer's operator table (Tasks 1 and 3).
+- No in-flight branch edits any of those hunks, so Tasks 1–3 start **before 2C lands**.
+- Tasks 4–6 touch the pass manager, `builtin.c`, the writers' entries, `src/api` and `odin3.h`, which 2B-3 and 2C-2 also edit (conflict notes 4–8). Rebase onto whichever of them has merged before Task 4 starts; otherwise whichever lands second rebases.
+
+**No file is cherry-picked between branches** (ruling C2). Every file lands in the PR of the task that creates it:
+- Task 5 creates the Yosys-0.55 CMake block (point (p)).
+- Task 21 creates the bridge: `tools/elab-check/elab-equiv`, `tools/elab-check/elab_equiv.py`, `tools/elab-check/memcap.py` (point (n)'s cap wrapper) and `tests/tools/test_elab_equiv.py`.
+- Task 25 creates `elab-check` and the rows.
+
+"Grows from 2D-3" works like this. The row sources and the hand-written stage-1 goldens (Task 25, no code) are written on `feat/2D-evidence` while 2D-3 is in review. The goldens stay provisional until 2D-4 merges (point (bb)). Before each of 2D-3…2D-6 opens, the controller merges that PR's head into a local scratch copy of the evidence branch (never pushed) and runs `elab-check` on it, with `--stage1` before 2D-5. The result goes in the PR description. The evidence CTests themselves land with 2D-7.
 
 **Model/effort** (PHASE0 §9; PHASE2 row 2D is Opus `xhigh`, review by Peter on semantics; `high` once settled, as spec §18 says):
 
@@ -50,99 +79,142 @@ Seven PRs, as spec §18:
 | 2 IR change C: port range and sign | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 3 IR change B: the `$proc` cell | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 4 Passes and processes, writer refusals, `compact` symtab remap | Opus `high` | Opus `xhigh` |
-| 5 `write_rtlil` | Opus `high` | Opus `high` |
-| 6 ABI v5 | Opus `high` | Opus `high` |
+| 5 `write_rtlil`, the Yosys-0.55 CMake block | Opus `high` | Opus `high` |
+| 6 ABI additions (v4) | Opus `high` | Opus `high` |
 | 7 Values, operators, the Yosys 0.55 constant table | Opus `xhigh` | Opus `xhigh` |
 | 8 Expression typing | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 9 Evaluator, interpreter, system functions | Opus `xhigh` | Opus `xhigh` |
-| 10 Stage-1 context, entry, lookup, top | Opus `xhigh` | Opus `xhigh` |
+| 10 Stage-1 context, entry, lookup, top, pending kinds, `run-reject` | Opus `xhigh` | Opus `xhigh` |
 | 11 Parameters, specializations, passes E/W, push-down | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 12 Instances, connections, arrays, black boxes | Opus `xhigh` | Opus `xhigh` |
-| 13 Binder | Opus `high` | Opus `xhigh` |
+| 13 Binder and EL-4 validation | Opus `high` | Opus `xhigh` |
 | 14 Generate and scope names | Opus `high` | Opus `xhigh` |
 | 15 Declarations, ports, implicit nets, normalisations | Opus `high` | Opus `high` |
-| 16 REJECT/IGNORE diagnostics, cap, handover on | Opus `high` | Opus `high` |
-| 17 Stage-2 context, wires, ports, provenance, budget, `--elab-only`, `odin3_ast_elaborate` | Opus `xhigh` | Opus `xhigh` |
+| 16 REJECT/IGNORE diagnostics, cap, handover expectations | Opus `high` | Opus `high` |
+| 17 Stage-2 context, wires, ports, provenance, keep levels, budget, `--elab-only`, `odin3_ast_elaborate` | Opus `xhigh` | Opus `xhigh` |
 | 18 Expressions and selects to word cells | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 19 Instances, gates, assignments, drivers, wired nets, tri-state | Opus `xhigh` | Opus `xhigh` |
 | 20 Memories (decision, `$mem`, reads) | Opus `xhigh` | Opus `xhigh` |
-| 21 Process generator core | Opus `xhigh` | **Fable**, else Opus `xhigh` |
+| 21 Process generator core, the bridge | Opus `xhigh` | **Fable**, else Opus `xhigh` |
 | 22 `if`/`case`, case temporaries, `full_case`/`parallel_case`, lvalue selects | Opus `xhigh` | Opus `xhigh` |
 | 23 Loops, functions and tasks, continuous-context calls | Opus `xhigh` | Opus `xhigh` |
 | 24 Memory writes, initial values, `$readmem`, T9/T10 | Opus `xhigh` | Opus `xhigh` |
-| 25 `elab-check`, rows, goldens, the bridge | Opus `high` (bulk generated goldens: Sonnet `high`) | Opus `high` (re-derives every hand golden) |
+| 25 `elab-check`, rows, goldens, the sweep preset | Opus `high` (bulk generated goldens: Sonnet `high`) | Opus `high` (re-derives every hand golden) |
 | 26 Project corpus, handover close-out, micro sweeps | Opus `high` | Opus `high` |
-| 27 VTR sweeps, `bench_elab`, PHASE2 entry | Opus `high` (bench runs: Sonnet `high`) | Opus `high` |
+| 27 VTR sweep, `bench_elab`, PHASE2 entry | Opus `high` (bench runs: Sonnet `high`) | Opus `high` |
 | 28 Fuzzer and differentials | Opus `high` | Opus `high` |
-| 29 `equiv-check --x-report` and the Parmys preview | Opus `high` | Opus `high` |
 | Whole-branch review before **each** PR (2D-1 … 2D-7) | — | **Fable**, else Opus `xhigh` |
 
 Effort cues:
 - Say `/model opus` + `/effort xhigh` at the start of 2D-1 Task 2, and keep `xhigh` through 2D-3 and through 2D-5/2D-6.
-- Say `/effort high` for Tasks 1, 4–6, 13–16 and 25–29.
+- Say `/effort high` for Tasks 1, 4–6, 13–16 and 25–28.
 - Say `/model sonnet` + `/effort high` for bulk golden generation and the bench runs.
 - Say `/clear` between tasks (one task per session).
 
-**Parallel lanes** (disjoint files; land one at a time on each branch):
-- **2D-1:** {1 ‖ 2} → 3 → {4 ‖ 5} → 6. Tasks 1 and 3 both append to `builtin.c`. Task 2 changes the port-def macros Task 3's cell uses, so it lands first.
+**Lanes** (land one at a time on each branch; review I2):
+- **2D-1:** 2 → 1 → 3 → 4 → {5 ‖ 6}.
+  - Tasks 1 and 2 share `cells.h` and `test_sim_word.c`.
+  - Task 3's cell uses Task 2's port macros.
+  - Task 5 needs Task 4's `processes` member and shares `write_formats.c`, the pass table and the docs with it.
+  - Tasks 5 and 6 share only `CMakeLists.txt` (appends).
 - **2D-2:** 7 → 8 → 9, in parallel with all of 2D-1.
-- **2D-3:** 10 → 11 → 12, with 13 alongside 11–12. The binder works on hand-built elaborated stores and shares no file with stage 1.
+- **2D-3:** 10 → 11 → 12, with 13 alongside 11–12 (`bind.c` and hand-built stores share no file with stage 1).
 - **2D-4:** 14 → 15 → 16. They share pass E/W.
 - **2D-5:** 17 → 18 → 19 → 20.
 - **2D-6:** 21 → 22 → 23 → 24. They share `odin3_pg`.
-- **2D-7:** 25 starts with 2D-3 (sources and hand goldens). 29 (Python only) can run any time. 26 → 27 after 2D-6, then 28.
+- **2D-7:** Task 25's sources and provisional hand goldens start with 2D-3. Then 25 → 26 → 27 → 28 after 2D-6.
 
 Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 
 **Pre-flight conflict note.**
-1. `CMakeLists.txt`: every task appends sources to `odin3_core`, `odin3_add_unit_test(...)` lines and CTests. These are append-only hunks; keep both sides. Task 25 adds the `ODIN3_YOSYS055` discovery block once (point (p)). Every Yosys-0.55 CTest sits inside it.
+1. `CMakeLists.txt`: every task appends sources to `odin3_core`, `odin3_add_unit_test(...)` lines and CTests. These are append-only hunks; keep both sides.
+   - Task 5 adds the `ODIN3_YOSYS055` discovery block (point (p)). Every later Yosys-0.55 CTest goes inside it.
+   - Task 25 adds the `sweep` label convention, and `CMakePresets.json` gets the `debug`/`release` exclusion and the `sweep` test preset (point (n)).
 2. `src/ir/cells/builtin.c` and `cells.h`: Task 1 appends the nine cells and Task 3 appends `$proc` (point (f)). Append-only.
-3. `src/ir/celltype.h` and `src/ir/module.h`: Task 2 appends `is_signed` to `odin3_port_def` and four fields to `odin3_port_spec`. Task 3 touches only the flag comment. Every positional initializer of either struct (cells macros, `tests/unit/*.c`) gains the new trailing values in Task 2. `-Wmissing-field-initializers` under `-Werror` finds them all.
-4. `include/odin3/odin3.h`:
+3. `src/ir/celltype.h`, `celltype.c` and `src/ir/module.h`:
+   - Task 2 appends `is_signed` to `odin3_port_def` and four fields to `odin3_port_spec`. Every positional initializer of either struct gains the new trailing values: the cells macros, `src/ir/cells/const.c` and `tests/unit/*.c` including `test_techlib_reader.c` and `test_blif_reader.c`. `-Wmissing-field-initializers` under `-Werror` finds them all.
+   - Task 3 raises `celltype.c`'s parameter-kind bound to `PROC` and adds the `$proc`-only rule (point (g)).
+4. `include/odin3/odin3.h` stays at **ABI v4** (point (c); no version change anywhere):
    - Task 3 adds `ODIN3_VAL_PROC` (4) and `ODIN3_CT_PROCESS` (32).
    - Task 4 adds the public `ODIN3_PASS_PROCESSES_*` constants and renames `odin3_plugin_pass.reserved[0]` to `processes`.
-   - Task 6 bumps the ABI to v5 and adds `odin3_module_get_proc_count`.
+   - Task 6 adds `odin3_module_get_proc_count` and writes the v4 history line "(cont., 2D)".
    - Task 10 adds `odin3_ast_get_library_units_from`.
-   - Task 17 adds `odin3_elab_options` and `odin3_ast_elaborate`.
-   - 2B-3 adds `odin3_design_has_project`, `odin3_pass_set_revision` and `odin3_pass_set_diag_paths` in other hunks.
-   All hunks are additive. The v5 header-comment line is written once (Task 6) and extended by Tasks 10 and 17 (point (c)).
+   - Task 17 adds `odin3_elab_options`, `odin3_ast_elaborate` and the failed-read note.
+   - Tasks 10 and 17 extend the same v4 line.
+   - 2B-3 adds `odin3_design_has_project`, `odin3_pass_set_revision` and `odin3_pass_set_diag_paths` under v4 in other hunks.
+   All hunks are additive. Whichever lands second extends the line rather than duplicating it.
 5. `src/passes/manager.{h,c}`: Task 4 appends `uint8_t processes` to `odin3_pass_def` and the refusal in `run_def`. 2B-3 extends `odin3_pass_options` and `run_def` (diag paths). Different hunks, but both in `run_def`: the refusal goes **before** `odin3_pass_run_begin`, and 2B-3's diag-path line stays first.
-6. `src/passes/builtin.c`, `builtin.h`, `write_formats.c`, `sim_pass.c`: Task 4 adds a `processes` value to every positional `odin3_pass_def` initializer and the remap in `compact`. Task 5 adds `write_rtlil` (in `write_formats.c` and the `odin3_builtin_passes[]` table). 2B-3 adds `read_project`, `dump_project` and `preprocess` (`project_pass.c`). 2C-2 adds `read_verilog`. Whichever lands second gives the other's new defs their `processes` value (point (x)).
-7. `src/api/{pass.c,node.c,module.c,ast_abi.c}`, new `src/api/elab_abi.c`: Tasks 4, 6, 10 and 17. 2B-3 edits `src/api/pass.c` and `design.c` (setters): different functions. `plugins/python/odin3.py` reads the cdef verbatim; Task 6 only adds the kind name.
-8. `src/backends/{blif,json,verilog,dot}/writer.c` and `src/backends/json/emit.c`: Task 3 adds the `ODIN3_VAL_PROC` switch arms. Task 4 adds the refusal at each writer's entry. Nothing else in flight touches them.
+6. `src/passes/builtin.c`, `builtin.h`, `write_formats.c`, `sim_pass.c`:
+   - Task 4 adds a `processes` value to every positional `odin3_pass_def` initializer and the remap in `compact`.
+   - Task 5 then adds `write_rtlil`.
+   - 2B-3 adds `read_project`, `dump_project` and `preprocess` (`project_pass.c`); 2C-2 adds `read_verilog`. Whichever lands second gives the other's new defs their `processes` value (point (x)).
+7. `src/api/{pass.c,node.c,module.c,ast_abi.c}` and the new `src/api/elab_abi.c`: Tasks 4, 6, 10 and 17. 2B-3 edits `src/api/pass.c` and `design.c` (setters): different functions. `src/api/celltype.c` is unchanged: plugins stay bounded at `COVER`. `plugins/python/odin3.py` reads the cdef verbatim; Task 6 only adds the kind name.
+8. Backends:
+   - `src/backends/json/emit.c` and `src/backends/verilog/writer.c`: Task 3 adds the `ODIN3_VAL_PROC` switch arms. These two files and `src/ir/value.c` are the only `-Wswitch` sites.
+   - `src/backends/verilog/writer.c`: Task 1 adds seven `BUILTINS` rows and the `$shiftx`/`$pow` refusal.
+   - `src/backends/{blif,json,verilog,dot}/writer.c`: Task 4 adds the refusal at each writer's entry.
+   Nothing else in flight touches these files.
 9. `src/cli/main.c` and `tests/cli/test_cli.sh`: Task 17 adds `--elab-only` and `cli_elab_only*`. 2C-2 adds `--parse-only`; 2B-3 adds `--project`/`-f`/`--revision`/`--diag-paths`. `--elab-only` mirrors 2C's `--parse-only` code path. Whichever of 2D-5 and 2B-3 lands second adds the `--project`/`-f` + `--elab-only` append rule, as 2C conflict note (5) does for `--parse-only`.
-10. 2C-2's files: `src/frontends/verilog/elab.h`, `elab_stub.c` and `read_verilog.c`.
-    - Task 10 changes the `odin3_elab_run` signature (point (a)), deletes `elab_stub.c`, adds the three flags to `read_verilog`'s option parse and usage, and changes the call.
-    - Task 16 changes `tools/parse-check/run-reject` and `tests/tools/test_run_reject.py` (per-case pending, point (l)). It may correct a `reject-2d/*.err` or `ignore-2d/*.warn` text only to match a §9 table row, quoting that row in the commit message.
+10. 2C-2's files: `src/frontends/verilog/elab.h`, `elab_stub.c`, `read_verilog.c`, `tests/unit/test_read_verilog.c`, `tools/parse-check/run-reject` and `tests/tools/test_run_reject.py`. **All are Task 10's** (review I4):
+    - Task 10 changes the `odin3_elab_run` signature and store ownership (point (a)), deletes `elab_stub.c`, and adds the three flags to `read_verilog`'s option parse, usage and call.
+    - Task 10 flips 2C's stub expectation in `test_read_verilog.c` and makes `run-reject --elaborate` judge per case (point (l)).
+    - Task 16 only flips `reject-2d`/`ignore-2d` expectations. It may correct a `.err` or `.warn` text only to match a §9 table row, quoting that row in the commit message.
 11. `src/ast/*`: 2D adds no AST API. It consumes 2C-2's `odin3_ast_library_units_from`. `docs/specs/2026-10-09-2A-ast-design.md` gets §19's two amendments: Task 15 the §4.6 pointer to EL-4, Task 22 the §7 D1 sentence. 2C-2 makes its §9 (b) there. These are different paragraphs.
 12. Docs:
-    - `docs/IR.md` (Tasks 2, 3, 17) and `docs/DESIGN.md` (Tasks 1, 3, 5, 10). PHASE0 `docs/` rules: only these tasks edit them.
+    - `docs/IR.md`: Tasks 2 and 3, with IR-12's note made **once**, in Task 3.
+    - `docs/DESIGN.md`: Tasks 1, 3, 5 and 10.
     - `docs/PASSES.md`: Tasks 4, 5, 10 and 17; 2B-3 and 2C-2 add rows. Rows are independent lines; keep both.
-    - `docs/specs/2026-10-09-2C-verilog-coverage.md` E12 (Task 8).
-    - `docs/specs/2026-10-09-1D-abi-design.md` (Task 4).
+    - `docs/specs/2026-10-09-2C-verilog-coverage.md` E12: Task 8.
+    - `docs/specs/2026-10-09-1D-abi-design.md`: Task 4.
+    - `docs/specs/2026-10-11-2D-elaboration-design.md` v4: this branch only.
     - `docs/PHASE2.md` is append-only: Task 27 adds 2D's entry as the next free number (#14 unless 2C took it).
 13. `tests/unit/simlib_word_cases.h` and `tools/sim-check/gen_simlib_cases.py`: Task 1 only. Regenerate, never hand-edit.
-14. 2C-2's `tools/verilog-gen/*` and the fuzz CMake block: Task 28 extends them (`--elab`, `fuzz_elab`). `tools/project-fixtures/project_fixtures.py` (2B-3): Task 26 adds the `--with-frontend` bridge mode. `tools/equiv-check/equiv_check.py`: Task 29 only.
+14. 2C-2's `tools/verilog-gen/*` and the fuzz CMake block: Task 28 extends them (`--elab`, `fuzz_elab`). `tools/project-fixtures/project_fixtures.py` (2B-3): Task 26 adds the `--with-frontend` bridge mode. `tools/equiv-check` is not touched by 2D (`--x-report` is 2H's, point (m)).
 15. Golden directories `tests/elab/rows/`: Task 25 writes them. A later task that finds a hand golden wrong fixes it only with the EL rule or Yosys 0.55 run that proves it quoted in the commit message, and the reviewer re-derives that file.
 
 **Spec points made exact here** (agent defaults, reversible; Task 27 logs them in PHASE2):
 
-- (a) **Options reach the entry.** 2C's stub signature has no options channel. The entry becomes `odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast *parsed, const odin3_elab_opts *opts)`.
-  - `read_verilog` parses `--nolatches`, `--nomem2reg` and `--auto-blackbox` into `opts` and leaves `top`/`top_at` 0.
-  - Step (1) fills them from `--top` (`odin3_pass_get_options().top`, interned, `top_at` 0), else from the project record's `top`/`top_at`.
+- (a) **Options reach the entry; the parsed store's owner is explicit.** 2C's stub signature has no options channel. The entry becomes `odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast *parsed, const odin3_elab_opts *opts)`.
+  - `read_verilog` parses `--nolatches`, `--nomem2reg` and `--auto-blackbox` into `opts` and leaves `top`/`top_at` 0. Step (1) fills them from `--top` (`odin3_pass_get_options().top`, interned, `top_at` 0), else from the project record's `top`/`top_at`.
+  - Ownership (review I10):
+    - `read_verilog` hands the parsed store to the design (`odin3_design_set_ast`) **before** the call.
+    - Step (3) is `odin3_design_drop_ast(design, run, PARSED)`, which destroys it unless the keep level is `ALL`, so the parsed store is gone before stage 2 as §15's estimate assumes.
+    - The pass's own later drop is a no-op ("a store not held is a no-op").
+    - `odin3_elab_run` never calls `odin3_ast_destroy` on `parsed`. `elab.h` documents this.
 - (b) **ABI entry.** `odin3_pass_ctx` is not in the ABI, so the ABI form is `odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast, const odin3_elab_options *opts)`.
   - The store must be held by `design` (made with `odin3_design_new_ast`), sealed and of form `ELABORATED`; anything else is `INVALID_ARG`.
   - The provenance run is the store's (`odin3_ast_get_run`), from which the call builds the internal context (`op` 0).
   - It runs EL-2 steps 4–5. Step 6 is moot because the design already holds the store. `opts->top` and `auto_blackbox` are stage-1 options, ignored here.
-- (c) **One ABI bump**, v4 → v5, in Task 6 (2D-1). The first incompatible changes are there: two enum values and a reserved slot that gains a meaning. 2D-3 and 2D-5 only append declarations under v5 and extend its comment line.
+  - Its paragraph says that a plugin cannot yet learn a pass-run ID (PHASE2 #8 carry-over). Until that ABI addition, the slang adapter supplies the run of the read it performs itself.
+- (c) **ABI stays at the unreleased v4** (ruling I1). Every 2D addition is additive in 1D's sense:
+  - new functions;
+  - enum constants appended at the end;
+  - a reserved slot whose old required value, NULL, keeps the safe old meaning (`REFUSE`).
+
+  `ODIN3_ABI_VERSION` stays 4. The header's v4 history line gains "(cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot, library units, odin3_ast_elaborate", written by Task 6 and extended by Tasks 10 and 17. The bump is decided once, at the first release or Phase-2 close, as a PHASE2 decision (Task 27 records the item).
 - (d) **IR change C has no ABI mirror.** No ABI function creates modules or ports, and `odin3_plugin_port` stays frozen (§6.2).
 - (e) **`ODIN3_VAL_PROC` payload** is one blob in the value's `bits`/`len` (`len` = bytes).
   - Layout: a header of six `uint32_t` counts (pbits, compares, actions, cases, switches, syncs), then the six arrays in that order as the §8.1 C structs, each array at an 8-byte-aligned offset.
-  - `odin3_proc_body_pack` builds it zero-filled (arena memory is zeroed and the arena is `max_align_t`-aligned), so padding bytes are 0.
-  - Hence `odin3_value_copy`, `odin3_value_equal` (byte compare), `compact` and tombstones need nothing beyond `has_payload` accepting `PROC`.
+  - `odin3_proc_body_pack` writes every record field by field into zeroed arena memory (`max_align_t`-aligned), so padding bytes are 0. Hence `odin3_value_copy`, `odin3_value_equal` (byte compare), `compact` and tombstones need nothing beyond `has_payload` accepting `PROC`.
+  - `odin3_proc_body_view` rejects a `bits` pointer that is not 8-byte aligned (no misaligned casts under UBSan).
+  - **Canonical layout** (review I3), which `verify` checks without allocating:
+    - case 0 is the root;
+    - the switches of case c are a contiguous range, the ranges in case-index order partitioning `[0, n_switches)`;
+    - the cases of switch s are a contiguous range, the ranges in switch-index order partitioning `[1, n_cases)`;
+    - every case of switch s has a higher index than the case owning s;
+    - the actions of case c are contiguous, the ranges in case order partitioning `[0, A)`;
+    - the sync actions follow, contiguous per sync in sync order, ending at `n_actions`;
+    - compares are contiguous per case, in case order.
+
+    The process generator emits this order (Task 21: breadth-first numbering). "Every case, switch and action used exactly once" is then O(body) running-counter checks.
 - (f) **Table order.** The nine cells (`$neg $xnor $reduce_xnor $reduce_bool $logic_not $logic_and $logic_or $shiftx $pow`), then `$proc`, are appended after `$sop` (index 52). Built-in IDs 0–52 do not move; the count becomes 63.
-- (g) **`$proc` type.** Ports are `I` and `O` (`ODIN3_PORT_VEC` on `I_WIDTH`/`O_WIDTH`). Parameter defaults are `I_WIDTH` 0, `O_WIDTH` 1 and an empty `BODY`, which `verify` rejects, so a default node cannot exist. `ODIN3_CT_PROCESS` = 32. A plugin or local type carrying the flag is `INVALID_ARG` ("only the built-in $proc may have ODIN3_CT_PROCESS").
-- (h) **A sync on an `OUT` position is legal** for edge and level syncs. §8.1 is normative and carries re-review N1. §14.1's "a sync signal that is an OUT position" among the rejected bodies is a stale v2 phrase. Task 3 asserts acceptance and rejects only an `ALWAYS` sync with a signal, or a signal that is not one `IN`/`OUT` position.
+- (g) **`$proc` type.**
+  - Ports are `I` and `O` (`ODIN3_PORT_VEC` on `I_WIDTH`/`O_WIDTH`).
+  - Parameter defaults are `I_WIDTH` 0, `O_WIDTH` 1 and an empty `BODY`, which `verify` rejects, so a default node cannot exist.
+  - `ODIN3_CT_PROCESS` = 32.
+  - `celltype.c`'s kind bound rises from `COVER` to `PROC` (review I14). Registration rejects a `PROC` parameter or the `ODIN3_CT_PROCESS` flag on any definition other than `&odin3_cell_proc`, with `cell type '<t>': only the built-in $proc may have a PROC parameter or ODIN3_CT_PROCESS`.
+  - `src/api/celltype.c` keeps its `COVER` bound, so a plugin can declare neither.
+- (h) **A sync on an `OUT` position is legal** for edge and level syncs. §8.1 is normative and carries re-review N1. §14.1's "a sync signal that is an OUT position" among the rejected bodies is a stale v2 phrase. Task 3 asserts acceptance. Task 27 logs it as a spec erratum.
 - (i) **Refusal point.** The `processes` check runs in `run_def` before `odin3_pass_run_begin`, so a refused pass opens no run.
   - The message names the first module, in creation order, whose count is nonzero.
   - `odin3_pass_def.processes` is the last member (`uint8_t`).
@@ -153,42 +225,93 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - `elab.h`: options, caps and stage APIs.
   - `elab_internal.h`: binding, the stage-2 context, emission, drivers and memories.
   - `pg.h`: the process generator.
-  - `elab_test.h`: limits hook.
+  - `elab_test.h`: limits and hooks.
   - `src/frontends/verilog/elab1.h`: the stage-1 context.
   - `src/frontends/verilog/elab1_inst.c`: instances and connections, added to §12's list.
-- (k) **The run-level iteration cap crosses the seam without a field.** Stage 2 starts its `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` count at the number of indexed `GEN_BLOCK`s in the elaborated store, one per generate-loop iteration stage 1 kept. The error count needs no carry, since stage 2 never starts after a stage-1 error.
-- (l) **Not-yet-built stages.**
-  - Until Task 17, `odin3_elab_stage2` is a stub (`src/frontends/elab/elab2_stub.c`). It logs 2C's exact text `elaboration is not available yet (2D)` and returns `PARSE`.
-  - From Task 17 until Tasks 21/23, reaching an `ALWAYS`, an `INITIAL`, a continuous-context call or a mem2reg variable-index read outside a process logs the same text and skips the construct.
-  - Task 16 makes `run-reject --elaborate` judge per case: expected line found → pass; else the stub text present → **pending** (listed, not failed); else → fail. Exit 77 only when every case is pending.
-  - Task 24 asserts zero pending.
-- (m) **`--x-report`** is 2H's (§14.6 item 4, §18). It is built here (Task 29) because 2H grows alongside 2D and the brief asks for it. It is used only by a report-only preview of the Parmys comparison and never gates a 2D PR. The defined-output miter (§14.6 item 5) stays in 2H's backlog. §14.6 item 2 (Yosys's x rules) is 2F's, and item 3 (the BLIF writer's `unconn` convention) is 2H's; 2D's part is item 1 (x kept explicit), asserted by Task 18 (`$shiftx`, the wildcard `===`) and Tasks 21–22 (x constant pins).
-- (n) **Memory caps for sweeps** (WSL rule).
-  - Every child a sweep driver starts (odin3, Yosys, equiv-check, `bench_elab`) runs under `systemd-run --user --scope -q -p MemoryMax=<cap> -p MemorySwapMax=0`. Where that is unavailable, Release binaries (never ASan) run under `prlimit --as=<cap>`.
-  - `--jobs J` is refused when `J × cap` exceeds 60% of `MemTotal`.
-  - Defaults: J = 1, cap 4 GiB; `lenet.v` and its Yosys run get 8 GiB alone.
+- (k) **The run-level iteration cap crosses the seam without a field.** Stage 2 starts its `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` count at the number of indexed `GEN_BLOCK`s in the elaborated store, one per generate-loop iteration stage 1 kept. The error count needs no carry, since stage 2 never starts after a stage-1 error. Task 23 tests the sum.
+- (l) **Not-yet-built constructs: a located error, so `main` stays green after every PR** (ruling C3).
+  - `src/frontends/elab/elab_pending.c` holds one static table per stage, `k_pending[stage][]`, of the AST kinds, plus three features (`ODIN3_PEND_COMB_CALL`, `ODIN3_PEND_REGS_VAR_READ`, `ODIN3_PEND_MEM_WRITE`), whose elaboration has not landed yet.
+  - Each task that implements a kind removes it from the table in the same commit. The staging is:
+    - Task 11 lands `MODULE`, `LIST`, ANSI `PORT_DECL`, `PARAM_DECL`, `NET_DECL`/`VAR_DECL` without strength or delay, `RANGE`, `CONT_ASSIGN`/`NET_ASSIGN`, `INSTANTIATION`/`INSTANCE`/`CONNECTION` (named connections), `DEFPARAM` and expressions as written.
+    - Task 12 lands ordered connections, arrays and `GATE_DECL`.
+    - Task 14 lands `GENERATE`, `GEN_FOR`, `GEN_IF`, `GEN_CASE`, `GEN_BLOCK`, `GENVAR_DECL` and scope `HIER_NAME`s.
+    - Task 15 lands `PORT_REF` merging, implicit nets, `FUNCTION_DECL`, `TASK_DECL`, `ALWAYS`, `INITIAL` and every statement kind.
+    - Task 16 lands every REJECT/IGNORE kind; the stage-1 table is then empty.
+    - In stage 2:
+      - Task 17 lands the module-level kinds;
+      - Task 21 lands `ALWAYS` with blocks and assignments;
+      - Task 22 lands `IF` and `CASE`;
+      - Task 23 lands `FOR`, `REPEAT`, `TASK_CALL`, calls in processes and the two read features;
+      - Task 24 lands `INITIAL` (variable initialisers included) and `ODIN3_PEND_MEM_WRITE`.
+  - Reaching a pending kind or feature logs, once per kind per run, `file:line:col: error: elaboration is not available yet (2D): '<KIND>'`. `<KIND>` is the dump's kind name, or `continuous-context call` / `variable index into a register array` / `memory write`. It counts as an error.
+  - A stage-1 error destroys the elaborated store, so rule 7 never sees an unhandled kind. A stage-2 error skips the construct, so the IR stays valid.
+  - Until Task 17, `odin3_elab_stage2` is the stub `src/frontends/elab/elab2_stub.c`, which logs 2C's exact unlocated text `elaboration is not available yet (2D)` and returns `PARSE`.
+  - Task 10 makes `run-reject --elaborate` judge per case. An expected line found → **pass**. Else a line containing `elaboration is not available yet (2D)` → **pending** (listed, not failed). Else → **fail**. Exit 1 on any fail, 77 when every case is pending.
+  - Hook `odin3_elab_test_pend(kind)` (elab_test.h) forces a kind pending, so the mechanism stays testable after the tables are empty.
+  - Task 16 asserts the stage-1 table is empty. Task 24 asserts both are, plus CTest `elab_no_pending`: the coverage rows and the sink never print the text.
+- (m) **`--x-report` and the defined-output miter stay in 2H** (ruling I13; spec §18, PHASE2 #13). 2D-7 produces only what 2H needs:
+  - `elab-equiv --a-only --keep DIR` (Task 21) writes side A's netlist as `a.blif` with Parmys's `write_blif -gates -undef + unconn` convention, for 2H to compare with Parmys goldens;
+  - Task 27 writes the 2H backlog line in 2D's PHASE2 entry.
+
+  Of §14.6's items, 2D owns item 1 (x kept explicit, asserted by Task 18's `$shiftx` and wildcard `===`, and Tasks 21–22's x constant pins). Item 2 is 2F's; items 3–5 are 2H's.
+- (n) **Memory and sweeps** (WSL rule; ruling I12).
+  - Every child a sweep driver starts (odin3, Yosys, equiv-check, `bench_elab`) runs through `tools/elab-check/memcap.py` under `systemd-run --user --scope -q -p MemoryMax=<cap> -p MemorySwapMax=0`. This holds for ASan binaries too (verified working here).
+  - When `systemd-run --user` is unavailable: a Release child runs under `prlimit --as=<cap>`, and an ASan child makes the driver exit 77 (skip).
+  - `--jobs J` is refused when `J × cap` exceeds 60% of `MemTotal`. Defaults: J = 1, cap 4 GiB; `lenet.v` and its Yosys run get 8 GiB alone.
   - A child killed by its cap is reported `out of memory (cap N)`, never retried in parallel.
+  - Heavy sweeps carry the CTest label `sweep` and `RUN_SERIAL TRUE`:
+    - `elab_coverage_equiv`, `verilog_micro_elab`, `elab_equiv_micro`, `verilog_vtr_elab`, `elab_equiv_vtr`, `elab_gen_vs_yosys`, `elab_const_diff` and `bench_elab_smoke`;
+    - any ASan run touching `lenet.v`.
+  - `CMakePresets.json`'s `debug` and `release` test presets exclude `sweep` (`"filter": {"exclude": {"label": "sweep"}}`), so the `-j4` gate never runs them. A new `sweep` test preset (configure `release`, `"filter": {"include": {"label": "sweep"}}`, `"execution": {"jobs": 1}`) runs them after the gate.
+  - The 64 VTR files (31 `verilog/*.v` + 33 `koios/*.v`) are one set, sorted by size together: `lenet.v` is last and `mcml.v` falls where its size puts it. Every runner says smallest first.
 - (o) **Micro `--top`** (EL-7, ruling 6) is the first `.model` of `~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`, read by `tools/elab-check/micro-top`.
-- (p) **Yosys 0.55 discovery.** `find_program(ODIN3_YOSYS055 yosys HINTS $ENV{VTR_ROOT}/build/bin $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin NO_DEFAULT_PATH)`, and `yosys -V` must contain `Yosys 0.55`. Without it no 0.55 CTest is registered: CI has none, so they run locally and nightly. 0.69 is the existing `ODIN3_YOSYS`, used only by the nightly drift job. Every generated table and golden records `yosys -V` in its header.
+- (p) **Yosys 0.55 discovery** (Task 5 creates the block). `find_program(ODIN3_YOSYS055 yosys HINTS $ENV{VTR_ROOT}/build/bin $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin NO_DEFAULT_PATH)`, and `yosys -V` must contain `Yosys 0.55`. Without it no 0.55 CTest is registered: CI has none, so they run locally and nightly. 0.69 is the existing `ODIN3_YOSYS`, used only by the nightly drift job. Every generated table and golden records `yosys -V` in its header.
 - (q) **Name collisions** get `$2`, `$3`, … in specialization creation order (FIFO), so names are deterministic. A name longer than 128 bytes is hashed **before** the collision check.
 - (r) **RTLIL process names.** A `$proc` node prints as `$proc$<file>:<line>$<ID>`, with file and line from the node's SOURCE record (the file's given path), else `$proc$<ID>`.
-- (s) **One body printer.** `odin3_proc_print` prints a body as an RTLIL `process` block through a net-spelling callback. `write_rtlil` passes its spelling; `odin3_node_get_param_text(BODY)` uses the same printer with `write_rtlil`'s spelling.
-- (t) **`bench_elab`** is a new `tests/bench/bench_elab.c` (§15's name), not a mode of `bench_ast`.
-- (u) **Stage-1 tests** are split into `test_elab_stage1_lookup.c`, `_params.c`, `_inst.c`, `_gen.c`, `_decl.c` and `_diag.c`. Stage-2 tests are `test_elab_stage2_wires.c`, `_expr.c`, `_drive.c`, `_mem.c`, `_proc.c`, `_case.c`, `_call.c` and `_init.c`.
+- (s) **One sigspec spelling.** `odin3_proc_sigspec` (`src/ir/proc.h`, Task 3) spells a span LSB-first-in, MSB-first-out:
+  - constant-net and `ANY` runs merge into `<n>'<bits>` (`-` for `ANY`);
+  - consecutive bits of one wire's primary merge into `\w [hi:lo]`, a whole wire is `\w`, and a single bit is `\w [k]` (`\w` for a 1-bit wire);
+  - another net is `\name`, else `$n<ID>`;
+  - several chunks go in `{ … }`.
+
+  The body printer, `write_rtlil` and `odin3_node_get_param_text(BODY)` all use it, so one fixture text serves every test (review M5).
+- (t) **`bench_elab`** is a new `tests/bench/bench_elab.c` (§15's name). `--set` runs are `elab-sweep --bench`, which starts `bench_elab --one F` per file.
+- (u) **Test files.** Stage 1: `test_elab_stage1_lookup.c`, `_params.c`, `_inst.c`, `_gen.c`, `_decl.c` and `_diag.c`. Stage 2: `test_elab_stage2_wires.c`, `_expr.c`, `_drive.c`, `_mem.c`, `_proc.c`, `_case.c`, `_call.c` and `_init.c`.
 - (v) **Warn once.** A construct elaborated several times warns once (§9.2). The key is `(parsed node ID << 32 | message-format index)` in a `u64map` on the stage-1 context. Stage 2 keys on the elaborated node's `loc`.
-- (w) **Info texts §9 leaves open:**
-  - `body of black box 'm' is ignored`
-  - `module 'foo' is not defined; it becomes an implicit black box (--auto-blackbox)`
-  - `implicit black box 'foo': port 'a' is 4 bits at its first instance; this connection is 8 bits` (an error)
-  - `value of parameter 'P' of cell type 't' is not an integer` (an error, EL-8 cell-type targets)
+- (w) **Texts §9 leaves open:**
+  - `body of black box 'm' is ignored` (info)
+  - `module 'foo' is not defined; it becomes an implicit black box (--auto-blackbox)` (info)
+  - `implicit black box 'foo': port 'a' is 4 bits at its first instance; this connection is 8 bits` (error)
+  - `value of parameter 'P' of cell type 't' is not an integer` (error)
   - `--elab-only cannot be combined with a script; use read_verilog in the script` (CLI)
+  - `module 'm': cell '<name>' of type '$shiftx' has no structural Verilog form` (`write_verilog`, also `$pow`)
 - (x) **`processes` values for other branches' passes.** `read_project`, `dump_project`, `preprocess` and `read_verilog` are `OK` (they never read the IR as logic). Every other existing pass is as §8.1 lists.
 - (y) **`$readmem` paths.** A relative path resolves against the directory of the resolved path of the `FILE` buffer holding the call's `loc`. An absolute path is used as given (DESIGN §4.0).
 - (z) **Text and count fixes.**
   - §4.7's "$clog2 needs a constant argument" and §9.1's `<what>` form disagree. Use §9.1's form: `$clog2 argument is not constant (it reads 'x')`.
   - §14.2's hand-written list names **54** rows, not "≈ 40". All 54 are hand-written.
   - §14.1's `test_ir_module.c` does not exist yet: Task 2 creates it.
-  - The constant table reads values back from `write_rtlil` `connect` lines of module outputs, because `localparam`s do not appear in RTLIL. Each case is `assign y<k> = <expr>;` in one module per batch.
+  - The constant table reads values back from `write_rtlil` `connect` lines of module outputs, because `localparam`s do not appear in RTLIL. Each case is `assign y<k> = <expr>;`.
+- (aa) **Cap texts** (review I6). §9 gives none for these. Each is located at the node named, and lowered hooks print the hook value:
+
+  | Cap | Text | Enforced and tested in |
+  |---|---|---|
+  | specializations | `elaboration makes more than 65536 specializations` (at the instance creating the next) | Task 11 |
+  | elaborated nodes | `elaboration needs more than 33554432 elaborated nodes` (at the node being written) | Task 11 |
+  | instances | `elaboration makes more than 16777216 instances` (at the instance or gate) | Task 12 |
+  | net bits | `elaboration needs more than 67108864 net bits` (at the declarator or the expression) | Task 17 |
+  | cell pins | `cell of N pins exceeds the limit of 4194304 pins` (at the expression) | Task 18 |
+  | inline depth | `function call nesting deeper than 1024 at 'f'` (at the call) | Task 23 |
+  | init bits | `initial values need more than 67108864 bits` (at the `initial` statement) | Task 24 |
+  | readmem bytes | `'f.hex' is larger than 268435456 bytes (the $readmem limit)` (at the call) | Task 24 |
+
+  The rest use §9.1's texts. Width is Task 8; loop, total and eval steps are Tasks 9, 14 and 23; call depth is Task 9; hierarchy depth is Task 11; memory bits is Task 20; bytes is Task 17.
+- (bb) **Spelling of `NUMBER`s that stage 1 creates** (review I8), so the hand `.elab` goldens are exact:
+  - **32-bit integer form:** a known value that fits a 32-bit signed integer, for genvar reads, folded `$clog2`, `REPEAT` and `REPLICATE` counts, `RANGE` and `SELECT` bounds and widths, and `GEN_BLOCK` indices. Sub `DEC`, flag `SIGNED`, payload width 32.
+  - **Unsized parameter values:** a final `PARAM_DECL` value that is still unsized (EL-16) keeps the source literal's sub (base), with payload width 0 and `SIGNED` per value.
+  - **Every other value:** sub `BIN`, payload width = the value's width, `SIGNED` per value. This covers sized parameter values, values with x/z, and attribute values.
+
+  Hand goldens drafted while 2D-3 is in review are **provisional**. They are re-derived once against Task 15's tests after 2D-4 merges and frozen then (Task 25).
 
 ## Global Constraints
 
@@ -206,10 +329,10 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - Ports of every specialization exist before any module body.
   - Nets are merged only in emission steps 3–5.
   - Each `$proc` node is created whole by one `odin3_node_create_connected`.
-  - A failed stage 2 leaves valid, incomplete modules. `odin3_check_design` FULL passes after every failing test.
+  - A failed stage 2 leaves valid, incomplete modules, and the top is not set. `odin3_check_design` FULL passes after every failing test.
 - **Oracle.** Every "verified" assertion, constant table, golden and bridge run uses Yosys 0.55 (point (p)). 0.69 appears only in the nightly drift job, and the two are never mixed in one comparison (ORACLES.md).
-- **Diagnostics.** Every located error and warning uses the exact §9 text, through `odin3_diag`: `file:line:col: error|warning|info: …`, lower case, names in `'…'`, no final period. DESIGN §4.0 kinds are written `<kind>: <detail>`. Every located-diagnostic test asserts the whole line through a capturing log sink. Errors are capped at 20 per run (`too many errors; elaboration stopped after 20`).
-- **Caps, exact (§11)**, each a named constant in `src/frontends/elab/elab.h`, checked before the allocation it guards, reported as a located `PARSE` naming the cap, and lowered in tests through `odin3_elab_test_set_limits` (`elab_test.h`):
+- **Diagnostics.** Every located error and warning uses the exact §9 or point (aa)/(w) text, through `odin3_diag`: `file:line:col: error|warning|info: …`, lower case, names in `'…'`, no final period. DESIGN §4.0 kinds are written `<kind>: <detail>`. Every located-diagnostic test asserts the whole line through a capturing log sink. Errors are capped at 20 per run (`too many errors; elaboration stopped after 20`).
+- **Caps, exact (§11)**, each a named constant in `src/frontends/elab/elab.h`, checked before the allocation it guards, reported as a located `PARSE` with its §9.1 or point (aa) text, and lowered in tests through `odin3_elab_test_set_limits` (`elab_test.h`):
 
   | Cap | Value |
   |---|---|
@@ -240,29 +363,42 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - **Tests first.**
   - Unity under ASan/UBSan.
   - An OOM sweep (`odin3_util_set_alloc_fail_after`) over each allocating entry point a task adds. It asserts `NO_MEMORY`, no leak, an unchanged store or valid IR.
-  - Gates: `cmake --build --preset debug -j6 && ctest --preset debug -j4` green, `/lint` before each commit, commit (and the controller pushes) at each green checkpoint.
+  - Gates: `cmake --build --preset debug -j6 && ctest --preset debug -j4` green. The preset excludes label `sweep` (point (n)); sweeps run from `ctest --preset sweep` after the gate.
+  - `/lint` before each commit; commit (and the controller pushes) at each green checkpoint.
+  - `main` is green after every PR (point (l)).
   - A read-only critique per task; a **Fable** whole-branch review before each PR.
 - **Every public function** in `odin3.h` gets the purpose/ownership/failure paragraph (CLAUDE.md).
 - **Python** (`tools/`, `tests/tools/`): stdlib only, `ruff check`, `mypy --strict`, `unittest`.
-- **Sweeps** run smallest input first, sequentially by default under point (n)'s caps. No sweep runs while a build runs.
+- **Sweeps** run smallest input first, serially, under point (n)'s caps. No sweep runs while a build runs.
 
 ## Review Focus
 
-1. **Parameterized instances as users write them.** Users expect what Yosys 0.55 gives:
-   - `#(.W(8))` equal to the default shares the base module, named `m`, not a `$paramod`;
+1. **Parameterized instances as users write them.** For `module m #(parameter W = 1)`, users expect what Yosys 0.55 gives:
+   - `#(.W(1))`, equal to the default, shares the base module, named `m`, not a `$paramod`;
    - `defparam u1.W = 7` loses to `#(.W(5))`, with the warning;
    - of two `defparam`s, the first wins;
    - a project `param top.u1.W 3` beats all three.
 
    Pinned in Task 11 (`test_elab_stage1_params`: the five-level matrix, names `m`, `m$W=5`, `m$W=8`, `m$W=6`, `m$W=3`).
-2. **Mixed-width arithmetic.** With 8-bit `a`, `b`, `y`, a user expects `y = (a + b) >> 1` to drop the carry: `$add` `Y_WIDTH` 8, as Yosys and IEEE. `y = (0 + a + b) >> 1` keeps it: 32-bit adds. An unsized `parameter P = 'hFFFF_FFFF` in a 64-bit context is all ones. Pinned in Task 8 (the typer's widths) and Task 18 (the cells' `Y_WIDTH`s).
-3. **Clocked blocks that mix `=` and `<=`.** In `t = a & b; r <= t;`, `r` must take the new `t`, and `t` is a second output whose register `opt` later removes. `q <= q + 1` reads the held value. Pinned in Task 21 (the exact `$proc` bodies of T7 and T8 and the `OUT`-read semantics).
-4. **Memories with non-zero bases and init files.** For `reg [7:0] m [1:4]`, `[4:1]` and `[-2:1]`, a write then a read at the same index must hit the same word. `$readmemh("init.hex", m)` reads from the source file's directory with `@` addresses. Pinned in Task 20 (`OFFSET` 1/1/−2, raw `RD_ADDR`) and Task 24 (write ports, `INIT` words, the bridge on all three ranges).
+2. **Mixed-width arithmetic and unsized constants.** With 8-bit `a`, `b`, `y`, a user expects:
+   - `y = (a + b) >> 1` drops the carry (`$add` `Y_WIDTH` 8, as Yosys and IEEE);
+   - `y = (0 + a + b) >> 1` keeps it (32-bit adds);
+   - `y8 = &a` gives a `$reduce_and` of `Y_WIDTH` 8, as Yosys;
+   - `localparam P = 'hFFFFFFFF`, and `[31:0] Q` of the same, assigned to a 64-bit output give all ones, while `[35:0] R` gives zero-extension.
+
+   Pinned in Task 8 (the typer's widths) and Task 18 (the cells' `Y_WIDTH`s and the P/Q/R outputs).
+3. **Clocked blocks that mix `=` and `<=`.** In `t = a & b; r <= t;`, `r` must take the new `t`, and `t` is a second output whose register `opt` later removes. `q <= q + 1` reads the held value. Pinned in Task 21 (the exact `$proc` bodies of T7 and T8, the `OUT`-read semantics, and their bridge CTest).
+4. **Memories with non-zero bases and init files.** For `reg [7:0] m [1:4]`, `[4:1]` and `[-2:1]`, a write then a read at the same index must hit the same word. A block that does not write must not create a feedback loop (the v4 x defaults). `$readmemh("init.hex", m)` reads from the source file's directory with `@` addresses. Pinned in Task 20 (`OFFSET` 1/1/−2, raw `RD_ADDR`) and Task 24 (write ports with `addr`/`data` x defaults, `INIT` words, `elab_mem_bridge` on all three ranges).
 5. **Generate names users probe.** Users expect `genblk1.genblk1.x` for an `if … else if` chain, `genblk3[0].w` after it, `g[-1].t`, and a user wire `genblk1` that does not rename a later block. Pinned in Task 14 (stage-1 names) and Task 17 (IR wire names `g[0].t`, `genblk3[0].w`).
+
+**Internal risks for the reviewers** (spec §16 items 3–5, and the IR changes Peter reviews):
+- **The `$proc` encoding (§16 #5, IR change B).** A body position off by one still passes a careless check. Pinned in Task 3 (every malformed body, the canonical-layout partition checks, no allocation in `verify`) and Task 21 (the bridge on real bodies).
+- **Pass-W replay (§16 #4).** Pinned in Task 11 (a hook dropping one log entry gives `ODIN3_ERR_CHECK` with the exact text).
+- **Case save/restore (§16 #3).** Pinned in Task 22 (nested switches with their own temporaries; the default/nolatches pair).
 
 ---
 
-## PR 2D-1 — IR changes, pass flag, `write_rtlil`, ABI v5
+## PR 2D-1 — IR changes, pass flag, `write_rtlil`, ABI additions (v4)
 
 ### Task 1: IR change A — nine word cells (EL-31, §7.2)
 **Files:**
@@ -271,8 +407,9 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Modify `src/ir/cells/reduce.c` (`$reduce_xnor`, `$reduce_bool`, with hooks).
 - Modify `src/ir/cells/shift.c` (`$shiftx` binary, `simulate` NULL).
 - Modify `src/ir/cells/cells.h` (nine `extern`s) and `builtin.c` (append in point (f)'s order).
-- Modify `tests/unit/test_ir_cells.c` and `test_sim_word.c`.
-- Modify `tools/sim-check/gen_simlib_cases.py`: `BINARY` gains `$xnor $logic_and $logic_or`, `UNARY` gains `$neg $reduce_xnor $reduce_bool $logic_not`. Regenerate `tests/unit/simlib_word_cases.h`.
+- Modify `src/backends/verilog/writer.c` (review M6): `BUILTINS` gains `$neg` (`FORM_UNARY`, `-`), `$reduce_xnor` (`~^`), `$reduce_bool` (`|`), `$logic_not` (`!`), `$xnor` (`FORM_BINARY`, `~^`), `$logic_and` (`&&`) and `$logic_or` (`||`). `$shiftx` and `$pow` are refused with point (w)'s text.
+- Modify `tests/unit/test_ir_cells.c`, `test_sim_word.c` and `test_verilog_writer.c`.
+- Modify `tools/sim-check/gen_simlib_cases.py`: `BINARY` gains `$xnor $logic_and $logic_or`, `UNARY` gains `$neg $reduce_xnor $reduce_bool $logic_not`. Regenerate `tests/unit/simlib_word_cases.h`. The existing rows change too, because the lists feed the RNG stream (review M7); the commit says so.
 - Modify `docs/DESIGN.md` §5.2: the word list gains the nine cells.
 
 **Consumes:**
@@ -305,7 +442,10 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - `$logic_not`: `0000` → `1`; `1000` with `Y_WIDTH` 2 → `00`.
   - `$logic_and`: `2'b10`,`3'b000` → `0`; `2'b10`,`3'b100` → `1`.
   - `$logic_or`: `00`,`000` → `0`; `00`,`001` → `1`.
-- Every `simlib_word_cases.h` row equal. The header's generator line is unchanged except the lists.
+- Every `simlib_word_cases.h` row equal.
+- `test_verilog_writer`:
+  - a module with one `$logic_and` (`A_WIDTH` 2, `B_WIDTH` 3, `Y_WIDTH` 1) writes `assign … = … && …;`;
+  - a `$shiftx` node → `INVALID_ARG` with `module 'm': cell '$c1' of type '$shiftx' has no structural Verilog form`.
 
 ### Task 2: IR change C — port range and signedness (EL-24, §6.2)
 **Files:**
@@ -313,7 +453,10 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Modify `src/ir/module.c` (`odin3_module_add_port`).
 - Modify `src/ir/celltype.h`: `odin3_port_def` appends `bool is_signed;`.
 - Modify `src/ir/cells/cells.h`: `ODIN3_PORT_BIT`/`_VEC`/`_FN` gain a trailing `false`.
-- Every positional `odin3_port_def`/`odin3_port_spec` initializer the compiler reports gains its trailing values: `tests/unit/test_{ir_netlist,ir_celltype,ir_wire,ir_check,ir_compact,sim_word,sim_build,sim_cycle,blif_writer,json_writer,verilog_writer,dot_writer}.c`.
+- Every positional `odin3_port_def`/`odin3_port_spec` initializer gains its trailing values (review M1):
+  - `src/ir/cells/const.c`;
+  - `tests/unit/test_{ir_netlist,ir_celltype,ir_wire,ir_check,ir_compact,sim_word,sim_build,sim_cycle,blif_writer,blif_reader,techlib_reader,json_writer,verilog_writer,dot_writer}.c`.
+  The compiler finds any other.
 - Create `tests/unit/test_ir_module.c`. Modify `CMakeLists.txt`.
 - Modify `docs/IR.md` IR-7: the port record carries range and sign, `has_range`, the derived width, and the two refusals.
 
@@ -336,57 +479,64 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - with `width` 8 → OK;
   - `scalar` with `[3:0]` → `INVALID_ARG`; `scalar` with `[5:5]` → OK, width 1.
 - No range, `width` 3, `is_signed` → `[2:0]`, signed.
-- All existing `test_ir_*` and writer tests pass unchanged apart from initializers.
+- All existing `test_ir_*`, reader and writer tests pass unchanged apart from initializers.
 - OOM sweep over `add_port` with a range: `NO_MEMORY`, module unchanged.
 
 ### Task 3: IR change B — the `$proc` cell (EL-33, §8.1)
 **Files:**
-- Create `src/ir/proc.h` and `src/ir/proc.c` (body types, pack/view, verify core, counter queries, printer).
+- Create `src/ir/proc.h` and `src/ir/proc.c` (body types, pack/view, allocation-free verify, counter queries, sigspec, printer).
 - Create `src/ir/cells/proc.c` (the cell type) and `tests/unit/test_ir_proc.c`.
 - Modify `src/ir/value.c`: `has_payload` and `odin3_value_valid` accept `ODIN3_VAL_PROC`; `odin3_value_equal` handles it as bytes.
 - Modify `include/odin3/odin3.h`: `ODIN3_VAL_PROC` appended to `odin3_value_kind`, `ODIN3_CT_PROCESS = 32` appended to the `ODIN3_CT_*` enum, each with its comment.
-- Modify `src/ir/celltype.c`: `ODIN3_CT_PROCESS` is accepted only on the built-in `$proc` (point (g)).
+- Modify `src/ir/celltype.c`: raise the kind bound in `param_error`/`def_valid` from `COVER` to `PROC` and add point (g)'s `$proc`-only rule (review I14).
 - Modify `src/ir/ir_internal.h` (module field `uint32_t proc_count`).
 - Modify `src/ir/node.c`: the count changes on create, create_connected, delete and replace of a node whose type has the flag.
 - Modify `src/ir/compact.c`: it keeps the count; tombstones copy `BODY` like any parameter.
 - Modify `src/ir/cells/cells.h` and `builtin.c` (append `&odin3_cell_proc`).
-- The one-line `ODIN3_VAL_PROC` arms `-Wswitch` requires, returning `INVALID_ARG` until Tasks 4/6: `src/ir/celltype.c`, `src/api/celltype.c`, `src/api/node.c`, `src/backends/json/emit.c`, `src/backends/verilog/writer.c`, `src/frontends/blif/reader.c`.
+- Add `ODIN3_VAL_PROC` arms to the only other `-Wswitch` sites, `src/backends/json/emit.c` and `src/backends/verilog/writer.c`; each returns `INVALID_ARG` (unreachable after Task 4's refusals).
 - Modify `CMakeLists.txt`.
-- Modify `docs/IR.md`: a new **IR-19** (the cell, ports, parameters, body, the `OUT`-read rule, verify, merge/delete/compact behaviour, counter); IR-9 (the RTLIL view allows `$proc`, the netlist view does not); IR-10 (the `proc` value kind); IR-12 (`hier` is module-relative).
+- Modify `docs/IR.md`:
+  - a new **IR-19**: the cell, ports, parameters, the body, the `OUT`-read rule, the canonical layout, verify, and merge/delete/compact behaviour;
+  - IR-19 also says that "each net on at most one `I` and one `O` pin of one `$proc`" is a property of how 2D builds nodes, not a check rule (review M22);
+  - IR-9: the RTLIL view allows `$proc`; the netlist view does not;
+  - IR-10: the `proc` value kind;
+  - IR-12: `hier` is module-relative, made here only (review M14).
 - Modify `docs/DESIGN.md`: §5.2 (`$proc` as the process cell) and §6 step 2 ("processes" = `$proc` nodes; `proc` before `opt`).
 
-**Consumes:** Task 2 (port macros), `odin3_node_create_connected`, `odin3_net_const_value`, `odin3_strbuf`.
+**Consumes:** Task 2 (port macros), `odin3_node_create_connected`, `odin3_net_const_value`, `odin3_net_primary`, `odin3_strbuf`.
 
 **Produces (`proc.h`):**
 - §8.1's types verbatim: `odin3_pbit` with `ODIN3_PBIT_IN`/`_OUT`/`_ANY`/`_INDEX_MASK`, `odin3_pspan`, `odin3_sync_type`, `odin3_proc_action`, `odin3_proc_case`, `odin3_proc_switch`, `odin3_proc_sync`, `odin3_proc_body`.
 - `enum { ODIN3_SWITCH_FULL_CASE = 1, ODIN3_SWITCH_PARALLEL_CASE = 2 };`, `enum { ODIN3_PROC_P_I_WIDTH, ODIN3_PROC_P_O_WIDTH, ODIN3_PROC_P_BODY };`, `enum { ODIN3_PROC_PORT_I, ODIN3_PROC_PORT_O };`.
-- `odin3_status odin3_proc_body_pack(odin3_arena *arena, const odin3_proc_body *body, odin3_value *out)` builds point (e)'s blob.
-- `bool odin3_proc_body_view(const odin3_value *val, odin3_proc_body *out)` gives views into the blob. It returns false for another kind, a short or inconsistent blob, or a count whose array overruns `len`.
+- `odin3_status odin3_proc_body_pack(odin3_arena *arena, const odin3_proc_body *body, odin3_value *out)` builds point (e)'s blob field by field. The body must already be in canonical layout; pack does not reorder.
+- `bool odin3_proc_body_view(const odin3_value *val, odin3_proc_body *out)` returns false for:
+  - another kind;
+  - a misaligned `bits`;
+  - a short or inconsistent header;
+  - a count whose array overruns `len`.
 - `typedef struct odin3_proc_why { char text[ODIN3_WIDTH_WHY_MAX]; } odin3_proc_why;`
-- `odin3_status odin3_proc_body_verify(const odin3_proc_body *body, uint32_t i_width, uint32_t o_width, odin3_proc_why *why)` checks every §8.1 rule plus point (h). It is O(body), with one used-count array per record kind.
+- `odin3_status odin3_proc_body_verify(const odin3_proc_body *body, uint32_t i_width, uint32_t o_width, odin3_proc_why *why)` checks every §8.1 rule, point (e)'s canonical layout and point (h). It runs in O(body) with running counters and **never allocates** (review I3).
 - `uint32_t odin3_module_proc_count(const odin3_module *module);`
 - `bool odin3_design_has_processes(const odin3_design *design);`
-- `odin3_module_id odin3_design_first_proc_module(const odin3_design *design);` (0 when none).
-- `typedef odin3_status (*odin3_proc_sig_fn)(void *user, const odin3_module *module, const odin3_net_id *nets, uint32_t n, odin3_strbuf *out);` spells one span (LSB first; a none entry is `ANY`) as an RTLIL sigspec.
-- `typedef struct odin3_proc_print_spec { odin3_proc_sig_fn sig; void *user; uint32_t indent; } odin3_proc_print_spec;` With `sig` NULL, constant nets print as merged runs (`2'1-`) and other nets as `\name` or `$n<ID>`, one entry each, in `{ … }` when there are several.
-- `odin3_status odin3_proc_print(const odin3_module *module, odin3_node_id node, const odin3_proc_print_spec *spec, odin3_strbuf *out);` prints the RTLIL `process` block per §13.
+- `odin3_module_id odin3_design_first_proc_module(const odin3_design *design);` (0 when none)
+- `odin3_status odin3_proc_sigspec(const odin3_module *module, const odin3_net_id *nets, uint32_t n, odin3_strbuf *out);` gives point (s)'s spelling. A none entry is `ANY`.
+- `odin3_status odin3_proc_print(const odin3_module *module, odin3_node_id node, uint32_t indent, odin3_strbuf *out);` prints the RTLIL `process` block per §13, named per point (r), with the node's attributes first.
 - `odin3_cell_proc`:
   - `{"$proc", ODIN3_GRAN_WORD, ODIN3_CT_PROCESS, {I, O}, {I_WIDTH INT 0, O_WIDTH INT 1, BODY PROC empty}, proc_verify, NULL, NULL, NULL}`.
   - `proc_verify(const odin3_value *params)` checks `O_WIDTH` ≥ 1 and `I_WIDTH` ≥ 0, views the body and calls `odin3_proc_body_verify`. On failure it logs `$proc: BODY: <why>` and returns `INVALID_ARG`.
 
 **Tests (`test_ir_proc.c`):**
 
-Fixture P1 is `always @(posedge clk) q <= d;`, built by hand:
-- nets named `clk`, `d`, `q`, `t0`;
+Fixture P1 is `always @(posedge clk) q <= d;` built by hand on four 1-bit **wires** `clk`, `d`, `q`, `t0` (review M5):
 - pins `I` = [clk, d], `O` = [q, t0];
 - pbits `[OUT|1, OUT|0, OUT|1, IN|1, OUT|0, OUT|1]`;
 - actions a0 (`t0 ← q`), a1 (`t0 ← d`), a2 (`q ← t0`);
-- root case with a0, a1;
-- sync `POSEDGE IN|0` with a2.
+- root case with actions [0, 2);
+- sync `POSEDGE IN|0` with action 2.
 
 Cases:
 - **Create and query.** `odin3_node_create_connected` → OK. `odin3_net_driver(q)` is `O` pin 0, the sinks of `d` include `I` pin 1, `odin3_module_proc_count` is 1, `odin3_design_has_processes` is true, and `odin3_check_design` FULL is OK.
-- **Malformed bodies.** Each is `INVALID_ARG` with nothing created, and logs exactly `$proc: BODY: ` followed by:
+- **Malformed bodies.** Each is `INVALID_ARG` with nothing created. The sink sees two lines (review M2): `$proc: BODY: <why>`, then `node_create: '$proc' rejects these parameters`. The `<why>`s, exactly:
   - `IN position 2 is out of range (I_WIDTH 2)`;
   - `action 1: lhs holds a non-OUT position`;
   - `action 0: OUT position 0 twice in one lhs`;
@@ -395,16 +545,20 @@ Cases:
   - `OUT position 2 is never assigned` (O_WIDTH 3);
   - `root case has compares`;
   - `switch 0: case 1 compare 0 has width 2; the signal has 1`;
-  - `action 0 is used 2 times`;
+  - `case 1: actions start at 0, expected 2` (action 0 reused by a second case);
+  - `case 0: actions start at 1, expected 0` (action 0 skipped);
+  - `switch 0: cases start at 2, expected 1`;
+  - `switch 1: case 2 is not after its parent case 2` (a cycle through the partition);
   - `sync 0: an ALWAYS sync has a signal`;
   - `sync 0: the signal must be one IN or OUT position` (a signal of `ANY`);
-  - `not a process body` (a `BITS` value; a blob 4 bytes short).
+  - `not a process body` (a `BITS` value; a blob 4 bytes short; a misaligned copy).
+- **No allocation in `verify`.** With `odin3_util_set_alloc_fail_after(0)`, `odin3_proc_body_verify` of P1 still returns OK.
 - **Point (h).** A `POSEDGE` sync on `OUT|0` (`always @(posedge a) a <= ~a`) is accepted.
 - **Merge leaves the body alone.** `odin3_net_merge({keep d2, drop d})` moves `I` pin 1 to `d2`, and the `BODY` value stays byte-identical (memcmp before/after).
 - **Rule 4.** A second `$add` driving `q` makes `check` report rule 4 (two drivers).
 - **Compact.** A module with live P1 and a deleted copy is compacted: the live body is unchanged, and the tombstone has type `$proc` with a `BODY` equal (`odin3_value_equal`) to the deleted node's.
 - **Counter.** Create 2 → 2; delete 1 → 1; `odin3_node_replace` → 1; compact → 1; delete → 0 and `has_processes` false.
-- **Printer.** `odin3_proc_print` of P1 (node ID 1, default spec, indent 0) is exactly:
+- **Printer.** `odin3_proc_print` of P1 (node ID 1, indent 0) is exactly:
 
   ```
   process $proc$1
@@ -415,8 +569,9 @@ Cases:
   end
   ```
 
-  P2 adds `switch \s` with flags FULL_CASE, a case with compare `IN|k` on the shared `$_CONST1_` net and `t0 ← d`, and a default case. It prints `attribute \full_case 1`, `switch \s`, `case 1'1`, `assign \t0 \d`, `case`, `end` in that order.
-- A plugin cell type with `ODIN3_CT_PROCESS` → `INVALID_ARG` with point (g)'s text.
+  P2 adds a 1-bit wire `s`, the switch flag `FULL_CASE`, one case comparing `s` to an `I` pin on the shared `$_CONST1_` net with `t0 ← d`, and a default case. It prints `attribute \full_case 1`, `switch \s`, `case 1'1`, `assign \t0 \d`, `case`, `end` in that order.
+- **`odin3_proc_sigspec`.** `[a0, a1]` of a 4-bit wire `a` → `\a [1:0]`; all four → `\a`; `[const1, ANY, x-net]` → `3'x-1`.
+- **Registration rules.** A plugin or local type with `ODIN3_CT_PROCESS` or a `PROC` parameter → `INVALID_ARG` with point (g)'s text. The built-in registers.
 - OOM sweep over `pack` and `create_connected`.
 
 ### Task 4: Passes and processes, writer refusals, `compact` symtab remap (EL-33 pass flag; EL-2 remap)
@@ -426,7 +581,7 @@ Cases:
 - Modify `src/passes/builtin.c` and `write_formats.c` so every `odin3_pass_def` initializer gets its value:
   - `OK`: `read_blif`, `read_techlib`, `check`, `stats`, `compact`, `hierarchy`, `write_verilog_ast`, plus point (x)'s passes when present;
   - `REFUSE`: `write_blif`, `write_json`, `write_verilog`, `write_dot`, `sim` (`sim_pass.c`).
-- `compact` calls `odin3_symtab_remap` after each module (below).
+- `compact` calls `odin3_symtab_remap` after each module.
 - Modify `src/backends/{blif,json,verilog,dot}/writer.c`: each `odin3_*_write` refuses a design with processes before opening the path.
 - Modify `include/odin3/odin3.h`: public `enum { ODIN3_PASS_PROCESSES_REFUSE = 0, ODIN3_PASS_PROCESSES_OK = 1 };`, and `odin3_plugin_pass` gets `const uint8_t *processes; void *reserved[3];` (layout unchanged), with the paragraph updated.
 - Modify `src/api/pass.c` (read the slot).
@@ -452,46 +607,44 @@ Cases:
 - Remap: an elaborated store handed to the design with a symtab symbol whose `ir_wire` is wire 5 of `m`. Delete wire 3 and run `compact`: the symbol's `ir_wire` is 4.
 - Every existing pass-manager test still passes.
 
-### Task 5: `write_rtlil` (EL-48, §13)
+### Task 5: `write_rtlil` and the Yosys-0.55 CMake block (EL-48, §13; ruling C2)
 **Files:**
 - Create `src/backends/rtlil/writer.h`, `writer.c` and `tests/unit/test_rtlil_writer.c`.
 - Modify `src/passes/write_formats.c` (`odin3_pass_write_rtlil`, `processes` OK), `builtin.h` (extern) and the built-in table.
-- Modify `CMakeLists.txt`: unit test, plus CTest `rtlil_yosys_roundtrip` inside the 0.55 block.
+- Modify `CMakeLists.txt`:
+  - the unit test;
+  - **point (p)'s `ODIN3_YOSYS055` block, created here**, with a configure-time `yosys -V` check;
+  - CTest `rtlil_yosys_roundtrip` inside the block.
 - Modify `docs/PASSES.md` (row `write_rtlil <file>`, 2D, RTLIL view → —) and `docs/DESIGN.md` §9 (row "RTLIL (Yosys text) | — | yes | word level with processes; the Yosys bridge for 2D–2F tests").
 
-**Consumes:** Tasks 2–3; `odin3_attr_foreach`, `odin3_net_primary`, `odin3_net_alias_next`, `odin3_net_const_value`, `odin3_prov_sources`, `odin3_pass_write_text` (2B-3's atomic writer if merged, else the writers' existing atomic helper).
+**Consumes:** Tasks 2–4; `odin3_attr_foreach`, `odin3_net_alias_next`, `odin3_prov_sources`, `odin3_proc_sigspec`, `odin3_proc_print`; `odin3_atomic_file_open/close` (`src/util/file.h`, review M4).
 
 **Produces:**
 - `odin3_status odin3_rtlil_text(const odin3_design *design, odin3_strbuf *out);`
 - `odin3_status odin3_rtlil_write(const odin3_design *design, const char *path);` (atomic)
-- `odin3_status odin3_rtlil_sig(void *user, const odin3_module *module, const odin3_net_id *nets, uint32_t n, odin3_strbuf *out);` (the `odin3_proc_sig_fn` that point (s) shares)
 - `extern const odin3_pass_def odin3_pass_write_rtlil;`
 
 Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 - One `module \name` per module in creation order, with its attributes first.
 - Live wires in ID order: `wire [width W] [upto] [offset O] [input|output|inout K] [signed] \name`, K = the 1-based port index.
 - `wire $n<ID>` for each net that is no wire's bit.
-- Sigspecs:
-  - MSB first;
-  - consecutive bits of one wire's primary merge into `\w [hi:lo]`, and a whole wire is `\w`;
-  - constant-net runs are `<n>'<bits>`, `ANY` is `-`;
-  - several chunks go in `{ … }`.
+- Sigspecs are `odin3_proc_sigspec`'s.
 - Cells:
   - `cell <type> <name>`, where an unnamed node is `$c<ID>`, a type's name starting with neither `$` nor `\` gets `\`, and instance nodes use their module's name;
   - `parameter \P <value>` in definition order (INT decimal, BITS `<n>'<bits>`, STRING `"…"` with escapes; `MEMID` gets a `\` prefix);
   - `connect \PORT <sig>` in port order;
   - `end`.
 - Port and constant nodes are not written.
-- `$proc` nodes print through `odin3_proc_print` with `odin3_rtlil_sig`, named per point (r), after the cells.
+- `$proc` nodes print through `odin3_proc_print` at indent 2, after the cells.
 - Then `connect <alias> <primary>`, one per alias run, in alias order.
 
 **Tests (`test_rtlil_writer.c`):**
-- Fixture, created in this order: module `m` with ports `input [3:0] a` (port 1) and `output signed [0:1] y` (port 2); wire `b` `[3:0]` merged onto `a`; an unnamed `$add` (node 3: A = `a`, B = const `4'b0011`, `Y_WIDTH` 2 on `y`); then the constant nodes. The text contains exactly these lines in this order:
+- Fixture: module `m` with ports `input [3:0] a` (port 1) and `output signed [0:1] y` (port 2); wire `b` `[3:0]` merged onto `a`; the four shared constant nodes; one unnamed `$add` (A = `a`, B = the constant nets for `4'b0011`, `Y_WIDTH` 2 on `y`), created last with `odin3_node_create_connected`. The test reads the `$add`'s ID k (review M12). The text contains exactly these lines in this order:
   - `module \m`
   - `  wire width 4 input 1 \a`
   - `  wire width 2 upto output 2 signed \y`
   - `  wire width 4 \b`
-  - `  cell $add $c3`
+  - `  cell $add $c<k>`
   - `    parameter \A_SIGNED 0` (then `\B_SIGNED 0`, `\A_WIDTH 4`, `\B_WIDTH 4`, `\Y_WIDTH 2`)
   - `    connect \A \a`
   - `    connect \B 4'0011`
@@ -499,23 +652,25 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
   - `  end`
   - `  connect \b \a`
   - `end`
-- A wire `[8:1]` prints `wire width 8 offset 1 \w`.
-- A one-bit select of `a[2]` prints `\a [2]`; a concatenation prints `{ \a [3:2] 2'x1 }`.
-- P1 inside a module prints `  process $proc$1` at indent 2.
-- A `$mem` node prints `parameter \MEMID "\\m"`, `parameter \OFFSET 1` and `parameter \INIT 16'xxxxxxxxxxxxxxxx` (an empty INIT prints as `0'`).
+- Wires and sigspecs: a wire `[8:1]` prints `wire width 8 offset 1 \w`; a concatenation prints `{ \a [3:2] 2'x1 }`.
+- **Every sync type** (review M11). One process holds syncs `POSEDGE`, `NEGEDGE`, `LEVEL0`, `LEVEL1` and `ALWAYS`, and prints `sync posedge \c`, `sync negedge \c`, `sync low \c`, `sync high \c`, `sync always`, each with its `update` lines. A `(* src = "t.v:3" *)` attribute on the node prints `attribute \src "t.v:3"` before `process`.
+- `$mem`: a node prints `parameter \MEMID "\\m"`, `parameter \OFFSET 1` and `parameter \INIT 16'xxxxxxxxxxxxxxxx`.
 - Two writes give identical bytes.
 - CTest `rtlil_yosys_roundtrip`:
   - the unit test writes its fixtures to `build/<preset>/rtlil/*.il`;
   - Yosys 0.55 runs `read_rtlil F; write_rtlil G` and `read_rtlil F; proc; opt; write_blif H`, each exiting 0, smallest first.
 
-### Task 6: ABI v5 (EL-47)
+### Task 6: ABI additions (v4) (EL-47; ruling I1)
 **Files:**
-- Modify `include/odin3/odin3.h`: `ODIN3_ABI_VERSION = 5`; the comment line `ABI v5 (Phase 2, 2D): $proc processes and process counts, value kind PROC, pass processes flag; later in v5: library units, odin3_ast_elaborate`; `odin3_module_get_proc_count`.
-- Modify `src/api/module.c`, and `src/api/node.c` (param text and kind of `BODY`, through `odin3_proc_print` with `odin3_rtlil_sig`).
+- Modify `include/odin3/odin3.h`:
+  - **`ODIN3_ABI_VERSION` stays 4**;
+  - the history line gains `ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot` (Tasks 10 and 17 extend it);
+  - add `odin3_module_get_proc_count`.
+- Modify `src/api/module.c`, and `src/api/node.c` (the kind and text of `BODY`, the text through `odin3_proc_print`).
 - Modify `plugins/python/odin3.py` (value-kind name `PROC`).
-- Modify `tests/unit/test_abi_core.c`, `test_abi_ir.c`, `test_abi_values.c` and `tests/tools/test_python_walk.py`.
+- Modify `tests/unit/test_abi_ir.c`, `test_abi_values.c` and `tests/tools/test_python_walk.py`.
 
-**Consumes:** Tasks 3–5.
+**Consumes:** Tasks 3–4.
 
 **Produces:**
 - `odin3_status odin3_module_get_proc_count(const odin3_design *design, uint32_t module, uint32_t *count);` with the paragraph: O(1), `INVALID_ARG` as the conventions say.
@@ -523,11 +678,10 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 - `odin3_node_get_param_text` of `BODY` gives the process text (interned, as the 1D text convention).
 
 **Tests:**
-- `odin3_abi_version()` == 5.
-- The example plugin built for v4 → `ODIN3_ERR_ABI_MISMATCH`.
+- `odin3_abi_version()` is still 4, and `cli_version` keeps `(ABI 4)`.
 - `get_proc_count` of P1's module → 1; module 99 → `INVALID_ARG`.
 - Param kind of index 2 → 4.
-- Param text equals Task 3's P1 text with `\` names as `write_rtlil` spells them.
+- Param text equals Task 3's P1 text exactly.
 - The Python walk prints the `$proc` node with kind `PROC` and its body text.
 
 ## PR 2D-2 — constants: values, typing, evaluator, interpreter
@@ -535,7 +689,7 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 ### Task 7: Values, operators and the Yosys 0.55 constant table (EL-12, EL-14, EL-15)
 **Files:**
 - Create `src/frontends/elab/elab.h`: caps, `odin3_elab_opts`, and the stage API declarations added later (Tasks 10, 17).
-- Create `src/frontends/elab/elab_test.h`: `odin3_elab_limits` and `odin3_elab_test_set_limits`.
+- Create `src/frontends/elab/elab_test.h`: `odin3_elab_limits` and `odin3_elab_test_set_limits`. Task 10 adds the stage hooks here, and Task 17 is their second user (review M16).
 - Create `src/frontends/elab/cval.h`, `cval.c` (construction, conversion, resize, select, concat, print, hash) and `cval_arith.c` (operators).
 - Create `tools/elab-check/gen-const-table` (Python) and `tests/elab/const_table.txt`, generated, with a header of `# gen-const-table seed 2026 count N` and `# yosys: <yosys -V>`.
 - Create `tests/unit/test_elab_cval.c` and `tests/tools/test_gen_const_table.py`.
@@ -552,7 +706,7 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
   - `odin3_status odin3_cval_from_i64(odin3_arena *arena, int64_t value, uint32_t width, bool is_signed, odin3_cval *out);`
   - `odin3_status odin3_cval_copy(odin3_arena *arena, const odin3_cval *src, odin3_cval *out);`
   - `odin3_status odin3_cval_to_value(odin3_arena *arena, const odin3_cval *val, odin3_value *out);` (BITS, one byte per bit)
-  - `odin3_status odin3_cval_to_number(odin3_arena *arena, const odin3_cval *val, odin3_ast_number *out);` (payload `width` 0 when `UNSIZED`, §2.4)
+  - `odin3_status odin3_cval_to_number(odin3_arena *arena, const odin3_cval *val, odin3_ast_number *out);` gives point (bb)'s spelling: payload `width` 0 when `UNSIZED`.
 - Resizing and inspection:
   - `odin3_status odin3_cval_resize(odin3_arena *arena, const odin3_cval *val, uint32_t width, bool is_signed, odin3_cval *out);` follows EL-13. An `UNSIZED` value repeats its top bit; otherwise sign extension when `is_signed`, else zero. Truncation keeps the low bits. The result is sized, with `SIGNED` = `is_signed`.
   - `odin3_bit odin3_cval_bit(const odin3_cval *val, uint32_t pos);`
@@ -565,7 +719,7 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 - Operators:
   - `typedef enum odin3_cop { ODIN3_COP_ADD, _SUB, _MUL, _DIV, _MOD, _POW, _AND, _OR, _XOR, _XNOR, _SHL, _SHR, _SSHL, _SSHR, _EQ, _NE, _EQX, _NEX, _LT, _LE, _GT, _GE, _LAND, _LOR, _NEG, _POS, _NOT, _LNOT, _RAND, _RNAND, _ROR, _RNOR, _RXOR, _RXNOR } odin3_cop;`
   - `typedef struct odin3_cop_args { odin3_cop op; const odin3_cval *a, *b; uint32_t width; bool is_signed; } odin3_cop_args;`
-  - `odin3_status odin3_cval_op(odin3_arena *arena, const odin3_cop_args *args, odin3_cval *out);` computes `RTLIL::const_*` semantics at `width`. Arithmetic, bitwise and unary operations extend both operands to `width` by `is_signed` (an unsized operand repeats its top bit). Comparisons extend both to `width` and give 1 bit. Logical operations and reductions read operands as they are and give 1 bit. Shifts extend `a` only; `b` is an unsigned amount, except `POW`, which reads `b`'s own `SIGNED`.
+  - `odin3_status odin3_cval_op(odin3_arena *arena, const odin3_cop_args *args, odin3_cval *out);` computes `RTLIL::const_*` semantics at `width`. Arithmetic, bitwise and unary operations extend both operands to `width` by `is_signed` (an unsized operand repeats its top bit). Comparisons extend both to their common width and give 1 bit, zero-extended to `width`. Logical operations and reductions read operands as they are and give 1 bit, zero-extended to `width`. Shifts extend `a` only; `b` is an unsigned amount, except `POW`, which reads `b`'s own `SIGNED`.
 - Parts and mux:
   - `typedef struct odin3_cval_part { const odin3_cval *val; int64_t lo; uint32_t width; } odin3_cval_part;`
   - `odin3_status odin3_cval_select(odin3_arena *arena, const odin3_cval_part *part, odin3_cval *out);` (positions outside the value read x)
@@ -575,7 +729,7 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
   - `odin3_status odin3_cval_mux(odin3_arena *arena, const odin3_cval_mux_args *args, odin3_cval *out);`: an x `cond` merges bit by bit, equal bits kept, others x.
 - Word-parallel planes for widths ≤ 64; schoolbook word loops above.
 
-**Produces (`elab.h`):**
+**Produces (`elab.h`, `elab_test.h`):**
 - §11's caps as named constants.
 - §2.2's `odin3_elab_opts`.
 - `typedef struct odin3_elab_limits { uint32_t max_errors, max_width, max_cell_pins, max_loop_iterations, max_total_iterations, max_eval_steps, max_call_depth, max_hier_depth, max_specializations, max_instances, max_elab_nodes, max_net_bits, max_init_bits, max_readmem_bytes; uint64_t max_memory_bits, max_bytes; } odin3_elab_limits;`
@@ -594,7 +748,7 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
   - Division: `8'd7 / 8'd0` → `8'bxxxxxxxx`; `%` by zero → all x; signed `-7 / 2` at 8 bits → `8'b11111101`; signed `-7 % 2` → `8'b11111111`.
   - `**` (8 bits): `0 ** -1` → all x; `0 ** 3` → 0; `2 ** -1` → 0; `(-1) ** -3` → −1; `(-1) ** -2` → 1; `1 ** -5` → 1; `3 ** 5` → 243; `7 ** 3` → 87.
   - Bitwise: `4'b10x1 & 4'b0011` → `4'b00x1`; `4'b10x1 | 4'b0100` → `4'b11x1`; `4'bz000 & 4'b1000` → `4'bx000`.
-  - Reductions: `&4'b1x11` → x; `&4'b0x11` → 0; `|4'b0x00` → x; `|4'b1x00` → 1.
+  - Reductions: `&4'b1x11` → x; `&4'b0x11` → 0; `|4'b0x00` → x; `|4'b1x00` → 1. `&8'hFF` at `width` 8 → `8'b00000001`.
   - Equality: `4'b1x00 == 4'b1000` → x; `4'b1x00 === 4'b1x00` → 1; `!==` → 0.
   - Shifts: `8'sb10000000 >>> 2` signed → `8'b11100000`, unsigned → `8'b00100000`; an amount `2'bx1` → all x; amount 8 → all fill.
   - Mux: `cond = 1'bx`, `a = 4'b1100`, `b = 4'b1010` → `4'b1xx0`.
@@ -629,9 +783,11 @@ Format (§13; field order as Yosys 0.55's `rtlil_backend.cc`):
 - `odin3_etype odin3_ctype_self(const odin3_ctype *ty, odin3_ast_id node);`
 - `odin3_etype odin3_ctype_final(const odin3_ctype *ty, odin3_ast_id node);`
 
-The two sweeps are §4.2's, each with an explicit stack: a post-order self sweep, then a pre-order context sweep. Diagnostics:
-- `width N exceeds the limit of 1048576 bits` (located, `PARSE`);
-- E12's warning `unsized constant in a concatenation is taken as N bits`, at the `NUMBER`.
+The two sweeps are §4.2's, each with an explicit stack: a post-order self sweep, then a pre-order context sweep in which the root's final width is `max(self, context)`.
+- Comparison, reduction and logical operators are 1-bit self-determined, so in a wider context their final width is the context's. Their operands stay self-determined (spec §4.2, EL-30 `Y_WIDTH = max(final, 1)`; Yosys `genrtlil.cc` 1142–1149, 1777–1783; ruling I7).
+- Diagnostics:
+  - `width N exceeds the limit of 1048576 bits` (located, `PARSE`);
+  - E12's warning `unsized constant in a concatenation is taken as N bits`, at the `NUMBER`.
 
 **Tests (`test_elab_ctype.c`, hand-built trees):**
 
@@ -646,12 +802,14 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 | E23: `s + a` | — | (8, u) |
 | E23: `s + t` | — | (8, s), `t` (8, s) |
 | E8: `a < t` | — | `<` (1, u), operands (8, u) |
+| E8: `a < t` | 8 | `<` (8, u), operands still (8, u) |
 | E8: `s < t` | — | operands (8, s) |
 | `t << a` | — | (4, s), `a` self (8, u) |
 | `s >>> a` | — | (8, s) |
 | `c ? a : t` | — | (8, u), `c` self (1, u) |
 | `{a, t}` | — | (12, u) |
 | `{a, 'h1}` | — | (40, u), plus the warning `x.v:1:12: warning: unsized constant in a concatenation is taken as 32 bits` |
+| `{&a, b}` | — | (9, u); `&a` (1, u) |
 | `{3{t}}` | — | (12, u) |
 | `s[3:0]` | — | (4, u) |
 | `s[2]` | — | (1, u) |
@@ -659,7 +817,8 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 | `$signed(a)` | — | (8, s) |
 | `$unsigned(s)` | — | (8, u) |
 | `t ** a` | — | (4, s), `a` self (8, u) |
-| `&a`, `!a`, `a && b` | 8 | the operator (1, u), zero-extended to 8 |
+| `&a`, `!a`, `a && b` | 8 | the operator (8, u); its operands self-determined (8, u) (ruling I7) |
+| `~&a` | 8 | the outer `!` (8, u); the inner `&` (1, u) (v4 EL-30) |
 | `f(a)` | — | (4, u) |
 | `g(a)` | — | (32, s) |
 | `P` | 64 | (64, u, unsized) |
@@ -700,6 +859,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `casez (v) 4'b1???: f = 3; 4'b01??: f = 2; default: f = 0; endcase` → `f(4'b0110)` = 2, `f(4'b1000)` = 3, `f(4'b0001)` = 0.
 - Recursion: `function automatic integer fact(input integer n); fact = (n <= 1) ? 1 : n * fact(n - 1); endfunction` → `fact(10)` = 3628800. With the call-depth hook at 8, `fact(9)` → `t.v:4:23: error: constant function recursion deeper than 8 in 'fact'`.
 - Steps hook 1000 on `while (1) k = k + 1;` → `constant evaluation of 'f' exceeds 1000 steps`.
+- The loop hook at 16 on `for (k = 0; k < 100; k = k + 1)` in a function → `loop exceeds 16 iterations`.
 - Non-constant reasons, each exact:
   - `function 'f' is not a constant function: it reads module variable 'x'`
   - `… it calls task 't'`
@@ -717,26 +877,39 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 
 ## PR 2D-3 — stage 1: hierarchy, parameters, specializations; the binder
 
-### Task 10: Stage-1 context, the entry, options, module lookup, top selection (EL-2, EL-3, EL-6, EL-7)
+### Task 10: Stage-1 context, the entry, options, lookup, top, pending kinds, per-case `run-reject` (EL-2, EL-3, EL-6, EL-7; point (l))
 **Files:**
 - Create `src/frontends/verilog/elab1.h`, `elab1.c` (context, diagnostics helpers, `odin3_elab_stage1` and `odin3_elab_run`), `elab1_lookup.c` and `elab1_top.c`.
-- Create `src/frontends/elab/elab2_stub.c` (point (l)).
+- Create `src/frontends/elab/elab_pending.c` (point (l)'s tables) and `src/frontends/elab/elab2_stub.c`.
 - Create `tests/unit/elab_test.h` (static helpers, below) and `tests/unit/test_elab_stage1_lookup.c`.
 - Delete `src/frontends/verilog/elab_stub.c`.
-- Modify `src/frontends/verilog/elab.h` (point (a)) and `read_verilog.c`: the flags `--nolatches`, `--nomem2reg` and `--auto-blackbox` (any order, before the files); the usage line; the call.
-- Modify `src/frontends/elab/elab.h` (stage APIs), `src/api/ast_abi.c` and `include/odin3/odin3.h` (`odin3_ast_get_library_units_from`, extending the v5 comment).
+- Modify `src/frontends/verilog/elab.h` (point (a), the ownership paragraph) and `read_verilog.c`:
+  - the flags `--nolatches`, `--nomem2reg` and `--auto-blackbox` (any order, before the files) and the usage line;
+  - `odin3_design_set_ast` of the parsed store before the call;
+  - the call.
+- Modify 2C-2's `tests/unit/test_read_verilog.c` (review I4): "without `--parse-only` → the stub's message and `INVALID_ARG`" becomes "a clean run reaches stage 2's stub: the unlocated `elaboration is not available yet (2D)` and `PARSE`".
+- Modify `tools/parse-check/run-reject` and `tests/tools/test_run_reject.py`: the per-case pass/pending/fail rule of point (l) (review I4).
+- Modify `src/frontends/elab/elab.h` (stage APIs) and `elab_test.h` (hooks).
+- Modify `src/api/ast_abi.c` and `include/odin3/odin3.h` (`odin3_ast_get_library_units_from`, extending the v4 "(cont., 2D)" line).
 - Modify `docs/PASSES.md` (the `read_verilog` row gains the three flags), `docs/DESIGN.md` §4.0 (`--auto-blackbox`; the top rule unchanged) and `CMakeLists.txt`.
 
 **Consumes:**
 - 2C-2: `odin3_read_verilog_files`, `odin3_rv_opts`, `odin3_ast_library_units_from`, the pass's option parse.
-- 2A: `odin3_ast_create(…, ODIN3_AST_FORM_ELABORATED, …)`, builders, `odin3_ast_finish`, `odin3_ast_check`, `odin3_srcman_buffer_info` (a unit's library).
+- 2A: `odin3_ast_create(…, ODIN3_AST_FORM_ELABORATED, …)`, builders, `odin3_ast_finish`, `odin3_ast_check`, `odin3_srcman_buffer_info` (a unit's library), `odin3_design_set_ast`, `odin3_design_drop_ast`, `odin3_design_find_ast`.
 - 2B-1 record (`top`, `top_at`, `params`); `odin3_pass_get_options`; `odin3_celltype_find` and `_get`; `odin3_module_prov` and `odin3_prov_get` (the run of a module made by an earlier read).
 
 **Produces:**
-- `src/frontends/verilog/elab.h`: `odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast *parsed, const odin3_elab_opts *opts);` runs EL-2 steps 1–7.
+- `src/frontends/verilog/elab.h`: `odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast *parsed, const odin3_elab_opts *opts);` runs EL-2 steps 1–7. Step (3) is `odin3_design_drop_ast`. It never destroys `parsed` itself (point (a)).
 - `src/frontends/elab/elab.h`:
   - `odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odin3_elab_opts *opts, odin3_ast **elab_out);`
   - `odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts);` (the stub until Task 17)
+  - `typedef enum odin3_elab_pend_feature { ODIN3_PEND_COMB_CALL = ODIN3_AST_KIND_COUNT, ODIN3_PEND_REGS_VAR_READ, ODIN3_PEND_MEM_WRITE, ODIN3_PEND_END } odin3_elab_pend_feature;`
+  - `bool odin3_elab_pending(uint8_t stage, uint32_t kind_or_feature);`
+  - `void odin3_elab_pend_report(odin3_design *design, odin3_loc loc, uint32_t kind_or_feature, bool *seen);` logs point (l)'s line once per kind per run. `seen` has `ODIN3_PEND_END` entries.
+- `elab_test.h`:
+  - `void odin3_elab_test_pend(uint8_t stage, uint32_t kind_or_feature, bool pending);`
+  - `typedef struct odin3_elab_test_hooks { uint32_t drop_log_entry; void (*on_body_start)(void *user, odin3_ast_id module_node); void *user; } odin3_elab_test_hooks;`
+  - `void odin3_elab_test_set_hooks(const odin3_elab_test_hooks *hooks);` (`drop_log_entry` 0 = off: Task 11; `on_body_start`: Task 17)
 - `elab1.h`:
   - `typedef struct odin3_elab1 odin3_elab1;`
   - `typedef enum odin3_elab_def_kind { ODIN3_DEF_MODULE = 1, ODIN3_DEF_BLACKBOX, ODIN3_DEF_UDP, ODIN3_DEF_CONFIG } odin3_elab_def_kind;`
@@ -753,10 +926,15 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t library);` follows EL-6 items 1–7, with the several-libraries info line once per name.
   - `odin3_status odin3_elab1_select_top(odin3_elab1 *e1, uint32_t *def);` is EL-7. Candidates count instantiations anywhere in a parsed body (divergence 20).
 - ABI: `odin3_status odin3_ast_get_library_units_from(const odin3_ast *ast, uint32_t *index);` with the paragraph (0 = none; `INVALID_ARG` as the conventions say).
-- `tests/unit/elab_test.h`:
+- **Staging at Task 10.** Stage 1 runs `collect_defs`, `select_top` and a reachability walk that resolves every `INSTANTIATION` reachable from the top (EL-6; the not-elaborated info line), then writes the `UNIT` and its `MODULE`s. Every module item is pending until Task 11 (point (l)), so the lookup tests assert their lines, which come first.
+- `run-reject --elaborate`: per case **pass** / **pending** / **fail** (point (l)). The summary is `pass N, pending P, fail F`. Exit 1 on any fail, 77 when P equals the case count, else 0.
+- `tests/unit/elab_test.h` (review I5):
   - `et_src { const char *path, *text; }`;
-  - `et_stage1(const et_src *srcs, uint32_t n, const odin3_elab_opts *opts, et_result *out)` writes the sources into a fresh directory under the build tree, runs `odin3_read_verilog_files` and then `odin3_elab_stage1`, and fills `et_result { design, parsed, elab, status, dump (odin3_ast_dump of elab), log lines, errors, warnings }` through a capturing sink;
+  - `et_req { const et_src *srcs; uint32_t n; const char *pre_script; const et_src *project; const odin3_elab_opts *opts; }`, where `pre_script` holds passes run on the fresh design first (e.g. `read_techlib lib/vtr.o3lib; read_project p.o3proj`), and `project` is written next to the sources when non-NULL;
+  - `et_stage1(const et_req *req, et_result *out)` writes the files into a fresh directory under the build tree, runs `pre_script`, `odin3_read_verilog_files` and then `odin3_elab_stage1`, and fills `et_result { design, parsed, elab, status, dump (odin3_ast_dump of elab), log lines, errors, warnings }` through a capturing sink;
   - `et_free(et_result *r)`.
+
+  Task 17 adds `et_read` with the same request.
 
 **Tests (`test_elab_stage1_lookup.c`; exact lines through the sink):**
 - **Lookup order.**
@@ -766,44 +944,61 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - A `primitive p` → `p.v:1:11: error: user-defined primitive 'p' is not supported`, with or without an instance.
   - `config c; … endconfig` → `configuration 'c' is not supported`.
 - **Cell types.**
-  - After `read_techlib lib/vtr.o3lib`, `single_port_ram #(.ADDR_WIDTH(10)) r (…)` resolves to the cell type.
+  - With `pre_script` `read_techlib lib/vtr.o3lib`, `single_port_ram #(.ADDR_WIDTH(10)) r (…)` resolves to the cell type.
   - `$add u (…)` → `t.v:3:3: error: unresolved_module: module '$add' is not defined`.
   - `foo u (…)` → `unresolved_module: module 'foo' is not defined`.
   - With `--auto-blackbox`, `foo` resolves to an implicit black box, with point (w)'s info line.
 - **Taken names.**
   - After `read_techlib lib/vtr.o3lib`, `module adder` → `a.v:1:8: error: module 'adder' has the name of cell type 'adder' registered by an earlier read (hard cell); rename the module`.
   - After a `read_blif` declaring black box `bb`, `module bb` → `… (black box); rename the module`.
-  - Two `read_verilog` runs defining `m` → `duplicate_module: module 'm' is already defined by an earlier read (run 1)`.
+  - `pre_script` `read_verilog first.v` and then the sources both defining `m` → `duplicate_module: module 'm' is already defined by an earlier read (run 1)`.
 - **Top.**
   - One candidate → info `top module 'work.t' chosen: the only module no other module instantiates`.
   - The corpus `neg_ambiguous_top` sources → `odin3: error: ambiguous_top: no top given and several modules are not instantiated: 'work.a', 'work.b'`.
   - `neg_no_top` → `no_top: no top given and every module is instantiated by another`.
   - No module → `no_top: no top given and no module is defined`.
   - `--top nope` → `odin3: error: unknown_top: 'nope' is not a defined module`.
-  - A project top `nope` with `top_at` → located at the project line.
+  - A project top `nope` with `top_at` (via `project` + `pre_script` `read_project`) → `p.o3proj:2:1: error: unknown_top: 'nope' is not a defined module`.
   - `--top` beats the project top.
   - `sub` in two libraries → `ambiguous_top: 'sub' is defined in several libraries: 'lib2.sub', 'lib3.sub'`; `--top lib3.sub` → OK.
   - Unreachable modules → info `not instantiated under the top, not elaborated: 'u1', 'u2'`.
   - A module instantiated only in an unselected generate branch is not a candidate.
+- **Pending mechanism (ruling C3).**
+  - With `odin3_elab_test_pend(1, ODIN3_AST_NET_DECL, true)`, a module with two `NET_DECL`s gives exactly one line, `t.v:2:3: error: elaboration is not available yet (2D): 'NET_DECL'`. The result is `PARSE` with no elaborated store, and `odin3_ast_check` was never handed an unhandled kind.
+  - Before Task 15 lands, an `always` gives `… 'ALWAYS'` (the case is replaced when Task 15 empties that entry).
+- **Ownership (review I10).** After a clean stage 1 under keep level `NONE`, `odin3_design_find_ast(…, PARSED)` gives NULL before stage 2. Under `ALL` it is held. A double drop is a no-op, and ASan sees no double free.
 - **ABI.** On a run with one `-v` file after two design files → index 2.
 - **Entry.**
   - `read_verilog --nolatches t.v` passes `nolatches` true.
   - `read_verilog --bogus t.v` → `read_verilog: unknown option '--bogus'`, `INVALID_ARG`.
-  - Before Task 17, a clean stage 1 is followed by the stub text and `PARSE`.
+  - A clean stage 1 is followed by the stub text and `PARSE` (until Task 17).
   - Debug `odin3_ast_check` FULL of the elaborated store passes.
+- `test_run_reject.py`, over a fake `odin3`:
+  - the stub text, located or not → pending;
+  - all pending → 77;
+  - a missing line without it → 1;
+  - the summary line exact.
+- CTests `verilog_reject_2d` and `verilog_ignore_2d` pass with every case pass or pending (no fail): `main` stays green.
 - **OOM sweep** over stage 1 on a three-module design: `NO_MEMORY`, the parsed store intact, no elaborated store left, no leak.
 
 ### Task 11: Parameters, specializations, passes E/W, `defparam` and project push-down (EL-8, EL-9, EL-16)
 **Files:**
 - Create `src/frontends/verilog/elab1_params.c` (EL-16 typing of values, EL-8 precedence, cycles).
-- Create `elab1_spec.c`: key bytes, `odin3_hash_bytes`, a `u64map` from hash to chain, names, the FIFO queue, the iterative-DFS acyclicity check, the depth cap.
-- Create `elab1_expand.c` (the pass E skeleton: environments, parameters, instance and `defparam` collection, the decision log).
-- Create `elab1_write.c` (the pass W skeleton: `MODULE`, the params `LIST` of `PARAM_DECL[localparam]{IN_HEADER}` with final values, `INSTANTIATION` names and named param `CONNECTION`s, the `UNIT` in BFS order).
-- Create `tests/unit/test_elab_stage1_params.c`.
+- Create `elab1_spec.c`: key bytes, `odin3_hash_bytes`, a `u64map` from hash to chain, names, the FIFO queue, the iterative-DFS acyclicity check, the depth, specialization and node caps.
+- Create `elab1_expand.c`: the pass-E skeleton.
+  - Environments: a scope stack, plus `u64map` `(scope << 32 | name) → odin3_elab_entry`.
+  - Every declaration is recorded: nets, variables, ports, parameters, localparams, genvars, functions and tasks, with folded ranges (review C3 (a)).
+  - It also covers instance and `defparam` collection and the decision log.
+- Create `elab1_write.c`: the pass-W skeleton.
+  - It writes point (l)'s Task-11 kinds: `MODULE`; the params `LIST` of `PARAM_DECL[localparam]{IN_HEADER}` with final values spelled per point (bb); ANSI `PORT_DECL`, `NET_DECL` and `VAR_DECL` with `NUMBER` bounds; `CONT_ASSIGN`; and `INSTANTIATION` names with named param `CONNECTION`s.
+  - The `UNIT` is written in BFS order.
+  - Pending kinds go to `odin3_elab_pend_report`.
+- Create `tests/unit/test_elab_stage1_params.c`; modify `elab_pending.c` (remove the Task-11 kinds).
 
 **Consumes:** Tasks 7–10; the project record's `odin3_proj_param { scope, name, value, type, at }`; `odin3_ast_number_parse` for project values.
 
 **Produces:**
+- `typedef struct odin3_elab_entry { uint8_t kind; odin3_ast_id decl; uint32_t width; bool is_signed; odin3_cval value; } odin3_elab_entry;`: `value` holds a parameter or genvar's value; a net or variable has kind `SIGNAL` with its width and sign.
 - `typedef enum odin3_elab_ovr_source { ODIN3_OVR_PROJECT = 1, ODIN3_OVR_NAMED, ODIN3_OVR_DEFPARAM, ODIN3_OVR_ORDERED } odin3_elab_ovr_source;` (precedence order)
 - `typedef struct odin3_elab_override { uint32_t path; uint8_t source; uint32_t order; odin3_cval value; odin3_loc at; odin3_ast_id from; } odin3_elab_override;`: `path` is a strtab ID of `W` or `u2.W` relative to the target; `order` is the stream order (first `defparam` wins).
 - `typedef struct odin3_elab_decision { odin3_ast_id node; int32_t value; } odin3_elab_decision;`
@@ -812,18 +1007,20 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - It evaluates the definition's `parameter`s lazily in declaration order, with overrides by precedence (EL-8) and converted per EL-16.
   - It returns the pending (deeper) overrides.
   - Errors are §9.1's (localparam, unknown, too many, mixed, depends on itself, not constant, P4).
-- `odin3_status odin3_elab1_spec_get(odin3_elab1 *e1, const odin3_elab_spec_req *req, uint32_t *spec);` finds or creates; on create it pushes back and names per EL-9 and point (q).
+- `odin3_status odin3_elab1_spec_get(odin3_elab1 *e1, const odin3_elab_spec_req *req, uint32_t *spec);` finds or creates; on create it pushes back and names per EL-9 and point (q). Caps: the specialization text of point (aa).
 - `odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec);`
-- `odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec);` replays the log in order. A log not consumed exactly is `ODIN3_ERR_CHECK` with `stage 1: decision log of 'm' not replayed (N of M entries)`, a 2D bug (§16 item 4).
+- `odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec);`
+  - It replays the log in order. A log not consumed exactly is `ODIN3_ERR_CHECK` with `stage 1: decision log of 'm' not replayed (N of M entries)`, a 2D bug (§16 item 4).
+  - The elaborated-node cap applies at every `make`.
 - `odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def);` (the §3.4 algorithm)
 - Every elaborated node made from one parsed node copies its `{loc, end}`. A node stage 1 creates (a genvar `NUMBER`, a resolved `CONNECTION`, a folded bound) takes the range of the node that caused it (EL-4).
 
-**Tests (`test_elab_stage1_params.c`; names and values asserted on the elaborated dump):** `module m #(parameter W = 1)`, instantiated from `top`:
+**Tests (`test_elab_stage1_params.c`; names and values asserted on the elaborated dump):** `module m #(parameter W = 1) (input [W-1:0] d);`, instantiated from `top`:
 - **Precedence (Review Focus 1).**
   - `m #(.W(5)) u1 (); defparam u1.W = 7;` → `u1` is `INSTANTIATION` `m$W=5`, plus `t.v:3:10: warning: defparam of 'u1.W' is overridden by the named parameter assignment of 'u1'`.
   - `defparam u3.W = 8; defparam u3.W = 9;` → `m$W=8`.
   - `m #(4) u4 (); defparam u4.W = 6;` → `m$W=6` (divergence 7).
-  - Project `param top.u1.W 3` → `m$W=3`.
+  - Project `param top.u1.W 3` (through `et_req.project` and `pre_script` `read_project p.o3proj`) → `m$W=3`.
   - `m u5 ();` and `m #(.W(1)) u6 ();` → both `m`, one `MODULE` in the `UNIT`.
 - **Sharing by resolved value.** On `parameter integer W`, `#(.W(8))` and `#(.W(32'sd8))` share one specialization. On an untyped `W`, `#(.W(8))` and `#(.W(4'd8))` → `m$W=8` and `m$W=4'b1000`.
 - **Names.**
@@ -832,37 +1029,43 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - Untyped `'hFFFFFFFF` → `m$P=32'b11111111111111111111111111111111`.
   - A 200-bit override → `m$h` plus 16 hex digits.
   - A user module `m$W=5` already defined → the specialization is `m$W=5$2`.
-  - A registered cell type named `m$W=6` → `m$W=6$2`.
+  - A registered cell type named `m$W=6` (via `pre_script`) → `m$W=6$2`.
 - **Errors (exact).**
   - `#(.L(1))` on a `localparam L` → `'L' is a localparam of module 'm' and cannot be overridden`.
   - `#(.X(1))` → `module 'm' has no parameter 'X'`.
   - `#(1, 2, 3)` on two parameters → `too many parameter values for module 'm' (3 given, 2 parameters)`.
   - `#(1, .W(2))` → `parameter assignment of instance 'u' mixes ordered and named values`.
-- **Dependencies.** `parameter A = B + 1, B = 2` → A = 3. `parameter A = B, B = A` → `parameter 'A' depends on itself` at `A`. `parameter A = w` → `parameter 'A' is not constant (it reads 'w')`.
-- **EL-16 types.**
-  - `parameter [7:0] P = 9'h1FF` → `8'hFF`, sized, unsigned.
-  - `parameter signed P = 4'b1000` → signed, 4 bits.
-  - `localparam [31:0] Q = 'hFFFFFFFF` → the elaborated `NUMBER` payload width is 0.
-  - `localparam [35:0] R = 'hFFFFFFFF` → width 36.
+- **Dependencies (review C3 (a)).**
+  - `parameter A = B + 1, B = 2` → A = 3.
+  - `parameter A = B, B = A` → `parameter 'A' depends on itself` at `A`.
+  - `wire w; parameter A = w;` → `parameter 'A' is not constant (it reads 'w')`, with `w` found in pass E's environment.
+- **EL-16 types and the point (bb) spellings.**
+  - `parameter [7:0] P = 9'h1FF` → `BIN` width 8, unsigned, `8'hFF`.
+  - `parameter signed P = 4'b1000` → `BIN` width 4, `SIGNED`.
+  - `localparam [31:0] Q = 'hFFFFFFFF` → `HEX` width 0 (unsized).
+  - `parameter W = 1` default → `DEC` width 0, `SIGNED`.
+  - `localparam [35:0] R = 'hFFFFFFFF` → `BIN` width 36.
   - `parameter real r = 1.0` → `parameter type 'real' is not supported`.
+- **Declarations.** `wire [W-1:0] w;` in `m$W=5` → `RANGE(NUMBER.dec 4, NUMBER.dec 0)`, both `SIGNED` width 32.
 - **Push-down.**
   - `defparam u_mid.u_leaf.W = 4;` → `mid$u_leaf.W=4` and `leaf$W=4`.
   - `defparam top.u.W = 1;` written in a child → `defparam target 'top.u.W' does not name a parameter of an instance below this module`.
   - A `defparam` naming its own module's parameter → the same error.
   - Project `param top.u_wide.W 8'hFF` pushes down; `param top.u_wide.X 1` → `p.o3proj:4:1: error: param 'top.u_wide.X' does not name a parameter`.
   - The corpus `param_instance` values: its `ref.cmd` parameters equal.
-- **Recursion and depth.**
+- **Recursion and caps (point (aa)).**
   - `ping`/`pong` instantiating each other, with `--top ping` → `recursive instantiation of 'ping' (through 'pong')`.
   - A six-module distinct chain with the depth hook at 4 → `instance hierarchy deeper than 4 at 'u'; recursive instantiation of 'a4'?`.
-  - The specialization hook at 2 with three specializations → its cap message.
+  - The specialization hook at 2 with three specializations → `t.v:6:3: error: elaboration makes more than 2 specializations`.
+  - The node hook at 50 → `elaboration needs more than 50 elaborated nodes`, fatal.
 - **Store shape.** `UNIT` named `top`, `top` first, then BFS order. Each `INSTANTIATION` has one named `CONNECTION` per parameter, with its final value.
-- **Replay.** A hook dropping one log entry → `ODIN3_ERR_CHECK` with the exact text.
+- **Replay (internal risk §16 #4).** `odin3_elab_test_set_hooks({.drop_log_entry = 1})` → `ODIN3_ERR_CHECK` and `stage 1: decision log of 'm' not replayed (1 of 2 entries)`.
 - OOM sweep.
 
 ### Task 12: Instances, connections, arrays, black boxes and cell types (EL-10, EL-11, EL-8 cell-type targets)
-**Files:** Create `src/frontends/verilog/elab1_inst.c` and `tests/unit/test_elab_stage1_inst.c`; modify `elab1_expand.c` and `elab1_write.c`.
+**Files:** Create `src/frontends/verilog/elab1_inst.c` and `tests/unit/test_elab_stage1_inst.c`; modify `elab1_expand.c`, `elab1_write.c` and `elab_pending.c` (ordered connections, arrays and `GATE_DECL` landed).
 
-**Consumes:** Tasks 8–11. Typing of connection expressions uses a stage-1 `odin3_ctype_host` over pass E's environment.
+**Consumes:** Tasks 8–11. Connection expressions are typed with a stage-1 `odin3_ctype_host` over pass E's environment (Task 11's entries).
 
 **Produces:**
 - `typedef struct odin3_elab_inst { odin3_ast_id instantiation, instance; uint32_t scope; odin3_elab_res target; uint32_t spec; } odin3_elab_inst;`
@@ -870,6 +1073,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `odin3_status odin3_elab1_inst_array(odin3_elab1 *e1, const odin3_elab_inst *inst);` expands `u[hi:lo]` to `u[hi]`…`u[lo]` with `SELECT` slices (gates use P = 1).
 - `odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst *inst);` checks overrides by name or order against the type and converts them by kind. Stage 2 infers the rest.
 - `odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t def);`: `(* blackbox *)` modules get per-specialization ports and their body is ignored; implicit black boxes take the union of named ports, `inout`, with widths from the first instance.
+- The instance cap uses point (aa)'s text.
 
 **Tests (`test_elab_stage1_inst.c`):** with `module m(x, y, z)`:
 - **Connections.**
@@ -881,7 +1085,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `m u (a, b, c, d)` → `instance 'u' of 'm' has 4 connections but 'm' has 3 ports`.
   - `m u (a, .y(b))` → `t.v:4:5: error: instance 'u' mixes ordered and named connections` at the `INSTANCE`.
 - **Positions.** `module n(a, , b)` with `n u (x, y, z)` → warning `connection 2 of instance 'u' goes to an unnamed port position and is ignored`, then `(a, x)`, `(b, z)`. `u ()` on a port-less module → OK.
-- **Arrays.** `m2 u[3:0] (.d(bus8), .q(q2))` with `d` 2 bits:
+- **Arrays.** `wire [7:0] bus8; wire [1:0] q2; m2 u[3:0] (.d(bus8), .q(q2))` with `d` 2 bits:
   - instances `u[3]`, `u[2]`, `u[1]`, `u[0]` in that order;
   - `u[3].d` = `bus8[7:6]`, `u[0].d` = `bus8[1:0]`, and the 2-bit `q2` goes whole to each;
   - a 3-bit connection → `connection of 'd' to instance array 'u' is 3 bits; expected 2 or 8`;
@@ -890,7 +1094,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Black boxes.**
   - `(* blackbox *) module bb(input [3:0] a, output y); assign y = &a; endmodule` → info `body of black box 'bb' is ignored`, connections as written, no `MODULE` for `bb` in the `UNIT`.
   - A parameterized black box with two override values → two names per EL-9.
-- **Cell types** (with `lib/vtr.o3lib`):
+- **Cell types** (with `pre_script` `read_techlib lib/vtr.o3lib`):
   - `single_port_ram #(.ADDR_WIDTH(10)) ram (…)` → the params `LIST` holds `(ADDR_WIDTH, 10)`.
   - `#(.FOO(1))` → `cell type 'single_port_ram' has no parameter 'FOO'`.
   - `defparam ram.DATA_WIDTH = 8;` → adds `(DATA_WIDTH, 8)`.
@@ -900,17 +1104,31 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `foo u1 (.a(x), .b(y)); foo u2 (.a(x2), .c(z));` → black box `foo` with ports `a b c`, all `inout`.
   - `foo u3 (x)` → `implicit black box 'foo' needs named connections`.
   - A 4-bit first `.a` and then an 8-bit one → point (w)'s error.
-- The instance cap hook at 4 with an 8-element array → its cap message, fatal.
+- The instance hook at 4 with an 8-element array → `t.v:5:3: error: elaboration makes more than 4 instances`, fatal.
 - OOM sweep.
 
-### Task 13: The binder (EL-5)
-**Files:** Create `src/frontends/elab/bind.c`, `src/frontends/elab/elab_internal.h` (binding part) and `tests/unit/test_elab_bind.c`; modify `tests/unit/elab_test_tree.h` (elaborated-store builders `eb_module`, `eb_net`, `eb_var`, `eb_localparam`, `eb_gen_block`, `eb_named_block`, `eb_function`, `eb_task`, `eb_assign`, `eb_always`).
+### Task 13: The binder and EL-4 validation (EL-5, EL-4)
+**Files:** Create `src/frontends/elab/bind.c`, `src/frontends/elab/elab_internal.h` (binding part) and `tests/unit/test_elab_bind.c`; modify `tests/unit/elab_test_tree.h` (elaborated-store builders `eb_module`, `eb_net`, `eb_var`, `eb_localparam`, `eb_gen_block`, `eb_named_block`, `eb_function`, `eb_task`, `eb_assign`, `eb_always`, `eb_instance`).
 
 **Consumes:** the 2A symbol table (`odin3_symtab_create`, `odin3_scope_new`, `odin3_symbol_new`, `_set_value`, `_set_unpacked`, `_add_assign`, `odin3_symtab_lookup`, `odin3_scope_child`); Task 7 (localparam values).
 
 **Produces:**
 - `typedef struct odin3_elab_binding { odin3_sym_id *sym_of; uint32_t n; odin3_u64map *scope_of; } odin3_elab_binding;`
-- `odin3_status odin3_elab_bind(odin3_ast *elab, odin3_elab_binding *out);` is one pre-order sweep. Its errors are §2.5's located texts, capped at 20; it returns `PARSE` after reporting.
+- `odin3_status odin3_elab_bind(odin3_ast *elab, odin3_elab_binding *out);` is one pre-order sweep.
+  - Its §2.5 errors are located and capped at 20; it returns `PARSE` after reporting.
+  - It also checks the **EL-4 store shape** for the rows 2A's rule 7 does not cover (review I10). A violation is a misuse of the seam: located `elaborated form: <rule>` and `INVALID_ARG`, before anything reaches the IR. The rules:
+    - `'WHILE' outside a function`
+    - `system function '$x' (only $signed and $unsigned are allowed)`
+    - `system task '$x' outside an initial block`
+    - `edge and level events in one event list`
+    - `'TIMING_STMT' outside an always`
+    - `intra-assignment control`
+    - `a count that is not a NUMBER of 0 or more`
+    - `a select bound or width that is not a NUMBER`
+    - `instance 'u' does not connect every port of 'm' once, in port order`
+    - `port 'p' without a net kind`
+    - `parameter 'P' is not a localparam with a NUMBER or STRING value`
+    - `unnamed block 'b' with declarations`
 - `odin3_scope_id odin3_elab_scope_of(const odin3_elab_binding *b, odin3_ast_id node);` (`MODULE`, `GEN_BLOCK`, named `SEQ_BLOCK`, `FUNCTION_DECL`, `TASK_DECL`)
 - `void odin3_elab_binding_free(odin3_elab_binding *b);`
 
@@ -928,18 +1146,19 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `u.w` → `hierarchical reference 'u.w' is not supported`.
   - `CALL k()` → `'k' is not a function`; `TASK_CALL f` → `'f' is not a task`.
   - A range bound `2147483648` → `width 2147483649 exceeds the limit of 1048576 bits`.
+- **EL-4 shape.** One hand-built store per rule above gives its exact line and `INVALID_ARG`, and creates no IR (module count 0).
 - 10,000 nested `GEN_BLOCK`s bind without recursion.
 - OOM sweep: `NO_MEMORY`, the symtab destroyed with the store, no leak.
 
-## PR 2D-4 — stage 1: generate, declarations, diagnostics; the handover on
+## PR 2D-4 — stage 1: generate, declarations, diagnostics; the handover expectations
 
 ### Task 14: Generate, scope names and references (EL-19, EL-20, EL-21, EL-22)
-**Files:** Create `src/frontends/verilog/elab1_gen.c` and `tests/unit/test_elab_stage1_gen.c`; modify `elab1_expand.c`, `elab1_write.c` and `elab1.h`.
+**Files:** Create `src/frontends/verilog/elab1_gen.c` and `tests/unit/test_elab_stage1_gen.c`; modify `elab1_expand.c`, `elab1_write.c`, `elab1.h` and `elab_pending.c` (generate kinds landed).
 
 **Consumes:** Tasks 9–12 (constant conditions, the decision log, push-down for scoped `defparam`).
 
 **Produces:**
-- `typedef struct odin3_elab_scope { uint8_t kind; uint32_t name; int32_t index; bool has_index; uint32_t parent; uint32_t counter; uint32_t seen; } odin3_elab_scope;`: `seen` is the scope's set of `genblk*` names met so far, copied from the parent on entry.
+- `typedef struct odin3_elab_scope { uint8_t kind; uint32_t name; int32_t index; bool has_index; uint32_t parent; uint32_t counter; } odin3_elab_scope;`. Each scope's set of `genblk*` names seen so far is internal to `elab1_gen.c`, copied from the parent on entry (review M13).
 - `odin3_status odin3_elab1_gen_for(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);`
 - `odin3_status odin3_elab1_gen_if(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);`
 - `odin3_status odin3_elab1_gen_case(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);`
@@ -952,9 +1171,9 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Naming algorithm (EL-21, undetermined by the signatures).**
   - Per scope, a pre-order walk of its items.
   - Each `GEN_IF`, `GEN_FOR` or `GEN_CASE` increments the scope's counter c.
-  - Each unnamed block of that construct is named `genblk<c>`, padded `genblk0<c>`, `genblk00<c>`, … while the name is in `seen`.
-  - A user declaration whose name starts with `genblk` enters `seen` when the walk reaches it.
-  - Entering a block starts a fresh counter at 0 with a copy of `seen`.
+  - Each unnamed block of that construct is named `genblk<c>`, padded `genblk0<c>`, `genblk00<c>`, … while the name is in the scope's seen set.
+  - A user declaration whose name starts with `genblk` enters the set when the walk reaches it.
+  - Entering a block starts a fresh counter at 0 with a copy of the set.
   - The else branch of `if … else if …` is a block of its own, named like the then-block.
   - Bare items are wrapped as blocks.
 
@@ -962,7 +1181,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **The review probe (Review Focus 5).** `localparam A = 0, B = 1; if (A) begin wire x; end else if (B) begin wire x; end if (B) assign y = a; genvar i; for (i = 0; i < 1; i = i + 1) begin wire w; end` gives:
   - `GEN_BLOCK genblk1` holding `GEN_BLOCK genblk1`, which declares `x` (path `genblk1.genblk1.x`);
   - `GEN_BLOCK genblk2` (the bare `if`);
-  - `GEN_BLOCK genblk3` with index 0, declaring `w`.
+  - `GEN_BLOCK genblk3` with index `NUMBER.dec 0` (point (bb)), declaring `w`.
 - **User `genblk` names.** `wire genblk1;` after the first `if` → the block is still `genblk1`. Before it → `genblk01`.
 - **Loops.**
   - `for (i = 3; i >= 0; i = i - 1) begin : g` → `g` indices 3, 2, 1, 0 in order.
@@ -974,9 +1193,10 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - Condition reading wire `w` → `generate loop condition is not constant (it reads 'w')`.
   - The loop hook at 8 with `i < 100` → `loop exceeds 8 iterations`.
 - **Case and if.**
+  - `if (w)` with `w` a wire → `generate condition is not constant (it reads 'w')` (review M10).
   - `case (W) 1, 2: … default: … endcase` with W = 2 → item 0; with W = 5 → default; an item `2'b1x` never matches; no match and no default → nothing.
+  - A `GEN_CASE` item reading wire `w` → `case item in a generate case is not constant (it reads 'w')`.
   - `if (1'bx)` → the else branch.
-  - A `GEN_CASE` item reading a wire `w` → `case item in a generate case is not constant (it reads 'w')`.
 - **References.**
   - `g[0].t` read in the module → a `HIER_NAME` with `NUMBER` index.
   - `g[5].t` with 5 not elaborated → `'g[5].t' does not exist (generate block 'g[5]' was not elaborated)`.
@@ -992,23 +1212,23 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 ### Task 15: Declarations, ports, implicit nets, blocks and subroutines (EL-4 normalisation, EL-23 stage 1, EL-24, EL-25)
 **Files:**
 - Create `src/frontends/verilog/elab1_decl.c` and `tests/unit/test_elab_stage1_decl.c`.
-- Modify `elab1_expand.c` and `elab1_write.c`.
+- Modify `elab1_expand.c`, `elab1_write.c` and `elab_pending.c` (Task 15's kinds landed).
 - Modify `docs/specs/2026-10-09-2A-ast-design.md` §4.6 (a pointer to EL-4 for the refined elaborated form, including the unsized `PARAM_DECL` value; §19).
 
-**Consumes:** Tasks 9–14.
+**Consumes:** Tasks 9–14; Task 11's environment entries (already holding every declaration).
 
 **Produces:**
 - `odin3_status odin3_elab1_ports(odin3_elab1 *e1, uint32_t spec);` merges non-ANSI declarations into one `PORT_DECL{IN_HEADER}` per port in header order:
   - the `NET` field is never 0; `DT` is `reg`, `integer` or none; `SIGNED`;
-  - `RANGE` bounds are `NUMBER`s;
+  - `RANGE` bounds are point (bb) `NUMBER`s;
   - empty positions are recorded for EL-10.
-- `odin3_status odin3_elab1_decls(odin3_elab1 *e1, uint32_t scope, odin3_ast_id item);`: `NET_DECL`/`VAR_DECL` with `NUMBER` bounds, no `STRENGTH`/`DELAY`/`VECTORED`/`SCALARED`; initialisers kept.
+- `odin3_status odin3_elab1_decls(odin3_elab1 *e1, uint32_t scope, odin3_ast_id item);` completes Task 11's declarations: no `STRENGTH`/`DELAY`/`VECTORED`/`SCALARED`; initialisers kept.
 - `odin3_status odin3_elab1_implicit(odin3_elab1 *e1, uint32_t spec);`: implicit nets per EL-25, first in the `MODULE`'s items, in first-use order, of the `` `default_nettype `` kind in effect.
 - `uint8_t odin3_elab1_nettype_at(const odin3_elab1 *e1, odin3_ast_id module_node);`: the last `DIRECTIVE[default_nettype]` before the module in stream order, reset by `` `resetall ``.
 - `odin3_status odin3_elab1_subroutine(odin3_elab1 *e1, odin3_ast_id decl, uint32_t scope);`: non-ANSI inputs move to the ports `LIST`, one declarator each; locals go to `LIST`.
-- Expression normalisation in pass W:
-  - genvar reads, `$clog2(…)`, `REPEAT` counts and `REPLICATE` counts become 32-bit signed `NUMBER`s;
-  - `SELECT` `[m:l]` bounds and `+:`/`-:` widths become `NUMBER`s;
+- `ALWAYS`, `INITIAL` and every statement kind are written per EL-4.
+- Expression normalisation in pass W (point (bb) spellings):
+  - genvar reads, `$clog2(…)`, `REPEAT` counts, `REPLICATE` counts, and `SELECT` `[m:l]` bounds and `+:`/`-:` widths become `NUMBER`s;
   - `ATTR` values are evaluated to `NUMBER` or `STRING` (`attribute value is not constant (it reads 'x')` otherwise);
   - unnamed blocks with declarations get `$unnamed_block$<k>` per module.
 
@@ -1032,37 +1252,35 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **`` `default_nettype `` placement.** Inside module 1 → `warning: `default_nettype inside a module takes effect at the next module`; module 2 uses it. `` `resetall `` resets to `wire`.
 - **Unnamed blocks.** `always @* begin reg t; t = a; y = t; end` → `SEQ_BLOCK $unnamed_block$1` plus `warning: declaration in an unnamed block is a SystemVerilog extension; the block is named '$unnamed_block$1'`. The second one in the module is `$unnamed_block$2`; the next module restarts at 1.
 - **Subroutines.** `function [3:0] f; input [3:0] a; input b; reg t; …` → ports `LIST(PORT_DECL a, PORT_DECL b)` and locals `LIST(VAR_DECL t)`.
-- **Constant folds.**
-  - `wire [$clog2(16)-1:0] w;` → `RANGE(NUMBER 3, NUMBER 0)`.
-  - `repeat (N)` with N = 3 → `NUMBER 3`.
+- **Constant folds (point (bb)).**
+  - `wire [$clog2(16)-1:0] w;` → `RANGE(NUMBER.dec 3, NUMBER.dec 0)`, `SIGNED` width 32.
+  - `repeat (N)` with N = 3 → `NUMBER.dec 3`.
   - `{N{a}}` → a `NUMBER` count.
   - `{-1{a}}` → `replication count -1 is negative`.
   - `{2'bx1{a}}` → `replication count has x or z bits`.
   - `{0{a}}` alone → `zero-width concatenation`.
   - `wire [w:0] x;` with `w` a wire → `range bound is not constant (it reads 'w')`.
-  - `a[P+1:P]` with `P` = 2 → `SELECT(…, NUMBER 3, NUMBER 2)`; `a[i +: W]` → the width a `NUMBER`.
+  - `a[P+1:P]` with `P` = 2 → `SELECT(…, NUMBER.dec 3, NUMBER.dec 2)`; `a[i +: W]` → the width a `NUMBER`.
   - `(* weight = P * 2 *)` → `ATTR` with `NUMBER`; `(* k = w *)` → `attribute value is not constant (it reads 'w')`.
-- **Genvar reads.** A genvar read inside a loop body → a 32-bit signed `NUMBER` of the iteration's value.
+- **Genvar reads.** A genvar read inside a loop body → `NUMBER.dec` of the iteration's value.
 - **M11 across kinds.** `wire x; reg x;` → `'x' is already declared (first at t.v:2:8)`.
-- The elaborated store matches EL-4 for every kind in the test (check FULL).
+- The elaborated store matches EL-4 for every kind in the test (check FULL and Task 13's shape check).
 - OOM sweep.
 
-### Task 16: REJECT/IGNORE diagnostics, the error cap, the 2C handover on (EL-42, EL-43, EL-44; §14.4)
+### Task 16: REJECT/IGNORE diagnostics, the error cap, the handover expectations (EL-42, EL-43, EL-44; §14.4)
 **Files:**
 - Create `src/frontends/verilog/elab1_diag.c` and `tests/unit/test_elab_stage1_diag.c`.
-- Modify `tools/parse-check/run-reject` (per-case pending, point (l)) and `tests/tools/test_run_reject.py`.
+- Modify `elab_pending.c`: every remaining stage-1 kind lands, and the stage-1 table is empty.
 - Modify `tests/verilog/reject-2d/*.err` and `tests/verilog/ignore-2d/*.warn` only where 2C's text differs from §9 (conflict note 10).
-- Modify `CMakeLists.txt`: `verilog_reject_2d` and `verilog_ignore_2d` now run.
 
 **Consumes:** Tasks 10–15. The rows are §9.1 and §9.2. A4, T9 and T10 are stage 2's (Tasks 19 and 24).
 
 **Produces:**
 - `odin3_status odin3_elab1_reject(odin3_elab1 *e1, odin3_ast_id node);` covers the stage-1 REJECT rows at the nodes §9.1 names: L9, M11 (other than modules), N17, N18, E20, E21, T6, T12, T13, T14, T15, T16, T19, F4, K12, Q6, Q7, S2, N15/P4, F2.
+- A mixed edge/level event list is rejected in stage 1, so the elaborated form holds none (EL-4): `edge and level events in one event list are not supported`. Task 21 keeps the check for adapter stores (with Task 13's shape check).
 - `odin3_status odin3_elab1_ignore(odin3_elab1 *e1, odin3_ast_id node);` covers the ten IGNORE rows' warnings, once per parsed node (point (v)).
-- A mixed edge/level event list is rejected in stage 1, so the elaborated form holds none (EL-4): `edge and level events in one event list are not supported`. Task 21 keeps the same check for adapter stores.
 - The cap: the 21st error is replaced by `too many errors; elaboration stopped after 20`, and stage 1 stops.
 - Stage 1 resumes at the next item or module. Dependents of a failed item are skipped silently.
-- `run-reject --elaborate`: per case **pass** / **pending** / **fail**. The summary is `pass N, pending P, fail F`. Exit 1 on any fail, 77 when P equals the case count, else 0.
 
 **Tests (`test_elab_stage1_diag.c`):** one source per row, each asserting its exact located line from §9's tables:
 - **REJECT texts.**
@@ -1100,71 +1318,83 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Once per node.** An IGNORE inside a 4-iteration generate loop warns once. One in a module specialized twice warns once.
 - **Cap.** 25 `real` variables → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`.
 - **Resume.** Two errors in one module are both reported. An instance of a module whose parameter failed adds no second error.
-- `test_run_reject.py`, over a fake `odin3`:
-  - the stub text → pending;
-  - all pending → 77;
-  - a missing line without the stub → 1;
-  - the summary line exact.
-- CTests: `verilog_reject_2d` passes with exactly A4, T9 and T10 pending. `verilog_ignore_2d` passes with none pending.
+- **Stage-1 table empty.** `odin3_elab_pending(1, k)` is false for every kind. Every `tests/verilog/coverage/*.v` file runs stage 1 without the not-available line.
+- **CTests (expectations flipped here).**
+  - `verilog_reject_2d` passes with exactly A4, T9 and T10 pending; they are stage 2's, and until Task 17 the unlocated stub text follows stage 1.
+  - `verilog_ignore_2d` passes with none pending.
 
 ## PR 2D-5 — stage 2: modules, wires, expressions, drivers, memories
 
-### Task 17: Stage-2 context, modules, ports and wires, provenance, attributes, byte budget, `--elab-only`, `odin3_ast_elaborate` (EL-2 steps 4–7, EL-23, EL-24, EL-45, EL-46, EL-47)
+### Task 17: Stage-2 context, modules, ports and wires, provenance, attributes, keep levels, byte budget, `--elab-only`, `odin3_ast_elaborate` (EL-2 steps 4–7, EL-23, EL-24, EL-45, EL-46, EL-47)
 **Files:**
-- Create `src/frontends/elab/elab2.c` (context, module order, the steps (1)–(8) driver, summary) and `elab2_wires.c` (wires, ports, provenance, attributes).
+- Create `src/frontends/elab/elab2.c` (context, module order, the steps (1)–(8) driver, summary, keep-level hand-over) and `elab2_wires.c` (wires, ports, provenance, attributes).
 - Create `src/api/elab_abi.c` and `tests/unit/test_elab_stage2_wires.c`.
 - Delete `src/frontends/elab/elab2_stub.c`.
-- Modify `elab_internal.h` and `elab.h`; `src/frontends/verilog/elab1.c` (`odin3_elab_run` steps 4–7).
+- Modify `elab_internal.h`, `elab.h`, `elab_test.h` (the `on_body_start` hook used) and `elab_pending.c`:
+  - stage-2 module-level kinds landed;
+  - the process kinds and the three features stay pending until Tasks 21–24 (point (l)).
+- Modify `src/frontends/verilog/elab1.c` (`odin3_elab_run` steps 4–7).
 - Modify `src/cli/main.c` (`--elab-only`) and `tests/cli/test_cli.sh` (`cli_elab_only`, `cli_elab_only_with_script`).
-- Modify `include/odin3/odin3.h`: `odin3_elab_options` and `odin3_ast_elaborate`, extending the v5 comment.
-- Modify `docs/PASSES.md` (the `read_verilog` row: elaborates; `--elab-only`), `docs/IR.md` IR-12 (module-relative `hier`, §10) and `CMakeLists.txt`.
+- Modify `include/odin3/odin3.h`:
+  - `odin3_elab_options` and `odin3_ast_elaborate`, extending the v4 "(cont., 2D)" line;
+  - the failed-read note on `odin3_design_run_script`'s paragraph: "a design whose `read_verilog` failed holds valid but incomplete modules and is fit only for destruction" (§2.3, ruling 10; review I10).
+- Modify `docs/PASSES.md` (the `read_verilog` row: elaborates; `--elab-only`; keep levels) and `CMakeLists.txt`.
 
-**Consumes:** Task 2 (`odin3_port_spec` range/sign); Task 13; `odin3_module_create`, `odin3_module_add_port`, `odin3_wire_create`, `odin3_attr_set`, `odin3_prov_source`, `odin3_srcman_srcloc`, `odin3_symbol_set_ir`, `odin3_design_set_top`, `odin3_design_set_ast`, `odin3_design_drop_ast`.
+**Consumes:** Task 2 (`odin3_port_spec` range/sign); Task 13; `odin3_module_create`, `odin3_module_add_port`, `odin3_wire_create`, `odin3_attr_set`, `odin3_prov_source`, `odin3_srcman_srcloc`, `odin3_symbol_set_ir`, `odin3_design_set_top`, `odin3_design_set_ast`, `odin3_design_keep_ast`, `odin3_celltype_find`.
 
 **Produces:**
 - Signals:
-  - `typedef uint32_t odin3_sigbit;` is a net ID, or `ODIN3_SB_CONST | odin3_bit`, with `enum { ODIN3_SB_CONST = 1U << 31 };`.
+  - `typedef uint32_t odin3_sigbit;` is a net ID, `ODIN3_SB_CONST | odin3_bit`, or `ODIN3_SB_ANY`, with `enum { ODIN3_SB_CONST = 1U << 31, ODIN3_SB_ANY = (1U << 31) | 4U };`. This one encoding serves expressions and the process generator (review M21).
   - `typedef struct odin3_sig { odin3_sigbit *bits; uint32_t width; bool is_signed; } odin3_sig;` (LSB first, in the stage-2 scratch arena)
 - Context and module emission:
-  - `typedef struct odin3_elab2 odin3_elab2;`
+  - `typedef struct odin3_elab2 odin3_elab2;` caches the `odin3_celltype_id` of every built-in type it emits, filled once at create (review M20).
   - `odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts, odin3_elab2 **out);`
   - `void odin3_elab2_destroy(odin3_elab2 *e2);`
-  - `odin3_status odin3_elab2_ports(odin3_elab2 *e2, odin3_ast_id module_node);` creates the module and its ports. It runs for every `MODULE` before any body.
-  - `odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node);` runs §6.6's steps (1)–(8). Steps not yet built log point (l)'s text and skip the construct.
-  - `odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node);` is step (1), names per EL-23.
+  - `odin3_status odin3_elab2_ports(odin3_elab2 *e2, odin3_ast_id module_node);` creates the module and its ports, recording each port symbol's `ir_wire` (`odin3_symbol_set_ir`). It runs for every `MODULE` before any body. A module whose ports could not be built stops stage 2.
+  - `odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node);` runs §6.6's steps (1)–(8). Pending constructs go to `odin3_elab_pend_report` and are skipped.
+  - `odin3_status odin3_elab2_wires(odin3_elab2 *e2, odin3_ast_id module_node);` is step (1). Names follow EL-23, `odin3_symbol_set_ir` is called for each symbol, and the net-bits cap of point (aa) applies.
 - Helpers:
   - `odin3_status odin3_elab2_const_net(odin3_elab2 *e2, odin3_bit bit, odin3_net_id *out);` gives the module's shared `$_CONST0_/1/X/Z_` net, created on first use (IR-4).
   - `typedef struct odin3_elab2_prov_req { odin3_ast_id node, call; uint32_t scope; } odin3_elab2_prov_req;`
   - `odin3_status odin3_elab2_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req, odin3_prov_id *out);` makes a SOURCE record per EL-45: locs = node, then call when inlined; `ast` = node; `hier` = `<spec name>/<scope path>`.
   - `odin3_status odin3_elab2_attrs(odin3_elab2 *e2, odin3_ast_id node, odin3_objref obj);` applies 2A §7: none → INT 1, `NUMBER` → BITS, `STRING` → STRING.
-  - `void odin3_elab2_error(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...);` and `void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...);` (cap 20; warn once per loc)
+  - `void odin3_elab2_error(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...);` and `void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...);` (cap 20 with `too many errors; elaboration stopped after 20`; warn once per loc)
   - `odin3_status odin3_elab2_budget(odin3_elab2 *e2);` is EL-46's byte budget, checked at each module boundary and every 2^16 IR objects, with §11's per-object estimate.
-- Real stage 2 replaces the stub: `odin3_elab_stage2` = bind → `ports` for all → `module` for each → `odin3_design_set_top` (the `UNIT`'s name) → the info summary `read_verilog: elaborated top 'T': M modules (S specializations), P processes, C cells, N nets, t1 + t2 ms`.
+- Real stage 2 replaces the stub. `odin3_elab_stage2` runs bind, then `ports` for all, then `module` for each. On success it calls `odin3_design_set_top` (the `UNIT`'s name; **not** called after any stage-2 error) and logs the info summary `read_verilog: elaborated top 'T': M modules (S specializations), P processes, C cells, N nets, t1 + t2 ms`.
+- Step (6) (review I10): `odin3_elab_run` hands the elaborated store and its symtab to the design with `odin3_design_set_ast` when the keep level is `ELABORATED` or `ALL`; otherwise it destroys the store at the end of `read_verilog`.
 - ABI:
   - `typedef struct odin3_elab_options { uint32_t top; uint32_t top_at; bool nolatches, nomem2reg, auto_blackbox; uint32_t reserved[4]; } odin3_elab_options;`
-  - `odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast, const odin3_elab_options *opts);` (point (b)), with the paragraph. `reserved` must be zero, else `INVALID_ARG`.
+  - `odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast, const odin3_elab_options *opts);` (point (b)), with the paragraph and the run-ID caveat. `reserved` must be zero, else `INVALID_ARG`.
 - CLI: `odin3 --elab-only a.v b.v` ≡ `-p "read_verilog a.v b.v; stats"`. With a script it fails with point (w)'s text.
 
-**Tests (`test_elab_stage2_wires.c`; `et_read` added to `elab_test.h` runs the whole pass):**
-- **Wires.** `wire [0:3] w; wire [-1:2] n; reg signed [7:0] r; integer i;` → IR wires `w` `[0:3]` unsigned, `n` `[-1:2]`, `r` `[7:0]` signed, `i` `[31:0]` signed.
+**Tests (`test_elab_stage2_wires.c`; `et_read(const et_req *req, et_result *out)` added to `elab_test.h` runs the whole pass):**
+- **Wires.** `wire [0:3] w; wire [-1:2] n; reg signed [7:0] r; integer i;` → IR wires `w` `[0:3]` unsigned, `n` `[-1:2]`, `r` `[7:0]` signed, `i` `[31:0]` signed. Each symbol's `ir_module`/`ir_wire` is set (review I10).
 - **Scoped names (Review Focus 5).**
   - `g[0].t`, `blk.count`, `$unnamed_block$1.tmp`.
   - Task 14's probe gives wires `genblk1.genblk1.x` and `genblk3[0].w`.
   - `g[-1].t` exists.
 - **Ports (IR change C).** `input signed [0:7] a` → port wire `[0:7]` signed. `input b` → `scalar`.
-- **Ports before bodies.** A test hook observing body starts sees every module's port count final at the first body.
+- **Ports before bodies.** An `on_body_start` hook sees every module's port count final at the first body.
 - **Provenance.**
   - Wire `w`'s record has `locs[0]` = its declarator (`t.v:2:15`–`2:16`), `ast` = the declarator's elaborated ID, `hier` = `top`.
   - `g[1].t` has `hier` `top/g[1]`.
   - A wire of `sub$W=8`'s `genblk1` has `sub$W=8/genblk1`.
 - **Attributes.** `(* keep *) wire w;` → wire attribute `keep` INT 1; `(* src = "x" *)` → STRING; `(* init = 4'b1010 *)` → BITS.
 - **Top.** `odin3_design_top` is `top`'s module. The summary line matches `^read_verilog: elaborated top 'top': 3 modules \(1 specializations\), 0 processes, [0-9]+ cells, [0-9]+ nets, [0-9.]+ \+ [0-9.]+ ms$`.
+- **Keep levels (review I10).**
+  - `NONE` → no store held after the pass.
+  - `ELABORATED` → the elaborated store held, with its symtab, and `write_verilog_ast` of it prints the elaborated `UNIT`.
+  - `ALL` → both stores held.
+- **Failure paths (review M10).**
+  - 25 two-driver assignments → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`, `odin3_design_top` unset, IR check passes.
+  - A port the IR refuses (hook) stops stage 2 after that module, and no body runs.
+- **Caps (point (aa)).** The net-bits hook at 64 with a `wire [99:0] w;` → `t.v:2:15: error: elaboration needs more than 64 net bits`, fatal.
 - **Budget.** The hook at 65536 bytes → `elaboration needs more than 65536 bytes (the budget is 60% of physical memory)`, `PARSE`, IR check passes.
 - **ABI.**
   - A store built by hand through `odin3_design_new_ast(design, ODIN3_AST_FORM_ELABORATED, run, …)` and the ABI builders → `odin3_ast_elaborate` gives the module with its wires.
   - A parsed-form store → `INVALID_ARG` and `odin3_ast_elaborate: the store is not elaborated`.
   - Nonzero `reserved` → `INVALID_ARG`.
-- **`ALWAYS` not built yet.** An `ALWAYS` (until Task 21) logs the stub text and gives `PARSE`.
+- **Pending.** An `ALWAYS` (until Task 21) → `t.v:3:3: error: elaboration is not available yet (2D): 'ALWAYS'`, the rest of the module emitted, `PARSE`.
 - **Determinism.** Two runs give identical `write_rtlil`.
 - **CLI.** `cli_elab_only` logs `stats:`. `cli_elab_only_with_script` fails with the text.
 - OOM sweep over stage 2 of a three-module design: `NO_MEMORY`, IR check passes, no leak.
@@ -1178,32 +1408,37 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab2_reads { odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out); void *user; } odin3_elab2_reads;` is the `rv` substitution hook (Task 21); NULL outside processes.
 - `typedef struct odin3_elab2_expr_req { odin3_ast_id expr; odin3_etype context; const odin3_net_id *dest; const odin3_elab2_reads *reads; } odin3_elab2_expr_req;`: `dest` is NULL, or `context.width` nets the outermost cell drives by construction (EL-28).
 - `odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);` types the expression and emits it post-order. All-constant operands fold through `odin3_cval_op`.
-- `typedef struct odin3_elab2_cell_req { const char *type; odin3_ast_id node; const odin3_sig *a, *b; uint32_t y_width; const odin3_net_id *dest; } odin3_elab2_cell_req;`
-- `odin3_status odin3_elab2_cell(odin3_elab2 *e2, const odin3_elab2_cell_req *req, odin3_sig *y);` follows genrtlil's parameter rules: operand widths as generated, `*_SIGNED` = signed in context, the node's attributes, its provenance.
+  - An unsized `localparam` read takes `UNSIZED` from its declarator's `NUMBER` (payload width 0), because the symtab value holds only bits and sign (review I11).
+- `typedef enum odin3_elab2_type odin3_elab2_type;` has one enumerator per registry type 2D emits, in registry order, from `ODIN3_E2T_ADD` to `ODIN3_E2T_POW`, then `ODIN3_E2T_COUNT`. It indexes the cached type IDs.
+- `typedef struct odin3_elab2_cell_req { uint8_t type; odin3_ast_id node; const odin3_sig *a, *b; uint32_t y_width; const odin3_net_id *dest; } odin3_elab2_cell_req;`
+- `odin3_status odin3_elab2_cell(odin3_elab2 *e2, const odin3_elab2_cell_req *req, odin3_sig *y);` follows genrtlil's parameter rules: operand widths as generated, `*_SIGNED` = signed in context, the node's attributes, its provenance. The cell-pins cap of point (aa) applies.
 - `odin3_status odin3_elab2_to_nets(odin3_elab2 *e2, const odin3_sig *sig, odin3_net_id *nets);`
 - `odin3_status odin3_elab2_extend(odin3_elab2 *e2, const odin3_sig *in, uint32_t width, bool is_signed, odin3_sig *out);` is wiring only, never a cell.
 - `odin3_status odin3_elab2_select(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);` handles constant selects, out-of-range x with the warning, and non-constant reads through `$shiftx` with genrtlil's offset computation.
 
-**Tests (`test_elab_stage2_expr.c`; every cell's type and every parameter asserted). Signals:** 8-bit `a`, `b`, `y`; `signed [7:0] s`; `signed [3:0] t`; `[3:0] u`.
+**Tests (`test_elab_stage2_expr.c`; every cell's type and every parameter asserted). Signals:** 8-bit `a`, `b`, `y`; `signed [7:0] s`; `signed [3:0] t`; `[3:0] u`; 64-bit `y64`.
 - **Assign by construction.** `y = a + b` → one `$add`: `A_WIDTH` 8, `B_WIDTH` 8, `Y_WIDTH` 8, `A_SIGNED` 0, `B_SIGNED` 0, its `Y` pins on `y`'s nets, no merge.
 - **E22 (Review Focus 2).**
   - `y = (a + b) >> 1` → `$add` `Y_WIDTH` 8, then `$shr` with `A_WIDTH` 8, `B_WIDTH` 32 on the constant nets for 1, `Y_WIDTH` 8.
   - `y = (0 + a + b) >> 1` → two `$add`s with `Y_WIDTH` 32, then `$shr` `Y_WIDTH` 32, truncated to `y` by wiring.
+- **Unsized constants (Review Focus 2; review I11).** `localparam P = 'hFFFFFFFF; localparam [31:0] Q = 'hFFFFFFFF; localparam [35:0] R = 'hFFFFFFFF;`, each assigned to a 64-bit output:
+  - `P` and `Q` → all 64 bits on the constant-1 net;
+  - `R` → 32 ones, then 32 zeros.
 - **E23.** `s + u` → `$add` with `A_SIGNED` 0, `B_SIGNED` 0, `A_WIDTH` 8, `B_WIDTH` 4. `s + t` → both `SIGNED` 1.
-- **Unary and reduction rows.**
+- **Every EL-30 row** (review M9; widths per ruling I7):
+  - `a - b` → `$sub`; `a * b` → `$mul`; `a / b` → `$div`; `a % b` → `$mod`.
   - `-a` → `$neg` with `A_WIDTH` = the context width (extended by wiring first). `~a` → `$not`. `+a` → no cell.
-  - `&a` → `$reduce_and` `Y_WIDTH` 1. `~&a` → `$reduce_and` + `$not` (1/1). `~^a` → `$reduce_xnor`.
-  - `!a` → `$logic_not`. `a && b` → `$logic_and`.
-- **Binary rows.**
+  - `y = &a` → `$reduce_and` `Y_WIDTH` 8. `{&a, b}` → `$reduce_and` `Y_WIDTH` 1.
+  - `y = ~&a` → `$reduce_and` (`Y_WIDTH` 1), then `$logic_not` (`A_WIDTH` 1, `Y_WIDTH` 8) (v4).
+  - `|a` → `$reduce_or`; `y = ~|a` → `$reduce_or` + `$logic_not`; `^a` → `$reduce_xor`; `~^a` → `$reduce_xnor`.
+  - `y = !a` → `$logic_not` `Y_WIDTH` 8. `y = a && b` → `$logic_and` `Y_WIDTH` 8. `a || b` → `$logic_or`.
   - `a ~^ b` → `$xnor`.
+  - `a << b` and `a <<< b` → `$shl`; `a >> b` → `$shr`; `s >>> b` → `$sshr`; `B_SIGNED` 0 throughout.
   - `a ** b` → `$pow` with `B_SIGNED` 0. `2 ** b` → `$shl` with A = constant 1.
-  - `a / b` → `$div`; `a % b` → `$mod`.
-  - `a < t` → `$lt` with both operands generated at 8 bits.
-- **Ternary.**
-  - `c ? a : b` (1-bit `c`) → `$mux` A=`b`, B=`a`, S=`c`, `WIDTH` 8.
-  - With a 4-bit `c` → `$reduce_bool` then `$mux`.
-  - `1 ? a : b` → no cell, `y` merged with `a`.
-- **No-cell forms.** `{a, b}`, `$signed(a)`.
+  - `y = a < t` → `$lt` with both operands generated at 8 bits and `Y_WIDTH` 8.
+  - `c ? a : b` (1-bit `c`) → `$mux` A=`b`, B=`a`, S=`c`, `WIDTH` 8. With a 4-bit `c` → `$reduce_bool` then `$mux`. `1 ? a : b` → no cell, `y` merged with `a`.
+  - `{a, b}`, `$signed(a)` and `$unsigned(s)` → no cell.
+  - `y64 = {2{a}}` → no cell: the upper 48 bits on the constant-0 net (zero extension).
 - **`===` and `!==`.**
   - `4'b1x00 === 4'b1x00` → constant 1, no cell.
   - `a4 !== 4'b1x00` → `$ne` with A = {`a4[3]`, `a4[1]`, `a4[0]`}, B = `3'b100`, plus `warning: '===' compares against x/z bits; they match any value`.
@@ -1220,8 +1455,9 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `w[k -: 4]` → base `k − 3`.
   - E17: an out-of-range read is a `$shiftx` (x fill), never a `$shr`.
 - **Attributes and folding.** `(* keep *)` on a `BINARY` → the `$add` node has `keep`. `y = 3 + 4` → `y`'s nets merged onto the constant nets for 7, no cell.
+- **Hand-built store (review I10).** The `y = (a + b) >> 1` module built with `eb_*` and run through `odin3_ast_elaborate` gives the same cells as the stage-1 path.
+- **Caps (point (aa)).** The cell-pins hook at 16 with a 9-bit `+` → `cell of 27 pins exceeds the limit of 16 pins`, fatal.
 - **Depth.** A 2,000-term `&` chain → 1,999 `$and`s, no recursion.
-- **E9 source text.** The bridge equivalence of the E9 file (`!==` against x) through Task 25's `elab-equiv` (quoted in the PR when Yosys 0.55 is present).
 - OOM sweep.
 
 ### Task 19: Instances, gates, continuous assignments, drivers, wired nets, tri-state (EL-10 widths, EL-11, EL-26, EL-28, EL-29)
@@ -1244,14 +1480,16 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `nand`/`nor`/`xnor` → the fold, then `$not`;
   - `buf`/`not` → one assignment per output;
   - `bufif*`/`notif*` → a ternary with z, i.e. `$tribuf`.
-- `odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);` is step (7): `$and`/`$or` chains in source order.
+- `odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);` is step (7): `$and`/`$or` chains in source order, each with the net's declarator as provenance.
 
 **Tests (`test_elab_stage2_drive.c`):**
 - **Assignments.**
   - `assign y = a + b;` → `$add` `Y` on `y`.
   - `assign b2 = a;` → one net with alias count 1.
   - `assign c = 1'b1;` → `c` merged onto the `$_CONST1_` net.
+  - `wire w = a & b;` (N7) → one `$and` driving `w`.
   - `assign p = q; assign q = p;` → no error, plus `warning: 'p' and 'q' are connected only to each other and are never driven`.
+  - `wire w; assign y = w;` → `warning: 'w' is never driven`, once.
   - `assign y[s] = d;` → `continuous assignment to 'y' with a non-constant index is not supported`.
   - `assign y[9:6] = d4;` → `warning: assignment to bits outside 'y' [7:0] is ignored`.
 - **A4.**
@@ -1263,13 +1501,11 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - A `uwire u` with two `assign`s → `'u' is a uwire and has a second driver (first at t.v:3:10)`.
   - `supply0 s; assign s = a;` → `'s' has two drivers (also driven at t.v:2:9)`.
   - `supply1 v;` → `v`'s net is the `$_CONST1_` net.
-  - `wire w = a & b;` (N7) → one `$and` driving `w`.
-  - `wire w; assign y = w;` → `warning: 'w' is never driven`, once.
 - **Wired nets.**
-  - `wand w` with three whole-net drivers → two `$and` cells of the net's width, in source order.
+  - `wand w` with three whole-net drivers → two `$and` cells of the net's width, in source order, each with a SOURCE record whose `ast` is `w`'s declarator (review M10).
   - `wor` with one driver of `w[3:0]` and one of `w[7:0]` → per-bit `$or`s.
   - One driver → no cell.
-  - `always @* w = a;` on a `wand` → `'w' is a wired net (wand) and cannot be assigned in an always block`.
+  - `always @* w = a;` on a `wand` → `'w' is a wired net (wand) and cannot be assigned in an always block` (from the pre-scan).
 - **Tri-state (D3)**, on top-level `output y`:
   - `assign y = en ? d : 'bz;` → `$tribuf` with A=`d`, EN=`en`, Y=`y`, `WIDTH` 8.
   - `en ? 'bz : d` → EN = `$not(en)`.
@@ -1288,7 +1524,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - An unconnected input → the `$_CONSTX_` net. An unconnected output → fresh nets.
 - **Instances and cell types.**
   - Module instances carry `parameter:W` (BITS) for each overridden parameter.
-  - `single_port_ram` (with `lib/vtr.o3lib`) and 10/8-bit address/data connections → `ADDR_WIDTH` 10, `DATA_WIDTH` 8 by inference.
+  - `single_port_ram` (with `pre_script` `read_techlib lib/vtr.o3lib`) and 10/8-bit address/data connections → `ADDR_WIDTH` 10, `DATA_WIDTH` 8 by inference.
   - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` once per specialization. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`.
 - **Gates.**
   - `and g (y1, a1, b1, c1);` → two `$and` (1/1/1), the second driving `y1`.
@@ -1306,10 +1542,10 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `odin3_status odin3_elab2_mem_decide(odin3_elab2 *e2, odin3_ast_id module_node);` applies rules 1–6, `(* nomem2reg *)` and `--nomem2reg`, with the warning naming the triggering places.
 - `typedef struct odin3_elab2_mem_rd { uint32_t mem; odin3_ast_id select; const odin3_elab2_reads *reads; } odin3_elab2_mem_rd;`
 - `odin3_status odin3_elab2_mem_read(odin3_elab2 *e2, const odin3_elab2_mem_rd *rd, odin3_sig *data);` adds an asynchronous read port with the raw index, or the row-major address for a flattened array.
-- `typedef struct odin3_elab2_mem_wr { uint32_t mem; const odin3_net_id *addr, *data, *en; uint32_t abits; odin3_net_id clk; bool posedge; odin3_ast_id stmt; } odin3_elab2_mem_wr;`
+- `typedef struct odin3_elab2_mem_wr { uint32_t mem; const odin3_sig *addr, *data, *en; odin3_net_id clk; bool posedge; odin3_ast_id stmt; } odin3_elab2_mem_wr;`: `addr`/`data` may be constant sigs (v4: no temporary for a constant index or full-word value).
 - `odin3_status odin3_elab2_mem_write(odin3_elab2 *e2, const odin3_elab2_mem_wr *wr);` (used from Task 24)
 - `odin3_status odin3_elab2_mem_emit(odin3_elab2 *e2);` is step (8): one `$mem` per memory, ports in source order.
-- Register-per-word arrays become wires `m[k]` (declared index). A constant-index access reads the word; out of range reads x with the warning.
+- Register-per-word arrays become wires `m[k]` (declared index). A constant-index access reads the word; out of range reads x with the warning. A variable-index read outside a process is the pending feature `ODIN3_PEND_REGS_VAR_READ` until Task 23.
 
 **Tests (`test_elab_stage2_mem.c`):**
 - **mem2reg rules.**
@@ -1320,26 +1556,34 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - Rule 5: constant-index writes only → registers.
   - `(* nomem2reg *)` exempts rules 2–5.
   - `--nomem2reg` with a net array assigned by `assign` → `array 'w' cannot be a memory (it is written in a combinational block) and --nomem2reg is set`.
+
+  (Rules 2–5 are decided from the pre-scan, so they are testable before processes exist. The blocks themselves stay pending until Task 21.)
 - **Addressing (Review Focus 4)**, for a read-only array (no writes outside `initial`, so not rule 5):
   - `reg [7:0] m [1:4]; assign q = m[ra];` → one `$mem` with `MEMID` `"m"`, `WIDTH` 8, `SIZE` 4, `OFFSET` 1, `ABITS` = width(`ra`), `RD_PORTS` 1, `WR_PORTS` 0, `RD_CLK_ENABLE` `1'b0`, `RD_TRANSPARENT` `1'b0`, `RD_EN` on the constant-1 net, `RD_CLK` on the x net, and `RD_ADDR` pins **on `ra`'s nets** (raw index, no `$sub`).
   - `[4:1]` → `OFFSET` 1. `[-2:1]` → `OFFSET` −2.
   - `reg [7:0] m2 [0:3][1:2]` read `m2[i][j]` → `OFFSET` 0, `SIZE` 8, the address `(i − 0) × 2 + (j − 1)` as `$sub`/`$mul`/`$add` cells.
-- **Registers per word.** `wire [3:0] w [0:3]; assign w[1] = a; assign y = w[1];` → `y` merged with `a`. `w[7]` → x plus the out-of-range warning. A variable-index read outside a process → the stub text until Task 23 (asserted here, flipped there).
+- **Registers per word.**
+  - `wire [3:0] w [0:3]; assign w[1] = a; assign y = w[1];` → `y` merged with `a`.
+  - `w[7]` → x plus the out-of-range warning.
+  - `assign y = w[s];` → `error: elaboration is not available yet (2D): 'variable index into a register array'` (Task 23 flips it).
 - **Whole-array read.** `assign y = m;` → `'m' is a memory; select a word`.
 - **Cap.** The memory-bits hook at 1024 with a 2048-bit array → `memory 'm' of 2048 bits exceeds the limit of 1024 bits`.
 - OOM sweep.
 
 ## PR 2D-6 — stage 2: processes
 
-### Task 21: The process generator core (EL-33 emission, EL-34, EL-35)
-**Files:** Create `src/frontends/elab/pg.h`, `pg.c` and `tests/unit/test_elab_stage2_proc.c`; modify `elab2.c` (step 6; the `ALWAYS` stub path removed) and `CMakeLists.txt` (CTest `elab_proc_bridge_smoke` in the 0.55 block).
+### Task 21: The process generator core and the Yosys bridge (EL-33 emission, EL-34, EL-35, §14.3; ruling C2)
+**Files:**
+- Create `src/frontends/elab/pg.h`, `pg.c` and `tests/unit/test_elab_stage2_proc.c`.
+- Create the bridge files (ruling C2): `tools/elab-check/elab-equiv` (shell wrapper), `tools/elab-check/elab_equiv.py`, `tools/elab-check/memcap.py` (point (n)) and `tests/tools/test_elab_equiv.py`.
+- Modify `elab2.c` (step 6) and `elab_pending.c` (`ALWAYS`, blocks and assignments landed in stage 2).
+- Modify `CMakeLists.txt`: the Python test in `python_tools`; CTest `elab_proc_bridge_smoke` inside Task 5's 0.55 block.
 
-**Consumes:** Task 3 (`odin3_proc_body`, `odin3_proc_body_pack`, `$proc`), Tasks 17–19 (`odin3_elab2_expr` with `reads`, `odin3_elab2_claim`, `odin3_elab2_const_net`, `odin3_elab2_prov`), the binding.
+**Consumes:** Task 3 (`odin3_proc_body`, `odin3_proc_body_pack`, `$proc`, the canonical layout), Tasks 17–19 (`odin3_elab2_expr` with `reads`, `odin3_elab2_claim`, `odin3_elab2_const_net`, `odin3_elab2_prov`, `odin3_sigbit`), the binding.
 
 **Produces (`pg.h`):**
-- Bits: `typedef uint32_t odin3_pg_bit;` is a net ID, `ODIN3_PG_CONST | odin3_bit`, or `ODIN3_PG_ANY`, with `enum { ODIN3_PG_CONST = 1U << 31, ODIN3_PG_ANY = (1U << 31) | 4U };`.
 - Lifetime and entry:
-  - `typedef struct odin3_pg odin3_pg;` holds the builder vectors for cases, switches, actions, compares and syncs, the `lv`/`rv` maps with an undo log, the per-bit action-slot index for removals, and the frame stack.
+  - `typedef struct odin3_pg odin3_pg;` holds the builder vectors for cases, switches, actions, compares and syncs (bits are `odin3_sigbit`, review M21), the `lv`/`rv` maps with an undo log, the per-bit action-slot index for removals, and the frame stack.
   - `odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out);` and `void odin3_pg_destroy(odin3_pg *pg);`
   - `odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node);` builds one block and creates one node, or none (§8.3 step 7).
 - Statement and assignment machinery:
@@ -1349,15 +1593,29 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `uint32_t odin3_pg_save(const odin3_pg *pg);` and `void odin3_pg_restore(odin3_pg *pg, uint32_t mark);` (the undo log)
   - `odin3_status odin3_pg_temp(odin3_pg *pg, uint32_t width, odin3_ast_id why, odin3_net_id *first);` makes fresh process-local nets.
   - `odin3_status odin3_pg_emit(odin3_pg *pg, odin3_ast_id prov_node, odin3_node_id *out);` runs step 7:
+    - renumber cases, switches and actions breadth-first into point (e)'s canonical layout (the builder may allocate);
     - `O` pins and then `I` pins in net-ID order, constants as `I` pins on the shared constant nets;
     - the driver-table claim for every `O` net, dropping the actions of conflicting bits;
-    - one `odin3_node_create_connected`.
+    - one `odin3_node_create_connected`;
+    - the `always`'s attributes on the node (`ODIN3_OBJ_NODE`).
 - Syncs (EL-34): one per edge event, or one `ALWAYS`. Errors:
   - `posedge on 'x', which is N bits; a 1-bit signal is needed` (and `negedge`);
-  - `edge and level events in one event list are not supported`.
+  - `edge and level events in one event list are not supported`, for adapter stores.
 - The T3 analysis names the first missing signal by name order.
 
-**Tests (`test_elab_stage2_proc.c`; each `$proc` body asserted exactly: `I`/`O` pin nets in order, every case, action and sync):**
+**Produces (bridge, §14.3; review I9):** `elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap B] [--keep DIR] [--allow-version V] [--a-only] <file>`:
+- **A** = `O [--top T] -p "read_verilog --nolatches F; write_rtlil a.il"`, then `Y -p "read_rtlil a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn a.blif"`. Without `--top`, `hierarchy -auto-top`.
+- **B** = the same Yosys script with `read_verilog -sv -nolatches F` in place of `read_rtlil a.il`. Both sides are always `--nolatches` (`equiv-check` cannot model latches, PHASE0 #7).
+- `Y -p "read_rtlil a.il; write_rtlil b.il"` must exit 0.
+- Then `E a.blif b.blif`.
+- Exit 0 equivalent, 1 not, 2 error.
+- `--a-only` stops after `a.blif` (kept in `--keep DIR`), the hand-off to 2H (point (m)).
+- Every child runs through `memcap.run(argv, cap)` (point (n)).
+- It refuses a Yosys whose `-V` lacks `0.55` unless `--allow-version` names it (the nightly drift job only).
+
+**Tests:**
+
+`test_elab_stage2_proc.c`, each `$proc` body asserted exactly (`I`/`O` pin nets in order, every case, action and sync; canonical layout):
 - **T7 (Review Focus 3).** `module t(input clk, a, b, output reg r); reg t; always @(posedge clk) begin t = a & b; r <= t; end endmodule` gives:
   - `I` = [`clk`, the `$and`'s Y];
   - `O` = [`r`, `t`, t0(`r`), t0(`t`)];
@@ -1373,22 +1631,33 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `@(posedge a or negedge b)` → syncs `POSEDGE I(a)`, `NEGEDGE I(b)` in order.
   - `@(a or b)`, `@(a, b)`, `@a`, `@*` → one `ALWAYS`.
   - `@(posedge w4)` → `posedge on 'w4', which is 4 bits; a 1-bit signal is needed`.
-  - `@(posedge a or b)` → `edge and level events in one event list are not supported`.
   - `always @(a) y = a & b;` → `warning: incomplete sensitivity list: 'b' is read but not listed; the block is built as @*`, once.
 - **Point (h).** `always @(posedge a) a <= ~a;` → a `POSEDGE` sync whose signal is `OUT|0`, accepted.
 - **Net in a process.** `wire w; always @* w = a;` → `warning: 'w' is a net assigned in an always block; treated as a variable`.
-- **Provenance.** The node's SOURCE record is its `ALWAYS`; each action, case and switch records its statement (EL-45).
+- **Attributes and provenance (review M10).** `(* keep *) always @* y = a;` → the node has attribute `keep`. The node's SOURCE record is its `ALWAYS`; each action, case and switch records its statement (EL-45).
 - **No node.** `always @* ;` → no node, `odin3_module_proc_count` 0.
 - **Different bits.** Two blocks writing `r[0]` and `r[1]` → two nodes, no error.
-- **Not built yet.** An `ALWAYS` holding `if` (until Task 22) → the stub text.
-- **Determinism.** Two runs give byte-identical `write_rtlil`.
-- **Round trip.** `odin3_check_design` FULL on every result. `write_rtlil` → Yosys 0.55 `read_rtlil; proc` exits 0.
-- CTest `elab_proc_bridge_smoke`: `elab-equiv` (Task 25's driver, cherry-picked here as a single file) on the T7, T8 and `q + 1` sources → exit 0.
+- **Pending.** An `if` inside an `always` (until Task 22) → `elaboration is not available yet (2D): 'IF'`.
+- **Hand-built store (review I10).** The T7 module built with `eb_*` and run through `odin3_ast_elaborate` gives the same body.
+- **Determinism and round trip.** Two runs give byte-identical `write_rtlil`. `odin3_check_design` FULL passes on every result. `write_rtlil` → Yosys 0.55 `read_rtlil; proc` exits 0.
 - OOM sweep over `odin3_pg_always`: `NO_MEMORY`, no node created, no leak.
+
+`test_elab_equiv.py`, over fake `odin3`, `yosys` and `equiv-check` scripts that log their argv:
+- the A argv with and without `--top T` (`odin3 --top T -p "read_verilog --nolatches F; write_rtlil a.il"`);
+- the two Yosys command strings exactly, `-nolatches` on B always;
+- the exit-code mapping;
+- `--a-only` writes `a.blif` and never runs B or `equiv-check`;
+- a `0.69` version refused, and accepted with `--allow-version 0.69`;
+- `memcap.run` wraps each child in `systemd-run --user --scope -q -p MemoryMax=… -p MemorySwapMax=0` when available;
+- an ASan child without `systemd-run` → exit 77;
+- `memcap.run` refuses a cap above 60% of `MemTotal` (a fake `/proc/meminfo`).
+
+CTest `elab_proc_bridge_smoke`: `elab-equiv` on the T7, T8 and `q + 1` sources → exit 0.
 
 ### Task 22: `if`, `case`, case temporaries, `full_case`/`parallel_case`, non-constant lvalue selects (EL-36, EL-32 writes)
 **Files:**
-- Create `src/frontends/elab/pg_case.c` and `tests/unit/test_elab_stage2_case.c`.
+- Create `src/frontends/elab/pg_case.c` and `tests/unit/test_elab_stage2_case.c`; modify `elab_pending.c` (`IF`, `CASE` landed in stage 2).
+- Modify `CMakeLists.txt` (CTest `elab_case_bridge` in the 0.55 block).
 - Modify `docs/specs/2026-10-09-2A-ast-design.md` §7: the D1 warning is emitted by 2D, not 2E (EL-36, §19).
 
 **Consumes:** Task 21.
@@ -1398,6 +1667,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - case temporaries t1 for bits the branches assign by blocking assignment, with `lv`/`rv` saved and restored around each case;
   - the added default case (`t1 ← rv(bits)`, or x under `full_case`);
   - `casez`/`casex` `ANY` positions;
+  - non-constant item expressions (C8) generated as compare signals;
   - constant folding of `if (0/1)` and of constant selectors;
   - the switch flags from `(* *)` and metacomment attributes;
   - D1's two warnings.
@@ -1413,6 +1683,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - default mode → the added default case holds [`t1 ← OUT(y)`], a latch path, plus root default `t0 ← y` removed by the final assignment;
   - `--nolatches` → no root default action, and the default case holds [`t1 ← 1'x`] with the `$_CONSTX_` net among `I`.
 - **`case`.** `case (sel) 2'd0: y = a; 2'd1, 2'd2: y = b; default: y = c; endcase` → compares [`2'00`], [`2'01`, `2'10`], then default last. With `default` written first, it is still last.
+- **C8 (review M10).** `case (1'b1) a: y = 1; b: y = 2; endcase` → compares on the `I` pins of `a` and `b` (non-constant items).
 - **Wildcards.** `casez` `2'b1?` → compare [`1`, `ANY`]. `casex` `2'bx1` → [`ANY`, `1`]. Plain `case` `2'bx1` → [x-net pin, `1`].
 - **Case width.** `case (a4) 3'd1:` → the compare is 4 bits.
 - **Flags.**
@@ -1420,21 +1691,21 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `// synopsys full_case parallel_case` → both flags and both warnings, the second `warning: 'parallel_case' is honoured: case items are not prioritised`.
 - **Constants.** `if (1) y = a; else y = b;` → no switch. `case (2'd1)` with constant items → folded to that item.
 - **Non-blocking in a branch.** `always @(posedge c) if (e) q <= d;` → root [`t0 ← q`], switch `e`, case [`1'1`] with [`t0 ← d`], and no t1 net.
-- **Nesting.** `if (a) begin y = 1; if (b) y = 2; end` → nested switches, each with its own t1, and outer state restored after the inner one.
+- **Nesting (internal risk §16 #3).** `if (a) begin y = 1; if (b) y = 2; end` → nested switches, each with its own t1, and outer state restored after the inner one.
 - **Variable-index write.** `always @(posedge c) y[s] <= d;` (`y` `[3:0]`, `s` 2 bits) → position temporary `p ← s`; a switch on `p` with cases `2'00`…`2'11`, each [`t0(y)[k] ← d`]; no default.
 - **Indexed part-select write.** `y[b +: 2] <= d2` (`b` 2 bits) → cases for positions 0–2 only.
 - **Ascending target.** An ascending `[0:3]` target maps positions by EL-23.
-- **Bridge.** Each test source passes the Yosys 0.55 bridge in `--nolatches` mode (CTest `elab_case_bridge`, 0.55 block).
+- **Bridge.** CTest `elab_case_bridge`: each test source passes `elab-equiv`.
 - OOM sweep.
 
 ### Task 23: Loops, functions and tasks, continuous-context calls, mem2reg variable reads (EL-37, EL-38, EL-27 reads)
-**Files:** Create `src/frontends/elab/pg_loop.c`, `pg_call.c` and `tests/unit/test_elab_stage2_call.c`; modify `elab2_expr.c` (continuous-context calls) and `elab2_mem.c` (the register-per-word variable read).
+**Files:** Create `src/frontends/elab/pg_loop.c`, `pg_call.c` and `tests/unit/test_elab_stage2_call.c`; modify `elab2_expr.c` (continuous-context calls), `elab2_mem.c` (the register-per-word variable read) and `elab_pending.c` (`FOR`, `REPEAT`, `TASK_CALL`, process calls and the two read features landed).
 
 **Consumes:** Tasks 9 (`odin3_ceval_try`, `odin3_ceval_call`), 20, 21 and 22.
 
 **Produces:**
 - `odin3_status odin3_pg_for(odin3_pg *pg, odin3_ast_id stmt);` and `odin3_status odin3_pg_repeat(odin3_pg *pg, odin3_ast_id stmt);` unroll with constant conditions, the loop frame, the final value, both caps, and point (k)'s starting count.
-- `odin3_status odin3_pg_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result);` handles functions and task enables. It tries the interpreter first, then inlines through a call frame of fresh temporaries, copies outputs, and caps the depth.
+- `odin3_status odin3_pg_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result);` handles functions and task enables, including K10's enable without parentheses. It tries the interpreter first, then inlines through a call frame of fresh temporaries, copies outputs, and stops at point (aa)'s inline-depth text.
 - `odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result);` makes a combinational `$proc` (one `ALWAYS` sync) for a call in a continuous context.
 - `odin3_status odin3_pg_comb_mem_read(odin3_pg *pg, odin3_ast_id select, odin3_sig *result);` makes a combinational `$proc` with a switch over the index, one case per word, default x.
 - Inside a process, register-per-word reads and writes are inline cases.
@@ -1451,53 +1722,65 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `i = 0;` in the body → `loop variable 'i' is assigned in the loop body`.
   - Init `i`, step `j` → `for-loop initialisation and step must assign the same variable`.
   - Two 20-iteration loops with the total hook at 32 → `unrolled loops exceed 32 iterations in this design`.
+- **Point (k) (review M15).** A 12-iteration generate loop plus a 24-iteration procedural loop with the total hook at 32 → the same total error at the procedural loop. The two loops alone each pass.
 - **`repeat` and shared counters.** `repeat (3)` → the body three times. A shared `integer i` looping in two blocks → no T10.
 - **Functions.**
   - `function [3:0] inc(input [3:0] v); inc = v + 1; endfunction` with `q <= inc(d);` → one `$add` reading the frame temporary of `v`; the temporaries are `O` pins with no sync action; no flip-flop for `v` or `inc`.
   - `inc(4'd3)` → folded to `4'd4`, no cell.
 - **Tasks.**
   - `task tk(input x, output z); z = ~x; endtask always @* tk(p, y);` → `y` gets `$not(p)`.
+  - K10: `task clr; y = 0; endtask always @* clr;` → `y ← 0` (review M10).
   - `tk(p, a & b)` → `output argument 2 of task 'tk' must be a variable`.
   - Nested calls (K6, K11) and a call inside a loop → correct frames, equivalent through the bridge.
 - **Continuous context.** `assign y = inc(d);` → one extra `$proc` with one `ALWAYS` sync, and `y`'s net driven by its `O` pin.
 - **Inlined provenance.** Two call sites of `inc` give two distinct SOURCE records for their `$add`s, each with locs [the body's `BINARY`, the `CALL`] (EL-45).
-- **Call errors.**
+- **Call errors (point (aa)).**
   - Recursion with non-constant arguments → `recursive call of 'f' cannot be inlined (its arguments are not constant)`.
+  - Non-recursive nesting past the hook at 4 → `function call nesting deeper than 4 at 'f'`.
   - `while` with non-constant arguments → `function 'f' can be called only with constant arguments (it uses 'while')`.
   - `inc(a, b)` → `function 'inc' has 1 inputs; 2 arguments given`.
 - **mem2reg variable reads.**
-  - `wire [3:0] w [0:3]; assign y = w[s];` → a `$proc` with a switch on `s`, cases `2'00`…`2'11` each [`t ← w[k]`], default [`t ← 4'x`]. This flips Task 20's stub assertion.
+  - `wire [3:0] w [0:3]; assign y = w[s];` → a `$proc` with a switch on `s`, cases `2'00`…`2'11` each [`t ← w[k]`], default [`t ← 4'x`]. This flips Task 20's pending assertion.
   - Inside a block, `m[s] <= d` on a register array → a case over `s` assigning one word each.
 - OOM sweep.
 
-### Task 24: Memory writes, initial values and `$readmem`, per-bit rules (EL-39, EL-40, EL-41)
+### Task 24: Memory writes, initial values and `$readmem`, per-bit rules (EL-39 v4, EL-40, EL-41)
 **Files:**
 - Create `src/frontends/elab/pg_init.c`, `tests/unit/test_elab_stage2_init.c`, `tests/unit/data/elab/readmem/{init.hex,init.bin,bad_addr.hex,bad_word.hex}` and `tests/elab/sink/sink.v` (a module using every construct of Tasks 17–24).
-- Modify `pg.c` (memory write temporaries), `elab2_mem.c` (write ports, `INIT`), `elab2.c` (step 3) and `CMakeLists.txt` (CTest `elab_mem_bridge` in the 0.55 block).
+- Modify `pg.c` (memory write temporaries), `elab2_mem.c` (write ports, `INIT`), `elab2.c` (step 3) and `elab_pending.c` (`INITIAL` and `ODIN3_PEND_MEM_WRITE` landed; both tables now empty).
+- Modify `CMakeLists.txt`: CTests `elab_mem_bridge` (0.55 block) and `elab_no_pending`.
 
 **Consumes:** Task 9 (`odin3_ceval_exec` with an `odin3_ceval_store` over the module's variable bits), Tasks 20–23.
 
 **Produces:**
-- `odin3_status odin3_pg_mem_write(odin3_pg *pg, const odin3_pg_assign_req *req);` (EL-39) uses three process-local temporaries (`addr`, `data`, `en`), the root action `en ← 0`, and one write port per statement in source order.
-- `odin3_status odin3_elab2_initials(odin3_elab2 *e2, odin3_ast_id module_node);` (EL-40) produces the three result kinds, the two D2 warnings and the ignored-value warning.
-- `odin3_status odin3_elab2_readmem(odin3_elab2 *e2, odin3_ast_id call, const odin3_ceval_store *store);` parses as Yosys's `readmem` does, with point (y)'s path rule.
+- `odin3_status odin3_pg_mem_write(odin3_pg *pg, const odin3_pg_assign_req *req);` (EL-39 **v4**, ruling C1):
+  - Up to three process-local temporaries per write statement: `addr` (the wider of the index and `ABITS`), `data` (the memory's width) and `en`.
+  - Root actions `addr ← x`, `data ← x`, `en ← 0`, in that order, on the `$_CONSTX_`/`$_CONST0_` pins.
+  - No `addr` temporary for a constant index, and no `data` temporary for a constant full-word value: the constant goes to the port.
+  - One write port per statement, in source order.
+- `odin3_status odin3_elab2_initials(odin3_elab2 *e2, odin3_ast_id module_node);` (EL-40) produces the three result kinds, the two D2 warnings and the ignored-value warning. The init-bits cap uses point (aa)'s text.
+- `odin3_status odin3_elab2_readmem(odin3_elab2 *e2, odin3_ast_id call, const odin3_ceval_store *store);` parses as Yosys's `readmem` does, with point (y)'s path rule and point (aa)'s size text.
 - The per-bit T9/T10 check at claim time, both places named from the symbol table's assignment lists.
 
 **Tests (`test_elab_stage2_init.c`):**
-- **Write ports (Review Focus 4).** `reg [7:0] m [1:4]; always @(posedge c) if (we) m[wa] <= d; assign q = m[ra];` gives one `$mem`:
+- **Write ports (Review Focus 4; ruling C1).** `reg [7:0] m [1:4]; wire [2:0] wa, ra; always @(posedge c) if (we) m[wa] <= d; assign q = m[ra];` gives one `$mem` with:
   - `WR_PORTS` 1, `WR_CLK_ENABLE` `1'b1`, `WR_CLK_POLARITY` `1'b1`, `WR_CLK` = `c`;
   - `WR_ADDR`/`WR_DATA`/`WR_EN` = the `$proc`'s three `O`-pin temporaries, which have no sync action;
-  - the body: root [`en ← 8'h00`], switch `we`, case [`addr ← wa`, `data ← d`, `en ← 8'hFF`];
+  - the body: root actions [`addr ← 3'xxx`, `data ← 8'xxxxxxxx`, `en ← 8'h00`] in that order, and a switch on `we` whose case `1'1` assigns `addr ← wa`, `data ← d`, `en ← 8'hFF` (through EL-36's case temporaries);
+  - every one of the three temporaries is the `lhs` of a root action;
   - `RD_ADDR` = `ra` raw, `OFFSET` 1.
+- **Constant index and value.** `m[2] <= 8'h5A;` → no `addr` or `data` temporary. `WR_ADDR` and `WR_DATA` are pins on the constant nets for `3'b010` and `8'h5A`. Root has only `en ← 8'h00`.
 - **Other bases.** `[4:1]` → `OFFSET` 1. `[-2:1]` → `OFFSET` −2.
-- **Bridge.** CTest `elab_mem_bridge` runs the bridge on all three ranges, each with a write then a read at the same index → equivalent.
+- **Bridge.** CTest `elab_mem_bridge` runs `elab-equiv` on all three ranges, each with a write then a read at the same index and with a cycle where `we` is 0 → equivalent (no feedback loop on side A).
 - **Partial and multiple writes.** `m[i][3:0] <= d4` → `en` `8'h0F`. Two write statements → two write ports in source order.
 - **Initial values.**
   - `reg [3:0] r = 4'd5; always @(posedge c) r <= r + 1;` → wire `r` has `init` = `4'b0101`.
   - `initial begin m[1] = 8'h12; for (i = 2; i <= 4; i = i + 1) m[i] = i; end` → `$mem` `INIT` = words 1..4 = `12 02 03 04`.
   - `initial r2 = a;` (`a` an input) → `warning: initial statement is not constant and is ignored`.
   - `reg k; initial k = 1;` with nothing else driving `k` → `k`'s net merged onto `$_CONST1_`.
-  - `assign w = a; initial w = 0;` → `warning: initial value of 'w' is ignored: 'w' is driven by a continuous assignment`; for an input port → `… driven by an input port`.
+  - `assign w = a; initial w = 0;` → `warning: initial value of 'w' is ignored: 'w' is driven by a continuous assignment`.
+  - The same for an instance output → `… driven by an instance` (review M10); for an input port → `… driven by an input port`.
+  - The init-bits hook at 16 with a 32-bit initialised memory → `t.v:4:5: error: initial values need more than 16 bits`.
 - **`$readmem`.**
   - `$readmemh("init.hex", m)`, the test running from another cwd, the file holding `// c`, `/* x */`, `@2` and `12 34` → `INIT` words 2, 3 = `12`, `34`, the rest x.
   - `$readmemb("init.bin", m, 1, 2)` → words 1–2.
@@ -1505,76 +1788,71 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - `bad_addr.hex` → `bad address '@zz' in 'bad_addr.hex' line 3`.
   - `bad_word.hex` → `bad word 'g1' in 'bad_word.hex' line 1`.
   - `$readmemh` in an `always` → `$readmemh is supported only in an initial block`.
-  - The readmem hook at 16 bytes → its cap message.
+  - The readmem hook at 16 bytes → `'init.hex' is larger than 16 bytes (the $readmem limit)`.
 - **Per-bit rules.**
   - T9: `r = a; r <= b;` in one block → `t.v:4:5: error: 'r' is assigned with both '=' and '<=' (also at t.v:3:5)`; also across two blocks; an inlined task output counts as `=`.
   - T10: `always @(posedge c) r[2] <= a; always @(posedge c) r[2] <= b;` → `'r[2]' is assigned in two always blocks (also at t.v:3:22)`. `r[1]`/`r[2]` split across blocks → OK.
   - A4: `assign r = a; always @* r = b;` → `'r' has two drivers (also driven at t.v:3:10)`, and the IR has a single driver.
-- **Handover closed.** `verilog_reject_2d` and `verilog_ignore_2d` pass with **0 pending**.
+- **Pending gone (point (l)).**
+  - `odin3_elab_pending(s, k)` is false for both stages and every kind and feature.
+  - CTest `elab_no_pending`: every `tests/verilog/coverage/*.v` and `tests/elab/sink/sink.v` runs `read_verilog` without the text `elaboration is not available yet (2D)`.
+  - `verilog_reject_2d` and `verilog_ignore_2d` pass with **0 pending**.
 - **Sink.**
-  - OOM over both stages of `tests/elab/sink/sink.v`: `NO_MEMORY` at every injection point, no leak, `odin3_check_design` FULL passes on what is left.
+  - OOM over both stages of `sink.v`: `NO_MEMORY` at every injection point, no leak, `odin3_check_design` FULL passes on what is left.
   - Two runs give byte-identical `write_rtlil`.
 
 ## PR 2D-7 — evidence (grows from 2D-3, closes last)
 
-### Task 25: `elab-check`, the coverage rows, both latch modes' goldens and the Yosys 0.55 bridge (§14.2, §14.3)
+### Task 25: `elab-check`, the coverage rows, both latch modes' goldens, the sweep preset (§14.2)
 **Files:**
-- Create `tools/elab-check/elab-equiv` and `elab_equiv.py`. They are written first and cherry-picked into 2D-6 for Task 21's CTests.
 - Create `tools/elab-check/elab-check.c` (C; links `odin3_core` like `odin3-parse-check`) and `tools/elab-check/micro-top` (Python, point (o)).
-- Create `tests/elab/rows/rows.txt` and `tests/elab/rows/<row>_<slug>.v` for the 125 MUST and SHOULD rows, each starting `// <row>: <construct> — variants: …` and derived from 2C's coverage file minus its parse-only variants.
-- Create `tests/elab/rows/<row>.elab`. The 54 rows of §14.2's list (point (z)) are hand-written, first line `# hand-written`: M1, M2, M12, P1–P6, P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6. The rest are generated with `--write` and reviewed once in the diff.
-- Create `tests/elab/rows/<row>.il` (default mode) and `<row>.nolatches.il` for every row with a combinational `always`.
-- Create `tests/elab/equiv_expect_fail.txt`, `tests/tools/test_elab_equiv.py` and `tests/tools/test_elab_rows.py`.
-- Modify `CMakeLists.txt`: the `ODIN3_YOSYS055` block (point (p)); CTests `elab_coverage` (label `elab`) and `elab_coverage_equiv` (0.55 block).
+- Create `tests/elab/rows/rows.txt` (review M19). One line per row: `<row> <file> comb=<0|1> clocks=<N>`, where `comb=1` means the file has a combinational `always` and `clocks` counts distinct edge signals.
+- Create `tests/elab/rows/<row>_<slug>.v` for the 125 MUST and SHOULD rows, each starting `// <row>: <construct> — variants: …` and derived from 2C's coverage file minus its parse-only variants.
+- Create `tests/elab/rows/<row>.elab`:
+  - The 54 rows of §14.2's list (point (z)) are hand-written, first line `# hand-written`: M1, M2, M12, P1–P6, P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6.
+  - Drafts written while 2D-3 is in review are provisional. Each is re-derived once against point (bb) and Task 15's tests after 2D-4 merges, and frozen in its own commit (review I8).
+  - The rest are generated with `--write` and reviewed once in the diff.
+- Create `tests/elab/rows/<row>.il` (default mode) and `<row>.nolatches.il` for every `comb=1` row.
+- Create `tests/elab/equiv_expect_fail.txt` and `tests/tools/test_elab_rows.py`.
+- Modify `CMakeLists.txt`: CTest `elab_coverage` (label `elab`, in the gate); CTest `elab_coverage_equiv` (label `sweep`, `RUN_SERIAL`, in the 0.55 block).
+- Modify `CMakePresets.json`: `debug` and `release` test presets get `"filter": {"exclude": {"label": "sweep"}}`, and a new `sweep` test preset (configure `release`, include label `sweep`, `"execution": {"jobs": 1}`) (point (n), ruling I12).
 
-**Consumes:** every earlier task; `odin3_ast_dump`; `odin3_rtlil_text`; `tools/equiv-check/equiv-check`.
+**Consumes:** every earlier task; `odin3_ast_dump`; `odin3_rtlil_text`; Task 21's `elab-equiv` and `memcap.py`.
 
-**Produces:**
-- `elab-check [--write] [--nolatches] [--top T] <file>…`. For each file, run from its own directory under its basename:
-  1. `read_verilog` (both stages, Debug checks on);
-  2. `odin3_ast_check` FULL and `odin3_check_design` FULL;
-  3. compare `odin3_ast_dump(elab)` with `<row>.elab` (`--write` refuses a `# hand-written` file);
-  4. compare `odin3_rtlil_text` with `<row>.il`, or with `<row>.nolatches.il` under `--nolatches`.
+**Produces:** `elab-check [--write] [--nolatches] [--stage1] [--top T] <file>…`. For each file, run from its own directory under its basename:
+1. `read_verilog` (both stages, Debug checks on), or stage 1 only with `--stage1`, which the controller uses on PR heads before 2D-5;
+2. `odin3_ast_check` FULL, and `odin3_check_design` FULL unless `--stage1`;
+3. compare `odin3_ast_dump(elab)` with `<row>.elab` (`--write` refuses a `# hand-written` file);
+4. unless `--stage1`, compare `odin3_rtlil_text` with `<row>.il`, or with `<row>.nolatches.il` under `--nolatches`.
 
-  Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors.
-- `elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--nolatches] [--mem-cap B] [--keep DIR] [--allow-version V] <file>`:
-  - **A** = `O -p "read_verilog [--nolatches] F; write_rtlil a.il"`, then `Y -p "read_rtlil a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn a.blif"`.
-  - **B** = the same Yosys script with `read_verilog -sv -nolatches F` in place of `read_rtlil a.il`.
-  - `Y -p "read_rtlil a.il; write_rtlil b.il"` must exit 0.
-  - Then `E a.blif b.blif`.
-  - Exit 0 equivalent, 1 not, 2 error.
-  - Every child runs under point (n)'s cap.
-  - It refuses a Yosys whose `-V` lacks `0.55` unless `--allow-version` names it (the nightly drift job only).
+Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_equiv` runs `elab-equiv` per row, smallest first.
 
 **Tests:**
-- `test_elab_equiv.py`, over fake `odin3`, `yosys` and `equiv-check` scripts that log their argv:
-  - the two Yosys command strings are exactly the ones above;
-  - the exit-code mapping;
-  - a `0.69` version refused and accepted with `--allow-version 0.69`;
-  - the `systemd-run` wrapper in argv when available.
 - `test_elab_rows.py`:
-  - `rows.txt` lists exactly the 125 IDs whose verdict in the audit's §4 tables starts with `MUST` or `SHOULD`, plus N15's `uwire` SHOULD, each once;
+  - `rows.txt` lists exactly the 125 IDs whose verdict in the audit's §4 tables starts with `MUST` or `SHOULD`, plus N15's `uwire` SHOULD, each once, each line matching the format;
   - every file exists with its header;
   - exactly the 54 hand-written rows have an `.elab` starting `# hand-written`;
-  - every row flagged `comb` has `.nolatches.il`.
+  - every `comb=1` row has `.nolatches.il`.
 - `elab_coverage`: green on all 125 rows, smallest first, in both modes.
-- `elab_coverage_equiv`: green except the rows in `equiv_expect_fail.txt`, each with its reason (multi-clock rows rely on their goldens, §14.2).
+- `elab_coverage_equiv` (`ctest --preset sweep`): green except the rows in `equiv_expect_fail.txt`, each with its reason. Rows with `clocks` above 1 rely on their goldens (§14.2).
+- `ctest --preset debug -N` lists no test labelled `sweep`.
 
 ### Task 26: Project corpus, the handover close-out and the micro sweeps (§14.4, §14.5)
 **Files:**
-- Create `tools/elab-check/elab-sweep` (Python): smallest first, point (n)'s caps, expect-fail lists, modes `--elab-only` and `--equiv`.
+- Create `tools/elab-check/elab-sweep` (Python): smallest first, `memcap.py`'s caps, expect-fail lists, modes `--elab-only`, `--equiv` and `--bench B` (point (t)).
 - Create `tests/elab/micro_expect_fail.txt` and `tests/tools/test_elab_sweep.py`.
 - Modify `tools/project-fixtures/project_fixtures.py`: a `--with-frontend` mode that runs `elab-equiv` on the positive phase-2 cases and kind/location/name checks on the negative ones.
-- Modify `CMakeLists.txt`: CTests `verilog_micro_elab`, `elab_equiv_micro` (0.55 block) and `project_corpus_frontend`.
+- Modify `CMakeLists.txt`: CTests `verilog_micro_elab` (label `sweep`), `elab_equiv_micro` (label `sweep`, 0.55 block) and `project_corpus_frontend` (gate; 0.55 block).
 
-**Consumes:** Task 25; 2B-3's `project-fixtures compare`; the Parmys golden tree (read-only).
+**Consumes:** Tasks 21 and 25; 2B-3's `project-fixtures compare`; the Parmys golden tree (read-only).
 
 **Produces:**
-- `elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E] [--expect-fail F] [--jobs J] [--mem-cap B] <dir or file>…`:
+- `elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E | --bench B] [--expect-fail F] [--jobs J] [--mem-cap C] <dir or file>…`:
   - It collects `.v` files: a multi-file micro is run through its includer, and a header-only `.vh` never alone.
-  - It sorts them by size and runs each under `--elab-only` or the bridge. `--top` comes from `micro-top` when a golden exists.
+  - It sorts them **all together** by size, smallest first, and runs each under `--elab-only`, the bridge, or `B --one F`. `--top` comes from `micro-top` when a golden exists.
   - It prints one line per file and a summary.
   - An unlisted failure or a listed pass fails the run. A listed entry is `<relative path> <one-line reason>`.
+  - An ASan `odin3` without `systemd-run --user` exits 77 (point (n)).
 - `micro_expect_fail.txt` lists only:
   - the Parmys-rejected micros (PHASE2 #4, the 2C list's entries);
   - the three splicing micros (PHASE2 #11);
@@ -1584,27 +1862,30 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 
 **Tests:**
 - `test_elab_sweep.py`, over fakes:
-  - ascending size order;
+  - one ascending size order across two directories (review I12);
   - `--jobs 2 --mem-cap 10G` refused against a fake `/proc/meminfo` of 24 GB (2 × 10 > 14.4);
   - a listed pass → 1, an unlisted failure → 1, a listed failure → 0;
   - `--top` taken from a fake golden's first `.model`;
-  - a child killed by its cap reported `out of memory (cap 4G)`.
-- `verilog_micro_elab` (539 files): green with the list.
-- `elab_equiv_micro`: green with the list (local; its run log quoted in the PR).
+  - a child killed by its cap reported `out of memory (cap 4G)`;
+  - an ASan binary without `systemd-run` → 77;
+  - `--bench B` starts `B --one F` per file.
+- `verilog_micro_elab` (539 files, `ctest --preset sweep`): green with the list.
+- `elab_equiv_micro` (`sweep`): green with the list, its run log quoted in the PR.
 - `project_corpus_frontend`:
   - `auto_top`, `param_instance`, `param_string`, `top_param`, `single_file` and `multi_dir` are equivalent to their `ref.blif` through the bridge;
   - `neg_unresolved_module`, `neg_unknown_top`, `neg_ambiguous_top` and `neg_no_top` give their kind, location and names;
   - a case where the fixture's 0.69 `ref.cmd` and 0.55 disagree is reported `oracle drift`, not failed.
 - `verilog_reject_2d` and `verilog_ignore_2d` are re-run here with 0 pending.
 
-### Task 27: VTR sweeps, `bench_elab`, the PHASE2 entry (§14.5, §15)
+### Task 27: The VTR sweep, `bench_elab`, the PHASE2 entry (§14.5, §15)
 **Files:**
 - Create `tests/bench/bench_elab.c` (Release).
-- Modify `CMakeLists.txt`: CTests `verilog_vtr_elab` when `VTR_ROOT` is set; `elab_equiv_vtr` with label `nightly`, not in the default set; `bench_elab_smoke`.
+- Create `tests/elab/vtr_expect_fail.txt`, pre-listing `koios/lenet.v` for the bridge's Yosys side as a candidate `out of memory (cap 8G)` entry, removed if it passes (review M24).
+- Modify `CMakeLists.txt`: CTests `verilog_vtr_elab` (label `sweep`, when `VTR_ROOT` is set), `elab_equiv_vtr` (labels `sweep` and `nightly`) and `bench_elab_smoke` (label `sweep`).
 - Modify `.github/workflows/nightly.yml`: the VTR bridge, the 5,000-seed generator run and the 0.69 drift job, as commented steps until a runner with VTR exists.
 - Modify `docs/PHASE2.md`: 2D's entry, the next free number.
 
-**Consumes:** Tasks 25–26; `odin3_ast_bytes_reserved`; the IR store ends.
+**Consumes:** Tasks 21, 25–26; `odin3_ast_bytes_reserved`; the IR store ends.
 
 **Produces:**
 - `bench_elab --one <file>` prints one line for one file:
@@ -1614,29 +1895,28 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - modules, specializations, cells, `$proc` nodes, `$mem` cells, nets, wires and pins;
   - each EL-46 estimate term and the estimated total;
   - peak RSS (`getrusage`).
-- `bench_elab --set <file>…` runs each file in its own capped child via `elab-sweep`, smallest first:
-  - the 31 files of `$VTR_ROOT/vtr_flow/benchmarks/verilog/*.v` first, `mcml.v` last of them;
-  - then the 33 `koios/*.v`, `lenet.v` last, run alone under the 8 GiB cap;
-  - then the §15 targets checked and printed `ok`/`MISSED`.
-- `verilog_vtr_elab` runs the same 64 files under `--elab-only`, smallest first, with the expect-fail list.
+- The bench set is `elab-sweep --bench build/release/bench_elab` over the **one set** of 64 files (`$VTR_ROOT/vtr_flow/benchmarks/verilog/*.v` and `koios/*.v` together), smallest first. `lenet.v` is last, alone under 8 GiB. It then prints the §15 targets, each `ok` or `MISSED`.
+- `verilog_vtr_elab` runs the same one set under `--elab-only` with `vtr_expect_fail.txt`, as a `sweep` test (never in the `-j4` gate; ruling I12).
 
 **Tests:**
 - `bench_elab_smoke` runs `--one` on two micros and checks every column is present.
-- `verilog_vtr_elab`: green locally on all 64 files, with the run log quoted in the PR.
+- `verilog_vtr_elab` (`ctest --preset sweep`): green locally on all 64 files, with the run log quoted in the PR.
 - Bench on the dev machine, targets from §15:
   - `mcml.v` stage 1 + stage 2 ≤ 0.5 s and peak RSS ≤ 200 MB;
   - `lenet.v` ≤ 10 s and ≤ 2.0 GB;
-  - the 31 VTR files ≤ 3 s total.
+  - the 31 `verilog/*.v` files ≤ 3 s total, summed from the one set's lines.
 
   A missed target is investigated and reported with the estimate terms, never relaxed.
-- `elab_equiv_vtr`: run once locally, smallest first (memory rule), with its summary quoted in the PR; `lenet.v`'s Yosys side is reported with its peak RSS.
+- `elab_equiv_vtr`: run once locally on the one set, smallest first, with its summary quoted in the PR; `lenet.v`'s Yosys side is reported with its peak RSS or its cap outcome.
 - The PHASE2 entry records:
-  - the bench output verbatim and the two sweeps' summaries;
-  - the divergence list §17 by reference;
+  - the bench output verbatim and the sweeps' summaries;
+  - the divergence list §17 by reference, and the v4 spec amendments (EL-39 x defaults, EL-30 `~&`);
+  - the erratum of point (h) (§14.1's stale OUT-sync phrase);
   - the Parmys exceptions added to PHASE2 #4;
-  - this plan's points (a)–(z) as agent defaults;
-  - the x preview table of Task 29;
-  - the three IR changes as "landed, for Peter's review".
+  - this plan's points (a)–(bb) as agent defaults;
+  - ABI v4 kept unreleased, with the bump deferred to the first release or Phase-2 close as a decision item;
+  - the three IR changes as "landed, for Peter's review";
+  - the **2H backlog item**: `equiv-check --x-report`, its latch handling and exit-code contract, and the defined-output miter (§14.6 items 3–5), fed by `elab-equiv --a-only`'s netlists.
 
 ### Task 28: Crash fuzzer, differential generator, constant and cell differentials (§14.5)
 **Files:**
@@ -1644,10 +1924,10 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - Modify `tools/verilog-gen/verilog_gen.py` (`--elab`) and its test.
 - Modify `CMakeLists.txt`:
   - `fuzz_elab` and the 10 s smoke `fuzz_elab_smoke` in the `ODIN3_FUZZ` block;
-  - `elab_gen_vs_yosys` with 200 seeds and `elab_const_diff` with 500 expressions, in the 0.55 block;
-  - nightly labels for 5,000 seeds, 10,000 expressions and the 0.69 drift.
+  - `elab_gen_vs_yosys` with 200 seeds and `elab_const_diff` with 500 expressions, both label `sweep` in the 0.55 block (review M24);
+  - `nightly` labels for 5,000 seeds, 10,000 expressions and the 0.69 drift.
 
-**Consumes:** Tasks 7 and 25; 2C-2's generator and fuzz block; `odin3_elab_test_set_limits`; the cell `simulate` hooks.
+**Consumes:** Tasks 7, 21 and 25; 2C-2's generator and fuzz block; `odin3_elab_test_set_limits`; the cell `simulate` hooks.
 
 **Produces:**
 - `fuzz_elab.c` (`LLVMFuzzerTestOneInput`): bytes → preprocess → parse → elaborate, with every cap lowered. Invariants, each violation a `__builtin_trap()` in `tests/` only:
@@ -1673,39 +1953,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - deterministic per seed;
   - each trap feature appears in at least one of seeds 1–50;
   - drift is classified, not failed.
-- `elab_gen_vs_yosys` passes on 200 seeds. A local 5,000-seed run's summary is quoted in the PR.
-- `elab_const_diff` passes on 500 expressions.
+- `elab_gen_vs_yosys` (`sweep`) passes on 200 seeds. A local 5,000-seed run's summary is quoted in the PR.
+- `elab_const_diff` (`sweep`) passes on 500 expressions.
 - `fuzz_elab_smoke` runs 10 s with no crash (clang).
-- `test_elab_cellsim`: for every word cell with a `simulate` hook (the 1E set plus Task 1's seven), 1,000 random 0/1 cases at widths 1, 7, 64 and 65, with random signs. `odin3_cval_op` and the hook agree bit for bit.
-
-### Task 29: `equiv-check --x-report` (2H-owned, §14.6 item 4) and the report-only Parmys preview
-**Files:**
-- Modify `tools/equiv-check/equiv_check.py` and `tests/tools/test_equiv_check.py`.
-- Create the fixtures `tests/tools/fixtures/xreport/{a,b_unconn,c_logic,d_latch}.blif` and `tools/elab-check/parmys-preview` (Python).
-- Modify `docs/ORACLES.md` (the mode and the four outcomes).
-
-**Consumes:** `tools/equiv-check` (ABC `cec`/`dsec`), `tools/netlist-compare`, Task 25's bridge A side, the Parmys goldens (read-only).
-
-**Produces:**
-- `equiv-check --x-report a.blif b.blif`, an algorithm the existing interface leaves open:
-  1. Run the normal check. Equivalent → exit 0.
-  2. Otherwise, in each netlist, collect the x sources: the net `unconn` (a zero-row `.names`) and any net driven by an x constant.
-  3. Walk each primary output's and each latch input's transitive fan-in, crossing latches (the sequential cone), with an explicit stack.
-  4. Remove from both netlists every output and latch input whose cone reaches an x source in **either** netlist.
-  5. Rerun `cec`/`dsec` on the rest.
-  6. Report: equivalent on the rest → exit **3** with `equivalent outside x-cones; removed: <name>, …` (names sorted); still differing → exit 1 with the same list. Exit 2 on error.
-- `parmys-preview --sweep <list> --out work/2D-parmys-preview.tsv` runs, per micro and VTR file (smallest first, capped):
-  - bridge side A, then `write_blif -gates -undef + unconn`;
-  - against `<leaf>.parmys.blif`;
-  - `netlist-compare`, then `equiv-check --x-report`;
-  - each file goes in one of four outcomes: **identical**, **equivalent**, **equivalent outside x-cones** (with the removed list), **differs**.
-
-  It is not a CTest and never gates a 2D PR (point (m)). Its summary goes into PHASE2 (Task 27) for Peter's §20 item 13 ruling.
-
-**Tests (`test_equiv_check.py`):**
-- `a` against itself → 0.
-- `a` against `b_unconn`, which differs only in output `y` whose cone reaches `unconn` → exit 3 and the line `equivalent outside x-cones; removed: y`.
-- `a` against `c_logic`, differing in `z` with no x in its cone → exit 1.
-- `a` against `d_latch`, a latch input `q_next` whose cone reaches `unconn` → exit 3 with `removed: q_next`.
-- A malformed file → 2.
-- The existing modes are unchanged (the current tests pass).
+- `test_elab_cellsim` (review M18): for every word cell that has both a `simulate` hook and an `odin3_cop` mapping, 1,000 random 0/1 cases at widths 1, 7, 64 and 65, with random signs. `odin3_cval_op` and the hook agree bit for bit. The cells are `$add $sub $mul $and $or $xor $not $eq $ne $lt $le $gt $ge $reduce_and $reduce_or $reduce_xor` plus Task 1's `$neg $xnor $reduce_xnor $reduce_bool $logic_not $logic_and $logic_or`. `$mux`, `$pmux`, flip-flops and memories are out of scope.
