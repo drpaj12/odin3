@@ -216,7 +216,8 @@ static void save_fixture(const char *name) {
 
 static void expect_line(const char *line) {
     char want[LOG_CAP];
-    (void)snprintf(want, sizeof want, "\n%s\n", line);
+    int n = snprintf(want, sizeof want, "\n%s\n", line);
+    TEST_ASSERT_TRUE_MESSAGE(n > 0 && (size_t)n < sizeof want, line);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text.data, want), line);
 }
 
