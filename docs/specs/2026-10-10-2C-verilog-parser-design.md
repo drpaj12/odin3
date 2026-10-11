@@ -1,6 +1,8 @@
 # 2C — Verilog-2005 lexer and parser: design
 
-Status: agent draft for Peter (PHASE2 #1, #3; light review). Phase 2, sub-project 2C. Spec:
+Status: approved (agent default under Peter's overnight rule, 2026-10-11; v2 applies the Opus
+review of a6b9131 — 1 critical, 10 important, the minors — and decides the open points as
+recommended). Phase 2, sub-project 2C (PHASE2 #1, #3; light review). Spec:
 `docs/DESIGN.md` §4.1, §6 step 1, §15. Inputs: PHASE2 #6 (coverage, D1–D5), #8 (the 2A AST and
 its carry-overs), #9 (the 2B stream contract); the construct table in
 `docs/specs/2026-10-09-2C-verilog-coverage.md` (rows cited as `L1`, `M1`, …); the AST in
@@ -60,15 +62,25 @@ rule (`nodefault`): a byte outside the grammar
 
 ### 2.2 Locations (VP-3)
 
-`YYLTYPE` is `odin3_range {loc, end}`. A token's `loc` is `odin3_srcman_cursor_loc(cur,
+`YYLTYPE` is `odin3_vp_loc {odin3_loc loc, end; uint32_t off}`: the node range plus the
+**stream offset** of the first byte (`off`), which the metacomment window (§2.6) and the
+location oracle (§7.2) compare — offsets order tokens within a stream, locs do not (an include
+or an expansion is another buffer). A token's `loc` is `odin3_srcman_cursor_loc(cur,
 tok_start)` and its `end` is `cursor_loc(tok_start + yyleng − 1) + 1` (2A AST-2: the last
 byte's loc plus one, so a token spanning segments — `` x`S `` → `x_y`, hex digits from two
-adjacent macros — gets the right ends). `YYLLOC_DEFAULT` gives a rule `@$ = {@1.loc, @N.end}`
-and an empty rule `{@0.end, @0.end}`; every node's range is its rule's `@$`. A multi-rule
-token (a block comment or an opaque body scanned line by line, §2.6, §2.8) keeps its start in
-`yyextra` and takes its end from the closing rule. A token never starts on an inserted byte
-(2B's `loc` 0 segments are blanks), so no token has `loc` 0; a token whose last byte is in a
-`loc` 0 segment cannot occur for the same reason.
+adjacent macros — gets the right ends). `YYLLOC_DEFAULT(Cur, Rhs, N)` takes `loc` and `off`
+from the **first non-empty** right-hand symbol and `end` from the last non-empty one, where a
+symbol is empty when its `loc == end` (an empty rule yields `{@0.end, @0.end, @0.off_end}`;
+a token or a node always has `loc ≠ end`, since `end` is one past a byte of the same or a
+later buffer); with no non-empty symbol, `@$` is `@0`'s end. So a nullable `attrs_opt` in
+front of every item and statement never moves the item's start to the previous `;` (the
+review's I2; a unit test pins `{loc, end}` of an item after an empty attribute list and
+after a non-empty one). Every node's range is its rule's `@$`. A multi-rule token (a block
+comment or an opaque body scanned line by line, §2.6, §2.8) keeps its start in `yyextra` and
+takes its end from the closing rule. The end-of-input token carries `{end, end, off_end}` of
+the last token, so "unexpected end of file" (a missing `endmodule`) is located there. A token
+never starts on an inserted byte (2B's `loc` 0 segments are blanks), so no token has `loc`
+0; a token whose last byte is in a `loc` 0 segment cannot occur for the same reason.
 
 ### 2.3 Numbers (VP-4)
 
@@ -79,7 +91,7 @@ Three tokens, so `8 'h FF` with blanks or comments between the pieces (L8) lexes
 | `UNSIGNED_NUMBER` | `[0-9][0-9_]*` | also the size of a sized literal and a plain decimal (L5) |
 | `BASE` | `'[sS]?[bBoOdDhH]` | enters start condition `BASED`, which skips blanks and comments (comments still recorded) and must find `BASED_DIGITS` |
 | `BASED_DIGITS` | `[0-9a-fA-FxXzZ?][0-9a-fA-FxXzZ?_]*` (`<BASED>`, then back to `INITIAL`) | the superset of every base's digits; the per-base check is `odin3_ast_number_parse`'s (a located `PARSE`: `'b12`) |
-| `REAL_NUMBER` | `[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?` \| `[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*` | L9; `1.` and `.5` are not reals (1364-2005 §3.5.2); value by `strtod` on the text without `_` |
+| `REAL_NUMBER` | `[0-9][0-9_]*\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?` \| `[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*` | L9; `1.` and `.5` are not reals (1364-2005 §3.5.2); value by `strtod` on the text without `_`; a value that overflows to infinity (`1e400`) is a located error "real literal out of range" (`odin3_ast_real_new` rejects non-finite values) |
 
 In `BASED`, anything but blanks, comments and `BASED_DIGITS` — in particular `_` (`'h_F`,
 PHASE2 #8 carry-over: `number_parse` stays lenient on `_`, the lexer is not) or end of input —
@@ -90,7 +102,11 @@ the `BASE` token and raise `YYERROR`, so the `_F` that follows is recovered quie
 `UNSIGNED_NUMBER`) hands the three byte views to
 `odin3_ast_number_parse` as `odin3_number_text {size, base, digits}` **as written** (no sizing,
 2A review focus 3) and `odin3_ast_number_kind` gives the node's sub and `SIGNED`. `?` is a `z`
-digit with `has_question` (L7), so `casez` patterns print back as written.
+digit with `has_question` (L7), so `casez` patterns print back as written. Because blanks may
+separate the size from the base, `a = #5 'b1;` is ambiguous in the standard's own lexicon;
+here a delay operand is never a sized literal (§3.1 f: `delay_value` is an unsigned number, a
+real, an identifier or a parenthesised list), so it reads as delay `5` and literal `'b1`, while
+`x = 5 'b1;` elsewhere is the sized literal `5'b1` (documented; the lexer unit test pins both).
 
 ### 2.4 Identifiers, keywords, system names, strings (VP-5)
 
@@ -128,14 +144,20 @@ The table carries a mask per word: `1364-1995`, `1364-2001-noconfig`, `1364-2001
 `1364-2005` (`uwire` is 2005-only; `automatic cell config design endconfig endgenerate generate
 genvar incdir include instance liblist library localparam noshowcancelled pulsestyle_ondetect
 pulsestyle_onevent showcancelled signed unsigned use` are 2001; `noconfig` drops the config
-words). The lexer keeps a stack of active masks (initially 2005; depth cap
-`ODIN3_VL_MAX_KEYWORD_DEPTH` = 64, a located error past it): `` `begin_keywords "<v>" ``
-pushes `<v>` when it is one of the four (L22 SHOULD); any other version string (`1800-2005`,
-…) is a located error naming it (L22 REJECT) and pushes nothing; `` `end_keywords `` pops (a
-located warning on an empty stack); `` `resetall `` empties it. The `DIRECTIVE` node is built
-for each of them regardless (§2.9), so the unit records what was written. A word that is a
-keyword only in a newer set lexes as `IDENT` under an older set — which is the point of the
-directive.
+words). The run keeps a stack of active masks (initially 2005; depth cap
+`ODIN3_VL_MAX_KEYWORD_DEPTH` = 64, a located error past it) in the read context, **not** per
+stream: 1364-2005 §19.11 gives the directive compilation-unit scope, and a run is one
+compilation unit (DESIGN §4.0), so a `` `begin_keywords `` left open at the end of one file
+still applies to the next (a located warning at that file's end names the open directive).
+`` `begin_keywords "<v>" `` pushes `<v>` when it is one of the four (L22 SHOULD); any other
+version string (`1800-2005`, …) is a located error naming it (L22 REJECT) and pushes nothing;
+`` `end_keywords `` pops (a located warning on an empty stack). `` `resetall `` does not touch
+the stack (§19.11 ends a set only at its `` `end_keywords ``; the plan re-reads §19.6 and §19.11
+and corrects this sentence if the text says otherwise). The `DIRECTIVE` node is built for each
+of them regardless (§2.9), so the unit records what was written. A word that is a keyword
+only in a newer set lexes as `IDENT` under an older set — which is the point of the directive;
+this includes the opaque-body openers of §2.8 (`config` is no keyword under `1364-1995` or
+`1364-2001-noconfig`, so no opaque region starts there).
 
 ### 2.6 Comments and metacomments (VP-7)
 
@@ -152,22 +174,29 @@ its start. The stream never contains `translate_off` regions (2B PP-10).
 `synopsys` or `synthesis` is flagged `ODIN3_AST_COMMENT_METACOMMENT`. When the words after the
 prefix are a non-empty subset of `{full_case, parallel_case}` (either order; `/* */` form too;
 the micro and VTR forms are `// synopsys parallel_case` and `// synopsys full_case
-parallel_case`), the lexer also appends `{loc, keys}` to its **pending metacomment list**. The
-parser consumes it at each `CASE`/`GEN_CASE` reduction (§3.5): the entries whose `loc` lies in
-`[end of the header's ')', loc of the first CASE_ITEM)` become `ATTR` nodes named `full_case`
-/ `parallel_case` with the `METACOMMENT` flag and no value, merged into that case's single
-attach with its `(* *)` attributes. The list is take-only: an entry no case claims stays until
-`endmodule` clears the list, so an inner case (which reduces first) never steals the outer
-case's metacomment and a metacomment anywhere else is a plain (flagged) comment. `ATTR` nodes
-are made only when taken, so no orphan nodes result. Other `synopsys`/`synthesis` words
-(`keep`, …) are flagged comments and nothing more.
+parallel_case`), the lexer also appends `{off, loc, keys}` to its **pending metacomment
+list**, which is therefore in stream-offset order. The parser consumes it at each
+`CASE`/`GEN_CASE` reduction (§3.5): the entries whose offset lies in `[one past the header's
+')', the first CASE_ITEM's offset)` — both from `YYLTYPE.off` (§2.2), never from locs, which
+do not order across buffers — found by binary search and taken from the list (O(log n) per
+case, not O(cases × metacomments)), become `ATTR` nodes named `full_case` / `parallel_case`
+with the `METACOMMENT` flag and no value, merged into that case's single attach with its
+`(* *)` attributes. The list is take-only: an entry no case claims stays until `endmodule`
+clears the list, so an inner case (which reduces first) never steals the outer case's
+metacomment and a metacomment anywhere else is a plain (flagged) comment. `ATTR` nodes are
+made only when taken, so no orphan nodes result. Other `synopsys`/`synthesis` words (`keep`,
+…) are flagged comments and nothing more; requiring the words to be exactly a subset of the
+two keys is stricter than Yosys's prefix match and covers every corpus form.
 
 ### 2.7 Attributes (VP-8)
 
-`(*` is `ATTR_OPEN` and `*)` is `ATTR_CLOSE`, except that `@*`, `@(*)`, `@( * )` and `@ *` lex
-as one `AT_STAR` token (Yosys's rule; L11, T2), which is the only place `(*` can follow `@`.
-`(*` cannot otherwise start a legal expression and `*)` cannot otherwise end one, so no further
-disambiguation is needed. An attribute instance in the grammar is `ATTR_OPEN attr_spec
+`(*` is `ATTR_OPEN` and `*)` is `ATTR_CLOSE`, except that `@*`, `@(*)`, `@( * )` and `@ *`
+(blanks only) lex as one `AT_STAR` token (Yosys's rule; L11, T2). A comment inside the
+parentheses (`@( /*c*/ * )`, `@(* /*c*/ )`) defeats the single token, so the grammar also
+accepts `'@' '(' '*' ')'`, `'@' ATTR_OPEN ')'` and `'@' '(' ATTR_CLOSE` as the implicit event
+control (a unit test covers all three). `(*` cannot otherwise start a legal expression and
+`*)` cannot otherwise end one, so no further disambiguation is needed. An attribute instance
+in the grammar is `ATTR_OPEN attr_spec
 {, attr_spec} ATTR_CLOSE`, `attr_spec ::= IDENT [= constant_expression]` → one `ATTR` per spec
 (name = key, `E?` value). Several consecutive instances before one node merge into one attach
 (PHASE2 #8: the printer prints them merged, so the round trip holds). Where attributes may
@@ -192,13 +221,19 @@ units 2D rejects by kind.
 
 A `` `name `` that 2B passes through (PP-8: `default_nettype timescale celldefine endcelldefine
 resetall begin_keywords end_keywords unconnected_drive nounconnected_drive pragma`) is one
-token `DIRECTIVE` covering the name and the rest of its line minus a trailing `//` comment and
-trailing blanks: sub = the directive kind, value = the argument text trimmed (`wire`, `none`,
-`1ns / 1ps`, `"1364-2005"` with its quotes, `protect`; empty for `` `resetall ``), interned as
-the node's name (`opt`; cap `ODIN3_VL_MAX_DIRECTIVE_BYTES` = 4096, a located error past it).
-The parser makes the `DIRECTIVE` node where the token occurs — unit level or as a module or
-generate item (class `IU`); inside a statement it is a syntax error. `` `default_nettype `` with
-an argument that is not a net kind or `none` is a located error (L19). Any other backtick word
+token `DIRECTIVE` whose extent is **per directive**, so code after an argument-less directive
+on the same line (`` `celldefine module m; `` — 2B passes directives through even from macro
+bodies) is lexed as code, never swallowed as text: no argument for `celldefine endcelldefine
+resetall end_keywords nounconnected_drive`; one word for `default_nettype` (one of `wire tri
+tri0 tri1 wand triand wor trior trireg uwire none` — 1364-2005 §19.2 excludes `supply0/1`;
+anything else is a located error, L19) and `unconnected_drive` (`pull0`/`pull1`); one string
+literal for `begin_keywords`; the `timescale` form `<n><unit> / <n><unit>` (`1ns / 1ps`, the
+blanks optional); the rest of the line minus a trailing `//` comment for `pragma` only. The
+argument text, trimmed, is the node's name (`opt`; `"1364-2005"` keeps its quotes; cap
+`ODIN3_VL_MAX_DIRECTIVE_BYTES` = 4096, a located error past it); a malformed argument is a
+located error at the directive and the token is still returned. The parser makes the
+`DIRECTIVE` node where the token occurs — unit level or as a module or generate item (class
+`IU`); inside a statement it is a syntax error. Any other backtick word
 reaching the lexer (2B consumed `define`/`ifdef`/`include`/`line` and errors on SystemVerilog
 operators and undefined macros, PP-5/PP-9) is a located error "unknown directive".
 
@@ -217,15 +252,62 @@ the token's life — number pieces are the only values copied before the next `y
 `make_marked` append to one pending stack and to the store, AST-5 orders IDs by creation), so
 GLR's deferred and possibly discarded actions would either duplicate nodes or require
 side-effect-free actions and a post-pass — the whole bottom-up design of 2A §5.1 assumes a
-deterministic parse. Verilog-2005 Annex A is LALR(1) once (a) the dangling `else` is resolved by
-precedence (§3.3), (b) `(*` is a token (§2.7), (c) `@*` is a token, (d) ANSI and non-ANSI port
-lists are told apart by the first token after `(` (`input`/`output`/`inout`/`(*` vs `IDENT`/
-`.`/`{`), (e) a declaration and a statement never start with the same token inside a block, and
-(f) `expression_list` and `mintypmax` forms are separate rules (`#(1:2:3)` only under `#(`).
-Yosys and Icarus both parse Verilog-2005 with LALR grammars. The budget is **zero**: the CMake
-Bison invocation runs with `-Werror` (conflicts, useless rules and precedence warnings all fail
-the build, `-Wcounterexamples` for the diagnosis), and a new conflict is removed by a grammar
-change or an explicit, commented `%prec`, never by raising `%expect`.
+deterministic parse. Yosys and Icarus both parse Verilog-2005 with LALR grammars. Verilog-2005
+Annex A is LALR(1) once each of the following is handled **by grammar shape**, not by
+precedence:
+
+- (a) the dangling `else`, by `%precedence` (§3.3) — the one precedence-resolved conflict
+  outside the expression operators;
+- (b) `(*` and `@*` are tokens (§2.7);
+- (c) ANSI and non-ANSI port lists are told apart by the first token after `(`
+  (`input`/`output`/`inout`/`(*` vs `IDENT`/`.`/`{`/`,`/`)`);
+- (d) **assignment targets are `net_lvalue`/`variable_lvalue`** (Annex A.8.5: a hierarchical
+  name with selects, or a `{ }` concatenation of lvalues), never `expression`: with an
+  expression on the left, `<=` — one token for less-or-equal and nonblocking assignment —
+  is resolved by `%left` and `q <= a & b;` becomes a syntax error while `a <= b <= c` parses
+  as `(a <= b) <= c` (the review's C1, reproduced with Bison 3.8.2 at zero reported
+  conflicts), and `assign (strong0, strong1) a = b;` is a real shift/reduce on `(`. The
+  lvalue rules are used by `CONT_ASSIGN`, both procedural assignments, `FOR`/`GEN_FOR`
+  init and step, and `PROC_CONT_ASSIGN`;
+- (e) **block items are one mixed list** — `attrs_opt` then a declaration or a statement —
+  because attributes start both (`begin (* a *) reg x; (* b *) x = 1; end` is a
+  reduce/reduce on `(*` with two lists); the action partitions them (§3.2); the same for
+  function and task bodies (port declaration, block declaration or statement);
+- (f) `delay_value` after `#` is an unsigned number, a real, an identifier or
+  `'(' mintypmax_list ')'` (Annex A.6.5), never a bare expression (`#a-b` would be
+  ambiguous); `#(1:2:3)` is the only place `MINTYPMAX` is parsed; the ordinary
+  `expression_list` is separate;
+- (g) **gate strength**: `and (strong0, strong1) g (y, a);` vs `and (y, a);` — a nullable
+  `strength_opt` before `(` is a shift/reduce; both alternatives of the gate rule spell the
+  `(` themselves (`gate_kind '(' strength_spec ')' delay_opt instances` vs `gate_kind
+  delay_opt instances` whose first instance may start with `(`), so the lookahead after `(`
+  (a strength keyword vs an expression start) decides; the same for `pullup (strong1) (n)`
+  vs `pullup (n)`;
+- (h) **task enable vs assignment** after a hierarchical name: one `hier_ref` nonterminal
+  (`IDENT` \| `hier_ref '.' IDENT` \| `hier_ref '[' expr ']' '.' IDENT`) is reduced lazily;
+  after it the lookahead decides — `(` or `;` a `TASK_CALL`, `[` a select, `=`/`<=` an
+  lvalue — and the item set after `hier_ref '[' expr ']'` holds both the component-index
+  continuation (shift `.`) and the final-select reduction, which LALR(1) separates on `.`;
+  the same nonterminal serves primaries in expressions;
+- (i) `IDENT`-led instantiation vs a UDP instance with `#delay2` or a drive strength:
+  `m #(1, 2) u (…)` is always a parameter override (the values are expressions), as the
+  standard itself prefers; a UDP-style instance with a strength (`m (strong0, strong1) u
+  (…)`) is a syntax error for now (`INSTANTIATION` has no slot for either; Q7 is REJECT);
+- (j) the empty-argument form `f(a, , b)` exists only in the system-call argument rule
+  (`E*0`); a user call with an empty argument is a located syntax error, not a builder
+  `INVALID_ARG`.
+
+The budget is **zero reported conflicts and a committed allowlist of resolved ones**.
+"Zero conflicts" alone proves nothing (C1 above), so `tests/verilog/solved_conflicts.txt`
+lists every conflict Bison resolves by precedence or associativity, as `bison
+--report=solved` prints them (normalised to rule text and token), and the CTest
+`verilog_grammar_solved` regenerates the report and requires it to equal the file: the
+expected content is the operator-table entries of §3.3 and the two `else` lines, nothing
+else. The CMake Bison invocation runs with `-Werror` (conflicts, useless rules and
+precedence warnings all fail the build, `-Wcounterexamples` for the diagnosis); a new
+conflict is removed by a grammar change or, when it is a genuine operator case, by an
+explicit, commented `%prec` plus a line in the allowlist — never by raising `%expect` and
+never by giving a non-operator token a precedence.
 
 ### 3.2 Grammar organisation and AST construction (VP-12)
 
@@ -233,9 +315,15 @@ change or an explicit, commented `%prec`, never by raising `%expect`.
 module header and ports (A.1.3–A.1.4), parameters (A.2.1), declarations (A.2), items (A.1.4),
 instantiation and gates (A.3–A.4), generate (A.4.2), functions and tasks (A.2.6–A.2.7), UDP /
 config / specify opaque tokens (A.5, A.7), statements (A.6), timing (A.6.5), expressions and
-primaries (A.8), attributes (A.9). ~130 nonterminals; every action is **one statement** calling
-a `vp_*` function in `actions_*.c` (hand-written C under the full lint gate, §6): the grammar
-file holds no logic. Conventions:
+primaries (A.8), attributes (A.9). ~130 nonterminals; every action is **one statement** of the form
+`$$ = VP(vp_xxx(ctx, …));` where `VP(call)` is the guard macro `(ctx->error_mode ? 0 :
+(call))` from `actions.h` and `vp_xxx` is a function in `actions_*.c` (hand-written C under
+the full lint gate, §6): the grammar file holds no logic, and inertness after an error (§3.4)
+is structural — `tools/check_rules.py` requires every `.y` action to contain `VP(`, so no
+action can reach a builder outside the guard. The `vp_*` parameters are exactly the union
+member types (`odin3_ast_id`, `uint32_t`, `odin3_bytes`, `const odin3_vp_loc *`), so no
+conversion happens inside the generated translation unit and the `-Wno-*` list of §6 hides
+nothing real. Conventions:
 
 - A fixed-arity node is `vp_make(ctx, kind, sub, flags, name, @$, ids…)` → `odin3_ast_make`
   (slots in table order; an absent optional slot is 0).
@@ -244,28 +332,46 @@ file holds no logic. Conventions:
   LR reductions nest, 2A §5.1). A kind with slots **before** a tail pushes the slot IDs first
   (0 for an absent optional slot: `odin3_ast_push` accepts 0 and `make` validates), e.g.
   `SEQ_BLOCK`: push the locals `LIST` (or 0), then the statements.
-- `CASE_ITEM` is the one kind whose slot (the body) comes **after** its tail in source order
-  (2A §4.2 convention 4). The match expressions are pushed from a mark, the body is parsed,
-  then `vp_make_case_item` copies `[body] ++ pending[mark..top]` into a scratch `odin3_vec`
-  and calls `odin3_ast_make` + `odin3_ast_unwind(mark)`. This needs one 2A accessor,
-  `odin3_ast_pending_span(ast, mark)` → the view `stack[mark..top]` (10 lines; §9 amendment).
-- `FUNCTION_DECL`/`TASK_DECL` non-ANSI bodies interleave port and local declarations
-  (`input a; reg t; input b;`): ports go on the pending stack, locals into the context's one
-  scratch vec (functions and tasks never nest), then `LIST` ports, `LIST` locals, body. The
-  printer writes ports then locals, which re-parses to the same two lists.
+- **Reordering at the reduction.** Three kinds are built from a pending span whose source
+  order is not the slot order, through one 2A accessor, `odin3_ast_pending_span(ast, mark)`
+  → the view `stack[mark..top]` (10 lines; §9 amendment), and the context's **two scratch
+  vectors**, `span_scratch` (a copy of the span) and `part_scratch` (the partitioned prefix),
+  both used only within one reduction, so nesting is safe (an inner block, case item or
+  function completes before the outer reduces; the review's I7):
+  - `CASE_ITEM`: the body comes **after** the tail in source order (2A §4.2 convention 4):
+    the match expressions are pushed from a mark, the body is parsed, then
+    `vp_make_case_item` copies `[body] ++ span` into `span_scratch`, calls `odin3_ast_make`
+    and `odin3_ast_unwind(mark)`.
+  - `SEQ_BLOCK`/`PAR_BLOCK`: the mixed item list (§3.1 e) is pushed in source order;
+    `vp_make_block` copies the span, unwinds, takes the leading D-class nodes into
+    `part_scratch` (a declaration after a statement is a located error "declaration after
+    a statement in block" — 1364-2005 §9.8.1 — and enters error mode), makes the locals
+    `LIST` from them (or pushes 0 when there are none), pushes the statements back and calls
+    `make_marked`.
+  - `FUNCTION_DECL`/`TASK_DECL`: the body items (port declarations, block declarations and
+    statements, interleaved: `input a; reg t; input b; …`) are pushed in source order;
+    `vp_make_function` partitions the span into the ports `LIST` (`PORT_DECL`s, header
+    ones first for an ANSI header), the locals `LIST` and the statement — exactly one for a
+    function (zero or several is a located error, Annex A), zero or one for a task (zero →
+    `NULL_STMT`); a declaration after the statement is the same located error. The
+    printer writes ports then locals, which re-parses to the same two lists.
 - Left recursion everywhere a list or operator chain is parsed (Bison's stack stays flat on a
   2,000-term `&` chain, 2A §10); right recursion only where the language is right-recursive
   (`else if`, nested parentheses, nested blocks), bounded by §5.
 - The context `odin3_vp_ctx` (one per stream) holds the design, the AST, the lexer state, the
-  scratch vec, the error count, the *error mode* flag (§3.4) and the current module's
-  metacomment list.
+  two scratch vectors, the error count, the *error mode* flag and the fatal status (§3.4),
+  and the current module's metacomment list; the keyword-set stack lives in the per-run read
+  context (§2.5).
 
 ### 3.3 Precedence and the dangling else (VP-13)
 
 1364-2005 §5.1.2 Table 5-4, lowest first, as Bison declarations:
 
 ```
-%right '?' ':'                                   /* conditional, right-associative      */
+%right '?'                                       /* conditional, right-associative; ':' has
+                                                    no precedence (ranges, case items and
+                                                    labels use it; a conflict there must
+                                                    surface, not resolve silently)        */
 %left  OR_OR                                     /* ||                                  */
 %left  AND_AND                                   /* &&                                  */
 %left  '|'                                       /* binary |                            */
@@ -283,35 +389,47 @@ file holds no logic. Conventions:
 
 Unary operators have no precedence declaration: as in Annex A, `expression ::= unary_operator
 {attribute_instance} primary`, so a unary operator binds to a primary only (`-a ** b` is
-`(-a) ** b`, `!a && b` is `(!a) && b`, `- -a` needs parentheses). `**` is **left**-associative
-because Table 5-4 says every binary operator associates left to right (`2 ** 3 ** 2` = 64);
-Odin II's `%right voPOWER` is a divergence from the standard, and §7's Yosys comparison checks
-the choice. Concatenation, replication and the conditional are primaries or the top rule, not
-operators with precedence. `%prec LOWER_THAN_ELSE` on `IF`/`GEN_IF` without `else` and
-`%precedence ELSE` resolve the dangling else as shift (the inner `if` takes the `else`), which is
-what Verilog, C and the printer assume (2A: the printer wraps a then-branch that would
-otherwise capture an `else`).
+`(-a) ** b`, `!a && b` is `(!a) && b`, `- -a` needs parentheses — stricter than Odin II and
+Yosys, which take a unary operator on any operand; no corpus file has the doubled form;
+logged as a divergence, §9). `**` is **left**-associative because Table 5-4 says every binary
+operator associates left to right (`2 ** 3 ** 2` = 64), and Yosys's `%left OP_POW` agrees;
+Odin II's `%right voPOWER` is the divergence. Concatenation and replication are primaries;
+the conditional is the rule `expression '?' attrs_opt expression ':' expression`, whose
+precedence is that of `'?'` (its last terminal with a precedence). `%prec LOWER_THAN_ELSE` on
+`IF`/`GEN_IF` without `else` and `%precedence ELSE` resolve the dangling else as shift (the
+inner `if` takes the `else`), which is what Verilog, C and the printer assume (2A: the printer
+wraps a then-branch that would otherwise capture an `else`). The operator lines above and the
+two `else` lines are the whole expected content of `solved_conflicts.txt` (§3.1).
 
 ### 3.4 Errors and recovery (VP-14)
 
-`yyerror` emits one `odin3_diag(design, ODIN3_LOG_ERROR, @lookahead.loc, "syntax: %s", msg)` with
-Bison's detailed message rewritten to name tokens as Verilog spells them (`unexpected 'endmodule',
-expected ';' or ','`; the token-name table maps `ATTR_OPEN` → `(*`, `AT_STAR` → `@*`, `IDENT` →
-`identifier`, …); the chain lines (`expanded from macro …`, `included from …`) come from
-`odin3_diag`. Then the parse **continues in error mode**: three `error` productions —
-`module_item: error ';'`, `statement: error ';'`, `description: error ENDMODULE` —
-resynchronise at the next `;` or `endmodule`, Bison's three-token rule suppresses cascades, and
-every `vp_*` action is a no-op returning 0 while the flag is set, so no builder is ever called
-with the half-built children recovery leaves behind (a tree after an error is never used: the
-pass destroys the store, 2A §9). The first error also unwinds the pending stack to 0. The run
-stops at `ODIN3_VP_MAX_ERRORS` = 20 diagnostics ("too many errors; stopping"), as a compiler's
-error limit does, and at the end of the stream returns `ODIN3_ERR_PARSE` when any error was
-emitted. Failures raised by actions: `NO_MEMORY` aborts the parse at once (2A §10 OOM policy);
-a cap (`PARSE` from `make`, `number_parse`, `text_new`, Bison's stack, §5) is reported once,
-located, and aborts the parse (a cap is not recoverable input); a literal error from
-`number_parse` (`'b12`, too many digits) is counted and enters error mode. Lexer errors (§2)
-count toward the cap and set error mode too; the lexer keeps producing tokens so later errors
-are still reported.
+`yyerror` emits one `odin3_diag(design, ODIN3_LOG_ERROR, @lookahead.loc, "syntax: %s", msg)`
+with Bison's detailed message naming tokens as Verilog spells them through **string aliases**
+(`%token ATTR_OPEN "(*"`, `AT_STAR "@*"`, `IDENT "identifier"`, `ENDMODULE "endmodule"`, …: no
+separate name table), e.g. `unexpected 'endmodule', expected ';' or ','`; the end-of-input
+token is located at the last token's end (§2.2); the chain lines (`expanded from macro …`,
+`included from …`) come from `odin3_diag`. Then the parse **continues in error mode**: three
+`error` productions — `module_item: error ';'`, `statement: error ';'`, `description: error
+ENDMODULE` — resynchronise at the next `;` or `endmodule`, Bison's three-token rule
+suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op returning 0 while
+the flag is set, so no builder is ever called with the half-built children recovery leaves
+behind (a tree after an error is never used: the stream yields **no `UNIT`** and the pass
+destroys the store, §4.2, 2A §9). The first error also unwinds the pending stack to 0. The
+run stops at `ODIN3_VP_MAX_ERRORS` = 20 diagnostics ("too many errors; stopping"), as a
+compiler's error limit does, and at the end of the stream returns `ODIN3_ERR_PARSE` when any
+error was emitted.
+
+Failures raised by actions and by the lexer fall in two classes. **Fatal**: `NO_MEMORY`
+(2A §10 OOM policy) and the structural caps — `odin3_ast_make`'s depth and child caps and
+Bison's stack (§5) — are reported once, located, and abort the parse (`YYABORT`; a structural
+cap is not recoverable input). The lexer has no return path for a status, so a lexer-side
+`NO_MEMORY` (from `comment_add`, `text_new`, `intern`, a strbuf) sets `ctx->fatal` and
+returns the end-of-input token; the driver checks `fatal` after `yyparse` and returns it.
+**Recoverable**: every other located error — a literal rejected by `number_parse` (`'b12`,
+too many digits), an identifier, string, directive, comment-text-free opaque body or
+keyword-depth cap, an unexpected byte, an unterminated string or comment — is counted, enters
+error mode, and lexing and parsing continue (the lexer still produces tokens; an over-cap
+opaque body is dropped as §2.8 says), so later errors are still reported.
 
 ### 3.5 Attributes and metacomments in the grammar (VP-15)
 
@@ -322,8 +440,11 @@ SPECIFY_BLOCK GENERATE GEN_FOR GEN_IF GEN_CASE`), every ANSI port declaration in
 (`PORT_DECL`), every parameter in a `#( )` header, every block-item declaration, every
 statement (its node, `NULL_STMT` included), and — per Annex A — a unary operator
 (`UNARY`), a binary operator (`BINARY`), the `?` of a conditional (`TERNARY`); nowhere else
-(a case item, a declarator, a port reference, a connection are syntax errors with an attribute).
-Attributes on an `assign` are accepted (Yosys rejects them; nothing in the corpus has them).
+(a case item, a declarator, a port reference, a connection are syntax errors with an
+attribute). Two Annex A placements are **not** supported and logged as divergences (§9): an
+attribute on a port connection (`.p((* x *) e)` has no `CONNECTION` attach in 2A §7) and on an
+ANSI function/task port; neither occurs in the corpus. Attributes on an `assign` are accepted
+(Yosys rejects them; nothing in the corpus has them).
 `(* full_case, parallel_case *)` before a `case` attaches to the `CASE` like any statement
 attribute; the `CASE`/`GEN_CASE` reduction then adds the pending metacomments of §2.6 into the
 **same** attach (attach-once). Attribute values are constant expressions parsed by the ordinary
@@ -343,15 +464,27 @@ given path; tail = `MODULE`/`DIRECTIVE`/`UDP_DECL`/`CONFIG_DECL` in source order
 L? params; L? ports; I* items). `module m;` → ports absent; `module m ();` → an empty `LIST`
 (the printer tells them apart: `module m;` vs `module m ();`). Parameter port list → `LIST` of
 `PARAM_DECL{IN_HEADER}` (one per `parameter` keyword, several declarators per keyword, `sub`
-`parameter`; `localparam` in a header is accepted and stored as `localparam`, 2D decides).
-**ANSI** port list → `LIST` of `PORT_DECL{IN_HEADER}`(sub = direction; `SIGNED`; `DT` = `reg`/
-`integer`/`time`/`real`/`realtime` or none; `NET` = the net kind written or 0; R? range;
-`DECLARATOR+`, one per name, an `E?` initialiser for `output reg q = 0`); a name without a
-direction inherits the previous port's direction, kind and range as its own node
-(`input [3:0] a, b` is one node with two declarators; `input [3:0] a, output b` two nodes).
-**Non-ANSI** port list → `LIST` of `PORT_REF`: `a` → name a; `.x(e)` → name x, `DOTTED`, E;
-`.x()` → name x, `DOTTED`, no E; `{a,b}` or `a[3:0]` → name 0 with the expression (M6: 2D
-rejects `DOTTED` or name 0). The body's `input [3:0] a;` → a `PORT_DECL` **item** (IN_HEADER
+`parameter`; `localparam` in a header is accepted and stored as `localparam`, 2D decides);
+`#()` (micro `parameter_2.v`, no Annex A rule, Parmys accepts) → an empty params `LIST`
+(the printer writes `#()` back). **ANSI** port list → `LIST` of `PORT_DECL{IN_HEADER}`(sub =
+direction; `SIGNED`; `DT` = `reg`/`integer`/`time`/`real`/`realtime` or none; `NET` = **1 +
+the net kind** written, 0 when none (`odin3.h`: `ODIN3_AST_F_PORT_DECL_NET_SHIFT` "0 =
+unspecified, else 1 + odin3_ast_net_kind"; storing the raw kind would make `input wire a`
+indistinguishable from `input a`, since `WIRE` is 0); R? range; `DECLARATOR+`, one per name,
+an `E?` initialiser for `output reg q = 0`); a name without a direction joins the previous
+port's node as another declarator (`input [3:0] a, b` is one node with two declarators;
+`input [3:0] a, output b` two nodes). `unsigned` (`input unsigned [3:0] a`, micros
+`keywords/signed_unsigned/*`, `keywords/output/multiple_declarations`) is accepted wherever
+`signed` is — ports, nets, variables, parameters, function returns — and sets no flag (it is
+the default). **Non-ANSI** port list → `LIST` of `PORT_REF`: `a` → name a; `.x(e)` → name x,
+`DOTTED`, E; `.x()` → name x, `DOTTED`, no E; `{a,b}` or `a[3:0]` → name 0 with the
+expression; an **empty port** (`(a, b, )`, `(, a)`: legal, `port ::= [port_expression]`;
+`large/arm_core.v` and a dozen micros have the trailing comma) → `PORT_REF` with name 0 and
+no expression — a shape M6 does not reject: M6's REJECT forms are `DOTTED` and *name 0 with
+an expression* (the 2A row text is amended, §9); 2D treats the empty port as an unconnected
+position. `module m ();` stays an empty `LIST` (one empty port by the letter of Annex A, but
+every tool reads it as "no ports", and the printer distinguishes it from `module m;`). The
+body's `input [3:0] a;` → a `PORT_DECL` **item** (IN_HEADER
 clear; PHASE2 #8: a `PORT_DECL` sits in the port LIST only in the elaborated form — in the
 parsed form it is an item for non-ANSI modules and a LIST entry for ANSI ones, never both).
 `input reg a` / `input integer n` (M12) → `PORT_DECL[input]{DT=reg|integer}` without comment
@@ -386,15 +519,22 @@ whole name: `u.w[3]` → `SELECT[bit]`(`HIER_NAME`(u, w), 3), which is how the p
 (E+); `{n{a, b}}` → `REPLICATE`(E count, `CONCAT`) (a replication's inner list is always a
 `CONCAT`, even of one element); unary → `UNARY[op]`(E) (`^~` stored as `~^`; unary `+` kept,
 E4); binary → `BINARY[op]`(E, E); `c ? a : b` → `TERNARY`(E, E, E); `f(a, b)` → `CALL`(name f;
-E*); `$signed(a)` → `CALL{SYSTEM}`(name `$signed`); `u.f(a)` → `CALL{HIER}`(name `u.f` interned
-whole); `$display(a, , b)` → `TASK_CALL{SYSTEM}` with a 0 tail entry for the empty argument
-(E*0); `(e)` → `e` itself (parentheses make no node; the printer re-parenthesises every nested
+E*); `$signed(a)` → `CALL{SYSTEM}`(name `$signed`); `u.f(a)`, `g[0].f(a)`, `\a+b .f(a)` →
+`CALL{HIER}` whose name is the components joined with `.`, each written as the 2A printer
+writes an identifier (escaped when not plain, an index as `[n]` after its component:
+`u.f`, `g[0].f`, `\a+b .f`), so the printer's raw output re-parses to the same interned
+string (E21 is REJECT; the name only serves the message and the round trip); `$display(a,
+, b)` → `TASK_CALL{SYSTEM}` with a 0 tail entry for the empty argument (E*0; a user call
+with an empty argument is a syntax error, §3.1 j); `(e)` → `e` itself (parentheses make no
+node; the printer re-parenthesises every nested
 operator, so `a + (b + c)` and `(a + b) + c` print and re-parse as their trees say).
 `(1:2:3)` → `MINTYPMAX` only under `#(` (§3.1 f).
 
 **Continuous assignment (A1–A4).** `assign [(strength)] [#d] a = e, b = f;` → `CONT_ASSIGN`
-(`STRENGTH`?, `DELAY`?; `NET_ASSIGN+`(E lhs, E rhs)). The lhs is any expression (a `CONCAT`, a
-`SELECT`); 2D checks it is an lvalue.
+(`STRENGTH`?, `DELAY`?; `NET_ASSIGN+`(E lhs, E rhs)). The lhs is a `net_lvalue` (§3.1 d): a
+hierarchical name with bit/part selects (`IDENT`, `SELECT`, `HIER_NAME`) or a `CONCAT` of
+net lvalues — the same E kinds as before, produced by a restricted rule; anything else
+(`a + b = c`) is a syntax error. Procedural assignments use `variable_lvalue`, the same shapes.
 
 **Procedural blocks and timing (T1–T20).** `always stmt` → `ALWAYS[always]`(S) — the S is a
 `TIMING_STMT` for `always @(…) …` and `always #5 …`, the bare statement for `always begin …`
@@ -447,16 +587,17 @@ both only in illegal code, which 2D reports. `task [automatic] t; items stmt_or_
 `task t (input a, output [3:0] b);` → `TASK_DECL`(name; `{AUTOMATIC}`; L ports; L locals; S body
 — `NULL_STMT` when empty). Timing controls and nonblocking assignments inside a function (K12)
 parse with the one statement grammar; 2D rejects them. A function call is a `CALL`, a task
-enable a `TASK_CALL` (§ expressions, statements).
+enable a `TASK_CALL` (above).
 
 **Instantiation (I1–I7, P5).** `m #(8, .W(4)) u1 (a, .p(b), .q(), , c), u2 [3:0] (…);` →
 `INSTANTIATION`(name m; L? parameter `CONNECTION`s: name 0 + E for ordered, name + E? for
 named; `INSTANCE+`: `INSTANCE`(name u1; R? array (I6); C*: `CONNECTION`(name 0, E) for an
 ordered connection, `(name p, E)` for `.p(b)`, `(name q, no E)` for `.q()`, `(name 0, no E)` for
-an empty positional slot)). Ordered and named connections may mix in one list (I2: 2D rejects).
+an empty positional slot; `u ()` has **zero** connections, `u (,)` two empty ones)). Ordered
+and named connections may mix in one list (I2: 2D rejects).
 An expression on any port is an expression (I3). An instance without a name is accepted by the
 grammar for every module name (a UDP instance may be unnamed); the pass enforces 2A's rule 4
-(§4.3).
+(§4.2 step 5).
 
 **Gates (Q1–Q6).** `and [(strength)] [#d] [g1] [[3:0]] (y, a, b), (z, c, d);` → `GATE_DECL[and]`
 (`STRENGTH`?, `DELAY`?; `INSTANCE+`(name opt; R? array (Q5); C*: one `CONNECTION`(name 0, E) per
@@ -478,7 +619,7 @@ in a delay); **REJECT rows** need the kind, sub or flag 2D reports on (`REAL` in
 `PROC_CONT_ASSIGN`, `WAIT`, `EVENT_TRIGGER`, `PAR_BLOCK`, `DISABLE`, `FOREVER`, `WHILE` outside a
 constant function, `GATE_DECL` of a MOS/pass/pull sub, `UDP_DECL`, `CONFIG_DECL`, an
 `INSTANCE` mixing connection forms). The 2C-raised errors are lexical and structural only
-(§2, §3.4, §4.3): the only semantic checks in 2C are `duplicate_module` and the unnamed-instance
+(§2, §3.4, §4.2): the only semantic checks in 2C are `duplicate_module` and the unnamed-instance
 rule, both of which need the whole run and nothing more.
 
 ### 3.7 Carry-overs from PHASE2 #8 (VP-17)
@@ -501,7 +642,7 @@ rule, both of which need the whole run and nothing more.
   no `GEN_BLOCK` index in the parsed form; `SELECT`'s third slot present exactly for the three
   part forms. `odin3_ast_check` FULL runs on every store 2C builds in Debug (§4.2) and in every
   test, so a drift is a test failure, not a 2D surprise.
-- **Rule 4 (unnamed instances)**: §4.3 — the store keeps every `UDP_DECL` of the run and the
+- **Rule 4 (unnamed instances)**: §4.2 step 5 — the store keeps every `UDP_DECL` of the run and the
   pass errors on an unnamed instance of anything else.
 - **`PORT_DECL` position**: §3.6 modules.
 
@@ -525,9 +666,10 @@ with a script is an error ("use the pass option").
 1. `odin3_ast_create(design, PARSED, ctx->run, &ast)`; `odin3_pp_create` from the record
    (defines, incdirs; PP-1).
 2. For each design file, in order: `odin3_pp_run` → stream; `odin3_verilog_parse_stream(ctx,
-   ast, &stream, &unit)` → one `UNIT` (also on a stream with errors, until the cap); the
-   per-stream lexer and parser contexts are created and destroyed here. A `NO_MEMORY` or a
-   cap stops the run at once (2A §10 OOM policy).
+   ast, &stream, &unit)` → one `UNIT` on success, none on a stream with errors (§3.4; the
+   run goes on to the next file for its diagnostics, until the error cap, and fails at step
+   6); the per-stream lexer and parser contexts are created and destroyed here. A fatal
+   failure (`NO_MEMORY`, a structural cap, §3.4) stops the run at once.
 3. **Library resolution** (DESIGN §4.0; `-v`/`libfile`, `-y`/`libdir`, `libext`): collect the
    module and UDP names defined and the module names instantiated so far; while some
    instantiated name is undefined: if any `libfile` is still unread, read **all** libfiles now
@@ -538,8 +680,9 @@ with a script is an error ("use the pass option").
    `unresolved_module`). Library `UNIT`s are appended after every design `UNIT`, and the store
    records where they begin (`odin3_ast_library_units_from`, a `uint32_t` on the store: §9
    amendment) so 2D never picks a library module as top and lets a design unit shadow a library
-   module (a library module with a design unit's name is dropped with an info line; a second
-   library definition is ignored, first file wins).
+   module (a library module with a design unit's name stays in the store — it is append-only
+   — and is reported with an info line; 2D's lookup takes the design unit; a second library
+   definition likewise stays and is ignored, first file wins).
 4. **`duplicate_module`** (M11, 2B §8): two design units defining one module or UDP name →
    located error at the second definition, names [the module]; counts toward the error cap.
 5. **Unnamed instances** (2A rule 4): every `INSTANCE` with name 0 under an `INSTANTIATION`
@@ -571,7 +714,7 @@ in `parser_test.h`, as 2A/2B do).
 
 | Cap | Value | Where | Why |
 |---|---|---|---|
-| `ODIN3_VP_YYMAXDEPTH` (`YYMAXDEPTH`) | 8 × `ODIN3_AST_MAX_DEPTH` = 262144 states | Bison, heap (`YYSTACK_USE_ALLOCA 0`), `YYINITDEPTH` 256; read through a function so the hook can lower it | 2A §5.1: a right-recursive form pushes ≤ 6 symbols per nesting level (an `else if` level: `if ( expr ) stmt else` ≈ 6), so the AST depth cap (height 32768) fires first on every form that creates nodes; nested parentheses create no nodes and are bounded only here (262144 `(`s). ≈ 6 MB at the limit (state + value + location per entry). Bison's "memory exhausted" is reported as a located error at the current token: "nesting deeper than the parser allows (262144)" |
+| `ODIN3_VP_YYMAXDEPTH` (`YYMAXDEPTH`) | 8 × `ODIN3_AST_MAX_DEPTH` = 262144 states | Bison, heap (`YYSTACK_USE_ALLOCA 0`), `YYINITDEPTH` 256; read through a function so the hook can lower it | 2A §5.1: a right-recursive form pushes ≤ 6 symbols per nesting level (an `else if` level: `if ( expr ) stmt else` ≈ 6), so the AST depth cap (height 32768) fires first on every form that creates nodes; nested parentheses create no nodes and are bounded only here (262144 `(`s). ≈ 7 MB at the limit (2-byte state + 8-byte value + 12-byte `odin3_vp_loc` per entry). Bison's "memory exhausted" is reported as a located error at the current token: "nesting deeper than the parser allows (262144)" |
 | `ODIN3_AST_MAX_DEPTH` | 32768 (2A) | `odin3_ast_make`, located at the node | a 32,769-term operator chain or `else if` chain (10 × the measured maximum, 2A §10) |
 | `ODIN3_AST_MAX_CHILDREN` | 2^24 (2A) | `make` | a 16M-element concatenation or module |
 | `ODIN3_AST_MAX_NUMBER_BITS`, `_DECIMAL_DIGITS` | 2^20, 4096 (2A) | `number_parse` | literal bombs |
@@ -585,7 +728,7 @@ in `parser_test.h`, as 2A/2B do).
 | token count, node count | none | — | bounded by the stream cap (2B: 2^28 bytes) and the ID space (2A: `NO_MEMORY`) |
 
 Everything else is bounded by these: the pending metacomment list by the comment count, the
-scratch vec by the longest case-item list (≤ `MAX_CHILDREN`), the lexer's strbufs by the
+scratch vectors by the longest reordered span (≤ `MAX_CHILDREN`), the lexer's strbufs by the
 string/comment/text caps, Flex's `yytext` by one line (comments and opaque bodies are scanned
 line by line) or one token (a token is at most the stream). Memory for mcml.v is measured in
 §7.6 against 2A's 20 MB budget.
@@ -608,8 +751,13 @@ add_custom_target(verilog_generated
                   DEPENDS ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
 add_library(odin3_verilog_gen OBJECT ${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS})
 target_include_directories(odin3_verilog_gen PRIVATE src include ${_gen})
-target_link_libraries(odin3_verilog_gen PRIVATE odin3_flags)
-target_compile_options(odin3_verilog_gen PRIVATE ${ODIN3_GENERATED_WNO})   # see below
+# Not linked to odin3_flags: an INTERFACE target's options come after the target's own, so
+# "-Wno-conversion ... -Wconversion" would re-enable the warning under -Werror. The generated
+# sources get the odin3_flags list verbatim minus the documented exceptions, as source-file
+# COMPILE_OPTIONS (one place, one list; ODIN3_GENERATED_FLAGS is derived from the same
+# variable odin3_flags is built from, so the two cannot drift).
+set_source_files_properties(${BISON_verilog_parser_OUTPUTS} ${FLEX_verilog_lexer_OUTPUTS}
+    PROPERTIES COMPILE_OPTIONS "${ODIN3_GENERATED_FLAGS}")
 ```
 
 Ubuntu 24.04 (CI) ships Bison 3.8.2 and Flex 2.6.4; the dev machine has the same. `bison flex`
@@ -625,12 +773,15 @@ headers from `${_gen}`.
 `include|src|plugins|tests/unit`, so the generated directory is invisible to clang-format, the
 rules script, clang-tidy, cppcheck and lizard without any change to their configuration, and
 nothing hand-written can hide there (CMake writes only the four Bison/Flex outputs into it).
-The one compiler-level concession is `ODIN3_GENERATED_WNO`, applied to `odin3_verilog_gen` and
-to nothing else: `-Werror`, `-Wall`, `-Wextra` stay; the list holds exactly the `-Wno-*` flags
-the pinned skeletons need, each with a CMake comment naming the generated construct (expected:
+The one compiler-level concession is `ODIN3_GENERATED_FLAGS`, applied to the four generated
+sources and to nothing else: the full `odin3_flags` list (`-Werror`, `-Wall`, `-Wextra`,
+sanitizers, `_POSIX_C_SOURCE`) with exactly the warnings the pinned skeletons cannot satisfy
+removed or negated, each with a CMake comment naming the generated construct (expected:
 `-Wno-conversion -Wno-sign-conversion -Wno-sign-compare` for Flex's `yy_size_t`/`int` buffer
 arithmetic, `-Wno-unused-parameter` for Flex's reentrant stubs, `-Wno-missing-prototypes` for
 Bison's internal helpers under `api.pure`; the plan measures the minimal list and records it).
+Because the `vp_*` parameters are exactly the union member types (§3.2), nothing in an action
+converts, so a disabled conversion warning can hide only skeleton code.
 Because the generated translation units also compile the `%{ %}` prologues and the actions,
 three rules keep hand-written code out of them: (1) prologues contain `#include`s and the
 `YY_USER_ACTION`/`YYLLOC_DEFAULT`/`YYMAXDEPTH` macros only; (2) every action is one statement,
@@ -697,11 +848,21 @@ complete module using the construct in every variant the row names, hand-written
 probe descriptions in the coverage audit. The driver `tools/parse-check/odin3-parse-check
 [--write] <file>…` (C, beside `blif-roundtrip`; links `odin3_core`) runs per file: parse
 (through `read_verilog --parse-only` on a one-file project) → `check` FULL → `odin3_ast_print` →
-parse the printed text → `check` FULL → `odin3_ast_equal` on the `UNIT`s → compare
-`odin3_ast_dump` against `<row>.ast` when it exists (`--write` creates or refreshes it; the
-`.ast` goldens are reviewed by hand against the slot table once and then guard slot drift that a
-stable round trip would not catch: a wrong-but-consistent slot order prints and re-parses
-equal). Exit 0/1/2 like the other tools. CTest runs the set smallest file first.
+parse the printed text → `check` FULL → `odin3_ast_equal` on the `UNIT`s' **children**
+pairwise after an equal child count (a `UNIT`'s name is its given path, which differs for the
+re-parsed text) → compare `odin3_ast_dump` against `<row>.ast` when it exists. The round trip
+alone cannot catch a precedence or associativity slip (the printer parenthesises fully), a
+dropped token that both parses drop alike, or a wrong-but-consistent slot order, so the
+goldens come in two classes: the rows the audit marks precedence- or slot-sensitive (every
+E row, C4–C7, F1, G2–G6, K1–K3, T1–T2, T11, I1, M1–M2, N7–N10: ≈ 45 files) get **hand-written**
+`.ast` goldens derived from the slot table and Table 5-4 before the parser exists (`--write`
+is refused for them: a `# hand-written` first line); the rest may be generated with `--write`
+and are reviewed once. A third oracle, independent of the printer, runs on every file: the
+**location oracle** — for every node, the bytes of the stream at `[off, off + len)` of its
+first token spell that token (an `IDENT`'s name, a `NUMBER`'s size digits, a keyword), and
+every child's range lies inside its parent's when both are in one buffer — which catches
+the I2 class (a node starting at the previous `;`). Exit 0/1/2 like the other tools. CTest
+runs the set smallest file first.
 
 ### 7.3 Negative tests (`verilog_reject`)
 
@@ -718,7 +879,11 @@ instance; a `DIRECTIVE` inside a statement. For the 24 REJECT rows the construct
 their coverage files in §7.2 carry an `.ast` golden showing the REJECT form (so 2D has the exact
 tree to report on), and `tests/verilog/reject-2d/<row>.v` + `.err` hold the located error 2D
 must produce (the construct's name, as the audit's verdict column says), registered as a CTest
-that is skipped until `odin3_elab_run` exists — the handover list for 2D.
+that is skipped until `odin3_elab_run` exists — the handover list for 2D. The 10 **IGNORE**
+rows get the same treatment: `tests/verilog/ignore-2d/<row>.v` + `<row>.warn` hold the located
+warning 2D must emit when it drops the construct (`L18 timescale`, `L21`, `P7 specparam`,
+`N19`, `A2`, `A3`, `T5` non-initial content, `T11`, `Q4`, `S1`, `S3`), registered and skipped
+the same way; their `.ast` goldens in §7.2 show the node 2D drops.
 
 ### 7.4 Corpus (`verilog_micro_parse`, `verilog_vtr_parse`)
 
@@ -726,12 +891,16 @@ that is skipped until `odin3_elab_run` exists — the handover list for 2D.
 test over a fake driver): every `.v` under `tests/micro/verilog` (539 files) sorted by size,
 smallest first (memory rule), each through `odin3-parse-check` (parse, check, print, re-parse,
 equal — no `.ast` goldens for the corpus); a file is expected to fail only when listed in
-`tests/verilog/micro_expect_fail.txt` with a one-line reason (micros that Parmys itself rejects
-as syntax — the PHASE2 #4 exceptions — the two preprocessor micros 2B declares divergent, files
-needing a `.vh` the micro tree lacks; the `syntax/` directory is Odin II's positive syntax set
-and must parse), and an unlisted failure or a listed file that passes fails the test (the list
-must
-shrink, never rot). `verilog_vtr_parse` does the same for `$VTR_ROOT/vtr_flow/benchmarks/
+`tests/verilog/micro_expect_fail.txt` with a one-line reason, and an unlisted failure or a
+listed file that passes fails the test (the list must shrink, never rot). Expected entries:
+the micros Parmys itself rejects (the PHASE2 #4 exceptions) — among them
+`syntax/*_expression_in_{function,task}_port.v`, which call functions and tasks with
+SystemVerilog **named arguments** (`f(.a(x))`), a form `CALL`/`TASK_CALL` cannot hold and
+Verilog-2005 does not have (a located syntax error; logged as a Parmys exception, §9) — the
+two preprocessor micros 2B declares divergent, and files needing a `.vh` the micro tree
+lacks; the rest of `syntax/` is Odin II's positive syntax set and must parse. The run also
+applies the location oracle of §7.2 to every file. `verilog_vtr_parse` does the same for
+`$VTR_ROOT/vtr_flow/benchmarks/
 verilog/*.v` (31) and `koios/*.v` (33), largest last (mcml.v, arm_core.v), registered only when
 `VTR_ROOT` is set (local and nightly; CI has no VTR checkout). A corpus run is the exit
 evidence: every micro and VTR benchmark parses with `--parse-only`, and the printed form
@@ -759,7 +928,13 @@ re-parses equal.
   classifies: both accept (expected); **odin3 rejects, Yosys accepts** — a 2C bug, the test
   fails; odin3 accepts, Yosys rejects — reported with the file (Yosys is stricter on a few
   legal forms, e.g. attributes on `assign`, and 2C is lenient by decision D5), not a failure;
-  both reject — a generator bug, fails. A **mutation** mode drops, duplicates or swaps one
+  both reject — a generator bug, fails. Acceptance alone is weak, so the generator is also a
+  **tree oracle**: it builds each file from its own tree, prints that tree as Verilog with
+  *minimal* parentheses from its own copy of Table 5-4 (the text odin3 reads), and emits
+  the tree as the 2A s-expression; `compare.py` requires `odin3_ast_dump` of the parse to
+  equal it — a precedence or associativity slip in `verilog.y` shows up as a tree
+  difference, which the fully parenthesised round trip of §7.2 cannot see. A **mutation**
+  mode drops, duplicates or swaps one
   token of a valid file and expects a located 2C error whenever Yosys rejects (an accepted
   mutant that Yosys rejects is reported, since `read_verilog` also elaborates and may reject
   semantically). CTest `verilog_gen_vs_yosys` runs 200 seeds when `ODIN3_YOSYS` is found (CI
@@ -817,23 +992,38 @@ into `docs/PHASE2.md` under 2C's decisions-log entry, replacing 2A's "an estimat
   the top), for §3.2's `CASE_ITEM` action; (b) a `uint32_t library_units_from` on the store
   (`odin3_ast_set_library_units_from`/`odin3_ast_library_units_from`; 0 = none), set by the
   pass in §4.2 step 3, so 2D's top selection and module lookup know which `UNIT`s came from
-  `-v`/`-y`; (c) the sentence "a parse-only read holds its parsed store as the run's store until
-  the design is destroyed" added to AST-15/16.
+  `-v`/`-y`, mirrored in the ABI as `odin3_ast_get_library_units_from` with 2D's ABI
+  additions (2D is its consumer); (c) the sentence "a parse-only read holds its parsed store
+  as the run's store until the design is destroyed" added to AST-15/16; (d) §5.1 and §7:
+  "the lexer turns a metacomment into `ATTR` nodes" becomes "the lexer records the
+  metacomment; the parser makes the `ATTR` nodes at the `CASE` reduction" (§2.6); (e) the
+  `PORT_REF` row's note: M6 REJECT when `DOTTED` or *name 0 with an expression*; name 0
+  without an expression is an empty port (§3.6).
 - **2B**: nothing changes; the stream contract is consumed as written. The `.v` cases of the
   corpus harness that need the front end (2B §10.2 `--with-frontend`) can run once this lands
   (`duplicate_module`, `unknown_top` after 2D).
 - **`docs/PASSES.md`**: the `read_verilog` row. **`docs/PHASE2.md`**: 2C's decisions-log entry
-  with VP-11 (LALR, zero budget), VP-13 (`**` left-associative per Table 5-4, Odin II differs),
-  VP-14 (error cap 20), VP-21 (generated into the build tree; `ODIN3_GENERATED_WNO` list as
-  measured), the §7.6 numbers, and the divergence list: attributes on `assign` accepted, `input
-  reg` parsed without comment (D5 is 2D's), `localparam` accepted in a parameter port list.
+  with VP-11 (LALR, zero reported conflicts plus the solved-conflict allowlist), VP-13 (`**`
+  left-associative per Table 5-4 and Yosys; Odin II differs), VP-14 (error cap 20), VP-21
+  (generated into the build tree; `ODIN3_GENERATED_FLAGS` list as measured), the §7.6
+  numbers, and the **divergence list**: attributes on `assign` accepted; attributes on a port
+  connection and on an ANSI function/task port are syntax errors (Annex A allows them);
+  unary operators bind to a primary only (`- -a` needs parentheses; Odin II and Yosys accept
+  it); SystemVerilog named-argument calls `f(.a(x))` are syntax errors — the
+  `syntax/*_expression_in_{function,task}_port.v` micros become Parmys exceptions under
+  PHASE2 #4; `input reg` parsed without comment (D5 is 2D's); `localparam` and `#()`
+  accepted in a parameter port list; `unsigned` accepted everywhere `signed` is; a UDP-style
+  instance with a drive strength is a syntax error (§3.1 i).
 - **`docs/DESIGN.md` §4.1**: the "Bison/Flex grammar" bullet gains "LALR(1), zero conflicts;
   generated at build time (Bison ≥ 3.8, Flex ≥ 2.6.4)".
 - **`.github/workflows/ci.yml`**: `bison flex` in both apt lines; `nightly.yml`: the
   `verilog_gen_vs_yosys` 5,000-seed run and `verilog_vtr_parse` when a VTR checkout is cached
   (a follow-up: the nightly is a stub today).
 
-## 10. Open points for Peter (recommendation first; each is applied as the default meanwhile)
+## 10. Open points (decided as recommended under the overnight rule, 2026-10-11)
+
+Each was Peter's call; the recommendation stands as the decision (the reviewer agreed with all
+five), the alternative is recorded.
 
 1. **Error recovery versus stop-at-first-error.** Recommend: recover at `;`/`endmodule` with
    actions inert after the first error and a cap of 20 (§3.4) — a user fixing a file sees
@@ -841,23 +1031,23 @@ into `docs/PHASE2.md` under 2C's decisions-log entry, replacing 2A's "an estimat
    first error (Yosys does); ≈ 40 fewer lines and one failure mode (review focus 3) less, at the
    cost of one error per run.
 2. **`**` associativity.** Recommend: left, as 1364-2005 Table 5-4 states for every binary
-   operator (§3.3); the Yosys comparison in §7.5 will show whether Yosys agrees, and 2D's
-   constant folding follows the tree either way. Alternative: right (Odin II's `%right`,
-   mathematical convention); if Yosys turns out to be right-associative the exit bar (Parmys)
-   decides and this flips.
+   operator (§3.3) and as Yosys's `%left OP_POW` does, so the exit bar agrees; 2D's constant
+   folding follows the tree. Alternative: right (Odin II's `%right`, mathematical convention).
 3. **Library files read eagerly on the first unresolved name** (§4.2 step 3: all `-v` files at
    once, `-y` lookups per name). Recommend: yes — it matches Verilog-XL/Icarus semantics ("a
    `-v` file's modules are all available"), keeps the UDP rule 4 story simple, and costs
-   nothing on the corpus (`lib_v_y` has one file). Alternative: 2D resolves libraries during
-   elaboration (as 2B's spec assumed), which would need the store unsealed during 2D stage 1 or a
-   second store.
+   nothing on the corpus (`lib_v_y` has one file); shadowed library modules stay in the
+   append-only store and 2D's lookup prefers design units. Alternative: 2D resolves libraries
+   during elaboration (as 2B's spec assumed), which would need the store unsealed during 2D
+   stage 1 or a second store.
 4. **Unnamed module instances are a 2C error** (§4.2 step 5) rather than auto-named. Recommend:
    the error — 1364-2005 §12.1.2 requires the name, no corpus file omits it, and auto-naming
    would invent names that must then be kept stable across runs for `netlist-compare` (the §7.5
    comparison records what Yosys does with one). Alternative: name them `$unnamed$<n>` like
    Odin II's generated names.
 5. **Generated files in the build tree, Bison/Flex required to build** (§6). Recommend: yes;
-   CI and the dev machine already have the exact versions, and committed output would need a
-   lint carve-out. Alternative: commit the generated files under `src/frontends/verilog/gen/`
+   CI and the dev machine already have the exact versions, committed output would need a
+   lint carve-out, and the flag ordering of the review's I10 is handled by source-file
+   `COMPILE_OPTIONS` (§6). Alternative: commit the generated files under `src/frontends/verilog/gen/`
    with the directory added to every exclusion list in `tools/lint.sh` — the "documented narrow
    exclusion" of the brief, which this design makes unnecessary.
