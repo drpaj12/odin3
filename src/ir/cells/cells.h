@@ -41,11 +41,11 @@
 
 /* A scalar (1-bit) port and a vector port whose width is the INT parameter wparam. */
 #define ODIN3_PORT_BIT(pname, pdir)                                                                \
-    { pname, pdir, true, 1, NULL, NULL, NULL }
+    { pname, pdir, true, 1, NULL, NULL, NULL, false }
 #define ODIN3_PORT_VEC(pname, pdir, wparam)                                                        \
-    { pname, pdir, false, 0, wparam, NULL, NULL }
+    { pname, pdir, false, 0, wparam, NULL, NULL, false }
 #define ODIN3_PORT_FN(pname, pdir, wfn)                                                            \
-    { pname, pdir, false, 0, NULL, wfn, NULL }
+    { pname, pdir, false, 0, NULL, wfn, NULL, false }
 
 /*
  * Simulate-hook accessors for the bit-level types (sim/cell.h): the value of bit 0 of an input
@@ -119,6 +119,13 @@ void odin3_cells_word_store(const odin3_sim_cell *cell, const uint64_t *word, ui
 /* Y (the last port) = flag, zero-extended. */
 void odin3_cells_flag_store(const odin3_sim_cell *cell, bool flag);
 
+/*
+ * The number of 1 bits of input port `port`, read as it is (never extended). Shared by the
+ * reductions and the logical cells ($reduce_*, $logic_*), which need no scratch: each reads its
+ * operand self-determined, so A_SIGNED and B_SIGNED do not change the result.
+ */
+uint32_t odin3_cells_port_ones(const odin3_sim_cell *cell, uint32_t port);
+
 /* Y = fn(A, B) (or fn(A) for a unary cell), computed at Y_WIDTH. */
 void odin3_cells_word_sim(const odin3_sim_cell *cell, odin3_word_fn fn);
 
@@ -182,6 +189,20 @@ extern const odin3_celltype_def odin3_cell_dlatch_p;
 extern const odin3_celltype_def odin3_cell_dlatch_n;
 extern const odin3_celltype_def odin3_cell_ff;
 extern const odin3_celltype_def odin3_cell_sop;
+/* 2D IR change A (EL-31, 2D spec §7.2): Yosys word cells, appended after $sop. */
+extern const odin3_celltype_def odin3_cell_neg;
+extern const odin3_celltype_def odin3_cell_xnor;
+extern const odin3_celltype_def odin3_cell_reduce_xnor;
+extern const odin3_celltype_def odin3_cell_reduce_bool;
+extern const odin3_celltype_def odin3_cell_logic_not;
+extern const odin3_celltype_def odin3_cell_logic_and;
+extern const odin3_celltype_def odin3_cell_logic_or;
+extern const odin3_celltype_def odin3_cell_shiftx;
+extern const odin3_celltype_def odin3_cell_pow;
+/*
+ * 2D IR change B (EL-33, spec §8.1): the process cell, appended after $pow. odin3_cell_proc is
+ * declared in ir/ir_internal.h, because celltype.c lets only that definition be a process.
+ */
 
 /* Word-level cells sharing the binary / unary tables above; the _SIM forms have hooks. */
 #define ODIN3_BINARY(var, label)                                                                   \

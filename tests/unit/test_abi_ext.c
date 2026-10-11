@@ -6,6 +6,7 @@
 #include "unity.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -322,7 +323,7 @@ static uint32_t pass_index(const char *name) {
 static void test_pass_register_runs_from_script(void) {
     static echo_record rec;
     char help[] = "abi_echo [args]: records its arguments";
-    odin3_plugin_pass pass = {"abi_echo", help, echo_run, &rec, {NULL}};
+    odin3_plugin_pass pass = {"abi_echo", help, echo_run, &rec, NULL, {NULL}};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&pass));
     memset(help, 'x', sizeof help - 1); /* help was copied */
     uint32_t index = pass_index("abi_echo");
@@ -348,7 +349,7 @@ static void test_pass_register_runs_from_script(void) {
 }
 
 static void test_pass_failure_is_returned(void) {
-    odin3_plugin_pass pass = {"abi_fail", "abi_fail: always fails", fail_run, NULL, {NULL}};
+    odin3_plugin_pass pass = {"abi_fail", "abi_fail: always fails", fail_run, NULL, NULL, {NULL}};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&pass));
     odin3_script_src src = {"-p", ODIN3_SCRIPT_BY_COMMAND};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_design_run_script(design, "check; abi_fail", src));
@@ -360,19 +361,49 @@ static void test_pass_register_rejects(void) {
     static int marker;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(NULL));
     TEST_ASSERT_TRUE(log_has("odin3_pass_register: invalid argument"));
-    const odin3_plugin_pass bad[] = {
-        {"abi_rej", "h", NULL, NULL, {NULL}},      {NULL, "h", echo_run, NULL, {NULL}},
-        {"abi_rej", NULL, echo_run, NULL, {NULL}}, {"abi rej", "h", echo_run, NULL, {NULL}},
-        {"", "h", echo_run, NULL, {NULL}},         {"check", "h", echo_run, NULL, {NULL}},
-        {"abi\"rej", "h", echo_run, NULL, {NULL}}, {"abi_rej", "h", echo_run, NULL, {&marker}}};
+    const odin3_plugin_pass bad[] = {{"abi_rej", "h", NULL, NULL, NULL, {NULL}},
+                                     {NULL, "h", echo_run, NULL, NULL, {NULL}},
+                                     {"abi_rej", NULL, echo_run, NULL, NULL, {NULL}},
+                                     {"abi rej", "h", echo_run, NULL, NULL, {NULL}},
+                                     {"", "h", echo_run, NULL, NULL, {NULL}},
+                                     {"check", "h", echo_run, NULL, NULL, {NULL}},
+                                     {"abi\"rej", "h", echo_run, NULL, NULL, {NULL}},
+                                     {"abi_rej", "h", echo_run, NULL, NULL, {&marker}}};
     uint32_t before = odin3_pass_get_count();
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&bad[i]));
     }
     TEST_ASSERT_TRUE(log_has("odin3_pass_register: pass 'abi_rej': reserved slot is set"));
     TEST_ASSERT_EQUAL_UINT32(before, odin3_pass_get_count());
-    odin3_plugin_pass good = {"abi_rej", "h", echo_run, NULL, {NULL}};
+    odin3_plugin_pass good = {"abi_rej", "h", echo_run, NULL, NULL, {NULL}};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&good));
+}
+
+/* 2D EL-33: the processes slot (the first of the old reserved slots). NULL means REFUSE; the
+ * address of ODIN3_PASS_PROCESSES_OK registers an OK pass; a value above OK is refused and
+ * nothing is registered. The value is read at registration, so the plugin's byte may change
+ * (test_pass_manager's test_plugin_processes_read_once runs such a pass on a design with
+ * processes: this file links only libodin3, which cannot make one). */
+static void test_pass_register_processes_slot(void) {
+    uint8_t one = ODIN3_PASS_PROCESSES_OK;
+    uint8_t two = 2;
+    odin3_plugin_pass refuse = {"abi_proc_null", "h", fail_run, NULL, NULL, {NULL}};
+    odin3_plugin_pass ok = {"abi_proc_ok", "h", fail_run, NULL, &one, {NULL}};
+    odin3_plugin_pass bad = {"abi_proc_bad", "h", fail_run, NULL, &two, {NULL}};
+    /* the layout of four reserved pointer slots is kept: processes took the first */
+    TEST_ASSERT_EQUAL_size_t(8 * sizeof(void *), sizeof(odin3_plugin_pass));
+    TEST_ASSERT_EQUAL_size_t(4 * sizeof(void *), offsetof(odin3_plugin_pass, processes));
+    uint32_t before = odin3_pass_get_count();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_register(&bad));
+    TEST_ASSERT_TRUE(
+        log_has("odin3_pass_register: pass 'abi_proc_bad': processes must be 0 (REFUSE) or 1 "
+                "(OK), not 2"));
+    TEST_ASSERT_EQUAL_UINT32(before, odin3_pass_get_count());
+    TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, pass_index("abi_proc_bad"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&refuse));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_register(&ok));
+    one = 2; /* read once (test_pass_manager runs such a pass on processes) */
+    TEST_ASSERT_EQUAL_UINT32(before + 2, odin3_pass_get_count());
 }
 
 /* --- the example plugin -------------------------------------------------------------------- */
@@ -565,6 +596,7 @@ int main(void) {
     RUN_TEST(test_pass_register_runs_from_script);
     RUN_TEST(test_pass_failure_is_returned);
     RUN_TEST(test_pass_register_rejects);
+    RUN_TEST(test_pass_register_processes_slot);
     RUN_TEST(test_example_plugin_pass_and_celltype);
     RUN_TEST(test_failed_init_keeps_plugin_loaded);
     RUN_TEST(test_prov_sources_of_objects);

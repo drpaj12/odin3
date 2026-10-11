@@ -5,6 +5,7 @@
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "util/alloc.h"
@@ -106,6 +107,15 @@ static const vw_builtin BUILTINS[] = {
     {"$reduce_and", FORM_UNARY, "&", 0},
     {"$reduce_or", FORM_UNARY, "|", 0},
     {"$reduce_xor", FORM_UNARY, "^", 0},
+    /* 2D word cells (EL-31): simlib's own expressions; a reduction or logical result is one bit,
+     * zero-extended by the assignment, and its operand is self-determined. */
+    {"$neg", FORM_UNARY, "-", 0},
+    {"$reduce_xnor", FORM_UNARY, "~^", 0},
+    {"$reduce_bool", FORM_UNARY, "|", 0},
+    {"$logic_not", FORM_UNARY, "!", 0},
+    {"$xnor", FORM_BINARY, "~^", 0},
+    {"$logic_and", FORM_BINARY, "&&", 0},
+    {"$logic_or", FORM_BINARY, "||", 0},
     {"$mux", FORM_MUX, NULL, 0},
     {"$pmux", FORM_PMUX, NULL, 0},
     {"$tribuf", FORM_TRIBUF, NULL, 0},
@@ -972,6 +982,16 @@ static void put_bits(verilog_writer *wr, const uint8_t *bits, uint32_t len) {
 
 /* --- built-in cells ------------------------------------------------------------------------ */
 
+/* A cell's name for a message: its own, else `$c<ID>` (formatted into id). */
+static odin3_bytes cell_label(const verilog_writer *wr, odin3_node_id node, char id[NODE_ID_TEXT]) {
+    uint32_t name = odin3_node_name(wr->mod.module, node);
+    if (name != 0) {
+        return str_bytes(wr, name);
+    }
+    (void)snprintf(id, NODE_ID_TEXT, "$c%u", (unsigned)node.v);
+    return odin3_bytes_cstr(id);
+}
+
 /* `  assign <output port> = ` */
 static void begin_assign(verilog_writer *wr, odin3_node_id node) {
     vw_puts(wr, "  assign ");
@@ -1151,10 +1171,8 @@ static void write_sop(verilog_writer *wr, odin3_node_id node, const vw_builtin *
     int out = cover_output(cover, row_len);
     if (out < 0) {
         char id[NODE_ID_TEXT];
-        uint32_t name = odin3_node_name(wr->mod.module, node);
-        (void)snprintf(id, sizeof id, "$c%u", (unsigned)node.v);
         (void)vw_refuse(wr, "$sop cover mixes ON-set and OFF-set rows in cell",
-                        name != 0 ? str_bytes(wr, name) : odin3_bytes_cstr(id));
+                        cell_label(wr, node, id));
         return;
     }
     begin_assign(wr, node);
@@ -1328,6 +1346,15 @@ static void put_value(verilog_writer *wr, const odin3_value *val) {
         break;
     case ODIN3_VAL_STRING:
         put_string(wr, str_bytes(wr, val->str), 0);
+        break;
+    case ODIN3_VAL_PROC:
+        /* A $proc BODY has no Verilog form; the writer refuses processes before reaching here. */
+        if (wr->st == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s: module '%s': a process body has no Verilog form; run proc first",
+                      wr->path, wr->mod.name != NULL ? wr->mod.name : "");
+        }
+        (void)vw_fail(wr, ODIN3_ERR_INVALID_ARG);
         break;
     case ODIN3_VAL_COVER:
     default:
@@ -1839,6 +1866,9 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
          opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE)) {
         odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path, or an unknown name style");
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
+        return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     verilog_writer wr;
     odin3_status st = wr_init(&wr, design, path);

@@ -283,12 +283,14 @@ static void add_bus(odin3_module *mod, const odin3_port_spec *spec, bus *out) {
 }
 
 static void in_bus(odin3_module *mod, const char *name, uint32_t width, bus *out) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_IN, width, false, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_IN, width, false, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, out);
 }
 
 static void out_bus(odin3_module *mod, const char *name, uint32_t width, bus *out) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_OUT, width, false, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_OUT, width, false, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, out);
 }
 
@@ -418,6 +420,12 @@ static bits bin_xor(const odin3_value *params, const pair *ab) {
     return ref_xor(&op);
 }
 
+static bits bin_xnor(const odin3_value *params, const pair *ab) {
+    pair op = at_y(params, ab);
+    bits out = ref_xor(&op);
+    return ref_not(&out);
+}
+
 /* The comparison of A and B: two's complement only when both are signed, else unsigned. */
 static int bin_cmp(const odin3_value *params, const pair *ab) {
     uint32_t width = (ab->lhs.width > ab->rhs.width ? ab->lhs.width : ab->rhs.width) + 1;
@@ -447,6 +455,23 @@ static bits bin_gt(const odin3_value *params, const pair *ab) {
 }
 static bits bin_ge(const odin3_value *params, const pair *ab) {
     return flag(params, bin_cmp(params, ab) >= 0);
+}
+
+/* A value as a truth value (Verilog `|A`): some bit is 1. Sign extension never changes it. */
+static bool any_one(const bits *val) {
+    for (uint32_t k = 0; k < val->width; k++) {
+        if (val->bit[k] != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bits bin_land(const odin3_value *params, const pair *ab) {
+    return flag(params, any_one(&ab->lhs) && any_one(&ab->rhs));
+}
+static bits bin_lor(const odin3_value *params, const pair *ab) {
+    return flag(params, any_one(&ab->lhs) || any_one(&ab->rhs));
 }
 
 /*
@@ -540,6 +565,15 @@ static void test_gt(void) {
 static void test_ge(void) {
     check_binary("$ge", bin_ge);
 }
+static void test_xnor(void) {
+    check_binary("$xnor", bin_xnor);
+}
+static void test_logic_and(void) {
+    check_binary("$logic_and", bin_land);
+}
+static void test_logic_or(void) {
+    check_binary("$logic_or", bin_lor);
+}
 
 /* --- unary word cells: A_SIGNED A_WIDTH Y_WIDTH; ports A Y --------------------------------------
  */
@@ -574,6 +608,21 @@ static bits un_ror(const odin3_value *params, const bits *val) {
 }
 static bits un_rxor(const odin3_value *params, const bits *val) {
     return reduce(params, val, '^');
+}
+
+/* -A at Y_WIDTH: A extended by A_SIGNED, then 0 - A modulo 2^Y_WIDTH. */
+static bits un_neg(const odin3_value *params, const bits *val) {
+    uint32_t yw = (uint32_t)params[2].i;
+    pair op = {zeros(yw), ext((operand){val, params[0].i != 0}, yw)};
+    return ref_sub(&op);
+}
+/* ~^A: even parity, one bit zero-extended. */
+static bits un_rxnor(const odin3_value *params, const bits *val) {
+    bits odd = reduce(params, val, '^');
+    return from_u64((sized){odd.bit[0] ^ 1U, odd.width});
+}
+static bits un_lnot(const odin3_value *params, const bits *val) {
+    return from_u64((sized){any_one(val) ? 0 : 1, (uint32_t)params[2].i});
 }
 
 /* One module per width pair: input A, outputs Y0 (A unsigned) and Y1 (A signed). */
@@ -627,6 +676,18 @@ static void test_reduce_or(void) {
 }
 static void test_reduce_xor(void) {
     check_unary("$reduce_xor", un_rxor);
+}
+static void test_neg(void) {
+    check_unary("$neg", un_neg);
+}
+static void test_reduce_xnor(void) {
+    check_unary("$reduce_xnor", un_rxnor);
+}
+static void test_reduce_bool(void) {
+    check_unary("$reduce_bool", un_ror); /* simlib: !(!A), which is |A */
+}
+static void test_logic_not(void) {
+    check_unary("$logic_not", un_lnot);
 }
 
 /* --- known answers (anchor the reference models) -----------------------------------------------
@@ -722,6 +783,83 @@ static void test_known_answers(void) {
     TEST_ASSERT_EQUAL_HEX64(0, low_u64((bits[]){run_one_binary(&eqs)}));
 }
 
+/* A single unary cell with the given parameters on input a; returns Y. */
+typedef struct one_unary {
+    const char *type;
+    int64_t a_signed;
+    bits a_val;
+    uint32_t yw;
+} one_unary;
+
+static bits run_unary(const one_unary *spec) {
+    odin3_module *top = new_module();
+    bus a_bus;
+    bus y_bus;
+    in_bus(top, "A", spec->a_val.width, &a_bus);
+    out_bus(top, "Y", spec->yw, &y_bus);
+    const odin3_value params[3] = {odin3_value_int(spec->a_signed),
+                                   odin3_value_int(spec->a_val.width), odin3_value_int(spec->yw)};
+    const bus *const buses[2] = {&a_bus, &y_bus};
+    add_cell(top, type_id(spec->type), params, buses);
+    odin3_sim *sim = build_ok(top);
+    set_port(sim, 0, &spec->a_val);
+    odin3_sim_cycle(sim);
+    bits out = get_port(sim, 0);
+    odin3_sim_destroy(sim);
+    return out;
+}
+
+/* A hand case: type, A_SIGNED, A and its width, Y_WIDTH, the expected Y. */
+typedef struct unary_answer {
+    const char *type;
+    int64_t a_signed;
+    sized a_val;
+    uint32_t yw;
+    uint64_t want;
+} unary_answer;
+
+typedef struct binary_answer {
+    const char *type;
+    sized a_val, b_val;
+    uint32_t yw;
+    uint64_t want;
+} binary_answer;
+
+/* The seven simulated 2D cells (IR change A, EL-31) on hand-computed simlib answers. */
+static void test_known_answers_2d_cells(void) {
+    static const unary_answer k_unary[] = {
+        {"$neg", 0, {0x3, 4}, 4, 0xd},         /* -4'b0011 = 4'b1101 */
+        {"$neg", 1, {0x2, 2}, 4, 0x2},         /* -(2'sb10 = -2) = 4'b0010 */
+        {"$neg", 0, {0x2, 2}, 4, 0xe},         /* -(2'b10 = 2) = 4'b1110 */
+        {"$reduce_xnor", 0, {0x6, 3}, 3, 0x1}, /* ~^3'b110 = 1, zero-extended */
+        {"$reduce_xnor", 0, {0x4, 3}, 3, 0x0}, /* ~^3'b100 = 0 */
+        {"$reduce_bool", 0, {0x0, 4}, 1, 0x0},
+        {"$reduce_bool", 0, {0x4, 4}, 2, 0x1}, /* |4'b0100 = 2'b01 */
+        {"$logic_not", 0, {0x0, 4}, 1, 0x1},
+        {"$logic_not", 0, {0x8, 4}, 2, 0x0},
+    };
+    for (uint32_t i = 0; i < sizeof k_unary / sizeof k_unary[0]; i++) {
+        const unary_answer *ans = &k_unary[i];
+        one_unary spec = {ans->type, ans->a_signed, from_u64(ans->a_val), ans->yw};
+        bits got = run_unary(&spec);
+        bits want = from_u64((sized){ans->want, ans->yw});
+        expect_bits(&want, &got, ans->type);
+    }
+    static const binary_answer k_binary[] = {
+        {"$xnor", {0xc, 4}, {0xa, 4}, 4, 0x9}, /* 1100 ~^ 1010 = 1001 */
+        {"$xnor", {0x3, 2}, {0x3, 4}, 4, 0xf}, /* 2'b11 zero-extended: 0011 ~^ 0011 */
+        {"$logic_and", {0x2, 2}, {0x0, 3}, 1, 0x0}, {"$logic_and", {0x2, 2}, {0x4, 3}, 1, 0x1},
+        {"$logic_or", {0x0, 2}, {0x0, 3}, 1, 0x0},  {"$logic_or", {0x0, 2}, {0x1, 3}, 1, 0x1},
+    };
+    for (uint32_t i = 0; i < sizeof k_binary / sizeof k_binary[0]; i++) {
+        const binary_answer *ans = &k_binary[i];
+        one_binary spec = {ans->type, 0, 0, from_u64(ans->a_val), from_u64(ans->b_val), ans->yw};
+        bits got = run_one_binary(&spec);
+        bits want = from_u64((sized){ans->want, ans->yw});
+        expect_bits(&want, &got, ans->type);
+    }
+}
+
 /* --- cross-check against Yosys simlib.v run in Icarus (tools/sim-check/gen_simlib_cases.py) --- */
 
 /* One generated case: the cell, its parameters, and A, B and the expected Y in hex. */
@@ -748,24 +886,10 @@ static bits from_hex(const char *hex, uint32_t width) {
     return out;
 }
 
-/* Runs one $not cell (A_SIGNED, A, Y_WIDTH as in the case) and returns Y. */
+/* Runs one unary cell (A_SIGNED, A, Y_WIDTH as in the case) and returns Y. */
 static bits run_one_unary(const simlib_case *cse) {
-    odin3_module *top = new_module();
-    bus a_bus;
-    bus y_bus;
-    in_bus(top, "A", cse->aw, &a_bus);
-    out_bus(top, "Y", cse->yw, &y_bus);
-    const odin3_value params[3] = {odin3_value_int(cse->a_signed), odin3_value_int(cse->aw),
-                                   odin3_value_int(cse->yw)};
-    const bus *const buses[2] = {&a_bus, &y_bus};
-    add_cell(top, type_id(cse->type), params, buses);
-    odin3_sim *sim = build_ok(top);
-    bits a_val = from_hex(cse->a_hex, cse->aw);
-    set_port(sim, 0, &a_val);
-    odin3_sim_cycle(sim);
-    bits out = get_port(sim, 0);
-    odin3_sim_destroy(sim);
-    return out;
+    one_unary spec = {cse->type, cse->a_signed, from_hex(cse->a_hex, cse->aw), cse->yw};
+    return run_unary(&spec);
 }
 
 /* Every generated case, mixed signedness included, matches simlib bit for bit. */
@@ -773,7 +897,7 @@ static void test_matches_simlib(void) {
     for (uint32_t i = 0; i < sizeof k_simlib_cases / sizeof k_simlib_cases[0]; i++) {
         const simlib_case *cse = &k_simlib_cases[i];
         bits got;
-        if (strcmp(cse->type, "$not") == 0) {
+        if (odin3_celltype_get(design, type_id(cse->type))->n_ports == 2) {
             got = run_one_unary(cse);
         } else {
             const one_binary spec = {cse->type,
@@ -884,14 +1008,17 @@ static void test_pmux(void) {
 
 static void test_word_cells_have_hooks(void) {
     static const char *const k_with[] = {
-        "$and", "$or", "$xor", "$not", "$add",        "$sub",       "$mul",        "$eq",  "$ne",
-        "$lt",  "$le", "$gt",  "$ge",  "$reduce_and", "$reduce_or", "$reduce_xor", "$mux", "$pmux"};
+        "$and",         "$or",         "$xor",       "$not",     "$add", "$sub",  "$mul",
+        "$eq",          "$ne",         "$lt",        "$le",      "$gt",  "$ge",   "$reduce_and",
+        "$reduce_or",   "$reduce_xor", "$mux",       "$pmux",    "$neg", "$xnor", "$reduce_xnor",
+        "$reduce_bool", "$logic_not",  "$logic_and", "$logic_or"};
     for (uint32_t i = 0; i < sizeof k_with / sizeof k_with[0]; i++) {
         const odin3_celltype_def *def = odin3_celltype_get(design, type_id(k_with[i]));
         TEST_ASSERT_NOT_NULL_MESSAGE(def->simulate, k_with[i]);
     }
-    /* still out of scope (1E spec): division, shifts */
-    static const char *const k_without[] = {"$div", "$mod", "$shl", "$shr", "$sshr"};
+    /* still out of scope (1E spec): division, shifts; 2D: $shiftx and $pow (spec §7.2) */
+    static const char *const k_without[] = {"$div",  "$mod",    "$shl", "$shr",
+                                            "$sshr", "$shiftx", "$pow"};
     for (uint32_t i = 0; i < sizeof k_without / sizeof k_without[0]; i++) {
         const odin3_celltype_def *def = odin3_celltype_get(design, type_id(k_without[i]));
         TEST_ASSERT_NULL_MESSAGE(def->simulate, k_without[i]);
@@ -1478,9 +1605,10 @@ static void test_fn_width_cap(void) {
 
 /* Task 3a minor: a black box is simulated when its type has a hook (here $_AND_'s). */
 static void test_blackbox_with_hook_simulates(void) {
-    static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"B", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def k_ports[] = {
+        {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"B", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     const odin3_celltype_def *and_def = odin3_celltype_get(design, type_id("$_AND_"));
     const odin3_celltype_def def = {"bb_and", ODIN3_GRAN_BLACKBOX, 0,   k_ports, 3, NULL, 0, NULL,
                                     NULL,     and_def->simulate,   NULL};
@@ -1591,7 +1719,15 @@ int main(void) {
     RUN_TEST(test_reduce_and);
     RUN_TEST(test_reduce_or);
     RUN_TEST(test_reduce_xor);
+    RUN_TEST(test_neg);
+    RUN_TEST(test_xnor);
+    RUN_TEST(test_reduce_xnor);
+    RUN_TEST(test_reduce_bool);
+    RUN_TEST(test_logic_not);
+    RUN_TEST(test_logic_and);
+    RUN_TEST(test_logic_or);
     RUN_TEST(test_known_answers);
+    RUN_TEST(test_known_answers_2d_cells);
     RUN_TEST(test_matches_simlib);
     RUN_TEST(test_mux);
     RUN_TEST(test_pmux);

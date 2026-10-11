@@ -20,7 +20,8 @@
 #            A golden Yosys cannot read, or with a word-level internal cell such as `.subckt $pow`
 #            and no `.param` line (write_blif drops a parameterless one on both sides), is
 #            excluded from this step ("ref-excluded", listed).
-#   VERILOG  iverilog -g2005 parses it; Yosys `read_verilog -noblackbox; hierarchy -top <first
+#   VERILOG  iverilog -g2005 parses it, with Yosys 0.55 simlib.v as a library (-l), which defines
+#            the built-in cells written as instances (`$pow`, `$shiftx`, `$mem*`); Yosys `read_verilog -noblackbox; hierarchy -top <first
 #            model>; proc; opt_clean; techmap; opt_clean; write_blif -blackbox` (the writer's own
 #            (* blackbox *) stubs declare the black boxes) and tools/equiv-check
 #            --allow-undriven against the golden. equiv-check cannot model black boxes other
@@ -45,7 +46,8 @@ export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
 usage() {
     cat >&2 <<'USAGE'
 usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH] [--yosys PATH] [--nc PATH] [--ec PATH]
-                    [--max-nodes N] [--dot-timeout S] [--out DIR] [--keep] [--resume] [--fixtures DIR | GOLDEN_ROOT]
+                    [--max-nodes N] [--dot-timeout S] [--simlib PATH] [--out DIR] [--keep] [--resume]
+                    [--fixtures DIR | GOLDEN_ROOT]
   GOLDEN_ROOT   default ~/odin3-ws/golden; only BLIFs whose sibling .prov has status=ok
   --fixtures D  every *.blif under D (no .prov needed); timeouts and caps are failures
   -j N          parallel jobs, 1 or 2 (default 2)
@@ -54,6 +56,8 @@ usage: writer-check [-j N] [-t SECONDS] [-m GB] [--largest-first] [--write PATH]
   --write PATH  odin3-write (default build/release/odin3-write, else build/debug/odin3-write)
   --yosys PATH  Yosys (default $ODIN3_YOSYS, else ~/odin3-ws/external/yosys/build/yosys, else PATH)
   --nc PATH, --ec PATH  netlist-compare, equiv-check (default: the repository's tools/)
+  --simlib PATH Yosys simlib.v for iverilog -l (default: $VTR_ROOT's Yosys 0.55, else
+                ~/odin3-ws/external/vtr-verilog-to-routing's, else the --yosys installation's)
   --max-nodes N dot node budget (default 2000)
   --dot-timeout S  dot -Tsvg layout timeout (default 120); past it, Graphviz nop must parse the file
   --out DIR     work/results directory (default: a new temp dir); --keep keeps the outputs
@@ -305,7 +309,8 @@ json_gate() {
 # Verilog gate for golden $1, Verilog $2, work prefix $3: prints "<iverilog> <equiv>".
 verilog_gate() {
     local gold=$1 vlog=$2 w=$3 rc=0 iv eq top msg
-    capped "$w.iv.log" "$w.iv.rss" "$WC_IVERILOG" -g2005 -o /dev/null "$vlog" || rc=$?
+    capped "$w.iv.log" "$w.iv.rss" "$WC_IVERILOG" -g2005 -o /dev/null -l "$WC_SIMLIB" "$vlog" ||
+        rc=$?
     note_rss "$w.iv.rss"
     if [ "$rc" -eq 0 ]; then iv=ok; else iv=$(fail_word "$rc" "$w.iv.log" FAIL); fi
     top=$(LC_ALL=C awk '$1 == ".model" { print $2; exit }' "$gold")
@@ -475,6 +480,16 @@ find_tools() {
         else WC_YOSYS=$(command -v yosys || true); fi
     fi
     WC_IVERILOG=$(command -v iverilog || true)
+    if [ -z "$WC_SIMLIB" ]; then
+        # The 0.55 oracle's simlib, else the one installed with the Yosys in use.
+        local cand
+        for cand in \
+            "${VTR_ROOT:-$HOME/odin3-ws/external/vtr-verilog-to-routing}/libs/EXTERNAL/yosys/techlibs/common/simlib.v" \
+            "$(dirname "${WC_YOSYS:-/usr/bin/yosys}")/../share/yosys/simlib.v" /usr/share/yosys/simlib.v; do
+            if [ -f "$cand" ]; then WC_SIMLIB=$cand; break; fi
+        done
+    fi
+    [ -f "$WC_SIMLIB" ] || missing="$missing simlib.v($WC_SIMLIB)"
     WC_DOT=$(command -v dot || true)
     WC_NOP=$(command -v nop || true)
     [ -n "$WC_YOSYS" ] && [ -x "$WC_YOSYS" ] || missing="$missing yosys"
@@ -494,6 +509,7 @@ main() {
     WC_WRITE=$REPO/build/release/odin3-write
     [ -x "$WC_WRITE" ] || WC_WRITE=$REPO/build/debug/odin3-write
     WC_YOSYS=""
+    WC_SIMLIB=""
     WC_NC=$REPO/tools/netlist-compare/netlist-compare
     WC_EC=$REPO/tools/equiv-check/equiv-check
     WC_TIMEOUT=600
@@ -510,6 +526,7 @@ main() {
         -m) WC_MEM_KB=$((${2:?} * 1024 * 1024)); shift 2 ;;
         --write) WC_WRITE=${2:?}; shift 2 ;;
         --yosys) WC_YOSYS=${2:?}; shift 2 ;;
+        --simlib) WC_SIMLIB=${2:?}; shift 2 ;;
         --nc) WC_NC=${2:?}; shift 2 ;;
         --ec) WC_EC=${2:?}; shift 2 ;;
         --max-nodes) WC_MAX_NODES=${2:?}; shift 2 ;;
@@ -533,7 +550,7 @@ main() {
     [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
     mkdir -p "$out/res" "$out/tmp"
     if [ "$resume" != 1 ]; then rm -f "$out"/res/* 2>/dev/null || true; fi
-    export WC_WRITE WC_YOSYS WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
+    export WC_WRITE WC_YOSYS WC_SIMLIB WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
         WC_DOT_TIMEOUT WC_NORM
     export WC_RESUME=$resume WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
     # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).

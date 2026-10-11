@@ -111,7 +111,7 @@ static odin3_module *new_module(const char *name) {
 }
 
 static odin3_net_id add_port(odin3_module *mod, const char *name, odin3_dir dir) {
-    odin3_port_spec spec = {intern(name), dir, 1, true, prov};
+    odin3_port_spec spec = {intern(name), dir, 1, true, prov, false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
     uint32_t index = odin3_module_port_count(mod) - 1;
     return odin3_wire_net(mod, odin3_module_port_wire(mod, index), 0);
@@ -295,6 +295,23 @@ static void test_fault_port_wire_mismatch_out(void) {
     TEST_ASSERT_TRUE_MESSAGE(log_has("port 2 (y)"), log_text);
 }
 
+/* Rule 9 ties the cell type's port flags to the port wire (IR-7): its sign, and scalar = 1 bit. */
+static void test_fault_port_sign(void) {
+    expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_PORT_SIGN, 1}, 9, false);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("port 1 (b): wire"), log_text);
+    TEST_ASSERT_TRUE_MESSAGE(log_has("is signed but the cell type's port is unsigned"), log_text);
+}
+
+static void test_fault_port_scalar(void) {
+    odin3_port_spec spec = {intern("wide"), ODIN3_DIR_IN, 2, false, prov, false, 0, 0, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, full(module));
+    expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_PORT_SCALAR, 3}, 9, false);
+    TEST_ASSERT_TRUE_MESSAGE(
+        log_has("port 3 (wide): the cell type's port is scalar but 2 bits wide"), log_text);
+}
+
 static void test_fault_dead_node_live_pin(void) {
     expect_fault((odin3_ir_test_target){ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN, g_buf.v}, 11, true);
 }
@@ -329,6 +346,8 @@ static void test_corrupt_rejects_bad_targets(void) {
         {ODIN3_IR_TEST_WIRE_BACKREF, 9999},
         {ODIN3_IR_TEST_FAULT_COUNT, 1},
         {ODIN3_IR_TEST_PORT_WIRE_MISMATCH, 3},
+        {ODIN3_IR_TEST_PORT_SIGN, 3},
+        {ODIN3_IR_TEST_PORT_SCALAR, 0}, /* a 1-bit port */
     };
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ir_test_corrupt(module, bad[i]));
@@ -598,6 +617,8 @@ int main(void) {
     RUN_TEST(test_fault_port_list);
     RUN_TEST(test_fault_port_wire_mismatch);
     RUN_TEST(test_fault_port_wire_mismatch_out);
+    RUN_TEST(test_fault_port_sign);
+    RUN_TEST(test_fault_port_scalar);
     RUN_TEST(test_fault_dead_node_live_pin);
     RUN_TEST(test_fault_view);
     RUN_TEST(test_corrupt_rejects_bad_targets);

@@ -654,8 +654,26 @@ static void port_bits_match(check_ctx *ctx, uint32_t index, const odin3_node_rec
 }
 
 /*
- * Port `index` against the module's cell type: node type and width, wire name and width, and
- * pin k on the net of wire bit k.
+ * The cell type's flags of port `index` against its wire (IR-7): the wire's sign is the port's
+ * is_signed, and a scalar port is one bit wide.
+ */
+static void port_flags_match(check_ctx *ctx, uint32_t index, const odin3_port_rec *port,
+                             const odin3_wire_rec *wire) {
+    const odin3_port_def *pdef = &ctx->module->type_def.ports[index];
+    if (wire->is_signed != pdef->is_signed) {
+        violation(ctx, R9, "port %u (%s): wire %u is %s but the cell type's port is %s", index,
+                  pdef->name, port->wire.v, wire->is_signed ? "signed" : "unsigned",
+                  pdef->is_signed ? "signed" : "unsigned");
+    }
+    if (pdef->scalar && pdef->width != 1) {
+        violation(ctx, R9, "port %u (%s): the cell type's port is scalar but %u bits wide", index,
+                  pdef->name, pdef->width);
+    }
+}
+
+/*
+ * Port `index` against the module's cell type: node type and width, wire name, width and sign,
+ * the scalar flag, and pin k on the net of wire bit k.
  */
 static void port_matches(check_ctx *ctx, uint32_t index, const odin3_port_rec *port,
                          const odin3_celltype_def *node_def) {
@@ -675,6 +693,7 @@ static void port_matches(check_ctx *ctx, uint32_t index, const odin3_port_rec *p
                   pdef->name, port->wire.v, pdef->width);
         return;
     }
+    port_flags_match(ctx, index, port, wire);
     port_bits_match(ctx, index, node, wire);
 }
 

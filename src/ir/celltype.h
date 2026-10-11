@@ -45,7 +45,9 @@ enum { ODIN3_READER_MAX_TOTAL_WIDTH = 1 << 22 };
  * settle ($_DLATCH_P_, $_DLATCH_N_). CLOCK_PIN0: port 0 is the cell's clock (edge) or enable
  * (level) pin, a scalar input of constant width 1, whose net the simulator drives as a clock;
  * $_FF_ has none (global clock). Registration rejects SEQ_EDGE with SEQ_LEVEL, and CLOCK_PIN0 on
- * a type whose port 0 is not such a pin. The ODIN3_CT_* values themselves are public: see odin3.h.
+ * a type whose port 0 is not such a pin. PROCESS (2D, docs/IR.md IR-19): the type is the
+ * built-in $proc; registration rejects it, and any parameter of kind ODIN3_VAL_PROC, on every
+ * other definition (2D plan point (g)). The ODIN3_CT_* values themselves are public: see odin3.h.
  */
 
 typedef struct odin3_celltype_def odin3_celltype_def;
@@ -89,7 +91,9 @@ struct odin3_width_expr {
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
  * width_expr (an integer expression over INT parameters of the same type), else width_param (the
  * name of an INT parameter of the same type), else the constant width. scalar records whether the
- * port is written without brackets (writers reproduce it).
+ * port is written without brackets (writers reproduce it). is_signed records a signed module port
+ * (odin3_module_add_port sets it; IR-7, 2D IR change C) for writers and the elaborator; it is
+ * false on every other type. It is internal: the ABI's odin3_plugin_port has no sign.
  */
 typedef struct odin3_port_def {
     const char *name;
@@ -99,6 +103,7 @@ typedef struct odin3_port_def {
     const char *width_param; /* name of an INT parameter giving the width */
     uint32_t (*width_fn)(const odin3_value *params, uint32_t port);
     const odin3_width_expr *width_expr; /* not copied; see odin3_width_expr */
+    bool is_signed;
 } odin3_port_def;
 
 /* One parameter: name, kind and default value (IR-10). */
@@ -120,8 +125,9 @@ typedef enum odin3_const {
 /*
  * A cell-type definition. Hooks receive one value per parameter definition, in order. Names must
  * be non-empty; port names are unique, parameter names are unique, a width_param names an INT
- * parameter of the same definition, a width_expr has both hooks and passes its check, and every
- * default has its parameter's kind and passes odin3_value_valid.
+ * parameter of the same definition, a width_expr has both hooks and passes its check, every
+ * default has its parameter's kind and passes odin3_value_valid, and only the built-in $proc has a
+ * PROC parameter or the PROCESS flag.
  */
 struct odin3_celltype_def {
     const char *name;

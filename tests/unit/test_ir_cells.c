@@ -1,17 +1,22 @@
 /*
  * test_ir_cells.c — table-driven tests of the built-in cell library (IR-8..IR-11).
  */
+#include "ir/cells/cells.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
+#include "ir/module.h"
 #include "ir/value.h"
+#include "sim/sim.h"
 #include "unity.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
@@ -20,18 +25,28 @@ enum {
     BAD_INIT = 4,
     SOP_WIDTH = 3,
     ROW_LEN = 4,
-    N_TYPES = 46,
-    STRUCTURAL_TYPES = 7
+    N_TYPES = 56,
+    STRUCTURAL_TYPES = 7,
+    SOP_INDEX = 52,  /* the last 1B type; 2D appends after it (plan point (f)) */
+    NEG_INDEX = 53,  /* the first of the nine 2D word cells (IR change A, EL-31) */
+    POW_INDEX = 61,  /* the last of the nine */
+    PROC_INDEX = 62, /* the process cell (IR change B, EL-33), after the nine */
+    BUILTIN_COUNT = 63,
+    POW_A_WIDTH = 4,
+    POW_B_WIDTH = 3,
+    POW_Y_WIDTH = 5,
+    LOG_TEXT = 512
 };
 
 static odin3_design *design;
 static uint32_t errors_logged;
+static char last_error[LOG_TEXT];
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)msg;
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors_logged++;
+        (void)snprintf(last_error, sizeof last_error, "%s", msg);
     }
 }
 
@@ -123,6 +138,16 @@ static const expect k_expect[] = {
     {"$_DLATCH_N_", BIT, ODIN3_CT_SEQ_LEVEL | ODIN3_CT_CLOCK_PIN0, "IIO", {1, 1, 1}},
     {"$_FF_", BIT, ODIN3_CT_SEQ_EDGE, "IO", {1, 1}},
     {"$sop", BIT, 0, "IO", {0, 1}},
+    {"$neg", WORD, 0, "IO", {1, 1}},
+    {"$xnor", WORD, 0, "IIO", {1, 1, 1}},
+    {"$reduce_xnor", WORD, 0, "IO", {1, 1}},
+    {"$reduce_bool", WORD, 0, "IO", {1, 1}},
+    {"$logic_not", WORD, 0, "IO", {1, 1}},
+    {"$logic_and", WORD, 0, "IIO", {1, 1, 1}},
+    {"$logic_or", WORD, 0, "IIO", {1, 1, 1}},
+    {"$shiftx", WORD, 0, "IIO", {1, 1, 1}},
+    {"$pow", WORD, 0, "IIO", {1, 1, 1}},
+    {"$proc", WORD, ODIN3_CT_PROCESS, "IO", {0, 1}},
 };
 #define N_EXPECT (sizeof k_expect / sizeof k_expect[0])
 
@@ -153,7 +178,9 @@ static void check_shape(const expect *exp) {
             exp->widths[i], odin3_celltype_port_width(design, id, params, i), exp->name);
     }
     if (def->verify != NULL) {
-        TEST_ASSERT_EQUAL_MESSAGE(ODIN3_OK, def->verify(params), exp->name);
+        /* $proc's empty default BODY is rejected: a default process cannot exist (IR-19). */
+        odin3_status want = (def->flags & ODIN3_CT_PROCESS) != 0 ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
+        TEST_ASSERT_EQUAL_MESSAGE(want, def->verify(params), exp->name);
     }
 }
 
@@ -396,6 +423,103 @@ static void test_port_width_overflow_is_rejected(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0, errors_logged);
 }
 
+/* --- the nine 2D word cells (IR change A, EL-31, spec §7.2) ------------------------------- */
+
+static const char *const k_nine[] = {"$neg",         "$xnor",      "$reduce_xnor",
+                                     "$reduce_bool", "$logic_not", "$logic_and",
+                                     "$logic_or",    "$shiftx",    "$pow"};
+enum { N_NINE = sizeof k_nine / sizeof k_nine[0] };
+
+/* Appended after $sop in point (f)'s order, then $proc; built-in IDs 0..52 do not move. */
+static void test_nine_cells_appended_in_order(void) {
+    TEST_ASSERT_EQUAL_UINT32(BUILTIN_COUNT, odin3_builtin_celltype_count);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_sop, odin3_builtin_celltypes[SOP_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_neg, odin3_builtin_celltypes[NEG_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_pow, odin3_builtin_celltypes[POW_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_proc, odin3_builtin_celltypes[PROC_INDEX]);
+    for (uint32_t i = 0; i < N_NINE; i++) {
+        TEST_ASSERT_EQUAL_STRING(k_nine[i], odin3_builtin_celltypes[NEG_INDEX + i]->name);
+        odin3_celltype_id id = find_type(k_nine[i]); /* a fresh design has every built-in */
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(0, id.v, k_nine[i]);
+        TEST_ASSERT_EQUAL_PTR_MESSAGE(odin3_builtin_celltypes[NEG_INDEX + i],
+                                      odin3_celltype_get(design, id), k_nine[i]);
+    }
+}
+
+/* The shared Yosys shapes: unary A Y / A_SIGNED A_WIDTH Y_WIDTH; binary A B Y / five params. */
+static void test_nine_cells_yosys_names(void) {
+    const char *const un_p[] = {"A", "Y", NULL};
+    const char *const un_n[] = {"A_SIGNED", "A_WIDTH", "Y_WIDTH", NULL};
+    const char *const bin_p[] = {"A", "B", "Y", NULL};
+    const char *const bin_n[] = {"A_SIGNED", "B_SIGNED", "A_WIDTH", "B_WIDTH", "Y_WIDTH", NULL};
+    for (uint32_t i = 0; i < N_NINE; i++) {
+        const odin3_celltype_def *def = get_def(k_nine[i]);
+        bool unary = def->n_ports == 2;
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(unary ? 3 : 5, def->n_params, k_nine[i]);
+        check_names(&(name_case){k_nine[i], unary ? un_p : bin_p, unary ? un_n : bin_n});
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, get_def("$neg")->n_ports);
+    TEST_ASSERT_EQUAL_UINT32(2, get_def("$logic_not")->n_ports);
+    TEST_ASSERT_EQUAL_UINT32(3, get_def("$logic_and")->n_ports);
+    TEST_ASSERT_EQUAL_UINT32(3, get_def("$shiftx")->n_ports);
+}
+
+/* Seven get 1E hooks; $shiftx and $pow have none until a pass needs them (§7.2). */
+static void test_nine_cells_hooks(void) {
+    for (uint32_t i = 0; i < N_NINE; i++) {
+        const odin3_celltype_def *def = get_def(k_nine[i]);
+        bool none = strcmp(k_nine[i], "$shiftx") == 0 || strcmp(k_nine[i], "$pow") == 0;
+        TEST_ASSERT_EQUAL_MESSAGE(none, def->simulate == NULL, k_nine[i]);
+        TEST_ASSERT_NULL_MESSAGE(def->const_value, k_nine[i]);
+    }
+}
+
+static odin3_module *new_module(const char *name) {
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(name), &str));
+    odin3_module_id mid = {0};
+    TEST_ASSERT_EQUAL(ODIN3_OK, odin3_module_create(design, str, (odin3_prov_id){0}, &mid));
+    return odin3_module_get(design, mid);
+}
+
+/* A binary node's params: unsigned, the three widths. */
+static odin3_status binary_node(odin3_module *mod, const char *type, int64_t y_width,
+                                odin3_node_id *out) {
+    const odin3_value params[5] = {odin3_value_int(0), odin3_value_int(0),
+                                   odin3_value_int(POW_A_WIDTH), odin3_value_int(POW_B_WIDTH),
+                                   odin3_value_int(y_width)};
+    odin3_node_spec spec = {find_type(type), 0, (odin3_prov_id){0}, params, 5};
+    return odin3_node_create(mod, &spec, out);
+}
+
+static void test_pow_node_pins(void) {
+    odin3_module *mod = new_module("m");
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL(ODIN3_OK, binary_node(mod, "$pow", POW_Y_WIDTH, &node));
+    TEST_ASSERT_EQUAL_UINT32(POW_A_WIDTH + POW_B_WIDTH + POW_Y_WIDTH,
+                             odin3_node_pins(mod, node).count);
+    TEST_ASSERT_EQUAL_UINT32(POW_Y_WIDTH, odin3_node_port(mod, node, 2).count);
+    errors_logged = 0;
+    odin3_node_id bad = {0};
+    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG, binary_node(mod, "$pow", -1, &bad));
+    TEST_ASSERT_GREATER_THAN_UINT32(0, errors_logged);
+    TEST_ASSERT_EQUAL_UINT32(0, bad.v);
+}
+
+/* No simulate hook: the build refuses the module with the 1E message. */
+static void test_shiftx_is_not_simulated(void) {
+    odin3_module *mod = new_module("m");
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL(ODIN3_OK, binary_node(mod, "$shiftx", POW_Y_WIDTH, &node));
+    odin3_sim *sim = NULL;
+    last_error[0] = '\0';
+    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG,
+                      odin3_sim_build(design, odin3_module_id_of(mod), &sim));
+    TEST_ASSERT_NULL(sim);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "cannot simulate `$shiftx` (node "),
+                                 last_error);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_builtin_has_expected_shape);
@@ -409,5 +533,10 @@ int main(void) {
     RUN_TEST(test_names_of_other_types);
     RUN_TEST(test_verify_rejects_more_types);
     RUN_TEST(test_port_width_overflow_is_rejected);
+    RUN_TEST(test_nine_cells_appended_in_order);
+    RUN_TEST(test_nine_cells_yosys_names);
+    RUN_TEST(test_nine_cells_hooks);
+    RUN_TEST(test_pow_node_pins);
+    RUN_TEST(test_shiftx_is_not_simulated);
     return UNITY_END();
 }

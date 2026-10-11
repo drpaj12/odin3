@@ -146,7 +146,7 @@ static odin3_node_id not_gate(odin3_net_id in, odin3_net_id out, const char *nam
 }
 
 static void add_port(odin3_module *mod, const char *name, odin3_dir dir) {
-    odin3_port_spec spec = {intern(name), dir, 1, true, (odin3_prov_id){0}};
+    odin3_port_spec spec = {intern(name), dir, 1, true, (odin3_prov_id){0}, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, &node));
 }

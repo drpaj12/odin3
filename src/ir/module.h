@@ -180,8 +180,17 @@ odin3_const odin3_net_const_value(const odin3_module *module, odin3_net_id net);
 /*
  * A module port. dir is the port's direction as an instance sees it (IN: an input of the module),
  * so IN makes a $port_in node (whose pin drives the module's net), OUT a $port_out, INOUT a
- * $port_inout. width is 1 .. 2^31; scalar records a port written without brackets and needs
- * width 1. name is a non-empty strtab ID that no wire of the module has.
+ * $port_inout. name is a non-empty strtab ID that no wire of the module has.
+ *
+ * Range and sign (IR-7; 2D IR change C, EL-24). Without has_range the port's wire is
+ * [width-1:0], width is 1 .. 2^31, and msb and lsb are ignored. With has_range the wire is
+ * [msb:lsb], in either direction, and the port has |msb - lsb| + 1 bits, at most 2^31: width 0
+ * takes that width, and a nonzero width that differs from it is INVALID_ARG. scalar records a
+ * port written without brackets and needs width 1, so with has_range a one-bit range such as
+ * [5:5]; writers that honour scalar (Verilog, BLIF) write such a port without its index, so only
+ * [0:0] survives a round trip through them (EL-24 never makes another). is_signed, in both forms,
+ * makes the wire signed and is recorded in the module cell type's port (odin3_port_def.is_signed;
+ * check rule 9 compares the two); the ABI's odin3_plugin_port does not carry it.
  */
 typedef struct odin3_port_spec {
     uint32_t name;
@@ -189,15 +198,20 @@ typedef struct odin3_port_spec {
     uint32_t width;
     bool scalar;
     odin3_prov_id prov;
+    bool has_range;
+    int32_t msb, lsb;
+    bool is_signed;
 } odin3_port_spec;
 
 /*
- * Appends a port: creates the port node (WIDTH = width, unnamed), a wire named name with range
- * [width-1:0] and width new unnamed nets (each with the wire bit as primary), connects port pin k
- * to net k, appends the node to the port order and the port to the module's cell type (names,
- * directions, widths, order; IR-7). Everything takes prov. INVALID_ARG also while the module's
- * cell type has live instances (IR-7; deleting them all lifts the refusal). *port_node gets the
- * node. The cell-type definition is updated in place, so adding P ports costs O(P) memory.
+ * Appends a port: creates the port node (WIDTH = the port's width, unnamed), a wire named name
+ * with range [msb:lsb] (or [width-1:0] without has_range) and sign is_signed and one new unnamed
+ * net per bit (each with the wire bit as primary), connects port pin k to the net of wire bit k,
+ * appends the node to the port order and the port to the module's cell type (name, direction,
+ * width, scalar and is_signed, order; IR-7). Everything takes prov. INVALID_ARG for a spec the
+ * paragraph above refuses, and also while the module's cell type has live instances (IR-7;
+ * deleting them all lifts the refusal). Nothing changes on failure. *port_node gets the node. The
+ * cell-type definition is updated in place, so adding P ports costs O(P) memory.
  */
 odin3_status odin3_module_add_port(odin3_module *module, const odin3_port_spec *spec,
                                    odin3_node_id *port_node);
@@ -363,8 +377,9 @@ typedef struct odin3_objref {
 /*
  * Sets attribute key_str (a non-empty strtab ID) of a live object to a copy of value (payload
  * copied into the module), replacing any earlier value. INVALID_ARG for a dead or unknown object,
- * a bad key, or a value odin3_value_valid rejects (unknown kind, a NULL payload of nonzero
- * length, partial cover rows).
+ * a bad key, a value odin3_value_valid rejects (unknown kind, a NULL payload of nonzero
+ * length, partial cover rows), or a PROC value (a process body is only a $proc node's BODY,
+ * IR-19).
  */
 odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key_str,
                             const odin3_value *value);

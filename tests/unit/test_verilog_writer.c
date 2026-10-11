@@ -264,7 +264,8 @@ typedef struct port_args {
 } port_args;
 
 static odin3_wire_id add_port_prov(port_args args, odin3_prov_id prov) {
-    odin3_port_spec spec = {intern(args.name), args.dir, args.width, args.scalar, prov};
+    odin3_port_spec spec = {
+        intern(args.name), args.dir, args.width, args.scalar, prov, false, 0, 0, false};
     odin3_node_id node = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, &node));
     return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
@@ -561,6 +562,49 @@ static void build_attrs(void) {
     odin3_net_id clk = in_bit("clk");
     odin3_node_id flop = storage((storage_args){"$_DFF_P_", clk, net_n, new_net("q"), 2});
     set_attr((odin3_objref){ODIN3_OBJ_NODE, flop.v}, "keep", odin3_value_int(1));
+}
+
+/* A port declared [msb:lsb] (IR-7, 2D IR change C). */
+typedef struct ranged_args {
+    const char *name;
+    odin3_dir dir;
+    int32_t msb, lsb;
+    bool is_signed;
+} ranged_args;
+
+static odin3_wire_id ranged_port(ranged_args args) {
+    odin3_port_spec spec = {.name = intern(args.name),
+                            .dir = args.dir,
+                            .has_range = true,
+                            .msb = args.msb,
+                            .lsb = args.lsb,
+                            .is_signed = args.is_signed};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
+}
+
+/*
+ * Ranged ports keep their declaration (ascending [0:3], descending offset [5:2], ascending through
+ * a negative bound [-1:2]) and every bit select uses the declared index: bit 0 of [0:3] is a[3],
+ * bit 0 of [-1:2] is n[2] and its bit 3 is n[-1].
+ */
+static void test_ranged_ports(void) {
+    (void)new_module("rng");
+    odin3_wire_id wa = ranged_port((ranged_args){"a", ODIN3_DIR_IN, 0, 3, true});
+    odin3_wire_id wd = ranged_port((ranged_args){"d", ODIN3_DIR_IN, 5, 2, false});
+    odin3_wire_id wn = ranged_port((ranged_args){"n", ODIN3_DIR_OUT, -1, 2, false});
+    (void)gate1("$_NOT_", (io_pair){bit_of(wa, 0), bit_of(wn, 0)});
+    (void)gate2("$_AND_", bit_of(wd, 0), bit_of(wd, 3), bit_of(wn, 1));
+    (void)gate2("$_OR_", bit_of(wa, 1), bit_of(wd, 1), bit_of(wn, 2));
+    (void)gate2("$_XOR_", bit_of(wa, 2), bit_of(wa, 3), bit_of(wn, 3));
+    (void)write_ok();
+    expect_has("  input signed [0:3] a,\n");
+    expect_has("  input [5:2] d,\n");
+    expect_has("  output [-1:2] n\n");
+    expect_has("  assign n[2] = ~a[3];\n");
+    expect_has("  assign n[1] = d[2] & d[5];\n");
+    expect_has("  assign n[0] = a[2] | d[3];\n");
+    expect_has("  assign n[-1] = a[1] ^ a[0];\n");
 }
 
 static void test_attributes(void) {
@@ -1072,19 +1116,19 @@ static void test_word_yosys_reads(void) {
 /* --- black boxes and hard cells ------------------------------------------------------------ */
 
 static const odin3_port_def ADDER_PORTS[] = {
-    {"a", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"cin", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"cout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
-    {"sumout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"a", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"b", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"cin", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"cout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
+    {"sumout", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_port_def BBV_PORTS[] = {
-    {"d", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL},
-    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"d", ODIN3_DIR_IN, false, 4, NULL, NULL, NULL, false},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 static const odin3_port_def HMUL_PORTS[] = {
-    {"A", ODIN3_DIR_IN, false, 0, "W", NULL, NULL},
-    {"Y", ODIN3_DIR_OUT, false, 0, "W", NULL, NULL},
+    {"A", ODIN3_DIR_IN, false, 0, "W", NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, false, 0, "W", NULL, NULL, false},
 };
 static const uint8_t MODE_DEFAULT[2] = {1, 0}; /* 2'b01 */
 
@@ -1163,7 +1207,8 @@ static void test_blackbox_stubs(void) {
 }
 
 /* $memrd and other built-ins without a Verilog form are generic instances with every parameter
- * (Yosys reads them as its internal cells; Icarus has no definition, so no compile check). */
+ * (Yosys reads them as its internal cells with `read_verilog -icells`, else as user cells named
+ * `\$memrd`; Icarus needs Yosys simlib.v as a library, so no compile check here). */
 static void test_generic_builtin_instance(void) {
     new_module("mem");
     odin3_net_id clk = in_bit("clk");
@@ -1189,6 +1234,146 @@ static void test_generic_builtin_instance(void) {
                "    .ADDR(addr),\n    .DATA(data)\n  );\n",
                cname(node, name));
     expect_not("(* blackbox *)");
+}
+
+/* --- the 2D word cells (IR change A, EL-31; review M6) ------------------------------------- */
+
+/* ops: the seven 2D cells with a Verilog form, on a[3:0], b[2:0], c[1:0]. */
+static void build_ops(void) {
+    new_module("ops");
+    odin3_net_id a_nets[4];
+    odin3_net_id b_nets[3];
+    odin3_net_id c_nets[2];
+    odin3_netvec a_vec = wire_nets(in_vec("a", 4), a_nets);
+    odin3_netvec b_vec = wire_nets(in_vec("b", 3), b_nets);
+    odin3_netvec c_vec = wire_nets(in_vec("c", 2), c_nets);
+    odin3_net_id y_nets[8][4];
+    odin3_value neg_params[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(4)};
+    odin3_netvec neg[] = {c_vec, out_nets("yneg", 4, y_nets[0])};
+    (void)add_cell("$neg", neg_params, 3, neg);
+    odin3_netvec xnor[] = {c_vec, a_vec, out_nets("yxn", 4, y_nets[1])};
+    (void)binary("$xnor", false, xnor);
+    odin3_netvec rxn[] = {a_vec, out_nets("yrx", 3, y_nets[2])};
+    (void)unary("$reduce_xnor", rxn);
+    odin3_netvec rb[] = {a_vec, out_nets("yrb", 2, y_nets[3])};
+    (void)unary("$reduce_bool", rb);
+    odin3_netvec lnot[] = {a_vec, out_nets("yln", 2, y_nets[4])};
+    (void)unary("$logic_not", lnot);
+    odin3_netvec land[] = {c_vec, b_vec, NV1(out_bit("yla"))};
+    (void)binary("$logic_and", false, land);
+    odin3_netvec lor[] = {c_vec, b_vec, NV1(out_bit("ylo"))};
+    (void)binary("$logic_or", false, lor);
+    odin3_netvec xns[] = {c_vec, b_vec, out_nets("yxs", 4, y_nets[7])};
+    (void)binary("$xnor", true, xns); /* both signed: both sign-extended to 4 bits */
+}
+
+static void test_2d_word_cells_text(void) {
+    build_ops();
+    (void)write_ok();
+    expect_has("  assign yneg = -$signed(c);\n");
+    expect_has("  assign yxn = c ~^ a;\n");
+    expect_has("  assign yrx = ~^a;\n");
+    expect_has("  assign yrb = |a;\n");
+    expect_has("  assign yln = !a;\n");
+    expect_has("  assign yla = c && b;\n");
+    expect_has("  assign ylo = c || b;\n");
+    expect_has("  assign yxs = $signed(c) ~^ $signed(b);\n");
+}
+
+static const char *const OPS_TB =
+    "module tb;\n"
+    "  reg [3:0] a;\n"
+    "  reg [2:0] b;\n"
+    "  reg [1:0] c;\n"
+    "  wire [3:0] yneg, yxn, yxs;\n"
+    "  wire [2:0] yrx;\n"
+    "  wire [1:0] yrb, yln;\n"
+    "  wire yla, ylo;\n"
+    "  ops dut(.a(a), .b(b), .c(c), .yneg(yneg), .yxn(yxn), .yrx(yrx), .yrb(yrb), .yln(yln),\n"
+    "          .yla(yla), .ylo(ylo), .yxs(yxs));\n"
+    "  initial begin\n"
+    "    a = 4'b1000; b = 3'b100; c = 2'b10;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo, yxs);\n"
+    "    a = 4'b0000; b = 3'b000; c = 2'b11;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo, yxs);\n"
+    "    a = 4'b0110; b = 3'b001; c = 2'b00;\n"
+    "    #1 $display(\"%b %b %b %b %b %b %b %b\", yneg, yxn, yrx, yrb, yln, yla, ylo, yxs);\n"
+    "  end\n"
+    "endmodule\n";
+
+/* The written expressions simulate to the simlib answers (the 1E reference values): $neg of a
+ * signed 2-bit c sign-extends, $xnor zero-extends the unsigned c and sign-extends both operands
+ * when both are signed (yxs), the rest are one bit zero-extended. */
+static void test_2d_word_cells_simulate(void) {
+    build_ops();
+    (void)write_ok();
+    put_testbench(OPS_TB);
+    char *compile[] = {"iverilog", "-g2005", "-o", vvp_path, tb_path, out_path, NULL};
+    int rc = run_tool(compile, NULL);
+    if (rc == TOOL_MISSING) {
+        TEST_IGNORE_MESSAGE("iverilog not found: simulation skipped");
+    }
+    TEST_ASSERT_EQUAL_INT(0, rc);
+    char *sim[] = {"vvp", "-n", vvp_path, NULL};
+    TEST_ASSERT_EQUAL_INT(0, run_tool(sim, aux_path));
+    TEST_ASSERT_EQUAL_STRING("0010 0101 000 01 00 1 1 1101\n"
+                             "0001 1100 001 00 01 0 1 0000\n"
+                             "0000 1001 001 01 00 0 1 1110\n",
+                             slurp(aux_path, aux));
+}
+
+/* Yosys reads the 2D cells' expressions back (when installed). */
+static void test_2d_word_cells_yosys_reads(void) {
+    build_ops();
+    (void)write_ok();
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog %s; proc; check -assert", out_path);
+    yosys_runs(script);
+}
+
+/* $shiftx and $pow have no operator form: generic instances with every parameter, as $memrd
+ * (controller ruling on plan point (w)). */
+static odin3_node_id build_no_form(const char *type) {
+    new_module("m");
+    odin3_net_id a_nets[4];
+    odin3_net_id b_nets[2];
+    odin3_netvec ports[] = {wire_nets(in_vec("a", 4), a_nets), wire_nets(in_vec("b", 2), b_nets),
+                            NV1(out_bit("y"))};
+    odin3_value params[5] = {odin3_value_int(0), odin3_value_int(1), odin3_value_int(4),
+                             odin3_value_int(2), odin3_value_int(1)};
+    return add_cell(type, params, 5, ports);
+}
+
+static void expect_no_form_instance(const char *type) {
+    odin3_node_id node = build_no_form(type);
+    (void)write_text();
+    char name[NAME_BUF];
+    char line[MSG_MAX];
+    (void)snprintf(line, sizeof line,
+                   "  \\%s #(.A_SIGNED(0), .B_SIGNED(1), .A_WIDTH(4), .B_WIDTH(2), .Y_WIDTH(1)) "
+                   "%s(\n    .A(a),\n    .B(b),\n    .Y(y)\n  );\n",
+                   type, cname(node, name));
+    expect_has(line);
+    expect_not("(* blackbox *)");
+}
+
+static void test_shiftx_is_a_generic_instance(void) {
+    expect_no_form_instance("$shiftx");
+}
+
+static void test_pow_is_a_generic_instance(void) {
+    expect_no_form_instance("$pow");
+}
+
+/* Yosys reads the instance back as its internal $pow cell with read_verilog -icells: then
+ * `hierarchy -check` accepts it (without -icells it is an undefined user module `\$pow`). */
+static void test_pow_instance_yosys_reads_icells(void) {
+    (void)build_no_form("$pow");
+    (void)write_text();
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script, "read_verilog -icells %s; hierarchy -check -top m",
+                   out_path);
+    yosys_runs(script);
 }
 
 /* --- aliases, feed-throughs and names ------------------------------------------------------ */
@@ -1463,8 +1648,8 @@ static void test_out_of_memory_sweep(void) {
 /* --- fix round 1 --------------------------------------------------------------------------- */
 
 static const odin3_port_def HS_PORTS[] = {
-    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-    {"Z", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL}, /* zero-width */
+    {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"Z", ODIN3_DIR_IN, false, 0, NULL, NULL, NULL, false}, /* zero-width */
 };
 
 /* String parameters are byte-exact: no blank is ever dropped inside a literal or a comment. */
@@ -1666,6 +1851,7 @@ int main(void) {
     RUN_TEST(test_ident_append);
     RUN_TEST(test_escaped_names);
     RUN_TEST(test_escaped_names_yosys_round_trip);
+    RUN_TEST(test_ranged_ports);
     RUN_TEST(test_attributes);
     RUN_TEST(test_attributes_yosys_reads);
     RUN_TEST(test_gates);
@@ -1681,6 +1867,12 @@ int main(void) {
     RUN_TEST(test_word_yosys_reads);
     RUN_TEST(test_blackbox_stubs);
     RUN_TEST(test_generic_builtin_instance);
+    RUN_TEST(test_2d_word_cells_text);
+    RUN_TEST(test_2d_word_cells_simulate);
+    RUN_TEST(test_2d_word_cells_yosys_reads);
+    RUN_TEST(test_shiftx_is_a_generic_instance);
+    RUN_TEST(test_pow_is_a_generic_instance);
+    RUN_TEST(test_pow_instance_yosys_reads_icells);
     RUN_TEST(test_aliases_and_feedthrough);
     RUN_TEST(test_two_input_ports_on_one_net_refused);
     RUN_TEST(test_unwritable_port_refused);

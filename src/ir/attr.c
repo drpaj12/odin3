@@ -45,6 +45,9 @@ static const char *set_error(const odin3_module *module, odin3_objref obj, uint3
     if (!odin3_value_valid(value)) {
         return "the value has an unknown kind, a missing payload or partial cover rows";
     }
+    if (value->kind == ODIN3_VAL_PROC) {
+        return "a process body is only ever a $proc node's BODY parameter (IR-19)";
+    }
     return NULL;
 }
 

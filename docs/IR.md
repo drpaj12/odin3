@@ -121,7 +121,7 @@ node (optional, for wires that are module ports).
 
 **Module** — name; the cell type that instantiates it (§4); the stores above; port nodes in
 order; name maps; alias table; attributes; a per-module arena for small arrays (parameter
-vectors, wire net vectors, attribute values).
+vectors, wire net vectors, attribute values); the count of its live processes (IR-19).
 
 **Design** — strtab; prov store and pass-run table; tombstone table; cell-type table; modules in
 creation order; top module (optional, 0 = none).
@@ -129,11 +129,40 @@ creation order; top module (optional, 0 = none).
 ## 4. Hierarchy
 
 **IR-7 Instances are nodes.** Creating a module registers a cell type of granularity `module`
-whose ports mirror the module's port nodes (names, directions, widths, order). An instance is a
+whose ports mirror the module's port nodes (names, directions, widths, scalar flags, signs,
+order). An instance is a
 node of that type; pin *k* of port *p* corresponds to bit *k* of the module's *p*-th port node.
 Hierarchy stays until an explicit `flatten` pass (spec §5.1). Changing a module's ports after
 instances exist is an error in Phase 1 (`module_add_port` refuses once the module's cell type is
 instantiated).
+
+**Port range and sign** (2D IR change C: 2D spec EL-24, §6.2; PHASE2 #13). A port carries the
+range and sign of its declaration, as IR-2 says every wire does. `odin3_port_spec` has
+`has_range`, `msb`, `lsb` and `is_signed`:
+- Without `has_range`, the port's wire is `[width−1:0]`, the Phase 1 form, and `msb`/`lsb` are
+  ignored. Readers that know no range (BLIF) are unchanged.
+- With `has_range`, the wire is `[msb:lsb]` in either direction (`[0:7]` stays ascending, `[-1:2]`
+  keeps its negative bound), and the port's width is derived as `|msb − lsb| + 1`; `width` 0 asks
+  for that width. A port has 1 .. 2^31 bits either way.
+- Two refusals, both `INVALID_ARG` with nothing changed: a nonzero `width` that differs from the
+  derived width, and `scalar` with a range wider than one bit (`scalar` with `[5:5]` is a one-bit
+  port).
+- `is_signed` applies in both forms: the port wire is signed, and the module's cell type records it
+  in that port's `odin3_port_def.is_signed` (false on every other type), for writers and for the
+  elaborator's output extension (2D EL-10).
+- `scalar` with a one-bit range other than `[0:0]` (`[5:5]`) is accepted and keeps its range in
+  the IR and JSON, but writers that honour `scalar` (Verilog, BLIF) write the port without an
+  index, so the index does not survive a round trip through them. EL-24 sets `scalar` only for a
+  port declared without a range, so the elaborator never makes one.
+- Writers name a port's bits by declared index, as Yosys does: `input [0:7] a` is `a[7] … a[0]`
+  in BLIF (`.inputs`, and the formals of an instance), and `output [-1:2] n` is
+  `n[2] n[1] n[0] n[-1]`.
+
+The sign is internal to the core: the ABI's `odin3_plugin_port`, whose layout `odin3.h` freezes,
+does not carry it, and the ABI stays at v4. A port's range and sign are fixed at creation (2D
+rejected a wire-range mutation after creation: it would leave the cell type's port record without
+the sign). `check` rule 9 ties the cell type's port to its wire: same width, same sign, and a
+scalar port is one bit (2D Task 2 review). Ranges are not compared: the cell type records none.
 
 **Parameterized modules:** each distinct parameter specialization (`sub #(.W(8))`) is its own
 Module and cell type (the front end names them deterministically, e.g. `sub$W=8`); the instance
@@ -164,7 +193,8 @@ writes a width-1 library port as `cin[0]`, Yosys+Parmys as `cin`).
 **Parameters of a `.subckt` (1G).** BLIF cannot give parameters, so a reader derives them: an
 instance of a model the file declares gets the declaration's parameter values; an instance of a
 registered type the file does not declare gets the values its formals imply — each port's width
-seen as its largest bit index + 1 (`p[k]`), inferred as above (`odin3_celltype_infer_params`;
+seen as its largest bit index + 1 (`p[k]`; a built-in `$` word cell's bare `P`, Yosys's spelling
+of a 1-bit connection, is `P[0]`), inferred as above (`odin3_celltype_infer_params`;
 types whose port widths are not parameters keep their defaults). Only a parameter that is some
 port's width parameter is inferred: one used only inside width expressions keeps its default, and
 a declaration it contradicts is reported as a port-width mismatch. Readers cap the widths their
@@ -236,14 +266,20 @@ depends on the IR, not the other way round at link level.
 the two structural tags; D1 amended). Views (spec §5.4): the *RTLIL view* allows `word`,
 `hard`, `blackbox`, `module`, `port`; the *netlist view* allows `bit`, `hard`, `blackbox`,
 `module`, `port`. Mixed is legal only inside `lower`/`raise`. Constant cells (`$_CONST*_`, flag `anyview`) are legal in every view: word-level
-front ends and bit-level netlists both use them.
+front ends and bit-level netlists both use them. The process cell `$proc` (granularity `word`,
+IR-19) is legal in the RTLIL view and never in the netlist view, so `lower` cannot meet one: `proc`
+(2E) lowers processes first.
 
 **IR-10 Parameters vs attributes.** Parameters are typed values a cell type declares, stored per
 node in declaration order. Attributes are free-form `name → value` on any object (Verilog
 `(* … *)`, pragmas, reader extras such as BLIF `.cname`), kept in a per-module side table keyed
 by (object kind, ID). Value kinds: `int` (int64), `bits` (4-state 0/1/x/z, any length),
-`string`, and `cover` (an SOP cover: rows of `0`/`1`/`-` input literals plus an output value,
-kept as written).
+`string`, `cover` (an SOP cover: rows of `0`/`1`/`-` input literals plus an output value,
+kept as written), and (2D) `proc` (`ODIN3_VAL_PROC`: a process body, the `BODY` of a `$proc` node,
+IR-19). A `proc` value is one blob in the module arena, like a cover's rows; copies, comparisons and
+tombstones treat it as bytes, and only the IR reads it (`src/ir/proc.h`). Only the built-in `$proc`
+declares a parameter of this kind (registration refuses it elsewhere, IR-19), and an attribute
+never holds one (`odin3_attr_set` refuses it).
 Reading: `odin3_attr_get(module, obj, key)` for one key; `odin3_attr_foreach(module, obj,
 visit, ctx)` visits every attribute of one object in the order its keys were first set
 (overwriting a key keeps its place; compact keeps the order), so writers emit attributes
@@ -263,6 +299,101 @@ creation, then adds module and black-box types as they appear (IR-7, IR-7b). Nam
 design; registering a different type under an existing name is an error (black-box redeclaration
 follows IR-7b).
 
+**IR-19 Processes are `$proc` nodes** (2D IR change B: 2D spec EL-33, §8.1; PHASE2 #13). An
+`always` block (and each process 2D builds for a continuous-context call or a mem2reg read) is one
+node of the built-in word-level cell type `$proc` (`src/ir/cells/proc.c`): its connectivity is
+ordinary pins and its decision structure (Yosys's `RTLIL::Process`) an opaque parameter. Nothing
+in IR-3, IR-4, IR-6, IR-15 or check rule 4 changes.
+
+- **Ports.** `I` (input, width `I_WIDTH`): every net the process reads and does not drive (action
+  right sides, switch signals, compare operands, sync signals) and the constants it uses, as pins on
+  the module's shared `$_CONST0_/1/X/Z_` nets (IR-4). `O` (output, width `O_WIDTH`): every net it
+  drives. So `odin3_net_driver` of a process-driven net is its `O` pin, the sinks of a net it reads
+  include its `I` pin, `odin3_net_const_value` and fanout walks work unchanged, and a second driver
+  (another process, a cell) is rule 4's error as for any cell.
+- **Each net on at most one `I` pin and at most one `O` pin of one `$proc`, never on both**
+  (reading a net the process drives is `OUT | k` in the body, not a self-loop pin). This is a
+  property of how 2D builds nodes (EL-35), not a check rule (2D plan review M22): the IR accepts any
+  connection, and since a body refers to pins, a later merge that puts two of a node's pins on one
+  net changes nothing the body says.
+- **Parameters.** `I_WIDTH` (INT ≥ 0), `O_WIDTH` (INT ≥ 1) and `BODY` (kind `proc`, IR-10), with
+  defaults 0, 1 and an empty `BODY`, which `verify` rejects, so a default node cannot exist. The only
+  hook is `verify`; `const_value`, `simulate` and the writer hooks are NULL.
+- **Flag and counter.** The type has `ODIN3_CT_PROCESS`, and the IR keeps a per-module count of live
+  nodes whose type has it: creating one adds one; deleting one, replacing one (the old node) and the
+  undo of a failed `odin3_node_create_connected` take one away; `compact` keeps it (only live nodes
+  survive). `odin3_module_proc_count` is O(1); `odin3_design_has_processes` and
+  `odin3_design_first_proc_module` (the first module in creation order with a process) are
+  O(modules). Registration (`celltype.c`) refuses the flag, and any parameter of kind `proc`, on
+  every definition other than the built-in `$proc` itself (identity, not shape: a copy of its
+  definition is refused; 2D plan point (g), review I14). The ABI's plugin registration keeps its
+  `cover` kind bound and flag mask, so a plugin can declare neither.
+- **The body** (`src/ir/proc.h`). Positions (`odin3_pbit`): `IN | k` is the net on `I` pin k,
+  `OUT | k` the net on `O` pin k, `ANY` (`-`, matches anything) appears only in compares. Positions
+  are pin positions, never net IDs, so merging, renaming and compacting nets never touch a body.
+  Spans `{first, len}` index the position array; an action is `lhs = rhs`; a case has its compares,
+  actions and switches (case 0 is the root); a switch has a signal, its cases and the flags
+  `full_case`/`parallel_case`; a sync has a type (posedge, negedge, level 0, level 1, always), a
+  signal and its actions; actions, cases and switches carry their own provenance records (EL-45).
+  `odin3_proc_body_pack` packs a body into one blob in the value's `bits`/`len`: six `uint32_t`
+  counts (positions, compares, actions, cases, switches, syncs), then the six arrays as the C
+  structs, each at an 8-byte-aligned offset, written field by field into zeroed arena memory, so
+  padding is zero and equal bodies are equal bytes. `odin3_proc_body_view` reads a blob in place
+  and refuses another kind, a payload that is not 8-byte aligned (no misaligned record reads) and a
+  header whose arrays do not end exactly at `len`. A body is immutable once its node exists.
+- **Reads of `OUT` positions** (2D re-review N6; 2E depends on it): in an action's right side, a
+  switch signal or a compare, `OUT | k` is the *current* value of the net on that pin, exactly as
+  an RTLIL process reads a wire it assigns: for a sync output the register's held value, for a
+  temporary the value the case tree computed for it, never "the value being assigned in this
+  evaluation". So `q <= q + 1` reads the register. Semantics are otherwise RTLIL's (2D spec §8.1).
+- **Canonical layout** (2D plan point (e), review I3): case 0 is the root; the compares, actions and
+  switches of the cases are contiguous per case and partition their arrays in case order (the cases'
+  actions first; the syncs' actions follow, contiguous per sync in sync order, ending at the last
+  action); the cases of the switches are contiguous per switch and partition `[1, n_cases)` in
+  switch order; and every case of a switch has a higher index than the case that owns the switch.
+  The cases and switches therefore form one tree under case 0 with each used once, and each action
+  belongs to exactly one case or sync. 2D's process generator numbers breadth first.
+- **`verify`** (run by check rule 5, FAST and FULL, as for any type): `I_WIDTH` and `O_WIDTH` in
+  range, the view, then `odin3_proc_body_verify`: the canonical layout; every span inside the
+  position array; `IN | k` with k < `I_WIDTH` and `OUT | k` with k < `O_WIDTH`; no compares on the
+  root case; each compare as wide as its switch's signal; an action's two sides equally wide and
+  not empty (Task 3 review M3; a switch signal may be empty, as 2E's `clean` leaves it); an lhs
+  of `OUT` positions only, none twice in one lhs; `ANY` only in compares (and with no index bits); a
+  switch's flags only the two; a sync's type one of the five, and its signal one `IN` or `OUT`
+  position for edge and level types (an `OUT` position is a block clocked by a net it assigns,
+  `always @(posedge a) a <= ~a;`, which Yosys accepts; 2D plan point (h)) and 0 for always; every
+  `OUT` position the lhs of some action (a pin the body never drives is rejected). It never
+  allocates (review I3): the "twice" and "assigned" checks mark positions in a fixed 8192-bit bitmap
+  on the stack, one pass per 8192 positions, so out of memory can never surface as a rejected body
+  or a false rule-5 error. A rejection logs `$proc: BODY: <why>` (e.g. `action 0: lhs and rhs widths
+  differ (1, 2)`). No new check rule exists.
+- **IR operations**, all as for any cell, by construction. `odin3_node_create_connected` creates a
+  node whole (2D builds the body off-IR, then calls once); `odin3_node_delete` removes it;
+  `odin3_node_replace` replaces it by a node with the same port widths (different widths: delete and
+  create). `odin3_net_merge` moves pins, and a body refers to pins: nothing is rewritten.
+  `odin3_net_delete` needs a pinless net, so it never deletes a net a process uses.
+  `odin3_module_compact` renumbers the node and its pins and copies `BODY` byte for byte (a body
+  needs no map); a dead `$proc` gets the usual tombstone, its parameters and so its body included
+  (IR-6; about 0.05 GB on lenet.v after `proc`, accepted for history: 2D re-review N7). The `always`
+  block's attributes are the node's (`ODIN3_OBJ_NODE`); a switch's are its two flags.
+- **Passes.** A pass that may meet a process must treat a `$proc` node as opaque (no constant
+  propagation or CSE through it; its `O` pins drive unknown values, its `I` pins read). Each pass
+  declares it through its `processes` flag (2D EL-33; mode P since 2D spec v4.2): `OK` passes
+  (readers, `check`, `stats`, `compact`, `hierarchy`, `proc`, `write_rtlil`, `write_verilog_ast`,
+  the project passes and the eight opt passes of 2F) may run on a design with processes;
+  `opt_muxtree` and `opt_clean` skip a module that still has any. The pass manager refuses every
+  `REFUSE` pass (`flatten`, `lower`, `abc`, `sim`, the netlist writers) on such a design before it
+  runs, and the netlist writers refuse it themselves when called directly (`docs/PASSES.md`,
+  "Processes").
+- **RTLIL spelling** (2D spec §13; plan points (r), (s)). `odin3_proc_sigspec` spells nets LSB
+  first in, MSB first out: constants and `ANY` merge into `<n>'<bits>`, consecutive bits of a named
+  wire into `\w [hi:lo]` (a whole wire `\w`, one bit `\w [k]`), another net is `\name` or `$n<ID>`,
+  several chunks go in `{ … }`. `odin3_proc_print` writes a node as an RTLIL `process` block named
+  `$proc$<file>:<line>$<ID>` from its SOURCE record (else `$proc$<ID>`), its attributes first; a
+  position on an unconnected pin fails the print rather than read as `-` (Task 3 review M1). The
+  body printer, `write_rtlil` and the ABI's text of `BODY` share these, so one text serves every
+  test.
+
 ## 6. Provenance: the lineage DAG (PHASE1 #3, D9)
 
 **IR-12 Every node, net and wire carries one `odin3_prov_id`** (pins inherit their node's).
@@ -278,6 +409,12 @@ once, via `util/idindex`). A record holds:
 | `ast` | AST node ID in the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store is held (2A AST-15/16) |
 | `hier` | str ID of the hierarchical path at creation, including generate scopes (`top/u1/gen[3]`) |
 | `parents` | zero or more prov IDs (`DERIVED` only) |
+
+**`hier` is module-relative** for hierarchical IR (2D EL-45): the module's own name (a
+specialization's IR name), then each generate or named-block scope with its loop indices
+(`top/g_stage[2]`, `sub$W=8/genblk1`). An IR module is shared by every instance of its
+specialization, so the instance path is not a property of its objects; `flatten` adds it through its
+`DERIVED` records. The example `top/u1/gen[3]` above is such a flattened path. No field changes.
 
 **Why `run` and `op`:** without them, 100 `$add`s elaborated from one line of a `generate` loop
 would share a record, and the 5,000 gates their lowering produces would be indistinguishable.
@@ -336,8 +473,9 @@ Renaming updates the map; a dead object's name leaves the map.
 **IR-15 All access goes through `src/ir` functions; no code outside `src/ir` writes an IR
 struct field.** The API maintains both sides of every relation. Primitives:
 
-- module: create; `module_add_port(name, dir, width, scalar?, prov)` (creates the port node,
-  its wire, appends to port order, updates the module's cell type; refused once instantiated);
+- module: create; `module_add_port(name, dir, width | has_range [msb:lsb], scalar?, signed?,
+  prov)` (creates the port node, its wire, appends to port order, updates the module's cell type;
+  refused once instantiated; IR-7);
   `$port_*` types have one port of width parameter `WIDTH`;
 - node: create (allocates pins); create-and-connect (type, params, per-port net vectors — the
   common case, so an `$add` is one call, not 97 `connect`s); delete (disconnects and kills its
@@ -390,7 +528,8 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 8. **E** Every wire's nets are live, and each either has this (wire, bit) as its primary or
    lists it in the alias table; every primary/alias entry is matched by the wire's vector.
 9. **E** Port nodes appear in the module's port list once each and match the module's cell type
-   (IR-7), and port pin *k* and port wire bit *k* hold the same net.
+   (IR-7), and port pin *k* and port wire bit *k* hold the same net. The port wire's sign is its
+   cell-type port's `is_signed`, and a scalar port is one bit wide.
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.
@@ -420,6 +559,11 @@ arena; design-global strtab and provenance; IR-18); D1 (six granularity tags; IR
 Under PHASE2 #7 (2A spec §13): `odin3_srcloc` gains `uint32_t loc`, the raw source-manager
 location (part of a record's identity; not of the forward index's (file, line) key), and the
 `ast` field is resolved by run and form (§6 table).
+
+Under PHASE2 #13 (2D spec §19, IR change B): IR-19 (processes as `$proc` nodes: the cell, its
+ports and parameters, the `proc` value kind, the `ODIN3_CT_PROCESS` flag and the per-module
+counter); IR-9 (`$proc` in the RTLIL view only); IR-10 (the `proc` kind); IR-12 (`hier` is
+module-relative). IR-3, IR-4, IR-6, IR-15 and check rule 4 are unchanged.
 
 ## 12. Out of scope for Phase 1
 

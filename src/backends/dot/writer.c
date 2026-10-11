@@ -3,6 +3,7 @@
 
 #include "ir/celltype.h"
 #include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "util/alloc.h"
 #include "util/file.h"
@@ -583,6 +584,9 @@ odin3_status odin3_dot_write(const odin3_design *design, const char *path,
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "dot: design and path are required");
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
+        return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     /* The module and forward-index accessors take a mutable design; nothing here mutates it. */
     dot_ctx dc = {(odin3_design *)design, odin3_design_strtab(design), NULL, 0};

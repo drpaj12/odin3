@@ -92,6 +92,7 @@ add_library(odin3_core OBJECT
     src/ir/prov.c
     src/ir/check.c
     src/ir/compact.c
+    src/ir/proc.c
     src/ir/ir_test.c
     src/ast/srcman.c
     src/ast/srcman_decode.c
@@ -155,6 +156,7 @@ add_library(odin3_core OBJECT
     src/ir/cells/gates.c
     src/ir/cells/dff.c
     src/ir/cells/sop.c
+    src/ir/cells/proc.c
     src/techlib/expr.c
     src/techlib/expr_eval.c
     src/techlib/width.c
@@ -177,7 +179,8 @@ add_library(odin3_core OBJECT
     src/backends/json/lut.c
     src/backends/json/writer.c
     src/backends/verilog/escape.c
-    src/backends/verilog/writer.c)
+    src/backends/verilog/writer.c
+    src/backends/rtlil/writer.c)
 set_target_properties(odin3_core PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden)
@@ -332,6 +335,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_ir_compact)
+    odin3_add_unit_test(test_ir_module)
+    odin3_add_unit_test(test_ir_proc)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -463,13 +468,24 @@ if(BUILD_TESTING)
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
     endif()
     odin3_add_unit_test(test_pass_outputs)
+    target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c
+                                             tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_pass_outputs PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_pass_manager)
+    target_sources(test_pass_manager PRIVATE tests/unit/proc_fixture.c
+                                             tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_pass_manager PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
+    # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
+    odin3_add_unit_test(test_rtlil_writer)
+    target_compile_definitions(test_rtlil_writer PRIVATE
+        ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
+    set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -487,6 +503,16 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    target_sources(test_abi_values PRIVATE tests/unit/proc_fixture.c
+                                           tests/unit/proc_fixture_core.c)
+    # Test-only, never installed: libodin3's objects plus odin3_test_proc_design (Task 3's P1), so
+    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6).
+    add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
+                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c)
+    set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
+    target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
+                                                     ${PROJECT_SOURCE_DIR}/include)
+    target_link_libraries(odin3_procfix PRIVATE odin3_flags ${CMAKE_DL_LIBS})
     # The AST and source-manager ABI (v4) built and read like an adapter would: libodin3.so only.
     add_executable(test_ast_abi tests/unit/test_ast_abi.c)
     target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
@@ -575,6 +601,7 @@ if(BUILD_TESTING)
                 --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
     set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
+    # The ABI stays v4 through 2D (ruling I1): 2D's additions are additive.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
@@ -712,7 +739,8 @@ if(BUILD_TESTING)
     set_tests_properties(verilog_grammar_solved PROPERTIES LABELS unit)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
-    set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>")
+    set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
+                    "ODIN3_PROC_LIB=$<TARGET_FILE:odin3_procfix>")
     if(ODIN3_SANITIZE)
         # gcc needs both runtimes; clang's ASan runtime includes UBSan. Clang names it with or
         # without an arch suffix depending on the runtime-directory layout, so try both.
@@ -769,4 +797,39 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+
+    # Yosys 0.55 as VTR pins it (2D plan point (p)): the oracle of every 2D-2F comparison. Found
+    # only in the VTR build (never PATH, which may hold another Yosys) and accepted only when
+    # `yosys -V` says 0.55; otherwise no 0.55 test is registered (CI has none: they run locally
+    # and nightly). Every later Yosys-0.55 CTest goes inside this block. ODIN3_YOSYS (above) is
+    # the workspace 0.69 build, used only by the nightly drift job; the two are never mixed.
+    find_program(ODIN3_YOSYS055 yosys
+        HINTS $ENV{VTR_ROOT}/build/bin
+              $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin
+        NO_DEFAULT_PATH)
+    set(ODIN3_YOSYS055_OK FALSE)
+    if(ODIN3_YOSYS055)
+        execute_process(COMMAND ${ODIN3_YOSYS055} -V
+            OUTPUT_VARIABLE _yosys055_version ERROR_QUIET RESULT_VARIABLE _yosys055_rc
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if(_yosys055_rc EQUAL 0 AND _yosys055_version MATCHES "Yosys 0\\.55([^0-9]|$)")
+            set(ODIN3_YOSYS055_OK TRUE)
+            message(STATUS "Yosys 0.55: ${ODIN3_YOSYS055} (${_yosys055_version})")
+        else()
+            message(STATUS "Yosys 0.55: ${ODIN3_YOSYS055} is '${_yosys055_version}', not 0.55; "
+                           "no Yosys-0.55 tests")
+        endif()
+    else()
+        message(STATUS "Yosys 0.55: not found (VTR build); no Yosys-0.55 tests")
+    endif()
+    if(ODIN3_YOSYS055_OK)
+        # 2D §13/§14.3: Yosys 0.55 reads every write_rtlil fixture of test_rtlil_writer back
+        # (read_rtlil; write_rtlil) and lowers it (read_rtlil; proc; opt; write_blif), smallest
+        # first.
+        add_test(NAME rtlil_yosys_roundtrip
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/rtlil-check/yosys-roundtrip
+                    ${ODIN3_YOSYS055} ${PROJECT_BINARY_DIR}/rtlil)
+        set_tests_properties(rtlil_yosys_roundtrip PROPERTIES
+            LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+    endif()
 endif()

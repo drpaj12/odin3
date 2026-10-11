@@ -23,7 +23,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-enum { OUT_BUF = 64, MAX_COVER = 64, SEVEN = 7 };
+enum { OUT_BUF = 64, MAX_COVER = 64, SEVEN = 7, CELL_TEXT = 4096 };
 
 extern char **environ;
 
@@ -77,7 +77,8 @@ typedef struct port_args {
 
 /* Adds net_a port; returns the net of its bit 0. */
 static odin3_net_id add_port(odin3_module *mod, port_args args) {
-    odin3_port_spec spec = {intern(args.name), args.dir, args.width, args.width == 1, prov_at(2)};
+    odin3_port_spec spec = {
+        intern(args.name), args.dir, args.width, args.width == 1, prov_at(2), false, 0, 0, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
     uint32_t idx = odin3_module_port_count(mod) - 1;
     return odin3_wire_net(mod, odin3_module_port_wire(mod, idx), 0);
@@ -381,8 +382,8 @@ static void test_user_attributes(void) {
 }
 
 static const odin3_port_def BB_PORTS[] = {
-    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL},
-    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL},
+    {"d", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL, false},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 
 /* A declared black-box model is a Yosys blackbox module: its ports with fresh bits, no cells. */
@@ -452,6 +453,80 @@ static void test_parameters_binary(void) {
     (void)remove("t6b.json");
 }
 
+/* A cell's JSON object to find: the whole text and the cell's key. */
+typedef struct cell_query {
+    const char *text;
+    const char *key;
+} cell_query;
+
+/* The cell object of query.key in query.text: from `"key": {` to the end of its "connections"
+ * member, copied into buf. */
+static const char *cell_object(cell_query query, char *buf, size_t size) {
+    const char *key = query.key;
+    const char *text = query.text;
+    char head[OUT_BUF];
+    (void)snprintf(head, sizeof head, "\"%s\": {", key);
+    const char *start = strstr(text, head);
+    TEST_ASSERT_NOT_NULL_MESSAGE(start, key);
+    const char *conn = strstr(start, "\"connections\"");
+    TEST_ASSERT_NOT_NULL_MESSAGE(conn, key);
+    const char *end = strchr(conn, '}');
+    TEST_ASSERT_NOT_NULL_MESSAGE(end, key);
+    size_t len = (size_t)(end - start);
+    TEST_ASSERT_LESS_THAN_size_t(size, len);
+    memcpy(buf, start, len);
+    buf[len] = '\0';
+    return buf;
+}
+
+/* The 2D word cells (IR change A, EL-31) are generic cells under their Yosys names, $shiftx and
+ * $pow included; each cell's own object has its type, parameters and connections. */
+static void test_2d_word_cells(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id net_x = add_port(mod, (port_args){"x", ODIN3_DIR_IN, 1});
+    odin3_net_id net_s = add_port(mod, (port_args){"s", ODIN3_DIR_IN, 1});
+    odin3_net_id net_y = add_port(mod, (port_args){"y", ODIN3_DIR_OUT, 1});
+    odin3_net_id net_z = add_port(mod, (port_args){"z", ODIN3_DIR_OUT, 1});
+    odin3_net_id net_n = add_port(mod, (port_args){"n", ODIN3_DIR_OUT, 1});
+    odin3_net_id two[2] = {net_x, net_s};
+    odin3_value bin[5] = {odin3_value_int(0), odin3_value_int(1), odin3_value_int(2),
+                          odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec shiftx = {type_id("$shiftx"), intern("sx"), prov_at(9), bin, 5};
+    odin3_netvec sx_ports[3] = {{two, 2}, {&net_s, 1}, {&net_y, 1}};
+    add_node(mod, &shiftx, sx_ports);
+    odin3_node_spec pow = {type_id("$pow"), intern("pw"), prov_at(9), bin, 5};
+    odin3_netvec pw_ports[3] = {{two, 2}, {&net_s, 1}, {&net_z, 1}};
+    add_node(mod, &pow, pw_ports);
+    odin3_value un[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(1)};
+    odin3_node_spec lnot = {type_id("$logic_not"), intern("ln"), prov_at(9), un, 3};
+    odin3_netvec ln_ports[2] = {{two, 2}, {&net_n, 1}};
+    add_node(mod, &lnot, ln_ports);
+    char *text = write_json("t2d.json");
+    static char cell[CELL_TEXT];
+    static const char *const keys[2] = {"sx", "pw"};
+    static const char *const types[2] = {"\"type\": \"$shiftx\"", "\"type\": \"$pow\""};
+    static const char *const outs[2] = {"\"Y\": [ 4 ]", "\"Y\": [ 5 ]"};
+    for (uint32_t i = 0; i < 2; i++) {
+        (void)cell_object((cell_query){text, keys[i]}, cell, sizeof cell);
+        assert_has(cell, types[i]);
+        assert_has(cell, "\"A_SIGNED\": \"00000000000000000000000000000000\"");
+        assert_has(cell, "\"B_SIGNED\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"A_WIDTH\": \"00000000000000000000000000000010\"");
+        assert_has(cell, "\"B_WIDTH\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"Y_WIDTH\": \"00000000000000000000000000000001\"");
+        assert_has(cell, "\"A\": [ 2, 3 ]");
+        assert_has(cell, "\"B\": [ 3 ]");
+        assert_has(cell, outs[i]);
+    }
+    (void)cell_object((cell_query){text, "ln"}, cell, sizeof cell);
+    assert_has(cell, "\"type\": \"$logic_not\"");
+    assert_has(cell, "\"A_SIGNED\": \"00000000000000000000000000000001\"");
+    assert_lacks(cell, "B_SIGNED");
+    assert_has(cell, "\"Y\": [ 6 ]");
+    odin3_util_free(text);
+    (void)remove("t2d.json");
+}
+
 /* A wire [5:2] has offset 2; [0:3] is upto; signedness is written. */
 static void test_wire_range_attributes(void) {
     odin3_module *mod = new_module("top");
@@ -466,6 +541,43 @@ static void test_wire_range_attributes(void) {
                      "          \"upto\": 1,");
     odin3_util_free(text);
     (void)remove("t7.json");
+}
+
+/*
+ * Ranged ports (IR-7, 2D IR change C) are written as Yosys writes them: bits LSB first, [0:3]
+ * signed is upto and signed, [5:2] has offset 2, [-1:2] has offset -1 and is upto.
+ */
+static void test_ranged_ports(void) {
+    odin3_module *mod = new_module("top");
+    static const struct {
+        const char *name;
+        odin3_dir dir;
+        int32_t msb, lsb;
+        bool is_signed;
+    } k_ports[] = {{"a", ODIN3_DIR_IN, 0, 3, true},
+                   {"d", ODIN3_DIR_IN, 5, 2, false},
+                   {"n", ODIN3_DIR_OUT, -1, 2, false}};
+    for (size_t i = 0; i < sizeof k_ports / sizeof k_ports[0]; i++) {
+        odin3_port_spec spec = {.name = intern(k_ports[i].name),
+                                .dir = k_ports[i].dir,
+                                .prov = prov_at(2),
+                                .has_range = true,
+                                .msb = k_ports[i].msb,
+                                .lsb = k_ports[i].lsb,
+                                .is_signed = k_ports[i].is_signed};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
+    }
+    char *text = write_json("t7r.json");
+    assert_has(text, "\"a\": {\n          \"direction\": \"input\",\n"
+                     "          \"bits\": [ 2, 3, 4, 5 ],\n"
+                     "          \"upto\": 1,\n          \"signed\": 1\n");
+    assert_has(text, "\"d\": {\n          \"direction\": \"input\",\n"
+                     "          \"bits\": [ 6, 7, 8, 9 ],\n          \"offset\": 2\n");
+    assert_has(text, "\"n\": {\n          \"direction\": \"output\",\n"
+                     "          \"bits\": [ 10, 11, 12, 13 ],\n"
+                     "          \"offset\": -1,\n          \"upto\": 1\n");
+    odin3_util_free(text);
+    (void)remove("t7r.json");
 }
 
 static size_t count_of(const char *text, const char *needle) {
@@ -866,7 +978,9 @@ int main(void) {
     RUN_TEST(test_declared_blackbox_module);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
+    RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
+    RUN_TEST(test_ranged_ports);
     RUN_TEST(test_cell_key_collision);
     RUN_TEST(test_netname_key_collision);
     RUN_TEST(test_cell_named_like_net);

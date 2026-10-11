@@ -82,14 +82,16 @@ static void add_bus(odin3_module *mod, const odin3_port_spec *spec, odin3_net_id
 
 static odin3_net_id in_bus(odin3_module *mod, const char *name, uint32_t width,
                            odin3_net_id *nets) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_IN, width, width == 1, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_IN, width, width == 1, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, nets);
     return nets[0];
 }
 
 static odin3_net_id out_bus(odin3_module *mod, const char *name, uint32_t width,
                             odin3_net_id *nets) {
-    odin3_port_spec spec = {intern(name), ODIN3_DIR_OUT, width, width == 1, (odin3_prov_id){0}};
+    odin3_port_spec spec = {
+        intern(name), ODIN3_DIR_OUT, width, width == 1, (odin3_prov_id){0}, false, 0, 0, false};
     add_bus(mod, &spec, nets);
     return nets[0];
 }
@@ -669,9 +671,10 @@ static void tbuf_sim(const odin3_sim_cell *view) {
 
 /* Tristate drivers form a bus: several on one net are not a multi-driver error. */
 static void test_tristate_drivers_are_allowed(void) {
-    static const odin3_port_def k_ports[] = {{"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"EN", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                             {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def k_ports[] = {
+        {"A", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"EN", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+        {"Y", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     odin3_celltype_def def = {"test_tbuf", ODIN3_GRAN_BIT, ODIN3_CT_TRISTATE, k_ports, 3, NULL, 0,
                               NULL,        NULL,           tbuf_sim,          NULL};
     odin3_celltype_id tbuf = {0};

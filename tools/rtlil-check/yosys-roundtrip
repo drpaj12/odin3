@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# yosys-roundtrip: Yosys reads Odin III's write_rtlil output back (2D spec §13, §14.3; plan
+# Task 5). For every DIR/*.il, smallest first, Yosys (the 0.55 that CMake's ODIN3_YOSYS055 block
+# found) runs
+#   read_rtlil F; write_rtlil G              (the text parses and passes Yosys's cell checks)
+#   read_rtlil F; proc; opt; write_blif H    (Yosys lowers it, processes included)
+# with G and H under DIR/yosys/. Each run must exit 0, and G must hold the same lines as F up to
+# order within a module: both are normalized (Yosys's "#" header and autoidx dropped, trailing
+# blanks stripped, Yosys's all-x constant N'x spelled out as N x's, each line keyed by its module)
+# and sorted, so a line Yosys dropped, added or reinterpreted fails the file.
+# Usage: yosys-roundtrip <yosys> <dir>. Exit: 0 all passed, 1 any failure, 2 usage or no input.
+set -euo pipefail
+
+if [[ $# -ne 2 || ! -x "$1" || ! -d "$2" ]]; then
+    echo "usage: yosys-roundtrip <yosys> <dir>" >&2
+    exit 2
+fi
+yosys=$1
+dir=$2
+out=$dir/yosys
+mkdir -p "$out"
+
+mapfile -t files < <(find "$dir" -maxdepth 1 -name '*.il' -type f -printf '%s %p\n' |
+    sort -n -k1,1 -k2,2 | cut -d' ' -f2-)
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "yosys-roundtrip: no .il files in $dir (run test_rtlil_writer first)" >&2
+    exit 2
+fi
+
+# The lines of an RTLIL file, normalized and keyed by module, sorted.
+normalized() {
+    awk '
+        /^#/ || /^autoidx / { next }
+        { sub(/[ \t]+$/, "") }
+        /^module / { mod = $2 }
+        {
+            match($0, /^ */)
+            indent = substr($0, 1, RLENGTH)
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^[0-9]+\x27x$/) {
+                    n = substr($i, 1, index($i, "\x27") - 1) + 0
+                    bits = ""
+                    for (k = 0; k < n; k++) bits = bits "x"
+                    $i = n "\x27" bits
+                }
+            }
+            line = $0
+            sub(/^ +/, "", line)
+            print mod "\t" indent line
+        }' "$1" | LC_ALL=C sort
+}
+
+failed=0
+for file in "${files[@]}"; do
+    name=$(basename "$file" .il)
+    for step in "read_rtlil $file; write_rtlil $out/$name.il" \
+        "read_rtlil $file; proc; opt; write_blif $out/$name.blif"; do
+        if "$yosys" -q -p "$step" >"$out/$name.log" 2>&1; then
+            echo "ok    $name: $step"
+        else
+            echo "FAIL  $name: $step"
+            sed 's/^/      /' "$out/$name.log"
+            failed=1
+        fi
+    done
+    if [[ -f $out/$name.il ]] && ! diff <(normalized "$file") <(normalized "$out/$name.il") \
+        >"$out/$name.diff"; then
+        echo "FAIL  $name: Yosys's write_rtlil differs from ours (< ours, > Yosys's):"
+        sed 's/^/      /' "$out/$name.diff"
+        failed=1
+    else
+        echo "ok    $name: same lines after Yosys's read_rtlil; write_rtlil"
+    fi
+done
+exit $failed

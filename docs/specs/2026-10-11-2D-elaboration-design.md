@@ -52,6 +52,14 @@ v4.3 (2026-10-11; the 2E/2F plan re-review): EL-35 step 7 fixes the order of the
 pins. They take their net-ID position among the other `I` pins, so a body that 2E decodes and
 re-encodes keeps its pins (2E §17).
 
+v4.4 (2026-10-11; the PR 2D-1 final review `final-review-2D1`, I1 and M1). First, §13 gains an
+implementation note that describes the exact `write_rtlil` text 2D-1 ships
+(`src/backends/rtlil/writer.h`). It lists the eight places where the text differs from §13's
+bullets, and the note wins. 2E-1 and 2F-1 read it. The note also covers the `attribute \top 1`
+line, which the writer now emits for the design's top. Second, EL-47 now says the ABI stays at
+the unreleased v4 (ruling I1, plan point (c)). It no longer says "one bump", and it says that
+IR change C has no ABI mirror (plan point (d)).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1141,6 +1149,10 @@ typedef struct odin3_proc_body {          /* the BODY parameter; cases[0] is the
 } odin3_proc_body;
 ```
 
+(Implementation note: `src/ir/proc.h` defines the four `ODIN3_PBIT_*` values as macros with
+exactly these values, because a C17 enumeration constant must fit an `int` and `2U << 30` does
+not.)
+
 Body positions are pin positions, never net IDs, so merging, renaming and compacting nets never
 touch a body. The only non-pin entry is `ANY`; every constant 0/1/x/z is an `I` pin on the
 shared constant net (IR-4; the review's F8), so `odin3_net_const_value` stays the one constant
@@ -1165,7 +1177,7 @@ value the process computes (2D's temporaries, EL-35); `proc` drives its net with
 **`verify`** (run by check rule 5, IR §9, for every `$proc` node; FAST and FULL like rule 5): the
 payload has kind `PROC`; every index is in range and every case, switch and action is used
 exactly once (a tree); the root case has no compares; each compare and its switch signal have
-the same width; an action's `lhs` and `rhs` have the same width; `lhs` holds only `OUT`
+the same width; an action's `lhs` and `rhs` have the same width, not 0; `lhs` holds only `OUT`
 positions, none twice in one `lhs`; `ANY` appears only in compares; `IN | k` has `k < I_WIDTH`,
 `OUT | k` has `k < O_WIDTH`; a sync's signal is one `IN` or `OUT` position for edge and level
 types (an `OUT` position is a block clocked by a net it assigns, `always @(posedge a) a <= ~a;`,
@@ -1201,10 +1213,14 @@ pass is safe) or `ODIN3_PASS_PROCESSES_OK`. Before running a `REFUSE` pass the p
 misuse). Built-ins marked `OK`: the readers (`read_blif`, `read_techlib`, `read_verilog`, which
 create processes), `check`, `stats`, `compact`, `hierarchy`, `write_rtlil`, `write_verilog_ast`,
 and `proc` (2E), and (v4.2) the eight opt passes of 2F (`opt`, `opt_expr`, `opt_merge`,
-`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`). Marked `REFUSE`: `flatten`,
-`lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`, `write_dot`. The writers also
-refuse a `$proc` node themselves (`module 'm' has processes; run proc first`) for callers that
-bypass the pass manager.
+`opt_muxtree`, `opt_reduce`, `opt_share`, `opt_dff`, `opt_clean`), and 2B-3's project passes
+(`read_project`, `dump_project`, `preprocess`, which never read the IR as logic; plan point (x)).
+Marked `REFUSE`: `flatten`, `lower`, `abc`, `sim`, `write_blif`, `write_json`, `write_verilog`,
+`write_dot`, and every plugin pass that does not declare `OK`. The refusal comes before the pass
+run is opened, so a refused pass leaves no pass run (plan point (i)). The writers also refuse a
+design with processes themselves (`module 'm' has processes; run proc first`, before the path is
+opened) for callers that bypass the pass manager. (v4.2, mode P: v1–v4.1 also listed the opt
+passes as `REFUSE`, to keep `opt` after `proc`; that order is no longer enforced.)
 
 The opt passes treat a module with processes as Yosys 0.55's do (v4.2): `opt_expr`,
 `opt_merge`, `opt_reduce`, `opt_share` and `opt_dff` treat every `$proc` node as opaque (never
@@ -1580,7 +1596,7 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   arguments are not constant)`; `output argument N of task 't' must be a variable`; `cannot open
   'f' for $readmemh`; `bad address '@zz' in 'f' line N`; `bad word 'g' in 'f' line N`;
   `$readmemh is supported only in an initial block`.
-- **Passes and budget**: `pass 'opt': module 'm' has processes; run proc first` (the pass
+- **Passes and budget**: `pass 'flatten': module 'm' has processes; run proc first` (the pass
   manager, EL-33; `ODIN3_ERR_INVALID_ARG`); `elaboration needs more than N bytes (the budget is
   60% of physical memory)` (EL-46).
 
@@ -1730,12 +1746,15 @@ records, init words), and the process generator `odin3_pg` (builder vectors, `lv
 undo logs, the frame stack). All containers are `src/util`'s (CLAUDE.md); every traversal uses an
 explicit stack (lizard: no recursion).
 
-**ABI** (one bump, after 2C's): `odin3_ast_elaborate` (EL-2) with `odin3_elab_options`;
-`odin3_ast_get_library_units_from` (2C §9 (b)); `odin3_module_get_proc_count`; the `$proc`
-node through the existing node accessors, with `BODY` as text through `odin3_node_get_param_text`
-(EL-33); `odin3_pass_def`'s `processes` flag (EL-33); the `odin3_port_spec` fields of IR change C
-mirrored where ports are created through the ABI. No new object kind (v1's `ODIN3_OBJ_PROC` is
-gone with F1). Each with the purpose/ownership/failure paragraph (CLAUDE.md); cffi cdef updated.
+**ABI** (v4.4: no bump; the ABI stays at the unreleased v4, ruling I1 and plan point (c), and
+`ODIN3_ABI_VERSION` stays 4; the bump is decided once, at the first release or Phase-2 close;
+v1–v4.3 said "one bump, after 2C's"): `odin3_ast_elaborate` (EL-2) with `odin3_elab_options`;
+`odin3_ast_get_library_units_from` (2C §9 (b)); `odin3_module_get_proc_count`; the `$proc` node
+through the existing node accessors, with `BODY` as text through `odin3_node_get_param_text`
+(EL-33); `odin3_pass_def`'s `processes` flag (EL-33). IR change C has no ABI mirror (v4.4, plan
+point (d): no ABI function creates modules or ports, and `odin3_plugin_port` stays frozen). No new
+object kind (v1's `ODIN3_OBJ_PROC` is gone with F1). Each with the purpose/ownership/failure
+paragraph (CLAUDE.md); cffi cdef updated.
 
 ## 13. `write_rtlil` (EL-48)
 
@@ -1762,6 +1781,99 @@ reads with `read_rtlil`): the bridge that lets the Yosys flow lower 2D's output,
   `always` with `update` lines. The node's attributes become the process's.
 - Deterministic (IR-16 order), written atomically like the other writers. A Yosys round trip
   (`read_rtlil; write_rtlil`) is a test (§14.3).
+
+**Implementation note (2D-1, v4.4; binding for 2E-1 and 2F-1).** The text 2D-1's `write_rtlil`
+produces is specified exactly by `src/backends/rtlil/writer.h` (`odin3_rtlil_text`). Where the
+bullets above differ from it, this note and `writer.h` win. The eight differences (review I1 of
+`final-review-2D1`) are:
+
+1. **Order and wire fields.** Per module, in creation order, the writer emits:
+   - at no indent, the module's attributes;
+   - `attribute \top 1` if the module is the design's top (`odin3_design_top`) and carries no
+     `top` attribute of its own (Yosys's `write_rtlil` emits it too, and `read_rtlil` takes it as
+     the top);
+   - `module \name`;
+   - at indent 2, the named wires, the net wires (point 8), the dangling wires (point 3), the
+     cells, the processes and the alias connects (point 2), each group in ID order;
+   - `end`.
+
+   Every object's attributes come on the lines just before it. A named wire is written
+   `wire [width W] [upto] [offset O] [input|output|inout K] [signed] \name`. This is the field
+   order of Yosys 0.55's `rtlil_backend.cc`, not the `width offset upto signed dir` order above.
+   - `width` appears only when W ≠ 1.
+   - `upto` appears for an ascending range (msb < lsb).
+   - `offset` appears only when O, the lower declared index, is not 0.
+   - K is the 1-based port index.
+
+   Unnamed wires are not written; their nets are spelled as nets (point 8).
+2. **Alias connects per run, not per bit.** For each named wire in ID order, the writer finds
+   each maximal run of bits that are not their net's own spelling: either the net's primary is
+   another `(wire, bit)`, or the net is constant. Each run gives one line:
+   - `connect \w <sig>` for the whole wire;
+   - `connect \w [k] <sig>` for one bit of a wider wire;
+   - `connect \w [hi:lo] <sig>` otherwise.
+
+   Here `<sig>` is the run's nets as a sigspec, for example `connect \b \a` or
+   `connect \y [1] 1'0` (2F M11). These lines replace the per-bit
+   `connect \alias [j] \primary [k]` lines described above.
+3. **`$p` dangling wires.** Each run of unconnected pins of a written cell (consecutive bits of
+   one port) is declared as `wire [width N] $p<P>`, where P is the run's lowest pin ID. The
+   cell's `connect` line spells the run as that wire. (A `$proc` with a position on an
+   unconnected pin is refused; see point 6.)
+4. **`$c<ID>` fallback.** A cell is written `\name`. It is written `$c<ID>` instead (ID = the
+   node ID) when the node is unnamed, or when its name is also the name of a written wire or
+   net wire (Yosys keeps cells and wires in one namespace), or when the name is empty or holds
+   a blank, tab, CR, LF or NUL. A cell type is written as its name, with `\` prepended unless it
+   starts with `$` or `\`. An instance's type (a module name) is always written `\name`, the same
+   as that module's `module` line.
+5. **`$mem` flags `1'0`.** On `$mem`, a 0-bit BITS parameter other than `INIT` is written `1'0`,
+   because Yosys 0.55's cell check wants max(1, ports) bits. Those parameters are
+   `RD_CLK_ENABLE`, `RD_CLK_POLARITY` and `RD_TRANSPARENT` with `RD_PORTS` 0, and
+   `WR_CLK_ENABLE` and `WR_CLK_POLARITY` with `WR_PORTS` 0. `MEMID` is a quoted string, with `\`
+   prepended unless it starts with `$` or `\`. Other parameter values are written as follows:
+   - INT in decimal when it fits int32, otherwise as `64'<bits>` (`proc.h`);
+   - BITS as `<n>'<bits>`, MSB first;
+   - STRING quoted, with Yosys's escapes.
+6. **Nine refusals.** In these cases `write_rtlil` fails with `ODIN3_ERR_INVALID_ARG` and the
+   message `write_rtlil: module 'm': cell '<name>' of type '<t>' has no RTLIL form`. The text
+   buffer stays unchanged, and an existing file keeps its contents. The nine cases are:
+   - `$_DFF_P_`, `$_DFF_N_`, `$_DLATCH_P_`, `$_DLATCH_N_` and `$_FF_` (Odin III's carry an
+     `INIT` parameter that Yosys's do not);
+   - a non-constant `$sop` (`WIDTH`/`COVER` where Yosys has `DEPTH`/`TABLE`);
+   - `$memrd` and `$memwr` (no `memory` record is written);
+   - a `$mem` with an empty `MEMID`, which gets its own message ending `has an empty MEMID`.
+
+   Three other inputs are also refused:
+   - a module, wire, net, attribute or cell-type name that RTLIL cannot carry (empty, or holding
+     a blank, tab, CR, LF or NUL);
+   - a net written `\name` whose name a wire also has;
+   - a `$proc` that `odin3_proc_print` refuses.
+
+   A new cell type, such as 2E-1's flip-flops or 3D's `$lut`, must either match Yosys 0.55 or
+   join this list.
+7. **No black-box stubs.** Black-box and hard cell types are not IR modules, so they get no
+   `module` stub; 2E-1 builds the stubs. Until then their instances are cells of a type Yosys
+   does not know. `read_rtlil`, `proc` and `opt` accept such cells, but `hierarchy -check`
+   rejects them. Yosys also counts every connection of such a cell as a user, because
+   `Cell::known()` is false.
+8. **Which nets get `wire $n`.** A net is spelled as a net of its own, and declared as a wire,
+   exactly when it is live, not constant, and its primary is not a bit of a *named* wire
+   (`odin3_proc_sig_is_net`). So the nets of unnamed wires, and nets with no wire at all, are
+   included. The declaration is `wire \name` for a named net, else `wire $n<ID>`, in net ID order.
+   The other nets are spelled as follows:
+   - a net on a named wire's bit as `\w [k]`; runs of bits merge into `\w [hi:lo]`, and a whole
+     wire into `\w`;
+   - a constant net as `1'0`, `1'1`, `1'x` or `1'z`; runs merge, for example `2'x1`. The
+     constant cells themselves are not written.
+
+Processes are written after all cells and are named `$proc$<file>:<line>$<ID>`, from the
+node's first SOURCE location. The name falls back to `$proc$<ID>`, which is also used when the
+file name holds whitespace. Two CTest tests check the writer:
+- `test_rtlil_writer` checks the text;
+- `rtlil_yosys_roundtrip` runs when CMake finds Yosys 0.55. Its `every_cell` fixture holds one
+  cell of every registered built-in `$` type except those refused in point 6, `$mem` and
+  `$proc` (the latter two have fixtures of their own). A new cell definition that disagrees with
+  Yosys 0.55's cell checker therefore fails this gate.
 
 `docs/PASSES.md` gains the row; DESIGN §9's table gains "RTLIL (Yosys text) | — | yes |
 word level with processes; the Yosys bridge for 2D–2F tests".
@@ -2053,6 +2165,7 @@ and reported, never relaxed (2A's rule).
 | 21 | an unsized constant in a concatenation is accepted at its stored width, with a warning | accepted silently (verified on 0.55) | illegal | the exit bar is Parmys |
 | 22 | an unsized literal of exactly a ranged parameter's width stays unsized (extends by its top bit) | same (`simplify.cc` 2381–2390, verified) | sized to the range | matches Yosys's values |
 | 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
+| 24 | a `$pow` read from BLIF (a `.subckt $pow`, as Yosys's `write_blif` writes it) is unsigned: `A_SIGNED` = `B_SIGNED` = 0, the widths implied by the formals | `write_blif` writes `.subckt $pow` with no parameters (unless `-param`, which the Parmys script does not use), so its own BLIF loses the operands' signedness too | — | BLIF carries no sign; no Parmys golden has a negative exponent (controller ruling on the Task 1 review) |
 
 ## 18. Implementation split (EL-51)
 
@@ -2079,11 +2192,14 @@ Made when the PRs land (not by this spec):
 - `docs/IR.md`: IR-19 (the `$proc` cell, EL-33: ports, parameters, the `ODIN3_VAL_PROC` value
   kind in IR-10, the `ODIN3_CT_PROCESS` type flag and the per-module counter); IR-9 (the RTLIL
   view allows `$proc`, the netlist view does not); IR-12's note that `hier` is module-relative;
-  `odin3_port_spec`'s `has_range`/`msb`/`lsb`/`is_signed` (IR change C). IR-3, IR-4, IR-6, IR-15
-  and the §9 check rules are unchanged.
+  `odin3_port_spec`'s `has_range`/`msb`/`lsb`/`is_signed` (IR change C; IR-15's `module_add_port`
+  summary names them). IR-3, IR-4 and IR-6 are unchanged; of the §9 check rules only rule 9 is
+  tightened (IR change C): a port wire's sign must match its cell-type port's `is_signed`, and a
+  scalar port is one bit wide.
 - `docs/DESIGN.md`: §5.2 word list (+ the nine cells, + `$proc` as the process cell); §6 step 2
-  ("processes" = `$proc` nodes) and the stated order `proc` before `opt`, enforced by the pass
-  flag; §9 (the RTLIL row); §4.0 (`--auto-blackbox`; the top rule unchanged).
+  ("processes" = `$proc` nodes) and the order the pass flag enforces (v4.2, mode P: `proc` before
+  the `REFUSE` passes; the opt family may run before `proc`); §9 (the RTLIL row); §4.0
+  (`--auto-blackbox`; the top rule unchanged).
 - 1D spec and `docs/PASSES.md`: `odin3_pass_def.processes` and each built-in's value;
   `read_verilog` options; `write_rtlil`; `compact` (the symtab remap wired).
 - 2A spec: §7's D1 warning is emitted by 2D, not 2E (EL-36); §4.6 points to EL-4 for the refined

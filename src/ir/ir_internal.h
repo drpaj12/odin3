@@ -207,6 +207,12 @@ struct odin3_module {
      */
     odin3_u64map *dead_pins;
     odin3_vec dead_pin_names; /* uint32_t */
+    /*
+     * Live nodes whose type has ODIN3_CT_PROCESS ($proc; docs/IR.md IR-19): node creation adds
+     * one, delete and replace (of the old node) and the undo of a failed create_connected take
+     * one away; compact keeps it (only live nodes survive).
+     */
+    uint32_t proc_count;
 };
 
 /*
@@ -274,6 +280,12 @@ void odin3_net_handover(odin3_module *module, odin3_pin_rec *from, odin3_pin_id 
 
 /* --- wires and aliases (wire.c) ------------------------------------------------------------ */
 
+/* Bits of the range [msb:lsb] in either direction: |msb - lsb| + 1, which may reach 2^32. */
+static inline uint64_t odin3_range_width(int32_t msb, int32_t lsb) {
+    int64_t span = (int64_t)msb - (int64_t)lsb;
+    return (uint64_t)(span < 0 ? -span : span) + 1;
+}
+
 /* A wire about to be created: odin3_wire_prepare fills it, odin3_wire_commit uses it. */
 typedef struct odin3_wire_plan {
     const odin3_wire_spec *spec;
@@ -331,5 +343,7 @@ extern const odin3_celltype_def odin3_cell_const0;
 extern const odin3_celltype_def odin3_cell_const1;
 extern const odin3_celltype_def odin3_cell_constx;
 extern const odin3_celltype_def odin3_cell_constz;
+/* The process cell (cells/proc.c; IR-19): celltype.c lets only this definition be a process. */
+extern const odin3_celltype_def odin3_cell_proc;
 
 #endif

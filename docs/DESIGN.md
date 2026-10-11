@@ -283,7 +283,7 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 ### 5.2 Op registry (CIRCT-inspired, one file per cell type)
 Each cell type is a `const struct odin3_celltype` table entry declaring: name, typed ports (direction, width expression, signedness), parameters, verifier function pointer, **simulation semantics** (C function pointer), BLIF/Verilog/JSON emitter function pointers, and a `granularity` tag (`word`, `bit`, `hard`, `blackbox`, plus the structural `module` and `port` — `docs/IR.md` IR-9). Adding a cell type touches exactly one file; plugins can register cell types at load time.
 
-Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $and $or $xor $not $shl $shr $sshr $eq $ne $lt $le $gt $ge $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $reduce_*`. (`$concat`/`$slice` are not cells: nets are one bit and a port is a pin vector, so slicing and concatenation are which nets a port uses — `docs/IR.md` IR-1.)
+Word-level set (mirrors Yosys RTLIL): `$add $sub $mul $div $mod $neg $pow $and $or $xor $xnor $not $shl $shr $sshr $shiftx $eq $ne $lt $le $gt $ge $logic_not $logic_and $logic_or $mux $pmux $dff $dffe $adff $sdff $mem $memrd $memwr $reduce_and $reduce_or $reduce_xor $reduce_xnor $reduce_bool`. (`$neg $xnor $reduce_xnor $reduce_bool $logic_not $logic_and $logic_or $shiftx $pow` are 2D's IR change A, EL-31: simlib semantics, with simulate hooks for all but `$shiftx` and `$pow`.) Process cell: `$proc` (2D's IR change B, EL-33; `docs/IR.md` IR-19), one node per `always` block, with real `I`/`O` pins and the block's decision structure as its opaque `BODY` parameter; `proc` lowers it. (`$concat`/`$slice` are not cells: nets are one bit and a port is a pin vector, so slicing and concatenation are which nets a port uses — `docs/IR.md` IR-1.)
 Bit-level set: `$_AND_ $_OR_ $_XOR_ $_NOT_ $_MUX_ $_DFF_* $_DLATCH_* $_FF_ $_CONST*_ $sop` (BLIF `.names` covers) and `$_LUT_K_`. Structural: `$port_in/out/inout`. Hard and black-box cells keep their own names (e.g. VTR `adder`, `multiply`), registered by the tech library or declared by a netlist (`docs/IR.md` IR-7b).
 Hard set: generated from the VPR arch `<model>` list and from the Altera primitive library.
 
@@ -298,7 +298,7 @@ Every node, net and wire carries a provenance ID (pins inherit their node's) int
 ## 6. Pass pipeline (forward)
 
 1. `read_*` → AST, symbol table
-2. `elaborate` → word-level IR with processes
+2. `elaborate` → word-level IR with processes: each process is a `$proc` node (`docs/IR.md` IR-19). The pass manager enforces the order through each pass's `processes` flag (2D EL-33, mode P since 2D spec v4.2): a `REFUSE` pass (`flatten`, `lower`, `abc`, `sim` and the netlist writers) fails on a design that still has processes (`pass '<name>': module '<m>' has processes; run proc first`), so `proc` runs before them. The opt family is `OK` and may run before `proc`, as Parmys runs `opt_expr; opt_clean; opt -nodffe -nosdff` (2F OP-3): `$proc` stays opaque to it, and `opt_muxtree`/`opt_clean` skip a module that still has processes
 3. `proc` — predicate-tracked lowering of `always` blocks to mux trees + `$dff*`; blocking/non-blocking analysis; latch detection (warn)
 4. `opt` — constant folding, dead-node removal, CSE, algebraic simplification on arithmetic, mux collapsing (Odin I)
 5. `fsm_detect`, `fsm_recode` (one-hot by default; AST-assisted as in Odin II)
@@ -339,6 +339,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 | VQM | yes | — | Titan |
 | EDIF | yes | later | |
 | JSON (Yosys schema) | later | yes | netlistsvg, nextpnr |
+| RTLIL (Yosys text) | — | yes | word level with processes; the Yosys bridge for 2D–2F tests |
 | Graphviz dot | — | yes | hierarchy clusters; `--focus <hier-path | file:line | cone(net)>`; never renders > N nodes without a focus |
 | CIRCT MLIR | later | yes | hw/comb/seq |
 

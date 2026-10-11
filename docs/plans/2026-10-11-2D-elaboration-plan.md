@@ -301,7 +301,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - `implicit black box 'foo': port 'a' is 4 bits at its first instance; this connection is 8 bits` (error)
   - `value of parameter 'P' of cell type 't' is not an integer` (error)
   - `--elab-only cannot be combined with a script; use read_verilog in the script` (CLI)
-  - `module 'm': cell '<name>' of type '$shiftx' has no structural Verilog form` (`write_verilog`, also `$pow`)
+  - ~~`module 'm': cell '<name>' of type '$shiftx' has no structural Verilog form` (`write_verilog`, also `$pow`)~~ — *Amended (Task 1 fix round, controller ruling):* `write_verilog` writes `$shiftx` and `$pow` as generic instances with every parameter, as `$memrd`; there is no refusal and no text.
 - (x) **`processes` values for other branches' passes.** `read_project`, `dump_project`, `preprocess` and `read_verilog` are `OK` (they never read the IR as logic). Every other existing pass is as §8.1 lists.
 - (y) **`$readmem` paths.** A relative path resolves against the directory of the resolved path of the `FILE` buffer holding the call's `loc`. An absolute path is used as given (DESIGN §4.0).
 - (z) **Text and count fixes.**
@@ -424,7 +424,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Modify `src/ir/cells/reduce.c` (`$reduce_xnor`, `$reduce_bool`, with hooks).
 - Modify `src/ir/cells/shift.c` (`$shiftx` binary, `simulate` NULL).
 - Modify `src/ir/cells/cells.h` (nine `extern`s) and `builtin.c` (append in point (f)'s order).
-- Modify `src/backends/verilog/writer.c` (review M6): `BUILTINS` gains `$neg` (`FORM_UNARY`, `-`), `$reduce_xnor` (`~^`), `$reduce_bool` (`|`), `$logic_not` (`!`), `$xnor` (`FORM_BINARY`, `~^`), `$logic_and` (`&&`) and `$logic_or` (`||`). `$shiftx` and `$pow` are refused with point (w)'s text.
+- Modify `src/backends/verilog/writer.c` (review M6): `BUILTINS` gains `$neg` (`FORM_UNARY`, `-`), `$reduce_xnor` (`~^`), `$reduce_bool` (`|`), `$logic_not` (`!`), `$xnor` (`FORM_BINARY`, `~^`), `$logic_and` (`&&`) and `$logic_or` (`||`). `$shiftx` and `$pow` are refused with point (w)'s text (superseded: generic instances, see (w)).
 - Modify `tests/unit/test_ir_cells.c`, `test_sim_word.c` and `test_verilog_writer.c`.
 - Modify `tools/sim-check/gen_simlib_cases.py`: `BINARY` gains `$xnor $logic_and $logic_or`, `UNARY` gains `$neg $reduce_xnor $reduce_bool $logic_not`. Regenerate `tests/unit/simlib_word_cases.h`. The existing rows change too, because the lists feed the RNG stream (review M7); the commit says so.
 - Modify `docs/DESIGN.md` §5.2: the word list gains the nine cells.
@@ -462,7 +462,7 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 - Every `simlib_word_cases.h` row equal.
 - `test_verilog_writer`:
   - a module with one `$logic_and` (`A_WIDTH` 2, `B_WIDTH` 3, `Y_WIDTH` 1) writes `assign … = … && …;`;
-  - a `$shiftx` node → `INVALID_ARG` with `module 'm': cell '$c1' of type '$shiftx' has no structural Verilog form`.
+  - a `$shiftx` node → `INVALID_ARG` with `module 'm': cell '$c1' of type '$shiftx' has no structural Verilog form` (superseded by (w)'s amendment: the exact generic-instance text).
 
 ### Task 2: IR change C — port range and signedness (EL-24, §6.2)
 **Files:**
@@ -533,6 +533,12 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
   - a count whose array overruns `len`.
 - `typedef struct odin3_proc_why { char text[ODIN3_WIDTH_WHY_MAX]; } odin3_proc_why;`
 - `odin3_status odin3_proc_body_verify(const odin3_proc_body *body, uint32_t i_width, uint32_t o_width, odin3_proc_why *why)` checks every §8.1 rule, point (e)'s canonical layout and point (h). It runs in O(body) with running counters and **never allocates** (review I3).
+  - *Amended (Task 3, agent defaults):*
+    - The widths are one argument, `odin3_proc_widths widths` (`{i_width, o_width}`), because lint (`bugprone-easily-swappable-parameters`) refuses two adjacent `uint32_t`s.
+    - The "assigned" and "twice" checks cannot be O(body) without memory, so they mark positions in a fixed 8192-bit stack bitmap: one pass for up to 8192 outputs (or an lhs spanning that many), else one pass per 8192.
+    - The four `ODIN3_PBIT_*` values are macros, because a C17 enumerator must fit an `int`.
+    - `odin3_proc_value_text` (the RTLIL spelling of an attribute or parameter value) is added for the printer and `write_rtlil`.
+    - `odin3_attr_set` refuses a `PROC` value.
 - `uint32_t odin3_module_proc_count(const odin3_module *module);`
 - `bool odin3_design_has_processes(const odin3_design *design);`
 - `odin3_module_id odin3_design_first_proc_module(const odin3_design *design);` (0 when none)
@@ -623,6 +629,13 @@ Cases:
 - Plugin pass `processes` NULL → `REFUSE`; `&one` → `OK`; `&two` (2) → registration `INVALID_ARG`.
 - Remap: an elaborated store handed to the design with a symtab symbol whose `ir_wire` is wire 5 of `m`. Delete wire 3 and run `compact`: the symbol's `ir_wire` is 4.
 - Every existing pass-manager test still passes.
+
+*Amended (Task 4, agent defaults):*
+- `processes` follows the 2D spec v4.2 (EL-33, mode P), not this plan's older text: the opt passes are `OK` when 2F lands them. DESIGN §6 step 2, IR-19's "Passes" bullet and §8.1's lists (plus §9.1's example and §19) say so.
+- One helper, `odin3_design_refuse_processes(design, pass)` in `src/ir/proc.{h,c}`, logs both texts (pass name, or NULL for a writer); the manager and the four writers call it.
+- `odin3_pass_register_def` also refuses `processes` > 1 (`pass_register: pass '<p>': processes must be 0 (REFUSE) or 1 (OK), not N`), as the ABI does for its slot (`odin3_pass_register: …`).
+- `tests/unit/proc_fixture.{h,c}` hold P1 for `test_pass_manager` and `test_pass_outputs` (linked by `target_sources`).
+- Task 3 review minors folded in: M1 (`odin3_proc_print` fails on a position on an unconnected pin: `proc_print: node N: position IN|k is on an unconnected pin`), M3 (`verify` rejects an empty action: `action N: empty`), M5 (a printer test of multi-bit chunk actions).
 
 ### Task 5: `write_rtlil` and the Yosys-0.55 CMake block (EL-48, §13; ruling C2)
 **Files:**
@@ -1949,6 +1962,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - the bench output verbatim and the sweeps' summaries;
   - the divergence list §17 by reference, and the v4 spec amendments (EL-39 x defaults, EL-30 `~&`);
   - the erratum of point (h) (§14.1's stale OUT-sync phrase);
+  - the spec v4.4 errata from the 2D-1 final review: §13's implementation note (the `write_rtlil` text 2D-1 ships, with `attribute \top 1`) and EL-47's ABI line (v4 kept, no bump);
   - the Parmys exceptions added to PHASE2 #4;
   - this plan's points (a)–(bb) as agent defaults;
   - ABI v4 kept unreleased, with the bump deferred to the first release or Phase-2 close as a decision item;

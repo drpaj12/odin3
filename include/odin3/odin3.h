@@ -13,6 +13,7 @@
  * provenance visitors, logging.
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
+ * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -100,7 +101,8 @@ odin3_status odin3_plugin_load(const char *path);
  *
  * Iteration. Module-local IDs run from 1 to one before the store's end (odin3_module_get_*_end),
  * in creation order; deleted ("dead") objects keep their ID until compact, so skip them with
- * odin3_*_is_live. Accessors also answer for a dead object (what it held when it died).
+ * odin3_*_is_live. Accessors also answer for a dead object (what it held when it died), with one
+ * exception: the text of a dead $proc node's PROC parameter (odin3_node_get_param_text) is refused.
  *
  * Failures. Every function below that takes a design (but odin3_design_destroy) returns
  * odin3_status. ODIN3_ERR_INVALID_ARG, logged as "<function>: invalid argument …", for a NULL
@@ -161,12 +163,18 @@ typedef enum odin3_granularity {
     ODIN3_GRAN_PORT
 } odin3_granularity;
 
-/* Kind of a parameter value (IR-10): integer, 4-state bit vector, string, SOP cover. */
+/*
+ * Kind of a parameter value (IR-10): integer, 4-state bit vector, string, SOP cover, and (2D) a
+ * process body: the BODY parameter of a built-in $proc node (docs/IR.md IR-19), an opaque blob
+ * only the core reads (odin3_node_get_param_text gives its text). A plugin cell type cannot
+ * declare a PROC parameter.
+ */
 typedef enum odin3_value_kind {
     ODIN3_VAL_INT,
     ODIN3_VAL_BITS,
     ODIN3_VAL_STRING,
-    ODIN3_VAL_COVER
+    ODIN3_VAL_COVER,
+    ODIN3_VAL_PROC
 } odin3_value_kind;
 
 /* --- design -------------------------------------------------------------------------------- */
@@ -328,16 +336,30 @@ odin3_status odin3_script_resolve_file(const char *path);
 typedef odin3_status (*odin3_pass_run_fn)(odin3_design *design, const char *args, void *user);
 
 /*
+ * Whether a pass may run on a design that still has processes ($proc nodes, before `proc`; 2D
+ * EL-33). REFUSE (the default) makes the pass manager fail the pass without running it, logging
+ * "pass '<name>': module '<m>' has processes; run proc first" (ODIN3_ERR_INVALID_ARG). OK lets it
+ * run; such a pass must then treat every $proc node as opaque (no constant propagation or CSE
+ * through it; its O pins drive unknown values, its I pins read).
+ */
+enum { ODIN3_PASS_PROCESSES_REFUSE = 0, ODIN3_PASS_PROCESSES_OK = 1 };
+
+/*
  * A pass as a plugin describes it. name: non-empty printable ASCII without blanks, ';', '#' or '"'
  * (a script word); help: its one-line usage, shown by `odin3 --help`; run: its body; user:
- * passed to run as is. reserved: must be all NULL (later ABI versions give the slots a meaning).
+ * passed to run as is. processes: NULL (ODIN3_PASS_PROCESSES_REFUSE, what a plugin built before
+ * this slot had a meaning passes) or the address of a uint8_t holding ODIN3_PASS_PROCESSES_REFUSE
+ * or _OK (an enumeration constant has no address), read once at registration (the plugin need not
+ * keep the byte). reserved: must be all NULL (later ABI versions give the slots a meaning). The
+ * layout is the one of four reserved slots: processes was the first.
  */
 typedef struct odin3_plugin_pass {
     const char *name;
     const char *help;
     odin3_pass_run_fn run;
     void *user;
-    void *reserved[4];
+    const uint8_t *processes;
+    void *reserved[3];
 } odin3_plugin_pass;
 
 /*
@@ -346,8 +368,10 @@ typedef struct odin3_plugin_pass {
  * provenance run, with the IR checked before and after (Debug builds, or odin3_pass_set_check),
  * timed and logged. name and help are copied; user must stay valid while the pass can run.
  * ODIN3_ERR_INVALID_ARG (logged) for a NULL pass, name, help or run, a bad name, a name already
- * registered (built-in or not) or a reserved slot that is not NULL; ODIN3_ERR_NO_MEMORY. Nothing
- * is registered on failure. Process-wide; not thread-safe; a pass cannot be unregistered.
+ * registered (built-in or not), a processes value above ODIN3_PASS_PROCESSES_OK or a reserved
+ * slot that is not NULL; ODIN3_ERR_NO_MEMORY. Nothing is registered on failure. A pass whose
+ * processes is NULL or REFUSE is refused on a design with processes (see
+ * ODIN3_PASS_PROCESSES_REFUSE). Process-wide; not thread-safe; a pass cannot be unregistered.
  */
 odin3_status odin3_pass_register(const odin3_plugin_pass *pass);
 
@@ -376,6 +400,15 @@ odin3_status odin3_module_get_node_count(const odin3_design *design, uint32_t mo
 odin3_status odin3_module_get_net_count(const odin3_design *design, uint32_t module,
                                         uint32_t *count);
 odin3_status odin3_module_get_wire_count(const odin3_design *design, uint32_t module,
+                                         uint32_t *count);
+
+/*
+ * *count gets the number of live process nodes ($proc, before the `proc` pass lowers them; 2D
+ * EL-33) of the module. O(1): the IR keeps the count. A module with a nonzero count makes every
+ * pass registered as ODIN3_PASS_PROCESSES_REFUSE fail on the design. Nothing is returned for the
+ * caller to free. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions say.
+ */
+odin3_status odin3_module_get_proc_count(const odin3_design *design, uint32_t module,
                                          uint32_t *count);
 
 /* *count gets the number of module ports. Fails only with ODIN3_ERR_INVALID_ARG, as the conventions
@@ -441,9 +474,17 @@ odin3_status odin3_node_get_param_count(const odin3_design *design, odin3_ref no
  * its value as text (see Strings): an INT in decimal; BITS as one character per bit from '0',
  * '1', 'x', 'z', most significant bit first ("" for no bits); a STRING as is; a COVER as BLIF
  * .names rows, each its input characters ('0', '1', '-'), a space when it has inputs, its
- * output character and '\n'. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count,
- * besides the conventions. odin3_node_get_param_text may intern the text in the design's string
- * table (not an IR change; other strings stay valid): ODIN3_ERR_NO_MEMORY then.
+ * output character and '\n'; a PROC (the BODY of a $proc node) as the RTLIL process block the
+ * core prints for the node (2D spec section 13): first the node's attributes, one
+ * "attribute \key value" line each, then "process <name>", its assign lines, its switches
+ * ("switch <sig>" preceded by "attribute \full_case 1" / "attribute \parallel_case 1" lines when
+ * flagged, then each "case <patterns>" line with the case's body, and "end"), its sync lines with
+ * their update lines, and "end"; each line ends in '\n', the attribute, process and final end lines
+ * at no indent and the lines inside indented two spaces per level; each position is spelled as the
+ * net on its pin. ODIN3_ERR_INVALID_ARG (logged) for an index >= the parameter count, besides the
+ * conventions, and for a PROC that cannot be printed (the node is dead, unlike the other kinds,
+ * or a position is on an unconnected pin). odin3_node_get_param_text may intern the text in the
+ * design's string table (not an IR change; other strings stay valid): ODIN3_ERR_NO_MEMORY then.
  */
 odin3_status odin3_node_get_param_name(const odin3_design *design, odin3_ref node, uint32_t index,
                                        const char **name);
@@ -568,14 +609,16 @@ odin3_status odin3_attr_set_string(odin3_design *design, odin3_obj obj, const ch
  * Simulation (1E): SEQ_EDGE, edge-triggered storage whose outputs depend only on its state (it
  * cuts the simulator's combinational graph); SEQ_LEVEL, a level-sensitive latch; at most one of
  * the two. CLOCK_PIN0: port 0 is the clock (edge) or enable (level) pin, a scalar input of
- * constant width 1.
+ * constant width 1. PROCESS (2D): the type is the built-in process cell $proc, whose live nodes
+ * the IR counts per module (docs/IR.md IR-19); no other type, and no plugin type, may have it.
  */
 enum {
     ODIN3_CT_TRISTATE = 1,
     ODIN3_CT_ANYVIEW = 2,
     ODIN3_CT_SEQ_EDGE = 4,
     ODIN3_CT_SEQ_LEVEL = 8,
-    ODIN3_CT_CLOCK_PIN0 = 16
+    ODIN3_CT_CLOCK_PIN0 = 16,
+    ODIN3_CT_PROCESS = 32
 };
 
 /*
@@ -649,7 +692,8 @@ typedef struct odin3_plugin_celltype {
  * afterwards hold the type (odin3_design_create) and their readers instantiate it by name (a BLIF
  * `.subckt`, its parameters derived from the connected pins as for any type); existing designs do
  * not see it. ODIN3_ERR_INVALID_ARG (logged) for a NULL definition, a reserved slot that is not
- * NULL, a granularity, direction, kind or flag out of range, a name with a character it may not
+ * NULL, a granularity, direction, kind or flag out of range (ODIN3_VAL_PROC and ODIN3_CT_PROCESS
+ * belong to the built-in $proc and are out of range here), a name with a character it may not
  * hold, a scalar port that is not 1 bit wide, a width_param with a non-zero width, a non-INT
  * parameter with a non-zero dflt, a definition the IR rejects (a missing or duplicate name, a
  * width_param that names no INT parameter, inconsistent simulation flags), or a name already

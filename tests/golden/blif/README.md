@@ -23,7 +23,14 @@ Verbatim oracle outputs from `~/odin3-ws/golden` (written by `tools/run-oracle.s
 `ansiportlist_2.parmys.blif` has three models: the top and the `.blackbox` models `adder`
 (scalar formals) and `multiply` (vector formals `b[0..35]`, `a[0..35]`, `out[0..71]`).
 `pow.parmys.blif` and `dffsre.parmys.blif` instantiate Yosys cells (`$pow`, `$_DFFSR_PPP_`) that
-no `.model` declares (the reader makes them implicit black boxes). `elsif_both_defined.odin.blif`
+no `.model` declares. `$_DFFSR_PPP_` is not registered, so the reader makes it an implicit black
+box; `$pow` is the registered word cell since 2D (IR change A, EL-31), its widths implied by the
+formals (a bare `B=` of a 1-bit port, as Yosys writes it, is `B[0]`). `write_verilog` writes it as a
+generic `\$pow #(…)` instance, which writer-check's iverilog step resolves through Yosys simlib.v
+(`-l`). Known limitation: BLIF carries no parameters, so a BLIF-read `$pow` (like any word cell)
+is unsigned — `a ** -1` written by Yosys as a 32-bit all-ones `B` reads as the exponent 2^32 − 1,
+not simlib's `A ** $signed(B)`. Nothing evaluates `$pow` yet (no hook); a future lowering must not
+trust the signedness of a BLIF-read `$pow`. `elsif_both_defined.odin.blif`
 drives one net from two `.names` (read as written; `check` reports rule 4).
 
 ## Hand-written fixtures

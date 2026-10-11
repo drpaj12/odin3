@@ -14,12 +14,15 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <dirent.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 
 #ifndef ODIN3_BLIF_FIXTURES
 #error "ODIN3_BLIF_FIXTURES must name tests/golden/blif"
@@ -604,6 +607,103 @@ static void test_generated_names_are_unique(void) {
     TEST_ASSERT_EQUAL_UINT32(live_nets(module), live_nets(module_of(design2, 1)));
 }
 
+/* A port declared [msb:lsb] (IR-7, 2D IR change C). */
+typedef struct ranged {
+    const char *name;
+    odin3_dir dir;
+    int32_t msb, lsb;
+} ranged;
+
+static odin3_wire_id ranged_port(odin3_module *module, ranged port) {
+    odin3_port_spec spec = {.name = intern_in(odin3_module_design(module), port.name),
+                            .dir = port.dir,
+                            .has_range = true,
+                            .msb = port.msb,
+                            .lsb = port.lsb};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
+}
+
+static void expect_contains(const char *text, const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, needle), text);
+}
+
+/* Writes the design, reads it back and writes that again: the two texts are the same. */
+static const char *write_stable(char *text) {
+    static char again[TEXT_MAX];
+    write_ok(design, OUT_PATH);
+    read_into(design2, OUT_PATH);
+    write_ok(design2, OUT2_PATH);
+    TEST_ASSERT_EQUAL_STRING(slurp(OUT_PATH, text), slurp(OUT2_PATH, again));
+    return text;
+}
+
+/*
+ * Port bits are named by their declared index, LSB first, as Yosys 0.55 write_blif names them:
+ * [0:3] (ascending) lists a[3] … a[0], [5:2] (descending, offset) d[2] … d[5], and [-1:2]
+ * (ascending through a negative bound) n[2] n[1] n[0] n[-1]. Read back (as scalar ports named
+ * `a[3]` …) and written again, the text is unchanged.
+ */
+static void test_ranged_port_bits(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = ranged_port(module, (ranged){"a", ODIN3_DIR_IN, 0, 3});
+    (void)ranged_port(module, (ranged){"d", ODIN3_DIR_IN, 5, 2});
+    odin3_wire_id out = ranged_port(module, (ranged){"n", ODIN3_DIR_OUT, -1, 2});
+    for (uint32_t k = 0; k < 4; k++) {
+        new_buffer(module, odin3_wire_net(module, in, k), odin3_wire_net(module, out, k));
+    }
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a[3] a[2] a[1] a[0] d[2] d[3] d[4] d[5]\n"
+                             ".outputs n[2] n[1] n[0] n[-1]\n"
+                             ".names a[3] n[2]\n1 1\n.names a[2] n[1]\n1 1\n"
+                             ".names a[1] n[0]\n1 1\n.names a[0] n[-1]\n1 1\n.end\n",
+                             write_stable(text));
+}
+
+/* An instance's formals carry the child's declared port indices (`.subckt sub i[1]=x[0] …`). */
+static void test_ranged_port_formals(void) {
+    odin3_module *sub = new_module(design, "sub");
+    odin3_wire_id sub_in = ranged_port(sub, (ranged){"i", ODIN3_DIR_IN, 0, 1});
+    odin3_wire_id sub_out = ranged_port(sub, (ranged){"o", ODIN3_DIR_OUT, -1, 0});
+    for (uint32_t k = 0; k < 2; k++) {
+        new_buffer(sub, odin3_wire_net(sub, sub_in, k), odin3_wire_net(sub, sub_out, k));
+    }
+    odin3_module *top = new_module(design, "top");
+    odin3_wire_id xin = new_port(top, "x", ODIN3_DIR_IN, 2);
+    odin3_wire_id yout = new_port(top, "y", ODIN3_DIR_OUT, 2);
+    odin3_net_id xs[2] = {odin3_wire_net(top, xin, 0), odin3_wire_net(top, xin, 1)};
+    odin3_net_id ys[2] = {odin3_wire_net(top, yout, 0), odin3_wire_net(top, yout, 1)};
+    const odin3_netvec ports[] = {{xs, 2}, {ys, 2}};
+    odin3_node_spec spec = {.type = odin3_module_celltype(sub), .name = intern_in(design, "u")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    static char text[TEXT_MAX];
+    const char *have = write_stable(text);
+    expect_contains(have, ".subckt sub i[1]=x[0] i[0]=x[1] o[0]=y[0] o[-1]=y[1]\n");
+    expect_contains(have, ".model sub\n.inputs i[1] i[0]\n.outputs o[0] o[-1]\n"
+                          ".names i[1] o[0]\n1 1\n.names i[0] o[-1]\n1 1\n.end\n");
+}
+
+/* A top that is not module 1 is written first, with no leading blank line, and one blank line
+ * separates it from the next model (final review M9: the separator was keyed on the module ID). */
+static void test_top_first_model_spacing(void) {
+    odin3_module *sub = new_module(design, "sub");
+    odin3_wire_id sub_in = new_port(sub, "i", ODIN3_DIR_IN, 1);
+    odin3_wire_id sub_out = new_port(sub, "o", ODIN3_DIR_OUT, 1);
+    new_buffer(sub, odin3_wire_net(sub, sub_in, 0), odin3_wire_net(sub, sub_out, 0));
+    odin3_module *top = new_module(design, "top");
+    odin3_net_id x_net = odin3_wire_net(top, new_port(top, "x", ODIN3_DIR_IN, 1), 0);
+    odin3_net_id y_net = odin3_wire_net(top, new_port(top, "y", ODIN3_DIR_OUT, 1), 0);
+    const odin3_netvec ports[] = {{&x_net, 1}, {&y_net, 1}};
+    odin3_node_spec spec = {.type = odin3_module_celltype(sub), .name = intern_in(design, "u")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){2}));
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(
+        ".model top\n.inputs x\n.outputs y\n.subckt sub i=x o=y\n.cname u\n.end\n\n"
+        ".model sub\n.inputs i\n.outputs o\n.names i o\n1 1\n.end\n",
+        write_stable(text));
+}
+
 /* A wire bit name that another net already has falls back to `$n<ID>`. */
 static void test_wire_bit_name_taken(void) {
     odin3_module *module = new_module(design, "top");
@@ -675,8 +775,8 @@ static void test_input_feeds_output(void) {
 /* A design listing one black box twice writes its model once. */
 static void test_declared_black_box_written_once(void) {
     new_module(design, "top");
-    static const odin3_port_def ports[] = {{"i", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL},
-                                           {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL}};
+    static const odin3_port_def ports[] = {{"i", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+                                           {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false}};
     odin3_celltype_def def = {
         .name = "bb", .gran = ODIN3_GRAN_BLACKBOX, .ports = ports, .n_ports = 2};
     odin3_celltype_id first = {0};
@@ -757,7 +857,7 @@ static void test_unwritable_path_is_io_error(void) {
     TEST_ASSERT_NOT_NULL(strstr(last_error, "cannot open"));
 }
 
-/* A write that fails (no space left on /dev/full) is IO with a located message. */
+/* A destination whose directory refuses the private temporary (/dev) is IO; the device stays. */
 static void test_failed_write_is_io_error(void) {
     FILE *probe = fopen("/dev/full", "wb");
     if (probe == NULL) {
@@ -766,11 +866,52 @@ static void test_failed_write_is_io_error(void) {
     (void)fclose(probe);
     read_into(design, FIXTURES[1]);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_blif_write(design, "/dev/full"));
-    TEST_ASSERT_EQUAL_STRING_LEN("/dev/full:", last_error, strlen("/dev/full:"));
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "write failed"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "/dev/full: cannot open"), last_error);
     probe = fopen("/dev/full", "wb"); /* a device is never removed */
     TEST_ASSERT_NOT_NULL(probe);
     (void)fclose(probe);
+}
+
+static const char *const BASELINE = "previous contents\n";
+
+static void put_baseline(const char *path) {
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(strlen(BASELINE), fwrite(BASELINE, 1, strlen(BASELINE), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/* path still holds BASELINE, and no "<path>.XXXXXX" temporary is left in the directory. */
+static void expect_baseline(const char *path) {
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(BASELINE, slurp(path, text));
+    char prefix[MSG_MAX];
+    (void)snprintf(prefix, sizeof prefix, "%s.", path);
+    DIR *dir = opendir(".");
+    TEST_ASSERT_NOT_NULL(dir);
+    for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+        TEST_ASSERT_NULL_MESSAGE(strstr(ent->d_name, prefix), ent->d_name);
+    }
+    (void)closedir(dir);
+}
+
+/* A write that fails part way (file size limit, EFBIG) is IO and leaves an existing file as it
+ * was: the writer writes a private temporary and renames it only on success. */
+static void test_failed_write_keeps_destination(void) {
+    read_into(design, FIXTURES[0]);
+    put_baseline(OUT_PATH);
+    struct rlimit old;
+    TEST_ASSERT_EQUAL_INT(0, getrlimit(RLIMIT_FSIZE, &old));
+    void (*prev)(int) = signal(SIGXFSZ, SIG_IGN);
+    TEST_ASSERT_TRUE(prev != SIG_ERR);
+    struct rlimit small = {256, old.rlim_max};
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &small));
+    odin3_status st = odin3_blif_write(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_INT(0, setrlimit(RLIMIT_FSIZE, &old));
+    TEST_ASSERT_TRUE(signal(SIGXFSZ, prev) != SIG_ERR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, st);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "write failed"), last_error);
+    expect_baseline(OUT_PATH);
 }
 
 static void test_bad_arguments(void) {
@@ -778,15 +919,14 @@ static void test_bad_arguments(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, NULL));
 }
 
-/* A refused write removes the file it had started, even one that existed before. */
+/* A refused write leaves an existing file as it was (the write is atomic). */
 static void test_inout_port_is_refused(void) {
     odin3_module *module = new_module(design, "top");
     new_port(module, "io", ODIN3_DIR_INOUT, 1);
-    write_input("old contents\n");
+    put_baseline(IN_PATH);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, IN_PATH));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "inout"), last_error);
-    FILE *file = fopen(IN_PATH, "rb");
-    TEST_ASSERT_NULL(file);
+    expect_baseline(IN_PATH);
 }
 
 /* A registered type with non-default parameters has no BLIF form. */
@@ -883,6 +1023,42 @@ static void test_unrecoverable_parameters_are_refused(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "o3test_wpow"), last_error);
 }
 
+/* The 2D word cells (IR change A, EL-31) take the generic path, as $add does: a .subckt when
+ * the connected formals imply the parameters (no decomposition in the writer: that is `lower`'s
+ * job, DESIGN D1), else the parameter refusal. */
+static void test_2d_word_cells_as_subckt(void) {
+    static const char text[] = ".model top\n.inputs a b c\n.outputs y z\n"
+                               ".subckt $logic_and A[0]=a A[1]=b B[0]=c Y[0]=y\n"
+                               ".subckt $shiftx A[0]=a A[1]=b B[0]=c Y[0]=z\n.end\n";
+    write_input(text);
+    round_trip(IN_PATH);
+    static char out[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(text, slurp(OUT_PATH, out));
+    /* both read as the registered word cells (not implicit black boxes), widths implied */
+    odin3_module *top = module_of(design, 1);
+    static const char *const types[2] = {"$logic_and", "$shiftx"};
+    for (uint32_t i = 0; i < 2; i++) {
+        odin3_node_id node = {odin3_module_port_count(top) + 1 + i};
+        const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(top, node));
+        TEST_ASSERT_EQUAL_STRING(types[i], def->name);
+        TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_WORD, def->gran);
+        static const int64_t want[5] = {0, 0, 2, 1, 1}; /* A_SIGNED B_SIGNED A_W B_W Y_W */
+        for (uint32_t k = 0; k < 5; k++) {
+            TEST_ASSERT_EQUAL_INT64(want[k], odin3_node_param(top, node, k)->i);
+        }
+    }
+}
+
+static void test_2d_signed_word_cell_is_refused(void) {
+    odin3_module *module = new_module(design, "top");
+    const odin3_value params[3] = {odin3_value_int(1), odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec spec = {.type = type_named(design, "$neg"), .params = params, .n_params = 3};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "cannot write a cell of '$neg'"), last_error);
+}
+
 /* Writing design under every allocation failure gives NO_MEMORY, never a crash or a leak, and
  * a write that succeeds gives the reference text. */
 static void oom_sweep(void) {
@@ -891,6 +1067,7 @@ static void oom_sweep(void) {
     last_error[0] = '\0';
     write_ok(design, OUT2_PATH);
     (void)slurp(OUT2_PATH, want);
+    put_baseline(OUT_PATH);
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         odin3_util_set_alloc_fail_after(fail_at);
@@ -901,6 +1078,7 @@ static void oom_sweep(void) {
             TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
         } else {
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            expect_baseline(OUT_PATH); /* a failed write keeps the old file */
         }
     }
     TEST_ASSERT_TRUE(done);
@@ -945,6 +1123,8 @@ int main(void) {
     RUN_TEST(test_long_lines_wrap);
     RUN_TEST(test_long_token_stays_whole);
     RUN_TEST(test_generated_names);
+    RUN_TEST(test_ranged_port_bits);
+    RUN_TEST(test_ranged_port_formals);
     RUN_TEST(test_generated_names_are_unique);
     RUN_TEST(test_wire_bit_name_taken);
     RUN_TEST(test_port_net_with_another_name);
@@ -955,6 +1135,7 @@ int main(void) {
     RUN_TEST(test_subckt_both_pins_of_one_blif_name);
     RUN_TEST(test_unwritable_path_is_io_error);
     RUN_TEST(test_failed_write_is_io_error);
+    RUN_TEST(test_failed_write_keeps_destination);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_inout_port_is_refused);
     RUN_TEST(test_non_default_parameters_are_refused);
@@ -962,6 +1143,9 @@ int main(void) {
     RUN_TEST(test_declared_parametric_model_written_as_declared);
     RUN_TEST(test_inferred_parameters_written);
     RUN_TEST(test_unrecoverable_parameters_are_refused);
+    RUN_TEST(test_2d_word_cells_as_subckt);
+    RUN_TEST(test_2d_signed_word_cell_is_refused);
+    RUN_TEST(test_top_first_model_spacing);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);
     RUN_TEST(test_out_of_memory_sweep_inferred_parameters);

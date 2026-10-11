@@ -26,6 +26,8 @@ typedef enum odin3_ir_test_fault {
     ODIN3_IR_TEST_VIEW,           /* rule 10: 1-bit $not node id becomes a $_NOT_ */
     ODIN3_IR_TEST_DEAD_NODE_LIVE_PIN, /* rule 11: node id dies with its pins still connected */
     ODIN3_IR_TEST_PORT_WIRE_MISMATCH, /* rule 9: port id's pin 0 moves to a new net */
+    ODIN3_IR_TEST_PORT_SIGN,          /* rule 9: port id's wire flips its sign, its type's not */
+    ODIN3_IR_TEST_PORT_SCALAR,        /* rule 9: port id's cell-type port becomes scalar */
     ODIN3_IR_TEST_FAULT_COUNT
 } odin3_ir_test_fault;
 
@@ -42,7 +44,8 @@ typedef struct odin3_ir_test_target {
  * DUP_NAME a live node and another live named node; BAD_PROV a live node; WIRE_BACKREF a live
  * wire whose bit 0 is its net's primary; PORT_LIST a port index of a module with two or more
  * ports; VIEW a live $not node of width 1; DEAD_NODE_LIVE_PIN a live non-port node;
- * PORT_WIRE_MISMATCH a port index whose pin 0 is connected. ODIN3_ERR_INVALID_ARG (logged) when
+ * PORT_WIRE_MISMATCH a port index whose pin 0 is connected; PORT_SIGN a port index; PORT_SCALAR
+ * a port index of a port wider than one bit. ODIN3_ERR_INVALID_ARG (logged) when
  * they do not hold (nothing changes); ODIN3_ERR_NO_MEMORY from MULTI_DRIVER's node creation or
  * PORT_WIRE_MISMATCH's net creation and connect (which goes through the API).
  */

@@ -164,8 +164,10 @@ static void test_value_valid(void) {
 
 static void test_value_invalid(void) {
     odin3_value bad_kind = odin3_value_int(0);
-    bad_kind.kind = (odin3_value_kind)(ODIN3_VAL_COVER + 1);
+    bad_kind.kind = (odin3_value_kind)(ODIN3_VAL_PROC + 1); /* PROC (2D, IR-19) is the last */
+    odin3_value proc_no_payload = {ODIN3_VAL_PROC, 0, NULL, sizeof k_cover, 0, 0};
     const odin3_value bad[] = {
+        proc_no_payload,
         make_bits(NULL),                                              /* len 4, no payload */
         with_inputs(make_cover(NULL, sizeof k_cover), 2),             /* rows, no payload */
         with_inputs(make_cover(k_cover, sizeof k_cover - 1), 2),      /* partial row */

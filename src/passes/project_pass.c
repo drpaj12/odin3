@@ -524,14 +524,23 @@ const odin3_pass_def odin3_pass_read_project = {
     "read_project",
     "read_project [--format o3proj|f|qsf|odin2] [--revision <r>] <entry>: read a project "
     "description into the design's project record (no front end runs)",
-    read_project_run, NULL, false};
+    read_project_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 const odin3_pass_def odin3_pass_dump_project = {
     "dump_project",
     "dump_project [<file>]: write the project record as JSON (stdout without a file)",
-    dump_project_run, NULL, false};
+    dump_project_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
 const odin3_pass_def odin3_pass_preprocess = {
     "preprocess",
     "preprocess [--out <dir>] [--segments]: preprocess the project's Verilog files (debug): "
     "<dir>/<n>.v, <n>.segments.json and files-read.txt (use a fresh <dir>: files a previous run "
     "left there are not removed), or the text on stdout",
-    preprocess_run, NULL, false};
+    preprocess_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};
