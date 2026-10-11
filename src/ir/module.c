@@ -371,12 +371,6 @@ odin3_wire_id odin3_module_port_wire(const odin3_module *module, uint32_t index)
     return port != NULL ? port->wire : (odin3_wire_id){0};
 }
 
-/* Bits of the range [msb:lsb] in either direction: |msb - lsb| + 1, which may reach 2^32. */
-static uint64_t range_width(int32_t msb, int32_t lsb) {
-    int64_t span = (int64_t)msb - (int64_t)lsb;
-    return (uint64_t)(span < 0 ? -span : span) + 1;
-}
-
 /*
  * NULL when the spec's width, range and scalar flag fit (module.h), with *shape the port as it is
  * created: spec's fields, its width (derived from the range when has_range) and its wire's range
@@ -385,9 +379,9 @@ static uint64_t range_width(int32_t msb, int32_t lsb) {
 static const char *port_shape_error(const odin3_port_spec *spec, odin3_port_spec *shape) {
     *shape = *spec;
     if (spec->has_range) {
-        uint64_t width = range_width(spec->msb, spec->lsb);
+        uint64_t width = odin3_range_width(spec->msb, spec->lsb);
         if (width > MAX_PORT_WIDTH) {
-            return "the range must span 1 .. 2^31 bits";
+            return "the range spans more than 2^31 bits";
         }
         if (spec->width != 0 && spec->width != width) {
             return "the width differs from the width of the range";

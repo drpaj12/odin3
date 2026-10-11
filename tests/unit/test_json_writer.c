@@ -469,6 +469,43 @@ static void test_wire_range_attributes(void) {
     (void)remove("t7.json");
 }
 
+/*
+ * Ranged ports (IR-7, 2D IR change C) are written as Yosys writes them: bits LSB first, [0:3]
+ * signed is upto and signed, [5:2] has offset 2, [-1:2] has offset -1 and is upto.
+ */
+static void test_ranged_ports(void) {
+    odin3_module *mod = new_module("top");
+    static const struct {
+        const char *name;
+        odin3_dir dir;
+        int32_t msb, lsb;
+        bool is_signed;
+    } k_ports[] = {{"a", ODIN3_DIR_IN, 0, 3, true},
+                   {"d", ODIN3_DIR_IN, 5, 2, false},
+                   {"n", ODIN3_DIR_OUT, -1, 2, false}};
+    for (size_t i = 0; i < sizeof k_ports / sizeof k_ports[0]; i++) {
+        odin3_port_spec spec = {.name = intern(k_ports[i].name),
+                                .dir = k_ports[i].dir,
+                                .prov = prov_at(2),
+                                .has_range = true,
+                                .msb = k_ports[i].msb,
+                                .lsb = k_ports[i].lsb,
+                                .is_signed = k_ports[i].is_signed};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(mod, &spec, NULL));
+    }
+    char *text = write_json("t7r.json");
+    assert_has(text, "\"a\": {\n          \"direction\": \"input\",\n"
+                     "          \"bits\": [ 2, 3, 4, 5 ],\n"
+                     "          \"upto\": 1,\n          \"signed\": 1\n");
+    assert_has(text, "\"d\": {\n          \"direction\": \"input\",\n"
+                     "          \"bits\": [ 6, 7, 8, 9 ],\n          \"offset\": 2\n");
+    assert_has(text, "\"n\": {\n          \"direction\": \"output\",\n"
+                     "          \"bits\": [ 10, 11, 12, 13 ],\n"
+                     "          \"offset\": -1,\n          \"upto\": 1\n");
+    odin3_util_free(text);
+    (void)remove("t7r.json");
+}
+
 static size_t count_of(const char *text, const char *needle) {
     size_t count = 0;
     for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
@@ -868,6 +905,7 @@ int main(void) {
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_parameters_binary);
     RUN_TEST(test_wire_range_attributes);
+    RUN_TEST(test_ranged_ports);
     RUN_TEST(test_cell_key_collision);
     RUN_TEST(test_netname_key_collision);
     RUN_TEST(test_cell_named_like_net);

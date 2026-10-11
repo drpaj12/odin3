@@ -604,6 +604,82 @@ static void test_generated_names_are_unique(void) {
     TEST_ASSERT_EQUAL_UINT32(live_nets(module), live_nets(module_of(design2, 1)));
 }
 
+/* A port declared [msb:lsb] (IR-7, 2D IR change C). */
+typedef struct ranged {
+    const char *name;
+    odin3_dir dir;
+    int32_t msb, lsb;
+} ranged;
+
+static odin3_wire_id ranged_port(odin3_module *module, ranged port) {
+    odin3_port_spec spec = {.name = intern_in(odin3_module_design(module), port.name),
+                            .dir = port.dir,
+                            .has_range = true,
+                            .msb = port.msb,
+                            .lsb = port.lsb};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
+}
+
+static void expect_contains(const char *text, const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, needle), text);
+}
+
+/* Writes the design, reads it back and writes that again: the two texts are the same. */
+static const char *write_stable(char *text) {
+    static char again[TEXT_MAX];
+    write_ok(design, OUT_PATH);
+    read_into(design2, OUT_PATH);
+    write_ok(design2, OUT2_PATH);
+    TEST_ASSERT_EQUAL_STRING(slurp(OUT_PATH, text), slurp(OUT2_PATH, again));
+    return text;
+}
+
+/*
+ * Port bits are named by their declared index, LSB first, as Yosys 0.55 write_blif names them:
+ * [0:3] (ascending) lists a[3] … a[0], [5:2] (descending, offset) d[2] … d[5], and [-1:2]
+ * (ascending through a negative bound) n[2] n[1] n[0] n[-1]. Read back (as scalar ports named
+ * `a[3]` …) and written again, the text is unchanged.
+ */
+static void test_ranged_port_bits(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_wire_id in = ranged_port(module, (ranged){"a", ODIN3_DIR_IN, 0, 3});
+    (void)ranged_port(module, (ranged){"d", ODIN3_DIR_IN, 5, 2});
+    odin3_wire_id out = ranged_port(module, (ranged){"n", ODIN3_DIR_OUT, -1, 2});
+    for (uint32_t k = 0; k < 4; k++) {
+        new_buffer(module, odin3_wire_net(module, in, k), odin3_wire_net(module, out, k));
+    }
+    static char text[TEXT_MAX];
+    TEST_ASSERT_EQUAL_STRING(".model top\n.inputs a[3] a[2] a[1] a[0] d[2] d[3] d[4] d[5]\n"
+                             ".outputs n[2] n[1] n[0] n[-1]\n"
+                             ".names a[3] n[2]\n1 1\n.names a[2] n[1]\n1 1\n"
+                             ".names a[1] n[0]\n1 1\n.names a[0] n[-1]\n1 1\n.end\n",
+                             write_stable(text));
+}
+
+/* An instance's formals carry the child's declared port indices (`.subckt sub i[1]=x[0] …`). */
+static void test_ranged_port_formals(void) {
+    odin3_module *sub = new_module(design, "sub");
+    odin3_wire_id sub_in = ranged_port(sub, (ranged){"i", ODIN3_DIR_IN, 0, 1});
+    odin3_wire_id sub_out = ranged_port(sub, (ranged){"o", ODIN3_DIR_OUT, -1, 0});
+    for (uint32_t k = 0; k < 2; k++) {
+        new_buffer(sub, odin3_wire_net(sub, sub_in, k), odin3_wire_net(sub, sub_out, k));
+    }
+    odin3_module *top = new_module(design, "top");
+    odin3_wire_id xin = new_port(top, "x", ODIN3_DIR_IN, 2);
+    odin3_wire_id yout = new_port(top, "y", ODIN3_DIR_OUT, 2);
+    odin3_net_id xs[2] = {odin3_wire_net(top, xin, 0), odin3_wire_net(top, xin, 1)};
+    odin3_net_id ys[2] = {odin3_wire_net(top, yout, 0), odin3_wire_net(top, yout, 1)};
+    const odin3_netvec ports[] = {{xs, 2}, {ys, 2}};
+    odin3_node_spec spec = {.type = odin3_module_celltype(sub), .name = intern_in(design, "u")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    static char text[TEXT_MAX];
+    const char *have = write_stable(text);
+    expect_contains(have, ".subckt sub i[1]=x[0] i[0]=x[1] o[0]=y[0] o[-1]=y[1]\n");
+    expect_contains(have, ".model sub\n.inputs i[1] i[0]\n.outputs o[0] o[-1]\n"
+                          ".names i[1] o[0]\n1 1\n.names i[0] o[-1]\n1 1\n.end\n");
+}
+
 /* A wire bit name that another net already has falls back to `$n<ID>`. */
 static void test_wire_bit_name_taken(void) {
     odin3_module *module = new_module(design, "top");
@@ -945,6 +1021,8 @@ int main(void) {
     RUN_TEST(test_long_lines_wrap);
     RUN_TEST(test_long_token_stays_whole);
     RUN_TEST(test_generated_names);
+    RUN_TEST(test_ranged_port_bits);
+    RUN_TEST(test_ranged_port_formals);
     RUN_TEST(test_generated_names_are_unique);
     RUN_TEST(test_wire_bit_name_taken);
     RUN_TEST(test_port_net_with_another_name);

@@ -359,12 +359,12 @@ static odin3_status name_pins(blif_writer *wr, odin3_node_id node) {
     return st;
 }
 
-/* wr->token = base, or base[k] when the port is not scalar. */
-static odin3_status bit_token(blif_writer *wr, bool scalar, odin3_bytes base, uint32_t bit) {
+/* wr->token = base, or base[index] when the port is not scalar (index: the declared one). */
+static odin3_status bit_token(blif_writer *wr, bool scalar, odin3_bytes base, int64_t index) {
     odin3_strbuf_clear(&wr->token);
     odin3_status st = odin3_strbuf_append(&wr->token, base);
     if (st == ODIN3_OK && !scalar) {
-        st = odin3_strbuf_appendf(&wr->token, "[%u]", (unsigned)bit);
+        st = odin3_strbuf_appendf(&wr->token, "[%lld]", (long long)index);
     }
     return st;
 }
@@ -382,12 +382,21 @@ static odin3_bytes port_base(const blif_writer *wr, const odin3_module *module, 
     return odin3_bytes_cstr(def->ports[at].name);
 }
 
-/* wr->token = the BLIF name of a port bit of the module being written: `base`, or `base[k]`. */
+/*
+ * The declared index of bit `bit` (position, LSB first) of port `at` of module: its port wire's
+ * (IR-7), as Yosys names port bits, so `input [0:7] a` lists a[7] … a[0].
+ */
+static int64_t port_index_of(const odin3_module *module, wr_portbit where) {
+    return odin3_wire_index(module, odin3_module_port_wire(module, where.port), where.bit);
+}
+
+/* wr->token = the BLIF name of a port bit of the module being written: `base`, or `base[i]` with
+ * the bit's declared index i (as a non-port wire bit, wire_bit_name). */
 static odin3_status port_bit_token(blif_writer *wr, wr_portbit where) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     return bit_token(wr, def->ports[where.port].scalar, port_base(wr, wr->module, where.port),
-                     where.bit);
+                     port_index_of(wr->module, where));
 }
 
 /* Reserves the port bit name in wr->token for net (none for an unconnected port pin); the first
@@ -572,7 +581,7 @@ static odin3_status write_model_ports(blif_writer *wr, const odin3_celltype_def 
         st = port_line(wr, def, i);
         const odin3_port_def *port = &def->ports[i];
         for (uint32_t k = 0; st == ODIN3_OK && k < port->width; k++) {
-            st = bit_token(wr, port->scalar, odin3_bytes_cstr(port->name), k);
+            st = bit_token(wr, port->scalar, odin3_bytes_cstr(port->name), (int64_t)k);
             if (st == ODIN3_OK) {
                 wr_token_built(wr);
             }
@@ -668,29 +677,66 @@ static odin3_status write_latch(blif_writer *wr, odin3_node_id node, wr_builtin 
     return wr->st;
 }
 
+/* The module type instantiates, NULL when type is no module's. */
+static const odin3_module *module_of_type(const blif_writer *wr, odin3_celltype_id type) {
+    uint64_t id = 0;
+    if (!odin3_u64map_get(wr->type_module, type.v, &id)) {
+        return NULL;
+    }
+    return odin3_module_get((odin3_design *)wr->design, (odin3_module_id){(uint32_t)id});
+}
+
 /* The formal base name of port `at` of type: a module's port base name (port_base), else the
  * port's name. */
 static odin3_bytes formal_base(const blif_writer *wr, odin3_celltype_id type, uint32_t at) {
-    uint64_t id = 0;
-    if (odin3_u64map_get(wr->type_module, type.v, &id)) {
-        return port_base(
-            wr, odin3_module_get((odin3_design *)wr->design, (odin3_module_id){(uint32_t)id}), at);
+    const odin3_module *module = module_of_type(wr, type);
+    if (module != NULL) {
+        return port_base(wr, module, at);
     }
     return odin3_bytes_cstr(odin3_celltype_get(wr->design, type)->ports[at].name);
 }
 
-/* True when an earlier port of node's type has the formal base `base` and a connected pin at
- * where.bit: a model with a name in both .inputs and .outputs has two ports of one BLIF name, and
- * BLIF cannot connect both. */
+/* The index the formal of bit where.bit of port where.port of type is written with: a module's
+ * declared port index (port_index_of), else the bit position. */
+static int64_t formal_index(const blif_writer *wr, odin3_celltype_id type, wr_portbit where) {
+    const odin3_module *module = module_of_type(wr, type);
+    return module != NULL ? port_index_of(module, where) : (int64_t)where.bit;
+}
+
+/* A formal: a port and the index its bit is written with. */
+typedef struct wr_formal {
+    uint32_t port;
+    int64_t index;
+} wr_formal;
+
+/* The bit position of formal.port of type whose formal index is formal.index; UINT32_MAX when
+ * none. */
+static uint32_t formal_position(const blif_writer *wr, odin3_celltype_id type, wr_formal formal) {
+    const odin3_module *module = module_of_type(wr, type);
+    int64_t pos = formal.index;
+    if (module != NULL) {
+        odin3_wire_id wire = odin3_module_port_wire(module, formal.port);
+        int64_t msb = odin3_wire_msb(module, wire);
+        int64_t lsb = odin3_wire_lsb(module, wire);
+        pos = msb >= lsb ? formal.index - lsb : lsb - formal.index;
+    }
+    return pos >= 0 && pos < UINT32_MAX ? (uint32_t)pos : UINT32_MAX;
+}
+
+/* True when an earlier port of node's type has the formal base `base` and a connected pin of the
+ * same formal index as where: a model with a name in both .inputs and .outputs has two ports of
+ * one BLIF name, and BLIF cannot connect both. */
 static bool formal_taken(const blif_writer *wr, odin3_node_id node, wr_portbit where,
                          odin3_bytes base) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
+    int64_t index = formal_index(wr, type, where);
     for (uint32_t j = 0; j < where.port; j++) {
         odin3_bytes other = formal_base(wr, type, j);
         odin3_pinslice pins = odin3_node_port(wr->module, node, j);
+        uint32_t bit = formal_position(wr, type, (wr_formal){j, index});
         if (other.len == base.len && memcmp(other.ptr, base.ptr, base.len) == 0 &&
-            where.bit < pins.count &&
-            odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + where.bit}))) {
+            bit < pins.count &&
+            odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + bit}))) {
             return true;
         }
     }
@@ -794,7 +840,7 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
             return wr_refuse(wr, "a .subckt cannot connect both ports of the BLIF name",
                              (const char *)base.ptr);
         }
-        st = bit_token(wr, scalar, base, k);
+        st = bit_token(wr, scalar, base, formal_index(wr, type, (wr_portbit){at, k}));
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, odin3_bytes_cstr("=")) : st;
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, net_name(wr, net)) : st;
         if (st == ODIN3_OK) {

@@ -187,8 +187,10 @@ odin3_const odin3_net_const_value(const odin3_module *module, odin3_net_id net);
  * [msb:lsb], in either direction, and the port has |msb - lsb| + 1 bits, at most 2^31: width 0
  * takes that width, and a nonzero width that differs from it is INVALID_ARG. scalar records a
  * port written without brackets and needs width 1, so with has_range a one-bit range such as
- * [5:5]. is_signed, in both forms, makes the wire signed and is recorded in the module cell
- * type's port (odin3_port_def.is_signed); the ABI's odin3_plugin_port does not carry it.
+ * [5:5]; writers that honour scalar (Verilog, BLIF) write such a port without its index, so only
+ * [0:0] survives a round trip through them (EL-24 never makes another). is_signed, in both forms,
+ * makes the wire signed and is recorded in the module cell type's port (odin3_port_def.is_signed;
+ * check rule 9 compares the two); the ABI's odin3_plugin_port does not carry it.
  */
 typedef struct odin3_port_spec {
     uint32_t name;

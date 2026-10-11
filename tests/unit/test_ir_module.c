@@ -18,22 +18,32 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 enum {
     OOM_LIMIT = 1000,
-    RANGE_PORT_ALLOCS = 6, /* port and port-def vectors, node/pin/net/wire pages */
+    LAST_ERROR_MAX = 256,
+    /*
+     * The first port of a module whose stores sit at page boundaries allocates six times: the
+     * port and port-def vectors (first push), then one page each of the node, pin, net and wire
+     * stores. This pins util's vec/pagevec growth policy too: if that changes, re-derive the six.
+     */
+    RANGE_PORT_ALLOCS = 6,
 };
 
 static odin3_design *design;
 static odin3_module *module;
 static odin3_prov_id prov;
 static size_t errors_logged;
+static char last_error[LAST_ERROR_MAX];
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)msg;
     (void)user;
-    errors_logged += level == ODIN3_LOG_ERROR ? 1 : 0;
+    if (level == ODIN3_LOG_ERROR) {
+        errors_logged++;
+        (void)snprintf(last_error, sizeof last_error, "%s", msg);
+    }
 }
 
 static uint32_t intern(const char *name) {
@@ -63,6 +73,7 @@ static void fresh_design(void) {
 
 void setUp(void) {
     errors_logged = 0;
+    last_error[0] = '\0';
     odin3_log_set_sink(count_sink, NULL);
     design = NULL;
     fresh_design();
@@ -187,8 +198,8 @@ static void assert_counts(const counts *want, const counts *have) {
     TEST_ASSERT_EQUAL_MEMORY(want, have, sizeof *want);
 }
 
-/* Refused with INVALID_ARG (one error logged) and nothing changed. */
-static void expect_refused(const char *name, port_shape shape) {
+/* Refused with INVALID_ARG, one error logged ("module_add_port: <why>"), and nothing changed. */
+static void expect_refused(const char *name, port_shape shape, const char *why) {
     odin3_port_spec spec = spec_of(name, ODIN3_DIR_IN, shape);
     counts before = take_counts(spec.name);
     size_t errors = errors_logged;
@@ -196,6 +207,9 @@ static void expect_refused(const char *name, port_shape shape) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_module_add_port(module, &spec, &node));
     TEST_ASSERT_EQUAL_UINT32(0, node.v);
     TEST_ASSERT_EQUAL_size_t(errors + 1, errors_logged);
+    char want[LAST_ERROR_MAX];
+    (void)snprintf(want, sizeof want, "module_add_port: %s", why);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
     counts after = take_counts(spec.name);
     assert_counts(&before, &after);
 }
@@ -203,8 +217,10 @@ static void expect_refused(const char *name, port_shape shape) {
 /* has_range [7:0] with width 4 is refused; with width 8 (or 0) it is accepted. */
 static void test_width_must_match_range(void) {
     (void)add_port_ok("first", ODIN3_DIR_IN, (port_shape){1, true, false, 0, 0, false});
-    expect_refused("b", (port_shape){4, false, true, 7, 0, false});
-    expect_refused("b", (port_shape){9, false, true, 7, 0, false});
+    expect_refused("b", (port_shape){4, false, true, 7, 0, false},
+                   "the width differs from the width of the range");
+    expect_refused("b", (port_shape){9, false, true, 7, 0, false},
+                   "the width differs from the width of the range");
     port_shape eight = {8, false, true, 7, 0, false};
     (void)add_port_ok("b", ODIN3_DIR_IN, eight);
     assert_port_wire(1, eight, 8);
@@ -215,8 +231,8 @@ static void test_width_must_match_range(void) {
 
 /* scalar with [3:0] is refused; scalar with [5:5] is a one-bit port. */
 static void test_scalar_needs_one_bit_range(void) {
-    expect_refused("s", (port_shape){0, true, true, 3, 0, false});
-    expect_refused("s", (port_shape){4, true, true, 3, 0, false});
+    expect_refused("s", (port_shape){0, true, true, 3, 0, false}, "a scalar port has width 1");
+    expect_refused("s", (port_shape){4, true, true, 3, 0, false}, "a scalar port has width 1");
     port_shape one = {0, true, true, 5, 5, false};
     (void)add_port_ok("s", ODIN3_DIR_IN, one);
     assert_port_wire(0, one, 1);
@@ -244,10 +260,14 @@ static void test_no_range_applies_sign(void) {
 
 /* A range of more than 2^31 bits is refused like a width above 2^31, before any allocation. */
 static void test_range_width_cap(void) {
-    expect_refused("w", (port_shape){0, false, true, INT32_MAX, INT32_MIN, false});
-    expect_refused("w", (port_shape){0, false, true, INT32_MIN, INT32_MAX, false});
-    expect_refused("w", (port_shape){0, false, true, INT32_MAX, -1, false});
-    expect_refused("w", (port_shape){0, false, false, 0, 0, false}); /* no range, width 0 */
+    expect_refused("w", (port_shape){0, false, true, INT32_MAX, INT32_MIN, false},
+                   "the range spans more than 2^31 bits");
+    expect_refused("w", (port_shape){0, false, true, INT32_MIN, INT32_MAX, false},
+                   "the range spans more than 2^31 bits");
+    expect_refused("w", (port_shape){0, false, true, INT32_MAX, -1, false},
+                   "the range spans more than 2^31 bits");
+    /* no range, width 0 */
+    expect_refused("w", (port_shape){0, false, false, 0, 0, false}, "the width must be 1 .. 2^31");
 }
 
 /* An instance of the module gets the derived width on its pins (IR-7). */
@@ -263,7 +283,8 @@ static void test_instance_sees_the_derived_width(void) {
     TEST_ASSERT_EQUAL_UINT32(12, odin3_node_pins(parent, inst).count);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full()); /* dangling instance pins only warn */
     /* instantiated: a further port is refused with nothing changed (IR-7) */
-    expect_refused("late", (port_shape){0, false, true, 1, 0, true});
+    expect_refused("late", (port_shape){0, false, true, 1, 0, true},
+                   "the module's cell type has instances (IR-7)");
 }
 
 /* Fills the node, pin, net and wire stores to a page boundary through the API (IR-18). */

@@ -564,6 +564,49 @@ static void build_attrs(void) {
     set_attr((odin3_objref){ODIN3_OBJ_NODE, flop.v}, "keep", odin3_value_int(1));
 }
 
+/* A port declared [msb:lsb] (IR-7, 2D IR change C). */
+typedef struct ranged_args {
+    const char *name;
+    odin3_dir dir;
+    int32_t msb, lsb;
+    bool is_signed;
+} ranged_args;
+
+static odin3_wire_id ranged_port(ranged_args args) {
+    odin3_port_spec spec = {.name = intern(args.name),
+                            .dir = args.dir,
+                            .has_range = true,
+                            .msb = args.msb,
+                            .lsb = args.lsb,
+                            .is_signed = args.is_signed};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
+}
+
+/*
+ * Ranged ports keep their declaration (ascending [0:3], descending offset [5:2], ascending through
+ * a negative bound [-1:2]) and every bit select uses the declared index: bit 0 of [0:3] is a[3],
+ * bit 0 of [-1:2] is n[2] and its bit 3 is n[-1].
+ */
+static void test_ranged_ports(void) {
+    (void)new_module("rng");
+    odin3_wire_id wa = ranged_port((ranged_args){"a", ODIN3_DIR_IN, 0, 3, true});
+    odin3_wire_id wd = ranged_port((ranged_args){"d", ODIN3_DIR_IN, 5, 2, false});
+    odin3_wire_id wn = ranged_port((ranged_args){"n", ODIN3_DIR_OUT, -1, 2, false});
+    (void)gate1("$_NOT_", (io_pair){bit_of(wa, 0), bit_of(wn, 0)});
+    (void)gate2("$_AND_", bit_of(wd, 0), bit_of(wd, 3), bit_of(wn, 1));
+    (void)gate2("$_OR_", bit_of(wa, 1), bit_of(wd, 1), bit_of(wn, 2));
+    (void)gate2("$_XOR_", bit_of(wa, 2), bit_of(wa, 3), bit_of(wn, 3));
+    (void)write_ok();
+    expect_has("  input signed [0:3] a,\n");
+    expect_has("  input [5:2] d,\n");
+    expect_has("  output [-1:2] n\n");
+    expect_has("  assign n[2] = ~a[3];\n");
+    expect_has("  assign n[1] = d[2] & d[5];\n");
+    expect_has("  assign n[0] = a[2] | d[3];\n");
+    expect_has("  assign n[-1] = a[1] ^ a[0];\n");
+}
+
 static void test_attributes(void) {
     build_attrs();
     (void)write_ok();
@@ -1667,6 +1710,7 @@ int main(void) {
     RUN_TEST(test_ident_append);
     RUN_TEST(test_escaped_names);
     RUN_TEST(test_escaped_names_yosys_round_trip);
+    RUN_TEST(test_ranged_ports);
     RUN_TEST(test_attributes);
     RUN_TEST(test_attributes_yosys_reads);
     RUN_TEST(test_gates);
