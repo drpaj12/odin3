@@ -693,11 +693,12 @@ if(BUILD_TESTING)
                 --suite ${PROJECT_SOURCE_DIR})
     set_tests_properties(pp_diff PROPERTIES LABELS differential SKIP_RETURN_CODE 77)
 
-    # 2C §3.1: the conflicts Bison resolves by precedence are exactly the committed allowlist.
+    # 2C §3.1: the conflicts Bison resolves by precedence are exactly the committed allowlist,
+    # and no operator token can follow an expression outside the operator rules (--operand).
     add_test(NAME verilog_grammar_solved
         COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/solved_conflicts.py
                 --bison ${BISON_EXECUTABLE}
-                --grammar ${PROJECT_SOURCE_DIR}/src/frontends/verilog/verilog.y
+                --grammar ${PROJECT_SOURCE_DIR}/src/frontends/verilog/verilog.y --operand expr
                 --expect ${PROJECT_SOURCE_DIR}/tests/verilog/solved_conflicts.txt)
     set_tests_properties(verilog_grammar_solved PROPERTIES LABELS unit)
 

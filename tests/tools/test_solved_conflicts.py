@@ -76,6 +76,73 @@ class SolvedConflictsTest(unittest.TestCase):
         self.assertEqual(code, 2)
 
 
+GRAMMAR = helpers.REPO_ROOT / "src" / "frontends" / "verilog" / "verilog.y"
+ALLOWLIST = helpers.REPO_ROOT / "tests" / "verilog" / "solved_conflicts.txt"
+SPECIFY_ITEM = (
+    "item_node: OPAQUE_SPECIFY  { VP($$, vp_opaque(ctx, &@1, $1, ODIN3_AST_SPECIFY_BLOCK, &$$)); }"
+)
+SCRATCH_RULE = "\n         | '#' expr '*' ';'  { VP($$, vp_none(ctx, &$$)); }"
+
+
+@unittest.skipIf(BISON is None, "bison not found")
+class OperandGuardTest(unittest.TestCase):
+    """--operand: an operator token after an operand outside its operator rules (Task 5 review)."""
+
+    def run_tool(self, grammar: Path, *argv: str) -> tuple[int, str, str]:
+        return helpers.run_main(solved_conflicts.main, ["--grammar", str(grammar), *argv])
+
+    def write(self, tmp: str, text: str) -> Path:
+        path = Path(tmp) / "g.y"
+        path.write_text(text)
+        return path
+
+    def test_operator_rules_alone_pass(self) -> None:
+        expect = str(SOLVED / "expr.expected")
+        code, out, err = self.run_tool(SOLVED / "expr.y", "--operand", "e", "--expect", expect)
+        self.assertEqual((code, out, err), (0, "", ""))
+
+    def test_operator_after_operand_fails_though_the_lines_are_equal(self) -> None:
+        """`'#' e '*' ';'` resolves with the lines already listed: only the guard sees it."""
+        text = (SOLVED / "expr.y").read_text().replace("%%\n", "%%\ns: e | '#' e '*' ';' ;\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            grammar = self.write(tmp, text)
+            expect = str(SOLVED / "expr.expected")
+            self.assertEqual(self.run_tool(grammar, "--expect", expect), (0, "", ""))
+            code, out, err = self.run_tool(grammar, "--operand", "e", "--expect", expect)
+        self.assertEqual((code, out), (1, ""))
+        self.assertEqual(err, "s: '#' e '*' ';' :: '*' :: operator token after e\n")
+
+    def test_operator_in_the_lookahead_fails(self) -> None:
+        """An operand at a rule's end whose context puts an operator after it (through x)."""
+        text = (SOLVED / "expr.y").read_text().replace("%%\n", "%%\ns: x '+' ;\nx: e ;\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            code, _, err = self.run_tool(self.write(tmp, text), "--operand", "e", "--print")
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "x: e :: '+' :: operator token after e\n")
+
+    def test_precedence_tokens_use_the_report_spelling(self) -> None:
+        text = '%token POW "**" N\n%right \'?\'\n%left POW /* power */ N\n%%\n'
+        self.assertEqual(solved_conflicts.precedence_tokens(text), {"'?'", '"**"', "N"})
+
+    def test_verilog_grammar_passes(self) -> None:
+        code, _, err = self.run_tool(GRAMMAR, "--operand", "expr", "--expect", str(ALLOWLIST))
+        self.assertEqual((code, err), (0, ""))
+
+    def test_verilog_operator_after_an_expression_fails(self) -> None:
+        """The review's scratch rule: Bison builds it with 0 conflicts and the allowlist is
+        unchanged, yet `# a + b * ;` would be rejected."""
+        text = GRAMMAR.read_text()
+        self.assertIn(SPECIFY_ITEM, text)
+        text = text.replace(SPECIFY_ITEM, SPECIFY_ITEM + SCRATCH_RULE)
+        with tempfile.TemporaryDirectory() as tmp:
+            grammar = self.write(tmp, text)
+            plain = self.run_tool(grammar, "--expect", str(ALLOWLIST))
+            code, _, err = self.run_tool(grammar, "--operand", "expr", "--expect", str(ALLOWLIST))
+        self.assertEqual(plain[0], 0)
+        self.assertEqual(code, 1)
+        self.assertEqual(err, "item_node: '#' expr '*' ';' :: '*' :: operator token after expr\n")
+
+
 class NormaliseTest(unittest.TestCase):
     REPORT = """Grammar
 

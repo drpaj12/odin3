@@ -11,8 +11,18 @@ with the rule text taken from the report's Grammar section (left side included),
 the rules changes nothing; the lines are sorted and de-duplicated (one conflict shows in several
 states). With --expect it compares them with a committed file instead.
 
-Usage: solved-conflicts [--bison B] --grammar G (--expect F | --print)
-Exit codes: 0 equal (or printed), 1 different (a unified diff on stderr), 2 usage/input error.
+The lines alone cannot see a new context in which an operator token follows an operand: once
+every operator rule meets every operator token, a rule such as `s: '#' e '*' ';'` resolves its
+conflicts with lines already listed. So with --operand E (the operand nonterminal, whose
+operator rules are `E: E <op> ... E`) the tool also requires that no precedence token (one of
+a %left, %right or %nonassoc line) can follow E anywhere outside its operator rules: neither
+FIRST of what follows it in a rule, nor, when that is nullable, the LALR lookaheads of the rule's
+reduction (Bison's --report=lookaheads). Each violation is printed as
+`<rule> :: <token> :: operator token after E` and fails the run.
+
+Usage: solved-conflicts [--bison B] --grammar G [--operand E] (--expect F | --print)
+Exit codes: 0 equal (or printed) and no violation, 1 different (a unified diff on stderr) or a
+violation, 2 usage/input error.
 """
 
 from __future__ import annotations
@@ -27,6 +37,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 _RULE = re.compile(r"^\s+(\d+)\s+(?:(\S+):|\|)\s*(.*?)\s*$")
+_REDUCE_ITEM = re.compile(r"^\s+(\d+)\s+(?:\S+:|\|).*\u2022\s*\[(.*)\]\s*$")
+_SYMBOL = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s,\[\]]+')
+_PRECEDENCE = re.compile(r"^%(?:left|right|nonassoc)\b(.*)$", re.MULTILINE)
+_TOKEN_DECL = re.compile(r"^%token\b(.*)$", re.MULTILINE)
+_ALIAS = re.compile(r'([A-Za-z_]\w*)\s+("(?:[^"\\]|\\.)*")')
+_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_EMPTY = ("ε", "%empty")
 _SOLVED = re.compile(r"^\s*Conflict between rule (\d+) and token (.+) resolved as (.+)\.\s*$")
 
 
@@ -69,6 +86,96 @@ def normalise(report: str) -> list[str]:
     return sorted(lines)
 
 
+def precedence_tokens(grammar_text: str) -> set[str]:
+    """The tokens of the %left/%right/%nonassoc lines, spelled as Bison's report spells them
+    (a string alias for a named token that has one)."""
+    text = _COMMENT.sub(" ", grammar_text)
+    aliases: dict[str, str] = {}
+    for decl in _TOKEN_DECL.finditer(text):
+        aliases.update(_ALIAS.findall(decl.group(1)))
+    tokens: set[str] = set()
+    for line in _PRECEDENCE.finditer(text):
+        for symbol in _SYMBOL.findall(line.group(1)):
+            if not symbol.startswith("<"):
+                tokens.add(aliases.get(symbol, symbol))
+    return tokens
+
+
+def _rules(report: str) -> dict[int, tuple[str, list[str]]]:
+    """Rule number -> (lhs, rhs symbols) from the report's Grammar section."""
+    rules: dict[int, tuple[str, list[str]]] = {}
+    for number, text in rule_texts(report).items():
+        lhs, _, rhs = text.partition(": ")
+        rules[number] = (lhs, [s for s in _SYMBOL.findall(rhs) if s not in _EMPTY])
+    return rules
+
+
+def _first_sets(
+    rules: dict[int, tuple[str, list[str]]],
+) -> tuple[dict[str, set[str]], set[str]]:
+    """FIRST of every nonterminal and the set of nullable ones (a fixpoint)."""
+    first: dict[str, set[str]] = {lhs: set() for lhs, _ in rules.values()}
+    nullable: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for lhs, rhs in rules.values():
+            heads, empty = _first_of(rhs, first, nullable)
+            if not heads <= first[lhs]:
+                first[lhs] |= heads
+                changed = True
+            if empty and lhs not in nullable:
+                nullable.add(lhs)
+                changed = True
+    return first, nullable
+
+
+def _first_of(
+    symbols: list[str], first: dict[str, set[str]], nullable: set[str]
+) -> tuple[set[str], bool]:
+    """FIRST of a symbol string and whether it derives the empty string."""
+    heads: set[str] = set()
+    for symbol in symbols:
+        if symbol not in first:  # a terminal
+            heads.add(symbol)
+            return heads, False
+        heads |= first[symbol]
+        if symbol not in nullable:
+            return heads, False
+    return heads, True
+
+
+def _reduce_lookaheads(report: str) -> dict[int, set[str]]:
+    """Rule number -> the union of its reductions' LALR lookaheads in every state."""
+    lookaheads: dict[int, set[str]] = {}
+    for line in report.splitlines():
+        match = _REDUCE_ITEM.match(line)
+        if match is not None:
+            tokens = set(_SYMBOL.findall(match.group(2)))
+            lookaheads.setdefault(int(match.group(1)), set()).update(tokens)
+    return lookaheads
+
+
+def operator_violations(report: str, operand: str, operators: set[str]) -> list[str]:
+    """Where an operator token can follow operand outside operand's own operator rules."""
+    rules = _rules(report)
+    first, nullable = _first_sets(rules)
+    lookaheads = _reduce_lookaheads(report)
+    texts = rule_texts(report)
+    found: set[str] = set()
+    for number, (lhs, rhs) in rules.items():
+        is_operator = lhs == operand and len(rhs) > 1 and rhs[0] == operand
+        for i, symbol in enumerate(rhs):
+            if symbol != operand or (is_operator and i in (0, len(rhs) - 1)):
+                continue
+            after, empty = _first_of(rhs[i + 1 :], first, nullable)
+            if empty:
+                after = after | lookaheads.get(number, set())
+            for token in sorted(after & operators):
+                found.add(f"{texts[number]} :: {token} :: operator token after {operand}")
+    return sorted(found)
+
+
 def bison_report(bison: str, grammar: Path) -> str:
     """Runs bison --report=solved on grammar into a temporary directory; returns the report."""
     if not grammar.is_file():
@@ -77,7 +184,7 @@ def bison_report(bison: str, grammar: Path) -> str:
         report = Path(tmp) / "grammar.output"
         cmd = [
             bison,
-            "--report=solved",
+            "--report=solved,lookaheads",
             f"--report-file={report}",
             "-o",
             str(Path(tmp) / "grammar.c"),
@@ -114,16 +221,25 @@ def main(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(prog="solved-conflicts", description=__doc__.splitlines()[0])
     parser.add_argument("--bison", default="bison", help="the bison executable (default: bison)")
     parser.add_argument("--grammar", required=True, type=Path, help="the .y file")
+    parser.add_argument(
+        "--operand", help="the operand nonterminal whose context is guarded (see above)"
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--expect", type=Path, help="the committed allowlist to compare with")
     mode.add_argument("--print", action="store_true", help="print the normalised lines")
     args = parser.parse_args(argv)
     try:
-        lines = normalise(bison_report(args.bison, args.grammar))
+        report = bison_report(args.bison, args.grammar)
+        lines = normalise(report)
+        violations: list[str] = []
+        if args.operand is not None:
+            operators = precedence_tokens(args.grammar.read_text(encoding="utf-8"))
+            violations = operator_violations(report, args.operand, operators)
+        sys.stderr.write("".join(line + "\n" for line in violations))
         if args.print:
             sys.stdout.write("".join(line + "\n" for line in lines))
-            return 0
-        return compare(lines, args.expect)
+            return 1 if violations else 0
+        return max(compare(lines, args.expect), 1 if violations else 0)
     except ToolError as exc:
         print(f"solved-conflicts: {exc}", file=sys.stderr)
         return 2

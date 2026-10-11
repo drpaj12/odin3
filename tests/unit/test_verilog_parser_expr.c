@@ -318,6 +318,27 @@ static void test_doubled_unary_is_a_syntax_error(void) {
     expect_tree("-(-a)", "UNARY[-](UNARY[-](a))");
 }
 
+/* The strict forms a looser grammar would accept (review M3): a doubled unary operator, a
+ * replication without its inner braces or followed by more items (A.8.1), a user call without an
+ * argument (A.8.2), two selects on a non-final component (G7), a min:typ:max outside `#(` (§3.1
+ * f), and a binary `~&` (A.8.6 has none). */
+static void test_strict_forms_are_syntax_errors(void) {
+    expect_error("module m; assign y = !~a; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:23: error: syntax: unexpected '~'\n");
+    expect_error("module m; assign y = {2{3{a}}}; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:26: error: syntax: unexpected '{'\n");
+    expect_error("module m; assign y = {4{a}, b}; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:27: error: syntax: unexpected ',', expecting '}'\n");
+    expect_error("module m; assign y = f(); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:24: error: syntax: unexpected ')'\n");
+    expect_error("module m; assign y = u.v[1][2].w; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:31: error: syntax: unexpected '.'\n");
+    expect_error("module m; assign y = (1:2:3); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:24: error: syntax: unexpected ':'\n");
+    expect_error("module m; assign y = a ~& b; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:24: error: syntax: unexpected ~&\n");
+}
+
 /* --- attributes on operators (§3.5) ----------------------------------------------------------- */
 
 static void test_attributes_on_operators(void) {
@@ -426,6 +447,51 @@ static void test_hierarchical_calls(void) {
     expect_tree_logged("g[0].f(a)", 1, "CALL:g[0].f{HIER}(a)");
     expect_tree_logged("\\a+b .f(a)", 1, "CALL:\\a+b .f{HIER}(a)");
     expect_tree_logged("u.v.f(a, b)", 2, "CALL:u.v.f{HIER}(a, b)");
+}
+
+/*
+ * An escaped identifier may hold a backtick (`\f`x `): the lexer and 2B accept it, the 1F
+ * writer calls it unwritable. As a callee component it is spelled as the printer writes it, so
+ * the call parses with no diagnostic and round-trips (review I1).
+ */
+static void test_hierarchical_call_with_a_backtick(void) {
+    expect_tree_logged("u.\\f`x (a)", 1, "CALL:u.\\f`x {HIER}(a)");
+    expect_tree_logged("\\u`v .f(a)", 1, "CALL:\\u`v .f{HIER}(a)");
+    expect_tree_logged("g[0].\\f`x (a)", 1, "CALL:g[0].\\f`x {HIER}(a)");
+}
+
+/* The same name as a plain hierarchical reference: the printer writes it `\f`x ` with its
+ * "written as stored" warning, and the text re-parses to an equal module. */
+static void test_hierarchical_reference_with_a_backtick(void) {
+    odin3_strbuf text;
+    assign_text("u.\\f`x ", &text); /* the blank ends the escaped name */
+    vt_result res;
+    parse_logged(text.data, "", &res);
+    odin3_strbuf got;
+    odin3_strbuf_init(&got);
+    compact(res.ast, rhs_of(&res), &got);
+    TEST_ASSERT_EQUAL_STRING("HIER_NAME(u, f`x)", got.data);
+    vt_result printed;
+    memset(&printed, 0, sizeof printed);
+    odin3_strbuf_init(&printed.log);
+    odin3_strbuf_init(&printed.dump);
+    odin3_log_set_sink(vt_sink, &printed);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_print(res.ast, module_of(&res), &printed.dump));
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_NOT_NULL(strstr(printed.dump.data, "assign y = u.\\f`x ;"));
+    TEST_ASSERT_NOT_NULL(strstr(printed.log.data, "written as stored"));
+    vt_result again;
+    parse_logged(printed.dump.data, "", &again);
+    bool equal = false;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_ast_equal(res.ast, module_of(&res), again.ast, module_of(&again), &equal));
+    TEST_ASSERT_TRUE(equal);
+    vt_free(&again);
+    odin3_strbuf_free(&printed.log);
+    odin3_strbuf_free(&printed.dump);
+    odin3_strbuf_free(&got);
+    vt_free(&res);
+    odin3_strbuf_free(&text);
 }
 
 static void test_literals(void) {
@@ -561,6 +627,27 @@ static void test_chain_past_the_depth_cap(void) {
     odin3_strbuf_free(&text);
 }
 
+/* A right-deep conditional chain also meets the AST cap before Bison's stack cap (§5): the
+ * second TERNARY from the outside is the first past 32768 high. */
+static void test_right_deep_conditional_past_the_depth_cap(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    append(&text, HEAD);
+    for (uint32_t i = 0; i < DEPTH_CHAIN; i++) {
+        append(&text, "a ? b : ");
+    }
+    append(&text, "c");
+    append(&text, TAIL);
+    vt_result res;
+    (void)parse_with_limits(text.data, (odin3_vp_limits){0}, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, res.status);
+    TEST_ASSERT_EQUAL_UINT32(0, res.unit.v);
+    TEST_ASSERT_EQUAL_STRING("x.v:1:30: error: nesting deeper than 32768\n", res.log.data);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_mark(res.ast));
+    vt_free(&res);
+    odin3_strbuf_free(&text);
+}
+
 /* --- OOM ----------------------------------------------------------------------------------------
  */
 
@@ -622,6 +709,7 @@ int main(void) {
     RUN_TEST(test_xnor_spellings_are_one_sub);
     RUN_TEST(test_reduction_operators);
     RUN_TEST(test_doubled_unary_is_a_syntax_error);
+    RUN_TEST(test_strict_forms_are_syntax_errors);
     RUN_TEST(test_attributes_on_operators);
     RUN_TEST(test_nested_operator_attributes);
     RUN_TEST(test_concatenation_and_replication);
@@ -633,6 +721,8 @@ int main(void) {
     RUN_TEST(test_system_call_empty_arguments);
     RUN_TEST(test_user_call_empty_argument_is_a_syntax_error);
     RUN_TEST(test_hierarchical_calls);
+    RUN_TEST(test_hierarchical_call_with_a_backtick);
+    RUN_TEST(test_hierarchical_reference_with_a_backtick);
     RUN_TEST(test_literals);
     RUN_TEST(test_number_forms);
     RUN_TEST(test_parentheses);
@@ -640,6 +730,7 @@ int main(void) {
     RUN_TEST(test_expressions_in_declarations);
     RUN_TEST(test_long_chain_keeps_the_stack_flat);
     RUN_TEST(test_chain_past_the_depth_cap);
+    RUN_TEST(test_right_deep_conditional_past_the_depth_cap);
     RUN_TEST(test_expression_oom_sweep);
     return UNITY_END();
 }

@@ -131,16 +131,40 @@ static odin3_bytes name_bytes(const odin3_ast *ast, uint32_t name) {
     return (odin3_bytes){str != NULL ? str : "", odin3_strtab_len(tab, name)};
 }
 
+/*
+ * name as the 2A printer writes an identifier: plain or `\name `. A name the 1F writer calls
+ * unwritable but the lexer accepts (an escaped identifier holding a backtick, `\f`x `) is written
+ * `\name ` too, as the printer writes it, so the printed call re-parses to the same name.
+ */
+static odin3_status append_name(odin3_strbuf *text, odin3_bytes name) {
+    if (odin3_verilog_ident_kind(name) != ODIN3_VERILOG_UNWRITABLE) {
+        return odin3_verilog_append_ident(text, name);
+    }
+    return odin3_strbuf_appendf(text, "\\%.*s ", (int)name.len, (const char *)name.ptr);
+}
+
+/* A callee component as the printer writes it: `u`, `\a+b `, or `g[<index>]`. */
+static odin3_status append_part(const odin3_ast *ast, odin3_ast_id part, odin3_strbuf *text) {
+    if (odin3_ast_kind_of(ast, part) != ODIN3_AST_SELECT) {
+        return append_name(text, name_bytes(ast, odin3_ast_name(ast, part)));
+    }
+    odin3_ast_id base = odin3_ast_child(ast, part, 0);
+    odin3_status st = append_name(text, name_bytes(ast, odin3_ast_name(ast, base)));
+    st = st == ODIN3_OK ? odin3_strbuf_append(text, odin3_bytes_cstr("[")) : st;
+    st = st == ODIN3_OK ? odin3_ast_print(ast, odin3_ast_child(ast, part, 1), text) : st;
+    return st == ODIN3_OK ? odin3_strbuf_append(text, odin3_bytes_cstr("]")) : st;
+}
+
 odin3_status vp_hier_call_name(odin3_vp_ctx *ctx, uint32_t mark, uint32_t last, uint32_t *out) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     odin3_ast_span parts = odin3_ast_pending_span(ctx->ast, mark);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; i < parts.n && st == ODIN3_OK; i++) {
-        st = odin3_ast_print(ctx->ast, parts.ids[i], &text); /* `u`, `\a+b `, `g[0]` */
+        st = append_part(ctx->ast, parts.ids[i], &text);
         st = st == ODIN3_OK ? odin3_strbuf_append(&text, odin3_bytes_cstr(".")) : st;
     }
-    st = st == ODIN3_OK ? odin3_verilog_append_ident(&text, name_bytes(ctx->ast, last)) : st;
+    st = st == ODIN3_OK ? append_name(&text, name_bytes(ctx->ast, last)) : st;
     st = st == ODIN3_OK ? odin3_ast_intern(ctx->ast, (odin3_bytes){text.data, text.len}, out) : st;
     odin3_strbuf_free(&text);
     odin3_ast_unwind(ctx->ast, mark);

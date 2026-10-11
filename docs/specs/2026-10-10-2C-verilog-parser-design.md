@@ -255,7 +255,7 @@ operators and undefined macros, PP-5/PP-9) is a located error "unknown directive
 
 Bison ≥ 3.8, `%define api.pure full`, `%define api.prefix {odin3_vp_}`, `%locations` with
 `YYLTYPE = odin3_range`, `%define parse.error detailed`, `%define parse.lac full` (exact
-expected-token lists; the cost is a small table walk per error), `%define lr.type lalr`,
+expected-token lists, of at most four tokens, §3.4; the cost is a small table walk per error), `%define lr.type lalr`,
 `%expect 0` (no `%expect-rr`: it is GLR-only, and under `-Werror` Bison stops on its warning;
 in LALR mode `%expect 0` already rejects reduce/reduce conflicts). Semantic values are one
 union of `odin3_ast_id` (nodes), `uint32_t`
@@ -338,7 +338,11 @@ lists every conflict Bison resolves by precedence or associativity, as `bison
 --report=solved` prints them (normalised to rule text and token), and the CTest
 `verilog_grammar_solved` regenerates the report and requires it to equal the file: the
 expected content is the operator-table entries of §3.3 and the two `else` lines, nothing
-else. The CMake Bison invocation runs with `-Werror` (conflicts, useless rules and
+else. Once every operator rule meets every operator token, a new rule that puts an operator
+token after an expression (`'#' expr '*' ';'`) resolves its conflicts with lines already
+listed, so the CTest also runs the comparator with `--operand expr`: no precedence token may
+follow an `expr` outside its operator rules (FIRST of what follows it, or the LALR lookaheads of
+the rule's reduction from Bison's `--report=lookaheads`); a violation fails the test. The CMake Bison invocation runs with `-Werror` (conflicts, useless rules and
 precedence warnings all fail the build, `-Wcounterexamples` for the diagnosis); a new
 conflict is removed by a grammar change or, when it is a genuine operator case, by an
 explicit, commented `%prec` plus a line in the allowlist — never by raising `%expect` and
@@ -487,7 +491,10 @@ ENDMODULE`, and `module_body: … module_items error` (an item missing its `;` b
 suppresses cascades, and the `VP` guard (§3.2) makes every action a no-op yielding 0 while
 the flag is set, so no builder is ever called with the half-built children recovery leaves
 behind (a tree after an error is never used: the stream yields **no `UNIT`** and the pass
-destroys the store, §4.2, 2A §9). The first error also unwinds the pending stack to 0. The
+destroys the store, §4.2, 2A §9). Bison's detailed message names at most four expected tokens
+and otherwise none, so after an expression operand, where any of the 24 binary operators or
+`?` may follow, a message is only `syntax: unexpected X` (`reg [3:0 r;`, `- -a`, `f(a, , b)`);
+tests pin the message as Bison writes it. The first error also unwinds the pending stack to 0. The
 run stops at `ODIN3_VP_MAX_ERRORS` = 20 diagnostics ("too many errors; stopping"), as a
 compiler's error limit does, and at the end of the stream returns `ODIN3_ERR_PARSE` when any
 error was emitted.
@@ -515,9 +522,10 @@ SPECIFY_BLOCK GENERATE GEN_FOR GEN_IF GEN_CASE`), every ANSI port declaration in
 statement (its node, `NULL_STMT` included), and — per Annex A — a unary operator
 (`UNARY`), a binary operator (`BINARY`), the `?` of a conditional (`TERNARY`); nowhere else
 (a case item, a declarator, a port reference, a connection are syntax errors with an
-attribute). Two Annex A placements are **not** supported and logged as divergences (§9): an
-attribute on a port connection (`.p((* x *) e)` has no `CONNECTION` attach in 2A §7) and on an
-ANSI function/task port; neither occurs in the corpus. Attributes on an `assign` are accepted
+attribute). Three Annex A placements are **not** supported and logged as divergences (§9): an
+attribute on a port connection (`.p((* x *) e)` has no `CONNECTION` attach in 2A §7), on an
+ANSI function/task port, and on a function call (`f (* k *) (a)`, A.8.2: no `CALL` attach in
+2A §7); none occurs in the corpus. Attributes on an `assign` are accepted
 (Yosys rejects them; nothing in the corpus has them).
 `(* full_case, parallel_case *)` before a `case` attaches to the `CASE` like any statement
 attribute; the `CASE`/`GEN_CASE` reduction then adds the pending metacomments of §2.6 into the
@@ -597,7 +605,12 @@ E*); `$signed(a)` → `CALL{SYSTEM}`(name `$signed`); `u.f(a)`, `g[0].f(a)`, `\a
 `CALL{HIER}` whose name is the components joined with `.`, each written as the 2A printer
 writes an identifier (escaped when not plain, an index as `[n]` after its component:
 `u.f`, `g[0].f`, `\a+b .f`), so the printer's raw output re-parses to the same interned
-string (E21 is REJECT; the name only serves the message and the round trip); `$display(a,
+string (E21 is REJECT; the name only serves the message and the round trip). A name the 1F
+writer calls unwritable but the lexer accepts (a backtick in an escaped identifier, `u.\f`x `)
+is written `\name ` as the printer writes it. The component nodes the callee was parsed from
+(made by `hier_ref` before the `(` is seen) stay in the store unreachable: 2A §4.1 allows them,
+`check` reports them as information (rule 3), and 2D never visits them; `TASK_CALL{HIER}` is the
+same; `$display(a,
 , b)` → `TASK_CALL{SYSTEM}` with a 0 tail entry for the empty argument (E*0; a user call
 with an empty argument is a syntax error, §3.1 j); `(e)` → `e` itself (parentheses make no
 node; the printer re-parenthesises every nested
@@ -1088,7 +1101,8 @@ into `docs/PHASE2.md` under 2C's decisions-log entry, replacing 2A's "an estimat
   left-associative per Table 5-4 and Yosys; Odin II differs), VP-14 (error cap 20), VP-21
   (generated into the build tree; the per-file `-Wno-*` list as measured), the §7.6
   numbers, and the **divergence list**: attributes on `assign` accepted; attributes on a port
-  connection and on an ANSI function/task port are syntax errors (Annex A allows them);
+  connection, on an ANSI function/task port and on a function call are syntax errors (Annex A
+  allows them);
   unary operators bind to a primary only (`- -a` needs parentheses; Odin II and Yosys accept
   it); SystemVerilog named-argument calls `f(.a(x))` are syntax errors — the
   `syntax/*_expression_in_{function,task}_port.v` micros become Parmys exceptions under

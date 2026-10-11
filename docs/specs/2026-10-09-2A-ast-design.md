@@ -236,8 +236,11 @@ typedef struct odin3_ast_node {   /* 24 bytes, pagevec, IDs from 1, slot 0 reser
 The field list is the contract; the layout stays behind accessors (`odin3_ast_payload`
 hides the `child` reuse). **Every child ID is smaller than its parent's** (AST-5): nodes are
 made bottom-up, so a forward sweep over IDs visits children before parents. A node belongs to
-exactly one parent span, or to exactly one attribute span (`ATTR`), or is a root (`UNIT`, or a
-subtree abandoned on a syntax error: allowed, unreachable). The child table is one `odin3_vec`
+exactly one parent span, or to exactly one attribute span (`ATTR`), or is a root (`UNIT`, a
+subtree abandoned on a syntax error, or a component of a hierarchical callee — the `IDENT`s and
+index `SELECT`s a `CALL{HIER}` or `TASK_CALL{HIER}` was parsed from, which keeps only their
+joined name (2C §3.6): allowed, unreachable; `check` reports them as information under rule 3,
+and 2D, which walks from the `UNIT`, never visits them). The child table is one `odin3_vec`
 of `uint32_t` (indices survive growth; iteration is contiguous).
 
 ### 4.2 Classes and child-ordering conventions
