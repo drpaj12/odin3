@@ -1,19 +1,26 @@
-# 3H QoR harness and exit run — Implementation Plan (v1)
+# 3H QoR harness and exit run — Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 v1 is written with the 3D and 3E plans (same commit), which share one contract: the heavy-run convention, the run-information header, the `$lut` cell and the PR order. For a 3D or 3E interface, that plan's Interfaces block is the authority.
 
+v2 applies the pre-flight review `3-plans-review` (3H: 1 critical, 3 important, 6 minor; every finding applied, no minor rejected) and the controller's rulings, each cited where it lands:
+- C1: one job at a time (`MAX_JOBS = 1`), fcheck right after its own VPR job and never beside another; the first P run is ≈ 4–4.5 h (point (w)).
+- I2: the controller hand-starts the nightly as `systemd-run --user … tools/heavy-run … vtr-qor nightly`; no delayed start, no Python-side locking (point (c)).
+- I3: tools pass the caller's environment through unchanged and never set `ODIN3_HEAVY_OK` (point (a)).
+- I4: no pre-2E-1 fallback: T8 and the Task 3 fixtures wait for `tools/heavy-run` on `main` (point (g)).
+- I10: the nightly gains a "3D sweeps" step, the runner of 3D §13.4, §13.5 and §13.8 (Task 13).
+
 **Goal:** Build `tools/vtr-qor`, the stdlib-Python harness that runs Parmys (P) and Odin III's legs (O, O′, P′, and the evidence legs R and Oprov) through VTR `3c9a4d23` on the 19 VTR 7.0 benchmarks, collects VTR's own metrics, and writes the Phase 3 exit table and verdict under the WSL limits and the heavy-run rule.
-- The P leg needs nothing from Odin III. It runs as soon as 3H-1 lands (≈ 3–4 h solo).
+- The P leg needs nothing from Odin III. It runs as soon as 3H-1 lands and 2E-1's `tools/heavy-run` is on `main` (≈ 4–4.5 h solo, one job at a time).
 - P′ reads the verified Parmys golden, so M1 needs only 3D's `abc` and 3E's writer.
-- The exit run (M3) takes ≈ 20–30 h over 5–7 nights, resumed through the job cache.
+- The exit run (M3) takes ≈ 20–30 h (about 1 h more with group A serial) over 5–7 nights, resumed through the job cache.
 - Nightly runs start by hand until Peter approves the systemd timer.
 
 **Architecture:** Seven stdlib modules under `tools/vtr-qor/`:
-- `qor_heavy.py`: the heavy convention (re-run through `tools/heavy-run`, verify the cgroup cap), the machine readers, `safe_rmtree`; 3E's sweep tools use it.
+- `qor_heavy.py`: the heavy convention (detect `tools/heavy-run`'s nesting evidence, re-run through it, verify the cgroup cap), the machine readers, `safe_rmtree`; 3D's and 3E's heavy tools use it.
 - `qor_legs.py`: the one definition of every leg's commands, which 3F imports.
-- `qor_sched.py`: jobs, keys, the cache, the planner, and the runner (a `-j3` pool for group A, then group B alone, with admission, retries, timeouts, cleanup and retention).
+- `qor_sched.py`: jobs, keys, the cache, the planner, and the runner (one job at a time, group A then group B, each fcheck right after its own VPR job, with admission, timeouts, cleanup and retention).
 - `qor_parse.py`: VTR's own `parse_vtr_flow.py`, plus the `time -v` and stage-log readers.
 - `qor_netstats.py`: one streaming pass over the pre-VPR BLIF.
 - `qor_table.py`: ratios, geomeans, the gate and the writers.
@@ -41,10 +48,10 @@ Four PRs and one controller run, as spec §17:
 
 | PR | Branch | Base | Tasks | Waits for |
 |---|---|---|---|---|
-| 3H-1 harness + P leg | `feat/3H-harness` | `origin/main` now | 1–6 | **Nothing for the code: it starts now** (unit tests use fakes). T8 and every real run need 2E-1's `tools/heavy-run` on `main` (T8's fallback: point (g)). |
-| 3H-run-P the first P run | — (controller) | `main` after 3H-1 | 7 | 3H-1 merged, 2E-1 on `main`; solo. |
+| 3H-1 harness + P leg | `feat/3H-harness` | `origin/main` now | 1–6 | **Nothing for the code: it starts now** (unit tests use fakes). T8, the Task 3 fixture captures and every real run need 2E-1's `tools/heavy-run` on `main` (ruling I4, point (g)). |
+| 3H-run-P the first P run | — (controller) | `main` after 3H-1 | 7 | 3H-1 merged, 2E-1 on `main`; solo, ≈ 4–4.5 h. |
 | 3H-2 table + gate | `feat/3H-table` | stacked on `feat/3H-harness` after Task 6 | 8–9 | 3H-1. Task 9's close-out needs 3H-run-P's `metrics.json`. |
-| 3H-3 control legs, checks, nightly | `feat/3H-legs` | `main` after 3H-2 | 10–13 | 3H-2, 3E-1 (`--vtr`), 3E-2 (`vtr-models`), 3E-5 (`$lut` in `--vtr`), 3D-5 (`abc`, for P′). `crosscheck` needs 3F, else it moves to Task 14 (point (h)). Closed by the M1 run. |
+| 3H-3 control legs, checks, nightly | `feat/3H-legs` | `main` after 3H-2 | 10–13 | 3H-2, 3E-1 (`--vtr`), 3E-2 (`vtr-models`), 3E-5 (`$lut` in `--vtr`), 3D-5 (`abc`, for P′; its golden tools for the "3D sweeps" step). `crosscheck` needs 3F, else it moves to Task 14 (point (h)). Closed by the M1 run. |
 | 3H-4 exit | `feat/3H-exit` | `main` after 3H-3 | 14–15 | 2D, 2E, 2F (and 2H's VTR rows), 3A, 3B, 3C, 3G; 3D (3D-7 for the measured exchange, point (e)); 3E-6 (Oprov); 3F. Closed by M2 and M3. |
 
 **Model/effort** (PHASE0 §9; PHASE3 row 3H: light review, Opus `high`, Sonnet for bulk and runs):
@@ -73,13 +80,13 @@ Effort cues:
 - Lane 3 runs alongside 3D/3E (lane 1) and 3A/3B/3C (lane 2).
 
 **Pre-flight conflict note.**
-1. **`tools/heavy-run`, `tools/build-locked`, `cmake/Odin3Sweep.cmake` (2E-1 Task 2, in review).** 3H executes `heavy-run` and never copies it. Every real run (T8, 3H-run-P, M1, the group B measurements, nightly, M2, M3) depends on 2E-1 being on `main`. 3H registers **no** `odin3_add_sweep_test` CTest. Builds use `tools/build-locked --preset release -j6`, never under `heavy-run`.
+1. **`tools/heavy-run`, `tools/build-locked`, `cmake/Odin3Sweep.cmake` (2E-1 Task 2, in review).** 3H executes `heavy-run` and never copies it, and uses its nesting rule (inside a heavy run, `heavy-run <cmd>` runs `<cmd>` as is when descriptor 9 holds the lock). Every real run (T8, the Task 3 fixture captures, 3H-run-P, M1, the group B measurements, nightly, M2, M3) depends on 2E-1 being on `main`; there is no fallback (ruling I4). 3H registers **no** `odin3_add_sweep_test` CTest. Builds use `tools/build-locked --preset release -j6`, never under `heavy-run`.
 2. **`CMakeLists.txt` and `.github/workflows/ci.yml`: no edit.** The `python_tools` CTest runs `unittest discover -s tests/tools`, so `test_vtr_qor_*.py` join the gate by themselves. 2C-2, 2D-2, 2E-1, 3D and 3E edit `CMakeLists.txt` without touching 3H.
 3. **`pyproject.toml` and `tests/tools/__init__.py`.** Task 1 appends `tools/vtr-qor` to `[tool.ruff] src`, `[tool.mypy] mypy_path` and the `sys.path` list. 2D-2 (`tools/elab-check`), 2E-1 (`tools/proc-check`), 3D-5 (`tools/abc-check`), 3E-2 (`tools/blif-vtr-check`, `tools/vtr-models`) and 3E-4 (`tools/vtr-read-check`) append too; keep both sides.
 4. **`include/odin3/odin3.h`, `src/passes/builtin.c`, `docs/PASSES.md`, the cell registry, `src/frontends/project/*`: no change.** 3H adds no C and no pass; it consumes Odin III only as the release binary (`odin3 --help`'s pass list, point (t); the §3 scripts; the `--vtr` file and its header). 3D's `$lut` reaches 3H only as `.names` lines, which `qor_netstats` counts like any other. The project grammar's `abc_script` (3D-6) reaches it only as the header's `sha256=` word (the key input "the ABC script's SHA-256"); 3H reads no project file, and the O leg uses `lib/abc/vtr.abc`.
 5. **The `# abc:` header** is written by whichever of 3E-1 and 3D-3 lands second, as `# abc: script=<path as given> sha256=<64 hex> abc=<40 hex> K=<K|none> exchange=<aig|blif> depth=<d>`. Task 4 parses exactly that. Before it exists, `abc_depth` and `abc_exchange` are empty for O/P′.
 6. **`tools/equiv-check` is consumed, never edited** (`--timeout 600`; Task 12). 3D-5's `--blackbox` and 2H's later `--x-report` are not used: §8.2 compares O′ with O, unboxed.
-7. **3E's tools.** `tools/vtr-models` (3E-2) is run by `check-lib`, `doctor` and nightly step 1. 3E-4's `vtr-read-check` calls `qor_heavy.reexec_under_lock`, and the shell `blif-roundtrip --vtr` calls `qor_heavy.py verify-scope`; nightly step 5 runs both. Task 1's signatures are their interface, and a change edits 3E-4's tools in the same PR.
+7. **3E's and 3D's tools.** `tools/vtr-models` (3E-2) is run by `check-lib`, `doctor` and nightly step 1. 3E-4's `vtr-read-check` calls `qor_heavy.reexec_under_lock`, and the shell `blif-roundtrip --vtr` calls `qor_heavy.py require-heavy`; nightly step 5 runs both. 3D's `abc-equiv`, `abc-diff` and `abc-determinism` call `qor_heavy.require_heavy()` on golden paths; the nightly's "3D sweeps" step runs them (3D point (m), ruling I10). The nightly starts every such tool with `pass_fds=(9,)`, so it is inside the held run. Task 1's signatures are their interface, and a change edits those tools in the same PR.
 8. **3F** imports `qor_legs.odin3_script` (frozen from 3H-1 on), and `crosscheck` runs 3F's task configs.
 9. **3D's own heavy runs** (3D §13.9, H1–H6) share the one lock with 3H's runs; the controller orders them. The P′ runs are 3H's.
 10. **Docs.**
@@ -92,22 +99,28 @@ Effort cues:
 **Spec points made exact here** (agent defaults, reversible; Task 15 logs them in PHASE3):
 
 - (a) **The heavy wrapper is `tools/heavy-run`** (standing rules; the shared contract). §7.1's `flock … systemd-run --user --scope -p MemoryMax=6G …` predates the named-slice correction: a bare scope escapes the cap of an enclosing one.
-  - `qor_heavy.reexec_under_lock` runs `[<repo>/tools/heavy-run, ("--xl"), "env", "ODIN3_HEAVY=1", sys.executable, "-I", <script>, *argv]` with `ODIN3_HEAVY_OK=1` added to the environment, and exits with the child's status. `<script>` is `vtr_qor.py` for the harness; 3E's tools get their own `sys.argv[0]`.
-  - `heavy-run` takes `/tmp/claude-1000/odin3-heavy.lock` exclusively (writer preference over builds), caps `odin3-heavy.slice` at `MemoryMax=6G`, `MemorySwapMax=0`, and runs the tool in a scope inside the slice. The jobs inherit that scope and never call `systemd-run` themselves.
-  - The wrapper first probes the lock without blocking. When it is busy it prints `vtr-qor: waiting for the heavy lock /tmp/claude-1000/odin3-heavy.lock`, or with `--no-wait` exits 4 (E-QH4; it passes `ODIN3_HEAVY_WAIT=0`).
-  - `heavy-run`'s exit 77 (skipped) maps to E-QH4 when the probe found the lock busy. Otherwise it maps to E-QH3's second text, made exact: `cannot apply the memory cap (tools/heavy-run exited 77; see its message above)`, exit 2.
+  - **Inside a heavy run** means `heavy-run`'s own nesting evidence: `ODIN3_HEAVY_SLICE` is set, the process's cgroup lies under that slice, and the inherited descriptor 9 is the heavy lock (`/proc/self/fd/9` resolves to `/tmp/claude-1000/odin3-heavy.lock`). `qor_heavy.inside_heavy_run()` checks exactly that; the review's finding 27 (both pieces of evidence) holds. The spec's `ODIN3_HEAVY=1` marker is not used.
+  - `qor_heavy.reexec_under_lock`: inside, it calls `verify_scope` and returns. Outside, it requires `ODIN3_HEAVY_OK=1` in the **caller's** environment, else `vtr-qor: heavy runs are the controller's: set ODIN3_HEAVY_OK=1` (exit 2; ruling I3). Then it runs `[<repo>/tools/heavy-run, ("--xl"), sys.executable, "-I", <script>, *argv]` with the caller's environment unchanged and exits with the child's status. `<script>` is `vtr_qor.py` for the harness; 3E's tools get their own `sys.argv[0]`.
+  - `heavy-run` takes `/tmp/claude-1000/odin3-heavy.lock` exclusively (writer preference over builds), caps `odin3-heavy.slice` at `MemoryMax=6G`, `MemorySwapMax=0`, and runs the tool in its scope `odin3-heavy-<pid>-<ns>.scope` inside the slice. The jobs inherit that scope and never call `systemd-run` themselves. No harness code starts a nested `heavy-run`; a heavy child tool is started with `pass_fds=(9,)`.
+  - It first probes the lock with `flock -n`. When it is busy it prints `vtr-qor: waiting for the heavy lock /tmp/claude-1000/odin3-heavy.lock`, or with `--no-wait` exits 4 (E-QH4) without starting `heavy-run`.
+  - `heavy-run`'s exit 77 (skipped: a 4 h lock wait, or no systemd user manager) maps to E-QH3's second text, made exact: `cannot apply the memory cap (tools/heavy-run exited 77; see its message above)`, exit 2.
 - (b) **`verify_scope` walks the cgroup ancestors**, because `heavy-run` caps the slice and the scope's own `memory.max` reads `max`.
   - It reads the `0::<path>` line of `/proc/self/cgroup` and walks `/sys/fs/cgroup/<path>` up to the root.
   - It passes when some ancestor has a numeric `memory.max` ≤ the limit (6,442,450,944; 9,663,676,416 under `--xl`) and some ancestor has `memory.swap.max` = `0`.
-  - The capping directory supplies `memory.events` (`oom_kill`) and `memory.peak`. Only one heavy job holds the slice, so they are this run's.
+  - `oom_kill` is read as a delta of the capping directory's `memory.events` around each job. `memory.peak` is read from the job's **own leaf cgroup** (the `heavy-run` scope), because the slice persists across heavy runs and its peak is not this run's (finding 26); one job runs at a time, so the scope's peak is the job's.
   - E-QH3 prints the tightest `memory.max` found (else `max`) and the own `memory.swap.max`.
-- (c) **The hand-started nightly** (§13; Peter has not approved the timer). The controller runs `systemd-run --user --unit=odin3-vtr-qor-nightly-<YYYYMMDD> --slice=odin3-heavy.slice --collect -p MemoryMax=6G -p MemorySwapMax=0 --setenv=ODIN3_HEAVY_SERVICE=1 <repo>/tools/vtr-qor/vtr-qor nightly --start-at 01:00`.
-  - `nightly` sleeps until `--start-at`, holding nothing.
-  - Under `ODIN3_HEAVY_SERVICE=1`, `reexec_under_lock` then takes the `flock` itself. While it waits it writes `/tmp/claude-1000/odin3-heavy.queued.<pid>` (so `tools/build-locked` yields, as for `heavy-run`), removed once held and on exit.
-  - It then sets `ODIN3_HEAVY=1`, creates no scope, and calls `verify_scope`.
-  - The timer files ship in `tools/vtr-qor/systemd/` for Peter; no agent installs them.
+- (c) **The hand-started nightly** (§13; Peter has not approved the timer; ruling I2). The controller starts it when he wants it to run, with no delayed start and no Python-side locking:
+
+  ```
+  systemd-run --user --unit=odin3-vtr-qor-nightly-<YYYYMMDD> --collect --setenv=ODIN3_HEAVY_OK=1 \
+    <repo>/tools/heavy-run <repo>/tools/vtr-qor/vtr-qor nightly [--budget H]
+  ```
+
+  - The transient service outlives the Claude session. `heavy-run` takes the lock, creates the scope and exports `ODIN3_HEAVY_SLICE`, so `nightly` finds itself inside (point (a)) and starts at once.
+  - Its deadline is the earlier of the next 06:00 local and the start plus `--budget` (default 5 h).
+  - `ODIN3_HEAVY_SERVICE`, `--start-at` and the in-Python `flock` are gone. The timer files ship in `tools/vtr-qor/systemd/` for Peter, running the same `heavy-run … nightly` command; no agent installs them.
 - (d) **`--xl` is controller-only and never automatic.**
-  - `run --xl` and `exit-run --xl` go through `tools/heavy-run --xl`: `odin3-heavyxl.slice`, 9G. The name has no dash, because systemd nests dashed slice names inside `odin3-heavy.slice`.
+  - Only `run --designs <capped designs> --xl` and `fcheck --designs … --xl` accept it (finding 29); `exit-run` and `nightly` never do. It goes through `tools/heavy-run --xl`: `odin3-heavyxl.slice`, 9G. The name has no dash, because systemd nests dashed slice names inside `odin3-heavy.slice`.
   - Without `ODIN3_HEAVY_XL_OK=1` it gives `--xl needs ODIN3_HEAVY_XL_OK=1 (an idle machine; the controller starts it)` (E-QH3, exit 2).
   - It is only for jobs already `capped`, after their measured peak went to Peter (§7.1: the agent never raises the cap), and only on an idle machine.
   - The harness never retries under `--xl` by itself. `job.json` records the slice, and the Cost section marks the row `xl`. The key is unchanged.
@@ -119,17 +132,11 @@ Effort cues:
   - The **job key** is §5.3's SHA-256 over every listed input. It is stored as `metrics.json` `key` and decides cache reuse.
   - The **leg key** is the same canonical JSON without `design` and the design-source SHA-256. Its first 12 hex digits are the `<key12>` directory, `latest`, and `table --keys`. "Complete" means every design of the run's set has an `ok` job under that `key12`.
   - The common parameters enter both keys as `-track_memory_usage -crit_path_router_iterations 100` plus `--seed N` when N ≠ 1. The housekeeping parameters (`-temp_dir`, `-timeout`, `-delete_*`) are left out: they hold the job directory (circular) and do not change results.
-- (g) **T8 before 2E-1 merges.** If 3H-1 is otherwise ready, the controller runs T8 by hand with the standing rule's command:
-
-  ```
-  flock /tmp/claude-1000/odin3-heavy.lock systemd-run --user --slice=odin3-heavy.slice -p MemoryMax=6G -p MemorySwapMax=0 --wait --pipe env ODIN3_HEAVY=1 python3 -I tools/vtr-qor/vtr_qor.py run --leg P --designs ch_intrinsics,stereovision3,diffeq2
-  ```
-
-  `ODIN3_HEAVY=1` skips the re-run, and `verify_scope` passes on the service's own `memory.max`. That is the same code path. 3H-run-P still waits for 2E-1.
+- (g) **No pre-2E-1 fallback** (ruling I4; finding 4). T8, the Task 3 fixture captures and every other VPR run go through `tools/heavy-run`, so they wait for 2E-1 on `main`. The controller captures Task 3's fixtures; the implementer commits them.
 - (h) **`crosscheck`** lands in Task 13 if 3F's `tests/vtr/tasks/` exists when 3H-3 opens. Otherwise it moves to Task 14 unchanged.
 - (i) **`sets.json` carries §2's first five columns** in a `designs` map beside the spec's lists (Task 2), so nightly admission can use `vtr_flow_time_s` × 1.5 when no measured time exists.
 - (j) **The pool.** Each worker thread runs one job's commands with `subprocess.Popen(…, start_new_session=True)`. Results are read back by key, so completion order never reaches a table.
-- (k) **E-QH10's `stage` and `peak`.** `stage` is the newest stage log by mtime (`parmys.out`, `abc*.out`, `*_blackboxing_latch.out`, `restore_latch*.out`, `vpr*.out`, `frontend.log`, `fcheck.log`). `peak` is the capping cgroup's `memory.peak` in MiB, or `?`.
+- (k) **E-QH10's `stage` and `peak`.** `stage` is the newest stage log by mtime (`parmys.out`, `abc*.out`, `*_blackboxing_latch.out`, `restore_latch*.out`, `vpr*.out`, `frontend.log`, `fcheck.log`). `peak` is the job's leaf scope's `memory.peak` in MiB (point (b)), or `?`.
 - (l) **Parmys determinism** (spec §20 item 3, report-only). Before cleanup, a P job's `job.json` gets `parmys_blif_sha256` (when VTR left `run/<d>.parmys.blif`) and `parmys_equals_golden` (`true`/`false`/`null`).
 - (m) **`--out` roots.** `--out` must resolve under `~/odin3-ws/work/` or `/tmp/claude-1000/`, else `refusing --out <dir>: not under ~/odin3-ws/work or /tmp/claude-1000` (E-QH12, exit 2). `safe_rmtree`'s root is the resolved `--out`.
 - (n) **Nightly step 3 keeps the O and O′ netlists** (`--keep-netlists`), because its `equiv` and `rerun-check` need them.
@@ -145,6 +152,8 @@ Effort cues:
   - exit 2 with `running ABC failed:` and `timed out` → `timeout`;
   - any other exit 2 → `error`;
   - the harness's own 660 s cap expiring → `timeout`.
+- (w) **One job at a time** (ruling C1; finding 1). §7.2's and PHASE3 #17's `-j3` group A pool predates the heavy-run rule, and three jobs in one scope share one `oom_kill` counter and one peak. So `MAX_JOBS` is 1: `-j` defaults to 1 and `-j 2` or more is E-QH9 `-j <n> exceeds 1 (the heavy-run rule)`. Each fcheck runs right after its own VPR job, never beside another job, in both groups. A capped job is not retried (nothing else was running), so `CAPPED_RETRIES` is 0. Group A of the first P run is ≈ 1,185 s serial × 1.5 ≈ 30 min, group B ≈ 3.8 h: ≈ 4–4.5 h solo. Task 15 logs this against PHASE3 #17 and 3H §7.2; `-j3` would need a new ruling and per-job sub-scopes.
+- (x) **`lut_size` reaches VTR's Python as 3E does** (finding 31): `$PY -I -c <snippet> <arch>`, the snippet putting `<V>/vtr_flow/scripts/python_libs` on `sys.path` and calling `vtr.log_parse.determine_lut_size`, not `PYTHONPATH`. It is 3E Task 7's helper; whichever of 3E-2 and 3H-1 lands second makes `qor_legs` import `vtr_models`' copy.
 
 ## Global Constraints
 
@@ -158,20 +167,20 @@ Effort cues:
   - 3: no failure but at least one `capped` or `timeout` (`gate`: INCOMPLETE);
   - 4: lock busy with `--no-wait`;
   - 5: stopped for disk space.
-- **Heavy runs** go only through `qor_heavy.reexec_under_lock` (point (a)). One heavy job runs machine-wide, the run is capped at 6 GiB with no swap, and group B runs alone. `--xl` is the controller's, only on an idle machine, and only after a capped measurement has gone to Peter (point (d)). Implementers run at most T8 and list the runs they deferred.
+- **Heavy runs** go only through `tools/heavy-run`, via `qor_heavy.reexec_under_lock` or the controller's hand start (points (a), (c)). One heavy job runs machine-wide, capped at 6 GiB with no swap, and inside it one VTR or Verilator job at a time (point (w)). No tool sets `ODIN3_HEAVY_OK` (ruling I3). `--xl` is the controller's, only on an idle machine, and only after a capped measurement has gone to Peter (point (d)). Implementers run at most T8 and list the runs they deferred.
 - **Caps (§11), named constants in the module that enforces them:**
 
   | Constant | Value |
   |---|---|
   | `CAP_BYTES` / `CAP_XL_BYTES` (`qor_heavy`) | 6 GiB / 9 GiB, no swap |
-  | `MAX_JOBS` (`qor_sched`) | 3 (group A); group B 1 |
+  | `MAX_JOBS` (`qor_sched`) | 1 (point (w)) |
   | `MIN_MEM_AVAILABLE_GIB` | 7 |
   | `MIN_DISK_FREE_GIB` / `DISK_FLOOR_GIB` | 20 / 10 |
   | `PAUSE_LIMIT_S`, `POLL_S` | 7,200, 60 |
   | `STAGE_TIMEOUT_S` A / B (`qor_legs`) | 7,200 / 14,400 |
   | `JOB_TIMEOUT_S` A / B | 14,400 / 21,600 |
   | `KILL_GRACE_S` | 30 |
-  | `CAPPED_RETRIES` | 1, alone, group A only |
+  | `CAPPED_RETRIES` | 0 (point (w)) |
   | `KEEP_KEYS`, `KEEP_FAILED`, `KEEP_FAILED_BYTES` | 3, 5, 2 GiB per (arch, leg) |
   | `FCHECK_VECTORS`, `FCHECK_SEED`, `FCHECK_J_A`, `FCHECK_J_B` | 50,000, 1, 2, 1 |
   | `EQUIV_TIMEOUT_S` | 600 (child wall cap 660) |
@@ -184,8 +193,8 @@ Effort cues:
 ## Review Focus
 
 1. **A result scored from a stale or partial attempt.** A retry that dies early must never be scored with the previous attempt's `vpr.out`, and a missing gated metric (`-1`, `0`, absent) must fail the gate rather than drop out of the geomean. Pinned in Task 5 (`test_fresh_attempt_mtime`) and Task 8 (`test_gate_missing_metric`).
-2. **A cached job reused after something changed.** Rebuilding `odin3`, editing `lib/vtr.o3lib` or the ABC script, or moving VTR must rerun the affected legs, and nothing else may. Pinned in Task 2 (`test_job_key_inputs`, `test_leg_key_shares_designs`) and Task 6 (`test_run_reuses_cache`).
-3. **The baseline's failure reported as Odin III's.** A capped or timed-out P job must make the verdict INCOMPLETE (exit 3) with "rerun it", never FAIL. A capped group A job is retried once alone. Pinned in Task 8 (`test_gate_incomplete_reference`) and Task 5 (`test_capped_retry_alone`).
+2. **A cached job reused after something changed.** Rebuilding `odin3`, editing `lib/vtr.o3lib` or the ABC script, or moving VTR must rerun the affected legs, and nothing else may. Pinned in Task 2 (`test_job_key_inputs`, `test_leg_key_shares_designs`, `test_plan_rekeys_on_lib_and_script`) and Task 6 (`test_run_reuses_cache`).
+3. **The baseline's failure reported as Odin III's.** A capped or timed-out P job must make the verdict INCOMPLETE (exit 3) with "rerun it", never FAIL, and a capped job's peak must be its own. Pinned in Task 8 (`test_gate_incomplete_reference`) and Task 5 (`test_capped_no_verdict`).
 4. **A ratio at the gate's boundary printed misleadingly.** `1.200` passes, `1.2001` fails and must print as `1.2001` (never `1.200` beside FAIL), and `1.500` per design passes. Pinned in Task 8 (`test_gate_boundaries`) and Task 9 (`test_md_four_decimals_near_bound`).
 5. **The machine dying during an unattended night.** `C:` filling (the VHDX never shrinks), memory pressure from another session, or a job overrunning 06:00: the run pauses, stops after 2 h, terminates at the 10 GiB floor, and releases the lock by morning. Pinned in Task 5 (`test_admission_disk_pause_stop_floor`, `test_admission_mem_wait`) and Task 13 (`test_nightly_deadline`).
 
@@ -205,37 +214,39 @@ Effort cues:
 - Produces (`qor_heavy.py`):
   - `HEAVY_DIR = Path("/tmp/claude-1000")`, `HEAVY_LOCK = HEAVY_DIR / "odin3-heavy.lock"`, `CAP_BYTES = 6 * 1024**3`, `CAP_XL_BYTES = 9 * 1024**3`.
   - `class HeavyError(Exception)`: `__init__(self, code: int, message: str)`, with attributes `code` (the §9 exit code) and `message` (without the `vtr-qor: ` prefix, which the CLI adds).
-  - `@dataclass(frozen=True) class ScopeInfo: path: Path; memory_max: int; swap_zero: bool`. `path` is the capping cgroup directory.
+  - `@dataclass(frozen=True) class ScopeInfo: path: Path; leaf: Path; memory_max: int; swap_zero: bool`. `path` is the capping cgroup directory, `leaf` the process's own (point (b)).
   - `REPO_ROOT = Path(__file__).resolve().parents[2]`.
+  - `def inside_heavy_run(env: Mapping[str, str] | None = None, *, self_cgroup: Path = Path("/proc/self/cgroup"), fd_link: Path = Path("/proc/self/fd/9"), lock: Path = HEAVY_LOCK) -> bool`: point (a)'s evidence (`ODIN3_HEAVY_SLICE` set, the cgroup path under it, fd 9 resolving to `lock`).
+  - `def require_heavy(*, xl: bool = False) -> ScopeInfo`: `inside_heavy_run()` and `verify_scope(...)`, else `HeavyError(2, "not inside a heavy run: the controller starts it through tools/heavy-run")`. 3D's tools call it on golden paths.
   - `def reexec_argv(argv: Sequence[str], script: Path, *, xl: bool = False) -> list[str]`.
   - `def reexec_under_lock(argv: Sequence[str], *, script: Path | None = None, xl: bool = False, no_wait: bool = False, lock: Path = HEAVY_LOCK, env: Mapping[str, str] | None = None) -> ScopeInfo`. `script` defaults to `Path(sys.argv[0]).resolve()`, so 3E's tools call `reexec_under_lock(sys.argv[1:])`.
-    - with `ODIN3_HEAVY=1` in `env`, it only returns `verify_scope(...)`;
-    - with `ODIN3_HEAVY_SERVICE=1`, it takes the lock itself (point (c)), sets `os.environ["ODIN3_HEAVY"] = "1"`, and returns `verify_scope(...)`, keeping the lock's file descriptor open for the life of the process;
-    - otherwise it probes the lock, runs `reexec_argv` through `subprocess.run`, and calls `sys.exit` with the child's status, mapping 77 per point (a).
+    - inside a heavy run, it only returns `verify_scope(...)`;
+    - outside, without `ODIN3_HEAVY_OK=1` in the caller's environment, it raises `HeavyError(2, "heavy runs are the controller's: set ODIN3_HEAVY_OK=1")` (ruling I3);
+    - otherwise it probes the lock, runs `reexec_argv` through `subprocess.run` with the caller's environment unchanged, and calls `sys.exit` with the child's status, mapping 77 per point (a).
   - `def verify_scope(limit: int = CAP_BYTES, *, self_cgroup: Path = Path("/proc/self/cgroup"), cgroup_root: Path = Path("/sys/fs/cgroup")) -> ScopeInfo`: point (b). It raises `HeavyError(2, …)`.
   - `def oom_kills(scope: ScopeInfo) -> int`: `oom_kill` from `<path>/memory.events`, 0 when absent.
-  - `def scope_peak_mib(scope: ScopeInfo) -> int | None`: from `<path>/memory.peak`.
+  - `def scope_peak_mib(scope: ScopeInfo) -> int | None`: from `<leaf>/memory.peak` (point (b)).
   - `def disk_free_gib(env: Mapping[str, str] | None = None) -> int`. It runs `df -B1G --output=avail /mnt/c`, or the argv in `ODIN3_QOR_DF_CMD` (whitespace-split; tests only), and reads the last line. On failure it raises `HeavyError(5, "cannot read free space of /mnt/c")`.
   - `def mem_available_gib(meminfo: Path = Path("/proc/meminfo")) -> float`.
   - `def check_out_dir(out: Path, home: Path) -> Path`: point (m). It returns the resolved path.
   - `def safe_rmtree(path: Path, root: Path) -> None`: it refuses unless `realpath(path)` lies strictly under `realpath(root)` and no component from `root` down is a symlink.
-  - `def main(argv: Sequence[str] | None = None) -> int`: the command `python3 -I tools/vtr-qor/qor_heavy.py verify-scope [--xl]`, for 3E's shell tool `blif-roundtrip --vtr`. It exits 0 inside a capped scope, else 2 with `vtr-qor: <message>` on stderr. Tests point it at a fake tree through `ODIN3_QOR_SELF_CGROUP` and `ODIN3_QOR_CGROUP_ROOT`.
+  - `def main(argv: Sequence[str] | None = None) -> int`: the command `python3 -I tools/vtr-qor/qor_heavy.py require-heavy [--xl]`, for 3E's shell tool `blif-roundtrip --vtr`. It exits 0 inside a heavy run with the cap verified, 3 when not inside, and 2 with `vtr-qor: <message>` on stderr when inside but the cap check fails. Tests point it at fake files through `ODIN3_QOR_SELF_CGROUP`, `ODIN3_QOR_CGROUP_ROOT` and `ODIN3_QOR_FD9`.
 
 **Tests (`test_vtr_qor_heavy.py`; every case uses temp files, fake executables and an injected `lock`; nothing touches the real lock or cgroups):**
 - **T6.**
-  - `test_reexec_argv`: `reexec_argv(["run", "--leg", "P"], S)` with `S = REPO_ROOT / "tools/vtr-qor/vtr_qor.py"` equals `[str(REPO_ROOT / "tools/heavy-run"), "env", "ODIN3_HEAVY=1", sys.executable, "-I", str(S), "run", "--leg", "P"]`. With `xl=True`, `"--xl"` follows the `heavy-run` path.
-  - `test_reexec_env`: a fake `tools/heavy-run` dumping its argv and environment exits 0. The child saw `ODIN3_HEAVY_OK=1` (and `ODIN3_HEAVY_WAIT=0` with `no_wait`), and `reexec_under_lock` exits 0. `xl=True` without `ODIN3_HEAVY_XL_OK=1` raises point (d)'s `HeavyError(2, …)` before the fake runs.
-  - `test_reexec_inside`: with `env={"ODIN3_HEAVY": "1"}` and a passing fake cgroup tree, no subprocess starts and a `ScopeInfo` comes back.
-  - `test_cli_verify_scope`: `main(["verify-scope"])` with a passing fake tree → 0; with a failing one → 2, and stderr holds the `not inside a capped scope` line.
+  - `test_reexec_argv`: `reexec_argv(["run", "--leg", "P"], S)` with `S = REPO_ROOT / "tools/vtr-qor/vtr_qor.py"` equals `[str(REPO_ROOT / "tools/heavy-run"), sys.executable, "-I", str(S), "run", "--leg", "P"]`. With `xl=True`, `"--xl"` follows the `heavy-run` path.
+  - `test_reexec_env` (ruling I3): with `ODIN3_HEAVY_OK=1` in the caller's environment, a fake `tools/heavy-run` dumping its argv and environment exits 0; the environment it saw equals the caller's exactly, and `reexec_under_lock` exits 0. Without the variable → `HeavyError(2, "heavy runs are the controller's: set ODIN3_HEAVY_OK=1")` and the fake never runs. `xl=True` without `ODIN3_HEAVY_XL_OK=1` raises point (d)'s `HeavyError(2, …)` before the fake runs.
+  - `test_reexec_inside`: with `ODIN3_HEAVY_SLICE=odin3-heavy.slice`, a fake cgroup path under that slice, a fake fd-9 link to the lock and a passing fake tree, no subprocess starts and a `ScopeInfo` comes back. The variable alone (no fd link, or a cgroup outside the slice) is not inside (finding 27).
+  - `test_require_heavy`: outside → `HeavyError(2, "not inside a heavy run: the controller starts it through tools/heavy-run")`.
+  - `test_cli_require_heavy`: `main(["require-heavy"])` inside with a passing tree → 0; outside → 3; inside with a failing tree → 2, and stderr holds the `not inside a capped scope` line.
 - **The lock.**
   - `test_lock_busy_no_wait`: the test holds the injected lock with `fcntl.flock(LOCK_EX)` → `HeavyError(4, "heavy lock <lock> is busy (--no-wait)")`.
   - `test_lock_wait_message`: the lock is held, then released by a timer thread after 0.2 s. Stderr holds exactly one line `vtr-qor: waiting for the heavy lock <lock>`, and the fake child runs.
-  - `test_heavy_run_77`: the fake exits 77 → point (a)'s `HeavyError(2, "cannot apply the memory cap …")` with the lock free, `HeavyError(4, …)` when the probe found it busy. A fake exiting 3 → `SystemExit(3)`.
-  - `test_service_mode`: with `ODIN3_HEAVY_SERVICE=1` and the lock held by the test, `<lockdir>/odin3-heavy.queued.<pid>` exists while waiting and is gone once the lock is held; then `os.environ["ODIN3_HEAVY"] == "1"` and no subprocess was started.
+  - `test_heavy_run_77`: the fake exits 77 → point (a)'s `HeavyError(2, "cannot apply the memory cap …")`. A fake exiting 3 → `SystemExit(3)`. With `no_wait` and the lock busy, the fake never starts.
 - **`verify_scope`.**
-  - `test_verify_scope_ancestor`: `/proc/self/cgroup` = `0::/user.slice/user-1000.slice/user@1000.service/odin3.slice/odin3-heavy.slice/run-r1.scope`; the scope has `memory.max`/`memory.swap.max` = `max`/`max`, the slice `6442450944`/`0` → `ScopeInfo(path=<…>/odin3-heavy.slice, memory_max=6442450944, swap_zero=True)`.
+  - `test_verify_scope_ancestor` (finding 26): `/proc/self/cgroup` = `0::/user.slice/user-1000.slice/user@1000.service/odin3.slice/odin3-heavy.slice/odin3-heavy-4242-1760000000000000000.scope` (`heavy-run`'s scope name); the scope has `memory.max`/`memory.swap.max` = `max`/`max`, the slice `6442450944`/`0` → `ScopeInfo(path=<…>/odin3-heavy.slice, leaf=<…>/odin3-heavy-4242-….scope, memory_max=6442450944, swap_zero=True)`. The same under a sibling `odin3-heavyxl.slice` at `9663676416` passes only with `limit=CAP_XL_BYTES`.
   - `test_verify_scope_refusals`: no numeric `memory.max` → `HeavyError(2, "not inside a capped scope (memory.max max, memory.swap.max max); run through the heavy wrapper")`; `8589934592` → the same with `memory.max 8589934592`; no `memory.swap.max` of `0` → refused; `limit=CAP_XL_BYTES` with `9663676416` → passes.
-  - `test_oom_and_peak`: `memory.events` holding `oom 2\noom_kill 3\n` → 3; no `memory.peak` → `None`; `memory.peak` of `1073741824` → 1024.
+  - `test_oom_and_peak`: `memory.events` holding `oom 2\noom_kill 3\n` → 3; no leaf `memory.peak` → `None`; a leaf `memory.peak` of `1073741824` (the slice's at `4294967296`) → 1024.
 - **Machine readers.**
   - `test_disk_free`: `ODIN3_QOR_DF_CMD` set to a fake printing `Avail\n  117\n` → 117. A fake exiting 1 → `HeavyError(5, "cannot read free space of /mnt/c")`.
   - `test_mem_available`: `MemAvailable:   19922944 kB` → 19.0.
@@ -270,7 +281,7 @@ Effort cues:
     - `P`: none.
   - `def registered_passes(odin3_help: str) -> frozenset[str]` (point (t)).
   - `def leg_available(leg: str, passes: frozenset[str]) -> str | None`: the first missing pass in `LEG_PASSES` order, else `None`.
-  - `def lut_size(vtr_root: Path, python: Path, arch_xml: Path) -> int`: K, read once per run through VTR's own `determine_lut_size` (as 3E §15.2 calls it, with `PYTHONPATH=<V>/vtr_flow/scripts/python_libs`). It is 6 for both arches.
+  - `def lut_size(vtr_root: Path, python: Path, arch_xml: Path) -> int`: K, read once per run through VTR's own `determine_lut_size` by point (x)'s `-I` snippet (3E Task 7's mechanism, not `PYTHONPATH`). It is 6 for both arches.
 - Produces (`qor_sched.py`, planning):
   - `@dataclass(frozen=True) class KeyInputs: leg: str; design: str; arch_base: str; arch_sha256: str; source_sha256: str; vtr_commit: str; params: tuple[str, ...]; odin3_build: str | None; script: str | None; lib_sha256: str | None; abc_script_sha256: str | None`.
   - `def job_key(k: KeyInputs) -> str`: the hex SHA-256 of `json.dumps({…, "schema": 1}, sort_keys=True, separators=(",", ":"))` over every field.
@@ -308,12 +319,13 @@ Effort cues:
   - `test_build_id`: a fake `ldd` (via `ODIN3_QOR_LDD_CMD`) listing `libodin3.so => /x/libodin3.so` and `libodin3_abc.so => /x/libodin3_abc.so`. Changing one byte of either file, or of `odin3`, changes the id.
   - `test_plan_order`: `--designs sha,ch_intrinsics` with legs `O,P` → `[(ch_intrinsics, P), (ch_intrinsics, O), (sha, P), (sha, O)]`.
   - `test_plan_cache`: an `ok` `metrics.json` with the same key → `cached=True`. A different key, `status failed`, or `rerun=True` → `cached=False`.
+  - `test_plan_rekeys_on_lib_and_script` (finding 30): in a temp repo copy, editing one byte of `lib/vtr.o3lib`, or of `lib/abc/vtr.abc`, changes `plan_jobs`' key for every O, O′ and P′ job and leaves P's unchanged.
 
 ### Task 3: `qor_parse` — VTR's parse, `time -v`, stage costs (QH-4.2–4.4; T1)
 **Files:**
 - Create `tools/vtr-qor/qor_parse.py` and `tests/tools/test_vtr_qor_parse.py`.
 - Create `tests/tools/fixtures/vtr_qor/{stereovision3_P,ch_intrinsics_P,frontend}/`: the logs of §4.2/§4.4 (`abc1.out` for the two-clock `stereovision3`), `parse_results.txt`, `qor_results.txt`, `expected.json`, and a `frontend.time`.
-  - They come from two real P runs of Task 2's command (2–3 s of VTR each: small samples under the standing rules; through `tools/heavy-run` once it is on `main`), trimmed to the lines the parse configs match.
+  - They come from two real P runs of Task 2's command (2–3 s of VTR each), which the **controller** captures through `tools/heavy-run` once 2E-1 is on `main` (ruling I4); the implementer commits them, trimmed to the lines the parse configs match.
   - `expected.json` records what VTR's `parse_vtr_flow.py` printed for the **untrimmed** directories.
 
 **Interfaces:**
@@ -390,13 +402,12 @@ Effort cues:
 - Produces:
   - The Global Constraints' scheduler caps as named constants (`MAX_JOBS` … `KEEP_FAILED_BYTES`).
   - `KEEP_RUN_FILES`: §7.5's keep list exactly (`vtr_flow.out output.txt parse_results.txt qor_results.txt vpr.out vpr.crit_path.out parmys.out` and the globs `abc*.out`, `*_blackboxing_latch.out`, `restore_latch*.out`, `report_clocks.abc.out`).
-  - `@dataclass class RunOptions: jobs: int = 3; job_timeout_s: Mapping[str, int] = JOB_TIMEOUT_S; keep_netlists: frozenset[str] = frozenset(); fcheck: bool = False; deadline: float | None = None; scope: ScopeInfo | None = None; clock: Callable[[], float] = time.time; sleep: Callable[[float], None] = time.sleep; env: Mapping[str, str] = os.environ; meminfo: Path = Path("/proc/meminfo"); out: Path; expected_s: Callable[[Job], float] | None = None`.
+  - `@dataclass class RunOptions: jobs: int = 1; job_timeout_s: Mapping[str, int] = JOB_TIMEOUT_S; keep_netlists: frozenset[str] = frozenset(); fcheck: bool = False; deadline: float | None = None; scope: ScopeInfo | None = None; clock: Callable[[], float] = time.time; sleep: Callable[[float], None] = time.sleep; env: Mapping[str, str] = os.environ; meminfo: Path = Path("/proc/meminfo"); out: Path; expected_s: Callable[[Job], float] | None = None`.
   - `@dataclass(frozen=True) class JobResult: job: Job; status: str; elapsed_s: float; error: str`. `status` is one of `ok failed capped timeout skipped aborted`.
   - `@dataclass(frozen=True) class RunSummary: results: tuple[JobResult, ...]; stopped_for_disk: bool; exit_code: int`. The exit code follows the Global Constraints.
   - `def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Callable[[Job, float], dict[str, object]]) -> RunSummary`.
-    - Group A runs through `opts.jobs` worker threads (`MAX_JOBS` maximum, E-QH9 above it).
-    - Then the capped group A jobs are retried once, each alone.
-    - Then group B runs one job at a time.
+    - Every job runs alone, group A then group B, in plan order (`opts.jobs` must be 1; E-QH9 above it).
+    - With `opts.fcheck`, each job's fcheck (Task 11) runs right after its VPR job, before the next job starts.
     - `finish(job, attempt_start)` builds `metrics.json` (Task 6) and is called for a job whose commands all exited 0.
   - `def fresh_attempt(job: Job) -> float`: it deletes `metrics.json` and `status`, runs `safe_rmtree(<J>/run)`, recreates `<J>/run`, and returns the start time.
   - `def run_one(job: Job, opts: RunOptions, finish: …) -> JobResult`. It runs each `Command` with `start_new_session=True` under the job wall timeout, reads `oom_kills` before and after, and classifies:
@@ -409,13 +420,13 @@ Effort cues:
   - `class HarnessLog`: it appends to `<out>/harness.log` and echoes to stderr. Its lines are `vtr-qor: [<i>/<n>] <leg> <design> <status> <elapsed> s (<group>, j<k>)` (elapsed with one decimal) and, at the end, `vtr-qor: done: <ok> ok, <failed> failed, <capped> capped, <timeout> timeout, <skipped> skipped in <h:mm:ss>`.
 - Behaviour:
   - Admission re-checks every `POLL_S` with §7.3's texts (`paused: …`, `resumed: …`, `waiting: <x.y> GiB available (< 7)`), and E-QH11's after `PAUSE_LIMIT_S` (plus the compaction hint line) or below `DISK_FLOOR_GIB` (running jobs `aborted`), exit 5.
-  - Capped: E-QH10's line (point (k)), then `vtr-qor: <L> <d>: retrying alone` the first time, or `vtr-qor: <L> <d>: no verdict` when capped again or in group B. Timeout: `vtr-qor: <L> <d>: timeout after <s> s`.
+  - Capped: E-QH10's line (point (k)), then `vtr-qor: <L> <d>: no verdict`. Timeout: `vtr-qor: <L> <d>: timeout after <s> s`.
   - Each job writes `<J>/status` (one word) when it ends. Retention runs after the whole run.
 
 **Tests (T4; fake jobs, a fake `df` via `ODIN3_QOR_DF_CMD` reading a file the test rewrites, a fake meminfo, a fake `memory.events`, an injected clock and sleep):**
-- `test_order_groups`: five A and two B jobs at `-j3` (each writes start/end stamps): at most three A jobs overlap, every B start follows the last A end, and the B jobs never overlap.
-- `test_j_cap`: `jobs=4` → `HeavyError(2, "-j 4 exceeds 3 (decision 17)")` (E-QH9).
-- `test_capped_retry_alone`: an A job exits 1 after incrementing `oom_kill`; it is retried alone after every other A job ended, and succeeds → `ok`, with the capped line then `retrying alone`. Capped again → `capped`, `no verdict`, exit 3. A failure without a risen counter → `failed`, no retry, exit 1.
+- `test_order_groups`: five A and two B jobs, each writing start/end stamps, with fcheck on: no two jobs (or a job and another job's fcheck) overlap, each fcheck follows its own VPR job, and every B start follows the last A end.
+- `test_j_cap`: `jobs=2` → `HeavyError(2, "-j 2 exceeds 1 (the heavy-run rule)")` (E-QH9).
+- `test_capped_no_verdict`: a job exits 1 after incrementing `oom_kill`, with its leaf `memory.peak` at 6,000 MiB and the slice's at 6,100 → `capped`, the E-QH10 line with `peak ≥ 6000 MiB`, then `no verdict`, no retry, exit 3. A failure without a risen counter → `failed`, exit 1.
 - `test_fresh_attempt_mtime`: `fresh_attempt` removes a previous attempt's `run/vpr.out` and `run/parse_results.txt`; a fake job that exits 0 but leaves a `parse_results.txt` dated one second before the attempt start → `failed`, `vtr-qor: P sha: stale parse_results.txt from an earlier attempt; job failed`.
 - `test_timeout_kills_group`: a fake job that spawns a grandchild sleeping 600 s, with a 1 s job timeout → `timeout`. Neither PID is alive after `KILL_GRACE_S` (injected as 0.5 s), and the log line is `vtr-qor: P sha: timeout after 1 s`.
 - `test_admission_disk_pause_stop_floor`: df 15 → the exact paused line, then df 25 → the resumed line, and the job runs; df 15 for 7,200 s of fake clock → the stop line with `(3 jobs not started)`, the hint line, exit 5; df 9 while one job runs → `terminating 1 running jobs`, that job `aborted`, exit 5.
@@ -433,7 +444,7 @@ Effort cues:
 - Consumes: Tasks 1–5.
 - Produces:
   - `def main(argv: Sequence[str] | None = None) -> int`. It catches `HeavyError`, prints `vtr-qor: <message>`, and returns its code.
-  - The common options are spec §9's with its defaults (`--out` checked per point (m)), plus `--xl` on `run` (point (d)).
+  - The common options are spec §9's with its defaults (`--out` checked per point (m)), plus `--xl` on `run --designs` only (point (d)).
   - Subcommands here: `doctor`, `run`, `status`, `clean`. Tasks 9 and 11–15 add the rest of §9.
   - `run` takes §9's options. It checks VTR (E-QH1, E-QH2), selects designs (E-QH7), checks legs (E-QH5), and plans. `--dry-run` prints `<leg> <design> <key12> cached|run` per job and stops (not heavy); otherwise it calls `reexec_under_lock`, then `run_jobs`.
   - `def check_vtr(vtr_root: Path, allow_drift: bool) -> str` returns the full commit, raising E-QH1/E-QH2 (the dirty check is `git status --porcelain --untracked-files=no`).
@@ -452,7 +463,7 @@ Effort cues:
 - `test_isolated_import`: `python3 -I tools/vtr-qor/vtr_qor.py --help` exits 0 (point (u)). The shim `tools/vtr-qor/vtr-qor --help` gives the same output.
 - `test_doctor_checklist`: with every fake present → exit 0. With `tools/heavy-run` removed → exit 1, with the exact FAIL line.
 
-**T8 (local, the implementer, after the unit tests pass):** `tools/vtr-qor/vtr-qor run --leg P --designs ch_intrinsics,stereovision3,diffeq2` (point (g) if 2E-1 has not merged).
+**T8 (local, after the unit tests pass, once 2E-1 is on `main`; point (g)):** `ODIN3_HEAVY_OK=1 tools/vtr-qor/vtr-qor run --leg P --designs ch_intrinsics,stereovision3,diffeq2`, run by the controller (or by the implementer only when the controller sets `ODIN3_HEAVY_OK=1` for that session).
 - 3 jobs end `ok` with `vpr_status=success`.
 - Each `metrics.json`'s routed values equal its `parse_results.txt`.
 - `run/` holds exactly the keep list plus the `.pre-vpr.blif.gz`.
@@ -466,7 +477,7 @@ Effort cues:
 **Steps (a Sonnet `high` run session; spec §12):**
 1. `tools/build-locked --preset release -j6`.
 2. `tools/vtr-qor/vtr-qor doctor`. Expected on 2026-10-11: VTR `3c9a4d23b27d` clean, the binaries and venv present, `C:` ≈ 117 GiB free, `MemAvailable` ≈ 19 GiB, the lock free. Stop on any FAIL.
-3. Start `tools/vtr-qor/vtr-qor run --arch k6 --leg P --set gate,extra` in the background and watch `harness.log` with Monitor until `vtr-qor: done:`. Group A is 17 jobs at `-j3` (≈ 11 min on VTR's runner); then `LU8PEEng`, `bgm`, `mcml` and `LU32PEEng` run alone (≈ 9, 9, 78 and 54 min). Plan for **3–4 h** solo (× 1.5 on 2 h 45 min), with nothing else heavy.
+3. Start `tools/vtr-qor/vtr-qor run --arch k6 --leg P --set gate,extra` in the background and watch `harness.log` with Monitor until `vtr-qor: done:`. The controller exports `ODIN3_HEAVY_OK=1`. Group A is 17 jobs, one at a time (≈ 1,185 s on VTR's runner, ≈ 30 min × 1.5); then `LU8PEEng`, `bgm`, `mcml` and `LU32PEEng` (≈ 9, 9, 78 and 54 min). Plan for **≈ 4–4.5 h** solo (point (w); ruling C1), with nothing else heavy.
 4. Acceptance (§12 item 5): 21 jobs `ok` with `vpr_status=success`, exit 0. A capped or timed-out job goes to Peter with its E-QH10 line and peak; the cap is not raised.
 5. Record the first measurement of the ABC stage's peak RSS: every `abc*.out` peak for all 21, `mcml` and `LU32PEEng` called out (§7.1 step 1).
 6. T2's local check: `depth` against VTR's `abc_depth` for each single-clock design. Mismatches are explained in 3H-2's PR description.
@@ -595,7 +606,7 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
     - for other legs it needs the kept `run/<d>.pre-vpr.blif`, else `vtr-qor: fcheck: <L> <d>: no kept netlist (run with --keep-netlists)` and `error`;
     - it rewrites `metrics.json` `verdicts.fcheck` atomically;
     - it deletes `<J>/fcheck` on `pass` and keeps it otherwise.
-  - Scheduling: with `--fcheck`, a group A job runs fcheck inline after its VPR job (`--verilator-j 2`). Group B runs fcheck as its own step after every VPR job, one design at a time in §2 order (`LU8PEEng`, `bgm`, `mcml`, `LU32PEEng`), with `--verilator-j 1`.
+  - Scheduling (ruling C1): with `--fcheck`, every job runs its fcheck right after its own VPR job and before the next job starts, never beside another job: `--verilator-j 2` in group A, `1` in group B.
   - `fcheck --leg L [--set|--designs]` runs the step on existing jobs.
 
 **Tests:**
@@ -603,7 +614,7 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
 - `test_fcheck_exit_mapping`: a fake script exiting 0, 1 and 2 gives `pass`, `fail` and `error`. One that increments `oom_kill` and exits 137 gives `capped`.
 - `test_fcheck_p_from_gz`: the fake receives `<J>/fcheck/sha.pre-vpr.blif`, equal to the gunzipped kept file.
 - `test_fcheck_dir_kept_on_fail`: `<J>/fcheck` is gone after `pass` and present after `fail`.
-- `test_fcheck_group_b_step`: the B fchecks start only after the last B VPR job, never overlap, and receive `--verilator-j 1`.
+- `test_fcheck_after_own_job`: each fcheck starts after its own VPR job ends and ends before the next job starts; B fchecks receive `--verilator-j 1`.
 - `test_divergences_rows`: every committed row parses with `load_tsv`, and its class is one of `mem-init-dropped`, `async-reset-made-sync`, `baseline-fails`.
 
 **The group B measurement (a run session; §7.1 "what is not yet measured", step 2):** `vtr-qor fcheck --leg P --designs LU8PEEng`, then `bgm`, then `mcml`, then `LU32PEEng`. Each runs solo under the lock, and the peaks are recorded in 3H-3's PR description. A capped one goes to Peter with its peak (point (d)).
@@ -630,7 +641,7 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
   - `def run_equiv(design: str, o_job: Job, oprime_job: Job) -> str`.
     - A netlist with `ram_slices > 0` (from `metrics.json`) → `ram`, not run.
     - The verdict is written to the O job's `metrics.json` `verdicts.equiv`.
-    - Group B designs need the heavy wrapper; group A designs run inline under the same lock when the subcommand is heavy.
+    - `equiv` is always heavy (finding 28): it goes through `reexec_under_lock`, since `equiv-check` runs ABC's `dsec`.
   - `equiv [--set|--designs]`.
 
 **Tests:**
@@ -647,12 +658,12 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
 
 **Interfaces:**
 - Produces:
-  - `nightly [--start-at HH:MM] [--now --budget H] [--slot N]`: without `--now` it sleeps until the next `--start-at` (default `01:00`) holding nothing, then calls `reexec_under_lock` (point (c)) and runs §13's steps 1–6 in one lock. The inner subcommands run in-process.
-  - `def nightly_deadline(start: datetime, now_mode: bool, budget_h: float) -> datetime`: the next 06:00 local after the start, or the start plus the budget.
+  - `nightly [--budget H] [--slot N]` (point (c); ruling I2): started inside `tools/heavy-run` by the controller, it checks `require_heavy()` and runs §13's steps 1–7 at once, in one held lock. The inner subcommands run in-process; a heavy child tool (3E's and 3D's) gets `pass_fds=(9,)`.
+  - `def nightly_deadline(start: datetime, budget_h: float) -> datetime`: the earlier of the next 06:00 local after the start and the start plus the budget (default 5 h).
   - `def expected_minutes(job: Job, history: Path, sets: Sets) -> float`. It is the last measured `elapsed_s` of the same (arch, leg, design) from `metrics.json` under any key. Else it is `vtr_flow_time_s` × 1.5, plus the leg's last `frontend_wall_s` when the leg runs `odin3`.
   - Admission: before each job, a job whose expected end passes the deadline is not started. The log gets `vtr-qor: nightly: <L> <d> not started: expected <m> min would pass 06:00`, exit 0 for that line alone (E-QH10). Running jobs finish.
   - `ROTATION`: §13 step 4's eight `(design, legs)` slots: 1 `LU8PEEng` O O′ P′ (+ fcheck O); 2 `bgm` O O′ P′ (+ fcheck O, equiv); 3–5 `mcml` O, O′, P′; 6–8 `LU32PEEng` O, O′, P′.
-    - State: `<out>/nightly/rotation.json` = `{"next_slot": n, "last_admitted": "<date>", "starved": {"<slot>": k}, "last_sweep_commit": "<sha>", "last_sweep_date": "<date>"}`.
+    - State: `<out>/nightly/rotation.json` = `{"next_slot": n, "last_admitted": "<date>", "starved": {"<slot>": k}, "last_sweep_commit": "<sha>", "last_sweep_date": "<date>", "last_3d_commit": "<sha>"}`.
     - A slot advances only when it ran. Unavailable legs are skipped; a slot with none available advances with an info line.
   - Starvation guard (§13): a slot refused the night before runs step 4 before step 3; after two refused nights `summary.md` starts with the starved line and group A runs only legs whose odin3 build id changed.
   - Steps:
@@ -661,14 +672,16 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
     3. k6 group A: every available leg, with `--fcheck` on O, `--keep-netlists` for O and O′ (point (n)), then `equiv` and `rerun-check` (Task 14; skipped until it lands).
     4. One rotation slot. P on group B runs only when VTR moved, as a night of its own.
     5. The 3E sweeps, as 3E-4's plan defines them (`blif-roundtrip --vtr` and `vtr-read-check` on the k6 golden tree), when `git -C <repo> log <last_sweep_commit>..HEAD -- src/backends/blif src/frontends/blif` is non-empty or on a Saturday night. A sweep night skips step 4 without advancing the rotation. Before 3E-4 merges: `vtr-qor: nightly: 3E sweeps skipped (tools/vtr-read-check absent)`.
-    6. `table --label nightly-<YYYYMMDD>`, then `nightly/<YYYYMMDD>/summary.md`, listing every (leg, design, gated metric) that moved more than 2 % from the previous nightly table, and every changed status.
-  - The unit files: `.service` (`Type=exec`, `Slice=odin3-heavy.slice`, `MemoryMax=6G`, `MemorySwapMax=0`, `Environment=ODIN3_HEAVY_SERVICE=1`, `ExecStart=%h/odin3-ws/odin3/tools/vtr-qor/vtr-qor nightly --start-at 01:00`) and `.timer` (`OnCalendar=*-*-* 01:00`, `Persistent=false`, `WantedBy=timers.target`), with §13's install and remove commands in a header comment. No agent installs them.
+    6. **The 3D sweeps** (ruling I10; review finding 10): 3D's `abc-equiv` on the k6 goldens except `mcml` and `LU32PEEng` (3D §13.4), `abc-diff` on the same set (§13.5), and `abc-determinism --mode a`, `--mode c` and `--mode d` (§13.8 (a), (c), (d); (d) needs `build/debug` and `build/release`), as direct commands with `pass_fds=(9,)`, smallest first. They run when `git log <last_3d_commit>..HEAD -- src/passes/abc adapters/abc` is non-empty, else on Sunday nights; a 3D-sweep night also skips step 4. Before 3D-5 merges: `vtr-qor: nightly: 3D sweeps skipped (tools/abc-check absent)`. Each tool's summary goes into `summary.md`.
+    7. `table --label nightly-<YYYYMMDD>`, then `nightly/<YYYYMMDD>/summary.md`, listing every (leg, design, gated metric) that moved more than 2 % from the previous nightly table, and every changed status.
+  - The unit files: `.service` (`Type=exec`, `Environment=ODIN3_HEAVY_OK=1`, `ExecStart=%h/odin3-ws/odin3/tools/heavy-run %h/odin3-ws/odin3/tools/vtr-qor/vtr-qor nightly`) and `.timer` (`OnCalendar=*-*-* 01:00`, `Persistent=false`, `WantedBy=timers.target`), with §13's install and remove commands in a header comment. No agent installs them.
   - `check-lib`: it runs `[<repo>/tools/vtr-models/vtr-models, check-lib, <repo>/lib/vtr.o3lib, --models, <repo>/tests/vtr/arch/k6_frac_N10_frac_chain_mem32K_40nm.models.json, --vtr-root, <V>]` and exits with its status (3E §15.2).
   - `crosscheck --task DIR` (heavy) runs `[<PY>, <V>/vtr_flow/scripts/run_vtr_task.py, <abs DIR>, -temp_dir, <out>/crosscheck, -j, 1]` on the three smallest designs. Every non-time key of each `parse_results.txt` must equal the harness's value (time keys: names ending `_time` or `_runtime`, or starting `max_vpr_mem`), else `vtr-qor: crosscheck: <d> <key>: task <a>, harness <b>`, exit 1 (point (h)).
 
 **Tests (`test_vtr_qor_nightly.py`; fake clock, fake jobs):**
-- `test_nightly_deadline`: started at 01:00 with a fake job list whose expected minutes are 120, 120, 100 and 90 → the first two start; the third is refused at 05:00 with the exact E-QH10 nightly text; the fourth, a 30-minute job, still starts. `--now --budget 4h` started at 14:00 → deadline 18:00.
-- `test_sleep_holds_nothing`: with `--start-at` an hour ahead, the injected `sleep` is called before `reexec_under_lock`, and the fake lock is free during the sleep.
+- `test_nightly_deadline`: started at 01:00 with a fake job list whose expected minutes are 120, 120, 100 and 90 → the first two start; the third is refused at 05:00 with the exact E-QH10 nightly text; the fourth, a 30-minute job, still starts. Started at 14:00 with `--budget 4` → deadline 18:00.
+- `test_nightly_requires_heavy_run`: outside a heavy run → exit 2 with `require_heavy`'s message, and no step runs (no Python-side locking, no delay).
+- `test_3d_sweep_night`: a changed `src/passes/abc/run.c` → step 6 runs the five 3D commands in that order, each with descriptor 9 passed, and step 4 is skipped.
 - `test_rotation_advance_and_starvation`: slot 3 admitted → `next_slot` 4; slot 4 refused → the next night runs step 4 before step 3; refused twice → `summary.md` starts `vtr-qor: nightly: group B slot 4 (mcml O′) starved for 2 nights`.
 - `test_sweep_night`: a changed `src/backends/blif/writer.c` in a temp git repo → step 5 runs and step 4 is skipped with the rotation unchanged. No change and not Saturday → step 5 is skipped.
 - `test_summary_diff`: a `num_clb` move of 2.5 % and a status change `ok` → `failed` are listed; a 1.9 % move is not.
@@ -712,14 +725,14 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
 - Modify `tools/vtr-qor/vtr_qor.py` and `tests/tools/test_vtr_qor_cli.py`.
 - Modify `docs/PHASE3.md`:
   - the M2 tick and entry;
-  - the M3/exit tick with the gate table verbatim, the seed spread, the `equiv` exceptions as measured (the `stereovision0` row if it came), and points (a)–(v) of this plan as agent defaults;
+  - the M3/exit tick with the gate table verbatim, the seed spread, the `equiv` exceptions as measured (the `stereovision0` row if it came), and points (a)–(x) of this plan as agent defaults;
   - decision 17's note if Task 9 did not land it.
 - Modify `docs/DESIGN.md` §13 #6: answered with the Oprov numbers.
 - Modify `tests/vtr/qor/equiv-exceptions.tsv` and `divergences.tsv` only with measured, reviewed rows.
 
 **Interfaces:**
-- Produces `exit-run --label TEXT [--start-at HH:MM | --now --budget H] [--xl]`, heavy. It shares `nightly`'s sleep, admission deadline and `expected_minutes` (Task 13), and runs in order:
-  1. `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists`, with group B fcheck as its own step;
+- Produces `exit-run --label TEXT [--budget H]`, heavy, with no `--xl` (point (d)) and no delayed start (point (c)). It shares `nightly`'s admission deadline and `expected_minutes` (Task 13), and runs in order:
+  1. `run --leg P,Oprime,Pprime,O --set gate,extra --fcheck --keep-netlists`, each fcheck right after its own VPR job;
   2. P fcheck from the kept netlists;
   3. `equiv`;
   4. `rerun-check --leg O --set gate`;
@@ -733,13 +746,13 @@ The run's `metrics.json` files are the record until 3H-2 renders the table from 
 **Tests:**
 - `test_exit_run_steps`: with fakes, the eight steps run in order with the exact argv each builds. A second invocation after a simulated stop at step 3 starts no job of steps 1–2 (cache) and resumes at step 3.
 - `test_exit_run_exit_code`: a fake gate FAIL → exit 1. A capped `mcml` P → exit 3.
-- `test_exit_run_deadline`: with `--start-at 01:00` and a fake clock, a job expected to pass 06:00 is not started (the nightly E-QH10 text with `exit-run` in place of `nightly`), and the next invocation resumes there.
+- `test_exit_run_deadline`: started at 01:00 on a fake clock, a job expected to pass 06:00 is not started (the nightly E-QH10 text with `exit-run` in place of `nightly`), and the next invocation resumes there.
 
 **The runs (Sonnet `high` sessions; background + Monitor):**
 - **M2:** `vtr-qor run --leg Oprime --set gate,extra --keep-netlists`, after 3A/3B/3C/3G and the 2D–2F passes are registered. All 19 must route. The table `--legs P,Oprime --label M2` goes into the PHASE3 M2 entry, and the controller publishes it.
 - **M3, the exit:** `vtr-qor exit-run --label exit-<YYYYMMDD>`.
-  - It takes ≈ 20–30 h: three legs on 21 designs ≈ 12–13 h, fcheck ≈ 3–6 h, `rerun-check` ≈ 3–4 h, `equiv` ≈ 1–1.5 h, the smoke ≈ 0.3 h, seeds 0–6+ h.
-  - It runs over 5–7 nights of ≈ 5 h. Each night is hand-started as in point (c), with `exit-run --label <same> --start-at 01:00` in place of `nightly`, and resumes through the cache.
+  - It takes ≈ 20–30 h, about 1 h more with group A serial (point (w)): three legs on 21 designs ≈ 13–14 h, fcheck ≈ 3–6 h, `rerun-check` ≈ 3–4 h, `equiv` ≈ 1–1.5 h, the smoke ≈ 0.3 h, seeds 0–6+ h.
+  - It runs over 5–7 nights of ≈ 5 h. Each night is hand-started as in point (c), with `exit-run --label <same>` in place of `nightly`, and resumes through the cache.
   - The first O run measures `stereovision0`'s `equiv`. A `timeout` adds its `equiv-exceptions.tsv` row with the measured time in a reviewed PR (spec §8.2).
   - Acceptance: `gate` PASS (T12). The gate table goes into PHASE3 verbatim, and the seed spread goes to Peter with it. INCOMPLETE reruns the named jobs. FAIL goes to Peter with the violations; no band is relaxed.
   - DESIGN §13 #6 is answered from the Name style section (one Oprov run, at M3).

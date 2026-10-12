@@ -1,8 +1,10 @@
-# 3D Linked ABC — Implementation Plan (v1)
+# 3D Linked ABC — Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-v1 is the agent draft, written against the approved spec v2 and the 3E and 3H plans of the same commit (one shared contract: PR order, heavy-run convention, the `$lut`, ISOP and run-information hand-overs).
+v1 was the agent draft, written with the 3E and 3H plans against one shared contract (PR order, the heavy-run convention, the `$lut`, ISOP and run-information hand-overs).
+
+v2 applies the pre-flight review `3-plans-review` (3D: 0 critical, 6 important, 13 minor; every finding applied, no minor rejected) and the controller's rulings I3–I10; each change cites its finding or ruling where it lands. The main ones: 2E Task 1's cells land before `$lut` (I5, conflict note 2); one budget message (I6, point (i)); only the clean `ODIN3_ERR_ENGINE` return ships and 3D-2 waits for Peter (I7, point (a)); word-cell BLIFs leave the `abc` inputs (I8, point (j)); `abc-equiv --step` (I9); 3H's nightly runs the 3D sweeps (I10, point (m)); no tool sets `ODIN3_HEAVY_OK`, and every heavy run waits for 2E-1 (I3, I4).
 
 **Goal:** Link the pinned ABC (`a3001b72`) into Odin III without letting its `exit()` calls or global symbols into `libodin3`, and add the core `abc` pass. The pass maps each module's soft logic to `$lut` cells, one ABC run per clock domain, re-stitches the result into the IR with provenance from ABC's own correspondence, and gives byte-identical reruns. In order of landing:
 - `$lut`, first and alone (3D-1), so 3E-5 can build on it;
@@ -53,18 +55,19 @@ Nine PRs, as spec §15. 3D-0's code is never merged.
 
 | PR | Branch | Base | Tasks | Waits for |
 |---|---|---|---|---|
-| 3D-0 spike | `~/odin3-ws/work/spike-abc/` (findings: `docs/3D-spike`) | — | 1 | **Nothing; starts now.** Small inputs only, no heavy run. The findings PR is docs-only (point (f)). |
-| 3D-1 `$lut` | `feat/3D-lut` | `origin/main` now | 2 | **Nothing; starts now.** Peter reviews it (IR change). 3E-5 starts the day it merges. |
-| 3D-2 adapter | `feat/3D-adapter` | `origin/main` now | 3–6 | **Nothing; starts now.** Rebase onto `main` before Task 6 if 2C-2 has merged (`main.c`, `CMakeLists.txt`). Peter reviews it (adapter build, ABI). |
-| 3D-3 run records | `feat/3D-records` | `main` after 3D-1 | 7–9 | 3D-1. Task 9 (Verilog `$lut`) needs 3E-5 merged; Tasks 7–8 do not. Peter reviews it (IR-12, ABI). |
-| 3D-4 script | `feat/3D-script` | `main` after 3D-2 and 3D-3 | 10–11 | 3D-3 (`sha256`). Task 11's adapter tests need 3D-2. |
-| 3D-6 project and CLI | `feat/3D-project` | `main` after 3D-4 | 12–13 | 3D-4 (spec §15). Light review (P3-1). |
-| 3D-5 pass, BLIF exchange | `feat/3D-pass` | `main` after 3D-6 and 3E-5 | 14–19 | 3D-2, 3D-3, 3D-4, 3D-6 (point (e)), 3E-5 (`odin3_blif_isop`), and 2E-1 on `main` (`odin3_budget_check`, `odin3_add_sweep_test`, `tools/heavy-run`). |
+| 3D-0 spike | `~/odin3-ws/work/spike-abc/` (findings: `docs/3D-spike`) | — | 1 | **Nothing; starts now** (the program and the micro checks). Its runs on the five VTR goldens go through `tools/heavy-run` (2E-1 on `main`). The findings PR is docs-only (point (f)). |
+| 3D-1 `$lut` | `feat/3D-lut` | `origin/main` now; rebased onto `main` after 2E-1 | 2 | **Starts now; merges after 2E-1** (2E Task 1's IDs 63–73 land first, ruling I5). Peter reviews it (IR change). 3E-5 starts the day it merges. |
+| 3D-2 adapter | `feat/3D-adapter` | `origin/main` now | 3–6 | **Starts now; merges only after Peter rules on point (a)'s question** (ruling I7). Rebase onto `main` before Task 6 if 2C-2 has merged (`main.c`, `CMakeLists.txt`). Peter reviews it (adapter build, ABI). |
+| 3D-3 run records | `feat/3D-records` | `main` after 3D-1 | 7–8 | 3D-1. Peter reviews it (IR-12, ABI). Task 9 moved to 3D-5 (finding 12). |
+| 3D-4 script | `feat/3D-script` | `main` after 3D-3 | 10–11 | 3D-3 (`sha256`). Task 11's two adapter tests land with whichever of 3D-2 and 3D-4 merges second (point (p)). |
+| 3D-6 project and CLI | `feat/3D-project` | `origin/main` now | 12–13 | **Nothing; starts now** (finding 11). The first of 3D-2, 3D-3 and 3D-6 to merge writes the "ABI v4 (cont., 3D)" line. Light review (P3-1). |
+| 3D-5 pass, BLIF exchange | `feat/3D-pass` | `main` after 3D-6 and 3E-5 | 9, 14–19 | 3D-2, 3D-3, 3D-4, 3D-6 (point (e)), 3E-5 (`odin3_blif_isop`), and 2E-1 on `main` (`odin3_budget_check`, `odin3_add_sweep_test`, `tools/heavy-run`). Its golden sweeps also need 3H-1's `qor_heavy` (finding 22). M1 therefore waits on Peter's point (a) ruling through 3D-2. |
 | 3D-7 in-memory exchange | `feat/3D-aig` | `main` after 3D-5 | 20–21 | 3D-5 and the 3D-0 "go" (criteria 1, 2, 4, 6, 7). Peter only if the spike forces P3-9 (c) or observation outputs. |
 | 3D-8 evidence | `feat/3D-evidence` | `main` after 3D-5; rebased after 3D-7 | 22 | 3D-5 (3D-7 for the in-memory rows); 2E-1 (heavy runs). Opens last. |
 
-Why 3D-1 and 3D-2 wait for nothing:
-- 3D-1 touches `src/ir/cells/{lut.c,builtin.c,cells.h}`, a new `src/ir/lut.h`, `tests/unit/test_ir_cells.c`, `docs/IR.md`'s cell paragraphs and DESIGN §5.2. In flight, only 2E Task 1 appends to the same registry, and conflict note 2 settles the order.
+Why 3D-1, 3D-2 and 3D-6 start now:
+- 3D-1 touches `src/ir/cells/{lut.c,builtin.c,cells.h}`, a new `src/ir/lut.h`, `tests/unit/test_ir_cells.c`, `test_ir_proc.c`, `docs/IR.md`'s cell paragraphs and DESIGN §5.2. In flight, only 2E Task 1 (7e6c1c9 on `feat/2E-core`) appends to the same registry; it merges first, and conflict note 2 settles the order.
+- 3D-6 touches only the project reader, the corpus, `main.c`'s option scan and one ABI function (conflict notes 3, 7, 8).
 - 3D-2 touches the `ODIN3_WITH_ABC` block of `CMakeLists.txt`, `adapters/abc/`, `odin3.h`'s status enum and a new engine section, `src/api/`, `src/passes/abc/engine.c`, the symbol tools and two `main.c` hunks. 2C-2's `main.c` hunks are elsewhere (`--parse-only`), so the second to merge keeps both (conflict note 7).
 
 **Model/effort** (PHASE0 §9; PHASE3 row 3D: Opus `xhigh` → `high`; spec §15):
@@ -102,14 +105,13 @@ Effort cues:
 - Say `/clear` between tasks (one task per session).
 
 **Lanes** (one task at a time on each branch):
-- **Now:** Task 1 (3D-0) ‖ Task 2 (3D-1) ‖ 3D-2: 3 → 4 → 5 → 6. Tasks 4 and 5 share `src/passes/abc/engine.c`'s header, and Task 6 extends Task 5's session.
-- **3D-3:** 7 ‖ 8 (disjoint files), then 9 once 3E-5 has merged.
+- **Now:** Task 1 (3D-0) ‖ Task 2 (3D-1) ‖ 3D-2: 3 → 4 → 5 → 6 ‖ 3D-6: 12 → 13. Tasks 4 and 5 share `src/passes/abc/engine.c`'s header, and Task 6 extends Task 5's session.
+- **3D-3:** 7 ‖ 8 (disjoint files).
 - **3D-4:** 10 → 11. Task 11 parses with Task 10's tables.
-- **3D-6:** 12 → 13. Both touch `project.h`.
-- **3D-5:** 14 → 15 → 16 → 17 → 18 → 19. They share `run.c` and the fake engine.
+- **3D-5:** 9 → 14 → 15 → 16 → 17 → 18 → 19. Tasks 14–19 share `run.c` and the fake engine; Task 9 (the Verilog writer) is independent of them.
 - **3D-7:** 20 → 21, after the spike's go.
 - **3D-8:** 22.
-- Across plans: 3D-1 → 3E-5 → {Task 9, 3D-5}. 3D-5 → 3E's header loop (point (g)) and 3H-3's P′ leg (M1).
+- Across plans: 2E-1 → 3D-1 → 3E-5 → 3D-5. 3D-5 → 3E's header loop (point (g)) and 3H-3's P′ leg (M1). 3H-1 → 3D's golden sweeps.
 
 **Pre-flight conflict note.**
 1. **`CMakeLists.txt`.** Every task appends sources to `odin3_core`, `odin3_add_unit_test(...)` lines and CTests. These are append-only hunks; keep both sides.
@@ -118,17 +120,16 @@ Effort cues:
    - In flight: 2C-2 (~54 lines), 2D-2 (15) and 2E-1 (14: `ODIN3_HEAVY_RUN` and the `Odin3Sweep.cmake` include) append elsewhere.
    - Every heavy CTest of this plan goes through `odin3_add_sweep_test()` (2E-1), never a bare `add_test`. Fuzz targets go inside the existing `ODIN3_FUZZ` block.
 2. **The cell registry: `src/ir/cells/builtin.c`, `cells.h`, `tests/unit/test_ir_cells.c`, and `test_ir_proc.c`'s count check.**
-   - Task 2 appends `&odin3_cell_lut` at the end. Its tests find `$lut` by name and assert that it is the **last** entry at landing; no test hard-codes its ID.
-   - 2E Task 1 (IR change D) appends eleven cells, planned at IDs 63–73 (count 74).
-   - If 3D-1 merges first, `$lut` is ID 63, and 2E Task 1 shifts to 64–74 (count 75) in its rebase. If 2E-1 merges first, `$lut` is ID 74 (count 75).
-   - Append-only; the second to merge fixes the other's count assertions.
+   - Ruling I5: 2E Task 1 (IR change D, 7e6c1c9 on `feat/2E-core`) lands first, with its eleven cells at IDs 63–73 after `$proc` (count 74). 3D-1 rebases onto it and appends `&odin3_cell_lut` after them, at the next free ID (74 today; count 75).
+   - No 3D test hard-codes the `$lut` ID: they get it through `src/ir/lut.h`'s `odin3_lut_builtin_index()`. Task 2 raises the two count constants, `BUILTIN_COUNT` in `test_ir_cells.c` and in `test_ir_proc.c` (line 40), from 74 to 75 (finding 13).
+   - Append-only. The 2E plan needs no amendment.
 3. **`include/odin3/odin3.h`** stays at **ABI v4** (spec Q4; point (d)):
-   - Task 4 adds `ODIN3_ERR_ENGINE = 8` before `ODIN3_STATUS_COUNT`, which becomes 9; the engine section verbatim from §4.3; and the history line `ABI v4 (cont., 3D): ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register)`.
-   - Task 8 adds `odin3_design_get_passrun_count` and `odin3_design_get_passrun` and extends the line with "; pass-run arguments and run information".
-   - Task 13 adds `odin3_pass_set_abc_script` and extends it with "; odin3_pass_set_abc_script".
+   - Task 4 adds `ODIN3_ERR_ENGINE = 8` before `ODIN3_STATUS_COUNT`, which becomes 9, and the engine section verbatim from §4.3. The first of Tasks 4, 8 and 13 to merge writes the history line `ABI v4 (cont., 3D): …`; each adds its words ("ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register)" for Task 4).
+   - Task 8 adds `odin3_design_get_passrun_count` and `odin3_design_get_passrun` ("pass-run arguments and run information").
+   - Task 13 adds `odin3_pass_set_abc_script` ("odin3_pass_set_abc_script").
    - In flight: 2D Tasks 10 and 17 (2D-3, 2D-5; not started) extend the "(cont., 2D)" line. 2C-2, 2D-2 and 2E add nothing to `odin3.h`.
    - All hunks are additive. The second to land keeps both lines.
-   - `src/api/version.c`'s `odin3_status_string` table gains `"ODIN3_ERR_ENGINE"`. Every test that asserts `ODIN3_STATUS_COUNT == 8` (`test_abi_core.c`) moves to 9 in Task 4.
+   - `src/api/version.c`'s `odin3_status_string` table gains `"ODIN3_ERR_ENGINE"`. The test that asserts `ODIN3_STATUS_COUNT == 8` (`tests/unit/test_api.c:36`) moves to 9 in Task 4 (finding 14).
 4. **`src/ir/prov.[ch]` and `src/passes/manager.c`.** Task 8 adds the run rows' `args` and `info`, `odin3_pass_run_begin_args` and the accessors, and makes `open_run` intern the trimmed arguments. 2E Task 3 adds `odin3_prov_bytes_reserved` to `prov.[ch]` in another hunk. 2D Task 4's refusal sits before `open_run` in `run_def` and is untouched.
 5. **The pass table: `src/passes/builtin.c` and `builtin.h`.**
    - Task 14 adds `&odin3_pass_abc`, defined in `src/passes/abc/run.c` with `processes` = `ODIN3_PASS_PROCESSES_REFUSE` and `wants_ast` false (point (n)). Task 19 adds `odin3_design_compact` to `builtin.[ch]` if 2F Task 13 has not (point (y)).
@@ -146,20 +147,16 @@ Effort cues:
    - In flight: 2C-2 only adds `.o3proj` inputs under `tests/unit/data/verilog/read/` and never edits the reader. 2D Task 26 adds `--with-frontend` to `project_fixtures.py`, in another function.
    - 3E and 3H do not touch the project grammar.
 9. **Writers.**
-   - `src/backends/verilog/writer.c`: Task 9 adds `$lut` (`FORM_LUT`). 2E makes no edit (2E conflict note 5).
+   - `src/backends/verilog/writer.c`: Task 9 (in 3D-5) adds `$lut` (`FORM_LUT`). 2E makes no edit (2E conflict note 5).
    - `src/backends/json/*`: no edit. The generic path writes `$lut`; Task 2 only asserts the form.
-   - `src/backends/blif/writer.[ch]` and `isop.[ch]` belong to 3E. 3D's own exchange writer is `src/passes/abc/xblif.c`.
-   - The `# abc:` header loop in `writer.c` lands with whichever of 3E-1 and Task 8 merges second (point (g)).
-10. **`src/passes/budget.[ch]`** (2E Task 3). Task 14 makes `odin3_budget_limit()` the smaller of 60% of physical memory and the smallest numeric cgroup `memory.max` on the process's cgroup path (point (i)). 2F only calls the budget.
+   - `src/backends/blif/{writer,vtr,isop}.[ch]` belong to 3E. 3D's own exchange writer is `src/passes/abc/xblif.c`.
+   - The `# abc:` header loop in `vtr.c`'s header function lands with whichever of 3E-1 and Task 8 merges second (point (g); finding 18).
+10. **`src/passes/budget.[ch]`** (2E Task 3). Task 14 makes `odin3_budget_limit()` the smaller of 60% of physical memory and the smallest numeric cgroup `memory.max` on the process's cgroup path, changes the one shared message, adds a fake-cgroup hook, and updates the 2E/2F tests that assert the old text or limit (point (i); ruling I6). 2F only calls the budget; if 2F lands later, its tests use the new text.
 11. **Tools.**
-    - Task 5 alone edits `tools/check-symbols.sh` (`--only`/`--forbid` mode), `tools/check_rules.py` (the adapter rules) and `tools/lint.sh` (it covers `adapters/abc/*.c`).
+    - Task 5 alone edits `tools/check-symbols.sh` (`--only`/`--forbid` mode), `tools/check_rules.py` (the `assert(` rule only; no trap allowance before Peter rules, point (a)) and `tools/lint.sh` (it covers `adapters/abc/*.c`).
     - Task 19 adds `--blackbox` to `tools/equiv-check/equiv_check.py`. 3H calls `equiv-check --timeout`; 2H later adds `--x-report`. These are independent options.
     - `pyproject.toml` (`[tool.ruff] src`, `[tool.mypy] mypy_path`) and `tests/tools/__init__.py`: Task 19 appends `tools/abc-check`. 2D-2 and 2E-1 (`tools/proc-check`), 3E and 3H append theirs. Keep every entry.
-12. **Docs.**
-    - `docs/IR.md`: Task 2 (the "LUT cells (3D)" paragraph after "BLIF cells (used by 1C)") and Task 8 (IR-12's row and two paragraphs, the §11 entry).
-    - `docs/DESIGN.md`: Task 2 (§5.2), Task 19 (§6 step 10), Task 12 (§4.0); 3E-1 (§9's BLIF row). These are different paragraphs.
-    - `docs/PHASE3.md`: append-only. 3D-0's findings, the `abc-diff` ratios (Task 21) and the evidence entry (Task 22). The P3-8/P3-9 (a)/P3-11 rewordings were merged with the spec.
-    - `docs/ORACLES.md` (Task 3: the `abc` tool is built from `libabc-pic`), `CLAUDE.md` (Task 3: Layout `adapters/{slang,abc}`) and the corpus README (Task 12).
+12. **Docs**, different paragraphs each: `docs/IR.md` (Task 2's "LUT cells (3D)" after "BLIF cells (used by 1C)"; Task 8's IR-12 row, two paragraphs and §11 entry); `docs/DESIGN.md` (Task 2 §5.2, Task 19 §6 step 10, Task 12 §4.0; 3E-1 §9's BLIF row); `docs/PHASE3.md`, append-only (3D-0's findings, Task 21's ratios, Task 22's entry); `docs/ORACLES.md` and `CLAUDE.md`'s Layout (Task 3); the corpus README (Task 12).
 13. **3E's files that 3D consumes.**
     - `src/backends/blif/isop.[ch]` (3E-5): Tasks 9, 16 and 20 call `odin3_blif_isop`.
     - `write_blif --vtr` (3E-1): `abc-equiv --vtr` (Task 19) and the M1 check.
@@ -168,27 +165,18 @@ Effort cues:
     - the run information's `depth=` and `exchange=` words, through 3E's `# abc:` header;
     - the INFO line `abc: final: depth <d>`.
     - Their formats are fixed in Task 18 and must not change without 3H.
-15. **Heavy runs.** 2E-1's `tools/heavy-run`, `tools/build-locked`, `cmake/Odin3Sweep.cmake` and `ODIN3_HEAVY_RUN` are consumed, never copied or cherry-picked. Every heavy item depends on 2E-1 being on `main`: Task 19's sweeps, Task 21's `abc-diff`, Task 22's suite, and H1–H6.
+15. **Heavy runs.** 2E-1's `tools/heavy-run`, `tools/build-locked`, `cmake/Odin3Sweep.cmake` and `ODIN3_HEAVY_RUN` are consumed, never copied or cherry-picked. Every heavy item depends on 2E-1 being on `main`: the spike's golden runs, Task 19's sweeps, Task 21's `abc-diff`, Task 22's suite, and H1–H6. The Python tools' golden mode also needs 3H-1's `qor_heavy.require_heavy` (point (m)).
 16. **`third_party/abc`** is read only. Task 3's pin check stops configure on any other commit, and a pin bump is an ORACLES change (Peter).
 
 **Spec points made exact here** (agent defaults, reversible; Task 22 logs them in PHASE3):
 
-- (a) **`ODIN3_ADAPTER_ASSERT`: one switchable macro; Peter's ruling pending.** §4.1 has the adapter trap (`__builtin_trap()`), as a documented exception to "trap only in `check`". Whether to allow that trap is still Peter's call, so the plan supports both answers.
-  - `adapters/abc/guard.h` defines the macro once. The CMake option `ODIN3_ADAPTER_TRAP` (BOOL, default **OFF**) selects the arm through `target_compile_definitions(odin3_abc PRIVATE ODIN3_ADAPTER_TRAP=$<BOOL:${ODIN3_ADAPTER_TRAP}>)`:
-    ```c
-    #if ODIN3_ADAPTER_TRAP
-    #define ODIN3_ADAPTER_ASSERT(c) do { if (!(c)) { __builtin_trap(); } } while (0)
-    #else
-    #define ODIN3_ADAPTER_ASSERT(c) \
-        do { if (!(c)) { return odin3_adapter_assert_fail(__FILE__, __LINE__, #c); } } while (0)
-    #endif
-    ```
-  - **OFF, the default until Peter rules: a clean error return.** `odin3_status odin3_adapter_assert_fail(const char *file, int line, const char *expr)` records the session's pending failure `{ODIN3_ABC_FAIL_ASSERT, 0, "adapter: <file>:<line>: <expr>"}` (truncated to 255 bytes), disables the engine as an escape does, and returns `ODIN3_ERR_ENGINE`. The pass then reports `abc: ABC assertion failed during '<cmd>': adapter: …; linked ABC is disabled until odin3 restarts`.
-  - The macro may appear only in functions returning `odin3_status`. In the default arm, a use in a `void` function is a compile error under `-Werror`.
-  - **ON, if Peter approves the trap:** §4.1 as written. Flipping the option's default is a one-line CMake change, plus the PR note.
-  - CI builds both arms (Task 5's `abc_adapter_trap_mode`).
-  - The **off-thread escape** of AB-6 is not this macro. ABC's worker thread has no caller to return to, so it stays the spec's trap in both arms (ruling I6). `tools/check_rules.py` allows `__builtin_trap` in `adapters/abc/` only in `guard.h`'s trap arm and in `guard.c`'s `escape_off_thread`.
-  - 3D-2's PR description asks Peter both items in one numbered list.
+- (a) **`ODIN3_ADAPTER_ASSERT` returns cleanly; traps wait for Peter** (ruling I7). §4.1 has the adapter trap (`__builtin_trap()`) as a documented exception to CLAUDE.md's "trap only in `check`". That exception, and any `check_rules.py` allowance for it, is Peter's call (CLAUDE.md rule 6), so only the clean return ships:
+  - `adapters/abc/guard.h`: `#define ODIN3_ADAPTER_ASSERT(c) do { if (!(c)) { return odin3_adapter_assert_fail(__FILE__, __LINE__, #c); } } while (0)`. There is no trap arm, no CMake option and no trap test.
+  - `odin3_status odin3_adapter_assert_fail(const char *file, int line, const char *expr)` records the session's pending failure `{ODIN3_ABC_FAIL_ASSERT, 0, "adapter: <file>:<line>: <expr>"}` (truncated to 255 bytes), disables the engine as an escape does, and returns `ODIN3_ERR_ENGINE`. The pass then reports `abc: ABC assertion failed during '<cmd>': adapter: …; linked ABC is disabled until odin3 restarts`.
+  - The macro may appear only in functions returning `odin3_status`; a use in a `void` function is a compile error under `-Werror`.
+  - **The off-thread escape** (AB-6: ABC's own thread calls `exit`/`abort`/`__assert_fail`) has no caller to return to. Its wrapper writes the stderr line and then calls `adp_offthread_stop()` in `guard.c`, whose body is Peter's answer. Until he rules, its body is left out and 3D-2 does not merge.
+  - The 3D-2 PR asks him one numbered question: "(1) Allow `__builtin_trap()` in `adapters/abc/guard.c`'s off-thread escape (required to stop safely), with the matching `check_rules.py` allowance? If not, the alternative is a non-trap stop after the line, `raise(SIGKILL)`. (2) Optionally allow the trap for adapter invariants (`ODIN3_ADAPTER_ASSERT`), instead of the shipped clean return?"
+  - Either answer for (1) is a one-function change plus Task 5's `o3test_thread_exit` signal (`SIGILL` or `SIGKILL`). A "yes" to (2) is a one-line macro change in review.
 - (b) **Where the engine lives.** `src/passes/abc/engine.c` holds the process's engine copy. Internal `const odin3_abc_engine *odin3_abc_engine_get(void)` returns it, or NULL.
   - `src/api/abc.c` holds the public `odin3_abc_engine_register`, which validates the table and then calls `odin3_abc_engine_set`.
   - `odin3_abc_test_set_engine` (`abc_test.h`) overrides it for tests; NULL restores the registered one. It is the only way past "final".
@@ -200,21 +188,25 @@ Effort cues:
     - `engine '<name>': abc_commit '<s>' is not 40 lower-case hex digits`
     - `abc engine already registered (<name>)`
 - (c) **`$lut` helpers live in `src/ir/lut.h`.**
-  - §2 puts `ODIN3_LUT_MAX_WIDTH` in `src/ir/cells/cells.h`, which is private to `src/ir/cells`. The pass, the writers and 3E need it, so `src/ir/lut.h` holds it with the parameter and port indices and two table helpers (Task 2). `cells.h` includes `lut.h`, so the constant is in `cells.h` as §2 says.
-  - Registry order is conflict note 2's.
-- (d) **ABI line.** One new history line, `ABI v4 (cont., 3D): …`, written by Task 4 and extended by Tasks 8 and 13. `ODIN3_ABI_VERSION` stays 4 (Q4), and `cli_version` still prints `(ABI 4)`.
-- (e) **Script precedence needs 3D-6, so 3D-5 waits for it.** §15 puts "args and precedence" in 3D-5. But precedence steps 2–3 read the project record's `abc_script` and `odin3_pass_options.abc_script`, both of which Tasks 12–13 add. 3D-6 is light and needs only 3D-4, so it lands first, and 3D-5 waits for it.
+  - §2 puts `ODIN3_LUT_MAX_WIDTH` in `src/ir/cells/cells.h`, which is private to `src/ir/cells`. The pass, the writers and 3E need it, so `src/ir/lut.h` holds it with the parameter and port indices, the table helpers and the registry lookup `odin3_lut_builtin_index()` (Task 2). `cells.h` includes `lut.h`, so the constant is in `cells.h` as §2 says.
+  - Registry order is conflict note 2's (ruling I5).
+- (d) **ABI line.** One new history line, `ABI v4 (cont., 3D): …`, written by whichever of Tasks 4, 8 and 13 merges first and extended by the others. `ODIN3_ABI_VERSION` stays 4 (Q4), and `cli_version` still prints `(ABI 4)`.
+- (e) **Script precedence needs 3D-6, so 3D-5 waits for it.** §15 puts "args and precedence" in 3D-5. But precedence steps 2–3 read the project record's `abc_script` and `odin3_pass_options.abc_script`, both of which Tasks 12–13 add. 3D-6 is light and waits for nothing (finding 11), so it lands first, and 3D-5 waits for it.
   - The CTest `cli_abc_script_precedence` (§10.3) needs the pass, so it moves to Task 19.
 - (f) **3D-0's findings.** The spike's program stays in `~/odin3-ws/work/spike-abc/` and is never committed. Its eight criteria and fallbacks become a PHASE3 entry, "3D-0 spike (AB-17)", in a docs-only PR (`docs/3D-spike`) that the controller merges. 3D-7 starts only once it has merged with "go".
-- (g) **The `# abc:` header lines** (3E §5 item 1) need both 3E-1's VTR header and Task 8's `odin3_passrun_info`. Whichever of 3E-1 and 3D-3 merges second adds the loop: one `# abc: <run information>` per pass run named `abc` with non-zero information, in run order, plus the test `vtr_header_abc_runs` in `tests/unit/test_blif_vtr.c`. Until then `--vtr` writes no `# abc:` line.
+- (g) **The `# abc:` header lines** (3E §5 item 1) need both 3E-1's VTR header (`vtr.c`'s header function) and Task 8's `odin3_passrun_info`. Whichever of 3E-1 and 3D-3 merges second adds the loop to `vtr.c`: one `# abc: <run information>` per pass run named `abc` with non-zero information, in run order, plus the test `vtr_header_abc_runs` in `tests/unit/test_blif_vtr.c`. Until then `--vtr` writes no `# abc:` line.
 - (h) **First location of a LUT** (3E-6, 3E §10 item 7). IR.md §5.3 already defines it: for `DERIVED`, the first leaf of the backward walk in parent order. Task 18 fixes the parent order: an old region's cells in node-ID order, and a multi-region LUT's extra record's parents in anchor order. So the rule is deterministic, 3D adds no new rule, and 3E-6 cites IR.md.
 - (i) **Budget under a slice.** §7.8 reads `/sys/fs/cgroup/<own cgroup>/memory.max`. Under `tools/heavy-run` the job is in a scope whose `memory.max` is `max`, while the 6G cap sits on `odin3-heavy.slice`.
   - So `odin3_budget_limit()` walks the `0::<path>` line of `/proc/self/cgroup` up to the root and takes the smallest numeric `memory.max`.
   - The limit is the smaller of that and 60% of physical memory. With no cgroup v2 file, it is 60% alone.
   - This is the same walk as 3H's `qor_heavy.verify_scope`.
+  - **One message for every pass** (ruling I6). `odin3_budget_message` gives `<pass> needs more than <N> bytes (the design's budget is <B> bytes: the smaller of 60% of physical memory and the cgroup's memory.max)`, replacing 2E's `… (the design's budget is 60% of physical memory)`. The text names the pass, so for `abc` it starts `abc needs …`, as §11 has it, with no separate `abc: ` prefix.
+  - The tests that change with it (Task 14): 2E's `budget_e6`, `check_and_message` and `limit_default` (`tests/unit/test_budget.c` and `test_proc_pass.c`), and 2F's `budget` and `budget_opt` when 2F has merged (else the 2F implementer uses the new text). `limit_default` points `odin3_budget_test_set_cgroup_root` at an empty fake tree, so it stays exactly 60% of physical memory on any machine.
+  - 2E §15 E6's and 2F's budget texts get an erratum in Task 22's PHASE3 entry.
 - (j) **What "micros" means in CI.**
   - §13.4's CI set "`tests/micro` and `tests/golden/blif`" cannot run in Phase 3 lane 1: `tests/micro` holds Verilog, and `abc` needs a netlist.
   - `abc_equiv_micro` (gate) therefore runs the committed BLIFs: `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif`.
+  - **Word-cell BLIFs are filtered out** (ruling I8; finding 8). `tests/abc/equiv_expect_fail.txt` lists `tests/golden/blif/pow.parmys.blif views` (it reads as the word cell `$pow`, so `abc` stops with the views error) and, if it fails `--blackbox`, `tests/golden/blif/dffsre.parmys.blif blackbox` (an undeclared `$_DFFSR_PPP_`). `abc-equiv` passes `views` entries only when the views error appears. `test_abc_pass` and `abc_determinism_ci` skip every listed file. The golden sweeps use the same file, extended per run.
   - The micros' Parmys goldens (the k6 `regression/` tree) and the `vtr/` goldens run in `abc_equiv_golden` (`sweep`): every k6 Parmys golden except `mcml` and `LU32PEEng`, smallest first.
   - `mcml` and `LU32PEEng` run only in the H1–H6 slots.
 - (k) **`<domain>` and clock names.**
@@ -233,13 +225,15 @@ Effort cues:
     - `bench_abc_set` (Task 22);
     - `fuzz_abc_script_long` and `fuzz_abc_splice_long` (past CI's 60 s and 2,000 cases).
   - The controller runs them: `tools/build-locked --preset release -j6`, then `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^abc_|^bench_abc|^fuzz_abc'`, or, before 2D Task 25 adds the `sweep` preset, `ODIN3_HEAVY_OK=1 ctest --preset release -L '^sweep$' -R '<same>' -j1`.
+  - **The spec's nightly 3D runs** (§13.4 golden equivalence, §13.5 `abc-diff`, §13.8 (a), (c) and (d)) have one runner (ruling I10): 3H's hand-started nightly, step "3D sweeps" (3H Task 13). It runs `abc-equiv`, `abc-diff` and `abc-determinism --mode a|c|d` as direct commands inside its held lock (no nested `heavy-run`), when `src/passes/abc/` or `adapters/abc/` changed since the last such night, else weekly. There is no `nightly` label and no `nightly.yml` edit.
+  - **No heavy tool sets `ODIN3_HEAVY_OK`** (ruling I3). `abc-equiv`, `abc-diff`, `abc-determinism` and `bench_abc` pass the caller's environment through unchanged. Given a path under `~/odin3-ws/golden`, the Python tools first call 3H's `qor_heavy.require_heavy()` (3H Task 1): outside `tools/heavy-run` they refuse with exit 2 (finding 22). A child they start that might itself be heavy gets the lock descriptor (`pass_fds=(9,)`), so `heavy-run`'s nesting rule applies instead of a wait on the parent.
   - Every heavy command runs under `timeout 3h`.
   - `mcml` and `LU32PEEng` (H1–H6) are never in a CTest. The controller starts them by hand, one per slot: `ODIN3_HEAVY_OK=1 tools/heavy-run timeout 3h <cmd>`.
   - A slot needs `--xl` (`odin3-heavyxl.slice`, 9G, `ODIN3_HEAVY_XL_OK=1`, idle machine only; the name has no dash, because systemd nests dashed slice names) only after `bench_abc` has measured more than 6 GB. That measurement goes to Peter first.
 - (n) **The pass definition.** `odin3_pass_abc` is defined in `src/passes/abc/run.c`, with `wants_ast` false and `processes` = `ODIN3_PASS_PROCESSES_REFUSE`. `abc` needs the netlist view, and a design with processes has none.
   - A design without a top runs every module, and records `depth=0`.
 - (o) **Adapter headers.** §14 names `bridge.h`, `guard.h` and `odin3_abc.h`. CLAUDE.md asks for one header per module, so `session.h` declares the session and the capture as well.
-- (p) **Adapter tests that need the checker move to Task 11:** "no files" (it runs every allowed command) and "checked is what runs" (it compares `CmdSplitLine` with the checker's words).
+- (p) **Adapter tests that need the checker** — "no files" (it runs every allowed command) and "checked is what runs" (it compares `CmdSplitLine` with the checker's words) — are written in Task 11 and land with whichever of 3D-2 and 3D-4 merges second, so 3D-4 does not wait on Peter's ruling.
 - (q) **The Verilog `$lut` form** (Task 9) is `assign <y> = <expr>;`, built from `odin3_blif_isop`'s cover:
   - a literal is `<net>` or `~<net>`, inputs in pin order;
   - a cube is its literals joined by ` & `, and each cube goes in parentheses when the cover has more than one row;
@@ -252,12 +246,7 @@ Effort cues:
 - (s) **New objects' names.** New `$lut` nodes have no name, so writers generate `$c<ID>`. A new flip-flop takes its representative's node name (§5.4). Output nets keep CO names through phase B's merges, and old internal names through phase C.
 - (t) **The fake engine** (`tests/unit/abc_fake_engine.[ch]`) is test code, linked into the `test_abc_*` executables. Its `exec` understands §13.1's commands, plus the test-only `const <i>` (LUT *i* becomes constant). The knob `odin3_abc_fake_fail_on(word, fail)` makes the first command whose word 0 is `word` return `ODIN3_ERR_ENGINE` with `fail` (any kind). Every behaviour is deterministic.
 - (u) **`--version`** prints a new line `linked ABC <40 hex> (adapters/abc/NOTICE)` after the existing ones when an engine is registered.
-- (v) **`bench_abc`** is `tests/bench/bench_abc.c` (Release), with `--one <file.blif> [--lut K] [--via-blif DIR] [--exe ABC]`. It prints one tab-separated line per run, with columns in §12's order:
-  - design, module, domain, exchange;
-  - cells, FFs, LUTs, depth;
-  - classification, AIG, checks, splice, provenance and total-outside ms;
-  - ABC ms, name-map ms and coverage %, edges, RSS before and peak MB.
-  - With `--exe`, a second line gives the pinned executable's figures on the same exchange BLIF and expanded script.
+- (v) **`bench_abc`** is `tests/bench/bench_abc.c` (Release), with `--one <file.blif> [--lut K] [--via-blif DIR] [--exe ABC]`. It prints one tab-separated line per run, columns in §12's order: design, module, domain, exchange; cells, FFs, LUTs, depth; classification, AIG, checks, splice, provenance and total-outside ms; ABC ms, name-map ms and coverage %, edges, RSS before and peak MB. With `--exe`, a second line gives the pinned executable's figures on the same exchange BLIF and expanded script.
 - (w) **Wrapper symbols through asm labels.** `--wrap=exit` needs a definition named `__wrap_exit`, but `bugprone-reserved-identifier` (on through `bugprone-*`) refuses C identifiers that start with `__`, and NOLINT is not allowed. So each wrapper has an `odin3_wrap_*` C name bound to its symbol with `__asm__("__wrap_<sym>")` (Task 5). `check-symbols.sh` sees the same symbols as §4.2 expects.
 - (x) **Script errors carry the `abc: ` prefix.** §11 lists "AB-21's script errors" without a prefix, and the P3-1 failure text has one. Every checker error is logged as `abc: ` + AB-21's text. Task 11's cases list the text after the prefix, and the sink assertion includes it.
 - (y) **Compaction after `abc`.** §6.5 has the manager compact after `abc` "using 2F-5's hook for `opt`". So `abc`'s last step is `odin3_design_compact(ctx, design)` (2F Task 13's helper in `builtin.h`). If 3D-5 merges first, Task 19 factors the `compact` pass's body into that function with the same signature, and 2F Task 13 drops its copy. 2F Task 13's IR-6 wording amendment for Peter ("… or the last step of a top-level `opt`") gains "or of `abc`".
@@ -276,7 +265,7 @@ Effort cues:
   - Only `adapters/abc/bridge.c` includes ABC headers. `bridge.c` compiles with `odin3_flags` plus `-Wno-strict-prototypes` (a source property); every other adapter file uses the full `odin3_flags`.
   - `libodin3` never links ABC.
   - The adapter exports exactly `odin3_plugin_init` and `odin3_abc_adapter_init`.
-  - No `assert(` in `adapters/abc/`. `__builtin_trap` appears only where point (a) allows it.
+  - No `assert(` in `adapters/abc/`, and no `__builtin_trap` until Peter rules on point (a).
   - The `--wrap` wrappers never name a `__real_` symbol.
   - `third_party/abc` is never modified.
 - **IR discipline (AB-18).**
@@ -286,7 +275,7 @@ Effort cues:
   - Nothing is compacted between runs; the manager compacts after the pass.
   - `odin3_check_design` FULL passes after every test, failing ones included.
 - **Diagnostics.**
-  - Every text of §11 is exact, prefixed `abc: `, lower case, names in `'…'`, no final period.
+  - Every text of §11 is exact, prefixed `abc: ` (the shared budget message excepted, point (i)), lower case, names in `'…'`, no final period.
   - Script errors are located `<file>:<line>` with the file as given.
   - Every diagnostic test asserts the whole line through a capturing log sink.
   - The core never logs during an engine call (IR-17); ABC's lines arrive through the `text` callback.
@@ -315,7 +304,7 @@ Effort cues:
   - `/lint` before each commit; commit at each green checkpoint (the controller pushes).
   - A read-only critique per task; a **Fable** whole-branch review before each PR.
 - **Heavy runs** (standing rules; point (m)).
-  - One heavy job machine-wide, in `odin3-heavy.slice` (6G, no swap), through `tools/heavy-run`, smallest first, `timeout 3h`.
+  - One heavy job machine-wide, in `odin3-heavy.slice` (6G, no swap), through `tools/heavy-run`, smallest first, `timeout 3h`. No tool sets `ODIN3_HEAVY_OK`; the controller does (ruling I3).
   - Implementers run only unit tests, the gate and small samples, and list in their report the sweeps they deferred.
   - `rm` only with one absolute path under `/tmp/claude-1000/`, `~/odin3-ws/work/` or `~/odin3-ws/rt-run*`.
   - Never write `~/odin3-ws/external` or `~/odin3-ws/golden`.
@@ -325,13 +314,13 @@ Effort cues:
 ## Review Focus
 
 1. **RAM address bits left open by Parmys stay open after `abc`.** A user who runs `read_blif ch_intrinsics.parmys.blif; abc --lut 6; write_blif --vtr` expects every `single_port_ram` pin that was on `unconn` (`addr[5..14]`) to still be on `unconn`, not tied to `gnd`. A soft path from `unconn` into a RAM pin, however, ends on `gnd`, as VTR does. Pinned in Task 15 (`test_abc_region`: `bypass_unconn_hard_pin`) and Task 19 (`test_abc_unconn`, both exchanges and both engines; `abc_unconn_ch_intrinsics`: the set of hard-block pins on `unconn` is equal before and after, and so is the `--vtr` text of every `.subckt` line).
-2. **Registers that start at 1 still start at 1.** For `initial q = 1` toggles, and for two init-1 registers that `scorr` merges, the user expects the mapped netlist to power up exactly as the input did. Pinned in Task 17 (`test_abc_splice`: `restore_flip_reader`, `restore_inverter_to_buffer`, `restore_shared_d_not`) and Task 19 (`test_abc_init1`: `equiv-check --strict-init` passes, and every result FF has `INIT` 1 and the polarity of AB-13).
+2. **Registers that start at 1 still start at 1.** For `initial q = 1` toggles, and for two init-1 registers that `scorr` merges, the user expects the mapped netlist to power up exactly as the input did. Pinned in Task 17 (`test_abc_splice`: `restore_flip_reader`, `restore_inverter_to_merge`, `restore_shared_d_not`) and Task 19 (`test_abc_init1`: `equiv-check --strict-init` passes, and every result FF has `INIT` 1 and the polarity of AB-13).
 3. **A clock or a port that soft logic drives keeps its identity.** For two output ports computing the same function, and for a derived clock `clk2 = clk & en`, the user expects two distinct port nets and a clock domain that still exists after the run. Pinned in Task 17 (`test_abc_splice`: `special_port_pair_buffered`, `derived_clock_buffered`, `constant_to_clock_buffered`) and Task 19 (`abc_equiv_micro` on `tests/unit/data/abc/derived_clock.blif`).
 4. **A bad script is refused before ABC starts, at its line, and nothing changes.** For a typo (`strsh`), a file command (`write_blif x.blif`), a script without a mapper (`resyn2`), or `if -K {K}` without `--lut`, the user expects one located error naming the line and an IR byte-identical to before. Pinned in Task 11 (`test_abc_script`: `refuse_unknown_command`, `refuse_file_command`, `refuse_unmapped_end`, `refuse_k_without_lut`) and Task 19 (`cli_abc_bad_script`: `write_blif` before and after are identical, and the engine's `open` is never called).
 5. **Reruns are byte-identical, even with randomised commands.** For two `abc` passes in one process, two processes, and a script with `fraig`, the user expects identical netlists. Pinned in Task 6 (`test_abc_adapter`: `determinism_one_process` with `strash; fraig; if -K 6`) and Task 22 (`abc_determinism_ci`: (a) two processes and (b) A, B, then A again).
 
 **Internal risks for the reviewers** (spec §17 items 1, 5 and 6, and the IR pieces Peter reviews):
-- **Escapes and fd capture (risk 1, AB-6).** A missed `fflush` or fd restore on an escape corrupts the CLI's output. Pinned in Task 5 (each escape in its own process: fds restored, then `DISABLED`; the off-thread exit dies by `SIGILL` after its line).
+- **Escapes and fd capture (risk 1, AB-6).** A missed `fflush` or fd restore on an escape corrupts the CLI's output. Pinned in Task 5 (each escape in its own process: fds restored, then `DISABLED`; the off-thread exit stops after its line, by the signal Peter's answer selects).
 - **Splice phase B (I13).** A wrong row in its table silently merges two port nets or drops a clock. Pinned in Task 17 (every row and both columns, with simulation equal before and after).
 - **Overlapping cones (risk 5).** Pinned in Task 18 (coarse mode at a lowered budget gives one record and the warning).
 
@@ -350,6 +339,7 @@ Effort cues:
 - Inputs, smallest first: `ch_intrinsics`, `stereovision3`, `diffeq2`, `diffeq1` and `mkPktMerge` (`~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/<d>/<d>.parmys.blif`), plus the micros `common/register/register` and `operators/twobits_arithmetic_multiply/twobits_arithmetic_multiply` (or the two smallest regression goldens with a latch, when those names are absent).
   - Each input's MiniAIG comes from ABC itself: `read` with `adder`, `multiply`, `single_port_ram` and `dual_port_ram` declared `.blackbox` (the hard-model stubs of `tools/golden-blackboxes`), then `strash`, then `Abc_NtkOutputMiniAig`.
 - Produces: `findings.md`, one section per criterion with its numbers, and the go/no-go for 3D-7 with the fallbacks that apply (§6.4).
+- Heavy rule (finding 23): the program and the two micros run now. Every criterion on the five VTR goldens (including `dsec`, which is unbounded, and the 1,000-frame loop) runs as `ODIN3_HEAVY_OK=1 tools/heavy-run timeout 1h ~/odin3-ws/work/spike-abc/run.sh <design>`, started by the controller, once 2E-1 is on `main`.
 
 **Tests** (the eight criteria, each a scripted assertion in `run.sh`; no heavy run):
 1. `Abc_FrameGiaInputMiniAig; &put; <lib/abc/vtr.abc with K 6>; &get -m -n; Abc_FrameGiaOutputMiniLut`. Per input: the PI and PO counts equal the input's; the register count is at most the input's; every LUT has ≤ 6 fanins; and ABC's `dsec` reports the MiniLUT (written as BLIF by the spike) equivalent to the input.
@@ -373,14 +363,16 @@ Acceptance:
 ### Task 2: The `$lut` cell, its table helpers, the JSON form and the IR text (AB-2)
 **Files:**
 - Create `src/ir/lut.h` (point (c)), `src/ir/cells/lut.c` and `tests/unit/test_lut_cell.c`.
-- Modify `src/ir/cells/cells.h` (`#include "ir/lut.h"`; `extern const odin3_celltype_def odin3_cell_lut;`), `src/ir/cells/builtin.c` (append `&odin3_cell_lut` last) and `tests/unit/test_ir_cells.c` (the expected table grows by one, `$lut` last).
-- Modify `CMakeLists.txt` (the source, `odin3_add_unit_test(test_lut_cell)`, and CTest `lut_json_yosys` in the existing `ODIN3_YOSYS` block).
+- Modify `src/ir/cells/cells.h` (`#include "ir/lut.h"`; `extern const odin3_celltype_def odin3_cell_lut;`) and `src/ir/cells/builtin.c` (append `&odin3_cell_lut` after 2E's eleven cells; conflict note 2).
+- Modify `tests/unit/test_ir_cells.c` (the expected table grows by one, `BUILTIN_COUNT` 74 → 75) and `tests/unit/test_ir_proc.c` (`BUILTIN_COUNT` at line 40, 74 → 75) (finding 13).
+- Modify `CMakeLists.txt` (the source, `odin3_add_unit_test(test_lut_cell)`, CTest `lut_json_yosys` in the existing `ODIN3_YOSYS` block, and CTest `lut_rtlil_yosys` in the `ODIN3_YOSYS055` block).
 - Modify `docs/IR.md`: §2's "LUT cells (3D)" paragraph, verbatim, after "BLIF cells (used by 1C)".
 - Modify `docs/DESIGN.md` §5.2: "`$sop` (BLIF `.names` covers) and `$_LUT_K_`" becomes "`$sop` (BLIF `.names` covers) and `$lut` (a K-input LUT, Yosys semantics; `docs/IR.md` LUT cells)".
 
 **Interfaces:**
 - Consumes: `ODIN3_PORT_VEC`, `ODIN3_PORT_BIT`, `ODIN3_P_INT`, `ODIN3_P_BITS`, `odin3_cells_check_int`, `odin3_cells_check_bits`, `odin3_cells_sim_out`, `odin3_sim_cell`, `odin3_arena_alloc`.
 - Produces (`src/ir/lut.h`):
+  - `uint32_t odin3_lut_builtin_index(void);` is the index of `&odin3_cell_lut` in `odin3_builtin_celltypes` (ruling I5: the only way a test or a pass names `$lut`'s built-in ID).
   - `enum { ODIN3_LUT_MAX_WIDTH = 16 };`, `enum { ODIN3_LUT_P_WIDTH = 0, ODIN3_LUT_P_LUT = 1 };` and `enum { ODIN3_LUT_PORT_A = 0, ODIN3_LUT_PORT_Y = 1 };`
   - `uint32_t odin3_lut_words(uint32_t width);` gives the 64-bit words of a 2^width-bit table: 1 for width ≤ 6, else 2^(width−6).
   - `odin3_status odin3_lut_params(odin3_arena *arena, uint32_t width, const uint64_t *words, odin3_value params[2]);` builds `WIDTH` and `LUT` from a table: bit *i* of `words` (word *i*/64, bit *i*%64) is `LUT[i]`, and bits from 2^width up are ignored. `INVALID_ARG` for width 0 or above 16, or a NULL argument.
@@ -392,18 +384,11 @@ Acceptance:
   - `lut_sim`: *i* = Σ A[j]·2^j over the input bytes, then `Y = LUT[i]`.
 
 **Tests (`test_lut_cell.c`; Unity, ASan):**
-- `registry_last`: `odin3_celltype_find(design, "$lut")` resolves, and `odin3_builtin_celltypes[odin3_builtin_celltype_count - 1] == &odin3_cell_lut` (conflict note 2: no hard-coded ID).
+- `registry_lookup` (ruling I5): `odin3_builtin_celltypes[odin3_lut_builtin_index()] == &odin3_cell_lut`, the entry occurs exactly once, and `odin3_celltype_find(design, "$lut")` resolves to that built-in. No test names a number for it.
 - `defaults_identity`: a node with the defaults has `WIDTH` 1, `LUT` bytes `{0, 1}` and 2 pins. Under `odin3_sim_build` it simulates A=0 → Y=0 and A=1 → Y=1.
-- `verify_refusals`: each gives `INVALID_ARG`, an unchanged node count, and exactly these two sink lines (the second is the IR's `node_create: '$lut' rejects these parameters`):
-  - `WIDTH` 0 and 17 → `cell parameter WIDTH must be an int in 1..16`;
-  - `WIDTH` 2 with a 3-bit `LUT` → `cell parameter LUT must be 4 bits`;
-  - `WIDTH` 2 with `LUT` byte 2 = x (2) → `$lut: LUT bit 2 is x; only 0 and 1 are allowed`; with z (3) → `… is z; …`.
+- `verify_refusals`: each gives `INVALID_ARG`, an unchanged node count, and exactly two sink lines, the second the IR's `node_create: '$lut' rejects these parameters`. `WIDTH` 0 and 17 → `cell parameter WIDTH must be an int in 1..16`; `WIDTH` 2 with a 3-bit `LUT` → `cell parameter LUT must be 4 bits`; `LUT` byte 2 = x (2) → `$lut: LUT bit 2 is x; only 0 and 1 are allowed`, and z (3) → `… is z; …`.
 - `const_value`: `WIDTH` 3 with all 0 → `ODIN3_CONST_0`; all 1 → `ODIN3_CONST_1`; one byte 1 → `ODIN3_CONST_NONE`.
-- `simulate_tables` (`odin3_prng`, seed `0x3D1`):
-  - `WIDTH` 1 and 2: every table × every input;
-  - `WIDTH` 3–6: 1,000 random tables × every input;
-  - `WIDTH` 7–16: 1,000 random tables × 64 random inputs.
-  - In every case `Y` equals byte *i* of `LUT`.
+- `simulate_tables` (`odin3_prng`, seed `0x3D1`): every table × every input for `WIDTH` 1–2; 1,000 random tables × every input for 3–6; 1,000 random tables × 64 random inputs for 7–16. `Y` always equals byte *i* of `LUT`.
 - `bit_order`: `WIDTH` 2, `LUT` = `4'b1000` → Y = 1 only for A[0] = A[1] = 1. `LUT` = `4'b0010` → Y = 1 only for A[0] = 1, A[1] = 0 (A[0] is the LSB of the index).
 - `table_helpers`:
   - `odin3_lut_words` of 1, 6, 7 and 16 → 1, 1, 2, 1024.
@@ -412,6 +397,7 @@ Acceptance:
 - `engine_word_layout` (I10): `lut_size` 6 (W = 2), k = 3, `truth` = `{0xFFFFFFA5, 0xFFFFFFFF}` → `LUT` = `8'b10100101`: bits 8 and up are ignored. With `lut_size` 4 (W = 1), k = 4 and `{0x0000F00F}` → bytes 0–3 and 12–15 are 1. k = 7 with `lut_size` 6 → `INVALID_ARG`.
 - `json_form`: `write_json` of a module with one `$lut` (`WIDTH` 2, `LUT` = `4'b0110`, A on `a[1:0]`, Y on `y`) holds the members `"type": "$lut"`, `"LUT": "0110"`, `"WIDTH": "00000000000000000000000000000010"`, `"A": "input"` and `"Y": "output"` (MSB-first `LUT`, as Yosys).
 - CTest `lut_json_yosys` (`ODIN3_YOSYS` block): `yosys -q -p "read_json F; stat"` on that file exits 0, and its output matches `\$lut +1`.
+- `rtlil_form` (finding 21): `odin3_rtlil_text` of the same module holds `    parameter \WIDTH 2` and `    parameter \LUT 4'0110` (MSB first, AB-2). CTest `lut_rtlil_yosys` (`ODIN3_YOSYS055` block): Yosys 0.55 `read_rtlil F; stat` exits 0 and reports `$lut 1`.
 - OOM sweep over `odin3_lut_params` and over node creation with a 16-input `$lut`.
 
 ## PR 3D-2 — the adapter and the engine ABI
@@ -428,7 +414,7 @@ Acceptance:
   - `CMAKE_C_FLAGS_DEBUG`/`CMAKE_CXX_FLAGS_DEBUG` are `-g -O2`, and `_RELEASE` is `-O2 -DNDEBUG`;
   - `set_property(TARGET libabc-pic APPEND PROPERTY COMPILE_DEFINITIONS ABC_NO_HISTORY)`;
   - neither `odin3_flags` nor the sanitizers reach ABC's targets.
-- `add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)` is linked to `libabc-pic`, with `OUTPUT_NAME abc` and `RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/third_party/abc`. `abc_tool` (ALL) depends on it. Every `ODIN3_ABC=$<TARGET_FILE:abc>` becomes `$<TARGET_FILE:odin3_abc_exe>`, so ABC compiles once per build directory.
+- `add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)`, created **inside** `odin3_add_abc()` next to the flag overrides, so it keeps ABC's GNU C settings, not C17 (finding 19). It is linked to `libabc-pic`, with `OUTPUT_NAME abc` and `RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/third_party/abc`. `abc_tool` (ALL) depends on it. Every `ODIN3_ABC=$<TARGET_FILE:abc>` becomes `$<TARGET_FILE:odin3_abc_exe>`, so ABC compiles once per build directory.
 - `odin3` (the CLI target) gets `ODIN3_HAVE_ABC` when `ODIN3_WITH_ABC` is on, and `ODIN3_ABC_COMMIT_STR="<40 hex>"` goes to the adapter (Task 5).
 
 **Tests:**
@@ -443,7 +429,7 @@ Acceptance:
 - Modify `include/odin3/odin3.h`: before `ODIN3_STATUS_COUNT`, `ODIN3_ERR_ENGINE = 8, /* the ABC engine failed or is unavailable (3D) */`, so the count becomes 9; §4.3's engine section verbatim inside the cdef block; the paragraph of `odin3_abc_engine_register`; and the history line of point (d).
 - Modify `src/api/version.c` (the status string table).
 - Create `src/api/abc.c`, `src/passes/abc/engine.h`, `src/passes/abc/engine.c`, `src/passes/abc/abc_test.h` and `tests/unit/test_abc_engine_abi.c`.
-- Modify `tests/unit/test_abi_core.c` (the count and the string), `tests/tools/test_python_walk.py` (the cdef holds the engine section) and `CMakeLists.txt`.
+- Modify `tests/unit/test_api.c` (line 36's count and the string; finding 14), `tests/tools/test_python_walk.py` (the cdef holds the engine section) and `CMakeLists.txt`.
 
 **Interfaces:**
 - Produces (`odin3.h`): §4.3 exactly: `ODIN3_ABC_ENGINE_VERSION`, `odin3_abc_fail_kind`, `odin3_abc_fail`, `odin3_abc_text_fn`, `odin3_abc_aig`, `odin3_abc_luts`, `odin3_abc_engine`, and `odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);`.
@@ -461,7 +447,7 @@ Acceptance:
 - `abc_commit` in upper case, and one of 39 digits → `odin3_abc_engine_register: engine 'fake': abc_commit '<s>' is not 40 lower-case hex digits`.
 - A valid table → `ODIN3_OK`, and `odin3_abc_engine_get()->name` is `"fake"`. A second valid table → `INVALID_ARG`, `odin3_abc_engine_register: abc engine already registered (fake)`.
 - `odin3_abc_test_set_engine(&dbl)` makes `get` return `&dbl`'s copy; NULL restores `"fake"`.
-- `odin3_status_string(ODIN3_ERR_ENGINE)` is `"ODIN3_ERR_ENGINE"`, and `ODIN3_STATUS_COUNT` is 9 (`test_abi_core`).
+- `odin3_status_string(ODIN3_ERR_ENGINE)` is `"ODIN3_ERR_ENGINE"`, and `ODIN3_STATUS_COUNT` is 9 (`test_api`).
 - `abi_exports` passes (the function is declared and exported). The Python binding loads, `lib.ODIN3_ERR_ENGINE == 8`, and `odin3_abc_engine_register` is in the cdef.
 - `cli_version` still prints `(ABI 4)`.
 
@@ -472,20 +458,19 @@ Acceptance:
 - Modify `CMakeLists.txt`:
   - the target `odin3_abc` (SHARED, `OUTPUT_NAME odin3_abc`, `C_VISIBILITY_PRESET hidden`, `LINKER_LANGUAGE CXX`, linked PRIVATE to `libodin3` and `libabc-pic`, with §4.2's link options verbatim);
   - `bridge.c`'s source property `COMPILE_OPTIONS -Wno-strict-prototypes` and its ABC include directories as `SYSTEM`;
-  - the option `ODIN3_ADAPTER_TRAP` (OFF) of point (a);
   - a test variant `odin3_abc_testlib` (OBJECT) of the same sources with `ODIN3_ABC_TEST_HOOKS=1`, linked into `test_abc_adapter`;
-  - CTests `abc_adapter_exports`, `abc_adapter_no_assert` and `abc_adapter_trap_mode`, and `symbol_rules` with `$<TARGET_FILE:odin3_abc>` added.
-- Modify `tools/check-symbols.sh` (the new mode), `tools/check_rules.py` (two adapter rules), `tools/lint.sh` (`adapters/abc/*.c` in every C check), and `tests/tools/test_check_rules.py`.
-- Create `tests/unit/test_abc_adapter.c` and `tests/unit/test_abc_trap.c`.
+  - CTests `abc_adapter_exports` and `abc_adapter_no_assert`, and `symbol_rules` with `$<TARGET_FILE:odin3_abc>` added.
+- Modify `tools/check-symbols.sh` (the new mode), `tools/check_rules.py` (the `assert(` rule), `tools/lint.sh` (`adapters/abc/*.c` in every C check), and `tests/tools/test_check_rules.py`.
+- Create `tests/unit/test_abc_adapter.c`.
 
 **Interfaces:**
 - `guard.h`:
   - `typedef odin3_status (*odin3_guard_fn)(void *arg);`
   - `odin3_status odin3_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail);` runs `fn(arg)` under `setjmp`, with fds 1 and 2 captured (below). On a session-thread escape it restores the fds first, fills `*fail` with `EXIT` and the code, `ABORT`, or `ASSERT` and `"<file>:<line>: <expr>"` (≤ 255 bytes), disables the engine, and returns `ODIN3_ERR_ENGINE`.
   - `bool odin3_guard_disabled(void);`
-  - Point (a)'s `ODIN3_ADAPTER_ASSERT` and `odin3_status odin3_adapter_assert_fail(const char *file, int line, const char *expr);`
+  - Point (a)'s `ODIN3_ADAPTER_ASSERT` (the clean return only) and `odin3_status odin3_adapter_assert_fail(const char *file, int line, const char *expr);`
   - **Wrapper symbols through asm labels** (point (w)): `bugprone-reserved-identifier` refuses C identifiers that start with `__`. So each wrapper is declared, for example, `_Noreturn void odin3_wrap_exit(int code) __asm__("__wrap_exit");`, and likewise `odin3_wrap__exit` (`__wrap__exit`), `odin3_wrap_abort`, `odin3_wrap_assert_fail` (`__wrap___assert_fail(const char *expr, const char *file, unsigned int line, const char *func)`), `odin3_wrap_system`, `odin3_wrap_popen`, `odin3_wrap_fork`, `odin3_wrap_execv`, `odin3_wrap_execvp` and `odin3_wrap_signal`. The last six return −1, NULL, −1, −1, −1 and `SIG_ERR`, set `errno = EPERM`, and add `ABC tried to <call>; refused` to the session's output.
-  - The escapes on another thread, or with no guard active, write `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the saved original stderr fd, then `__builtin_trap()` (point (a): not the switchable macro).
+  - The escapes on another thread, or with no guard active, write `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the saved original stderr fd, then call `adp_offthread_stop()`, whose body is Peter's answer (point (a)).
 - `session.h`:
   - `typedef struct odin3_capture { FILE *file; int saved_out, saved_err; long read_at; } odin3_capture;`
   - `odin3_status odin3_capture_begin(odin3_capture *cap);` flushes stdout and stderr and `dup2`s fds 1 and 2 onto `cap->file`.
@@ -503,9 +488,7 @@ Acceptance:
   - `check-symbols: <lib> does not export <sym>`;
   - `check-symbols: <lib> imports forbidden <sym>`.
   - Exit 2 on usage errors.
-- `check_rules.py`:
-  - `adapters/abc/<f>:<n>: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)`;
-  - the trap rule allows `__builtin_trap` under `adapters/abc/` only in `guard.h` and `guard.c`.
+- `check_rules.py`: `adapters/abc/<f>:<n>: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)`. The existing trap rule is unchanged until Peter rules (point (a)).
 
 **Tests:**
 - `test_abc_adapter.c` (real ABC; the session cases):
@@ -515,12 +498,11 @@ Acceptance:
 - Escapes, each in its own forked process with `ASAN_OPTIONS=detect_leaks=0`:
   - `o3test_exit 3` → `ENGINE`, `{EXIT, 3}`, fds restored; the next `open` gives `DISABLED`.
   - `o3test_assert` → `{ASSERT, 0, "<file>:<line>: <expr>"}` with a non-empty text.
-  - `o3test_thread_exit` → the child dies by `SIGILL`, and its stderr holds `odin3: linked ABC called exit outside its session thread; stopping`.
-- `adapter_assert_clean` (default arm): the hook `odin3_abc_test_invariant(false)` returns `ODIN3_ERR_ENGINE`, with `fail.kind` = `ASSERT` and a `fail.text` that starts `adapter: adapters/abc/` and ends `: o3test invariant`; the next `open` gives `DISABLED`.
-- CTest `abc_adapter_trap_mode`: `test_abc_trap.c`, compiled with `-DODIN3_ADAPTER_TRAP=1` and including `guard.h`, runs a failing `ODIN3_ADAPTER_ASSERT` in a forked child, which dies by `SIGILL`. This builds and tests Peter's second answer in CI.
+  - `o3test_thread_exit` → its stderr holds `odin3: linked ABC called exit outside its session thread; stopping`, and the child dies by the signal Peter's answer selects (`SIGILL` for the trap, `SIGKILL` otherwise). This case is written once he rules.
+- `adapter_assert_clean`: the hook `odin3_abc_test_invariant(false)` returns `ODIN3_ERR_ENGINE`, with `fail.kind` = `ASSERT` and a `fail.text` that starts `adapter: adapters/abc/` and ends `: o3test invariant`; the next `open` gives `DISABLED`.
 - `abc_adapter_exports`: `check-symbols.sh --only odin3_plugin_init,odin3_abc_adapter_init --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,execv,execvp,signal <libodin3_abc.so>` exits 0. The same command on `libodin3.so` exits 1, with the "not in --only" line.
 - `symbol_rules` with the adapter added is green. `abi_exports` is unchanged and green.
-- `abc_adapter_no_assert`: `check_rules.py adapters/abc/*.c adapters/abc/*.h` exits 0. `test_check_rules.py` gains a fixture with `assert(x)` under `adapters/abc/` (the message), and one with `__builtin_trap()` in `adapters/abc/session.c` (refused).
+- `abc_adapter_no_assert`: `check_rules.py adapters/abc/*.c adapters/abc/*.h` exits 0. `test_check_rules.py` gains a fixture with `assert(x)` under `adapters/abc/` (the message), and one with `__builtin_trap()` under `adapters/abc/` (refused by the existing rule).
 - `lsan.supp` suppresses only ABC functions (`Abc_*`, `Gia_*`, `Cmd_*`, `Extra_*`, `Mem_*`). The review checks that no suppression names an `odin3_`/`adp_` function.
 
 ### Task 6: Bridge calls, test hooks, CLI start-up, `--version`, NOTICE and the licence scan (AB-8, AB-9, AB-16 calls)
@@ -556,7 +538,7 @@ Acceptance:
 - `cli_abc_unavailable_warning`: a test build hook makes registration fail, and the CLI logs the warning and still runs `stats`.
 - Licence: the PR lists every licence header found under `third_party/abc/src`. A licence that cannot be combined stops the PR for Peter.
 
-## PR 3D-3 — run records: SHA-256, pass-run arguments and information, Verilog `$lut`
+## PR 3D-3 — run records: SHA-256, pass-run arguments and information
 
 ### Task 7: SHA-256 (AB-20 identity)
 **Files:** Create `src/util/sha256.h`, `src/util/sha256.c` and `tests/unit/test_sha256.c`; modify `CMakeLists.txt` and `src/util/README.md` (one line).
@@ -600,10 +582,10 @@ Acceptance:
 - `open_run` trims the arguments (leading and trailing blanks) and interns them. Empty arguments give 0.
 
 **Tests (`test_passrun.c`):**
-- A script `read_blif t.blif; stats   ; check -x  ` (with a test pass `check` that accepts `-x`):
+- A script `read_blif t.blif; stats   ; t_args -x  ` (with a test pass `t_args` that accepts `-x`; finding 15):
   - run 1 has args `t.blif`;
   - `stats` has args 0;
-  - `check` has args `-x`;
+  - `t_args` has args `-x`;
   - `odin3_design_get_passrun` returns `""` for the empty args.
 - A reader that opens its own run through `odin3_pass_run_begin` has args 0.
 - Info:
@@ -614,24 +596,7 @@ Acceptance:
 - `odin3_passrun_info_append`: `script` with `lib/abc/vtr.abc` → `script=lib/abc/vtr.abc`. Then `K` with `6` → `script=lib/abc/vtr.abc K=6`. A value `a b"c\d` → `x="a b\"c\\d"`.
 - `compact` keeps every row (name, args and info compare equal before and after).
 - ABI: `get_passrun_count` equals `odin3_passrun_end`. Run 0 and run = count → `INVALID_ARG`. `abi_exports` is green, and the Python cdef has both functions.
-- `vtr_header_abc_runs` (only when 3E-1 has merged; otherwise 3E-1's rebase adds it): a design with two runs named `abc` and info `script=a.abc sha256=<64 hex> abc=<40 hex> K=6 exchange=blif depth=3` (set through a test pass named `abc`) writes, after the `# Odin III …` line, exactly two lines `# abc: script=a.abc …` in run order, and then the blank line.
-
-### Task 9: `$lut` in the Verilog writer (§2, point (q))
-**Waits for 3E-5** (`odin3_blif_isop`).
-
-**Files:** Modify `src/backends/verilog/writer.c` (`BUILTINS` gains `{"$lut", FORM_LUT, NULL, 0}`, and `write_lut`). Create `tests/unit/test_lut_verilog.c`. Modify `CMakeLists.txt` (the unit test, and CTest `lut_verilog_icarus` when `ODIN3_IVERILOG` and `ODIN3_VVP` are found).
-
-**Interfaces:**
-- Consumes: `odin3_lut_table` (Task 2) and `odin3_blif_isop(const uint64_t *tt, uint32_t k, odin3_strbuf *cover, uint32_t *rows, int *constant)` (3E-5).
-- Produces: `write_lut` writes `assign <Y> = <expr>;` in point (q)'s form, with input names in pin order A[0] … A[k−1].
-
-**Tests (`test_lut_verilog.c`):**
-- AND (`WIDTH` 2, `LUT` `4'b1000`, A = {a, b}) → `assign y = a & b;`.
-- NOT (`WIDTH` 1, `LUT` `2'b01`) → `assign y = ~a;` (on-set wins the tie).
-- XOR (`4'b0110`) → two cubes, each in parentheses, joined by ` | `. The test asserts the line matches `^  assign y = \((~?a) & (~?b)\) \| \((~?a) & (~?b)\);$`, and that evaluating the cubes gives the table.
-- NOR on 3 inputs (`8'b00000001`) → whichever of the on-set and off-set cover is shorter. The test checks that an off-set result is written `~(…)`.
-- A constant `WIDTH` 2 all-ones `$lut` → `assign y = 1'b1;`.
-- CTest `lut_verilog_icarus`: the unit test writes `build/<preset>/lut/luts.v` (one module, 16 random `$lut`s per width 1–6, `odin3_prng` seed `0x3D9`) and `luts_tb.v`. The testbench drives all 2^k inputs of each LUT and compares with its table. `iverilog` + `vvp` print `PASS` and exit 0.
+- `vtr_header_abc_runs` (only when 3E-1 has merged; otherwise 3E-1's rebase adds it): a design with two runs named `abc` and info `script=a.abc sha256=<64 hex> abc=<40 hex> K=6 exchange=blif depth=3` (made directly with `odin3_pass_run_begin_args(design, <"abc">, 0, &ctx)` and `odin3_passrun_set_info`, so no test pass collides with the built-in `abc`) writes, after the `# Odin III …` line, exactly two lines `# abc: script=a.abc …` in run order, and then the blank line.
 
 ## PR 3D-4 — the script checker
 
@@ -737,7 +702,7 @@ The rows are §7.5's, and each command name is verified at the pin.
 - With `lut_k` 6 the commands are exactly `strash`, `ifraig -v`, `scorr -v`, `dc2 -v`, `dch -f`, `if -K 6 -v`, `mfs2 -v`, `print_stats`, with source lines 5–12.
 - With `lut_k` 0 → `builtin:lib/abc/vtr.abc:10: the script uses {K} but abc was given no --lut`.
 
-**Tests (adapter, point (p); `test_abc_adapter.c`):**
+**Tests (adapter, point (p); `test_abc_adapter.c`; they land with whichever of 3D-2 and 3D-4 merges second):**
 - `checked_is_what_runs`: for every accepted line in `test_abc_script.c`, every alias expansion and every seed of `tests/fuzz/abc_script_seeds/`, `odin3_abc_test_split(line)` gives exactly the checker's words.
 - `no_files` (I12): a temporary directory holds only a file `6` with 64 bytes of garbage, plus an existing `abc.history` with known bytes. Every allowed command runs with its default options on a 20-AND network (`load_aig`; `&put`; then each command, with `if -K 6` first wherever a command needs a mapped network). Afterwards the directory holds exactly `6` and `abc.history`, both byte-identical, and the `6` was never opened: its content would make any reader fail with an error the session would log, and the log has no such line.
 
@@ -807,12 +772,29 @@ The rows are §7.5's, and each command name is verified at the pin.
 
 ## PR 3D-5 — the `abc` pass on the BLIF exchange (M1 with 3E and 3F)
 
+### Task 9: `$lut` in the Verilog writer (§2, point (q))
+**In PR 3D-5** (finding 12), which already waits for 3E-5 (`odin3_blif_isop`).
+
+**Files:** Modify `src/backends/verilog/writer.c` (`BUILTINS` gains `{"$lut", FORM_LUT, NULL, 0}`, and `write_lut`). Create `tests/unit/test_lut_verilog.c`. Modify `CMakeLists.txt` (the unit test, and CTest `lut_verilog_icarus` when `ODIN3_IVERILOG` and `ODIN3_VVP` are found).
+
+**Interfaces:**
+- Consumes: `odin3_lut_table` (Task 2) and `odin3_blif_isop(const uint64_t *tt, uint32_t k, odin3_strbuf *cover, uint32_t *rows, int *constant)` (3E-5).
+- Produces: `write_lut` writes `assign <Y> = <expr>;` in point (q)'s form, with input names in pin order A[0] … A[k−1].
+
+**Tests (`test_lut_verilog.c`):**
+- AND (`WIDTH` 2, `LUT` `4'b1000`, A = {a, b}) → `assign y = a & b;`.
+- NOT (`WIDTH` 1, `LUT` `2'b01`) → `assign y = ~a;` (on-set wins the tie).
+- XOR (`4'b0110`) → two cubes, each in parentheses, joined by ` | `. The test asserts the line matches `^  assign y = \((~?a) & (~?b)\) \| \((~?a) & (~?b)\);$`, and that evaluating the cubes gives the table.
+- OR3 (`8'b11111110`; finding 16): the off-set has one row against the on-set's three, so → `assign y = ~(~a & ~b & ~c);`.
+- A constant `WIDTH` 2 all-ones `$lut` → `assign y = 1'b1;`.
+- CTest `lut_verilog_icarus`: the unit test writes `build/<preset>/lut/luts.v` (one module, 16 random `$lut`s per width 1–6, `odin3_prng` seed `0x3D9`) and `luts_tb.v`. The testbench drives all 2^k inputs of each LUT and compares with its table. `iverilog` + `vvp` print `PASS` and exit 0.
+
 ### Task 14: Arguments, script precedence, start-up checks, the budget and the pass row (AB-19, AB-20, AB-24, AB-28)
 **Files:**
 - Create `src/passes/abc/args.c`, `src/passes/abc/run.h`, `src/passes/abc/run.c` and `tests/unit/test_abc_args.c`.
 - Create `tests/unit/abc_fake_engine.h` and `.c`: `open`, `close` and an `exec` that records lines. Task 16 completes it.
 - Extend `src/passes/abc/abc.h` (options, the pass) and `abc_test.h` (limits).
-- Modify `src/passes/builtin.c`/`builtin.h` (conflict note 5), `src/passes/budget.c` (point (i)), `tests/unit/test_budget.c` (2E's; one case added), `docs/PASSES.md` (the row, verbatim from §7.1) and `CMakeLists.txt`.
+- Modify `src/passes/builtin.c`/`builtin.h` (conflict note 5), `src/passes/budget.[ch]` (point (i): the cgroup bound, the one message, `odin3_budget_test_set_cgroup_root`), `tests/unit/test_budget.c` (`budget_e6`, `check_and_message`, `limit_default` and a new `limit_cgroup`), `tests/unit/test_proc_pass.c` (2E's budget text), 2F's `budget`/`budget_opt` tests if 2F has merged, `docs/PASSES.md` (the row, verbatim from §7.1) and `CMakeLists.txt`.
 
 **Interfaces:**
 - `abc.h`:
@@ -865,8 +847,8 @@ The rows are §7.5's, and each command name is verified at the pin.
 - **INFO line:** with the default script and `--lut 6` it matches `^abc: script builtin:lib/abc/vtr.abc \(embedded\), sha256 [0-9a-f]{16}…, K=6, exchange blif, ABC [0-9a-f]{12}$`, and the 16 hex digits are the default script's SHA-256 prefix.
 - **Script refused** (`cli_abc_bad_script`'s unit half; Review Focus 4): `--script bad.abc` with line 1 `write_blif x.blif` → `PARSE`, the one line `abc: bad.abc:1: abc command 'write_blif' is not allowed: abc scripts cannot read or write files` (point (x)), the fake engine's `open` count 0, and `write_blif` before equal to after.
 - **Budget:**
-  - `odin3_budget_test_set_limit(4096)` → `abc needs more than <N> bytes (the design's budget is 4096 bytes)`, `PARSE`, `open` count 0.
-  - In `test_budget.c`: a fake root where the scope's `memory.max` is `max` and the parent slice's is `6442450944` → `odin3_budget_limit()` ≤ 6442450944.
+  - `odin3_budget_test_set_limit(4096)` → `abc needs more than <N> bytes (the design's budget is 4096 bytes: the smaller of 60% of physical memory and the cgroup's memory.max)`, `PARSE`, `open` count 0.
+  - `limit_cgroup` (`test_budget.c`): a fake root where the scope's `memory.max` is `max` and the parent slice's is `6442450944` → `odin3_budget_limit()` ≤ 6442450944. `limit_default` with an empty fake root → exactly 60% of physical memory. The 2E/2F text assertions read the new message.
 - The pass is in `odin3_pass_count()`'s list with `wants_ast` false and `processes` `REFUSE`. A design with a `$proc` → `pass 'abc': module 'm' has processes; run proc first`.
 
 ### Task 15: The region: soft, register, constant and cut cells; CIs, COs, domains and loops (AB-10, AB-11, AB-12)
@@ -964,16 +946,7 @@ The rows are §7.5's, and each command name is verified at the pin.
   `<n>` is the net ID of `n`, read by the test. `clk` is not a CI (a clock pin is not a data pin).
 - The same fixture with `INIT` 0 has no `o3d`/`o3r` inverters, and the CO buffer reads `o3q0`. With `INIT` 2 or 3 the latch is sent at 0, with no inverters.
 - `abc0.cmd` with the default script and `--lut 6` is exactly `read "<abs in>"`, the eight commands of Task 11, then `write_hie "<abs in>" "<abs out>"`.
-- Read-back, each crafted `.out.blif` giving `ENGINE` and the exact line `abc: ABC returned a malformed network: <why>` with:
-  - `an unknown output 'o3co9'`;
-  - `a .subckt`;
-  - `a latch with init 1 (all were sent at 0)`;
-  - `a LUT with 17 inputs (at most 16)`;
-  - `a LUT with 5 inputs exceeds --lut 4`;
-  - `2 registers, more than the 1 it was given`;
-  - `register 0 carries no input register's name` (a latch output `foo`);
-  - `3 primary inputs, expected 2`;
-  - `2 outputs, expected 1`.
+- Read-back, each crafted `.out.blif` giving `ENGINE` and the exact line `abc: ABC returned a malformed network: <why>` with: `an unknown output 'o3co9'`; `a .subckt`; `a latch with init 1 (all were sent at 0)`; `a LUT with 17 inputs (at most 16)`; `a LUT with 5 inputs exceeds --lut 4`; `2 registers, more than the 1 it was given`; `register 0 carries no input register's name` (a latch output `foo`); `3 primary inputs, expected 2`; `2 outputs, expected 1`.
 - A one-input `1 1` `.names` becomes a connection, not a LUT.
 - Determinism: two writes of `t1` give identical `.in.blif` and `.cmd` bytes.
 - `test_abc_result.c`:
@@ -996,7 +969,7 @@ The rows are §7.5's, and each command name is verified at the pin.
 - `odin3_status odin3_abc_canonical_const(odin3_abc_run *run, int value, odin3_net_id *out);` gives the lowest-ID net driven by `$_CONST<v>_` or by a constant `$sop` that is not undefined. When there is none, it creates a `$_CONST<v>_` node and its net.
 - `odin3_status odin3_abc_restore(odin3_abc_run *run, odin3_abc_result *res);` handles every result register *j* whose `INIT(k*)` = 1:
   - it flips the table of each new LUT that reads *j*, in that variable;
-  - a CO reading *j* directly gets a NOT `$lut`, and an inverter LUT reading *j* becomes a buffer;
+  - a CO reading *j* directly gets a NOT `$lut`, and a CO reading *j* through an inverter LUT becomes a merge onto *j*'s new net (the inverter cancels; finding 17);
   - a `D` source LUT that feeds only *j* is complemented, and any other `D` source gets a NOT `$lut`;
   - a constant `D` flips.
 
@@ -1018,7 +991,7 @@ The rows are §7.5's, and each command name is verified at the pin.
 - **Folding (3E §4.2 item 1):** `const 0` (the fake) on a LUT read by a `$port_out` → no `$lut` with constant tables exists, and the port net is on the `$_CONST0_` net.
 - **Restore (C1; Review Focus 2):**
   - `restore_flip_reader`: an `INIT` 1 register read by a 2-input LUT → that LUT's table is flipped in variable 0 or 1 as wired, the FF has `INIT` 1, and simulation is equal from reset.
-  - `restore_inverter_to_buffer`: a `$port_out` reading ¬*j* through an inverter LUT → the inverter becomes a merge (no NOT left).
+  - `restore_inverter_to_merge`: a `$port_out` reading ¬*j* through an inverter LUT → a merge, with no NOT left.
   - `restore_shared_d_not`: the `D` source LUT also feeds a port → *j*'s `D` gets a NOT `$lut`.
   - `restore_d_only`: a `D` source that feeds only *j* → its table is complemented, with no new cell.
   - `restore_const_d`: a constant `D` → it flips.
@@ -1078,13 +1051,15 @@ The rows are §7.5's, and each command name is verified at the pin.
   - their outputs become shared primary inputs, and their inputs compared outputs;
   - unequal counts → exit 2 with `equiv-check: --blackbox: model '<m>' has <x> instances in <a> and <y> in <b>`;
   - several clocks stay excluded (`multiclock`, exit 2, as today).
-- `abc-equiv --odin3 O --equiv-check E [--lut K] [--via-blif DIR | --exchange aig|blif] [--vtr] [--keep DIR] [--expect-fail F] [--timeout S] <file or dir>…`:
+- `abc-equiv --odin3 O --equiv-check E [--step abc|equiv|all] [--lut K] [--via-blif DIR | --exchange aig|blif] [--vtr] [--keep DIR] [--expect-fail F] [--timeout S] <file or dir>…`:
   - It collects `.blif` files and sorts them all together by size, smallest first.
   - Per design it runs `O -p "read_techlib lib/vtr.o3lib; read_blif X; write_blif before.blif; abc --lut K [--via-blif D]; write_blif after.blif"` (and `write_blif --vtr after.vtr.blif` with `--vtr`). `--exchange` sets `ODIN3_ABC_EXCHANGE` for that child (point (z)).
   - Then `E --blackbox adder,multiply,single_port_ram,dual_port_ram --timeout S before.blif after.blif`.
   - Then it checks that the sets of `(model, occurrence, formal)` on `unconn` are equal in `before.blif` and `after.blif` (and in `after.vtr.blif`).
   - It prints one line per design, `<design> equivalent|differs|multiclock|timeout|error|unconn-changed <s> s`, and a summary. A listed entry (`<path> <reason>`) passes; an unlisted failure or a listed pass fails.
-  - Exit 0, 1 or 2. Children run as ordinary subprocesses of the heavy scope (no nested `--scope`).
+  - `--step` (ruling I9; default `all`): `abc` runs the `odin3` step only and leaves `before.blif`, `after.blif` (and `after.vtr.blif`) in `--keep DIR`, printing `<design> mapped <s> s`; `equiv` runs `equiv-check` and the `unconn` check on the files already in `--keep DIR` (a missing file is `error`). `--step abc|equiv` without `--keep` is a usage error (exit 2).
+  - A listed `views` entry passes only when `odin3` fails with the views error (point (j)).
+  - Exit 0, 1 or 2. It passes the caller's environment through unchanged; on a path under `~/odin3-ws/golden` it first calls `qor_heavy.require_heavy()` (point (m)). Children run as ordinary subprocesses of the heavy scope (no nested `--scope`).
 
 **Tests:**
 - `test_abc_unconn.c` (3E §14.1 items 2 and 4; Review Focus 1), fake and real engines, BLIF exchange (Task 20 adds the in-memory one):
@@ -1096,20 +1071,20 @@ The rows are §7.5's, and each command name is verified at the pin.
   - `scorr_merge_init1.blif` (two `INIT` 1 latches on equal `D`) → one `$_DFF_P_` with `INIT` 1;
   - `tools/equiv-check --strict-init before after` exits 0 on both.
 - `test_abc_pass.c`:
-  - the fake identity in BLIF mode on every `tests/unit/data/abc/*.blif` and `tests/golden/blif/*.blif` → simulation-equal;
+  - the fake identity in BLIF mode on every `tests/unit/data/abc/*.blif` and `tests/golden/blif/*.blif` not in `tests/abc/equiv_expect_fail.txt` → simulation-equal, and `pow.parmys.blif` → the views error `abc: module 'pow' is not in the netlist view: $pow '<cell>'; run lower first` (ruling I8);
   - the real engine with `--script` `strash; if -K 6` → `equiv-check` exit 0, and a second `abc` on the result is still equivalent;
   - an OOM sweep over the whole pass on `t1`, `derived_clock` and `toggle_init1` → `NO_MEMORY`, no leak, FULL check, simulation-equal;
   - after a pass, the module has no deleted slots (point (y)), and without `--via-blif` no `odin3-abc-*` directory is left under the test's `TMPDIR` (point (l));
   - `$lut` round trip (§13.3 item 1, 3E-5): `write_blif`, `read_blif`, `write_blif` give identical text, and the tables are equal;
   - engine failures through `odin3_abc_fake_fail_on`, each exact: `balance` failing under `resyn2; if -K {K}` → `abc: s.abc:1: command 'balance' failed (from alias 'resyn2')`; `&put` → `abc: internal command '&put' failed`; `EXIT` 3 during `strash` → `abc: ABC called exit(3) during 'strash'; linked ABC is disabled until odin3 restarts`, and likewise `ABC aborted during 'strash'; …` and `ABC assertion failed during 'strash': <text>; …`; `DISABLED` → `abc: linked ABC is disabled by an earlier failure in this process`; `BUSY` → `abc: linked ABC is busy (another session is open)`. Each is `ENGINE`, and the IR stays valid and equivalent;
   - with the real engine and the default script, `print_stats`' output reaches the log at INFO as `abc| <line>`, and `strash`'s at DEBUG.
-- `abc_equiv_micro` (gate; point (j)): `abc-equiv --lut 6` on `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif` → every design `equivalent`, exit 0.
+- `abc_equiv_micro` (gate; point (j)): `abc-equiv --lut 6 --expect-fail tests/abc/equiv_expect_fail.txt` on `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif` → every unlisted design `equivalent`, `pow.parmys.blif` failing as listed (`views`), exit 0.
 - `cli_abc`: `odin3 -p "read_blif t.blif; abc --lut 4; stats"` → exit 0, `stats` lists `$lut`, and the first INFO line is as Task 14's regex.
 - `cli_abc_bad_script` (Review Focus 4): `odin3 -p "read_blif t.blif; abc --script bad.abc --lut 4"` → exit 1, stderr holds `abc: bad.abc:1: abc command 'write_blif' is not allowed: abc scripts cannot read or write files`, and no `x.blif` exists.
 - `cli_abc_script_precedence` (moved here, point (e)): `abc` on a two-gate BLIF with four scripts that differ only in a comment. For every combination of `--script`, `--abc-script` and a project `abc_script`, the logged hash prefix is that of the script AB-20 picks. With `--abc-script` and a project, the replacement info line appears.
 - `abc_unconn_ch_intrinsics` (gate; exit 77 when the golden or 3E-1's `--vtr` is missing): `read_techlib lib/vtr.o3lib; read_blif <ch_intrinsics.parmys.blif>; abc --lut 6; write_blif --vtr W` → every `.subckt single_port_ram` line of `W` has `addr[5]=unconn` … `addr[14]=unconn`, and the set equals the golden's.
 - `test_equiv_check.py`: two netlists with a `multiply` box that differ only in soft logic → 0; a change in what feeds a box input → 1; counts 3 against 2 → 2 and the exact text.
-- `test_abc_equiv.py` (fakes for `odin3` and `equiv-check`): one size order across two directories; the argv of both children exactly; an `unconn` set change → `unconn-changed`; the expect-list rules; the summary line.
+- `test_abc_equiv.py` (fakes for `odin3` and `equiv-check`): one size order across two directories; the argv of both children exactly; an `unconn` set change → `unconn-changed`; the expect-list rules (a `views` entry passes only on the views error); the summary line; `--step abc` runs no `equiv-check` and keeps the files, then `--step equiv` on the same `--keep` runs no `odin3`; `--step equiv` without `--keep` → exit 2; the child environment equals the caller's (no `ODIN3_HEAVY_OK` added); a golden path outside `heavy-run` → exit 2 with `require_heavy`'s message.
 - `fuzz_abc_splice` (fake engine): bytes become a hand-built module (inputs, gates, FFs with `INIT` 0–3, `unconn` readers, a derived clock) plus K and the fake choices (`scorr`, `const <i>`).
   - Invariants (`__builtin_trap()` in `tests/` only): the status is `OK`, or an injected `NO_MEMORY`; the FULL check passes; 64 vectors of 1E simulation are equal; every new object's record reaches a `SOURCE`.
   - `fuzz_abc_splice_smoke`: 2,000 runs, no crash.
@@ -1187,43 +1162,39 @@ The rows are §7.5's, and each command name is verified at the pin.
 - Modify `CMakeLists.txt`:
   - gate CTests `abc_determinism_ci` and `bench_abc_smoke`;
   - the sweeps `abc_determinism_golden` and `bench_abc_set` (point (m));
-  - the `nightly` label on (c) and (d).
-- Modify `src/passes/abc/abc.h` (the calibrated `ODIN3_ABC_BYTES_PER_AIG_OBJ`, only upwards), `.github/workflows/nightly.yml` (commented steps for (c) and (d)) and `docs/PHASE3.md` (the 3D entry and checklist tick).
+  - `bench_abc` as a top-level target like `bench_util` (output `build/release/bench_abc`), linked to `odin3_core` and `odin3_abc`; its `main` calls `odin3_abc_adapter_init()` first (finding 20).
+- Modify `src/passes/abc/abc.h` (the calibrated `ODIN3_ABC_BYTES_PER_AIG_OBJ`, only upwards) and `docs/PHASE3.md` (the 3D entry and checklist tick). No `nightly.yml` edit: 3H's nightly is the runner (point (m)).
 
 **Interfaces:**
-- `abc-determinism --odin3 O [--via-blif] [--mode a|b] <files>`:
+- `abc-determinism --odin3 O [--odin3-debug D] [--via-blif] [--mode a|b|c|d] <files>`:
   - (a) runs the same `read_blif; abc --lut 6 [--via-blif D]; write_blif` in two processes and compares `write_blif` and (BLIF) `abc<r>.in.blif`, `.cmd` and `.out.blif` byte for byte, never `.log` or `--log`;
   - (b) runs A, then B, then a fresh A in one `odin3 -p` script, for the default script and for `strash; fraig; if -K 6`, and compares the two A outputs;
-  - it prints `same` or `differs <file>` per design. Exit 0 when all are the same, else 1.
+  - (c) runs (a)'s first process, sleeps 60 s, runs it again, and compares the two (§13.8 (c));
+  - (d) runs (a)'s command once with `--odin3` (Release, `build/release/odin3`) and once with `--odin3-debug` (Debug, `build/debug/odin3`) and compares `write_blif` (§13.8 (d); both build trees must exist, else exit 2);
+  - it prints `same` or `differs <file>` per design. Exit 0 when all are the same, else 1. It passes the caller's environment through unchanged and, on golden paths, calls `qor_heavy.require_heavy()` first.
 - `bench_abc --one <file.blif> [--lut K] [--via-blif DIR] [--exe ABC]` prints the columns of point (v). `bench_abc_set` runs it on the k6 goldens except `mcml` and `LU32PEEng`, smallest first.
 
 **Tests and runs:**
-- `abc_determinism_ci` (gate; Review Focus 5): (a) and (b) on `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif` → every design `same`.
+- `abc_determinism_ci` (gate; Review Focus 5): (a) and (b) on `tests/golden/blif/*.blif` and `tests/unit/data/abc/*.blif`, less `tests/abc/equiv_expect_fail.txt`'s entries → every design `same`.
 - `bench_abc_smoke`: `--one` on `tests/golden/blif/ff.parmys.blif` prints every column of point (v), the times as numbers.
-- `test_abc_determinism.py` (fakes): the compared files exactly, `.log` never compared, the exit codes.
+- `test_abc_determinism.py` (fakes): the compared files exactly, `.log` never compared, the exit codes; mode (c) sleeps through an injected `sleep`; mode (d) without `--odin3-debug` → exit 2.
+- **Nightly** (ruling I10): (a) on the golden set, (c) and (d) run in 3H's nightly "3D sweeps" step, with `abc-equiv` and `abc-diff` (point (m)).
 - **Controller sweeps**, smallest first, under `tools/heavy-run`:
   - `abc_determinism_golden` (a);
   - `bench_abc_set`. Its per-run table goes verbatim into PHASE3, with VTR's ABC-stage time per design beside it.
-  - The §12 targets, each reported `ok` or `MISSED`:
-    - outside-ABC time ≤ 5% of ABC's (≤ 10 s on `mcml`);
-    - linked against the executable ≤ 1.05× time, with equal LUT, FF and level counts;
-    - the name map ≤ 15%;
-    - `--via-blif` overhead ≤ 25% on `mcml`;
-    - peak RSS ≤ before + 1.2 × the executable's peak + 64 MB;
-    - `open` + `close` ≤ 20 ms;
-    - the checker ≤ 1 ms on 64 KiB.
+  - The §12 targets, each reported `ok` or `MISSED`: outside-ABC time ≤ 5% of ABC's (≤ 10 s on `mcml`); linked against the executable ≤ 1.05× time with equal LUT, FF and level counts; the name map ≤ 15%; `--via-blif` overhead ≤ 25% on `mcml`; peak RSS ≤ before + 1.2 × the executable's peak + 64 MB; `open` + `close` ≤ 20 ms; the checker ≤ 1 ms on 64 KiB.
   - A missed target is investigated and reported with its phase times, never relaxed.
 - **Calibration:** `ODIN3_ABC_BYTES_PER_AIG_OBJ` becomes ⌈1.5 × the worst measured (peak RSS growth ÷ AIG objects)⌉ over the 19, only if that is above 512, in its own commit citing the bench line.
-- **The large designs (§13.9)**, by hand, one per heavy slot, nothing else heavy on the machine. Each command is `ODIN3_HEAVY_OK=1 tools/heavy-run timeout 3h <cmd>`, and `abc-equiv`'s ABC step and its `equiv-check --timeout 7200` step run as two separate slots, so neither exceeds 3 h:
+- **The large designs (§13.9)**, by hand, one per heavy slot, nothing else heavy on the machine. Each command is `ODIN3_HEAVY_OK=1 tools/heavy-run timeout 3h <cmd>`. H1 and H4 are two slots each, `abc-equiv --step abc` and then `--step equiv --timeout 7200` on the same `--keep` (ruling I9), so neither exceeds 3 h:
 
   | Run | After | Command (`<d>` ∈ {`mcml`, `LU32PEEng`}, smallest first) |
   |---|---|---|
-  | H1 | 3D-5 | `tools/abc-check/abc-equiv --via-blif ~/odin3-ws/work/abc-h1/<d> --keep ~/odin3-ws/work/abc-h1/<d> …` (the BLIF side of `abc-diff`, determinism (a) run 1) |
-  | H2 | 3D-5 | `build/release/tests/bench/bench_abc --one <G> --lut 6 --via-blif ~/odin3-ws/work/abc-h2/<d> --exe build/release/third_party/abc/abc` |
-  | H3 | 3D-5 | H1's ABC step again into `abc-h3/<d>`, then `cmp` of `after.blif`, `.in.blif`, `.cmd` and `.out.blif` with H1's |
-  | H4 | 3D-7, before the flip | `abc-equiv --exchange aig …` into `abc-h4/<d>` (the in-memory side of `abc-diff`) |
+  | H1 | 3D-5 | `tools/abc-check/abc-equiv --step abc --via-blif ~/odin3-ws/work/abc-h1/<d>/x --keep ~/odin3-ws/work/abc-h1/<d> …`, then `--step equiv --timeout 7200` with the same `--keep` (the BLIF side of `abc-diff`, determinism (a) run 1) |
+  | H2 | 3D-5 | `build/release/bench_abc --one <G> --lut 6 --via-blif ~/odin3-ws/work/abc-h2/<d> --exe build/release/third_party/abc/abc` |
+  | H3 | 3D-5 | H1's `--step abc` again into `abc-h3/<d>`, then `cmp` of `after.blif`, `.in.blif`, `.cmd` and `.out.blif` with H1's |
+  | H4 | 3D-7, before the flip | `abc-equiv --step abc --exchange aig --keep ~/odin3-ws/work/abc-h4/<d> …`, then `--step equiv --timeout 7200` (the in-memory side of `abc-diff`) |
   | H5 | 3D-7 | `bench_abc --one <G> --lut 6` (in-memory; the executable row reused from H2) |
-  | H6 | 3D-7 | H4's ABC step again, then `cmp` with H4's `after.blif` |
+  | H6 | 3D-7 | H4's `--step abc` again, then `cmp` with H4's `after.blif` |
 
   `--xl` (`odin3-heavyxl.slice`, 9G; `ODIN3_HEAVY_XL_OK=1`; idle machine only) is used only after `bench_abc` has measured more than 6 GB and Peter has seen the figure. A failed slot is repeated only after a fix. Each `~/odin3-ws/work/abc-h*/<d>` directory is removed with one absolute `rm -r` path after its result is recorded.
 - **The PHASE3 entry** records:
@@ -1232,5 +1203,5 @@ The rows are §7.5's, and each command name is verified at the pin.
   - the spike's findings link;
   - M1's status (3H-3's P′ run on the BLIF exchange);
   - points (a)–(z) as agent defaults;
-  - the open item for Peter: `ODIN3_ADAPTER_ASSERT` (point (a); the switch's state);
+  - Peter's ruling on point (a)'s question and what was built from it;
   - the ABI v4 additions, with no bump.

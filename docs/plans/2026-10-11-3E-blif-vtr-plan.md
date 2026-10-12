@@ -1,8 +1,10 @@
-# 3E `write_blif --vtr` — Implementation Plan (v1)
+# 3E `write_blif --vtr` — Implementation Plan (v2)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 v1 is written together with the 3D and 3H plans (`docs/plans/2026-10-11-3D-linked-abc-plan.md`, `docs/plans/2026-10-11-3H-qor-harness-plan.md`). The three share one contract for PR order, heavy runs, `$lut`, the ISOP signature, the run information and the shared files. Where this plan names a 3D or 3H interface, that plan's task owns it.
+
+v2 applies the pre-flight review `3-plans-review` (3E: 0 critical, 0 important, 2 minor; both applied, none rejected) and the controller's shared rulings: I3 (tools pass the caller's environment through unchanged and never set `ODIN3_HEAVY_OK`; point (a)) and I4 (every VPR run goes through `tools/heavy-run`, so Task 11's runs wait for 2E-1). Finding 24 fixes `vtr-read-check`'s default binary (`build/release/odin3`); finding 25 states who rebases `writer.c` between 3E-1 and 3E-5 (conflict note 6).
 
 **Goal:** `write_blif --vtr` writes the design's top module as BLIF that VPR reads with `-start vpr` (O and P′ legs) and that VTR's ABC stage reads with `-start abc` (O′ and R legs). It refuses, with located errors and before any byte is written, every construct VPR would reject or misread. Also in 3E:
 - a VPR-free checker that gives CI the same verdicts;
@@ -109,7 +111,7 @@ Effort cues:
    - Independent lines; keep both.
 4. **`docs/PASSES.md`.** Task 1 rewrites the `write_blif` row (point (q)). 2C-2, 2D, 2E, 2F and 3D-5 (`abc`) add rows. Rows are independent lines.
 5. **The `$lut` registry entry** (`src/ir/cells/lut.c`, `cells/builtin.c`, `cells/cells.h`): 3D-1's. 3E-5 consumes `odin3_cell_lut`, the `WIDTH`/`LUT` parameter names, `ODIN3_LUT_MAX_WIDTH` and the AB-2 bit order. It never assumes `$lut`'s built-in ID: 2E-1 Task 1 also appends eleven cells, and the order of the two merges decides the ID. 3E-5 edits no registry file.
-6. **`src/backends/blif/writer.[ch]`.** 3E-1 (Tasks 1–5), 3E-3 (Task 8) and 3E-5 (Task 9) are serial owners. 3D does not edit them: its exchange writer is `src/passes/abc/xblif.c`.
+6. **`src/backends/blif/writer.[ch]`.** 3E-1 (Tasks 1–5), 3E-3 (Task 8) and 3E-5 (Task 9) own it in turn. 3E-5 may land before or after 3E-1: the second of the two to land rebases the other's `writer.c` hunk, the plain `$lut` branch included, as point (b) already says for the `--vtr` row (finding 25). 3D does not edit them: its exchange writer is `src/passes/abc/xblif.c`.
    - The `# abc:` header loop (point (c)) is added by whichever of 3E-1 and 3D-3 lands second. If that is 3D-3, its implementer edits `vtr.c`'s header function and `test_blif_vtr.c` exactly as point (c) states.
    - 2D Task 4's process refusal at the writer's entry stays first in `odin3_blif_write_with`.
 7. **`src/backends/blif/isop.[ch]`** (Task 9) is consumed by 3D-3 (Verilog `$lut`), 3D-5 (BLIF exchange) and 3D-7 (AIG builder). Its signature is frozen by the shared contract; a change needs all three plans.
@@ -129,10 +131,11 @@ Effort cues:
 **Spec points made exact here** (agent defaults, reversible; Task 11 logs them in PHASE3):
 
 - (a) **Heavy runs go through `tools/heavy-run`** (the standing rule's slice correction). §16.4's `flock … systemd-run --user --scope -p MemoryMax=6G …` predates the slice correction and is not implemented. One implementation, 3H's `qor_heavy` (3H spec §7.1; 3H Task 1's Interfaces), serves both heavy 3E tools:
-  - `vtr-read-check` (Python) calls `qor_heavy.reexec_under_lock(sys.argv[1:])` first. Without `ODIN3_HEAVY=1`, that re-runs the tool through `<repo>/tools/heavy-run env ODIN3_HEAVY=1 …` with `ODIN3_HEAVY_OK=1`: one exclusive lock and the 6G `odin3-heavy.slice`. With `ODIN3_HEAVY=1`, it only calls `verify_scope()`, and a failure exits 2 with its message.
-  - `blif-roundtrip --vtr` on a golden root (bash) does the same in shell. Without `ODIN3_HEAVY=1` it execs `env ODIN3_HEAVY_OK=1 <repo>/tools/heavy-run env ODIN3_HEAVY=1 "$0" "$@"`, which is `qor_heavy.reexec_argv`'s form for a shell script. With it, it first runs `python3 -I <repo>/tools/vtr-qor/qor_heavy.py verify-scope` (3H Task 1) and exits 2 when that fails.
-  - So under `vtr-qor nightly`, which already holds the lock, no second `flock` is taken and nothing deadlocks.
-  - The sweep CTests are registered as `odin3_add_sweep_test(<name> LABEL sweep COMMAND env ODIN3_HEAVY=1 <shim> …)`. heavy-run takes the lock, and the shim must not take it again.
+  - "Inside a heavy run" is `tools/heavy-run`'s own nesting evidence, checked by `qor_heavy.inside_heavy_run()`: `ODIN3_HEAVY_SLICE` is set, the process is in that slice, and the inherited descriptor 9 holds the heavy lock.
+  - `vtr-read-check` (Python) calls `qor_heavy.reexec_under_lock(sys.argv[1:])` first. Inside a heavy run it checks the cap (`verify_scope`) and continues. Outside, it re-runs itself as `<repo>/tools/heavy-run <python> -I <script> …` (one exclusive lock, the 6G `odin3-heavy.slice`) with the caller's environment unchanged, when the caller set `ODIN3_HEAVY_OK=1`; otherwise it exits 2 with `vtr-qor: heavy runs are the controller's: set ODIN3_HEAVY_OK=1` (ruling I3).
+  - `blif-roundtrip --vtr` on a golden root (bash) first runs `python3 -I <repo>/tools/vtr-qor/qor_heavy.py require-heavy` (3H Task 1): exit 0 → it continues; exit 3 (not inside) → it execs `<repo>/tools/heavy-run "$0" "$@"` when `ODIN3_HEAVY_OK=1` is set, else prints the same message and exits 2; exit 2 (inside, cap check failed) → it exits 2.
+  - No 3E tool sets `ODIN3_HEAVY_OK`. The sweep CTests are `odin3_add_sweep_test(<name> LABEL sweep COMMAND <tool> …)`: `heavy-run` takes the lock and the tool finds itself inside.
+  - Under 3H's nightly (one held heavy run), the nightly starts these tools with the lock descriptor (`pass_fds=(9,)`), so they are inside too. No 3E tool starts a nested `heavy-run` without that descriptor.
   - Children (odin3, VPR, netlist-compare) are plain subprocesses inside the scope.
   - Nothing in 3E needs more than 6 GB; `--xl` is never used.
 - (b) **The `--vtr` `$lut` row** (§6) and its normalisation tests go in **whichever of 3E-1 and 3E-5 lands second**. 3E-5 depends on 3D-1 only. It also makes the **plain** writer write `$lut` as `.names` with the ISOP cover; without that, 1C's generic path would write `.subckt $lut`, and 3D §13.3 item 1's round trip would fail.
@@ -726,18 +729,18 @@ Effort cues:
   - a W1 ≠ W2 file fails;
   - an `fe` Parmys file not refused fails;
   - a refused one passes as `refused E1`;
-  - on a golden root, the script re-execs through `heavy-run` when `ODIN3_HEAVY` is unset, and with it runs `qor_heavy.py verify-scope` first (fakes for both, logging their argv).
+  - on a golden root: `require-heavy` exit 3 with `ODIN3_HEAVY_OK=1` → the script execs `heavy-run "$0" …` (fakes for both, logging their argv, and the environment passed unchanged); exit 3 without it → exit 2 and the message; exit 0 → it runs.
 - CTest **`blif_roundtrip_vtr_fixtures`** (label `unit`): `blif-roundtrip --vtr --fixtures tests/golden/blif --techlib lib/vtr.o3lib` → exit 0. Every Parmys sample is idempotent and `netlist-compare`-identical; `dffsre` and `pow` are `refused` (E1b, E5). This is §16.3 step 5 (CI).
 
 ### Task 11: `vtr-read-check`, the k6 sweeps, the report and the PHASE3 entry (VB-17 §16.4–16.6)
 **Files:**
 - Create `tools/vtr-read-check/vtr-read-check` (bash: `exec python3 -I "$(dirname "$0")/vtr_read_check.py" "$@"`), `vtr_read_check.py` (its `main` starts with point (a)'s `reexec_under_lock`) and `tests/tools/test_vtr_read_check.py`.
-- Modify `CMakeLists.txt`: sweep CTests `blif_roundtrip_vtr_k6` and `vtr_read_check_k6`, each through `odin3_add_sweep_test(<name> LABEL sweep COMMAND env ODIN3_HEAVY=1 <shim> …)`, registered only when `VTR_ROOT` and the golden tree exist.
+- Modify `CMakeLists.txt`: sweep CTests `blif_roundtrip_vtr_k6` and `vtr_read_check_k6`, each through `odin3_add_sweep_test(<name> LABEL sweep COMMAND <tool> …)`, registered only when `VTR_ROOT` and the golden tree exist.
 - Modify `pyproject.toml`, `tests/tools/__init__.py`, `docs/ORACLES.md` (`vpr --exit_before_pack on` is the VPR-read oracle) and `docs/PHASE3.md` (the 3E entry, point (v)).
 
 **Interfaces:**
 - `vtr-read-check [--golden-root DIR] [--arch ARCH.xml] [--odin3 PATH] [--checker PATH] [--work DIR] [--report FILE] [--limit N] [--bad-corpus DIR]`:
-  - The defaults: `~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm`, the k6 XML under `$VTR_ROOT`, `build/release/src/cli/odin3`, Task 6's checker, `~/odin3-ws/work/vtr-read-check`, `<work>/report.tsv`.
+  - The defaults: `~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm`, the k6 XML under `$VTR_ROOT`, `build/release/odin3`, Task 6's checker, `~/odin3-ws/work/vtr-read-check`, `<work>/report.tsv`.
   - It collects every `*.blif` whose sibling `.prov` says `status=ok` (923 on 2026-10-11), sorted by size, smallest first.
   - For each, in a fresh `<work>/<n>/`:
     1. `odin3 -p "read_techlib <repo>/lib/vtr.o3lib; read_blif G; write_blif --vtr W"`;
@@ -763,8 +766,8 @@ Effort cues:
   - checker/VPR disagreement on G → `fail`;
   - the report header exact;
   - `--bad-corpus` with a file VPR accepts but the checker rejects → exit 1;
-  - without `ODIN3_HEAVY=1`, `main` re-runs itself through `heavy-run` (a fake logging its argv: `[<repo>/tools/heavy-run, env, ODIN3_HEAVY=1, <python>, -I, <vtr_read_check.py>, …]`);
-  - with `ODIN3_HEAVY=1` and a fake cgroup that fails `verify_scope` → exit 2.
+  - outside a heavy run with `ODIN3_HEAVY_OK=1`, `main` re-runs itself through `heavy-run` (a fake logging its argv `[<repo>/tools/heavy-run, <python>, -I, <vtr_read_check.py>, …]` and an environment equal to the caller's); without the variable → exit 2 and the message;
+  - inside (fake slice, cgroup and descriptor) with a fake cgroup that fails `verify_scope` → exit 2.
 - **Controller sweeps** (deferred by the implementer; run after `tools/build-locked --preset release -j6`, smallest first, one file at a time):
   - `ODIN3_HEAVY_OK=1 ctest --preset sweep -R 'blif_roundtrip_vtr_k6|vtr_read_check_k6'` (before 2D Task 25's preset: `ODIN3_HEAVY_OK=1 ctest --preset release -L '^sweep$' -R '…' -j1`);
   - estimate ≈ 1 h (§16.3) + ≈ 1 h (§16.4); the first run records the real times;
