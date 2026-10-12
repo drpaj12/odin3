@@ -31,7 +31,10 @@ HAND_N1_LINE = 5  # `.names a b n1`
 HAND_SUB_LINE = 18  # `.subckt sub ...` (u_sub)
 # Originals that drive one net from several cells (PHASE1 decision #15): the check after
 # read_blif fails in a Debug library, so these are compared only against a Release library.
-MULTI_DRIVER = {"elsif_both_defined.odin.blif"}
+MULTI_DRIVER = {"elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif"}
+# Negative fixtures that read_blif rejects by design (3E preflight E8: a cover mixing on-set and
+# off-set rows); they test the reader's refusal, not the walk.
+READ_REJECTS = {"neg_e8_mixed.in.blif"}
 
 try:
     import cffi  # noqa: F401
@@ -57,8 +60,8 @@ if TYPE_CHECKING or HAVE_CFFI:
 
 
 def fixtures() -> list[Path]:
-    """Every committed BLIF fixture under tests/, smallest first."""
-    found = sorted((REPO_ROOT / "tests").rglob("*.blif"))
+    """Every committed BLIF fixture under tests/ that read_blif accepts, smallest first."""
+    found = sorted(p for p in (REPO_ROOT / "tests").rglob("*.blif") if p.name not in READ_REJECTS)
     return sorted(found, key=lambda path: (path.stat().st_size, str(path)))
 
 
