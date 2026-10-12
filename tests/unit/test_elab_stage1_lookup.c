@@ -606,7 +606,8 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_UNIT, false},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_UDP_DECL, false},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_CONFIG_DECL, false},
-    {ODIN3_ELAB_STAGE1, ODIN3_AST_INSTANTIATION, true},
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 11 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_GATE_DECL, true},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, true},
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
@@ -902,11 +903,11 @@ static int oom_sweep(odin3_status want) {
 }
 
 static void test_oom(void) {
-    /* Three modules with hierarchy: lookup, the walk, the shells and the pending lines. */
+    /* Three modules with hierarchy (Task 11: specialized and written cleanly). */
     run_one("t.v", "module t;\n  m u ();\nendmodule\nmodule m;\n  l v ();\nendmodule\n"
                    "module l;\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
-    TEST_ASSERT_TRUE(oom_sweep(ODIN3_ERR_PARSE) > 10);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rs.status);
+    TEST_ASSERT_TRUE(oom_sweep(ODIN3_OK) > 10);
     et_free(&rs);
     /* Three clean modules, a given top: the store is written, sealed and handed out. */
     set_cli_top("t");
@@ -932,8 +933,94 @@ static void test_oom_libraries(void) {
                                "file verilog l3.v library lib3\n"};
     et_req req = {srcs, 3, "read_project p.o3proj", &proj, NULL};
     et_stage1(&req, &rs);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status); /* the pending INSTANTIATION */
-    TEST_ASSERT_TRUE(oom_sweep(ODIN3_ERR_PARSE) > 10);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rs.status); /* Task 11: the instance is written */
+    TEST_ASSERT_TRUE(oom_sweep(ODIN3_OK) > 10);
+}
+
+/* --- Task 10 review carries (n2, n3) ------------------------------------------------------ */
+
+/* n2: a kind that is neither pending nor handled is a 2D bug (the I3 path): its line and CHECK. */
+static void test_unhandled_kind(void) {
+    run_one("t.v", "module t;\nendmodule\n");
+    odin3_elab1 *e1 = context();
+    odin3_ast_id module = odin3_ast_child(rs.parsed, odin3_ast_root(rs.parsed, 0), 0);
+    TEST_ASSERT_FALSE(odin3_elab_pending(ODIN3_ELAB_STAGE1, ODIN3_AST_MODULE));
+    odin3_elab1_not_yet(e1, module);
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:1:1: error: stage 1: no elaboration of 'MODULE' (a 2D bug)");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_elab1_status(e1));
+    odin3_elab1_destroy(e1);
+}
+
+/* n2: a black box's body is never walked: its instance of an undefined module is not reported,
+ * and the instance of the black box is written as given (Task 11). */
+static void test_blackbox_body_unwalked(void) {
+    run_one("t.v", "module t;\n  bb x ();\nendmodule\n(* blackbox *)\nmodule bb;\n  foo y ();\n"
+                   "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_ERROR, "unresolved_module"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rs.dump.data, "(INSTANTIATION:bb @t.v:2:3"), rs.dump.data);
+    TEST_ASSERT_NULL(strstr(rs.dump.data, "(MODULE:bb"));
+}
+
+/* Arms an allocation failure once, as stage 2 starts (the on_body_start hook). */
+typedef struct arm_at {
+    long after;
+    bool armed;
+} arm_at;
+
+static void arm_failure(void *user, odin3_ast_id module) {
+    arm_at *arm = user;
+    (void)module;
+    if (!arm->armed) {
+        arm->armed = true;
+        odin3_util_set_alloc_fail_after(arm->after);
+    }
+}
+
+/* A design under --keep-ast all holding 7 stores (a --parse-only read, then three reads), so the
+ * next read's elaborated store is the 9th: handing it over grows the design's store list. */
+static void seven_stores(void) {
+    et_src src = {"e.v", "module e;\nendmodule\n"};
+    et_req req = {&src, 1, NULL, NULL, NULL};
+    et_setup(&req, &rs);
+    odin3_log_set_sink(quiet_sink, NULL); /* the sink must not take the failure */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, ODIN3_KEEP_AST_ALL));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("--parse-only e.v")));
+    for (int i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                              odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v")));
+    }
+    TEST_ASSERT_EQUAL_UINT32(7, odin3_design_ast_count(rs.design));
+}
+
+/* n3 (m6): out of memory while the elaborated store is handed to the design wins over stage 2's
+ * PARSE. Each allocation after stage 2 starts fails in turn until the store is held; while it is
+ * not, the read must say NO_MEMORY. */
+static void test_oom_hand_over(void) {
+    int missed = 0;
+    bool held = false;
+    for (long after = 0; after < OOM_SETTLE && !held; after++) {
+        seven_stores();
+        arm_at arm = {after, false};
+        odin3_elab_test_hooks hooks = {0, arm_failure, &arm};
+        odin3_elab_test_set_hooks(&hooks);
+        odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
+        odin3_util_set_alloc_fail_after(-1);
+        odin3_elab_test_set_hooks(NULL);
+        held = odin3_design_ast_count(rs.design) == 9;
+        if (!held) {
+            TEST_ASSERT_EQUAL_UINT32(8, odin3_design_ast_count(rs.design));
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            missed++;
+        } else {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st); /* the stage-2 stub */
+        }
+        et_free(&rs);
+    }
+    TEST_ASSERT_TRUE(held);
+    TEST_ASSERT_TRUE(missed > 0);
 }
 
 int main(void) {
@@ -992,5 +1079,8 @@ int main(void) {
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom);
     RUN_TEST(test_oom_libraries);
+    RUN_TEST(test_unhandled_kind);
+    RUN_TEST(test_blackbox_body_unwalked);
+    RUN_TEST(test_oom_hand_over);
     return UNITY_END();
 }

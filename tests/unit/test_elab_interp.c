@@ -385,7 +385,7 @@ static void expect_error(const char *where, const char *msg) {
 
 /* Caps to lower (0 keeps the default). */
 typedef struct caps {
-    uint32_t steps, loops, depth;
+    uint32_t steps, loops, depth, reentry;
 } caps;
 
 static void lower(caps wish) {
@@ -393,6 +393,7 @@ static void lower(caps wish) {
     lim.max_eval_steps = wish.steps != 0 ? wish.steps : lim.max_eval_steps;
     lim.max_loop_iterations = wish.loops != 0 ? wish.loops : lim.max_loop_iterations;
     lim.max_call_depth = wish.depth != 0 ? wish.depth : lim.max_call_depth;
+    lim.max_reentry_depth = wish.reentry != 0 ? wish.reentry : lim.max_reentry_depth;
     odin3_elab_test_set_limits(&lim);
 }
 
@@ -858,11 +859,14 @@ static void test_call_nesting(void) {
     expect_error(at("d(n - 1)", 1), "constant function recursion deeper than 8 in 'd'");
 }
 
+/* 2D Task 11: each level of d nests one run in C (the count) beside its frame, so the C re-entry
+ * cap (256) stops it before the call-depth cap (1024) would: 512 frames and nestings. */
 static void test_call_nesting_default_cap(void) {
-    parse(NEST_SRC); /* 512 C levels (a frame and a nesting each), under ASan: no overflow */
+    parse(NEST_SRC);
     odin3_cval val = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("D", &val));
-    expect_error(at("d(n - 1)", 1), "constant function recursion deeper than 1024 in 'd'");
+    expect_error(at("d(n - 1) >=", 1),
+                 "constant evaluation of replication count nested deeper than 256");
 }
 
 static void test_strings(void) {
@@ -1486,7 +1490,7 @@ static void test_work_budget(void) {
 }
 
 /* Finding 3: a return range calling its own function nests in C through the typer alone (no
- * frame): 1024 levels at the default cap, about 2.5 KiB each under ASan. */
+ * frame): stopped by the C re-entry cap (256 levels, 2D Task 11), about 2.5 KiB each under ASan. */
 static void test_return_range_chain(void) {
     parse("module m;\n"
           "  function [f(1):0] f(input integer n); f = n; endfunction\n"
@@ -1494,7 +1498,7 @@ static void test_return_range_chain(void) {
           "endmodule\n");
     odin3_cval val = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P", &val));
-    expect_error(at("[f(1):0]", 1), "constant function recursion deeper than 1024 in 'f'");
+    expect_error(at("[f(1):0]", 1), "constant evaluation of range bound nested deeper than 256");
 }
 
 /* Finding 6: IEEE 1364-2005 §9.5.1: z (casez) or x and z (casex) on either side match. */
@@ -1607,21 +1611,36 @@ static const char *chain_source(int links) {
 }
 
 /* Finding 1: each link of a lazily evaluated parameter chain re-enters the evaluator from the
- * host's lookup (about 4 KiB of C stack under ASan); a chain within the call-depth cap works. */
+ * host's lookup (about 4 KiB of C stack under ASan); a chain at the C re-entry cap works: P256 is
+ * evaluated 256 levels deep (2D Task 11). */
 static void test_parameter_chain(void) {
-    parse(chain_source(1000));
-    TEST_ASSERT_EQUAL_INT64(1000, param_int("P0"));
+    parse(chain_source(256));
+    TEST_ASSERT_EQUAL_INT64(256, param_int("P0"));
     TEST_ASSERT_EQUAL_INT(0, errors_logged);
 }
 
-/* Finding 1: the re-entries count against the call-depth cap, so a 2000-link chain (a stack
- * overflow under ASan before) is a located error at the 1025th nested evaluation. */
+/* Finding 1 and 2D Task 11: the re-entries stop at the C re-entry cap (256), so a 2000-link chain
+ * (a stack overflow under ASan before) is a located error at the 257th nested evaluation. */
 static void test_parameter_chain_cap(void) {
     parse(chain_source(2000));
     odin3_cval val = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P0", &val));
-    expect_error(at("P1026 + 1", 1),
-                 "constant evaluation of parameter 'P1025' nested deeper than 1024");
+    expect_error(at("P258 + 1", 1),
+                 "constant evaluation of parameter 'P257' nested deeper than 256");
+}
+
+/* 2D Task 11: one past the cap (257 links), and a lowered cap: the C nestings are counted alone
+ * (the call-depth cap stays 1024), each kind of nesting with its own <what>. */
+static void test_reentry_cap(void) {
+    parse(chain_source(257));
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P0", &val));
+    expect_error(at("0;", 1), "constant evaluation of parameter 'P257' nested deeper than 256");
+    errors_logged = 0;
+    lower((caps){.reentry = 4});
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P0", &val));
+    expect_error(at("P6 + 1", 1), "constant evaluation of parameter 'P5' nested deeper than 4");
+    TEST_ASSERT_EQUAL_UINT32(1024, odin3_elab_limits_get()->max_call_depth);
 }
 
 /* Finding 4: a host answer whose type disagrees with its value or range is a host bug. */
@@ -1705,6 +1724,7 @@ static void test_lvalue_index_cap(void) {
 static void run_final_review(void) {
     RUN_TEST(test_parameter_chain);
     RUN_TEST(test_parameter_chain_cap);
+    RUN_TEST(test_reentry_cap);
     RUN_TEST(test_host_symbol_checks);
     RUN_TEST(test_byte_budget_wide_expression);
     RUN_TEST(test_lvalue_index_cap);

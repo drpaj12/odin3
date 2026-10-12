@@ -1,7 +1,6 @@
 /*
  * elab1.c — stage 1's run context and diagnostics (elab1.h), EL-2's entry odin3_elab_run
- * (elab.h) with its step 1 (the options), odin3_elab_stage1 (frontends/elab/elab.h) and, until
- * Task 11's elab1_write.c, the writer of the UNIT and its MODULE shells.
+ * (elab.h) with its step 1 (the options) and odin3_elab_stage1 (frontends/elab/elab.h).
  */
 #include "frontends/verilog/elab1.h"
 
@@ -19,8 +18,10 @@
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 #include "util/alloc.h"
+#include "util/arena.h"
 #include "util/hash.h"
 #include "util/log.h"
+#include "util/str.h"
 #include "util/u64map.h"
 #include "util/vec.h"
 
@@ -82,14 +83,79 @@ static bool error_slot(odin3_elab1 *e1, odin3_loc loc) {
     return false;
 }
 
-void odin3_elab1_error(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) {
-    if (!error_slot(e1, loc)) {
+/* True when (level, loc, text) was logged before; otherwise it is recorded (out of memory latches
+ * NO_MEMORY and lets it through). Hash collisions only let a repeat through, never drop a line. */
+static bool said_before(odin3_elab1 *e1, odin3_log_level level, odin3_loc loc, const char *text) {
+    uint64_t key = odin3_hash_combine(odin3_hash_bytes(odin3_bytes_cstr(text), ODIN3_HASH_SEED),
+                                      (uint64_t)level << E1_KEY_SHIFT | loc.v);
+    uint64_t at = 0;
+    if (odin3_u64map_get(e1->said, key, &at)) {
+        const odin3_elab1_said *old = odin3_vec_cat(&e1->said_texts, (size_t)at - 1);
+        return old->level == (uint8_t)level && old->loc.v == loc.v && strcmp(old->text, text) == 0;
+    }
+    char *copy = odin3_arena_strndup(e1->arena, text, strlen(text));
+    odin3_elab1_said *slot = copy != NULL ? odin3_vec_push(&e1->said_texts) : NULL;
+    odin3_status st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    if (slot != NULL) {
+        *slot = (odin3_elab1_said){(uint8_t)level, loc, copy};
+        st = odin3_u64map_put(e1->said, (odin3_kv){key, e1->said_texts.len});
+        if (st != ODIN3_OK) {
+            odin3_vec_pop(&e1->said_texts);
+        }
+    }
+    e1->fatal = e1->fatal != ODIN3_OK || st == ODIN3_OK ? e1->fatal : st;
+    return false;
+}
+
+/* One message's text at loc (unlocated when 0). */
+static void emit_text(odin3_elab1 *e1, odin3_log_level level, odin3_loc loc, const char *text) {
+    if (loc.v != 0) {
+        odin3_diag(e1->design, level, loc, "%s", text);
+    } else {
+        odin3_log(level, "%s", text);
+    }
+}
+
+/* An error's text, once: counted against the cap (the stop line at the cap). */
+static void error_text(odin3_elab1 *e1, odin3_loc loc, const char *text) {
+    if (e1->stopped || said_before(e1, ODIN3_LOG_ERROR, loc, text) || !error_slot(e1, loc)) {
         return;
     }
+    emit_text(e1, ODIN3_LOG_ERROR, loc, text);
+}
+
+static void verror(odin3_elab1 *e1, odin3_loc loc, const char *fmt, va_list args)
+    ODIN3_PRINTF(3, 0);
+
+static void verror(odin3_elab1 *e1, odin3_loc loc, const char *fmt, va_list args) {
+    char text[ODIN3_LOG_BUF];
+    if (vsnprintf(text, sizeof text, fmt, args) < 0) {
+        text[0] = '\0';
+    }
+    error_text(e1, loc, text);
+}
+
+void odin3_elab1_error(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    emit(e1, ODIN3_LOG_ERROR, loc, fmt, args);
+    verror(e1, loc, fmt, args);
     va_end(args);
+}
+
+void odin3_elab1_fatal(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    verror(e1, loc, fmt, args);
+    va_end(args);
+    e1->stopped = true;
+}
+
+void odin3_elab1_report(odin3_elab1 *e1, odin3_log_level level, odin3_loc loc, const char *msg) {
+    if (level == ODIN3_LOG_ERROR) {
+        error_text(e1, loc, msg);
+    } else if (!said_before(e1, level, loc, msg)) {
+        emit_text(e1, level, loc, msg);
+    }
 }
 
 /* The index of format fmt among the run's warning formats (point (v)), registered on first use;
@@ -147,19 +213,32 @@ odin3_status odin3_elab1_status(const odin3_elab1 *e1) {
     return e1->fatal;
 }
 
+void odin3_elab1_pend_at(odin3_elab1 *e1, odin3_loc loc, uint32_t kind) {
+    if (kind >= ODIN3_PEND_END || e1->pend_seen[kind] || e1->stopped) {
+        return;
+    }
+    if (error_slot(e1, loc)) {
+        odin3_elab_pend_report(e1->design, loc, kind, e1->pend_seen);
+    }
+}
+
+/* Point (l)'s line for parsed_node's kind, once per kind per run, counted as an error. */
+static void report_pending(odin3_elab1 *e1, odin3_ast_id parsed_node) {
+    odin3_elab1_pend_at(e1, odin3_ast_loc(e1->parsed, parsed_node),
+                        (uint32_t)odin3_ast_kind_of(e1->parsed, parsed_node));
+}
+
 bool odin3_elab1_pending(odin3_elab1 *e1, odin3_ast_id parsed_node) {
     uint32_t kind = (uint32_t)odin3_ast_kind_of(e1->parsed, parsed_node);
     if (!odin3_elab_pending(ODIN3_ELAB_STAGE1, kind)) {
         return false;
     }
-    if (e1->pend_seen[kind]) {
-        return true;
-    }
-    odin3_loc loc = odin3_ast_loc(e1->parsed, parsed_node);
-    if (error_slot(e1, loc)) {
-        odin3_elab_pend_report(e1->design, loc, kind, e1->pend_seen);
-    }
+    report_pending(e1, parsed_node);
     return true;
+}
+
+void odin3_elab1_pend_form(odin3_elab1 *e1, odin3_ast_id parsed_node) {
+    report_pending(e1, parsed_node);
 }
 
 void odin3_elab1_unhandled(odin3_elab1 *e1, odin3_ast_id parsed_node) {
@@ -206,8 +285,28 @@ static void init_containers(odin3_elab1 *e1) {
     odin3_vec_init(&e1->params, sizeof(odin3_ast_id));
     odin3_vec_init(&e1->ports, sizeof(odin3_ast_id));
     odin3_vec_init(&e1->insts, sizeof(odin3_ast_id));
-    odin3_vec_init(&e1->order, sizeof(uint32_t));
     odin3_vec_init(&e1->warn_fmts, sizeof(const char *));
+    odin3_vec_init(&e1->said_texts, sizeof(odin3_elab1_said));
+    odin3_vec_init(&e1->specs, sizeof(odin3_elab1_spec));
+    odin3_vec_init(&e1->log, sizeof(odin3_elab_decision));
+    odin3_vec_init(&e1->edges, sizeof(odin3_elab1_edge));
+    odin3_vec_init(&e1->frames, sizeof(odin3_elab1_frame));
+}
+
+/* The maps and arenas; false when one could not be made. */
+static bool make_tables(odin3_elab1 *e1) {
+    e1->by_name = odin3_u64map_create(0);
+    e1->instantiated = odin3_u64map_create(0);
+    e1->noted = odin3_u64map_create(0);
+    e1->warned = odin3_u64map_create(0);
+    e1->said = odin3_u64map_create(0);
+    e1->spec_hash = odin3_u64map_create(0);
+    e1->spec_names = odin3_u64map_create(0);
+    e1->arena = odin3_arena_create(0);
+    e1->scratch = odin3_arena_create(0);
+    return e1->by_name != NULL && e1->instantiated != NULL && e1->noted != NULL &&
+           e1->warned != NULL && e1->said != NULL && e1->spec_hash != NULL &&
+           e1->spec_names != NULL && e1->arena != NULL && e1->scratch != NULL;
 }
 
 odin3_status odin3_elab1_create(odin3_pass_ctx *ctx, odin3_ast *parsed, const odin3_elab_opts *opts,
@@ -230,15 +329,7 @@ odin3_status odin3_elab1_create(odin3_pass_ctx *ctx, odin3_ast *parsed, const od
     e1->limits = odin3_elab_limits_get();
     e1->fatal = ODIN3_OK;
     init_containers(e1);
-    e1->by_name = odin3_u64map_create(0);
-    e1->instantiated = odin3_u64map_create(0);
-    e1->noted = odin3_u64map_create(0);
-    e1->warned = odin3_u64map_create(0);
-    odin3_status st = ODIN3_OK;
-    if (e1->by_name == NULL || e1->instantiated == NULL || e1->noted == NULL ||
-        e1->warned == NULL) {
-        st = ODIN3_ERR_NO_MEMORY;
-    }
+    odin3_status st = make_tables(e1) ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     st = st != ODIN3_OK ? st : odin3_design_intern(e1->design, odin3_bytes_cstr(k_work), &e1->work);
     if (st != ODIN3_OK) {
         odin3_elab1_destroy(e1);
@@ -252,137 +343,33 @@ void odin3_elab1_destroy(odin3_elab1 *e1) {
     if (e1 == NULL) {
         return;
     }
+    odin3_elab1_env_destroy(e1->env);
     odin3_ast_destroy(e1->elab);
     odin3_vec_free(&e1->defs);
     odin3_vec_free(&e1->defx);
     odin3_vec_free(&e1->params);
     odin3_vec_free(&e1->ports);
     odin3_vec_free(&e1->insts);
-    odin3_vec_free(&e1->order);
     odin3_vec_free(&e1->warn_fmts);
+    odin3_vec_free(&e1->said_texts);
+    odin3_vec_free(&e1->specs);
+    odin3_vec_free(&e1->log);
+    odin3_vec_free(&e1->edges);
+    odin3_vec_free(&e1->frames);
     odin3_u64map_destroy(e1->by_name);
     odin3_u64map_destroy(e1->instantiated);
     odin3_u64map_destroy(e1->noted);
     odin3_u64map_destroy(e1->warned);
+    odin3_u64map_destroy(e1->said);
+    odin3_u64map_destroy(e1->spec_hash);
+    odin3_u64map_destroy(e1->spec_names);
+    odin3_arena_destroy(e1->arena);
+    odin3_arena_destroy(e1->scratch);
     odin3_util_free(e1);
 }
 
-/* --- Task 10's pass W: the UNIT and its MODULE shells --------------------------------------- */
-
-/* A node of kind made in the elaborated store with parsed node from's range and name. */
-static odin3_ast_spec spec_from(const odin3_elab1 *e1, uint32_t kind, odin3_ast_id from) {
-    return (odin3_ast_spec){.kind = (uint8_t)kind,
-                            .loc = odin3_ast_loc(e1->parsed, from).v,
-                            .end = odin3_ast_end(e1->parsed, from).v};
-}
-
-/* Every entry of a parsed list (a slot LIST's entries or a module's items): no kind inside a
- * module has landed in stage 1 yet (Task 11 writes the first), so each is pending. */
-static void pend_span(odin3_elab1 *e1, odin3_ast_span span) {
-    for (uint32_t i = 0; i < span.n && !e1->stopped && e1->fatal == ODIN3_OK; i++) {
-        if (span.ids[i].v != 0) {
-            odin3_elab1_not_yet(e1, span.ids[i]);
-        }
-    }
-}
-
-/* A slot LIST of the elaborated MODULE: present when the parsed slot is (ports) and holds the
- * entries written (none yet); the parsed entries are reported. *out is 0 when absent. */
-static odin3_status write_slot(odin3_elab1 *e1, odin3_ast_id parsed_list, bool keep_empty,
-                               odin3_ast_id *out) {
-    *out = (odin3_ast_id){0};
-    if (parsed_list.v == 0) {
-        return ODIN3_OK;
-    }
-    pend_span(e1, odin3_ast_children(e1->parsed, parsed_list));
-    if (!keep_empty) {
-        return ODIN3_OK;
-    }
-    odin3_ast_spec spec = spec_from(e1, ODIN3_AST_LIST, parsed_list);
-    return odin3_ast_make(e1->elab, &spec, NULL, 0, out);
-}
-
-enum { E1_SLOT_PARAMS = 0, E1_SLOT_PORTS = 1, E1_MODULE_SLOTS = 2 };
-
-/* One MODULE shell of definition def (name, range, the ports LIST); its contents reported. */
-static odin3_status write_module(odin3_elab1 *e1, const odin3_elab_def *def, odin3_ast_id *out) {
-    odin3_ast_id node = def->node;
-    pend_span(e1, odin3_ast_attrs(e1->parsed, node));
-    odin3_ast_id slots[E1_MODULE_SLOTS] = {{0}, {0}};
-    odin3_ast_id params = odin3_ast_child(e1->parsed, node, E1_SLOT_PARAMS);
-    odin3_ast_id ports = odin3_ast_child(e1->parsed, node, E1_SLOT_PORTS);
-    odin3_status st = write_slot(e1, params, false, &slots[E1_SLOT_PARAMS]);
-    st = st != ODIN3_OK ? st : write_slot(e1, ports, true, &slots[E1_SLOT_PORTS]);
-    odin3_ast_span kids = odin3_ast_children(e1->parsed, node);
-    if (kids.n > E1_MODULE_SLOTS) {
-        pend_span(e1, (odin3_ast_span){kids.ids + E1_MODULE_SLOTS, kids.n - E1_MODULE_SLOTS});
-    }
-    odin3_ast_spec spec = spec_from(e1, ODIN3_AST_MODULE, node);
-    spec.name = def->name;
-    return st != ODIN3_OK ? st : odin3_ast_make(e1->elab, &spec, slots, E1_MODULE_SLOTS, out);
-}
-
-/* The directives of the design UNITs (default_nettype, timescale, …): none has landed. */
-static void pend_unit_directives(odin3_elab1 *e1) {
-    uint32_t from = odin3_ast_library_units_from(e1->parsed);
-    uint32_t units = from != 0 ? from : odin3_ast_root_count(e1->parsed);
-    for (uint32_t idx = 0; idx < units && !e1->stopped; idx++) {
-        odin3_ast_span kids = odin3_ast_children(e1->parsed, odin3_ast_root(e1->parsed, idx));
-        for (uint32_t i = 0; i < kids.n && !e1->stopped; i++) {
-            if (odin3_ast_kind_of(e1->parsed, kids.ids[i]) == ODIN3_AST_DIRECTIVE) {
-                odin3_elab1_not_yet(e1, kids.ids[i]);
-            }
-        }
-    }
-}
-
-/* The MODULEs in order on the store's pending stack (above mark). */
-static odin3_status push_modules(odin3_elab1 *e1) {
-    odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < e1->order.len; i++) {
-        uint32_t idx = *(const uint32_t *)odin3_vec_cat(&e1->order, i);
-        const odin3_elab_def *def = odin3_elab1_def(e1, idx);
-        const odin3_elab1_defx *ext = odin3_vec_cat(&e1->defx, idx);
-        if (def->kind != ODIN3_DEF_MODULE || ext->taken != ODIN3_TAKEN_NONE) {
-            continue; /* a black box becomes a cell type (EL-11); a taken name failed (EL-44) */
-        }
-        if (odin3_elab1_pending(e1, def->node)) {
-            continue;
-        }
-        odin3_ast_id module = {0};
-        st = write_module(e1, def, &module);
-        st = st != ODIN3_OK ? st : odin3_ast_push(e1->elab, module);
-    }
-    return st;
-}
-
-odin3_status odin3_elab1_write_unit(odin3_elab1 *e1, odin3_ast **out) {
-    *out = NULL;
-    if (e1->order.len == 0) {
-        return ODIN3_OK;
-    }
-    odin3_status st =
-        odin3_ast_create(e1->design, ODIN3_AST_FORM_ELABORATED, e1->ctx->run, &e1->elab);
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    pend_unit_directives(e1);
-    uint32_t mark = odin3_ast_mark(e1->elab);
-    st = push_modules(e1);
-    const odin3_elab_def *top =
-        odin3_elab1_def(e1, *(const uint32_t *)odin3_vec_cat(&e1->order, 0));
-    odin3_ast_spec spec = spec_from(e1, ODIN3_AST_UNIT, top->node);
-    spec.name = top->name;
-    odin3_ast_id unit = {0};
-    st = st != ODIN3_OK ? st : odin3_ast_make_marked(e1->elab, &spec, mark, &unit);
-    if (st != ODIN3_OK) {
-        odin3_ast_destroy(e1->elab);
-        e1->elab = NULL;
-        return st;
-    }
-    *out = e1->elab;
-    e1->elab = NULL;
-    return ODIN3_OK;
+const char *odin3_elab1_str(const odin3_elab1 *e1, uint32_t id) {
+    return odin3_strtab_get(odin3_design_strtab(e1->design), id);
 }
 
 /* --- odin3_elab_stage1 ----------------------------------------------------------------------- */
@@ -401,7 +388,7 @@ static bool stage1_args_ok(const odin3_pass_ctx *ctx, const odin3_ast *parsed,
     return true;
 }
 
-/* The steps after the context exists: definitions, the top, reachability, the shells. */
+/* The steps after the context exists: definitions, the top, the specialization queue (§3.4). */
 static odin3_status stage1_steps(odin3_elab1 *e1, odin3_ast **elab) {
     odin3_status st = odin3_elab1_collect_defs(e1);
     uint32_t top = 0;
@@ -412,12 +399,14 @@ static odin3_status stage1_steps(odin3_elab1 *e1, odin3_ast **elab) {
         }
     }
     if (st == ODIN3_OK && !e1->stopped) {
-        st = odin3_elab1_reach(e1, top);
+        st = odin3_elab1_run_queue(e1, top);
     }
-    if (st == ODIN3_OK && !e1->stopped) {
-        st = odin3_elab1_write_unit(e1, elab);
+    st = st != ODIN3_OK ? st : e1->fatal;
+    if (st == ODIN3_OK && e1->errors == 0 && !e1->stopped) {
+        *elab = e1->elab; /* the UNIT is made: the store is the caller's */
+        e1->elab = NULL;
     }
-    return st != ODIN3_OK ? st : e1->fatal;
+    return st;
 }
 
 odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odin3_elab_opts *opts,

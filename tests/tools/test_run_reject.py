@@ -24,7 +24,8 @@ import json, os, re, signal, sys
 args = sys.argv[1:]
 name = re.search(r"(\\w+)\\.v", " ".join(args)).group(1)
 with open(name + ".argv", "w") as out:
-    json.dump({{"args": args, "cwd": os.getcwd()}}, out)
+    json.dump({{"args": args, "cwd": os.getcwd(),
+               "asan": os.environ.get("ASAN_OPTIONS")}}, out)
 lines = open(name + ".fake").read().split("\\n", 1)
 sys.stdout.write(lines[1] if len(lines) > 1 else "")
 sys.stdout.flush()
@@ -74,6 +75,25 @@ class RunRejectTest(unittest.TestCase):
         record = json.loads((self.cases / "c.argv").read_text())
         self.assertEqual(record["args"], ["--parse-only", "c.v"])
         self.assertEqual(os.path.realpath(record["cwd"]), os.path.realpath(self.cases))
+
+    def test_sanitizer_reports_are_not_symbolized(self) -> None:
+        """2D Task 10 review n1: a case runs with ASAN_OPTIONS symbolize=0 (others kept)."""
+        self.case("c", "c.v:3:5: error:\nboom\n", 1, "odin3: error: c.v:3:5: error: boom\n")
+        saved = os.environ.get("ASAN_OPTIONS")
+        try:
+            os.environ.pop("ASAN_OPTIONS", None)
+            self.assertEqual(self.run_tool()[0], 0)
+            record = json.loads((self.cases / "c.argv").read_text())
+            self.assertEqual(record["asan"], "symbolize=0")
+            os.environ["ASAN_OPTIONS"] = "detect_leaks=1"
+            self.assertEqual(self.run_tool()[0], 0)
+            record = json.loads((self.cases / "c.argv").read_text())
+            self.assertEqual(record["asan"], "detect_leaks=1:symbolize=0")
+        finally:
+            if saved is None:
+                os.environ.pop("ASAN_OPTIONS", None)
+            else:
+                os.environ["ASAN_OPTIONS"] = saved
 
     def test_wrong_location_fails(self) -> None:
         self.case("c", "c.v:3:5: error:\nboom\n", 1, "odin3: error: c.v:3:6: error: boom\n")

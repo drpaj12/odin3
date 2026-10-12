@@ -244,8 +244,10 @@ typedef struct odin3_ceval_req {
  * `system function '$name' is not supported`, a typer error, or a cap (call depth, steps,
  * loop iterations, width, the word-operation budget of * / % ** and a single '**', the byte
  * budget of the evaluator's own memory; the call depth counts function frames, typer-callback runs
- * and host re-entries together: `constant evaluation of <what> nested deeper than N` for a
- * re-entry, e.g. a chain of lazily evaluated parameters); a host callback's failure status;
+ * and host re-entries together, and the C re-entry cap (ODIN3_ELAB_MAX_REENTRY_DEPTH, 256) the
+ * typer-callback runs and host re-entries alone: `constant evaluation of <what> nested deeper
+ * than N` for a re-entry, e.g. a chain of lazily evaluated parameters, or a run whose <what> is
+ * the typer's: "replication count", "range bound"); a host callback's failure status;
  * INVALID_ARG (logged) for a NULL argument or a root that is not an expression; NO_MEMORY.
  * *out is unchanged on failure.
  */

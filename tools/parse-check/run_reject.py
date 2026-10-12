@@ -32,6 +32,7 @@ or input error, 77 (--elaborate) every case is pending.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -50,6 +51,18 @@ FORBIDDEN = re.compile(
 )
 EXIT_ODIN3_FAIL = 1  # odin3's exit status for a failed pass (0 success, 2 usage)
 TIMEOUT_S = 120
+# A sanitizer report is printed unsymbolized: symbolizing one can take about two minutes on a
+# machine without an unversioned llvm-symbolizer, which the timeout would misread (2D Task 10
+# review, n1). The report's banner is what FORBIDDEN judges; addresses are enough to see a fail.
+SANITIZER_QUIET = "symbolize=0"
+
+
+def case_env() -> dict[str, str]:
+    """The environment of each case: ours, with symbolize=0 added to ASAN_OPTIONS."""
+    env = dict(os.environ)
+    given = env.get("ASAN_OPTIONS", "")
+    env["ASAN_OPTIONS"] = f"{given}:{SANITIZER_QUIET}" if given else SANITIZER_QUIET
+    return env
 
 
 @dataclass(frozen=True)
@@ -124,6 +137,7 @@ def run_case(odin3: str, case: Path, elaborate: bool) -> tuple[int, str]:
     proc = subprocess.run(
         command(odin3, case.name, elaborate),
         cwd=case.parent,
+        env=case_env(),
         capture_output=True,
         text=True,
         errors="replace",

@@ -21,32 +21,8 @@
 static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 11: MODULE's contents, declarations, assignments, named instances. */
-            [ODIN3_AST_LIST] = true,
-            [ODIN3_AST_ATTR] = true,
-            [ODIN3_AST_PORT_DECL] = true,
-            [ODIN3_AST_DECLARATOR] = true,
-            [ODIN3_AST_RANGE] = true,
-            [ODIN3_AST_NET_DECL] = true,
-            [ODIN3_AST_VAR_DECL] = true,
-            [ODIN3_AST_PARAM_DECL] = true,
-            [ODIN3_AST_DEFPARAM] = true,
-            [ODIN3_AST_CONT_ASSIGN] = true,
-            [ODIN3_AST_NET_ASSIGN] = true,
-            [ODIN3_AST_INSTANTIATION] = true,
-            [ODIN3_AST_INSTANCE] = true,
-            [ODIN3_AST_CONNECTION] = true,
-            [ODIN3_AST_NUMBER] = true,
-            [ODIN3_AST_STRING] = true,
-            [ODIN3_AST_IDENT] = true,
-            [ODIN3_AST_SELECT] = true,
-            [ODIN3_AST_CONCAT] = true,
-            [ODIN3_AST_REPLICATE] = true,
-            [ODIN3_AST_UNARY] = true,
-            [ODIN3_AST_BINARY] = true,
-            [ODIN3_AST_TERNARY] = true,
-            [ODIN3_AST_CALL] = true,
-            /* Task 12: gates (ordered connections and arrays are features of Task 11's kinds). */
+            /* Task 12: gates (ordered connections and arrays are forms of Task 11's kinds,
+             * reported through odin3_elab1_pend_form until Task 12). */
             [ODIN3_AST_GATE_DECL] = true,
             /* Task 14: generate and scope names. */
             [ODIN3_AST_GENERATE] = true,
@@ -56,8 +32,10 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
             [ODIN3_AST_GEN_BLOCK] = true,
             [ODIN3_AST_GENVAR_DECL] = true,
             [ODIN3_AST_HIER_NAME] = true,
-            /* Task 15: non-ANSI ports, subroutines, processes and every statement kind. */
+            /* Task 15: non-ANSI ports, attributes, subroutines, processes and every statement
+             * kind (a port declared in the body: odin3_elab1_pend_form). */
             [ODIN3_AST_PORT_REF] = true,
+            [ODIN3_AST_ATTR] = true,
             [ODIN3_AST_FUNCTION_DECL] = true,
             [ODIN3_AST_TASK_DECL] = true,
             [ODIN3_AST_ALWAYS] = true,

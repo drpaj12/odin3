@@ -69,6 +69,30 @@ and S2 were at their nodes already); EL-6 item 4's Q7 is at the `UDP_DECL`, as �
 taken-name check runs when a definition is reached, and names a built-in cell type with its own
 text; EL-7 rejects a `(* blackbox *)` module given as the top; §17 #25 records `(* top *)`.
 
+v4.6 (2026-10-12; 2D Task 11, agent defaults). (1) A C re-entry cap, `ODIN3_ELAB_MAX_REENTRY_DEPTH`
+= 256, bounds the constant evaluations nested in C (a typer callback's run, a host's re-entry such
+as a lazily evaluated parameter; §4.6, §11) apart from the call-depth cap, which still counts them
+with the function frames: 1024 C levels needed 4–6 MB of stack under gcc ASan and overflowed under
+clang ASan with fuzzer flags. Past it: `constant evaluation of <what> nested deeper than 256`. (2)
+EL-9's key counts `UNSIZED` only for an unsigned value whose top bit is 1, the one case where it
+changes how the value extends: `#(.W(8))` and `#(.W(32'sd8))` on `parameter integer W` share, while
+`'hFFFFFFFF` and `32'hFFFFFFFF` on an untyped `P` are two specializations of one spelling (the
+second takes `$2`). (3) A parameter is named in EL-9's name when an override applies to it and its
+final value differs from what its default expression gives in that specialization. (4) Point (q)'s
+taken names: a definition of another name, a specialization made so far, a registered cell type
+(two libraries' definitions of one name: the second specialization takes `$2`). (5) Pending
+overrides keep one entry per path, the one of highest precedence (the others can never win); the
+key holds each one's path, source and value. (6) The top's specialization is named like any other
+(`param top.W 16` makes the UNIT `top$W=16`). (7) Locations: the defparam errors and warning at the
+defparam's target (its `HIER_NAME`); the project texts at the project line; the localparam and
+unknown-parameter errors at the `CONNECTION`; the mixing error at the first value of the other
+form; `too many parameter values` at the first surplus value; the specialization cap at the
+`INSTANTIATION`; the depth cap and the recursion error at the `INSTANCE` (a module instantiating
+itself with the same parameters: `recursive instantiation of 'm'`, no "through"). An override of a
+localparam has the localparam text from a `#()` or a `defparam`, the project text from a project
+line. (8) Instances of one `INSTANTIATION` that land in different specializations are written as
+one `INSTANTIATION` per run of consecutive instances sharing one (EL-4).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -671,9 +695,10 @@ a replication count, an attribute value, a `for`-loop bound in stage 2, …) is 
   a call pushes a frame, `return` (end of body) pops it. No C recursion, so recursive constant
   functions (K8) work up to `ODIN3_ELAB_MAX_CALL_DEPTH` (1024) frames. The cap also counts every
   evaluation nested in C inside another: a typer callback's (a replication count, a bound, a
-  return range) and a host's re-entry (a lazily evaluated parameter read by another, §4.5), so a
-  2000-link `localparam` chain stops with `constant evaluation of parameter 'P1025' nested
-  deeper than 1024` instead of exhausting the C stack.
+  return range) and a host's re-entry (a lazily evaluated parameter read by another, §4.5), and
+  those C nestings alone are bounded by `ODIN3_ELAB_MAX_REENTRY_DEPTH` (256, v4.6), so a 2000-link
+  `localparam` chain stops with `constant evaluation of parameter 'P257' nested deeper than 256`
+  instead of exhausting the C stack.
 - **Locals**: the function's ports, its result variable (named like the function; width from the
   return range, 32 bits for `integer`, 1 bit by default; sign from `signed`/`integer`), its local
   declarations and named-block declarations, each a value of its declared width initialised to x.
@@ -1605,7 +1630,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   (reasons: `it reads module variable 'x'`, `it calls task 't'`, `it calls system task '$x'`, `it
   assigns 'x', which is not local`); `constant evaluation of 'f' exceeds 67108864 steps`;
   `constant function recursion deeper than 1024 in 'f'`; `constant evaluation of <what> nested
-  deeper than 1024`; `replication count N is negative`;
+  deeper than 256` (the C re-entry cap, v4.6; 1024 when the call-depth cap is reached first);
+  `replication count N is negative`;
   `replication count has x or z bits`; `zero-width concatenation`; `width N exceeds the limit of
   1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
 - **Generate (EL-19–EL-22)**: `'i' is not a genvar`; `generate loop must assign genvar 'i' in its
@@ -1733,6 +1759,7 @@ guards, reported as a located `ODIN3_ERR_PARSE` naming the cap, and lowered in t
 | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 | all unrolled loop iterations of a run; nested loops multiply, and this stops a 2^20 × 2^20 bomb long before memory does |
 | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 | statements plus expression nodes per top-level constant evaluation (a `while (1)` in a constant function) |
 | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 | constant-function recursion and inline nesting; real recursive constant functions are < 64 deep |
+| `ODIN3_ELAB_MAX_REENTRY_DEPTH` | 256 | constant evaluations nested in C (typer callbacks, host re-entries; v4.6): each takes 4–6 KiB of C stack under ASan, where a function frame takes none |
 | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 | instance nesting below the top; real designs ≈ 10 (mcml: 7) |
 | `ODIN3_ELAB_MAX_SPECIALIZATIONS` | 2^16 | modules made; lenet makes 138 |
 | `ODIN3_ELAB_MAX_INSTANCES` | 2^24 | instance and gate nodes per run (instance-array bombs) |

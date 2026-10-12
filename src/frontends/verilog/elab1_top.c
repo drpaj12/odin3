@@ -1,8 +1,7 @@
 /*
- * elab1_top.c — stage 1's top selection (2D spec §3.2, EL-7) and, until Task 11's queue, the
- * reachability walk from the top (EL-6, EL-9): breadth first over the definitions, resolving
- * every instantiation of a reached body, the taken-name errors of the definitions reached, and
- * the info line naming the modules left out.
+ * elab1_top.c — stage 1's top selection (2D spec §3.2, EL-7), the definitions reached by the
+ * specialization queue (EL-6: the taken-name errors when a definition is reached) and the info
+ * line naming the modules left out.
  */
 #include "frontends/verilog/elab1.h"
 
@@ -253,59 +252,21 @@ static void report_taken(odin3_elab1 *e1, const odin3_elab_def *def, uint8_t tak
     }
 }
 
-/* Marks definition idx reached and queues it (the first time). */
-static odin3_status reach_def(odin3_elab1 *e1, uint32_t idx) {
-    odin3_elab1_defx *ext = defx_at(e1, idx);
-    if (ext->reached) {
-        return ODIN3_OK;
-    }
-    uint32_t *slot = odin3_vec_push(&e1->order);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = idx;
+bool odin3_elab1_reach_def(odin3_elab1 *e1, uint32_t def) {
+    const odin3_elab_def *rec = odin3_elab1_def(e1, def);
+    odin3_elab1_defx *ext = defx_at(e1, def);
     ext->reached = true;
-    return ODIN3_OK;
-}
-
-/* One INSTANTIATION of a body of library: resolved, its module queued, its errors reported. */
-static odin3_status reach_instance(odin3_elab1 *e1, odin3_ast_id inst, uint32_t library) {
-    uint32_t name = odin3_ast_name(e1->parsed, inst);
-    odin3_elab_res res = odin3_elab1_resolve(e1, name, library);
-    if (res.kind == ODIN3_RES_MODULE) {
-        return reach_def(e1, res.def);
-    }
-    if (res.kind == ODIN3_RES_UDP) {
-        odin3_elab1_reject_def(e1, res.def); /* a design unit's UDP: reported already */
-    } else if (res.kind == ODIN3_RES_NONE) {
-        odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, inst),
-                          "unresolved_module: module '%s' is not defined", text_of(e1, name));
-    }
-    return ODIN3_OK;
-}
-
-/* The body of reached definition idx: its taken-name error, else its instantiations. */
-static odin3_status reach_body(odin3_elab1 *e1, uint32_t idx) {
-    const odin3_elab_def *def = odin3_elab1_def(e1, idx);
-    odin3_elab1_defx *ext = defx_at(e1, idx);
     if (ext->taken != ODIN3_TAKEN_NONE) {
-        ext->reported = true;
-        report_taken(e1, def, ext->taken);
-        return ODIN3_OK; /* what depends on it is skipped silently (EL-44) */
+        if (!ext->reported) {
+            ext->reported = true;
+            report_taken(e1, rec, ext->taken);
+        }
+        return false; /* what depends on it is skipped silently (EL-44) */
     }
-    if (def->kind != ODIN3_DEF_MODULE) {
-        return ODIN3_OK; /* a black box's body is ignored (EL-11) */
-    }
-    odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; st == ODIN3_OK && i < ext->n_inst && !e1->stopped; i++) {
-        odin3_ast_id inst = *(const odin3_ast_id *)odin3_vec_cat(&e1->insts, ext->first_inst + i);
-        st = reach_instance(e1, inst, def->library);
-    }
-    return st;
+    return rec->kind == ODIN3_DEF_MODULE; /* a black box's body is ignored (EL-11) */
 }
 
-/* The info line naming the design-unit modules the walk did not reach. */
-static odin3_status not_elaborated(odin3_elab1 *e1) {
+odin3_status odin3_elab1_not_elaborated(odin3_elab1 *e1) {
     odin3_strbuf list;
     odin3_strbuf_init(&list);
     odin3_status st = ODIN3_OK;
@@ -324,13 +285,4 @@ static odin3_status not_elaborated(odin3_elab1 *e1) {
     }
     odin3_strbuf_free(&list);
     return st;
-}
-
-odin3_status odin3_elab1_reach(odin3_elab1 *e1, uint32_t top) {
-    odin3_status st = reach_def(e1, top);
-    for (size_t i = 0; st == ODIN3_OK && i < e1->order.len && !e1->stopped; i++) {
-        st = reach_body(e1, *(const uint32_t *)odin3_vec_cat(&e1->order, i));
-        st = st != ODIN3_OK ? st : e1->fatal;
-    }
-    return st == ODIN3_OK && !e1->stopped ? not_elaborated(e1) : st;
 }

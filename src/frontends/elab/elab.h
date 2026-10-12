@@ -18,7 +18,12 @@
 #include <stdint.h>
 
 /*
- * The caps of §11, exact, plus ODIN3_ELAB_MAX_EVAL_WORK (2D Task 9 ruling and fix round 1): the
+ * The caps of §11, exact, plus ODIN3_ELAB_MAX_REENTRY_DEPTH (2D Task 11, spec v4.6): constant
+ * evaluations nested in C inside another (a typer callback's run: a replication count, a bound, a
+ * function's return range; a host's re-entry: a lazily evaluated parameter read by another),
+ * which take C stack (4-6 KiB a level under ASan) where function frames do not; the call-depth
+ * cap still counts them together with the frames. Past it: `constant evaluation of <what> nested
+ * deeper than 256`. And ODIN3_ELAB_MAX_EVAL_WORK (2D Task 9 ruling and fix round 1): the
  * word products one top-level constant evaluation may spend in * / % ** (ceil(width / 64)^2 for
  * each * / %; a ** up to (width - 2) square-and-multiply steps of that, O(w^3), which the width
  * cap alone does not bound). A single ** is checked before it runs (`constant '**' of N bits
@@ -33,6 +38,7 @@ enum {
     ODIN3_ELAB_MAX_TOTAL_ITERATIONS = 1 << 24, /* unrolled loop iterations per run */
     ODIN3_ELAB_MAX_EVAL_STEPS = 1 << 26,       /* steps of one top-level constant evaluation */
     ODIN3_ELAB_MAX_CALL_DEPTH = 1024,          /* constant-function frames, inline nesting */
+    ODIN3_ELAB_MAX_REENTRY_DEPTH = 256,        /* constant evaluations nested in C (below) */
     ODIN3_ELAB_MAX_HIER_DEPTH = 1024,          /* instance nesting below the top */
     ODIN3_ELAB_MAX_SPECIALIZATIONS = 1 << 16,  /* modules made per run */
     ODIN3_ELAB_MAX_INSTANCES = 1 << 24,        /* instance and gate nodes per run */
