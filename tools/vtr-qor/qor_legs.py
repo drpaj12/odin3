@@ -124,7 +124,7 @@ def arch_base(arch: str) -> str:
     raise HeavyError(2, f"unknown arch '{arch}' ({', '.join(ARCH_BASES)})")
 
 
-def arch_xml(vtr_root: Path, arch: str) -> Path:
+def arch_xml_path(vtr_root: Path, arch: str) -> Path:
     """``<V>/vtr_flow/arch/timing/<arch base>.xml`` (spec §2)."""
     return vtr_root / "vtr_flow" / "arch" / "timing" / f"{arch_base(arch)}.xml"
 

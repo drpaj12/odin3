@@ -8,6 +8,7 @@ Nothing runs VTR.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import shutil
@@ -23,12 +24,13 @@ from unittest import mock
 import qor_legs
 import qor_sched
 from qor_heavy import HEAVY_DIR, HeavyError
-from qor_sched import KeyInputs, PlanRequest
+from qor_sched import Job, KeyInputs, PlanRequest
 
 PIN = qor_legs.VTR_PIN
 K6 = "k6_frac_N10_frac_chain_mem32K_40nm"
 SETS = qor_sched.load_sets(qor_legs.REPO_ROOT / "tests" / "vtr" / "qor" / "sets.json")
 HEX = frozenset("0123456789abcdef")
+ALL_LEGS = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 
 BASE = KeyInputs(
     leg="O", design="sha", arch_base=K6, arch_sha256="a" * 64, source_sha256="b" * 64,
@@ -69,6 +71,18 @@ class KeyTest(unittest.TestCase):
         canon = dict(dataclasses.asdict(BASE), schema=1)
         text = json.dumps(canon, sort_keys=True, separators=(",", ":"))
         self.assertEqual(key, hashlib.sha256(text.encode()).hexdigest())
+
+    def test_leg_key_inputs(self) -> None:
+        """The leg key (and so key12) changes with every input but the design and its source."""
+        key = qor_sched.leg_key(BASE)
+        for field in dataclasses.fields(KeyInputs):
+            changed = dataclasses.replace(BASE, **{field.name: _changed(getattr(BASE, field.name))})
+            same = qor_sched.leg_key(changed) == key
+            self.assertEqual(same, field.name in ("design", "source_sha256"), field.name)
+            self.assertEqual(qor_sched.leg_key(changed)[:12] == key[:12], same, field.name)
+
+    def test_max_jobs(self) -> None:
+        self.assertEqual(qor_sched.MAX_JOBS, 1)  # ruling C1, point (w): change it deliberately
 
     def test_leg_key_shares_designs(self) -> None:
         other = dataclasses.replace(BASE, design="ch_intrinsics", source_sha256="f" * 64)
@@ -138,11 +152,16 @@ class PlanTestBase(unittest.TestCase):
         for name, path in libs.items():
             path.write_bytes(name.encode())
         self.ldd = self.tmp / "ldd"
-        lines = "".join(f"\t{n} => {p} (0x00007f0000000000)\\n" for n, p in libs.items())
+        # Out of basename order, with libc between the two (point (q): only libodin3*.so count).
+        abc, core = libs["libodin3_abc.so"], libs["libodin3.so"]
+        self.libc = build / "libc.so.6"
+        self.libc.write_bytes(b"libc")
         self.ldd.write_text(
             "#!/bin/sh\n"
-            f'printf "\\tlinux-vdso.so.1 (0x00007ffd00000000)\\n{lines}'
-            '\\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f0000000000)\\n"\n'
+            'printf "\\tlinux-vdso.so.1 (0x00007ffd00000000)\\n"\n'
+            f'printf "\\tlibodin3_abc.so => {abc} (0x00007f0000000000)\\n"\n'
+            f'printf "\\tlibc.so.6 => {self.libc} (0x00007f0000000000)\\n"\n'
+            f'printf "\\tlibodin3.so => {core} (0x00007f0000000000)\\n"\n'
         )
         self.ldd.chmod(0o755)
         return odin3, libs
@@ -156,11 +175,53 @@ class PlanTestBase(unittest.TestCase):
         jobs = qor_sched.plan_jobs(self.request(legs, ("sha", "ch_intrinsics")), SETS)
         return {(job.leg, job.design): job.key for job in jobs}
 
+    def patching(self, name: str, **kwargs: Any) -> Callable[[], object]:
+        """A mutation that patches ``qor_legs.<name>`` for the rest of the test."""
+        def start() -> object:
+            patcher = mock.patch.object(qor_legs, name, **kwargs)
+            self.addCleanup(patcher.stop)
+            return patcher.start()
+        return start
+
+    def plan_all(self) -> list[Job]:
+        return qor_sched.plan_jobs(self.request(ALL_LEGS, ("sha", "ch_intrinsics")), SETS)
+
+    def assert_rekeys(self, mutate: Callable[[], object], affected: Callable[[Job], bool],
+                      *, key12_moves: bool) -> None:
+        """Plan every leg on two designs and mark each job ``ok`` under its key; after
+        ``mutate``, exactly the ``affected`` jobs re-key (their key12 moving iff
+        ``key12_moves``) and are not cached, and every other job is reused unchanged."""
+        before = self.plan_all()
+        for job in before:
+            job.job_dir.mkdir(parents=True, exist_ok=True)
+            (job.job_dir / "metrics.json").write_text(
+                json.dumps({"schema": 1, "status": "ok", "key": job.key}))
+        self.assertTrue(all(j.cached for j in self.plan_all()))
+        mutate()
+        after = self.plan_all()
+        self.assertEqual([(j.design, j.leg) for j in after], [(j.design, j.leg) for j in before])
+        for old, new in zip(before, after, strict=True):
+            where = (new.leg, new.design)
+            if affected(new):
+                self.assertNotEqual(new.key, old.key, where)
+                self.assertFalse(new.cached, where)
+                self.assertEqual(new.key12 != old.key12, key12_moves, where)
+            else:
+                self.assertEqual((new.key, new.key12, new.cached), (old.key, old.key12, True),
+                                 where)
+
 
 class BuildIdTest(PlanTestBase):
     def test_build_id(self) -> None:
         first = qor_sched.odin3_build_id(self.odin3)
         self.assertEqual(len(first), 64)
+        manifest = "".join(
+            f"{name}\0{hashlib.sha256(path.read_bytes()).hexdigest()}\n"
+            for name, path in (("odin3", self.odin3), ("libodin3.so", self.libs["libodin3.so"]),
+                               ("libodin3_abc.so", self.libs["libodin3_abc.so"])))
+        self.assertEqual(first, hashlib.sha256(manifest.encode()).hexdigest())
+        _bump(self.libc)
+        self.assertEqual(qor_sched.odin3_build_id(self.odin3), first)  # libc is not odin3's
         self.assertEqual(qor_sched.odin3_build_id(self.odin3), first)
         seen = {first}
         for path in (self.libs["libodin3.so"], self.libs["libodin3_abc.so"], self.odin3):
@@ -193,6 +254,9 @@ class PlanTest(PlanTestBase):
         # The planner orders by itself, whatever order the request gives.
         unsorted = qor_sched.plan_jobs(self.request(("O", "P"), ("sha", "ch_intrinsics")), SETS)
         self.assertEqual([(j.design, j.leg) for j in unsorted], [(j.design, j.leg) for j in jobs])
+        everything = qor_sched.plan_jobs(self.request(("P",), tuple(reversed(SETS.order))), SETS)
+        self.assertEqual(tuple(j.design for j in everything), SETS.order)
+        self.assertEqual(tuple(j.group for j in everything), ("A",) * 17 + ("B",) * 4)
         every = qor_sched.plan_jobs(
             self.request(("Oprov", "R", "O", "O'", "P'", "P"), ("sha",)), SETS)
         self.assertEqual([j.leg for j in every], ["P", "Pprime", "Oprime", "O", "R", "Oprov"])
@@ -248,18 +312,67 @@ class PlanTest(PlanTestBase):
         (again,) = qor_sched.plan_jobs(self.request(("P",), ("sha",)), SETS)
         self.assertFalse(again.cached)
 
+    def test_plan_key_inputs(self) -> None:
+        """Each planned key is §5.3's over the real inputs (point (f)), hand-built here."""
+        sha = hashlib.sha256
+        jobs = {(j.leg, j.design): j for j in self.plan_all()}
+        xml = self.vtr / "vtr_flow/arch/timing" / f"{K6}.xml"
+        v_sha = sha((self.vtr / "vtr_flow/benchmarks/verilog/sha.v").read_bytes()).hexdigest()
+        g_sha = sha((self.golden / K6 / "vtr/sha/sha.parmys.blif").read_bytes()).hexdigest()
+        p = KeyInputs(
+            leg="P", design="sha", arch_base=K6, arch_sha256=sha(xml.read_bytes()).hexdigest(),
+            source_sha256=v_sha, vtr_commit=PIN, params=tuple(qor_legs.key_params()),
+            odin3_build=None, script=None, lib_sha256=None, abc_script_sha256=None,
+        )
+        o = dataclasses.replace(
+            p, leg="O", odin3_build=qor_sched.odin3_build_id(self.odin3),
+            lib_sha256=sha((self.repo / "lib/vtr.o3lib").read_bytes()).hexdigest(),
+            abc_script_sha256=sha((self.repo / "lib/abc/vtr.abc").read_bytes()).hexdigest(),
+            script="read_techlib $LIB; read_verilog --nolatches $IN; proc; opt; flatten; "
+            "wreduce; hardmap; lower; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
+        )
+        pprime = dataclasses.replace(
+            o, leg="Pprime", source_sha256=g_sha,
+            script="read_techlib $LIB; read_blif $IN; abc --lut 6; write_blif --vtr --lut-k 6 $OUT",
+        )
+        expected = {"P": p, "O": o, "Pprime": pprime}
+        for leg, inputs in expected.items():
+            job = jobs[(leg, "sha")]
+            self.assertEqual(job.key, qor_sched.job_key(inputs), leg)
+            self.assertEqual(job.key12, qor_sched.leg_key(inputs)[:12], leg)
+
     def test_plan_rekeys_on_lib_and_script(self) -> None:
-        legs = ("P", "Oprime", "O", "Pprime")
-        before = self.keys(legs)
+        def odin3_legs(job: Job) -> bool:
+            return job.leg != "P"
+
         for path in (self.repo / "lib" / "vtr.o3lib", self.repo / "lib" / "abc" / "vtr.abc"):
-            _bump(path)
-            after = self.keys(legs)
-            for (leg, design), key in after.items():
-                if leg == "P":
-                    self.assertEqual(key, before[(leg, design)], (path.name, design))
-                else:
-                    self.assertNotEqual(key, before[(leg, design)], (path.name, leg, design))
-            before = after
+            self.assert_rekeys(functools.partial(_bump, path), odin3_legs, key12_moves=True)
+        # The script text itself (with K in it).
+        key_script = qor_legs.key_script
+        self.assert_rekeys(self.patching("key_script",
+                                         side_effect=lambda *a: key_script(*a) + "; stats"),
+                           odin3_legs, key12_moves=True)
+        self.assert_rekeys(self.patching("lut_size", return_value=4), odin3_legs,
+                           key12_moves=True)
+
+    def test_plan_rekeys_on_sources(self) -> None:
+        """A design's source re-keys that design's jobs alone, in the same key12 directory."""
+        v = self.vtr / "vtr_flow" / "benchmarks" / "verilog" / "sha.v"
+        self.assert_rekeys(lambda: _bump(v),
+                           lambda job: job.design == "sha" and job.leg not in ("Pprime", "R"),
+                           key12_moves=False)
+        g = self.golden / K6 / "vtr" / "sha" / "sha.parmys.blif"
+        self.assert_rekeys(lambda: _bump(g),
+                           lambda job: job.design == "sha" and job.leg in ("Pprime", "R"),
+                           key12_moves=False)
+
+    def test_plan_rekeys_on_arch_and_vtr(self) -> None:
+        xml = self.vtr / "vtr_flow" / "arch" / "timing" / f"{K6}.xml"
+        self.assert_rekeys(lambda: _bump(xml), lambda job: True, key12_moves=True)
+        self.assert_rekeys(self.patching("vtr_commit", return_value="f" * 40), lambda job: True,
+                           key12_moves=True)
+        moved = self.plan_all()[0]
+        self.assertEqual(moved.job_dir.relative_to(self.out).parts[0], "f" * 12)
 
     def test_plan_rekeys_on_build_seed_and_golden(self) -> None:
         legs = ("P", "O", "Pprime")
@@ -272,6 +385,8 @@ class PlanTest(PlanTestBase):
         golden = self.keys(legs)
         changed = {lk for lk, key in golden.items() if key != after[lk]}
         self.assertEqual(changed, {("Pprime", "sha")})
+        self.assert_rekeys(lambda: _bump(self.libs["libodin3.so"]), lambda job: job.leg != "P",
+                           key12_moves=True)
         seeded = qor_sched.plan_jobs(dataclasses.replace(
             self.request(legs, ("sha",)), seed=2), SETS)
         self.assertTrue(all(j.key != golden[(j.leg, j.design)] for j in seeded))
@@ -280,6 +395,19 @@ class PlanTest(PlanTestBase):
     def test_plan_missing_golden(self) -> None:
         (job,) = qor_sched.plan_jobs(self.request(("R",), ("diffeq1",)), SETS)
         self.assertIn(str(qor_legs.golden_blif(K6, "diffeq1")), job.commands[0].argv[-1])
+        (with_golden,) = qor_sched.plan_jobs(self.request(("R",), ("sha",)), SETS)
+        inputs = KeyInputs(
+            leg="R", design="diffeq1", arch_base=K6,
+            arch_sha256=qor_sched.file_sha256(self.vtr / "vtr_flow/arch/timing" / f"{K6}.xml"),
+            source_sha256=qor_sched.GOLDEN_MISSING, vtr_commit=PIN,
+            params=tuple(qor_legs.key_params()), odin3_build=qor_sched.odin3_build_id(self.odin3),
+            script="read_techlib $LIB; read_blif $IN; write_blif --vtr --lut-k 6 $OUT",
+            lib_sha256=qor_sched.file_sha256(self.repo / "lib/vtr.o3lib"),
+            abc_script_sha256=qor_sched.file_sha256(self.repo / "lib/abc/vtr.abc"),
+        )
+        self.assertEqual(qor_sched.GOLDEN_MISSING, "missing")
+        self.assertEqual(job.key, qor_sched.job_key(inputs))
+        self.assertEqual(job.key12, with_golden.key12)
         self.assertEqual(job.commands[1].argv[4:6], ("-start", "abc"))
 
 
@@ -304,6 +432,35 @@ class SelectTest(unittest.TestCase):
             path = Path(name) / "sets.json"
             mutations: list[Callable[[dict[str, Any]], object]] = [
                 lambda d: d.update(schema=2),
+                lambda d: d.update(schema=True),
+                lambda d: d.update(schema="1"),
+                lambda d: d["designs"]["sha"].update(vtr_flow_time_s=float("nan")),
+                lambda d: d["designs"]["sha"].update(vtr_flow_time_s=float("inf")),
+                lambda d: d["designs"]["sha"].update(vtr_flow_time_s=-1.0),
+                lambda d: d["designs"]["sha"].update(vtr_flow_time_s=0),
+                lambda d: d["designs"]["sha"].update(vtr_flow_time_s=True),
+                lambda d: d["designs"]["ch_intrinsics"].update(golden_bytes=0),
+                lambda d: d["designs"]["ch_intrinsics"].update(golden_bytes=-1),
+                lambda d: d["designs"]["ch_intrinsics"].update(golden_bytes=1.5),
+                lambda d: d["designs"]["sha"].update(golden_bytes=1),  # out of size order
+                lambda d: d["designs"]["sha"].update(rank=0),
+                lambda d: d["designs"]["sha"].update(rank=True),
+                lambda d: [d["designs"][n].update(rank=1) for n in d["gate"]],
+                lambda d: (d["designs"]["sha"].update(rank=6),
+                           d["designs"]["raygentop"].update(rank=7)),
+                lambda d: d["designs"]["spree"].update(rank=20),
+                lambda d: d["designs"]["sha"].update(extra=1),
+                lambda d: d["designs"]["sha"].pop("rank"),
+                lambda d: d["designs"].update(sha=[1]),
+                lambda d: d.update(smoke=[]),
+                lambda d: d.update(smoke=d["gate"][1:6]),
+                lambda d: d.update(order=[], gate=[], extra=[], smoke=[], group_b=[], designs={}),
+                lambda d: d.update(gate="sha"),
+                lambda d: d["extra"].append("spree"),
+                lambda d: d.update(extra=["arm_core", "spree"]),
+                lambda d: d.update(group_b=["bgm", "LU8PEEng", "mcml", "LU32PEEng"]),
+                lambda d: d["designs"]["blob_merge"].update(group="B"),
+                lambda d: d["designs"]["mcml"].update(group="A"),
                 lambda d: d["order"].reverse(),
                 lambda d: d["smoke"].append("spree"),
                 lambda d: d["group_b"].pop(),
@@ -312,14 +469,21 @@ class SelectTest(unittest.TestCase):
                 lambda d: d["designs"]["sha"].update(golden_bytes="big"),
                 lambda d: d.pop("designs"),
             ]
+            texts = ["", "[]", "{}"]
             for mutate in mutations:
                 data = json.loads(json.dumps(good))
                 mutate(data)
-                path.write_text(json.dumps(data))
-                with self.assertRaises(HeavyError) as caught:
+                texts.append(json.dumps(data))
+            # A design name that would escape <J> (renamed everywhere it appears).
+            texts.append(json.dumps(good).replace('"sha"', '"../sha"'))
+            for i, text in enumerate(texts):
+                path.write_text(text)
+                with self.assertRaises(HeavyError, msg=f"case {i}") as caught:
                     qor_sched.load_sets(path)
                 self.assertEqual(caught.exception.code, 2)
                 self.assertTrue(caught.exception.message.startswith(f"{path}: "))
+            path.write_text(json.dumps(good))
+            self.assertEqual(qor_sched.load_sets(path), SETS)
 
 
 class VtrCommitTest(unittest.TestCase):

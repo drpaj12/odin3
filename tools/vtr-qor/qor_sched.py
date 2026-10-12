@@ -26,6 +26,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import re
 import subprocess
 from collections.abc import Iterable, Mapping, Sequence
@@ -44,6 +45,9 @@ PLAN_LEG_ORDER = ("P", "Pprime", "Oprime", "O", "R", "Oprov")
 GOLDEN_LEGS = frozenset({"Pprime", "R"})
 SET_NAMES = ("gate", "extra", "smoke")
 GROUPS = ("A", "B")
+DESIGN_FIELDS = frozenset({"rank", "group", "golden_bytes", "vtr_flow_time_s"})
+# Design names become path components (<J>/<d>, <d>.v): no separators, no dots.
+DESIGN_NAME = re.compile(r"[A-Za-z0-9_]+")
 SETS_JSON = qor_legs.REPO_ROOT / "tests" / "vtr" / "qor" / "sets.json"
 # ldd by absolute path when present; a module seam the tests replace (point (q)).
 LDD_BIN = "/usr/bin/ldd" if Path("/usr/bin/ldd").exists() else "ldd"
@@ -83,37 +87,70 @@ def _bad(path: Path, what: str) -> HeavyError:
     return HeavyError(2, f"{path}: {what}")
 
 
-def _names(data: Mapping[str, Any], field: str, path: Path) -> tuple[str, ...]:
+def _names(data: Mapping[str, Any], field: str, path: Path, *, empty: bool = False
+           ) -> tuple[str, ...]:
     value = data.get(field)
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise _bad(path, f"'{field}' is not a list of design names")
+    if not value and not empty:
+        raise _bad(path, f"'{field}' is empty")
     if len(set(value)) != len(value):
         raise _bad(path, f"'{field}' repeats a design")
+    for name in value:
+        if not DESIGN_NAME.fullmatch(name):
+            raise _bad(path, f"'{field}' has a bad design name '{name}'")
     return tuple(value)
 
 
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _design_info(name: str, raw: object, path: Path) -> DesignInfo:
-    if not isinstance(raw, dict):
-        raise _bad(path, f"design '{name}' is not an object")
-    rank, group = raw.get("rank"), raw.get("group")
-    size, secs = raw.get("golden_bytes"), raw.get("vtr_flow_time_s")
-    if (rank is not None and (not isinstance(rank, int) or isinstance(rank, bool))) \
-            or group not in GROUPS or not isinstance(size, int) or isinstance(size, bool) \
-            or not isinstance(secs, (int, float)) or isinstance(secs, bool):
-        raise _bad(path, f"design '{name}' needs rank, group (A|B), golden_bytes, vtr_flow_time_s")
+    if not isinstance(raw, dict) or set(raw) != DESIGN_FIELDS:
+        raise _bad(path, f"design '{name}' needs exactly {', '.join(sorted(DESIGN_FIELDS))}")
+    rank, group = raw["rank"], raw["group"]
+    size, secs = raw["golden_bytes"], raw["vtr_flow_time_s"]
+    if rank is not None and not _is_int(rank):
+        raise _bad(path, f"design '{name}': rank is not an integer or null")
+    if group not in GROUPS:
+        raise _bad(path, f"design '{name}': group is not A or B")
+    if not _is_int(size) or size <= 0:
+        raise _bad(path, f"design '{name}': golden_bytes is not a positive integer")
+    if not (_is_int(secs) or isinstance(secs, float)) or not math.isfinite(secs) or secs <= 0:
+        raise _bad(path, f"design '{name}': vtr_flow_time_s is not a positive finite number")
     return DesignInfo(rank, str(group), size, float(secs))
 
 
-def _check_sets(sets: Sets, path: Path) -> None:
+def _subsequence(part: tuple[str, ...], order: tuple[str, ...]) -> bool:
+    members = set(part)
+    return part == tuple(d for d in order if d in members)
+
+
+def _check_split(sets: Sets, path: Path) -> None:
     if set(sets.designs) != set(sets.order):
         raise _bad(path, "'designs' and 'order' name different designs")
     if set(sets.gate) & set(sets.extra) or set(sets.gate) | set(sets.extra) != set(sets.order):
         raise _bad(path, "'gate' and 'extra' must split 'order'")
-    if not set(sets.smoke) <= set(sets.gate):
-        raise _bad(path, "'smoke' must lie in 'gate'")
-    in_b = {d for d, info in sets.designs.items() if info.group == "B"}
-    if set(sets.group_b) != in_b:
-        raise _bad(path, "'group_b' must be the designs of group B")
+    if not _subsequence(sets.gate, sets.order) or not _subsequence(sets.extra, sets.order):
+        raise _bad(path, "'gate' and 'extra' must follow 'order'")
+    if sets.smoke != sets.gate[:len(sets.smoke)]:
+        raise _bad(path, "'smoke' must be the first designs of 'gate'")
+
+
+def _check_ranks(sets: Sets, path: Path) -> None:
+    for i, design in enumerate(sets.gate, start=1):
+        if sets.designs[design].rank != i:
+            raise _bad(path, f"design '{design}': rank is not {i} (its place in 'gate')")
+    for design in sets.extra:
+        if sets.designs[design].rank is not None:
+            raise _bad(path, f"design '{design}': an extra has rank null")
+
+
+def _check_order(sets: Sets, path: Path) -> None:
+    in_b = tuple(d for d in sets.order if sets.designs[d].group == "B")
+    if sets.group_b != in_b or sets.order[len(sets.order) - len(in_b):] != in_b:
+        raise _bad(path, "'group_b' must be the designs of group B, at the end of 'order'")
     sizes = [sets.designs[d].golden_bytes for d in sets.order]
     if sizes != sorted(sizes):
         raise _bad(path, "'order' is not by ascending golden size")
@@ -125,18 +162,21 @@ def load_sets(path: Path = SETS_JSON) -> Sets:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise _bad(path, f"cannot read: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schema") != SCHEMA:
+    if not isinstance(data, dict) or not _is_int(data.get("schema")) \
+            or data["schema"] != SCHEMA:
         raise _bad(path, f"not a schema {SCHEMA} sets file")
     raw = data.get("designs")
     if not isinstance(raw, dict):
         raise _bad(path, "'designs' is not an object")
     sets = Sets(
         order=_names(data, "order", path), gate=_names(data, "gate", path),
-        extra=_names(data, "extra", path), smoke=_names(data, "smoke", path),
-        group_b=_names(data, "group_b", path),
+        extra=_names(data, "extra", path, empty=True), smoke=_names(data, "smoke", path),
+        group_b=_names(data, "group_b", path, empty=True),
         designs={name: _design_info(name, info, path) for name, info in raw.items()},
     )
-    _check_sets(sets, path)
+    _check_split(sets, path)
+    _check_ranks(sets, path)
+    _check_order(sets, path)
     return sets
 
 
@@ -304,6 +344,7 @@ class _Common:
     odin3_build: str | None
     lib_sha256: str | None
     abc_script_sha256: str | None
+    hashes: dict[Path, str] = dataclasses.field(default_factory=dict)
 
 
 def _ordered_legs(legs: Iterable[str]) -> tuple[str, ...]:
@@ -313,7 +354,7 @@ def _ordered_legs(legs: Iterable[str]) -> tuple[str, ...]:
 
 def _common(req: PlanRequest, legs: tuple[str, ...]) -> _Common:
     arch = qor_legs.arch_base(req.arch)
-    xml = qor_legs.arch_xml(req.vtr_root, arch)
+    xml = qor_legs.arch_xml_path(req.vtr_root, arch)
     arch_sha = file_sha256(xml)
     commit = qor_legs.vtr_commit(req.vtr_root)
     python = req.vtr_root / ".venv" / "bin" / "python"
@@ -353,12 +394,23 @@ def is_cached(job_dir: Path, key: str) -> bool:
         and metrics.get("key") == key
 
 
+def _source_sha256(path: Path, com: _Common, *, may_miss: bool) -> str:
+    """A design source's SHA-256, hashed once per plan (a golden is read by Pprime and R, a
+    ``.v`` by up to four legs). A missing golden is ``GOLDEN_MISSING``."""
+    if path not in com.hashes:
+        if may_miss and not path.is_file():
+            return GOLDEN_MISSING
+        com.hashes[path] = file_sha256(path)
+    return com.hashes[path]
+
+
 def _plan_job(leg: str, design: str, req: PlanRequest, sets: Sets, com: _Common) -> Job:
     golden = qor_legs.golden_blif(com.arch, design) if leg in GOLDEN_LEGS else None
     if golden is not None:
-        source_sha = _sha_or(golden, GOLDEN_MISSING) or GOLDEN_MISSING
+        source_sha = _source_sha256(golden, com, may_miss=True)
     else:
-        source_sha = file_sha256(qor_legs.design_verilog(req.vtr_root, design))
+        source_sha = _source_sha256(qor_legs.design_verilog(req.vtr_root, design), com,
+                                    may_miss=False)
     inputs = _key_inputs(leg, design, source_sha, req, com)
     key, key12 = job_key(inputs), leg_key(inputs)[:KEY12]
     job_dir = req.out / com.vtr_commit[:KEY12] / com.arch / leg / key12 / design
