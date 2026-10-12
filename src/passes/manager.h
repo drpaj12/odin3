@@ -87,7 +87,8 @@ odin3_pass_options odin3_pass_get_options(void);
  * refuses a pass whose processes is REFUSE when some module has a process (2D EL-33: "pass
  * '<name>': module '<m>' has processes; run proc first" logged, ODIN3_ERR_INVALID_ARG, nothing run,
  * no pass run opened, no check, no timing line); opens a provenance pass run named after the pass
- * (odin3_pass_run_begin), checks the design (FULL,
+ * whose row records args without leading and trailing blanks, 0 when that is empty
+ * (odin3_pass_run_begin_args; IR-12), checks the design (FULL,
  * when checking is on; see odin3_pass_options; this check reports errors only, so the warnings of
  * the check after a pass show once per pass; blind spots: a warning that first appears in this
  * check, e.g. from IR changed outside a pass, is counted in odin3_log_count but never delivered,

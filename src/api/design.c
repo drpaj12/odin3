@@ -1,6 +1,7 @@
 /*
- * design.c — the public ABI's design group: run a pass, top module, modules by index and name.
- * (odin3_design_create and odin3_design_destroy are exported from src/ir/design.c as they are.)
+ * design.c — the public ABI's design group: run a pass, top module, modules by index and name, the
+ * pass-run table. (odin3_design_create and odin3_design_destroy are exported from src/ir/design.c
+ * as they are.)
  */
 #include "api/api.h"
 
@@ -8,6 +9,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 #include "util/attr.h"
@@ -82,5 +84,28 @@ ODIN3_EXPORT odin3_status odin3_design_lookup_module(const odin3_design *design,
             break;
         }
     }
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_design_get_passrun_count(const odin3_design *design,
+                                                         uint32_t *count) {
+    if (design == NULL || count == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    *count = odin3_passrun_end(design);
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_design_get_passrun(const odin3_design *design, uint32_t run,
+                                                   const char **name, const char **args,
+                                                   const char **info) {
+    if (design == NULL || name == NULL || args == NULL || info == NULL || run == 0 ||
+        run >= odin3_passrun_end(design)) {
+        return odin3_api_invalid(__func__);
+    }
+    odin3_passrun_id id = {run};
+    *name = odin3_api_str(design, odin3_passrun_name(design, id));
+    *args = odin3_api_str(design, odin3_passrun_args(design, id));
+    *info = odin3_api_str(design, odin3_passrun_info(design, id));
     return ODIN3_OK;
 }

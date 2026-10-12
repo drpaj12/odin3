@@ -239,6 +239,23 @@ class PythonWalkTest(unittest.TestCase):
                 design.run_script("no_such_pass")
             self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_PARSE)
 
+    def test_pass_runs(self) -> None:
+        """The pass-run table through the cdef (3D Task 8): name, trimmed arguments, information."""
+        ffi = self.odin3.ffi
+        with Design(self.odin3) as design:
+            design.run_script(f'read_blif "{HAND_BODY}";  stats  ')
+            count = int(design.get("odin3_design_get_passrun_count", "uint32_t"))
+            self.assertEqual(count, 3)
+            out = [ffi.new("const char **") for _ in range(3)]
+            rows = []
+            for run in range(1, count):
+                design.call("odin3_design_get_passrun", run, *out)
+                rows.append(tuple(self.odin3.text(ptr[0]) for ptr in out))
+            self.assertEqual(rows, [("read_blif", f'"{HAND_BODY}"', ""), ("stats", "", "")])
+            with self.assertRaises(Odin3Error) as ctx:
+                design.call("odin3_design_get_passrun", count, *out)
+            self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_INVALID_ARG)
+
     def test_capture_log_nests(self) -> None:
         odin3 = self.odin3
         with odin3.capture_log() as outer:

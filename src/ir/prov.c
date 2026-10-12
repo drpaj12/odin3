@@ -38,7 +38,7 @@ odin3_status odin3_prov_store_init(odin3_design *design) {
         return ODIN3_ERR_NO_MEMORY;
     }
     design->prov = store; /* odin3_prov_store_free cleans up a partial store */
-    odin3_vec_init(&store->runs, sizeof(uint32_t));
+    odin3_vec_init(&store->runs, sizeof(odin3_passrun_row));
     odin3_vec_init(&store->tombstones, sizeof(odin3_tombstone));
     odin3_vec_init(&store->marks, sizeof(uint32_t));
     odin3_vec_init(&store->stack, sizeof(uint32_t));
@@ -210,27 +210,48 @@ static odin3_status record_intern(odin3_prov_store *store, const odin3_prov_reco
 
 /* --- pass runs and operations -------------------------------------------------------------- */
 
-odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
-                                  odin3_pass_ctx *ctx) {
-    if (design == NULL || ctx == NULL || pass_name_str == 0 || !is_str(design, pass_name_str)) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "odin3_pass_run_begin: no design, no context or %u is not a pass name",
-                  pass_name_str);
-        return ODIN3_ERR_INVALID_ARG;
-    }
+/* Appends the row {name, args, 0} (both checked by the caller) and fills *ctx. */
+static odin3_status run_append(odin3_design *design, odin3_passrun_row row, odin3_pass_ctx *ctx) {
     odin3_prov_store *store = design->prov;
     if (store->runs.len >= UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    uint32_t *slot = odin3_vec_push(&store->runs);
+    odin3_passrun_row *slot = odin3_vec_push(&store->runs);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *slot = pass_name_str;
+    *slot = row;
     ctx->design = design;
     ctx->run.v = (uint32_t)(store->runs.len - 1);
     ctx->op = 0;
     return ODIN3_OK;
+}
+
+/* odin3_pass_run_begin_args, its errors logged for `what`. */
+static odin3_status run_begin(odin3_design *design, odin3_passrun_row row, odin3_pass_ctx *ctx,
+                              const char *what) {
+    if (design == NULL || ctx == NULL || row.name == 0 || !is_str(design, row.name)) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: no design, no context or %u is not a pass name", what,
+                  row.name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (!is_str(design, row.args)) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: invalid argument args_str", what);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return run_append(design, row, ctx);
+}
+
+odin3_status odin3_pass_run_begin_args(odin3_design *design, uint32_t pass_name_str,
+                                       uint32_t args_str, odin3_pass_ctx *ctx) {
+    odin3_passrun_row row = {pass_name_str, args_str, 0};
+    return run_begin(design, row, ctx, "odin3_pass_run_begin_args");
+}
+
+odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
+                                  odin3_pass_ctx *ctx) {
+    odin3_passrun_row row = {pass_name_str, 0, 0};
+    return run_begin(design, row, ctx, "odin3_pass_run_begin");
 }
 
 void odin3_prov_begin_op(odin3_pass_ctx *ctx) {
@@ -238,13 +259,133 @@ void odin3_prov_begin_op(odin3_pass_ctx *ctx) {
     ctx->op++;
 }
 
+/* The row of run, NULL for a NULL design or run 0 or unknown. */
+static const odin3_passrun_row *run_row(const odin3_design *design, odin3_passrun_id run) {
+    const odin3_vec *runs = design != NULL ? &design->prov->runs : NULL;
+    return runs != NULL && run.v != 0 && run.v < runs->len ? odin3_vec_cat(runs, run.v) : NULL;
+}
+
 uint32_t odin3_passrun_name(const odin3_design *design, odin3_passrun_id run) {
-    const odin3_vec *runs = &design->prov->runs;
-    return run.v != 0 && run.v < runs->len ? *(const uint32_t *)odin3_vec_cat(runs, run.v) : 0;
+    const odin3_passrun_row *row = run_row(design, run);
+    return row != NULL ? row->name : 0;
+}
+
+uint32_t odin3_passrun_args(const odin3_design *design, odin3_passrun_id run) {
+    const odin3_passrun_row *row = run_row(design, run);
+    return row != NULL ? row->args : 0;
+}
+
+uint32_t odin3_passrun_info(const odin3_design *design, odin3_passrun_id run) {
+    const odin3_passrun_row *row = run_row(design, run);
+    return row != NULL ? row->info : 0;
 }
 
 uint32_t odin3_passrun_end(const odin3_design *design) {
     return (uint32_t)design->prov->runs.len;
+}
+
+odin3_status odin3_passrun_set_info(const odin3_pass_ctx *ctx, uint32_t info_str) {
+    const char *what = "odin3_passrun_set_info";
+    if (ctx == NULL || ctx->design == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: no pass context", what);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_vec *runs = &ctx->design->prov->runs;
+    if (ctx->run.v == 0 || ctx->run.v >= runs->len) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: no run %u", what, ctx->run.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (info_str == 0 || !is_str(ctx->design, info_str)) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: invalid argument info_str", what);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_passrun_row *row = odin3_vec_at(runs, ctx->run.v);
+    if (row->info != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: run %u already has information", what, ctx->run.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    row->info = info_str;
+    return ODIN3_OK;
+}
+
+/* --- run information: the word formatter ---------------------------------------------------- */
+
+/* Lowest and highest bytes of an information key (printable ASCII, no blank). */
+enum { INFO_KEY_MIN = '!', INFO_KEY_MAX = '~' };
+
+static bool info_key_ok(const char *key) {
+    if (key == NULL || key[0] == '\0') {
+        return false;
+    }
+    for (const char *at = key; *at != '\0'; at++) {
+        if (*at < INFO_KEY_MIN || *at > INFO_KEY_MAX || strchr("=\"\\", *at) != NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* *quote: the value needs double quotes; false when it cannot be written (NUL, CR or LF). */
+static bool info_value_ok(odin3_bytes value, bool *quote) {
+    *quote = false;
+    if (value.ptr == NULL && value.len > 0) {
+        return false;
+    }
+    const char *chars = value.ptr;
+    for (size_t i = 0; i < value.len; i++) {
+        char chr = chars[i];
+        if (chr == '\0' || chr == '\r' || chr == '\n') {
+            return false;
+        }
+        *quote = *quote || chr == ' ' || chr == '\t' || chr == '"' || chr == '\\';
+    }
+    return true;
+}
+
+/* Appends value in double quotes, each `"` and `\` preceded by `\`. */
+static odin3_status append_quoted(odin3_strbuf *out, odin3_bytes value) {
+    const char *chars = value.ptr;
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr("\""));
+    for (size_t i = 0; st == ODIN3_OK && i < value.len; i++) {
+        if (chars[i] == '"' || chars[i] == '\\') {
+            st = odin3_strbuf_append(out, odin3_bytes_cstr("\\"));
+        }
+        st = st == ODIN3_OK ? odin3_strbuf_append(out, (odin3_bytes){chars + i, 1}) : st;
+    }
+    return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\"")) : st;
+}
+
+/* The name of the first bad argument of odin3_passrun_info_append, NULL when all are good (then
+ * *quote tells whether the value needs double quotes). */
+static const char *info_bad_arg(const odin3_strbuf *out, const char *key, odin3_bytes value,
+                                bool *quote) {
+    if (out == NULL) {
+        return "out";
+    }
+    if (!info_key_ok(key)) {
+        return "key";
+    }
+    return info_value_ok(value, quote) ? NULL : "value";
+}
+
+odin3_status odin3_passrun_info_append(odin3_strbuf *out, const char *key, odin3_bytes value) {
+    bool quote = false;
+    const char *bad = info_bad_arg(out, key, value, &quote);
+    if (bad != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_passrun_info_append: invalid argument %s", bad);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    size_t had = out->len;
+    odin3_status st = had > 0 ? odin3_strbuf_append(out, odin3_bytes_cstr(" ")) : ODIN3_OK;
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(out, "%s=", key) : st;
+    if (st == ODIN3_OK) {
+        st = quote ? append_quoted(out, value) : odin3_strbuf_append(out, value);
+    }
+    if (st != ODIN3_OK && out->data != NULL) { /* back to what it was */
+        out->len = had;
+        out->data[had] = '\0';
+    }
+    return st;
 }
 
 /* The store of a usable pass context; NULL (logged for `what`) otherwise. */

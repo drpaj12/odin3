@@ -589,6 +589,8 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # 3D Task 8: the pass-run table's arguments and run information (IR-12).
+    odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
     # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
@@ -745,7 +747,7 @@ if(BUILD_TESTING)
                 --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
     set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
-    # The ABI stays v4 through 2D (ruling I1): 2D's additions are additive.
+    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4): their additions are additive.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
