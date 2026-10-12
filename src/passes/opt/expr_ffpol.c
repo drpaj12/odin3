@@ -86,28 +86,18 @@ typedef struct pol_table {
     uint32_t n;
 } pol_table;
 
-static odin3_celltype_id type_id(const odin3_design *design, const char *name) {
-    uint32_t str = 0;
-    odin3_celltype_id id = {0};
-    if (odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) &&
-        odin3_celltype_find(design, str, &id)) {
-        return id;
-    }
-    return (odin3_celltype_id){0};
-}
-
 /* The types of this design's registry that fold, resolved once per call. */
 static void table_init(const odin3_design *design, pol_table *tab) {
     tab->n = 0;
     for (size_t i = 0; i < sizeof k_word_types / sizeof k_word_types[0]; i++) {
-        odin3_celltype_id id = type_id(design, k_word_types[i]);
+        odin3_celltype_id id = odin3_kit_type_named(design, k_word_types[i]);
         if (id.v != 0) {
             tab->entry[tab->n++] = (pol_type){id, {0}, NULL};
         }
     }
     for (size_t i = 0; i < sizeof k_fine_types / sizeof k_fine_types[0]; i++) {
-        odin3_celltype_id id = type_id(design, k_fine_types[i].name);
-        odin3_celltype_id swap = type_id(design, k_fine_types[i].swap);
+        odin3_celltype_id id = odin3_kit_type_named(design, k_fine_types[i].name);
+        odin3_celltype_id swap = odin3_kit_type_named(design, k_fine_types[i].swap);
         if (id.v != 0 && swap.v != 0) {
             tab->entry[tab->n++] = (pol_type){id, swap, k_fine_types[i].port};
         }
@@ -125,14 +115,6 @@ static const pol_type *table_find(const pol_table *tab, odin3_celltype_id type) 
 
 /* --- what to flip ----------------------------------------------------------------------------- */
 
-static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
-    uint32_t i = 0;
-    while (i < def->n_params && strcmp(def->params[i].name, name) != 0) {
-        i++;
-    }
-    return i;
-}
-
 /* The slot of port `port` of def: the index of its polarity parameter, SWAP_SLOT for a fine FF's
  * clock or enable, NO_SLOT for a port without a polarity ($memrd's EN, a data port, an output). */
 static int32_t polarity_slot(const odin3_celltype_def *def, const pol_type *type, uint32_t port) {
@@ -145,8 +127,8 @@ static int32_t polarity_slot(const odin3_celltype_def *def, const pol_type *type
     }
     for (size_t i = 0; i < sizeof k_pol_ports / sizeof k_pol_ports[0]; i++) {
         if (strcmp(pdef->name, k_pol_ports[i].port) == 0) {
-            uint32_t index = param_index(def, k_pol_ports[i].param);
-            return index < def->n_params ? (int32_t)index : NO_SLOT;
+            uint32_t index = odin3_kit_param_index(def, k_pol_ports[i].param);
+            return index != ODIN3_KIT_NONE ? (int32_t)index : NO_SLOT;
         }
     }
     return NO_SLOT;

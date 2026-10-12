@@ -47,8 +47,8 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
 
 /*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt_merge: Task
- * 8; opt_reduce: 9; opt_muxtree: 10; opt_dff: 11 and 12; opt: 13; opt_share: 14).
+ * Point (e): the passes that are still stubs. Each later task removes its own line (opt_dff: Task
+ * 11 and 12; opt: 13; opt_share: 14).
  */
 static const char *const k_stubs[] = {
     "opt",
@@ -210,10 +210,8 @@ typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 
 /* The sub-pass bodies; NULL while a sub-pass is a stub (the odin3_opt_<sub>_run of its task). */
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
-    [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,
-    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
-    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run,
-    [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
+    [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
+    [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run, [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
     [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
 };
 

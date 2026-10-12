@@ -250,7 +250,7 @@ exactly as each Yosys rule tests (`== State::Sx` versus "not 0/1").
 | `mux_undef`, `mux_empty`, `mux_sel01`, `mux_reduce` (`-mux_undef`) | `$mux $pmux` | (A and B all undef) or S all undef → Y = A; B slices that are all undef or whose S bit is undef are dropped; an all-undef A takes the last remaining B slice; none left → Y = A; A = 0, B = 1 → Y = S; else rebuilt as `$pmux` (≥ 2 selects) or `$mux` | |
 | `const.$<type>` | every evaluable registry cell: `$not $and $or $xor $xnor $reduce_* $logic_* $shl $shr $sshr $shiftx $lt $le $eq $ne $gt $ge $add $sub $mul $div $mod $pow $neg $mux $pmux` | every input bit constant | Y = the 4-state fold (OP-5) |
 | (`$mux` conservative) | `$mux` | S constant (`-keepdc`: and defined) → Y = B if S is 1, else A (so **S = x picks A**); A = B → Y = A | |
-| `$pow` strength reduction | `$pow`, A constant one-hot (not the sign bit of a signed A), B unsigned | A = 2 → `$shl(1, B)` with `A_SIGNED` 0; A = 2^k → `$mul(k, B)` feeding `$shl(1, ·)` | Yosys 0.55 keeps `A_SIGNED` 1 on the 1-bit `1'1` (`-1 << B`) and also rewrites a signed A whose one-hot bit is the sign: §17 #13 |
+| `$pow` strength reduction | `$pow`, A constant one-hot (not the sign bit of a signed A), B unsigned | A = 2 → `$shl(1, B)` with `A_SIGNED` 0; A = 2^k → `$mul(k, B)` feeding `$shl(1, ·)` | Yosys 0.55 keeps `A_SIGNED` 1 on the 1-bit `1'1` (`-1 << B`) and also rewrites a signed A whose one-hot bit is the sign: §17 #21 |
 | `mul_shift.zero` / `.swapped` / `.unswapped`, `mul_low_zeros` (`!keepdc`) | `$mul` | a fully defined constant side: 0 → Y = 0; one-hot (not the signed MSB) → `$shl` by its index; low zero bits on either side → a narrower `$mul` and Y's low bits 0 | |
 | `divmod_zero` | `$div $mod` | B fully defined and zero | Y = all x |
 | `div_shift` / `mod_mask` (`!keepdc`) | `$div` / `$mod` | B one-hot (not the signed MSB) | `$sshr` by the index (signed truncating: plus `$reduce_or`/`$and`/`$add` correction) / `$and` mask (signed truncating: the remainder bits plus a sign fix) |
@@ -267,7 +267,7 @@ that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY` (a `$memrd`/`$memwr`'s `C
 WIDTH-bit ports: only a 1-bit FF has an inverter's output there (the invert map is keyed by whole
 signals, as Yosys's). The node is rebuilt once however many inputs change, its Q nets kept (so the
 `init` on them stays); `DEBUG` line and `clkinv` count per input, as Yosys logs per input. An input
-on a ring of inverters is left alone (§17 #20).
+on a ring of inverters is left alone (§17 #28).
 
 ### 4.5 `-fine` rules
 
@@ -288,7 +288,7 @@ is skipped without `-fine` (or `-full`). Where the rules sit in a cell type's li
 group, neutral, reduce_and, A and B rules after the logic rules and before `xbit`, the strip first
 for `$add`/`$sub`, the `$eq`/`$ne` and comparison rules after folding. `fine.neutral_*`, `fine.A/B`,
 `fine.$reduce_and` and the strip go on with the rebuilt cell in the same visit (§4.1), the others
-end it. Differences: §17 #17-19.
+end it. Differences: §17 #25-27.
 
 ### 4.6 `replace_undriven` (`-undriven`)
 

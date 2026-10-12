@@ -274,12 +274,9 @@ static const odin3_expr_rule_fn *const k_rules[ODIN3_EXPR_T_COUNT] = {
 
 /* The registry types by name, once per module; a type the registry lacks stays 0. */
 static void resolve_types(odin3_expr_ctx *ec) {
-    const odin3_strtab *tab = odin3_design_strtab(ec->oc->design);
     for (uint32_t i = 0; i < ODIN3_EXPR_T_COUNT; i++) {
-        uint32_t str = 0;
-        odin3_celltype_id id = {0};
-        if (odin3_strtab_find(tab, odin3_bytes_cstr(k_type_names[i]), &str) &&
-            odin3_celltype_find(ec->oc->design, str, &id)) {
+        odin3_celltype_id id = odin3_kit_type_named(ec->oc->design, k_type_names[i]);
+        if (id.v != 0) {
             ec->type[i] = id;
         }
     }
@@ -319,11 +316,7 @@ void odin3_expr_log_rewrite(const odin3_opt_ctx *oc, const char *rule, const cha
     }
     const odin3_strtab *tab = odin3_design_strtab(oc->design);
     char label[LABEL_MAX];
-    if (name_str != 0) {
-        (void)snprintf(label, sizeof label, "%s", odin3_strtab_get(tab, name_str));
-    } else {
-        (void)snprintf(label, sizeof label, "$c%" PRIu32, node.v);
-    }
+    odin3_kit_name_label(oc, name_str, node, label, sizeof label);
     odin3_log(ODIN3_LOG_DEBUG, "opt_expr: module '%s': %s on %s '%s'",
               odin3_strtab_get(tab, odin3_module_name(oc->module)), rule, type_name, label);
 }

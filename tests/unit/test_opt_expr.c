@@ -3321,7 +3321,7 @@ static const char K_FINE_ADD[] = "module \\m\n"
                                  "end\n";
 
 /* yosys -p "read_rtlil add.il; opt_expr -fine": Y[0] = a4[0], a 3-bit $add for Y[3:1]; the $sub's
- * 1 - 1 bit is 0; an $add of 0 strips every bit (Yosys leaves a 0-bit cell: §17 #18) */
+ * 1 - 1 bit is 0; an $add of 0 strips every bit (Yosys leaves a 0-bit cell: §17 #26) */
 static void test_fine_add_low_bit(void) {
     fx.opts.fine = true;
     build_run(K_FINE_ADD);
@@ -3377,7 +3377,7 @@ static const char K_FINE_ADD_SIGNED[] = "module \\m\n"
                                         "end\n";
 
 /* A fully stripped operand: a signed one keeps its top bit (Yosys), an unsigned one is 0 (Yosys:
- * a 0-bit port; §17 #18), which strips the rest of an unsigned cell in the rounds that follow. */
+ * a 0-bit port; §17 #26), which strips the rest of an unsigned cell in the rounds that follow. */
 static void test_fine_add_operand_gone(void) {
     fx.opts.fine = true;
     build_run(K_FINE_ADD_SIGNED);
@@ -3646,7 +3646,7 @@ static const char K_FINE_CMP_MIXED[] = "module \\m\n"
                                        "  end\n"
                                        "end\n";
 
-/* Signed only when both operands are (§17 #19): a signed A against an unsigned 0 is unsigned. */
+/* Signed only when both operands are (§17 #27): a signed A against an unsigned 0 is unsigned. */
 static void test_fine_cmp_mixed_sign(void) {
     fx.opts.fine = true;
     build_run(K_FINE_CMP_MIXED);

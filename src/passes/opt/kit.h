@@ -204,6 +204,13 @@ void odin3_kit_sort_unify(odin3_vec *vec, size_t from);
  */
 void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size);
 
+/*
+ * The same label from a name string read earlier (0 = unnamed), for a log line written after the
+ * node is gone: name, else "$c<ID>" of node.
+ */
+void odin3_kit_name_label(const odin3_opt_ctx *oc, uint32_t name, odin3_node_id node, char *out,
+                          size_t size);
+
 /* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 

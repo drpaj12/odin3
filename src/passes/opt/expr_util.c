@@ -190,7 +190,8 @@ odin3_status odin3_expr_extend(odin3_expr_ctx *ec, const odin3_expr_sig *in, uin
 }
 
 odin3_expr_sig odin3_expr_slice(const odin3_expr_sig *in, uint32_t from, uint32_t n) {
-    return (odin3_expr_sig){in->net + from, n};
+    /* NULL + 0 is undefined: an empty signal may have no array (UBSan). */
+    return (odin3_expr_sig){in->net != NULL ? in->net + from : NULL, n};
 }
 
 odin3_status odin3_expr_join(odin3_expr_ctx *ec, const odin3_expr_sig *low,

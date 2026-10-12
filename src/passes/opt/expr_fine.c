@@ -299,7 +299,7 @@ odin3_status odin3_expr_rule_fine_addsub(odin3_expr_ctx *ec) {
     if (stripped == 0) {
         return ODIN3_OK;
     }
-    if (stripped == job.y.n) { /* nothing is left to compute: Y is wiring (§17 #18) */
+    if (stripped == job.y.n) { /* nothing is left to compute: Y is wiring (§17 #26) */
         return odin3_expr_wire(ec, ODIN3_OPT_RULE_FINE_ADDSUB, &job.src);
     }
     return strip_rest(ec, &job, stripped);
