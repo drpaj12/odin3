@@ -618,22 +618,25 @@ static odin3_status mx_open(mx_walk *walk, mx_frame *frame, odin3_pw_sig value, 
 }
 
 /*
- * Yosys gen_mux for case case_index (value: its tree): no compare, or value equal to the result,
- * makes value the result with no cell; so does an empty select (whose earlier compares' cells
- * stay), and the open mux stays open (the open-across-boundary quirk, §6). Otherwise the open mux
- * ends and a new one opens on the select.
+ * Yosys gen_mux for case case_index (value: its tree): value equal to the result makes it the
+ * result with no cell. No compare, or an empty select (whose earlier compares' cells stay), also
+ * makes value the result with no cell; then the open mux ends too (§20 #18: Yosys keeps it open,
+ * and a later append to it loses that case's value). Otherwise the open mux ends and a new one
+ * opens on the select.
  */
 static odin3_status mx_gen(mx_walk *walk, mx_frame *frame, uint32_t case_index,
                            odin3_pw_sig value) {
     const odin3_pw_case *cs = case_cat(walk->pw, case_index);
-    if (cs->compares.len == 0 || odin3_pw_sig_equal(walk->pw, value, frame->result)) {
+    if (cs->compares.len != 0 && odin3_pw_sig_equal(walk->pw, value, frame->result)) {
         frame->result = value;
         return ODIN3_OK;
     }
-    bool empty = mx_select_empty(walk, cs);
-    odin3_status st = empty ? ODIN3_OK : mx_close(walk, frame);
+    bool empty = cs->compares.len == 0 || mx_select_empty(walk, cs);
+    odin3_status st = mx_close(walk, frame);
     odin3_pw_bit sel = 0;
-    st = st == ODIN3_OK ? mx_select(walk, frame, case_index, &sel, &empty) : st;
+    if (st == ODIN3_OK && cs->compares.len != 0) {
+        st = mx_select(walk, frame, case_index, &sel, &empty);
+    }
     if (st != ODIN3_OK || empty) {
         frame->result = st == ODIN3_OK ? value : frame->result;
         return st;

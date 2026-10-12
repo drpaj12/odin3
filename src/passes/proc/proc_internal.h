@@ -360,11 +360,13 @@ void odin3_proc_snips_free(odin3_proc_snips *snips);
  * mux is a record until no case can append to it (the next mux of its switch opens, an append
  * closes it, or its switch is done), then one node; an append never resizes a node. An append whose
  * select is empty (a compare of only '-' in a parallel_case group, where Yosys 0.55 asserts)
- * makes the case's value the result, as gen_mux does, and closes the open mux (§20 #17). Each
- * snippet's value is recorded with odin3_proc_connect (sig[i] <- value[i]), after the promotions
- * step B records, so M1 applies them in that order. ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE,
- * odin3_proc_add_cell) stop at once with valid IR: the cells made stay, and the nets of muxes
- * still open are deleted. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ * makes the case's value the result, as gen_mux does, and closes the open mux (§20 #17); gen_mux's
+ * own no-cell paths (no compare, an empty select) close it too, where Yosys keeps it open and
+ * loses a later append (§20 #18). Each snippet's value is recorded with odin3_proc_connect
+ * (sig[i] <- value[i]), after the promotions step B records, so M1 applies them in that order.
+ * ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR: the
+ * cells made stay, and the nets of muxes still open are deleted. ODIN3_ERR_INVALID_ARG (logged) for
+ * a NULL argument.
  */
 odin3_status odin3_proc_mux(odin3_proc_mctx *mctx, odin3_pw *pw);
 

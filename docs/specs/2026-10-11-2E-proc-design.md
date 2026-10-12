@@ -568,24 +568,32 @@ both the compare and the switch signal; a compare that is then empty makes the c
 costs no `$eq`); anything else is `$eq(A = signal bits, B = compare bits, A_SIGNED = B_SIGNED =
 0, Y_WIDTH = 1)`, where an x compare bit stays a pin on the x constant net and a non-constant
 item (2D C8) is its nets. Several compares are ORed by `$reduce_or` (`A_WIDTH` = their count).
-Yosys's quirks are kept on purpose, so that `proc-diff` is exact: an `$eq` made before a later
-compare turned out empty stays (dead, removed by `opt`); a mux stays open across a group
-boundary when the boundary case built no cell, so the next case appends to it. *Amended (2E
-Task 7):* that second quirk is not only structural. When the boundary case made its own value
-the result (a default, or an empty select) while a mux of a later case was open, an earlier
-case of the next group appends to that mux, whose output no longer reaches the result, and its
-value is lost: Yosys 0.55 lowers `casez (s) 2'b00: y = x0; 2'b01: y = a; 2'b??: y = a; k: y =
-b; endcase` (rmdead keeps the non-constant item `k` after `2'b??`) to `y = a`, where Verilog
-gives `x0` for `s = 2'b00` (verified). 2E keeps Yosys's result for parity, pending a ruling (2E
-Task 7 report; the fix would end the open mux there, as an empty-select append does). *Amended
+Yosys's first quirk is kept on purpose, so that `proc-diff` is exact: an `$eq` made before a
+later compare turned out empty stays (dead, removed by `opt`). *Amended (2E Task 7 fix round,
+§20 #18):* its second, a mux left open across a group boundary when the boundary case built no
+cell, is not kept. When gen_mux makes the case's value the result with no cell because the case
+has no compare or its select is empty, while a mux of a later case is open, Yosys keeps that mux
+open, an earlier case of the next group appends to it, and since its output no longer reaches
+the result that case's value is lost: Yosys 0.55 lowers `casez (s) 2'b00: y = x0; 2'b01: y = a;
+2'b??: y = a; k: y = b; endcase` (rmdead keeps the non-constant item `k` after `2'b??`) to `y =
+a`, where Verilog gives `x0` for `s = 2'b00` (2E Task 7 review: `miter -equiv` against `y = (s ==
+2'b00) ? x0 : a` fails at `s = 00, a = 1, x0 = 0`; Yosys's `eval` of its own netlist gives `y =
+0` for `s = 00, x0 = 1, a = 0`; Icarus gives `y = 1`). 2E ends the open mux on those two no-cell
+paths (it becomes a node with no sinks), so the earlier case opens a new mux on the result and
+keeps Verilog's priority. The `value == result` path needs no change: an open mux is then the
+result itself. The netlist differs from Yosys's only where Yosys appends to such a dead mux
+(review: byte-identical in 319 of 330 random processes, the same normal form in 4 more, and
+`sat`-equivalent in all 323 Yosys lowers, where the appended value happened to equal the result).
+*Amended
 (2E Task 7, replacing the claim that an all-`-` compare cannot reach an append):* rmdead removes
 only constant items after an item matching every value, so a non-constant item after it (2D C8)
 survives, and in a `parallel_case` switch, where every case is one group, the reverse walk opens
 a mux for it and then appends the all-`-` item with an empty select, where Yosys 0.55 asserts
 (`ctrl_sig.size() == 1`, proc_mux.cc:264; verified on `parallel_case {2'--: … | \k: …}`). 2E
 lowers it as above (§20 #17): the item's value becomes the result and an earlier item of the
-group opens a new mux on it, so for that snippet the item wins over the later items, in
-Verilog's first-match order (checked by simulation; Yosys has no result to compare with). Where
+group opens a new mux on it, so for that snippet the item wins over the later items, as in
+Verilog's first-match order, while the earlier items keep `$pmux` semantics among themselves on
+the new mux (checked by simulation; Yosys has no result to compare with). Where
 the item's value equals the open mux's `A` it is skipped, as every such append is, and the later
 items' mux stands: `parallel_case` allows both, since the item overlaps every other item. In
 a switch without `parallel_case` an all-`-` item always ends its group (nothing is left in the
@@ -612,14 +620,18 @@ promotions at merge point M1 (§7). Constant inputs are pins on the shared const
 | `full_case`, or every value listed (rmdead marks it) | as above, with x for the bits every item assigns, so the default leg is x (2D adds an x default under `full_case`, EL-36) |
 | case items that assign the same value as the default | no mux stage for them (`value == result`) |
 
-Cost: O(cells created + Σ over snippets of the cases on their paths); the pattern pools of the
-grouping step are capped as in §5.2 (past the cap the remaining cases start new groups, W5b,
-equivalent). *Amended (2E Task 7):* each switch's groups (and its simple-parallel test) are
-computed once, on its first visit, where Yosys recomputes them for every snippet (the same
-groups: they depend on the switch only), so W5b is given once per switch; the cap is per
-grouping pool (rmdead's live pools share theirs, §16). Past the cap the groups are smaller, so
-the result is equivalent, or more defined where the extra group boundary keeps a case away from
-the open-mux quirk above (seen once in 80 random capped processes, 2E Task 7).
+Cost: O(cells created + Σ over snippets of the cases on their paths + Σ over snippets of the
+switches of the cases they visit). *Amended (2E Task 7 review M1):* the last term is Yosys's own
+loop (`swcache.check(sw)` for every switch of a visited case, per snippet), so N independent `if`s
+in one block, each assigning its own signal, cost O(N²): 1000 take 21 ms and 4000 take 349 ms
+(Release, the mux phase alone); a per-(case, snippet) index of the touching switches would make
+it linear without changing the order. Each switch's groups (and its simple-parallel test) are
+computed once, on its first visit, where Yosys recomputes them for every snippet (the same groups:
+they depend on the switch only), so W5b is given once per switch. The pattern pools of the
+grouping step are capped per pool (rmdead's live pools share theirs, §16): *amended (2E Task 7
+review M2)*, when a take passes the cap, the next case starts a new group with a fresh pool and
+grouping then resumes as before, so the groups are only smaller (W5b) and the result is
+equivalent.
 
 ## 7. Connections, merges and the net map (PR-13)
 
@@ -1129,7 +1141,10 @@ removes unused cells and wires and joins connected names. `netlist-compare --imp
 (new, 2E) treats a `.subckt` of an undefined `$`-model as a black box whose formals are those
 used, outputs being `Y`, `Q`, `X`, `CO`, `RD_DATA`. Known exceptions go to
 `tests/proc/diff_expect.txt` with a reason (expected: none; §20 items 8, 9 and 15 can only arise
-with latches on shared mux cones).
+with latches on shared mux cones). *Amended (2E Task 7 fix round):* §20 #18 differs on purpose
+where Yosys 0.55 gives wrong logic (a case appended to a mux that no longer reaches the result);
+`proc-diff` flags such inputs, and so does an equivalence check against a Parmys golden, with 2E
+the correct side; they are listed there with that reason. §20 #17's inputs make Yosys assert.
 
 ### 18.4 Bisect
 
@@ -1257,6 +1272,13 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones; a second visit of a mux whose pin it moved to x drops that branch | same | linear time, no error on legal input; differs only on shared cones with a direct feedback input, where Yosys's hold depends on visiting order |
 | 16 | E3 when `apply_reset`'s value has not settled after 100 rounds (*amended, 2E Task 6*) | errors at `count > 100`, tested before its unchanged test: at round 102 | same | the brief's cap semantics (the cap's rounds, lowered by the test hook); differs only on a chain of 100–101 substitutions |
 | 17 | an append whose select is empty (an all-`-` item in a `parallel_case` group, reached when rmdead keeps a later non-constant item) makes the item's value the result and ends the open mux (§6); a default appended to a group has select 0 (*2E Task 7*) | asserts `ctrl_sig.size() == 1` (proc_mux.cc:264); the default's select is a `$reduce_or` of zero bits | same (crashes) | valid input (`(* parallel_case *) casez … 2'b??: …; k: …`); Verilog's first-match order; the IR has no zero-width `$reduce_or` (same values) |
+| 18 | gen_mux's no-cell paths (no compare, or an empty select) end the open mux, so an earlier case of the next group opens a new mux (§6; *2E Task 7 fix round*) | keeps the mux open; the next group's case appends to it although its output no longer reaches the result, and that case's value is lost: wrong logic, e.g. `casez (s) 2'b00: y=x0; 2'b01: y=a; 2'b??: y=a; k: y=b;` gives `y = a` (`miter`/`sat`, Yosys's `eval`, Icarus: 2E Task 7 review) | same | 2E gives Verilog's value; the netlists differ only on such inputs, where `proc-diff` and an equivalence check against a Parmys golden flag them with 2E the correct side (§18.3) |
+
+*Kept from Yosys (2E Task 7 review, a note, not a divergence):* clean (§5.1, Task 4) removes an
+empty item of a `parallel_case` switch, as Yosys's `proc_clean` does, so with a default the
+inputs that match only that item take the default, where Verilog (with or without
+`parallel_case`) leaves the signals unchanged; the review's first-match interpreter saw it in 3 of
+328 random processes, and 2E keeps Yosys's choice.
 
 ## 21. Review focus
 

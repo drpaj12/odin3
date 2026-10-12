@@ -707,14 +707,16 @@ static void test_mux_items_eq_default(void) {
 /*
  * mux_open_across_boundary.il, proc_mux alone (internal risk §21 #1; with rmdead the 2'-- item
  * would remove 2'10): groups {00, 01}, {--}, {10}. 10 opens M; -- has an empty select, so a
- * becomes the result with no cell and M stays open; 01's value a equals the result (no cell); 00,
- * in 01's group, appends to M, whose Y then has no sinks. y1 is merged with a.
+ * becomes the result with no cell and M ends (its Y has no sinks; §20 #18: Yosys keeps M open and
+ * appends 00 to it, losing b for s = 2'b00); 01's value a equals the result (no cell); 00 opens a
+ * new mux on a. y1 = (s == 2'b00) ? b : a, Verilog's value.
  */
 static void test_mux_open_across_boundary(void) {
     static const char *const k_cells[] = {
         "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 1] Y=[c0]",
-        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 0] Y=[c1]",
-        "$pmux WIDTH=1 S_WIDTH=2 A=[x] B=[c b] S=[c0 c1] Y=[c2]",
+        "$mux WIDTH=1 A=[x] B=[c] S=[c0] Y=[c1]",
+        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 0] Y=[c2]",
+        "$mux WIDTH=1 A=[a] B=[b] S=[c2] Y=[y1]",
     };
     fixture fx;
     mux_run(&fx, (mux_case){"module \\m\n"
@@ -740,27 +742,27 @@ static void test_mux_open_across_boundary(void) {
                             "  end\n"
                             "end\n",
                             PRE_NONE, k_cells, N_OF(k_cells)});
-    expect_net(&fx, "y1", 0, "a");
-    odin3_net_id pmux_y =
-        odin3_pin_net(fx.res.module, odin3_node_port(fx.res.module, fx.cells[2], 3).first);
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_sinks(fx.res.module, pmux_y).count);
+    odin3_net_id dead_y =
+        odin3_pin_net(fx.res.module, odin3_node_port(fx.res.module, fx.cells[1], 3).first);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_sinks(fx.res.module, dead_y).count);
     fx_close(&fx);
 }
 
 /*
- * mux_open_boundary_nonconst.il (the same quirk after rmdead, which keeps the non-constant item k
+ * mux_open_boundary_nonconst.il (the same shape after rmdead, which keeps the non-constant item k
  * after 2'--: `casez (s) 2'b00: y = x0; 2'b01: y = a; 2'b??: y = a; k: y = b;`): k opens M; --
- * makes a the result with M still open; 01's value is a (no cell); 00 appends to M, whose Y is
- * dead, so t1 is a. Verilog gives x0 for s = 2'b00: Yosys 0.55 miscompiles this, and 2E keeps its
- * result for parity (spec §6, pending a ruling; the 2E Task 7 report).
+ * makes a the result and M ends (dead); 01's value is a (no cell); 00 opens a new mux on a, so t1 =
+ * (s == 2'b00) ? x0 : a, Verilog's value. Yosys 0.55 appends 00 to M and gives t1 = a, wrong for s
+ * = 2'b00 (§20 #18; `sat`, Yosys's `eval` and Icarus, 2E Task 7 review).
  */
 static void test_mux_open_boundary_nonconst(void) {
     static const char *const k_cells[] = {
         ("$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[k[0] k[1]] "
          "Y=[c0] full_case=1"),
-        ("$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 0] Y=[c1] "
+        "$mux WIDTH=1 A=[x] B=[b] S=[c0] Y=[c1] full_case=1",
+        ("$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 0] Y=[c2] "
          "full_case=1"),
-        "$pmux WIDTH=1 S_WIDTH=2 A=[x] B=[b x0] S=[c0 c1] Y=[c2] full_case=1",
+        "$mux WIDTH=1 A=[a] B=[x0] S=[c2] Y=[t1] full_case=1",
     };
     fixture fx;
     mux_run(&fx, (mux_case){"module \\m\n"
@@ -787,7 +789,42 @@ static void test_mux_open_boundary_nonconst(void) {
                             "  end\n"
                             "end\n",
                             PRE_UPTO_ARST, k_cells, N_OF(k_cells)});
-    expect_net(&fx, "t1", 0, "a");
+    odin3_net_id dead_y =
+        odin3_pin_net(fx.res.module, odin3_node_port(fx.res.module, fx.cells[1], 3).first);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_sinks(fx.res.module, dead_y).count);
+    fx_close(&fx);
+}
+
+/*
+ * mux_case_leaves_snippet.il (2E Task 7 review I1): `if (s) z = a; else begin y = b; z = b; end`
+ * with y = c before it. Case 1'1 leaves y alone, so its value for y is the switch's initial value
+ * c, not the running result b of the case after it: y = $mux(A = b, B = c, S = s).
+ */
+static void test_mux_case_leaves_snippet(void) {
+    static const char *const k_cells[] = {
+        "$mux WIDTH=1 A=[b] B=[c] S=[s] Y=[y] full_case=1",
+        "$mux WIDTH=1 A=[b] B=[a] S=[s] Y=[z] full_case=1",
+    };
+    fixture fx;
+    mux_run(&fx, (mux_case){"module \\m\n"
+                            "  wire input 1 \\s\n"
+                            "  wire input 2 \\a\n"
+                            "  wire input 3 \\b\n"
+                            "  wire input 4 \\c\n"
+                            "  wire output 5 \\y\n"
+                            "  wire output 6 \\z\n"
+                            "  process $p\n"
+                            "    assign \\y \\c\n"
+                            "    switch \\s\n"
+                            "      case 1'1\n"
+                            "        assign \\z \\a\n"
+                            "      case\n"
+                            "        assign \\y \\b\n"
+                            "        assign \\z \\b\n"
+                            "    end\n"
+                            "  end\n"
+                            "end\n",
+                            PRE_UPTO_ARST, k_cells, N_OF(k_cells)});
     fx_close(&fx);
 }
 
@@ -1530,6 +1567,7 @@ int main(void) {
     RUN_TEST(test_mux_items_eq_default);
     RUN_TEST(test_mux_open_across_boundary);
     RUN_TEST(test_mux_open_boundary_nonconst);
+    RUN_TEST(test_mux_case_leaves_snippet);
     RUN_TEST(test_mux_dead_eq);
     RUN_TEST(test_mux_x_compare);
     RUN_TEST(test_mux_nonconst_item);
