@@ -3,7 +3,7 @@
 
 Usage::
 
-    fuzz_seeds.py OUT_DIR [--generated N] SOURCE...
+    fuzz_seeds.py OUT_DIR [--generated N] [--regress DIR] SOURCE...
 
 Each SOURCE is a Verilog file or a directory (its ``*.v``).  The sources, smallest first, are
 written into OUT_DIR twice: as a raw-mode input (mode byte 0x00, then the file's bytes) and as
@@ -12,7 +12,9 @@ matching ``k_alphabet`` spelling, which is read from fuzz_verilog.c itself so th
 drift; an unmatched identifier maps to ``a``, an unmatched number to ``42``, anything else is
 skipped).  Two more raw inputs come first: a UTF-8 byte order mark before the smallest source
 (2C Review Focus 5) and the same with a Latin-1 byte in a comment.  ``--generated N`` adds the
-raw text of verilog_gen.py's seeds 1..N.  OUT_DIR is emptied of earlier seeds first.
+raw text of verilog_gen.py's seeds 1..N.  ``--regress DIR`` copies DIR's files as they are
+(each already starts with its mode byte): the inputs of earlier findings.  OUT_DIR is emptied
+of earlier seeds first.
 
 Exit 0 written, 2 usage or I/O error.
 """
@@ -74,7 +76,8 @@ def sources(paths: Sequence[str]) -> list[Path]:
     return sorted(files, key=lambda p: (p.stat().st_size, str(p)))
 
 
-def write_seeds(out: Path, files: Sequence[Path], generated: int) -> int:
+def write_seeds(out: Path, files: Sequence[Path], generated: int,
+                regress: Path | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     for old in out.glob("seed_*"):
         old.unlink()
@@ -88,6 +91,8 @@ def write_seeds(out: Path, files: Sequence[Path], generated: int) -> int:
         data = path.read_bytes()
         seeds.append(b"\x00" + data)
         seeds.append(b"\x01" + token_bytes(data, spellings))
+    if regress is not None:
+        seeds.extend(path.read_bytes() for path in sorted(regress.iterdir()) if path.is_file())
     for seed in range(1, generated + 1):
         seeds.append(b"\x00" + verilog_gen.render(seed, "in.v").text.encode("utf-8"))
     for idx, data in enumerate(seeds):
@@ -100,9 +105,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("out")
     parser.add_argument("sources", nargs="*")
     parser.add_argument("--generated", type=int, default=0)
+    parser.add_argument("--regress", help="a directory of earlier findings' inputs")
     args = parser.parse_args(argv)
     try:
-        count = write_seeds(Path(args.out), sources(args.sources), args.generated)
+        regress = Path(args.regress) if args.regress else None
+        count = write_seeds(Path(args.out), sources(args.sources), args.generated, regress)
     except (OSError, ValueError) as exc:
         print(f"fuzz_seeds: {exc}", file=sys.stderr)
         return 2

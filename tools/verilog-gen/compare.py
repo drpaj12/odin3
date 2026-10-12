@@ -27,8 +27,9 @@ timeout from odin3 is a failure in every mode.  Yosys runs under a 2 GB address-
 (``ulimit -v``): a mutant once made it allocate 5 GB; past the cap it fails, a rejection.
 
 The files of every failed or reported seed stay in the work directory (a fresh temporary one
-unless ``--work`` names one), whose path the summary prints.  Exit 0 no failure, 1 a failure,
-2 usage error or a tool that cannot run.
+unless ``--work`` names one; a named one is first emptied of earlier ``gen_*`` files), whose
+path the summary prints.  The tool paths may be relative to the current directory.  Exit 0 no
+failure, 1 a failure, 2 usage error or a tool that cannot run.
 """
 
 from __future__ import annotations
@@ -49,6 +50,8 @@ import verilog_gen
 TIMEOUT_S = 120
 YOSYS_AS_KB = 2 << 20  # a mutant can make Yosys allocate without bound (5 GB seen)
 SANITIZER_RE = re.compile(r"ERROR: (Address|Leak|Memory|Thread)Sanitizer|runtime error:")
+STATUS_RE = re.compile(r"failed: (ODIN3_ERR_[A-Z_]+)")
+GOLDEN_DIFF = "the dump differs from the golden"
 
 
 @dataclass
@@ -114,19 +117,36 @@ def tree_oracle(tools: Tools, work: Path, name: str, expected: str) -> str:
     why = crashed(result)
     if why:
         return f"odin3-parse-check {why}"
+    stem = name.removesuffix(".v")
+    differs = (f"the dump differs from the generator's tree (diff the output of "
+               f"`odin3-parse-check --dump {name}` with {stem}.ast)")
+    if result.rc != 0 and GOLDEN_DIFF in result.err:
+        return differs
     if result.rc != 0:
-        return f"odin3-parse-check exit {result.rc}: {last_lines(result.err)}"
+        return f"odin3-parse-check exit {result.rc}: {first_error(result.err, name)}"
     if result.out != expected:
-        return "the dump differs from the generator's tree (diff gen_N.ast)"
+        return differs
     return ""
 
 
 def first_error(err: str, name: str) -> str:
-    """The first diagnostic located in the file, else the last lines."""
+    """The first diagnostic located in the file, else the first error or FAIL line, else the
+    last lines."""
     for line in err.splitlines():
         if located(line, name):
             return line.strip()
+    for line in err.splitlines():
+        if "error" in line or line.startswith("FAIL"):
+            return line.strip()
     return last_lines(err)
+
+
+def fatal_status(err: str) -> str:
+    """An odin3 failure status other than ODIN3_ERR_PARSE in err, else ''."""
+    for status in STATUS_RE.findall(err):
+        if status != "ODIN3_ERR_PARSE":
+            return str(status)
+    return ""
 
 
 def last_lines(text: str, count: int = 3) -> str:
@@ -169,6 +189,8 @@ def check_mutant(tools: Tools, work: Path, seed: int) -> Outcome:
         outcome.failure = f"odin3 {why} ({made.note})"
     elif odin3.rc != 0 and not located(odin3.err, name):
         outcome.failure = f"odin3 rejects without a located error ({made.note})"
+    elif odin3.rc != 0 and fatal_status(odin3.err):
+        outcome.failure = f"odin3 fails with {fatal_status(odin3.err)} ({made.note})"
     elif odin3.rc == 0 and yosys.rc != 0:
         outcome.report = f"accepted mutant Yosys rejects ({made.note})"
     elif odin3.rc != 0 and yosys.rc == 0:
@@ -196,9 +218,29 @@ def parse_seeds(text: str) -> range:
     return range(first, last + 1)
 
 
-def tools_missing(tools: Tools) -> list[str]:
-    return [path for path in (tools.odin3, tools.parse_check, tools.yosys)
-            if shutil.which(path) is None]
+def resolve_tools(given: Tools) -> tuple[Tools, list[str]]:
+    """The tools as absolute paths (each command runs in the work directory, so a path
+    relative to the current one would not be found there), and the ones that cannot run."""
+    found: list[str] = []
+    missing: list[str] = []
+    for path in (given.odin3, given.parse_check, given.yosys):
+        where = shutil.which(path)
+        if where is None:
+            missing.append(path)
+        found.append(str(Path(where).resolve()) if where is not None else path)
+    return Tools(*found), missing
+
+
+def work_dir(named: str | None) -> Path:
+    """The named work directory, emptied of an earlier run's gen_* files, or a new temporary
+    one."""
+    if not named:
+        return Path(tempfile.mkdtemp(prefix="verilog-gen-"))
+    work = Path(named)
+    work.mkdir(parents=True, exist_ok=True)
+    for old in work.glob("gen_*"):
+        old.unlink()
+    return work
 
 
 def summarize(outcomes: Sequence[Outcome], work: Path, mutated: bool) -> int:
@@ -225,13 +267,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--work", help="directory for the files (default: a new temporary one)")
     parser.add_argument("--jobs", type=int, default=1)
     args = parser.parse_args(argv)
-    tools = Tools(args.odin3, args.parse_check, args.yosys)
-    missing = tools_missing(tools)
+    tools, missing = resolve_tools(Tools(args.odin3, args.parse_check, args.yosys))
     if missing:
-        print(f"compare.py: cannot run {', '.join(missing)}", file=sys.stderr)
+        print(f"compare.py: cannot run {', '.join(missing)} (not found, or not executable)",
+              file=sys.stderr)
         return 2
-    work = Path(args.work) if args.work else Path(tempfile.mkdtemp(prefix="verilog-gen-"))
-    work.mkdir(parents=True, exist_ok=True)
+    try:
+        work = work_dir(args.work)
+    except OSError as exc:
+        print(f"compare.py: work directory: {exc}", file=sys.stderr)
+        return 2
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
         outcomes = list(pool.map(lambda s: one_seed(tools, work, s, args.mutate), args.seeds))
     code = summarize(outcomes, work, args.mutate)

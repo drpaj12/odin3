@@ -69,6 +69,7 @@ NET_KINDS = ("wire", "tri", "wand", "wor", "triand", "trior", "tri0", "tri1", "t
              "supply0", "supply1")
 
 MAX_DUMP_COL = 256  # odin3_ast_dump clamps the indentation at 2 * ODIN3_PR_MAX_INDENT
+MUTATE_TRIES = 8  # draws of a mutation before a no-op swap is given up on
 
 
 class Node:
@@ -1025,8 +1026,8 @@ class Printer:
     def directive(self, node: Node) -> None:
         node.loc = self.out.here()
         self.out.tok("`" + (node.sub or ""))
-        self.out.raw(" ")
-        self.out.raw(node.name or "")
+        if node.name is not None:
+            self.out.raw(" " + node.name)
         self.out.raw("\n")
 
 
@@ -1758,11 +1759,15 @@ class ModuleGen:
         return node
 
     def wire_decl(self) -> Node:
-        width = self.rng.randint(1, 8)
+        kind = str(self.gen.pick(("wire",) * 16 + ("tri",) * 2 + ("wand", "wor") * 2
+                                 + ("supply0", "supply1")))
+        supply = kind.startswith("supply")  # N16: scalar, since Yosys 0.55 takes no range on one
+        width = 1 if supply else self.rng.randint(1, 8)
         sig = Sig(self.gen.fresh("w"), width - 1, 0, signed=width > 1 and self.chance(0.1))
-        kind = str(self.gen.pick(("wire",) * 8 + ("tri", "wand", "wor")))
         init: Node | None = None
-        if self.chance(0.3):
+        if supply:
+            pass  # a supply net has its value: it is read, never driven (Yosys takes no `= e`)
+        elif self.chance(0.3):
             init = self.gen.expr(self.scope, 2, width)
         else:
             self.scope.wires.append(sig)
@@ -2219,12 +2224,18 @@ class ModuleGen:
 
 
 def generate(seed: int) -> list[Node]:
-    """The unit for seed: an optional directive, then one to four modules."""
+    """The unit for seed: optional directives, then one to four modules."""
     gen = Gen(seed)
     items: list[Node] = []
     if gen.chance(0.15):
         text = str(gen.pick(("1ns/1ps", "1ns / 1ps", "10ns/1ns")))
         items.append(Node("DIRECTIVE", sub="timescale", name=text))
+    if gen.chance(0.05):
+        items.append(Node("DIRECTIVE", sub="resetall"))  # L20
+    if gen.chance(0.1):
+        # L19: wire only. Yosys 0.55 takes only wire and none, and none would reject the
+        # header ports declared without a net type.
+        items.append(Node("DIRECTIVE", sub="default_nettype", name="wire"))
     if gen.chance(0.1):
         items.append(empty_module(gen, f"e{seed}"))
     for idx in range(gen.rng.randint(1, 4)):
@@ -2247,7 +2258,18 @@ def empty_module(gen: Gen, name: str) -> Node:
 
 
 def mutate(text: str, tokens: Sequence[tuple[int, int]], rng: random.Random) -> tuple[str, str]:
-    """Drops, duplicates or swaps (with the next) one token; the text and what was done."""
+    """Drops, duplicates or swaps (with the next) one token; the text and what was done. A swap
+    of two equal spellings would be a no-op, so it is drawn again."""
+    for _ in range(MUTATE_TRIES):
+        mutated, note = mutate_once(text, tokens, rng)
+        if mutated != text:
+            break
+    return mutated, note
+
+
+def mutate_once(text: str, tokens: Sequence[tuple[int, int]],
+                rng: random.Random) -> tuple[str, str]:
+    """One draw of mutate."""
     idx = rng.randrange(len(tokens) - 1)
     start, end = tokens[idx]
     op = rng.choice(("drop", "dup", "swap"))

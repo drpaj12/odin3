@@ -237,7 +237,7 @@ class GeneratorTest(unittest.TestCase):
                          '     (STRING:"a\\tb" @f.v:0:0))})')
 
     def test_mutation_changes_one_token(self) -> None:
-        for seed in range(1, 30):
+        for seed in range(1, 500):  # seed 406 once swapped ')' with ')': a no-op
             made = vg.render(seed, "f.v", mutated=True)
             self.assertNotEqual(made.text, vg.render(seed, "f.v").text)
             self.assertRegex(made.note, r"^(drop|duplicate|swap) ")
@@ -276,6 +276,17 @@ class ToolsTest(unittest.TestCase):
             self.assertTrue((out / "seed_0000").read_bytes().startswith(b"\x00\xef\xbb\xbf"))
             self.assertTrue((out / "seed_0003").read_bytes().startswith(b"\x01"))
 
+    def test_seeds_take_regression_inputs_as_they_are(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "a.v"
+            src.write_text("module a; endmodule\n", encoding="utf-8")
+            regress = Path(tmp) / "regress"
+            regress.mkdir()
+            (regress / "r.v").write_bytes(b"\x00`pragma a\x00b\n")
+            out = Path(tmp) / "seeds"
+            self.assertEqual(fuzz_seeds.write_seeds(out, [src], 0, regress), 5)
+            self.assertEqual((out / "seed_0004").read_bytes(), b"\x00`pragma a\x00b\n")
+
     def test_compare_helpers(self) -> None:
         self.assertEqual(compare.parse_seeds("3..5"), range(3, 6))
         self.assertEqual(compare.parse_seeds("7"), range(7, 8))
@@ -284,6 +295,34 @@ class ToolsTest(unittest.TestCase):
         self.assertFalse(compare.located("odin3: error: pass read_verilog: failed", "g.v"))
         self.assertEqual(compare.crashed(compare.Run(1, "", "==1== ERROR: AddressSanitizer")),
                          "sanitizer report")
+        self.assertEqual(compare.fatal_status("odin3: error: pass x: failed: ODIN3_ERR_PARSE"),
+                         "")
+        self.assertEqual(compare.fatal_status("g.v:1:1: error: x\nodin3: error: pass x: failed: "
+                                              "ODIN3_ERR_INVALID_ARG"), "ODIN3_ERR_INVALID_ARG")
+        self.assertEqual(compare.first_error("dump...\nFAIL g.v: x\n_)))", "g.v"), "FAIL g.v: x")
+
+    def test_compare_resolves_relative_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tool = Path(tmp) / "bin" / "tool"
+            tool.parent.mkdir()
+            tool.write_text("#!/bin/sh\n", encoding="utf-8")
+            tool.chmod(0o755)
+            here = os.getcwd()
+            try:
+                os.chdir(tmp)
+                given = compare.Tools("bin/tool", "bin/tool", "bin/missing")
+                tools, missing = compare.resolve_tools(given)
+            finally:
+                os.chdir(here)
+            self.assertEqual(tools.odin3, str(tool.resolve()))
+            self.assertEqual(missing, ["bin/missing"])
+
+    def test_compare_work_dir_drops_old_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "gen_7.v").write_text("old", encoding="utf-8")
+            (Path(tmp) / "keep.txt").write_text("mine", encoding="utf-8")
+            work = compare.work_dir(tmp)
+            self.assertEqual(sorted(p.name for p in work.iterdir()), ["keep.txt"])
 
 
 if __name__ == "__main__":

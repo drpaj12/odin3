@@ -839,9 +839,11 @@ if(BUILD_TESTING)
         # reports still symbolize; ASAN_SYMBOLIZER_PATH points at a versioned one when found.
         find_program(ODIN3_LLVM_SYMBOLIZER NAMES llvm-symbolizer llvm-symbolizer-20
                      llvm-symbolizer-19 llvm-symbolizer-18)
-        set(_fuzz_env "")
+        # DEBUGINFOD_URLS empty: without a network llvm-symbolizer blocks on debuginfod, and a
+        # crash report then ends in the CTest timeout instead of being printed.
+        set(_fuzz_env "DEBUGINFOD_URLS=")
         if(ODIN3_LLVM_SYMBOLIZER)
-            set(_fuzz_env "ASAN_SYMBOLIZER_PATH=${ODIN3_LLVM_SYMBOLIZER}")
+            list(APPEND _fuzz_env "ASAN_SYMBOLIZER_PATH=${ODIN3_LLVM_SYMBOLIZER}")
         endif()
         set(_fuzz_seeds ${PROJECT_BINARY_DIR}/fuzz_pp_seeds)
         set(_fuzz_corpus ${PROJECT_BINARY_DIR}/fuzz_pp_corpus)
@@ -870,7 +872,8 @@ if(BUILD_TESTING)
 
         # 2C §7.5: the parser's seeds (`fuzz_seeds.py`): two BOM-prefixed files (Review Focus 5),
         # then the coverage rows and the syntax micros, smallest first, each as a raw input and
-        # as a token stream, and twenty generated modules. fuzz_verilog_seed_inputs runs each
+        # as a token stream, twenty generated modules and tests/fuzz/fuzz_verilog_regress (the
+        # inputs of earlier findings). fuzz_verilog_seed_inputs runs each
         # seed once; fuzz_verilog_smoke fuzzes 10 s per mode (raw, token stream). Long runs are
         # local (one worker, 2 GB RSS).
         set(_fv_seeds ${PROJECT_BINARY_DIR}/fuzz_verilog_seeds)
@@ -879,7 +882,8 @@ if(BUILD_TESTING)
         add_test(NAME fuzz_verilog_seeds
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/fuzz_seeds.py
                     ${_fv_seeds} ${PROJECT_SOURCE_DIR}/tests/verilog/coverage
-                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax --generated 20)
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax --generated 20
+                    --regress ${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_verilog_regress)
         set_tests_properties(fuzz_verilog_seeds PROPERTIES FIXTURES_SETUP fuzz_verilog_seeds
                              LABELS fuzz)
         add_test(NAME fuzz_verilog_seed_inputs
@@ -1114,7 +1118,8 @@ if(BUILD_TESTING)
         add_test(NAME verilog_gen_vs_yosys
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/compare.py
                     --odin3 $<TARGET_FILE:odin3> --parse-check $<TARGET_FILE:odin3-parse-check>
-                    --yosys ${_gen_yosys} --seeds 1..200)
+                    --yosys ${_gen_yosys} --seeds 1..200
+                    --work ${PROJECT_BINARY_DIR}/verilog_gen_work)
         set_tests_properties(verilog_gen_vs_yosys PROPERTIES LABELS verilog TIMEOUT 900)
     else()
         message(STATUS "verilog_gen_vs_yosys not registered: needs yosys")

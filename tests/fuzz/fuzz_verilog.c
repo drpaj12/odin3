@@ -145,9 +145,10 @@ static char again[PATH_MAX_LEN];
 
 /* What the log sink saw during one parse. */
 typedef struct sink_count {
-    uint32_t errors;    /* located error lines other than the stop line */
-    uint32_t stops;     /* "too many errors; stopping" */
+    uint32_t errors;    /* located error lines (the stop line taken out after the run) */
+    uint32_t stops;     /* the cap's stop line: 1 when the run's cap fired, else 0 */
     uint32_t unlocated; /* error lines without a usable name:line:col */
+    bool last_stop;     /* the last located error line has the stop line's exact shape */
     char last[LAST_LOG];
 } sink_count;
 
@@ -184,6 +185,23 @@ static bool is_located(const char *msg) {
     return at > msg;
 }
 
+/* The stop line's shape: the text after the location's ": error: ", up to the first newline (the
+ * expansion notes that may follow), is exactly the stop text. The shape alone never makes a
+ * line the stop line (fuzz review C1: a message holds user text, and libFuzzer's CMP hook
+ * learns the needle): only the last error line of a run whose cap fired is one (stop_taken). */
+static bool is_stop_shape(const char *msg) {
+    static const char k_stop[] = "too many errors; stopping";
+    static const char k_mark[] = ": error: ";
+    const char *mark = strstr(msg, k_mark);
+    if (mark == NULL) {
+        return false;
+    }
+    const char *body = mark + sizeof k_mark - 1;
+    const char *nl = strchr(body, '\n');
+    size_t len = nl != NULL ? (size_t)(nl - body) : strlen(body);
+    return len == sizeof k_stop - 1 && memcmp(body, k_stop, len) == 0;
+}
+
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
     sink_count *count = user;
     size_t len = strnlen(msg, sizeof count->last - 1); /* the last message, cut to fit */
@@ -194,10 +212,20 @@ static void count_sink(odin3_log_level level, const char *msg, void *user) {
     }
     if (!is_located(msg)) {
         count->unlocated++;
-    } else if (strstr(msg, "too many errors; stopping") != NULL) {
-        count->stops++;
     } else {
         count->errors++;
+        count->last_stop = is_stop_shape(msg);
+    }
+}
+
+/* After a run: the stop line is structural, never textual. Only when the run's cap fired (it
+ * stopped with max_errors errors counted) and more than max_errors located lines were logged is
+ * the last line (nothing is logged once a run stops), if it has the stop shape, the stop line;
+ * it moves from errors to stops. Otherwise every line, whatever its text, stays an error. */
+static void stop_taken(bool capped) {
+    if (capped && g_count.last_stop && g_count.errors > MAX_ERRORS) {
+        g_count.errors--;
+        g_count.stops = 1;
     }
 }
 
@@ -289,6 +317,7 @@ typedef struct vread {
     odin3_ast *ast;
     odin3_pp *pp;
     odin3_ast_id unit;
+    bool capped; /* the parser's error cap fired: the run stopped at max_errors errors */
 } vread;
 
 static void read_free(vread *rd) {
@@ -336,7 +365,9 @@ static odin3_status read_run(vread *rd, const char *path, bool lowered) {
         return st;
     }
     odin3_vp_stream vs = {stream.text, stream.stream, src.given};
-    return odin3_verilog_parse_stream(&run, rd->ast, &vs, &rd->unit);
+    st = odin3_verilog_parse_stream(&run, rd->ast, &vs, &rd->unit);
+    rd->capped = run.stop && run.errors >= run.limits.max_errors;
+    return st;
 }
 
 /* --- the OK path: check, print, re-read, equal --------------------------------------------- */
@@ -424,14 +455,15 @@ static void check_round_trip(vread *first) {
 
 /* --- one input ----------------------------------------------------------------------------- */
 
-static void check_parse_errors(bool injected) {
+static void check_parse_errors(const vread *rd, bool injected) {
     if (injected) {
         return;
     }
+    stop_taken(rd->capped);
     if (g_count.unlocated != 0) {
         fail("an unlocated error line on PARSE (INVALID_ARG or a check failure)");
     }
-    if (g_count.errors == 0 || g_count.errors > MAX_ERRORS || g_count.stops > 1) {
+    if (g_count.errors == 0 || g_count.errors > MAX_ERRORS) {
         fail("PARSE without 1 to 20 located error diagnostics");
     }
 }
@@ -453,7 +485,7 @@ static void run_file(bool injected, long fail_after) {
             check_round_trip(&first);
         }
     } else if (st == ODIN3_ERR_PARSE) {
-        check_parse_errors(injected);
+        check_parse_errors(&first, injected);
     } else if (!(st == ODIN3_ERR_NO_MEMORY && injected)) {
         fail("the read returned neither OK nor PARSE");
     }

@@ -955,6 +955,29 @@ static void test_pragma_string_with_slashes(void) {
     TEST_ASSERT_EQUAL_STRING("", logged());
 }
 
+/* A raw NUL in a `pragma argument (the only directive whose argument may hold one): a located
+ * error, and the argument ends before it, so no NUL is interned (an unlocated INVALID_ARG before;
+ * fuzz_verilog review I1). */
+static void test_directive_nul(void) {
+    open_n("`pragma a\0b\n", 12);
+    expect_text(TOK_DIRECTIVE, (tok_range){0, 11}, "a");
+    expect_eof(11);
+    TEST_ASSERT_EQUAL_STRING("t.v:1:10: error: unexpected byte 0x00\n", logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
+/* The other directive whose argument may hold a NUL (inside its quotes): located the same way,
+ * then the cut version is the usual located error. */
+static void test_begin_keywords_nul(void) {
+    open_n("`begin_keywords \"13\0\"", 21);
+    expect_text(TOK_DIRECTIVE, (tok_range){0, 21}, "\"13");
+    TEST_ASSERT_EQUAL_STRING("t.v:1:20: error: unexpected byte 0x00\n"
+                             "t.v:1:1: error: unknown `begin_keywords version \"13\n",
+                             logged());
+    TEST_ASSERT_TRUE(err_flag);
+    expect_eof(21);
+}
+
 static void test_pragma(void) {
     open_text("`pragma foo bar // c\n`pragma\n`pragma a/b /\n`pragma x\r\n");
     expect_text(TOK_DIRECTIVE, (tok_range){0, 15}, "foo bar");
@@ -1396,6 +1419,8 @@ static void run_trivia_and_edges(void) {
     RUN_TEST(test_unconnected_drive);
     RUN_TEST(test_pragma);
     RUN_TEST(test_pragma_string_with_slashes);
+    RUN_TEST(test_directive_nul);
+    RUN_TEST(test_begin_keywords_nul);
     RUN_TEST(test_directive_cap);
     RUN_TEST(test_directive_cap_default);
     RUN_TEST(test_unknown_directive);
