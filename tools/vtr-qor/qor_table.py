@@ -6,14 +6,17 @@
   A job whose ``status`` is ``ok`` but whose ``metrics.json`` is not an ``ok`` record of the same
   leg and design is ``incomplete``: a result is never scored from a partial attempt.
 - ``metric`` is §6.1's *present*: a finite number other than VTR's ``-1`` default.
-- ``ratio`` and ``geomean`` are §6.1's; the gate compares ratios and geomeans exactly (as
-  fractions: ``geomean <= b`` iff ``prod r <= b**n``), never rounded, so a geomean of exactly
-  1.20 passes and 1.2001 fails; ``fmt_ratio`` prints 4 decimals within 0.005 of a bound.
+- ``ratio`` and ``geomean`` are §6.1's (a report-only ratio of 0 makes the geomean 0.0). The
+  gate compares ratios and geomeans exactly, as fractions of the decimals VTR printed and
+  ``bands.json`` states (``geomean <= b`` iff ``prod r <= b**n``), never rounded: CPD 3.6/2.4
+  meets 1.50, a geomean of exactly 1.20 passes and 1.2001 fails; ``fmt_ratio`` prints 4
+  decimals within 0.005 of a bound.
 - ``gate`` applies §6.2's rules 1-7 in order and collects every violation, with §10's texts.
   The verdict is INCOMPLETE (exit 3) only when a reference job (P; O′/P′ when those legs are in
-  the table) is not ``ok``, a P fcheck is ``error``/``capped``, the table has no O (or no P)
-  leg, or a run is at a VTR commit other than the pin (point (p)); otherwise FAIL (exit 1)
-  when any rule is violated, else PASS (exit 0).
+  the table) is not ``ok``, a P fcheck is ``error``/``capped``, an O fcheck/equiv/rerun did not
+  run (``skipped`` or no verdict; ruling D1), the table has no O (or no P) leg, or a run is at
+  a VTR commit other than the pin (point (p)); otherwise FAIL (exit 1) when any rule is
+  violated, else PASS (exit 0).
 
 TSV inputs (``explanations.tsv``, ``divergences.tsv``, ``equiv-exceptions.tsv``) are three
 tab-separated fields per line; lines starting ``#`` and empty lines are skipped.
@@ -30,13 +33,13 @@ from fractions import Fraction
 from pathlib import Path
 
 import qor_legs
+import qor_parse
 import qor_sched
 from qor_heavy import HeavyError
 
 PAIRS = (("O", "P"), ("Oprime", "P"), ("Pprime", "P"), ("O", "Oprime"), ("R", "P"),
          ("Oprov", "O"))
 SECTIONS = ("netlist", "packed", "routed", "cost", "verdicts")
-VTR_MISSING = -1                    # VTR's parser default for a missing key (§6.1)
 PASS, FAIL, INCOMPLETE = "PASS", "FAIL", "INCOMPLETE"
 EXIT_TABLE = 1                      # E-QH13
 NEAR_BOUND = 0.005                  # §6: 4 decimals within this of a gate bound
@@ -64,6 +67,8 @@ P_SIDE_FCHECK = frozenset({"error", "capped"})
 EQUIV_OK = frozenset({"equivalent", "ram"})
 EQUIV_DIFFERS = "differs"
 RERUN_SAME = "same"
+# Ruling D1: a check that did not run is unmeasured (INCOMPLETE), not failed.
+NOT_RUN = frozenset({"skipped", MISSING})
 
 
 @dataclass(frozen=True)
@@ -147,7 +152,8 @@ def _legs_to_load(arch_dir: Path, keys: Mapping[str, str],
                   legs: Sequence[str] | None) -> tuple[str, ...]:
     if legs is not None:
         return tuple(dict.fromkeys(qor_legs.normalise_leg(leg) for leg in legs))
-    return tuple(leg for leg in qor_legs.LEGS if leg in keys or _real_dir(arch_dir / leg))
+    return tuple(leg for leg in qor_legs.LEGS
+                 if leg in keys or _read_word(arch_dir / leg / LATEST) is not None)
 
 
 def _real_dir(path: Path) -> bool:
@@ -166,8 +172,10 @@ def load_runs(out: Path, vtr12: str, arch: str, keys: Mapping[str, str], *,
               legs: Sequence[str] | None = None) -> list[Run]:
     """Every job of one key per leg under ``<out>/<vtr12>/<arch>``. ``keys`` maps leg →
     ``key12`` (``O'``/``P'`` accepted); a leg not given reads its ``latest``. ``legs`` names the
-    legs to load; by default, every leg in ``keys`` or with a directory there. E-QH13 (exit 1):
-    ``table: no complete key for leg <L> on <arch>``. The runs follow ``sort_runs``."""
+    legs to load; by default, every leg in ``keys`` or with a ``latest`` file (a leg whose
+    ``latest`` is retracted mid-rerun is left out rather than refusing the table). E-QH13
+    (exit 1): ``table: no complete key for leg <L> on <arch>`` for a leg to load. The runs follow
+    ``sort_runs``."""
     given = {qor_legs.normalise_leg(leg): key12 for leg, key12 in keys.items()}
     arch_dir = out / vtr12 / arch
     sets = qor_sched.load_sets()
@@ -182,10 +190,12 @@ def load_runs(out: Path, vtr12: str, arch: str, keys: Mapping[str, str], *,
 
 
 def _present(value: object) -> float | None:
+    """§6.1's *present* for a ``metrics.json`` value: ``qor_parse.present``'s rule (finite, not
+    VTR's ``-1``) applied to a JSON number rather than to parsed text; bools are not numbers."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     number = float(value)
-    if not math.isfinite(number) or number == VTR_MISSING:
+    if not math.isfinite(number) or number == float(qor_parse.ABSENT):
         return None
     return number
 
@@ -223,9 +233,12 @@ def ratio(x: float | None, y: float | None, gated: bool) -> float | None:
 
 
 def geomean(values: Sequence[float]) -> float | None:
-    """``exp(mean(ln r))`` over the values; None when there are none."""
+    """``exp(mean(ln r))`` over the values; None when there are none. A report-only ratio of 0
+    (§6.1: X = 0, Y > 0) makes it 0.0, the limit of that formula; ratios are never negative."""
     if not values:
         return None
+    if any(v == 0 for v in values):
+        return 0.0
     return math.exp(math.fsum(math.log(v) for v in values) / len(values))
 
 
@@ -323,7 +336,7 @@ def load_tsv(path: Path) -> list[tuple[str, str, str]]:
         fields = line.split("\t")
         if len(fields) != TSV_FIELDS or not all(f.strip() for f in fields):
             raise ValueError(f"{path.absolute()}:{number}: expected 3 tab-separated fields")
-        rows.append((fields[0], fields[1], fields[2]))
+        rows.append((fields[0].strip(), fields[1].strip(), fields[2].strip()))
     return rows
 
 
@@ -421,14 +434,16 @@ def _rule2_present(ctx: _Ctx, compared: Sequence[str], out: _Collect) -> None:
                     out.fail(f"gate: FAIL: {name} missing for {design} ({leg})")
 
 
-def _bound_exact(value: float) -> Fraction:
-    """A bound as written (``1.20`` is exactly 6/5), not its binary approximation."""
+def _decimal(value: float) -> Fraction:
+    """A value or bound as written (``1.20`` is exactly 6/5, CPD ``3.6`` exactly 18/5), not its
+    binary approximation: a JSON float's ``repr`` is its shortest decimal, which is the number
+    VTR printed (or ``bands.json`` states), so a ratio exactly on a bound meets it."""
     return Fraction(repr(value))
 
 
 def _rule3_bands(ctx: _Ctx, compared: Sequence[str], out: _Collect) -> None:
     bands = ctx.inp.bands
-    gmax, dmax = _bound_exact(bands.geomean_max), _bound_exact(bands.per_design_max)
+    gmax, dmax = _decimal(bands.geomean_max), _decimal(bands.per_design_max)
     pair = f"{ctx.x}/{ctx.y}"
     for name in bands.metrics:
         exact: list[tuple[str, Fraction]] = []
@@ -436,7 +451,7 @@ def _rule3_bands(ctx: _Ctx, compared: Sequence[str], out: _Collect) -> None:
             x = metric(ctx.index[(ctx.x, design)], name)
             y = metric(ctx.index[(ctx.y, design)], name)
             if x is not None and y is not None and x > 0 and y > 0:
-                exact.append((design, Fraction(x) / Fraction(y)))
+                exact.append((design, _decimal(x) / _decimal(y)))
         product = math.prod((r for _, r in exact), start=Fraction(1))
         value = geomean([float(r) for _, r in exact])
         if value is not None and product > gmax ** len(exact):
@@ -448,22 +463,31 @@ def _rule3_bands(ctx: _Ctx, compared: Sequence[str], out: _Collect) -> None:
                          f" > {bands.per_design_max:.{BOUND_DECIMALS}f}")
 
 
-def _count(value: float | None) -> str:
-    if value is None:
-        return MISSING
+def _count(value: float) -> str:
     return str(int(value)) if value.is_integer() else f"{value:g}"
 
 
 def _rule4_equal(ctx: _Ctx, compared: Sequence[str], out: _Collect) -> None:
+    """Rule 4: O = P or a row in explanations.tsv. A missing value is rule 2's text (review M5):
+    two missing counts are not "O != P", and no row explains a value VTR did not print."""
     explained = {(row[0], row[1]) for row in ctx.inp.explanations}
     for name in ctx.inp.bands.equal_or_explained:
         for design in compared:
             a = metric(ctx.index[(ctx.x, design)], name)
             b = metric(ctx.index[(ctx.y, design)], name)
-            if (a is not None and a == b) or (design, name) in explained:
-                continue
-            out.fail(f"gate: FAIL: {name} {design} {ctx.x} {_count(a)} != {ctx.y} {_count(b)} "
-                     "(no row in explanations.tsv)")
+            if a is None or b is None:
+                for leg, value in ((ctx.x, a), (ctx.y, b)):
+                    if value is None:
+                        out.fail(f"gate: FAIL: {name} missing for {design} ({leg})")
+            elif a != b and (design, name) not in explained:
+                out.fail(f"gate: FAIL: {name} {design} {ctx.x} {_count(a)} != {ctx.y} "
+                         f"{_count(b)} (no row in explanations.tsv)")
+
+
+def _not_run(ctx: _Ctx, design: str, check: str, verdict: str, out: _Collect) -> None:
+    """Ruling D1 (Task 8 review): a check not run (``skipped``, or no verdict) is unmeasured,
+    so INCOMPLETE, never FAIL."""
+    out.hold(f"gate: INCOMPLETE: {design} {ctx.x} {check} {verdict} (not run); run it")
 
 
 def _divergence_applies(ctx: _Ctx, design: str, reference: str) -> bool:
@@ -475,7 +499,12 @@ def _divergence_applies(ctx: _Ctx, design: str, reference: str) -> bool:
     return False
 
 
+def _fcheck_fail(ctx: _Ctx, design: str, out: _Collect) -> None:
+    out.fail(f"gate: FAIL: {design} {ctx.x} fcheck fail (no row in divergences.tsv)")
+
+
 def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
+    declared = {row[0] for row in ctx.inp.divergences}
     for design in usable:
         mine = text_field(ctx.index[(ctx.x, design)], "fcheck")
         ref_run = ctx.index.get((ctx.y, design))
@@ -483,8 +512,12 @@ def _rule5_fcheck(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
         if reference in P_SIDE_FCHECK:
             out.hold(f"gate: INCOMPLETE: {design} {ctx.y} fcheck is {reference} (reference); "
                      "rerun it")
+            if mine == FCHECK_FAIL and design not in declared:  # review M1: Odin III's own
+                _fcheck_fail(ctx, design, out)
+        elif mine in NOT_RUN:
+            _not_run(ctx, design, "fcheck", mine, out)
         elif mine == FCHECK_FAIL and not _divergence_applies(ctx, design, reference):
-            out.fail(f"gate: FAIL: {design} {ctx.x} fcheck fail (no row in divergences.tsv)")
+            _fcheck_fail(ctx, design, out)
         elif mine not in (FCHECK_PASS, FCHECK_FAIL):
             out.fail(f"gate: FAIL: {design} {ctx.x} fcheck {mine}")
 
@@ -495,14 +528,20 @@ def _rule6_equiv(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
         verdict = text_field(ctx.index[(ctx.x, design)], "equiv")
         if verdict == EQUIV_DIFFERS:
             out.fail(f"gate: FAIL: {design} equiv differs")
-        elif verdict not in EQUIV_OK and design not in excepted:
+        elif verdict in EQUIV_OK or design in excepted:
+            continue
+        elif verdict in NOT_RUN:
+            _not_run(ctx, design, "equiv", verdict, out)
+        else:
             out.fail(f"gate: FAIL: {design} equiv {verdict} (not in equiv-exceptions.tsv)")
 
 
 def _rule7_rerun(ctx: _Ctx, usable: Sequence[str], out: _Collect) -> None:
     for design in usable:
         verdict = text_field(ctx.index[(ctx.x, design)], "rerun")
-        if verdict != RERUN_SAME:
+        if verdict in NOT_RUN:
+            _not_run(ctx, design, "rerun", verdict, out)
+        elif verdict != RERUN_SAME:
             out.fail(f"gate: FAIL: {design} rerun {verdict}")
 
 

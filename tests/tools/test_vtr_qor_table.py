@@ -117,6 +117,9 @@ class RatioTest(unittest.TestCase):
         assert value is not None
         self.assertEqual(round(value, 4), 1.1972)
         self.assertIsNone(qor_table.geomean([]))
+        # Review I2: a report-only ratio of 0 (O has no adders, P has some) makes it 0.0.
+        self.assertEqual(qor_table.geomean([0.0, 2.0]), 0.0)
+        self.assertEqual(qor_table.geomean_n([qor_table.ratio(0.0, 5.0, False), 1.0]), (0.0, 2))
         runs = replace(table(1.1), run("O", "sha", override={"num_clb": -1}))
         ratios = qor_table.pair_ratios(runs, ("O", "P"), "num_clb", GATE, gated=True)
         self.assertEqual(len(ratios), 19)
@@ -125,6 +128,11 @@ class RatioTest(unittest.TestCase):
         assert mean is not None
         self.assertAlmostEqual(mean, 1.1, places=12)
         self.assertEqual(qor_table.geomean_n([None, None]), (None, 0))
+        # Review M2: only ok runs give a ratio.
+        runs = replace(table(1.1), run("O", "sha", 1.1, status="failed"))
+        ratios = qor_table.pair_ratios(runs, ("O", "P"), "num_clb", GATE, gated=True)
+        self.assertIsNone(ratios[GATE.index("sha")])
+        self.assertEqual(sum(r is None for r in ratios), 1)
 
     def test_metric_present(self) -> None:
         r = run("P", "sha", override={"num_clb": -1, "min_chan_width": float("nan"),
@@ -176,6 +184,25 @@ class GateTest(unittest.TestCase):
         self.assertEqual(got.violations[0], "gate: FAIL: num_clb sha O/P 1.5001 > 1.50")
         self.assertEqual(len(got.violations), 4)  # the four gated metrics, nothing else
 
+    def test_gate_boundaries_decimal(self) -> None:
+        """Review I1: values are taken as the decimals VTR printed, so CPD 3.6 / 2.4 is exactly
+        1.50 and 19 × 3.6 / 3.0 is a geomean of exactly 1.20; both meet the inclusive bounds."""
+        cpd = "critical_path_delay_ns"
+        runs = replace(replace(table(), run("P", "sha", override={cpd: 2.4})),
+                       run("O", "sha", override={cpd: 3.6}))
+        self.assertEqual(verdict(runs), Verdict(state="PASS", violations=()))
+        runs = replace(runs, run("O", "sha", override={cpd: 3.600000001}))
+        self.assertEqual(verdict(runs), Verdict(state="FAIL", violations=(
+            f"gate: FAIL: {cpd} sha O/P 1.5000 > 1.50",)))
+        runs = table()
+        for design in GATE:
+            runs = replace(replace(runs, run("P", design, override={cpd: 3.0})),
+                           run("O", design, override={cpd: 3.6}))
+        self.assertEqual(verdict(runs), Verdict(state="PASS", violations=()))
+        runs = replace(runs, run("O", "sha", override={cpd: 3.600000001}))
+        self.assertEqual(verdict(runs), Verdict(state="FAIL", violations=(
+            f"gate: FAIL: {cpd} geomean O/P 1.2000 > 1.20",)))
+
     def test_gate_boundary_float_noise(self) -> None:
         """Rule 3 compares exactly: five ratios of exactly 1.51 meet a 1.51 bound, although the
         float exp(mean(ln r)) of them is 1.5100000000000002."""
@@ -223,6 +250,13 @@ class GateTest(unittest.TestCase):
         self.assertVerdict(verdict(drop(table(), "P", "bgm")), "INCOMPLETE",
                            "gate: INCOMPLETE: bgm P is missing (reference); rerun it")
 
+    def test_gate_reference_excluded_from_rules_2_to_4(self) -> None:
+        """Review M2: a capped P's metrics are not judged (no duplicate "(P)" lines)."""
+        runs = replace(table(), run("P", "mcml", status="capped",
+                                    override={"min_chan_width": None, "num_mult": 9}))
+        self.assertEqual(verdict(runs), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: mcml P is capped (reference); rerun it",)))
+
     def test_gate_incomplete_attribution_reference(self) -> None:
         runs = table(legs=("P", "Oprime", "O"))
         self.assertEqual(verdict(runs).state, "PASS")
@@ -250,6 +284,13 @@ class GateTest(unittest.TestCase):
         self.assertEqual(verdict(runs, explanations=rows).state, "PASS")
         rows = [("sha", "num_memories", "wrong metric")]
         self.assertEqual(verdict(runs, explanations=rows).state, "FAIL")
+        # Review M5: missing counts are rule 2's text, and no row explains them.
+        gone = replace(replace(table(), run("O", "sha", override={"num_mult": -1})),
+                       run("P", "sha", override={"num_mult": None}))
+        rows = [("sha", "num_mult", "a row")]
+        self.assertEqual(verdict(gone, explanations=rows), Verdict(state="FAIL", violations=(
+            "gate: FAIL: num_mult missing for sha (O)",
+            "gate: FAIL: num_mult missing for sha (P)")))
 
     def test_gate_fcheck(self) -> None:
         fail = replace(table(), run("O", "sha", override={"fcheck": "fail"}))
@@ -271,8 +312,24 @@ class GateTest(unittest.TestCase):
         p_error = replace(table(), run("P", "sha", override={"fcheck": "error"}))
         self.assertEqual(verdict(p_error), Verdict(state="INCOMPLETE", violations=(
             "gate: INCOMPLETE: sha P fcheck is error (reference); rerun it",)))
+        p_capped = replace(table(), run("P", "sha", override={"fcheck": "capped"}))
+        self.assertEqual(verdict(p_capped), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha P fcheck is capped (reference); rerun it",)))
+        # Review M1: P's error does not hide O's own undeclared fail ...
+        hidden = replace(fail, run("P", "sha", override={"fcheck": "error"}))
+        self.assertEqual(verdict(hidden), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha P fcheck is error (reference); rerun it",
+            "gate: FAIL: sha O fcheck fail (no row in divergences.tsv)")))
+        # ... but a declared row waits for P's verdict.
+        self.assertEqual(verdict(hidden, divergences=rows), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha P fcheck is error (reference); rerun it",)))
+        # Ruling D1: a check that did not run is INCOMPLETE, never FAIL.
         skipped = replace(table(), run("O", "sha", override={"fcheck": "skipped"}))
-        self.assertVerdict(verdict(skipped), "FAIL", "gate: FAIL: sha O fcheck skipped")
+        self.assertEqual(verdict(skipped), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha O fcheck skipped (not run); run it",)))
+        absent = replace(table(), run("O", "sha", override={"fcheck": None}))
+        self.assertEqual(verdict(absent), Verdict(state="INCOMPLETE", violations=(
+            "gate: INCOMPLETE: sha O fcheck missing (not run); run it",)))
 
     def test_gate_equiv(self) -> None:
         listed = [("stereovision3", "multiclock", "two clocks; the Verilator check stands in")]
@@ -290,6 +347,12 @@ class GateTest(unittest.TestCase):
             self.assertEqual(verdict(runs, exceptions=listed).state, "PASS", word)
         ram = replace(table(), run("O", "mcml", override={"equiv": "ram"}))
         self.assertEqual(verdict(ram).state, "PASS")
+        skipped = replace(table(), run("O", "sha", override={"equiv": "skipped"}))
+        self.assertEqual(verdict(skipped, exceptions=listed), Verdict(
+            state="INCOMPLETE",
+            violations=("gate: INCOMPLETE: sha O equiv skipped (not run); run it",)))
+        skipped = replace(table(), run("O", "stereovision3", override={"equiv": "skipped"}))
+        self.assertEqual(verdict(skipped, exceptions=listed).state, "PASS")
 
     def test_gate_rerun_and_status(self) -> None:
         rerun = replace(table(), run("O", "sha", override={"rerun": "differs"}))
@@ -302,6 +365,15 @@ class GateTest(unittest.TestCase):
                                    override={"vpr_status": "failed"}))
         self.assertEqual(verdict(vpr), Verdict(state="FAIL", violations=(
             "gate: FAIL: sha O vpr_status=failed",)))
+        for word in ("skipped", None):
+            runs = replace(table(), run("O", "sha", override={"rerun": word}))
+            self.assertEqual(verdict(runs), Verdict(state="INCOMPLETE", violations=(
+                f"gate: INCOMPLETE: sha O rerun {word or 'missing'} (not run); run it",)))
+        # Ruling D1 does not hide a failure: a FAIL elsewhere is still listed.
+        runs = replace(rerun, run("O", "bgm", override={"rerun": "skipped"}))
+        self.assertEqual(verdict(runs).violations, (
+            "gate: FAIL: sha rerun differs",
+            "gate: INCOMPLETE: bgm O rerun skipped (not run); run it"))
 
     def test_gate_collects_in_rule_order(self) -> None:
         runs = drop(table(), "O", "bgm")
@@ -356,6 +428,8 @@ class InputsTest(unittest.TestCase):
                             encoding="utf-8")
             self.assertEqual(qor_table.load_tsv(path), [
                 ("sha", "mem-init-dropped", "why"), ("bgm", "baseline-fails", "P")])
+            path.write_text("sha \t num_mult\ttext \n", encoding="utf-8")
+            self.assertEqual(qor_table.load_tsv(path), [("sha", "num_mult", "text")])
             for bad in ("sha\tonly-two\n", "a\tb\tc\td\n", "a b c\n", "sha\t\ttext\n"):
                 path.write_text(f"# head\n{bad}", encoding="utf-8")
                 with self.assertRaises(ValueError) as cm:
@@ -429,11 +503,14 @@ class LoadRunsTest(unittest.TestCase):
         text = f"table: no complete key for leg P on {ARCH}"
         self.assertEqual(refused({}, ["P"]), text)
         write_job(self.root, "P", "aaaaaaaaaaaa", "sha", data=metrics("P", "sha"))
-        self.assertEqual(refused({}), text)  # a leg directory without latest
+        # Review M3: by default a leg directory without latest (retracted mid-rerun) is left
+        # out; asked for by name, it is refused.
+        self.assertEqual(qor_table.load_runs(self.root, VTR12, ARCH, {}), [])
+        self.assertEqual(refused({}, ["P"]), text)
         self.assertEqual(refused({"P": "bbbbbbbbbbbb"}), text)
         self.assertEqual(refused({"P": "../../xx"}), text)
         self.latest("P", "not-a-key")
-        self.assertEqual(refused({}), text)
+        self.assertEqual(refused({}), text)  # a latest that names no key
         self.latest("P", "aaaaaaaaaaaa")
         self.assertEqual(refused({"O'": "aaaaaaaaaaaa"}, ["P", "Oprime"]),
                          f"table: no complete key for leg Oprime on {ARCH}")
