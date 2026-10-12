@@ -629,7 +629,7 @@ static void test_pending_stub(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_run(&res, "proc", ""));
     char errs[4][LOG_TEXT];
     TEST_ASSERT_TRUE(errors_seen(errs, 4) >= 1);
-    TEST_ASSERT_EQUAL_STRING("odin3: error: proc: 'mux' is not available yet (2E)", errs[0]);
+    TEST_ASSERT_EQUAL_STRING("odin3: error: proc: 'latch' is not available yet (2E)", errs[0]);
     size_t pending = 0;
     for (size_t i = 0; i < n_lines && i < LOG_LINES; i++) {
         pending += strstr(lines[i], "is not available yet") != NULL ? 1 : 0;
@@ -641,7 +641,7 @@ static void test_pending_stub(void) {
     for (uint32_t i = 0; i < after.count; i++) {
         TEST_ASSERT_TRUE(odin3_value_equal(&before.body[i], &after.body[i]));
     }
-    TEST_ASSERT_EQUAL(ODIN3_PROC_PH_MUX, odin3_proc_pending_first());
+    TEST_ASSERT_EQUAL(ODIN3_PROC_PH_LATCH, odin3_proc_pending_first());
     pb_free(&res);
 }
 

@@ -24,7 +24,6 @@ typedef struct pending_phase {
 } pending_phase;
 
 static const pending_phase k_pending[] = {
-    {ODIN3_PROC_PH_MUX, "mux"},
     {ODIN3_PROC_PH_LATCH, "latch"},
     {ODIN3_PROC_PH_FF, "ff"},
 };

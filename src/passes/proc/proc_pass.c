@@ -99,8 +99,8 @@ static odin3_status proc_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw) {
 }
 
 /* The phase itself: clean and rmdead (2E Task 4), prune (Task 5), arst and the clock pre-check
- * (Task 6); the rest are still pending (proc_pending.c), and Tasks 7-9 dispatch theirs here as
- * their pending entries go. */
+ * (Task 6), mux (Task 7); the rest are still pending (proc_pending.c), and Tasks 8-9 dispatch
+ * theirs here as their pending entries go. */
 static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phase, odin3_pw *pw) {
     switch (phase) {
     case ODIN3_PROC_PH_CLEAN:
@@ -113,6 +113,8 @@ static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phas
         return odin3_pw_arst(mctx, pw);
     case ODIN3_PROC_PH_CLOCKS:
         return proc_clocks(mctx, pw);
+    case ODIN3_PROC_PH_MUX:
+        return odin3_proc_mux(mctx, pw);
     default:
         return odin3_proc_pending_run(mctx, phase);
     }

@@ -302,6 +302,72 @@ odin3_status odin3_pw_check_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw);
  */
 odin3_status odin3_pw_check_memwr(odin3_proc_mctx *mctx, const odin3_pw *pw);
 
+/* --- step B: snippets and mux trees (§6, §7; proc_snip.c, proc_mux.c) --------------------- */
+
+/*
+ * The snippets of a process (Yosys 0.55's SigSnippets and SnippetSwCache, §6): the bits its case
+ * tree assigns, partitioned into runs so that every action lhs is a concatenation of whole
+ * snippets, each in its own bit order.
+ */
+typedef struct odin3_proc_snips odin3_proc_snips;
+
+/*
+ * Inserts every action lhs of pw's case tree (the root's actions first, then each switch's cases
+ * depth first, in order), as Yosys's SigSnippets::insert: bits of no snippet yet join a new one; a
+ * run that matches part of an existing snippet splits it into up to three, each a new snippet
+ * (the worklist is the lhs being walked; a run matching a whole snippet leaves it in its place);
+ * an lhs identical to a snippet is stored once. Snippets are numbered in creation order, the
+ * pieces of a split after every older snippet. Then the switch cache (a u64map keyed
+ * switch << 32 | snippet: some action below the switch assigns the snippet) and, per case and
+ * snippet, the case's last action assigning it. Bits are compared as stored (the raw view). Each
+ * snippet is a sub-run of an action's lhs run, so pw->bits is not changed. *out is owned by the
+ * caller (odin3_proc_snips_free), NULL on failure. ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL argument; ODIN3_ERR_CHECK (logged) if an lhs does not cover whole snippets
+ * (a 2E bug). O(Σ lhs bits + splits' bits + Σ actions' snippets x switch depth), with u64map
+ * operations.
+ */
+odin3_status odin3_proc_snips_build(const odin3_proc_mctx *mctx, const odin3_pw *pw,
+                                    odin3_proc_snips **out);
+
+/* The number of snippets (0 for NULL). */
+uint32_t odin3_proc_snips_count(const odin3_proc_snips *snips);
+
+/* Snippet index (below the count), a run of pw->bits. */
+odin3_pw_sig odin3_proc_snip(const odin3_proc_snips *snips, uint32_t index);
+
+/* True when an action somewhere below switch sw assigns snippet snip (SnippetSwCache::check). */
+bool odin3_proc_snips_touches(const odin3_proc_snips *snips, uint32_t sw, uint32_t snip);
+
+/* True when an action of case case_index itself assigns snippet snip; *rhs is then the slice of
+ * the last such action's rhs that it assigns (a run of pw->bits, the snippet's width). */
+bool odin3_proc_snips_assigned(const odin3_proc_snips *snips, uint32_t case_index, uint32_t snip,
+                               odin3_pw_sig *rhs);
+
+/* Frees the snippets; NULL is a no-op. */
+void odin3_proc_snips_free(odin3_proc_snips *snips);
+
+/*
+ * The mux phase (§6, PR-12; proc_mux.c): Yosys 0.55's proc_mux without -ifx for pw, whose $proc
+ * node step B has deleted. One tree per snippet in creation order, from the root case with
+ * default x; per switch the snippet touches: its groups (one for parallel_case or simple parallel,
+ * else Yosys's BitPatternPool(width) per group, odin3_ppool_init, each past the cap ending its
+ * group with W5b once per switch), its full_case mask (memoised), its cases in reverse with
+ * Yosys's gen_mux and append_pmux. Cells: $eq (A_SIGNED 0, B_SIGNED 0, A_WIDTH = B_WIDTH = the
+ * bits left after dropping '-', Y_WIDTH 1; a 1-bit compare against 1 is the signal bit itself),
+ * $reduce_or of several compares (A_SIGNED 0, A_WIDTH their count, Y_WIDTH 1), $mux (WIDTH) and
+ * $pmux (WIDTH, S_WIDTH; B slices and S bits in append order), each with the switch's record
+ * odin3_proc_prov(mctx, pw, [switch, its cases in case order]) and the attributes of its flags. A
+ * mux is a record until no case can append to it (the next mux of its switch opens, an append
+ * closes it, or its switch is done), then one node; an append never resizes a node. An append whose
+ * select is empty (a compare of only '-' in a parallel_case group, where Yosys 0.55 asserts)
+ * makes the case's value the result, as gen_mux does, and closes the open mux (§20 #17). Each
+ * snippet's value is recorded with odin3_proc_connect (sig[i] <- value[i]), after the promotions
+ * step B records, so M1 applies them in that order. ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE,
+ * odin3_proc_add_cell) stop at once with valid IR: the cells made stay, and the nets of muxes
+ * still open are deleted. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ */
+odin3_status odin3_proc_mux(odin3_proc_mctx *mctx, odin3_pw *pw);
+
 /* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
 
 /* The first pending phase in schedule order, ODIN3_PROC_N_PHASES when none is pending. */
