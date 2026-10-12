@@ -11,6 +11,7 @@
 #include "util/log.h"
 #include "util/u64map.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -138,6 +139,8 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
     return ODIN3_OK;
 }
 
+enum { SOP_COVER_PARAM = 1 }; /* $sop parameters WIDTH, COVER (ir/cells/sop.c) */
+
 /* --- source classes (spec 3E §9.1) -------------------------------------------------------- */
 
 /* The registry names the preflight and the classes tell apart. */
@@ -180,7 +183,7 @@ odin3_blif_src_class odin3_blif_vtr_net_class(const odin3_module *module, odin3_
     case ODIN3_CONST_Z:
         return ODIN3_BLIF_SRC_X;
     case ODIN3_CONST_0:
-        return sop && odin3_node_param(module, node, 1)->len == 0 &&
+        return sop && odin3_node_param(module, node, SOP_COVER_PARAM)->len == 0 &&
                        strcmp(own_net_name(module, net), UNCONN_NAME) == 0
                    ? ODIN3_BLIF_SRC_U
                    : ODIN3_BLIF_SRC_0;
@@ -284,8 +287,8 @@ static const char MORE_DRIVERS[] = ", \xE2\x80\xA6";
 enum {
     LATCH_C = 0, /* $_DFF_P_ ports C D Q */
     LATCH_D = 1,
-    SOP_COVER_PARAM = 1,
-    SHOWN_DRIVERS = 2, /* E12 names at most two drivers */
+    SHOWN_DRIVERS = 2,     /* E12 names at most two drivers */
+    DRIVER_KEY_SHIFT = 32, /* next_driver's key: node ID << 32 | pin ID */
 };
 
 /* The walk over the top: its state, the text being built, the plan and the report it fills. */
@@ -480,6 +483,11 @@ static odin3_status check_params(vtr_walk *walk, odin3_node_id node, bool *refus
     bool ok = true;
     odin3_strbuf_clear(&walk->text);
     odin3_status st = odin3_blif_params_check(walk->design, walk->top, node, &walk->text, &ok);
+    if (st == ODIN3_ERR_INVALID_ARG) { /* the type cannot infer them (the IR logged why) */
+        odin3_strbuf_clear(&walk->text);
+        st = odin3_strbuf_append(&walk->text, odin3_bytes_cstr("of the type"));
+        ok = false;
+    }
     *refused = st == ODIN3_OK && !ok;
     if (!*refused || !refusal_logged(walk)) {
         return st;
@@ -530,6 +538,7 @@ static odin3_status check_clock(vtr_walk *walk, odin3_node_id node, uint32_t por
 static odin3_status check_hard(vtr_walk *walk, odin3_node_id node, const odin3_techlib_cell *lib) {
     const odin3_celltype_def *def =
         odin3_celltype_get(walk->design, odin3_node_type(walk->top, node));
+    assert(def->n_ports == lib->n_ports); /* the library registers its ports in order (1G) */
     bool refused = false;
     odin3_status st = check_params(walk, node, &refused);
     uint32_t x_inputs = 0;
@@ -679,17 +688,34 @@ static uint32_t out_drivers(const vtr_walk *walk, odin3_net_id net) {
     return count;
 }
 
-/* The lowest node ID above `above` with an OUT pin on net (0 for none). */
-static uint32_t next_driver(const vtr_walk *walk, odin3_net_id net, uint32_t above) {
+/* The lowest key node ID << 32 | pin ID above `above` of an OUT pin on net (0 for none): the
+ * driver pins in (node ID, pin ID) order, so a cell with two pins on net is listed twice. */
+static uint64_t next_driver(const vtr_walk *walk, odin3_net_id net, uint64_t above) {
     odin3_pinlist pins = odin3_net_pins(walk->top, net);
-    uint32_t best = 0;
+    uint64_t best = 0;
     for (uint32_t i = 0; i < pins.count; i++) {
-        uint32_t node = odin3_pin_node(walk->top, pins.pins[i]).v;
-        if (drives_out(walk, pins.pins[i]) && node > above && (best == 0 || node < best)) {
-            best = node;
+        uint64_t key = (uint64_t)odin3_pin_node(walk->top, pins.pins[i]).v << DRIVER_KEY_SHIFT |
+                       pins.pins[i].v;
+        if (drives_out(walk, pins.pins[i]) && key > above && (best == 0 || key < best)) {
+            best = key;
         }
     }
     return best;
+}
+
+/* Appends E12's first SHOWN_DRIVERS driver names, each in `'…'`, joined by `, `. */
+static odin3_status append_drivers(vtr_walk *walk, odin3_net_id net) {
+    odin3_status st = ODIN3_OK;
+    uint64_t key = next_driver(walk, net, 0); /* the net has > 1 OUT pins */
+    for (uint32_t i = 0; st == ODIN3_OK && key != 0 && i < SHOWN_DRIVERS; i++) {
+        st = odin3_strbuf_append(&walk->head, odin3_bytes_cstr(i == 0 ? "'" : ", '"));
+        st = st == ODIN3_OK
+                 ? append_driver(walk, (odin3_node_id){(uint32_t)(key >> DRIVER_KEY_SHIFT)})
+                 : st;
+        st = st == ODIN3_OK ? odin3_strbuf_append(&walk->head, odin3_bytes_cstr("'")) : st;
+        key = next_driver(walk, net, key);
+    }
+    return st;
 }
 
 /* E12: `<module>: net '<net>' has <N> drivers ('<a>', '<b>'[, …])` (plan 3E point (h)). */
@@ -703,13 +729,7 @@ static odin3_status refuse_drivers(vtr_walk *walk, odin3_net_id net, uint32_t dr
     st = st == ODIN3_OK ? append_net(walk, net) : st;
     st = st == ODIN3_OK ? odin3_strbuf_appendf(&walk->head, "' has %u drivers (", (unsigned)drivers)
                         : st;
-    uint32_t node = 0;
-    for (uint32_t i = 0; st == ODIN3_OK && i < SHOWN_DRIVERS; i++) {
-        node = next_driver(walk, net, node);
-        st = odin3_strbuf_append(&walk->head, odin3_bytes_cstr(i == 0 ? "'" : ", '"));
-        st = st == ODIN3_OK ? append_driver(walk, (odin3_node_id){node}) : st;
-        st = st == ODIN3_OK ? odin3_strbuf_append(&walk->head, odin3_bytes_cstr("'")) : st;
-    }
+    st = st == ODIN3_OK ? append_drivers(walk, net) : st;
     if (st == ODIN3_OK && drivers > SHOWN_DRIVERS) {
         st = odin3_strbuf_append(&walk->head, odin3_bytes_cstr(MORE_DRIVERS));
     }

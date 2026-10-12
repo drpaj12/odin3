@@ -1007,11 +1007,28 @@ static bool formal_scalar(const blif_writer *wr, odin3_celltype_id type, uint32_
     return port->scalar;
 }
 
+/* The parameters the BLIF reader gives node's .subckt (frontends/blif/reader.h): a declared
+ * model's, else those its connected formals imply. seen is scratch for one width per port. */
+typedef struct wr_implied {
+    const odin3_design *design;
+    const odin3_module *module;
+    odin3_node_id node;
+    const odin3_u64map *declared; /* type -> first declared-model entry; NULL: scan the list */
+    uint32_t *seen;               /* one per port of the type */
+    odin3_value *params;          /* receives one per parameter of the type */
+} wr_implied;
+
 /* True and *index = the first declared-model entry of type when the design declares it. */
-static bool first_declared(const odin3_design *design, odin3_celltype_id type, uint32_t *index) {
-    uint32_t count = odin3_design_declared_model_count(design);
+static bool first_declared(const wr_implied *req, odin3_celltype_id type, uint32_t *index) {
+    uint64_t at = 0;
+    if (req->declared != NULL) {
+        bool found = odin3_u64map_get(req->declared, type.v, &at);
+        *index = (uint32_t)at;
+        return found;
+    }
+    uint32_t count = odin3_design_declared_model_count(req->design);
     for (uint32_t i = 0; i < count; i++) {
-        if (odin3_design_declared_model(design, i).v == type.v) {
+        if (odin3_design_declared_model(req->design, i).v == type.v) {
             *index = i;
             return true;
         }
@@ -1019,21 +1036,11 @@ static bool first_declared(const odin3_design *design, odin3_celltype_id type, u
     return false;
 }
 
-/* The parameters the BLIF reader gives node's .subckt (frontends/blif/reader.h): a declared
- * model's, else those its connected formals imply. seen is scratch for one width per port. */
-typedef struct wr_implied {
-    const odin3_design *design;
-    const odin3_module *module;
-    odin3_node_id node;
-    uint32_t *seen;      /* one per port of the type */
-    odin3_value *params; /* receives one per parameter of the type */
-} wr_implied;
-
 static odin3_status implied_params(const wr_implied *req) {
     odin3_celltype_id type = odin3_node_type(req->module, req->node);
     const odin3_celltype_def *def = odin3_celltype_get(req->design, type);
     uint32_t index = 0;
-    const odin3_value *declared = first_declared(req->design, type, &index)
+    const odin3_value *declared = first_declared(req, type, &index)
                                       ? odin3_design_declared_model_params(req->design, index)
                                       : NULL;
     if (declared != NULL) {
@@ -1059,21 +1066,21 @@ static odin3_status list_param(odin3_strbuf *bad, const char *name, bool *first)
     return st == ODIN3_OK ? odin3_strbuf_appendf(bad, "'%s'", name) : st;
 }
 
-odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_module *module,
-                                     odin3_node_id node, odin3_strbuf *bad, bool *ok) {
-    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(module, node));
+/* odin3_blif_params_check for req's node (its design, module and declared map). */
+static odin3_status params_check(wr_implied req, odin3_strbuf *bad, bool *ok) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(req.design, odin3_node_type(req.module, req.node));
     *ok = true;
     if (def->n_params == 0) {
         return ODIN3_OK;
     }
-    wr_implied req = {design, module, node,
-                      odin3_util_malloc(sizeof(uint32_t) * (def->n_ports + 1U)),
-                      odin3_util_malloc(sizeof(odin3_value) * def->n_params)};
+    req.seen = odin3_util_malloc(sizeof(uint32_t) * (def->n_ports + 1U));
+    req.params = odin3_util_malloc(sizeof(odin3_value) * def->n_params);
     odin3_status st =
         req.seen != NULL && req.params != NULL ? implied_params(&req) : ODIN3_ERR_NO_MEMORY;
     bool first = true;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params; i++) {
-        if (!odin3_value_equal(odin3_node_param(module, node, i), &req.params[i])) {
+        if (!odin3_value_equal(odin3_node_param(req.module, req.node, i), &req.params[i])) {
             *ok = false;
             st = list_param(bad, def->params[i].name, &first);
         }
@@ -1081,6 +1088,11 @@ odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_mod
     odin3_util_free(req.seen);
     odin3_util_free(req.params);
     return st;
+}
+
+odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_module *module,
+                                     odin3_node_id node, odin3_strbuf *bad, bool *ok) {
+    return params_check((wr_implied){design, module, node, NULL, NULL, NULL}, bad, ok);
 }
 
 /* The connected pins of port `at` of node as `formal=actual` tokens. */
@@ -1130,7 +1142,8 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
         odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
     bool ok = true;
     odin3_strbuf_clear(&wr->cand);
-    odin3_status checked = odin3_blif_params_check(wr->design, wr->module, node, &wr->cand, &ok);
+    odin3_status checked = params_check(
+        (wr_implied){wr->design, wr->module, node, wr->declared, NULL, NULL}, &wr->cand, &ok);
     if (checked != ODIN3_OK) {
         return wr_fail(wr, checked);
     }

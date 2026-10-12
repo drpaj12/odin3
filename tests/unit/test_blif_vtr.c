@@ -12,6 +12,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
@@ -1327,6 +1328,10 @@ static void test_e3_no_clock(void) {
     expect_vtr_refused(line_of("write_blif: --vtr: top: $_DFF_P_ '$c%u': %s", dff.v, E3));
     pin_to_const(dff, (pin_at){0, 0}, "$_CONSTX_");
     expect_vtr_refused(line_of("write_blif: --vtr: top: $_DFF_P_ '$c%u': %s", dff.v, E3));
+    odin3_pin_id clock = odin3_node_port(top, dff, 0).first; /* then C on an undriven net */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top, clock));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top, clock, hand_net(top, "floating")));
+    expect_preflight_refused(line_of("write_blif: --vtr: top: $_DFF_P_ '$c%u': %s", dff.v, E3));
 }
 
 /* A single_port_ram with ADDR_WIDTH 4 and DATA_WIDTH 1, every pin connected, fed by .names. */
@@ -1346,6 +1351,17 @@ static void test_e3b_ram_clock_x(void) {
     expect_vtr_refused(line_of("write_blif: --vtr: t.blif:4: single_port_ram '$c%u': clock input "
                                "'clk' is unconnected or x",
                                ram));
+}
+
+/* E3b with `clk` unconnected (an open pin is as bad as x). */
+static void test_e3b_ram_clock_open(void) {
+    read_ok(RAM4, true);
+    uint32_t ram = node_of("single_port_ram");
+    odin3_pin_id clock = odin3_node_port(top_of(), (odin3_node_id){ram}, 0).first;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top_of(), clock));
+    expect_preflight_refused(line_of("write_blif: --vtr: t.blif:4: single_port_ram '$c%u': clock "
+                                     "input 'clk' is unconnected or x",
+                                     ram));
 }
 
 static void test_e4_tristate(void) {
@@ -1531,6 +1547,31 @@ static void test_e12_drivers(void) {
         line_of("write_blif: --vtr: top: net 'a' has 2 drivers ('a', '$c%u')", second.v));
 }
 
+/* One cell driving the net twice (review I1): listed twice, no crash. Read with odin3_blif_read
+ * (the read_blif pass's Debug check refuses the net) and refused by the API write, the path with
+ * no check before it. */
+static void test_e12_one_cell_twice(void) {
+    char path[PATH_BUF];
+    read_ok(TWO_MODELS, false); /* the directory and the sink */
+    empty_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(tc.design, "read_techlib",
+                                                   odin3_bytes_cstr(ODIN3_LIB_DIR "/vtr.o3lib")));
+    path_in_dir("twice.blif", path);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_TRUE(fputs(".model top\n.inputs x y z\n.outputs n\n"
+                           ".subckt adder a=x b=y cin=z cout=n sumout=n\n.end\n",
+                           file) >= 0);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(tc.design, path), tc.log.data);
+    uint32_t adder = node_of("adder");
+    const char *want =
+        line_of("write_blif: --vtr: top: net 'n' has 2 drivers ('$c%u', '$c%u')", adder, adder);
+    expect_preflight_refused(want);
+    expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0},
+                       want);
+}
+
 /* 21 `fe` latches: 20 E1 lines, then the count line; report.errors is exact. */
 static void test_error_cap(void) {
     odin3_strbuf text;
@@ -1581,6 +1622,72 @@ static odin3_net_id const_net(const char *const_type) {
     const odin3_netvec ports[] = {{&net, 1}};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
     return net;
+}
+
+/* Twenty refusals, then naming's own (two ports of one BLIF name): its line is past the cap, so
+ * it is counted only (review M2). */
+static void test_naming_refusal_past_cap(void) {
+    odin3_module *top = hand_top();
+    (void)hand_port(top, (hand_port_spec){"a", ODIN3_DIR_IN, 2, false, 0, 0});
+    (void)hand_scalar(top, "a[1]", ODIN3_DIR_IN);
+    for (int i = 0; i < 20; i++) {
+        (void)hand_cell(top, "$_DFF_N_", NULL, 0);
+    }
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(21, report.errors);
+    TEST_ASSERT_EQUAL_UINT32(21, count_of(tc.log.data, "error: "));
+    TEST_ASSERT_EQUAL_UINT32(20, count_of(tc.log.data, "falling-edge flip-flop"));
+    TEST_ASSERT_NULL_MESSAGE(strstr(tc.log.data, "BLIF name"), tc.log.data);
+    TEST_ASSERT_TRUE_MESSAGE(
+        ends_with(tc.log.data, "\nerror: write_blif: --vtr: 1 more errors not shown\n"),
+        tc.log.data);
+}
+
+/* A refused write logs its refusal alone: no VB-10 port warning or info line (review M3). */
+static void test_refused_logs_no_renames(void) {
+    read_ok(".model top\n.inputs re c\n.outputs q\n.latch re q fe c 0\n.end\n", false);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:4: $_DFF_N_ '$c%u': falling-edge "
+                               "flip-flop; VPR accepts only rising-edge latches (lower inverts "
+                               "the clock)",
+                               node_of("$_DFF_N_")));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, tc.warnings, tc.log.data);
+    TEST_ASSERT_NULL_MESSAGE(strstr(tc.log.data, "legalised"), tc.log.data);
+}
+
+/* `.names unconn` with the row `0` is a constant 0, not Parmys's zero-row `unconn` (review M1). */
+static void test_unconn_with_row_is_zero(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names unconn\n0\n.names unconn a y\n11 1\n"
+            ".end\n",
+            false);
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_0,
+                          odin3_blif_vtr_net_class(top_of(), net_named("unconn")));
+}
+
+/* Point (i) for a DERIVED record: the first leaf of the backward walk gives `<loc>`. */
+static void test_loc_derived(void) {
+    odin3_module *top = hand_top();
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("probe"), &ctx));
+    odin3_srcloc loc = {.file = intern("src/x.v"), .line = 7, .col = 1, .end_line = 7};
+    odin3_prov_origin origin = {.locs = &loc, .n_locs = 1};
+    odin3_prov_id leaf = {0};
+    odin3_prov_id derived = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaf));
+    odin3_prov_begin_op(&ctx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&leaf, 1}, &derived));
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$_DFF_N_"), &type));
+    odin3_node_spec spec = {.type = type, .prov = derived};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(top, &spec, &node));
+    expect_preflight_refused(line_of("write_blif: --vtr: src/x.v:7: $_DFF_N_ '$c%u': "
+                                     "falling-edge flip-flop; VPR accepts only rising-edge latches "
+                                     "(lower inverts the clock)",
+                                     node.v));
 }
 
 /* Review Focus 2: §9.1's classes by the driving cell only; x is gnd on a LUT input and open on a
@@ -1683,9 +1790,16 @@ static void test_clean_report(void) {
  * want (leaks are LeakSanitizer's). */
 static void preflight_oom_sweep(odin3_status want) {
     odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report clean = {0};
+    odin3_strbuf clean_log;
+    odin3_strbuf_init(&clean_log);
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(want, odin3_blif_vtr_preflight(tc.design, &opts, &clean));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&clean_log, buf_of(&tc.log)));
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
         odin3_blif_vtr_report report = {0};
+        odin3_strbuf_clear(&tc.log);
         odin3_util_set_alloc_fail_after(fail_at);
         odin3_status st = odin3_blif_vtr_preflight(tc.design, &opts, &report);
         odin3_util_set_alloc_fail_after(-1);
@@ -1693,7 +1807,12 @@ static void preflight_oom_sweep(odin3_status want) {
             TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
         }
         done = st == want;
+        if (done) { /* the end state is an unfailed run's: no failure swallowed or refused */
+            TEST_ASSERT_EQUAL_MEMORY(&clean, &report, sizeof report);
+            TEST_ASSERT_EQUAL_STRING(text_of(&clean_log), text_of(&tc.log));
+        }
     }
+    odin3_strbuf_free(&clean_log);
     TEST_ASSERT_TRUE(done);
 }
 
@@ -1897,6 +2016,7 @@ static void run_task_3_and_more(void) {
     RUN_TEST(test_e2_level_latch);
     RUN_TEST(test_e3_no_clock);
     RUN_TEST(test_e3b_ram_clock_x);
+    RUN_TEST(test_e3b_ram_clock_open);
     RUN_TEST(test_e4_tristate);
     RUN_TEST(test_e5_word_cell);
     RUN_TEST(test_e6_not_hard);
@@ -1906,7 +2026,12 @@ static void run_task_3_and_more(void) {
     RUN_TEST(test_e10_hierarchy);
     RUN_TEST(test_e11_params);
     RUN_TEST(test_e12_drivers);
+    RUN_TEST(test_e12_one_cell_twice);
     RUN_TEST(test_error_cap);
+    RUN_TEST(test_naming_refusal_past_cap);
+    RUN_TEST(test_refused_logs_no_renames);
+    RUN_TEST(test_unconn_with_row_is_zero);
+    RUN_TEST(test_loc_derived);
     RUN_TEST(test_classes_by_pin_kind);
     RUN_TEST(test_refusal_keeps_old_file);
     RUN_TEST(test_clean_report);
