@@ -302,6 +302,13 @@ static odin3_status proc_change(proc_run *run, odin3_proc_mctx *mctx) {
     return st;
 }
 
+/* --stop-after X runs the analysis phases up to X: stop values are phase values plus one. */
+_Static_assert(ODIN3_PROC_STOP_CLEAN - 1 == ODIN3_PROC_PH_CLEAN &&
+                   ODIN3_PROC_STOP_RMDEAD - 1 == ODIN3_PROC_PH_RMDEAD &&
+                   ODIN3_PROC_STOP_PRUNE - 1 == ODIN3_PROC_PH_PRUNE &&
+                   ODIN3_PROC_STOP_ARST - 1 == ODIN3_PROC_PH_ARST,
+               "odin3_proc_stop and odin3_proc_phase are aligned");
+
 /* One module (PR-3): step A; then, unless it or an earlier module failed, steps B-F. */
 static odin3_status proc_module(proc_run *run, odin3_module *module) {
     odin3_proc_mctx mctx;

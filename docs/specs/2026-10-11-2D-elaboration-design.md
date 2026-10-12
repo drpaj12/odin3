@@ -1875,11 +1875,18 @@ bullets above differ from it, this note and `writer.h` win. The eight difference
 
    A new cell type, such as 2E-1's flip-flops or 3D's `$lut`, must either match Yosys 0.55 or
    join this list.
-7. **No black-box stubs.** Black-box and hard cell types are not IR modules, so they get no
-   `module` stub; 2E-1 builds the stubs. Until then their instances are cells of a type Yosys
-   does not know. `read_rtlil`, `proc` and `opt` accept such cells, but `hierarchy -check`
-   rejects them. Yosys also counts every connection of such a cell as a user, because
-   `Cell::known()` is false.
+7. **Black-box stubs** *(amended by 2E-1 Task 3, controller ruling)*. Black-box and hard cell
+   types are not IR modules; after the modules `write_rtlil` writes one `module` stub per such
+   type (declared models first, then the other instantiated types; `$` names excepted), as Yosys
+   0.55's `read_verilog` makes a `(* blackbox *)` module: `attribute \blackbox 1`, `attribute
+   \dynports 1` when a port's width depends on a parameter, the parameters with their defaults
+   and the ports at the default widths (`src/backends/rtlil/writer.h`). `hierarchy -check`
+   accepts every parameterisation through one stub (with `dynports` it neither resizes nor
+   derives the instances). `Cell::known()` is now true for these instances, so Yosys counts only
+   their input connections as users, and `opt_clean` *removes* a black-box instance whose
+   outputs are unused (without stubs it kept every instance); 2F's `opt_clean` mirrors this (2F
+   §10). Yosys's `write_blif` writes only the low `min(connection, stub port)` bits of a
+   parameterised instance, on both sides of a BLIF comparison.
 8. **Which nets get `wire $n`.** A net is spelled as a net of its own, and declared as a wire,
    exactly when it is live, not constant, and its primary is not a bit of a *named* wire
    (`odin3_proc_sig_is_net`). So the nets of unnamed wires, and nets with no wire at all, are

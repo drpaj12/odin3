@@ -164,8 +164,10 @@ odin3_celltype_id odin3_proc_type(const odin3_proc_mctx *mctx, const char *name)
 
 /*
  * *out = the DERIVED record of the run's current operation with parents (n of them, in order; a 0
- * parent, or none at all, stands for pw->prov). The IR's status (INVALID_ARG before an
- * operation begins); ODIN3_ERR_NO_MEMORY.
+ * parent, or none at all, stands for pw->prov). A parent that is still 0 (a process without a
+ * record) is left out, and with no parent left *out is 0 and the status ODIN3_OK, as
+ * odin3_proc_begin_lowering does. The IR's status (INVALID_ARG before an operation begins);
+ * ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_proc_prov(const odin3_proc_mctx *mctx, const odin3_pw *pw,
                              const odin3_prov_id *parents, uint32_t n, odin3_prov_id *out);

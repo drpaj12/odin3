@@ -376,10 +376,10 @@ typedef struct odin3_objref {
 
 /*
  * Sets attribute key_str (a non-empty strtab ID) of a live object to a copy of value (payload
- * copied into the module), replacing any earlier value. INVALID_ARG for a dead or unknown object,
- * a bad key, a value odin3_value_valid rejects (unknown kind, a NULL payload of nonzero
- * length, partial cover rows), or a PROC value (a process body is only a $proc node's BODY,
- * IR-19).
+ * copied into the module), replacing any earlier value. INVALID_ARG for a NULL module, a dead or
+ * unknown object, a bad key, a value odin3_value_valid rejects (unknown kind, a NULL payload of
+ * nonzero length, partial cover rows), or a PROC value (a process body is only a $proc node's
+ * BODY, IR-19).
  */
 odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key_str,
                             const odin3_value *value);
@@ -391,7 +391,7 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
  * attributes keep their order; setting the key again appends it at the end of the first-set order.
  * The record stays in the table until compact drops it, so earlier odin3_attr_get pointers stay
  * readable. ODIN3_OK when obj has no such attribute. Never allocates. INVALID_ARG (logged as
- * odin3_attr_set logs) for a dead or unknown object or a bad key.
+ * odin3_attr_set logs) for a NULL module, a dead or unknown object or a bad key.
  */
 odin3_status odin3_attr_remove(odin3_module *module, odin3_objref obj, uint32_t key_str);
 

@@ -326,9 +326,8 @@ typedef struct cell_build {
     odin3_net_id *nets;  /* one per pin, port after port */
     odin3_netvec *ports; /* one per port, into nets */
     uint32_t n_pins;
-    uint32_t n_fresh;   /* fresh output nets made so far (deleted again on failure) */
-    uint32_t out_first; /* index in nets of the first output pin */
-    uint32_t n_out;     /* output pins */
+    uint32_t n_fresh; /* fresh output nets made so far (deleted again on failure) */
+    uint32_t n_out;   /* output pins */
 } cell_build;
 
 /* The resolved net of bit (a constant: the shared constant net). */
@@ -408,7 +407,6 @@ static odin3_status cb_nets(cell_build *cb) {
         cb->ports[port].nets = nets;
         odin3_status st = ODIN3_OK;
         if (cb->def->ports[port].dir == ODIN3_DIR_OUT) {
-            cb->out_first = taken == 0 ? at : cb->out_first;
             st = cb_outputs(cb, nets, width, &taken);
         } else {
             const odin3_pw_bit *bits = odin3_pw_sig_bits(cb->cell->pw, cb->cell->inputs[input++]);
@@ -484,35 +482,48 @@ static void cb_count_kind(const cell_build *cb) {
     }
 }
 
-/* Creates the node and copies its attributes; *out gets the output nets as a new run of pw. */
+/* *out = the output nets, output port after output port, as a new run of pw->bits. */
+static odin3_status cb_out_sig(const cell_build *cb, odin3_pw_sig *out) {
+    odin3_pw_bit *bits = odin3_util_malloc(sizeof *bits * ((size_t)cb->n_out + 1));
+    if (bits == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t taken = 0;
+    for (uint32_t port = 0; port < cb->def->n_ports; port++) {
+        for (uint32_t k = 0; cb->def->ports[port].dir == ODIN3_DIR_OUT && k < cb->ports[port].count;
+             k++) {
+            bits[taken++] = cb->ports[port].nets[k].v;
+        }
+    }
+    odin3_status st = odin3_pw_sig_new(cb->cell->pw, bits, cb->n_out, out);
+    odin3_util_free(bits);
+    return st;
+}
+
+/*
+ * The output run first (pw->bits only grows, so a later failure leaves garbage, never a half-made
+ * cell), then the node, its kind and its attributes; only setting an attribute can fail after the
+ * node exists, and the IR is valid then.
+ */
 static odin3_status cb_create(cell_build *cb, odin3_pw_sig *out) {
     const odin3_proc_cell *cell = cb->cell;
-    odin3_node_spec spec = {cell->type, 0, cell->prov, cell->params, cell->n_params};
+    odin3_status st = cb_out_sig(cb, out);
     odin3_node_id node = {0};
-    odin3_status st = odin3_node_create_connected(cb->mctx->module, &spec, cb->ports, &node);
+    if (st == ODIN3_OK) {
+        odin3_node_spec spec = {cell->type, 0, cell->prov, cell->params, cell->n_params};
+        st = odin3_node_create_connected(cb->mctx->module, &spec, cb->ports, &node);
+    }
     if (st != ODIN3_OK) {
         cb_undo(cb);
         return st;
     }
     cb_count_kind(cb);
-    st = cb_attrs(cb, node);
-    odin3_pw_bit *bits =
-        st == ODIN3_OK ? odin3_util_malloc(sizeof *bits * ((size_t)cb->n_out + 1)) : NULL;
-    if (st == ODIN3_OK && bits == NULL) {
-        st = ODIN3_ERR_NO_MEMORY;
-    }
-    for (uint32_t k = 0; st == ODIN3_OK && k < cb->n_out; k++) {
-        bits[k] = cb->nets[cb->out_first + k].v;
-    }
-    st = st == ODIN3_OK ? odin3_pw_sig_new(cell->pw, bits, cb->n_out, out) : st;
-    odin3_util_free(bits);
-    return st;
+    return cb_attrs(cb, node);
 }
 
 odin3_status odin3_proc_add_cell(odin3_proc_mctx *mctx, const odin3_proc_cell *cell,
                                  odin3_pw_sig *out) {
-    cell_build cb = {mctx, cell, odin3_celltype_get(mctx->design, cell->type), NULL, NULL, 0, 0,
-                     0,    0};
+    cell_build cb = {mctx, cell, odin3_celltype_get(mctx->design, cell->type), NULL, NULL, 0, 0, 0};
     if (cb.def == NULL || cell->pw == NULL || (cell->n_inputs > 0 && cell->inputs == NULL) ||
         cell->n_params != cb.def->n_params || (cell->n_params > 0 && cell->params == NULL)) {
         odin3_log(ODIN3_LOG_ERROR,
@@ -547,11 +558,17 @@ odin3_status odin3_proc_prov(const odin3_proc_mctx *mctx, const odin3_pw *pw,
     if (ids == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    uint32_t kept = 0;
     for (uint32_t i = 0; i < count; i++) {
         odin3_prov_id parent = n > 0 ? parents[i] : (odin3_prov_id){0};
-        ids[i] = parent.v != 0 ? parent : pw->prov;
+        parent = parent.v != 0 ? parent : pw->prov;
+        if (parent.v != 0) { /* a record-less process: its 0 is left out (review I2) */
+            ids[kept++] = parent;
+        }
     }
-    odin3_status st = odin3_prov_derive(mctx->ctx, (odin3_prov_list){ids, count}, out);
+    *out = (odin3_prov_id){0};
+    odin3_status st =
+        kept > 0 ? odin3_prov_derive(mctx->ctx, (odin3_prov_list){ids, kept}, out) : ODIN3_OK;
     if (ids != stack) {
         odin3_util_free(ids);
     }

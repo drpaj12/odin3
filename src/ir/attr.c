@@ -33,14 +33,27 @@ static bool obj_live(const odin3_module *module, odin3_objref obj) {
     return false;
 }
 
-/* NULL when the call is valid, else what is wrong. */
-static const char *set_error(const odin3_module *module, odin3_objref obj, uint32_t key_str,
-                             const odin3_value *value) {
+/* NULL when module, obj and key_str can be used, else what is wrong. */
+static const char *object_key_error(const odin3_module *module, odin3_objref obj,
+                                    uint32_t key_str) {
+    if (module == NULL) {
+        return "no module";
+    }
     if (!obj_live(module, obj)) {
         return "no live object of that kind and ID";
     }
     if (key_str == 0 || key_str >= odin3_strtab_count(odin3_design_strtab(module->design))) {
         return "the key is not a non-empty string ID";
+    }
+    return NULL;
+}
+
+/* NULL when the call is valid, else what is wrong. */
+static const char *set_error(const odin3_module *module, odin3_objref obj, uint32_t key_str,
+                             const odin3_value *value) {
+    const char *err = object_key_error(module, obj, key_str);
+    if (err != NULL) {
+        return err;
     }
     if (!odin3_value_valid(value)) {
         return "the value has an unknown kind, a missing payload or partial cover rows";
@@ -135,11 +148,7 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
 }
 
 odin3_status odin3_attr_remove(odin3_module *module, odin3_objref obj, uint32_t key_str) {
-    const char *err = !obj_live(module, obj) ? "no live object of that kind and ID" : NULL;
-    if (err == NULL &&
-        (key_str == 0 || key_str >= odin3_strtab_count(odin3_design_strtab(module->design)))) {
-        err = "the key is not a non-empty string ID";
-    }
+    const char *err = object_key_error(module, obj, key_str);
     if (err != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "attr_remove: kind %d, ID %u, key %u: %s", (int)obj.kind, obj.id,
                   key_str, err);

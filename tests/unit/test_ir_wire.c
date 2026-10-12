@@ -1175,6 +1175,10 @@ static void test_attr_remove_rejects_and_never_allocates(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, node));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_remove(module, ref, key));
     TEST_ASSERT_EQUAL_size_t(4, errors_logged);
+    odin3_value one = odin3_value_int(1); /* review minor 7: a NULL module is refused, not used */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_remove(NULL, ref, key));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_set(NULL, ref, key, &one));
+    TEST_ASSERT_EQUAL_size_t(6, errors_logged);
 }
 
 /* --- out of memory ------------------------------------------------------------------------- */
