@@ -1,0 +1,9 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+# C-S3: 'vcc' driven by a constant-0 generator; VPR accepts it.
+.model top
+.inputs a
+.outputs y
+.names vcc
+.names a vcc y
+11 1
+.end

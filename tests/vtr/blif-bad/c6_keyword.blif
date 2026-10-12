@@ -1,0 +1,7 @@
+# vpr: syntax error, unexpected re, expecting STRING
+# C6: a net named 're' on a .latch line lexes as the latch-type keyword.
+.model top
+.inputs re clk
+.outputs q
+.latch re q re clk 0
+.end

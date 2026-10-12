@@ -1,0 +1,13 @@
+# vpr: Assertion 'pin_net(pin_id) == net_id' failed
+# C7: one formal given twice, on two different nets (VPR accepts it twice on the same net).
+.model top
+.inputs a b c d
+.outputs y
+.subckt adder a=a a=d b=b cin=c sumout=y
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

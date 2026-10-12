@@ -625,12 +625,22 @@ if(BUILD_TESTING)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
     # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
-    # lists) against the expected files. The --checker argument (tools/blif-vtr-check, 3E-2) is
-    # added by whichever of 3E-1 and 3E-2 lands second; without it the driver skips that step.
+    # lists) against the expected files, then blif-vtr-check --strict on every expected file
+    # (vtr_fixtures.STRICT_EXCEPTIONS without --strict).
     add_test(NAME blif_vtr_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
-                     --odin3 $<TARGET_FILE:odin3> --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr)
+                     --odin3 $<TARGET_FILE:odin3> --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr
+                     --checker ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/blif-vtr-check)
     set_tests_properties(blif_vtr_fixtures PROPERTIES LABELS unit)
+    # 3E §15.2: the committed models JSONs pass the schema check, and lib/vtr.o3lib's hard cells
+    # match the k6_frac models (CI; the freshness `check --arch` runs locally and in 3H).
+    set(_vtr_models ${PROJECT_SOURCE_DIR}/tools/vtr-models/vtr-models)
+    set(_vtr_arch ${PROJECT_SOURCE_DIR}/tests/vtr/arch)
+    add_test(NAME vtr_models_check
+             COMMAND sh -c "\"$0\" check \"$1\" && \"$0\" check \"$2\" && \"$0\" check-lib \"$3\" --models \"$1\""
+                     ${_vtr_models} ${_vtr_arch}/k6_frac_N10_frac_chain_mem32K_40nm.models.json
+                     ${_vtr_arch}/EArch.models.json ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib)
+    set_tests_properties(vtr_models_check PROPERTIES LABELS unit)
     # The driver's own negative: a deliberately wrong expected file must be reported.
     add_test(NAME blif_vtr_fixtures_detects_corruption
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
@@ -741,6 +751,13 @@ if(BUILD_TESTING)
     # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
     list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # 3E §15.1/§15.2: the VPR negative corpus. Every tests/vtr/blif-bad/*.blif has exactly one
+    # violation of its prefix's class; every strict/*.blif passes without --strict and fails with
+    # it. (That VPR rejects exactly the top-level files is Task 11's --bad-corpus run.)
+    add_test(NAME blif_vtr_check_bad
+             COMMAND ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_vtr_models.BlifBadCorpusTest
+             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(blif_vtr_check_bad PROPERTIES LABELS unit)
     # The project-input corpus (tests/golden/projects) parses to its expected records in every
     # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.
     add_test(NAME project_fixtures

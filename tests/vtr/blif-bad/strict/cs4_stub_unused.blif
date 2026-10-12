@@ -1,0 +1,14 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+# C-S4: a black-box stub no .subckt instantiates; VPR accepts it.
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end
+
+.model multiply
+.inputs a b
+.outputs out
+.blackbox
+.end

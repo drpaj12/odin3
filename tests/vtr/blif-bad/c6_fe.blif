@@ -1,0 +1,7 @@
+# vpr: Only rising edge latches supported
+# C6: a falling-edge latch.
+.model top
+.inputs d clk
+.outputs q
+.latch d q fe clk 0
+.end

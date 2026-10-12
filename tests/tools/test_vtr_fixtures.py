@@ -104,5 +104,33 @@ class FixtureRoundTripTest(unittest.TestCase):
             self.assertEqual((None, "bytes"), vtr_fixtures.round_trip_verdict(w1, w2, renamed))
 
 
+CHECKER = helpers.REPO_ROOT / "tools" / "blif-vtr-check" / "blif-vtr-check"
+
+
+class StrictExceptionTest(unittest.TestCase):
+    """The checker step: --strict on every expected file, but STRICT_EXCEPTIONS without it, and
+    an exception that --strict no longer needs fails."""
+
+    def check(self, name: str, blif: Path) -> tuple[str | None, str]:
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            why = vtr_fixtures.check_expected(CHECKER, name, blif)
+        return why, log.getvalue()
+
+    def test_shiftx_needs_its_exception(self) -> None:
+        blif = FIXTURES / "shiftx.parmys.vtr.blif"
+        why, log = self.check("shiftx.parmys", blif)
+        self.assertIsNone(why)
+        self.assertIn("note shiftx.parmys: blif-vtr-check without --strict (C-S2", log)
+        why, log = self.check("not_excepted", blif)
+        self.assertEqual("blif-vtr-check --strict exited 1", why)
+        self.assertIn("net 'unconn' feeds a .names/.latch pin", log)
+
+    def test_stale_exception_fails(self) -> None:
+        why, _ = self.check("shiftx.parmys", FIXTURES / "two_clock.vtr.blif")
+        self.assertEqual("in STRICT_EXCEPTIONS but passes blif-vtr-check --strict "
+                         "(drop the exception)", why)
+
+
 if __name__ == "__main__":
     unittest.main()

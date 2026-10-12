@@ -1,0 +1,7 @@
+# vpr: Subckt instantiates model 'mystery', but no such model exists in the architecture file.
+# C7: a .subckt of a model the arch does not have.
+.model top
+.inputs a
+.outputs y
+.subckt mystery i=a o=y
+.end

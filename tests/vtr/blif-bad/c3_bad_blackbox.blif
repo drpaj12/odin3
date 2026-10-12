@@ -1,0 +1,14 @@
+# vpr: Blackbox BLIF model 'mystery' has no equivalent architecture model.
+# C3: a black-box model that is not one of the arch's <models>.
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end
+
+.model mystery
+.inputs i
+.outputs o
+.blackbox
+.end

@@ -1,0 +1,8 @@
+# vpr: Unrecognized character
+# C1: '=' is legal only between a .subckt formal and its net; inside .names it is no token.
+.model top
+.inputs a b c
+.outputs y
+.names a b=c y
+11 1
+.end

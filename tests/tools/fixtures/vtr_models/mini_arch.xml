@@ -1,0 +1,76 @@
+<!-- A tiny arch for tests/tools/test_vtr_models.py: the <models> and pb_types vtr-models reads.
+     The RAM's widths differ across its two pb_types (R11 takes the largest num_pins per port);
+     the fracturable LUT gives K=6 (a 5-LUT and a 6-LUT .names); RAM addresses reach 15. -->
+<architecture>
+  <models>
+    <model name="adder">
+      <input_ports>
+        <port name="a" combinational_sink_ports="sumout cout"/>
+        <port name="b" combinational_sink_ports="sumout cout"/>
+        <port name="cin" combinational_sink_ports="sumout cout"/>
+      </input_ports>
+      <output_ports>
+        <port name="cout"/>
+        <port name="sumout"/>
+      </output_ports>
+    </model>
+    <model name="single_port_ram">
+      <input_ports>
+        <port name="we" clock="clk"/>
+        <port name="addr" clock="clk"/>
+        <port name="data" clock="clk"/>
+        <port name="clk" is_clock="1"/>
+      </input_ports>
+      <output_ports>
+        <port name="out" clock="clk"/>
+      </output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="clb">
+      <pb_type name="fle" num_pb="10">
+        <mode name="n2_lut5">
+          <pb_type name="lut5" blif_model=".names" num_pb="2" class="lut">
+            <input name="in" num_pins="5" port_class="lut_in"/>
+            <output name="out" num_pins="1" port_class="lut_out"/>
+          </pb_type>
+        </mode>
+        <mode name="n1_lut6">
+          <pb_type name="lut6" blif_model=".names" num_pb="1" class="lut">
+            <input name="in" num_pins="6" port_class="lut_in"/>
+            <output name="out" num_pins="1" port_class="lut_out"/>
+          </pb_type>
+        </mode>
+        <mode name="arithmetic">
+          <pb_type name="adder" blif_model=".subckt adder" num_pb="2">
+            <input name="a" num_pins="1"/>
+            <input name="b" num_pins="1"/>
+            <input name="cin" num_pins="1"/>
+            <output name="cout" num_pins="1"/>
+            <output name="sumout" num_pins="1"/>
+          </pb_type>
+        </mode>
+      </pb_type>
+    </pb_type>
+    <pb_type name="memory">
+      <mode name="mem_512x64_sp">
+        <pb_type name="mem_512x64_sp" blif_model=".subckt single_port_ram" class="memory" num_pb="1">
+          <input name="addr" num_pins="9" port_class="address"/>
+          <input name="data" num_pins="64" port_class="data_in"/>
+          <input name="we" num_pins="1" port_class="write_en"/>
+          <output name="out" num_pins="64" port_class="data_out"/>
+          <clock name="clk" num_pins="1" port_class="clock"/>
+        </pb_type>
+      </mode>
+      <mode name="mem_32768x1_sp">
+        <pb_type name="mem_32768x1_sp" blif_model=".subckt single_port_ram" class="memory" num_pb="1">
+          <input name="addr" num_pins="15" port_class="address"/>
+          <input name="data" num_pins="1" port_class="data_in"/>
+          <input name="we" num_pins="1" port_class="write_en"/>
+          <output name="out" num_pins="1" port_class="data_out"/>
+          <clock name="clk" num_pins="1" port_class="clock"/>
+        </pb_type>
+      </mode>
+    </pb_type>
+  </complexblocklist>
+</architecture>

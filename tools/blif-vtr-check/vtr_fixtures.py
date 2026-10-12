@@ -32,7 +32,9 @@ A written case then runs the round trip of §16.3 step 1 (step 5: CI on the fixt
   W2 differs from W1 by design. A ``note`` line names such a case.
 
 Then ``blif-vtr-check --strict`` runs on every expected ``.vtr.blif`` (skipped with a note
-without ``--checker``: the checker lands in 3E-2). An expected file that no case owns fails.
+without ``--checker``). A case in ``STRICT_EXCEPTIONS`` runs the checker without ``--strict``
+(the VPR rules C1-C9 still apply) and must still fail ``--strict``, so a stale exception fails.
+An expected file that no case owns fails.
 
 ``--write`` writes the missing expected file of a case (``.vtr.blif`` or ``.err``); it never
 overwrites one.
@@ -66,6 +68,12 @@ RENAMED = re.compile(r"^odin3: info: write_blif: --vtr: (\d+) names legalised ",
 # A VB-10 escape: `%` and two upper-case hex digits (plan 3E point (o)).
 ESCAPE = re.compile(rb"%([0-9A-F]{2})")
 TRAILER = re.compile(r"^odin3: error: (pass \S+: |-p: command \d+: )")
+# Expected files that break an Odin III convention (C-S rule) by design, with the reason; the
+# checker runs on them without --strict. shiftx.parmys is a Parmys k6 golden read back: its
+# class-U `unconn` stays on .names pins (spec §9.2, the writer only warns), which C-S2 flags.
+STRICT_EXCEPTIONS = {
+    "shiftx.parmys": "C-S2: the Parmys golden's class-U 'unconn' on .names pins (spec 9.2)",
+}
 
 
 class UsageError(Exception):
@@ -309,8 +317,36 @@ def orphans(fixtures: Path, cases: list[Case]) -> list[str]:
     return found
 
 
+def check_file(checker: Path, blif: Path, strict: bool) -> subprocess.CompletedProcess[str]:
+    """blif-vtr-check (with --strict when strict) on blif."""
+    return subprocess.run(
+        [str(checker), *(["--strict"] if strict else []), str(blif)],
+        capture_output=True,
+        text=True,
+        timeout=RUN_TIMEOUT,
+        check=False,
+    )
+
+
+def check_expected(checker: Path, name: str, blif: Path) -> str | None:
+    """None when blif passes the checker (--strict unless an exception), else why not."""
+    reason = STRICT_EXCEPTIONS.get(name)
+    proc = check_file(checker, blif, reason is None)
+    if proc.returncode != 0:
+        sys.stdout.write(proc.stdout + proc.stderr)
+        flag = "" if reason is not None else " --strict"
+        return f"blif-vtr-check{flag} exited {proc.returncode}"
+    if reason is None:
+        return None
+    if check_file(checker, blif, True).returncode != 1:
+        return "in STRICT_EXCEPTIONS but passes blif-vtr-check --strict (drop the exception)"
+    print(f"note {name}: blif-vtr-check without --strict ({reason})")
+    return None
+
+
 def run_checker(checker: Path | None, fixtures: Path, cases: list[Case]) -> int:
-    """blif-vtr-check --strict on every expected .vtr.blif; the number that fail."""
+    """blif-vtr-check --strict on every expected .vtr.blif (STRICT_EXCEPTIONS without it);
+    the number that fail."""
     if checker is None:
         print("vtr-fixtures: note: no --checker given; the blif-vtr-check step is skipped")
         return 0
@@ -319,17 +355,10 @@ def run_checker(checker: Path | None, fixtures: Path, cases: list[Case]) -> int:
         blif = fixtures / (case.name + OUT_SUFFIX)
         if not blif.is_file():
             continue
-        proc = subprocess.run(
-            [str(checker), "--strict", str(blif)],
-            capture_output=True,
-            text=True,
-            timeout=RUN_TIMEOUT,
-            check=False,
-        )
-        if proc.returncode != 0:
+        why = check_expected(checker, case.name, blif)
+        if why is not None:
             failed += 1
-            print(f"FAIL {case.name}: blif-vtr-check --strict exited {proc.returncode}")
-            sys.stdout.write(proc.stdout + proc.stderr)
+            print(f"FAIL {case.name}: {why}")
     return failed
 
 

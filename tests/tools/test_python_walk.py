@@ -31,10 +31,14 @@ HAND_N1_LINE = 5  # `.names a b n1`
 HAND_SUB_LINE = 18  # `.subckt sub ...` (u_sub)
 # Originals that drive one net from several cells (PHASE1 decision #15): the check after
 # read_blif fails in a Debug library, so these are compared only against a Release library.
-MULTI_DRIVER = {"elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif"}
+# c9_two_drivers is 3E's VPR negative corpus (tests/vtr/blif-bad, C9).
+MULTI_DRIVER = {"elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
+                "c9_two_drivers.blif"}
 # Negative fixtures that read_blif rejects by design (3E preflight E8: a cover mixing on-set and
-# off-set rows); they test the reader's refusal, not the walk.
-READ_REJECTS = {"neg_e8_mixed.in.blif"}
+# off-set rows; and the files of 3E's VPR negative corpus, tests/vtr/blif-bad, that our reader
+# refuses as VPR does); they test a refusal, not the walk.
+READ_REJECTS = {"neg_e8_mixed.in.blif", "c5_row_width.blif", "c6_init4.blif", "c7_no_port.blif",
+                "c7_twice.blif", "c7_wide_port.blif"}
 
 try:
     import cffi  # noqa: F401

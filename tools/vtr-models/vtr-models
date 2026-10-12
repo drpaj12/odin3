@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# vtr-models: the arch's <models> as JSON, and the library check (spec 3E §15.2). See vtr_models.py.
+# Exit codes: 0 clean, 1 a violation, 2 usage or I/O.
+set -euo pipefail
+exec python3 -I "$(dirname "$0")/vtr_models.py" "$@"

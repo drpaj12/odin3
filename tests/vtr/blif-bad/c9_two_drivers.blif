@@ -1,0 +1,15 @@
+# vpr: Must be no existing net driver
+# C9: y is driven by a .names and by the adder's second output formal (the block is named z).
+.model top
+.inputs a b c
+.outputs y z
+.names a b y
+11 1
+.subckt adder a=a b=b cin=c sumout=z cout=y
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

@@ -1,0 +1,13 @@
+# vpr: Found no matching port 'x' on architecture model 'adder'
+# C7: a formal that is no port of the model.
+.model top
+.inputs a b c d
+.outputs y
+.subckt adder a=a b=b cin=c x=d sumout=y
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

@@ -1,0 +1,7 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+# C-S5: a clock net named with '|', which VTR's blackbox_latches.pl splits on; VPR accepts it.
+.model top
+.inputs d a|b
+.outputs q
+.latch d q re a|b 0
+.end

@@ -1,0 +1,9 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+# C-S2: 'unconn' on a .names pin; VPR accepts it and leaves the LUT input open.
+.model top
+.inputs a
+.outputs y
+.names unconn
+.names a unconn y
+11 1
+.end

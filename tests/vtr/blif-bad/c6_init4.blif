@@ -1,0 +1,7 @@
+# vpr: syntax error, unexpected STRING, expecting end-of-line
+# C6: latch init 4 (VPR reads 0, 1, 2 and 3).
+.model top
+.inputs d clk
+.outputs q
+.latch d q re clk 4
+.end

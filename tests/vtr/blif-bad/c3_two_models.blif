@@ -1,0 +1,15 @@
+# vpr: Found multiple models with primitives. Only one model can contain primitives, the others must be blackboxes.
+# C3: a second model with primitives (VPR reads one; the hierarchy must be flat).
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end
+
+.model sub
+.inputs c
+.outputs z
+.names c z
+0 1
+.end

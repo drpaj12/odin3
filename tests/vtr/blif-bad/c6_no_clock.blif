@@ -1,0 +1,7 @@
+# vpr: Latch must have a clock
+# C6: an untyped latch with an init value carries no control net.
+.model top
+.inputs d
+.outputs q
+.latch d q 0
+.end

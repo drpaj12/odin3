@@ -1,0 +1,9 @@
+# vpr: syntax error, unexpected STRING
+# C2: .clock (written by ABC and Yosys) is no directive VPR reads; it lexes as a name.
+.model top
+.inputs a b clk
+.outputs y
+.clock clk
+.names a b y
+11 1
+.end

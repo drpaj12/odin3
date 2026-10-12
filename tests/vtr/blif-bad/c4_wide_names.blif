@@ -1,0 +1,8 @@
+# vpr: BLIF .names input size (7) greater than .names model input size (6)
+# C4: a .names wider than the arch's LUT (K=6).
+.model top
+.inputs a b c d e f g
+.outputs y
+.names a b c d e f g y
+1111111 1
+.end
