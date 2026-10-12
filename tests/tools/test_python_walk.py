@@ -67,7 +67,7 @@ P1_TEXT = (
 
 if TYPE_CHECKING or HAVE_CFFI:
     import walk
-    from odin3 import Design, Module, Node, Odin3, Odin3Error, Source
+    from odin3 import Design, Module, Node, Odin3, Odin3Error, Source, cdef_from_header
 
 
 def fixtures() -> list[Path]:
@@ -284,6 +284,22 @@ class PythonWalkTest(unittest.TestCase):
         ok = int(odin3.lib.ODIN3_OK)
         self.assertEqual(int(odin3.lib.odin3_pass_set_abc_script(b"map.abc")), ok)
         self.assertEqual(int(odin3.lib.odin3_pass_set_abc_script(odin3.ffi.NULL)), ok)
+
+    def test_engine_abi_in_cdef(self) -> None:
+        """3D Task 4: the cdef holds the ABC engine section, and its function resolves."""
+        odin3 = self.odin3
+        self.assertIn("odin3_abc_engine_register", cdef_from_header())
+        self.assertEqual(int(odin3.lib.ODIN3_ERR_ENGINE), 8)
+        self.assertEqual(int(odin3.lib.ODIN3_STATUS_COUNT), 9)
+        self.assertEqual(int(odin3.lib.ODIN3_ABC_ENGINE_VERSION), 1)
+        self.assertEqual(odin3.ffi.sizeof("odin3_abc_fail"), 264)
+        self.assertEqual(odin3.status_string(int(odin3.lib.ODIN3_ERR_ENGINE)), "ODIN3_ERR_ENGINE")
+        with odin3.capture_log() as log:  # NULL is refused and registers nothing
+            status = odin3.lib.odin3_abc_engine_register(odin3.ffi.NULL)
+        self.assertEqual(int(status), int(odin3.lib.ODIN3_ERR_INVALID_ARG))
+        self.assertEqual(
+            [rec.message for rec in log], ["odin3_abc_engine_register: invalid argument engine"]
+        )
 
     def test_walk_script(self) -> None:
         out = io.StringIO()

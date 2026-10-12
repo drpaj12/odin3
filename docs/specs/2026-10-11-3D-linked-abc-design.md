@@ -286,7 +286,7 @@ The rule "bump on the first incompatible change after a release" stands.
 
 ```c
 /* --- the ABC engine (3D) -------------------------------------------------------------------- */
-enum { ODIN3_ABC_ENGINE_VERSION = 1 };
+enum { ODIN3_ABC_ENGINE_VERSION = 1, ODIN3_ABC_FAIL_TEXT_BYTES = 256 };
 
 typedef enum odin3_abc_fail_kind {
     ODIN3_ABC_FAIL_NONE = 0,
@@ -302,7 +302,7 @@ typedef enum odin3_abc_fail_kind {
 typedef struct odin3_abc_fail {
     uint32_t kind; /* odin3_abc_fail_kind */
     int32_t code;
-    char text[256]; /* NUL-terminated detail, "" when none */
+    char text[ODIN3_ABC_FAIL_TEXT_BYTES]; /* NUL-terminated detail, "" when none */
 } odin3_abc_fail;
 
 /* One line of ABC's output (stdout and stderr merged), without its newline; valid during the

@@ -63,6 +63,7 @@ add_library(odin3_core OBJECT
     src/api/net.c
     src/api/attr.c
     src/api/log.c
+    src/api/abc.c
     src/util/alloc.c
     src/util/arena.c
     src/util/hash.c
@@ -105,6 +106,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
+    src/passes/abc/engine.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -727,6 +729,8 @@ if(BUILD_TESTING)
     add_dependencies(test_abi_ext example_plugin plugin_bad_init)
     add_test(NAME test_abi_ext COMMAND test_abi_ext)
     set_tests_properties(test_abi_ext PROPERTIES LABELS unit)
+    # 3D Task 4: the ABC engine ABI and registry (cases in order: registration is final).
+    odin3_add_unit_test(test_abc_engine_abi)
     odin3_add_unit_test(test_abi_core)
     target_compile_definitions(test_abi_core PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
