@@ -34,7 +34,10 @@ Recorded 2026-10-08 (Phase 0 §4).
   Debug and `-O2 -DNDEBUG` in Release, `ABC_NO_HISTORY` (no `abc.history`), and never
   `odin3_flags` or the sanitisers. The `abc` tool is the target `odin3_abc_exe` (ABC's `main.c`
   linked to `libabc-pic`, output `build/<preset>/third_party/abc/abc`); it is what `ODIN3_ABC`
-  points at in CTest. ABC's own `abc` and `libabc` targets are not built.
+  points at in CTest; build it alone with `--target odin3_abc_exe` (or `abc_tool`). ABC's own
+  `abc` and `libabc` targets are not built: `--target abc` is ABC's upstream tool (output
+  `abc-upstream`, on the non-PIC `libabc`), which compiles all of ABC a second time and does not
+  update `third_party/abc/abc`.
 - **Yosys now builds with CMake** (`cmake -B build -G Ninja && ninja -C build`); its old
   `make -j` instructions no longer apply.
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.

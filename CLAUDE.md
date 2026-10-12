@@ -104,8 +104,8 @@ tools/golden-sample/golden-sample [--write]                  # pick the committe
 ## Layout
 
 `include/odin3/` public ABI · `src/{util,ir,ast,frontends,passes,backends,sim,cli,api}` core ·
-`adapters/{slang,abc}` SystemVerilog shim and linked-ABC adapter (C17; ABC's own C and C++ stay
-in `third_party/abc`) · `plugins/` C and Python examples · `tools/` oracle and lint
+`adapters/slang` C++ SystemVerilog shim · `adapters/abc` linked-ABC adapter (C17; ABC's own C and
+C++ stay in `third_party/abc`) · `plugins/` C and Python examples · `tools/` oracle and lint
 tools · `tests/{unit,golden,micro,tools}` · `third_party/{abc,unity}` submodules · `docs/` spec,
 ADRs, IR, passes, oracles, phase checklists.
 

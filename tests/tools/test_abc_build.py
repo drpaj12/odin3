@@ -34,13 +34,12 @@ TWO_GATES = """.model t
 """
 
 
-def _pin_check(*defines: str) -> subprocess.CompletedProcess[str]:
+def _pin_check(*defines: str, source: str = "third_party/abc") -> subprocess.CompletedProcess[str]:
     cmake = os.environ.get("ODIN3_CMAKE") or shutil.which("cmake")
     if cmake is None:
         raise unittest.SkipTest("no cmake")
     return subprocess.run(
-        [cmake, "-DODIN3_ABC_SOURCE_DIR=third_party/abc", *defines, "-P",
-         "cmake/abc_pin.cmake"],
+        [cmake, f"-DODIN3_ABC_SOURCE_DIR={source}", *defines, "-P", "cmake/abc_pin.cmake"],
         cwd=helpers.REPO_ROOT, capture_output=True, text=True, timeout=120, check=False)
 
 
@@ -54,6 +53,17 @@ class AbcPinTest(unittest.TestCase):
         run = _pin_check()
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         self.assertEqual(run.stderr, "")
+
+    def test_uninitialised_submodule_says_what_to_run(self) -> None:
+        # An empty directory, as after a clone without --recursive (where git would answer with
+        # the superproject's commit, which must not be reported).
+        with tempfile.TemporaryDirectory() as empty:
+            run = _pin_check(source=empty)
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("third_party/abc is not checked out", run.stderr)
+        self.assertIn("git submodule update --init third_party/abc", run.stderr)
+        self.assertIn("git -c protocol.file.allow=always submodule update", run.stderr)
+        self.assertNotIn("is at ", run.stderr)
 
     def test_pin_matches_oracles_md(self) -> None:
         oracles = (helpers.REPO_ROOT / "docs" / "ORACLES.md").read_text(encoding="utf-8")
