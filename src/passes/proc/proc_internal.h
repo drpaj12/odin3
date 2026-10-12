@@ -1,8 +1,8 @@
 /*
  * proc_internal.h — one module's lowering state for the proc pass (2E spec §3, §7, §14, §15, §17):
  * the module context, its constant nets and the shared scratch index (Task 2); the net map and
- * merges, the cell helper, provenance, orphans, the pending phases and diagnostics (Task 3). Task 8
- * appends the latch database.
+ * merges, the cell helper, provenance, orphans, the pending phases and diagnostics (Task 3); the
+ * latch database and the latch phase (Task 8).
  */
 #ifndef ODIN3_PASSES_PROC_PROC_INTERNAL_H
 #define ODIN3_PASSES_PROC_PROC_INTERNAL_H
@@ -27,6 +27,9 @@ enum { ODIN3_PROC_N_CONST_NETS = 4 };
 
 /* The built-in cell types proc creates, looked up once per module (odin3_proc_type). */
 enum { ODIN3_PROC_N_TYPES = 11 };
+
+/* The latch database of a module (§8; proc_latch.c), built by the latch phase. */
+typedef struct odin3_proc_ldb odin3_proc_ldb;
 
 /* One recorded connection lhs <- rhs (§7), merged at M1 or M2. */
 typedef struct odin3_proc_conn {
@@ -57,7 +60,7 @@ struct odin3_proc_mctx {
     uint32_t *reported; /* the run's pending phases already reported (bit per phase), or NULL */
     uint64_t pw_bytes;  /* bytes of the working forms decoded so far: the budget's extra */
     odin3_celltype_id types[ODIN3_PROC_N_TYPES]; /* odin3_proc_type's cache, filled at init */
-    /* Task 8 appends the latch database */
+    odin3_proc_ldb *ldb; /* Task 8: the latch database, NULL until the latch phase builds it */
 };
 
 /*
@@ -68,7 +71,8 @@ struct odin3_proc_mctx {
  */
 odin3_status odin3_proc_mctx_init(odin3_proc_mctx *mctx, odin3_pass_ctx *ctx, odin3_module *module);
 
-/* Frees every working form in pws (odin3_pw_free) and the vectors; NULL is a no-op. */
+/* Frees every working form in pws (odin3_pw_free), the latch database and the vectors; NULL is a
+ * no-op. */
 void odin3_proc_mctx_free(odin3_proc_mctx *mctx);
 
 /*
@@ -369,6 +373,105 @@ void odin3_proc_snips_free(odin3_proc_snips *snips);
  * a NULL argument.
  */
 odin3_status odin3_proc_mux(odin3_proc_mctx *mctx, odin3_pw *pw);
+
+/* --- step C: latches (§8, §10, PR-14, PR-16; proc_latch.c) --------------------------------- */
+
+/*
+ * A hold rule of the latch walk (Yosys 0.55's rule_node_t): true when signal equals match and,
+ * when it has children, one of them is true. Rules are hash-consed per module, with IDs from
+ * ODIN3_PROC_RULE_FIRST in creation order; ODIN3_PROC_RULE_TRUE and _FALSE are the two constant
+ * rules, which have no record. An inner rule of a mux branch is (select bit, ODIN3_PW_S0 or _S1,
+ * [child]); the "or" of a mux's branches is (ODIN3_PW_S0, ODIN3_PW_S0, children sorted by ID).
+ * The children are odin3_proc_ldb_child(mctx, rule, 0 .. n_children - 1).
+ */
+typedef struct odin3_proc_rule {
+    odin3_pw_bit signal, match;
+    uint32_t first_child, n_children;
+} odin3_proc_rule;
+
+enum { ODIN3_PROC_RULE_TRUE = 1, ODIN3_PROC_RULE_FALSE = 2, ODIN3_PROC_RULE_FIRST = 3 };
+
+/*
+ * The latch phase (§8, PR-14), Yosys 0.55's proc_dlatch for the whole module after step B. It
+ * builds the database once (odin3_proc_ldb_build, unless one is already built; nothing at all
+ * happens when no process has an ALWAYS action), then for each process in node-ID order (the
+ * byte budget checked at each): every ALWAYS sync action (live view, odin3_proc_find) is
+ * quickchecked (odin3_proc_quickcheck); a false one leaves all its bits no-latch, a true one makes
+ * each bit a candidate out <- in; the sync's actions are then cleared. Candidates are sorted by
+ * odin3_proc_bit_key of out (a repeated out keeps its last in) and each is walked from in
+ * (find_mux_feedback: A first, then the B slices; memoised per (net, set_undef) within one out, so
+ * each mux bit of a cone is expanded at most once per flag; set_undef false below a net with more
+ * than one reader in the snapshot; an A or B pin on out moved to the x constant net when it is
+ * true; a combinational cycle through the walk reads as no feedback, where Yosys's recursion does
+ * not end). The no-latch bits (the false actions' bits, then the candidates whose walk is false)
+ * become connections out <- in, merged at M2, and lose their initial value
+ * (odin3_ffinit_remove; W2 once per wire per process for a defined bit). The latch bits, in key
+ * order, are grouped while the next bit has the same primary wire and rule; each group is one
+ * $dlatch (WIDTH, EN_POLARITY 1; EN = $not(hold(rule)), D = the in bits, Q = the out bits) with
+ * W1. hold(n) is built once per rule: TRUE is 1'1; a rule whose signal differs from its match
+ * gives the signal (match 1) or $not(signal) (match 0), made first; children give the $reduce_or
+ * of their holds in order; two terms their $and. Every cell of the step has A_SIGNED/B_SIGNED 0
+ * and Y_WIDTH 1 where it applies, pw->lowered as its record and pw's attributes. Then the fix-up:
+ * breadth-first upstream from every $dlatch through the drivers of input nets, visiting only §8's
+ * internal combinational types, each $mux/$pmux loses its all-x/z B slices with their select bits
+ * (none left: B = A, S = 1'0), takes its last valid slice as A when A is all x/z, and is $mux
+ * with one select, else $pmux; a changed one is deleted and re-created on the same nets with its
+ * old record and attributes (not counted again in the statistics). Then M2
+ * (odin3_proc_apply_merges). The database's per-net snapshot is released at the end; its rules
+ * and latches stay until mctx is freed or the database is rebuilt. ODIN3_ERR_CHECK (logged "proc:
+ * internal: latch candidate on a constant net") when an ALWAYS action's lhs bit resolves to a
+ * constant (2D never merges an always output into one, so it is a 2E bug); ODIN3_ERR_NO_MEMORY and
+ * E6 (ODIN3_ERR_PARSE, at a process boundary or in odin3_proc_add_cell) stop at once with valid
+ * IR; ODIN3_ERR_INVALID_ARG (logged) for a NULL mctx.
+ */
+odin3_status odin3_proc_latches(odin3_proc_mctx *mctx);
+
+/*
+ * (Re)builds mctx's latch database from the module as it stands (§8): for every live $mux and
+ * $pmux, the (node, bit) of each net on Y and a snapshot of the distinct nets on A and B that are
+ * not constant nets; per net the number of reading pins (sinks and inouts) of nodes other than
+ * ports and processes, plus one per $port_in or $port_inout pin that drives it (Yosys's sigusers);
+ * an empty rule table, hold memo and latch list. An earlier database is freed first.
+ * ODIN3_ERR_NO_MEMORY (the database is then left unbuilt); ODIN3_ERR_INVALID_ARG (logged) for a
+ * NULL mctx. O(module pins).
+ */
+odin3_status odin3_proc_ldb_build(odin3_proc_mctx *mctx);
+
+/* Frees mctx's latch database (mctx->ldb NULL afterwards); a NULL mctx or database is a no-op. */
+void odin3_proc_ldb_free(odin3_proc_mctx *mctx);
+
+/* The bytes the latch database holds, for the byte budget (0 without one). */
+uint64_t odin3_proc_ldb_bytes(const odin3_proc_mctx *mctx);
+
+/* A quickcheck: rhs and lhs are runs of pw->bits. */
+typedef struct odin3_proc_qc {
+    const odin3_pw *pw;
+    odin3_pw_sig rhs, lhs;
+} odin3_proc_qc;
+
+/*
+ * Yosys 0.55's quickcheck(rhs, lhs) on the database's snapshot (§8 step 1): breadth-first from the
+ * nets of rhs (live view) through the $mux/$pmux drivers recorded at the build and their recorded
+ * A/B nets; true when a recorded net is one of lhs's nets. Reads only the snapshot, so a pin moved
+ * after the build is not seen until the next odin3_proc_ldb_build. False without a built database.
+ * Never allocates; O(the cone's nets and recorded inputs).
+ */
+bool odin3_proc_quickcheck(odin3_proc_mctx *mctx, const odin3_proc_qc *qc);
+
+/* The rule with ID id (from ODIN3_PROC_RULE_FIRST), NULL for another ID or without a database. */
+const odin3_proc_rule *odin3_proc_ldb_rule(const odin3_proc_mctx *mctx, uint32_t id);
+
+/* Child index (below rule->n_children) of a rule of mctx's database. */
+uint32_t odin3_proc_ldb_child(const odin3_proc_mctx *mctx, const odin3_proc_rule *rule,
+                              uint32_t index);
+
+/* The index-th $dlatch the latch phase made (creation order, from 0) and its hold rule; false past
+ * the last. */
+bool odin3_proc_ldb_latch(const odin3_proc_mctx *mctx, uint32_t index, odin3_node_id *node,
+                          uint32_t *rule);
+
+/* Calls the test hook on_expand (proc_test.h), if one is installed (proc_pass.c owns the hooks). */
+void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
 
 /* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
 

@@ -65,8 +65,14 @@ odin3_proc_limits odin3_proc_limits_now(void) {
 }
 
 void odin3_proc_test_set_hooks(const odin3_proc_test_hooks *hooks) {
-    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL};
+    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL, NULL};
     g_hooks = hooks != NULL ? *hooks : k_none;
+}
+
+void odin3_proc_hook_expand(odin3_net_id net, bool set_undef) {
+    if (g_hooks.on_expand != NULL) {
+        g_hooks.on_expand(g_hooks.user, net, set_undef);
+    }
 }
 
 /* --- one run -------------------------------------------------------------------------------- */
@@ -99,8 +105,8 @@ static odin3_status proc_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw) {
 }
 
 /* The phase itself: clean and rmdead (2E Task 4), prune (Task 5), arst and the clock pre-check
- * (Task 6), mux (Task 7); the rest are still pending (proc_pending.c), and Tasks 8-9 dispatch
- * theirs here as their pending entries go. */
+ * (Task 6), mux (Task 7), latch (Task 8); ff is still pending (proc_pending.c), and Task 9
+ * dispatches it here as its pending entry goes. */
 static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phase, odin3_pw *pw) {
     switch (phase) {
     case ODIN3_PROC_PH_CLEAN:
@@ -115,6 +121,8 @@ static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phas
         return proc_clocks(mctx, pw);
     case ODIN3_PROC_PH_MUX:
         return odin3_proc_mux(mctx, pw);
+    case ODIN3_PROC_PH_LATCH:
+        return odin3_proc_latches(mctx);
     default:
         return odin3_proc_pending_run(mctx, phase);
     }

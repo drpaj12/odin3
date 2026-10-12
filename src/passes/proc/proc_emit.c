@@ -83,6 +83,7 @@ void odin3_proc_mctx_free(odin3_proc_mctx *mctx) {
         odin3_pw_free(odin3_vec_at(&mctx->pws, i));
     }
     odin3_vec_free(&mctx->pws);
+    odin3_proc_ldb_free(mctx);
     odin3_vec_free(&mctx->scratch);
     odin3_vec_free(&mctx->touched);
     odin3_vec_free(&mctx->netmap);
@@ -611,7 +612,8 @@ odin3_status odin3_proc_orphans(odin3_proc_mctx *mctx) {
 odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at) {
     uint64_t extra = mctx->pw_bytes + (uint64_t)mctx->scratch.cap * mctx->scratch.elem_size +
                      (uint64_t)mctx->netmap.cap * mctx->netmap.elem_size +
-                     (uint64_t)mctx->pending.cap * mctx->pending.elem_size;
+                     (uint64_t)mctx->pending.cap * mctx->pending.elem_size +
+                     odin3_proc_ldb_bytes(mctx);
     odin3_status st = odin3_budget_check(mctx->ctx, mctx->design, extra);
     if (st != ODIN3_ERR_PARSE) {
         return st;

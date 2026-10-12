@@ -50,11 +50,14 @@ typedef struct odin3_proc_phase_call {
  * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE). While it is
  * installed the end-of-step-A check for pending lowering phases (plan point (h)) is skipped, so it
  * must handle every lowering phase still pending. on_step_f: called at step F for each lowered
- * module (unless --noopt or --stop-after). Either may be NULL.
+ * module (unless --noopt or --stop-after). on_expand: called by the latch phase's walk each time
+ * it expands a mux bit, with the net and the walk's set_undef there (2E Task 8; §8's memo expands
+ * each (net, set_undef) at most once per latch output). Any of them may be NULL.
  */
 typedef struct odin3_proc_test_hooks {
     bool (*phase)(void *user, const odin3_proc_phase_call *call, odin3_status *st);
     void (*on_step_f)(void *user, odin3_module_id module);
+    void (*on_expand)(void *user, odin3_net_id net, bool set_undef);
     void *user;
 } odin3_proc_test_hooks;
 

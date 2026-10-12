@@ -692,6 +692,13 @@ Per process (node-ID order), per `ALWAYS` sync action `lhs ← rhs` (live view):
    there and drops that branch, so on a shared cone with a direct feedback input 2E's hold
    condition keeps a branch Yosys drops (§20 #15; a legal design must not fail where Parmys
    succeeds slowly). A Debug assertion checks that no `(net, set_undef)` is expanded twice.
+   *Amended (2E Task 8):* the key's `set_undef` is the walk's value at the net, after its
+   readers are counted. In a snapshot that matches the IR a net reached twice within one `out` has
+   two readers, so both visits have the same key and the memo also gives Yosys's own result there;
+   the two keys of one net arise only when a pin moved after the database was built, which
+   `latch_memo_set_undef` uses. A `(net, set_undef)` reached again while it is still being
+   expanded (a combinational cycle of muxes that does not pass through `out`, such as `assign w =
+   s ? b : w;` in the cone) reads as false, where Yosys's recursion never ends (§20 #19).
 4. False → no latch for that bit; else a latch bit with hold rule n.
 5. **No-latch bits** are recorded connections `out ← in` (merged at M2); their `init` bits are
    removed (§10).
@@ -703,7 +710,10 @@ Per process (node-ID order), per `ALWAYS` sync action `lhs ← rhs` (live view):
    their holds (even of one); two terms give their `$and`. A candidate whose `out` resolves to a
    constant net is skipped, as Yosys skips a latch bit with no wire (`w != nullptr`); 2D never
    merges an `always` output into a constant (EL-40, A4), so reaching it is an internal error
-   (`ODIN3_ERR_CHECK`).
+   (`ODIN3_ERR_CHECK`). *Amended (2E Task 8):* the check covers every `lhs` bit of an `ALWAYS`
+   action and runs before quickcheck, since a constant `out` never passes quickcheck (the snapshot
+   holds no constant) and a no-latch connection into a constant would merge a driven net into the
+   constant net.
 
 **Fix-up** (`fixup_muxes`): from every generated `$dlatch`, breadth-first upstream through
 drivers of input nets, visiting only Yosys's "internal" combinational types (in the registry:
@@ -712,7 +722,15 @@ $gt $add $sub $mul $div $mod $pow $mux $pmux $tribuf $sop`), each `$mux`/`$pmux`
 `B` slices that are all x/z are dropped with their select bits; none left → `B = A`, `S` =
 constant 0; `A` all x/z with some valid slice → `A` = the last valid slice; one select → `$mux`,
 more → `$pmux`. A changed mux is deleted and re-created on the same `Y` nets, keeping its
-provenance and attributes (IR-12: a rewiring keeps records). Then M2.
+provenance and attributes (IR-12: a rewiring keeps records). Then M2. *Amended (2E Task 8):*
+`$reduce_*` and `$logic_*` are every such type of the registry (`$reduce_and`, `_or`, `_xor`,
+`_xnor`, `_bool`; `$logic_not`, `_and`, `_or`). `$lut`, which 3D appended to the registry after this
+list was written and which Yosys's list also has, is left out as the list says; no `$lut` exists
+before `proc`. The walk is one breadth-first queue seeded with every `$dlatch` in creation order,
+and a re-created mux is marked visited. The latch step's cells (holds, `EN`'s `$not`, `$dlatch`)
+take `pw->lowered` and the `$proc` node's attributes (§14). The database is built when the first
+process with an `ALWAYS` action is reached (Yosys always builds it; with no such action there is
+nothing to observe) and its per-net snapshot is freed after M2.
 
 Verified example (default mode): `always @* if (en) y = a;` gives `$mux(A = a, B = a, S = en)`
 (the `y` input moved to x, then `A` := the valid `B` slice), `$dlatch(D = mux, Q = y, EN =
@@ -1262,7 +1280,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 5 | `$aldff` when the reset value is not made of constant nets | `ConstEval` may prove it constant (`$adff`) | same | 2D folds constant cells; equivalent |
 | 6 | `check_signal` stops after 1024 hops | recurses until the stack overflows on a cycle | same | robustness |
 | 7 | pattern pools capped (W5a/W5b; rmdead's nested pools share the cap) | unbounded | same | memory rule. Past a W5a trip the switch keeps its later items and its flags, without `FULL_CASE` unless a default is reached: Yosys's semantics on the body with those items kept. Equal or more defined values unless the switch is `parallel_case` and a dead item or default is kept; then inputs selecting two or more items may give x where Yosys gives a value, or a dead item's value where Yosys keeps the fall-through value: not a refinement (verified on 0.55, 2E Task 5 review). Constant items after a compare with no 0/1 bit (all `-`, x or z), or after a default, are still removed, and a default still gives `FULL_CASE` (§5.2; *amended, 2E Task 6*: after the default the result is Yosys's; the default itself is kept where Yosys drops it as dead). A block whose items cover every value without a default can gain an always-enabled latch (no `FULL_CASE`, so the hold stays; equivalent values, a `$dlatch` and W1 more; verified on 0.55). W5b: extra groups, equivalent. (*Amended, 2E Task 5 review*: the switch no longer loses `parallel_case`.) |
-| 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites) |
+| 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites), and in the order of a hold's `$reduce_or` inputs when two processes' holds share hash-consed rules (rule IDs follow creation order; *amended, 2E Task 8*: 1 of 520 random modules, identical under Yosys's order) |
 | 9 | bits ordered by (primary wire ID, bit) | by name-interning order, then offset | same | reproducible; creation order only |
 | 10 | W1, W2 are warnings | logged | logged | DESIGN §6 "latch detection (warn)" |
 | 11 | errors E1–E5 located, house style | `ERROR: Multiple edge sensitive events found for this signal!` etc. | same | same conditions, better text |
@@ -1273,6 +1291,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 16 | E3 when `apply_reset`'s value has not settled after 100 rounds (*amended, 2E Task 6*) | errors at `count > 100`, tested before its unchanged test: at round 102 | same | the brief's cap semantics (the cap's rounds, lowered by the test hook); differs only on a chain of 100–101 substitutions |
 | 17 | an append whose select is empty (an all-`-` item in a `parallel_case` group, reached when rmdead keeps a later non-constant item) makes the item's value the result and ends the open mux (§6); a default appended to a group has select 0 (*2E Task 7*) | asserts `ctrl_sig.size() == 1` (proc_mux.cc:264); the default's select is a `$reduce_or` of zero bits | same (crashes) | valid input (`(* parallel_case *) casez … 2'b??: …; k: …`); Verilog's first-match order; the IR has no zero-width `$reduce_or` (same values) |
 | 18 | gen_mux's no-cell paths (no compare, or an empty select) end the open mux, so an earlier case of the next group opens a new mux (§6; *2E Task 7 fix round*) | keeps the mux open; the next group's case appends to it although its output no longer reaches the result, and that case's value is lost: wrong logic, e.g. `casez (s) 2'b00: y=x0; 2'b01: y=a; 2'b??: y=a; k: y=b;` gives `y = a` (`miter`/`sat`, Yosys's `eval`, Icarus: 2E Task 7 review) | same | 2E gives Verilog's value; the netlists differ only on such inputs, where `proc-diff` and an equivalence check against a Parmys golden flag them with 2E the correct side (§18.3) |
+| 19 | a combinational cycle of muxes in the latch walk's cone (not through `out`) reads as no feedback there (§8 step 3; *2E Task 8*) | recurses until the stack overflows | same | robustness, as #6; valid Verilog (`assign w = s ? b : w;`) reaches it |
 
 *Kept from Yosys (2E Task 7 review, a note, not a divergence):* clean (§5.1, Task 4) removes an
 empty item of a `parallel_case` switch, as Yosys's `proc_clean` does, so with a default the
