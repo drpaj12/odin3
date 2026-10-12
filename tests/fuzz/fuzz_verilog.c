@@ -186,7 +186,9 @@ static bool is_located(const char *msg) {
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
     sink_count *count = user;
-    (void)snprintf(count->last, sizeof count->last, "%s", msg);
+    size_t len = strnlen(msg, sizeof count->last - 1); /* the last message, cut to fit */
+    memcpy(count->last, msg, len);
+    count->last[len] = '\0';
     if (level != ODIN3_LOG_ERROR) {
         return;
     }
@@ -212,17 +214,24 @@ static void remove_files(void) {
     (void)rmdir(dir);
 }
 
+/* path = prefix + suffix, or a failure when it does not fit. */
+static void join_path(char *path, const char *prefix, const char *suffix) {
+    int len = snprintf(path, PATH_MAX_LEN, "%s%s", prefix, suffix);
+    if (len < 0 || len >= PATH_MAX_LEN) {
+        fail("the temporary directory's path is too long");
+    }
+}
+
 int LLVMFuzzerInitialize(int *argc, char ***argv) {
     (void)argc;
     (void)argv;
     const char *base = getenv("TMPDIR");
-    (void)snprintf(dir, sizeof dir, "%s/fuzz_verilog_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
+    join_path(dir, base != NULL && base[0] != '\0' ? base : "/tmp", "/fuzz_verilog_XXXXXX");
     if (mkdtemp(dir) == NULL) {
         fail("cannot create the temporary directory");
     }
-    (void)snprintf(input, sizeof input, "%s/in.v", dir);
-    (void)snprintf(again, sizeof again, "%s/again.v", dir);
+    join_path(input, dir, "/in.v");
+    join_path(again, dir, "/again.v");
     (void)atexit(remove_files);
     const char *mode = getenv("FUZZ_VERILOG_MODE");
     if (mode != NULL && strcmp(mode, "raw") == 0) {

@@ -1563,7 +1563,7 @@ class ModuleGen:
         self.header_params: list[tuple[str, int]] = []
         self.ports: list[PortInfo] = []
         self.after_subprograms: list[Node] = []
-        self.pending_genvar: Node | None = None
+        self.pending_genvars: list[Node] = []
         self.defparams: list[Node] = []
 
     @property
@@ -2043,20 +2043,41 @@ class ModuleGen:
 
     def region(self, node: Node) -> Node:
         """G1: now and then inside generate … endgenerate (with its genvar declared there)."""
-        genvar = self.pending_genvar
-        self.pending_genvar = None
+        genvars, self.pending_genvars = self.pending_genvars, []
         if not self.chance(0.35):
-            if genvar is not None:
-                self.decls.append(genvar)
+            self.decls.extend(genvars)
             return node
-        return Node("GENERATE", *([genvar] if genvar is not None else []), node)
+        return Node("GENERATE", *genvars, node)
 
     def genvar(self) -> str:
         name = self.gen.fresh("gv")
-        self.pending_genvar = Node("GENVAR_DECL", Node("DECLARATOR", None, name=name))
+        self.pending_genvars.append(Node("GENVAR_DECL", Node("DECLARATOR", None, name=name)))
         return name
 
+    def loop(self, var: str, count: int, body: Node) -> Node:
+        """for (var = 0; var < count; var = var + 1) body."""
+        init = Node("BLOCKING_ASSIGN", ident(var), None, num(0))
+        cond = Node("BINARY", ident(var), num(count), sub="<")
+        step = Node("BLOCKING_ASSIGN", ident(var), None,
+                    Node("BINARY", ident(var), num(1), sub="+"))
+        return Node("GEN_FOR", init, cond, step, body)
+
+    def nested_gen_for(self, wire: Sig) -> Node:
+        """G2 nested: w[i * half + j] over i < 2 and j < half, the inner loop in a block."""
+        outer, inner = self.genvar(), self.genvar()
+        half = wire.width // 2
+        index = Node("BINARY", Node("BINARY", ident(outer), num(half), sub="*"), ident(inner),
+                     sub="+")
+        bit = Node("SELECT", ident(wire.name), index, None, sub="bit")
+        assign = Node("CONT_ASSIGN", None, None,
+                      Node("NET_ASSIGN", bit, self.gen.expr(self.scope, 2, 1)))
+        body = Node("GEN_BLOCK", None, self.loop(inner, half, assign), name=self.gen.fresh("go"))
+        return self.loop(outer, 2, body)
+
     def gen_for(self, wire: Sig) -> Node:
+        if wire.width >= 4 and wire.width % 2 == 0 and min(wire.msb, wire.lsb) == 0 \
+                and self.chance(0.25):
+            return self.nested_gen_for(wire)
         var = self.genvar()
         lo = min(wire.msb, wire.lsb)
         bit = Node("SELECT", ident(wire.name), ident(var), None, sub="bit")

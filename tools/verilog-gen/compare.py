@@ -23,7 +23,8 @@ With ``--mutate`` each file has one token dropped, duplicated or swapped: whenev
 rejects, odin3 must reject with a located error (``gen_<seed>.v:L:C: error:``); an accepted
 mutant Yosys rejects is reported, as is a mutant odin3 rejects (located) while Yosys accepts
 (2C is stricter by decision on a few forms, e.g. ``- -a``).  A sanitizer report, a signal or a
-timeout from odin3 is a failure in every mode.
+timeout from odin3 is a failure in every mode.  Yosys runs under a 2 GB address-space cap
+(``ulimit -v``): a mutant once made it allocate 5 GB; past the cap it fails, a rejection.
 
 The files of every failed or reported seed stay in the work directory (a fresh temporary one
 unless ``--work`` names one), whose path the summary prints.  Exit 0 no failure, 1 a failure,
@@ -46,6 +47,7 @@ from pathlib import Path
 import verilog_gen
 
 TIMEOUT_S = 120
+YOSYS_AS_KB = 2 << 20  # a mutant can make Yosys allocate without bound (5 GB seen)
 SANITIZER_RE = re.compile(r"ERROR: (Address|Leak|Memory|Thread)Sanitizer|runtime error:")
 
 
@@ -64,6 +66,13 @@ def run(cmd: Sequence[str], cwd: Path) -> Run:
     except subprocess.TimeoutExpired:
         return Run(-1, "", "", True)
     return Run(proc.returncode, proc.stdout, proc.stderr)
+
+
+def run_yosys(tools: Tools, work: Path, name: str) -> Run:
+    """yosys -q -p "read_verilog NAME" under an address-space cap (odin3, an ASan build,
+    cannot take one; its caps are its own)."""
+    capped = f'ulimit -v {YOSYS_AS_KB} && exec "$0" "$@"'
+    return run(["sh", "-c", capped, tools.yosys, "-q", "-p", f"read_verilog {name}"], work)
 
 
 @dataclass
@@ -112,6 +121,14 @@ def tree_oracle(tools: Tools, work: Path, name: str, expected: str) -> str:
     return ""
 
 
+def first_error(err: str, name: str) -> str:
+    """The first diagnostic located in the file, else the last lines."""
+    for line in err.splitlines():
+        if located(line, name):
+            return line.strip()
+    return last_lines(err)
+
+
 def last_lines(text: str, count: int = 3) -> str:
     lines = [line for line in text.splitlines() if line.strip()]
     return " | ".join(lines[-count:])
@@ -125,12 +142,12 @@ def check_plain(tools: Tools, work: Path, seed: int) -> Outcome:
     (work / f"gen_{seed}.ast").write_text(header + made.ast, encoding="utf-8")
     outcome = Outcome(seed, files=[name, f"gen_{seed}.ast"])
     odin3 = run([tools.odin3, "--parse-only", name], work)
-    yosys = run([tools.yosys, "-q", "-p", f"read_verilog {name}"], work)
+    yosys = run_yosys(tools, work, name)
     why = crashed(odin3)
     if why:
         outcome.failure = f"odin3 {why}"
     elif odin3.rc != 0 and yosys.rc == 0:
-        outcome.failure = f"odin3 rejects, Yosys accepts: {last_lines(odin3.err)}"
+        outcome.failure = f"odin3 rejects, Yosys accepts: {first_error(odin3.err, name)}"
     elif odin3.rc != 0:
         outcome.failure = f"both reject (generator bug): {last_lines(yosys.err, 1)}"
     else:
@@ -146,7 +163,7 @@ def check_mutant(tools: Tools, work: Path, seed: int) -> Outcome:
     (work / name).write_text(made.text, encoding="utf-8")
     outcome = Outcome(seed, files=[name])
     odin3 = run([tools.odin3, "--parse-only", name], work)
-    yosys = run([tools.yosys, "-q", "-p", f"read_verilog {name}"], work)
+    yosys = run_yosys(tools, work, name)
     why = crashed(odin3)
     if why:
         outcome.failure = f"odin3 {why} ({made.note})"
@@ -156,7 +173,7 @@ def check_mutant(tools: Tools, work: Path, seed: int) -> Outcome:
         outcome.report = f"accepted mutant Yosys rejects ({made.note})"
     elif odin3.rc != 0 and yosys.rc == 0:
         outcome.report = f"mutant odin3 rejects, Yosys accepts ({made.note}): " \
-                         f"{last_lines(odin3.err, 2)}"
+                         f"{first_error(odin3.err, name)}"
     return outcome
 
 
