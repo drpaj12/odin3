@@ -548,6 +548,20 @@ static void test_reduction_rows(void) {
     expect_un(driver_of("y3", 0), (un_want){"$reduce_xnor", 0, 8, 8});
 }
 
+/* A signed operand of a reduction is unsigned to its cell (genrtlil generates it with no hint);
+ * a compound one keeps the sign of its operator (Yosys 0.55: `&s` A_SIGNED 0, `&(s + t)` 1). */
+static void test_reduction_signed_operands(void) {
+    read_clean("  assign y = &s;\n  assign y1 = |s;\n  assign y2 = ^s;\n  assign y3 = ~^s;\n"
+               "  assign y32 = &(s + t);\n  assign o1 = ~|s;\n  assign o2 = ~&s;\n");
+    expect_un(driver_of("y", 0), (un_want){"$reduce_and", 0, 8, 8});
+    expect_un(driver_of("y1", 0), (un_want){"$reduce_or", 0, 8, 8});
+    expect_un(driver_of("y2", 0), (un_want){"$reduce_xor", 0, 8, 8});
+    expect_un(driver_of("y3", 0), (un_want){"$reduce_xnor", 0, 8, 8});
+    expect_un(driver_of("y32", 0), (un_want){"$reduce_and", 1, 8, 32});
+    expect_un(nth_node("$reduce_or", 1), (un_want){"$reduce_or", 0, 8, 1});
+    expect_un(nth_node("$reduce_and", 2), (un_want){"$reduce_and", 0, 8, 1});
+}
+
 /* ~&a and ~|a are the reduction (1 bit) and a $logic_not of it (Yosys's parser form, v4). */
 static void test_nand_nor_rows(void) {
     read_clean("  assign y = ~&a;\n  assign y1 = ~|a;\n");
@@ -569,6 +583,16 @@ static void test_logic_rows(void) {
     expect_un(driver_of("y", 0), (un_want){"$logic_not", 0, 8, 8});
     expect_bin(driver_of("y1", 0), (bin_want){"$logic_and", 0, 0, 8, 8, 8});
     expect_bin(driver_of("y2", 0), (bin_want){"$logic_or", 0, 0, 8, 8, 8});
+}
+
+static void test_logic_signed_operands(void) {
+    read_clean("  assign y = !s;\n  assign y1 = s && t;\n  assign y2 = s || a;\n"
+               "  assign y3 = a && (s + t);\n  assign y32 = !(-s);\n");
+    expect_un(driver_of("y", 0), (un_want){"$logic_not", 0, 8, 8});
+    expect_bin(driver_of("y1", 0), (bin_want){"$logic_and", 0, 0, 8, 4, 8});
+    expect_bin(driver_of("y2", 0), (bin_want){"$logic_or", 0, 0, 8, 8, 8});
+    expect_bin(driver_of("y3", 0), (bin_want){"$logic_and", 0, 1, 8, 8, 8});
+    expect_un(driver_of("y32", 0), (un_want){"$logic_not", 0, 8, 32});
 }
 
 static void test_bitwise_rows(void) {
@@ -633,6 +657,15 @@ static void test_ternary_rows(void) {
     expect_same_nets((bits_of){"y3", 0}, (bits_of){"b", 0}, 8);
 }
 
+/* The $reduce_bool of a wider condition reads it as genrtlil does: a signed name is unsigned. */
+static void test_ternary_signed_condition(void) {
+    read_clean("  assign y = s ? a : b;\n  assign y1 = (s + t) ? a : b;\n");
+    odin3_node_id plain = nth_node("$reduce_bool", 0);
+    odin3_node_id compound = nth_node("$reduce_bool", 1);
+    expect_un(plain, (un_want){"$reduce_bool", 0, 8, 1});
+    expect_un(compound, (un_want){"$reduce_bool", 1, 8, 1});
+}
+
 /* Yosys makes the mux as wide as its branches as generated and extends the result (agent default
  * for EL-30's WIDTH: the spec's "final width" and genrtlil differ only here). */
 static void test_ternary_wide_context(void) {
@@ -643,6 +676,21 @@ static void test_ternary_wide_context(void) {
         TEST_ASSERT_EQUAL_UINT32(pin_net(mux, "Y", bit).v, wnet("y32", bit).v);
     }
     expect_const_run("y32", (run_span){8, 32}, ODIN3_BIT_0);
+}
+
+/* In a context wider than 32 bits a plain decimal keeps its 32 bits (Yosys 0.55); the apostrophe
+ * forms are widened to the context (spec 17 #41). */
+static void test_plain_decimal_in_wide_context(void) {
+    read_clean("  assign y64 = a + 1;\n  assign q64 = a + 'd1;\n  assign r64 = c ? a : 5;\n"
+               "  assign y32 = c ? a : 'd5;\n");
+    odin3_node_id plain = driver_of("y64", 0);
+    expect_bin(plain, (bin_want){"$add", 0, 0, 8, 32, 64});
+    expect_pins_const(plain, "B", (run_span){0, 1}, ODIN3_BIT_1);
+    expect_bin(driver_of("q64", 0), (bin_want){"$add", 0, 0, 8, 64, 64});
+    odin3_node_id mux = nth_node("$mux", 0);
+    TEST_ASSERT_EQUAL_INT64(32, param_of(mux, "WIDTH"));
+    expect_const_run("r64", (run_span){32, 64}, ODIN3_BIT_0);
+    TEST_ASSERT_EQUAL_INT64(32, param_of(nth_node("$mux", 1), "WIDTH"));
 }
 
 /* Concatenation, replication, $signed and $unsigned are wiring only. */
@@ -1564,6 +1612,10 @@ static void test_oom_sweep(void) {
     X(test_reads_hook)                                                                             \
     X(test_select_wrapper_and_misuse)                                                              \
     X(test_to_nets_any_value)                                                                      \
+    X(test_reduction_signed_operands)                                                              \
+    X(test_logic_signed_operands)                                                                  \
+    X(test_ternary_signed_condition)                                                               \
+    X(test_plain_decimal_in_wide_context)                                                          \
     X(test_hand_built_store)                                                                       \
     X(test_deterministic_rtlil)                                                                    \
     X(test_oom_sweep)

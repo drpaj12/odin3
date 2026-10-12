@@ -26,8 +26,10 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE2] =
         {
             /* Task 17 landed the store, scopes, declarations and ports: nothing is left of it. */
-            /* Task 18 landed continuous assignments and expressions (memory reads and user calls
-             * inside them report their own lines; Tasks 20 and 23). */
+            /* Task 18 landed continuous assignments and expressions (a user call inside them is
+             * the continuous-context call, Task 23). */
+            /* Task 20: memory word reads. */
+            [ODIN3_PEND_MEM_READ] = true,
             /* Task 19: instances, gates, drivers. */
             [ODIN3_PEND_DRIVERS] = true,
             [ODIN3_AST_INSTANTIATION] = true,
@@ -82,6 +84,7 @@ static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] 
     "continuous-context call",
     "variable index into a register array",
     "memory write",
+    "memory read",
     "two-driver check",
 };
 

@@ -4,8 +4,10 @@
  * x with the warning) and the non-constant read through $shiftx with genrtlil's offset
  * computation (frontends/ast/genrtlil.cc, AST_IDENTIFIER with a dynamic range: the index minus
  * the declaration's low index, then for an ascending range (width - w) minus that; B is signed
- * when an offset was subtracted or the index is 32 bits wide). The walk that hands it its
- * operands is elab2_expr.c; the lvalue side is elab2_assign.c.
+ * when an offset was subtracted, the index is signed or 32 bits wide). A bit select makes
+ * Yosys's cells; a +: or -: read builds its base more simply (one $sub(base, w - 1) for -:,
+ * nothing for +:; spec 17 #42), equal modulo 2^32. The walk that hands it its operands is
+ * elab2_expr.c; the lvalue side is elab2_assign.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"

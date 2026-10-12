@@ -114,6 +114,7 @@ typedef enum odin3_elab_pend_feature {
     ODIN3_PEND_COMB_CALL = ODIN3_AST_KIND_COUNT, /* "continuous-context call" */
     ODIN3_PEND_REGS_VAR_READ,                    /* "variable index into a register array" */
     ODIN3_PEND_MEM_WRITE,                        /* "memory write" */
+    ODIN3_PEND_MEM_READ,                         /* "memory read" (Task 20) */
     ODIN3_PEND_DRIVERS,                          /* "two-driver check" (Task 19) */
     ODIN3_PEND_END
 } odin3_elab_pend_feature;
