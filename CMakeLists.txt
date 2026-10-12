@@ -89,6 +89,7 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pending.c
     src/passes/proc/proc_clean.c
     src/passes/proc/proc_rmdead.c
+    src/passes/proc/proc_prune.c
     src/passes/proc/ppool.c
     src/passes/proc/proc_pass.c
     src/passes/budget.c
@@ -376,6 +377,8 @@ if(BUILD_TESTING)
     target_sources(test_proc_clean PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_proc_rmdead)
     target_sources(test_proc_rmdead PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_proc_prune)
+    target_sources(test_proc_prune PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
     odin3_add_unit_test(test_ast_srcman)

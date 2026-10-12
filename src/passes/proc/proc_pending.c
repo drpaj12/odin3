@@ -24,9 +24,8 @@ typedef struct pending_phase {
 } pending_phase;
 
 static const pending_phase k_pending[] = {
-    {ODIN3_PROC_PH_PRUNE, "prune"},   {ODIN3_PROC_PH_ARST, "arst"},
-    {ODIN3_PROC_PH_CLOCKS, "clocks"}, {ODIN3_PROC_PH_MUX, "mux"},
-    {ODIN3_PROC_PH_LATCH, "latch"},   {ODIN3_PROC_PH_FF, "ff"},
+    {ODIN3_PROC_PH_ARST, "arst"},   {ODIN3_PROC_PH_CLOCKS, "clocks"}, {ODIN3_PROC_PH_MUX, "mux"},
+    {ODIN3_PROC_PH_LATCH, "latch"}, {ODIN3_PROC_PH_FF, "ff"},
 };
 
 enum { N_PENDING = sizeof k_pending / sizeof k_pending[0] };

@@ -225,6 +225,22 @@ enum { ODIN3_PW_CLEAN_WHOLE_TREE = -1 };
  */
 odin3_status odin3_pw_rmdead(odin3_proc_mctx *mctx, odin3_pw *pw);
 
+/*
+ * prune (§5.3, PR-9; proc_prune.c): Yosys 0.55's proc_prune on pw in the raw view (its decoded
+ * nets). From the root case, each case's switches run last to first, then its actions last to
+ * first; a switch runs its cases in order, each from the state it was entered with, and adds the
+ * bits newly assigned in every case when it is full_case or has a default. An action bit already
+ * assigned later on the path goes, and so does a constant bit; a root action bit assigned nowhere
+ * later in the process (not in `affected`) is promoted. Actions left with no bits are removed,
+ * the others keep their remaining bits in order; each root action that promotes bits appends one
+ * promotion (lhs <- rhs in its bit order, its record) to pw->promoted, which step B and
+ * --stop-after apply. Uses mctx's scratch index (all zero again on return, also on failure) for
+ * the per-net marks and counts, so it costs O(body + lhs bits). ODIN3_ERR_NO_MEMORY (pw stays a
+ * valid tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a pw without a root case, or an
+ * action whose lhs and rhs differ in length.
+ */
+odin3_status odin3_pw_prune(odin3_proc_mctx *mctx, odin3_pw *pw);
+
 /* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
 
 /* The first pending phase in schedule order, ODIN3_PROC_N_PHASES when none is pending. */

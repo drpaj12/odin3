@@ -91,14 +91,16 @@ static double now_ms(void) {
 
 /* --- phases (point (h)) -------------------------------------------------------------------- */
 
-/* The phase itself: clean and rmdead (2E Task 4); the rest are still pending (proc_pending.c), and
- * Tasks 5-9 dispatch theirs here as their pending entries go. */
+/* The phase itself: clean and rmdead (2E Task 4), prune (Task 5); the rest are still pending
+ * (proc_pending.c), and Tasks 6-9 dispatch theirs here as their pending entries go. */
 static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phase, odin3_pw *pw) {
     switch (phase) {
     case ODIN3_PROC_PH_CLEAN:
         return odin3_pw_clean(pw, 0, ODIN3_PW_CLEAN_WHOLE_TREE);
     case ODIN3_PROC_PH_RMDEAD:
         return odin3_pw_rmdead(mctx, pw);
+    case ODIN3_PROC_PH_PRUNE:
+        return odin3_pw_prune(mctx, pw);
     default:
         return odin3_proc_pending_run(mctx, phase);
     }
