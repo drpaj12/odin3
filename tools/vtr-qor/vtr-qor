@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# vtr-qor: the 3H QoR harness (spec QH-9). See vtr_qor.py for the subcommands.
+exec python3 -I "$(dirname "$0")/vtr_qor.py" "$@"

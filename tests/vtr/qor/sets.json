@@ -1,0 +1,193 @@
+{
+ "schema": 1,
+ "sizes_from": "odin3-golden 3931cf4",
+ "order": [
+  "ch_intrinsics",
+  "stereovision3",
+  "diffeq2",
+  "diffeq1",
+  "mkPktMerge",
+  "spree",
+  "raygentop",
+  "sha",
+  "boundtop",
+  "mkSMAdapter4B",
+  "or1200",
+  "stereovision0",
+  "stereovision1",
+  "arm_core",
+  "mkDelayWorker32B",
+  "stereovision2",
+  "blob_merge",
+  "LU8PEEng",
+  "bgm",
+  "mcml",
+  "LU32PEEng"
+ ],
+ "gate": [
+  "ch_intrinsics",
+  "stereovision3",
+  "diffeq2",
+  "diffeq1",
+  "mkPktMerge",
+  "raygentop",
+  "sha",
+  "boundtop",
+  "mkSMAdapter4B",
+  "or1200",
+  "stereovision0",
+  "stereovision1",
+  "mkDelayWorker32B",
+  "stereovision2",
+  "blob_merge",
+  "LU8PEEng",
+  "bgm",
+  "mcml",
+  "LU32PEEng"
+ ],
+ "extra": [
+  "spree",
+  "arm_core"
+ ],
+ "smoke": [
+  "ch_intrinsics",
+  "stereovision3",
+  "diffeq2",
+  "diffeq1",
+  "mkPktMerge"
+ ],
+ "group_b": [
+  "LU8PEEng",
+  "bgm",
+  "mcml",
+  "LU32PEEng"
+ ],
+ "designs": {
+  "ch_intrinsics": {
+   "rank": 1,
+   "group": "A",
+   "golden_bytes": 59473,
+   "vtr_flow_time_s": 3.0
+  },
+  "stereovision3": {
+   "rank": 2,
+   "group": "A",
+   "golden_bytes": 113057,
+   "vtr_flow_time_s": 2.3
+  },
+  "diffeq2": {
+   "rank": 3,
+   "group": "A",
+   "golden_bytes": 127006,
+   "vtr_flow_time_s": 9.7
+  },
+  "diffeq1": {
+   "rank": 4,
+   "group": "A",
+   "golden_bytes": 163388,
+   "vtr_flow_time_s": 8.9
+  },
+  "mkPktMerge": {
+   "rank": 5,
+   "group": "A",
+   "golden_bytes": 384705,
+   "vtr_flow_time_s": 13.6
+  },
+  "spree": {
+   "rank": null,
+   "group": "A",
+   "golden_bytes": 431216,
+   "vtr_flow_time_s": 12.7
+  },
+  "raygentop": {
+   "rank": 6,
+   "group": "A",
+   "golden_bytes": 689323,
+   "vtr_flow_time_s": 19.3
+  },
+  "sha": {
+   "rank": 7,
+   "group": "A",
+   "golden_bytes": 697688,
+   "vtr_flow_time_s": 14.1
+  },
+  "boundtop": {
+   "rank": 8,
+   "group": "A",
+   "golden_bytes": 1110434,
+   "vtr_flow_time_s": 18.0
+  },
+  "mkSMAdapter4B": {
+   "rank": 9,
+   "group": "A",
+   "golden_bytes": 1385687,
+   "vtr_flow_time_s": 28.0
+  },
+  "or1200": {
+   "rank": 10,
+   "group": "A",
+   "golden_bytes": 1497595,
+   "vtr_flow_time_s": 38.9
+  },
+  "stereovision0": {
+   "rank": 11,
+   "group": "A",
+   "golden_bytes": 2651591,
+   "vtr_flow_time_s": 78.5
+  },
+  "stereovision1": {
+   "rank": 12,
+   "group": "A",
+   "golden_bytes": 2757780,
+   "vtr_flow_time_s": 121.5
+  },
+  "arm_core": {
+   "rank": null,
+   "group": "A",
+   "golden_bytes": 3376843,
+   "vtr_flow_time_s": 226.8
+  },
+  "mkDelayWorker32B": {
+   "rank": 13,
+   "group": "A",
+   "golden_bytes": 4467574,
+   "vtr_flow_time_s": 71.9
+  },
+  "stereovision2": {
+   "rank": 14,
+   "group": "A",
+   "golden_bytes": 4977084,
+   "vtr_flow_time_s": 433.3
+  },
+  "blob_merge": {
+   "rank": 15,
+   "group": "A",
+   "golden_bytes": 6723686,
+   "vtr_flow_time_s": 84.6
+  },
+  "LU8PEEng": {
+   "rank": 16,
+   "group": "B",
+   "golden_bytes": 16900911,
+   "vtr_flow_time_s": 532.9
+  },
+  "bgm": {
+   "rank": 17,
+   "group": "B",
+   "golden_bytes": 23271051,
+   "vtr_flow_time_s": 548.1
+  },
+  "mcml": {
+   "rank": 18,
+   "group": "B",
+   "golden_bytes": 51063332,
+   "vtr_flow_time_s": 4699.4
+  },
+  "LU32PEEng": {
+   "rank": 19,
+   "group": "B",
+   "golden_bytes": 59566477,
+   "vtr_flow_time_s": 3236.8
+  }
+ }
+}

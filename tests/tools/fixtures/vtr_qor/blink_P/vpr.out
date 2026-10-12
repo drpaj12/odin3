@@ -1,0 +1,49 @@
+Revision: v8.0.0-18416-g3c9a4d23b2
+Compiled: 2026-10-08T12:40:04
+Compiler: GNU 13.3.0 on Linux-6.18.40.1-microsoft-standard-WSL2 x86_64
+Build Info: release IPO VTR_ASSERT_LEVEL=2
+  Blocks: 22
+    .input :       2
+    .output:       1
+  Nets  : 25
+  Netlist Clocks: 1
+## Computing placement delta delay look-up took 0.00 seconds (max_rss 23.1 MiB, delta_rss +2.1 MiB)
+FPGA sized to 3 x 3: 9 grid tiles (auto)
+### Packing took 0.00 seconds (max_rss 23.1 MiB, delta_rss +0.0 MiB)
+Netlist num_nets: 4
+Netlist num_blocks: 4
+Netlist clb blocks: 1.
+Netlist mult_36 blocks: 0.
+Netlist memory blocks: 0.
+Netlist inputs pins: 2
+FPGA sized to 3 x 3: 9 grid tiles (auto)
+## AP Full Legalizer took 0.03 seconds (max_rss 61.8 MiB, delta_rss +38.7 MiB)
+## Computing placement delta delay look-up took 0.00 seconds (max_rss 61.8 MiB, delta_rss +0.0 MiB)
+Initial placement BB estimate of wirelength: 6
+Initial placement estimated Critical Path Delay (CPD): 1.47 ns
+### Placement Quench took 0.00 seconds (max_rss 61.9 MiB)
+Swaps called: 90
+BB estimate of min-dist (placement) wire length: 6
+Placement estimated critical path delay (least slack): 1.47 ns, Fmax: 680.272 MHz
+Placement estimated setup Worst Negative Slack (sWNS): -1.47 ns
+Placement estimated setup Total Negative Slack (sTNS): -7.65084 ns
+Placement estimated geomean non-virtual intra-domain period: 1.47 ns (680.272 MHz)
+	Swaps accepted: 25 (27.8 %)
+	Swaps rejected: 25 (27.8 %)
+	Swaps aborted: 40 (44.4 %)
+Placement Quench timing analysis took 2.02e-05 seconds (1.8086e-05 STA, 2.114e-06 slack) (1 full updates: 1 setup, 0 hold, 0 combined).
+Placement Total  timing analysis took 0.000819429 seconds (0.000741609 STA, 7.782e-05 slack) (31 full updates: 31 setup, 0 hold, 0 combined).
+## AP Detailed Placer took 0.00 seconds (max_rss 61.9 MiB, delta_rss +0.0 MiB)
+# Analytical Placement took 0.04 seconds (max_rss 61.9 MiB, delta_rss +41.3 MiB)
+Successfully routed after 1 routing iterations.
+# Routing took 0.00 seconds (max_rss 62.1 MiB, delta_rss +0.1 MiB)
+	Total wirelength: 3, average net length: 1.50000
+	Total logic block area (Warning, need to add pitch of routing to blocks with height > 3): 53894
+	Total used logic block area: 53894
+	Total routing area: 21226.3, per logic tile: 2358.48
+Flow timing analysis took 0.00247055 seconds (0.00225094 STA, 0.00021961 slack) (83 full updates: 80 setup, 0 hold, 3 combined).
+The entire flow of VPR took 0.08 seconds (max_rss 62.1 MiB)
+	Command being timed: "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/vpr/vpr EArch.xml blink --circuit_file blink.pre-vpr.blif --route_chan_width 100"
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.08
+	Maximum resident set size (kbytes): 63568
+	Exit status: 0

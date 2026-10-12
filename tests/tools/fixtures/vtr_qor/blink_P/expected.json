@@ -1,0 +1,17 @@
+{
+  "source": "a real VTR 3c9a4d23 + Parmys + ABC + VPR run of blink.v on EArch (2026-10-08, fixed channel width 100, so min_chan_width and the crit_path.out keys are -1); logs trimmed to the lines the parse configs match plus the time -v lines",
+  "vtr_parse": {
+    "num_clb": "1", "num_memories": "0", "num_mult": "0",
+    "device_width": "3", "device_height": "3",
+    "min_chan_width": "-1", "critical_path_delay": "-1", "crit_path_routed_wirelength": "-1",
+    "max_vpr_mem": "63568", "vpr_status": "success", "total_runtime": "0.08"
+  },
+  "metrics": {
+    "packed": {"num_clb": 1, "num_memories": 0, "num_mult": 0, "device_width": 3, "device_height": 3},
+    "routed": {"vpr_status": "success", "min_chan_width": null, "critical_path_delay_ns": null,
+               "fmax_mhz": null, "crit_path_routed_wirelength": null},
+    "cost": {"max_vpr_mem_mib": 62, "vpr_total_runtime_s": 0.08}
+  },
+  "vpr_time_s": 0.08,
+  "stage": {"wall_s": 0.07, "peak_rss_mib": 34, "complete": true}
+}

@@ -1,0 +1,2 @@
+arch	circuit	script_params	vpr_status	total_wirelength	total_runtime	num_clb	min_chan_width	crit_path_delay	
+EArch.xml	blink.v	common	success	3	0.08	1	-1	-1	

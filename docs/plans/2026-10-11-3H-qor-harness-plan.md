@@ -39,7 +39,7 @@ Also:
 - `docs/PHASE3.md`: the exit test (items 1–5) and decisions 2, 3, 5, 15, 16, 17 and 18. Decision 17 is the WSL caps.
 - The 3E spec v2.1: §4.3, §5 item 1 (the `# abc:` header), §14.1 item 6, §15.2 (`vtr-models`), §16.4–16.5 (nightly step 5's sweeps, the R leg).
 - The 3D spec v2: §8.1 (run information), §11 (`abc: final: depth <d>`), §6.3 (I8: the exchange P′ used), §13.9 (3D's heavy runs share the lock).
-- The standing rules (heavy runs; `rm` roots; never writing `~/odin3-ws/golden` or `~/odin3-ws/external`), PHASE0 #29 (WSL caps) and §9 (model/effort), and `docs/ORACLES.md` (the VTR pin).
+- The standing rules (heavy runs; `rm` roots; never writing `~/odin3-ws/golden` or `~/odin3-ws/external`; they live outside this repo, in the controller's SDD directory: `~/odin3-ws/odin3-2Cp/.superpowers/sdd/2026-10-11-2C-verilog-parser-plan/standing-rules.md`, and the harness enforces them in code: `check_out_dir`, `safe_rmtree`, VTR run read-only), PHASE0 #29 (WSL caps) and §9 (model/effort), and `docs/ORACLES.md` (the VTR pin).
 - The 2E plan point (p) and `tools/heavy-run` / `tools/build-locked` as on `feat/2E-core`.
 
 **Ordering and bases.** `main` (c1e3987) has the 3E/3H specs (#51), the 2E/2F plans (#52), the 3D spec (#53) and 2D-1 (#54). In flight: 2C-2 (`feat/2C-read`), 2D-2 (`feat/2D-const`) and 2E-1 (`feat/2E-core`), whose Task 2, in review, creates `tools/heavy-run`, `tools/build-locked` and `cmake/Odin3Sweep.cmake`. **That PR merges to main first; every real 3H run depends on it.**
@@ -142,7 +142,7 @@ Effort cues:
 - (n) **Nightly step 3 keeps the O and O′ netlists** (`--keep-netlists`), because its `equiv` and `rerun-check` need them.
 - (o) **P′'s front-end cost** is `parmys.out` of the latest P job with the same VTR commit and arch, plus `frontend.time`. When that job is missing, the cell is `*` with `vtr-qor: Pprime <d>: no P job for the Parmys stage cost`.
 - (p) **`--allow-vtr-drift` is report-only.** `job.json` records `"vtr_drift": true`, and `gate` on such a table prints `gate: INCOMPLETE: VTR at <sha12> is not the pin (report-only run)`, exit 3.
-- (q) **The odin3 build id** is the SHA-256 over the `odin3` binary, then each `libodin3*.so` that `ldd` resolves (`libodin3_abc.so` included), in basename order. `ODIN3_QOR_LDD_CMD` replaces `ldd` in tests.
+- (q) **The odin3 build id** is the SHA-256 over the `odin3` binary, then each `libodin3*.so` that `ldd` resolves (`libodin3_abc.so` included), in basename order. Tests replace `ldd` through the module-level seam `qor_sched.LDD_CMD` (`mock.patch.object`), never an environment variable: no production path reads a test hook from the environment (controller ruling, 3H Task 1 fix round 1; Task 2 fix round 1).
 - (r) **Rounding.** Peak RSS is `(kB + 512) // 1024` MiB. Admission messages print disk free as an integer and `MemAvailable` with one decimal.
 - (s) **Pair names.** CSV and Markdown write `O'` and `P'`. Directories and `job.json` use `Oprime`/`Pprime`. The CLI accepts both.
 - (t) **Leg availability.** A pass is registered when a line of `odin3 --help` matches `^  ([A-Za-z_][A-Za-z0-9_]*)(?=[ :]|$)`. Every pass's help line starts with its name, and option lines (`  --…`) never match.
@@ -316,7 +316,7 @@ Effort cues:
   - `test_job_key_inputs`: changing any one `KeyInputs` field changes `job_key`. The keys are 64 hex digits, and `key12` is the first 12.
   - `test_leg_key_shares_designs`: two designs of one leg config share `leg_key` and differ in `job_key`. Changing `odin3_build` changes both keys for O and neither for P (P's odin3 fields are `None`).
   - `test_key_excludes_housekeeping`: the job directory and the timeout are not inputs (`key_params()` holds no `-temp_dir` or `-timeout`). A seed change re-keys.
-  - `test_build_id`: a fake `ldd` (via `ODIN3_QOR_LDD_CMD`) listing `libodin3.so => /x/libodin3.so` and `libodin3_abc.so => /x/libodin3_abc.so`. Changing one byte of either file, or of `odin3`, changes the id.
+  - `test_build_id`: a fake `ldd` (via the `qor_sched.LDD_CMD` seam) listing `libodin3.so => /x/libodin3.so` and `libodin3_abc.so => /x/libodin3_abc.so`. Changing one byte of either file, or of `odin3`, changes the id.
   - `test_plan_order`: `--designs sha,ch_intrinsics` with legs `O,P` → `[(ch_intrinsics, P), (ch_intrinsics, O), (sha, P), (sha, O)]`.
   - `test_plan_cache`: an `ok` `metrics.json` with the same key → `cached=True`. A different key, `status failed`, or `rerun=True` → `cached=False`.
   - `test_plan_rekeys_on_lib_and_script` (finding 30): in a temp repo copy, editing one byte of `lib/vtr.o3lib`, or of `lib/abc/vtr.abc`, changes `plan_jobs`' key for every O, O′ and P′ job and leaves P's unchanged.
@@ -381,7 +381,7 @@ Effort cues:
   - depth counts levels of non-buffer LUTs. Sources are primary inputs, latch outputs, hard-block outputs and constants; sinks are primary outputs, latch inputs and hard-block inputs. A buffer adds 0 levels.
 
 **Tests (T2):**
-- `test_counts`: `mixed.blif` (hand-written: 2 `.inputs`, 1 `.latch`, 5 `.names` of which one is `1 1`, one is `0 0` and one has zero inputs, an adder, a multiply and a RAM, plus stubs after `.end`) → `NetStats(luts=3, buffers=2, ffs=1, adders=1, mults=1, ram_slices=1, …)`. `blif_sha256` is the file's `sha256sum`.
+- `test_counts`: `mixed.blif` (hand-written: 2 `.inputs`, 1 `.latch`, 6 `.names` of which one is `1 1`, one is `0 0` and one has zero inputs, an adder, a multiply and a RAM, plus stubs after `.end`) → `NetStats(luts=3, buffers=2, ffs=1, adders=1, mults=1, ram_slices=1, …)`. `blif_sha256` is the file's `sha256sum`.
 - `test_depth_chain`: a chain of three LUTs fed by a PI → 3. Through a buffer → still 3. A `multiply` in the middle cuts the path, so the depth is the longer side (2).
 - `test_depth_latch_cut`: a LUT → latch → LUT path → 1.
 - `test_loop`: two LUTs feeding each other → −1 and the stderr line exact.
