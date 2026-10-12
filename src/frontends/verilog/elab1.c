@@ -390,6 +390,7 @@ void odin3_elab1_destroy(odin3_elab1 *e1) {
     odin3_u64map_destroy(e1->spec_hash);
     odin3_u64map_destroy(e1->spec_names);
     odin3_u64map_destroy(e1->port_pos);
+    odin3_u64map_destroy(e1->nettypes);
     odin3_arena_destroy(e1->arena);
     odin3_arena_destroy(e1->scratch);
     odin3_util_free(e1);

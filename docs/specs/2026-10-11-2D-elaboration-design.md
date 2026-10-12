@@ -128,6 +128,16 @@ written named, by the type's parameter at their position, in the type's paramete
 §17 #29 records IEEE. (5) §9.1 gains the texts of Task 12's agent defaults; §17 #27 and #28 record
 gate arrays and the output rule.
 
+v4.11 (2026-10-12; 2D Task 15, agent defaults). (1) EL-4: the implicit nets' `NET_DECL` carries a
+value-less `ATTR` `implicit` (synthesized, like `blackbox`); the binder sets `ODIN3_SYM_F_IMPLICIT`
+from it (EL-5). (2) EL-24, EL-25: a `PORT_DECL` (the header's or the body's) and a `NET_DECL`/`VAR_DECL` of its name
+merge in either order (Yosys 0.55 accepts `module m(output q); reg q;`); an `input` declared `reg`/`integer` is a net (an `integer` one a `signed [31:0]`);
+a port expression in the header makes the body's unlisted-port errors moot (M6 is the one error);
+`` `default_nettype `` and `` `resetall `` are read by stage 1 and dropped (the other directives stay
+Task 16's). (3) EL-4: a `REPEAT` count below 0 is 0; an `always` without an event control, a delay
+or event control inside a statement and a system task other than `$readmemh`/`$readmemb` in an
+`initial` stay Task 16's (T6, T11, T12, S3). (4) §17 #35 records the rejections of what Yosys accepts.
+
 v4.10 (2026-10-12; the PR 2D-3 final review, controller ruling I2 and minors m1, m3, m5). (1) EL-9,
 EL-11, EL-4: a `(* blackbox *)` definition keeps its base name for every specialization (Yosys
 0.55: `module \bb`, `cell \bb` with `parameter \W 8`), one ports-only `MODULE` from its default
@@ -284,7 +294,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
 | `VAR_DECL` | sub `reg` or `integer`; a declarator's `E?` is a variable initialiser (N8: `initial name = e`, EL-40) |
-| implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25) |
+| implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25); marked by one value-less `ATTR` `implicit` (synthesized, v4.11) on the `NET_DECL`, from which the binder sets `ODIN3_SYM_F_IMPLICIT` (EL-5) |
 | `GEN_BLOCK` | every selected generate block, named (the user's name or `genblk<n>`, EL-21), with a `NUMBER` index slot (32-bit signed) for loop iterations; nesting kept, since scopes name things (EL-21) |
 | `CONT_ASSIGN` | no `STRENGTH`/`DELAY` slots |
 | `ALWAYS` | sub `always` over `TIMING_STMT`[`EVENT_CONTROL`, S]; the event list is `STAR`, or all `EVENT_EXPR[posedge|negedge]`, or all `EVENT_EXPR[none]` (mixed lists are rejected, EL-34) |
@@ -399,8 +409,8 @@ Made exact by 2D Task 13 (v4.9, agent defaults):
   width for identifier"). One that resolves to a `BLOCK` binds to it: Yosys 0.55 makes a generate
   block's name an implicit net (`Identifier '\g' is implicitly declared`), which Task 18 (or
   Task 15) implements or records as a divergence.
-- **Not yet.** The `IMPLICIT` flag is not set: the elaborated form has no marker for the implicit
-  nets' `NET_DECL` (Task 15 defines one and makes the binder set the flag from it).
+- **Implicit nets** (v4.11). The `IMPLICIT` flag is set on the declarators of a `NET_DECL` carrying
+  the value-less `ATTR` `implicit` (EL-4).
 
 ## 3. Hierarchy
 
@@ -2415,6 +2425,7 @@ and reported, never relaxed (2A's rule).
 | 32 | a user-named generate block and another declaration of its name in one scope (`wire g;` … `begin : g`) is M11's error (`'g' is already declared (first at …)`); an implicit `genblk<n>` beside a later user declaration of that name is accepted, as Yosys does (EL-21) | both accepted: the wire is `g`, the block's objects `g[0].t` (verified on 0.55, Task 14's batch, c9) | a generate block's name is declared in its scope: a clash is an error | IEEE: a name that is both a net and a block is ambiguous in a HIER_NAME (Task 14) |
 | 33 | two generate constructs with one user block name in one scope (`if (1) begin : a … end` twice) are M11's error (`'a' is already declared (first at …)`) | both accepted and merged: `a.genblk1.q` and `a.z` (verified on 0.55, Task 14 review, M1) | the second declaration of a block name in a scope is an error | IEEE: a scope's names are unique; Yosys has no such check on generate blocks (Task 14 review) |
 | 34 | a user block `genblk2` beside an implicit `genblk2` (two sibling `GEN_BLOCK`s of one name) is M11's error from the binder, after stage 1 has accepted the store; stage 1's naming does not pad past a user-named block | both accepted and merged: `genblk2.a` and `genblk2.b` (verified on 0.55, Task 14 review, M2) | the same name twice in a scope: an error | Yosys's seen set never holds a user-named block (`named_genblk`, EL-21), so only the binder sees the clash (Task 14 review) |
+| 35 | a non-variable declaration in a block, function or task (`localparam`, `event`); a repeated declaration of one name beyond the legal port pair (`wire x; reg x;`) | stage 1 errors: "this declaration is not supported in a block or a subroutine"; "'x' is already declared (first at …)" (M11) | Yosys 0.55 accepts all three (probed: `wire x; reg x;`, `wire x; wire x;`, a `localparam` in a function) | — |
 
 ## 18. Implementation split (EL-51)
 

@@ -814,13 +814,14 @@ static void test_connection_errors(void) {
 }
 
 /* Forms of landed kinds that later tasks land report their kind (point (l)): a hierarchical call
- * (E21, Task 16), a port declared in the body (Task 15), a specparam (P7) and a time variable
+ * (E21, Task 16), an always without an event control (T6), a specparam (P7) and a time variable
  * (N17, Task 16), a rejected net type (N15). */
 static void test_later_forms_pending(void) {
     static const char *const cases[][2] = {
         {"module top (output y);\n  assign y = u.f(1);\nendmodule\n",
          "t.v:2:14: error: " PENDING ": 'CALL'"},
-        {"module top (a);\n  input a;\nendmodule\n", "t.v:2:3: error: " PENDING ": 'PORT_DECL'"},
+        {"module top;\n  reg r;\n  always r = 1;\nendmodule\n",
+         "t.v:3:3: error: " PENDING ": 'ALWAYS'"},
         {"module top;\n  specparam p = 1;\nendmodule\n",
          "t.v:2:3: error: " PENDING ": 'PARAM_DECL'"},
         {"module top;\n  time t;\nendmodule\n", "t.v:2:3: error: " PENDING ": 'VAR_DECL'"},
@@ -998,11 +999,11 @@ static void test_reported_once(void) {
 /* m4: the forms of landed kinds that later tasks land have a table of their own; a form not in it
  * is a 2D bug. */
 static void test_pending_forms_table(void) {
-    TEST_ASSERT_EQUAL_UINT32(6, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1)); /* Task 12 */
+    TEST_ASSERT_EQUAL_UINT32(10, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1)); /* Task 15 */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE2));
-    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_PORT_DECL));
+    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS));
     TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_CONNECTION));
-    TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_PORT_DECL));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_ALWAYS));
     run_clean(M_W "module top; m u ();\nendmodule\n");
     odin3_elab1 *e1 = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_create(&rs.ctx, rs.parsed, &rs.opts, &e1));

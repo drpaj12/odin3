@@ -21,28 +21,6 @@
 static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 15: non-ANSI ports, attributes, subroutines, processes and every statement
-             * kind (a port declared in the body: odin3_elab1_pend_form). */
-            [ODIN3_AST_PORT_REF] = true,
-            [ODIN3_AST_ATTR] = true,
-            [ODIN3_AST_FUNCTION_DECL] = true,
-            [ODIN3_AST_TASK_DECL] = true,
-            [ODIN3_AST_ALWAYS] = true,
-            [ODIN3_AST_INITIAL] = true,
-            [ODIN3_AST_SEQ_BLOCK] = true,
-            [ODIN3_AST_BLOCKING_ASSIGN] = true,
-            [ODIN3_AST_NONBLOCKING_ASSIGN] = true,
-            [ODIN3_AST_IF] = true,
-            [ODIN3_AST_CASE] = true,
-            [ODIN3_AST_CASE_ITEM] = true,
-            [ODIN3_AST_FOR] = true,
-            [ODIN3_AST_WHILE] = true,
-            [ODIN3_AST_REPEAT] = true,
-            [ODIN3_AST_TIMING_STMT] = true,
-            [ODIN3_AST_TASK_CALL] = true,
-            [ODIN3_AST_NULL_STMT] = true,
-            [ODIN3_AST_EVENT_CONTROL] = true,
-            [ODIN3_AST_EVENT_EXPR] = true,
             /* Task 16: the REJECT and IGNORE kinds. */
             [ODIN3_AST_DIRECTIVE] = true,
             [ODIN3_AST_EVENT_DECL] = true,
@@ -123,8 +101,13 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
 static const bool k_forms[ODIN3_ELAB_STAGES + 1][ODIN3_AST_KIND_COUNT] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 15: a port declared in the body. */
-            [ODIN3_AST_PORT_DECL] = true,
+            /* Task 16: an always without an event control (T6), a delay or event control in
+             * a statement (T11, T12), a system task (S3). */
+            [ODIN3_AST_ALWAYS] = true,
+            [ODIN3_AST_TIMING_STMT] = true,
+            [ODIN3_AST_BLOCKING_ASSIGN] = true,
+            [ODIN3_AST_NONBLOCKING_ASSIGN] = true,
+            [ODIN3_AST_TASK_CALL] = true,
             /* Task 16: specparam, time/real variables, tri0/tri1/trireg, hierarchical calls,
              * switch-level and pull gates (Q6). */
             [ODIN3_AST_PARAM_DECL] = true,

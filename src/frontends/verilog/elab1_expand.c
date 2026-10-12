@@ -108,18 +108,41 @@ static void clash(odin3_elab1_env *env, const odin3_elab1_slot *proto, odin3_ast
     odin3_strbuf_free(&pos);
 }
 
+/* EL-24: a PORT_DECL (a header's or the body's) and a NET_DECL or VAR_DECL of the same name (either
+ * order, module scope; Yosys 0.55 accepts `module m(output q); reg q;`) are one port, the type from
+ * the net or variable declaration. */
+static bool port_pair(const odin3_elab1_env *env, const odin3_elab1_slot *first,
+                      const odin3_elab1_slot *proto) {
+    const odin3_ast *ast = env->e1->parsed;
+    if (proto->scope != 0 || first->entry.kind != ODIN3_ENTRY_SIGNAL ||
+        proto->entry.kind != ODIN3_ENTRY_SIGNAL || first->group2.v != 0) {
+        return false;
+    }
+    odin3_ast_kind lhs = odin3_ast_kind_of(ast, first->group);
+    odin3_ast_kind rhs = odin3_ast_kind_of(ast, proto->group);
+    bool lhs_port = lhs == ODIN3_AST_PORT_DECL;
+    bool rhs_port = rhs == ODIN3_AST_PORT_DECL;
+    bool lhs_obj = lhs == ODIN3_AST_NET_DECL || lhs == ODIN3_AST_VAR_DECL;
+    bool rhs_obj = rhs == ODIN3_AST_NET_DECL || rhs == ODIN3_AST_VAR_DECL;
+    return (lhs_port && rhs_obj) || (lhs_obj && rhs_port);
+}
+
 odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
     uint64_t key = (uint64_t)proto->scope << E1_SCOPE_SHIFT | proto->name;
     uint64_t at = 0;
     if (odin3_u64map_get(env->names, key, &at)) {
-        const odin3_elab1_slot *first = odin3_vec_cat(&env->slots, (size_t)at);
+        odin3_elab1_slot *first = odin3_vec_at(&env->slots, (size_t)at);
         bool block = proto->entry.kind == ODIN3_ENTRY_BLOCK;
-        bool blocks = block || first->entry.kind == ODIN3_ENTRY_BLOCK;
-        if (blocks && !(block && first->entry.kind == ODIN3_ENTRY_BLOCK &&
-                        first->group.v == proto->group.v)) {
-            clash(env, proto, first->entry.decl);
+        if (block && first->entry.kind == ODIN3_ENTRY_BLOCK && first->group.v == proto->group.v) {
+            return ODIN3_OK; /* the branches of one construct may share a block name */
         }
-        return ODIN3_OK; /* the first declaration of a name wins (the rest of M11 is Task 15's) */
+        if (port_pair(env, first, proto)) {
+            first->group2 = proto->group;
+            first->decl2 = proto->entry.decl;
+            return ODIN3_OK;
+        }
+        clash(env, proto, first->entry.decl); /* M11: the first declaration stands */
+        return ODIN3_OK;
     }
     odin3_elab1_slot *slot = odin3_vec_push(&env->slots);
     if (slot == NULL) {
@@ -461,6 +484,9 @@ odin3_status odin3_elab1_env_create(odin3_elab1 *e1, uint32_t def, odin3_elab1_e
     env->module = odin3_elab1_def(e1, def)->node;
     odin3_vec_init(&env->slots, sizeof(odin3_elab1_slot));
     odin3_vec_init(&env->ranges, sizeof(odin3_elab1_range));
+    odin3_vec_init(&env->ports, sizeof(odin3_elab1_mport));
+    odin3_vec_init(&env->implicit, sizeof(odin3_elab1_implicit_net));
+    odin3_vec_init(&env->scan, sizeof(odin3_elab1_scan_frame));
     odin3_status st = env_tables(env);
     st = st != ODIN3_OK ? st : record_module(env);
     if (st != ODIN3_OK) {
@@ -482,6 +508,7 @@ void odin3_elab1_env_destroy(odin3_elab1_env *env) {
     odin3_u64map_destroy(env->names);
     odin3_u64map_destroy(env->ranged);
     odin3_elab1_gen_free(env);
+    odin3_elab1_decl_free(env);
     odin3_arena_destroy(env->arena);
     odin3_util_free(env);
 }
@@ -788,24 +815,38 @@ static uint32_t unranged_width(const odin3_ast *ast, odin3_ast_id group, bool *i
     return wide ? E1_TIME_BITS : 1;
 }
 
-/* The width, sign and range of a net, variable or port (integer: 32 signed; time: 64). */
+/* The width, sign and range of a net, variable or port (integer: 32 signed; time: 64); a body port
+ * merged with its net or variable declaration (EL-24) takes the written range from either, and
+ * the sign and `integer` from both. */
 static odin3_status signal_type(odin3_elab1_env *env, uint32_t idx) {
     const odin3_ast *ast = env->e1->parsed;
-    odin3_ast_id group = odin3_elab1_env_slot(env, idx)->group;
+    const odin3_elab1_slot *cur = odin3_elab1_env_slot(env, idx);
+    odin3_ast_id groups[2] = {cur->group, cur->group2};
     bool integer = false;
-    int64_t msb = (int64_t)unranged_width(ast, group, &integer) - 1;
-    int64_t lsb = 0;
+    bool is_signed = false;
+    uint32_t bits = 1;
     odin3_ast_id range = {0};
-    if (!integer) {
-        range = signal_range(ast, group);
+    for (uint32_t k = 0; k < 2; k++) {
+        if (groups[k].v == 0) {
+            continue;
+        }
+        bool one = false;
+        uint32_t width = unranged_width(ast, groups[k], &one);
+        integer = integer || one;
+        bits = width > bits ? width : bits;
+        is_signed =
+            is_signed || (odin3_ast_flags(ast, groups[k]) & ODIN3_AST_F_NET_DECL_SIGNED) != 0;
+        range = range.v != 0 ? range : signal_range(ast, groups[k]);
     }
-    odin3_status st = range.v != 0 ? odin3_elab1_env_range(env, range, &msb, &lsb) : ODIN3_OK;
+    int64_t msb = (int64_t)bits - 1;
+    int64_t lsb = 0;
+    odin3_status st =
+        (!integer && range.v != 0) ? odin3_elab1_env_range(env, range, &msb, &lsb) : ODIN3_OK;
     odin3_elab1_slot *slot = odin3_elab1_env_slot(env, idx);
     slot->msb = msb;
     slot->lsb = lsb;
     slot->entry.width = (uint32_t)(msb >= lsb ? msb - lsb : lsb - msb) + 1;
-    slot->entry.is_signed =
-        integer || (odin3_ast_flags(ast, group) & ODIN3_AST_F_NET_DECL_SIGNED) != 0;
+    slot->entry.is_signed = integer || is_signed;
     return st;
 }
 
@@ -1555,6 +1596,7 @@ static odin3_status walk_item(e1_pass *ps, uint32_t scope, odin3_ast_id item) {
         break;
     }
     odin3_status st = odin3_elab1_gen_seen(ps->env, item, scope);
+    st = st != ODIN3_OK ? st : odin3_elab1_implicit(ps->env, item);
     if (st == ODIN3_OK && (kind == ODIN3_AST_INSTANTIATION || kind == ODIN3_AST_DEFPARAM)) {
         st = push_todo(ps, item, scope);
     } else if (st == ODIN3_OK && kind == ODIN3_AST_GATE_DECL) {
@@ -1629,7 +1671,9 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     if (st == ODIN3_OK) {
         ps.env = e1->env;
         odin3_elab1_env_preload(ps.env, spec);
-        st = expand_items(&ps);
+        ps.env->nettype = odin3_elab1_nettype_at(e1, ps.env->module);
+        st = odin3_elab1_ports(e1, spec);
+        st = st != ODIN3_OK ? st : expand_items(&ps);
     }
     odin3_elab1_spec *rec = odin3_vec_at(&e1->specs, spec);
     rec->first_log = (uint32_t)first_log;

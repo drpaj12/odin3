@@ -441,6 +441,10 @@ enforces:
   (resolution is the symbol table's job, built in 2D for both forms), attributes, `INITIAL`
   (D2), tri-state forms (D3).
 
+The refined elaborated form that 2D stage 1 writes (and stage 2's binder checks) is the 2D spec's
+EL-4 (`docs/specs/2026-10-11-2D-elaboration-design.md` §2.4), including the unsized `PARAM_DECL`
+value, the merged ports, the implicit nets' `implicit` marker and the unnamed blocks' names (§19).
+
 A store is never rewritten in place (§2); the elaborated form is a second store built with the
 same builders. Which store the design holds: §9.
 

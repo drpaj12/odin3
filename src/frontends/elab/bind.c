@@ -63,6 +63,7 @@ typedef enum bd_num {
 } bd_num;
 
 static const char k_blackbox[] = "blackbox";
+static const char k_implicit[] = "implicit"; /* the ATTR marking stage 1's implicit nets */
 static const char k_work[] = "work";
 
 /* One node of the sweep's path from the UNIT. */
@@ -552,6 +553,8 @@ static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, b
 _Static_assert(ODIN3_AST_F_NET_DECL_SIGNED == ODIN3_AST_F_VAR_DECL_SIGNED,
                "NET_DECL and VAR_DECL share the SIGNED bit");
 
+static bool bd_has_marker(const bd_run *br, odin3_ast_id node, const char *text);
+
 /* A NET_DECL's or VAR_DECL's declarator; a net declaration assignment is queued (CONTINUOUS). */
 static void bd_object(bd_run *br, const bd_frame *decl, odin3_ast_id declarator) {
     bool is_net = decl->kind == ODIN3_AST_NET_DECL;
@@ -571,6 +574,10 @@ static void bd_object(bd_run *br, const bd_frame *decl, odin3_ast_id declarator)
         .decl = decl->node,
         .declarator = declarator,
     };
+    if (is_net && bd_has_marker(br, decl->node, k_implicit)) {
+        spec.flags =
+            (uint16_t)(spec.flags | ODIN3_SYM_F_IMPLICIT); /* EL-4: stage 1's implicit net */
+    }
     bd_packed(br, bd_child(br, decl->node, is_net ? 1 : 0), &spec);
     if (!is_net && sub == ODIN3_AST_VAR_DECL_INTEGER) {
         bd_integer_type(&spec);
@@ -695,18 +702,23 @@ static void bd_modules(bd_run *br, odin3_ast_id unit) {
 
 /* --- scopes of the sweep -------------------------------------------------------------------- */
 
-static bool bd_is_blackbox(const bd_run *br, odin3_ast_id module) {
+/* Whether node carries the value-less ATTR text (the elaborated form's markers). */
+static bool bd_has_marker(const bd_run *br, odin3_ast_id node, const char *text) {
     uint32_t id = 0;
-    if (!odin3_strtab_find(odin3_design_strtab(br->design), odin3_bytes_cstr(k_blackbox), &id)) {
+    if (!odin3_strtab_find(odin3_design_strtab(br->design), odin3_bytes_cstr(text), &id)) {
         return false;
     }
-    odin3_ast_span attrs = odin3_ast_attrs(br->ast, module);
+    odin3_ast_span attrs = odin3_ast_attrs(br->ast, node);
     for (uint32_t i = 0; i < attrs.n; i++) {
         if (odin3_ast_name(br->ast, attrs.ids[i]) == id) {
             return true;
         }
     }
     return false;
+}
+
+static bool bd_is_blackbox(const bd_run *br, odin3_ast_id module) {
+    return bd_has_marker(br, module, k_blackbox);
 }
 
 /* A MODULE frame: the scope declared for it (none for a duplicate: its subtree is skipped). */

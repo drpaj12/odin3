@@ -728,6 +728,9 @@ typedef struct odin3_elab1_slot {
     bool overridden;
     bool bound;          /* GENVAR: holds a generate loop's value (entry.value, Task 14) */
     uint32_t n_unpacked; /* SIGNAL: the unpacked dimensions (a memory) */
+    odin3_ast_id group2; /* SIGNAL: the NET_DECL/VAR_DECL merged into a body PORT_DECL (EL-24), or
+                            the PORT_DECL merged into a net; 0 when none (Task 15) */
+    odin3_ast_id decl2;  /* its DECLARATOR */
     int64_t msb;         /* the declared range; an unranged value: width - 1 and 0 */
     int64_t lsb;
     odin3_elab_override ovr; /* PARAM: the override that won */
@@ -791,6 +794,33 @@ typedef struct odin3_elab1_comp {
 /* An environment (EL-12): the scopes of one definition's elaboration (Task 14: the module and its
  * elaborated generate blocks), their declarations (slots, by scope << 32 | name), the folded
  * ranges (by scope << 32 | RANGE) and the evaluator whose host it is. */
+/* One port of a module as pass E merged it (EL-24): the header position's declaration and the body
+ * declarations of its name. name 0: an empty position (EL-10). */
+typedef struct odin3_elab1_mport {
+    uint32_t name;
+    uint8_t dir; /* ODIN3_AST_PORT_DECL_* */
+    uint8_t dt;  /* ODIN3_AST_DT_*: none, reg or integer */
+    uint8_t net; /* 1 + the net kind of a net port, else 0 (a variable) */
+    bool is_signed;
+    bool ansi;
+    bool as_integer;    /* an `input integer`, treated as a signed [31:0] net (M12) */
+    odin3_ast_id range; /* the RANGE that gives the port's type, or 0 */
+    odin3_ast_id group; /* the PORT_DECL (its attributes and location) */
+    odin3_ast_id decl;  /* the DECLARATOR, or the empty position's PORT_REF */
+} odin3_elab1_mport;
+
+/* An implicit net (EL-25): its name and the first use. */
+typedef struct odin3_elab1_implicit_net {
+    uint32_t name;
+    odin3_ast_id use;
+} odin3_elab1_implicit_net;
+
+/* A frame of the implicit-net scan: a node, or the end of a scope that node opened. */
+typedef struct odin3_elab1_scan_frame {
+    odin3_ast_id node;
+    bool leave;
+} odin3_elab1_scan_frame;
+
 typedef struct odin3_elab1_env {
     odin3_elab1 *e1;
     uint32_t def;
@@ -813,6 +843,13 @@ typedef struct odin3_elab1_env {
     uint32_t seq;        /* the seen-set clock */
     uint32_t made_first; /* the scopes the last odin3_elab1_gen_* made: [first, first + n) */
     uint32_t made_n;
+    /* Task 15 */
+    odin3_vec ports;         /* odin3_elab1_mport: the merged port list (odin3_elab1_ports) */
+    odin3_vec implicit;      /* odin3_elab1_implicit_net, in first-use order */
+    odin3_u64map *imp_names; /* implicit (or reported-undeclared) names → 1 */
+    odin3_u64map *locals;    /* names of the enclosing blocks and subroutines → depth count */
+    odin3_vec scan;          /* odin3_elab1_scan_frame: the implicit-net scan's stack */
+    uint8_t nettype;         /* the module's `default_nettype (odin3_elab1_nettype_at) */
 } odin3_elab1_env;
 
 /* A new environment of definition def with every declaration of its module scope recorded (no
@@ -968,6 +1005,52 @@ const odin3_elab1_scope_x *odin3_elab1_scope_ext(const odin3_elab1_env *env, uin
  * seen set, in pre-order (label_genblks's default case). ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_elab1_gen_seen(odin3_elab1_env *env, odin3_ast_id node, uint32_t scope);
 
+/* --- declarations, ports, implicit nets, subroutines (Task 15, elab1_decl.c) ---------------- */
+
+/* The net type nothing is implicit under (`default_nettype none). */
+enum { ODIN3_NETTYPE_NONE = 0xFF };
+
+/*
+ * EL-25: the `default_nettype in effect for module_node (a parsed MODULE): the last
+ * DIRECTIVE[default_nettype] before it in project stream order (the UNITs in order, directives
+ * inside earlier modules included; one inside a module warns "`default_nettype inside a module
+ * takes effect at the next module"), `resetall clearing it; as an ODIN3_AST_NET_DECL_* sub, or
+ * ODIN3_NETTYPE_NONE. The table is built on the first call (an out-of-memory latches
+ * odin3_elab1_status and answers wire).
+ */
+uint8_t odin3_elab1_nettype_at(odin3_elab1 *e1, odin3_ast_id module_node);
+
+/*
+ * EL-24: the ports of specialization spec's module merged into env->ports (e1->env), in header
+ * order: ANSI declarators as written, each non-ANSI name with its body PORT_DECL and the net or
+ * variable declaration that follows or precedes it. Errors: "port 'a' is not declared", "'x' is
+ * declared as a port but is not in the port list", "port 'q' is declared with ranges [3:0] and
+ * [7:0]", M6's "port expression in a module port list is not supported"; M12's warning for
+ * `input reg`. ODIN3_OK (errors are counted); ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_ports(odin3_elab1 *e1, uint32_t spec);
+
+/*
+ * EL-25 (pass E, one module or generate-scope item at a time): every identifier of item (an
+ * expression, statement or connection; not a constant position, a name used as function, task or
+ * module, or a block's or subroutine's own local) that resolves to nothing becomes an implicit net
+ * of env's implicit list (first use order) with the warning "'x' is implicitly declared", or the
+ * error "'x' is not declared (`default_nettype is none)" or N15's "net type 'tri0' is not
+ * supported". ODIN3_OK (errors are counted); ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_implicit(odin3_elab1_env *env, odin3_ast_id item);
+
+/* The NET_DECL sub an implicit net of `default_nettype type has (wire/tri → wire, wand/triand →
+ * wand, wor/trior → wor, uwire). */
+uint8_t odin3_elab1_implicit_sub(uint8_t nettype);
+
+/* True for a DIRECTIVE stage 1 reads (`default_nettype, `resetall) and drops from the elaborated
+ * form; the other directives are Task 16's. */
+bool odin3_elab1_directive_handled(const odin3_elab1 *e1, odin3_ast_id directive);
+
+/* Frees the Task 15 tables of env. */
+void odin3_elab1_decl_free(odin3_elab1_env *env);
+
 /* How a path's leading components walk through generate blocks (odin3_elab1_scope_walk). */
 typedef enum odin3_elab1_walked {
     ODIN3_WALK_STOP = 0, /* comps[used] is not a block (or every component was used) */
@@ -1042,6 +1125,8 @@ struct odin3_elab1 {
     odin3_u64map *bbport_ix;  /* bbox << 32 | port name → bbports index + 1 */
     /* Task 14 */
     uint64_t n_gen_iters; /* generate-loop iterations unrolled so far (the run-level cap) */
+    /* Task 15 */
+    odin3_u64map *nettypes; /* MODULE node → its `default_nettype (odin3_elab1_nettype_at) */
 };
 
 /* A diagnostic logged once (odin3_elab1_report, odin3_elab1_error). */

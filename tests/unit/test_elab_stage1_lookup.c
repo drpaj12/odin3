@@ -571,8 +571,8 @@ static void test_pending_forced_kind(void) {
 
 /* Before Task 15 an always block is pending. */
 static void test_pending_always(void) {
-    run_one("t.v", "module t;\n  always @* ;\nendmodule\n");
-    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:2:3: error: " PENDING ": 'ALWAYS'");
+    run_one("t.v", "module t;\n  reg r;\n  always r = 1;\nendmodule\n"); /* T6: Task 16's */
+    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:3:3: error: " PENDING ": 'ALWAYS'");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
 }
 
@@ -590,8 +590,8 @@ static void test_pending_forced_module(void) {
 static void test_pending_directive_and_attribute(void) {
     run_one("d.v", "`timescale 1ns/1ps\n(* keep *)\nmodule t;\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_ERROR, "d.v:1:1: error: " PENDING ": 'DIRECTIVE'");
-    et_expect(&rs, ODIN3_LOG_ERROR, "d.v:2:4: error: " PENDING ": 'ATTR'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, rs.errors, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors,
+                                     et_log(&rs)); /* the attribute landed (Task 15) */
 }
 
 /* What odin3_elab_pending answers for (stage, kind or feature). */
@@ -610,7 +610,9 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_GATE_DECL, false},     /* landed by Task 12 */
     {ODIN3_ELAB_STAGE1, ODIN3_AST_GEN_FOR, false},       /* landed by Task 14 */
     {ODIN3_ELAB_STAGE1, ODIN3_AST_HIER_NAME, false},     /* landed by Task 14 */
-    {ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS, true},
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS, false},        /* landed by Task 15 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_ATTR, false},
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_DELAY, true},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, true},
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},

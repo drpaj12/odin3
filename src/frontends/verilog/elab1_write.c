@@ -46,7 +46,8 @@ enum {
     E1_INT_BITS = 32,
     E1_NET_RANGE_SLOT = 1,
     E1_NET_DELAY_SLOT = 2,
-    E1_INT64_BITS = 64
+    E1_INT64_BITS = 64,
+    W_UNNAMED_TEXT = 40 /* "$unnamed_block$" and a 32-bit count */
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -67,6 +68,8 @@ typedef struct e1w {
     uint32_t scope;      /* the scope being written (pass E's) */
     uint32_t next_scope; /* the next scope a selected block takes (pass E's creation order) */
     odin3_vec walk;      /* e1w_frame */
+    uint32_t unnamed;    /* the unnamed blocks with declarations named so far in the module */
+    bool in_initial;     /* the statement being copied is an INITIAL's */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -132,8 +135,16 @@ static bool w_room(e1w *wr, odin3_ast_id from) {
     return false;
 }
 
-static odin3_ast_id w_make_marked(e1w *wr, const odin3_ast_spec *spec, uint32_t mark,
-                                  odin3_ast_id from) {
+typedef struct w_attrs_of {
+    odin3_ast_id from; /* the parsed node whose attributes are written */
+    odin3_ast_id made; /* the elaborated node they are attached to */
+} w_attrs_of;
+
+static void w_attach_attrs(e1w *wr, const w_attrs_of *at);
+
+/* A node over the pending children from mark, without from's attributes. */
+static odin3_ast_id w_make_plain(e1w *wr, const odin3_ast_spec *spec, uint32_t mark,
+                                 odin3_ast_id from) {
     odin3_ast_id id = {0};
     if (!live(wr) || !w_room(wr, from)) {
         return id;
@@ -142,6 +153,14 @@ static odin3_ast_id w_make_marked(e1w *wr, const odin3_ast_spec *spec, uint32_t 
     if (st != ODIN3_OK) {
         fail(wr, st);
     }
+    return id;
+}
+
+/* w_make_plain, then the attributes of from attached (EL-4: evaluated to NUMBER or STRING). */
+static odin3_ast_id w_make_marked(e1w *wr, const odin3_ast_spec *spec, uint32_t mark,
+                                  odin3_ast_id from) {
+    odin3_ast_id id = w_make_plain(wr, spec, mark, from);
+    w_attach_attrs(wr, &(w_attrs_of){from, id});
     return id;
 }
 
@@ -234,6 +253,55 @@ static odin3_ast_id w_value(e1w *wr, const odin3_cval *val, uint8_t base, odin3_
     return w_leaf(wr, &leaf);
 }
 
+/* An ATTR's value evaluated to a NUMBER or STRING (EL-4); absent when the source has none. */
+static odin3_ast_id w_attr_value(e1w *wr, odin3_ast_id value) {
+    if (value.v == 0) {
+        return value;
+    }
+    odin3_cval val = {0};
+    uint8_t base = ODIN3_AST_NUMBER_DEC;
+    odin3_elab1_eval_req req = {value, "attribute value", &base};
+    odin3_status st = odin3_elab1_eval(wr->env, &req, &val);
+    if (st != ODIN3_OK) {
+        stop_on(wr, st);
+        return (odin3_ast_id){0};
+    }
+    return w_value(wr, &val, base, value);
+}
+
+/* The attributes of the parsed node from, evaluated and attached to the elaborated node made. */
+static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
+    odin3_ast_id made = at->made;
+    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, at->from);
+    if (attrs.n == 0 || made.v == 0 || !live(wr)) {
+        return;
+    }
+    odin3_ast_id *ids = odin3_arena_alloc(wr->env->arena, (size_t)attrs.n * sizeof *ids);
+    if (ids == NULL) {
+        fail(wr, ODIN3_ERR_NO_MEMORY);
+        return;
+    }
+    for (uint32_t i = 0; i < attrs.n; i++) {
+        odin3_ast_id attr = attrs.ids[i];
+        odin3_ast_id value = w_attr_value(wr, odin3_ast_child(wr->ast, attr, 0));
+        if (!live(wr) || !w_room(wr, attr)) {
+            return;
+        }
+        odin3_ast_spec spec = spec_of(wr, ODIN3_AST_ATTR, attr);
+        spec.name = odin3_ast_name(wr->ast, attr);
+        spec.flags = odin3_ast_flags(wr->ast, attr);
+        odin3_status st = odin3_ast_make(wr->out, &spec, &value, 1, &ids[i]);
+        if (st != ODIN3_OK) {
+            fail(wr, st);
+            return;
+        }
+    }
+    odin3_status st = odin3_ast_attach(wr->out, made, ids, attrs.n);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+}
+
 /* A declaration's RANGE with its folded bounds (pass E folded them). */
 static odin3_ast_id w_range(e1w *wr, odin3_ast_id range) {
     if (range.v == 0) {
@@ -255,27 +323,60 @@ static odin3_ast_id w_range(e1w *wr, odin3_ast_id range) {
 
 /* --- expressions ---------------------------------------------------------------------------- */
 
+/* The kinds the copier walks: expressions, statements and the process items. */
 static bool copyable(odin3_ast_kind kind) {
-    switch (kind) {
-    case ODIN3_AST_HIER_NAME:
-    case ODIN3_AST_NUMBER:
-    case ODIN3_AST_STRING:
-    case ODIN3_AST_IDENT:
-    case ODIN3_AST_SELECT:
-    case ODIN3_AST_CONCAT:
-    case ODIN3_AST_REPLICATE:
-    case ODIN3_AST_UNARY:
-    case ODIN3_AST_BINARY:
-    case ODIN3_AST_TERNARY:
-    case ODIN3_AST_CALL:
-        return true;
-    default:
-        return false;
+    static const odin3_ast_kind k_kinds[] = {
+        ODIN3_AST_HIER_NAME,
+        ODIN3_AST_NUMBER,
+        ODIN3_AST_STRING,
+        ODIN3_AST_IDENT,
+        ODIN3_AST_SELECT,
+        ODIN3_AST_CONCAT,
+        ODIN3_AST_REPLICATE,
+        ODIN3_AST_UNARY,
+        ODIN3_AST_BINARY,
+        ODIN3_AST_TERNARY,
+        ODIN3_AST_CALL,
+        ODIN3_AST_ALWAYS,
+        ODIN3_AST_INITIAL,
+        ODIN3_AST_SEQ_BLOCK,
+        ODIN3_AST_BLOCKING_ASSIGN,
+        ODIN3_AST_NONBLOCKING_ASSIGN,
+        ODIN3_AST_IF,
+        ODIN3_AST_CASE,
+        ODIN3_AST_CASE_ITEM,
+        ODIN3_AST_FOR,
+        ODIN3_AST_WHILE,
+        ODIN3_AST_REPEAT,
+        ODIN3_AST_TIMING_STMT,
+        ODIN3_AST_TASK_CALL,
+        ODIN3_AST_NULL_STMT,
+        ODIN3_AST_EVENT_CONTROL,
+        ODIN3_AST_EVENT_EXPR,
+    };
+    for (size_t i = 0; i < sizeof k_kinds / sizeof k_kinds[0]; i++) {
+        if (k_kinds[i] == kind) {
+            return true;
+        }
     }
+    return false;
 }
 
-/* Whether node is walked: a kind not landed is reported (pending, or a 2D bug); an attribute on
- * it is pending (Task 15), the walk goes on to report the rest. */
+/* Whether a CALL (system function) or TASK_CALL (system task) is one the elaborated form keeps
+ * or folds; the rest are Task 16's (E20, S3). */
+static bool keeps_system(const e1w *wr, odin3_ast_id node) {
+    const char *name = odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node));
+    if (name == NULL) {
+        return false;
+    }
+    if (odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_CALL) {
+        return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
+               strcmp(name, "$clog2") == 0;
+    }
+    return wr->in_initial && (strcmp(name, "$readmemh") == 0 || strcmp(name, "$readmemb") == 0);
+}
+
+/* Whether node is walked: a kind not landed is reported (pending, or a 2D bug). */
 static bool w_enter(e1w *wr, odin3_ast_id node) {
     if (odin3_elab1_pending(wr->e1, node)) {
         halt(wr);
@@ -287,15 +388,13 @@ static bool w_enter(e1w *wr, odin3_ast_id node) {
         halt(wr);
         return false;
     }
-    if (kind == ODIN3_AST_CALL && (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_CALL_HIER) != 0) {
-        odin3_elab1_pend_form(wr->e1, node); /* E21: Task 16 */
+    bool call = kind == ODIN3_AST_CALL || kind == ODIN3_AST_TASK_CALL;
+    uint16_t flags = call ? odin3_ast_flags(wr->ast, node) : 0;
+    if ((flags & ODIN3_AST_F_CALL_HIER) != 0 ||
+        ((flags & ODIN3_AST_F_CALL_SYSTEM) != 0 && !keeps_system(wr, node))) {
+        odin3_elab1_pend_form(wr->e1, node); /* E21, E20, S3: Task 16 */
         halt(wr);
         return false;
-    }
-    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, node);
-    if (attrs.n > 0) {
-        odin3_elab1_not_yet(wr->e1, attrs.ids[0]);
-        halt(wr);
     }
     return true;
 }
@@ -306,6 +405,9 @@ static const char *fold_role(const odin3_ast *ast, odin3_ast_id node, uint32_t i
     odin3_ast_kind kind = odin3_ast_kind_of(ast, node);
     if (kind == ODIN3_AST_REPLICATE) {
         return idx == 0 ? "replication count" : NULL;
+    }
+    if (kind == ODIN3_AST_REPEAT) {
+        return idx == 0 ? "repeat count" : NULL;
     }
     if (kind != ODIN3_AST_SELECT) {
         return NULL;
@@ -321,18 +423,28 @@ static const char *fold_role(const odin3_ast *ast, odin3_ast_id node, uint32_t i
     }
 }
 
-static odin3_ast_id w_fold(e1w *wr, odin3_ast_id expr, const char *role) {
+/* A constant position folded to a NUMBER; alone: a replication outside a concatenation. */
+static odin3_ast_id w_fold(e1w *wr, odin3_ast_id expr, const char *role, bool alone) {
     int32_t value = 0;
     odin3_status st = odin3_elab1_fold_int(wr->env, expr, role, &value);
     if (st != ODIN3_OK) {
         stop_on(wr, st);
         return (odin3_ast_id){0};
     }
-    if (value < 0 && strcmp(role, "replication count") == 0) {
+    bool replicate = strcmp(role, "replication count") == 0;
+    if (value < 0 && replicate) {
         odin3_elab1_error(wr->e1, odin3_ast_loc(wr->ast, expr),
                           "replication count %" PRId32 " is negative", value);
         halt(wr);
         return (odin3_ast_id){0};
+    }
+    if (value == 0 && replicate && alone) {
+        odin3_elab1_error(wr->e1, odin3_ast_loc(wr->ast, expr), "zero-width concatenation");
+        halt(wr);
+        return (odin3_ast_id){0};
+    }
+    if (value < 0 && strcmp(role, "repeat count") == 0) {
+        value = 0; /* a negative repeat count runs zero times */
     }
     return w_int(wr, value, expr);
 }
@@ -356,7 +468,7 @@ static odin3_ast_id w_hier(e1w *wr, odin3_ast_id hier) {
         }
         uint32_t sel = w_mark(wr); /* SELECT(bit; IDENT, NUMBER, absent) */
         w_push(wr, w_copy_node(wr, odin3_ast_child(wr->ast, part, 0), w_mark(wr)));
-        w_push(wr, w_fold(wr, odin3_ast_child(wr->ast, part, 1), "generate block index"));
+        w_push(wr, w_fold(wr, odin3_ast_child(wr->ast, part, 1), "generate block index", false));
         w_push(wr, (odin3_ast_id){0});
         w_push(wr, w_copy_node(wr, part, sel));
     }
@@ -370,6 +482,11 @@ static bool w_special(e1w *wr, odin3_ast_id node, odin3_ast_id *out) {
     odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
     if (kind == ODIN3_AST_HIER_NAME) {
         *out = w_hier(wr, node);
+        return true;
+    }
+    if (kind == ODIN3_AST_CALL && (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_CALL_SYSTEM) != 0 &&
+        strcmp(odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)), "$clog2") == 0) {
+        *out = w_fold(wr, node, "$clog2 argument", false); /* EL-18: a NUMBER */
         return true;
     }
     if (kind != ODIN3_AST_IDENT) {
@@ -386,6 +503,113 @@ static bool w_special(e1w *wr, odin3_ast_id node, odin3_ast_id *out) {
     return true;
 }
 
+/* The name of an unnamed block with declarations (EL-4, EL-23): `$unnamed_block$<k>`, k counting
+ * per module in source order, with the SystemVerilog-extension warning. */
+static uint32_t w_unnamed(e1w *wr, odin3_ast_id node) {
+    char text[W_UNNAMED_TEXT];
+    int len = snprintf(text, sizeof text, "$unnamed_block$%" PRIu32, ++wr->unnamed);
+    uint32_t name = 0;
+    if (len <= 0 || (size_t)len >= sizeof text) {
+        fail(wr, ODIN3_ERR_CHECK);
+        return 0;
+    }
+    odin3_status st = odin3_ast_intern(wr->out, odin3_bytes_cstr(text), &name);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return 0;
+    }
+    odin3_elab1_warn_once(wr->e1, node,
+                          "declaration in an unnamed block is a SystemVerilog extension; the "
+                          "block is named '%s'",
+                          text);
+    return name;
+}
+
+/* A variable declared in a block, function or task: VAR_DECL[reg|integer], its declarators without
+ * initialisers (not an expression walk: a block's declarations are written from inside one). */
+static odin3_ast_id w_local_var(e1w *wr, odin3_ast_id group) {
+    uint32_t sub = odin3_ast_sub(wr->ast, group);
+    if (sub != ODIN3_AST_VAR_DECL_REG && sub != ODIN3_AST_VAR_DECL_INTEGER) {
+        odin3_elab1_pend_form(wr->e1, group); /* N17 (Task 16) */
+        halt(wr);
+        return (odin3_ast_id){0};
+    }
+    uint32_t mark = w_mark(wr);
+    w_push(wr, w_range(wr, odin3_ast_child(wr->ast, group, 0)));
+    odin3_ast_span kids = odin3_ast_children(wr->ast, group);
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_VAR_DECL); i < kids.n; i++) {
+        odin3_ast_id decl = kids.ids[i];
+        if (odin3_ast_child(wr->ast, decl, 0).v != 0) {
+            odin3_elab1_error(wr->e1, odin3_ast_loc(wr->ast, decl),
+                              "an initialiser in a block or a subroutine is not supported");
+            halt(wr);
+        }
+        uint32_t one = w_mark(wr);
+        w_push(wr, (odin3_ast_id){0});
+        for (uint32_t k = 1; k < odin3_ast_nchild(wr->ast, decl); k++) {
+            w_push(wr, w_range(wr, odin3_ast_child(wr->ast, decl, k)));
+        }
+        odin3_ast_spec dspec = spec_of(wr, ODIN3_AST_DECLARATOR, decl);
+        dspec.name = odin3_ast_name(wr->ast, decl);
+        w_push(wr, w_make_marked(wr, &dspec, one, decl));
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_VAR_DECL, group);
+    spec.sub = (uint8_t)sub;
+    spec.flags = odin3_ast_flags(wr->ast, group) & (uint16_t)ODIN3_AST_F_VAR_DECL_SIGNED;
+    return w_make_marked(wr, &spec, mark, group);
+}
+
+/* A declaration of a block, function or task that is not a variable (Task 15's error). */
+static void w_local_other(e1w *wr, odin3_ast_id group) {
+    odin3_elab1_error(wr->e1, odin3_ast_loc(wr->ast, group),
+                      "this declaration is not supported in a block or a subroutine");
+    halt(wr);
+}
+
+/* The declarations of a block (a LIST of VAR_DECLs). */
+static odin3_ast_id w_locals(e1w *wr, odin3_ast_id list) {
+    uint32_t mark = w_mark(wr);
+    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
+    for (uint32_t i = 0; i < entries.n; i++) {
+        odin3_ast_id entry = entries.ids[i];
+        if (odin3_elab1_pending(wr->e1, entry)) {
+            halt(wr);
+        } else if (odin3_ast_kind_of(wr->ast, entry) == ODIN3_AST_VAR_DECL) {
+            w_push(wr, w_local_var(wr, entry));
+        } else {
+            w_local_other(wr, entry);
+        }
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_LIST, list);
+    return w_make_marked(wr, &spec, mark, list);
+}
+
+/* The child idx of node when it is more than a copy: a block's declarations, the control of an
+ * assignment (Task 16), a TIMING_STMT outside an ALWAYS (T12, Task 16), an absent statement of a
+ * TIMING_STMT (a NULL_STMT). True when the child was written. */
+static bool copy_special(e1w *wr, odin3_ast_id node, uint32_t idx, odin3_ast_id kid) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
+    bool assign = kind == ODIN3_AST_BLOCKING_ASSIGN || kind == ODIN3_AST_NONBLOCKING_ASSIGN;
+    if (kind == ODIN3_AST_SEQ_BLOCK && idx == 0 && kid.v != 0) {
+        w_push(wr, w_locals(wr, kid));
+        return true;
+    }
+    if (kind == ODIN3_AST_TIMING_STMT && idx == 1 && kid.v == 0) {
+        odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NULL_STMT, node);
+        w_push(wr, w_make_marked(wr, &spec, w_mark(wr), node));
+        return true;
+    }
+    bool stray = kid.v != 0 && kind != ODIN3_AST_ALWAYS &&
+                 odin3_ast_kind_of(wr->ast, kid) == ODIN3_AST_TIMING_STMT;
+    if ((assign && idx == 1 && kid.v != 0) || stray) {
+        odin3_elab1_pend_form(wr->e1, assign ? node : kid); /* T11, T12: Task 16 */
+        halt(wr);
+        w_push(wr, (odin3_ast_id){0});
+        return true;
+    }
+    return false;
+}
+
 /* A copy of node (a leaf or an operator) whose children are the pending span from mark. */
 static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark) {
     if (!live(wr)) {
@@ -397,6 +621,10 @@ static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark) {
     spec.name = odin3_ast_name(wr->ast, node);
     if (spec.kind == ODIN3_AST_NUMBER) {
         return w_number(wr, odin3_ast_number_of(wr->ast, node), &spec, node);
+    }
+    if (spec.kind == ODIN3_AST_SEQ_BLOCK && spec.name == 0 &&
+        odin3_ast_nchild(wr->ast, odin3_ast_child(wr->ast, node, 0)) > 0) {
+        spec.name = w_unnamed(wr, node);
     }
     return w_make_marked(wr, &spec, mark, node);
 }
@@ -411,6 +639,15 @@ static bool push_frame(e1w *wr, odin3_ast_id node) {
     return true;
 }
 
+/* Whether the node being copied (the top frame) is an item of a concatenation. */
+static bool in_concat(const e1w *wr, size_t base) {
+    if (wr->e1->frames.len - 1 <= base) {
+        return false;
+    }
+    const odin3_elab1_frame *up = odin3_vec_cat(&wr->e1->frames, wr->e1->frames.len - 2);
+    return odin3_ast_kind_of(wr->ast, (odin3_ast_id){up->node}) == ODIN3_AST_CONCAT;
+}
+
 /* One step of the copier: the top frame's next child, or the node itself once they are made. */
 static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
     odin3_elab1_frame *top = odin3_vec_at(&wr->e1->frames, wr->e1->frames.len - 1);
@@ -421,8 +658,12 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
         odin3_ast_id kid = kids.ids[idx];
         const char *role = kid.v != 0 ? fold_role(wr->ast, node, idx) : NULL;
         odin3_ast_id made = {0};
+        if (copy_special(wr, node, idx, kid)) {
+            return;
+        }
         if (role != NULL) {
-            w_push(wr, w_fold(wr, kid, role));
+            bool alone = !in_concat(wr, base);
+            w_push(wr, w_fold(wr, kid, role, alone));
         } else if (kid.v == 0 || !w_enter(wr, kid)) {
             w_push(wr, (odin3_ast_id){0});
         } else if (w_special(wr, kid, &made)) {
@@ -516,52 +757,39 @@ static odin3_ast_id w_param_decl(e1w *wr, odin3_ast_id group, bool in_header) {
     return w_make_marked(wr, &spec, mark, group);
 }
 
-/* One ANSI port: PORT_DECL{IN_HEADER} with one DECLARATOR; an untyped net port is `wire`
- * (EL-24: the NET field is never 0 on a net port). */
-/* An ANSI port: its PORT_DECL group and one of its DECLARATORs. */
-typedef struct e1w_port {
-    odin3_ast_id group;
-    odin3_ast_id decl;
-} e1w_port;
-
-static odin3_ast_id w_port(e1w *wr, const e1w_port *port) {
-    odin3_ast_id group = port->group;
-    odin3_ast_id decl = port->decl;
-    uint32_t flags =
-        (uint32_t)odin3_ast_flags(wr->ast, group) | (uint32_t)ODIN3_AST_F_PORT_DECL_IN_HEADER;
-    uint32_t dt = (flags & (uint32_t)ODIN3_AST_F_PORT_DECL_DT_MASK) >>
-                  (uint32_t)ODIN3_AST_F_PORT_DECL_DT_SHIFT;
-    uint32_t net = (flags & (uint32_t)ODIN3_AST_F_PORT_DECL_NET_MASK) >>
-                   (uint32_t)ODIN3_AST_F_PORT_DECL_NET_SHIFT;
-    if (dt == ODIN3_AST_DT_NONE && net == 0) {
-        flags |= (1U + (uint32_t)ODIN3_AST_NET_DECL_WIRE)
-                 << (uint32_t)ODIN3_AST_F_PORT_DECL_NET_SHIFT;
-    }
+/* The RANGE of an `input integer` treated as a net (M12): [31:0]. */
+static odin3_ast_id w_integer_range(e1w *wr, odin3_ast_id from) {
     uint32_t mark = w_mark(wr);
-    w_push(wr, w_range(wr, odin3_ast_child(wr->ast, group, 0)));
-    w_push(wr, w_declarator(wr, decl));
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_PORT_DECL, group);
-    spec.sub = (uint8_t)odin3_ast_sub(wr->ast, group);
-    spec.flags = (uint16_t)flags;
-    return w_make_marked(wr, &spec, mark, group);
+    w_push(wr, w_int(wr, E1_INT_BITS - 1, from));
+    w_push(wr, w_int(wr, 0, from));
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_RANGE, from);
+    return w_make_marked(wr, &spec, mark, from);
 }
 
-/* The ports LIST: one PORT_DECL per ANSI declarator; a non-ANSI PORT_REF is Task 15's. */
+/* One merged port (pass E: odin3_elab1_ports): PORT_DECL{IN_HEADER} with one DECLARATOR; the NET
+ * field is never 0 on a net port (EL-24). */
+static odin3_ast_id w_port(e1w *wr, const odin3_elab1_mport *port) {
+    uint32_t flags = (uint32_t)ODIN3_AST_F_PORT_DECL_IN_HEADER |
+                     (port->is_signed ? (uint32_t)ODIN3_AST_F_PORT_DECL_SIGNED : 0U) |
+                     ((uint32_t)port->dt << (uint32_t)ODIN3_AST_F_PORT_DECL_DT_SHIFT) |
+                     ((uint32_t)port->net << (uint32_t)ODIN3_AST_F_PORT_DECL_NET_SHIFT);
+    uint32_t mark = w_mark(wr);
+    w_push(wr, port->as_integer && port->range.v == 0 ? w_integer_range(wr, port->decl)
+                                                      : w_range(wr, port->range));
+    w_push(wr, w_declarator(wr, port->decl));
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_PORT_DECL, port->group);
+    spec.sub = port->dir;
+    spec.flags = (uint16_t)flags;
+    return w_make_marked(wr, &spec, mark, port->group);
+}
+
+/* The ports LIST: one PORT_DECL per merged port (pass E's list); empty positions are EL-10's. */
 static odin3_ast_id w_ports(e1w *wr, odin3_ast_id list) {
     uint32_t mark = w_mark(wr);
-    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
-    for (uint32_t i = 0; i < entries.n; i++) {
-        odin3_ast_id entry = entries.ids[i];
-        if (odin3_ast_kind_of(wr->ast, entry) != ODIN3_AST_PORT_DECL ||
-            odin3_elab1_pending(wr->e1, entry)) {
-            odin3_elab1_not_yet(wr->e1, entry);
-            halt(wr);
-            continue;
-        }
-        odin3_ast_span decls = odin3_ast_children(wr->ast, entry);
-        for (uint32_t j = odin3_ast_slot_count(ODIN3_AST_PORT_DECL); j < decls.n; j++) {
-            e1w_port port = {entry, decls.ids[j]};
-            w_push(wr, w_port(wr, &port));
+    for (size_t i = 0; i < wr->env->ports.len; i++) {
+        const odin3_elab1_mport *port = odin3_vec_cat(&wr->env->ports, i);
+        if (port->name != 0) {
+            w_push(wr, w_port(wr, port));
         }
     }
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_LIST, list);
@@ -576,6 +804,37 @@ static void w_dropped_slot(e1w *wr, odin3_ast_id slot) {
     }
 }
 
+/* Whether decl (a declarator of a NET_DECL or VAR_DECL) was merged into a body port (EL-24). */
+static bool merged_decl(const e1w *wr, odin3_ast_id decl) {
+    if (wr->scope != 0) {
+        return false;
+    }
+    uint32_t idx = odin3_elab1_env_find(wr->env, 0, odin3_ast_name(wr->ast, decl));
+    const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
+    return slot != NULL && slot->group2.v != 0 &&
+           (slot->entry.decl.v == decl.v || slot->decl2.v == decl.v);
+}
+
+/* The declarators of group not merged into a port. */
+static uint32_t unmerged_count(const e1w *wr, odin3_ast_id group) {
+    odin3_ast_span kids = odin3_ast_children(wr->ast, group);
+    uint32_t count = 0;
+    for (uint32_t i = odin3_ast_slot_count(odin3_ast_kind_of(wr->ast, group)); i < kids.n; i++) {
+        count += merged_decl(wr, kids.ids[i]) ? 0U : 1U;
+    }
+    return count;
+}
+
+/* w_declarators without the declarators merged into ports. */
+static void w_object_declarators(e1w *wr, odin3_ast_id group) {
+    odin3_ast_span kids = odin3_ast_children(wr->ast, group);
+    for (uint32_t i = odin3_ast_slot_count(odin3_ast_kind_of(wr->ast, group)); i < kids.n; i++) {
+        if (!merged_decl(wr, kids.ids[i])) {
+            w_push(wr, w_declarator(wr, kids.ids[i]));
+        }
+    }
+}
+
 /* NET_DECL with NUMBER bounds, no strength, delay, `vectored` or `scalared` (EL-4). */
 static odin3_ast_id w_net_decl(e1w *wr, odin3_ast_id group) {
     uint32_t sub = odin3_ast_sub(wr->ast, group);
@@ -587,11 +846,14 @@ static odin3_ast_id w_net_decl(e1w *wr, odin3_ast_id group) {
     }
     w_dropped_slot(wr, odin3_ast_child(wr->ast, group, 0));
     w_dropped_slot(wr, odin3_ast_child(wr->ast, group, E1_NET_DELAY_SLOT));
+    if (unmerged_count(wr, group) == 0) {
+        return (odin3_ast_id){0}; /* every declarator is a port's (EL-24) */
+    }
     uint32_t mark = w_mark(wr);
     w_push(wr, (odin3_ast_id){0});
     w_push(wr, w_range(wr, odin3_ast_child(wr->ast, group, E1_NET_RANGE_SLOT)));
     w_push(wr, (odin3_ast_id){0});
-    w_declarators(wr, group, w_declarator);
+    w_object_declarators(wr, group);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NET_DECL, group);
     spec.sub = (uint8_t)sub;
     spec.flags = odin3_ast_flags(wr->ast, group) & (uint16_t)ODIN3_AST_F_NET_DECL_SIGNED;
@@ -606,9 +868,12 @@ static odin3_ast_id w_var_decl(e1w *wr, odin3_ast_id group) {
         halt(wr);
         return (odin3_ast_id){0};
     }
+    if (unmerged_count(wr, group) == 0) {
+        return (odin3_ast_id){0}; /* every declarator is a port's (EL-24) */
+    }
     uint32_t mark = w_mark(wr);
     w_push(wr, w_range(wr, odin3_ast_child(wr->ast, group, 0)));
-    w_declarators(wr, group, w_declarator);
+    w_object_declarators(wr, group);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_VAR_DECL, group);
     spec.sub = (uint8_t)sub;
     spec.flags = odin3_ast_flags(wr->ast, group) & (uint16_t)ODIN3_AST_F_VAR_DECL_SIGNED;
@@ -1226,30 +1491,95 @@ static void w_close_block(e1w *wr, const e1w_frame *frame) {
 
 /* --- the module ----------------------------------------------------------------------------- */
 
-static void w_item(e1w *wr, odin3_ast_id item) {
-    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, item);
-    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, item);
-    if (odin3_elab1_pending(wr->e1, item)) {
+/* A body item pushed unless it came to nothing (every declarator merged into a port). */
+static void w_push_item(e1w *wr, odin3_ast_id id) {
+    if (id.v != 0) {
+        w_push(wr, id);
+    }
+}
+
+/* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
+ * Task 16's). */
+static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
+    odin3_ast_id first = odin3_ast_child(wr->ast, item, 0);
+    if (odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
+        odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS && first.v != 0 &&
+        odin3_ast_kind_of(wr->ast, first) != ODIN3_AST_TIMING_STMT) {
+        odin3_elab1_pend_form(wr->e1, item);
         halt(wr);
-        return;
+        return (odin3_ast_id){0};
     }
-    if (attrs.n > 0) {
-        odin3_elab1_not_yet(wr->e1, attrs.ids[0]); /* ATTR: Task 15 */
-        halt(wr);
+    wr->in_initial = odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_INITIAL;
+    odin3_ast_id made = w_expr(wr, item);
+    wr->in_initial = false;
+    return made;
+}
+
+/* One PORT_DECL per declarator of a function's or task's port group (EL-4). */
+static void w_sub_port(e1w *wr, odin3_ast_id group) {
+    odin3_ast_span decls = odin3_ast_children(wr->ast, group);
+    for (uint32_t j = odin3_ast_slot_count(ODIN3_AST_PORT_DECL); j < decls.n; j++) {
+        uint32_t mark = w_mark(wr);
+        w_push(wr, w_range(wr, odin3_ast_child(wr->ast, group, 0)));
+        w_push(wr, w_declarator(wr, decls.ids[j]));
+        odin3_ast_spec spec = spec_of(wr, ODIN3_AST_PORT_DECL, group);
+        spec.sub = (uint8_t)odin3_ast_sub(wr->ast, group);
+        spec.flags =
+            (uint16_t)(odin3_ast_flags(wr->ast, group) | (uint16_t)ODIN3_AST_F_PORT_DECL_IN_HEADER);
+        w_push(wr, w_make_marked(wr, &spec, mark, group));
     }
-    if (w_generate(wr, item)) {
-        return;
+}
+
+/* The PORT_DECLs (ports) or the other declarations of a function's or task's LIST. */
+static void w_sub_entries(e1w *wr, odin3_ast_id list, bool ports) {
+    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
+    for (uint32_t i = 0; i < entries.n; i++) {
+        odin3_ast_id group = entries.ids[i];
+        odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, group);
+        if (odin3_elab1_pending(wr->e1, group)) {
+            halt(wr);
+        } else if ((kind == ODIN3_AST_PORT_DECL) != ports) {
+            continue;
+        } else if (ports) {
+            w_sub_port(wr, group);
+        } else if (kind == ODIN3_AST_VAR_DECL) {
+            w_push(wr, w_local_var(wr, group));
+        } else {
+            w_local_other(wr, group);
+        }
     }
-    switch (kind) {
-    case ODIN3_AST_PARAM_DECL:
-        w_push(wr, w_param_decl(wr, item, false));
-        break;
-    case ODIN3_AST_NET_DECL:
-        w_push(wr, w_net_decl(wr, item));
-        break;
-    case ODIN3_AST_VAR_DECL:
-        w_push(wr, w_var_decl(wr, item));
-        break;
+}
+
+/* A FUNCTION_DECL or TASK_DECL (EL-4): ports LIST (one declarator each, non-ANSI inputs moved
+ * there in order), locals LIST, body. */
+static odin3_ast_id w_subroutine(e1w *wr, odin3_ast_id node) {
+    bool function = odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_FUNCTION_DECL;
+    uint32_t first = function ? 1U : 0U;
+    odin3_ast_id ports = odin3_ast_child(wr->ast, node, first);
+    odin3_ast_id locals = odin3_ast_child(wr->ast, node, first + 1);
+    uint32_t mark = w_mark(wr);
+    if (function) {
+        w_push(wr, w_range(wr, odin3_ast_child(wr->ast, node, 0)));
+    }
+    uint32_t list = w_mark(wr);
+    w_sub_entries(wr, ports, true);
+    w_sub_entries(wr, locals, true);
+    odin3_ast_spec lspec = spec_of(wr, ODIN3_AST_LIST, ports);
+    w_push(wr, w_make_marked(wr, &lspec, list, ports));
+    list = w_mark(wr);
+    w_sub_entries(wr, locals, false);
+    lspec = spec_of(wr, ODIN3_AST_LIST, locals);
+    w_push(wr, w_make_marked(wr, &lspec, list, locals));
+    w_push(wr, w_expr(wr, odin3_ast_child(wr->ast, node, first + 2)));
+    odin3_ast_spec spec = spec_of(wr, odin3_ast_kind_of(wr->ast, node), node);
+    spec.name = odin3_ast_name(wr->ast, node);
+    spec.flags = odin3_ast_flags(wr->ast, node);
+    return w_make_marked(wr, &spec, mark, node);
+}
+
+/* The instances, gates, processes and subroutines of a body (the declarations are w_item's). */
+static void w_behaviour(e1w *wr, odin3_ast_id item) {
+    switch (odin3_ast_kind_of(wr->ast, item)) {
     case ODIN3_AST_CONT_ASSIGN:
         w_push(wr, w_cont_assign(wr, item));
         break;
@@ -1259,17 +1589,52 @@ static void w_item(e1w *wr, odin3_ast_id item) {
     case ODIN3_AST_GATE_DECL:
         w_push(wr, w_gate(wr, item));
         break;
-    case ODIN3_AST_DEFPARAM:
-        break; /* resolved in pass E; absent from the elaborated form */
-    case ODIN3_AST_PORT_DECL:
-        if (wr->scope == 0) {
-            odin3_elab1_pend_form(wr->e1, item); /* a port declared in the body: Task 15 */
-        }
-        halt(wr); /* in a generate block: reported in pass E */
+    case ODIN3_AST_ALWAYS:
+    case ODIN3_AST_INITIAL:
+        w_push_item(wr, w_process(wr, item));
+        break;
+    case ODIN3_AST_FUNCTION_DECL:
+    case ODIN3_AST_TASK_DECL:
+        w_push(wr, w_subroutine(wr, item));
         break;
     default:
         odin3_elab1_unhandled(wr->e1, item);
         halt(wr);
+        break;
+    }
+}
+
+static void w_item(e1w *wr, odin3_ast_id item) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, item);
+    if (kind == ODIN3_AST_DIRECTIVE && odin3_elab1_directive_handled(wr->e1, item)) {
+        return; /* `default_nettype and `resetall: read by odin3_elab1_nettype_at */
+    }
+    if (odin3_elab1_pending(wr->e1, item)) {
+        halt(wr);
+        return;
+    }
+    if (w_generate(wr, item)) {
+        return;
+    }
+    switch (kind) {
+    case ODIN3_AST_PARAM_DECL:
+        w_push(wr, w_param_decl(wr, item, false));
+        break;
+    case ODIN3_AST_NET_DECL:
+        w_push_item(wr, w_net_decl(wr, item));
+        break;
+    case ODIN3_AST_VAR_DECL:
+        w_push_item(wr, w_var_decl(wr, item));
+        break;
+    case ODIN3_AST_DEFPARAM:
+        break; /* resolved in pass E; absent from the elaborated form */
+    case ODIN3_AST_PORT_DECL:
+        if (wr->scope != 0) {
+            halt(wr); /* in a generate block: reported in pass E */
+        }
+        break; /* a body port: merged into the ports LIST (EL-24) */
+    default:
+        w_behaviour(wr, item);
         break;
     }
 }
@@ -1294,8 +1659,56 @@ static odin3_ast_id w_header_params(e1w *wr, odin3_ast_id list) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
+/* The `implicit` ATTR of an implicit net's NET_DECL: how the binder knows it (EL-4, EL-5). */
+static void w_implicit_attr(e1w *wr, const w_attrs_of *at) {
+    odin3_ast_id net = at->made;
+    static const char k_implicit[] = "implicit";
+    odin3_ast_spec spec = {.kind = ODIN3_AST_ATTR,
+                           .loc = odin3_ast_loc(wr->out, net).v,
+                           .end = odin3_ast_end(wr->out, net).v};
+    const odin3_ast_id none = {0};
+    odin3_ast_id attr = {0};
+    if (!live(wr) || !w_room(wr, at->from)) {
+        return;
+    }
+    odin3_status st = odin3_ast_intern(wr->out, odin3_bytes_cstr(k_implicit), &spec.name);
+    st = st != ODIN3_OK ? st : odin3_ast_make(wr->out, &spec, &none, 1, &attr);
+    st = st != ODIN3_OK ? st : odin3_ast_attach(wr->out, net, &attr, 1);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+}
+
+/* EL-4: the implicit nets as one NET_DECL first among the items, in first-use order, of the
+ * `default_nettype kind in effect (EL-25). */
+static void w_implicit(e1w *wr) {
+    const odin3_vec *nets = &wr->env->implicit;
+    if (nets->len == 0) {
+        return;
+    }
+    odin3_ast_id first = ((const odin3_elab1_implicit_net *)odin3_vec_cat(nets, 0))->use;
+    uint32_t mark = w_mark(wr);
+    for (uint32_t k = 0; k < 3; k++) {
+        w_push(wr, (odin3_ast_id){0});
+    }
+    for (size_t i = 0; i < nets->len; i++) {
+        const odin3_elab1_implicit_net *net = odin3_vec_cat(nets, i);
+        uint32_t decl = w_mark(wr);
+        w_push(wr, (odin3_ast_id){0}); /* no net declaration assignment */
+        odin3_ast_spec dspec = spec_of(wr, ODIN3_AST_DECLARATOR, net->use);
+        dspec.name = net->name;
+        w_push(wr, w_make_plain(wr, &dspec, decl, net->use));
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NET_DECL, first);
+    spec.sub = odin3_elab1_implicit_sub(wr->env->nettype);
+    odin3_ast_id made = w_make_plain(wr, &spec, mark, first);
+    w_implicit_attr(wr, &(w_attrs_of){first, made});
+    w_push(wr, made);
+}
+
 /* The module's items, and those of every selected generate block, through a worklist. */
 static void w_body(e1w *wr, odin3_ast_id module) {
+    w_implicit(wr);
     e1w_frame top = {module, E1_ITEMS, odin3_ast_nchild(wr->ast, module), 0, false, false,
                      0,      module};
     w_frame(wr, &top);
@@ -1323,11 +1736,6 @@ static void w_body(e1w *wr, odin3_ast_id module) {
 
 static odin3_ast_id w_module(e1w *wr) {
     odin3_ast_id node = odin3_elab1_def(wr->e1, wr->spec->def)->node;
-    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, node);
-    if (attrs.n > 0) {
-        odin3_elab1_not_yet(wr->e1, attrs.ids[0]); /* ATTR: Task 15 */
-        halt(wr);
-    }
     uint32_t mark = w_mark(wr);
     w_push(wr, w_header_params(wr, odin3_ast_child(wr->ast, node, E1_SLOT_PARAMS)));
     odin3_ast_id ports = odin3_ast_child(wr->ast, node, E1_SLOT_PORTS);
