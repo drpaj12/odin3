@@ -7,6 +7,8 @@
  *
  * The Verilog files read are the project record's when the pre-script read one, else the
  * request's files ending in ".v", in order (library "work"); other files are only written.
+ * et_read (2D Task 17) runs the whole read_verilog pass through the pass manager instead (stage 1,
+ * check, stage 2, the top, the keep level), keeping the stores the keep level keeps in the design.
  * A test using these helpers calls et_free in its body and resets the log sink in tearDown
  * (odin3_log_set_sink(NULL, NULL)), so a failed assertion never leaves the sink pointing at a
  * dead result. Not to be included together with elab_test_tree.h (both define et_free).
@@ -307,6 +309,46 @@ static inline void et_stage1(const et_req *req, et_result *out) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                               odin3_ast_dump(out->elab, odin3_ast_root(out->elab, 0), &out->dump));
     }
+}
+
+/* Appends path to args (blank-separated) at *len. */
+static inline void et_append_arg(char *args, size_t cap, size_t *len, const char *path) {
+    int got = snprintf(args + *len, cap - *len, "%s%s", *len > 0 ? " " : "", path);
+    TEST_ASSERT_TRUE(got > 0 && (size_t)got < cap - *len);
+    *len += (size_t)got;
+}
+
+/* The Verilog files read_verilog is given: none (the record's) when the pre-script read a
+ * record, else the request's ".v" files in order. */
+static inline void et_read_args(et_result *out, const et_req *req, char *args, size_t cap) {
+    odin3_pp_source srcs[ET_MAX_SOURCES];
+    size_t len = 0;
+    args[0] = '\0';
+    if (et_record_sources(out, srcs) > 0) {
+        return;
+    }
+    for (uint32_t i = 0; i < req->n; i++) {
+        if (et_is_verilog(req->srcs[i].path)) {
+            et_append_arg(args, cap, &len, req->srcs[i].path);
+        }
+    }
+    TEST_ASSERT_TRUE(len > 0);
+}
+
+/* et_setup, the keep level, then the read_verilog pass over the request's files (or the record's):
+ * out->status is the pass's. The stores the keep level keeps are the design's (out->parsed and
+ * out->elab stay NULL; odin3_design_find_ast reaches them); et_free works as always. */
+static inline void et_read_keep(const et_req *req, odin3_keep_ast keep, et_result *out) {
+    et_setup(req, out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(out->design, keep));
+    char args[ET_PATH];
+    et_read_args(out, req, args, sizeof args);
+    out->status = odin3_pass_run(out->design, "read_verilog", odin3_bytes_cstr(args));
+}
+
+/* et_read_keep at the default keep level (NONE: no store is held afterwards). */
+static inline void et_read(const et_req *req, et_result *out) {
+    et_read_keep(req, ODIN3_KEEP_AST_NONE, out);
 }
 
 /* The elaborated store binds (EL-5: the seam stage 2 reads) and then passes check FULL, rule 8

@@ -214,6 +214,17 @@ class RunRejectTest(unittest.TestCase):
         check = "odin3: error: pass read_verilog: failed: ODIN3_ERR_CHECK\n"
         self.assert_fails(STUB + check, 1, "forbidden line: pass read_verilog: failed: ODIN3_ERR_C")
 
+    def test_ir_check_warning_is_not_forbidden(self) -> None:
+        warning = "odin3: warning: check: m: rule 4: net 2 (unnamed) has sinks and no driver\n"
+        self.case("a", "a.v:2:1: error:\nx\n", 1, "odin3: error: a.v:2:1: error: x\n" + warning)
+        self.case("b", "b.v:2:1: error:\ny\n", 1, STUB + warning)
+        self.assertEqual(self.run_tool("--elaborate")[0], 0)
+
+    def test_ir_check_error_is_forbidden(self) -> None:
+        error = "odin3: error: check: m: rule 4: net 2 has two drivers\n"
+        output = "odin3: error: a.v:2:1: error: x\n" + error
+        self.assert_fails(output, 1, "forbidden line: check: m")
+
     def test_elaborate_fail_exits_1(self) -> None:
         self.case("a", "a.v:2:1: error:\nx\n", 1, "odin3: error: a.v:2:1: error: y\n")
         self.case("b", "b.v:2:1: error:\ny\n", 1, STUB)

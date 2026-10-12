@@ -4,7 +4,8 @@
  * still pending, the forced entries of the test hook, and the once-per-kind located error.
  *
  * Each task that lands a kind deletes its line in the same commit; the comments name the task
- * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 24 asserts stage 2's.
+ * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 17 removed stage 2's store,
+ * scope, declaration and port kinds; Task 24 asserts the rest of stage 2's table is empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -22,21 +23,7 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE1] = {false}, /* Task 16 landed the last stage-1 kinds: empty */
     [ODIN3_ELAB_STAGE2] =
         {
-            /* Task 17: the store, scopes, declarations and ports. */
-            [ODIN3_AST_UNIT] = true,
-            [ODIN3_AST_MODULE] = true,
-            [ODIN3_AST_LIST] = true,
-            [ODIN3_AST_ATTR] = true,
-            [ODIN3_AST_PORT_DECL] = true,
-            [ODIN3_AST_DECLARATOR] = true,
-            [ODIN3_AST_RANGE] = true,
-            [ODIN3_AST_NET_DECL] = true,
-            [ODIN3_AST_VAR_DECL] = true,
-            [ODIN3_AST_PARAM_DECL] = true,
-            [ODIN3_AST_GEN_BLOCK] = true,
-            [ODIN3_AST_SEQ_BLOCK] = true,
-            [ODIN3_AST_FUNCTION_DECL] = true,
-            [ODIN3_AST_TASK_DECL] = true,
+            /* Task 17 landed the store, scopes, declarations and ports: nothing is left of it. */
             /* Task 18: continuous assignments and expressions. */
             [ODIN3_AST_CONT_ASSIGN] = true,
             [ODIN3_AST_NET_ASSIGN] = true,
