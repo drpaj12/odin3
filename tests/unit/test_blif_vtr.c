@@ -2359,6 +2359,53 @@ static void test_header_exact(void) {
     TEST_ASSERT_TRUE_MESSAGE(starts_with(text_of(&out), first), text_of(&out));
 }
 
+/* 3D's run information (AB-25 §8.1), as abc records it; the second run's differs in its depth. */
+static const char *const ABC_RUN_1 = "script=a.abc sha256="
+                                     "0123456789abcdef0123456789abcdef"
+                                     "0123456789abcdef0123456789abcdef abc="
+                                     "0123456789abcdef0123456789abcdef01234567 K=6 exchange=blif "
+                                     "depth=3";
+static const char *const ABC_RUN_2 = "script=a.abc sha256="
+                                     "0123456789abcdef0123456789abcdef"
+                                     "0123456789abcdef0123456789abcdef abc="
+                                     "0123456789abcdef0123456789abcdef01234567 K=6 exchange=blif "
+                                     "depth=4";
+
+/* Opens a run named name directly (no pass named abc runs) and records info (NULL: none). */
+static void passrun_with_info(const char *name, const char *info) {
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin_args(tc.design, intern(name), 0, &ctx));
+    if (info != NULL) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_passrun_set_info(&ctx, intern(info)));
+    }
+}
+
+/* Plan 3D point (g): one `# abc:` line per run named abc with information, in run order, between
+ * the `# Odin III` line and the blank line; other runs, and abc runs without information, none.
+ * The first abc run is run 1: the design is emptied (keeping tc's directory) before it opens, and
+ * read_blif is run 2. */
+static void test_vtr_header_abc_runs(void) {
+    read_ok(GATES, false);
+    empty_design();
+    passrun_with_info("abc", ABC_RUN_1);
+    read_ok(GATES, false);
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_passrun_end(tc.design));
+    passrun_with_info("abc", NULL);
+    passrun_with_info("other", "K=5");
+    passrun_with_info("abc", ABC_RUN_2);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    odin3_strbuf want;
+    odin3_strbuf_init(&want);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_strbuf_appendf(&want,
+                             "# Odin III %s write_blif --vtr (K=6, names short)\n# abc: %s\n"
+                             "# abc: %s\n\n.model top\n",
+                             odin3_version_string(), ABC_RUN_1, ABC_RUN_2));
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(text_of(&out), want.data), text_of(&out));
+    odin3_strbuf_free(&want);
+}
+
 static void test_summary_line(void) {
     read_ok(".model top\n.inputs a b c d e w\n.outputs y1 y2 q s1 s2 s3 o\n"
             ".subckt $_AND_ A=a B=b Y=y1\n.subckt $_AND_ A=b B=a Y=y2\n.latch d q re c 2\n"
@@ -3003,6 +3050,7 @@ static void run_task_4(void) {
     RUN_TEST(test_generator_is_sop);
     RUN_TEST(test_generators_in_order);
     RUN_TEST(test_header_exact);
+    RUN_TEST(test_vtr_header_abc_runs);
     RUN_TEST(test_summary_line);
     RUN_TEST(test_other_modules_info);
     RUN_TEST(test_deterministic);

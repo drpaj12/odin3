@@ -144,7 +144,9 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds.
  *
  * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
- * names short|provenance)` and a blank line; `.model <top>`; `.inputs`/`.outputs` (no `.clock`);
+ * names short|provenance)`, one `# abc: <run information>` line per pass run named `abc` that has
+ * run information (odin3_passrun_info, verbatim; 3D AB-25), in run order, and a blank line;
+ * `.model <top>`; `.inputs`/`.outputs` (no `.clock`);
  * the generators `.names gnd`, `.names vcc` / `1`, `.names unconn` that some pin or buffer reads,
  * in that order, each left out when a written zero-input $sop already is it; the cells in node ID
  * order; the port buffers; `.end`; then the hard-block stubs (§8.3): for each hard type a live

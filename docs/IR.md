@@ -446,7 +446,7 @@ once, via `util/idindex`). A record holds:
 | field | meaning |
 |---|---|
 | `kind` | `SOURCE` (from source text), `IMPORTED` (from a netlist file; structural only, spec §4.4), `DERIVED` (made by a pass) |
-| `run` | the pass run that created it (pass-run table: pass name str + run number); readers and front ends are runs too |
+| `run` | the pass run that created it (the pass-run table below: pass name, arguments, run information, run number); readers and front ends are runs too |
 | `op` | operation sequence number within that run (`DERIVED`: one per decompose/clump operation) |
 | `locs` | zero or more source locations `{file str, line, col, end_line, end_col, loc}`, one per node the record covers; `loc` is the **raw** source-manager location of the node (any buffer, 0 = none; 2A AST-2). `locs[1..]` never hold chain entries, which `odin3_srcman_chain` derives from `loc` |
 | `ast` | AST node ID in the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store is held (2A AST-15/16) |
@@ -464,6 +464,39 @@ would share a record, and the 5,000 gates their lowering produces would be indis
 With them, each operation (lowering *one* `$add`) gets its own record, shared only by the pieces
 *that operation* made; distinct operations never merge. `hier` separates generate iterations at
 the source.
+
+**The pass-run table (3D, PHASE3 #14).** One row per run, in run order: the pass name; the
+**arguments**, the text after the pass name as the script gave it, trimmed (a strtab ID; 0 when
+there were none or when a reader opened the run itself); and the **run information**, the facts
+the pass established while running, as blank-separated `key=value` words in an order the pass
+fixes, a value with a byte outside `!`..`~` (a blank included), `"` or `\` written in double quotes with `\"` and `\\` (a strtab
+ID; 0 = none). The pass manager records the arguments when it opens the run
+(`odin3_pass_run_begin_args`); a pass sets its information at most once
+(`odin3_passrun_set_info`); rows never change afterwards and survive `compact`. `abc` records
+`script=<path> sha256=<64 hex> abc=<40 hex> K=<K or none> exchange=<aig|blif> depth=<d>`: the
+script's path exactly as given (`builtin:lib/abc/vtr.abc` for the default; never resolved
+against the working directory, so that the record is the same on every machine), the SHA-256 of
+the bytes it read (its identity), the commit of the linked ABC, the LUT size and the top
+module's LUT depth after the pass; `write_blif --vtr` repeats it in a header comment.
+
+**Provenance across ABC (3D, PHASE3 #14).** `abc` replaces a region of soft cells and flip-flops
+by LUTs and flip-flops that ABC made, and keeps lineage through **anchors**: pairs of a new
+object and an old net that compute the same function. They are every input, output and register
+input of the run (by identity; a register input pairs the old `D` net with the new `D`'s
+driver); every new flip-flop with the old flip-flops whose names ABC kept on it (sequential
+correspondence); and, with the in-memory exchange, every new LUT whose output ABC's name map
+proves combinationally equivalent to an old net, up to complement. An anchor's **old region** is
+the set of old soft cells in the fan-in cone of its old net, up to other anchors' nets and the
+run's inputs (for a flip-flop anchor, its old flip-flops); its **new region** is the set of new
+LUTs in the fan-in cone of its new object, up to other anchored objects and the run's inputs.
+Each anchor is one operation, whose `DERIVED` record has as parents the records of its old
+region's cells, in node-ID order. A new LUT in one new region carries that record; one in several
+carries the record of one more operation, whose parents are those regions' records in anchor
+order. When a run's parent edges would exceed 16 × (old cells + new objects) + 65,536, the run
+makes one record whose parents are all its old cells and flip-flops, every new object carries
+it, and a warning says so. With identity anchors only (the BLIF exchange, `abc --prov cone`, or
+no name map) a region is the cut-bounded cone of an output or a register input. An old cell that
+reaches no output and no register input had no observable effect; it dies without children.
 
 **Transformations add records and never edit them.** Clumping N objects into one (raise, merge,
 CSE) is one operation: the new object gets a `DERIVED` record whose parents are the N objects'
@@ -607,6 +640,9 @@ Under PHASE2 #13 (2D spec §19, IR change B): IR-19 (processes as `$proc` nodes:
 ports and parameters, the `proc` value kind, the `ODIN3_CT_PROCESS` flag and the per-module
 counter); IR-9 (`$proc` in the RTLIL view only); IR-10 (the `proc` kind); IR-12 (`hier` is
 module-relative). IR-3, IR-4, IR-6, IR-15 and check rule 4 are unchanged.
+
+Under PHASE3 #9 and #14 (3D spec): the `$lut` cell, the pass-run table's arguments and run
+information, and provenance across ABC (IR-12).
 
 ## 12. Out of scope for Phase 1
 

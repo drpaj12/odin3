@@ -10,6 +10,8 @@
 #include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "util/hash.h"
+#include "util/str.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -51,11 +53,18 @@ typedef struct odin3_pass_ctx {
 } odin3_pass_ctx;
 
 /*
- * Starts a pass run named pass_name_str (a non-empty strtab ID): appends it to the design's
- * pass-run table and fills *ctx with op 0. The run ID is the run number: one global sequence
- * from 1, in order; names may repeat across runs. Readers and front ends are runs too.
- * INVALID_ARG for a NULL design or ctx.
+ * Starts a pass run named pass_name_str (a non-empty strtab ID) with arguments args_str (a strtab
+ * ID: the text after the pass name as the script gave it, trimmed; 0 = none): appends the row
+ * {name, args, info 0} to the design's pass-run table (IR-12) and fills *ctx with op 0. The run ID
+ * is the run number: one global sequence from 1, in order; names may repeat across runs. Readers
+ * and front ends are runs too. The pass manager opens every pass's run this way. INVALID_ARG
+ * (logged) for a NULL design or ctx, a pass name that is 0 or not a strtab ID, or args_str not a
+ * strtab ID; NO_MEMORY. Nothing changes on failure.
  */
+odin3_status odin3_pass_run_begin_args(odin3_design *design, uint32_t pass_name_str,
+                                       uint32_t args_str, odin3_pass_ctx *ctx);
+
+/* odin3_pass_run_begin_args with no arguments (0): a reader or front end that opens its own run. */
 odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
                                   odin3_pass_ctx *ctx);
 
@@ -127,6 +136,33 @@ odin3_prov_list odin3_prov_parents(const odin3_design *design, odin3_prov_id id)
 /* The pass name (strtab ID) of a run, 0 for an unknown run; one past the last run ID. */
 uint32_t odin3_passrun_name(const odin3_design *design, odin3_passrun_id run);
 uint32_t odin3_passrun_end(const odin3_design *design);
+
+/* The arguments and the run information (strtab IDs) of a run; 0 for none, and for a NULL design
+ * or run 0 or unknown. */
+uint32_t odin3_passrun_args(const odin3_design *design, odin3_passrun_id run);
+uint32_t odin3_passrun_info(const odin3_design *design, odin3_passrun_id run);
+
+/*
+ * Records info_str (a strtab ID: blank-separated key=value words, odin3_passrun_info_append) as
+ * the run information of the context's run, at most once per run (IR-12). INVALID_ARG (logged)
+ * for a NULL ctx or design ("odin3_passrun_set_info: no pass context"), run 0 or a run past the
+ * table ("odin3_passrun_set_info: no run <r>"), info_str 0 or not a strtab ID
+ * ("odin3_passrun_set_info: invalid argument info_str"), or a run that already has information
+ * ("odin3_passrun_set_info: run <r> already has information"). Nothing changes on failure.
+ */
+odin3_status odin3_passrun_set_info(const odin3_pass_ctx *ctx, uint32_t info_str);
+
+/*
+ * Appends the word key=value to out, after one blank when out is not empty (IR-12's run
+ * information). A value holding a byte outside `!`..`~` (a blank, any other control byte, DEL or a
+ * non-ASCII byte), a `"` or a `\` is written in double quotes, with `\"` and `\\`, so that no
+ * reader splits it; an empty value is `key=`. INVALID_ARG (logged
+ * "odin3_passrun_info_append: invalid argument <out|key|value>") for a NULL out; a NULL or empty
+ * key, or one with a byte outside `!`..`~` or `=`, `"` or `\`; a value with NULL bytes and a
+ * non-zero length, or holding a NUL, CR or LF (the information is one line). NO_MEMORY. out is
+ * unchanged on failure.
+ */
+odin3_status odin3_passrun_info_append(odin3_strbuf *out, const char *key, odin3_bytes value);
 
 /*
  * Backward navigation: calls visit once for each SOURCE or IMPORTED record reachable from id

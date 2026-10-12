@@ -9,6 +9,7 @@
 #include "ir/lut.h"
 #include "ir/module.h"
 #include "ir/proc.h"
+#include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "techlib/reader.h"
@@ -2247,6 +2248,26 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
     return ODIN3_OK;
 }
 
+/* One `# abc: <run information>` line per pass run named abc that has information, in run order
+ * (spec 3E §5 item 1; 3D AB-25 §8.1): the information verbatim, as abc recorded it. */
+static void write_abc_runs(blif_writer *wr) {
+    uint32_t abc = 0;
+    if (!odin3_strtab_find(wr->tab, odin3_bytes_cstr("abc"), &abc)) {
+        return; /* no run is named abc */
+    }
+    uint32_t end = odin3_passrun_end(wr->design);
+    for (uint32_t run = 1; run < end && wr->st == ODIN3_OK; run++) {
+        odin3_passrun_id id = {run};
+        uint32_t info = odin3_passrun_info(wr->design, id);
+        if (info != 0 && odin3_passrun_name(wr->design, id) == abc) {
+            wr_put(wr, odin3_bytes_cstr("# abc: "));
+            wr_put(wr,
+                   (odin3_bytes){odin3_strtab_get(wr->tab, info), odin3_strtab_len(wr->tab, info)});
+            wr_newline(wr);
+        }
+    }
+}
+
 /* The VTR dialect's header (spec 3E §5 item 1): no date, host or path, so reruns are identical. */
 static odin3_status write_vtr_header(blif_writer *wr) {
     odin3_strbuf_clear(&wr->token);
@@ -2259,6 +2280,7 @@ static odin3_status write_vtr_header(blif_writer *wr) {
     }
     wr_put(wr, (odin3_bytes){wr->token.data, wr->token.len});
     wr_newline(wr);
+    write_abc_runs(wr);
     wr_newline(wr);
     return wr->st;
 }

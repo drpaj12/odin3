@@ -33,9 +33,10 @@ odin3_node_id proc_fixture_p1(odin3_module *module, odin3_prov_id prov);
 odin3_module *proc_fixture_design(odin3_design *design);
 
 /*
- * The odin3_procfix library's one export besides libodin3's (proc_fixture_lib.c): a new design
- * filled by proc_fixture_build_design, owned by the caller (odin3_design_destroy); NULL on any
- * failure. Test-only: the Python walk's way to a $proc node before a front end makes one.
+ * An odin3_procfix library export besides libodin3's (proc_fixture_lib.c; the other test hook is
+ * odin3_test_passrun_info, passrun_fixture.h): a new design filled by proc_fixture_build_design,
+ * owned by the caller (odin3_design_destroy); NULL on any failure. Test-only: the Python walk's way
+ * to a $proc node before a front end makes one.
  */
 odin3_design *odin3_test_proc_design(void);
 

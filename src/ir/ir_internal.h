@@ -39,12 +39,20 @@ typedef struct odin3_declared_entry {
     const odin3_celltype_def *decl; /* the declaration as written (design arena) */
 } odin3_declared_entry;
 
+/* One row of the pass-run table (IR-12; 3D AB-25): strtab IDs of the pass name, its arguments and
+ * its run information (0: none). Never changed once the run has begun, but for info, set once. */
+typedef struct odin3_passrun_row {
+    uint32_t name;
+    uint32_t args;
+    uint32_t info;
+} odin3_passrun_row;
+
 /* The design's provenance store (prov.c; IR-12, IR-13, IR-6 tombstones). */
 typedef struct odin3_prov_store {
     odin3_pagevec *records; /* odin3_prov_record; slot 0 reserved */
     odin3_arena *arena;     /* locs and parents arrays of the records */
     odin3_idindex *index;   /* hash-consing: record identity -> ID */
-    odin3_vec runs;         /* uint32_t pass name strtab ID per run; slot 0 reserved */
+    odin3_vec runs;         /* odin3_passrun_row per run; slot 0 reserved */
     odin3_vec tombstones;   /* odin3_tombstone; slot 0 reserved */
     odin3_vec marks;        /* uint32_t per record: walk generation that visited it */
     uint32_t gen;           /* current walk generation */

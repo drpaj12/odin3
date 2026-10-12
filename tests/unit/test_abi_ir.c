@@ -151,7 +151,8 @@ static uint32_t sink_of_type(odin3_ref net, const char *type) {
 
 /* --- design -------------------------------------------------------------------------------- */
 
-/* 2D's additions (process counts, value kind PROC, the pass processes slot) stay v4 (ruling I1). */
+/* 2D's additions (process counts, value kind PROC, the pass processes slot) stay v4 (ruling I1),
+ * and so do 3D's (the pass-run accessors; spec Q4, plan point (d)). */
 static void test_abi_version_is_4(void) {
     TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version());
 }
@@ -728,6 +729,60 @@ static void test_pass_check_option(void) {
 #endif
 }
 
+/* --- the pass-run table (3D Task 8, IR-12) -------------------------------------------------- */
+
+/* One row through the ABI. */
+typedef struct passrun_row {
+    const char *name, *args, *info;
+} passrun_row;
+
+static passrun_row passrun_at(uint32_t run) {
+    passrun_row row = {NULL, NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_get_passrun(design, run, &row.name, &row.args, &row.info));
+    return row;
+}
+
+/* setUp's read_blif is run 1, its argument as given (quotes kept); stats has none. */
+static void test_passrun_rows(void) {
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_passrun_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(2, count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "stats", "  "));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_passrun_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(3, count);
+    passrun_row read = passrun_at(1);
+    passrun_row stats = passrun_at(2);
+    TEST_ASSERT_EQUAL_STRING("read_blif", read.name);
+    TEST_ASSERT_EQUAL_STRING("\"" ODIN3_BLIF_FIXTURES "/hand_body.blif\"", read.args);
+    TEST_ASSERT_EQUAL_STRING("", read.info);
+    TEST_ASSERT_EQUAL_STRING("stats", stats.name);
+    TEST_ASSERT_EQUAL_STRING("", stats.args);
+    TEST_ASSERT_EQUAL_STRING("", stats.info);
+}
+
+/* Run 0 and run = count are refused as the conventions say, the outputs unchanged. */
+static void test_passrun_bad_arguments(void) {
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_passrun_count(design, &count));
+    const char *name = "keep";
+    const char *args = "keep";
+    const char *info = "keep";
+    reset_log();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_get_passrun(design, 0, &name, &args, &info));
+    TEST_ASSERT_TRUE(log_has("odin3_design_get_passrun: invalid argument"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_get_passrun(design, count, &name, &args, &info));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_get_passrun(NULL, 1, &name, &args, &info));
+    TEST_ASSERT_EQUAL_STRING("keep", name);
+    TEST_ASSERT_EQUAL_STRING("keep", args);
+    TEST_ASSERT_EQUAL_STRING("keep", info);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_passrun_count(NULL, &count));
+    TEST_ASSERT_TRUE(log_has("odin3_design_get_passrun_count: invalid argument"));
+}
+
 /* --- logging ------------------------------------------------------------------------------- */
 
 static void test_logging(void) {
@@ -778,6 +833,8 @@ int main(void) {
     RUN_TEST(test_pass_revision_option);
     RUN_TEST(test_pass_diag_paths_option);
     RUN_TEST(test_pass_check_option);
+    RUN_TEST(test_passrun_rows);
+    RUN_TEST(test_passrun_bad_arguments);
     RUN_TEST(test_logging);
     return UNITY_END();
 }

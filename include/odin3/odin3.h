@@ -14,6 +14,7 @@
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
  * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
+ * ABI v4 (cont., 3D): pass-run arguments and run information.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -758,6 +759,27 @@ typedef void (*odin3_prov_object_visit)(const odin3_prov_object *found, void *us
  */
 odin3_status odin3_prov_visit_objects(const odin3_design *design, const char *file, uint32_t line,
                                       odin3_prov_object_visit visit, void *user);
+
+/*
+ * *count gets one past the last pass-run ID of the design's pass-run table (docs/IR.md IR-12):
+ * runs are numbered 1 .. count - 1 in the order they began (every pass, reader and front end run
+ * is one), so a design no run has touched has count 1. Fails only with ODIN3_ERR_INVALID_ARG, as
+ * the conventions say.
+ */
+odin3_status odin3_design_get_passrun_count(const odin3_design *design, uint32_t *count);
+
+/*
+ * The row of pass run `run` (1 .. count - 1, see odin3_design_get_passrun_count): *name gets its
+ * pass name, *args the text after the pass name as the script or caller gave it, trimmed, and
+ * *info its run information, blank-separated key=value words the pass recorded (a value holding a
+ * blank or any other byte outside `!`..`~`, a `"` or a `\` is in double quotes with `\"` and `\\`;
+ * `abc` writes `script=… sha256=… abc=… K=… exchange=… depth=…`); "" for none. A pass sets its
+ * information at most once, while it runs; rows never change afterwards. Strings as the
+ * conventions say (see Strings). ODIN3_ERR_INVALID_ARG, as the conventions say, for run 0,
+ * run >= count or any NULL output.
+ */
+odin3_status odin3_design_get_passrun(const odin3_design *design, uint32_t run, const char **name,
+                                      const char **args, const char **info);
 
 /* --- logging ------------------------------------------------------------------------------- */
 

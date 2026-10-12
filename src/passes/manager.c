@@ -152,11 +152,36 @@ static odin3_status check_around(odin3_design *design, const char *pass, bool be
     return st;
 }
 
-static odin3_status open_run(odin3_design *design, const char *name, odin3_pass_ctx *ctx) {
+static bool is_blank(char chr) {
+    return chr == ' ' || chr == '\t' || chr == '\r' || chr == '\n';
+}
+
+/* bytes without leading and trailing blanks. */
+static odin3_bytes trim(odin3_bytes bytes) {
+    const char *at = bytes.ptr;
+    size_t len = bytes.len;
+    while (len > 0 && is_blank(at[0])) {
+        at++;
+        len--;
+    }
+    while (len > 0 && is_blank(at[len - 1])) {
+        len--;
+    }
+    return (odin3_bytes){len > 0 ? at : NULL, len};
+}
+
+/* Opens the pass's provenance run, its row holding the trimmed arguments (0 when blank; IR-12). */
+static odin3_status open_run(odin3_design *design, const char *name, odin3_bytes args,
+                             odin3_pass_ctx *ctx) {
     uint32_t name_str = 0;
+    uint32_t args_str = 0;
+    odin3_bytes text = trim(args);
     odin3_status st = odin3_design_intern(design, odin3_bytes_cstr(name), &name_str);
+    if (st == ODIN3_OK && text.len > 0) {
+        st = odin3_design_intern(design, text, &args_str);
+    }
     if (st == ODIN3_OK) {
-        st = odin3_pass_run_begin(design, name_str, ctx);
+        st = odin3_pass_run_begin_args(design, name_str, args_str, ctx);
     }
     return st;
 }
@@ -189,7 +214,7 @@ static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odi
         return st;
     }
     odin3_pass_ctx ctx = {0};
-    st = open_run(design, def->name, &ctx);
+    st = open_run(design, def->name, args, &ctx);
     if (st != ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "pass %s: cannot open its provenance run: %s", def->name,
                   odin3_status_string(st));
@@ -231,24 +256,6 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
 }
 
 /* --- arguments ------------------------------------------------------------------------------ */
-
-static bool is_blank(char chr) {
-    return chr == ' ' || chr == '\t' || chr == '\r' || chr == '\n';
-}
-
-/* bytes without leading and trailing blanks. */
-static odin3_bytes trim(odin3_bytes bytes) {
-    const char *at = bytes.ptr;
-    size_t len = bytes.len;
-    while (len > 0 && is_blank(at[0])) {
-        at++;
-        len--;
-    }
-    while (len > 0 && is_blank(at[len - 1])) {
-        len--;
-    }
-    return (odin3_bytes){len > 0 ? at : NULL, len};
-}
 
 odin3_bytes odin3_pass_arg_next(odin3_bytes *rest) {
     odin3_bytes left = trim(*rest);

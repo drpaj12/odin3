@@ -72,6 +72,7 @@ add_library(odin3_core OBJECT
     src/util/str.c
     src/util/log.c
     src/util/file.c
+    src/util/sha256.c
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
@@ -372,6 +373,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_util_str)
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
+    odin3_add_unit_test(test_sha256)
     odin3_add_unit_test(test_ir_value)
     odin3_add_unit_test(test_ir_celltype)
     odin3_add_unit_test(test_ir_netlist)
@@ -587,6 +589,8 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # 3D Task 8: the pass-run table's arguments and run information (IR-12).
+    odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
     # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
@@ -624,9 +628,12 @@ if(BUILD_TESTING)
     target_sources(test_abi_values PRIVATE tests/unit/proc_fixture.c
                                            tests/unit/proc_fixture_core.c)
     # Test-only, never installed: libodin3's objects plus odin3_test_proc_design (Task 3's P1), so
-    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6).
+    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6),
+    # and odin3_test_passrun_info (3D Task 8), so it checks qor_netstats' `# abc:` parser against the
+    # run information the core formats.
     add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
-                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c)
+                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c
+                tests/unit/passrun_fixture_lib.c)
     set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
     target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
                                                      ${PROJECT_SOURCE_DIR}/include)
@@ -743,7 +750,7 @@ if(BUILD_TESTING)
                 --exports ${PROJECT_SOURCE_DIR}/include/odin3/odin3.h $<TARGET_FILE:libodin3>)
     set_tests_properties(abi_exports PROPERTIES LABELS unit)
 
-    # The ABI stays v4 through 2D (ruling I1): 2D's additions are additive.
+    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4): their additions are additive.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
