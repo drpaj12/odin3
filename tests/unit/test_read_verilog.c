@@ -669,9 +669,10 @@ static odin3_status oom_step(const oom_case *oc, int limit) {
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = run("read_verilog", oc->args);
     odin3_util_set_alloc_fail_after(-1);
-    /* 2C reports a file it could not read (an allocation failed in the preprocessor) as PARSE */
-    TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_PARSE,
-                             logged());
+    /* Open 2C item: an allocation failure in the preprocessor reads as a missing file and ends as
+     * PARSE. That PARSE, and only that one, is tolerated: it carries the missing_file line. */
+    bool swallowed = st == ODIN3_ERR_PARSE && strstr(logged(), "missing_file:") != NULL;
+    TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY || swallowed, logged());
     TEST_ASSERT_EQUAL_UINT32(st == oc->want ? oc->held : 0, odin3_design_ast_count(design));
     return st;
 }
