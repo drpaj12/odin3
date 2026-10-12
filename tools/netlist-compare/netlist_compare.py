@@ -4,6 +4,7 @@ Usage::
 
     netlist-compare A.blif B.blif     # exit 0 identical, 1 different (unified diff), 2 error
     netlist-compare --canon A.blif    # print the canonical form of A
+    netlist-compare --implicit-models A.blif B.blif   # undefined $-models are black boxes
 
 Canonical form (per model; the first model stays first, the rest are sorted by name):
 
@@ -35,6 +36,15 @@ Canonical form (per model; the first model stays first, the rest are sorted by n
 * ``.param`` is semantic and always kept; ``.cname``/``.attr`` are dropped unless
   ``--keep-attrs``.
 
+``--implicit-models`` (2E §18.3, for Yosys ``write_blif -icells``): a ``.subckt`` of a
+``$``-prefixed model the file does not define is a black box whose formals are those the file
+uses; a formal whose port (the name before any ``[bit]``) is ``Y``, ``Q``, ``X``, ``CO`` or
+``RD_DATA`` is an output, every other one an input.  The stub models are listed in the canonical
+form like any black box.  The ``A`` bits of an implicit ``$reduce_and``/``_or``/``_xor``/``_xnor``/
+``_bool`` are a set: their order cannot change ``Y``, so ``A[k]`` is compared as ``A`` (this is
+how ``proc-diff`` absorbs §20 #8's ``$reduce_or`` input order).  A model the file defines is used
+as written.
+
 Everything is iterative (explicit worklists, no recursion).
 """
 
@@ -57,6 +67,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "blif"))
 import blif  # noqa: E402
 
 TOOL = "netlist-compare"
+# --implicit-models: the ports of an undefined $-model that are outputs (2E §18.3).
+IMPLICIT_OUTPUTS = frozenset({"Y", "Q", "X", "CO", "RD_DATA"})
+# --implicit-models: implicit models whose A bits are a set (a reduction's order is irrelevant).
+SET_INPUT_MODELS = frozenset({"$reduce_and", "$reduce_or", "$reduce_xor", "$reduce_xnor",
+                              "$reduce_bool"})
+SET_INPUT_PORT = "A"
+_BIT_SUFFIX = re.compile(r"\[\d+\]$")
 # Upper bound on column permutations tried when .names inputs have identical labels.
 MAX_TIE_PERMUTATIONS = 720
 # Above this many canonical lines (both sides) the diff falls back to a linear method.
@@ -546,6 +563,66 @@ def canonicalize(netlist: blif.Netlist, keep_attrs: bool = False) -> str:
     return "\n\n".join(chunks) + "\n"
 
 
+# --------------------------------------------------------------------------- implicit models
+
+
+def _port_of(formal: str) -> str:
+    """The port a formal names: ``A[3]`` -> ``A``."""
+    return _BIT_SUFFIX.sub("", formal)
+
+
+def implicit_stubs(text: str) -> tuple[str, frozenset[str]]:
+    """BLIF text of a black-box stub for every undefined ``$``-model the text instantiates, and
+    the names of those models.  A stub's formals are those used, in first-use order."""
+    defined: set[str] = set()
+    used: dict[str, dict[str, None]] = {}
+    for _, tokens in blif.logical_lines(text):
+        if tokens[0] == ".model" and len(tokens) > 1:
+            defined.add(tokens[1])
+        elif tokens[0] == ".subckt" and len(tokens) > 1 and tokens[1].startswith("$"):
+            formals = used.setdefault(tokens[1], {})
+            for tok in tokens[2:]:
+                formal, eq, _ = tok.partition("=")
+                if eq and formal:
+                    formals[formal] = None
+    lines: list[str] = []
+    names = sorted(name for name in used if name not in defined)
+    for name in names:
+        outs = [f for f in used[name] if _port_of(f) in IMPLICIT_OUTPUTS]
+        ins = [f for f in used[name] if _port_of(f) not in IMPLICIT_OUTPUTS]
+        lines.append(f".model {name}")
+        lines += [" ".join([d, *ports]) for d, ports in ((".inputs", ins), (".outputs", outs))
+                  if ports]
+        lines += [".blackbox", ".end"]
+    return "".join(f"{line}\n" for line in lines), frozenset(names)
+
+
+def _set_inputs(netlist: blif.Netlist, implicit: frozenset[str]) -> None:
+    """Compare the A bits of each implicit reduction as a set: ``A[k]`` becomes ``A``."""
+    for model in netlist.models:
+        for cell in model.cells:
+            if (isinstance(cell, blif.Subckt) and cell.model in SET_INPUT_MODELS
+                    and cell.model in implicit):
+                cell.conns = [(SET_INPUT_PORT if _port_of(f) == SET_INPUT_PORT else f, a)
+                              for f, a in cell.conns]
+
+
+def load(path: str, implicit_models: bool) -> blif.Netlist:
+    """Parse a BLIF file; with implicit_models, undefined $-models become black-box stubs."""
+    if not implicit_models:
+        return blif.parse_file(path)
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
+    if text and not text.endswith("\n"):
+        text += "\n"
+    stubs, implicit = implicit_stubs(text)
+    netlist = blif.parse_text(text + stubs, path)
+    _set_inputs(netlist, implicit)
+    return netlist
+
+
 # --------------------------------------------------------------------------- CLI
 
 
@@ -581,6 +658,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--canon", action="store_true", help="print the canonical form of one file")
     ap.add_argument("--keep-attrs", action="store_true", help="keep .cname/.attr lines")
     ap.add_argument("--quiet", action="store_true", help="no diff output, exit code only")
+    ap.add_argument("--implicit-models", action="store_true",
+                    help="an undefined $-model is a black box whose formals are those used")
     return ap
 
 
@@ -591,7 +670,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(files) != (1 if args.canon else 2):
         ap.error("--canon takes one file" if args.canon else "expected two files")
     try:
-        canon = [canonicalize(blif.parse_file(f), args.keep_attrs) for f in files]
+        canon = [canonicalize(load(f, args.implicit_models), args.keep_attrs) for f in files]
     except blif.BlifError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return 2

@@ -401,6 +401,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_celltype)
     odin3_add_unit_test(test_ir_netlist)
     odin3_add_unit_test(test_ir_cells)
+    # 2E plan point (o): proc-diff's INT-parameter list must equal the registry's.
+    target_compile_definitions(test_ir_cells PRIVATE
+        ODIN3_INT_PARAMS_FILE="${PROJECT_SOURCE_DIR}/tools/proc-check/int_params.txt")
     odin3_add_unit_test(test_ir_wire)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)

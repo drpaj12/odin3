@@ -233,6 +233,75 @@ class CompareTest(unittest.TestCase):
         self.assertLess(time.monotonic() - start, 30.0)
         self.assertIn(".outputs o", canon)
 
+    # -- --implicit-models (2E §18.3) ---------------------------------------------------------
+
+    DFF = ".model top\n.inputs c d\n.outputs q\n.subckt $dff CLK=c D=d Q=q\n" \
+          ".param WIDTH 1\n.end\n"
+
+    def test_implicit_models_dff(self) -> None:
+        """An undefined $-model is a black box whose formals are those used (Q an output)."""
+        a = self.write("a.blif", self.DFF)
+        b = self.write("b.blif", self.DFF.replace("CLK=c D=d Q=q", "Q=q CLK=c D=d"))
+        self.assertEqual(compare("--implicit-models", a, b)[0], 0)
+        code, _, err = compare(a, b)
+        self.assertEqual(code, 2)
+        self.assertIn("undefined model '$dff'", err)
+
+    def test_implicit_models_swapped_q_d_differ(self) -> None:
+        a = self.write("a.blif", self.DFF)
+        swapped = self.DFF.replace(".inputs c d", ".inputs c q").replace(".outputs q", ".outputs d")
+        b = self.write("b.blif", swapped.replace("D=d Q=q", "D=q Q=d"))
+        code, out, _ = compare("--implicit-models", a, b)
+        self.assertEqual(code, 1, out)
+
+    def test_implicit_models_outputs_drive(self) -> None:
+        """Y, Q, X, CO and RD_DATA (any bit) are outputs: a second driver is an error."""
+        for formal in ("Y", "Q", "X", "CO", "RD_DATA[3]"):
+            with self.subTest(formal):
+                text = (".model top\n.inputs a\n.outputs y\n"
+                        f".subckt $cell A=a {formal}=y\n.names a y\n1 1\n.end\n")
+                code, _, err = compare("--implicit-models", self.write("t.blif", text),
+                                       self.write("u.blif", text))
+                self.assertEqual(code, 2)
+                self.assertIn("more than one driver", err)
+
+    def test_implicit_models_canon_lists_the_stub(self) -> None:
+        code, out, _ = compare("--implicit-models", "--canon", self.write("a.blif", self.DFF))
+        self.assertEqual(code, 0)
+        self.assertIn(".model $dff\n.inputs CLK\n.inputs D\n.outputs Q\n.blackbox\n", out)
+
+    def test_implicit_models_defined_model_wins(self) -> None:
+        """A $-model the file defines is used as written (no stub, no set inputs)."""
+        text = (".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n"
+                ".end\n.model $reduce_or\n.inputs A[0] A[1]\n.outputs Y\n.blackbox\n.end\n")
+        swapped = text.replace("A[0]=a A[1]=b", "A[0]=b A[1]=a")
+        code, _, _ = compare("--implicit-models", self.write("a.blif", text),
+                             self.write("b.blif", swapped))
+        self.assertEqual(code, 1)
+
+    def test_implicit_models_reduce_inputs_are_a_set(self) -> None:
+        """§20 #8: the A bits of an implicit $reduce_* are a set (their order cannot change Y)."""
+        for model in ("$reduce_or", "$reduce_and", "$reduce_xor", "$reduce_xnor",
+                      "$reduce_bool"):
+            with self.subTest(model):
+                text = (".model top\n.inputs a b c\n.outputs y z\n"
+                        f".subckt {model} A[0]=a A[1]=n A[2]=c Y=y\n"
+                        ".names b n\n0 1\n.subckt $mux A=a B=b S=c Y=z\n.end\n")
+                swapped = text.replace("A[0]=a A[1]=n A[2]=c", "A[0]=n A[1]=c A[2]=a")
+                a, b = self.write("a.blif", text), self.write("b.blif", swapped)
+                self.assertEqual(compare("--implicit-models", a, b)[0], 0)
+                # $mux is not commutative: swapping its A and B differs.
+                muxed = text.replace("A=a B=b S=c", "A=b B=a S=c")
+                self.assertEqual(compare("--implicit-models", a,
+                                         self.write("c.blif", muxed))[0], 1)
+
+    def test_implicit_models_reduce_width_still_counts(self) -> None:
+        text = ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n.end\n"
+        narrow = text.replace(" A[1]=b", "")
+        code, _, _ = compare("--implicit-models", self.write("a.blif", text),
+                             self.write("b.blif", narrow))
+        self.assertEqual(code, 1)
+
     def test_wrapper_script(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "netlist-compare" / "netlist-compare"
         a, b = helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")
