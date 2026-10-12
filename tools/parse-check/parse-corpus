@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # parse-corpus: a Verilog corpus (or BLIFs through odin3-write) through odin3-parse-check,
 # smallest first, against an expect-fail list. See parse_corpus.py.
-# Exit codes: 0 pass, 1 an unexpected result, 2 usage/input error, 77 skipped (--heavy).
+# Exit codes: 0 pass, 1 an unexpected result, 2 usage/input error. Heavy corpora run under
+# tools/heavy-run (the sweep CTests do so through odin3_add_sweep_test).
 set -euo pipefail
 exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/parse_corpus.py" "$@"

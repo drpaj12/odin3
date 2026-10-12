@@ -2,21 +2,22 @@
 
 The fake odin3-parse-check appends the file it was given to calls.log, fails when the file's
 text contains FAIL and sleeps when it contains SLOW; the fake odin3-write appends its arguments
-to calls.log and copies the BLIF's text to the Verilog path. The heavy-run tests put fakes of
-`flock`, `systemd-run`, a 2E-contract `heavy-run` and a contract-breaking `plain` wrapper first
-on PATH, with ODIN3_HEAVY_DIR and ODIN3_HEAVY_CGROUP pointing into the test's directory.
+to calls.log and copies the BLIF's text to the Verilog path. The heavy tests run parse-corpus as
+its sweep CTests do, under the real tools/heavy-run with the real flock(1) and fakes of
+`systemctl` and `systemd-run` (which runs the job in place) first on PATH, ODIN3_HEAVY_DIR and
+ODIN3_HEAVY_CGROUP pointing into the test's directory: parse-corpus has no heavy logic of its own
+(Task 10 re-review R1/R2), so heavy-run alone decides skip, refusal and nesting.
 """
 
 from __future__ import annotations
 
-import fcntl
 import os
+import re
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
-from collections.abc import Sequence
 from pathlib import Path
 from unittest import mock
 
@@ -47,77 +48,26 @@ with open(os.environ["FAKE_LOG"], "a") as log:
 shutil.copy(blif, out)
 """
 
-# The heavy-run fakes. flock: `flock -x -w <s> -E <code> <lock> <cmd...>`, holding the lock on an
-# inherited descriptor (flock(1)'s child keeps it), <code> after <s> s busy. systemd-run: logs
-# its options and ODIN3_HEAVY_SLICE, runs what follows `MemorySwapMax=0`. heavy-run: the 2E
-# contract (the lock on an inherited descriptor, ODIN3_HEAVY_SLICE=odin3-heavy.slice exported).
-# plain: a wrapper that breaks the contract (no lock, no slice).
-FAKE_FLOCK = """#!{python}
-import fcntl, os, sys, time
-args = sys.argv[1:]
-wait, code, lock, cmd = float(args[2]), int(args[4]), args[5], args[6:]
-with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write(" ".join(["flock", *args[:5], os.path.basename(lock)]) + "\\n")
-fd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
-deadline = time.monotonic() + wait
-while True:
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        break
-    except BlockingIOError:
-        if time.monotonic() > deadline:
-            sys.exit(code)
-        time.sleep(0.05)
-os.set_inheritable(fd, True)
-os.execvp(cmd[0], cmd)
+# The heavy-run fakes: systemctl succeeds; systemd-run logs its --slice and runs the job in place.
+FAKE_SYSTEMCTL = """#!{python}
 """
 
 FAKE_SYSTEMD_RUN = """#!{python}
 import os, sys
 args = sys.argv[1:]
-at = args.index("MemorySwapMax=0") + 1
 with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write(" ".join(["systemd-run", *args[:at]]) + "\\n")
-    log.write("slice " + os.environ.get("ODIN3_HEAVY_SLICE", "unset") + "\\n")
+    log.write("systemd-run " + next(a for a in args if a.startswith("--slice=")) + "\\n")
+at = args.index("OOMPolicy=continue") + 1
 os.execvp(args[at], args[at:])
 """
 
-FAKE_HEAVY_RUN = """#!{python}
-import fcntl, os, sys
-with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write("heavy-run\\n")
-fd = os.open(os.path.join(os.environ["ODIN3_HEAVY_DIR"], "odin3-heavy.lock"),
-             os.O_WRONLY | os.O_CREAT | os.O_APPEND)
-fcntl.flock(fd, fcntl.LOCK_EX)
-os.set_inheritable(fd, True)
-os.environ["ODIN3_HEAVY_SLICE"] = "odin3-heavy.slice"
-os.execvp(sys.argv[1], sys.argv[1:])
-"""
-
-FAKE_PLAIN = """#!{python}
-import os, sys
-with open(os.environ["FAKE_LOG"], "a") as log:
-    log.write("plain\\n")
-os.execvp(sys.argv[1], sys.argv[1:])
-"""
-
-FAKES = {
-    "flock": FAKE_FLOCK,
-    "systemd-run": FAKE_SYSTEMD_RUN,
-    "heavy-run": FAKE_HEAVY_RUN,
-    "plain": FAKE_PLAIN,
-}
-
-# A cgroup under the slice: with the cgroup override the lock alone tells inside from outside.
-CGROUP = "0::/user.slice/user@1000.service/odin3-heavy.slice/run-1.scope\n"
-
-WRAPPED_LOG = [
-    "flock -x -w 14400 -E 77 odin3-heavy.lock",
-    "systemd-run --user --scope -q --slice=odin3-heavy.slice -p MemoryMax=6G -p MemorySwapMax=0",
-    "slice odin3-heavy.slice",
-]
+# Outside any heavy slice, and in user.slice itself (R1's crafted slice).
+CGROUP_OUT = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-r0.scope\n"
+CGROUP_USER = "0::/user.slice/run-r1.scope\n"
 
 TOOL = Path(parse_corpus.__file__).resolve()
+HEAVY_RUN = helpers.REPO_ROOT / "tools" / "heavy-run"
+SWEEPS = ("verilog_micro_parse", "verilog_writer_parse", "verilog_vtr_parse")
 
 
 class ParseCorpusTest(unittest.TestCase):
@@ -233,100 +183,77 @@ class ParseCorpusTest(unittest.TestCase):
         )
         self.assertEqual(code, 0, out)
 
-    def heavy_env(self) -> dict[str, str]:
-        heavy = self.dir / "heavy"
-        heavy.mkdir(exist_ok=True)
-        cgroup = self.dir / "cgroup"
-        cgroup.write_text(CGROUP)
-        return {"ODIN3_HEAVY_DIR": str(heavy), "ODIN3_HEAVY_CGROUP": str(cgroup)}
-
-    def test_heavy_skips_without_the_go_ahead(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        env = {**self.heavy_env(), "ODIN3_HEAVY_OK": "", "ODIN3_HEAVY_SLICE": ""}
-        with mock.patch.dict(os.environ, env):
-            code, out, _ = self.run_tool("--heavy", str(self.corpus))
-        self.assertEqual(code, 77)
-        self.assertEqual(self.calls(), [])
-
-    def test_inside_a_heavy_run_it_sweeps_in_place(self) -> None:
-        """In the slice with the heavy lock on a descriptor: no wrapper (in-process)."""
-        self.put("a.v", "module a; endmodule\n")
-        env = {**self.heavy_env(), "ODIN3_HEAVY_SLICE": "odin3-heavy.slice", "ODIN3_HEAVY_OK": ""}
-        with mock.patch.dict(os.environ, env), open(parse_corpus.heavy_lock(), "a"):
-            self.assertTrue(parse_corpus.inside_heavy_run())
-            code, out, _ = self.run_tool("--heavy", str(self.corpus))
-        self.assertEqual(code, 0, out)
-        self.assertEqual(self.calls(), ["check a.v"])
-
     def run_heavy(
-        self, env: dict[str, str], wrapper: Sequence[str] = ()
+        self, cgroup: str = CGROUP_OUT, fd9: bool = False, **env: str
     ) -> subprocess.CompletedProcess[str]:
-        """parse-corpus --heavy as a process (under wrapper, if any), the fakes first on PATH."""
+        """tools/heavy-run python parse_corpus.py --check <fake> <corpus>, as odin3_add_sweep_test
+        registers it, in cgroup, with the heavy lock opened (not locked) on fd 9 if fd9."""
         bin_dir = self.dir / "bin"
         bin_dir.mkdir(exist_ok=True)
-        for name, text in FAKES.items():
+        for name, text in (("systemctl", FAKE_SYSTEMCTL), ("systemd-run", FAKE_SYSTEMD_RUN)):
             path = bin_dir / name
             path.write_text(text.format(python=sys.executable))
             path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        heavy = self.dir / "heavy"
+        heavy.mkdir(exist_ok=True)
+        cgroup_file = self.dir / "cgroup"
+        cgroup_file.write_text(cgroup)
         base = {k: v for k, v in os.environ.items() if not k.startswith("ODIN3_HEAVY")}
-        base.update({"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "ODIN3_HEAVY_OK": "1"})
-        base.update(self.heavy_env())
-        base.update(env)
-        cmd = [*wrapper, sys.executable, str(TOOL), "--check", self.check, "--heavy",
-               str(self.corpus)]  # fmt: skip
+        base.update({"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+                     "ODIN3_HEAVY_DIR": str(heavy), "ODIN3_HEAVY_CGROUP": str(cgroup_file),
+                     "ODIN3_HEAVY_WAIT": "5", **env})  # fmt: skip
+        opener = f'exec 9>>"{heavy / "odin3-heavy.lock"}"; ' if fd9 else ""
+        cmd = ["bash", "-c", f'{opener}exec "$@"', "job", str(HEAVY_RUN), sys.executable,
+               str(TOOL), "--check", self.check, str(self.corpus)]  # fmt: skip
         return subprocess.run(
             cmd, env=base, capture_output=True, text=True, timeout=60, check=False
         )
 
-    def test_heavy_runs_under_flock_and_the_slice(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({})
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual(self.calls(), [*WRAPPED_LOG, "check a.v"])
-        self.assertIn("1 files, 1 passed", proc.stdout)
+    def test_the_sweep_ctests_go_through_odin3_add_sweep_test(self) -> None:
+        text = (helpers.REPO_ROOT / "CMakeLists.txt").read_text()
+        for name in SWEEPS:
+            self.assertRegex(text, rf"odin3_add_sweep_test\({name} LABEL sweep\b")
+            self.assertNotRegex(text, rf"add_test\(NAME {name}\b")
 
-    def test_under_a_2e_heavy_run_it_does_not_wrap_again(self) -> None:
-        """odin3_add_sweep_test() runs the command under heavy-run: no second lock wait."""
+    def test_heavy_logic_is_heavy_runs_alone(self) -> None:
+        """No --heavy, no lock, slice or nesting check in parse-corpus (R1/R2 removed by design)."""
         self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({}, wrapper=[str(self.dir / "bin" / "heavy-run")])
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual(self.calls(), ["heavy-run", "check a.v"])
+        code, _, err = self.run_tool("--heavy", str(self.corpus))
+        self.assertEqual(code, 2)
+        self.assertIn("unrecognized arguments: --heavy", err)
+        self.assertEqual(self.calls(), [])
+        self.assertIsNone(re.search(r"ODIN3_HEAVY|flock|systemd-run|cgroup", TOOL.read_text()))
 
-    def test_heavy_run_as_odin3_heavy_run_does_not_wrap_again(self) -> None:
+    def test_heavy_skips_without_the_go_ahead(self) -> None:
         self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({"ODIN3_HEAVY_RUN": str(self.dir / "bin" / "heavy-run")})
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual(self.calls(), ["heavy-run", "check a.v"])
-
-    def test_a_stale_heavy_slice_is_still_wrapped(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"})
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertIn("ODIN3_HEAVY_SLICE=odin3-heavy.slice is set outside a heavy run", proc.stderr)
-        self.assertEqual(self.calls(), [*WRAPPED_LOG, "check a.v"])
-
-    def test_an_empty_heavy_run_is_still_wrapped(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({"ODIN3_HEAVY_RUN": ""})
-        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertIn("ODIN3_HEAVY_RUN is empty; ignoring it", proc.stderr)
-        self.assertEqual(self.calls(), [*WRAPPED_LOG, "check a.v"])
-
-    def test_a_wrapper_that_breaks_the_contract_is_not_wrapped_again(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        proc = self.run_heavy({"ODIN3_HEAVY_RUN": str(self.dir / "bin" / "plain")})
-        self.assertEqual(proc.returncode, 2)
-        self.assertIn("did not put this run inside a heavy run", proc.stderr)
-        self.assertEqual(self.calls(), ["plain"])
-
-    def test_a_busy_lock_skips_after_the_wait(self) -> None:
-        self.put("a.v", "module a; endmodule\n")
-        env = self.heavy_env()
-        with open(Path(env["ODIN3_HEAVY_DIR"]) / "odin3-heavy.lock", "a") as held:
-            fcntl.flock(held, fcntl.LOCK_EX)
-            proc = self.run_heavy({"ODIN3_HEAVY_WAIT": "0.2"})
+        proc = self.run_heavy()
         self.assertEqual(proc.returncode, 77, proc.stdout + proc.stderr)
-        self.assertEqual(self.calls(), ["flock -x -w 0.2 -E 77 odin3-heavy.lock"])
+        self.assertIn("ODIN3_HEAVY_OK is not 1; skipped", proc.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_heavy_sweeps_in_the_slice(self) -> None:
+        self.put("a.v", "module a; endmodule\n")
+        proc = self.run_heavy(ODIN3_HEAVY_OK="1")
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertEqual(self.calls(), ["systemd-run --slice=odin3-heavy.slice", "check a.v"])
+        self.assertIn("1 files, 1 passed", proc.stdout)
+        self.put("b.v", "FAIL\n")
+        self.assertEqual(self.run_heavy(ODIN3_HEAVY_OK="1").returncode, 1)  # the sweep's status
+
+    def test_r1_a_crafted_slice_and_an_unlocked_fd_never_run_uncapped(self) -> None:
+        """R1: ODIN3_HEAVY_SLICE=user.slice, a user.slice cgroup and the lock file open (not
+        locked) on fd 9 used to run in place, uncapped. heavy-run ignores the variable; the fd
+        outside a heavy slice is refused at once (R2), and without the go-ahead it skips."""
+        self.put("a.v", "module a; endmodule\n")
+        for slice_var in ("user.slice", "odin3-heavy.slice"):
+            proc = self.run_heavy(CGROUP_USER, fd9=True, ODIN3_HEAVY_SLICE=slice_var)
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("run the sweep outside the build", proc.stderr)
+            proc = self.run_heavy(CGROUP_USER, ODIN3_HEAVY_SLICE=slice_var)
+            self.assertEqual(proc.returncode, 77, proc.stdout + proc.stderr)
+            self.assertIn(f"ODIN3_HEAVY_SLICE={slice_var} is set outside a heavy run",
+                          proc.stderr)  # fmt: skip
+        self.assertEqual(self.calls(), [])  # never swept, never wrapped
 
     def test_a_timeout_is_that_files_failure(self) -> None:
         self.put("a.v", "module a; endmodule\n")

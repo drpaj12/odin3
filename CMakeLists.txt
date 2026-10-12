@@ -952,37 +952,29 @@ if(BUILD_TESTING)
     # 2C §7.4 (plan Task 10): the corpus sweeps through parse-corpus, one file at a time, smallest
     # first: every micro against tests/verilog/micro_expect_fail.txt; every VTR and Koios
     # benchmark together when VTR_ROOT is set at configure time (koios/lenet.v last, point (n));
-    # every committed BLIF through odin3-write --verilog (Review Focus 1). They are heavy sweeps
-    # (label `sweep`, outside the -j4 gate): parse-corpus --heavy skips them with 77 unless
-    # ODIN3_HEAVY_OK=1, and then re-runs itself under the heavy-run protocol (flock -w 14400 -E 77
-    # on /tmp/claude-1000/odin3-heavy.lock, systemd-run --scope in odin3-heavy.slice,
-    # MemoryMax=6G, no swap), or under a non-empty ODIN3_HEAVY_RUN (tools/heavy-run once 2E-1
-    # lands it); inside a heavy run (heavy-run's slice + inherited-lock test) it runs in place.
-    # Run them as `ODIN3_HEAVY_OK=1 ctest --preset release -L sweep`. Switch them to
-    # odin3_add_sweep_test() (2E plan C1) when 2E-1 lands it.
+    # every committed BLIF through odin3-write --verilog (Review Focus 1). Heavy sweeps (label
+    # `sweep`) through odin3_add_sweep_test(): tools/heavy-run alone takes the lock and the slice
+    # (skip 77 without ODIN3_HEAVY_OK=1). Run them as `ODIN3_HEAVY_OK=1 ctest --preset release
+    # -L sweep`.
     set(_parse_corpus ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/parse_corpus.py
-                      --heavy --check $<TARGET_FILE:odin3-parse-check>)
-    add_test(NAME verilog_micro_parse
+                      --check $<TARGET_FILE:odin3-parse-check>)
+    odin3_add_sweep_test(verilog_micro_parse LABEL sweep
         COMMAND ${_parse_corpus}
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/verilog/micro_expect_fail.txt
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
-    add_test(NAME verilog_writer_parse
+    odin3_add_sweep_test(verilog_writer_parse LABEL sweep
         COMMAND ${_parse_corpus} --writer $<TARGET_FILE:odin3-write>
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
-    set(_parse_sweeps verilog_micro_parse verilog_writer_parse)
     if(DEFINED ENV{VTR_ROOT})
         set(_vtr_verilog $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog)
         file(GLOB _vtr_benchmarks CONFIGURE_DEPENDS ${_vtr_verilog}/*.v ${_vtr_verilog}/koios/*.v)
     endif()
     if(_vtr_benchmarks)
-        add_test(NAME verilog_vtr_parse
+        odin3_add_sweep_test(verilog_vtr_parse LABEL sweep
             COMMAND ${_parse_corpus} --root ${_vtr_verilog} ${_vtr_benchmarks})
-        list(APPEND _parse_sweeps verilog_vtr_parse)
     elseif(DEFINED ENV{VTR_ROOT})
         message(STATUS "verilog_vtr_parse not registered: no benchmarks under $ENV{VTR_ROOT}")
     endif()
-    set_tests_properties(${_parse_sweeps} PROPERTIES LABELS sweep RUN_SERIAL TRUE
-                         SKIP_RETURN_CODE 77 TIMEOUT 43200)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
