@@ -277,6 +277,17 @@ class VtrRoundTripTest(unittest.TestCase):
         self.assertEqual(["error", "-"], rows[0][2:4])
         self.assertIn("odin3-blif-rt --vtr exited 2: odin3: error: x: cannot open", out)
 
+    def test_excluded_not_run(self) -> None:
+        self.add("LargeRam.odin.blif", golden(".names a y", "1 1", marks=("refuse x",)))
+        self.add("ok.parmys.blif", BUF)
+        code, out, rows = self.run_script()
+        self.assertEqual(0, code, out)
+        self.assertEqual(["ok.parmys.blif"], self.rt_inputs())
+        self.assertIn(["LargeRam.odin.blif", "odin", "excluded", "-", "-", "-", "-", "excluded"],
+                      rows)
+        self.assertIn("excluded: 915 MB", out)
+        self.assertIn("excluded 1,", out)
+
     def test_report_needs_vtr(self) -> None:
         proc = subprocess.run([str(SCRIPT), "--report", str(self.tmp / "r.tsv"), "--fixtures",
                                str(self.fixtures)], capture_output=True, text=True,

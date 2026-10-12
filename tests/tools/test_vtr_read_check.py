@@ -5,7 +5,11 @@ marker lines in the BLIF files:
 
 - ``# fake-refuse: <text>``: odin3 refuses with ``write_blif: --vtr: <loc>: <text>`` (exit 1);
 - ``# fake-vpr: <message>``: VPR rejects the file (exit 1, ``Message: <message>`` on stdout);
-- ``# fake-checker: reject``: the checker rejects it (exit 1);
+- ``# fake-vpr-stderr: <message>``: the same with ``Message:`` on stderr (real VPR off a tty)
+  and a last line on stdout;
+- ``# fake-vpr-kill``: VPR is killed by SIGKILL (an OOM kill): no verdict;
+- ``# fake-checker: reject``: the checker rejects it (exit 1); ``crash``: exits 2;
+- ``# fake-refuse-leave-w``: odin3 refuses (exit 1) after writing W;
 - ``# fake-warn: <text>``: odin3 warns ``write_blif: --vtr: <text>`` and writes W;
 - ``# W-<marker>``: odin3 writes ``# <marker>`` into W (and drops the G-only markers).
 
@@ -32,9 +36,14 @@ from vtr_read_check import ReadCtx, pairing_ok
 FAKE_ODIN3 = """\
 import re, sys
 script = sys.argv[2]
-g = re.search(r"read_blif (\\S+);", script).group(1)
-w = re.search(r"write_blif --vtr (\\S+)$", script).group(1)
+g = re.search(r'read_blif "([^"]+)";', script).group(1)
+w = re.search(r'write_blif --vtr "([^"]+)"$', script).group(1)
 lines = open(g).read().splitlines()
+if "# fake-refuse-leave-w" in lines:
+    open(w, "w").write("partial\\n")
+    print(f"odin3: error: write_blif: --vtr: {g}:1: $_DFF_N_ 'c': falling-edge flip-flop; x",
+          file=sys.stderr)
+    sys.exit(1)
 refusals = [ln.split(":", 1)[1].strip() for ln in lines if ln.startswith("# fake-refuse:")]
 if refusals:
     for text in refusals:
@@ -47,9 +56,16 @@ out = [ln.replace("# W-", "# ", 1) for ln in lines if not ln.startswith("# fake-
 open(w, "w").write("\\n".join(out) + "\\n")
 """
 FAKE_VPR = """\
-import sys
+import os, signal, sys
 blif = sys.argv[2]
 for line in open(blif).read().splitlines():
+    if line == "# fake-vpr-kill":
+        os.kill(os.getpid(), signal.SIGKILL)
+    if line.startswith("# fake-vpr-stderr:"):
+        print("Error 1:\\nType: Blif file", file=sys.stderr)
+        print("Message: " + line.split(":", 1)[1].strip(), file=sys.stderr)
+        print("The entire flow of VPR took 0.01 seconds")
+        sys.exit(1)
     if line.startswith("# fake-vpr:"):
         print("Error 1:\\nType: Blif file\\nMessage: " + line.split(":", 1)[1].strip())
         sys.exit(1)
@@ -58,7 +74,7 @@ print("VPR succeeded")
 FAKE_CHECKER = """\
 import sys
 text = open(sys.argv[-1]).read()
-sys.exit(1 if "# fake-checker: reject" in text else 0)
+sys.exit(2 if "# fake-checker: crash" in text else 1 if "# fake-checker: reject" in text else 0)
 """
 BODY = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
 HEADER = ("golden\ttool\twritten|refused\terror class\tvpr_W\tvpr_G\tchecker_W\tchecker_G\t"
@@ -196,6 +212,60 @@ class CollectAndRunTest(ReadCheckBase):
         row = vtr_read_check.run_one(g, self.ctx())
         self.assertEqual(("refused", "E4", "fail"), (row.outcome, row.classes, row.verdict))
 
+    def test_checker_exit_2_on_g_fails(self) -> None:
+        """A checker crash (exit 2) on G is no verdict, even when VPR rejects G too."""
+        g = self.golden_file("crash.parmys.blif", "# fake-checker: crash",
+                             "# fake-vpr: Latch must have a clock")
+        row = vtr_read_check.run_one(g, self.ctx())
+        self.assertEqual(("written", "1", "2", "fail"),
+                         (row.outcome, row.vpr_g, row.checker_g, row.verdict))
+
+    def test_vpr_kill_on_g_is_no_verdict(self) -> None:
+        """M1: an OOM kill of VPR on G with a checker reject is not agreement."""
+        g = self.golden_file("oom.parmys.blif", "# fake-vpr-kill", "# fake-checker: reject")
+        row = vtr_read_check.run_one(g, self.ctx())
+        self.assertEqual(("written", "-9", "1", "fail"),
+                         (row.outcome, row.vpr_g, row.checker_g, row.verdict))
+        self.assertIn("VPR gives no verdict on G (exit -9)", row.why)
+
+    def test_refusal_leaving_w_fails(self) -> None:
+        g = self.golden_file("leak.odin.blif", "# fake-refuse-leave-w",
+                             "# fake-vpr: Only rising edge latches supported",
+                             "# fake-checker: reject")
+        row = vtr_read_check.run_one(g, self.ctx())
+        self.assertEqual(("error", "fail"), (row.outcome, row.verdict))
+        self.assertIn("odin3 refused (exit 1) but left W behind", row.why)
+
+    def test_message_on_stderr_pairs(self) -> None:
+        g = self.golden_file("fe.odin.blif", "# fake-refuse: $_DFF_N_ 'c': falling-edge "
+                             "flip-flop; VPR accepts only rising-edge",
+                             "# fake-vpr-stderr: Only rising edge latches supported",
+                             "# fake-checker: reject")
+        row = vtr_read_check.run_one(g, self.ctx())
+        self.assertEqual(("refused", "E1", "1", "1", "pass"),
+                         (row.outcome, row.classes, row.vpr_g, row.checker_g, row.verdict))
+
+    def test_excluded_golden(self) -> None:
+        self.golden_file("big/LargeRam.odin.blif", "# fake-checker: crash")
+        self.golden_file("a.parmys.blif", pad=10)
+        code, out, _ = self.run_main()
+        self.assertEqual(0, code, out)
+        report = (self.work / "report.tsv").read_text().splitlines()
+        self.assertIn("big/LargeRam.odin.blif\todin\texcluded\t-\t-\t-\t-\t-\texcluded",
+                      report)
+        self.assertIn("EXCLUDED big/LargeRam.odin.blif: 915 MB", out)
+        self.assertIn("excluded 1", out)
+
+    def test_stale_run_dirs_removed_and_report_checked(self) -> None:
+        (self.work / "7").mkdir()
+        self.golden_file("a.parmys.blif")
+        code, out, _ = self.run_main()
+        self.assertEqual(0, code, out)
+        self.assertFalse((self.work / "7").exists())
+        code, _, err = self.run_main("--report", "/etc/odin3-report.tsv")
+        self.assertEqual(2, code)
+        self.assertIn("refusing --out", err)
+
     def test_report_header_and_exit(self) -> None:
         self.golden_file("a.parmys.blif", "# fake-warn: g:3: $_DFF_P_ 'q': clock is 'unconn'; "
                          "VPR will never clock it")
@@ -226,6 +296,13 @@ class CollectAndRunTest(ReadCheckBase):
         self.assertEqual(1, code)
         self.assertIn("FAIL c9_lenient.blif", out)
         self.assertIn("ok   c6_fe.blif", out)
+        (corpus / "c9_lenient.blif").unlink()
+        (corpus / "c7_other.blif").write_text(
+            "# vpr: Latch must have a clock\n# fake-vpr: Only rising edge latches supported\n"
+            "# fake-checker: reject\n" + BODY)
+        code, out, _ = self.run_main("--bad-corpus", str(corpus))
+        self.assertEqual(1, code)
+        self.assertIn("VPR's output lacks `Latch must have a clock`", out)
 
 
 class HeavyTest(ReadCheckBase):

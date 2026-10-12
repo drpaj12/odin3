@@ -810,6 +810,11 @@ case. `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline
    implicit clock) and are skipped.
 5. CI: steps 1–2 on `tests/golden/blif/*.parmys.blif` and the 16.2 fixtures.
 
+**Excluded** (§25): `LargeRam.odin.blif` (915 MB) is not run. `odin3-blif-rt` peaks near 5 GB
+per write (615 MB at 117 MB, scaled), twice, at the 6G cap. Its row is `excluded`, with the
+reason, and does not fail the sweep. The list is explicit, by file name (`VTR_EXCLUDED` in
+`tools/blif-roundtrip/blif-roundtrip`), not a size threshold.
+
 ### 16.4 VPR reads every golden-equivalent BLIF (local, heavy-run rule)
 
 `tools/vtr-read-check` (bash + a small Python report): for each `status=ok` k6 golden G
@@ -837,7 +842,7 @@ statistics, then stop: VPR's whole reader at a fraction of a route's cost. **Ora
   | Refusal | VPR on G |
   |---|---|
   | E1 (`fe`) | `Only rising edge latches supported` |
-  | E1b (async FF) | cannot occur in a BLIF golden (no such `.latch`); a hit is a failure |
+  | E1b (async FF) | `Subckt instantiates model …` (plan point (e): an async FF reaches a golden as a `.subckt` of a Yosys cell no `.model` declares, never as a `.latch`; §25) |
   | E2 (`ah`/`al`) | `Only rising edge latches supported` |
   | E3 (no clock) | `Latch must have a clock` |
   | E3b (hard-block clock open) | accepted by VPR (open pin); listed as an intended refusal |
@@ -854,6 +859,14 @@ statistics, then stop: VPR's whole reader at a fraction of a route's cost. **Ora
 - **checker agreement**: `blif-vtr-check G`'s verdict equals VPR's on G for all 923, and on every
   W; and on `tests/vtr/blif-bad/*.blif` (one file per C-check, committed with the VPR message it
   draws, verified by this script) VPR rejects exactly the files the checker rejects.
+- **no verdict** (§25): a VPR timeout, or a VPR killed by any signal but SIGABRT (its assertion
+  abort), gives no verdict on G and fails the row; so does a refusal (exit 1) that leaves W.
+- **excluded** (§25): `LargeRam.odin.blif` (915 MB) is not run: the checker would need about
+  23 GB (3 GB at 117 MB, scaled), more than any heavy slice, and VPR's read many GB more. Its row
+  is `excluded`, with the reason, and does not fail the sweep; it needs a streaming checker or
+  VPR on a larger host. The list is explicit, by file name (`EXCLUDED` in
+  `tools/vtr-read-check/vtr_read_check.py`, the same file as §16.3's), not a size threshold, so
+  each exclusion is a recorded decision and a new large golden fails loudly until one is made.
 
 Scope: `--exit_before_pack` checks reading only. Whether a hard block can be *packed* (R10/R11
 check each port's size alone: a RAM `.subckt` is a 1-bit data slice, §24, and the slices of one
@@ -1031,3 +1044,6 @@ No minor finding was rejected.
 | nit (Task 10 review) | the one-step decode accepted rule 8's `%7C`/`%5E` on any net; §10 item 8 escapes them on clock nets only | applied (Task 11): decoded only on a written file's `.latch` controls and `.subckt` pins (a hard-block clock is a `.subckt` pin; which pin needs the arch models, which `netlist-compare` does not read), `^` only between two `_`; never in `--vtr-rewrite`, where W1's clock names are already escaped. No k6 golden holds `\|` or `_^_` (measured) |
 | Task 11 | §16.4's E12 row names the R16 assertion; VPR's Release build stops an Odin II multi-driver golden (`elsif_both_defined.odin`) at `Inconsistent block data sizes` (`netlist.tpp`) | applied: E12 pairs with either message |
 | Task 11 | §16.4's `flock … systemd-run --scope` text predates the slice correction | superseded by plan point (a): `tools/heavy-run` (`qor_heavy.reexec_under_lock`) |
+| M4 (3E-4 final review) | §16.4's E1b row said "cannot occur in a BLIF golden; a hit is a failure", but async FFs reach Parmys goldens as `.subckt`s (`dffsre`) | applied: E1b pairs with `Subckt instantiates model` (plan point (e)) |
+| I1 (3E-4 final review) | `LargeRam.odin.blif` (915 MB) exceeds every heavy slice in the checker (≈ 23 GB) and nears the 6G cap in `odin3-blif-rt` | applied as an agent default: excluded by name in both §16.3 and §16.4, row `excluded` with the reason (PHASE3 #29) |
+| M1, M2 (3E-4 final review) | a VPR timeout or OOM kill on G counted as a rejection; a refusal that left W was a refusal | applied: both fail the row (§16.4 "no verdict") |

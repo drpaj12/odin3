@@ -543,6 +543,18 @@ class VtrNormalizeTest(unittest.TestCase):
         self.assertEqual(2, compare("--vtr-rewrite", "--canon", fa)[0])
         self.assertEqual(2, compare("--vtr-rewrite", fa, str(Path(self.tmp.name) / "none"))[0])
 
+    def test_implicit_models_with_vtr_normalize(self) -> None:
+        """The merge repair: --implicit-models still applies under --vtr-normalize."""
+        dff = ".model top\n.inputs c d\n.outputs q\n.subckt $_DFF_P_ C=c D=d Q=q\n.end\n"
+        swapped = (dff.replace(".inputs c d", ".inputs c q").replace(".outputs q", ".outputs d")
+                   .replace("D=d Q=q", "D=q Q=d"))
+        fa, fb = self.write("a.blif", dff), self.write("b.blif", swapped)
+        both = ("--implicit-models", "--vtr-normalize")
+        self.assertEqual(2, compare("--vtr-normalize", fa, fa)[0])  # undefined model
+        self.assertEqual(0, compare(*both, fa, fa)[0])
+        self.assertEqual(1, compare(*both, fa, fb)[0])
+        self.assertEqual(2, compare("--vtr-rewrite", "--implicit-models", fa, fa)[0])
+
     def test_vtr_rewrite_not_renamed(self) -> None:
         w1 = b".model m\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
         fa = self.write("w1.blif", w1)

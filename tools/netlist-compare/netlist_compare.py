@@ -1060,7 +1060,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     files: list[str] = args.files
     if len(files) != (1 if args.canon else 2):
         ap.error("--canon takes one file" if args.canon else "expected two files")
-    if args.vtr_rewrite and (args.canon or args.vtr_normalize or args.keep_attrs):
+    if args.vtr_rewrite and (args.canon or args.vtr_normalize or args.keep_attrs
+                             or args.implicit_models):
         ap.error("--vtr-rewrite compares token lines; it takes no other option but --quiet")
     try:
         if args.vtr_rewrite:

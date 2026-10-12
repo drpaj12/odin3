@@ -24,8 +24,10 @@ It is a heavy run (plan point (a)): ``main`` first calls ``qor_heavy.reexec_unde
 inside ``tools/heavy-run`` verifies the cap and otherwise re-runs this script through it when the
 caller set ``ODIN3_HEAVY_OK=1``. A passing file's run directory is removed (``safe_rmtree``, one
 absolute path under ``--work``); a failing one is kept. Report: TSV ``--report`` (default
-``<work>/report.tsv``). Exit 0 when every verdict passes, 1 otherwise, 2 for usage or a failed
-cap check.
+``<work>/report.tsv``, under the same roots as ``--work``). A golden named in ``EXCLUDED`` is not
+run: its row is ``excluded``, with the reason printed, and it does not fail the run. Earlier
+runs' ``<work>/<n>/`` directories are removed first. Exit 0 when every verdict passes, 1
+otherwise, 2 for usage or a failed cap check.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ import os
 import pwd
 import re
 import resource
+import signal
 import subprocess
 import sys
 import time
@@ -65,7 +68,18 @@ HEADER = "\t".join(("golden", "tool", "written|refused", "error class", "vpr_W",
 NOT_RUN = "-"
 VERDICT_PASS, VERDICT_FAIL = "pass", "fail"
 VERDICT_INTENDED, VERDICT_LISTED = "intended", "listed"
-PASSING = frozenset({VERDICT_PASS, VERDICT_INTENDED, VERDICT_LISTED})
+VERDICT_EXCLUDED = "excluded"
+PASSING = frozenset({VERDICT_PASS, VERDICT_INTENDED, VERDICT_LISTED, VERDICT_EXCLUDED})
+# Goldens not run, by file name, with the reason (3E spec §16.4; PHASE3 #29). An explicit list,
+# not a size threshold: each exclusion is a recorded decision, and a new large golden is run
+# (and fails loudly) until someone decides otherwise. blif-roundtrip --vtr keeps the same list.
+EXCLUDED: dict[str, str] = {
+    "LargeRam.odin.blif": "915 MB: the checker needs about 23 GB (3 GB at 117 MB, scaled), "
+                          "more than any heavy slice; needs a streaming checker or VPR on a "
+                          "larger host",
+}
+# VPR's assertion failures abort (SIGABRT): a verdict. Any other signal (an OOM kill) is none.
+VPR_ABORT = -signal.SIGABRT
 REFUSAL_PREFIX = "odin3: error: write_blif: --vtr: "
 VPR_LINE = re.compile(r"^#\s*vpr:\s*(.*?)\s*$")
 # The writer's class-U clock warning (plan point (j)): such a W is listed for the full VPR flow
@@ -283,6 +297,11 @@ def _fresh_dir(ctx: ReadCtx) -> Path:
     return run_dir
 
 
+def no_verdict(vpr: Step) -> bool:
+    """VPR gave no verdict: a timeout, or killed by a signal other than its assertion abort."""
+    return vpr.code is None or (vpr.code < 0 and vpr.code != VPR_ABORT)
+
+
 def _written_verdict(row: Row, vpr_w: Step, checker_w: Step) -> None:
     if vpr_w.code != 0:
         row.why.append(f"VPR rejects W: {vpr_message(vpr_w)}")
@@ -303,7 +322,9 @@ def _refused_verdict(row: Row, vpr_g: Step) -> str:
 
 
 def _agreement(row: Row, vpr_g: Step, checker_g: Step) -> None:
-    if checker_g.code not in (0, 1) or (checker_g.code == 0) != (vpr_g.code == 0):
+    if no_verdict(vpr_g):
+        row.why.append(f"VPR gives no verdict on G (exit {vpr_g.shown})")
+    elif checker_g.code not in (0, 1) or (checker_g.code == 0) != (vpr_g.code == 0):
         row.why.append(f"checker on G (exit {checker_g.shown}) disagrees with VPR "
                        f"(exit {vpr_g.shown}: {vpr_message(vpr_g) or 'accepted'})")
 
@@ -311,13 +332,22 @@ def _agreement(row: Row, vpr_g: Step, checker_g: Step) -> None:
 def _write(ctx: ReadCtx, g: Path, run_dir: Path, row: Row) -> tuple[Path, Step]:
     """Step 1; sets row.outcome (written, refused or error) and row.classes."""
     w = run_dir / "W.blif"
-    script = f"read_techlib {ctx.techlib}; read_blif {g}; write_blif --vtr {w}"
+    paths = (ctx.techlib, g, w)
+    if any('"' in str(p) or "\n" in str(p) for p in paths):
+        row.outcome = "error"
+        row.why.append("a path holds '\"' or a newline; odin3 -p cannot quote it")
+        return w, Step(None, run_dir / "write.out", run_dir / "write.err")
+    techlib, gq, wq = (f'"{p}"' for p in paths)
+    script = f"read_techlib {techlib}; read_blif {gq}; write_blif --vtr {wq}"
     write = run_step([str(ctx.odin3), "-p", script], run_dir, "write", ctx.timeout)
     if write.code == 0 and w.is_file():
         row.outcome = "written"
         row.unconn_clock = UNCONN_CLOCK in _read(write.stderr)
-    elif write.code == 1:
+    elif write.code == 1 and not w.exists():
         row.outcome, row.classes = "refused", refusal_classes(_read(write.stderr))
+    elif write.code == 1:
+        row.outcome = "error"
+        row.why.append("odin3 refused (exit 1) but left W behind")
     else:
         row.outcome = "error"
         row.why.append(f"odin3 exit {write.shown} (no W)")
@@ -332,6 +362,10 @@ def run_one(g: Path, ctx: ReadCtx) -> Row:
     except ValueError:
         rel = str(g)
     row = Row(rel, tool_of(g))
+    if g.name in EXCLUDED:
+        row.outcome = row.verdict = VERDICT_EXCLUDED
+        row.why.append(EXCLUDED[g.name])
+        return row
     run_dir = _fresh_dir(ctx)
     w, write = _write(ctx, g, run_dir, row)
     verdict = VERDICT_PASS
@@ -367,12 +401,12 @@ def bad_one(blif: Path, ctx: ReadCtx) -> list[str]:
     checker = run_step([str(ctx.checker), str(blif)], run_dir, "checker", ctx.timeout)
     expected = vpr_lines(blif)
     why = []
-    if vpr.code is None or checker.code not in (0, 1):
+    if no_verdict(vpr) or checker.code not in (0, 1):
         why.append(f"VPR exit {vpr.shown}, checker exit {checker.shown}")
     elif (vpr.code != 0) != (checker.code == 1):
         verb = "rejects" if vpr.code != 0 else "accepts"
         why.append(f"VPR {verb} it (exit {vpr.shown}) but the checker exits {checker.shown}")
-    if vpr.code not in (0, None):
+    if vpr.code != 0 and not no_verdict(vpr):
         output = _read(vpr.stdout) + "\n" + _read(vpr.stderr)
         if not expected:
             why.append("VPR rejects it but the file has no `# vpr:` line")
@@ -414,6 +448,13 @@ def _summary(rows: list[Row], seconds: float) -> str:
             + f"\nRESULT: {'FAIL' if failed else 'PASS'}")
 
 
+def clear_stale_runs(ctx: ReadCtx) -> None:
+    """Removes an earlier run's ``<work>/<n>/`` directories, so none outlives a rerun."""
+    for child in ctx.work.iterdir():
+        if child.name.isdigit() and child.is_dir() and not child.is_symlink():
+            qor_heavy.safe_rmtree(child, ctx.work)
+
+
 def run_goldens(ctx: ReadCtx, report: Path, limit: int | None) -> int:
     goldens = collect(ctx.golden_root)
     if limit is not None:
@@ -431,7 +472,9 @@ def run_goldens(ctx: ReadCtx, report: Path, limit: int | None) -> int:
             rows.append(row)
             tsv.write(row.tsv() + "\n")
             tsv.flush()
-            if row.verdict not in PASSING:
+            if row.verdict == VERDICT_EXCLUDED:
+                print(f"EXCLUDED {row.golden}: {row.why[0]}", flush=True)
+            elif row.verdict not in PASSING:
                 print(f"FAIL {row.golden}" + "".join(f"\n  why: {w}" for w in row.why),
                       flush=True)
     print(_summary(rows, time.monotonic() - start))
@@ -489,9 +532,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         qor_heavy.reexec_under_lock(argv, script=SCRIPT, lock=qor_heavy.HEAVY_LOCK)
         args = parse_args(argv)
         ctx = make_ctx(args)
+        clear_stale_runs(ctx)
         if args.bad_corpus is not None:
             return run_bad_corpus(args.bad_corpus.resolve(), ctx)
-        report = args.report if args.report is not None else ctx.work / "report.tsv"
+        home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        report = (qor_heavy.check_out_dir(args.report, home) if args.report is not None
+                  else ctx.work / "report.tsv")
         return run_goldens(ctx, report, args.limit)
     except HeavyError as exc:
         print(f"{PREFIX}{exc.message}", file=sys.stderr)

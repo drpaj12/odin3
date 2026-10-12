@@ -35,7 +35,8 @@
 #             multiply) skipped).
 # A refusal (odin3-blif-rt exit 1) passes when its classes are expected: Parmys E1 (fe), E1b and
 # E5 (the Yosys cells no .model declares: async flip-flops, word cells); Odin II E1, E7, E12. A
-# Parmys golden with an `fe` latch must be refused with E1. Report: TSV (--report, default
+# Parmys golden with an `fe` latch must be refused with E1. A golden named in VTR_EXCLUDED is not
+# run: its row is `excluded` with the reason, and it does not fail the run. Report: TSV (--report, default
 # OUT/report.tsv) `golden tool written|refused class idempotent compare equiv verdict`.
 # On a golden root (not --fixtures), --vtr is a heavy run (plan 3E point (a)): it first asks
 # `python3 -I tools/vtr-qor/qor_heavy.py require-heavy`; 0 (inside a capped heavy run) runs;
@@ -47,6 +48,10 @@ SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HERE=$(dirname "$SELF")
 # Basenames whose original netlist drives one net from several cells (decision #15).
 export MULTI_DRIVER='elsif_both_defined.odin.blif multi_assignment.odin.blif'
+# --vtr: goldens not run, one "<file name><TAB><reason>" per line (3E spec §16.3; PHASE3 #29).
+# An explicit list, as vtr-read-check's EXCLUDED, not a size threshold: each exclusion is a
+# recorded decision, and a new large golden runs (and fails loudly) until someone decides.
+export VTR_EXCLUDED='LargeRam.odin.blif	915 MB: odin3-blif-rt peaks near 5 GB per write (615 MB at 117 MB, scaled), twice (W1, W2), at the 6G cap; needs a larger host'
 
 usage() {
     cat >&2 <<'USAGE'
@@ -437,6 +442,14 @@ vtr_worker() {
     local cmp=- eqv=- why="" f
     IFS=$'\t' read -r id path <<<"$1"
     case $path in *.parmys.blif) tool=parmys ;; *) tool=odin ;; esac
+    local rel=$path excl
+    if [ "${rel#"$BRT_ROOT"/}" != "$rel" ]; then rel=${rel#"$BRT_ROOT"/}; fi
+    excl=$(awk -F '\t' -v n="${path##*/}" '$1 == n { print $2; exit }' <<<"$VTR_EXCLUDED")
+    if [ -n "$excl" ]; then
+        printf '%s\t%s\texcluded\t-\t-\t-\t-\texcluded\t%s\t0\n' "$rel" "$tool" "$excl" \
+            >"$BRT_RES/$id.tsv"
+        return 0
+    fi
     w1=$BRT_TMP/$id.w1.blif
     w2=$BRT_TMP/$id.w2.blif
     errf=$BRT_TMP/$id.err
@@ -477,9 +490,8 @@ vtr_worker() {
         done
     fi
     if [ -n "$why" ] && [ -s "$errf" ]; then cp "$errf" "$BRT_RES/$id.rt.log"; fi
-    local verdict=pass rel=$path
+    local verdict=pass
     if [ -n "$why" ]; then verdict=FAIL; fi
-    if [ "${rel#"$BRT_ROOT"/}" != "$rel" ]; then rel=${rel#"$BRT_ROOT"/}; fi
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$rel" "$tool" "$written" "$cls" "$idem" \
         "$cmp" "$eqv" "$verdict" "$why" "$secs" >"$BRT_RES/$id.tsv"
     if [ "$BRT_KEEP" != 1 ]; then
@@ -503,8 +515,8 @@ vtr_report() {
     LC_ALL=C awk -F '\t' '
     {
         printf "%-7s %-7s %-8s %-10s %-11s %-14s %-5s %s\n", $2, $3, $4, $5, $6, $7, $8, $1
-        if ($9 != "") print "    why: " $9
-        tot++; st[$3]++; if ($8 != "pass") fail++
+        if ($9 != "") print ($8 == "excluded" ? "    excluded: " : "    why: ") $9
+        tot++; st[$3]++; if ($8 != "pass" && $8 != "excluded") fail++
         if ($3 == "refused") cls[$4]++
         id[$5]++; cm[$6]++; eq[$7]++
         if ($3 == "written") { rt += $10; if ($10 + 0 > maxrt) { maxrt = $10 + 0; maxf = $1 } }
@@ -512,7 +524,7 @@ vtr_report() {
     END {
         print ""
         print "SUMMARY (--vtr)"
-        printf "files: %d; written %d, refused %d, odin3-blif-rt errors %d\n", tot, st["written"], st["refused"], st["error"]
+        printf "files: %d; written %d, refused %d, excluded %d, odin3-blif-rt errors %d\n", tot, st["written"], st["refused"], st["excluded"], st["error"]
         for (c in cls) printf "refused %s: %d\n", c, cls[c]
         printf "idempotent: bytes %d, decoded %d, differ %d, error %d\n", id["bytes"], id["decoded"], id["differ"], id["error"]
         printf "compare: identical %d, normalized %d, different %d, timeout %d, memlimit %d, error %d\n", cm["identical"], cm["normalized"], cm["different"], cm["timeout"], cm["memlimit"], cm["error"]

@@ -713,10 +713,41 @@ then the options considered.
       - **Rule 8 (the Task 10 review's nit; spec §25).** `--vtr-normalize` decodes
         `%7C`/`_%5E_` only on a written file's `.latch` controls and `.subckt` pins.
         `--vtr-rewrite` never decodes them.
-    - **Risk.** LargeRam.odin (915 MB) is 8× LU64PEEng, where the checker holds about 3 GB, so
-      it will likely exceed the 6G cap. In the slice, an OOM kill shows as checker or VPR exit
-      `-9` and a `fail` row. If it does, run that one file on the xl slice, or list it as
-      excluded.
+    - **Agent defaults of Task 10:**
+      - **The one-step decode.** `--vtr-rewrite` compares W1 with one strict VB-10 decoding step
+        of W2; `--vtr-normalize G W` decodes W by one step and never decodes G (spec §25 I1).
+      - **Undriven nets.** `--vtr-normalize` rewrites an undriven `.names`/`.latch` D input to
+        `gnd`, an undriven `.subckt` input to `unconn`, and an undriven primary output to a
+        `gnd` buffer, as the writer does (§9.2).
+      - **`equiv-check --allow-undriven`.** Oracle 4 treats an undriven net as 0, the writer's
+        `gnd`.
+      - **The Task 10 report's defaults 1–8:**
+        1. `--vtr` takes only `*.parmys.blif` and `*.odin.blif`; other BLIFs are skipped and
+           counted;
+        2. Parmys may also be refused E1b and E5 (Yosys cells no `.model` declares);
+        3. the undriven-net rewrite above;
+        4. oracle 2's fallback runs when `--canon --vtr-normalize G` differs from `--canon G`;
+        5. compare `timeout`/`memlimit` fails in `--fixtures` mode and is listed on a golden
+           root; an `equiv-check` `timeout` is listed; `NOT-equivalent`, `error`, class `?`
+           and an `odin3-blif-rt` exit 2 fail;
+        6. the heavy-run shim's message carries the `blif-roundtrip: ` prefix, on a golden root
+           only;
+        7. `--vtr` does not deduplicate identical files;
+        8. a missing latch init is normalised like 3 → 2.
+    - **Agent defaults of the 3E-4 final review:**
+      - **No verdict.** A VPR timeout, or a VPR killed by any signal but SIGABRT, fails the row;
+        so does a refusal (exit 1) that leaves W behind.
+      - **`--vtr-rewrite --implicit-models`** is a usage error; `--report` must lie under the
+        `--work` roots; paths go double-quoted into the `-p` script (one holding `"` is an
+        `error` row); stale `<work>/<n>/` directories are removed at the start of a run.
+    - **Risk: LargeRam.odin (915 MB), excluded.** It is 8× LU64PEEng, where the checker holds
+      about 3 GB, so the checker would need about 23 GB, more than the xl slice (9G) and close to
+      the whole VM (24 GB); `odin3-blif-rt` would peak near 5 GB per write, twice. Both
+      `vtr-read-check` and `blif-roundtrip --vtr` list it by name (`EXCLUDED`/`VTR_EXCLUDED`) and
+      report it as `excluded`, never `pass` (spec §16.3, §16.4, §25). It needs a streaming
+      checker or VPR on a larger host. The list is explicit, not a size threshold: each
+      exclusion is a recorded decision, and a new large golden runs (and fails loudly) until one
+      is made.
 
 ## Risks
 
