@@ -357,6 +357,8 @@ then the options considered.
     - (a) Only the front-end lane waits, at M2: 2D, 2E and 2F merged, and 2H's 19 VTR rows
       identical or equivalent (PHASE2 #4).
       - The x → `unconn` writer convention (2D §14.6 item 3) lands in 3E if 2F has not done it.
+        **Done by 3E-3** (3E §9.4): the plain `write_blif` writes `$_CONST0_`/`$_CONST1_` as
+        `gnd`/`vcc` and `$_CONSTX_`/`$_CONSTZ_` as `unconn`, never `.subckt $_CONST*_`.
       - `flatten` moves into Phase 3 (3A).
       - Not blocking: fuzzing, micro exceptions, the `--x-report` miter, the Odin II XML reader,
         the 2A plugin `wants_ast` ABI, the 1C writer follow-ups.
@@ -458,6 +460,22 @@ then the options considered.
         Resetting the AB-4 generators changed no hash, but they stay reset.
       - `print_stats`' `nd` counts CO buffers and constants, while the MiniLUT count does not.
         QoR rows name which count they report.
+
+23. **3E-3 plain constants: the agent defaults** (2026-10-12; plan point (p), from the 3E-3
+    reviews).
+    - Plain `write_blif` writes `.names gnd`, `.names vcc` / `1` and `.names unconn` per module,
+      and only for the constants that module uses. Designs without constant cells write
+      byte-identical text.
+    - A net already named `gnd`, `vcc` or `unconn` becomes `$n<ID>` only in a module that uses
+      that generator (BLIF names are per model).
+    - A zero-input constant `$sop` whose net is unnamed and drives a port named like the
+      generator counts as that generator. If its net has another name, it is refused, so no name
+      ever has two drivers.
+    - A port bit named like a generator is refused unless its net is that generator.
+    - The generators follow `.clock`.
+    - **For 2H:** Parmys writes all three generators unconditionally. `netlist-compare` therefore
+      ignores an unreferenced zero-input `.names gnd`/`vcc`/`unconn`, so the "identical" leg is
+      not lost to equivalence. That change lands with 2H's comparison work.
 
 ## Risks
 

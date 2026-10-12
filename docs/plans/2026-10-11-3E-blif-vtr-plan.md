@@ -170,7 +170,7 @@ Effort cues:
 - (p) **Plain-mode generators** (3E-3):
   - In every written module, a pin on a net driven by `$_CONST0_`/`$_CONST1_`/`$_CONSTX_`/`$_CONSTZ_` writes `gnd`/`vcc`/`unconn`/`unconn`. The `$_CONST*_` node writes no line.
   - Each referenced generator is emitted once per module, after the ports.
-  - A non-constant net whose chosen name would be `gnd`, `vcc` or `unconn` falls back to `$n<ID>`.
+  - In a module that reads a generator, a net whose chosen name would be that generator's (`gnd`, `vcc` or `unconn`) and which is not that generator falls back to `$n<ID>`. A port bit of that name is refused there unless its net is the generator: the `$_CONST*_` net of that value, or a zero-input `$sop` of that value written under that name. *(Amended 2026-10-12, 3E-3 review M2/I1: the fallback applies only in a module that reads the generator. A module that writes no generator has no name to collide with, and an unconditional rule would change the plain bytes of read-back goldens.)*
   - A port bit on a constant net gets 1C's port buffer from the generator.
   - §9.3's zero-input `$sop` rule applies as in the VTR dialect.
 - (q) **The `docs/PASSES.md` `write_blif` row** becomes: `write_blif [--vtr] [--lut-k K] [--name-style short|provenance] <file>` | 1 (1C, 1D); 3 (3E) | netlist → — | `src/backends/blif/{writer,vtr,isop}.c`, `src/passes/builtin.c` | `blif_roundtrip_fixtures`, `blif_vtr_fixtures`, `cli_*_roundtrip`, `cli_top_written_first` | Plain: the top first, then the others, written atomically; constants as `gnd`/`vcc`/`unconn` (3E-3). `--vtr`: the top alone in the dialect VPR reads (3E spec), refused with located errors before anything is written.

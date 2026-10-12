@@ -42,13 +42,13 @@ typedef struct odin3_blif_write_opts {
  * Modules: the design's top (odin3_design_top) first, since BLIF's first model is the top, then
  * the others in creation order (all in creation order when no top is set): `.model`, then the ports
  * in port order, each run of ports of one direction as one `.inputs` or `.outputs` line, then
- * `.clock` from the module's ODIN3_BLIF_ATTR_CLOCK attribute, then the cells in node ID order (port
- * nodes skipped), then the port buffers (below), then `.end`. Then every declared black-box model
- * (odin3_design_declared_model) in declaration order, once each even when listed twice (the first
- * declaration): `.model`, the ports of the declaration as written
- * (odin3_design_declared_model_decl: its order, widths and scalar flags) as above, `.blackbox`,
- * `.end`. Implicit black boxes (local BLACKBOX types that are not
- * declared models) get no `.model`.
+ * `.clock` from the module's ODIN3_BLIF_ATTR_CLOCK attribute, then the constant generators
+ * (below), then the cells in node ID order (port nodes skipped), then the port buffers (below),
+ * then `.end`. Then every declared black-box model (odin3_design_declared_model) in declaration
+ * order, once each even when listed twice (the first declaration): `.model`, the ports of the
+ * declaration as written (odin3_design_declared_model_decl: its order, widths and scalar flags) as
+ * above, `.blackbox`, `.end`. Implicit black boxes (local BLACKBOX types that are not declared
+ * models) get no `.model`.
  *
  * Ports keep their names: bit k of a port is written as its port bit name, the port wire's
  * ODIN3_BLIF_ATTR_PORT_NAME (frontends/blif/attrs.h) or else the port's name, followed by `[k]`
@@ -81,6 +81,19 @@ typedef struct odin3_blif_write_opts {
  * without a `blif.attr:`/`blif.param:` prefix or without a STRING attribute on the cell is skipped
  * with a warning.
  *
+ * Constants (spec 3E §9.4; Parmys's `write_blif -true + vcc -false + gnd -undef + unconn`): a
+ * `$_CONST0_`, `$_CONST1_`, `$_CONSTX_` or `$_CONSTZ_` cell writes no line, never `.subckt
+ * $_CONST*_`; every pin on its net reads `gnd`, `vcc`, `unconn` or `unconn` instead, and a port bit
+ * on its net gets the port buffer from that name. Each generator a module reads is written once in
+ * it, after `.clock`: `.names gnd`, `.names vcc` / `1`, `.names unconn` (in that order), unless a
+ * zero-input `$sop` whose net keeps that name and value (0, 1, 0) already is it. A net named
+ * `gnd`, `vcc` or `unconn` that is not that generator falls back to `$n<ID>`… in a module that
+ * reads that generator; a port bit of that name is refused there (`path: model 'm': a port bit on
+ * another net has the name of the constant generator 'vcc'`) unless its net is the generator: the
+ * `$_CONST*_` net of that value, or a zero-input `$sop` of that value written under that name
+ * (its own, or an unnamed net's port bit name), so the name always has one driver.
+ * Read back, the generators are zero-input `$sop`s, and a second write gives the same text.
+ *
  * Other net names: the net's own name, unless it is a port bit name of another net; else its
  * primary wire bit (the wire's ODIN3_BLIF_ATTR_PORT_NAME or name, with `[index]` unless the wire
  * is a scalar port or a 1-bit non-port wire); else `$n<net ID>`. A generated name already used by
@@ -96,13 +109,13 @@ typedef struct odin3_blif_write_opts {
  * Errors (logged): ODIN3_ERR_IO when the temporary cannot be created, a write fails or the rename
  * fails ("path: cannot open …", "path:line: write failed …", "path: cannot rename …");
  * ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction INOUT, two ports of one BLIF name
- * on different nets, an IR change D flip-flop or latch, a `.subckt` cell with parameters the reader
- * would not derive or with both ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out of
- * memory. The text goes to a private temporary beside path (util/file.h), renamed over path on
- * success; on any failure only the temporary is removed, so an existing file at path keeps its old
- * contents (a write into a directory that refuses the temporary, such as /dev, is "cannot open").
- * Names are written as they are: a name holding blanks or other characters BLIF cannot carry is not
- * escaped.
+ * on different nets, a port bit named after a generator the module reads, an IR change D flip-flop
+ * or latch, a `.subckt` cell with parameters the reader would not derive or with both ports of one
+ * BLIF name connected; ODIN3_ERR_NO_MEMORY on out of memory. The text goes to a private temporary
+ * beside path (util/file.h), renamed over path on success; on any failure only the temporary is
+ * removed, so an existing file at path keeps its old contents (a write into a directory that
+ * refuses the temporary, such as /dev, is "cannot open"). Names are written as they are: a name
+ * holding blanks or other characters BLIF cannot carry is not escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 
