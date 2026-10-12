@@ -62,8 +62,8 @@ EXT_LANGUAGE = {".v": "verilog", ".vh": "verilog", ".sv": "systemverilog",
 ARCH_KINDS = {".o3lib": "o3lib", ".xml": "vpr_xml"}
 DEFAULT_LIBEXT = [".v"]
 RECORD_KEYS = ("files", "libfiles", "libdirs", "libext", "incdirs", "defines", "top", "params",
-               "arch", "rules", "inventory", "overrides", "flow", "output", "ignored",
-               "duplicates")
+               "arch", "rules", "inventory", "overrides", "flow", "abc_script", "output",
+               "ignored", "duplicates")
 # Record fields a format may state differently from the case's common record (it cannot say
 # what the others say, yet elaborates to the same design).
 OVERRIDABLE = {"o3proj": (), "f": (), "qsf": ("top", "ignored", "libdirs"),
@@ -114,7 +114,8 @@ def syntax(at: str | None, detail: str, *names: str) -> ProjectError:
 def empty_record() -> dict[str, Any]:
     return {"files": [], "libfiles": [], "libdirs": [], "libext": [], "incdirs": [],
             "defines": [], "top": None, "params": [], "arch": [], "rules": [], "inventory": [],
-            "overrides": [], "flow": None, "output": None, "ignored": [], "duplicates": []}
+            "overrides": [], "flow": None, "abc_script": None, "output": None, "ignored": [],
+            "duplicates": []}
 
 
 class Ctx:
@@ -474,6 +475,14 @@ def o3_flow(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
     ctx.record["flow"] = ctx.resolve(base, a[0], at)
 
 
+def o3_abc_script(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
+    """`abc_script <file>` (3D AB-27): once, a path (never inline text), any extension."""
+    a = need(args, 1, 1, at, "abc_script <file>")
+    if ctx.record["abc_script"] is not None:
+        raise syntax(at, "abc_script given twice", "abc_script")
+    ctx.record["abc_script"] = ctx.resolve(base, a[0], at)
+
+
 def o3_import(ctx: Ctx, base: Path, args: list[Word], at: str) -> None:
     usage = "import <file.qpf|file.qsf> [revision <name>]"
     a = need(args, 1, 3, at, usage)
@@ -491,7 +500,7 @@ O3PROJ_KEYS: dict[str, O3Handler] = {
     "incdir": o3_incdir, "define": o3_define, "top": o3_top, "param": o3_param,
     "arch": o3_arch, "device": o3_device, "map": o3_map, "split": o3_split, "limit": o3_limit,
     "patterns": o3_patterns, "available": o3_available, "hide": o3_hide, "cell": o3_cell,
-    "flow": o3_flow, "import": o3_import,
+    "flow": o3_flow, "abc_script": o3_abc_script, "import": o3_import,
 }
 
 
@@ -1925,6 +1934,7 @@ def relativize_record(rec: dict[str, Any], case_dir: str) -> tuple[dict[str, Any
         out[key] = [rel(p, key) for p in out[key]]
     out["duplicates"] = sorted(out["duplicates"])
     out["flow"] = rel(out["flow"], "flow")
+    out["abc_script"] = rel(out["abc_script"], "abc_script")
     if isinstance(out["output"], dict):
         out["output"]["path"] = rel(out["output"]["path"], "output")
     return out, probs

@@ -147,7 +147,8 @@ static odin3_status read_project_run(odin3_pass_ctx *ctx, odin3_design *design, 
     }
     if (st == ODIN3_OK) {
         odin3_pass_options opts = odin3_pass_get_options();
-        odin3_project_request req = {entry.data, parsed.format, NULL, opts.top};
+        /* abc_script: odin3_pass_get_options().abc_script once the CLI has it (3D Task 13) */
+        odin3_project_request req = {entry.data, parsed.format, NULL, opts.top, NULL};
         if (parsed.revision.ptr != NULL) {
             req.revision = revision.data != NULL ? revision.data : "";
         } else if (opts.has_revision) {

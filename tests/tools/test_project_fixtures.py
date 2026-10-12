@@ -87,6 +87,7 @@ class O3projTest(_TmpCase):
         self.put("a.o3lib")
         self.put("p.o3lib")
         self.put("f.o3")
+        self.put("abc/map.abc", "strash; dch -f; if -K {K}\n")
         self.put("p.o3proj", """# comment
 file verilog src/top.v   # trailing comment
 file vhdl "src/top.v" library mylib
@@ -112,6 +113,7 @@ hide dual_port_ram
 cell m27 from multiply param A=27
 patterns p.o3lib
 flow f.o3
+abc_script abc/map.abc
 """)
         rec = self.record("o3proj", "p.o3proj")
         self.assertEqual(rec["files"][1], {"path": "src/top.v", "language": "vhdl",
@@ -137,6 +139,41 @@ flow f.o3
         self.assertEqual(rec["rules"][4], {"rule": "patterns", "path": "p.o3lib"})
         self.assertEqual(rec["overrides"][1]["params"], {"A": "27"})
         self.assertEqual(rec["flow"], "f.o3")
+        self.assertEqual(rec["abc_script"], "abc/map.abc")
+        self.assertEqual(list(rec)[12:15], ["flow", "abc_script", "output"])
+
+    def test_abc_script(self) -> None:
+        """3D AB-27: once, a path resolved against the project file, any extension."""
+        self.put("proj/abc/map.txt", "strash\n")
+        self.put("proj/p.o3proj", "\n\nabc_script abc/map.txt\n")
+        self.assertEqual(self.record("o3proj", "proj/p.o3proj")["abc_script"], "proj/abc/map.txt")
+        self.put("proj/p.o3proj", "abc_script abc/map.txt\n# x\n\nabc_script abc/none.abc\n")
+        err = self.error("o3proj", "proj/p.o3proj")
+        self.assertEqual(err.as_json(), {"kind": "syntax", "at": "proj/p.o3proj:4",
+                                         "names": ["abc_script"]})
+        self.assertEqual(err.detail, "abc_script given twice")
+        self.put("proj/p.o3proj", "abc_script abc/none.abc\n")
+        self.assertEqual(self.error("o3proj", "proj/p.o3proj").as_json(),
+                         {"kind": "missing_file", "at": "proj/p.o3proj:1",
+                          "names": ["proj/abc/none.abc"]})
+        for text in ("abc_script\n", "abc_script a b\n"):
+            with self.subTest(text=text):
+                self.put("proj/p.o3proj", text)
+                self.assertEqual(self.error("o3proj", "proj/p.o3proj").detail,
+                                 "usage: abc_script <file>")
+
+    def test_abc_script_only_in_o3proj(self) -> None:
+        """A -f list has no form for it; a Quartus ABC_SCRIPT is ignored like any assignment."""
+        self.put("src/top.v", module("top"))
+        self.put("x.abc", "strash\n")
+        self.put("files.f", "src/top.v\n-abc_script x.abc\n")
+        self.assertEqual(self.error("f", "files.f").as_json(),
+                         {"kind": "unknown_option", "at": "files.f:2", "names": ["-abc_script"]})
+        self.put("p.qpf", 'PROJECT_REVISION = "top"\n')
+        self.put("top.qsf", "set_global_assignment -name VERILOG_FILE src/top.v\n"
+                            "set_global_assignment -name ABC_SCRIPT x.abc\n")
+        rec = self.record("qsf", "p.qpf")
+        self.assertEqual((rec["abc_script"], rec["ignored"]), (None, ["ABC_SCRIPT"]))
 
     def test_unknown_key_is_located(self) -> None:
         self.put("p.o3proj", "\n# x\nmaps * $mul soft\n")

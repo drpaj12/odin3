@@ -526,7 +526,7 @@ static odin3_status key_patterns(o3_reader *rd, const o3_stmt *st) {
     return res != ODIN3_OK ? res : odin3_project_add_rule(rd->proj, &rule, (odin3_proj_ids){0});
 }
 
-/* --- flow, import -------------------------------------------------------------------------- */
+/* --- flow, abc_script, import -------------------------------------------------------------- */
 
 static odin3_status key_flow(o3_reader *rd, const o3_stmt *st) {
     if (rd->proj->flow.given != 0) {
@@ -537,6 +537,20 @@ static odin3_status key_flow(o3_reader *rd, const o3_stmt *st) {
     odin3_status res = arg_path(rd, &st->args[0], ODIN3_PROJ_WANT_FILE, &flow);
     if (res == ODIN3_OK) {
         rd->proj->flow = flow;
+    }
+    return res;
+}
+
+/* abc_script <file> (3D AB-27): once, a path (never inline text), any extension. */
+static odin3_status key_abc_script(o3_reader *rd, const o3_stmt *st) {
+    if (rd->proj->abc_script.given != 0) {
+        odin3_bytes key = odin3_bytes_cstr("abc_script");
+        return syntax(rd, st, "abc_script given twice", &key);
+    }
+    odin3_proj_path script = {0, 0, {0}};
+    odin3_status res = arg_path(rd, &st->args[0], ODIN3_PROJ_WANT_FILE, &script);
+    if (res == ODIN3_OK) {
+        rd->proj->abc_script = script;
     }
     return res;
 }
@@ -591,6 +605,7 @@ static const o3_key k_keys[] = {
     {"hide", 1, 1, "hide <libcell>", key_hide},
     {"cell", 3, MAX_ARGS, "cell <name> from <libcell> [param <name>=<value>...]", key_cell},
     {"flow", 1, 1, "flow <script.o3>", key_flow},
+    {"abc_script", 1, 1, "abc_script <file>", key_abc_script},
     {"import", 1, 3, "import <file.qpf|file.qsf> [revision <name>]", key_import},
 };
 
