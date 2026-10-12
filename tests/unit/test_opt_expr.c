@@ -1,9 +1,10 @@
 /*
- * test_opt_expr.c — opt_expr (2F spec OP-4, §4; plan Task 6): the logic rules (§4.2), the
- * comparison, shift, arithmetic and mux rules (§4.3), replace_undriven (§4.6), -keepdc, the order
- * of the rules and the counters and log lines, module scope, the opacity of $proc nodes and out of
- * memory. Every case is an RTLIL module through pb_build, one odin3_opt_expr_run (or the design
- * entry) and assertions on the cells and nets after.
+ * test_opt_expr.c — opt_expr (2F spec OP-4, §4; plan Tasks 6 and 7): the logic rules (§4.2), the
+ * comparison, shift, arithmetic and mux rules (§4.3), FF polarity folding (§4.4), the -fine rules
+ * (§4.5), replace_undriven (§4.6), -keepdc, the order of the rules and the counters and log lines,
+ * module scope, the opacity of $proc nodes and out of memory. Every case is an RTLIL module through
+ * pb_build, one odin3_opt_expr_run (or the design entry) and assertions on the cells and nets
+ * after.
  *
  * Oracle: Yosys 0.55, the VTR build (the case files are `read_rtlil`-able as they stand, every
  * parameter spelled out in Yosys's copy of the text):
@@ -97,7 +98,11 @@ static uint32_t intern(const char *name) {
 
 static void build(const char *text) {
     pb_free(&fx.res);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(text, &fx.res));
+    odin3_status built = pb_build(text, &fx.res);
+    for (uint32_t i = 0; built != ODIN3_OK && i < n_lines; i++) {
+        (void)fprintf(stderr, "  log: %s\n", lines[i].text);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, built);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_pass_run_begin(fx.res.design, intern("opt_expr"), &fx.ctx));
 }
@@ -256,18 +261,23 @@ static void expect_port(odin3_node_id node, const char *port, const char *want) 
     TEST_ASSERT_EQUAL_STRING_MESSAGE(want, got, port);
 }
 
-static int64_t pparam(odin3_node_id node, const char *name) {
+/* The parameter `name` of node (the test fails when the type has none). */
+static const odin3_value *param_value(odin3_node_id node, const char *name) {
     const odin3_celltype_def *def =
         odin3_celltype_get(fx.res.design, odin3_node_type(fx.res.module, node));
     for (uint32_t i = 0; def != NULL && i < def->n_params; i++) {
         if (strcmp(def->params[i].name, name) == 0) {
             const odin3_value *val = odin3_node_param(fx.res.module, node, i);
             TEST_ASSERT_NOT_NULL(val);
-            return val->i;
+            return val;
         }
     }
     TEST_FAIL_MESSAGE(name);
-    return 0;
+    return NULL;
+}
+
+static int64_t pparam(odin3_node_id node, const char *name) {
+    return param_value(node, name)->i;
 }
 
 /* Port `port` of node is the nets of wire `wire` from bit `from`, bit for bit. */
@@ -2639,6 +2649,1259 @@ static void test_undriven_oom_keeps_init(void) {
     TEST_ASSERT_TRUE(done);
 }
 
+/* --- FF polarity folding (§4.4) and -fine (§4.5; plan Task 7) ----------------------------------
+ *
+ * Oracle: Yosys 0.55, `yosys -p "read_rtlil CASE.il; opt_expr [-fine | -noclkinv]; write_rtlil"`
+ * (the commands are in the report of Task 7; a case's comment names its flags). Yosys has no $mem
+ * polarity rule: its $memrd/$memwr CLK inputs are the counterpart of a $mem's RD_CLK/WR_CLK bits.
+ */
+
+static const char K_CLKINV_DFF[] = "module \\m\n"
+                                   "  wire input 1 \\c\n"
+                                   "  wire input 2 \\d\n"
+                                   "  attribute \\init 1'1\n"
+                                   "  wire output 3 \\q\n"
+                                   "  wire \\n\n"
+                                   "  cell $not \\inv\n"
+                                   "    connect \\A \\c\n"
+                                   "    connect \\Y \\n\n"
+                                   "  end\n"
+                                   "  cell $dff \\ff\n"
+                                   "    connect \\CLK \\n\n"
+                                   "    connect \\D \\d\n"
+                                   "    connect \\Q \\q\n"
+                                   "  end\n"
+                                   "end\n";
+
+static const char K_CLKINV_RESETS[] = "module \\m\n"
+                                      "  wire input 1 \\c\n"
+                                      "  wire input 2 \\d\n"
+                                      "  wire input 3 \\r\n"
+                                      "  wire input 4 \\e\n"
+                                      "  wire input 5 \\s\n"
+                                      "  wire output 6 \\q1\n"
+                                      "  wire output 7 \\q2\n"
+                                      "  wire \\nr\n"
+                                      "  wire \\nc\n"
+                                      "  wire \\ne\n"
+                                      "  wire \\ns\n"
+                                      "  cell $logic_not \\inv1\n"
+                                      "    connect \\A \\r\n"
+                                      "    connect \\Y \\nr\n"
+                                      "  end\n"
+                                      "  cell $not \\inv2\n"
+                                      "    connect \\A \\c\n"
+                                      "    connect \\Y \\nc\n"
+                                      "  end\n"
+                                      "  cell $mux \\inv3\n"
+                                      "    connect \\A 1'1\n"
+                                      "    connect \\B 1'0\n"
+                                      "    connect \\S \\e\n"
+                                      "    connect \\Y \\ne\n"
+                                      "  end\n"
+                                      "  cell $not \\inv4\n"
+                                      "    connect \\A \\s\n"
+                                      "    connect \\Y \\ns\n"
+                                      "  end\n"
+                                      "  cell $adffe \\ff1\n"
+                                      "    connect \\CLK \\nc\n"
+                                      "    connect \\ARST \\nr\n"
+                                      "    connect \\EN \\ne\n"
+                                      "    connect \\D \\d\n"
+                                      "    connect \\Q \\q1\n"
+                                      "  end\n"
+                                      "  cell $sdff \\ff2\n"
+                                      "    connect \\CLK \\c\n"
+                                      "    connect \\SRST \\ns\n"
+                                      "    connect \\D \\d\n"
+                                      "    connect \\Q \\q2\n"
+                                      "  end\n"
+                                      "end\n";
+
+static const char K_CLKINV_SR[] = "module \\m\n"
+                                  "  wire input 1 \\c\n"
+                                  "  wire input 2 \\s\n"
+                                  "  wire input 3 \\r\n"
+                                  "  wire width 2 input 4 \\s2\n"
+                                  "  wire width 2 input 5 \\r2\n"
+                                  "  wire width 2 input 6 \\d2\n"
+                                  "  wire output 7 \\q1\n"
+                                  "  wire width 2 output 8 \\q2\n"
+                                  "  wire \\ns\n"
+                                  "  wire \\nr\n"
+                                  "  wire \\ns2\n"
+                                  "  wire \\nr2\n"
+                                  "  cell $not \\inv1\n"
+                                  "    connect \\A \\s\n"
+                                  "    connect \\Y \\ns\n"
+                                  "  end\n"
+                                  "  cell $not \\inv2\n"
+                                  "    connect \\A \\r\n"
+                                  "    connect \\Y \\nr\n"
+                                  "  end\n"
+                                  "  cell $not \\inv3\n"
+                                  "    connect \\A \\s2 [0]\n"
+                                  "    connect \\Y \\ns2\n"
+                                  "  end\n"
+                                  "  cell $not \\inv4\n"
+                                  "    connect \\A \\r2 [0]\n"
+                                  "    connect \\Y \\nr2\n"
+                                  "  end\n"
+                                  "  cell $dffsr \\ff1\n"
+                                  "    connect \\CLK \\c\n"
+                                  "    connect \\SET \\ns\n"
+                                  "    connect \\CLR \\nr\n"
+                                  "    connect \\D \\s\n"
+                                  "    connect \\Q \\q1\n"
+                                  "  end\n"
+                                  "  cell $dffsr \\ff2\n"
+                                  "    parameter \\WIDTH 2\n"
+                                  "    connect \\CLK \\c\n"
+                                  "    connect \\SET { \\ns2 \\ns2 }\n"
+                                  "    connect \\CLR { \\nr2 \\nr2 }\n"
+                                  "    connect \\D \\d2\n"
+                                  "    connect \\Q \\q2\n"
+                                  "  end\n"
+                                  "end\n";
+
+static const char K_CLKINV_MEM[] = "module \\m\n"
+                                   "  wire input 1 \\c0\n"
+                                   "  wire input 2 \\c1\n"
+                                   "  wire width 2 input 3 \\ra\n"
+                                   "  wire width 8 output 4 \\rd\n"
+                                   "  wire input 5 \\wc\n"
+                                   "  wire input 6 \\wa\n"
+                                   "  wire width 4 input 7 \\wd\n"
+                                   "  wire \\n\n"
+                                   "  wire \\nw\n"
+                                   "  cell $not \\inv\n"
+                                   "    connect \\A \\c1\n"
+                                   "    connect \\Y \\n\n"
+                                   "  end\n"
+                                   "  cell $not \\invw\n"
+                                   "    connect \\A \\wc\n"
+                                   "    connect \\Y \\nw\n"
+                                   "  end\n"
+                                   "  cell $mem \\mem\n"
+                                   "    parameter \\MEMID \"m\"\n"
+                                   "    parameter \\SIZE 2\n"
+                                   "    parameter \\WIDTH 4\n"
+                                   "    parameter \\RD_PORTS 2\n"
+                                   "    parameter \\WR_PORTS 1\n"
+                                   "    parameter \\RD_CLK_ENABLE 2'11\n"
+                                   "    parameter \\RD_CLK_POLARITY 2'11\n"
+                                   "    parameter \\RD_TRANSPARENT 2'00\n"
+                                   "    parameter \\WR_CLK_ENABLE 1'1\n"
+                                   "    parameter \\WR_CLK_POLARITY 1'1\n"
+                                   "    connect \\RD_CLK { \\n \\c0 }\n"
+                                   "    connect \\RD_EN 2'11\n"
+                                   "    connect \\RD_ADDR \\ra\n"
+                                   "    connect \\RD_DATA \\rd\n"
+                                   "    connect \\WR_CLK \\nw\n"
+                                   "    connect \\WR_EN 4'1111\n"
+                                   "    connect \\WR_ADDR \\wa\n"
+                                   "    connect \\WR_DATA \\wd\n"
+                                   "  end\n"
+                                   "end\n";
+
+static const char K_CLKINV_MEMRD[] = "module \\m\n"
+                                     "  wire input 1 \\c\n"
+                                     "  wire input 2 \\a\n"
+                                     "  wire width 4 output 3 \\d\n"
+                                     "  wire \\n\n"
+                                     "  cell $not \\inv\n"
+                                     "    connect \\A \\c\n"
+                                     "    connect \\Y \\n\n"
+                                     "  end\n"
+                                     "  cell $memrd \\rd\n"
+                                     "    parameter \\MEMID \"m\"\n"
+                                     "    parameter \\WIDTH 4\n"
+                                     "    parameter \\CLK_ENABLE 1\n"
+                                     "    parameter \\CLK_POLARITY 1\n"
+                                     "    connect \\CLK \\n\n"
+                                     "    connect \\EN 1'1\n"
+                                     "    connect \\ADDR \\a\n"
+                                     "    connect \\DATA \\d\n"
+                                     "  end\n"
+                                     "end\n";
+
+static const char K_CLKINV_FINE[] = "module \\m\n"
+                                    "  wire input 1 \\c\n"
+                                    "  wire input 2 \\d\n"
+                                    "  wire input 3 \\e\n"
+                                    "  wire output 4 \\q\n"
+                                    "  wire output 5 \\ql\n"
+                                    "  wire \\n\n"
+                                    "  wire \\ne\n"
+                                    "  cell $_NOT_ \\inv\n"
+                                    "    connect \\A \\c\n"
+                                    "    connect \\Y \\n\n"
+                                    "  end\n"
+                                    "  cell $_NOT_ \\inve\n"
+                                    "    connect \\A \\e\n"
+                                    "    connect \\Y \\ne\n"
+                                    "  end\n"
+                                    "  cell $_DFF_P_ \\ff\n"
+                                    "    parameter \\INIT 1\n"
+                                    "    connect \\C \\n\n"
+                                    "    connect \\D \\d\n"
+                                    "    connect \\Q \\q\n"
+                                    "  end\n"
+                                    "  cell $_DLATCH_N_ \\lt\n"
+                                    "    connect \\E \\ne\n"
+                                    "    connect \\D \\d\n"
+                                    "    connect \\Q \\ql\n"
+                                    "  end\n"
+                                    "end\n";
+
+static const char K_CLKINV_CHAIN[] = "module \\m\n"
+                                     "  wire input 1 \\c\n"
+                                     "  wire input 2 \\d\n"
+                                     "  wire output 3 \\q\n"
+                                     "  wire \\n1\n"
+                                     "  wire \\n2\n"
+                                     "  cell $not \\inv1\n"
+                                     "    connect \\A \\c\n"
+                                     "    connect \\Y \\n1\n"
+                                     "  end\n"
+                                     "  cell $not \\inv2\n"
+                                     "    connect \\A \\n1\n"
+                                     "    connect \\Y \\n2\n"
+                                     "  end\n"
+                                     "  cell $dff \\ff\n"
+                                     "    connect \\CLK \\n2\n"
+                                     "    connect \\D \\d\n"
+                                     "    connect \\Q \\q\n"
+                                     "  end\n"
+                                     "end\n";
+
+static const char K_CLKINV_RING[] = "module \\m\n"
+                                    "  wire input 1 \\d\n"
+                                    "  wire output 2 \\q\n"
+                                    "  wire \\n1\n"
+                                    "  wire \\n2\n"
+                                    "  cell $not \\inv1\n"
+                                    "    connect \\A \\n2\n"
+                                    "    connect \\Y \\n1\n"
+                                    "  end\n"
+                                    "  cell $not \\inv2\n"
+                                    "    connect \\A \\n1\n"
+                                    "    connect \\Y \\n2\n"
+                                    "  end\n"
+                                    "  cell $dff \\ff\n"
+                                    "    connect \\CLK \\n1\n"
+                                    "    connect \\D \\d\n"
+                                    "    connect \\Q \\q\n"
+                                    "  end\n"
+                                    "end\n";
+
+static odin3_node_id named_node(const char *name) {
+    odin3_node_id node = odin3_module_find_node(fx.res.module, intern(name));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_node_valid(node), name);
+    return node;
+}
+
+/* Bit `bit` of the BITS parameter `name` of node. */
+static uint8_t pparam_bit(odin3_node_id node, const char *name, uint32_t bit) {
+    const odin3_value *val = param_value(node, name);
+    TEST_ASSERT_TRUE_MESSAGE(bit < val->len, name);
+    return val->bits[bit];
+}
+
+/* yosys -p "read_rtlil clkinv_dff.il; opt_expr": CLK = c, CLK_POLARITY 0 (the $not stays) */
+static void test_clkinv_dff(void) {
+    build_run(K_CLKINV_DFF);
+    odin3_node_id ff = need_type("$dff");
+    expect_same(pnet(ff, "CLK", 0), wnet("c", 0), "CLK is c");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "CLK_POLARITY"));
+    expect_same(pnet(ff, "Q", 0), wnet("q", 0), "Q is q");
+    TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, pnet(ff, "Q", 0).v);
+    TEST_ASSERT_TRUE(odin3_node_valid(odin3_module_find_node(fx.res.module, intern("ff"))));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.rewritten);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.folded);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $dff 'ff'"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$not")); /* the inverter is opt_clean's */
+}
+
+/* The rebuilt FF keeps its Q net, so the init on q survives. */
+static void test_clkinv_keeps_init(void) {
+    build_run(K_CLKINV_DFF);
+    odin3_wire_id wire = odin3_module_find_wire(fx.res.module, intern("q"));
+    const odin3_value *init =
+        odin3_attr_get(fx.res.module, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, intern("init"));
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, init->bits[0]);
+}
+
+/* yosys -p "read_rtlil clkinv_adff.il; opt_expr": ARST = r, ARST_POLARITY 0 (a $logic_not) */
+static void test_clkinv_adff_arst(void) {
+    build_run(K_CLKINV_RESETS);
+    odin3_node_id ff = named_node("ff1");
+    TEST_ASSERT_EQUAL_STRING("$adffe", type_name(ff));
+    expect_same(pnet(ff, "ARST", 0), wnet("r", 0), "ARST is r");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "ARST_POLARITY"));
+}
+
+/* CLK, ARST and EN of one $adffe at once (EN's inverter is a $mux with A = 1, B = 0: the invert
+ * map's second shape); a $sdff's SRST. One rebuild, one count and DEBUG line per flip. */
+static void test_clkinv_all_ports(void) {
+    build_run(K_CLKINV_RESETS);
+    odin3_node_id ff = named_node("ff1");
+    expect_same(pnet(ff, "CLK", 0), wnet("c", 0), "CLK is c");
+    expect_same(pnet(ff, "EN", 0), wnet("e", 0), "EN is e");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "EN_POLARITY"));
+    odin3_node_id sff = named_node("ff2");
+    TEST_ASSERT_EQUAL_STRING("$sdff", type_name(sff));
+    expect_same(pnet(sff, "SRST", 0), wnet("s", 0), "SRST is s");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(sff, "SRST_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(sff, "CLK_POLARITY")); /* its CLK was not inverted */
+    TEST_ASSERT_EQUAL_UINT32(4, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(
+        3, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $adffe 'ff1'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $sdff 'ff2'"));
+}
+
+/* $dffsr: SET and CLR are WIDTH-bit ports, so only a 1-bit FF has a signal an inverter can drive
+ * (Yosys's invert map is keyed by 1-bit signals); a 2-bit FF keeps its SET and CLR. */
+static void test_clkinv_set_clr(void) {
+    build_run(K_CLKINV_SR);
+    odin3_node_id ff = named_node("ff1");
+    expect_same(pnet(ff, "SET", 0), wnet("s", 0), "SET is s");
+    expect_same(pnet(ff, "CLR", 0), wnet("r", 0), "CLR is r");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "SET_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(0, pparam(ff, "CLR_POLARITY"));
+    odin3_node_id wide = named_node("ff2");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(wide, "SET_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(wide, "CLR_POLARITY"));
+    TEST_ASSERT_FALSE(same_net(pnet(wide, "SET", 0), wnet("s2", 0)));
+    TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
+}
+
+/* a $mem port's RD_CLK bit is its own: bit 1 flips, bit 0 stays */
+static void test_clkinv_mem(void) {
+    build_run(K_CLKINV_MEM);
+    odin3_node_id mem = need_type("$mem");
+    expect_same(pnet(mem, "RD_CLK", 1), wnet("c1", 0), "RD_CLK[1] is c1");
+    expect_same(pnet(mem, "RD_CLK", 0), wnet("c0", 0), "RD_CLK[0] is c0");
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, pparam_bit(mem, "RD_CLK_POLARITY", 0));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, pparam_bit(mem, "RD_CLK_POLARITY", 1));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, pparam_bit(mem, "RD_CLK_ENABLE", 1));
+    expect_same(pnet(mem, "WR_CLK", 0), wnet("wc", 0), "WR_CLK is wc");
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, pparam_bit(mem, "WR_CLK_POLARITY", 0));
+    TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(
+        2, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $mem 'mem'"));
+}
+
+/* yosys -p "read_rtlil memrd.il; opt_expr": the $memrd's CLK = c, CLK_POLARITY 0, whatever its
+ * CLK_ENABLE */
+static void test_clkinv_memrd(void) {
+    build_run(K_CLKINV_MEMRD);
+    odin3_node_id rd = need_type("$memrd");
+    expect_same(pnet(rd, "CLK", 0), wnet("c", 0), "CLK is c");
+    TEST_ASSERT_EQUAL_INT64(0, pparam(rd, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(rd, "CLK_ENABLE"));
+}
+
+/* yosys -p "read_rtlil dffn.il; opt_expr": $_DFF_P_ with an inverted C is $_DFF_N_; a
+ * $_DLATCH_N_ with an inverted E is $_DLATCH_P_ */
+static void test_clkinv_fine(void) {
+    build_run(K_CLKINV_FINE);
+    odin3_node_id ff = named_node("ff");
+    TEST_ASSERT_EQUAL_STRING("$_DFF_N_", type_name(ff));
+    expect_same(pnet(ff, "C", 0), wnet("c", 0), "C is c");
+    expect_same(pnet(ff, "Q", 0), wnet("q", 0), "Q is q");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ff, "INIT"));
+    odin3_node_id lt = named_node("lt");
+    TEST_ASSERT_EQUAL_STRING("$_DLATCH_P_", type_name(lt));
+    expect_same(pnet(lt, "E", 0), wnet("e", 0), "E is e");
+    TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $_DFF_P_ 'ff'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': clkinv on $_DLATCH_N_ 'lt'"));
+}
+
+/* yosys -p "read_rtlil clkinv_dff.il; opt_expr -noclkinv": the $dff is as it was */
+static void test_noclkinv(void) {
+    fx.opts.noclkinv = true;
+    build_run(K_CLKINV_DFF);
+    odin3_node_id ff = need_type("$dff");
+    expect_same(pnet(ff, "CLK", 0), wnet("n", 0), "CLK is still n");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ff, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.rewritten);
+    build_run(K_CLKINV_FINE);
+    TEST_ASSERT_EQUAL_STRING("$_DFF_P_", type_name(named_node("ff")));
+}
+
+/* Two inverters in a row take two rounds: the polarity is back to 1 on c (Yosys loops the same). */
+static void test_clkinv_chain(void) {
+    build_run(K_CLKINV_CHAIN);
+    odin3_node_id ff = need_type("$dff");
+    expect_same(pnet(ff, "CLK", 0), wnet("c", 0), "CLK is c");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ff, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_UINT32(2, rule(ODIN3_OPT_RULE_CLKINV));
+}
+
+/* A ring of inverters would flip the clock for ever (Yosys's loop never ends on it): left alone. */
+static void test_clkinv_ring(void) {
+    build_run(K_CLKINV_RING);
+    odin3_node_id ff = need_type("$dff");
+    expect_same(pnet(ff, "CLK", 0), wnet("n1", 0), "CLK is still n1");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ff, "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_CLKINV));
+}
+
+/* OP-15: the rebuilt FF carries a DERIVED record whose parent is the old FF's. */
+static void test_clkinv_provenance(void) {
+    build(K_CLKINV_DFF);
+    odin3_prov_id parent = odin3_node_prov(fx.res.module, named_node("ff"));
+    TEST_ASSERT_TRUE(odin3_prov_valid(parent));
+    run_expr();
+    const odin3_prov_record *rec =
+        odin3_prov_get(fx.res.design, odin3_node_prov(fx.res.module, need_type("$dff")));
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    TEST_ASSERT_EQUAL_UINT32(1, rec->parents.count);
+    TEST_ASSERT_EQUAL_UINT32(parent.v, rec->parents.ids[0].v);
+}
+
+static const char K_FINE_GROUP[] = "module \\m\n"
+                                   "  wire width 2 input 1 \\a2\n"
+                                   "  wire input 2 \\b\n"
+                                   "  wire width 2 output 3 \\y\n"
+                                   "  cell $and \\c\n"
+                                   "    parameter \\A_WIDTH 2\n"
+                                   "    parameter \\B_WIDTH 2\n"
+                                   "    parameter \\Y_WIDTH 2\n"
+                                   "    connect \\A \\a2\n"
+                                   "    connect \\B { 1'1 \\b }\n"
+                                   "    connect \\Y \\y\n"
+                                   "  end\n"
+                                   "end\n";
+
+/* yosys -p "read_rtlil group.il; opt_expr -fine": y[1] = a2[1], y[0] a 1-bit $and(a2[0], b) */
+static void test_fine_group(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_GROUP);
+    odin3_node_id and_ = need_type("$and");
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$and"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(and_, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(and_, "B_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(and_, "Y_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(0, pparam(and_, "A_SIGNED"));
+    expect_same(pnet(and_, "A", 0), wnet("a2", 0), "A is a2[0]");
+    expect_same(pnet(and_, "B", 0), wnet("b", 0), "B is b");
+    expect_same(pnet(and_, "Y", 0), wnet("y", 0), "Y is y[0]");
+    expect_same(wnet("y", 1), wnet("a2", 1), "y[1] is a2[1]");
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_GROUP));
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.rewritten);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.group on $and 'c'"));
+}
+
+/* without -fine, and with -full (which implies it) */
+static void test_fine_group_off_and_full(void) {
+    build_run(K_FINE_GROUP);
+    TEST_ASSERT_EQUAL_INT64(2, pparam(need_type("$and"), "A_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(0, rules_total());
+    fx.opts.full = true;
+    build_run(K_FINE_GROUP);
+    TEST_ASSERT_EQUAL_INT64(1, pparam(need_type("$and"), "A_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_GROUP));
+}
+
+static const char K_FINE_GROUP_KINDS[] = "module \\m\n"
+                                         "  wire input 1 \\a\n"
+                                         "  wire width 3 input 2 \\b\n"
+                                         "  wire width 3 output 3 \\y\n"
+                                         "  wire width 3 output 4 \\z\n"
+                                         "  wire width 3 output 5 \\w\n"
+                                         "  cell $xor \\c1\n"
+                                         "    parameter \\A_WIDTH 3\n"
+                                         "    parameter \\B_WIDTH 3\n"
+                                         "    parameter \\Y_WIDTH 3\n"
+                                         "    connect \\A { 1'1 1'x \\a }\n"
+                                         "    connect \\B \\b\n"
+                                         "    connect \\Y \\y\n"
+                                         "  end\n"
+                                         "  cell $or \\c2\n"
+                                         "    parameter \\A_WIDTH 3\n"
+                                         "    parameter \\B_WIDTH 3\n"
+                                         "    parameter \\Y_WIDTH 3\n"
+                                         "    connect \\A { 1'x 1'0 \\a }\n"
+                                         "    connect \\B \\b\n"
+                                         "    connect \\Y \\z\n"
+                                         "  end\n"
+                                         "  cell $not \\c3\n"
+                                         "    parameter \\A_WIDTH 3\n"
+                                         "    parameter \\Y_WIDTH 3\n"
+                                         "    connect \\A { \\a \\a 1'0 }\n"
+                                         "    connect \\Y \\w\n"
+                                         "  end\n"
+                                         "end\n";
+
+/* yosys -p "read_rtlil xorg.il; opt_expr -fine": the constant-A groups of $xor and $or are wiring
+ * or $not cells (x -> 0 for $xor, -> 1 for $or); equal bits of a $not share one cell */
+static void test_fine_group_kinds(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_GROUP_KINDS);
+    TEST_ASSERT_EQUAL_STRING("$xor", driver_type(wnet("y", 0)));
+    TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("y", 1)));
+    TEST_ASSERT_EQUAL_STRING("$not", driver_type(wnet("y", 2)));
+    expect_same(pnet(driver_node(wnet("y", 2)), "A", 0), wnet("b", 2), "~b[2]");
+    TEST_ASSERT_EQUAL_STRING("$or", driver_type(wnet("z", 0)));
+    expect_same(wnet("z", 1), wnet("b", 1), "z[1] is b[1]");
+    TEST_ASSERT_EQUAL_CHAR('1', cbit(wnet("z", 2)));
+    TEST_ASSERT_EQUAL_CHAR('1', cbit(wnet("w", 0))); /* ~0, folded in a later round */
+    expect_same(wnet("w", 1), wnet("w", 2), "one $not for both a bits");
+    TEST_ASSERT_EQUAL_STRING("$not", driver_type(wnet("w", 1)));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(driver_node(wnet("w", 1)), "A_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(3, rule(ODIN3_OPT_RULE_FINE_GROUP));
+}
+
+/* With -keepdc an x bit is not defined, so it stays in the cell (Yosys's `def || !keepdc`). */
+static void test_fine_group_keepdc(void) {
+    fx.opts.fine = true;
+    fx.opts.keepdc = true;
+    build_run(K_FINE_GROUP_KINDS);
+    TEST_ASSERT_EQUAL_STRING("$xor", driver_type(wnet("y", 1)));
+    TEST_ASSERT_EQUAL_STRING("$or", driver_type(wnet("z", 2)));
+}
+
+static const char K_FINE_NEUTRAL[] = "module \\m\n"
+                                     "  wire input 1 \\a\n"
+                                     "  wire input 2 \\b\n"
+                                     "  wire output 3 \\y\n"
+                                     "  wire output 4 \\z\n"
+                                     "  wire output 5 \\u\n"
+                                     "  wire output 6 \\v\n"
+                                     "  cell $reduce_or \\c1\n"
+                                     "    parameter \\A_WIDTH 3\n"
+                                     "    connect \\A { \\a 1'0 \\b }\n"
+                                     "    connect \\Y \\y\n"
+                                     "  end\n"
+                                     "  cell $reduce_and \\c2\n"
+                                     "    parameter \\A_WIDTH 4\n"
+                                     "    connect \\A 4'1111\n"
+                                     "    connect \\Y \\z\n"
+                                     "  end\n"
+                                     "  cell $logic_and \\c3\n"
+                                     "    parameter \\B_WIDTH 2\n"
+                                     "    connect \\A \\a\n"
+                                     "    connect \\B { \\b 1'0 }\n"
+                                     "    connect \\Y \\u\n"
+                                     "  end\n"
+                                     "  cell $reduce_and \\c4\n"
+                                     "    parameter \\A_WIDTH 3\n"
+                                     "    connect \\A { \\a 1'1 \\b }\n"
+                                     "    connect \\Y \\v\n"
+                                     "  end\n"
+                                     "end\n";
+
+/* yosys -p "read_rtlil neutral.il; opt_expr -fine": the neutral bits go (0; 1 for $reduce_and) */
+static void test_fine_neutral(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_NEUTRAL);
+    odin3_node_id or_ = need_type("$reduce_or");
+    TEST_ASSERT_EQUAL_INT64(2, pparam(or_, "A_WIDTH"));
+    expect_same(pnet(or_, "A", 0), wnet("b", 0), "A[0] is b");
+    expect_same(pnet(or_, "A", 1), wnet("a", 0), "A[1] is a");
+    expect_wire("z", 1, "1"); /* $reduce_and(4'b1111): A = 1'1, then folded */
+    odin3_node_id land = need_type("$logic_and");
+    TEST_ASSERT_EQUAL_INT64(1, pparam(land, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(land, "B_WIDTH"));
+    expect_same(pnet(land, "B", 0), wnet("b", 0), "B is b");
+    odin3_node_id and_ = need_type("$reduce_and");
+    TEST_ASSERT_EQUAL_INT64(2, pparam(and_, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(3, rule(ODIN3_OPT_RULE_FINE_NEUTRAL_A));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_NEUTRAL_B));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.neutral_A on $reduce_or 'c1'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.neutral_B on $logic_and 'c3'"));
+}
+
+static void test_fine_neutral_off(void) {
+    build_run(K_FINE_NEUTRAL);
+    TEST_ASSERT_EQUAL_INT64(3, pparam(need_type("$reduce_or"), "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(need_type("$logic_and"), "B_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_NEUTRAL_A));
+}
+
+static const char K_FINE_CONST[] = "module \\m\n"
+                                   "  wire input 1 \\a\n"
+                                   "  wire input 2 \\b\n"
+                                   "  wire output 3 \\y\n"
+                                   "  wire output 4 \\z\n"
+                                   "  wire output 5 \\u\n"
+                                   "  cell $logic_not \\c1\n"
+                                   "    parameter \\A_WIDTH 2\n"
+                                   "    connect \\A { \\a 1'1 }\n"
+                                   "    connect \\Y \\y\n"
+                                   "  end\n"
+                                   "  cell $logic_or \\c2\n"
+                                   "    parameter \\B_WIDTH 2\n"
+                                   "    connect \\A \\a\n"
+                                   "    connect \\B { \\b 1'1 }\n"
+                                   "    connect \\Y \\z\n"
+                                   "  end\n"
+                                   "  cell $reduce_and \\c3\n"
+                                   "    parameter \\A_WIDTH 2\n"
+                                   "    connect \\A { 1'x 1'x }\n"
+                                   "    connect \\Y \\u\n"
+                                   "  end\n"
+                                   "end\n";
+
+/* fine.A, fine.B and fine.$reduce_and: an all-constant side collapses to its one-bit reduction;
+ * the cell goes on in the same visit (the fold, or the next round's and_or rules) */
+static void test_fine_const_sides(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_CONST);
+    expect_wire("y", 1, "0"); /* !(a | 1) */
+    expect_wire("z", 1, "1"); /* a || (b | 1) */
+    expect_wire("u", 1, "x"); /* &{x, x} */
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_A));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_B));
+    TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_FINE_REDUCE_AND));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.A on $logic_not 'c1'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.B on $logic_or 'c2'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1,
+        count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.$reduce_and on $reduce_and 'c3'"));
+}
+
+/* The brief's fine_reduce_and_const: $reduce_and(4'b1111) is 1. */
+static void test_fine_reduce_and_const(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_NEUTRAL);
+    expect_wire("z", 1, "1");
+}
+
+static const char K_FINE_ADD[] = "module \\m\n"
+                                 "  wire width 4 input 1 \\a4\n"
+                                 "  wire width 3 input 2 \\b3\n"
+                                 "  wire width 4 output 3 \\y\n"
+                                 "  wire width 3 input 4 \\a3\n"
+                                 "  wire width 4 output 5 \\z\n"
+                                 "  wire width 4 input 6 \\b4\n"
+                                 "  wire width 2 output 7 \\w\n"
+                                 "  wire width 2 input 8 \\a2\n"
+                                 "  cell $add \\c1\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    parameter \\Y_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B { \\b3 1'0 }\n"
+                                 "    connect \\Y \\y\n"
+                                 "  end\n"
+                                 "  cell $sub \\c2\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    parameter \\Y_WIDTH 4\n"
+                                 "    connect \\A { \\a3 1'1 }\n"
+                                 "    connect \\B { \\b3 1'1 }\n"
+                                 "    connect \\Y \\z\n"
+                                 "  end\n"
+                                 "  cell $add \\c3\n"
+                                 "    parameter \\A_WIDTH 2\n"
+                                 "    parameter \\B_WIDTH 2\n"
+                                 "    parameter \\Y_WIDTH 2\n"
+                                 "    connect \\A \\a2\n"
+                                 "    connect \\B 2'00\n"
+                                 "    connect \\Y \\w\n"
+                                 "  end\n"
+                                 "end\n";
+
+/* yosys -p "read_rtlil add.il; opt_expr -fine": Y[0] = a4[0], a 3-bit $add for Y[3:1]; the $sub's
+ * 1 - 1 bit is 0; an $add of 0 strips every bit (Yosys leaves a 0-bit cell: §17 #18) */
+static void test_fine_add_low_bit(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_ADD);
+    expect_same(wnet("y", 0), wnet("a4", 0), "y[0] is a4[0]");
+    odin3_node_id add = driver_node(wnet("y", 3));
+    TEST_ASSERT_EQUAL_STRING("$add", type_name(add));
+    TEST_ASSERT_EQUAL_INT64(3, pparam(add, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(3, pparam(add, "B_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(3, pparam(add, "Y_WIDTH"));
+    for (uint32_t k = 0; k < 3; k++) {
+        expect_same(pnet(add, "A", k), wnet("a4", k + 1), "A is a4[3:1]");
+        expect_same(pnet(add, "B", k), wnet("b3", k), "B is b3");
+        expect_same(pnet(add, "Y", k), wnet("y", k + 1), "Y is y[3:1]");
+    }
+    TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("z", 0)));
+    odin3_node_id sub = need_type("$sub");
+    TEST_ASSERT_EQUAL_INT64(3, pparam(sub, "A_WIDTH"));
+    expect_same(pnet(sub, "Y", 0), wnet("z", 1), "$sub drives z[3:1]");
+    for (uint32_t k = 0; k < 2; k++) {
+        expect_same(wnet("w", k), wnet("a2", k), "w is a2");
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add")); /* the c3 $add is gone */
+    TEST_ASSERT_EQUAL_UINT32(3, rule(ODIN3_OPT_RULE_FINE_ADDSUB));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine on $add 'c1'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine on $sub 'c2'"));
+}
+
+static const char K_FINE_ADD_SIGNED[] = "module \\m\n"
+                                        "  wire input 1 \\a1\n"
+                                        "  wire input 2 \\b0\n"
+                                        "  wire width 4 output 3 \\y\n"
+                                        "  wire width 4 output 4 \\z\n"
+                                        "  cell $add \\c1\n"
+                                        "    parameter \\A_SIGNED 1\n"
+                                        "    parameter \\B_SIGNED 1\n"
+                                        "    parameter \\A_WIDTH 2\n"
+                                        "    parameter \\B_WIDTH 1\n"
+                                        "    parameter \\Y_WIDTH 4\n"
+                                        "    connect \\A { \\a1 1'0 }\n"
+                                        "    connect \\B \\b0\n"
+                                        "    connect \\Y \\y\n"
+                                        "  end\n"
+                                        "  cell $add \\c2\n"
+                                        "    parameter \\A_WIDTH 2\n"
+                                        "    parameter \\B_WIDTH 1\n"
+                                        "    parameter \\Y_WIDTH 4\n"
+                                        "    connect \\A { \\a1 1'0 }\n"
+                                        "    connect \\B \\b0\n"
+                                        "    connect \\Y \\z\n"
+                                        "  end\n"
+                                        "end\n";
+
+/* A fully stripped operand: a signed one keeps its top bit (Yosys), an unsigned one is 0 (Yosys:
+ * a 0-bit port; §17 #18), which strips the rest of an unsigned cell in the rounds that follow. */
+static void test_fine_add_operand_gone(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_ADD_SIGNED);
+    odin3_node_id sadd = driver_node(wnet("y", 3));
+    TEST_ASSERT_EQUAL_STRING("$add", type_name(sadd));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(sadd, "A_SIGNED"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(sadd, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(sadd, "B_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(3, pparam(sadd, "Y_WIDTH"));
+    expect_same(pnet(sadd, "A", 0), wnet("a1", 0), "A is a1");
+    expect_same(pnet(sadd, "B", 0), wnet("b0", 0), "B is the stripped bit, as the sign");
+    expect_same(wnet("y", 0), wnet("b0", 0), "y[0] is b0");
+    /* unsigned: a1 + 0, stripped to the end (Yosys is left with a $add with a 0-bit B) */
+    expect_same(wnet("z", 0), wnet("b0", 0), "z[0] is b0");
+    expect_same(wnet("z", 1), wnet("a1", 0), "z[1] is a1");
+    TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("z", 2)));
+    TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("z", 3)));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
+}
+
+static const char K_FINE_EQ[] = "module \\m\n"
+                                "  wire input 1 \\a\n"
+                                "  wire input 2 \\b\n"
+                                "  wire output 3 \\y\n"
+                                "  wire output 4 \\z\n"
+                                "  wire width 2 input 5 \\c\n"
+                                "  wire width 2 input 6 \\d\n"
+                                "  wire output 7 \\w\n"
+                                "  wire output 8 \\u\n"
+                                "  wire output 9 \\v\n"
+                                "  cell $eq \\c1\n"
+                                "    parameter \\A_WIDTH 2\n"
+                                "    parameter \\B_WIDTH 2\n"
+                                "    connect \\A { \\a \\a }\n"
+                                "    connect \\B { 1'0 1'1 }\n"
+                                "    connect \\Y \\y\n"
+                                "  end\n"
+                                "  cell $ne \\c2\n"
+                                "    parameter \\A_WIDTH 3\n"
+                                "    parameter \\B_WIDTH 3\n"
+                                "    connect \\A { \\a \\b \\a }\n"
+                                "    connect \\B { \\b \\a \\b }\n"
+                                "    connect \\Y \\z\n"
+                                "  end\n"
+                                "  cell $eq \\c3\n"
+                                "    parameter \\A_WIDTH 2\n"
+                                "    parameter \\B_WIDTH 2\n"
+                                "    connect \\A \\c\n"
+                                "    connect \\B { \\d [1] \\d [0] }\n"
+                                "    connect \\Y \\w\n"
+                                "  end\n"
+                                "  cell $ne \\c4\n"
+                                "    parameter \\A_WIDTH 3\n"
+                                "    parameter \\B_WIDTH 3\n"
+                                "    connect \\A { \\a \\b \\a }\n"
+                                "    connect \\B { \\b 1'1 1'0 }\n"
+                                "    connect \\Y \\u\n"
+                                "  end\n"
+                                "  cell $ne \\c5\n"
+                                "    parameter \\A_WIDTH 1\n"
+                                "    parameter \\B_WIDTH 3\n"
+                                "    connect \\A \\b\n"
+                                "    connect \\B { \\a \\b 1'0 }\n"
+                                "    connect \\Y \\v\n"
+                                "  end\n"
+                                "end\n";
+
+/* yosys -p "read_rtlil eq.il; opt_expr -fine": $eq({a, a}, {0, 1}) is 0; $ne({a, b, a}, {b, a, b})
+ * keeps one pair; a chain a ~ b, b ~ 1, a ~ 0 joins 0 and 1, so $ne(..) is 1 */
+static void test_fine_eq_unionfind(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_EQ);
+    expect_wire("y", 1, "0");
+    expect_wire("u", 1, "1");
+    odin3_node_id ne = driver_node(wnet("z", 0));
+    TEST_ASSERT_EQUAL_STRING("$ne", type_name(ne));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ne, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(ne, "B_WIDTH"));
+    expect_same(pnet(ne, "A", 0), wnet("a", 0), "A is a");
+    expect_same(pnet(ne, "B", 0), wnet("b", 0), "B is b");
+    odin3_node_id eq = driver_node(wnet("w", 0));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(eq, "A_WIDTH")); /* c3 has no redundant pair */
+    /* c5: b != {a, b, 0} loses its only A bit (b against the zero-padded b at bit 1); A is 0, so
+     * the cell is the reduction of what is left of B (Yosys: a 0-bit A, then eqneq.cmpzero) */
+    odin3_node_id rbool = driver_node(wnet("v", 0));
+    TEST_ASSERT_EQUAL_STRING("$reduce_bool", type_name(rbool));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(rbool, "A_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(4, rule(ODIN3_OPT_RULE_FINE_EQNE));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.eqne on $eq 'c1'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.eqne on $ne 'c2'"));
+}
+
+static void test_fine_eq_off(void) {
+    build_run(K_FINE_EQ);
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_EQNE));
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("$eq")); /* c1 does not fold without -fine */
+}
+
+static const char K_FINE_CMP[] = "module \\m\n"
+                                 "  wire width 4 input 1 \\a4\n"
+                                 "  wire width 4 input 2 \\s4\n"
+                                 "  wire output 3 \\y_lt0\n"
+                                 "  wire output 4 \\y_ge0\n"
+                                 "  wire output 5 \\y_gt1\n"
+                                 "  wire output 6 \\y_le1\n"
+                                 "  wire output 7 \\y_lt4\n"
+                                 "  wire output 8 \\y_ge4\n"
+                                 "  wire output 9 \\y_slt\n"
+                                 "  wire output 10 \\y_sge\n"
+                                 "  wire output 11 \\y_swap\n"
+                                 "  wire output 12 \\y_wide\n"
+                                 "  cell $lt \\c1\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'0000\n"
+                                 "    connect \\Y \\y_lt0\n"
+                                 "  end\n"
+                                 "  cell $ge \\c2\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'0000\n"
+                                 "    connect \\Y \\y_ge0\n"
+                                 "  end\n"
+                                 "  cell $gt \\c3\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'1111\n"
+                                 "    connect \\Y \\y_gt1\n"
+                                 "  end\n"
+                                 "  cell $le \\c4\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'1111\n"
+                                 "    connect \\Y \\y_le1\n"
+                                 "  end\n"
+                                 "  cell $lt \\c5\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'0100\n"
+                                 "    connect \\Y \\y_lt4\n"
+                                 "  end\n"
+                                 "  cell $ge \\c6\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'0100\n"
+                                 "    connect \\Y \\y_ge4\n"
+                                 "  end\n"
+                                 "  cell $lt \\c7\n"
+                                 "    parameter \\A_SIGNED 1\n"
+                                 "    parameter \\B_SIGNED 1\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\s4\n"
+                                 "    connect \\B 4'0000\n"
+                                 "    connect \\Y \\y_slt\n"
+                                 "  end\n"
+                                 "  cell $ge \\c8\n"
+                                 "    parameter \\A_SIGNED 1\n"
+                                 "    parameter \\B_SIGNED 1\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\s4\n"
+                                 "    connect \\B 4'0000\n"
+                                 "    connect \\Y \\y_sge\n"
+                                 "  end\n"
+                                 "  cell $gt \\c9\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A 4'0000\n"
+                                 "    connect \\B \\a4\n"
+                                 "    connect \\Y \\y_swap\n"
+                                 "  end\n"
+                                 "  cell $lt \\c10\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 5\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 5'10000\n"
+                                 "    connect \\Y \\y_wide\n"
+                                 "  end\n"
+                                 "end\n";
+
+/* yosys -p "read_rtlil cmp.il; opt_expr -fine" (c1-c8; c9 swaps the sides, c10's constant is
+ * above X's range) */
+static void test_fine_cmp(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_CMP);
+    expect_wire("y_lt0", 1, "0");
+    expect_wire("y_ge0", 1, "1");
+    expect_wire("y_gt1", 1, "0");
+    expect_wire("y_le1", 1, "1");
+    expect_wire("y_swap", 1, "0"); /* 0 > a4 is a4 < 0 */
+    expect_wire("y_wide", 1, "1");
+    odin3_node_id lnot = driver_node(wnet("y_lt4", 0));
+    TEST_ASSERT_EQUAL_STRING("$logic_not", type_name(lnot));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(lnot, "A_WIDTH"));
+    expect_same(pnet(lnot, "A", 0), wnet("a4", 2), "A[0] is a4[2]");
+    expect_same(pnet(lnot, "A", 1), wnet("a4", 3), "A[1] is a4[3]");
+    odin3_node_id ror = driver_node(wnet("y_ge4", 0));
+    TEST_ASSERT_EQUAL_STRING("$reduce_or", type_name(ror));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(ror, "A_WIDTH"));
+    expect_same(wnet("y_slt", 0), wnet("s4", 3), "signed X<0 is the MSB");
+    odin3_node_id sge = driver_node(wnet("y_sge", 0));
+    TEST_ASSERT_EQUAL_STRING("$logic_not", type_name(sge));
+    TEST_ASSERT_EQUAL_INT64(1, pparam(sge, "A_WIDTH"));
+    expect_same(pnet(sge, "A", 0), wnet("s4", 3), "signed X>=0 is !MSB");
+    TEST_ASSERT_EQUAL_UINT32(10, rule(ODIN3_OPT_RULE_FINE_CMP));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_expr: module 'm': fine.cmp on $lt 'c5'"));
+}
+
+static void test_fine_cmp_off(void) {
+    build_run(K_FINE_CMP);
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_CMP));
+    TEST_ASSERT_EQUAL_UINT32(0, rules_total());
+}
+
+static const char K_FINE_NOTHING[] = "module \\m\n"
+                                     "  wire width 2 input 1 \\a\n"
+                                     "  wire width 2 input 2 \\b\n"
+                                     "  wire width 2 output 3 \\y\n"
+                                     "  cell $and \\c\n"
+                                     "    parameter \\A_WIDTH 2\n"
+                                     "    parameter \\B_WIDTH 2\n"
+                                     "    parameter \\Y_WIDTH 2\n"
+                                     "    connect \\A \\a\n"
+                                     "    connect \\B \\b\n"
+                                     "    connect \\Y \\y\n"
+                                     "  end\n"
+                                     "end\n";
+
+/* Yosys: when one group already holds every bit as a different pair, nothing is regrouped. */
+static void test_fine_group_nothing(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_NOTHING);
+    TEST_ASSERT_EQUAL_UINT32(0, rules_total());
+    TEST_ASSERT_EQUAL_INT64(2, pparam(need_type("$and"), "A_WIDTH"));
+}
+
+static const char K_FINE_CMP_MIXED[] = "module \\m\n"
+                                       "  wire width 4 input 1 \\s4\n"
+                                       "  wire output 2 \\y\n"
+                                       "  wire output 3 \\z\n"
+                                       "  cell $lt \\c1\n"
+                                       "    parameter \\A_SIGNED 1\n"
+                                       "    parameter \\A_WIDTH 4\n"
+                                       "    parameter \\B_WIDTH 4\n"
+                                       "    connect \\A \\s4\n"
+                                       "    connect \\B 4'0000\n"
+                                       "    connect \\Y \\y\n"
+                                       "  end\n"
+                                       "  cell $ge \\c2\n"
+                                       "    parameter \\A_SIGNED 1\n"
+                                       "    parameter \\A_WIDTH 4\n"
+                                       "    parameter \\B_WIDTH 4\n"
+                                       "    connect \\A \\s4\n"
+                                       "    connect \\B 4'0000\n"
+                                       "    connect \\Y \\z\n"
+                                       "  end\n"
+                                       "end\n";
+
+/* Signed only when both operands are (§17 #19): a signed A against an unsigned 0 is unsigned. */
+static void test_fine_cmp_mixed_sign(void) {
+    fx.opts.fine = true;
+    build_run(K_FINE_CMP_MIXED);
+    expect_wire("y", 1, "0");
+    expect_wire("z", 1, "1");
+}
+
+static void test_fine_rule_names(void) {
+    TEST_ASSERT_EQUAL_STRING("clkinv", odin3_opt_rule_name(ODIN3_OPT_RULE_CLKINV));
+    TEST_ASSERT_EQUAL_STRING("fine.group", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_GROUP));
+    TEST_ASSERT_EQUAL_STRING("fine.neutral_A", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_NEUTRAL_A));
+    TEST_ASSERT_EQUAL_STRING("fine.neutral_B", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_NEUTRAL_B));
+    TEST_ASSERT_EQUAL_STRING("fine.$reduce_and",
+                             odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_REDUCE_AND));
+    TEST_ASSERT_EQUAL_STRING("fine.A", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_A));
+    TEST_ASSERT_EQUAL_STRING("fine.B", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_B));
+    TEST_ASSERT_EQUAL_STRING("fine", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_ADDSUB));
+    TEST_ASSERT_EQUAL_STRING("fine.eqne", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_EQNE));
+    TEST_ASSERT_EQUAL_STRING("fine.cmp", odin3_opt_rule_name(ODIN3_OPT_RULE_FINE_CMP));
+}
+
+/* The FF rules and the fine rules in one module, for the out-of-memory sweep. */
+static const char K_OOM_FINE[] = "module \\m\n"
+                                 "  wire input 1 \\c\n"
+                                 "  wire input 2 \\d\n"
+                                 "  wire input 3 \\a\n"
+                                 "  wire input 4 \\b\n"
+                                 "  wire width 4 input 5 \\a4\n"
+                                 "  wire width 3 input 6 \\b3\n"
+                                 "  wire width 2 input 7 \\a2\n"
+                                 "  wire width 2 input 8 \\ra\n"
+                                 "  attribute \\init 1'1\n"
+                                 "  wire output 9 \\q\n"
+                                 "  wire output 10 \\ql\n"
+                                 "  wire width 8 output 11 \\rd\n"
+                                 "  wire width 2 output 12 \\y1\n"
+                                 "  wire width 3 output 13 \\y2\n"
+                                 "  wire output 14 \\y3\n"
+                                 "  wire width 4 output 15 \\y4\n"
+                                 "  wire output 16 \\y5\n"
+                                 "  wire output 17 \\y6\n"
+                                 "  wire output 18 \\y7\n"
+                                 "  wire input 19 \\wc\n"
+                                 "  wire input 20 \\wa\n"
+                                 "  wire width 4 input 21 \\wd\n"
+                                 "  wire \\nw\n"
+                                 "  wire \\n\n"
+                                 "  wire \\n2\n"
+                                 "  wire \\n3\n"
+                                 "  cell $not \\inv\n"
+                                 "    connect \\A \\c\n"
+                                 "    connect \\Y \\n\n"
+                                 "  end\n"
+                                 "  cell $not \\inv2\n"
+                                 "    connect \\A \\d\n"
+                                 "    connect \\Y \\n2\n"
+                                 "  end\n"
+                                 "  cell $not \\inv3\n"
+                                 "    connect \\A \\a\n"
+                                 "    connect \\Y \\n3\n"
+                                 "  end\n"
+                                 "  cell $not \\invw\n"
+                                 "    connect \\A \\wc\n"
+                                 "    connect \\Y \\nw\n"
+                                 "  end\n"
+                                 "  cell $dff \\ff\n"
+                                 "    connect \\CLK \\n\n"
+                                 "    connect \\D \\d\n"
+                                 "    connect \\Q \\q\n"
+                                 "  end\n"
+                                 "  cell $_DFF_P_ \\ff2\n"
+                                 "    connect \\C \\n2\n"
+                                 "    connect \\D \\a\n"
+                                 "    connect \\Q \\ql\n"
+                                 "  end\n"
+                                 "  cell $mem \\mem\n"
+                                 "    parameter \\MEMID \"m\"\n"
+                                 "    parameter \\SIZE 2\n"
+                                 "    parameter \\WIDTH 4\n"
+                                 "    parameter \\RD_PORTS 2\n"
+                                 "    parameter \\WR_PORTS 1\n"
+                                 "    parameter \\RD_CLK_ENABLE 2'11\n"
+                                 "    parameter \\RD_CLK_POLARITY 2'11\n"
+                                 "    parameter \\RD_TRANSPARENT 2'00\n"
+                                 "    parameter \\WR_CLK_ENABLE 1'1\n"
+                                 "    parameter \\WR_CLK_POLARITY 1'1\n"
+                                 "    connect \\RD_CLK { \\n3 \\c }\n"
+                                 "    connect \\RD_EN 2'11\n"
+                                 "    connect \\RD_ADDR \\ra\n"
+                                 "    connect \\RD_DATA \\rd\n"
+                                 "    connect \\WR_CLK \\nw\n"
+                                 "    connect \\WR_EN 4'1111\n"
+                                 "    connect \\WR_ADDR \\wa\n"
+                                 "    connect \\WR_DATA \\wd\n"
+                                 "  end\n"
+                                 "  cell $xor \\g1\n"
+                                 "    parameter \\A_WIDTH 2\n"
+                                 "    parameter \\B_WIDTH 2\n"
+                                 "    parameter \\Y_WIDTH 2\n"
+                                 "    connect \\A { 1'1 \\a }\n"
+                                 "    connect \\B \\a2\n"
+                                 "    connect \\Y \\y1\n"
+                                 "  end\n"
+                                 "  cell $reduce_or \\g2\n"
+                                 "    parameter \\A_WIDTH 3\n"
+                                 "    connect \\A { \\a 1'0 \\b }\n"
+                                 "    connect \\Y \\y3\n"
+                                 "  end\n"
+                                 "  cell $add \\g3\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    parameter \\Y_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B { \\b3 1'0 }\n"
+                                 "    connect \\Y \\y4\n"
+                                 "  end\n"
+                                 "  cell $ne \\g4\n"
+                                 "    parameter \\A_WIDTH 3\n"
+                                 "    parameter \\B_WIDTH 3\n"
+                                 "    connect \\A { \\a \\b \\a }\n"
+                                 "    connect \\B { \\b \\a \\b }\n"
+                                 "    connect \\Y \\y5\n"
+                                 "  end\n"
+                                 "  cell $lt \\g5\n"
+                                 "    parameter \\A_WIDTH 4\n"
+                                 "    parameter \\B_WIDTH 4\n"
+                                 "    connect \\A \\a4\n"
+                                 "    connect \\B 4'0100\n"
+                                 "    connect \\Y \\y6\n"
+                                 "  end\n"
+                                 "  cell $eq \\g6\n"
+                                 "    parameter \\A_WIDTH 2\n"
+                                 "    parameter \\B_WIDTH 2\n"
+                                 "    connect \\A { \\a \\a }\n"
+                                 "    connect \\B { 1'0 1'1 }\n"
+                                 "    connect \\Y \\y7\n"
+                                 "  end\n"
+                                 "end\n";
+
+/* The FF q keeps its init bit through every failed or finished run. */
+static void expect_q_init_kept(void) {
+    odin3_wire_id wire = odin3_module_find_wire(fx.res.module, intern("q"));
+    const odin3_value *init =
+        odin3_attr_get(fx.res.module, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, intern("init"));
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, init->bits[0]);
+}
+
+/* Each FF, and the $mem's clocks, are wholly as they were or wholly folded: the polarity and the
+ * net (or the type) always agree, whichever allocation failed. */
+static void expect_ffpol_consistent(void) {
+    odin3_node_id ff = named_node("ff");
+    bool flipped = same_net(pnet(ff, "CLK", 0), wnet("c", 0));
+    TEST_ASSERT_TRUE(flipped || same_net(pnet(ff, "CLK", 0), wnet("n", 0)));
+    TEST_ASSERT_EQUAL_INT64(flipped ? 0 : 1, pparam(ff, "CLK_POLARITY"));
+    odin3_node_id fine = named_node("ff2");
+    bool swapped = strcmp(type_name(fine), "$_DFF_N_") == 0;
+    expect_same(pnet(fine, "C", 0), swapped ? wnet("d", 0) : wnet("n2", 0), "ff2 C and type");
+    odin3_node_id mem = need_type("$mem");
+    bool rd = same_net(pnet(mem, "RD_CLK", 1), wnet("a", 0));
+    TEST_ASSERT_TRUE(rd || same_net(pnet(mem, "RD_CLK", 1), wnet("n3", 0)));
+    TEST_ASSERT_EQUAL_UINT8(rd ? ODIN3_BIT_0 : ODIN3_BIT_1, pparam_bit(mem, "RD_CLK_POLARITY", 1));
+    bool wr = same_net(pnet(mem, "WR_CLK", 0), wnet("wc", 0));
+    TEST_ASSERT_EQUAL_UINT8(wr ? ODIN3_BIT_0 : ODIN3_BIT_1, pparam_bit(mem, "WR_CLK_POLARITY", 0));
+}
+
+static void oom_fine_once(long fail, bool *done) {
+    memset(&fx.counts, 0, sizeof fx.counts);
+    build(K_OOM_FINE);
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts);
+    odin3_util_set_alloc_fail_after(-1);
+    *done = st == ODIN3_OK;
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    check_full();
+    expect_q_init_kept();
+    expect_ffpol_consistent();
+}
+
+/* Out of memory at every allocation of FF polarity folding and the fine rules: the IR is valid
+ * and the FF's init stays; the run that gets through did all of it (so the sweep is not vacuous).
+ */
+static long oom_fine_sweep(void) {
+    bool done = false;
+    long failures = 0;
+    for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
+        oom_fine_once(fail, &done);
+        failures += done ? 0 : 1;
+    }
+    TEST_ASSERT_TRUE(done);
+    return failures;
+}
+
+/* The same sweep with the FF polarity folding alone (no -fine): it has failing points of its own,
+ * and the fine rules did nothing. */
+static void test_clkinv_oom(void) {
+    long failures = oom_fine_sweep();
+    TEST_ASSERT_TRUE(failures > 30);
+    TEST_ASSERT_EQUAL_INT64(0, pparam(need_type("$dff"), "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_STRING("$_DFF_N_", type_name(named_node("ff2")));
+    TEST_ASSERT_EQUAL_UINT32(3, count_type("$ne") + count_type("$lt") + count_type("$eq"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_GROUP));
+    printf("opt_expr clkinv OOM: %ld failing allocation points\n", failures);
+}
+
+static void test_fine_oom(void) {
+    fx.opts.fine = true;
+    long failures = oom_fine_sweep();
+    TEST_ASSERT_TRUE(failures > 100);
+    TEST_ASSERT_EQUAL_INT64(0, pparam(need_type("$dff"), "CLK_POLARITY"));
+    TEST_ASSERT_EQUAL_STRING("$_DFF_N_", type_name(named_node("ff2")));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, pparam_bit(need_type("$mem"), "RD_CLK_POLARITY", 1));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, pparam_bit(need_type("$mem"), "RD_CLK_POLARITY", 0));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, pparam_bit(need_type("$mem"), "WR_CLK_POLARITY", 0));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$ne")); /* g4 keeps one pair */
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$lt") + count_type("$eq"));
+    TEST_ASSERT_EQUAL_INT64(2, pparam(need_type("$reduce_or"), "A_WIDTH"));
+    TEST_ASSERT_EQUAL_STRING("$add", driver_type(wnet("y4", 3)));
+    printf("opt_expr fine OOM: %ld failing allocation points\n", failures);
+}
+
+static void run_fine_tests(void) {
+    RUN_TEST(test_clkinv_dff);
+    RUN_TEST(test_clkinv_keeps_init);
+    RUN_TEST(test_clkinv_adff_arst);
+    RUN_TEST(test_clkinv_all_ports);
+    RUN_TEST(test_clkinv_set_clr);
+    RUN_TEST(test_clkinv_mem);
+    RUN_TEST(test_clkinv_memrd);
+    RUN_TEST(test_clkinv_fine);
+    RUN_TEST(test_noclkinv);
+    RUN_TEST(test_clkinv_chain);
+    RUN_TEST(test_clkinv_ring);
+    RUN_TEST(test_clkinv_provenance);
+    RUN_TEST(test_fine_group);
+    RUN_TEST(test_fine_group_off_and_full);
+    RUN_TEST(test_fine_group_kinds);
+    RUN_TEST(test_fine_group_keepdc);
+    RUN_TEST(test_fine_neutral);
+    RUN_TEST(test_fine_neutral_off);
+    RUN_TEST(test_fine_const_sides);
+    RUN_TEST(test_fine_reduce_and_const);
+    RUN_TEST(test_fine_add_low_bit);
+    RUN_TEST(test_fine_add_operand_gone);
+    RUN_TEST(test_fine_eq_unionfind);
+    RUN_TEST(test_fine_eq_off);
+    RUN_TEST(test_fine_cmp);
+    RUN_TEST(test_fine_cmp_off);
+    RUN_TEST(test_fine_cmp_mixed_sign);
+    RUN_TEST(test_fine_group_nothing);
+    RUN_TEST(test_fine_rule_names);
+    RUN_TEST(test_clkinv_oom);
+    RUN_TEST(test_fine_oom);
+}
+
 static void run_logic_tests(void) {
     RUN_TEST(test_const_and);
     RUN_TEST(test_and_bit_inverse);
@@ -2724,5 +3987,6 @@ int main(void) {
     run_logic_tests();
     run_arith_tests();
     run_mux_and_driver_tests();
+    run_fine_tests();
     return UNITY_END();
 }

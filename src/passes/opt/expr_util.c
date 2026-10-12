@@ -90,6 +90,11 @@ static void census_add(odin3_expr_census *census, odin3_const value) {
     }
 }
 
+bool odin3_expr_both_signed(const odin3_expr_ctx *ec) {
+    return odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0 &&
+           odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
+}
+
 odin3_expr_census odin3_expr_port_census(const odin3_expr_ctx *ec, odin3_expr_port port) {
     odin3_expr_census census = {0};
     odin3_pinslice pins = odin3_node_port(ec->module, ec->node, port.v);

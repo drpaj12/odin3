@@ -262,8 +262,12 @@ Unless `-noclkinv`: a `CLK`, `EN`, `ARST`, `SRST`, `ALOAD`, `SET`, `CLR` input o
 $dffe $adff $adffe $aldff $aldffe $sdff $sdffe $sdffce $dffsr $dffsre $dlatch $adlatch $dlatchsr
 $sr`) driven by an invert-map output takes the inverter's input and flips its `*_POLARITY` parameter
 (rebuild); likewise each bit of a `$mem`'s `RD_CLK`/`WR_CLK` (one `$mem` per array, 2D EL-27) flips
-that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY`; `$_DFF_P_`↔`$_DFF_N_` and
-`$_DLATCH_P_`↔`$_DLATCH_N_` swap types the same way.
+that port's bit of `RD_CLK_POLARITY`/`WR_CLK_POLARITY` (a `$memrd`/`$memwr`'s `CLK` likewise);
+`$_DFF_P_`↔`$_DFF_N_` and `$_DLATCH_P_`↔`$_DLATCH_N_` swap types the same way. `SET` and `CLR` are
+WIDTH-bit ports: only a 1-bit FF has an inverter's output there (the invert map is keyed by whole
+signals, as Yosys's). The node is rebuilt once however many inputs change, its Q nets kept (so the
+`init` on them stays); `DEBUG` line and `clkinv` count per input, as Yosys logs per input. An input
+on a ring of inverters is left alone (§17 #20).
 
 ### 4.5 `-fine` rules
 
@@ -277,7 +281,14 @@ Nothing happens when one group already holds every bit. `fine.neutral_A/B` drop 
 $reduce_bool`; `fine.$reduce_and`, `fine.A`, `fine.B` collapse an all-constant input to its one-bit
 4-state reduction; `fine` (`$add`/`$sub`) strips low result bits that are copies of an operand
 bit (B bit 0; `$add` A bit 0; `$sub` 1 − 1 = 0); `$eq`/`$ne` drop redundant bit pairs and fold
-when a union-find over the constant-equal positions merges 0 with 1.
+when a union-find over the constant-equal positions merges 0 with 1. Counter and `DEBUG` names:
+`fine.group`, `fine.neutral_A`, `fine.neutral_B`, `fine.$reduce_and`, `fine.A`, `fine.B`, `fine`
+(the `$add`/`$sub` strip), and, with no Yosys `cover` name, `fine.eqne` and `fine.cmp`. Every rule
+is skipped without `-fine` (or `-full`). Where the rules sit in a cell type's list is Yosys's: the
+group, neutral, reduce_and, A and B rules after the logic rules and before `xbit`, the strip first
+for `$add`/`$sub`, the `$eq`/`$ne` and comparison rules after folding. `fine.neutral_*`, `fine.A/B`,
+`fine.$reduce_and` and the strip go on with the rebuilt cell in the same visit (§4.1), the others
+end it. Differences: §17 #17-19.
 
 ### 4.6 `replace_undriven` (`-undriven`)
 
@@ -702,6 +713,10 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 22 | `mul_low_zeros`: an operand all of whose bits are 0 gives Y = 0 | Yosys strips its bits and leaves a 0-bit port (folded to 0 later) | same value; Odin III cells have no 0-width ports |
 | 23 | `div_shift` / `mod_mask`: the low bits examined are cut at A's width | 0.55 extracts `exp` bits even when `exp` exceeds A | later Yosys does the same cut; avoids an out-of-range extract |
 | 24 | one `opt_expr` call can reduce further than one Yosys `opt_expr` | Yosys rules that read `cell->getPort` see a connected constant only after the next `opt_clean` | constants are read through merged nets at once (IR-1); after Yosys's own `opt` loop the results converge (differential, ~19,000 modules: undefined values may resolve differently) |
+| 25 | `fine.group`: the new cells' bits are in (constant, then net ID) order of their operand pair | `std::map` by wire name | IR has no wire-name order (§17 #4); only the order of bits inside the new cells changes |
+| 26 | `fine` on `$add`/`$sub`: a stripped cell with no result bit left is wiring; an operand with no bit left is a constant 0 (unsigned) or its last stripped bit (signed), not a 0-bit port; an `$eq`/`$ne` that loses every bit of a side becomes `$logic_not`/`$reduce_bool` of the other side at once | Yosys leaves 0-bit ports (the cell is rewritten in a later round, or stays under `-keepdc`) | Odin III cells have no 0-width ports (as #14); same value, and the strip goes on in the same run |
+| 27 | `fine` `$add`/`$sub`, `$eq`/`$ne` and comparisons treat the operands as signed only when both `A_SIGNED` and `B_SIGNED` are set | Yosys tests `A_SIGNED` alone | Yosys 0.55 rejects mixed-sign cells (`check`: matched sign), whose constant evaluation is unsigned; the two agree on every valid cell |
+| 28 | an FF input on a ring of inverters is not folded into the polarity | Yosys flips it in every round, for ever | a ring of inverters never reaches a fixed point; the walk that finds the ring is capped at 1024 inverters |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

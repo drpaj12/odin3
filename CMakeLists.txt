@@ -113,6 +113,8 @@ add_library(odin3_core OBJECT
     src/passes/opt/expr_arith.c
     src/passes/opt/expr_mux.c
     src/passes/opt/expr_undriven.c
+    src/passes/opt/expr_ffpol.c
+    src/passes/opt/expr_fine.c
     src/passes/opt/clean.c
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c

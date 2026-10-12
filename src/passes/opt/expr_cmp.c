@@ -127,8 +127,7 @@ static odin3_status eq_operands(odin3_expr_ctx *ec, odin3_expr_sig *lhs, odin3_e
         return st;
     }
     uint32_t width = raw_a.n > raw_b.n ? raw_a.n : raw_b.n;
-    bool both_signed = odin3_expr_param(ec, ODIN3_EXPR_P_BIN_ASIGNED) != 0 &&
-                       odin3_expr_param(ec, ODIN3_EXPR_P_BIN_BSIGNED) != 0;
+    bool both_signed = odin3_expr_both_signed(ec);
     st = odin3_expr_extend(ec, &raw_a, width, both_signed, lhs);
     return st == ODIN3_OK ? odin3_expr_extend(ec, &raw_b, width, both_signed, rhs) : st;
 }

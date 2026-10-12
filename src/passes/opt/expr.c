@@ -1,10 +1,11 @@
 /*
  * expr.c — opt_expr (2F spec OP-4, §4.1; plan Task 6): the driver (Yosys 0.55 opt_expr.cc
  * `execute` and `replace_const_cells`), the per-type rule tables, the counters and the lines
- * of §16. The rules are in expr_logic.c (§4.2), expr_cmp.c, expr_arith.c and expr_mux.c (§4.3)
- * and expr_undriven.c (§4.6); their shared helpers are in expr_util.c.
+ * of §16. The rules are in expr_logic.c (§4.2), expr_cmp.c, expr_arith.c and expr_mux.c (§4.3),
+ * expr_ffpol.c (§4.4), expr_fine.c (§4.5) and expr_undriven.c (§4.6); their shared helpers are in
+ * expr_util.c.
  *
- * One round (`rcc`): snapshot the invert map; fold the FF polarities (Task 7); visit the
+ * One round (`rcc`): snapshot the invert map; fold the FF polarities (expr_ffpol.c); visit the
  * evaluable nodes in odin3_kit_topo order and apply to each the first rule of its type's list that
  * fires. Rules are listed in Yosys's order of opt_expr.cc, filtered by cell type; constant
  * folding (odin3_opt_fold) is the rule at its place in that order.
@@ -86,6 +87,16 @@ static const char *const k_rule_names[ODIN3_OPT_RULE_COUNT] = {
     [ODIN3_OPT_RULE_DIVMOD_ZERO] = "divmod_zero",
     [ODIN3_OPT_RULE_DIV_SHIFT] = "div_shift",
     [ODIN3_OPT_RULE_MOD_MASK] = "mod_mask",
+    [ODIN3_OPT_RULE_CLKINV] = "clkinv",
+    [ODIN3_OPT_RULE_FINE_GROUP] = "fine.group",
+    [ODIN3_OPT_RULE_FINE_NEUTRAL_A] = "fine.neutral_A",
+    [ODIN3_OPT_RULE_FINE_NEUTRAL_B] = "fine.neutral_B",
+    [ODIN3_OPT_RULE_FINE_REDUCE_AND] = "fine.$reduce_and",
+    [ODIN3_OPT_RULE_FINE_A] = "fine.A",
+    [ODIN3_OPT_RULE_FINE_B] = "fine.B",
+    [ODIN3_OPT_RULE_FINE_ADDSUB] = "fine",
+    [ODIN3_OPT_RULE_FINE_EQNE] = "fine.eqne",
+    [ODIN3_OPT_RULE_FINE_CMP] = "fine.cmp",
     [ODIN3_OPT_RULE_UNDRIVEN] = "undriven",
 };
 
@@ -180,20 +191,29 @@ static odin3_status rule_fold(odin3_expr_ctx *ec) {
 
 #define RULES(name, ...) static const odin3_expr_rule_fn name[] = {__VA_ARGS__, NULL}
 
-RULES(k_inv, odin3_expr_rule_invert_double, rule_fold);
+RULES(k_inv, odin3_expr_rule_fine_group, odin3_expr_rule_fine_neutral_a,
+      odin3_expr_rule_fine_const_a, odin3_expr_rule_invert_double, rule_fold);
 RULES(k_neg, odin3_expr_rule_unary, odin3_expr_rule_xbit, rule_fold);
-RULES(k_reduce_andor, odin3_expr_rule_and_or, odin3_expr_rule_unary, rule_fold);
+RULES(k_reduce_andor, odin3_expr_rule_and_or, odin3_expr_rule_unary, odin3_expr_rule_fine_neutral_a,
+      odin3_expr_rule_fine_reduce_and, odin3_expr_rule_fine_const_a, rule_fold);
 RULES(k_reduce_xor, odin3_expr_rule_unary, odin3_expr_rule_xbit, rule_fold);
-RULES(k_logic_andor, odin3_expr_rule_and_or, rule_fold);
-RULES(k_and, odin3_expr_rule_and_or, odin3_expr_rule_bitwise, rule_fold);
-RULES(k_or, odin3_expr_rule_and_or, odin3_expr_rule_bitwise, odin3_expr_rule_identwrt, rule_fold);
-RULES(k_xor, odin3_expr_rule_xor, odin3_expr_rule_bitwise, odin3_expr_rule_identwrt, rule_fold);
-RULES(k_xnor, odin3_expr_rule_xor, odin3_expr_rule_bitwise, rule_fold);
+RULES(k_logic_andor, odin3_expr_rule_and_or, odin3_expr_rule_fine_neutral_a,
+      odin3_expr_rule_fine_neutral_b, odin3_expr_rule_fine_const_a, odin3_expr_rule_fine_const_b,
+      rule_fold);
+RULES(k_and, odin3_expr_rule_and_or, odin3_expr_rule_bitwise, odin3_expr_rule_fine_group,
+      rule_fold);
+RULES(k_or, odin3_expr_rule_and_or, odin3_expr_rule_bitwise, odin3_expr_rule_fine_group,
+      odin3_expr_rule_identwrt, rule_fold);
+RULES(k_xor, odin3_expr_rule_xor, odin3_expr_rule_bitwise, odin3_expr_rule_fine_group,
+      odin3_expr_rule_identwrt, rule_fold);
+RULES(k_xnor, odin3_expr_rule_xor, odin3_expr_rule_bitwise, odin3_expr_rule_fine_group, rule_fold);
 RULES(k_shift, odin3_expr_rule_xbit, odin3_expr_rule_constshift, rule_fold);
 RULES(k_shiftx, odin3_expr_rule_xbit, odin3_expr_rule_trim, odin3_expr_rule_constshift, rule_fold);
-RULES(k_cmp, odin3_expr_rule_xbit, rule_fold);
-RULES(k_eq, odin3_expr_rule_eqneq, odin3_expr_rule_eq1bit, odin3_expr_rule_cmpzero, rule_fold);
-RULES(k_addsub, odin3_expr_rule_xbit, odin3_expr_rule_identwrt, rule_fold);
+RULES(k_cmp, odin3_expr_rule_xbit, rule_fold, odin3_expr_rule_fine_cmp);
+RULES(k_eq, odin3_expr_rule_eqneq, odin3_expr_rule_eq1bit, odin3_expr_rule_cmpzero, rule_fold,
+      odin3_expr_rule_fine_eqne);
+RULES(k_addsub, odin3_expr_rule_fine_addsub, odin3_expr_rule_xbit, odin3_expr_rule_identwrt,
+      rule_fold);
 RULES(k_mul, odin3_expr_rule_xbit, odin3_expr_rule_identwrt, rule_fold, odin3_expr_rule_mul);
 RULES(k_div, odin3_expr_rule_xbit, odin3_expr_rule_identwrt, rule_fold, odin3_expr_rule_divmod);
 RULES(k_mod, odin3_expr_rule_xbit, rule_fold, odin3_expr_rule_divmod);
@@ -292,22 +312,27 @@ static const char *name_text(const odin3_expr_ctx *ec, uint32_t str) {
     return str == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(ec->oc->design), str);
 }
 
-/* DEBUG "opt_expr: module 'm': <rule> on <type> '<cell>'" (rule = §4 name; cell = name or $c<ID>).
- */
-static void log_rewrite(const odin3_expr_ctx *ec, uint32_t name_str) {
+void odin3_expr_log_rewrite(const odin3_opt_ctx *oc, const char *rule, const char *type_name,
+                            uint32_t name_str, odin3_node_id node) {
     if (odin3_log_get_level() < ODIN3_LOG_DEBUG) {
         return;
     }
+    const odin3_strtab *tab = odin3_design_strtab(oc->design);
     char label[LABEL_MAX];
-    const char *text = name_text(ec, name_str);
-    if (text != NULL) {
-        (void)snprintf(label, sizeof label, "%s", text);
+    if (name_str != 0) {
+        (void)snprintf(label, sizeof label, "%s", odin3_strtab_get(tab, name_str));
     } else {
-        (void)snprintf(label, sizeof label, "$c%" PRIu32, ec->node.v);
+        (void)snprintf(label, sizeof label, "$c%" PRIu32, node.v);
     }
-    const char *rule = ec->rule_text != NULL ? ec->rule_text : odin3_opt_rule_name(ec->rule);
     odin3_log(ODIN3_LOG_DEBUG, "opt_expr: module '%s': %s on %s '%s'",
-              name_text(ec, odin3_module_name(ec->module)), rule, ec->def->name, label);
+              odin3_strtab_get(tab, odin3_module_name(oc->module)), rule, type_name, label);
+}
+
+/* DEBUG "opt_expr: module 'm': <rule> on <type> '<cell>'" (rule = §4 name; cell = name or $c<ID>).
+ */
+static void log_rewrite(const odin3_expr_ctx *ec, uint32_t name_str) {
+    const char *rule = ec->rule_text != NULL ? ec->rule_text : odin3_opt_rule_name(ec->rule);
+    odin3_expr_log_rewrite(ec->oc, rule, ec->def->name, name_str, ec->node);
 }
 
 /* The counters of a rewrite that fired: the rule, and rewritten or folded (a fold counted itself).
@@ -395,10 +420,14 @@ static odin3_status visit(odin3_expr_ctx *ec, odin3_node_id node) {
 /* --- rounds and the driver ---------------------------------------------------------------------
  */
 
-/* One `replace_const_cells`: invert map, (FF polarities: Task 7), every evaluable node in order. */
+/* One `replace_const_cells`: invert map, FF polarities (unless -noclkinv), every evaluable node in
+ * order. */
 static odin3_status round_once(odin3_expr_ctx *ec, bool consume_x, bool *loop_logged) {
     ec->consume_x = consume_x;
     odin3_status st = odin3_kit_invert_map(ec->oc);
+    if (st == ODIN3_OK && !ec->oc->opts->noclkinv) {
+        st = odin3_opt_expr_ffpol(ec->oc);
+    }
     odin3_vec order;
     odin3_vec_init(&order, sizeof(odin3_node_id));
     bool sorted = true;
@@ -454,6 +483,7 @@ static void expr_ctx_init(odin3_expr_ctx *ec, odin3_opt_ctx *oc) {
     ec->keepdc = oc->opts->keepdc;
     ec->mux_undef = oc->opts->mux_undef || oc->opts->full;
     ec->mux_bool = oc->opts->mux_bool || oc->opts->full;
+    ec->fine = oc->opts->fine || oc->opts->full;
     odin3_vec_init(&ec->marks, sizeof(uint32_t));
     resolve_types(ec);
 }

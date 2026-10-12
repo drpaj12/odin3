@@ -80,6 +80,16 @@ typedef enum odin3_opt_rule {
     ODIN3_OPT_RULE_DIVMOD_ZERO,
     ODIN3_OPT_RULE_DIV_SHIFT,
     ODIN3_OPT_RULE_MOD_MASK,
+    ODIN3_OPT_RULE_CLKINV,
+    ODIN3_OPT_RULE_FINE_GROUP,
+    ODIN3_OPT_RULE_FINE_NEUTRAL_A,
+    ODIN3_OPT_RULE_FINE_NEUTRAL_B,
+    ODIN3_OPT_RULE_FINE_REDUCE_AND,
+    ODIN3_OPT_RULE_FINE_A,
+    ODIN3_OPT_RULE_FINE_B,
+    ODIN3_OPT_RULE_FINE_ADDSUB,
+    ODIN3_OPT_RULE_FINE_EQNE,
+    ODIN3_OPT_RULE_FINE_CMP,
     ODIN3_OPT_RULE_UNDRIVEN,
     ODIN3_OPT_RULE_COUNT
 } odin3_opt_rule;
@@ -188,7 +198,7 @@ typedef struct odin3_expr_ctx {
     odin3_vec marks;                            /* per net: the scan generation that saw it */
     uint32_t gen;
     bool consume_x;
-    bool keepdc, mux_undef, mux_bool; /* the options, -full implying the last two */
+    bool keepdc, mux_undef, mux_bool, fine; /* the options, -full implying the last three */
     /* the visited cell */
     odin3_node_id node;
     odin3_expr_type kind;
@@ -241,6 +251,9 @@ odin3_expr_port odin3_expr_y_port(const odin3_expr_ctx *ec);
 /* Same net, or the same constant value (Yosys SigBit equality, x and z included). */
 bool odin3_expr_same(const odin3_expr_ctx *ec, odin3_net_id lhs, odin3_net_id rhs);
 bool odin3_expr_is_undef(const odin3_expr_ctx *ec, odin3_net_id net); /* constant x or z */
+/* A_SIGNED and B_SIGNED both set: the one case where a binary cell's operands are signed
+ * (Yosys's cells with mixed signs are invalid, and its const_* treat them as unsigned). */
+bool odin3_expr_both_signed(const odin3_expr_ctx *ec);
 
 odin3_expr_census odin3_expr_port_census(const odin3_expr_ctx *ec, odin3_expr_port port);
 odin3_expr_census odin3_expr_sig_census(const odin3_expr_ctx *ec, const odin3_expr_sig *sig);
@@ -330,5 +343,33 @@ odin3_status odin3_expr_rule_mux_const(odin3_expr_ctx *ec);
 
 /* expr_undriven.c (§4.6): replace_undriven on the module of ec. */
 odin3_status odin3_expr_replace_undriven(odin3_expr_ctx *ec);
+
+/* expr_fine.c (§4.5, only with -fine or -full; each is a no-op for the other cell types). The
+ * order of a type's list is Yosys's: group, neutral_A, neutral_B, reduce_and, const_a, const_b
+ * (all before the xbit rules), the $add/$sub strip, then after folding the $eq/$ne and
+ * comparison rules. */
+odin3_status odin3_expr_rule_fine_group(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_neutral_a(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_neutral_b(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_reduce_and(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_const_a(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_const_b(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_addsub(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_eqne(odin3_expr_ctx *ec);
+odin3_status odin3_expr_rule_fine_cmp(odin3_expr_ctx *ec);
+
+/* expr_ffpol.c (§4.4): one pass over the module's FFs and memories after the invert map is taken
+ * (odin3_kit_invert_map): each CLK, EN, ARST, SRST, ALOAD, SET, CLR (a $mem's RD_CLK / WR_CLK
+ * bits, a fine FF's C / E) driven by an inverter's output takes the inverter's input and flips its
+ * polarity; the node is rebuilt once however many inputs change. Counts ODIN3_OPT_RULE_CLKINV and
+ * `rewritten` per input, with one DEBUG line each. NO_MEMORY leaves the IR valid and every FF as
+ * it was (the rebuild is the kit's: nothing is destroyed before it can no longer fail). */
+odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc);
+
+/* The DEBUG line of a rewrite (§16): "opt_expr: module 'm': <rule> on <type> '<cell>'", the cell
+ * being the string name_str (0: none) or else $c<ID of node>. The caller reads both before the
+ * rewrite, which deletes the node. Nothing at a level below DEBUG. */
+void odin3_expr_log_rewrite(const odin3_opt_ctx *oc, const char *rule, const char *type_name,
+                            uint32_t name_str, odin3_node_id node);
 
 #endif
