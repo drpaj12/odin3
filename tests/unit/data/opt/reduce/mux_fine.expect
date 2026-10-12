@@ -1,0 +1,3 @@
+# yosys 0.55 (VTR build): read_rtlil mux_fine.il; opt_reduce -fine; write_rtlil
+# flags: -fine
+cell $mux WIDTH=1

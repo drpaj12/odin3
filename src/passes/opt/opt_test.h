@@ -40,4 +40,10 @@ const odin3_opt_test_hooks *odin3_opt_test_hooks_now(void);
  */
 void odin3_opt_merge_test_set_key_hash(uint64_t (*fn)(const void *key, size_t len));
 
+/*
+ * Replaces opt_reduce's operand-vector hash: fn gets the keys' bytes; NULL restores the real hash.
+ * Tests pass a constant to put every group on one collision chain.
+ */
+void odin3_opt_reduce_test_set_key_hash(uint64_t (*fn)(const void *key, size_t len));
+
 #endif

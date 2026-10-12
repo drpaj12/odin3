@@ -670,8 +670,7 @@ static odin3_status gather_attr(void *ctx, uint32_t key_str, const odin3_value *
     return ODIN3_OK;
 }
 
-/* Copies the attributes of from onto to, in first-set order. */
-static odin3_status copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
+odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
     odin3_vec items;
     odin3_vec_init(&items, sizeof(attr_item));
     odin3_status st =
@@ -719,7 +718,7 @@ static odin3_status rb_build(rebuild_job *job) {
                  ? odin3_node_create_connected(oc->module, &spec, job->plan.ports, &job->node)
                  : st;
     }
-    return st == ODIN3_OK ? copy_attrs(oc->module, job->req->old_node, job->node) : st;
+    return st == ODIN3_OK ? odin3_kit_copy_attrs(oc->module, job->req->old_node, job->node) : st;
 }
 
 /* Undoes rb_build: the new node and its fresh nets go again (best effort under OOM). */

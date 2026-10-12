@@ -121,6 +121,27 @@ odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
 odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
                                  const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
+/* --- 2F Task 9: opt_reduce (OP-8) ----------------------------------------------------------- */
+
+/*
+ * opt_reduce (2F spec §8, Yosys opt_reduce.cc) over every module of design. Per module, until a
+ * worker run changes nothing: $reduce_or then $reduce_and (inputs sorted by net ID and
+ * de-duplicated, an absorbing constant makes the input that constant alone, neutral constants go,
+ * inputs driven by a reduction of the same type are replaced by that reduction's inputs, an empty
+ * input becomes the neutral constant; the child is processed first, through an explicit stack, and
+ * stays for opt_clean), then for each $mux and $pmux: with opts->fine, or when its Y feeds a $mem
+ * WR_EN (Yosys's mem_wren_sigs), opt_mux_bits (Y bits whose input tuples are equal share one bit,
+ * bits whose tuple is one repeated value become that value), then opt_pmux (B slices equal to A
+ * are dropped, equal slices are grouped by a hash of their operand vectors in first-occurrence
+ * order and their S bits ORed by a new $reduce_or; no slice left: Y = A; one left: a $mux). Adds
+ * the changes to counts->reduce_changes; logs INFO "opt_reduce: performed N changes". A cell with
+ * an unconnected input pin is left alone. INVALID_ARG (logged) for a NULL argument; NO_MEMORY,
+ * possibly after some rewrites (the IR stays valid; each rewrite builds before its first
+ * destructive step).
+ */
+odin3_status odin3_opt_reduce_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                  const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */

@@ -202,7 +202,7 @@ static void test_parse_unknown(void) {
 
 /* One line per pass that is still a stub: each later task removes its own. */
 static const char *const k_stub_passes[] = {
-    "opt", "opt_expr", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
+    "opt", "opt_expr", "opt_muxtree", "opt_share", "opt_dff",
 };
 
 static void test_stubs(void) {

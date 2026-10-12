@@ -107,6 +107,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/ff.c
     src/passes/opt/clean.c
     src/passes/opt/merge.c
+    src/passes/opt/reduce.c
     src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
@@ -562,6 +563,11 @@ if(BUILD_TESTING)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_cse PRIVATE
         ODIN3_MERGE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/merge")
+    # 2F Task 9: opt_reduce.
+    odin3_add_unit_test(test_opt_reduce)
+    target_sources(test_opt_reduce PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_reduce PRIVATE
+        ODIN3_REDUCE_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/reduce")
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")

@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil mux_wren_dff.il; opt_reduce; write_rtlil
+# flags:
+cell $dff WIDTH=2
+cell $mux WIDTH=1
+cell $mem WIDTH=2

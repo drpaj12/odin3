@@ -685,6 +685,8 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
 | 13 | `opt_merge` candidates have exactly one output port, so `$memwr` (no output) never merges | merges `$memwr` | `kit_connect` redirects one output port; a missed merge, never a wrong one |
 | 14 | the commutative swap only when `A_SIGNED == B_SIGNED` | merges mixed-sign commutative cells with swapped operands (unsound) | OP-13: with mixed signs, sext(x)+zext(y) differs from sext(y)+zext(x) (Yosys's `calc.cc` extends each operand by its own sign; `simlib.v` reads mixed signs as unsigned) |
+| 15 | `opt_reduce` sorts a reduction's inputs by key (constants by value, then net ID) and rebuilds the cell only when its input set changed (or had repeats) | sorts by wire name, and `setPort`s the sorted `A` of every reduction it visits, counted or not | same function and the same change count (3,400 random designs, `-fine` or not, `$mem` write enables or not, compared with Yosys 0.55 over cell types, widths, constant inputs and change counts); only the order of a unique, constant-free input vector differs |
+| 16 | `opt_reduce` leaves a cell with an unconnected input pin alone | has no open pins (an undriven wire is a full-width signal) | a missed rewrite, never a wrong one |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

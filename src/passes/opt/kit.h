@@ -154,6 +154,13 @@ typedef struct odin3_kit_rebuild {
 odin3_status odin3_kit_rebuild_node(odin3_opt_ctx *oc, const odin3_kit_rebuild *req,
                                     odin3_node_id *out);
 
+/*
+ * Copies the attributes of node `from` onto node `to`, in first-set order (what kit_rebuild_node
+ * does for the node it rebuilds; a rewrite that builds its replacement with kit_new_cell calls it
+ * too). NO_MEMORY (some attributes may have been copied).
+ */
+odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to);
+
 /* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 
