@@ -182,7 +182,12 @@ static bool param_set(const odin3_opt_ctx *oc, odin3_node_id node, uint32_t inde
     return val != NULL && val->i != 0;
 }
 
-/* Yosys const2big reads a z bit of a shift amount as 0 (only x is undefined there). */
+/*
+ * A z bit of a shift amount: Yosys's constshift (plain opt_expr, which takes any constant amount
+ * before the fold, and the fold table with it) reads it as 0 (as_int_saturating), while
+ * const_shift_worker (the fold under -keepdc, where constshift wants a fully defined amount) takes
+ * any bit that is not 0 or 1 as undefined and gives all x. So z reads as 0 unless keepdc.
+ */
 static void z_to_zero(odin3_cval *val) {
     for (uint32_t i = 0; i < odin3_cval_words(val->width); i++) {
         val->bval[i] &= val->aval[i];
@@ -205,7 +210,8 @@ static odin3_status load_operands(fold_job *job) {
     odin3_status st = load_port(job, PORT_A, job->a_signed, &job->a);
     if (st == ODIN3_OK && shape != SHAPE_UNARY && job->all_const) {
         st = load_port(job, PORT_B, shape == SHAPE_SHIFT ? false : job->b_signed, &job->b);
-        if (st == ODIN3_OK && job->all_const && (shape == SHAPE_SHIFT || shape == SHAPE_SHIFTX)) {
+        if (st == ODIN3_OK && job->all_const && !job->oc->opts->keepdc &&
+            (shape == SHAPE_SHIFT || shape == SHAPE_SHIFTX)) {
             z_to_zero(&job->b);
         }
     }

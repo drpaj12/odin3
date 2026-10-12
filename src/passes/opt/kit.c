@@ -992,8 +992,8 @@ odin3_net_id odin3_kit_inverse(const odin3_opt_ctx *oc, odin3_net_id net) {
 
 /* --- topological order ---------------------------------------------------------------------- */
 
-/* Yosys 0.55's evaluable cells (CellTypes::setup_internals_eval, setup_stdcells_eval) that the
- * registry has. */
+/* Yosys 0.55's evaluable cells (CellTypes::setup_internals_eval and setup_stdcells_eval, and the
+ * VTR build's `$tribuf`, whose setup_type has is_evaluable true) that the registry has. */
 static const char *const k_evaluable[] = {
     "$not",         "$neg",       "$reduce_and", "$reduce_or", "$reduce_xor", "$reduce_xnor",
     "$reduce_bool", "$logic_not", "$lut",        "$sop",       "$and",        "$or",
@@ -1002,7 +1002,7 @@ static const char *const k_evaluable[] = {
     "$add",         "$sub",       "$mul",        "$div",       "$mod",        "$pow",
     "$logic_and",   "$logic_or",  "$mux",        "$pmux",      "$_BUF_",      "$_NOT_",
     "$_AND_",       "$_NAND_",    "$_OR_",       "$_NOR_",     "$_XOR_",      "$_XNOR_",
-    "$_MUX_"};
+    "$_MUX_",       "$tribuf"};
 
 enum { N_EVALUABLE = sizeof k_evaluable / sizeof k_evaluable[0] };
 

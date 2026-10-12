@@ -14,6 +14,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/opt/opt.h"
 #include "passes/proc/proc_internal.h"
 #include "passes/proc/proc_test.h"
 #include "passes/proc/pw.h"
@@ -25,10 +26,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-enum { MS_PER_S = 1000, NS_PER_MS = 1000000 };
+enum { MS_PER_S = 1000, NS_PER_MS = 1000000, OPT_PART_LEN = 48 };
 
 /* --- caps and test hooks (proc_test.h) ----------------------------------------------------- */
 
@@ -282,19 +284,35 @@ static odin3_status proc_lower(odin3_proc_mctx *mctx) {
 
 /*
  * Step F: opt_expr -keepdc on the lowered module (§2.2; 2F §4.8), skipped under --noopt and
- * --stop-after: the test hook on_step_f. Point (f)'s pre-merge step (whichever of 2E-3 and 2F-2
- * merges second) adds, after the hook, the call odin3_opt_expr_run(mctx->ctx, mctx->module,
- * &(odin3_opt_opts){.keepdc = true}, &counts) with a zeroed local odin3_opt_expr_counts added
- * into mctx->stats->opt_expr (that call's own Debug check, 2F §4.8, is the only check) and the
- * info line's opt_expr part. Until then stats->opt_expr stays zero and the line has no such part.
+ * --stop-after: the test hook on_step_f, then odin3_opt_expr_run with a zeroed local
+ * odin3_opt_expr_counts added into stats->opt_expr (that call's own Debug check, 2F §4.8, is the
+ * only check). The info line's opt_expr part is K = rewritten + folded of the whole run.
  */
-static void proc_step_f(const odin3_proc_mctx *mctx) {
+static void add_expr_counts(odin3_opt_expr_counts *total, const odin3_opt_expr_counts *part) {
+    total->rewritten += part->rewritten;
+    total->folded += part->folded;
+    for (uint32_t i = 0; i < ODIN3_OPT_EXPR_MAX_RULES; i++) {
+        total->rule[i] += part->rule[i];
+    }
+}
+
+static odin3_status proc_step_f(const odin3_proc_mctx *mctx) {
     if (mctx->opts->noopt || mctx->opts->stop_after != ODIN3_PROC_STOP_NONE) {
-        return;
+        return ODIN3_OK;
     }
     if (g_hooks.on_step_f != NULL) {
         g_hooks.on_step_f(g_hooks.user, odin3_module_id_of(mctx->module));
     }
+    odin3_opt_expr_counts counts;
+    memset(&counts, 0, sizeof counts);
+    odin3_opt_opts opts;
+    memset(&opts, 0, sizeof opts);
+    opts.keepdc = true;
+    odin3_status st = odin3_opt_expr_run(mctx->ctx, mctx->module, &opts, &counts);
+    if (mctx->stats != NULL) {
+        add_expr_counts(&mctx->stats->opt_expr, &counts);
+    }
+    return st;
 }
 
 /* --stop-after: every process re-encoded as a new $proc node (taking pw->prov, point (i)), then
@@ -321,7 +339,7 @@ static odin3_status proc_change(proc_run *run, odin3_proc_mctx *mctx) {
     if (st == ODIN3_OK) {
         run->stats->processes_lowered += (uint32_t)mctx->pws.len;
         run->stats->modules_lowered++;
-        proc_step_f(mctx);
+        st = proc_step_f(mctx);
     }
     return st;
 }
@@ -379,14 +397,19 @@ static void log_summary(const proc_run *run, odin3_status st) {
         odin3_log(ODIN3_LOG_INFO, "proc: stopped after %s; %" PRIu32 " processes kept",
                   stop <= ODIN3_PROC_STOP_ARST ? k_stop_names[stop] : "?", run->kept);
     } else if (st == ODIN3_OK) {
+        char opt[OPT_PART_LEN] = ""; /* "opt_expr: K changes; ", absent under --noopt */
+        if (!run->opts.noopt) {
+            (void)snprintf(opt, sizeof opt, "opt_expr: %" PRIu32 " changes; ",
+                           stats->opt_expr.rewritten + stats->opt_expr.folded);
+        }
         odin3_log(ODIN3_LOG_INFO,
                   "proc: %" PRIu32 " processes in %" PRIu32 " modules: %" PRIu32 " $dff, %" PRIu32
                   " $adff, %" PRIu32 " $aldff, %" PRIu32 " $dffsr, %" PRIu32 " $dlatch, %" PRIu32
-                  " $mux, %" PRIu32 " $pmux; %.1f ms",
+                  " $mux, %" PRIu32 " $pmux; %s%.1f ms",
                   stats->processes_lowered, stats->modules_lowered, stats->cells[ODIN3_PROC_K_DFF],
                   stats->cells[ODIN3_PROC_K_ADFF], stats->cells[ODIN3_PROC_K_ALDFF],
                   stats->cells[ODIN3_PROC_K_DFFSR], stats->cells[ODIN3_PROC_K_DLATCH],
-                  stats->cells[ODIN3_PROC_K_MUX], stats->cells[ODIN3_PROC_K_PMUX],
+                  stats->cells[ODIN3_PROC_K_MUX], stats->cells[ODIN3_PROC_K_PMUX], opt,
                   now_ms() - run->start);
     }
 }
