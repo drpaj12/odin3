@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# proc-diff: Odin III's proc against Yosys 0.55's on the same RTLIL. See proc_diff.py.
+# Exit codes: 0 identical (or only expected differences), 1 differ (work directory kept), 2 error.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/proc_diff.py" "$@"

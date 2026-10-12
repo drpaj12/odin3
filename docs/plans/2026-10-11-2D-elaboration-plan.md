@@ -1612,6 +1612,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 ## PR 2D-6 — stage 2: processes
 
 ### Task 21: The process generator core and the Yosys bridge (EL-33 emission, EL-34, EL-35, §14.3; ruling C2)
+- **Interface owed to 2E's `proc-diff` (2E-4a final review, 2026-10-12):** `tools/elab-check/memcap.py` provides `memcap.run(argv: list[str], cap_bytes: int, capture_output: bool = False) -> CompletedProcess`; with `capture_output=True` the child's stdout/stderr are returned (2E needs them to recognise §20 #16/#17). The cap is in bytes.
 **Files:**
 - Create `src/frontends/elab/pg.h`, `pg.c` and `tests/unit/test_elab_stage2_proc.c`.
 - Create the bridge files (ruling C2): `tools/elab-check/elab-equiv` (shell wrapper), `tools/elab-check/elab_equiv.py`, `tools/elab-check/memcap.py` (point (n)) and `tests/tools/test_elab_equiv.py`.
@@ -1891,6 +1892,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
 - `ctest --preset debug -N` lists no test labelled `sweep`.
 
 ### Task 26: Project corpus, the handover close-out and the micro sweeps (§14.4, §14.5)
+- **Interface owed to 2E Tasks 11–13 (2E-4a final review, 2026-10-12):** `elab_sweep.collect(paths: list[str]) -> …` (the corpus collector `proc-diff`'s sweeps reuse), plus a per-file top for `proc-diff` (`--tops F`: one `<file> <top>` per line) and an `xl` skip for files over the heavy cap.
 **Files:**
 - Create `tools/elab-check/elab-sweep` (Python): smallest first, `memcap.py`'s caps, expect-fail lists, modes `--elab-only`, `--equiv` and `--bench B` (point (t)).
 - Create `tests/elab/micro_expect_fail.txt` and `tests/tools/test_elab_sweep.py`.

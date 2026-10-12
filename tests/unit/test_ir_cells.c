@@ -17,7 +17,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#ifndef ODIN3_INT_PARAMS_FILE
+#error "ODIN3_INT_PARAMS_FILE must name tools/proc-check/int_params.txt (CMakeLists.txt)"
+#endif
 
 enum {
     MAX_PORTS = 8,
@@ -44,7 +49,9 @@ enum {
     POW_A_WIDTH = 4,
     POW_B_WIDTH = 3,
     POW_Y_WIDTH = 5,
-    LOG_TEXT = 512
+    LOG_TEXT = 512,
+    MAX_INT_NAMES = 64, /* distinct INT parameter names over the built-in cells (int_params) */
+    NAME_TEXT = 64
 };
 
 static odin3_design *design;
@@ -764,6 +771,76 @@ static void test_ffcell_no_sim(void) {
     TEST_ASSERT_EQUAL_STRING(want, last_error);
 }
 
+/* qsort comparator over an array of NAME_TEXT-byte names. */
+static int name_cmp(const void *lhs, const void *rhs) {
+    return strcmp((const char *)lhs, (const char *)rhs);
+}
+
+/* Adds name to the first *count entries of names unless it is already there. */
+static void add_name(char (*names)[NAME_TEXT], uint32_t *count, const char *name) {
+    for (uint32_t i = 0; i < *count; i++) {
+        if (strcmp(names[i], name) == 0) {
+            return;
+        }
+    }
+    TEST_ASSERT_LESS_THAN_UINT32(MAX_INT_NAMES, *count);
+    size_t len = strlen(name);
+    TEST_ASSERT_LESS_THAN_UINT32(NAME_TEXT, (uint32_t)len);
+    memcpy(names[*count], name, len + 1);
+    (*count)++;
+}
+
+/* The sorted set of INT parameter names over every built-in word and bit cell. */
+static uint32_t registry_int_names(char (*names)[NAME_TEXT]) {
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < odin3_builtin_celltype_count; i++) {
+        const odin3_celltype_def *def = odin3_builtin_celltypes[i];
+        if (def->gran != ODIN3_GRAN_WORD && def->gran != ODIN3_GRAN_BIT) {
+            continue;
+        }
+        for (uint32_t j = 0; j < def->n_params; j++) {
+            if (def->params[j].kind == ODIN3_VAL_INT) {
+                add_name(names, &count, def->params[j].name);
+            }
+        }
+    }
+    qsort(names, count, NAME_TEXT, name_cmp);
+    return count;
+}
+
+/* The lines of the file, newline stripped; fails on an over-long line or too many lines. */
+static uint32_t file_int_names(char (*names)[NAME_TEXT]) {
+    FILE *file = fopen(ODIN3_INT_PARAMS_FILE, "r");
+    TEST_ASSERT_NOT_NULL_MESSAGE(file, ODIN3_INT_PARAMS_FILE);
+    uint32_t count = 0;
+    char line[NAME_TEXT + 2];
+    while (fgets(line, (int)sizeof line, file) != NULL) {
+        size_t len = strcspn(line, "\n");
+        TEST_ASSERT_LESS_THAN_UINT32_MESSAGE(NAME_TEXT, (uint32_t)len, line);
+        TEST_ASSERT_LESS_THAN_UINT32(MAX_INT_NAMES, count);
+        line[len] = '\0';
+        memcpy(names[count], line, len + 1);
+        count++;
+    }
+    (void)fclose(file);
+    return count;
+}
+
+/* 2E plan point (o): proc-diff's INT list (tools/proc-check/int_params.txt, one name per line,
+ * sorted) is exactly the set of INT parameter names of the built-in word and bit cells, so the
+ * .param normalisation cannot drift from the registry. */
+static void test_int_params_file(void) {
+    static char want[MAX_INT_NAMES][NAME_TEXT];
+    static char got[MAX_INT_NAMES][NAME_TEXT];
+    uint32_t n_want = registry_int_names(want);
+    uint32_t n_got = file_int_names(got);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, n_want);
+    for (uint32_t i = 0; i < n_want && i < n_got; i++) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(want[i], got[i], "int_params.txt line");
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(n_want, n_got, "int_params.txt line count");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_builtin_has_expected_shape);
@@ -785,5 +862,6 @@ int main(void) {
     RUN_TEST(test_ffcell_table);
     RUN_TEST(test_ffcell_pins_and_verify);
     RUN_TEST(test_ffcell_no_sim);
+    RUN_TEST(test_int_params_file);
     return UNITY_END();
 }
