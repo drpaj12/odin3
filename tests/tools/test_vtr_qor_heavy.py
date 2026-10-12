@@ -545,6 +545,10 @@ class DeletionTest(HeavyTestBase):
         self.assertFalse((real / "sub").exists())
         qor_heavy.safe_rmtree(real / "absent", root)  # absent: a no-op
         self.assertTrue(real.is_dir())
+        (real / "file").write_text("x\n")  # a regular file is unlinked (Task 5 deletes files)
+        qor_heavy.safe_rmtree(real / "file", root)
+        self.assertFalse((real / "file").exists())
+        self.assertIsNone(qor_heavy._other_device(real, os.stat(root).st_dev))
 
     def test_safe_rmtree_more(self) -> None:
         """M6g: '..' through a symlink, a symlinked root, and a symlink inside the tree."""

@@ -34,6 +34,7 @@ import fcntl
 import os
 import pwd
 import shutil
+import stat
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
@@ -336,8 +337,11 @@ def check_out_dir(out: Path, home: Path) -> Path:
 def _other_device(real: Path, device: int) -> Path | None:
     """The first entry at or below ``real`` (symlinks not followed) whose ``st_dev`` differs from
     ``device``, or None. An entry that vanishes during the walk raises its ``OSError``."""
-    if os.lstat(real).st_dev != device:
+    info = os.lstat(real)
+    if info.st_dev != device:
         return real
+    if not stat.S_ISDIR(info.st_mode):  # a file: nothing below it to walk
+        return None
     for top, dirs, files in os.walk(real, followlinks=False, onerror=_raise):
         for name in (*dirs, *files):
             entry = Path(top) / name

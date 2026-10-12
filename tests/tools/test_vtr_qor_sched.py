@@ -1,27 +1,37 @@
-"""Tests for tools/vtr-qor/qor_sched.py, the planning half (3H plan Task 2: T5 and the planner).
+"""Tests for tools/vtr-qor/qor_sched.py: the planner (3H plan Task 2: T5) and the runner (Task 5:
+T4).
 
-Every case builds a fake VTR tree, repo copy, golden tree, odin3 and ldd under /tmp/claude-1000
-and reaches them through module seams (mock.patch.object), never through the environment.
-Nothing runs VTR.
+Every case builds its fakes (a VTR tree, repo copy, golden tree, odin3 and ldd; a cgroup tree,
+descriptor 9, df, meminfo and scripted fake jobs) under /tmp/claude-1000 and reaches them through
+module seams (mock.patch.object), never through an environment hook. Nothing runs VTR, takes the
+real heavy lock or reads the real cgroups.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import functools
+import gzip
 import hashlib
+import io
 import json
+import os
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr
 from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import qor_heavy
 import qor_legs
+import qor_parse
 import qor_sched
 from qor_heavy import HEAVY_DIR, HeavyError
 from qor_sched import Job, KeyInputs, PlanRequest
@@ -502,6 +512,941 @@ class VtrCommitTest(unittest.TestCase):
             head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, capture_output=True,
                                   text=True).stdout.strip()
             self.assertEqual(qor_legs.vtr_commit(root), head)
+
+
+
+# -- the runner (plan Task 5: T4) --------------------------------------------------------------
+
+FAKEJOB = Path(__file__).resolve().parent / "fixtures" / "vtr_qor" / "fakejob" / "fakejob.py"
+GIB = 1024**3
+MIB = 1024**2
+KIB_PER_GIB = 1024**2
+VTR12 = PIN[:12]
+KEY12 = "0123456789ab"
+SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
+HINT = ("vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then Optimize-VHD or "
+        "diskpart compact vdisk; Peter's hands)")
+KEEP_PRESENT = ("vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
+                "vpr.crit_path.out", "parmys.out", "abc0.out", "abc1.out",
+                "sha_blackboxing_latch.out", "restore_latch0.out", "report_clocks.abc.out")
+SCRATCH = ("sha.pre-vpr.blif", "sha.net", "sha.place", "sha.route", "sha.parmys.blif",
+           "sha.abc.blif", "parse_results.err", "qor_results.err")
+PARSE_TEXT = "arch\tcircuit\tvpr_status\t\nk6.xml\tsha.v\tsuccess\t\n"
+
+Spec = dict[str, Any]
+
+
+class FakeClock:
+    """A clock that moves only when told: ``tick`` per call, and by the slept time."""
+
+    def __init__(self, tick: float = 0.0) -> None:
+        self.now = 1_000_000.0
+        self.tick = tick
+        self.sleeps: list[float] = []
+        self.on_sleep: Callable[[int], None] | None = None
+
+    def __call__(self) -> float:
+        self.now += self.tick
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+        if self.on_sleep is not None:
+            self.on_sleep(len(self.sleeps))
+
+
+class ScaledClock:
+    """Real time sped up ``scale`` times, so POLL_S passes in a fraction of a second."""
+
+    def __init__(self, scale: float) -> None:
+        self.t0 = time.monotonic()
+        self.scale = scale
+
+    def __call__(self) -> float:
+        return 1_000_000.0 + (time.monotonic() - self.t0) * self.scale
+
+
+def _alive(pid: int) -> bool:
+    """True while ``pid`` runs (a zombie or a missing process is not alive)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+
+
+def _wait_dead(pids: list[int], limit_s: float = 5.0) -> bool:
+    end = time.monotonic() + limit_s
+    while time.monotonic() < end:
+        if not any(_alive(pid) for pid in pids):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def finish_ok(job: Job, start: float) -> dict[str, object]:
+    return {"schema": 1, "leg": job.leg, "routed": {"vpr_status": "success"}}
+
+
+class RunnerTestBase(unittest.TestCase):
+    """A fake heavy run: a cgroup tree with heavy-run's slice and scope, descriptor 9 on a fake
+    lock, a fake df on /mnt/c and a fake meminfo, reached only through qor_heavy's module seams
+    (and ODIN3_HEAVY_SLICE, which alone proves nothing). Jobs are fakejob.py runs."""
+
+    def setUp(self) -> None:
+        HEAVY_DIR.mkdir(parents=True, exist_ok=True)
+        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-sched-run-")
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.out = self.tmp / "out"
+        self.out.mkdir()
+        self.stamps = self.tmp / "stamps"
+        root = self.tmp / "cg"
+        self.slice = root / SLICE_DIRS / "odin3-heavy.slice"
+        self.leaf = self.slice / "odin3-heavy-4242-1760000000000000000.scope"
+        self.leaf.mkdir(parents=True)
+        for directory, mem, swap in ((self.leaf, "max", "max"), (self.slice, "6442450944", "0")):
+            (directory / "memory.max").write_text(mem + "\n")
+            (directory / "memory.swap.max").write_text(swap + "\n")
+        self.events = self.slice / "memory.events"
+        self.events.write_text("low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\n")
+        self_cgroup = self.tmp / "self-cgroup"
+        self_cgroup.write_text(f"0::/{self.leaf.relative_to(root)}\n")
+        self.lock = self.tmp / "odin3-heavy.lock"
+        self.lock.touch()
+        fd9 = self.tmp / "fd9"
+        fd9.symlink_to(self.lock)
+        self.df_file = self.tmp / "df-gib"
+        self.set_df(100)
+        fake_df = self.tmp / "fake-df.py"
+        fake_df.write_text(
+            "import sys\n"
+            "gib = int(open(sys.argv[1]).read())\n"
+            f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n")
+        self.meminfo = self.tmp / "meminfo"
+        self.set_mem(16.0)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        for name, value in (("SELF_CGROUP", self_cgroup), ("CGROUP_ROOT", root), ("FD9", fd9),
+                            ("HEAVY_LOCK", self.lock),
+                            ("DF_CMD", (sys.executable, "-I", str(fake_df), str(self.df_file)))):
+            stack.enter_context(mock.patch.object(qor_heavy, name, value))
+        stack.enter_context(mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"}))
+        self.scope = qor_heavy.require_heavy()
+        self.n_specs = 0
+
+    # -- fakes -------------------------------------------------------------------------------
+
+    def set_df(self, gib: int) -> None:
+        self.df_file.write_text(f"{gib}\n")
+
+    def set_mem(self, gib: float) -> None:
+        kib = int(gib * KIB_PER_GIB)
+        self.meminfo.write_text(f"MemTotal: 25000000 kB\nMemAvailable: {kib} kB\n")
+
+    def job_dir(self, design: str, leg: str = "P") -> Path:
+        return self.out / VTR12 / K6 / leg / KEY12 / design
+
+    def command(self, spec: Spec, stdout: Path, *, stderr: Path | None = None,
+                env: tuple[tuple[str, str], ...] = ()) -> qor_legs.Command:
+        self.n_specs += 1
+        path = self.tmp / f"spec-{self.n_specs}.json"
+        path.write_text(json.dumps(spec))
+        return qor_legs.Command((sys.executable, "-I", str(FAKEJOB), str(path)), stdout.parent,
+                                stdout, env, stderr)
+
+    def job(self, design: str, specs: list[Spec], *, leg: str = "P", group: str = "A",
+            cached: bool = False, key: str = "f" * 64) -> Job:
+        """A job whose commands are fake jobs: for an odin3 leg the first is the front end
+        (stdout frontend.log), every other one VTR (stdout run/vtr_flow.out)."""
+        job_dir = self.job_dir(design, leg)
+        commands = []
+        for i, spec in enumerate(specs):
+            front = leg != "P" and i == 0
+            stdout = job_dir / "frontend.log" if front else job_dir / "run" / "vtr_flow.out"
+            commands.append(self.command(spec, stdout))
+        return Job(leg=leg, design=design, arch=K6, group=group, gating=True, key=key,
+                   key12=KEY12, job_dir=job_dir, commands=tuple(commands), cached=cached)
+
+    def opts(self, clock: Callable[[], float] | None = None, **kwargs: Any) -> qor_sched.RunOptions:
+        fake = FakeClock()
+        kwargs.setdefault("scope", self.scope)
+        return qor_sched.RunOptions(
+            out=self.out, clock=clock or fake, sleep=kwargs.pop("sleep", fake.sleep),
+            meminfo=self.meminfo, **kwargs)
+
+    def run_jobs(self, jobs: list[Job], opts: qor_sched.RunOptions,
+                 finish: qor_sched.Finish = finish_ok) -> tuple[qor_sched.RunSummary, list[str]]:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            summary = qor_sched.run_jobs(jobs, opts, finish)
+        return summary, err.getvalue().splitlines()
+
+    def stamp_lines(self) -> list[list[str]]:
+        if not self.stamps.exists():
+            return []
+        return [line.split() for line in self.stamps.read_text().splitlines()]
+
+    def starts(self) -> list[str]:
+        return [fields[1] for fields in self.stamp_lines() if fields[0] == "start"]
+
+
+class RunOrderTest(RunnerTestBase):
+    def test_order_groups(self) -> None:
+        """Five A and two B jobs given interleaved, fcheck on: every job and fcheck runs alone,
+        each fcheck straight after its own job, every B after the last A (point (w))."""
+        plan = [("a1", "A"), ("b1", "B"), ("a2", "A"), ("a3", "A"), ("b2", "B"), ("a4", "A"),
+                ("a5", "A")]
+        jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d, "sleep": 0.05}], group=g)
+                for d, g in plan]
+        calls: list[tuple[str, int]] = []
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            with self.stamps.open("a") as handle:
+                handle.write(f"start fcheck-{job.design} {time.time():.6f}\n")
+            time.sleep(0.02)
+            calls.append((job.design, verilator_j))
+            with self.stamps.open("a") as handle:
+                handle.write(f"end fcheck-{job.design} {time.time():.6f}\n")
+            return "pass"
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            summary, _ = self.run_jobs(jobs, self.opts(fcheck=True))
+        self.assertEqual(summary.exit_code, 0)
+        order = ["a1", "a2", "a3", "a4", "a5", "b1", "b2"]
+        self.assertEqual([r.job.design for r in summary.results], order)
+        self.assertEqual(calls, [(d, 2 if d.startswith("a") else 1) for d in order])
+        spans: dict[str, list[float]] = {}
+        for _, name, when in self.stamp_lines():
+            spans.setdefault(name, []).append(float(when))
+        intervals = sorted((s, e, n) for n, (s, e) in spans.items())
+        self.assertEqual([n for _, _, n in intervals],
+                         [x for d in order for x in (d, f"fcheck-{d}")])
+        for (_, end, name), (start, _, nxt) in zip(intervals, intervals[1:], strict=False):
+            self.assertLessEqual(end, start, f"{name} overlaps {nxt}")
+        last_a = max(e for _, e, n in intervals if n.removeprefix("fcheck-").startswith("a"))
+        self.assertTrue(all(s >= last_a for s, _, n in intervals
+                            if n.removeprefix("fcheck-").startswith("b")))
+
+    def test_fcheck_after_cleanup_and_admitted(self) -> None:
+        """The fcheck step sees the job already cleaned up (P's netlist gzipped) and is
+        admitted like a job: memory short after the job makes it wait."""
+        run = self.job_dir("sha") / "run"
+        spec = {"write": [{"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"},
+                          {"path": str(self.meminfo), "text": "MemAvailable: 1000 kB\n"}]}
+        seen: list[list[str]] = []
+        clock = FakeClock()
+        clock.on_sleep = lambda n: self.set_mem(8.0)
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            seen.append(sorted(p.name for p in run.iterdir()))
+            return "pass"
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            summary, lines = self.run_jobs([self.job("sha", [spec])],
+                                           self.opts(clock=clock, sleep=clock.sleep,
+                                                     fcheck=True))
+        self.assertEqual(seen, [["sha.pre-vpr.blif.gz", "vtr_flow.out"]])
+        self.assertIn("vtr-qor: waiting: 0.0 GiB available (< 7)", lines)
+        self.assertEqual(clock.sleeps, [60])
+        self.assertEqual(summary.exit_code, 0)
+
+    def test_no_fcheck_unless_asked_or_ok(self) -> None:
+        calls: list[str] = []
+        jobs = [self.job("sha", [{}]), self.job("bad", [{"exit": 1}])]
+
+        def fake_fcheck(job: Job, opts: qor_sched.RunOptions, verilator_j: int) -> str:
+            calls.append(job.design)
+            return "pass"
+
+        with mock.patch.object(qor_sched, "run_fcheck", fake_fcheck):
+            self.run_jobs(jobs, self.opts())
+            self.assertEqual(calls, [])
+            self.run_jobs(jobs, self.opts(fcheck=True))
+        self.assertEqual(calls, ["sha"])
+
+    def test_j_cap(self) -> None:
+        jobs = [self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])]
+        with self.assertRaises(HeavyError) as caught:
+            self.run_jobs(jobs, self.opts(jobs=2))
+        self.assertEqual((caught.exception.code, caught.exception.message),
+                         (2, "-j 2 exceeds 1 (the heavy-run rule)"))
+        self.assertEqual(qor_sched.MAX_JOBS, 1)
+        self.assertEqual(self.starts(), [])
+        self.assertFalse((self.out / "harness.log").exists())
+        with self.assertRaises(HeavyError):
+            self.run_jobs(jobs, self.opts(jobs=0))
+
+    def test_constants(self) -> None:
+        """The Global Constraints' scheduler caps."""
+        self.assertEqual(
+            (qor_sched.MIN_MEM_AVAILABLE_GIB, qor_sched.MIN_DISK_FREE_GIB,
+             qor_sched.DISK_FLOOR_GIB, qor_sched.PAUSE_LIMIT_S, qor_sched.POLL_S,
+             dict(qor_sched.JOB_TIMEOUT_S), qor_sched.KILL_GRACE_S, qor_sched.CAPPED_RETRIES,
+             qor_sched.KEEP_KEYS, qor_sched.KEEP_FAILED, qor_sched.KEEP_FAILED_BYTES),
+            (7, 20, 10, 7200, 60, {"A": 14400, "B": 21600}, 30, 0, 3, 5, 2 * GIB))
+        self.assertEqual(qor_sched.KEEP_RUN_FILES, (
+            "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
+            "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
+            "restore_latch*.out", "report_clocks.abc.out"))
+
+    def test_cached_job_not_run(self) -> None:
+        """A cached job is not started; one whose metrics.json key is not the planned key is."""
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)
+        job.job_dir.mkdir(parents=True)
+        (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": job.key}))
+        summary, lines = self.run_jobs([job], self.opts())
+        self.assertEqual(self.starts(), [])
+        self.assertEqual([r.status for r in summary.results], ["ok"])
+        self.assertIn("vtr-qor: [1/1] P sha cached", lines)
+        (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": "0" * 64}))
+        summary, _ = self.run_jobs([job], self.opts())
+        self.assertEqual(self.starts(), ["sha"])
+        self.assertTrue(qor_sched.job_complete(job))
+
+
+class HeavyGuardTest(RunnerTestBase):
+    """Nothing starts unless the real nesting evidence and the cap hold (standing rules)."""
+
+    def assert_refused(self, call: Callable[[], object]) -> None:
+        with self.assertRaises(HeavyError) as caught:
+            call()
+        self.assertEqual(caught.exception.code, 2)
+        self.assertEqual(self.starts(), [])
+
+    def test_refuses_outside_heavy_run(self) -> None:
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
+        no_scope = self.opts(scope=None)
+        self.assert_refused(lambda: self.run_jobs([job], no_scope))
+        self.assert_refused(lambda: qor_sched.run_one(job, no_scope, finish_ok))
+        self.assert_refused(lambda: qor_sched.run_command(job.commands[0], no_scope,
+                                                          deadline=time.time() + 60))
+        self.assertFalse((self.out / "harness.log").exists())
+        # ODIN3_HEAVY_SLICE with a scope object, but descriptor 9 is not the lock: not inside.
+        with mock.patch.object(qor_heavy, "FD9", self.tmp / "no-fd9"):
+            self.assert_refused(lambda: self.run_jobs([job], self.opts()))
+            self.assert_refused(lambda: qor_sched.run_one(job, self.opts(), finish_ok))
+        # A cgroup outside the slice: not inside either.
+        with mock.patch.object(qor_heavy, "SELF_CGROUP", self.tmp / "other-cgroup"):
+            (self.tmp / "other-cgroup").write_text("0::/user.slice/other.scope\n")
+            self.assert_refused(lambda: self.run_jobs([job], self.opts()))
+        # Inside, but the cap is gone.
+        (self.slice / "memory.max").write_text("max\n")
+        self.assert_refused(lambda: self.run_jobs([job], self.opts()))
+
+    def test_job_dirs_under_out(self) -> None:
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
+        stray = dataclasses.replace(job, job_dir=self.tmp / "elsewhere" / "a" / "b" / "c" / "d")
+        self.assert_refused(lambda: self.run_jobs([stray], self.opts()))
+        shallow = dataclasses.replace(job, job_dir=self.out / "a" / "b" / "c" / "d")
+        self.assert_refused(lambda: self.run_jobs([shallow], self.opts()))
+        # An unknown group is refused, never silently dropped from the run.
+        self.assert_refused(lambda: self.run_jobs([job, dataclasses.replace(job, group="C")],
+                                                  self.opts()))
+        self.assert_refused(lambda: self.run_jobs([job], self.opts(job_timeout_s={"B": 1})))
+
+
+class CommandTest(RunnerTestBase):
+    def test_env_and_streams(self) -> None:
+        """Command.stderr gets stderr alone; without it stderr joins stdout. The job sees its
+        overrides and PYTHONDONTWRITEBYTECODE=1; output files are written afresh."""
+        work = self.tmp / "w"
+        work.mkdir()
+        dump = self.tmp / "env.json"
+        out, err = work / "parse_results.txt", work / "parse_results.err"
+        out.write_text("old contents\n")
+        spec = {"stdout": "OUT\n", "stderr": "ERR\n", "env_dump": str(dump)}
+        cmd = self.command(spec, out, stderr=err, env=(("PYTHONPATH", "/v/libs"),))
+        result = qor_sched.run_command(cmd, self.opts(env={"PATH": os.defpath, "X": "1"}),
+                                       deadline=FakeClock().now + 60)
+        self.assertEqual((result.kind, result.returncode), ("exit", 0))
+        self.assertEqual((out.read_text(), err.read_text()), ("OUT\n", "ERR\n"))
+        env = json.loads(dump.read_text())
+        self.assertEqual((env["PYTHONDONTWRITEBYTECODE"], env["PYTHONPATH"], env["X"]),
+                         ("1", "/v/libs", "1"))
+        merged = work / "merged.log"
+        cmd = self.command(spec, merged)
+        qor_sched.run_command(cmd, self.opts(), deadline=FakeClock().now + 60)
+        self.assertEqual(sorted(merged.read_text().splitlines()), ["ERR", "OUT"])
+
+    def test_missing_program(self) -> None:
+        job = self.job("sha", [])
+        bad = qor_legs.Command((str(self.tmp / "nope"),), self.tmp, self.tmp / "x.log", ())
+        job = dataclasses.replace(job, commands=(bad,))
+        result = qor_sched.run_one(job, self.opts(), finish_ok)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.error,
+                         f"P sha: cannot run {self.tmp / 'nope'}: No such file or directory")
+
+    def test_group_stragglers_killed(self) -> None:
+        """A job that exits 0 but leaves a grandchild running: the grandchild is killed before
+        the next job (one job at a time)."""
+        pids = self.tmp / "pids"
+        job = self.job("sha", [{"spawn_sleep": 600, "pids": str(pids)}])
+        result = qor_sched.run_one(job, self.opts(), finish_ok)
+        self.assertEqual(result.status, "ok")
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+
+    def test_interrupt_kills_group(self) -> None:
+        """An exception while a job runs (Ctrl-C, SIGTERM as SystemExit) kills its group."""
+        pids = self.tmp / "pids"
+        job = self.job("sha", [{"spawn_sleep": 600, "pids": str(pids), "sleep": 600}])
+        calls = 0
+
+        def clock() -> float:
+            nonlocal calls
+            calls += 1
+            if pids.exists() and calls > 3:
+                raise KeyboardInterrupt
+            return 1_000_000.0
+
+        with self.assertRaises(KeyboardInterrupt):
+            qor_sched.run_one(job, self.opts(clock=clock), finish_ok)
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+
+    def test_sigterm_handler_restored(self) -> None:
+        before = signal.getsignal(signal.SIGTERM)
+        self.run_jobs([self.job("sha", [{}])], self.opts())
+        self.assertIs(signal.getsignal(signal.SIGTERM), before)
+
+    def test_sigterm_while_running(self) -> None:
+        """SIGTERM to the harness while a job runs: the job's group is killed, then the run
+        exits 143."""
+        pids = self.tmp / "pids"
+        job = self.job("sha", [{"spawn_sleep": 600, "pids": str(pids), "sleep": 600}])
+        sent = False
+
+        def clock() -> float:
+            nonlocal sent
+            if pids.exists() and not sent:
+                sent = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            return 1_000_000.0
+
+        with self.assertRaises(SystemExit) as caught:
+            self.run_jobs([job], self.opts(clock=clock))
+        self.assertEqual(caught.exception.code, 143)
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+
+    def test_term_before_kill(self) -> None:
+        """On timeout the group gets SIGTERM first; a job that exits on it is not waited for
+        through the whole grace period."""
+        flag, pids = self.tmp / "term", self.tmp / "pids"
+        spec = {"on_term": str(flag), "spawn_sleep": 600, "pids": str(pids), "sleep": 600}
+        frozen = time.time()
+        opts = self.opts(clock=lambda: time.time() if pids.exists() else frozen,
+                         job_timeout_s={"A": 1, "B": 1})
+        began = time.monotonic()
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 60.0):
+            result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
+        self.assertEqual(result.status, "timeout")
+        self.assertEqual(flag.read_text(), "term\n")
+        self.assertLess(time.monotonic() - began, 30)
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+
+    def test_lock_descriptor_passed(self) -> None:
+        """Descriptor 9 reaches the job when it really is the heavy lock (so an orphaned job
+        keeps the lock), and only then."""
+        try:
+            os.fstat(9)
+            self.skipTest("descriptor 9 is in use in this process")
+        except OSError:
+            pass
+        dump = self.tmp / "fds"
+        cmd = self.command({"fd_dump": str(dump)}, self.tmp / "x.log")
+        other = self.tmp / "other"
+        other.touch()
+        fd = os.open(self.lock, os.O_RDONLY)
+        try:
+            os.dup2(fd, 9)
+            qor_sched.run_command(cmd, self.opts(), deadline=FakeClock().now + 60)
+            self.assertIn(f"9 {self.lock}", dump.read_text().splitlines())
+            os.close(fd)
+            fd = os.open(other, os.O_RDONLY)
+            os.dup2(fd, 9)
+            qor_sched.run_command(cmd, self.opts(), deadline=FakeClock().now + 60)
+            self.assertFalse(any(line.startswith("9 ") for line in
+                                 dump.read_text().splitlines()))
+        finally:
+            os.close(9)
+            os.close(fd)
+
+
+class OutcomeTest(RunnerTestBase):
+    def test_capped_no_verdict(self) -> None:
+        """A failure while oom_kill rose is capped, with the leaf scope's peak (not the
+        slice's), then no verdict; no retry; exit 3. Without the rise it is failed, exit 1."""
+        (self.leaf / "memory.peak").write_text(f"{6000 * MIB}\n")
+        (self.slice / "memory.peak").write_text(f"{6100 * MIB}\n")
+        vpr_out = str(self.job_dir("sha") / "run" / "vpr.out")
+        parmys = str(self.job_dir("sha") / "run" / "parmys.out")
+        spec = {"stamp": str(self.stamps), "name": "sha", "exit": 1,
+                "write": [{"path": parmys, "text": "done\n", "age_s": 60},
+                          {"path": vpr_out, "text": "routing\n"}],
+                "oom_kill": {"events": str(self.events), "add": 1}}
+        summary, lines = self.run_jobs([self.job("sha", [spec])], self.opts())
+        self.assertEqual([r.status for r in summary.results], ["capped"])
+        capped = ("vtr-qor: P sha: capped: stage vpr.out exceeded the 6 GiB scope "
+                  "(peak ≥ 6000 MiB at the kill)")
+        self.assertEqual(lines[:3], [capped, "vtr-qor: P sha: no verdict",
+                                     "vtr-qor: [1/1] P sha capped 0.0 s (A, j1)"])
+        self.assertEqual(self.starts(), ["sha"])
+        self.assertEqual(summary.exit_code, 3)
+        self.assertEqual((self.job_dir("sha") / "status").read_text(), "capped\n")
+        self.assertTrue(Path(vpr_out).exists())
+        self.assertFalse((self.job_dir("sha") / "metrics.json").exists())
+        # The counter is cumulative: an unchanged (non-zero) count is no rise.
+        spec.pop("oom_kill")
+        summary, lines = self.run_jobs([self.job("sha", [spec])], self.opts())
+        self.assertEqual([r.status for r in summary.results], ["failed"])
+        self.assertEqual(summary.exit_code, 1)
+        flow = self.job_dir("sha") / "run" / "vtr_flow.out"
+        python = Path(sys.executable).name
+        self.assertEqual(lines[0], f"vtr-qor: P sha: {python} exited 1; see {flow}")
+
+    def test_capped_unknown_peak_and_xl(self) -> None:
+        spec = {"exit": 137, "oom_kill": {"events": str(self.events), "add": 2}}
+        result = qor_sched.run_one(self.job("sha", [spec]), self.opts(), finish_ok)
+        self.assertEqual(result.error, "P sha: capped: stage ? exceeded the 6 GiB scope "
+                                       "(peak ≥ ? MiB at the kill)")
+
+    def test_fresh_attempt_mtime(self) -> None:
+        job_dir = self.job_dir("sha")
+        (job_dir / "run").mkdir(parents=True)
+        for name in ("run/vpr.out", "run/parse_results.txt", "metrics.json", "status",
+                     "job.json", "sha.blif", "frontend.log"):
+            (job_dir / name).write_text("previous attempt\n")
+        job = self.job("sha", [])
+        before = time.time()
+        start = qor_sched.fresh_attempt(job)
+        self.assertLessEqual(start, time.time())
+        self.assertGreaterEqual(start, before - 0.1)
+        self.assertEqual(list(job_dir.iterdir()), [job_dir / "run"])
+        self.assertEqual(list((job_dir / "run").iterdir()), [])
+        parse = str(job_dir / "run" / "parse_results.txt")
+
+        def finish(job: Job, attempt_start: float) -> dict[str, object]:
+            fields = qor_parse.read_parse_results(Path(parse), not_before=attempt_start,
+                                                  label=f"{job.leg} {job.design}")
+            return {"routed": {"vpr_status": fields["vpr_status"]}}
+
+        stale = self.job("sha", [{"write": [{"path": parse, "text": PARSE_TEXT, "age_s": 1}]}])
+        summary, lines = self.run_jobs([stale], self.opts(), finish)
+        self.assertEqual([r.status for r in summary.results], ["failed"])
+        message = "P sha: stale parse_results.txt from an earlier attempt; job failed"
+        self.assertEqual(summary.results[0].error, message)
+        self.assertEqual(lines[0], f"vtr-qor: {message}")
+        self.assertFalse((job_dir / "metrics.json").exists())
+        self.assertEqual((job_dir / "status").read_text(), "failed\n")
+        fresh = self.job("sha", [{"write": [{"path": parse, "text": PARSE_TEXT}]}])
+        summary, _ = self.run_jobs([fresh], self.opts(), finish)
+        self.assertEqual([r.status for r in summary.results], ["ok"])
+
+    def test_timeout_kills_group(self) -> None:
+        """A job (and its grandchild) ignoring SIGTERM past a 1 s timeout: SIGTERM to the group,
+        SIGKILL after KILL_GRACE_S (0.5 s here); neither PID survives."""
+        pids = self.tmp / "pids"
+        spec = {"ignore_term": True, "spawn_sleep": 600, "pids": str(pids), "sleep": 600}
+        frozen = time.time()
+
+        def clock() -> float:
+            """Real time, held until the fake ignores SIGTERM (it may start slowly under load)."""
+            return time.time() if pids.exists() else frozen
+
+        opts = self.opts(clock=clock, sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
+        began = time.monotonic()
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
+            summary, lines = self.run_jobs([self.job("sha", [spec])], opts)
+        took = time.monotonic() - began
+        self.assertEqual([r.status for r in summary.results], ["timeout"])
+        self.assertIn("vtr-qor: P sha: timeout after 1 s", lines)
+        self.assertIn("vtr-qor: P sha: timeout after 1 s",
+                      (self.out / "harness.log").read_text().splitlines())
+        self.assertGreaterEqual(took, 1.5)
+        self.assertLess(took, 30)
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+        self.assertEqual(summary.exit_code, 3)
+        self.assertEqual((self.job_dir("sha") / "status").read_text(), "timeout\n")
+
+    def test_failure_texts(self) -> None:
+        front = {"exit": 3, "stamp": str(self.stamps), "name": "front"}
+        vtr = {"stamp": str(self.stamps), "name": "vtr"}
+        summary, lines = self.run_jobs([self.job("sha", [front, vtr], leg="O")], self.opts())
+        log = self.job_dir("sha", "O") / "frontend.log"
+        self.assertEqual(summary.results[0].status, "failed")
+        self.assertEqual(lines[0], f"vtr-qor: O sha: front end exited 3; see {log}")
+        self.assertEqual(self.starts(), ["front"])
+        self.assertEqual(summary.exit_code, 1)
+
+        def finish(job: Job, start: float) -> dict[str, object]:
+            return {"routed": {"vpr_status": "failed"}, "key": "stale"}
+
+        job = self.job("sha", [{}])
+        summary, lines = self.run_jobs([job], self.opts(), finish)
+        flow = self.job_dir("sha") / "run" / "vtr_flow.out"
+        self.assertEqual(lines[0], f"vtr-qor: P sha: vpr_status=failed; see {flow}")
+        metrics = json.loads((job.job_dir / "metrics.json").read_text())
+        self.assertEqual((metrics["status"], metrics["key"]), ("failed", job.key))
+        self.assertFalse(qor_sched.job_complete(job))
+        summary, lines = self.run_jobs([job], self.opts(), lambda j, s: {"routed": {}})
+        self.assertEqual(lines[0], f"vtr-qor: P sha: vpr_status=missing; see {flow}")
+
+    def test_finish_errors(self) -> None:
+        """A finish that raises fails the job; a metrics.json it left behind does not survive."""
+        job = self.job("sha", [{}])
+
+        def finish(job: Job, start: float) -> dict[str, object]:
+            (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok",
+                                                                  "key": job.key}))
+            raise ValueError("bad number")
+
+        result = qor_sched.run_one(job, self.opts(), finish)
+        self.assertEqual((result.status, result.error),
+                         ("failed", "P sha: cannot finish the job: bad number"))
+        self.assertFalse((job.job_dir / "metrics.json").exists())
+        self.assertFalse(qor_sched.job_complete(job))
+        result = qor_sched.run_one(job, self.opts(), lambda j, s: {"x": object()})
+        self.assertEqual(result.status, "failed")
+        self.assertTrue(result.error.startswith("P sha: cannot finish the job: "))
+
+    def test_ok_metrics_and_status(self) -> None:
+        job = self.job("sha", [{}])
+        clock = FakeClock(tick=0.75)
+        result = qor_sched.run_one(job, self.opts(clock=clock), finish_ok)
+        self.assertEqual(result.status, "ok")
+        metrics = json.loads((job.job_dir / "metrics.json").read_text())
+        self.assertEqual((metrics["status"], metrics["key"], metrics["error"], metrics["leg"]),
+                         ("ok", job.key, "", "P"))
+        self.assertEqual(metrics["elapsed_s"], round(result.elapsed_s, 1))
+        self.assertTrue((job.job_dir / "metrics.json").read_text().startswith('{\n "elapsed_s"'))
+        self.assertEqual((job.job_dir / "status").read_text(), "ok\n")
+        self.assertTrue(qor_sched.job_complete(job))
+
+
+class AdmissionTest(RunnerTestBase):
+    def test_admission_disk_pause_stop_floor(self) -> None:
+        # Paused at 15 GiB, resumed at 25: the job then runs.
+        self.set_df(15)
+        clock = FakeClock()
+        clock.on_sleep = lambda n: self.set_df(25)
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
+        summary, lines = self.run_jobs([job], self.opts(clock=clock, sleep=clock.sleep))
+        self.assertEqual(lines[:2], [
+            "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
+            "vtr-qor: resumed: C: has 25 GiB free"])
+        self.assertEqual(clock.sleeps, [60])
+        self.assertEqual((self.starts(), summary.exit_code), (["sha"], 0))
+
+    def test_admission_pause_limit(self) -> None:
+        self.set_df(15)
+        clock = FakeClock()
+        jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b", "c")]
+        summary, lines = self.run_jobs(jobs, self.opts(clock=clock, sleep=clock.sleep))
+        self.assertEqual(lines[:3], [
+            "vtr-qor: paused: C: has 15 GiB free (< 20 GiB); checking every 60 s",
+            "vtr-qor: C: stayed below 20 GiB free for 2 h; stopping (3 jobs not started)",
+            HINT])
+        self.assertEqual(sum(clock.sleeps), 7200)
+        self.assertEqual(self.starts(), [])
+        self.assertEqual([r.status for r in summary.results], ["skipped"] * 3)
+        self.assertEqual((summary.exit_code, summary.stopped_for_disk), (5, True))
+        self.assertTrue(lines[-1].startswith("vtr-qor: done: 0 ok, 0 failed, 0 capped, "
+                                             "0 timeout, 3 skipped in "))
+
+    def test_admission_floor_while_running(self) -> None:
+        """C: drops to 9 GiB while a job runs: it is terminated (aborted), the run stops, exit 5."""
+        pids = self.tmp / "pids"
+        spec = {"write": [{"path": str(self.df_file), "text": "9\n"}], "spawn_sleep": 600,
+                "pids": str(pids), "sleep": 600}
+        jobs = [self.job("sha", [spec]),
+                self.job("later", [{"stamp": str(self.stamps), "name": "later"}])]
+        summary, lines = self.run_jobs(jobs, self.opts(clock=ScaledClock(600)))
+        self.assertIn("vtr-qor: C: fell below 10 GiB free; terminating 1 running jobs", lines)
+        self.assertEqual([r.status for r in summary.results], ["aborted", "skipped"])
+        self.assertEqual((summary.exit_code, summary.stopped_for_disk), (5, True))
+        self.assertEqual(self.starts(), [])
+        self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
+        self.assertEqual((self.job_dir("sha") / "status").read_text(), "aborted\n")
+        self.assertIn(", 1 aborted in ", lines[-1])
+
+    def test_df_fails_while_running(self) -> None:
+        spec = {"write": [{"path": str(self.df_file), "text": "garbage\n"}], "sleep": 600}
+        summary, lines = self.run_jobs([self.job("sha", [spec])],
+                                       self.opts(clock=ScaledClock(600)))
+        self.assertEqual(summary.results[0].error, "cannot read free space of /mnt/c")
+        self.assertEqual((summary.results[0].status, summary.exit_code), ("aborted", 5))
+
+    def test_df_fails_between_jobs(self) -> None:
+        self.df_file.write_text("garbage\n")
+        summary, lines = self.run_jobs([self.job("sha", [{}])], self.opts())
+        self.assertEqual(lines[0], "vtr-qor: cannot read free space of /mnt/c")
+        self.assertEqual(([r.status for r in summary.results], summary.exit_code),
+                         (["skipped"], 5))
+
+    def test_admission_mem_wait(self) -> None:
+        self.set_mem(6.5)
+        clock = FakeClock()
+        clock.on_sleep = lambda n: self.set_mem(8.0) if n == 3 else None
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
+        summary, lines = self.run_jobs([job], self.opts(clock=clock, sleep=clock.sleep))
+        self.assertEqual(lines[0], "vtr-qor: waiting: 6.5 GiB available (< 7)")
+        self.assertEqual(lines[1], "vtr-qor: [1/1] P sha ok 0.0 s (A, j1)")
+        self.assertEqual(clock.sleeps, [60, 60, 60])
+        self.assertEqual(self.starts(), ["sha"])
+        opts = self.opts()
+        self.set_mem(6.99)
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(qor_sched.admit(opts, running=0), "wait")
+        self.assertEqual(err.getvalue(), "vtr-qor: waiting: 6.9 GiB available (< 7)\n")
+        self.set_mem(7.0)
+        self.assertEqual(qor_sched.admit(opts, running=0), "go")
+
+    def test_admit_running(self) -> None:
+        """With a job running only the floor counts: 15 GiB goes on, 9 stops; memory is not
+        read."""
+        opts = self.opts()
+        self.set_mem(1.0)
+        self.set_df(15)
+        self.assertEqual(qor_sched.admit(opts, running=1), "go")
+        self.set_df(10)
+        self.assertEqual(qor_sched.admit(opts, running=1), "go")
+        self.set_df(9)
+        self.assertEqual(qor_sched.admit(opts, running=1), "stop")
+        self.set_df(20)
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(qor_sched.admit(opts, running=0), "wait")  # memory, not disk
+        self.set_mem(16.0)
+        self.assertEqual(qor_sched.admit(opts, running=0), "go")  # 20 GiB is enough
+        self.set_df(19)
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(qor_sched.admit(opts, running=0), "wait")
+        self.assertIn("paused: C: has 19 GiB free", err.getvalue())
+
+    def test_deadline(self) -> None:
+        clock = FakeClock()
+        jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b", "c")]
+        minutes = {"a": 30, "b": 200, "c": 30}
+        opts = self.opts(clock=clock, sleep=clock.sleep, deadline=clock.now + 100 * 60,
+                         expected_s=lambda job: minutes[job.design] * 60.0)
+        summary, lines = self.run_jobs(jobs, opts)
+        self.assertEqual([r.status for r in summary.results], ["ok", "skipped", "ok"])
+        when = time.strftime("%H:%M", time.localtime(clock.now + 100 * 60))
+        self.assertIn(f"vtr-qor: nightly: P b not started: expected 200 min would pass {when}",
+                      lines)
+        self.assertEqual(summary.exit_code, 0)
+
+
+class CleanupTest(RunnerTestBase):
+    def ok(self, job: Job) -> qor_sched.JobResult:
+        return qor_sched.JobResult(job, "ok", 1.0, "")
+
+    def test_cleanup_keep_list(self) -> None:
+        job = self.job("sha", [])
+        run = job.job_dir / "run"
+        run.mkdir(parents=True)
+        for name in KEEP_PRESENT + SCRATCH:
+            (run / name).write_text(f"{name} contents\n" * 50)
+        self.assertEqual(len(list(run.iterdir())), 20)
+        original = (run / "sha.pre-vpr.blif").read_bytes()
+        qor_sched.cleanup_job(job, self.ok(job), frozenset())
+        self.assertEqual(sorted(p.name for p in run.iterdir()),
+                         sorted((*KEEP_PRESENT, "sha.pre-vpr.blif.gz")))
+        self.assertEqual(gzip.decompress((run / "sha.pre-vpr.blif.gz").read_bytes()), original)
+        # Reproducible bytes (no name, no time in the gzip header).
+        first = (run / "sha.pre-vpr.blif.gz").read_bytes()
+        (run / "sha.pre-vpr.blif").write_bytes(original)
+        qor_sched.cleanup_job(job, self.ok(job), frozenset())
+        self.assertEqual((run / "sha.pre-vpr.blif.gz").read_bytes(), first)
+
+    def make_o(self, leg: str = "O") -> tuple[Job, Path, Path]:
+        job = self.job("sha", [], leg=leg)
+        qor_heavy.safe_rmtree(job.job_dir, self.out)
+        run = job.job_dir / "run"
+        (run / "sub").mkdir(parents=True)
+        (run / "sub" / "x").write_text("x\n")
+        for name in ("vpr.out", "sha.pre-vpr.blif", "sha.net"):
+            (run / name).write_text(name)
+        blif = job.job_dir / "sha.blif"
+        blif.write_text(".model sha\n.end\n")
+        return job, run, blif
+
+    def test_cleanup_netlists(self) -> None:
+        job, run, blif = self.make_o()
+        digest = hashlib.sha256(blif.read_bytes()).hexdigest()
+        qor_sched.cleanup_job(job, self.ok(job), frozenset({"Oprime"}))
+        self.assertEqual(sorted(p.name for p in run.iterdir()), ["vpr.out"])
+        self.assertFalse(blif.exists())
+        self.assertEqual((job.job_dir / "sha.blif.sha256").read_text(), digest + "\n")
+        job, run, blif = self.make_o()
+        qor_sched.cleanup_job(job, self.ok(job), frozenset({"O"}))
+        self.assertEqual(sorted(p.name for p in run.iterdir()), ["sha.pre-vpr.blif", "vpr.out"])
+        self.assertTrue(blif.exists())
+        self.assertFalse((job.job_dir / "sha.blif.sha256").exists())
+
+    def test_cleanup_keeps_failed(self) -> None:
+        for status in ("failed", "capped", "timeout", "aborted"):
+            job, run, blif = self.make_o()
+            qor_sched.cleanup_job(job, qor_sched.JobResult(job, status, 1.0, "x"), frozenset())
+            self.assertEqual(sorted(p.name for p in run.iterdir()),
+                             ["sha.net", "sha.pre-vpr.blif", "sub", "vpr.out"], status)
+            self.assertTrue(blif.exists())
+
+    def test_cleanup_refuses_symlink(self) -> None:
+        job, run, _ = self.make_o()
+        outside = self.tmp / "outside"
+        outside.mkdir()
+        (outside / "keep").write_text("keep\n")
+        (run / "link").symlink_to(outside)
+        with self.assertRaises(HeavyError) as caught:
+            qor_sched.cleanup_job(job, self.ok(job), frozenset())
+        self.assertEqual(caught.exception.code, 2)
+        self.assertTrue((outside / "keep").exists())
+
+    def test_run_cleans_ok_job(self) -> None:
+        run = self.job_dir("sha") / "run"
+        spec = {"write": [{"path": str(run / n), "text": n} for n in ("vpr.out", "sha.net",
+                                                                      "sha.pre-vpr.blif")]}
+        summary, _ = self.run_jobs([self.job("sha", [spec])], self.opts())
+        self.assertEqual(summary.exit_code, 0)
+        self.assertEqual(sorted(p.name for p in run.iterdir()),
+                         ["sha.pre-vpr.blif.gz", "vpr.out", "vtr_flow.out"])
+
+
+class RetentionTest(RunnerTestBase):
+    def leg_dir(self, leg: str = "P") -> Path:
+        return self.out / VTR12 / K6 / leg
+
+    def make(self, key12: str, design: str, status: str, when: float, *,
+             size: int = 100) -> Path:
+        job_dir = self.leg_dir() / key12 / design
+        (job_dir / "run").mkdir(parents=True)
+        with (job_dir / "run" / "big").open("wb") as handle:
+            handle.truncate(size)
+        if status == "ok":
+            (job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": "k"}))
+        (job_dir / "status").write_text(status + "\n")
+        os.utime(job_dir / "status", (when, when))
+        return job_dir
+
+    def prune(self) -> None:
+        qor_sched.prune(self.out, VTR12, K6, "P")
+
+    def test_retention_keys(self) -> None:
+        keys = [f"{i:012x}" for i in range(5)]
+        for i, key in enumerate(keys):
+            for design in ("sha", "ch_intrinsics"):
+                self.make(key, design, "ok", 1_000_000.0 + i)
+        incomplete = self.make("incomplete00", "sha", "ok", 1.0)
+        self.make("incomplete00", "ch_intrinsics", "failed", 2.0)
+        self.prune()
+        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir()),
+                         sorted([*keys[2:], "incomplete00"]))
+        self.assertTrue(incomplete.exists())
+        # latest is never pruned, even when older keys would be.
+        (self.leg_dir() / "latest").write_text(keys[2] + "\n")
+        for i in range(5, 8):
+            self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)
+        self.prune()
+        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir() if p.is_dir()),
+                         sorted([keys[2], *(f"{i:012x}" for i in range(5, 8)), "incomplete00"]))
+
+    def test_retention_failed_count(self) -> None:
+        dirs = [self.make("aaaaaaaaaaaa", f"d{i}", "failed" if i % 2 else "capped",
+                          1_000_000.0 + 10 * (7 - i)) for i in range(7)]
+        self.prune()
+        with_run = [d for d in dirs if (d / "run").exists()]
+        self.assertEqual(with_run, dirs[:5])
+        self.assertTrue(all((d / "status").exists() for d in dirs))
+
+    def test_retention_failed_bytes(self) -> None:
+        dirs = [self.make("bbbbbbbbbbbb", f"d{i}", "timeout", 1_000_000.0 + i, size=GIB)
+                for i in range(3)]
+        self.prune()
+        self.assertEqual([(d / "run").exists() for d in dirs], [False, True, True])
+        total = sum(qor_sched._tree_bytes(d / "run") for d in dirs if (d / "run").exists())
+        self.assertLessEqual(total, 2 * GIB)
+
+    def test_retention_refuses_symlinks(self) -> None:
+        outside = self.tmp / "outside"
+        (outside / "sha").mkdir(parents=True)
+        (outside / "sha" / "status").write_text("ok\n")
+        self.make("cccccccccccc", "sha", "ok", 1.0)
+        link = self.leg_dir() / "dddddddddddd"
+        link.symlink_to(outside)
+        with self.assertRaises(HeavyError) as caught:
+            self.prune()
+        self.assertEqual((caught.exception.code, caught.exception.message),
+                         (2, f"refusing to delete {link}: {link} is a symlink"))
+        self.assertTrue((outside / "sha" / "status").exists())
+        link.unlink()
+        (self.leg_dir() / "cccccccccccc" / "lnk").symlink_to(outside)
+        with self.assertRaises(HeavyError):
+            self.prune()
+        (self.leg_dir() / "cccccccccccc" / "lnk").unlink()
+        status = self.leg_dir() / "cccccccccccc" / "sha" / "status"
+        status.rename(self.tmp / "status")
+        status.symlink_to(self.tmp / "status")
+        with self.assertRaises(HeavyError):
+            self.prune()
+        status.unlink()
+        (self.tmp / "status").rename(status)
+        (self.leg_dir() / "latest").symlink_to(self.tmp / "status")
+        with self.assertRaises(HeavyError):
+            self.prune()
+        (self.leg_dir() / "latest").unlink()
+        moved = self.tmp / "realleg"
+        self.leg_dir().rename(moved)
+        self.leg_dir().symlink_to(moved)
+        with self.assertRaises(HeavyError):
+            self.prune()
+        self.assertTrue((moved / "cccccccccccc" / "sha" / "status").exists())
+
+    def test_run_prunes_after(self) -> None:
+        for i in range(4):
+            self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)
+        summary, _ = self.run_jobs([self.job("sha", [{}])], self.opts())
+        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir()),
+                         ["000000000002", "000000000003", KEY12])
+
+
+class ProgressTest(RunnerTestBase):
+    def test_progress_lines(self) -> None:
+        log = qor_sched.HarnessLog(self.out)
+        job = self.job("sha", [])
+        results = ([qor_sched.JobResult(job, "ok", 14.25, "")] * 19
+                   + [qor_sched.JobResult(job, "failed", 1.0, "x"),
+                      qor_sched.JobResult(job, "timeout", 1.0, "x"),
+                      qor_sched.JobResult(dataclasses.replace(job, group="B", leg="O"),
+                                          "capped", 3723.04, "x")])
+        with redirect_stderr(io.StringIO()) as err:
+            log.job(3, 21, qor_sched.JobResult(job, "ok", 14.21, ""))
+            log.job(21, 21, results[-1])
+            log.done(results, 3723.4)
+        expected = ["vtr-qor: [3/21] P sha ok 14.2 s (A, j1)",
+                    "vtr-qor: [21/21] O sha capped 3723.0 s (B, j1)",
+                    "vtr-qor: done: 19 ok, 1 failed, 1 capped, 1 timeout, 0 skipped in 1:02:03"]
+        self.assertEqual(err.getvalue().splitlines(), expected)
+        self.assertEqual((self.out / "harness.log").read_text().splitlines(), expected)
+        self.assertEqual((qor_sched.hms(0.6), qor_sched.hms(59.5), qor_sched.hms(-3)),
+                         ("0:00:01", "0:01:00", "0:00:00"))
+        with redirect_stderr(io.StringIO()):
+            log.done([], 0.4)
+        self.assertEqual((self.out / "harness.log").read_text().splitlines()[-1],
+                         "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00")
+
+    def test_run_lines(self) -> None:
+        jobs = [self.job("sha", [{}]), self.job("mcml", [{"exit": 2}], group="B")]
+        clock = FakeClock()  # elapsed times are pinned by test_progress_lines
+        summary, lines = self.run_jobs(jobs, self.opts(clock=clock))
+        flow = self.job_dir("mcml") / "run" / "vtr_flow.out"
+        python = Path(sys.executable).name
+        self.assertEqual(lines, [
+            "vtr-qor: [1/2] P sha ok 0.0 s (A, j1)",
+            f"vtr-qor: P mcml: {python} exited 2; see {flow}",
+            "vtr-qor: [2/2] P mcml failed 0.0 s (B, j1)",
+            "vtr-qor: done: 1 ok, 1 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00"])
+        self.assertEqual(lines, (self.out / "harness.log").read_text().splitlines())
 
 
 if __name__ == "__main__":
