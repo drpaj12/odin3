@@ -199,7 +199,7 @@ targets.
 | E9 | Case equality `=== !==` | §5.1.6 | ? | C p.42 "cannot be synthesized"; B App.A p.193 "not supported" | E-: "Operation not supported" (nca:3700). Fails micros `operators/binary_equal`, `binary_not_equal` (Parmys passes) | 2/0/0 | Y | MUST (exit test; elaborate as `==` when neither side has x/z, else constant-fold; warn) |
 | E10 | Shifts `<< >> <<< >>>`, variable amount | §5.1.10 | S | C p.41 | OK=. `>>>` sign-fills only for a declared-signed left operand (nca:3775) | 62/9/28; `>>>` 41/0/7 | Y | MUST |
 | E11 | Conditional `?:`, nested | §5.1.11 | S | C p.44; B p.36 | OK= | — | Y | MUST |
-| E12 | Concatenation, incl. as LHS; unsized operand → error | §5.1.12 | S | C p.43; B p.24 | OK=. Unsized operand gives a located error (au:457, 1491), which is correct | — | Y | MUST |
+| E12 | Concatenation, incl. as LHS; an unsized operand is accepted at its stored width with a warning (2D; was: error) | §5.1.12 | S | C p.43; B p.24 | OK=. Unsized operand gives a located error (au:457, 1491), as IEEE 1364-2005 says. Yosys 0.55 and Parmys accept it silently (`{a, 'h1}` is `{a, 32'h00000001}`), so 2D accepts it too, with the warning `unsized constant in a concatenation is taken as N bits` at the literal (F6 ruling; 2D spec EL-13, §17 #21) | — | Y | MUST |
 | E13 | Replication, nested, parameter count | §5.1.12 | S | C p.44 | OK= | 11/4/23 | Y | MUST |
 | E14 | Constant bit- and part-select | §5.2.1 | S | C p.43; B p.32–33 | OK= | — | Y | MUST |
 | E15 | **Non-constant bit-select** on a vector: rvalue → mux, lvalue → decoder | §5.2.1 | S | **B §2.10.2–3 p.34–35** | E-: assert `get_name_of_pins: rnode[1]->type == NUMBERS` (au:671) for `a[s]`, `y[s] = d` (*bs1*, *bs3*) | not counted | Y | MUST |

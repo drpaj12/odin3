@@ -1033,7 +1033,8 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab_decision { odin3_ast_id node; int32_t value; } odin3_elab_decision;`
 - `typedef struct odin3_elab_spec_req { uint32_t def; const odin3_elab_override *ovr; uint32_t n_ovr; uint32_t depth; } odin3_elab_spec_req;`
 - `odin3_status odin3_elab1_params(odin3_elab1 *e1, const odin3_elab_spec_req *req, odin3_cval *values, odin3_elab_override *pending, uint32_t *n_pending);`
-  - It evaluates the definition's `parameter`s lazily in declaration order, with overrides by precedence (EL-8) and converted per EL-16.
+  - It evaluates the definition's `parameter`s lazily in declaration order, with overrides by precedence (EL-8) and converted per EL-16 through `odin3_cval_to_param` (`cval.h`, PR 2D-2's final review: the one copy of the four-mode rule and its equal-width `UNSIZED` quirk; Tasks 12 and 14 call it too). A `STRING` value's node and EL-9 name take its bytes from `odin3_cval_string_bytes`.
+  - The evaluator's per-level typers live until `odin3_ceval_destroy` (counted in its byte budget): use one `odin3_ceval` per specialization, not one per run.
   - It returns the pending (deeper) overrides.
   - Errors are §9.1's (localparam, unknown, too many, mixed, depends on itself, not constant, P4).
 - `odin3_status odin3_elab1_spec_get(odin3_elab1 *e1, const odin3_elab_spec_req *req, uint32_t *spec);` finds or creates; on create it pushes back and names per EL-9 and point (q). Caps: the specialization text of point (aa).

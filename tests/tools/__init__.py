@@ -1,5 +1,6 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures, tools/parse-check, the BLIF reader and the Python plugin binding
+tools/project-fixtures, tools/elab-check, the BLIF reader and the Python plugin binding
 (plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
@@ -21,6 +22,7 @@ for _sub in (
     "tools/pp-diff",
     "tools/parse-check",
     "tools/token-cost",
+    "tools/elab-check",
     "plugins/python",
 ):
     _path = str(REPO_ROOT / _sub)
