@@ -851,6 +851,12 @@ typedef struct odin3_elab1_mport {
     odin3_ast_id range; /* the RANGE that gives the port's type, or 0 */
     odin3_ast_id group; /* the PORT_DECL (its attributes and location) */
     odin3_ast_id decl;  /* the DECLARATOR, or the empty position's PORT_REF */
+    /* The NET_DECL or VAR_DECL merged into the port (EL-24), else 0, and its DECLARATOR: the
+     * written port takes its value (E?) and its attributes (C-1). obj_first: it was declared
+     * before the port's own PORT_DECL, so the PORT_DECL's attributes win a name both give. */
+    odin3_ast_id obj_group;
+    odin3_ast_id obj_decl;
+    bool obj_first;
 } odin3_elab1_mport;
 
 /* An implicit net (EL-25): its name and the first use. */
@@ -883,6 +889,7 @@ typedef struct odin3_elab1_env {
     uint32_t cur_scope;  /* where lookups start and declarations are recorded */
     odin3_u64map *seen;  /* scope << 32 | genblk* name → the sequence number it was seen at */
     odin3_u64map *kids;  /* scope << 32 | block name → its first elaborated scope + 1 */
+    odin3_u64map *procs; /* scope << 32 | name of a named begin/end block of an always or initial */
     odin3_u64map *iters; /* first scope << 32 | (uint32_t)index → the iteration's scope + 1 */
     uint32_t seq;        /* the seen-set clock */
     uint32_t made_first; /* the scopes the last odin3_elab1_gen_* made: [first, first + n) */
@@ -1020,7 +1027,9 @@ odin3_status odin3_elab1_genblk_name(odin3_elab1 *e1, uint32_t scope, uint32_t c
 /* G7: hier_name (a HIER_NAME) read in scope resolved through the module's generate blocks to a
  * declaration of the reached scope; E21 "hierarchical reference 'u.w' is not supported", "'g[5].t'
  * does not exist (generate block 'g[5]' was not elaborated)" or "'b.x' is not declared"
- * otherwise. ODIN3_ERR_PARSE after the diagnostic; ODIN3_ERR_NO_MEMORY. */
+ * otherwise. A path whose first component names a named begin/end block of an always or initial
+ * in scope (`blk.count`, I-1) is accepted unchecked: the binder finds its member. ODIN3_ERR_PARSE
+ * after the diagnostic; ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope);
 
 /* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
@@ -1114,7 +1123,8 @@ void odin3_elab1_decl_free(odin3_elab1_env *env);
 typedef enum odin3_elab1_walked {
     ODIN3_WALK_STOP = 0, /* comps[used] is not a block (or every component was used) */
     ODIN3_WALK_NOT_ELAB, /* comps[used] is a block that was not elaborated (that index) */
-    ODIN3_WALK_BAD       /* comps[used] names a block with an index it lacks, or no index */
+    ODIN3_WALK_BAD,      /* comps[used] names a block with an index it lacks, or no index */
+    ODIN3_WALK_PROC      /* comps[used] names a begin/end block of an always or initial (I-1) */
 } odin3_elab1_walked;
 
 /* A path to walk: comps[0 .. count) from scope; where the walk stopped. */

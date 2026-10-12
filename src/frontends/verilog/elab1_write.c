@@ -148,6 +148,7 @@ static bool w_room(e1w *wr, odin3_ast_id from) {
 typedef struct w_attrs_of {
     odin3_ast_id from; /* the parsed node whose attributes are written */
     odin3_ast_id made; /* the elaborated node they are attached to */
+    odin3_ast_id then; /* a second parsed node merged in after from's (0: none); it wins a name */
 } w_attrs_of;
 
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at);
@@ -170,7 +171,7 @@ static odin3_ast_id w_make_plain(e1w *wr, const odin3_ast_spec *spec, uint32_t m
 static odin3_ast_id w_make_marked(e1w *wr, const odin3_ast_spec *spec, uint32_t mark,
                                   odin3_ast_id from) {
     odin3_ast_id id = w_make_plain(wr, spec, mark, from);
-    w_attach_attrs(wr, &(w_attrs_of){from, id});
+    w_attach_attrs(wr, &(w_attrs_of){.from = from, .made = id});
     return id;
 }
 
@@ -279,34 +280,61 @@ static odin3_ast_id w_attr_value(e1w *wr, odin3_ast_id value) {
     return w_value(wr, &val, base, value);
 }
 
-/* The attributes of the parsed node from, evaluated and attached to the elaborated node made. */
+/* One ATTR copied from attr with its value evaluated; 0 when the writer stopped. */
+static odin3_ast_id w_attr_one(e1w *wr, odin3_ast_id attr) {
+    odin3_ast_id value = w_attr_value(wr, odin3_ast_child(wr->ast, attr, 0));
+    odin3_ast_id id = {0};
+    if (!live(wr) || !w_room(wr, attr)) {
+        return id;
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_ATTR, attr);
+    spec.name = odin3_ast_name(wr->ast, attr);
+    spec.flags = odin3_ast_flags(wr->ast, attr);
+    odin3_status st = odin3_ast_make(wr->out, &spec, &value, 1, &id);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+    return id;
+}
+
+/* Whether the attributes of node include one named name. */
+static bool w_has_attr(const e1w *wr, odin3_ast_id node, uint32_t name) {
+    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, node);
+    for (uint32_t i = 0; i < attrs.n; i++) {
+        if (odin3_ast_name(wr->ast, attrs.ids[i]) == name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The attributes of the parsed node from (then those of at->then, which win a name both give),
+ * evaluated and attached to the elaborated node made. */
 static void w_attach_attrs(e1w *wr, const w_attrs_of *at) {
-    odin3_ast_id made = at->made;
-    odin3_ast_span attrs = odin3_ast_attrs(wr->ast, at->from);
-    if (attrs.n == 0 || made.v == 0 || !live(wr)) {
+    odin3_ast_span first = odin3_ast_attrs(wr->ast, at->from);
+    odin3_ast_span second = odin3_ast_attrs(wr->ast, at->then);
+    if (first.n + second.n == 0 || at->made.v == 0 || !live(wr)) {
         return;
     }
-    odin3_ast_id *ids = odin3_arena_alloc(wr->env->arena, (size_t)attrs.n * sizeof *ids);
+    odin3_ast_id *ids =
+        odin3_arena_alloc(wr->env->arena, ((size_t)first.n + second.n) * sizeof *ids);
     if (ids == NULL) {
         fail(wr, ODIN3_ERR_NO_MEMORY);
         return;
     }
-    for (uint32_t i = 0; i < attrs.n; i++) {
-        odin3_ast_id attr = attrs.ids[i];
-        odin3_ast_id value = w_attr_value(wr, odin3_ast_child(wr->ast, attr, 0));
-        if (!live(wr) || !w_room(wr, attr)) {
-            return;
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < first.n + second.n && live(wr); i++) {
+        odin3_ast_id attr = i < first.n ? first.ids[i] : second.ids[i - first.n];
+        if (i < first.n && w_has_attr(wr, at->then, odin3_ast_name(wr->ast, attr))) {
+            continue; /* the later declaration's value wins */
         }
-        odin3_ast_spec spec = spec_of(wr, ODIN3_AST_ATTR, attr);
-        spec.name = odin3_ast_name(wr->ast, attr);
-        spec.flags = odin3_ast_flags(wr->ast, attr);
-        odin3_status st = odin3_ast_make(wr->out, &spec, &value, 1, &ids[i]);
-        if (st != ODIN3_OK) {
-            fail(wr, st);
-            return;
-        }
+        ids[count] = w_attr_one(wr, attr);
+        count += ids[count].v != 0 ? 1U : 0U;
     }
-    odin3_status st = odin3_ast_attach(wr->out, made, ids, attrs.n);
+    if (!live(wr)) {
+        return;
+    }
+    odin3_status st = odin3_ast_attach(wr->out, at->made, ids, count);
     if (st != ODIN3_OK) {
         fail(wr, st);
     }
@@ -856,17 +884,27 @@ static odin3_ast_id w_expr(e1w *wr, odin3_ast_id root) {
 
 /* --- declarations --------------------------------------------------------------------------- */
 
-/* A DECLARATOR copied: its value expression (E?) and its unpacked RANGEs folded. */
-static odin3_ast_id w_declarator(e1w *wr, odin3_ast_id decl) {
+/* A DECLARATOR to copy: its name and unpacked RANGEs are decl's, its value expression (E?) is
+ * value's (the same declarator, or the merged object's for a port, C-1). */
+typedef struct w_declarator_of {
+    odin3_ast_id decl;
+    odin3_ast_id value;
+} w_declarator_of;
+
+static odin3_ast_id w_declarator_valued(e1w *wr, const w_declarator_of *of) {
     uint32_t mark = w_mark(wr);
-    odin3_ast_span kids = odin3_ast_children(wr->ast, decl);
-    w_push(wr, kids.n > 0 ? w_expr(wr, kids.ids[0]) : (odin3_ast_id){0});
+    odin3_ast_span kids = odin3_ast_children(wr->ast, of->decl);
+    w_push(wr, w_expr(wr, odin3_ast_child(wr->ast, of->value, 0)));
     for (uint32_t i = 1; i < kids.n; i++) {
         w_push(wr, w_range(wr, kids.ids[i]));
     }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_DECLARATOR, decl);
-    spec.name = odin3_ast_name(wr->ast, decl);
-    return w_make_marked(wr, &spec, mark, decl);
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_DECLARATOR, of->decl);
+    spec.name = odin3_ast_name(wr->ast, of->decl);
+    return w_make_marked(wr, &spec, mark, of->decl);
+}
+
+static odin3_ast_id w_declarator(e1w *wr, odin3_ast_id decl) {
+    return w_declarator_valued(wr, &(w_declarator_of){decl, decl});
 }
 
 /* A parameter's DECLARATOR with its final value (pass E evaluated it). */
@@ -930,11 +968,17 @@ static odin3_ast_id w_port(e1w *wr, const odin3_elab1_mport *port) {
     uint32_t mark = w_mark(wr);
     w_push(wr, port->as_integer && port->range.v == 0 ? w_integer_range(wr, port->decl)
                                                       : w_range(wr, port->range));
-    w_push(wr, w_declarator(wr, port->decl));
+    bool own_value = odin3_ast_child(wr->ast, port->decl, 0).v != 0;
+    w_push(wr, w_declarator_valued(
+                   wr, &(w_declarator_of){port->decl, own_value ? port->decl : port->obj_decl}));
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_PORT_DECL, port->group);
     spec.sub = port->dir;
     spec.flags = (uint16_t)flags;
-    return w_make_marked(wr, &spec, mark, port->group);
+    odin3_ast_id made = w_make_plain(wr, &spec, mark, port->group);
+    w_attach_attrs(wr, &(w_attrs_of){.from = port->obj_first ? port->obj_group : port->group,
+                                     .made = made,
+                                     .then = port->obj_first ? port->group : port->obj_group});
+    return made;
 }
 
 /* The ports LIST: one PORT_DECL per merged port (pass E's list); empty positions are EL-10's. */
@@ -1854,7 +1898,7 @@ static void w_implicit(e1w *wr) {
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NET_DECL, first);
     spec.sub = odin3_elab1_implicit_sub(wr->env->nettype);
     odin3_ast_id made = w_make_plain(wr, &spec, mark, first);
-    w_implicit_attr(wr, &(w_attrs_of){first, made});
+    w_implicit_attr(wr, &(w_attrs_of){.from = first, .made = made});
     w_push(wr, made);
 }
 

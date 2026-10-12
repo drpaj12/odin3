@@ -133,6 +133,71 @@ static void test_m1_net_kind_and_order(void) {
     EXPECT_SEQ("(PORT_DECL.output [IN_HEADER DT=1]", "(VAR_DECL.reg", "(DECLARATOR:r");
 }
 
+/* C-1: a net or variable declaration merged into a port keeps its value (the net declaration
+ * assignment or the initial value) in the port's DECLARATOR, the slot an ANSI `output reg q = 1`
+ * uses; the object's NET_DECL or VAR_DECL disappears. Yosys 0.55 (the commands are in the 2D-4
+ * fix report) drives `w` from `~a` and gives `q` its init in each of these. */
+static void test_merged_values(void) {
+    static const char *const nets[] = {
+        "module m(w, a);\n  output w;\n  input a;\n  wire w = ~a;\nendmodule\n",
+        "module m(w, a);\n  wire w = ~a;\n  output w;\n  input a;\nendmodule\n",
+        "module m(input a, output w);\n  wire w = ~a;\nendmodule\n",
+        "module m(input a, output wire w = ~a);\nendmodule\n",
+    };
+    for (size_t i = 0; i < sizeof nets / sizeof nets[0]; i++) {
+        run_clean(nets[i]);
+        EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "(DECLARATOR:w", "(UNARY.~");
+        expect_absent("NET_DECL");
+        expect_absent("CONT_ASSIGN");
+    }
+    static const char *const vars[] = {
+        "module m(q);\n  output q;\n  reg q = 1'b1;\nendmodule\n",
+        "module m(q);\n  reg q = 1'b1;\n  output q;\nendmodule\n",
+        "module m(output q);\n  reg q = 1'b1;\nendmodule\n",
+        "module m(output reg q = 1'b1);\nendmodule\n",
+    };
+    for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
+        run_clean(vars[i]);
+        EXPECT_SEQ("(PORT_DECL.output [IN_HEADER DT=1]", "(DECLARATOR:q", "(NUMBER");
+        expect_absent("VAR_DECL");
+    }
+    run_clean("module m(q, r);\n  output q, r;\n  reg [3:0] q = 4'd5, r;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER DT=1]", "(DECLARATOR:q", "(NUMBER",
+               "(PORT_DECL.output [IN_HEADER DT=1]", "(DECLARATOR:r");
+}
+
+/* C-1: the attributes of both declarations are on the port, the later declaration winning a
+ * name both give (Yosys 0.55: `(* keep=0 *) output q; (* keep=1 *) wire q;` keeps 1). */
+static void test_merged_attrs(void) {
+    run_clean("module m(q, a);\n  output q;\n  input a;\n  (* keep *) wire q;\n"
+              "  assign q = a;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "{(ATTR:keep");
+    run_clean("module m(q, a);\n  (* keep *) wire q;\n  output q;\n  input a;\n"
+              "  assign q = a;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "{(ATTR:keep");
+    run_clean("module m(q, a);\n  (* keep *) output q;\n  input a;\n  (* foo = 2 *) wire q;\n"
+              "  assign q = a;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "(ATTR:keep", "(ATTR:foo");
+    run_clean("module m(output q, input a);\n  (* keep *) wire q;\n  assign q = a;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "{(ATTR:keep");
+    run_clean("module m(output reg q, input a);\n  (* keep *) reg q = 1'b1;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER DT=1]", "(DECLARATOR:q", "(NUMBER", "{(ATTR:keep");
+    run_clean("module m(q, a);\n  (* keep = 0 *) output q;\n  input a;\n  (* keep = 1 *) wire q;\n"
+              "  assign q = a;\nendmodule\n");
+    EXPECT_SEQ("(PORT_DECL.output [IN_HEADER NET=1]", "{(ATTR:keep @t.v:4:6", "@t.v:4:13 1)");
+    TEST_ASSERT_NULL_MESSAGE(strstr(strstr(rs.dump.data, "(ATTR:keep") + 1, "(ATTR:keep"),
+                             rs.dump.data);
+}
+
+/* C-1: a value on both declarations is an error at the second one. Yosys 0.55 accepts it and
+ * keeps both drivers; §17 #37. */
+static void test_merged_two_values(void) {
+    run_error("module m(input a, output wire w = a);\n  wire w = ~a;\nendmodule\n",
+              "t.v:2:8: error: port 'w' has a value in both of its declarations");
+    run_error("module m(output reg q = 1'b0);\n  reg q = 1'b1;\nendmodule\n",
+              "t.v:2:7: error: port 'q' has a value in both of its declarations");
+}
+
 /* Yosys 0.55 accepts a body declaration of an ANSI port: the same merge. */
 static void test_ansi_redeclared(void) {
     run_clean("module m(output q, input signed [3:0] a);\n  reg q;\n  wire [3:0] a;\n"
@@ -596,7 +661,8 @@ static odin3_status oom_step(const oom_at *at) {
 static void test_oom(void) {
     run_clean(
         "`default_nettype wand\nmodule m(a, q, r);\n  input a;\n  input reg r;\n  output [3:0] q;\n"
-        "  reg [3:0] q;\n  localparam N = 2;\n  (* k = N *) wire [$clog2(8)-1:0] w;\n"
+        "  (* kk = 1 *) reg [3:0] q = 4'd2;\n  localparam N = 2;\n  (* k = N *) wire "
+        "[$clog2(8)-1:0] w;\n"
         "  assign w = a & b;\n  function [3:0] f;\n    input [3:0] x;\n    reg t;\n"
         "    begin t = x[0]; f = x; end\n  endfunction\n  task tk(input z); begin end endtask\n"
         "  always @* begin reg t; t = a; repeat (N) q = {N{a}}; q = f(q); end\n"
@@ -624,6 +690,9 @@ int main(void) {
     RUN_TEST(test_m1_merge);
     RUN_TEST(test_m1_net_kind_and_order);
     RUN_TEST(test_ansi_redeclared);
+    RUN_TEST(test_merged_values);
+    RUN_TEST(test_merged_attrs);
+    RUN_TEST(test_merged_two_values);
     RUN_TEST(test_m1_range_conflict);
     RUN_TEST(test_m1_signed);
     RUN_TEST(test_port_lists);

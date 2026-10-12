@@ -513,6 +513,15 @@ static void bd_gate(bd_run *br, odin3_ast_id node) {
     }
 }
 
+/* A net port's value (`output wire w = e`, or a merged `wire w = e`, C-1) is a net declaration
+ * assignment, queued (CONTINUOUS) as a NET_DECL's is. */
+static void bd_port_value(bd_run *br, odin3_ast_id declarator, bool variable) {
+    if (!variable && bd_child(br, declarator, 0).v != 0) {
+        bd_assign net_assign = {declarator, declarator, ODIN3_ASSIGN_CONTINUOUS};
+        bd_push_assign(br, &net_assign);
+    }
+}
+
 /* A port's symbol: a module port is a net (its NET field) or a reg/integer variable (its DT); a
  * function or task port is a variable. */
 static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, bool subroutine) {
@@ -548,6 +557,7 @@ static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, b
         bd_integer_type(&spec);
     }
     bd_unpacked(br, declarator, bd_declare(br, &spec, declarator));
+    bd_port_value(br, declarator, is_var); /* a subroutine port is a variable */
 }
 
 _Static_assert(ODIN3_AST_F_NET_DECL_SIGNED == ODIN3_AST_F_VAR_DECL_SIGNED,

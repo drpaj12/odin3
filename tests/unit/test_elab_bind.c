@@ -552,6 +552,30 @@ static void test_assignments(void) {
     expect_assigns(local(mod, "a"), (assigns_want){0, {0}, ODIN3_ASSIGN_BLOCKING});
 }
 
+/* A net port with a value (`output w; wire w = ~a;` merged by stage 1, or `output wire w = a`)
+ * queues its declaration assignment as a CONTINUOUS one, like a NET_DECL's; a variable port's
+ * value (`output reg q = 1'b1`) is an initial value and queues nothing. */
+static void test_port_value_assign(void) {
+    eb_decl net = {.sub = ODIN3_AST_PORT_DECL_OUTPUT,
+                   .flags = eb_wire_port(),
+                   .name = "w",
+                   .value = eb_int(&tree, 1)};
+    eb_decl var = {.sub = ODIN3_AST_PORT_DECL_OUTPUT,
+                   .flags = (uint16_t)(ODIN3_AST_DT_REG << ODIN3_AST_F_PORT_DECL_DT_SHIFT),
+                   .name = "q",
+                   .value = eb_int(&tree, 1)};
+    const odin3_ast_id ports[] = {eb_port(&tree, &net), eb_port(&tree, &var)};
+    odin3_ast_id module = module_of("t", eb_list(&tree, ports, 2), NULL, 0);
+    (void)eb_unit(&tree, &module, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bind(), all_lines());
+    odin3_scope_id mod = odin3_elab_scope_of(&bnd, module);
+    odin3_ast_id declarator = odin3_ast_child(tree.ast, ports[0], 1);
+    expect_assigns(local(mod, "w"), (assigns_want){1, declarator, ODIN3_ASSIGN_CONTINUOUS});
+    TEST_ASSERT_EQUAL_UINT16(ODIN3_SYM_F_PORT | ODIN3_SYM_F_ASSIGNED_CONTINUOUS,
+                             local(mod, "w")->flags);
+    expect_assigns(local(mod, "q"), (assigns_want){0, {0}, ODIN3_ASSIGN_BLOCKING});
+}
+
 /* {p1, p2} = …: both assigned; {q, q} = …: one record. */
 static void test_concat_lvalues(void) {
     const odin3_ast_id pair[] = {ident("p1"), ident("p2")};
@@ -1516,6 +1540,7 @@ int main(void) {
     RUN_TEST(test_resolution);
     RUN_TEST(test_scope_of);
     RUN_TEST(test_assignments);
+    RUN_TEST(test_port_value_assign);
     RUN_TEST(test_concat_lvalues);
     RUN_TEST(test_symbol_forms);
     RUN_TEST(test_blackbox);

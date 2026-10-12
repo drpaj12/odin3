@@ -55,9 +55,11 @@ odin3_status odin3_elab1_gen_init(odin3_elab1_env *env) {
     env->seen = odin3_u64map_create(0);
     env->kids = odin3_u64map_create(0);
     env->iters = odin3_u64map_create(0);
+    env->procs = odin3_u64map_create(0);
     odin3_elab_scope *top = odin3_vec_push(&env->scopes);
     odin3_elab1_scope_x *ext = top != NULL ? odin3_vec_push(&env->scope_x) : NULL;
-    if (env->seen == NULL || env->kids == NULL || env->iters == NULL || ext == NULL) {
+    if (env->seen == NULL || env->kids == NULL || env->iters == NULL || env->procs == NULL ||
+        ext == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *top = (odin3_elab_scope){ODIN3_ESCOPE_MODULE, 0, 0, false, G_NONE, 0};
@@ -71,6 +73,7 @@ void odin3_elab1_gen_free(odin3_elab1_env *env) {
     odin3_u64map_destroy(env->seen);
     odin3_u64map_destroy(env->kids);
     odin3_u64map_destroy(env->iters);
+    odin3_u64map_destroy(env->procs);
 }
 
 const odin3_elab_scope *odin3_elab1_scope_at(const odin3_elab1_env *env, uint32_t scope) {
@@ -172,6 +175,14 @@ static bool named_genblk(const odin3_ast *ast, odin3_ast_id node) {
            strncmp(odin3_ast_name_str(ast, node), G_PREFIX, sizeof G_PREFIX - 1) == 0;
 }
 
+/* The named begin/end blocks of an always or initial item of scope, which a G7 path can name
+ * (I-1); the binder resolves what is inside. */
+static bool proc_block(const odin3_ast *ast, odin3_ast_id item, odin3_ast_id at) {
+    odin3_ast_kind kind = odin3_ast_kind_of(ast, item);
+    return (kind == ODIN3_AST_ALWAYS || kind == ODIN3_AST_INITIAL) &&
+           odin3_ast_kind_of(ast, at) == ODIN3_AST_SEQ_BLOCK && odin3_ast_name(ast, at) != 0;
+}
+
 odin3_status odin3_elab1_gen_seen(odin3_elab1_env *env, odin3_ast_id node, uint32_t scope) {
     if (node.v == 0) {
         return ODIN3_OK;
@@ -190,6 +201,10 @@ odin3_status odin3_elab1_gen_seen(odin3_elab1_env *env, odin3_ast_id node, uint3
             odin3_ast_cursor_skip(&cur); /* Yosys's identifier is the whole dotted path */
         } else if (named_genblk(ast, at)) {
             st = see(env, scope, odin3_ast_name(ast, at));
+        }
+        if (st == ODIN3_OK && proc_block(ast, node, at)) {
+            st = odin3_u64map_put(
+                env->procs, (odin3_kv){(uint64_t)scope << G_SHIFT | odin3_ast_name(ast, at), 1});
         }
     }
     odin3_ast_cursor_free(&cur);
@@ -652,7 +667,7 @@ odin3_status odin3_elab1_gen_for(odin3_elab1 *e1, odin3_ast_id node, uint32_t sc
 static uint32_t first_scope(const odin3_elab1_env *env, uint32_t scope, uint32_t name) {
     uint64_t key = (uint64_t)scope << G_SHIFT | name;
     for (uint32_t at = scope; at != G_NONE;) {
-        if (odin3_u64map_get(env->kids, key, NULL) ||
+        if (odin3_u64map_get(env->kids, key, NULL) || odin3_u64map_get(env->procs, key, NULL) ||
             odin3_elab1_env_find(env, at, (uint32_t)(key & UINT32_MAX)) != G_NONE) {
             return at;
         }
@@ -669,6 +684,9 @@ static odin3_elab1_walked walk_step(const odin3_elab1_env *env, uint32_t at,
     *next = G_NONE;
     uint64_t first = 0;
     if (!odin3_u64map_get(env->kids, (uint64_t)at << G_SHIFT | comp->name, &first)) {
+        if (odin3_u64map_get(env->procs, (uint64_t)at << G_SHIFT | comp->name, NULL)) {
+            return ODIN3_WALK_PROC;
+        }
         uint32_t idx = odin3_elab1_env_find(env, at, comp->name);
         const odin3_elab1_slot *slot = idx != G_NONE ? odin3_vec_cat(&env->slots, idx) : NULL;
         bool block = slot != NULL && slot->entry.kind == ODIN3_ENTRY_BLOCK;
@@ -769,8 +787,10 @@ static odin3_status ref_error(const odin3_elab1_env *env, const g_ref *ref, cons
     return st != ODIN3_OK ? st : ODIN3_ERR_PARSE;
 }
 
-odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name,
-                                      uint32_t *slot) {
+/* The target of hier_name; when proc is not NULL a path into a begin/end block of an always or
+ * initial is accepted (*proc set, *slot G_NONE): its member is the binder's to find. */
+static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t *slot,
+                              bool *proc) {
     *slot = G_NONE;
     odin3_elab1_comp *comps = NULL;
     odin3_status st = odin3_elab1_hier_comps(env, hier_name, &comps);
@@ -782,6 +802,10 @@ odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_na
     odin3_elab1_reach reach = {0, 0};
     ref.walked = odin3_elab1_scope_walk(env, &ref.path, &reach);
     ref.used = reach.used;
+    if (proc != NULL && ref.walked == ODIN3_WALK_PROC && reach.used + 1 < count) {
+        *proc = true;
+        return ODIN3_OK;
+    }
     if (ref.walked != ODIN3_WALK_STOP || ref.used == 0 || ref.used + 1 != count ||
         comps[count - 1].has_index) {
         ref.used = ref.used < count ? ref.used : count - 1;
@@ -795,12 +819,18 @@ odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_na
     return ODIN3_OK;
 }
 
+odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name,
+                                      uint32_t *slot) {
+    return target_of(env, hier_name, slot, NULL);
+}
+
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope) {
     odin3_elab1_env *env = e1->env;
     uint32_t saved = env->cur_scope;
     env->cur_scope = scope;
     uint32_t slot = 0;
-    odin3_status st = odin3_elab1_scope_target(env, hier_name, &slot);
+    bool proc = false;
+    odin3_status st = target_of(env, hier_name, &slot, &proc);
     env->cur_scope = saved;
     return st;
 }

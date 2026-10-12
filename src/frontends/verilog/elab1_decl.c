@@ -254,6 +254,18 @@ static void merge_type(odin3_elab1_env *env, odin3_ast_id obj, odin3_elab1_mport
         port->is_signed || (odin3_ast_flags(ast, obj) & ODIN3_AST_F_NET_DECL_SIGNED) != 0;
 }
 
+/* C-1: the port's DECLARATOR and the merged object's carry one value at most (Yosys 0.55 keeps
+ * both; §17 #37). */
+static void one_value(odin3_elab1_env *env, const odin3_elab1_slot *slot,
+                      const odin3_elab1_mport *port) {
+    const odin3_ast *ast = env->e1->parsed;
+    if (odin3_ast_child(ast, port->decl, 0).v != 0 &&
+        odin3_ast_child(ast, port->obj_decl, 0).v != 0) {
+        d_error(env, slot->decl2, "port '%s' has a value in both of its declarations",
+                odin3_elab1_str(env->e1, port->name));
+    }
+}
+
 /* A non-ANSI port merged with the net or variable declared beside it (the slot's two groups). */
 static odin3_status merge_object(odin3_elab1_env *env, const odin3_elab1_slot *slot,
                                  odin3_elab1_mport *port) {
@@ -264,6 +276,9 @@ static odin3_status merge_object(odin3_elab1_env *env, const odin3_elab1_slot *s
         return ODIN3_OK;
     }
     merge_type(env, obj, port);
+    port->obj_group = obj;
+    port->obj_decl = port_first ? slot->decl2 : slot->entry.decl;
+    port->obj_first = !port_first;
     odin3_ast_id other = object_range(ast, obj);
     odin3_status st = ODIN3_OK;
     if (port->range.v != 0 && other.v != 0) {
@@ -272,6 +287,7 @@ static odin3_status merge_object(odin3_elab1_env *env, const odin3_elab1_slot *s
         st = ranges_agree(env, port, ranges, slot->decl2);
     }
     port->range = port->range.v != 0 ? port->range : other;
+    one_value(env, slot, port);
     return st;
 }
 

@@ -15,6 +15,7 @@
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
 #include "odin3/odin3.h"
+#include "passes/manager.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -33,6 +34,11 @@
 enum {
     ROW_SOURCE_MAX = 64,
     COVERAGE_MAX = 512,
+    COVERAGE_MIN_ROWS = 100, /* a floor: fewer .v files means the directory was not found */
+    COVERAGE_HEADERS = 8,
+    COVERAGE_MODULES = 16,
+    COVERAGE_PATH = 512,
+    COVERAGE_FILE_MAX = 1U << 20,
     CAP_VARS = 25,
     CAP_ERRORS = 20,
     CAP_TEXT = 4096,
@@ -43,6 +49,10 @@ enum {
 
 static et_result rs;
 
+static void cov_free(void);
+static void set_top(const char *top);
+static bool log_has(const char *needle);
+
 void setUp(void) {
     memset(&rs, 0, sizeof rs);
 }
@@ -50,6 +60,8 @@ void setUp(void) {
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
+    cov_free();
+    set_top(NULL);
     if (rs.design != NULL || rs.dir[0] != '\0') {
         et_free(&rs);
     }
@@ -332,6 +344,23 @@ static void test_resume_at_next_item_and_module(void) {
     et_expect(&rs, ODIN3_LOG_ERROR, "t.v:6:3: error: variable type 'realtime' is not supported");
 }
 
+/* A module whose scan found an error skips passes E and W (§9.3, §17 #36), so its children are
+ * never reached: the info "not instantiated under the top" would be wrong, and is not logged once
+ * an error has been (review minor 1). */
+static void test_no_not_elaborated_after_an_error(void) {
+    run_one("module child (input a, output y);\n  assign y = a;\nendmodule\n"
+            "module top (input a, output y);\n  real r;\n  child u (.a(a), .y(y));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
+    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:5:3: error: variable type 'real' is not supported");
+    TEST_ASSERT_FALSE_MESSAGE(log_has("not instantiated under the top"), et_log(&rs));
+    set_top("top"); /* without an error the info is still logged */
+    run_one("module child (input a, output y);\n  assign y = a;\nendmodule\n"
+            "module top (input a, output y);\n  assign y = a;\nendmodule\n");
+    TEST_ASSERT_TRUE_MESSAGE(log_has("not instantiated under the top, not elaborated: 'child'"),
+                             et_log(&rs));
+}
+
 static void test_failed_parameter_adds_no_second_error(void) {
     run_one("module leaf #(parameter real R = 1) ();\nendmodule\n"
             "module top;\n  leaf u ();\n  leaf #(.R(2)) v ();\nendmodule\n");
@@ -424,55 +453,186 @@ static void test_stage1_tables_are_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1));
 }
 
+/* What the coverage test owns, freed by tearDown so a failed assertion leaks nothing. */
+static char *cov_names[COVERAGE_MAX];
+static size_t cov_count;
+static char *cov_text;
+static char *cov_headers[COVERAGE_HEADERS];
+static char cov_header_paths[COVERAGE_HEADERS][COVERAGE_PATH];
+static size_t cov_header_count;
+
+static void cov_free(void) {
+    for (size_t i = 0; i < cov_count; i++) {
+        free(cov_names[i]);
+        cov_names[i] = NULL;
+    }
+    cov_count = 0;
+    for (size_t i = 0; i < cov_header_count; i++) {
+        free(cov_headers[i]);
+        cov_headers[i] = NULL;
+    }
+    cov_header_count = 0;
+    free(cov_text);
+    cov_text = NULL;
+}
+
 static char *slurp(const char *path) {
     FILE *fp = fopen(path, "rb");
-    TEST_ASSERT_NOT_NULL(fp);
-    char *buf = malloc(1U << 20);
-    TEST_ASSERT_NOT_NULL(buf);
-    size_t got = fread(buf, 1, (1U << 20) - 1, fp);
+    TEST_ASSERT_NOT_NULL_MESSAGE(fp, path);
+    char *buf = malloc(COVERAGE_FILE_MAX);
+    if (buf == NULL) {
+        (void)fclose(fp);
+        TEST_FAIL_MESSAGE("out of memory");
+    }
+    size_t got = fread(buf, 1, COVERAGE_FILE_MAX - 1, fp);
     buf[got] = '\0';
     (void)fclose(fp);
     return buf;
 }
 
 /* The coverage rows' file names (the directory's .v files), in directory order. */
-static size_t coverage_names(char **names, size_t cap) {
-    size_t count = 0;
+static void coverage_names(void) {
     DIR *dir = opendir(ODIN3_COVERAGE_DIR);
     TEST_ASSERT_NOT_NULL(dir);
     for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
         size_t len = strlen(ent->d_name);
-        if (len > 2 && strcmp(ent->d_name + len - 2, ".v") == 0 && count < cap) {
-            names[count++] = strdup(ent->d_name);
+        if (len > 2 && strcmp(ent->d_name + len - 2, ".v") == 0 && cov_count < COVERAGE_MAX) {
+            cov_names[cov_count++] = strdup(ent->d_name);
         }
     }
     (void)closedir(dir);
+}
+
+/* One header of the coverage directory's inc/, read and named inc/<name> for the request. */
+static void coverage_header(const char *file_name) {
+    TEST_ASSERT_TRUE_MESSAGE(cov_header_count < COVERAGE_HEADERS,
+                             "more headers than COVERAGE_HEADERS");
+    char file[COVERAGE_PATH];
+    TEST_ASSERT_TRUE(snprintf(file, sizeof file, ODIN3_COVERAGE_DIR "/inc/%s", file_name) > 0);
+    TEST_ASSERT_TRUE(
+        snprintf(cov_header_paths[cov_header_count], COVERAGE_PATH, "inc/%s", file_name) > 0);
+    cov_headers[cov_header_count++] = slurp(file);
+}
+
+/* The headers a row's `include names, resolved: every file of the coverage directory's inc/ (the
+ * rows' include path) is read once and written beside the source. */
+static void coverage_headers(void) {
+    DIR *dir = opendir(ODIN3_COVERAGE_DIR "/inc");
+    TEST_ASSERT_NOT_NULL(dir);
+    for (const struct dirent *ent = readdir(dir); ent != NULL; ent = readdir(dir)) {
+        if (ent->d_name[0] != '.') {
+            coverage_header(ent->d_name);
+        }
+    }
+    (void)closedir(dir);
+}
+
+/* Some message holds needle. */
+static bool log_has(const char *needle) {
+    for (uint32_t i = 0; i < et_count(&rs); i++) {
+        if (strstr(et_text(&rs, i), needle) != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void set_top(const char *top) {
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.top = top;
+    odin3_pass_set_options(opts);
+}
+
+/* One run of a coverage row with the --top option top (NULL: automatic). Rejected input is fine; an
+ * internal error, a 2D bug line, the not-available line, and (with a top given) ambiguous_top are
+ * not. */
+typedef struct cov_run {
+    const char *name;
+    const char *top;
+} cov_run;
+
+/* The request of a run: the row's source, and the headers when it includes any. */
+static uint32_t coverage_request(const cov_run *run, et_src *srcs) {
+    uint32_t count = 0;
+    srcs[count++] = (et_src){run->name, cov_text};
+    for (size_t i = 0; strstr(cov_text, "`include") != NULL && i < cov_header_count; i++) {
+        srcs[count++] = (et_src){cov_header_paths[i], cov_headers[i]};
+    }
     return count;
 }
 
-/* Stage 1 on one coverage file: no pending line (L17 needs its include directory: skipped). */
-static void run_coverage_file(const char *name) {
-    char path[1024];
-    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/%s", ODIN3_COVERAGE_DIR, name) > 0);
-    char *text = slurp(path);
-    if (strstr(text, "`include") == NULL) {
-        run_one(text);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(
-            0, et_count_with(&rs, ODIN3_LOG_ERROR, "elaboration is not available yet (2D): "),
-            name);
+/* What is wrong with the run just made, or NULL: only OK and rejected input are fine. */
+static const char *coverage_fault(const cov_run *run) {
+    if (rs.status != ODIN3_OK && rs.status != ODIN3_ERR_PARSE) {
+        return "status is neither OK nor PARSE";
     }
-    free(text);
+    if (log_has("(a 2D bug)")) {
+        return "a 2D bug line";
+    }
+    if (log_has("elaboration is not available yet (2D): ")) {
+        return "the not-available line";
+    }
+    return run->top != NULL && log_has("ambiguous_top") ? "ambiguous_top with a top given" : NULL;
 }
 
-/* Every coverage row's .v runs stage 1 without point (l)'s line. */
-static void test_coverage_rows_run_stage_1(void) {
-    static char *names[COVERAGE_MAX];
-    size_t count = coverage_names(names, COVERAGE_MAX);
-    TEST_ASSERT_TRUE(count > 100);
-    for (size_t i = 0; i < count; i++) {
-        run_coverage_file(names[i]);
-        free(names[i]);
+static void run_coverage(const cov_run *run) {
+    et_src srcs[1 + COVERAGE_HEADERS];
+    et_req req = {srcs, coverage_request(run, srcs), NULL, NULL, NULL};
+    if (rs.design != NULL || rs.dir[0] != '\0') {
+        et_free(&rs);
+        memset(&rs, 0, sizeof rs);
     }
+    set_top(run->top);
+    et_stage1(&req, &rs);
+    const char *fault = coverage_fault(run);
+    if (fault != NULL) {
+        char why[COVERAGE_PATH];
+        TEST_ASSERT_TRUE(snprintf(why, sizeof why, "%s (top %s): %s", run->name,
+                                  run->top != NULL ? run->top : "automatic", fault) > 0);
+        TEST_FAIL_MESSAGE(why);
+    }
+    if (rs.status == ODIN3_OK) {
+        et_expect_binds(&rs);
+    }
+}
+
+/* The MODULE names of the last run's parsed store, copied (the store goes with the next run). */
+static size_t parsed_modules(char (*names)[COVERAGE_PATH], size_t cap) {
+    size_t count = 0;
+    odin3_ast_span units = odin3_ast_children(rs.parsed, odin3_ast_root(rs.parsed, 0));
+    for (uint32_t i = 0; i < units.n && count < cap; i++) {
+        if (odin3_ast_kind_of(rs.parsed, units.ids[i]) == ODIN3_AST_MODULE) {
+            TEST_ASSERT_TRUE(snprintf(names[count++], COVERAGE_PATH, "%s",
+                                      odin3_ast_name_str(rs.parsed, units.ids[i])) > 0);
+        }
+    }
+    return count;
+}
+
+/* A row runs once with the automatic top; one that declares several modules runs again with each
+ * of them as the top, so none stops at ambiguous_top and passes E and W elaborate every module. */
+static void run_coverage_row(const char *name) {
+    char path[COVERAGE_PATH];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/%s", ODIN3_COVERAGE_DIR, name) > 0);
+    free(cov_text);
+    cov_text = slurp(path);
+    run_coverage(&(cov_run){name, NULL});
+    char modules[COVERAGE_MODULES][COVERAGE_PATH];
+    size_t count = parsed_modules(modules, COVERAGE_MODULES);
+    for (size_t i = 0; count > 1 && i < count; i++) {
+        run_coverage(&(cov_run){name, modules[i]});
+    }
+}
+
+/* Every coverage row's .v runs stage 1, each module of a multi-module row as the top. */
+static void test_coverage_rows_run_stage_1(void) {
+    coverage_names();
+    coverage_headers();
+    TEST_ASSERT_TRUE(cov_count >= COVERAGE_MIN_ROWS);
+    for (size_t i = 0; i < cov_count; i++) {
+        run_coverage_row(cov_names[i]);
+    }
+    set_top(NULL);
 }
 
 int main(void) {
@@ -491,6 +651,7 @@ int main(void) {
     RUN_TEST(test_warning_once_per_node);
     RUN_TEST(test_error_cap);
     RUN_TEST(test_resume_at_next_item_and_module);
+    RUN_TEST(test_no_not_elaborated_after_an_error);
     RUN_TEST(test_failed_parameter_adds_no_second_error);
     RUN_TEST(test_oom_ignore_rows);
     RUN_TEST(test_oom_reject_rows);

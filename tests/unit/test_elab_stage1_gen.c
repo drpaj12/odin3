@@ -420,6 +420,52 @@ static void test_reference_errors(void) {
                           "t.v:7:14: error: 'g[0].q' is not declared"});
 }
 
+/* I-1 (EL-22, EL-4): a reference into a named procedural block (`blk.count`) elaborates, before
+ * or after the block and inside a generate block; the binder resolves the member. Yosys 0.55
+ * accepts all three (wire `blk.count`, `g.blk.r`). */
+static void test_named_block_reference(void) {
+    static const char *const sources[] = {
+        "module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
+        "    reg [3:0] count;\n    count = count + 1;\n  end\n  wire [3:0] w = blk.count;\n"
+        "  assign y = w;\nendmodule\n",
+        "module t(input clk, output [3:0] y);\n  wire [3:0] w = blk.count;\n  assign y = w;\n"
+        "  always @(posedge clk) begin : blk\n    reg [3:0] count;\n    count = count + 1;\n"
+        "  end\nendmodule\n",
+        "module t(input clk, output y);\n  if (1) begin : g\n"
+        "    always @(posedge clk) begin : blk\n      reg r;\n      r = ~r;\n    end\n"
+        "    wire z = blk.r;\n    assign y = z;\n  end\nendmodule\n",
+    };
+    for (size_t i = 0; i < sizeof sources / sizeof sources[0]; i++) {
+        if (rs.design != NULL) {
+            et_free(&rs);
+        }
+        run_clean(sources[i]);
+        odin3_ast_id hier = find(ODIN3_AST_HIER_NAME, "");
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, hier.v);
+        TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, hier));
+        TEST_ASSERT_EQUAL_STRING("blk", name_of(odin3_ast_child(rs.elab, hier, 0)));
+    }
+}
+
+/* A name that is no block of the scope is still E21, and a member the block lacks is the binder's
+ * error (Yosys 0.55 declares an implicit wire `blk.nope`, warning only). */
+static void test_named_block_reference_errors(void) {
+    run_error(
+        &(gen_case){"module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
+                    "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = nope.count;\n"
+                    "  assign y = w;\nendmodule\n",
+                    "t.v:6:18: error: hierarchical reference 'nope.count' is not supported"});
+    et_free(&rs);
+    run_one("module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
+            "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = blk.nope;\n"
+            "  assign y = w;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    odin3_elab_binding binding = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_elab_bind(rs.elab, &binding));
+    odin3_elab_binding_free(&binding);
+    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:6:18: error: 'blk.nope' is not declared");
+}
+
 /* --- misplaced and clashing names ---------------------------------------------------------- */
 
 static void test_port_in_block(void) {
@@ -579,6 +625,8 @@ int main(void) {
     RUN_TEST(test_case_item_error);
     RUN_TEST(test_reference);
     RUN_TEST(test_reference_errors);
+    RUN_TEST(test_named_block_reference);
+    RUN_TEST(test_named_block_reference_errors);
     RUN_TEST(test_port_in_block);
     RUN_TEST(test_block_clash);
     RUN_TEST(test_scoped_defparam);

@@ -439,6 +439,53 @@ static void test_array_slice_forms(void) {
     expect_conn(instance("c[0]"), 0, "d", "1");
 }
 
+/* Connection 0 of the INSTANCE named inst is a call of fn, or (msb >= 0) the slice [msb:lsb] of it.
+ */
+typedef struct call_conn {
+    const char *inst;
+    const char *fn;
+    int64_t msb;
+    int64_t lsb;
+} call_conn;
+
+static void expect_call_conn(const call_conn *want) {
+    odin3_ast_id expr = odin3_ast_child(rs.elab, conn_at(instance(want->inst), 0), 0);
+    if (want->msb >= 0) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_AST_SELECT, odin3_ast_kind_of(rs.elab, expr));
+        TEST_ASSERT_EQUAL_INT64(want->msb, number_int(odin3_ast_child(rs.elab, expr, 1)));
+        TEST_ASSERT_EQUAL_INT64(want->lsb, number_int(odin3_ast_child(rs.elab, expr, 2)));
+        expr = odin3_ast_child(rs.elab, expr, 0);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_CALL, odin3_ast_kind_of(rs.elab, expr));
+    TEST_ASSERT_EQUAL_STRING(want->fn, name_of(expr));
+}
+
+#define EXPECT_CALL_CONN(inst, fn, msb, lsb)                                                       \
+    expect_call_conn(&(const call_conn){(inst), (fn), (msb), (lsb)})
+
+/* I-2: a user function call in an array connection is typed at the function's declared result
+ * width (Yosys 0.55, §17 #17): [3:0] here, `integer` 32, none 1 bit. */
+static void test_array_function_call(void) {
+    run_clean(M2 "module top;\n  wire [3:0] x; wire [1:0] q2;\n"
+                 "  function [1:0] inv; input [1:0] v; inv = ~v; endfunction\n"
+                 "  m2 u[1:0] (.d({inv(x[3:2]), inv(x[1:0])}), .q(q2));\nendmodule\n");
+    EXPECT_CALL_CONN("u[1]", "inv", -1, 0); /* each element takes one call whole */
+    EXPECT_CALL_CONN("u[0]", "inv", -1, 0);
+    et_free(&rs);
+    run_clean(M2 "module top;\n  wire [3:0] x; wire [1:0] q2;\n"
+                 "  function [3:0] inv; input [3:0] v; inv = ~v; endfunction\n"
+                 "  m2 u[1:0] (.d(inv(x)), .q(q2));\nendmodule\n");
+    EXPECT_CALL_CONN("u[1]", "inv", 3, 2); /* the 4-bit result split in two */
+    EXPECT_CALL_CONN("u[0]", "inv", 1, 0);
+    et_free(&rs);
+    run_clean("module m32 (input [31:0] d);\nendmodule\n"
+              "module top;\n  wire a, b;\n"
+              "  function integer fi; input v; fi = v; endfunction\n"
+              "  function one; input v; one = v; endfunction\n"
+              "  m32 u[1:0] (.d({fi(a), fi(b)}));\n"
+              "  m32 w[31:0] (.d({32{one(a)}}));\nendmodule\n");
+}
+
 /* --- outputs (I3) ----------------------------------------------------------------------------- */
 
 #define M_OUT "module mo (input a, output [3:0] q);\nendmodule\n"
@@ -847,6 +894,7 @@ int main(void) {
     RUN_TEST(test_gate_array);
     RUN_TEST(test_ascending_array);
     RUN_TEST(test_array_slice_forms);
+    RUN_TEST(test_array_function_call);
     RUN_TEST(test_output_not_a_net);
     RUN_TEST(test_output_constant);
     RUN_TEST(test_output_inout_and_index);

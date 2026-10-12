@@ -639,6 +639,12 @@ static odin3_status make_unit(odin3_elab1 *e1, uint32_t mark) {
     return odin3_ast_make_marked(e1->elab, &spec, mark, &unit);
 }
 
+/* The info listing the modules left out; after an error it would be wrong, since a module whose
+ * scan failed never reached its children (§9.3). */
+static odin3_status not_elaborated_if_clean(odin3_elab1 *e1) {
+    return e1->errors > 0 ? ODIN3_OK : odin3_elab1_not_elaborated(e1);
+}
+
 odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def) {
     odin3_status st =
         odin3_ast_create(e1->design, ODIN3_AST_FORM_ELABORATED, e1->ctx->run, &e1->elab);
@@ -653,7 +659,7 @@ odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def) {
     st = st != ODIN3_OK ? st : run_specs(e1);
     st = st != ODIN3_OK || e1->stopped ? st : implicit_modules(e1);
     st = st != ODIN3_OK || e1->stopped ? st : check_acyclic(e1);
-    st = st != ODIN3_OK || e1->stopped ? st : odin3_elab1_not_elaborated(e1);
+    st = st != ODIN3_OK || e1->stopped ? st : not_elaborated_if_clean(e1);
     bool clean = st == ODIN3_OK && e1->fatal == ODIN3_OK && e1->errors == 0 && !e1->stopped &&
                  e1->specs.len > 0;
     if (clean) {
