@@ -1,6 +1,6 @@
 /*
- * ffinit.c — set and remove a net's initial value on the `init` attribute (2E spec §10; 2F spec
- * §9.4; Yosys kernel/ffinit.h).
+ * ffinit.c — read, set and remove a net's initial value on the `init` attribute (2E spec §10; 2F
+ * spec §9.4; Yosys kernel/ffinit.h).
  */
 #include "passes/ffinit.h"
 
@@ -159,4 +159,30 @@ odin3_status odin3_ffinit_remove(odin3_module *module, odin3_net_id net,
     }
     odin3_vec_free(&wbs);
     return st;
+}
+
+/* The `init` bit (key) of wire bit wb: 0 or 1, else x (no wire, no attribute, x or z). */
+static odin3_bit membership_init(const odin3_module *module, uint32_t key, odin3_wirebit wb) {
+    if (!odin3_wire_valid(wb.wire)) {
+        return ODIN3_BIT_X;
+    }
+    odin3_objref ref = {ODIN3_OBJ_WIRE, wb.wire.v};
+    odin3_bit bit = init_bit(odin3_attr_get(module, ref, key), wb.bit);
+    return bit == ODIN3_BIT_0 || bit == ODIN3_BIT_1 ? bit : ODIN3_BIT_X;
+}
+
+odin3_bit odin3_ffinit_get(const odin3_module *module, odin3_net_id net) {
+    uint32_t key = 0;
+    if (module == NULL || !odin3_net_live(module, net) ||
+        !odin3_strtab_find(odin3_design_strtab(odin3_module_design(module)),
+                           odin3_bytes_cstr(k_init), &key)) {
+        return ODIN3_BIT_X;
+    }
+    odin3_bit bit = membership_init(module, key, odin3_net_primary(module, net));
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    while (bit == ODIN3_BIT_X && odin3_net_alias_next(module, net, &cursor, &alias)) {
+        bit = membership_init(module, key, alias.wb);
+    }
+    return bit;
 }

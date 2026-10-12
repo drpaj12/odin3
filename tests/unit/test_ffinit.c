@@ -1,7 +1,8 @@
 /*
  * test_ffinit.c — initial values on the `init` attribute (2E spec §10; 2F spec §9.4; Yosys
- * kernel/ffinit.h set_init and remove_init): the target bit, the other memberships cleared, an
- * attribute left all x removed, defined_on, and out of memory.
+ * kernel/ffinit.h set_init, remove_init and operator()): the target bit, the other memberships
+ * cleared, an attribute left all x removed, defined_on, the first defined bit read (get), and out
+ * of memory.
  * Yosys re-derivation: none (no proc phase runs here).
  */
 #include "ir/check.h"
@@ -251,6 +252,45 @@ static void test_set_oom(void) {
     TEST_ASSERT_TRUE(done);
 }
 
+/* get: the primary's bit; an alias's when the primary has none; the first defined one wins. */
+static void test_get_primary_and_alias(void) {
+    odin3_wire_id wire_w = wire_of("w", 4, NULL);
+    odin3_net_id net_n = bit_net(wire_w, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(module, net_n)); /* no `init` key yet */
+    odin3_net_id both[2] = {net_n, net_n};
+    odin3_wire_id wire_v = wire_of("v", 2, both);
+    set_init(wire_w, "xx1x");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(module, net_n)); /* init on the primary */
+    set_init(wire_w, "xxxx");
+    set_init(wire_v, "1x");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(module, net_n)); /* primary x, alias 1 */
+    set_init(wire_w, "xx0x");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(module, net_n)); /* primary 0, alias 1 */
+    set_init(wire_w, "xxzx");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(module, net_n)); /* z is not defined */
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(module, bit_net(wire_w, 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(NULL, net_n));
+    TEST_ASSERT_EQUAL_size_t(0, n_errors);
+}
+
+/* get: an alias-only net reads its alias's bit; a net with no wire reads x. */
+static void test_get_alias_only_and_no_wire(void) {
+    odin3_net_id net_x = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, (odin3_prov_id){0}, &net_x));
+    odin3_wire_id wire_t = wire_of("t", 1, &net_x);
+    odin3_wire_id wire_f = wire_of("f", 2, NULL);
+    odin3_net_id nets[2] = {net_x, bit_net(wire_f, 1)};
+    odin3_wire_id wire_u = wire_of("u", 2, nets);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_delete(module, wire_t));
+    set_init(wire_u, "x0");
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(module, net_x));
+    odin3_net_id tmp = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, (odin3_prov_id){0}, &tmp));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(module, tmp));
+    TEST_ASSERT_EQUAL_size_t(0, n_errors);
+    check_full();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_set_primary);
@@ -261,5 +301,7 @@ int main(void) {
     RUN_TEST(test_remove_every_membership);
     RUN_TEST(test_rejects);
     RUN_TEST(test_set_oom);
+    RUN_TEST(test_get_primary_and_alias);
+    RUN_TEST(test_get_alias_only_and_no_wire);
     return UNITY_END();
 }
