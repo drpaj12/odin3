@@ -357,6 +357,8 @@ then the options considered.
     - (a) Only the front-end lane waits, at M2: 2D, 2E and 2F merged, and 2H's 19 VTR rows
       identical or equivalent (PHASE2 #4).
       - The x → `unconn` writer convention (2D §14.6 item 3) lands in 3E if 2F has not done it.
+        **Done by 3E-3** (3E §9.4): the plain `write_blif` writes `$_CONST0_`/`$_CONST1_` as
+        `gnd`/`vcc` and `$_CONSTX_`/`$_CONSTZ_` as `unconn`, never `.subckt $_CONST*_`.
       - `flatten` moves into Phase 3 (3A).
       - Not blocking: fuzzing, micro exceptions, the `--x-report` miter, the Odin II XML reader,
         the 2A plugin `wants_ast` ABI, the 1C writer follow-ups.

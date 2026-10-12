@@ -375,7 +375,8 @@ static bool is_generator(const blif_writer *wr, odin3_net_id net, odin3_bytes na
         !same_bytes(name, odin3_bytes_cstr("unconn"))) {
         return false;
     }
-    odin3_pin_id driver = odin3_net_driver(wr->module, net);
+    odin3_pin_id driver =
+        odin3_net_valid(net) ? odin3_net_driver(wr->module, net) : (odin3_pin_id){0};
     return odin3_pin_valid(driver) && wr->builtin[WR_SOP].v != 0 &&
            odin3_node_type(wr->module, odin3_pin_node(wr->module, driver)).v ==
                wr->builtin[WR_SOP].v &&
@@ -483,8 +484,51 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     return st == ODIN3_OK && changed ? note_renamed(wr, self.v, gen_get(wr, key)) : st;
 }
 
-/* The name net is written under: its generated or port bit name when it has one, else its own. */
+/* The generators (spec 3E §9.3), in the order §5 item 4 writes them. */
+typedef enum wr_gen { GEN_GND, GEN_VCC, GEN_UNCONN, GEN_COUNT, GEN_NONE = GEN_COUNT } wr_gen;
+
+static const char *const GEN_NAMES[GEN_COUNT] = {"gnd", "vcc", "unconn"};
+
+/* The claims owner of a generator's name that reserve_generators reserves: no net ID. */
+static const uint64_t GEN_OWNER = (uint64_t)1 << PIN_KEY_SHIFT;
+
+/* Plain (spec 3E §9.4): the generator a net driven by a $_CONST*_ cell is written as (`gnd`,
+ * `vcc`, and `unconn` for x and z), GEN_NONE for any other net and in the VTR dialect, which
+ * reads constants by §9.2 (source_gen). */
+static wr_gen plain_gen(const blif_writer *wr, odin3_net_id net) {
+    odin3_pin_id driver =
+        odin3_net_valid(net) ? odin3_net_driver(wr->module, net) : (odin3_pin_id){0};
+    if (wr->vtr || !odin3_pin_valid(driver) ||
+        !odin3_blif_vtr_const_cell(wr->module, odin3_pin_node(wr->module, driver))) {
+        return GEN_NONE;
+    }
+    switch (odin3_net_const_value(wr->module, net)) {
+    case ODIN3_CONST_0:
+        return GEN_GND;
+    case ODIN3_CONST_1:
+        return GEN_VCC;
+    default:
+        return GEN_UNCONN;
+    }
+}
+
+/* A zero-input $sop written under a generator's name is that generator (§9.3: VB-10 keeps the
+ * name only for the generator of that value, is_generator). */
+static void note_generator(blif_writer *wr, odin3_bytes name) {
+    for (uint32_t gen = 0; gen < GEN_COUNT; gen++) {
+        if (same_bytes(name, odin3_bytes_cstr(GEN_NAMES[gen]))) {
+            wr->gens_have |= 1U << gen;
+        }
+    }
+}
+
+/* The name net is written under: plain, a $_CONST*_ net's generator (plain_gen); its generated
+ * or port bit name when it has one; else its own. */
 static odin3_bytes net_name(const blif_writer *wr, odin3_net_id net) {
+    wr_gen gen = plain_gen(wr, net);
+    if (gen != GEN_NONE) {
+        return odin3_bytes_cstr(GEN_NAMES[gen]);
+    }
     uint64_t id = 0;
     if (wr->gen != NULL && odin3_u64map_get(wr->gen, net.v, &id)) {
         return (odin3_bytes){odin3_strtab_get(wr->gen_names, (uint32_t)id),
@@ -697,20 +741,38 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
                                                   : st;
 }
 
-/* Chooses the name net is written under: its own name unless a port bit of another net has it
- * (then `$n<ID>`…); for an unnamed net the first port bit name on it, else a generated name. In
- * the VTR dialect, each in its VB-10 form (name_named_vtr, claim_ports, generate). */
-static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
-    uint32_t real = odin3_net_name(wr->module, net);
+/*
+ * Plain: a named net keeps its name unless a port bit of another net has it, or it is the name of
+ * a generator the module reads (reserve_generators) and the net is not that generator
+ * (is_generator, §9.3; spec 3E §9.4): then `$n<ID>`…. A net that keeps a generator's name is that
+ * generator (note_generator).
+ */
+static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t real) {
+    odin3_bytes own = str_bytes(wr, real);
     uint32_t id = 0;
     uint64_t owner = 0;
-    if (real != 0 && wr->vtr) {
-        return name_named_vtr(wr, net, real);
+    bool generator = is_generator(wr, net, own);
+    bool reserved = odin3_strtab_find(wr->gen_names, own, &id) &&
+                    odin3_u64map_get(wr->claims, id, &owner) && owner != net.v &&
+                    !(owner == GEN_OWNER && generator);
+    if (reserved) {
+        return take_numbered(wr, net.v);
     }
+    if (generator) {
+        note_generator(wr, own);
+    }
+    return ODIN3_OK;
+}
+
+/* Chooses the name net is written under: its own name unless a port bit of another net or (plain)
+ * a generator has it (then `$n<ID>`…, name_named_plain); for an unnamed net the first port bit name
+ * on it, else a generated name. In the VTR dialect, each in its VB-10 form (name_named_vtr,
+ * claim_ports, generate). */
+static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
+    uint32_t real = odin3_net_name(wr->module, net);
+    uint64_t owner = 0;
     if (real != 0) {
-        bool reserved = odin3_strtab_find(wr->gen_names, str_bytes(wr, real), &id) &&
-                        odin3_u64map_get(wr->claims, id, &owner);
-        return reserved && owner != net.v ? take_numbered(wr, net.v) : ODIN3_OK;
+        return wr->vtr ? name_named_vtr(wr, net, real) : name_named_plain(wr, net, real);
     }
     if (odin3_u64map_get(wr->net_port, net.v, &owner)) {
         return set_gen(wr, net.v, (uint32_t)owner);
@@ -748,9 +810,64 @@ static odin3_status name_model(blif_writer *wr) {
     return st;
 }
 
+/*
+ * Plain (spec 3E §9.4): reserves the name of generator gen, which the module reads, against the
+ * nets named after it (claims → GEN_OWNER, name_named_plain; gen_names, so no generated name
+ * takes it). A port bit claimed it first: allowed when its net is that generator (a $_CONST*_
+ * net of that value, or a zero-input $sop as §9.3 says), else refused.
+ */
+static odin3_status reserve_generator(blif_writer *wr, wr_gen gen) {
+    odin3_bytes name = odin3_bytes_cstr(GEN_NAMES[gen]);
+    uint32_t id = 0;
+    uint64_t owner = 0;
+    odin3_status st = odin3_strtab_intern(wr->gen_names, name, &id);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (!odin3_u64map_get(wr->claims, id, &owner)) {
+        return odin3_u64map_put(wr->claims, (odin3_kv){id, GEN_OWNER});
+    }
+    odin3_net_id net = {(uint32_t)owner};
+    if (plain_gen(wr, net) == gen || is_generator(wr, net, name)) {
+        return ODIN3_OK;
+    }
+    return wr_refuse(wr, "a port bit on another net has the name of the constant generator",
+                     GEN_NAMES[gen]);
+}
+
+/* Plain (spec 3E §9.4): wr->gens_used = the generators the module's pins and port bits read (a
+ * $_CONST*_ net with a pin besides its driver), each reserved (reserve_generator); gens_have
+ * starts empty (name_named_plain fills it). */
+static odin3_status reserve_generators(blif_writer *wr) {
+    wr->gens_used = 0;
+    wr->gens_have = 0;
+    for (uint32_t i = 1; i < odin3_module_net_end(wr->module); i++) {
+        odin3_net_id net = {i};
+        wr_gen gen = odin3_net_live(wr->module, net) ? plain_gen(wr, net) : GEN_NONE;
+        if (gen != GEN_NONE && odin3_net_pins(wr->module, net).count > 1) {
+            wr->gens_used |= 1U << gen;
+        }
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t gen = 0; st == ODIN3_OK && gen < GEN_COUNT; gen++) {
+        st = (wr->gens_used >> gen & 1U) != 0 ? reserve_generator(wr, (wr_gen)gen) : ODIN3_OK;
+    }
+    return st;
+}
+
+/* name_module's first steps, before the nets: VTR, the `.model` name and the clock nets (VB-10
+ * rule 8); the port bit names; plain, the generators the module reads (§9.4). */
+static odin3_status name_header(blif_writer *wr) {
+    odin3_status st = wr->vtr ? name_model(wr) : ODIN3_OK;
+    st = st == ODIN3_OK && wr->vtr ? find_clocks(wr) : st;
+    st = st == ODIN3_OK ? claim_ports(wr) : st;
+    return st == ODIN3_OK && !wr->vtr ? reserve_generators(wr) : st;
+}
+
 /* Names the module: (VTR: its `.model` name, then its clock nets, for VB-10 rule 8) port bit
- * names, then every live net (ID order), then the unconnected pins of .names, .latch and port
- * cells (VTR: and the unconnected outputs of hard cells). */
+ * names, (plain: then the generators it reads, §9.4) then every live net (ID order), then the
+ * unconnected pins of .names, .latch and port cells (VTR: and the unconnected outputs of hard
+ * cells). */
 static odin3_status name_module(blif_writer *wr) {
     const odin3_module *module = wr->module;
     wr->gen_names = odin3_strtab_create();
@@ -759,9 +876,7 @@ static odin3_status name_module(blif_writer *wr) {
     if (wr->gen_names == NULL || wr->claims == NULL || wr->net_port == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st = wr->vtr ? name_model(wr) : ODIN3_OK;
-    st = st == ODIN3_OK && wr->vtr ? find_clocks(wr) : st;
-    st = st == ODIN3_OK ? claim_ports(wr) : st;
+    odin3_status st = name_header(wr);
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_net_end(module); i++) {
         if (odin3_net_live(module, (odin3_net_id){i})) {
             st = name_net(wr, (odin3_net_id){i});
@@ -776,11 +891,6 @@ static odin3_status name_module(blif_writer *wr) {
 }
 
 /* --- VTR: constants, x and `unconn` (spec 3E §9) -------------------------------------------- */
-
-/* The generators (§9.3), in the order §5 item 4 writes them. */
-typedef enum wr_gen { GEN_GND, GEN_VCC, GEN_UNCONN, GEN_COUNT, GEN_NONE = GEN_COUNT } wr_gen;
-
-static const char *const GEN_NAMES[GEN_COUNT] = {"gnd", "vcc", "unconn"};
 
 /* The generator a pin reads instead of net (§9.2; `hard` for a .subckt input, which reads x as
  * `unconn`, open in VPR, where logic reads it as `gnd`), GEN_NONE when it reads net by its name.
@@ -811,16 +921,6 @@ static odin3_bytes gen_use(blif_writer *wr, wr_gen gen) {
 static odin3_bytes source_name(blif_writer *wr, odin3_pin_id pin, bool hard) {
     wr_gen gen = source_gen(wr, odin3_pin_net(wr->module, pin), hard);
     return gen == GEN_NONE ? pin_name(wr, pin) : gen_use(wr, gen);
-}
-
-/* A zero-input $sop written under a generator's name is that generator (§9.3: VB-10 keeps the
- * name only for the generator of that value, is_generator). */
-static void note_generator(blif_writer *wr, odin3_bytes name) {
-    for (uint32_t gen = 0; gen < GEN_COUNT; gen++) {
-        if (same_bytes(name, odin3_bytes_cstr(GEN_NAMES[gen]))) {
-            wr->gens_have |= 1U << gen;
-        }
-    }
 }
 
 /* The constant (0 or 1) of the $sop or gate driving net when §6 writes it as a generator (a
@@ -1623,6 +1723,9 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     if (wr->vtr) {
         return write_cell_vtr(wr, node);
     }
+    if (odin3_blif_vtr_const_cell(wr->module, node)) {
+        return wr->st; /* spec 3E §9.4: its readers read gnd/vcc/unconn (net_name) */
+    }
     wr_builtin which = builtin_of(wr, type);
     odin3_status st = ODIN3_OK;
     if (which == WR_SOP) {
@@ -1781,7 +1884,8 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     st = st == ODIN3_OK ? write_model_line(wr) : st;
     st = st == ODIN3_OK ? write_module_ports(wr) : st;
     if (st == ODIN3_OK && !wr->vtr) {
-        write_clock(wr); /* VPR has no .clock (spec 3E R3) */
+        write_clock(wr);      /* VPR has no .clock (spec 3E R3) */
+        write_generators(wr); /* §9.4: before the cells, as the VTR dialect's */
     }
     if (st == ODIN3_OK && wr->vtr) {
         st = write_vtr_generators(wr);

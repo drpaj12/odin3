@@ -1140,6 +1140,183 @@ static void test_out_of_memory_sweep_inferred_parameters(void) {
     oom_sweep();
 }
 
+/* --- constants as gnd/vcc/unconn (spec 3E §9.4, plan point (p)) ---------------------------- */
+
+/* A cell of a 1-bit-port type: nets[i] on port i (none: unconnected). */
+static odin3_node_id new_cell(odin3_module *module, const char *type, const odin3_net_id *nets,
+                              uint32_t n_ports) {
+    enum { MAX_PORTS = 3 };
+    TEST_ASSERT_TRUE(n_ports <= MAX_PORTS);
+    odin3_netvec ports[MAX_PORTS];
+    for (uint32_t i = 0; i < n_ports; i++) {
+        ports[i] = (odin3_netvec){&nets[i], 1};
+    }
+    odin3_node_spec spec = {.type = type_named(odin3_module_design(module), type)};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    return node;
+}
+
+/* A $_CONST*_ cell driving a new unnamed net; that net. */
+static odin3_net_id new_const(odin3_module *module, const char *type) {
+    odin3_net_id net = new_net(module, NULL);
+    new_cell(module, type, &net, 1);
+    return net;
+}
+
+static odin3_net_id port_net(odin3_module *module, const char *name, odin3_dir dir) {
+    return odin3_wire_net(module, new_port(module, name, dir, 1), 0);
+}
+
+/* Module m: $_CONST0_, $_CONST1_ and $_CONSTX_ on three $_AND_ inputs, $_CONSTZ_ on output z. */
+static void build_const_module(odin3_design *des) {
+    odin3_module *module = new_module(des, "m");
+    odin3_net_id in_a = port_net(module, "a", ODIN3_DIR_IN);
+    odin3_net_id y1 = port_net(module, "y1", ODIN3_DIR_OUT);
+    odin3_net_id y2 = port_net(module, "y2", ODIN3_DIR_OUT);
+    odin3_net_id out_z = port_net(module, "z", ODIN3_DIR_OUT);
+    odin3_net_id zero = new_const(module, "$_CONST0_");
+    odin3_net_id one = new_const(module, "$_CONST1_");
+    odin3_net_id x_net = new_const(module, "$_CONSTX_");
+    new_cell(module, "$_AND_", (odin3_net_id[]){zero, one, y1}, 3);
+    new_cell(module, "$_AND_", (odin3_net_id[]){x_net, in_a, y2}, 3);
+    new_cell(module, "$_CONSTZ_", &out_z, 1);
+}
+
+static const char CONST_TEXT[] = ".model m\n.inputs a\n.outputs y1 y2 z\n"
+                                 ".names gnd\n.names vcc\n1\n.names unconn\n"
+                                 ".subckt $_AND_ A=gnd B=vcc Y=y1\n"
+                                 ".subckt $_AND_ A=unconn B=a Y=y2\n"
+                                 ".names unconn z\n1 1\n.end\n";
+
+/* Writes design to OUT_PATH, reads it back into design2 and writes that to OUT2_PATH: both texts
+ * are want. */
+static void expect_written_twice(const char *want) {
+    static char text[TEXT_MAX];
+    write_ok(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
+    read_into(design2, OUT_PATH);
+    write_ok(design2, OUT2_PATH);
+    TEST_ASSERT_EQUAL_STRING(want, slurp(OUT2_PATH, text));
+}
+
+/* The number of live nodes of module whose type is name. */
+static uint32_t count_type(odin3_design *des, const odin3_module *module, const char *name) {
+    uint32_t count = 0;
+    for (uint32_t i = 1; i < odin3_module_node_end(module); i++) {
+        odin3_node_id node = {i};
+        count +=
+            odin3_node_live(module, node) &&
+                    strcmp(odin3_celltype_get(des, odin3_node_type(module, node))->name, name) == 0
+                ? 1U
+                : 0U;
+    }
+    return count;
+}
+
+/* The generators follow the ports, the gates read them, z gets a buffer from unconn, no
+ * `.subckt $_CONST`; read back, the constants are zero-input $sops and the text is the same. */
+static void test_plain_const_generators(void) {
+    build_const_module(design);
+    expect_written_twice(CONST_TEXT);
+    odin3_module *back = module_of(design2, 1);
+    static const char *const consts[] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"};
+    for (uint32_t i = 0; i < 4; i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, count_type(design2, back, consts[i]));
+    }
+    TEST_ASSERT_EQUAL_UINT32(4, count_type(design2, back, "$sop")); /* 3 generators, z's buffer */
+    static const char *const gens[] = {"gnd", "vcc", "unconn"};
+    static const odin3_const values[] = {ODIN3_CONST_0, ODIN3_CONST_1, ODIN3_CONST_0};
+    for (uint32_t i = 0; i < 3; i++) {
+        odin3_net_id net = odin3_module_find_net(back, find_in(design2, gens[i]));
+        TEST_ASSERT_TRUE_MESSAGE(odin3_net_valid(net), gens[i]);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(values[i], odin3_net_const_value(back, net), gens[i]);
+    }
+}
+
+/* Each module writes only the generators it reads: m2, on $_CONST1_ alone, only vcc. */
+static void test_plain_const_per_module(void) {
+    build_const_module(design);
+    odin3_module *m2 = new_module(design, "m2");
+    odin3_net_id out_o = port_net(m2, "o", ODIN3_DIR_OUT);
+    odin3_net_id one = new_const(m2, "$_CONST1_");
+    new_cell(m2, "$_AND_", (odin3_net_id[]){one, one, out_o}, 3);
+    new_const(m2, "$_CONST0_"); /* read by nothing: no gnd */
+    static char want[TEXT_MAX];
+    int len =
+        snprintf(want, sizeof want, "%s\n%s", CONST_TEXT,
+                 ".model m2\n.outputs o\n.names vcc\n1\n.subckt $_AND_ A=vcc B=vcc Y=o\n.end\n");
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    expect_written_twice(want);
+}
+
+/* A signal net named vcc in a module that reads vcc is written `$n<ID>`; one named gnd keeps its
+ * name (the module reads no gnd). */
+static void test_plain_const_name_fallback(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_net_id in_a = port_net(module, "a", ODIN3_DIR_IN);
+    odin3_net_id out_y = port_net(module, "y", ODIN3_DIR_OUT);
+    odin3_net_id out_w = port_net(module, "w", ODIN3_DIR_OUT);
+    odin3_net_id vcc = new_net(module, "vcc");
+    odin3_net_id gnd = new_net(module, "gnd");
+    new_buffer(module, in_a, vcc);
+    new_cell(module, "$_AND_", (odin3_net_id[]){vcc, new_const(module, "$_CONST1_"), gnd}, 3);
+    new_buffer(module, gnd, out_y);
+    new_cell(module, "$_OR_", (odin3_net_id[]){in_a, in_a, out_w}, 3);
+    static char want[TEXT_MAX];
+    int len = snprintf(want, sizeof want,
+                       ".model top\n.inputs a\n.outputs y w\n.names vcc\n1\n"
+                       ".names a $n%u\n1 1\n.subckt $_AND_ A=$n%u B=vcc Y=gnd\n.names gnd y\n1 1\n"
+                       ".subckt $_OR_ A=a B=a Y=w\n.end\n",
+                       (unsigned)vcc.v, (unsigned)vcc.v);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    static char text[TEXT_MAX];
+    write_ok(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
+}
+
+/* A zero-input $sop on a net named gnd (value 0) is the gnd generator: no second `.names gnd`. */
+static void test_plain_const_sop_is_generator(void) {
+    write_input(".model top\n.outputs y\n.names gnd\n.subckt $_AND_ A=gnd B=k Y=y\n.end\n");
+    read_into(design, IN_PATH);
+    odin3_module *module = module_of(design, 1);
+    odin3_net_id k_net = odin3_module_find_net(module, find_in(design, "k"));
+    TEST_ASSERT_TRUE(odin3_net_valid(k_net));
+    new_cell(module, "$_CONST0_", &k_net, 1);
+    expect_written_twice(".model top\n.outputs y\n.names gnd\n"
+                         ".subckt $_AND_ A=gnd B=gnd Y=y\n.end\n");
+}
+
+/* An output port named vcc on a $_CONST1_ net is the generator; an input port named unconn in a
+ * module that reads unconn is refused, and nothing is written. */
+static void test_plain_const_port_names(void) {
+    odin3_module *module = new_module(design, "top");
+    odin3_net_id vcc = port_net(module, "vcc", ODIN3_DIR_OUT);
+    odin3_net_id out_y = port_net(module, "y", ODIN3_DIR_OUT);
+    new_cell(module, "$_CONST1_", &vcc, 1);
+    new_cell(module, "$_NOT_", (odin3_net_id[]){vcc, out_y}, 2);
+    expect_written_twice(".model top\n.outputs vcc y\n.names vcc\n1\n"
+                         ".subckt $_NOT_ A=vcc Y=y\n.end\n");
+    odin3_module *other = new_module(design, "bad");
+    odin3_net_id in = port_net(other, "unconn", ODIN3_DIR_IN);
+    new_cell(other, "$_AND_", (odin3_net_id[]){in, new_const(other, "$_CONSTX_"), {0}}, 3);
+    put_baseline(OUT_PATH);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    char want[MSG_MAX];
+    int len = snprintf(want, sizeof want,
+                       "%s: model 'bad': a port bit on another net has the name of the constant "
+                       "generator 'unconn'",
+                       OUT_PATH);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+    expect_baseline(OUT_PATH);
+}
+
+static void test_out_of_memory_sweep_constants(void) {
+    build_const_module(design);
+    oom_sweep();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_round_trip_every_fixture);
@@ -1178,5 +1355,11 @@ int main(void) {
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);
     RUN_TEST(test_out_of_memory_sweep_inferred_parameters);
+    RUN_TEST(test_plain_const_generators);
+    RUN_TEST(test_plain_const_per_module);
+    RUN_TEST(test_plain_const_name_fallback);
+    RUN_TEST(test_plain_const_sop_is_generator);
+    RUN_TEST(test_plain_const_port_names);
+    RUN_TEST(test_out_of_memory_sweep_constants);
     return UNITY_END();
 }
