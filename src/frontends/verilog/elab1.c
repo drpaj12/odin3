@@ -238,7 +238,12 @@ bool odin3_elab1_pending(odin3_elab1 *e1, odin3_ast_id parsed_node) {
 }
 
 void odin3_elab1_pend_form(odin3_elab1 *e1, odin3_ast_id parsed_node) {
-    report_pending(e1, parsed_node);
+    uint32_t kind = (uint32_t)odin3_ast_kind_of(e1->parsed, parsed_node);
+    if (odin3_elab_pending_form(ODIN3_ELAB_STAGE1, kind)) {
+        report_pending(e1, parsed_node);
+    } else {
+        odin3_elab1_unhandled(e1, parsed_node); /* its form landed without its code: a 2D bug */
+    }
 }
 
 void odin3_elab1_unhandled(odin3_elab1 *e1, odin3_ast_id parsed_node) {
@@ -302,11 +307,13 @@ static bool make_tables(odin3_elab1 *e1) {
     e1->said = odin3_u64map_create(0);
     e1->spec_hash = odin3_u64map_create(0);
     e1->spec_names = odin3_u64map_create(0);
+    e1->port_pos = odin3_u64map_create(0);
     e1->arena = odin3_arena_create(0);
     e1->scratch = odin3_arena_create(0);
     return e1->by_name != NULL && e1->instantiated != NULL && e1->noted != NULL &&
            e1->warned != NULL && e1->said != NULL && e1->spec_hash != NULL &&
-           e1->spec_names != NULL && e1->arena != NULL && e1->scratch != NULL;
+           e1->spec_names != NULL && e1->port_pos != NULL && e1->arena != NULL &&
+           e1->scratch != NULL;
 }
 
 odin3_status odin3_elab1_create(odin3_pass_ctx *ctx, odin3_ast *parsed, const odin3_elab_opts *opts,
@@ -363,9 +370,26 @@ void odin3_elab1_destroy(odin3_elab1 *e1) {
     odin3_u64map_destroy(e1->said);
     odin3_u64map_destroy(e1->spec_hash);
     odin3_u64map_destroy(e1->spec_names);
+    odin3_u64map_destroy(e1->port_pos);
     odin3_arena_destroy(e1->arena);
     odin3_arena_destroy(e1->scratch);
     odin3_util_free(e1);
+}
+
+void odin3_elab1_path_print(char *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == ODIN3_ELAB_PATH_SEP) {
+            data[i] = '.';
+        }
+    }
+}
+
+void odin3_elab1_path_join(char *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] == '.') {
+            data[i] = ODIN3_ELAB_PATH_SEP;
+        }
+    }
 }
 
 const char *odin3_elab1_str(const odin3_elab1 *e1, uint32_t id) {

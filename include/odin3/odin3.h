@@ -21,6 +21,14 @@
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
  * attributes.
+ *
+ * Stack: Odin III never recurses over a design, but constant evaluation during elaboration
+ * (read_verilog) nests in C up to 256 levels (a parameter whose value reads a later parameter,
+ * a function's return range; ODIN3_ELAB_MAX_REENTRY_DEPTH, 2D spec v4.6). Call the library from a
+ * thread with at least 1 MB of stack in a release build and 4 MB under the sanitizers (measured:
+ * 256 levels need under 1 MB at -O3, about 2 MB under gcc ASan and 4 MB under clang ASan with
+ * -fsanitize=fuzzer-no-link). The main thread's 8 MB default is enough; a secondary thread's
+ * default may not be (512 KB on macOS): give it the size explicitly.
  */
 #ifndef ODIN3_ODIN3_H
 #define ODIN3_ODIN3_H

@@ -82,8 +82,8 @@ final value differs from what its default expression gives in that specializatio
 taken names: a definition of another name, a specialization made so far, a registered cell type
 (two libraries' definitions of one name: the second specialization takes `$2`). (5) Pending
 overrides keep one entry per path, the one of highest precedence (the others can never win); the
-key holds each one's path, source and value. (6) The top's specialization is named like any other
-(`param top.W 16` makes the UNIT `top$W=16`). (7) Locations: the defparam errors and warning at the
+key holds each one's path, source and value. (6) *Reversed by v4.7:* the top's specialization keeps
+its definition's name (EL-9). (7) Locations: the defparam errors and warning at the
 defparam's target (its `HIER_NAME`); the project texts at the project line; the localparam and
 unknown-parameter errors at the `CONNECTION`; the mixing error at the first value of the other
 form; `too many parameter values` at the first surplus value; the specialization cap at the
@@ -92,6 +92,30 @@ itself with the same parameters: `recursive instantiation of 'm'`, no "through")
 localparam has the localparam text from a `#()` or a `defparam`, the project text from a project
 line. (8) Instances of one `INSTANTIATION` that land in different specializations are written as
 one `INSTANTIATION` per run of consecutive instances sharing one (EL-4).
+
+v4.7 (2026-10-12; the 2D Task 11 review, controller rulings I1 and I2, verified on Yosys 0.55).
+(1) The top's specialization keeps its definition's name whatever its parameters and pending
+overrides (EL-9), as Yosys's `chparam` and `hierarchy -chparam` do; v4.6 item (6) is reversed. (2)
+Erratum to EL-16: an override value is sized before it is converted. Yosys passes `#()`,
+`defparam` and `chparam` values into a `$paramod` as an `RTLIL::Const`, which has no `is_unsized`:
+`m #(.P('hFFFFFFFF))`, `m #('hFFFFFFFF)`, `defparam a.P = 'hFFFFFFFF` and a ranged `[31:0] P`
+overridden with it all give `64'h00000000ffffffff` in a 64-bit context, like `32'hFFFFFFFF`; only
+a default `parameter P = 'hFFFFFFFF` gives all ones, and `#(.P(-1))` keeps its sign. (3) v4.6 item
+(2) is corrected: the key keeps `UNSIZED` for an unsigned value whose top bit is not 0 (1, x or z),
+since an unsized value repeats an x or z top bit where a sized one extends with 0 (Yosys: a default
+`'hx0` gives `64'hxxxxxxxxxxxxxxx0`, an override `32'hxxxxxxx0` gives `64'h00000000xxxxxxx0`; two
+specializations). With (2), `'hFFFFFFFF` and `32'hFFFFFFFF` overrides now share one. (4) Project
+numbers are sized like every override (2) and keep the literal's sign, as the same text in a `#()`
+would (`16` is `32'sd16`, `8'hFF` unsigned, `-3` the literal negated), so `param top.u1.W 3` names
+`m$W=3`; `chparam -set W 3` makes an unsigned `RTLIL::Const` instead (`$paramod\leaf\W=32'…011`):
+divergence §17 #26. (5) Override paths join their components with
+the unit separator (0x1F), which no identifier holds, so an escaped `\a.b` is one component; names
+and messages print `.`. (6) The `<what>` of a parameter's declared range is `range bound of
+parameter 'P'`, so a nesting or constant error there names the parameter. (7) The forms of landed
+kinds that later tasks land (ordered connections, instance arrays, a defparam reaching a cell
+type, a body port, a specparam, a time or real variable, `tri0`/`tri1`/`trireg`, a hierarchical
+call) have a table of their own beside point (l)'s, which the "tables empty" assertions of Tasks
+16 and 24 also check.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -400,7 +424,8 @@ Rules:
   `W`; `param top.u_wide.W` is the pending `("u_wide.W", v)` of the top, pushed down like a
   `defparam`. A path that never reaches a parameter is an error at the project line
   (`param 'top.u_wide.X' does not name a parameter`). Values are numbers (`16`, `-3`, `8'hFF`,
-  through `odin3_ast_number_parse`, sized as a literal of that text) or strings.
+  through `odin3_ast_number_parse`, sized as a literal of that text and then sized like every
+  override, its sign kept, v4.7) or strings.
 - **Paths that end at a cell-type instance** (a `defparam` or project `param` whose instance is a
   hard or black-box cell, EL-11, such as `defparam ram.ADDR_WIDTH = 10` on a `single_port_ram`)
   set that node's parameter, converted to the type's parameter kind (INT: the value as a signed
@@ -427,7 +452,11 @@ its default, in declaration order, then `$<path>=v` for each pending entry. A va
 plain decimal when it is a 32-bit signed value without x/z (`W=8`, `W=-3`); otherwise
 `<width>'<s>b<bits>` (`INIT=4'b10x0`, `S=8'sb11110000`); a string as `"text"` with `"` and `\`
 escaped. A name longer than `ODIN3_ELAB_MAX_MODULE_NAME` (128 bytes) becomes
-`base$h<16 hex digits of the key hash>`. A name already taken by another definition or
+`base$h<16 hex digits of the key hash>`. The top's specialization keeps its definition's name
+whatever its parameters and pending overrides, as Yosys `chparam` and `hierarchy -chparam` do
+(verified on 0.55); VTR and BLIF `.model` expect it, and Task 17's `odin3_design_set_top` takes it.
+A specialization of the top's definition with default values can then only come from recursion; it
+takes `top$2` (v4.7). A name already taken by another definition or
 specialization, or by a registered cell type of the design (`odin3_celltype_find`; EL-6's
 "names already taken"), gets `$2`, `$3`, … appended (checked against every definition name of
 the store, every specialization made so far and the design's cell-type table), so names are
@@ -676,7 +705,9 @@ Typing of a `parameter` or `localparam` (IEEE §12.2; Yosys `simplify` for `AST_
 | `real`, `realtime`, `time` | P4's error ("parameter type 'real' is not supported") |
 
 An override (EL-8) is converted the same way, so a ranged or `integer` parameter keeps its type
-and an untyped one takes the override's type. Evaluation is lazy and in declaration order: a
+and an untyped one takes the override's type; the override's value is sized first, its sign kept
+(v4.7: Yosys passes overrides as `RTLIL::Const`, without `is_unsized`), so only a default keeps
+`UNSIZED`. Evaluation is lazy and in declaration order: a
 parameter whose value reads a later parameter evaluates that one first (allowed, as in Yosys); a
 cycle is "parameter 'P' depends on itself" at `P`'s declaration. A parameter value that reads a
 net or variable is "parameter 'P' is not constant (it reads 'x')". In a generate block (and in
@@ -2239,6 +2270,7 @@ and reported, never relaxed (2A's rule).
 | 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
 | 24 | a `$pow` read from BLIF (a `.subckt $pow`, as Yosys's `write_blif` writes it) is unsigned: `A_SIGNED` = `B_SIGNED` = 0, the widths implied by the formals | `write_blif` writes `.subckt $pow` with no parameters (unless `-param`, which the Parmys script does not use), so its own BLIF loses the operands' signedness too | — | BLIF carries no sign; no Parmys golden has a negative exponent (controller ruling on the Task 1 review) |
 | 25 | a module's `(* top *)` attribute does not choose the top (EL-7's rule decides) | `hierarchy` takes a `(* top *)` module before `-auto-top` (`passes/hierarchy/hierarchy.cc` 1008–1013 in VTR's 0.55) | — | DESIGN §4.0's top rule; no VTR benchmark or micro uses the attribute (v4.5) |
+| 26 | a project number keeps its literal's sign (`param top.u.W 3` is a signed 32-bit 3) | `chparam -set W 3` makes an unsigned `RTLIL::Const` | — | a project value means what the same text means in a `#()` (v4.7); only an untyped parameter in signed arithmetic sees the difference |
 
 ## 18. Implementation split (EL-51)
 

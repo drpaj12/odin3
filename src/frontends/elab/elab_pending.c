@@ -130,6 +130,37 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
         },
 };
 
+/* The forms of landed kinds still pending (elab.h, odin3_elab_pending_form). */
+static const bool k_forms[ODIN3_ELAB_STAGES + 1][ODIN3_AST_KIND_COUNT] = {
+    [ODIN3_ELAB_STAGE1] =
+        {
+            /* Task 12: ordered connections, instance arrays, a defparam on a cell type. */
+            [ODIN3_AST_CONNECTION] = true,
+            [ODIN3_AST_INSTANCE] = true,
+            [ODIN3_AST_DEFPARAM] = true,
+            /* Task 15: a port declared in the body. */
+            [ODIN3_AST_PORT_DECL] = true,
+            /* Task 16: specparam, time/real variables, tri0/tri1/trireg, hierarchical calls. */
+            [ODIN3_AST_PARAM_DECL] = true,
+            [ODIN3_AST_VAR_DECL] = true,
+            [ODIN3_AST_NET_DECL] = true,
+            [ODIN3_AST_CALL] = true,
+        },
+};
+
+bool odin3_elab_pending_form(uint8_t stage, uint32_t kind) {
+    return (stage == ODIN3_ELAB_STAGE1 || stage == ODIN3_ELAB_STAGE2) &&
+           kind < ODIN3_AST_KIND_COUNT && k_forms[stage][kind];
+}
+
+uint32_t odin3_elab_pending_form_count(uint8_t stage) {
+    uint32_t count = 0;
+    for (uint32_t kind = 0; kind < ODIN3_AST_KIND_COUNT; kind++) {
+        count += odin3_elab_pending_form(stage, kind) ? 1U : 0U;
+    }
+    return count;
+}
+
 /* The features' names in point (l)'s line. */
 static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] = {
     "continuous-context call",

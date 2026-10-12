@@ -40,7 +40,7 @@ enum {
     E1_INT_BITS = 32,
     E1_TIME_BITS = 64,
     E1_NET_RANGE_SLOT = 1, /* NET_DECL(STRENGTH?, RANGE?, DELAY?) */
-    E1_WHAT_EXTRA = 16     /* "parameter ''" and its NUL */
+    E1_WHAT_EXTRA = 16     /* the blank, the quotes and the NUL of a <what>, with room */
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -409,16 +409,22 @@ odin3_status odin3_elab1_fold_int(odin3_elab1_env *env, odin3_ast_id expr, const
     return ODIN3_OK;
 }
 
+/* A RANGE to fold and §9.1's <what> of its bounds. */
+typedef struct e1_range_req {
+    odin3_ast_id range;
+    const char *what;
+} e1_range_req;
+
 /* Both bounds of range folded, and its width within the cap. */
-static odin3_status fold_range(odin3_elab1_env *env, odin3_ast_id range, int64_t bounds[2]) {
+static odin3_status fold_range(odin3_elab1_env *env, const e1_range_req *req, int64_t bounds[2]) {
     const odin3_ast *ast = env->e1->parsed;
+    odin3_ast_id range = req->range;
     int32_t msb = 0;
     int32_t lsb = 0;
-    odin3_status st =
-        odin3_elab1_fold_int(env, odin3_ast_child(ast, range, 0), "range bound", &msb);
+    odin3_status st = odin3_elab1_fold_int(env, odin3_ast_child(ast, range, 0), req->what, &msb);
     st = st != ODIN3_OK
              ? st
-             : odin3_elab1_fold_int(env, odin3_ast_child(ast, range, 1), "range bound", &lsb);
+             : odin3_elab1_fold_int(env, odin3_ast_child(ast, range, 1), req->what, &lsb);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -433,8 +439,10 @@ static odin3_status fold_range(odin3_elab1_env *env, odin3_ast_id range, int64_t
     return ODIN3_OK;
 }
 
-odin3_status odin3_elab1_env_range(odin3_elab1_env *env, odin3_ast_id range, int64_t *msb,
-                                   int64_t *lsb) {
+/* A declaration's folded RANGE, memoized per node (req->what names its bounds). */
+static odin3_status range_folded(odin3_elab1_env *env, const e1_range_req *req, int64_t *msb,
+                                 int64_t *lsb) {
+    odin3_ast_id range = req->range;
     uint64_t at = 0;
     if (!odin3_u64map_get(env->ranged, range.v, &at)) {
         odin3_elab1_range *rec = odin3_vec_push(&env->ranges);
@@ -445,7 +453,7 @@ odin3_status odin3_elab1_env_range(odin3_elab1_env *env, odin3_ast_id range, int
         at = env->ranges.len - 1;
         odin3_status st = odin3_u64map_put(env->ranged, (odin3_kv){range.v, at});
         int64_t bounds[2] = {0, 0};
-        st = st != ODIN3_OK ? st : fold_range(env, range, bounds);
+        st = st != ODIN3_OK ? st : fold_range(env, req, bounds);
         rec = odin3_vec_at(&env->ranges, (size_t)at);
         rec->state = st == ODIN3_OK ? ODIN3_E1_DONE : ODIN3_E1_FAILED;
         rec->msb = bounds[0];
@@ -461,6 +469,29 @@ odin3_status odin3_elab1_env_range(odin3_elab1_env *env, odin3_ast_id range, int
     *msb = rec->msb;
     *lsb = rec->lsb;
     return ODIN3_OK;
+}
+
+odin3_status odin3_elab1_env_range(odin3_elab1_env *env, odin3_ast_id range, int64_t *msb,
+                                   int64_t *lsb) {
+    e1_range_req req = {range, "range bound"};
+    return range_folded(env, &req, msb, lsb);
+}
+
+/* "<prefix> 'name'" in the environment's arena (§9.1's <what>); prefix alone without memory. */
+static const char *named_what(odin3_elab1_env *env, const char *prefix, uint32_t name) {
+    const char *text = odin3_elab1_str(env->e1, name);
+    size_t len = strlen(prefix) + strlen(text) + E1_WHAT_EXTRA;
+    char *what = odin3_arena_alloc(env->arena, len);
+    if (what == NULL) {
+        return prefix;
+    }
+    int got = snprintf(what, len, "%s '%s'", prefix, text);
+    return got > 0 && (size_t)got < len ? what : prefix;
+}
+
+/* "parameter 'P'" (§9.1's <what> of a parameter's value). */
+static const char *param_what(odin3_elab1_env *env, uint32_t name) {
+    return named_what(env, "parameter", name);
 }
 
 /* --- declared types (EL-16, EL-23) ---------------------------------------------------------- */
@@ -485,8 +516,9 @@ static const char *dt_name(uint32_t dt) {
     }
 }
 
-static odin3_status param_type(odin3_elab1_env *env, odin3_ast_id group, e1_ptype *out) {
+static odin3_status param_type(odin3_elab1_env *env, uint32_t idx, e1_ptype *out) {
     const odin3_ast *ast = env->e1->parsed;
+    odin3_ast_id group = odin3_elab1_env_slot(env, idx)->group;
     uint32_t flags = odin3_ast_flags(ast, group);
     uint32_t dt = (flags & ODIN3_AST_F_PARAM_DECL_DT_MASK) >> ODIN3_AST_F_PARAM_DECL_DT_SHIFT;
     bool is_signed = (flags & ODIN3_AST_F_PARAM_DECL_SIGNED) != 0;
@@ -504,24 +536,14 @@ static odin3_status param_type(odin3_elab1_env *env, odin3_ast_id group, e1_ptyp
         out->type.mode = is_signed ? ODIN3_CPARAM_SIGNED : ODIN3_CPARAM_UNTYPED;
         return ODIN3_OK;
     }
-    odin3_status st = odin3_elab1_env_range(env, range, &out->msb, &out->lsb);
+    e1_range_req req = {
+        range, named_what(env, "range bound of parameter", odin3_elab1_env_slot(env, idx)->name)};
+    odin3_status st = range_folded(env, &req, &out->msb, &out->lsb);
     uint64_t span =
         out->msb >= out->lsb ? (uint64_t)(out->msb - out->lsb) : (uint64_t)(out->lsb - out->msb);
     out->type = (odin3_cparam_type){ODIN3_CPARAM_SIZED, (uint32_t)span + 1, is_signed};
     out->has_range = true;
     return st;
-}
-
-/* "parameter 'P'" in the environment's arena (§9.1's <what>). */
-static const char *param_what(odin3_elab1_env *env, uint32_t name) {
-    const char *text = odin3_elab1_str(env->e1, name);
-    size_t len = strlen(text) + E1_WHAT_EXTRA;
-    char *what = odin3_arena_alloc(env->arena, len);
-    if (what == NULL) {
-        return "parameter";
-    }
-    int got = snprintf(what, len, "parameter '%s'", text);
-    return got > 0 && (size_t)got < len ? what : "parameter";
 }
 
 /* The value of the parameter or localparam in slot idx before conversion: its override or its
@@ -545,7 +567,7 @@ static odin3_status raw_value(odin3_elab1_env *env, uint32_t idx, odin3_cval *va
 
 static odin3_status param_value(odin3_elab1_env *env, uint32_t idx) {
     e1_ptype decl;
-    odin3_status st = param_type(env, odin3_elab1_env_slot(env, idx)->group, &decl);
+    odin3_status st = param_type(env, idx, &decl);
     odin3_cval raw = {0};
     uint8_t base = ODIN3_AST_NUMBER_DEC;
     st = st != ODIN3_OK ? st : raw_value(env, idx, &raw, &base);
@@ -680,7 +702,12 @@ odin3_status odin3_elab1_override_text(const odin3_elab1 *e1, const odin3_elab_o
         return odin3_strbuf_appendf(out, "%s.%s", odin3_elab1_str(e1, param->scope),
                                     odin3_elab1_str(e1, param->name));
     }
-    return odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, ovr->path)));
+    size_t from = out->len;
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, ovr->path)));
+    if (st == ODIN3_OK) {
+        odin3_elab1_path_print(out->data + from, out->len - from);
+    }
+    return st;
 }
 
 /* --- pass E ---------------------------------------------------------------------------------- */
@@ -690,6 +717,7 @@ odin3_status odin3_elab1_override_text(const odin3_elab1 *e1, const odin3_elab_o
 typedef struct e1_dp {
     uint32_t inst;
     odin3_elab_override ovr;
+    uint32_t next; /* the next one for the same instance + 1, 0 = none */
 } e1_dp;
 
 typedef struct e1_pass {
@@ -697,9 +725,10 @@ typedef struct e1_pass {
     odin3_elab1_env *env;
     uint32_t spec;
     uint32_t def;
-    odin3_vec dps;  /* e1_dp */
-    odin3_vec list; /* odin3_elab_override: one INSTANTIATION's #() values */
-    odin3_vec ovr;  /* odin3_elab_override: one instance's overrides */
+    odin3_vec dps;            /* e1_dp */
+    odin3_u64map *dp_by_inst; /* instance name → (first dp + 1) | (last dp + 1) << 32 */
+    odin3_vec list;           /* odin3_elab_override: one INSTANTIATION's #() values */
+    odin3_vec ovr;            /* odin3_elab_override: one instance's overrides */
 } e1_pass;
 
 static odin3_status push_override(odin3_vec *vec, const odin3_elab_override *ovr) {
@@ -711,13 +740,32 @@ static odin3_status push_override(odin3_vec *vec, const odin3_elab_override *ovr
     return ODIN3_OK;
 }
 
+/* The override for instance inst, appended to its chain (indexed by name: review m3). */
 static odin3_status push_dp(e1_pass *ps, uint32_t inst, const odin3_elab_override *ovr) {
     e1_dp *slot = odin3_vec_push(&ps->dps);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *slot = (e1_dp){inst, *ovr};
-    return ODIN3_OK;
+    *slot = (e1_dp){inst, *ovr, 0};
+    uint64_t self = ps->dps.len;
+    uint64_t ends = 0;
+    if (!odin3_u64map_get(ps->dp_by_inst, inst, &ends)) {
+        ends = self | self << E1_SCOPE_SHIFT;
+    } else {
+        ((e1_dp *)odin3_vec_at(&ps->dps, (ends >> E1_SCOPE_SHIFT) - 1))->next = (uint32_t)self;
+        ends = (ends & UINT32_MAX) | self << E1_SCOPE_SHIFT;
+    }
+    odin3_status st = odin3_u64map_put(ps->dp_by_inst, (odin3_kv){inst, ends});
+    if (st != ODIN3_OK) {
+        odin3_vec_pop(&ps->dps); /* the chain is unchanged: the run stops on NO_MEMORY */
+    }
+    return st;
+}
+
+/* The first override for instance name + 1 (0 = none); the next one is its e1_dp.next. */
+static uint32_t first_dp(const e1_pass *ps, uint32_t name) {
+    uint64_t ends = 0;
+    return odin3_u64map_get(ps->dp_by_inst, name, &ends) ? (uint32_t)(ends & UINT32_MAX) : 0;
 }
 
 /* True when name is an instance of the module scope. */
@@ -775,8 +823,13 @@ static odin3_status collect_defparam(e1_pass *ps, odin3_ast_id item) {
     odin3_strbuf_init(&rest);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 1; st == ODIN3_OK && i < parts.n; i++) {
-        st = odin3_strbuf_appendf(&rest, "%s%s", i > 1 ? "." : "",
-                                  odin3_ast_name_str(ast, parts.ids[i]));
+        if (i > 1) {
+            char sep = ODIN3_ELAB_PATH_SEP;
+            st = odin3_strbuf_append(&rest, (odin3_bytes){&sep, 1});
+        }
+        st = st != ODIN3_OK ? st
+                            : odin3_strbuf_append(
+                                  &rest, odin3_bytes_cstr(odin3_ast_name_str(ast, parts.ids[i])));
     }
     st = st != ODIN3_OK
              ? st
@@ -789,13 +842,14 @@ static odin3_status collect_defparam(e1_pass *ps, odin3_ast_id item) {
     if (ev == ODIN3_ERR_PARSE) {
         return ODIN3_OK; /* reported; the instance takes no value from it (EL-44) */
     }
+    ovr.value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* an override is sized (v4.7) */
     return ev != ODIN3_OK ? ev : push_dp(ps, inst, &ovr);
 }
 
-/* One pending override of the specialization: "u.rest" goes to instance u as "rest". */
+/* One pending override of the specialization: "u<SEP>rest" goes to instance u as "rest". */
 static odin3_status split_pending(e1_pass *ps, const odin3_elab_override *ovr) {
     const char *path = odin3_elab1_str(ps->e1, ovr->path);
-    const char *dot = strchr(path, '.');
+    const char *dot = strchr(path, ODIN3_ELAB_PATH_SEP);
     uint32_t inst = dot != NULL ? find_id(ps->e1, (odin3_bytes){path, (size_t)(dot - path)}) : 0;
     if (inst == 0 || !is_instance(ps, inst)) {
         bad_target(ps->e1, ovr);
@@ -860,6 +914,7 @@ static odin3_status param_value_of(e1_pass *ps, odin3_ast_id entry, uint32_t par
                                .from = entry};
     odin3_elab1_eval_req req = {expr, param_what(ps->env, param), &ovr.base};
     odin3_status st = odin3_elab1_eval(ps->env, &req, &ovr.value);
+    ovr.value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* an override is sized (v4.7) */
     return st != ODIN3_OK ? st : push_override(&ps->list, &ovr);
 }
 
@@ -921,9 +976,10 @@ static odin3_status instance_overrides(e1_pass *ps, uint32_t inst) {
     for (size_t i = 0; st == ODIN3_OK && i < ps->list.len; i++) {
         st = push_override(&ps->ovr, odin3_vec_cat(&ps->list, i));
     }
-    for (size_t i = 0; st == ODIN3_OK && i < ps->dps.len; i++) {
-        const e1_dp *dp = odin3_vec_cat(&ps->dps, i);
-        st = dp->inst == inst ? push_override(&ps->ovr, &dp->ovr) : ODIN3_OK;
+    for (uint32_t at = first_dp(ps, inst); st == ODIN3_OK && at != 0;) {
+        const e1_dp *dp = odin3_vec_cat(&ps->dps, at - 1);
+        st = push_override(&ps->ovr, &dp->ovr);
+        at = dp->next;
     }
     return st;
 }
@@ -960,11 +1016,10 @@ static odin3_status log_all(e1_pass *ps, odin3_ast_id item, int32_t value) {
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANTIATION); st == ODIN3_OK && i < kids.n;
          i++) {
         uint32_t name = odin3_ast_name(ps->e1->parsed, kids.ids[i]);
-        for (size_t j = 0; value == ODIN3_DECISION_AS_GIVEN && j < ps->dps.len; j++) {
-            const e1_dp *dp = odin3_vec_cat(&ps->dps, j);
-            if (dp->inst == name) {
-                odin3_elab1_pend_at(ps->e1, dp->ovr.at, ODIN3_AST_DEFPARAM);
-            }
+        uint32_t at = value == ODIN3_DECISION_AS_GIVEN ? first_dp(ps, name) : 0;
+        for (; at != 0; at = ((const e1_dp *)odin3_vec_cat(&ps->dps, at - 1))->next) {
+            odin3_elab1_pend_at(ps->e1, ((const e1_dp *)odin3_vec_cat(&ps->dps, at - 1))->ovr.at,
+                                ODIN3_AST_DEFPARAM);
         }
         st = log_decision(ps, kids.ids[i], value);
     }
@@ -1065,7 +1120,9 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     odin3_vec_init(&ps.dps, sizeof(e1_dp));
     odin3_vec_init(&ps.list, sizeof(odin3_elab_override));
     odin3_vec_init(&ps.ovr, sizeof(odin3_elab_override));
-    odin3_status st = odin3_elab1_env_create(e1, ps.def, &e1->env);
+    ps.dp_by_inst = odin3_u64map_create(0);
+    odin3_status st =
+        ps.dp_by_inst != NULL ? odin3_elab1_env_create(e1, ps.def, &e1->env) : ODIN3_ERR_NO_MEMORY;
     size_t first_log = e1->log.len;
     size_t first_edge = e1->edges.len;
     if (st == ODIN3_OK) {
@@ -1079,6 +1136,7 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     rec->first_edge = (uint32_t)first_edge;
     rec->n_edges = (uint32_t)(e1->edges.len - first_edge);
     odin3_vec_free(&ps.dps);
+    odin3_u64map_destroy(ps.dp_by_inst);
     odin3_vec_free(&ps.list);
     odin3_vec_free(&ps.ovr);
     return st;

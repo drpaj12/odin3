@@ -274,15 +274,72 @@ static void test_unsized_name(void) {
     TEST_ASSERT_EQUAL_STRING("m$P=32'b11111111111111111111111111111111", spec_of_instance("u"));
 }
 
-/* An unsized unsigned value with a top 1 and its sized twin extend differently (ones, zeros):
- * the key keeps UNSIZED there, so they are two specializations of one spelling. */
-static void test_unsized_twin_distinct(void) {
+/* Review I2 (Yosys 0.55): every override is sized, its sign kept (Yosys passes it as an
+ * RTLIL::Const), so `'hFFFFFFFF` and `32'hFFFFFFFF` overrides share and are written BIN width 32;
+ * only a default stays unsized. */
+static void test_unsized_overrides_sized(void) {
+    run_clean("module m #(parameter P = 'hFFFFFFFF) (); endmodule\n"
+              "module top; m #(.P('hFFFFFFFF)) a (); m #(.P(32'hFFFFFFFF)) b (); m #('h7) c ();\n"
+              "m d ();\ndefparam d.P = 'h3;\nm e ();\nendmodule\n");
+    const char *ones = "m$P=32'b11111111111111111111111111111111";
+    TEST_ASSERT_EQUAL_STRING(ones, spec_of_instance("a"));
+    TEST_ASSERT_EQUAL_STRING(ones, spec_of_instance("b"));
+    expect_number(value_of(ones, "P"), ODIN3_AST_NUMBER_BIN, false, 32);
+    expect_number(value_of("m$P=32'b00000000000000000000000000000111", "P"), ODIN3_AST_NUMBER_BIN,
+                  false, 32); /* ordered */
+    expect_number(value_of("m$P=32'b00000000000000000000000000000011", "P"), ODIN3_AST_NUMBER_BIN,
+                  false, 32); /* defparam */
+    TEST_ASSERT_EQUAL_STRING("m", spec_of_instance("e"));
+    expect_number(value_of("m", "P"), ODIN3_AST_NUMBER_HEX, false, 0); /* the default */
+}
+
+/* Review I2: an x or z top bit also extends differently unsized (repeated) and sized (0), so a
+ * default `'hx0` and an override `32'hxxxxxxx0` are two specializations (Yosys 0.55: 64'hx…x0
+ * and 64'h00000000xxxxxxx0); a signed unsized default and a sized override of it share. */
+static void test_unsized_key_boundary(void) {
+    run_clean("module n #(parameter P = 'hx0) (); endmodule\n"
+              "module s #(parameter W = 8) (); endmodule\n"
+              "module x #(parameter X = 'sbx) (); endmodule\n"
+              "module top; n a (); n #(.P(32'hxxxxxxx0)) b (); s c (); s #(.W(32'sd8)) d ();\n"
+              "x e (); x #(.X(32'sbx)) f ();\nendmodule\n");
+    TEST_ASSERT_EQUAL_STRING("n", spec_of_instance("a"));
+    TEST_ASSERT_EQUAL_STRING("n$P=32'bxxxxxxxxxxxxxxxxxxxxxxxxxxxx0000", spec_of_instance("b"));
+    TEST_ASSERT_EQUAL_STRING("s", spec_of_instance("c"));
+    TEST_ASSERT_EQUAL_STRING("s", spec_of_instance("d"));
+    TEST_ASSERT_EQUAL_STRING("x", spec_of_instance("e")); /* signed: x repeats either way */
+    TEST_ASSERT_EQUAL_STRING("x", spec_of_instance("f"));
+}
+
+/* Review m5 (T05): the z plane is part of the key: 4'b0z00 and 4'b0000 do not share. */
+static void test_key_holds_z(void) {
     run_clean("module m #(parameter P = 0) (); endmodule\n"
-              "module top; m #(.P('hFFFFFFFF)) a (); m #(.P(32'hFFFFFFFF)) b ();\n"
-              "m #(.P('h7FFFFFFF)) c (); m #(.P(32'h7FFFFFFF)) d ();\nendmodule\n");
-    TEST_ASSERT_EQUAL_STRING("m$P=32'b11111111111111111111111111111111", spec_of_instance("a"));
-    TEST_ASSERT_EQUAL_STRING("m$P=32'b11111111111111111111111111111111$2", spec_of_instance("b"));
-    TEST_ASSERT_EQUAL_STRING(spec_of_instance("c"), spec_of_instance("d"));
+              "module top; m #(.P(4'b0z00)) a (); m #(.P(4'b0000)) b ();\nendmodule\n");
+    TEST_ASSERT_EQUAL_STRING("m$P=4'b0z00", spec_of_instance("a"));
+    TEST_ASSERT_EQUAL_STRING("m$P=4'b0000", spec_of_instance("b"));
+}
+
+/* The name of the instance of m whose string S is len zeros. */
+static const char *name_with_string(int len) {
+    char text[NAME_BUF * 2];
+    int got = snprintf(text, sizeof text,
+                       "module m #(parameter S = \"s\") (); endmodule\n"
+                       "module top; m #(.S(\"%0*d\")) u ();\nendmodule\n",
+                       len, 0);
+    TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof text);
+    run_clean(text);
+    return spec_of_instance("u");
+}
+
+/* Review m5 (T10): a name of 128 bytes is kept, one of 129 is hashed. */
+static void test_name_length_boundary(void) {
+    char want[NAME_BUF];
+    int got = snprintf(want, sizeof want, "m$S=\"%0*d\"", 122, 0);
+    TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof want);
+    const char *name = name_with_string(122);
+    TEST_ASSERT_EQUAL_size_t(128, strlen(name));
+    TEST_ASSERT_EQUAL_STRING(want, name);
+    et_free(&rs);
+    TEST_ASSERT_EQUAL_size_t(3 + 16, strlen(name_with_string(123)));
 }
 
 static void test_long_name_hashed(void) {
@@ -469,8 +526,9 @@ static void test_project_push_down(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_STRING("wide$u.W=8'b11111111", spec_of_instance("u_wide"));
     TEST_ASSERT_EQUAL_STRING("leaf$W=8'b11111111", spec_of_instance("u"));
-    /* The top carries the pending override in its name (EL-9: nothing pending → the plain name). */
-    TEST_ASSERT_EQUAL_STRING("top$u_wide.u.W=8'b11111111", name_of(odin3_ast_root(rs.elab, 0)));
+    /* The top keeps its definition's name under overrides (v4.7, Yosys chparam). */
+    TEST_ASSERT_EQUAL_STRING("top", name_of(odin3_ast_root(rs.elab, 0)));
+    TEST_ASSERT_EQUAL_STRING("top,wide$u.W=8'b11111111,leaf$W=8'b11111111", module_order());
 }
 
 static void test_project_bad_parameter(void) {
@@ -724,8 +782,24 @@ static void test_project_top_parameters(void) {
     et_src proj = project_file("file verilog t.v\ntop top\nparam top.W -3\nparam top.S \"q\"\n");
     run_project(&proj, "module top #(parameter W = 1, parameter S = \"s\") ();\nendmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    TEST_ASSERT_EQUAL_STRING("top$W=-3$S=\"q\"", name_of(odin3_ast_root(rs.elab, 0)));
-    TEST_ASSERT_EQUAL_INT64(-3, number_int(value_of("top$W=-3$S=\"q\"", "W")));
+    TEST_ASSERT_EQUAL_STRING("top", name_of(odin3_ast_root(rs.elab, 0)));
+    odin3_ast_id wv = value_of("top", "W");
+    TEST_ASSERT_EQUAL_INT64(-3, number_int(wv));
+    expect_number(wv, ODIN3_AST_NUMBER_BIN, true, 32); /* sized, the literal's sign kept */
+    TEST_ASSERT_EQUAL_STRING("q", name_of(value_of("top", "S")));
+}
+
+/* Review m2 and v4.7: a project number keeps its literal's sign (`'s`) and is sized (an unsized
+ * one included), so it shares with the sized `#()` value. */
+static void test_project_number_forms(void) {
+    et_src proj = project_file("file verilog t.v\ntop top\nparam top.u.W 4'sb1111\n"
+                               "param top.v.W 'hFFFFFFFF\n");
+    run_project(&proj, "module p #(parameter W = 1) (); endmodule\n"
+                       "module top; p u (); p v (); p #(.W(32'hFFFFFFFF)) x ();\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_STRING("p$W=4'sb1111", spec_of_instance("u"));
+    TEST_ASSERT_EQUAL_STRING("p$W=32'b11111111111111111111111111111111", spec_of_instance("v"));
+    TEST_ASSERT_EQUAL_STRING(spec_of_instance("v"), spec_of_instance("x"));
 }
 
 static void test_connection_errors(void) {
@@ -814,7 +888,7 @@ static void test_params_api(void) {
     }
     odin3_elab_override ovr[2] = {{.source = ODIN3_OVR_NAMED}, {.source = ODIN3_OVR_DEFPARAM}};
     ovr[0].path = et_intern(&rs, "W");
-    ovr[1].path = et_intern(&rs, "u.X");
+    ovr[1].path = et_intern(&rs, "u\x1fX"); /* the components joined by ODIN3_ELAB_PATH_SEP */
     odin3_cval_int five = {5, 32, true};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_i64(values, &five, &ovr[0].value));
     ovr[1].value = ovr[0].value;
@@ -827,8 +901,117 @@ static void test_params_api(void) {
     TEST_ASSERT_TRUE(odin3_cval_to_i64(&out[0], &got));
     TEST_ASSERT_EQUAL_INT64(5, got);
     TEST_ASSERT_EQUAL_UINT32(1, n_pending);
-    TEST_ASSERT_EQUAL_STRING("u.X", odin3_elab1_str(e1, pending[0].path));
+    TEST_ASSERT_EQUAL_STRING("u\x1fX", odin3_elab1_str(e1, pending[0].path));
     odin3_elab1_destroy(e1);
+}
+
+/* --- fix round 1: the review's survivors and minors -------------------------------------- */
+
+/* I3 (T04): the pending overrides are part of the key: two instances of mid, one with a defparam
+ * below it, are two specializations. */
+static void test_pending_in_key(void) {
+    run_clean("module leaf #(parameter W = 1) (); endmodule\n"
+              "module mid; leaf u_leaf (); endmodule\n"
+              "module top; mid a (); mid b ();\ndefparam a.u_leaf.W = 4;\nendmodule\n");
+    TEST_ASSERT_EQUAL_STRING("mid$u_leaf.W=4", spec_of_instance("a"));
+    TEST_ASSERT_EQUAL_STRING("mid", spec_of_instance("b"));
+    TEST_ASSERT_EQUAL_STRING("top,mid$u_leaf.W=4,mid,leaf$W=4,leaf", module_order());
+}
+
+/* I3 (T16): a pushed-down path whose next component is not an instance is the located error at
+ * the defparam, never dropped. */
+static void test_pending_bad_component(void) {
+    run_one("module leaf #(parameter W = 1) (); endmodule\n"
+            "module mid; leaf u_leaf (); endmodule\n"
+            "module top; mid u_mid ();\ndefparam u_mid.nope.W = 4;\nendmodule\n");
+    expect_only_error("t.v:4:10: error: defparam target 'u_mid.nope.W' does not name a parameter "
+                      "of an instance below this module");
+}
+
+/* I3 (T23): one CONNECTION per parameter, the body's included, with its final value (EL-4). */
+static void test_body_parameter_connections(void) {
+    run_clean("module m #(parameter A = 1) (); parameter B = 2; endmodule\n"
+              "module top; m #(5) u ();\nendmodule\n");
+    odin3_ast_id inst = find_in((odin3_ast_id){0}, ODIN3_AST_INSTANTIATION, "m$A=5");
+    odin3_ast_id list = odin3_ast_child(rs.elab, inst, 0);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, list));
+    odin3_ast_id body = odin3_ast_child(rs.elab, list, 1);
+    TEST_ASSERT_EQUAL_STRING("B", name_of(body));
+    TEST_ASSERT_EQUAL_INT64(2, number_int(odin3_ast_child(rs.elab, body, 0)));
+}
+
+/* I3 (T26): a `+:`/`-:` width is folded to point (bb)'s NUMBER; the base stays as written. */
+static void test_indexed_part_select(void) {
+    run_clean(
+        "module top #(parameter W = 2) (input [7:0] a, input [2:0] i, output [1:0] y,\n"
+        "  output [1:0] z);\n  assign y = a[i +: W];\n  assign z = a[i -: W + 0];\nendmodule\n");
+    uint32_t end = odin3_ast_node_end(rs.elab).v;
+    int seen = 0;
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_ast_id node = {id};
+        uint32_t sub = odin3_ast_sub(rs.elab, node);
+        if (odin3_ast_kind_of(rs.elab, node) != ODIN3_AST_SELECT ||
+            (sub != ODIN3_AST_SELECT_PART_PLUS && sub != ODIN3_AST_SELECT_PART_MINUS)) {
+            continue;
+        }
+        TEST_ASSERT_EQUAL_INT(ODIN3_AST_IDENT,
+                              odin3_ast_kind_of(rs.elab, odin3_ast_child(rs.elab, node, 1)));
+        odin3_ast_id width = odin3_ast_child(rs.elab, node, 2);
+        expect_number(width, ODIN3_AST_NUMBER_DEC, true, 32);
+        TEST_ASSERT_EQUAL_INT64(2, number_int(width));
+        seen++;
+    }
+    TEST_ASSERT_EQUAL_INT(2, seen);
+}
+
+/* m1: an escaped name holding '.' is one path component (parameter and instance). */
+static void test_escaped_dotted_names(void) {
+    run_clean("module m #(parameter \\a.b = 1) (); endmodule\n"
+              "module top; m #(.\\a.b (3)) u (); m \\v.w  ();\ndefparam \\v.w .\\a.b = 2;\n"
+              "endmodule\n");
+    TEST_ASSERT_EQUAL_STRING("m$a.b=3", spec_of_instance("u"));
+    TEST_ASSERT_EQUAL_STRING("m$a.b=2", spec_of_instance("v.w"));
+}
+
+/* m5 (T31, T43): a construct of a module specialized twice reports its error, and its evaluator
+ * warning, once (§9.3). */
+static void test_reported_once(void) {
+    run_one("module m #(parameter N = 1) ();\n  wire w;\n  localparam [63:0] L = {32'd0, 'h1};\n"
+            "  localparam K = w;\nendmodule\n"
+            "module top; m #(1) a (); m #(2) b ();\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:4:18: error: parameter 'K' is not constant (it reads 'w')");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.warnings, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, et_count_with(&rs, ODIN3_LOG_WARN, "unsized constant in a concatenation is taken as"));
+}
+
+/* m4: the forms of landed kinds that later tasks land have a table of their own; a form not in it
+ * is a 2D bug. */
+static void test_pending_forms_table(void) {
+    TEST_ASSERT_EQUAL_UINT32(8, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE2));
+    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_CONNECTION));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_MODULE));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_CONNECTION));
+    run_clean(M_W "module top; m u ();\nendmodule\n");
+    odin3_elab1 *e1 = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_create(&rs.ctx, rs.parsed, &rs.opts, &e1));
+    odin3_ast_id module = odin3_ast_child(rs.parsed, odin3_ast_root(rs.parsed, 0), 0);
+    odin3_elab1_pend_form(e1, module);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_elab1_status(e1));
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:1:1: error: stage 1: no elaboration of 'MODULE' (a 2D bug)");
+    odin3_elab1_destroy(e1);
+}
+
+/* m6: a parameter's declared range names the parameter in its diagnostics. */
+static void test_parameter_range_named(void) {
+    run_one("module top;\n  wire [3:0] w;\n  parameter [w:0] P = 1;\nendmodule\n");
+    expect_only_error(
+        "t.v:3:14: error: range bound of parameter 'P' is not constant (it reads 'w')");
 }
 
 /* --- out of memory ------------------------------------------------------------------------- */
@@ -885,6 +1068,23 @@ static void test_oom(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.parsed, ODIN3_CHECK_FULL));
 }
 
+/* The fix round's tests (review task-11-review.md: I2, I3, m1, m2, m4, m5, m6). */
+static void run_fix_round(void) {
+    RUN_TEST(test_unsized_overrides_sized);
+    RUN_TEST(test_unsized_key_boundary);
+    RUN_TEST(test_key_holds_z);
+    RUN_TEST(test_name_length_boundary);
+    RUN_TEST(test_project_number_forms);
+    RUN_TEST(test_pending_in_key);
+    RUN_TEST(test_pending_bad_component);
+    RUN_TEST(test_body_parameter_connections);
+    RUN_TEST(test_indexed_part_select);
+    RUN_TEST(test_escaped_dotted_names);
+    RUN_TEST(test_reported_once);
+    RUN_TEST(test_pending_forms_table);
+    RUN_TEST(test_parameter_range_named);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_named_beats_defparam);
@@ -897,7 +1097,6 @@ int main(void) {
     RUN_TEST(test_string_name);
     RUN_TEST(test_signed_ranged_name);
     RUN_TEST(test_unsized_name);
-    RUN_TEST(test_unsized_twin_distinct);
     RUN_TEST(test_long_name_hashed);
     RUN_TEST(test_name_taken_by_module);
     RUN_TEST(test_name_taken_by_cell_type);
@@ -941,6 +1140,7 @@ int main(void) {
     RUN_TEST(test_self_recursion);
     RUN_TEST(test_unbounded_recursion);
     RUN_TEST(test_params_api);
+    run_fix_round();
     RUN_TEST(test_oom);
     return UNITY_END();
 }

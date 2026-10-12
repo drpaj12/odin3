@@ -163,7 +163,8 @@ void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node);
  * Point (l)'s line for a form of a landed kind whose elaboration a later task lands (Task 11's
  * split: ordered connections and instance arrays, Task 12; a port declared in the body, Task 15;
  * a specparam, a real or time variable and a rejected net type, Task 16): the node's kind is
- * reported as pending (once per kind per run, counted as an error) whatever the table says.
+ * reported as pending (once per kind per run, counted as an error) while the forms table
+ * (odin3_elab_pending_form) lists it, and as unhandled (a 2D bug) once it does not.
  */
 void odin3_elab1_pend_form(odin3_elab1 *e1, odin3_ast_id parsed_node);
 
@@ -260,6 +261,15 @@ typedef struct odin3_elab_entry {
     odin3_cval value;
 } odin3_elab_entry;
 
+/* The separator of an override path's components (spec v4.7): the unit separator, which no
+ * identifier holds, so an escaped `\a.b` is one component; names and messages print '.'. */
+#define ODIN3_ELAB_PATH_SEP '\x1f'
+
+/* In place over len bytes: _print turns each ODIN3_ELAB_PATH_SEP into '.', _join each '.' into
+ * ODIN3_ELAB_PATH_SEP (a project scope's components). */
+void odin3_elab1_path_print(char *data, size_t len);
+void odin3_elab1_path_join(char *data, size_t len);
+
 /* Where an override comes from, in precedence order (EL-8: PROJECT is the highest). */
 typedef enum odin3_elab_ovr_source {
     ODIN3_OVR_PROJECT = 1,
@@ -270,14 +280,15 @@ typedef enum odin3_elab_ovr_source {
 
 /*
  * One override of a parameter: path is the strtab ID of "W" (a parameter of the target) or of
- * "u2.W" (pending: for the instance u2 below it, pushed down, EL-8); source an
- * odin3_elab_ovr_source; order the stream order among overrides of one source (the DEFPARAM node's
- * ID, so the first defparam wins; a project override's index in the record's params); value the
- * value as evaluated where it was written (self-determined, not yet converted, EL-16); at where to
- * report it (the CONNECTION, the defparam's HIER_NAME, the project line); from the node that wrote
- * it (the CONNECTION or DEFPARAM; 0 for a project line). base (added to the brief's fields): the
- * NUMBER sub-kind of the source literal of a value that is still unsized, for point (bb)'s
- * spelling of the final value.
+ * "u2<SEP>W" (pending: for the instance u2 below it, pushed down, EL-8; ODIN3_ELAB_PATH_SEP joins
+ * the components); source an odin3_elab_ovr_source; order the stream order among overrides of one
+ * source (the DEFPARAM node's ID, so the first defparam wins; a project override's index in the
+ * record's params); value the value as evaluated where it was written (self-determined, not yet
+ * converted, EL-16; sized, its sign kept: v4.7, as Yosys passes overrides); at where to report it
+ * (the CONNECTION, the defparam's HIER_NAME, the project line); from the node that wrote it (the
+ * CONNECTION or DEFPARAM; 0 for a project line). base (added to the brief's fields): the NUMBER
+ * sub-kind of the source literal of a value that is still unsized, for point (bb)'s spelling of
+ * the final value (since v4.7 only a default is).
  */
 typedef struct odin3_elab_override {
     uint32_t path;
@@ -316,7 +327,7 @@ typedef struct odin3_elab_spec_req {
  * req's overrides applied by EL-8's precedence, each evaluated lazily in declaration order in the
  * definition's environment and converted to its declared type per EL-16 (odin3_cval_to_param),
  * into values[0 .. n_header_params + n_body_params) (planes in e1's scratch arena, valid until
- * the next call); the overrides whose path goes deeper ("u2.W") are copied to pending[0 ..
+ * the next call); the overrides whose path goes deeper ("u2<SEP>W") are copied to pending[0 ..
  * *n_pending) (room for req->n_ovr). A defparam that loses to a named override warns ("defparam
  * of 'u1.W' is overridden by the named parameter assignment of 'u1'", at its target, once).
  * Errors (§9.1, at the override or the declaration): "'L' is a localparam of module 'm' and
@@ -331,7 +342,8 @@ odin3_status odin3_elab1_params(odin3_elab1 *e1, const odin3_elab_spec_req *req,
 /*
  * The specialization of req (EL-9), found by its key (the definition, each parameter's width,
  * flags and bits, the pending overrides sorted by path, one per path: the highest precedence) or
- * created: depth req->depth, named per EL-9 and point (q), appended to the FIFO queue. Caps (point
+ * created: depth req->depth, named per EL-9 and point (q) (the first one made, the top's, keeps
+ * its definition's name: v4.7), appended to the FIFO queue. Caps (point
  * (aa)): more specializations than the cap → "elaboration makes more than N specializations" and a
  * depth past ODIN3_ELAB_MAX_HIER_DEPTH → "instance hierarchy deeper than N at 'u'; recursive
  * instantiation of 'm'?", both at the instance being specialized (odin3_elab1.creating), both
@@ -387,10 +399,11 @@ typedef enum odin3_elab1_taken {
 typedef struct odin3_elab1_defx {
     uint32_t first_inst; /* odin3_elab1.insts[first_inst .. + n_inst) */
     uint32_t n_inst;
-    uint32_t next; /* the next definition of the same name + 1, 0 = none */
-    uint8_t taken; /* odin3_elab1_taken */
-    bool reached;  /* reached from the top (odin3_elab1_reach_def) */
-    bool reported; /* its Q7 (a library unit's UDP) or taken-name error is logged */
+    uint32_t next;      /* the next definition of the same name + 1, 0 = none */
+    uint8_t taken;      /* odin3_elab1_taken */
+    bool reached;       /* reached from the top (odin3_elab1_reach_def) */
+    bool ports_indexed; /* its port names are in odin3_elab1.port_pos */
+    bool reported;      /* its Q7 (a library unit's UDP) or taken-name error is logged */
 } odin3_elab1_defx;
 
 /* One specialization (EL-9): everything lives in the run arena. */
@@ -589,6 +602,7 @@ struct odin3_elab1 {
     odin3_vec log;            /* odin3_elab_decision, contiguous per specialization */
     odin3_vec edges;          /* odin3_elab1_edge, contiguous per specialization */
     odin3_vec frames;         /* pass W's expression copier stack */
+    odin3_u64map *port_pos;   /* def << 32 | port name → position + 1 (built per def) */
     odin3_elab1_env *env;     /* pass E's environment of the specialization being written */
     odin3_elab1_creating creating;
 };

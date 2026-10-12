@@ -38,7 +38,8 @@ enum {
     E1_ITEMS = 2,
     E1_INT_BITS = 32,
     E1_NET_RANGE_SLOT = 1,
-    E1_NET_DELAY_SLOT = 2
+    E1_NET_DELAY_SLOT = 2,
+    E1_KEY_SHIFT = 32
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -56,6 +57,7 @@ typedef struct e1w {
     uint32_t used;
     bool replay_failed;
     bool dropped;
+    odin3_u64map *conns; /* INSTANCE << 32 | port name → its named CONNECTION */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -656,40 +658,72 @@ static odin3_ast_id w_given_params(e1w *wr, odin3_ast_id item) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
-/* The port position of definition def named name; E1_NONE when none. */
-static uint32_t port_position(const e1w *wr, const odin3_elab_def *def, uint32_t name) {
-    for (uint32_t k = 0; name != 0 && k < def->n_positions; k++) {
+/* The port names of definition def in odin3_elab1.port_pos, once (review m3: a lookup by name
+ * is then O(1), not a scan of the ports). */
+static bool index_ports(e1w *wr, uint32_t def) {
+    odin3_elab1_defx *ext = odin3_vec_at(&wr->e1->defx, def);
+    const odin3_elab_def *rec = odin3_elab1_def(wr->e1, def);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = 0; !ext->ports_indexed && st == ODIN3_OK && k < rec->n_positions; k++) {
         odin3_ast_id port =
-            *(const odin3_ast_id *)odin3_vec_cat(&wr->e1->ports, def->first_port + k);
-        if (odin3_ast_name(wr->ast, port) == name) {
-            return k;
-        }
+            *(const odin3_ast_id *)odin3_vec_cat(&wr->e1->ports, rec->first_port + k);
+        uint64_t key = (uint64_t)def << E1_KEY_SHIFT | odin3_ast_name(wr->ast, port);
+        bool named = odin3_ast_name(wr->ast, port) != 0;
+        st = named && !odin3_u64map_get(wr->e1->port_pos, key, NULL)
+                 ? odin3_u64map_put(wr->e1->port_pos, (odin3_kv){key, (uint64_t)k + 1})
+                 : ODIN3_OK;
     }
-    return E1_NONE;
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return false;
+    }
+    ext->ports_indexed = true;
+    return true;
 }
 
-/* The named connections of inst checked against def's ports (EL-10, §9.1); an ordered one is
- * Task 12's (pending). False after a diagnostic. */
-static bool check_connections(e1w *wr, odin3_ast_id inst, const odin3_elab_def *def) {
+/* Whether definition def has a port named name. */
+static bool has_port(const e1w *wr, uint32_t def, uint32_t name) {
+    return odin3_u64map_get(wr->e1->port_pos, (uint64_t)def << E1_KEY_SHIFT | name, NULL);
+}
+
+/* One named connection of inst, checked (EL-10, §9.1) and recorded by name. False after a
+ * diagnostic or out of memory. */
+static bool check_connection(e1w *wr, odin3_ast_id inst, uint32_t def, odin3_ast_id conn) {
+    uint32_t name = odin3_ast_name(wr->ast, conn);
+    odin3_loc at = odin3_ast_loc(wr->ast, conn);
+    if (name == 0) {
+        odin3_elab1_pend_form(wr->e1, conn); /* an ordered connection: Task 12 */
+        return false;
+    }
+    if (!has_port(wr, def, name)) {
+        odin3_elab1_error(wr->e1, at, "module '%s' has no port '%s'",
+                          odin3_elab1_str(wr->e1, odin3_elab1_def(wr->e1, def)->name),
+                          odin3_elab1_str(wr->e1, name));
+        return false;
+    }
+    uint64_t key = (uint64_t)inst.v << E1_KEY_SHIFT | name;
+    if (odin3_u64map_get(wr->conns, key, NULL)) {
+        odin3_elab1_error(wr->e1, at, "port '%s' of instance '%s' is connected twice",
+                          odin3_elab1_str(wr->e1, name), odin3_ast_name_str(wr->ast, inst));
+        return false;
+    }
+    odin3_status st = odin3_u64map_put(wr->conns, (odin3_kv){key, conn.v});
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+    return st == ODIN3_OK;
+}
+
+/* The named connections of inst checked against def's ports; an ordered one is Task 12's
+ * (pending). False after a diagnostic. */
+static bool check_connections(e1w *wr, odin3_ast_id inst, uint32_t def) {
+    if (!index_ports(wr, def)) {
+        return false;
+    }
     odin3_ast_span conns = odin3_ast_children(wr->ast, inst);
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANCE); i < conns.n; i++) {
-        uint32_t name = odin3_ast_name(wr->ast, conns.ids[i]);
-        odin3_loc at = odin3_ast_loc(wr->ast, conns.ids[i]);
-        if (name == 0) {
-            odin3_elab1_pend_form(wr->e1, conns.ids[i]);
+        if (!check_connection(wr, inst, def, conns.ids[i])) {
             return false;
-        }
-        if (port_position(wr, def, name) == E1_NONE) {
-            odin3_elab1_error(wr->e1, at, "module '%s' has no port '%s'",
-                              odin3_elab1_str(wr->e1, def->name), odin3_elab1_str(wr->e1, name));
-            return false;
-        }
-        for (uint32_t j = odin3_ast_slot_count(ODIN3_AST_INSTANCE); j < i; j++) {
-            if (odin3_ast_name(wr->ast, conns.ids[j]) == name) {
-                odin3_elab1_error(wr->e1, at, "port '%s' of instance '%s' is connected twice",
-                                  odin3_elab1_str(wr->e1, name), odin3_ast_name_str(wr->ast, inst));
-                return false;
-            }
         }
     }
     return true;
@@ -697,20 +731,17 @@ static bool check_connections(e1w *wr, odin3_ast_id inst, const odin3_elab_def *
 
 /* The connection of inst named name (0 when none). */
 static odin3_ast_id named_connection(const e1w *wr, odin3_ast_id inst, uint32_t name) {
-    odin3_ast_span conns = odin3_ast_children(wr->ast, inst);
-    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANCE); i < conns.n; i++) {
-        if (odin3_ast_name(wr->ast, conns.ids[i]) == name) {
-            return conns.ids[i];
-        }
-    }
-    return (odin3_ast_id){0};
+    uint64_t conn = 0;
+    bool found = odin3_u64map_get(wr->conns, (uint64_t)inst.v << E1_KEY_SHIFT | name, &conn);
+    return (odin3_ast_id){found ? (uint32_t)conn : 0};
 }
 
 /* A module INSTANCE: one named CONNECTION per port in port order (EL-4), unconnected ones
  * without an expression. */
 static odin3_ast_id w_module_instance(e1w *wr, odin3_ast_id inst, uint32_t child) {
-    const odin3_elab_def *def = odin3_elab1_def(wr->e1, odin3_elab1_spec_at(wr->e1, child)->def);
-    if (!check_connections(wr, inst, def)) {
+    uint32_t def_idx = odin3_elab1_spec_at(wr->e1, child)->def;
+    const odin3_elab_def *def = odin3_elab1_def(wr->e1, def_idx);
+    if (!check_connections(wr, inst, def_idx)) {
         halt(wr);
         return (odin3_ast_id){0};
     }
@@ -889,11 +920,16 @@ odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {
         return ODIN3_ERR_CHECK; /* pass E did not run: a 2D bug */
     }
     wr.cursor = wr.spec->first_log;
+    wr.conns = odin3_u64map_create(0);
+    if (wr.conns == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     odin3_ast_id module = w_module(&wr);
     odin3_status st = wr.st;
     st = st != ODIN3_OK || e1->stopped ? st : w_replay_done(&wr);
     w_push(&wr, module);
     st = st != ODIN3_OK ? st : wr.st;
+    odin3_u64map_destroy(wr.conns);
     odin3_elab1_env_destroy(e1->env);
     e1->env = NULL;
     return st;

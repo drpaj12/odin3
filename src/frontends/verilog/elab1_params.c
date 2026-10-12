@@ -112,7 +112,7 @@ static odin3_status apply_all(odin3_elab1_env *env, const odin3_elab_spec_req *r
     odin3_status worst = ODIN3_OK;
     for (uint32_t i = 0; i < req->n_ovr; i++) {
         const odin3_elab_override *ovr = &req->ovr[i];
-        if (strchr(odin3_elab1_str(env->e1, ovr->path), '.') != NULL) {
+        if (strchr(odin3_elab1_str(env->e1, ovr->path), ODIN3_ELAB_PATH_SEP) != NULL) {
             pending[(*n_pending)++] = *ovr;
             continue;
         }

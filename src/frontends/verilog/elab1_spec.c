@@ -40,8 +40,8 @@ static odin3_status key_u32(odin3_strbuf *key, uint32_t value) {
 }
 
 uint8_t odin3_elab1_key_flags(const odin3_cval *val) {
-    bool top_one = val->width > 0 && odin3_cval_bit(val, val->width - 1) == ODIN3_BIT_1;
-    bool keeps = (val->flags & ODIN3_CVAL_SIGNED) == 0 && top_one;
+    bool top_not_0 = val->width > 0 && odin3_cval_bit(val, val->width - 1) != ODIN3_BIT_0;
+    bool keeps = (val->flags & ODIN3_CVAL_SIGNED) == 0 && top_not_0;
     return keeps ? val->flags : (uint8_t)(val->flags & ~ODIN3_CVAL_UNSIZED);
 }
 
@@ -147,11 +147,26 @@ static bool name_taken(const odin3_elab1 *e1, uint32_t def_name, odin3_bytes tex
            (id != def_name && odin3_u64map_get(e1->by_name, id, NULL));
 }
 
-/* base$P=v for each parameter that differs from its default, then $path=v per pending. */
+/* An override path as names print it: its components joined by '.'. */
+static odin3_status append_path(const odin3_elab1 *e1, uint32_t path, odin3_strbuf *out) {
+    const char *text = odin3_elab1_str(e1, path);
+    size_t from = out->len;
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(text));
+    if (st == ODIN3_OK) {
+        odin3_elab1_path_print(out->data + from, out->len - from);
+    }
+    return st;
+}
+
+/* base$P=v for each parameter that differs from its default, then $path=v per pending (the top:
+ * its definition's name, v4.7). */
 static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *res,
                           const odin3_elab_def *def, odin3_strbuf *out) {
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, def->name)));
     uint32_t count = def->n_header_params + def->n_body_params;
+    if (e1->specs.len == 0) {
+        return st; /* the top keeps its definition's name (Yosys chparam, hierarchy -chparam) */
+    }
     for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
         if (!res->differ[k]) {
             continue;
@@ -161,7 +176,9 @@ static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *r
         st = st != ODIN3_OK ? st : odin3_cval_print(&res->values[k], out);
     }
     for (uint32_t i = 0; st == ODIN3_OK && i < res->n_pending; i++) {
-        st = odin3_strbuf_appendf(out, "$%s=", odin3_elab1_str(e1, res->pending[i].path));
+        st = odin3_strbuf_append(out, odin3_bytes_cstr("$"));
+        st = st != ODIN3_OK ? st : append_path(e1, res->pending[i].path, out);
+        st = st != ODIN3_OK ? st : odin3_strbuf_append(out, odin3_bytes_cstr("="));
         st = st != ODIN3_OK ? st : odin3_cval_print(&res->pending[i].value, out);
     }
     return st;
@@ -367,13 +384,14 @@ static odin3_status project_value(odin3_elab1 *e1, const odin3_proj_param *param
     }
     bool negative = text[0] == '-';
     odin3_status st = literal_of(e1, number_pieces(text + (negative ? 1 : 0)), param->at, ovr);
-    if (st != ODIN3_OK || !negative) {
-        return st;
+    if (st == ODIN3_OK && negative) {
+        odin3_cval magnitude = ovr->value;
+        odin3_cop_args neg = {ODIN3_COP_NEG, &magnitude, NULL, magnitude.width,
+                              (magnitude.flags & ODIN3_CVAL_SIGNED) != 0};
+        st = odin3_cval_op(e1->arena, &neg, &ovr->value);
     }
-    odin3_cval magnitude = ovr->value;
-    odin3_cop_args neg = {ODIN3_COP_NEG, &magnitude, NULL, magnitude.width,
-                          (magnitude.flags & ODIN3_CVAL_SIGNED) != 0};
-    return odin3_cval_op(e1->arena, &neg, &ovr->value);
+    ovr->value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* an override is sized (v4.7) */
+    return st;
 }
 
 /* Project line i (`param top[.inst…].name value`) as an override of the top: its path below
@@ -383,7 +401,12 @@ static odin3_status project_override(odin3_elab1 *e1, size_t idx, odin3_elab_ove
     const char *below = strchr(odin3_elab1_str(e1, param->scope), '.');
     odin3_strbuf path;
     odin3_strbuf_init(&path);
-    odin3_status st = below != NULL ? odin3_strbuf_appendf(&path, "%s.", below + 1) : ODIN3_OK;
+    odin3_status st = below != NULL
+                          ? odin3_strbuf_appendf(&path, "%s%c", below + 1, ODIN3_ELAB_PATH_SEP)
+                          : ODIN3_OK;
+    if (st == ODIN3_OK && path.len > 0) {
+        odin3_elab1_path_join(path.data, path.len);
+    }
     st = st != ODIN3_OK
              ? st
              : odin3_strbuf_append(&path, odin3_bytes_cstr(odin3_elab1_str(e1, param->name)));
