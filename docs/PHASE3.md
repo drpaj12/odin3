@@ -642,7 +642,7 @@ then the options considered.
       - `check` has no run-row rules;
       - the checker defaults of #27;
       - the QoR INCOMPLETE semantics, and EArch gated over its smoke set (#25 and E-QH14a–c).
-28. **3E-4 round-trip and VPR-read evidence: the measured counts and the agent defaults**
+29. **3E-4 round-trip and VPR-read evidence: the measured counts and the agent defaults**
     (2026-10-12; 3E spec §16.3–16.6 and §25, plan Tasks 10–11). Peter may override any default.
     - **Write counts, measured.** `odin3 write_blif --vtr` was run on every `status=ok` k6
       golden except LargeRam. Parmys (467): **458 written**, 9 refused: E1 ×4 (`fe`:
