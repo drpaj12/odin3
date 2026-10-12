@@ -2,7 +2,8 @@
 
 Usage::
 
-    blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N] FILE...
+    blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N]
+                   [--writer-log LOG] FILE...
 
 It does not reuse ``tools/blif/blif.py``'s permissive reader. It carries its own lexer, which
 mirrors libblifparse's ``blif_lexer.l`` at VTR ``3c9a4d23`` (states INITIAL, NAMES, LATCH and
@@ -21,6 +22,15 @@ rejects what VPR rejects:
 ``.names``/``.latch`` pin, ``gnd``/``vcc``/``unconn`` are the right constant generators, the
 ``write_blif --vtr`` header, no ``.clock``, no unused stub, and clock net names
 ``blackbox_latches.pl`` can split.
+
+``--writer-log LOG`` (with ``--strict`` and one FILE) pairs C-S2 with the class-U warnings that
+``write_blif --vtr`` logged while writing FILE (spec §16.4, Task 11): a Parmys golden read back
+keeps its ``unconn`` on logic pins by design (§9.2), and the writer warns of it. The C-S2 lines on
+``.names`` inputs and ``.latch`` D pins are dropped when their pin count equals the N of the
+writer's ``net 'unconn' feeds N .names/.latch pins`` warning; those on ``.latch`` controls are
+dropped when the ``.latch`` and hard-block clock pins on ``unconn`` number exactly the writer's
+``clock is 'unconn'`` warnings. A count that differs keeps every C-S2 line of its kind and adds a
+line saying so; every other ``--strict`` rule is unchanged.
 
 The models file is the JSON ``tools/vtr-models extract`` writes (spec §15.2); only ``lut_size``
 and ``models`` are read.
@@ -76,6 +86,8 @@ _WS_RE = re.compile(r"[ \t]+")
 _COMMENT_RE = re.compile(r"#[^\n]*\n\r?")
 _CONT_BLANK_RE = re.compile(r"\\(?:\n\r|\r\n|\n)[ \t]*(?:\n\r|\r\n|\n)")
 _INDEX_RE = re.compile(r"^(.*)\[(\d+)\]$")
+_FEEDS_RE = re.compile(r"write_blif: --vtr: net 'unconn' feeds (\d+) \.names/\.latch pins")
+_CLOCK_RE = re.compile(r"write_blif: --vtr: .*: clock is 'unconn'")
 
 
 @dataclass(frozen=True)
@@ -115,11 +127,22 @@ class Violation:
 
 
 @dataclass(frozen=True)
+class UnconnWarnings:
+    """The class-U warnings of the write that produced a file (``--writer-log``): the N of
+    ``net 'unconn' feeds N .names/.latch pins`` (0 when absent) and the number of
+    ``clock is 'unconn'`` lines (one per ``.latch`` or hard-block clock pin on ``unconn``)."""
+
+    logic_pins: int
+    clock_pins: int
+
+
+@dataclass(frozen=True)
 class CheckOptions:
     lut_k: int
     strict: bool
     eblif: bool
     max_errors: int
+    writer: UnconnWarnings | None = None
 
 
 class ModelsError(Exception):
@@ -458,6 +481,11 @@ class _Checker:
 
     def _ports(self, model: _Model, word: str, args: list[Token]) -> None:
         for token in args:
+            # VPR's inputs()/outputs() reuse the block, port and pin of a repeated name
+            # (Netlist::create_block, create_pin), so `.inputs a a` is one pad, as in VPR.
+            seen = model.inputs if word == ".inputs" else model.outputs
+            if any(prev.text == token.text for prev in seen):
+                continue
             if word == ".inputs":
                 model.inputs.append(token)
                 model.drivers.append((token.text, token.line))
@@ -678,9 +706,7 @@ class _Checker:
         for value, line in top.latch_inits:
             if value == "3":
                 self.report(line, "latch init 3 (write 2; VTR's ABC rejects 3)")
-        unconn_lines = sorted({line for net, line, what in top.sinks
-                               if net == "unconn" and what in ("logic", "latch clock")})
-        for line in unconn_lines:
+        for line in self._unconn_lines(top):
             self.report(line, "net 'unconn' feeds a .names/.latch pin (VPR leaves it open)")
         if complete:
             self._constants(top)
@@ -689,6 +715,27 @@ class _Checker:
             if what.endswith("clock") and ("|" in net or "_^_" in net):
                 self.report(line, f"clock net '{net}' contains '|' or '_^_' "
                                   "(breaks VTR's blackbox_latches.pl)")
+
+    def _unconn_lines(self, top: _Model) -> list[int]:
+        """C-S2's lines: every .names/.latch pin on `unconn`, less the kinds --writer-log pairs
+        with the writer's class-U warnings (an equal pin count)."""
+        pins = {what: [line for net, line, kind in top.sinks if net == "unconn" and kind == what]
+                for what in ("logic", "latch clock", "hard clock")}
+        writer = self.opts.writer
+        if writer is not None:
+            logic = len(pins["logic"])
+            if logic == writer.logic_pins:
+                pins["logic"] = []
+            else:
+                self.report(1, f"net 'unconn' feeds {logic} .names inputs and .latch D pins, "
+                               f"but the writer warned of {writer.logic_pins}")
+            clocks = len(pins["latch clock"]) + len(pins["hard clock"])
+            if clocks == writer.clock_pins:
+                pins["latch clock"] = []
+            else:
+                self.report(1, f"net 'unconn' feeds {clocks} clock pins, but the writer "
+                               f"warned of {writer.clock_pins}")
+        return sorted(set(pins["logic"]) | set(pins["latch clock"]))
 
     def _unused_stubs(self, top: _Model) -> None:
         used = {subckt.model for subckt in top.subckts}
@@ -756,8 +803,19 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--eblif", action="store_true", help="accept .conn .attr .param .cname")
     parser.add_argument("--max-errors", type=_positive, default=DEFAULT_MAX_ERRORS,
                         help="violations shown per file (default 50)")
+    parser.add_argument("--writer-log", type=Path, metavar="LOG",
+                        help="with --strict and one FILE: pair C-S2 with the class-U warnings "
+                             "write_blif --vtr logged while writing FILE")
     parser.add_argument("files", nargs="+", metavar="FILE")
     return parser
+
+
+def read_writer_log(path: Path) -> UnconnWarnings:
+    """The class-U warning counts of a write_blif --vtr log. Raises OSError."""
+    text = path.read_bytes().decode("utf-8", errors="replace")
+    feeds = _FEEDS_RE.search(text)
+    clocks = sum(1 for line in text.splitlines() if _CLOCK_RE.search(line))
+    return UnconnWarnings(int(feeds[1]) if feeds is not None else 0, clocks)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -770,7 +828,19 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, ModelsError) as err:
         print(f"{PROG}: {args.models}: cannot read models: {err}", file=sys.stderr)
         return 2
-    opts = CheckOptions(args.lut_k or models.lut_size, args.strict, args.eblif, args.max_errors)
+    writer: UnconnWarnings | None = None
+    if args.writer_log is not None:
+        if not args.strict or len(args.files) != 1:
+            print(f"{PROG}: --writer-log needs --strict and one FILE", file=sys.stderr)
+            return 2
+        try:
+            writer = read_writer_log(args.writer_log)
+        except OSError as err:
+            print(f"{PROG}: {args.writer_log}: cannot read: {err.strerror or err}",
+                  file=sys.stderr)
+            return 2
+    opts = CheckOptions(args.lut_k or models.lut_size, args.strict, args.eblif, args.max_errors,
+                        writer)
     status = 0
     for name in args.files:
         try:

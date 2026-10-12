@@ -336,6 +336,12 @@ class C8C9Test(CheckerCase):
                                ["4: duplicate block name 'a' (input and names)",
                                 "4: net 'a' has 2 drivers"])
 
+    def test_repeated_port_names(self) -> None:
+        # VPR's inputs()/outputs() reuse the block, port and pin of a repeated name
+        self.assert_violations(model(".names a b y\n11 1\n", inputs="a b a"), [])
+        self.assert_violations(model(".names a y\n1 1\n", outputs="y y"), [])
+        self.assert_violations(model(".names a y\n1 1\n", inputs="a\n.inputs a"), [])
+
     def test_second_output_formal(self) -> None:
         text = model(".subckt adder a=a b=a cin=a cout=c sumout=y\n.names a y\n1 1\n") + ADDER_STUB
         self.assert_violations(text, ["5: net 'y' has 2 drivers"])
@@ -362,6 +368,14 @@ class StrictTest(CheckerCase):
     def test_unconn_on_logic(self) -> None:
         text = GOOD.replace(".end\n", ".names unconn\n.names unconn a z\n10 1\n.end\n", 1)
         self.strict(text, ["12: net 'unconn' feeds a .names/.latch pin (VPR leaves it open)"])
+
+    def test_unconn_on_latch_pins(self) -> None:
+        cs2 = "net 'unconn' feeds a .names/.latch pin (VPR leaves it open)"
+        for latch in (".latch unconn q re c 2", ".latch a q re unconn 2"):
+            with self.subTest(latch=latch):
+                text = GOOD.replace(".latch a q re c 2", ".names unconn\n" + latch)
+                self.assert_violations(text, [])
+                self.strict(text, [f"11: {cs2}"])
 
     def test_constant_generator_value(self) -> None:
         text = GOOD.replace(".names gnd\n", ".names gnd\n1\n")
@@ -407,6 +421,75 @@ class StrictTest(CheckerCase):
                 ".end\n")
         self.strict(text, ["6: clock net 'k_^_x' contains '|' or '_^_' "
                            "(breaks VTR's blackbox_latches.pl)"])
+
+
+# GOOD with `unconn` on a .latch control (line 10) and on a .names input (line 12)
+UNCONN = GOOD.replace(".latch a q re c 2", ".latch a q re unconn 2").replace(
+    ".end\n", ".names unconn\n.names unconn a z\n10 1\n.end\n", 1)
+CS2 = "net 'unconn' feeds a .names/.latch pin (VPR leaves it open)"
+FEEDS = ("odin3: warning: write_blif: --vtr: net 'unconn' feeds {} .names/.latch pins; VPR leaves "
+         "them open (run abc first)\n")
+CLOCK = ("odin3: warning: write_blif: --vtr: t.blif:{}: $_DFF_P_ 'q': clock is 'unconn'; VPR will "
+         "never clock it\n")
+
+
+class WriterLogTest(CheckerCase):
+    """--writer-log pairs C-S2 with the writer's class-U warnings (spec §16.4, Task 11)."""
+
+    def with_log(self, text: str, log: str, expected: list[str]) -> None:
+        path = Path(self.tmp.name) / "writer.log"
+        path.write_text(log, encoding="utf-8")
+        self.assert_violations(text, expected, "--strict", "--writer-log", str(path))
+
+    def test_paired(self) -> None:
+        self.assert_violations(UNCONN, ["10: " + CS2, "12: " + CS2], "--strict")
+        self.with_log(UNCONN, "odin3: info: x\n" + FEEDS.format(1) + CLOCK.format(3), [])
+
+    def test_counts_differ(self) -> None:
+        self.with_log(UNCONN, "", [
+            "1: net 'unconn' feeds 1 .names inputs and .latch D pins, but the writer warned of 0",
+            "1: net 'unconn' feeds 1 clock pins, but the writer warned of 0",
+            "10: " + CS2, "12: " + CS2])
+        self.with_log(UNCONN, FEEDS.format(2) + CLOCK.format(3), [
+            "1: net 'unconn' feeds 1 .names inputs and .latch D pins, but the writer warned of 2",
+            "12: " + CS2])
+        self.with_log(UNCONN, FEEDS.format(1), [
+            "1: net 'unconn' feeds 1 clock pins, but the writer warned of 0", "10: " + CS2])
+
+    def test_a_warning_without_pins_fails(self) -> None:
+        self.with_log(GOOD, FEEDS.format(1), [
+            "1: net 'unconn' feeds 0 .names inputs and .latch D pins, but the writer warned of 1"])
+
+    def test_hard_clock_pins_count(self) -> None:
+        # the writer warns once per .latch or hard-block clock pin on `unconn`
+        ram = ("\n.model single_port_ram\n.inputs we addr data clk\n.outputs out\n.blackbox\n"
+               ".end\n")
+        text = UNCONN.replace(".names unconn\n", ".names unconn\n.subckt single_port_ram "
+                              "clk=unconn we=a addr=a data=a out=r\n", 1) + ram
+        self.with_log(text, FEEDS.format(1) + CLOCK.format(3) + CLOCK.format(4), [])
+        self.with_log(text, FEEDS.format(1) + CLOCK.format(3), [
+            "1: net 'unconn' feeds 2 clock pins, but the writer warned of 1", "10: " + CS2])
+
+    def test_other_strict_rules_stay(self) -> None:
+        text = UNCONN.replace("re unconn 2", "re unconn 3")
+        self.with_log(text, FEEDS.format(1) + CLOCK.format(3),
+                      ["10: latch init 3 (write 2; VTR's ABC rejects 3)"])
+
+    def test_usage(self) -> None:
+        path = Path(self.tmp.name) / "case.blif"
+        path.write_text(GOOD, encoding="utf-8")
+        log = Path(self.tmp.name) / "empty.log"
+        log.write_text("", encoding="utf-8")
+        models = ["--models", str(self.models)]
+        for argv in (["--writer-log", str(log), str(path)],
+                     ["--strict", "--writer-log", str(log), str(path), str(path)]):
+            code, out, err = run_main([*models, *argv])
+            self.assertEqual((2, "", "blif-vtr-check: --writer-log needs --strict and one FILE\n"),
+                             (code, out, err))
+        code, _, err = run_main([*models, "--strict", "--writer-log",
+                                 str(Path(self.tmp.name) / "no.log"), str(path)])
+        self.assertEqual(2, code)
+        self.assertIn("no.log: cannot read", err)
 
 
 class MainTest(CheckerCase):

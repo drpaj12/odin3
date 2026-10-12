@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +126,22 @@ class StrictExceptionTest(unittest.TestCase):
         why, log = self.check("not_excepted", blif)
         self.assertEqual("blif-vtr-check --strict exited 1", why)
         self.assertIn("net 'unconn' feeds a .names/.latch pin", log)
+
+    @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (run CTest python_tools)")
+    def test_writer_log_pairs_shiftx(self) -> None:
+        # Task 11's oracle (spec §16.4): a W whose C-S2 lines pair with the writer's class-U
+        # warning passes --strict --writer-log; the plain --strict run still fails.
+        with tempfile.TemporaryDirectory(prefix="vtr-log.") as tmp:
+            w = Path(tmp) / "w.blif"
+            proc = vtr_fixtures.rewrite(Path(str(ODIN3)), FIXTURES / "shiftx.parmys.in.blif", w)
+            self.assertEqual(0, proc.returncode)
+            log = Path(tmp) / "w.log"
+            log.write_bytes(proc.stderr)
+            self.assertIn(b"net 'unconn' feeds 7 .names/.latch pins", proc.stderr)
+            self.assertEqual(1, vtr_fixtures.check_file(CHECKER, w, True).returncode)
+            paired = subprocess.run([str(CHECKER), "--strict", "--writer-log", str(log), str(w)],
+                                    capture_output=True, text=True, check=False, timeout=60)
+            self.assertEqual((0, ""), (paired.returncode, paired.stdout))
 
     def test_stale_exception_fails(self) -> None:
         why, _ = self.check("shiftx.parmys", FIXTURES / "two_clock.vtr.blif")

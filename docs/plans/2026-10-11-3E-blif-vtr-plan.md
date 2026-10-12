@@ -747,12 +747,16 @@ Effort cues:
     1. `odin3 -p "read_techlib <repo>/lib/vtr.o3lib; read_blif G; write_blif --vtr W"`;
     2. `$VTR_ROOT/vpr/vpr <arch> W --circuit_format blif --exit_before_pack on` (when written);
     3. the same on G;
-    4. `blif-vtr-check --strict W` and `blif-vtr-check G`.
+    4. `blif-vtr-check --strict --writer-log <step 1's stderr> W` and `blif-vtr-check G`.
   - The verdict is §16.4's:
-    - a written W needs VPR exit 0 and the checker exit 0;
+    - a written W needs VPR exit 0 and the checker exit 0. `--writer-log` (spec §15.1, amended 2026-10-12 after the 3E-2 final review I1) allows C-S2 only where it pairs with the writer's class-U warnings (`net 'unconn' feeds N .names/.latch pins`; one `clock is 'unconn'` per clock pin), as ≥ 39 goldens keep class-U `unconn` on `.names` pins by design (spec §9.2); every other `--strict` rule holds;
     - a refusal pairs with VPR's G verdict per the pairing table and point (e) (E3b and E8 listed as intended; E11 listed per file);
     - the checker's verdict on G equals VPR's.
   - `--bad-corpus DIR` instead runs VPR and the checker on each `tests/vtr/blif-bad` file and requires that VPR rejects exactly the files the checker rejects, with the message in the file's `# vpr:` line.
+  - Notes from the 3E-2 final review (M4):
+    - VPR's assertion failures (`c5b_buffer_rows`, `c7_twice`, `c9_two_drivers`) abort with ` Assertion '…' failed` on **stderr**, while `vpr_throw` errors print to stdout and the log and exit 1: `--bad-corpus` searches both streams and matches the `# vpr:` text as a **substring** (`c8_dup_block`'s line is cut at `found in netlist.` on purpose);
+    - the checker holds every token in memory, about **3 GB on `LU64PEEng`**, inside the 6G heavy-run cap: it runs inside the heavy-run scope, never beside it;
+    - `--max-errors` caps only the printed lines; the exit code is unaffected.
   - The report TSV header is exactly `golden\ttool\twritten|refused\terror class\tvpr_W\tvpr_G\tchecker_W\tchecker_G\tverdict`. A passing file's directory is removed with one absolute path.
   - Exit 0 when every verdict passes, 1 otherwise, 2 for usage or `verify_scope` failure.
 - Python: `def pairing_ok(refusal: str, vpr_g_message: str) -> bool` (the table plus point (e)); `def run_one(g: Path, ctx: ReadCtx) -> Row`; `def main(argv: list[str] | None = None) -> int`.

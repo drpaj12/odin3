@@ -1,7 +1,10 @@
 # 3E — `write_blif --vtr`: design
 
-Status: v2.3 (2026-10-12): v2.2 plus the §24 erratum of the 3E Task 7 review (I1: VPR makes
-the data ports of memory-class pb_types 1 bit wide; §2's table, R11, §15.2 and §16.4 corrected).
+Status: v2.4 (2026-10-12): v2.3 plus the 3E-2 final review's amendments (§24: `--writer-log`
+pairs C-S2 with the writer's class-U warnings in §16.4's oracle; §15.1's C7 and C8/C9 notes on
+repeats VPR accepts). v2.3 (2026-10-12): v2.2 plus the §24 erratum of the 3E Task 7 review (I1:
+VPR makes the data ports of memory-class pb_types 1 bit wide; §2's table, R11, §15.2 and §16.4
+corrected).
 v2.2 (2026-10-12): v2.1 plus the errata of the 3E-1 final review (§23; Peter's ruling on
 the round trip, §16.3 step 1). v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (§14.1 item 6 marked a
 3H request; constant LUT objects return as `$_CONST0_`/`$_CONST1_`, §4.2; constants are not traced
@@ -654,13 +657,23 @@ temporary directory as `--via-blif`). Whatever 3D chooses, 3E's output is only c
 own lexer that mirrors libblifparse's token rules (R1–R3, R5, R8), so it rejects what VPR rejects.
 
 ```
-blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N] FILE...
+blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N]
+               [--writer-log LOG] FILE...
 ```
 
 - `--models` default `tests/vtr/arch/k6_frac_N10_frac_chain_mem32K_40nm.models.json`; `--lut-k`
   default the JSON's `lut_size` (6).
 - `--strict`: also Odin III's own conventions (C-S rows below).
 - `--eblif`: accept `.conn .attr .param .cname` (VPR eblif mode); default off, as for `.blif`.
+- `--writer-log LOG` (with `--strict` and one FILE; added 2026-10-12, §24): LOG is the stderr of
+  the `write_blif --vtr` run that wrote FILE. C-S2's lines on `.names` inputs and `.latch` D pins
+  are dropped when their pin count equals the N of the writer's `net 'unconn' feeds N
+  .names/.latch pins` warning (0 when absent), and those on `.latch` controls when the `.latch`
+  and hard-block clock pins on `unconn` number exactly the writer's `clock is 'unconn'` warnings
+  (one per such pin, §7 item 3, plan point (j)). A count that differs keeps every C-S2 line of
+  its kind and adds `net 'unconn' feeds <M> .names inputs and .latch D pins, but the writer warned
+  of <N>` (or `… <M> clock pins …`) on line 1. Every other rule stays as `--strict` has it. The
+  pairing is by count, since the writer's §9.2 warning is one count per write.
 - Exit: 0 every file legal, 1 any violation (located `file:line: message` lines on stdout, at
   most `--max-errors` per file, default 50), 2 usage or I/O.
 
@@ -673,9 +686,9 @@ blif-vtr-check [--models FILE] [--lut-k K] [--strict] [--eblif] [--max-errors N]
 | C5 | R5 | `cover row has <N> columns, expected <M>` / `cover row character '<c>'` |
 | C5b | R5b | `1-input .names '<y>' has <N> cover rows; VPR asserts exactly one (absorb_buffer_luts)` |
 | C6 | R6, R7, R8, R2 | `latch type '<t>' (VPR accepts only re)` / `latch without a clock` (also for a `NIL` control and for every untyped form, which carries none) / `latch init '<v>'` / `'<w>' on a .latch line lexes as a keyword` |
-| C7 | R9, R10 | `.subckt model '<m>' is not an arch model` / `no port '<p>' on model '<m>'` / `port '<p>[<i>]' exceeds width <W> of '<m>'` / `formal '<p>' given twice` (any repeated formal, input or output: a second pin on one port bit) |
+| C7 | R9, R10 | `.subckt model '<m>' is not an arch model` / `no port '<p>' on model '<m>'` / `port '<p>[<i>]' exceeds width <W> of '<m>'` / `formal '<p>' given twice` (any repeated formal, input or output: a second pin on one port bit. VPR itself accepts a repeat on the *same* net, since `Netlist::create_pin` finds the pin and asserts only that the net is equal, and fails one on a different net; the checker refuses both, which no writer produces; noted 2026-10-12, Task 6 review M4, §24) |
 | C8 | R12 | `duplicate block name '<b>' (<kind> and <kind>)` |
-| C9 | R16 | `net '<n>' has <N> drivers` (`.inputs` pads count as drivers, so a `.names` driving a primary input is caught) |
+| C9 | R16 | `net '<n>' has <N> drivers` (`.inputs` pads count as drivers, so a `.names` driving a primary input is caught; a name repeated on `.inputs`/`.outputs` is one pad, as VPR's `inputs()`/`outputs()` reuse its block, port and pin, so `.inputs a a` is legal: amended 2026-10-12, §24) |
 | C-S1 | VB-7 | `latch init 3 (write 2; VTR's ABC rejects 3)` |
 | C-S2 | VB-2a | `net 'unconn' feeds a .names/.latch pin (VPR leaves it open)` |
 | C-S3 | VB-9 | `'<gnd\|vcc\|unconn>' is not a constant generator of the right value` |
@@ -798,14 +811,18 @@ case. `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline
 odin3 -p "read_techlib lib/vtr.o3lib; read_blif G; write_blif --vtr W"      # W or a refusal
 $VTR_ROOT/vpr/vpr <arch> W --circuit_format blif --exit_before_pack on       # in a temp dir
 $VTR_ROOT/vpr/vpr <arch> G --circuit_format blif --exit_before_pack on       # the original
-blif-vtr-check --strict W ; blif-vtr-check G
+blif-vtr-check --strict --writer-log <the write's stderr> W ; blif-vtr-check G
 ```
 
 `--exit_before_pack on` makes VPR read, clean (R14, R15) and verify the netlist and print its
 statistics, then stop: VPR's whole reader at a fraction of a route's cost. **Oracles**:
 
 - every written W: VPR exits 0 after printing its netlist statistics (the atom-netlist block
-  counts; no pack output), and `blif-vtr-check --strict W` exits 0;
+  counts; no pack output), and `blif-vtr-check --strict --writer-log <the write's stderr> W`
+  exits 0: a class-U `unconn` on a `.names`/`.latch` pin (§9.2; ≥ 39 goldens, 35 Parmys and 4
+  Odin II under 3 MB) is allowed only when its C-S2 lines pair with the writer's class-U warnings
+  (§15.1 `--writer-log`), and every other `--strict` rule holds (amended 2026-10-12, §24, from
+  the 3E-2 final review I1);
 - every refused G: the refusal's class and VPR's verdict on G pair as below; any other pairing
   is a failure:
 
@@ -987,9 +1004,12 @@ No minor finding was rejected.
 | M2, M13 | `PASSES.md` row; `wr_refuse`'s comment | applied (no spec text) |
 | M4 | `modules_skipped` = `module_end − 2` counts dead modules | kept: the IR cannot remove a module (every ID below `module_end` is live), so the count is exact; the code comment now says so |
 
-## 24. Erratum after the 3E Task 7 review (v2.3, 2026-10-12)
+## 24. Errata after the 3E Task 7 review (v2.3) and the 3E-2 final review (v2.4), 2026-10-12
 
 | # | Finding | Disposition |
 |---|---|---|
 | I1 | §2's RAM data widths (`data` 64/`out` 64; `data1`/`data2`/`out1`/`out2` 32) are not VPR's model sizes. libarchfpga's `ProcessMemoryClass` (`arch_util.cpp`, run on every `class="memory"` pb_type before `SyncModelsPbTypes`) moves the `blif_model` to a `memory_slice` child and forces each `port_class="data*"` port to 1 pin, so VPR refuses `data[1]` with `Port 'data[1]' on architecture model 'single_port_ram' exceeds port width (1 bits)` | applied (controller's ruling): R11 states the memory-class rule; §2's table gives the data ports 1; §15.2 and §16.4 corrected; `vtr-models extract` mirrors the rule and the committed `tests/vtr/arch/*.models.json` were regenerated; corpus file `tests/vtr/blif-bad/c7_ram_data_bit.blif`. `lib/vtr.o3lib` (`DATA_WIDTH` default 1) still passes `check-lib`. |
 | M3 | `extract` did not refuse a pb_type port whose direction or `is_clock` differs from its model, as `SyncModelsPbTypes` does | applied: `extract` refuses both (exit 1) |
+| I1 (3E-2 final) | §16.4's `--strict W` oracle fails by design on every golden with class-U `unconn` on a `.names`/`.latch` pin (§9.2 keeps it; C-S2 flags it): ≥ 39 goldens | applied (controller's ruling): checker option `--writer-log` (§15.1) pairs C-S2 with the writer's class-U warnings by count; §16.4 and plan Task 11 use it; every other `--strict` rule unchanged |
+| M1 (3E-2 final) | §15.1 C7 stricter than VPR for a formal repeated on the same net (Task 6 review M4) | applied: note in C7 (the checker keeps refusing both) |
+| M3 (3E-2 final) | `.inputs a a` gave C8 and C9; VPR accepts it | applied: a repeated `.inputs`/`.outputs` name is one pad (C9 note) |
