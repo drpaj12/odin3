@@ -389,6 +389,60 @@ then the options considered.
         (§8.2 erratum), so every instance matches its stub.
       - The top's `.model` name gets VB-10 rules 1 and 2 (not rule 3) and counts as renamed.
 
+22. **3D-0 spike (AB-17): GO for 3D-7** (2026-10-12; plan point (f)). The spike program lives
+    in `~/odin3-ws/work/spike-abc/` and is not committed. It linked `libabc-pic` at `a3001b72`
+    with `--wrap` for `exit`/`abort`/`__assert_fail`, and ran the in-memory exchange
+    `Abc_FrameGiaInputMiniAig; &put; vtr.abc (K 6); &get -m -n; Abc_FrameGiaOutputMiniLut`.
+    Inputs: two micros, one hand-made `scorr` input, and five k6 Parmys goldens. The golden runs
+    each went through `tools/heavy-run` (6 GiB cap), smallest first, about 2 min each.
+    - **Go criteria 1, 2 (default script), 4, 6 and 7 pass on all eight inputs.**
+
+      | Golden | PI/PO/regs in | LUTs | Depth | Regs out | C3 coverage (seq) | C8 obs. outputs |
+      |---|---|---|---|---|---|---|
+      | ch_intrinsics | 107/141/210 | 97 | 3 | 82 | 83.5% | −2.1% |
+      | stereovision3 | 79/83/120 | 185 | 5 | 120 | 82.2% | +2.7% |
+      | diffeq2 | 690/451/96 | 197 | 5 | 96 | 92.9% | 0.0% |
+      | diffeq1 | 786/547/193 | 295 | 5 | 193 | 94.9% | −0.3% |
+      | mkPktMerge | 1313/679/36 | 176 | 2 | 18 | 93.8% | +4.6% |
+
+      - C1: every LUT has at most 6 fanins. `dsec` proves each result equivalent, including
+        under `scorr`, `&st`, `&synch2`, `&dch`, `&if`, `&mfs`, `fraig` and `Abc_NtkInputMiniAig`.
+        A po0-inverted mutant is caught.
+      - C2: every result register's `c<n>` name parses and maps back; a 256-cycle lockstep
+        simulation has 0 state mismatches, and a swapped-name control shows 416–510.
+      - C4: 1,000 frames each give 1,000/1,000 identical MiniLUTs. LSan reports 0 leaked bytes,
+        and the heap stays flat.
+      - C6: 2 frames × 2 processes give the same hash for both scripts.
+      - C7: the two entry points give the same hash.
+    - **C3 (not a go criterion) holds for the sequential runs: 0 wrong literals, time ≤ 13.1%.**
+      It misses the 15% time bound on the combinational variant of two goldens (16.2%, 15.3%).
+      There the default script takes about 25 ms, so the name map's 0.2–1.1 ms fixed cost
+      dominates.
+      - Agent ruling: fine provenance stays.
+      - 3D-8's `bench_abc` re-measures C3 on the 19, and cone provenance becomes the fallback if
+        any real (sequential) run exceeds 15%.
+    - **C5:** `exit(3)` from a command added on the session thread returns through the `setjmp`
+      guard, with fds 1/2 restored and ABC's text kept out of the pipe.
+    - **C8:** observation outputs are not needed, since C2 passes for the default script. They
+      would cost up to +4.6% LUTs. No fallback applies, and Peter is not needed (P3-9 (c) is
+      not used).
+    - **Facts for 3D-2/3D-4/3D-5/3D-7:**
+      - `Abc_FrameCreate` costs 12–17 ms (~21 ms under LSan), 99% of it `Dar_LibStart`; that is
+        per clock-domain run, and `bench_abc` counts it.
+      - MiniLUT `LutSize` is max(2, largest LUT), not K. For LutSize ≤ 5 the truth table is one
+        replicated 32-bit word; use only its first 2^n bits.
+      - Inverter LUTs for complemented COs are created inside the CO loop, so a LUT can follow
+        a CO; `abc_result` must not assume LUTs come first.
+      - `Abc_FrameReadMiniLutNameMapping` is not in `abcapis.h` and needs an `extern`. Its CO
+        entries are positional, not proven, so provenance uses only LUT and CI entries.
+      - Only the `&put` entry keeps `pGiaMiniAig`, which the name map needs.
+      - ABC refuses `&if` directly after `&get -m` ("Current AIG has mapping. Run &st"). The
+        AB-21 checker refuses that sequence.
+      - No ABC command in the default or `fraig` script starts a thread or reads the wall clock.
+        Resetting the AB-4 generators changed no hash, but they stay reset.
+      - `print_stats`' `nd` counts CO buffers and constants, while the MiniLUT count does not.
+        QoR rows name which count they report.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
