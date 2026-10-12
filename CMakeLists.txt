@@ -174,6 +174,7 @@ add_library(odin3_core OBJECT
     src/ir/cells/dff.c
     src/ir/cells/sop.c
     src/ir/cells/proc.c
+    src/ir/cells/lut.c
     src/techlib/expr.c
     src/techlib/expr_eval.c
     src/techlib/width.c
@@ -511,9 +512,23 @@ if(BUILD_TESTING)
     # The writers' Yosys checks run when Yosys is found (workspace build first, then PATH) and
     # are ignored otherwise (CI has no Yosys).
     find_program(ODIN3_YOSYS_EXE yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
+    # 3D-1 (3D spec §2, AB-2): the $lut cell. test_lut_cell also writes lut/lut.json and
+    # lut/lut.il, the inputs of CTests lut_json_yosys (below) and lut_rtlil_yosys (Yosys 0.55).
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/lut)
+    odin3_add_unit_test(test_lut_cell)
+    target_compile_definitions(test_lut_cell PRIVATE ODIN3_LUT_OUT="${PROJECT_BINARY_DIR}/lut")
+    set_tests_properties(test_lut_cell PROPERTIES FIXTURES_SETUP lut_fixtures)
     if(ODIN3_YOSYS_EXE)
         set_tests_properties(test_json_writer test_verilog_writer PROPERTIES
             ENVIRONMENT "ODIN3_YOSYS=${ODIN3_YOSYS_EXE}")
+        # Yosys reads write_json's $lut back and counts one. Its stat line is "$lut  1" up to
+        # 0.5x and "1  $lut" later, so both orders match; tee shows stat under -q, and sh makes
+        # Yosys's exit status count too.
+        add_test(NAME lut_json_yosys
+            COMMAND sh -c "out=$(\"$0\" -q -p \"read_json $1; tee -o /dev/stdout stat\") && printf '%s\\n' \"$out\" | grep -Eq '[$]lut +1$|(^|[^0-9])1 +[$]lut$'"
+                    ${ODIN3_YOSYS_EXE} ${PROJECT_BINARY_DIR}/lut/lut.json)
+        set_tests_properties(lut_json_yosys PROPERTIES
+            LABELS differential FIXTURES_REQUIRED lut_fixtures)
     endif()
     odin3_add_unit_test(test_pass_outputs)
     target_sources(test_pass_outputs PRIVATE tests/unit/proc_fixture.c
@@ -923,6 +938,13 @@ if(BUILD_TESTING)
                     "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/bbox.il; hierarchy -check -top top; check -assert")
         set_tests_properties(rtlil_bbox_hierarchy PROPERTIES
             LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+        # 3D-1 (finding 21): Yosys 0.55 reads write_rtlil's $lut (WIDTH 2, LUT 4'0110) and its
+        # stat reports one $lut; sh makes the exit status count as well as the line.
+        add_test(NAME lut_rtlil_yosys
+            COMMAND sh -c "out=$(\"$0\" -q -p \"read_rtlil $1; tee -o /dev/stdout stat\") && printf '%s\\n' \"$out\" | grep -Eq '[$]lut +1$'"
+                    ${ODIN3_YOSYS055} ${PROJECT_BINARY_DIR}/lut/lut.il)
+        set_tests_properties(lut_rtlil_yosys PROPERTIES
+            LABELS differential FIXTURES_REQUIRED lut_fixtures)
         # test_verilog_writer's own -icells check of the eleven runs on this 0.55 too, never on
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY

@@ -318,6 +318,16 @@ clock, or `$_DLATCH_P_` (`ah`) / `$_DLATCH_N_` (`al`), each with an `INIT` int p
 clock (`.latch in out [init]`) is `$_FF_` (global clock); `as` is rejected in Phase 1 (no golden
 uses it). `.subckt` → a node of the named type (IR-7b).
 
+**LUT cells (3D).** `$lut` (`src/ir/cells/lut.c`, granularity `bit`) has parameters `WIDTH`
+(int, 1 to 16, `ODIN3_LUT_MAX_WIDTH`) and `LUT` (bits: exactly 2^`WIDTH` bits, each 0 or 1), and
+ports `A` (in, `WIDTH` bits, LSB first) and `Y` (out, 1 bit). `Y = LUT[i]` with `i = Σ A[j]·2^j`,
+and `LUT[i]` is bit *i* of the parameter counted from its least significant bit: Yosys `$lut`
+semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
+is, and it simulates (1E). Writers print it as an irredundant cover (3E's `odin3_blif_isop`: a
+BLIF `.names`, a sum of products in Verilog) and as Yosys `$lut` in JSON; a BLIF round trip turns
+it into the `$sop` with that cover. `abc` is its only producer in Phase 3 and never makes a
+constant one; DESIGN §5.2's `$_LUT_K_` is this cell.
+
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global
 registry (built-ins from a static table compiled from `src/ir/cells/`; plugins add theirs at load
 through the C ABI, 1D). Each design's cell-type table instantiates every registered definition at

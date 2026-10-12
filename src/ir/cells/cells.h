@@ -9,6 +9,7 @@
 #define ODIN3_IR_CELLS_H
 
 #include "ir/ir_internal.h"
+#include "ir/lut.h"
 #include "sim/cell.h"
 #include "sim/word.h"
 
@@ -215,6 +216,8 @@ extern const odin3_celltype_def odin3_cell_dlatch;
 extern const odin3_celltype_def odin3_cell_adlatch;
 extern const odin3_celltype_def odin3_cell_dlatchsr;
 extern const odin3_celltype_def odin3_cell_sr;
+/* 3D (3D spec §2, AB-2): the K-input LUT, appended after $sr; ir/lut.h names its ID. */
+extern const odin3_celltype_def odin3_cell_lut;
 
 /* Word-level cells sharing the binary / unary tables above; the _SIM forms have hooks. */
 #define ODIN3_BINARY(var, label)                                                                   \

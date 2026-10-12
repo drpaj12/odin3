@@ -7,7 +7,9 @@
  * Append only: a type's index is its built-in ID. 2D IR change A (EL-31) appended the nine word
  * cells from $neg to $pow after $sop (index 52), so IDs 0..52 did not move, and IR change B
  * (EL-33) then appended the process cell $proc (index 62; 2D plan point (f)). 2E's IR change D
- * (2E spec §13) appended the eleven word flip-flops and latches $adffe … $sr (indices 63..73).
+ * (2E spec §13) appended the eleven word flip-flops and latches $adffe … $sr (indices 63..73),
+ * and 3D (3D spec §2, AB-2) then appended $lut, whose index only odin3_lut_builtin_index names
+ * (ruling I5).
  */
 const odin3_celltype_def *const odin3_builtin_celltypes[] = {
     &odin3_cell_port_in,    &odin3_cell_port_out,    &odin3_cell_port_inout,
@@ -34,7 +36,7 @@ const odin3_celltype_def *const odin3_builtin_celltypes[] = {
     &odin3_cell_adffe,      &odin3_cell_sdffe,       &odin3_cell_sdffce,
     &odin3_cell_aldff,      &odin3_cell_aldffe,      &odin3_cell_dffsr,
     &odin3_cell_dffsre,     &odin3_cell_dlatch,      &odin3_cell_adlatch,
-    &odin3_cell_dlatchsr,   &odin3_cell_sr,
+    &odin3_cell_dlatchsr,   &odin3_cell_sr,          &odin3_cell_lut,
 };
 
 const uint32_t odin3_builtin_celltype_count =

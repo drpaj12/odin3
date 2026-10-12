@@ -25,7 +25,7 @@ enum {
     BAD_INIT = 4,
     SOP_WIDTH = 3,
     ROW_LEN = 4,
-    N_TYPES = 67,
+    N_TYPES = 68,
     STRUCTURAL_TYPES = 7,
     SOP_INDEX = 52,   /* the last 1B type; 2D appends after it (plan point (f)) */
     NEG_INDEX = 53,   /* the first of the nine 2D word cells (IR change A, EL-31) */
@@ -33,7 +33,7 @@ enum {
     PROC_INDEX = 62,  /* the process cell (IR change B, EL-33), after the nine */
     ADFFE_INDEX = 63, /* the first of the eleven 2E flip-flops and latches (IR change D, §13) */
     SR_INDEX = 73,    /* the last of the eleven */
-    BUILTIN_COUNT = 74,
+    BUILTIN_COUNT = 75,
     FF_WIDE = 4, /* WIDTH of the pin-count and verify cases below */
     FF_WIDE_PINS = 11,
     DFFSRE_WIDTH = 3,
@@ -172,6 +172,7 @@ static const expect k_expect[] = {
     {"$adlatch", WORD, 0, "IIIO", {1, 1, 1, 1}},
     {"$dlatchsr", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
     {"$sr", WORD, 0, "IIO", {1, 1, 1}},
+    {"$lut", BIT, 0, "IO", {1, 1}}, /* 3D (AB-2), after the eleven; ir/lut.h names its ID */
 };
 #define N_EXPECT (sizeof k_expect / sizeof k_expect[0])
 
