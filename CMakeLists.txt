@@ -362,11 +362,13 @@ if(ODIN3_WITH_ABC)
     set(_abc_adapter_copts -fmacro-prefix-map=${PROJECT_SOURCE_DIR}/=)
     set(_abc_adapter_defs ODIN3_ABC_COMMIT_STR="${ODIN3_ABC_COMMIT}")
     # §4.2's wraps: exit, _exit, abort and __assert_fail escape through the guard; the process
-    # control calls are refused (adapters/abc/guard.c). The test variant links with them too.
+    # control and code loading calls are refused (adapters/abc/guard.c): execl (base/sn's child)
+    # and dlopen (Libs_Init loads every libabc_*.so of the cwd or $ABC_LIB_PATH at frame creation;
+    # Task 5 review C1). The test variant links with them too.
     set(ODIN3_ABC_WRAPS
         -Wl,--wrap=exit -Wl,--wrap=_exit -Wl,--wrap=abort -Wl,--wrap=__assert_fail
         -Wl,--wrap=system -Wl,--wrap=popen -Wl,--wrap=fork -Wl,--wrap=execv -Wl,--wrap=execvp
-        -Wl,--wrap=signal)
+        -Wl,--wrap=execl -Wl,--wrap=signal -Wl,--wrap=dlopen)
     # §4.2's link options. clang links no sanitiser runtime into a shared object (the executable
     # carries it), so -z defs would refuse every __asan_/__ubsan_ reference: it is dropped for
     # sanitised clang builds only.
@@ -800,6 +802,17 @@ if(BUILD_TESTING)
                                                        $<LINK_ONLY:libabc-pic>)
         target_link_options(test_abc_adapter PRIVATE ${ODIN3_ABC_WRAPS})
         set_target_properties(test_abc_adapter PROPERTIES LINKER_LANGUAGE CXX)
+        # A planted libabc_o3test.so, alone in its directory: ABC would dlopen it from the cwd or
+        # $ABC_LIB_PATH at frame creation, and its constructor exits 9 (review finding C1).
+        add_library(abc_planted_lib MODULE tests/unit/abc_planted_lib.c)
+        set_target_properties(abc_planted_lib PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME libabc_o3test
+            LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/abc_planted)
+        target_link_libraries(abc_planted_lib PRIVATE odin3_flags)
+        add_dependencies(test_abc_adapter abc_planted_lib)
+        target_compile_definitions(test_abc_adapter PRIVATE
+            ODIN3_ABC_PLANTED_DIR="${PROJECT_BINARY_DIR}/abc_planted")
         add_test(NAME test_abc_adapter COMMAND test_abc_adapter)
         set_tests_properties(test_abc_adapter PROPERTIES LABELS unit
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
@@ -900,10 +913,11 @@ if(BUILD_TESTING)
 
     if(ODIN3_WITH_ABC)
         # 3D §4.2: the adapter exports exactly its two functions and imports none of the
-        # process-ending or process-control calls (the wraps took them all).
+        # process-ending, process-control or code-loading calls (the wraps took those ABC makes;
+        # the rest of the exec, spawn and dl families must not appear with a pin bump).
         set(_abc_exports_args
             --only odin3_plugin_init,odin3_abc_adapter_init
-            --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,execv,execvp,signal)
+            --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,vfork,execv,execvp,execl,execle,execlp,execve,execvpe,fexecve,posix_spawn,posix_spawnp,signal,dlopen,dlmopen)
         add_test(NAME abc_adapter_exports
             COMMAND ${PROJECT_SOURCE_DIR}/tools/check-symbols.sh ${_abc_exports_args}
                     $<TARGET_FILE:odin3_abc>)

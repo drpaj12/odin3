@@ -36,7 +36,12 @@ static Abc_Frame_t *adp_frame; /* the session's frame, NULL when none is open */
 static Abc_Frame_t *adp_prev;  /* the frame entered before it */
 static bool adp_entered;       /* adp_frame is the thread's current frame */
 
-/* Every AB-4 generator back to its start, and libc's rand() seeded with seed. */
+/*
+ * Every AB-4 generator back to its start, and libc's rand() seeded with seed. The seed is a
+ * parameter, not the literal: clang-tidy's cert-msc32-c refuses srand() with a constant, which
+ * guards against predictable randomness, while here the predictable sequence is the requirement
+ * (AB-8: srand(1) per session, so fraig's rand() repeats).
+ */
 static void adp_reset_generators(unsigned int seed) {
     (void)Abc_Random(ADP_RESET);
     (void)Abc_RandomW(ADP_RESET);

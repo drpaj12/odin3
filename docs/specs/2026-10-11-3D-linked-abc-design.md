@@ -214,7 +214,7 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
 -Wl,--exclude-libs,ALL -Wl,--version-script=adapters/abc/exports.map -Wl,-z,defs
 -Wl,--wrap=exit -Wl,--wrap=_exit -Wl,--wrap=abort -Wl,--wrap=__assert_fail
 -Wl,--wrap=system -Wl,--wrap=popen -Wl,--wrap=fork -Wl,--wrap=execv -Wl,--wrap=execvp
--Wl,--wrap=signal
+-Wl,--wrap=execl -Wl,--wrap=signal -Wl,--wrap=dlopen
 ```
 
 `exports.map` is `{ global: odin3_plugin_init; odin3_abc_adapter_init; local: *; };`.
@@ -244,20 +244,26 @@ The wrappers:
     `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
     saved original stderr fd, then executes `__builtin_trap()`. A `longjmp` across threads would
     be undefined behaviour, and the trap imports nothing.
-- **Process control:**
-  - `__wrap_system`, `__wrap_fork`, `__wrap_execv` and `__wrap_execvp` return −1;
-  - `__wrap_popen` returns NULL;
+- **Process control and code loading:**
+  - `__wrap_system`, `__wrap_fork`, `__wrap_execv`, `__wrap_execvp` and `__wrap_execl` return −1;
+  - `__wrap_popen` and `__wrap_dlopen` return NULL;
   - `__wrap_signal` returns `SIG_ERR`.
 
   All of them set `errno = EPERM` and add `ABC tried to <call>; refused` to the session's output.
-  The allow-list makes them unreachable; they are kept as defence in depth.
+  The allow-list makes all but `dlopen` unreachable; they are kept as defence in depth.
+  - `dlopen` is reached at every frame's creation. `Abc_FrameInit` runs `Libs_Init`
+    (`base/main/libSupport.c`), which would `dlopen` each `libabc_*.so` in the working directory
+    or in `$ABC_LIB_PATH` and call its `abc_init`, outside every wrap.
+  - Refused, it loads nothing (3D-2 Task 5 review, finding C1).
+  - `test_abc_adapter` plants such a library in both places.
 
 **Checks:**
 
 - `symbol_rules` is `check-symbols.sh libodin3 example_plugin odin3_abc`.
 - `abc_adapter_exports` is `check-symbols.sh --only odin3_plugin_init,odin3_abc_adapter_init
-  --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,execv,execvp,signal
-  <libodin3_abc.so>`. This is a new mode: the exported functions must equal `--only`, and nothing
+  --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,vfork,execv,execvp,execl,execle,
+  execlp,execve,execvpe,fexecve,posix_spawn,posix_spawnp,signal,dlopen,dlmopen <libodin3_abc.so>`
+  (one comma list). This is a new mode: the exported functions must equal `--only`, and nothing
   in `--forbid` may be imported.
 - `abi_exports` is unchanged.
 

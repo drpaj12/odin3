@@ -122,22 +122,21 @@ static odin3_status adp_guard_call(void) {
     return adp_guard.fn(adp_guard.arg);
 }
 
-static odin3_status adp_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail) {
-    ODIN3_ADAPTER_ASSERT(fn != NULL && fail != NULL && adp_guard.cap != NULL);
-    ODIN3_ADAPTER_ASSERT(!atomic_load(&adp_guard.active));
-    odin3_status st = odin3_capture_begin(adp_guard.cap);
-    if (st != ODIN3_OK) {
-        return st;
-    }
+/* The guarded call between the fds' capture and their restore. captured false: no capture (fds
+ * 1 and 2 stay as they are), for odin3_guard_run_always only. */
+static odin3_status adp_guard_body(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail,
+                                   bool captured) {
     odin3_abc_fail_reset(&adp_guard.escape, ODIN3_ABC_FAIL_NONE);
     adp_guard.fn = fn;
     adp_guard.arg = arg;
     adp_guard.thread = pthread_self();
     atomic_store(&adp_guard.active, true);
-    st = adp_guard_call();
+    odin3_status st = adp_guard_call();
     atomic_store(&adp_guard.active, false);
     /* The fds first, on every path: an escape left them on the capture file. */
-    odin3_capture_end(adp_guard.cap, adp_guard.text, adp_guard.user);
+    if (captured) {
+        odin3_capture_end(adp_guard.cap, adp_guard.text, adp_guard.user);
+    }
     if (adp_guard.escape.kind != ODIN3_ABC_FAIL_NONE) {
         *fail = adp_guard.escape;
         atomic_store(&adp_guard.disabled, true);
@@ -146,9 +145,28 @@ static odin3_status adp_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *
     return st;
 }
 
+static odin3_status adp_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail,
+                                  bool uncaptured_ok) {
+    ODIN3_ADAPTER_ASSERT(fn != NULL && fail != NULL && adp_guard.cap != NULL);
+    ODIN3_ADAPTER_ASSERT(!atomic_load(&adp_guard.active));
+    odin3_status st = odin3_capture_begin(adp_guard.cap);
+    if (st == ODIN3_ERR_NO_MEMORY && uncaptured_ok) {
+        return adp_guard_body(fn, arg, fail, false);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return adp_guard_body(fn, arg, fail, true);
+}
+
 odin3_status odin3_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail) {
     odin3_abc_fail_reset(fail, ODIN3_ABC_FAIL_NONE);
-    return odin3_guard_finish(adp_guard_run(fn, arg, fail), fail);
+    return odin3_guard_finish(adp_guard_run(fn, arg, fail, false), fail);
+}
+
+odin3_status odin3_guard_run_always(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail) {
+    odin3_abc_fail_reset(fail, ODIN3_ABC_FAIL_NONE);
+    return odin3_guard_finish(adp_guard_run(fn, arg, fail, true), fail);
 }
 
 /* --- the escapes ----------------------------------------------------------------------------- */
@@ -159,8 +177,8 @@ odin3_status odin3_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail)
  *
  * PENDING PETER (plan point (a), question 1): the body is his answer, either __builtin_trap()
  * with a matching check_rules.py allowance, or the non-trap stop raise(SIGKILL). Until he rules,
- * the body is the non-trap stop, so the adapter never returns into ABC after such an escape, and
- * 3D-2 does not merge.
+ * SIGKILL ships (a _Noreturn function needs a body), so the adapter never returns into ABC after
+ * such an escape; test_abc_adapter pins SIGKILL, and 3D-2 does not merge before the ruling.
  */
 static _Noreturn void adp_offthread_stop(void) {
     for (;;) {
@@ -259,6 +277,24 @@ int odin3_wrap_execvp(const char *file, char *const argv[]) {
     (void)file;
     (void)argv;
     adp_refused("execvp");
+    return ADP_REFUSED;
+}
+
+/* ABC's Libs_Init (base/main/libSupport.c) dlopens every libabc_*.so in the working directory or
+ * in $ABC_LIB_PATH at each frame's creation, and runs its abc_init: code outside every wrap. It
+ * is refused, so ABC prints its own "failed to load" warning and loads nothing. */
+void *odin3_wrap_dlopen(const char *file, int mode) {
+    (void)file;
+    (void)mode;
+    adp_refused("dlopen");
+    return NULL;
+}
+
+/* arg is const-qualified in this definition only (see odin3_wrap_popen). */
+int odin3_wrap_execl(const char *path, const char *const arg, ...) {
+    (void)path;
+    (void)arg;
+    adp_refused("execl");
     return ADP_REFUSED;
 }
 

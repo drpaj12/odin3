@@ -3,11 +3,13 @@
  * §4.2, AB-6; plan points (a) and (w)).
  *
  * libodin3_abc.so links with --wrap for exit, _exit, abort, __assert_fail, system, popen, fork,
- * execv, execvp and signal, so every call ABC's own objects make to them lands in a wrapper below.
+ * execv, execvp, execl, signal and dlopen, so every call ABC's own objects make to them lands in a
+ * wrapper below.
  * The escapes (exit, _exit, abort, an assertion) on the thread running a guarded call longjmp
  * back to odin3_guard_run, which restores fds 1 and 2, reports the escape and disables the engine
  * for the rest of the process. On any other thread, or with no guarded call running, they write
- * one line to the original stderr and stop the process. The process-control calls are refused.
+ * one line to the original stderr and stop the process. The process-control and code-loading
+ * calls are refused.
  *
  * The wrappers never name a __real_ symbol, and their C names are bound to the --wrap symbols with
  * asm labels, because clang-tidy refuses C identifiers that start with "__" (point (w)).
@@ -57,6 +59,13 @@ odin3_status odin3_adapter_assert_fail(const char *file, int line, const char *e
  */
 odin3_status odin3_guard_run(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail);
 
+/*
+ * As odin3_guard_run, except that when fds 1 and 2 cannot be captured (no descriptor left) fn
+ * still runs under the guard, its output going to the real fds 1 and 2. For the session's close,
+ * which must leave its frame whatever happens: a frame left entered would disable the engine.
+ */
+odin3_status odin3_guard_run_always(odin3_guard_fn fn, void *arg, odin3_abc_fail *fail);
+
 /* True once an escape or an adapter assertion has disabled the engine (for the process). */
 bool odin3_guard_disabled(void);
 
@@ -91,13 +100,15 @@ _Noreturn void odin3_wrap_abort(void) __asm__("__wrap_abort");
 _Noreturn void odin3_wrap_assert_fail(const char *expr, const char *file, unsigned int line,
                                       const char *func) __asm__("__wrap___assert_fail");
 
-/* The refused process control: each sets errno to EPERM and adds "ABC tried to <call>; refused"
- * to the session's output. */
+/* The refused process control and code loading: each sets errno to EPERM and adds "ABC tried to
+ * <call>; refused" to the session's output. */
 int odin3_wrap_system(const char *command) __asm__("__wrap_system");
 FILE *odin3_wrap_popen(const char *command, const char *type) __asm__("__wrap_popen");
 pid_t odin3_wrap_fork(void) __asm__("__wrap_fork");
 int odin3_wrap_execv(const char *path, char *const argv[]) __asm__("__wrap_execv");
 int odin3_wrap_execvp(const char *file, char *const argv[]) __asm__("__wrap_execvp");
+int odin3_wrap_execl(const char *path, const char *arg, ...) __asm__("__wrap_execl");
+void *odin3_wrap_dlopen(const char *file, int mode) __asm__("__wrap_dlopen");
 odin3_sighandler_fn odin3_wrap_signal(int sig,
                                       odin3_sighandler_fn handler) __asm__("__wrap_signal");
 

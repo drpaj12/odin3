@@ -33,29 +33,58 @@ the engine's `text` callback (without the newline and trailing blanks; a partial
 ## Process control (AB-6) and what it covers, honestly
 
 The link wraps `exit`, `_exit`, `abort`, `__assert_fail`, `system`, `popen`, `fork`, `execv`,
-`execvp` and `signal` (`guard.c`; no wrapper names a `__real_` symbol).
+`execvp`, `execl`, `signal` and `dlopen` (`guard.c`; no wrapper names a `__real_` symbol).
 
 - **Escapes on the session thread** (`exit`, `_exit`, `abort`, a failed assertion) `longjmp` back
   to the guard, which restores fds 1 and 2, reports `EXIT` (with the code), `ABORT` or `ASSERT`
   (with `"<file>:<line>: <expr>"`), and disables the engine until the process ends. The frame's
-  state is leaked, never reused.
+  state is leaked, never reused. The `longjmp` skips the destructors of any live C++ frames
+  between the guard and the escape (ABC has 124 C++ sources). That is acceptable only because
+  the engine never runs again in that process.
 - **Escapes on any other thread**, or with no guarded call running, write
   `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
-  original stderr and stop the process: a `longjmp` across threads is undefined. How it stops is
-  Peter's call (plan point (a)); until he rules, the stop is `raise(SIGKILL)`, not a trap. ABC
-  started no thread in the spike's runs (PHASE3 decision 22).
-- **Process control** is refused: `system`, `fork`, `execv` and `execvp` return −1, `popen` NULL,
-  `signal` `SIG_ERR`, each with `errno = EPERM` and the line `ABC tried to <call>; refused` in the
-  session's output. The AB-21 checker makes them unreachable; they are defence in depth.
+  original stderr and stop the process, because a `longjmp` across threads is undefined.
+  - **Until Peter rules on plan point (a), the stop is `raise(SIGKILL)`.** That is what ships,
+    and `test_abc_adapter` pins `SIGKILL`.
+  - The alternative under review is a trap (`__builtin_trap()`, `SIGILL`).
+  - ABC started no thread in the spike's runs (PHASE3 decision 22).
+- **Process control and code loading are refused.**
+  - `system`, `fork`, `execv`, `execvp` and `execl` return −1; `popen` and `dlopen` return NULL;
+    `signal` returns `SIG_ERR`.
+  - Each sets `errno = EPERM` and adds the line `ABC tried to <call>; refused` to the session's
+    output.
+  - **`dlopen` is reachable:** every frame's creation runs ABC's `Libs_Init`
+    (`base/main/libSupport.c`). It would `dlopen` each `libabc_*.so` in the working directory, or
+    in `$ABC_LIB_PATH`, and run its `abc_init` outside every wrap. Refused, it loads nothing.
+    ABC then prints its own "failed to load ABC library" warning, whose second line is whatever
+    `dlerror()` holds (`(null)`, or a stale message).
+  - The others are unreachable behind the AB-21 checker and are kept as defence in depth.
 
 The wraps catch these calls **only when ABC's own objects make them**. They do not catch:
 
-- `std::terminate` (ABC has 124 C++ sources; it reaches `abort` inside `libstdc++.so`);
+- `std::terminate` (it reaches `abort` inside `libstdc++.so`);
 - glibc's fatal paths (heap corruption, `__libc_fatal`);
 - signals, notably the SIGSEGV an unchecked `ABC_ALLOC` gives when memory runs out.
 
 Each of those still ends `odin3` (spec §17, risk 1). The fallback, if they are seen, is ABC as a
 subprocess engine.
+
+**The adapter's other process-affecting imports** (from ABC's objects, `nm -D`) are unreachable
+from a guarded call, by reading the pinned source:
+
+- `execl` is used only in a `fork` child (`base/sn/snCom.c`); both are wrapped anyway.
+- `prctl` and `raise` are used only in signal handlers or `fork` children (`opt/util/util.cpp`,
+  `sat/cadical`, `sat/kissat`), which the `signal` and `fork` wraps refuse. The adapter's own
+  stop also uses `raise`, so it cannot be forbidden.
+- `setrlimit` is used only in `Abc_RealMain` and bsat2's `main`, never by a command.
+- `pthread_exit` runs only on worker threads.
+- `dlsym`, `dlerror` and `dlclose` act only on the handles `dlopen` would have returned; there are
+  none. They stay unwrapped, because clang's static sanitizer runtime, linked into the test
+  executable, uses `dlsym` itself.
+- `pipe`, `waitpid` and `pclose` serve `fork` and `popen`, which are refused.
+
+CTest `abc_adapter_exports` forbids the rest of the exec, spawn and `dl*open` families, so a pin
+bump that brings one in fails.
 
 ## Tests
 
@@ -64,8 +93,14 @@ subprocess engine.
   - the capture: `echo hello` reaches the callback while the test's own pipes on fds 1 and 2 get
     nothing and are restored; output still buffered in stdout goes to the original fd 1; a partial
     line waits for the next call;
-  - a failing command (`COMMAND`), the refused calls and the plugin entry;
-  - each in a child process: `o3test_exit 3`, `o3test_assert`, an off-thread `exit` and the
-    adapter assertion.
+  - a failing command (`COMMAND`), the refused calls, the generators and `srand(1)` reset at
+    every open, and the plugin entry;
+  - each in a child process:
+    - `o3test_exit 3`, `o3test__exit 4`, `o3test_abort` and `o3test_assert`;
+    - off-thread `exit`, `abort` and `assert` (the line, then `SIGKILL`);
+    - the adapter assertion;
+    - a planted `libabc_o3test.so` in the working directory and on `$ABC_LIB_PATH`, never loaded
+      (its constructor would exit 9);
+    - `close` with no descriptor left, after which the next open still works.
 - `abc_adapter_exports`, `abc_adapter_exports_refuses_libodin3`, `symbol_rules` (with the adapter)
   and `abc_adapter_no_assert`.

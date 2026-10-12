@@ -40,11 +40,12 @@ static odin3_status adp_frame_close_fn(void *arg) {
 }
 
 /* Leaves the frame (destroying it only when the engine is still enabled): run under the guard,
- * whose own failure is the engine's (disabled) and is not reported further. */
+ * whose own failure is the engine's (disabled) and is not reported further. It runs even when no
+ * descriptor is left for the capture, so a later open still finds no frame. */
 static void adp_close_frame(void) {
     bool destroy = !odin3_guard_disabled();
     odin3_abc_fail ignored;
-    (void)odin3_guard_run(adp_frame_close_fn, &destroy, &ignored);
+    (void)odin3_guard_run_always(adp_frame_close_fn, &destroy, &ignored);
 }
 
 /* Ends the session: no capture, no file, and the lock released. */
