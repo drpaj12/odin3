@@ -16,11 +16,15 @@
  *   scorr -P        abc.c:25839 nPartSize: the partitioned run writes part%03d.aig
  *                               (sswPart.c:245, 286-288)
  *   scorr -e, -f    abc.c:26004, 26007  fEquivDump/fEquivDump2: equiv%03d.aig (sswSweep.c:354-363)
+ *   scorr -I        abc.c:25905 nItersStop: stopping at that iteration writes srm.blif
+ *                               (sswCore.c:300-303; Task 11's audit, with -I 0)
  *   if -S, -J       abc.c:23077, 23091  pLutStruct = the string (usage abc.c:23480 "[-SJ str]")
  *   if -f           abc.c:23167 fDumpFile: If_ManStop writes <name>__n.._k...bin (ifMan.c:351-365)
  *   &if -S, -J      abc.c:45359, 45373  pLutStruct = the string (usage abc.c:45832 "[-SJ str]")
  *   &ps -D          abc.c:36140 pDumpFile = the file (usage abc.c:36173 "[-D file]";
  *                               Gia_ManLogAigStats, giaMan.c:460-462)
+ *   mfs2 -i         abc.c:5916  fIndDCs: with the frames set (-j) the unrolled network is written
+ *                               to unroll_dump.blif (abc.c:5946-5950, abcMfs.c:555; Task 11)
  *
  * crash_opts: the options with which the command crashes ABC at the pin (SIGSEGV, which kills
  * Odin III; Task 10 review, fix round 2), each reproduced on a sequential and a combinational
@@ -34,14 +38,38 @@
  *   print_auto -O   abc.c:2652  Output: an index past the last output reads a stray BDD
  *                               (Extra_SupportArray, extraBddMisc.c:550; fix round 3)
  *
+ * Task 11's bounded audit (every pair of each allowed command's other options, valued ones at 2,
+ * and each valued option alone at 0, 1 and 64, on the same two designs) found these, each
+ * backtraced in the Debug abc; a value-dependent crash refuses the whole option, as -O does:
+ *
+ *   dc2 -f          abc.c:18480 fFanout: off with -l asserts p->pFanData
+ *                               (Aig_ManStartReverseLevels, aigTiming.c:146)
+ *   drw -f          abc.c:18259 fFanout: off with -l, the same assertion
+ *   drw -C, -N      abc.c:18231, 18242  nCutsMax 0 (Aig_MmFixedEntryFetch, aigMem.c:197) and
+ *                               nSubgMax 0 (Dar_LibCutMatch, darLib.c:741)
+ *   drf -C          abc.c:18377 nCutsMax 0 asserts in Vec_VecEntry (vecVec.h:275)
+ *   scorr -N        abc.c:25938 nConstrs: more constraints than outputs (Aig_ManDfsNodes from
+ *                               Ssw_ManUpdateEquivs, sswCore.c:197)
+ *   if -c           abc.c:23164 fUseTtPerm: with -g asserts in Vec_WecEntry (vecWec.h:156)
+ *   mfs -t          abc.c:5715  fOneHotness: with -C 2, sat_solver_solve (satSolver.c:2072)
+ *   mfs2 -Z         abc.c:5879  nFirstFixed: 64 asserts in Vec_StrWriteEntry (vecStr.h:390)
+ *   dch -W          abc.c:18664 nWords 0 reads past the simulation words
+ *                               (Dch_PerformRandomSimulation, dchSim.c:219, valgrind); glibc aborts
+ *   &synch2 -W      abc.c:40960 nWords 0 corrupts the heap (glibc aborts)
+ *   &dch -W         abc.c:49978 nWords 0 corrupts the heap (glibc aborts)
+ *   &if -w          abc.c:45472 fVerboseTrace: with -g or -x it traces the LUT levels of an AIG
+ *                               that has no mapping (Gia_ManLutLevel, giaIf.c:170)
+ *
  * print_box crashes with any option, so it is a refused row of class CRASH.
  *
  * How the others were checked: every option of every allowed command was mapped to the variable
  * its case assigns, and the usage texts were searched for dump, file, write, save, record and log.
  * Then each allowed command ran once in the abc tool at the pin, once per option (numeric options
  * with 2), on a strashed, a mapped, a & and a &-mapped network, each run in an empty directory: the
- * only files created came from the options above. That audit is per option, on one small design;
- * combinations of options and other networks were not run (Task 11's fuzzer should widen it).
+ * only files created came from the options above. Task 11 then ran option pairs, the values 0, 1,
+ * 64, -1, 3 and 1000, and the print and & commands' pairs after if, &if and &get -m (above; clean
+ * once the lists held its findings). Triples, other values, other networks and longer command
+ * sequences were not run, so the lists may still be incomplete.
  *
  * Then the refused rows: §7.5's "among others" (files, process, latches), every registered
  * read_* and write_* command with read and write, the & space's &r, &w, &read_* and &write_*
@@ -64,30 +92,30 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "x", ""},
     {"refactor", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", ""},
-    {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
+    {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "f"},
+    {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "fCN"},
+    {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "C"},
+    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "W"},
     {"ifraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig_sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "Pef", ""},
+    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "N"},
     /* optimisation: keeps */
     {"sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* mapping */
-    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "s"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
-    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
+    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "sc"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "t"},
+    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "Z"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
-    {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
-    {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "m"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "s"},
+    {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
+    {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "sw"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
     /* printing: the 34 print_* commands at the pin but print_constr, print_status and print_box;
      * print_mint is registered only under ABC_USE_CUDD (on in the pinned build) */

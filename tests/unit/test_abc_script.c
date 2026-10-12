@@ -576,10 +576,11 @@ static void test_file_and_crash_options(void) {
         file_seen += check_file_options(odin3_abc_command_at(i));
         crash_seen += check_crash_options(odin3_abc_command_at(i));
     }
-    /* print_stats bd, rewrite x, resub PD, scorr Pef, if SJf, &if SJ, &ps D; if s, &if s,
-     * &dch m, &put e, print_auto O (Task 10, fix rounds 1-3) */
-    TEST_ASSERT_EQUAL_UINT32(14, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(5, crash_seen);
+    /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i;
+     * crashes: if sc, &if sw, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr N,
+     * mfs t, mfs2 Z, dch W, &synch2 W (Task 10 fix rounds 1-3, Task 11's audit) */
+    TEST_ASSERT_EQUAL_UINT32(16, file_seen);
+    TEST_ASSERT_EQUAL_UINT32(18, crash_seen);
 }
 
 static void test_options_from_alias(void) {

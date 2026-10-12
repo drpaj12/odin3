@@ -136,27 +136,27 @@ static const odin3_abc_command_info k_allowed[] = {
     {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "x", ""},
     {"refactor", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", ""},
-    {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
+    {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "f"},
+    {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "fCN"},
+    {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "C"},
+    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "W"},
     {"ifraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig_sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "Pef", ""},
+    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "N"},
     {"sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
-    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "s"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
-    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
+    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "sc"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "t"},
+    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "Z"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
-    {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
-    {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "m"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "s"},
+    {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
+    {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "sw"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
     {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -808,6 +808,25 @@ static void test_crash_refusals_round3(void) {
     TEST_ASSERT_TRUE(uses_refused_opt("&get -n; &if -K 6; &put -e"));
 }
 
+/* name's row lists letter among its file and string options. */
+static bool file_opt(const char *name, char letter) {
+    const odin3_abc_command_info *row = odin3_abc_command_find(name);
+    return row != NULL && strchr(row->file_opts, letter) != NULL;
+}
+
+/* Task 11's audit (option pairs; values 0, 1 and 64): two writes and thirteen crashes. */
+static void test_refusals_task11(void) {
+    TEST_ASSERT_TRUE(file_opt("scorr", 'I'));
+    TEST_ASSERT_TRUE(file_opt("mfs2", 'i'));
+    static const char *const k_cmds[] = {"dc2", "drw",  "drw", "drw",     "drf",  "scorr", "if",
+                                         "mfs", "mfs2", "dch", "&synch2", "&dch", "&if"};
+    static const char k_letters[] = "ffCNCNctZWWWw";
+    TEST_ASSERT_EQUAL_UINT32(COUNT_OF(k_cmds), (uint32_t)strlen(k_letters));
+    for (uint32_t i = 0; i < COUNT_OF(k_cmds); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(crash_opt(k_cmds[i], k_letters[i]), k_cmds[i]);
+    }
+}
+
 /* print_box crashes with any option, so it is a refused row; a crash option refuses a script. */
 static void test_crash_command(void) {
     expect_row("print_box", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
@@ -912,6 +931,7 @@ int main(void) {
     RUN_TEST(test_crash_refusals);
     RUN_TEST(test_crash_command);
     RUN_TEST(test_crash_refusals_round3);
+    RUN_TEST(test_refusals_task11);
     RUN_TEST(test_files_rows_pinned);
     RUN_TEST(test_rc_parser_forms);
     RUN_TEST(test_print_rows);

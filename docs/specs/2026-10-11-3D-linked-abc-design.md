@@ -1025,7 +1025,8 @@ of AB-21.
 
 Agent defaults: the `print_*` set as listed, and `&ps` as the `&`-space print. Per command, the
 options that read or write a file, or take a string, are refused too (AB-21 step 9): `print_stats`
-`-b -d`, `rewrite -x`, `resub -P -D`, `scorr -P -e -f`, `if -S -J -f`, `&if -S -J` and `&ps -D`.
+`-b -d`, `rewrite -x`, `resub -P -D`, `scorr -P -e -f -I`, `if -S -J -f`, `&if -S -J`, `&ps -D` and
+`mfs2 -i`.
 
 Crash options, refused too (§7.3 step 9): `if -s` and `&if -s` (`If_CutLutBalanceEval`,
 ifDelay.c:387), `&dch -m` (`Gia_ManChoiceMinLevel_rec`, giaEquiv.c:571), `&put -e` on a mapped
@@ -1033,7 +1034,19 @@ ifDelay.c:387), `&dch -m` (`Gia_ManChoiceMinLevel_rec`, giaEquiv.c:571), `&put -
 `print_auto -O` (an output index past the last output; `Extra_SupportArray`,
 extraBddMisc.c:550). `print_box` crashes
 with any option (`If_LibBoxPrint` on the NULL box library, ifLibBox.c:350) and is refused with
-the class ending of §7.3 step 8.
+the class ending of §7.3 step 8. Also `dc2 -f` and `drw -f` (fanout off with `-l`), `drw -C -N`
+and `drf -C` (0), `scorr -N` (more constraints than outputs), `if -c` (with `-g`), `mfs -t` (with
+`-C 2`), `mfs2 -Z` (64), `dch -W`, `&synch2 -W` and `&dch -W` (0: the simulation words overrun
+and glibc aborts) and `&if -w` (with `-g` or `-x`); `allow.c` cites each crash site.
+
+> *(Erratum, 3D Task 11, 2026-10-12: `scorr -I` (stopping at that iteration writes `srm.blif`),
+> `mfs2 -i` (with `-j` it writes `unroll_dump.blif`) and the crash options of the sentence above
+> are new. Task 11 ran every pair of each allowed command's other options (valued ones at 2) and
+> each valued option alone at 0, 1, 64, -1, 3 and 1000, on the two Task 10 designs, and the pairs
+> of the print and `&` commands after `if`, `&if` and `&get -m`: 9,242 runs of the pinned `abc`
+> tool, then the pairs again with the new lists, clean. As with `-O`, a crash that depends on the
+> value refuses the whole option. Triples, other values and networks, and longer sequences remain
+> unrun.)*
 
 > *(Erratum, 3D Task 10 review fix round 3, 2026-10-12: `&put -e` (found by the reviewer) and
 > `print_auto -O` added. Every allowed command was then run once per option after a mapping step
