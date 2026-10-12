@@ -66,13 +66,18 @@ row. Beyond the plan's list (an agent default, 3E-4 Task 10): an undriven net re
 ``.names`` or a ``.latch`` D as ``gnd``, by a ``.subckt`` input as ``unconn``, and an undriven
 primary output buffered from ``gnd`` (spec §9.2, as the writer does); then a ``.names gnd`` /
 ``.names unconn`` generator where one is read but undriven. The files are read as bytes (a
-name may decode to any byte).
+name may decode to any byte). Rule 8's escapes (``%7C`` for ``|``, ``_%5E_`` for ``_^_``) are
+decoded only on a name the written file uses as a clock (a ``.latch`` control) or on a
+``.subckt`` pin, which covers every hard-block clock without the architecture's models (3E-4
+Task 11); anywhere else they stay as written, so a writer that escapes them on a data net fails.
 
 ``--vtr-rewrite W1 W2`` is §16.3 step 1's decoded comparison, not a structural one: W2 must be
 W1 read back and written again with ``write_blif --vtr``. W1's token lines (continuations
 joined, ``#`` lines dropped) must equal W2's after one VB-10 decoding step of every name
 (``vb10_decode_once``), which inverts one write exactly and is injective, so no name written
 wrongly can hide behind the fixed point (``a%5Cb`` and ``a%255Cb`` decode alike only there).
+Rule 8's escapes are never decoded there: W1's clock names are already escaped, so writing them
+again escapes only their ``%``.
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -118,8 +123,10 @@ MAX_TRIALS = 64
 # `%` followed by anything else is rule 3's reserved-name prefix.
 VB10_ESCAPE = re.compile(rb"%([0-9A-F]{2})")
 VB10_PREFIX = b"%"
-# The bytes VB-10 writes as `%XX` (rules 1 and 8), the names rule 3 prefixes with `%`.
-VB10_ESCAPED = frozenset(set(range(0x21)) | set(range(0x7F, 0x100)) | set(b'="#\\%|^'))
+# The bytes VB-10 rule 1 writes as `%XX` on every name, the names rule 3 prefixes with `%`.
+VB10_ESCAPED = frozenset(set(range(0x21)) | set(range(0x7F, 0x100)) | set(b'="#\\%'))
+# Rule 8, on a clock net only: `|` anywhere, `^` where it is the middle of `_^_`.
+VB10_PIPE, VB10_CARET, VB10_UNDERSCORE = ord("|"), ord("^"), ord("_")
 VB10_RESERVED = frozenset({b"re", b"fe", b"ah", b"al", b"as", b"NIL", b"0", b"1", b"2", b"3",
                            b"gnd", b"vcc", b"unconn"})
 VB10_OUT_PREFIX = b"out:"
@@ -721,31 +728,38 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
 # --------------------------------------------------------------------------- --vtr rewrites
 
 
-def _escape_at(name: bytes, i: int) -> bool:
+def _escape_at(name: bytes, i: int, clock: bool = False) -> bool:
     """True when name[i:i+3] is an escape the writer can have written: `%`, two upper-case hex
-    digits, and a byte VB-10 escapes (rule 1: one outside 0x21-0x7E or one of `="#\\%`; rule 8:
-    `|` and `^` on a clock net; rule 2: `.` at the start). `%41` (`A`, a legal byte) is none."""
+    digits, and a byte VB-10 escapes (rule 1: one outside 0x21-0x7E or one of `="#\\%`; rule 2:
+    `.` at the start; rule 8, only when clock: `|`, and `^` between two `_`). `%41` (`A`, a
+    legal byte) is none, and neither is `%7C` on a data net (spec §10 item 8)."""
     match = VB10_ESCAPE.match(name, i)
     if match is None:
         return False
     byte = int(match[1], HEX)
-    return byte in VB10_ESCAPED or (byte == ord(".") and i == 0)
+    if byte in VB10_ESCAPED or (byte == ord(".") and i == 0):
+        return True
+    if not clock:
+        return False
+    flanked = i > 0 and name[i - 1] == VB10_UNDERSCORE and name[i + 3:i + 4] == b"_"
+    return byte == VB10_PIPE or (byte == VB10_CARET and flanked)
 
 
-def vb10_decode_once(name: bytes) -> bytes:
+def vb10_decode_once(name: bytes, clock: bool = False) -> bytes:
     """One VB-10 decoding step, the exact inverse of one write (3E spec §10, plan point (o)):
     rule 3's `%` prefix dropped where it stands before a reserved name (`%re`, `%unconn`,
     `%out:x`), then every escape the writer can have written (_escape_at) replaced by its byte.
     Anything else stays as it is, so the step is injective and a name the writer cannot have
-    written (`y%41`, `%zz`) never decodes onto another name (3E-4 Task 10 review I1)."""
-    if name.startswith(VB10_PREFIX) and not _escape_at(name, 0):
+    written (`y%41`, `%zz`) never decodes onto another name (3E-4 Task 10 review I1). Rule 8's
+    escapes are decoded only when clock (the name is a clock net's)."""
+    if name.startswith(VB10_PREFIX) and not _escape_at(name, 0, clock):
         rest = name[len(VB10_PREFIX):]
         if rest in VB10_RESERVED or rest.startswith(VB10_OUT_PREFIX):
             name = rest
     out = bytearray()
     i = 0
     while i < len(name):
-        if _escape_at(name, i):
+        if _escape_at(name, i, clock):
             out.append(int(name[i + 1:i + 3], HEX))
             i += 3
         else:
@@ -757,20 +771,35 @@ def vb10_decode_once(name: bytes) -> bytes:
 def vb10_decode(name: bytes) -> bytes:
     """vb10_decode_once repeated until nothing changes, so a name written twice (`%255C`) decodes
     like one written once (`%5C`), both to `\\`. Not injective: only vtr_fixtures' report
-    (vtr_normalized) uses it, never a verdict."""
+    (vtr_normalized) uses it, never a verdict; it has no net context, so it decodes rule 8's
+    escapes everywhere."""
     while True:
-        step = vb10_decode_once(name)
+        step = vb10_decode_once(name, clock=True)
         if step == name:
             return name
         name = step
 
 
-def decode_name(name: str) -> str:
+def decode_name(name: str, clock: bool = False) -> str:
     """vb10_decode_once of a name read with surrogateescape (bytes that are not UTF-8 survive)."""
     if "%" not in name:
         return name
     raw = name.encode("utf-8", "surrogateescape")
-    return vb10_decode_once(raw).decode("utf-8", "surrogateescape")
+    return vb10_decode_once(raw, clock).decode("utf-8", "surrogateescape")
+
+
+def clock_names(netlist: blif.Netlist) -> frozenset[str]:
+    """The names rule 8 may have escaped in a written file: every `.latch` control and every
+    `.subckt` actual (a hard-block clock pin is a `.subckt` pin; which one needs the
+    architecture's models, which netlist-compare does not read)."""
+    names: set[str] = set()
+    for model in netlist.models:
+        for cell in model.cells:
+            if isinstance(cell, blif.Latch) and cell.control is not None:
+                names.add(cell.control)
+            elif isinstance(cell, blif.Subckt):
+                names.update(actual for _, actual in cell.conns)
+    return frozenset(names)
 
 
 def vtr_token_lines(
@@ -902,13 +931,18 @@ def _drive_generators(model: blif.Model, models: dict[str, blif.Model]) -> None:
 def vtr_normalize(netlist: blif.Netlist, written: bool = False) -> blif.Netlist:
     """A copy of netlist with write_blif --vtr's documented rewrites applied (3E spec §16.3
     step 3): when written (the file is the writer's output), every name decoded by one VB-10
-    step (decode_name; a golden is never decoded: 3E-4 Task 10 review I1); `.clock` lines
+    step (decode_name, rule 8's escapes only on clock_names; a golden is never decoded: 3E-4
+    Task 10 review I1); `.clock` lines
     dropped; latch init 3 (or none) as 2; a `.subckt`'s omitted input formal bits (its
     model's) as `=unconn`; an undriven net read by a `.names` or a `.latch` D as `gnd`, by a
     `.subckt` input as `unconn`, and an undriven primary output buffered from `gnd` (§9.2);
     §6's constant and 1-input covers; and the `gnd`/`unconn` generators where these rewrites
     read one that nothing drives."""
-    dn: Callable[[str], str] = decode_name if written else str
+    clocks = clock_names(netlist) if written else frozenset()
+
+    def dn(name: str) -> str:
+        return decode_name(name, name in clocks) if written else name
+
     models = [
         blif.Model(dn(m.name), [dn(p) for p in m.inputs], [dn(p) for p in m.outputs], [],
                    [_decode_cell(c, dn) for c in m.cells], m.blackbox, m.line)

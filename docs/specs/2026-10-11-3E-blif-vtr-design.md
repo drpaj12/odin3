@@ -1,6 +1,8 @@
 # 3E — `write_blif --vtr`: design
 
-Status: v2.4 (2026-10-12): v2.3 plus the 3E-2 final review's amendments (§24: `--writer-log`
+Status: v2.5 (2026-10-12): v2.4 plus the 3E-4 errata (§25: the one-step decode of §16.3 step 1,
+the undriven → `gnd` normalisation of step 3, rule 8 decoded on clock names only, E12's second VPR
+message). v2.4 (2026-10-12): v2.3 plus the 3E-2 final review's amendments (§24: `--writer-log`
 pairs C-S2 with the writer's class-U warnings in §16.4's oracle; §15.1's C7 and C8/C9 notes on
 repeats VPR accepts). v2.3 (2026-10-12): v2.2 plus the §24 erratum of the 3E Task 7 review (I1:
 VPR makes the data ports of memory-class pb_types 1 bit wide; §2's table, R11, §15.2 and §16.4
@@ -773,10 +775,12 @@ case. `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline
    - `renamed == 0`: **W1 == W2 byte for byte** (idempotence; the header line is identical
      because nothing in it depends on the run);
    - `renamed > 0` (the 25 Parmys k6 goldens with a mid-name `\`, §3 item 9, and any Odin III
-     design with a reserved or illegal name): **W1 and W2 identical under `--vtr-normalize`**,
-     whose VB-10 decode runs to a fixed point (one decoding step inverts one write exactly,
-     point (o); repeating it until nothing changes decodes `%255C` and `%5C` alike, to `\`);
-     the byte comparison is not applied. Such files are listed `decoded`.
+     design with a reserved or illegal name): **W1's tokens equal W2's after one VB-10
+     decoding step** (`netlist-compare --vtr-rewrite W1 W2`; one step inverts one write exactly
+     and is injective, point (o), so `$2%255Cbuffer` in W2 decodes to W1's `$2%5Cbuffer`); the
+     byte comparison is not applied. Such files are listed `decoded`. **Erratum (3E-4 Task 10
+     review I1, §25):** the fixed-point decode first written here is not injective (`y%41` and
+     `yA` meet) and is not used for a verdict.
 
    The escape set stays as it is (§10 item 1). CI runs this step on every written fixture
    (`blif_vtr_fixtures`; the decode is `vtr_normalized` in `tools/blif-vtr-check/vtr_fixtures.py`
@@ -791,8 +795,12 @@ case. `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline
 3. **Odin II k6 goldens**: `netlist-compare --vtr-normalize G W1` identical. `--vtr-normalize`
    (new flag, 3E-4) applies the writer's documented rewrites to both sides before
    canonicalising: latch init 3 → 2; an omitted `.subckt` input formal bit ≡ `=unconn`; `.clock`
-   lines dropped; VB-10 names decoded to a fixed point (step 1); §6's constant and 1-input
-   normalisation. The 6 `fe` files → E1, the 92 files with `.names` wider than
+   lines dropped; the written file's VB-10 names decoded by one strict step, the golden's never
+   (rule 8's `%7C`/`_%5E_` only on a name used as a `.latch` control or on a `.subckt` pin);
+   §6's constant and 1-input normalisation; and (agent default, 3E-4 Task 10, §25) an undriven
+   net read by a `.names` or a `.latch` D as `gnd`, by a `.subckt` input as `unconn`, and an
+   undriven primary output buffered from `gnd`, as the writer does (§9.2). `equiv-check` (step 4)
+   runs with `--allow-undriven` (an undriven net is 0, as the writer's `gnd`). The 6 `fe` files → E1, the 92 files with `.names` wider than
    6 → E7, the 2 multi-driver files → E12; each refused file's original is also rejected by VPR
    (§16.4).
 4. `equiv-check G W1` on every Odin II golden written in step 3 that has no RAM (PHASE0 #8) and
@@ -840,7 +848,7 @@ statistics, then stop: VPR's whole reader at a fraction of a route's cost. **Ora
   | E9 (inout) | cannot occur in BLIF; failure |
   | E10 (hierarchy) | `Found multiple models with primitives …` |
   | E11 (parameters) | depends; listed per file |
-  | E12 (multi-driver) | the R16 assertion |
+  | E12 (multi-driver) | the R16 assertion, or `Inconsistent block data sizes` (VPR's netlist check, §25) |
   | E13 (no top) | `No non-blackbox models found …` |
 
 - **checker agreement**: `blif-vtr-check G`'s verdict equals VPR's on G for all 923, and on every
@@ -1013,3 +1021,13 @@ No minor finding was rejected.
 | I1 (3E-2 final) | §16.4's `--strict W` oracle fails by design on every golden with class-U `unconn` on a `.names`/`.latch` pin (§9.2 keeps it; C-S2 flags it): ≥ 39 goldens | applied (controller's ruling): checker option `--writer-log` (§15.1) pairs C-S2 with the writer's class-U warnings by count; §16.4 and plan Task 11 use it; every other `--strict` rule unchanged |
 | M1 (3E-2 final) | §15.1 C7 stricter than VPR for a formal repeated on the same net (Task 6 review M4) | applied: note in C7 (the checker keeps refusing both) |
 | M3 (3E-2 final) | `.inputs a a` gave C8 and C9; VPR accepts it | applied: a repeated `.inputs`/`.outputs` name is one pad (C9 note) |
+
+## 25. Errata after 3E-4 (v2.5, 2026-10-12)
+
+| # | Finding | Disposition |
+|---|---|---|
+| I1 (Task 10 review) | §16.3 step 1's fixed-point decode is not injective (`y%41` and `yA` decode alike), so a name written wrongly could pass | applied (controller's ruling): step 1 compares W1 with one strict VB-10 step of W2 (`--vtr-rewrite`); step 3's `--vtr-normalize G W` decodes W by one step and G never; the fixed-point `vb10_decode` remains only in `vtr_fixtures`' report. PHASE3 #21's "fixed point" is amended likewise |
+| M3 (Task 10 review) | step 3 did not list the undriven-net rewrite the writer applies (§9.2) | applied as an agent default: `--vtr-normalize` rewrites an undriven `.names`/`.latch` D input to `gnd`, a `.subckt` input to `unconn`, an undriven output to a `gnd` buffer; `equiv-check --allow-undriven` |
+| nit (Task 10 review) | the one-step decode accepted rule 8's `%7C`/`%5E` on any net; §10 item 8 escapes them on clock nets only | applied (Task 11): decoded only on a written file's `.latch` controls and `.subckt` pins (a hard-block clock is a `.subckt` pin; which pin needs the arch models, which `netlist-compare` does not read), `^` only between two `_`; never in `--vtr-rewrite`, where W1's clock names are already escaped. No k6 golden holds `\|` or `_^_` (measured) |
+| Task 11 | §16.4's E12 row names the R16 assertion; VPR's Release build stops an Odin II multi-driver golden (`elsif_both_defined.odin`) at `Inconsistent block data sizes` (`netlist.tpp`) | applied: E12 pairs with either message |
+| Task 11 | §16.4's `flock … systemd-run --scope` text predates the slice correction | superseded by plan point (a): `tools/heavy-run` (`qor_heavy.reexec_under_lock`) |

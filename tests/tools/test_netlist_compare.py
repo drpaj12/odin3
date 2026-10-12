@@ -427,6 +427,28 @@ class VtrNormalizeTest(unittest.TestCase):
             with self.subTest(written=written):  # no write gives these: they stay as they are
                 self.assertEqual(written, netlist_compare.vb10_decode_once(written))
 
+    def test_rule8_decoded_only_on_clock_names(self) -> None:
+        # Spec §10 item 8: `|` and the `^` of `_^_` are escaped on clock nets only (3E-4
+        # Task 11, the Task 10 review's nit)
+        once = netlist_compare.vb10_decode_once
+        self.assertEqual(b"c|k_^_x", once(b"c%7Ck_%5E_x", clock=True))
+        for written in (b"c%7Ck", b"_%5E_"):
+            with self.subTest(written=written):
+                self.assertEqual(written, once(written))
+        self.assertEqual(b"a%5Eb", once(b"a%5Eb", clock=True))  # `^` not between two `_`
+        self.assertEqual(b"c|k", netlist_compare.vb10_decode(b"c%7Ck"))  # report-only
+
+        def latched(clk: str, data: str) -> str:
+            return model(f".latch {data} q re {clk} 2", ".names q y", "1 1",
+                         ports=f".inputs {data} {clk}\n.outputs y")
+
+        self.assertEqual(0, self.pair(latched("c|k", "d"), latched("c%7Ck", "d"))[1])
+        self.assertEqual(1, self.pair(latched("clk", "d|x"), latched("clk", "d%7Cx"))[1])
+        ram = model(".subckt mem clk=c|k a=a", tail=".model mem\n.inputs clk a\n.blackbox\n.end")
+        ram_w = ram.replace("c|k", "c%7Ck")
+        self.assertEqual(0, self.pair(ram.replace(".inputs a b clk", ".inputs a b c|k"),
+                                      ram_w.replace(".inputs a b clk", ".inputs a b c%7Ck"))[1])
+
     def test_latch_init_3_is_2(self) -> None:
         a = model(".latch a q re clk 3", ".names q y", "1 1")
         b = model(".latch a q re clk 2", ".names q y", "1 1")

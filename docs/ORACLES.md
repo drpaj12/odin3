@@ -49,6 +49,15 @@ Recorded 2026-10-08 (Phase 0 §4).
   except that `--allow-vtr-drift` lets a run at another commit go ahead as report-only. The pin
   is also `VTR_PIN` in `tools/vtr-qor/qor_legs.py`: moving VTR updates both, and every P job's
   key changes with it.
+- **The VPR-read oracle (3E §16.4).** `$VTR_ROOT/vpr/vpr <arch> F --circuit_format blif
+  --exit_before_pack on` runs VPR's whole BLIF reader (parse, clean, verify, netlist statistics)
+  and stops before packing: exit 0 means VPR reads F. `tools/vtr-read-check/vtr-read-check` runs
+  it on every `status=ok` k6 golden G and on `write_blif --vtr`'s W of it, and pairs each
+  refusal with VPR's message on G; `--bad-corpus tests/vtr/blif-bad` checks that VPR rejects
+  exactly the files `tools/blif-vtr-check` rejects, with each file's `# vpr:` text. VPR's
+  `vpr_throw` and `VPR_FATAL_ERROR` texts follow `Message:` (on stdout or stderr); its assertion
+  failures abort on stderr (exit 134 in a shell). A heavy run (`tools/heavy-run`); the CTests
+  `vtr_read_check_k6` and `vtr_read_check_k6_bad` (label `sweep`) wrap it.
 
 ## Rebuilding
 

@@ -881,6 +881,36 @@ if(BUILD_TESTING)
     set_tests_properties(blif_roundtrip_vtr_detects_wrong_function PROPERTIES LABELS unit
         PASS_REGULAR_EXPRESSION "parmys +written +- +bytes +different +- +FAIL +ff\\.parmys\\.blif.*odin +written +- +bytes +different +[^ ]+ +FAIL +ff\\.odin\\.blif.*RESULT: FAIL"
         ENVIRONMENT "BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>;BRT_CORRUPT=first-write")
+    # 3E §16.3-16.4 on every k6 golden (plan Task 11): the --vtr round trip and the VPR read
+    # sweep (vtr-read-check, plus its --bad-corpus check), heavy CTests (label `sweep`, one file
+    # at a time inside tools/heavy-run's 6G slice, point (u)). Registered only when VTR_ROOT has
+    # VPR at configure time and the k6 golden tree exists. Run them as `ODIN3_HEAVY_OK=1 ctest
+    # --preset release -L '^sweep$' -R 'blif_roundtrip_vtr_k6|vtr_read_check_k6' -j1`.
+    set(ODIN3_GOLDEN_K6 "$ENV{HOME}/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm"
+        CACHE PATH "The k6_frac golden tree the 3E sweeps read")
+    if(DEFINED ENV{VTR_ROOT} AND EXISTS "$ENV{VTR_ROOT}/vpr/vpr"
+       AND IS_DIRECTORY "${ODIN3_GOLDEN_K6}")
+        odin3_add_sweep_test(blif_roundtrip_vtr_k6 LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr -j 1 -m 5
+                    --rt $<TARGET_FILE:odin3-blif-rt> --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --out $ENV{HOME}/odin3-ws/work/blif-roundtrip-vtr-k6 ${ODIN3_GOLDEN_K6})
+        if(ODIN3_WITH_ABC)
+            set_tests_properties(blif_roundtrip_vtr_k6 PROPERTIES
+                ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:abc>")
+        endif()
+        odin3_add_sweep_test(vtr_read_check_k6 LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/vtr-read-check/vtr-read-check
+                    --golden-root ${ODIN3_GOLDEN_K6} --odin3 $<TARGET_FILE:odin3>)
+        odin3_add_sweep_test(vtr_read_check_k6_bad LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/vtr-read-check/vtr-read-check
+                    --odin3 $<TARGET_FILE:odin3> --work $ENV{HOME}/odin3-ws/work/vtr-read-check-bad
+                    --bad-corpus ${PROJECT_SOURCE_DIR}/tests/vtr/blif-bad)
+        set_tests_properties(vtr_read_check_k6 vtr_read_check_k6_bad PROPERTIES
+            ENVIRONMENT "VTR_ROOT=$ENV{VTR_ROOT}")
+    else()
+        message(STATUS "blif_roundtrip_vtr_k6/vtr_read_check_k6 not registered: no VPR under "
+                       "VTR_ROOT or no ${ODIN3_GOLDEN_K6}")
+    endif()
     # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
     # lists) against the expected files, then blif-vtr-check --strict on every expected file
     # (vtr_fixtures.STRICT_EXCEPTIONS without --strict).

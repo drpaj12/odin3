@@ -390,6 +390,10 @@ then the options considered.
       `--vtr-normalize`, whose VB-10 decode runs to a fixed point (`%255C` and `%5C` both decode
       to `\`). The escape set stays: `\` is escaped although VPR reads it mid-name, so the 25
       Parmys k6 goldens with a mid-name `\` are compared that way (3E §16.3 step 1).
+      **Erratum (3E-4, 2026-10-12; spec §25):** the fixed-point decode is not injective (`y%41`
+      and `yA` meet), so no verdict uses it. W1 is compared with W2 after one strict VB-10 step
+      (`netlist-compare --vtr-rewrite`), and `--vtr-normalize G W` decodes W by one step and G
+      never.
     - Agent defaults, for Peter's review:
       - `--vtr` drops the plain dialect's `.cname`/`.attr`/`.param` lines (eblif only; §5).
       - E12 counts OUT pins only; an INOUT pin is on a node E6 or E9 refuses already.
@@ -638,6 +642,81 @@ then the options considered.
       - `check` has no run-row rules;
       - the checker defaults of #27;
       - the QoR INCOMPLETE semantics, and EArch gated over its smoke set (#25 and E-QH14a–c).
+28. **3E-4 round-trip and VPR-read evidence: the measured counts and the agent defaults**
+    (2026-10-12; 3E spec §16.3–16.6 and §25, plan Tasks 10–11). Peter may override any default.
+    - **Write counts, measured.** `odin3 write_blif --vtr` was run on every `status=ok` k6
+      golden except LargeRam. Parmys (467): **458 written**, 9 refused: E1 ×4 (`fe`:
+      `negedge` ×2, `register`, `bm_jk_rtl`), E1b ×1 (`dffsre`), E5 ×4 (`$pow`: `pow`,
+      `pow_const`, `twobits_`/`eightbit_arithmetic_power`). The survey's 463 becomes 458,
+      because the 5 E1b/E5 files hold Yosys cells that no `.model` declares. Odin II (456): 355
+      written, 100 refused (E1 ×6, E7 ×92, E12 ×2), and LargeRam (915 MB) not run. Writing all
+      467 Parmys files took about 15 s; the largest, LU64PEEng (117 MB), peaked at 615 MB RSS.
+    - **VPR-read sample (real VPR, `--exit_before_pack on`).** It ran on 10 goldens:
+      - the 6 smallest (Odin II, all written), where VPR and the checker exit 0 on W and G;
+      - 4 refusals, each paired with VPR's message on G: E1 `bm_jk_rtl`, E1b `dffsre` (point
+        (e): `Subckt instantiates model '$_DFFSR_PPP_'`), E5 `pow`, and E12 `elsif_both_defined`
+        (`Inconsistent block data sizes`, §25).
+
+      `--bad-corpus tests/vtr/blif-bad` passes 18 of 18: VPR rejects exactly the files the
+      checker rejects, each with its `# vpr:` text.
+    - **Full sweeps (the controller's heavy runs; to fill in from their output).** The commands
+      are `ODIN3_HEAVY_OK=1 ctest --preset release -L '^sweep$' -R
+      'blif_roundtrip_vtr_k6|vtr_read_check_k6' -j1`. Still to record:
+      - the counts written and refused, per class and per tool;
+      - the wall times of §16.3 and §16.4;
+      - the files listed `decoded` (25 expected) and `normalized`;
+      - the `equiv-check` results, with timeouts listed;
+      - the class-U clock files that `vtr-read-check` lists, and the full VPR flow (pack, place,
+        route) of one of them (3E-1 final review M8).
+    - **Checklist (plan point (v)).** The line "3E `write_blif --vtr`: Parmys goldens round-trip
+      through it and route via `-start abc`" is ticked by 3H's R leg routing all 19 (3H-3/3H-4),
+      not by 3E-4. 3E-4 supplies the round-trip and VPR-read figures.
+    - **Agent defaults: the 3E plan's points (a)–(y)**, as implemented:
+      - (a) heavy runs go through `tools/heavy-run` via `qor_heavy`;
+      - (b) the `$lut` row in whichever PR landed second;
+      - (c) the `# abc:` header lines;
+      - (d) IR.md §5.3's first location;
+      - (e) E1b by name as well as registry, paired with `Subckt instantiates model`;
+      - (f) one refusal per node, in E-order;
+      - (g) E7 counts stored inputs;
+      - (h) E12's driver list;
+      - (i) `<loc>` as given;
+      - (j) a clock on `unconn` is a warning;
+      - (k) warning and info levels;
+      - (l) argument parsing;
+      - (m) `--name-style provenance` refused until 3E-6;
+      - (n) the API's refusals;
+      - (o) upper-case hex escapes;
+      - (p) plain-mode generators;
+      - (q) the `PASSES.md` row;
+      - (r) fixture inputs from the copied goldens;
+      - (s) the header line by pattern;
+      - (t) the ISOP order;
+      - (u) `-j 1` and `-m 5` in the sweeps;
+      - (v) the checklist tick above;
+      - (w) E11's list;
+      - (x) §14.1 answered by 3D;
+      - (y) spec §21's four decisions: x as `gnd` on logic, used stubs only, declared-index port
+        bits, and `--lut-k` default 6.
+    - **Agent defaults of Task 11:**
+      - **E12 pairing.** E12 also pairs with `Inconsistent block data sizes`.
+      - **E3b and E8.** They pair only with VPR accepting G (verdict `intended`).
+      - **E11.** It pairs with any verdict (`listed`).
+      - **Several classes.** A refusal with several classes pairs when one of them pairs and none
+        is ruled out (E4, E9, an unknown text).
+      - **Exit codes.** A checker exit 2 counts as a disagreement with VPR. Each step has a
+        3600 s cap.
+      - **The bad-corpus CTest.** It is `vtr_read_check_k6_bad`, so it matches the controller's
+        `-R`.
+      - **The message prefix.** The tool prints `vtr-read-check: …`, as `blif-roundtrip` prints
+        its own name.
+      - **Rule 8 (the Task 10 review's nit; spec §25).** `--vtr-normalize` decodes
+        `%7C`/`_%5E_` only on a written file's `.latch` controls and `.subckt` pins.
+        `--vtr-rewrite` never decodes them.
+    - **Risk.** LargeRam.odin (915 MB) is 8× LU64PEEng, where the checker holds about 3 GB, so
+      it will likely exceed the 6G cap. In the slice, an OOM kill shows as checker or VPR exit
+      `-9` and a `fail` row. If it does, run that one file on the xl slice, or list it as
+      excluded.
 
 ## Risks
 
