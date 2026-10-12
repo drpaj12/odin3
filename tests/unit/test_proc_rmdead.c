@@ -45,6 +45,7 @@ enum {
     PAT_MAX = 72,
     POOL_PATS = 16,
     CAP_BITS = 8,
+    NESTED_CAP_BITS = 24,
     WIDE = 40,
     NET_BIT = 5,
     NO_CAP = 0,
@@ -395,6 +396,99 @@ static void test_rmdead_pattern_cap(void) {
     TEST_ASSERT_EQUAL_size_t(2, check_warnings(k_cap_warning));
 }
 
+/* rmdead_cap_located.il: W5a is located at the switch's record when it has one (`attribute \\src`
+ * before the switch; Yosys prints that attribute, pb_print does not). */
+static void test_rmdead_cap_located(void) {
+    char text[LOG_TEXT * 2];
+    const char *needle = "    switch \\a4\n";
+    const char *at = strstr(k_cap_text, needle);
+    TEST_ASSERT_NOT_NULL(at);
+    int len = snprintf(text, sizeof text, "%.*s    attribute \\src \"t.v:7.5\"\n%s",
+                       (int)(at - k_cap_text), k_cap_text, at);
+    TEST_ASSERT_TRUE(len > 0 && len < (int)sizeof text);
+    rmdead_run(text, CAP_BITS, CAP_CASES "    case\n      assign \\y \\f\n  end\nend\n");
+    TEST_ASSERT_EQUAL_size_t(1,
+                             check_warnings("odin3: warning: t.v:7:5: warning: case analysis needs "
+                                            "more than 8 pattern bits; no more dead cases are "
+                                            "removed from this case statement"));
+}
+
+/*
+ * rmdead_cap_parallel.il: 4'11-- is inside 4'1---. Yosys (no cap) removes it and the switch stays
+ * parallel_case. Under the cap both stay, so a $pmux of the parallel_case switch would have two hot
+ * selects (x) where Yosys gives a; the tripped switch loses parallel_case, and the priority chain
+ * built instead gives a (§20 #7).
+ */
+static void test_rmdead_cap_parallel(void) {
+    const char *text = CAP_HEAD "    attribute \\parallel_case 1\n"
+                                "    switch \\a4\n"
+                                "      case 4'1---\n        assign \\y \\a\n"
+                                "      case 4'11--\n        assign \\y \\b\n"
+                                "      case\n        assign \\y \\c\n"
+                                "    end\n" TAIL;
+    rmdead_run(text, NO_CAP,
+               "  attribute \\full_case 1\n"
+               "  attribute \\parallel_case 1\n"
+               "  switch \\a4\n"
+               "    case 4'1---\n      assign \\y \\a\n"
+               "    case\n      assign \\y \\c\n"
+               "  end\n"
+               "end\n");
+    rmdead_run(text, CAP_BITS,
+               "  switch \\a4\n"
+               "    case 4'1---\n      assign \\y \\a\n"
+               "    case 4'11--\n      assign \\y \\b\n"
+               "    case\n      assign \\y \\c\n"
+               "  end\n"
+               "end\n");
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+}
+
+/*
+ * rmdead_cap_nested.il under a cap of 24: the outer pool holds 2 patterns of 4 bits (16 bits)
+ * while the inner switch runs; the inner pool alone stays within 24 bits (8, then 16), but the two
+ * together reach 32, so the inner pool stops: its 4'1100 and default stay, no full_case, one W5a.
+ * The outer switch is unaffected and gains full_case. Without the cap: Yosys's result.
+ */
+static void test_rmdead_cap_nested(void) {
+    const char *text = "module \\m\n  wire width 4 \\a4\n  wire width 4 \\b4\n  wire \\a\n"
+                       "  wire \\b\n  wire \\c\n  wire \\y\n  wire \\z\n  process $p\n"
+                       "    switch \\a4\n"
+                       "      case 4'11--\n"
+                       "        switch \\b4\n"
+                       "          case 4'11--\n            assign \\z \\a\n"
+                       "          case 4'1100\n            assign \\z \\b\n"
+                       "          case\n            assign \\z \\c\n"
+                       "        end\n"
+                       "      case\n        assign \\y \\c\n"
+                       "    end\n" TAIL;
+    rmdead_run(text, NESTED_CAP_BITS,
+               "  attribute \\full_case 1\n"
+               "  switch \\a4\n"
+               "    case 4'11--\n"
+               "      switch \\b4\n"
+               "        case 4'11--\n          assign \\z \\a\n"
+               "        case 4'1100\n          assign \\z \\b\n"
+               "        case\n          assign \\z \\c\n"
+               "      end\n"
+               "    case\n      assign \\y \\c\n"
+               "  end\n"
+               "end\n");
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+    rmdead_run(text, NO_CAP,
+               "  attribute \\full_case 1\n"
+               "  switch \\a4\n"
+               "    case 4'11--\n"
+               "      attribute \\full_case 1\n"
+               "      switch \\b4\n"
+               "        case 4'11--\n          assign \\z \\a\n"
+               "        case\n          assign \\z \\c\n"
+               "      end\n"
+               "    case\n      assign \\y \\c\n"
+               "  end\n"
+               "end\n");
+}
+
 /* --- through the pass ------------------------------------------------------------------------- */
 
 /* The info line among the captured lines (the pass manager logs after it). */
@@ -647,7 +741,7 @@ static void test_ppool_cap(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ppool_init(&pool, 2));
     expect_take(&pool, &pw, "01", true); /* 1 + 2 patterns of 4 bits: 12 > 8 */
     TEST_ASSERT_EQUAL_INT(1, pool.over_cap);
-    expect_pool(&pool, "--");
+    expect_pool(&pool, ""); /* the patterns are dropped */
     expect_take(&pool, &pw, "11", true);
     expect_has_all(&pool, &pw, "--", false);
     odin3_ppool_take_all(&pool);
@@ -658,6 +752,15 @@ static void test_ppool_cap(void) {
     TEST_ASSERT_EQUAL_INT(1, pool.over_cap);
     TEST_ASSERT_EQUAL_size_t(0, pool.words.len);
     odin3_ppool_free(&pool);
+    odin3_proc_test_set_limits(NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ppool_init(&pool, 2));
+    odin3_ppool_stop(&pool); /* rmdead's walk-wide cap */
+    TEST_ASSERT_EQUAL_INT(1, pool.over_cap);
+    expect_pool(&pool, "");
+    expect_take(&pool, &pw, "01", true);
+    TEST_ASSERT_EQUAL_INT(0, odin3_ppool_empty(&pool));
+    odin3_ppool_free(&pool);
+    odin3_ppool_stop(NULL);
     odin3_pw_free(&pw);
 }
 
@@ -888,6 +991,9 @@ int main(void) {
     RUN_TEST(test_rmdead_const_signal);
     RUN_TEST(test_rmdead_empty_signal);
     RUN_TEST(test_rmdead_pattern_cap);
+    RUN_TEST(test_rmdead_cap_located);
+    RUN_TEST(test_rmdead_cap_parallel);
+    RUN_TEST(test_rmdead_cap_nested);
     RUN_TEST(test_rmdead_stop_after);
     RUN_TEST(test_ppool_ops);
     RUN_TEST(test_ppool_dedupe);

@@ -21,9 +21,10 @@
  * (00 = 0, 01 = 1, 11 = '-') packed LSB first, 32 positions to a uint64_t word; words holds
  * words_per_pattern words per pattern (padding positions 00). bits_used is 2 * width * the number
  * of patterns held. over_cap: a take needed more than the pattern-bit cap
- * (odin3_proc_limits_now().max_pattern_bits, ODIN3_PROC_MAX_PATTERN_BITS), so the pool no longer
- * says which values are left: every take is then a no-op that reports the pattern taken, has_all
- * is false and the pool is never empty. Read the fields; change them only through these calls.
+ * (odin3_proc_limits_now().max_pattern_bits, ODIN3_PROC_MAX_PATTERN_BITS), or the pool was
+ * stopped, so it no longer says which values are left: its patterns are dropped (bits_used 0),
+ * every take is a no-op that reports the pattern taken, has_all is false and the pool is never
+ * empty. Read the fields; change them only through these calls.
  */
 typedef struct odin3_ppool {
     odin3_vec words;
@@ -52,10 +53,12 @@ odin3_status odin3_ppool_init_sig(odin3_ppool *pool, const odin3_pw *pw, odin3_p
  * removes every pattern it matches (no position where both are 0 or 1 and differ), and for each
  * removed pattern p and each position where p has '-' and pattern has 0 or 1, the pattern p with
  * that position set to the opposite value is inserted (each once). *taken: some pattern matched;
- * false on an empty pool. When the pool's patterns plus the inserted ones would hold more than
- * the cap's bits, the pool sets over_cap instead and is unchanged; once over_cap it is a no-op
- * with *taken true. ODIN3_ERR_NO_MEMORY with the pool unchanged; ODIN3_ERR_INVALID_ARG (logged)
- * for a NULL argument or, on a non-empty pool, a pattern whose length is not the pool's width.
+ * false on an empty pool. When the pool's patterns plus the inserted ones (before deduplication:
+ * Yosys inserts them before it erases the matched pattern) would hold more than the cap's bits,
+ * the pool is stopped instead (odin3_ppool_stop) and *taken is true; once over_cap a take is a
+ * no-op with *taken true. ODIN3_ERR_NO_MEMORY with the pool unchanged; ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL argument or, on a non-empty pool, a pattern whose length is not the pool's
+ * width.
  */
 odin3_status odin3_ppool_take(odin3_ppool *pool, const odin3_pw *pw, odin3_pw_sig pattern,
                               bool *taken);
@@ -72,6 +75,10 @@ void odin3_ppool_take_all(odin3_ppool *pool);
 
 /* No pattern is left (never once over_cap). */
 bool odin3_ppool_empty(const odin3_ppool *pool);
+
+/* Gives the pool up as past the cap: its patterns are freed and over_cap is set (a caller that
+ * bounds several live pools together, rmdead's walk, stops the one that grew). NULL: no-op. */
+void odin3_ppool_stop(odin3_ppool *pool);
 
 /* Frees the patterns and empties the pool (over_cap cleared); NULL is a no-op. */
 void odin3_ppool_free(odin3_ppool *pool);

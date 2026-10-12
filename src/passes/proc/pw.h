@@ -68,6 +68,8 @@ typedef struct odin3_pw_attr {
     const odin3_value *value;
 } odin3_pw_attr;
 
+/* The process. A case or switch the phases unlink stays in cases/switches with stale content, so
+ * walk the tree from the root case, never those vectors flat. */
 typedef struct odin3_pw {
     odin3_node_id node;    /* the $proc node, until step B deletes it */
     odin3_prov_id prov;    /* the node's SOURCE record (EL-45: its ALWAYS) */

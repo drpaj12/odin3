@@ -38,6 +38,8 @@ enum {
     OOM_LIMIT = 4000,
     CHAIN_DEPTH = 200,
     CHAIN_SWEEPS_MAX = 201,
+    DEEP_STEPS = 81202, /* test_clean_work_count's frame steps today: about 2 x 200 x 202 */
+    SEQ_STEPS = 80202,
 };
 
 static odin3_log_level levels[LOG_LINES];
@@ -193,6 +195,24 @@ static void test_clean_dash_compare_kept(void) {
                  "end\n");
 }
 
+/* clean_fold_stops_at_default.il: the fold walks the cases only up to a default case: 2'01 goes,
+ * the default and the 2'10 after it stay, and with no match the signal stays. */
+static void test_clean_fold_stops_at_default(void) {
+    clean_expect("module \\m\n  wire \\a\n  wire \\b\n  wire \\c\n  wire \\y\n  process $p\n"
+                 "    switch 2'10\n"
+                 "      case 2'01\n        assign \\y \\a\n"
+                 "      case\n        assign \\y \\b\n"
+                 "      case 2'10\n        assign \\y \\c\n"
+                 "    end\n"
+                 "  end\nend\n",
+                 ODIN3_PW_CLEAN_WHOLE_TREE,
+                 "  switch 2'10\n"
+                 "    case\n      assign \\y \\b\n"
+                 "    case 2'10\n      assign \\y \\c\n"
+                 "  end\n"
+                 "end\n");
+}
+
 /* clean_const_not_first.il: the match is case 0, so the signal is cleared (Yosys prints
  * `switch { }`), but the switch is not its parent's first, so it is not inlined. */
 static void test_clean_const_not_first(void) {
@@ -284,6 +304,24 @@ static void expect_full_all_empty(void) {
     TEST_ASSERT_EQUAL_UINT32(3, odin3_proc_test_clean_sweeps());
 }
 
+/*
+ * clean_par_all_empty.il (attr: parallel_case) and clean_trail_all_empty.il (no attribute): every
+ * case is empty, so the parallel and the trailing rule each remove them all and set did_something;
+ * the second sweep removes the caseless switch and the third changes nothing (3 sweeps). Without
+ * that did_something the caseless switch would stay, as it does under full_case.
+ */
+static void expect_all_empty_removed(const char *attr, const char *cases) {
+    char text[LOG_TEXT];
+    int len =
+        snprintf(text, sizeof text,
+                 "module \\m\n  wire \\s\n  wire \\a\n  wire \\y\n  process $p\n%s"
+                 "    switch \\s\n%s    end\n    sync always\n      update \\y \\a\n  end\nend\n",
+                 attr, cases);
+    TEST_ASSERT_TRUE(len > 0 && len < (int)sizeof text);
+    clean_expect(text, ODIN3_PW_CLEAN_WHOLE_TREE, "  sync always\n    update \\y \\a\nend\n");
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_proc_test_clean_sweeps());
+}
+
 /* clean_empty_none.il, clean_empty_par.il, clean_empty_full.il: only trailing empty cases go;
  * under parallel_case every empty case; under full_case nothing unless all are empty, then all. */
 static void test_clean_empty_cases(void) {
@@ -311,6 +349,8 @@ static void test_clean_empty_cases(void) {
                  "  end\n"
                  "end\n");
     expect_full_all_empty();
+    expect_all_empty_removed(PAR_ATTR, "      case 1'0\n      case 1'1\n");
+    expect_all_empty_removed("", "      case 1'0\n      case\n");
 }
 
 /* --- empty syncs and actions ------------------------------------------------------------------ */
@@ -499,6 +539,57 @@ static void test_clean_terminates(void) {
     odin3_strbuf_free(&text);
 }
 
+/* Appends `count` copies of piece to out. */
+static void repeat_text(odin3_strbuf *out, const char *piece, int count) {
+    for (int i = 0; i < count; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(out, odin3_bytes_cstr(piece)));
+    }
+}
+
+/* clean on text must print want within limits[0] sweeps and limits[1] frame steps. */
+static void work_expect(const odin3_strbuf *text, const odin3_strbuf *want,
+                        const uint64_t limits[2]) {
+    clean_expect(text->data, ODIN3_PW_CLEAN_WHOLE_TREE, want->data);
+    TEST_ASSERT_TRUE(odin3_proc_test_clean_sweeps() <= limits[0]);
+    TEST_ASSERT_TRUE(odin3_proc_test_clean_steps() <= limits[1]);
+}
+
+/*
+ * The work of shapes whose every sweep walks the whole remaining tree (spec §5.1, §19: O(body x
+ * sweeps), as Yosys's proc_clean). clean_deep_empty_ifs.il: 200 nested `if (s) ;` with empty
+ * branches, each sweep peeling one level; clean_seq_const_ifs.il: 200 sequential switches on 1'0
+ * (`if (en)` with `wire en = 1'b0`, which 2E folds through the net view), each sweep inlining one.
+ * Today both take exactly CHAIN_DEPTH + 2 sweeps and exactly DEEP_STEPS and SEQ_STEPS frame steps
+ * (quadratic); a later worklist must give the same bodies and may only lower the counts.
+ */
+static void test_clean_work_count(void) {
+    odin3_strbuf text;
+    odin3_strbuf want;
+    odin3_strbuf_init(&text);
+    odin3_strbuf_init(&want);
+    repeat_text(&text, "module \\m\n  wire \\s\n  wire \\a\n  wire \\y\n  process $p\n", 1);
+    repeat_text(&text, "switch \\s\ncase 1'1\n", CHAIN_DEPTH);
+    repeat_text(&text, "case\nend\n", CHAIN_DEPTH);
+    repeat_text(&text, "    sync always\n      update \\y \\a\n  end\nend\n", 1);
+    repeat_text(&want, "  sync always\n    update \\y \\a\nend\n", 1);
+    uint64_t deep[2] = {CHAIN_DEPTH + 2, DEEP_STEPS};
+    work_expect(&text, &want, deep);
+    odin3_strbuf_free(&text);
+    odin3_strbuf_free(&want);
+    odin3_strbuf_init(&text);
+    odin3_strbuf_init(&want);
+    repeat_text(&text, "module \\m\n  wire \\a\n  wire \\b\n  wire \\y\n  process $p\n", 1);
+    repeat_text(&text, "switch 1'0\ncase 1'1\nassign \\y \\a\ncase\nassign \\y \\b\nend\n",
+                CHAIN_DEPTH);
+    repeat_text(&text, "  end\nend\n", 1);
+    repeat_text(&want, "  assign \\y \\b\n", CHAIN_DEPTH);
+    repeat_text(&want, "end\n", 1);
+    uint64_t seq[2] = {CHAIN_DEPTH + 2, SEQ_STEPS};
+    work_expect(&text, &want, seq);
+    odin3_strbuf_free(&text);
+    odin3_strbuf_free(&want);
+}
+
 /* --- through the pass ------------------------------------------------------------------------- */
 
 /* The info line among the captured lines (the pass manager logs after it). */
@@ -601,6 +692,7 @@ int main(void) {
     RUN_TEST(test_clean_x_compare_kept);
     RUN_TEST(test_clean_dash_compare_kept);
     RUN_TEST(test_clean_const_not_first);
+    RUN_TEST(test_clean_fold_stops_at_default);
     RUN_TEST(test_clean_inline_first_only);
     RUN_TEST(test_clean_empty_cases);
     RUN_TEST(test_clean_sync_empty);
@@ -608,6 +700,7 @@ int main(void) {
     RUN_TEST(test_clean_depth_one);
     RUN_TEST(test_clean_case_index);
     RUN_TEST(test_clean_terminates);
+    RUN_TEST(test_clean_work_count);
     RUN_TEST(test_clean_stop_after);
     RUN_TEST(test_clean_oom);
     return UNITY_END();

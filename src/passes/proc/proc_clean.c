@@ -19,11 +19,16 @@
 #include <stdint.h>
 #include <string.h>
 
-/* The sweeps of the last odin3_pw_clean call (proc_test.h). */
+/* The sweeps and the frame steps of the last odin3_pw_clean call (proc_test.h). */
 static uint32_t g_sweeps;
+static uint64_t g_steps;
 
 uint32_t odin3_proc_test_clean_sweeps(void) {
     return g_sweeps;
+}
+
+uint64_t odin3_proc_test_clean_steps(void) {
+    return g_steps;
 }
 
 /* --- the working form's vectors -------------------------------------------------------------- */
@@ -34,6 +39,21 @@ static void vec_erase(odin3_vec *vec, size_t pos) {
     memmove(data + pos * vec->elem_size, data + (pos + 1) * vec->elem_size,
             (vec->len - pos - 1) * vec->elem_size);
     odin3_vec_pop(vec);
+}
+
+/* Drops the elements from len on. */
+static void vec_truncate(odin3_vec *vec, size_t len) {
+    while (vec->len > len) {
+        odin3_vec_pop(vec);
+    }
+}
+
+/* Moves element from to slot to (to <= from), the compaction step of a one-pass removal. */
+static void vec_move(odin3_vec *vec, size_t to, size_t from) {
+    if (to != from) {
+        char *data = vec->data;
+        memcpy(data + to * vec->elem_size, data + from * vec->elem_size, vec->elem_size);
+    }
 }
 
 /* Inserts the n elements at src in front of vec's, whose room the caller reserved. */
@@ -62,31 +82,32 @@ static uint32_t index_at(const odin3_vec *vec, size_t pos) {
     return *(const uint32_t *)odin3_vec_cat(vec, pos);
 }
 
-/* Removes every action whose lhs is empty; *did when one goes. */
+/* Removes every action whose lhs is empty, in one pass; *did when one goes. */
 static void drop_empty_actions(odin3_vec *actions, bool *did) {
-    for (size_t i = 0; i < actions->len;) {
-        if (((const odin3_pw_action *)odin3_vec_cat(actions, i))->lhs.len == 0) {
-            vec_erase(actions, i);
-            *did = true;
-        } else {
-            i++;
+    size_t kept = 0;
+    for (size_t i = 0; i < actions->len; i++) {
+        if (((const odin3_pw_action *)odin3_vec_cat(actions, i))->lhs.len != 0) {
+            vec_move(actions, kept++, i);
         }
     }
+    *did = *did || kept < actions->len;
+    vec_truncate(actions, kept);
 }
 
 /* proc_clean's sync step (before the sweeps): empty actions, then syncs left without actions. */
 static void clean_syncs(odin3_pw *pw) {
     bool unused = false; /* Yosys sets no did_something here */
-    for (size_t i = 0; i < pw->syncs.len;) {
+    size_t kept = 0;
+    for (size_t i = 0; i < pw->syncs.len; i++) {
         odin3_pw_sync *sync = odin3_vec_at(&pw->syncs, i);
         drop_empty_actions(&sync->actions, &unused);
         if (sync->actions.len == 0) {
             odin3_vec_free(&sync->actions);
-            vec_erase(&pw->syncs, i);
         } else {
-            i++;
+            vec_move(&pw->syncs, kept++, i);
         }
     }
+    vec_truncate(&pw->syncs, kept);
 }
 
 /* --- the switch rules (proc_clean_switch) ---------------------------------------------------- */
@@ -97,17 +118,17 @@ static void clean_syncs(odin3_pw *pw) {
  * others (x, z, '-', nets) are kept and skipped.
  */
 static bool match_compares(const odin3_pw *pw, odin3_pw_case *cs, odin3_pw_sig signal) {
-    for (size_t j = 0; j < cs->compares.len;) {
+    size_t kept = 0;
+    for (size_t j = 0; j < cs->compares.len; j++) {
         odin3_pw_sig val = *(const odin3_pw_sig *)odin3_vec_cat(&cs->compares, j);
         if (!odin3_pw_sig_is_fully_def(pw, val)) {
-            j++;
+            vec_move(&cs->compares, kept++, j);
         } else if (odin3_pw_sig_equal(pw, val, signal)) {
             odin3_vec_clear(&cs->compares);
             return true;
-        } else {
-            vec_erase(&cs->compares, j);
         }
     }
+    vec_truncate(&cs->compares, kept);
     return false;
 }
 
@@ -121,23 +142,23 @@ static void fold_constant(odin3_pw *pw, odin3_pw_switch *sw) {
         return;
     }
     bool found = false;
+    size_t kept = 0; /* cases [0, kept) stay; the walk is at `at` */
     size_t at = 0;
-    while (at < sw->cases.len && !found) {
+    for (; at < sw->cases.len && !found; at++) {
         odin3_pw_case *cs = case_at(pw, index_at(&sw->cases, at));
         if (cs->compares.len == 0) {
-            break;
+            break; /* a default case: it and every later case stay */
         }
         found = match_compares(pw, cs, sw->signal);
-        if (!found && cs->compares.len == 0) {
-            vec_erase(&sw->cases, at);
-        } else if (!found) {
-            at++;
+        if (found || cs->compares.len != 0) {
+            vec_move(&sw->cases, kept++, at);
         }
     }
-    while (found && sw->cases.len > at + 1) {
-        odin3_vec_pop(&sw->cases);
+    for (; !found && at < sw->cases.len; at++) {
+        vec_move(&sw->cases, kept++, at);
     }
-    if (found && at == 0) {
+    vec_truncate(&sw->cases, kept); /* after a match, the later cases go */
+    if (found && kept == 1) {
         sw->signal = (odin3_pw_sig){0, 0};
     }
 }
@@ -151,13 +172,6 @@ static bool can_inline(odin3_pw *pw, const odin3_pw_case *parent, uint32_t sw_id
         return false;
     }
     return sw->signal.len == 0 || case_at(pw, index_at(&sw->cases, 0))->compares.len == 0;
-}
-
-/* Empties case cs, which the tree no longer reaches (Yosys deletes it). */
-static void drop_case(odin3_pw_case *cs) {
-    odin3_vec_clear(&cs->compares);
-    odin3_vec_clear(&cs->actions);
-    odin3_vec_clear(&cs->switches);
 }
 
 /* Is case case_id empty (Yosys's CaseRule::empty: no actions and no switches)? */
@@ -220,8 +234,7 @@ static odin3_status inline_switch(clean_walk *walk, odin3_pw_case *parent, uint3
             *(const odin3_pw_action *)odin3_vec_cat(&only->actions, i);
     }
     vec_insert_front(&parent->switches, only->switches.data, only->switches.len);
-    drop_case(only);
-    odin3_vec_clear(&sw->cases);
+    odin3_vec_clear(&sw->cases); /* the case is unlinked, its content stale (pw.h) */
     walk->did = true;
     return ODIN3_OK;
 }
@@ -276,14 +289,14 @@ static void drop_full_cases(clean_walk *walk, odin3_pw_switch *sw) {
 
 /* parallel_case without full_case: every empty case goes. */
 static void drop_parallel_cases(clean_walk *walk, odin3_pw_switch *sw) {
-    for (size_t i = 0; i < sw->cases.len;) {
-        if (case_empty(walk->pw, index_at(&sw->cases, i))) {
-            vec_erase(&sw->cases, i);
-            walk->did = true;
-        } else {
-            i++;
+    size_t kept = 0;
+    for (size_t i = 0; i < sw->cases.len; i++) {
+        if (!case_empty(walk->pw, index_at(&sw->cases, i))) {
+            vec_move(&sw->cases, kept++, i);
         }
     }
+    walk->did = walk->did || kept < sw->cases.len;
+    vec_truncate(&sw->cases, kept);
 }
 
 /* The empty-case rules: full_case, parallel_case, else the trailing empty cases go. */
@@ -320,6 +333,7 @@ static odin3_status step_switch(clean_walk *walk) {
 static odin3_status sweep(clean_walk *walk, uint32_t case_id, int32_t depth) {
     odin3_status st = push_case(walk, case_id, depth);
     while (st == ODIN3_OK && walk->stack.len > 0) {
+        g_steps++;
         st = top_frame(walk)->is_switch ? step_switch(walk) : step_case(walk);
     }
     odin3_vec_clear(&walk->stack);
@@ -338,6 +352,7 @@ odin3_status odin3_pw_clean(odin3_pw *pw, uint32_t case_index, int32_t max_depth
     odin3_vec_init(&walk.stack, sizeof(clean_frame));
     odin3_status st = ODIN3_OK;
     g_sweeps = 0;
+    g_steps = 0;
     while (st == ODIN3_OK && walk.did) {
         walk.did = false;
         g_sweeps++;

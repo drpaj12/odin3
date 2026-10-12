@@ -315,7 +315,7 @@ static odin3_status take_patterns(odin3_ppool *pool, const odin3_pw *pw, odin3_p
     if (st != ODIN3_OK || count.matched == 0) {
         /* nothing matched: the pool is unchanged */
     } else if (past_cap(pool, (uint64_t)held + count.children)) {
-        pool->over_cap = true;
+        odin3_ppool_stop(pool);
     } else if (count.children == 0) {
         drop_matched(pool, probe.data);
         pool->bits_used = (uint64_t)n_patterns(pool) * BITS_PER_PAIR * pool->width;
@@ -378,6 +378,14 @@ void odin3_ppool_take_all(odin3_ppool *pool) {
 
 bool odin3_ppool_empty(const odin3_ppool *pool) {
     return pool != NULL && !pool->over_cap && pool->words.len == 0;
+}
+
+void odin3_ppool_stop(odin3_ppool *pool) {
+    if (pool != NULL) {
+        odin3_vec_free(&pool->words);
+        pool->bits_used = 0;
+        pool->over_cap = true;
+    }
 }
 
 void odin3_ppool_free(odin3_ppool *pool) {

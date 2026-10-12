@@ -197,13 +197,15 @@ odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at);
 
 /*
  * clean (§5.1, PR-7; proc_clean.c): Yosys 0.55's proc_clean_case on case case_index of pw, swept
- * until a sweep sets Yosys's did_something (an empty action, empty switch, inline, or a parallel or
- * trailing empty case removed; a constant switch folded or a full_case switch emptied does not).
- * max_depth -1 is the whole tree; arst passes 1. With case_index 0 and max_depth -1 it is
- * proc_clean on the process: first every sync action with an empty lhs, then every sync without
- * actions, is removed. An inlined switch stays in its parent's list with no cases until the
- * parent's walk reaches it again, as in Yosys. No recursion. ODIN3_ERR_NO_MEMORY (pw stays a valid
- * tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL pw or a case index past its cases.
+ * again while a sweep sets Yosys's did_something (an empty action, empty switch, inline, or a
+ * parallel or trailing empty case removed; a constant switch folded or a full_case switch emptied
+ * sets none). Each sweep walks the subtree from case_index, as Yosys's does, so the cost is
+ * O(subtree x sweeps) (§19). max_depth -1 is the whole tree; arst passes 1. With case_index 0 and
+ * max_depth -1 it is proc_clean on the process: first every sync action with an empty lhs, then
+ * every sync without actions, is removed. An inlined switch stays in its parent's list with no
+ * cases until the parent's walk reaches it again, as in Yosys. No recursion. ODIN3_ERR_NO_MEMORY
+ * (pw stays a valid tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL pw or a case index past its
+ * cases.
  */
 odin3_status odin3_pw_clean(odin3_pw *pw, uint32_t case_index, int32_t max_depth);
 
@@ -215,9 +217,11 @@ enum { ODIN3_PW_CLEAN_WHOLE_TREE = -1 };
  * depth first, cases in order, each switch with its own pool (odin3_fdpool when its signal has no
  * constant bit and every compare is fully defined, else odin3_ppool): compares the pool does not
  * take are removed, a non-default case left without compares is removed, a default case takes
- * all, and a switch whose pool ends empty gains ODIN3_SWITCH_FULL_CASE. A pattern pool past the cap
- * gives W5a once for its switch (at the switch's record, else the process's) and keeps the rest of
- * that switch. ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
+ * all, and a switch whose pool ends empty gains ODIN3_SWITCH_FULL_CASE. The pattern pools of the
+ * switches being processed (a switch and the ones nested in its current case) share the cap: past
+ * it the pool that grew stops (odin3_ppool_stop), its switch keeps the rest of its cases and
+ * compares, loses ODIN3_SWITCH_PARALLEL_CASE (§20 #7) and gets W5a once (at the switch's record,
+ * else the process's). ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
  */
 odin3_status odin3_pw_rmdead(odin3_proc_mctx *mctx, odin3_pw *pw);
 
