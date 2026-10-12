@@ -100,6 +100,9 @@ static bool clock_caret(const unsigned char *text, size_t len, size_t at) {
 }
 
 odin3_status odin3_blif_vtr_clock_name(odin3_bytes legal, odin3_strbuf *out) {
+    if (legal.len == 0) {
+        return ODIN3_OK; /* an empty name escapes to nothing; `legal.ptr` may be NULL */
+    }
     size_t start = out->len;
     const unsigned char *bytes = legal.ptr;
     odin3_status st = ODIN3_OK;
