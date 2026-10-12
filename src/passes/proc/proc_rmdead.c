@@ -36,7 +36,7 @@ typedef struct rd_frame {
     bool is_default; /* that case is the default */
     bool fd;         /* the pool is fp (FullyDefinedPool), else pp (BitPatternPool) */
     bool warned;     /* W5a was given for this switch */
-    bool exhausted;  /* past the cap, a compare without 0/1 bits was taken: the pool is empty */
+    bool exhausted;  /* past the cap, a compare without 0/1 bits or a default: the pool is empty */
     odin3_ppool pp;  /* both are freed with the frame; only one is used */
     odin3_fdpool fp;
 } rd_frame;
@@ -144,7 +144,8 @@ static bool matches_all(const odin3_pw *pw, odin3_pw_sig value) {
  * The cap after the frame's pattern pool changed from `before` bits: the walk's total is updated,
  * and past the cap the pool is stopped (nested switches' pools count together, §16). A pool past
  * the cap gives W5a once for its switch (at the switch's record, else the process's); the switch
- * keeps its remaining items and its flags, without full_case (§20 #7).
+ * keeps its remaining items and its flags, without full_case unless an all-'-' compare or a
+ * default exhausts it (§20 #7).
  */
 static void check_cap(rd_walk *walk, rd_frame *frame, uint64_t before) {
     if (frame->fd) {
@@ -188,6 +189,8 @@ static odin3_status pool_take(rd_walk *walk, rd_frame *frame, odin3_pw_sig value
     return st;
 }
 
+/* A default's take_all. Past the cap the pool cannot take all, but Yosys's pool is then empty,
+ * so the switch is exhausted: every later item goes and it gains full_case, as in Yosys. */
 static void pool_take_all(rd_walk *walk, rd_frame *frame) {
     if (frame->fd) {
         odin3_fdpool_take_all(&frame->fp);
@@ -195,6 +198,7 @@ static void pool_take_all(rd_walk *walk, rd_frame *frame) {
         walk->live_bits -= frame->pp.bits_used;
         odin3_ppool_take_all(&frame->pp);
         walk->live_bits += frame->pp.bits_used;
+        frame->exhausted = frame->exhausted || frame->pp.over_cap;
     }
 }
 

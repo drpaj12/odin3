@@ -45,6 +45,7 @@ enum {
     PAT_MAX = 72,
     POOL_PATS = 16,
     CAP_BITS = 8,
+    MID_DEFAULT_CAP_BITS = 2,
     NESTED_CAP_BITS = 24,
     WIDE = 40,
     NET_BIT = 5,
@@ -371,24 +372,40 @@ static const char *const k_cap_warning =
 
 /*
  * rmdead_pattern_cap.il: under the cap of 8 the first take needs two 4-bit patterns at once (the
- * pool's one and the child it adds: 2 x 2 x 4 = 16 bits), so the pool stops: every case is kept, no
- * full_case, W5a once. Without the cap (Yosys) 4'0000 takes the last pattern, so the default is
- * dead and the switch gains full_case. rmdead_cap_two.il: the cap is per pool, so each switch warns
- * once.
+ * pool's one and the child it adds: 2 x 2 x 4 = 16 bits), so the pool stops: every case is kept,
+ * W5a once, and the default, which empties Yosys's pool, still gives full_case (Task 6, N1).
+ * Without the cap (Yosys) 4'0000 takes the last pattern, so the default is dead and the switch
+ * gains full_case. rmdead_cap_no_default.il (the same items without the default): Yosys's pool
+ * ends empty (full_case); under the cap nothing says so, and the switch gains none (§20 #7).
+ * rmdead_cap_two.il: the cap is per pool, so each switch warns once.
  */
 static void test_rmdead_pattern_cap(void) {
-    rmdead_run(k_cap_text, CAP_BITS, CAP_CASES "    case\n      assign \\y \\f\n  end\nend\n");
+    rmdead_run(k_cap_text, CAP_BITS,
+               "  attribute \\full_case 1\n" CAP_CASES
+               "    case\n      assign \\y \\f\n  end\nend\n");
     TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
     TEST_ASSERT_EQUAL_size_t(1, check_warnings(k_cap_warning));
     rmdead_run(k_cap_text, NO_CAP, "  attribute \\full_case 1\n" CAP_CASES "  end\nend\n");
+    const char *no_default = CAP_HEAD "    switch \\a4\n"
+                                      "      case 4'1---\n        assign \\y \\a\n"
+                                      "      case 4'-1--\n        assign \\y \\b\n"
+                                      "      case 4'--1-\n        assign \\y \\c\n"
+                                      "      case 4'---1\n        assign \\y \\d\n"
+                                      "      case 4'0000\n        assign \\y \\e\n"
+                                      "    end\n" TAIL;
+    rmdead_run(no_default, CAP_BITS, CAP_CASES "  end\nend\n");
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+    rmdead_run(no_default, NO_CAP, "  attribute \\full_case 1\n" CAP_CASES "  end\nend\n");
     rmdead_run(
         CAP_HEAD "    switch \\a4\n      case 4'1---\n        assign \\y \\a\n"
                  "      case\n        assign \\y \\b\n    end\n"
                  "    switch \\a4\n      case 4'-1--\n        assign \\z \\a\n"
                  "      case\n        assign \\z \\b\n    end\n" TAIL,
         CAP_BITS,
+        "  attribute \\full_case 1\n"
         "  switch \\a4\n    case 4'1---\n      assign \\y \\a\n    case\n      assign \\y \\b\n"
         "  end\n"
+        "  attribute \\full_case 1\n"
         "  switch \\a4\n    case 4'-1--\n      assign \\z \\a\n    case\n      assign \\z \\b\n"
         "  end\n"
         "end\n");
@@ -406,7 +423,9 @@ static void test_rmdead_cap_located(void) {
     int len = snprintf(text, sizeof text, "%.*s    attribute \\src \"t.v:7.5\"\n%s",
                        (int)(at - k_cap_text), k_cap_text, at);
     TEST_ASSERT_TRUE(len > 0 && len < (int)sizeof text);
-    rmdead_run(text, CAP_BITS, CAP_CASES "    case\n      assign \\y \\f\n  end\nend\n");
+    rmdead_run(text, CAP_BITS,
+               "  attribute \\full_case 1\n" CAP_CASES
+               "    case\n      assign \\y \\f\n  end\nend\n");
     TEST_ASSERT_EQUAL_size_t(1,
                              check_warnings("odin3: warning: t.v:7:5: warning: case analysis needs "
                                             "more than 8 pattern bits; no more dead cases are "
@@ -416,7 +435,7 @@ static void test_rmdead_cap_located(void) {
 /*
  * rmdead_cap_parallel.il: 4'11-- is inside 4'1---. Yosys (no cap) removes it and the switch stays
  * parallel_case. Under the cap both stay, and the tripped switch keeps parallel_case too (§20 #7:
- * the kept dead item can then give x where Yosys gives a).
+ * the kept dead item can then give x where Yosys gives a); its default gives full_case, as Yosys's.
  */
 static void test_rmdead_cap_parallel(void) {
     const char *text = CAP_HEAD "    attribute \\parallel_case 1\n"
@@ -434,6 +453,7 @@ static void test_rmdead_cap_parallel(void) {
                "  end\n"
                "end\n");
     rmdead_run(text, CAP_BITS,
+               "  attribute \\full_case 1\n"
                "  attribute \\parallel_case 1\n"
                "  switch \\a4\n"
                "    case 4'1---\n      assign \\y \\a\n"
@@ -493,10 +513,38 @@ static void test_rmdead_cap_all_dash(void) {
 }
 
 /*
+ * rmdead_cap_mid_default.il (2E Task 5 re-review N1, fixed in Task 6): a default in the middle of
+ * a switch empties Yosys's pool (take_all), so every later item goes, a later default included,
+ * and the switch gains full_case. Under a cap of 2 the pool stops at its seed (the all-'-'
+ * pattern is 4 bits), so it cannot take all; the default still exhausts it, and 2E removes the
+ * same items: Yosys's result without the cap, with one W5a.
+ */
+static void test_rmdead_cap_mid_default(void) {
+    const char *text = HEAD2("") "    attribute \\parallel_case 1\n"
+                                 "    switch \\s\n"
+                                 "      case 2'01\n        assign \\y \\c\n"
+                                 "      case\n        assign \\y \\a\n"
+                                 "      case 2'1-\n        assign \\y \\b\n"
+                                 "      case\n        assign \\y \\d\n"
+                                 "    end\n" TAIL;
+    const char *want = "  attribute \\full_case 1\n"
+                       "  attribute \\parallel_case 1\n"
+                       "  switch \\s\n"
+                       "    case 2'01\n      assign \\y \\c\n"
+                       "    case\n      assign \\y \\a\n"
+                       "  end\n"
+                       "end\n";
+    rmdead_run(text, NO_CAP, want);
+    rmdead_run(text, MID_DEFAULT_CAP_BITS, want);
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+}
+
+/*
  * rmdead_cap_nested.il under a cap of 24: the outer pool holds 2 patterns of 4 bits (16 bits)
  * while the inner switch runs; the inner pool alone stays within 24 bits (8, then 16), but the two
- * together reach 32, so the inner pool stops: its 4'1100 and default stay, no full_case, one W5a.
- * The outer switch is unaffected and gains full_case. Without the cap: Yosys's result.
+ * together reach 32, so the inner pool stops: its 4'1100 stays, one W5a, and its default still
+ * gives full_case (Task 6, N1). The outer switch is unaffected and gains full_case. Without the
+ * cap: Yosys's result.
  */
 static void test_rmdead_cap_nested(void) {
     const char *text = "module \\m\n  wire width 4 \\a4\n  wire width 4 \\b4\n  wire \\a\n"
@@ -514,6 +562,7 @@ static void test_rmdead_cap_nested(void) {
                "  attribute \\full_case 1\n"
                "  switch \\a4\n"
                "    case 4'11--\n"
+               "      attribute \\full_case 1\n"
                "      switch \\b4\n"
                "        case 4'11--\n          assign \\z \\a\n"
                "        case 4'1100\n          assign \\z \\b\n"
@@ -1042,6 +1091,7 @@ int main(void) {
     RUN_TEST(test_rmdead_cap_located);
     RUN_TEST(test_rmdead_cap_parallel);
     RUN_TEST(test_rmdead_cap_all_dash);
+    RUN_TEST(test_rmdead_cap_mid_default);
     RUN_TEST(test_rmdead_cap_nested);
     RUN_TEST(test_rmdead_stop_after);
     RUN_TEST(test_ppool_ops);

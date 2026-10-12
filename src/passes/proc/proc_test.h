@@ -47,8 +47,10 @@ typedef struct odin3_proc_phase_call {
 
 /*
  * phase: called before each phase; when it returns true the hook replaced the phase and *st is its
- * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE). on_step_f:
- * called at step F for each lowered module (unless --noopt or --stop-after). Either may be NULL.
+ * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE). While it is
+ * installed the end-of-step-A check for pending lowering phases (plan point (h)) is skipped, so it
+ * must handle every lowering phase still pending. on_step_f: called at step F for each lowered
+ * module (unless --noopt or --stop-after). Either may be NULL.
  */
 typedef struct odin3_proc_test_hooks {
     bool (*phase)(void *user, const odin3_proc_phase_call *call, odin3_status *st);
@@ -65,5 +67,9 @@ uint32_t odin3_proc_test_clean_sweeps(void);
 /* The frame steps (one per case or switch visit) of the last odin3_pw_clean call, its walk's
  * work: O(subtree) per sweep (spec §19). */
 uint64_t odin3_proc_test_clean_steps(void);
+
+/* The driver hops of the last odin3_proc_check_signal walk (arst's included): at most
+ * odin3_proc_limits_now().max_signal_walk (spec §16). */
+uint32_t odin3_proc_test_signal_hops(void);
 
 #endif
