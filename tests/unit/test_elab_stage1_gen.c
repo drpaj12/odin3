@@ -234,6 +234,15 @@ static void test_user_genblk_names(void) {
     expect_block(top, 3, "genblk4", NULL);
 }
 
+/* An ancestor's `genblk` names make a nested block pad too (the review's M5, Yosys's inherited
+ * seen set): `wire genblk1` outside pads the outer block and the inner one. */
+static void test_inherited_seen_set(void) {
+    run_clean(
+        "module t;\n  wire genblk1;\n  if (1) begin if (1) begin wire q; end end\nendmodule\n");
+    odin3_ast_id outer = expect_block(module_named("t"), 0, "genblk01", NULL);
+    expect_block(outer, 0, "genblk01", NULL);
+}
+
 /* An unselected construct consumes a number; a null branch is an (empty) block; a region is
  * transparent; case and if blocks are named after their construct. */
 static void test_counter_and_regions(void) {
@@ -532,11 +541,13 @@ static odin3_status oom_step(const oom_at *at) {
 
 /* Loops, if, case, a reference, a scoped defparam: every allocation fails in turn. */
 static void test_oom(void) {
-    run_clean(M_W "module t (output z);\n  genvar i;\n  wire genblk1;\n"
-                  "  for (i = 0; i < 3; i = i + 1) begin : g\n    wire [i:0] t;\n"
-                  "    if (i == 1) begin m u (.o(t[0])); end else m v (.o(t[0]));\n  end\n"
-                  "  case (2) 1: ; 2: begin wire c; end endcase\n  assign z = g[2].t[0];\n"
-                  "  defparam g[1].genblk01.u.W = 1;\nendmodule\n");
+    run_clean(
+        M_W
+        "module t (output z);\n  genvar i;\n  wire genblk1;\n"
+        "  for (i = 0; i < 3; i = i + 1) begin : g\n    wire [i:0] t;\n    reg [3:0] mem [0:i+1];\n"
+        "    if (i == 1) begin m u (.o(t[0])); end else m v (.o(t[0]));\n  end\n"
+        "  case (2) 1: ; 2: begin wire c; end endcase\n  assign z = g[2].t[0];\n"
+        "  defparam g[1].genblk01.u.W = 1;\nendmodule\n");
     uint32_t nodes = odin3_ast_node_end(rs.parsed).v;
     odin3_log_set_sink(quiet_sink, NULL);
     int failed = 0;
@@ -556,6 +567,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_review_probe);
     RUN_TEST(test_user_genblk_names);
+    RUN_TEST(test_inherited_seen_set);
     RUN_TEST(test_counter_and_regions);
     RUN_TEST(test_loop_descending);
     RUN_TEST(test_loop_negative);

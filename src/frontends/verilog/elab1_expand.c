@@ -515,15 +515,20 @@ uint8_t odin3_elab1_value_base(odin3_elab1_env *env, odin3_ast_id expr) {
     }
 }
 
-odin3_status odin3_elab1_eval(odin3_elab1_env *env, const odin3_elab1_eval_req *req,
-                              odin3_cval *out) {
+odin3_status odin3_elab1_eval_in(odin3_elab1_env *env, odin3_arena *arena,
+                                 const odin3_elab1_eval_req *req, odin3_cval *out) {
     odin3_ceval_req eval = {req->expr, {0, false, false}, req->what};
-    odin3_status st = odin3_ceval_expr(env->ev, &eval, env->arena, out);
+    odin3_status st = odin3_ceval_expr(env->ev, &eval, arena, out);
     if (st == ODIN3_OK && req->base != NULL) {
         *req->base = (out->flags & ODIN3_CVAL_UNSIZED) != 0 ? odin3_elab1_value_base(env, req->expr)
                                                             : (uint8_t)ODIN3_AST_NUMBER_BIN;
     }
     return st;
+}
+
+odin3_status odin3_elab1_eval(odin3_elab1_env *env, const odin3_elab1_eval_req *req,
+                              odin3_cval *out) {
+    return odin3_elab1_eval_in(env, env->arena, req, out);
 }
 
 /* |value| + 1 as a width, for the width error of an out-of-range bound. */
@@ -532,11 +537,12 @@ static uint64_t magnitude_width(int64_t value) {
     return mag == UINT64_MAX ? mag : mag + 1;
 }
 
-odin3_status odin3_elab1_fold_int(odin3_elab1_env *env, odin3_ast_id expr, const char *what,
-                                  int32_t *out) {
+/* The folded value of expr in tmp as an int32. */
+static odin3_status fold_in(odin3_elab1_env *env, odin3_arena *tmp, odin3_ast_id expr,
+                            const char *what, int32_t *out) {
     odin3_elab1_eval_req req = {expr, what, NULL};
     odin3_cval val = {0};
-    odin3_status st = odin3_elab1_eval(env, &req, &val);
+    odin3_status st = odin3_elab1_eval_in(env, tmp, &req, &val);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -553,6 +559,17 @@ odin3_status odin3_elab1_fold_int(odin3_elab1_env *env, odin3_ast_id expr, const
     }
     *out = (int32_t)num;
     return ODIN3_OK;
+}
+
+odin3_status odin3_elab1_fold_int(odin3_elab1_env *env, odin3_ast_id expr, const char *what,
+                                  int32_t *out) {
+    odin3_arena *tmp = odin3_arena_create(ODIN3_E1_TMP_CHUNK);
+    if (tmp == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = fold_in(env, tmp, expr, what, out);
+    odin3_arena_destroy(tmp);
+    return st;
 }
 
 /* A RANGE to fold and §9.1's <what> of its bounds. */

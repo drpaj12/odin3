@@ -282,15 +282,29 @@ static uint32_t count_construct(odin3_elab1_env *env, uint32_t scope) {
 }
 
 /* A condition's truth (IEEE: true when a bit is 1; x is false): PARSE after a diagnostic. */
-static odin3_status truth_of(odin3_elab1_env *env, odin3_ast_id expr, const char *what, bool *out) {
+static odin3_status truth_of(odin3_elab1_env *env, odin3_arena *tmp, odin3_ast_id expr,
+                             const char *what, bool *out) {
     odin3_elab1_eval_req req = {expr, what, NULL};
     odin3_cval val = {0};
-    odin3_status st = odin3_elab1_eval(env, &req, &val);
+    odin3_status st = odin3_elab1_eval_in(env, tmp, &req, &val);
     *out = st == ODIN3_OK && odin3_cval_truth(&val) == ODIN3_BIT_1;
     return st;
 }
 
 /* --- GEN_IF (EL-20) -------------------------------------------------------------------------- */
+
+/* The condition seen and evaluated (temporaries freed at once): *taken its truth. PARSE after a
+ * diagnostic; every other failure propagates (a 2D bug is never turned into OK). */
+static odin3_status if_truth(odin3_elab1_env *env, odin3_ast_id cond, uint32_t scope, bool *taken) {
+    odin3_arena *tmp = odin3_arena_create(ODIN3_E1_TMP_CHUNK);
+    if (tmp == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_elab1_gen_seen(env, cond, scope);
+    st = st != ODIN3_OK ? st : truth_of(env, tmp, cond, "generate condition", taken);
+    odin3_arena_destroy(tmp);
+    return st;
+}
 
 odin3_status odin3_elab1_gen_if(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope) {
     odin3_elab1_env *env = e1->env;
@@ -298,16 +312,15 @@ odin3_status odin3_elab1_gen_if(odin3_elab1 *e1, odin3_ast_id node, uint32_t sco
     env->made_n = 0;
     env->cur_scope = scope;
     uint32_t counter = count_construct(env, scope);
-    odin3_ast_id cond = odin3_ast_child(ast, node, G_IF_COND);
-    odin3_status st = odin3_elab1_gen_seen(env, cond, scope);
     bool taken = false;
-    odin3_status ev = st == ODIN3_OK ? truth_of(env, cond, "generate condition", &taken) : st;
-    if (ev == ODIN3_ERR_NO_MEMORY) {
+    odin3_status ev = if_truth(env, odin3_ast_child(ast, node, G_IF_COND), scope, &taken);
+    if (ev != ODIN3_OK && ev != ODIN3_ERR_PARSE) {
         return ev;
     }
     uint32_t slot = taken ? G_IF_THEN : G_IF_THEN + 1;
     bool has = ev == ODIN3_OK && odin3_ast_child(ast, node, slot).v != 0;
-    st = log_push(e1, node, has ? (int32_t)(slot - G_IF_THEN) : ODIN3_DECISION_SKIPPED);
+    odin3_status st =
+        log_push(e1, node, has ? (int32_t)(slot - G_IF_THEN) : ODIN3_DECISION_SKIPPED);
     uint32_t name = 0;
     st = st != ODIN3_OK || !has
              ? st
@@ -323,10 +336,11 @@ typedef struct g_case {
     uint32_t scope;
     uint32_t counter;
     odin3_cval value;
-    bool valid;      /* the case expression evaluated */
-    uint32_t chosen; /* the item index, G_NONE */
-    uint32_t name;   /* its block's name */
-    uint32_t dflt;   /* the default item, G_NONE */
+    odin3_arena *tmp; /* the evaluator's temporaries, freed with the construct */
+    bool valid;       /* the case expression evaluated */
+    uint32_t chosen;  /* the item index, G_NONE */
+    uint32_t name;    /* its block's name */
+    uint32_t dflt;    /* the default item, G_NONE */
     uint32_t dflt_name;
 } g_case;
 
@@ -335,10 +349,10 @@ static odin3_status case_match(odin3_elab1_env *env, const g_case *gc, odin3_ast
                                bool *out) {
     odin3_elab1_eval_req req = {expr, "case item in a generate case", NULL};
     odin3_cval item = {0};
-    odin3_status st = odin3_elab1_eval(env, &req, &item);
+    odin3_status st = odin3_elab1_eval_in(env, gc->tmp, &req, &item);
     odin3_cval eq = {0};
     odin3_cop_args args = {ODIN3_COP_EQ, &gc->value, &item, 1, false};
-    st = st != ODIN3_OK ? st : odin3_cval_op(env->arena, &args, &eq);
+    st = st != ODIN3_OK ? st : odin3_cval_op(gc->tmp, &args, &eq);
     *out = st == ODIN3_OK && odin3_cval_truth(&eq) == ODIN3_BIT_1;
     return st;
 }
@@ -373,27 +387,37 @@ static odin3_status case_item(odin3_elab1_env *env, g_case *gc, uint32_t index, 
     return st;
 }
 
-odin3_status odin3_elab1_gen_case(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope) {
-    odin3_elab1_env *env = e1->env;
-    const odin3_ast *ast = e1->parsed;
-    env->made_n = 0;
-    env->cur_scope = scope;
-    g_case gc = {scope, count_construct(env, scope), {0}, false, G_NONE, 0, G_NONE, 0};
+/* The case expression seen and evaluated, then each item tried in order (gc->tmp holds the
+ * evaluator's temporaries). */
+static odin3_status case_decide(odin3_elab1_env *env, g_case *gc, odin3_ast_id node) {
+    const odin3_ast *ast = env->e1->parsed;
     odin3_ast_id expr = odin3_ast_child(ast, node, 0);
-    odin3_status st = odin3_elab1_gen_seen(env, expr, scope);
+    odin3_status st = odin3_elab1_gen_seen(env, expr, gc->scope);
     if (st == ODIN3_OK) {
         odin3_elab1_eval_req req = {expr, "generate case expression", NULL};
-        st = odin3_elab1_eval(env, &req, &gc.value);
-        gc.valid = st == ODIN3_OK;
+        st = odin3_elab1_eval_in(env, gc->tmp, &req, &gc->value);
+        gc->valid = st == ODIN3_OK;
         st = st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
     }
     odin3_ast_span items = odin3_ast_children(ast, node);
     for (uint32_t k = G_CASE_ITEMS; st == ODIN3_OK && k < items.n; k++) {
-        st = case_item(env, &gc, k - G_CASE_ITEMS, items.ids[k]);
+        st = case_item(env, gc, k - G_CASE_ITEMS, items.ids[k]);
     }
+    return st;
+}
+
+odin3_status odin3_elab1_gen_case(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope) {
+    odin3_elab1_env *env = e1->env;
+    env->made_n = 0;
+    env->cur_scope = scope;
+    g_case gc = {scope, count_construct(env, scope), {0}, NULL, false, G_NONE, 0, G_NONE, 0};
+    gc.tmp = odin3_arena_create(ODIN3_E1_TMP_CHUNK);
+    odin3_status st = gc.tmp != NULL ? case_decide(env, &gc, node) : ODIN3_ERR_NO_MEMORY;
+    odin3_arena_destroy(gc.tmp);
     if (st != ODIN3_OK) {
         return st;
     }
+    odin3_ast_span items = odin3_ast_children(e1->parsed, node);
     if (gc.chosen == G_NONE && gc.valid) {
         gc.chosen = gc.dflt;
         gc.name = gc.dflt_name;
@@ -494,25 +518,37 @@ static odin3_status admit(g_loop *lp, int32_t value) {
     return odin3_u64map_put(lp->distinct, (odin3_kv){(uint32_t)value, 1});
 }
 
-/* init, then cond and step while cond holds, the genvar bound to each value in turn. */
-static odin3_status unroll(g_loop *lp) {
+/* One iteration of the unroll: the genvar bound to *value, the condition tested, the value
+ * admitted and the step folded. The genvar's binding and the evaluator's temporaries live in a
+ * scratch arena freed by the caller, so a runaway loop at the cap holds nothing per iteration. */
+static odin3_status unroll_step(g_loop *lp, odin3_arena *tmp, int32_t *value, bool *more) {
     const odin3_ast *ast = lp->e1->parsed;
     odin3_elab1_env *env = lp->env;
-    odin3_ast_id init =
-        odin3_ast_child(ast, odin3_ast_child(ast, lp->node, G_FOR_INIT), G_ASSIGN_RHS);
     odin3_ast_id cond = odin3_ast_child(ast, lp->node, G_FOR_COND);
     odin3_ast_id step =
         odin3_ast_child(ast, odin3_ast_child(ast, lp->node, G_FOR_STEP), G_ASSIGN_RHS);
+    odin3_status st = bind_value(tmp, odin3_elab1_env_slot(env, lp->genvar), *value);
+    st = st != ODIN3_OK ? st : truth_of(env, tmp, cond, "generate loop condition", more);
+    st = st != ODIN3_OK || !*more ? st : admit(lp, *value);
+    return st != ODIN3_OK || !*more ? st
+                                    : odin3_elab1_fold_int(env, step, "generate loop step", value);
+}
+
+/* init, then cond and step while cond holds, the genvar bound to each value in turn. */
+static odin3_status unroll(g_loop *lp) {
+    const odin3_ast *ast = lp->e1->parsed;
+    odin3_ast_id init =
+        odin3_ast_child(ast, odin3_ast_child(ast, lp->node, G_FOR_INIT), G_ASSIGN_RHS);
     int32_t value = 0;
-    odin3_status st = odin3_elab1_fold_int(env, init, "generate loop initialisation", &value);
+    odin3_status st = odin3_elab1_fold_int(lp->env, init, "generate loop initialisation", &value);
     bool more = st == ODIN3_OK;
     while (more && !lp->e1->stopped) {
-        st = bind_value(env->arena, odin3_elab1_env_slot(env, lp->genvar), value);
-        st = st != ODIN3_OK ? st : truth_of(env, cond, "generate loop condition", &more);
-        st = st != ODIN3_OK || !more ? st : admit(lp, value);
-        st = st != ODIN3_OK || !more
-                 ? st
-                 : odin3_elab1_fold_int(env, step, "generate loop step", &value);
+        odin3_arena *tmp = odin3_arena_create(ODIN3_E1_TMP_CHUNK);
+        if (tmp == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        st = unroll_step(lp, tmp, &value, &more);
+        odin3_arena_destroy(tmp);
         more = more && st == ODIN3_OK;
     }
     return st;

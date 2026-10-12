@@ -721,6 +721,29 @@ static void test_duplicate_blocks(void) {
     TEST_ASSERT_EQUAL_UINT32(2, error_count());
 }
 
+/* A named block, then a declaration of its name: M11 at the declaration, in both orders (the
+ * review's M4: only an implicit `genblk<n>` yields to a later declaration, EL-21). */
+static void test_block_then_declaration(void) {
+    et_line(&tree, 2);
+    eb_block named = {"g", eb_int(&tree, 0), NULL, 0};
+    odin3_ast_id gen = eb_gen_block(&tree, &named);
+    et_line(&tree, 3);
+    const odin3_ast_id items[] = {gen, wire("g", no_range())};
+    (void)top_of(items, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, bind());
+    expect_line("b.v:3:1: error: 'g' is already declared (first at b.v:2:1)");
+    TEST_ASSERT_EQUAL_UINT32(1, error_count());
+}
+
+/* The implicit name yields: `genblk1` then `wire genblk1` binds both (Yosys keeps both). */
+static void test_implicit_block_then_declaration(void) {
+    eb_block implicit = {"genblk1", {0}, NULL, 0};
+    const odin3_ast_id items[] = {eb_gen_block(&tree, &implicit), wire("genblk1", no_range())};
+    (void)top_of(items, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bind());
+    TEST_ASSERT_EQUAL_UINT32(0, error_count());
+}
+
 /* Two MODULEs of one name, in two libraries: M11 at the second (names are unique in a UNIT, point
  * (q); stage 1 never writes this, an adapter may). */
 static void test_duplicate_modules(void) {
@@ -1422,36 +1445,8 @@ static void test_oom(void) {
     oom_sweep(&errors);
 }
 
-int main(void) {
-    UNITY_BEGIN();
-    RUN_TEST(test_symbols_objects);
-    RUN_TEST(test_symbols_localparam);
-    RUN_TEST(test_symbols_ports_and_scopes);
-    RUN_TEST(test_scopes_top);
-    RUN_TEST(test_scopes_module);
-    RUN_TEST(test_resolution);
-    RUN_TEST(test_scope_of);
-    RUN_TEST(test_assignments);
-    RUN_TEST(test_concat_lvalues);
-    RUN_TEST(test_symbol_forms);
-    RUN_TEST(test_blackbox);
-    RUN_TEST(test_undeclared);
-    RUN_TEST(test_duplicate);
-    RUN_TEST(test_duplicate_blocks);
-    RUN_TEST(test_duplicate_modules);
-    RUN_TEST(test_module_name_not_value);
-    RUN_TEST(test_not_a_value);
-    RUN_TEST(test_library_scopes);
-    RUN_TEST(test_hierarchical_through_instance);
-    RUN_TEST(test_hierarchical_call);
-    RUN_TEST(test_hier_missing);
-    RUN_TEST(test_hier_indexed_end);
-    RUN_TEST(test_not_function_or_task);
-    RUN_TEST(test_width);
-    RUN_TEST(test_unpacked_bounds);
-    RUN_TEST(test_width_and_xz);
-    RUN_TEST(test_error_cap);
-    RUN_TEST(test_misuse);
+/* The elaborated-form shape checks, the stress cases and the OOM sweep. */
+static void run_shape_tests(void) {
     RUN_TEST(test_shape_while);
     RUN_TEST(test_shape_system_function);
     RUN_TEST(test_shape_system_task);
@@ -1480,5 +1475,40 @@ int main(void) {
     RUN_TEST(test_deep_nesting);
     RUN_TEST(test_wide_loop);
     RUN_TEST(test_oom);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_symbols_objects);
+    RUN_TEST(test_symbols_localparam);
+    RUN_TEST(test_symbols_ports_and_scopes);
+    RUN_TEST(test_scopes_top);
+    RUN_TEST(test_scopes_module);
+    RUN_TEST(test_resolution);
+    RUN_TEST(test_scope_of);
+    RUN_TEST(test_assignments);
+    RUN_TEST(test_concat_lvalues);
+    RUN_TEST(test_symbol_forms);
+    RUN_TEST(test_blackbox);
+    RUN_TEST(test_undeclared);
+    RUN_TEST(test_duplicate);
+    RUN_TEST(test_duplicate_blocks);
+    RUN_TEST(test_block_then_declaration);
+    RUN_TEST(test_implicit_block_then_declaration);
+    RUN_TEST(test_duplicate_modules);
+    RUN_TEST(test_module_name_not_value);
+    RUN_TEST(test_not_a_value);
+    RUN_TEST(test_library_scopes);
+    RUN_TEST(test_hierarchical_through_instance);
+    RUN_TEST(test_hierarchical_call);
+    RUN_TEST(test_hier_missing);
+    RUN_TEST(test_hier_indexed_end);
+    RUN_TEST(test_not_function_or_task);
+    RUN_TEST(test_width);
+    RUN_TEST(test_unpacked_bounds);
+    RUN_TEST(test_width_and_xz);
+    RUN_TEST(test_error_cap);
+    RUN_TEST(test_misuse);
+    run_shape_tests();
     return UNITY_END();
 }

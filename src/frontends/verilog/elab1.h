@@ -854,6 +854,13 @@ typedef struct odin3_elab1_eval_req {
 odin3_status odin3_elab1_eval(odin3_elab1_env *env, const odin3_elab1_eval_req *req,
                               odin3_cval *out);
 
+/* The same with the value and the evaluator's temporaries in arena (a scratch arena of
+ * ODIN3_E1_TMP_CHUNK bytes per chunk, freed by the caller): what a value that outlives the call
+ * is not. Lazily evaluated parameters still live in the environment's arena. */
+enum { ODIN3_E1_TMP_CHUNK = 2048 };
+odin3_status odin3_elab1_eval_in(odin3_elab1_env *env, odin3_arena *arena,
+                                 const odin3_elab1_eval_req *req, odin3_cval *out);
+
 /* A constant folded to a 32-bit signed integer (point (bb)): x or z bits are "<what> has x or z
  * bits", a value outside int32 the width error. */
 odin3_status odin3_elab1_fold_int(odin3_elab1_env *env, odin3_ast_id expr, const char *what,

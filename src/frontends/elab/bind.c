@@ -809,12 +809,30 @@ static bool bd_holds(bd_run *br, odin3_ast_id holder, uint32_t name) {
     return odin3_u64map_get(br->held, base | name, NULL);
 }
 
+/* True for a name stage 1 gives an unnamed block: `genblk` and digits (EL-21; a user's block of
+ * that name is named, but reaches the same rule only when stage 1 padded it). */
+static bool bd_genblk_name(const bd_run *br, uint32_t name) {
+    const char *text = bd_str(br, name);
+    static const char prefix[] = "genblk";
+    size_t len = sizeof prefix - 1;
+    if (strncmp(text, prefix, len) != 0 || text[len] == '\0') {
+        return false;
+    }
+    for (const char *ch = text + len; *ch != '\0'; ch++) {
+        if (*ch < '0' || *ch > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* A GEN_BLOCK's BLOCK symbol, unless its holder declares the name later (the block came first, so
  * no symbol holds the name yet): Yosys keeps both, an implicit `genblk1` beside a later `wire
  * genblk1` (EL-21), and the block is then reached through its scope alone. False after M11. */
 static bool bd_gen_symbol(bd_run *br, const odin3_scope_spec *spec, odin3_ast_id node) {
     const bd_frame *up = bd_frame_at(br, 0);
-    if (up != NULL && odin3_symtab_lookup_local(br->st, spec->parent, spec->name).v == 0 &&
+    if (up != NULL && bd_genblk_name(br, spec->name) &&
+        odin3_symtab_lookup_local(br->st, spec->parent, spec->name).v == 0 &&
         bd_holds(br, up->node, spec->name)) {
         return true;
     }
