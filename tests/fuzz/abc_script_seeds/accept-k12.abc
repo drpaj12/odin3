@@ -1,0 +1,2 @@
+
+&get -n; &if -K {K}; &st; &if -K 6

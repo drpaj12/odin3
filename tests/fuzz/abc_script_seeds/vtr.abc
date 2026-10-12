@@ -1,0 +1,12 @@
+# lib/abc/vtr.abc: the default script of Odin III's abc pass (PHASE3 #10).
+# The logic part of VTR's ABC stage at VTR 3c9a4d23
+# (vtr_flow/scripts/python_libs/vtr/abc/abc.py, run(), "Logic Opt + Techmap"),
+# without its file, echo, time and print commands. {K} is abc --lut K.
+strash
+ifraig -v
+scorr -v
+dc2 -v
+dch -f
+if -K {K} -v
+mfs2 -v
+print_stats

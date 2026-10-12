@@ -568,6 +568,46 @@ then the options considered.
       further than IR.md's wording, so that `qor_netstats` (which splits on Python's whitespace,
       including VT, FF, 0x1c–0x1f, U+0085 and U+00A0) never splits a value.
     - `check` has no run-row rules, and none were added; a new rule is Peter's call.
+27. **3D-4 the ABC script checker: the agent defaults** (2026-10-12; AB-21, 3D spec §7.3–§7.5
+    and their dated errata; from the Task 10 and 11 reviews and PR 3D-4's final review). They
+    refine decision 11 and are Peter's to override:
+    - **Refusal classes.** Besides files, process and latches, a fourth class, *crashes*: a
+      command or option with which the pinned ABC (a3001b72) dies is refused, with its own text
+      ("it crashes ABC at the pin"). Whole commands: `print_box`, `print_cone`, `print_npn`.
+      "File options" include flags that write files (`print_stats -b`, `scorr -I`, `mfs2 -i`, …),
+      not only options whose value is a file name. Aliases that reach them are refused (`psb`,
+      `sif`, `pcon`).
+    - **A value-dependent crash refuses the whole option** (`print_auto -O`, `drw -C`, `scorr -N`
+      and `-F`, `mfs -M`, `if -Y`, …): the checker cannot know the design. Three ranges are
+      expressed instead because the bound is design-independent: `if`/`&if -K` 2..12, `-E` ≥ 1,
+      `refactor -N` ≥ 2, each written alone as `-X <n>`.
+    - **Numbers lie in 0..1,000,000**, read exactly both as `atoi` and as `atof` read them; no
+      negative numbers (a word starting with `-` is an option cluster to ABC's getopt). `echo`'s
+      words are exempt.
+    - **K ≤ 12 with linked ABC**: `{K}` above 12 and `-K` above 12 are refused, and so is `&get
+      -m` of the BLIF start (its nodes have any width), because `&st`/`&synch2` crash on wider
+      mappings, in Release too. `--lut` itself stays 2..16 (§7.1).
+    - **State rules** (§7.3 step 11): `&if` is refused on any mapped `&` network (ABC's own
+      `Gia_ManHasMapping` check), on choices a plain `&get` copied, and `print_xcut` on choices;
+      at the BLIF start `mfs` and `print_xcut` need a rebuilt network; `&get -m`/`-c` are read as
+      toggles; `if -g -x -y -u` and `&if -g -x -y` count as not mapping. Other run-time refusals
+      by ABC remain P3-1's `command '<cmd>' failed`.
+    - **Diagnostics.** An unreadable script is `abc: <given>: cannot read the script:
+      <strerror>`, the file as given (§7.3), as Task 14 expects.
+    - **Residual risk, for Peter's question 4.** The checker is a sound parser over a hand-made
+      table, and the table does not converge: about 70,000 runs of the pinned `abc` over six
+      audit rounds, and every round that tried new design shapes, K values or option values
+      found new crash classes, because ABC's asserts and unchecked allocations depend on the
+      design as much as on the options; a pin bump reopens the lists. The AB-6 wraps
+      catch an assertion on the session thread but then disable linked ABC for the process, and
+      catch nothing in a Release libabc (no asserts; the same scripts corrupt memory) nor an
+      unchecked allocation. There is no wall-clock bound and no output bound either (`print_kmap`
+      on a 20-input node prints 2^20 cells). So the checker makes user scripts hard to crash, not
+      impossible, and a crash takes the whole `odin3` process with its IR. The default script
+      (eight commands VTR runs daily) is safe in process. The proportionate control is risk 1's
+      fallback: run non-default scripts in a subprocess ABC over the BLIF exchange (checker,
+      SHA-256 identity and run record unchanged), with a wall-clock and an output cap. That is
+      Peter's question 4; nothing was built for it in 3D-4.
 
 ## Risks
 

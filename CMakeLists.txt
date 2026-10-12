@@ -101,6 +101,9 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pass.c
     src/passes/budget.c
     src/passes/ffinit.c
+    src/passes/abc/alias.c
+    src/passes/abc/allow.c
+    src/passes/abc/script.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -220,6 +223,18 @@ target_include_directories(odin3_core
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
+
+# --- The abc pass's default script, embedded (3D spec §7.7, AB-23) ----------------------------
+# lib/abc/vtr.abc becomes the byte array odin3_abc_default_script in
+# generated/abc/default_script.c; editing the script re-runs the configure step.
+set(_abc_default_script ${PROJECT_SOURCE_DIR}/lib/abc/vtr.abc)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_abc_default_script})
+file(READ ${_abc_default_script} _abc_default_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ODIN3_ABC_DEFAULT_SCRIPT_BYTES
+       "${_abc_default_hex}")
+configure_file(cmake/abc_default_script.c.in
+               ${PROJECT_BINARY_DIR}/generated/abc/default_script.c @ONLY)
+target_sources(odin3_core PRIVATE ${PROJECT_BINARY_DIR}/generated/abc/default_script.c)
 
 # --- The Verilog parser: Bison and Flex generated into the build tree (2C spec §6) ----------
 find_package(BISON 3.8 REQUIRED)        # parse.error detailed, parse.lac, %precedence, -Wcex
@@ -345,6 +360,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_verilog PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_verilog PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_verilog PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_abc_script.c: the ABC script checker's fuzzer (3D §13.7, plan Task 11).
+    add_executable(fuzz_abc_script tests/fuzz/fuzz_abc_script.c)
+    target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -412,6 +432,16 @@ if(BUILD_TESTING)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
+    odin3_add_unit_test(test_abc_alias_table)
+    target_compile_definitions(test_abc_alias_table PRIVATE
+        ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
+    # 3D Task 11: the script checker (its accepted cases are shared with 3D-2's adapter test,
+    # point (p)) and the embedded default script, compared with lib/abc/vtr.abc.
+    odin3_add_unit_test(test_abc_script)
+    target_sources(test_abc_script PRIVATE tests/unit/abc_script_cases.c)
+    odin3_add_unit_test(test_abc_default_script)
+    target_compile_definitions(test_abc_default_script PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -919,6 +949,36 @@ if(BUILD_TESTING)
         if(_fuzz_env)
             set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
+        endif()
+
+        # 3D §13.7 (plan Task 11): the ABC script checker (no ABC runs). The seeds
+        # (tests/fuzz/abc_script_seeds: a K byte, then lib/abc/vtr.abc, VTR's whole stage, one
+        # script per abc.rc alias and one per refused example of test_abc_script) run once;
+        # fuzz_abc_script_smoke fuzzes 60 s with inputs up to 8 KiB; fuzz_abc_script_long fuzzes
+        # an hour, up to past the 64 KiB cap, as a heavy sweep (tools/heavy-run, label sweep).
+        set(_fa_seeds ${PROJECT_SOURCE_DIR}/tests/fuzz/abc_script_seeds)
+        set(_fa_corpus ${PROJECT_BINARY_DIR}/fuzz_abc_script_corpus)
+        file(MAKE_DIRECTORY ${_fa_corpus})
+        add_test(NAME fuzz_abc_script_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_abc_script> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    ${_fa_seeds})
+        # -seed=1: every CI run explores the same inputs, so a finding reproduces from its log.
+        add_test(NAME fuzz_abc_script_smoke
+            COMMAND $<TARGET_FILE:fuzz_abc_script> -seed=1 -max_total_time=60 -timeout=10
+                    -rss_limit_mb=2048 -max_len=8192 -print_funcs=0 -print_final_stats=1
+                    ${_fa_corpus} ${_fa_seeds})
+        set_tests_properties(fuzz_abc_script_seed_inputs fuzz_abc_script_smoke PROPERTIES
+                             LABELS fuzz TIMEOUT 300)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_script_seed_inputs fuzz_abc_script_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+        odin3_add_sweep_test(fuzz_abc_script_long LABEL sweep
+            COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_script> -max_total_time=3600 -timeout=10
+                    -rss_limit_mb=2048 -max_len=70000 -print_funcs=0 -print_final_stats=1
+                    ${_fa_corpus} ${_fa_seeds})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_script_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
         endif()
     endif()
 
