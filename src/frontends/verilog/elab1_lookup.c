@@ -261,11 +261,14 @@ static odin3_status add_def(odin3_elab1 *e1, odin3_ast_id node, uint8_t kind,
     return chain(e1, (uint32_t)e1->defs.len - 1);
 }
 
-/* The library of a UNIT: its FILE buffer's (2A §3.1), "work" when the buffer has none. */
+/* The library of a UNIT: its FILE buffer's (2A §3.1), "work" when the buffer has none. Out of
+ * memory creating the source manager latches. */
 static uint32_t unit_library(odin3_elab1 *e1, odin3_ast_id unit) {
     odin3_srcman *sm = NULL;
     odin3_srcbuf_info info;
-    if (odin3_design_get_srcman(e1->design, &sm) != ODIN3_OK ||
+    odin3_status st = odin3_design_get_srcman(e1->design, &sm);
+    e1->fatal = e1->fatal != ODIN3_OK ? e1->fatal : st;
+    if (st != ODIN3_OK ||
         !odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, odin3_ast_loc(e1->parsed, unit)),
                                   &info) ||
         info.library == 0) {

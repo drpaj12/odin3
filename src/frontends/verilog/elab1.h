@@ -545,13 +545,13 @@ odin3_status odin3_elab1_inst_array(odin3_elab1 *e1, const odin3_elab_inst *inst
 odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst *inst);
 
 /*
- * EL-11 for a `(* blackbox *)` definition's specialization spec (elab1_bbox.c; agent default: the
- * brief names a definition; the ports are per specialization): the info line "body of black box
- * 'm' is ignored" once per definition when its body holds anything but port and parameter
- * declarations, and the specialization's ports, evaluated with its parameter values (errors
- * reported), recorded in the black-box table and, without errors so far, written as its
- * ports-only black-box MODULE (EL-4, v4.8) on the store's pending stack. ODIN3_OK;
- * ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY.
+ * EL-11 for a `(* blackbox *)` definition's default specialization spec (elab1_bbox.c; v4.10:
+ * the definition keeps its name, as Yosys 0.55's module): the info line "body of black box 'm' is
+ * ignored" once per definition when its body holds anything but port and parameter declarations,
+ * and the ports, evaluated with the default parameter values (errors reported), recorded in the
+ * black-box table and, without errors so far, written as the definition's one ports-only
+ * black-box MODULE (EL-4, v4.8) on the store's pending stack. ODIN3_OK; ODIN3_ERR_PARSE after a
+ * diagnostic; ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec);
 
@@ -662,7 +662,9 @@ typedef struct odin3_elab1_defx {
     bool ports_indexed;       /* its port names are in odin3_elab1.port_pos, dirs in port_dirs */
     bool reported;            /* its Q7 (a library unit's UDP) or taken-name error is logged */
     bool body_noted;          /* a black box's "body … is ignored" info is logged (Task 12) */
+    bool bb_default_asked;    /* a black box's default specialization was requested (EL-11) */
     const uint8_t *port_dirs; /* odin3_dir per port position (run arena; Task 12) */
+    uint32_t bb_name;         /* a black box: the name all its specializations share; 0 = none */
 } odin3_elab1_defx;
 
 /* One specialization (EL-9): everything lives in the run arena. */
@@ -686,6 +688,7 @@ typedef struct odin3_elab1_spec {
     const odin3_elab1_port *ports; /* odin3_elab1_spec_ports, once computed (Task 12) */
     uint32_t n_ports;
     bool ports_done;
+    bool dflt; /* every parameter has its default value and nothing is pending */
 } odin3_elab1_spec;
 
 /* One edge of the specialization graph: an instance of spec `from` specialized as `to`. */
@@ -707,7 +710,8 @@ typedef enum odin3_elab1_state {
     ODIN3_E1_NEW = 0,
     ODIN3_E1_BUSY,
     ODIN3_E1_DONE,
-    ODIN3_E1_FAILED
+    ODIN3_E1_FAILED,
+    ODIN3_E1_NO_MEMORY /* failed for want of memory: a later read answers NO_MEMORY, not PARSE */
 } odin3_elab1_state;
 
 /* One entry of an environment, with what pass E needs beside odin3_elab_entry. */

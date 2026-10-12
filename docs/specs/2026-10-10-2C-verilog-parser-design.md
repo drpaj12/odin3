@@ -336,7 +336,12 @@ precedence:
   empty_conn: %empty ;   conn_opt: %empty | conn ;
   ```
   so `()` is zero elements, `(,)` two empty ones, `(a,)` `a` plus an empty one; the same
-  shape for ports and system-call arguments (verified in the re-review's toy grammar).
+  shape for system-call arguments (verified in the re-review's toy grammar). Non-ANSI **module
+  ports** are stricter (amended by the PR 2D-3 final review, m5, to match Yosys 0.55, which
+  answers `syntax error, unexpected ','`): only the last entry may be empty — one trailing
+  comma, `(a, b, )` — so `(a, , b)`, `(, a)` and `(,)` are located syntax errors:
+  `nonansi_ports: nonansi_list | nonansi_list ',' empty_port ;
+  nonansi_list: port_entry | nonansi_list ',' port_entry ;`.
 
 The budget is **zero reported conflicts and a committed allowlist of resolved ones**.
 "Zero conflicts" alone proves nothing (C1 above), so `tests/verilog/solved_conflicts.txt`
@@ -580,8 +585,9 @@ port's node as another declarator (`input [3:0] a, b` is one node with two decla
 `signed` is — ports, nets, variables, parameters, function returns — and sets no flag (it is
 the default). **Non-ANSI** port list → `LIST` of `PORT_REF`: `a` → name a; `.x(e)` → name x,
 `DOTTED`, E; `.x()` → name x, `DOTTED`, no E; `{a,b}` or `a[3:0]` → name 0 with the
-expression; an **empty port** (`(a, b, )`, `(, a)`: legal, `port ::= [port_expression]`;
-`large/arm_core.v` and a dozen micros have the trailing comma) → `PORT_REF` with name 0 and
+expression; an **empty port** (`(a, b, )`: legal, `port ::= [port_expression]`;
+`large/arm_core.v` and a dozen micros have the trailing comma; an empty port anywhere but last,
+`(a, , b)` or `(, a)`, is a syntax error as in Yosys 0.55, §3.1 (k)) → `PORT_REF` with name 0 and
 no expression — a shape M6 does not reject: M6's REJECT forms are `DOTTED` and *name 0 with
 an expression* (the 2A row text is amended, §9); 2D treats the empty port as an unconnected
 position. `module m ();` stays an empty `LIST` (one empty port by the letter of Annex A, but

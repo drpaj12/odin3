@@ -331,14 +331,15 @@ static odin3_elab_inst parsed_instance(odin3_elab1 *e1, const char *module, cons
     return inst;
 }
 
-/* `module n(a, , b)`: an ordered connection to the empty position warns and is dropped. The
+/* `module n(a, b, )` (the one empty position 2C accepts, a trailing comma; `(a, , b)` is a
+ * syntax error as in Yosys 0.55): an ordered connection to it warns and is dropped. The
  * header is non-ANSI (Task 15 lands it, so the store stops at its pending kinds): the warning
  * comes from the run, the resolution from odin3_elab1_connect itself. */
 static void test_unnamed_position(void) {
-    run_one("module n (a, , b);\n  input a;\n  input b;\nendmodule\n"
-            "module top;\n  wire x, y, z;\n  n u (x, y, z);\nendmodule\n");
+    run_one("module n (a, b, );\n  input a;\n  input b;\nendmodule\n"
+            "module top;\n  wire x, y, z;\n  n u (x, z, y);\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:7:11: warning: connection 2 of instance 'u' goes to an unnamed port position "
+              "t.v:7:14: warning: connection 3 of instance 'u' goes to an unnamed port position "
               "and is ignored");
     TEST_ASSERT_EQUAL_UINT32(1, rs.warnings);
     odin3_elab1 *e1 = NULL;
@@ -490,34 +491,74 @@ static void test_blackbox_module(void) {
     expect_conn(inst, 1, "y", "z");
 }
 
+/* The INSTANTIATION named n-th (from 0) in node order; 0 when there are fewer. */
+static odin3_ast_id nth_instantiation(const char *name, uint32_t n) {
+    uint32_t end = odin3_ast_node_end(rs.elab).v;
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_ast_id node = {id};
+        if (odin3_ast_kind_of(rs.elab, node) == ODIN3_AST_INSTANTIATION &&
+            strcmp(name_of(node), name) == 0 && n-- == 0) {
+            return node;
+        }
+    }
+    return (odin3_ast_id){0};
+}
+
+/* A parameterized `(* blackbox *)` definition keeps its name, as Yosys 0.55's module and cells
+ * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): one ports-only MODULE with the defaults' ports
+ * and values, written even when no instance uses the defaults; each INSTANTIATION names it and
+ * carries its final values; connections are checked against the instance's own widths. */
 static void test_blackbox_specializations(void) {
-    run_one("(* blackbox *) module pb #(parameter W = 1) (input [W-1:0] a);\nendmodule\n"
-            "module top; wire [1:0] x2; wire [2:0] x3;\n"
-            "  pb #(.W(2)) u1 (.a(x2));\n  pb #(.W(3)) u2 (.a(x3));\nendmodule\n");
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [1:0] x2; wire [2:0] x3; wire [7:0] x8;\n"
+            "  pb #(.W(2)) u1 (.a(x2));\n  pb #(.W(3)) u2 (.a(x3));\n"
+            "  pb #(.W(2)) u3[3:0] (.a(x8));\nendmodule\n");
     expect_clean();
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "black box"));
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=2").v);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=3").v);
-    TEST_ASSERT_EQUAL_STRING("top,pb$W=2,pb$W=3", module_names());
-    static const char *const ports[] = {"a input [1:0]", "a input [2:0]"};
-    for (uint32_t i = 0; i < 2; i++) {
-        odin3_ast_id module = expect_blackbox(i == 0 ? "pb$W=2" : "pb$W=3", 1);
-        expect_port(module, 0, ports[i]);
-        odin3_ast_id params = odin3_ast_child(rs.elab, module, 0);
-        TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(rs.elab, params));
-        odin3_ast_id decl = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, params, 0), 1);
-        TEST_ASSERT_EQUAL_STRING("W", name_of(decl));
-        TEST_ASSERT_EQUAL_INT64(i + 2, number_int(odin3_ast_child(rs.elab, decl, 0)));
+    TEST_ASSERT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=2").v);
+    TEST_ASSERT_EQUAL_STRING("top,pb", module_names());
+    odin3_ast_id module = expect_blackbox("pb", 1);
+    expect_port(module, 0, "a input [3:0]");
+    odin3_ast_id params = odin3_ast_child(rs.elab, module, 0);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(rs.elab, params));
+    odin3_ast_id decl = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, params, 0), 1);
+    TEST_ASSERT_EQUAL_STRING("W", name_of(decl));
+    TEST_ASSERT_EQUAL_INT64(4, number_int(odin3_ast_child(rs.elab, decl, 0)));
+    static const int64_t widths[] = {2, 3, 2};
+    for (uint32_t i = 0; i < 3; i++) {
+        odin3_ast_id holder = nth_instantiation("pb", i);
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, holder.v);
+        odin3_ast_id value = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, holder, 0), 0);
+        TEST_ASSERT_EQUAL_STRING("W", name_of(value)); /* the final values, as for a module */
+        TEST_ASSERT_EQUAL_INT64(widths[i], number_int(odin3_ast_child(rs.elab, value, 0)));
     }
-    odin3_ast_id holder = find(ODIN3_AST_INSTANTIATION, "pb$W=3");
-    odin3_ast_id value = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, holder, 0), 0);
-    TEST_ASSERT_EQUAL_STRING("W", name_of(value)); /* the final values, as for a module */
+    TEST_ASSERT_EQUAL_UINT32(0, nth_instantiation("pb", 3).v);
+    expect_conn(instance("u3[0]"), 0, "a", "x8[1:0]");
+}
+
+/* An instance's connection width is checked against its own specialization's ports. */
+static void test_blackbox_specialization_widths(void) {
+    run_one("(* blackbox *) module pb #(parameter W = 4) (input [W-1:0] a);\nendmodule\n"
+            "module top; wire [2:0] x3;\n  pb #(.W(2)) u[1:0] (.a(x3));\nendmodule\n");
+    TEST_ASSERT_NOT_EQUAL_UINT32(0,
+                                 et_count_with(&rs, ODIN3_LOG_ERROR, "is 3 bits; expected 2 or 4"));
 }
 
 /* --- cell types (EL-8's cell-type targets, EL-11) ------------------------------------------ */
 
 #define RAM_TOP(params, extra)                                                                     \
     "module top; wire c;\n  single_port_ram " params " ram (.clk(c));\n" extra "endmodule\n"
+
+/* A parameterized source `(* blackbox *)` of a registered type's name keeps that name whatever
+ * its parameters, so stage 2 meets the registered type (IR-7b reuse; review I2). */
+static void test_blackbox_param_keeps_celltype_name(void) {
+    run_req("(* blackbox *) module single_port_ram #(parameter ADDR_WIDTH = 1) (input clk);\n"
+            "endmodule\n" RAM_TOP("#(.ADDR_WIDTH(10))", ""),
+            NULL, TECHLIB);
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,single_port_ram", module_names());
+    TEST_ASSERT_EQUAL_INT64(10, param_value("ADDR_WIDTH"));
+}
 
 static void test_celltype_named(void) {
     run_req(RAM_TOP("#(.ADDR_WIDTH(10))", ""), NULL, TECHLIB);
@@ -627,6 +668,19 @@ static void test_implicit_widths(void) {
     expect_port(module, 1, "a inout [3:0]");
     expect_port(module, 2, "e inout");
     expect_conn(instance("u"), 0, "d", "");
+}
+
+/* An array instance's first connection gives an implicit port one element's width when the
+ * element count divides it (else the whole width, broadcast); a later scalar instance then
+ * connects that width (PR 2D-3 final review m3). */
+static void test_implicit_width_from_array(void) {
+    run_req("module top; wire [7:0] bus8; wire [1:0] x2; wire clk;\n"
+            "  foo u[3:0] (.a(bus8), .c(clk));\n  foo v (.a(x2), .c(clk));\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    odin3_ast_id module = expect_blackbox("foo", 2);
+    expect_port(module, 0, "a inout [1:0]");
+    expect_port(module, 1, "c inout");
 }
 
 /* A black box's body adds no port to an implicit black box's union (Task 12 review n3, Q10). */
@@ -799,6 +853,8 @@ int main(void) {
     RUN_TEST(test_output_lvalues);
     RUN_TEST(test_blackbox_module);
     RUN_TEST(test_blackbox_specializations);
+    RUN_TEST(test_blackbox_specialization_widths);
+    RUN_TEST(test_blackbox_param_keeps_celltype_name);
     RUN_TEST(test_celltype_named);
     RUN_TEST(test_celltype_no_parameter);
     RUN_TEST(test_celltype_defparam);
@@ -810,6 +866,7 @@ int main(void) {
     RUN_TEST(test_celltype_array);
     RUN_TEST(test_implicit_union);
     RUN_TEST(test_implicit_widths);
+    RUN_TEST(test_implicit_width_from_array);
     RUN_TEST(test_blackbox_body_not_in_union);
     RUN_TEST(test_blackbox_port_signed);
     RUN_TEST(test_implicit_needs_named);

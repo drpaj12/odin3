@@ -48,6 +48,20 @@ static const uint32_t E1_NONE = UINT32_MAX;
 static const int64_t E1_INT32_MIN = INT32_MIN;
 static const int64_t E1_INT32_MAX = INT32_MAX;
 
+/* A status that stops a sweep whose user errors are already reported: out of memory, or a
+ * failed internal check (a 2D bug, never turned into OK). */
+static bool e1_internal(odin3_status st) {
+    return st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_CHECK;
+}
+
+/* worst, unless it is OK or a user error and st is internal (NO_MEMORY before CHECK). */
+static odin3_status e1_keep_internal(odin3_status worst, odin3_status st) {
+    if (worst == ODIN3_ERR_NO_MEMORY || !e1_internal(st)) {
+        return worst;
+    }
+    return worst == ODIN3_ERR_CHECK && st != ODIN3_ERR_NO_MEMORY ? worst : st;
+}
+
 /* --- recording the declarations ------------------------------------------------------------ */
 
 static odin3_status env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
@@ -647,6 +661,14 @@ static odin3_status signal_type(odin3_elab1_env *env, uint32_t idx) {
     return st;
 }
 
+/* The state an evaluation ending with st leaves (out of memory is remembered as such). */
+static uint8_t state_after(odin3_status st) {
+    if (st == ODIN3_OK) {
+        return ODIN3_E1_DONE;
+    }
+    return st == ODIN3_ERR_NO_MEMORY ? ODIN3_E1_NO_MEMORY : ODIN3_E1_FAILED;
+}
+
 odin3_status odin3_elab1_env_value(odin3_elab1_env *env, uint32_t idx) {
     odin3_elab1_slot *slot = odin3_elab1_env_slot(env, idx);
     uint8_t kind = slot->entry.kind;
@@ -656,6 +678,8 @@ odin3_status odin3_elab1_env_value(odin3_elab1_env *env, uint32_t idx) {
         return ODIN3_OK;
     case ODIN3_E1_FAILED:
         return ODIN3_ERR_PARSE;
+    case ODIN3_E1_NO_MEMORY:
+        return ODIN3_ERR_NO_MEMORY;
     case ODIN3_E1_BUSY:
         if (param) {
             env_error(env, slot->entry.decl, "parameter '%s' depends on itself",
@@ -671,7 +695,7 @@ odin3_status odin3_elab1_env_value(odin3_elab1_env *env, uint32_t idx) {
     slot->state = ODIN3_E1_BUSY;
     odin3_status st = param ? param_value(env, idx) : signal_type(env, idx);
     slot = odin3_elab1_env_slot(env, idx);
-    slot->state = st == ODIN3_OK ? ODIN3_E1_DONE : ODIN3_E1_FAILED;
+    slot->state = state_after(st);
     return st;
 }
 
@@ -1157,31 +1181,31 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
 /* The instance cap over a GATE_DECL's instances (an array's elements each count). */
 static odin3_status gate_counts(e1_pass *ps, odin3_ast_id item) {
     odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, item);
-    odin3_status st = ODIN3_OK;
+    odin3_status worst = ODIN3_OK;
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_GATE_DECL);
-         st != ODIN3_ERR_NO_MEMORY && i < kids.n && !ps->e1->stopped; i++) {
+         !e1_internal(worst) && i < kids.n && !ps->e1->stopped; i++) {
         odin3_elab_inst desc = {item, kids.ids[i], 0, {ODIN3_RES_NONE, 0, {0}}, E1_NONE};
-        st = count_elements(ps, &desc);
+        worst = e1_keep_internal(worst, count_elements(ps, &desc));
     }
-    return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
+    return worst;
 }
 
 /* Every declaration evaluated (EL-23: ranges folded; EL-16: values), in declaration order. */
 static odin3_status evaluate_all(odin3_elab1_env *env) {
-    odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; i < env->slots.len && st != ODIN3_ERR_NO_MEMORY && !env->e1->stopped;
-         i++) {
+    odin3_status worst = ODIN3_OK;
+    for (uint32_t i = 0; i < env->slots.len && !e1_internal(worst) && !env->e1->stopped; i++) {
         const odin3_elab1_slot *slot = odin3_elab1_env_slot(env, i);
-        st = odin3_elab1_env_value(env, i);
+        worst = e1_keep_internal(worst, odin3_elab1_env_value(env, i));
         uint32_t unpacked = slot->entry.kind == ODIN3_ENTRY_SIGNAL ? slot->n_unpacked : 0;
         odin3_ast_id decl = odin3_elab1_env_slot(env, i)->entry.decl;
-        for (uint32_t k = 1; k <= unpacked && st != ODIN3_ERR_NO_MEMORY; k++) {
+        for (uint32_t k = 1; k <= unpacked && !e1_internal(worst); k++) {
             int64_t msb = 0;
             int64_t lsb = 0;
-            st = odin3_elab1_env_range(env, odin3_ast_child(env->e1->parsed, decl, k), &msb, &lsb);
+            odin3_ast_id range = odin3_ast_child(env->e1->parsed, decl, k);
+            worst = e1_keep_internal(worst, odin3_elab1_env_range(env, range, &msb, &lsb));
         }
     }
-    return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
+    return worst;
 }
 
 void odin3_elab1_env_preload(odin3_elab1_env *env, uint32_t spec_idx) {

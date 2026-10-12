@@ -159,14 +159,21 @@ static odin3_status append_path(const odin3_elab1 *e1, uint32_t path, odin3_strb
     return st;
 }
 
-/* base$P=v for each parameter that differs from its default, then $path=v per pending (the top:
- * its definition's name, v4.7). */
+/* Whether a new specialization of def takes def's name whatever its values: the top's (Yosys
+ * chparam, hierarchy -chparam) and a `(* blackbox *)` definition's (its cells keep the module's
+ * name and carry the values, Yosys 0.55). */
+static bool keeps_base(const odin3_elab1 *e1, const odin3_elab_def *def) {
+    return e1->specs.len == 0 || def->kind == ODIN3_DEF_BLACKBOX;
+}
+
+/* base$P=v for each parameter that differs from its default, then $path=v per pending (the top
+ * and a `(* blackbox *)` definition: its definition's name, v4.7, v4.10). */
 static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *res,
                           const odin3_elab_def *def, odin3_strbuf *out) {
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, def->name)));
     uint32_t count = def->n_header_params + def->n_body_params;
-    if (e1->specs.len == 0) {
-        return st; /* the top keeps its definition's name (Yosys chparam, hierarchy -chparam) */
+    if (keeps_base(e1, def)) {
+        return st;
     }
     for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
         if (!res->differ[k]) {
@@ -186,9 +193,16 @@ static odin3_status spell(const odin3_elab1 *e1, const odin3_elab1_params_out *r
 }
 
 /* The name of a new specialization: spelled, hashed past the length cap, then `$2`, `$3`, … until
- * free; interned and recorded. */
-static odin3_status spec_name(odin3_elab1 *e1, const odin3_elab1_params_out *res,
-                              const odin3_elab_def *def, uint64_t hash, uint32_t *name) {
+ * free; interned and recorded. Every specialization of a `(* blackbox *)` definition shares its
+ * first one's name (EL-9 v4.10). */
+static odin3_status spec_name(odin3_elab1 *e1, uint32_t def_idx, const odin3_elab1_params_out *res,
+                              uint64_t hash, uint32_t *name) {
+    const odin3_elab_def *def = odin3_elab1_def(e1, def_idx);
+    odin3_elab1_defx *ext = odin3_vec_at(&e1->defx, def_idx);
+    if (def->kind == ODIN3_DEF_BLACKBOX && ext->bb_name != 0) {
+        *name = ext->bb_name;
+        return ODIN3_OK;
+    }
     odin3_strbuf base;
     odin3_strbuf_init(&base);
     odin3_status st = spell(e1, res, def, &base);
@@ -207,6 +221,7 @@ static odin3_status spec_name(odin3_elab1 *e1, const odin3_elab1_params_out *res
     st = st != ODIN3_OK ? st
                         : odin3_design_intern(e1->design, (odin3_bytes){cand.data, cand.len}, name);
     st = st != ODIN3_OK ? st : odin3_u64map_put(e1->spec_names, (odin3_kv){*name, 1});
+    ext->bb_name = st == ODIN3_OK && def->kind == ODIN3_DEF_BLACKBOX ? *name : 0;
     odin3_strbuf_free(&base);
     odin3_strbuf_free(&cand);
     return st;
@@ -288,8 +303,13 @@ static odin3_status create_spec(odin3_elab1 *e1, const odin3_elab_spec_req *req,
                                 const odin3_elab1_params_out *res, odin3_bytes key,
                                 uint32_t *spec) {
     const odin3_elab_def *def = odin3_elab1_def(e1, req->def);
-    odin3_elab1_spec rec = {
-        .def = req->def, .depth = req->depth, .hash = odin3_hash_bytes(key, ODIN3_HASH_SEED)};
+    odin3_elab1_spec rec = {.def = req->def,
+                            .depth = req->depth,
+                            .hash = odin3_hash_bytes(key, ODIN3_HASH_SEED),
+                            .dflt = res->n_pending == 0};
+    for (uint32_t k = 0; k < def->n_header_params + def->n_body_params; k++) {
+        rec.dflt = rec.dflt && !res->differ[k];
+    }
     odin3_status st = check_caps(e1, req);
     st = st != ODIN3_OK ? st : keep(e1, res, def->n_header_params + def->n_body_params, &rec);
     uint8_t *bytes =
@@ -299,7 +319,7 @@ static odin3_status create_spec(odin3_elab1 *e1, const odin3_elab_spec_req *req,
         memcpy(bytes, key.ptr, key.len);
         rec.key = bytes;
         rec.key_len = (uint32_t)key.len;
-        st = spec_name(e1, res, def, rec.hash, &rec.name);
+        st = spec_name(e1, req->def, res, rec.hash, &rec.name);
     }
     uint64_t head = 0;
     rec.next_same_hash = odin3_u64map_get(e1->spec_hash, rec.hash, &head) ? (uint32_t)head : 0;
@@ -548,6 +568,32 @@ static void pend_unit_directives(odin3_elab1 *e1) {
     }
 }
 
+/* A `(* blackbox *)` specialization with parameters away from their defaults writes no MODULE:
+ * its instances name the definition and carry the values (EL-11 v4.10, Yosys 0.55's cell
+ * parameters); the definition's default specialization, queued once here, writes the one
+ * ports-only MODULE with the defaults' ports, as Yosys's module. */
+static odin3_status blackbox_default(odin3_elab1 *e1, uint32_t spec) {
+    const odin3_elab1_spec *rec = odin3_elab1_spec_at(e1, spec);
+    odin3_elab1_defx *ext = odin3_vec_at(&e1->defx, rec->def);
+    if (ext->bb_default_asked) {
+        return ODIN3_OK;
+    }
+    ext->bb_default_asked = true;
+    odin3_ast_id node = odin3_elab1_def(e1, rec->def)->node;
+    e1->creating = (odin3_elab1_creating){node, node, rec->def};
+    odin3_elab_spec_req req = {.def = rec->def, .ovr = NULL, .n_ovr = 0, .depth = rec->depth};
+    uint32_t dflt = 0;
+    return odin3_elab1_spec_get(e1, &req, &dflt);
+}
+
+/* A `(* blackbox *)` specialization: the definition's MODULE from its default one (EL-4 v4.8),
+ * the default one queued from any other; a reported error is counted, not returned. */
+static odin3_status run_blackbox(odin3_elab1 *e1, uint32_t spec) {
+    odin3_status bb = odin3_elab1_spec_at(e1, spec)->dflt ? odin3_elab1_blackbox(e1, spec)
+                                                          : blackbox_default(e1, spec);
+    return bb == ODIN3_ERR_PARSE || bb == ODIN3_OK ? e1->fatal : bb;
+}
+
 /* Passes E and W of every specialization in FIFO order (the queue grows as instances are
  * specialized). */
 static odin3_status run_specs(odin3_elab1 *e1) {
@@ -558,8 +604,7 @@ static odin3_status run_specs(odin3_elab1 *e1) {
             continue; /* a MODULE forced pending (point (l)'s hook) */
         }
         if (odin3_elab1_def(e1, def)->kind == ODIN3_DEF_BLACKBOX) {
-            odin3_status bb = odin3_elab1_blackbox(e1, i); /* a ports-only MODULE (EL-4 v4.8) */
-            st = bb == ODIN3_ERR_PARSE || bb == ODIN3_OK ? e1->fatal : bb;
+            st = run_blackbox(e1, i);
             continue;
         }
         st = odin3_elab1_expand(e1, i);

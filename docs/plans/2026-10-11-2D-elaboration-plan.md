@@ -1564,7 +1564,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - **Instances and cell types.**
   - Module instances carry `parameter:W` (BITS) for each overridden parameter.
   - `single_port_ram` (with `pre_script` `read_techlib lib/vtr.o3lib`) and 10/8-bit address/data connections → `ADDR_WIDTH` 10, `DATA_WIDTH` 8 by inference.
-  - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` once per specialization. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`.
+  - A `(* blackbox *)` module → `odin3_celltype_declare_blackbox` **once per definition, under its base name** (spec v4.10, EL-11; PR 2D-3 final review I2, ruling: Yosys 0.55 keeps `module \bb` and `cell \bb \u1` with `parameter \W 8`). Stage 1 writes one ports-only `MODULE` named `bb` (the defaults' ports and values) and every `INSTANTIATION` of the definition is named `bb` with its final values in its params LIST; it never writes `bb$W=8`. Task 19 declares the type from that `MODULE`; each cell takes its `INSTANTIATION`'s values as cell parameters, and its port widths are its own specialization's (stage 1 has checked the connections against them): the type is parametric (IR-7b width rules, for a port whose width depends on a parameter) or Task 19 records the widths per cell from stage 1's specialization table — Task 19 decides, and a black box whose port widths do not depend on its parameters needs neither. `write_blif --vtr` (3E) writes `.subckt bb`, never a `$`-suffixed name, so an architecture model named after the definition matches. A mismatch with a registered type → located `black box 'single_port_ram' does not match the registered cell type: <IR's why>`; a source `(* blackbox *)` named like a registered type reuses it whatever its parameters (IR-7b's check by port name).
 - **Error cap and top (moved from Task 17; review R1).**
   - 25 two-driver assignments → 20 errors, then `too many errors; elaboration stopped after 20`, `PARSE`, `odin3_design_top` unset, IR check passes.
   - A clean three-module design (one specialization) → `odin3_design_top` set, and the summary line `… 3 modules (1 specializations), …`.
@@ -1934,6 +1934,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - `neg_unresolved_module`, `neg_unknown_top`, `neg_ambiguous_top` and `neg_no_top` give their kind, location and names;
   - a case where the fixture's 0.69 `ref.cmd` and 0.55 disagree is reported `oracle drift`, not failed.
 - `verilog_reject_2d` and `verilog_ignore_2d` are re-run here with 0 pending.
+- **Oracle crash (PR 2D-3 final review m6):** Yosys 0.55 segfaults (core dumped) on recursive instantiation under `hierarchy -check -top` (`top` instantiating itself; `ping`→`pong`→`ping`), where 2D reports "recursive instantiation of 'top'". `elab-sweep --equiv` and `project_corpus_frontend` class a Yosys crash (signal exit) on such a case as `oracle crash`, not a mismatch or a 2D failure.
 
 ### Task 27: The VTR sweep, `bench_elab`, the PHASE2 entry (§14.5, §15)
 **Files:**
@@ -1955,6 +1956,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - peak RSS (`getrusage`).
 - The bench set is `elab-sweep --bench build/release/bench_elab` over the **one set** of 64 files (`$VTR_ROOT/vtr_flow/benchmarks/verilog/*.v` and `koios/*.v` together), smallest first. `lenet.v` is last, alone under 8 GiB. It then prints the §15 targets, each `ok` or `MISSED`.
 - `verilog_vtr_elab` runs the same one set under `--elab-only` with `vtr_expect_fail.txt`, as a `sweep` test (never in the `-j4` gate; ruling I12).
+- `elab_equiv_vtr` classes a Yosys 0.55 crash on recursive instantiation as `oracle crash` (Task 26's rule; PR 2D-3 final review m6).
 
 **Tests:**
 - `bench_elab_smoke` runs `--one` on two micros and checks every column is present.
@@ -2004,7 +2006,7 @@ Exit 0 if all pass, 1 if any differs, 2 for usage or I/O errors. `elab_coverage_
   - `always` blocks mixing `=` and `<=`;
   - `case`/`casez`, loops, functions and tasks;
   - memories with non-zero low indices.
-- `elab-diff --seeds A..B [--yosys-069 Y2]` runs `elab-equiv` per seed. A non-equivalence fails and keeps the seed and file. With `--yosys-069`, a file where 0.55 and 0.69 disagree is listed as `oracle drift`, not failed.
+- `elab-diff --seeds A..B [--yosys-069 Y2]` runs `elab-equiv` per seed. A non-equivalence fails and keeps the seed and file. With `--yosys-069`, a file where 0.55 and 0.69 disagree is listed as `oracle drift`, not failed. Yosys 0.55 segfaults on recursive instantiation (PR 2D-3 final review m6): a generator case that recurses and makes Yosys crash is listed as `oracle crash`, not failed (2D must still give its recursion error).
 - `const-diff --count N --seed S` generates random constant expressions over Task 7's ops and compares `odin3_cval_op` through a tiny driver against Yosys 0.55's values.
 
 **Tests:**

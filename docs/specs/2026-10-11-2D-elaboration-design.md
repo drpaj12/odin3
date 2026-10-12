@@ -128,6 +128,15 @@ written named, by the type's parameter at their position, in the type's paramete
 §17 #29 records IEEE. (5) §9.1 gains the texts of Task 12's agent defaults; §17 #27 and #28 record
 gate arrays and the output rule.
 
+v4.10 (2026-10-12; the PR 2D-3 final review, controller ruling I2 and minors m1, m3, m5). (1) EL-9,
+EL-11, EL-4: a `(* blackbox *)` definition keeps its base name for every specialization (Yosys
+0.55: `module \bb`, `cell \bb` with `parameter \W 8`), one ports-only `MODULE` from its default
+specialization, its instances carrying their values; Task 19 declares one cell type under that
+name and `write_blif --vtr` writes `.subckt <base>` (§17 #30). (2) EL-9's key text names each
+pending entry's source. (3) EL-11: an implicit black box's width from an instance array's first
+connection is one element's when N divides it. (4) EL-24: 2C rejects an empty non-ANSI port other
+than a trailing comma, as Yosys does (§17 #31).
+
 v4.9 (2026-10-12; 2D Task 13, the binder, and the Task 12 review's notes n1 and n2). (1) EL-4: a
 black-box `MODULE`'s `PARAM_DECL`s are bare (no `RANGE`, `SIGNED` or `DT`: the value's `NUMBER`
 carries width and sign), and its ports are always written as `wire` ports (`integer`: `signed
@@ -270,7 +279,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` specialization and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` specialization with one bare `PARAM_DECL` per `parameter` holding its final value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where first reached, implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -533,8 +542,13 @@ another parameter, so the key is the resolved vector, not the override list: `#(
 `#(.W(32'sd8))` on `parameter integer W` share a specialization, while on an untyped `W` they
 differ (8 is 32-bit signed, `4'd8` 4-bit unsigned: different expressions inside). Key =
 (definition, for each `parameter` in order: width, signedness, string flag, bits; the pending
-list sorted by path). Hash: `odin3_hash_bytes` (`util/hash.h`) over the key bytes; equality is
-exact. Two instances with equal keys share one specialization and one IR module.
+list sorted by path, each entry as (path, source, value)). The source (`#()`, `defparam` or
+project line) is part of the key because at its target a pending entry competes with the child's
+own `#()` by EL-8's precedence, so two equal values from different sources can give different
+results; an equal-valued pending from another source is another specialization, whose name takes
+the `$2` suffix (`mid$u_leaf.W=4` and `mid$u_leaf.W=4$2`; v4.10). Hash: `odin3_hash_bytes`
+(`util/hash.h`) over the key bytes; equality is exact. Two instances with equal keys share one
+specialization and one IR module.
 
 **Names** (IR-7): the definition's name when every `parameter` has its default value and nothing
 is pending (Yosys derives a `$paramod` name as soon as any override is given, even one equal to
@@ -547,7 +561,10 @@ escaped. A name longer than `ODIN3_ELAB_MAX_MODULE_NAME` (128 bytes) becomes
 whatever its parameters and pending overrides, as Yosys `chparam` and `hierarchy -chparam` do
 (verified on 0.55); VTR and BLIF `.model` expect it, and Task 17's `odin3_design_set_top` takes it.
 A specialization of the top's definition with default values can then only come from recursion; it
-takes `top$2` (v4.7). A name already taken by another definition or
+takes `top$2` (v4.7). Every specialization of a **`(* blackbox *)` definition** takes the
+definition's name, whatever its parameters (v4.10; Yosys 0.55 keeps `module \bb` and gives the
+cell `parameter \W 8`, never a `$paramod`): its instances are told apart by their parameter
+values, not by name (EL-11). A name already taken by another definition or
 specialization, or by a registered cell type of the design (`odin3_celltype_find`; EL-6's
 "names already taken"), gets `$2`, `$3`, … appended (checked against every definition name of
 the store, every specialization made so far and the design's cell-type table), so names are
@@ -623,12 +640,22 @@ and makes one specialization per level.
 ### 3.6 Black boxes, hard cells and undefined modules (EL-11)
 
 - **`(* blackbox *)` modules** in the sources (Yosys's attribute): the body is ignored (an info
-  line if it is not empty), the ports are evaluated per specialization and written as a
-  ports-only black-box `MODULE` (EL-4, v4.8), and stage 2 registers a black-box cell type per such
-  `MODULE` (IR-7b; granularity `blackbox`, the specialization's name, its ports in port order)
-  instead of creating an IR module. When a cell type of that name is already registered (a tech
-  library's `single_port_ram`), IR-7b's compatibility check by port name applies and the
-  registered type is reused; a mismatch is a located error naming the port.
+  line if it is not empty). A black box keeps its **base name** whatever its parameters (v4.10,
+  Yosys 0.55; EL-9): stage 1 still specializes it per resolved parameter vector and checks each
+  instance's connections against that specialization's ports (EL-10; Yosys's `hierarchy` derives
+  the same per-parameter port widths for the check and then drops the derived module), but writes
+  **one** ports-only black-box `MODULE` per definition, named after it, with the ports and
+  `PARAM_DECL` values of its **default** specialization (Yosys's `module \bb`), queued once when no
+  instance uses the defaults; every `INSTANTIATION` of the definition is named after it and carries
+  its final values in its params LIST (EL-4: the cell's parameters). Stage 2 (Task 19) registers one
+  black-box cell type per such `MODULE` (IR-7b; granularity `blackbox`, the definition's name, its
+  ports in port order) instead of creating an IR module; each cell takes its `INSTANTIATION`'s
+  values as cell parameters and its own specialization's port widths (a port whose width depends
+  on a parameter makes the type parametric, IR-7b). `write_blif --vtr` (3E) therefore writes
+  `.subckt <base name>`, which an architecture model of that name matches; no `$`-suffixed black-box
+  name reaches a writer. When a cell type of that name is already registered (a tech library's
+  `single_port_ram`), IR-7b's compatibility check by port name applies and the registered type is
+  reused whatever the parameters; a mismatch is a located error naming the port.
 - **Registered cell types** (EL-6 item 5): parameters by name must be parameters of the type
   ("cell type 't' has no parameter 'P'"); ordered values map to the type's parameters in its
   declaration order; parameters not given are inferred from the connections' widths
@@ -640,7 +667,10 @@ and makes one specialization per level.
   per distinct name: every instance must use named connections ("implicit black box 'm' needs
   named connections"), its ports are the union of the names used (every instantiation of the name
   in the sources, in source order), the first elaborated connection with an expression fixes each
-  port's width (later instances must agree; 1 bit when no connection gives one), all ports are
+  port's width (from an instance array of N elements, a width W that N divides fixes W / N, the
+  element's slice, else W: EL-10's two forms, read with the slice preferred; later instances must
+  agree, an array's connection being one element's width or N times it; 1 bit when no connection
+  gives one; v4.10), all ports are
   `inout`, an info line names it, and it is written as a ports-only black-box `MODULE` (EL-4,
   v4.8).
   This is coverage row I7's black box (B §2.23.1) without guessing directions.
@@ -983,8 +1013,10 @@ one per bit, unless it is a memory (EL-27):
 - **`input reg`/`input integer`** (M12, D5): accepted as a net with "input 'a' is declared as a
   variable ('reg'); it is treated as a net".
 - **`inout`** (M7) ports are `$port_inout` (EL-29 says what may drive them).
-- **Empty positions** (`(a, , b)`, a trailing comma, 2C §3.6) are kept as positions for ordered
-  connections (EL-10) and are not ports. **Port expressions** `.x(a)`, `{a, b}`, `a[3:0]` in a
+- **Empty positions**: only a trailing comma (`(a, b, )`, 2C §3.6) reaches 2D; 2C rejects
+  `(a, , b)` and `(, a)` with a located syntax error, as Yosys 0.55 does (2C §3.1 (k); §17 #31;
+  v4.10). The trailing one is kept as a position for ordered connections (EL-10) and is not a port.
+  **Port expressions** `.x(a)`, `{a, b}`, `a[3:0]` in a
   header are M6: "port expression in a module port list is not supported".
 - **Order**: header order. Stage 2 creates the ports with `odin3_module_add_port` in that order,
   for every specialization before any module body (IR-7: a module's ports must exist before
@@ -2378,6 +2410,8 @@ and reported, never relaxed (2A's rule).
 | 27 | gate arrays (`and g[1:0] (y, a, b)`) are expanded per EL-10 with P = 1 | fails: "Cell arrays of primitives are currently not supported", ending in an assertion at `simplify.cc` 2755 (verified on 0.55) | legal (Q5) | coverage row Q5; Parmys fails where 2D succeeds, so no golden can disagree (v4.8) |
 | 28 | an output or inout connected to anything but a net lvalue (`a + b`, `w[i]`) is EL-10's error | elaborated, with "Drivers conflicting" warnings; only a constant output is an error | not a net lvalue: illegal | EL-10 I3; the constant cases match Yosys's own error (v4.8) |
 | 29 | an instance array's lowest index gets the connection's low bits whatever the range's direction | same (verified on 0.55) | bits are distributed by range position (the left index gets the leftmost bits), which differs for ascending ranges | the exit bar is Parmys (v4.8) |
+| 30 | a parameterized `(* blackbox *)` module keeps its name and one ports-only `MODULE` (the defaults' ports); each `INSTANTIATION` carries **every** parameter's final value | same name and module, the module's ports at the defaults' widths (verified on 0.55: PR 2D-3 final review probe 17; `pb #(.W(2))` beside a default `pb` in the fix round); the cell's `parameter`s are only the overrides given (none for a default instance) | — | EL-4: an `INSTANTIATION`'s params LIST holds the specialization's final values for every module instance; the values are the same, only the defaulted ones are spelled out (v4.10) |
+| 31 | an empty non-ANSI port anywhere but last (`module n(a, , b)`, `(, a)`) is a syntax error; a trailing comma is accepted | same ("syntax error, unexpected ','"; verified on 0.55: probe 20, and `(, a)` and `(a, b, )` in the fix round) | legal (`port ::= [port_expression]`) | Yosys; IEEE's empty position has no use but a dropped connection (v4.10) |
 
 ## 18. Implementation split (EL-51)
 

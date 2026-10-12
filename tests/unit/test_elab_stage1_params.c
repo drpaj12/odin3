@@ -1029,10 +1029,12 @@ static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
 }
 
-/* One step of the sweep: the allocation limit and the parsed store's node count to keep. */
+/* One step of the sweep: the allocation limit, the parsed store's node count to keep and the
+ * unlimited run's dump an OK run must reproduce (its parameter values and names: review I1). */
 typedef struct oom_at {
     long limit;
     uint32_t nodes;
+    const odin3_strbuf *want;
 } oom_at;
 
 static odin3_status oom_step(const oom_at *at) {
@@ -1045,9 +1047,33 @@ static odin3_status oom_step(const oom_at *at) {
     TEST_ASSERT_EQUAL_UINT32(at->nodes, odin3_ast_node_end(rs.parsed).v);
     if (st == ODIN3_OK) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(elab, ODIN3_CHECK_FULL));
+        odin3_strbuf got;
+        odin3_strbuf_init(&got);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_dump(elab, odin3_ast_root(elab, 0), &got));
+        TEST_ASSERT_EQUAL_STRING(at->want->data, got.data);
+        odin3_strbuf_free(&got);
     }
     odin3_ast_destroy(elab);
     return st;
+}
+
+/* Every allocation of stage 1 over the parsed store of rs fails in turn until OOM_SETTLE runs
+ * in a row succeed; each OK run reproduces rs's dump. Returns the NO_MEMORY runs. */
+static int oom_sweep(void) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    uint32_t nodes = odin3_ast_node_end(rs.parsed).v;
+    odin3_log_set_sink(quiet_sink, NULL);
+    int failed = 0;
+    int settled = 0;
+    for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
+        oom_at at = {limit, nodes, &rs.dump};
+        bool oom = oom_step(&at) == ODIN3_ERR_NO_MEMORY;
+        failed += oom ? 1 : 0;
+        settled = oom ? 0 : settled + 1;
+    }
+    TEST_ASSERT_EQUAL_INT(OOM_SETTLE, settled);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.parsed, ODIN3_CHECK_FULL));
+    return failed;
 }
 
 /* Parameters, a defparam pushed down, a project override, the name and the writer: every
@@ -1059,20 +1085,16 @@ static void test_oom(void) {
                        "module mid #(parameter N = 2) (); leaf #(.W(N)) u_leaf (); endmodule\n"
                        "module top; mid #(3) u_mid (); mid u_two ();\n"
                        "defparam u_two.u_leaf.S = \"t\";\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    uint32_t nodes = odin3_ast_node_end(rs.parsed).v;
-    odin3_log_set_sink(quiet_sink, NULL);
-    int failed = 0;
-    int settled = 0;
-    for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
-        oom_at at = {limit, nodes};
-        bool oom = oom_step(&at) == ODIN3_ERR_NO_MEMORY;
-        failed += oom ? 1 : 0;
-        settled = oom ? 0 : settled + 1;
-    }
-    TEST_ASSERT_EQUAL_INT(OOM_SETTLE, settled);
-    TEST_ASSERT_TRUE(failed > 100);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.parsed, ODIN3_CHECK_FULL));
+    TEST_ASSERT_TRUE(oom_sweep() > 100);
+}
+
+/* The restoring evaluation of `differs` (EL-9's name) failing for want of memory fails the run,
+ * not keeps the default's value (review I1): a value wider than an arena chunk makes every
+ * evaluation allocate, so the sweep fails that evaluation alone at some step. */
+static void test_oom_restoring_evaluation(void) {
+    run_clean("module m #(parameter [599999:0] P = 0) (); endmodule\n"
+              "module top; m #(.P(1)) u (); endmodule\n");
+    TEST_ASSERT_TRUE(oom_sweep() > 0);
 }
 
 /* The fix round's tests (review task-11-review.md: I2, I3, m1, m2, m4, m5, m6). */
@@ -1149,5 +1171,6 @@ int main(void) {
     RUN_TEST(test_params_api);
     run_fix_round();
     RUN_TEST(test_oom);
+    RUN_TEST(test_oom_restoring_evaluation);
     return UNITY_END();
 }

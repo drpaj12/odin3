@@ -121,11 +121,14 @@ static odin3_status apply_all(odin3_elab1_env *env, const odin3_elab_spec_req *r
 }
 
 /* Whether parameter slot idx's final value differs from what its default would give in this
- * specialization (EL-9's name), judged quietly: a default that cannot be evaluated differs. */
-static bool differs(odin3_elab1_env *env, uint32_t idx) {
+ * specialization (EL-9's name), judged quietly into *out: a default that cannot be evaluated
+ * differs. ODIN3_ERR_NO_MEMORY from either evaluation is returned (EL-46): the restoring one
+ * failing would leave the default's value in the slot. */
+static odin3_status differs(odin3_elab1_env *env, uint32_t idx, bool *out) {
     odin3_elab1_slot *slot = odin3_elab1_env_slot(env, idx);
+    *out = false;
     if (!slot->overridden) {
-        return false;
+        return ODIN3_OK;
     }
     odin3_elab_override saved = slot->ovr;
     odin3_cval final = slot->entry.value;
@@ -134,20 +137,32 @@ static bool differs(odin3_elab1_env *env, uint32_t idx) {
     env->quiet = true;
     odin3_status st = odin3_elab1_env_value(env, idx);
     env->quiet = false;
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        return st;
+    }
     slot = odin3_elab1_env_slot(env, idx);
     bool same = st == ODIN3_OK && odin3_elab1_same_value(&slot->entry.value, &final);
     slot->overridden = true;
     slot->ovr = saved;
     slot->state = ODIN3_E1_NEW;
     st = odin3_elab1_env_value(env, idx); /* restores the final value (no diagnostic: it worked) */
-    return !same || st != ODIN3_OK;
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        return st;
+    }
+    *out = !same || st != ODIN3_OK;
+    return ODIN3_OK;
 }
 
 static odin3_status copy_out(odin3_elab1_env *env, uint32_t idx, odin3_elab1_params_out *out,
                              uint32_t pos) {
     const odin3_elab1_slot *slot = odin3_elab1_env_slot(env, idx);
     out->bases[pos] = slot->base;
-    out->differ[pos] = differs(env, idx);
+    bool differ = false;
+    odin3_status st = differs(env, idx, &differ);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    out->differ[pos] = differ;
     slot = odin3_elab1_env_slot(env, idx);
     return odin3_cval_copy(env->e1->scratch, &slot->entry.value, &out->values[pos]);
 }
@@ -170,7 +185,7 @@ static odin3_status evaluate(odin3_elab1_env *env, odin3_elab1_params_out *out) 
     for (uint32_t k = 0; k < count && worst != ODIN3_ERR_NO_MEMORY && !env->e1->stopped; k++) {
         uint32_t idx = param_slot(env, k);
         odin3_status st = idx != E1_NONE ? odin3_elab1_env_value(env, idx) : ODIN3_ERR_CHECK;
-        worst = worst != ODIN3_OK ? worst : st;
+        worst = worst != ODIN3_OK && st != ODIN3_ERR_NO_MEMORY ? worst : st; /* NO_MEMORY wins */
     }
     for (uint32_t k = 0; k < count && worst == ODIN3_OK; k++) {
         worst = copy_out(env, param_slot(env, k), out, k);

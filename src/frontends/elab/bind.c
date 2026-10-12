@@ -629,11 +629,14 @@ static void bd_declarator(bd_run *br, const bd_frame *up, odin3_ast_id node) {
     }
 }
 
-/* The library of a MODULE: its FILE buffer's (2A §3.1), "work" when the buffer has none. */
+/* The library of a MODULE: its FILE buffer's (2A §3.1), "work" when the buffer has none. Out of
+ * memory creating the source manager latches. */
 static uint32_t bd_library(bd_run *br, odin3_ast_id module) {
     odin3_srcman *sm = NULL;
     odin3_srcbuf_info info = {0};
-    if (odin3_design_get_srcman(br->design, &sm) != ODIN3_OK) {
+    odin3_status st = odin3_design_get_srcman(br->design, &sm);
+    if (st != ODIN3_OK) {
+        bd_latch(br, st);
         return br->work_lib;
     }
     odin3_loc at = odin3_srcman_file_loc(sm, odin3_ast_loc(br->ast, module));

@@ -358,7 +358,8 @@ typedef struct e1b_auto {
 } e1b_auto;
 
 /* One named connection's width against its port's (fixed by the first connection with an
- * expression; an array element's slice counts). */
+ * expression: from an array of n elements, a width that n divides is n slices of width / n, as
+ * for a declared port (EL-11); a later connection may be one element's width or all of them). */
 static odin3_status auto_port(e1b_auto *ax, uint32_t box, odin3_ast_id conn) {
     odin3_elab1 *e1 = ax->e1;
     uint32_t name = odin3_ast_name(e1->parsed, conn);
@@ -372,6 +373,9 @@ static odin3_status auto_port(e1b_auto *ax, uint32_t box, odin3_ast_id conn) {
     odin3_elab1_bbport *rec = odin3_vec_at(&e1->bbports, at - 1);
     uint32_t want = rec->port.width;
     if (want == 0) {
+        if (e1->array.n > 1 && width % e1->array.n == 0) {
+            width /= e1->array.n;
+        }
         rec->port.width = width;
         rec->port.msb = (int64_t)width - 1;
         rec->port.scalar = width == 1;
