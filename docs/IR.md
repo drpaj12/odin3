@@ -234,10 +234,11 @@ spec §5.2. An entry declares:
 **The built-in table** (`src/ir/cells/builtin.c`) is append-only: a type's index is its built-in
 ID, so IDs never move. IDs 0–52 are 1B's set (structural and constant types, the word cells, the
 bit cells, `$sop`); 53–61 are 2D's IR change A (`$neg` … `$pow`), 62 is IR change B (`$proc`,
-IR-19), and 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
-$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), 74 types
-in all. IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT,
-≥ 1), polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
+IR-19), 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
+$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), and 74 is
+3D's `$lut` (`lut.c`; its ID is named only through `odin3_lut_builtin_index`), 75 types in all.
+IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT, ≥ 1),
+polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
 `ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.
 Like `$dff $dffe $adff $sdff` they have word granularity, flags 0 and no simulate hook (1E
 simulates the netlist view), so they are legal in the RTLIL view only.
@@ -323,10 +324,11 @@ uses it). `.subckt` → a node of the named type (IR-7b).
 ports `A` (in, `WIDTH` bits, LSB first) and `Y` (out, 1 bit). `Y = LUT[i]` with `i = Σ A[j]·2^j`,
 and `LUT[i]` is bit *i* of the parameter counted from its least significant bit: Yosys `$lut`
 semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
-is, and it simulates (1E). Writers print it as an irredundant cover (3E's `odin3_blif_isop`: a
-BLIF `.names`, a sum of products in Verilog) and as Yosys `$lut` in JSON; a BLIF round trip turns
-it into the `$sop` with that cover. `abc` is its only producer in Phase 3 and never makes a
-constant one; DESIGN §5.2's `$_LUT_K_` is this cell.
+is, and it simulates (1E). It is written as Yosys `$lut` in JSON and RTLIL. The BLIF and Verilog
+writers print it as an irredundant cover (3E's `odin3_blif_isop`: a BLIF `.names`, a sum of
+products in Verilog) once 3E-5 and 3D Task 9 land; until then they write it generically (a
+`.subckt $lut`, a generic instance). A BLIF round trip then turns it into the `$sop` with that
+cover. `abc` is its only producer in Phase 3 and never makes a constant one.
 
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global
 registry (built-ins from a static table compiled from `src/ir/cells/`; plugins add theirs at load

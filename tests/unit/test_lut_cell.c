@@ -215,6 +215,38 @@ static void test_defaults_identity(void) {
     odin3_sim_destroy(sim);
 }
 
+/* Y of the built simulator for the input index `input` (a[j] = bit j of it). */
+static bool sim_y_wide(odin3_sim *sim, uint32_t input) {
+    uint32_t width = odin3_sim_input_width(sim, 0);
+    for (uint32_t j = 0; j < width; j++) {
+        odin3_status st = odin3_sim_set_input(sim, (odin3_sim_bit){0, j}, ((input >> j) & 1U) != 0);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    }
+    odin3_sim_cycle(sim);
+    bool out = false;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_get_output(sim, (odin3_sim_bit){0, 0}, &out));
+    return out;
+}
+
+/* A WIDTH-6 $lut through odin3_sim_build: every input gives LUT[i] (review M4). */
+static void test_sim_build_width6(void) {
+    char msb_first[65];
+    for (uint32_t i = 0; i < 64; i++) {
+        msb_first[63 - i] = (char)((i * 7U + i / 5U) % 3U == 0 ? '1' : '0'); /* LUT[i] */
+    }
+    msb_first[64] = '\0';
+    odin3_module_id mid = build_lut_module(6, msb_first);
+    check_full_ok();
+    odin3_sim *sim = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_build(design, mid, &sim));
+    TEST_ASSERT_EQUAL_UINT32(6, odin3_sim_input_width(sim, 0));
+    for (uint32_t input = 0; input < 64; input++) {
+        bool want = msb_first[63 - input] == '1';
+        TEST_ASSERT_EQUAL_MESSAGE(want, sim_y_wide(sim, input), "Y != LUT[i]");
+    }
+    odin3_sim_destroy(sim);
+}
+
 /* --- verify -------------------------------------------------------------------------------- */
 
 /* A $lut with params is refused: INVALID_ARG, no node, and exactly the two lines expected. */
@@ -240,6 +272,7 @@ static void test_verify_refusals(void) {
     static const uint8_t k_three[3] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_0};
     static const uint8_t k_x[4] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_X, ODIN3_BIT_0};
     static const uint8_t k_z[4] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_Z, ODIN3_BIT_0};
+    static const uint8_t k_z_top[4] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_0, ODIN3_BIT_Z};
     odin3_value params[2] = {odin3_value_int(0), bits_value(k_two, 2)};
     expect_refused(params, "cell parameter WIDTH must be an int in 1..16");
     params[0] = odin3_value_int(ODIN3_LUT_MAX_WIDTH + 1);
@@ -251,6 +284,8 @@ static void test_verify_refusals(void) {
     expect_refused(params, "$lut: LUT bit 2 is x; only 0 and 1 are allowed");
     params[1] = bits_value(k_z, 4);
     expect_refused(params, "$lut: LUT bit 2 is z; only 0 and 1 are allowed");
+    params[1] = bits_value(k_z_top, 4); /* the last bit is checked too (review M1) */
+    expect_refused(params, "$lut: LUT bit 3 is z; only 0 and 1 are allowed");
     check_full_ok();
 }
 
@@ -617,6 +652,45 @@ static void test_oom_lut_params(void) {
     TEST_ASSERT_GREATER_THAN_UINT32(0, failures);
 }
 
+/* One odin3_lut_from_engine of a 16-input table (W = 2^11) with allocation fail_at failing. */
+static odin3_status try_from_engine(long fail_at, const uint32_t *truth) {
+    odin3_arena *arena = odin3_arena_create(ARENA_CHUNK);
+    TEST_ASSERT_NOT_NULL(arena);
+    odin3_value params[2] = {odin3_value_int(-1), odin3_value_int(-1)};
+    odin3_util_set_alloc_fail_after(fail_at);
+    odin3_status st =
+        odin3_lut_from_engine(arena, ODIN3_LUT_MAX_WIDTH, ODIN3_LUT_MAX_WIDTH, truth, params);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        TEST_ASSERT_EQUAL_INT64(-1, params[0].i);
+    } else {
+        static uint64_t back[1024];
+        TEST_ASSERT_EQUAL(true, odin3_lut_table(params, back, 1024));
+        for (size_t i = 0; i < 1024; i++) {
+            uint64_t want = (uint64_t)truth[2 * i] | ((uint64_t)truth[(2 * i) + 1] << 32);
+            TEST_ASSERT_EQUAL_HEX64(want, back[i]);
+        }
+    }
+    odin3_arena_destroy(arena);
+    return st;
+}
+
+static void test_oom_from_engine(void) {
+    static uint32_t truth[2048];
+    for (uint32_t i = 0; i < 2048; i++) {
+        truth[i] = 0x9E3779B9U * (i + 1);
+    }
+    uint32_t failures = 0;
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (long fail_at = 0; fail_at < OOM_LIMIT && st != ODIN3_OK; fail_at++) {
+        st = try_from_engine(fail_at, truth);
+        failures += st != ODIN3_OK ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_GREATER_THAN_UINT32(0, failures);
+}
+
 /* One attempt at a connected 16-input $lut in a fresh design; its status. */
 static odin3_status try_wide_node(long fail_at) {
     odin3_design_destroy(design);
@@ -664,6 +738,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_registry_lookup);
     RUN_TEST(test_defaults_identity);
+    RUN_TEST(test_sim_build_width6);
     RUN_TEST(test_verify_refusals);
     RUN_TEST(test_const_value);
     RUN_TEST(test_simulate_tables);
@@ -678,6 +753,7 @@ int main(void) {
     RUN_TEST(test_rtlil_form);
     RUN_TEST(test_rtlil_form_msb_first);
     RUN_TEST(test_oom_lut_params);
+    RUN_TEST(test_oom_from_engine);
     RUN_TEST(test_oom_wide_node);
     return UNITY_END();
 }
