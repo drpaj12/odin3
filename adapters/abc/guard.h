@@ -70,6 +70,13 @@ odin3_status odin3_guard_run_always(odin3_guard_fn fn, void *arg, odin3_abc_fail
 bool odin3_guard_disabled(void);
 
 /*
+ * True while a guarded call (odin3_guard_run or odin3_guard_run_always) runs on this thread. Every
+ * bridge function asserts it first (ODIN3_ADAPTER_ASSERT), so an ABC call outside the guard is an
+ * adapter assertion, never an unguarded exit, abort or assert inside ABC.
+ */
+bool odin3_guard_active_here(void);
+
+/*
  * Makes cap and text/user the capture and output of the following guarded calls, and saves a
  * close-on-exec copy of fd 2, the "original stderr" of the off-thread line, until
  * odin3_guard_detach. The session calls it at open.

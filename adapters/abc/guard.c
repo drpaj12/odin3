@@ -81,6 +81,10 @@ bool odin3_guard_disabled(void) {
     return atomic_load(&adp_guard.disabled);
 }
 
+bool odin3_guard_active_here(void) {
+    return atomic_load(&adp_guard.active) && pthread_equal(pthread_self(), adp_guard.thread);
+}
+
 void odin3_guard_attach(odin3_capture *cap, odin3_abc_text_fn text, void *user) {
     adp_guard.cap = cap;
     adp_guard.text = text;

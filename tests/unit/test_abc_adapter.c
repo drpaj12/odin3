@@ -562,6 +562,55 @@ static void test_get_luts_other_names(void) {
     lut_copy_free(&out);
 }
 
+/* odin3_abc_test_name_ci under the guard, as every ABC call runs. */
+typedef struct ci_name {
+    uint32_t ci;
+    const char *name;
+} ci_name;
+
+static odin3_status name_ci_fn(void *arg) {
+    const ci_name *rename = arg;
+    return odin3_abc_test_name_ci(rename->ci, rename->name);
+}
+
+/* After the toggle's mapping, the & space's CIs renamed to names[0..2]; get_luts' ci_from must
+ * equal want. */
+static void expect_ci_from(const char *const names[TOGGLE_PIS], const int32_t want[TOGGLE_PIS]) {
+    static lines got;
+    odin3_abc_fail fail;
+    lut_copy out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st = run_in_session(&TOGGLE_AIG, &MAP_K6, &out, &fail);
+    lut_copy_free(&out);
+    for (uint32_t k = 0; st == ODIN3_OK && k < TOGGLE_PIS; k++) {
+        ci_name rename = {.ci = k, .name = names[k]};
+        st = odin3_guard_run(name_ci_fn, &rename, &fail);
+    }
+    odin3_abc_luts luts;
+    st = st == ODIN3_OK ? odin3_abc_session_get_luts(self(), &luts, &fail) : st;
+    if (st == ODIN3_OK) {
+        lut_copy_take(&out, &luts);
+    }
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    TEST_ASSERT_NOT_NULL(out.ci_from);
+    TEST_ASSERT_EQUAL_INT32_ARRAY(want, out.ci_from, TOGGLE_PIS);
+    lut_copy_free(&out);
+}
+
+/* Only canonical c<n> names count: no leading zero, digits only, at most INT32_MAX. */
+static void test_ci_names(void) {
+    static const char *const names_a[TOGGLE_PIS] = {"c0", "c01", "c2147483648"};
+    static const int32_t want_a[TOGGLE_PIS] = {0, -1, -1};
+    expect_ci_from(names_a, want_a);
+    static const char *const names_b[TOGGLE_PIS] = {"c", "c1x", "c2147483647"};
+    static const int32_t want_b[TOGGLE_PIS] = {-1, -1, 2147483647};
+    expect_ci_from(names_b, want_b);
+    static const char *const names_c[TOGGLE_PIS] = {"d1", "c-1", "c10"};
+    static const int32_t want_c[TOGGLE_PIS] = {-1, -1, 10};
+    expect_ci_from(names_c, want_c);
+}
+
 /* One malformed MiniAIG and the exact RESULT text it gives. */
 typedef struct bad_aig {
     int32_t objs[16];
@@ -719,6 +768,38 @@ static void expect_name_map(const odin3_abc_luts *aligned, const int32_t *lits) 
     TEST_ASSERT_EQUAL_INT32(TOGGLE_XOR_LIT, lits[driver]);
 }
 
+/* Which count of the aligned network expect_count_mismatch changes. */
+typedef enum count_kind { COUNT_REGS, COUNT_POS, COUNT_PIS } count_kind;
+
+/* name_map on a copy of the toggle's result with one count changed must be RESULT; its text goes
+ * to text (LINE_CAP bytes). The session stays open. */
+static void expect_count_mismatch(const lut_copy *out, count_kind kind, char *text) {
+    odin3_abc_luts other = out->luts;
+    int32_t *fanins = malloc(sizeof *fanins * out->fanin_count);
+    TEST_ASSERT_NOT_NULL(fanins);
+    memcpy(fanins, out->fanins, sizeof *fanins * out->fanin_count);
+    other.fanins = fanins;
+    if (kind == COUNT_REGS) {
+        other.n_regs = 0;
+    } else if (kind == COUNT_POS) {
+        other.n_objs--;
+    } else {
+        uint32_t lut = 2;
+        while (is_pi(&other, lut)) {
+            lut++;
+        }
+        fanins[(size_t)other.lut_size * lut] = LUT_NULL;
+    }
+    odin3_abc_fail fail;
+    const int32_t *lits = NULL;
+    odin3_status st = odin3_abc_session_name_map(self(), &other, &lits, &fail);
+    free(fanins);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, st);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, fail.kind);
+    TEST_ASSERT_TRUE(strlen(fail.text) < LINE_CAP);
+    memcpy(text, fail.text, strlen(fail.text) + 1);
+}
+
 static void test_name_map_aligned(void) {
     static lines got;
     odin3_abc_fail fail;
@@ -735,15 +816,24 @@ static void test_name_map_aligned(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
     TEST_ASSERT_NOT_NULL(lits);
     expect_name_map(&out.luts, lits);
-    odin3_abc_luts other = out.luts;
-    other.n_regs = 0;
-    st = odin3_abc_session_name_map(self(), &other, &lits, &fail);
+    /* Each count on its own: the registers, the POs (the last PO dropped) and the PIs (the
+     * first LUT made a PI); ABC's Gia_ManDup2 would assert on the last two. */
+    char regs_text[LINE_CAP];
+    char pos_text[LINE_CAP];
+    char pis_text[LINE_CAP];
+    expect_count_mismatch(&out, COUNT_REGS, regs_text);
+    expect_count_mismatch(&out, COUNT_POS, pos_text);
+    expect_count_mismatch(&out, COUNT_PIS, pis_text);
     odin3_abc_session_close(self());
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, st);
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, fail.kind);
     TEST_ASSERT_EQUAL_STRING("the aligned network has 3 PIs, 2 POs and 0 registers; the loaded "
                              "AIG has 3, 2 and 1",
-                             fail.text);
+                             regs_text);
+    TEST_ASSERT_EQUAL_STRING("the aligned network has 3 PIs, 1 POs and 1 registers; the loaded "
+                             "AIG has 3, 2 and 1",
+                             pos_text);
+    TEST_ASSERT_EQUAL_STRING("the aligned network has 4 PIs, 2 POs and 1 registers; the loaded "
+                             "AIG has 3, 2 and 1",
+                             pis_text);
     lut_copy_free(&out);
 }
 
@@ -1100,6 +1190,10 @@ static void test_close_without_descriptors(void) {
     expect_child_ok("no_descriptors", NULL);
 }
 
+static void test_unguarded_bridge_call(void) {
+    expect_child_ok("unguarded", NULL);
+}
+
 /* --- child processes, child side -------------------------------------------------------------- */
 
 static int child_failures;
@@ -1288,6 +1382,21 @@ static void case_planted_env(void) {
     child_planted();
 }
 
+/* A bridge call outside the guard (finding I1 of the Task 6 review) is an adapter assertion:
+ * ODIN3_ERR_ENGINE before ABC runs, the assertion's text, and the engine disabled. */
+static void case_unguarded(void) {
+    odin3_abc_fail fail;
+    int rc = 0;
+    child_check(odin3_abc_session_open(self(), NULL, NULL, &fail) == ODIN3_OK, "open");
+    odin3_status st = odin3_guard_finish(odin3_bridge_exec("echo unguarded", &rc), &fail);
+    child_check(st == ODIN3_ERR_ENGINE, "an unguarded bridge call gives ODIN3_ERR_ENGINE");
+    child_check(fail.kind == ODIN3_ABC_FAIL_ASSERT && strstr(fail.text, "adapters/abc/bridge.c:") &&
+                    strstr(fail.text, ": odin3_guard_active_here()") != NULL,
+                fail.text);
+    child_check(odin3_guard_disabled(), "the engine is disabled");
+    odin3_abc_session_close(self());
+}
+
 /* With no descriptor left, exec reports NO_MEMORY, and close still leaves and destroys the
  * frame: the engine stays usable once descriptors are back (review finding 6). */
 static void case_no_descriptors(void) {
@@ -1332,6 +1441,7 @@ static const struct {
     {"planted_cwd", case_planted_cwd},
     {"planted_env", case_planted_env},
     {"no_descriptors", case_no_descriptors},
+    {"unguarded", case_unguarded},
 };
 
 static int run_child_case(const char *which) {
@@ -1369,6 +1479,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_plugin_init);
     RUN_TEST(test_load_aig_toggle);
     RUN_TEST(test_get_luts_other_names);
+    RUN_TEST(test_ci_names);
     RUN_TEST(test_load_aig_rejects);
     RUN_TEST(test_get_luts_unmapped);
     RUN_TEST(test_name_map_aligned);
@@ -1389,5 +1500,6 @@ int main(int argc, char **argv) {
     RUN_TEST(test_planted_library_in_cwd);
     RUN_TEST(test_planted_library_on_abc_lib_path);
     RUN_TEST(test_close_without_descriptors);
+    RUN_TEST(test_unguarded_bridge_call);
     return UNITY_END();
 }

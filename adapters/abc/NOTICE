@@ -203,6 +203,38 @@ OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
+The header of third_party/abc/src/misc/btor/btor2mem.h, compiled into libabc-pic:
+
+/**
+ *  Btor2Tools: A tool package for the BTOR format.
+ *
+ *  Copyright (C) 2007-2009 Robert Daniel Brummayer.
+ *  Copyright (C) 2007-2012 Armin Biere.
+ *  Copyright (C) 2012-2015 Mathias Preiner.
+ *  Copyright (c) 2018 Aina Niemetz.
+ *
+ *  All rights reserved.
+ *
+ *  This file is part of the Btor2Tools package.
+ *  See LICENSE.txt for more information on using this software.
+ */
+
+The header of third_party/abc/src/misc/btor/btor2stack.h, compiled into libabc-pic:
+
+/**
+ *  Btor2Tools: A tool package for the BTOR format.
+ *
+ *  Copyright (C) 2007-2009 Robert Daniel Brummayer.
+ *  Copyright (C) 2007-2013 Armin Biere.
+ *  Copyright (C) 2013-2018 Aina Niemetz.
+ *  Copyright (C) 2015-2016 Mathias Preiner.
+ *
+ *  All rights reserved.
+ *
+ *  This file is part of the Btor2Tools package.
+ *  See LICENSE.txt for more information on using this software.
+ */
+
 
 ==============================================================================
 MiniSat (C version)

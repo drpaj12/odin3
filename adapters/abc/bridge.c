@@ -81,6 +81,7 @@ static void adp_test_add_commands(Abc_Frame_t *frame);
 #endif
 
 odin3_status odin3_bridge_frame_open(void) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame == NULL && !adp_entered);
     adp_frame = Abc_FrameCreate();
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL);
@@ -106,7 +107,8 @@ static void adp_free_luts(void) {
     adp_ci_from = NULL;
 }
 
-void odin3_bridge_frame_close(bool destroy) {
+odin3_status odin3_bridge_frame_close(bool destroy) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     /* The session's own results go even after an escape: they are plain malloc'd arrays. */
     adp_free_luts();
     free(adp_lits);
@@ -120,10 +122,14 @@ void odin3_bridge_frame_close(bool destroy) {
     }
     adp_frame = NULL;
     adp_prev = NULL;
+    return ODIN3_OK;
 }
 
-int odin3_bridge_exec(const char *command) {
-    return Cmd_CommandExecute(adp_frame, command);
+odin3_status odin3_bridge_exec(const char *command, int *rc) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
+    ODIN3_ADAPTER_ASSERT(adp_frame != NULL && command != NULL && rc != NULL);
+    *rc = Cmd_CommandExecute(adp_frame, command);
+    return ODIN3_OK;
 }
 
 /* The GIA's vNamesIn becomes "c<n>" for CI n (AB-16): &put names the network's CIs after it,
@@ -145,6 +151,7 @@ static void adp_name_cis(Gia_Man_t *gia) {
 }
 
 odin3_status odin3_bridge_load_aig(int32_t *objs, uint32_t n_objs, uint32_t n_regs) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL && objs != NULL && n_objs > 0 &&
                          n_objs <= INT32_MAX / 2);
     Mini_Aig_t mini = {.nCap = (int)(2 * n_objs),
@@ -198,6 +205,7 @@ static odin3_status adp_ci_from_names(Gia_Man_t *gia, int32_t **ci_from) {
 }
 
 odin3_status odin3_bridge_get_luts(odin3_abc_luts *luts, odin3_abc_fail *fail) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL && luts != NULL);
     Gia_Man_t *gia = Abc_FrameReadGia(adp_frame);
     /* Abc_FrameGiaOutputMiniLut asserts a mapping, and Mini_LutStart at most 16 inputs. */
@@ -205,6 +213,7 @@ odin3_status odin3_bridge_get_luts(odin3_abc_luts *luts, odin3_abc_fail *fail) {
         return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "no mapping in the & space");
     }
     int widest = Gia_ManLutSizeMax(gia);
+    /* Not reached by any test: the pinned ABC's mappers stop below 17 inputs (if -K, &if -K). */
     if (widest > ADP_LUT_MAX_INPUTS) {
         return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "a LUT with %d inputs (at most %d)",
                                   widest, ADP_LUT_MAX_INPUTS);
@@ -229,6 +238,7 @@ odin3_status odin3_bridge_get_luts(odin3_abc_luts *luts, odin3_abc_fail *fail) {
 
 odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32_t **lits,
                                    odin3_abc_fail *fail) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL && aligned != NULL && lits != NULL);
     ODIN3_ADAPTER_ASSERT(aligned->n_objs <= INT32_MAX && aligned->n_regs <= aligned->n_objs);
     free(adp_lits);
@@ -294,6 +304,19 @@ int odin3_abc_test_split(const char *line, char ***argv) {
     int argc = 0;
     (void)CmdSplitLine(adp_frame, line, &argc, argv);
     return argc;
+}
+
+odin3_status odin3_abc_test_name_ci(uint32_t ci, const char *name) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
+    Gia_Man_t *gia = adp_frame != NULL ? Abc_FrameReadGia(adp_frame) : NULL;
+    if (gia == NULL || gia->vNamesIn == NULL || name == NULL ||
+        ci >= (uint32_t)Vec_PtrSize(gia->vNamesIn)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    char *old = (char *)Vec_PtrEntry(gia->vNamesIn, (int)ci);
+    ABC_FREE(old);
+    Vec_PtrWriteEntry(gia->vNamesIn, (int)ci, Abc_UtilStrsav((char *)name));
+    return ODIN3_OK;
 }
 
 /*

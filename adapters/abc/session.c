@@ -58,8 +58,7 @@ static odin3_status adp_frame_open_fn(void *arg) {
 
 static odin3_status adp_frame_close_fn(void *arg) {
     const bool *destroy = arg;
-    odin3_bridge_frame_close(*destroy);
-    return ODIN3_OK;
+    return odin3_bridge_frame_close(*destroy);
 }
 
 /* Leaves the frame (destroying it only when the engine is still enabled): run under the guard,
@@ -127,8 +126,7 @@ typedef struct adp_exec_arg {
 
 static odin3_status adp_exec_fn(void *arg) {
     adp_exec_arg *exec = arg;
-    exec->rc = odin3_bridge_exec(exec->command);
-    return ODIN3_OK;
+    return odin3_bridge_exec(exec->command, &exec->rc);
 }
 
 /* The checks every call between open and close starts with: the session's own invariants (an

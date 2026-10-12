@@ -1,7 +1,9 @@
 /*
  * bridge.h — the adapter's only calls into ABC (3D spec §4.1, §4.4). ABC's types stay inside
  * bridge.c, the one adapter file that includes ABC's headers. Every function here must run under
- * odin3_guard_run (guard.h), on the session's thread, between frame_open and frame_close.
+ * odin3_guard_run (guard.h), on the session's thread, between frame_open and frame_close; each
+ * starts with ODIN3_ADAPTER_ASSERT(odin3_guard_active_here()), so one called outside the guard
+ * returns ODIN3_ERR_ENGINE (an adapter assertion) before it reaches ABC.
  */
 #ifndef ODIN3_ADAPTERS_ABC_BRIDGE_H
 #define ODIN3_ADAPTERS_ABC_BRIDGE_H
@@ -21,13 +23,16 @@
 odin3_status odin3_bridge_frame_open(void);
 
 /*
- * Leaves the frame (back to the frame entered before it) and, when destroy is true, destroys it;
- * after an escape the caller passes false and the frame's state is leaked. No frame: nothing.
+ * Frees what get_luts and name_map returned, leaves the frame (back to the frame entered before
+ * it) and, when destroy is true, destroys it; after an escape the caller passes false and the
+ * frame's state is leaked. No frame: only the frees. ODIN3_OK, or ODIN3_ERR_ENGINE outside a
+ * guarded call.
  */
-void odin3_bridge_frame_close(bool destroy);
+odin3_status odin3_bridge_frame_close(bool destroy);
 
-/* Cmd_CommandExecute on the open frame: ABC's result, 0 on success. */
-int odin3_bridge_exec(const char *command);
+/* Cmd_CommandExecute on the open frame: *rc gets ABC's result, 0 on success. ODIN3_OK, or
+ * ODIN3_ERR_ENGINE (an adapter assertion) outside a guarded call. */
+odin3_status odin3_bridge_exec(const char *command, int *rc);
 
 /*
  * A checked MiniAIG (session.c checked it: odin3_abc_aig's layout, objs holding 2 * n_objs ints,
@@ -78,9 +83,17 @@ odin3_status odin3_abc_test_add_command(const char *name, odin3_abc_test_cmd_fn 
  * Test builds only: ABC's CmdSplitLine on line's first command, as Cmd_CommandExecute splits it
  * (3D Task 11 compares it with the script checker's words). Returns argc and sets *argv (argc
  * malloc'd strings in a malloc'd array; the caller frees each, then the array). Needs an open
- * session (its frame takes ABC's warnings); -1 without one.
+ * session (its frame takes ABC's warnings); -1 without one. Unlike the bridge functions it runs
+ * outside the guard: it only splits, and ABC_ALLOC is all it calls that can fail.
  */
 int odin3_abc_test_split(const char *line, char ***argv);
+
+/*
+ * Test builds only: names CI ci of the & space's GIA (its vNamesIn entry, which must exist), so
+ * a test can give get_luts a name that is not canonical c<n>. Runs under the guard like any
+ * bridge call. ODIN3_ERR_INVALID_ARG without such a GIA, CI or name.
+ */
+odin3_status odin3_abc_test_name_ci(uint32_t ci, const char *name);
 
 /*
  * Test builds only: the pthread_create calls made in this process so far, by ABC or anyone else

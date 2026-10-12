@@ -20,6 +20,11 @@ only runs ABC. Spec: `docs/specs/2026-10-11-3D-linked-abc-design.md` §4 (AB-5 t
   `ODIN3_ERR_ENGINE`. It never traps (plan point (a): a trap is Peter's call). CTest
   `abc_adapter_no_assert` and `tools/check_rules.py` check it.
 - **Sanitizers** reach the adapter's C, never ABC's objects. `lsan.supp` names only ABC functions.
+  Its `^Abc_`/`^Gia_` patterns would also hide a leak of an ABC-allocated object the adapter owns
+  (the MiniLUT from `Abc_FrameGiaOutputMiniLut`, the name map), so `close` frees both by hand.
+- **Every bridge call runs under the guard.** Each `odin3_bridge_*` function starts with
+  `ODIN3_ADAPTER_ASSERT(odin3_guard_active_here())`: one called outside `odin3_guard_run` is an
+  adapter assertion (`ODIN3_ERR_ENGINE`, engine disabled) before ABC runs.
 
 ## Sessions (AB-8)
 
@@ -50,6 +55,10 @@ The exchange calls (AB-16, spec §4.4 steps 3, 5 and 6):
 `odin3` links the adapter and calls `odin3_abc_adapter_init()` before any `--plugin`. A failure is
 the warning `linked ABC unavailable: <status>`, and `odin3` runs without linked ABC. With the
 engine registered, `odin3 --version` adds `linked ABC <commit> (adapters/abc/NOTICE)`.
+
+Only a failed *registration* gives that warning. `odin3` links `libodin3_abc.so` as an ordinary
+dynamic dependency (P3-8), so when the library is missing the dynamic loader stops `odin3` before
+`main`: there is no soft fallback. Build with `ODIN3_WITH_ABC=OFF` for an `odin3` without it.
 
 `NOTICE` reproduces ABC's `copyright.txt` and the notice of every third-party component that the
 licence scan of `third_party/abc/src` found compiled into `libabc-pic` (spec §4.5, AB-9).
