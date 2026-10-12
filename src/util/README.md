@@ -13,7 +13,7 @@ The only generic containers in the tree (spec §15.1): `arena`, `vec`, `pagevec`
 - `str` — string interning (`strtab`, ID 0 is the empty string) and a growable string builder (`strbuf`).
 - `log` — process-global diagnostics with levels, per-level counts and a replaceable sink.
 - `file` — atomic file output (not a container): `odin3_atomic_file_open` makes a private temporary beside the destination with `mkstemp`, `odin3_atomic_file_close` renames it over the destination or removes it on failure. Every writer (dot, JSON, Verilog) saves through it.
-- `sha256` — streaming SHA-256 (FIPS 180-4), no allocation: `init`/`update`/`final`/`hex`; the run-info identity hash.
+- `sha256` — streaming SHA-256 (FIPS 180-4), no allocation: `init`/`update`/`final`/`hex`; the run-info identity hash. Its test is `test_sha256` (not `test_util_sha256`) because the 3D plan names it so.
 
 Benchmark: `tests/bench/bench_util.c` (target `bench_util`, built by default, not in CTest) times 2,000,000 interns, `u64map` puts and `pagevec` pushes; run it from the release build.
 
