@@ -4,8 +4,11 @@
  * (I10), and its JSON and RTLIL forms. The module of json_form and rtlil_form is also written to
  * ODIN3_LUT_OUT/lut.json and lut.il, the inputs of CTests lut_json_yosys and lut_rtlil_yosys.
  */
+#include "backends/blif/writer.h"
+#include "backends/dot/writer.h"
 #include "backends/json/writer.h"
 #include "backends/rtlil/writer.h"
+#include "backends/verilog/writer.h"
 #include "ir/cells/cells.h"
 #include "ir/celltype.h"
 #include "ir/check.h"
@@ -541,6 +544,46 @@ static void test_engine_word_layout(void) {
     odin3_arena_destroy(arena);
 }
 
+/* odin3_lut_from_engine(k, lut_size, truth) has LUT bytes equal to want (MSB-first text). */
+/* One engine case: n_inputs, lut_size, the single truth word and the LUT expected (MSB first). */
+typedef struct engine_case {
+    uint32_t n_inputs;
+    uint32_t lut_size;
+    uint32_t word;
+    const char *want;
+} engine_case;
+
+static void expect_engine(const engine_case *ec) {
+    uint32_t n_inputs = ec->n_inputs;
+    uint32_t lut_size = ec->lut_size;
+    uint32_t word = ec->word;
+    const char *want = ec->want;
+    odin3_arena *arena = odin3_arena_create(ARENA_CHUNK);
+    TEST_ASSERT_NOT_NULL(arena);
+    const uint32_t truth[1] = {word};
+    odin3_value params[2];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_lut_from_engine(arena, n_inputs, lut_size, truth, params));
+    TEST_ASSERT_EQUAL_INT64(n_inputs, params[ODIN3_LUT_P_WIDTH].i);
+    uint8_t bits[32];
+    uint32_t len = lut_from_msb(want, bits);
+    TEST_ASSERT_EQUAL_UINT32(len, params[ODIN3_LUT_P_LUT].len);
+    TEST_ASSERT_EQUAL_UINT8_ARRAY_MESSAGE(bits, params[ODIN3_LUT_P_LUT].bits, len, want);
+    odin3_arena_destroy(arena);
+}
+
+/* The MiniLUT shapes of lut_size <= 5 (one 32-bit word, ABC replicating the table in it). */
+static void test_engine_small_sizes(void) {
+    static const engine_case k_cases[] = {
+        {1, 2, 0x55555555U, "01"},                               /* ABC's inverter LUT: NOT */
+        {5, 5, 0x80000001U, "10000000000000000000000000000001"}, /* bits 0 and 31 */
+        {3, 5, 0xA5A5A5A5U, "10100101"},                         /* only the first 2^3 bits */
+    };
+    for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
+        expect_engine(&k_cases[i]);
+    }
+}
+
 /* --- text forms ---------------------------------------------------------------------------- */
 
 static const char *slurp(const char *path) {
@@ -612,6 +655,66 @@ static void test_rtlil_form_msb_first(void) {
     rtlil_of(&text);
     expect_in(text.data, "\n    parameter \\LUT 4'1000\n");
     odin3_strbuf_free(&text);
+}
+
+/* --- interim BLIF, Verilog and DOT forms (until 3E-5 and 3D Task 9; docs/IR.md) ----------- */
+
+/* write_blif of a one-$lut module: INVALID_ARG with the refusal line, or OK and the .subckt. */
+/* One BLIF case: the $lut's WIDTH and table (MSB first), and the .subckt expected (NULL: refused).
+ */
+typedef struct blif_case {
+    uint32_t width;
+    const char *msb_first;
+    const char *subckt;
+} blif_case;
+
+static void expect_blif(const blif_case *bc) {
+    const char *msb_first = bc->msb_first;
+    const char *subckt = bc->subckt;
+    (void)build_lut_module(bc->width, msb_first);
+    char path[PATH_MAX_LEN];
+    out_path(path, "interim.blif");
+    log_count = 0;
+    odin3_status st = odin3_blif_write(design, path);
+    if (subckt == NULL) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, st, msb_first);
+        TEST_ASSERT_EQUAL_UINT32(1, log_count);
+        expect_in(log_lines[0], ": model 'm': parameters neither declared nor implied by the "
+                                "connected formals have no BLIF form; cannot write a cell of "
+                                "'$lut'");
+    } else {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, msb_first);
+        expect_in(slurp(path), subckt);
+    }
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+}
+
+/* write_blif refuses every $lut but the WIDTH-1 identity, which is a .subckt (review I1). */
+static void test_interim_blif(void) {
+    static const blif_case k_cases[] = {
+        {2, "0110", NULL},
+        {2, "1000", NULL},
+        {1, "01", NULL},
+        {1, "10", "\n.subckt $lut A[0]=a[0] Y=y\n"},
+    };
+    for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
+        expect_blif(&k_cases[i]);
+    }
+}
+
+/* write_verilog writes a generic instance, LUT MSB first; write_dot a box labelled $lut. */
+static void test_interim_verilog_dot(void) {
+    (void)build_lut_module(2, "1000");
+    char path[PATH_MAX_LEN];
+    out_path(path, "interim.v");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, path, NULL));
+    expect_in(slurp(path),
+              "  \\$lut #(.WIDTH(2), .LUT(4'b1000)) u (\n    .A(a),\n    .Y(y)\n  );\n");
+    out_path(path, "interim.dot");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_dot_write(design, path, NULL));
+    expect_in(slurp(path), "[label=\"$lut\\nu\"];");
 }
 
 /* --- out of memory ------------------------------------------------------------------------- */
@@ -748,10 +851,13 @@ int main(void) {
     RUN_TEST(test_table_params_refusals);
     RUN_TEST(test_table_refusals);
     RUN_TEST(test_engine_word_layout);
+    RUN_TEST(test_engine_small_sizes);
     RUN_TEST(test_json_form);
     RUN_TEST(test_json_form_msb_first);
     RUN_TEST(test_rtlil_form);
     RUN_TEST(test_rtlil_form_msb_first);
+    RUN_TEST(test_interim_blif);
+    RUN_TEST(test_interim_verilog_dot);
     RUN_TEST(test_oom_lut_params);
     RUN_TEST(test_oom_from_engine);
     RUN_TEST(test_oom_wide_node);

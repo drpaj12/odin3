@@ -56,7 +56,8 @@ use one shared node per value per module (`$_CONST0_`, `$_CONST1_`, `$_CONSTX_`,
 one output pin each). The BLIF reader keeps a zero-input `.names` as the `$sop` cell it was
 (round trip, PHASE1 #2). Cell types may supply a `const_value` hook (0, 1, x, z or "not
 constant"), and `odin3_net_const_value(net)` asks the driver's type, so passes have one
-predicate for "is this net constant" across `$_CONST*_` and constant `$sop`s.
+predicate for "is this net constant" across `$_CONST*_`, constant `$sop`s and constant `$lut`s (a
+`$lut` whose table is all 0 or all 1 is constant whatever its inputs; 3D, `docs/IR.md` LUT cells).
 
 ## 2. IDs
 
@@ -324,11 +325,15 @@ uses it). `.subckt` → a node of the named type (IR-7b).
 ports `A` (in, `WIDTH` bits, LSB first) and `Y` (out, 1 bit). `Y = LUT[i]` with `i = Σ A[j]·2^j`,
 and `LUT[i]` is bit *i* of the parameter counted from its least significant bit: Yosys `$lut`
 semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
-is, and it simulates (1E). It is written as Yosys `$lut` in JSON and RTLIL. The BLIF and Verilog
-writers print it as an irredundant cover (3E's `odin3_blif_isop`: a BLIF `.names`, a sum of
-products in Verilog) once 3E-5 and 3D Task 9 land; until then they write it generically (a
-`.subckt $lut`, a generic instance). A BLIF round trip then turns it into the `$sop` with that
-cover. `abc` is its only producer in Phase 3 and never makes a constant one.
+is, and it simulates (1E). The writers today: `write_json` and `write_rtlil` write it as Yosys
+`$lut` (`LUT` MSB first; RTLIL spells the output of a constant one as the constant),
+`write_verilog` as a generic instance `\$lut #(.WIDTH(…), .LUT(…))` (`LUT` MSB first),
+`write_dot` as a node labelled `$lut`, and `write_blif` refuses it ("… have no BLIF form;
+cannot write a cell of '$lut'"), except the WIDTH-1 identity, which it writes as `.subckt $lut`.
+3E-5 makes `write_blif` print it as an irredundant cover (3E's `odin3_blif_isop`: a BLIF
+`.names`, so a BLIF round trip turns it into the `$sop` with that cover), and 3D Task 9 makes
+`write_verilog` print that cover as a sum of products. `abc` is its only producer in Phase 3 and
+never makes a constant one.
 
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global
 registry (built-ins from a static table compiled from `src/ir/cells/`; plugins add theirs at load

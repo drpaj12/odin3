@@ -243,9 +243,9 @@ then the options considered.
    - (c) Build `Abc_Ntk_t` through ABC's internal `base/abc/abc.h`: full control, but it
      couples to ABC internals.
 
-   Either way, LUTs come back as a new `$lut` registry cell (DESIGN §5.2's `$_LUT_K_`, Yosys
-   `$lut` semantics), which `--vtr` writes as an irredundant `.names` cover. It is an IR
-   addition for Peter's review.
+   Either way, LUTs come back as a new `$lut` registry cell (DESIGN §5.2's `$lut`, Yosys
+   `$lut` semantics; `docs/IR.md` LUT cells), which `--vtr` writes as an irredundant `.names`
+   cover. It is an IR addition for Peter's review.
 10. **Default ABC script when neither project nor CLI names one.** Recommend (a), shipped as
     `lib/abc/vtr.abc` with the VTR commit cited. It is exactly what the Parmys baseline runs,
     so the script is not a confound and only the ABC version is. (Parmys's own Yosys script

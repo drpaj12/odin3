@@ -49,6 +49,9 @@ odin3_status odin3_lut_params(odin3_arena *arena, uint32_t width, const uint64_t
  * Reads a $lut's table into words (n_words of them, bit i of the table at word i / 64, bit
  * i % 64), every bit from 2^WIDTH up zero. False (nothing logged; words untouched) for parameters
  * the cell's verify rejects, a NULL argument, or n_words below odin3_lut_words(WIDTH).
+ * Consumers (3E's odin3_blif_isop): the bits above 2^WIDTH are zero, not replicated as ABC
+ * replicates a narrow table across its words, so the result is a WIDTH-variable table and a
+ * routine working on whole 64-bit words must mask a table of WIDTH < 6.
  */
 bool odin3_lut_table(const odin3_value params[2], uint64_t *words, uint32_t n_words);
 
@@ -57,9 +60,14 @@ bool odin3_lut_table(const odin3_value params[2], uint64_t *words, uint32_t n_wo
  * W = (lut_size > 5 ? 1 << (lut_size - 5) : 1) 32-bit words, word 0 and bit 0 of each word least
  * significant; LUT[i] for i < 2^n_inputs is bit i of that array, and every bit from 2^n_inputs up
  * is ignored (ABC replicates the table there). WIDTH is n_inputs. The BITS payload is allocated in
- * arena. ODIN3_ERR_INVALID_ARG (not logged) for n_inputs 0, n_inputs above lut_size, lut_size
- * above ODIN3_LUT_MAX_WIDTH or a NULL argument; ODIN3_ERR_NO_MEMORY on out of memory. params is
- * untouched on failure.
+ * arena. Callers (the 3D splice): input variable v is A[v] = Mini_LutNodeFanin(p, id, v), the
+ * MiniLUT's own fanin order, never the GIA LUT's (giaMini.c rotates the leaves of LUTs above six
+ * inputs before computing the truth table); lut_size is Mini_LutSize(p), which is max(2, largest
+ * LUT), not the K asked for. "Word 0 least significant" holds because ABC computes the table in
+ * 64-bit words and casts them to 32-bit unsigned words, which on a little-endian host (x86-64,
+ * AArch64) puts the low half of each 64-bit word first. ODIN3_ERR_INVALID_ARG (not logged) for
+ * n_inputs 0, n_inputs above lut_size, lut_size above ODIN3_LUT_MAX_WIDTH or a NULL argument;
+ * ODIN3_ERR_NO_MEMORY on out of memory. params is untouched on failure.
  */
 odin3_status odin3_lut_from_engine(odin3_arena *arena, uint32_t n_inputs, uint32_t lut_size,
                                    const uint32_t *truth, odin3_value params[2]);
