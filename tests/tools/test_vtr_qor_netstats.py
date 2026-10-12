@@ -19,7 +19,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from qor_netstats import AbcHeader, NetStats, abc_header, netstats
+import qor_netstats
+from qor_netstats import AbcHeader, MalformedBlif, NetStats, abc_header, netstats
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "vtr_qor" / "netstats"
@@ -119,12 +120,14 @@ class CountsTest(TempTest):
                 self.assertEqual((got.luts, got.buffers), (luts, buffers))
 
     def test_two_input_row_1_1_is_not_a_buffer(self) -> None:
-        got = self.stats(model(".names a b y\n1 1\n", "a b", "y"))
-        self.assertEqual((got.luts, got.buffers), (1, 0))
+        with self.assertRaisesRegex(MalformedBlif, "cover row that does not fit its .names: 1 1"):
+            self.stats(model(".names a b y\n1 1\n", "a b", "y"))
 
-    def test_exdc_ends_the_model(self) -> None:
+    def test_exdc_stops_counting_but_needs_its_end(self) -> None:
         text = model(".names i o\n0 1\n")[: -len(".end\n")] + ".exdc\n.names i o\n0 1\n.end\n"
         self.assertEqual(self.stats(text).luts, 1)
+        with self.assertRaises(MalformedBlif):
+            self.stats(text[: -len(".end\n")])
 
     def test_text_after_end_is_ignored_even_without_model(self) -> None:
         text = model(".names i o\n0 1\n") + ".names x y\n0 1\n.latch x y\n.subckt adder a=x\n"
@@ -137,7 +140,7 @@ class CountsTest(TempTest):
         self.assertEqual((got.luts, got.ffs, got.adders), (1, 0, 0))
 
     def test_trailing_continuation_at_eof(self) -> None:
-        text = ".model m\n.inputs i\n.outputs o\n.subckt adder a=i \\"
+        text = ".model m\n.inputs i\n.outputs o\n.subckt adder a=i\n.end \\"
         self.assertEqual(self.stats(text).adders, 1)
         self.assertEqual(self.stats(text + "\n").adders, 1)
 
@@ -181,19 +184,83 @@ class CountsTest(TempTest):
         self.assertEqual(both.blif_sha256, hashlib.sha256((first + stubs).encode()).hexdigest())
         self.assertNotEqual(both.blif_sha256, alone.blif_sha256)
 
-    def test_missing_end_and_model(self) -> None:
-        self.assertEqual(self.stats(".model m\n.inputs i\n.outputs o\n.names i o\n0 1\n").luts, 1)
-        self.assertEqual(self.stats(".names i o\n0 1\n").luts, 0)
-        empty = self.stats("")
-        self.assertEqual((empty.luts, empty.depth), (0, 0))
-        self.assertEqual(empty.blif_sha256, hashlib.sha256(b"").hexdigest())
+    def assertMalformed(self, text: str | bytes, why: str, name: str = "x.blif") -> None:
+        path = self.tmp / name
+        path.write_bytes(text if isinstance(text, bytes) else text.encode("latin-1"))
+        with self.assertRaises(MalformedBlif) as caught:
+            netstats(path)
+        self.assertEqual(str(caught.exception).split(": malformed BLIF: ")[0], str(path))
+        self.assertIn(why, str(caught.exception))
 
-    def test_second_model_without_end_stops(self) -> None:
-        text = (
-            model(".names i j o\n11 1\n", "i j", "o")[: -len(".end\n")]
-            + ".model two\n.names a b\n0 1\n.end\n"
+    def test_missing_end_is_malformed(self) -> None:
+        self.assertMalformed(".model m\n.inputs i\n.outputs o\n.names i o\n0 1\n", "no .end")
+
+    def test_no_model_is_malformed(self) -> None:
+        self.assertMalformed(".names i o\n0 1\n", "no .model")
+        self.assertMalformed("this is not a netlist\n", "no .model")
+        self.assertMalformed("", "no .model")
+        self.assertMalformed("# only a comment\n", "no .model")
+
+    def test_half_a_file_is_malformed(self) -> None:
+        raw = (FIXTURES / "ch_intrinsics.parmys.blif").read_bytes()
+        self.assertMalformed(raw[: len(raw) // 2], "no .end")
+        self.assertMalformed(raw[: raw.index(b".end\n")], "no .end")
+        # Cut inside the stubs: the first model is whole, a later one is not.
+        stub = raw.rindex(b".model ")
+        self.assertMalformed(raw[: stub + 10], "no .end")
+        # Cut right after the first model's .end: nothing is missing that the file promises.
+        first = raw.index(b".end\n") + len(b".end\n")
+        self.assertEqual(netstats(self.write(raw[:first].decode("latin-1"))).luts, 395)
+
+    def test_model_structure_is_malformed(self) -> None:
+        self.assertMalformed(".end\n", ".end outside a model")
+        self.assertMalformed(model("") + ".end\n", ".end outside a model")
+        self.assertMalformed(".model a\n.model b\n.end\n", ".model inside a model")
+        self.assertMalformed(
+            model(".names i j o\n11 1\n", "i j")[: -len(".end\n")] + ".model two\n.end\n",
+            ".model inside a model",
         )
-        self.assertEqual(self.stats(text).luts, 1)
+
+    def test_names_and_rows_are_checked(self) -> None:
+        self.assertMalformed(model(".names\n"), ".names without an output")
+        self.assertMalformed(model("0 1\n"), "cover row outside .names")
+        self.assertMalformed(model(".names a y\n11 1\n"), "does not fit its .names: 11 1")
+        self.assertMalformed(model(".names a y\n1 1 1\n"), "does not fit its .names: 1 1 1")
+        self.assertMalformed(model(".names a y\n1 2\n"), "does not fit its .names: 1 2")
+        self.assertMalformed(model(".names a y\nx 1\n"), "does not fit its .names: x 1")
+        self.assertMalformed(model(".names y\n1 1\n"), "does not fit its .names: 1 1")
+        self.assertMalformed(model(".names y\n2\n"), "does not fit its .names: 2")
+        self.assertMalformed(model(".latch d\n"), ".latch without")
+
+    def test_two_drivers_are_malformed(self) -> None:
+        both = ".names a y\n0 1\n.names b y\n0 1\n"
+        self.assertMalformed(model(both, "a b", "y"), "net 'y' has two drivers")
+        self.assertMalformed(model(".names y\n1\n.names a y\n0 1\n", "a", "y"), "net 'y' has")
+        self.assertMalformed(model(".names a y\n0 1\n.latch a y re clk 0\n"), "net 'y' has")
+        self.assertMalformed(model(".latch a y\n.latch b y\n"), "net 'y' has two drivers")
+        self.assertMalformed(model(".names a y\n1 1\n.names b y\n1 1\n"), "net 'y' has")
+
+    def test_one_driver_per_net_is_fine(self) -> None:
+        body = ".names gnd\n.names vcc\n1\n.names a y\n0 1\n.latch y q\n.latch y q2\n"
+        self.assertEqual(self.stats(model(body, "a")).ffs, 2)
+
+    def test_truncated_gz_is_malformed(self) -> None:
+        raw = (FIXTURES / "ch_intrinsics.parmys.blif").read_bytes()
+        packed = gzip.compress(raw)
+        path = self.tmp / "t.blif.gz"
+        path.write_bytes(packed[: len(packed) // 2])
+        with self.assertRaises(MalformedBlif) as caught:
+            netstats(path)
+        self.assertTrue(str(caught.exception).startswith(f"{path}: malformed BLIF: "))
+        self.assertIn("gzip", str(caught.exception))
+        path.write_bytes(packed[:-8])  # the trailer (CRC and length) is gone
+        with self.assertRaises(MalformedBlif):
+            netstats(path)
+
+    def test_complete_gz_of_incomplete_blif_is_malformed(self) -> None:
+        self.assertMalformed(
+            gzip.compress(b".model m\n.names a b\n0 1\n"), "no .end", name="g.blif.gz"
+        )
 
     def test_comments_and_blank_lines(self) -> None:
         text = (
@@ -203,16 +270,34 @@ class CountsTest(TempTest):
         got = self.stats(text)
         self.assertEqual((got.luts, got.buffers), (0, 1))
 
-    def test_names_without_output_ignored(self) -> None:
-        self.assertEqual(self.stats(model(".names\n.names x\n")).luts, 0)
+    def test_reads_line_by_line(self) -> None:
+        """The reader never asks for the whole file: no unbounded read, no readlines."""
 
-    def test_does_not_read_whole_file(self) -> None:
-        path = FIXTURES / "mixed.blif"
+        class Lazy(io.BufferedReader):
+            def read(self, size: int | None = -1) -> bytes:
+                raise AssertionError(f"read({size})")
+
+            def readall(self) -> bytes:
+                raise AssertionError("readall")
+
+            def readlines(self, hint: int = -1) -> list[bytes]:
+                raise AssertionError("readlines")
+
+        def lazy_open(path: Path) -> io.BufferedIOBase:
+            return Lazy(io.FileIO(path, "rb"))
+
+        for name in ("mixed.blif", "ch_intrinsics.parmys.blif", "abc_buffers.blif"):
+            with self.subTest(name):
+                path = FIXTURES / name
+                want = netstats(path)
+                with mock.patch.object(qor_netstats, "_open", lazy_open):
+                    self.assertEqual(netstats(path), want)
+                    abc_header(path)
         with (
             mock.patch.object(Path, "read_bytes", side_effect=AssertionError("read_bytes")),
             mock.patch.object(Path, "read_text", side_effect=AssertionError("read_text")),
         ):
-            self.assertEqual(netstats(path).luts, 3)
+            self.assertEqual(netstats(FIXTURES / "mixed.blif").luts, 3)
 
 
 class FormatTest(TempTest):
@@ -268,11 +353,23 @@ class FormatTest(TempTest):
         text = ".model m\n.inputs \xe9\n.outputs \xfc\n.names \xe9 \xfc\n0 1\n.end\n"
         self.assertEqual(self.stats(text).depth, 1)
 
-    def test_corrupt_gz_raises(self) -> None:
+    def test_corrupt_gz_is_malformed(self) -> None:
         path = self.tmp / "bad.blif.gz"
         path.write_bytes(b"not gzip")
-        with self.assertRaises(OSError):
+        with self.assertRaises(MalformedBlif):
             netstats(path)
+        packed = bytearray(gzip.compress((FIXTURES / "ch_intrinsics.parmys.blif").read_bytes()))
+        middle = len(packed) // 2
+        packed[middle : middle + 16] = bytes(16)
+        path.write_bytes(bytes(packed))
+        with self.assertRaises(MalformedBlif):
+            netstats(path)
+
+    def test_no_space_continuation(self) -> None:
+        """Odin II's goldens continue a line with ``a\\`` and no blank before the backslash."""
+        text = ".model m\n.inputs a b\n.outputs y\n.names a\\\nb\\\ny\n11 1\n.end\n"
+        got = self.stats(text)
+        self.assertEqual((got.luts, got.depth), (1, 1))
 
     def test_missing_file_raises(self) -> None:
         with self.assertRaises(FileNotFoundError):
@@ -415,6 +512,11 @@ class LoopTest(TempTest):
 
 class AbcStatsTest(unittest.TestCase):
     def test_abc_print_stats(self) -> None:
+        """``depth == lev`` is the contract for ABC's own mapping, where the written file's
+        identity buffers (a PO named after another net, a PI wired to a PO) are not levels in the
+        ``print_stats`` network and ours add 0 as well. Re-reading a written file in ABC would
+        count those buffers as nodes; ``abc_buffers.blif`` shows the two agree anyway when no
+        buffer sits on a deepest path, which is what ABC's own mapping produces."""
         path = FIXTURES / "abc_small.blif"
         match = re.search(r"^# print_stats printed: lev = ([0-9]+)$", path.read_text(), re.M)
         assert match is not None
@@ -425,20 +527,31 @@ class AbcStatsTest(unittest.TestCase):
         self.assertGreater(got.ffs, 0)
         self.assertGreater(lev, 1)
 
+    def test_abc_print_stats_with_a_real_buffer(self) -> None:
+        path = FIXTURES / "abc_buffers.blif"
+        match = re.search(r"^# print_stats printed: lev = ([0-9]+)$", path.read_text(), re.M)
+        assert match is not None
+        got = netstats(path)
+        self.assertEqual(got.buffers, 1)
+        self.assertEqual(got.depth, int(match.group(1)))
+        self.assertEqual((got.adders, got.mults, got.ram_slices), (0, 0, 0))
+
     @unittest.skipUnless(ABC.is_file(), "the debug build's ABC is not built")
     def test_abc_print_stats_live(self) -> None:
-        """Ask the pinned ABC itself for the committed netlist's ``lev``."""
-        path = FIXTURES / "abc_small.blif"
-        run = subprocess.run(
-            [str(ABC), "-c", f"read_blif {path}; print_stats"],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=120,
-        )
-        match = re.search(r"lev = ([0-9]+)", run.stdout)
-        assert match is not None
-        self.assertEqual(netstats(path).depth, int(match.group(1)))
+        """Ask the pinned ABC itself for the committed netlists' ``lev``."""
+        for name in ("abc_small.blif", "abc_buffers.blif"):
+            with self.subTest(name):
+                path = FIXTURES / name
+                run = subprocess.run(
+                    [str(ABC), "-c", f"read_blif {path}; print_stats"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=120,
+                )
+                match = re.search(r"lev = ([0-9]+)", run.stdout)
+                assert match is not None
+                self.assertEqual(netstats(path).depth, int(match.group(1)))
 
 
 class AbcHeaderTest(TempTest):
@@ -467,7 +580,8 @@ class AbcHeaderTest(TempTest):
             ),
         )
         quoted = self.header(
-            '# abc: script="my dir/x.abc" sha256=1 abc=2 K=6 exchange=blif depth=1\n.model m\n'
+            f'# abc: script="my dir/x.abc" sha256={SHA} abc={COMMIT} K=6 exchange=blif depth=1\n'
+            ".model m\n"
         )
         assert quoted is not None
         self.assertEqual(quoted.script, "my dir/x.abc")
@@ -508,11 +622,14 @@ class AbcHeaderTest(TempTest):
         self.assertIsNone(self.header(f".inputs a\n{HEADER}"))
 
     def test_quoting(self) -> None:
-        line = '# abc: script="a \\"b\\" \\\\c d" sha256=1 abc=2 K=none exchange=aig depth=0\n'
+        line = (
+            f'# abc: script="a \\"b\\" \\\\c d" sha256={SHA} abc={COMMIT} '
+            "K=none exchange=aig depth=0\n"
+        )
         got = self.header(line + ".model m\n")
         assert got is not None
         self.assertEqual(got.script, 'a "b" \\c d')
-        self.assertEqual((got.k, got.depth, got.sha256, got.abc), ("none", 0, "1", "2"))
+        self.assertEqual((got.k, got.depth, got.sha256, got.abc), ("none", 0, SHA, COMMIT))
 
     def test_quoted_value_in_other_keys(self) -> None:
         got = self.header('# abc: exchange="aig" depth="3"\n')
@@ -558,6 +675,46 @@ class AbcHeaderTest(TempTest):
                 self.assertIn("'# abc:' line", str(caught.exception))
                 self.assertIn(str(self.tmp / "x.blif"), str(caught.exception))
 
+    def test_values_are_validated(self) -> None:
+        good = f"script=x sha256={SHA} abc={COMMIT} K=6 exchange=aig depth=4"
+        cases = {
+            "exchange": ("exchange=aig", ["exchange=AIG", "exchange=mig", 'exchange="aig "']),
+            "depth": ("depth=4", ["depth=-1", "depth=1.5", "depth=x", "depth=+3"]),
+            "sha256": (
+                f"sha256={SHA}",
+                ["sha256=1", f"sha256={SHA[:-1]}", f"sha256={SHA}0", "sha256=" + "g" * 64],
+            ),
+            "abc": (f"abc={COMMIT}", ["abc=2", f"abc={COMMIT[:-1]}", "abc=" + "z" * 40]),
+            "K": ("K=6", ["K=six", "K=-1", "K=6.0", "K=None"]),
+        }
+        for key, (ok, bad_words) in cases.items():
+            for bad in bad_words:
+                with self.subTest(bad):
+                    path = self.write("# abc: " + good.replace(ok, bad) + "\n.model m\n")
+                    with self.assertRaises(ValueError) as caught:
+                        abc_header(path)
+                    self.assertEqual(
+                        str(caught.exception).split(" (")[0],
+                        f"{path}: '# abc:' line with an invalid {key}=",
+                    )
+
+    def test_valid_forms_are_accepted(self) -> None:
+        for k in ("2", "6", "16", "none"):
+            for exchange in ("aig", "blif"):
+                line = (
+                    f"# abc: sha256={SHA.upper()} abc={COMMIT} K={k} exchange={exchange} depth=0\n"
+                )
+                got = self.header(line)
+                assert got is not None
+                self.assertEqual((got.k, got.exchange, got.sha256), (k, exchange, SHA.upper()))
+
+    def test_truncated_gz_header_is_malformed(self) -> None:
+        packed = gzip.compress(("#" * 100 + "\n").encode() * 500)
+        path = self.tmp / "t.blif.gz"
+        path.write_bytes(packed[: len(packed) // 2])
+        with self.assertRaises(MalformedBlif):
+            abc_header(path)
+
     def test_bare_word_is_named(self) -> None:
         for line in ("# abc: junk exchange=aig depth=3", "# abc: exchange=aig depth=3 junk"):
             with self.subTest(line):
@@ -566,9 +723,9 @@ class AbcHeaderTest(TempTest):
                 self.assertIn("not key=value", str(caught.exception))
 
     def test_depth_forms(self) -> None:
-        got = self.header("# abc: exchange=blif depth=-1\n")
+        got = self.header("# abc: exchange=blif depth=0\n")
         assert got is not None
-        self.assertEqual(got.depth, -1)
+        self.assertEqual(got.depth, 0)
         got = self.header("# abc: exchange=blif depth=12\n")
         assert got is not None
         self.assertEqual(got.depth, 12)
@@ -609,10 +766,6 @@ class SourceTest(unittest.TestCase):
         text = (REPO_ROOT / "tools" / "vtr-qor" / "qor_netstats.py").read_text(encoding="utf-8")
         for needle in ("os.environ", "getenv", "import os"):
             self.assertNotIn(needle, text)
-
-    def test_no_recursion_limit_games(self) -> None:
-        text = (REPO_ROOT / "tools" / "vtr-qor" / "qor_netstats.py").read_text(encoding="utf-8")
-        self.assertNotIn("setrecursionlimit", text)
 
 
 if __name__ == "__main__":

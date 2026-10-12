@@ -381,7 +381,7 @@ Effort cues:
   - depth counts levels of non-buffer LUTs. Sources are primary inputs, latch outputs, hard-block outputs and constants; sinks are primary outputs, latch inputs and hard-block inputs. A buffer adds 0 levels.
 
 **Tests (T2):**
-- `test_counts`: `mixed.blif` (hand-written: 2 `.inputs`, 1 `.latch`, 5 `.names` of which one is `1 1`, one is `0 0` and one has zero inputs, an adder, a multiply and a RAM, plus stubs after `.end`) → `NetStats(luts=3, buffers=2, ffs=1, adders=1, mults=1, ram_slices=1, …)`. `blif_sha256` is the file's `sha256sum`.
+- `test_counts`: `mixed.blif` (hand-written: 2 `.inputs`, 1 `.latch`, 6 `.names` of which one is `1 1`, one is `0 0` and one has zero inputs, an adder, a multiply and a RAM, plus stubs after `.end`) → `NetStats(luts=3, buffers=2, ffs=1, adders=1, mults=1, ram_slices=1, …)`. `blif_sha256` is the file's `sha256sum`.
 - `test_depth_chain`: a chain of three LUTs fed by a PI → 3. Through a buffer → still 3. A `multiply` in the middle cuts the path, so the depth is the longer side (2).
 - `test_depth_latch_cut`: a LUT → latch → LUT path → 1.
 - `test_loop`: two LUTs feeding each other → −1 and the stderr line exact.
