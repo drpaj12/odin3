@@ -6,7 +6,7 @@ text and print as **[TODO: …]**.
 
 ## Figures
 
-Nine figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
+Ten figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
 is a hand-drawn SVG.
 
 - `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
@@ -37,13 +37,15 @@ Build status is coded by fill and by border, so it survives greyscale printing:
 | specified | white fill, dashed blue border | approved specification and plan |
 | planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
 
-The status shown is as of 2026-10-11:
+The status shown is as of 2026-10-12:
 
-- **Built:** Phases 0–1, 2A and all of 2B, including the Odin II XML reader.
-- **In progress:** 2C, whose grammar is complete except generate, instantiation and gates, and
-  2D-1/2D-2.
-- **Specified:** the rest of 2D, plus 2E and 2F.
-- **Planned:** Phases 3–7.
+- **Built:** Phases 0–1, 2A, 2B and 2C; 2D-1 (IR changes, `write_rtlil`) and 2D-2 (constants).
+- **In progress:** 2D stage 1 (2D-3); `proc` (2E-1 to 2E-3 merged, evidence open); linked ABC
+  (3D-0, 3D-1, 3D-3, 3D-4, 3D-6 merged); `write_blif --vtr` (3E-1, 3E-2, 3E-3, 3E-5 merged); the
+  QoR harness (3H-1, 3H-2 merged, with the first Parmys baseline).
+- **Specified:** the rest of 2D, and 2F.
+- **Planned:** the rest of Phase 3 (`flatten`, `lower`, `hardmap`, `wreduce`, VTR hookup) and
+  Phases 4–7.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
 features table and the phases table together.
@@ -53,6 +55,7 @@ features table and the phases table together.
 | `fig_pipeline` | the system pipeline, with build status | TikZ | `\textwidth` |
 | `fig_project` | four project formats filling one record | TikZ | `\columnwidth` |
 | `fig_elab_seam` | two-stage elaboration and the elaborated-AST seam | TikZ | `\textwidth` |
+| `fig_proc` | the `proc` pass: Yosys 0.55 `proc_*` sub-passes as phases (2E spec §2) | TikZ | `\columnwidth` |
 | `fig_util` | the `src/util` containers and what each uses | TikZ | `\columnwidth` |
 | `fig_ir_model` | the IR object model, record sizes and ID references | TikZ | `\textwidth` |
 | `fig_prov` | the provenance lineage DAG (illustrative) | TikZ | `\columnwidth` |
@@ -75,7 +78,7 @@ features table and the phases table together.
 3. Under *Menu → Compiler*, choose **pdfLaTeX**. The main document is `odin3.tex`.
 
 No shell-escape is needed. The paper uses only packages that Overleaf ships: IEEEtran, cite,
-amsmath, graphicx, booktabs, url, listings and tikz. It uses relative paths only, and Overleaf
+amsmath, graphicx, booktabs, array, url, listings and tikz. It uses relative paths only, and Overleaf
 runs BibTeX itself. pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
 
 ## Build locally (optional)
@@ -105,7 +108,9 @@ make clean            # remove build/
 
 Every claim is taken from the repository:
 
-- `docs/DESIGN.md`, `docs/IR.md`, `docs/ADR/` and `docs/PHASE0.md`–`PHASE3.md`;
+- `docs/DESIGN.md`, `docs/IR.md`, `docs/ADR/` and `docs/PHASE0.md`–`PHASE3.md` (PHASE2 #16 and
+  PHASE3 #28, Peter's rulings of 2026-10-12, come from PR #75);
+- `git log` (merge commits and their review rounds);
 - `docs/specs/` and `docs/log_cost_of_tokens_and_time.md`;
 - the headers under `include/odin3/` and `src/`;
 - for the comparison, the read-only Yosys and Odin II trees under `~/odin3-ws/external`.
