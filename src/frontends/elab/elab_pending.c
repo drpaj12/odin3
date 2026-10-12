@@ -21,14 +21,6 @@
 static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 14: generate and scope names. */
-            [ODIN3_AST_GENERATE] = true,
-            [ODIN3_AST_GEN_FOR] = true,
-            [ODIN3_AST_GEN_IF] = true,
-            [ODIN3_AST_GEN_CASE] = true,
-            [ODIN3_AST_GEN_BLOCK] = true,
-            [ODIN3_AST_GENVAR_DECL] = true,
-            [ODIN3_AST_HIER_NAME] = true,
             /* Task 15: non-ANSI ports, attributes, subroutines, processes and every statement
              * kind (a port declared in the body: odin3_elab1_pend_form). */
             [ODIN3_AST_PORT_REF] = true,

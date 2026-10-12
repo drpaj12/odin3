@@ -4,7 +4,9 @@
  * parameters and localparams, and the evaluator whose host it is), then pass E of one
  * specialization: every declaration evaluated, its defparams and pending overrides pushed down to
  * its instances, and each instance resolved and specialized, one decision-log entry per INSTANCE.
- * Task 11 has the module scope only (scope 0); Task 14 adds the generate scopes.
+ * Task 14 adds the generate scopes: pass E walks the module with a worklist, entering each selected
+ * generate block as a scope (its declarations recorded and evaluated there), and resolves the
+ * defparams and instances after the walk, against the expanded scopes (EL-8, EL-22).
  */
 #include "frontends/verilog/elab1.h"
 
@@ -25,12 +27,14 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -41,7 +45,10 @@ enum {
     E1_INT_BITS = 32,
     E1_TIME_BITS = 64,
     E1_NET_RANGE_SLOT = 1, /* NET_DECL(STRENGTH?, RANGE?, DELAY?) */
-    E1_WHAT_EXTRA = 16     /* the blank, the quotes and the NUL of a <what>, with room */
+    E1_FOR_BODY = 3,       /* GEN_FOR(init, cond, step, body) */
+    E1_INDEX_TEXT = 24,    /* the digits of a pending path's `[i]` */
+    E1_DECIMAL = 10,
+    E1_WHAT_EXTRA = 16 /* the blank, the quotes and the NUL of a <what>, with room */
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -62,12 +69,56 @@ static odin3_status e1_keep_internal(odin3_status worst, odin3_status st) {
     return worst == ODIN3_ERR_CHECK && st != ODIN3_ERR_NO_MEMORY ? worst : st;
 }
 
+/* An error of the environment (dropped while quiet). */
+static void env_error(const odin3_elab1_env *env, odin3_ast_id at, const char *fmt, ...)
+    ODIN3_PRINTF(3, 4);
+
+static void env_error(const odin3_elab1_env *env, odin3_ast_id at, const char *fmt, ...) {
+    if (env->quiet) {
+        return;
+    }
+    char text[ODIN3_LOG_BUF];
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(text, sizeof text, fmt, args);
+    va_end(args);
+    odin3_elab1_report(env->e1, ODIN3_LOG_ERROR, odin3_ast_loc(env->e1->parsed, at),
+                       len >= 0 ? text : fmt);
+}
+
 /* --- recording the declarations ------------------------------------------------------------ */
 
-static odin3_status env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
+/* M11 for a generate block's name (EL-21): proto's name is first's already in the scope. */
+static void clash(odin3_elab1_env *env, const odin3_elab1_slot *proto, odin3_ast_id first) {
+    odin3_elab1 *e1 = env->e1;
+    odin3_srcman *sm = NULL;
+    odin3_strbuf pos;
+    odin3_strbuf_init(&pos);
+    odin3_status st = odin3_design_get_srcman(e1->design, &sm);
+    st = st != ODIN3_OK ? st
+                        : odin3_srcman_format(sm, odin3_ast_loc(e1->parsed, first), &pos,
+                                              odin3_design_diag_paths(e1->design));
+    if (st == ODIN3_OK) {
+        env_error(env, proto->entry.decl, "'%s' is already declared (first at %s)",
+                  odin3_elab1_str(e1, proto->name), pos.data);
+    } else {
+        e1->fatal = e1->fatal != ODIN3_OK ? e1->fatal : st;
+    }
+    odin3_strbuf_free(&pos);
+}
+
+odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto) {
     uint64_t key = (uint64_t)proto->scope << E1_SCOPE_SHIFT | proto->name;
-    if (odin3_u64map_get(env->names, key, NULL)) {
-        return ODIN3_OK; /* the first declaration of a name wins (M11 is Task 15's) */
+    uint64_t at = 0;
+    if (odin3_u64map_get(env->names, key, &at)) {
+        const odin3_elab1_slot *first = odin3_vec_cat(&env->slots, (size_t)at);
+        bool block = proto->entry.kind == ODIN3_ENTRY_BLOCK;
+        bool blocks = block || first->entry.kind == ODIN3_ENTRY_BLOCK;
+        if (blocks && !(block && first->entry.kind == ODIN3_ENTRY_BLOCK &&
+                        first->group.v == proto->group.v)) {
+            clash(env, proto, first->entry.decl);
+        }
+        return ODIN3_OK; /* the first declaration of a name wins (the rest of M11 is Task 15's) */
     }
     odin3_elab1_slot *slot = odin3_vec_push(&env->slots);
     if (slot == NULL) {
@@ -81,10 +132,11 @@ static odin3_status env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto)
     return st;
 }
 
-static uint8_t param_kind(uint32_t sub) {
+/* A `parameter` in a generate block is a localparam (EL-19: nothing overrides it). */
+static uint8_t param_kind(const odin3_elab1_env *env, uint32_t sub) {
     switch (sub) {
     case ODIN3_AST_PARAM_DECL_PARAMETER:
-        return ODIN3_ENTRY_PARAM;
+        return env->cur_scope == 0 ? (uint8_t)ODIN3_ENTRY_PARAM : (uint8_t)ODIN3_ENTRY_LOCALPARAM;
     case ODIN3_AST_PARAM_DECL_LOCALPARAM:
         return ODIN3_ENTRY_LOCALPARAM;
     default:
@@ -103,8 +155,9 @@ static odin3_status add_declarators(odin3_elab1_env *env, odin3_ast_id group, ui
         odin3_elab1_slot proto = {.entry = {.kind = kind, .decl = decl},
                                   .group = group,
                                   .name = odin3_ast_name(ast, decl),
+                                  .scope = env->cur_scope,
                                   .n_unpacked = odin3_ast_nchild(ast, decl) - 1};
-        st = env_add(env, &proto);
+        st = odin3_elab1_env_add(env, &proto);
     }
     return st;
 }
@@ -114,8 +167,9 @@ static odin3_status add_named(odin3_elab1_env *env, odin3_ast_id node, odin3_ast
                               uint8_t kind) {
     odin3_elab1_slot proto = {.entry = {.kind = kind, .decl = node},
                               .group = group,
-                              .name = odin3_ast_name(env->e1->parsed, node)};
-    return proto.name != 0 ? env_add(env, &proto) : ODIN3_OK;
+                              .name = odin3_ast_name(env->e1->parsed, node),
+                              .scope = env->cur_scope};
+    return proto.name != 0 ? odin3_elab1_env_add(env, &proto) : ODIN3_OK;
 }
 
 static odin3_status add_instances(odin3_elab1_env *env, odin3_ast_id item) {
@@ -128,16 +182,55 @@ static odin3_status add_instances(odin3_elab1_env *env, odin3_ast_id item) {
     return st;
 }
 
+/* A user-named generate block of construct (EL-21): a BLOCK of the scope, M11 against the rest. */
+static odin3_status add_block(odin3_elab1_env *env, odin3_ast_id body, odin3_ast_id construct) {
+    const odin3_ast *ast = env->e1->parsed;
+    if (body.v == 0 || odin3_ast_kind_of(ast, body) != ODIN3_AST_GEN_BLOCK ||
+        odin3_ast_name(ast, body) == 0) {
+        return ODIN3_OK;
+    }
+    odin3_elab1_slot proto = {.entry = {.kind = ODIN3_ENTRY_BLOCK, .decl = body},
+                              .group = construct,
+                              .name = odin3_ast_name(ast, body),
+                              .scope = env->cur_scope,
+                              .state = ODIN3_E1_DONE};
+    return odin3_elab1_env_add(env, &proto);
+}
+
+/* The named blocks of a generate construct (each branch of one construct may share a name). */
+static odin3_status add_blocks(odin3_elab1_env *env, odin3_ast_id item) {
+    const odin3_ast *ast = env->e1->parsed;
+    odin3_ast_span kids = odin3_ast_children(ast, item);
+    odin3_status st = ODIN3_OK;
+    switch (odin3_ast_kind_of(ast, item)) {
+    case ODIN3_AST_GEN_IF:
+        st = add_block(env, kids.ids[1], item);
+        return st != ODIN3_OK ? st : add_block(env, kids.ids[2], item);
+    case ODIN3_AST_GEN_FOR:
+        return add_block(env, kids.ids[E1_FOR_BODY], item);
+    default: /* GEN_CASE */
+        for (uint32_t k = 1; st == ODIN3_OK && k < kids.n; k++) {
+            st = add_block(env, odin3_ast_child(ast, kids.ids[k], 0), item);
+        }
+        return st;
+    }
+}
+
 static odin3_status record_item(odin3_elab1_env *env, odin3_ast_id item) {
     const odin3_ast *ast = env->e1->parsed;
     switch (odin3_ast_kind_of(ast, item)) {
     case ODIN3_AST_PARAM_DECL: {
-        uint8_t kind = param_kind(odin3_ast_sub(ast, item));
+        uint8_t kind = param_kind(env, odin3_ast_sub(ast, item));
         return kind != 0 ? add_declarators(env, item, kind) : ODIN3_OK;
     }
+    case ODIN3_AST_PORT_DECL:
+        if (env->cur_scope != 0) {
+            env_error(env, item, "port declarations are not allowed in a generate block");
+            return ODIN3_OK;
+        }
+        return add_declarators(env, item, ODIN3_ENTRY_SIGNAL);
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
-    case ODIN3_AST_PORT_DECL:
         return add_declarators(env, item, ODIN3_ENTRY_SIGNAL);
     case ODIN3_AST_GENVAR_DECL:
         return add_declarators(env, item, ODIN3_ENTRY_GENVAR);
@@ -147,16 +240,48 @@ static odin3_status record_item(odin3_elab1_env *env, odin3_ast_id item) {
         return add_named(env, item, item, ODIN3_ENTRY_TASK);
     case ODIN3_AST_INSTANTIATION:
         return add_instances(env, item);
+    case ODIN3_AST_GEN_IF:
+    case ODIN3_AST_GEN_FOR:
+    case ODIN3_AST_GEN_CASE:
+        return add_blocks(env, item);
     default:
-        return ODIN3_OK; /* generate constructs: Task 14 */
+        return ODIN3_OK;
     }
 }
 
-static odin3_status record_span(odin3_elab1_env *env, odin3_ast_span span) {
-    odin3_status st = ODIN3_OK;
-    for (uint32_t i = 0; st == ODIN3_OK && i < span.n; i++) {
-        st = span.ids[i].v != 0 ? record_item(env, span.ids[i]) : ODIN3_OK;
+static odin3_status push_span(odin3_vec *stack, odin3_ast_span span) {
+    odin3_ast_span *slot = odin3_vec_push(stack);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
     }
+    *slot = span;
+    return ODIN3_OK;
+}
+
+/* The declarations of span's items in env->cur_scope, a `generate` region's items as the
+ * scope's own (no recursion: a stack of spans). */
+static odin3_status record_span(odin3_elab1_env *env, odin3_ast_span span) {
+    const odin3_ast *ast = env->e1->parsed;
+    odin3_vec stack;
+    odin3_vec_init(&stack, sizeof(odin3_ast_span));
+    odin3_status st = push_span(&stack, span);
+    while (st == ODIN3_OK && stack.len > 0) {
+        odin3_ast_span *top = odin3_vec_at(&stack, stack.len - 1);
+        if (top->n == 0) {
+            odin3_vec_pop(&stack);
+            continue;
+        }
+        odin3_ast_id item = top->ids[0];
+        top->ids++;
+        top->n--;
+        if (item.v == 0) {
+            continue;
+        }
+        st = odin3_ast_kind_of(ast, item) == ODIN3_AST_GENERATE
+                 ? push_span(&stack, odin3_ast_children(ast, item))
+                 : record_item(env, item);
+    }
+    odin3_vec_free(&stack);
     return st;
 }
 
@@ -175,23 +300,6 @@ static odin3_status record_module(odin3_elab1_env *env) {
 }
 
 /* --- the evaluator's host -------------------------------------------------------------------- */
-
-/* An error of the environment (dropped while quiet). */
-static void env_error(const odin3_elab1_env *env, odin3_ast_id at, const char *fmt, ...)
-    ODIN3_PRINTF(3, 4);
-
-static void env_error(const odin3_elab1_env *env, odin3_ast_id at, const char *fmt, ...) {
-    if (env->quiet) {
-        return;
-    }
-    char text[ODIN3_LOG_BUF];
-    va_list args;
-    va_start(args, fmt);
-    int len = vsnprintf(text, sizeof text, fmt, args);
-    va_end(args);
-    odin3_elab1_report(env->e1, ODIN3_LOG_ERROR, odin3_ast_loc(env->e1->parsed, at),
-                       len >= 0 ? text : fmt);
-}
 
 static void host_report(void *user, odin3_log_level level, odin3_loc loc, const char *msg) {
     const odin3_elab1_env *env = user;
@@ -222,11 +330,8 @@ static void signal_sym(const odin3_elab1_slot *slot, odin3_csym *out) {
     out->lsb = slot->lsb;
 }
 
-static odin3_status lookup_ident(odin3_elab1_env *env, odin3_ast_id ref, odin3_csym *out) {
-    uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(env->e1->parsed, ref));
-    if (idx == E1_NONE) {
-        return ODIN3_OK; /* NONE: "'x' is not declared" (implicit nets are Task 15's) */
-    }
+/* The answer of a value's slot idx (NONE for a function, task, instance or block name). */
+static odin3_status value_sym(odin3_elab1_env *env, uint32_t idx, odin3_csym *out) {
     uint8_t kind = odin3_elab1_env_slot(env, idx)->entry.kind;
     if (kind != ODIN3_ENTRY_PARAM && kind != ODIN3_ENTRY_LOCALPARAM && kind != ODIN3_ENTRY_SIGNAL &&
         kind != ODIN3_ENTRY_GENVAR) {
@@ -250,6 +355,31 @@ static odin3_status lookup_ident(odin3_elab1_env *env, odin3_ast_id ref, odin3_c
     return st;
 }
 
+/* value_sym, a genvar holding a generate loop's value a constant (EL-19). */
+static odin3_status slot_sym(odin3_elab1_env *env, uint32_t idx, odin3_csym *out) {
+    const odin3_elab1_slot *slot = odin3_elab1_env_slot(env, idx);
+    if (slot->entry.kind == ODIN3_ENTRY_GENVAR && slot->bound) {
+        const_sym(slot, out);
+        return ODIN3_OK;
+    }
+    return value_sym(env, idx, out);
+}
+
+static odin3_status lookup_ident(odin3_elab1_env *env, odin3_ast_id ref, odin3_csym *out) {
+    uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(env->e1->parsed, ref));
+    if (idx == E1_NONE) {
+        return ODIN3_OK; /* NONE: "'x' is not declared" (implicit nets are Task 15's) */
+    }
+    return slot_sym(env, idx, out);
+}
+
+/* A HIER_NAME into the module's generate blocks (G7): the declaration it reaches. */
+static odin3_status lookup_hier(odin3_elab1_env *env, odin3_ast_id ref, odin3_csym *out) {
+    uint32_t idx = E1_NONE;
+    odin3_status st = odin3_elab1_scope_target(env, ref, &idx);
+    return st != ODIN3_OK ? st : slot_sym(env, idx, out);
+}
+
 /* A SELECT: a memory word when its chain is as deep as the name's unpacked dimensions. */
 static odin3_status lookup_word(odin3_elab1_env *env, odin3_ast_id sel, odin3_csym *out) {
     const odin3_ast *ast = env->e1->parsed;
@@ -262,7 +392,7 @@ static odin3_status lookup_word(odin3_elab1_env *env, odin3_ast_id sel, odin3_cs
     if (odin3_ast_kind_of(ast, obj) != ODIN3_AST_IDENT) {
         return ODIN3_OK;
     }
-    uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(ast, obj));
+    uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(ast, obj));
     if (idx == E1_NONE) {
         return ODIN3_OK;
     }
@@ -284,17 +414,14 @@ static odin3_status host_lookup(void *user, odin3_ast_id ref, odin3_csym *out) {
         return lookup_word(env, ref, out);
     case ODIN3_AST_IDENT:
         return lookup_ident(env, ref, out);
-    default: /* a HIER_NAME: generate scopes are Task 14's */
-        if (!env->quiet) {
-            odin3_elab1_not_yet(env->e1, ref);
-        }
-        return ODIN3_ERR_PARSE;
+    default:
+        return lookup_hier(env, ref, out);
     }
 }
 
 static odin3_status host_callee(void *user, odin3_ast_id call, odin3_csym *out) {
     odin3_elab1_env *env = user;
-    uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(env->e1->parsed, call));
+    uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(env->e1->parsed, call));
     if (idx == E1_NONE) {
         return ODIN3_OK;
     }
@@ -318,7 +445,8 @@ static odin3_status env_tables(odin3_elab1_env *env) {
         return ODIN3_ERR_NO_MEMORY;
     }
     const odin3_ceval_host host = {host_lookup, host_callee, host_report, env};
-    return odin3_ceval_create(env->e1->parsed, &host, &env->ev);
+    odin3_status st = odin3_elab1_gen_init(env);
+    return st != ODIN3_OK ? st : odin3_ceval_create(env->e1->parsed, &host, &env->ev);
 }
 
 odin3_status odin3_elab1_env_create(odin3_elab1 *e1, uint32_t def, odin3_elab1_env **out) {
@@ -352,6 +480,7 @@ void odin3_elab1_env_destroy(odin3_elab1_env *env) {
     odin3_vec_free(&env->ranges);
     odin3_u64map_destroy(env->names);
     odin3_u64map_destroy(env->ranged);
+    odin3_elab1_gen_free(env);
     odin3_arena_destroy(env->arena);
     odin3_util_free(env);
 }
@@ -377,7 +506,7 @@ uint8_t odin3_elab1_value_base(odin3_elab1_env *env, odin3_ast_id expr) {
     case ODIN3_AST_NUMBER:
         return (uint8_t)odin3_ast_sub(ast, expr);
     case ODIN3_AST_IDENT: {
-        uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(ast, expr));
+        uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(ast, expr));
         return idx != E1_NONE ? odin3_elab1_env_slot(env, idx)->base : ODIN3_AST_NUMBER_DEC;
     }
     default:
@@ -459,15 +588,16 @@ static odin3_status fold_range(odin3_elab1_env *env, const e1_range_req *req, in
 static odin3_status range_folded(odin3_elab1_env *env, const e1_range_req *req, int64_t *msb,
                                  int64_t *lsb) {
     odin3_ast_id range = req->range;
+    uint64_t key = (uint64_t)env->cur_scope << E1_SCOPE_SHIFT | range.v; /* per loop iteration */
     uint64_t at = 0;
-    if (!odin3_u64map_get(env->ranged, range.v, &at)) {
+    if (!odin3_u64map_get(env->ranged, key, &at)) {
         odin3_elab1_range *rec = odin3_vec_push(&env->ranges);
         if (rec == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *rec = (odin3_elab1_range){range, ODIN3_E1_BUSY, 0, 0};
         at = env->ranges.len - 1;
-        odin3_status st = odin3_u64map_put(env->ranged, (odin3_kv){range.v, at});
+        odin3_status st = odin3_u64map_put(env->ranged, (odin3_kv){key, at});
         int64_t bounds[2] = {0, 0};
         st = st != ODIN3_OK ? st : fold_range(env, req, bounds);
         rec = odin3_vec_at(&env->ranges, (size_t)at);
@@ -693,7 +823,10 @@ odin3_status odin3_elab1_env_value(odin3_elab1_env *env, uint32_t idx) {
         return ODIN3_OK; /* functions, tasks and instances have no value */
     }
     slot->state = ODIN3_E1_BUSY;
+    uint32_t saved = env->cur_scope;
+    env->cur_scope = slot->scope; /* evaluated where it is declared */
     odin3_status st = param ? param_value(env, idx) : signal_type(env, idx);
+    env->cur_scope = saved;
     slot = odin3_elab1_env_slot(env, idx);
     slot->state = state_after(st);
     return st;
@@ -741,10 +874,28 @@ odin3_status odin3_elab1_override_text(const odin3_elab1 *e1, const odin3_elab_o
 /* An override for the instance named inst of the module scope (a defparam of the module, or a
  * pending override of the specialization), its path below that instance. */
 typedef struct e1_dp {
-    uint32_t inst;
+    uint64_t inst; /* scope << 32 | instance name */
     odin3_elab_override ovr;
     uint32_t next; /* the next one for the same instance + 1, 0 = none */
 } e1_dp;
+
+/* What pass E's walk met for after it: an INSTANTIATION (its decisions reserved at log_at) or a
+ * DEFPARAM (log_at E1_NONE), in its scope. */
+typedef struct e1_todo {
+    odin3_ast_id item;
+    uint32_t scope;
+    uint32_t log_at;
+} e1_todo;
+
+/* One frame of pass E's walk: the items [next, end) of node in scope; fresh until the scope's
+ * declarations are recorded and evaluated (a generate block's, or the module's). */
+typedef struct e1_walk {
+    odin3_ast_id node;
+    uint32_t next;
+    uint32_t end;
+    uint32_t scope;
+    bool fresh;
+} e1_walk;
 
 typedef struct e1_pass {
     odin3_elab1 *e1;
@@ -752,8 +903,13 @@ typedef struct e1_pass {
     uint32_t spec;
     uint32_t def;
     odin3_vec dps;            /* e1_dp */
-    odin3_u64map *dp_by_inst; /* instance name → (first dp + 1) | (last dp + 1) << 32 */
+    odin3_u64map *dp_by_inst; /* scope << 32 | instance name → (first + 1) | (last + 1) << 32 */
     odin3_vec list;           /* odin3_elab_override: one INSTANTIATION's #() values */
+    odin3_vec walk;           /* e1_walk */
+    odin3_vec todo;           /* e1_todo, in walk order */
+    uint32_t scope;           /* the scope of the INSTANTIATION being resolved */
+    bool filling;             /* decisions go to the reserved entries from fill */
+    uint32_t fill;
 } e1_pass;
 
 static odin3_status push_override(odin3_vec *vec, const odin3_elab_override *ovr) {
@@ -766,7 +922,7 @@ static odin3_status push_override(odin3_vec *vec, const odin3_elab_override *ovr
 }
 
 /* The override for instance inst, appended to its chain (indexed by name: review m3). */
-static odin3_status push_dp(e1_pass *ps, uint32_t inst, const odin3_elab_override *ovr) {
+static odin3_status push_dp(e1_pass *ps, uint64_t inst, const odin3_elab_override *ovr) {
     e1_dp *slot = odin3_vec_push(&ps->dps);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -787,16 +943,58 @@ static odin3_status push_dp(e1_pass *ps, uint32_t inst, const odin3_elab_overrid
     return st;
 }
 
-/* The first override for instance name + 1 (0 = none); the next one is its e1_dp.next. */
-static uint32_t first_dp(const e1_pass *ps, uint32_t name) {
+/* The first override for instance key + 1 (0 = none); the next one is its e1_dp.next. */
+static uint32_t first_dp(const e1_pass *ps, uint64_t key) {
     uint64_t ends = 0;
-    return odin3_u64map_get(ps->dp_by_inst, name, &ends) ? (uint32_t)(ends & UINT32_MAX) : 0;
+    return odin3_u64map_get(ps->dp_by_inst, key, &ends) ? (uint32_t)(ends & UINT32_MAX) : 0;
 }
 
-/* True when name is an instance of the module scope. */
-static bool is_instance(const e1_pass *ps, uint32_t name) {
-    uint32_t idx = odin3_elab1_env_find(ps->env, 0, name);
-    return idx != E1_NONE && odin3_elab1_env_slot(ps->env, idx)->entry.kind == ODIN3_ENTRY_INSTANCE;
+/* The instance a path reaches through the generate blocks (EL-8, EL-22): its scope << 32 | name
+ * and the index of the component after it; false when the path does not reach an instance with a
+ * component after it. */
+typedef struct e1_target {
+    uint64_t key;
+    uint32_t rest;
+} e1_target;
+
+static bool reach_instance(const e1_pass *ps, const odin3_elab1_path *path, e1_target *out) {
+    odin3_elab1_reach reach = {0, 0};
+    odin3_elab1_walked walked = odin3_elab1_scope_walk(ps->env, path, &reach);
+    const odin3_elab1_comp *comp = &path->comps[reach.used < path->count ? reach.used : 0];
+    if (walked != ODIN3_WALK_STOP || reach.used + 1 >= path->count || comp->has_index) {
+        return false;
+    }
+    uint32_t idx = odin3_elab1_env_find(ps->env, reach.reached, comp->name);
+    if (idx == E1_NONE || odin3_elab1_env_slot(ps->env, idx)->entry.kind != ODIN3_ENTRY_INSTANCE) {
+        return false;
+    }
+    *out = (e1_target){(uint64_t)reach.reached << E1_SCOPE_SHIFT | comp->name, reach.used + 1};
+    return true;
+}
+
+/* comps[0 .. count) joined by ODIN3_ELAB_PATH_SEP (an index as `[i]`), interned into *path. */
+static odin3_status join_rest(e1_pass *ps, const odin3_elab1_comp *comps, uint32_t count,
+                              uint32_t *path) {
+    odin3_strbuf rest;
+    odin3_strbuf_init(&rest);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+        if (i > 0) {
+            char sep = ODIN3_ELAB_PATH_SEP;
+            st = odin3_strbuf_append(&rest, (odin3_bytes){&sep, 1});
+        }
+        st = st != ODIN3_OK ? st
+                            : odin3_strbuf_append(
+                                  &rest, odin3_bytes_cstr(odin3_elab1_str(ps->e1, comps[i].name)));
+        if (st == ODIN3_OK && comps[i].has_index) {
+            st = odin3_strbuf_appendf(&rest, "[%" PRId32 "]", comps[i].index);
+        }
+    }
+    st = st != ODIN3_OK
+             ? st
+             : odin3_design_intern(ps->e1->design, (odin3_bytes){rest.data, rest.len}, path);
+    odin3_strbuf_free(&rest);
+    return st;
 }
 
 /* The ID of bytes when interned already (0 otherwise: nothing has that name). */
@@ -822,77 +1020,107 @@ void odin3_elab1_bad_target(odin3_elab1 *e1, const odin3_elab_override *ovr) {
     odin3_strbuf_free(&text);
 }
 
-/* One defparam of the module scope: its target instance and the path below it; its value
- * evaluated here (EL-8). A path that does not start at an instance is the target error. */
-static odin3_status collect_defparam(e1_pass *ps, odin3_ast_id item) {
+/* One defparam, written in scope: its target instance (from scope outward, through generate
+ * blocks: `g[1].u.W`) and the path below it; its value evaluated there (EL-8). A path that does
+ * not reach an instance is the target error. */
+static odin3_status collect_defparam(e1_pass *ps, odin3_ast_id item, uint32_t scope) {
     const odin3_ast *ast = ps->e1->parsed;
     odin3_ast_id hier = odin3_ast_child(ast, item, 0);
-    odin3_ast_span parts = odin3_ast_children(ast, hier);
-    for (uint32_t i = 0; i < parts.n; i++) {
-        if (odin3_ast_kind_of(ast, parts.ids[i]) != ODIN3_AST_IDENT) {
-            odin3_elab1_not_yet(ps->e1, hier); /* a generate scope (g[1].u.W): Task 14 */
-            return ODIN3_OK;
-        }
-    }
+    uint32_t count = odin3_ast_nchild(ast, hier);
     odin3_elab_override ovr = {.source = ODIN3_OVR_DEFPARAM,
                                .order = item.v,
                                .at = odin3_ast_loc(ast, hier),
                                .from = item};
-    uint32_t inst = odin3_ast_name(ast, parts.ids[0]);
-    if (parts.n < 2 || !is_instance(ps, inst)) {
+    odin3_elab1_comp *comps = NULL;
+    odin3_status st = odin3_elab1_hier_comps(ps->env, hier, &comps);
+    if (st != ODIN3_OK) {
+        return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+    }
+    odin3_elab1_path path = {comps, count, scope};
+    e1_target target = {0, 0};
+    if (!reach_instance(ps, &path, &target)) {
         odin3_elab1_bad_target(ps->e1, &ovr);
         return ODIN3_OK;
     }
-    odin3_strbuf rest;
-    odin3_strbuf_init(&rest);
-    odin3_status st = ODIN3_OK;
-    for (uint32_t i = 1; st == ODIN3_OK && i < parts.n; i++) {
-        if (i > 1) {
-            char sep = ODIN3_ELAB_PATH_SEP;
-            st = odin3_strbuf_append(&rest, (odin3_bytes){&sep, 1});
-        }
-        st = st != ODIN3_OK ? st
-                            : odin3_strbuf_append(
-                                  &rest, odin3_bytes_cstr(odin3_ast_name_str(ast, parts.ids[i])));
-    }
-    st = st != ODIN3_OK
-             ? st
-             : odin3_design_intern(ps->e1->design, (odin3_bytes){rest.data, rest.len}, &ovr.path);
-    odin3_strbuf_free(&rest);
+    st = join_rest(ps, comps + target.rest, count - target.rest, &ovr.path);
     odin3_elab1_eval_req req = {odin3_ast_child(ast, item, 1),
-                                param_what(ps->env, odin3_ast_name(ast, parts.ids[parts.n - 1])),
-                                &ovr.base};
+                                param_what(ps->env, comps[count - 1].name), &ovr.base};
     odin3_status ev = st == ODIN3_OK ? odin3_elab1_eval(ps->env, &req, &ovr.value) : st;
     if (ev == ODIN3_ERR_PARSE) {
         return ODIN3_OK; /* reported; the instance takes no value from it (EL-44) */
     }
     ovr.value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* an override is sized (v4.7) */
-    return ev != ODIN3_OK ? ev : push_dp(ps, inst, &ovr);
+    return ev != ODIN3_OK ? ev : push_dp(ps, target.key, &ovr);
 }
 
-/* One pending override of the specialization: "u<SEP>rest" goes to instance u as "rest". */
+/* One component of a pending path's text: `name`, or `name[i]` (an iteration of a generate loop:
+ * the bracket form wins when its base names something interned). */
+static void text_comp(const odin3_elab1 *e1, const char *text, size_t len, odin3_elab1_comp *out) {
+    *out = (odin3_elab1_comp){find_id(e1, (odin3_bytes){text, len}), 0, false};
+    const char *open = len > 0 ? memchr(text, '[', len) : NULL;
+    if (open == NULL || text[len - 1] != ']') {
+        return;
+    }
+    char digits[E1_INDEX_TEXT];
+    size_t inner = len - (size_t)(open - text) - 2;
+    if (inner == 0 || inner >= sizeof digits) {
+        return;
+    }
+    memcpy(digits, open + 1, inner);
+    digits[inner] = '\0';
+    char *stop = NULL;
+    long long index = strtoll(digits, &stop, E1_DECIMAL);
+    uint32_t base = find_id(e1, (odin3_bytes){text, (size_t)(open - text)});
+    if (*stop == '\0' && base != 0 && index >= INT32_MIN && index <= INT32_MAX) {
+        *out = (odin3_elab1_comp){base, (int32_t)index, true};
+    }
+}
+
+/* One pending override of the specialization: "u<SEP>rest" goes to instance u as "rest", "g[1]
+ * <SEP>u<SEP>rest" to instance u of generate block g[1]. */
 static odin3_status split_pending(e1_pass *ps, const odin3_elab_override *ovr) {
     const char *path = odin3_elab1_str(ps->e1, ovr->path);
-    const char *dot = strchr(path, ODIN3_ELAB_PATH_SEP);
-    uint32_t inst = dot != NULL ? find_id(ps->e1, (odin3_bytes){path, (size_t)(dot - path)}) : 0;
-    if (inst == 0 || !is_instance(ps, inst)) {
+    uint32_t count = 1;
+    for (const char *at = path; *at != '\0'; at++) {
+        count += *at == ODIN3_ELAB_PATH_SEP ? 1U : 0U;
+    }
+    odin3_elab1_comp *comps = odin3_arena_alloc(ps->env->arena, count * sizeof *comps);
+    if (comps == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    const char *from = path;
+    for (uint32_t i = 0; i < count; i++) {
+        const char *sep = strchr(from, ODIN3_ELAB_PATH_SEP);
+        size_t len = sep != NULL ? (size_t)(sep - from) : strlen(from);
+        text_comp(ps->e1, from, len, &comps[i]);
+        from = sep != NULL ? sep + 1 : from + len;
+    }
+    odin3_elab1_path walk = {comps, count, 0};
+    e1_target target = {0, 0};
+    if (!reach_instance(ps, &walk, &target)) {
         odin3_elab1_bad_target(ps->e1, ovr);
         return ODIN3_OK;
     }
+    const char *tail = path;
+    for (uint32_t i = 0; i < target.rest; i++) {
+        tail = strchr(tail, ODIN3_ELAB_PATH_SEP) + 1;
+    }
     odin3_elab_override down = *ovr;
-    odin3_status st = odin3_design_intern(ps->e1->design, odin3_bytes_cstr(dot + 1), &down.path);
-    return st != ODIN3_OK ? st : push_dp(ps, inst, &down);
+    odin3_status st = odin3_design_intern(ps->e1->design, odin3_bytes_cstr(tail), &down.path);
+    return st != ODIN3_OK ? st : push_dp(ps, target.key, &down);
 }
 
+/* The defparams the walk met, each in its scope, then the specialization's pending overrides. */
 static odin3_status collect_overrides(e1_pass *ps) {
-    const odin3_ast *ast = ps->e1->parsed;
-    odin3_ast_span kids = odin3_ast_children(ast, ps->env->module);
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = E1_ITEMS; st == ODIN3_OK && i < kids.n; i++) {
-        if (odin3_ast_kind_of(ast, kids.ids[i]) == ODIN3_AST_DEFPARAM) {
-            st = collect_defparam(ps, kids.ids[i]);
+    for (size_t i = 0; st == ODIN3_OK && i < ps->todo.len; i++) {
+        const e1_todo *todo = odin3_vec_cat(&ps->todo, i);
+        if (todo->log_at == E1_NONE) {
+            ps->env->cur_scope = todo->scope;
+            st = collect_defparam(ps, todo->item, todo->scope);
         }
     }
+    ps->env->cur_scope = 0;
     const odin3_elab1_spec *spec = odin3_elab1_spec_at(ps->e1, ps->spec);
     for (uint32_t i = 0; st == ODIN3_OK && i < spec->n_pending; i++) {
         odin3_elab_override ovr = odin3_elab1_spec_at(ps->e1, ps->spec)->pending[i];
@@ -1026,6 +1254,12 @@ static odin3_status param_list(e1_pass *ps, odin3_ast_id item, const e1_ptarget 
 /* --- instances ------------------------------------------------------------------------------ */
 
 static odin3_status log_decision(e1_pass *ps, odin3_ast_id inst, int32_t value) {
+    if (ps->filling) { /* the entry the walk reserved (in order) */
+        odin3_elab_decision *at = odin3_vec_at(&ps->e1->log, ps->fill++);
+        assert(at->node.v == inst.v);
+        at->value = value;
+        return ODIN3_OK;
+    }
     odin3_elab_decision *slot = odin3_vec_push(&ps->e1->log);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -1046,13 +1280,14 @@ static odin3_status add_edge(e1_pass *ps, odin3_ast_id inst, uint32_t child) {
 /* The overrides of instance inst into odin3_elab1.inst_ovr: the #() values, then the defparams
  * and pending overrides that name it. */
 static odin3_status instance_overrides(e1_pass *ps, uint32_t inst) {
+    uint64_t key = (uint64_t)ps->scope << E1_SCOPE_SHIFT | inst;
     odin3_vec *out = &ps->e1->inst_ovr;
     odin3_vec_clear(out);
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < ps->list.len; i++) {
         st = push_override(out, odin3_vec_cat(&ps->list, i));
     }
-    for (uint32_t at = first_dp(ps, inst); st == ODIN3_OK && at != 0;) {
+    for (uint32_t at = first_dp(ps, key); st == ODIN3_OK && at != 0;) {
         const e1_dp *dp = odin3_vec_cat(&ps->dps, at - 1);
         st = push_override(out, &dp->ovr);
         at = dp->next;
@@ -1190,10 +1425,11 @@ static odin3_status gate_counts(e1_pass *ps, odin3_ast_id item) {
     return worst;
 }
 
-/* Every declaration evaluated (EL-23: ranges folded; EL-16: values), in declaration order. */
-static odin3_status evaluate_all(odin3_elab1_env *env) {
+/* The declarations of slots [from, end) evaluated (EL-23: ranges folded; EL-16: values), in
+ * declaration order. */
+static odin3_status evaluate_all(odin3_elab1_env *env, uint32_t from) {
     odin3_status worst = ODIN3_OK;
-    for (uint32_t i = 0; i < env->slots.len && !e1_internal(worst) && !env->e1->stopped; i++) {
+    for (uint32_t i = from; i < env->slots.len && !e1_internal(worst) && !env->e1->stopped; i++) {
         const odin3_elab1_slot *slot = odin3_elab1_env_slot(env, i);
         worst = e1_keep_internal(worst, odin3_elab1_env_value(env, i));
         uint32_t unpacked = slot->entry.kind == ODIN3_ENTRY_SIGNAL ? slot->n_unpacked : 0;
@@ -1201,8 +1437,11 @@ static odin3_status evaluate_all(odin3_elab1_env *env) {
         for (uint32_t k = 1; k <= unpacked && !e1_internal(worst); k++) {
             int64_t msb = 0;
             int64_t lsb = 0;
+            uint32_t saved = env->cur_scope;
+            env->cur_scope = odin3_elab1_env_slot(env, i)->scope;
             odin3_ast_id range = odin3_ast_child(env->e1->parsed, decl, k);
             worst = e1_keep_internal(worst, odin3_elab1_env_range(env, range, &msb, &lsb));
+            env->cur_scope = saved;
         }
     }
     return worst;
@@ -1224,18 +1463,130 @@ void odin3_elab1_env_preload(odin3_elab1_env *env, uint32_t spec_idx) {
     }
 }
 
-static odin3_status expand_items(e1_pass *ps) {
-    odin3_status st = evaluate_all(ps->env);
-    st = st != ODIN3_OK ? st : collect_overrides(ps);
-    odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, ps->env->module);
-    for (uint32_t i = E1_ITEMS; st == ODIN3_OK && i < kids.n && !ps->e1->stopped; i++) {
-        odin3_ast_kind kind = odin3_ast_kind_of(ps->e1->parsed, kids.ids[i]);
-        if (kind == ODIN3_AST_INSTANTIATION) {
-            st = instantiation(ps, kids.ids[i]);
-        } else if (kind == ODIN3_AST_GATE_DECL) {
-            st = gate_counts(ps, kids.ids[i]);
+/* --- the walk (Task 14) ---------------------------------------------------------------------- */
+
+static odin3_status push_walk(e1_pass *ps, e1_walk frame) {
+    e1_walk *slot = odin3_vec_push(&ps->walk);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = frame;
+    return ODIN3_OK;
+}
+
+/* The scopes the construct just made, walked in order (pushed last first). */
+static odin3_status push_made(e1_pass *ps, odin3_status st) {
+    const odin3_elab1_env *env = ps->env;
+    for (uint32_t k = env->made_n; st == ODIN3_OK && k > 0; k--) {
+        e1_walk frame = {.scope = env->made_first + k - 1, .fresh = true};
+        odin3_elab1_scope_items(env, frame.scope, &frame.node, &frame.next, &frame.end);
+        st = push_walk(ps, frame);
+    }
+    return st;
+}
+
+/* An INSTANTIATION or DEFPARAM for after the walk; an INSTANTIATION's decisions reserved now, in
+ * walk order (pass W replays them there). */
+static odin3_status push_todo(e1_pass *ps, odin3_ast_id item, uint32_t scope) {
+    bool inst = odin3_ast_kind_of(ps->e1->parsed, item) == ODIN3_AST_INSTANTIATION;
+    e1_todo *slot = odin3_vec_push(&ps->todo);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (e1_todo){item, scope, inst ? (uint32_t)ps->e1->log.len : E1_NONE};
+    return inst ? log_all(ps, item, ODIN3_DECISION_SKIPPED) : ODIN3_OK;
+}
+
+/* A fresh scope entered: a generate block's declarations recorded (M11 for its named blocks, a
+ * port the error), then its declarations evaluated; the module's names in its header seen. */
+static odin3_status enter_scope(e1_pass *ps, const e1_walk *frame) {
+    odin3_elab1_env *env = ps->env;
+    const odin3_ast *ast = ps->e1->parsed;
+    uint32_t from = frame->scope == 0 ? 0 : (uint32_t)env->slots.len;
+    odin3_status st = ODIN3_OK;
+    if (frame->scope == 0) {
+        st = odin3_elab1_gen_seen(env, odin3_ast_child(ast, env->module, E1_SLOT_PARAMS), 0);
+        st = st != ODIN3_OK
+                 ? st
+                 : odin3_elab1_gen_seen(env, odin3_ast_child(ast, env->module, E1_SLOT_PORTS), 0);
+    } else if (frame->next < frame->end) {
+        odin3_ast_span kids = odin3_ast_children(ast, frame->node);
+        st = record_span(env, (odin3_ast_span){kids.ids + frame->next, frame->end - frame->next});
+    }
+    return st != ODIN3_OK ? st : evaluate_all(env, from);
+}
+
+/* One item of scope: a generate construct decided and its blocks queued, a `generate` region's
+ * items queued as the scope's; the others' names seen, instances and defparams kept for later. */
+static odin3_status walk_item(e1_pass *ps, uint32_t scope, odin3_ast_id item) {
+    odin3_elab1 *e1 = ps->e1;
+    odin3_ast_kind kind = odin3_ast_kind_of(e1->parsed, item);
+    switch (kind) {
+    case ODIN3_AST_GENERATE:
+        return push_walk(ps, (e1_walk){item, 0, odin3_ast_nchild(e1->parsed, item), scope, false});
+    case ODIN3_AST_GEN_IF:
+        return push_made(ps, odin3_elab1_gen_if(e1, item, scope));
+    case ODIN3_AST_GEN_CASE:
+        return push_made(ps, odin3_elab1_gen_case(e1, item, scope));
+    case ODIN3_AST_GEN_FOR:
+        return push_made(ps, odin3_elab1_gen_for(e1, item, scope));
+    default:
+        break;
+    }
+    odin3_status st = odin3_elab1_gen_seen(ps->env, item, scope);
+    if (st == ODIN3_OK && (kind == ODIN3_AST_INSTANTIATION || kind == ODIN3_AST_DEFPARAM)) {
+        st = push_todo(ps, item, scope);
+    } else if (st == ODIN3_OK && kind == ODIN3_AST_GATE_DECL) {
+        st = gate_counts(ps, item);
+    }
+    return st;
+}
+
+/* The module walked, every selected generate block entered as a scope (a worklist). */
+static odin3_status walk_module(e1_pass *ps) {
+    const odin3_ast *ast = ps->e1->parsed;
+    odin3_ast_id module = ps->env->module;
+    odin3_status st =
+        push_walk(ps, (e1_walk){module, E1_ITEMS, odin3_ast_nchild(ast, module), 0, true});
+    while (st == ODIN3_OK && ps->walk.len > 0 && !ps->e1->stopped) {
+        e1_walk *top = odin3_vec_at(&ps->walk, ps->walk.len - 1);
+        e1_walk now = *top;
+        ps->env->cur_scope = now.scope;
+        if (now.fresh) {
+            top->fresh = false;
+            st = enter_scope(ps, &now);
+        } else if (now.next >= now.end) {
+            odin3_vec_pop(&ps->walk);
+        } else {
+            top->next++;
+            st = walk_item(ps, now.scope, odin3_ast_children(ast, now.node).ids[now.next]);
         }
     }
+    return st;
+}
+
+/* The instances the walk met, resolved and specialized in order, each in its scope. */
+static odin3_status resolve_instances(e1_pass *ps) {
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < ps->todo.len && !ps->e1->stopped; i++) {
+        e1_todo todo = *(const e1_todo *)odin3_vec_cat(&ps->todo, i);
+        if (todo.log_at != E1_NONE) {
+            ps->env->cur_scope = todo.scope;
+            ps->scope = todo.scope;
+            ps->filling = true;
+            ps->fill = todo.log_at;
+            st = instantiation(ps, todo.item);
+            ps->filling = false;
+        }
+    }
+    return st;
+}
+
+static odin3_status expand_items(e1_pass *ps) {
+    odin3_status st = walk_module(ps);
+    st = st != ODIN3_OK ? st : collect_overrides(ps);
+    st = st != ODIN3_OK ? st : resolve_instances(ps);
+    ps->env->cur_scope = 0;
     return st;
 }
 
@@ -1245,6 +1596,8 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     e1_pass ps = {.e1 = e1, .spec = spec, .def = odin3_elab1_spec_at(e1, spec)->def};
     odin3_vec_init(&ps.dps, sizeof(e1_dp));
     odin3_vec_init(&ps.list, sizeof(odin3_elab_override));
+    odin3_vec_init(&ps.walk, sizeof(e1_walk));
+    odin3_vec_init(&ps.todo, sizeof(e1_todo));
     odin3_vec_clear(&e1->given); /* the parameter records pass W of this specialization reads */
     odin3_vec_clear(&e1->gparams);
     ps.dp_by_inst = odin3_u64map_create(0);
@@ -1265,5 +1618,7 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     odin3_vec_free(&ps.dps);
     odin3_u64map_destroy(ps.dp_by_inst);
     odin3_vec_free(&ps.list);
+    odin3_vec_free(&ps.walk);
+    odin3_vec_free(&ps.todo);
     return st;
 }

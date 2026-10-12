@@ -8,7 +8,11 @@
  * bounds and widths and the replication counts folded to NUMBERs (the elaborated form's resolved
  * constants). Task 12 adds ordered connections (resolved by elab1_inst.c), instance and gate
  * arrays expanded to their elements with sliced connections, cell-type and black-box instances
- * with their parameter records, and GATE_DECL. A kind not landed yet is reported (point (l));
+ * with their parameter records, and GATE_DECL. Task 14 adds the generate blocks: the module's
+ * items are walked with a worklist, each selected block (replayed from the decision log, pass E's
+ * scopes taken in the same order) written as a GEN_BLOCK with its name and loop index, a genvar
+ * read written as its NUMBER and a HIER_NAME into the generate blocks resolved (G7) with its
+ * indices folded. A kind not landed yet is reported (point (l));
  * after any error nothing is built, though the walk goes on to report.
  */
 #include "frontends/verilog/elab1.h"
@@ -60,6 +64,9 @@ typedef struct e1w {
     uint32_t used;
     bool replay_failed;
     bool dropped;
+    uint32_t scope;      /* the scope being written (pass E's) */
+    uint32_t next_scope; /* the next scope a selected block takes (pass E's creation order) */
+    odin3_vec walk;      /* e1w_frame */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -250,6 +257,7 @@ static odin3_ast_id w_range(e1w *wr, odin3_ast_id range) {
 
 static bool copyable(odin3_ast_kind kind) {
     switch (kind) {
+    case ODIN3_AST_HIER_NAME:
     case ODIN3_AST_NUMBER:
     case ODIN3_AST_STRING:
     case ODIN3_AST_IDENT:
@@ -329,6 +337,55 @@ static odin3_ast_id w_fold(e1w *wr, odin3_ast_id expr, const char *role) {
     return w_int(wr, value, expr);
 }
 
+static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark);
+
+/* A HIER_NAME into the module's generate blocks (G7), resolved; its indices NUMBERs. */
+static odin3_ast_id w_hier(e1w *wr, odin3_ast_id hier) {
+    odin3_status st = odin3_elab1_scope_ref(wr->e1, hier, wr->scope);
+    if (st != ODIN3_OK) {
+        stop_on(wr, st);
+        return (odin3_ast_id){0};
+    }
+    uint32_t mark = w_mark(wr);
+    odin3_ast_span parts = odin3_ast_children(wr->ast, hier);
+    for (uint32_t i = 0; i < parts.n; i++) {
+        odin3_ast_id part = parts.ids[i];
+        if (odin3_ast_kind_of(wr->ast, part) != ODIN3_AST_SELECT) {
+            w_push(wr, w_copy_node(wr, part, w_mark(wr)));
+            continue;
+        }
+        uint32_t sel = w_mark(wr); /* SELECT(bit; IDENT, NUMBER, absent) */
+        w_push(wr, w_copy_node(wr, odin3_ast_child(wr->ast, part, 0), w_mark(wr)));
+        w_push(wr, w_fold(wr, odin3_ast_child(wr->ast, part, 1), "generate block index"));
+        w_push(wr, (odin3_ast_id){0});
+        w_push(wr, w_copy_node(wr, part, sel));
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_HIER_NAME, hier);
+    return w_make_marked(wr, &spec, mark, hier);
+}
+
+/* The nodes written whole instead of copied: a HIER_NAME, and a genvar read inside a generate
+ * loop (its iteration's value, a 32-bit signed NUMBER: EL-19). */
+static bool w_special(e1w *wr, odin3_ast_id node, odin3_ast_id *out) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
+    if (kind == ODIN3_AST_HIER_NAME) {
+        *out = w_hier(wr, node);
+        return true;
+    }
+    if (kind != ODIN3_AST_IDENT) {
+        return false;
+    }
+    uint32_t idx = odin3_elab1_env_lookup(wr->env, odin3_ast_name(wr->ast, node));
+    const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
+    int64_t value = 0;
+    if (slot == NULL || slot->entry.kind != ODIN3_ENTRY_GENVAR || !slot->bound ||
+        !odin3_cval_to_i64(&slot->entry.value, &value)) {
+        return false;
+    }
+    *out = w_int(wr, value, node);
+    return true;
+}
+
 /* A copy of node (a leaf or an operator) whose children are the pending span from mark. */
 static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark) {
     if (!live(wr)) {
@@ -363,10 +420,13 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
         uint32_t idx = top->next++;
         odin3_ast_id kid = kids.ids[idx];
         const char *role = kid.v != 0 ? fold_role(wr->ast, node, idx) : NULL;
+        odin3_ast_id made = {0};
         if (role != NULL) {
             w_push(wr, w_fold(wr, kid, role));
         } else if (kid.v == 0 || !w_enter(wr, kid)) {
             w_push(wr, (odin3_ast_id){0});
+        } else if (w_special(wr, kid, &made)) {
+            w_push(wr, made);
         } else {
             (void)push_frame(wr, kid);
         }
@@ -386,7 +446,8 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
 static odin3_ast_id w_expr(e1w *wr, odin3_ast_id root) {
     odin3_ast_id result = {0};
     size_t base = wr->e1->frames.len;
-    if (root.v == 0 || !w_enter(wr, root) || !push_frame(wr, root)) {
+    if (root.v == 0 || !w_enter(wr, root) || w_special(wr, root, &result) ||
+        !push_frame(wr, root)) {
         return result;
     }
     while (wr->e1->frames.len > base && wr->st == ODIN3_OK) {
@@ -415,7 +476,7 @@ static odin3_ast_id w_declarator(e1w *wr, odin3_ast_id decl) {
 
 /* A parameter's DECLARATOR with its final value (pass E evaluated it). */
 static odin3_ast_id w_param_declarator(e1w *wr, odin3_ast_id decl) {
-    uint32_t idx = odin3_elab1_env_find(wr->env, 0, odin3_ast_name(wr->ast, decl));
+    uint32_t idx = odin3_elab1_env_find(wr->env, wr->scope, odin3_ast_name(wr->ast, decl));
     const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
     if (slot == NULL || slot->state != ODIN3_E1_DONE) {
         halt(wr); /* reported in pass E */
@@ -716,7 +777,7 @@ typedef struct e1w_slice {
 
 /* A net or variable (not a memory) named by ident: its declared range in *msb, *lsb. */
 static bool plain_signal(e1w *wr, odin3_ast_id ident, int64_t *msb, int64_t *lsb) {
-    uint32_t idx = odin3_elab1_env_find(wr->env, 0, odin3_ast_name(wr->ast, ident));
+    uint32_t idx = odin3_elab1_env_lookup(wr->env, odin3_ast_name(wr->ast, ident));
     const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
     if (slot == NULL || slot->entry.kind != ODIN3_ENTRY_SIGNAL || slot->n_unpacked != 0 ||
         slot->state != ODIN3_E1_DONE) {
@@ -1066,6 +1127,103 @@ static odin3_ast_id w_gate(e1w *wr, odin3_ast_id item) {
     return w_make_marked(wr, &spec, mark, item);
 }
 
+/* --- generate blocks (Task 14) --------------------------------------------------------------- */
+
+/* One frame of the module's walk: the items [next, end) of node in scope; a generate block (its
+ * GEN_BLOCK made from mark once its items are written) fresh until its index slot is pushed. */
+typedef struct e1w_frame {
+    odin3_ast_id node;
+    uint32_t next;
+    uint32_t end;
+    uint32_t scope;
+    bool block;
+    bool fresh;
+    uint32_t mark;
+    odin3_ast_id from; /* the block's source: its GEN_BLOCK, bare item or NULL_STMT */
+} e1w_frame;
+
+static void w_frame(e1w *wr, const e1w_frame *frame) {
+    e1w_frame *slot = odin3_vec_push(&wr->walk);
+    if (slot == NULL) {
+        fail(wr, ODIN3_ERR_NO_MEMORY);
+        return;
+    }
+    *slot = *frame;
+}
+
+/* The selected blocks of a construct: pass E's scopes [first, first + n), walked in order. */
+static void w_blocks(e1w *wr, uint32_t first, uint32_t n) {
+    for (uint32_t k = n; k > 0 && wr->st == ODIN3_OK; k--) {
+        uint32_t scope = first + k - 1;
+        const odin3_elab1_scope_x *ext = odin3_elab1_scope_ext(wr->env, scope);
+        if (ext == NULL) {
+            wr->replay_failed = true; /* pass E made no such scope */
+            continue;
+        }
+        e1w_frame frame = {.scope = scope, .block = true, .fresh = true};
+        frame.from = odin3_ast_child(wr->ast, ext->holder, ext->slot);
+        frame.from = frame.from.v != 0 ? frame.from : ext->holder;
+        odin3_elab1_scope_items(wr->env, scope, &frame.node, &frame.next, &frame.end);
+        w_frame(wr, &frame);
+    }
+}
+
+/* A GEN_IF or GEN_CASE replayed: its selected block, if any. */
+static void w_choice(e1w *wr, odin3_ast_id item) {
+    if (w_replay(wr, item) >= 0) {
+        w_blocks(wr, wr->next_scope++, 1);
+    }
+}
+
+/* A GEN_FOR replayed: its count, its values, then one block per iteration. */
+static void w_loop(e1w *wr, odin3_ast_id item) {
+    int32_t logged = w_replay(wr, item);
+    uint32_t count = logged > 0 ? (uint32_t)logged : 0;
+    for (uint32_t k = 0; k < count; k++) {
+        (void)w_replay(wr, item);
+    }
+    w_blocks(wr, wr->next_scope, count);
+    wr->next_scope += count;
+}
+
+/* A generate item: a region's items queued in the scope, a construct's selected blocks, a genvar
+ * declaration dropped (EL-4). False for the other kinds. */
+static bool w_generate(e1w *wr, odin3_ast_id item) {
+    switch (odin3_ast_kind_of(wr->ast, item)) {
+    case ODIN3_AST_GENERATE: {
+        e1w_frame frame = {
+            .node = item, .end = odin3_ast_nchild(wr->ast, item), .scope = wr->scope, .from = item};
+        w_frame(wr, &frame);
+        return true;
+    }
+    case ODIN3_AST_GEN_FOR:
+        w_loop(wr, item);
+        return true;
+    case ODIN3_AST_GEN_IF:
+    case ODIN3_AST_GEN_CASE:
+        w_choice(wr, item);
+        return true;
+    case ODIN3_AST_GENVAR_DECL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* A fresh block: its index slot (a loop iteration's value, else absent) on the pending stack. */
+static void w_open_block(e1w *wr, e1w_frame *frame) {
+    frame->fresh = false;
+    frame->mark = w_mark(wr);
+    const odin3_elab_scope *rec = odin3_elab1_scope_at(wr->env, frame->scope);
+    w_push(wr, rec->has_index ? w_int(wr, rec->index, frame->from) : (odin3_ast_id){0});
+}
+
+static void w_close_block(e1w *wr, const e1w_frame *frame) {
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_GEN_BLOCK, frame->from);
+    spec.name = odin3_elab1_scope_at(wr->env, frame->scope)->name;
+    w_push(wr, w_make_marked(wr, &spec, frame->mark, frame->from));
+}
+
 /* --- the module ----------------------------------------------------------------------------- */
 
 static void w_item(e1w *wr, odin3_ast_id item) {
@@ -1078,6 +1236,9 @@ static void w_item(e1w *wr, odin3_ast_id item) {
     if (attrs.n > 0) {
         odin3_elab1_not_yet(wr->e1, attrs.ids[0]); /* ATTR: Task 15 */
         halt(wr);
+    }
+    if (w_generate(wr, item)) {
+        return;
     }
     switch (kind) {
     case ODIN3_AST_PARAM_DECL:
@@ -1101,8 +1262,10 @@ static void w_item(e1w *wr, odin3_ast_id item) {
     case ODIN3_AST_DEFPARAM:
         break; /* resolved in pass E; absent from the elaborated form */
     case ODIN3_AST_PORT_DECL:
-        odin3_elab1_pend_form(wr->e1, item); /* a port declared in the body: Task 15 */
-        halt(wr);
+        if (wr->scope == 0) {
+            odin3_elab1_pend_form(wr->e1, item); /* a port declared in the body: Task 15 */
+        }
+        halt(wr); /* in a generate block: reported in pass E */
         break;
     default:
         odin3_elab1_unhandled(wr->e1, item);
@@ -1131,6 +1294,33 @@ static odin3_ast_id w_header_params(e1w *wr, odin3_ast_id list) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
+/* The module's items, and those of every selected generate block, through a worklist. */
+static void w_body(e1w *wr, odin3_ast_id module) {
+    e1w_frame top = {module, E1_ITEMS, odin3_ast_nchild(wr->ast, module), 0, false, false,
+                     0,      module};
+    w_frame(wr, &top);
+    while (wr->walk.len > 0 && wr->st == ODIN3_OK && !wr->e1->stopped) {
+        e1w_frame *frame = odin3_vec_at(&wr->walk, wr->walk.len - 1);
+        e1w_frame now = *frame;
+        wr->scope = now.scope;
+        wr->env->cur_scope = now.scope;
+        if (now.fresh) {
+            w_open_block(wr, frame);
+        } else if (now.next < now.end) {
+            frame->next++;
+            w_item(wr, odin3_ast_children(wr->ast, now.node).ids[now.next]);
+        } else {
+            odin3_vec_pop(&wr->walk);
+            if (now.block) {
+                w_close_block(wr, &now);
+            }
+        }
+    }
+    odin3_vec_clear(&wr->walk);
+    wr->scope = 0;
+    wr->env->cur_scope = 0;
+}
+
 static odin3_ast_id w_module(e1w *wr) {
     odin3_ast_id node = odin3_elab1_def(wr->e1, wr->spec->def)->node;
     odin3_ast_span attrs = odin3_ast_attrs(wr->ast, node);
@@ -1142,10 +1332,7 @@ static odin3_ast_id w_module(e1w *wr) {
     w_push(wr, w_header_params(wr, odin3_ast_child(wr->ast, node, E1_SLOT_PARAMS)));
     odin3_ast_id ports = odin3_ast_child(wr->ast, node, E1_SLOT_PORTS);
     w_push(wr, ports.v != 0 ? w_ports(wr, ports) : ports);
-    odin3_ast_span kids = odin3_ast_children(wr->ast, node);
-    for (uint32_t i = E1_ITEMS; i < kids.n && wr->st == ODIN3_OK && !wr->e1->stopped; i++) {
-        w_item(wr, kids.ids[i]);
-    }
+    w_body(wr, node);
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_MODULE, node);
     spec.name = wr->spec->name;
     return w_make_marked(wr, &spec, mark, node);
@@ -1163,7 +1350,10 @@ odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {
         return ODIN3_ERR_CHECK; /* pass E did not run: a 2D bug */
     }
     wr.cursor = wr.spec->first_log;
+    odin3_vec_init(&wr.walk, sizeof(e1w_frame));
+    wr.next_scope = 1;
     odin3_ast_id module = w_module(&wr);
+    odin3_vec_free(&wr.walk);
     odin3_status st = wr.st;
     st = st != ODIN3_OK || e1->stopped ? st : w_replay_done(&wr);
     w_push(&wr, module);

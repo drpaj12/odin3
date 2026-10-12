@@ -190,6 +190,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_write.c
     src/frontends/verilog/elab1_inst.c
     src/frontends/verilog/elab1_bbox.c
+    src/frontends/verilog/elab1_gen.c
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2_stub.c
     src/ir/cells/builtin.c
@@ -790,6 +791,13 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_stage1_inst PRIVATE ${_gen})
     add_dependencies(test_elab_stage1_inst verilog_generated)
     target_compile_definitions(test_elab_stage1_inst PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 14: generate, scope names and references.
+    odin3_add_unit_test(test_elab_stage1_gen)
+    target_include_directories(test_elab_stage1_gen PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_gen verilog_generated)
+    target_compile_definitions(test_elab_stage1_gen PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
