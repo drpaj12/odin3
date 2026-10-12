@@ -39,6 +39,9 @@ size_t odin3_strtab_len(const odin3_strtab *tab, uint32_t id);
 /* Number of interned strings, including the empty string. */
 size_t odin3_strtab_count(const odin3_strtab *tab);
 
+/* Bytes the table holds: its struct, arena chunks, entry vector and index (0 for NULL). */
+size_t odin3_strtab_bytes_reserved(const odin3_strtab *tab);
+
 /*
  * data is NUL-terminated after every successful append that adds bytes; it stays NULL on a fresh
  * buffer after an empty append. Appending a buffer's own data to itself (append, or appendf with

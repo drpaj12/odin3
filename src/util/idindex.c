@@ -79,6 +79,10 @@ size_t odin3_idindex_count(const odin3_idindex *ix) {
     return ix->count;
 }
 
+size_t odin3_idindex_bytes_reserved(const odin3_idindex *ix) {
+    return ix != NULL ? sizeof *ix + ix->cap * sizeof(ix_slot) : 0;
+}
+
 /* Index of the slot accepted by cmp, or ix->cap if none. */
 static size_t find_index(const odin3_idindex *ix, const odin3_idcmp *cmp) {
     size_t mask = ix->cap - 1;

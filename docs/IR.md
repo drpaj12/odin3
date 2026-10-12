@@ -273,6 +273,16 @@ types' simulate hooks live in their cell files. The IR layer therefore depends o
 headers, which are value types and inline helpers only with no link dependency. `src/sim`
 depends on the IR, not the other way round at link level.
 
+**Memory accounting** *(2E Task 3: agent-decided read-only accessor, for Peter's review)*.
+`odin3_design_bytes_reserved(design)` is what the design holds: per module its node, pin, net and
+wire pages, arena, pin pool, vector capacities and name and attribute maps; and the design's
+strtab, provenance store (tombstones included), source manager, arena (local cell types) and
+cell-type table. Dead objects count until compact frees them; AST stores are added by the caller
+(`odin3_ast_bytes_reserved`). It changes nothing and is O(modules). It is the measure of the one
+design-wide byte budget (`src/passes/budget.h`: 60% of physical memory, shared by 2E's `proc` and
+2F's opt passes, 2E §16, 2F §19), backed by the byte accessors of `u64map`, `idindex`, `strtab`
+and the provenance store.
+
 **IR-9 Granularity tags:** `word`, `bit`, `hard`, `blackbox`, `module`, `port` (D1's four plus
 the two structural tags; D1 amended). Views (spec §5.4): the *RTLIL view* allows `word`,
 `hard`, `blackbox`, `module`, `port`; the *netlist view* allows `bit`, `hard`, `blackbox`,
@@ -295,6 +305,11 @@ Reading: `odin3_attr_get(module, obj, key)` for one key; `odin3_attr_foreach(mod
 visit, ctx)` visits every attribute of one object in the order its keys were first set
 (overwriting a key keeps its place; compact keeps the order), so writers emit attributes
 deterministically. *(1F Task 4: agent-decided IR API addition, read-only; for Peter's review.)*
+Removing: `odin3_attr_remove(module, obj, key)` unlinks one attribute from the object's chain (OK
+when it has none; never allocates; INVALID_ARG for a dead object or a bad key, as `odin3_attr_set`).
+The other attributes keep their order; removing a key and setting it again moves it to the end of
+the first-set order. The record stays in the table until compact drops it. *(2E Task 3, plan point
+(e): `ffinit` removes an `init` left all x, 2E §10, 2F §9.4; for Peter's review with IR change D.)*
 
 **BLIF cells (used by 1C).** `.names` → `$sop` (bit granularity; *N* inputs, 1 output;
 parameter `COVER`; zero inputs allowed). `.latch` → `$_DFF_P_` (`re`) / `$_DFF_N_` (`fe`) with

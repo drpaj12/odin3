@@ -1,7 +1,8 @@
 /*
  * test_proc_pw.c — the proc working form (2E spec §3, §4, §17; plan Task 2): decode of every
  * position kind, decode then encode as the identity, the signal operations against hand-computed
- * results, the bit key, encode after an edit, and proc_build (pb_*) against hand-packed bodies.
+ * results, the bit key, encode after an edit, and proc_build (pb_*) against hand-packed bodies;
+ * the net map and its merges (§7; Task 3).
  *
  * The bodies are 2D Task 3's P1 and P2 (test_ir_proc.c). Yosys re-derivation: none of these tests
  * runs a proc phase, so no yosys-phase command applies.
@@ -1340,6 +1341,173 @@ static void test_oom_pb_build(void) {
     TEST_ASSERT_TRUE(done);
 }
 
+/* --- the net map (2E Task 3; §7, plan point (u)) -------------------------------------------- */
+
+/* A pb design and net_a module context on its last module. */
+typedef struct pb_mctx {
+    pb_result res;
+    odin3_proc_mctx m;
+} pb_mctx;
+
+static void pb_open(const char *text, pb_mctx *out) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(text, &out->res));
+    check_full_ok_in(out->res.design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_mctx_init(&out->m, &out->res.ctx, out->res.module));
+}
+
+static void pb_close(pb_mctx *pm) {
+    odin3_proc_mctx_free(&pm->m);
+    pb_free(&pm->res);
+}
+
+/* The net on bit `bit` of the wire named name in pm's module. */
+static odin3_pw_bit wire_bit(const pb_mctx *pm, const char *name, uint32_t bit) {
+    uint32_t str = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(pm->res.design), odin3_bytes_cstr(name), &str));
+    odin3_wire_id wire = odin3_module_find_wire(pm->res.module, str);
+    TEST_ASSERT_TRUE(odin3_wire_valid(wire));
+    return odin3_wire_net(pm->res.module, wire, bit).v;
+}
+
+/* A new unnamed net with no wire (net_a temporary). */
+static odin3_pw_bit tmp_net(const pb_mctx *pm) {
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_net_create(pm->res.module, 0, odin3_module_prov(pm->res.module), &net));
+    return net.v;
+}
+
+static void connect_apply(pb_mctx *pm, odin3_pw_bit lhs, odin3_pw_bit rhs) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_connect(&pm->m, lhs, rhs));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_apply_merges(&pm->m));
+    TEST_ASSERT_EQUAL_size_t(0, pm->m.pending.len);
+}
+
+/* a <- b, b <- c: one class and one IR net, which every wire's name finds. */
+static void test_netmap_chain(void) {
+    pb_mctx pm;
+    pb_open("module \\m\n  wire \\a\n  wire \\b\n  wire \\c\nend\n", &pm);
+    odin3_pw_bit net_a = wire_bit(&pm, "a", 0);
+    odin3_pw_bit net_b = wire_bit(&pm, "b", 0);
+    odin3_pw_bit net_c = wire_bit(&pm, "c", 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_connect(&pm.m, net_a, net_b));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_connect(&pm.m, net_b, net_c));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_proc_apply_merges(&pm.m));
+    TEST_ASSERT_EQUAL_HEX32(odin3_proc_find(&pm.m, net_a), odin3_proc_find(&pm.m, net_c));
+    TEST_ASSERT_EQUAL_HEX32(odin3_proc_find(&pm.m, net_a), odin3_proc_find(&pm.m, net_b));
+    odin3_pw_bit root = odin3_proc_find(&pm.m, net_a);
+    TEST_ASSERT_EQUAL_HEX32(net_a, root); /* three wires' nets: the lowest ID */
+    TEST_ASSERT_TRUE(odin3_net_live(pm.res.module, (odin3_net_id){root}));
+    TEST_ASSERT_FALSE(odin3_net_live(pm.res.module, (odin3_net_id){net_b}));
+    TEST_ASSERT_FALSE(odin3_net_live(pm.res.module, (odin3_net_id){net_c}));
+    TEST_ASSERT_EQUAL_HEX32(root, wire_bit(&pm, "a", 0));
+    TEST_ASSERT_EQUAL_HEX32(root, wire_bit(&pm, "b", 0));
+    TEST_ASSERT_EQUAL_HEX32(root, wire_bit(&pm, "c", 0));
+    check_full_ok_in(pm.res.design);
+    pb_close(&pm);
+}
+
+/* t <- 1: t's net is the $_CONST1_ net, its class's root S1; y <- y changes nothing. */
+static void test_netmap_const(void) {
+    pb_mctx pm;
+    pb_open("module \\m\n  wire \\t\n  wire \\y\nend\n", &pm);
+    odin3_pw_bit net_t = wire_bit(&pm, "t", 0);
+    odin3_pw_bit net_y = wire_bit(&pm, "y", 0);
+    connect_apply(&pm, net_t, ODIN3_PW_S1);
+    TEST_ASSERT_EQUAL_HEX32(ODIN3_PW_S1, odin3_proc_find(&pm.m, net_t));
+    odin3_net_id now = {wire_bit(&pm, "t", 0)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_1, odin3_net_const_value(pm.res.module, now));
+    TEST_ASSERT_EQUAL_HEX32(ODIN3_PW_S1, odin3_proc_find(&pm.m, ODIN3_PW_S1));
+    uint32_t net_end = odin3_module_net_end(pm.res.module);
+    connect_apply(&pm, net_y, net_y);
+    TEST_ASSERT_EQUAL_UINT32(net_end, odin3_module_net_end(pm.res.module));
+    TEST_ASSERT_TRUE(odin3_net_live(pm.res.module, (odin3_net_id){net_y}));
+    TEST_ASSERT_EQUAL_HEX32(net_y, odin3_proc_find(&pm.m, net_y));
+    check_full_ok_in(pm.res.design);
+    pb_close(&pm);
+}
+
+/* Which net survives (§7): a port wire's, else a wire's, else the lower ID (point (u)). */
+static void test_netmap_keep_policy(void) {
+    pb_mctx pm;
+    pb_open("module \\m\n  wire output 1 \\y\n  wire input 2 \\a\n  wire \\w\nend\n", &pm);
+    odin3_pw_bit net_y = wire_bit(&pm, "y", 0);
+    odin3_pw_bit net_a = wire_bit(&pm, "a", 0);
+    odin3_pw_bit net_w = wire_bit(&pm, "w", 0);
+    odin3_pw_bit t1 = tmp_net(&pm);
+    connect_apply(&pm, t1, net_y); /* an unnamed net and an output port's: the port's */
+    TEST_ASSERT_EQUAL_HEX32(net_y, odin3_proc_find(&pm.m, t1));
+    TEST_ASSERT_FALSE(odin3_net_live(pm.res.module, (odin3_net_id){t1}));
+    odin3_pw_bit t2 = tmp_net(&pm);
+    connect_apply(&pm, net_w, t2); /* a wire's net and an unnamed one: the wire's */
+    TEST_ASSERT_EQUAL_HEX32(net_w, odin3_proc_find(&pm.m, t2));
+    odin3_pw_bit t3 = tmp_net(&pm);
+    odin3_pw_bit t4 = tmp_net(&pm);
+    connect_apply(&pm, t4, t3); /* two unnamed nets: the lower ID */
+    TEST_ASSERT_EQUAL_HEX32(t3, odin3_proc_find(&pm.m, t4));
+    TEST_ASSERT_TRUE(net_y < net_a);
+    connect_apply(&pm, net_y, net_a); /* always @* y = a; two ports: the lower net ID */
+    TEST_ASSERT_EQUAL_HEX32(net_y, odin3_proc_find(&pm.m, net_a));
+    TEST_ASSERT_EQUAL_HEX32(net_y, wire_bit(&pm, "a", 0));
+    TEST_ASSERT_FALSE(odin3_net_live(pm.res.module, (odin3_net_id){net_a}));
+    check_full_ok_in(pm.res.design);
+    pb_close(&pm);
+}
+
+/* Two driven nets merged: a 2E bug, ODIN3_ERR_CHECK in Debug, with both names. */
+static void test_netmap_two_drivers(void) {
+#ifdef NDEBUG
+    TEST_IGNORE_MESSAGE("the driver check is Debug only");
+#else
+    const char *text =
+        "module \\m\n  wire \\i\n  wire \\p\n  wire \\q\n"
+        "  cell $not \\n1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
+        "    parameter \\Y_WIDTH 1\n    connect \\A \\i\n    connect \\Y \\p\n  end\n"
+        "  cell $not \\n2\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
+        "    parameter \\Y_WIDTH 1\n    connect \\A \\i\n    connect \\Y \\q\n  end\n"
+        "end\n";
+    pb_mctx pm;
+    pb_open(text, &pm);
+    n_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_proc_connect(&pm.m, wire_bit(&pm, "p", 0), wire_bit(&pm, "q", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_proc_apply_merges(&pm.m));
+    TEST_ASSERT_EQUAL_size_t(1, n_lines);
+    TEST_ASSERT_EQUAL_STRING("proc: internal: merging two driven nets 'p' and 'q'", lines[0]);
+    TEST_ASSERT_EQUAL_size_t(0, pm.m.pending.len);
+    check_full_ok_in(pm.res.design);
+    pb_close(&pm);
+#endif
+}
+
+/* A 10,000-link chain resolves without recursion; afterwards every path has length 1. */
+static void test_netmap_compression(void) {
+    enum { CHAIN = 10000 };
+    pb_mctx pm;
+    pb_open("module \\m\nend\n", &pm);
+    odin3_pw_bit first = tmp_net(&pm);
+    for (uint32_t i = 0; i < CHAIN; i++) {
+        (void)tmp_net(&pm);
+    }
+    odin3_pw_bit root = first + CHAIN;
+    odin3_vec *map = &pm.m.netmap;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_vec_reserve(map, (size_t)root + 1));
+    while (map->len <= root) {
+        (void)odin3_vec_push(map);
+    }
+    for (odin3_pw_bit net = first; net < root; net++) {
+        *(odin3_pw_bit *)odin3_vec_at(map, net) = net + 1;
+    }
+    TEST_ASSERT_EQUAL_HEX32(root, odin3_proc_find(&pm.m, first));
+    for (odin3_pw_bit net = first; net < root; net++) {
+        TEST_ASSERT_EQUAL_HEX32(root, *(const odin3_pw_bit *)odin3_vec_cat(map, net));
+    }
+    TEST_ASSERT_EQUAL_HEX32(root, odin3_proc_find(&pm.m, first + CHAIN / 2));
+    TEST_ASSERT_EQUAL_HEX32(0, *(const odin3_pw_bit *)odin3_vec_cat(map, root));
+    pb_close(&pm);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_decode_p1);
@@ -1374,5 +1542,10 @@ int main(void) {
     RUN_TEST(test_oom_decode);
     RUN_TEST(test_oom_encode);
     RUN_TEST(test_oom_pb_build);
+    RUN_TEST(test_netmap_chain);
+    RUN_TEST(test_netmap_const);
+    RUN_TEST(test_netmap_keep_policy);
+    RUN_TEST(test_netmap_two_drivers);
+    RUN_TEST(test_netmap_compression);
     return UNITY_END();
 }

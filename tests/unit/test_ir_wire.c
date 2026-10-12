@@ -1098,6 +1098,85 @@ static void test_attr_foreach_empty_stop_and_rejects(void) {
                           odin3_attr_foreach(NULL, net_ref, record_attr, &seen));
 }
 
+/* The keys odin3_attr_foreach visits on ref, in order. */
+static attr_seen keys_of(odin3_objref ref) {
+    attr_seen seen = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_foreach(module, ref, record_attr, &seen));
+    return seen;
+}
+
+/* 2E Task 3 (plan point (e)): remove the middle, then the head, then the last; an absent key. */
+static void test_attr_remove(void) {
+    odin3_objref ref = {ODIN3_OBJ_NODE, node_of("$_AND_").v};
+    uint32_t key_a = intern("a");
+    uint32_t key_c = intern("c");
+    set_int(ref, "a", 1);
+    set_int(ref, "b", 2);
+    set_int(ref, "c", 3);
+    const odin3_value *old_b = odin3_attr_get(module, ref, intern("b"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, intern("b")));
+    attr_seen seen = keys_of(ref);
+    TEST_ASSERT_EQUAL_UINT32(2, seen.count);
+    TEST_ASSERT_EQUAL_UINT32(key_a, seen.keys[0]);
+    TEST_ASSERT_EQUAL_UINT32(key_c, seen.keys[1]);
+    TEST_ASSERT_NULL(odin3_attr_get(module, ref, intern("b")));
+    TEST_ASSERT_EQUAL_INT64(2, old_b->i); /* an earlier get stays readable */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, key_a)); /* the head */
+    seen = keys_of(ref);
+    TEST_ASSERT_EQUAL_UINT32(1, seen.count);
+    TEST_ASSERT_EQUAL_UINT32(key_c, seen.keys[0]);
+    TEST_ASSERT_EQUAL_INT64(3, seen.values[0]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, key_c)); /* the only one */
+    TEST_ASSERT_EQUAL_UINT32(0, keys_of(ref).count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, intern("zz")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, key_a)); /* none left */
+    TEST_ASSERT_EQUAL_size_t(0, errors_logged);
+}
+
+/* Setting a removed key again appends it at the end of the first-set order (IR-10). */
+static void test_attr_remove_then_set(void) {
+    odin3_objref ref = {ODIN3_OBJ_NET, net_named("n").v};
+    set_int(ref, "a", 1);
+    set_int(ref, "b", 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, intern("a")));
+    set_int(ref, "a", 5);
+    attr_seen seen = keys_of(ref);
+    TEST_ASSERT_EQUAL_UINT32(2, seen.count);
+    TEST_ASSERT_EQUAL_UINT32(intern("b"), seen.keys[0]);
+    TEST_ASSERT_EQUAL_UINT32(intern("a"), seen.keys[1]);
+    TEST_ASSERT_EQUAL_INT64(5, seen.values[1]);
+    /* compact keeps what is left, and drops the unlinked record */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, intern("b")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, NULL));
+    odin3_net_id net = odin3_module_find_net(module, intern("n"));
+    seen = keys_of((odin3_objref){ODIN3_OBJ_NET, net.v});
+    TEST_ASSERT_EQUAL_UINT32(1, seen.count);
+    TEST_ASSERT_EQUAL_INT64(5, seen.values[0]);
+}
+
+/* A dead or unknown object and a bad key are INVALID_ARG (logged); removal never allocates. */
+static void test_attr_remove_rejects_and_never_allocates(void) {
+    odin3_node_id node = node_of("$_AND_");
+    odin3_objref ref = {ODIN3_OBJ_NODE, node.v};
+    set_int(ref, "a", 1);
+    set_int(ref, "b", 2);
+    uint32_t key = intern("a");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_remove(module, ref, 0));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_remove(module, ref, UINT32_MAX));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_attr_remove(module, (odin3_objref){ODIN3_OBJ_WIRE, 5}, key));
+    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, key)); /* moves the head */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(module, ref, intern("b"))); /* the last */
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_UINT32(0, keys_of(ref).count);
+    set_int(ref, "a", 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_attr_remove(module, ref, key));
+    TEST_ASSERT_EQUAL_size_t(4, errors_logged);
+}
+
 /* --- out of memory ------------------------------------------------------------------------- */
 
 /* Observable state: store ends, port count, the first SNAP_MAX nets, a name in every map. */
@@ -1490,6 +1569,9 @@ int main(void) {
     RUN_TEST(test_attr_rejects);
     RUN_TEST(test_attr_foreach_order);
     RUN_TEST(test_attr_foreach_empty_stop_and_rejects);
+    RUN_TEST(test_attr_remove);
+    RUN_TEST(test_attr_remove_then_set);
+    RUN_TEST(test_attr_remove_rejects_and_never_allocates);
     RUN_TEST(test_add_port_oom_sweep);
     RUN_TEST(test_wire_create_oom_sweep);
     RUN_TEST(test_merge_oom_sweep);

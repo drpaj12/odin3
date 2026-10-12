@@ -134,6 +134,46 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
     return attr_append(module, obj, key_str, copy);
 }
 
+odin3_status odin3_attr_remove(odin3_module *module, odin3_objref obj, uint32_t key_str) {
+    const char *err = !obj_live(module, obj) ? "no live object of that kind and ID" : NULL;
+    if (err == NULL &&
+        (key_str == 0 || key_str >= odin3_strtab_count(odin3_design_strtab(module->design)))) {
+        err = "the key is not a non-empty string ID";
+    }
+    if (err != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "attr_remove: kind %d, ID %u, key %u: %s", (int)obj.kind, obj.id,
+                  key_str, err);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    uint64_t head = 0;
+    uint64_t map_key = odin3_attr_key(obj);
+    if (!odin3_u64map_get(module->attr_heads, map_key, &head)) {
+        return ODIN3_OK;
+    }
+    uint32_t prev = 0;
+    uint32_t idx = (uint32_t)head;
+    while (idx != 0 && attr_cat(module, idx)->key != key_str) {
+        prev = idx;
+        idx = attr_cat(module, idx)->next;
+    }
+    if (idx == 0) {
+        return ODIN3_OK;
+    }
+    uint32_t next = attr_cat(module, idx)->next;
+    if (prev != 0) {
+        ((odin3_attr_rec *)odin3_vec_at(&module->attrs, prev))->next = next;
+    } else if (next != 0) {
+        /* the key is present, so put only overwrites its value: never allocates */
+        odin3_status st = odin3_u64map_put(module->attr_heads, (odin3_kv){map_key, next});
+        assert(st == ODIN3_OK);
+        (void)st;
+    } else {
+        (void)odin3_u64map_remove(module->attr_heads, map_key);
+    }
+    ((odin3_attr_rec *)odin3_vec_at(&module->attrs, idx))->next = 0;
+    return ODIN3_OK;
+}
+
 const odin3_value *odin3_attr_get(const odin3_module *module, odin3_objref obj, uint32_t key_str) {
     uint32_t idx = find_attr(module, obj, key_str, NULL);
     return idx != 0 ? attr_cat(module, idx)->value : NULL;

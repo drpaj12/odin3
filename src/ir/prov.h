@@ -114,6 +114,13 @@ const odin3_prov_record *odin3_prov_get(const odin3_design *design, odin3_prov_i
 /* One past the last record ID. */
 uint32_t odin3_prov_end(const odin3_design *design);
 
+/*
+ * Bytes the design's provenance store holds (read-only; 2E Task 3, the shared budget): the store,
+ * its record pages, its arena (record arrays and tombstone copies), its hash-consing index and its
+ * vectors (pass runs, tombstones, walk marks and stacks). 0 for a NULL design.
+ */
+size_t odin3_prov_bytes_reserved(const odin3_design *design);
+
 /* The parents of a record, in order; empty for a leaf or an unknown ID. */
 odin3_prov_list odin3_prov_parents(const odin3_design *design, odin3_prov_id id);
 

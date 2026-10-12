@@ -385,6 +385,17 @@ odin3_status odin3_attr_set(odin3_module *module, odin3_objref obj, uint32_t key
                             const odin3_value *value);
 
 /*
+ * Removes attribute key_str of a live object (2E Task 3, plan point (e): ffinit removes an `init`
+ * left all x): its record leaves the object's chain, the head moving to the next record when it
+ * was the first, the object leaving the attribute map when it was the only one. The other
+ * attributes keep their order; setting the key again appends it at the end of the first-set order.
+ * The record stays in the table until compact drops it, so earlier odin3_attr_get pointers stay
+ * readable. ODIN3_OK when obj has no such attribute. Never allocates. INVALID_ARG (logged as
+ * odin3_attr_set logs) for a dead or unknown object or a bad key.
+ */
+odin3_status odin3_attr_remove(odin3_module *module, odin3_objref obj, uint32_t key_str);
+
+/*
  * The value of attribute key_str of obj, NULL when it has none (or obj is invalid). The pointer
  * stays readable until the module is destroyed or compacted; a later set of the same key does not
  * change it.

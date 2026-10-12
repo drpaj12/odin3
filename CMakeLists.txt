@@ -84,6 +84,11 @@ add_library(odin3_core OBJECT
     src/passes/proc/pw_sig.c
     src/passes/proc/pw_encode.c
     src/passes/proc/proc_emit.c
+    src/passes/proc/proc_diag.c
+    src/passes/proc/proc_pending.c
+    src/passes/proc/proc_pass.c
+    src/passes/budget.c
+    src/passes/ffinit.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -356,6 +361,12 @@ if(BUILD_TESTING)
     # 2E: the proc working form. Every later test_proc_* and test_opt_* links proc_build.c too.
     odin3_add_unit_test(test_proc_pw)
     target_sources(test_proc_pw PRIVATE tests/unit/proc_build.c)
+    # 2E Task 3: the pass skeleton (fake phases), the shared budget and ffinit.
+    odin3_add_unit_test(test_proc_pass)
+    target_sources(test_proc_pass PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_proc_pass PRIVATE ODIN3_DOCS_DIR="${PROJECT_SOURCE_DIR}/docs")
+    odin3_add_unit_test(test_budget)
+    odin3_add_unit_test(test_ffinit)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -876,6 +887,14 @@ if(BUILD_TESTING)
                     "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/ffcells.il; check -assert; write_rtlil -; design -reset; read_verilog -icells ${PROJECT_BINARY_DIR}/rtlil/ffcells.v; hierarchy -check; check -assert")
         set_tests_properties(ffcells_yosys_read PROPERTIES
             LABELS differential FIXTURES_REQUIRED ffcells)
+        # 2E Task 3 (2D spec §13 point 7, review I1): Yosys 0.55's hierarchy -check accepts
+        # write_rtlil's black-box stubs (bbox.il: one parameterised black box at two widths, a
+        # declared model with an inout, a hard cell), and no instance port is resized (-e).
+        add_test(NAME rtlil_bbox_hierarchy
+            COMMAND ${ODIN3_YOSYS055} -q -e Resizing -p
+                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/bbox.il; hierarchy -check -top top; check -assert")
+        set_tests_properties(rtlil_bbox_hierarchy PROPERTIES
+            LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
         # test_verilog_writer's own -icells check of the eleven runs on this 0.55 too, never on
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY

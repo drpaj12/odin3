@@ -606,6 +606,139 @@ static void put_aliases(rtl_writer *rw) {
     }
 }
 
+/* --- black-box stubs (2D spec §13 point 7; 2E Task 3) ------------------------------------ */
+
+/* A type that gets a stub: black box or hard, and not `$` (Yosys's namespace of internal cells). */
+static bool stub_kind(const odin3_celltype_def *def) {
+    return def != NULL && (def->gran == ODIN3_GRAN_BLACKBOX || def->gran == ODIN3_GRAN_HARD) &&
+           def->name[0] != '$';
+}
+
+/* True when some port's width depends on the parameters (Yosys's `dynports`). */
+static bool has_dynports(const odin3_celltype_def *def) {
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        const odin3_port_def *port = &def->ports[i];
+        if (port->width_param != NULL || port->width_fn != NULL || port->width_expr != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Appends a C-string name as an RTLIL ID (\ prepended unless it starts with \), refusing one
+ * RTLIL cannot carry. */
+static void rw_cname(rtl_writer *rw, const char *what, const char *name) {
+    if (!name_ok(name, strlen(name))) {
+        refuse_name(rw, what, name);
+        return;
+    }
+    if (name[0] != '\\') {
+        rw_put(rw, "\\");
+    }
+    rw_put(rw, name);
+}
+
+/* "parameter \P <default>" per parameter, as Yosys writes a module's parameters. */
+static void put_stub_params(rtl_writer *rw, const odin3_celltype_def *def) {
+    for (uint32_t i = 0; rw_ok(rw) && i < def->n_params; i++) {
+        rw_indent(rw, CELL_INDENT);
+        rw_put(rw, "parameter ");
+        rw_cname(rw, "parameter", def->params[i].name);
+        rw_put(rw, " ");
+        if (rw_ok(rw)) {
+            rw->st = odin3_proc_value_text(rw->design, &def->params[i].dflt, rw->out);
+        }
+        rw_put(rw, "\n");
+    }
+}
+
+/* "wire [width W] input|output|inout K \port" per port, W its width for the default parameters. */
+static void put_stub_ports(rtl_writer *rw, odin3_celltype_id type, const odin3_celltype_def *def,
+                           const odin3_value *dflts) {
+    static const char *const k_dirs[] = {"input", "output", "inout"};
+    for (uint32_t i = 0; rw_ok(rw) && i < def->n_ports; i++) {
+        uint32_t width = 0;
+        odin3_port_query query = {type, dflts, i};
+        rw_keep(rw, odin3_celltype_port_width_checked(rw->design, &query, &width));
+        rw_indent(rw, CELL_INDENT);
+        rw_put(rw, "wire ");
+        if (width != 1 && rw_ok(rw)) {
+            rw->st = odin3_strbuf_appendf(rw->out, "width %u ", width);
+        }
+        if (rw_ok(rw)) {
+            rw->st = odin3_strbuf_appendf(rw->out, "%s %u ", k_dirs[def->ports[i].dir], i + 1);
+        }
+        rw_cname(rw, "port", def->ports[i].name);
+        rw_put(rw, "\n");
+    }
+}
+
+/*
+ * One stub, as Yosys's read_verilog makes a (* blackbox *) module: attribute blackbox, attribute
+ * dynports when a port's width depends on the parameters (so `hierarchy` neither resizes nor
+ * derives the instances, which keep their parameters), the parameters with their defaults, and
+ * the ports sized for the defaults.
+ */
+static void put_stub(rtl_writer *rw, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(rw->design, type);
+    rw->module_name = def->name;
+    odin3_value *dflts = odin3_util_calloc(sizeof *dflts * ((size_t)def->n_params + 1));
+    if (dflts == NULL) {
+        rw_keep(rw, ODIN3_ERR_NO_MEMORY);
+        return;
+    }
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        dflts[i] = def->params[i].dflt;
+    }
+    rw_put(rw, "attribute \\blackbox 1\n");
+    if (has_dynports(def)) {
+        rw_put(rw, "attribute \\dynports 1\n");
+    }
+    rw_put(rw, "module ");
+    rw_cname(rw, "module", def->name);
+    rw_put(rw, "\n");
+    put_stub_params(rw, def);
+    put_stub_ports(rw, type, def, dflts);
+    rw_put(rw, "end\n");
+    odin3_util_free(dflts);
+    rw_flush(rw, FLUSH_BYTES);
+}
+
+/* Writes type's stub unless it has one already (done: one byte per cell-type ID). */
+static void stub_once(rtl_writer *rw, odin3_celltype_id type, odin3_vec *done) {
+    const odin3_celltype_def *def = odin3_celltype_get(rw->design, type);
+    if (!stub_kind(def) || type.v >= done->len || *(uint8_t *)odin3_vec_at(done, type.v) != 0) {
+        return;
+    }
+    *(uint8_t *)odin3_vec_at(done, type.v) = 1;
+    put_stub(rw, type);
+}
+
+/* The stubs, after every module: declared models in declaration order, then every other
+ * instantiated black-box or hard type in type-ID order, each once (as the Verilog writer). */
+static void put_stubs(rtl_writer *rw) {
+    uint32_t n_types = 1;
+    while (odin3_celltype_get(rw->design, (odin3_celltype_id){n_types}) != NULL) {
+        n_types++;
+    }
+    odin3_vec done;
+    odin3_vec_init(&done, sizeof(uint8_t));
+    rw_keep(rw, odin3_vec_reserve(&done, n_types));
+    while (rw_ok(rw) && done.len < n_types) {
+        (void)odin3_vec_push(&done); /* reserved; zeroed */
+    }
+    uint32_t declared = odin3_design_declared_model_count(rw->design);
+    for (uint32_t i = 0; rw_ok(rw) && i < declared; i++) {
+        stub_once(rw, odin3_design_declared_model(rw->design, i), &done);
+    }
+    for (uint32_t i = 1; rw_ok(rw) && i < n_types; i++) {
+        if (odin3_celltype_instances(rw->design, (odin3_celltype_id){i}) > 0) {
+            stub_once(rw, (odin3_celltype_id){i}, &done);
+        }
+    }
+    odin3_vec_free(&done);
+}
+
 /* --- modules ------------------------------------------------------------------------------- */
 
 /* Maps each port wire to its 1-based port index. */
@@ -673,6 +806,9 @@ static odin3_status write_design(const odin3_design *design, odin3_strbuf *out, 
     odin3_strbuf_init(&rw.part);
     for (uint32_t i = 1; rw_ok(&rw) && i < odin3_design_module_end(design); i++) {
         put_module(&rw, i);
+    }
+    if (rw_ok(&rw)) {
+        put_stubs(&rw);
     }
     rw_flush(&rw, 0);
     odin3_vec_free(&rw.nets);

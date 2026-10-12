@@ -380,6 +380,21 @@ uint32_t odin3_prov_end(const odin3_design *design) {
     return record_end(design->prov);
 }
 
+static size_t vec_bytes(const odin3_vec *vec) {
+    return vec->cap * vec->elem_size;
+}
+
+size_t odin3_prov_bytes_reserved(const odin3_design *design) {
+    const odin3_prov_store *store = design != NULL ? design->prov : NULL;
+    if (store == NULL) {
+        return 0;
+    }
+    return sizeof *store + odin3_pagevec_bytes_reserved(store->records) +
+           odin3_arena_bytes_reserved(store->arena) + odin3_idindex_bytes_reserved(store->index) +
+           vec_bytes(&store->runs) + vec_bytes(&store->tombstones) + vec_bytes(&store->marks) +
+           vec_bytes(&store->stack) + vec_bytes(&store->scratch);
+}
+
 odin3_prov_list odin3_prov_parents(const odin3_design *design, odin3_prov_id id) {
     const odin3_prov_record *rec = record_cat(design->prov, id.v);
     odin3_prov_list none = {NULL, 0};
