@@ -1864,6 +1864,21 @@ class FixRound6Test(RetentionBase):
         self.assertEqual(qor_sched.write_planned([self.job("ch_intrinsics", [{}])]), [])
         self.assertEqual(latest.read_text(), "aaaaaaaaaaaa\n")
 
+    def test_retract_latest(self) -> None:
+        """Only a latest naming the job's own key goes; a symlinked latest is refused."""
+        latest = self.leg_dir() / "latest"
+        latest.parent.mkdir(parents=True)
+        job = self.job("sha", [{}])
+        latest.write_text("aaaaaaaaaaaa\n")
+        self.assertFalse(qor_sched.retract_latest(job))
+        self.assertTrue(latest.exists())
+        latest.write_text(f"{KEY12}\n")
+        self.assertTrue(qor_sched.retract_latest(job))
+        self.assertFalse(latest.exists())
+        latest.symlink_to(self.tmp / "x")
+        with self.assertRaisesRegex(HeavyError, "is a symlink"):
+            qor_sched.retract_latest(job)
+
     def test_read_planned_refusals(self) -> None:
         key = self.leg_dir() / "aaaaaaaaaaaa"
         key.mkdir(parents=True)

@@ -625,14 +625,28 @@ class RunTest(CliTestBase):
         self.assertEqual((code, out), (0, f"{K6} P latest {key12} ok 2 failed 0 age 0d\n"))
 
     def test_latest_retracted(self) -> None:
-        """Review M2: a rerun of the latest key that fails makes it incomplete: latest goes."""
+        """Review M2: a failed rerun of the latest key leaves no latest (retracted as the
+        attempt starts); and update_latest itself retracts a latest whose key lost a result
+        some other way (here: metrics.json deleted by hand)."""
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
         self.assertTrue(self.latest("P").exists())
         (self.vtr / "fail").write_text("")
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun")
         self.assertEqual(code, 1, err)
         self.assertFalse(self.latest("P").exists())
-        self.assertIn("retracted (no longer complete)", err)
+        self.assertIn("retracted (its ch_intrinsics job reruns)", err)
+        (self.vtr / "fail").unlink()
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        key12 = job.parent.name
+        self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+        (job / "metrics.json").unlink()
+        req = qor_sched.PlanRequest(legs=("P",), designs=("ch_intrinsics",), arch="k6",
+                                    out=self.out, vtr_root=self.vtr, odin3=self.odin3,
+                                    rerun=False)
+        self.assertEqual(vtr_qor.update_latest(req, SETS, drift=False),
+                         [f"latest: P {key12} retracted (no longer complete)"])
+        self.assertFalse(self.latest("P").exists())
 
     def test_latest_never_on_a_growing_key(self) -> None:
         """Review I3 (the reviewer's reproduction): a run that adds spree to the latest key and
@@ -655,6 +669,53 @@ class RunTest(CliTestBase):
         (self.vtr / "term").unlink()
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "spree")[0], 0)
         self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+
+    def test_killed_rerun_retracts_latest(self) -> None:
+        """Review I3, addendum 2 (the reproduction): a --rerun of the latest key stopped by
+        SIGTERM mid-attempt leaves no latest on the key whose results it wiped; a completed
+        rerun sets latest again."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        key12 = job.parent.name
+        (self.vtr / "term").write_text("ch_intrinsics\n")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun")
+        self.assertEqual(code, 143, err)
+        self.assertFalse((job / "metrics.json").exists())
+        self.assertFalse(self.latest("P").exists())
+        self.assertIn(f"vtr-qor: latest: P {key12} retracted (its ch_intrinsics job reruns)",
+                      self.harness_lines())
+        code, out, _ = self.cli("status")
+        self.assertEqual(out, f"{K6} P latest - ok 0 failed 0 age -\n")  # wiped: no status
+        (self.vtr / "term").unlink()
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                  "--rerun")[0], 0)
+        self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+
+    def test_timed_out_rerun_retracts_latest(self) -> None:
+        """A --rerun of the latest key that times out (exit 3): no latest on the wiped key."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (self.vtr / "sleep").write_text("30")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun",
+                                "--job-timeout", "1")
+        self.assertEqual(code, 3, err)
+        self.assertFalse(self.latest("P").exists())
+
+    def test_clean_keeps_latest_results(self) -> None:
+        """clean --keep 1 with latest on the older of two complete keys: latest's key and its
+        results stay whole."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        newer = job.parents[1] / "ffffffffffff" / "ch_intrinsics"
+        (newer / "run").mkdir(parents=True)
+        (newer / "status").write_text("ok\n")
+        (newer / "metrics.json").write_text(json.dumps({"status": "ok"}))
+        (newer.parent / "planned.json").write_text(json.dumps({"designs": ["ch_intrinsics"]}))
+        before = sorted(str(p.relative_to(job)) for p in job.rglob("*"))
+        code, _, err = self.cli("clean", "--keep", "1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted(str(p.relative_to(job)) for p in job.rglob("*")), before)
+        self.assertEqual(self.latest("P").read_text(), f"{job.parent.name}\n")
+        self.assertTrue(newer.is_dir())
 
     def test_latest_judged_by_planned_set(self) -> None:
         """Review N1: a key whose planned spree failed stays without latest even when a later

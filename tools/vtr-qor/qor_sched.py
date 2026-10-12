@@ -1166,6 +1166,8 @@ def _run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     scope = _heavy_scope(opts)
     began = opts.clock()
     deadline = began + opts.job_timeout_s[job.group]
+    if retract_latest(job):
+        _emit(opts, f"latest: {job.leg} {job.key12} retracted (its {job.design} job reruns)")
     attempt_start = fresh_attempt(job)
     error = _prepare(job, opts, attempt_start)
     if error:
@@ -1385,6 +1387,21 @@ def read_planned(key_dir: Path) -> frozenset[str] | None:
                                                 for d in designs):
         return None
     return frozenset(designs)
+
+
+def retract_latest(job: Job) -> bool:
+    """Delete the leg's ``latest`` when it names ``job``'s key (Task 6 review I3, addendum 2):
+    called before the job's attempt wipes its directory, so a run stopped mid-attempt (a
+    ``--rerun``, a retry after a failure or timeout) never leaves ``latest`` on a key whose
+    results are gone; the run's end sets it again once the key completes. True when
+    retracted. A symlinked ``latest`` is refused (E-QH12)."""
+    latest = job.job_dir.parents[1] / LATEST
+    if latest.is_symlink():
+        raise _symlink_refusal(latest)
+    if _read_word(latest) != job.key12:
+        return False
+    qor_heavy.safe_rmtree(latest, job_out_root(job))
+    return True
 
 
 def write_planned(jobs: Sequence[Job]) -> list[str]:
