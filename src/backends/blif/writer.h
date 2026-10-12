@@ -113,7 +113,14 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * name_style"); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
  * name_style apply to the VTR dialect only"); a non-zero lut_k outside 2..16
  * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); VTR with PROVENANCE ("write_blif: --vtr:
- * --name-style provenance is not available yet (3E-6)"); then the preflight's refusals. */
+ * --name-style provenance is not available yet (3E-6)"); then the preflight's refusals.
+ *
+ * VTR names (spec 3E VB-10): every net, port bit and generated name is written in its
+ * odin3_blif_vtr_legal_name form, and a net used as a `.latch` control or a hard cell's clock
+ * input in its odin3_blif_vtr_clock_name form, before 1C's uniqueness rule (a form another net or
+ * port bit already has falls back to `$n<ID>`, `$n<ID>$1`, …; nets in ID order). A net named
+ * `gnd`/`vcc`/`unconn` that a zero-input $sop of value 0/1/0 drives keeps its name. Port bits are
+ * named by their wire's declared index, as in the plain dialect. */
 odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
                                    const odin3_blif_write_opts *opts);
 

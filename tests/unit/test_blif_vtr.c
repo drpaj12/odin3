@@ -1,6 +1,6 @@
 /*
  * test_blif_vtr.c — unit tests for write_blif --vtr (spec 3E §16.1): options, arguments, the API's
- * own refusals, E13 and the process refusal (3E Task 1).
+ * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2).
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
@@ -10,6 +10,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/value.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 #include "proc_fixture.h"
@@ -550,6 +551,432 @@ static void test_preflight_report_and_k(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_vtr_preflight(tc.design, &opts, NULL));
 }
 
+/* --- VB-10 names (3E Task 2) ----------------------------------------------------------------- */
+
+/* odin3_blif_vtr_legal_name(in) appended to a buffer holding "<": the result after the "<". */
+static void expect_legal(odin3_bytes in, const char *want) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&buf, odin3_bytes_cstr("<")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_legal_name(in, &buf));
+    TEST_ASSERT_EQUAL_STRING_LEN_MESSAGE("<", buf.data, 1, want);
+    TEST_ASSERT_EQUAL_size_t_MESSAGE(strlen(want) + 1, buf.len, want);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, buf.data + 1, want);
+    odin3_strbuf_free(&buf);
+}
+
+/* A legal-name case of the brief's table. */
+typedef struct legal_case {
+    const char *in;
+    const char *want;
+} legal_case;
+
+static void test_legal_name_table(void) {
+    static const legal_case cases[] = {
+        {"a#b", "a%23b"},
+        {"a b", "a%20b"},
+        {"x=y", "x%3Dy"},
+        {"q\"", "q%22"},
+        {"a\\b", "a%5Cb"},
+        {"50%", "50%25"},
+        {"\xC3\xA9", "%C3%A9"},
+        {"\t", "%09"},
+        {".end", "%2Eend"},
+        {"re", "%re"},
+        {"0", "%0"},
+        {"NIL", "%NIL"},
+        {"out:x", "%out:x"},
+        {"unconn", "%unconn"},
+        {"$auto$rtlil.cc:3203:MuxGate$1084", "$auto$rtlil.cc:3203:MuxGate$1084"},
+        {"single_port_ram^MEM~0-7^out~0", "single_port_ram^MEM~0-7^out~0"},
+        {"memory_controller_address~26", "memory_controller_address~26"},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        expect_legal(odin3_bytes_cstr(cases[i].in), cases[i].want);
+    }
+    /* the rest of rule 3's list, a `.` and an `out:` that are not leading or whole, NUL and DEL */
+    static const char *const reserved[] = {"fe", "ah", "al", "as", "1", "2", "3", "gnd", "vcc"};
+    for (size_t i = 0; i < sizeof reserved / sizeof reserved[0]; i++) {
+        char want[LINE_BUF];
+        TEST_ASSERT_TRUE(snprintf(want, sizeof want, "%%%s", reserved[i]) < LINE_BUF);
+        expect_legal(odin3_bytes_cstr(reserved[i]), want);
+    }
+    expect_legal(odin3_bytes_cstr("a.b"), "a.b");
+    expect_legal(odin3_bytes_cstr("xout:"), "xout:");
+    expect_legal(odin3_bytes_cstr("Re"), "Re");
+    expect_legal(odin3_bytes_cstr("nil"), "nil");
+    expect_legal(odin3_bytes_cstr("out"), "out");
+    expect_legal((odin3_bytes){"a\0b\x7F", 4}, "a%00b%7F");
+    expect_legal((odin3_bytes){"", 0}, "");
+    expect_legal(odin3_bytes_cstr("!~"), "!~");
+}
+
+/* `fe` and the byte 0xFE: lower-case letters are the reserved prefix, upper-case hex a byte. */
+static void test_legal_name_injective_fe(void) {
+    expect_legal(odin3_bytes_cstr("fe"), "%fe");
+    expect_legal(odin3_bytes_cstr("\xFE"), "%FE");
+    expect_legal(odin3_bytes_cstr("%fe"), "%25fe");
+    expect_legal(odin3_bytes_cstr("%FE"), "%25FE");
+}
+
+/* Rule 3's list as odin3_blif_vtr_reserved has it: whole names, and the `out:` prefix. */
+static void test_reserved_names(void) {
+    static const char *const yes[] = {"re", "fe", "ah",  "al",  "as",     "NIL",  "0",    "1",
+                                      "2",  "3",  "gnd", "vcc", "unconn", "out:", "out:x"};
+    static const char *const no[] = {"", "vcc1", "ou", "out", "Out:x", "4", "nil", "xre"};
+    for (size_t i = 0; i < sizeof yes / sizeof yes[0]; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(odin3_blif_vtr_reserved(odin3_bytes_cstr(yes[i])), yes[i]);
+    }
+    for (size_t i = 0; i < sizeof no / sizeof no[0]; i++) {
+        TEST_ASSERT_FALSE_MESSAGE(odin3_blif_vtr_reserved(odin3_bytes_cstr(no[i])), no[i]);
+    }
+}
+
+/* odin3_blif_vtr_clock_name(in), alone in a fresh buffer. */
+static void expect_clock(const char *in, const char *want) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_clock_name(odin3_bytes_cstr(in), &buf));
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, buf.len > 0 ? buf.data : "", in);
+    odin3_strbuf_free(&buf);
+}
+
+/* Two `.latch` clocks and two signals with the same characters: only the clocks change. */
+static const char *const CLOCK_NAMES = ".model top\n"
+                                       ".inputs c d e\n"
+                                       ".outputs q r y z\n"
+                                       ".names c a|b\n"
+                                       "1 1\n"
+                                       ".names e x_^_y\n"
+                                       "1 1\n"
+                                       ".latch d q re a|b 2\n"
+                                       ".latch d r re x_^_y 2\n"
+                                       ".names d p|q\n"
+                                       "1 1\n"
+                                       ".names p|q y\n"
+                                       "1 1\n"
+                                       ".names d m_^_n\n"
+                                       "1 1\n"
+                                       ".names m_^_n z\n"
+                                       "1 1\n"
+                                       ".end\n";
+
+static void test_clock_name_rule(void) {
+    expect_clock("a|b", "a%7Cb");
+    expect_clock("x_^_y", "x_%5E_y");
+    expect_clock("_^_^_", "_%5E_%5E_");
+    expect_clock("^_^", "^_^");
+    expect_clock("a^_b_^c", "a^_b_^c");
+    expect_clock("||", "%7C%7C");
+    expect_clock("", "");
+    read_ok(CLOCK_NAMES, false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    char want[LINE_BUF * 2];
+    header_of(ODIN3_BLIF_VTR_DEFAULT_K, want);
+    TEST_ASSERT_TRUE(strlen(want) + strlen(".model top\n") < sizeof want);
+    (void)strncat(want, ".model top\n", sizeof want - strlen(want) - 1);
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(out.data, want), out.data);
+    const char *body = out.data + strlen(want);
+    TEST_ASSERT_EQUAL_STRING(".inputs c d e\n"
+                             ".outputs q r y z\n"
+                             ".names c a%7Cb\n"
+                             "1 1\n"
+                             ".names e x_%5E_y\n"
+                             "1 1\n"
+                             ".latch d q re a%7Cb 2\n"
+                             ".latch d r re x_%5E_y 2\n"
+                             ".names d p|q\n"
+                             "1 1\n"
+                             ".names p|q y\n"
+                             "1 1\n"
+                             ".names d m_^_n\n"
+                             "1 1\n"
+                             ".names m_^_n z\n"
+                             "1 1\n"
+                             ".end\n",
+                             body);
+    /* rule 8 is VB-10's too: the two clocks are counted (no port changed, so no warning) */
+    TEST_ASSERT_EQUAL_UINT32(0, tc.warnings);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data,
+               "info: write_blif: --vtr: 2 names legalised (first: 'a|b' -> 'a%7Cb')\n"),
+        tc.log.data);
+}
+
+/* --- hand IR ------------------------------------------------------------------------------- */
+
+static uint32_t intern(const char *name) {
+    uint32_t id = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(tc.design, odin3_bytes_cstr(name), &id));
+    return id;
+}
+
+/* tc's design replaced by one empty module `top`, the top. */
+static odin3_module *hand_top(void) {
+    read_ok(TWO_MODELS, false); /* the directory and the sink */
+    empty_design();
+    odin3_module_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_module_create(tc.design, intern("top"), (odin3_prov_id){0}, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(tc.design, id));
+    return odin3_module_get(tc.design, id);
+}
+
+/* A port of width bits declared [msb:lsb] (has_range) or [width-1:0]; its wire. */
+typedef struct hand_port_spec {
+    const char *name;
+    odin3_dir dir;
+    uint32_t width;
+    bool has_range;
+    int32_t msb, lsb;
+} hand_port_spec;
+
+static odin3_wire_id hand_port(odin3_module *module, hand_port_spec want) {
+    odin3_port_spec spec = {.name = intern(want.name),
+                            .dir = want.dir,
+                            .width = want.has_range ? 0 : want.width,
+                            .scalar = !want.has_range && want.width == 1,
+                            .has_range = want.has_range,
+                            .msb = want.msb,
+                            .lsb = want.lsb};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(module, &spec, NULL));
+    return odin3_module_port_wire(module, odin3_module_port_count(module) - 1);
+}
+
+/* The net of a scalar port. */
+static odin3_net_id hand_scalar(odin3_module *module, const char *name, odin3_dir dir) {
+    return odin3_wire_net(module, hand_port(module, (hand_port_spec){name, dir, 1, false, 0, 0}),
+                          0);
+}
+
+static odin3_net_id hand_net(odin3_module *module, const char *name) {
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_create(module, intern(name), (odin3_prov_id){0}, &net));
+    return net;
+}
+
+/* A buffer `$sop` from in to `to`. */
+static void hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) {
+    static const uint8_t rows[] = {'1', '1'};
+    odin3_value params[2] = {odin3_value_int(1), {.kind = ODIN3_VAL_COVER}};
+    params[1].bits = rows;
+    params[1].len = sizeof rows;
+    params[1].cover_inputs = 1;
+    odin3_celltype_id sop = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$sop"), &sop));
+    odin3_node_spec spec = {.type = sop, .params = params, .n_params = 2};
+    const odin3_netvec ports[] = {{&in, 1}, {&to, 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, NULL));
+}
+
+/* The written file after the header and `.model top`, which it must start with. */
+static const char *vtr_body(void) {
+    char want[LINE_BUF * 2];
+    header_of(ODIN3_BLIF_VTR_DEFAULT_K, want);
+    TEST_ASSERT_TRUE(strlen(want) + strlen(".model top\n") < sizeof want);
+    (void)strncat(want, ".model top\n", sizeof want - strlen(want) - 1);
+    TEST_ASSERT_TRUE_MESSAGE(out.len > 0 && starts_with(out.data, want), text_of(&out));
+    return out.data + strlen(want);
+}
+
+/* `--vtr out.blif` succeeds; the body after `.model top`. */
+static const char *write_vtr(void) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    return vtr_body();
+}
+
+/* Nets `a#b` and `a%23b` stay distinct (rule 1 escapes `%`), so neither falls back. */
+static void test_escaped_names_distinct(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id in = hand_scalar(top, "i", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_net_id first = hand_net(top, "a#b");
+    odin3_net_id second = hand_net(top, "a%23b");
+    hand_buffer(top, in, first);
+    hand_buffer(top, first, second);
+    hand_buffer(top, second, y_net);
+    TEST_ASSERT_EQUAL_STRING(".inputs i\n.outputs y\n.names i a%23b\n1 1\n"
+                             ".names a%23b a%2523b\n1 1\n.names a%2523b y\n1 1\n.end\n",
+                             write_vtr());
+}
+
+/* A net named `p q` and an unnamed net on a wire `p q`: both legalise to `p%20q`, and the second
+ * by net ID falls back to `$n<ID>` (VB-10 rule 4: legalisation before uniqueness). */
+static void collide(bool named_first) {
+    odin3_module *top = hand_top();
+    odin3_net_id in = hand_scalar(top, "i", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_net_id first = {0};
+    odin3_net_id second = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, named_first ? intern("p q") : 0,
+                                                     (odin3_prov_id){0}, &first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, named_first ? 0 : intern("p q"),
+                                                     (odin3_prov_id){0}, &second));
+    odin3_wire_spec wire = {.name = intern("p q")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_wire_create(top, &wire, named_first ? &second : &first, NULL));
+    hand_buffer(top, in, first);
+    hand_buffer(top, first, second);
+    hand_buffer(top, second, y_net);
+    char want[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(want, sizeof want,
+                              ".inputs i\n.outputs y\n.names i p%%20q\n1 1\n"
+                              ".names p%%20q $n%u\n1 1\n.names $n%u y\n1 1\n.end\n",
+                              (unsigned)second.v, (unsigned)second.v) < LINE_BUF);
+    TEST_ASSERT_EQUAL_STRING(want, write_vtr());
+    bvt_free(&tc);
+}
+
+static void test_collision_falls_back(void) {
+    collide(true);
+    collide(false);
+}
+
+/* `input [8:1] a`: bit k is a[1 + k] in both dialects (VB-10 rule 5; the plain writer has used the
+ * declared index since 2D-1), and an ascending [1:8] lists a[8] … a[1]. */
+static void declared_design(void) {
+    odin3_module *top = hand_top();
+    odin3_wire_id a_wire = hand_port(top, (hand_port_spec){"a", ODIN3_DIR_IN, 0, true, 8, 1});
+    odin3_wire_id b_wire = hand_port(top, (hand_port_spec){"b", ODIN3_DIR_IN, 0, true, 1, 8});
+    odin3_wire_id y_wire = hand_port(top, (hand_port_spec){"y", ODIN3_DIR_OUT, 16, false, 0, 0});
+    for (uint32_t k = 0; k < 8; k++) {
+        hand_buffer(top, odin3_wire_net(top, a_wire, k), odin3_wire_net(top, y_wire, k));
+        hand_buffer(top, odin3_wire_net(top, b_wire, k), odin3_wire_net(top, y_wire, k + 8));
+    }
+}
+
+static const char *const DECLARED_PORTS =
+    ".inputs a[1] a[2] a[3] a[4] a[5] a[6] a[7] a[8] b[8] b[7] b[6] b[5] b[4] b[3] b[2] b[1]\n";
+
+static void test_declared_index(void) {
+    declared_design();
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(write_vtr(), DECLARED_PORTS), text_of(&out));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, ".names a[1] y[0]\n1 1\n"));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, ".names b[1] y[15]\n1 1\n"));
+}
+
+/* The plain dialect names the same bits alike (2D-1's declared index, pinned in test_blif_writer's
+ * test_ranged_port_bits), not a[0] … a[7]. */
+static void test_declared_index_plain(void) {
+    declared_design();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "out.blif", &out), tc.log.data);
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(out.data, ".model top\n"), out.data);
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(out.data + strlen(".model top\n"), DECLARED_PORTS),
+                             out.data);
+}
+
+/* A port `re` is written `%re`, with one warning; a 3-bit port `a b` gets one warning for its three
+ * bits (next test). */
+static void test_port_rename_warning(void) {
+    read_ok(".model top\n.inputs re\n.outputs y\n.names re y\n1 1\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".inputs %re\n.outputs y\n.names %re y\n1 1\n.end\n", write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "warn: write_blif: --vtr: port"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: port 're' "
+                                                     "written as '%re' (VPR cannot read 're')\n"),
+                                 tc.log.data);
+}
+
+static void test_port_rename_once_per_port(void) {
+    odin3_module *top = hand_top();
+    odin3_wire_id ab = hand_port(top, (hand_port_spec){"a b", ODIN3_DIR_IN, 3, false, 0, 0});
+    odin3_wire_id y_wire = hand_port(top, (hand_port_spec){"y", ODIN3_DIR_OUT, 3, false, 0, 0});
+    for (uint32_t k = 0; k < 3; k++) {
+        hand_buffer(top, odin3_wire_net(top, ab, k), odin3_wire_net(top, y_wire, k));
+    }
+    TEST_ASSERT_TRUE_MESSAGE(
+        starts_with(write_vtr(), ".inputs a%20b[0] a%20b[1] a%20b[2]\n.outputs y[0] y[1] y[2]\n"),
+        text_of(&out));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "warn: write_blif: --vtr: port"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data,
+                                        "warn: write_blif: --vtr: port 'a b' "
+                                        "written as 'a%20b' (VPR cannot read 'a b')\n"),
+                                 tc.log.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data,
+               "info: write_blif: --vtr: 3 names legalised (first: 'a b[0]' -> 'a%20b[0]')\n"),
+        tc.log.data);
+}
+
+/* 1C's refusal of two ports of one BLIF name on different nets (`a[1]` twice) comes from the
+ * preflight's naming run in the VTR dialect: counted as an error, and no file. */
+static void test_port_collision_refused(void) {
+    odin3_module *top = hand_top();
+    odin3_wire_id a_wire = hand_port(top, (hand_port_spec){"a", ODIN3_DIR_IN, 2, false, 0, 0});
+    odin3_net_id a1 = hand_scalar(top, "a[1]", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_net_id z_net = hand_scalar(top, "z", ODIN3_DIR_OUT);
+    hand_buffer(top, odin3_wire_net(top, a_wire, 1), y_net);
+    hand_buffer(top, a1, z_net);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_TRUE_MESSAGE(only_error_is("write_blif: --vtr: model 'top': two ports on different "
+                                           "nets have the BLIF name 'a[1]'"),
+                             tc.log.data);
+    TEST_ASSERT_FALSE(bvt_file_exists(&tc, "out.blif"));
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(1, report.errors);
+}
+
+/* Three illegal net names in a chain i -> `a b` -> `c=d` -> `.e` -> o. */
+static void three_illegal(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id in = hand_scalar(top, "i", ODIN3_DIR_IN);
+    odin3_net_id o_net = hand_scalar(top, "o", ODIN3_DIR_OUT);
+    odin3_net_id ab = hand_net(top, "a b");
+    odin3_net_id cd = hand_net(top, "c=d");
+    odin3_net_id dot_e = hand_net(top, ".e");
+    hand_buffer(top, in, ab);
+    hand_buffer(top, ab, cd);
+    hand_buffer(top, cd, dot_e);
+    hand_buffer(top, dot_e, o_net);
+}
+
+static void test_info_line(void) {
+    three_illegal();
+    TEST_ASSERT_EQUAL_STRING(".inputs i\n.outputs o\n.names i a%20b\n1 1\n.names a%20b c%3Dd\n"
+                             "1 1\n.names c%3Dd %2Ee\n1 1\n.names %2Ee o\n1 1\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_TRUE_MESSAGE(
+        starts_with(tc.log.data,
+                    "info: write_blif: --vtr: 3 names legalised (first: 'a b' -> 'a%20b')\n"),
+        tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "legalised"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(tc.log.data, "write_blif: --vtr: port"));
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(3, report.renamed);
+    TEST_ASSERT_EQUAL_UINT32(0, report.errors);
+    /* the plain dialect writes the names as they are, and says nothing */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "out.blif", &out));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, ".names c=d .e\n"));
+    TEST_ASSERT_NULL(strstr(tc.log.data, "legalised"));
+}
+
+/* A generator keeps its reserved name (rule 3's exception, VB-9 §9.3): Parmys's `.names gnd` and
+ * `.names vcc` / `1`; a signal named `vcc` and a constant-1 cover named `gnd` are renamed. */
+static void test_generator_keeps_name(void) {
+    static const char *const parmys = ".inputs a\n.outputs y\n.names gnd\n.names vcc\n1\n"
+                                      ".names unconn\n.names gnd vcc unconn a y\n0101 1\n.end\n";
+    char text[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text, ".model top\n%s", parmys) < LINE_BUF);
+    read_ok(text, false);
+    TEST_ASSERT_EQUAL_STRING(parmys, write_vtr());
+    TEST_ASSERT_NULL_MESSAGE(strstr(tc.log.data, "legalised"), tc.log.data);
+    bvt_free(&tc);
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a vcc\n1 1\n.names gnd\n1\n"
+            ".names vcc gnd y\n11 1\n.end\n",
+            false);
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names a %vcc\n1 1\n.names %gnd\n1\n"
+                             ".names %vcc %gnd y\n11 1\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "info: write_blif: --vtr: 2 names legalised"),
+                                 tc.log.data);
+}
+
 /* --- help and processes ---------------------------------------------------------------------- */
 
 static void test_help_string(void) {
@@ -636,6 +1063,54 @@ static void test_out_of_memory_sweep_pass(void) {
     TEST_ASSERT_TRUE(done);
 }
 
+/* odin3_blif_vtr_legal_name: NO_MEMORY leaves the buffer as it was, until it succeeds. */
+static void test_out_of_memory_legal_name(void) {
+    static const char name[] = "out:a b#c\xFE.d_^_e|f";
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        odin3_strbuf buf;
+        odin3_strbuf_init(&buf);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&buf, odin3_bytes_cstr("keep")));
+        odin3_util_set_alloc_fail_after(fail_at);
+        odin3_status st = odin3_blif_vtr_legal_name(odin3_bytes_cstr(name), &buf);
+        odin3_status clock =
+            st == ODIN3_OK ? odin3_blif_vtr_clock_name(odin3_bytes_cstr("|d_^_e|"), &buf) : st;
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            TEST_ASSERT_EQUAL_STRING("keep", buf.data);
+        } else if (clock != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, clock);
+            TEST_ASSERT_EQUAL_STRING("keep%out:a%20b%23c%FE.d_^_e|f", buf.data);
+        } else {
+            TEST_ASSERT_EQUAL_STRING("keep%out:a%20b%23c%FE.d_^_e|f%7Cd_%5E_e%7C", buf.data);
+            done = true;
+        }
+        odin3_strbuf_free(&buf);
+    }
+    TEST_ASSERT_TRUE(done);
+}
+
+/* A --vtr write with renames (the info line, the preflight's naming run, the writer's): NO_MEMORY
+ * with no file until it succeeds, then the same bytes as without the sweep. */
+static void test_out_of_memory_sweep_renames(void) {
+    char path[PATH_BUF];
+    three_illegal();
+    path_in_dir("api.blif", path);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        done = api_oom_step(fail_at, path, &opts);
+    }
+    TEST_ASSERT_TRUE(done);
+    odin3_strbuf api;
+    odin3_strbuf_init(&api);
+    slurp_into(path, &api);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_EQUAL_STRING(text_of(&out), text_of(&api));
+    odin3_strbuf_free(&api);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unknown_argument);
@@ -661,9 +1136,24 @@ int main(void) {
     RUN_TEST(test_e13_no_top);
     RUN_TEST(test_e13_keeps_old_file);
     RUN_TEST(test_preflight_report_and_k);
+    RUN_TEST(test_legal_name_table);
+    RUN_TEST(test_legal_name_injective_fe);
+    RUN_TEST(test_reserved_names);
+    RUN_TEST(test_clock_name_rule);
+    RUN_TEST(test_escaped_names_distinct);
+    RUN_TEST(test_collision_falls_back);
+    RUN_TEST(test_declared_index);
+    RUN_TEST(test_declared_index_plain);
+    RUN_TEST(test_port_rename_warning);
+    RUN_TEST(test_port_rename_once_per_port);
+    RUN_TEST(test_port_collision_refused);
+    RUN_TEST(test_info_line);
+    RUN_TEST(test_generator_keeps_name);
     RUN_TEST(test_help_string);
     RUN_TEST(test_processes_refused_first);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_pass);
+    RUN_TEST(test_out_of_memory_legal_name);
+    RUN_TEST(test_out_of_memory_sweep_renames);
     return UNITY_END();
 }
