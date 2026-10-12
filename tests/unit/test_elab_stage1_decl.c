@@ -309,23 +309,79 @@ static void test_unnamed_blocks(void) {
     TEST_ASSERT_EQUAL_UINT32(3, rs.warnings);
 }
 
+/* I1: a local (block reg, function port or local) hides a genvar of the same name. */
+static void test_local_hides_genvar(void) {
+    run_clean("module m(input a, output reg y);\n  genvar i;\n"
+              "  for (i = 0; i < 2; i = i + 1) begin : g\n"
+              "    function f;\n      input i;\n      f = i;\n    endfunction\n"
+              "    always @* begin : b\n      reg i;\n      i = a;\n      y = i;\n    end\n"
+              "  end\nendmodule\n");
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(DECLARATOR:i", "(BLOCKING_ASSIGN", "(IDENT:f", "(IDENT:i",
+               "(SEQ_BLOCK:b", "(DECLARATOR:i", "(BLOCKING_ASSIGN", "(IDENT:i", "(IDENT:a",
+               "(BLOCKING_ASSIGN", "(IDENT:y", "(IDENT:i");
+    /* outside the local's scope the genvar is read again */
+    run_clean("module m(input a, output reg [1:0] y);\n  genvar i;\n"
+              "  for (i = 0; i < 2; i = i + 1) begin : g\n"
+              "    always @* begin : b reg i; i = a; end\n    always @* y[0] = i;\n"
+              "  end\nendmodule\n");
+    EXPECT_SEQ("(SEQ_BLOCK:b", "(IDENT:i", "(SELECT.bit", "(NUMBER.dec [SIGNED] @t.v:5:", "32'sd0");
+}
+
+/* I2: the unnamed-block number belongs to the source block; generate iterations share it. */
+static void test_unnamed_generate_shares_k(void) {
+    run_clean("module m(input a, output reg y);\n  genvar i;\n"
+              "  for (i = 0; i < 2; i = i + 1) begin : g\n"
+              "    always @* begin reg t; t = a; y = t; end\n  end\n"
+              "  always @* begin reg u; u = a; y = u; end\nendmodule\n");
+    EXPECT_SEQ("(GEN_BLOCK:g", "(SEQ_BLOCK:$unnamed_block$1", "(GEN_BLOCK:g",
+               "(SEQ_BLOCK:$unnamed_block$1", "(SEQ_BLOCK:$unnamed_block$2");
+    expect_absent("$unnamed_block$3");
+    expect_warn("t.v:4:15: warning: declaration in an unnamed block is a SystemVerilog "
+                "extension; the block is named '$unnamed_block$1'");
+    expect_warn("t.v:6:13: warning: declaration in an unnamed block is a SystemVerilog "
+                "extension; the block is named '$unnamed_block$2'");
+    TEST_ASSERT_EQUAL_UINT32(2, rs.warnings);
+}
+
+/* m2: a negative repeat count is 0; a local going out of scope ends its hiding; an undeclared
+ * name in a part-select's lsb is an error, not an implicit net. */
+static void test_scope_exit_and_folds(void) {
+    run_clean("module m(input a, output reg y);\n  always @* begin repeat (-1) y = a; end\n"
+              "endmodule\n");
+    EXPECT_SEQ("(REPEAT", "(NUMBER.dec [SIGNED]", "32'sd0");
+    run_clean("module m(input a, output reg y);\n"
+              "  always @* begin : b1 reg t; t = a; end\n  always @* begin : b2 y = t; end\n"
+              "endmodule\n");
+    EXPECT_SEQ("(NET_DECL.wire", "(DECLARATOR:t", "{(ATTR:implicit");
+    expect_warn("t.v:3:28: warning: 't' is implicitly declared");
+    run_error("module m(input [7:0] v, output y);\n  assign y = v[1:q];\nendmodule\n",
+              "t.v:2:18: error: 'q' is not declared");
+}
+
+/* m1: an untyped function or task port is a wire (NET = 1 + wire), like a module port. */
+static void test_subroutine_port_net(void) {
+    run_clean("module m(input a, output y);\n  function f; input x; f = x; endfunction\n"
+              "  assign y = f(a);\nendmodule\n");
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(PORT_DECL.input [IN_HEADER NET=1]", "(DECLARATOR:x");
+}
+
 /* --- subroutines --------------------------------------------------------------------------- */
 
 static void test_function_shape(void) {
     run_clean("module m(input [3:0] x, output [3:0] y);\n  function [3:0] f;\n    input [3:0] a;\n"
               "    input b, c;\n    reg t;\n    integer k;\n    begin t = b; f = a; end\n"
               "  endfunction\n  assign y = f(x, 1'b0, 1'b1);\nendmodule\n");
-    EXPECT_SEQ("(FUNCTION_DECL:f", "(RANGE", "(LIST", "(PORT_DECL.input [IN_HEADER]", "(RANGE",
-               "(DECLARATOR:a", "(PORT_DECL.input [IN_HEADER]", "(DECLARATOR:b",
-               "(PORT_DECL.input [IN_HEADER]", "(DECLARATOR:c", "(LIST", "(VAR_DECL.reg",
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(RANGE", "(LIST", "(PORT_DECL.input [IN_HEADER NET=1]",
+               "(RANGE", "(DECLARATOR:a", "(PORT_DECL.input [IN_HEADER NET=1]", "(DECLARATOR:b",
+               "(PORT_DECL.input [IN_HEADER NET=1]", "(DECLARATOR:c", "(LIST", "(VAR_DECL.reg",
                "(DECLARATOR:t", "(VAR_DECL.integer", "(DECLARATOR:k", "(SEQ_BLOCK");
     run_clean(
         "module m(input x);\n  task tk(input a, output b);\n    reg t;\n    begin t = a; b = t; "
         "end\n  endtask\n  task tn;\n    input [1:0] p, q;\n    reg r;\n    r = p[0];\n  "
         "endtask\n  reg v;\n  always @(posedge x) tk(1'b1, v);\nendmodule\n");
-    EXPECT_SEQ("(TASK_DECL:tk", "(PORT_DECL.input [IN_HEADER]", "(DECLARATOR:a",
-               "(PORT_DECL.output [IN_HEADER]", "(DECLARATOR:b", "(VAR_DECL.reg", "(TASK_DECL:tn",
-               "(DECLARATOR:p", "(DECLARATOR:q", "(VAR_DECL.reg", "(TASK_CALL:tk");
+    EXPECT_SEQ("(TASK_DECL:tk", "(PORT_DECL.input [IN_HEADER NET=1]", "(DECLARATOR:a",
+               "(PORT_DECL.output [IN_HEADER NET=1]", "(DECLARATOR:b", "(VAR_DECL.reg",
+               "(TASK_DECL:tn", "(DECLARATOR:p", "(DECLARATOR:q", "(VAR_DECL.reg", "(TASK_CALL:tk");
 }
 
 /* --- constant folds (point (bb)) ----------------------------------------------------------- */
@@ -500,6 +556,10 @@ int main(void) {
     RUN_TEST(test_implicit_places);
     RUN_TEST(test_nettype_placement);
     RUN_TEST(test_unnamed_blocks);
+    RUN_TEST(test_local_hides_genvar);
+    RUN_TEST(test_unnamed_generate_shares_k);
+    RUN_TEST(test_scope_exit_and_folds);
+    RUN_TEST(test_subroutine_port_net);
     RUN_TEST(test_function_shape);
     RUN_TEST(test_folds);
     RUN_TEST(test_fold_errors);

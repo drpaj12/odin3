@@ -395,20 +395,20 @@ odin3_status odin3_elab1_ports(odin3_elab1 *e1, uint32_t spec) {
 /* --- implicit nets (EL-25) ------------------------------------------------------------------- */
 
 /* The use count of a name local to a block or subroutine being scanned (enter: +1, else -1). */
-static odin3_status local_add(odin3_elab1_env *env, uint32_t name, bool enter) {
+static odin3_status local_add(odin3_u64map *map, uint32_t name, bool enter) {
     uint64_t count = 0;
-    (void)odin3_u64map_get(env->locals, name, &count);
+    (void)odin3_u64map_get(map, name, &count);
     if (enter) {
         count++;
     } else if (count > 0) {
         count--;
     }
-    return odin3_u64map_put(env->locals, (odin3_kv){name, count});
+    return odin3_u64map_put(map, (odin3_kv){name, count});
 }
 
 /* The declarators of the groups of the LIST in slot idx of node. */
-static odin3_status list_names(odin3_elab1_env *env, odin3_ast_id node, uint32_t idx, bool enter) {
-    const odin3_ast *ast = env->e1->parsed;
+static odin3_status list_names(odin3_u64map *map, const odin3_ast *ast, odin3_ast_id node,
+                               uint32_t idx, bool enter) {
     odin3_ast_id list = odin3_ast_child(ast, node, idx);
     odin3_ast_span groups = odin3_ast_children(ast, list);
     odin3_status st = ODIN3_OK;
@@ -416,27 +416,27 @@ static odin3_status list_names(odin3_elab1_env *env, odin3_ast_id node, uint32_t
         odin3_ast_span decls = odin3_ast_children(ast, groups.ids[i]);
         for (uint32_t j = odin3_ast_slot_count(odin3_ast_kind_of(ast, groups.ids[i]));
              st == ODIN3_OK && j < decls.n; j++) {
-            st = local_add(env, odin3_ast_name(ast, decls.ids[j]), enter);
+            st = local_add(map, odin3_ast_name(ast, decls.ids[j]), enter);
         }
     }
     return st;
 }
 
 /* The names a block or subroutine declares for its body (its own name too, for a subroutine). */
-static odin3_status scope_names(odin3_elab1_env *env, odin3_ast_id node, bool enter) {
-    const odin3_ast *ast = env->e1->parsed;
+odin3_status odin3_elab1_scope_names(odin3_u64map *map, const odin3_ast *ast, odin3_ast_id node,
+                                     bool enter) {
     switch (odin3_ast_kind_of(ast, node)) {
     case ODIN3_AST_SEQ_BLOCK:
-        return list_names(env, node, 0, enter);
+        return list_names(map, ast, node, 0, enter);
     case ODIN3_AST_FUNCTION_DECL: {
-        odin3_status st = local_add(env, odin3_ast_name(ast, node), enter);
-        st = st != ODIN3_OK ? st : list_names(env, node, 1, enter);
-        return st != ODIN3_OK ? st : list_names(env, node, 2, enter);
+        odin3_status st = local_add(map, odin3_ast_name(ast, node), enter);
+        st = st != ODIN3_OK ? st : list_names(map, ast, node, 1, enter);
+        return st != ODIN3_OK ? st : list_names(map, ast, node, 2, enter);
     }
     default: { /* TASK_DECL */
-        odin3_status st = local_add(env, odin3_ast_name(ast, node), enter);
-        st = st != ODIN3_OK ? st : list_names(env, node, 0, enter);
-        return st != ODIN3_OK ? st : list_names(env, node, 1, enter);
+        odin3_status st = local_add(map, odin3_ast_name(ast, node), enter);
+        st = st != ODIN3_OK ? st : list_names(map, ast, node, 0, enter);
+        return st != ODIN3_OK ? st : list_names(map, ast, node, 1, enter);
     }
     }
 }
@@ -596,7 +596,7 @@ static bool scanned_item(odin3_ast_kind kind) {
 static odin3_status scan_step(odin3_elab1_env *env, const odin3_elab1_scan_frame *frame) {
     odin3_ast_kind kind = odin3_ast_kind_of(env->e1->parsed, frame->node);
     if (frame->leave) {
-        return scope_names(env, frame->node, false);
+        return odin3_elab1_scope_names(env->locals, env->e1->parsed, frame->node, false);
     }
     if (kind == ODIN3_AST_IDENT) {
         return scan_ident(env, frame->node);
@@ -605,7 +605,7 @@ static odin3_status scan_step(odin3_elab1_env *env, const odin3_elab1_scan_frame
         kind != ODIN3_AST_TASK_DECL) {
         return push_kids(env, frame->node);
     }
-    odin3_status st = scope_names(env, frame->node, true);
+    odin3_status st = odin3_elab1_scope_names(env->locals, env->e1->parsed, frame->node, true);
     st = st != ODIN3_OK ? st : push_frame(env, frame->node, true);
     return st != ODIN3_OK ? st : push_kids(env, frame->node);
 }

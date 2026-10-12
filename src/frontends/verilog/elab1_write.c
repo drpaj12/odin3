@@ -30,6 +30,7 @@
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <inttypes.h>
@@ -65,11 +66,13 @@ typedef struct e1w {
     uint32_t used;
     bool replay_failed;
     bool dropped;
-    uint32_t scope;      /* the scope being written (pass E's) */
-    uint32_t next_scope; /* the next scope a selected block takes (pass E's creation order) */
-    odin3_vec walk;      /* e1w_frame */
-    uint32_t unnamed;    /* the unnamed blocks with declarations named so far in the module */
-    bool in_initial;     /* the statement being copied is an INITIAL's */
+    uint32_t scope;            /* the scope being written (pass E's) */
+    uint32_t next_scope;       /* the next scope a selected block takes (pass E's creation order) */
+    odin3_vec walk;            /* e1w_frame */
+    uint32_t unnamed;          /* the source unnamed blocks with declarations numbered so far */
+    odin3_u64map *unnamed_ids; /* source block node -> its k (generate iterations share it) */
+    odin3_u64map *locals;      /* names local to the enclosing blocks and subroutines -> depth */
+    bool in_initial;           /* the statement being copied is an INITIAL's */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -495,6 +498,10 @@ static bool w_special(e1w *wr, odin3_ast_id node, odin3_ast_id *out) {
     uint32_t idx = odin3_elab1_env_lookup(wr->env, odin3_ast_name(wr->ast, node));
     const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
     int64_t value = 0;
+    uint64_t depth = 0;
+    if (odin3_u64map_get(wr->locals, odin3_ast_name(wr->ast, node), &depth) && depth > 0) {
+        return false; /* a block, function or task local hides the genvar (EL-19) */
+    }
     if (slot == NULL || slot->entry.kind != ODIN3_ENTRY_GENVAR || !slot->bound ||
         !odin3_cval_to_i64(&slot->entry.value, &value)) {
         return false;
@@ -504,10 +511,20 @@ static bool w_special(e1w *wr, odin3_ast_id node, odin3_ast_id *out) {
 }
 
 /* The name of an unnamed block with declarations (EL-4, EL-23): `$unnamed_block$<k>`, k counting
- * per module in source order, with the SystemVerilog-extension warning. */
+ * per module in source order of the source block (every generate iteration shares its k), with
+ * the SystemVerilog-extension warning. */
 static uint32_t w_unnamed(e1w *wr, odin3_ast_id node) {
     char text[W_UNNAMED_TEXT];
-    int len = snprintf(text, sizeof text, "$unnamed_block$%" PRIu32, ++wr->unnamed);
+    uint64_t k = 0;
+    if (!odin3_u64map_get(wr->unnamed_ids, node.v, &k)) {
+        k = ++wr->unnamed;
+        odin3_status put = odin3_u64map_put(wr->unnamed_ids, (odin3_kv){node.v, k});
+        if (put != ODIN3_OK) {
+            fail(wr, put);
+            return 0;
+        }
+    }
+    int len = snprintf(text, sizeof text, "$unnamed_block$%" PRIu64, k);
     uint32_t name = 0;
     if (len <= 0 || (size_t)len >= sizeof text) {
         fail(wr, ODIN3_ERR_CHECK);
@@ -584,6 +601,21 @@ static odin3_ast_id w_locals(e1w *wr, odin3_ast_id list) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
+/* Enter or leave the names node (a SEQ_BLOCK, FUNCTION_DECL or TASK_DECL) declares. */
+static void w_scope(e1w *wr, odin3_ast_id node, bool enter) {
+    odin3_status st = odin3_elab1_scope_names(wr->locals, wr->ast, node, enter);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+}
+
+/* Enter or leave a SEQ_BLOCK's names (when `at` holds: its first child, or its close). */
+static void w_block_scope(e1w *wr, odin3_ast_id node, bool at, bool enter) {
+    if (at && odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_SEQ_BLOCK) {
+        w_scope(wr, node, enter);
+    }
+}
+
 /* The child idx of node when it is more than a copy: a block's declarations, the control of an
  * assignment (Task 16), a TIMING_STMT outside an ALWAYS (T12, Task 16), an absent statement of a
  * TIMING_STMT (a NULL_STMT). True when the child was written. */
@@ -655,6 +687,7 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
     odin3_ast_span kids = odin3_ast_children(wr->ast, node);
     if (top->next < kids.n) {
         uint32_t idx = top->next++;
+        w_block_scope(wr, node, idx == 0, true);
         odin3_ast_id kid = kids.ids[idx];
         const char *role = kid.v != 0 ? fold_role(wr->ast, node, idx) : NULL;
         odin3_ast_id made = {0};
@@ -675,6 +708,7 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
     }
     uint32_t mark = top->mark;
     odin3_vec_pop(&wr->e1->frames);
+    w_block_scope(wr, node, true, false);
     odin3_ast_id made = w_copy_node(wr, node, mark);
     if (wr->e1->frames.len > base) {
         w_push(wr, made);
@@ -1524,8 +1558,13 @@ static void w_sub_port(e1w *wr, odin3_ast_id group) {
         w_push(wr, w_declarator(wr, decls.ids[j]));
         odin3_ast_spec spec = spec_of(wr, ODIN3_AST_PORT_DECL, group);
         spec.sub = (uint8_t)odin3_ast_sub(wr->ast, group);
-        spec.flags =
-            (uint16_t)(odin3_ast_flags(wr->ast, group) | (uint16_t)ODIN3_AST_F_PORT_DECL_IN_HEADER);
+        uint32_t flags =
+            odin3_ast_flags(wr->ast, group) | (uint32_t)ODIN3_AST_F_PORT_DECL_IN_HEADER;
+        if ((flags & (ODIN3_AST_F_PORT_DECL_DT_MASK | ODIN3_AST_F_PORT_DECL_NET_MASK)) == 0) {
+            /* an untyped subroutine port is a wire, like a module port (EL-4, EL-24) */
+            flags |= (1U + (uint32_t)ODIN3_AST_NET_DECL_WIRE) << ODIN3_AST_F_PORT_DECL_NET_SHIFT;
+        }
+        spec.flags = (uint16_t)flags;
         w_push(wr, w_make_marked(wr, &spec, mark, group));
     }
 }
@@ -1558,6 +1597,7 @@ static odin3_ast_id w_subroutine(e1w *wr, odin3_ast_id node) {
     odin3_ast_id ports = odin3_ast_child(wr->ast, node, first);
     odin3_ast_id locals = odin3_ast_child(wr->ast, node, first + 1);
     uint32_t mark = w_mark(wr);
+    w_scope(wr, node, true);
     if (function) {
         w_push(wr, w_range(wr, odin3_ast_child(wr->ast, node, 0)));
     }
@@ -1571,6 +1611,7 @@ static odin3_ast_id w_subroutine(e1w *wr, odin3_ast_id node) {
     lspec = spec_of(wr, ODIN3_AST_LIST, locals);
     w_push(wr, w_make_marked(wr, &lspec, list, locals));
     w_push(wr, w_expr(wr, odin3_ast_child(wr->ast, node, first + 2)));
+    w_scope(wr, node, false);
     odin3_ast_spec spec = spec_of(wr, odin3_ast_kind_of(wr->ast, node), node);
     spec.name = odin3_ast_name(wr->ast, node);
     spec.flags = odin3_ast_flags(wr->ast, node);
@@ -1760,8 +1801,16 @@ odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {
     wr.cursor = wr.spec->first_log;
     odin3_vec_init(&wr.walk, sizeof(e1w_frame));
     wr.next_scope = 1;
-    odin3_ast_id module = w_module(&wr);
+    wr.unnamed_ids = odin3_u64map_create(0);
+    wr.locals = odin3_u64map_create(0);
+    if (wr.unnamed_ids == NULL || wr.locals == NULL) {
+        wr.st = ODIN3_ERR_NO_MEMORY;
+        wr.building = false;
+    }
+    odin3_ast_id module = wr.st == ODIN3_OK ? w_module(&wr) : (odin3_ast_id){0};
     odin3_vec_free(&wr.walk);
+    odin3_u64map_destroy(wr.unnamed_ids);
+    odin3_u64map_destroy(wr.locals);
     odin3_status st = wr.st;
     st = st != ODIN3_OK || e1->stopped ? st : w_replay_done(&wr);
     w_push(&wr, module);

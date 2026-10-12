@@ -1040,6 +1040,12 @@ odin3_status odin3_elab1_ports(odin3_elab1 *e1, uint32_t spec);
  */
 odin3_status odin3_elab1_implicit(odin3_elab1_env *env, odin3_ast_id item);
 
+/* Enter (+1) or leave (-1) the names a SEQ_BLOCK, FUNCTION_DECL or TASK_DECL declares for its body
+ * (its ports and locals, and a subroutine's own name) in map (name -> depth count). Shared by the
+ * implicit-net scan and the writer's genvar shadowing (EL-19). ODIN3_OK; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_scope_names(odin3_u64map *map, const odin3_ast *ast, odin3_ast_id node,
+                                     bool enter);
+
 /* The NET_DECL sub an implicit net of `default_nettype type has (wire/tri → wire, wand/triand →
  * wand, wor/trior → wor, uwire). */
 uint8_t odin3_elab1_implicit_sub(uint8_t nettype);
