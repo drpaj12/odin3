@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.25)
 project(odin3 VERSION 0.0.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
-option(ODIN3_WITH_ABC "Build third_party/abc (abc executable now; libabc linked from Phase 3)" ON)
+option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
+       ON)
 option(ODIN3_SANITIZE "Build Odin III targets with ASan + UBSan" OFF)
 option(ODIN3_WERROR "Treat warnings as errors in Odin III targets" ON)
 # libFuzzer harnesses (tests/fuzz): clang only, in a build directory of their own
@@ -296,18 +297,43 @@ target_link_libraries(example_plugin PRIVATE libodin3 odin3_flags)
 
 # --- Third-party ----------------------------------------------------------------
 if(ODIN3_WITH_ABC)
-    # ABC's own CMake project enables C++ and drives its Makefile for flags; it
-    # builds the `abc` executable (used by tools/equiv-check) and, on demand, libabc.
-    # A function scope keeps our strict C17 settings out of ABC, which needs GNU extensions.
+    # ABC (3D spec AB-5). cmake/abc_pin.cmake stops configure unless third_party/abc is at the
+    # commit docs/ORACLES.md pins, and sets ODIN3_ABC_COMMIT. ABC's own CMake project enables C++
+    # and drives its Makefile for flags; we build only its `libabc-pic` (a PIC static archive,
+    # linked into the adapter from 3D-2) and `odin3_abc_exe`, the `abc` tool linked to it, so
+    # ABC compiles once per build directory. ABC's own `abc` and `libabc` targets are never built.
+    include(${PROJECT_SOURCE_DIR}/cmake/abc_pin.cmake)
+    # ABC has C++ sources, so whatever links libabc-pic links through the C++ driver.
+    enable_language(CXX)
+    # The function scope keeps our C17 settings out of ABC, which needs GNU extensions; neither
+    # odin3_flags nor the sanitisers (both on odin3_flags only) reach ABC's targets.
     function(odin3_add_abc)
         unset(CMAKE_C_STANDARD)
         unset(CMAKE_C_EXTENSIONS)
+        # ABC is always optimised: unoptimised, it would stretch the large runs several-fold.
+        # Debug keeps its assertions; Release drops them.
+        set(CMAKE_C_FLAGS_DEBUG "-g -O2")
+        set(CMAKE_CXX_FLAGS_DEBUG "-g -O2")
+        set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
+        set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
         set(READLINE_FOUND FALSE)
         set(ABC_SKIP_TESTS ON CACHE BOOL "Skip ABC googletest suite (needs network at configure)")
         add_subdirectory(third_party/abc EXCLUDE_FROM_ALL)
+        # No abc.history in the working directory (ABC's cmd/cmdHist.c).
+        set_property(TARGET libabc-pic APPEND PROPERTY COMPILE_DEFINITIONS ABC_NO_HISTORY)
+        # ABC's main.c, created here so it keeps ABC's GNU C settings, not C17 (finding 19).
+        add_executable(odin3_abc_exe third_party/abc/src/base/main/main.c)
+        target_link_libraries(odin3_abc_exe PRIVATE libabc-pic)
+        set_target_properties(odin3_abc_exe PROPERTIES
+            OUTPUT_NAME abc
+            LINKER_LANGUAGE CXX
+            RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/third_party/abc)
+        # ABC's own (never built) `abc` would claim the same path: move it aside.
+        set_target_properties(abc PROPERTIES OUTPUT_NAME abc-upstream)
     endfunction()
     odin3_add_abc()
-    add_custom_target(abc_tool ALL DEPENDS abc)
+    add_custom_target(abc_tool ALL DEPENDS odin3_abc_exe)
+    target_compile_definitions(odin3 PRIVATE ODIN3_HAVE_ABC)
 endif()
 
 # --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
@@ -758,8 +784,8 @@ if(BUILD_TESTING)
     set(_wc_env "")
     set(_wc_env_list "")
     if(ODIN3_WITH_ABC)
-        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:abc>")
-        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:abc>;")
+        set(_wc_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
+        set(_wc_env_list "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>;")
     endif()
     add_test(NAME writer_check_fixtures
              COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args})
@@ -818,7 +844,7 @@ if(BUILD_TESTING)
                    "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
-        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
+        list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>" "ODIN3_REQUIRE_ABC=1")
     endif()
     # sim-check (1E exit test, tools/sim-check) also needs Yosys and Icarus Verilog; without them
     # sim_check_fixtures is not registered and the sim-check Python tests skip.
@@ -832,7 +858,8 @@ if(BUILD_TESTING)
         # -m 0: no address-space cap (the debug driver is an ASan build).
         add_test(NAME sim_check_fixtures
                  COMMAND ${PROJECT_SOURCE_DIR}/tools/sim-check/sim-check -m 0
-                         --driver $<TARGET_FILE:odin3-sim-vectors> --abc $<TARGET_FILE:abc>
+                         --driver $<TARGET_FILE:odin3-sim-vectors>
+                         --abc $<TARGET_FILE:odin3_abc_exe>
                          --yosys ${ODIN3_YOSYS} --iverilog ${ODIN3_IVERILOG} --vvp ${ODIN3_VVP}
                          --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --fixtures ${_sim_fixtures})
         set_tests_properties(sim_check_fixtures PROPERTIES LABELS tools)
