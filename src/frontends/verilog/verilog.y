@@ -103,9 +103,9 @@
 %right '?'                              /* conditional: the rule's %prec '?' (§3.3)          */
 %left  OR_OR                            /* ||                                                */
 %left  AND_AND                          /* &&                                                */
-%left  '|'                              /* binary |                                          */
+%left  '|' NOR                          /* binary |  ~| (~| is not in A.8.6: Yosys, Odin II)  */
 %left  '^' XNOR                         /* ^  ^~  ~^                                         */
-%left  '&'                              /* binary &                                          */
+%left  '&' NAND                         /* binary &  ~& (~& is not in A.8.6: Yosys, Odin II)  */
 %left  EQ NE CASE_EQ CASE_NE            /* == != === !==                                     */
 %left  '<' '>' LE GE                    /* < <= > >=                                         */
 %left  SHL SHR ASHL ASHR                /* << >> <<< >>>                                     */
@@ -1039,9 +1039,11 @@ expr: operand
     | expr OR_OR attrs_opt expr        { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LOR), &$$)); }
     | expr AND_AND attrs_opt expr      { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(LAND), &$$)); }
     | expr '|' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(OR), &$$)); }
+    | expr NOR attrs_opt expr          { VP($$, vp_binary_not(ctx, &@$, $1, VP_BINARY(OR), &$$)); }
     | expr '^' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(XOR), &$$)); }
     | expr XNOR attrs_opt expr         { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(XNOR), &$$)); }
     | expr '&' attrs_opt expr          { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(AND), &$$)); }
+    | expr NAND attrs_opt expr         { VP($$, vp_binary_not(ctx, &@$, $1, VP_BINARY(AND), &$$)); }
     | expr EQ attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(EQ), &$$)); }
     | expr NE attrs_opt expr           { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(NE), &$$)); }
     | expr CASE_EQ attrs_opt expr      { VP($$, vp_binary(ctx, &@$, $1, VP_BINARY(CASE_EQ), &$$)); }

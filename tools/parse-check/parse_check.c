@@ -502,8 +502,25 @@ static bool pc_special_lead(const pc_oracle *orc, odin3_ast_id node, odin3_bytes
     }
 }
 
+/* The parser's reading of a binary `~&` / `~|` (2C Task 10): UNARY[~] at the same loc as its
+ * operand, a BINARY[&] or BINARY[|]; its first token is the BINARY's. */
+static bool pc_binary_not(const odin3_ast *ast, odin3_ast_id node) {
+    if (odin3_ast_kind_of(ast, node) != ODIN3_AST_UNARY ||
+        odin3_ast_sub(ast, node) != ODIN3_AST_UNARY_NOT || odin3_ast_nchild(ast, node) != 1) {
+        return false;
+    }
+    odin3_ast_id operand = odin3_ast_child(ast, node, 0);
+    uint32_t sub = operand.v != 0 ? odin3_ast_sub(ast, operand) : 0;
+    return operand.v != 0 && odin3_ast_kind_of(ast, operand) == ODIN3_AST_BINARY &&
+           (sub == ODIN3_AST_BINARY_AND || sub == ODIN3_AST_BINARY_OR) &&
+           odin3_ast_loc(ast, operand).v == odin3_ast_loc(ast, node).v;
+}
+
 static bool pc_sub_spelled(const pc_oracle *orc, odin3_ast_id node, odin3_bytes tok) {
     const odin3_ast *ast = orc->read->ast;
+    if (pc_binary_not(ast, node)) {
+        return true; /* checked as its operand */
+    }
     if (odin3_ast_kind_of(ast, node) == ODIN3_AST_EVENT_EXPR &&
         odin3_ast_sub(ast, node) == ODIN3_AST_EVENT_EXPR_NONE) {
         return true; /* a plain expression event */

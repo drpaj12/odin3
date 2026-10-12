@@ -88,6 +88,12 @@ odin3_status vp_binary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark,
     return operator_node(ctx, mark, at, spec, out);
 }
 
+odin3_status vp_binary_not(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t spec,
+                           uint32_t *out) {
+    odin3_status st = operator_node(ctx, mark, at, spec, out);
+    return st == ODIN3_OK ? operator_node(ctx, mark, at, VP_UNARY(NOT), out) : st;
+}
+
 odin3_status vp_ternary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t *out) {
     return operator_node(ctx, mark, at, VP_SPEC(ODIN3_AST_TERNARY, 0), out);
 }

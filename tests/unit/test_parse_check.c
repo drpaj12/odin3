@@ -30,7 +30,8 @@ enum { PATH_BUF = 1024 };
 
 /* Line 6 holds `assign z = a & b;`; every construct the faults below touch has its own line.
  * Module mc (lines 16-24) adds a macro use (line 18: a BINARY whose first operand lies in the
- * expansion buffer) and a metacomment (line 20). */
+ * expansion buffer) and a metacomment (line 20). Module nn (lines 25-28) holds a binary `~&` (line
+ * 26: UNARY[~] over BINARY[&], both at `a`) beside a written `~(a | b)` (line 27). */
 static const char k_source[] = "// the oracle's fixture\n"
                                "module leaf #(parameter W = 1) (input a, output y);\n"
                                "  assign y = a;\n"
@@ -54,6 +55,10 @@ static const char k_source[] = "// the oracle's fixture\n"
                                "      0: y = a;\n"
                                "      default: y = b;\n"
                                "    endcase\n"
+                               "endmodule\n"
+                               "module nn (input a, b, output y, z);\n"
+                               "  assign y = a ~& b;\n"
+                               "  assign z = ~(a | b);\n"
                                "endmodule\n";
 
 static char cwd[PATH_BUF];
@@ -202,6 +207,21 @@ static void test_clean_file_passes(void) {
     TEST_ASSERT_TRUE(rd.tokens.len > 0);
     TEST_ASSERT_TRUE(rd.stream.len > 0);
     expect_pass();
+}
+
+/* A binary `~&` reads as UNARY[~] over BINARY[&] at the left operand (2C Task 10): it passes as
+ * its operand; moved one token right, to the `~&`, it no longer does. */
+static void test_binary_nand_and_its_shifted_unary(void) {
+    odin3_ast_id unary = find(ODIN3_AST_UNARY, NULL, 1);
+    odin3_ast_id binary = odin3_ast_child(rd.ast, unary, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_BINARY, odin3_ast_kind_of(rd.ast, binary));
+    TEST_ASSERT_EQUAL_UINT32(odin3_ast_loc(rd.ast, binary).v, odin3_ast_loc(rd.ast, unary).v);
+    expect_pass();
+    uint32_t i = token_at(odin3_ast_loc(rd.ast, unary));
+    set_range(unary, token(i + 1)->loc, odin3_ast_end(rd.ast, unary));
+    const char *const needles[] = {"t.v:26:16: error: location oracle: UNARY",
+                                   "starts at '~&', which does not spell it", NULL};
+    expect_fail(needles);
 }
 
 /* `a` of `a & b` moved one token right: it now starts at '&', which does not spell it. */
@@ -410,5 +430,6 @@ int main(void) {
     RUN_TEST(test_child_outside_parent_in_the_stream);
     RUN_TEST(test_stream_length_mismatch);
     RUN_TEST(test_token_loc_off_its_offset);
+    RUN_TEST(test_binary_nand_and_its_shifted_unary);
     return UNITY_END();
 }

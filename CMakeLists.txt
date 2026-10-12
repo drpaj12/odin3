@@ -243,8 +243,9 @@ target_include_directories(odin3_core PRIVATE ${_gen})
 # trailing context, yyless(0), YY_DECL: no warning; with 2C Task 4's grammar core, 353
 # states, YYMALLOC/YYFREE through the allocation hook, with Task 5's expressions, 488
 # states and the precedence table, with Task 6's statements, 763 states and the
-# dangling-else precedence, and with Task 7's instantiation, gates and generate, 941 states:
-# still none but the one below). One flag, for the parser only:
+# dangling-else precedence, with Task 7's instantiation, gates and generate, 941 states, and
+# with Task 10's binary ~& and ~|, 947 states (gcc 13): still none but the one below). One flag,
+# for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
@@ -909,6 +910,33 @@ if(BUILD_TESTING)
                     --elaborate $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
         set_tests_properties(${_handover_test} PROPERTIES LABELS verilog SKIP_RETURN_CODE 77)
     endforeach()
+
+    # 2C §7.4 (plan Task 10): the corpus sweeps through parse-corpus, one file at a time, smallest
+    # first: every micro against tests/verilog/micro_expect_fail.txt; every VTR and Koios
+    # benchmark together when VTR_ROOT is set at configure time (koios/lenet.v last, point (n));
+    # every committed BLIF through odin3-write --verilog (Review Focus 1). They are heavy sweeps
+    # (label `sweep`, outside the -j4 gate): parse-corpus --heavy skips them with 77 unless
+    # ODIN3_HEAVY_OK=1, so run them as `ODIN3_HEAVY_OK=1 ctest --preset release -L sweep` inside
+    # the heavy slice. Switch them to odin3_add_sweep_test() (2E plan C1) when 2E-1 lands it.
+    set(_parse_corpus ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/parse_corpus.py
+                      --heavy --check $<TARGET_FILE:odin3-parse-check>)
+    add_test(NAME verilog_micro_parse
+        COMMAND ${_parse_corpus}
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/verilog/micro_expect_fail.txt
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+    add_test(NAME verilog_writer_parse
+        COMMAND ${_parse_corpus} --writer $<TARGET_FILE:odin3-write>
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set(_parse_sweeps verilog_micro_parse verilog_writer_parse)
+    if(DEFINED ENV{VTR_ROOT})
+        set(_vtr_verilog $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog)
+        file(GLOB _vtr_benchmarks ${_vtr_verilog}/*.v ${_vtr_verilog}/koios/*.v)
+        add_test(NAME verilog_vtr_parse
+            COMMAND ${_parse_corpus} --root ${_vtr_verilog} ${_vtr_benchmarks})
+        list(APPEND _parse_sweeps verilog_vtr_parse)
+    endif()
+    set_tests_properties(${_parse_sweeps} PROPERTIES LABELS sweep RUN_SERIAL TRUE
+                         SKIP_RETURN_CODE 77 TIMEOUT 43200)
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"

@@ -3,21 +3,40 @@
  * throughput on mcml.v, the 200k-node mcml memory estimate, and a 2M-node AST (build, walk, cursor,
  * check FULL with and without locations, destroy). Run it from a Release build; smallest first.
  * Usage: bench_ast [path-to-mcml.v]   (default $VTR_ROOT/vtr_flow/benchmarks/verilog/mcml.v)
+ *
+ * bench_ast --parse <file>... (2C spec §7.6, plan Task 10): each file, smallest first, in a child
+ * process of its own (so the peak RSS is the file's): the 2B preprocessor and the 2C parser on a
+ * fresh design, timed separately, then check FULL; then `read_verilog --parse-only`'s reader
+ * (odin3_read_verilog_files, steps 1-7) on another fresh design, timed end to end. One line per
+ * file (bytes, nodes, comments, odin3_ast_bytes_reserved, odin3_srcman_bytes_reserved, strtab
+ * growth, the times, peak RSS), then the targets: mcml.v AST + srcman <= 20 MB and parse-only
+ * <= 1 s, and the files given in <= 5 s in total (read_verilog end to end; the target is
+ * for the .v files of $VTR_ROOT/vtr_flow/benchmarks/verilog; koios times are reported only,
+ * point (n)).
  */
 #include "ast/ast.h"
 #include "ast/ast_internal.h"
 #include "ast/check.h"
 #include "ast/srcman.h"
+#include "frontends/project/paths.h"
+#include "frontends/verilog/parser.h"
+#include "frontends/verilog/preproc.h"
+#include "frontends/verilog/read_verilog.h"
 #include "ir/design.h"
 #include "util/alloc.h"
 #include "util/log.h"
+#include "util/str.h"
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 enum {
     MCML_BYTES = 650837,
@@ -534,12 +553,232 @@ static int bench_big(void) {
     return rc;
 }
 
+/* --- (4) --parse: the 2C parser on real files (spec §7.6) ----------------------------------- */
+
+enum { PARSE_MAX_FILES = 1024, PARSE_PATH_BYTES = 4096 };
+
+static const double PARSE_ONLY_TARGET = 1.0;
+static const double SET_TARGET = 5.0;
+static const double MEMORY_TARGET = 20e6;
+
+/* What one file measured (the child's report through the pipe). */
+typedef struct parse_result {
+    int status; /* 0 ok */
+    uint32_t nodes, comments, strings;
+    uint64_t bytes, ast_bytes, sm_bytes, string_bytes;
+    double pp_secs, parse_secs, check_secs, read_secs;
+    long rss_kib;
+} parse_result;
+
+typedef struct parse_file {
+    const char *path;
+    long size;
+} parse_file;
+
+static int by_size(const void *lhs, const void *rhs) {
+    const parse_file *left = lhs;
+    const parse_file *right = rhs;
+    if (left->size != right->size) {
+        return left->size < right->size ? -1 : 1;
+    }
+    return strcmp(left->path, right->path);
+}
+
+/* The design-file source of path (given as given, resolved against the working directory as
+ * read_verilog does, library work). */
+static int parse_source(odin3_design *design, const char *path, odin3_pp_source *src) {
+    char cwd[PARSE_PATH_BYTES];
+    odin3_strbuf resolved;
+    odin3_strbuf_init(&resolved);
+    *src = (odin3_pp_source){0};
+    int rc = getcwd(cwd, sizeof cwd) == NULL ||
+             odin3_path_resolve((odin3_path_join){odin3_bytes_cstr(cwd), odin3_bytes_cstr(path)},
+                                &resolved) != ODIN3_OK ||
+             odin3_design_intern(design, odin3_bytes_cstr(path), &src->given) != ODIN3_OK ||
+             odin3_design_intern(design, (odin3_bytes){resolved.data, resolved.len},
+                                 &src->resolved) != ODIN3_OK ||
+             odin3_design_intern(design, odin3_bytes_cstr("work"), &src->library) != ODIN3_OK;
+    odin3_strbuf_free(&resolved);
+    return rc;
+}
+
+/* The strings interned since count `from`: how many and their bytes. */
+static void strtab_growth(const odin3_design *design, size_t from, parse_result *res) {
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    size_t count = odin3_strtab_count(tab);
+    res->strings = (uint32_t)(count - from);
+    for (size_t id = from; id < count; id++) {
+        res->string_bytes += odin3_strtab_len(tab, (uint32_t)id);
+    }
+}
+
+/* Preprocess, parse, seal and check one file on design, each timed. */
+static int parse_staged(odin3_design *design, const odin3_pp_source *src, parse_result *res) {
+    odin3_pp *pp = NULL;
+    odin3_ast *ast = NULL;
+    odin3_pp_stream stream;
+    odin3_ast_id unit = {0};
+    odin3_vl_run run;
+    odin3_vl_run_init(&run, design);
+    double start = now_seconds();
+    int rc = odin3_pp_create(design, &(odin3_pp_config){0}, &pp) != ODIN3_OK ||
+             odin3_pp_run(pp, src, &stream) != ODIN3_OK;
+    double pp_done = now_seconds();
+    rc = rc ||
+         odin3_ast_create(design, ODIN3_AST_FORM_PARSED, (odin3_passrun_id){1}, &ast) != ODIN3_OK;
+    odin3_vp_stream vs = {stream.text, stream.stream, src->given};
+    rc = rc || odin3_verilog_parse_stream(&run, ast, &vs, &unit) != ODIN3_OK ||
+         odin3_ast_finish(ast) != ODIN3_OK;
+    double parsed = now_seconds();
+    rc = rc || odin3_ast_check(ast, ODIN3_CHECK_FULL) != ODIN3_OK;
+    res->pp_secs = pp_done - start;
+    res->parse_secs = parsed - pp_done;
+    res->check_secs = now_seconds() - parsed;
+    if (rc == 0) {
+        odin3_srcman *sm = NULL;
+        res->bytes = stream.text.len;
+        res->nodes = odin3_ast_node_end(ast).v - 1;
+        res->comments = odin3_ast_comment_count(ast);
+        res->ast_bytes = odin3_ast_bytes_reserved(ast);
+        rc = odin3_design_get_srcman(design, &sm) != ODIN3_OK;
+        res->sm_bytes = rc == 0 ? odin3_srcman_bytes_reserved(sm) : 0;
+    }
+    odin3_ast_destroy(ast);
+    odin3_pp_destroy(pp);
+    return rc;
+}
+
+/* read_verilog --parse-only's reader on a fresh design, end to end. */
+static int parse_read(const char *path, parse_result *res) {
+    odin3_design *design = odin3_design_create();
+    odin3_pp_source src;
+    odin3_ast *ast = NULL;
+    double start = now_seconds();
+    int rc = design == NULL || parse_source(design, path, &src) != 0 ||
+             odin3_read_verilog_files(
+                 design, &(odin3_rv_opts){&src, 1, (odin3_passrun_id){1}, NULL}, &ast) != ODIN3_OK;
+    res->read_secs = now_seconds() - start;
+    odin3_ast_destroy(ast);
+    odin3_design_destroy(design);
+    return rc;
+}
+
+/* The child's measurement of one file. */
+static void parse_measure(const char *path, parse_result *res) {
+    *res = (parse_result){0};
+    odin3_design *design = odin3_design_create();
+    odin3_pp_source src;
+    size_t strings = 0;
+    int rc = design == NULL;
+    if (rc == 0) {
+        strings = odin3_strtab_count(odin3_design_strtab(design));
+        rc = parse_source(design, path, &src);
+    }
+    rc = rc || parse_staged(design, &src, res);
+    if (rc == 0) {
+        strtab_growth(design, strings, res);
+    }
+    odin3_design_destroy(design);
+    rc = rc || parse_read(path, res);
+    res->status = rc;
+    res->rss_kib = max_rss_kib();
+}
+
+/* Runs parse_measure in a child; its result through a pipe. */
+static int parse_in_child(const char *path, parse_result *res) {
+    int fds[2];
+    if (pipe(fds) != 0) {
+        return 1;
+    }
+    (void)fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {
+        (void)close(fds[0]);
+        parse_measure(path, res);
+        ssize_t n = write(fds[1], res, sizeof *res);
+        _exit(n == (ssize_t)sizeof *res ? 0 : 1);
+    }
+    (void)close(fds[1]);
+    ssize_t got = pid > 0 ? read(fds[0], res, sizeof *res) : -1;
+    (void)close(fds[0]);
+    int wstatus = 0;
+    if (pid < 0 || waitpid(pid, &wstatus, 0) != pid || !WIFEXITED(wstatus) ||
+        WEXITSTATUS(wstatus) != 0 || got != (ssize_t)sizeof *res) {
+        return 1;
+    }
+    return res->status;
+}
+
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash != NULL ? slash + 1 : path;
+}
+
+/* One file: its bytes on disk and in the stream, the store, the times and the peak RSS. */
+static void parse_line(const parse_file *file, const parse_result *res) {
+    printf("%-32s %9ld B (stream %9" PRIu64 ")  nodes %8" PRIu32 "  comments %6" PRIu32
+           "  ast %10" PRIu64 " B  srcman %8" PRIu64 " B  strtab +%6" PRIu32 " (%7" PRIu64
+           " B)  pp %.3f s  parse %.3f s  check %.3f s  read_verilog %.3f s  peak RSS %ld KiB\n",
+           base_name(file->path), file->size, res->bytes, res->nodes, res->comments, res->ast_bytes,
+           res->sm_bytes, res->strings, res->string_bytes, res->pp_secs, res->parse_secs,
+           res->check_secs, res->read_secs, res->rss_kib);
+}
+
+/* mcml.v's two targets. */
+static void parse_mcml_targets(const parse_result *res) {
+    double memory = (double)(res->ast_bytes + res->sm_bytes);
+    printf("mcml.v AST + srcman               : %9.0f B  (target <= 20,000,000 B: %s)\n", memory,
+           verdict(memory <= MEMORY_TARGET));
+    printf("mcml.v parse-only (read_verilog)  : %9.3f s  (pp %.3f s + parse %.3f s; target <= "
+           "1.000 s: %s)\n",
+           res->read_secs, res->pp_secs, res->parse_secs,
+           verdict(res->read_secs <= PARSE_ONLY_TARGET));
+}
+
+static int bench_parse(int nfiles, char **paths) {
+    static parse_file files[PARSE_MAX_FILES];
+    if (nfiles <= 0 || nfiles > PARSE_MAX_FILES) {
+        fprintf(stderr, "bench_ast --parse: 1 to %d files\n", PARSE_MAX_FILES);
+        return 2;
+    }
+    for (int i = 0; i < nfiles; i++) {
+        struct stat sb;
+        files[i] = (parse_file){paths[i], stat(paths[i], &sb) == 0 ? (long)sb.st_size : 0};
+    }
+    qsort(files, (size_t)nfiles, sizeof files[0], by_size);
+    int rc = 0;
+    double total = 0;
+    double staged = 0;
+    for (int i = 0; i < nfiles; i++) {
+        parse_result res;
+        if (parse_in_child(files[i].path, &res) != 0) {
+            fprintf(stderr, "bench_ast --parse: %s failed\n", files[i].path);
+            rc = 1;
+            continue;
+        }
+        parse_line(&files[i], &res);
+        total += res.read_secs;
+        staged += res.pp_secs + res.parse_secs;
+        if (strcmp(base_name(files[i].path), "mcml.v") == 0) {
+            parse_mcml_targets(&res);
+        }
+    }
+    printf("%d files, read_verilog total     : %9.3f s  (pp + parse %.3f s; target for "
+           "verilog/*.v <= 5.000 s: %s)\n",
+           nfiles, total, staged, verdict(rc == 0 && total <= SET_TARGET));
+    return rc;
+}
+
 static int quiet_run(void) {
     odin3_log_set_level(ODIN3_LOG_ERROR);
     return 0;
 }
 
 int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "--parse") == 0) {
+        (void)quiet_run();
+        return bench_parse(argc - 2, argv + 2);
+    }
     char path[1024];
     if (argc > 1) {
         (void)snprintf(path, sizeof path, "%s", argv[1]);
