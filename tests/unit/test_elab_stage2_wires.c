@@ -445,7 +445,7 @@ static void test_provenance(void) {
     const odin3_prov_record *rec = wire_prov(top, "w");
     expect_prov(rec, (prov_want){"t.v", 2, 15, 2, 16, "top"});
     TEST_ASSERT_EQUAL_UINT32(declarator_named(ast, "w").v, rec->ast);
-    TEST_ASSERT_EQUAL_UINT32(rs.ctx.run.v == 0 ? rec->run.v : rs.ctx.run.v, rec->run.v);
+    TEST_ASSERT_EQUAL_UINT32(1, rec->run.v); /* the read_verilog run */
     rec = wire_prov(top, "g[1].t");
     expect_prov(rec, (prov_want){"t.v", 5, 10, 5, 11, "top/g[1]"});
     TEST_ASSERT_EQUAL_STRING("top/g[0]", str_of(wire_prov(top, "g[0].t")->hier));
@@ -524,6 +524,30 @@ static void test_port_attributes(void) {
     odin3_node_id node = odin3_wire_port_node(top, wire_named(top, "a"));
     TEST_ASSERT_NOT_NULL(
         odin3_attr_get(top, (odin3_objref){ODIN3_OBJ_NODE, node.v}, id_of("keep")));
+}
+
+/* Non-ANSI ports: the attributes of the port declaration and of the net or variable declaration
+ * that merged into it land on the port's wire, and the port is created in header order. */
+static void test_non_ansi_port_attributes(void) {
+    read_clean("module top (a, b, c);\n  (* keep *) input a;\n  (* src = \"x\" *) output b;\n"
+               "  (* hello *) wire b;\n  (* keep *) output [1:0] c;\n  (* hi *) wire [1:0] c;\n"
+               "endmodule\n",
+               ODIN3_KEEP_AST_NONE);
+    odin3_module *top = module_named("top");
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_module_port_count(top));
+    expect_wire(top, "c", (wire_shape){1, 0, false});
+    static const struct {
+        attr_ref ref;
+        bool present;
+    } k_cases[] = {{{"a", "keep"}, true},  {{"b", "src"}, true}, {{"b", "hello"}, true},
+                   {{"c", "keep"}, true},  {{"c", "hi"}, true},  {{"a", "hello"}, false},
+                   {{"b", "keep"}, false}, {{"c", "src"}, false}};
+    for (size_t index = 0; index < sizeof k_cases / sizeof k_cases[0]; index++) {
+        const odin3_value *val = wire_attr(top, k_cases[index].ref);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(k_cases[index].present, val != NULL, k_cases[index].ref.key);
+    }
+    TEST_ASSERT_EQUAL_STRING("x", str_of(wire_attr(top, (attr_ref){"b", "src"})->str));
+    TEST_ASSERT_EQUAL_INT64(1, wire_attr(top, (attr_ref){"b", "hello"})->i);
 }
 
 static void test_module_attributes(void) {
@@ -1107,13 +1131,13 @@ static uint32_t port_node(const abi_store *store) {
     return node_of(store->ast, spec, kids, 2);
 }
 
-/* `wire [3:0] w;` at offsets 30 .. 44 (the DECLARATOR w at 41). */
-static uint32_t net_node(const abi_store *store) {
+/* `wire [3:0] <name>;` at offsets 30 .. 44 (the DECLARATOR at 41). */
+static uint32_t net_node(const abi_store *store, const char *name) {
     uint32_t bounds[2] = {int_node(store, (int_req){36, 3}), int_node(store, (int_req){38, 0})};
     odin3_ast_spec range_spec = {
         .kind = ODIN3_AST_RANGE, .loc = loc_at(store, 35), .end = loc_at(store, 40)};
     uint32_t kids[4] = {0, node_of(store->ast, range_spec, bounds, 2), 0,
-                        declarator_node(store, "w", 41)};
+                        declarator_node(store, name, 41)};
     odin3_ast_spec spec = {.kind = ODIN3_AST_NET_DECL,
                            .sub = ODIN3_AST_NET_DECL_WIRE,
                            .loc = loc_at(store, 30),
@@ -1121,9 +1145,9 @@ static uint32_t net_node(const abi_store *store) {
     return node_of(store->ast, spec, kids, 4);
 }
 
-/* The store `module <name> (input a); wire [3:0] w; endmodule` on the FILE buffer adapter.sv,
- * held by rs.design with a pass run of its own, sealed. */
-static abi_store build_store(const char *module_name) {
+/* A new elaborated store held by rs.design under a pass run of its own, over a FILE buffer
+ * adapter.sv. */
+static abi_store open_store(void) {
     odin3_pass_ctx ctx;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_pass_run_begin(rs.design, et_intern(&rs, "adapter"), &ctx));
@@ -1135,17 +1159,70 @@ static abi_store build_store(const char *module_name) {
     odin3_srcfile_spec file = {.name = name_id(out.ast, "adapter.sv"), .len = 200};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_build_file(sm, &file, &out.buf));
     out.base = loc_at(&out, 0);
-    uint32_t list_kids[1] = {port_node(&out)};
-    uint32_t list = node_of(out.ast, (odin3_ast_spec){.kind = ODIN3_AST_LIST}, list_kids, 1);
-    uint32_t module_kids[3] = {0, list, net_node(&out)};
+    return out;
+}
+
+enum { MODULE_ITEMS = 4 };
+
+/* `module <name> (input a); wire [3:0] w; <extra items> endmodule`; the extras follow the net. */
+static uint32_t module_node(const abi_store *store, const char *name, const uint32_t *extra,
+                            uint32_t count) {
+    uint32_t list_kids[1] = {port_node(store)};
+    uint32_t list = node_of(store->ast, (odin3_ast_spec){.kind = ODIN3_AST_LIST}, list_kids, 1);
+    uint32_t kids[3 + MODULE_ITEMS] = {0, list, net_node(store, "w")};
+    TEST_ASSERT_TRUE(count <= MODULE_ITEMS);
+    for (uint32_t index = 0; index < count; index++) {
+        kids[3 + index] = extra[index];
+    }
     odin3_ast_spec named = {.kind = ODIN3_AST_MODULE,
-                            .loc = out.base,
-                            .end = out.base + 60,
-                            .name = name_id(out.ast, module_name)};
-    uint32_t module = node_of(out.ast, named, module_kids, 3);
-    named.kind = ODIN3_AST_UNIT;
-    (void)node_of(out.ast, named, &module, 1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_finish(out.ast));
+                            .loc = store->base,
+                            .end = store->base + 60,
+                            .name = name_id(store->ast, name)};
+    return node_of(store->ast, named, kids, 3 + count);
+}
+
+/* The UNIT named unit_name over the modules, then the seal. */
+static void seal_store(const abi_store *store, const char *unit_name, const uint32_t *modules,
+                       uint32_t count) {
+    odin3_ast_spec unit = {.kind = ODIN3_AST_UNIT,
+                           .loc = store->base,
+                           .end = store->base + 60,
+                           .name = name_id(store->ast, unit_name)};
+    (void)node_of(store->ast, unit, modules, count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_finish(store->ast));
+}
+
+/* The store `module <name> (input a); wire [3:0] w; endmodule` on the FILE buffer adapter.sv,
+ * held by rs.design with a pass run of its own, sealed. */
+static abi_store build_store(const char *module_name) {
+    abi_store out = open_store();
+    uint32_t module = module_node(&out, module_name, NULL, 0);
+    seal_store(&out, module_name, &module, 1);
+    return out;
+}
+
+/* A richer store: `top` (input a; wire [3:0] w; a generate block g[1] holding `(* keep *) wire
+ * [3:0] t;`) and `sub` (input a; wire [3:0] w), so stage 2 meets a scope, an attribute and two
+ * modules. */
+static abi_store build_rich_store(void) {
+    abi_store out = open_store();
+    uint32_t inner = net_node(&out, "t");
+    uint32_t keep = node_of(out.ast,
+                            (odin3_ast_spec){.kind = ODIN3_AST_ATTR,
+                                             .loc = loc_at(&out, 25),
+                                             .end = loc_at(&out, 29),
+                                             .name = name_id(out.ast, "keep")},
+                            (uint32_t[1]){0}, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_build_attach(out.ast, inner, &keep, 1));
+    uint32_t gen_kids[2] = {int_node(&out, (int_req){26, 1}), inner};
+    uint32_t gen = node_of(out.ast,
+                           (odin3_ast_spec){.kind = ODIN3_AST_GEN_BLOCK,
+                                            .loc = loc_at(&out, 24),
+                                            .end = loc_at(&out, 46),
+                                            .name = name_id(out.ast, "g")},
+                           gen_kids, 2);
+    uint32_t modules[2] = {module_node(&out, "top", &gen, 1), module_node(&out, "sub", NULL, 0)};
+    seal_store(&out, "top", modules, 2);
     return out;
 }
 
@@ -1176,6 +1253,21 @@ static void test_abi_elaborate(void) {
     expect_ir_ok();
     /* a second call: the store has its symbol table now */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(rs.design, store.ast, NULL));
+}
+
+/* The richer store: both modules, the generate block's scoped wire with its attribute. */
+static void test_abi_rich_store(void) {
+    abi_setup();
+    abi_store store = build_rich_store();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_ast_elaborate(rs.design, store.ast, NULL),
+                                  et_log(&rs));
+    odin3_module *top = module_named("top");
+    expect_wire(top, "g[1].t", (wire_shape){3, 0, false});
+    TEST_ASSERT_NOT_NULL(wire_attr(top, (attr_ref){"g[1].t", "keep"}));
+    TEST_ASSERT_EQUAL_STRING("top/g[1]", str_of(wire_prov(top, "g[1].t")->hier));
+    expect_wire(module_named("sub"), "w", (wire_shape){3, 0, false});
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_id_of(top).v, odin3_design_top(rs.design).v);
+    expect_ir_ok();
 }
 
 static void test_abi_options_and_misuse(void) {
@@ -1256,10 +1348,16 @@ static void test_abi_module_named_like_cell_type(void) {
 /* --- out of memory -----------------------------------------------------------------------------
  */
 
+/* What the quiet sink saw of a run (it allocates nothing, so an injected failure is not its). */
+static bool g_saw_missing_file;
+static bool g_saw_pending_instance;
+
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
     (void)level;
-    (void)msg;
     (void)user;
+    g_saw_missing_file |= strstr(msg, "missing_file:") != NULL;
+    g_saw_pending_instance |=
+        strstr(msg, "elaboration is not available yet (2D): 'INSTANTIATION'") != NULL;
 }
 
 static const char k_three[] =
@@ -1300,10 +1398,16 @@ static void expect_ir_ok_quiet(void) {
 /* One run of the whole read with the limit-th allocation failing. */
 static odin3_status read_failing_at(long limit) {
     fresh_quiet_design();
+    g_saw_missing_file = false;
+    g_saw_pending_instance = false;
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
-    TEST_ASSERT_TRUE(st == ODIN3_ERR_NO_MEMORY || st == ODIN3_ERR_PARSE);
+    /* PARSE is only ever 2C's missing_file (the open 2C item: an injected failure in the
+     * preprocessor reads as a missing file) or the read's own pending instances; any other PARSE
+     * is a stage-2 failure returned as a user error. */
+    TEST_ASSERT_TRUE(st == ODIN3_ERR_NO_MEMORY ||
+                     (st == ODIN3_ERR_PARSE && (g_saw_missing_file || g_saw_pending_instance)));
     expect_ir_ok_quiet();
     return st;
 }
@@ -1321,7 +1425,8 @@ static void test_oom_sweep(void) {
     for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
         odin3_status st = read_failing_at(limit);
         failures += st == ODIN3_ERR_NO_MEMORY ? 1U : 0U;
-        settled = st == ODIN3_ERR_PARSE && read_complete() ? settled + 1 : 0;
+        settled =
+            st == ODIN3_ERR_PARSE && g_saw_pending_instance && read_complete() ? settled + 1 : 0;
     }
     TEST_ASSERT_EQUAL_UINT32(OOM_SETTLE, settled);
     TEST_ASSERT_GREATER_THAN_UINT32(100, failures);
@@ -1330,7 +1435,7 @@ static void test_oom_sweep(void) {
 /* One run of the ABI entry on a fresh store with the limit-th allocation failing. */
 static odin3_status elaborate_failing_at(long limit) {
     fresh_quiet_design();
-    abi_store store = build_store("top");
+    abi_store store = build_rich_store();
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_ast_elaborate(rs.design, store.ast, NULL);
     odin3_util_set_alloc_fail_after(-1);
@@ -1371,6 +1476,7 @@ int main(void) {
     RUN_TEST(test_provenance_nested);
     RUN_TEST(test_attributes);
     RUN_TEST(test_port_attributes);
+    RUN_TEST(test_non_ansi_port_attributes);
     RUN_TEST(test_module_attributes);
     RUN_TEST(test_top_and_summary);
     RUN_TEST(test_summary_specialization_count);
@@ -1397,6 +1503,7 @@ int main(void) {
     RUN_TEST(test_context_account);
     RUN_TEST(test_deterministic_rtlil);
     RUN_TEST(test_abi_elaborate);
+    RUN_TEST(test_abi_rich_store);
     RUN_TEST(test_abi_options_and_misuse);
     RUN_TEST(test_abi_parsed_store);
     RUN_TEST(test_abi_foreign_store);
