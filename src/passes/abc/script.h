@@ -38,7 +38,8 @@ typedef enum odin3_abc_class {
     ODIN3_ABC_CLASS_PRINT,     /* printing: output logged at INFO */
     ODIN3_ABC_CLASS_FILES,     /* refused: reads or writes files */
     ODIN3_ABC_CLASS_PROCESS,   /* refused: controls the ABC process */
-    ODIN3_ABC_CLASS_LATCHES    /* refused: retimes or changes initial values (PHASE3 #12) */
+    ODIN3_ABC_CLASS_LATCHES,   /* refused: retimes or changes initial values (PHASE3 #12) */
+    ODIN3_ABC_CLASS_CRASH      /* refused: crashes ABC at the pin (Task 10 review erratum) */
 } odin3_abc_class;
 
 /* A command's effect on the spaces (§7.5's "Effect" column, in row order; §7.3 step 11). */
@@ -58,20 +59,23 @@ typedef enum odin3_abc_effect {
  * One row of the allow-list table. cls is an odin3_abc_class and effect an odin3_abc_effect.
  * file_opts lists the option letters that read or write a file, or that take a string, read at
  * the pin from the command's Extra_UtilGetopt handling, usage text and the code each option
- * enables ("" for none); §7.3 step 9 refuses them, flags included, even with a numeric value. A
- * refused row has effect NONE and file_opts "".
+ * enables ("" for none); §7.3 step 9 refuses them, flags included, even with a numeric value.
+ * crash_opts lists the option letters with which the command crashes ABC at the pin (a SIGSEGV,
+ * which kills the whole process); step 9 refuses them too ("" for none). A refused row has effect
+ * NONE, file_opts "" and crash_opts "".
  */
 typedef struct odin3_abc_command_info {
     const char *name;
     uint8_t cls;
     uint8_t effect;
     const char *file_opts;
+    const char *crash_opts;
 } odin3_abc_command_info;
 
 /*
  * The row of the ABC command called name (an expanded word 0, never an alias): an allowed row
- * (class OPT, MAP, GIA or PRINT), a refused row (class FILES, PROCESS or LATCHES), or NULL for
- * "other" — an unlisted name, or a row of class OTHER (the table lists the commands that stop a
+ * (class OPT, MAP, GIA or PRINT), a refused row (class FILES, PROCESS, LATCHES or CRASH), or NULL
+ * for "other" — an unlisted name, or a row of class OTHER (the table lists the commands that stop a
  * refused abc.rc alias, §7.4, so that they are verified at the pin). Never allocates.
  */
 const odin3_abc_command_info *odin3_abc_command_find(const char *name);

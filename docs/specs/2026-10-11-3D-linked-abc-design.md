@@ -887,6 +887,7 @@ file as given, and nothing changes.
    - `is not allowed: abc scripts cannot read or write files`;
    - `is not allowed: abc scripts cannot control the ABC process`;
    - `is not allowed: it retimes or changes initial values (PHASE3 #12)`;
+   - `is not allowed: it crashes ABC at the pin (a3001b72)`;
    - `is not an allowed ABC command (3D spec §7.5)`.
 9. **Arguments.**
    - Each argument is an option `-[A-Za-z][A-Za-z0-9]*` or a number
@@ -899,6 +900,12 @@ file as given, and nothing changes.
      flags included, and even with a numeric value (a numeric word can name a file in the working
      directory): `<file>:<line>: option '-<x>' of '<cmd>' reads or writes a file or takes a string
      and is not allowed`.
+   - **Crash options.** `allow.c` also lists, per allowed command, the options with which it
+     crashes ABC at the pin (a SIGSEGV kills Odin III, since the guard of AB-6 covers only
+     `exit`/`abort`): `<file>:<line>: option '-<x>' of '<cmd>' crashes ABC at the pin (a3001b72) and
+     is not allowed`.
+     > *(Erratum, 3D Task 10 review fix round 2, 2026-10-12: crash options and the step 8 ending
+     > above are new; the coordinator ruled that anything crashing the pinned ABC is refused.)*
      > *(Erratum, 3D Task 10 review C1, 2026-10-12: the list was "options whose value is a file or
      > a string". Flags and numeric options write files too: `print_stats -b`, `rewrite -x`,
      > `resub -P`/`-D`, `scorr -P`/`-e`/`-f` and `if -f`. The message changed with it, from
@@ -937,14 +944,16 @@ until the table follows.
   print_gates, `pl` print_level, `plat` print_latch, `pio` print_io, `pk` print_kmap, `pm`
   print_miter, `ps` print_stats, `psu` print_supp, `psy` print_symm, `pun`
   print_unate, `rw` rewrite, `rwz` rewrite -z, `rf` refactor, `rfz` refactor -z, `rs` resub, `rsz`
-  resub -z, `scl` scleanup, `sif` if -s, `st` strash, `sw` sweep.
+  resub -z, `scl` scleanup, `st` strash, `sw` sweep.
 - Refused (expansions as in `abc.rc`), files: `r`, `ra`, `rh`, `ri`, `rl`, `rb`, `rp`, `rt`, `rv`,
   `rvl`, `rsup`, `rlib`, `rlibc`, `rty`, `rlut`, `so`, `w`, `wa`, `wb`, `wc`, `wh`, `wl`, `wp`, `wv`.
   Process: `hi`, `q`, `sa`. Latches: `fr`, `r3`, `r3f`, `r3b`, `ret`, `dret`. Other: `cg`, `clp`,
   `cs`, `el`, `esd`, `fsto`, `fres`, `ft`, `ic`, `ren`, `re`, `rez`, `ssw`, `tr0`, `tr1`, `u`.
-  Option: `psb` (print_stats -b; `-b` writes `<spec>_best.blif`, §7.3 step 9).
+  Option: `psb` (print_stats -b; `-b` writes `<spec>_best.blif`, §7.3 step 9), `sif` (if -s;
+  `-s` crashes ABC at the pin, §7.3 step 9).
 
 > *(Erratum, 3D Task 10 review C1, 2026-10-12: `psb` moved from usable to refused.)*
+> *(Erratum, 3D Task 10 review fix round 2, 2026-10-12: `sif` moved from usable to refused.)*
 
 **Usable script aliases:**
 
@@ -997,12 +1006,20 @@ of AB-21.
 | `&st`, `&synch2`, `&dch` | `&` space | gia | gia := aig |
 | `&if` | `&` space | gia | gia := mapped |
 | `&mfs` | `&` space | gia | keeps |
-| the 32 `print_*` commands at the pin except `print_constr` and `print_status` (which take files); `&ps`; `time`; `echo` | printing | — | none (output logged at INFO) |
+| the 31 `print_*` commands at the pin except `print_constr` and `print_status` (which take files) and `print_box` (which crashes); `&ps`; `time`; `echo` | printing | — | none (output logged at INFO) |
 
 Agent defaults: the `print_*` set as listed, and `&ps` as the `&`-space print. Per command, the
 options that read or write a file, or take a string, are refused too (AB-21 step 9): `print_stats`
 `-b -d`, `rewrite -x`, `resub -P -D`, `scorr -P -e -f`, `if -S -J -f`, `&if -S -J` and `&ps -D`.
 
+Crash options, refused too (§7.3 step 9): `if -s` and `&if -s` (`If_CutLutBalanceEval`,
+ifDelay.c:387) and `&dch -m` (`Gia_ManChoiceMinLevel_rec`, giaEquiv.c:571). `print_box` crashes
+with any option (`If_LibBoxPrint` on the NULL box library, ifLibBox.c:350) and is refused with
+the class ending of §7.3 step 8.
+
+> *(Erratum, 3D Task 10 review fix round 2, 2026-10-12: crash options and the `print_box` refusal
+> are new. They were found by running each allowed command once per option on one small design,
+> so the list is not complete; AB-21's fuzzer (Task 11) or a later task should widen it.)*
 > *(Erratum, 3D Task 10 review C1, 2026-10-12: the option list grew from `-S -J` of `if`/`&if` and
 > `&ps -D`. Each allowed command's options were read at the pin, and each was also run once in an
 > empty directory; the Task 10 report has the audit.)*
@@ -1012,7 +1029,8 @@ Refused, among others:
 - **files:** `read*`, `write*`, `&r`, `&w`, `source`, `load`, `save`;
 - **process:** `quit` (which returns −1 and does not call `exit()`, `cmd.c:386`), `exit`, `cd`,
   `ls`, `alias`, `unalias`, `set`, `unset`, `history`, `load_plugin`;
-- **latches:** `retime`, `dretime`, `fretime`, `zero`, `init`, `undc`, `cycle` (P3-12).
+- **latches:** `retime`, `dretime`, `fretime`, `zero`, `init`, `undc`, `cycle` (P3-12);
+- **crashes:** `print_box` (fix round 2 erratum above).
 
 The classes are a table in `allow.c`; an unlisted name is "other".
 
