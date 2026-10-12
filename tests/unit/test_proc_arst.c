@@ -217,6 +217,9 @@ static void arst_fail(io test) {
     "    end\n"
 #define SYNC(kind, sig, lhs, rhs) "    sync " kind " " sig "\n      update " lhs " " rhs "\n"
 #define TAIL "  end\nend\n"
+#define K_E1A_Q                                                                                    \
+    "'q' is clocked by both 'clk' and 'rst'; a second edge event must be an asynchronous reset "   \
+    "tested by the block's only top-level 'if'"
 #define UNARY_PARAMS                                                                               \
     "    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n    parameter \\Y_WIDTH 1\n"
 #define BINARY_PARAMS                                                                              \
@@ -621,6 +624,56 @@ static void test_arst_assign_view(void) {
                   "end\n"});
 }
 
+/*
+ * arst_two_root_first_rst.il (2E Task 6 review I1): two top-level ifs, the first `if (rst)`. The
+ * loop runs only while the root has exactly one switch, so no reset is found and the clock
+ * pre-check reports E1a (Yosys: `Multiple edge sensitive events found for this signal!`).
+ */
+static void test_arst_two_root_switches(void) {
+    arst_fail((io){
+        PORTS_RST
+        "  wire input 5 \\en\n  wire output 6 \\p\n  wire \\t1\n  process $p\n"
+        "    assign \\t1 \\p\n" RST_SWITCH(
+            "rst") "    switch \\en\n      case 1'1\n        assign \\t1 \\d\n    end\n"
+                   "    sync posedge \\clk\n      update \\q \\t0\n      update \\p \\t1\n"
+                   "    sync posedge \\rst\n      update \\q \\t0\n      update \\p \\t1\n" TAIL,
+        "odin3: error: proc: module 'm': " K_E1A_Q});
+}
+
+/* arst_wide_root.il (review I1): a root switch on { x rst } is two bits wide, and check_signal
+ * needs one bit, so no reset is found: E1a, as Yosys. */
+static void test_arst_wide_root(void) {
+    arst_fail((io){PORTS_RST "  wire input 5 \\x\n  process $p\n"
+                             "    switch { \\x \\rst }\n"
+                             "      case 2'01\n        assign \\t0 1'0\n"
+                             "      case\n        assign \\t0 \\d\n"
+                             "    end\n" SYNC("posedge", "\\clk", "\\q", "\\t0")
+                                 SYNC("posedge", "\\rst", "\\q", "\\t0") TAIL,
+                   "odin3: error: proc: module 'm': " K_E1A_Q});
+}
+
+/*
+ * arst_dup_chain.il (review I1): t1 and t2 are both promoted to w, so the reset sync's
+ * { q2 q1 } <- { t2 t1 } reads w twice in the assign view; the reset branch's w <- 1'0 writes
+ * every position that holds w, giving 2'00 as in Yosys.
+ */
+static void test_arst_dup_chain(void) {
+    arst_run((io){"module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\d\n"
+                  "  wire output 4 \\q1\n  wire output 5 \\q2\n  wire \\t1\n  wire \\t2\n"
+                  "  wire \\w\n  process $p\n"
+                  "    assign \\t1 \\w\n    assign \\t2 \\w\n"
+                  "    switch \\rst\n"
+                  "      case 1'1\n        assign \\w 1'0\n"
+                  "      case\n        assign \\w \\d\n"
+                  "    end\n"
+                  "    sync posedge \\clk\n      update \\q1 \\t1\n      update \\q2 \\t2\n"
+                  "    sync posedge \\rst\n      update { \\q2 \\q1 } { \\t2 \\t1 }\n" TAIL,
+                  "  assign \\w \\d\n"
+                  "  sync high \\rst\n    update { \\q2 \\q1 } 2'00\n"
+                  "  sync posedge \\clk\n    update \\q1 \\t1\n    update \\q2 \\t2\n"
+                  "end\n"});
+}
+
 /* arst_reorder.il: a level sync and an always sync arrive in the body; after arst the syncs are
  * the level ones (the old first, then the reset found), the edge, then the always sync. */
 static void test_arst_reorder(void) {
@@ -791,11 +844,15 @@ static void test_clocks_e1b(void) {
 }
 
 /* clocks_e5.il: a body that arrives with a level sync only. */
+static const char *const k_e5_text =
+    "module \\m\n  wire input 1 \\en\n  wire input 2 \\d\n"
+    "  wire output 3 \\q\n  process $p\n" SYNC("high", "\\en", "\\q", "\\d") TAIL;
+
+static const char *const k_e5_error = "odin3: error: proc: module 'm': 'q' is assigned only under "
+                                      "level events; a register needs a clock edge";
+
 static void test_clocks_e5(void) {
-    arst_fail((io){"module \\m\n  wire input 1 \\en\n  wire input 2 \\d\n  wire output 3 \\q\n"
-                   "  process $p\n" SYNC("high", "\\en", "\\q", "\\d") TAIL,
-                   "odin3: error: proc: module 'm': 'q' is assigned only under level events; a "
-                   "register needs a clock edge"});
+    arst_fail((io){k_e5_text, k_e5_error});
 }
 
 /* clocks_ok_self.il (`always @(posedge a) a <= d;`) and clocks_ok_const.il (`@(posedge 1'b1)`):
@@ -1022,6 +1079,66 @@ static void test_arst_oom(void) {
     TEST_ASSERT_TRUE(fail > 1); /* at least one injection failed */
 }
 
+/*
+ * One injection over arst, E4 and the clocks on an erroneous text (2E Task 6 review M1): either
+ * ODIN3_ERR_NO_MEMORY with no error logged (no half-built message), or the whole error; the
+ * scratch index is clear either way. True once the error is reached.
+ */
+static bool oom_error_step(io test, long fail) {
+    fixture fx;
+    fx_open(&fx, test.text);
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_pw_arst(&fx.mctx, &fx.pw);
+    st = st == ODIN3_OK ? odin3_pw_check_memwr(&fx.mctx, &fx.pw) : st;
+    st = st == ODIN3_OK ? odin3_pw_check_clocks(&fx.mctx, &fx.pw) : st;
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_ERR_PARSE || st == ODIN3_ERR_NO_MEMORY, "status");
+    expect_scratch_clear(&fx);
+    if (st == ODIN3_ERR_PARSE) {
+        expect_one_error(test.want);
+    } else {
+        char errs[1][LOG_TEXT];
+        TEST_ASSERT_EQUAL_size_t(0, errors_seen(errs, 1));
+        TEST_ASSERT_EQUAL_UINT32(0, fx.stats.errors);
+    }
+    fx_close(&fx);
+    return st == ODIN3_ERR_PARSE;
+}
+
+static void oom_error_sweep(io test) {
+    bool done = false;
+    long fail = 0;
+    for (; fail < OOM_LIMIT && !done; fail++) {
+        done = oom_error_step(test, fail);
+    }
+    TEST_ASSERT_TRUE(done);
+    TEST_ASSERT_TRUE(fail > 1); /* at least one injection failed */
+}
+
+/* The OOM sweep over the error paths: E2 and E3 (reset_error's names), E1a, E1b and E5 (the
+ * clock pre-check's bits and names) and E4 (its scratch index). */
+static void test_errors_oom(void) {
+    static char e1a[TEXT_MAX];
+    static char e1b[TEXT_MAX];
+    int len = snprintf(e1a, TEXT_MAX, "odin3: error: proc: module 'm': %s", k_e1a_msg);
+    TEST_ASSERT_TRUE(len > 0 && len < TEXT_MAX);
+    len = snprintf(e1b, TEXT_MAX, "odin3: error: proc: module 'm': %s", k_e1b_msg);
+    TEST_ASSERT_TRUE(len > 0 && len < TEXT_MAX);
+    oom_error_sweep((io){k_promoted_text, k_promoted_e2});
+    oom_error_sweep((io){k_e1a_text, e1a});
+    oom_error_sweep((io){k_e1b_text, e1b});
+    oom_error_sweep((io){k_e5_text, k_e5_error});
+    oom_error_sweep((io){MEMWR_TEXT("WR_ADDR", MEMWR_RST),
+                         "odin3: error: proc: module 'm': memory 'm' is written in an always block "
+                         "with asynchronous reset 'rst'"});
+    odin3_proc_limits limits = odin3_proc_limits_now();
+    limits.max_arst_rounds = ONE_ROUND;
+    odin3_proc_test_set_limits(&limits);
+    oom_error_sweep((io){k_rounds_text, "odin3: error: proc: module 'm': asynchronous reset 'rst' "
+                                        "does not settle the value of 'q' after 1 substitutions"});
+    odin3_proc_test_set_limits(NULL);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_arst_posedge);
@@ -1037,6 +1154,9 @@ int main(void) {
     RUN_TEST(test_arst_switch_order);
     RUN_TEST(test_arst_later_cases);
     RUN_TEST(test_arst_assign_view);
+    RUN_TEST(test_arst_two_root_switches);
+    RUN_TEST(test_arst_wide_root);
+    RUN_TEST(test_arst_dup_chain);
     RUN_TEST(test_arst_reorder);
     RUN_TEST(test_arst_apply_promoted_e2);
     RUN_TEST(test_arst_nested_unknown);
@@ -1052,5 +1172,6 @@ int main(void) {
     RUN_TEST(test_located);
     RUN_TEST(test_arst_stop_after);
     RUN_TEST(test_arst_oom);
+    RUN_TEST(test_errors_oom);
     return UNITY_END();
 }
