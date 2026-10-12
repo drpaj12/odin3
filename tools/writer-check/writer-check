@@ -554,7 +554,12 @@ main() {
         WC_DOT_TIMEOUT WC_NORM
     export WC_RESUME=$resume WC_KEEP=$keep WC_RES=$out/res WC_TMP=$out/tmp WC_WRITE_ASAN=0
     # WC_REAL_WRITE: the real driver behind a wrapper (the negative CTest's write-corrupt).
-    if ldd "${WC_REAL_WRITE:-$WC_WRITE}" 2>/dev/null | grep -q -E 'libasan|libclang_rt.asan'; then
+    # ldd's output is captured first: `ldd | grep -q` under pipefail fails whenever grep exits
+    # on the match before ldd has finished writing (SIGPIPE), which under load missed the ASan
+    # driver, capped it with ulimit -v and made every file a WRITEFAIL.
+    local libs
+    libs=$(ldd "${WC_REAL_WRITE:-$WC_WRITE}" 2>/dev/null || true)
+    if grep -q -E 'libasan|libclang_rt.asan' <<<"$libs"; then
         WC_WRITE_ASAN=1
     fi
     export -f now capped rss_of note_rss fail_word stubs is_multi_driver compare drop_self_buffers sort_statements expand_covers restore_bit0_names json_gate \
