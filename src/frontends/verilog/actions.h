@@ -351,6 +351,12 @@ odin3_status vp_unary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, 
 /* BINARY[spec] over at from the span at mark: left, the ATTRs, right. As vp_unary. */
 odin3_status vp_binary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t spec,
                        uint32_t *out);
+/* The binary `~&` and `~|` (not in A.8.6; Yosys and Odin II accept them, and Parmys-golden
+ * micros use them): BINARY[spec] (AND or OR) as vp_binary, then UNARY[~] over the same at with
+ * that BINARY as its operand — Yosys's own reading, `~(a & b)`, with no 2A sub-kind or ABI
+ * change. As vp_unary. */
+odin3_status vp_binary_not(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t spec,
+                           uint32_t *out);
 /* TERNARY over at from the span at mark: condition, the `?`'s ATTRs, then and else. As
  * vp_unary. */
 odin3_status vp_ternary(odin3_vp_ctx *ctx, const odin3_vp_loc *at, uint32_t mark, uint32_t *out);

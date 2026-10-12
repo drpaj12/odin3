@@ -1,0 +1,85 @@
+# generated: odin3-parse-check --write
+(MODULE:g1_region @G1_generate_region.v:2:1
+  _
+  (LIST @G1_generate_region.v:2:18
+    (PORT_DECL.input [IN_HEADER] @G1_generate_region.v:2:19
+      _
+      (DECLARATOR:clk @G1_generate_region.v:2:25
+        _))
+    (PORT_DECL.input [IN_HEADER] @G1_generate_region.v:2:30
+      (RANGE @G1_generate_region.v:2:36
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:2:37 3)
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:2:39 0))
+      (DECLARATOR:a @G1_generate_region.v:2:42
+        _))
+    (PORT_DECL.output [IN_HEADER] @G1_generate_region.v:2:45
+      (RANGE @G1_generate_region.v:2:52
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:2:53 3)
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:2:55 0))
+      (DECLARATOR:y @G1_generate_region.v:2:58
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @G1_generate_region.v:2:61
+      _
+      (DECLARATOR:q @G1_generate_region.v:2:72
+        _)))
+  (GENERATE @G1_generate_region.v:3:3
+    (GENVAR_DECL @G1_generate_region.v:4:5
+      (DECLARATOR:i @G1_generate_region.v:4:12
+        _))
+    (NET_DECL.wire @G1_generate_region.v:5:5
+      _
+      (RANGE @G1_generate_region.v:5:10
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:5:11 3)
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:5:13 0))
+      _
+      (DECLARATOR:t @G1_generate_region.v:5:16
+        _))
+    (CONT_ASSIGN @G1_generate_region.v:6:5
+      _
+      _
+      (NET_ASSIGN @G1_generate_region.v:6:12
+        (IDENT:t @G1_generate_region.v:6:12)
+        (UNARY.~ @G1_generate_region.v:6:16
+          (IDENT:a @G1_generate_region.v:6:17))))
+    (GEN_FOR @G1_generate_region.v:7:5
+      (BLOCKING_ASSIGN @G1_generate_region.v:7:10
+        (IDENT:i @G1_generate_region.v:7:10)
+        _
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:7:14 0))
+      (BINARY.< @G1_generate_region.v:7:17
+        (IDENT:i @G1_generate_region.v:7:17)
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:7:21 4))
+      (BLOCKING_ASSIGN @G1_generate_region.v:7:24
+        (IDENT:i @G1_generate_region.v:7:24)
+        _
+        (BINARY.+ @G1_generate_region.v:7:28
+          (IDENT:i @G1_generate_region.v:7:28)
+          (NUMBER.dec [SIGNED] @G1_generate_region.v:7:32 1)))
+      (GEN_BLOCK:g @G1_generate_region.v:7:35
+        _
+        (CONT_ASSIGN @G1_generate_region.v:8:7
+          _
+          _
+          (NET_ASSIGN @G1_generate_region.v:8:14
+            (SELECT.bit @G1_generate_region.v:8:14
+              (IDENT:y @G1_generate_region.v:8:14)
+              (IDENT:i @G1_generate_region.v:8:16)
+              _)
+            (SELECT.bit @G1_generate_region.v:8:21
+              (IDENT:t @G1_generate_region.v:8:21)
+              (IDENT:i @G1_generate_region.v:8:23)
+              _)))))
+    (ALWAYS.always @G1_generate_region.v:10:5
+      (TIMING_STMT @G1_generate_region.v:10:12
+        (EVENT_CONTROL @G1_generate_region.v:10:12
+          _
+          (EVENT_EXPR.posedge @G1_generate_region.v:10:14
+            (IDENT:clk @G1_generate_region.v:10:22)))
+        (NONBLOCKING_ASSIGN @G1_generate_region.v:11:7
+          (IDENT:q @G1_generate_region.v:11:7)
+          _
+          (SELECT.bit @G1_generate_region.v:11:12
+            (IDENT:a @G1_generate_region.v:11:12)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:11:14 0)
+            _)))))
+  (GENERATE @G1_generate_region.v:13:3))

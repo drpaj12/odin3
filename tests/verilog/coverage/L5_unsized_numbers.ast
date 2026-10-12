@@ -1,0 +1,80 @@
+# generated: odin3-parse-check --write
+(MODULE:l5_unsized @L5_unsized_numbers.v:2:1
+  _
+  (LIST @L5_unsized_numbers.v:2:19
+    (PORT_DECL.output [IN_HEADER] @L5_unsized_numbers.v:2:20
+      (RANGE @L5_unsized_numbers.v:2:27
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:28 31)
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:31 0))
+      (DECLARATOR:y1 @L5_unsized_numbers.v:2:34
+        _)
+      (DECLARATOR:y2 @L5_unsized_numbers.v:2:38
+        _)
+      (DECLARATOR:y3 @L5_unsized_numbers.v:2:42
+        _)
+      (DECLARATOR:y4 @L5_unsized_numbers.v:2:46
+        _)
+      (DECLARATOR:y5 @L5_unsized_numbers.v:2:50
+        _)
+      (DECLARATOR:y6 @L5_unsized_numbers.v:2:54
+        _))
+    (PORT_DECL.output [IN_HEADER] @L5_unsized_numbers.v:2:58
+      (RANGE @L5_unsized_numbers.v:2:65
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:66 35)
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:69 0))
+      (DECLARATOR:y7 @L5_unsized_numbers.v:2:72
+        _))
+    (PORT_DECL.output [IN_HEADER] @L5_unsized_numbers.v:2:76
+      (RANGE @L5_unsized_numbers.v:2:83
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:84 32)
+        (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:2:87 0))
+      (DECLARATOR:y8 @L5_unsized_numbers.v:2:90
+        _)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:3:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:3:10
+      (IDENT:y1 @L5_unsized_numbers.v:3:10)
+      (NUMBER.hex @L5_unsized_numbers.v:3:15 'hf)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:4:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:4:10
+      (IDENT:y2 @L5_unsized_numbers.v:4:10)
+      (NUMBER.bin @L5_unsized_numbers.v:4:15 'b1)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:5:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:5:10
+      (IDENT:y3 @L5_unsized_numbers.v:5:10)
+      (NUMBER.oct @L5_unsized_numbers.v:5:15 'o17)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:6:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:6:10
+      (IDENT:y4 @L5_unsized_numbers.v:6:10)
+      (NUMBER.dec @L5_unsized_numbers.v:6:15 'd9)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:7:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:7:10
+      (IDENT:y5 @L5_unsized_numbers.v:7:10)
+      (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:7:15 42)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:8:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:8:10
+      (IDENT:y6 @L5_unsized_numbers.v:8:10)
+      (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:8:15 0)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:9:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:9:10
+      (IDENT:y7 @L5_unsized_numbers.v:9:10)
+      (NUMBER.hex @L5_unsized_numbers.v:9:15 'h000000001)))
+  (CONT_ASSIGN @L5_unsized_numbers.v:10:3
+    _
+    _
+    (NET_ASSIGN @L5_unsized_numbers.v:10:10
+      (IDENT:y8 @L5_unsized_numbers.v:10:10)
+      (NUMBER.dec [SIGNED] @L5_unsized_numbers.v:10:15 2147483648))))

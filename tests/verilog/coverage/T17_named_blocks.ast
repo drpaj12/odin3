@@ -1,0 +1,42 @@
+# generated: odin3-parse-check --write
+(MODULE:t17_named_blocks @T17_named_blocks.v:2:1
+  _
+  (LIST @T17_named_blocks.v:2:25
+    (PORT_DECL.input [IN_HEADER] @T17_named_blocks.v:2:26
+      _
+      (DECLARATOR:clk @T17_named_blocks.v:2:32
+        _)
+      (DECLARATOR:d @T17_named_blocks.v:2:37
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T17_named_blocks.v:2:40
+      _
+      (DECLARATOR:q @T17_named_blocks.v:2:51
+        _)
+      (DECLARATOR:r @T17_named_blocks.v:2:54
+        _)))
+  (ALWAYS.always @T17_named_blocks.v:3:3
+    (TIMING_STMT @T17_named_blocks.v:3:10
+      (EVENT_CONTROL @T17_named_blocks.v:3:10
+        _
+        (EVENT_EXPR.posedge @T17_named_blocks.v:3:12
+          (IDENT:clk @T17_named_blocks.v:3:20)))
+      (SEQ_BLOCK:capture @T17_named_blocks.v:3:25
+        _
+        (NONBLOCKING_ASSIGN @T17_named_blocks.v:4:5
+          (IDENT:q @T17_named_blocks.v:4:5)
+          _
+          (IDENT:d @T17_named_blocks.v:4:10)))))
+  (ALWAYS.always @T17_named_blocks.v:6:3
+    (TIMING_STMT @T17_named_blocks.v:6:10
+      (EVENT_CONTROL @T17_named_blocks.v:6:10
+        _
+        (EVENT_EXPR.posedge @T17_named_blocks.v:6:12
+          (IDENT:clk @T17_named_blocks.v:6:20)))
+      (SEQ_BLOCK @T17_named_blocks.v:6:25
+        _
+        (SEQ_BLOCK:inner @T17_named_blocks.v:7:5
+          _
+          (NONBLOCKING_ASSIGN @T17_named_blocks.v:8:7
+            (IDENT:r @T17_named_blocks.v:8:7)
+            _
+            (IDENT:q @T17_named_blocks.v:8:12)))))))

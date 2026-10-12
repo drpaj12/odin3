@@ -1,0 +1,2 @@
+ident_too_long.v:3:8: error:
+identifier longer than 4096 bytes

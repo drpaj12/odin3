@@ -1,0 +1,48 @@
+# generated: odin3-parse-check --write
+(MODULE:p4_typed_parameters @P4_typed_parameters.v:2:1
+  _
+  (LIST @P4_typed_parameters.v:2:28
+    (PORT_DECL.output [IN_HEADER] @P4_typed_parameters.v:2:29
+      (RANGE @P4_typed_parameters.v:2:36
+        (NUMBER.dec [SIGNED] @P4_typed_parameters.v:2:37 31)
+        (NUMBER.dec [SIGNED] @P4_typed_parameters.v:2:40 0))
+      (DECLARATOR:y @P4_typed_parameters.v:2:43
+        _)
+      (DECLARATOR:z @P4_typed_parameters.v:2:46
+        _)))
+  (PARAM_DECL.parameter [DT=2] @P4_typed_parameters.v:3:3
+    _
+    (DECLARATOR:I @P4_typed_parameters.v:3:21
+      (NUMBER.dec [SIGNED] @P4_typed_parameters.v:3:25 5)))
+  (PARAM_DECL.localparam [DT=2] @P4_typed_parameters.v:4:3
+    _
+    (DECLARATOR:J @P4_typed_parameters.v:4:22
+      (NUMBER.dec [SIGNED] @P4_typed_parameters.v:4:26 6)))
+  (PARAM_DECL.parameter [DT=3] @P4_typed_parameters.v:5:3
+    _
+    (DECLARATOR:R @P4_typed_parameters.v:5:18
+      (REAL @P4_typed_parameters.v:5:22 1.5)))
+  (PARAM_DECL.parameter [DT=4] @P4_typed_parameters.v:6:3
+    _
+    (DECLARATOR:RT @P4_typed_parameters.v:6:22
+      (REAL @P4_typed_parameters.v:6:27 2.5)))
+  (PARAM_DECL.parameter [DT=5] @P4_typed_parameters.v:7:3
+    _
+    (DECLARATOR:T @P4_typed_parameters.v:7:18
+      (NUMBER.dec [SIGNED] @P4_typed_parameters.v:7:22 10)))
+  (PARAM_DECL.localparam [DT=3] @P4_typed_parameters.v:8:3
+    _
+    (DECLARATOR:LR @P4_typed_parameters.v:8:19
+      (REAL @P4_typed_parameters.v:8:24 0.5)))
+  (CONT_ASSIGN @P4_typed_parameters.v:9:3
+    _
+    _
+    (NET_ASSIGN @P4_typed_parameters.v:9:10
+      (IDENT:y @P4_typed_parameters.v:9:10)
+      (IDENT:I @P4_typed_parameters.v:9:14)))
+  (CONT_ASSIGN @P4_typed_parameters.v:10:3
+    _
+    _
+    (NET_ASSIGN @P4_typed_parameters.v:10:10
+      (IDENT:z @P4_typed_parameters.v:10:10)
+      (IDENT:J @P4_typed_parameters.v:10:14))))

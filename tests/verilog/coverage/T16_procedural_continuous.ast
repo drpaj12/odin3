@@ -1,0 +1,31 @@
+# generated: odin3-parse-check --write
+(MODULE:t16_proc_cont @T16_procedural_continuous.v:2:1
+  _
+  (LIST @T16_procedural_continuous.v:2:22
+    (PORT_DECL.input [IN_HEADER] @T16_procedural_continuous.v:2:23
+      _
+      (DECLARATOR:a @T16_procedural_continuous.v:2:29
+        _)
+      (DECLARATOR:b @T16_procedural_continuous.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T16_procedural_continuous.v:2:35
+      _
+      (DECLARATOR:q @T16_procedural_continuous.v:2:46
+        _)
+      (DECLARATOR:r @T16_procedural_continuous.v:2:49
+        _)))
+  (INITIAL @T16_procedural_continuous.v:3:3
+    (SEQ_BLOCK @T16_procedural_continuous.v:3:11
+      _
+      (PROC_CONT_ASSIGN.assign @T16_procedural_continuous.v:4:5
+        (IDENT:r @T16_procedural_continuous.v:4:12)
+        (IDENT:a @T16_procedural_continuous.v:4:16))
+      (PROC_CONT_ASSIGN.deassign @T16_procedural_continuous.v:5:5
+        (IDENT:r @T16_procedural_continuous.v:5:14)
+        _)
+      (PROC_CONT_ASSIGN.force @T16_procedural_continuous.v:6:5
+        (IDENT:q @T16_procedural_continuous.v:6:11)
+        (IDENT:b @T16_procedural_continuous.v:6:15))
+      (PROC_CONT_ASSIGN.release @T16_procedural_continuous.v:7:5
+        (IDENT:q @T16_procedural_continuous.v:7:13)
+        _))))

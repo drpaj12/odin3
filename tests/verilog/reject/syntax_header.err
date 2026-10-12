@@ -1,0 +1,2 @@
+syntax_header.v:2:13: error:
+syntax: unexpected identifier, expecting ')' or ',' or '.' or '['

@@ -1,0 +1,56 @@
+# generated: odin3-parse-check --write
+(MODULE:i6_inv @I6_instance_arrays.v:2:1
+  _
+  (LIST @I6_instance_arrays.v:2:15
+    (PORT_DECL.input [IN_HEADER] @I6_instance_arrays.v:2:16
+      _
+      (DECLARATOR:a @I6_instance_arrays.v:2:22
+        _))
+    (PORT_DECL.output [IN_HEADER] @I6_instance_arrays.v:2:25
+      _
+      (DECLARATOR:y @I6_instance_arrays.v:2:32
+        _)))
+  (CONT_ASSIGN @I6_instance_arrays.v:3:3
+    _
+    _
+    (NET_ASSIGN @I6_instance_arrays.v:3:10
+      (IDENT:y @I6_instance_arrays.v:3:10)
+      (UNARY.~ @I6_instance_arrays.v:3:14
+        (IDENT:a @I6_instance_arrays.v:3:15)))))
+(MODULE:i6_instance_array @I6_instance_arrays.v:6:1
+  _
+  (LIST @I6_instance_arrays.v:6:26
+    (PORT_DECL.input [IN_HEADER] @I6_instance_arrays.v:6:27
+      (RANGE @I6_instance_arrays.v:6:33
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:34 3)
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:36 0))
+      (DECLARATOR:a @I6_instance_arrays.v:6:39
+        _))
+    (PORT_DECL.output [IN_HEADER] @I6_instance_arrays.v:6:42
+      (RANGE @I6_instance_arrays.v:6:49
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:50 3)
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:6:52 0))
+      (DECLARATOR:y @I6_instance_arrays.v:6:55
+        _)
+      (DECLARATOR:z @I6_instance_arrays.v:6:58
+        _)))
+  (INSTANTIATION:i6_inv @I6_instance_arrays.v:7:3
+    _
+    (INSTANCE:u @I6_instance_arrays.v:7:10
+      (RANGE @I6_instance_arrays.v:7:11
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:12 3)
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:7:14 0))
+      (CONNECTION:a @I6_instance_arrays.v:7:18
+        (IDENT:a @I6_instance_arrays.v:7:21))
+      (CONNECTION:y @I6_instance_arrays.v:7:25
+        (IDENT:y @I6_instance_arrays.v:7:28))))
+  (INSTANTIATION:i6_inv @I6_instance_arrays.v:8:3
+    _
+    (INSTANCE:v @I6_instance_arrays.v:8:10
+      (RANGE @I6_instance_arrays.v:8:11
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:12 0)
+        (NUMBER.dec [SIGNED] @I6_instance_arrays.v:8:14 3))
+      (CONNECTION @I6_instance_arrays.v:8:18
+        (IDENT:a @I6_instance_arrays.v:8:18))
+      (CONNECTION @I6_instance_arrays.v:8:21
+        (IDENT:z @I6_instance_arrays.v:8:21)))))

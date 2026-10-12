@@ -1,0 +1,2 @@
+K12.v:6:7: error:
+timing control in function 'f' is not supported

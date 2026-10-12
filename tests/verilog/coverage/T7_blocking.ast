@@ -1,0 +1,50 @@
+# generated: odin3-parse-check --write
+(MODULE:t7_blocking @T7_blocking.v:2:1
+  _
+  (LIST @T7_blocking.v:2:20
+    (PORT_DECL.input [IN_HEADER] @T7_blocking.v:2:21
+      _
+      (DECLARATOR:clk @T7_blocking.v:2:27
+        _)
+      (DECLARATOR:a @T7_blocking.v:2:32
+        _)
+      (DECLARATOR:b @T7_blocking.v:2:35
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T7_blocking.v:2:38
+      _
+      (DECLARATOR:y @T7_blocking.v:2:49
+        _)
+      (DECLARATOR:r @T7_blocking.v:2:52
+        _)))
+  (VAR_DECL.reg @T7_blocking.v:3:3
+    _
+    (DECLARATOR:t @T7_blocking.v:3:7
+      _))
+  (ALWAYS.always @T7_blocking.v:4:3
+    (TIMING_STMT @T7_blocking.v:4:10
+      (EVENT_CONTROL [STAR] @T7_blocking.v:4:10
+        _)
+      (BLOCKING_ASSIGN @T7_blocking.v:5:5
+        (IDENT:y @T7_blocking.v:5:5)
+        _
+        (BINARY.^ @T7_blocking.v:5:9
+          (IDENT:a @T7_blocking.v:5:9)
+          (IDENT:b @T7_blocking.v:5:13)))))
+  (ALWAYS.always @T7_blocking.v:6:3
+    (TIMING_STMT @T7_blocking.v:6:10
+      (EVENT_CONTROL @T7_blocking.v:6:10
+        _
+        (EVENT_EXPR.posedge @T7_blocking.v:6:12
+          (IDENT:clk @T7_blocking.v:6:20)))
+      (SEQ_BLOCK @T7_blocking.v:6:25
+        _
+        (BLOCKING_ASSIGN @T7_blocking.v:7:5
+          (IDENT:t @T7_blocking.v:7:5)
+          _
+          (BINARY.& @T7_blocking.v:7:9
+            (IDENT:a @T7_blocking.v:7:9)
+            (IDENT:b @T7_blocking.v:7:13)))
+        (NONBLOCKING_ASSIGN @T7_blocking.v:8:5
+          (IDENT:r @T7_blocking.v:8:5)
+          _
+          (IDENT:t @T7_blocking.v:8:10))))))

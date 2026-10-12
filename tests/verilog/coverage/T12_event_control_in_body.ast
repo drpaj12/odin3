@@ -1,0 +1,45 @@
+# generated: odin3-parse-check --write
+(MODULE:t12_body_events @T12_event_control_in_body.v:2:1
+  _
+  (LIST @T12_event_control_in_body.v:2:24
+    (PORT_DECL.input [IN_HEADER] @T12_event_control_in_body.v:2:25
+      _
+      (DECLARATOR:clk @T12_event_control_in_body.v:2:31
+        _)
+      (DECLARATOR:a @T12_event_control_in_body.v:2:36
+        _)
+      (DECLARATOR:b @T12_event_control_in_body.v:2:39
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T12_event_control_in_body.v:2:42
+      _
+      (DECLARATOR:x @T12_event_control_in_body.v:2:53
+        _)
+      (DECLARATOR:y @T12_event_control_in_body.v:2:56
+        _)))
+  (ALWAYS.always @T12_event_control_in_body.v:3:3
+    (SEQ_BLOCK @T12_event_control_in_body.v:3:10
+      _
+      (TIMING_STMT @T12_event_control_in_body.v:4:5
+        (EVENT_CONTROL @T12_event_control_in_body.v:4:5
+          _
+          (EVENT_EXPR.posedge @T12_event_control_in_body.v:4:7
+            (IDENT:clk @T12_event_control_in_body.v:4:15)))
+        (BLOCKING_ASSIGN @T12_event_control_in_body.v:4:20
+          (IDENT:x @T12_event_control_in_body.v:4:20)
+          _
+          (IDENT:a @T12_event_control_in_body.v:4:24)))
+      (TIMING_STMT @T12_event_control_in_body.v:5:5
+        (EVENT_CONTROL @T12_event_control_in_body.v:5:5
+          _
+          (EVENT_EXPR.negedge @T12_event_control_in_body.v:5:7
+            (IDENT:clk @T12_event_control_in_body.v:5:15)))
+        (BLOCKING_ASSIGN @T12_event_control_in_body.v:5:20
+          (IDENT:y @T12_event_control_in_body.v:5:20)
+          _
+          (IDENT:b @T12_event_control_in_body.v:5:24)))
+      (TIMING_STMT @T12_event_control_in_body.v:6:5
+        (EVENT_CONTROL @T12_event_control_in_body.v:6:5
+          _
+          (EVENT_EXPR.posedge @T12_event_control_in_body.v:6:7
+            (IDENT:clk @T12_event_control_in_body.v:6:15)))
+        _))))

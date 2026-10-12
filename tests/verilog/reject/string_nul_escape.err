@@ -1,0 +1,2 @@
+string_nul_escape.v:3:20: error:
+a string cannot hold a NUL byte (\000)

@@ -1,0 +1,2 @@
+I2.v:7:8: error:
+instance 'u' mixes ordered and named connections

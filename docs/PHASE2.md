@@ -115,8 +115,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    ```
 
    Targets met: decode and segment cursor >= 10 M/s; the 200k-node mcml estimate (about 9.5 MB
-   against 20 MB; an estimate until 2C's `--parse-only` run); build, walk and check FULL (0.125 s
-   with locations, against 0.300 s). The rule-1 location-decode cost inside check FULL is about
+   against 20 MB; measured by 2C's `--parse-only` run at 4.56 MB, entry 15); build, walk and
+   check FULL (0.125 s with locations, against 0.300 s). The rule-1 location-decode cost inside check FULL is about
    0.06 s (FULL with locations minus FULL on the same tree without locations). The mcml.v buffer
    reports 24,508 lines: 24,507 newlines (the file ends in one) plus the implicit line 1.
 
@@ -462,3 +462,158 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    IR change D (eleven FF/latch cells, 2E-1), the 2E decisions 1–8 and 2F decisions 1–7 as
    ruled after the joint Fable review, and the S-P exit splice (Odin III through `proc`, Yosys
    0.55 from `fsm` on).
+15. **2C results and declared divergences** (2C Task 10, 2026-10-12; spec §7.4, §7.6, §9).
+   - *Form.* VP-11: pure LALR(1) Bison (`lr.type lalr`, `%expect 0`, no `%expect-rr`), zero
+     reported conflicts in 947 states; the conflicts Bison resolves by precedence equal the
+     committed allowlist `tests/verilog/solved_conflicts.txt` (731 lines: the operator pairs and
+     the two dangling-`else` lines, `verilog_grammar_solved`). VP-13: every binary operator is
+     left-associative, `**` included (Table 5-4 and Yosys's `%left OP_POW`; Odin II's `%right`
+     differs). VP-14: recovery at `;`/`endmodule`, actions inert after the first error, a cap of
+     20 errors per run (`too many errors; stopping`). VP-21: Bison/Flex output generated into
+     `build/<preset>/generated/verilog`, never committed, compiled inside `odin3_core`; the
+     measured per-file list is one flag, `-Wno-unused-but-set-variable` on the parser
+     (`yyparse`'s `yynerrs` under `api.pure`, clang only) — none of the expected
+     `-Wno-conversion`/`-Wno-sign-*`/`-Wno-unused-parameter`/`-Wno-missing-prototypes` occur.
+   - *Sweeps* (`tools/parse-check/parse-corpus`, `odin3-parse-check` per file with the location
+     oracle and the print/re-parse/equal round trip, smallest first, one file at a time, Release,
+     in `odin3-heavy.slice`; CTests `verilog_micro_parse`, `verilog_vtr_parse`,
+     `verilog_writer_parse`, label `sweep`):
+     - micros: 539 files, 489 pass, 50 expected failures (`tests/verilog/micro_expect_fail.txt`,
+       each with its reason), 0 unexpected. Of the 56 that failed before Task 10, 6 were a 2C
+       gap, fixed (binary `~&`/`~|`, below); 38 are rejected by Parmys too (8 intended `*_failure`
+       negatives, 14 SystemVerilog named-argument calls, the 3 splicing micros of entry 11, 13
+       fragments that need a macro only their includer defines); 12 are illegal Verilog-2005 in
+       a micro meant to pass (10 with `$display` as a module item, the 5 `nested_ifdef_*`
+       among them; `recursive_task`'s `task automatic integer … endfunction`; `fir_scu_rtl`'s
+       module instance inside `always`), and Parmys rejects them as well — at the same line,
+       except the 5 `nested_ifdef_*`, whose Parmys goldens failed earlier, on the include path
+       (`Can't open include file`, an oracle working-directory artifact). Every one of the 50
+       has a failed Parmys golden.
+     - VTR: 64 files (`verilog/*.v` 31 and `koios/*.v` 33, `koios/lenet.v` last), 64 pass in
+       7.5 s; the largest round trip, `odin3-parse-check koios/lenet.v`, peaks at 224,224 KiB.
+     - writer round trip (Review Focus 1): the 12 committed `tests/golden/blif` BLIFs pass.
+       Over the whole golden set on the dev machine (1,846 BLIFs, both architectures, 580 s,
+       peak 3.4 GB) 1,840 pass; the 6 others are written as 317 MB–2.1 GB of Verilog
+       (`LU64PEEng.parmys` ×4, `LargeRam.odin` ×2) and stop at the 2B source-file cap
+       (`file … is N bytes, over the limit of 268435456`), by design.
+   - *Bench* (`build/release/bench_ast --parse --set-target $VTR_ROOT/vtr_flow/benchmarks/verilog/*.v`,
+     Release, dev machine, 2026-10-12 (rerun at fix round 1), output verbatim; each file in a child process of its own,
+     so peak RSS is per file; `pp` is the 2B preprocessor, `parse` the 2C parser and
+     `odin3_ast_finish`, `check` is check FULL, `read_verilog` is the pass's reader end to end on
+     a fresh design). This replaces entry 8's "an estimate until 2C's `--parse-only` run":
+   ```
+   single_wire.v                           62 B (stream        62)  nodes       11  comments      0  ast     163908 B  srcman     1040 B  strtab +     6 (    123 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1920 KiB
+   single_ff.v                             96 B (stream        96)  nodes       16  comments      0  ast     163932 B  srcman     1040 B  strtab +     7 (    126 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   and_latch.v                            260 B (stream       260)  nodes       26  comments      2  ast     164052 B  srcman     1136 B  strtab +     8 (    138 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   multiclock_separate_and_latch.v        702 B (stream       702)  nodes       84  comments      3  ast     164688 B  srcman     1264 B  strtab +    13 (    226 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   multiclock_output_and_latch.v          889 B (stream       889)  nodes      112  comments      3  ast     164940 B  srcman     1264 B  strtab +    15 (    239 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   multiclock_reader_writer.v            1021 B (stream      1021)  nodes      182  comments      2  ast     165892 B  srcman     1264 B  strtab +    11 (    221 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   diffeq1.v                             1409 B (stream      1409)  nodes      186  comments      2  ast     165820 B  srcman     1264 B  strtab +    19 (    219 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   diffeq2.v                             2131 B (stream      2131)  nodes      115  comments      3  ast     165088 B  srcman     1264 B  strtab +    12 (    165 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   ch_intrinsics.v                       4838 B (stream      4283)  nodes      520  comments      2  ast     169632 B  srcman     4272 B  strtab +    48 (    552 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   ch_intrinsics_nolatches.v             5005 B (stream      4450)  nodes      522  comments      2  ast     169752 B  srcman     4272 B  strtab +    48 (    562 B)  pp 0.000 s  parse 0.000 s  check 0.000 s  read_verilog 0.000 s  peak RSS 1864 KiB
+   stereovision3.v                      35847 B (stream     35847)  nodes     2304  comments     11  ast     190940 B  srcman     9200 B  strtab +    64 (    759 B)  pp 0.000 s  parse 0.001 s  check 0.000 s  read_verilog 0.001 s  peak RSS 1992 KiB
+   sha.v                                38061 B (stream     37865)  nodes     5486  comments     65  ast     298508 B  srcman    18608 B  strtab +    61 (    386 B)  pp 0.000 s  parse 0.001 s  check 0.000 s  read_verilog 0.001 s  peak RSS 2120 KiB
+   mkPktMerge.v                         39878 B (stream     39690)  nodes     2566  comments    371  ast     194952 B  srcman    15024 B  strtab +   125 (   1328 B)  pp 0.000 s  parse 0.001 s  check 0.000 s  read_verilog 0.001 s  peak RSS 1992 KiB
+   blob_merge.v                         58879 B (stream     55660)  nodes     5229  comments    359  ast     387796 B  srcman    33456 B  strtab +   215 (   2774 B)  pp 0.000 s  parse 0.001 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2248 KiB
+   stereovision2.v                      63099 B (stream     61774)  nodes     7277  comments     75  ast     410760 B  srcman    17072 B  strtab +   460 (   7276 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2376 KiB
+   spree.v                              68099 B (stream     65433)  nodes     6300  comments    206  ast     399088 B  srcman    29360 B  strtab +   447 (   4637 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2376 KiB
+   bgm.v                                71508 B (stream     71298)  nodes     8920  comments    392  ast     520768 B  srcman    20144 B  strtab +   439 (   3659 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2476 KiB
+   boundtop.v                           72116 B (stream     72116)  nodes     8456  comments     55  ast     520360 B  srcman    17392 B  strtab +   476 (   3899 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2468 KiB
+   boundtop_nolatches.v                 81343 B (stream     81343)  nodes     8894  comments     86  ast     523820 B  srcman    17392 B  strtab +   476 (   3909 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2504 KiB
+   raygentop.v                          84801 B (stream     84801)  nodes     8771  comments     33  ast     526884 B  srcman    17392 B  strtab +   364 (   2963 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2632 KiB
+   raygentop_nolatches.v                92241 B (stream     92241)  nodes     8770  comments    138  ast     526292 B  srcman    17392 B  strtab +   324 (   2586 B)  pp 0.000 s  parse 0.002 s  check 0.001 s  read_verilog 0.002 s  peak RSS 2632 KiB
+   stereovision1.v                     102964 B (stream    102964)  nodes    11559  comments     16  ast     611604 B  srcman    17392 B  strtab +   553 (   8539 B)  pp 0.000 s  parse 0.003 s  check 0.001 s  read_verilog 0.003 s  peak RSS 2748 KiB
+   stereovision0.v                     131550 B (stream    131550)  nodes    18680  comments     39  ast    1036376 B  srcman    17392 B  strtab +  1222 (  14976 B)  pp 0.000 s  parse 0.004 s  check 0.001 s  read_verilog 0.004 s  peak RSS 3416 KiB
+   or1200.v                            135776 B (stream    105416)  nodes    10738  comments   1423  ast     641104 B  srcman    82608 B  strtab +   713 (   9844 B)  pp 0.001 s  parse 0.003 s  check 0.001 s  read_verilog 0.004 s  peak RSS 3044 KiB
+   mkSMAdapter4B.v                     137869 B (stream    137559)  nodes     9102  comments    756  ast     530676 B  srcman    39600 B  strtab +   765 (  15737 B)  pp 0.001 s  parse 0.003 s  check 0.001 s  read_verilog 0.003 s  peak RSS 2748 KiB
+   LU8PEEng.v                          140203 B (stream    132207)  nodes    17376  comments    582  ast    1035960 B  srcman    98992 B  strtab +   890 (   9809 B)  pp 0.001 s  parse 0.004 s  check 0.002 s  read_verilog 0.005 s  peak RSS 3536 KiB
+   LU32PEEng.v                         155750 B (stream    147942)  nodes    20098  comments    582  ast    1134696 B  srcman   131760 B  strtab +  1009 (  10728 B)  pp 0.001 s  parse 0.005 s  check 0.002 s  read_verilog 0.006 s  peak RSS 3668 KiB
+   LU64PEEng.v                         176532 B (stream    168880)  nodes    23648  comments    582  ast    1342168 B  srcman   131760 B  strtab +  1169 (  12008 B)  pp 0.001 s  parse 0.005 s  check 0.003 s  read_verilog 0.006 s  peak RSS 3928 KiB
+   mkDelayWorker32B.v                  204602 B (stream    204056)  nodes    13372  comments   1247  ast     745824 B  srcman    45744 B  strtab +   958 (  19056 B)  pp 0.001 s  parse 0.004 s  check 0.001 s  read_verilog 0.005 s  peak RSS 3368 KiB
+   arm_core.v                          346864 B (stream    336469)  nodes    22852  comments   2062  ast    1278348 B  srcman    67248 B  strtab +  1004 (  12544 B)  pp 0.001 s  parse 0.006 s  check 0.002 s  read_verilog 0.007 s  peak RSS 4316 KiB
+   mcml.v                              650837 B (stream    649054)  nodes    78229  comments   2985  ast    4235356 B  srcman   328368 B  strtab +  5614 (  55033 B)  pp 0.003 s  parse 0.017 s  check 0.009 s  read_verilog 0.020 s  peak RSS 9020 KiB
+   mcml.v AST + srcman               :   4563724 B  (target <= 20,000,000 B: ok)
+   mcml.v parse-only (read_verilog)  :     0.020 s  (pp 0.003 s + parse 0.017 s; target <= 1.000 s: ok)
+   31 files given, read_verilog total:     0.085 s  (pp + parse 0.088 s; set target <= 5.000 s: ok)
+   ```
+
+     Targets met: mcml.v AST + srcman 4.56 MB (≤ 20 MB; 78,229 nodes, against 2A's 200k-node
+     estimate of 9.5 MB), mcml.v parse-only 0.020 s (≤ 1 s), the 31 files 0.085 s (≤ 5 s); a
+     missed target prints `MISSED` and exits 1. 2B's
+     own §10.6 numbers for the preprocessor are in entry 12. Koios (reported, not targeted,
+     point (n); no `--set-target`), last lines verbatim of
+     `bench_ast --parse $VTR_ROOT/vtr_flow/benchmarks/verilog/koios/*.v`:
+   ```
+   lenet.v                           11062147 B (stream  11059985)  nodes   919695  comments    602  ast   34120584 B  srcman  1049648 B  strtab + 25042 ( 735092 B)  pp 0.046 s  parse 0.198 s  check 0.065 s  read_verilog 0.221 s  peak RSS 75416 KiB
+   33 files given, read_verilog total:     0.830 s  (pp + parse 0.906 s)
+   ```
+   - *Declared divergences* (spec §9, verbatim): attributes on `assign` accepted; attributes on
+     a port connection, on an ANSI function/task port and on a function call are syntax errors
+     (Annex A allows them); unary operators bind to a primary only (`- -a` needs parentheses;
+     Odin II and Yosys accept it); SystemVerilog named-argument calls `f(.a(x))` are syntax
+     errors — the `syntax/*_expression_in_{function,task}_port.v` micros become Parmys
+     exceptions under PHASE2 #4; `input reg` parsed without comment (D5 is 2D's); `localparam`
+     and `#()` accepted in a parameter port list; `unsigned` accepted everywhere `signed` is; a
+     UDP-style instance with a drive strength or a `#delay2` is a syntax error (§3.1 i).
+     Added by Tasks 4–10 (agent defaults):
+     - *binary `~&` and `~|` are accepted* (Task 10): A.8.6 has them only as unary operators,
+       but Yosys and Odin II accept them and six micros with Parmys goldens use them
+       (`operators/binary_nand`, `binary_nor`, `full/ansiportlist`, `ansiportlist_2`, `binops`,
+       `syntax/bm_log_all`). They take the precedence of `&` and `|` (Table 5-4's rows, Yosys's
+       `%left`) and read as Yosys reads them, UNARY[`~`] over BINARY[`&`]/BINARY[`|`] at the
+       left operand, so the printer writes `~(a & b)`; no 2A sub-kind or ABI change (2C adds
+       none). The alternative, BINARY sub-kinds `~&`/`~|`, would be an ABI addition for 2D's
+       ABI round. One difference from Yosys remains: an attribute after the operator
+       (`a ~& (* k *) b`) is attached to the inner BINARY, where Yosys attaches it to the outer
+       `AST_BIT_NOT`. Pinned by coverage row E1 (`E1_bitwise.v`, module `e1_binary_nand_nor`);
+     - *stricter than Parmys's `read_verilog -sv`* (Annex A, no tree change): a `casez`/`casex`
+       generate (`generate casez (W) … endcase` is `syntax: unexpected casez`; A.4.2 has only
+       `case`; Yosys accepts it with or without `-sv`), and implicit port connections `.*`
+       (`'.*' (implicit port connections) is SystemVerilog, not Verilog-2005`, spec §3.1; Yosys
+       accepts it under `-sv`, the Parmys mode). A design with either form reads in Parmys and
+       not in Odin III;
+     - *a stray `;` module item is a syntax error* (Task 11, 2C-2 final review): `wire a;;` is
+       rejected, as Annex A has no empty module item; Yosys 0.55 (with or without `-sv`) and
+       Icarus accept it. No corpus file has one. Open for Peter: accept it leniently like
+       Yosys/Icarus (the reviewer's recommendation) or keep rejecting;
+     - *more lenient than Parmys*: `macromodule` is a module (1364-2005 §12.1); Yosys has no
+       such keyword, so every `keywords/macromodule` micro fails in Parmys at its `macromodule`;
+     - *lenient forms 2D judges* (parse-lenient, no tree change): module items of any kind in a
+       `generate` region or block (a port declaration, `parameter`, `specify`, a nested
+       `generate`); `m #() u (…)` (an empty params LIST; Annex A needs one assignment); ordered
+       and named parameter values mixed; strengths on MOS and pass switches; a single pull
+       strength of either polarity; null loop bodies; `reg x = 1;` as a block-item declaration;
+       `a.b[0]` as a non-ANSI port reference; `input integer [3:0]` and
+       `parameter integer [3:0]`; `(highz0, highz1)`.
+   - *Parmys exceptions added to PHASE2 #4* (micros Parmys rejects; for those 2C rejects too,
+     the reasons are in `tests/verilog/micro_expect_fail.txt`): the 14 SystemVerilog
+     named-argument micros, `syntax/{basic,bitwise_op,conditional,mix}_expression_in_{function,task}_port.v`
+     and `syntax/instantiated_by_name_{function,task}_{valid,invalid,invalid_1}.v`; and the 12
+     illegal-Verilog-2005 micros above; and the 3 `keywords/macromodule` micros 2C reads
+     (`macromodules_modules`, `multiple_macromodules`, `multiple_topmodules`: Yosys has no
+     `macromodule`). The 8 `*_failure` micros, the 3 splicing micros (entry 11) and the 13
+     includer-macro fragments are not designs of their own.
+   - *Known, not fixed:* a backtick name inside an index of a hierarchical call
+     (`` g[\a`b ].f(x) ``) still goes through `odin3_ast_print` while parsing and logs one
+     unlocated `written as stored` warning; the parse succeeds and the round trip is equal
+     (Task 5 re-review residual).
+   - *Plan points (a)–(s) as agent defaults* (`docs/plans/2026-10-11-2C-verilog-parser-plan.md`):
+     (a) one location type `odin3_vp_loc`, `TOK_` token prefix, the `%union`; (b) the parser
+     input `odin3_vp_stream`; (c) the per-run read context `odin3_vl_run`; (d) `YYMAXDEPTH`
+     through a `parser.c` static under `parse.lac full`; (e) Bison's `detailed` message with
+     `syntax: ` for `syntax error, `; (f) the precedence block arrives with its rules; (g) node
+     ranges start at the node's own first token, attributes attached by the enclosing rule; (h)
+     one located error per run of bytes ≥ 0x80; (i) the rows rejected before or by 2C keep
+     parsing variants, the rejecting forms are `tests/verilog/reject/` cases; (j) the reject
+     driver runs in the case directory with the given paths; (k) `` `resetall `` leaves the
+     keyword stack alone; (l) the 2D entry `odin3_elab_run` in `elab.h`, a stub until 2D; (m)
+     `library_units_from` is the root index of the first library `UNIT`; (n) koios `lenet.v`
+     runs last, the ≤ 5 s target covers `verilog/*.v`; (o) `odin3-parse-check` runs each file
+     from its own directory through `odin3_read_verilog_files`; (p) `rows.txt` assigns each
+     coverage row to its task; (q) `duplicate_module` located at the second definition's
+     keyword; (r) the error cap counts errors only, the 21st becomes `too many errors;
+     stopping`; (s) `vp_*` arity ≤ 5, enum-valued nonterminals through `vp_value`.
+   - *Heavy runs:* the three sweep CTests are registered through `odin3_add_sweep_test()`, so
+     `tools/heavy-run` alone gates (77 without `ODIN3_HEAVY_OK=1`), locks, caps and decides
+     nesting; `parse-corpus` keeps no heavy logic (`--heavy` removed; Task 10 re-review R1/R2).

@@ -1,0 +1,2 @@
+A2.v:3:10: warning:
+delay on a continuous assignment is ignored

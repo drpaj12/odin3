@@ -1,0 +1,4 @@
+# -y with two libexts: and2.vh is found before and2.v; mux2.v instantiates inv2 (also -y).
+file verilog src/ext_top.v
+libdir lib/cells
+libext .vh .v

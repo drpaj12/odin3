@@ -123,3 +123,70 @@
         (BINARY.& @E1_bitwise.v:12:20
           (IDENT:b @E1_bitwise.v:12:20)
           (IDENT:c @E1_bitwise.v:12:24))))))
+(MODULE:e1_binary_nand_nor @E1_bitwise.v:14:1
+  _
+  (LIST @E1_bitwise.v:14:27
+    (PORT_DECL.input [IN_HEADER] @E1_bitwise.v:14:28
+      (RANGE @E1_bitwise.v:14:34
+        (NUMBER.dec [SIGNED] @E1_bitwise.v:14:35 3)
+        (NUMBER.dec [SIGNED] @E1_bitwise.v:14:37 0))
+      (DECLARATOR:a @E1_bitwise.v:14:40
+        _)
+      (DECLARATOR:b @E1_bitwise.v:14:43
+        _)
+      (DECLARATOR:c @E1_bitwise.v:14:46
+        _))
+    (PORT_DECL.output [IN_HEADER] @E1_bitwise.v:14:49
+      (RANGE @E1_bitwise.v:14:56
+        (NUMBER.dec [SIGNED] @E1_bitwise.v:14:57 3)
+        (NUMBER.dec [SIGNED] @E1_bitwise.v:14:59 0))
+      (DECLARATOR:y1 @E1_bitwise.v:14:62
+        _)
+      (DECLARATOR:y2 @E1_bitwise.v:14:66
+        _)
+      (DECLARATOR:y3 @E1_bitwise.v:14:70
+        _)
+      (DECLARATOR:y4 @E1_bitwise.v:14:74
+        _)))
+  (CONT_ASSIGN @E1_bitwise.v:15:3
+    _
+    _
+    (NET_ASSIGN @E1_bitwise.v:15:10
+      (IDENT:y1 @E1_bitwise.v:15:10)
+      (UNARY.~ @E1_bitwise.v:15:15
+        (BINARY.& @E1_bitwise.v:15:15
+          (IDENT:a @E1_bitwise.v:15:15)
+          (IDENT:b @E1_bitwise.v:15:20)))))
+  (CONT_ASSIGN @E1_bitwise.v:16:3
+    _
+    _
+    (NET_ASSIGN @E1_bitwise.v:16:10
+      (IDENT:y2 @E1_bitwise.v:16:10)
+      (UNARY.~ @E1_bitwise.v:16:15
+        (BINARY.| @E1_bitwise.v:16:15
+          (IDENT:a @E1_bitwise.v:16:15)
+          (IDENT:b @E1_bitwise.v:16:20)))))
+  (CONT_ASSIGN @E1_bitwise.v:17:3
+    _
+    _
+    (NET_ASSIGN @E1_bitwise.v:17:10
+      (IDENT:y3 @E1_bitwise.v:17:10)
+      (BINARY.| @E1_bitwise.v:17:15
+        (UNARY.~ @E1_bitwise.v:17:15
+          (BINARY.& @E1_bitwise.v:17:15
+            (IDENT:a @E1_bitwise.v:17:15)
+            (IDENT:b @E1_bitwise.v:17:28)
+            {(ATTR:k @E1_bitwise.v:17:23
+               _)}))
+        (IDENT:c @E1_bitwise.v:17:32))))
+  (CONT_ASSIGN @E1_bitwise.v:18:3
+    _
+    _
+    (NET_ASSIGN @E1_bitwise.v:18:10
+      (IDENT:y4 @E1_bitwise.v:18:10)
+      (UNARY.~ @E1_bitwise.v:18:15
+        (BINARY.| @E1_bitwise.v:18:15
+          (IDENT:a @E1_bitwise.v:18:15)
+          (BINARY.^ @E1_bitwise.v:18:20
+            (IDENT:b @E1_bitwise.v:18:20)
+            (IDENT:c @E1_bitwise.v:18:24)))))))

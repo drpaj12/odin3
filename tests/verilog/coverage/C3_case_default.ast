@@ -1,0 +1,55 @@
+# generated: odin3-parse-check --write
+(MODULE:c3_case_default @C3_case_default.v:2:1
+  _
+  (LIST @C3_case_default.v:2:24
+    (PORT_DECL.input [IN_HEADER] @C3_case_default.v:2:25
+      (RANGE @C3_case_default.v:2:31
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:32 1)
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:34 0))
+      (DECLARATOR:s @C3_case_default.v:2:37
+        _))
+    (PORT_DECL.input [IN_HEADER] @C3_case_default.v:2:40
+      (RANGE @C3_case_default.v:2:46
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:47 3)
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:49 0))
+      (DECLARATOR:a @C3_case_default.v:2:52
+        _)
+      (DECLARATOR:b @C3_case_default.v:2:55
+        _)
+      (DECLARATOR:c @C3_case_default.v:2:58
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @C3_case_default.v:2:61
+      (RANGE @C3_case_default.v:2:72
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:73 3)
+        (NUMBER.dec [SIGNED] @C3_case_default.v:2:75 0))
+      (DECLARATOR:y @C3_case_default.v:2:78
+        _)))
+  (ALWAYS.always @C3_case_default.v:3:3
+    (TIMING_STMT @C3_case_default.v:3:10
+      (EVENT_CONTROL [STAR] @C3_case_default.v:3:10
+        _)
+      (CASE.case @C3_case_default.v:4:5
+        (IDENT:s @C3_case_default.v:4:11)
+        (CASE_ITEM @C3_case_default.v:5:7
+          (BLOCKING_ASSIGN @C3_case_default.v:5:13
+            (IDENT:y @C3_case_default.v:5:13)
+            _
+            (IDENT:a @C3_case_default.v:5:17))
+          (NUMBER.dec @C3_case_default.v:5:7 2'd0))
+        (CASE_ITEM @C3_case_default.v:6:7
+          (BLOCKING_ASSIGN @C3_case_default.v:6:13
+            (IDENT:y @C3_case_default.v:6:13)
+            _
+            (IDENT:b @C3_case_default.v:6:17))
+          (NUMBER.dec @C3_case_default.v:6:7 2'd1))
+        (CASE_ITEM @C3_case_default.v:7:7
+          (BLOCKING_ASSIGN @C3_case_default.v:7:13
+            (IDENT:y @C3_case_default.v:7:13)
+            _
+            (IDENT:c @C3_case_default.v:7:17))
+          (NUMBER.dec @C3_case_default.v:7:7 2'd2))
+        (CASE_ITEM [DEFAULT] @C3_case_default.v:8:7
+          (BLOCKING_ASSIGN @C3_case_default.v:8:16
+            (IDENT:y @C3_case_default.v:8:16)
+            _
+            (NUMBER.dec @C3_case_default.v:8:20 4'd0)))))))

@@ -1,0 +1,67 @@
+# The micros of tests/micro/verilog that `read_verilog --parse-only` rejects, one per line:
+# `<path relative to tests/micro/verilog> <one-line reason>` (2C spec §7.4, plan Task 10).
+# parse-corpus fails the run on an unlisted failure, on a listed file that passes, and on an entry
+# that names no micro: the list must shrink, never rot. Every entry's Parmys golden is
+# status=failed (PHASE2 #4 exceptions). The reason names why 2C rejects it; the Parmys log fails
+# at the same line for the same reason unless the reason says otherwise (checked against each
+# EArch .parmys.log, 2C Task 10 fix round 1).
+#
+# --- intended negative micros (*_failure): Parmys rejects them too --------------------------------
+keywords/function_endfunction/function_input_failure.v Parmys rejects: `$display` as a module item (6:5) and a call `add()` with no argument (A.8.2)
+keywords/function_endfunction/time_control_failure.v Parmys rejects: `$display` as a module item (8:5); `always` inside a function
+keywords/default/multiple_defaults_failure.v Parmys rejects: `$display` as a module item with no `;` (7:1); two `default` items
+keywords/macromodule/missing_endmodule_failure.v Parmys rejects: 2C: no `endmodule` (unexpected end of file, 5:18); Parmys fails earlier, on `macromodule` itself (1: unexpected TOK_ID; Yosys has no macromodule)
+keywords/module_endmodule/missing_endmodule_failure.v Parmys rejects: no `endmodule` (2C: unexpected end of file at 5:18; Yosys reports its end of file at line 1)
+keywords/macromodule/repeated_macromodule_failure.v Parmys rejects: 2C: duplicate_module 'simple_op' (M11, 20:1); Parmys fails earlier, on `macromodule` itself (4: unexpected TOK_ID; Yosys has no macromodule)
+keywords/module_endmodule/repeated_module_failure.v Parmys rejects: duplicate_module 'simple_op' (M11; Yosys: re-definition of module)
+keywords/specparam/specparam_failure.v Parmys rejects: `specparam` outside a module (1:1)
+#
+# --- SystemVerilog named-argument calls f(.a(x)) (2C §7.4, §9; not Verilog-2005; Parmys rejects) --
+syntax/basic_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (20:24)
+syntax/bitwise_op_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (22:24)
+syntax/conditional_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (21:24)
+syntax/mix_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (20:24)
+syntax/basic_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/bitwise_op_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/conditional_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/mix_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (11:17)
+syntax/instantiated_by_name_function_valid.v Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_function_invalid.v Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_function_invalid_1.v Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_task_valid.v Parmys rejects: SystemVerilog named-argument task call (21:10)
+syntax/instantiated_by_name_task_invalid.v Parmys rejects: SystemVerilog named-argument task call (21:10)
+syntax/instantiated_by_name_task_invalid_1.v Parmys rejects: SystemVerilog named-argument task call (21:10)
+#
+# --- the preprocessor micros 2B declares divergent (PHASE2 #11: formal spliced into a macro name) --
+syntax/preprocessor_define.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+syntax/preprocessor_complex_define.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+syntax/preprocessor_define_with_comment.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+#
+# --- fragments that need a macro only their includer defines (read in context by it; PHASE2 #12) --
+keywords/.generic/range_any_width_binary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/range_any_width_unary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/replicate_any_width_binary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/replicate_any_width_unary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+syntax/ifdef-else-syntax/module_a_and.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifdef-else-syntax/module_a_or.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifdef-else-syntax/module_b.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_a_and.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_a_or.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_b.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/include-syntax/module_a.v Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
+syntax/include-syntax/module_b.v Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
+syntax/nested-ifdef-syntax/module_b.v Parmys rejects: a fragment of syntax/nested-ifdef-syntax.v, which defines `BITS before including it
+#
+# --- illegal Verilog-2005 in a micro meant to pass (Parmys rejects these too) ---------------------
+preprocessor/nested_ifdef_alldef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_middef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_nonedef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_outsidedef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_twodef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/elsif_both_defined.v illegal Verilog-2005: `$display` as a module item (8:5; A.1.4 has no system task item)
+preprocessor/ifdef_undefined.v illegal Verilog-2005: `$display` as a module item (2:1; A.1.4 has no system task item)
+preprocessor/ifndef_defined.v illegal Verilog-2005: `$display` as a module item (4:5; A.1.4 has no system task item)
+preprocessor/nested_operation_define.v illegal Verilog-2005: `$display` as a module item (9:5; A.1.4 has no system task item)
+preprocessor/undef.v illegal Verilog-2005: `$display` as a module item (10:5; A.1.4 has no system task item)
+keywords/automatic/recursive_task.v illegal Verilog-2005: `task automatic integer` (a task has no return type, 9:17) closed by `endfunction`
+syntax/fir_scu_rtl_restructured_for_cmm_exp.v illegal Verilog-2005: a module instance inside an `always` block (94:11)

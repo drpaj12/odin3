@@ -1,0 +1,49 @@
+# generated: odin3-parse-check --write
+(MODULE:m12_nonansi @M12_input_reg.v:2:1
+  _
+  (LIST @M12_input_reg.v:2:20
+    (PORT_REF:a @M12_input_reg.v:2:21
+      _)
+    (PORT_REF:n @M12_input_reg.v:2:24
+      _)
+    (PORT_REF:y @M12_input_reg.v:2:27
+      _))
+  (PORT_DECL.input [DT=1] @M12_input_reg.v:3:3
+    _
+    (DECLARATOR:a @M12_input_reg.v:3:13
+      _))
+  (PORT_DECL.input [DT=2] @M12_input_reg.v:4:3
+    _
+    (DECLARATOR:n @M12_input_reg.v:4:17
+      _))
+  (PORT_DECL.output @M12_input_reg.v:5:3
+    _
+    (DECLARATOR:y @M12_input_reg.v:5:10
+      _))
+  (CONT_ASSIGN @M12_input_reg.v:6:3
+    _
+    _
+    (NET_ASSIGN @M12_input_reg.v:6:10
+      (IDENT:y @M12_input_reg.v:6:10)
+      (IDENT:a @M12_input_reg.v:6:14))))
+(MODULE:m12_ansi @M12_input_reg.v:9:1
+  _
+  (LIST @M12_input_reg.v:9:17
+    (PORT_DECL.input [IN_HEADER DT=1] @M12_input_reg.v:9:18
+      _
+      (DECLARATOR:a @M12_input_reg.v:9:28
+        _))
+    (PORT_DECL.input [IN_HEADER DT=2] @M12_input_reg.v:9:31
+      _
+      (DECLARATOR:n @M12_input_reg.v:9:45
+        _))
+    (PORT_DECL.output [IN_HEADER] @M12_input_reg.v:9:48
+      _
+      (DECLARATOR:y @M12_input_reg.v:9:55
+        _)))
+  (CONT_ASSIGN @M12_input_reg.v:10:3
+    _
+    _
+    (NET_ASSIGN @M12_input_reg.v:10:10
+      (IDENT:y @M12_input_reg.v:10:10)
+      (IDENT:a @M12_input_reg.v:10:14))))

@@ -259,6 +259,21 @@ uint32_t odin3_ast_max_height(const odin3_ast *ast);
 uint32_t odin3_ast_root_count(const odin3_ast *ast);
 odin3_ast_id odin3_ast_root(const odin3_ast *ast, uint32_t idx);
 
+/*
+ * Where the library UNITs begin (2C §4.2 step 3, §9 amendment (b)): the odin3_ast_root index of
+ * the first UNIT read from a -v library file or a -y library directory; 0 = none (a read run
+ * always has a design UNIT first, so index 0 is never a library UNIT). Every root at or past it
+ * came from a library, every root before it from a design file, so 2D never picks a library
+ * module as top and lets a design unit shadow a library module. The setter records root_idx
+ * (read_verilog sets it once its libraries are read; open or sealed store alike); a NULL store
+ * or an index at or past the root count is ignored. The reader gives 0 for NULL.
+ */
+void odin3_ast_set_library_units_from(odin3_ast *ast, uint32_t root_idx);
+uint32_t odin3_ast_library_units_from(const odin3_ast *ast);
+
+/* The number of comments recorded in the store's side table (§7); 0 for NULL. */
+uint32_t odin3_ast_comment_count(const odin3_ast *ast);
+
 /* The design whose strtab and source manager the store uses. */
 const odin3_design *odin3_ast_design(const odin3_ast *ast);
 

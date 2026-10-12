@@ -1,0 +1,76 @@
+# generated: odin3-parse-check --write
+(MODULE:i3_leaf @I3_port_expressions.v:2:1
+  _
+  (LIST @I3_port_expressions.v:2:16
+    (PORT_DECL.input [IN_HEADER] @I3_port_expressions.v:2:17
+      (RANGE @I3_port_expressions.v:2:23
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:2:24 3)
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:2:26 0))
+      (DECLARATOR:a @I3_port_expressions.v:2:29
+        _))
+    (PORT_DECL.output [IN_HEADER] @I3_port_expressions.v:2:32
+      (RANGE @I3_port_expressions.v:2:39
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:2:40 3)
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:2:42 0))
+      (DECLARATOR:y @I3_port_expressions.v:2:45
+        _)))
+  (CONT_ASSIGN @I3_port_expressions.v:3:3
+    _
+    _
+    (NET_ASSIGN @I3_port_expressions.v:3:10
+      (IDENT:y @I3_port_expressions.v:3:10)
+      (UNARY.~ @I3_port_expressions.v:3:14
+        (IDENT:a @I3_port_expressions.v:3:15)))))
+(MODULE:i3_port_exprs @I3_port_expressions.v:6:1
+  _
+  (LIST @I3_port_expressions.v:6:22
+    (PORT_DECL.input [IN_HEADER] @I3_port_expressions.v:6:23
+      (RANGE @I3_port_expressions.v:6:29
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:30 1)
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:32 0))
+      (DECLARATOR:p @I3_port_expressions.v:6:35
+        _)
+      (DECLARATOR:q @I3_port_expressions.v:6:38
+        _))
+    (PORT_DECL.input [IN_HEADER] @I3_port_expressions.v:6:41
+      (RANGE @I3_port_expressions.v:6:47
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:48 3)
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:50 0))
+      (DECLARATOR:r @I3_port_expressions.v:6:53
+        _))
+    (PORT_DECL.output [IN_HEADER] @I3_port_expressions.v:6:56
+      (RANGE @I3_port_expressions.v:6:63
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:64 1)
+        (NUMBER.dec [SIGNED] @I3_port_expressions.v:6:66 0))
+      (DECLARATOR:s @I3_port_expressions.v:6:69
+        _)
+      (DECLARATOR:t @I3_port_expressions.v:6:72
+        _)
+      (DECLARATOR:v @I3_port_expressions.v:6:75
+        _)
+      (DECLARATOR:w @I3_port_expressions.v:6:78
+        _)))
+  (INSTANTIATION:i3_leaf @I3_port_expressions.v:7:3
+    _
+    (INSTANCE:u1 @I3_port_expressions.v:7:11
+      _
+      (CONNECTION:a @I3_port_expressions.v:7:15
+        (BINARY.+ @I3_port_expressions.v:7:18
+          (IDENT:r @I3_port_expressions.v:7:18)
+          (NUMBER.dec [SIGNED] @I3_port_expressions.v:7:22 1)))
+      (CONNECTION:y @I3_port_expressions.v:7:26
+        (CONCAT @I3_port_expressions.v:7:29
+          (IDENT:s @I3_port_expressions.v:7:30)
+          (IDENT:t @I3_port_expressions.v:7:33)))))
+  (INSTANTIATION:i3_leaf @I3_port_expressions.v:8:3
+    _
+    (INSTANCE:u2 @I3_port_expressions.v:8:11
+      _
+      (CONNECTION @I3_port_expressions.v:8:15
+        (CONCAT @I3_port_expressions.v:8:15
+          (IDENT:p @I3_port_expressions.v:8:16)
+          (IDENT:q @I3_port_expressions.v:8:19)))
+      (CONNECTION @I3_port_expressions.v:8:23
+        (CONCAT @I3_port_expressions.v:8:23
+          (IDENT:v @I3_port_expressions.v:8:24)
+          (IDENT:w @I3_port_expressions.v:8:27))))))

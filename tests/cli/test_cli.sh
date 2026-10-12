@@ -20,8 +20,11 @@
 # with an info line and counts as applied), project_revision (--revision reaches read_project),
 # project_diag_paths (--diag-paths given|resolved names the file of a located error),
 # project_preprocess (preprocess --out d --segments writes 0.v, 0.segments.json and
-# files-read.txt; without --out the text goes to stdout). The project cases run from the
-# project's directory (tests/cli/project), so the paths given are relative.
+# files-read.txt; without --out the text goes to stdout), parse_only (--parse-only a.v b.v is
+# -p "read_verilog --parse-only a.v b.v"; with --project or -f it reads the record's files; a
+# syntax error fails), parse_only_with_script (--parse-only with -p or a .o3 script exits 2:
+# use the pass option). The project cases run from the project's directory (tests/cli/project), so the paths
+# given are relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -261,6 +264,47 @@ project_preprocess)
     cmp -s "$work/out" "$work/d/0.v" || fail "stdout differs from 0.v"
     expect_fail "include_not_found" --project "$corpus/neg_include_not_found/project.o3proj" \
         -p preprocess
+    ;;
+parse_only)
+    printf 'module a (input wire i, output wire o);\n    b u_b (.i(i), .o(o));\nendmodule\n' \
+        >"$work/a.v"
+    printf 'module b (input wire i, output wire o);\n    assign o = i;\nendmodule\n' >"$work/b.v"
+    # odin3 --parse-only a.v b.v is -p "read_verilog --parse-only a.v b.v": the same summary.
+    "$odin3" --parse-only "$work/a.v" "$work/b.v" 2>"$work/err" || fail "--parse-only failed"
+    grep -o 'read_verilog: 2 units (0 library), [0-9]* nodes, [0-9]* comments, [0-9]* bytes' \
+        "$work/err" >"$work/sugar" || fail "no summary line for --parse-only"
+    "$odin3" -p "read_verilog --parse-only $work/a.v $work/b.v" 2>"$work/err" ||
+        fail "-p read_verilog --parse-only failed"
+    grep -o 'read_verilog: 2 units (0 library), [0-9]* nodes, [0-9]* comments, [0-9]* bytes' \
+        "$work/err" >"$work/script" || fail "no summary line for the pass"
+    cmp -s "$work/sugar" "$work/script" || fail "--parse-only differs from the pass"
+    # With --project or -f: read_project, then read_verilog --parse-only (the record's files).
+    cd "$project"
+    "$odin3" --project p.o3proj --parse-only 2>"$work/err" || fail "--project --parse-only failed"
+    grep -qF 'read_verilog: 1 units (0 library)' "$work/err" || fail "--project: no summary"
+    "$odin3" -f files.f --parse-only 2>"$work/err" || fail "-f --parse-only failed"
+    grep -qF 'read_verilog: 1 units (0 library)' "$work/err" || fail "-f: no summary"
+    # A located syntax error fails the run.
+    printf 'module c;\n    wire a b;\nendmodule\n' >"$work/c.v"
+    expect_fail "c.v:2:12: error: syntax: unexpected identifier" --parse-only "$work/c.v"
+    ;;
+parse_only_with_script)
+    printf 'module b;\nendmodule\n' >"$work/b.v"
+    set +e
+    "$odin3" --parse-only -p "stats" "$work/b.v" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--parse-only with -p: exit code $rc, expected 2"
+    grep -qF -- "--parse-only cannot be combined with a script: use the pass option" \
+        "$work/err" || fail "stderr lacks the message"
+    # A script file (.o3) under --parse-only is refused the same way, not parsed as Verilog.
+    printf 'stats\n' >"$work/flow.o3"
+    set +e
+    "$odin3" --parse-only "$work/flow.o3" 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--parse-only with a script file: exit code $rc, expected 2"
+    grep -qF -- "use the pass option" "$work/err" || fail "script file: stderr lacks the message"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

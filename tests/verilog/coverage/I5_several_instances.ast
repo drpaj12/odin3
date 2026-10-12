@@ -1,0 +1,81 @@
+# generated: odin3-parse-check --write
+(MODULE:i5_leaf @I5_several_instances.v:2:1
+  (LIST @I5_several_instances.v:2:16
+    (PARAM_DECL.parameter [IN_HEADER] @I5_several_instances.v:2:18
+      _
+      (DECLARATOR:W @I5_several_instances.v:2:28
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:2:32 1))))
+  (LIST @I5_several_instances.v:2:35
+    (PORT_DECL.input [IN_HEADER] @I5_several_instances.v:2:36
+      (RANGE @I5_several_instances.v:2:42
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:2:43 3)
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:2:45 0))
+      (DECLARATOR:a @I5_several_instances.v:2:48
+        _))
+    (PORT_DECL.output [IN_HEADER] @I5_several_instances.v:2:51
+      (RANGE @I5_several_instances.v:2:58
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:2:59 3)
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:2:61 0))
+      (DECLARATOR:y @I5_several_instances.v:2:64
+        _)))
+  (CONT_ASSIGN @I5_several_instances.v:3:3
+    _
+    _
+    (NET_ASSIGN @I5_several_instances.v:3:10
+      (IDENT:y @I5_several_instances.v:3:10)
+      (BINARY.+ @I5_several_instances.v:3:14
+        (IDENT:a @I5_several_instances.v:3:14)
+        (IDENT:W @I5_several_instances.v:3:18)))))
+(MODULE:i5_several @I5_several_instances.v:6:1
+  _
+  (LIST @I5_several_instances.v:6:19
+    (PORT_DECL.input [IN_HEADER] @I5_several_instances.v:6:20
+      (RANGE @I5_several_instances.v:6:26
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:6:27 3)
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:6:29 0))
+      (DECLARATOR:a @I5_several_instances.v:6:32
+        _)
+      (DECLARATOR:b @I5_several_instances.v:6:35
+        _))
+    (PORT_DECL.output [IN_HEADER] @I5_several_instances.v:6:38
+      (RANGE @I5_several_instances.v:6:45
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:6:46 3)
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:6:48 0))
+      (DECLARATOR:y1 @I5_several_instances.v:6:51
+        _)
+      (DECLARATOR:y2 @I5_several_instances.v:6:55
+        _)
+      (DECLARATOR:y3 @I5_several_instances.v:6:59
+        _)
+      (DECLARATOR:y4 @I5_several_instances.v:6:63
+        _)))
+  (INSTANTIATION:i5_leaf @I5_several_instances.v:7:3
+    _
+    (INSTANCE:u1 @I5_several_instances.v:7:11
+      _
+      (CONNECTION:a @I5_several_instances.v:7:15
+        (IDENT:a @I5_several_instances.v:7:18))
+      (CONNECTION:y @I5_several_instances.v:7:22
+        (IDENT:y1 @I5_several_instances.v:7:25)))
+    (INSTANCE:u2 @I5_several_instances.v:7:31
+      _
+      (CONNECTION:a @I5_several_instances.v:7:35
+        (IDENT:b @I5_several_instances.v:7:38))
+      (CONNECTION:y @I5_several_instances.v:7:42
+        (IDENT:y2 @I5_several_instances.v:7:45))))
+  (INSTANTIATION:i5_leaf @I5_several_instances.v:8:3
+    (LIST @I5_several_instances.v:8:11
+      (CONNECTION @I5_several_instances.v:8:13
+        (NUMBER.dec [SIGNED] @I5_several_instances.v:8:13 2)))
+    (INSTANCE:u3 @I5_several_instances.v:8:16
+      _
+      (CONNECTION @I5_several_instances.v:8:20
+        (IDENT:a @I5_several_instances.v:8:20))
+      (CONNECTION @I5_several_instances.v:8:23
+        (IDENT:y3 @I5_several_instances.v:8:23)))
+    (INSTANCE:u4 @I5_several_instances.v:8:28
+      _
+      (CONNECTION @I5_several_instances.v:8:32
+        (IDENT:b @I5_several_instances.v:8:32))
+      (CONNECTION @I5_several_instances.v:8:35
+        (IDENT:y4 @I5_several_instances.v:8:35)))))

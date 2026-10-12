@@ -1,0 +1,102 @@
+# generated: odin3-parse-check --write
+(MODULE:g7_scope_names @G7_generate_scope_names.v:2:1
+  _
+  (LIST @G7_generate_scope_names.v:2:23
+    (PORT_DECL.input [IN_HEADER] @G7_generate_scope_names.v:2:24
+      (RANGE @G7_generate_scope_names.v:2:30
+        (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:2:31 3)
+        (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:2:33 0))
+      (DECLARATOR:a @G7_generate_scope_names.v:2:36
+        _))
+    (PORT_DECL.output [IN_HEADER] @G7_generate_scope_names.v:2:39
+      _
+      (DECLARATOR:y1 @G7_generate_scope_names.v:2:46
+        _)
+      (DECLARATOR:y2 @G7_generate_scope_names.v:2:50
+        _)
+      (DECLARATOR:y3 @G7_generate_scope_names.v:2:54
+        _)))
+  (GENVAR_DECL @G7_generate_scope_names.v:3:3
+    (DECLARATOR:i @G7_generate_scope_names.v:3:10
+      _))
+  (GEN_FOR @G7_generate_scope_names.v:4:3
+    (BLOCKING_ASSIGN @G7_generate_scope_names.v:4:8
+      (IDENT:i @G7_generate_scope_names.v:4:8)
+      _
+      (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:4:12 0))
+    (BINARY.< @G7_generate_scope_names.v:4:15
+      (IDENT:i @G7_generate_scope_names.v:4:15)
+      (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:4:19 4))
+    (BLOCKING_ASSIGN @G7_generate_scope_names.v:4:22
+      (IDENT:i @G7_generate_scope_names.v:4:22)
+      _
+      (BINARY.+ @G7_generate_scope_names.v:4:26
+        (IDENT:i @G7_generate_scope_names.v:4:26)
+        (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:4:30 1)))
+    (GEN_BLOCK:g @G7_generate_scope_names.v:4:33
+      _
+      (NET_DECL.wire @G7_generate_scope_names.v:5:5
+        _
+        _
+        _
+        (DECLARATOR:t @G7_generate_scope_names.v:5:10
+          _))
+      (CONT_ASSIGN @G7_generate_scope_names.v:6:5
+        _
+        _
+        (NET_ASSIGN @G7_generate_scope_names.v:6:12
+          (IDENT:t @G7_generate_scope_names.v:6:12)
+          (SELECT.bit @G7_generate_scope_names.v:6:16
+            (IDENT:a @G7_generate_scope_names.v:6:16)
+            (IDENT:i @G7_generate_scope_names.v:6:18)
+            _)))))
+  (GEN_IF @G7_generate_scope_names.v:8:3
+    (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:8:7 1)
+    (GEN_BLOCK @G7_generate_scope_names.v:8:10
+      _
+      (NET_DECL.wire @G7_generate_scope_names.v:9:5
+        _
+        _
+        _
+        (DECLARATOR:w @G7_generate_scope_names.v:9:10
+          _))
+      (CONT_ASSIGN @G7_generate_scope_names.v:10:5
+        _
+        _
+        (NET_ASSIGN @G7_generate_scope_names.v:10:12
+          (IDENT:w @G7_generate_scope_names.v:10:12)
+          (SELECT.bit @G7_generate_scope_names.v:10:16
+            (IDENT:a @G7_generate_scope_names.v:10:16)
+            (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:10:18 0)
+            _))))
+    _)
+  (CONT_ASSIGN @G7_generate_scope_names.v:12:3
+    _
+    _
+    (NET_ASSIGN @G7_generate_scope_names.v:12:10
+      (IDENT:y1 @G7_generate_scope_names.v:12:10)
+      (HIER_NAME @G7_generate_scope_names.v:12:15
+        (SELECT.bit @G7_generate_scope_names.v:12:15
+          (IDENT:g @G7_generate_scope_names.v:12:15)
+          (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:12:17 0)
+          _)
+        (IDENT:t @G7_generate_scope_names.v:12:20))))
+  (CONT_ASSIGN @G7_generate_scope_names.v:13:3
+    _
+    _
+    (NET_ASSIGN @G7_generate_scope_names.v:13:10
+      (IDENT:y2 @G7_generate_scope_names.v:13:10)
+      (HIER_NAME @G7_generate_scope_names.v:13:15
+        (SELECT.bit @G7_generate_scope_names.v:13:15
+          (IDENT:g @G7_generate_scope_names.v:13:15)
+          (NUMBER.dec [SIGNED] @G7_generate_scope_names.v:13:17 3)
+          _)
+        (IDENT:t @G7_generate_scope_names.v:13:20))))
+  (CONT_ASSIGN @G7_generate_scope_names.v:14:3
+    _
+    _
+    (NET_ASSIGN @G7_generate_scope_names.v:14:10
+      (IDENT:y3 @G7_generate_scope_names.v:14:10)
+      (HIER_NAME @G7_generate_scope_names.v:14:15
+        (IDENT:genblk2 @G7_generate_scope_names.v:14:15)
+        (IDENT:w @G7_generate_scope_names.v:14:23)))))

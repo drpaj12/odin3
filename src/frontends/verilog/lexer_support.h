@@ -273,6 +273,10 @@ void odin3_vl_comment_close(odin3_vl_state *st);
 int odin3_vl_directive(odin3_vl_state *st, YYSTYPE *val, odin3_vp_loc *loc);
 void odin3_vl_unknown_directive(odin3_vl_state *st);
 
+/* SystemVerilog's `.*` (implicit port connections, not Verilog-2005): a located error at the
+ * '.'; both bytes are dropped, so `m u (.*);` yields this one error and no cascade. */
+void odin3_vl_implicit_ports(odin3_vl_state *st);
+
 /* Flex's fatal error (YY_EXIT_FAILURE): records the fatal status and returns to the armed
  * entry point (odin3_vl_guard). */
 _Noreturn void odin3_vl_flex_fatal(const char *msg, void *scanner);

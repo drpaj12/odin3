@@ -1,0 +1,76 @@
+# generated: odin3-parse-check --write
+(MODULE:m4_params @M4_parameter_ports.v:2:1
+  (LIST @M4_parameter_ports.v:2:18
+    (PARAM_DECL.parameter [IN_HEADER] @M4_parameter_ports.v:2:20
+      _
+      (DECLARATOR:A @M4_parameter_ports.v:2:30
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:2:34 1))
+      (DECLARATOR:B @M4_parameter_ports.v:2:37
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:2:41 2)))
+    (PARAM_DECL.parameter [IN_HEADER] @M4_parameter_ports.v:2:44
+      (RANGE @M4_parameter_ports.v:2:54
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:2:55 3)
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:2:57 0))
+      (DECLARATOR:C @M4_parameter_ports.v:2:60
+        (NUMBER.dec @M4_parameter_ports.v:2:64 4'd5)))
+    (PARAM_DECL.parameter [SIGNED IN_HEADER] @M4_parameter_ports.v:2:70
+      _
+      (DECLARATOR:D @M4_parameter_ports.v:2:87
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:2:91 1))))
+  (LIST @M4_parameter_ports.v:2:94
+    (PORT_DECL.input [IN_HEADER] @M4_parameter_ports.v:2:95
+      _
+      (DECLARATOR:a @M4_parameter_ports.v:2:101
+        _))
+    (PORT_DECL.output [IN_HEADER] @M4_parameter_ports.v:2:104
+      _
+      (DECLARATOR:y @M4_parameter_ports.v:2:111
+        _)))
+  (CONT_ASSIGN @M4_parameter_ports.v:3:3
+    _
+    _
+    (NET_ASSIGN @M4_parameter_ports.v:3:10
+      (IDENT:y @M4_parameter_ports.v:3:10)
+      (IDENT:a @M4_parameter_ports.v:3:14))))
+(MODULE:m4_localparam_header @M4_parameter_ports.v:6:1
+  (LIST @M4_parameter_ports.v:6:29
+    (PARAM_DECL.parameter [IN_HEADER] @M4_parameter_ports.v:6:31
+      _
+      (DECLARATOR:W @M4_parameter_ports.v:6:41
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:6:45 4)))
+    (PARAM_DECL.localparam [IN_HEADER] @M4_parameter_ports.v:6:48
+      _
+      (DECLARATOR:LW @M4_parameter_ports.v:6:59
+        (NUMBER.dec [SIGNED] @M4_parameter_ports.v:6:64 2))))
+  (LIST @M4_parameter_ports.v:6:67
+    (PORT_DECL.input [IN_HEADER] @M4_parameter_ports.v:6:68
+      _
+      (DECLARATOR:a @M4_parameter_ports.v:6:74
+        _))
+    (PORT_DECL.output [IN_HEADER] @M4_parameter_ports.v:6:77
+      _
+      (DECLARATOR:y @M4_parameter_ports.v:6:84
+        _)))
+  (CONT_ASSIGN @M4_parameter_ports.v:7:3
+    _
+    _
+    (NET_ASSIGN @M4_parameter_ports.v:7:10
+      (IDENT:y @M4_parameter_ports.v:7:10)
+      (IDENT:a @M4_parameter_ports.v:7:14))))
+(MODULE:m4_empty_params @M4_parameter_ports.v:10:1
+  (LIST @M4_parameter_ports.v:10:24)
+  (LIST @M4_parameter_ports.v:10:28
+    (PORT_DECL.input [IN_HEADER] @M4_parameter_ports.v:10:29
+      _
+      (DECLARATOR:a @M4_parameter_ports.v:10:35
+        _))
+    (PORT_DECL.output [IN_HEADER] @M4_parameter_ports.v:10:38
+      _
+      (DECLARATOR:y @M4_parameter_ports.v:10:45
+        _)))
+  (CONT_ASSIGN @M4_parameter_ports.v:11:3
+    _
+    _
+    (NET_ASSIGN @M4_parameter_ports.v:11:10
+      (IDENT:y @M4_parameter_ports.v:11:10)
+      (IDENT:a @M4_parameter_ports.v:11:14))))

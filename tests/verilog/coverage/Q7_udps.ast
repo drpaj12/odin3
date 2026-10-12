@@ -1,0 +1,44 @@
+# generated: odin3-parse-check --write
+(UDP_DECL:q7_mux @Q7_udps.v:2:1 "primitive q7_mux (y, s, a, b);\n  output y;\n  input s, a, b;\n  table\n    0 0 ? : 0;\n    0 1 ? : 1;\n    1 ? 0 : 0;\n    1 ? 1 : 1;\n  endtable\nendprimitive")
+(UDP_DECL:q7_dff @Q7_udps.v:13:1 "primitive q7_dff (q, clk, d);\n  output q;\n  reg q;\n  input clk, d;\n  initial q = 1'b0;\n  table\n    (01) 0 : ? : 0;\n    (01) 1 : ? : 1;\n    (0?) ? : ? : -;\n    (?0) ? : ? : -;\n    ? (??) : ? : -;\n  endtable\nendprimitive")
+(MODULE:q7_udp_use @Q7_udps.v:27:1
+  _
+  (LIST @Q7_udps.v:27:19
+    (PORT_DECL.input [IN_HEADER] @Q7_udps.v:27:20
+      _
+      (DECLARATOR:s @Q7_udps.v:27:26
+        _)
+      (DECLARATOR:a @Q7_udps.v:27:29
+        _)
+      (DECLARATOR:b @Q7_udps.v:27:32
+        _)
+      (DECLARATOR:clk @Q7_udps.v:27:35
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q7_udps.v:27:40
+      _
+      (DECLARATOR:y @Q7_udps.v:27:47
+        _)
+      (DECLARATOR:q @Q7_udps.v:27:50
+        _)))
+  (INSTANTIATION:q7_mux @Q7_udps.v:28:3
+    _
+    (INSTANCE @Q7_udps.v:28:10
+      _
+      (CONNECTION @Q7_udps.v:28:11
+        (IDENT:y @Q7_udps.v:28:11))
+      (CONNECTION @Q7_udps.v:28:14
+        (IDENT:s @Q7_udps.v:28:14))
+      (CONNECTION @Q7_udps.v:28:17
+        (IDENT:a @Q7_udps.v:28:17))
+      (CONNECTION @Q7_udps.v:28:20
+        (IDENT:b @Q7_udps.v:28:20))))
+  (INSTANTIATION:q7_dff @Q7_udps.v:29:3
+    _
+    (INSTANCE:u @Q7_udps.v:29:10
+      _
+      (CONNECTION @Q7_udps.v:29:13
+        (IDENT:q @Q7_udps.v:29:13))
+      (CONNECTION @Q7_udps.v:29:16
+        (IDENT:clk @Q7_udps.v:29:16))
+      (CONNECTION @Q7_udps.v:29:21
+        (IDENT:a @Q7_udps.v:29:21)))))

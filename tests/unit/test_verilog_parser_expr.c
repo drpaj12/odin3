@@ -321,7 +321,7 @@ static void test_doubled_unary_is_a_syntax_error(void) {
 /* The strict forms a looser grammar would accept (review M3): a doubled unary operator, a
  * replication without its inner braces or followed by more items (A.8.1), a user call without an
  * argument (A.8.2), two selects on a non-final component (G7), a min:typ:max outside `#(` (§3.1
- * f), and a binary `~&` (A.8.6 has none). */
+ * f). */
 static void test_strict_forms_are_syntax_errors(void) {
     expect_error("module m; assign y = !~a; endmodule", ODIN3_ERR_PARSE,
                  "x.v:1:23: error: syntax: unexpected '~'\n");
@@ -335,8 +335,30 @@ static void test_strict_forms_are_syntax_errors(void) {
                  "x.v:1:31: error: syntax: unexpected '.'\n");
     expect_error("module m; assign y = (1:2:3); endmodule", ODIN3_ERR_PARSE,
                  "x.v:1:24: error: syntax: unexpected ':'\n");
-    expect_error("module m; assign y = a ~& b; endmodule", ODIN3_ERR_PARSE,
-                 "x.v:1:24: error: syntax: unexpected ~&\n");
+}
+
+/* Binary `~&` and `~|` (2C Task 10; not in A.8.6, but Yosys and Odin II accept them and six
+ * micros with Parmys goldens use them: operators/binary_nand, binary_nor, full/ansiportlist,
+ * ansiportlist_2, binops, syntax/bm_log_all). They take the precedence of `&` and `|` (Table
+ * 5-4's rows, Yosys's %left) and read as Yosys reads them: UNARY[~] over BINARY[&] or BINARY[|],
+ * both at the left operand; the operator's attributes stay on the BINARY. */
+static void test_binary_nand_and_nor(void) {
+    expect_tree("a ~& b", "UNARY[~](BINARY[&](a, b))");
+    expect_tree("a ~| b", "UNARY[~](BINARY[|](a, b))");
+    expect_tree("a ~& b | c", "BINARY[|](UNARY[~](BINARY[&](a, b)), c)");
+    expect_tree("a | b ~& c", "BINARY[|](a, UNARY[~](BINARY[&](b, c)))");
+    expect_tree("a ~| b & c", "UNARY[~](BINARY[|](a, BINARY[&](b, c)))");
+    expect_tree("a ^ b ~& c", "BINARY[^](a, UNARY[~](BINARY[&](b, c)))");
+    expect_tree("a ~& b & c", "BINARY[&](UNARY[~](BINARY[&](a, b)), c)");
+    expect_tree("a ~| b ~| c", "UNARY[~](BINARY[|](UNARY[~](BINARY[|](a, b)), c))");
+    expect_tree("a ~& ~&b", "UNARY[~](BINARY[&](a, UNARY[~&](b)))");
+    expect_printed("a ~& b", "~(a & b)");
+    expect_dump("a ~& (* k *) b", "(UNARY.~ @x.v:1:22\n"
+                                  "  (BINARY.& @x.v:1:22\n"
+                                  "    (IDENT:a @x.v:1:22)\n"
+                                  "    (IDENT:b @x.v:1:35)\n"
+                                  "    {(ATTR:k @x.v:1:30\n"
+                                  "       _)}))");
 }
 
 /* --- attributes on operators (§3.5) ----------------------------------------------------------- */
@@ -657,6 +679,7 @@ static const char OOM_TEXT[] =
     "  assign y = - (* k *) a + (* j = 1 *) b * $signed(a) ? {2{a[1:0], b[3]}} : "
     "f(a, u.w[1]) ** (a ~^ 'sd5);\n"
     "  assign y = $display(\"x\", , g[0].h(b)) | {a, b} >>> a[b+:2] - 1.5;\n"
+    "  assign y = a ~& (* n *) b ~| a;\n"
     "endmodule\n";
 
 /* A parse that failed under the allocation hook: NO_MEMORY with nothing left behind. */
@@ -710,6 +733,7 @@ int main(void) {
     RUN_TEST(test_reduction_operators);
     RUN_TEST(test_doubled_unary_is_a_syntax_error);
     RUN_TEST(test_strict_forms_are_syntax_errors);
+    RUN_TEST(test_binary_nand_and_nor);
     RUN_TEST(test_attributes_on_operators);
     RUN_TEST(test_nested_operator_attributes);
     RUN_TEST(test_concatenation_and_replication);

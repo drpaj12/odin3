@@ -1,0 +1,2 @@
+unnamed_instance.v:7:8: error:
+instance of 'leaf' has no name (only gate and UDP instances may be unnamed)

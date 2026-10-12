@@ -1,0 +1,46 @@
+# generated: odin3-parse-check --write
+(MODULE:a4_multi_driver @A4_multiple_drivers.v:2:1
+  _
+  (LIST @A4_multiple_drivers.v:2:24
+    (PORT_DECL.input [IN_HEADER] @A4_multiple_drivers.v:2:25
+      _
+      (DECLARATOR:a @A4_multiple_drivers.v:2:31
+        _)
+      (DECLARATOR:b @A4_multiple_drivers.v:2:34
+        _))
+    (PORT_DECL.output [IN_HEADER] @A4_multiple_drivers.v:2:37
+      _
+      (DECLARATOR:y @A4_multiple_drivers.v:2:44
+        _)
+      (DECLARATOR:z @A4_multiple_drivers.v:2:47
+        _)))
+  (CONT_ASSIGN @A4_multiple_drivers.v:3:3
+    _
+    _
+    (NET_ASSIGN @A4_multiple_drivers.v:3:10
+      (IDENT:y @A4_multiple_drivers.v:3:10)
+      (IDENT:a @A4_multiple_drivers.v:3:14)))
+  (CONT_ASSIGN @A4_multiple_drivers.v:4:3
+    _
+    _
+    (NET_ASSIGN @A4_multiple_drivers.v:4:10
+      (IDENT:y @A4_multiple_drivers.v:4:10)
+      (IDENT:b @A4_multiple_drivers.v:4:14)))
+  (NET_DECL.wire @A4_multiple_drivers.v:5:3
+    _
+    _
+    _
+    (DECLARATOR:w @A4_multiple_drivers.v:5:8
+      (IDENT:a @A4_multiple_drivers.v:5:12)))
+  (CONT_ASSIGN @A4_multiple_drivers.v:6:3
+    _
+    _
+    (NET_ASSIGN @A4_multiple_drivers.v:6:10
+      (IDENT:w @A4_multiple_drivers.v:6:10)
+      (IDENT:b @A4_multiple_drivers.v:6:14)))
+  (CONT_ASSIGN @A4_multiple_drivers.v:7:3
+    _
+    _
+    (NET_ASSIGN @A4_multiple_drivers.v:7:10
+      (IDENT:z @A4_multiple_drivers.v:7:10)
+      (IDENT:w @A4_multiple_drivers.v:7:14))))

@@ -681,6 +681,19 @@ static void test_string_nul_escape(void) {
     TEST_ASSERT_TRUE(err_flag);
 }
 
+/* A backslash before a raw NUL escapes nothing: the NUL is the "unexpected byte" error a raw NUL
+ * in a string gets, never a string byte (an interned NUL was INVALID_ARG; fuzz_verilog). */
+static void test_string_backslash_nul(void) {
+    open_n("\"a\\\0b\" \"\\\0", 10);
+    expect_name(TOK_STRING, (tok_range){0, 6}, "ab");
+    expect_name(TOK_STRING, (tok_range){7, 3}, "");
+    TEST_ASSERT_EQUAL_STRING("t.v:1:4: error: unexpected byte 0x00\n"
+                             "t.v:1:10: error: unexpected byte 0x00\n"
+                             "t.v:1:8: error: unterminated string\n",
+                             logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
 static void test_string_unterminated(void) {
     open_text("\"abc\r\nx \"d\\");
     expect_name(TOK_STRING, (tok_range){0, 4}, "abc");
@@ -942,6 +955,29 @@ static void test_pragma_string_with_slashes(void) {
     TEST_ASSERT_EQUAL_STRING("", logged());
 }
 
+/* A raw NUL in a `pragma argument (the only directive whose argument may hold one): a located
+ * error, and the argument ends before it, so no NUL is interned (an unlocated INVALID_ARG before;
+ * fuzz_verilog review I1). */
+static void test_directive_nul(void) {
+    open_n("`pragma a\0b\n", 12);
+    expect_text(TOK_DIRECTIVE, (tok_range){0, 11}, "a");
+    expect_eof(11);
+    TEST_ASSERT_EQUAL_STRING("t.v:1:10: error: unexpected byte 0x00\n", logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
+/* The other directive whose argument may hold a NUL (inside its quotes): located the same way,
+ * then the cut version is the usual located error. */
+static void test_begin_keywords_nul(void) {
+    open_n("`begin_keywords \"13\0\"", 21);
+    expect_text(TOK_DIRECTIVE, (tok_range){0, 21}, "\"13");
+    TEST_ASSERT_EQUAL_STRING("t.v:1:20: error: unexpected byte 0x00\n"
+                             "t.v:1:1: error: unknown `begin_keywords version \"13\n",
+                             logged());
+    TEST_ASSERT_TRUE(err_flag);
+    expect_eof(21);
+}
+
 static void test_pragma(void) {
     open_text("`pragma foo bar // c\n`pragma\n`pragma a/b /\n`pragma x\r\n");
     expect_text(TOK_DIRECTIVE, (tok_range){0, 15}, "foo bar");
@@ -985,6 +1021,24 @@ static void test_unknown_directive(void) {
                              "t.v:1:8: error: unknown directive `define\n"
                              "t.v:1:16: error: unexpected byte 0x60\n",
                              logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
+/* SystemVerilog's `.*` is one located error at its '.', both bytes dropped: `(.*)` is '(' ')'
+ * (not '(' '.' ATTR_CLOSE), and `. *` (two tokens) is left to the parser. */
+static void test_implicit_port_connection(void) {
+    open_text("u (.*); v (. *)");
+    expect_ident("u");
+    expect_tok('(', (tok_range){2, 1});
+    expect_tok(')', (tok_range){5, 1});
+    expect_tok(';', (tok_range){6, 1});
+    expect_ident("v");
+    expect_tok('(', (tok_range){10, 1});
+    expect_tok('.', (tok_range){11, 1});
+    expect_tok(TOK_ATTR_CLOSE, (tok_range){13, 2});
+    TEST_ASSERT_EQUAL_STRING(
+        "t.v:1:4: error: '.*' (implicit port connections) is SystemVerilog, not Verilog-2005\n",
+        logged());
     TEST_ASSERT_TRUE(err_flag);
 }
 
@@ -1342,6 +1396,7 @@ static void run_tokens(void) {
     RUN_TEST(test_string_unknown_escape_warns);
     RUN_TEST(test_string_unknown_escape_of_raw_byte);
     RUN_TEST(test_string_nul_escape);
+    RUN_TEST(test_string_backslash_nul);
     RUN_TEST(test_string_unterminated);
     RUN_TEST(test_string_cap);
     RUN_TEST(test_string_cap_hook);
@@ -1364,9 +1419,12 @@ static void run_trivia_and_edges(void) {
     RUN_TEST(test_unconnected_drive);
     RUN_TEST(test_pragma);
     RUN_TEST(test_pragma_string_with_slashes);
+    RUN_TEST(test_directive_nul);
+    RUN_TEST(test_begin_keywords_nul);
     RUN_TEST(test_directive_cap);
     RUN_TEST(test_directive_cap_default);
     RUN_TEST(test_unknown_directive);
+    RUN_TEST(test_implicit_port_connection);
     RUN_TEST(test_specify_body);
     RUN_TEST(test_body_end_after_base);
     RUN_TEST(test_primitive_and_config_names);

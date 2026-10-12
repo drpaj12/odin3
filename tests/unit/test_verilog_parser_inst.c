@@ -13,6 +13,8 @@
 #include "ast/ast.h"
 #include "ast/check.h"
 #include "ast/print.h"
+#include "ast/srcfmt.h"
+#include "ast/srcman.h"
 #include "frontends/verilog/parser.h"
 #include "frontends/verilog/parser_test.h"
 #include "ir/check.h"
@@ -391,6 +393,51 @@ static void test_gate_locations_and_attributes(void) {
     vt_free(&res);
 }
 
+/* node's end (one past its last byte) is at file:line:col want. */
+static void expect_end(const vt_result *res, odin3_ast_id node, const char *want) {
+    odin3_srcman *sm = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(res->design, &sm));
+    odin3_strbuf got;
+    odin3_strbuf_init(&got);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_srcman_format(sm, odin3_ast_end(res->ast, node), &got, ODIN3_SRCFMT_GIVEN));
+    TEST_ASSERT_EQUAL_STRING(want, got.data);
+    odin3_strbuf_free(&got);
+}
+
+/*
+ * The ends of the Task 7 nodes (2C-1 review, deferred to Task 9): an INSTANTIATION past its ';',
+ * its parameter LIST past ')', an INSTANCE past its ')', a GATE_DECL past its ';', a GENERATE
+ * past 'endgenerate', a GEN_BLOCK past its 'end', a GEN_CASE past 'endcase' and a DEFPARAM pair
+ * at its value (its statement's ';' belongs to no pair).
+ */
+static void test_end_locations(void) {
+    vt_result res;
+    parse_body("m #(1, 2) u (a, b);\n"
+               "and g (y, a);\n"
+               "generate if (1) begin : blk wire w; end endgenerate\n"
+               "case (P) 0: assign y = a; default: assign y = b; endcase\n"
+               "defparam u.W = 3, u.V = 4;",
+               &res);
+    odin3_ast_id inst = item_at(&res, 0);
+    expect_end(&res, inst, "x.v:2:20");
+    expect_end(&res, odin3_ast_child(res.ast, inst, 0), "x.v:2:10");
+    expect_end(&res, odin3_ast_child(res.ast, inst, 1), "x.v:2:19");
+    odin3_ast_id gate = item_at(&res, 1);
+    expect_end(&res, gate, "x.v:3:14");
+    expect_end(&res, odin3_ast_child(res.ast, gate, 2), "x.v:3:13");
+    odin3_ast_id gen = item_at(&res, 2);
+    expect_end(&res, gen, "x.v:4:52");
+    odin3_ast_id gen_if = odin3_ast_child(res.ast, gen, 0);
+    expect_end(&res, gen_if, "x.v:4:40");
+    expect_end(&res, odin3_ast_child(res.ast, gen_if, 1), "x.v:4:40");
+    expect_end(&res, item_at(&res, 3), "x.v:5:57");
+    expect_end(&res, item_at(&res, 4), "x.v:6:17");
+    expect_head(&res, item_at(&res, 5), "(DEFPARAM @x.v:6:19");
+    expect_end(&res, item_at(&res, 5), "x.v:6:26");
+    vt_free(&res);
+}
+
 /* Gate terminals are never empty (A.3.3), and a pull gate takes no delay (A.3.1). */
 static void test_gate_syntax_errors(void) {
     expect_error("and g (y, , a);", "x.v:2:11: error: syntax: unexpected ','\n");
@@ -668,6 +715,7 @@ int main(void) {
     RUN_TEST(test_generate_attributes_references_defparam);
     RUN_TEST(test_generate_syntax_errors);
     RUN_TEST(test_generate_recovery_at_closers);
+    RUN_TEST(test_end_locations);
     RUN_TEST(test_inst_oom_sweep);
     return UNITY_END();
 }

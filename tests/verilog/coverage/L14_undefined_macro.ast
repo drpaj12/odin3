@@ -1,0 +1,18 @@
+# generated: odin3-parse-check --write
+(MODULE:l14_undefined_macro @L14_undefined_macro.v:5:1
+  _
+  (LIST @L14_undefined_macro.v:5:28
+    (PORT_DECL.input [IN_HEADER] @L14_undefined_macro.v:5:29
+      _
+      (DECLARATOR:a @L14_undefined_macro.v:5:35
+        _))
+    (PORT_DECL.output [IN_HEADER] @L14_undefined_macro.v:5:38
+      _
+      (DECLARATOR:y @L14_undefined_macro.v:5:45
+        _)))
+  (CONT_ASSIGN @L14_undefined_macro.v:9:3
+    _
+    _
+    (NET_ASSIGN @L14_undefined_macro.v:9:10
+      (IDENT:y @L14_undefined_macro.v:9:10)
+      (IDENT:a @L14_undefined_macro.v:9:14))))

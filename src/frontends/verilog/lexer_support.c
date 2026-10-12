@@ -295,11 +295,7 @@ void odin3_vl_vreport(odin3_vl_run *run, odin3_log_level level, odin3_loc loc, c
         }
         run->errors++;
     }
-    odin3_srcman *sm = NULL;
-    if (odin3_design_get_srcman(run->design, &sm) != ODIN3_OK) {
-        sm = NULL;
-    }
-    odin3_srcman_vdiag(sm, level, loc, fmt, args);
+    odin3_vdiag(run->design, level, loc, fmt, args); /* --diag-paths style (PRJ-18) */
 }
 
 bool odin3_vl_in_error(const odin3_vl_run *run) {

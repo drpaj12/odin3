@@ -1,0 +1,79 @@
+# generated: odin3-parse-check --write
+(MODULE:k12_func_timing @K12_function_timing.v:2:1
+  _
+  (LIST @K12_function_timing.v:2:24
+    (PORT_DECL.input [IN_HEADER] @K12_function_timing.v:2:25
+      _
+      (DECLARATOR:clk @K12_function_timing.v:2:31
+        _))
+    (PORT_DECL.input [IN_HEADER] @K12_function_timing.v:2:36
+      (RANGE @K12_function_timing.v:2:42
+        (NUMBER.dec [SIGNED] @K12_function_timing.v:2:43 3)
+        (NUMBER.dec [SIGNED] @K12_function_timing.v:2:45 0))
+      (DECLARATOR:a @K12_function_timing.v:2:48
+        _))
+    (PORT_DECL.output [IN_HEADER] @K12_function_timing.v:2:51
+      (RANGE @K12_function_timing.v:2:58
+        (NUMBER.dec [SIGNED] @K12_function_timing.v:2:59 3)
+        (NUMBER.dec [SIGNED] @K12_function_timing.v:2:61 0))
+      (DECLARATOR:y @K12_function_timing.v:2:64
+        _)))
+  (FUNCTION_DECL:f @K12_function_timing.v:3:3
+    (RANGE @K12_function_timing.v:3:12
+      (NUMBER.dec [SIGNED] @K12_function_timing.v:3:13 3)
+      (NUMBER.dec [SIGNED] @K12_function_timing.v:3:15 0))
+    (LIST @K12_function_timing.v:3:21
+      (PORT_DECL.input [IN_HEADER] @K12_function_timing.v:3:21
+        (RANGE @K12_function_timing.v:3:27
+          (NUMBER.dec [SIGNED] @K12_function_timing.v:3:28 3)
+          (NUMBER.dec [SIGNED] @K12_function_timing.v:3:30 0))
+        (DECLARATOR:x @K12_function_timing.v:3:33
+          _)))
+    (LIST @K12_function_timing.v:3:36)
+    (SEQ_BLOCK @K12_function_timing.v:4:5
+      _
+      (NONBLOCKING_ASSIGN @K12_function_timing.v:5:7
+        (IDENT:f @K12_function_timing.v:5:7)
+        _
+        (IDENT:x @K12_function_timing.v:5:12))))
+  (FUNCTION_DECL:g @K12_function_timing.v:8:3
+    (RANGE @K12_function_timing.v:8:12
+      (NUMBER.dec [SIGNED] @K12_function_timing.v:8:13 3)
+      (NUMBER.dec [SIGNED] @K12_function_timing.v:8:15 0))
+    (LIST @K12_function_timing.v:8:21
+      (PORT_DECL.input [IN_HEADER] @K12_function_timing.v:8:21
+        (RANGE @K12_function_timing.v:8:27
+          (NUMBER.dec [SIGNED] @K12_function_timing.v:8:28 3)
+          (NUMBER.dec [SIGNED] @K12_function_timing.v:8:30 0))
+        (DECLARATOR:x @K12_function_timing.v:8:33
+          _)))
+    (LIST @K12_function_timing.v:8:36)
+    (SEQ_BLOCK @K12_function_timing.v:9:5
+      _
+      (TIMING_STMT @K12_function_timing.v:10:7
+        (EVENT_CONTROL @K12_function_timing.v:10:7
+          _
+          (EVENT_EXPR.posedge @K12_function_timing.v:10:9
+            (IDENT:clk @K12_function_timing.v:10:17)))
+        (BLOCKING_ASSIGN @K12_function_timing.v:10:22
+          (IDENT:g @K12_function_timing.v:10:22)
+          _
+          (IDENT:x @K12_function_timing.v:10:26)))
+      (TIMING_STMT @K12_function_timing.v:11:7
+        (DELAY @K12_function_timing.v:11:7
+          (NUMBER.dec [SIGNED] @K12_function_timing.v:11:8 1))
+        (BLOCKING_ASSIGN @K12_function_timing.v:11:10
+          (IDENT:g @K12_function_timing.v:11:10)
+          _
+          (UNARY.~ @K12_function_timing.v:11:14
+            (IDENT:g @K12_function_timing.v:11:15))))))
+  (CONT_ASSIGN @K12_function_timing.v:14:3
+    _
+    _
+    (NET_ASSIGN @K12_function_timing.v:14:10
+      (IDENT:y @K12_function_timing.v:14:10)
+      (BINARY.| @K12_function_timing.v:14:14
+        (CALL:f @K12_function_timing.v:14:14
+          (IDENT:a @K12_function_timing.v:14:16))
+        (CALL:g @K12_function_timing.v:14:21
+          (IDENT:a @K12_function_timing.v:14:23))))))

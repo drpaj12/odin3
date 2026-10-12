@@ -1,0 +1,45 @@
+# generated: odin3-parse-check --write
+(MODULE:i2_leaf @I2_mixed_connections.v:2:1
+  _
+  (LIST @I2_mixed_connections.v:2:16
+    (PORT_DECL.input [IN_HEADER] @I2_mixed_connections.v:2:17
+      _
+      (DECLARATOR:a @I2_mixed_connections.v:2:23
+        _)
+      (DECLARATOR:b @I2_mixed_connections.v:2:26
+        _))
+    (PORT_DECL.output [IN_HEADER] @I2_mixed_connections.v:2:29
+      _
+      (DECLARATOR:y @I2_mixed_connections.v:2:36
+        _)))
+  (CONT_ASSIGN @I2_mixed_connections.v:3:3
+    _
+    _
+    (NET_ASSIGN @I2_mixed_connections.v:3:10
+      (IDENT:y @I2_mixed_connections.v:3:10)
+      (BINARY.& @I2_mixed_connections.v:3:14
+        (IDENT:a @I2_mixed_connections.v:3:14)
+        (IDENT:b @I2_mixed_connections.v:3:18)))))
+(MODULE:i2_mixed @I2_mixed_connections.v:6:1
+  _
+  (LIST @I2_mixed_connections.v:6:17
+    (PORT_DECL.input [IN_HEADER] @I2_mixed_connections.v:6:18
+      _
+      (DECLARATOR:p @I2_mixed_connections.v:6:24
+        _)
+      (DECLARATOR:q @I2_mixed_connections.v:6:27
+        _))
+    (PORT_DECL.output [IN_HEADER] @I2_mixed_connections.v:6:30
+      _
+      (DECLARATOR:r @I2_mixed_connections.v:6:37
+        _)))
+  (INSTANTIATION:i2_leaf @I2_mixed_connections.v:7:3
+    _
+    (INSTANCE:u @I2_mixed_connections.v:7:11
+      _
+      (CONNECTION @I2_mixed_connections.v:7:14
+        (IDENT:p @I2_mixed_connections.v:7:14))
+      (CONNECTION:b @I2_mixed_connections.v:7:17
+        (IDENT:q @I2_mixed_connections.v:7:20))
+      (CONNECTION:y @I2_mixed_connections.v:7:24
+        (IDENT:r @I2_mixed_connections.v:7:27)))))

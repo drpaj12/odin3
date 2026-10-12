@@ -14,7 +14,8 @@ extern const odin3_pass_def *const odin3_builtin_passes[];
 extern const uint32_t odin3_builtin_pass_count;
 
 /* Built-in passes defined outside builtin.c: write_formats.c (write_json, write_verilog,
- * write_dot, write_rtlil), sim_pass.c, project_pass.c and proc/proc_pass.c (proc, 2E). */
+ * write_dot, write_rtlil), sim_pass.c, project_pass.c, proc/proc_pass.c (proc, 2E) and
+ * read_verilog.c. */
 extern const odin3_pass_def odin3_pass_write_json;
 extern const odin3_pass_def odin3_pass_write_verilog;
 extern const odin3_pass_def odin3_pass_write_dot;
@@ -24,6 +25,8 @@ extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;
 extern const odin3_pass_def odin3_pass_preprocess;
 extern const odin3_pass_def odin3_pass_proc;
+/* src/frontends/verilog/read_verilog.c (2C §4). */
+extern const odin3_pass_def odin3_read_verilog_pass;
 
 /* Writes text to path atomically (the destination keeps its old contents on failure); IO
  * (logged) when it cannot be written. */

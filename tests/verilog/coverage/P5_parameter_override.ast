@@ -1,0 +1,97 @@
+# generated: odin3-parse-check --write
+(MODULE:p5_leaf @P5_parameter_override.v:2:1
+  (LIST @P5_parameter_override.v:2:16
+    (PARAM_DECL.parameter [IN_HEADER] @P5_parameter_override.v:2:18
+      _
+      (DECLARATOR:W @P5_parameter_override.v:2:28
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:32 4))
+      (DECLARATOR:D @P5_parameter_override.v:2:35
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:39 2))))
+  (LIST @P5_parameter_override.v:2:42
+    (PORT_DECL.input [IN_HEADER] @P5_parameter_override.v:2:43
+      (RANGE @P5_parameter_override.v:2:49
+        (BINARY.- @P5_parameter_override.v:2:50
+          (IDENT:W @P5_parameter_override.v:2:50)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:52 1))
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:54 0))
+      (DECLARATOR:a @P5_parameter_override.v:2:57
+        _))
+    (PORT_DECL.output [IN_HEADER] @P5_parameter_override.v:2:60
+      (RANGE @P5_parameter_override.v:2:67
+        (BINARY.- @P5_parameter_override.v:2:68
+          (IDENT:W @P5_parameter_override.v:2:68)
+          (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:70 1))
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:2:72 0))
+      (DECLARATOR:y @P5_parameter_override.v:2:75
+        _)))
+  (CONT_ASSIGN @P5_parameter_override.v:3:3
+    _
+    _
+    (NET_ASSIGN @P5_parameter_override.v:3:10
+      (IDENT:y @P5_parameter_override.v:3:10)
+      (IDENT:a @P5_parameter_override.v:3:14))))
+(MODULE:p5_override @P5_parameter_override.v:6:1
+  _
+  (LIST @P5_parameter_override.v:6:20
+    (PORT_DECL.input [IN_HEADER] @P5_parameter_override.v:6:21
+      (RANGE @P5_parameter_override.v:6:27
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:28 7)
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:30 0))
+      (DECLARATOR:a @P5_parameter_override.v:6:33
+        _))
+    (PORT_DECL.output [IN_HEADER] @P5_parameter_override.v:6:36
+      (RANGE @P5_parameter_override.v:6:43
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:44 7)
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:6:46 0))
+      (DECLARATOR:y1 @P5_parameter_override.v:6:49
+        _)
+      (DECLARATOR:y2 @P5_parameter_override.v:6:53
+        _)
+      (DECLARATOR:y3 @P5_parameter_override.v:6:57
+        _)
+      (DECLARATOR:y4 @P5_parameter_override.v:6:61
+        _)))
+  (INSTANTIATION:p5_leaf @P5_parameter_override.v:7:3
+    (LIST @P5_parameter_override.v:7:11
+      (CONNECTION @P5_parameter_override.v:7:13
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:7:13 8)))
+    (INSTANCE:u1 @P5_parameter_override.v:7:16
+      _
+      (CONNECTION:a @P5_parameter_override.v:7:20
+        (IDENT:a @P5_parameter_override.v:7:23))
+      (CONNECTION:y @P5_parameter_override.v:7:27
+        (IDENT:y1 @P5_parameter_override.v:7:30))))
+  (INSTANTIATION:p5_leaf @P5_parameter_override.v:8:3
+    (LIST @P5_parameter_override.v:8:11
+      (CONNECTION @P5_parameter_override.v:8:13
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:8:13 8))
+      (CONNECTION @P5_parameter_override.v:8:16
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:8:16 3)))
+    (INSTANCE:u2 @P5_parameter_override.v:8:19
+      _
+      (CONNECTION:a @P5_parameter_override.v:8:23
+        (IDENT:a @P5_parameter_override.v:8:26))
+      (CONNECTION:y @P5_parameter_override.v:8:30
+        (IDENT:y2 @P5_parameter_override.v:8:33))))
+  (INSTANTIATION:p5_leaf @P5_parameter_override.v:9:3
+    (LIST @P5_parameter_override.v:9:11
+      (CONNECTION:W @P5_parameter_override.v:9:13
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:9:16 8)))
+    (INSTANCE:u3 @P5_parameter_override.v:9:20
+      _
+      (CONNECTION:a @P5_parameter_override.v:9:24
+        (IDENT:a @P5_parameter_override.v:9:27))
+      (CONNECTION:y @P5_parameter_override.v:9:31
+        (IDENT:y3 @P5_parameter_override.v:9:34))))
+  (INSTANTIATION:p5_leaf @P5_parameter_override.v:10:3
+    (LIST @P5_parameter_override.v:10:11
+      (CONNECTION:W @P5_parameter_override.v:10:13
+        (NUMBER.dec [SIGNED] @P5_parameter_override.v:10:16 8))
+      (CONNECTION:D @P5_parameter_override.v:10:20
+        _))
+    (INSTANCE:u4 @P5_parameter_override.v:10:26
+      _
+      (CONNECTION:a @P5_parameter_override.v:10:30
+        (IDENT:a @P5_parameter_override.v:10:33))
+      (CONNECTION:y @P5_parameter_override.v:10:37
+        (IDENT:y4 @P5_parameter_override.v:10:40)))))

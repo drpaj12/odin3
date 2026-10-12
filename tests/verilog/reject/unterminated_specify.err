@@ -1,0 +1,2 @@
+unterminated_specify.v:3:3: error:
+'specify' has no matching 'endspecify'

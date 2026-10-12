@@ -1,0 +1,2 @@
+duplicate_module.v:6:1: error:
+duplicate_module: module 'm' is already defined

@@ -1,0 +1,44 @@
+# generated: odin3-parse-check --write
+(MODULE:q5_gate_arrays @Q5_gate_arrays.v:2:1
+  _
+  (LIST @Q5_gate_arrays.v:2:23
+    (PORT_DECL.input [IN_HEADER] @Q5_gate_arrays.v:2:24
+      (RANGE @Q5_gate_arrays.v:2:30
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:31 3)
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:33 0))
+      (DECLARATOR:a @Q5_gate_arrays.v:2:36
+        _)
+      (DECLARATOR:b @Q5_gate_arrays.v:2:39
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q5_gate_arrays.v:2:42
+      (RANGE @Q5_gate_arrays.v:2:49
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:50 3)
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:52 0))
+      (DECLARATOR:y @Q5_gate_arrays.v:2:55
+        _)
+      (DECLARATOR:z @Q5_gate_arrays.v:2:58
+        _)))
+  (GATE_DECL.and @Q5_gate_arrays.v:3:3
+    _
+    _
+    (INSTANCE:g @Q5_gate_arrays.v:3:7
+      (RANGE @Q5_gate_arrays.v:3:8
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:9 3)
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:11 0))
+      (CONNECTION @Q5_gate_arrays.v:3:15
+        (IDENT:y @Q5_gate_arrays.v:3:15))
+      (CONNECTION @Q5_gate_arrays.v:3:18
+        (IDENT:a @Q5_gate_arrays.v:3:18))
+      (CONNECTION @Q5_gate_arrays.v:3:21
+        (IDENT:b @Q5_gate_arrays.v:3:21))))
+  (GATE_DECL.not @Q5_gate_arrays.v:4:3
+    _
+    _
+    (INSTANCE:n @Q5_gate_arrays.v:4:7
+      (RANGE @Q5_gate_arrays.v:4:8
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:9 0)
+        (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:11 3))
+      (CONNECTION @Q5_gate_arrays.v:4:15
+        (IDENT:z @Q5_gate_arrays.v:4:15))
+      (CONNECTION @Q5_gate_arrays.v:4:18
+        (IDENT:a @Q5_gate_arrays.v:4:18)))))

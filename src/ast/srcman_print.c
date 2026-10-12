@@ -200,15 +200,20 @@ void odin3_srcman_vdiag(const odin3_srcman *sm, odin3_log_level level, odin3_loc
 }
 
 /* PRJ-18: a design's diagnostics name files in its --diag-paths style. */
-void odin3_diag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt, ...) {
+void odin3_vdiag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt,
+                 va_list args) {
     odin3_srcman *sm = NULL;
     if (design == NULL || odin3_design_get_srcman(design, &sm) != ODIN3_OK) {
         sm = NULL;
     }
     diag_site site = {sm, design != NULL ? odin3_design_diag_paths(design) : ODIN3_SRCFMT_GIVEN,
                       level, loc};
+    vdiag_styled(&site, fmt, args);
+}
+
+void odin3_diag(odin3_design *design, odin3_log_level level, odin3_loc loc, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    vdiag_styled(&site, fmt, args);
+    odin3_vdiag(design, level, loc, fmt, args);
     va_end(args);
 }

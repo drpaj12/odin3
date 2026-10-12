@@ -374,10 +374,24 @@ int odin3_vl_directive(odin3_vl_state *st, YYSTYPE *val, odin3_vp_loc *loc) {
                  st->run->limits.directive_bytes);
         arg.len = st->run->limits.directive_bytes;
     }
+    const char *nul = arg.len > 0 ? memchr(arg.ptr, 0, arg.len) : NULL;
+    if (nul != NULL) { /* `pragma text may hold one; a NUL is never interned (2A §4.5) */
+        vl_error(st, vl_loc(st, lo + (uint32_t)(nul - (const char *)arg.ptr)),
+                 "unexpected byte 0x00");
+        arg.len = (size_t)(nul - (const char *)arg.ptr);
+    }
     directive_apply(st, kind, at, arg);
     val->text = arg;
     uint32_t end = hi > lo ? hi : st->tok_start + 1 + (uint32_t)word.len;
     return vl_token_at(st, loc, (vl_span){st->tok_start, end}, TOK_DIRECTIVE);
+}
+
+void odin3_vl_implicit_ports(odin3_vl_state *st) {
+    if (vl_in_body(st)) {
+        return;
+    }
+    vl_error(st, vl_loc(st, st->tok_start),
+             "'.*' (implicit port connections) is SystemVerilog, not Verilog-2005");
 }
 
 void odin3_vl_unknown_directive(odin3_vl_state *st) {

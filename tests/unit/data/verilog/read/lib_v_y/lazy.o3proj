@@ -1,0 +1,3 @@
+# Every instantiated name resolves in the design: the -v file is never read.
+file verilog src/lazy_top.v
+libfile verilog lib/b.v

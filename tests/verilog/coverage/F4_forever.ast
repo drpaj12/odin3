@@ -1,0 +1,48 @@
+# generated: odin3-parse-check --write
+(MODULE:f4_forever @F4_forever.v:2:1
+  _
+  (LIST @F4_forever.v:2:19
+    (PORT_DECL.input [IN_HEADER] @F4_forever.v:2:20
+      _
+      (DECLARATOR:clk @F4_forever.v:2:26
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @F4_forever.v:2:31
+      _
+      (DECLARATOR:r @F4_forever.v:2:42
+        _)
+      (DECLARATOR:q @F4_forever.v:2:45
+        _)))
+  (INITIAL @F4_forever.v:3:3
+    (SEQ_BLOCK @F4_forever.v:3:11
+      _
+      (BLOCKING_ASSIGN @F4_forever.v:4:5
+        (IDENT:r @F4_forever.v:4:5)
+        _
+        (NUMBER.bin @F4_forever.v:4:9 1'b0))
+      (FOREVER @F4_forever.v:5:5
+        (TIMING_STMT @F4_forever.v:5:13
+          (DELAY @F4_forever.v:5:13
+            (NUMBER.dec [SIGNED] @F4_forever.v:5:14 5))
+          (BLOCKING_ASSIGN @F4_forever.v:5:16
+            (IDENT:r @F4_forever.v:5:16)
+            _
+            (UNARY.~ @F4_forever.v:5:20
+              (IDENT:r @F4_forever.v:5:21)))))))
+  (INITIAL @F4_forever.v:7:3
+    (SEQ_BLOCK @F4_forever.v:7:11
+      _
+      (BLOCKING_ASSIGN @F4_forever.v:8:5
+        (IDENT:q @F4_forever.v:8:5)
+        _
+        (NUMBER.bin @F4_forever.v:8:9 1'b0))
+      (FOREVER @F4_forever.v:9:5
+        (TIMING_STMT @F4_forever.v:9:13
+          (EVENT_CONTROL @F4_forever.v:9:13
+            _
+            (EVENT_EXPR.posedge @F4_forever.v:9:15
+              (IDENT:clk @F4_forever.v:9:23)))
+          (BLOCKING_ASSIGN @F4_forever.v:9:28
+            (IDENT:q @F4_forever.v:9:28)
+            _
+            (UNARY.~ @F4_forever.v:9:32
+              (IDENT:q @F4_forever.v:9:33))))))))

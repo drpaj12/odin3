@@ -148,6 +148,11 @@ real, an identifier or a parenthesised list), so it reads as delay `5` and liter
   `~^`/`^~` both → `XNOR`, `~&`, `~|`, `**`, `+:`, `-:`, `->`, `=`, `<=` (one token; the grammar
   tells assignment from comparison by position), `@`, `#`, `,`, `;`, `:`, `.`, `?`, `(`, `)`,
   `[`, `]`, `{`, `}`) and the attribute brackets (§2.7).
+- SystemVerilog's implicit port connection `.*` (the two bytes adjacent) is one located error
+  at the `.`, "'.*' (implicit port connections) is SystemVerilog, not Verilog-2005", and both
+  bytes are dropped, so `m u (.*);` gives that error alone rather than "unexpected *)" from
+  `*)` lexed as `ATTR_CLOSE` (2C-1 final review, ruled into Task 9; `.*` has no 1364-2005
+  reading, so no valid input changes). `. *` is two tokens and a plain syntax error.
 - Blanks `[ \t\r\n\f]+` are skipped.
 
 ### 2.5 Keyword sets and `` `begin_keywords `` (VP-6)
@@ -793,7 +798,8 @@ with a script is an error ("use the pass option").
    — and is reported with an info line; 2D's lookup takes the design unit; a second library
    definition likewise stays and is ignored, first file wins).
 4. **`duplicate_module`** (M11, 2B §8): two design units defining one module or UDP name →
-   located error at the second definition, names [the module]; counts toward the error cap.
+   located error at the second definition (its `module`/`primitive` keyword: the node's loc;
+   the name itself carries no location), names [the module]; counts toward the error cap.
 5. **Unnamed instances** (2A rule 4): every `INSTANCE` with name 0 under an `INSTANTIATION`
    whose module name is not a `UDP_DECL` of this store → located error "instance of 'm' has no
    name (only gate and UDP instances may be unnamed)". 1364-2005 §12.1.2 requires the name for

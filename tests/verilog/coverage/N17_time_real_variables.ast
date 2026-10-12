@@ -1,0 +1,22 @@
+# generated: odin3-parse-check --write
+(MODULE:n17_time_real @N17_time_real_variables.v:2:1
+  _
+  _
+  (VAR_DECL.time @N17_time_real_variables.v:3:3
+    _
+    (DECLARATOR:t @N17_time_real_variables.v:3:8
+      _))
+  (VAR_DECL.real @N17_time_real_variables.v:4:3
+    _
+    (DECLARATOR:r @N17_time_real_variables.v:4:8
+      _))
+  (VAR_DECL.realtime @N17_time_real_variables.v:5:3
+    _
+    (DECLARATOR:rt @N17_time_real_variables.v:5:12
+      _))
+  (VAR_DECL.real @N17_time_real_variables.v:6:3
+    _
+    (DECLARATOR:a @N17_time_real_variables.v:6:8
+      _)
+    (DECLARATOR:b @N17_time_real_variables.v:6:11
+      _)))

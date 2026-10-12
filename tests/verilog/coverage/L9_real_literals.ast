@@ -1,0 +1,57 @@
+# generated: odin3-parse-check --write
+(MODULE:l9_real_literals @L9_real_literals.v:2:1
+  _
+  (LIST @L9_real_literals.v:2:25
+    (PORT_DECL.input [IN_HEADER] @L9_real_literals.v:2:26
+      _
+      (DECLARATOR:a @L9_real_literals.v:2:32
+        _))
+    (PORT_DECL.output [IN_HEADER] @L9_real_literals.v:2:35
+      _
+      (DECLARATOR:y1 @L9_real_literals.v:2:42
+        _)
+      (DECLARATOR:y2 @L9_real_literals.v:2:46
+        _))
+    (PORT_DECL.output [IN_HEADER] @L9_real_literals.v:2:50
+      (RANGE @L9_real_literals.v:2:57
+        (NUMBER.dec [SIGNED] @L9_real_literals.v:2:58 7)
+        (NUMBER.dec [SIGNED] @L9_real_literals.v:2:60 0))
+      (DECLARATOR:y3 @L9_real_literals.v:2:63
+        _)
+      (DECLARATOR:y4 @L9_real_literals.v:2:67
+        _)))
+  (CONT_ASSIGN @L9_real_literals.v:3:3
+    _
+    (DELAY @L9_real_literals.v:3:10
+      (REAL @L9_real_literals.v:3:11 1.5))
+    (NET_ASSIGN @L9_real_literals.v:3:15
+      (IDENT:y1 @L9_real_literals.v:3:15)
+      (IDENT:a @L9_real_literals.v:3:20)))
+  (CONT_ASSIGN @L9_real_literals.v:4:3
+    _
+    (DELAY @L9_real_literals.v:4:10
+      (REAL @L9_real_literals.v:4:12 25.0)
+      (REAL @L9_real_literals.v:4:19 0.10000000000000001))
+    (NET_ASSIGN @L9_real_literals.v:4:25
+      (IDENT:y2 @L9_real_literals.v:4:25)
+      (IDENT:a @L9_real_literals.v:4:30)))
+  (CONT_ASSIGN @L9_real_literals.v:5:3
+    _
+    _
+    (NET_ASSIGN @L9_real_literals.v:5:10
+      (IDENT:y3 @L9_real_literals.v:5:10)
+      (REAL @L9_real_literals.v:5:15 1.5)))
+  (CONT_ASSIGN @L9_real_literals.v:6:3
+    _
+    _
+    (NET_ASSIGN @L9_real_literals.v:6:10
+      (IDENT:y4 @L9_real_literals.v:6:10)
+      (REAL @L9_real_literals.v:6:15 1000.0)))
+  (NET_DECL.wire @L9_real_literals.v:7:3
+    _
+    (RANGE @L9_real_literals.v:7:8
+      (NUMBER.dec [SIGNED] @L9_real_literals.v:7:9 7)
+      (NUMBER.dec [SIGNED] @L9_real_literals.v:7:11 0))
+    _
+    (DECLARATOR:w @L9_real_literals.v:7:14
+      (REAL @L9_real_literals.v:7:18 1000.01))))

@@ -1561,8 +1561,9 @@ cases (2C §7.3) expect, at the node named:
 | F2 | the `WHILE` | `'while' is supported only in constant functions` |
 
 (L14 is 2B's error and M11's duplicate module is 2C's `duplicate_module`; 2D raises every other
-REJECT, including M11's other duplicates. The `reject-2d/` handover holds the 22 rows other than
-L14 and M11, 2C plan point (i).)
+REJECT, including M11's other duplicates. The `reject-2d/` handover holds 25 cases: the 22 rows
+other than L14 and M11, 2C plan point (i), and the REJECT parts of N15, P4 and F2 tabulated
+above.)
 
 Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 
@@ -2031,7 +2032,7 @@ writer's text is valid RTLIL. The bridge is also 2E's and 2F's oracle later (the
 
 ### 14.4 The 2C handover
 
-`tests/verilog/reject-2d/` (22 rows) and `tests/verilog/ignore-2d/` (10 rows), already registered
+`tests/verilog/reject-2d/` (25 cases: 22 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (10 rows), already registered
 by 2C as `verilog_reject_2d`/`verilog_ignore_2d` and skipped while `odin3_elab_run` is a stub,
 turn on with 2D; their `.err`/`.warn` texts are §9's tables. The project corpus's Verilog cases
 (2B §10.2 `--with-frontend`) run: the positive phase-2 cases (`auto_top`, `param_instance`,

@@ -1,0 +1,2 @@
+T9.v:5:5: error:
+'r' is assigned with both '=' and '<=' (also at T9.v:4:5)

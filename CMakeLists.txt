@@ -164,6 +164,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval.c
     src/frontends/elab/ceval_expr.c
     src/frontends/elab/ceval_interp.c
+    src/frontends/verilog/read_verilog.c
+    src/frontends/verilog/read_verilog_lib.c
+    src/frontends/verilog/elab_stub.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -241,8 +244,9 @@ target_include_directories(odin3_core PRIVATE ${_gen})
 # trailing context, yyless(0), YY_DECL: no warning; with 2C Task 4's grammar core, 353
 # states, YYMALLOC/YYFREE through the allocation hook, with Task 5's expressions, 488
 # states and the precedence table, with Task 6's statements, 763 states and the
-# dangling-else precedence, and with Task 7's instantiation, gates and generate, 941 states:
-# still none but the one below). One flag, for the parser only:
+# dangling-else precedence, with Task 7's instantiation, gates and generate, 941 states, and
+# with Task 10's binary ~& and ~|, 947 states (gcc 13): still none but the one below). One flag,
+# for the parser only:
 #   -Wno-unused-but-set-variable  yyparse's yynerrs, counted but never read under api.pure
 #                                 (clang; gcc does not warn)
 set_source_files_properties(${BISON_verilog_parser_OUTPUT_SOURCE}
@@ -297,6 +301,12 @@ add_executable(odin3-blif-rt tools/blif-roundtrip/odin3-blif-rt.c)
 target_include_directories(odin3-blif-rt PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-blif-rt PRIVATE odin3_core odin3_flags)
 
+# --- odin3-parse-check: the Verilog coverage-row driver and location oracle (2C §7.2) ----------
+add_executable(odin3-parse-check tools/parse-check/odin3-parse-check.c
+                                 tools/parse-check/parse_check.c)
+target_include_directories(odin3-parse-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(odin3-parse-check PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -326,6 +336,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_pp PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_pp PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_verilog.c: the Verilog parser's crash fuzzer (2C §7.5).
+    add_executable(fuzz_verilog tests/fuzz/fuzz_verilog.c)
+    target_include_directories(fuzz_verilog PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_verilog PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_verilog PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -477,6 +492,19 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pp_check PRIVATE
         ODIN3_PP_PROBES="${PROJECT_SOURCE_DIR}/tests/unit/data/pp/probes"
         ODIN3_PP_MICROS="${PROJECT_SOURCE_DIR}/tests/micro/verilog")
+    # 2C Task 8: the read_verilog pass on temporary and committed trees, and the lexer cases
+    # that need the preprocessor (macros, includes).
+    odin3_add_unit_test(test_read_verilog)
+    target_compile_definitions(test_read_verilog PRIVATE
+        ODIN3_RV_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/verilog/read"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    odin3_add_pp_test(test_verilog_lexer_pp)
+    target_include_directories(test_verilog_lexer_pp PRIVATE ${_gen})
+    add_dependencies(test_verilog_lexer_pp verilog_generated)
+    # 2C Task 9: the location oracle of odin3-parse-check on seeded faults.
+    odin3_add_unit_test(test_parse_check)
+    target_sources(test_parse_check PRIVATE tools/parse-check/parse_check.c)
+    target_include_directories(test_parse_check PRIVATE ${PROJECT_SOURCE_DIR}/tools/parse-check)
     odin3_add_pp_test(test_pp_limits)
     odin3_add_pp_test(test_pp_mixed)
     # 2B §10.5 properties: a file without directives is its own output; re-preprocessing an
@@ -726,7 +754,7 @@ if(BUILD_TESTING)
                            unknown_pass_later_script top top_written_first top_unapplied quoted
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
-                           project_preprocess)
+                           project_preprocess parse_only parse_only_with_script)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -736,7 +764,8 @@ if(BUILD_TESTING)
     endforeach()
 
     find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
-    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>")
+    set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>"
+                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
         list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:abc>" "ODIN3_REQUIRE_ABC=1")
@@ -813,9 +842,11 @@ if(BUILD_TESTING)
         # reports still symbolize; ASAN_SYMBOLIZER_PATH points at a versioned one when found.
         find_program(ODIN3_LLVM_SYMBOLIZER NAMES llvm-symbolizer llvm-symbolizer-20
                      llvm-symbolizer-19 llvm-symbolizer-18)
-        set(_fuzz_env "")
+        # DEBUGINFOD_URLS empty: without a network llvm-symbolizer blocks on debuginfod, and a
+        # crash report then ends in the CTest timeout instead of being printed.
+        set(_fuzz_env "DEBUGINFOD_URLS=")
         if(ODIN3_LLVM_SYMBOLIZER)
-            set(_fuzz_env "ASAN_SYMBOLIZER_PATH=${ODIN3_LLVM_SYMBOLIZER}")
+            list(APPEND _fuzz_env "ASAN_SYMBOLIZER_PATH=${ODIN3_LLVM_SYMBOLIZER}")
         endif()
         set(_fuzz_seeds ${PROJECT_BINARY_DIR}/fuzz_pp_seeds)
         set(_fuzz_corpus ${PROJECT_BINARY_DIR}/fuzz_pp_corpus)
@@ -841,6 +872,37 @@ if(BUILD_TESTING)
             set_tests_properties(fuzz_pp_default_caps fuzz_pp_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
+
+        # 2C §7.5: the parser's seeds (`fuzz_seeds.py`): two BOM-prefixed files (Review Focus 5),
+        # then the coverage rows and the syntax micros, smallest first, each as a raw input and
+        # as a token stream, twenty generated modules and tests/fuzz/fuzz_verilog_regress (the
+        # inputs of earlier findings). fuzz_verilog_seed_inputs runs each
+        # seed once; fuzz_verilog_smoke fuzzes 10 s per mode (raw, token stream). Long runs are
+        # local (one worker, 2 GB RSS).
+        set(_fv_seeds ${PROJECT_BINARY_DIR}/fuzz_verilog_seeds)
+        set(_fv_corpus ${PROJECT_BINARY_DIR}/fuzz_verilog_corpus)
+        file(MAKE_DIRECTORY ${_fv_corpus})
+        add_test(NAME fuzz_verilog_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/fuzz_seeds.py
+                    ${_fv_seeds} ${PROJECT_SOURCE_DIR}/tests/verilog/coverage
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax --generated 20
+                    --regress ${PROJECT_SOURCE_DIR}/tests/fuzz/fuzz_verilog_regress)
+        set_tests_properties(fuzz_verilog_seeds PROPERTIES FIXTURES_SETUP fuzz_verilog_seeds
+                             LABELS fuzz)
+        add_test(NAME fuzz_verilog_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_verilog> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    ${_fv_seeds})
+        set(_fv_smoke -max_total_time=10 -timeout=10 -rss_limit_mb=2048 -print_funcs=0
+                      -print_final_stats=1 ${_fv_corpus} ${_fv_seeds})
+        add_test(NAME fuzz_verilog_smoke
+            COMMAND sh -c "FUZZ_VERILOG_MODE=raw \"$0\" \"$@\" && FUZZ_VERILOG_MODE=tokens \"$0\" \"$@\""
+                    $<TARGET_FILE:fuzz_verilog> ${_fv_smoke})
+        set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_verilog_seeds LABELS fuzz TIMEOUT 300)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
     endif()
 
     # 2B §10.4: the preprocessor against Icarus and Yosys over the probes, the backtick micros
@@ -862,6 +924,60 @@ if(BUILD_TESTING)
                 --grammar ${PROJECT_SOURCE_DIR}/src/frontends/verilog/verilog.y --operand expr
                 --expect ${PROJECT_SOURCE_DIR}/tests/verilog/solved_conflicts.txt)
     set_tests_properties(verilog_grammar_solved PROPERTIES LABELS unit)
+
+    # 2C §7.2: every coverage row through read → check → print → re-read → equal, its .ast golden
+    # and the location oracle, smallest file first.
+    file(GLOB _coverage_rows CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/coverage/*.v)
+    add_test(NAME verilog_coverage
+        COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_coverage_rows})
+    set_tests_properties(verilog_coverage PROPERTIES LABELS verilog)
+    # 2C §7.3: the negative cases (odin3 --parse-only in the case directory), and the 2D handover
+    # cases (read_verilog without --parse-only; pending, exit 77, while 2D's entry is the stub).
+    add_test(NAME verilog_reject
+        COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
+                $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/reject)
+    set_tests_properties(verilog_reject PROPERTIES LABELS verilog)
+    # The handover cases must parse (2C §7.3: 2D reports them, not the parser): read, round
+    # trip and location oracle, with no golden.
+    file(GLOB _handover_cases CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tests/verilog/reject-2d/*.v
+                                                ${PROJECT_SOURCE_DIR}/tests/verilog/ignore-2d/*.v)
+    add_test(NAME verilog_handover_parse
+        COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
+    set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
+    foreach(_handover reject-2d ignore-2d)
+        string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
+        add_test(NAME ${_handover_test}
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
+                    --elaborate $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
+        set_tests_properties(${_handover_test} PROPERTIES LABELS verilog SKIP_RETURN_CODE 77)
+    endforeach()
+
+    # 2C §7.4 (plan Task 10): the corpus sweeps through parse-corpus, one file at a time, smallest
+    # first: every micro against tests/verilog/micro_expect_fail.txt; every VTR and Koios
+    # benchmark together when VTR_ROOT is set at configure time (koios/lenet.v last, point (n));
+    # every committed BLIF through odin3-write --verilog (Review Focus 1). Heavy sweeps (label
+    # `sweep`) through odin3_add_sweep_test(): tools/heavy-run alone takes the lock and the slice
+    # (skip 77 without ODIN3_HEAVY_OK=1). Run them as `ODIN3_HEAVY_OK=1 ctest --preset release
+    # -L sweep`.
+    set(_parse_corpus ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/parse_corpus.py
+                      --check $<TARGET_FILE:odin3-parse-check>)
+    odin3_add_sweep_test(verilog_micro_parse LABEL sweep
+        COMMAND ${_parse_corpus}
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/verilog/micro_expect_fail.txt
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+    odin3_add_sweep_test(verilog_writer_parse LABEL sweep
+        COMMAND ${_parse_corpus} --writer $<TARGET_FILE:odin3-write>
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    if(DEFINED ENV{VTR_ROOT})
+        set(_vtr_verilog $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog)
+        file(GLOB _vtr_benchmarks CONFIGURE_DEPENDS ${_vtr_verilog}/*.v ${_vtr_verilog}/koios/*.v)
+    endif()
+    if(_vtr_benchmarks)
+        odin3_add_sweep_test(verilog_vtr_parse LABEL sweep
+            COMMAND ${_parse_corpus} --root ${_vtr_verilog} ${_vtr_benchmarks})
+    elseif(DEFINED ENV{VTR_ROOT})
+        message(STATUS "verilog_vtr_parse not registered: no benchmarks under $ENV{VTR_ROOT}")
+    endif()
 
     # Python loading a sanitized libodin3 needs the sanitizer runtime preloaded.
     set(_python_env "ODIN3_LIB=$<TARGET_FILE:libodin3>"
@@ -983,5 +1099,26 @@ if(BUILD_TESTING)
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+    endif()
+
+    # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
+    # (tools/verilog-gen/compare.py; 200 seeds here, 5,000 locally). The oracle is VTR's Yosys
+    # (0.55, docs/ORACLES.md) when the workspace has it, else ODIN3_YOSYS (CI's).
+    find_program(ODIN3_YOSYS_VTR yosys
+                 PATHS $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin
+                 NO_DEFAULT_PATH)
+    set(_gen_yosys ${ODIN3_YOSYS_VTR})
+    if(NOT _gen_yosys)
+        set(_gen_yosys ${ODIN3_YOSYS})
+    endif()
+    if(_gen_yosys)
+        add_test(NAME verilog_gen_vs_yosys
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/compare.py
+                    --odin3 $<TARGET_FILE:odin3> --parse-check $<TARGET_FILE:odin3-parse-check>
+                    --yosys ${_gen_yosys} --seeds 1..200
+                    --work ${PROJECT_BINARY_DIR}/verilog_gen_work)
+        set_tests_properties(verilog_gen_vs_yosys PROPERTIES LABELS verilog TIMEOUT 900)
+    else()
+        message(STATUS "verilog_gen_vs_yosys not registered: needs yosys")
     endif()
 endif()

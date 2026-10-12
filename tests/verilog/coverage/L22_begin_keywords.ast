@@ -1,0 +1,107 @@
+# generated: odin3-parse-check --write
+(DIRECTIVE.begin_keywords:"1364-1995" @L22_begin_keywords.v:2:1)
+(MODULE:l22_1995 @L22_begin_keywords.v:3:1
+  _
+  (LIST @L22_begin_keywords.v:3:17
+    (PORT_REF:a @L22_begin_keywords.v:3:18
+      _)
+    (PORT_REF:y @L22_begin_keywords.v:3:21
+      _))
+  (PORT_DECL.input @L22_begin_keywords.v:4:3
+    _
+    (DECLARATOR:a @L22_begin_keywords.v:4:9
+      _))
+  (PORT_DECL.output @L22_begin_keywords.v:5:3
+    _
+    (DECLARATOR:y @L22_begin_keywords.v:5:10
+      _))
+  (NET_DECL.wire @L22_begin_keywords.v:6:3
+    _
+    _
+    _
+    (DECLARATOR:generate @L22_begin_keywords.v:6:8
+      _))
+  (CONT_ASSIGN @L22_begin_keywords.v:7:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:7:10
+      (IDENT:generate @L22_begin_keywords.v:7:10)
+      (IDENT:a @L22_begin_keywords.v:7:21)))
+  (CONT_ASSIGN @L22_begin_keywords.v:8:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:8:10
+      (IDENT:y @L22_begin_keywords.v:8:10)
+      (IDENT:generate @L22_begin_keywords.v:8:14))))
+(DIRECTIVE.begin_keywords:"1364-2001" @L22_begin_keywords.v:10:1)
+(MODULE:l22_2001 @L22_begin_keywords.v:11:1
+  _
+  (LIST @L22_begin_keywords.v:11:17
+    (PORT_DECL.input [SIGNED IN_HEADER] @L22_begin_keywords.v:11:18
+      (RANGE @L22_begin_keywords.v:11:31
+        (NUMBER.dec [SIGNED] @L22_begin_keywords.v:11:32 1)
+        (NUMBER.dec [SIGNED] @L22_begin_keywords.v:11:34 0))
+      (DECLARATOR:a @L22_begin_keywords.v:11:37
+        _))
+    (PORT_DECL.output [IN_HEADER] @L22_begin_keywords.v:11:40
+      _
+      (DECLARATOR:uwire @L22_begin_keywords.v:11:47
+        _)))
+  (CONT_ASSIGN @L22_begin_keywords.v:12:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:12:10
+      (IDENT:uwire @L22_begin_keywords.v:12:10)
+      (IDENT:a @L22_begin_keywords.v:12:18))))
+(DIRECTIVE.end_keywords @L22_begin_keywords.v:14:1)
+(DIRECTIVE.end_keywords @L22_begin_keywords.v:15:1)
+(DIRECTIVE.begin_keywords:"1364-2001-noconfig" @L22_begin_keywords.v:16:1)
+(MODULE:l22_noconfig @L22_begin_keywords.v:17:1
+  _
+  (LIST @L22_begin_keywords.v:17:21
+    (PORT_DECL.input [IN_HEADER] @L22_begin_keywords.v:17:22
+      _
+      (DECLARATOR:a @L22_begin_keywords.v:17:28
+        _))
+    (PORT_DECL.output [IN_HEADER] @L22_begin_keywords.v:17:31
+      _
+      (DECLARATOR:config @L22_begin_keywords.v:17:38
+        _)))
+  (CONT_ASSIGN @L22_begin_keywords.v:18:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:18:10
+      (IDENT:config @L22_begin_keywords.v:18:10)
+      (IDENT:a @L22_begin_keywords.v:18:19))))
+(DIRECTIVE.end_keywords @L22_begin_keywords.v:20:1)
+(DIRECTIVE.begin_keywords:"1364-2005" @L22_begin_keywords.v:21:1)
+(MODULE:l22_2005 @L22_begin_keywords.v:22:1
+  _
+  (LIST @L22_begin_keywords.v:22:17
+    (PORT_DECL.input [IN_HEADER] @L22_begin_keywords.v:22:18
+      _
+      (DECLARATOR:a @L22_begin_keywords.v:22:24
+        _))
+    (PORT_DECL.output [IN_HEADER] @L22_begin_keywords.v:22:27
+      _
+      (DECLARATOR:y @L22_begin_keywords.v:22:34
+        _)))
+  (NET_DECL.uwire @L22_begin_keywords.v:23:3
+    _
+    _
+    _
+    (DECLARATOR:w @L22_begin_keywords.v:23:9
+      _))
+  (CONT_ASSIGN @L22_begin_keywords.v:24:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:24:10
+      (IDENT:w @L22_begin_keywords.v:24:10)
+      (IDENT:a @L22_begin_keywords.v:24:14)))
+  (CONT_ASSIGN @L22_begin_keywords.v:25:3
+    _
+    _
+    (NET_ASSIGN @L22_begin_keywords.v:25:10
+      (IDENT:y @L22_begin_keywords.v:25:10)
+      (IDENT:w @L22_begin_keywords.v:25:14))))
+(DIRECTIVE.end_keywords @L22_begin_keywords.v:27:1)

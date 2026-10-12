@@ -1,0 +1,2 @@
+A4.v:4:10: error:
+'y' has two drivers (also driven at A4.v:3:10)

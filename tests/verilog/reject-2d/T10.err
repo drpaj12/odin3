@@ -1,0 +1,2 @@
+T10.v:4:23: error:
+'r[2]' is assigned in two always blocks (also at T10.v:3:23)

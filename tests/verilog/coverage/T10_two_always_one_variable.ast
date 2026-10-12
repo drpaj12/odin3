@@ -1,0 +1,30 @@
+# generated: odin3-parse-check --write
+(MODULE:t10_two_always @T10_two_always_one_variable.v:2:1
+  _
+  (LIST @T10_two_always_one_variable.v:2:23
+    (PORT_DECL.input [IN_HEADER] @T10_two_always_one_variable.v:2:24
+      _
+      (DECLARATOR:a @T10_two_always_one_variable.v:2:30
+        _)
+      (DECLARATOR:b @T10_two_always_one_variable.v:2:33
+        _))
+    (PORT_DECL.output [IN_HEADER DT=1] @T10_two_always_one_variable.v:2:36
+      _
+      (DECLARATOR:y @T10_two_always_one_variable.v:2:47
+        _)))
+  (ALWAYS.always @T10_two_always_one_variable.v:3:3
+    (TIMING_STMT @T10_two_always_one_variable.v:3:10
+      (EVENT_CONTROL [STAR] @T10_two_always_one_variable.v:3:10
+        _)
+      (BLOCKING_ASSIGN @T10_two_always_one_variable.v:4:5
+        (IDENT:y @T10_two_always_one_variable.v:4:5)
+        _
+        (IDENT:a @T10_two_always_one_variable.v:4:9))))
+  (ALWAYS.always @T10_two_always_one_variable.v:5:3
+    (TIMING_STMT @T10_two_always_one_variable.v:5:10
+      (EVENT_CONTROL [STAR] @T10_two_always_one_variable.v:5:10
+        _)
+      (BLOCKING_ASSIGN @T10_two_always_one_variable.v:6:5
+        (IDENT:y @T10_two_always_one_variable.v:6:5)
+        _
+        (IDENT:b @T10_two_always_one_variable.v:6:9)))))

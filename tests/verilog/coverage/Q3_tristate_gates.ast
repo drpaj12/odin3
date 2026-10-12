@@ -1,0 +1,64 @@
+# generated: odin3-parse-check --write
+(MODULE:q3_tristate_gates @Q3_tristate_gates.v:2:1
+  _
+  (LIST @Q3_tristate_gates.v:2:26
+    (PORT_DECL.input [IN_HEADER] @Q3_tristate_gates.v:2:27
+      _
+      (DECLARATOR:d @Q3_tristate_gates.v:2:33
+        _)
+      (DECLARATOR:en @Q3_tristate_gates.v:2:36
+        _))
+    (PORT_DECL.output [IN_HEADER] @Q3_tristate_gates.v:2:40
+      _
+      (DECLARATOR:y1 @Q3_tristate_gates.v:2:47
+        _)
+      (DECLARATOR:y2 @Q3_tristate_gates.v:2:51
+        _)
+      (DECLARATOR:y3 @Q3_tristate_gates.v:2:55
+        _)
+      (DECLARATOR:y4 @Q3_tristate_gates.v:2:59
+        _)))
+  (GATE_DECL.bufif0 @Q3_tristate_gates.v:3:3
+    _
+    _
+    (INSTANCE:b0 @Q3_tristate_gates.v:3:10
+      _
+      (CONNECTION @Q3_tristate_gates.v:3:14
+        (IDENT:y1 @Q3_tristate_gates.v:3:14))
+      (CONNECTION @Q3_tristate_gates.v:3:18
+        (IDENT:d @Q3_tristate_gates.v:3:18))
+      (CONNECTION @Q3_tristate_gates.v:3:21
+        (IDENT:en @Q3_tristate_gates.v:3:21))))
+  (GATE_DECL.bufif1 @Q3_tristate_gates.v:4:3
+    _
+    _
+    (INSTANCE @Q3_tristate_gates.v:4:10
+      _
+      (CONNECTION @Q3_tristate_gates.v:4:11
+        (IDENT:y2 @Q3_tristate_gates.v:4:11))
+      (CONNECTION @Q3_tristate_gates.v:4:15
+        (IDENT:d @Q3_tristate_gates.v:4:15))
+      (CONNECTION @Q3_tristate_gates.v:4:18
+        (IDENT:en @Q3_tristate_gates.v:4:18))))
+  (GATE_DECL.notif0 @Q3_tristate_gates.v:5:3
+    _
+    _
+    (INSTANCE:n0 @Q3_tristate_gates.v:5:10
+      _
+      (CONNECTION @Q3_tristate_gates.v:5:14
+        (IDENT:y3 @Q3_tristate_gates.v:5:14))
+      (CONNECTION @Q3_tristate_gates.v:5:18
+        (IDENT:d @Q3_tristate_gates.v:5:18))
+      (CONNECTION @Q3_tristate_gates.v:5:21
+        (IDENT:en @Q3_tristate_gates.v:5:21))))
+  (GATE_DECL.notif1 @Q3_tristate_gates.v:6:3
+    _
+    _
+    (INSTANCE @Q3_tristate_gates.v:6:10
+      _
+      (CONNECTION @Q3_tristate_gates.v:6:11
+        (IDENT:y4 @Q3_tristate_gates.v:6:11))
+      (CONNECTION @Q3_tristate_gates.v:6:15
+        (IDENT:d @Q3_tristate_gates.v:6:15))
+      (CONNECTION @Q3_tristate_gates.v:6:18
+        (IDENT:en @Q3_tristate_gates.v:6:18)))))

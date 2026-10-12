@@ -1,0 +1,2 @@
+syntax_item.v:3:10: error:
+syntax: unexpected identifier, expecting ';' or ',' or '=' or '['

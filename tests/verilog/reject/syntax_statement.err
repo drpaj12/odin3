@@ -1,0 +1,2 @@
+syntax_statement.v:4:9: error:
+syntax: unexpected ';'
