@@ -19,10 +19,11 @@
 #include <stdint.h>
 #include <string.h>
 
-/* The heap copies of the --top name and the --revision the pass options point at
- * (odin3_pass_set_top_name, odin3_pass_set_revision). */
+/* The heap copies of the --top name, the --revision and the --abc-script path the pass options
+ * point at (odin3_pass_set_top_name, odin3_pass_set_revision, odin3_pass_set_abc_script). */
 static char *g_top_copy = NULL;
 static char *g_revision_copy = NULL;
+static char *g_abc_script_copy = NULL;
 
 ODIN3_EXPORT uint32_t odin3_pass_get_count(void) {
     return odin3_pass_count();
@@ -90,6 +91,19 @@ ODIN3_EXPORT odin3_status odin3_pass_set_revision(const char *revision) {
     odin3_pass_set_options(opts);
     odin3_util_free(g_revision_copy);
     g_revision_copy = copy;
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_pass_set_abc_script(const char *path) {
+    char *copy = NULL;
+    if (copy_text(path, &copy) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.abc_script = copy;
+    odin3_pass_set_options(opts);
+    odin3_util_free(g_abc_script_copy);
+    g_abc_script_copy = copy;
     return ODIN3_OK;
 }
 

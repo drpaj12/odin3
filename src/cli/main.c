@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 /* Process exit codes: success, a failed pass or script, a command-line error. */
 enum { EXIT_OK = 0, EXIT_FAIL = 1, EXIT_USAGE = 2 };
@@ -40,6 +41,7 @@ static void print_usage(FILE *out) {
                 "  --project FILE   read a project first (read_project FILE, before every script)\n"
                 "  -f LIST          read a file list first (read_project --format f LIST)\n"
                 "  --revision R     the Quartus revision every read_project reads\n"
+                "  --abc-script FILE the ABC script of every abc pass (below abc --script)\n"
                 "  --dump-project   write the project record as JSON after the scripts\n"
                 "  --diag-paths given|resolved\n"
                 "                   name files in diagnostics as given (default) or absolute\n"
@@ -84,11 +86,13 @@ typedef struct cli_state {
     bool help;            /* --help: printed after the scan (plugin passes listed), nothing runs */
     const char *quoted;   /* a positional argument holding '"' (refused under --parse-only) */
     odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
+    /* --abc-script FILE, NULL for none */
+    const char *abc_script;
 } cli_state;
 
 /* The options that take a value. */
-static const char *const k_value_options[] = {"--plugin", "--top",      "-p",          "--project",
-                                              "-f",       "--revision", "--diag-paths"};
+static const char *const k_value_options[] = {
+    "--plugin", "--top", "-p", "--project", "-f", "--revision", "--diag-paths", "--abc-script"};
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
 static bool option_value(char **argv, int argc, int *at, const char **value) {
@@ -143,6 +147,12 @@ static bool scan_flag(const char *arg, cli_state *state) {
     return true;
 }
 
+/* True when path names a regular file (symbolic links followed). */
+static bool is_regular_file(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISREG(info.st_mode);
+}
+
 /* An option with its value (loads a plugin, records the rest). */
 static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--plugin") == 0) {
@@ -157,10 +167,14 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (is_project_option(arg) && strchr(value, '"') != NULL) {
         return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
     }
+    if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
+        return bad_value(arg, value, "no such file");
+    }
     state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);
     state->top = strcmp(arg, "--top") == 0 ? value : state->top;
     state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
+    state->abc_script = strcmp(arg, "--abc-script") == 0 ? value : state->abc_script;
     return EXIT_OK;
 }
 
@@ -366,7 +380,8 @@ int main(int argc, char **argv) {
     odin3_pass_set_check(state.check);
     odin3_pass_set_diag_paths(state.resolved);
     if (odin3_pass_set_top_name(state.top) != ODIN3_OK ||
-        odin3_pass_set_revision(state.revision) != ODIN3_OK) {
+        odin3_pass_set_revision(state.revision) != ODIN3_OK ||
+        odin3_pass_set_abc_script(state.abc_script) != ODIN3_OK) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }

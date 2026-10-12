@@ -278,6 +278,13 @@ class PythonWalkTest(unittest.TestCase):
         self.assertEqual(outer[-1].message, "last")
         self.assertEqual(int(odin3.lib.odin3_log_get_level()), int(odin3.lib.ODIN3_LOG_ERROR))
 
+    def test_abc_script_setter(self) -> None:
+        """3D Task 13: odin3_pass_set_abc_script is in the cdef (lib resolves it); NULL clears."""
+        odin3 = self.odin3
+        ok = int(odin3.lib.ODIN3_OK)
+        self.assertEqual(int(odin3.lib.odin3_pass_set_abc_script(b"map.abc")), ok)
+        self.assertEqual(int(odin3.lib.odin3_pass_set_abc_script(odin3.ffi.NULL)), ok)
+
     def test_walk_script(self) -> None:
         out = io.StringIO()
         with redirect_stdout(out):

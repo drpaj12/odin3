@@ -23,8 +23,10 @@
 # files-read.txt; without --out the text goes to stdout), parse_only (--parse-only a.v b.v is
 # -p "read_verilog --parse-only a.v b.v"; with --project or -f it reads the record's files; a
 # syntax error fails), parse_only_with_script (--parse-only with -p or a .o3 script exits 2:
-# use the pass option). The project cases run from the project's directory (tests/cli/project), so the paths
-# given are relative.
+# use the pass option), abc_script_missing (--abc-script naming no file exits 2),
+# abc_script_project (--abc-script replaces the project's abc_script with an info line; --help
+# shows the option). The project cases run from the project's directory (tests/cli/project), so
+# the paths given are relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -305,6 +307,44 @@ parse_only_with_script)
     set -e
     [[ $rc -eq 2 ]] || fail "--parse-only with a script file: exit code $rc, expected 2"
     grep -qF -- "use the pass option" "$work/err" || fail "script file: stderr lacks the message"
+    ;;
+abc_script_missing)
+    cd "$work"
+    set +e
+    "$odin3" --abc-script nope.abc -p stats 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--abc-script nope.abc: exit code $rc, expected 2"
+    grep -qxF "odin3: --abc-script nope.abc: no such file" "$work/err" ||
+        fail "stderr lacks the message"
+    mkdir "$work/dir.abc"
+    set +e
+    "$odin3" --abc-script dir.abc -p stats 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--abc-script on a directory: exit code $rc, expected 2"
+    grep -qxF "odin3: --abc-script dir.abc: no such file" "$work/err" ||
+        fail "a directory: stderr lacks the message"
+    ;;
+abc_script_project)
+    cp -R "$corpus/o3proj_abc_script" "$work/p"
+    mv "$work/p/project.o3proj" "$work/p/p.o3proj"
+    printf 'strash\n' >"$work/p/cli.abc"
+    cd "$work/p"
+    "$odin3" --abc-script cli.abc --project p.o3proj -p dump_project >"$work/out" \
+        2>"$work/err" || fail "--abc-script --project failed"
+    grep -qF "\"abc_script\": \"$(pwd -P)/cli.abc\"," "$work/out" ||
+        fail "the dump's abc_script is not cli.abc's resolved path"
+    grep -qF "info: p.o3proj: --abc-script cli.abc replaces the project abc_script abc/map.abc" \
+        "$work/err" || fail "no replacement info line"
+    "$odin3" --project p.o3proj -p dump_project >"$work/out" 2>"$work/err" ||
+        fail "--project alone failed"
+    grep -qF "\"abc_script\": \"$(pwd -P)/abc/map.abc\"," "$work/out" ||
+        fail "without --abc-script the project's script is not kept"
+    ! grep -qF "replaces the project abc_script" "$work/err" || fail "spurious info line"
+    "$odin3" --help >"$work/out" 2>"$work/err" || fail "--help failed"
+    grep -qxF "  --abc-script FILE the ABC script of every abc pass (below abc --script)" \
+        "$work/out" || fail "--help lacks the --abc-script line"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

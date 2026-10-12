@@ -1,6 +1,7 @@
 /*
  * test_abi_ext.c — the public ABI's extension points: plugin cell types and passes (registered
- * directly and by the example plugin) and the provenance visitors; links only libodin3.so.
+ * directly and by the example plugin), the provenance visitors and the ABC script option (3D);
+ * links only libodin3.so.
  */
 #include "odin3/odin3.h"
 #include "unity.h"
@@ -132,6 +133,22 @@ static char *dup_str(const char *text) {
     TEST_ASSERT_NOT_NULL(copy);
     memcpy(copy, text, len);
     return copy;
+}
+
+/* The whole file at path, NUL-terminated (free it). */
+static char *read_whole(const char *path) {
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_END));
+    long size = ftell(file);
+    TEST_ASSERT_TRUE(size >= 0);
+    TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_SET));
+    char *text = malloc((size_t)size + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    TEST_ASSERT_EQUAL_size_t((size_t)size, fread(text, 1, (size_t)size, file));
+    text[size] = '\0';
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    return text;
 }
 
 /* --- cell types ---------------------------------------------------------------------------- */
@@ -587,6 +604,76 @@ static void test_prov_invalid_arguments(void) {
     TEST_ASSERT_TRUE(log_has("odin3_prov_visit_objects: invalid argument"));
 }
 
+/* --- the ABC script option (3D AB-27) ----------------------------------------------------- */
+
+/* An snprintf result len that fits a buffer of cap bytes. */
+static void fits(int len, size_t cap) {
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < cap);
+}
+
+/* read_project on the corpus case o3proj_abc_script, then dump_project to ODIN3_TEST_TMP: the
+ * dump's text (free it). */
+static char *read_and_dump(void) {
+    char entry[PATH_BUF];
+    fits(snprintf(entry, sizeof entry, "\"%s/../projects/o3proj_abc_script/project.o3proj\"",
+                  ODIN3_BLIF_FIXTURES),
+         sizeof entry);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_project", entry));
+    char out[PATH_BUF];
+    fits(snprintf(out, sizeof out, "\"%s\"", ODIN3_TEST_TMP), sizeof out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "dump_project", out));
+    return read_whole(ODIN3_TEST_TMP);
+}
+
+/* The path set reaches read_project, which replaces the project's abc_script with it and logs
+ * the info line. */
+static void test_pass_abc_script_option(void) {
+    char cli[PATH_BUF];
+    fits(snprintf(cli, sizeof cli, "%s/../projects/neg_abc_script_twice/abc/map.abc",
+                  ODIN3_BLIF_FIXTURES),
+         sizeof cli);
+    char line[LINE_BUF];
+    fits(snprintf(line, sizeof line, "--abc-script %s replaces the project abc_script abc/map.abc",
+                  cli),
+         sizeof line);
+    odin3_log_level level = odin3_log_get_level();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_INFO));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(cli));
+    char *dump = read_and_dump();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(level));
+    TEST_ASSERT_NOT_NULL(strstr(dump, "/neg_abc_script_twice/abc/map.abc\","));
+    free(dump);
+    TEST_ASSERT_TRUE(log_has(line));
+}
+
+/* Cleared (NULL), the project's own abc_script is kept. */
+static void test_pass_abc_script_cleared(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script("ignored.abc"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(NULL));
+    char *dump = read_and_dump();
+    TEST_ASSERT_NOT_NULL(strstr(dump, "/o3proj_abc_script/abc/map.abc\","));
+    TEST_ASSERT_NULL(strstr(dump, "ignored.abc"));
+    free(dump);
+}
+
+/* The setter is declared inside the cffi cdef block of odin3.h (the Python binding sees it). */
+static void test_pass_abc_script_in_cdef(void) {
+    char path[PATH_BUF];
+    fits(snprintf(path, sizeof path, "%s/../../include/odin3/odin3.h", ODIN3_CLI_FIXTURES),
+         sizeof path);
+    char *text = read_whole(path);
+    /* the cdef's begin marker, then the declaration, then the end marker, in that order */
+    const char *begin = strstr(text, "/* ODIN3_CDEF_BEGIN */");
+    const char *decl =
+        begin != NULL
+            ? strstr(begin, "\nodin3_status odin3_pass_set_abc_script(const char *path);\n")
+            : NULL;
+    const char *end = decl != NULL ? strstr(decl, "/* ODIN3_CDEF_END */") : NULL;
+    TEST_ASSERT_NOT_NULL(end);
+    free(text);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_celltype_register_copies_and_creates_nodes);
@@ -603,5 +690,8 @@ int main(void) {
     RUN_TEST(test_prov_objects_of_line);
     RUN_TEST(test_prov_invalid_arguments);
     RUN_TEST(test_prov_nested_visits);
+    RUN_TEST(test_pass_abc_script_option);
+    RUN_TEST(test_pass_abc_script_cleared);
+    RUN_TEST(test_pass_abc_script_in_cdef);
     return UNITY_END();
 }
