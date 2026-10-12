@@ -415,9 +415,8 @@ static void test_rmdead_cap_located(void) {
 
 /*
  * rmdead_cap_parallel.il: 4'11-- is inside 4'1---. Yosys (no cap) removes it and the switch stays
- * parallel_case. Under the cap both stay, so a $pmux of the parallel_case switch would have two hot
- * selects (x) where Yosys gives a; the tripped switch loses parallel_case, and the priority chain
- * built instead gives a (§20 #7).
+ * parallel_case. Under the cap both stay, and the tripped switch keeps parallel_case too (§20 #7:
+ * the kept dead item can then give x where Yosys gives a).
  */
 static void test_rmdead_cap_parallel(void) {
     const char *text = CAP_HEAD "    attribute \\parallel_case 1\n"
@@ -435,12 +434,61 @@ static void test_rmdead_cap_parallel(void) {
                "  end\n"
                "end\n");
     rmdead_run(text, CAP_BITS,
+               "  attribute \\parallel_case 1\n"
                "  switch \\a4\n"
                "    case 4'1---\n      assign \\y \\a\n"
                "    case 4'11--\n      assign \\y \\b\n"
                "    case\n      assign \\y \\c\n"
                "  end\n"
                "end\n");
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+}
+
+/*
+ * rmdead_cap_all_dash.il: under the cap of 8 the pool stops at 4'1---, but 4'--x- (no 0/1 bit: x
+ * reads as '-') empties Yosys's pool whether it takes it or not, so 2E still removes what follows:
+ * 4'0000 (the non-constant \b4 stays, as compares with nets are never tested), the case 4'11--,
+ * and the default; the switch gains full_case and keeps parallel_case. This is Yosys's result
+ * without the cap. rmdead_cap_all_dash2.il: the all-'-' item that would otherwise reach an append
+ * with an empty select in §6 (Yosys asserts) is last after rmdead.
+ */
+static void test_rmdead_cap_all_dash(void) {
+    const char *text = "module \\m\n  wire width 4 \\a4\n  wire width 4 \\b4\n  wire \\a\n"
+                       "  wire \\b\n  wire \\c\n  wire \\d\n  wire \\e\n  wire \\y\n  process $p\n"
+                       "    attribute \\parallel_case 1\n"
+                       "    switch \\a4\n"
+                       "      case 4'1---\n        assign \\y \\a\n"
+                       "      case 4'--x-\n        assign \\y \\b\n"
+                       "      case 4'0000 , \\b4\n        assign \\y \\c\n"
+                       "      case 4'11--\n        assign \\y \\d\n"
+                       "      case\n        assign \\y \\e\n"
+                       "    end\n" TAIL;
+    const char *want = "  attribute \\full_case 1\n"
+                       "  attribute \\parallel_case 1\n"
+                       "  switch \\a4\n"
+                       "    case 4'1---\n      assign \\y \\a\n"
+                       "    case 4'--x-\n      assign \\y \\b\n"
+                       "    case \\b4\n      assign \\y \\c\n"
+                       "  end\n"
+                       "end\n";
+    rmdead_run(text, NO_CAP, want);
+    rmdead_run(text, CAP_BITS, want);
+    TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
+    const char *text2 = HEAD2("") "    attribute \\parallel_case 1\n"
+                                  "    switch \\s\n"
+                                  "      case 2'01\n        assign \\y \\c\n"
+                                  "      case 2'--\n        assign \\y \\a\n"
+                                  "      case 2'1-\n        assign \\y \\b\n"
+                                  "    end\n" TAIL;
+    const char *want2 = "  attribute \\full_case 1\n"
+                        "  attribute \\parallel_case 1\n"
+                        "  switch \\s\n"
+                        "    case 2'01\n      assign \\y \\c\n"
+                        "    case 2'--\n      assign \\y \\a\n"
+                        "  end\n"
+                        "end\n";
+    rmdead_run(text2, NO_CAP, want2);
+    rmdead_run(text2, CAP_BITS, want2);
     TEST_ASSERT_EQUAL_UINT32(1, last_w5a);
 }
 
@@ -993,6 +1041,7 @@ int main(void) {
     RUN_TEST(test_rmdead_pattern_cap);
     RUN_TEST(test_rmdead_cap_located);
     RUN_TEST(test_rmdead_cap_parallel);
+    RUN_TEST(test_rmdead_cap_all_dash);
     RUN_TEST(test_rmdead_cap_nested);
     RUN_TEST(test_rmdead_stop_after);
     RUN_TEST(test_ppool_ops);

@@ -219,9 +219,11 @@ enum { ODIN3_PW_CLEAN_WHOLE_TREE = -1 };
  * take are removed, a non-default case left without compares is removed, a default case takes
  * all, and a switch whose pool ends empty gains ODIN3_SWITCH_FULL_CASE. The pattern pools of the
  * switches being processed (a switch and the ones nested in its current case) share the cap: past
- * it the pool that grew stops (odin3_ppool_stop), its switch keeps the rest of its cases and
- * compares, loses ODIN3_SWITCH_PARALLEL_CASE (§20 #7) and gets W5a once (at the switch's record,
- * else the process's). ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
+ * it the pool that grew stops (odin3_ppool_stop), and its switch keeps the rest of its cases and
+ * compares and its flags, without full_case (§20 #7), and gets W5a once (at the switch's record,
+ * else the process's); only a constant compare without 0/1 bits still empties it (every later
+ * constant compare goes, as does the default, and the switch gains full_case), as in Yosys.
+ * ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
  */
 odin3_status odin3_pw_rmdead(odin3_proc_mctx *mctx, odin3_pw *pw);
 

@@ -215,6 +215,30 @@ static void test_prune_promote_root(void) {
               (want){"  sync posedge \\clk\n    update \\q \\t0\nend\n", "t0 <- d"});
 }
 
+/*
+ * The promotion takes the record of the action it came from (§5.3): prune_promote_root.il with a
+ * `\\src` record on each assign, which pb_build reads (Yosys's RTLIL has no attributes on actions,
+ * so its derivation is prune_promote_root.il).
+ */
+static void test_prune_promotion_record(void) {
+    fixture fx;
+    fx_open(&fx, HEAD "    attribute \\src \"t.v:2.5\"\n    assign \\t0 \\q\n"
+                      "    attribute \\src \"t.v:3.5\"\n    assign \\t0 \\d\n"
+                      "    sync posedge \\clk\n      update \\q \\t0\n" TAIL);
+    const odin3_pw_case *root = odin3_vec_cat(&fx.pw.cases, 0);
+    TEST_ASSERT_EQUAL_size_t(2, root->actions.len);
+    odin3_prov_id first = ((const odin3_pw_action *)odin3_vec_cat(&root->actions, 0))->prov;
+    odin3_prov_id second = ((const odin3_pw_action *)odin3_vec_cat(&root->actions, 1))->prov;
+    TEST_ASSERT_TRUE(first.v != 0 && second.v != 0 && first.v != second.v);
+    TEST_ASSERT_TRUE(second.v != fx.pw.prov.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pw_prune(&fx.mctx, &fx.pw));
+    TEST_ASSERT_EQUAL_size_t(1, fx.pw.promoted.len);
+    const odin3_pw_action *promo = odin3_vec_cat(&fx.pw.promoted, 0);
+    TEST_ASSERT_EQUAL_UINT32(second.v, promo->prov.v);
+    fx_expect(&fx, "  sync posedge \\clk\n    update \\q \\t0\nend\n", "t0 <- d");
+    fx_close(&fx);
+}
+
 /* prune_no_promote_later_switch.il: the switch assigns t0 (so it is in affected) but has no
  * default and no full_case (so not on every path): the root action stays, not promoted. */
 static void test_prune_no_promote_later_switch(void) {
@@ -325,6 +349,30 @@ static void test_prune_narrow(void) {
                      "  end\n"
                      "end\n",
                      "t2 <- a"});
+}
+
+/* prune_narrow_case.il: in a nested case, {t1 t0} <- {a b} loses its upper bit t1, which the
+ * inner full switch covers, and keeps `t0 <- b` (no root, so nothing is promoted). */
+static void test_prune_narrow_case(void) {
+    prune_run(HEAD "    switch \\e\n"
+                   "      case 1'1\n"
+                   "        assign { \\t1 \\t0 } { \\a \\b }\n"
+                   "        switch \\f\n"
+                   "          case 1'1\n            assign \\t1 \\c\n"
+                   "          case\n            assign \\t1 \\d\n"
+                   "        end\n"
+                   "    end\n" TAIL,
+              (want){"  switch \\e\n"
+                     "    case 1'1\n"
+                     "      assign \\t0 \\b\n"
+                     "      attribute \\full_case 1\n"
+                     "      switch \\f\n"
+                     "        case 1'1\n          assign \\t1 \\c\n"
+                     "        case\n          assign \\t1 \\d\n"
+                     "      end\n"
+                     "  end\n"
+                     "end\n",
+                     ""});
 }
 
 /* prune_nested_not_every_path.il (internal risk §21 #2): the default assigns t0 only under the
@@ -666,12 +714,14 @@ static void test_prune_oom(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_prune_promote_root);
+    RUN_TEST(test_prune_promotion_record);
     RUN_TEST(test_prune_no_promote_later_switch);
     RUN_TEST(test_prune_switch_default_covers);
     RUN_TEST(test_prune_default_without_full);
     RUN_TEST(test_prune_full_case_covers);
     RUN_TEST(test_prune_partial_bits);
     RUN_TEST(test_prune_narrow);
+    RUN_TEST(test_prune_narrow_case);
     RUN_TEST(test_prune_nested_not_every_path);
     RUN_TEST(test_prune_two_branches_order);
     RUN_TEST(test_prune_nested_full_propagates);

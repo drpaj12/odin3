@@ -365,9 +365,14 @@ A pool past `ODIN3_PROC_MAX_PATTERN_BITS` (§16) stops this switch's analysis: i
 and compares are kept, `FULL_CASE` is not set, and the warning of §15 (W5a) is given once for
 the switch. *Amended (2E Task 4 review M2, M3):* the pattern pools of the switches being processed
 at once (a switch and those nested in its current case) share the cap, so nesting cannot
-multiply it; the pool that grows past it stops and drops its patterns. A tripped switch also
-loses `parallel_case`: its kept items may overlap, and the priority chain then built refines the
-x that a `$pmux` gives for two hot selects (§20 #7). The result is equivalent (dead cases cost cells, never meaning). Cost: O(compares ×
+multiply it; the pool that grows past it stops and drops its patterns. *Amended (2E Task 5
+review):* a tripped switch keeps its flags, `parallel_case` included, and never gains `FULL_CASE`,
+except that a constant compare with no 0/1 bit (all `-`, x or z) still empties the pool: every
+later constant compare, the cases left without compares and the default are then removed and the
+switch gains `FULL_CASE`, exactly as in Yosys, whose pool is empty after such a compare whether it
+took it or not (this also keeps an all-`-` item from reaching §6's append with an empty select).
+The result is Yosys's semantics on the body with the remaining items kept, with the divergences
+§20 #7 lists. Cost: O(compares ×
 width) for the defined pool; the pattern pool is O(patterns × width) per operation and can grow
 with the number of overlapping wildcard items, hence the cap.
 
@@ -854,7 +859,7 @@ through `odin3_proc_test_set_limits` (`proc_test.h`, as 2A–2D do):
 | Cap | Value | Why / on reaching it |
 |---|---|---|
 | `ODIN3_PROC_MAX_ERRORS` | 20 | as 2C/2D; E7 |
-| `ODIN3_PROC_MAX_PATTERN_BITS` | 2^24 pattern bits (two per position, padding excluded): for rmdead's live pools together (§5.2), and per mux-grouping pool | `BitPatternPool` can grow with overlapping wildcard items. *Amended (2E Task 4 review M2):* the words of the pools under the cap stay ≤ 5.2 MB (widths 12–16 are the worst: 32 positions per word, and at most 3^w patterns), and a take briefly holds about twice that plus its index; past the cap W5a/W5b and an equivalent, coarser result |
+| `ODIN3_PROC_MAX_PATTERN_BITS` | 2^24 pattern bits (two per position, padding excluded): for rmdead's live pools together (§5.2), and per mux-grouping pool | `BitPatternPool` can grow with overlapping wildcard items. *Amended (2E Task 4 review M2):* the words of the pools under the cap stay ≤ 5.2 MB (widths 12–16 are the worst: 32 positions per word, and at most 3^w patterns), and a take briefly holds about twice that plus its index; past the cap W5a/W5b and the result §20 #7 describes |
 | `ODIN3_PROC_MAX_ARST_ROUNDS` | 100 | Yosys's limit; E3 |
 | `ODIN3_PROC_MAX_SIGNAL_WALK` | 1024 driver hops | only a cycle of inverters reaches it; `check_signal` answers false |
 | design byte budget | 60% of physical memory (2D's formula, `ODIN3_BUDGET_FRACTION`) | **one budget for the whole design**, not one per pass: checked at each process boundary and every 2^16 created pins against `odin3_design_bytes_reserved(design)` (new read-only IR accessor, 2E-1 Task 3: every module's stores, arenas and pin pools plus the strtab, provenance store and tombstones) + `odin3_ast_bytes_reserved` of every AST store the design holds + 2E's working forms. Since it measures what is held, not a per-pass estimate, 2D's, 2E's and 2F's checks cannot add up to more than 60% (2D and 2F are invited to call the same `odin3_budget_check`, §23). E6, fatal (memory rule: a host OOM kills the WSL VM) |
@@ -982,7 +987,7 @@ expected cells as `write_rtlil` text of the module.
   first/later, with `-` and x compares kept, the inline's first-switch condition, the three
   empty-case rules); rmdead with both pools (a `case` listing every value gains `FULL_CASE` and
   loses its default; `casez 2'b1?` then `2'b10` removes the second; a non-constant item stops
-  nothing), the pattern cap (W5a, equivalent result).
+  nothing), the pattern cap (W5a, §20 #7's result, `parallel_case` kept, the all-`-` rule).
 - `test_proc_prune.c`: promotion of a root assignment, no promotion when a later switch assigns
   the bit, removal of overwritten actions, the intersection over cases with and without a
   default, `FULL_CASE`.
@@ -1180,7 +1185,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 4 | no `proc_init` | runs it | runs it | 2D emits `init` attributes directly |
 | 5 | `$aldff` when the reset value is not made of constant nets | `ConstEval` may prove it constant (`$adff`) | same | 2D folds constant cells; equivalent |
 | 6 | `check_signal` stops after 1024 hops | recurses until the stack overflows on a cycle | same | robustness |
-| 7 | pattern pools capped (W5a/W5b; rmdead's nested pools share the cap; a W5a switch loses `parallel_case`) | unbounded | same | memory rule; equivalent, coarser (dropping `parallel_case` turns a possible x of overlapping kept items into the priority value, which refines it), except for a signal that an earlier of two overlapping kept items leaves alone and the later assigns: Yosys's `$pmux` skips the earlier item for that signal (§6: an append whose value equals `A`), and a later clean (arst's) removes an item prune emptied, as `parallel_case` allows, so Yosys gives the later item's value where 2E's priority chain lets the earlier item keep the old one — a different value, not a refinement, reachable only after a W5a trip on a `parallel_case` switch whose kept items overlap (*amended, 2E Task 5*, verified on 0.55: `proc` on one body with and without `parallel_case` fails a `miter`/`sat` proof, and `--upto arst` drops the emptied item only with it) |
+| 7 | pattern pools capped (W5a/W5b; rmdead's nested pools share the cap) | unbounded | same | memory rule. Past a W5a trip the switch keeps its later items and its flags, without `FULL_CASE`: Yosys's semantics on the body with those items kept. Equal or more defined values unless the switch is `parallel_case` and a dead item or default is kept; then inputs selecting two or more items may give x where Yosys gives a value, or a dead item's value where Yosys keeps the fall-through value: not a refinement (verified on 0.55, 2E Task 5 review). Constant items after a compare with no 0/1 bit (all `-`, x or z) are still removed (§5.2). A block whose items cover every value without a default can gain an always-enabled latch (no `FULL_CASE`, so the hold stays; equivalent values, a `$dlatch` and W1 more; verified on 0.55). W5b: extra groups, equivalent. (*Amended, 2E Task 5 review*: the switch no longer loses `parallel_case`.) |
 | 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites) |
 | 9 | bits ordered by (primary wire ID, bit) | by name-interning order, then offset | same | reproducible; creation order only |
 | 10 | W1, W2 are warnings | logged | logged | DESIGN §6 "latch detection (warn)" |

@@ -36,6 +36,7 @@ typedef struct rd_frame {
     bool is_default; /* that case is the default */
     bool fd;         /* the pool is fp (FullyDefinedPool), else pp (BitPatternPool) */
     bool warned;     /* W5a was given for this switch */
+    bool exhausted;  /* past the cap, a compare without 0/1 bits was taken: the pool is empty */
     odin3_ppool pp;  /* both are freed with the frame; only one is used */
     odin3_fdpool fp;
 } rd_frame;
@@ -122,15 +123,28 @@ static bool can_use_fd(odin3_pw *pw, const odin3_pw_switch *sw) {
 }
 
 static bool pool_empty(const rd_frame *frame) {
+    if (frame->exhausted) {
+        return true;
+    }
     return frame->fd ? odin3_fdpool_empty(&frame->fp) : odin3_ppool_empty(&frame->pp);
+}
+
+/* No bit of value is 0 or 1 (each is x, z or '-'): taking it leaves Yosys's pool empty. */
+static bool matches_all(const odin3_pw *pw, odin3_pw_sig value) {
+    const odin3_pw_bit *bits = odin3_pw_sig_bits(pw, value);
+    for (uint32_t i = 0; i < value.len; i++) {
+        if (bits[i] == ODIN3_PW_S0 || bits[i] == ODIN3_PW_S1) {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*
  * The cap after the frame's pattern pool changed from `before` bits: the walk's total is updated,
  * and past the cap the pool is stopped (nested switches' pools count together, §16). A pool past
- * the cap gives W5a once for its switch (at the switch's record, else the process's) and loses
- * parallel_case: its remaining items may overlap, and a priority chain refines the x a $pmux gives
- * for two hot selects (§20 #7).
+ * the cap gives W5a once for its switch (at the switch's record, else the process's); the switch
+ * keeps its remaining items and its flags, without full_case (§20 #7).
  */
 static void check_cap(rd_walk *walk, rd_frame *frame, uint64_t before) {
     if (frame->fd) {
@@ -146,8 +160,7 @@ static void check_cap(rd_walk *walk, rd_frame *frame, uint64_t before) {
         return;
     }
     frame->warned = true;
-    odin3_pw_switch *sw = switch_at(walk->pw, frame->sw);
-    sw->flags = (uint16_t)(sw->flags & ~ODIN3_SWITCH_PARALLEL_CASE);
+    const odin3_pw_switch *sw = switch_at(walk->pw, frame->sw);
     odin3_prov_id at = sw->prov.v != 0 ? sw->prov : walk->pw->prov;
     odin3_proc_warn(walk->mctx, ODIN3_PROC_W5A, at,
                     "case analysis needs more than %" PRIu32
@@ -155,12 +168,22 @@ static void check_cap(rd_walk *walk, rd_frame *frame, uint64_t before) {
                     cap);
 }
 
+/*
+ * Takes value (fully constant) from the frame's pool. Past the cap the pool keeps every compare,
+ * except after an exhausting one: a compare without 0/1 bits empties Yosys's pool whether it took
+ * it or not, so every later compare is not taken (and the switch ends full_case), as in Yosys.
+ */
 static odin3_status pool_take(rd_walk *walk, rd_frame *frame, odin3_pw_sig value, bool *taken) {
+    if (frame->exhausted) {
+        *taken = false;
+        return ODIN3_OK;
+    }
     uint64_t before = frame->pp.bits_used;
     odin3_status st = frame->fd ? odin3_fdpool_take(&frame->fp, walk->pw, value, taken)
                                 : odin3_ppool_take(&frame->pp, walk->pw, value, taken);
     if (st == ODIN3_OK) {
         check_cap(walk, frame, before);
+        frame->exhausted = !frame->fd && frame->pp.over_cap && matches_all(walk->pw, value);
     }
     return st;
 }
