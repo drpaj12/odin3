@@ -73,7 +73,7 @@ _COVER_RE = re.compile(r"[01\-]+")
 _ENDL_RE = re.compile(r"\n\r|\r\n|\n")
 _BLANK_RE = re.compile(r"[ \t]*(?:\n\r|\r\n|\n)")
 _WS_RE = re.compile(r"[ \t]+")
-_COMMENT_RE = re.compile(r"#[^\n]*(?:\n\r?|$)")
+_COMMENT_RE = re.compile(r"#[^\n]*\n\r?")
 _CONT_BLANK_RE = re.compile(r"\\(?:\n\r|\r\n|\n)[ \t]*(?:\n\r|\r\n|\n)")
 _INDEX_RE = re.compile(r"^(.*)\[(\d+)\]$")
 
@@ -159,7 +159,9 @@ class _Lexer:
         text, pos = self.text, self.pos
         char = text[pos]
         if char == "#":
-            return self._comment()
+            comment = _COMMENT_RE.match(text, pos)
+            if comment:
+                return self._comment(comment.end())
         if char == "\\" and _ENDL_RE.match(text, pos + 1):
             return self._continuation()
         if self.state == _INITIAL and (pos == 0 or text[pos - 1] == "\n"):
@@ -177,14 +179,12 @@ class _Lexer:
             return self._cover()
         return self._word()
 
-    def _comment(self) -> Token:
-        # <*>#.*{ENDL}: always longer than a word starting at '#'. A comment at the end of a
-        # file without a newline is taken as a comment too (agent default). Its EOL has the
-        # text '#': a comment does not move NAMES to SO_COVER, so rows after it are names.
+    def _comment(self, end: int) -> Token:
+        # <*>#.*{ENDL}: always longer than a word starting at '#'. Without an ENDL (the end
+        # of the file) it does not match, and '#...' lexes as a word, as in flex. The EOL has
+        # the text '#': a comment does not move NAMES to SO_COVER, so rows after it are names.
         line = self.line
-        match = _COMMENT_RE.match(self.text, self.pos)
-        assert match is not None
-        self._take(match.end())
+        self._take(end)
         return Token(EOL, "#", line)
 
     def _continuation(self) -> Token | None:
@@ -222,7 +222,8 @@ class _Lexer:
 
     def _cover(self) -> Token:
         # SO_COVER: 0 1 - and the directives only. A word starting with '.' that is no
-        # directive is returned whole, so the checker can name it (C2).
+        # directive is returned whole and the rest of its line lexes as in INITIAL, so the
+        # checker names it (C2); flex stops at the '.' ("Unrecognized character").
         text, pos, line = self.text, self.pos, self.line
         cover = _COVER_RE.match(text, pos)
         if cover:
@@ -233,6 +234,7 @@ class _Lexer:
             self._take(word.end())
             if word.group() in DIRECTIVES:
                 return self._directive(word.group())
+            self.state = _INITIAL
             return Token(NAME, word.group(), line)
         raise LexError(line, _cover_char(text[pos]))
 
@@ -273,7 +275,8 @@ def _int_map(value: object, where: str) -> dict[str, int]:
         raise ModelsError(f"{where}: not an object")
     out: dict[str, int] = {}
     for key, width in value.items():
-        if not isinstance(key, str) or not isinstance(width, int) or width < 1:
+        if (not isinstance(key, str) or not isinstance(width, int) or isinstance(width, bool)
+                or width < 1):
             raise ModelsError(f"{where}: port '{key}' needs a positive width")
         out[key] = width
     return out
@@ -599,7 +602,7 @@ class _Checker:
 
     # --- models (C3) and nets (C8, C9) ------------------------------------------------------------
 
-    def model_checks(self) -> _Model | None:
+    def model_checks(self, complete: bool) -> _Model | None:
         top: _Model | None = None
         for model in self.models:
             if model.blackbox_line:
@@ -610,7 +613,7 @@ class _Checker:
                 self.report(model.line, f"second model '{model.name}' with primitives; "
                                         "VPR reads one")
             self._nets(model)
-        if top is None:
+        if top is None and complete:
             self.report(1, "no model with primitives; VPR needs one")
         return top
 
@@ -662,7 +665,9 @@ class _Checker:
 
     # --- strict (C-S1 to C-S5) ------------------------------------------------------------------
 
-    def strict(self, text: str, top: _Model | None) -> None:
+    def strict(self, text: str, top: _Model | None, complete: bool) -> None:
+        """C-S1 to C-S5. Without ``complete`` (a lexer error), the rules that judge the
+        whole file (C-S3's generators, C-S4's unused stubs) are skipped."""
         first = text.split("\n", 1)[0].rstrip("\r")
         if not re.match(HEADER_RE.format(k=self.opts.lut_k), first):
             self.report(1, "missing header")
@@ -677,15 +682,19 @@ class _Checker:
                                if net == "unconn" and what in ("logic", "latch clock")})
         for line in unconn_lines:
             self.report(line, "net 'unconn' feeds a .names/.latch pin (VPR leaves it open)")
-        self._constants(top)
-        used = {subckt.model for subckt in top.subckts}
-        for model in self.models:
-            if model.blackbox_line and model.name not in used:
-                self.report(model.line, f"stub '{model.name}' unused")
+        if complete:
+            self._constants(top)
+            self._unused_stubs(top)
         for net, line, what in top.sinks:
             if what.endswith("clock") and ("|" in net or "_^_" in net):
                 self.report(line, f"clock net '{net}' contains '|' or '_^_' "
                                   "(breaks VTR's blackbox_latches.pl)")
+
+    def _unused_stubs(self, top: _Model) -> None:
+        used = {subckt.model for subckt in top.subckts}
+        for model in self.models:
+            if model.blackbox_line and model.name not in used:
+                self.report(model.line, f"stub '{model.name}' unused")
 
     def _constants(self, top: _Model) -> None:
         generators = {names.nets[-1].text: names for names in top.names if names.nets}
@@ -718,9 +727,9 @@ def check_text(text: str, path: str, models: Models, opts: CheckOptions) -> list
         lex_error = err
     checker = _Checker(models, opts)
     checker.statements(tokens, lex_error is None)
-    top = checker.model_checks()
+    top = checker.model_checks(lex_error is None)
     if opts.strict:
-        checker.strict(text, top)
+        checker.strict(text, top, lex_error is None)
     found = sorted(checker.found, key=lambda item: item[0])
     if lex_error is not None:
         found = [item for item in found if item[0] < lex_error.line]

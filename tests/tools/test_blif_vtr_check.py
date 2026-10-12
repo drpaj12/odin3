@@ -125,6 +125,23 @@ class LexTest(unittest.TestCase):
         self.assertEqual([("DIRECTIVE", ".end"), ("EOL", ""), ("EOL", "")],
                          self.kinds("\n  \n.end\n"))
 
+    def test_initial_continuation_into_a_blank_line_ends_the_line(self) -> None:
+        # \{ENDL}{WS}*{ENDL} (INITIAL only) returns EOL; without it the blank line would be
+        # swallowed and .outputs would continue the .inputs line
+        self.assertEqual([("DIRECTIVE", ".inputs"), ("NAME", "a"), ("EOL", ""),
+                          ("DIRECTIVE", ".outputs"), ("NAME", "y"), ("EOL", ""), ("EOL", "")],
+                         self.kinds(".inputs a \\\n  \n.outputs y\n"))
+
+    def test_newline_cr_is_one_endl(self) -> None:
+        tokens = list(bvc.lex(".inputs a\n\r.outputs y\n"))
+        outputs = [(t.text, t.line) for t in tokens if t.text == ".outputs"]
+        self.assertEqual([(".outputs", 2)], outputs)
+
+    def test_comment_at_eof_without_newline_is_a_word(self) -> None:
+        # <*>#.*{ENDL} needs the ENDL, so flex lexes '#x' at the end of the file as a word
+        self.assertEqual([("DIRECTIVE", ".inputs"), ("NAME", "a"), ("NAME", "#x"), ("EOL", "")],
+                         self.kinds(".inputs a #x"))
+
     def test_illegal_byte(self) -> None:
         with self.assertRaises(bvc.LexError) as ctx:
             list(bvc.lex(".model t\n.names a=b y\n"))
@@ -147,6 +164,21 @@ class C1Test(CheckerCase):
         self.assert_violations('.model t\n.inputs "abc\n.end\n',
                                ["2: unterminated quoted string"])
 
+    def test_comment_at_eof_without_newline(self) -> None:
+        self.assert_violations(model("") + "#x", ["5: directive '#x' is not read by VPR"])
+
+    def test_continuation_into_a_blank_line(self) -> None:
+        self.assert_violations(".model t\n.inputs a \\\n\n.outputs y\n.names a y\n1 1\n.end\n", [])
+
+    def test_mid_line_directive(self) -> None:
+        self.assert_violations(".model t\n.inputs a .outputs y\n.names a y\n1 1\n.end\n",
+                               ["2: syntax: '.outputs' must start a line"])
+
+    def test_lexer_error_ends_the_file(self) -> None:
+        # only the lexer's line: no "no model" and no C5b for the cover cut short
+        self.assert_violations('\n\n"abc\n', ["3: unterminated quoted string"])
+        self.assert_violations(model(".names a y\n\x01 1\n"), ["5: cover row character '<0x01>'"])
+
     def test_hash_mid_name_accepted(self) -> None:
         self.assert_violations(model(".names a#b y\n1 1\n", inputs="a#b"), [])
 
@@ -155,6 +187,11 @@ class C2Test(CheckerCase):
     def test_clock(self) -> None:
         self.assert_violations(".model t\n.inputs clk\n.clock clk\n.end\n",
                                ["3: directive '.clock' is not read by VPR"])
+
+    def test_clock_after_a_cover(self) -> None:
+        # the line after a cover lexes in SO_COVER; '.clock clk' still gets C2, not 'c'
+        self.assert_violations(model(".names a y\n1 1\n.clock clk\n"),
+                               ["6: directive '.clock' is not read by VPR"])
 
     def test_attr_needs_eblif(self) -> None:
         text = model(".names a y\n1 1\n.attr x 1\n")
@@ -176,6 +213,23 @@ class C3Test(CheckerCase):
         text = (model(".subckt adder a=a b=a cin=a cout=c sumout=y\n")
                 + ".model adder\n.inputs a[0] a[1] b cin\n.outputs cout sumout\n.blackbox\n.end\n")
         self.assert_violations(text, ["7: stub port 'a' of 'adder': width 2 exceeds 1"])
+
+    def test_stub_with_primitives(self) -> None:
+        text = (model(".subckt adder a=a b=a cin=a cout=c sumout=y\n")
+                + ".model adder\n.inputs a b cin\n.outputs cout sumout\n.names a cout\n1 1\n"
+                ".blackbox\n.end\n")
+        self.assert_violations(text, ["11: black-box model 'adder' has primitives"])
+
+    def test_stub_port_direction_and_name(self) -> None:
+        text = (model(".subckt adder a=a b=a cin=a cout=c sumout=y\n")
+                + ".model adder\n.inputs a b cin cout x\n.outputs sumout\n.blackbox\n.end\n")
+        self.assert_violations(text, [
+            "7: stub port 'cout' of 'adder': direction differs from the model",
+            "7: stub port 'x' of 'adder': no such port on the model"])
+
+    def test_no_top_model(self) -> None:
+        self.assert_violations(ADDER_STUB.lstrip("\n"),
+                               ["1: no model with primitives; VPR needs one"])
 
 
 class C4Test(CheckerCase):
@@ -235,6 +289,7 @@ class C6Test(CheckerCase):
 
     def test_bad_init(self) -> None:
         self.latch(".latch d q re c 4", ["4: latch init '4'"])
+        self.latch(".latch d q 4", ["4: latch init '4'"])
 
     def test_keyword_as_a_net(self) -> None:
         self.latch(".latch re q re c 0", ["4: 're' on a .latch line lexes as a keyword"])
@@ -259,6 +314,9 @@ class C7Test(CheckerCase):
     def test_formal_twice(self) -> None:
         self.assert_violations(model(".subckt adder a=x a=y cout=y\n") + ADDER_STUB,
                                ["4: formal 'a' given twice"])
+        # split_index: 'a' is bit 0 of a
+        self.assert_violations(model(".subckt adder a=x a[0]=y cout=y\n") + ADDER_STUB,
+                               ["4: formal 'a[0]' given twice"])
 
 
 class C8C9Test(CheckerCase):
@@ -325,6 +383,17 @@ class StrictTest(CheckerCase):
                             ".names a y\n1 1\n")
         self.strict(text, ["14: stub 'adder' unused"])
 
+    def test_clock_after_a_cover(self) -> None:
+        text = GOOD.replace(".names vcc\n1\n", ".names vcc\n1\n.clock c\n")
+        self.strict(text, ["9: directive '.clock' is not read by VPR", "9: .clock present"])
+
+    def test_lexer_error_skips_whole_file_rules(self) -> None:
+        # gnd is used before the error and its generator follows it; the stub's .subckt too
+        text = (HEADER + ADDER_STUB.lstrip("\n")
+                + ".model t\n.inputs a\n.outputs y\n.names gnd a y\n01 1\n.names a z\n2 1\n"
+                ".subckt adder a=a b=a cin=a cout=c sumout=s\n.names gnd\n.end\n")
+        self.strict(text, ["14: cover row character '2'"])
+
     def test_clock_net_name(self) -> None:
         text = GOOD.replace(" c\n", " a|b\n", 1).replace("re c 2", "re a|b 2")
         self.assert_violations(text, [])
@@ -362,6 +431,16 @@ class MainTest(CheckerCase):
         code, out, err = run_main(["--models", str(bad), str(GOLDEN_BLIF / "ff.parmys.blif")])
         self.assertEqual((2, ""), (code, out))
         self.assertEqual(f"blif-vtr-check: {bad}: cannot read models: models: missing\n", err)
+
+    def test_boolean_port_width(self) -> None:
+        bad = Path(self.tmp.name) / "bool.json"
+        data = json.loads(json.dumps(K6_MODELS))
+        data["models"]["adder"]["inputs"]["a"] = True
+        bad.write_text(json.dumps(data), encoding="utf-8")
+        code, out, err = run_main(["--models", str(bad), str(GOLDEN_BLIF / "ff.parmys.blif")])
+        self.assertEqual((2, ""), (code, out))
+        self.assertEqual(f"blif-vtr-check: {bad}: cannot read models: models: adder: inputs: "
+                         "port 'a' needs a positive width\n", err)
 
     def test_usage(self) -> None:
         code, _, err = run_main(["--max-errors", "0", "x.blif"])
