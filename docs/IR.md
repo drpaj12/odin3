@@ -469,7 +469,7 @@ the source.
 **arguments**, the text after the pass name as the script gave it, trimmed (a strtab ID; 0 when
 there were none or when a reader opened the run itself); and the **run information**, the facts
 the pass established while running, as blank-separated `key=value` words in an order the pass
-fixes, a value with a blank, `"` or `\` written in double quotes with `\"` and `\\` (a strtab
+fixes, a value with a byte outside `!`..`~` (a blank included), `"` or `\` written in double quotes with `\"` and `\\` (a strtab
 ID; 0 = none). The pass manager records the arguments when it opens the run
 (`odin3_pass_run_begin_args`); a pass sets its information at most once
 (`odin3_passrun_set_info`); rows never change afterwards and survive `compact`. `abc` records

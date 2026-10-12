@@ -1159,7 +1159,7 @@ observes, dies without children.
 > **arguments**, the text after the pass name as the script gave it, trimmed (a strtab ID; 0 when
 > there were none or when a reader opened the run itself); and the **run information**, the facts
 > the pass established while running, as blank-separated `key=value` words in an order the pass
-> fixes, a value with a blank, `"` or `\` written in double quotes with `\"` and `\\` (a strtab
+> fixes, a value with a byte outside `!`..`~` (a blank included), `"` or `\` written in double quotes with `\"` and `\\` (a strtab
 > ID; 0 = none). The pass manager records the arguments when it opens the run
 > (`odin3_pass_run_begin_args`); a pass sets its information at most once
 > (`odin3_passrun_set_info`); rows never change afterwards and survive `compact`. `abc` records
@@ -1187,6 +1187,8 @@ observes, dies without children.
 > it, and a warning says so. With identity anchors only (the BLIF exchange, `abc --prov cone`, or
 > no name map) a region is the cut-bounded cone of an output or a register input. An old cell that
 > reaches no output and no register input had no observable effect; it dies without children.
+>
+> *(Erratum, 3D-3 final review, 2026-10-12: quoting covers every byte outside `!`..`~`, not only a blank, so 3H's `qor_netstats` never splits a value; PHASE3 #26.)*
 
 **In §11** add: "Under PHASE3 #9 and #14 (3D spec): the `$lut` cell, the pass-run table's arguments
 and run information, and provenance across ABC (IR-12)."
