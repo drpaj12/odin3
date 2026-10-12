@@ -16,7 +16,6 @@
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
-#include "util/vec.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -96,17 +95,18 @@ typedef struct blif_writer {
     wr_keys keys;
     odin3_u64map *type_module; /* module cell type -> module ID */
     odin3_u64map *declared;    /* declared cell type -> its first declared-model index */
-    odin3_vec seen;            /* uint32_t per port of a .subckt: highest connected bit + 1 */
-    odin3_vec params;          /* odin3_value: the parameters its formals imply */
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
     /* the VTR dialect's names (spec 3E VB-10) */
-    bool log_names;                       /* log the port warnings (the preflight's naming run) */
-    odin3_strbuf orig;                    /* the last name legalise rewrote, as it was */
-    odin3_strbuf legal;                   /* scratch for legalise */
-    uint32_t renamed;                     /* written names VB-10 changed (note_renamed) */
-    bool have_first;                      /* first_key, first_orig, first_legal are set */
-    uint32_t first_key;                   /* the lowest net ID of such a name */
+    odin3_blif_names
+        *names;         /* VTR: the top's names from the preflight's plan, lent to the writer */
+    bool quiet_refusal; /* the preflight's cap is reached: a refusal is counted, not logged */
+    bool log_names;     /* log the port warnings (the preflight's naming run) */
+    odin3_strbuf orig;  /* the last name legalise rewrote, as it was */
+    odin3_strbuf legal; /* scratch for legalise */
+    uint32_t renamed;   /* written names VB-10 changed (note_renamed) */
+    bool have_first;    /* first_key, first_orig, first_legal are set */
+    uint32_t first_key; /* the lowest net ID of such a name */
     odin3_strbuf first_orig, first_legal; /* that name before and after */
     /* the module being written */
     const odin3_module *module;
@@ -133,9 +133,12 @@ static odin3_status wr_fail(blif_writer *wr, odin3_status st) {
     return wr->st;
 }
 
-/* Logs "path: model '<model>': <what> '<name>'" and fails with ODIN3_ERR_INVALID_ARG. */
+/* Logs "path: model '<model>': <what> '<name>'" (unless quiet_refusal) and fails with
+ * ODIN3_ERR_INVALID_ARG. */
 static odin3_status wr_refuse(blif_writer *wr, const char *what, const char *name) {
-    odin3_log(ODIN3_LOG_ERROR, "%s: model '%s': %s '%s'", wr->path, wr->model, what, name);
+    if (!wr->quiet_refusal) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: model '%s': %s '%s'", wr->path, wr->model, what, name);
+    }
     return wr_fail(wr, ODIN3_ERR_INVALID_ARG);
 }
 
@@ -1004,58 +1007,80 @@ static bool formal_scalar(const blif_writer *wr, odin3_celltype_id type, uint32_
     return port->scalar;
 }
 
-/* wr->params: the parameters the BLIF reader gives node's .subckt (frontends/blif/reader.h): a
- * declared model's, else those its connected formals imply. */
-static odin3_status implied_params(blif_writer *wr, odin3_node_id node,
-                                   const odin3_celltype_def *def) {
-    odin3_celltype_id type = odin3_node_type(wr->module, node);
-    odin3_vec_clear(&wr->params);
-    odin3_vec_clear(&wr->seen);
-    if (odin3_vec_reserve(&wr->params, def->n_params) != ODIN3_OK ||
-        odin3_vec_reserve(&wr->seen, def->n_ports) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
+/* True and *index = the first declared-model entry of type when the design declares it. */
+static bool first_declared(const odin3_design *design, odin3_celltype_id type, uint32_t *index) {
+    uint32_t count = odin3_design_declared_model_count(design);
+    for (uint32_t i = 0; i < count; i++) {
+        if (odin3_design_declared_model(design, i).v == type.v) {
+            *index = i;
+            return true;
+        }
     }
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        (void)odin3_vec_push(&wr->params); /* reserved */
-    }
+    return false;
+}
+
+/* The parameters the BLIF reader gives node's .subckt (frontends/blif/reader.h): a declared
+ * model's, else those its connected formals imply. seen is scratch for one width per port. */
+typedef struct wr_implied {
+    const odin3_design *design;
+    const odin3_module *module;
+    odin3_node_id node;
+    uint32_t *seen;      /* one per port of the type */
+    odin3_value *params; /* receives one per parameter of the type */
+} wr_implied;
+
+static odin3_status implied_params(const wr_implied *req) {
+    odin3_celltype_id type = odin3_node_type(req->module, req->node);
+    const odin3_celltype_def *def = odin3_celltype_get(req->design, type);
     uint32_t index = 0;
-    const odin3_value *declared = declared_of(wr, type, &index) != NULL
-                                      ? odin3_design_declared_model_params(wr->design, index)
+    const odin3_value *declared = first_declared(req->design, type, &index)
+                                      ? odin3_design_declared_model_params(req->design, index)
                                       : NULL;
     if (declared != NULL) {
-        memcpy(wr->params.data, declared, sizeof *declared * def->n_params);
+        memcpy(req->params, declared, sizeof *declared * def->n_params);
         return ODIN3_OK;
     }
     for (uint32_t port = 0; port < def->n_ports; port++) {
-        uint32_t *seen = odin3_vec_push(&wr->seen); /* reserved */
-        odin3_pinslice pins = odin3_node_port(wr->module, node, port);
-        for (uint32_t k = pins.count; k > 0 && *seen == 0; k--) {
-            if (odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k - 1}))) {
-                *seen = k;
+        odin3_pinslice pins = odin3_node_port(req->module, req->node, port);
+        req->seen[port] = 0;
+        for (uint32_t k = pins.count; k > 0 && req->seen[port] == 0; k--) {
+            if (odin3_net_valid(odin3_pin_net(req->module, (odin3_pin_id){pins.first.v + k - 1}))) {
+                req->seen[port] = k;
             }
         }
     }
-    return odin3_celltype_infer_params(wr->design, type, wr->seen.data, wr->params.data);
+    return odin3_celltype_infer_params(req->design, type, req->seen, req->params);
 }
 
-/* True when node's parameters are those its .subckt reads back with (BLIF has no other way to
- * give them); a failure (out of memory) is recorded. */
-static bool params_recoverable(blif_writer *wr, odin3_node_id node, const odin3_celltype_def *def) {
+/* Appends `'name'` to bad, after `, ` unless it is the first (*first is then cleared). */
+static odin3_status list_param(odin3_strbuf *bad, const char *name, bool *first) {
+    odin3_status st = *first ? ODIN3_OK : odin3_strbuf_append(bad, odin3_bytes_cstr(", "));
+    *first = false;
+    return st == ODIN3_OK ? odin3_strbuf_appendf(bad, "'%s'", name) : st;
+}
+
+odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_module *module,
+                                     odin3_node_id node, odin3_strbuf *bad, bool *ok) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(module, node));
+    *ok = true;
     if (def->n_params == 0) {
-        return true;
+        return ODIN3_OK;
     }
-    odin3_status st = implied_params(wr, node, def);
-    if (st != ODIN3_OK) {
-        (void)wr_fail(wr, st);
-        return false;
-    }
-    const odin3_value *want = wr->params.data;
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        if (!odin3_value_equal(odin3_node_param(wr->module, node, i), &want[i])) {
-            return false;
+    wr_implied req = {design, module, node,
+                      odin3_util_malloc(sizeof(uint32_t) * (def->n_ports + 1U)),
+                      odin3_util_malloc(sizeof(odin3_value) * def->n_params)};
+    odin3_status st =
+        req.seen != NULL && req.params != NULL ? implied_params(&req) : ODIN3_ERR_NO_MEMORY;
+    bool first = true;
+    for (uint32_t i = 0; st == ODIN3_OK && i < def->n_params; i++) {
+        if (!odin3_value_equal(odin3_node_param(module, node, i), &req.params[i])) {
+            *ok = false;
+            st = list_param(bad, def->params[i].name, &first);
         }
     }
-    return true;
+    odin3_util_free(req.seen);
+    odin3_util_free(req.params);
+    return st;
 }
 
 /* The connected pins of port `at` of node as `formal=actual` tokens. */
@@ -1103,13 +1128,17 @@ static uint32_t port_of_decl(const odin3_celltype_def *def, const odin3_celltype
 static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
-    if (!params_recoverable(wr, node, def)) {
-        return wr->st != ODIN3_OK
-                   ? wr->st
-                   : wr_refuse(wr,
-                               "parameters neither declared nor implied by the connected formals "
-                               "have no BLIF form; cannot write a cell of",
-                               def->name);
+    bool ok = true;
+    odin3_strbuf_clear(&wr->cand);
+    odin3_status checked = odin3_blif_params_check(wr->design, wr->module, node, &wr->cand, &ok);
+    if (checked != ODIN3_OK) {
+        return wr_fail(wr, checked);
+    }
+    if (!ok) {
+        return wr_refuse(wr,
+                         "parameters neither declared nor implied by the connected formals "
+                         "have no BLIF form; cannot write a cell of",
+                         def->name);
     }
     wr_begin(wr, ".subckt");
     wr_token(wr, odin3_bytes_cstr(def->name));
@@ -1208,7 +1237,54 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
 
 /* --- models -------------------------------------------------------------------------------- */
 
+/* A module's names, as name_module leaves them in the writer (see blif_writer). */
+struct odin3_blif_names {
+    odin3_strtab *gen_names;
+    odin3_u64map *claims, *net_port, *gen, *port_of, *clocks;
+};
+
+/* Moves the names in from (each table it holds) to the writer's tables, leaving from empty. */
+static void names_take(blif_writer *wr, odin3_blif_names *from) {
+    wr->gen_names = from->gen_names;
+    wr->claims = from->claims;
+    wr->net_port = from->net_port;
+    wr->gen = from->gen;
+    wr->port_of = from->port_of;
+    wr->clocks = from->clocks;
+    *from = (odin3_blif_names){0};
+}
+
+/* Moves the writer's tables (each it holds) into to, which must be empty. */
+static void names_give(blif_writer *wr, odin3_blif_names *to) {
+    *to = (odin3_blif_names){wr->gen_names, wr->claims,  wr->net_port,
+                             wr->gen,       wr->port_of, wr->clocks};
+    wr->gen_names = NULL;
+    wr->claims = NULL;
+    wr->net_port = NULL;
+    wr->gen = NULL;
+    wr->port_of = NULL;
+    wr->clocks = NULL;
+}
+
+void odin3_blif_names_free(odin3_blif_names *names) {
+    if (names == NULL) {
+        return;
+    }
+    odin3_strtab_destroy(names->gen_names);
+    odin3_u64map_destroy(names->claims);
+    odin3_u64map_destroy(names->net_port);
+    odin3_u64map_destroy(names->gen);
+    odin3_u64map_destroy(names->port_of);
+    odin3_u64map_destroy(names->clocks);
+    odin3_util_free(names);
+}
+
+/* Ends the module being written: lent names go back to their owner (the plan), the writer's own
+ * are freed. */
 static void end_module(blif_writer *wr) {
+    if (wr->names != NULL && wr->module != NULL) {
+        names_give(wr, wr->names);
+    }
     odin3_strtab_destroy(wr->gen_names);
     odin3_u64map_destroy(wr->claims);
     odin3_u64map_destroy(wr->net_port);
@@ -1242,7 +1318,12 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     uint32_t id = written_module(wr->design, pos);
     wr->module = odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id});
     wr->model = odin3_strtab_get(wr->tab, odin3_module_name(wr->module));
-    odin3_status st = wr_fail(wr, name_module(wr));
+    odin3_status st = ODIN3_OK;
+    if (wr->names != NULL) {
+        names_take(wr, wr->names); /* VTR: the preflight named the top (its plan) */
+    } else {
+        st = wr_fail(wr, name_module(wr));
+    }
     if (pos > 1) {
         wr_newline(wr);
     }
@@ -1331,8 +1412,6 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     for (uint32_t i = 0; i < WR_NO_BLIF; i++) {
         wr->no_blif[i] = find_type(wr, NO_BLIF_FORM[i]);
     }
-    odin3_vec_init(&wr->seen, sizeof(uint32_t));
-    odin3_vec_init(&wr->params, sizeof(odin3_value));
     wr->type_module = odin3_u64map_create(0);
     wr->declared = odin3_u64map_create(0);
     if (wr->type_module == NULL || wr->declared == NULL) {
@@ -1407,8 +1486,6 @@ static void wr_free(blif_writer *wr) {
     odin3_strbuf_free(&wr->first_legal);
     odin3_u64map_destroy(wr->type_module);
     odin3_u64map_destroy(wr->declared);
-    odin3_vec_free(&wr->seen);
-    odin3_vec_free(&wr->params);
 }
 
 /* The options' refusals for odin3_blif_write_with (plan 3E points (m) and (n)), before the
@@ -1470,23 +1547,56 @@ static void write_design(blif_writer *wr) {
     }
 }
 
-odin3_status odin3_blif_vtr_name_top(const odin3_design *design, const odin3_blif_write_opts *opts,
-                                     odin3_blif_vtr_report *report) {
+/* Logs the info line of VB-10 item 9 for the names wr counted. */
+static void log_renamed(const blif_writer *wr) {
+    odin3_log(ODIN3_LOG_INFO, ODIN3_BLIF_VTR_PREFIX "%u names legalised (first: '%.*s' -> '%.*s')",
+              (unsigned)wr->renamed, (int)wr->first_orig.len, wr->first_orig.data,
+              (int)wr->first_legal.len, wr->first_legal.data);
+}
+
+odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif_names **names,
+                                     uint32_t *renamed) {
     blif_writer wr;
-    odin3_status st = wr_init(&wr, design, ODIN3_BLIF_VTR_WHO, opts);
-    wr.log_names = true;
+    *names = NULL;
+    *renamed = 0;
+    odin3_status st = wr_init(&wr, req->design, ODIN3_BLIF_VTR_WHO, req->opts);
+    wr.log_names = req->log_names;
+    wr.quiet_refusal = !req->log_refusal;
     if (st == ODIN3_OK) {
-        wr.module = odin3_module_get((odin3_design *)design, odin3_design_top(design));
+        wr.module = odin3_module_get((odin3_design *)req->design, odin3_design_top(req->design));
         wr.model = odin3_strtab_get(wr.tab, odin3_module_name(wr.module));
         st = wr_fail(&wr, name_module(&wr));
     }
-    report->renamed = wr.renamed;
-    if (st == ODIN3_OK && wr.have_first) {
-        odin3_log(ODIN3_LOG_INFO,
-                  ODIN3_BLIF_VTR_PREFIX "%u names legalised (first: '%.*s' -> '%.*s')",
-                  (unsigned)wr.renamed, (int)wr.first_orig.len, wr.first_orig.data,
-                  (int)wr.first_legal.len, wr.first_legal.data);
+    if (st == ODIN3_OK) {
+        *names = odin3_util_calloc(sizeof **names);
+        st = *names != NULL ? ODIN3_OK : wr_fail(&wr, ODIN3_ERR_NO_MEMORY);
     }
+    if (st == ODIN3_OK) {
+        names_give(&wr, *names);
+        *renamed = wr.renamed;
+        if (wr.log_names && wr.have_first) {
+            log_renamed(&wr);
+        }
+    }
+    wr.module = NULL; /* the tables, if not given, are wr's own: wr_free frees them */
+    wr_free(&wr);
+    return st;
+}
+
+/* Opens the temporary and writes the design with opts (VTR: with the plan's names, lent). */
+static odin3_status write_opened(const odin3_design *design, const char *path,
+                                 const odin3_blif_write_opts *opts, odin3_blif_names *names) {
+    blif_writer wr;
+    odin3_status st = wr_init(&wr, design, path, opts);
+    wr.names = names;
+    if (st == ODIN3_OK) {
+        st = wr_open(&wr);
+    }
+    if (st == ODIN3_OK) {
+        write_design(&wr);
+    }
+    wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
+    st = wr.st;
     wr_free(&wr);
     return st;
 }
@@ -1508,23 +1618,15 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
         opts != NULL ? *opts
                      : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0};
     odin3_status st = check_opts(&use);
+    odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {
         odin3_blif_vtr_report report;
-        st = odin3_blif_vtr_preflight(design, &use, &report); /* before the path is opened */
-    }
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    blif_writer wr;
-    st = wr_init(&wr, design, path, &use);
-    if (st == ODIN3_OK) {
-        st = wr_open(&wr);
+        st =
+            odin3_blif_vtr_plan_build(design, &use, &plan, &report); /* before the path is opened */
     }
     if (st == ODIN3_OK) {
-        write_design(&wr);
+        st = write_opened(design, path, &use, plan.names);
     }
-    wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
-    st = wr.st;
-    wr_free(&wr);
+    odin3_blif_vtr_plan_free(&plan);
     return st;
 }

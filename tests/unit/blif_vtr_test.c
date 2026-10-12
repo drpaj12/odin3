@@ -79,13 +79,19 @@ static odin3_status run_in_dir(bvt *bv, const char *pass, const char *args) {
     return chdir(cwd) == 0 ? st : ODIN3_ERR_IO;
 }
 
-odin3_status bvt_read(bvt *bv, const char *blif_text, bool vtr_lib) {
+odin3_status bvt_read_lib(bvt *bv, bvt_source src) {
     odin3_status st = bvt_setup(bv);
-    st = st == ODIN3_OK ? put_input(bv, blif_text) : st;
-    if (st == ODIN3_OK && vtr_lib) {
-        st = run_in_dir(bv, "read_techlib", ODIN3_LIB_DIR "/vtr.o3lib");
+    st = st == ODIN3_OK ? put_input(bv, src.blif_text) : st;
+    if (st == ODIN3_OK && src.lib_file != NULL) {
+        char path[PATH_BUF];
+        int len = snprintf(path, sizeof path, "%s/%s", ODIN3_LIB_DIR, src.lib_file);
+        st = len > 0 && len < PATH_BUF ? run_in_dir(bv, "read_techlib", path) : ODIN3_ERR_IO;
     }
     return st == ODIN3_OK ? run_in_dir(bv, "read_blif", "t.blif") : st;
+}
+
+odin3_status bvt_read(bvt *bv, const char *blif_text, bool vtr_lib) {
+    return bvt_read_lib(bv, (bvt_source){blif_text, vtr_lib ? "vtr.o3lib" : NULL});
 }
 
 static odin3_status slurp(const char *path, odin3_strbuf *out) {

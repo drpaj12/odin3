@@ -5,8 +5,12 @@
 #define ODIN3_BACKENDS_BLIF_WRITER_H
 
 #include "ir/design.h"
+#include "ir/ids.h"
+#include "ir/module.h"
 #include "odin3/odin3.h"
+#include "util/str.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 /* BLIF dialects (spec 3E VB-4). */
@@ -120,8 +124,56 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * input in its odin3_blif_vtr_clock_name form, before 1C's uniqueness rule (a form another net or
  * port bit already has falls back to `$n<ID>`, `$n<ID>$1`, …; nets in ID order). A net named
  * `gnd`/`vcc`/`unconn` that a zero-input $sop of value 0/1/0 drives keeps its name. Port bits are
- * named by their wire's declared index, as in the plain dialect. */
+ * named by their wire's declared index, as in the plain dialect. The top is named once, by the
+ * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds. */
 odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
                                    const odin3_blif_write_opts *opts);
+
+/*
+ * E11 (spec 3E §11; 1C's rule, both dialects): *ok when every parameter of node (a live node of
+ * module, of a type with parameters or none) equals the value the BLIF reader would give its
+ * `.subckt`: the declared model's parameters when the design declares the type (its first
+ * declaration), else those its connected formals imply (odin3_celltype_infer_params). When not,
+ * appends to bad the parameters that differ, in definition order, each in `'…'`, joined by `, `
+ * (plan 3E point (w)): `'A_WIDTH', 'B_WIDTH'`. ODIN3_ERR_NO_MEMORY (not logged; bad may hold part
+ * of the list) when scratch memory runs out; ODIN3_ERR_INVALID_ARG (logged by the IR) when the
+ * type cannot infer its parameters.
+ */
+odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_module *module,
+                                     odin3_node_id node, odin3_strbuf *bad, bool *ok);
+
+/* The VTR dialect's names of the design's top (spec 3E VB-10), as the writer's naming machinery
+ * chose them: built once by the preflight (odin3_blif_vtr_name_top), then handed to the writer
+ * through the plan (vtr.h), so naming runs once per write. Opaque; odin3_blif_names_free frees. */
+typedef struct odin3_blif_names odin3_blif_names;
+
+/* What odin3_blif_vtr_name_top names and logs. */
+typedef struct odin3_blif_names_req {
+    const odin3_design *design;        /* its top must exist (E13 is the caller's) */
+    const odin3_blif_write_opts *opts; /* the VTR dialect */
+    bool log_names;   /* log the port warnings and the info line (no refusal so far) */
+    bool log_refusal; /* log a refusal (the preflight's cap is not reached) */
+} odin3_blif_names_req;
+
+/*
+ * Names the design's top as the VTR dialect writes it (VB-10: rules 1-3 and 8 before 1C's
+ * uniqueness fallback; spec 3E §10), without writing anything, and stores the result in *names
+ * (NULL on failure; the caller frees it). When log_names, logs, once per port whose bit names
+ * changed, the warning `write_blif: --vtr: port '<p>' written as '<legal>' (VPR cannot read
+ * '<p>')`, or, when rule 8 alone changed them (a clock port), `write_blif: --vtr: clock port '<p>'
+ * written as '<legal>' (VTR's latch clock domains cannot hold '|' or '_^_')`; and, when N > 0,
+ * the info line `write_blif: --vtr: N names legalised (first: '<orig>' -> '<legal>')` for the
+ * name of the lowest net ID (an unconnected port bit sorts last; on a tie, the port bit). N, set
+ * in *renamed, counts the written names VB-10 changed: each port bit name, and each net's own or
+ * wire bit name (a net written under its own port bit's name counts once). Returns ODIN3_OK;
+ * ODIN3_ERR_INVALID_ARG when two ports on different nets end up with one BLIF name (logged as
+ * `write_blif: --vtr: model '<top>': two ports on different nets have the BLIF name '<n>'` when
+ * log_refusal); ODIN3_ERR_NO_MEMORY (logged `write_blif: --vtr: out of memory`).
+ */
+odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif_names **names,
+                                     uint32_t *renamed);
+
+/* Frees names (NULL is a no-op). */
+void odin3_blif_names_free(odin3_blif_names *names);
 
 #endif

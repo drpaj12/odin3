@@ -7,9 +7,12 @@
 
 #include "backends/blif/writer.h"
 #include "ir/design.h"
+#include "ir/ids.h"
+#include "ir/module.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
 #include "util/str.h"
+#include "util/u64map.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,6 +34,67 @@ typedef struct odin3_blif_vtr_report {
  * argument is NULL, ODIN3_ERR_NO_MEMORY. Reads only; O(nodes + pins). */
 odin3_status odin3_blif_vtr_preflight(const odin3_design *design, const odin3_blif_write_opts *opts,
                                       odin3_blif_vtr_report *report);
+
+/* The source class of an input pin or an output-port bit (spec 3E §9.1). */
+typedef enum odin3_blif_src_class {
+    ODIN3_BLIF_SRC_SIGNAL = 0,
+    ODIN3_BLIF_SRC_0,
+    ODIN3_BLIF_SRC_1,
+    ODIN3_BLIF_SRC_X,
+    ODIN3_BLIF_SRC_UNDRIVEN,
+    ODIN3_BLIF_SRC_U
+} odin3_blif_src_class;
+
+/*
+ * §9.1's class of net in module, by its driving cell's own function only (constants are not
+ * traced through buffers): none (an unconnected pin) or a net without a driver → UNDRIVEN;
+ * driven by $_CONSTX_ or $_CONSTZ_ → X; a net named `unconn` driven by a zero-input $sop with no
+ * rows (Parmys's `unconn`) → U; driven by $_CONST0_ or a zero-input $sop of value 0 → 0; by
+ * $_CONST1_ or a zero-input $sop of value 1 → 1 (odin3_net_const_value; a net with several
+ * drivers has none); anything else → SIGNAL. O(1).
+ */
+odin3_blif_src_class odin3_blif_vtr_net_class(const odin3_module *module, odin3_net_id net);
+
+/*
+ * What the preflight leaves the emitter (internal): the top, the resolved K, the class of every
+ * net of the top whose class is not SIGNAL, and the top's VB-10 names (writer.h), so the write
+ * names the top once. Zero-initialise before odin3_blif_vtr_plan_build; free with
+ * odin3_blif_vtr_plan_free whatever the build returned.
+ */
+typedef struct odin3_blif_vtr_plan {
+    const odin3_design *design;
+    const odin3_module *top;
+    uint32_t k;
+    odin3_u64map *classes;   /* net ID -> odin3_blif_src_class, for the nets not SIGNAL */
+    odin3_blif_names *names; /* NULL until naming succeeded */
+} odin3_blif_vtr_plan;
+
+/*
+ * The preflight, keeping its plan: checks the options (the preflight's own lines), then E13
+ * alone; then the top's nodes in ID order, each with at most one of E1b, E1, E2, E3, E4, E5,
+ * E6, E10, E7, E8, E11 (plan 3E point (f)), E3b per clock input of a hard cell, and E9 per
+ * $port_inout; then its nets (E12, and the class map); then its names (VB-10;
+ * odin3_blif_vtr_name_top logs its warnings and info line only when nothing was refused, and its
+ * own refusal only below the cap). Each refusal is `error: write_blif: --vtr: <§11 text>`; past
+ * ODIN3_BLIF_VTR_MAX_ERRORS they are counted only, then `write_blif: --vtr: N more errors not
+ * shown` follows. report (zeroed first) counts the refusals and what the write will emit:
+ * `names` the $sop and gate cells (.names lines of cells; generators and port buffers the writer
+ * adds are not counted), `latches` the $_DFF_P_ cells, `subckts` the hard cells; per pin,
+ * `x_to_gnd` the X and UNDRIVEN .names inputs, .latch D pins and output-port bits,
+ * `x_to_unconn` the X and UNDRIVEN non-clock inputs of hard cells, `unconn_logic` the class-U
+ * .names inputs and .latch D pins (of cells not refused); `renamed` (VB-10) and
+ * `modules_skipped`. Returns as odin3_blif_vtr_preflight (out of memory logged `write_blif:
+ * --vtr: out of memory`).
+ */
+odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
+                                       const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan,
+                                       odin3_blif_vtr_report *report);
+
+/* Frees what plan holds and zeroes it. */
+void odin3_blif_vtr_plan_free(odin3_blif_vtr_plan *plan);
+
+/* The class plan recorded for net: UNDRIVEN for none, SIGNAL for a net not in its map. */
+odin3_blif_src_class odin3_blif_vtr_plan_class(const odin3_blif_vtr_plan *plan, odin3_net_id net);
 
 /* The prefix of every preflight refusal and of the dialect's own lines (spec 3E §11), and the
  * writer's name for itself in the lines its VTR naming logs (`write_blif: --vtr: model …`). */
@@ -61,21 +125,6 @@ bool odin3_blif_vtr_reserved(odin3_bytes name);
  * clock whole. The result stays injective and decodable. ODIN3_ERR_NO_MEMORY leaves out as it
  * was. */
 odin3_status odin3_blif_vtr_clock_name(odin3_bytes legal, odin3_strbuf *out);
-
-/* Defined in writer.c, whose naming machinery it runs: names the design's top as the VTR dialect
- * writes it (VB-10: rules 1-3 and 8 before 1C's uniqueness fallback; spec 3E §10) without writing
- * anything. Logs, once per port whose bit names changed, the warning `write_blif: --vtr: port
- * '<p>' written as '<legal>' (VPR cannot read '<p>')`, or, when rule 8 alone changed them (a
- * clock port), `write_blif: --vtr: clock port '<p>' written as '<legal>' (VTR's latch clock
- * domains cannot hold '|' or '_^_')`. N counts the written names VB-10 changed: each port bit
- * name, and each net's own or wire bit name (a net written under its own port bit's name counts
- * once). When N > 0, logs the info line `write_blif: --vtr: N names legalised (first: '<orig>' ->
- * '<legal>')` for the name of the lowest net ID (an unconnected port bit sorts last; on a tie, the
- * port bit); sets report->renamed = N. The top must exist (E13 is the caller's). Returns ODIN3_OK;
- * ODIN3_ERR_INVALID_ARG (logged) when two ports on different nets end up with one BLIF name;
- * ODIN3_ERR_NO_MEMORY. */
-odin3_status odin3_blif_vtr_name_top(const odin3_design *design, const odin3_blif_write_opts *opts,
-                                     odin3_blif_vtr_report *report);
 
 /* The K the VTR dialect writes with: opts->lut_k, or ODIN3_BLIF_VTR_DEFAULT_K when it is 0. */
 uint32_t odin3_blif_vtr_k(const odin3_blif_write_opts *opts);

@@ -30,6 +30,15 @@ typedef struct bvt {
  */
 odin3_status bvt_read(bvt *bv, const char *blif_text, bool vtr_lib);
 
+/* A BLIF text and the tech library (a file of <repo>/lib, or NULL) read before it. */
+typedef struct bvt_source {
+    const char *blif_text;
+    const char *lib_file;
+} bvt_source;
+
+/* bvt_read with `read_techlib <repo>/lib/<src.lib_file>` first when lib_file is not NULL. */
+odin3_status bvt_read_lib(bvt *bv, bvt_source src);
+
 /*
  * Clears bv->log and the counts, then runs `write_blif <pass_args>` in bv->dir (pass_args names the
  * path, out.blif in the tests) and reads bv->dir/out.blif into out (empty when there is none).

@@ -1,11 +1,13 @@
 /*
  * test_blif_vtr.c — unit tests for write_blif --vtr (spec 3E §16.1): options, arguments, the API's
- * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2).
+ * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2); the preflight's
+ * refusals E1-E12, its cap, the source classes and the report (3E Task 3).
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
 #include "blif_vtr_test.h"
 #include "frontends/blif/reader.h"
+#include "ir/celltype.h"
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -16,9 +18,11 @@
 #include "proc_fixture.h"
 #include "unity.h"
 #include "util/alloc.h"
+#include "util/attr.h"
 #include "util/str.h"
 
 #include <dirent.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -140,6 +144,37 @@ static void header_of(uint32_t lut_k, char *buf) {
 
 static bool starts_with(const char *text, const char *prefix) {
     return strncmp(text, prefix, strlen(prefix)) == 0;
+}
+
+/* The expected line, formatted (fails the test when it does not fit). */
+static char want_line[LINE_BUF * 2];
+
+static const char *line_of(const char *fmt, ...) ODIN3_PRINTF(1, 2);
+static const char *line_of(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(want_line, sizeof want_line, fmt, args);
+    va_end(args);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want_line);
+    return want_line;
+}
+
+static odin3_module *top_of(void) {
+    return odin3_module_get(tc.design, odin3_design_top(tc.design));
+}
+
+/* The ID of the first live node of the top whose type is named type. */
+static uint32_t node_of(const char *type) {
+    odin3_module *top = top_of();
+    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(top, node) &&
+            strcmp(odin3_celltype_get(tc.design, odin3_node_type(top, node))->name, type) == 0) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE(type);
+    return 0;
 }
 
 /* --- arguments (plan 3E point (l)) ---------------------------------------------------------- */
@@ -385,14 +420,20 @@ static void test_plain_bytes_pinned(void) {
 /* --- what the VTR dialect leaves out at Task 1 ----------------------------------------------- */
 
 /* Reads tests/golden/blif/<stem>.blif into tc through bvt_read. */
-static void read_golden(const char *stem) {
+/* tests/golden/blif/<stem>.blif read through bvt_read (after lib/vtr.o3lib when vtr_lib). */
+static void read_golden_with(const char *stem, bool vtr_lib) {
     char golden[PATH_BUF];
     odin3_strbuf text;
     odin3_strbuf_init(&text);
-    (void)snprintf(golden, sizeof golden, "%s/%s.blif", ODIN3_BLIF_FIXTURES, stem);
+    TEST_ASSERT_TRUE(snprintf(golden, sizeof golden, "%s/%s.blif", ODIN3_BLIF_FIXTURES, stem) <
+                     PATH_BUF);
     slurp_into(golden, &text);
-    read_ok(text_of(&text), false);
+    read_ok(text_of(&text), vtr_lib);
     odin3_strbuf_free(&text);
+}
+
+static void read_golden(const char *stem) {
+    read_golden_with(stem, false);
 }
 
 static uint32_t count_of(const char *text, const char *needle) {
@@ -418,10 +459,10 @@ static void test_vtr_omits_clock_and_models(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".blackbox"));
 }
 
-/* ansiportlist_2's declared black boxes adder and multiply: their instances stay (Tasks 3-5 make
- * them hard cells and stubs), their declared models are not written. */
+/* ansiportlist_2's declared black boxes adder and multiply, read after lib/vtr.o3lib (else E6):
+ * their instances stay (Task 5 adds the stubs), their declared models are not written. */
 static void test_vtr_omits_declared_blackboxes(void) {
-    read_golden("ansiportlist_2.parmys");
+    read_golden_with("ansiportlist_2.parmys", true);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
     TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".model "));
     TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".blackbox"));
@@ -837,8 +878,8 @@ static odin3_net_id hand_net(odin3_module *module, const char *name) {
     return net;
 }
 
-/* A buffer `$sop` from in to `to`. */
-static void hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) {
+/* A buffer `$sop` from in to `to`; its node. */
+static odin3_node_id hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) {
     static const uint8_t rows[] = {'1', '1'};
     odin3_value params[2] = {odin3_value_int(1), {.kind = ODIN3_VAL_COVER}};
     params[1].bits = rows;
@@ -848,7 +889,9 @@ static void hand_buffer(odin3_module *module, odin3_net_id in, odin3_net_id to) 
     TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$sop"), &sop));
     odin3_node_spec spec = {.type = sop, .params = params, .n_params = 2};
     const odin3_netvec ports[] = {{&in, 1}, {&to, 1}};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, NULL));
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    return node;
 }
 
 /* The written file after the header and `.model top`, which it must start with. */
@@ -1019,11 +1062,15 @@ static void test_hard_cell_clock(void) {
     TEST_ASSERT_NULL_MESSAGE(strstr(body, "x|y"), body);
 }
 
-/* Without the library the same cell is a black box with no known clock: the name stays. */
+/* Without the library the same cell is an implicit black box with no known clock, which the VTR
+ * dialect refuses (E6, 3E Task 3) before any name is written. */
 static void test_blackbox_clock_unknown(void) {
     read_ok(RAM_CLOCK, false);
-    const char *body = write_vtr();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, " clk=x|y"), body);
+    expect_refused(
+        (refusal){"--vtr out.blif", line_of("write_blif: --vtr: t.blif:6: single_port_ram '$c%u': "
+                                            "'single_port_ram' is not a hard cell of a loaded tech "
+                                            "library (read_techlib lib/vtr.o3lib)",
+                                            node_of("single_port_ram"))});
 }
 
 /* A clock that is a port bit: the port is written in its rule-8 form everywhere, and the warning
@@ -1132,6 +1179,534 @@ static void test_generator_keeps_name(void) {
                              write_vtr());
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "info: write_blif: --vtr: 2 names legalised"),
                                  tc.log.data);
+}
+
+/* --- the preflight: refusals E1-E12, the cap, classes, the report (3E Task 3) ---------------- */
+
+/* `write_blif --vtr out.blif` refused with exactly want (after `error: `), no out.blif. */
+static void expect_vtr_refused(const char *want) {
+    expect_refused((refusal){"--vtr out.blif", want});
+}
+
+/* odin3_blif_vtr_preflight (default K) is INVALID_ARG and logs exactly `error: <want>`. */
+static void expect_preflight_refused(const char *want) {
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    char line[LINE_BUF * 2];
+    TEST_ASSERT_TRUE(snprintf(line, sizeof line, "error: %s\n", want) < (int)sizeof line);
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_STRING(line, text_of(&tc.log));
+    TEST_ASSERT_EQUAL_UINT32(1, report.errors);
+}
+
+/* A pin of a node: bit `bit` of port `port`. */
+typedef struct pin_at {
+    uint32_t port, bit;
+} pin_at;
+
+/* Moves pin `bit` of port `port` of node onto a new net driven by a new cell of type const_type
+ * (`$_CONSTX_`, …). */
+static void pin_to_const(odin3_node_id node, pin_at at, const char *const_type) {
+    odin3_module *top = top_of();
+    odin3_pin_id pin = {odin3_node_port(top, node, at.port).first.v + at.bit};
+    odin3_net_id net = {0};
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top, pin));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, 0, (odin3_prov_id){0}, &net));
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern(const_type), &type));
+    odin3_node_spec spec = {.type = type};
+    const odin3_netvec ports[] = {{&net, 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top, pin, net));
+}
+
+/* A new unconnected node of the named type with params (NULL: the defaults) in hand IR. */
+static odin3_node_id hand_cell(odin3_module *top, const char *type_name, const odin3_value *params,
+                               uint32_t n_params) {
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE_MESSAGE(odin3_celltype_find(tc.design, intern(type_name), &type), type_name);
+    odin3_node_spec spec = {.type = type, .params = params, .n_params = n_params};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(top, &spec, &node));
+    return node;
+}
+
+/* A latch on line 5, with the latch line given. */
+static void read_latch_line(const char *latch) {
+    char text[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text,
+                              ".model top\n.inputs d c\n.outputs q\n# line 4\n%s\n.end\n",
+                              latch) < LINE_BUF);
+    read_ok(text, false);
+}
+
+static void test_e1_falling_edge(void) {
+    read_latch_line(".latch d q fe c 0");
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:5: $_DFF_N_ '$c%u': falling-edge "
+                               "flip-flop; VPR accepts only rising-edge latches (lower inverts "
+                               "the clock)",
+                               node_of("$_DFF_N_")));
+    bvt_free(&tc);
+    read_latch_line(".latch d q fe c 0\n.cname ff1"); /* a named cell: its name */
+    expect_vtr_refused("write_blif: --vtr: t.blif:5: $_DFF_N_ 'ff1': falling-edge flip-flop; VPR "
+                       "accepts only rising-edge latches (lower inverts the clock)");
+}
+
+static const char *const E1B = "asynchronous set/reset flip-flop; VPR has none (lower makes it "
+                               "synchronous, decision 19)";
+
+static void test_e1b_async(void) {
+    read_ok(".model top\n.inputs c d r s\n.outputs q\n# line 4\n"
+            ".subckt $_DFFSR_PPP_ C=c D=d Q=q R=r S=s\n.end\n",
+            false);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:5: $_DFFSR_PPP_ '$c%u': %s",
+                               node_of("$_DFFSR_PPP_"), E1B));
+    bvt_free(&tc);
+    odin3_module *top = hand_top();
+    odin3_node_id adff = hand_cell(top, "$adff", NULL, 0);
+    expect_vtr_refused(line_of("write_blif: --vtr: top: $adff '$c%u': %s", adff.v, E1B));
+}
+
+/* Plan 3E point (e)'s names: E1b wins over E6 for each; `$_DFF_PN2_` and `$_DFFE_PP0_` are no
+ * async flip-flops (E6). */
+static void test_e1b_names(void) {
+    read_ok(".model top\n.inputs c d r\n.outputs q\n"
+            ".subckt $_DFF_PN0_ C=c D=d Q=q R=r\n"
+            ".subckt $_DFFE_PP1N_ C=c D=d Q=q R=r\n"
+            ".subckt $_SR_PN_ S=c R=r Q=q\n"
+            ".subckt $_ALDFF_PP_ C=c D=d Q=q\n"
+            ".subckt $_ALDFFE_PPP_ C=c D=d Q=q\n"
+            ".subckt $_DFFSRE_PPPP_ C=c D=d Q=q\n"
+            ".subckt $_DFF_PN2_ C=c D=d Q=q\n"
+            ".subckt $_DFFE_PP0_ C=c D=d Q=q\n"
+            ".end\n",
+            false);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(8, report.errors);
+    TEST_ASSERT_EQUAL_UINT32(6, count_of(tc.log.data, E1B));
+    TEST_ASSERT_EQUAL_UINT32(2, count_of(tc.log.data, "is not a hard cell"));
+    TEST_ASSERT_NOT_NULL(strstr(tc.log.data, "t.blif:10: $_DFF_PN2_ '"));
+    TEST_ASSERT_NOT_NULL(strstr(tc.log.data, "t.blif:11: $_DFFE_PP0_ '"));
+}
+
+static void test_e2_level_latch(void) {
+    read_latch_line(".latch d q ah c 0");
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:5: $_DLATCH_P_ '$c%u': level-sensitive "
+                               "latch; VPR accepts only rising-edge latches",
+                               node_of("$_DLATCH_P_")));
+}
+
+static const char *const E3 = "flip-flop without a clock; VPR requires a clock on every latch";
+
+/* A hand $_DFF_P_ with D and Q connected and C open; its node. */
+static odin3_node_id hand_dff_open_clock(odin3_module *top) {
+    odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
+    odin3_net_id q_net = hand_scalar(top, "q", ODIN3_DIR_OUT);
+    odin3_node_id dff = hand_cell(top, "$_DFF_P_", NULL, 0);
+    odin3_pinslice pins = odin3_node_pins(top, dff);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_connect(top, (odin3_pin_id){pins.first.v + 1}, d_net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_connect(top, (odin3_pin_id){pins.first.v + 2}, q_net));
+    return dff;
+}
+
+static void test_e3_no_clock(void) {
+    read_latch_line(".latch d q 0");
+    expect_vtr_refused(
+        line_of("write_blif: --vtr: t.blif:5: $_FF_ '$c%u': %s", node_of("$_FF_"), E3));
+    bvt_free(&tc);
+    odin3_module *top = hand_top();
+    odin3_node_id dff = hand_dff_open_clock(top);
+    expect_vtr_refused(line_of("write_blif: --vtr: top: $_DFF_P_ '$c%u': %s", dff.v, E3));
+    pin_to_const(dff, (pin_at){0, 0}, "$_CONSTX_");
+    expect_vtr_refused(line_of("write_blif: --vtr: top: $_DFF_P_ '$c%u': %s", dff.v, E3));
+}
+
+/* A single_port_ram with ADDR_WIDTH 4 and DATA_WIDTH 1, every pin connected, fed by .names. */
+static const char *const RAM4 = ".model top\n"
+                                ".inputs c d a0 a1 a2 a3 w\n"
+                                ".outputs o y\n"
+                                ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 addr[1]=a1 "
+                                "addr[2]=a2 addr[3]=a3 we=w out[0]=o\n"
+                                ".names a0 a1 y\n"
+                                "11 1\n"
+                                ".end\n";
+
+static void test_e3b_ram_clock_x(void) {
+    read_ok(RAM4, true);
+    uint32_t ram = node_of("single_port_ram");
+    pin_to_const((odin3_node_id){ram}, (pin_at){0, 0}, "$_CONSTX_");
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:4: single_port_ram '$c%u': clock input "
+                               "'clk' is unconnected or x",
+                               ram));
+}
+
+static void test_e4_tristate(void) {
+    read_ok(".model top\n.inputs a e\n.outputs y\n.subckt $tribuf A=a EN=e Y=y\n.end\n", false);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:4: $tribuf '$c%u': tri-state cell; VPR "
+                               "has no tri-state",
+                               node_of("$tribuf")));
+}
+
+static void test_e5_word_cell(void) {
+    read_ok(".model top\n.inputs a b\n.outputs y\n.subckt $add A[0]=a B[0]=b Y[0]=y\n.end\n",
+            false);
+    expect_vtr_refused(
+        line_of("write_blif: --vtr: t.blif:4: $add '$c%u': not a netlist cell (run lower)",
+                node_of("$add")));
+}
+
+static const char *const E6 = "is not a hard cell of a loaded tech library (read_techlib "
+                              "lib/vtr.o3lib)";
+
+static void test_e6_not_hard(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.subckt foo a=a\n.end\n", false);
+    expect_vtr_refused(
+        line_of("write_blif: --vtr: t.blif:6: foo '$c%u': 'foo' %s", node_of("foo"), E6));
+    bvt_free(&tc);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        bvt_read_lib(&tc, (bvt_source){".model top\n.inputs a b\n.outputs y\n"
+                                       ".subckt AND2 A=a B=b Y=y\n.end\n",
+                                       "generic_gates.o3lib"}),
+        tc.log.data);
+    expect_vtr_refused(
+        line_of("write_blif: --vtr: t.blif:4: AND2 '$c%u': 'AND2' %s", node_of("AND2"), E6));
+    bvt_free(&tc);
+    read_ok(".model top\n.inputs a\n.outputs y\n.subckt bb i=a o=y\n.end\n\n"
+            ".model bb\n.inputs i\n.outputs o\n.blackbox\n.end\n",
+            false);
+    expect_vtr_refused(
+        line_of("write_blif: --vtr: t.blif:4: bb '$c%u': 'bb' %s", node_of("bb"), E6));
+}
+
+/* A 7-input .names on line 4 with the cover row given. */
+static void read_names7(const char *row) {
+    char text[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text,
+                              ".model top\n.inputs a b c d e f g\n.outputs y\n"
+                              ".names a b c d e f g y\n%s\n.end\n",
+                              row) < LINE_BUF);
+    read_ok(text, false);
+}
+
+static void test_e7_too_many_inputs(void) {
+    read_names7("1111111 1");
+    const char *want = line_of("write_blif: --vtr: t.blif:4: $sop '$c%u': 7 inputs exceed K=6 "
+                               "(run abc, or pass --lut-k)",
+                               node_of("$sop"));
+    expect_vtr_refused(want);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr --lut-k 7 out.blif", &out),
+                                  tc.log.data);
+    bvt_free(&tc);
+    read_names7("------- 1"); /* a constant function is still refused (plan 3E point (g)) */
+    expect_vtr_refused(want);
+    bvt_free(&tc);
+    read_ok(".model top\n.inputs a b s\n.outputs y\n.subckt $_MUX_ A=a B=b S=s Y=y\n.end\n", false);
+    expect_refused((refusal){"--vtr --lut-k 2 out.blif",
+                             line_of("write_blif: --vtr: t.blif:4: $_MUX_ '$c%u': 3 inputs exceed "
+                                     "K=2 (run abc, or pass --lut-k)",
+                                     node_of("$_MUX_"))});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr --lut-k 3 out.blif", &out),
+                                  tc.log.data);
+}
+
+/* A hand $sop of `inputs` inputs (all on in) driving y with the cover rows (inputs + 1 bytes
+ * each, no blanks); its node. */
+static odin3_node_id hand_sop(odin3_module *top, uint32_t inputs, const char *rows) {
+    odin3_net_id in = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_net_id ins[7] = {in, in, in, in, in, in, in};
+    TEST_ASSERT_TRUE(inputs <= 7);
+    odin3_value params[2] = {odin3_value_int(inputs), {.kind = ODIN3_VAL_COVER}};
+    params[1].bits = (const uint8_t *)rows;
+    params[1].len = (uint32_t)strlen(rows);
+    params[1].cover_inputs = inputs;
+    odin3_celltype_id sop = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$sop"), &sop));
+    odin3_node_spec spec = {.type = sop, .params = params, .n_params = 2};
+    const odin3_netvec ports[] = {{ins, inputs}, {&y_net, 1}};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, &node));
+    return node;
+}
+
+/* E8 in hand IR (the BLIF reader refuses such a cover itself). */
+static void test_e8_mixed_cover(void) {
+    odin3_node_id sop = hand_sop(hand_top(), 1, "1100");
+    expect_vtr_refused(line_of("write_blif: --vtr: top: $sop '$c%u': cover mixes on-set and "
+                               "off-set rows",
+                               sop.v));
+    bvt_free(&tc);
+    sop = hand_sop(hand_top(), 7, "1111111100000000"); /* E7 comes first: one refusal per node */
+    expect_vtr_refused(line_of("write_blif: --vtr: top: $sop '$c%u': 7 inputs exceed K=6 (run "
+                               "abc, or pass --lut-k)",
+                               sop.v));
+}
+
+static void test_e9_inout(void) {
+    odin3_module *top = hand_top();
+    (void)hand_port(top, (hand_port_spec){"p", ODIN3_DIR_INOUT, 1, false, 0, 0});
+    expect_vtr_refused("write_blif: --vtr: top: port 'p': inout port; VPR has no bidirectional "
+                       "pins");
+}
+
+static void test_e10_hierarchy(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.subckt sub x=a z=y\n.end\n\n"
+            ".model sub\n.inputs x\n.outputs z\n.names x z\n1 1\n.end\n",
+            false);
+    expect_vtr_refused(line_of("write_blif: --vtr: t.blif:4: instance '$c%u' of module 'sub': "
+                               "hierarchy not flattened (run flatten); VPR reads one model",
+                               node_of("sub")));
+}
+
+/* A top and the declared model multiply (a[0..35], b[0..35], out[0..71]), after lib/vtr.o3lib;
+ * then a hand node of multiply with A_WIDTH a_width and B_WIDTH b_width; its node. */
+static odin3_node_id multiply_node(int64_t a_width, int64_t b_width) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(".model top\n.inputs i\n.outputs "
+                                                              "o\n.names i o\n1 1\n.end\n\n"
+                                                              ".model multiply\n.inputs")));
+    for (int i = 0; i < 72; i++) { /* a[0] … a[35], then b[0] … b[35] */
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_strbuf_appendf(&text, " %c[%d]", i < 36 ? 'a' : 'b', i % 36));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("\n.outputs")));
+    for (int i = 0; i < 72; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&text, " out[%d]", i));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_append(&text, odin3_bytes_cstr("\n.blackbox\n.end\n")));
+    read_ok(text.data, true);
+    odin3_strbuf_free(&text);
+    odin3_value params[2] = {odin3_value_int(a_width), odin3_value_int(b_width)};
+    return hand_cell(top_of(), "multiply", params, 2);
+}
+
+static void test_e11_params(void) {
+    odin3_node_id mul = multiply_node(8, 36);
+    expect_vtr_refused(line_of("write_blif: --vtr: top: multiply '$c%u': parameters 'A_WIDTH' "
+                               "cannot be recovered from BLIF formals",
+                               mul.v));
+    bvt_free(&tc);
+    mul = multiply_node(8, 9);
+    expect_vtr_refused(line_of("write_blif: --vtr: top: multiply '$c%u': parameters 'A_WIDTH', "
+                               "'B_WIDTH' cannot be recovered from BLIF formals",
+                               mul.v));
+}
+
+/* E12 (the pass's Debug check refuses a net with two drivers first, so the preflight is called):
+ * drivers in node ID order, at most two, then `, …`; a $port_in by its port. */
+static void test_e12_drivers(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id a_net = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_net_id b_net = hand_scalar(top, "b", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_net_id n_net = hand_net(top, "n");
+    odin3_node_id first = hand_buffer(top, a_net, n_net);
+    odin3_node_id second = hand_buffer(top, b_net, n_net);
+    (void)hand_buffer(top, n_net, y_net);
+    expect_preflight_refused(line_of("write_blif: --vtr: top: net 'n' has 2 drivers ('$c%u', "
+                                     "'$c%u')",
+                                     first.v, second.v));
+    (void)hand_buffer(top, a_net, n_net);
+    expect_preflight_refused(line_of("write_blif: --vtr: top: net 'n' has 3 drivers ('$c%u', "
+                                     "'$c%u', \xE2\x80\xA6)",
+                                     first.v, second.v));
+    bvt_free(&tc);
+    top = hand_top();
+    a_net = hand_scalar(top, "a", ODIN3_DIR_IN);
+    b_net = hand_scalar(top, "b", ODIN3_DIR_IN);
+    second = hand_buffer(top, b_net, a_net);
+    expect_preflight_refused(
+        line_of("write_blif: --vtr: top: net 'a' has 2 drivers ('a', '$c%u')", second.v));
+}
+
+/* 21 `fe` latches: 20 E1 lines, then the count line; report.errors is exact. */
+static void test_error_cap(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_append(&text, odin3_bytes_cstr(".model top\n.inputs d c\n"
+                                                                      ".outputs")));
+    for (int i = 0; i < 21; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&text, " q%d", i));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr("\n")));
+    for (int i = 0; i < 21; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&text, ".latch d q%d fe c 0\n", i));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&text, odin3_bytes_cstr(".end\n")));
+    read_ok(text.data, false);
+    odin3_strbuf_free(&text);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(21, report.errors);
+    TEST_ASSERT_EQUAL_UINT32(21, count_of(tc.log.data, "error: "));
+    TEST_ASSERT_EQUAL_UINT32(20, count_of(tc.log.data, "falling-edge flip-flop"));
+    TEST_ASSERT_TRUE_MESSAGE(
+        ends_with(tc.log.data, "\nerror: write_blif: --vtr: 1 more errors not shown\n"),
+        tc.log.data);
+    TEST_ASSERT_NOT_NULL(strstr(tc.log.data, "t.blif:23: $_DFF_N_"));
+    TEST_ASSERT_NULL(strstr(tc.log.data, "t.blif:24: $_DFF_N_"));
+}
+
+/* The net of the top named name. */
+static odin3_net_id net_named(const char *name) {
+    odin3_net_id net = odin3_module_find_net(top_of(), intern(name));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_net_valid(net), name);
+    return net;
+}
+
+/* A new net of the top driven by a new cell of the constant type const_type. */
+static odin3_net_id const_net(const char *const_type) {
+    odin3_module *top = top_of();
+    odin3_net_id net = {0};
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, 0, (odin3_prov_id){0}, &net));
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern(const_type), &type));
+    odin3_node_spec spec = {.type = type};
+    const odin3_netvec ports[] = {{&net, 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, NULL));
+    return net;
+}
+
+/* Review Focus 2: §9.1's classes by the driving cell only; x is gnd on a LUT input and open on a
+ * hard-block input, never the reverse. */
+static void test_classes_by_pin_kind(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names gnd\n.names vcc\n1\n.names unconn\n"
+            ".names vcc b\n1 1\n.names c\n1\n.names e\n.names gnd vcc unconn b c e y\n"
+            "011110 1\n.end\n",
+            false);
+    odin3_module *top = top_of();
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_0, odin3_blif_vtr_net_class(top, net_named("gnd")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_1, odin3_blif_vtr_net_class(top, net_named("vcc")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_U, odin3_blif_vtr_net_class(top, net_named("unconn")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_SIGNAL, odin3_blif_vtr_net_class(top, net_named("b")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_1, odin3_blif_vtr_net_class(top, net_named("c")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_0, odin3_blif_vtr_net_class(top, net_named("e")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_SIGNAL, odin3_blif_vtr_net_class(top, net_named("a")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_X, odin3_blif_vtr_net_class(top, const_net("$_CONSTX_")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_X, odin3_blif_vtr_net_class(top, const_net("$_CONSTZ_")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_0, odin3_blif_vtr_net_class(top, const_net("$_CONST0_")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_1, odin3_blif_vtr_net_class(top, const_net("$_CONST1_")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_UNDRIVEN,
+                          odin3_blif_vtr_net_class(top, hand_net(top, "w")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_UNDRIVEN,
+                          odin3_blif_vtr_net_class(top, (odin3_net_id){0}));
+    /* the plan keeps the classes that are not SIGNAL */
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    odin3_blif_vtr_plan plan = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_plan_build(tc.design, &opts, &plan, &report));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_U, odin3_blif_vtr_plan_class(&plan, net_named("unconn")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_SIGNAL, odin3_blif_vtr_plan_class(&plan, net_named("b")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_UNDRIVEN,
+                          odin3_blif_vtr_plan_class(&plan, net_named("w")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BLIF_SRC_UNDRIVEN,
+                          odin3_blif_vtr_plan_class(&plan, (odin3_net_id){0}));
+    TEST_ASSERT_NOT_NULL(plan.names);
+    odin3_blif_vtr_plan_free(&plan);
+    TEST_ASSERT_NULL(plan.names);
+    TEST_ASSERT_EQUAL_UINT32(1, report.unconn_logic); /* the .names input on `unconn` */
+    TEST_ASSERT_EQUAL_UINT32(0, report.x_to_gnd);
+    /* x on a .names input -> gnd; x on a RAM address bit -> unconn */
+    bvt_free(&tc);
+    read_ok(RAM4, true);
+    pin_to_const((odin3_node_id){node_of("$sop")}, (pin_at){0, 1}, "$_CONSTX_");
+    pin_to_const((odin3_node_id){node_of("single_port_ram")}, (pin_at){2, 3}, "$_CONSTX_");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(1, report.x_to_gnd);
+    TEST_ASSERT_EQUAL_UINT32(1, report.x_to_unconn);
+    TEST_ASSERT_EQUAL_UINT32(0, report.unconn_logic);
+    TEST_ASSERT_EQUAL_UINT32(1, report.names);
+    TEST_ASSERT_EQUAL_UINT32(1, report.subckts);
+}
+
+/* Review Focus 5: an E1 refusal leaves an existing out.blif as it was. */
+static void test_refusal_keeps_old_file(void) {
+    char path[PATH_BUF];
+    read_latch_line(".latch d q fe c 0");
+    path_in_dir("out.blif", path);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_TRUE(fputs("old\n", file) >= 0);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_EQUAL_STRING("old\n", text_of(&out));
+}
+
+/* The number of lines of buf that start with word. */
+static uint32_t lines_starting(const odin3_strbuf *buf, const char *word) {
+    uint32_t count = 0;
+    for (const char *at = text_of(buf); at != NULL && *at != '\0';) {
+        count += starts_with(at, word) ? 1U : 0U;
+        at = strchr(at, '\n');
+        at = at != NULL ? at + 1 : NULL;
+    }
+    return count;
+}
+
+/* The adder golden (Task 5's fixture), read after lib/vtr.o3lib: no refusal, and the report's
+ * counts are the written file's lines. */
+static void test_clean_report(void) {
+    read_golden_with("adder_hard_block.parmys", true);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {.errors = 9};
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_UINT32(0, report.errors);
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(text_of(&tc.log), "error"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(3, report.names);
+    TEST_ASSERT_EQUAL_UINT32(0, report.latches);
+    TEST_ASSERT_EQUAL_UINT32(8, report.subckts);
+    TEST_ASSERT_EQUAL_UINT32(lines_starting(&out, ".names "), report.names);
+    TEST_ASSERT_EQUAL_UINT32(lines_starting(&out, ".latch "), report.latches);
+    TEST_ASSERT_EQUAL_UINT32(lines_starting(&out, ".subckt "), report.subckts);
+    TEST_ASSERT_EQUAL_UINT32(0, report.x_to_gnd + report.x_to_unconn + report.unconn_logic);
+}
+
+/* odin3_blif_vtr_preflight under an allocation failure at every step: NO_MEMORY until it gives
+ * want (leaks are LeakSanitizer's). */
+static void preflight_oom_sweep(odin3_status want) {
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        odin3_blif_vtr_report report = {0};
+        odin3_util_set_alloc_fail_after(fail_at);
+        odin3_status st = odin3_blif_vtr_preflight(tc.design, &opts, &report);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != want) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        }
+        done = st == want;
+    }
+    TEST_ASSERT_TRUE(done);
+}
+
+static void test_out_of_memory_preflight(void) {
+    read_golden_with("adder_hard_block.parmys", true);
+    preflight_oom_sweep(ODIN3_OK);
+    bvt_free(&tc);
+    (void)multiply_node(8, 9); /* E11's list */
+    odin3_module *top = top_of();
+    odin3_net_id n_net = net_named("o");
+    (void)hand_buffer(top, net_named("i"), n_net); /* E12 */
+    (void)hand_cell(top, "$_DFF_N_", NULL, 0);     /* E1 */
+    preflight_oom_sweep(ODIN3_ERR_INVALID_ARG);
 }
 
 /* --- help and processes ---------------------------------------------------------------------- */
@@ -1268,8 +1843,8 @@ static void test_out_of_memory_sweep_renames(void) {
     odin3_strbuf_free(&api);
 }
 
-int main(void) {
-    UNITY_BEGIN();
+/* Tasks 1 and 2: options, arguments, the API, E13, names. */
+static void run_tasks_1_2(void) {
     RUN_TEST(test_unknown_argument);
     RUN_TEST(test_path_count);
     RUN_TEST(test_lut_k_values);
@@ -1312,11 +1887,41 @@ int main(void) {
     RUN_TEST(test_first_is_lowest_net);
     RUN_TEST(test_info_line);
     RUN_TEST(test_generator_keeps_name);
+}
+
+/* Task 3 (the preflight), then help, processes and out of memory. */
+static void run_task_3_and_more(void) {
+    RUN_TEST(test_e1_falling_edge);
+    RUN_TEST(test_e1b_async);
+    RUN_TEST(test_e1b_names);
+    RUN_TEST(test_e2_level_latch);
+    RUN_TEST(test_e3_no_clock);
+    RUN_TEST(test_e3b_ram_clock_x);
+    RUN_TEST(test_e4_tristate);
+    RUN_TEST(test_e5_word_cell);
+    RUN_TEST(test_e6_not_hard);
+    RUN_TEST(test_e7_too_many_inputs);
+    RUN_TEST(test_e8_mixed_cover);
+    RUN_TEST(test_e9_inout);
+    RUN_TEST(test_e10_hierarchy);
+    RUN_TEST(test_e11_params);
+    RUN_TEST(test_e12_drivers);
+    RUN_TEST(test_error_cap);
+    RUN_TEST(test_classes_by_pin_kind);
+    RUN_TEST(test_refusal_keeps_old_file);
+    RUN_TEST(test_clean_report);
+    RUN_TEST(test_out_of_memory_preflight);
     RUN_TEST(test_help_string);
     RUN_TEST(test_processes_refused_first);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_pass);
     RUN_TEST(test_out_of_memory_legal_name);
     RUN_TEST(test_out_of_memory_sweep_renames);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    run_tasks_1_2();
+    run_task_3_and_more();
     return UNITY_END();
 }
