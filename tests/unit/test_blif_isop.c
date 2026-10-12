@@ -1,7 +1,8 @@
 /*
  * test_blif_isop.c — odin3_blif_isop (spec 3E §4.1, VB-4; plan 3E point (t); 3E Task 9): exact
- * covers, every function of 0-4 inputs (both sets, irredundance, the shorter set, on-set on a
- * tie), random tables of 5-16 inputs, the bits above 2^k, and a 16-input parity table under an
+ * covers, every function of 0-4 inputs (both sets, irredundance and primality, the shorter set,
+ * on-set on a tie), random tables of 5-16 inputs (200 per k up to 12, 20 per k above; the first
+ * 5 per k also irredundant and prime), the bits above 2^k, and a 16-input parity table under an
  * out-of-memory sweep.
  */
 #include "backends/blif/isop.h"
@@ -18,10 +19,13 @@
 enum {
     MAX_K = 16,
     MAX_WORDS = 1024,
-    SMALL_K = 4,      /* every function of 0 .. 4 inputs */
-    SMALL_ROWS = 16,  /* more than any ISOP of 4 inputs has */
-    RANDOM_MIN_K = 5, /* random tables of 5 .. 16 inputs */
+    SMALL_K = 4,        /* every function of 0 .. 4 inputs */
+    MAX_ROWS = 1 << 15, /* no ISOP of 16 inputs has more rows (parity has as many) */
+    RANDOM_MIN_K = 5,   /* random tables of 5 .. 16 inputs */
     RANDOM_TABLES = 200,
+    WIDE_K = 13,             /* from 13 inputs (fix round 1, M3): */
+    RANDOM_TABLES_WIDE = 20, /* this many random tables per k */
+    STRUCTURE_TABLES = 5,    /* the first 5 random tables per k: prime and irredundant (M1, M2) */
     RANDOM_INPUTS = 4096,
     ALL_INPUTS_K = 12,      /* every input up to 12 inputs */
     DETERMINISM_EVERY = 10, /* every 10th random table is covered twice */
@@ -77,13 +81,15 @@ static void add_cube(uint64_t *table, cube row, uint32_t width) {
     } while (sub != 0);
 }
 
-/* A parsed cover: its rows, their common output character ('\0' for none), and for up to
- * SMALL_ROWS rows each row's minterms (6 inputs or fewer). */
+/* A parsed cover: its rows (their cubes in `cubes`) and their common output character ('\0'
+ * for none). */
 typedef struct parsed {
     uint32_t rows;
     char out;
-    uint64_t row_minterms[SMALL_ROWS];
 } parsed;
+
+static cube cubes[MAX_ROWS];                  /* the rows of the last parse_cover */
+static uint16_t coverage[(size_t)1 << MAX_K]; /* per minterm, the rows that cover it */
 
 /* The plane character at text into the cube's bit `bit`; fails the test on any other. */
 static void add_literal(const char *text, uint32_t bit, cube *row) {
@@ -122,12 +128,8 @@ static parsed parse_cover(const char *text, uint32_t width, uint64_t *table) {
         TEST_ASSERT_TRUE_MESSAGE(res.out == '\0' || res.out == out, text);
         res.out = out;
         add_cube(table, row, width);
-        if (width <= 6 && res.rows < SMALL_ROWS) {
-            uint64_t one = 0;
-            add_cube(&one, row, width);
-            res.row_minterms[res.rows] = one;
-        }
-        res.rows++;
+        TEST_ASSERT_TRUE(res.rows < MAX_ROWS);
+        cubes[res.rows++] = row;
     }
     return res;
 }
@@ -137,20 +139,69 @@ static uint64_t function_of(uint64_t rows_or, char out, uint32_t width) {
     return out == '0' ? ~rows_or & mask_of(width) : rows_or;
 }
 
-/* The OR of the rows of a small cover but row number skip. */
-static uint64_t rows_but(const parsed *rows, uint32_t skip) {
-    uint64_t rest = 0;
-    for (uint32_t other = 0; other < rows->rows; other++) {
-        rest |= other != skip ? rows->row_minterms[other] : 0U;
-    }
-    return rest;
+static uint32_t tt_bit(const uint64_t *table, uint32_t index) {
+    return (uint32_t)(table[index >> 6] >> (index & 63U)) & 1U;
 }
 
-/* Removing any one row of a small cover changes the function it computes. */
-static void expect_irredundant(const parsed *rows, uint64_t whole, const char *text) {
-    TEST_ASSERT_TRUE(rows->rows <= SMALL_ROWS);
-    for (uint32_t skip = 0; skip < rows->rows; skip++) {
-        TEST_ASSERT_TRUE_MESSAGE(rows_but(rows, skip) != whole, text);
+/* coverage[m] = the rows of the last parsed cover (`width` inputs) that cover minterm m. */
+static void count_coverage(const parsed *cover_rows, uint32_t width) {
+    memset(coverage, 0, sizeof coverage[0] << width);
+    for (uint32_t row_no = 0; row_no < cover_rows->rows; row_no++) {
+        uint32_t dont = ~cubes[row_no].care & ((1U << width) - 1U);
+        uint32_t sub = 0;
+        do {
+            coverage[cubes[row_no].value | sub]++;
+            sub = (sub - dont) & dont;
+        } while (sub != 0);
+    }
+}
+
+/* True when a minterm of the row (`width` inputs) has no other row of the cover over it. */
+static bool covers_alone(cube row, uint32_t width) {
+    uint32_t dont = ~row.care & ((1U << width) - 1U);
+    uint32_t sub = 0;
+    do {
+        if (coverage[row.value | sub] == 1) {
+            return true;
+        }
+        sub = (sub - dont) & dont;
+    } while (sub != 0);
+    return false;
+}
+
+/* True when every minterm of the cube (`width` inputs) is in the set the cover covers: f in tt,
+ * or its complement for an off-set. */
+static bool inside_set(cube row, uint32_t width, bool offset) {
+    uint32_t dont = ~row.care & ((1U << width) - 1U);
+    uint32_t sub = 0;
+    do {
+        if ((tt_bit(tt, row.value | sub) != 0) == offset) {
+            return false;
+        }
+        sub = (sub - dont) & dont;
+    } while (sub != 0);
+    return true;
+}
+
+/* The row is needed (it covers a minterm alone) and prime: flipping any of its literals reaches a
+ * minterm outside the set, so no literal can become `-`. */
+static void expect_prime_needed(cube row, uint32_t width, bool offset) {
+    TEST_ASSERT_TRUE_MESSAGE(covers_alone(row, width), "a redundant row");
+    for (uint32_t j = 0; j < width; j++) {
+        uint32_t bit = 1U << j;
+        if ((row.care & bit) != 0) {
+            cube flipped = {row.care, row.value ^ bit};
+            TEST_ASSERT_FALSE_MESSAGE(inside_set(flipped, width, offset), "a removable literal");
+        }
+    }
+}
+
+/* The last parsed cover of tt's set is irredundant (removing any one row changes the function: no
+ * row has all its minterms covered twice) and prime (fix round 1, M1 and M2). */
+static void expect_prime_irredundant(const parsed *cover_rows, uint32_t width) {
+    count_coverage(cover_rows, width);
+    for (uint32_t row_no = 0; row_no < cover_rows->rows; row_no++) {
+        expect_prime_needed(cubes[row_no], width, cover_rows->out == '0');
     }
 }
 
@@ -289,7 +340,7 @@ static void test_bits_above_ignored(void) {
 /* --- every function of 0-4 inputs ---------------------------------------------------------- */
 
 /* One set's cover of the table (4 inputs or fewer) computes it (on-set) or its complement
- * (off-set) and is irredundant; its text in text, its rows returned. */
+ * (off-set) and is irredundant and prime; its text in text, its rows returned. */
 static uint32_t check_set(small_table table, bool offset, char *text) {
     tt[0] = table.bits;
     uint32_t rows = UINT32_MAX;
@@ -302,7 +353,7 @@ static uint32_t check_set(small_table table, bool offset, char *text) {
     TEST_ASSERT_TRUE_MESSAGE(rows == 0 || cover_rows.out == (offset ? '0' : '1'), text);
     uint64_t want = offset ? ~table.bits & mask_of(table.width) : table.bits;
     TEST_ASSERT_EQUAL_HEX64_MESSAGE(want, got[0], text);
-    expect_irredundant(&cover_rows, got[0], text);
+    expect_prime_irredundant(&cover_rows, table.width);
     return rows;
 }
 
@@ -340,13 +391,9 @@ static void test_every_small_function(void) {
 
 /* --- random tables of 5-16 inputs ---------------------------------------------------------- */
 
-static uint32_t tt_bit(const uint64_t *table, uint32_t index) {
-    return (uint32_t)(table[index >> 6] >> (index & 63U)) & 1U;
-}
-
 /* The cover of the table in tt (`width` inputs) computes it: on every input up to ALL_INPUTS_K
- * inputs, else on RANDOM_INPUTS random ones. */
-static void expect_computes(uint32_t width, odin3_prng *prng) {
+ * inputs, else on RANDOM_INPUTS random ones. The cover, parsed. */
+static parsed expect_computes(uint32_t width, odin3_prng *prng) {
     parsed cover_rows = parse_cover(text_of(&cover), width, got);
     uint32_t flip = cover_rows.out == '0' ? 1U : 0U;
     uint32_t inputs = width <= ALL_INPUTS_K ? 1U << width : RANDOM_INPUTS;
@@ -357,6 +404,7 @@ static void expect_computes(uint32_t width, odin3_prng *prng) {
             TEST_FAIL_MESSAGE("the cover differs from the table");
         }
     }
+    return cover_rows;
 }
 
 /* A second call on tt gives the same bytes and rows as the first (first, its text in cover). */
@@ -376,7 +424,8 @@ static void test_random_tables(void) {
     odin3_prng prng;
     odin3_prng_seed(&prng, SEED);
     for (uint32_t width = RANDOM_MIN_K; width <= MAX_K; width++) {
-        for (uint32_t table_no = 0; table_no < RANDOM_TABLES; table_no++) {
+        uint32_t tables = width < WIDE_K ? RANDOM_TABLES : RANDOM_TABLES_WIDE;
+        for (uint32_t table_no = 0; table_no < tables; table_no++) {
             for (uint32_t i = 0; i < odin3_blif_isop_words(width); i++) {
                 tt[i] = odin3_prng_next(&prng) & mask_of(width);
             }
@@ -386,7 +435,10 @@ static void test_random_tables(void) {
             if (table_no % DETERMINISM_EVERY == 0) {
                 expect_deterministic(width, res);
             }
-            expect_computes(width, &prng);
+            parsed cover_rows = expect_computes(width, &prng);
+            if (table_no < STRUCTURE_TABLES) {
+                expect_prime_irredundant(&cover_rows, width);
+            }
         }
     }
 }
@@ -418,7 +470,8 @@ static void test_parity_16(void) {
     TEST_ASSERT_EQUAL_MEMORY("1000000000000000 1\n", cover.data, MAX_K + 3);
     odin3_prng prng;
     odin3_prng_seed(&prng, SEED);
-    expect_computes(MAX_K, &prng);
+    parsed cover_rows = expect_computes(MAX_K, &prng);
+    expect_prime_irredundant(&cover_rows, MAX_K);
 }
 
 /* odin3_blif_isop (or, when set, odin3_blif_isop_set's off-set) of tt under every allocation
