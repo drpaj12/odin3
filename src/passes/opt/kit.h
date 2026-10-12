@@ -172,6 +172,19 @@ odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net);
 /* qsort comparison of two uint64_t, ascending. */
 int odin3_kit_cmp_u64(const void *lhs, const void *rhs);
 
+/* "Not found" of odin3_kit_port_index and odin3_kit_param_index; odin3_node_port and
+ * odin3_node_param accept it (an empty slice, NULL). */
+#define ODIN3_KIT_NONE UINT32_MAX
+
+/* The index of the port (parameter) of def called name, ODIN3_KIT_NONE when it has none. */
+uint32_t odin3_kit_port_index(const odin3_celltype_def *def, const char *name);
+uint32_t odin3_kit_param_index(const odin3_celltype_def *def, const char *name);
+
+/*
+ * The vector helpers below work on odin3_vec of 32- and 64-bit words and sit here, not in
+ * util/vec.h, because they are specific to the opt passes' side tables (net IDs, keys, indices);
+ * they allocate through odin3_vec, so NO_MEMORY leaves the vec unchanged.
+ */
 /* Appends value to vec (elements uint32_t / uint64_t). NO_MEMORY with vec unchanged. */
 odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value);
 odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value);
@@ -179,7 +192,10 @@ odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value);
 /* Drops elements from the end of vec until len elements are left (no-op when it has fewer). */
 void odin3_kit_truncate(odin3_vec *vec, size_t len);
 
-/* Sorts vec[from ..) (elements uint64_t) and drops the repeats (Yosys's sort_and_unify). */
+/*
+ * Sorts vec[from ..) (elements uint64_t) and drops the repeats (Yosys's sort_and_unify).
+ * Requires from <= vec->len (a larger from would wrap the count).
+ */
 void odin3_kit_sort_unify(odin3_vec *vec, size_t from);
 
 /*

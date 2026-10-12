@@ -1,4 +1,5 @@
 # yosys 0.55 (VTR build): read_rtlil mux_wren_dff.il; opt_reduce; write_rtlil
+# input: hand-written, read unedited by Yosys 0.55 and proc_build.c; the $mem is a minimal one-read, one-write memory (SIZE 2, WIDTH 2, ABITS 1, WR_PORTS 1) whose WR_EN is the mux Y
 # flags:
 cell $dff WIDTH=2
 cell $mux WIDTH=1

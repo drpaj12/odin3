@@ -1,0 +1,6 @@
+# ours (OP-13: sound; Yosys 0.55 differs, see multiport_mux2.yosys and spec 17 row 20): the input unchanged, no port dead
+# yosys 0.55 (VTR build) for the removed count: read_rtlil multiport_mux2.il; opt_muxtree  -> Removed 0 multiplexer ports.
+# normalised by name: see the top of test_opt_muxtree.c
+cell $mux WIDTH=1 A=c:1 B=c:0 S=s:0 Y=y:0
+cell $mux WIDTH=2 A=s:0 s:0 B=b:0 b:1 S=t:0 Y=c:0 c:1
+removed 0

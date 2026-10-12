@@ -85,14 +85,6 @@ static const ff_kind *kind_of(const odin3_design *design, odin3_celltype_id type
     return NULL;
 }
 
-static uint32_t param_named(const odin3_celltype_def *def, const char *name) {
-    uint32_t i = 0;
-    while (i < def->n_params && strcmp(def->params[i].name, name) != 0) {
-        i++;
-    }
-    return i;
-}
-
 bool odin3_ff_is_ff(const odin3_opt_ctx *oc, odin3_celltype_id type) {
     return oc != NULL && kind_of(oc->design, type) != NULL;
 }
@@ -293,8 +285,8 @@ static odin3_status read_init(const odin3_module *module, const odin3_celltype_d
         st = push_bit(&ff->val_init,
                       odin3_net_valid(qnet) ? odin3_ffinit_get(module, qnet) : ODIN3_BIT_X);
     }
-    uint32_t init = param_named(def, "INIT");
-    if (st != ODIN3_OK || !ff->is_fine || ff->width == 0 || init == def->n_params ||
+    uint32_t init = odin3_kit_param_index(def, "INIT");
+    if (st != ODIN3_OK || !ff->is_fine || ff->width == 0 || init == ODIN3_KIT_NONE ||
         bit_at(&ff->val_init, 0) != ODIN3_BIT_X) {
         return st;
     }

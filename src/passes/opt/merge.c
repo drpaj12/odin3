@@ -17,6 +17,7 @@
  * with more than one, are never candidates, because kit_connect redirects one output port: this
  * misses Yosys's merges of `$memwr` (row 13). The commutative swap applies only when A_SIGNED ==
  * B_SIGNED, where Yosys swaps mixed-sign operands too (row 14, OP-13).
+ * A node with an unconnected input pin is no candidate (row 16), as in opt_reduce.
  *
  * An FF merge never loses an init (OP-2): the dropped Q's init bits are only read before
  * kit_connect, and only after it succeeds is the survivor's net settled to one init bit.
@@ -74,8 +75,6 @@ typedef enum key_class {
     CLS_PMUX   /* the (S bit, B slice) pairs sorted */
 } key_class;
 
-#define NONE_PORT UINT32_MAX
-
 enum {
     CLS_MASK = 0x0F,
     CLS_FF = 0x10,    /* Q's init is part of the key */
@@ -130,22 +129,13 @@ static uint32_t count_outputs(const odin3_celltype_def *def) {
     return outs;
 }
 
-static uint32_t port_index(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; i < def->n_ports; i++) {
-        if (strcmp(def->ports[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return NONE_PORT;
-}
-
 static uint32_t out_port(const odin3_celltype_def *def) {
     for (uint32_t i = 0; i < def->n_ports; i++) {
         if (def->ports[i].dir == ODIN3_DIR_OUT) {
             return i;
         }
     }
-    return NONE_PORT;
+    return ODIN3_KIT_NONE;
 }
 
 /* The class byte of a type: CLS_SKIP unless the type is a candidate. */
@@ -153,7 +143,7 @@ static uint8_t classify(const odin3_opt_ctx *oc, odin3_celltype_id type,
                         const odin3_celltype_def *def) {
     if (def == NULL || (def->gran != ODIN3_GRAN_WORD && def->gran != ODIN3_GRAN_BIT) ||
         name_in(def->name, k_never, sizeof k_never / sizeof k_never[0]) ||
-        count_outputs(def) != 1) {
+        count_outputs(def) != 1 || def->n_params > MAX_PARAMS) {
         return CLS_SKIP;
     }
     uint8_t cls = (uint8_t)class_by_name(def->name);
@@ -240,23 +230,10 @@ static int cmp_run(const uint64_t *lhs, size_t nl, const uint64_t *rhs, size_t n
     return 0;
 }
 
-/* Sorts vec's words; with unify, drops the repeats. */
-static void sort_words(odin3_vec *vec, bool unify) {
+/* Sorts vec's words, a multiset. */
+static void sort_words(odin3_vec *vec) {
     if (vec->len > 1) {
         qsort(vec->data, vec->len, sizeof(uint64_t), odin3_kit_cmp_u64);
-    }
-    if (!unify || vec->len < 2) {
-        return;
-    }
-    uint64_t *data = vec->data;
-    size_t kept = 1;
-    for (size_t i = 1; i < vec->len; i++) {
-        if (data[i] != data[kept - 1]) {
-            data[kept++] = data[i];
-        }
-    }
-    while (vec->len > kept) {
-        odin3_vec_pop(vec);
     }
 }
 
@@ -315,22 +292,12 @@ static void put_run(merge_state *ms, const odin3_vec *run) {
     }
 }
 
-/* Index of the parameter called name, NONE_PORT when the type has none. */
-static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        if (strcmp(def->params[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return NONE_PORT;
-}
-
 /* True unless A_SIGNED and B_SIGNED both exist and differ (OP-13: sext(x) + zext(y) is not
  * sext(y) + zext(x), so a mixed-sign cell keeps its operand order). */
 static bool signs_agree(const merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
-    uint32_t sa = param_index(def, "A_SIGNED");
-    uint32_t sb = param_index(def, "B_SIGNED");
-    if (sa == NONE_PORT || sb == NONE_PORT) {
+    uint32_t sa = odin3_kit_param_index(def, "A_SIGNED");
+    uint32_t sb = odin3_kit_param_index(def, "B_SIGNED");
+    if (sa == ODIN3_KIT_NONE || sb == ODIN3_KIT_NONE) {
         return true;
     }
     return odin3_node_param(ms->m, node, sa)->i == odin3_node_param(ms->m, node, sb)->i;
@@ -338,8 +305,8 @@ static bool signs_agree(const merge_state *ms, odin3_node_id node, const odin3_c
 
 /* $and, $add, ...: the A and B operand vectors, the smaller one first (equal signs only). */
 static void key_commutative(merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
-    uint32_t pa = port_index(def, "A");
-    uint32_t pb = port_index(def, "B");
+    uint32_t pa = odin3_kit_port_index(def, "A");
+    uint32_t pb = odin3_kit_port_index(def, "B");
     odin3_vec_clear(&ms->ta);
     odin3_vec_clear(&ms->tb);
     port_operands(ms, node, pa, &ms->ta);
@@ -355,12 +322,16 @@ static void key_commutative(merge_state *ms, odin3_node_id node, const odin3_cel
 /* $reduce_*: A as a multiset (unify false) or a set (true). */
 static void key_reduce(merge_state *ms, odin3_node_id node, const odin3_celltype_def *def,
                        bool unify) {
-    uint32_t pa = port_index(def, "A");
+    uint32_t pa = odin3_kit_port_index(def, "A");
     odin3_vec_clear(&ms->ta);
     port_operands(ms, node, pa, &ms->ta);
-    sort_words(&ms->ta, unify);
+    if (unify) {
+        odin3_kit_sort_unify(&ms->ta, 0);
+    } else {
+        sort_words(&ms->ta);
+    }
     put_run(ms, &ms->ta);
-    const uint32_t skip[2] = {pa, NONE_PORT};
+    const uint32_t skip[2] = {pa, ODIN3_KIT_NONE};
     put_inputs(ms, node, def, skip);
 }
 
@@ -410,8 +381,8 @@ static void sort_pairs(const pair_ctx *pc, uint32_t *idx, uint32_t *tmp, size_t 
 }
 
 static void key_pmux(merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
-    uint32_t pb = port_index(def, "B");
-    uint32_t ps = port_index(def, "S");
+    uint32_t pb = odin3_kit_port_index(def, "B");
+    uint32_t ps = odin3_kit_port_index(def, "S");
     const uint32_t skip[2] = {pb, ps};
     put_inputs(ms, node, def, skip);
     odin3_vec_clear(&ms->ta);
@@ -461,7 +432,7 @@ static bool build_key(merge_state *ms, odin3_node_id node, const odin3_celltype_
     for (uint32_t i = 0; i < def->n_params; i++) {
         put_param(ms, odin3_node_param(ms->m, node, i));
     }
-    const uint32_t none[2] = {NONE_PORT, NONE_PORT};
+    const uint32_t none[2] = {ODIN3_KIT_NONE, ODIN3_KIT_NONE};
     switch ((key_class)(cls & CLS_MASK)) {
     case CLS_COMM:
         key_commutative(ms, node, def);
@@ -532,6 +503,23 @@ static bool init_defined(const merge_state *ms, odin3_node_id node, const odin3_
     return true;
 }
 
+/* True when an input pin of node has no net: such a cell is no candidate (spec 17 row 16). */
+static bool has_open_input(const merge_state *ms, odin3_node_id node,
+                           const odin3_celltype_def *def) {
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        if (def->ports[port].dir == ODIN3_DIR_OUT) {
+            continue;
+        }
+        odin3_pinslice ps = odin3_node_port(ms->m, node, port);
+        for (uint32_t k = 0; k < ps.count; k++) {
+            if (!odin3_net_valid(odin3_pin_net(ms->m, (odin3_pin_id){ps.first.v + k}))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /* The class byte when node is a candidate, else CLS_SKIP. */
 static uint8_t candidate(merge_state *ms, odin3_node_id node, const odin3_celltype_def **def) {
     if (!odin3_node_live(ms->m, node)) {
@@ -544,7 +532,8 @@ static uint8_t candidate(merge_state *ms, odin3_node_id node, const odin3_cellty
     const odin3_opt_opts *opts = ms->oc->opts;
     bool skip = ((cls & CLS_MUX) != 0 && opts->nomux) ||
                 ((cls & CLS_CONST) != 0 && node_is_const(ms, node, *def)) ||
-                ((cls & CLS_FF) != 0 && opts->keepdc && !init_defined(ms, node, *def));
+                ((cls & CLS_FF) != 0 && opts->keepdc && !init_defined(ms, node, *def)) ||
+                has_open_input(ms, node, *def);
     return skip ? (uint8_t)CLS_SKIP : cls;
 }
 

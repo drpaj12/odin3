@@ -1,6 +1,7 @@
 /*
  * opt_test.h — test hooks of the opt family (2F plan Task 1, Global Constraints): lowered caps and
- * a call hook. Never part of the ABI. The hooks live in kit.c.
+ * a call hook. Never part of the ABI. The limits and the call hook live in kit.c, the key-hash
+ * hooks in merge.c (opt_merge) and reduce.c (opt_reduce).
  */
 #ifndef ODIN3_PASSES_OPT_OPT_TEST_H
 #define ODIN3_PASSES_OPT_OPT_TEST_H

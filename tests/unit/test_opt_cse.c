@@ -480,6 +480,27 @@ static void test_cse_collision(void) {
 /* --- what never merges -------------------------------------------------------------------------
  */
 
+/* Two cells with the same unconnected input pin are no candidates (spec 17 row 16): a dangling
+ * input is no known value. The same cells with the pin connected merge. */
+static void test_cse_open_input(void) {
+    run_pair(PAIR_TEXT("$and", "", "    connect \\B \\b\n", "", "    connect \\B \\b\n"), false);
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("$and"));
+    tearDown();
+    setUp();
+    run_pair(PAIR_TEXT("$and", "", AB, "", AB), true);
+    tearDown();
+    setUp();
+    /* an open input of an FF: a $dff with no D */
+    build("module \\m\n  wire input 1 \\clk\n  wire output 2 \\q1\n  wire output 3 \\q2\n"
+          "  cell $dff \\f1\n    parameter \\CLK_POLARITY 1\n    connect \\CLK \\clk\n"
+          "    connect \\Q \\q1\n  end\n"
+          "  cell $dff \\f2\n    parameter \\CLK_POLARITY 1\n    connect \\CLK \\clk\n"
+          "    connect \\Q \\q2\n  end\nend\n");
+    run_merge();
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("$dff"));
+    expect_removed(0);
+}
+
 static void test_cse_never(void) {
     build("module \\sub\n  wire input 1 \\a\n  wire output 2 \\y\n"
           "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"
@@ -789,6 +810,7 @@ int main(void) {
     RUN_TEST(test_cse_keep_both);
     RUN_TEST(test_cse_cascade);
     RUN_TEST(test_cse_collision);
+    RUN_TEST(test_cse_open_input);
     RUN_TEST(test_cse_never);
     RUN_TEST(test_merge_yosys_cases);
     RUN_TEST(test_cse_provenance);

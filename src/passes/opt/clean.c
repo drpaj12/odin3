@@ -227,15 +227,6 @@ static const char *name_text(const clean_state *cs, uint32_t str) {
     return str == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(cs->oc->design), str);
 }
 
-static uint32_t type_id_of(const odin3_design *design, const char *name) {
-    uint32_t str = 0;
-    odin3_celltype_id id = {0};
-    if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str)) {
-        return 0;
-    }
-    return odin3_celltype_find(design, str, &id) ? id.v : 0;
-}
-
 static bool node_keep(const clean_state *cs, odin3_node_id node) {
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
     return odin3_kit_keep(cs->oc, obj);
@@ -723,9 +714,9 @@ odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
     clean_tally total = {0, 0, 0};
     if (st == ODIN3_OK) {
         clean_call call = {ctx, opts, counts, {keep.data, &tm, 0, 0, 0}};
-        call.shared.buf_type = type_id_of(design, "$_BUF_");
-        call.shared.memrd_type = type_id_of(design, "$memrd");
-        call.shared.memwr_type = type_id_of(design, "$memwr");
+        call.shared.buf_type = odin3_kit_type_named(design, "$_BUF_").v;
+        call.shared.memrd_type = odin3_kit_type_named(design, "$memrd").v;
+        call.shared.memwr_type = odin3_kit_type_named(design, "$memwr").v;
         st = clean_modules(design, &call, &total);
     }
     if (st == ODIN3_OK) {

@@ -16,7 +16,7 @@
  * on one vector and the parents of open port frames on another, so nothing recurses. The roots are
  * evaluated from the last mux to the first, then the re-queued ones, the last queued first: the
  * order Yosys's cell dictionary and pool give (a promotion to pure root prunes later evaluations,
- * so a different order removes fewer ports; checked on over 3,000 random layered DAGs). A budget of
+ * so a different order removes fewer ports; observed on random layered DAGs). A budget of
  * ODIN3_OPT_MUXTREE_MAX_EVALS eval_mux entries per module stops the analysis: nothing is changed in
  * that module, not even the known-bit replacements Yosys has already made by then (§17 row 18).
  *
@@ -24,6 +24,8 @@
  * mux, and applied with the dead ports at the end. A bit that is the select of its own slice reads
  * 1 and any other select of the mux reads 0; Yosys compares an index into the distinct select nets
  * with the slice index instead, which is wrong when a select repeats (§17 row 17).
+ * A mux that feeds more than one (user, port) pair is replaced nowhere, since each port meets it
+ * under opposite knowledge and the first would win (§17 row 20).
  *
  * The rewrite. Per mux in ID order: no live port deletes the node; one live port connects Y to
  * that port's data; several rebuild a narrower $pmux or a $mux. A mux with all ports live but
@@ -91,6 +93,7 @@ typedef struct mux_info {
     uint32_t n_repl;        /* replaced data bits */
     size_t data0;           /* overlay[data0 ..): A, then B */
     uint8_t root, enable, rerun, visited;
+    uint8_t noreplace; /* reached through more than one (user, port): replace_known is unsafe */
 } mux_info;
 
 typedef enum frame_kind { F_MUX, F_PORT } frame_kind;
@@ -113,7 +116,7 @@ typedef struct mux_state {
     int32_t *known_inact; /* per net: open frames that know it inactive */
     int32_t *known_act;   /* per net: open frames that know it active */
     uint8_t *overlay;     /* per A and B data bit of every mux: OV_* */
-    odin3_vec muxes, ports, inmux, ctrls, pairs, scratch; /* mux_info, port_info, uint64_t ... */
+    odin3_vec muxes, ports, inmux, ctrls, pairs, portpairs; /* mux_info, port_info, uint64_t ... */
     mux_info *mx;
     port_info *pt;
     odin3_vec frames, parents, rerun_q, live, na, nb, ns;
@@ -124,7 +127,7 @@ typedef struct mux_state {
 static void vecs_init(mux_state *ms) {
     odin3_vec_init(&ms->muxes, sizeof(mux_info));
     odin3_vec_init(&ms->ports, sizeof(port_info));
-    odin3_vec *u64s[] = {&ms->inmux, &ms->ctrls, &ms->pairs, &ms->scratch};
+    odin3_vec *u64s[] = {&ms->inmux, &ms->ctrls, &ms->pairs, &ms->portpairs};
     for (size_t i = 0; i < sizeof u64s / sizeof u64s[0]; i++) {
         odin3_vec_init(u64s[i], sizeof(uint64_t));
     }
@@ -139,9 +142,9 @@ static void vecs_init(mux_state *ms) {
 }
 
 static void state_free(mux_state *ms) {
-    odin3_vec *all[] = {&ms->muxes,   &ms->ports,  &ms->inmux,   &ms->ctrls,   &ms->pairs,
-                        &ms->scratch, &ms->frames, &ms->parents, &ms->rerun_q, &ms->live,
-                        &ms->na,      &ms->nb,     &ms->ns};
+    odin3_vec *all[] = {&ms->muxes,     &ms->ports,  &ms->inmux,   &ms->ctrls,   &ms->pairs,
+                        &ms->portpairs, &ms->frames, &ms->parents, &ms->rerun_q, &ms->live,
+                        &ms->na,        &ms->nb,     &ms->ns};
     for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
         odin3_vec_free(all[i]);
     }
@@ -377,7 +380,8 @@ static odin3_status build_ports(mux_state *ms) {
     return ms->overlay == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
-/* Pairs (driver, user) over every port's input muxes, sorted and unique, into ms->pairs. */
+/* Pairs (driver, user) into ms->pairs and (driver, port) into ms->portpairs over every port's input
+ * muxes, sorted and unique. */
 static odin3_status collect_pairs(mux_state *ms) {
     for (uint32_t user = 0; user < ms->muxes.len; user++) {
         const mux_info *mi = &ms->mx[user];
@@ -385,13 +389,16 @@ static odin3_status collect_pairs(mux_state *ms) {
             const port_info *pi = &ms->pt[mi->port0 + port];
             const uint64_t *in = (const uint64_t *)ms->inmux.data + pi->first;
             for (uint32_t k = 0; k < pi->count; k++) {
-                if (odin3_kit_push_u64(&ms->pairs, (in[k] << PAIR_SHIFT) | user) != ODIN3_OK) {
+                if (odin3_kit_push_u64(&ms->pairs, (in[k] << PAIR_SHIFT) | user) != ODIN3_OK ||
+                    odin3_kit_push_u64(&ms->portpairs,
+                                       (in[k] << PAIR_SHIFT) | (mi->port0 + port)) != ODIN3_OK) {
                     return ODIN3_ERR_NO_MEMORY;
                 }
             }
         }
     }
     odin3_kit_sort_unify(&ms->pairs, 0);
+    odin3_kit_sort_unify(&ms->portpairs, 0);
     return ODIN3_OK;
 }
 
@@ -401,6 +408,21 @@ static void mark_fanout_roots(mux_state *ms) {
     for (size_t i = 0; i + 1 < ms->pairs.len; i++) {
         if ((pair[i + 1] >> PAIR_SHIFT) == (pair[i] >> PAIR_SHIFT)) {
             ms->mx[pair[i] >> PAIR_SHIFT].root = 1;
+        }
+    }
+}
+
+/*
+ * A mux that feeds more than one port (of one user or of several) is evaluated once per port, each
+ * time under that port's own knowledge: replacing its data bits by the first knowledge met would
+ * change the function (Yosys 0.55 does; spec section 17 row 20). It, and the muxes below it that
+ * are not roots, get no replacements.
+ */
+static void mark_multi_port(mux_state *ms) {
+    const uint64_t *pair = ms->portpairs.data;
+    for (size_t i = 0; i + 1 < ms->portpairs.len; i++) {
+        if ((pair[i + 1] >> PAIR_SHIFT) == (pair[i] >> PAIR_SHIFT)) {
+            ms->mx[pair[i] >> PAIR_SHIFT].noreplace = 1;
         }
     }
 }
@@ -422,6 +444,7 @@ static odin3_status build_roots(mux_state *ms) {
     odin3_status st = collect_pairs(ms);
     if (st == ODIN3_OK) {
         mark_fanout_roots(ms);
+        mark_multi_port(ms);
         mark_pure_roots(ms);
     }
     return st;
@@ -656,7 +679,7 @@ static frame child_of(const mux_state *ms, const frame *fr, uint32_t index) {
     if (ms->mx[index].root) {
         child.abort_count = (uint8_t)(fr->abort_count - 1U);
     } else {
-        child.replace = fr->replace;
+        child.replace = ms->mx[index].noreplace ? 0U : fr->replace;
         child.abort_count = fr->abort_count;
     }
     return child;

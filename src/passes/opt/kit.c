@@ -97,6 +97,24 @@ int odin3_kit_cmp_u64(const void *lhs, const void *rhs) {
     return left < right ? -1 : 1;
 }
 
+uint32_t odin3_kit_port_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return ODIN3_KIT_NONE;
+}
+
+uint32_t odin3_kit_param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return ODIN3_KIT_NONE;
+}
+
 odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value) {
     uint32_t *slot = odin3_vec_push(vec);
     if (slot == NULL) {
@@ -145,16 +163,6 @@ void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out
     } else {
         (void)snprintf(out, size, "$c%" PRIu32, node.v);
     }
-}
-
-/* The index of the port of def named name, def->n_ports when it has none. */
-static uint32_t port_named(const odin3_celltype_def *def, const char *name) {
-    for (uint32_t i = 0; i < def->n_ports; i++) {
-        if (strcmp(def->ports[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return def->n_ports;
 }
 
 /* The net on bit 0 of port `port` of node, none when the port is empty or unconnected. */
@@ -907,8 +915,8 @@ enum { INV_UNARY = 3, INV_MUX = 2 };
 /* The net node inverts (Y -> A of a 1-bit unary inverter), none otherwise. */
 static odin3_net_id unary_source(const odin3_module *module, const odin3_celltype_def *def,
                                  odin3_node_id node) {
-    uint32_t port_a = port_named(def, "A");
-    uint32_t port_y = port_named(def, "Y");
+    uint32_t port_a = odin3_kit_port_index(def, "A");
+    uint32_t port_y = odin3_kit_port_index(def, "Y");
     if (odin3_node_port(module, node, port_a).count != 1 ||
         odin3_node_port(module, node, port_y).count != 1) {
         return (odin3_net_id){0};
@@ -919,15 +927,15 @@ static odin3_net_id unary_source(const odin3_module *module, const odin3_celltyp
 /* S of a 1-bit mux with A = 1 and B = 0 (Y = !S), none otherwise. */
 static odin3_net_id mux_source(const odin3_module *module, const odin3_celltype_def *def,
                                odin3_node_id node) {
-    uint32_t port_a = port_named(def, "A");
-    uint32_t port_b = port_named(def, "B");
+    uint32_t port_a = odin3_kit_port_index(def, "A");
+    uint32_t port_b = odin3_kit_port_index(def, "B");
     if (odin3_node_port(module, node, port_a).count != 1 ||
         odin3_node_port(module, node, port_b).count != 1 ||
         odin3_net_const_value(module, port_net0(module, node, port_a)) != ODIN3_CONST_1 ||
         odin3_net_const_value(module, port_net0(module, node, port_b)) != ODIN3_CONST_0) {
         return (odin3_net_id){0};
     }
-    return port_net0(module, node, port_named(def, "S"));
+    return port_net0(module, node, odin3_kit_port_index(def, "S"));
 }
 
 /* The source net of node when it is an inverter of the map (*y_net its Y), none otherwise. */
@@ -937,7 +945,7 @@ static odin3_net_id invert_source(const odin3_module *module, const odin3_cellty
     const odin3_celltype_def *def = odin3_celltype_get(odin3_module_design(module), type);
     for (uint32_t i = 0; i < INV_UNARY + INV_MUX; i++) {
         if (types[i].v != 0 && types[i].v == type.v) {
-            *y_net = port_net0(module, node, port_named(def, "Y"));
+            *y_net = port_net0(module, node, odin3_kit_port_index(def, "Y"));
             return i < INV_UNARY ? unary_source(module, def, node) : mux_source(module, def, node);
         }
     }

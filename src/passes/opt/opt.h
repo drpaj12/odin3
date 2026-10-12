@@ -116,7 +116,9 @@ odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
  * fully defined. Each class is then closed with one rebuild of its survivor whose DERIVED record
  * has the parents [survivor, drops in ID order]. Adds the drops to counts->merge_removed; logs
  * INFO "opt_merge: removed N cells" and a DEBUG line per drop. INVALID_ARG (logged) for a NULL
- * argument; NO_MEMORY, possibly after some modules were merged (the IR stays valid).
+ * argument; NO_MEMORY, possibly after some modules were merged (the IR stays valid; the survivors
+ * of the classes dropped so far then keep no DERIVED provenance parents, because the classes are
+ * only closed after the sweeps).
  */
 odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
                                  const odin3_opt_opts *opts, odin3_opt_counts *counts);

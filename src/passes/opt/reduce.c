@@ -89,7 +89,6 @@ enum {
 };
 
 #define NONE_GROUP UINT32_MAX
-#define NONE_PORT UINT32_MAX
 
 /* --- the state -------------------------------------------------------------------------------- */
 
@@ -137,17 +136,10 @@ typedef struct rd_state {
     uint32_t groups;
 } rd_state;
 
-static uint32_t port_named(const odin3_design *design, odin3_celltype_id type, const char *name) {
-    if (type.v == 0) {
-        return NONE_PORT;
-    }
-    const odin3_celltype_def *def = odin3_celltype_get(design, type);
-    for (uint32_t i = 0; i < def->n_ports; i++) {
-        if (strcmp(def->ports[i].name, name) == 0) {
-            return i;
-        }
-    }
-    return NONE_PORT;
+/* The port of a registered type (type 0: not registered) called name. */
+static uint32_t type_port(const odin3_design *design, odin3_celltype_id type, const char *name) {
+    return type.v == 0 ? ODIN3_KIT_NONE
+                       : odin3_kit_port_index(odin3_celltype_get(design, type), name);
 }
 
 static void state_init(rd_state *rs, odin3_opt_ctx *oc) {
@@ -157,10 +149,10 @@ static void state_init(rd_state *rs, odin3_opt_ctx *oc) {
     for (int i = 0; i < T_COUNT; i++) {
         rs->types[i] = odin3_kit_type_named(oc->design, k_type_names[i]);
     }
-    rs->mem_wr_en = port_named(oc->design, rs->types[T_MEM], "WR_EN");
-    rs->memwr_en = port_named(oc->design, rs->types[T_MEMWR], "EN");
-    rs->dff_d = port_named(oc->design, rs->types[T_DFF], "D");
-    rs->dff_q = port_named(oc->design, rs->types[T_DFF], "Q");
+    rs->mem_wr_en = type_port(oc->design, rs->types[T_MEM], "WR_EN");
+    rs->memwr_en = type_port(oc->design, rs->types[T_MEMWR], "EN");
+    rs->dff_d = type_port(oc->design, rs->types[T_DFF], "D");
+    rs->dff_q = type_port(oc->design, rs->types[T_DFF], "Q");
     odin3_vec_init(&rs->wren, sizeof(uint8_t));
     odin3_vec_init(&rs->stack, sizeof(uint32_t));
     odin3_vec_init(&rs->members, sizeof(member));

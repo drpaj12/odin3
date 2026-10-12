@@ -620,10 +620,10 @@ static void test_same_user_twice(void) {
 
 /* --- budget, depth, processes ----------------------------------------------------------------- */
 
-/* REPEAT copies of NESTED_TEXT's cells, each its own s, a, b, c, t, y. */
-static void repeated_text(odin3_strbuf *text) {
+/* A module of REPEAT copies of NESTED_TEXT's cells, each its own s, a, b, c, t, y. */
+static void repeated_text(odin3_strbuf *text, const char *module) {
     odin3_strbuf_init(text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(text, "module \\m\n"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(text, "module \\%s\n", module));
     for (int i = 0; i < REPEAT; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                               odin3_strbuf_appendf(text,
@@ -650,7 +650,7 @@ static void repeated_text(odin3_strbuf *text) {
 /* The cap stops the analysis: the warning, no change and no count. */
 static void test_budget(void) {
     odin3_strbuf text;
-    repeated_text(&text);
+    repeated_text(&text, "m");
     build(text.data);
     odin3_strbuf_free(&text);
     char *before = rtlil_text();
@@ -666,7 +666,7 @@ static void test_budget(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_prefix(ODIN3_LOG_DEBUG, "opt_muxtree:"));
     /* the same design under the default cap: every pair loses one port */
     reset();
-    repeated_text(&text);
+    repeated_text(&text, "m");
     build(text.data);
     odin3_strbuf_free(&text);
     run_muxtree();
@@ -802,7 +802,7 @@ static void test_idempotent(void) {
 
 static void test_determinism(void) {
     odin3_strbuf text;
-    repeated_text(&text);
+    repeated_text(&text, "m");
     build(text.data);
     run_muxtree();
     char *first = rtlil_text();
@@ -834,7 +834,8 @@ static const char *const k_cases[] = {
     "bug2824",         "const_one",          "const_zero",   "const_x",         "pmux_const",
     "nested_same_sel", "nested_inverse_sel", "shared_ports", "shared_live",     "levels",
     "replace_known",   "replace_ctrl",       "pmux_known",   "same_user_twice", "loop",
-    "wide_known",      "dead_child",         "order_a",      "order_b",
+    "wide_known",      "dead_child",         "order_a",      "multiport_pmux",  "multiport_mux2",
+    "order_b",
 };
 
 static void read_case(const char *name, const char *ext, char *buf) {
@@ -999,6 +1000,57 @@ static void test_yosys_cases(void) {
     }
 }
 
+/*
+ * A mux that feeds two ports of one user (C.Y into two $pmux slices, or into a $mux's A and B) is
+ * evaluated once per port under opposite knowledge. Yosys 0.55 writes the first port's knowledge
+ * into C's data bits and changes the function (the .yosys files record its output and the eval
+ * that shows it); here C gets no replacements (spec 17 row 20). The cases are also in k_cases,
+ * which pins our output; this test pins that Yosys's output differs from it.
+ */
+static void test_multiport_unsound(void) {
+    static const char *const k_names[] = {"multiport_pmux", "multiport_mux2"};
+    for (size_t i = 0; i < sizeof k_names / sizeof k_names[0]; i++) {
+        static char text[CASE_BUF];
+        static char yosys[CASE_BUF];
+        dump theirs;
+        dump ours;
+        read_case(k_names[i], ".il", text);
+        read_case(k_names[i], ".yosys", yosys);
+        parse_expect(yosys, &theirs);
+        build(text);
+        run_muxtree();
+        dump_module(&ours);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, fx.counts.muxtree_ports, k_names[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(ours.n, theirs.n, k_names[i]);
+        uint32_t differing = 0;
+        for (uint32_t k = 0; k < ours.n; k++) {
+            differing += strcmp(ours.line[k], theirs.line[k]) != 0 ? 1U : 0U;
+        }
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, differing, k_names[i]); /* C's A port */
+        reset();
+    }
+}
+
+/* The cap is per module: the big module gives up, the small one after it is still optimised. */
+static void test_budget_per_module(void) {
+    odin3_strbuf text;
+    repeated_text(&text, "big");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&text, "%s", NESTED_TEXT));
+    build(text.data);
+    odin3_strbuf_free(&text);
+    set_max_evals(10);
+    run_muxtree();
+    TEST_ASSERT_EQUAL_UINT32(
+        1,
+        count_lines(ODIN3_LOG_WARN, "opt_muxtree: module 'big': giving up after 10 evaluations"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_prefix(ODIN3_LOG_WARN, "opt_muxtree: module 'm'"));
+    TEST_ASSERT_TRUE(node_gone("inner")); /* module m: 2 evaluations, under the cap */
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_DEBUG, "opt_muxtree: module 'm': dead port 2/2 on $mux 'inner'"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_prefix(ODIN3_LOG_DEBUG, "opt_muxtree:"));
+    expect_removed(1);
+}
+
 /* --- out of memory ---------------------------------------------------------------------------- */
 
 /* Every kind of rewrite once, and a register with an init that must never change. */
@@ -1119,6 +1171,8 @@ int main(void) {
     RUN_TEST(test_determinism);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_yosys_cases);
+    RUN_TEST(test_multiport_unsound);
+    RUN_TEST(test_budget_per_module);
     RUN_TEST(test_muxtree_oom);
     return UNITY_END();
 }

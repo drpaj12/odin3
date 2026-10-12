@@ -1098,6 +1098,19 @@ static void test_node_label(void) {
     TEST_ASSERT_EQUAL_STRING(want, label);
 }
 
+/* One lookup by name for ports and parameters, one "not found". */
+static void test_name_lookup(void) {
+    build("module \\m\n  wire input 1 \\a\nend\n");
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(fx.res.design, intern("$pmux"), &type));
+    const odin3_celltype_def *def = odin3_celltype_get(fx.res.design, type);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_kit_port_index(def, "B"));
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_kit_port_index(def, "Y"));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_KIT_NONE, odin3_kit_port_index(def, "Q"));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_kit_param_index(def, "S_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_KIT_NONE, odin3_kit_param_index(def, "A_SIGNED"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_canon_consts);
@@ -1133,5 +1146,6 @@ int main(void) {
     RUN_TEST(test_limits_clamped);
     RUN_TEST(test_vec_helpers);
     RUN_TEST(test_node_label);
+    RUN_TEST(test_name_lookup);
     return UNITY_END();
 }
