@@ -1182,7 +1182,8 @@ static void wr_free(blif_writer *wr) {
     odin3_vec_free(&wr->params);
 }
 
-/* The options' refusals (plan 3E points (m) and (n)); logged, ODIN3_ERR_INVALID_ARG. */
+/* The options' refusals for odin3_blif_write_with (plan 3E points (m) and (n)), before the
+ * preflight (whose own option checks serve its direct callers); logged, ODIN3_ERR_INVALID_ARG. */
 static odin3_status check_opts(const odin3_blif_write_opts *opts) {
     bool vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR;
     bool provenance = opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE;

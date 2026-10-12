@@ -1,0 +1,36 @@
+.model top
+.inputs a b clk
+.outputs y q[0] q[1] l
+.names a b n1
+11 1
+.names n1 y
+0 1
+.names k0
+.names k1
+1
+.latch n1 q[0] re clk 2
+.latch y q[1] fe clk 3
+.latch a l ah clk 0
+.latch b m1 al clk 3
+.latch m1 m2 3
+.latch m2 m3 1
+.subckt sub i[0]=b i[1]=a o=s1
+.cname u_sub
+.attr src "top.v:4"
+.param P 01 01
+.subckt bb x=n1
+.end
+
+.model sub
+.inputs i[0] i[1]
+.outputs o
+.names i[0] i[1] o
+1- 1
+-1 1
+.end
+
+.model bb
+.inputs x
+.outputs z
+.blackbox
+.end

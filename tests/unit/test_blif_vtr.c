@@ -27,6 +27,9 @@
 #ifndef ODIN3_BLIF_FIXTURES
 #error "ODIN3_BLIF_FIXTURES must name tests/golden/blif"
 #endif
+#ifndef ODIN3_BVT_DATA
+#error "ODIN3_BVT_DATA must name tests/unit/data/blif_vtr"
+#endif
 
 enum { PATH_BUF = 512, OOM_SWEEP = 20000, LINE_BUF = 256 };
 
@@ -195,6 +198,19 @@ static void test_option_given_twice(void) {
                              "write_blif: option '--name-style' given twice"});
 }
 
+/* Only `--` words are options, so a path starting with one `-` is a path as before 3E; after a
+ * lone `--` every word is a path. */
+static void test_dash_paths(void) {
+    read_ok(TWO_MODELS, false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "-weird.blif", &out), tc.log.data);
+    TEST_ASSERT_TRUE(bvt_file_exists(&tc, "-weird.blif"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr -- --odd.blif", &out),
+                                  tc.log.data);
+    TEST_ASSERT_TRUE(bvt_file_exists(&tc, "--odd.blif"));
+    expect_refused((refusal){"-- out.blif --vtr", "write_blif: expects one path"});
+    expect_refused((refusal){"--vtr --", "write_blif: expects one path"});
+}
+
 /* Point (m): provenance names parse, and the writer refuses them until 3E-6. */
 static void test_name_style_provenance_not_yet(void) {
     read_ok(TWO_MODELS, false);
@@ -236,7 +252,7 @@ static void test_vtr_plain_options(void) {
     TEST_ASSERT_TRUE_MESSAGE(starts_with(out.data, want), out.data);
 }
 
-/* A refusal leaves an existing file at the path as it was. */
+/* An argument refusal leaves an existing file at the path as it was. */
 static void test_argument_refusal_keeps_old_file(void) {
     read_ok(TWO_MODELS, false);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "out.blif", &out));
@@ -271,15 +287,21 @@ static void slurp_into(const char *path, odin3_strbuf *buf) {
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
 }
 
-/* For one golden (read without the pass manager, as test_blif_writer does): odin3_blif_write_with
- * with NULL opts and odin3_blif_write agree in status and bytes, and so does `write_blif out.blif`
- * when the design passes check (in Debug the manager checks it before the pass; Odin II's
- * multi-driver nets do not pass). Returns whether the pass was compared. */
-static bool plain_same(const char *golden) {
+/* The one golden of tests/golden/blif that fails check (Odin II's multi-driver net), so the pass
+ * (which Debug checks first) is not compared on it. */
+static const char *const UNCHECKED = "elsif_both_defined.odin.blif";
+
+static bool ends_with(const char *text, const char *suffix) {
+    size_t len = strlen(text);
+    return len >= strlen(suffix) && strcmp(text + len - strlen(suffix), suffix) == 0;
+}
+
+/* For one golden (read without the pass manager, as test_blif_writer does): `write_blif out.blif`
+ * writes what odin3_blif_write_with(NULL) writes, in status and bytes (the pass wiring; the bytes
+ * themselves are pinned by test_plain_bytes_pinned). Only UNCHECKED fails check and is skipped. */
+static void plain_same(const char *golden) {
     odin3_strbuf api;
-    odin3_strbuf plain;
     odin3_strbuf_init(&api);
-    odin3_strbuf_init(&plain);
     read_ok(TWO_MODELS, false); /* the directory and the sink */
     empty_design();
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(tc.design, golden), golden);
@@ -287,51 +309,117 @@ static bool plain_same(const char *golden) {
     path_in_dir("api.blif", path);
     odin3_status with = odin3_blif_write_with(tc.design, path, NULL);
     slurp_into(with == ODIN3_OK ? path : NULL, &api);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(with, odin3_blif_write(tc.design, path), golden);
-    slurp_into(with == ODIN3_OK ? path : NULL, &plain);
-    TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&api), text_of(&plain), golden);
     bool checked = odin3_check_design(tc.design, (odin3_check_opts){ODIN3_CHECK_FULL,
                                                                     ODIN3_VIEW_NONE}) == ODIN3_OK;
+    TEST_ASSERT_TRUE_MESSAGE(checked != ends_with(golden, UNCHECKED), golden);
     if (checked) {
         TEST_ASSERT_EQUAL_INT_MESSAGE(with, bvt_write(&tc, "out.blif", &out), golden);
         TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&api), text_of(&out), golden);
     }
     odin3_strbuf_free(&api);
-    odin3_strbuf_free(&plain);
     bvt_free(&tc);
-    return checked;
 }
 
-static bool is_blif(const char *name) {
-    size_t len = strlen(name);
-    return len >= strlen(".blif") && strcmp(name + len - strlen(".blif"), ".blif") == 0;
-}
-
-/* The goldens seen, and those the pass was compared on too. */
-typedef struct golden_count {
-    uint32_t files, passes;
-} golden_count;
-
-/* Runs plain_same on every golden of dir. */
-static golden_count each_golden(DIR *dir) {
-    golden_count count = {0, 0};
+static void test_plain_pass_matches_api(void) {
+    DIR *dir = opendir(ODIN3_BLIF_FIXTURES);
+    TEST_ASSERT_NOT_NULL(dir);
+    uint32_t files = 0;
     for (struct dirent *entry = readdir(dir); entry != NULL; entry = readdir(dir)) {
         char path[PATH_BUF];
         (void)snprintf(path, sizeof path, "%s/%s", ODIN3_BLIF_FIXTURES, entry->d_name);
-        count.files += is_blif(entry->d_name) ? 1U : 0U;
-        count.passes += is_blif(entry->d_name) && plain_same(path) ? 1U : 0U;
+        if (ends_with(entry->d_name, ".blif")) {
+            files++;
+            plain_same(path);
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(0, closedir(dir));
+    TEST_ASSERT_TRUE(files > 1);
+}
+
+/*
+ * The plain bytes as the base build (11b5ab4, before 3E) wrote them: tests/unit/data/blif_vtr/plain
+ * /<stem>.blif is that build's `read_blif tests/golden/blif/<stem>.blif; write_blif <file>`. Both
+ * the API with NULL opts and the pass must still write them. 3E-3 (Task 8) changes the plain
+ * constants on purpose and updates these files in the same commit.
+ */
+static const char *const PINNED[] = {"adder_hard_block.parmys", "ansiportlist_2.parmys", "ff.odin",
+                                     "hand_body", "hand_ports"};
+
+static void pinned_same(const char *stem) {
+    char golden[PATH_BUF];
+    char pinned[PATH_BUF];
+    char path[PATH_BUF];
+    odin3_strbuf want;
+    odin3_strbuf api;
+    odin3_strbuf_init(&want);
+    odin3_strbuf_init(&api);
+    (void)snprintf(golden, sizeof golden, "%s/%s.blif", ODIN3_BLIF_FIXTURES, stem);
+    (void)snprintf(pinned, sizeof pinned, "%s/plain/%s.blif", ODIN3_BVT_DATA, stem);
+    slurp_into(pinned, &want);
+    read_ok(TWO_MODELS, false); /* the directory and the sink */
+    empty_design();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_read(tc.design, golden), stem);
+    path_in_dir("api.blif", path);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write_with(tc.design, path, NULL), stem);
+    slurp_into(path, &api);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&want), text_of(&api), stem);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "out.blif", &out), stem);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(text_of(&want), text_of(&out), stem);
+    odin3_strbuf_free(&want);
+    odin3_strbuf_free(&api);
+    bvt_free(&tc);
+}
+
+static void test_plain_bytes_pinned(void) {
+    for (size_t i = 0; i < sizeof PINNED / sizeof PINNED[0]; i++) {
+        pinned_same(PINNED[i]);
+    }
+}
+
+/* --- what the VTR dialect leaves out at Task 1 ----------------------------------------------- */
+
+/* Reads tests/golden/blif/<stem>.blif into tc through bvt_read. */
+static void read_golden(const char *stem) {
+    char golden[PATH_BUF];
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    (void)snprintf(golden, sizeof golden, "%s/%s.blif", ODIN3_BLIF_FIXTURES, stem);
+    slurp_into(golden, &text);
+    read_ok(text_of(&text), false);
+    odin3_strbuf_free(&text);
+}
+
+static uint32_t count_of(const char *text, const char *needle) {
+    uint32_t count = 0;
+    for (const char *at = strstr(text, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
     }
     return count;
 }
 
-static void test_plain_bytes_unchanged(void) {
-    DIR *dir = opendir(ODIN3_BLIF_FIXTURES);
-    TEST_ASSERT_NOT_NULL(dir);
-    golden_count count = each_golden(dir);
-    TEST_ASSERT_EQUAL_INT(0, closedir(dir));
-    TEST_ASSERT_TRUE(count.files > 0);
-    /* only elsif_both_defined.odin.blif (multi-driver) fails check */
-    TEST_ASSERT_TRUE(count.passes + 1 >= count.files);
+/* hand_ports has a `.clock` line and the models sub and bb (a black box): plain writes them all,
+ * --vtr writes the top alone, without `.clock`. */
+static void test_vtr_omits_clock_and_models(void) {
+    read_golden("hand_ports");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "out.blif", &out));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, "\n.clock clk\n"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_of(out.data, ".model "));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".blackbox"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    TEST_ASSERT_NULL(strstr(out.data, ".clock"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".model "));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, "\n.model top\n"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".blackbox"));
+}
+
+/* ansiportlist_2's declared black boxes adder and multiply: their instances stay (Tasks 3-5 make
+ * them hard cells and stubs), their declared models are not written. */
+static void test_vtr_omits_declared_blackboxes(void) {
+    read_golden("ansiportlist_2.parmys");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".model "));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".blackbox"));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, ".subckt adder "));
 }
 
 /* --- the API's own refusals (plan 3E point (n)) ---------------------------------------------- */
@@ -409,6 +497,28 @@ static void test_e13_no_top(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_blif_vtr_preflight(tc.design, &opts, &report));
     TEST_ASSERT_EQUAL_UINT32(1, report.errors);
+}
+
+/* An E13 refusal (the writer's preflight, not the parser) leaves an existing file as it was. */
+static void test_e13_keeps_old_file(void) {
+    char path[PATH_BUF];
+    read_ok(TWO_MODELS, false);
+    path_in_dir("out.blif", path);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_TRUE(fputs("keep\n", file) >= 0);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    empty_design();
+    odin3_module_id id = {0};
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(tc.design, odin3_bytes_cstr("lonely"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(tc.design, name, (odin3_prov_id){0}, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_TRUE_MESSAGE(
+        only_error_is("write_blif: --vtr: no top module (read_blif sets one; or run hierarchy)"),
+        tc.log.data);
+    TEST_ASSERT_EQUAL_STRING("keep\n", out.data);
 }
 
 static void test_preflight_report_and_k(void) {
@@ -534,17 +644,22 @@ int main(void) {
     RUN_TEST(test_name_style_values);
     RUN_TEST(test_options_need_vtr);
     RUN_TEST(test_option_given_twice);
+    RUN_TEST(test_dash_paths);
     RUN_TEST(test_name_style_provenance_not_yet);
     RUN_TEST(test_order_free);
     RUN_TEST(test_vtr_defaults_and_top_alone);
     RUN_TEST(test_vtr_plain_options);
     RUN_TEST(test_argument_refusal_keeps_old_file);
-    RUN_TEST(test_plain_bytes_unchanged);
+    RUN_TEST(test_plain_pass_matches_api);
+    RUN_TEST(test_plain_bytes_pinned);
+    RUN_TEST(test_vtr_omits_clock_and_models);
+    RUN_TEST(test_vtr_omits_declared_blackboxes);
     RUN_TEST(test_api_plain_rejects_vtr_options);
     RUN_TEST(test_api_lut_k_range);
     RUN_TEST(test_api_null_opts_is_plain);
     RUN_TEST(test_api_vtr_matches_pass);
     RUN_TEST(test_e13_no_top);
+    RUN_TEST(test_e13_keeps_old_file);
     RUN_TEST(test_preflight_report_and_k);
     RUN_TEST(test_help_string);
     RUN_TEST(test_processes_refused_first);

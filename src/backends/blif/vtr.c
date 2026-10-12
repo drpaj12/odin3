@@ -14,7 +14,8 @@ uint32_t odin3_blif_vtr_k(const odin3_blif_write_opts *opts) {
     return opts->lut_k == 0 ? ODIN3_BLIF_VTR_DEFAULT_K : opts->lut_k;
 }
 
-/* The options' own checks: a direct caller may pass what odin3_blif_write_with refuses. */
+/* The options' own checks, for a direct caller of the preflight: through odin3_blif_write_with
+ * they never fire, since its check_opts refuses the same options first. */
 static odin3_status check_opts(const odin3_blif_write_opts *opts) {
     uint32_t k = odin3_blif_vtr_k(opts);
     if (opts->dialect != ODIN3_BLIF_DIALECT_VTR) {

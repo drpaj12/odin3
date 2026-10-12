@@ -105,19 +105,16 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 /* Writes design to path in opts' dialect; opts NULL = PLAIN with defaults. odin3_blif_write is
  * odin3_blif_write_with(design, path, NULL). VTR: runs odin3_blif_vtr_preflight first and opens
  * path only when it passes, so a refused design leaves no file. Errors: as odin3_blif_write,
- * plus ODIN3_ERR_INVALID_ARG for a preflight refusal or an option out of range. */
+ * plus ODIN3_ERR_INVALID_ARG for a preflight refusal or an option out of range.
+ *
+ * opts is read during the call only. The refusals come in this order, each logged and
+ * ODIN3_ERR_INVALID_ARG with nothing opened: a NULL design or path; a design with processes;
+ * a dialect or name style out of its enum ("odin3_blif_write_with: unknown dialect" / "unknown
+ * name_style"); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
+ * name_style apply to the VTR dialect only"); a non-zero lut_k outside 2..16
+ * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); VTR with PROVENANCE ("write_blif: --vtr:
+ * --name-style provenance is not available yet (3E-6)"); then the preflight's refusals. */
 odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
                                    const odin3_blif_write_opts *opts);
-
-/*
- * The checks before the preflight, in this order, each logged and ODIN3_ERR_INVALID_ARG with
- * nothing opened (plan 3E points (m) and (n)): a NULL design or path; a design with processes
- * (2D EL-33, first); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
- * name_style apply to the VTR dialect only"); a lut_k outside 2..16 ("odin3_blif_write_with:
- * lut_k <k> is outside 2..16"); a dialect or name style out of range; VTR with PROVENANCE
- * ("write_blif: --vtr: --name-style provenance is not available yet (3E-6)", until 3E-6). The VTR
- * dialect writes the header comment, a blank line and the top module (no `.clock`, no other
- * module, no black-box model).
- */
 
 #endif

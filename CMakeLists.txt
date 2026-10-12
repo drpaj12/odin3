@@ -483,7 +483,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_blif_vtr PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
-        ODIN3_BVT_ROOT="${PROJECT_BINARY_DIR}")
+        ODIN3_BVT_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_libs)

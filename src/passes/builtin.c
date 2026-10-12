@@ -268,17 +268,26 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
     return bit == WB_LUT_K ? wb_lut_k(value, out) : wb_name_style(value, out);
 }
 
+/* True for an option word: `--` and at least one more character. */
+static bool wb_is_option(odin3_bytes word) {
+    return word.len > 2 && memcmp(word.ptr, "--", 2) == 0;
+}
+
 /*
- * Plan 3E point (l): the words left to right; a word starting with `-` is an option (unknown and
- * repeated options fail at once), any other word a path. Then exactly one non-empty path, then
- * --lut-k and --name-style only with --vtr. Logged, ODIN3_ERR_INVALID_ARG.
+ * Plan 3E point (l), the words left to right: an option word (`--x`) is an option, and unknown or
+ * repeated options fail at once; a lone `--` ends the options; any other word is a path, so a path
+ * starting with one `-` is written as before 3E. Then exactly one non-empty path, then --lut-k and
+ * --name-style only with --vtr. Logged, ODIN3_ERR_INVALID_ARG.
  */
 static odin3_status write_blif_parse(odin3_bytes args, write_blif_args *out) {
     uint32_t paths = 0;
+    bool options = true;
     odin3_status st = ODIN3_OK;
     for (odin3_bytes word = odin3_pass_arg_next(&args); st == ODIN3_OK && word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
-        if (word.len > 0 && ((const char *)word.ptr)[0] == '-') {
+        if (options && odin3_pass_arg_is(word, "--")) {
+            options = false;
+        } else if (options && wb_is_option(word)) {
             st = wb_option(word, &args, out);
         } else if (++paths == 1) {
             st = odin3_strbuf_append(&out->path, word);

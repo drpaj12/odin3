@@ -156,10 +156,10 @@ typedef struct odin3_blif_write_opts {
     uint32_t lut_k;                   /* VTR only: max .names inputs; 0 = the default */
 } odin3_blif_write_opts;
 
-#define ODIN3_BLIF_VTR_DEFAULT_K 6u   /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
-#define ODIN3_BLIF_VTR_MIN_K 2u
-#define ODIN3_BLIF_VTR_MAX_K 16u      /* VB-12 */
-#define ODIN3_BLIF_VTR_MAX_ERRORS 20u /* refusals logged before "N more" */
+#define ODIN3_BLIF_VTR_DEFAULT_K 6U   /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
+#define ODIN3_BLIF_VTR_MIN_K 2U
+#define ODIN3_BLIF_VTR_MAX_K 16U      /* VB-12 */
+#define ODIN3_BLIF_VTR_MAX_ERRORS 20U /* refusals logged before "N more" */
 
 /* Writes design to path in opts' dialect; opts NULL = PLAIN with defaults. odin3_blif_write is
  * odin3_blif_write_with(design, path, NULL). VTR: runs odin3_blif_vtr_preflight first and opens
@@ -168,6 +168,9 @@ typedef struct odin3_blif_write_opts {
 odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
                                    const odin3_blif_write_opts *opts);
 ```
+
+Amendment (3E-1 Task 1): the constants' suffixes are upper case (`6U`, not `6u`), as the lint
+gate's clang-tidy check `readability-uppercase-literal-suffix` requires.
 
 In `src/backends/blif/vtr.h`:
 
@@ -229,7 +232,8 @@ else about the cell is assumed.
 write_blif [--vtr] [--lut-k <K>] [--name-style short|provenance] <file>
 ```
 
-Options and the path in any order (like `write_verilog`). `--lut-k` and `--name-style` need
+Options and the path in any order (like `write_verilog`). Amendment (3E-1 Task 1 review): only a word starting with `--` (and longer) is an option, and a
+lone `--` ends the options, so a plain path starting with one `-` is written as before 3E. `--lut-k` and `--name-style` need
 `--vtr`. `--lut-k` default `ODIN3_BLIF_VTR_DEFAULT_K`; 3F's wrapper and 3H pass VTR's own
 `determine_lut_size(arch)`. Help string: `write_blif [--vtr] [--lut-k K] [--name-style
 short|provenance] <file>: write the design as BLIF (the top first); --vtr writes the top alone in
