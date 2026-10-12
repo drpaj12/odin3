@@ -530,9 +530,10 @@ HINT = ("vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then Optim
         "diskpart compact vdisk; Peter's hands)")
 KEEP_PRESENT = ("vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
                 "vpr.crit_path.out", "parmys.out", "abc0.out", "abc1.out",
-                "sha_blackboxing_latch.out", "restore_latch0.out", "report_clocks.abc.out")
+                "sha_blackboxing_latch.out", "restore_latch0.out", "report_clocks.abc.out",
+                "parse_results.err", "qor_results.err")  # the parse's stderr (final review M1)
 SCRATCH = ("sha.pre-vpr.blif", "sha.net", "sha.place", "sha.route", "sha.parmys.blif",
-           "sha.abc.blif", "parse_results.err", "qor_results.err")
+           "sha.abc.blif")
 PARSE_TEXT = "arch\tcircuit\tvpr_status\t\nk6.xml\tsha.v\tsuccess\t\n"
 
 Spec = dict[str, Any]
@@ -800,7 +801,8 @@ class RunOrderTest(RunnerTestBase):
         self.assertEqual(qor_sched.KEEP_RUN_FILES, (
             "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
             "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
-            "restore_latch*.out", "report_clocks.abc.out"))
+            "restore_latch*.out", "report_clocks.abc.out", "parse_results.err",
+            "qor_results.err"))
 
     def test_cached_job_not_run(self) -> None:
         """A cached job is not started; one whose metrics.json key is not the planned key is."""
@@ -1852,6 +1854,37 @@ class RetentionFailedOnlyTest(RetentionBase):
         self.assertEqual([(job / "run").is_dir() for job in failed],
                          [False, False, True, True, True, True, True])
         self.assertTrue(all((job / "status").read_text() == "failed\n" for job in failed))
+
+
+class SignalTest(unittest.TestCase):
+    """Final review I1: an inherited SIG_IGN is left alone; any other disposition is replaced
+    by SystemExit(128 + N) while jobs run and restored afterwards."""
+
+    def test_signals_as_exit(self) -> None:
+        def noop(signum: int, frame: object) -> None:
+            return None
+
+        before_term = signal.signal(signal.SIGTERM, noop)
+        before_hup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        try:
+            with qor_sched._signals_as_exit():
+                self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+                self.assertIs(signal.getsignal(signal.SIGTERM), qor_sched._raise_exit)
+                os.kill(os.getpid(), signal.SIGHUP)  # ignored: nothing happens
+                with self.assertRaises(SystemExit) as ctx:
+                    os.kill(os.getpid(), signal.SIGTERM)
+                    time.sleep(1)
+                self.assertEqual(ctx.exception.code, 143)
+            self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+            self.assertIs(signal.getsignal(signal.SIGTERM), noop)
+            signal.signal(signal.SIGHUP, noop)
+            with qor_sched._signals_as_exit(), self.assertRaises(SystemExit) as ctx:
+                os.kill(os.getpid(), signal.SIGHUP)
+                time.sleep(1)
+            self.assertEqual(ctx.exception.code, 129)
+        finally:
+            signal.signal(signal.SIGTERM, before_term)
+            signal.signal(signal.SIGHUP, before_hup)
 
 
 class FixRound6Test(RetentionBase):

@@ -39,7 +39,7 @@ Also:
 - `docs/PHASE3.md`: the exit test (items 1–5) and decisions 2, 3, 5, 15, 16, 17 and 18. Decision 17 is the WSL caps.
 - The 3E spec v2.1: §4.3, §5 item 1 (the `# abc:` header), §14.1 item 6, §15.2 (`vtr-models`), §16.4–16.5 (nightly step 5's sweeps, the R leg).
 - The 3D spec v2: §8.1 (run information), §11 (`abc: final: depth <d>`), §6.3 (I8: the exchange P′ used), §13.9 (3D's heavy runs share the lock).
-- The standing rules (heavy runs; `rm` roots; never writing `~/odin3-ws/golden` or `~/odin3-ws/external`), PHASE0 #29 (WSL caps) and §9 (model/effort), and `docs/ORACLES.md` (the VTR pin).
+- The standing rules (heavy runs; `rm` roots; never writing `~/odin3-ws/golden` or `~/odin3-ws/external`; they live outside this repo, in the controller's SDD directory: `~/odin3-ws/odin3-2Cp/.superpowers/sdd/2026-10-11-2C-verilog-parser-plan/standing-rules.md`, and the harness enforces them in code: `check_out_dir`, `safe_rmtree`, VTR run read-only), PHASE0 #29 (WSL caps) and §9 (model/effort), and `docs/ORACLES.md` (the VTR pin).
 - The 2E plan point (p) and `tools/heavy-run` / `tools/build-locked` as on `feat/2E-core`.
 
 **Ordering and bases.** `main` (c1e3987) has the 3E/3H specs (#51), the 2E/2F plans (#52), the 3D spec (#53) and 2D-1 (#54). In flight: 2C-2 (`feat/2C-read`), 2D-2 (`feat/2D-const`) and 2E-1 (`feat/2E-core`), whose Task 2, in review, creates `tools/heavy-run`, `tools/build-locked` and `cmake/Odin3Sweep.cmake`. **That PR merges to main first; every real 3H run depends on it.**

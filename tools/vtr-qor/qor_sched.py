@@ -490,6 +490,9 @@ KEEP_RUN_FILES = (
     "vtr_flow.out", "output.txt", "parse_results.txt", "qor_results.txt", "vpr.out",
     "vpr.crit_path.out", "parmys.out", "abc*.out", "*_blackboxing_latch.out",
     "restore_latch*.out", "report_clocks.abc.out",
+    # The parse scripts' stderr (qor_parse.STDERR_SUFFIX): a warning that did not fail the job
+    # stays readable (final review M1).
+    "parse_results.err", "qor_results.err",
 )
 # Point (k): the stage logs E-QH10 names (the newest by mtime), in <J>/run and in <J>.
 STAGE_LOGS_RUN = ("parmys.out", "abc*.out", "*_blackboxing_latch.out", "restore_latch*.out",
@@ -1527,11 +1530,15 @@ def _grouped(jobs: Sequence[Job]) -> list[Job]:
 @contextmanager
 def _signals_as_exit() -> Iterator[None]:
     """SIGTERM and SIGHUP raise SystemExit while jobs run, so the running job's group is killed
-    before this process goes (the main thread only; elsewhere the handlers stay)."""
+    before this process goes (the main thread only; elsewhere the handlers stay). One inherited
+    as ``SIG_IGN`` is left alone."""
     if threading.current_thread() is not threading.main_thread():
         yield
         return
-    previous = {sig: signal.signal(sig, _raise_exit) for sig in EXIT_SIGNALS}
+    # A signal inherited as ignored stays ignored (POSIX; what nohup relies on): a nohup'd run
+    # must outlive its terminal's hangup (final review I1).
+    previous = {sig: signal.signal(sig, _raise_exit) for sig in EXIT_SIGNALS
+                if signal.getsignal(sig) is not signal.SIG_IGN}
     try:
         yield
     finally:

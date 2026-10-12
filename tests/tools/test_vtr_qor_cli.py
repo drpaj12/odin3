@@ -21,6 +21,7 @@ import os
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -80,6 +81,11 @@ if term.exists() and design in term.read_text().split():
     import os, signal, time
     os.kill(os.getppid(), signal.SIGTERM)
     time.sleep(30)
+hup = root / "hup"  # the designs whose start sends the harness a hangup
+if hup.exists() and design in hup.read_text().split():
+    import os, signal, time
+    os.kill(os.getppid(), signal.SIGHUP)
+    time.sleep(0.5)
 if (root / "sleep").exists():
     import time
     time.sleep(float((root / "sleep").read_text()))
@@ -531,6 +537,7 @@ class RunTest(CliTestBase):
             # Cleaned up (spec §7.5): the keep list plus the gzipped pre-VPR netlist.
             self.assertEqual(sorted(p.name for p in (job / "run").iterdir()), sorted(
                 ["abc0.out", "output.txt", "parmys.out", "parse_results.txt", "qor_results.txt",
+                 "parse_results.err", "qor_results.err",
                  "vpr.crit_path.out", "vpr.out", "vtr_flow.out", f"{design}.pre-vpr.blif.gz"]))
 
     def _planned_key(self, design: str) -> str:
@@ -669,6 +676,25 @@ class RunTest(CliTestBase):
         (self.vtr / "term").unlink()
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "spree")[0], 0)
         self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+
+    def test_hangup_under_nohup(self) -> None:
+        """Final review I1 (the reproduction): a SIGHUP mid-job ends the run (exit 129) unless
+        SIGHUP was inherited as ignored, as nohup leaves it; then the run finishes ok and the
+        disposition is still SIG_IGN afterwards."""
+        (self.vtr / "hup").write_text("ch_intrinsics\n")
+        previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+        try:
+            code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+            self.assertEqual(code, 0, err)
+            self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
+            signal.signal(signal.SIGHUP, lambda signum, frame: None)  # not ignored
+            code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                    "--rerun")
+            self.assertEqual(code, 129, err)
+        finally:
+            signal.signal(signal.SIGHUP, previous)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        self.assertFalse((job / "metrics.json").exists())
 
     def test_killed_rerun_retracts_latest(self) -> None:
         """Review I3, addendum 2 (the reproduction): a --rerun of the latest key stopped by

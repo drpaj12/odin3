@@ -3,6 +3,9 @@
 The fixtures under tests/tools/fixtures/vtr_qor/netstats are real Parmys golden BLIFs (small ones,
 copied from ~/odin3-ws/golden), one ABC-mapped netlist and one hand-written file; expected.json was
 made by an independent reference, not by qor_netstats. Nothing here runs VTR.
+
+T2 checks ``depth`` against the reference, never against VTR's ``abc_depth``: on a multi-clock
+design the two differ by design (see qor_netstats' docstring; final review M5).
 """
 
 from __future__ import annotations

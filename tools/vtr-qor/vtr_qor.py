@@ -26,6 +26,12 @@ spec §9. The common options are §9's: ``--vtr-root`` (default ``$VTR_ROOT``, e
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
   ``<vtr12>/<arch>/<leg>``, each key judged by its own planned set.
 
+The harness must be ``tools/heavy-run``'s direct child (``heavy-run tools/vtr-qor/vtr-qor run
+…``, or ``ODIN3_HEAVY_OK=1 tools/vtr-qor/vtr-qor run …``, which re-runs itself that way): one job
+runs at a time, so the runner refuses to start a command while any other process sits in
+heavy-run's scope, and ``heavy-run sh -c 'vtr-qor run … | tee log'`` exits 2 with ``one job at a
+time: … still holds process <sh pid>``. Redirect in the outer shell (``> log 2>&1``) instead.
+
 ``VTR_ROOT`` and ``ODIN3_QOR_DIR`` are the spec's configuration (§3, §5.1). No production path
 reads a test hook from the environment: tests replace the module seams (``MEMINFO``, ``CPUINFO``,
 ``PROC_LOCKS``, ``SYSTEMD_PROBE`` here; ``qor_heavy``'s, ``qor_legs``' and ``qor_sched``'s).
@@ -114,6 +120,12 @@ _PATHS_SNIPPET = (
     "print(mod.yosys_exe_path)\n"
 )
 VTR_EXES = ("vpr", "abc", "yosys")
+RUN_EPILOG = """\
+A real run is tools/heavy-run's direct child: ODIN3_HEAVY_OK=1 tools/vtr-qor/vtr-qor run ...
+(it re-runs itself through tools/heavy-run), or tools/heavy-run tools/vtr-qor/vtr-qor run ...
+Never heavy-run sh -c '... | tee log': the runner refuses to start a job while another
+process sits in heavy-run's scope (one job at a time). Redirect in the outer shell
+(> log 2>&1). Started under nohup, a hangup is ignored (SIGHUP stays SIG_IGN)."""
 
 
 # -- configuration -----------------------------------------------------------------------------
@@ -989,7 +1001,9 @@ def _parser() -> argparse.ArgumentParser:
                                      "of Parmys and Odin III on the VTR benchmarks)")
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
     sub.add_parser("doctor", parents=[common], help="check the machine (read-only)")
-    run = sub.add_parser("run", parents=[common], help="run legs through VTR (heavy)")
+    run = sub.add_parser(
+        "run", parents=[common], help="run legs through VTR (heavy)", epilog=RUN_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     run.add_argument("--leg", required=True, metavar="L[,L...]",
                      help="P, O, Oprime (O'), Pprime (P'), R, Oprov")
     run.add_argument("--set", dest="sets", default="", metavar="S[,S...]",

@@ -35,12 +35,16 @@ import fcntl
 import os
 import pwd
 import shutil
+import signal
 import stat
 import subprocess
 import sys
+import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import FrameType
+from typing import Any
 
 HEAVY_DIR = Path("/tmp/claude-1000")
 HEAVY_LOCK = HEAVY_DIR / "odin3-heavy.lock"
@@ -223,6 +227,43 @@ def _lock_busy(lock: Path) -> bool:
     return False
 
 
+def _holds_lock(lock: Path) -> bool:
+    """True when descriptor 9 (``FD9``) is ``lock``: this process already holds the heavy lock
+    as ``tools/heavy-run``'s child, whatever its environment says."""
+    try:
+        return os.path.realpath(os.readlink(FD9)) == os.path.realpath(lock)
+    except OSError:
+        return False
+
+
+FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+
+
+def _run_forwarding(argv: Sequence[str], env: dict[str, str] | None,
+                    pass_fds: tuple[int, ...]) -> int:
+    """Run ``tools/heavy-run`` in a session of its own and forward SIGTERM, SIGHUP and SIGINT
+    to its process group, so a ``kill`` of this outer process ends the heavy run cleanly (the
+    harness drains its job) and this process exits with the child's status, never a traceback.
+    A signal this process inherited as ignored (``nohup``) is left ignored, and is not
+    forwarded: the new session has no terminal, so the child sees only what is forwarded."""
+    proc = subprocess.Popen(list(argv), env=env, start_new_session=True, pass_fds=pass_fds)
+
+    def forward(signum: int, frame: FrameType | None) -> None:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signum)
+
+    previous: dict[signal.Signals, Any] = {}
+    if threading.current_thread() is threading.main_thread():
+        for sig in FORWARDED_SIGNALS:
+            if signal.getsignal(sig) is not signal.SIG_IGN:
+                previous[sig] = signal.signal(sig, forward)
+    try:
+        return proc.wait()
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def reexec_under_lock(
     argv: Sequence[str],
     *,
@@ -239,7 +280,11 @@ def reexec_under_lock(
 
     ``no_wait`` is best effort: the lock is probed, then released for ``heavy-run`` to take, so a
     job that takes it in between makes ``heavy-run`` wait (up to its ``ODIN3_HEAVY_WAIT``) with no
-    message. A race-free ``--no-wait`` needs ``heavy-run`` to support it."""
+    message. A race-free ``--no-wait`` needs ``heavy-run`` to support it. When descriptor 9
+    already holds the lock (inside a heavy run whose ``ODIN3_HEAVY_SLICE`` was stripped), the
+    lock is not probed and fd 9 is passed on, so ``--no-wait`` never reports the run's own lock
+    as busy. Signals to this outer process reach ``heavy-run``'s process group
+    (``_run_forwarding``); one inherited as ignored stays ignored."""
     environ = _environ(env)
     if _inside(environ, lock):
         return _verify_inside(environ, xl)
@@ -247,21 +292,34 @@ def reexec_under_lock(
         raise HeavyError(EXIT_USAGE, MSG_NOT_CONTROLLER)
     if xl and environ.get("ODIN3_HEAVY_XL_OK") != "1":
         raise HeavyError(EXIT_USAGE, MSG_XL_NOT_OK)
-    if _lock_busy(lock):
+    # Inside a heavy run whose ODIN3_HEAVY_SLICE was stripped (``env -i``), the lock is this
+    # process's own (descriptor 9): it is not busy, and fd 9 goes on to heavy-run, whose nested
+    # path (cgroup plus fd 9) runs the tool in place (review M4).
+    holding = _holds_lock(lock)
+    if not holding and _lock_busy(lock):
         if no_wait:
             raise HeavyError(EXIT_LOCK_BUSY, f"heavy lock {lock} is busy (--no-wait)")
         print(f"{PREFIX}waiting for the heavy lock {lock}", file=sys.stderr, flush=True)
     target = Path(sys.argv[0]).resolve() if script is None else script
     child_env = None if env is None else dict(env)
+    pass_fds = (9,) if holding and _fd_open(9) else ()
     try:
-        proc = subprocess.run(reexec_argv(argv, target, xl=xl), env=child_env, check=False)
+        returncode = _run_forwarding(reexec_argv(argv, target, xl=xl), child_env, pass_fds)
     except OSError as exc:  # no tools/heavy-run (2E-1 not merged): no fallback, plan point (g)
         raise HeavyError(
             EXIT_USAGE, f"cannot apply the memory cap (cannot run {HEAVY_RUN}: {exc.strerror})"
         ) from exc
-    if proc.returncode == HEAVY_RUN_SKIPPED:
+    if returncode == HEAVY_RUN_SKIPPED:
         raise HeavyError(EXIT_USAGE, MSG_CAP_77)
-    sys.exit(proc.returncode if proc.returncode >= 0 else SIGNAL_EXIT_BASE - proc.returncode)
+    sys.exit(returncode if returncode >= 0 else SIGNAL_EXIT_BASE - returncode)
+
+
+def _fd_open(fd: int) -> bool:
+    try:
+        os.fstat(fd)
+    except OSError:
+        return False
+    return True
 
 
 def oom_kills(scope: ScopeInfo) -> int:

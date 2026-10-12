@@ -7,6 +7,12 @@ size of LU32PEEng's (380 k ``.names``) fits easily in the heavy scope. There is 
 
 ``abc_header`` reads the run information that ``write_blif --vtr`` (3E, spec §5 item 1) copies
 from the ``abc`` pass (3D, spec §8.5) into a ``# abc:`` comment before ``.model``.
+
+``depth`` and VTR's ``abc_depth`` (``abc0.out``'s ``lev``) agree on single-clock designs but
+differ, as expected, on multi-clock ones: VTR's ABC stage maps one clock domain at a time with the
+other domains' latches black-boxed, so its ``lev`` is one domain's, while ``depth`` cuts at every
+latch of the whole netlist (T8: stereovision3, two clocks, ``depth`` 2 vs ``abc_depth`` 4;
+ch_intrinsics 3/3, diffeq2 4/4). Compare the two only on single-clock designs.
 """
 
 from __future__ import annotations

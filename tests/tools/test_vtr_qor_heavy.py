@@ -12,6 +12,7 @@ import fcntl
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -364,6 +365,99 @@ class LockTest(HeavyTestBase):
             qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock)
         self.assertEqual(ctx.exception.code, 143)
         self.assertEqual(json.loads(self.record.read_text()), env)
+
+
+class OuterSignalTest(HeavyTestBase):
+    """Final review M2 and M4: the outer process before the re-exec."""
+
+    OUTER = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, {tools!r})\n"
+        "import qor_heavy\n"
+        "qor_heavy.HEAVY_RUN = Path({fake!r})\n"
+        "qor_heavy.reexec_under_lock(['x'], script=Path('/nonexistent'), lock=Path({lock!r}),\n"
+        "                            env={{'ODIN3_HEAVY_OK': '1', 'PATH': '/usr/bin:/bin'}})\n"
+    )
+
+    def outer(self, *, ignore_hup: bool) -> tuple[subprocess.Popen[str], Path]:
+        """An outer vtr-qor-like process re-running through a fake heavy-run that records the
+        signals its process group receives, and waits."""
+        seen = self.tmp / "seen"
+        fake = self.tmp / "heavy-run"
+        # Python, not bash: bash cannot trap a signal it inherited as ignored, so it could not
+        # tell a forwarded hangup from none.
+        fake.write_text(f"#!{sys.executable} -I\n"
+                        "import signal, sys, time\n"
+                        f"def note(word):\n    open({str(seen)!r}, 'a').write(word + '\\n')\n"
+                        "def hup(signum, frame):\n    note('HUP')\n"
+                        "def term(signum, frame):\n    note('TERM')\n    sys.exit(143)\n"
+                        "signal.signal(signal.SIGHUP, hup)\n"
+                        "signal.signal(signal.SIGTERM, term)\n"
+                        "note('started')\n"
+                        "time.sleep(30)\n")
+        fake.chmod(0o755)
+        code = self.OUTER.format(tools=str(qor_heavy.REPO_ROOT / "tools" / "vtr-qor"),
+                                 fake=str(fake), lock=str(self.lock))
+
+        def preexec() -> None:
+            if ignore_hup:
+                signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+        proc = subprocess.Popen([sys.executable, "-I", "-c", code], stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, preexec_fn=preexec)
+        end = time.monotonic() + 10
+        while not (seen.exists() and "started" in seen.read_text()):
+            self.assertLess(time.monotonic(), end, "the fake heavy-run never started")
+            time.sleep(0.05)
+        return proc, seen
+
+    def test_sigterm_forwarded(self) -> None:
+        """A kill of the outer process reaches heavy-run's group; the outer exits with its
+        status (143), with no traceback."""
+        proc, seen = self.outer(ignore_hup=False)
+        proc.send_signal(signal.SIGTERM)
+        _, err = proc.communicate(timeout=20)
+        self.assertEqual(proc.returncode, 143)
+        self.assertNotIn("Traceback", err)
+        self.assertIn("TERM", seen.read_text())
+
+    def test_nohup_hangup_not_forwarded(self) -> None:
+        """Under nohup (SIGHUP ignored) a hangup of the outer process changes nothing; without
+        it the hangup is forwarded."""
+        proc, seen = self.outer(ignore_hup=True)
+        proc.send_signal(signal.SIGHUP)
+        time.sleep(0.5)
+        self.assertIsNone(proc.poll())
+        self.assertNotIn("HUP", seen.read_text())
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=20)
+        seen.unlink()
+        proc, seen = self.outer(ignore_hup=False)
+        proc.send_signal(signal.SIGHUP)
+        end = time.monotonic() + 10
+        while "HUP" not in seen.read_text():
+            self.assertLess(time.monotonic(), end, "SIGHUP was not forwarded")
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGTERM)
+        proc.communicate(timeout=20)
+
+    def test_own_lock_not_busy(self) -> None:
+        """M4: inside a heavy run whose ODIN3_HEAVY_SLICE was stripped, descriptor 9 holds the
+        lock: --no-wait does not call it busy and heavy-run is started (whose nested path then
+        runs the tool in place)."""
+        fake = self.fake_heavy_run(0)
+        fd = self.hold_lock()
+        try:
+            with mock.patch.object(qor_heavy, "FD9", self.fd9(self.lock)), \
+                    mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                    self.assertRaises(SystemExit) as ctx:
+                qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", no_wait=True,
+                                            lock=self.lock, env=self.caller_env(ODIN3_HEAVY_OK="1"))
+        finally:
+            os.close(fd)
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertTrue(self.record.exists())
 
 
 class RulingTest(HeavyTestBase):
