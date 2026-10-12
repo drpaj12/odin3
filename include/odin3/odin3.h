@@ -17,6 +17,7 @@
  * library units.
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
+ * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -208,7 +209,9 @@ void odin3_design_destroy(odin3_design *design);
  * (logged); ODIN3_ERR_CHECK when a check around it fails; ODIN3_ERR_INVALID_ARG for a NULL design
  * or name (as the conventions say), or (logged by the pass manager) an unknown pass, bad
  * arguments or an unclosed quote; ODIN3_ERR_NO_MEMORY.
- * Mutates the IR (see Strings above). Nothing is returned for the caller to free.
+ * Mutates the IR (see Strings above). Nothing is returned for the caller to free. After a pass
+ * fails, the design stays valid but may no longer compute what its input did (a pass can stop in
+ * the middle of a rewrite), so the caller must discard it (odin3_design_destroy).
  */
 odin3_status odin3_design_run_pass(odin3_design *design, const char *name, const char *args);
 
@@ -306,6 +309,18 @@ odin3_status odin3_pass_set_revision(const char *revision);
 odin3_status odin3_pass_set_abc_script(const char *path);
 
 /*
+ * Makes every later opt-family sub-pass call that changes the design write its design as RTLIL
+ * text before and after into dir (the CLI's --opt-snapshot; 2F OP-16), as
+ * <dir>/<NNNN>-<sub>-before.il and <dir>/<NNNN>-<sub>-after.il: NNNN is the call sequence (four
+ * digits from 0001, counted from this call) and <sub> the sub-pass (opt_expr, opt_merge, ...).
+ * dir must exist; it is copied. NULL turns snapshots off. Process-wide. Every call restarts the
+ * sequence at 0001. A snapshot that cannot be written (a cell with no RTLIL form, an I/O error)
+ * logs WARN "opt: snapshot skipped: <reason>" and the sub-pass call goes on with its own result.
+ * Fails only with ODIN3_ERR_NO_MEMORY (the old directory and sequence are kept).
+ */
+odin3_status odin3_pass_set_opt_snapshot(const char *dir);
+
+/*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false
  * (the default) as the path was given, true as its absolute resolved path. Applied to the design
  * before each pass runs. Process-wide. Never fails.
@@ -327,7 +342,8 @@ typedef struct odin3_script_src {
  * is looked up before anything runs (an unknown one is "<loc>: unknown pass '<name>'",
  * ODIN3_ERR_PARSE); then the commands run in order through the pass manager until one fails, whose
  * status is returned ("<loc>: pass '<name>' failed: <status>" logged). ODIN3_ERR_INVALID_ARG
- * (logged) for a NULL design, text or src.origin; ODIN3_ERR_NO_MEMORY. Mutates the IR.
+ * (logged) for a NULL design, text or src.origin; ODIN3_ERR_NO_MEMORY. Mutates the IR. After a
+ * failed pass the design must be discarded, as for odin3_design_run_pass.
  */
 odin3_status odin3_design_run_script(odin3_design *design, const char *text, odin3_script_src src);
 

@@ -28,8 +28,10 @@
 # shows the option), version_abc (with linked ABC, --version ends with exactly one
 # "linked ABC <40 hex> (adapters/abc/NOTICE)" line), abc_unavailable_warning (ODIN3 is the test
 # CLI whose adapter cannot register: it warns "odin3: warning: linked ABC unavailable: <status>",
-# runs stats anyway, and --version names no linked ABC). The project cases run from the
-# project's directory (tests/cli/project), so the paths given are relative.
+# runs stats anyway, and --version names no linked ABC), opt_snapshot (--opt-snapshot DIR writes
+# 0001-opt_clean-before.il and -after.il when opt_clean removes a cell; a missing DIR exits 2).
+# The project cases run from the project's directory (tests/cli/project), so the paths given are
+# relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -365,6 +367,28 @@ abc_unavailable_warning)
     grep -qF "stats: design: modules 2" "$work/err" || fail "stats did not run"
     "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
     ! grep -qF "linked ABC " "$work/out" || fail "--version names a linked ABC that is not registered"
+    ;;
+opt_snapshot)
+    cat >"$work/x.blif" <<'BLIF'
+.model top
+.inputs a
+.outputs y
+.subckt $_NOT_ A=a Y=y
+.subckt $_NOT_ A=a Y=dead
+.end
+BLIF
+    mkdir "$work/snap"
+    "$odin3" --opt-snapshot "$work/snap" -p "read_blif $work/x.blif; opt_clean" \
+        >"$work/out" 2>"$work/err" || fail "--opt-snapshot run failed"
+    [[ -f $work/snap/0001-opt_clean-before.il ]] || fail "no 0001-opt_clean-before.il"
+    [[ -f $work/snap/0001-opt_clean-after.il ]] || fail "no 0001-opt_clean-after.il"
+    ! cmp -s "$work/snap/0001-opt_clean-before.il" "$work/snap/0001-opt_clean-after.il" ||
+        fail "before and after are equal"
+    set +e
+    "$odin3" --opt-snapshot "$work/nope" -p stats 2>"$work/err"
+    rc=$?
+    set -e
+    [[ $rc -eq 2 ]] || fail "--opt-snapshot nope: exit code $rc, expected 2"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

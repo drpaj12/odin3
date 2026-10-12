@@ -1141,7 +1141,15 @@ static void test_builtin_processes_values(void) {
                                      "preprocess",
                                      "write_rtlil",
                                      "proc",
-                                     "read_verilog"};
+                                     "read_verilog",
+                                     "opt",
+                                     "opt_expr",
+                                     "opt_merge",
+                                     "opt_muxtree",
+                                     "opt_reduce",
+                                     "opt_share",
+                                     "opt_dff",
+                                     "opt_clean"};
     static const char *const refuse[] = {"write_blif", "write_json", "write_verilog", "write_dot",
                                          "sim"};
     for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) {

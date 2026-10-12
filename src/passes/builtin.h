@@ -25,6 +25,15 @@ extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;
 extern const odin3_pass_def odin3_pass_preprocess;
 extern const odin3_pass_def odin3_pass_proc;
+/* src/passes/opt/register.c (2F Task 4): the eight opt passes. */
+extern const odin3_pass_def odin3_pass_opt;
+extern const odin3_pass_def odin3_pass_opt_expr;
+extern const odin3_pass_def odin3_pass_opt_merge;
+extern const odin3_pass_def odin3_pass_opt_muxtree;
+extern const odin3_pass_def odin3_pass_opt_reduce;
+extern const odin3_pass_def odin3_pass_opt_share;
+extern const odin3_pass_def odin3_pass_opt_dff;
+extern const odin3_pass_def odin3_pass_opt_clean;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;
 

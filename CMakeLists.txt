@@ -103,6 +103,10 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pass.c
     src/passes/budget.c
     src/passes/ffinit.c
+    src/passes/opt/kit.c
+    src/passes/opt/ff.c
+    src/passes/opt/clean.c
+    src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -537,6 +541,18 @@ if(BUILD_TESTING)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
+    # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
+    odin3_add_unit_test(test_opt_kit)
+    target_sources(test_opt_kit PRIVATE tests/unit/proc_build.c)
+    # 2F Task 2: the FF model (Tasks 11-12 extend test_opt_dff with opt_dff's rules).
+    odin3_add_unit_test(test_opt_dff)
+    target_sources(test_opt_dff PRIVATE tests/unit/proc_build.c)
+    # 2F Task 3: opt_clean.
+    odin3_add_unit_test(test_opt_clean)
+    target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
+    # 2F Task 4: the opt pass registrations, options, the call wrapper (Task 13 extends it).
+    odin3_add_unit_test(test_opt_loop)
+    target_sources(test_opt_loop PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
@@ -1019,7 +1035,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
                            project_preprocess parse_only parse_only_with_script
-                           abc_script_missing abc_script_project)
+                           abc_script_missing abc_script_project opt_snapshot)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
