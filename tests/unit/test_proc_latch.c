@@ -720,8 +720,9 @@ static void test_latch_group_by_wire_rule(void) {
 
 /* latch_fixup_rules.il: in the latch's cone, the process's mux loses its x A (A := p); $pmux pm
  * with B slices {x, b} and S {s0, s1} becomes $mux(A = r, B = b, S = s1); $mux rm whose only B
- * slice is x becomes B = A, S = 1'0; $pmux tm with A x takes its last valid slice t2 as A. Each
- * keeps its record; they are re-created in breadth-first order from the $dlatch. */
+ * slice is z (undefined too, as Yosys's is_fully_undef) becomes B = A, S = 1'0; $pmux tm with A x
+ * takes its last valid slice t2 as A. Each keeps its record; they are re-created in breadth-first
+ * order from the $dlatch. */
 static const char *const k_fixup = "module \\m\n"
                                    "  wire input 1 \\en\n"
                                    "  wire input 2 \\b\n"
@@ -749,7 +750,7 @@ static const char *const k_fixup = "module \\m\n"
                                    "  cell $mux \\rm\n"
                                    "    parameter \\WIDTH 1\n"
                                    "    connect \\A \\tt\n"
-                                   "    connect \\B 1'x\n"
+                                   "    connect \\B 1'z\n"
                                    "    connect \\S \\s2\n"
                                    "    connect \\Y \\r\n"
                                    "  end\n"
@@ -859,6 +860,110 @@ static void test_latch_repeated_out(void) {
     TEST_ASSERT_TRUE(odin3_node_live(fx.res.module, first)); /* c0 untouched: A still y */
     TEST_ASSERT_EQUAL_UINT32(wire_net(&fx, "y", 0).v,
                              odin3_pin_net(fx.res.module, port_pin(&fx, first, PORT_A)).v);
+    fx_close(&fx);
+}
+
+/* --- the walk's rules (review I1: Yosys-matched probes t8rev/p/pa, pb, pc) ---------------- */
+
+/* latch_incomplete_case.il (t8rev pa): `always @* case (s) 0: y = a; 1: y = b; endcase` with the
+ * hold default, the everyday latch. The $pmux's A branch is nested in (S[k], 0) for every select
+ * bit k, so the hold is "neither item" ($not of both $eq, the 00 item's outermost); the fix-up
+ * gives the $pmux its last valid slice as A. */
+static void test_latch_incomplete_case(void) {
+    static const char *const k_cells[] = {
+        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[1 0] Y=[c0]",
+        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[0 0] Y=[c1]",
+        NOT1("c1", "c2"),
+        NOT1("c0", "c3"),
+        OR1("1", "c4"),
+        AND1("c3", "c4", "c5"),
+        OR1("c5", "c6"),
+        AND1("c2", "c6", "c7"),
+        OR1("c7", "c8"),
+        NOT1("c8", "c9"),
+        DLATCH("1", "c9", "t", "y"),
+        "$pmux WIDTH=1 S_WIDTH=2 A=[a] B=[b a] S=[c0 c1] Y=[t]"};
+    fixture fx;
+    fx_open(&fx, "module \\m\n"
+                 "  wire width 2 input 1 \\s\n  wire input 2 \\a\n  wire input 3 \\b\n"
+                 "  wire output 4 \\y\n  wire \\t\n"
+                 "  process $p\n    assign \\t \\y\n    switch \\s\n      case 2'00\n"
+                 "        assign \\t \\a\n      case 2'01\n        assign \\t \\b\n    end\n"
+                 "    sync always\n      update \\y \\t\n  end\n"
+                 "end\n");
+    fx_step_b(&fx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_latch(&fx));
+    expect_cells(&fx, k_cells, N_OF(k_cells));
+    fx_close(&fx);
+}
+
+/* latch_memo_per_out.il (t8rev pb): outputs y and z share the ?: mux m = s ? z : y
+ * (`if (en) begin y = m; z = m; end`). The memo starts afresh for each output, so m is expanded
+ * once per output (set_undef false: two readers) and gives (s, 0) for y but (s, 1) for z; m keeps
+ * its pins (no move under two readers), the process's muxes take A := m. */
+static void test_latch_memo_per_out(void) {
+    static const char *const k_cells[] = {
+        "$mux WIDTH=1 A=[y] B=[z] S=[s] Y=[m]",
+        NOT1("en", "c1"),
+        OR1("1", "c2"),
+        AND1("c1", "c2", "c3"),
+        NOT1("s", "c4"),
+        OR1("1", "c5"),
+        AND1("c4", "c5", "c6"),
+        OR1("c6", "c7"),
+        OR1("c7", "c8"),
+        AND1("en", "c8", "c9"),
+        "$reduce_or A_SIGNED=0 A_WIDTH=2 Y_WIDTH=1 A=[c3 c9] Y=[c10]",
+        NOT1("c10", "c11"),
+        DLATCH("1", "c11", "ty", "y"),
+        OR1("1", "c13"),
+        AND1("s", "c13", "c14"),
+        OR1("c14", "c15"),
+        OR1("c15", "c16"),
+        AND1("en", "c16", "c17"),
+        "$reduce_or A_SIGNED=0 A_WIDTH=2 Y_WIDTH=1 A=[c3 c17] Y=[c18]",
+        NOT1("c18", "c19"),
+        DLATCH("1", "c19", "tz", "z"),
+        "$mux WIDTH=1 A=[m] B=[m] S=[en] Y=[ty]",
+        "$mux WIDTH=1 A=[m] B=[m] S=[en] Y=[tz]"};
+    fixture fx;
+    fx_open(&fx, "module \\m\n"
+                 "  wire input 1 \\s\n  wire input 2 \\en\n  wire output 3 \\y\n"
+                 "  wire output 4 \\z\n  wire \\m\n  wire \\ty\n  wire \\tz\n"
+                 "  cell $mux $cm\n    parameter \\WIDTH 1\n    connect \\A \\y\n"
+                 "    connect \\B \\z\n    connect \\S \\s\n    connect \\Y \\m\n  end\n"
+                 "  process $p\n    assign \\ty \\y\n    assign \\tz \\z\n    switch \\en\n"
+                 "      case 1'1\n        assign \\ty \\m\n        assign \\tz \\m\n    end\n"
+                 "    sync always\n      update \\y \\ty\n      update \\z \\tz\n  end\n"
+                 "end\n");
+    fx_step_b(&fx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_latch(&fx));
+    expect_cells(&fx, k_cells, N_OF(k_cells));
+    TEST_ASSERT_EQUAL_UINT32(4, expands.count); /* ty, m; tz, m: m once per output */
+    TEST_ASSERT_EQUAL_UINT32(wire_net(&fx, "m", 0).v, expands.net[1].v);
+    TEST_ASSERT_EQUAL_UINT32(wire_net(&fx, "m", 0).v, expands.net[3].v);
+    TEST_ASSERT_FALSE(expands.set_undef[3]);
+    fx_close(&fx);
+}
+
+/* latch_self_hold.il (t8rev pc): a hold default and nothing else (an `if` folded to false) leaves
+ * `y <- y`: quickcheck compares only the muxes' sources with y, not the rhs itself, so there is no
+ * latch and no W1, y stays undriven (Yosys: `connect \y \y`), and z is merged with a. */
+static void test_latch_self_hold(void) {
+    fixture fx;
+    fx_open(&fx, "module \\m\n"
+                 "  wire input 1 \\a\n  wire output 2 \\y\n  wire output 3 \\z\n"
+                 "  wire \\t\n  wire \\u\n"
+                 "  process $p\n    assign \\t \\y\n    assign \\u \\a\n    sync always\n"
+                 "      update \\y \\t\n      update \\z \\u\n  end\n"
+                 "end\n");
+    fx_step_b(&fx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_latch(&fx));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.n_cells);
+    TEST_ASSERT_EQUAL_UINT32(0, expands.count);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.stats.warnings[ODIN3_PROC_W1]);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(fx.res.module, wire_net(&fx, "y", 0)));
+    TEST_ASSERT_EQUAL_UINT32(wire_net(&fx, "a", 0).v, wire_net(&fx, "z", 0).v);
     fx_close(&fx);
 }
 
@@ -1467,6 +1572,9 @@ int main(void) {
     RUN_TEST(test_latch_fixup_rules);
     RUN_TEST(test_latch_fixup_stops_at_ff);
     RUN_TEST(test_latch_repeated_out);
+    RUN_TEST(test_latch_incomplete_case);
+    RUN_TEST(test_latch_memo_per_out);
+    RUN_TEST(test_latch_self_hold);
     RUN_TEST(test_latch_crossed_feedback);
     RUN_TEST(test_latch_snapshot_vs_live);
     RUN_TEST(test_latch_init_removed);

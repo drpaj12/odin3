@@ -1493,8 +1493,26 @@ static const char *const k_oom_text = "module \\m\n"
 static char oom_want[MAX_CELLS][DESC_TEXT];
 static uint32_t oom_cells;
 
+/*
+ * Whether the injected failure fired: probes up to fail + 1 allocations, one of which fails when it
+ * did not (fewer than fail + 1 allocations were made). Leaves the hook disabled. A sweep that ends
+ * only when the failure did not fire is not cut short by a failure the code absorbs.
+ */
+static bool injection_fired(long fail) {
+    for (long i = 0; i <= fail; i++) {
+        void *probe = odin3_util_malloc(1);
+        if (probe == NULL) {
+            return false;
+        }
+        odin3_util_free(probe);
+    }
+    odin3_util_set_alloc_fail_after(-1);
+    return true;
+}
+
 /* One injection over the mux phase and M1: NO_MEMORY or the whole result, valid IR, no mux net
- * left pinless (ASan reports a leak at exit). True once it succeeds. */
+ * left pinless (ASan reports a leak at exit). True once the phase makes no more allocations than
+ * fail (review M2 of 2E Task 8: an absorbed failure no longer ends the sweep). */
 static bool oom_step(long fail) {
     fixture fx;
     fx_open(&fx, k_oom_text, PRE_UPTO_ARST);
@@ -1503,7 +1521,7 @@ static bool oom_step(long fail) {
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = odin3_proc_mux(&fx.mctx, fx.pw);
     st = st == ODIN3_OK ? odin3_proc_apply_merges(&fx.mctx) : st;
-    odin3_util_set_alloc_fail_after(-1);
+    bool fired = injection_fired(fail);
     TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, "status");
     check_full(&fx.res);
     fx_list(&fx);
@@ -1518,7 +1536,7 @@ static bool oom_step(long fail) {
         expect_no_new_pinless(&fx, net_end);
     }
     fx_close(&fx);
-    return st == ODIN3_OK;
+    return !fired;
 }
 
 static void test_mux_oom(void) {

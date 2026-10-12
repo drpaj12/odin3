@@ -688,10 +688,11 @@ Per process (node-ID order), per `ALWAYS` sync action `lhs ← rhs` (live view):
    child)` and likewise moves a `B` pin on `out` to x; no children → false; else an "or" rule
    over the sorted children. Ports are read live, the snapshot is used only by quickcheck, as in
    Yosys. The memo makes the walk linear in the cone; Yosys walks without one, exponentially on
-   shared (diamond) cones, and on a second visit of a mux whose pin it already moved reads x
-   there and drops that branch, so on a shared cone with a direct feedback input 2E's hold
-   condition keeps a branch Yosys drops (§20 #15; a legal design must not fail where Parmys
-   succeeds slowly). A Debug assertion checks that no `(net, set_undef)` is expanded twice.
+   shared (diamond) cones (§20 #15: speed only; a legal design must not fail where Parmys
+   succeeds slowly). *Amended (2E Task 8 review M3):* v2 said Yosys's second visit of a mux whose
+   pin it had moved reads x there and drops a branch 2E keeps; that cannot happen, since a net
+   reached twice within one `out` has two readers at the join, so no pin below it moves. A Debug
+   assertion checks that no `(net, set_undef)` is expanded twice.
    *Amended (2E Task 8):* the key's `set_undef` is the walk's value at the net, after its
    readers are counted. In a snapshot that matches the IR a net reached twice within one `out` has
    two readers, so both visits have the same key and the memo also gives Yosys's own result there;
@@ -1094,7 +1095,7 @@ expected cells as `write_rtlil` text of the module.
   fix-up rule, deferred M2 merges (two processes whose feedback crosses: no latch, as Yosys),
   `init` removal (W2) including a temporary with no wire (nothing removed, no warning), the
   walk's memo on a diamond chain of 30 shared muxes (linear; the Debug assertion holds; the hold
-  condition equals the memoised definition, §20 #15), a candidate resolving to a constant net
+  condition equals Yosys's, §20 #15), a candidate resolving to a constant net
   (internal error).
 - `test_proc_ff.c`: grouping, `$dff`/`$adff` with both polarities, collapse with one and two
   equal resets, the self-reset mux, `$dffsr` (W4), `$aldff` (W3), attributes copied.
@@ -1158,8 +1159,8 @@ Exit 0 identical, 1 differ (diff kept), 2 error. Yosys's `proc` here sees exactl
 removes unused cells and wires and joins connected names. `netlist-compare --implicit-models`
 (new, 2E) treats a `.subckt` of an undefined `$`-model as a black box whose formals are those
 used, outputs being `Y`, `Q`, `X`, `CO`, `RD_DATA`. Known exceptions go to
-`tests/proc/diff_expect.txt` with a reason (expected: none; §20 items 8, 9 and 15 can only arise
-with latches on shared mux cones). *Amended (2E Task 7 fix round):* §20 #18 differs on purpose
+`tests/proc/diff_expect.txt` with a reason (expected: none; §20 items 8 and 9 can only arise
+with latches on shared mux cones or rules shared across processes, and #15 is speed only). *Amended (2E Task 7 fix round):* §20 #18 differs on purpose
 where Yosys 0.55 gives wrong logic (a case appended to a mux that no longer reaches the result);
 `proc-diff` flags such inputs, and so does an equivalence check against a Parmys golden, with 2E
 the correct side; they are listed there with that reason. §20 #17's inputs make Yosys assert.
@@ -1287,7 +1288,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 12 | no `$memwr`, no `proc_memwr` | `$memwr_v2` | same | 2D collects `$mem` (2D §17 #15); E4 guards the reset case |
 | 13 | SV attribute checks (`always_ff`, …), `$global_clock`, any-edge, `-global_arst`, `-ifx`, `-nomux` not provided | provided | — | not producible by Verilog-2005 bodies; Phase 5 revisits |
 | 14 | cells unnamed (`$c<ID>` when written) | `$procmux$N`, `$procdff$N` | same | names carry no meaning; provenance does |
-| 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones; a second visit of a mux whose pin it moved to x drops that branch | same | linear time, no error on legal input; differs only on shared cones with a direct feedback input, where Yosys's hold depends on visiting order |
+| 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones | same | memoised: linear time where Yosys is exponential on shared cones; no observable difference in consistent IR (a net reached twice within one `out` has two readers at the join, so no pin moves below it; *amended, 2E Task 8 review M3*: v2 claimed a difference on shared cones with a direct feedback input) |
 | 16 | E3 when `apply_reset`'s value has not settled after 100 rounds (*amended, 2E Task 6*) | errors at `count > 100`, tested before its unchanged test: at round 102 | same | the brief's cap semantics (the cap's rounds, lowered by the test hook); differs only on a chain of 100–101 substitutions |
 | 17 | an append whose select is empty (an all-`-` item in a `parallel_case` group, reached when rmdead keeps a later non-constant item) makes the item's value the result and ends the open mux (§6); a default appended to a group has select 0 (*2E Task 7*) | asserts `ctrl_sig.size() == 1` (proc_mux.cc:264); the default's select is a `$reduce_or` of zero bits | same (crashes) | valid input (`(* parallel_case *) casez … 2'b??: …; k: …`); Verilog's first-match order; the IR has no zero-width `$reduce_or` (same values) |
 | 18 | gen_mux's no-cell paths (no compare, or an empty select) end the open mux, so an earlier case of the next group opens a new mux (§6; *2E Task 7 fix round*) | keeps the mux open; the next group's case appends to it although its output no longer reaches the result, and that case's value is lost: wrong logic, e.g. `casez (s) 2'b00: y=x0; 2'b01: y=a; 2'b??: y=a; k: y=b;` gives `y = a` (`miter`/`sat`, Yosys's `eval`, Icarus: 2E Task 7 review) | same | 2E gives Verilog's value; the netlists differ only on such inputs, where `proc-diff` and an equivalence check against a Parmys golden flag them with 2E the correct side (§18.3) |

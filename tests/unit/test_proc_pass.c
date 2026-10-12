@@ -647,7 +647,26 @@ static void test_pending_stub(void) {
 
 /* --- out of memory ------------------------------------------------------------------------- */
 
-/* One injection: NO_MEMORY or OK, valid IR (ASan finds a leak at exit). True once it succeeds. */
+/*
+ * Whether the injected failure fired: probes up to fail + 1 allocations, one of which fails when it
+ * did not (fewer than fail + 1 allocations were made). Leaves the hook disabled. A sweep that ends
+ * only when the failure did not fire is not cut short by a failure the code absorbs.
+ */
+static bool injection_fired(long fail) {
+    for (long i = 0; i <= fail; i++) {
+        void *probe = odin3_util_malloc(1);
+        if (probe == NULL) {
+            return false;
+        }
+        odin3_util_free(probe);
+    }
+    odin3_util_set_alloc_fail_after(-1);
+    return true;
+}
+
+/* One injection: NO_MEMORY or OK, valid IR (ASan finds a leak at exit). True once the run makes
+ * no more allocations than fail (review M2 of 2E Task 8: an absorbed failure no longer ends the
+ * sweep). */
 static bool oom_step(long fail) {
     pb_result res;
     install_fakes();
@@ -659,14 +678,14 @@ static bool oom_step(long fail) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(res.design, name, &ctx));
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = odin3_proc_run(&ctx, res.design, NULL, NULL);
-    odin3_util_set_alloc_fail_after(-1);
+    bool fired = injection_fired(fail);
     TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, "status");
     check_full(&res);
     if (st == ODIN3_OK) {
         TEST_ASSERT_FALSE(odin3_design_has_processes(res.design));
     }
     pb_free(&res);
-    return st == ODIN3_OK;
+    return !fired;
 }
 
 static void test_oom(void) {
