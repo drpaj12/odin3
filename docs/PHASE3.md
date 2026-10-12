@@ -559,6 +559,15 @@ then the options considered.
         - `depth` skips identity buffers (3H §4.1; VPR absorbs them), so it reads 3.
         - Recounting the kept `raygentop.pre-vpr.blif.gz` with a buffer as one level gives 4.
           On `sha` and `boundtop` the same recount leaves the depth unchanged.
+26. **3D-3 run records: the agent defaults** (2026-10-12; IR-12, AB-25 §8.1/§8.5; from the 3D-3
+    reviews).
+    - `odin3_passrun_info_append` refuses a value containing NUL, CR or LF, so every value fits
+      on one `# abc:` line.
+    - A value is quoted, in the run table's text form and in `write_blif --vtr`'s `# abc:` header,
+      whenever it has any byte outside `!`..`~`, not only a space, tab, `"` or `\`. This goes
+      further than IR.md's wording, so that `qor_netstats` (which splits on Python's whitespace,
+      including VT, FF, 0x1c–0x1f, U+0085 and U+00A0) never splits a value.
+    - `check` has no run-row rules, and none were added; a new rule is Peter's call.
 
 ## Risks
 

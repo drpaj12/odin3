@@ -351,10 +351,6 @@ class ProcWalkTest(unittest.TestCase):
             self.assertIn("module m: cell $proc 1", walk.walk_lines(design))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 # Script paths as a user may give them (3D §8.5: recorded as given), each with bytes that a
 # blank-splitting reader could mistake for a separator: Python's str.isspace() is true for VT, FF,
 # 0x1c-0x1f, U+0085 and U+00A0 as well as space, tab, CR and LF.
@@ -431,3 +427,7 @@ class PassrunInfoTest(unittest.TestCase):
                 self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_INVALID_ARG)
                 self.assertEqual([rec.message for rec in log],
                                  ["odin3_passrun_info_append: invalid argument value"])
+
+
+if __name__ == "__main__":
+    unittest.main()
