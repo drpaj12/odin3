@@ -11,6 +11,7 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -64,6 +65,41 @@ typedef struct odin3_opt_counts {
         dff_const_bits;
     uint32_t dff_action[ODIN3_OPT_DFF_MAX_ACTIONS];
     uint32_t clean_cells, clean_nets, clean_wires, iterations;
+    /*
+     * 2F Task 3: opt_clean's did_something events (buffers wired, non-constant nodes removed, wires
+     * deleted, init bits removed). Beyond the briefed fields: odin3_opt_clean_run has no changed
+     * output, and those events are not all in clean_cells/clean_wires (Yosys counts neither the
+     * buffers nor the inits, and constants have no Yosys counterpart); the loop reads this one.
+     */
+    uint32_t clean_changes;
 } odin3_opt_counts;
+
+/* --- 2F Task 3: opt_clean (OP-10) ----------------------------------------------------------- */
+
+/*
+ * opt_clean (2F spec §10, Yosys rmunused_module) over every module of design, in creation order,
+ * except those with live $proc nodes (INFO "opt_clean: module 'm' has processes; skipped"). Per
+ * module: `$_BUF_` nodes without `keep` become wiring; liveness spreads back from the module's
+ * ports, `keep` wires and `keep` nodes (instances of `keep` modules included); dead nodes are
+ * deleted in ID order (a dead FF's Q init bits go with it); `init` bits on nets no FF drives are
+ * removed (WARN when a 0/1 constant net disagrees); wires whose nets have no pins are deleted
+ * (also, with opts->purge, every other wire named without a leading `$`; ports, `keep` and
+ * initialised wires stay); nets left with no pins, wire or aliases are deleted. Dead `$_CONST*_`
+ * nodes have no Yosys counterpart: they are removed silently, uncounted and without a change.
+ * It adds into counts (clean_cells, clean_nets, clean_wires, clean_changes) and logs the INFO line
+ * "opt_clean: removed N unused cells, M unused nets and W unused wires" (this call's totals).
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument; ODIN3_ERR_NO_MEMORY, possibly after some
+ * modules were cleaned (the IR stays valid).
+ */
+odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                 const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
+/*
+ * Yosys's keep_cache: keep is cleared and receives one bool per module ID (index 0 unused, so
+ * odin3_design_module_end entries; the vec's element size must be sizeof(bool), else INVALID_ARG):
+ * true when the module has `keep`, contains a node or wire with `keep`, or (iteratively) contains
+ * an instance of a module for which it is true. NO_MEMORY (keep then empty).
+ */
+odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
 
 #endif

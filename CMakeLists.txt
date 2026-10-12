@@ -105,6 +105,7 @@ add_library(odin3_core OBJECT
     src/passes/ffinit.c
     src/passes/opt/kit.c
     src/passes/opt/ff.c
+    src/passes/opt/clean.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -545,6 +546,9 @@ if(BUILD_TESTING)
     # 2F Task 2: the FF model (Tasks 11-12 extend test_opt_dff with opt_dff's rules).
     odin3_add_unit_test(test_opt_dff)
     target_sources(test_opt_dff PRIVATE tests/unit/proc_build.c)
+    # 2F Task 3: opt_clean.
+    odin3_add_unit_test(test_opt_clean)
+    target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
