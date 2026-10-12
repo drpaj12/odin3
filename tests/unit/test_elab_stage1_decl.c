@@ -486,6 +486,68 @@ static void test_task16_stays_pending(void) {
               "t.v:3:15: error: elaboration is not available yet (2D): 'TASK_CALL'");
 }
 
+/* --- Task 15b: parameters in functions, tasks and named blocks ------------------------------ */
+
+static void test_local_params(void) {
+    run_clean("module m(input [3:0] x, output [3:0] y);\n  function [3:0] f;\n    input [3:0] a;\n"
+              "    localparam W = 4;\n    reg [W-1:0] t;\n    begin t = a; f = t + W; end\n"
+              "  endfunction\n  assign y = f(x);\nendmodule\n");
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(PORT_DECL.input", "(LIST", "(PARAM_DECL.localparam",
+               "(DECLARATOR:W", "(NUMBER.dec [SIGNED]", " 4)", "(VAR_DECL.reg", "(RANGE",
+               "(NUMBER.dec [SIGNED]", "32'sd3", "32'sd0", "(DECLARATOR:t", "(SEQ_BLOCK");
+    run_clean(
+        "module m(input x);\n  reg v;\n  task tk(input a);\n    parameter P = 2;\n"
+        "    reg [P:0] r;\n    r = P;\n  endtask\n  always @(posedge x) tk(1'b1);\nendmodule\n");
+    EXPECT_SEQ("(TASK_DECL:tk", "(PARAM_DECL.localparam", "(DECLARATOR:P", "(NUMBER.dec [SIGNED]",
+               " 2)", "(VAR_DECL.reg", "(RANGE", "32'sd2", "32'sd0");
+    run_clean(
+        "module m(input [7:0] v, output reg y);\n  parameter M = 5;\n  always @* begin : blk\n"
+        "    localparam K = M + 1;\n    y = v[K:K-1];\n  end\nendmodule\n");
+    EXPECT_SEQ("(SEQ_BLOCK:blk", "(PARAM_DECL.localparam", "(DECLARATOR:K", "(NUMBER.bin [SIGNED]",
+               "00000110)", "(SELECT.part", "(IDENT:v", "32'sd6", "32'sd5");
+}
+
+static void test_local_param_scoping(void) {
+    run_clean("module m(input [7:0] v, output reg [1:0] y);\n  localparam W = 8;\n"
+              "  function [1:0] f;\n    input q;\n    localparam W = 2;\n    reg [W-1:0] t;\n"
+              "    begin t = 0; f = t; end\n  endfunction\n  reg [W-1:0] z;\n"
+              "  always @* y = f(v[0]);\nendmodule\n");
+    EXPECT_SEQ("(PARAM_DECL.localparam", " 8)", "(FUNCTION_DECL:f", "(PARAM_DECL", " 2)",
+               "(VAR_DECL.reg", "(RANGE", "32'sd1", "32'sd0", "(DECLARATOR:t", "(VAR_DECL.reg",
+               "(RANGE", "32'sd7", "32'sd0", "(DECLARATOR:z");
+    run_clean(
+        "module m(output reg y);\n  genvar g;\n  for (g = 0; g < 2; g = g + 1) begin : lp\n"
+        "    always @* begin : b\n      localparam g = 3;\n      reg [g:0] r;\n      y = r[0];\n"
+        "    end\n  end\nendmodule\n");
+    EXPECT_SEQ("(GEN_BLOCK:lp", "(SEQ_BLOCK:b", "(PARAM_DECL.localparam", "(DECLARATOR:g",
+               "(NUMBER.dec [SIGNED]", " 3)", "(VAR_DECL.reg", "(RANGE", "32'sd3");
+    run_clean("module m(input x, output reg y);\n  always @* begin\n    localparam A = 1;\n"
+              "    y = x;\n  end\nendmodule\n");
+    expect_warn("t.v:2:13: warning: declaration in an unnamed block is a SystemVerilog extension; "
+                "the block is named '$unnamed_block$1'");
+    EXPECT_SEQ("(SEQ_BLOCK:$unnamed_block$1", "(PARAM_DECL.localparam", "(DECLARATOR:A");
+}
+
+/* Yosys 0.55 probe a10, a13: a later local param may be read first; a typed one is truncated. */
+static void test_local_param_values(void) {
+    run_clean(
+        "module m(output [7:0] y);\n  function [7:0] f;\n    input q;\n    localparam A = B;\n"
+        "    localparam B = 3;\n    localparam [3:0] C = 5'd17;\n    begin f = A + C; end\n"
+        "  endfunction\n  assign y = f(1'b0);\nendmodule\n");
+    EXPECT_SEQ("(PARAM_DECL.localparam", "(DECLARATOR:A", "(NUMBER.dec [SIGNED]", " 3)",
+               "(PARAM_DECL.localparam", "(DECLARATOR:B", " 3)", "(PARAM_DECL.localparam",
+               "(DECLARATOR:C", "4'b0001");
+}
+
+static void test_local_param_errors(void) {
+    run_error("module m(input x);\n  wire w;\n  function f;\n    input a;\n    localparam P = w;\n"
+              "    f = a;\n  endfunction\nendmodule\n",
+              "t.v:5:20: error: parameter 'P' is not constant (it reads 'w')");
+    run_error("module m(input x);\n  task tk;\n    localparam P = 1;\n    localparam P = 2;\n"
+              "  endtask\nendmodule\n",
+              "t.v:4:16: error: 'P' is already declared (first at t.v:3:16)");
+}
+
 /* --- OOM ----------------------------------------------------------------------------------- */
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
@@ -523,7 +585,10 @@ static void test_oom(void) {
         "  assign w = a & b;\n  function [3:0] f;\n    input [3:0] x;\n    reg t;\n"
         "    begin t = x[0]; f = x; end\n  endfunction\n  task tk(input z); begin end endtask\n"
         "  always @* begin reg t; t = a; repeat (N) q = {N{a}}; q = f(q); end\n"
-        "  initial q = 0;\nendmodule\n");
+        "  initial q = 0;\n"
+        "  function [1:0] g;\n    input p;\n    localparam W = N + 1;\n    reg [W-1:0] u;\n"
+        "    begin u = p; g = u; end\n  endfunction\n"
+        "  always @* begin : nb\n    localparam K = N;\n    q = g(a) + K;\n  end\nendmodule\n");
     uint32_t nodes = odin3_ast_node_end(rs.parsed).v;
     odin3_log_set_sink(quiet_sink, NULL);
     int failed = 0;
@@ -568,6 +633,10 @@ int main(void) {
     RUN_TEST(test_m11);
     RUN_TEST(test_statement_kinds);
     RUN_TEST(test_readmem);
+    RUN_TEST(test_local_params);
+    RUN_TEST(test_local_param_scoping);
+    RUN_TEST(test_local_param_values);
+    RUN_TEST(test_local_param_errors);
     RUN_TEST(test_task16_stays_pending);
     RUN_TEST(test_oom);
     return UNITY_END();

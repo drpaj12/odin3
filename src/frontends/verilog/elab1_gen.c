@@ -112,6 +112,11 @@ static odin3_status new_scope(odin3_elab1_env *env, const odin3_elab_scope *rec,
     return ODIN3_OK;
 }
 
+odin3_status odin3_elab1_scope_local(odin3_elab1_env *env, uint32_t parent, uint32_t *out) {
+    odin3_elab_scope rec = {.kind = ODIN3_ESCOPE_LOCAL, .parent = parent};
+    return new_scope(env, &rec, (odin3_elab1_scope_x){{0}, 0, 0}, out);
+}
+
 void odin3_elab1_scope_items(const odin3_elab1_env *env, uint32_t scope, odin3_ast_id *node,
                              uint32_t *first, uint32_t *end) {
     const odin3_ast *ast = env->e1->parsed;

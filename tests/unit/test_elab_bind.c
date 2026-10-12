@@ -638,6 +638,34 @@ static void test_symbol_forms(void) {
     TEST_ASSERT_EQUAL_UINT32(local_id(mod, "f").v, odin3_elab_sym_of(&bnd, fx.call).v);
 }
 
+/* Task 15b: a localparam in a function's and in a named block's locals LIST is a LOCALPARAM symbol
+ * of that scope, hiding the module's; a read inside resolves to it. */
+static void test_local_params_bound(void) {
+    odin3_ast_id read_fn = ident("N");
+    odin3_ast_id read_blk = ident("K");
+    const odin3_ast_id fn_locals[] = {eb_localparam(&tree, "N", eb_int(&tree, 2))};
+    eb_subr fn = {
+        .name = "f", .locals = eb_list(&tree, fn_locals, 1), .body = blocking(ident("f"), read_fn)};
+    const odin3_ast_id blk_locals[] = {eb_localparam(&tree, "K", eb_int(&tree, 6))};
+    const odin3_ast_id stmts[] = {blocking(ident("r"), read_blk)};
+    eb_block blk = {"blk", eb_list(&tree, blk_locals, 1), stmts, 1};
+    odin3_ast_id named = eb_named_block(&tree, &blk);
+    const odin3_ast_id items[] = {reg("r", (odin3_ast_id){0}),
+                                  eb_localparam(&tree, "N", eb_int(&tree, 8)),
+                                  eb_function(&tree, &fn), eb_initial(&tree, named)};
+    odin3_ast_id module = module_of("t", (odin3_ast_id){0}, items, 4);
+    (void)eb_unit(&tree, &module, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bind(), all_lines());
+    odin3_scope_id mod = odin3_elab_scope_of(&bnd, module);
+    odin3_scope_id fscope = odin3_scope_child(symtab(), mod, name_id("f"), ODIN3_SCOPE_NO_INDEX);
+    odin3_scope_id bscope = odin3_scope_child(symtab(), mod, name_id("blk"), ODIN3_SCOPE_NO_INDEX);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_SYM_LOCALPARAM, local(fscope, "N")->kind);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_SYM_LOCALPARAM, local(bscope, "K")->kind);
+    TEST_ASSERT_EQUAL_UINT32(local_id(fscope, "N").v, odin3_elab_sym_of(&bnd, read_fn).v);
+    TEST_ASSERT_EQUAL_UINT32(local_id(bscope, "K").v, odin3_elab_sym_of(&bnd, read_blk).v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(local_id(mod, "N").v, local_id(fscope, "N").v);
+}
+
 /* A black box's scope holds its ports only; its INSTANTIATION resolves to its MODULE symbol; a
  * cell type's to nothing. */
 static void test_blackbox(void) {
@@ -1481,6 +1509,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_symbols_objects);
     RUN_TEST(test_symbols_localparam);
+    RUN_TEST(test_local_params_bound);
     RUN_TEST(test_symbols_ports_and_scopes);
     RUN_TEST(test_scopes_top);
     RUN_TEST(test_scopes_module);

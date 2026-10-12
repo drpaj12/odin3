@@ -186,6 +186,11 @@ static odin3_status add_declarators(odin3_elab1_env *env, odin3_ast_id group, ui
     return st;
 }
 
+odin3_status odin3_elab1_env_add_params(odin3_elab1_env *env, odin3_ast_id group) {
+    uint8_t kind = param_kind(env, odin3_ast_sub(env->e1->parsed, group));
+    return kind != 0 ? add_declarators(env, group, kind) : ODIN3_OK;
+}
+
 /* An entry named by node itself (a FUNCTION_DECL, a TASK_DECL, an INSTANCE). */
 static odin3_status add_named(odin3_elab1_env *env, odin3_ast_id node, odin3_ast_id group,
                               uint8_t kind) {

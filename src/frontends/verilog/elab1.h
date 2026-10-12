@@ -756,7 +756,8 @@ typedef struct odin3_elab1_range {
 
 typedef enum odin3_elab_scope_kind {
     ODIN3_ESCOPE_MODULE = 0,
-    ODIN3_ESCOPE_BLOCK
+    ODIN3_ESCOPE_BLOCK,
+    ODIN3_ESCOPE_LOCAL /* a function, task or block that declares parameters (Task 15b) */
 } odin3_elab_scope_kind;
 
 /*
@@ -996,6 +997,15 @@ void odin3_elab1_scope_items(const odin3_elab1_env *env, uint32_t scope, odin3_a
  * env->cur_scope ("generate block index"). ODIN3_ERR_PARSE after a diagnostic; NO_MEMORY. */
 odin3_status odin3_elab1_hier_comps(odin3_elab1_env *env, odin3_ast_id hier,
                                     odin3_elab1_comp **out);
+
+/* A new scope of kind ODIN3_ESCOPE_LOCAL under parent, for the localparams of a function, task or
+ * named block (Task 15b; made by the writer after pass E's scopes, so it never shifts their
+ * numbers): nothing finds it by name. *out its index. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_scope_local(odin3_elab1_env *env, uint32_t parent, uint32_t *out);
+
+/* The parameters of group (a PARAM_DECL of a function, task or block) as localparam entries of
+ * env->cur_scope (a `parameter` there is a localparam; a specparam is ignored). NO_MEMORY. */
+odin3_status odin3_elab1_env_add_params(odin3_elab1_env *env, odin3_ast_id group);
 
 /* The scope record (NULL past the count) and its extension. */
 const odin3_elab_scope *odin3_elab1_scope_at(const odin3_elab1_env *env, uint32_t scope);

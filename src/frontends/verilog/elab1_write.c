@@ -542,6 +542,8 @@ static uint32_t w_unnamed(e1w *wr, odin3_ast_id node) {
     return name;
 }
 
+static odin3_ast_id w_param_decl(e1w *wr, odin3_ast_id group, bool in_header);
+
 /* A variable declared in a block, function or task: VAR_DECL[reg|integer], its declarators without
  * initialisers (not an expression walk: a block's declarations are written from inside one). */
 static odin3_ast_id w_local_var(e1w *wr, odin3_ast_id group) {
@@ -593,6 +595,8 @@ static odin3_ast_id w_locals(e1w *wr, odin3_ast_id list) {
             halt(wr);
         } else if (odin3_ast_kind_of(wr->ast, entry) == ODIN3_AST_VAR_DECL) {
             w_push(wr, w_local_var(wr, entry));
+        } else if (odin3_ast_kind_of(wr->ast, entry) == ODIN3_AST_PARAM_DECL) {
+            w_push(wr, w_param_decl(wr, entry, false));
         } else {
             w_local_other(wr, entry);
         }
@@ -609,10 +613,70 @@ static void w_scope(e1w *wr, odin3_ast_id node, bool enter) {
     }
 }
 
+/* The declarations LIST of a SEQ_BLOCK, FUNCTION_DECL or TASK_DECL. */
+static odin3_ast_id locals_list(const e1w *wr, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
+    uint32_t idx = 2; /* a FUNCTION_DECL: range, ports, locals, body */
+    if (kind == ODIN3_AST_SEQ_BLOCK) {
+        idx = 0;
+    } else if (kind == ODIN3_AST_TASK_DECL) {
+        idx = 1;
+    }
+    return odin3_ast_child(wr->ast, node, idx);
+}
+
+/* Enter node's parameter scope (Task 15b, EL-4): when its declarations hold a PARAM_DECL, a scope
+ * under the current one becomes the lookup scope and holds the parameters (evaluated lazily, in
+ * order, where they are declared). Left by w_params_leave. */
+static void w_params_enter(e1w *wr, odin3_ast_id node) {
+    odin3_ast_id list = locals_list(wr, node);
+    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
+    uint32_t scope = 0;
+    bool any = false;
+    for (uint32_t i = 0; list.v != 0 && i < entries.n; i++) {
+        any = any || odin3_ast_kind_of(wr->ast, entries.ids[i]) == ODIN3_AST_PARAM_DECL;
+    }
+    if (!any) {
+        return;
+    }
+    odin3_status st = odin3_elab1_scope_local(wr->env, wr->env->cur_scope, &scope);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return;
+    }
+    wr->env->cur_scope = scope;
+    for (uint32_t i = 0; st == ODIN3_OK && i < entries.n; i++) {
+        if (odin3_ast_kind_of(wr->ast, entries.ids[i]) == ODIN3_AST_PARAM_DECL) {
+            st = odin3_elab1_env_add_params(wr->env, entries.ids[i]);
+        }
+    }
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+}
+
+/* Leave the scope w_params_enter made for node (none when it declares no parameter). */
+static void w_params_leave(e1w *wr, odin3_ast_id node) {
+    const odin3_elab_scope *rec = odin3_elab1_scope_at(wr->env, wr->env->cur_scope);
+    odin3_ast_id list = locals_list(wr, node);
+    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
+    for (uint32_t i = 0; list.v != 0 && rec != NULL && i < entries.n; i++) {
+        if (odin3_ast_kind_of(wr->ast, entries.ids[i]) == ODIN3_AST_PARAM_DECL) {
+            wr->env->cur_scope = rec->parent;
+            return;
+        }
+    }
+}
+
 /* Enter or leave a SEQ_BLOCK's names (when `at` holds: its first child, or its close). */
 static void w_block_scope(e1w *wr, odin3_ast_id node, bool at, bool enter) {
     if (at && odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_SEQ_BLOCK) {
         w_scope(wr, node, enter);
+        if (enter) {
+            w_params_enter(wr, node);
+        } else {
+            w_params_leave(wr, node);
+        }
     }
 }
 
@@ -751,12 +815,14 @@ static odin3_ast_id w_declarator(e1w *wr, odin3_ast_id decl) {
 
 /* A parameter's DECLARATOR with its final value (pass E evaluated it). */
 static odin3_ast_id w_param_declarator(e1w *wr, odin3_ast_id decl) {
-    uint32_t idx = odin3_elab1_env_find(wr->env, wr->scope, odin3_ast_name(wr->ast, decl));
+    uint32_t idx = odin3_elab1_env_find(wr->env, wr->env->cur_scope, odin3_ast_name(wr->ast, decl));
     const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
-    if (slot == NULL || slot->state != ODIN3_E1_DONE) {
-        halt(wr); /* reported in pass E */
+    odin3_status st = slot != NULL ? odin3_elab1_env_value(wr->env, idx) : ODIN3_ERR_PARSE;
+    if (st != ODIN3_OK) {
+        stop_on(wr, st); /* a module parameter: reported in pass E; a local one, here */
         return (odin3_ast_id){0};
     }
+    slot = odin3_elab1_env_slot(wr->env, idx);
     uint32_t mark = w_mark(wr);
     w_push(wr, w_value(wr, &slot->entry.value, slot->base, decl));
     odin3_ast_spec spec = spec_of(wr, ODIN3_AST_DECLARATOR, decl);
@@ -1583,6 +1649,8 @@ static void w_sub_entries(e1w *wr, odin3_ast_id list, bool ports) {
             w_sub_port(wr, group);
         } else if (kind == ODIN3_AST_VAR_DECL) {
             w_push(wr, w_local_var(wr, group));
+        } else if (kind == ODIN3_AST_PARAM_DECL) {
+            w_push(wr, w_param_decl(wr, group, false));
         } else {
             w_local_other(wr, group);
         }
@@ -1597,10 +1665,12 @@ static odin3_ast_id w_subroutine(e1w *wr, odin3_ast_id node) {
     odin3_ast_id ports = odin3_ast_child(wr->ast, node, first);
     odin3_ast_id locals = odin3_ast_child(wr->ast, node, first + 1);
     uint32_t mark = w_mark(wr);
+    uint32_t outer = wr->env->cur_scope;
     w_scope(wr, node, true);
     if (function) {
         w_push(wr, w_range(wr, odin3_ast_child(wr->ast, node, 0)));
     }
+    w_params_enter(wr, node);
     uint32_t list = w_mark(wr);
     w_sub_entries(wr, ports, true);
     w_sub_entries(wr, locals, true);
@@ -1612,6 +1682,7 @@ static odin3_ast_id w_subroutine(e1w *wr, odin3_ast_id node) {
     w_push(wr, w_make_marked(wr, &lspec, list, locals));
     w_push(wr, w_expr(wr, odin3_ast_child(wr->ast, node, first + 2)));
     w_scope(wr, node, false);
+    wr->env->cur_scope = outer;
     odin3_ast_spec spec = spec_of(wr, odin3_ast_kind_of(wr->ast, node), node);
     spec.name = odin3_ast_name(wr->ast, node);
     spec.flags = odin3_ast_flags(wr->ast, node);
@@ -1646,6 +1717,7 @@ static void w_behaviour(e1w *wr, odin3_ast_id item) {
 }
 
 static void w_item(e1w *wr, odin3_ast_id item) {
+    wr->env->cur_scope = wr->scope; /* a halted body may have left a parameter scope */
     odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, item);
     if (kind == ODIN3_AST_DIRECTIVE && odin3_elab1_directive_handled(wr->e1, item)) {
         return; /* `default_nettype and `resetall: read by odin3_elab1_nettype_at */
