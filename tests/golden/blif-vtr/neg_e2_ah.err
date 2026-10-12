@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e2_ah.in.blif:5: $_DLATCH_P_ '$c4': level-sensitive latch; VPR accepts only rising-edge latches

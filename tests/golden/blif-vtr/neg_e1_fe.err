@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e1_fe.in.blif:5: $_DFF_N_ '$c4': falling-edge flip-flop; VPR accepts only rising-edge latches (lower inverts the clock)

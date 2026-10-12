@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: pow.parmys.blif:10: $pow '$c17': not a netlist cell (run lower)

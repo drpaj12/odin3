@@ -1,0 +1,6 @@
+# corrupt: one latch; corrupt.vtr.blif deliberately expects init 0 instead of 2
+.model corrupt
+.inputs d clk
+.outputs q
+.latch d q re clk 2
+.end

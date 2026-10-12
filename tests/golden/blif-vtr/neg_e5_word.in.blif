@@ -1,0 +1,6 @@
+# neg_e5_word: a registry word cell, not a netlist cell (E5)
+.model neg_e5
+.inputs a b
+.outputs y
+.subckt $add A[0]=a B[0]=b Y[0]=y
+.end

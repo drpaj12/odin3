@@ -1,0 +1,14 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model adders
+.inputs a b c
+.outputs s1 s2
+.subckt adder a=a b=b cin=c cout=$p9 sumout=s1
+.subckt adder a=b b=a cin=c cout=$p14 sumout=s2
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

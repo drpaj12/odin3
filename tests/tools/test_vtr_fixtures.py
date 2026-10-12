@@ -1,0 +1,108 @@
+"""Tests for tools/blif-vtr-check/vtr_fixtures.py: the round trip of 3E §16.3 step 1, as the 3E-1
+final review's erratum amends it (I1). A write that legalised no name must give W1 == W2 byte for
+byte; a write that legalised names is compared under the VB-10 decode instead, since VB-10 escapes
+the `%` of its own escapes again (`\\` -> `%5C` -> `%255C`).
+
+The end-to-end cases run odin3 (``ODIN3_CLI``, set by CTest python_tools) on two committed
+fixtures: ``shiftx.parmys`` (a Parmys k6 golden with a mid-name `\\`, one of 25) and ``two_clock``.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import io
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+import vtr_fixtures
+
+from . import helpers
+
+FIXTURES = helpers.REPO_ROOT / "tests" / "golden" / "blif-vtr"
+ODIN3 = os.environ.get("ODIN3_CLI")
+
+
+class Vb10DecodeTest(unittest.TestCase):
+    def test_one_write_inverted(self) -> None:
+        # plan 3E point (o): upper-case hex is a byte, anything else after `%` the rule-3 prefix
+        cases = {
+            b"%fe": b"fe",
+            b"%FE": b"\xfe",
+            b"a%23b": b"a#b",
+            b"%2Eend": b".end",
+            b"%out:%5Cx": b"out:\\x",
+            b"plain[3]": b"plain[3]",
+        }
+        for written, name in cases.items():
+            with self.subTest(written=written):
+                self.assertEqual(name, vtr_fixtures.vb10_decode(written))
+
+    def test_fixed_point(self) -> None:
+        # a name written twice decodes like one written once
+        once, twice = b"$2%5Cbuffer[7:0][0]", b"$2%255Cbuffer[7:0][0]"
+        self.assertEqual(b"$2\\buffer[7:0][0]", vtr_fixtures.vb10_decode(once))
+        self.assertEqual(vtr_fixtures.vb10_decode(once), vtr_fixtures.vb10_decode(twice))
+        self.assertEqual(b"NIL", vtr_fixtures.vb10_decode(b"%25NIL"))
+
+
+W1 = b"# header\n\n.model m\n.inputs a%5Cb\n.outputs y\n.names a%5Cb \\\n  y\n1 1\n.end\n"
+W2 = b"# header\n\n.model m\n.inputs a%255Cb\n.outputs y\n.names a%255Cb y\n1 1\n.end\n"
+
+
+class RoundTripVerdictTest(unittest.TestCase):
+    def test_renamed_compared_decoded(self) -> None:
+        self.assertEqual((None, "decoded"), vtr_fixtures.round_trip_verdict(W1, W2, 2))
+
+    def test_renamed_structural_difference_fails(self) -> None:
+        why, mode = vtr_fixtures.round_trip_verdict(W1, W2.replace(b"1 1", b"0 1"), 2)
+        self.assertEqual("decoded", mode)
+        self.assertIsNotNone(why)
+
+    def test_not_renamed_needs_bytes(self) -> None:
+        self.assertEqual((None, "bytes"), vtr_fixtures.round_trip_verdict(W1, W1, 0))
+        why, mode = vtr_fixtures.round_trip_verdict(W1, W2, 0)
+        self.assertEqual("bytes", mode)
+        self.assertIsNotNone(why)
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_CLI not set (run CTest python_tools)")
+class FixtureRoundTripTest(unittest.TestCase):
+    def round_trip(self, name: str, work: Path) -> tuple[int, bytes, bytes]:
+        """W1 and W2 of fixture name in work, and the `renamed` count of W1's write."""
+        odin3 = Path(str(ODIN3))
+        case = vtr_fixtures.Case(name, FIXTURES / (name + vtr_fixtures.IN_SUFFIX))
+        outcome = vtr_fixtures.run_case(odin3, case, work)
+        self.assertEqual("", outcome.detail)
+        w1 = work / (name + vtr_fixtures.OUT_SUFFIX)
+        w2 = work / (name + ".w2.blif")
+        proc = vtr_fixtures.rewrite(odin3, w1, w2)
+        self.assertEqual(0, proc.returncode, proc.stderr.decode(errors="replace"))
+        return outcome.renamed, w1.read_bytes(), w2.read_bytes()
+
+    def test_shiftx_compared_decoded_not_bytes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vtr-rt.") as tmp:
+            renamed, w1, w2 = self.round_trip("shiftx.parmys", Path(tmp))
+            self.assertEqual(8, renamed)
+            self.assertIn(b"$2%5Cbuffer[7:0][0]", w1)
+            self.assertIn(b"$2%255Cbuffer[7:0][0]", w2)
+            self.assertNotEqual(w1, w2)  # byte idempotence cannot hold: it is not applied
+            self.assertEqual((None, "decoded"), vtr_fixtures.round_trip_verdict(w1, w2, renamed))
+            log = io.StringIO()
+            with contextlib.redirect_stdout(log):
+                why = vtr_fixtures.round_trip(Path(str(ODIN3)), "shiftx.parmys", Path(tmp), renamed)
+            self.assertIsNone(why)
+            self.assertIn("note shiftx.parmys: round trip: 8 names legalised", log.getvalue())
+            self.assertIn("(byte comparison not applied)", log.getvalue())
+
+    def test_two_clock_bytes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="vtr-rt.") as tmp:
+            renamed, w1, w2 = self.round_trip("two_clock", Path(tmp))
+            self.assertEqual(0, renamed)
+            self.assertEqual(w1, w2)
+            self.assertEqual((None, "bytes"), vtr_fixtures.round_trip_verdict(w1, w2, renamed))
+
+
+if __name__ == "__main__":
+    unittest.main()

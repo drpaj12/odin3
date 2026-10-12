@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e6_implicit.in.blif:5: mystery '$c3': 'mystery' is not a hard cell of a loaded tech library (read_techlib lib/vtr.o3lib)

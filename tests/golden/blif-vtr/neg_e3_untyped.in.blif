@@ -1,0 +1,6 @@
+# neg_e3_untyped: an untyped latch, a flip-flop with no clock ($_FF_, E3)
+.model neg_e3
+.inputs d
+.outputs q
+.latch d q 0
+.end

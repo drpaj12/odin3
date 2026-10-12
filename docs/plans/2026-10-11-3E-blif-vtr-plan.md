@@ -702,7 +702,7 @@ Effort cues:
 - `odin3-blif-rt [--techlib LIB]… [--vtr [--lut-k K]] IN OUT`: exit 0 written, 1 refused (the refusal lines on stderr), 2 for an I/O or usage error.
 - `blif-roundtrip --vtr [-j 1] [-t S] [-m GB] [--techlib LIB]… [--rt PATH] [--nc PATH] [--equiv PATH] [--out DIR] [--report FILE] [--fixtures DIR | GOLDEN_ROOT]`:
   - Per file, smallest first: `W1 = rt --vtr G`, `W2 = rt --vtr W1`.
-  - Oracle 1: W1 == W2 byte for byte.
+  - Oracle 1 (spec §16.3 step 1, erratum after the 3E-1 final review I1): when the W1 write legalised no name (`renamed == 0`, no `names legalised` info line), W1 == W2 byte for byte; otherwise `netlist-compare --vtr-normalize W1 W2` identical and the file listed `decoded` (the byte comparison is not applied: VB-10 escapes its own `%` again, `%5C` → `%255C`). The decode must agree with `vtr_normalized` in `tools/blif-vtr-check/vtr_fixtures.py`, which already runs this oracle on the fixtures (`test_vtr_fixtures`).
   - Oracle 2: Parmys files (`*.parmys.blif`) → `netlist-compare G W1` exit 0; a file the §6 normalisation changes is compared with `--vtr-normalize` and listed `normalized`.
   - Oracle 3: Odin II files (`*.odin.blif`) → `netlist-compare --vtr-normalize G W1` exit 0.
   - Oracle 4: for Odin II files written in oracle 3 with no `single_port_ram`/`dual_port_ram`/`multiply` and one clock, `equiv-check --timeout 600 G W1` (`timeout` listed, `multiclock` skipped).
@@ -713,7 +713,7 @@ Effort cues:
   - latch init `3` → `2`;
   - an omitted `.subckt` input formal bit ≡ `=unconn` (bits up to the stub's or the model's width);
   - `.clock` lines dropped;
-  - VB-10 names decoded (point (o): `%XX` with upper-case hex → the byte; `%` + anything else → drop the `%`);
+  - VB-10 names decoded (point (o): `%XX` with upper-case hex → the byte; a leading `%` + anything else → drop the `%`), repeated to a fixed point so a name written twice (`%255C`) decodes like one written once (`%5C`);
   - §6's constant and 1-input normalisation (constant covers to zero-input generators, 1-input covers to one row).
 
   Python: `def vtr_normalize(model: BlifModel) -> BlifModel` over `tools/blif`'s model type.
@@ -723,7 +723,8 @@ Effort cues:
   - **`vtr_normalize_decodes_names`** (Review Focus 3): `%fe` ↔ `fe`, `%FE` ↔ byte 0xFE, `a%23b` ↔ `a#b`, `%2Eend` ↔ `.end`;
   - a latch init 3 against 2 → equal only with the flag;
   - a `.subckt multiply a[0]=x` against one with `a[1..35]=unconn` → equal with the flag;
-  - a 1-input cover with two `1 1` rows against one row → equal with the flag.
+  - a 1-input cover with two `1 1` rows against one row → equal with the flag;
+  - `$2%5Cbuffer` against `$2%255Cbuffer` (a primary output, so the name is kept) → equal with the flag, different without.
 - `test_blif_roundtrip_vtr.py`, over a fake `odin3-blif-rt`:
   - smallest first;
   - a W1 ≠ W2 file fails;
@@ -776,7 +777,9 @@ Effort cues:
     - every Odin II golden written is identical under `--vtr-normalize` (6 `fe` → E1, 92 wide → E7, 2 multi-driver → E12);
     - VPR reads every W;
     - the checker agrees with VPR on all 923 G and every W;
-    - `--bad-corpus` passes.
+    - `--bad-corpus` passes;
+    - the 25 Parmys k6 goldens with a mid-name `\` are listed `decoded` (renamed > 0), not failed on bytes;
+    - one design with a latch clocked from `unconn` (class U, spec §7 item 3) runs the full VPR flow (pack, place, route) and its outcome is recorded before 3H relies on that form (3E-1 final review M8).
 - **Report and PHASE3** (Sonnet `high` session, in the background with Monitor):
   - the 3E entry gives the counts written/refused per class and per tool, the run times, the files compared with `--vtr-normalize`, and the `equiv-check` results (timeouts listed);
   - it also logs this plan's points (a)–(y) as agent defaults, and the R leg's tick as 3H's (point (v)).

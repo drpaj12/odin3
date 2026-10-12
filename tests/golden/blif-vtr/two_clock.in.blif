@@ -1,0 +1,13 @@
+# two_clock: two rising-edge latches on different clocks, in Parmys's form (written unchanged)
+.model two_clock
+.inputs clk1 clk2 d1 d2
+.outputs q1 q2
+.names gnd
+.names vcc
+1
+.names unconn
+.latch d1 q1 re clk1 2
+.latch n2 q2 re clk2 2
+.names d2 q1 n2
+11 1
+.end

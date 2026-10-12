@@ -1,0 +1,1 @@
+odin3: error: check: neg_e12: rule 4: net 3 (y) has 2 drivers that are neither inout nor tristate

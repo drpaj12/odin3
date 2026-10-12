@@ -1,0 +1,24 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model rams
+.inputs clk a0 a1 b0 b1 d1 d2 w
+.outputs q1 q2 r
+.names gnd
+.names vcc
+1
+.subckt dual_port_ram addr1[0]=a0 addr1[1]=a1 addr2[0]=b0 addr2[1]=b1 clk=clk data1=d1 data2=d2 \
+  out1=q1 out2=q2 we1=w we2=vcc
+.subckt single_port_ram addr=a0 clk=gnd data=d1 out=r we=w
+.end
+
+.model dual_port_ram
+.inputs clk data2 data1 addr2[0] addr2[1] addr1[0] addr1[1] we2 we1
+.outputs out2 out1
+.blackbox
+.end
+
+.model single_port_ram
+.inputs clk data addr we
+.outputs out
+.blackbox
+.end

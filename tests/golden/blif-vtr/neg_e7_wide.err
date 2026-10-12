@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e7_wide.in.blif:5: $sop '$c9': 7 inputs exceed K=6 (run abc, or pass --lut-k)

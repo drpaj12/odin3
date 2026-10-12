@@ -75,6 +75,7 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
+    src/backends/blif/vtr.c
     src/passes/manager.c
     src/passes/builtin.c
     src/passes/write_formats.c
@@ -475,6 +476,15 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3E: write_blif --vtr (tests/unit/blif_vtr_test.c: read a BLIF text, run write_blif).
+    odin3_add_unit_test(test_blif_vtr)
+    target_sources(test_blif_vtr PRIVATE tests/unit/blif_vtr_test.c tests/unit/proc_fixture.c
+                                         tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_blif_vtr PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_BVT_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_BVT_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/blif_vtr")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_libs)
@@ -599,6 +609,20 @@ if(BUILD_TESTING)
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
+    # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
+    # lists) against the expected files. The --checker argument (tools/blif-vtr-check, 3E-2) is
+    # added by whichever of 3E-1 and 3E-2 lands second; without it the driver skips that step.
+    add_test(NAME blif_vtr_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
+                     --odin3 $<TARGET_FILE:odin3> --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr)
+    set_tests_properties(blif_vtr_fixtures PROPERTIES LABELS unit)
+    # The driver's own negative: a deliberately wrong expected file must be reported.
+    add_test(NAME blif_vtr_fixtures_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
+                     --odin3 $<TARGET_FILE:odin3>
+                     --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr-corrupt)
+    set_tests_properties(blif_vtr_fixtures_detects_corruption PROPERTIES LABELS unit
+        PASS_REGULAR_EXPRESSION "FAIL corrupt: differs from corrupt.vtr.blif")
     # The goldens' distinct black-box stanzas (tools/golden-blackboxes) against lib/vtr.o3lib.
     add_test(NAME blif_roundtrip_techlib
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
@@ -699,6 +723,8 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
     list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
+    # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
+    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
     # The project-input corpus (tests/golden/projects) parses to its expected records in every
     # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.

@@ -1,6 +1,7 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures, tools/parse-check, tools/elab-check, tools/proc-check, tools/heavy-run,
-tools/build-locked, the BLIF reader and the Python plugin binding (plugins/python).
+tools/build-locked, the fixture driver of tools/blif-vtr-check, the BLIF reader and the Python
+plugin binding (plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
 sys.path here so the test modules can import them.
@@ -12,6 +13,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 for _sub in (
     "tools/blif",
+    "tools/blif-vtr-check",
     "tools/netlist-compare",
     "tools/equiv-check",
     "tools/golden-sample",

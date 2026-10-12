@@ -333,7 +333,7 @@ Algorithm: VF2-style with anchor seeding and width-agnostic matching; semantic v
 
 | Format | Read | Write | Notes |
 |---|---|---|---|
-| BLIF | yes | yes | VTR dialect; black boxes; `.latch` init |
+| BLIF | yes | yes | black boxes; `.latch` init. VTR dialect (`write_blif --vtr`): top only, `.latch … re` init 0/1/2, `unconn` on open hard-block inputs |
 | Verilog | yes (front end) | structural (bit/word), Altera-primitive flavoured | the RE output |
 | SystemVerilog | via slang | word-level structural | |
 | VQM | yes | — | Titan |

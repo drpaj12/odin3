@@ -1,0 +1,8 @@
+# subckt_unconnected_outputs_named: two adders whose cout nobody reads: every output bit is
+# written, on a generated $p<pin ID> net of its own (distinct block names, R12)
+.model adders
+.inputs a b c
+.outputs s1 s2
+.subckt adder a=a b=b cin=c sumout=s1
+.subckt adder a=b b=a cin=c sumout=s2
+.end

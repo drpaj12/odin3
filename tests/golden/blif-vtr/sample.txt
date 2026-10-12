@@ -1,0 +1,6 @@
+# Copied goldens the fixture driver also runs (plan 3E point (r)); repo-relative paths.
+tests/golden/blif/adder_hard_block.parmys.blif
+tests/golden/blif/ansiportlist_2.parmys.blif
+tests/golden/blif/ff.parmys.blif
+tests/golden/blif/dffsre.parmys.blif
+tests/golden/blif/pow.parmys.blif

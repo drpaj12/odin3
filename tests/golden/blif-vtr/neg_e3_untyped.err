@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e3_untyped.in.blif:5: $_FF_ '$c3': flip-flop without a clock; VPR requires a clock on every latch

@@ -1,0 +1,6 @@
+# neg_e2_ah: an active-high level-sensitive latch (E2)
+.model neg_e2
+.inputs d en
+.outputs q
+.latch d q ah en 0
+.end

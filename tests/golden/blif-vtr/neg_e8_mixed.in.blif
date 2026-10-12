@@ -1,0 +1,8 @@
+# neg_e8_mixed: a cover mixing on-set and off-set rows (E8); the BLIF reader refuses it first
+.model neg_e8
+.inputs a b
+.outputs y
+.names a b y
+11 1
+00 0
+.end

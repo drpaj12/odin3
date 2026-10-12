@@ -1,0 +1,2 @@
+odin3: error: write_blif: --vtr: dffsre.parmys.blif:10: $_DFFSR_PPP_ '$c14': asynchronous set/reset flip-flop; VPR has none (lower makes it synchronous, decision 19)
+odin3: error: write_blif: --vtr: dffsre.parmys.blif:11: $_DFFSR_PPP_ '$c15': asynchronous set/reset flip-flop; VPR has none (lower makes it synchronous, decision 19)

@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e3b_ram_clk_open.in.blif:5: single_port_ram '$c5': clock input 'clk' is unconnected or x

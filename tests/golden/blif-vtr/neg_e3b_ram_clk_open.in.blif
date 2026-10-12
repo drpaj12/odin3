@@ -1,0 +1,6 @@
+# neg_e3b_ram_clk_open: a RAM whose clock input is a net nothing drives (E3b)
+.model neg_e3b
+.inputs d a w
+.outputs q
+.subckt single_port_ram clk=nc data[0]=d addr[0]=a we=w out[0]=q
+.end
