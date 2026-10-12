@@ -54,8 +54,13 @@ port is 1 bit at the defaults but whose connection is wider (only bit 0 is writt
 black-box pin), so the instance would otherwise name a port the model lacks.
 ``--vtr-normalize`` (3E spec §16.3 step 3) applies ``write_blif --vtr``'s documented rewrites
 to both files before canonicalising (``vtr_normalize``): latch init 3 (or none) as 2; every
+``--vtr-normalize G W`` (3E spec §16.3 step 3) applies ``write_blif --vtr``'s documented
+rewrites to both files before canonicalising (``vtr_normalize``): the second file's names (the
+writer's output) decoded by one VB-10 step (``vb10_decode_once``), the first (the golden) never
+decoded, which is exact and injective where a fixed-point decode of both is not (``y%41`` and
+``yA`` would meet; 3E-4 Task 10 review I1); latch init 3 (or none) as 2; every
 input formal bit of a ``.subckt``'s model that the instance omits connected to ``unconn``;
-``.clock`` lines dropped; VB-10 names decoded to a fixed point (``vb10_decode``); a cover with
+``.clock`` lines dropped; a cover with
 inputs whose function is constant as a zero-input generator, and a 1-input cover as its one
 row. Beyond the plan's list (an agent default, 3E-4 Task 10): an undriven net read by a
 ``.names`` or a ``.latch`` D as ``gnd``, by a ``.subckt`` input as ``unconn``, and an undriven
@@ -113,6 +118,11 @@ MAX_TRIALS = 64
 # `%` followed by anything else is rule 3's reserved-name prefix.
 VB10_ESCAPE = re.compile(rb"%([0-9A-F]{2})")
 VB10_PREFIX = b"%"
+# The bytes VB-10 writes as `%XX` (rules 1 and 8), the names rule 3 prefixes with `%`.
+VB10_ESCAPED = frozenset(set(range(0x21)) | set(range(0x7F, 0x100)) | set(b'="#\\%|^'))
+VB10_RESERVED = frozenset({b"re", b"fe", b"ah", b"al", b"as", b"NIL", b"0", b"1", b"2", b"3",
+                           b"gnd", b"vcc", b"unconn"})
+VB10_OUT_PREFIX = b"out:"
 # write_blif --vtr's names for an open hard-block input and its generator (3E spec §9).
 UNCONN = "unconn"
 GND = "gnd"
@@ -711,18 +721,43 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
 # --------------------------------------------------------------------------- --vtr rewrites
 
 
+def _escape_at(name: bytes, i: int) -> bool:
+    """True when name[i:i+3] is an escape the writer can have written: `%`, two upper-case hex
+    digits, and a byte VB-10 escapes (rule 1: one outside 0x21-0x7E or one of `="#\\%`; rule 8:
+    `|` and `^` on a clock net; rule 2: `.` at the start). `%41` (`A`, a legal byte) is none."""
+    match = VB10_ESCAPE.match(name, i)
+    if match is None:
+        return False
+    byte = int(match[1], HEX)
+    return byte in VB10_ESCAPED or (byte == ord(".") and i == 0)
+
+
 def vb10_decode_once(name: bytes) -> bytes:
-    """One VB-10 decoding step: rule 3's `%` prefix (a leading `%` not followed by two upper-case
-    hex digits) dropped, then every `%XX` replaced by its byte. It inverts one write exactly
-    (plan point (o)), so it is injective over written names."""
-    if name.startswith(VB10_PREFIX) and VB10_ESCAPE.match(name) is None:
-        name = name[len(VB10_PREFIX):]
-    return VB10_ESCAPE.sub(lambda m: bytes([int(m[1], HEX)]), name)
+    """One VB-10 decoding step, the exact inverse of one write (3E spec §10, plan point (o)):
+    rule 3's `%` prefix dropped where it stands before a reserved name (`%re`, `%unconn`,
+    `%out:x`), then every escape the writer can have written (_escape_at) replaced by its byte.
+    Anything else stays as it is, so the step is injective and a name the writer cannot have
+    written (`y%41`, `%zz`) never decodes onto another name (3E-4 Task 10 review I1)."""
+    if name.startswith(VB10_PREFIX) and not _escape_at(name, 0):
+        rest = name[len(VB10_PREFIX):]
+        if rest in VB10_RESERVED or rest.startswith(VB10_OUT_PREFIX):
+            name = rest
+    out = bytearray()
+    i = 0
+    while i < len(name):
+        if _escape_at(name, i):
+            out.append(int(name[i + 1:i + 3], HEX))
+            i += 3
+        else:
+            out.append(name[i])
+            i += 1
+    return bytes(out)
 
 
 def vb10_decode(name: bytes) -> bytes:
     """vb10_decode_once repeated until nothing changes, so a name written twice (`%255C`) decodes
-    like one written once (`%5C`), both to `\\` (3E spec §16.3 step 1). Not injective."""
+    like one written once (`%5C`), both to `\\`. Not injective: only vtr_fixtures' report
+    (vtr_normalized) uses it, never a verdict."""
     while True:
         step = vb10_decode_once(name)
         if step == name:
@@ -731,11 +766,11 @@ def vb10_decode(name: bytes) -> bytes:
 
 
 def decode_name(name: str) -> str:
-    """vb10_decode of a name read with surrogateescape (bytes that are not UTF-8 survive)."""
+    """vb10_decode_once of a name read with surrogateescape (bytes that are not UTF-8 survive)."""
     if "%" not in name:
         return name
     raw = name.encode("utf-8", "surrogateescape")
-    return vb10_decode(raw).decode("utf-8", "surrogateescape")
+    return vb10_decode_once(raw).decode("utf-8", "surrogateescape")
 
 
 def vtr_token_lines(
@@ -805,8 +840,7 @@ def _normalize_names(cell: blif.Names) -> blif.Names:
     return cell
 
 
-def _decode_cell(cell: blif.Cell) -> blif.Cell:
-    dn = decode_name
+def _decode_cell(cell: blif.Cell, dn: Callable[[str], str]) -> blif.Cell:
     if isinstance(cell, blif.Names):
         return blif.Names([dn(n) for n in cell.inputs], dn(cell.output), list(cell.rows),
                           list(cell.attrs), cell.line)
@@ -865,17 +899,19 @@ def _drive_generators(model: blif.Model, models: dict[str, blif.Model]) -> None:
             model.cells.append(blif.Names([], name))
 
 
-def vtr_normalize(netlist: blif.Netlist) -> blif.Netlist:
+def vtr_normalize(netlist: blif.Netlist, written: bool = False) -> blif.Netlist:
     """A copy of netlist with write_blif --vtr's documented rewrites applied (3E spec §16.3
-    step 3): VB-10 names decoded to a fixed point; `.clock` lines dropped; latch init 3 (or
-    none) as 2; a `.subckt`'s omitted input formal bits (its model's) as `=unconn`; an undriven
-    net read by a `.names` or a `.latch` D as `gnd`, by a `.subckt` input as `unconn`, and an
-    undriven primary output buffered from `gnd` (§9.2); §6's constant and 1-input covers; and
-    the `gnd`/`unconn` generators where these rewrites read one that nothing drives."""
-    dn = decode_name
+    step 3): when written (the file is the writer's output), every name decoded by one VB-10
+    step (decode_name; a golden is never decoded: 3E-4 Task 10 review I1); `.clock` lines
+    dropped; latch init 3 (or none) as 2; a `.subckt`'s omitted input formal bits (its
+    model's) as `=unconn`; an undriven net read by a `.names` or a `.latch` D as `gnd`, by a
+    `.subckt` input as `unconn`, and an undriven primary output buffered from `gnd` (§9.2);
+    §6's constant and 1-input covers; and the `gnd`/`unconn` generators where these rewrites
+    read one that nothing drives."""
+    dn: Callable[[str], str] = decode_name if written else str
     models = [
         blif.Model(dn(m.name), [dn(p) for p in m.inputs], [dn(p) for p in m.outputs], [],
-                   [_decode_cell(c) for c in m.cells], m.blackbox, m.line)
+                   [_decode_cell(c, dn) for c in m.cells], m.blackbox, m.line)
         for m in netlist.models
     ]
     by_name = {m.name: m for m in models}
@@ -926,7 +962,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--implicit-models", action="store_true",
                     help="an undefined $-model is a black box whose formals are those used")
     ap.add_argument("--vtr-normalize", action="store_true",
-                    help="apply write_blif --vtr's documented rewrites to both files first")
+                    help="apply write_blif --vtr's documented rewrites to both files first; "
+                    "the second (the writer's output) has its names decoded by one VB-10 step")
     ap.add_argument("--vtr-rewrite", action="store_true",
                     help="the second file is the first written again by write_blif --vtr: "
                     "compare token lines after one VB-10 decoding step of the second")
@@ -945,12 +982,13 @@ def _read_bytes(path: str) -> bytes:
         raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
 
 
-def _load(path: str, vtr: bool) -> blif.Netlist:
-    """The parsed file; with vtr, read as bytes (surrogateescape) and vtr_normalize'd."""
+def _load(path: str, vtr: bool, written: bool) -> blif.Netlist:
+    """The parsed file; with vtr, read as bytes (surrogateescape) and vtr_normalize'd (its names
+    decoded when written: the second of two files)."""
     if not vtr:
         return blif.parse_file(path)
     text = _read_bytes(path).decode("utf-8", "surrogateescape")
-    return vtr_normalize(blif.parse_text(text, path))
+    return vtr_normalize(blif.parse_text(text, path), written)
 
 
 def _rewrite_diff(w1: bytes, w2: bytes, name_a: str, name_b: str) -> list[str]:
@@ -985,7 +1023,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         canon = [canonicalize(load(f, args.implicit_models), args.keep_attrs) for f in files]
         if args.vtr_rewrite:
             return _vtr_rewrite(files, args.quiet)
-        canon = [canonicalize(_load(f, args.vtr_normalize), args.keep_attrs) for f in files]
+        canon = [canonicalize(_load(f, args.vtr_normalize, k == 1), args.keep_attrs)
+                 for k, f in enumerate(files)]
     except blif.BlifError as exc:
         print(f"{TOOL}: {_printable(str(exc))}", file=sys.stderr)
         return 2

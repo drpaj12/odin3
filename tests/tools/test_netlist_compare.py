@@ -403,11 +403,29 @@ class VtrNormalizeTest(unittest.TestCase):
         written = outputs("%fe", "%FE", "%2Eend")
         plain = outputs("fe", "\xfe", ".end")
         plain_bytes = plain.encode("latin-1")  # 0xFE as the raw byte, not UTF-8
-        fa, fb = self.write("w.blif", written), self.write("p.blif", plain_bytes)
-        self.assertEqual(0, compare("--vtr-normalize", fa, fb)[0])
-        self.assertEqual(2, compare(fa, fb)[0])  # the raw byte is no UTF-8: plain mode refuses
+        golden, wrote = self.write("p.blif", plain_bytes), self.write("w.blif", written)
+        self.assertEqual(0, compare("--vtr-normalize", golden, wrote)[0])
+        self.assertEqual(2, compare(golden, wrote)[0])  # the raw byte is no UTF-8: plain refuses
         swapped = written.replace("%FE", "%fe2")
-        self.assertEqual(1, compare("--vtr-normalize", self.write("s.blif", swapped), fb)[0])
+        self.assertEqual(1, compare("--vtr-normalize", golden, self.write("s.blif", swapped))[0])
+        # the golden (first file) is never decoded: a golden name that looks written stays
+        self.assertEqual(1, compare("--vtr-normalize", wrote, golden)[0])
+
+    def test_decode_is_not_many_to_one(self) -> None:
+        # 3E-4 Task 10 review I1: a fixed-point decode of both files made each pair equal
+        def ports(name: str) -> str:
+            return model(f".names a {name}", "1 1", ports=f".inputs a\n.outputs {name}")
+
+        and_ab = model(".names a p%41", "1 1", ".names b pA", "1 1", ".names p%41 pA y", "11 1")
+        only_a = model(".names a pA", "1 1", ".names b p%41", "1 1", ".names pA pA y", "11 1")
+        for first, second in ((ports("y%41"), ports("yA")), (ports("%zz"), ports("zz")),
+                              (and_ab, only_a)):
+            for a, b in ((first, second), (second, first)):
+                with self.subTest(a=a, b=b):
+                    self.assertEqual(1, self.pair(a, b)[1])
+        for written in (b"y%41", b"%zz", b"a%2Eb", b"%41", b"%%41"):
+            with self.subTest(written=written):  # no write gives these: they stay as they are
+                self.assertEqual(written, netlist_compare.vb10_decode_once(written))
 
     def test_latch_init_3_is_2(self) -> None:
         a = model(".latch a q re clk 3", ".names q y", "1 1")

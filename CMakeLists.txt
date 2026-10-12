@@ -871,6 +871,16 @@ if(BUILD_TESTING)
     set_tests_properties(blif_roundtrip_vtr_detects_corruption PROPERTIES LABELS unit
         PASS_REGULAR_EXPRESSION "RESULT: FAIL"
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
+    # Oracles 2 and 3: a W1 whose function is damaged (and that W2 keeps, so oracle 1 holds)
+    # must fail netlist-compare for a Parmys and an Odin II golden.
+    add_test(NAME blif_roundtrip_vtr_detects_wrong_function
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt
+                     --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                     --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib)
+    set_tests_properties(blif_roundtrip_vtr_detects_wrong_function PROPERTIES LABELS unit
+        PASS_REGULAR_EXPRESSION "parmys +written +- +bytes +different +- +FAIL +ff\\.parmys\\.blif.*odin +written +- +bytes +different +[^ ]+ +FAIL +ff\\.odin\\.blif.*RESULT: FAIL"
+        ENVIRONMENT "BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>;BRT_CORRUPT=first-write")
     # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
     # lists) against the expected files, then blif-vtr-check --strict on every expected file
     # (vtr_fixtures.STRICT_EXCEPTIONS without --strict).

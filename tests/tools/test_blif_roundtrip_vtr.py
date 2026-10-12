@@ -242,6 +242,33 @@ class VtrRoundTripTest(unittest.TestCase):
         self.assertEqual({"two.odin.blif": "multiclock", "ram.odin.blif": "excluded"},
                          {r[0]: r[6] for r in rows})
 
+    def test_equiv_failures_fail(self) -> None:
+        # oracle 4: NOT-equivalent (exit 1) and an equiv-check error (exit 2) fail; a timeout is
+        # listed and passes
+        self.add("e.odin.blif", BUF)
+        for rc, text, word, verdict in ((1, "NOT equivalent", "NOT-equivalent", "FAIL"),
+                                        (2, "ABC exited with status 3", "error", "FAIL"),
+                                        (2, "running ABC failed: timed out", "timeout", "pass")):
+            with self.subTest(word=word):
+                write_exe(self.equiv, f"#!/usr/bin/env bash\necho 'equiv-check: {text}'\n"
+                          f"exit {rc}\n")
+                code, out, rows = self.run_script()
+                self.assertEqual(1 if verdict == "FAIL" else 0, code, out)
+                self.assertEqual([word, verdict], rows[0][6:8])
+                if verdict == "FAIL":
+                    self.assertIn(f"why: equiv-check: {word}", out)
+
+    def test_compare_timeout_fails_in_fixtures_mode(self) -> None:
+        self.add("slow.parmys.blif", BUF)
+        slow_nc = self.tmp / "slow-nc"
+        write_exe(slow_nc, "#!/usr/bin/env bash\nexec sleep 30\n")
+        argv = [str(SCRIPT), "--vtr", "-t", "1", "--rt", str(self.rt), "--nc", str(slow_nc),
+                "--out", str(self.tmp / "out"), "--fixtures", str(self.fixtures)]
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT,
+                              env=self.env, check=False)
+        self.assertEqual(1, proc.returncode, proc.stdout + proc.stderr)
+        self.assertIn("why: netlist-compare: timeout", proc.stdout)
+
     def test_rt_error_fails(self) -> None:
         self.add("bad.parmys.blif", BUF)
         write_exe(self.rt, "#!/usr/bin/env bash\necho 'odin3: error: x: cannot open' >&2\nexit 2\n")
@@ -315,6 +342,18 @@ class HeavyShimTest(unittest.TestCase):
         report = (self.tmp / "out" / "report.tsv").read_text(encoding="utf-8").splitlines()
         self.assertEqual(["d/x.parmys.blif", "parmys", "written", "-", "bytes", "identical", "-",
                           "pass"], report[1].split("\t"))
+
+    def test_compare_timeout_listed_on_golden_root(self) -> None:
+        slow_nc = self.tmp / "slow-nc"
+        write_exe(slow_nc, "#!/usr/bin/env bash\nexec sleep 30\n")
+        (self.qor / "rc.txt").write_text("0", encoding="utf-8")
+        proc = subprocess.run([str(self.script), "--vtr", "-t", "1", "--rt", str(self.rt),
+                               "--nc", str(slow_nc), "--out", str(self.tmp / "out"),
+                               str(self.root)], capture_output=True, text=True, timeout=TIMEOUT,
+                              env=self.env, check=False)
+        self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
+        report = (self.tmp / "out" / "report.tsv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(["timeout", "-", "pass"], report[1].split("\t")[5:])
 
     def test_cap_check_failed_exits_2(self) -> None:
         proc = self.run_root(2, heavy_ok=True)

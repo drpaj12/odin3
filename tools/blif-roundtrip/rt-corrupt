@@ -1,6 +1,20 @@
 #!/usr/bin/env bash
-# rt-corrupt: odin3-blif-rt wrapper for the negative CTest; damages the written BLIF so that the
+# rt-corrupt: odin3-blif-rt wrapper for the negative CTests; damages the written BLIF so that the
 # blif-roundtrip gates must fail. BRT_REAL_RT names the real driver.
+#   default                  every write: an extra input `zz` on the first .names (idempotence)
+#   BRT_CORRUPT=first-write  only a golden's write (W1, not W2 = the rewrite of a *.w1.blif):
+#                            the first cover row with inputs gets its first literal flipped, a
+#                            different function that W2 keeps, so --vtr's oracle 1 holds and
+#                            oracles 2-4 (netlist-compare, equiv-check) must catch it
 set -euo pipefail
 "${BRT_REAL_RT:?}" "$@"
-sed -i '0,/^\.names /s//.names zz /' "${!#}" # the output is the last argument
+out=${!#}               # the output is the last argument, the input the one before it
+in=${*: -2:1}
+if [ "${BRT_CORRUPT:-}" = first-write ]; then
+    case $in in *.w1.blif) exit 0 ;; esac
+    awk '!done && /^[01-]+ [01]$/ { $0 = (substr($0, 1, 1) == "1" ? "0" : "1") substr($0, 2); done = 1 }
+         { print }' "$out" >"$out.corrupt"
+    mv "$out.corrupt" "$out"
+else
+    sed -i '0,/^\.names /s//.names zz /' "$out"
+fi
