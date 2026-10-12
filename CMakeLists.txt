@@ -75,6 +75,7 @@ add_library(odin3_core OBJECT
     src/frontends/blif/lexer.c
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
+    src/backends/blif/vtr.c
     src/passes/manager.c
     src/passes/builtin.c
     src/passes/write_formats.c
@@ -475,6 +476,14 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3E: write_blif --vtr (tests/unit/blif_vtr_test.c: read a BLIF text, run write_blif).
+    odin3_add_unit_test(test_blif_vtr)
+    target_sources(test_blif_vtr PRIVATE tests/unit/blif_vtr_test.c tests/unit/proc_fixture.c
+                                         tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_blif_vtr PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_BVT_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_techlib_expr)
     odin3_add_unit_test(test_techlib_reader)
     odin3_add_unit_test(test_techlib_libs)

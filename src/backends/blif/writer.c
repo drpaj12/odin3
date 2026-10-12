@@ -1,12 +1,14 @@
 /* writer.c — BLIF writer: modules, cells and declared black boxes of a design. */
 #include "backends/blif/writer.h"
 
+#include "backends/blif/vtr.h"
 #include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/value.h"
+#include "odin3/odin3.h"
 #include "util/alloc.h"
 #include "util/file.h"
 #include "util/hash.h"
@@ -77,6 +79,8 @@ typedef struct blif_writer {
     const odin3_design *design;
     const odin3_strtab *tab;
     const char *path;
+    const odin3_blif_write_opts *opts; /* checked: the dialect, its K and name style */
+    bool vtr;                          /* opts->dialect is ODIN3_BLIF_DIALECT_VTR */
     odin3_atomic_file file; /* a private temporary beside path, renamed over it on success */
     char *buffer;           /* the stdio buffer of file.fp */
     uint32_t line;          /* complete lines written so far */
@@ -1025,8 +1029,8 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     wr_token(wr, str_bytes(wr, odin3_module_name(wr->module)));
     wr_end(wr);
     st = st == ODIN3_OK ? write_module_ports(wr) : st;
-    if (st == ODIN3_OK) {
-        write_clock(wr);
+    if (st == ODIN3_OK && !wr->vtr) {
+        write_clock(wr); /* VPR has no .clock (spec 3E R3) */
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(wr->module); i++) {
         if (odin3_node_live(wr->module, (odin3_node_id){i})) {
@@ -1084,8 +1088,13 @@ static odin3_celltype_id find_type(const blif_writer *wr, const char *name) {
     return type;
 }
 
-static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const char *path) {
-    *wr = (blif_writer){.design = design, .tab = odin3_design_strtab(design), .path = path};
+static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const char *path,
+                            const odin3_blif_write_opts *opts) {
+    *wr = (blif_writer){.design = design,
+                        .tab = odin3_design_strtab(design),
+                        .path = path,
+                        .opts = opts,
+                        .vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR};
     odin3_strbuf_init(&wr->token);
     odin3_strbuf_init(&wr->cand);
     wr->keys = (wr_keys){.clock = find_key(wr, ODIN3_BLIF_ATTR_CLOCK),
@@ -1173,7 +1182,70 @@ static void wr_free(blif_writer *wr) {
     odin3_vec_free(&wr->params);
 }
 
+/* The options' refusals (plan 3E points (m) and (n)); logged, ODIN3_ERR_INVALID_ARG. */
+static odin3_status check_opts(const odin3_blif_write_opts *opts) {
+    bool vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR;
+    bool provenance = opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE;
+    const char *why = NULL;
+    if (!vtr && opts->dialect != ODIN3_BLIF_DIALECT_PLAIN) {
+        why = "odin3_blif_write_with: unknown dialect";
+    } else if (!provenance && opts->name_style != ODIN3_BLIF_NAMES_SHORT) {
+        why = "odin3_blif_write_with: unknown name_style";
+    } else if (!vtr && (opts->lut_k != 0 || provenance)) {
+        why = "odin3_blif_write_with: lut_k and name_style apply to the VTR dialect only";
+    } else if (opts->lut_k != 0 &&
+               (opts->lut_k < ODIN3_BLIF_VTR_MIN_K || opts->lut_k > ODIN3_BLIF_VTR_MAX_K)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_blif_write_with: lut_k %u is outside %u..%u",
+                  (unsigned)opts->lut_k, ODIN3_BLIF_VTR_MIN_K, ODIN3_BLIF_VTR_MAX_K);
+        return ODIN3_ERR_INVALID_ARG;
+    } else if (provenance) {
+        why = "write_blif: --vtr: --name-style provenance is not available yet (3E-6)";
+    }
+    if (why != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "%s", why);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
+/* The VTR dialect's header (spec 3E §5 item 1): no date, host or path, so reruns are identical. */
+static odin3_status write_vtr_header(blif_writer *wr) {
+    odin3_strbuf_clear(&wr->token);
+    odin3_status st = odin3_strbuf_appendf(
+        &wr->token, "# Odin III %s write_blif --vtr (K=%u, names %s)", odin3_version_string(),
+        (unsigned)odin3_blif_vtr_k(wr->opts),
+        wr->opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE ? "provenance" : "short");
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    wr_put(wr, (odin3_bytes){wr->token.data, wr->token.len});
+    wr_newline(wr);
+    wr_newline(wr);
+    return wr->st;
+}
+
+/* Plain: every module, then the declared black boxes. VTR: the header, then the top alone. */
+static void write_design(blif_writer *wr) {
+    if (wr->vtr) {
+        if (write_vtr_header(wr) == ODIN3_OK) {
+            (void)write_module(wr, 1); /* written_module: position 1 is the top */
+        }
+        return;
+    }
+    for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_design_module_end(wr->design); i++) {
+        (void)write_module(wr, i);
+    }
+    if (wr->st == ODIN3_OK) {
+        (void)write_blackboxes(wr);
+    }
+}
+
 odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
+    return odin3_blif_write_with(design, path, NULL);
+}
+
+odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
+                                   const odin3_blif_write_opts *opts) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "blif_write: NULL design or path");
         return ODIN3_ERR_INVALID_ARG;
@@ -1181,16 +1253,24 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path) {
     if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
+    odin3_blif_write_opts use =
+        opts != NULL ? *opts
+                     : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_status st = check_opts(&use);
+    if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {
+        odin3_blif_vtr_report report;
+        st = odin3_blif_vtr_preflight(design, &use, &report); /* before the path is opened */
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
     blif_writer wr;
-    odin3_status st = wr_init(&wr, design, path);
+    st = wr_init(&wr, design, path, &use);
     if (st == ODIN3_OK) {
         st = wr_open(&wr);
     }
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = write_module(&wr, i);
-    }
     if (st == ODIN3_OK) {
-        (void)write_blackboxes(&wr);
+        write_design(&wr);
     }
     wr_close(&wr); /* the status is sticky: wr.st holds the first failure, closing included */
     st = wr.st;

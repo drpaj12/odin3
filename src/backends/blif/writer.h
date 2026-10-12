@@ -7,6 +7,31 @@
 #include "ir/design.h"
 #include "odin3/odin3.h"
 
+#include <stdint.h>
+
+/* BLIF dialects (spec 3E VB-4). */
+typedef enum odin3_blif_dialect {
+    ODIN3_BLIF_DIALECT_PLAIN = 0, /* 1C: every module, IR round trip */
+    ODIN3_BLIF_DIALECT_VTR = 1,   /* 3E: the top only, what VPR and VTR's ABC stage read */
+} odin3_blif_dialect;
+
+/* Net and cell names in the VTR dialect (spec 3E VB-10; the 1F Verilog writer's styles). */
+typedef enum odin3_blif_name_style {
+    ODIN3_BLIF_NAMES_SHORT = 0,      /* own name, else generated (default) */
+    ODIN3_BLIF_NAMES_PROVENANCE = 1, /* hier/<short name>@file:line where provenance has one */
+} odin3_blif_name_style;
+
+typedef struct odin3_blif_write_opts {
+    odin3_blif_dialect dialect;
+    odin3_blif_name_style name_style; /* VTR only; PLAIN requires SHORT */
+    uint32_t lut_k;                   /* VTR only: max .names inputs; 0 = the default */
+} odin3_blif_write_opts;
+
+#define ODIN3_BLIF_VTR_DEFAULT_K 6U /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
+#define ODIN3_BLIF_VTR_MIN_K 2U
+#define ODIN3_BLIF_VTR_MAX_K 16U      /* VB-12 */
+#define ODIN3_BLIF_VTR_MAX_ERRORS 20U /* refusals logged before "N more" */
+
 /*
  * Writes design as BLIF to path (created or truncated). Nothing in the design changes.
  *
@@ -76,5 +101,23 @@
  * escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
+
+/* Writes design to path in opts' dialect; opts NULL = PLAIN with defaults. odin3_blif_write is
+ * odin3_blif_write_with(design, path, NULL). VTR: runs odin3_blif_vtr_preflight first and opens
+ * path only when it passes, so a refused design leaves no file. Errors: as odin3_blif_write,
+ * plus ODIN3_ERR_INVALID_ARG for a preflight refusal or an option out of range. */
+odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
+                                   const odin3_blif_write_opts *opts);
+
+/*
+ * The checks before the preflight, in this order, each logged and ODIN3_ERR_INVALID_ARG with
+ * nothing opened (plan 3E points (m) and (n)): a NULL design or path; a design with processes
+ * (2D EL-33, first); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
+ * name_style apply to the VTR dialect only"); a lut_k outside 2..16 ("odin3_blif_write_with:
+ * lut_k <k> is outside 2..16"); a dialect or name style out of range; VTR with PROVENANCE
+ * ("write_blif: --vtr: --name-style provenance is not available yet (3E-6)", until 3E-6). The VTR
+ * dialect writes the header comment, a blank line and the top module (no `.clock`, no other
+ * module, no black-box model).
+ */
 
 #endif

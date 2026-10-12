@@ -190,22 +190,132 @@ static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     return st;
 }
 
+/* write_blif's arguments (spec 3E §4.3): one path and the options, in any order. */
+typedef struct write_blif_args {
+    odin3_strbuf path;
+    odin3_blif_write_opts opts;
+    uint8_t seen; /* the WB_* bits of the options given so far */
+} write_blif_args;
+
+enum {
+    WB_VTR = 1U << 0,
+    WB_LUT_K = 1U << 1,
+    WB_NAME_STYLE = 1U << 2,
+    WB_DECIMAL = 10,
+    WB_MAX_DIGITS = 9, /* more digits than this are out of range anyway (no overflow) */
+};
+
+/* The value word of an option: "" when the option was the last word. */
+static odin3_bytes wb_value(odin3_bytes *rest) {
+    odin3_bytes value = odin3_pass_arg_next(rest);
+    return value.ptr != NULL ? value : odin3_bytes_cstr("");
+}
+
+static odin3_status wb_lut_k(odin3_bytes value, write_blif_args *out) {
+    const char *text = (const char *)value.ptr;
+    bool ok = value.len > 0 && value.len <= WB_MAX_DIGITS;
+    uint32_t k = 0;
+    for (size_t i = 0; ok && i < value.len; i++) {
+        ok = text[i] >= '0' && text[i] <= '9';
+        k = ok ? k * WB_DECIMAL + (uint32_t)(text[i] - '0') : k;
+    }
+    if (!ok || k < ODIN3_BLIF_VTR_MIN_K || k > ODIN3_BLIF_VTR_MAX_K) {
+        odin3_log(ODIN3_LOG_ERROR, "write_blif: --lut-k expects an integer in %u..%u, got '%.*s'",
+                  ODIN3_BLIF_VTR_MIN_K, ODIN3_BLIF_VTR_MAX_K, (int)value.len, text);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    out->opts.lut_k = k;
+    return ODIN3_OK;
+}
+
+static odin3_status wb_name_style(odin3_bytes value, write_blif_args *out) {
+    if (odin3_pass_arg_is(value, "short")) {
+        out->opts.name_style = ODIN3_BLIF_NAMES_SHORT;
+    } else if (odin3_pass_arg_is(value, "provenance")) {
+        out->opts.name_style = ODIN3_BLIF_NAMES_PROVENANCE;
+    } else {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "write_blif: --name-style expects short or provenance, got '%.*s'",
+                  (int)value.len, (const char *)value.ptr);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
+/* Option word (its value read from rest): unknown, given twice, or parsed into out. */
+static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_args *out) {
+    uint8_t bit = 0;
+    if (odin3_pass_arg_is(word, "--vtr")) {
+        bit = WB_VTR;
+    } else if (odin3_pass_arg_is(word, "--lut-k")) {
+        bit = WB_LUT_K;
+    } else if (odin3_pass_arg_is(word, "--name-style")) {
+        bit = WB_NAME_STYLE;
+    } else {
+        return unknown_arg("write_blif", word);
+    }
+    if ((out->seen & bit) != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_blif: option '%.*s' given twice", (int)word.len,
+                  (const char *)word.ptr);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    out->seen |= bit;
+    if (bit == WB_VTR) {
+        out->opts.dialect = ODIN3_BLIF_DIALECT_VTR;
+        return ODIN3_OK;
+    }
+    odin3_bytes value = wb_value(rest);
+    return bit == WB_LUT_K ? wb_lut_k(value, out) : wb_name_style(value, out);
+}
+
+/*
+ * Plan 3E point (l): the words left to right; a word starting with `-` is an option (unknown and
+ * repeated options fail at once), any other word a path. Then exactly one non-empty path, then
+ * --lut-k and --name-style only with --vtr. Logged, ODIN3_ERR_INVALID_ARG.
+ */
+static odin3_status write_blif_parse(odin3_bytes args, write_blif_args *out) {
+    uint32_t paths = 0;
+    odin3_status st = ODIN3_OK;
+    for (odin3_bytes word = odin3_pass_arg_next(&args); st == ODIN3_OK && word.ptr != NULL;
+         word = odin3_pass_arg_next(&args)) {
+        if (word.len > 0 && ((const char *)word.ptr)[0] == '-') {
+            st = wb_option(word, &args, out);
+        } else if (++paths == 1) {
+            st = odin3_strbuf_append(&out->path, word);
+        }
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (paths != 1 || out->path.len == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_blif: expects one path");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if ((out->seen & (WB_LUT_K | WB_NAME_STYLE)) != 0 && (out->seen & WB_VTR) == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_blif: --lut-k and --name-style need --vtr");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                    void *user) {
     (void)user;
     (void)ctx;
-    odin3_strbuf path;
-    odin3_strbuf_init(&path);
-    odin3_status st = one_path("write_blif", args, &path);
+    write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0},
+                              .seen = 0};
+    odin3_strbuf_init(&parsed.path);
+    odin3_status st = write_blif_parse(args, &parsed);
     odin3_module_id top = odin3_design_top(design);
     if (st == ODIN3_OK && odin3_module_valid(top)) {
-        odin3_log(ODIN3_LOG_DEBUG, "write_blif: %s: top %s first", path.data,
-                  module_name(design, top));
+        odin3_log(ODIN3_LOG_DEBUG, "write_blif: %s: top %s %s", parsed.path.data,
+                  module_name(design, top),
+                  parsed.opts.dialect == ODIN3_BLIF_DIALECT_VTR ? "alone" : "first");
     }
     if (st == ODIN3_OK) {
-        st = odin3_blif_write(design, path.data);
+        st = odin3_blif_write_with(design, parsed.path.data, &parsed.opts);
     }
-    odin3_strbuf_free(&path);
+    odin3_strbuf_free(&parsed.path);
     return st;
 }
 
@@ -538,9 +648,13 @@ static const odin3_pass_def READ_TECHLIB = {
     false,
     ODIN3_PASS_PROCESSES_OK};
 static const odin3_pass_def WRITE_BLIF = {
-    "write_blif",   "write_blif <file>: write the design as BLIF (the top module first)",
-    write_blif_run, NULL,
-    false,          ODIN3_PASS_PROCESSES_REFUSE};
+    "write_blif",
+    "write_blif [--vtr] [--lut-k K] [--name-style short|provenance] <file>: write the design as "
+    "BLIF (the top first); --vtr writes the top alone in the dialect VPR reads",
+    write_blif_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_REFUSE};
 static const odin3_pass_def CHECK = {
     "check",   "check [--fast]: check the IR invariants (IR.md section 9)",
     check_run, NULL,
