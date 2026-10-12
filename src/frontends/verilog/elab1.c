@@ -32,6 +32,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* Debug builds check the elaborated store whatever the options say (EL-2 step 2). */
 #ifdef NDEBUG
@@ -40,7 +41,7 @@ enum { E1_ALWAYS_CHECK = 0 };
 enum { E1_ALWAYS_CHECK = 1 };
 #endif
 
-enum { E1_KEY_SHIFT = 32 };
+enum { E1_KEY_SHIFT = 32, E1_MS_PER_S = 1000, E1_NS_PER_MS = 1000000 };
 
 static const char k_work[] = "work";
 
@@ -498,6 +499,12 @@ odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odi
 
 /* --- odin3_elab_run (EL-2) ------------------------------------------------------------------- */
 
+static double now_ms(void) {
+    struct timespec ts;
+    (void)clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * E1_MS_PER_S + (double)ts.tv_nsec / E1_NS_PER_MS;
+}
+
 /* Step 2's check of the elaborated store (Debug, --check); the store is destroyed on failure. */
 static odin3_status check_elab(odin3_ast **elab) {
     if (!E1_ALWAYS_CHECK && !odin3_pass_get_options().check) {
@@ -510,19 +517,6 @@ static odin3_status check_elab(odin3_ast **elab) {
     odin3_ast_destroy(*elab);
     *elab = NULL;
     return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_ERR_CHECK;
-}
-
-/* Until Task 17 (whose stage 2 calls it as each body starts): the on_body_start test hook for
- * each MODULE of the elaborated store, in order, as stage 2 begins. */
-static void body_hooks(const odin3_ast *elab) {
-    const odin3_elab_test_hooks *hooks = odin3_elab_test_hooks_get();
-    if (hooks->on_body_start == NULL || odin3_ast_root_count(elab) == 0) {
-        return;
-    }
-    odin3_ast_span modules = odin3_ast_children(elab, odin3_ast_root(elab, 0));
-    for (uint32_t i = 0; i < modules.n; i++) {
-        hooks->on_body_start(hooks->user, modules.ids[i]);
-    }
 }
 
 /* Step 6: the design holds the elaborated store and drops it unless the keep level keeps it. */
@@ -548,14 +542,15 @@ odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast
     odin3_status st = odin3_elab1_options(design, opts, &options);
     odin3_elab_test_note_opts(&options);
     odin3_ast *elab = NULL;
+    double started = now_ms();
     st = st != ODIN3_OK ? st : odin3_elab_stage1(ctx, parsed, &options, &elab);
     st = st != ODIN3_OK ? st : check_elab(&elab);
+    options.stage1_ms = now_ms() - started;
     odin3_design_drop_ast(design, parsed_run, ODIN3_AST_FORM_PARSED); /* step 3 */
     if (st != ODIN3_OK) {
         return st;
     }
-    body_hooks(elab);
-    st = odin3_elab_stage2(ctx, elab, &options);
+    st = odin3_elab_stage2(ctx, elab, &options); /* steps 4, 5 and 7 */
     odin3_status held = hand_over_elab(design, elab);
     return held == ODIN3_ERR_NO_MEMORY || st == ODIN3_OK ? held : st; /* NO_MEMORY first */
 }

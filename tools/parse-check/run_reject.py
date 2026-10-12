@@ -16,8 +16,8 @@ case passes when a line starts with line 1 and contains line 2 — for an .err w
 any line (a 2D handover file may raise another row's error first) — the exit status is odin3's
 failure status 1 for an .err (0 for a .warn; a signal or any other status is a crash), and no
 line reports ODIN3_ERR_INVALID_ARG, ODIN3_ERR_CHECK, a check failure (a builder or check failure
-on user input is a 2C bug) or a sanitizer report (AddressSanitizer, LeakSanitizer, UBSan's
-``runtime error:``).
+on user input is a 2C bug; the IR check's warnings are not failures) or a sanitizer report
+(AddressSanitizer, LeakSanitizer, UBSan's ``runtime error:``).
 
 With --elaborate each case is judged on its own (2D plan point (l), review I4): **pass** as
 above; else **fail** on a forbidden line, a signal or a status other than 0 and 1 (2D Task 10
@@ -51,6 +51,9 @@ FORBIDDEN = re.compile(
     r"|AddressSanitizer|LeakSanitizer|UndefinedBehaviorSanitizer|MemorySanitizer|ThreadSanitizer"
     r"|runtime error: "
 )
+# The IR check's warnings (rule W, e.g. an output port nothing drives yet) are not failures: stage 2
+# of a case whose assignment is still pending (2D Task 17) leaves one. An error-level check line is.
+CHECK_WARNING = "odin3: warning: check: "
 EXIT_ODIN3_FAIL = 1  # odin3's exit status for a failed pass (0 success, 2 usage)
 TIMEOUT_S = 120
 # A sanitizer report is printed unsymbolized: symbolizing one can take about two minutes on a
@@ -114,7 +117,12 @@ def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
         line.startswith(expect.prefix) and expect.text in line
         for line in candidates(expect, output, elaborate)
     )
-    forbidden = [line for line in lines if FORBIDDEN.search(line)]
+    raws = output.splitlines()
+    forbidden = [
+        line
+        for raw, line in zip(raws, lines, strict=True)
+        if FORBIDDEN.search(line) and not raw.startswith(CHECK_WARNING)
+    ]
     exit_ok = code == EXIT_ODIN3_FAIL if expect.is_error else code == 0
     if found and exit_ok and not forbidden:
         return Verdict("pass", "")

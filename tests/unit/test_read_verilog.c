@@ -301,25 +301,25 @@ static void test_parse_only_printable(void) {
 /* An empty module: stage 1 is clean on it while every module item is pending (2D point (l)). */
 static const char k_empty_module[] = "module e;\nendmodule\n";
 
-/* Without --parse-only 2D's entry runs: a clean stage 1 reaches stage 2's stub (until 2D Task
- * 17), whose unlocated text fails the pass with PARSE; both stores are freed (keep NONE). */
-static void test_stub_without_parse_only(void) {
+/* Without --parse-only 2D's entry runs: a clean stage 1 reaches stage 2, which elaborates the
+ * empty module, sets the top and logs the summary; both stores are freed (keep NONE). */
+static void test_elaborates_without_parse_only(void) {
     put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
     enter(tmp);
-    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "e1.v"),
-               "\nelaboration is not available yet (2D)\n");
-    TEST_ASSERT_EQUAL_INT(1, errors);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "e1.v"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(logged(), "read_verilog: elaborated top 'e': 1 modules"),
+                                 logged());
+    TEST_ASSERT_EQUAL_INT(0, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_design_top(design).v);
 }
 
-/* Under --keep-ast=all the parsed store survives the failed elaboration (AST-16), and so does the
- * elaborated one. */
-static void test_stub_keeps_parsed_under_all(void) {
+/* Under --keep-ast=all both stores survive the elaboration (AST-16). */
+static void test_keeps_both_under_all(void) {
     put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
     enter(tmp);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_ALL));
-    expect_log(ODIN3_ERR_PARSE, run("read_verilog", "e1.v"),
-               "\nelaboration is not available yet (2D)\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_verilog", "e1.v"));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_design_ast_count(design));
     TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_PARSED, odin3_ast_form_of(odin3_design_ast_at(design, 0)));
     TEST_ASSERT_EQUAL_INT(ODIN3_AST_FORM_ELABORATED,
@@ -656,6 +656,7 @@ typedef struct oom_case {
     const char *project;
     const char *args;
     odin3_status want;
+    uint32_t held; /* stores the design holds after a run that ends in want */
 } oom_case;
 
 /* One step: a fresh design, the record, then the read with allocation limit limit; NO_MEMORY or
@@ -671,14 +672,14 @@ static odin3_status oom_step(const oom_case *oc, int limit) {
     TEST_ASSERT_TRUE_MESSAGE(st == oc->want || st == ODIN3_ERR_NO_MEMORY, logged());
     /* an allocation failure is never reported as a missing file */
     TEST_ASSERT_NULL_MESSAGE(strstr(logged(), "missing_file:"), logged());
-    TEST_ASSERT_EQUAL_UINT32(st == ODIN3_OK ? 1 : 0, odin3_design_ast_count(design));
+    TEST_ASSERT_EQUAL_UINT32(st == oc->want ? oc->held : 0, odin3_design_ast_count(design));
     return st;
 }
 
 /* Fails every allocation in turn until the case runs to its own status; returns the steps. */
 static int oom_sweep(const oom_case *oc) {
     int limit = 0;
-    while (limit < OOM_LIMIT && oom_step(oc, limit) == ODIN3_ERR_NO_MEMORY) {
+    while (limit < OOM_LIMIT && oom_step(oc, limit) != oc->want) {
         limit++;
     }
     TEST_ASSERT_TRUE(limit < OOM_LIMIT);
@@ -686,18 +687,18 @@ static int oom_sweep(const oom_case *oc) {
 }
 
 /* Every allocation fails in turn: a library run, a duplicate_module run (its map, the error
- * path) and a run through the 2D entry (set_ast, stage 1, drop_ast, the stage-2 stub, the
- * elaborated store's hand-over); nothing leaked. */
+ * path) and a run through the 2D entry (set_ast, stage 1, drop_ast, stage 2, the elaborated
+ * store's hand-over); nothing leaked. */
 static void test_oom_sweep(void) {
     enter(D "/lib_v_y");
-    oom_case lib = {"ext.o3proj", "--parse-only", ODIN3_OK};
+    oom_case lib = {"ext.o3proj", "--parse-only", ODIN3_OK, 1};
     TEST_ASSERT_TRUE(oom_sweep(&lib) > 50); /* the read itself allocates, not only the run */
     enter(D "/dup");
-    oom_case dup = {NULL, "--parse-only one.v", ODIN3_ERR_PARSE};
+    oom_case dup = {NULL, "--parse-only one.v", ODIN3_ERR_PARSE, 0};
     (void)oom_sweep(&dup);
     put_tmp("e1.v", odin3_bytes_cstr(k_empty_module));
     enter(tmp);
-    oom_case elab = {NULL, "e1.v", ODIN3_ERR_PARSE};
+    oom_case elab = {NULL, "e1.v", ODIN3_OK, 0};
     (void)oom_sweep(&elab);
 }
 
@@ -726,8 +727,8 @@ int main(void) {
     RUN_TEST(test_missing_file);
     RUN_TEST(test_unreadable_file);
     RUN_TEST(test_parse_only_printable);
-    RUN_TEST(test_stub_without_parse_only);
-    RUN_TEST(test_stub_keeps_parsed_under_all);
+    RUN_TEST(test_elaborates_without_parse_only);
+    RUN_TEST(test_keeps_both_under_all);
     RUN_TEST(test_duplicate_module);
     RUN_TEST(test_duplicate_module_corpus);
     RUN_TEST(test_duplicate_module_per_library);

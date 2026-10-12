@@ -57,6 +57,7 @@ add_library(odin3_core OBJECT
     src/api/celltype.c
     src/api/prov.c
     src/api/ast_abi.c
+    src/api/elab_abi.c
     src/api/srcman_abi.c
     src/api/module.c
     src/api/node.c
@@ -207,7 +208,8 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_decl.c
     src/frontends/verilog/elab1_diag.c
     src/frontends/elab/elab_pending.c
-    src/frontends/elab/elab2_stub.c
+    src/frontends/elab/elab2.c
+    src/frontends/elab/elab2_wires.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -853,6 +855,13 @@ if(BUILD_TESTING)
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_COVERAGE_DIR="${PROJECT_SOURCE_DIR}/tests/verilog/coverage"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 17: stage 2's modules, ports, wires, provenance, attributes, keep levels, budget and
+    # the ABI entry odin3_ast_elaborate (tests/unit/elab_test.h's et_read runs the whole pass).
+    odin3_add_unit_test(test_elab_stage2_wires)
+    target_include_directories(test_elab_stage2_wires PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_wires verilog_generated)
+    target_compile_definitions(test_elab_stage2_wires PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1095,8 +1104,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                            unknown_pass_later_script top top_written_first top_unapplied quoted
                            help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
                            project_dump project_top project_revision project_diag_paths
-                           project_preprocess parse_only parse_only_with_script
-                           abc_script_missing abc_script_project opt_snapshot)
+                           project_preprocess parse_only parse_only_with_script elab_only
+                           elab_only_with_script abc_script_missing abc_script_project opt_snapshot)
         add_test(NAME cli_${_case}
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
