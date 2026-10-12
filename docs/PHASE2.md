@@ -611,8 +611,11 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
      keyword; (r) the error cap counts errors only, the 21st becomes `too many errors;
      stopping`; (s) `vp_*` arity ≤ 5, enum-valued nonterminals through `vp_value`.
    - *Heavy runs:* the three sweep CTests skip (77) unless `ODIN3_HEAVY_OK=1`, so the `-j4`
-     gate never runs them; with it, `parse-corpus --heavy` re-runs itself as `flock
-     /tmp/claude-1000/odin3-heavy.lock systemd-run --user --scope -q --slice=odin3-heavy.slice
-     -p MemoryMax=6G -p MemorySwapMax=0 …` (`ODIN3_HEAVY_RUN` replaces the prefix, e.g. with
-     `tools/heavy-run`; empty for a runner without a user systemd). They move to
-     `odin3_add_sweep_test()` when 2E-1 lands it (agent default).
+     gate never runs them; with it, `parse-corpus --heavy` re-runs itself as `flock -x -w 14400
+     -E 77 /tmp/claude-1000/odin3-heavy.lock systemd-run --user --scope -q
+     --slice=odin3-heavy.slice -p MemoryMax=6G -p MemorySwapMax=0 …` (a busy lock skips after
+     4 h, inside the 12 h CTest timeout). A non-empty `ODIN3_HEAVY_RUN` (e.g. `tools/heavy-run`)
+     replaces the prefix; an empty one is ignored, never an uncapped run. Inside a heavy run
+     (heavy-run's test: the cgroup lies under `$ODIN3_HEAVY_SLICE` and the heavy lock is held on
+     an inherited descriptor) it runs in place; a stale `ODIN3_HEAVY_SLICE` is ignored with a
+     warning. They move to `odin3_add_sweep_test()` when 2E-1 lands it (agent default).

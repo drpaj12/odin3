@@ -20,16 +20,29 @@ argument it was found under, else the file's name. A failure is accepted only wh
 listed; an unlisted failure, a listed file that passes, or a listed path that names no collected
 file fails the run.
 
---heavy marks a heavy sweep (plan point (n), 2E plan C1): unless ODIN3_HEAVY_OK=1 the run is
-skipped with exit 77, so a sweep reached from the -j4 gate does not run. With ODIN3_HEAVY_OK=1 the
-run re-executes itself under the heavy-run protocol, one heavy job machine-wide in the 6 GB slice:
+--heavy marks a heavy sweep (plan point (n), 2E plan C1) and follows tools/heavy-run's contract
+(2E Task 2):
 
-    flock /tmp/claude-1000/odin3-heavy.lock systemd-run --user --scope -q
-          --slice=odin3-heavy.slice -p MemoryMax=6G -p MemorySwapMax=0 <this run>
+- Inside a heavy run (ODIN3_HEAVY_SLICE names a slice, this process's cgroup lies under it, and
+  one of its descriptors holds the heavy lock, inherited from the wrapper) the sweep runs in
+  place: taking the lock again would wait on its own parent. ODIN3_HEAVY_SLICE without that
+  evidence is ignored with a warning.
+- Otherwise it is skipped with exit 77 unless ODIN3_HEAVY_OK=1, so a sweep reached from the -j4
+  gate does not run; with it, the run re-executes itself under the wrapper,
 
-with ODIN3_HEAVY_SLICE=1 set for the inner run (which then sweeps directly). ODIN3_HEAVY_RUN
-replaces that prefix (a shell-quoted command, e.g. ``tools/heavy-run`` once 2E-1 lands it; empty:
-no wrapper, for CI runners without a user systemd).
+      flock -x -w ${ODIN3_HEAVY_WAIT:-14400} -E 77 /tmp/claude-1000/odin3-heavy.lock
+            systemd-run --user --scope -q --slice=odin3-heavy.slice -p MemoryMax=6G
+            -p MemorySwapMax=0 <this run>
+
+  (flock's child keeps the locked descriptor; a lock busy past the wait exits 77, a skip, well
+  inside the CTest TIMEOUT of 43200 s), with ODIN3_HEAVY_SLICE=odin3-heavy.slice for the inner
+  run. A non-empty ODIN3_HEAVY_RUN (a shell-quoted command, e.g. ``tools/heavy-run`` once 2E-1
+  lands it) replaces that prefix and must export ODIN3_HEAVY_SLICE itself, as heavy-run does; an
+  empty one is ignored with a warning (never an uncapped run). An inner run that the wrapper did
+  not put inside a heavy run exits 2 instead of wrapping again.
+
+ODIN3_HEAVY_DIR (the lock's directory) and ODIN3_HEAVY_CGROUP (read instead of /proc/self/cgroup)
+exist for the tests only, as in heavy-run.
 
 A file whose check runs past an hour is that file's failure.
 
@@ -54,11 +67,9 @@ EXIT_TIMEOUT = 124
 TIMEOUT_S = 3600
 TAIL_LINES = 4
 SOURCE_CAP = 1 << 28  # 2B's per-file source cap (ODIN3_PP_MAX_SOURCE_BYTES)
-HEAVY_LOCK = "/tmp/claude-1000/odin3-heavy.lock"
-HEAVY_PREFIX = (
-    "flock", HEAVY_LOCK, "systemd-run", "--user", "--scope", "-q", "--slice=odin3-heavy.slice",
-    "-p", "MemoryMax=6G", "-p", "MemorySwapMax=0",
-)  # fmt: skip
+HEAVY_SLICE = "odin3-heavy.slice"
+HEAVY_WAIT_S = 14400  # under the sweeps' CTest TIMEOUT of 43200 s
+WRAPPED = "ODIN3_PARSE_CORPUS_WRAPPED"  # set for the inner run: never wrap twice
 
 
 @dataclass(frozen=True)
@@ -221,28 +232,84 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def heavy_prefix() -> list[str]:
-    """The heavy-run wrapper: ODIN3_HEAVY_RUN (shell-quoted; empty: none), else HEAVY_PREFIX."""
-    custom = os.environ.get("ODIN3_HEAVY_RUN")
-    return shlex.split(custom) if custom is not None else list(HEAVY_PREFIX)
+def heavy_lock() -> Path:
+    return Path(os.environ.get("ODIN3_HEAVY_DIR", "/tmp/claude-1000")) / "odin3-heavy.lock"
+
+
+def inside_heavy_run() -> bool:
+    """tools/heavy-run's test: ODIN3_HEAVY_SLICE names a slice this process's cgroup lies under,
+    and one of its descriptors is the heavy lock (inherited, so held by the wrapper)."""
+    slice_name = os.environ.get("ODIN3_HEAVY_SLICE", "")
+    try:
+        cgroup = Path(os.environ.get("ODIN3_HEAVY_CGROUP", "/proc/self/cgroup")).read_text()
+        lock = os.path.realpath(heavy_lock())
+        fds = [os.readlink(fd) for fd in Path("/proc/self/fd").iterdir() if fd.is_symlink()]
+    except OSError:
+        return False
+    return bool(slice_name) and f"/{slice_name}/" in cgroup and lock in fds
+
+
+def warn(text: str) -> None:
+    print(f"parse-corpus: warning: {text}", file=sys.stderr)
+
+
+def default_prefix() -> list[str]:
+    wait = os.environ.get("ODIN3_HEAVY_WAIT", str(HEAVY_WAIT_S))
+    return [
+        "flock", "-x", "-w", wait, "-E", str(EXIT_SKIP), str(heavy_lock()),
+        "systemd-run", "--user", "--scope", "-q", f"--slice={HEAVY_SLICE}",
+        "-p", "MemoryMax=6G", "-p", "MemorySwapMax=0",
+    ]  # fmt: skip
 
 
 def run_heavy(args: Sequence[str]) -> int:
-    """This run again under heavy_prefix(), marked ODIN3_HEAVY_SLICE=1; its exit code."""
-    cmd = [*heavy_prefix(), sys.executable, str(Path(__file__).resolve()), *args]
-    env = {**os.environ, "ODIN3_HEAVY_SLICE": "1"}
+    """This run again under the heavy-run wrapper; its exit code."""
+    env = {k: v for k, v in os.environ.items() if k != "ODIN3_HEAVY_SLICE"}
+    custom = os.environ.get("ODIN3_HEAVY_RUN")
+    if custom is not None and not custom.strip():
+        warn("ODIN3_HEAVY_RUN is empty; ignoring it (a heavy sweep never runs uncapped)")
+        custom = None
+    if custom is None:
+        prefix = default_prefix()
+        heavy_lock().parent.mkdir(parents=True, exist_ok=True)
+        env["ODIN3_HEAVY_SLICE"] = HEAVY_SLICE
+    else:
+        prefix = shlex.split(custom)
+    env[WRAPPED] = "1"
+    cmd = [*prefix, sys.executable, str(Path(__file__).resolve()), *args]
     sys.stdout.flush()
     return subprocess.run(cmd, env=env, check=False).returncode
+
+
+def heavy_gate(args: Sequence[str]) -> int | None:
+    """None to sweep here; else the exit code (skip, the wrapped run's, or 2)."""
+    if inside_heavy_run():
+        return None
+    if os.environ.get(WRAPPED) == "1":
+        print(
+            "parse-corpus: the heavy wrapper did not put this run inside a heavy run "
+            f"({HEAVY_SLICE} and the heavy lock); not wrapping again",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    if os.environ.get("ODIN3_HEAVY_SLICE"):
+        warn(
+            f"ODIN3_HEAVY_SLICE={os.environ['ODIN3_HEAVY_SLICE']} is set outside a heavy run "
+            "(not in that slice, or no heavy lock held); ignoring it"
+        )
+    if os.environ.get("ODIN3_HEAVY_OK") != "1":
+        print("parse-corpus: skipped: a heavy sweep (set ODIN3_HEAVY_OK=1 to run it)")
+        return EXIT_SKIP
+    return run_heavy(args)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     opts = parse_args(args)
-    if opts.heavy and os.environ.get("ODIN3_HEAVY_OK") != "1":
-        print("parse-corpus: skipped: a heavy sweep (set ODIN3_HEAVY_OK=1 to run it)")
-        return EXIT_SKIP
-    if opts.heavy and os.environ.get("ODIN3_HEAVY_SLICE") != "1":
-        return run_heavy(args)
+    if opts.heavy:
+        gated = heavy_gate(args)
+        if gated is not None:
+            return gated
     try:
         expect = read_expect(opts.expect_fail) if opts.expect_fail is not None else {}
         root = opts.root.resolve() if opts.root is not None else None

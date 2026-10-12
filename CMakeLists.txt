@@ -916,9 +916,10 @@ if(BUILD_TESTING)
     # benchmark together when VTR_ROOT is set at configure time (koios/lenet.v last, point (n));
     # every committed BLIF through odin3-write --verilog (Review Focus 1). They are heavy sweeps
     # (label `sweep`, outside the -j4 gate): parse-corpus --heavy skips them with 77 unless
-    # ODIN3_HEAVY_OK=1, and then re-runs itself under the heavy-run protocol (flock on
-    # /tmp/claude-1000/odin3-heavy.lock, systemd-run --scope in odin3-heavy.slice, MemoryMax=6G,
-    # no swap), or under ODIN3_HEAVY_RUN when it is set (tools/heavy-run once 2E-1 lands it).
+    # ODIN3_HEAVY_OK=1, and then re-runs itself under the heavy-run protocol (flock -w 14400 -E 77
+    # on /tmp/claude-1000/odin3-heavy.lock, systemd-run --scope in odin3-heavy.slice,
+    # MemoryMax=6G, no swap), or under a non-empty ODIN3_HEAVY_RUN (tools/heavy-run once 2E-1
+    # lands it); inside a heavy run (heavy-run's slice + inherited-lock test) it runs in place.
     # Run them as `ODIN3_HEAVY_OK=1 ctest --preset release -L sweep`. Switch them to
     # odin3_add_sweep_test() (2E plan C1) when 2E-1 lands it.
     set(_parse_corpus ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/parse_corpus.py
