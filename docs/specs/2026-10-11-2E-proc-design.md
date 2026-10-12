@@ -892,7 +892,7 @@ typedef struct odin3_proc_stats { /* filled on success and on failure */
 odin3_status odin3_proc_run(odin3_pass_ctx *ctx, odin3_design *design,
                             const odin3_proc_opts *opts, odin3_proc_stats *stats);
 uint64_t odin3_design_bytes_reserved(const odin3_design *design);              /* src/ir */
-odin3_status odin3_budget_check(odin3_pass_ctx *ctx, const odin3_design *design,
+odin3_status odin3_budget_check(const odin3_pass_ctx *ctx, const odin3_design *design,
                                 uint64_t extra_bytes);                         /* src/passes */
 
 /* proc_internal.h — one module's lowering */

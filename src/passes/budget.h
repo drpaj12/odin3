@@ -19,7 +19,9 @@ enum { ODIN3_BUDGET_FRACTION = 60 };
 
 /*
  * The limit in bytes: ODIN3_BUDGET_FRACTION% of sysconf(_SC_PHYS_PAGES) x sysconf(_SC_PAGESIZE),
- * or of 8 GiB when either call fails; the test hook's value instead while one is set.
+ * or of 8 GiB when either call fails; the test hook's value instead while one is set. Physical
+ * memory, not a cgroup cap: under tools/heavy-run's 6G slice the limit lies above the cap, so a
+ * sweep that outgrows the slice ends with the OOM killer's 137, not E6. E6 guards ad hoc runs.
  */
 uint64_t odin3_budget_limit(void);
 

@@ -32,6 +32,9 @@ BASH = shutil.which("bash") or "/bin/bash"
 SKIP = 77
 WAIT_S = 10.0
 
+# A cgroup line as /proc/self/cgroup reads outside any heavy slice.
+CGROUP_OUT = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/run-r0.scope\n"
+
 # Each fake appends one line per call to $FAKE_LOG: its name and argv, then key=value facts.
 FAKE_SYSTEMCTL = """#!{bash}
 echo "systemctl $*" >>"$FAKE_LOG"
@@ -100,6 +103,10 @@ class FakeTools(unittest.TestCase):
         self.env["PATH"] = f"{self.bin}:{os.environ.get('PATH', '/usr/bin:/bin')}"
         self.env["FAKE_LOG"] = str(self.log)
         self.env["ODIN3_HEAVY_DIR"] = str(self.heavy)
+        # outside any heavy slice by default, even when ctest itself runs under heavy-run
+        outside = self.dir / "cgroup-outside"
+        outside.write_text(CGROUP_OUT)
+        self.env["ODIN3_HEAVY_CGROUP"] = str(outside)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -136,6 +143,18 @@ class HeavyRunTest(FakeTools):
         assert unit is not None
         self.assertEqual(calls[3], f"systemctl --user stop {unit.group(1)}.scope")
         self.assertEqual(sorted(p.name for p in self.heavy.iterdir()), ["odin3-heavy.lock"])
+
+    def test_the_slice_is_stopped_after_the_job(self) -> None:
+        """Strays outside the job's scope (memcap.py's own scopes) go with the slice; under a
+        private ODIN3_HEAVY_DIR only with ODIN3_HEAVY_STOP_SLICE=1 (review finding 3)."""
+        run = self.run_tool(HEAVY_RUN, "true", ODIN3_HEAVY_OK="1", ODIN3_HEAVY_STOP_SLICE="1")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        calls = self.calls()
+        self.assertEqual(len(calls), 5, calls)
+        self.assertRegex(calls[3], r"^systemctl --user stop odin3-heavy-[0-9]+-[0-9]+\.scope$")
+        self.assertEqual(calls[4], "systemctl --user stop odin3-heavy.slice")
+        self.assertIn('[[ $dir == /tmp/claude-1000 || ${ODIN3_HEAVY_STOP_SLICE:-} == 1 ]]',
+                      HEAVY_RUN.read_text())  # the machine's lock always stops it
 
     def test_the_flag_names_the_pid(self) -> None:
         script = self.dir / "show-flag"
@@ -215,8 +234,8 @@ CGROUP_IN = "0::/user.slice/user-1000.slice/user@1000.service/odin3.slice/{slice
 
 class NestingTest(FakeTools):
     """Inside a heavy run heavy-run runs the job as is and builds refuse; the evidence is the
-    process's cgroup (faked with ODIN3_HEAVY_CGROUP) and the heavy lock on fd 9, not the variable
-    ODIN3_HEAVY_SLICE alone."""
+    process's cgroup (faked with ODIN3_HEAVY_CGROUP) and the heavy lock on fd 9, never the variable
+    ODIN3_HEAVY_SLICE. In the slice without fd 9 both exit 2 at once."""
 
     def cgroup_file(self, slice_name: str) -> str:
         path = self.dir / f"cgroup-{slice_name}"
@@ -224,18 +243,22 @@ class NestingTest(FakeTools):
         return str(path)
 
     def inside(self, tool: Path, *args: str, slice_name: str = "odin3-heavy.slice",
-               fd9: bool = True, in_slice: bool = True) -> subprocess.CompletedProcess[str]:
-        """Runs tool as a heavy run's job would: ODIN3_HEAVY_SLICE set, in the slice (unless not
-        in_slice), and the heavy lock open on fd 9 (unless not fd9)."""
+               fd9: bool = True, in_slice: bool = True, env_slice: str | None = None,
+               **extra: str) -> subprocess.CompletedProcess[str]:
+        """Runs tool as a heavy run's job would: in the slice (unless not in_slice), the heavy
+        lock open on fd 9 (unless not fd9), and ODIN3_HEAVY_SLICE=env_slice (default
+        slice_name; empty unsets it)."""
         self.heavy.mkdir(exist_ok=True)
         opener = f'exec 9>>"{self.lock}"; ' if fd9 else ""
-        env = {"ODIN3_HEAVY_SLICE": slice_name}
+        env = {**self.env, **extra}
+        env_slice = slice_name if env_slice is None else env_slice
+        if env_slice:
+            env["ODIN3_HEAVY_SLICE"] = env_slice
         if in_slice:
             env["ODIN3_HEAVY_CGROUP"] = self.cgroup_file(slice_name)
         script = f'{opener}exec {BASH} "$@"'
-        return subprocess.run([BASH, "-c", script, "job", str(tool), *args],
-                              env={**self.env, **env}, capture_output=True, text=True,
-                              timeout=60, check=False)
+        return subprocess.run([BASH, "-c", script, "job", str(tool), *args], env=env,
+                              capture_output=True, text=True, timeout=60, check=False)
 
     def test_nested_heavy_run_runs_in_place(self) -> None:
         run = self.inside(HEAVY_RUN, "echo", "inner")
@@ -259,18 +282,53 @@ class NestingTest(FakeTools):
         self.assertIn("build-locked: refused inside a heavy run (odin3-heavy.slice)", run.stderr)
         self.assertEqual(self.calls(), [])
 
+    def test_in_the_slice_without_the_descriptor_fails_at_once(self) -> None:
+        """A parent closed fd 9 (Python's close_fds): exit 2, no wait, no lock (final review I1)."""
+        self.real_flock()
+        self.heavy.mkdir()
+        holder = os.open(self.lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)  # the ancestor heavy run's lock
+            for env_slice in ("odin3-heavy.slice", ""):  # the variable does not matter
+                start = time.monotonic()
+                run = self.inside(HEAVY_RUN, "echo", "never", fd9=False, env_slice=env_slice,
+                                  ODIN3_HEAVY_OK="1", ODIN3_HEAVY_WAIT="30")
+                self.assertLess(time.monotonic() - start, 10.0)
+                self.assertEqual(run.returncode, 2)
+                self.assertEqual(run.stdout, "")
+                self.assertEqual(run.stderr, "heavy-run: nested heavy-run lost the lock "
+                                             "descriptor; the parent must pass fd 9 (Python: "
+                                             "pass_fds=(9,))\n")
+                start = time.monotonic()
+                run = self.inside(BUILD_LOCKED, "--preset", "debug", fd9=False,
+                                  env_slice=env_slice)
+                self.assertLess(time.monotonic() - start, 10.0)
+                self.assertEqual(run.returncode, 2)
+                self.assertIn("build-locked: refused inside a heavy run (odin3-heavy.slice)",
+                              run.stderr)
+        finally:
+            os.close(holder)
+        self.assertEqual(self.calls(), [])  # no slice set-up, no scope, no build
+        self.assertEqual([p.name for p in self.heavy.iterdir()], ["odin3-heavy.lock"])
+
+    def test_under_build_locked_fails_at_once(self) -> None:
+        """The heavy lock open outside a heavy slice (build-locked's shared lock, inherited by
+        every build child): exit 2 instead of waiting on its own tree (review finding 2)."""
+        run = self.inside(HEAVY_RUN, "echo", "never", in_slice=False, ODIN3_HEAVY_OK="1")
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("heavy-run: started under build-locked", run.stderr)
+        self.assertIn("run the sweep outside the build", run.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_stale_variable_is_ignored(self) -> None:
-        """ODIN3_HEAVY_SLICE without the evidence: warned, unset, the normal path (review r2)."""
+        """ODIN3_HEAVY_SLICE outside a heavy slice: warned, unset, the normal path (review r2)."""
         warning = ("heavy-run: warning: ODIN3_HEAVY_SLICE=odin3-heavy.slice is set outside a "
-                   "heavy run (not in that slice, or no heavy lock held); ignoring it\n")
+                   "heavy run (not in that slice); ignoring it\n")
         run = self.run_tool(HEAVY_RUN, "echo", "never", ODIN3_HEAVY_SLICE="odin3-heavy.slice")
         self.assertEqual(run.returncode, SKIP)  # no ODIN3_HEAVY_OK: skipped, not run uncapped
         self.assertEqual(run.stdout, "")
         self.assertEqual(run.stderr, warning + "heavy-run: ODIN3_HEAVY_OK is not 1; skipped\n")
-        for fd9, in_slice in ((False, True), (True, False)):  # half the evidence is not enough
-            run = self.inside(HEAVY_RUN, "echo", "never", fd9=fd9, in_slice=in_slice)
-            self.assertEqual(run.returncode, SKIP)
-            self.assertEqual(run.stderr, warning + "heavy-run: ODIN3_HEAVY_OK is not 1; skipped\n")
         run = self.run_tool(HEAVY_RUN, "echo", "hi", ODIN3_HEAVY_OK="1",
                             ODIN3_HEAVY_SLICE="odin3-heavy.slice")
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -285,20 +343,41 @@ class NestingTest(FakeTools):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("build-locked: warning: ODIN3_HEAVY_SLICE=odin3-heavy.slice is set outside",
                       run.stderr)
+        self.assertIn("(not in that slice); ignoring it", run.stderr)
         self.assertEqual(self.calls()[-1],
                          f"flock -s {self.lock} cmake --build --preset debug | flag=no fd9=none")
 
     def test_nested_with_the_real_lock(self) -> None:
         """A heavy run whose job calls heavy-run and build-locked: no wait on its own lock."""
         self.real_flock()
-        inner = (f"{BASH} {HEAVY_RUN} echo inner && "
+        # the job enters the slice (the fake systemd-run cannot move it there)
+        inner = (f"export ODIN3_HEAVY_CGROUP={self.cgroup_file('odin3-heavy.slice')}; "
+                 f"{BASH} {HEAVY_RUN} echo inner && "
                  f"{{ {BASH} {BUILD_LOCKED} --preset debug; echo build=$?; }}")
         start = time.monotonic()
         run = self.run_tool(HEAVY_RUN, BASH, "-c", inner, ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_WAIT="5",
-                            ODIN3_HEAVY_CGROUP=self.cgroup_file("odin3-heavy.slice"))
+                            ODIN3_HEAVY_WAIT="5")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "inner\nbuild=2\n")
+        self.assertLess(time.monotonic() - start, 5.0)
+
+    def test_python_driver_must_pass_fd9(self) -> None:
+        """A Python driver's nested step runs in place with pass_fds=(9,), and fails at once
+        (exit 2, not a 4 h wait) without it, since subprocess closes fd 9 by default."""
+        self.real_flock()
+        driver = ("import subprocess, sys\n"
+                  "for fds in ((9,), ()):\n"
+                  f"    step = subprocess.run([{BASH!r}, {str(HEAVY_RUN)!r}, 'echo', 'step'],"
+                  " pass_fds=fds)\n"
+                  "    print(f'rc={step.returncode}', flush=True)\n")
+        inner = (f"export ODIN3_HEAVY_CGROUP={self.cgroup_file('odin3-heavy.slice')}; "
+                 f"exec python3 -I -c \"$1\"")
+        start = time.monotonic()
+        run = self.run_tool(HEAVY_RUN, BASH, "-c", inner, "job", driver, ODIN3_HEAVY_OK="1",
+                            ODIN3_HEAVY_WAIT="5")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, "step\nrc=0\nrc=2\n")
+        self.assertIn("pass_fds=(9,)", run.stderr)
         self.assertLess(time.monotonic() - start, 5.0)
 
 
@@ -433,6 +512,8 @@ class LiveProbeTest(unittest.TestCase):
     def test_slice_cap_is_set(self) -> None:
         if not _user_manager():
             self.skipTest("no systemd-run --user")
+        if "/odin3-heavy" in Path("/proc/self/cgroup").read_text():
+            self.skipTest("already inside a heavy slice")
         env = {k: v for k, v in os.environ.items() if not k.startswith("ODIN3_HEAVY")}
         with tempfile.TemporaryDirectory() as heavy:  # never the machine's lock
             run = subprocess.run([BASH, str(HEAVY_RUN), "true"],

@@ -1699,6 +1699,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `--a-only` writes `a.blif` and never runs B or `equiv-check`;
 - a `0.69` version refused, and accepted with `--allow-version 0.69`;
 - `memcap.run` wraps each child in `systemd-run --user --scope -q -p MemoryMax=… -p MemorySwapMax=0` when available;
+  (2E-1 final review: a Python driver that spawns nested heavy steps must pass `pass_fds=(9,)`, or a nested `tools/heavy-run` exits 2 and `build-locked` refuses;)
 - an ASan child without `systemd-run` → exit 77;
 - `memcap.run` refuses a cap above 60% of `MemTotal` (a fake `/proc/meminfo`).
 
