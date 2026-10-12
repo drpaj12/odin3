@@ -1,10 +1,12 @@
 /* writer.c — BLIF writer: modules, cells and declared black boxes of a design. */
 #include "backends/blif/writer.h"
 
+#include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
 #include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
+#include "ir/lut.h"
 #include "ir/module.h"
 #include "ir/proc.h"
 #include "ir/value.h"
@@ -61,6 +63,9 @@ static const char *const NO_BLIF_FORM[WR_NO_BLIF] = {"$adffe",   "$sdffe",    "$
                                                      "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
                                                      "$adlatch", "$dlatchsr", "$sr"};
 
+/* 3D's $lut (AB-2), written as `.names` with odin3_blif_isop's cover in both dialects (3E-5). */
+static const char LUT_TYPE_NAME[] = "$lut";
+
 /* The .latch type word of each built-in; NULL for $sop and for $_FF_ (no type, no control). */
 static const char *const LATCH_WORDS[WR_BUILTINS] = {NULL, "re", "fe", "ah", "al", NULL};
 
@@ -95,11 +100,13 @@ typedef struct blif_writer {
     const char *model; /* name of the model being written, for messages */
     odin3_celltype_id builtin[WR_BUILTINS];
     odin3_celltype_id no_blif[WR_NO_BLIF]; /* NO_BLIF_FORM's IDs; 0 when not registered */
+    odin3_celltype_id lut;                 /* $lut's ID; 0 when not registered */
     wr_keys keys;
     odin3_u64map *type_module; /* module cell type -> module ID */
     odin3_u64map *declared;    /* declared cell type -> its first declared-model index */
     odin3_strbuf token;        /* the token being built */
     odin3_strbuf cand;         /* a candidate generated name */
+    odin3_strbuf cover;        /* a $lut's rows (odin3_blif_isop) */
     /* the VTR dialect's names (spec 3E VB-10) */
     odin3_blif_names
         *names;         /* VTR: the top's names from the preflight's plan, lent to the writer */
@@ -541,13 +548,18 @@ static odin3_bytes pin_name(const blif_writer *wr, odin3_pin_id pin) {
                                 : gen_get(wr, ((uint64_t)1 << PIN_KEY_SHIFT) | pin.v);
 }
 
+/* True for a $lut (3D AB-2): a `.names` in both dialects (3E-5). */
+static bool is_lut(const blif_writer *wr, odin3_celltype_id type) {
+    return wr->lut.v != 0 && type.v == wr->lut.v;
+}
+
 /* True for a node whose pins are written by net name even when unconnected (.names, .latch and
- * port nodes; in the VTR dialect the gates too, written as .names); .subckt skips unconnected
- * pins. */
+ * port nodes, and $lut; in the VTR dialect the gates too, written as .names); .subckt skips
+ * unconnected pins. */
 static bool names_every_pin(const blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
     odin3_blif_vtr_rows rows;
-    return builtin_of(wr, type) != WR_BUILTINS ||
+    return builtin_of(wr, type) != WR_BUILTINS || is_lut(wr, type) ||
            odin3_celltype_get(wr->design, type)->gran == ODIN3_GRAN_PORT ||
            (wr->vtr && odin3_blif_vtr_rows_of(wr->module, node, &rows));
 }
@@ -1230,6 +1242,55 @@ static odin3_status write_names_vtr(blif_writer *wr, odin3_node_id node,
     return wr->st;
 }
 
+/* The rows of `inputs` inputs odin3_blif_isop left in wr->cover (each `<plane> <out>` and a
+ * newline), one line each. */
+static void write_cover(blif_writer *wr, uint32_t inputs) {
+    size_t row = (size_t)inputs + 2U; /* the plane, a blank, the output; then the newline */
+    for (size_t at = 0; at + row < wr->cover.len; at += row + 1U) {
+        wr_put(wr, (odin3_bytes){wr->cover.data + at, row});
+        wr_newline(wr);
+    }
+}
+
+/*
+ * A $lut (3D AB-2) as `.names A[0] … A[WIDTH-1] Y` (cover column j is A[j]) with odin3_blif_isop's
+ * cover of its LUT parameter: the shorter of the on-set and off-set ISOP (spec 3E §6, plan 3E
+ * point (t)), so a BLIF round trip turns it into the $sop of that cover. A constant table is the
+ * zero-input generator `.names Y` (no row for 0, the row `1` for 1), its inputs dropped. In both
+ * dialects; VTR reads the inputs per §9.2 (source_name).
+ */
+static odin3_status write_lut(blif_writer *wr, odin3_node_id node) {
+    uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
+    if (!odin3_blif_vtr_eval(wr->module, node, tt)) { /* check refuses such parameters first */
+        return wr_refuse(wr, "parameters $lut's verify refuses; cannot write a cell of",
+                         LUT_TYPE_NAME);
+    }
+    uint32_t k = (uint32_t)odin3_node_param(wr->module, node, ODIN3_LUT_P_WIDTH)->i;
+    odin3_pinslice in = odin3_node_port(wr->module, node, ODIN3_LUT_PORT_A);
+    assert(in.count == k); /* A is WIDTH bits (its width rule, IR-8) */
+    uint32_t rows = 0;
+    int constant = -1;
+    odin3_strbuf_clear(&wr->cover);
+    odin3_status st = odin3_blif_isop(tt, k, &wr->cover, &rows, &constant);
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    odin3_bytes out = pin_name(wr, odin3_node_port(wr->module, node, ODIN3_LUT_PORT_Y).first);
+    if (constant >= 0) {
+        write_constant(wr, out, constant);
+        return wr->st;
+    }
+    wr_begin(wr, ".names");
+    for (uint32_t j = 0; j < in.count; j++) {
+        odin3_pin_id pin = {in.first.v + j};
+        wr_token(wr, wr->vtr ? source_name(wr, pin, false) : pin_name(wr, pin));
+    }
+    wr_token(wr, out);
+    wr_end(wr);
+    write_cover(wr, k);
+    return wr->st;
+}
+
 /* `.latch D Q [type C] init`. */
 static odin3_status write_latch(blif_writer *wr, odin3_node_id node, wr_builtin which) {
     const char *word = LATCH_WORDS[which];
@@ -1710,13 +1771,16 @@ static bool lacks_blif_form(const blif_writer *wr, odin3_celltype_id type) {
     return false;
 }
 
-/* VTR: one cell (spec 3E §6): a $sop or gate as .names, a $_CONST*_ as no line (its readers
- * read gnd/vcc/unconn, §9), $_DFF_P_ as .latch, a hard cell as .subckt (the preflight refused
- * every other cell). No .cname/.attr/.param: VPR reads them in extended BLIF only (R3). */
+/* VTR: one cell (spec 3E §6): a $sop, gate or $lut as .names, a $_CONST*_ as no line (its
+ * readers read gnd/vcc/unconn, §9), $_DFF_P_ as .latch, a hard cell as .subckt (the preflight
+ * refused every other cell). No .cname/.attr/.param: VPR reads them in extended BLIF only (R3). */
 static odin3_status write_cell_vtr(blif_writer *wr, odin3_node_id node) {
     odin3_blif_vtr_rows rows;
     if (odin3_blif_vtr_rows_of(wr->module, node, &rows)) {
         return write_names_vtr(wr, node, &rows);
+    }
+    if (is_lut(wr, odin3_node_type(wr->module, node))) {
+        return write_lut(wr, node);
     }
     if (odin3_blif_vtr_const_cell(wr->module, node)) {
         return wr->st;
@@ -1747,6 +1811,8 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     odin3_status st = ODIN3_OK;
     if (which == WR_SOP) {
         st = write_names(wr, node);
+    } else if (is_lut(wr, type)) {
+        st = write_lut(wr, node);
     } else if (which < WR_BUILTINS) {
         st = write_latch(wr, node, which);
     } else {
@@ -2061,6 +2127,7 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
                         .vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR};
     odin3_strbuf_init(&wr->token);
     odin3_strbuf_init(&wr->cand);
+    odin3_strbuf_init(&wr->cover);
     odin3_strbuf_init(&wr->orig);
     odin3_strbuf_init(&wr->legal);
     odin3_strbuf_init(&wr->first_orig);
@@ -2074,6 +2141,7 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     for (uint32_t i = 0; i < WR_NO_BLIF; i++) {
         wr->no_blif[i] = find_type(wr, NO_BLIF_FORM[i]);
     }
+    wr->lut = find_type(wr, LUT_TYPE_NAME);
     wr->type_module = odin3_u64map_create(0);
     wr->declared = odin3_u64map_create(0);
     if (wr->type_module == NULL || wr->declared == NULL) {
@@ -2142,6 +2210,7 @@ static void wr_free(blif_writer *wr) {
     odin3_util_free(wr->buffer);
     odin3_strbuf_free(&wr->token);
     odin3_strbuf_free(&wr->cand);
+    odin3_strbuf_free(&wr->cover);
     odin3_strbuf_free(&wr->orig);
     odin3_strbuf_free(&wr->legal);
     odin3_strbuf_free(&wr->first_orig);

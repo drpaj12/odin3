@@ -1,6 +1,8 @@
 /*
- * test_blif_writer.c — unit tests for the BLIF writer (read → write → read round trips).
+ * test_blif_writer.c — unit tests for the BLIF writer (read → write → read round trips), with the
+ * plain dialect's constants (3E-3) and $lut as `.names` (3E-5).
  */
+#include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
 #include "frontends/blif/attrs.h"
 #include "frontends/blif/reader.h"
@@ -1392,6 +1394,112 @@ static void test_out_of_memory_sweep_constants(void) {
     oom_sweep();
 }
 
+/* --- $lut as `.names` with odin3_blif_isop's cover (3E-5, Task 9) ---------------------------- */
+
+enum { LUT_TEST_MAX_K = 3 };
+
+/* A $lut's WIDTH and table (bit i = LUT[i]). */
+typedef struct lut_case {
+    uint32_t width;
+    uint64_t table;
+} lut_case;
+
+/* Module top: scalar inputs a, b, … (WIDTH of them), output y, and one $lut of the case on them
+ * (A[j] = the j-th input) driving y; its node. */
+static odin3_node_id build_lut_top(lut_case lc) {
+    static const char *const NAMES[LUT_TEST_MAX_K] = {"a", "b", "c"};
+    uint8_t bits[1U << LUT_TEST_MAX_K];
+    TEST_ASSERT_TRUE(lc.width >= 1 && lc.width <= LUT_TEST_MAX_K);
+    odin3_module *module = new_module(design, "top");
+    odin3_net_id ins[LUT_TEST_MAX_K];
+    for (uint32_t j = 0; j < lc.width; j++) {
+        ins[j] = port_net(module, NAMES[j], ODIN3_DIR_IN);
+    }
+    odin3_net_id out = port_net(module, "y", ODIN3_DIR_OUT);
+    for (uint32_t i = 0; i < 1U << lc.width; i++) {
+        bits[i] = (uint8_t)(((lc.table >> i) & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0);
+    }
+    odin3_value params[2] = {odin3_value_int(lc.width), {.kind = ODIN3_VAL_BITS}};
+    params[1].bits = bits;
+    params[1].len = 1U << lc.width;
+    odin3_node_spec spec = {.type = type_named(design, "$lut"), .params = params, .n_params = 2};
+    const odin3_netvec ports[] = {{ins, lc.width}, {&out, 1}};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    return node;
+}
+
+/* The read-back $sop on y (design2) computes the LUT's table (3D §13.3 item 1): the same k-input
+ * table, or for a constant LUT a zero-input $sop of that value. */
+static void expect_read_back_table(lut_case lc) {
+    odin3_module *back = module_of(design2, 1);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type(design2, back, "$sop"));
+    odin3_net_id y_net = odin3_module_find_net(back, find_in(design2, "y"));
+    odin3_node_id sop = odin3_pin_node(back, odin3_net_driver(back, y_net));
+    uint64_t mask = (1ULL << (1U << lc.width)) - 1U;
+    if (lc.table == 0 || lc.table == mask) {
+        TEST_ASSERT_EQUAL_UINT32(1, odin3_node_pins(back, sop).count);
+        TEST_ASSERT_EQUAL_INT(lc.table == 0 ? ODIN3_CONST_0 : ODIN3_CONST_1,
+                              odin3_net_const_value(back, y_net));
+        return;
+    }
+    static uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
+    TEST_ASSERT_TRUE(odin3_blif_vtr_eval(back, sop, tt));
+    TEST_ASSERT_EQUAL_HEX64(lc.table, tt[0]);
+}
+
+/* write, read_blif, write: want both times, and the read-back $sop is the LUT's table. */
+static void expect_lut_plain(lut_case lc, const char *want) {
+    (void)build_lut_top(lc);
+    expect_written_twice(want);
+    expect_read_back_table(lc);
+    odin3_design_destroy(design);
+    odin3_design_destroy(design2);
+    design = odin3_design_create();
+    design2 = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_NOT_NULL(design2);
+}
+
+/* Spec 3E §6 (both dialects), plan point (b): AND2 on a b, the majority's ISOP rows, OR2's
+ * off-set row (the shorter), a 1-input inverter, and the constants as zero-input `.names`. */
+static void test_lut_plain(void) {
+    expect_lut_plain((lut_case){2, 0x8},
+                     ".model top\n.inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n");
+    expect_lut_plain((lut_case){3, 0xE8},
+                     ".model top\n.inputs a b c\n.outputs y\n.names a b c y\n-11 1\n1-1 1\n"
+                     "11- 1\n.end\n");
+    expect_lut_plain((lut_case){2, 0xE},
+                     ".model top\n.inputs a b\n.outputs y\n.names a b y\n00 0\n.end\n");
+    expect_lut_plain((lut_case){1, 0x1},
+                     ".model top\n.inputs a\n.outputs y\n.names a y\n0 1\n.end\n");
+    expect_lut_plain((lut_case){2, 0x0}, ".model top\n.inputs a b\n.outputs y\n.names y\n.end\n");
+    expect_lut_plain((lut_case){3, 0xFF},
+                     ".model top\n.inputs a b c\n.outputs y\n.names y\n1\n.end\n");
+}
+
+/* An unconnected A pin is written under its own `$p<pin ID>`, as a .names pin is (never
+ * skipped, as a .subckt formal would be). */
+static void test_lut_plain_unconnected_pin(void) {
+    odin3_node_id lut = build_lut_top((lut_case){2, 0x8});
+    odin3_module *module = module_of(design, 1);
+    odin3_pin_id pin = {odin3_node_port(module, lut, 0).first.v + 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(module, pin));
+    static char text[TEXT_MAX];
+    char want[MSG_MAX];
+    (void)snprintf(want, sizeof want,
+                   ".model top\n.inputs a b\n.outputs y\n.names a $p%u y\n11 1\n.end\n",
+                   (unsigned)pin.v);
+    write_ok(design, OUT_PATH);
+    TEST_ASSERT_EQUAL_STRING(want, slurp(OUT_PATH, text));
+}
+
+/* The plain write of a LUT under every allocation failure (the ISOP's arena and cover). */
+static void test_out_of_memory_sweep_lut(void) {
+    (void)build_lut_top((lut_case){3, 0xE8});
+    oom_sweep();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_round_trip_every_fixture);
@@ -1438,6 +1546,9 @@ int main(void) {
     RUN_TEST(test_plain_const_port_sop_is_generator);
     RUN_TEST(test_plain_const_port_named_sop_refused);
     RUN_TEST(test_plain_const_generator_found_per_module);
+    RUN_TEST(test_lut_plain);
+    RUN_TEST(test_lut_plain_unconnected_pin);
+    RUN_TEST(test_out_of_memory_sweep_lut);
     RUN_TEST(test_out_of_memory_sweep_constants);
     return UNITY_END();
 }

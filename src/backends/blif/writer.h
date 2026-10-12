@@ -62,7 +62,10 @@ typedef struct odin3_blif_write_opts {
  * the write is refused.
  *
  * Cells: `$sop` → `.names` (its pins' nets, then the cover rows as stored; a zero-input cover is
- * one output character per row); `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_`/`$_DLATCH_N_` → `.latch in
+ * one output character per row); `$lut` → `.names A[0] … A[WIDTH-1] Y` with odin3_blif_isop's
+ * cover of its LUT parameter (isop.h: the shorter of the on-set and off-set ISOP, so the read-back
+ * is the $sop of that cover), a constant table as the zero-input `.names Y` (no row for 0, the
+ * row `1` for 1; 3E-5); `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_`/`$_DLATCH_N_` → `.latch in
  * out re|fe|ah|al ctrl init` and `$_FF_` → `.latch in out init` (init always written); the eleven
  * word flip-flops and latches of 2E's IR change D (`$adffe $sdffe $sdffce $aldff $aldffe $dffsr
  * $dffsre $dlatch $adlatch $dlatchsr $sr`) are refused, `path: model 'm': word flip-flops and
@@ -148,10 +151,11 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * node of the top uses, sorted by name in byte order, a blank line, `.model <m>`, its ports,
  * `.blackbox`, `.end`, a declared type as declared, an undeclared library cell in library port
  * order with each port at the widest width a live node gives it (`p` when that is 1). No other
- * module, black-box model, `.cname`, `.attr` or `.param` is written. Cells: a $sop or a Yosys
- * gate is a `.names` (§6's gate rows; a cell with inputs whose function is constant is the
- * zero-input generator on its output, a 1-input one has the one row `1 1` or `0 1`, any other
- * keeps its rows); a $_CONST*_ writes no line; $_DFF_P_ is `.latch <D> <Q> re <C> <init>` with
+ * module, black-box model, `.cname`, `.attr` or `.param` is written. Cells: a $sop, a Yosys
+ * gate or a $lut is a `.names` (§6's gate rows; a cell with inputs whose function is constant is
+ * the zero-input generator on its output, a 1-input one has the one row `1 1` or `0 1`, any other
+ * keeps its rows, a $lut's being odin3_blif_isop's cover as in the plain dialect); a $_CONST*_
+ * writes no line; $_DFF_P_ is `.latch <D> <Q> re <C> <init>` with
  * init 0 1 2 2 for INIT 0 1 2 3; a hard cell is a `.subckt` with every formal bit at the node's
  * widths, sorted by port name in byte order then by bit (§8.2): `p` for a 1-bit port (as declared
  * when the type is), else `p[k]`; an unconnected output reads its own generated `$p<pin ID>`. An

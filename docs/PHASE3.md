@@ -477,6 +477,19 @@ then the options considered.
       ignores an unreferenced zero-input `.names gnd`/`vcc`/`unconn`, so the "identical" leg is
       not lost to equivalence. That change lands with 2H's comparison work.
 
+24. **3E-5 `$lut` through an irredundant cover: the agent defaults** (2026-10-12; from the 3E-5
+    reviews).
+    - `odin3_blif_isop` picks the shorter of the on-set and off-set ISOP, with the on-set on a tie.
+      `--vtr` keeps an off-set cover as is, since VPR and ABC read off-set `.names`.
+    - A constant `$lut` writes as a zero-input constant; one on a port named like a generator is
+      refused in plain mode, which is safe.
+    - A `$lut` whose parameters fail `verify` is refused in the writer; checked IR never reaches
+      that path.
+    - If a `$_CONST*_` net's only reader is a constant `$lut`, which is dropped, that generator is
+      still written, unreferenced. The round trip is identical.
+    - Deferred to 3E-4, to be measured by its sweeps: spec §18's per-node `odin3_blif_vtr_fn` cache
+      (M9) and resolving cell kinds by type ID instead of `strcmp` (M11).
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
