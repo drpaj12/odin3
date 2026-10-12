@@ -377,7 +377,8 @@ static const char *at(const char *needle, int nth) {
 
 static void expect_error(const char *where, const char *msg) {
     char want[MSG];
-    (void)snprintf(want, sizeof want, "%s: error: %s", where, msg);
+    int len = snprintf(want, sizeof want, "%s: error: %s", where, msg);
+    TEST_ASSERT_TRUE_MESSAGE(len > 0 && (size_t)len < sizeof want, msg);
     TEST_ASSERT_EQUAL_STRING(want, last);
     TEST_ASSERT_EQUAL_INT(1, errors_logged);
 }
