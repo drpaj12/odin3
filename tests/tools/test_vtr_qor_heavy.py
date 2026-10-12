@@ -1,11 +1,13 @@
 """Tests for tools/vtr-qor/qor_heavy.py (3H plan Task 1: T6 and T4's safe_rmtree).
 
 Every case uses temp files under /tmp/claude-1000, fake executables and an injected lock: nothing
-touches the real heavy lock, the real cgroups or tools/heavy-run.
+touches the real heavy lock, the real cgroups or tools/heavy-run. Fakes reach the module through
+its seams (mock.patch.object) or keyword parameters, never through the environment (fix round 1).
 """
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import io
 import json
@@ -28,6 +30,7 @@ SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
 SCOPE = "odin3-heavy-4242-1760000000000000000.scope"
 CAP_6G = "6442450944"
 CAP_9G = "9663676416"
+XL_NESTED = "--xl inside odin3-heavy.slice (6G): run the xl job on its own"
 
 
 class HeavyTestBase(unittest.TestCase):
@@ -95,13 +98,26 @@ class HeavyTestBase(unittest.TestCase):
         env.update(extra)
         return env
 
-    def inside_env(self, root: Path, slice_name: str = "odin3-heavy.slice") -> dict[str, str]:
-        return self.caller_env(
-            ODIN3_HEAVY_SLICE=slice_name,
-            ODIN3_QOR_SELF_CGROUP=str(self.self_cgroup),
-            ODIN3_QOR_CGROUP_ROOT=str(root),
-            ODIN3_QOR_FD9=str(self.fd9(self.lock)),
-        )
+    def inside_env(self, slice_name: str = "odin3-heavy.slice", **extra: str) -> dict[str, str]:
+        return self.caller_env(ODIN3_HEAVY_SLICE=slice_name, **extra)
+
+    def machine(self, root: Path) -> contextlib.ExitStack:
+        """Point the module seams (never the environment) at the fake cgroup tree, a fake fd 9
+        holding self.lock, and self.lock as HEAVY_LOCK."""
+        stack = contextlib.ExitStack()
+        for name, value in (("SELF_CGROUP", self.self_cgroup), ("CGROUP_ROOT", root),
+                            ("FD9", self.fd9(self.lock)), ("HEAVY_LOCK", self.lock)):
+            stack.enter_context(mock.patch.object(qor_heavy, name, value))
+        return stack
+
+    def hooks_env(self, root: Path, **extra: str) -> dict[str, str]:
+        """Every retired ODIN3_QOR_* hook set to a passing fake, plus ODIN3_HEAVY_SLICE."""
+        df = self.tmp / "fake-df"
+        df.write_text("#!/bin/sh\nprintf 'Avail\\n  999999\\n'\n")
+        df.chmod(0o755)
+        return self.inside_env(
+            ODIN3_QOR_SELF_CGROUP=str(self.self_cgroup), ODIN3_QOR_CGROUP_ROOT=str(root),
+            ODIN3_QOR_FD9=str(self.fd9(self.lock)), ODIN3_QOR_DF_CMD=str(df), **extra)
 
     def hold_lock(self) -> int:
         fd = os.open(self.lock, os.O_WRONLY | os.O_APPEND)
@@ -155,8 +171,8 @@ class ReexecTest(HeavyTestBase):
     def test_reexec_inside(self) -> None:
         root, slice_dir, scope = self.cgroup_tree()
         fake = self.fake_heavy_run(0)
-        env = self.inside_env(root)
-        with mock.patch.object(qor_heavy, "HEAVY_RUN", fake):
+        env = self.inside_env()
+        with self.machine(root), mock.patch.object(qor_heavy, "HEAVY_RUN", fake):
             info = qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock,
                                                env=env)
         self.assertEqual(info, ScopeInfo(path=slice_dir, leaf=scope, memory_max=int(CAP_6G),
@@ -181,12 +197,36 @@ class ReexecTest(HeavyTestBase):
             {k: v for k, v in env.items() if k != "ODIN3_HEAVY_SLICE"},
             self_cgroup=self.self_cgroup, fd_link=self.tmp / "fd9", lock=self.lock))
         # With the evidence incomplete, reexec takes the outside path (and wants ODIN3_HEAVY_OK).
-        env["ODIN3_QOR_FD9"] = str(self.tmp / "no-fd9")
-        with mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+        with self.machine(root), mock.patch.object(qor_heavy, "FD9", self.tmp / "no-fd9"), \
+                mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
                 self.assertRaises(HeavyError) as err:
             qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock, env=env)
         self.assert_heavy(err, 2, "heavy runs are the controller's: set ODIN3_HEAVY_OK=1")
         self.assertFalse(self.record.exists())
+
+    def test_reexec_inside_refusals(self) -> None:
+        """Inside a run, a failing cap or --xl nested in the 6G slice refuses; nothing runs."""
+        fake = self.fake_heavy_run(0)
+        root, _, _ = self.cgroup_tree(swap="max")
+        with self.machine(root), mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock,
+                                        env=self.inside_env(ODIN3_HEAVY_OK="1"))
+        self.assert_heavy(err, 2, "not inside a capped scope (memory.max 6442450944, "
+                                  "memory.swap.max max); run through the heavy wrapper")
+        root, _, _ = self.cgroup_tree()
+        env = self.inside_env(ODIN3_HEAVY_OK="1", ODIN3_HEAVY_XL_OK="1")
+        with self.machine(root), mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", xl=True,
+                                        lock=self.lock, env=env)
+        self.assert_heavy(err, 2, XL_NESTED)
+        self.assertFalse(self.record.exists())
+        root, slice_dir, _ = self.cgroup_tree("odin3-heavyxl.slice", mem=CAP_9G)
+        with self.machine(root):
+            info = qor_heavy.reexec_under_lock(["x"], xl=True, lock=self.lock,
+                                               env=self.inside_env("odin3-heavyxl.slice"))
+        self.assertEqual((info.path, info.memory_max), (slice_dir, int(CAP_9G)))
 
     def test_require_heavy(self) -> None:
         with mock.patch.dict(os.environ, self.caller_env(), clear=True), \
@@ -195,24 +235,35 @@ class ReexecTest(HeavyTestBase):
         self.assert_heavy(
             err, 2, "not inside a heavy run: the controller starts it through tools/heavy-run")
         root, slice_dir, _ = self.cgroup_tree()
-        with mock.patch.dict(os.environ, self.inside_env(root), clear=True):
+        with self.machine(root), mock.patch.dict(os.environ, self.inside_env(), clear=True):
             self.assertEqual(qor_heavy.require_heavy().path, slice_dir)
+            with self.assertRaises(HeavyError) as err:
+                qor_heavy.require_heavy(xl=True)
+            self.assert_heavy(err, 2, XL_NESTED)
+        root, _, _ = self.cgroup_tree(mem="8589934592")
+        with self.machine(root), mock.patch.dict(os.environ, self.inside_env(), clear=True), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.require_heavy()
+        self.assert_heavy(err, 2, "not inside a capped scope (memory.max 8589934592, "
+                                  "memory.swap.max max); run through the heavy wrapper")
 
     def test_cli_require_heavy(self) -> None:
         root, _, _ = self.cgroup_tree()
-        with mock.patch.dict(os.environ, self.inside_env(root), clear=True):
+        with self.machine(root), mock.patch.dict(os.environ, self.inside_env(), clear=True):
             self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy"]), (0, "", ""))
+            self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy", "--xl"]),
+                             (2, "", f"vtr-qor: {XL_NESTED}\n"))
         with mock.patch.dict(os.environ, self.caller_env(), clear=True):
             self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy"])[0], 3)
         root, _, _ = self.cgroup_tree(swap="max")
-        with mock.patch.dict(os.environ, self.inside_env(root), clear=True):
+        with self.machine(root), mock.patch.dict(os.environ, self.inside_env(), clear=True):
             code, _, err = helpers.run_main(qor_heavy.main, ["require-heavy"])
         self.assertEqual(code, 2)
         self.assertEqual(err, "vtr-qor: not inside a capped scope (memory.max 6442450944, "
                               "memory.swap.max max); run through the heavy wrapper\n")
         root, _, _ = self.cgroup_tree("odin3-heavyxl.slice", mem=CAP_9G)
-        with mock.patch.dict(os.environ, self.inside_env(root, "odin3-heavyxl.slice"),
-                             clear=True):
+        with self.machine(root), \
+                mock.patch.dict(os.environ, self.inside_env("odin3-heavyxl.slice"), clear=True):
             self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy"])[0], 2)
             self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy", "--xl"])[0], 0)
 
@@ -287,6 +338,72 @@ class LockTest(HeavyTestBase):
                                   "No such file or directory)")
 
 
+    def test_reexec_signal_and_inherited_env(self) -> None:
+        """A child killed by a signal exits 128 + N (M6d); env=None passes os.environ (M6f)."""
+        fake = self.tmp / "heavy-run"
+        fake.write_text(f"#!{sys.executable} -I\nimport json, os, signal\n"
+                        f"open({str(self.record)!r}, 'w').write(json.dumps(dict(os.environ)))\n"
+                        "os.kill(os.getpid(), signal.SIGTERM)\n")
+        fake.chmod(0o755)
+        env = self.caller_env(ODIN3_HEAVY_OK="1")
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                self.assertRaises(SystemExit) as ctx:
+            qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock)
+        self.assertEqual(ctx.exception.code, 143)
+        self.assertEqual(json.loads(self.record.read_text()), env)
+
+
+class RulingTest(HeavyTestBase):
+    """The controller's ruling (fix round 1): with every retired ODIN3_QOR_* hook set to a passing
+    fake, plus ODIN3_HEAVY_SLICE and no fd 9, the production paths ignore the hooks."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        try:
+            held = os.path.realpath(os.readlink("/proc/self/fd/9"))
+        except OSError:
+            held = ""
+        if held == os.path.realpath(qor_heavy.HEAVY_LOCK):
+            self.skipTest("this test process really runs inside a heavy run (fd 9 is the lock)")
+        root, _, _ = self.cgroup_tree()
+        self.root = root
+
+    def test_require_heavy_ignores_hooks(self) -> None:
+        with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.require_heavy()
+        self.assert_heavy(
+            err, 2, "not inside a heavy run: the controller starts it through tools/heavy-run")
+        with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True):
+            self.assertEqual(helpers.run_main(qor_heavy.main, ["require-heavy"])[0], 3)
+
+    def test_reexec_ignores_hooks(self) -> None:
+        fake = self.fake_heavy_run(0)
+        env = self.hooks_env(self.root, ODIN3_HEAVY_OK="1")
+        with mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                self.assertRaises(SystemExit) as ctx:
+            qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock, env=env)
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertEqual(json.loads(self.record.read_text())["env"], env)  # re-executed
+        self.record.unlink()
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(qor_heavy, "HEAVY_RUN", fake), \
+                self.assertRaises(SystemExit):
+            qor_heavy.reexec_under_lock(["x"], script=self.tmp / "t.py", lock=self.lock)
+        self.assertTrue(self.record.exists())
+
+    def test_disk_free_ignores_hook(self) -> None:
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="Avail\n   72\n")
+        with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True), \
+                mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
+            self.assertEqual(qor_heavy.disk_free_gib(), 72)
+        self.assertEqual(run.call_args.args[0], ["df", "-B1G", "--output=avail", "/mnt/c"])
+        if Path("/mnt/c").is_dir():  # the real df on /mnt/c, never the fake's 999999
+            with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True):
+                self.assertNotEqual(qor_heavy.disk_free_gib(), 999999)
+
+
 class ScopeTest(HeavyTestBase):
     """verify_scope's ancestor walk (plan point (b), finding 26)."""
 
@@ -352,20 +469,27 @@ class ReaderTest(HeavyTestBase):
         fake.chmod(0o755)
         return str(fake)
 
+    def disk_free(self, body: str) -> int:
+        with mock.patch.object(qor_heavy, "DF_CMD", (self.fake_df(body),)):
+            return qor_heavy.disk_free_gib()
+
     def test_disk_free(self) -> None:
-        env = {"ODIN3_QOR_DF_CMD": self.fake_df(r"printf 'Avail\n  117\n'")}
-        self.assertEqual(qor_heavy.disk_free_gib(env), 117)
-        env = {"ODIN3_QOR_DF_CMD": self.fake_df("exit 1")}
-        with self.assertRaises(HeavyError) as err:
-            qor_heavy.disk_free_gib(env)
-        self.assert_heavy(err, 5, "cannot read free space of /mnt/c")
-        env = {"ODIN3_QOR_DF_CMD": self.fake_df(r"printf 'Avail\n  lots\n'")}
-        with self.assertRaises(HeavyError) as err:
-            qor_heavy.disk_free_gib(env)
-        self.assert_heavy(err, 5, "cannot read free space of /mnt/c")
-        with self.assertRaises(HeavyError) as err:
-            qor_heavy.disk_free_gib({"ODIN3_QOR_DF_CMD": str(self.tmp / "no-such-df")})
+        self.assertEqual(self.disk_free(r"printf 'Avail\n  117\n'"), 117)
+        for body in ("exit 1", r"printf 'Avail\n  lots\n'", ":"):
+            with self.assertRaises(HeavyError) as err:
+                self.disk_free(body)
+            self.assert_heavy(err, 5, "cannot read free space of /mnt/c")
+        with mock.patch.object(qor_heavy, "DF_CMD", (str(self.tmp / "no-such-df"),)), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.disk_free_gib()
         self.assertEqual(err.exception.code, 5)
+
+    def test_disk_free_argv(self) -> None:
+        """The production argv is df on /mnt/c (M6c)."""
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="Avail\n   72\n")
+        with mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
+            self.assertEqual(qor_heavy.disk_free_gib(), 72)
+        self.assertEqual(run.call_args.args[0], ["df", "-B1G", "--output=avail", "/mnt/c"])
 
     def test_mem_available(self) -> None:
         meminfo = self.tmp / "meminfo"
@@ -411,6 +535,42 @@ class DeletionTest(HeavyTestBase):
         self.assertFalse((real / "sub").exists())
         qor_heavy.safe_rmtree(real / "absent", root)  # absent: a no-op
         self.assertTrue(real.is_dir())
+
+    def test_safe_rmtree_more(self) -> None:
+        """M6g: '..' through a symlink, a symlinked root, and a symlink inside the tree."""
+        root = self.tmp / "out"
+        real = root / "real"
+        (real / "x").mkdir(parents=True)
+        (root / "x").mkdir()
+        link = root / "link"
+        link.symlink_to(real)
+        dotted = Path(f"{link}/../x")
+        with self.assertRaises(HeavyError) as err:
+            qor_heavy.safe_rmtree(dotted, root)
+        self.assert_heavy(err, 2, f"refusing to delete {dotted}: not under {root}")
+        self.assertTrue((root / "x").is_dir())
+        alias = self.tmp / "alias"
+        alias.symlink_to(root)
+        with self.assertRaises(HeavyError) as err:
+            qor_heavy.safe_rmtree(alias / "x", alias)
+        self.assert_heavy(err, 2, f"refusing to delete {alias / 'x'}: {alias} is a symlink")
+        self.assertTrue((root / "x").is_dir())
+        keep = self.tmp / "keep"
+        keep.mkdir()
+        (keep / "f").write_text("keep\n")
+        (real / "x" / "out-link").symlink_to(keep)
+        qor_heavy.safe_rmtree(real / "x", root)
+        self.assertFalse((real / "x").exists())
+        self.assertEqual((keep / "f").read_text(), "keep\n")
+        (real / "y").mkdir()
+        with mock.patch.object(qor_heavy, "_other_device", return_value=real / "y"), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.safe_rmtree(real, root)
+        self.assert_heavy(
+            err, 2, f"refusing to delete {real}: {real / 'y'} is on another file system")
+        self.assertTrue((real / "y").is_dir())
+        self.assertIsNone(qor_heavy._other_device(real, os.stat(root).st_dev))
+        self.assertEqual(qor_heavy._other_device(real, -1), real)
 
     def test_out_dir_roots(self) -> None:
         home = Path("/odin3-qor-heavy-test-home")  # never created; outside /tmp/claude-1000
