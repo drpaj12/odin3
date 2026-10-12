@@ -45,7 +45,11 @@ input, so those two are per model); every other formal is an input.  The stub mo
 in the canonical form like any black box.  The ``A`` bits of an implicit ``$reduce_and``/
 ``_or``/``_xor``/``_xnor``/``_bool`` are a set: their order cannot change ``Y``, so ``A[k]`` is
 compared as ``A`` (this is how ``proc-diff`` absorbs §20 #8's ``$reduce_or`` input order).
-A model the file defines is used as written.
+A model the file defines is used as written, with one exception: on a ``.blackbox`` model with a
+scalar port ``p`` (no ``p[0]``), an instance pin ``p[0]`` with no other bit of ``p`` reads as
+``p``.  Yosys 0.55's ``write_blif -blackbox`` writes such a pin for a parameterised black box whose
+port is 1 bit at the defaults but whose connection is wider (only bit 0 is written, as for every
+black-box pin), so the instance would otherwise name a port the model lacks.
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -605,6 +609,51 @@ def implicit_stubs(text: str) -> tuple[str, frozenset[str]]:
     return "".join(f"{line}\n" for line in lines), frozenset(names)
 
 
+def _blackbox_ports(text: str) -> dict[str, set[str]]:
+    """The ports of every ``.blackbox`` model the text defines."""
+    ports: dict[str, set[str]] = {}
+    found: dict[str, set[str]] = {}
+    name: str | None = None
+    for _, tokens in blif.logical_lines(text):
+        if tokens[0] == ".model" and len(tokens) > 1:
+            name = tokens[1]
+            ports[name] = set()
+        elif name is not None and tokens[0] in (".inputs", ".outputs", ".clock"):
+            ports[name].update(tokens[1:])
+        elif name is not None and tokens[0] == ".blackbox":
+            found[name] = ports[name]
+    return found
+
+
+def _scalar_bit0(tokens: list[str], ports: set[str]) -> list[str]:
+    """A ``.subckt``'s tokens with ``p[0]=x`` as ``p=x`` where p is a scalar port and the
+    instance names no other bit of p."""
+    formals = [tok.partition("=")[0] for tok in tokens[2:]]
+    out = tokens[:2]
+    for tok in tokens[2:]:
+        formal, eq, actual = tok.partition("=")
+        port = _port_of(formal)
+        if (eq and formal == f"{port}[0]" and port in ports
+                and sum(_port_of(f) == port for f in formals) == 1):
+            tok = f"{port}={actual}"
+        out.append(tok)
+    return out
+
+
+def scalar_blackbox_pins(text: str) -> str:
+    """Rewrites each one-line ``.subckt`` of a ``.blackbox`` model per ``_scalar_bit0``."""
+    boxes = _blackbox_ports(text)
+    if not boxes:
+        return text
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        tokens = line.split("#", 1)[0].split()
+        if (len(tokens) > 2 and tokens[0] == ".subckt" and tokens[1] in boxes
+                and not line.rstrip().endswith("\\")):
+            lines[i] = " ".join(_scalar_bit0(tokens, boxes[tokens[1]]))
+    return "\n".join(lines)
+
+
 def _set_inputs(netlist: blif.Netlist, implicit: frozenset[str]) -> None:
     """Compare the A bits of each implicit reduction as a set: ``A[k]`` becomes ``A``."""
     for model in netlist.models:
@@ -625,6 +674,7 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
         raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
     if text and not text.endswith("\n"):
         text += "\n"
+    text = scalar_blackbox_pins(text)
     stubs, implicit = implicit_stubs(text)
     netlist = blif.parse_text(text + stubs, path)
     _set_inputs(netlist, implicit)

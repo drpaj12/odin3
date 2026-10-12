@@ -1197,7 +1197,10 @@ by `test_ir_cells`) of at most 32 bits of 0/1 become decimal (a wider value, suc
 `INIT`, is kept); a port-to-port buffer reads the root of its buffer chain, unless the chain is a
 cycle, so the order of `connect` lines across processes does not matter; and `netlist-compare
 --implicit-models` compares the `A` bits of an implicit `$reduce_*` as a set (§20 #8). Implicit
-outputs also include `DATA` of `$memrd`/`$memrd_v2` and `CTRL_OUT` of `$fsm`. Side B failing
+outputs also include `DATA` of `$memrd`/`$memrd_v2` and `CTRL_OUT` of `$fsm`. On a `.blackbox` model
+with a scalar port `p`, an instance pin `p[0]` (no other bit of `p`) reads as `p`: Yosys 0.55
+writes it so for a parameterised black box whose port is 1 bit at the defaults but connected
+wider (fix round 2). Side B failing
 with Yosys's `ctrl_sig.size() == 1` assertion is recognised as §20 #17 (an expected difference,
 exit 0; `a.il` still goes through step 3); `--expect-fail` lines are `<relative path> <reason>`,
 and a reason citing `§20 #N` for N in 8, 9, 16, 17, 18 must see that divergence's outcome (a

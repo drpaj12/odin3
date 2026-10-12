@@ -570,6 +570,10 @@ class ProcDiffTest(unittest.TestCase):
         """M4: a cycle of two buffers is not two self-loops."""
         text = ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n.end\n"
         self.assertEqual(proc_diff.normalise_text(text, frozenset()), text)
+        # A tail of two buffers off the cycle stays as written too (pins the None of _root).
+        tail = ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n" \
+               ".names z w\n1 1\n.end\n"
+        self.assertEqual(proc_diff.normalise_text(tail, frozenset()), tail)
         head = ".model top\n.inputs a\n.outputs y1 y2\n"
         self.set_blif("in", head + ".names y1 y2\n1 1\n.names y2 y1\n1 1\n.end\n")
         self.set_blif("a", head + ".names y1 y1\n1 1\n.names y2 y2\n1 1\n.end\n")

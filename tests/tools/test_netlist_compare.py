@@ -276,6 +276,27 @@ class CompareTest(unittest.TestCase):
         self.assertIn(".model $memwr\n.inputs ADDR\n.inputs CLK\n.inputs DATA\n.blackbox", out)
         self.assertIn(".model $fsm\n.inputs CLK\n.inputs CTRL_IN\n.outputs CTRL_OUT\n", out)
 
+    def test_implicit_models_scalar_blackbox_bit0(self) -> None:
+        """I3: Yosys 0.55 writes `addr[0]=a[0]` for a black box whose model port `addr` is 1 bit
+        at its defaults (parameter W = 1) but is connected wider; it reads as `addr`."""
+        text = (".model top\n.inputs clk a[0] a[1]\n.outputs o[0]\n"
+                ".subckt single_port_ram addr[0]=a[0] clk=clk out[0]=o[0]\n.end\n"
+                ".model single_port_ram\n.inputs clk addr\n.outputs out\n.blackbox\n.end\n")
+        a = self.write("a.blif", text)
+        self.assertEqual(compare(a, a)[0], 2)  # without the flag: no port addr[0]
+        self.assertEqual(compare("--implicit-models", a, a)[0], 0)
+        moved = self.write("b.blif", text.replace("addr[0]=a[0]", "addr[0]=a[1]"))
+        self.assertEqual(compare("--implicit-models", a, moved)[0], 1)
+        # Not rewritten: the model has addr[0] itself, or the instance names two bits of addr.
+        ports = text.replace(".inputs clk addr", ".inputs clk addr[0]")
+        self.assertIn(" addr[0]=a[0] clk=clk out=o[0]\n",
+                      netlist_compare.scalar_blackbox_pins(ports))
+        two = text.replace("addr[0]=a[0]", "addr[0]=a[0] addr[1]=a[1]")
+        self.assertIn(" addr[0]=a[0] addr[1]=a[1] clk=clk out=o[0]\n",
+                      netlist_compare.scalar_blackbox_pins(two))
+        not_box = text.replace(".blackbox\n", "")
+        self.assertEqual(netlist_compare.scalar_blackbox_pins(not_box), not_box)
+
     def test_implicit_models_canon_lists_the_stub(self) -> None:
         code, out, _ = compare("--implicit-models", "--canon", self.write("a.blif", self.DFF))
         self.assertEqual(code, 0)
