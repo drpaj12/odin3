@@ -51,7 +51,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -508,9 +508,16 @@ JOB_DEPTH = 5
 WAIT_FIRST_S = 0.01
 WAIT_MAX_S = 1.0
 GRACE_POLL_S = 0.05
-# tools/heavy-run's lock descriptor, passed on to every job so the lock outlives no job.
+# tools/heavy-run's lock descriptor, passed on to each command's direct child.
 LOCK_FD = 9
 PROC_SELF_FD = Path("/proc/self/fd")
+PROC = Path("/proc")
+# The child cgroup of heavy-run's scope that every command runs in, and how long it may take
+# to empty once killed before the run stops rather than start another job beside it.
+JOB_CGROUP = "vtr-qor-job"
+CGROUP_DRAIN_S = 60.0
+# How long a killed df probe is waited for before it is let go.
+PROBE_REAP_S = 1.0
 SECONDS_PER_MINUTE = 60
 SECONDS_PER_HOUR = 3600
 MEM_DECIMALS = 10
@@ -555,12 +562,22 @@ class HarnessLog:
     def __init__(self, out: Path) -> None:
         out.mkdir(parents=True, exist_ok=True)
         self.path = out / "harness.log"
+        self.broken = False
 
     def emit(self, message: str) -> None:
+        """A line to stderr and the log. A log that cannot be written (a full disk) is reported
+        once on stderr and skipped from then on: the run's own decisions never depend on it."""
         line = f"{PREFIX}{message}"
         print(line, file=sys.stderr, flush=True)
-        with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(line + "\n")
+        if self.broken:
+            return
+        try:
+            with self.path.open("a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+        except OSError as exc:
+            self.broken = True
+            print(f"{PREFIX}cannot write {self.path}: {exc.strerror or exc}", file=sys.stderr,
+                  flush=True)
 
     def job(self, i: int, n: int, result: JobResult) -> None:
         """``[<i>/<n>] <leg> <design> <status> <elapsed> s (<group>, j1)``: one worker."""
@@ -600,9 +617,13 @@ def _environ() -> Mapping[str, str]:
 
 @dataclass(kw_only=True)
 class RunOptions:
-    """How ``run_jobs`` runs. ``scope`` is what ``reexec_under_lock`` returned; ``clock`` and
-    ``sleep`` drive admission and the job timeouts; ``env`` is the jobs' base environment;
-    ``deadline`` and ``expected_s`` gate the nightly's starts (plan Task 13)."""
+    """How ``run_jobs`` runs. ``scope`` is what ``reexec_under_lock`` returned; ``clock`` (a
+    duration clock: monotonic, so a WSL clock resync cannot fire or delay a timeout) and ``sleep``
+    drive admission and the job timeouts; ``env`` is the jobs' base environment; ``deadline`` (on
+    ``clock``'s scale) and ``expected_s`` gate the nightly's starts (plan Task 13); ``prepare``
+    runs after each fresh attempt (Task 6 writes ``job.json`` there, so failed jobs keep it);
+    ``retain_designs`` is the set a key must hold complete before retention may prune it (None:
+    no key is pruned, only failed run directories)."""
 
     jobs: int = 1
     job_timeout_s: Mapping[str, int] = JOB_TIMEOUT_S
@@ -610,12 +631,14 @@ class RunOptions:
     fcheck: bool = False
     deadline: float | None = None
     scope: ScopeInfo | None = None
-    clock: Callable[[], float] = time.time
+    clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
     env: Mapping[str, str] = field(default_factory=_environ)
     meminfo: Path = Path("/proc/meminfo")
     out: Path
     expected_s: Callable[[Job], float] | None = None
+    prepare: Callable[[Job, float], None] | None = None
+    retain_designs: frozenset[str] | None = None
     admission: _Admission = field(default_factory=_Admission, init=False, repr=False,
                                   compare=False)
     log: HarnessLog | None = field(default=None, init=False, repr=False, compare=False)
@@ -696,13 +719,28 @@ def fresh_attempt(job: Job) -> float:
     return min(time.time(), run.stat().st_mtime)
 
 
+def _done(job_dir: Path, leg: str, design: str) -> bool:
+    """A finished ok job's other marks: ``status`` ok, and for P the pre-VPR netlist gzipped. A
+    job interrupted between those and its ``metrics.json`` (by an older runner, which wrote
+    ``metrics.json`` first) is redone."""
+    if _read_word(job_dir / "status") != OK:
+        return False
+    return not (leg == "P" and (job_dir / "run" / f"{design}.pre-vpr.blif").exists())
+
+
 def job_complete(job: Job) -> bool:
     """True when the job's ``metrics.json`` is ``ok`` under the planned job key (never an older
-    key's ``ok`` left in the same ``<key12>`` directory)."""
-    return is_cached(job.job_dir, job.key)
+    key's ``ok`` left in the same ``<key12>`` directory) and the job was fully cleaned up."""
+    return is_cached(job.job_dir, job.key) and _done(job.job_dir, job.leg, job.design)
 
 
 # -- running one command -----------------------------------------------------------------------
+#
+# Each command runs in the job cgroup <leaf>/vtr-qor-job, a child of the heavy-run scope the
+# harness runs in: the child joins it before exec, so every process it starts (VTR's stages each
+# start their own session) stays in it. A command ends only when that cgroup is empty: SIGTERM to
+# every member on a timeout or abort, then cgroup.kill (and SIGKILL to each member left), and the
+# runner waits for the cgroup to empty before anything else starts (one job at a time).
 
 
 def _job_env(cmd: Command, opts: RunOptions) -> dict[str, str]:
@@ -715,8 +753,9 @@ def _job_env(cmd: Command, opts: RunOptions) -> dict[str, str]:
 
 
 def _lock_fds() -> tuple[int, ...]:
-    """Descriptor 9 when it really is the heavy lock (as ``tools/heavy-run`` passes it): a job
-    that holds it keeps the lock taken even if this process dies first."""
+    """Descriptor 9 when it really is the heavy lock (as ``tools/heavy-run`` passes it), for the
+    direct child only: VTR and Verilator start their own stages with ``close_fds``, so those hold
+    no lock; the job cgroup's drain is what keeps a stage from outliving its job."""
     try:
         target = os.readlink(PROC_SELF_FD / str(LOCK_FD))
     except OSError:
@@ -726,44 +765,139 @@ def _lock_fds() -> tuple[int, ...]:
     return (LOCK_FD,)
 
 
-def _start(cmd: Command, opts: RunOptions) -> subprocess.Popen[bytes]:
-    """Start a command in its own session, stdout to ``cmd.stdout`` and stderr to
-    ``cmd.stderr`` (or with stdout when unset), both written afresh."""
+def _alive(pid: int) -> bool:
+    """True while ``pid`` runs (a zombie or a vanished process is not running)."""
+    try:
+        stat_line = (PROC / str(pid) / "stat").read_text(encoding="ascii", errors="replace")
+    except OSError:
+        return False
+    fields = stat_line.rsplit(")", 1)[-1].split()
+    return bool(fields) and fields[0] not in ("Z", "X")
+
+
+def _members(cgroup: Path) -> list[int]:
+    """The running processes of a cgroup other than this one (``cgroup.procs``)."""
+    try:
+        text = (cgroup / "cgroup.procs").read_text(encoding="ascii")
+    except FileNotFoundError:
+        return []
+    me = os.getpid()
+    pids = sorted({int(word) for word in text.split() if word.isdigit()})
+    return [pid for pid in pids if pid != me and _alive(pid)]
+
+
+def job_cgroup(scope: ScopeInfo) -> Path:
+    """The cgroup every command runs in: a child of the harness's own (heavy-run's scope)."""
+    return scope.leaf / JOB_CGROUP
+
+
+def _ready_cgroup(scope: ScopeInfo) -> Path:
+    """Create the job cgroup and check that nothing else runs: neither in it nor beside the
+    harness in its scope (one job at a time). HeavyError otherwise."""
+    cgroup = job_cgroup(scope)
+    try:
+        cgroup.mkdir(exist_ok=True)
+    except OSError as exc:
+        raise HeavyError(EXIT_USAGE, f"cannot create the job cgroup {cgroup}: "
+                                     f"{exc.strerror or exc}") from exc
+    for where in (cgroup, scope.leaf):
+        others = _members(where)
+        if others:
+            raise HeavyError(EXIT_USAGE, f"one job at a time: {where} still holds process "
+                                         f"{others[0]}; not starting another")
+    return cgroup
+
+
+def _joiner(cgroup: Path) -> Callable[[], None]:
+    """The child's last step before exec: join the job cgroup (it is single-threaded then)."""
+    procs = str(cgroup / "cgroup.procs")
+
+    def join() -> None:
+        with open(procs, "a", encoding="ascii") as handle:
+            handle.write(f"{os.getpid()}\n")
+
+    return join
+
+
+def _start(cmd: Command, opts: RunOptions, cgroup: Path) -> subprocess.Popen[bytes]:
+    """Start a command in its own session and the job cgroup, stdout to ``cmd.stdout`` and
+    stderr to ``cmd.stderr`` (or with stdout when unset), both written afresh. A child that cannot
+    join the cgroup never runs (HeavyError)."""
     with ExitStack() as stack:
         out = stack.enter_context(cmd.stdout.open("wb"))
         err: int | IO[bytes] = subprocess.STDOUT
         if cmd.stderr is not None:
             err = stack.enter_context(cmd.stderr.open("wb"))
-        return subprocess.Popen(
-            list(cmd.argv), cwd=cmd.cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-            env=_job_env(cmd, opts), start_new_session=True, pass_fds=_lock_fds(),
-        )
+        try:
+            return subprocess.Popen(
+                list(cmd.argv), cwd=cmd.cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                env=_job_env(cmd, opts), start_new_session=True, pass_fds=_lock_fds(),
+                preexec_fn=_joiner(cgroup),
+            )
+        except subprocess.SubprocessError as exc:
+            raise HeavyError(EXIT_USAGE, f"cannot start {cmd.argv[0]} in the job cgroup "
+                                         f"{cgroup}") from exc
 
 
 def _exited(pid: int) -> bool:
-    """True once the child has exited; it is not reaped, so its process group id stays
-    reserved until ``_end_group`` has signalled the group."""
+    """True once the child has exited; it is not reaped, so its pid and process group id stay
+    reserved until ``_drain`` has signalled them."""
     return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
 
 
+def _send(pids: Iterable[int], sig: signal.Signals) -> None:
+    for pid in pids:
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, sig)
+
+
 def _signal_group(pgid: int, sig: signal.Signals) -> None:
-    with suppress(ProcessLookupError):  # the group has already gone
+    with suppress(ProcessLookupError, PermissionError):  # the group has already gone
         os.killpg(pgid, sig)
 
 
-def _end_group(proc: subprocess.Popen[bytes], *, terminate: bool) -> int:
-    """End the command's process group and reap its leader. With ``terminate``, SIGTERM first
-    and SIGKILL after ``KILL_GRACE_S`` (spec §7.4); the group always gets SIGKILL at the end, so
-    no process of this job survives into the next one (one job at a time). Termination signals
-    are held until it is done."""
+def _emptied(cgroup: Path, proc: subprocess.Popen[bytes]) -> bool:
+    return not _members(cgroup) and _exited(proc.pid)
+
+
+def _terminate(cgroup: Path, proc: subprocess.Popen[bytes]) -> None:
+    """SIGTERM to every member and to the leader's group; wait up to ``KILL_GRACE_S``."""
+    _send(_members(cgroup), signal.SIGTERM)
+    _signal_group(proc.pid, signal.SIGTERM)
+    limit = time.monotonic() + KILL_GRACE_S
+    while not _emptied(cgroup, proc) and time.monotonic() < limit:
+        time.sleep(GRACE_POLL_S)
+
+
+def _kill_cgroup(cgroup: Path) -> None:
+    """``cgroup.kill`` (Linux 5.14+) kills every member at once, whatever its session."""
+    with suppress(OSError), (cgroup / "cgroup.kill").open("w", encoding="ascii") as handle:
+        handle.write("1")
+
+
+def _drain(cgroup: Path, proc: subprocess.Popen[bytes], *, terminate: bool) -> int:
+    """End the command: with ``terminate``, SIGTERM first (spec §7.4); then cgroup.kill and
+    SIGKILL to every member left, the leader and its group, until the cgroup is empty and the
+    leader has exited; then reap the leader. A cgroup that will not empty within
+    ``CGROUP_DRAIN_S`` stops the run (HeavyError): no further job may start beside it.
+    Termination signals are held meanwhile."""
     held = signal.pthread_sigmask(signal.SIG_BLOCK, _DEFERRED_SIGNALS)
     try:
         if terminate:
-            _signal_group(proc.pid, signal.SIGTERM)
-            limit = time.monotonic() + KILL_GRACE_S
-            while not _exited(proc.pid) and time.monotonic() < limit:
-                time.sleep(GRACE_POLL_S)
-        _signal_group(proc.pid, signal.SIGKILL)
+            _terminate(cgroup, proc)
+        _kill_cgroup(cgroup)
+        limit = time.monotonic() + CGROUP_DRAIN_S
+        while not _emptied(cgroup, proc):
+            if time.monotonic() >= limit:
+                raise HeavyError(EXIT_USAGE, f"{cgroup} still holds processes "
+                                             f"{_members(cgroup)} after {CGROUP_DRAIN_S:g} s; "
+                                             "stopping")
+            _send(_members(cgroup), signal.SIGKILL)
+            _signal_group(proc.pid, signal.SIGKILL)
+            if not _exited(proc.pid):
+                _send((proc.pid,), signal.SIGKILL)
+            time.sleep(GRACE_POLL_S)
+        _signal_group(proc.pid, signal.SIGKILL)  # a straggler that left the cgroup (never)
         return proc.wait()
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, held)
@@ -774,41 +908,92 @@ def floor_message(running: int) -> str:
     return f"C: fell below {DISK_FLOOR_GIB} GiB free; terminating {running} running jobs"
 
 
+class _DfProbe:
+    """One ``df`` of ``/mnt/c`` run beside a job, polled without blocking: a hung ``/mnt/c``
+    can never hold up the job's wall timeout. It fails (E-QH11) after ``DF_TIMEOUT_S``."""
+
+    def __init__(self) -> None:
+        self.started = time.monotonic()
+        try:
+            self.proc: subprocess.Popen[str] | None = subprocess.Popen(
+                list(qor_heavy.DF_CMD), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, text=True)
+        except OSError as exc:
+            raise HeavyError(EXIT_DISK, qor_heavy.MSG_DF) from exc
+
+    def poll(self) -> int | None:
+        """Free GiB once df has finished, else None. HeavyError when it fails or hangs."""
+        assert self.proc is not None
+        returncode = self.proc.poll()
+        if returncode is None:
+            if time.monotonic() - self.started >= qor_heavy.DF_TIMEOUT_S:
+                self.cancel()
+                raise HeavyError(EXIT_DISK, qor_heavy.MSG_DF)
+            return None
+        stdout = self.proc.stdout.read() if self.proc.stdout is not None else ""
+        self.cancel()
+        return qor_heavy.parse_df(returncode, stdout)
+
+    def cancel(self) -> None:
+        """Kill a df still running and reap it within ``PROBE_REAP_S``; one stuck in the kernel
+        (a hung drvfs ``statfs``) is let go rather than waited for."""
+        if self.proc is None:
+            return
+        if self.proc.poll() is None:
+            with suppress(OSError):
+                self.proc.kill()
+            with suppress(subprocess.TimeoutExpired):
+                self.proc.wait(timeout=PROBE_REAP_S)
+        if self.proc.stdout is not None:
+            self.proc.stdout.close()
+        self.proc = None
+
+
 def _watch(proc: subprocess.Popen[bytes], opts: RunOptions, deadline: float) -> str:
-    """Wait for the command: ``exit``, or ``timeout`` at ``deadline``, or ``aborted`` when a
-    check every ``POLL_S`` finds ``C:`` below the floor."""
+    """Wait for the command: ``exit``, or ``timeout`` at ``deadline`` (checked on every pass,
+    whatever df does), or ``aborted`` when a df probe started every ``POLL_S`` finds ``C:`` below
+    the floor. A probe that fails or hangs raises HeavyError (E-QH11)."""
     pause = WAIT_FIRST_S
     next_disk = opts.clock() + POLL_S
-    while not _exited(proc.pid):
-        now = opts.clock()
-        if now >= deadline:
-            return TIMEOUT
-        if now >= next_disk:
-            next_disk = now + POLL_S
-            if admit(opts, running=1) == STOP:
-                return ABORTED
-        time.sleep(pause)
-        pause = min(pause * 2, WAIT_MAX_S)
-    return "exit"
+    probe: _DfProbe | None = None
+    try:
+        while not _exited(proc.pid):
+            now = opts.clock()
+            if now >= deadline:
+                return TIMEOUT
+            if probe is None and now >= next_disk:
+                probe = _DfProbe()
+            free = probe.poll() if probe is not None else None
+            if free is not None:
+                probe, next_disk = None, now + POLL_S
+                if free < DISK_FLOOR_GIB:
+                    return ABORTED
+            time.sleep(pause)
+            pause = min(pause * 2, WAIT_MAX_S)
+        return "exit"
+    finally:
+        if probe is not None:
+            probe.cancel()
 
 
 def run_command(cmd: Command, opts: RunOptions, *, deadline: float) -> CommandOutcome:
-    """Run one command inside the verified heavy run (refused outside), under ``deadline`` (a
-    time on ``opts.clock``) and the disk floor; the whole process group ends with it."""
-    _heavy_scope(opts)
+    """Run one command inside the verified heavy run (refused outside) and in the job cgroup,
+    under ``deadline`` (a time on ``opts.clock``) and the disk floor. It returns only once every
+    process of the command has ended; HeavyError when that cannot be made so."""
+    cgroup = _ready_cgroup(_heavy_scope(opts))
     try:
-        proc = _start(cmd, opts)
+        proc = _start(cmd, opts, cgroup)
     except OSError as exc:
         return CommandOutcome("error", None, f"cannot run {cmd.argv[0]}: {exc.strerror or exc}")
     try:
         kind = _watch(proc, opts, deadline)
     except HeavyError as exc:  # C: unreadable while the job runs: stop it as at the floor
-        _end_group(proc, terminate=True)
+        _drain(cgroup, proc, terminate=True)
         return CommandOutcome(ABORTED, None, exc.message)
     except BaseException:
-        _end_group(proc, terminate=True)
+        _drain(cgroup, proc, terminate=True)
         raise
-    returncode = _end_group(proc, terminate=kind != "exit")
+    returncode = _drain(cgroup, proc, terminate=kind != "exit")
     if kind == ABORTED:
         return CommandOutcome(ABORTED, None, floor_message(1))
     return CommandOutcome(kind, returncode if kind == "exit" else None, "")
@@ -831,7 +1016,7 @@ def _newest_stage(job_dir: Path) -> str | None:
 
 
 def _capped_message(job: Job, scope: ScopeInfo) -> str:
-    """E-QH10 (point (k)): the stage and the job's leaf-scope peak, else ``?``."""
+    """E-QH10 (point (k)): the stage and the leaf scope's peak, else ``?``."""
     stage = _newest_stage(job.job_dir) or "?"
     peak = qor_heavy.scope_peak_mib(scope)
     shown = "?" if peak is None else str(peak)
@@ -895,38 +1080,71 @@ def _finish(job: Job, finish: Finish, attempt_start: float
     return OK, "", metrics
 
 
+def _cleanup_ok(job: Job, opts: RunOptions) -> tuple[str, str]:
+    """Cleanup belongs to completion: an ok job whose cleanup fails is failed (and redone)."""
+    try:
+        cleanup_job(job, JobResult(job, OK, 0.0, ""), opts.keep_netlists)
+    except (HeavyError, OSError) as exc:
+        detail = exc.message if isinstance(exc, HeavyError) else str(exc)
+        return FAILED, f"{_label(job)}: cleanup failed: {detail}"
+    return OK, ""
+
+
 def _record(job: Job, status: str, error: str, metrics: dict[str, object] | None,
             elapsed_s: float) -> None:
-    """``metrics.json`` (with the planned key and this attempt's status) when there are metrics;
-    otherwise none may survive, so a failed attempt is never read as ``ok``."""
+    """``status``, then ``metrics.json`` last, by atomic rename (with the planned key and this
+    status) when there are metrics: an ok ``metrics.json`` exists only once its job is complete
+    and cleaned up. Without metrics, none may survive, so a failed attempt is never read as ok."""
     path = job.job_dir / "metrics.json"
     if metrics is None:
         qor_heavy.safe_rmtree(path, job_out_root(job))
-    else:
+    _write_status(job, status)
+    if metrics is not None:
         record = dict(metrics)
         record.update(key=job.key, status=status, error=error, elapsed_s=round(elapsed_s, 1))
         _write_atomic(path, json.dumps(record, sort_keys=True, indent=1) + "\n")
-    _write_status(job, status)
+
+
+def _end_job(job: Job, opts: RunOptions, began: float,
+             outcome: tuple[str, str, dict[str, object] | None]) -> JobResult:
+    status, error, metrics = outcome
+    if status == OK:
+        status, error = _cleanup_ok(job, opts)
+    elapsed = opts.clock() - began
+    try:
+        _record(job, status, error, metrics, elapsed)
+    except OSError as exc:  # a full disk: the job ran, but its record could not be written
+        status, error = FAILED, f"{_label(job)}: cannot record the job: {exc}"
+    return JobResult(job, status, elapsed, error)
+
+
+def _prepare(job: Job, opts: RunOptions, attempt_start: float) -> str:
+    if opts.prepare is None:
+        return ""
+    try:
+        opts.prepare(job, attempt_start)
+    except Exception as exc:  # as for finish: never stop an unattended run
+        return f"{_label(job)}: cannot prepare the job: {exc}"
+    return ""
 
 
 def run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
-    """Run one job alone from a fresh attempt, inside the verified heavy run (spec §7.4)."""
+    """Run one job alone from a fresh attempt, inside the verified heavy run (spec §7.4). An ok
+    job is cleaned up (spec §7.5) before its ``metrics.json`` is written."""
     scope = _heavy_scope(opts)
     began = opts.clock()
     deadline = began + opts.job_timeout_s[job.group]
     attempt_start = fresh_attempt(job)
+    error = _prepare(job, opts, attempt_start)
+    if error:
+        return _end_job(job, opts, began, (FAILED, error, None))
     oom_before = qor_heavy.oom_kills(scope)
     for cmd in job.commands:
         outcome = run_command(cmd, opts, deadline=deadline)
         status, error = _classify(job, cmd, outcome, opts, scope, oom_before)
         if status != OK:
-            elapsed = opts.clock() - began
-            _record(job, status, error, None, elapsed)
-            return JobResult(job, status, elapsed, error)
-    status, error, metrics = _finish(job, finish, attempt_start)
-    elapsed = opts.clock() - began
-    _record(job, status, error, metrics, elapsed)
-    return JobResult(job, status, elapsed, error)
+            return _end_job(job, opts, began, (status, error, None))
+    return _end_job(job, opts, began, _finish(job, finish, attempt_start))
 
 
 # -- admission ---------------------------------------------------------------------------------
@@ -975,7 +1193,8 @@ def _deadline_line(job: Job, opts: RunOptions) -> str:
     """E-QH10's nightly text (plan Task 13 owns the nightly)."""
     expected = opts.expected_s(job) if opts.expected_s is not None else 0.0
     minutes = math.ceil(expected / SECONDS_PER_MINUTE)
-    when = time.strftime("%H:%M", time.localtime(opts.deadline or 0.0))
+    wall = time.time() + ((opts.deadline or 0.0) - opts.clock())  # deadline is on clock's scale
+    when = time.strftime("%H:%M", time.localtime(wall))
     return f"nightly: {_label(job)} not started: expected {minutes} min would pass {when}"
 
 
@@ -1039,7 +1258,7 @@ def cleanup_job(job: Job, result: JobResult, keep_netlists: frozenset[str]) -> N
 class _JobDir:
     path: Path
     status: str | None
-    metrics_ok: bool
+    complete: bool
     when: float
 
 
@@ -1063,7 +1282,7 @@ def _read_word(path: Path) -> str | None:
         return None
 
 
-def _job_dir_info(path: Path) -> _JobDir:
+def _job_dir_info(path: Path, leg: str) -> _JobDir:
     for name in ("status", "metrics.json", "run"):
         if (path / name).is_symlink():
             raise _symlink_refusal(path / name)
@@ -1076,8 +1295,9 @@ def _job_dir_info(path: Path) -> _JobDir:
         metrics = json.loads((path / "metrics.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         metrics = None
-    metrics_ok = isinstance(metrics, dict) and metrics.get("status") == OK
-    return _JobDir(path, _read_word(status_file), metrics_ok, when)
+    complete = isinstance(metrics, dict) and metrics.get("status") == OK \
+        and _done(path, leg, path.name)
+    return _JobDir(path, _read_word(status_file), complete, when)
 
 
 def _tree_bytes(path: Path) -> int:
@@ -1094,18 +1314,28 @@ def _scan_leg(leg_dir: Path) -> dict[Path, list[_JobDir]]:
     keys: dict[Path, list[_JobDir]] = {}
     for key_dir in _entries(leg_dir):
         if key_dir.is_dir():
-            keys[key_dir] = [_job_dir_info(d) for d in _entries(key_dir) if d.is_dir()]
+            keys[key_dir] = [_job_dir_info(d, leg_dir.name) for d in _entries(key_dir)
+                             if d.is_dir()]
     return keys
 
 
-def _prune_keys(keys: Mapping[Path, list[_JobDir]], latest: str | None, root: Path,
-                keep_keys: int) -> None:
-    """Spec §5.4: the ``keep_keys`` newest complete keys stay (and ``latest`` always)."""
+def _key_complete(jobs: Sequence[_JobDir], designs: Collection[str]) -> bool:
+    """Point (f): every design of the set has a complete job under the key, and every job
+    present is complete."""
+    done = {j.path.name for j in jobs if j.complete}
+    return bool(jobs) and all(j.complete for j in jobs) and set(designs) <= done
+
+
+def _prune_keys(keys: Mapping[Path, list[_JobDir]], designs: Collection[str],
+                protect: Collection[str], root: Path, keep_keys: int) -> None:
+    """Spec §5.4: the ``keep_keys`` newest complete keys stay; a protected key is never
+    deleted (it counts among the newest when it is complete); a key that is not complete is not
+    touched."""
     complete = [(max(j.when for j in jobs), key.name, key) for key, jobs in keys.items()
-                if jobs and all(j.status == OK and j.metrics_ok for j in jobs)]
+                if _key_complete(jobs, designs)]
     complete.sort(reverse=True)
     for _, name, key in complete[keep_keys:]:
-        if name != latest:
+        if name not in protect:
             qor_heavy.safe_rmtree(key, root)
 
 
@@ -1124,9 +1354,14 @@ def _prune_failed(keys: Mapping[Path, list[_JobDir]], root: Path) -> None:
         total -= size
 
 
-def prune(out: Path, vtr12: str, arch: str, leg: str, *, keep_keys: int = KEEP_KEYS) -> None:
-    """Retention for ``<out>/<vtr12>/<arch>/<leg>`` (spec §5.4). A symlink anywhere on the way
-    is refused (E-QH12), never followed; deletions go through ``safe_rmtree`` under ``out``."""
+def prune(out: Path, vtr12: str, arch: str, leg: str, *,
+          designs: Collection[str] | None = None, protect: Collection[str] = (),
+          keep_keys: int = KEEP_KEYS) -> None:
+    """Retention for ``<out>/<vtr12>/<arch>/<leg>`` (spec §5.4). A key is complete only when
+    every one of ``designs`` (the set, e.g. ``sets.json``'s gate and extra) is complete under it;
+    without ``designs`` no key is pruned, only failed run directories. The keys in ``protect``
+    (the current run's) and ``latest`` are never deleted. A symlink anywhere on the way is refused
+    (E-QH12), never followed; deletions go through ``safe_rmtree`` under ``out``."""
     leg_dir = out / vtr12 / arch / leg
     current = out
     for part in (vtr12, arch, leg):
@@ -1138,20 +1373,22 @@ def prune(out: Path, vtr12: str, arch: str, leg: str, *, keep_keys: int = KEEP_K
     if (leg_dir / "latest").is_symlink():
         raise _symlink_refusal(leg_dir / "latest")
     keys = _scan_leg(leg_dir)
-    _prune_keys(keys, _read_word(leg_dir / "latest"), out, keep_keys)
+    if designs is not None:
+        kept = {*protect, _read_word(leg_dir / "latest") or ""}
+        _prune_keys(keys, designs, kept, out, keep_keys)
     remaining = {key: jobs for key, jobs in keys.items() if key.exists()}
     _prune_failed(remaining, out)
 
 
 def _prune_after(jobs: Sequence[Job], opts: RunOptions) -> None:
-    seen: set[Path] = set()
+    """Retention after the run, per (vtr12, arch, leg); the run's own keys are protected."""
+    legs: dict[Path, set[str]] = {}
     for job in jobs:
-        leg_dir = job.job_dir.parents[1]
-        if leg_dir in seen:
-            continue
-        seen.add(leg_dir)
+        legs.setdefault(job.job_dir.parents[1], set()).add(job.key12)
+    for leg_dir, own in legs.items():
         try:
-            prune(opts.out, leg_dir.parents[1].name, leg_dir.parent.name, leg_dir.name)
+            prune(opts.out, leg_dir.parents[1].name, leg_dir.parent.name, leg_dir.name,
+                  designs=opts.retain_designs, protect=own)
         except (HeavyError, OSError) as exc:
             _emit(opts, exc.message if isinstance(exc, HeavyError) else f"prune: {exc}")
 
@@ -1213,14 +1450,9 @@ class _Run:
         return sum(not (job.cached and job_complete(job)) for job in self.jobs[start:])
 
 
-def _after_ok(run: _Run, job: Job, result: JobResult) -> bool:
-    """Cleanup, then the job's own fcheck before the next job; False when admission stopped the
-    run."""
-    try:
-        cleanup_job(job, result, run.opts.keep_netlists)
-    except (HeavyError, OSError) as exc:
-        run.log.emit(exc.message if isinstance(exc, HeavyError) else
-                     f"{_label(job)}: cleanup failed: {exc}")
+def _after_ok(run: _Run, job: Job) -> bool:
+    """The job's own fcheck (it is already cleaned up) before the next job; False when admission
+    stopped the run."""
     if not run.opts.fcheck:
         return True
     if _admit_loop(job, run.opts, deadline=False) == STOP:
@@ -1264,7 +1496,7 @@ def _step(run: _Run, index: int) -> bool:
     if result.status == ABORTED:
         run.stop(EXIT_DISK, index + 1)
         return False
-    if result.status == OK and not _after_ok(run, job, result):
+    if result.status == OK and not _after_ok(run, job):
         _stop_for_pause(run, index + 1)
         return False
     return True
@@ -1289,8 +1521,9 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
     Refused (HeavyError) above ``MAX_JOBS`` (E-QH9) or outside a verified heavy run.
 
     ``finish(job, attempt_start)`` builds the job's metrics (plan Task 6) once all its commands
-    exited 0; its ``routed.vpr_status`` must be ``success``. The runner writes ``metrics.json``
-    with the planned key and the status, and ``<J>/status``."""
+    exited 0; its ``routed.vpr_status`` must be ``success``. It must not write ``metrics.json``:
+    the runner cleans the job up (spec §7.5), writes ``<J>/status``, then ``metrics.json`` last
+    (atomic, with the planned key and the status), so an ok ``metrics.json`` means complete."""
     _check_jobs_option(opts)
     _check_layout(jobs, opts)
     ordered = _grouped(jobs)
@@ -1315,6 +1548,8 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
             if not going:
                 break
             index += 1
+    with suppress(OSError):  # an empty job cgroup is removed (the scope's stop removes it too)
+        os.rmdir(job_cgroup(_heavy_scope(opts)))
     _prune_after(ordered, opts)
     log.done(run.results, opts.clock() - began)
     return RunSummary(tuple(run.results), run.stop_code == EXIT_DISK,

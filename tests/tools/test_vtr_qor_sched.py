@@ -620,8 +620,11 @@ class RunnerTestBase(unittest.TestCase):
         self.df_file = self.tmp / "df-gib"
         self.set_df(100)
         fake_df = self.tmp / "fake-df.py"
+        self.df_hang = self.tmp / "df-hang"
         fake_df.write_text(
-            "import sys\n"
+            "import os, sys, time\n"
+            f"if os.path.exists({str(self.df_hang)!r}):\n"
+            "    time.sleep(600)\n"
             "gib = int(open(sys.argv[1]).read())\n"
             f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n")
         self.meminfo = self.tmp / "meminfo"
@@ -796,6 +799,7 @@ class RunOrderTest(RunnerTestBase):
         job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)
         job.job_dir.mkdir(parents=True)
         (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": job.key}))
+        (job.job_dir / "status").write_text("ok\n")
         summary, lines = self.run_jobs([job], self.opts())
         self.assertEqual(self.starts(), [])
         self.assertEqual([r.status for r in summary.results], ["ok"])
@@ -1031,7 +1035,7 @@ class OutcomeTest(RunnerTestBase):
                                                   label=f"{job.leg} {job.design}")
             return {"routed": {"vpr_status": fields["vpr_status"]}}
 
-        stale = self.job("sha", [{"write": [{"path": parse, "text": PARSE_TEXT, "age_s": 1}]}])
+        stale = self.job("sha", [{"write": [{"path": parse, "text": PARSE_TEXT, "age_s": 60}]}])
         summary, lines = self.run_jobs([stale], self.opts(), finish)
         self.assertEqual([r.status for r in summary.results], ["failed"])
         message = "P sha: stale parse_results.txt from an earlier attempt; job failed"
@@ -1122,6 +1126,276 @@ class OutcomeTest(RunnerTestBase):
         self.assertTrue((job.job_dir / "metrics.json").read_text().startswith('{\n "elapsed_s"'))
         self.assertEqual((job.job_dir / "status").read_text(), "ok\n")
         self.assertTrue(qor_sched.job_complete(job))
+
+
+class CgroupKillTest(RunnerTestBase):
+    """Review C1: VTR starts every stage in a session of its own, so a process-group kill misses
+    it; the job cgroup's drain must not. The fake records its grandchild in the fake
+    cgroup.procs as the kernel would."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.cg = self.leaf / qor_sched.JOB_CGROUP
+        self.pids = self.tmp / "pids"
+
+    def stage(self, **extra: Any) -> Spec:
+        """A fake run_vtr_flow: a stage in its own session, then it waits."""
+        spec: Spec = {"spawn_sleep": 600, "spawn_session": True, "pids": str(self.pids),
+                      "cgroup_procs": str(self.cg / "cgroup.procs"), "sleep": 600}
+        spec.update(extra)
+        return spec
+
+    def pid_list(self) -> list[int]:
+        return [int(p) for p in self.pids.read_text().split()]
+
+    def held_clock(self) -> Callable[[], float]:
+        """Real time, held until the stage runs; records the two sessions once."""
+        frozen = time.monotonic()
+        self.sessions: list[int] = []
+
+        def clock() -> float:
+            if not self.pids.exists():
+                return frozen
+            if not self.sessions:
+                self.sessions = [os.getsid(pid) for pid in self.pid_list()]
+            return time.monotonic()
+
+        return clock
+
+    def test_job_joins_cgroup(self) -> None:
+        spec = {"spawn_sleep": 0, "pids": str(self.pids)}
+        result = qor_sched.run_one(self.job("sha", [spec]), self.opts(), finish_ok)
+        self.assertEqual(result.status, "ok")
+        leader = self.pid_list()[0]
+        self.assertIn(str(leader), (self.cg / "cgroup.procs").read_text().split())
+
+    def test_setsid_stage_killed_on_timeout(self) -> None:
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
+                         job_timeout_s={"A": 1, "B": 1})
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
+            summary, lines = self.run_jobs([self.job("sha", [self.stage()]),
+                                            self.job("next", [{"stamp": str(self.stamps),
+                                                               "name": "next"}])], opts)
+        self.assertEqual(len(set(self.sessions)), 2)  # the stage really had its own session
+        self.assertEqual([r.status for r in summary.results], ["timeout", "ok"])
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))  # dead before the next job ran
+        self.assertIn("vtr-qor: P sha: timeout after 1 s", lines)
+
+    def test_setsid_stage_killed_on_floor(self) -> None:
+        spec = self.stage(write=[{"path": str(self.df_file), "text": "9\n"}])
+        summary, _ = self.run_jobs([self.job("sha", [spec])], self.opts(clock=ScaledClock(600)))
+        self.assertEqual(([r.status for r in summary.results], summary.exit_code),
+                         (["aborted"], 5))
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))
+
+    def test_setsid_stage_killed_on_sigterm(self) -> None:
+        sent = False
+        inner = self.held_clock()
+
+        def clock() -> float:
+            nonlocal sent
+            now = inner()
+            if self.pids.exists() and not sent:
+                sent = True
+                os.kill(os.getpid(), signal.SIGTERM)
+            return now
+
+        with self.assertRaises(SystemExit):
+            self.run_jobs([self.job("sha", [self.stage()])], self.opts(clock=clock))
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))
+
+    def test_setsid_straggler_after_exit(self) -> None:
+        """A job that exits 0 leaving a stage in its own session: the stage is killed before
+        run_one returns."""
+        result = qor_sched.run_one(self.job("sha", [self.stage(sleep=0)]), self.opts(),
+                                   finish_ok)
+        self.assertEqual(result.status, "ok")
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))
+
+    def test_stage_gets_sigterm_and_its_grace(self) -> None:
+        """On a timeout the stage in its own session gets SIGTERM, and the grace lasts until the
+        cgroup is empty (not just until run_vtr_flow, which dies at once, has gone)."""
+        flag = self.tmp / "stage-term"
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
+                         job_timeout_s={"A": 1, "B": 1})
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 20.0):
+            result = qor_sched.run_one(self.job("sha", [self.stage(stage_on_term=str(flag))]),
+                                       opts, finish_ok)
+        self.assertEqual(result.status, "timeout")
+        self.assertEqual(flag.read_text(), "term\n")
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))
+
+    def test_cgroup_kill_written(self) -> None:
+        self.cg.mkdir()
+        (self.cg / "cgroup.kill").write_text("")
+        opts = self.opts(clock=self.held_clock(), sleep=time.sleep,
+                         job_timeout_s={"A": 1, "B": 1})
+        with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.2):
+            result = qor_sched.run_one(self.job("sha", [self.stage(ignore_term=True)]), opts,
+                                       finish_ok)
+        self.assertEqual(result.status, "timeout")
+        self.assertEqual((self.cg / "cgroup.kill").read_text(), "1")
+        self.assertTrue(_wait_dead(self.pid_list(), 0.1))
+
+    def test_busy_scope_refused(self) -> None:
+        """Another process in the harness's scope or in the job cgroup: no job starts."""
+        sleeper = subprocess.Popen([sys.executable, "-I", "-c", "import time; time.sleep(60)"])
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(sleeper.kill)
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}])
+        for where in (self.leaf, self.cg):
+            where.mkdir(exist_ok=True)
+            (where / "cgroup.procs").write_text(f"{os.getpid()}\n{sleeper.pid}\n")
+            summary, lines = self.run_jobs([job], self.opts())
+            self.assertEqual(lines[0], f"vtr-qor: one job at a time: {where} still holds "
+                                       f"process {sleeper.pid}; not starting another")
+            self.assertEqual((summary.exit_code, self.starts()), (2, []))
+            (where / "cgroup.procs").write_text("")
+        summary, _ = self.run_jobs([job], self.opts())
+        self.assertEqual((summary.exit_code, self.starts()), (0, ["sha"]))
+
+    def test_cgroup_that_will_not_empty_stops_the_run(self) -> None:
+        """A member that cannot be killed (pid 1 stands in): the run stops rather than start the
+        next job beside it."""
+        spec = {"write": [{"path": str(self.cg / "cgroup.procs"), "text": "1\n"}]}
+        jobs = [self.job("sha", [spec]), self.job("next", [{"stamp": str(self.stamps),
+                                                            "name": "next"}])]
+        with mock.patch.object(qor_sched, "CGROUP_DRAIN_S", 0.3):
+            summary, lines = self.run_jobs(jobs, self.opts())
+        self.assertIn(f"vtr-qor: {self.cg} still holds processes [1] after 0.3 s; stopping",
+                      lines)
+        self.assertEqual((summary.exit_code, self.starts()), (2, []))
+
+    def test_no_cgroup_no_job(self) -> None:
+        """A job cgroup that cannot be created (here: a file in its place): nothing starts."""
+        self.cg.write_text("")
+        summary, lines = self.run_jobs([self.job("sha", [{"stamp": str(self.stamps),
+                                                          "name": "sha"}])], self.opts())
+        self.assertTrue(lines[0].startswith(f"vtr-qor: cannot create the job cgroup {self.cg}"))
+        self.assertEqual((summary.exit_code, self.starts()), (2, []))
+
+
+class DfTest(RunnerTestBase):
+    """Review I2: a hung df of /mnt/c is bounded, and never holds up a job's wall timeout."""
+
+    def test_df_hangs_between_jobs(self) -> None:
+        self.df_hang.touch()
+        began = time.monotonic()
+        with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
+            summary, lines = self.run_jobs([self.job("sha", [{"stamp": str(self.stamps),
+                                                              "name": "sha"}])], self.opts())
+        self.assertLess(time.monotonic() - began, 20)
+        self.assertEqual(lines[0], "vtr-qor: cannot read free space of /mnt/c")
+        self.assertEqual((summary.exit_code, self.starts()), (5, []))
+
+    def test_df_hangs_while_running(self) -> None:
+        spec = {"write": [{"path": str(self.df_hang), "text": ""}], "sleep": 600}
+        began = time.monotonic()
+        with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
+            summary, _ = self.run_jobs([self.job("sha", [spec])],
+                                       self.opts(clock=ScaledClock(600)))
+        self.assertLess(time.monotonic() - began, 20)
+        self.assertEqual((summary.results[0].status, summary.results[0].error, summary.exit_code),
+                         ("aborted", "cannot read free space of /mnt/c", 5))
+
+    def test_timeout_despite_hung_df(self) -> None:
+        pids = self.tmp / "pids"
+        spec = {"write": [{"path": str(self.df_hang), "text": ""}], "spawn_sleep": 600,
+                "pids": str(pids), "sleep": 600}
+        frozen = time.monotonic()
+        opts = self.opts(clock=lambda: time.monotonic() if pids.exists() else frozen,
+                         sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
+        began = time.monotonic()
+        with mock.patch.object(qor_sched, "POLL_S", 0.05), \
+                mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
+            result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
+        self.assertEqual(result.status, "timeout")
+        self.assertLess(time.monotonic() - began, 15)
+
+
+class CompletionTest(RunnerTestBase):
+    """Review I3: an ok metrics.json is written last, after cleanup and status; a job left
+    half-done is redone."""
+
+    def p_spec(self) -> Spec:
+        run = self.job_dir("sha") / "run"
+        return {"stamp": str(self.stamps), "name": "sha",
+                "write": [{"path": str(run / "sha.pre-vpr.blif"), "text": ".model sha\n"}]}
+
+    def test_interrupted_cleanup_publishes_nothing(self) -> None:
+        job = self.job("sha", [self.p_spec()])
+        with mock.patch.object(qor_sched, "cleanup_job", side_effect=SystemExit(143)), \
+                self.assertRaises(SystemExit):
+            qor_sched.run_one(job, self.opts(), finish_ok)
+        self.assertFalse((job.job_dir / "metrics.json").exists())
+        self.assertFalse(qor_sched.job_complete(job))
+
+    def test_cleanup_failure_fails_the_job(self) -> None:
+        job = self.job("sha", [self.p_spec()])
+        with mock.patch.object(qor_sched, "cleanup_job",
+                               side_effect=HeavyError(2, "refusing to delete x")):
+            result = qor_sched.run_one(job, self.opts(), finish_ok)
+        self.assertEqual((result.status, result.error),
+                         ("failed", "P sha: cleanup failed: refusing to delete x"))
+        self.assertEqual(json.loads((job.job_dir / "metrics.json").read_text())["status"],
+                         "failed")
+        self.assertFalse(qor_sched.job_complete(job))
+
+    def test_order_cleanup_status_metrics(self) -> None:
+        job = self.job("sha", [self.p_spec()])
+        result = qor_sched.run_one(job, self.opts(), finish_ok)
+        self.assertEqual(result.status, "ok")
+        run = job.job_dir / "run"
+        self.assertTrue((run / "sha.pre-vpr.blif.gz").exists())
+        self.assertFalse((run / "sha.pre-vpr.blif").exists())
+        self.assertLessEqual((job.job_dir / "status").stat().st_mtime_ns,
+                             (job.job_dir / "metrics.json").stat().st_mtime_ns)
+        self.assertTrue(qor_sched.job_complete(job))
+
+    def test_half_done_job_redone(self) -> None:
+        job = self.job("sha", [self.p_spec()], cached=True)
+        job.job_dir.mkdir(parents=True)
+        (job.job_dir / "metrics.json").write_text(json.dumps({"status": "ok", "key": job.key}))
+        self.run_jobs([job], self.opts())  # no status: redone
+        self.assertEqual(self.starts(), ["sha"])
+        self.run_jobs([job], self.opts())  # complete now: cached
+        self.assertEqual(self.starts(), ["sha"])
+        (job.job_dir / "run" / "sha.pre-vpr.blif").write_text(".model sha\n")
+        self.assertFalse(qor_sched.job_complete(job))  # P's netlist not gzipped: redone
+        self.run_jobs([job], self.opts())
+        self.assertEqual(self.starts(), ["sha", "sha"])
+
+    def test_prepare_after_fresh_attempt(self) -> None:
+        seen: list[list[str]] = []
+
+        def prepare(job: Job, start: float) -> None:
+            seen.append(sorted(p.name for p in job.job_dir.iterdir()))
+            (job.job_dir / "job.json").write_text("{}\n")
+
+        job = self.job("sha", [{"exit": 1}])
+        job.job_dir.mkdir(parents=True)
+        (job.job_dir / "old").write_text("x\n")
+        result = qor_sched.run_one(job, self.opts(prepare=prepare), finish_ok)
+        self.assertEqual((seen, result.status), ([["run"]], "failed"))
+        self.assertTrue((job.job_dir / "job.json").exists())  # a failed job keeps job.json
+
+        def broken(job: Job, start: float) -> None:
+            raise ValueError("no disk")
+
+        result = qor_sched.run_one(self.job("sha", [{"stamp": str(self.stamps), "name": "x"}]),
+                                   self.opts(prepare=broken), finish_ok)
+        self.assertEqual((result.status, result.error, self.starts()),
+                         ("failed", "P sha: cannot prepare the job: no disk", []))
+
+    def test_unwritable_log(self) -> None:
+        (self.out / "harness.log").mkdir()
+        summary, lines = self.run_jobs([self.job("sha", [{}])], self.opts())
+        self.assertEqual(summary.exit_code, 0)
+        self.assertEqual(sum("cannot write" in line for line in lines), 1)
+        self.assertTrue(lines[-1].startswith("vtr-qor: done: 1 ok"))
+
+    def test_default_clock_is_monotonic(self) -> None:
+        self.assertIs(qor_sched.RunOptions(out=self.out).clock, time.monotonic)
 
 
 class AdmissionTest(RunnerTestBase):
@@ -1231,9 +1505,11 @@ class AdmissionTest(RunnerTestBase):
                          expected_s=lambda job: minutes[job.design] * 60.0)
         summary, lines = self.run_jobs(jobs, opts)
         self.assertEqual([r.status for r in summary.results], ["ok", "skipped", "ok"])
-        when = time.strftime("%H:%M", time.localtime(clock.now + 100 * 60))
-        self.assertIn(f"vtr-qor: nightly: P b not started: expected 200 min would pass {when}",
-                      lines)
+        # The deadline is on the run's clock; the text shows it as local wall time.
+        whens = {time.strftime("%H:%M", time.localtime(time.time() + 100 * 60 + d))
+                 for d in (-60, 0)}
+        self.assertTrue(any(f"vtr-qor: nightly: P b not started: expected 200 min would pass "
+                            f"{when}" in lines for when in whens), lines)
         self.assertEqual(summary.exit_code, 0)
 
 
@@ -1329,8 +1605,12 @@ class RetentionTest(RunnerTestBase):
         os.utime(job_dir / "status", (when, when))
         return job_dir
 
-    def prune(self) -> None:
-        qor_sched.prune(self.out, VTR12, K6, "P")
+    def prune(self, designs: tuple[str, ...] | None = ("sha", "ch_intrinsics"),
+              protect: tuple[str, ...] = ()) -> None:
+        qor_sched.prune(self.out, VTR12, K6, "P", designs=designs, protect=protect)
+
+    def names(self) -> list[str]:
+        return sorted(p.name for p in self.leg_dir().iterdir() if p.is_dir())
 
     def test_retention_keys(self) -> None:
         keys = [f"{i:012x}" for i in range(5)]
@@ -1339,17 +1619,49 @@ class RetentionTest(RunnerTestBase):
                 self.make(key, design, "ok", 1_000_000.0 + i)
         incomplete = self.make("incomplete00", "sha", "ok", 1.0)
         self.make("incomplete00", "ch_intrinsics", "failed", 2.0)
+        self.prune(designs=None)  # no set: no key is pruned
+        self.assertEqual(self.names(), sorted([*keys, "incomplete00"]))
         self.prune()
-        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir()),
-                         sorted([*keys[2:], "incomplete00"]))
+        self.assertEqual(self.names(), sorted([*keys[2:], "incomplete00"]))
         self.assertTrue(incomplete.exists())
         # latest is never pruned, even when older keys would be.
         (self.leg_dir() / "latest").write_text(keys[2] + "\n")
         for i in range(5, 8):
-            self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)
+            for design in ("sha", "ch_intrinsics"):
+                self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
         self.prune()
-        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir() if p.is_dir()),
+        self.assertEqual(self.names(),
                          sorted([keys[2], *(f"{i:012x}" for i in range(5, 8)), "incomplete00"]))
+
+    def test_retention_complete_means_the_whole_set(self) -> None:
+        """Point (f): a key holding only some designs of the set (a smoke or seed run) is not
+        complete, so it neither counts among the kept keys nor is pruned."""
+        self.make("000000000000", "sha", "ok", 1.0)
+        self.make("000000000000", "ch_intrinsics", "ok", 1.0)
+        for i in range(1, 5):
+            self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)  # partial: sha only
+        self.prune()
+        self.assertEqual(len(self.names()), 5)
+        # A complete job needs status ok, an ok metrics.json and (P) the netlist gzipped.
+        for i in range(1, 4):
+            self.make(f"{i:012x}", "ch_intrinsics", "ok", 1_000_000.0 + i)
+        # Every design of the set ok, but another job of the key failed: not complete either.
+        self.make("000000000001", "extra", "failed", 1.0)
+        raw = self.make("000000000004", "ch_intrinsics", "ok", 1_000_004.0) / "run"
+        (raw / "ch_intrinsics.pre-vpr.blif").write_text(".model x\n")
+        self.prune()  # complete: 0, 2, 3 only (1 has a failed job, 4 an un-gzipped netlist)
+        self.assertEqual(self.names(), [f"{i:012x}" for i in range(5)])
+        (raw / "ch_intrinsics.pre-vpr.blif").unlink()  # 4 complete now: 0 is the 4th newest
+        self.prune()
+        self.assertEqual(self.names(), [f"{i:012x}" for i in range(1, 5)])
+
+    def test_retention_protects_the_run(self) -> None:
+        for i in range(5):
+            for design in ("sha", "ch_intrinsics"):
+                self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
+        self.prune(protect=("000000000000",))
+        self.assertEqual(self.names(), ["000000000000", "000000000002", "000000000003",
+                                        "000000000004"])
 
     def test_retention_failed_count(self) -> None:
         dirs = [self.make("aaaaaaaaaaaa", f"d{i}", "failed" if i % 2 else "capped",
@@ -1405,9 +1717,21 @@ class RetentionTest(RunnerTestBase):
     def test_run_prunes_after(self) -> None:
         for i in range(4):
             self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)
-        summary, _ = self.run_jobs([self.job("sha", [{}])], self.opts())
-        self.assertEqual(sorted(p.name for p in self.leg_dir().iterdir()),
-                         ["000000000002", "000000000003", KEY12])
+        self.run_jobs([self.job("sha", [{}])], self.opts())
+        self.assertEqual(len(self.names()), 5)  # no retain_designs: no key pruned
+        self.run_jobs([self.job("sha", [{}])], self.opts(retain_designs=frozenset({"sha"})))
+        self.assertEqual(self.names(), ["000000000002", "000000000003", KEY12])
+
+    def test_run_keeps_its_own_cached_key(self) -> None:
+        """A run whose job is cached (old) never loses its own key to newer complete keys."""
+        job = self.job("sha", [{"stamp": str(self.stamps), "name": "sha"}], cached=True)
+        own = self.make(KEY12, "sha", "ok", 1.0)
+        (own / "metrics.json").write_text(json.dumps({"status": "ok", "key": job.key}))
+        for i in range(3):
+            self.make(f"{i:012x}", "sha", "ok", 1_000_000.0 + i)
+        summary, _ = self.run_jobs([job], self.opts(retain_designs=frozenset({"sha"})))
+        self.assertEqual(([r.status for r in summary.results], self.starts()), (["ok"], []))
+        self.assertTrue(own.exists())
 
 
 class ProgressTest(RunnerTestBase):

@@ -12,6 +12,12 @@ Usage: ``python3 -I fakejob.py <spec.json>``. The spec is a JSON object; every k
 - ``on_term`` (path): on SIGTERM, write ``term`` there and exit 143;
 - ``fd_dump`` (path): write ``<fd> <target>`` lines for the open descriptors there;
 - ``spawn_sleep``: start a grandchild sleeping this many seconds in the same process group;
+- ``spawn_session``: start that grandchild in a session of its own instead, as VTR's
+  ``CommandRunner`` starts every stage (``start_new_session=True``);
+- ``stage_on_term`` (path): the grandchild, on SIGTERM, waits 0.3 s, writes ``term`` there and
+  exits (a stage shutting down cleanly);
+- ``cgroup_procs`` (path): append the grandchild's pid to this fake ``cgroup.procs``, as the
+  kernel puts a child in its parent's cgroup;
 - ``pids``: write ``<own pid> <grandchild pid>`` here once the grandchild runs;
 - ``stdout`` / ``stderr``: text to print on each stream;
 - ``env_dump`` (path): write the job's environment there as JSON;
@@ -67,9 +73,23 @@ def _add_oom_kill(spec: dict[str, Any]) -> None:
 def _spawn(spec: dict[str, Any]) -> None:
     if "spawn_sleep" not in spec:
         return
+    code = f"import time; time.sleep({float(spec['spawn_sleep'])})"
+    if "stage_on_term" in spec:
+        code = (
+            "import os, signal, time\n"
+            "def term(signum, frame):\n"
+            "    time.sleep(0.3)\n"
+            f"    open({spec['stage_on_term']!r}, 'w').write('term\\n')\n"
+            "    os._exit(0)\n"
+            "signal.signal(signal.SIGTERM, term)\n"
+            f"time.sleep({float(spec['spawn_sleep'])})\n"
+        )
     child = subprocess.Popen(
-        [sys.executable, "-I", "-c", f"import time; time.sleep({float(spec['spawn_sleep'])})"]
+        [sys.executable, "-I", "-c", code], start_new_session=bool(spec.get("spawn_session"))
     )
+    if "cgroup_procs" in spec:
+        with open(spec["cgroup_procs"], "a", encoding="ascii") as handle:
+            handle.write(f"{child.pid}\n")
     if "pids" in spec:
         Path(spec["pids"]).write_text(f"{os.getpid()} {child.pid}\n", encoding="utf-8")
 

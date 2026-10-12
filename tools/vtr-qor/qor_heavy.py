@@ -56,6 +56,8 @@ WIN_C = "/mnt/c"
 # df by absolute path (never PATH): /usr/bin/df, or /bin/df without the merged /usr.
 DF_BIN = "/usr/bin/df" if Path("/usr/bin/df").exists() else "/bin/df"
 DF_CMD: tuple[str, ...] = (DF_BIN, "-B1", "--output=target,avail", WIN_C)
+# The longest a df of /mnt/c may take (a stalled drvfs mount can block statfs).
+DF_TIMEOUT_S = 30.0
 
 PREFIX = "vtr-qor: "
 EXIT_USAGE = 2
@@ -279,22 +281,30 @@ def scope_peak_mib(scope: ScopeInfo) -> int | None:
     return int(value) // MIB
 
 
-def disk_free_gib() -> int:
-    """Free whole GiB on ``C:`` (floored) from ``df -B1 --output=target,avail /mnt/c``
-    (``DF_CMD``; never an environment override, so a leaked variable cannot defeat admission).
-    The reported mount point must be ``/mnt/c``: with ``C:`` unmounted, ``df`` would silently
-    report the file system holding the directory (the VHDX), so that is E-QH11 too."""
-    try:
-        proc = subprocess.run(list(DF_CMD), capture_output=True, text=True, check=False)
-    except OSError as exc:
-        raise HeavyError(EXIT_DISK, MSG_DF) from exc
-    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if proc.returncode != 0 or len(lines) < 2:
+def parse_df(returncode: int, stdout: str) -> int:
+    """Free whole GiB on ``C:`` (floored) from ``DF_CMD``'s output. The reported mount point must
+    be ``/mnt/c``: with ``C:`` unmounted, ``df`` would silently report the file system holding the
+    directory (the VHDX), so that is E-QH11 too."""
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if returncode != 0 or len(lines) < 2:
         raise HeavyError(EXIT_DISK, MSG_DF)
     fields = lines[-1].rsplit(None, 1)
     if len(fields) != 2 or fields[0] != WIN_C or not fields[1].isdigit():
         raise HeavyError(EXIT_DISK, MSG_DF)
     return int(fields[1]) // GIB
+
+
+def disk_free_gib() -> int:
+    """Free whole GiB on ``C:`` from ``df -B1 --output=target,avail /mnt/c`` (``DF_CMD``; never an
+    environment override, so a leaked variable cannot defeat admission), within ``DF_TIMEOUT_S``:
+    ``statfs`` on WSL's ``/mnt/c`` can hang while Windows stalls, and a hung reader must not hold
+    the heavy lock. Any failure is E-QH11."""
+    try:
+        proc = subprocess.run(list(DF_CMD), capture_output=True, text=True, check=False,
+                              timeout=DF_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HeavyError(EXIT_DISK, MSG_DF) from exc
+    return parse_df(proc.returncode, proc.stdout)
 
 
 def mem_available_gib(meminfo: Path = Path("/proc/meminfo")) -> float:
