@@ -211,13 +211,12 @@ static void test_review_probe(void) {
     TEST_ASSERT_TRUE(declares(expect_block(top, 2, "genblk3", &zero), "w"));
 }
 
-/* A user `genblk1` declared after the first construct does not pad it; one before does. The first
- * store is checked but not bound: the binder (Task 13) holds one symbol per name and reports M11
- * for the block beside the later wire, which Yosys accepts (spec §5.3; the report's carry). */
+/* A user `genblk1` declared after the first construct does not pad it, and both bind (Yosys
+ * keeps the wire and the block: the IDENT reads the wire, the HIER_NAME the block); one declared
+ * before pads it. */
 static void test_user_genblk_names(void) {
-    run_one("module t;\n  if (1) begin wire x; end\n  wire genblk1;\nendmodule\n");
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.elab, ODIN3_CHECK_FULL));
+    run_clean("module t (output y, output z);\n  if (1) begin wire x; end\n  wire genblk1;\n"
+              "  assign y = genblk1.x;\n  assign z = genblk1;\nendmodule\n");
     expect_block(module_named("t"), 0, "genblk1", NULL);
     TEST_ASSERT_TRUE(declares(module_named("t"), "genblk1"));
     et_free(&rs);
@@ -444,6 +443,15 @@ static void test_scoped_defparam(void) {
     module_named("m$W=2");
 }
 
+/* A defparam into a block that was not elaborated is the target error, its path as written. */
+static void test_defparam_bad_scope(void) {
+    run_error(&(gen_case){M_W "module t;\n  genvar i;\n  for (i = 0; i < 2; i = i + 1) begin : g\n"
+                              "    wire [3:0] t;\n    m u (.o(t));\n  end\n"
+                              "  defparam g[1 + 4].u.W = 2;\nendmodule\n",
+                          "t.v:10:12: error: defparam target 'g[1 + 4].u.W' does not name a "
+                          "parameter of an instance below this module"});
+}
+
 /* A defparam written inside a block names an instance of that block. */
 static void test_defparam_in_block(void) {
     run_clean(M_W "module t;\n  genvar i;\n  for (i = 0; i < 2; i = i + 1) begin : g\n"
@@ -562,6 +570,7 @@ int main(void) {
     RUN_TEST(test_port_in_block);
     RUN_TEST(test_block_clash);
     RUN_TEST(test_scoped_defparam);
+    RUN_TEST(test_defparam_bad_scope);
     RUN_TEST(test_defparam_in_block);
     RUN_TEST(test_defparam_pushed_into_block);
     RUN_TEST(test_recursion);

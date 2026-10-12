@@ -12,6 +12,7 @@
 
 #include "ast/ast.h"
 #include "ast/kinds.h"
+#include "ast/print.h"
 #include "ast/srcman.h"
 #include "frontends/elab/ceval.h"
 #include "frontends/elab/cval.h"
@@ -834,18 +835,21 @@ odin3_status odin3_elab1_env_value(odin3_elab1_env *env, uint32_t idx) {
 
 /* --- override paths ------------------------------------------------------------------------- */
 
-/* The HIER_NAME parts of a defparam joined by '.' (an index part by its name; generate scopes
- * are Task 14's). */
+/* The HIER_NAME parts of a defparam joined by '.', an index part as written (`g[1].u.W`). */
 static odin3_status append_hier(const odin3_elab1 *e1, odin3_ast_id hier, odin3_strbuf *out) {
     odin3_ast_span parts = odin3_ast_children(e1->parsed, hier);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < parts.n; i++) {
         odin3_ast_id part = parts.ids[i];
-        if (odin3_ast_kind_of(e1->parsed, part) == ODIN3_AST_SELECT) {
-            part = odin3_ast_child(e1->parsed, part, 0);
-        }
+        bool sel = odin3_ast_kind_of(e1->parsed, part) == ODIN3_AST_SELECT;
+        odin3_ast_id name = sel ? odin3_ast_child(e1->parsed, part, 0) : part;
         st = odin3_strbuf_appendf(out, "%s%s", i > 0 ? "." : "",
-                                  odin3_ast_name_str(e1->parsed, part));
+                                  odin3_ast_name_str(e1->parsed, name));
+        st = st != ODIN3_OK || !sel ? st : odin3_strbuf_append(out, odin3_bytes_cstr("["));
+        st = st != ODIN3_OK || !sel
+                 ? st
+                 : odin3_ast_print(e1->parsed, odin3_ast_child(e1->parsed, part, 1), out);
+        st = st != ODIN3_OK || !sel ? st : odin3_strbuf_append(out, odin3_bytes_cstr("]"));
     }
     return st;
 }
