@@ -19,6 +19,16 @@
  * registered so far (built-ins first, then plugin additions in registration order; IR-11).
  */
 
+/*
+ * The bytes the design holds (read-only; 2E Task 3, the design-wide budget of
+ * src/passes/budget.h): for every module its node, pin, net and wire pages, arena, pin pool,
+ * vector capacities and name and attribute maps; and the design's strtab, provenance store (with
+ * the tombstones), source manager, arena (local cell types) and cell-type table. Dead objects are
+ * included until compact frees them. The AST stores the design holds are not: callers add
+ * odin3_ast_bytes_reserved of each (odin3_budget_check does). 0 for a NULL design. O(modules).
+ */
+uint64_t odin3_design_bytes_reserved(const odin3_design *design);
+
 /* The design-global string table (names, string parameter values). */
 odin3_strtab *odin3_design_strtab(const odin3_design *design);
 

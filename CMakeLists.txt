@@ -80,6 +80,15 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/sim_pass.c
     src/passes/project_pass.c
+    src/passes/proc/pw.c
+    src/passes/proc/pw_sig.c
+    src/passes/proc/pw_encode.c
+    src/passes/proc/proc_emit.c
+    src/passes/proc/proc_diag.c
+    src/passes/proc/proc_pending.c
+    src/passes/proc/proc_pass.c
+    src/passes/budget.c
+    src/passes/ffinit.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -312,6 +321,11 @@ endif()
 
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
+# Heavy runs (2E plan point (p), ruling C1): every sweep and sweep-xl CTest goes through
+# odin3_add_sweep_test(), which runs it via tools/heavy-run (one heavy job machine-wide, inside
+# the odin3-heavy.slice memory cap). Builds go through tools/build-locked.
+set(ODIN3_HEAVY_RUN "${PROJECT_SOURCE_DIR}/tools/heavy-run")
+include(${PROJECT_SOURCE_DIR}/cmake/Odin3Sweep.cmake)
 if(BUILD_TESTING)
     add_library(unity STATIC third_party/unity/src/unity.c)
     target_include_directories(unity PUBLIC third_party/unity/src)
@@ -344,6 +358,17 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ir_module)
     odin3_add_unit_test(test_ir_proc)
+    # 2E: the proc working form. Every later test_proc_* and test_opt_* links proc_build.c too.
+    odin3_add_unit_test(test_proc_pw)
+    target_sources(test_proc_pw PRIVATE tests/unit/proc_build.c)
+    # 2E Task 3: the pass skeleton (fake phases), the shared budget and ffinit.
+    odin3_add_unit_test(test_proc_pass)
+    target_sources(test_proc_pass PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_proc_pass PRIVATE ODIN3_DOCS_DIR="${PROJECT_SOURCE_DIR}/docs")
+    odin3_add_unit_test(test_proc_emit)
+    target_sources(test_proc_emit PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_budget)
+    odin3_add_unit_test(test_ffinit)
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
@@ -467,6 +492,12 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
+    # 2E Task 1: test_verilog_writer also writes rtlil/ffcells.v (IR change D's eleven cells),
+    # beside test_rtlil_writer's ffcells.il, for CTest ffcells_yosys_read (ODIN3_YOSYS055 block).
+    target_sources(test_verilog_writer PRIVATE tests/unit/ffcells_fixture.c)
+    target_compile_definitions(test_verilog_writer PRIVATE
+        ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
+    set_tests_properties(test_verilog_writer PROPERTIES FIXTURES_SETUP ffcells)
     # The writers' Yosys checks run when Yosys is found (workspace build first, then PATH) and
     # are ignored otherwise (CI has no Yosys).
     find_program(ODIN3_YOSYS_EXE yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
@@ -490,6 +521,7 @@ if(BUILD_TESTING)
     # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
     odin3_add_unit_test(test_rtlil_writer)
+    target_sources(test_rtlil_writer PRIVATE tests/unit/ffcells_fixture.c)
     target_compile_definitions(test_rtlil_writer PRIVATE
         ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
@@ -501,6 +533,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_elab_interp)
     target_include_directories(test_elab_interp PRIVATE ${_gen})
     add_dependencies(test_elab_interp verilog_generated)
+    set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -664,6 +697,8 @@ if(BUILD_TESTING)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
+    list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
     # The project-input corpus (tests/golden/projects) parses to its expected records in every
     # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.
@@ -846,5 +881,25 @@ if(BUILD_TESTING)
                     ${ODIN3_YOSYS055} ${PROJECT_BINARY_DIR}/rtlil)
         set_tests_properties(rtlil_yosys_roundtrip PROPERTIES
             LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+        # 2E Task 1 (IR change D, plan point (b)): Yosys 0.55 reads the eleven word flip-flops
+        # and latches as test_rtlil_writer writes them (ffcells.il; Yosys's cell checker) and as
+        # test_verilog_writer writes them (ffcells.v, generic instances; -icells).
+        add_test(NAME ffcells_yosys_read
+            COMMAND ${ODIN3_YOSYS055} -q -p
+                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/ffcells.il; check -assert; write_rtlil -; design -reset; read_verilog -icells ${PROJECT_BINARY_DIR}/rtlil/ffcells.v; hierarchy -check; check -assert")
+        set_tests_properties(ffcells_yosys_read PROPERTIES
+            LABELS differential FIXTURES_REQUIRED ffcells)
+        # 2E Task 3 (2D spec §13 point 7, review I1): Yosys 0.55's hierarchy -check accepts
+        # write_rtlil's black-box stubs (bbox.il: one parameterised black box at two widths, a
+        # declared model with an inout, a hard cell), and no instance port is resized (-e).
+        add_test(NAME rtlil_bbox_hierarchy
+            COMMAND ${ODIN3_YOSYS055} -q -e Resizing -p
+                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/bbox.il; hierarchy -check -top top; check -assert")
+        set_tests_properties(rtlil_bbox_hierarchy PROPERTIES
+            LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+        # test_verilog_writer's own -icells check of the eleven runs on this 0.55 too, never on
+        # the workspace 0.69 of ODIN3_YOSYS.
+        set_property(TEST test_verilog_writer APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
     endif()
 endif()

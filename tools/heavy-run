@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# heavy-run: run one heavy job (a sweep, a large benchmark, a long fuzz run) machine-wide alone,
+# inside a memory-capped systemd slice (2E plan point (p), ruling C1; the standing heavy-run rule).
+#
+# Usage: tools/heavy-run [--xl] <cmd...>
+#
+# - Nested: the evidence is this process's cgroup, never a variable alone (a leaked variable cannot
+#   put a process into a slice; only `systemd-run --slice` does).
+#   - In odin3-heavy.slice or odin3-heavyxl.slice and holding the heavy lock on an inherited
+#     descriptor (fd 9): a heavy run's job is calling it, already holding the lock in the slice,
+#     so <cmd...> runs as is (taking the lock again would wait on the caller itself). --xl inside
+#     odin3-heavy.slice exits 2: the 6G cap would still apply.
+#   - In a heavy slice without that descriptor: exits 2 at once, "nested heavy-run lost the lock
+#     descriptor; the parent must pass fd 9 (Python: pass_fds=(9,))". The rule: a driver that
+#     spawns nested heavy steps keeps fd 9 open in them (shell does by default; Python's
+#     subprocess closes it unless given pass_fds=(9,)).
+#   - Outside a heavy slice but with the lock open on an inherited descriptor (started under
+#     tools/build-locked, which keeps its shared lock open in every build child): exits 2 at
+#     once, "run the sweep outside the build"; waiting would block on its own process tree.
+#   - Otherwise a set ODIN3_HEAVY_SLICE is stale: ignored with a warning (unset), and the run
+#     takes the normal path.
+# - Exits 77 (CTest's skip) unless ODIN3_HEAVY_OK=1; with --xl it also needs ODIN3_HEAVY_XL_OK=1,
+#   which the controller exports by hand only when no agent is running. Also 77 without
+#   systemd-run, or when the slice cannot be set up (no systemd --user manager).
+# - Slice S is odin3-heavy.slice (MemoryMax=6G), or with --xl odin3-heavyxl.slice (9G). systemd
+#   nests a slice under the one its name extends at a dash, so odin3-heavy-xl.slice would sit
+#   inside odin3-heavy.slice and keep its 6G cap; odin3-heavyxl.slice is a sibling. Both caps are
+#   set with `systemctl --user set-property --runtime S MemoryMax=.. MemorySwapMax=0`.
+# - Exports ODIN3_HEAVY_SLICE=S: a tool that starts children (memcap.py) starts each with
+#   `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE ...`, so every child stays inside S
+#   (a bare nested --scope lands in app.slice, outside the cap).
+# - Writer preference: its PID goes to $DIR/odin3-heavy.queued.<pid> while it waits for the lock,
+#   so tools/build-locked starts no new build meanwhile. The flag is removed once the lock is held,
+#   and on any exit.
+# - The lock: an exclusive flock(2) on $DIR/odin3-heavy.lock, taken on file descriptor 9 with
+#   `flock -x -w ${ODIN3_HEAVY_WAIT:-14400} 9` (so a timeout is told apart from the job's own exit
+#   status, and the flag goes as soon as the lock is held). The job inherits the descriptor, so
+#   the lock lives as long as the job's processes, even if this wrapper is killed. A wait past
+#   ODIN3_HEAVY_WAIT seconds exits 77 with "heavy-run: lock busy for <N> s; skipped". Builds take
+#   the same lock shared.
+# - Then runs `systemd-run --user --scope -q --unit=odin3-heavy-<pid>-<ns> --slice=S <cmd...>`, stops
+#   that scope once the job returns (a stray descendant would keep the lock), then stops S itself
+#   (memcap.py's children run in scopes of their own under S, without the lock, and would outlive
+#   it), and exits with the job's status. A scope systemd-run cannot create reads as the job's
+#   failure (systemd-run's own status), which a sweep reports.
+#
+# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only). Only the holder of
+# the machine's lock owns S, so under another DIR S is not stopped (another agent's job may be in
+# it) unless ODIN3_HEAVY_STOP_SLICE=1 (tests with a fake systemctl only). tools/build-locked
+# refuses to run under heavy-run: its shared lock would wait forever on this exclusive one.
+set -uo pipefail
+
+skip() {
+    echo "heavy-run: $*; skipped" >&2
+    exit 77
+}
+
+xl=0
+if [[ ${1:-} == --xl ]]; then
+    xl=1
+    shift
+fi
+if [[ $# -eq 0 ]]; then
+    echo "usage: heavy-run [--xl] <cmd...>" >&2
+    exit 2
+fi
+dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
+lock=$dir/odin3-heavy.lock
+
+# The heavy slice this process runs in according to its cgroup, or nothing. A cgroup is
+# trustworthy evidence where a variable is not. ODIN3_HEAVY_CGROUP replaces /proc/self/cgroup
+# (tests only).
+heavy_slice_of_cgroup() {
+    local cgroup s
+    cgroup=$(cat "${ODIN3_HEAVY_CGROUP:-/proc/self/cgroup}" 2>/dev/null) || return 0
+    for s in odin3-heavy.slice odin3-heavyxl.slice; do
+        if [[ $cgroup == */"$s"/* ]]; then
+            echo "$s"
+            return 0
+        fi
+    done
+}
+
+# True when one of this shell's descriptors (fd 9, inherited from heavy-run; or build-locked's)
+# has the heavy lock open.
+holds_lock_fd() {
+    local fd want
+    want=$(readlink -f "$lock" 2>/dev/null) || return 1
+    for fd in /proc/$$/fd/*; do
+        [[ $(readlink "$fd" 2>/dev/null) == "$want" ]] && return 0
+    done
+    return 1
+}
+
+in_slice=$(heavy_slice_of_cgroup)
+if [[ -n $in_slice ]]; then
+    if ! holds_lock_fd; then
+        echo "heavy-run: nested heavy-run lost the lock descriptor; the parent must pass fd 9" \
+            "(Python: pass_fds=(9,))" >&2
+        exit 2
+    fi
+    if [[ $xl -eq 1 && $in_slice != odin3-heavyxl.slice ]]; then
+        echo "heavy-run: --xl inside $in_slice (6G): run the xl job on its own" >&2
+        exit 2
+    fi
+    export ODIN3_HEAVY_SLICE=$in_slice
+    exec "$@"
+fi
+if holds_lock_fd; then
+    echo "heavy-run: started under build-locked (the heavy lock is open on an inherited" \
+        "descriptor outside a heavy slice): run the sweep outside the build" >&2
+    exit 2
+fi
+if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
+    echo "heavy-run: warning: ODIN3_HEAVY_SLICE=$ODIN3_HEAVY_SLICE is set outside a heavy run" \
+        "(not in that slice); ignoring it" >&2
+    unset ODIN3_HEAVY_SLICE
+fi
+if [[ ${ODIN3_HEAVY_OK:-} != 1 ]]; then
+    skip "ODIN3_HEAVY_OK is not 1"
+fi
+slice=odin3-heavy.slice
+mem=6G
+if [[ $xl -eq 1 ]]; then
+    if [[ ${ODIN3_HEAVY_XL_OK:-} != 1 ]]; then
+        skip "--xl needs ODIN3_HEAVY_XL_OK=1 (an idle machine)"
+    fi
+    slice=odin3-heavyxl.slice
+    mem=9G
+fi
+if ! command -v systemd-run >/dev/null 2>&1; then
+    skip "systemd-run not found"
+fi
+
+wait_s=${ODIN3_HEAVY_WAIT:-14400}
+mkdir -p "$dir" || exit 2
+if ! systemctl --user set-property --runtime "$slice" "MemoryMax=$mem" MemorySwapMax=0; then
+    skip "cannot set up $slice (no systemd --user manager?)"
+fi
+export ODIN3_HEAVY_SLICE=$slice
+
+flag=$dir/odin3-heavy.queued.$$
+trap 'rm -f "$flag"' EXIT
+echo $$ >"$flag" || exit 2
+exec 9>>"$lock" || exit 2
+# The wait runs in the background so a signal ends it at once (bash defers a trap until a
+# foreground child exits); the lock flock(1) takes on the shared descriptor outlives it.
+flock -x -w "$wait_s" 9 &
+waiter=$!
+trap 'kill "$waiter" 2>/dev/null; exit 130' INT
+trap 'kill "$waiter" 2>/dev/null; exit 143' TERM HUP
+wait "$waiter"
+rc=$?
+trap - INT TERM HUP
+rm -f "$flag"
+if [[ $rc -eq 1 ]]; then
+    skip "lock busy for $wait_s s"
+elif [[ $rc -ne 0 ]]; then
+    echo "heavy-run: flock failed (exit $rc)" >&2
+    exit 2
+fi
+unit=odin3-heavy-$$-$(date +%s%N) # unique even when a SIGKILLed run's scope and PID linger
+systemd-run --user --scope -q --unit="$unit" --slice="$slice" "$@"
+rc=$?
+systemctl --user stop "$unit.scope" >/dev/null 2>&1
+if [[ $dir == /tmp/claude-1000 || ${ODIN3_HEAVY_STOP_SLICE:-} == 1 ]]; then
+    systemctl --user stop "$slice" >/dev/null 2>&1
+fi
+exit $rc

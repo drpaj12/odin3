@@ -55,4 +55,7 @@ bool odin3_idindex_remove(odin3_idindex *ix, odin3_identry entry);
 
 size_t odin3_idindex_count(const odin3_idindex *ix);
 
+/* Bytes the index holds: its struct and its slot array (0 for NULL). */
+size_t odin3_idindex_bytes_reserved(const odin3_idindex *ix);
+
 #endif

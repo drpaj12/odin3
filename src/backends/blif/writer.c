@@ -45,6 +45,17 @@ typedef enum wr_builtin {
 static const char *const BUILTIN_NAMES[WR_BUILTINS] = {"$sop",        "$_DFF_P_",    "$_DFF_N_",
                                                        "$_DLATCH_P_", "$_DLATCH_N_", "$_FF_"};
 
+/*
+ * The word flip-flops and latches of 2E's IR change D (2E spec §13): BLIF's `.latch` cannot carry
+ * their resets, enables and polarities, so the netlist-view writer refuses them (`lower` maps them
+ * to bit cells first). wr_init resolves the names to the design's type IDs once, and write_cell
+ * compares IDs: exact, since no other type can be registered under a built-in's name.
+ */
+enum { WR_NO_BLIF = 11 };
+static const char *const NO_BLIF_FORM[WR_NO_BLIF] = {"$adffe",   "$sdffe",    "$sdffce", "$aldff",
+                                                     "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
+                                                     "$adlatch", "$dlatchsr", "$sr"};
+
 /* The .latch type word of each built-in; NULL for $sop and for $_FF_ (no type, no control). */
 static const char *const LATCH_WORDS[WR_BUILTINS] = {NULL, "re", "fe", "ah", "al", NULL};
 
@@ -76,6 +87,7 @@ typedef struct blif_writer {
     odin3_status st;   /* sticky: the first failure */
     const char *model; /* name of the model being written, for messages */
     odin3_celltype_id builtin[WR_BUILTINS];
+    odin3_celltype_id no_blif[WR_NO_BLIF]; /* NO_BLIF_FORM's IDs; 0 when not registered */
     wr_keys keys;
     odin3_u64map *type_module; /* module cell type -> module ID */
     odin3_u64map *declared;    /* declared cell type -> its first declared-model index */
@@ -936,10 +948,25 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
     }
 }
 
+/* True for one of the NO_BLIF_FORM types, resolved to their IDs once in wr_init. */
+static bool lacks_blif_form(const blif_writer *wr, odin3_celltype_id type) {
+    for (uint32_t i = 0; i < WR_NO_BLIF; i++) {
+        if (wr->no_blif[i].v != 0 && wr->no_blif[i].v == type.v) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
-    if (odin3_celltype_get(wr->design, type)->gran == ODIN3_GRAN_PORT) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
+    if (def->gran == ODIN3_GRAN_PORT) {
         return ODIN3_OK;
+    }
+    if (lacks_blif_form(wr, type)) {
+        return wr_refuse(
+            wr, "word flip-flops and latches have no BLIF form; cannot write a cell of", def->name);
     }
     wr_builtin which = builtin_of(wr, type);
     odin3_status st = ODIN3_OK;
@@ -1047,6 +1074,16 @@ static uint32_t find_key(const blif_writer *wr, const char *key) {
     return odin3_strtab_find(wr->tab, odin3_bytes_cstr(key), &str) ? str : 0;
 }
 
+/* The ID of the cell type registered under name, or ID 0 when there is none. */
+static odin3_celltype_id find_type(const blif_writer *wr, const char *name) {
+    uint32_t str = find_key(wr, name);
+    odin3_celltype_id type = {0};
+    if (str == 0 || !odin3_celltype_find(wr->design, str, &type)) {
+        return (odin3_celltype_id){0};
+    }
+    return type;
+}
+
 static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const char *path) {
     *wr = (blif_writer){.design = design, .tab = odin3_design_strtab(design), .path = path};
     odin3_strbuf_init(&wr->token);
@@ -1055,10 +1092,10 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
                          .port_name = find_key(wr, ODIN3_BLIF_ATTR_PORT_NAME),
                          .extras = find_key(wr, ODIN3_BLIF_ATTR_EXTRAS)};
     for (uint32_t i = 0; i < WR_BUILTINS; i++) {
-        uint32_t name = find_key(wr, BUILTIN_NAMES[i]);
-        if (name == 0 || !odin3_celltype_find(design, name, &wr->builtin[i])) {
-            wr->builtin[i] = (odin3_celltype_id){0};
-        }
+        wr->builtin[i] = find_type(wr, BUILTIN_NAMES[i]);
+    }
+    for (uint32_t i = 0; i < WR_NO_BLIF; i++) {
+        wr->no_blif[i] = find_type(wr, NO_BLIF_FORM[i]);
     }
     odin3_vec_init(&wr->seen, sizeof(uint32_t));
     odin3_vec_init(&wr->params, sizeof(odin3_value));

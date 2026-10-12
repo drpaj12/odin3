@@ -7,6 +7,7 @@
  * round trip (CTest rtlil_yosys_roundtrip).
  */
 #include "backends/rtlil/writer.h"
+#include "ffcells_fixture.h"
 #include "ir/celltype.h"
 #include "ir/check.h"
 #include "ir/design.h"
@@ -34,8 +35,9 @@
 #endif
 
 enum { LOG_CAP = 4096, TEXT_MAX = 1 << 16, PATH_MAX_LEN = 512, OOM_LIMIT = 4000, ARENA = 1024 };
-/* EVERY_CELL_MIN: the `$` types 2D-1 registers that test_every_cell writes (review probe A). */
-enum { CELL_PORTS_MAX = 16, CELL_PINS_MAX = 64, NAME_MAX_LEN = 64, EVERY_CELL_MIN = 46 };
+/* EVERY_CELL_MIN: the `$` types 2D-1 (46) and 2E-1 (the eleven flip-flops and latches of IR change
+ * D) register that test_every_cell writes (review probe A). */
+enum { CELL_PORTS_MAX = 16, CELL_PINS_MAX = 64, NAME_MAX_LEN = 64, EVERY_CELL_MIN = 57 };
 
 static odin3_design *design;
 static odin3_prov_id prov;
@@ -219,6 +221,15 @@ static void expect_line(const char *line) {
     int len = snprintf(want, sizeof want, "\n%s\n", line);
     TEST_ASSERT_TRUE_MESSAGE(len > 0 && (size_t)len < sizeof want, line);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text.data, want), line);
+}
+
+/* How many times needle occurs in the text. */
+static int count_lines(const char *needle) {
+    int count = 0;
+    for (const char *at = strstr(text.data, needle); at != NULL; at = strstr(at + 1, needle)) {
+        count++;
+    }
+    return count;
 }
 
 /* --- the plan's fixture -------------------------------------------------------------------- */
@@ -696,6 +707,142 @@ static void test_module_names_like_ids(void) {
     save_fixture("modnames");
 }
 
+/* --- black-box stubs (2D spec §13 point 7, review I1; 2E Task 3) ------------------------- */
+
+static const odin3_port_def k_bbp_ports[] = {
+    {"i", ODIN3_DIR_IN, false, 0, "W", NULL, NULL, false},
+    {"o", ODIN3_DIR_OUT, false, 0, "W", NULL, NULL, false},
+};
+static const odin3_port_def k_fix_ports[] = {
+    {"i", ODIN3_DIR_IN, true, 1, NULL, NULL, NULL, false},
+    {"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
+    {"io", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL, false},
+};
+static const odin3_port_def k_hm_ports[] = {
+    {"A", ODIN3_DIR_IN, false, 3, NULL, NULL, NULL, false},
+    {"Y", ODIN3_DIR_OUT, false, 0, NULL, NULL, NULL, false}, /* zero-width */
+};
+static const uint8_t k_mode_default[2] = {1, 0}; /* 2'01 */
+
+/*
+ * Module top instantiates bbp (black box, ports i/o of width W, default 1) at W = 8 and W = 4,
+ * fix (a declared model, fixed ports with an inout) and hm (hard, constant widths, parameters of
+ * every kind); unused declares a model nobody instantiates.
+ */
+static void build_blackboxes(void) {
+    odin3_param_def bbp_params[1] = {{"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}}};
+    odin3_celltype_def bbp = {
+        "bbp", ODIN3_GRAN_BLACKBOX, 0, k_bbp_ports, 2, bbp_params, 1, NULL, NULL, NULL, NULL};
+    odin3_param_def hm_params[3] = {
+        {"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 2, NULL, 0, 0, 0}},
+        {"MODE", ODIN3_VAL_BITS, {ODIN3_VAL_BITS, 0, k_mode_default, 2, 0, 0}},
+        {"TAG", ODIN3_VAL_STRING, {ODIN3_VAL_STRING, 0, NULL, 0, intern("t"), 0}},
+    };
+    odin3_celltype_def hm = {
+        "hm", ODIN3_GRAN_HARD, 0, k_hm_ports, 2, hm_params, 3, NULL, NULL, NULL, NULL};
+    odin3_celltype_def fix = {
+        "fix", ODIN3_GRAN_BLACKBOX, 0, k_fix_ports, 3, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_def unused = {
+        "unused", ODIN3_GRAN_BLACKBOX, 0, k_fix_ports, 1, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &bbp, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &hm, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &unused, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &fix, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &fix, &id));
+    odin3_module *top = new_module("top");
+    odin3_wire_id wire_a = port(top, "a", ODIN3_DIR_IN, 7, 0);
+    odin3_wire_id wire_b = port(top, "b", ODIN3_DIR_IN, 3, 0);
+    odin3_wire_id wire_y = port(top, "y", ODIN3_DIR_OUT, 7, 0);
+    odin3_wire_id wire_z = port(top, "z", ODIN3_DIR_OUT, 3, 0);
+    odin3_net_id net_c = bit_of(top, port(top, "c", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id net_w = bit_of(top, port(top, "w", ODIN3_DIR_OUT, 0, 0), 0);
+    odin3_net_id net_q = bit_of(top, port(top, "q", ODIN3_DIR_INOUT, 0, 0), 0);
+    odin3_net_id nets[4][8];
+    const odin3_wire_id wires[4] = {wire_a, wire_y, wire_b, wire_z};
+    for (uint32_t k = 0; k < 4; k++) {
+        for (uint32_t j = 0; j < odin3_wire_width(top, wires[k]); j++) {
+            nets[k][j] = bit_of(top, wires[k], j);
+        }
+    }
+    odin3_value w8 = odin3_value_int(8);
+    odin3_value w4 = odin3_value_int(4);
+    odin3_netvec u1[2] = {{nets[0], 8}, {nets[1], 8}};
+    odin3_netvec u2[2] = {{nets[2], 4}, {nets[3], 4}};
+    odin3_netvec u3[3] = {{&net_c, 1}, {&net_w, 1}, {&net_q, 1}};
+    odin3_value hp[3] = {odin3_value_int(5), bits_value(k_mode_default, 2), str_value("x")};
+    odin3_netvec u4[2] = {{nets[2], 3}, {&net_c, 0}};
+    (void)cell(top, (cell_req){"bbp", "u1", &w8, 1, u1});
+    (void)cell(top, (cell_req){"bbp", "u2", &w4, 1, u2});
+    (void)cell(top, (cell_req){"fix", "u3", NULL, 0, u3});
+    (void)cell(top, (cell_req){"hm", "u4", hp, 3, u4});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, odin3_module_id_of(top)));
+}
+
+/* One stub per black-box or hard type, after the modules, as Yosys's read_verilog makes them. */
+static void test_blackbox_stubs(void) {
+    build_blackboxes();
+    (void)rtlil();
+    expect_line(
+        "  cell \\bbp \\u1\n    parameter \\W 8\n    connect \\i \\a\n    connect \\o \\y\n  end");
+    expect_line(
+        "  cell \\bbp \\u2\n    parameter \\W 4\n    connect \\i \\b\n    connect \\o \\z\n  end");
+    const char *stubs = "end\n"
+                        "attribute \\blackbox 1\n"
+                        "module \\unused\n"
+                        "  wire input 1 \\i\n"
+                        "end\n"
+                        "attribute \\blackbox 1\n"
+                        "module \\fix\n"
+                        "  wire input 1 \\i\n"
+                        "  wire output 2 \\o\n"
+                        "  wire inout 3 \\io\n"
+                        "end\n"
+                        "attribute \\blackbox 1\n"
+                        "attribute \\dynports 1\n"
+                        "module \\bbp\n"
+                        "  parameter \\W 1\n"
+                        "  wire input 1 \\i\n"
+                        "  wire output 2 \\o\n"
+                        "end\n"
+                        "attribute \\blackbox 1\n"
+                        "module \\hm\n"
+                        "  parameter \\W 2\n"
+                        "  parameter \\MODE 2'01\n"
+                        "  parameter \\TAG \"t\"\n"
+                        "  wire width 3 input 1 \\A\n"
+                        "  wire width 0 output 2 \\Y\n"
+                        "end\n";
+    size_t len = strlen(stubs);
+    TEST_ASSERT_TRUE(text.len > len);
+    TEST_ASSERT_EQUAL_STRING(stubs, text.data + text.len - len);
+    TEST_ASSERT_EQUAL_INT(1, count_lines("module \\fix\n"));
+    save_fixture("bbox"); /* CTest rtlil_bbox_hierarchy: Yosys 0.55 hierarchy -check */
+}
+
+/* A design without black boxes gets no stub; out of memory while writing stubs is NO_MEMORY with
+ * the text unchanged. */
+static void test_blackbox_stubs_oom(void) {
+    (void)build_fixture();
+    TEST_ASSERT_NULL(strstr(rtlil(), "blackbox"));
+    build_blackboxes();
+    char want[TEXT_MAX];
+    int len = snprintf(want, sizeof want, "keep%s", rtlil());
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (long tries = 0; st == ODIN3_ERR_NO_MEMORY && tries < OOM_LIMIT; tries++) {
+        odin3_strbuf out;
+        odin3_strbuf_init(&out);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&out, odin3_bytes_cstr("keep")));
+        odin3_util_set_alloc_fail_after(tries);
+        st = odin3_rtlil_text(design, &out);
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_EQUAL_STRING(st == ODIN3_OK ? want : "keep", out.data);
+        odin3_strbuf_free(&out);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+}
+
 /* --- the design's top (review M4) --------------------------------------------------------- */
 
 /* The top gets "attribute \top 1" before its module line, as Yosys's write_rtlil writes it. */
@@ -802,6 +949,50 @@ static void test_every_cell(void) {
     }
     TEST_ASSERT_GREATER_OR_EQUAL_UINT32(EVERY_CELL_MIN, made);
     save_fixture("every_cell");
+}
+
+/* --- the eleven flip-flops and latches (2E IR change D, §13) -------------------------------- */
+
+/* $aldff (WIDTH 1) is written generically: simlib's parameters and ports, in order. */
+static void test_rtlil_aldff(void) {
+    odin3_module *mod = new_module("m");
+    odin3_net_id clk = bit_of(mod, port(mod, "clk", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id aload = bit_of(mod, port(mod, "aload", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id ad = bit_of(mod, port(mod, "ad", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id dat = bit_of(mod, port(mod, "d", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id out = bit_of(mod, port(mod, "q", ODIN3_DIR_OUT, 0, 0), 0);
+    odin3_value params[3] = {odin3_value_int(1), odin3_value_int(1), odin3_value_int(1)};
+    odin3_netvec ports[5] = {{&clk, 1}, {&aload, 1}, {&ad, 1}, {&dat, 1}, {&out, 1}};
+    uint32_t k = cell(mod, (cell_req){"$aldff", NULL, params, 3, ports}).v;
+    char want[LOG_CAP];
+    (void)snprintf(want, sizeof want,
+                   "  cell $aldff $c%u\n"
+                   "    parameter \\WIDTH 1\n"
+                   "    parameter \\CLK_POLARITY 1\n"
+                   "    parameter \\ALOAD_POLARITY 1\n"
+                   "    connect \\CLK \\clk\n"
+                   "    connect \\ALOAD \\aload\n"
+                   "    connect \\AD \\ad\n"
+                   "    connect \\D \\d\n"
+                   "    connect \\Q \\q\n"
+                   "  end\n",
+                   k);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rtlil(), want), text.data);
+}
+
+/* Module ffcells (all eleven, WIDTH 2) to ffcells.il, the input of CTest ffcells_yosys_read. */
+static void test_ffcells_fixture(void) {
+    (void)ffcells_build(design);
+    (void)rtlil();
+    for (uint32_t i = 0; i < FFCELLS_COUNT; i++) {
+        char line[LOG_CAP];
+        (void)snprintf(line, sizeof line, "  cell %s \\c_%s", ffcells_types[i],
+                       ffcells_types[i] + 1);
+        expect_line(line);
+    }
+    expect_line("    parameter \\ARST_VALUE 2'01");
+    expect_line("    parameter \\CLR_POLARITY 0");
+    save_fixture("ffcells");
 }
 
 /* --- refusals and the atomic write --------------------------------------------------------- */
@@ -988,6 +1179,8 @@ int main(void) {
     RUN_TEST(test_module_names_like_ids);
     RUN_TEST(test_top_attribute);
     RUN_TEST(test_every_cell);
+    RUN_TEST(test_rtlil_aldff);
+    RUN_TEST(test_ffcells_fixture);
     RUN_TEST(test_refuses_dff_p);
     RUN_TEST(test_refuses_dff_n);
     RUN_TEST(test_refuses_dlatch_p);
@@ -1004,5 +1197,7 @@ int main(void) {
     RUN_TEST(test_failed_write_keeps_destination);
     RUN_TEST(test_unopenable_path_is_io);
     RUN_TEST(test_out_of_memory);
+    RUN_TEST(test_blackbox_stubs);
+    RUN_TEST(test_blackbox_stubs_oom);
     return UNITY_END();
 }

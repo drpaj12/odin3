@@ -118,6 +118,14 @@ size_t odin3_strtab_count(const odin3_strtab *tab) {
     return tab->entries.len;
 }
 
+size_t odin3_strtab_bytes_reserved(const odin3_strtab *tab) {
+    if (tab == NULL) {
+        return 0;
+    }
+    return sizeof *tab + odin3_arena_bytes_reserved(tab->arena) +
+           tab->entries.cap * tab->entries.elem_size + odin3_idindex_bytes_reserved(tab->index);
+}
+
 void odin3_strbuf_init(odin3_strbuf *buf) {
     buf->data = NULL;
     buf->len = 0;

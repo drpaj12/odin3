@@ -47,10 +47,18 @@
  *
  * A module's own cell type (an instance) is always written \name, as its `module` line.
  *
- * Limitation (review I1; stubs are 2E-1's): black-box and hard cell types are not IR modules and
- * get no `module` stub, so their instances are cells of a type Yosys does not know. read_rtlil,
- * proc and opt accept that; `hierarchy -check` rejects it, and Yosys counts every connection of
- * such a cell as a user (Cell::known() is false), where the JSON and Verilog writers emit stubs.
+ * After every module, a stub per black-box or hard cell type (2D spec §13 point 7, review I1; 2E
+ * Task 3): first each declared model (odin3_design_declared_model) in declaration order, then each
+ * other type with live instances in type-ID order, once each, except `$` names (Yosys's
+ * namespace of internal cells). A stub is what Yosys 0.55's read_verilog makes of a
+ * (* blackbox *) module: `attribute \blackbox 1`, `attribute \dynports 1` when some port's
+ * width depends on the parameters (a width parameter, function or expression), `module \name`,
+ * `  parameter \P <default>` per parameter, `  wire [width W] input|output|inout K \port` per port
+ * (W its width for the default parameters, K the 1-based port index), `end`. So `hierarchy
+ * -check` accepts the instances (it rejects a parameter the stub does not declare); with dynports
+ * it neither resizes an instance's ports to the stub's widths nor derives a module, so every
+ * parameterisation of a type shares one stub and keeps its own widths; and Cell::known() is true
+ * for the instances, as 2E §8's user counts assume.
  *
  * ODIN3_ERR_INVALID_ARG for a NULL argument (logged "write_rtlil: no design or no output", or
  * "... no path"), and, logged "write_rtlil: module 'm': ...", for:

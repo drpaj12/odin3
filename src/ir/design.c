@@ -8,15 +8,20 @@
 #include "frontends/project/project.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
+#include "ir/pinpool.h"
+#include "ir/prov.h"
 #include "util/alloc.h"
 #include "util/arena.h"
 #include "util/attr.h"
 #include "util/log.h"
+#include "util/pagevec.h"
 #include "util/str.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     odin3_design *design = odin3_util_calloc(sizeof *design);
@@ -51,6 +56,46 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     odin3_strtab_destroy(design->strtab);
     odin3_arena_destroy(design->arena);
     odin3_util_free(design);
+}
+
+/* --- memory accounting (2E Task 3; the shared budget, src/passes/budget.h) ----------------- */
+
+static size_t vec_bytes(const odin3_vec *vec) {
+    return vec->cap * vec->elem_size;
+}
+
+/* What one module holds: its stores, arena, pin pool, vectors and name and attribute maps. */
+static uint64_t module_bytes(const odin3_module *module) {
+    uint64_t bytes = sizeof *module;
+    bytes +=
+        odin3_pagevec_bytes_reserved(module->nodes) + odin3_pagevec_bytes_reserved(module->pins) +
+        odin3_pagevec_bytes_reserved(module->nets) + odin3_pagevec_bytes_reserved(module->wires);
+    bytes +=
+        odin3_arena_bytes_reserved(module->arena) + odin3_pinpool_bytes_reserved(&module->pinpool);
+    bytes += vec_bytes(&module->aliases) + vec_bytes(&module->ports) +
+             vec_bytes(&module->port_defs) + vec_bytes(&module->attrs) +
+             vec_bytes(&module->dead_pin_names);
+    bytes += odin3_u64map_bytes(module->node_names) + odin3_u64map_bytes(module->net_names) +
+             odin3_u64map_bytes(module->wire_names) + odin3_u64map_bytes(module->attr_heads) +
+             odin3_u64map_bytes(module->dead_pins);
+    return bytes;
+}
+
+uint64_t odin3_design_bytes_reserved(const odin3_design *design) {
+    if (design == NULL) {
+        return 0;
+    }
+    uint64_t bytes = sizeof *design;
+    bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design);
+    bytes += design->srcman != NULL ? odin3_srcman_bytes_reserved(design->srcman) : 0;
+    bytes += odin3_arena_bytes_reserved(design->arena) + vec_bytes(&design->celltypes) +
+             odin3_u64map_bytes(design->celltype_names) + vec_bytes(&design->declared);
+    bytes += vec_bytes(&design->modules) + vec_bytes(&design->asts);
+    for (size_t i = 1; i < design->modules.len; i++) {
+        const odin3_module *module = *(odin3_module *const *)odin3_vec_cat(&design->modules, i);
+        bytes += module != NULL ? module_bytes(module) : 0;
+    }
+    return bytes;
 }
 
 odin3_strtab *odin3_design_strtab(const odin3_design *design) {

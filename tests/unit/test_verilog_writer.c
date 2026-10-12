@@ -2,6 +2,7 @@
  * test_verilog_writer.c — unit tests for the structural Verilog writer (IR built through the API).
  */
 #include "backends/verilog/writer.h"
+#include "ffcells_fixture.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -14,6 +15,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -30,6 +32,10 @@
 #include <unistd.h>
 
 extern char **environ;
+
+#ifndef ODIN3_RTLIL_OUT
+#error "ODIN3_RTLIL_OUT must name the directory ffcells.v is written to"
+#endif
 
 enum {
     TEXT_MAX = 1 << 16,
@@ -1376,6 +1382,125 @@ static void test_pow_instance_yosys_reads_icells(void) {
     yosys_runs(script);
 }
 
+/* --- the eleven flip-flops and latches (2E IR change D; plan point (b)) --------------------- */
+
+/* A flip-flop case: the type, its ports (blank-separated, in order) and the expected `#(…)` list,
+ * whose INT values are also the node's parameters. */
+typedef struct ff_instance {
+    const char *type;
+    const char *ports;
+    const char *params;
+} ff_instance;
+
+/* The INT value of def written as `.NAME(<value>)` in the parameter list text. */
+static odin3_value listed_int(const odin3_param_def *def, const char *list) {
+    char key[NAME_BUF];
+    (void)snprintf(key, sizeof key, ".%s(", def->name);
+    const char *at = strstr(list, key);
+    TEST_ASSERT_NOT_NULL_MESSAGE(at, def->name);
+    return odin3_value_int(strtoll(at + strlen(key), NULL, 10));
+}
+
+/* The ports of a flip-flop case as module ports, and the expected connection lines. */
+typedef struct ff_ports {
+    odin3_net_id nets[NAME_BUF][NAME_BUF];
+    odin3_netvec vecs[NAME_BUF];
+    char conns[MSG_MAX];
+} ff_ports;
+
+/* Port port_idx of def (named by the word at *word, which moves past it) on a module port named in
+ * lower case, its connection line appended to out->conns. */
+static void ff_port(const odin3_celltype_def *def, uint32_t port_idx, const odin3_value *values,
+                    const char **word, ff_ports *out) {
+    size_t len = strcspn(*word, " ");
+    TEST_ASSERT_TRUE(len == strlen(def->ports[port_idx].name) &&
+                     strncmp(*word, def->ports[port_idx].name, len) == 0);
+    char lower[NAME_BUF] = "";
+    for (size_t i = 0; i < len; i++) {
+        lower[i] = (char)tolower((unsigned char)(*word)[i]);
+    }
+    uint32_t width = odin3_celltype_port_width(design, type_of(def->name), values, port_idx);
+    port_args args = {lower, def->ports[port_idx].dir, width, def->ports[port_idx].scalar};
+    out->vecs[port_idx] = wire_nets(add_port_prov(args, (odin3_prov_id){0}), out->nets[port_idx]);
+    size_t used = strlen(out->conns);
+    (void)snprintf(out->conns + used, sizeof out->conns - used, "    .%s(%s)%s\n",
+                   def->ports[port_idx].name, lower, port_idx + 1 < def->n_ports ? "," : "");
+    *word += len + ((*word)[len] == ' ' ? 1 : 0);
+}
+
+/* The flip-flop counterpart of expect_no_form_instance: module m holds one node of the case's type
+ * with its listed parameters (all INT), each port P on a module port named P in lower case (Q the
+ * output); the node must be written as a generic instance with every parameter,
+ * `\<type> #(<params>) \$c<ID> (.P(p), …);`. */
+static void expect_ff_generic_instance(const ff_instance *item) {
+    new_module("m");
+    const odin3_celltype_def *def = odin3_celltype_get(design, type_of(item->type));
+    odin3_value values[NAME_BUF];
+    for (uint32_t k = 0; k < def->n_params; k++) {
+        values[k] = listed_int(&def->params[k], item->params);
+    }
+    static ff_ports ports;
+    memset(&ports, 0, sizeof ports);
+    const char *word = item->ports;
+    for (uint32_t k = 0; k < def->n_ports; k++) {
+        ff_port(def, k, values, &word, &ports);
+    }
+    TEST_ASSERT_EQUAL_CHAR('\0', *word);
+    odin3_node_id node = add_cell(item->type, values, def->n_params, ports.vecs);
+    (void)write_text();
+    char name[NAME_BUF];
+    char line[2 * MSG_MAX];
+    (void)snprintf(line, sizeof line, "  \\%s #(%s) %s(\n%s  );\n", item->type, item->params,
+                   cname(node, name), ports.conns);
+    expect_has(line);
+    expect_not("(* blackbox *)");
+}
+
+static void test_ffcells_are_generic_instances(void) {
+    expect_ff_generic_instance(
+        &(ff_instance){"$dffsr", "CLK SET CLR D Q",
+                       ".WIDTH(2), .CLK_POLARITY(1), .SET_POLARITY(1), .CLR_POLARITY(0)"});
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    expect_ff_generic_instance(&(ff_instance){"$dlatch", "EN D Q", ".WIDTH(1), .EN_POLARITY(0)"});
+}
+
+/* Module ffcells (all eleven, WIDTH 2) to ffcells.v beside ffcells.il, the input of CTest
+ * ffcells_yosys_read (`read_verilog -icells; hierarchy -check`). */
+static void test_ffcells_fixture(void) {
+    (void)ffcells_build(design);
+    char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/ffcells.v", ODIN3_RTLIL_OUT);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_verilog_write(design, path, NULL), last_error);
+    (void)slurp(path, text);
+    for (uint32_t i = 0; i < FFCELLS_COUNT; i++) {
+        char line[MSG_MAX];
+        (void)snprintf(line, sizeof line, "  \\%s #(.WIDTH(2), ", ffcells_types[i]);
+        expect_has(line);
+    }
+    expect_has(".ARST_VALUE(2'b01)");
+    expect_not("(* blackbox *)");
+}
+
+/* Yosys 0.55 (VTR's, the 2D-2F oracle: $ODIN3_YOSYS055, which CMake sets when its
+ * ODIN3_YOSYS055 block finds it; never the workspace 0.69 of $ODIN3_YOSYS) reads all eleven
+ * instances as its internal cells with read_verilog -icells. Ignored without it. */
+static void test_ffcells_yosys_reads_icells(void) {
+    char *yosys = getenv("ODIN3_YOSYS055");
+    if (yosys == NULL || yosys[0] == '\0') {
+        TEST_IGNORE_MESSAGE("ODIN3_YOSYS055 not set (no Yosys 0.55): check skipped");
+    }
+    (void)ffcells_build(design);
+    (void)write_text();
+    char script[SCRIPT_BUF];
+    (void)snprintf(script, sizeof script,
+                   "read_verilog -icells %s; hierarchy -check -top ffcells; check -assert",
+                   out_path);
+    char *argv[] = {yosys, "-q", "-p", script, NULL};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, run_tool(argv, aux_path), "yosys 0.55 rejected ffcells.v");
+}
+
 /* --- aliases, feed-throughs and names ------------------------------------------------------ */
 
 /* ft: y is a (one net), z = ~a, z2 on z's net, wire t aliases a. */
@@ -1873,6 +1998,9 @@ int main(void) {
     RUN_TEST(test_shiftx_is_a_generic_instance);
     RUN_TEST(test_pow_is_a_generic_instance);
     RUN_TEST(test_pow_instance_yosys_reads_icells);
+    RUN_TEST(test_ffcells_are_generic_instances);
+    RUN_TEST(test_ffcells_fixture);
+    RUN_TEST(test_ffcells_yosys_reads_icells);
     RUN_TEST(test_aliases_and_feedthrough);
     RUN_TEST(test_two_input_ports_on_one_net_refused);
     RUN_TEST(test_unwritable_port_refused);

@@ -36,8 +36,8 @@ enum {
     MAX_PINS = 16,
     PBITS_MAX = 16,
     ARR_MAX = 8,
-    PROC_INDEX = 62, /* appended after the nine word cells (plan point (f)) */
-    BUILTIN_COUNT = 63,
+    PROC_INDEX = 62,       /* appended after the nine word cells (plan point (f)) */
+    BUILTIN_COUNT = 74,    /* the eleven 2E flip-flops and latches follow $proc (IR change D) */
     TEST_ARENA_CHUNK = 64, /* smaller than a packed body: pack must take a fresh chunk */
     MISALIGN = 4,
     SAVE_WORDS = 128, /* a saved body: up to 1 KiB */

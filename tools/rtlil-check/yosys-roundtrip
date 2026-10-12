@@ -27,7 +27,9 @@ if [[ ${#files[@]} -eq 0 ]]; then
     exit 2
 fi
 
-# The lines of an RTLIL file, normalized and keyed by module, sorted.
+# The lines of an RTLIL file, normalized and keyed by module, sorted. A module's own attributes
+# come before its `module` line, so they are keyed by the module that follows (Yosys may write
+# the modules in another order).
 normalized() {
     awk '
         /^#/ || /^autoidx / { next }
@@ -46,8 +48,17 @@ normalized() {
             }
             line = $0
             sub(/^ +/, "", line)
+            if (indent == "" && line ~ /^attribute /) {
+                held[n_held++] = line
+                next
+            }
+            if (line ~ /^module /) {
+                for (h = 0; h < n_held; h++) print mod "\t" held[h]
+                n_held = 0
+            }
             print mod "\t" indent line
-        }' "$1" | LC_ALL=C sort
+        }
+        END { for (h = 0; h < n_held; h++) print "\t" held[h] }' "$1" | LC_ALL=C sort
 }
 
 failed=0

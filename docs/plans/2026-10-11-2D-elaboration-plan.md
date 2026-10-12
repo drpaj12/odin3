@@ -265,14 +265,15 @@ Stage 1 (2D-3/2D-4) and the IR (2D-1) are independent lanes until 2D-5.
 
   Of §14.6's items, 2D owns item 1 (x kept explicit, asserted by Task 18's `$shiftx` and wildcard `===`, and Tasks 21–22's x constant pins). Item 2 is 2F's; items 3–5 are 2H's.
 - (n) **Memory and sweeps** (WSL rule; ruling I12).
-  - *Amended (2E/2F plans v2; controller ruling C1).* Every sweep runs through `tools/heavy-run` (2E plan point (p); created by 2E-1 Task 2, or identically by 2D-7 if it lands first). `heavy-run` takes `/tmp/claude-1000/odin3-heavy.lock` exclusively and starts the job in the named slice `odin3-heavy.slice` (MemoryMax=6G, MemorySwapMax=0), exporting `ODIN3_HEAVY_SLICE`.
+  - *Amended (2E/2F plans v2; controller ruling C1).* Every sweep runs through `tools/heavy-run` (2E plan point (p); created by 2E-1 Task 2, or identically by 2D-7 if it lands first). `heavy-run` takes `/tmp/claude-1000/odin3-heavy.lock` exclusively on file descriptor 9, which the job inherits (the lock lives as long as the job's processes), and starts the job in the named slice `odin3-heavy.slice` (MemoryMax=6G, MemorySwapMax=0), exporting `ODIN3_HEAVY_SLICE`. Inside a heavy run (`ODIN3_HEAVY_SLICE` set) a nested `heavy-run` runs its job in place, without the lock (*amended by 2E Task 2's review*).
   - Every child a sweep driver starts (odin3, Yosys, equiv-check, `bench_elab`) runs through `tools/elab-check/memcap.py` under `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE -p MemoryMax=<cap> -p MemorySwapMax=0`, so the slice bounds the job and all its children together. Never a bare nested `--scope`: it lands in `app.slice`, outside the cap. Without `ODIN3_HEAVY_SLICE` (an ad hoc run), a child gets its own scope as before. This holds for ASan binaries too.
   - When `systemd-run --user` is unavailable: a Release child runs under `prlimit --as=<cap>`, and an ASan child makes the driver exit 77 (skip).
   - `--jobs J` is refused when `J × cap` exceeds 60% of `MemTotal`, or exceeds the slice's MemoryMax inside a slice. Defaults: J = 1, cap 4 GiB; `lenet.v`'s Odin III child gets 5 GiB, alone, in the 6G slice.
-  - *Amended (ruling C1).* A run needing more than 6 GB carries the CTest label `sweep-xl` instead of `sweep`. That is every Yosys-side run on `lenet.v` (≈ 7 GB), so `elab_equiv_vtr`'s lenet leg becomes `elab_equiv_vtr_xl`. It runs through `tools/heavy-run --xl` in `odin3-heavy-xl.slice` (MemoryMax=9G, MemorySwapMax=0), with an 8 GiB child cap. The controller starts it by hand, only when no agent is running (Peter's rule), by exporting `ODIN3_HEAVY_XL_OK=1`.
+  - *Amended (ruling C1).* A run needing more than 6 GB carries the CTest label `sweep-xl` instead of `sweep`. That is every Yosys-side run on `lenet.v` (≈ 7 GB), so `elab_equiv_vtr`'s lenet leg becomes `elab_equiv_vtr_xl`. It runs through `tools/heavy-run --xl` in `odin3-heavyxl.slice` (MemoryMax=9G, MemorySwapMax=0), with an 8 GiB child cap. (Not `odin3-heavy-xl.slice`: systemd nests a slice under the one its name extends at a dash, so that name would keep the 6G cap; 2E Task 2.) The controller starts it by hand, only when no agent is running (Peter's rule), by exporting `ODIN3_HEAVY_XL_OK=1`.
   - *Amended (ruling C1; re-review).* Every build runs through `tools/build-locked <cmake --build args>` (2E-1 Task 2):
-    - it waits while a `/tmp/claude-1000/odin3-heavy.queued.<pid>` file names a live PID (a heavy job queued for the lock: writer preference);
-    - then it takes `/tmp/claude-1000/odin3-heavy.lock` shared.
+    - it waits while a `/tmp/claude-1000/odin3-heavy.queued.<pid>` file names a live `heavy-run` (a heavy job queued for the lock: writer preference; a stale flag is removed);
+    - then it takes `/tmp/claude-1000/odin3-heavy.lock` shared;
+    - it refuses (exit 2) inside a heavy run (`ODIN3_HEAVY_SLICE` set), where its shared lock would wait forever.
 
     So no heavy run overlaps a build in any worktree, and builds cannot starve a heavy run. The `ctest -j4` gate runs outside the lock by design: its tests are light.
   - A child killed by its cap is reported `out of memory (cap N)`, never retried in parallel.
@@ -1698,6 +1699,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `--a-only` writes `a.blif` and never runs B or `equiv-check`;
 - a `0.69` version refused, and accepted with `--allow-version 0.69`;
 - `memcap.run` wraps each child in `systemd-run --user --scope -q -p MemoryMax=… -p MemorySwapMax=0` when available;
+  (2E-1 final review: a Python driver that spawns nested heavy steps must pass `pass_fds=(9,)`, or a nested `tools/heavy-run` exits 2 and `build-locked` refuses;)
 - an ASan child without `systemd-run` → exit 77;
 - `memcap.run` refuses a cap above 60% of `MemTotal` (a fake `/proc/meminfo`).
 
