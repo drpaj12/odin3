@@ -207,7 +207,14 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
   __builtin_trap()`). `tools/check_rules.py` gains the rule "no `assert(` in `adapters/abc/`".
   `__builtin_trap` outside `check` is a documented exception for this directory (Peter, in 3D-2's
   review).
-  - **Interim (2026-10-12, 3D-2, plan point (a)):** until Peter rules on point (a), the adapter ships the clean return for `ODIN3_ADAPTER_ASSERT` (an assertion records `ASSERT`, disables the engine and returns `ODIN3_ERR_ENGINE`) and `raise(SIGKILL)` for the off-thread stop; `test_abc_adapter` pins `SIGKILL`. The trap below is the intended design.
+  - **Ruled (2026-10-12, 3D-2, plan point (a); PHASE3 #28):** the off-thread stop (§4.2) is
+    `__builtin_trap()` (`SIGILL`, exit status 132), replacing the interim `raise(SIGKILL)`;
+    `test_abc_adapter` pins `SIGILL`. The exception is that single call site:
+    `tools/check_rules.py` allows `__builtin_trap` only in `adp_offthread_stop` in
+    `adapters/abc/guard.c`, and CLAUDE.md's "trap only in `check`" rule names it. A trap
+    anywhere else in `adapters/abc/` is still refused, so `ODIN3_ADAPTER_ASSERT` keeps the clean
+    return that 3D-2 ships (an assertion records `ASSERT`, disables the engine and returns
+    `ODIN3_ERR_ENGINE`); question 2 of point (a) was not taken up.
 
 ### 4.2 Symbols and process control (AB-6)
 
@@ -250,8 +257,8 @@ The wrappers:
     `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
     saved original stderr fd, then executes `__builtin_trap()`. A `longjmp` across threads would
     be undefined behaviour, and the trap imports nothing.
-  - **Interim (2026-10-12):** until Peter rules on plan point (a), this stop is `raise(SIGKILL)`
-    (exit status 137, no core), not the trap; see §4.1's note.
+  - **Ruled (2026-10-12, PHASE3 #28):** this stop is the trap (exit status 132), which replaced
+    the interim `raise(SIGKILL)`; see §4.1's note.
 - **Process control and code loading:**
   - `__wrap_system`, `__wrap_fork`, `__wrap_execv`, `__wrap_execvp` and `__wrap_execl` return −1;
   - `__wrap_popen` and `__wrap_dlopen` return NULL;
@@ -1521,8 +1528,7 @@ flip-flops`. `<file>` is the script path as given.
 | ERROR | `abc: ABC returned a malformed network: <why>`, `<why>` ∈ `N primary inputs, expected M`; `N outputs, expected M`; `N registers, more than the M it was given`; `register J carries no input register's name`; `a latch with init <v> (all were sent at 0)`; `a LUT with N inputs (at most 16)`; `a LUT with N inputs exceeds --lut K`; `an unknown output '<name>'`; `a .subckt`; `no mapping in the & space` | `ENGINE`, `RESULT` |
 | FATAL (stderr, then trap) | `odin3: linked ABC called <exit\|abort\|assert> outside its session thread; stopping` | AB-6 |
 
-The FATAL row's stop is `raise(SIGKILL)` until Peter rules on plan point (a) (interim, 2026-10-12;
-§4.1).
+The FATAL row's stop is the trap (Peter's ruling (a), PHASE3 #28, 2026-10-12; §4.1).
 | ERROR / INFO | the project and CLI texts of §10.2 | §10 |
 
 ## 12. Performance (AB-29)
@@ -1614,8 +1620,7 @@ thread), added with `Cmd_CommandAdd`, and access to `CmdSplitLine`.
   - `o3test_exit 3` gives `EXIT` code 3 with fds restored, then `DISABLED`;
   - `o3test_assert` gives `ASSERT`;
   - `o3test_thread_exit` dies by `SIGILL` after the "outside its session thread" line (I6).
-    Interim (2026-10-12): until Peter rules on plan point (a), the stop is `raise(SIGKILL)`, and
-    the test expects `SIGKILL` (§4.1).
+    Ruled (2026-10-12, PHASE3 #28): the stop is the trap, and the test expects `SIGILL` (§4.1).
 - **Checked is what runs.** `CmdSplitLine`'s argv equals the checker's words on every accepted test,
   alias and fuzz-corpus command.
 - **Symbols.** `symbol_rules` with the adapter; `abc_adapter_exports`; `abc_adapter_no_assert`

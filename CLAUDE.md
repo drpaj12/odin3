@@ -85,8 +85,9 @@ tools/golden-sample/golden-sample [--write]                  # pick the committe
   clang-tidy).
 - **No recursion in IR traversals** — use an explicit worklist (the IR can be 2M nodes deep).
 - **No VLAs. No `goto`** except the single `cleanup:` label for error paths.
-- **Errors:** return `odin3_status`. `exit()` only in `src/cli/`. `abort()`, `raise(SIGABRT)`,
-  `__builtin_trap()` only in `check` (debug). `assert()` is allowed.
+- **Errors:** return `odin3_status`. `exit()` only in `src/cli/`. `abort()` and `raise(SIGABRT)`
+  only in `check` (debug); `__builtin_trap()` only in `check` (debug), and the ABC adapter's
+  off-thread stop (PHASE3 #28). `assert()` is allowed.
 - **Memory:** IR objects live in their Module's storage (paged arrays + arena, `docs/IR.md`
   IR-18); passes never `malloc` IR objects. Cross-references are typed `uint32_t` IDs, never
   pointers. Only `src/util/` defines containers (`arena`, `vec`, `pagevec`, `u64map`,

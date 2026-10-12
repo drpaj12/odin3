@@ -94,7 +94,7 @@ typedef struct cli_state {
     odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
     /* --abc-script FILE, NULL for none */
     const char *abc_script;
-    bool linked_abc;      /* the linked ABC engine is registered (--version names it) */
+    bool linked_abc; /* the linked ABC engine is registered (--version names it) */
 } cli_state;
 
 /* The options that take a value. */

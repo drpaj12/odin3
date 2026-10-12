@@ -77,9 +77,11 @@ The link wraps `exit`, `_exit`, `abort`, `__assert_fail`, `system`, `popen`, `fo
 - **Escapes on any other thread**, or with no guarded call running, write
   `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
   original stderr and stop the process, because a `longjmp` across threads is undefined.
-  - **Until Peter rules on plan point (a), the stop is `raise(SIGKILL)`.** That is what ships,
-    and `test_abc_adapter` pins `SIGKILL`.
-  - The alternative under review is a trap (`__builtin_trap()`, `SIGILL`).
+  - **The stop is `__builtin_trap()`** (`SIGILL`, exit status 132, which an OOM kill's 137 cannot
+    be mistaken for; under ASan it prints a backtrace). Peter's ruling (a), PHASE3 #28, replaced
+    the interim `raise(SIGKILL)`. It is the one trap outside `check` that CLAUDE.md and
+    `tools/check_rules.py` allow (`adp_offthread_stop` in `guard.c` only), and
+    `test_abc_adapter` pins `SIGILL`.
   - ABC started no thread in the spike's runs (PHASE3 decision 22).
   - The same applies at process exit. ABC's C++ objects have 8 static initialisers
     (`_GLOBAL__sub_I_Glucose*.cpp`, `UfarCmd.cpp`), whose destructors `__cxa_atexit` runs during
@@ -144,7 +146,7 @@ bump that brings one in fails.
   - ABC's command splitting (`odin3_abc_test_split`, for 3D Task 11);
   - each in a child process:
     - `o3test_exit 3`, `o3test__exit 4`, `o3test_abort` and `o3test_assert`;
-    - off-thread `exit`, `abort` and `assert` (the line, then `SIGKILL`);
+    - off-thread `exit`, `abort` and `assert` (the line, then `SIGILL`);
     - the adapter assertion;
     - a planted `libabc_o3test.so` in the working directory and on `$ABC_LIB_PATH`, never loaded
       (its constructor would exit 9);

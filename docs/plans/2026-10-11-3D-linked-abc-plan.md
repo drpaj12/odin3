@@ -177,6 +177,7 @@ Effort cues:
   - **The off-thread escape** (AB-6: ABC's own thread calls `exit`/`abort`/`__assert_fail`) has no caller to return to. Its wrapper writes the stderr line and then calls `adp_offthread_stop()` in `guard.c`, whose body is Peter's answer. Until he rules, its body is left out and 3D-2 does not merge.
   - The 3D-2 PR asks him one numbered question: "(1) Allow `__builtin_trap()` in `adapters/abc/guard.c`'s off-thread escape (required to stop safely), with the matching `check_rules.py` allowance? If not, the alternative is a non-trap stop after the line, `raise(SIGKILL)`. (2) Optionally allow the trap for adapter invariants (`ODIN3_ADAPTER_ASSERT`), instead of the shipped clean return?"
   - Either answer for (1) is a one-function change plus Task 5's `o3test_thread_exit` signal (`SIGILL` or `SIGKILL`). A "yes" to (2) is a one-line macro change in review.
+  - **Ruled (Peter, 2026-10-12, PHASE3 #28):** (1) yes. `adp_offthread_stop()`'s body is `__builtin_trap()` (`SIGILL`, exit status 132), replacing the interim `raise(SIGKILL)` that 3D-2 shipped while the question was open. `tools/check_rules.py` allows `__builtin_trap` only in that function in `adapters/abc/guard.c` (a trap anywhere else in `adapters/abc/`, or in `src/` outside `check`, is still refused, and `test_check_rules.py` shows both), and CLAUDE.md's Errors rule names the exception. (2) was not taken up: `ODIN3_ADAPTER_ASSERT` keeps the clean return. With this in, 3D-2 may merge.
 - (b) **Where the engine lives.** `src/passes/abc/engine.c` holds the process's engine copy. Internal `const odin3_abc_engine *odin3_abc_engine_get(void)` returns it, or NULL.
   - `src/api/abc.c` holds the public `odin3_abc_engine_register`, which validates the table and then calls `odin3_abc_engine_set`.
   - `odin3_abc_test_set_engine` (`abc_test.h`) overrides it for tests; NULL restores the registered one. It is the only way past "final".
@@ -265,7 +266,7 @@ Effort cues:
   - Only `adapters/abc/bridge.c` includes ABC headers. `bridge.c` compiles with `odin3_flags` plus `-Wno-strict-prototypes` (a source property); every other adapter file uses the full `odin3_flags`.
   - `libodin3` never links ABC.
   - The adapter exports exactly `odin3_plugin_init` and `odin3_abc_adapter_init`.
-  - No `assert(` in `adapters/abc/`, and no `__builtin_trap` until Peter rules on point (a).
+  - No `assert(` in `adapters/abc/`, and no `__builtin_trap` except `adp_offthread_stop`'s (point (a), PHASE3 #28).
   - The `--wrap` wrappers never name a `__real_` symbol.
   - `third_party/abc` is never modified.
 - **IR discipline (AB-18).**
@@ -488,7 +489,7 @@ Acceptance:
   - `check-symbols: <lib> does not export <sym>`;
   - `check-symbols: <lib> imports forbidden <sym>`.
   - Exit 2 on usage errors.
-- `check_rules.py`: `adapters/abc/<f>:<n>: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)`. The existing trap rule is unchanged until Peter rules (point (a)).
+- `check_rules.py`: `adapters/abc/<f>:<n>: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)`. The trap rule gains point (a)'s one allowance, `adp_offthread_stop` in `adapters/abc/guard.c` (PHASE3 #28).
 
 **Tests:**
 - `test_abc_adapter.c` (real ABC; the session cases):
@@ -498,11 +499,11 @@ Acceptance:
 - Escapes, each in its own forked process with `ASAN_OPTIONS=detect_leaks=0`:
   - `o3test_exit 3` → `ENGINE`, `{EXIT, 3}`, fds restored; the next `open` gives `DISABLED`.
   - `o3test_assert` → `{ASSERT, 0, "<file>:<line>: <expr>"}` with a non-empty text.
-  - `o3test_thread_exit` → its stderr holds `odin3: linked ABC called exit outside its session thread; stopping`, and the child dies by the signal Peter's answer selects (`SIGILL` for the trap, `SIGKILL` otherwise). This case is written once he rules. *Interim (2026-10-12): written in Task 5 against the shipped `raise(SIGKILL)` stop, so it expects `SIGKILL` until Peter rules.*
+  - `o3test_thread_exit` → its stderr holds `odin3: linked ABC called exit outside its session thread; stopping`, and the child dies by the signal Peter's answer selects (`SIGILL` for the trap, `SIGKILL` otherwise). *Ruled (2026-10-12, PHASE3 #28): the trap, so the case expects `SIGILL` (exit status 132); it expected `SIGKILL` while the interim stop shipped.*
 - `adapter_assert_clean`: the hook `odin3_abc_test_invariant(false)` returns `ODIN3_ERR_ENGINE`, with `fail.kind` = `ASSERT` and a `fail.text` that starts `adapter: adapters/abc/` and ends `: o3test invariant`; the next `open` gives `DISABLED`.
 - `abc_adapter_exports`: `check-symbols.sh --only odin3_plugin_init,odin3_abc_adapter_init --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,execv,execvp,signal <libodin3_abc.so>` exits 0. The same command on `libodin3.so` exits 1, with the "not in --only" line.
 - `symbol_rules` with the adapter added is green. `abi_exports` is unchanged and green.
-- `abc_adapter_no_assert`: `check_rules.py adapters/abc/*.c adapters/abc/*.h` exits 0. `test_check_rules.py` gains a fixture with `assert(x)` under `adapters/abc/` (the message), and one with `__builtin_trap()` under `adapters/abc/` (refused by the existing rule).
+- `abc_adapter_no_assert`: `check_rules.py adapters/abc/*.c adapters/abc/*.h` exits 0. `test_check_rules.py` gains a fixture with `assert(x)` under `adapters/abc/` (the message), and fixtures for the trap allowance of point (a): `__builtin_trap()` in `adp_offthread_stop` in `adapters/abc/guard.c` is allowed, and a trap in any other function or file under `adapters/abc/`, or in `src/` outside `check`, is refused.
 - `lsan.supp` suppresses only ABC functions (`Abc_*`, `Gia_*`, `Cmd_*`, `Extra_*`, `Mem_*`). The review checks that no suppression names an `odin3_`/`adp_` function.
 
 ### Task 6: Bridge calls, test hooks, CLI start-up, `--version`, NOTICE and the licence scan (AB-8, AB-9, AB-16 calls)

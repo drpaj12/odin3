@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -1129,8 +1130,8 @@ static bool offthread_names_fill(offthread_names *names, const char *call) {
 }
 
 /* The case thread_<call> printed "odin3: linked ABC called <call> outside its session thread;
- * stopping", then died by SIGKILL: the off-thread stop that ships until Peter rules on point (a)
- * (a trap would make it SIGILL). */
+ * stopping", then died by SIGILL (exit status 132): the off-thread stop is __builtin_trap()
+ * (ruling (a), PHASE3 #28). */
 static void expect_offthread_stop(const char *call) {
     static child res;
     static offthread_names names;
@@ -1138,7 +1139,7 @@ static void expect_offthread_stop(const char *call) {
     const child_req req = {.which = names.which, .extra = NULL};
     run_child(&req, &res);
     TEST_ASSERT_TRUE_MESSAGE(WIFSIGNALED(res.status), res.out);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(SIGKILL, WTERMSIG(res.status), res.out);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(SIGILL, WTERMSIG(res.status), res.out);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(res.out, names.line), res.out);
 }
 
@@ -1445,6 +1446,8 @@ static const struct {
 };
 
 static int run_child_case(const char *which) {
+    /* The thread_ cases end by the adapter's trap (SIGILL): no core dump or crash report for it. */
+    (void)prctl(PR_SET_DUMPABLE, 0L, 0L, 0L, 0L);
     (void)odin3_abc_test_add_command("o3test_exit", o3test_exit);
     (void)odin3_abc_test_add_command("o3test__exit", o3test_underscore_exit);
     (void)odin3_abc_test_add_command("o3test_abort", o3test_abort);

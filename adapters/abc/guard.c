@@ -194,15 +194,13 @@ odin3_status odin3_guard_run_always(odin3_guard_fn fn, void *arg, odin3_abc_fail
  * Stops the process after an off-thread escape, which has no caller to return to (a longjmp
  * across threads is undefined behaviour).
  *
- * PENDING PETER (plan point (a), question 1): the body is his answer, either __builtin_trap()
- * with a matching check_rules.py allowance, or the non-trap stop raise(SIGKILL). Until he rules,
- * SIGKILL ships (a _Noreturn function needs a body), so the adapter never returns into ABC after
- * such an escape; test_abc_adapter pins SIGKILL, and 3D-2 does not merge before the ruling.
+ * The stop is __builtin_trap() (SIGILL, exit status 132), Peter's ruling (a) of 2026-10-12,
+ * PHASE3 #28: the one trap outside `check` that CLAUDE.md and tools/check_rules.py allow. It ends
+ * the process at once (no atexit handler or ABC code runs), so the adapter never returns into ABC
+ * after such an escape; test_abc_adapter pins SIGILL.
  */
 static _Noreturn void adp_offthread_stop(void) {
-    for (;;) {
-        (void)raise(SIGKILL);
-    }
+    __builtin_trap();
 }
 
 /* The off-thread path: the line to the original stderr, then the stop. */
