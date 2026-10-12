@@ -1,0 +1,390 @@
+"""qor_heavy: the heavy-run convention for vtr-qor and the heavy tools of 3D and 3E.
+
+The 3H spec QH-7.1, as made exact by the 3H plan's point (a), (b), (d) and (m):
+
+- ``inside_heavy_run`` checks ``tools/heavy-run``'s own nesting evidence: ``ODIN3_HEAVY_SLICE``
+  is set, this process's cgroup lies under that slice, and descriptor 9 (inherited from
+  ``heavy-run``) is the heavy lock. The variable alone is not evidence.
+- ``reexec_under_lock`` re-runs a tool through ``tools/heavy-run`` (never a copy of it) with the
+  caller's environment unchanged; inside a heavy run it only verifies the cap.
+- ``verify_scope`` walks the cgroup ancestors: ``heavy-run`` caps the slice, so the scope's own
+  ``memory.max`` reads ``max``.
+- The machine readers (``disk_free_gib``, ``mem_available_gib``) feed admission (spec §7.3).
+- ``safe_rmtree`` is the only deletion (spec §7.5): strictly under the run's root, through no
+  symlink, and only under ``~/odin3-ws/work`` or ``/tmp/claude-1000``.
+
+Command line (3E's shell tool ``blif-roundtrip --vtr``)::
+
+    python3 -I tools/vtr-qor/qor_heavy.py require-heavy [--xl]
+
+exits 0 inside a heavy run with the cap verified, 3 when not inside, and 2 (with
+``vtr-qor: <message>`` on stderr) when inside but the cap check fails.
+
+Test hooks (never set them outside tests): ``ODIN3_QOR_SELF_CGROUP``, ``ODIN3_QOR_CGROUP_ROOT``
+and ``ODIN3_QOR_FD9`` replace ``/proc/self/cgroup``, ``/sys/fs/cgroup`` and ``/proc/self/fd/9``;
+``ODIN3_QOR_DF_CMD`` replaces the ``df`` command; ``ODIN3_HEAVY_DIR`` (``heavy-run``'s own) moves
+the lock.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import os
+import shutil
+import subprocess
+import sys
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+HEAVY_DIR = Path("/tmp/claude-1000")
+HEAVY_LOCK = HEAVY_DIR / "odin3-heavy.lock"
+LOCK_NAME = "odin3-heavy.lock"
+CAP_BYTES = 6 * 1024**3
+CAP_XL_BYTES = 9 * 1024**3
+REPO_ROOT = Path(__file__).resolve().parents[2]
+HEAVY_RUN = REPO_ROOT / "tools" / "heavy-run"
+WORK_SUBDIR = Path("odin3-ws") / "work"
+
+PREFIX = "vtr-qor: "
+EXIT_USAGE = 2
+EXIT_NOT_INSIDE = 3
+EXIT_LOCK_BUSY = 4
+EXIT_DISK = 5
+HEAVY_RUN_SKIPPED = 77
+SIGNAL_EXIT_BASE = 128
+MIB = 1024**2
+KIB_PER_GIB = 1024**2
+DF_CMD = ("df", "-B1G", "--output=avail", "/mnt/c")
+
+MSG_NOT_CONTROLLER = "heavy runs are the controller's: set ODIN3_HEAVY_OK=1"
+MSG_XL_NOT_OK = "--xl needs ODIN3_HEAVY_XL_OK=1 (an idle machine; the controller starts it)"
+MSG_NOT_INSIDE = "not inside a heavy run: the controller starts it through tools/heavy-run"
+MSG_CAP_77 = "cannot apply the memory cap (tools/heavy-run exited 77; see its message above)"
+MSG_DF = "cannot read free space of /mnt/c"
+
+
+class HeavyError(Exception):
+    """A heavy-run refusal: ``code`` is the exit code (plan, Global Constraints), ``message``
+    the text without the ``vtr-qor: `` prefix, which the CLI adds."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class ScopeInfo:
+    """The verified cap: ``path`` is the capping cgroup directory (whose ``memory.events``
+    counts OOM kills), ``leaf`` this process's own cgroup (whose ``memory.peak`` is the job's)."""
+
+    path: Path
+    leaf: Path
+    memory_max: int
+    swap_zero: bool
+
+
+@dataclass(frozen=True)
+class _Probe:
+    """Where the nesting evidence and the cgroup tree are read (test hooks resolved)."""
+
+    self_cgroup: Path
+    cgroup_root: Path
+    fd_link: Path
+    lock: Path
+
+
+def _environ(env: Mapping[str, str] | None) -> Mapping[str, str]:
+    return os.environ if env is None else env
+
+
+def heavy_lock(env: Mapping[str, str] | None = None) -> Path:
+    """The lock ``tools/heavy-run`` takes: ``$ODIN3_HEAVY_DIR/odin3-heavy.lock`` (tests), else
+    ``HEAVY_LOCK``."""
+    heavy_dir = _environ(env).get("ODIN3_HEAVY_DIR")
+    return Path(heavy_dir) / LOCK_NAME if heavy_dir else HEAVY_LOCK
+
+
+def _probe(env: Mapping[str, str], lock: Path | None = None) -> _Probe:
+    return _Probe(
+        self_cgroup=Path(env.get("ODIN3_QOR_SELF_CGROUP") or "/proc/self/cgroup"),
+        cgroup_root=Path(env.get("ODIN3_QOR_CGROUP_ROOT") or "/sys/fs/cgroup"),
+        fd_link=Path(env.get("ODIN3_QOR_FD9") or "/proc/self/fd/9"),
+        lock=heavy_lock(env) if lock is None else lock,
+    )
+
+
+def _cgroup_path(self_cgroup: Path) -> str | None:
+    """The ``0::<path>`` entry of ``/proc/self/cgroup`` (cgroup v2), or None."""
+    try:
+        text = self_cgroup.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        if line.startswith("0::"):
+            return line[3:].strip()
+    return None
+
+
+def inside_heavy_run(
+    env: Mapping[str, str] | None = None,
+    *,
+    self_cgroup: Path = Path("/proc/self/cgroup"),
+    fd_link: Path = Path("/proc/self/fd/9"),
+    lock: Path = HEAVY_LOCK,
+) -> bool:
+    """True when this process runs inside ``tools/heavy-run``: ``ODIN3_HEAVY_SLICE`` is set, the
+    cgroup path lies under that slice, and ``fd_link`` (descriptor 9) resolves to ``lock``."""
+    heavy_slice = _environ(env).get("ODIN3_HEAVY_SLICE", "")
+    if not heavy_slice or "/" in heavy_slice:
+        return False
+    cgroup = _cgroup_path(self_cgroup)
+    if cgroup is None or f"/{heavy_slice}/" not in cgroup:
+        return False
+    try:
+        target = os.readlink(fd_link)
+    except OSError:
+        return False
+    return os.path.realpath(target) == os.path.realpath(lock)
+
+
+def _read_cg(directory: Path, name: str) -> str | None:
+    try:
+        return (directory / name).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def verify_scope(
+    limit: int = CAP_BYTES,
+    *,
+    self_cgroup: Path = Path("/proc/self/cgroup"),
+    cgroup_root: Path = Path("/sys/fs/cgroup"),
+) -> ScopeInfo:
+    """Verify this process's cap (plan point (b)): some cgroup from the leaf up to the root has a
+    numeric ``memory.max`` <= ``limit``, and some has ``memory.swap.max`` = 0. The capping
+    directory is the one with the tightest ``memory.max`` (the nearest on a tie)."""
+    cgroup = _cgroup_path(self_cgroup)
+    rel = (cgroup or "").strip("/")
+    leaf = cgroup_root / rel if rel else cgroup_root
+    tightest: tuple[int, Path] | None = None
+    swap_zero = False
+    current = leaf
+    while True:
+        value = _read_cg(current, "memory.max")
+        if value is not None and value.isdigit() and (tightest is None or int(value) < tightest[0]):
+            tightest = (int(value), current)
+        swap_zero = swap_zero or _read_cg(current, "memory.swap.max") == "0"
+        if current == cgroup_root or current.parent == current:
+            break
+        current = current.parent
+    if cgroup is not None and tightest is not None and tightest[0] <= limit and swap_zero:
+        return ScopeInfo(path=tightest[1], leaf=leaf, memory_max=tightest[0], swap_zero=True)
+    shown_max = "max" if tightest is None else str(tightest[0])
+    shown_swap = _read_cg(leaf, "memory.swap.max") or "max"
+    raise HeavyError(
+        EXIT_USAGE,
+        f"not inside a capped scope (memory.max {shown_max}, memory.swap.max {shown_swap}); "
+        "run through the heavy wrapper",
+    )
+
+
+def _limit(xl: bool) -> int:
+    return CAP_XL_BYTES if xl else CAP_BYTES
+
+
+def _verify(probe: _Probe, xl: bool) -> ScopeInfo:
+    return verify_scope(_limit(xl), self_cgroup=probe.self_cgroup, cgroup_root=probe.cgroup_root)
+
+
+def _inside(env: Mapping[str, str], probe: _Probe) -> bool:
+    return inside_heavy_run(
+        env, self_cgroup=probe.self_cgroup, fd_link=probe.fd_link, lock=probe.lock
+    )
+
+
+def require_heavy(*, xl: bool = False) -> ScopeInfo:
+    """For tools that must already run inside a heavy run (3D's golden paths): the nesting
+    evidence and the cap, else ``HeavyError(2, …)``."""
+    env = os.environ
+    probe = _probe(env)
+    if not _inside(env, probe):
+        raise HeavyError(EXIT_USAGE, MSG_NOT_INSIDE)
+    return _verify(probe, xl)
+
+
+def reexec_argv(argv: Sequence[str], script: Path, *, xl: bool = False) -> list[str]:
+    """``[<repo>/tools/heavy-run, (--xl), <python>, -I, <script>, *argv]``."""
+    head = [str(HEAVY_RUN)] + (["--xl"] if xl else [])
+    return [*head, sys.executable, "-I", str(script), *argv]
+
+
+def _lock_busy(lock: Path) -> bool:
+    """Probe the heavy lock as ``flock -n`` would (exclusive, non-blocking), then release it at
+    once: ``heavy-run`` takes it for real."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC, 0o666)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    finally:
+        os.close(fd)  # closing the only descriptor releases a lock taken on it
+    return False
+
+
+def reexec_under_lock(
+    argv: Sequence[str],
+    *,
+    script: Path | None = None,
+    xl: bool = False,
+    no_wait: bool = False,
+    lock: Path = HEAVY_LOCK,
+    env: Mapping[str, str] | None = None,
+) -> ScopeInfo:
+    """Make the caller a heavy run (plan point (a)). Inside one, verify the cap and return it.
+    Outside, with ``ODIN3_HEAVY_OK=1`` (and ``ODIN3_HEAVY_XL_OK=1`` for ``xl``) in the caller's
+    environment, re-run ``script argv`` through ``tools/heavy-run`` and ``sys.exit`` with its
+    status; ``heavy-run``'s 77 (skipped) becomes ``HeavyError(2, …)``."""
+    environ = _environ(env)
+    probe = _probe(environ, lock)
+    if _inside(environ, probe):
+        return _verify(probe, xl)
+    if environ.get("ODIN3_HEAVY_OK") != "1":
+        raise HeavyError(EXIT_USAGE, MSG_NOT_CONTROLLER)
+    if xl and environ.get("ODIN3_HEAVY_XL_OK") != "1":
+        raise HeavyError(EXIT_USAGE, MSG_XL_NOT_OK)
+    if _lock_busy(lock):
+        if no_wait:
+            raise HeavyError(EXIT_LOCK_BUSY, f"heavy lock {lock} is busy (--no-wait)")
+        print(f"{PREFIX}waiting for the heavy lock {lock}", file=sys.stderr, flush=True)
+    target = Path(sys.argv[0]).resolve() if script is None else script
+    child_env = None if env is None else dict(env)
+    try:
+        proc = subprocess.run(reexec_argv(argv, target, xl=xl), env=child_env, check=False)
+    except OSError as exc:  # no tools/heavy-run (2E-1 not merged): no fallback, plan point (g)
+        raise HeavyError(
+            EXIT_USAGE, f"cannot apply the memory cap (cannot run {HEAVY_RUN}: {exc.strerror})"
+        ) from exc
+    if proc.returncode == HEAVY_RUN_SKIPPED:
+        raise HeavyError(EXIT_USAGE, MSG_CAP_77)
+    sys.exit(proc.returncode if proc.returncode >= 0 else SIGNAL_EXIT_BASE - proc.returncode)
+
+
+def oom_kills(scope: ScopeInfo) -> int:
+    """The capping directory's ``memory.events`` ``oom_kill`` counter, 0 when absent."""
+    text = _read_cg(scope.path, "memory.events")
+    for line in (text or "").splitlines():
+        fields = line.split()
+        if len(fields) == 2 and fields[0] == "oom_kill" and fields[1].isdigit():
+            return int(fields[1])
+    return 0
+
+
+def scope_peak_mib(scope: ScopeInfo) -> int | None:
+    """The leaf cgroup's ``memory.peak`` in MiB (the job's own peak, plan point (b)), or None."""
+    value = _read_cg(scope.leaf, "memory.peak")
+    if value is None or not value.isdigit():
+        return None
+    return int(value) // MIB
+
+
+def disk_free_gib(env: Mapping[str, str] | None = None) -> int:
+    """Free GiB on ``C:`` from ``df -B1G --output=avail /mnt/c`` (or ``ODIN3_QOR_DF_CMD``)."""
+    override = _environ(env).get("ODIN3_QOR_DF_CMD", "").split()
+    cmd = override or list(DF_CMD)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise HeavyError(EXIT_DISK, MSG_DF) from exc
+    lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if proc.returncode != 0 or not lines:
+        raise HeavyError(EXIT_DISK, MSG_DF)
+    last = lines[-1].removesuffix("G")
+    if not last.isdigit():
+        raise HeavyError(EXIT_DISK, MSG_DF)
+    return int(last)
+
+
+def mem_available_gib(meminfo: Path = Path("/proc/meminfo")) -> float:
+    """``MemAvailable`` in GiB."""
+    try:
+        text = meminfo.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HeavyError(EXIT_USAGE, f"cannot read MemAvailable from {meminfo}") from exc
+    for line in text.splitlines():
+        fields = line.split()
+        if len(fields) >= 2 and fields[0] == "MemAvailable:" and fields[1].isdigit():
+            return int(fields[1]) / KIB_PER_GIB
+    raise HeavyError(EXIT_USAGE, f"cannot read MemAvailable from {meminfo}")
+
+
+def _allowed_roots(home: Path) -> tuple[Path, Path]:
+    return (Path(os.path.realpath(home / WORK_SUBDIR)), Path(os.path.realpath(HEAVY_DIR)))
+
+
+def _strictly_under(path: Path, root: Path) -> bool:
+    return path != root and root in path.parents
+
+
+def check_out_dir(out: Path, home: Path) -> Path:
+    """Plan point (m): ``--out`` must resolve strictly under ``~/odin3-ws/work`` or
+    ``/tmp/claude-1000``. Returns the resolved path."""
+    resolved = Path(os.path.realpath(out))
+    if any(_strictly_under(resolved, root) for root in _allowed_roots(home)):
+        return resolved
+    raise HeavyError(
+        EXIT_USAGE, f"refusing --out {resolved}: not under ~/odin3-ws/work or /tmp/claude-1000"
+    )
+
+
+def safe_rmtree(path: Path, root: Path) -> None:
+    """Delete ``path`` (a tree or a file; absent is a no-op) only when it lies strictly under
+    ``root`` both as spelled and after ``realpath``, no component from ``root`` down to ``path``
+    is a symlink, and ``root`` itself is a permitted ``--out`` (E-QH12)."""
+    not_under = HeavyError(EXIT_USAGE, f"refusing to delete {path}: not under {root}")
+    spelled, spelled_root = Path(os.path.abspath(path)), Path(os.path.abspath(root))
+    if not _strictly_under(spelled, spelled_root):
+        raise not_under
+    try:
+        check_out_dir(root, Path.home())
+    except HeavyError:
+        raise not_under from None
+    current = spelled_root
+    for part in ("", *spelled.relative_to(spelled_root).parts):
+        current = current / part if part else current
+        if current.is_symlink():
+            raise HeavyError(EXIT_USAGE, f"refusing to delete {path}: {current} is a symlink")
+    real, real_root = Path(os.path.realpath(path)), Path(os.path.realpath(root))
+    if not _strictly_under(real, real_root):
+        raise not_under
+    if real.is_dir():
+        shutil.rmtree(real)
+    elif real.exists():
+        real.unlink()
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="qor_heavy.py", description="the heavy-run convention for vtr-qor and its peers"
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    req = sub.add_parser("require-heavy", help="exit 0 inside a capped heavy run, 3 outside")
+    req.add_argument("--xl", action="store_true", help="accept the 9 GiB xl cap")
+    args = parser.parse_args(argv)
+    env = os.environ
+    probe = _probe(env)
+    if not _inside(env, probe):
+        return EXIT_NOT_INSIDE
+    try:
+        _verify(probe, bool(args.xl))
+    except HeavyError as exc:
+        print(f"{PREFIX}{exc.message}", file=sys.stderr)
+        return exc.code
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

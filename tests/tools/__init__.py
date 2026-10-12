@@ -1,7 +1,7 @@
 """Tests for tools/netlist-compare, tools/equiv-check, tools/golden-sample, tools/golden-blackboxes,
 tools/project-fixtures, tools/parse-check, tools/elab-check, tools/proc-check, tools/heavy-run,
 tools/build-locked, tools/blif-vtr-check (the checker and the fixture driver), tools/vtr-models,
-the BLIF reader and the Python plugin binding (plugins/python).
+tools/vtr-qor, the BLIF reader and the Python plugin binding (plugins/python).
 
 The tools are stand-alone scripts (not installed packages); their directories are put on
 sys.path here so the test modules can import them.
@@ -26,6 +26,7 @@ for _sub in (
     "tools/token-cost",
     "tools/elab-check",
     "tools/proc-check",
+    "tools/vtr-qor",
     "plugins/python",
 ):
     _path = str(REPO_ROOT / _sub)
