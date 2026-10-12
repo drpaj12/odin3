@@ -685,7 +685,7 @@ The rows are §7.5's, and each command name is verified at the pin.
 - **Arguments.**
   - `if -K six` → `t.abc:1: argument 'six' of 'if' is neither an option nor a number`.
   - `echo hello-world` is accepted.
-  - For **every** row of the allow-list and every letter `x` in its `file_opts`, `<cmd> -<x> 6` → `t.abc:1: option '-<x>' of '<cmd>' takes a file or a string and is not allowed` (table-driven; I12).
+  - For **every** row of the allow-list and every letter `x` in its `file_opts`, `<cmd> -<x> 6` → `t.abc:1: option '-<x>' of '<cmd>' reads or writes a file or takes a string and is not allowed` (table-driven; I12; text per the §7.3 step 9 erratum of the Task 10 review).
 - **Count.** 1,025 `b` commands → `t.abc:1025: script expands to more than 1024 commands`. 1,024 are accepted, then `if -K 6` makes 1,025 and is refused.
 - **Spaces and mapping.**
   - `strash` alone → `t.abc: the script leaves the network unmapped; end it with a LUT mapper such as 'if -K {K}'` (`refuse_unmapped_end`). So do the empty script and `resyn2`.

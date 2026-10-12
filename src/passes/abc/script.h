@@ -56,9 +56,10 @@ typedef enum odin3_abc_effect {
 
 /*
  * One row of the allow-list table. cls is an odin3_abc_class and effect an odin3_abc_effect.
- * file_opts lists the option letters whose value is a file or a string, read at the pin from the
- * command's Extra_UtilGetopt handling and usage text in base/abci/abc.c ("" for none); §7.3 step
- * 9 refuses them even with a numeric value. A refused row has effect NONE and file_opts "".
+ * file_opts lists the option letters that read or write a file, or that take a string, read at
+ * the pin from the command's Extra_UtilGetopt handling, usage text and the code each option
+ * enables ("" for none); §7.3 step 9 refuses them, flags included, even with a numeric value. A
+ * refused row has effect NONE and file_opts "".
  */
 typedef struct odin3_abc_command_info {
     const char *name;

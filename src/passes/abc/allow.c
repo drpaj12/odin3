@@ -1,14 +1,33 @@
 /*
  * allow.c — the allow-list of ABC commands (3D spec §7.5; PHASE3 #11, #12): P3-11 in real command
  * names, each verified at the pin (a3001b72) against its Cmd_CommandAdd line, with the class, the
- * effect that drives §7.3 step 11, and the options whose value is a file or a string (§7.3 step
- * 9, I12), read from each command's Extra_UtilGetopt handling and usage text:
+ * effect that drives §7.3 step 11, and file_opts: the options that read or write a file, or that
+ * take a string (§7.3 step 9 and its Task 10 review erratum; I12). Each is cited at the line that
+ * assigns its value or flag in base/abci/abc.c, then at the code it enables:
  *
- *   if   -S, -J  base/abci/abc.c:23071, 23085 (pLutStruct; usage line 23480: "[-SJ str]")
- *   &if  -S, -J  base/abci/abc.c:45353, 45367 (pLutStruct; usage line 45832: "[-SJ str]")
- *   &ps  -D      base/abci/abc.c:36134 (pDumpFile; usage line 36173: "[-D file]")
+ *   print_stats -b  abc.c:1670  fSaveBest: Abc_NtkCompareAndSaveBest writes <spec>_best.blif
+ *                               (abcPrint.c:309-310, 137-141)
+ *   print_stats -d  abc.c:1673  fDumpResult: its writes are commented out at the pin
+ *                               (abcPrint.c:311-319, 417-421); listed anyway
+ *   rewrite -x      abc.c:8317  fPrecompute: Rwr_Precompute writes npn4_aig_array.txt
+ *                               (abc.c:8338-8340, rwrUtil.c:435)
+ *   resub -P, -D    abc.c:8738, 8749  Log2Probs/Log2Divs: both nonzero write p..d..v.._<name>.bin
+ *                               (abcResub.c:164-172)
+ *   scorr -P        abc.c:25839 nPartSize: the partitioned run writes part%03d.aig
+ *                               (sswPart.c:245, 286-288)
+ *   scorr -e, -f    abc.c:26004, 26007  fEquivDump/fEquivDump2: equiv%03d.aig (sswSweep.c:354-363)
+ *   if -S, -J       abc.c:23077, 23091  pLutStruct = the string (usage abc.c:23480 "[-SJ str]")
+ *   if -f           abc.c:23167 fDumpFile: If_ManStop writes <name>__n.._k...bin (ifMan.c:351-365)
+ *   &if -S, -J      abc.c:45359, 45373  pLutStruct = the string (usage abc.c:45832 "[-SJ str]")
+ *   &ps -D          abc.c:36140 pDumpFile = the file (usage abc.c:36173 "[-D file]";
+ *                               Gia_ManLogAigStats, giaMan.c:460-462)
  *
- * Every other allowed command reads each option value with atoi/atof, or takes none.
+ * How the others were checked: every option of every allowed command was mapped to the variable
+ * its case assigns, and the usage texts were searched for dump, file, write, save, record and log.
+ * Then each allowed command ran once in the abc tool at the pin, once per option (numeric options
+ * with 2), on a strashed, a mapped, a & and a &-mapped network, each run in an empty directory: the
+ * only files created came from the options above. That audit is per option, on one small design;
+ * combinations of options and other networks were not run.
  *
  * Then the refused rows: §7.5's "among others" (files, process, latches), every registered
  * read_* and write_* command with read and write, the & space's &r, &w, &read_* and &write_*
@@ -28,9 +47,9 @@ static const odin3_abc_command_info k_abc_commands[] = {
     /* optimisation: ntk := aig */
     {"strash", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
     {"balance", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
-    {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
+    {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "x"},
     {"refactor", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
-    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
+    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD"},
     {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
     {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
     {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
@@ -38,13 +57,13 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"ifraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
     {"fraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
     {"fraig_sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
-    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, ""},
+    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "Pef"},
     /* optimisation: keeps */
     {"sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, ""},
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, ""},
     /* mapping */
-    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJ"},
+    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf"},
     {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, ""},
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, ""},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, ""},
@@ -84,7 +103,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"print_npn", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
     {"print_profile", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
     {"print_sharing", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
-    {"print_stats", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
+    {"print_stats", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "bd"},
     {"print_supp", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
     {"print_symm", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},
     {"print_tim", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, ""},

@@ -893,11 +893,16 @@ file as given, and nothing changes.
      `[-+]?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?`; `echo` takes any printable word without `{`, `}` or
      `!`.
    - Otherwise: `<file>:<line>: argument '<w>' of '<cmd>' is neither an option nor a number`.
-   - **File and string options** (I12). `allow.c` lists, per allowed command, the options whose
-     value is a file or a string, read at the pin from each command's `Extra_UtilGetopt` string and
-     usage text. Those are refused even with a numeric value (a numeric word can name a file in the
-     working directory): `<file>:<line>: option '-<x>' of '<cmd>' takes a file or a string and is
-     not allowed`.
+   - **File and string options** (I12). `allow.c` lists, per allowed command, the options that
+     read or write a file, or that take a string, read at the pin from each command's
+     `Extra_UtilGetopt` handling, usage text and the code each option enables. Those are refused,
+     flags included, and even with a numeric value (a numeric word can name a file in the working
+     directory): `<file>:<line>: option '-<x>' of '<cmd>' reads or writes a file or takes a string
+     and is not allowed`.
+     > *(Erratum, 3D Task 10 review C1, 2026-10-12: the list was "options whose value is a file or
+     > a string". Flags and numeric options write files too: `print_stats -b`, `rewrite -x`,
+     > `resub -P`/`-D`, `scorr -P`/`-e`/`-f` and `if -f`. The message changed with it, from
+     > "takes a file or a string".)*
 10. **Count.** More than 1,024 commands after expansion: `<file>:<line>: script expands to more
     than 1024 commands`.
 11. **Spaces and mapping.** `ntk` (the `Abc_Ntk` space) and `gia` (the `&` space) are each
@@ -930,13 +935,16 @@ until the table follows.
 - Usable: `b` balance, `cl` cleanup, `f` fraig, `fs` fraig_sweep, `lp` lutpack, `pcon`
   print_cone, `pd` print_dsd, `pex` print_exdc -d, `pf` print_factor, `pfan` print_fanio, `pg`
   print_gates, `pl` print_level, `plat` print_latch, `pio` print_io, `pk` print_kmap, `pm`
-  print_miter, `ps` print_stats, `psb` print_stats -b, `psu` print_supp, `psy` print_symm, `pun`
+  print_miter, `ps` print_stats, `psu` print_supp, `psy` print_symm, `pun`
   print_unate, `rw` rewrite, `rwz` rewrite -z, `rf` refactor, `rfz` refactor -z, `rs` resub, `rsz`
   resub -z, `scl` scleanup, `sif` if -s, `st` strash, `sw` sweep.
 - Refused (expansions as in `abc.rc`), files: `r`, `ra`, `rh`, `ri`, `rl`, `rb`, `rp`, `rt`, `rv`,
   `rvl`, `rsup`, `rlib`, `rlibc`, `rty`, `rlut`, `so`, `w`, `wa`, `wb`, `wc`, `wh`, `wl`, `wp`, `wv`.
   Process: `hi`, `q`, `sa`. Latches: `fr`, `r3`, `r3f`, `r3b`, `ret`, `dret`. Other: `cg`, `clp`,
   `cs`, `el`, `esd`, `fsto`, `fres`, `ft`, `ic`, `ren`, `re`, `rez`, `ssw`, `tr0`, `tr1`, `u`.
+  Option: `psb` (print_stats -b; `-b` writes `<spec>_best.blif`, §7.3 step 9).
+
+> *(Erratum, 3D Task 10 review C1, 2026-10-12: `psb` moved from usable to refused.)*
 
 **Usable script aliases:**
 
@@ -991,8 +999,13 @@ of AB-21.
 | `&mfs` | `&` space | gia | keeps |
 | the 32 `print_*` commands at the pin except `print_constr` and `print_status` (which take files); `&ps`; `time`; `echo` | printing | — | none (output logged at INFO) |
 
-Agent defaults: the `print_*` set as listed, and `&ps` as the `&`-space print. Per command, options
-whose value is a file or a string are refused too (AB-21 step 9).
+Agent defaults: the `print_*` set as listed, and `&ps` as the `&`-space print. Per command, the
+options that read or write a file, or take a string, are refused too (AB-21 step 9): `print_stats`
+`-b -d`, `rewrite -x`, `resub -P -D`, `scorr -P -e -f`, `if -S -J -f`, `&if -S -J` and `&ps -D`.
+
+> *(Erratum, 3D Task 10 review C1, 2026-10-12: the option list grew from `-S -J` of `if`/`&if` and
+> `&ps -D`. Each allowed command's options were read at the pin, and each was also run once in an
+> empty directory; the Task 10 report has the audit.)*
 
 Refused, among others:
 
