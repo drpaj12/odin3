@@ -7,9 +7,9 @@
   % ---- the main row ------------------------------------------------------------------------
   \node[box, neutral, text width=15mm, minimum height=12mm] (vf) at (0.95, 0)
        {Verilog-2005\\files\\[-1pt]\odinsub{preprocessed, 2B}};
-  \node[store, inprog, text width=14mm, minimum height=14mm] (ps) at (2.95, 0)
+  \node[store, built, text width=14mm, minimum height=14mm] (ps) at (2.95, 0)
        {parsed\\store\\[-1pt]\odinsub{form \odintt{PARSED}}\\[-2pt]\odinsub{2C}};
-  \node[stage, spec] (s1) at (5.84, 0)
+  \node[stage, inprog] (s1) at (5.84, 0)
        {\textbf{stage 1} (Verilog only)\\[1pt]
         \scriptsize module lookup, top selection\\
         \scriptsize \odintt{\#()}, \odintt{defparam}, project params\\
@@ -38,7 +38,7 @@
        {\odintt{odin3\_ast\_check}, rule 7\\\odinsub{enforces the elaborated subset}};
   \node[box, planned, text width=36mm] (sl) at (9.81, -2.35)
        {slang adapter (C++)\\\odinsub{\odintt{odin3\_ast\_*} builders; Phase 5}};
-  \node[box, inprog, text width=19.5mm] (rt) at (16.94, -2.35)
+  \node[box, built, text width=19.5mm] (rt) at (16.94, -2.35)
        {\odintt{write\_rtlil}\\\odinsub{2D-1}};
   \node[box, external, text width=28mm] (yo) at (13.6, -2.35)
        {Yosys 0.55 (Parmys's)\\\odinsub{equivalence oracle}};

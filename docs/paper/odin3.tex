@@ -1,14 +1,15 @@
 % Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
-% from the repository's docs (DESIGN.md, IR.md, PHASE0-3.md, specs/) as of 2026-10-11; gaps are
-% marked with \todo{}.
+% from the repository's docs (DESIGN.md, IR.md, PHASE0-3.md, specs/) and git log as of
+% 2026-10-12; gaps are marked with \todo{}.
 \documentclass[conference]{IEEEtran}
 
 \usepackage{cite}
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{url}
 \usepackage{listings}
 \usepackage{tikz}
@@ -47,13 +48,18 @@ which every node, net and wire carries a provenance record, and it is planned to
 architecture-driven partial mapping, link ABC for soft logic, and write netlists for the VTR
 flow, for Intel/Altera devices and for visualisation. The core is structured C17 behind a
 stable C ABI, with no recursion, explicit resource caps and out-of-memory-safe operations, and
-it was built by an AI coding agent under human architectural control, specification first and
+it was built by AI coding agents under human architectural control, specification first and
 against external oracles. This paper describes the architecture, the feature set, and the
 internal data structures (ID-based paged netlist storage, a lineage DAG for provenance, a
 Clang-style source manager, a 24-byte AST record), and explains how and why the design departs
-from Yosys and Odin~II. Phase~1 (core IR, BLIF round trip, simulator, writers, C ABI) is
-complete and was validated on 1,846 golden netlists; Phase~2 (the Verilog-2005 front end) is
-under way, and the Phase~3 back end (ABC and the VTR flow) is decided.
+from Yosys and Odin~II, including its split of ABC into a vetted in-process default and
+sandboxed user scripts. Phase~1 (core IR, BLIF round trip, simulator, writers, C ABI) is
+complete and was validated on 1,846 golden netlists. In Phase~2 the conflict-free LALR(1)
+Verilog-2005 parser reads all 64 VTR and Koios benchmarks, and the \code{proc} pass mirrors
+Yosys~0.55 except where Yosys gives wrong logic; elaboration is under way. In Phase~3 the
+\code{\$lut} cell, the VPR-ready BLIF writer, the ABC script checker and a QoR harness are
+built, and the harness has reproduced VTR's Parmys baseline on 21 designs to within 0.5\% in
+geometric mean.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -76,7 +82,7 @@ drive the design (DESIGN \S1): \emph{forward synthesis}, a Parmys/Odin~II-class 
 flexible, subgraph-based hard-block inference (multipliers, memories, DSP/MAC and eventually
 tensor tiles); \emph{reverse engineering}, reading flat netlists and raising them back to
 word-level structure; and \emph{agentic construction}, the project as a case study in building a
-Yosys-class tool with an AI coding agent~\cite{claudecode} under human architectural control.
+Yosys-class tool with AI coding agents~\cite{claudecode} under human architectural control.
 The first two share one engine, a VF2-style~\cite{cordella2004vf2} subgraph matcher run forward (bind cells to hard blocks) or
 backward (raise bit-level cones to word-level cells).
 
@@ -94,11 +100,12 @@ The contributions of this paper are:
   agent-driven method (Sec.~\ref{sec:method}).
 \end{itemize}
 
-Odin III is young. Phase~1 is complete; Phase~2 has its project readers and preprocessor built,
-its parser and the first parts of elaboration in progress, and its process and optimisation
-passes specified; Phase~3's plan is approved (Sec.~\ref{sec:status}). Quality-of-results numbers
-await Phase~3 \todo{Phase 3 QoR against Parmys on the VTR benchmarks}; this paper reports
-the architecture and the measurements that exist.
+Odin III is young. Phase~1 is complete; Phase~2 has its project readers, preprocessor and
+parser built, the \code{proc} pass merged, elaboration in progress and \code{opt} specified;
+Phase~3 has its linked-ABC, VPR-BLIF and QoR-harness sub-projects under way, with the
+architect's rulings on how ABC runs (Sec.~\ref{sec:status}). Odin III's own quality-of-results
+numbers await the end of Phase~3; this paper reports the architecture and the measurements that exist, including the
+Parmys baseline that comparison will use.
 
 % ------------------------------------------------------------------------------------------
 \section{Background}
@@ -130,10 +137,11 @@ SystemVerilog compiler that Odin III will use through an adapter.
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_pipeline}}
-\caption{The Odin III pipeline and its status on 2026-10-11. Built: merged on the main branch;
-in progress: being implemented (the 2C parser, and 2D-1's IR changes and 2D-2's constant
-evaluator); specified: approved specification and plan; planned: Phases 3--7 (Phase~3's plan is
-approved). Every step inside the core is a pass registered with the pass manager, which runs
+\caption{The Odin III pipeline and its status on 2026-10-12. Built: merged on the main branch;
+in progress: being implemented (2D's stage~1, the \code{proc} pass, whose phases are merged
+and whose end-to-end evidence waits for 2D's processes, linked ABC and \code{write\_blif
+--vtr}); specified: approved specification and plan; planned: later sub-projects and phases
+(Phase~3's plan is approved). Every step inside the core is a pass registered with the pass manager, which runs
 \code{check} before and after each pass in Debug builds. The elaborated AST is the seam where the
 slang adapter enters; Phase~4's \code{partial\_map} replaces Phase~3's fixed \code{hardmap}.}
 \label{fig:pipeline}
@@ -160,9 +168,11 @@ checker, the simulator and the matcher therefore exist once.
 
 Every reader, writer and transformation is a pass. Running a pass opens a provenance pass run,
 runs the full structural \code{check} before and after it in Debug builds (or with
-\code{--check} in Release), times it and logs it (1D spec). Under the 2D specification a pass
-also declares whether it handles processes (refusal is the default), so \code{opt} cannot run
-on a design that still holds \code{\$proc} cells (EL-33).
+\code{--check} in Release), times it and logs it (1D spec). Since 2D-1 a pass also declares
+whether it handles processes, and refusal is the default (EL-33). The eight \code{opt} passes
+accept them and treat \code{\$proc} as opaque, so Parmys's pre-\code{proc} optimisations run in
+Parmys's order (``mode~P''; the order changes netlists: 812 against 792 cells on
+\code{stereovision3}); every other pass refuses a design that still holds \code{\$proc} cells.
 
 \subsection{Project input}
 
@@ -240,52 +250,156 @@ every IR invariant, driver query and fanout walk holds unchanged; a first design
 nets by ID without pins was rejected in review because it broke the ``every driver is a pin''
 rule.
 
+\subsection{Parsing}
+
+The parser (2C; PHASE2 \#10, \#15) keeps Odin~II's Bison/Flex lineage but not its grammar. A
+reentrant Flex lexer reads the preprocessor's stream, and a pure LALR(1) Bison grammar
+(\code{\%expect 0}, no \code{\%expect-rr}) has no reported conflicts in its 947 states. The
+conflicts that Bison resolves by precedence must equal a committed allowlist (731 lines: the
+operator pairs and the dangling \code{else}), so a grammar change cannot silently add one.
+Precedence follows IEEE~1364 Table~5-4, and every binary operator is left-associative,
+\code{**} included, as in Yosys (Odin~II makes \code{**} right-associative). Error recovery
+resynchronises at \code{;} and \code{endmodule}, and stops after 20 errors. The Bison and Flex
+output is generated at build time, never committed, and compiled inside the core under one
+per-file warning flag.
+
+Each parse is checked twice. \code{odin3-parse-check} runs a \emph{location oracle}: every
+node's first token must spell the node, its range must end on a token end, and children must
+lie inside their parents. It also prints the tree, parses the text again and requires equal
+trees. Two independent generators of input go further. A libFuzzer target feeds raw bytes and
+token streams with allocation failures injected and every cap lowered, and requires either a
+clean tree or 1--20 located errors; about 62,000 raw-mode runs found one bug, a backslash before
+a NUL byte in a string, now fixed. A random-module generator covers the coverage audit's
+required and recommended rows. It prints with minimal parentheses from its own copy of
+Table~5-4 and dumps its own tree, so it is an oracle independent of the parser. Each seed is
+classified against Yosys~0.55, and Odin III must reproduce the generator's tree (200 seeds in
+CTest).
+
+\subsection{Processes: \code{proc}}
+
+\begin{figure}[t]
+\centering
+\odinfit{\columnwidth}{\input{IMAGE/fig_proc}}
+\caption{The \code{proc} pass (2E spec \S2): Yosys~0.55's \code{proc -norom} sub-passes, as
+Parmys runs them, as phases of one pass in Yosys's order. Each box shows 2E's phase, the
+Yosys sub-pass it mirrors, and what it does. Step~A changes nothing; a module is lowered only if
+none of its processes has an error, so it is lowered completely or not at all. The phases are
+merged (2E-1 to 2E-3); the trailing \code{opt\_expr} is 2F's (specified).}
+\label{fig:proc}
+\end{figure}
+
+\code{proc} (2E) turns \code{\$proc} cells into mux trees, latches and flip-flops by
+re-implementing Yosys~0.55's \code{proc\_*} sub-passes in C (Fig.~\ref{fig:proc}). Each
+process is decoded into a working form over the module's nets. The decision-tree phases
+(\code{clean}, \code{rmdead}, \code{prune}, \code{arst}) and a clock pre-check run on every
+process of a module before the IR changes; then \code{mux}, \code{latch} and \code{ff} lower
+it. The flip-flop phase targets eleven word-level flip-flop and latch cells added with Yosys's
+simlib ports (\code{\$adffe} to \code{\$sr}; IR change~D). Every walk that Yosys writes
+recursively is an explicit stack, and every unit-test expectation was re-derived by running
+Yosys~0.55's sub-passes up to the same phase. \code{proc-diff} gives both tools the same RTLIL
+and compares their netlists.
+
+The 2E specification declares 19 divergences from Yosys~0.55 (\S20). Most are for robustness or
+determinism. Yosys recurses until its stack overflows on a combinational cycle, and 2E stops
+after 1,024 hops or treats the cycle as no feedback. 2E memoises the latch walk, which is
+exponential in Yosys on shared cones. It caps pattern pools, and it visits processes in node-ID
+order. One divergence is a correctness fix (\S20 \#18, Sec.~\ref{sec:compare}).
+
+\subsection{The back end: linked ABC and VPR-ready BLIF}
+
+Phase~3 takes bit-level IR through ABC to a BLIF file that VPR places and routes (PHASE3).
+ABC's LUTs return as one new registry cell, \code{\$lut}, with Yosys's semantics: \code{WIDTH}
+from 1 to 16, a \code{LUT} parameter of exactly $2^{\mathit{WIDTH}}$ bits, and
+$Y = \mathit{LUT}[\sum_j A_j 2^j]$. It was added first and alone (3D-1), as every IR change
+is. The BLIF writers emit it as a \code{.names} cover: the shorter of the on-set and off-set
+irredundant sum of products (Minato--Morreale ISOP), the on-set on a tie (3E-5). Each
+\code{abc} run records its arguments and run information in the pass-run table, including the
+script's path and SHA-256, and \code{write\_blif --vtr} prints them as \code{\# abc:} header
+lines (3D-3). The ABC script can come from the project (\code{abc\_script}) or from
+\code{--abc-script} (3D-6).
+
+ABC is linked through an adapter, \code{libodin3\_abc.so} (3D spec AB-6; PR 3D-2, in progress,
+merges once the trap below replaces an interim \code{raise(SIGKILL)}), which links ABC's
+objects with \code{-Wl,--wrap} for \code{exit}, \code{\_exit}, \code{abort},
+\code{\_\_assert\_fail}, \code{system}, \code{popen}, \code{fork}, the \code{exec} calls and
+\code{signal}, and exports two symbols. On the session thread an escape \code{longjmp}s to a
+\code{setjmp} guard, so the run fails and \code{odin3} continues. ABC starts threads in 18
+files, and an escape on any other thread prints one line and stops the process with
+\code{\_\_builtin\_trap()}; its exit status, SIGILL (132), cannot be confused with an
+out-of-memory kill (137) (PHASE3 \#28). The process-control wrappers refuse with
+\code{EPERM}. The wraps do not catch \code{std::terminate}, glibc's fatal paths or signals such
+as the SIGSEGV of an unchecked ABC allocation; the specification lists those.
+
+\code{write\_blif --vtr} (3E) writes the top module as BLIF that VPR reads with
+\code{-start vpr} and that VTR's ABC stage reads with \code{-start abc}. A preflight refuses,
+with a located error and before any byte is written, every construct that VPR would reject or
+misread. The plain writer now writes constants as Parmys does, as \code{gnd}, \code{vcc} and
+\code{unconn} generators, and only those a module uses. \code{blif-vtr-check}, a VPR-free
+checker in Python's standard library, mirrors VPR's BLIF lexer and its \code{read\_blif}
+checks, so CI gets VPR's verdicts without building VTR. \code{vtr-qor} (3H) runs Odin III and
+Parmys through VTR's own flow, collects VTR's metrics, and renders the table and gate of the
+Phase~3 exit (Sec.~\ref{sec:status}).
+
 % ------------------------------------------------------------------------------------------
 \section{Features}
 \label{sec:features}
 
-Table~\ref{tab:features} lists the features and their status on 2026-10-11. ``Built'' means
+Table~\ref{tab:features} lists the features and their status on 2026-10-12. ``Built'' means
 merged on the main branch with its exit test; ``in progress'' means being implemented against an
 approved plan, not yet merged; ``specified'' means an approved specification and implementation
 plan; ``planned'' means scheduled in a later phase (DESIGN \S12). The figures use the same four
 states.
 
 \begin{table*}[t]
-\caption{Odin III features and status (2026-10-11)}
+\caption{Odin III features and status (2026-10-12)}
 \label{tab:features}
 \centering
 \footnotesize
-\begin{tabular}{@{}p{0.20\textwidth}p{0.57\textwidth}p{0.16\textwidth}@{}}
+\begin{tabular}{@{}p{0.15\textwidth}p{0.57\textwidth}>{\raggedright\arraybackslash}p{0.21\textwidth}@{}}
 \toprule
 Area & Feature & Status \\
 \midrule
 Core containers & arena, vec, pagevec, u64map, idindex, strtab/strbuf, log; OOM injection hook & built (1A) \\
 IR & ID-based paged netlist; ports as nodes; constants as cells; wires as names with aliases;
   \code{check} (11 rules); \code{compact} with tombstones & built (1B) \\
-Op registry & 53 built-in cell types with Yosys names; verify, const, simulate and writer hooks;
-  plugin registration & built (1B, 1E) \\
+Op registry & 75 built-in cell types with Yosys names; verify, const, simulate and writer hooks;
+  plugin registration & built (1B, 1E, 2D-1, 2E-1, 3D-1) \\
 Provenance & lineage DAG on every node, net and wire; backward walk; forward index by
   \code{file:line}; provenance names in output & built (1B) \\
 Tech library & \code{.o3lib} format: gates and hard cells, parametric widths, functions as
   expressions; generic gate and VTR libraries & built (1G) \\
-Netlist I/O & BLIF reader/writer (VTR dialect, black boxes, Yosys \code{.cname/.attr/.param}) & built (1C) \\
-Writers & Yosys-schema JSON, structural Verilog, Graphviz dot with focus and node budget & built (1F) \\
+Netlist I/O & BLIF reader/writer (VTR dialect, black boxes, Yosys \code{.cname/.attr/.param});
+  Parmys-style constants; \code{\$lut} as an irredundant cover & built (1C, 3E-3, 3E-5) \\
+Writers & Yosys-schema JSON, structural Verilog, Graphviz dot with focus and node budget;
+  RTLIL to Yosys~0.55 & built (1F, 2D-1) \\
 Simulator & cycle-based, event-free, 2-state; hard cells through their library functions & built (1E) \\
-C ABI, plugins & \code{odin3.h} ABI v4 (125 functions); \code{.so} plugins; Python via cffi;
-  pass manager and script CLI & built (1D, 2A) \\
+C ABI, plugins & \code{odin3.h} ABI v4 (129 functions); \code{.so} plugins; Python via cffi;
+  pass manager and script CLI; pass-run arguments and run information, SHA-256 & built (1D, 2A,
+  3D-3) \\
 Project input & \code{.o3proj}, \code{-f}/\code{-F} lists, Quartus \code{.qpf/.qsf/.qip}, Odin~II
-  XML; \code{read\_project}, \code{dump\_project} & built (2B) \\
+  XML; \code{read\_project}, \code{dump\_project}; \code{abc\_script}, \code{--abc-script} &
+  built (2B, 3D-6) \\
 Preprocessor & Verilog-2005 macros, conditionals, includes, \code{translate\_off}; segment map
   with macro and include chains; 16 caps & built (2B) \\
 Source manager, AST & Clang-style locations; 24-byte node record, 68 kinds; symbol table;
   printer; structural check & built (2A) \\
-Parser & reentrant Flex lexer, pure LALR(1) Bison grammar, \code{\%expect 0}; grammar complete
-  except generate, instantiation and gates & in progress (2C) \\
-Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{write\_rtlil} & in
-  progress (2D-1 IR, 2D-2 constants); rest specified \\
-\code{proc}, \code{opt} & processes to mux trees and \code{\$dff*}; folding, dead nodes, CSE & specified (2E, 2F) \\
-Back end & \code{flatten}, \code{lower}, fixed \code{hardmap}, linked ABC, \code{write\_blif --vtr},
-  VTR flow hookup & planned (Phase 3; plan approved) \\
+Parser & reentrant Flex lexer, pure LALR(1) Bison grammar with 0 conflicts; \code{read\_verilog},
+  \code{odin3-parse-check} with a location oracle; libFuzzer target; generator with its own tree
+  oracle & built (2C) \\
+Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{write\_rtlil}; IR
+  changes and constant evaluator built; stage~1 (hierarchy, parameters, instances, binder) &
+  built (2D-1, 2D-2); in progress (2D-3); rest specified \\
+\code{proc} & Yosys~0.55 \code{proc -norom} phases; mux trees, latches, eleven flip-flop cells;
+  \code{proc-diff} & in progress (2E-1 to 2E-3 merged; evidence open) \\
+\code{opt} & folding, dead nodes, CSE (Yosys~0.55 \code{opt} family, mode~P) & specified (2F) \\
+Linked ABC & \code{\$lut} cell; run records; script checker; adapter with escape guard;
+  \code{abc} pass; in-memory exchange & in progress (3D-0, 3D-1, 3D-3, 3D-4, 3D-6 merged) \\
+VPR BLIF & \code{write\_blif --vtr} with preflight; \code{blif-vtr-check}; arch models &
+  in progress (3E-1, 3E-2, 3E-3, 3E-5 merged) \\
+QoR harness & \code{vtr-qor}: legs, heavy-run scheduling, VTR metrics, table and gate; Parmys
+  baseline & in progress (3H-1, 3H-2 merged) \\
+Rest of Phase~3 & \code{flatten}, \code{lower}, fixed \code{hardmap}, \code{wreduce}, VTR flow
+  hookup & planned (plan approved) \\
 Mapping & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & planned (Phase 4) \\
 Other languages & slang adapter (SV), GHDL path (VHDL) & planned (Phase 5) \\
 Reverse engineering & \code{raise}, VQM/EDIF readers, Altera \code{bind}, Titan & planned (Phase 6) \\
@@ -391,10 +505,11 @@ compiled expression supplied by the tech library), parameters with defaults, and
 be NULL: \code{verify}, \code{const\_value} (one predicate for ``is this net constant''),
 \code{simulate} with its scratch-sizing hook, and writer hooks. Simulation flags distinguish
 edge-triggered storage, which cuts the simulator's combinational graph, from level latches, which
-do not. 53 types are built in: ports, constants, the BLIF \code{\$sop} cover and latch family,
-bit gates, and the word set (\code{\$add}, \ldots, \code{\$pmux}, \code{\$dff}, \code{\$mem},
-\code{\$reduce\_*}); the 2D specification adds nine Yosys simlib cells and \code{\$proc}. Plugins register types
-at load time. Each module instantiates as a cell type of granularity \code{module} whose ports
+do not. 75 types are built in. Phase~1 brought 53: ports, constants, the BLIF \code{\$sop} cover
+and latch family, bit gates, and the word set (\code{\$add}, \ldots, \code{\$pmux},
+\code{\$dff}, \code{\$mem}, \code{\$reduce\_*}). 2D-1 added nine Yosys simlib cells and
+\code{\$proc}, 2E-1 eleven flip-flop and latch cells, and 3D-1 \code{\$lut}. The table is
+append-only, so a built-in type's index never changes. Plugins register types at load time. Each module instantiates as a cell type of granularity \code{module} whose ports
 mirror its port nodes, and each parameter specialisation is its own module (IR-7).
 
 \subsection{Provenance}
@@ -554,7 +669,7 @@ ABI can hand them out safely and the IR serialises trivially.
 
 \begin{table}[t]
 \caption{Selected resource caps (named constants, each a located error with a test). The
-parser and elaboration caps belong to work in progress (2C, 2D), the others are built.}
+loop caps belong to elaboration (2D, in progress); the others are built.}
 \label{tab:caps}
 \centering
 \footnotesize
@@ -571,7 +686,9 @@ Preprocessed stream & $2^{28}$ B \\
 Parser stack (\code{YYMAXDEPTH}) & 262,144 \\
 Errors per run (parser, elaboration) & 20 \\
 Loop iterations: one / all & $2^{20}$ / $2^{24}$ \\
-Elaboration byte budget & 60\% of physical memory \\
+Byte budget (elaboration, \code{proc}) & 60\% of physical memory \\
+\code{proc} pattern pool / reset rounds & $2^{24}$ bits / 100 \\
+ABC script numbers / LUT inputs $K$ & $0..10^6$ / ${\le}\,12$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -613,8 +730,9 @@ Resource limits & implicit & implicit & named caps; OOM is a status \\
 Input & command line, XML config & scripts, command line & project record: \code{.o3proj},
   \code{-f}, Quartus; includes architecture and mapping rules \\
 Architecture & VPR XML hard blocks & Parmys reads VPR XML & \code{.o3lib} (VPR XML import planned) \\
-ABC & separate step in the VTR flow & external process with a script & linked \code{libabc}
-  (planned); project-chosen script \\
+ABC & separate step in the VTR flow & external process with a script & default script in a
+  linked \code{libabc}; other scripts checked, then run in a capped child process; script
+  SHA-256 recorded \\
 SV / VHDL & no & yosys-slang, GHDL plugins & slang adapter at the seam; GHDL (planned) \\
 Simulator & yes & \code{sim}, \code{eval}, SAT-based passes & yes, registry semantics \\
 Extension & source changes & C++ passes and plugins & C ABI \code{.so}, Python cffi \\
@@ -667,22 +785,55 @@ reproducibility: sources, defines, top and parameters, the architecture with its
 research overrides, the mapping rules, and the flow. The architect's decision for Phase~3 extends
 this to ABC: the project file names the ABC script (\code{abc\_script <file>} in
 \code{.o3proj}), \code{--abc-script} on the command line overrides it, and the \code{abc} pass
-records the script's path and SHA-256 in provenance, so a soft-logic experiment is recorded with
-the design rather than in a wrapper script. ABC is linked rather than
-spawned (ADR D3: its permissive license allows linking into the MIT core), and the \code{abc}
-pass will hand it the soft-logic cone with black boxes preserved and stitch the result back.
+records the script's path and SHA-256 in its run record, so a soft-logic experiment is recorded
+with the design rather than in a wrapper script.
+
+\emph{Linked ABC for the vetted script, a sandbox for the rest.} Yosys's \code{abc} pass writes
+the netlist to a per-run temporary directory and runs ABC on it, in a child process or, in builds
+with ABC linked, in-process; VTR runs ABC as a separate flow step. ADR~D3 links ABC instead (its permissive license allows linking into the MIT core),
+so the \code{abc} pass can hand ABC the soft-logic cone in memory, keep black boxes and
+provenance, and stitch the LUTs back. The 3D-0 spike gave a go for the in-memory exchange
+(MiniAIG in, MiniLUT out) on two micros, a hand-made \code{scorr} input and five Parmys goldens:
+every LUT had at most six inputs, \code{dsec} proved each result equivalent, every register name
+mapped back (0 state mismatches in a 256-cycle lockstep simulation), 1,000 runs in one process
+gave identical results with no leaked bytes, and two processes gave the same hash (PHASE3
+\#22). Linking has a price that a child process does not: ABC calls \code{exit} and
+\code{abort}, asserts, and dies on some options, and in-process it takes the IR with it. The
+script checker (3D-4) therefore parses every script against an allow-list built from ABC's
+sources at the pin, with its 112 aliases, and refuses file, process and latch commands and a
+fourth class: options that crash the pinned ABC. Its audit is the finding that decided the
+design (PHASE3 \#27). About 70,000 runs of the pinned \code{abc} over six rounds did not
+converge. Every round that tried new design shapes, $K$ values or option values found new crash
+classes, because ABC's asserts and unchecked allocations depend on the design as much as on the
+options. The guard catches an assertion only on the session thread, nothing in a Release
+\code{libabc}, and no runaway output (\code{print\_kmap} on a 20-input node prints $2^{20}$ cells).
+The architect's ruling (PHASE3 \#28) splits the difference. The built-in default script, the
+eight logic commands VTR's ABC stage runs every day, runs in-process through the linked engine.
+Any other script, from \code{abc --script}, \code{--abc-script} or the project, still passes the
+checker and then runs in a child \code{abc} process with a wall-clock limit and an output cap,
+and a crash or timeout there fails that run, not \code{odin3}. The checker, the SHA-256 identity
+and the run record are the same on both paths. Odin III thus keeps linking where it is safe and
+measured, and pays for isolation only where the input is untrusted.
 
 \emph{Yosys~0.55 semantics as the oracle, with declared divergences.} Rather than reinterpret
 IEEE~1364-2005~\cite{ieee1364} independently, Odin III adopts the semantics of the Yosys inside
 Parmys (0.55) as its oracle for literal sizing, widths and signedness, parameter precedence and
 process generation, and checks against it through \code{write\_rtlil} and equivalence checking.
-Where it differs, the difference is declared and tested: the 2D specification lists 23
+Where it differs, the difference is declared and tested: the 2D specification lists 24
 divergences (for example, automatic top selection requires a single uninstantiated module,
 \code{\$readmem} files are never searched in the working directory, and unconnected inputs are
 driven by \code{x}), and the preprocessor declares its own (for example, directives inside
 macro text are errors, recursion is judged on the spelling ancestry, and includes never search
-the working directory). Odin~II is kept as a
-read-only reference: a coverage audit of 159 synthesizable Verilog-2005
+the working directory). Parity yields to correctness in one place so far (2E \S20 \#18,
+confirmed by the architect in PHASE2 \#16). When a \code{casez} group ends on a path that
+builds no cell, Yosys~0.55's \code{proc\_mux} keeps the mux open, and the next group's case
+appends to a mux that no longer reaches the result, so its value is lost. For
+\code{casez (s) 2\textquotesingle b00: y=x0; 2\textquotesingle b01: y=a; 2\textquotesingle b??: y=a; k: y=b;} Yosys gives $y = a$ where
+Verilog gives \code{x0} for $s = 00$. A \code{miter}/\code{sat} check finds the
+counterexample, Yosys's own \code{eval} of its netlist disagrees with the source, and Icarus
+gives Verilog's value. 2E ends the open mux and gives Verilog's value; \code{proc-diff} and an
+equivalence check against a Parmys golden flag such inputs, with 2E on the correct side.
+Odin~II is kept as a read-only reference: a coverage audit of 159 synthesizable Verilog-2005
 constructs~\cite{ieee13641} (100 required, 25 recommended, 10 ignored, 24 rejected) probed
 Odin~II and Yosys with about 340 one-module tests and found constructs Odin~II's grammar lacks
 (e.g.\ \code{casez}, attributes, ANSI function headers) and constructs it elaborates
@@ -695,7 +846,7 @@ processes---in one stage~2 that both the Verilog stage~1 and the slang adapter f
 Phase~5 test that three front ends give one netlist has one place to fail.
 
 \emph{Agentic, spec-first development with oracles.} Odin~II and Yosys grew through human
-contributions. Odin III is written by an AI coding agent under an architect's control, so its
+contributions. Odin III is written by AI coding agents under an architect's control, so its
 correctness evidence must come from outside the code: golden BLIFs from Parmys and Odin~II on
 two architectures (2,380 oracle runs: 1,846 succeeded, 522 failed and 12 hit the memory cap),
 \code{netlist-compare} (canonicalised identity), \code{equiv-check} (ABC \code{cec}/\code{dsec}),
@@ -716,21 +867,43 @@ own recommendations elsewhere, logging each as a default he may override. Exit t
 ran over every successful golden, the simulator was compared cycle by cycle with Icarus running
 an independent dump of the same netlist, and the writers were validated through Yosys.
 
-Cost is logged from the agent's transcripts (\code{docs/log\_cost\_of\_tokens\_and\_time.md}).
-From 2026-10-08 to 2026-10-11 (60.2\,h wall clock, 27.0\,h active), 9,115 API requests used
-1.99 billion tokens, 96\% of them prompt-cache reads, across 6 main sessions and 201 subagent
-runs, mostly with Claude Opus~5.5. \todo{update the token log at submission time}
+Review is layered. A controller agent owns git and dispatches each plan task to an implementer
+agent, which may not dispatch agents of its own. A fresh reviewer then reads the task's diff and
+reports findings graded critical, important or minor; the implementer fixes them in numbered
+fix rounds, and an important finding gets a re-review. Before a pull request opens, a
+whole-branch review reads the entire branch against its specification and plan, on a different
+model (Fable) where one is available, else Opus at extra-high effort. The spec reviews were graded the same way; the 2D
+specification's first review, for example, raised 2 critical, 10 important and 17 minor
+findings, all applied before approval (PHASE2 \#13). Commit messages name each round and the
+findings it answers, so the history records why each fix was made.
+
+Several agents share one 24\,GB WSL virtual machine, and an out-of-memory condition there kills
+the whole machine (PHASE0 \#29). Every heavy job (a benchmark sweep, a long fuzz run, VPR)
+therefore goes through \code{tools/heavy-run}: a machine-wide lock admits one heavy job at a
+time, and the job runs in a systemd slice capped at 6\,GiB with no swap (9\,GiB for the few
+jobs that need it), so a runaway job is killed alone. Nesting is decided from the job's cgroup
+and the inherited lock descriptor, never from environment variables alone, because a review
+found that a leaked variable could let a job run uncapped. Sweeps are CTests registered so that \code{heavy-run}
+alone decides whether they may run.
+
+Cost is logged from the agents' transcripts (\code{docs/log\_cost\_of\_tokens\_and\_time.md}).
+From 2026-10-08 16:15 to 2026-10-11 19:29 UTC (75.2\,h wall clock, 30.4\,h active), 10,922 API
+requests used 2.47 billion tokens, 96\% of them prompt-cache reads, across 6 main sessions and
+227 subagent runs: 9,198 requests to Claude Opus~5.5, 1,088 to Sonnet~5.5, 618 to Fable~5.1 and
+18 to Haiku~5.5. \todo{regenerate the token log to cover 2026-10-12 and later at submission
+time}
 
 % ------------------------------------------------------------------------------------------
 \section{Status and Roadmap}
 \label{sec:status}
 
 \begin{table*}[t]
-\caption{Development phases (DESIGN \S12) and status on 2026-10-11}
+\caption{Development phases (DESIGN \S12) and status on 2026-10-12}
 \label{tab:phases}
 \centering
 \footnotesize
-\begin{tabular}{@{}p{0.03\textwidth}p{0.36\textwidth}p{0.36\textwidth}p{0.18\textwidth}@{}}
+\begin{tabular}{@{}p{0.03\textwidth}>{\raggedright\arraybackslash}p{0.36\textwidth}%
+  >{\raggedright\arraybackslash}p{0.36\textwidth}>{\raggedright\arraybackslash}p{0.18\textwidth}@{}}
 \toprule
 Ph. & Deliverable & Exit test & Status \\
 \midrule
@@ -741,10 +914,10 @@ Ph. & Deliverable & Exit test & Status \\
   matches ABC; a Python plugin walks the IR & done \\
 2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
   micros identical or equivalent to Parmys; every project fixture parses and elaborates from each
-  format & 2A, 2B built; 2C, 2D in progress; 2E, 2F specified \\
+  format & 2A, 2B, 2C built; 2D, 2E in progress; 2F specified \\
 3 & \code{flatten}, \code{lower}, fixed \code{hardmap}, linked ABC, \code{write\_blif --vtr}, VTR
-  flow hookup & the 19 VTR~7.0 benchmarks through place and route; QoR table against Parmys &
-  planned (plan approved) \\
+  flow hookup, QoR harness & the 19 VTR~7.0 benchmarks through place and route; QoR table
+  against Parmys & 3D, 3E, 3H in progress; rest planned \\
 4 & VPR-XML import, partial mapping, memory inference, carry chains, FSM, matcher v1 & QoR
   parity on an architecture sweep & planned \\
 5 & slang adapter, GHDL path & three front ends, one netlist & planned \\
@@ -771,34 +944,102 @@ Phase~2 has built the source manager, AST and symbol table (2A), and the project
 preprocessor (2B), whose differential check against Icarus and Yosys over 287 files gave 271
 agreements, 11 cases where the two oracles disagree (all as expected), 5 declared divergences and
 20 excluded files (headers read only through another micro), with no differences or crashes. The
-Odin~II XML reader (2B-4) completed project input. The parser (2C) is in progress, with its
-grammar complete except generate constructs, instantiation and gates; elaboration (2D) is in
-progress with its IR changes and constant evaluator (2D-1, 2D-2); \code{proc} (2E) and
-\code{opt} (2F) are specified. 2D's targets are \code{mcml.v} in at most 0.5\,s and
-Koios \code{lenet.v} in at most 10\,s, against Yosys~0.55's measured 0.48\,s and 14.3\,s
-\todo{measured 2C parse-only and 2D elaboration results on mcml.v and lenet.v}
+Odin~II XML reader (2B-4) completed project input.
+
+The parser (2C) is built (PHASE2 \#15). Its sweeps run \code{odin3-parse-check}, with the
+location oracle and the print and re-parse round trip, on every file, smallest first. Of 539
+micros, 489 pass and 50 are expected failures, each listed with its reason, and each also
+rejected by Parmys; there are no unexpected failures. All 64 VTR and Koios benchmarks pass, in
+7.5\,s. Writing the 1,846 golden BLIFs as Verilog and parsing them back succeeds on 1,840; the
+other 6 are 317\,MB to 2.1\,GB of Verilog and stop at the source-file cap, by design. Parsing
+\code{mcml.v} (650,837 bytes, 78,229 nodes) takes 0.020\,s, and its AST and source manager take
+4.56\,MB (targets 1\,s and 20\,MB); the 31 VTR files take 0.085\,s in total. Koios
+\code{lenet.v} (11\,MB, 919,695 nodes) reads in 0.221\,s at 75,416\,KiB peak RSS. The parser
+declares its divergences: it is stricter than Parmys's \code{read\_verilog -sv} on forms
+outside Verilog-2005 (SystemVerilog named-argument calls and \code{.*}, a \code{casez}
+generate) and more lenient on \code{macromodule}, which Yosys lacks. The architect has ruled that a stray \code{;} module item be accepted
+with a warning, as Yosys and Icarus accept it (PHASE2 \#16).
+
+Elaboration (2D) has its IR changes (2D-1) and constant evaluator (2D-2) built, and stage~1
+(hierarchy, parameters, instances and the binder; 2D-3) is in progress. The \code{proc} pass
+(2E) is merged through its lowering phases (2E-1 to 2E-3) with \code{proc-diff}; its
+end-to-end evidence waits for 2D's processes (2D-6). On random processes, the mux phase gave
+netlists identical to Yosys~0.55's on 547, and the other 6 made Yosys fail an assertion
+(\code{ctrl\_sig.size() == 1}) on valid input that 2E lowers (\S20 \#17). The review of the
+open-mux fix (\S20 \#18) found 2E byte-identical to Yosys on 319 of 330 random processes, in the
+same normal form on 4 more, and \code{sat}-equivalent on all 323 that Yosys lowers.
+\code{opt} (2F) is specified. 2D's targets are \code{mcml.v} in at most 0.5\,s and Koios
+\code{lenet.v} in at most 10\,s, against Yosys~0.55's measured 0.48\,s and 14.3\,s
+\todo{measured 2D elaboration results on mcml.v and lenet.v}
 \todo{Phase 2 exit-test results against Parmys}.
 
-Phase~3's plan and its twenty decisions are approved (PHASE3). Its exit test runs the 19 VTR~7.0
-benchmarks on \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm} with Odin III alone producing
-each netlist (\code{proc}, \code{opt}, \code{flatten}, \code{wreduce}, a fixed \code{hardmap}
-that copies Parmys's defaults, \code{lower}, linked ABC, \code{write\_blif --vtr}), routes them
-with VPR, passes VTR's functional check, and reports a QoR table against the Parmys flow with a
-loose gate: a geomean ratio of at most 1.20, and no design above 1.50, on CLB count, channel
-width, critical-path delay and routed wirelength.
+\begin{table}[t]
+\caption{The first Parmys baseline (leg P) through \code{vtr-qor} on
+\code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}, against VTR's golden results (PHASE3 \#25)}
+\label{tab:qor}
+\centering
+\footnotesize
+\begin{tabular}{@{}lr@{}}
+\toprule
+Measure & Value \\
+\midrule
+Jobs with \code{vpr\_status=success} & 21 of 21 \\
+Wall time, 18 jobs (3 reused from cache) & 1\,h 08\,m 46\,s \\
+Parmys BLIF byte-identical to the golden & 21 of 21 \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Geomean of P/golden over the 19 (the 2 extras: 1.000)}} \\
+CLBs (\code{num\_clb}) & 1.000 \\
+Minimum channel width $W$ & 0.995 \\
+Critical-path delay & 1.000 \\
+Routed wirelength & 1.001 \\
+Designs equal to the golden on all four & 16 of 19 \\
+\midrule
+\multicolumn{2}{@{}l}{\emph{Peak memory (\code{LU32PEEng}; ABC: \code{mcml})}} \\
+VPR & 2,264\,MiB \\
+Parmys & 1,186\,MiB \\
+VTR's ABC stage & 364\,MiB \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Phase~3's plan and its decisions 1--20 are approved; later entries record spike results,
+rulings and agent defaults (PHASE3). Its exit test runs the 19 VTR~7.0 benchmarks on
+\code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm} with Odin III alone producing each netlist
+(\code{proc}, \code{opt}, \code{flatten}, \code{wreduce}, a fixed \code{hardmap} that copies
+Parmys's defaults, \code{lower}, linked ABC, \code{write\_blif --vtr}), routes them with VPR,
+passes VTR's functional check, and reports a QoR table against the Parmys flow with a loose
+gate: a geomean ratio of at most 1.20, and no design above 1.50, on CLB count, channel width,
+critical-path delay and routed wirelength. The gate compares the decimals VTR prints exactly, so
+1.20 passes and 1.2001 fails.
+
+The harness's first run of the Parmys leg (Table~\ref{tab:qor}; PHASE3 \#25) routed all 21
+designs (the 19 plus \code{arm\_core} and \code{spree}, as VTR's \code{vtr\_reg\_qor\_chain}
+task runs them), with nothing capped or timed out. The 18 jobs it started took 1\,h 09\,m,
+against a planned 4 to 4.5\,h; the three smallest were reused from an earlier run. Its geomeans match VTR's golden results to within 0.5\%, and no metric is outside VTR's
+pass bands. The three designs that differ do so in channel width: \code{diffeq2} 68 against 58,
+\code{diffeq1} 50 against 62, and \code{LU8PEEng} 84 against 88. Peak VPR memory, 2,264\,MiB,
+is far below the 6\,GiB heavy-run cap. The architect has approved publishing the baseline to
+the golden repository and ruled out nightly QoR runs (PHASE3 \#28): the sweeps once planned for
+a nightly run go through \code{heavy-run}, started by hand, before the PRs that need them
+merge.
+\todo{Odin III (leg O) against this baseline once 3B, 3C and 3D-5 land}
 
 % ------------------------------------------------------------------------------------------
 \section{Conclusion}
 
 Odin III is a research front end designed around three needs that existing tools serve only in
 part: architecture and mapping rules carried with the design, lineage from every netlist object
-back to its source and through every transformation, and a core simple and checked enough for an
-AI agent to build and a human to review. Its IR keeps Odin~II's node/pin/net model in ID-based
+back to its source and through every transformation, and a core simple and checked enough for
+AI agents to build and a human to review. Its IR keeps Odin~II's node/pin/net model in ID-based
 paged storage; its front end follows Yosys's semantics, declaring every divergence; and its
 elaboration seam prepares one back half for Verilog and SystemVerilog alike. Phase~1 is complete
-and validated on 1,846 golden netlists. The next milestones are the parser, elaboration and the
-Phase~2 exit test against Parmys, then ABC and the VTR flow in Phase~3, where the first
-quality-of-results comparison will be made \todo{QoR summary once Phase 3 lands}.
+and validated on 1,846 golden netlists; the conflict-free parser reads every VTR and Koios
+benchmark; \code{proc} matches Yosys~0.55 except where Yosys~0.55 gives wrong logic; and ABC
+runs linked only for the vetted default script, with every other script isolated in a capped
+child process. The next milestones are elaboration and
+the Phase~2 exit test against Parmys, then \code{lower}, \code{hardmap} and the \code{abc}
+pass, which close the loop to VPR. The harness that will judge Odin III's quality of results
+already reproduces VTR's own Parmys baseline \todo{QoR summary once Phase 3 lands}.
 
 \section*{Acknowledgment}
 \todo{acknowledgments and funding}
