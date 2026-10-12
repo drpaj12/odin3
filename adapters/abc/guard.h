@@ -88,6 +88,13 @@ odin3_status odin3_guard_finish(odin3_status st, odin3_abc_fail *fail);
 /* *fail = {kind, 0, ""}; NULL is ignored. */
 void odin3_abc_fail_reset(odin3_abc_fail *fail, uint32_t kind);
 
+/*
+ * *fail = {kind, 0, <fmt formatted>} (cut to ODIN3_ABC_FAIL_TEXT_BYTES - 1 bytes); NULL is
+ * ignored. Returns ODIN3_ERR_ENGINE, so a failing check reads `return odin3_abc_fail_set(...)`.
+ */
+odin3_status odin3_abc_fail_set(odin3_abc_fail *fail, uint32_t kind, const char *fmt, ...)
+    __attribute__((format(printf, 3, 4)));
+
 /* --- the --wrap wrappers (§4.2; defined in guard.c, never called by the adapter itself) ------- */
 
 /* A signal handler, as signal() takes and returns it. */

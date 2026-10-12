@@ -376,19 +376,29 @@ if(ODIN3_WITH_ABC)
     if(ODIN3_SANITIZE AND CMAKE_C_COMPILER_ID MATCHES "Clang")
         set(_abc_zdefs "")
     endif()
-    add_library(odin3_abc SHARED ${ODIN3_ABC_ADAPTER_SOURCES})
-    set_target_properties(odin3_abc PROPERTIES
-        OUTPUT_NAME odin3_abc
-        C_VISIBILITY_PRESET hidden
-        LINKER_LANGUAGE CXX
-        LINK_DEPENDS ${PROJECT_SOURCE_DIR}/adapters/abc/exports.map)
-    target_compile_definitions(odin3_abc PRIVATE ${_abc_adapter_defs})
-    target_compile_options(odin3_abc PRIVATE ${_abc_adapter_copts})
-    target_link_libraries(odin3_abc PRIVATE libodin3 odin3_flags $<LINK_ONLY:libabc-pic>)
-    target_link_options(odin3_abc PRIVATE
-        -Wl,--exclude-libs,ALL
-        -Wl,--version-script=${PROJECT_SOURCE_DIR}/adapters/abc/exports.map
-        ${_abc_zdefs} ${ODIN3_ABC_WRAPS})
+    # One adapter library with §4.1-§4.2's properties and link options: odin3_abc, and the CLI's
+    # test variant (cli_abc_unavailable_warning). Extra arguments are compile definitions.
+    function(odin3_add_abc_adapter name)
+        add_library(${name} SHARED ${ODIN3_ABC_ADAPTER_SOURCES})
+        set_target_properties(${name} PROPERTIES
+            OUTPUT_NAME ${name}
+            C_VISIBILITY_PRESET hidden
+            LINKER_LANGUAGE CXX
+            LINK_DEPENDS ${PROJECT_SOURCE_DIR}/adapters/abc/exports.map)
+        target_compile_definitions(${name} PRIVATE ${_abc_adapter_defs} ${ARGN})
+        target_compile_options(${name} PRIVATE ${_abc_adapter_copts})
+        target_link_libraries(${name} PRIVATE libodin3 odin3_flags $<LINK_ONLY:libabc-pic>)
+        target_link_options(${name} PRIVATE
+            -Wl,--exclude-libs,ALL
+            -Wl,--version-script=${PROJECT_SOURCE_DIR}/adapters/abc/exports.map
+            ${_abc_zdefs} ${ODIN3_ABC_WRAPS})
+    endfunction()
+    odin3_add_abc_adapter(odin3_abc)
+    # The CLI links the adapter (P3-8) and registers its engine at start-up, before any --plugin
+    # (3D spec §4.3); --version names the commit (plan point (u)). libodin3 never links ABC.
+    target_link_libraries(odin3 PRIVATE odin3_abc)
+    target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+    target_compile_definitions(odin3 PRIVATE ${_abc_adapter_defs})
 endif()
 
 # --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
@@ -800,7 +810,12 @@ if(BUILD_TESTING)
         target_compile_definitions(test_abc_adapter PRIVATE ODIN3_ABC_TEST_HOOKS=1)
         target_link_libraries(test_abc_adapter PRIVATE odin3_abc_testlib libodin3 unity odin3_flags
                                                        $<LINK_ONLY:libabc-pic>)
-        target_link_options(test_abc_adapter PRIVATE ${ODIN3_ABC_WRAPS})
+        # 3D Task 6: pthread_create is wrapped with a counter here only (bridge.c's test hook;
+        # §9: the default script starts no thread). The 40-AND networks use odin3_prng.
+        target_link_options(test_abc_adapter PRIVATE ${ODIN3_ABC_WRAPS}
+                                                     -Wl,--wrap=pthread_create)
+        target_sources(test_abc_adapter PRIVATE src/sim/prng.c)
+        target_include_directories(test_abc_adapter PRIVATE ${PROJECT_SOURCE_DIR}/src)
         set_target_properties(test_abc_adapter PROPERTIES LINKER_LANGUAGE CXX)
         # A planted libabc_o3test.so, alone in its directory: ABC would dlopen it from the cwd or
         # $ABC_LIB_PATH at frame creation, and its constructor exits 9 (review finding C1).
@@ -937,6 +952,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
+    if(ODIN3_WITH_ABC)
+        # 3D Task 6: --version names the linked ABC; a CLI whose adapter cannot register (the
+        # test variant's abc_commit is refused) warns and runs on without it.
+        odin3_add_abc_adapter(odin3_abc_unavailable ODIN3_ABC_TEST_UNREGISTRABLE=1)
+        add_executable(odin3_abc_unavailable_cli src/cli/main.c)
+        target_link_libraries(odin3_abc_unavailable_cli PRIVATE libodin3 odin3_abc_unavailable
+                                                                odin3_flags)
+        target_include_directories(odin3_abc_unavailable_cli PRIVATE
+            ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(odin3_abc_unavailable_cli PRIVATE ODIN3_HAVE_ABC
+                                                                     ${_abc_adapter_defs})
+        foreach(_case IN ITEMS version_abc abc_unavailable_warning)
+            set(_cli $<TARGET_FILE:odin3>)
+            if(_case STREQUAL "abc_unavailable_warning")
+                set(_cli $<TARGET_FILE:odin3_abc_unavailable_cli>)
+            endif()
+            add_test(NAME cli_${_case}
+                COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh ${_case} ${_cli}
+                        ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                        ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+            set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
+        endforeach()
+    endif()
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted

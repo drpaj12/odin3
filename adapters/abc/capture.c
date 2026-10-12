@@ -28,7 +28,7 @@ enum {
 
 odin3_status odin3_capture_open(odin3_capture *cap) {
     *cap = (odin3_capture){.file = NULL, .saved_out = ADP_NOT_SAVED, .saved_err = ADP_NOT_SAVED};
-    FILE *tmp = tmpfile();
+    FILE *tmp = odin3_abc_tmpfile();
     if (tmp == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }

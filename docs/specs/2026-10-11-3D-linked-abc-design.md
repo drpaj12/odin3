@@ -219,6 +219,11 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
 
 `exports.map` is `{ global: odin3_plugin_init; odin3_abc_adapter_init; local: *; };`.
 
+`-Wl,-z,defs` is dropped for sanitized clang builds only (3D-2 Task 5, agent default): clang links
+no sanitizer runtime into a shared object, because the executable carries it, so every
+`__asan_*`/`__ubsan_*` reference in the adapter would be undefined. gcc, Release and unsanitized
+clang builds keep it.
+
 `--wrap=sym` rewrites the undefined references to `sym` **in the objects of this link**, which
 includes the members taken from the static `libabc-pic.a`. `guard.c` defines the wrappers and never
 names a `__real_` symbol. So the `.so` imports none of the banned names, `tools/check-symbols.sh`

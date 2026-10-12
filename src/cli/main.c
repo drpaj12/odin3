@@ -2,9 +2,15 @@
  * main.c — the odin3 command-line driver. The only place exit codes and
  * process-level output policy live (spec §15.1: no exit() outside cli/).
  * Uses only the public ABI (odin3.h): it links libodin3, so plugins it loads
- * register into the same pass registry.
+ * register into the same pass registry. With ODIN3_HAVE_ABC it also links the
+ * linked-ABC adapter (libodin3_abc.so, odin3_abc.h) and registers its engine at
+ * start-up, before any --plugin (3D spec §4.3).
  */
 #include "odin3/odin3.h"
+
+#ifdef ODIN3_HAVE_ABC
+#include "odin3_abc.h"
+#endif
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -88,6 +94,7 @@ typedef struct cli_state {
     odin3_keep_ast keep;  /* --keep-ast (ELABORATED), --keep-ast=all (ALL); NONE by default */
     /* --abc-script FILE, NULL for none */
     const char *abc_script;
+    bool linked_abc;      /* the linked ABC engine is registered (--version names it) */
 } cli_state;
 
 /* The options that take a value. */
@@ -126,10 +133,41 @@ static int bad_value(const char *option, const char *value, const char *why) {
     return EXIT_USAGE;
 }
 
+/* --version: the version and ABI lines, then the linked ABC's commit when it is registered. */
+static void print_version(const cli_state *state) {
+    (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+#ifdef ODIN3_HAVE_ABC
+    if (state->linked_abc) {
+        (void)printf("linked ABC %s (adapters/abc/NOTICE)\n", ODIN3_ABC_COMMIT_STR);
+    }
+#else
+    (void)state;
+#endif
+}
+
+/*
+ * Registers the linked ABC engine (3D spec §4.3), before any --plugin can register another. A
+ * failure is the warning "linked ABC unavailable: <status>", which the default log sink prints as
+ * "odin3: warning: linked ABC unavailable: <status>" (§11's "odin3: " is the sink's, as for the
+ * unlocated project diagnostics), and odin3 runs on without linked ABC. True when registered.
+ */
+static bool init_linked_abc(void) {
+#ifdef ODIN3_HAVE_ABC
+    odin3_status status = odin3_abc_adapter_init();
+    if (status == ODIN3_OK) {
+        return true;
+    }
+    char msg[MSG_BUF];
+    (void)snprintf(msg, sizeof msg, "linked ABC unavailable: %s", odin3_status_string(status));
+    (void)odin3_log_write(ODIN3_LOG_WARN, msg);
+#endif
+    return false;
+}
+
 /* A flag of the first scan: true when arg is one (recorded in state). */
 static bool scan_flag(const char *arg, cli_state *state) {
     if (strcmp(arg, "--version") == 0) {
-        (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+        print_version(state);
     } else if (strcmp(arg, "--help") == 0) {
         state->help = true;
     } else if (strcmp(arg, "--check") == 0) {
@@ -359,6 +397,7 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
 
 int main(int argc, char **argv) {
     cli_state state = {0};
+    state.linked_abc = init_linked_abc();
     for (int i = 1; i < argc; i++) {
         int rc = scan_one(argv, argc, &i, &state);
         if (rc != EXIT_OK) {

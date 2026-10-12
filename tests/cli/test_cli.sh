@@ -25,8 +25,11 @@
 # syntax error fails), parse_only_with_script (--parse-only with -p or a .o3 script exits 2:
 # use the pass option), abc_script_missing (--abc-script naming no file exits 2),
 # abc_script_project (--abc-script replaces the project's abc_script with an info line; --help
-# shows the option). The project cases run from the project's directory (tests/cli/project), so
-# the paths given are relative.
+# shows the option), version_abc (with linked ABC, --version ends with exactly one
+# "linked ABC <40 hex> (adapters/abc/NOTICE)" line), abc_unavailable_warning (ODIN3 is the test
+# CLI whose adapter cannot register: it warns "odin3: warning: linked ABC unavailable: <status>",
+# runs stats anyway, and --version names no linked ABC). The project cases run from the
+# project's directory (tests/cli/project), so the paths given are relative.
 set -euo pipefail
 
 [[ $# -eq 4 ]] || { echo "usage: test_cli.sh CASE ODIN3 NETLIST_COMPARE FIXTURES_DIR" >&2; exit 2; }
@@ -345,6 +348,23 @@ abc_script_project)
     "$odin3" --help >"$work/out" 2>"$work/err" || fail "--help failed"
     grep -qxF "  --abc-script FILE the ABC script of every abc pass (below abc --script)" \
         "$work/out" || fail "--help lacks the --abc-script line"
+    ;;
+version_abc)
+    "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
+    [[ $(wc -l <"$work/out") -eq 2 ]] || fail "--version printed $(wc -l <"$work/out") lines, not 2"
+    [[ $(grep -cE '^linked ABC [0-9a-f]{40} \(adapters/abc/NOTICE\)$' "$work/out") -eq 1 ]] ||
+        fail "no single 'linked ABC <commit> (adapters/abc/NOTICE)' line: $(cat "$work/out")"
+    tail -1 "$work/out" | grep -qE '^linked ABC ' || fail "the linked ABC line is not the last"
+    [[ ! -s $work/err ]] || fail "--version wrote to stderr"
+    ;;
+abc_unavailable_warning)
+    "$odin3" -p "read_blif $fixture; stats" >"$work/out" 2>"$work/err" ||
+        fail "odin3 without linked ABC failed"
+    grep -qxF "odin3: warning: linked ABC unavailable: ODIN3_ERR_INVALID_ARG" "$work/err" ||
+        fail "no 'linked ABC unavailable' warning"
+    grep -qF "stats: design: modules 2" "$work/err" || fail "stats did not run"
+    "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
+    ! grep -qF "linked ABC " "$work/out" || fail "--version names a linked ABC that is not registered"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

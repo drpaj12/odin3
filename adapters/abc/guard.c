@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -60,6 +61,20 @@ void odin3_abc_fail_reset(odin3_abc_fail *fail, uint32_t kind) {
     if (fail != NULL) {
         *fail = (odin3_abc_fail){.kind = kind};
     }
+}
+
+odin3_status odin3_abc_fail_set(odin3_abc_fail *fail, uint32_t kind, const char *fmt, ...) {
+    if (fail != NULL) {
+        odin3_abc_fail_reset(fail, kind);
+        va_list args;
+        va_start(args, fmt);
+        int len = vsnprintf(fail->text, sizeof fail->text, fmt, args);
+        va_end(args);
+        if (len < 0) {
+            fail->text[0] = '\0';
+        }
+    }
+    return ODIN3_ERR_ENGINE;
 }
 
 bool odin3_guard_disabled(void) {

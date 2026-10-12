@@ -1,7 +1,9 @@
 /*
- * test_abc_adapter.c — the linked engine on the real ABC (3D spec §13.2, AB-6, AB-8; plan Task 5,
- * point (a)): sessions, the fd capture, a failing command, the refused process control, the
- * plugin entry, the escapes and the adapter assertion.
+ * test_abc_adapter.c — the linked engine on the real ABC (3D spec §13.2, §13.6, §9, AB-6, AB-8,
+ * AB-16; plan Tasks 5 and 6, point (a)): sessions, the fd capture, a failing command, the refused
+ * process control, the plugin entry, the escapes and the adapter assertion; the exchange calls
+ * (load_aig, get_luts, name_map) and their checks, the adapter's out-of-memory paths, no threads
+ * and one-process determinism on a 40-AND network, and ABC's command splitting.
  *
  * Built from the adapter's sources with the test hooks (ODIN3_ABC_TEST_HOOKS) and linked with the
  * adapter's --wrap set, so the exit() and __assert_fail calls of the ABC commands this file adds
@@ -16,6 +18,7 @@
 #include "guard.h"
 #include "odin3_abc.h"
 #include "session.h"
+#include "sim/prng.h"
 #include "unity.h"
 
 #include <errno.h>
@@ -385,6 +388,552 @@ static void test_open_resets_generators(void) {
     TEST_ASSERT_EQUAL_INT(expected.libc, after_open.libc);
 }
 
+/* --- the exchange: load_aig, get_luts, name_map (§4.4 steps 3, 5 and 6; AB-16) ---------------- */
+
+enum {
+    AIG_NULL = 0x7FFFFFFF, /* MiniAIG's empty slot: a PI is (AIG_NULL, AIG_NULL) */
+    LUT_NULL = 0x7FFFFFFF, /* MiniLUT's empty fanin slot */
+    LUT_NULL2 = 0x7FFFFFFE /* MiniLUT's slot 1 of a PO */
+};
+
+/*
+ * The toggle: PIs a (1) and b (2), then the register output r (3); t = a & b (4); r ^ t as
+ * !(r & !t) & !(!r & t) (5, 6, 7, complemented); the output y = r ^ t (8) and the register's
+ * input r ^ t (9).
+ */
+static const int32_t TOGGLE[] = {
+    AIG_NULL, AIG_NULL, /* 0: the constant */
+    AIG_NULL, AIG_NULL, /* 1: a */
+    AIG_NULL, AIG_NULL, /* 2: b */
+    AIG_NULL, AIG_NULL, /* 3: r, the register output */
+    2,        4,        /* 4: t = a & b */
+    6,        9,        /* 5: r & !t */
+    7,        8,        /* 6: !r & t */
+    11,       13,       /* 7: !5 & !6 = !(r ^ t) */
+    15,       AIG_NULL, /* 8: y = r ^ t */
+    15,       AIG_NULL, /* 9: the register input r ^ t */
+};
+static const odin3_abc_aig TOGGLE_AIG = {.objs = TOGGLE, .n_objs = 10, .n_regs = 1};
+enum { TOGGLE_PIS = 3, TOGGLE_POS = 2, TOGGLE_XOR_LIT = 15 };
+
+/* A MiniLUT copied out of the session (get_luts' arrays live only until the next call). */
+typedef struct lut_copy {
+    odin3_abc_luts luts; /* points into the arrays below */
+    int32_t *fanins;
+    uint32_t *truths;
+    int32_t *ci_from;
+    uint32_t pis; /* PI objects, so ci_from's length */
+    size_t fanin_count, truth_count;
+} lut_copy;
+
+static size_t truth_words(uint32_t lut_size) {
+    return lut_size > 5 ? (size_t)1 << (lut_size - 5) : 1;
+}
+
+static void lut_copy_take(lut_copy *out, const odin3_abc_luts *luts) {
+    out->fanin_count = (size_t)luts->lut_size * luts->n_objs;
+    out->truth_count = truth_words(luts->lut_size) * luts->n_objs;
+    out->fanins = malloc(sizeof *out->fanins * out->fanin_count);
+    out->truths = malloc(sizeof *out->truths * out->truth_count);
+    TEST_ASSERT_TRUE(out->fanins != NULL && out->truths != NULL);
+    memcpy(out->fanins, luts->fanins, sizeof *out->fanins * out->fanin_count);
+    memcpy(out->truths, luts->truths, sizeof *out->truths * out->truth_count);
+    out->pis = 0;
+    for (uint32_t i = 2; i < luts->n_objs; i++) {
+        out->pis += luts->fanins[(size_t)luts->lut_size * i] == LUT_NULL;
+    }
+    out->ci_from = NULL;
+    if (luts->ci_from != NULL) {
+        out->ci_from = malloc(sizeof *out->ci_from * (out->pis + 1));
+        TEST_ASSERT_NOT_NULL(out->ci_from);
+        memcpy(out->ci_from, luts->ci_from, sizeof *out->ci_from * out->pis);
+    }
+    out->luts = *luts;
+    out->luts.fanins = out->fanins;
+    out->luts.truths = out->truths;
+    out->luts.ci_from = out->ci_from;
+}
+
+static void lut_copy_free(lut_copy *copy) {
+    free(copy->fanins);
+    free(copy->truths);
+    free(copy->ci_from);
+    *copy = (lut_copy){0};
+}
+
+/* Fanin slot of object obj, and whether obj is a PO. */
+static int32_t fanin_of(const odin3_abc_luts *luts, uint32_t obj, uint32_t slot) {
+    return luts->fanins[((size_t)luts->lut_size * obj) + slot];
+}
+
+static bool is_po(const odin3_abc_luts *luts, uint32_t obj) {
+    return obj > 1 && fanin_of(luts, obj, 0) != LUT_NULL && fanin_of(luts, obj, 1) == LUT_NULL2;
+}
+
+/* A script: its commands, run after load_aig and &put (and before &get -m -n). */
+typedef struct script {
+    const char *const *commands;
+    size_t count;
+    const char *get; /* the command that brings the mapping back to the & space */
+} script;
+
+/* Runs aig through script in the open session; the MiniLUT goes to *out. */
+static odin3_status run_in_session(const odin3_abc_aig *aig, const script *run, lut_copy *out,
+                                   odin3_abc_fail *fail) {
+    odin3_status st = odin3_abc_session_load_aig(self(), aig, fail);
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), "&put", fail) : st;
+    for (size_t i = 0; st == ODIN3_OK && i < run->count; i++) {
+        st = odin3_abc_session_exec(self(), run->commands[i], fail);
+    }
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), run->get, fail) : st;
+    odin3_abc_luts luts;
+    st = st == ODIN3_OK ? odin3_abc_session_get_luts(self(), &luts, fail) : st;
+    if (st == ODIN3_OK) {
+        lut_copy_take(out, &luts);
+    }
+    return st;
+}
+
+/* run_in_session in a session of its own; the test fails with ABC's lines if it fails. */
+static void run_script(const odin3_abc_aig *aig, const script *run, lut_copy *out) {
+    static lines got;
+    odin3_abc_fail fail;
+    got.count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st = run_in_session(aig, run, out, &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+}
+
+static const char *const IF_K6[] = {"if -K 6"};
+static const script MAP_K6 = {.commands = IF_K6, .count = 1, .get = "&get -m -n"};
+
+/* The fanins of LUT or PO obj, each on an earlier object that is not a PO; returns their count. */
+static uint32_t expect_fanins_before(const odin3_abc_luts *luts, uint32_t obj) {
+    uint32_t count = 0;
+    while (count < luts->lut_size && fanin_of(luts, obj, count) < LUT_NULL2) {
+        int32_t fanin = fanin_of(luts, obj, count);
+        TEST_ASSERT_TRUE(fanin >= 0 && (uint32_t)fanin < obj);
+        TEST_ASSERT_FALSE(is_po(luts, (uint32_t)fanin));
+        count++;
+    }
+    return count;
+}
+
+/* Every LUT's fanins come before it, every PO's driver too, and lut_size covers them all. */
+static void expect_topological(const odin3_abc_luts *luts) {
+    uint32_t widest = 0;
+    for (uint32_t obj = 2; obj < luts->n_objs; obj++) {
+        if (fanin_of(luts, obj, 0) == LUT_NULL) {
+            continue; /* a PI */
+        }
+        uint32_t count = expect_fanins_before(luts, obj);
+        widest = !is_po(luts, obj) && count > widest ? count : widest;
+    }
+    /* MiniLUT's lut_size is the widest LUT, at least 2 (3D-0 spike finding), not the K asked. */
+    TEST_ASSERT_EQUAL_UINT32(widest > 2 ? widest : 2, luts->lut_size);
+}
+
+static void test_load_aig_toggle(void) {
+    lut_copy out;
+    run_script(&TOGGLE_AIG, &MAP_K6, &out);
+    TEST_ASSERT_EQUAL_UINT32(1, out.luts.n_regs);
+    TEST_ASSERT_EQUAL_UINT32(TOGGLE_PIS, out.pis);
+    TEST_ASSERT_TRUE(out.luts.lut_size >= 2 && out.luts.lut_size <= 6);
+    expect_topological(&out.luts);
+    TEST_ASSERT_NOT_NULL(out.ci_from);
+    for (uint32_t k = 0; k < TOGGLE_PIS; k++) {
+        TEST_ASSERT_EQUAL_INT32((int32_t)k, out.ci_from[k]); /* ci_from[2] = 2: the register */
+    }
+    lut_copy_free(&out);
+}
+
+/* CI names that are not c<n> (short_names renames the network's CIs) give -1 in ci_from. */
+static void test_get_luts_other_names(void) {
+    static const char *const RENAMED[] = {"if -K 6", "short_names"};
+    static const script MAP_RENAMED = {.commands = RENAMED, .count = 2, .get = "&get -m -n"};
+    lut_copy out;
+    run_script(&TOGGLE_AIG, &MAP_RENAMED, &out);
+    TEST_ASSERT_NOT_NULL(out.ci_from);
+    TEST_ASSERT_EQUAL_UINT32(TOGGLE_PIS, out.pis);
+    for (uint32_t k = 0; k < TOGGLE_PIS; k++) {
+        TEST_ASSERT_EQUAL_INT32(-1, out.ci_from[k]);
+    }
+    lut_copy_free(&out);
+}
+
+/* One malformed MiniAIG and the exact RESULT text it gives. */
+typedef struct bad_aig {
+    int32_t objs[16];
+    uint32_t n_objs, n_regs;
+    const char *text;
+} bad_aig;
+
+static const bad_aig BAD_AIGS[] = {
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 4, 2, 7, AIG_NULL},
+     5,
+     0,
+     "object 3: an AND needs 0 <= lit0 < lit1 < 6, not (4, 2)"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, 4, 4, AIG_NULL},
+     4,
+     0,
+     "object 2: an AND needs 0 <= lit0 < lit1 < 4, not (2, 4)"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, 2, 6, AIG_NULL},
+     5,
+     0,
+     "object 3: an AND needs 0 <= lit0 < lit1 < 6, not (2, 2)"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, -1, 2, 6, AIG_NULL},
+     5,
+     0,
+     "object 3: an AND needs 0 <= lit0 < lit1 < 6, not (-1, 2)"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, AIG_NULL, AIG_NULL, AIG_NULL},
+     4,
+     0,
+     "object 3: a PI after the first AND or PO"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, AIG_NULL, 2, 4},
+     5,
+     0,
+     "object 4: an AND after the first PO"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, AIG_NULL, 4, AIG_NULL},
+     4,
+     0,
+     "object 3: a PO needs a literal from 0 to 3, not 4"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, -1, AIG_NULL},
+     3,
+     0,
+     "object 2: a PO needs a literal from 0 to 3, not -1"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, AIG_NULL, 2, AIG_NULL},
+     4,
+     2,
+     "2 registers, more than the 1 PIs or the 2 POs"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, 3, AIG_NULL, AIG_NULL, 2, AIG_NULL},
+     5,
+     0,
+     "object 3: a PI after the first AND or PO"},
+    {{AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 2, AIG_NULL},
+     4,
+     2,
+     "2 registers, more than the 2 PIs or the 1 POs"},
+    {{AIG_NULL, 0, AIG_NULL, AIG_NULL},
+     2,
+     0,
+     "object 0: the constant is (2147483647, 0), not (2147483647, 2147483647)"},
+    {{0, AIG_NULL, AIG_NULL, AIG_NULL},
+     2,
+     0,
+     "object 0: the constant is (0, 2147483647), not "
+     "(2147483647, 2147483647)"},
+    {{0}, 0, 0, "an AIG needs from 1 to 536870912 objects, not 0"},
+};
+
+/* Each malformed AIG is refused with its text before ABC sees it; the session stays usable. */
+static void test_load_aig_rejects(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    for (size_t i = 0; i < sizeof BAD_AIGS / sizeof BAD_AIGS[0]; i++) {
+        const odin3_abc_aig aig = {
+            .objs = BAD_AIGS[i].objs, .n_objs = BAD_AIGS[i].n_objs, .n_regs = BAD_AIGS[i].n_regs};
+        odin3_status st = odin3_abc_session_load_aig(self(), &aig, &fail);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, st, BAD_AIGS[i].text);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(ODIN3_ABC_FAIL_RESULT, fail.kind, BAD_AIGS[i].text);
+        TEST_ASSERT_EQUAL_STRING(BAD_AIGS[i].text, fail.text);
+    }
+    const odin3_abc_aig no_objs = {.objs = NULL, .n_objs = 1, .n_regs = 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_load_aig(self(), &no_objs, &fail));
+    TEST_ASSERT_EQUAL_STRING("an AIG needs from 1 to 536870912 objects, not 1 (objs is NULL)",
+                             fail.text);
+    /* Over MiniAIG's ceiling: refused before objs is read (it holds 10 objects only). */
+    const odin3_abc_aig too_big = {.objs = TOGGLE, .n_objs = (1U << 29) + 1, .n_regs = 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_load_aig(self(), &too_big, &fail));
+    TEST_ASSERT_EQUAL_STRING("an AIG needs from 1 to 536870912 objects, not 536870913", fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_load_aig(self(), NULL, &fail));
+    TEST_ASSERT_EQUAL_STRING("no AIG (aig is NULL)", fail.text);
+    /* Nothing reached ABC: the & space is still empty, and the session works. */
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+    odin3_abc_luts luts;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_get_luts(self(), &luts, &fail));
+    TEST_ASSERT_EQUAL_STRING("no mapping in the & space", fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_load_aig(self(), &TOGGLE_AIG, &fail));
+    /* The limits themselves are accepted: as many registers as PIs and POs, and a PO on the last
+     * AND (literal 2 * index - 1 of the object before it). */
+    static const int32_t edge[] = {AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 0, 3, 5, AIG_NULL};
+    const odin3_abc_aig at_limits = {.objs = edge, .n_objs = 4, .n_regs = 1};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_abc_session_load_aig(self(), &at_limits, &fail),
+                                  fail.text);
+    odin3_abc_session_close(self());
+}
+
+static void test_get_luts_unmapped(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    odin3_abc_luts luts;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st = odin3_abc_session_load_aig(self(), &TOGGLE_AIG, &fail);
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), "&put", &fail) : st;
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), "strash", &fail) : st;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    st = odin3_abc_session_get_luts(self(), &luts, &fail);
+    odin3_status no_place = odin3_abc_session_get_luts(self(), NULL, &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, st);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, no_place);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, fail.kind);
+    TEST_ASSERT_EQUAL_STRING("nowhere to put the LUTs (luts is NULL)", fail.text);
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+}
+
+/* The name map of the toggle against its own (aligned) result: one literal or -1 per object;
+ * every PI maps to its own PI's literal, and the LUT driving the register input to r ^ t. */
+static bool is_literal_or_none(int32_t lit) {
+    return lit == -1 || (lit >= 0 && lit < 2 * (int32_t)TOGGLE_AIG.n_objs);
+}
+
+static bool is_pi(const odin3_abc_luts *luts, uint32_t obj) {
+    return obj > 1 && fanin_of(luts, obj, 0) == LUT_NULL;
+}
+
+/* lits' entry for obj is -1 or a literal of the toggle, and a PI's is its own PI's literal (PI
+ * number *pi, counted here). */
+static bool name_ok(const odin3_abc_luts *aligned, const int32_t *lits, uint32_t obj,
+                    uint32_t *pi) {
+    if (!is_literal_or_none(lits[obj])) {
+        return false;
+    }
+    if (!is_pi(aligned, obj)) {
+        return true;
+    }
+    (*pi)++;
+    return lits[obj] == (int32_t)(2 * *pi);
+}
+
+static void expect_name_map(const odin3_abc_luts *aligned, const int32_t *lits) {
+    uint32_t pi = 0;
+    for (uint32_t obj = 0; obj < aligned->n_objs; obj++) {
+        TEST_ASSERT_TRUE(name_ok(aligned, lits, obj, &pi));
+    }
+    TEST_ASSERT_EQUAL_UINT32(TOGGLE_PIS, pi);
+    uint32_t reg_in = aligned->n_objs - 1;
+    TEST_ASSERT_TRUE(is_po(aligned, reg_in));
+    int32_t driver = fanin_of(aligned, reg_in, 0);
+    TEST_ASSERT_EQUAL_INT32(TOGGLE_XOR_LIT, lits[driver]);
+}
+
+static void test_name_map_aligned(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    lut_copy out = {0};
+    const int32_t *lits = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          odin3_abc_session_name_map(self(), &out.luts, &lits, &fail));
+    TEST_ASSERT_EQUAL_STRING("no AIG was loaded in this session", fail.text);
+    odin3_status st = run_in_session(&TOGGLE_AIG, &MAP_K6, &out, &fail);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    /* No register merged (if -K 6 has no scorr), so the result is its own aligned network. */
+    st = odin3_abc_session_name_map(self(), &out.luts, &lits, &fail);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    TEST_ASSERT_NOT_NULL(lits);
+    expect_name_map(&out.luts, lits);
+    odin3_abc_luts other = out.luts;
+    other.n_regs = 0;
+    st = odin3_abc_session_name_map(self(), &other, &lits, &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, st);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, fail.kind);
+    TEST_ASSERT_EQUAL_STRING("the aligned network has 3 PIs, 2 POs and 0 registers; the loaded "
+                             "AIG has 3, 2 and 1",
+                             fail.text);
+    lut_copy_free(&out);
+}
+
+/* Malformed aligned networks: refused with their text, ABC never called. */
+static void test_name_map_rejects(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    lut_copy out = {0};
+    const int32_t *lits = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_in_session(&TOGGLE_AIG, &MAP_K6, &out, &fail));
+    odin3_abc_luts bad = out.luts;
+    bad.lut_size = 1;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_name_map(self(), &bad, &lits, &fail));
+    TEST_ASSERT_EQUAL_STRING("the aligned network needs lut_size 2 to 16 and 2 to 536870912 "
+                             "objects, not 1 and 9",
+                             fail.text);
+    /* The last object (a PO) driven by itself: a fanin that is not earlier. */
+    uint32_t last = out.luts.n_objs - 1;
+    TEST_ASSERT_TRUE(is_po(&out.luts, last) && is_po(&out.luts, last - 1));
+    out.fanins[(size_t)out.luts.lut_size * last] = (int32_t)last;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          odin3_abc_session_name_map(self(), &out.luts, &lits, &fail));
+    TEST_ASSERT_EQUAL_STRING("aligned object 8: fanin 0 is 8, not an earlier PI or LUT", fail.text);
+    /* ... and driven by the PO before it. */
+    out.fanins[(size_t)out.luts.lut_size * last] = (int32_t)(last - 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          odin3_abc_session_name_map(self(), &out.luts, &lits, &fail));
+    TEST_ASSERT_EQUAL_STRING("aligned object 8: fanin 0 is 7, not an earlier PI or LUT", fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, odin3_abc_session_name_map(self(), NULL, &lits, &fail));
+    odin3_abc_session_close(self());
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+    lut_copy_free(&out);
+}
+
+/*
+ * The test hook fails each of the adapter's own allocations in turn (open's capture file, the
+ * AIG copy, ci_from, the aligned copies and the PO marks): each gives ODIN3_ERR_NO_MEMORY, the
+ * engine stays enabled, and the whole flow then runs (§13.6).
+ */
+static odin3_status oom_flow(lut_copy *out, odin3_abc_fail *fail) {
+    odin3_status st = odin3_abc_session_open(self(), NULL, NULL, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = run_in_session(&TOGGLE_AIG, &MAP_K6, out, fail);
+    const int32_t *lits = NULL;
+    st = st == ODIN3_OK ? odin3_abc_session_name_map(self(), &out->luts, &lits, fail) : st;
+    odin3_abc_session_close(self());
+    return st;
+}
+
+static void test_adapter_oom(void) {
+    odin3_abc_fail fail;
+    uint32_t injected = 0;
+    for (uint32_t after = 0;; after++) {
+        lut_copy out = {0};
+        odin3_abc_test_fail_alloc_after(after);
+        odin3_status st = oom_flow(&out, &fail);
+        lut_copy_free(&out);
+        if (st == ODIN3_OK) {
+            break;
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, fail.text);
+        TEST_ASSERT_FALSE(odin3_guard_disabled());
+        injected++;
+    }
+    odin3_abc_test_fail_alloc_after(UINT32_MAX);
+    TEST_ASSERT_EQUAL_UINT32(6, injected); /* tmpfile, AIG copy, ci_from, 2 aligned copies, marks */
+}
+
+/* --- determinism and threads on a 40-AND network (§9, Review Focus 5) ------------------------ */
+
+enum { NET_PIS = 8, NET_REGS = 4, NET_ANDS = 40, NET_OUTS = 4, NET_SEED = 0x3D2 };
+enum { NET_CIS = NET_PIS + NET_REGS, NET_OBJS = 1 + NET_CIS + NET_ANDS + NET_OUTS + NET_REGS };
+
+static int32_t net40_objs[2 * NET_OBJS];
+static const odin3_abc_aig NET40 = {.objs = net40_objs, .n_objs = NET_OBJS, .n_regs = NET_REGS};
+
+/*
+ * 8 PIs and 4 register outputs, then 40 ANDs drawn from odin3_prng (seed 0x3D2): AND j takes the
+ * object just before it and an earlier random one, each with a random complement, so all 40 are in
+ * the last one's cone. The outputs are ANDs 39, 30, 20 and 10, the register inputs ANDs 35, 25, 15
+ * and 5, each with a random complement.
+ */
+static void build_net40(void) {
+    odin3_prng prng;
+    odin3_prng_seed(&prng, NET_SEED);
+    for (size_t i = 0; i <= NET_CIS; i++) {
+        net40_objs[2 * i] = AIG_NULL;
+        net40_objs[(2 * i) + 1] = AIG_NULL;
+    }
+    for (uint32_t j = 0; j < NET_ANDS; j++) {
+        size_t i = 1 + NET_CIS + j;
+        uint32_t other = 1 + (uint32_t)(odin3_prng_next(&prng) % (i - 2));
+        int32_t lit_prev = (int32_t)(2 * (i - 1)) + odin3_prng_bit(&prng);
+        int32_t lit_other = (int32_t)(2 * other) + odin3_prng_bit(&prng);
+        net40_objs[2 * i] = lit_other; /* other < i - 1, so lit_other < lit_prev */
+        net40_objs[(2 * i) + 1] = lit_prev;
+    }
+    static const uint32_t pos[NET_OUTS + NET_REGS] = {39, 30, 20, 10, 35, 25, 15, 5};
+    for (uint32_t k = 0; k < NET_OUTS + NET_REGS; k++) {
+        size_t i = 1 + NET_CIS + NET_ANDS + k;
+        net40_objs[2 * i] = (int32_t)(2 * (1 + NET_CIS + pos[k])) + odin3_prng_bit(&prng);
+        net40_objs[(2 * i) + 1] = AIG_NULL;
+    }
+}
+
+/* lib/abc/vtr.abc (§7.7) with K = 6, and Review Focus 5's randomised script. */
+static const char *const VTR_K6[] = {"strash", "ifraig -v",  "scorr -v", "dc2 -v",
+                                     "dch -f", "if -K 6 -v", "mfs2 -v",  "print_stats"};
+static const script DEFAULT_K6 = {.commands = VTR_K6, .count = 8, .get = "&get -m -n"};
+static const char *const FRAIG_IF_K6[] = {"strash", "fraig", "if -K 6"};
+static const script FRAIG_K6 = {.commands = FRAIG_IF_K6, .count = 3, .get = "&get -m -n"};
+
+/* A thread that does nothing: o3test_spawn's, the counter's positive control. */
+static void *idle_thread(void *arg) {
+    return arg;
+}
+
+static int o3test_spawn(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    pthread_t thread;
+    if (pthread_create(&thread, NULL, idle_thread, NULL) != 0) {
+        return 1;
+    }
+    return pthread_join(thread, NULL) != 0;
+}
+
+static void test_no_threads_default_script(void) {
+    static bool added;
+    if (!added) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_test_add_command("o3test_spawn", o3test_spawn));
+        added = true;
+    }
+    lut_copy out;
+    uint32_t before = odin3_abc_test_thread_count();
+    run_script(&NET40, &DEFAULT_K6, &out);
+    TEST_ASSERT_EQUAL_UINT32(before, odin3_abc_test_thread_count());
+    TEST_ASSERT_TRUE(out.luts.n_objs > NET_CIS + 2);
+    lut_copy_free(&out);
+    /* The counter counts: a command that starts one thread adds one. */
+    odin3_abc_fail fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), NULL, NULL, &fail));
+    odin3_status st = odin3_abc_session_exec(self(), "o3test_spawn", &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_EQUAL_UINT32(before + 1, odin3_abc_test_thread_count());
+}
+
+/* The same script twice in one process gives byte-identical fanins and truths. */
+static void expect_same_twice(const script *run) {
+    lut_copy first;
+    lut_copy second;
+    run_script(&NET40, run, &first);
+    run_script(&NET40, run, &second);
+    TEST_ASSERT_EQUAL_UINT32(first.luts.n_objs, second.luts.n_objs);
+    TEST_ASSERT_EQUAL_UINT32(first.luts.n_regs, second.luts.n_regs);
+    TEST_ASSERT_EQUAL_UINT32(first.luts.lut_size, second.luts.lut_size);
+    TEST_ASSERT_EQUAL_MEMORY(first.fanins, second.fanins, sizeof *first.fanins * first.fanin_count);
+    TEST_ASSERT_EQUAL_MEMORY(first.truths, second.truths, sizeof *first.truths * first.truth_count);
+    expect_topological(&first.luts);
+    lut_copy_free(&first);
+    lut_copy_free(&second);
+}
+
+static void test_determinism_one_process(void) {
+    expect_same_twice(&DEFAULT_K6);
+    expect_same_twice(&FRAIG_K6);
+}
+
+/* --- ABC's command splitting (Task 11's "checked is what runs") ------------------------------- */
+
+static void test_split(void) {
+    char **argv = NULL;
+    TEST_ASSERT_EQUAL_INT(-1, odin3_abc_test_split("if -K 6", &argv));
+    odin3_abc_fail fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), NULL, NULL, &fail));
+    int argc = odin3_abc_test_split("  if -K \"6\" -v; strash", &argv);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT(4, argc);
+    static const char *const want[] = {"if", "-K", "6", "-v"};
+    for (int i = 0; i < argc; i++) {
+        TEST_ASSERT_EQUAL_STRING(want[i], argv[i]);
+        free(argv[i]);
+    }
+    free((void *)argv);
+}
+
 /* --- child processes, parent side ------------------------------------------------------------- */
 
 typedef struct child {
@@ -551,8 +1100,7 @@ static void test_close_without_descriptors(void) {
     expect_child_ok("no_descriptors", NULL);
 }
 
-/* --- child processes, child side ---------------------------------------------------------------
- */
+/* --- child processes, child side -------------------------------------------------------------- */
 
 static int child_failures;
 
@@ -819,6 +1367,17 @@ int main(int argc, char **argv) {
     RUN_TEST(test_refused_calls);
     RUN_TEST(test_open_resets_generators);
     RUN_TEST(test_plugin_init);
+    RUN_TEST(test_load_aig_toggle);
+    RUN_TEST(test_get_luts_other_names);
+    RUN_TEST(test_load_aig_rejects);
+    RUN_TEST(test_get_luts_unmapped);
+    RUN_TEST(test_name_map_aligned);
+    RUN_TEST(test_name_map_rejects);
+    RUN_TEST(test_adapter_oom);
+    build_net40();
+    RUN_TEST(test_no_threads_default_script);
+    RUN_TEST(test_determinism_one_process);
+    RUN_TEST(test_split);
     RUN_TEST(test_escape_exit);
     RUN_TEST(test_escape_underscore_exit);
     RUN_TEST(test_escape_abort);

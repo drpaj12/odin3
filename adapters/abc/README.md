@@ -30,6 +30,30 @@ of it `Dar_LibStart` (PHASE3 decision 22). Every ABC call runs under `odin3_guar
 fds 1 and 2 on the session's capture file, the call, the fds restored, and ABC's lines handed to
 the engine's `text` callback (without the newline and trailing blanks; a partial line waits).
 
+The exchange calls (AB-16, spec §4.4 steps 3, 5 and 6):
+
+- **`load_aig`** checks a copy of the MiniAIG before ABC sees it: object 0 is the constant, then
+  the PIs, the ANDs with `0 <= lit0 < lit1 < 2 * index`, and the POs on earlier PIs or ANDs;
+  `n_regs` is at most the PI and the PO count. The first fault is `RESULT`, naming the object. The
+  copy then goes in through `Abc_FrameGiaInputMiniAig`, and CI *n* is named `c<n>`.
+- **`get_luts`** is `Abc_FrameGiaOutputMiniLut`, with `ci_from` parsed from the GIA's CI names.
+  It refuses first, with `RESULT`, when the `&` space has no mapping (`no mapping in the & space`)
+  or a LUT wider than 16, because ABC would assert there, or crash without assertions. MiniLUT's
+  `lut_size` is the widest LUT (at least 2), not the K of the mapping.
+- **`name_map`** checks a copy of the aligned MiniLUT (every fanin on an earlier PI or LUT, and
+  the loaded AIG's PI, PO and register counts), then calls `Abc_FrameGiaInputMiniLut2` and
+  `Abc_FrameReadMiniLutNameMapping`.
+- What `get_luts` and `name_map` return stays valid until the next such call or `close`.
+
+## Start-up and licence
+
+`odin3` links the adapter and calls `odin3_abc_adapter_init()` before any `--plugin`. A failure is
+the warning `linked ABC unavailable: <status>`, and `odin3` runs without linked ABC. With the
+engine registered, `odin3 --version` adds `linked ABC <commit> (adapters/abc/NOTICE)`.
+
+`NOTICE` reproduces ABC's `copyright.txt` and the notice of every third-party component that the
+licence scan of `third_party/abc/src` found compiled into `libabc-pic` (spec §4.5, AB-9).
+
 ## Process control (AB-6) and what it covers, honestly
 
 The link wraps `exit`, `_exit`, `abort`, `__assert_fail`, `system`, `popen`, `fork`, `execv`,
@@ -79,8 +103,9 @@ from a guarded call, by reading the pinned source:
 - `setrlimit` is used only in `Abc_RealMain` and bsat2's `main`, never by a command.
 - `pthread_exit` runs only on worker threads.
 - `dlsym`, `dlerror` and `dlclose` act only on the handles `dlopen` would have returned; there are
-  none. They stay unwrapped, because clang's static sanitizer runtime, linked into the test
-  executable, uses `dlsym` itself.
+  none (ABC's warning prints whatever `dlerror()` holds, which is cosmetic). All three stay
+  unwrapped for the same reason: clang's static sanitizer runtime, linked into the test
+  executable, calls the `dl*` functions itself, and a link-wide wrap would redirect its calls too.
 - `pipe`, `waitpid` and `pclose` serve `fork` and `popen`, which are refused.
 
 CTest `abc_adapter_exports` forbids the rest of the exec, spawn and `dl*open` families, so a pin
@@ -95,6 +120,14 @@ bump that brings one in fails.
     line waits for the next call;
   - a failing command (`COMMAND`), the refused calls, the generators and `srand(1)` reset at
     every open, and the plugin entry;
+  - the exchange: a toggle (two PIs and a register) through `load_aig`, `&put`, `if -K 6`,
+    `&get -m -n` and `get_luts`; every malformed AIG and aligned network refused with its text;
+    `get_luts` without a mapping; the name map; and each of the adapter's own allocations
+    failed in turn (`NO_MEMORY`, the engine still usable);
+  - on a 40-AND network: no thread started by the default script (the test link counts
+    `pthread_create`), and two runs in one process byte-identical for the default script and for
+    `strash; fraig; if -K 6`;
+  - ABC's command splitting (`odin3_abc_test_split`, for 3D Task 11);
   - each in a child process:
     - `o3test_exit 3`, `o3test__exit 4`, `o3test_abort` and `o3test_assert`;
     - off-thread `exit`, `abort` and `assert` (the line, then `SIGKILL`);
@@ -104,3 +137,5 @@ bump that brings one in fails.
     - `close` with no descriptor left, after which the next open still works.
 - `abc_adapter_exports`, `abc_adapter_exports_refuses_libodin3`, `symbol_rules` (with the adapter)
   and `abc_adapter_no_assert`.
+- `cli_version_abc` and `cli_abc_unavailable_warning` (a test CLI linked to an adapter variant
+  whose table the registry refuses).
