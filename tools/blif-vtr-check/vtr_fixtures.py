@@ -26,10 +26,12 @@ A written case then runs the round trip of §16.3 step 1 (step 5: CI on the fixt
 
 - when the write of W1 legalised no name (no ``names legalised`` info line, ``renamed == 0``),
   W1 == W2 byte for byte;
-- otherwise W1 and W2 are compared under the VB-10 decode (``vtr_normalized``: continuations
-  joined, comment lines dropped, every name decoded to a fixed point), and the byte comparison
-  is not applied: VB-10 escapes the ``%`` of an escape again (``\\`` -> ``%5C`` -> ``%255C``), so
-  W2 differs from W1 by design. A ``note`` line names such a case.
+- otherwise W1's token lines must equal W2's after one VB-10 decoding step of every name
+  (``netlist_compare.vtr_rewrite_same``, the check of ``netlist-compare --vtr-rewrite``; 3E-4
+  Task 10), and the byte comparison is not applied: VB-10 escapes the ``%`` of an escape again
+  (``\\`` -> ``%5C`` -> ``%255C``), so W2 differs from W1 by design. One step inverts one write
+  exactly and is injective, unlike the fixed point of ``vtr_normalized`` (``a%5Cb`` and
+  ``a%255Cb`` both decode to ``a\\b`` there). A ``note`` line names such a case.
 
 Then ``blif-vtr-check --strict`` runs on every expected ``.vtr.blif`` (skipped with a note
 without ``--checker``). A case in ``STRICT_EXCEPTIONS`` runs the checker without ``--strict``
@@ -53,6 +55,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "netlist-compare"))
+import netlist_compare  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 LIBRARY = REPO / "lib" / "vtr.o3lib"
 SAMPLE = "sample.txt"
@@ -65,8 +70,6 @@ HEADER = re.compile(r"^# Odin III \S+ write_blif --vtr \(K=(\d+), names (short|p
 ERROR_PREFIX = "odin3: error: "
 # VB-10 item 9's info line; its count is the report's `renamed` (§16.3 step 1, amended).
 RENAMED = re.compile(r"^odin3: info: write_blif: --vtr: (\d+) names legalised ", re.MULTILINE)
-# A VB-10 escape: `%` and two upper-case hex digits (plan 3E point (o)).
-ESCAPE = re.compile(rb"%([0-9A-F]{2})")
 TRAILER = re.compile(r"^odin3: error: (pass \S+: |-p: command \d+: )")
 # Expected files that break an Odin III convention (C-S rule) by design, with the reason; the
 # checker runs on them without --strict. shiftx.parmys is a Parmys k6 golden read back: its
@@ -171,38 +174,28 @@ def run_case(odin3: Path, case: Case, work: Path) -> Outcome:
 
 
 def vb10_decode(name: bytes) -> bytes:
-    """name with VB-10 undone to a fixed point: rule 3's `%` prefix (a `%` not followed by two
-    upper-case hex digits) dropped, then every `%XX` replaced by its byte, until nothing changes.
-    One step inverts one write exactly (point (o)); the fixed point makes a name written twice
-    (`%255C`) decode like one written once (`%5C`), both to `\\`."""
-    while True:
-        step = name[1:] if name.startswith(b"%") and ESCAPE.match(name) is None else name
-        step = ESCAPE.sub(lambda m: bytes([int(m[1], 16)]), step)
-        if step == name:
-            return name
-        name = step
+    """name with VB-10 undone to a fixed point (netlist_compare.vb10_decode, the decode of
+    ``netlist-compare --vtr-normalize``): rule 3's `%` prefix dropped and every `%XX` replaced by
+    its byte, until nothing changes, so a name written twice (`%255C`) decodes like one written
+    once (`%5C`), both to `\\`."""
+    return netlist_compare.vb10_decode(name)
 
 
 def vtr_normalized(text: bytes) -> list[list[bytes]]:
     """A --vtr file as token lines: ` \\` continuations joined, `#` comment lines and blank lines
     dropped, and every name (each side of a `formal=actual`) VB-10-decoded (vb10_decode)."""
-    lines = []
-    for line in text.replace(b"\\\n", b" ").split(b"\n"):
-        tokens = line.split()
-        if not tokens or tokens[0].startswith(b"#"):
-            continue
-        lines.append([b"=".join(vb10_decode(part) for part in tok.split(b"=")) for tok in tokens])
-    return lines
+    return netlist_compare.vtr_token_lines(text, netlist_compare.vb10_decode)
 
 
 def round_trip_verdict(w1: bytes, w2: bytes, renamed: int) -> tuple[str | None, str]:
     """§16.3 step 1 as amended (3E-1 final review I1): (why it fails or None, the comparison
     applied, "bytes" or "decoded"). renamed == 0 needs W1 == W2 byte for byte; renamed > 0 needs
-    W1 and W2 equal under vtr_normalized, and the byte comparison is not applied."""
+    W1's token lines to equal W2's after one VB-10 decoding step (exact and injective:
+    netlist_compare.vtr_rewrite_same), and the byte comparison is not applied."""
     if renamed == 0:
         return (None if w1 == w2 else "W1 != W2 byte for byte (no name legalised)"), "bytes"
-    same = vtr_normalized(w1) == vtr_normalized(w2)
-    return (None if same else "W1 and W2 differ under the VB-10 decode"), "decoded"
+    same = netlist_compare.vtr_rewrite_same(w1, w2)
+    return (None if same else "W1 and W2 differ under one VB-10 decoding step"), "decoded"
 
 
 def round_trip(odin3: Path, name: str, work: Path, renamed: int) -> str | None:

@@ -345,5 +345,171 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
 
+def model(*body: str, ports: str = ".inputs a b clk\n.outputs y", tail: str = "") -> str:
+    """A top `m` with the given ports and body, then any further models (tail)."""
+    return "\n".join([".model m", ports, *body, ".end", tail]) + "\n"
+
+
+MULTIPLY = "\n".join([".model multiply",
+                      ".inputs " + " ".join(f"a[{i}]" for i in range(36)),
+                      ".outputs out[0]", ".blackbox", ".end"])
+
+# VB-10 rules 1-3 (3E spec §10), as the writer applies them: a reference encoder for the
+# property test of the one-step decode.
+LEGAL = set(range(0x21, 0x7F)) - set(b'="#\\%')
+RESERVED = {b"re", b"fe", b"ah", b"al", b"as", b"NIL", b"0", b"1", b"2", b"3", b"gnd", b"vcc",
+            b"unconn"}
+
+
+def vb10_encode(name: bytes) -> bytes:
+    out = b"".join(bytes([c]) if c in LEGAL else b"%%%02X" % c for c in name)
+    if out.startswith(b"."):
+        out = b"%2E" + out[1:]
+    if out in RESERVED or out.startswith(b"out:"):
+        out = b"%" + out
+    return out
+
+
+class VtrNormalizeTest(unittest.TestCase):
+    """netlist-compare --vtr-normalize and --vtr-rewrite (3E spec §16.3; plan 3E Task 10)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str | bytes) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_bytes(text.encode() if isinstance(text, str) else text)
+        return str(path)
+
+    def pair(self, a: str | bytes, b: str | bytes) -> tuple[int, int]:
+        """(exit without the flag, exit with --vtr-normalize) for a against b."""
+        fa, fb = self.write("a.blif", a), self.write("b.blif", b)
+        return compare(fa, fb)[0], compare("--vtr-normalize", fa, fb)[0]
+
+    def test_vtr_normalize_decodes_names(self) -> None:
+        # Review Focus 3: each written form decodes to its name, and %fe/%FE stay distinct
+        cases = {"%fe": "fe", "%FE": "\udcfe", "a%23b": "a#b", "%2Eend": ".end"}
+        for written, name in cases.items():
+            with self.subTest(written=written):
+                self.assertEqual(name, netlist_compare.decode_name(written))
+        self.assertNotEqual(netlist_compare.decode_name("%fe"),
+                            netlist_compare.decode_name("%FE"))
+        # as primary outputs (names kept by the canonical form), in files
+        def outputs(*names: str) -> str:
+            body = [f".names a {n}\n1 1" for n in names]
+            return model(*body, ports=".inputs a\n.outputs " + " ".join(names))
+
+        written = outputs("%fe", "%FE", "%2Eend")
+        plain = outputs("fe", "\xfe", ".end")
+        plain_bytes = plain.encode("latin-1")  # 0xFE as the raw byte, not UTF-8
+        fa, fb = self.write("w.blif", written), self.write("p.blif", plain_bytes)
+        self.assertEqual(0, compare("--vtr-normalize", fa, fb)[0])
+        self.assertEqual(2, compare(fa, fb)[0])  # the raw byte is no UTF-8: plain mode refuses
+        swapped = written.replace("%FE", "%fe2")
+        self.assertEqual(1, compare("--vtr-normalize", self.write("s.blif", swapped), fb)[0])
+
+    def test_latch_init_3_is_2(self) -> None:
+        a = model(".latch a q re clk 3", ".names q y", "1 1")
+        b = model(".latch a q re clk 2", ".names q y", "1 1")
+        self.assertEqual((1, 0), self.pair(a, b))
+        no_init = model(".latch a q re clk", ".names q y", "1 1")
+        self.assertEqual((1, 0), self.pair(no_init, b))
+        self.assertEqual((1, 1), self.pair(model(".latch a q re clk 1", ".names q y", "1 1"), b))
+
+    def test_omitted_subckt_inputs_are_unconn(self) -> None:
+        a = model(".subckt multiply a[0]=a out[0]=y", tail=MULTIPLY)
+        unconn = " ".join(f"a[{i}]=unconn" for i in range(1, 36))
+        b = model(".names unconn", f".subckt multiply a[0]=a {unconn} out[0]=y", tail=MULTIPLY)
+        self.assertEqual((1, 0), self.pair(a, b))
+        b_gnd = model(".names unconn", ".names gnd",
+                      f".subckt multiply a[0]=a {unconn.replace('a[35]=unconn', 'a[35]=gnd')} "
+                      "out[0]=y", tail=MULTIPLY)
+        self.assertEqual((1, 1), self.pair(a, b_gnd))
+
+    def test_one_input_cover_one_row(self) -> None:
+        one = model(".names a y", "1 1")
+        self.assertEqual((0, 0), self.pair(model(".names a y", "1 1", "1 1"), one))
+        self.assertEqual((1, 0), self.pair(model(".names a y", "0 0"), one))  # off-set buffer
+        inv = model(".names a y", "0 1")
+        self.assertEqual((1, 0), self.pair(model(".names a y", "1 0"), inv))
+        self.assertEqual((1, 1), self.pair(inv, one))
+
+    def test_constant_cover_is_generator(self) -> None:
+        one = model(".names y", "1")
+        self.assertEqual((1, 0), self.pair(model(".names a b y", "-- 1"), one))
+        self.assertEqual((1, 0), self.pair(model(".names a b y", "1- 1", "0- 1"), one))
+        self.assertEqual((1, 0), self.pair(model(".names a b y"), model(".names y")))
+        self.assertEqual((1, 0), self.pair(model(".names a y", "- 0"), model(".names y")))
+        self.assertEqual((1, 1), self.pair(model(".names a b y", "11 1"), one))
+
+    def test_clock_dropped(self) -> None:
+        a = model(".latch a q re clk 2", ".names q y", "1 1", ports=".inputs a clk\n.clock clk\n"
+                  ".outputs y")
+        b = model(".latch a q re clk 2", ".names q y", "1 1", ports=".inputs a clk\n.outputs y")
+        self.assertEqual((1, 0), self.pair(a, b))
+
+    def test_undriven_is_gnd(self) -> None:
+        # Odin II's no_input: an undriven net buffered to the output is written from gnd
+        a = model(".names gnd", ".names floating y", "1 1", ports=".inputs\n.outputs y")
+        b = model(".names gnd", ".names gnd y", "1 1", ports=".inputs\n.outputs y")
+        self.assertEqual((1, 0), self.pair(a, b))
+        no_driver = model(ports=".inputs\n.outputs y")
+        self.assertEqual((1, 0), self.pair(no_driver, b))
+
+    def test_written_twice_decodes_like_once(self) -> None:
+        # a primary output, so the canonical form keeps the name
+        ports = ".inputs a\n.outputs {}"
+        once = model(".names a $2%5Cbuffer", "1 1", ports=ports.format("$2%5Cbuffer"))
+        twice = model(".names a $2%255Cbuffer", "1 1", ports=ports.format("$2%255Cbuffer"))
+        self.assertEqual((1, 0), self.pair(once, twice))
+
+    def test_normalize_returns_a_copy(self) -> None:
+        net = blif.parse_text(model(".latch a q re clk 3", ".names q y", "1 1", "1 1"))
+        before = canon_text(model(".latch a q re clk 3", ".names q y", "1 1", "1 1"))
+        netlist_compare.vtr_normalize(net)
+        self.assertEqual(before, netlist_compare.canonicalize(net))
+
+    def test_decode_once_inverts_one_write(self) -> None:
+        rng = random.Random(3)
+        alphabet = b"%\\.#= \xfe\x01aerfFE025:outNIL[]"
+        names = [b"re", b"0", b"NIL", b".end", b"out:x", b"%re", b"%5C", b"a\\b", b"%FE", b"fe"]
+        names += [bytes(rng.choice(alphabet) for _ in range(rng.randint(1, 7)))
+                  for _ in range(5000)]
+        seen: dict[bytes, bytes] = {}
+        for name in names:
+            written = vb10_encode(name)
+            self.assertEqual(name, netlist_compare.vb10_decode_once(written), written)
+            self.assertEqual(written, vb10_encode(name))
+            self.assertEqual(seen.setdefault(written, name), name)  # injective
+
+    def test_vtr_rewrite(self) -> None:
+        w1 = b"# h\n.model m\n.inputs a%5Cb\n.outputs y\n.names a%5Cb \\\n  y\n1 1\n.end\n"
+        w2 = b"# h2\n\n.model m\n.inputs a%255Cb\n.outputs y\n.names a%255Cb y\n1 1\n.end\n"
+        fa, fb = self.write("w1.blif", w1), self.write("w2.blif", w2)
+        self.assertEqual(0, compare("--vtr-rewrite", fa, fb)[0])
+        self.assertEqual(1, compare("--vtr-rewrite", fa, fa)[0])  # escapes: not its own rewrite
+        # The counterexample (3E-1 final review carry): a%5Cb and a%255Cb both decode to a\b at
+        # the fixed point, so W2 written without escaping again (== W1) or escaped twice passes
+        # the fixed-point comparison; one decoding step tells them apart.
+        for bad in (w1, w2.replace(b"%255C", b"%25255C")):
+            with self.subTest(w2=bad):
+                fbad = self.write("bad.blif", bad)
+                code, out, _ = compare("--vtr-rewrite", fa, fbad)
+                self.assertEqual(1, code)
+                self.assertIn("one VB-10 decoding step", out)
+                self.assertEqual(netlist_compare.vtr_token_lines(w1, netlist_compare.vb10_decode),
+                                 netlist_compare.vtr_token_lines(bad, netlist_compare.vb10_decode))
+        self.assertEqual(2, compare("--vtr-rewrite", "--canon", fa)[0])
+        self.assertEqual(2, compare("--vtr-rewrite", fa, str(Path(self.tmp.name) / "none"))[0])
+
+    def test_vtr_rewrite_not_renamed(self) -> None:
+        w1 = b".model m\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
+        fa = self.write("w1.blif", w1)
+        self.assertEqual(0, compare("--vtr-rewrite", fa, fa)[0])
+        self.assertEqual(1, compare("--vtr-rewrite", fa,
+                                    self.write("w2.blif", w1.replace(b"1 1", b"0 1")))[0])
+
+
 if __name__ == "__main__":
     unittest.main()

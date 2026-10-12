@@ -849,6 +849,28 @@ if(BUILD_TESTING)
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
+    # 3E §16.3 step 5 (CI): the --vtr round trip on the copied goldens. Every Parmys sample is
+    # idempotent and netlist-compare-identical, dffsre and pow are refused (E1b, E5); the Odin II
+    # ff is identical under --vtr-normalize and equivalent (equiv-check), elsif_both_defined is
+    # refused (E12). The hand-written fixtures are no goldens and are skipped.
+    add_test(NAME blif_roundtrip_vtr_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                     --rt $<TARGET_FILE:odin3-blif-rt> --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                     --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib)
+    set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES LABELS unit)
+    if(ODIN3_WITH_ABC)
+        set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES
+            ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:abc>")
+    endif()
+    # Its negative: a damaged W1 must fail the oracles.
+    add_test(NAME blif_roundtrip_vtr_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip --vtr
+                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt
+                     --fixtures ${PROJECT_SOURCE_DIR}/tests/golden/blif
+                     --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib)
+    set_tests_properties(blif_roundtrip_vtr_detects_corruption PROPERTIES LABELS unit
+        PASS_REGULAR_EXPRESSION "RESULT: FAIL"
+        ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
     # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
     # lists) against the expected files, then blif-vtr-check --strict on every expected file
     # (vtr_fixtures.STRICT_EXCEPTIONS without --strict).

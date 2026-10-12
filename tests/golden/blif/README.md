@@ -73,3 +73,9 @@ CTest `blif_roundtrip_fixtures` runs `tools/blif-roundtrip/blif-roundtrip --fixt
 `*.blif` here (read, check FULL, write; normalized text identity; `netlist-compare`). No fixtures
 were added for it; `elsif_both_defined.odin.blif` is on the script's multi-driver list. The full
 golden run is `tools/blif-roundtrip/blif-roundtrip` with no arguments (see `docs/PHASE1.md`, 1C).
+
+CTest `blif_roundtrip_vtr_fixtures` runs `blif-roundtrip --vtr` (3E §16.3 step 5) over the
+`*.parmys.blif` and `*.odin.blif` here (the hand-written fixtures are skipped): the Parmys samples
+are idempotent and `netlist-compare`-identical, `dffsre` and `pow` are refused (E1b, E5), `ff.odin`
+is identical under `--vtr-normalize` and equivalent, and `elsif_both_defined.odin` is refused (E12).
+`blif_roundtrip_vtr_detects_corruption` checks that a damaged W1 fails it.

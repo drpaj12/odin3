@@ -5,6 +5,8 @@ Usage::
     netlist-compare A.blif B.blif     # exit 0 identical, 1 different (unified diff), 2 error
     netlist-compare --canon A.blif    # print the canonical form of A
     netlist-compare --implicit-models A.blif B.blif   # undefined $-models are black boxes
+    netlist-compare --vtr-normalize A.blif B.blif   # both after the --vtr rewrites (below)
+    netlist-compare --vtr-rewrite W1.blif W2.blif   # W2 = write_blif --vtr (read_blif W1)?
 
 Canonical form (per model; the first model stays first, the rest are sorted by name):
 
@@ -50,6 +52,22 @@ scalar port ``p`` (no ``p[0]``), an instance pin ``p[0]`` with no other bit of `
 ``p``.  Yosys 0.55's ``write_blif -blackbox`` writes such a pin for a parameterised black box whose
 port is 1 bit at the defaults but whose connection is wider (only bit 0 is written, as for every
 black-box pin), so the instance would otherwise name a port the model lacks.
+``--vtr-normalize`` (3E spec §16.3 step 3) applies ``write_blif --vtr``'s documented rewrites
+to both files before canonicalising (``vtr_normalize``): latch init 3 (or none) as 2; every
+input formal bit of a ``.subckt``'s model that the instance omits connected to ``unconn``;
+``.clock`` lines dropped; VB-10 names decoded to a fixed point (``vb10_decode``); a cover with
+inputs whose function is constant as a zero-input generator, and a 1-input cover as its one
+row. Beyond the plan's list (an agent default, 3E-4 Task 10): an undriven net read by a
+``.names`` or a ``.latch`` D as ``gnd``, by a ``.subckt`` input as ``unconn``, and an undriven
+primary output buffered from ``gnd`` (spec §9.2, as the writer does); then a ``.names gnd`` /
+``.names unconn`` generator where one is read but undriven. The files are read as bytes (a
+name may decode to any byte).
+
+``--vtr-rewrite W1 W2`` is §16.3 step 1's decoded comparison, not a structural one: W2 must be
+W1 read back and written again with ``write_blif --vtr``. W1's token lines (continuations
+joined, ``#`` lines dropped) must equal W2's after one VB-10 decoding step of every name
+(``vb10_decode_once``), which inverts one write exactly and is injective, so no name written
+wrongly can hide behind the fixed point (``a%5Cb`` and ``a%255Cb`` decode alike only there).
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -65,7 +83,7 @@ import math
 import re
 import sys
 from collections import Counter
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -91,11 +109,22 @@ MAX_TIE_PERMUTATIONS = 720
 MAX_UNIFIED_DIFF_LINES = 40000
 # Largest tied class whose members are each trial-individualized before choosing one.
 MAX_TRIALS = 64
+# A VB-10 escape (3E spec §10, plan point (o)): `%` and two upper-case hex digits is a byte;
+# `%` followed by anything else is rule 3's reserved-name prefix.
+VB10_ESCAPE = re.compile(rb"%([0-9A-F]{2})")
+VB10_PREFIX = b"%"
+# write_blif --vtr's names for an open hard-block input and its generator (3E spec §9).
+UNCONN = "unconn"
+GND = "gnd"
+# §6's normalisation evaluates covers of at most this many inputs (VB-12's largest K).
+MAX_NORMALIZE_INPUTS = 16
+HEX = 16
 
 
 def _h(*parts: str) -> str:
     """Content hash used for labels (stable across processes, unlike hash())."""
-    return hashlib.blake2b("\x1f".join(parts).encode(), digest_size=12).hexdigest()
+    return hashlib.blake2b("\x1f".join(parts).encode("utf-8", "surrogateescape"),
+                           digest_size=12).hexdigest()
 
 
 # --------------------------------------------------------------------------- labelling
@@ -679,6 +708,184 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
     netlist = blif.parse_text(text + stubs, path)
     _set_inputs(netlist, implicit)
     return netlist
+# --------------------------------------------------------------------------- --vtr rewrites
+
+
+def vb10_decode_once(name: bytes) -> bytes:
+    """One VB-10 decoding step: rule 3's `%` prefix (a leading `%` not followed by two upper-case
+    hex digits) dropped, then every `%XX` replaced by its byte. It inverts one write exactly
+    (plan point (o)), so it is injective over written names."""
+    if name.startswith(VB10_PREFIX) and VB10_ESCAPE.match(name) is None:
+        name = name[len(VB10_PREFIX):]
+    return VB10_ESCAPE.sub(lambda m: bytes([int(m[1], HEX)]), name)
+
+
+def vb10_decode(name: bytes) -> bytes:
+    """vb10_decode_once repeated until nothing changes, so a name written twice (`%255C`) decodes
+    like one written once (`%5C`), both to `\\` (3E spec §16.3 step 1). Not injective."""
+    while True:
+        step = vb10_decode_once(name)
+        if step == name:
+            return name
+        name = step
+
+
+def decode_name(name: str) -> str:
+    """vb10_decode of a name read with surrogateescape (bytes that are not UTF-8 survive)."""
+    if "%" not in name:
+        return name
+    raw = name.encode("utf-8", "surrogateescape")
+    return vb10_decode(raw).decode("utf-8", "surrogateescape")
+
+
+def vtr_token_lines(
+    text: bytes, decode: Callable[[bytes], bytes] | None = None
+) -> list[list[bytes]]:
+    """A --vtr file as token lines: ` \\` continuations joined, blank lines and `#` comment lines
+    dropped, and, when decode is given, every name (each side of a `formal=actual`) decoded."""
+    lines = []
+    for line in text.replace(b"\\\n", b" ").split(b"\n"):
+        tokens = line.split()
+        if not tokens or tokens[0].startswith(b"#"):
+            continue
+        if decode is not None:
+            tokens = [b"=".join(decode(part) for part in tok.split(b"=")) for tok in tokens]
+        lines.append(tokens)
+    return lines
+
+
+def vtr_rewrite_same(w1: bytes, w2: bytes) -> bool:
+    """True when w2 is w1 written again by write_blif --vtr: w1's token lines equal w2's after one
+    VB-10 step (vb10_decode_once). Holds whether or not the write legalised names."""
+    return vtr_token_lines(w1) == vtr_token_lines(w2, vb10_decode_once)
+
+
+def _var_mask(i: int, n_inputs: int) -> int:
+    """The truth table (bit m = minterm m, input i = bit i of m) of input i alone."""
+    half = 1 << i
+    mask = ((1 << half) - 1) << half
+    width = 2 * half
+    while width < 1 << n_inputs:
+        mask |= mask << width
+        width *= 2
+    return mask
+
+
+def cover_function(n_inputs: int, rows: Sequence[tuple[str, str]]) -> int:
+    """The truth table of a cover over n_inputs (BLIF: no rows is constant 0; rows with output
+    0 give the off-set)."""
+    full = (1 << (1 << n_inputs)) - 1
+    masks = [_var_mask(i, n_inputs) for i in range(n_inputs)]
+    onset = 0
+    for plane, _ in rows:
+        cube = full
+        for i, char in enumerate(plane):
+            if char == "1":
+                cube &= masks[i]
+            elif char == "0":
+                cube &= full ^ masks[i]
+        onset |= cube
+    return full ^ onset if rows and rows[0][1] == "0" else onset
+
+
+def _normalize_names(cell: blif.Names) -> blif.Names:
+    """§6: a constant cover with inputs as the zero-input generator, a 1-input cover as one
+    row (`1 1` or `0 1`); any other cover (or one wider than 16 inputs) unchanged."""
+    k = len(cell.inputs)
+    if k == 0 or k > MAX_NORMALIZE_INPUTS:
+        return cell
+    table = cover_function(k, cell.rows)
+    full = (1 << (1 << k)) - 1
+    if table in (0, full):
+        rows = [("", "1")] if table == full else []
+        return blif.Names([], cell.output, rows, cell.attrs, cell.line)
+    if k == 1:
+        return blif.Names(cell.inputs, cell.output, [("1" if table == 0b10 else "0", "1")],
+                          cell.attrs, cell.line)
+    return cell
+
+
+def _decode_cell(cell: blif.Cell) -> blif.Cell:
+    dn = decode_name
+    if isinstance(cell, blif.Names):
+        return blif.Names([dn(n) for n in cell.inputs], dn(cell.output), list(cell.rows),
+                          list(cell.attrs), cell.line)
+    if isinstance(cell, blif.Latch):
+        control = None if cell.control is None else dn(cell.control)
+        return blif.Latch(dn(cell.input), dn(cell.output), cell.ltype, control, cell.init,
+                          list(cell.attrs), cell.line)
+    conns = [(dn(f), dn(a)) for f, a in cell.conns]
+    return blif.Subckt(dn(cell.model), conns, list(cell.attrs), cell.line)
+
+
+def _normalize_cell(cell: blif.Cell, models: dict[str, blif.Model]) -> blif.Cell:
+    if isinstance(cell, blif.Names):
+        return _normalize_names(cell)
+    if isinstance(cell, blif.Latch):
+        if cell.init in (None, "3"):
+            cell.init = "2"
+        return cell
+    sub = models.get(cell.model)
+    if sub is not None:
+        connected = {formal for formal, _ in cell.conns}
+        cell.conns += [(f, UNCONN) for f in sub.inputs if f not in connected]
+    return cell
+
+
+def _undriven_to_constants(model: blif.Model, models: dict[str, blif.Model]) -> None:
+    """§7 item 4 and §9.2: an undriven net on a `.names` input or a `.latch` D as `gnd`, on a
+    `.subckt` input as `unconn`; an undriven primary output buffered from `gnd`."""
+    driven = set(model.inputs)
+    for cell in model.cells:
+        driven.update(blif.cell_io(cell, models)[1])
+    for cell in model.cells:
+        if isinstance(cell, blif.Names):
+            cell.inputs = [n if n in driven else GND for n in cell.inputs]
+        elif isinstance(cell, blif.Latch):
+            cell.input = cell.input if cell.input in driven else GND
+        else:
+            outs = set(models[cell.model].outputs) if cell.model in models else set()
+            cell.conns = [(f, a if a in driven or f in outs else UNCONN) for f, a in cell.conns]
+    for out in dict.fromkeys(model.outputs):
+        if out not in driven:
+            model.cells.append(blif.Names([GND], out, [("1", "1")]))
+
+
+def _drive_generators(model: blif.Model, models: dict[str, blif.Model]) -> None:
+    """Adds `.names gnd` / `.names unconn` (constant 0) for each the model reads and nothing
+    drives."""
+    driven = set(model.inputs)
+    read: set[str] = set()
+    for cell in model.cells:
+        ins, outs = blif.cell_io(cell, models)
+        driven.update(outs)
+        read.update(ins)
+    for name in (GND, UNCONN):
+        if name in read and name not in driven:
+            model.cells.append(blif.Names([], name))
+
+
+def vtr_normalize(netlist: blif.Netlist) -> blif.Netlist:
+    """A copy of netlist with write_blif --vtr's documented rewrites applied (3E spec §16.3
+    step 3): VB-10 names decoded to a fixed point; `.clock` lines dropped; latch init 3 (or
+    none) as 2; a `.subckt`'s omitted input formal bits (its model's) as `=unconn`; an undriven
+    net read by a `.names` or a `.latch` D as `gnd`, by a `.subckt` input as `unconn`, and an
+    undriven primary output buffered from `gnd` (§9.2); §6's constant and 1-input covers; and
+    the `gnd`/`unconn` generators where these rewrites read one that nothing drives."""
+    dn = decode_name
+    models = [
+        blif.Model(dn(m.name), [dn(p) for p in m.inputs], [dn(p) for p in m.outputs], [],
+                   [_decode_cell(c) for c in m.cells], m.blackbox, m.line)
+        for m in netlist.models
+    ]
+    by_name = {m.name: m for m in models}
+    for model in models:
+        if model.blackbox:
+            continue
+        model.cells = [_normalize_cell(c, by_name) for c in model.cells]
+        _undriven_to_constants(model, by_name)
+        _drive_generators(model, by_name)
+    return blif.Netlist(netlist.path, models)
 
 
 # --------------------------------------------------------------------------- CLI
@@ -718,7 +925,52 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--quiet", action="store_true", help="no diff output, exit code only")
     ap.add_argument("--implicit-models", action="store_true",
                     help="an undefined $-model is a black box whose formals are those used")
+    ap.add_argument("--vtr-normalize", action="store_true",
+                    help="apply write_blif --vtr's documented rewrites to both files first")
+    ap.add_argument("--vtr-rewrite", action="store_true",
+                    help="the second file is the first written again by write_blif --vtr: "
+                    "compare token lines after one VB-10 decoding step of the second")
     return ap
+
+
+def _printable(text: str) -> str:
+    """text with any byte that is not UTF-8 (read with surrogateescape) shown as an escape."""
+    return text.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def _read_bytes(path: str) -> bytes:
+    try:
+        return Path(path).read_bytes()
+    except OSError as exc:
+        raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
+
+
+def _load(path: str, vtr: bool) -> blif.Netlist:
+    """The parsed file; with vtr, read as bytes (surrogateescape) and vtr_normalize'd."""
+    if not vtr:
+        return blif.parse_file(path)
+    text = _read_bytes(path).decode("utf-8", "surrogateescape")
+    return vtr_normalize(blif.parse_text(text, path))
+
+
+def _rewrite_diff(w1: bytes, w2: bytes, name_a: str, name_b: str) -> list[str]:
+    def text(lines: list[list[bytes]]) -> str:
+        joined = "\n".join(b" ".join(tokens).decode("utf-8", "surrogateescape") for tokens in lines)
+        return _printable(joined)
+
+    once = f"{name_b} (one VB-10 decoding step)"
+    return diff_lines(text(vtr_token_lines(w1)), text(vtr_token_lines(w2, vb10_decode_once)),
+                      name_a, once)
+
+
+def _vtr_rewrite(files: list[str], quiet: bool) -> int:
+    w1, w2 = (_read_bytes(f) for f in files)
+    if vtr_rewrite_same(w1, w2):
+        return 0
+    if not quiet:
+        for line in _rewrite_diff(w1, w2, files[0], files[1]):
+            print(line)
+    return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -727,19 +979,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     files: list[str] = args.files
     if len(files) != (1 if args.canon else 2):
         ap.error("--canon takes one file" if args.canon else "expected two files")
+    if args.vtr_rewrite and (args.canon or args.vtr_normalize or args.keep_attrs):
+        ap.error("--vtr-rewrite compares token lines; it takes no other option but --quiet")
     try:
         canon = [canonicalize(load(f, args.implicit_models), args.keep_attrs) for f in files]
+        if args.vtr_rewrite:
+            return _vtr_rewrite(files, args.quiet)
+        canon = [canonicalize(_load(f, args.vtr_normalize), args.keep_attrs) for f in files]
     except blif.BlifError as exc:
-        print(f"{TOOL}: {exc}", file=sys.stderr)
+        print(f"{TOOL}: {_printable(str(exc))}", file=sys.stderr)
         return 2
     if args.canon:
-        sys.stdout.write(canon[0])
+        sys.stdout.write(_printable(canon[0]))
         return 0
     if canon[0] == canon[1]:
         return 0
     if not args.quiet:
         for line in diff_lines(canon[0], canon[1], files[0], files[1]):
-            print(line)
+            print(_printable(line))
     return 1
 
 
