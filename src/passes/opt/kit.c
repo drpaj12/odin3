@@ -140,11 +140,11 @@ void odin3_kit_truncate(odin3_vec *vec, size_t len) {
 }
 
 void odin3_kit_sort_unify(odin3_vec *vec, size_t from) {
+    if (vec->data == NULL || vec->len - from < 2) {
+        return; /* nothing to sort (and no pointer arithmetic on a null storage) */
+    }
     uint64_t *data = (uint64_t *)vec->data + from;
     size_t count = vec->len - from;
-    if (count < 2) {
-        return;
-    }
     qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
     size_t kept = 1;
     for (size_t i = 1; i < count; i++) {

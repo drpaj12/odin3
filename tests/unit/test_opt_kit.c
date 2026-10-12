@@ -1080,6 +1080,33 @@ static void test_vec_helpers(void) {
     odin3_vec_free(&vec);
 }
 
+/* Every helper on an empty vec that never allocated (data NULL): no pointer arithmetic on NULL,
+ * which clang's UBSan reports, and no lookup in a type without ports or parameters. */
+static void test_helpers_empty(void) {
+    odin3_vec vec;
+    odin3_vec_init(&vec, sizeof(uint64_t));
+    TEST_ASSERT_NULL(vec.data);
+    odin3_kit_sort_unify(&vec, 0);
+    odin3_kit_truncate(&vec, 0);
+    odin3_kit_truncate(&vec, 3);
+    TEST_ASSERT_EQUAL_UINT64(0, vec.len);
+    TEST_ASSERT_NULL(vec.data);
+    odin3_vec one;
+    odin3_vec_init(&one, sizeof(uint32_t));
+    odin3_kit_truncate(&one, 0);
+    TEST_ASSERT_NULL(one.data);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_push_u32(&one, 7));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_push_u64(&vec, 7));
+    odin3_kit_sort_unify(&vec, 1); /* from == len */
+    TEST_ASSERT_EQUAL_UINT64(1, vec.len);
+    odin3_vec_free(&one);
+    odin3_vec_free(&vec);
+    odin3_celltype_def bare;
+    memset(&bare, 0, sizeof bare);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_KIT_NONE, odin3_kit_port_index(&bare, "A"));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_KIT_NONE, odin3_kit_param_index(&bare, "WIDTH"));
+}
+
 /* The log label of a node: its name, else $c<ID>, truncated to the buffer. */
 static void test_node_label(void) {
     build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
@@ -1145,6 +1172,7 @@ int main(void) {
     RUN_TEST(test_reads_oom);
     RUN_TEST(test_limits_clamped);
     RUN_TEST(test_vec_helpers);
+    RUN_TEST(test_helpers_empty);
     RUN_TEST(test_node_label);
     RUN_TEST(test_name_lookup);
     return UNITY_END();

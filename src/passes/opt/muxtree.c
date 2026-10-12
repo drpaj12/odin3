@@ -155,6 +155,16 @@ static void state_free(mux_state *ms) {
     odin3_util_free(ms->overlay);
 }
 
+/* Storage of a uint64_t / uint32_t vec from element off on; NULL for a vec that never allocated
+ * (clang's UBSan rejects a zero offset on a null pointer). */
+static const uint64_t *u64_from(const odin3_vec *vec, size_t off) {
+    return vec->data == NULL ? NULL : (const uint64_t *)vec->data + off;
+}
+
+static const uint32_t *u32_from(const odin3_vec *vec, size_t off) {
+    return vec->data == NULL ? NULL : (const uint32_t *)vec->data + off;
+}
+
 static odin3_net_id pin_net_at(const mux_state *ms, odin3_pinslice ps, uint32_t bit) {
     return odin3_pin_net(ms->m, (odin3_pin_id){ps.first.v + bit});
 }
@@ -387,7 +397,7 @@ static odin3_status collect_pairs(mux_state *ms) {
         const mux_info *mi = &ms->mx[user];
         for (uint32_t port = 0; port < mi->n_ports; port++) {
             const port_info *pi = &ms->pt[mi->port0 + port];
-            const uint64_t *in = (const uint64_t *)ms->inmux.data + pi->first;
+            const uint64_t *in = u64_from(&ms->inmux, pi->first);
             for (uint32_t k = 0; k < pi->count; k++) {
                 if (odin3_kit_push_u64(&ms->pairs, (in[k] << PAIR_SHIFT) | user) != ODIN3_OK ||
                     odin3_kit_push_u64(&ms->portpairs,
@@ -494,7 +504,7 @@ static void port_knowledge(mux_state *ms, const mux_info *mi, uint32_t port, boo
 
 /* True when net is one of the (non-constant) selects of mi. */
 static bool is_select(const mux_state *ms, const mux_info *mi, uint32_t net) {
-    const uint64_t *sel = (const uint64_t *)ms->ctrls.data + mi->ctrl0;
+    const uint64_t *sel = u64_from(&ms->ctrls, mi->ctrl0);
     uint32_t lo = 0;
     uint32_t hi = mi->n_ctrl;
     while (lo < hi) {
@@ -632,7 +642,7 @@ static odin3_status port_enter(mux_state *ms, frame *fr) {
     port_knowledge(ms, mi, fr->port, true);
     fr->par0 = (uint32_t)ms->parents.len;
     fr->npar = 0;
-    const uint64_t *in = (const uint64_t *)ms->inmux.data + pi->first;
+    const uint64_t *in = u64_from(&ms->inmux, pi->first);
     for (uint32_t k = 0; k < pi->count; k++) {
         mux_info *parent = &ms->mx[in[k]];
         if (parent->visited) {
@@ -650,7 +660,7 @@ static odin3_status port_enter(mux_state *ms, frame *fr) {
 
 /* The end of eval_mux_port: the parents are unmarked, the knowledge is given back. */
 static void port_leave(mux_state *ms, const frame *fr) {
-    const uint32_t *parent = (const uint32_t *)ms->parents.data + fr->par0;
+    const uint32_t *parent = u32_from(&ms->parents, fr->par0);
     for (uint32_t k = 0; k < fr->npar; k++) {
         ms->mx[parent[k]].visited = 0;
     }
