@@ -67,6 +67,7 @@
       }
     ],
     "flow": "flow/synth.o3",
+    "abc_script": null,
     "output": null,
     "ignored": [],
     "duplicates": []

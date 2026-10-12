@@ -27,6 +27,7 @@
     "inventory": [],
     "overrides": [],
     "flow": null,
+    "abc_script": null,
     "output": null,
     "ignored": [],
     "duplicates": []
