@@ -2,7 +2,8 @@
  * test_blif_vtr.c — unit tests for write_blif --vtr (spec 3E §16.1): options, arguments, the API's
  * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2); the preflight's
  * refusals E1-E12, its cap, the source classes and the report (3E Task 3); emission: the header,
- * generators, cells, latches and port buffers (3E Task 4).
+ * generators, cells, latches and port buffers (3E Task 4); hard blocks: the sorted .subckt
+ * formals, clock pins and the stubs, and Task 4's review minors (3E Task 5).
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
@@ -18,6 +19,7 @@
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 #include "proc_fixture.h"
+#include "techlib/reader.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/attr.h"
@@ -462,13 +464,19 @@ static void test_vtr_omits_clock_and_models(void) {
 }
 
 /* ansiportlist_2's declared black boxes adder and multiply, read after lib/vtr.o3lib (else E6):
- * their instances stay (Task 5 adds the stubs), their declared models are not written. */
+ * their instances stay, and their declared models come back as the stubs (§8.3), as declared and
+ * sorted by name, after the top's .end. */
 static void test_vtr_omits_declared_blackboxes(void) {
     read_golden_with("ansiportlist_2.parmys", true);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
-    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".model "));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".blackbox"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_of(out.data, ".model "));
+    TEST_ASSERT_EQUAL_UINT32(2, count_of(out.data, ".blackbox"));
     TEST_ASSERT_NOT_NULL(strstr(out.data, ".subckt adder "));
+    const char *adder =
+        strstr(out.data, "\n.end\n\n.model adder\n.inputs cin b a\n"
+                         ".outputs sumout cout\n.blackbox\n.end\n\n.model multiply\n"
+                         ".inputs b[0] b[1] ");
+    TEST_ASSERT_NOT_NULL_MESSAGE(adder, out.data);
 }
 
 /* --- the API's own refusals (plan 3E point (n)) ---------------------------------------------- */
@@ -2278,7 +2286,8 @@ static void test_generators_in_order(void) {
     TEST_ASSERT_EQUAL_STRING(".inputs x y z\n.outputs s c t\n.names gnd\n.names vcc\n1\n"
                              ".names unconn\n"
                              ".subckt adder a=gnd b=vcc cin=unconn cout=c sumout=s\n"
-                             ".names x y vcc t\n111 1\n.end\n",
+                             ".names x y vcc t\n111 1\n.end\n\n.model adder\n.inputs a b cin\n"
+                             ".outputs cout sumout\n.blackbox\n.end\n",
                              write_vtr());
     odin3_blif_vtr_report report = vtr_report();
     TEST_ASSERT_EQUAL_UINT32(1, report.x_to_unconn);
@@ -2311,7 +2320,7 @@ static void test_summary_line(void) {
                               "(adder 3, single_port_ram 1), K=6; x bits: 0 to gnd, 1 open "
                               "(unconn)\n"),
         tc.log.data);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " addr[0]=unconn "), out.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " addr=unconn "), out.data); /* 1 bit (§8.2) */
     bvt_free(&tc);
     read_ok(GATES, false);
     write_vtr();
@@ -2379,6 +2388,328 @@ static void test_out_of_memory_sweep_gates(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
     TEST_ASSERT_EQUAL_STRING(text_of(&out), text_of(&api));
     odin3_strbuf_free(&api);
+}
+
+/* --- Task 5: hard blocks, formals, clock pins and stubs (spec 3E §8) -------------------------- */
+
+static odin3_strbuf flat;
+
+/* Appends piece to text. */
+static void put(odin3_strbuf *text, const char *piece) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(text, odin3_bytes_cstr(piece)));
+}
+
+/* text with its ` \` line continuations joined (the logical lines), in flat. */
+static const char *unwrapped(const char *text) {
+    static const char mark[] = " \\\n  ";
+    odin3_strbuf_clear(&flat);
+    for (const char *at = text; *at != '\0';) {
+        const char *cont = strstr(at, mark);
+        size_t len = cont != NULL ? (size_t)(cont - at) : strlen(at);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&flat, (odin3_bytes){at, len}));
+        if (cont != NULL) {
+            put(&flat, " ");
+        }
+        at += cont != NULL ? len + strlen(mark) : len;
+    }
+    return text_of(&flat);
+}
+
+/* The ID of the n-th (from 0) live node of the top whose type is named type. */
+static uint32_t nth_node(const char *type, uint32_t n) {
+    odin3_module *top = top_of();
+    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(top, node) &&
+            strcmp(odin3_celltype_get(tc.design, odin3_node_type(top, node))->name, type) == 0 &&
+            n-- == 0) {
+            return i;
+        }
+    }
+    TEST_FAIL_MESSAGE(type);
+    return 0;
+}
+
+/* Appends ` <port>[0]=<net> … <port>[width-1]=<net>` to text. */
+static void formals_on(odin3_strbuf *text, const char *port, uint32_t width, const char *net) {
+    for (uint32_t k = 0; k < width; k++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_strbuf_appendf(text, " %s[%u]=%s", port, (unsigned)k, net));
+    }
+}
+
+/* Appends ` <word>[0] … <word>[width-1]` to text. */
+static void bits_of(odin3_strbuf *text, const char *word, uint32_t width) {
+    for (uint32_t k = 0; k < width; k++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(text, " %s[%u]", word, (unsigned)k));
+    }
+}
+
+/* A single_port_ram (15 address bits, 2 data bits) read from a file whose formals are in library
+ * order (clk data addr we out) is written addr[0] … addr[14] clk data[0] data[1] out[0] out[1]
+ * we (§8.2), and the undeclared cell's stub keeps the library order (§8.3). */
+static void test_formals_sorted(void) {
+    odin3_strbuf text;
+    odin3_strbuf want;
+    odin3_strbuf_init(&text);
+    odin3_strbuf_init(&want);
+    put(&text, ".model top\n.inputs c d a w\n"
+               ".outputs o0 o1\n"
+               ".subckt single_port_ram clk=c "
+               "data[0]=d data[1]=d");
+    formals_on(&text, "addr", 15, "a");
+    put(&text, " we=w out[0]=o0 out[1]=o1\n"
+               ".end\n");
+    read_ok(text.data, true);
+    put(&want, ".inputs c d a w\n.outputs o0 o1\n"
+               ".subckt single_port_ram");
+    formals_on(&want, "addr", 15, "a");
+    put(&want, " clk=c data[0]=d data[1]=d out[0]=o0 "
+               "out[1]=o1 we=w\n.end\n\n"
+               ".model single_port_ram\n.inputs clk "
+               "data[0] data[1]");
+    bits_of(&want, "addr", 15);
+    put(&want, " we\n.outputs out[0] out[1]\n"
+               ".blackbox\n.end\n");
+    TEST_ASSERT_EQUAL_STRING(want.data, unwrapped(write_vtr()));
+    odin3_strbuf_free(&text);
+    odin3_strbuf_free(&want);
+}
+
+/* A 1-bit data slice: `data=` and `out=` (Parmys's scalars), in the formals and in the stub. */
+static void test_ram_one_bit_slice_scalar(void) {
+    read_ok(".model top\n.inputs c d a0 a1 w\n.outputs o\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 addr[1]=a1 we=w out[0]=o\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_STRING(".inputs c d a0 a1 w\n.outputs o\n"
+                             ".subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=c data=d out=o "
+                             "we=w\n.end\n\n.model single_port_ram\n.inputs clk data addr[0] "
+                             "addr[1] we\n.outputs out\n.blackbox\n.end\n",
+                             unwrapped(write_vtr()));
+}
+
+/* An adder with cout unconnected: `cout=$p<pin ID>`, so every output bit is written and the
+ * block keeps a name of its own (R12); two such adders get distinct names. */
+static void test_subckt_unconnected_outputs_named(void) {
+    read_ok(".model top\n.inputs x y z\n.outputs s1 s2\n"
+            ".subckt adder a=x b=y cin=z sumout=s1\n.subckt adder a=x b=y cin=z sumout=s2\n.end\n",
+            true);
+    odin3_module *top = top_of();
+    uint32_t cout1 = odin3_node_port(top, (odin3_node_id){nth_node("adder", 0)}, 3).first.v;
+    uint32_t cout2 = odin3_node_port(top, (odin3_node_id){nth_node("adder", 1)}, 3).first.v;
+    TEST_ASSERT_NOT_EQUAL(cout1, cout2);
+    TEST_ASSERT_EQUAL_STRING(line_of(".inputs x y z\n.outputs s1 s2\n"
+                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=s1\n"
+                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=s2\n.end\n\n"
+                                     ".model adder\n.inputs a b cin\n.outputs cout sumout\n"
+                                     ".blackbox\n.end\n",
+                                     cout1, cout2),
+                             write_vtr());
+}
+
+/* A hand-built RAM (library loaded, so <loc> is the top) whose clk is on $_CONST0_: written
+ * `clk=gnd`, with the hard-cell clock warning. */
+static void test_ram_clock_constant(void) {
+    odin3_module *top = hand_top();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(tc.design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
+    odin3_net_id a_net = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_net_id w_net = hand_scalar(top, "w", ODIN3_DIR_IN);
+    odin3_net_id o_net = hand_scalar(top, "o", ODIN3_DIR_OUT);
+    odin3_value params[2] = {odin3_value_int(1), odin3_value_int(1)}; /* ADDR_WIDTH DATA_WIDTH */
+    odin3_node_id ram = hand_cell(top, "single_port_ram", params, 2);
+    pin_onto(ram, 0, const_net("$_CONST0_"));
+    pin_onto(ram, 1, d_net);
+    pin_onto(ram, 2, a_net);
+    pin_onto(ram, 3, w_net);
+    pin_onto(ram, 4, o_net);
+    TEST_ASSERT_EQUAL_STRING(".inputs d a w\n.outputs o\n.names gnd\n"
+                             ".subckt single_port_ram addr=a clk=gnd data=d out=o we=w\n.end\n\n"
+                             ".model single_port_ram\n.inputs clk data addr we\n.outputs out\n"
+                             ".blackbox\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: top: single_port_ram '$c%u': clock "
+                                      "input 'clk' is the constant 0; VPR will never clock it\n",
+                                      ram.v)),
+        tc.log.data);
+}
+
+/* Appends `.subckt multiply` with a[0..a-1] and b[0..b-1] on i and out[0] on out_net. */
+static void multiply_line(odin3_strbuf *text, uint32_t a_width, uint32_t b_width,
+                          const char *out_net) {
+    put(text, ".subckt multiply");
+    formals_on(text, "a", a_width, "i");
+    formals_on(text, "b", b_width, "i");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(text, " out[0]=%s\n", out_net));
+}
+
+/* Two multiply nodes with a widths 8 and 12 (b 8 and 4): the stub has each port at its widest,
+ * a[0] … a[11], b[0] … b[7], out[0] … out[15], in library order (a b out). */
+static void test_stub_width_max(void) {
+    odin3_strbuf text;
+    odin3_strbuf want;
+    odin3_strbuf_init(&text);
+    odin3_strbuf_init(&want);
+    put(&text, ".model top\n.inputs i\n"
+               ".outputs p q\n");
+    multiply_line(&text, 8, 8, "p");
+    multiply_line(&text, 12, 4, "q");
+    put(&text, ".end\n");
+    read_ok(text.data, true);
+    const char *body = unwrapped(write_vtr());
+    put(&want, "\n.end\n\n.model multiply\n"
+               ".inputs");
+    bits_of(&want, "a", 12);
+    bits_of(&want, "b", 8);
+    put(&want, "\n.outputs");
+    bits_of(&want, "out", 16);
+    put(&want, "\n.blackbox\n.end\n");
+    TEST_ASSERT_TRUE_MESSAGE(ends_with(body, want.data), body);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(body, ".blackbox"));
+    odin3_strbuf_free(&text);
+    odin3_strbuf_free(&want);
+}
+
+/* A declared multiply with ports in the order b a out: its stub keeps that order (the formals are
+ * still sorted). */
+static void test_stub_declared_order_kept(void) {
+    read_ok(".model top\n.inputs i\n.outputs o p q r\n"
+            ".subckt multiply a[0]=i a[1]=i b[0]=i b[1]=i out[0]=o out[1]=p out[2]=q out[3]=r\n"
+            ".end\n\n.model multiply\n.inputs b[0] b[1] a[0] a[1]\n"
+            ".outputs out[0] out[1] out[2] out[3]\n.blackbox\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_STRING(".inputs i\n.outputs o p q r\n"
+                             ".subckt multiply a[0]=i a[1]=i b[0]=i b[1]=i out[0]=o out[1]=p "
+                             "out[2]=q out[3]=r\n.end\n\n.model multiply\n"
+                             ".inputs b[0] b[1] a[0] a[1]\n.outputs out[0] out[1] out[2] out[3]\n"
+                             ".blackbox\n.end\n",
+                             unwrapped(write_vtr()));
+}
+
+/* A declared adder with no live node gets no stub (VPR checks every stub against the arch). */
+static void test_stub_unused_dropped(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n\n"
+            ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names a y\n1 1\n.end\n", write_vtr());
+}
+
+/* Task 4 review M1 (§7 item 3): a clock whose driver §6 writes as a constant generator (a cover
+ * with inputs whose function is constant) warns as a constant clock does. */
+static void test_clock_constant_cover_warns(void) {
+    read_ok(".model top\n.inputs a d e w\n.outputs q o\n.names a k1\n- 1\n.names a k0\n"
+            ".latch d q re k1 2\n"
+            ".subckt single_port_ram clk=k0 data[0]=d addr[0]=e we=w out[0]=o\n.end\n",
+            true);
+    const char *body = write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, ".names k1\n1\n.names k0\n.latch d q re k1 2\n"),
+                                 body);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: t.blif:7: $_DFF_P_ '$c%u': clock "
+                                      "is the constant 1; VPR will never clock it\n",
+                                      node_of("$_DFF_P_"))),
+        tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: t.blif:8: single_port_ram '$c%u': "
+                                      "clock input 'clk' is the constant 0; VPR will never clock "
+                                      "it\n",
+                                      node_of("single_port_ram"))),
+        tc.log.data);
+}
+
+/* Task 4 review M2: the summary line is logged only once the file is written. */
+static void test_summary_after_write(void) {
+    read_ok(GATES, false);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, bvt_write(&tc, "--vtr no-such-dir/out.blif", &out));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, count_of(tc.log.data, "'top': 9 .names"), tc.log.data);
+    write_vtr();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_of(tc.log.data, "'top': 9 .names"), tc.log.data);
+}
+
+/* Task 4 review M5: a constant 8-input cover (a truth table of 4 words) under --lut-k 8. */
+static void test_constant_cover_k8(void) {
+    read_ok(".model top\n.inputs a\n.outputs y z\n.names a a a a a a a a y\n-------- 1\n"
+            ".names a a a a a a a a z\n1------- 1\n0------- 1\n.end\n",
+            false);
+    uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
+    TEST_ASSERT_TRUE(odin3_blif_vtr_eval(top_of(), (odin3_node_id){nth_node("$sop", 1)}, tt));
+    for (uint32_t word = 0; word < 4; word++) {
+        TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, tt[word]);
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr --lut-k 8 out.blif", &out),
+                                  tc.log.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "\n.names y\n1\n.names z\n1\n.end\n"), out.data);
+}
+
+/* Task 4 review M6: an output-port bit on Parmys's `unconn` net itself is buffered from unconn
+ * (VPR: open), not written as a constant 0; a gate's unconnected output is its `$p<pin ID>`. */
+static void test_output_on_unconn_and_open_gate_output(void) {
+    odin3_module *top = hand_top();
+    odin3_node_id sop = hand_sop(top, 0, "");
+    odin3_net_id y_net = odin3_pin_net(top, odin3_node_port(top, sop, 1).first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, y_net, intern("unconn")));
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names unconn\n.names unconn y\n1 1\n.end\n",
+                             write_vtr());
+    bvt_free(&tc);
+    top = hand_top();
+    odin3_net_id a_net = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_node_id gate = hand_cell(top, "$_AND_", NULL, 0);
+    pin_onto(gate, 0, a_net);
+    pin_onto(gate, 1, a_net);
+    TEST_ASSERT_EQUAL_STRING(
+        line_of(".inputs a\n.names a a $p%u\n11 1\n.end\n", odin3_node_port(top, gate, 2).first.v),
+        write_vtr());
+}
+
+/* The OOM sweep over a write with stubs: a declared adder (as declared) and an undeclared RAM
+ * (write_lib_stub's scratch). */
+static void test_out_of_memory_sweep_stubs(void) {
+    char path[PATH_BUF];
+    read_ok(".model top\n.inputs c d a w x y\n.outputs o s\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a we=w out[0]=o\n"
+            ".subckt adder a=x b=y sumout=s\n.end\n\n"
+            ".model adder\n.inputs cin b a\n.outputs sumout cout\n.blackbox\n.end\n",
+            true);
+    path_in_dir("api.blif", path);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        done = api_oom_step(fail_at, path, &opts);
+    }
+    TEST_ASSERT_TRUE(done);
+    odin3_strbuf api;
+    odin3_strbuf_init(&api);
+    slurp_into(path, &api);
+    const char *body = write_vtr();
+    TEST_ASSERT_EQUAL_STRING(text_of(&out), text_of(&api));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\n.end\n\n.model adder\n.inputs cin b a\n"
+                                              ".outputs sumout cout\n.blackbox\n.end\n\n"
+                                              ".model single_port_ram\n.inputs clk data addr we\n"
+                                              ".outputs out\n.blackbox\n.end\n"),
+                                 body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "a=x b=y cin=unconn cout=$p"), body);
+    odin3_strbuf_free(&api);
+}
+
+/* Task 5: hard blocks. */
+static void run_task_5(void) {
+    RUN_TEST(test_formals_sorted);
+    RUN_TEST(test_ram_one_bit_slice_scalar);
+    RUN_TEST(test_subckt_unconnected_outputs_named);
+    RUN_TEST(test_ram_clock_constant);
+    RUN_TEST(test_stub_width_max);
+    RUN_TEST(test_stub_declared_order_kept);
+    RUN_TEST(test_stub_unused_dropped);
+    RUN_TEST(test_clock_constant_cover_warns);
+    RUN_TEST(test_summary_after_write);
+    RUN_TEST(test_constant_cover_k8);
+    RUN_TEST(test_output_on_unconn_and_open_gate_output);
+    RUN_TEST(test_out_of_memory_sweep_stubs);
+    odin3_strbuf_free(&flat);
 }
 
 /* Task 4: emission. */
@@ -2493,5 +2824,6 @@ int main(void) {
     run_tasks_1_2();
     run_task_3_and_more();
     run_task_4();
+    run_task_5();
     return UNITY_END();
 }

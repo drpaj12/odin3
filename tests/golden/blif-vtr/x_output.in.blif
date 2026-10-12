@@ -1,0 +1,10 @@
+# x_output: an output nothing drives and an output buffered from a net nothing drives: both read
+# x as gnd (x_to_gnd 2), through a buffer from the gnd generator
+.model x_output
+.inputs a
+.outputs y0 y1 y2
+.names nc y1
+1 1
+.names a y2
+1 1
+.end

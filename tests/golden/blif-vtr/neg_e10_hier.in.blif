@@ -1,0 +1,13 @@
+# neg_e10_hier: the top instantiates another model; hierarchy not flattened (E10)
+.model neg_e10
+.inputs a
+.outputs y
+.subckt sub i=a o=y
+.end
+
+.model sub
+.inputs i
+.outputs o
+.names i o
+0 1
+.end

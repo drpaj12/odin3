@@ -1,0 +1,17 @@
+# ram_slice_unconn_addr: a RAM slice using 5 of the 15 address bits (Parmys's unconn on the
+# rest, and one bit on a net nothing drives): every unused address bit stays unconn (open)
+.model ram_slice
+.inputs clk we a~0 a~1 a~2 a~3 a~4 d~0
+.outputs q~0
+.names gnd
+.names vcc
+1
+.names unconn
+.subckt single_port_ram clk=clk data=d~0 we=we out=q~0 addr[0]=a~0 addr[1]=a~1 addr[2]=a~2 addr[3]=a~3 addr[4]=a~4 addr[5]=unconn addr[6]=unconn addr[7]=unconn addr[8]=unconn addr[9]=unconn addr[10]=unconn addr[11]=unconn addr[12]=unconn addr[13]=unconn addr[14]=nc
+.end
+
+.model single_port_ram
+.inputs clk we addr[0] addr[1] addr[2] addr[3] addr[4] addr[5] addr[6] addr[7] addr[8] addr[9] addr[10] addr[11] addr[12] addr[13] addr[14] data
+.outputs out
+.blackbox
+.end

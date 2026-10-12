@@ -1,0 +1,7 @@
+# neg_e7_wide: a 7-input .names, wider than K=6 (E7)
+.model neg_e7
+.inputs a b c d e f g
+.outputs y
+.names a b c d e f g y
+1111111 1
+.end

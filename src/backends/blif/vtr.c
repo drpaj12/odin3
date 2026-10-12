@@ -292,10 +292,9 @@ bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_
 odin3_blif_vtr_fn odin3_blif_vtr_function(const odin3_module *module, odin3_node_id node) {
     uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
     odin3_blif_vtr_rows rows;
-    if (!odin3_blif_vtr_rows_of(module, node, &rows) || rows.inputs > ODIN3_BLIF_VTR_MAX_K) {
+    if (!odin3_blif_vtr_rows_of(module, node, &rows) || !odin3_blif_vtr_eval(module, node, tt)) {
         return ODIN3_BLIF_VTR_FN_NONE;
     }
-    tt_of_rows(&rows, tt);
     uint32_t k = rows.inputs;
     bool zero = true;
     bool one = true;
@@ -898,6 +897,23 @@ static odin3_status walk_top(vtr_walk *walk) {
 
 static const char NEVER_CLOCKED[] = "; VPR will never clock it";
 
+/* The class a clock warning reads for the first pin of port `port` of node: §9.1's, except that a
+ * net driven by a cell §6 writes as a zero-input generator (a $sop or gate with inputs whose
+ * function is constant) counts as that constant too (§7 item 3: "a constant $sop"). */
+static odin3_blif_src_class clock_class(const vtr_walk *walk, odin3_node_id node, uint32_t port) {
+    odin3_blif_src_class cls = pin_class(walk, node, port);
+    odin3_net_id net = odin3_pin_net(walk->top, odin3_node_port(walk->top, node, port).first);
+    if (cls != ODIN3_BLIF_SRC_SIGNAL) {
+        return cls;
+    }
+    odin3_pin_id driver = odin3_net_driver(walk->top, net); /* SIGNAL: a non-constant driver */
+    odin3_blif_vtr_fn fn = odin3_blif_vtr_function(walk->top, odin3_pin_node(walk->top, driver));
+    if (fn == ODIN3_BLIF_VTR_FN_CONST0 || fn == ODIN3_BLIF_VTR_FN_CONST1) {
+        return fn == ODIN3_BLIF_VTR_FN_CONST1 ? ODIN3_BLIF_SRC_1 : ODIN3_BLIF_SRC_0;
+    }
+    return cls;
+}
+
 /* The warning for a clock pin (a $_DFF_P_'s C, or bit 0 of a hard cell's clock input `port`,
  * NULL for the latch) of class cls: a constant (§7 item 3) or `unconn` (point (j)). */
 static odin3_status warn_clock(vtr_walk *walk, odin3_node_id node, const char *port,
@@ -928,7 +944,7 @@ static odin3_status warn_node(vtr_walk *walk, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(walk->top, node);
     const odin3_celltype_def *def = odin3_celltype_get(walk->design, type);
     if (kind_of(def->name) == VK_DFF_P) {
-        return warn_clock(walk, node, NULL, pin_class(walk, node, LATCH_C));
+        return warn_clock(walk, node, NULL, clock_class(walk, node, LATCH_C));
     }
     const odin3_techlib_cell *lib = odin3_celltype_lib(walk->design, type);
     odin3_status st = ODIN3_OK;
@@ -936,7 +952,7 @@ static odin3_status warn_node(vtr_walk *walk, odin3_node_id node) {
                          i < lib->n_ports && i < def->n_ports;
          i++) {
         if (lib->ports[i].clock && def->ports[i].dir == ODIN3_DIR_IN) {
-            st = warn_clock(walk, node, def->ports[i].name, pin_class(walk, node, i));
+            st = warn_clock(walk, node, def->ports[i].name, clock_class(walk, node, i));
         }
     }
     return st;
@@ -980,18 +996,20 @@ static odin3_status summary_types(vtr_walk *walk) {
                : st;
 }
 
-/* The summary info line (spec 3E §11). */
-static odin3_status log_summary(vtr_walk *walk) {
+/* plan->summary = the summary info line (spec 3E §11), logged once the file is written. */
+static odin3_status build_summary(vtr_walk *walk) {
     const odin3_blif_vtr_report *report = walk->report;
     odin3_status st = summary_types(walk);
+    odin3_strbuf_clear(&walk->plan->summary);
     if (st == ODIN3_OK) {
-        odin3_log(ODIN3_LOG_INFO,
-                  VTR_PREFIX "'%s': %u .names, %u .latch, %u .subckt%s, K=%u; x bits: %u to gnd, "
-                             "%u open (unconn)",
-                  odin3_strtab_get(walk->tab, odin3_module_name(walk->top)),
-                  (unsigned)report->names, (unsigned)report->latches, (unsigned)report->subckts,
-                  walk->text.len > 0 ? walk->text.data : "", (unsigned)walk->k,
-                  (unsigned)report->x_to_gnd, (unsigned)report->x_to_unconn);
+        st = odin3_strbuf_appendf(
+            &walk->plan->summary,
+            VTR_PREFIX "'%s': %u .names, %u .latch, %u .subckt%s, K=%u; x bits: %u to gnd, %u "
+                       "open (unconn)",
+            odin3_strtab_get(walk->tab, odin3_module_name(walk->top)), (unsigned)report->names,
+            (unsigned)report->latches, (unsigned)report->subckts,
+            walk->text.len > 0 ? walk->text.data : "", (unsigned)walk->k,
+            (unsigned)report->x_to_gnd, (unsigned)report->x_to_unconn);
     }
     return st;
 }
@@ -1016,7 +1034,7 @@ static odin3_status log_notes(vtr_walk *walk) {
                              "(run abc first)",
                   (unsigned)report->unconn_logic);
     }
-    return st == ODIN3_OK ? log_summary(walk) : st;
+    return st == ODIN3_OK ? build_summary(walk) : st;
 }
 
 /* --- the plan ------------------------------------------------------------------------------ */
@@ -1106,6 +1124,7 @@ void odin3_blif_vtr_plan_free(odin3_blif_vtr_plan *plan) {
     }
     odin3_u64map_destroy(plan->classes);
     odin3_blif_names_free(plan->names);
+    odin3_strbuf_free(&plan->summary);
     *plan = (odin3_blif_vtr_plan){0};
 }
 
@@ -1124,6 +1143,15 @@ odin3_status odin3_blif_vtr_preflight(const odin3_design *design, const odin3_bl
                                       odin3_blif_vtr_report *report) {
     odin3_blif_vtr_plan plan = {0};
     odin3_status st = odin3_blif_vtr_plan_build(design, opts, &plan, report);
+    if (st == ODIN3_OK) {
+        odin3_blif_vtr_log_summary(&plan);
+    }
     odin3_blif_vtr_plan_free(&plan);
     return st;
+}
+
+void odin3_blif_vtr_log_summary(const odin3_blif_vtr_plan *plan) {
+    if (plan->summary.len > 0) {
+        odin3_log(ODIN3_LOG_INFO, "%s", plan->summary.data);
+    }
 }

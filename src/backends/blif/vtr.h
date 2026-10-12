@@ -30,8 +30,9 @@ typedef struct odin3_blif_vtr_report {
 
 /* Checks that the design's top can be written in the VTR dialect with opts (lut_k resolved).
  * Logs each refusal (VB-11, at most ODIN3_BLIF_VTR_MAX_ERRORS, then one count line) and fills
- * report. Returns ODIN3_OK when report->errors == 0, ODIN3_ERR_INVALID_ARG when it is not or an
- * argument is NULL, ODIN3_ERR_NO_MEMORY. Reads only; O(nodes + pins). */
+ * report; with no refusal it logs what odin3_blif_vtr_plan_build logs, then the summary line.
+ * Returns ODIN3_OK when report->errors == 0, ODIN3_ERR_INVALID_ARG when it is not or an argument
+ * is NULL, ODIN3_ERR_NO_MEMORY. Reads only; O(nodes + pins). */
 odin3_status odin3_blif_vtr_preflight(const odin3_design *design, const odin3_blif_write_opts *opts,
                                       odin3_blif_vtr_report *report);
 
@@ -67,6 +68,7 @@ typedef struct odin3_blif_vtr_plan {
     uint32_t k;
     odin3_u64map *classes;   /* net ID -> odin3_blif_src_class, for the nets not SIGNAL */
     odin3_blif_names *names; /* NULL until naming succeeded */
+    odin3_strbuf summary;    /* the summary info line of a clean plan (odin3_blif_vtr_plan_build) */
 } odin3_blif_vtr_plan;
 
 /*
@@ -90,13 +92,15 @@ typedef struct odin3_blif_vtr_plan {
  * order, the warnings `<loc>: $_DFF_P_ '<cell>': clock is the constant <0|1>; VPR will never
  * clock it` (§7 item 3), `<loc>: <type> '<cell>': clock input '<port>' is the constant <0|1>; VPR
  * will never clock it` (a hard cell's clock input) and `<loc>: <type> '<cell>': clock is
- * 'unconn'; VPR will never clock it` (point (j)); the warning `write_blif: --vtr: net 'unconn'
- * feeds N .names/.latch pins; VPR leaves them open (run abc first)` when unconn_logic N > 0; and
- * the summary info line `write_blif: --vtr: '<top>': N .names, M .latch, S .subckt (adder A,
- * multiply B, single_port_ram C, dual_port_ram D), K=<K>; x bits: X to gnd, Y open (unconn)`,
- * the types with count 0 left out of the parentheses and the parentheses left out when none is
- * left. Returns as odin3_blif_vtr_preflight (out of memory logged `write_blif: --vtr: out of
- * memory`).
+ * 'unconn'; VPR will never clock it` (point (j)), a clock being constant when its class is 0 or 1
+ * or its net's driver is a cell §6 writes as a constant generator; and the warning `write_blif:
+ * --vtr: net 'unconn' feeds N .names/.latch pins; VPR leaves them open (run abc first)` when
+ * unconn_logic N > 0. It builds, but does not log, plan->summary: the info line `write_blif:
+ * --vtr: '<top>': N .names, M .latch, S .subckt (adder A, multiply B, single_port_ram C,
+ * dual_port_ram D), K=<K>; x bits: X to gnd, Y open (unconn)`, the types with count 0 left out of
+ * the parentheses and the parentheses left out when none is left; odin3_blif_vtr_log_summary logs
+ * it once the write succeeded (odin3_blif_vtr_preflight: at once). Returns as
+ * odin3_blif_vtr_preflight (out of memory logged `write_blif: --vtr: out of memory`).
  */
 odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
                                        const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan,
@@ -104,6 +108,9 @@ odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
 
 /* Frees what plan holds and zeroes it. */
 void odin3_blif_vtr_plan_free(odin3_blif_vtr_plan *plan);
+
+/* Logs plan->summary (info), when the plan has one. Allocates nothing. */
+void odin3_blif_vtr_log_summary(const odin3_blif_vtr_plan *plan);
 
 /* The class plan recorded for net: UNDRIVEN for none, SIGNAL for a net not in its map. */
 odin3_blif_src_class odin3_blif_vtr_plan_class(const odin3_blif_vtr_plan *plan, odin3_net_id net);

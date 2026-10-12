@@ -1,0 +1,1 @@
+odin3: error: write_blif: --vtr: neg_e10_hier.in.blif:5: instance '$c3' of module 'sub': hierarchy not flattened (run flatten); VPR reads one model

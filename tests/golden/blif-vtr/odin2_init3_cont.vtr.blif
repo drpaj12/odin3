@@ -1,0 +1,21 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model counter
+.inputs counter^clock counter^enable counter^data_in~0 counter^data_in~1 counter^data_in~2 \
+  counter^data_in~3
+.outputs counter^count_out~0 counter^count_out~1
+.names gnd
+.names unconn
+.names vcc
+1
+.latch counter^next_state_of_the_counter_register~0 counter^count_out~0 re counter^clock 2
+.latch counter^next_state_of_the_counter_register~1 counter^count_out~1 re counter^clock 0
+.names counter^enable counter^data_in~0 counter^data_in~2 counter^count_out~0 \
+  counter^next_state_of_the_counter_register~0
+1-1- 1
+0--1 1
+.names counter^enable counter^data_in~1 counter^data_in~3 counter^count_out~1 \
+  counter^next_state_of_the_counter_register~1
+11-- 1
+0--1 1
+.end

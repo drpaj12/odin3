@@ -16,6 +16,7 @@
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
+#include "util/vec.h"
 
 #include <assert.h>
 #include <errno.h>
@@ -23,6 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum {
@@ -502,14 +504,24 @@ static bool names_every_pin(const blif_writer *wr, odin3_node_id node) {
            (wr->vtr && odin3_blif_vtr_rows_of(wr->module, node, &rows));
 }
 
-/* Generates names for the unconnected pins of a node written by pin (see names_every_pin). */
-static odin3_status name_pins(blif_writer *wr, odin3_node_id node) {
+/* True for a hard cell of a loaded tech library (1G): in the VTR dialect, a .subckt that writes
+ * every formal (spec 3E §8). */
+static bool hard_type(const odin3_design *design, odin3_celltype_id type) {
+    const odin3_techlib_cell *lib = odin3_celltype_lib(design, type);
+    return lib != NULL && lib->kind == ODIN3_TECHLIB_HARD;
+}
+
+/* Generates names for the unconnected pins of a node written by pin (see names_every_pin), or
+ * (outputs) only for its unconnected outputs: a VTR .subckt writes every output bit (§8.2), while
+ * its unconnected inputs read `unconn`. */
+static odin3_status name_pins(blif_writer *wr, odin3_node_id node, bool outputs) {
     odin3_pinslice pins = odin3_node_pins(wr->module, node);
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
-        uint32_t pin = pins.first.v + k;
-        if (!odin3_net_valid(odin3_pin_net(wr->module, (odin3_pin_id){pin}))) {
-            st = generate(wr, ((uint64_t)1 << PIN_KEY_SHIFT) | pin);
+        odin3_pin_id pin = {pins.first.v + k};
+        if (!odin3_net_valid(odin3_pin_net(wr->module, pin)) &&
+            (!outputs || odin3_pin_dir(wr->module, pin) == ODIN3_DIR_OUT)) {
+            st = generate(wr, ((uint64_t)1 << PIN_KEY_SHIFT) | pin.v);
         }
     }
     return st;
@@ -696,8 +708,21 @@ static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
     return generate(wr, net.v);
 }
 
+/* The unconnected pins name_module names for node: all of them for a node written by pin
+ * (names_every_pin), the outputs of a VTR hard cell. */
+static odin3_status name_node_pins(blif_writer *wr, odin3_node_id node) {
+    if (names_every_pin(wr, node)) {
+        return name_pins(wr, node, false);
+    }
+    if (wr->vtr && hard_type(wr->design, odin3_node_type(wr->module, node))) {
+        return name_pins(wr, node, true);
+    }
+    return ODIN3_OK;
+}
+
 /* Names the module: (VTR: its clock nets first, for VB-10 rule 8) port bit names, then every live
- * net (ID order), then the unconnected pins of .names, .latch and port cells. */
+ * net (ID order), then the unconnected pins of .names, .latch and port cells (VTR: and the
+ * unconnected outputs of hard cells). */
 static odin3_status name_module(blif_writer *wr) {
     const odin3_module *module = wr->module;
     wr->gen_names = odin3_strtab_create();
@@ -714,9 +739,8 @@ static odin3_status name_module(blif_writer *wr) {
         }
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
-        odin3_node_id node = {i};
-        if (odin3_node_live(module, node) && names_every_pin(wr, node)) {
-            st = name_pins(wr, node);
+        if (odin3_node_live(module, (odin3_node_id){i})) {
+            st = name_node_pins(wr, (odin3_node_id){i});
         }
     }
     return st;
@@ -1087,6 +1111,7 @@ static odin3_status write_latch_vtr(blif_writer *wr, odin3_node_id node) {
     static const char *const INIT_WORDS[] = {"0", "1", "2", "2"};
     int64_t init = odin3_node_param(wr->module, node, LATCH_INIT)->i;
     bool known = init >= 0 && (uint64_t)init < sizeof INIT_WORDS / sizeof INIT_WORDS[0];
+    assert(known); /* the reader gives 0..3 (R8); a pass that sets another value is a bug */
     wr_begin(wr, ".latch");
     wr_token(wr, source_name(wr, odin3_node_port(wr->module, node, TYPED_D).first, false));
     pin_token(wr, node, TYPED_Q);
@@ -1324,11 +1349,10 @@ static uint32_t port_of_decl(const odin3_celltype_def *def, const odin3_celltype
     return at;
 }
 
-/* `.subckt type formal=actual …` in port order (a declared type's: in declaration order),
- * unconnected pins skipped. */
-static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
-    const odin3_celltype_def *def =
-        odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
+/* Refuses a cell of def whose parameters the BLIF reader would not give it back (declared, or
+ * implied by the connected formals). */
+static odin3_status subckt_params_ok(blif_writer *wr, odin3_node_id node,
+                                     const odin3_celltype_def *def) {
     bool ok = true;
     odin3_strbuf_clear(&wr->cand);
     odin3_status checked = params_check(
@@ -1342,6 +1366,17 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
                          "have no BLIF form; cannot write a cell of",
                          def->name);
     }
+    return ODIN3_OK;
+}
+
+/* `.subckt type formal=actual …` in port order (a declared type's: in declaration order),
+ * unconnected pins skipped. */
+static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
+    if (subckt_params_ok(wr, node, def) != ODIN3_OK) {
+        return wr->st;
+    }
     wr_begin(wr, ".subckt");
     wr_token(wr, odin3_bytes_cstr(def->name));
     uint32_t index = 0;
@@ -1349,6 +1384,75 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
         st = subckt_port(wr, node, decl != NULL ? port_of_decl(def, decl, i) : i);
+    }
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    wr_end(wr);
+    return wr->st;
+}
+
+/* VTR (spec 3E §8.2): whether the formals of port `at` of type, `width` bits at the node, are
+ * written `p` rather than `p[k]`: one bit, spelled so by the declaration when the type has one
+ * (the round trip), else always (Parmys's scalar `data=`, `we=`, `out=`). */
+static bool vtr_formal_scalar(const blif_writer *wr, odin3_celltype_id type, uint32_t at,
+                              uint32_t width) {
+    uint32_t index = 0;
+    return width == 1 && (declared_of(wr, type, &index) == NULL || formal_scalar(wr, type, at));
+}
+
+/* VTR (§8.2): every bit of port `at` of node as `formal=actual`, bits beyond the node's width
+ * not written: an input reads its source per §9.2 (x, undriven and unconnected read `unconn`, a
+ * clock's constant gnd/vcc), an output its net or, unconnected, its generated `$p<pin ID>`. */
+static odin3_status subckt_port_vtr(blif_writer *wr, odin3_node_id node, uint32_t at) {
+    odin3_celltype_id type = odin3_node_type(wr->module, node);
+    const odin3_port_def *port = &odin3_celltype_get(wr->design, type)->ports[at];
+    odin3_pinslice pins = odin3_node_port(wr->module, node, at);
+    bool scalar = vtr_formal_scalar(wr, type, at, pins.count);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
+        odin3_pin_id pin = {pins.first.v + k};
+        odin3_bytes actual =
+            port->dir == ODIN3_DIR_IN ? source_name(wr, pin, true) : pin_name(wr, pin);
+        st = bit_token(wr, scalar, odin3_bytes_cstr(port->name), (int64_t)k);
+        st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, odin3_bytes_cstr("=")) : st;
+        st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, actual) : st;
+        if (st == ODIN3_OK) {
+            wr_token_built(wr);
+        }
+    }
+    return st;
+}
+
+/* The port of def whose name follows that of port `prev` in byte order (the first for
+ * UINT32_MAX); def->n_ports after the last. Port names are distinct. */
+static uint32_t next_port_by_name(const odin3_celltype_def *def, uint32_t prev) {
+    uint32_t best = def->n_ports;
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        bool after = prev >= def->n_ports || strcmp(def->ports[i].name, def->ports[prev].name) > 0;
+        if (after &&
+            (best == def->n_ports || strcmp(def->ports[i].name, def->ports[best].name) < 0)) {
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* VTR: `.subckt type formal=actual …` with every formal bit of the node, sorted as Parmys sorts
+ * them (§8.2): ports by name in byte order, bits by index, so VPR names the block after the same
+ * first output formal (R12). */
+static odin3_status write_subckt_vtr(blif_writer *wr, odin3_node_id node) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(wr->design, odin3_node_type(wr->module, node));
+    if (subckt_params_ok(wr, node, def) != ODIN3_OK) {
+        return wr->st;
+    }
+    wr_begin(wr, ".subckt");
+    wr_token(wr, odin3_bytes_cstr(def->name));
+    odin3_status st = ODIN3_OK;
+    for (uint32_t at = next_port_by_name(def, UINT32_MAX); st == ODIN3_OK && at < def->n_ports;
+         at = next_port_by_name(def, at)) {
+        st = subckt_port_vtr(wr, node, at);
     }
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);
@@ -1426,7 +1530,7 @@ static odin3_status write_cell_vtr(blif_writer *wr, odin3_node_id node) {
     if (builtin_of(wr, odin3_node_type(wr->module, node)) == WR_DFF_P) {
         return write_latch_vtr(wr, node);
     }
-    return write_subckt(wr, node);
+    return write_subckt_vtr(wr, node);
 }
 
 static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
@@ -1599,6 +1703,21 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     return wr->st;
 }
 
+/* A blank line, then the black-box model decl: `.model`, its ports, `.blackbox`, `.end`. */
+static void write_blackbox_model(blif_writer *wr, const odin3_celltype_def *decl) {
+    wr->model = decl->name;
+    wr_newline(wr);
+    wr_begin(wr, ".model");
+    wr_token(wr, odin3_bytes_cstr(decl->name));
+    wr_end(wr);
+    if (write_model_ports(wr, decl) == ODIN3_OK) {
+        wr_begin(wr, ".blackbox");
+        wr_end(wr);
+        wr_begin(wr, ".end");
+        wr_end(wr);
+    }
+}
+
 /* Each declared black-box model once (its first declaration), in declaration order. */
 static odin3_status write_blackboxes(blif_writer *wr) {
     uint32_t count = odin3_design_declared_model_count(wr->design);
@@ -1606,21 +1725,113 @@ static odin3_status write_blackboxes(blif_writer *wr) {
         uint32_t first = 0;
         const odin3_celltype_def *decl =
             declared_of(wr, odin3_design_declared_model(wr->design, i), &first);
-        if (decl == NULL || first != i) {
-            continue;
-        }
-        wr->model = decl->name;
-        wr_newline(wr);
-        wr_begin(wr, ".model");
-        wr_token(wr, odin3_bytes_cstr(decl->name));
-        wr_end(wr);
-        if (write_model_ports(wr, decl) == ODIN3_OK) {
-            wr_begin(wr, ".blackbox");
-            wr_end(wr);
-            wr_begin(wr, ".end");
-            wr_end(wr);
+        if (decl != NULL && first == i) {
+            write_blackbox_model(wr, decl);
         }
     }
+    return wr->st;
+}
+
+/* --- VTR: the hard-block stubs (spec 3E §8.3) ------------------------------------------------- */
+
+/* A hard type a stub is written for. */
+typedef struct wr_stub {
+    const char *name;
+    odin3_celltype_id type;
+} wr_stub;
+
+static int stub_cmp(const void *left, const void *right) {
+    return strcmp(((const wr_stub *)left)->name, ((const wr_stub *)right)->name);
+}
+
+/* stubs = the hard types the live nodes of top use, each once, sorted by name in byte order. */
+static odin3_status used_hard_types(const blif_writer *wr, const odin3_module *top,
+                                    odin3_vec *stubs) {
+    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        odin3_celltype_id type = odin3_node_type(top, node);
+        if (!odin3_node_live(top, node) || !hard_type(wr->design, type)) {
+            continue;
+        }
+        bool seen = false;
+        for (size_t j = 0; j < stubs->len && !seen; j++) {
+            seen = ((const wr_stub *)odin3_vec_cat(stubs, j))->type.v == type.v;
+        }
+        wr_stub *add = seen ? NULL : odin3_vec_push(stubs);
+        if (!seen && add == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        if (add != NULL) {
+            *add = (wr_stub){odin3_celltype_get(wr->design, type)->name, type};
+        }
+    }
+    if (stubs->len > 1) {
+        qsort(stubs->data, stubs->len, sizeof(wr_stub), stub_cmp);
+    }
+    return ODIN3_OK;
+}
+
+/* ports[i].width = the widest port i of type is on a live node of top (§8.3). */
+static void widest_ports(const odin3_module *top, odin3_celltype_id type, odin3_port_def *ports,
+                         uint32_t n_ports) {
+    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        if (!odin3_node_live(top, node) || odin3_node_type(top, node).v != type.v) {
+            continue;
+        }
+        for (uint32_t at = 0; at < n_ports; at++) {
+            uint32_t width = odin3_node_port(top, node, at).count;
+            ports[at].width = width > ports[at].width ? width : ports[at].width;
+        }
+    }
+}
+
+/* The stub of an undeclared library cell (§8.3): its ports in library order, each at the widest
+ * width a live node of top gives it, `p` (scalar) when that is 1 (as its formals, §8.2), else
+ * `p[0] … p[w-1]`. */
+static odin3_status write_lib_stub(blif_writer *wr, const odin3_module *top,
+                                   odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
+    odin3_port_def *ports = odin3_util_calloc(sizeof *ports * (def->n_ports + 1U));
+    if (ports == NULL) {
+        return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
+    for (uint32_t at = 0; at < def->n_ports; at++) {
+        ports[at] = (odin3_port_def){.name = def->ports[at].name, .dir = def->ports[at].dir};
+    }
+    widest_ports(top, type, ports, def->n_ports);
+    for (uint32_t at = 0; at < def->n_ports; at++) {
+        ports[at].scalar = ports[at].width == 1;
+    }
+    odin3_celltype_def stub = {.name = def->name, .ports = ports, .n_ports = def->n_ports};
+    write_blackbox_model(wr, &stub);
+    odin3_util_free(ports);
+    return wr->st;
+}
+
+/* §5 item 8: after the top's .end, one stub per hard type a live node of the top uses, sorted by
+ * name: a declared type as declared (only the used ones: VPR checks every stub against the arch,
+ * R13), an undeclared library cell by write_lib_stub. */
+static odin3_status write_stubs(blif_writer *wr) {
+    const odin3_module *top =
+        odin3_module_get((odin3_design *)wr->design, odin3_design_top(wr->design));
+    odin3_vec stubs;
+    odin3_vec_init(&stubs, sizeof(wr_stub));
+    odin3_status st = used_hard_types(wr, top, &stubs);
+    if (st != ODIN3_OK) {
+        (void)wr_fail(wr, st);
+    }
+    for (size_t j = 0; wr->st == ODIN3_OK && j < stubs.len; j++) {
+        const wr_stub *stub = odin3_vec_cat(&stubs, j);
+        uint32_t first = 0;
+        const odin3_celltype_def *decl = declared_of(wr, stub->type, &first);
+        if (decl != NULL) {
+            write_blackbox_model(wr, decl);
+        } else {
+            (void)write_lib_stub(wr, top, stub->type);
+        }
+    }
+    odin3_vec_free(&stubs);
     return wr->st;
 }
 
@@ -1785,8 +1996,9 @@ static odin3_status write_vtr_header(blif_writer *wr) {
 /* Plain: every module, then the declared black boxes. VTR: the header, then the top alone. */
 static void write_design(blif_writer *wr) {
     if (wr->vtr) {
-        if (write_vtr_header(wr) == ODIN3_OK) {
-            (void)write_module(wr, 1); /* written_module: position 1 is the top */
+        /* written_module: position 1 is the top */
+        if (write_vtr_header(wr) == ODIN3_OK && write_module(wr, 1) == ODIN3_OK) {
+            (void)write_stubs(wr);
         }
         return;
     }
@@ -1877,6 +2089,9 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
     }
     if (st == ODIN3_OK) {
         st = write_opened(design, path, &use, plan.names);
+    }
+    if (st == ODIN3_OK) {
+        odin3_blif_vtr_log_summary(&plan); /* VTR: once the file is written (plain: none) */
     }
     odin3_blif_vtr_plan_free(&plan);
     return st;

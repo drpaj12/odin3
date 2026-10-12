@@ -609,6 +609,13 @@ if(BUILD_TESTING)
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
+    # 3E §16.2: write_blif --vtr over tests/golden/blif-vtr (and the goldens its sample.txt
+    # lists) against the expected files. The --checker argument (tools/blif-vtr-check, 3E-2) is
+    # added by whichever of 3E-1 and 3E-2 lands second; without it the driver skips that step.
+    add_test(NAME blif_vtr_fixtures
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
+                     --odin3 $<TARGET_FILE:odin3> --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr)
+    set_tests_properties(blif_vtr_fixtures PROPERTIES LABELS unit)
     # The goldens' distinct black-box stanzas (tools/golden-blackboxes) against lib/vtr.o3lib.
     add_test(NAME blif_roundtrip_techlib
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip

@@ -1,0 +1,13 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model x_output
+.inputs a
+.outputs y0 y1 y2
+.names gnd
+.names gnd y1
+1 1
+.names a y2
+1 1
+.names gnd y0
+1 1
+.end

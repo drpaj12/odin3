@@ -1,0 +1,9 @@
+# neg_e12_multidriver: two .names drive one net (E12; a Debug build's check refuses it first)
+.model neg_e12
+.inputs a b
+.outputs y
+.names a y
+1 1
+.names b y
+1 1
+.end

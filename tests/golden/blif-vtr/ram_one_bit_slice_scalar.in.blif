@@ -1,0 +1,7 @@
+# ram_one_bit_slice_scalar: an undeclared 1-bit RAM slice read from bit formals data[0]/out[0];
+# its 1-bit ports are written scalar (data=, out=, we=), and its stub comes from lib/vtr.o3lib
+.model ram_bit
+.inputs clk d a0 a1 w
+.outputs q
+.subckt single_port_ram clk=clk data[0]=d addr[0]=a0 addr[1]=a1 we=w out[0]=q
+.end

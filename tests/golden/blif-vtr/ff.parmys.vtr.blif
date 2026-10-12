@@ -1,0 +1,14 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+
+.model dff
+.inputs rst d clk
+.outputs q
+.names gnd
+.names vcc
+1
+.names unconn
+.latch $auto$rtlil.cc:3203:MuxGate$139 q re clk 2
+.names d gnd rst $auto$rtlil.cc:3203:MuxGate$139
+1-0 1
+-11 1
+.end

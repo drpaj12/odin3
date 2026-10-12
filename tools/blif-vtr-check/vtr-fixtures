@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# vtr-fixtures: the write_blif --vtr fixture gate (spec 3E §16.2). See vtr_fixtures.py.
+# Exit codes: 0 every case passes, 1 any difference, 2 usage.
+set -euo pipefail
+exec python3 -I "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/vtr_fixtures.py" "$@"

@@ -1,0 +1,18 @@
+# const_output: constants on output ports: a zero-input .names on the port (one driver, no
+# buffer), a constant cover with an input (the generator under the port's name), Parmys's buffer
+# from vcc (unchanged), and a plain buffer
+.model const_output
+.inputs a
+.outputs y0 y1 y2 y3
+.names gnd
+.names vcc
+1
+.names y0
+1
+.names a y1
+- 1
+.names vcc y2
+1 1
+.names a y3
+1 1
+.end

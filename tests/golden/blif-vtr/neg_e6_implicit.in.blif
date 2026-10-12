@@ -1,0 +1,6 @@
+# neg_e6_implicit: an implicit black box (no library cell, no declared model; E6)
+.model neg_e6
+.inputs x
+.outputs z
+.subckt mystery a=x y=z
+.end

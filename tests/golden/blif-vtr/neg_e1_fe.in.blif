@@ -1,0 +1,6 @@
+# neg_e1_fe: a falling-edge latch (E1)
+.model neg_e1
+.inputs d clk
+.outputs q
+.latch d q fe clk 0
+.end
