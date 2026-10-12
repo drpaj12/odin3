@@ -44,13 +44,11 @@ typedef struct odin3_blif_write_opts {
  * in port order, each run of ports of one direction as one `.inputs` or `.outputs` line, then
  * `.clock` from the module's ODIN3_BLIF_ATTR_CLOCK attribute, then the constant generators
  * (below), then the cells in node ID order (port nodes skipped), then the port buffers (below),
- * then
- * `.end`. Then every declared black-box model
- * (odin3_design_declared_model) in declaration order, once each even when listed twice (the first
- * declaration): `.model`, the ports of the declaration as written
- * (odin3_design_declared_model_decl: its order, widths and scalar flags) as above, `.blackbox`,
- * `.end`. Implicit black boxes (local BLACKBOX types that are not
- * declared models) get no `.model`.
+ * then `.end`. Then every declared black-box model (odin3_design_declared_model) in declaration
+ * order, once each even when listed twice (the first declaration): `.model`, the ports of the
+ * declaration as written (odin3_design_declared_model_decl: its order, widths and scalar flags) as
+ * above, `.blackbox`, `.end`. Implicit black boxes (local BLACKBOX types that are not declared
+ * models) get no `.model`.
  *
  * Ports keep their names: bit k of a port is written as its port bit name, the port wire's
  * ODIN3_BLIF_ATTR_PORT_NAME (frontends/blif/attrs.h) or else the port's name, followed by `[k]`
@@ -91,7 +89,9 @@ typedef struct odin3_blif_write_opts {
  * zero-input `$sop` whose net keeps that name and value (0, 1, 0) already is it. A net named
  * `gnd`, `vcc` or `unconn` that is not that generator falls back to `$n<ID>`… in a module that
  * reads that generator; a port bit of that name is refused there (`path: model 'm': a port bit on
- * another net has the name of the constant generator 'vcc'`) unless its net is the generator.
+ * another net has the name of the constant generator 'vcc'`) unless its net is the generator: the
+ * `$_CONST*_` net of that value, or a zero-input `$sop` of that value written under that name
+ * (its own, or an unnamed net's port bit name), so the name always has one driver.
  * Read back, the generators are zero-input `$sop`s, and a second write gives the same text.
  *
  * Other net names: the net's own name, unless it is a port bit name of another net; else its

@@ -1312,6 +1312,81 @@ static void test_plain_const_port_names(void) {
     expect_baseline(OUT_PATH);
 }
 
+/* A zero-input $sop of value 1 (the row `1`) driving out. */
+static void new_sop_one(odin3_module *module, odin3_net_id out) {
+    static const uint8_t row[] = {'1'};
+    odin3_value params[2] = {odin3_value_int(0), {.kind = ODIN3_VAL_COVER}};
+    params[1].bits = row;
+    params[1].len = 1;
+    params[1].cover_inputs = 0;
+    odin3_node_spec spec = {
+        .type = type_named(odin3_module_design(module), "$sop"), .params = params, .n_params = 2};
+    const odin3_netvec ports[] = {{NULL, 0}, {&out, 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, NULL));
+}
+
+/* Module top: output vcc driven by a constant-1 zero-input $sop (its net renamed to net_name, or
+ * unnamed for NULL), and a $_CONST1_ read by $_NOT_ -> y. */
+static void build_vcc_port_sop(const char *net_name) {
+    odin3_module *module = new_module(design, "top");
+    odin3_net_id vcc = port_net(module, "vcc", ODIN3_DIR_OUT);
+    odin3_net_id out_y = port_net(module, "y", ODIN3_DIR_OUT);
+    uint32_t name = net_name == NULL ? 0 : intern_in(design, net_name);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(module, vcc, name));
+    new_sop_one(module, vcc);
+    new_cell(module, "$_NOT_", (odin3_net_id[]){new_const(module, "$_CONST1_"), out_y}, 2);
+}
+
+static const char VCC_PORT_SOP_TEXT[] = ".model top\n.outputs vcc y\n.names vcc\n1\n"
+                                        ".subckt $_NOT_ A=vcc Y=y\n.end\n";
+
+/* Review I1: a constant-1 $sop written under the port bit name vcc is the vcc generator, so no
+ * second `.names vcc` (one driver per name): its net unnamed (it takes the port bit's name) or
+ * named vcc. */
+static void test_plain_const_port_sop_is_generator(void) {
+    build_vcc_port_sop(NULL);
+    expect_written_twice(VCC_PORT_SOP_TEXT);
+    odin3_design_destroy(design);
+    odin3_design_destroy(design2);
+    design = odin3_design_create();
+    design2 = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_NOT_NULL(design2);
+    build_vcc_port_sop("vcc");
+    expect_written_twice(VCC_PORT_SOP_TEXT);
+}
+
+/* Review I1: the same $sop on a net named k would be written `.names k` with a buffer to vcc,
+ * a second driver beside the generator: refused, nothing written. */
+static void test_plain_const_port_named_sop_refused(void) {
+    build_vcc_port_sop("k");
+    put_baseline(OUT_PATH);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    char want[MSG_MAX];
+    int len = snprintf(want, sizeof want,
+                       "%s: model 'top': a port bit on another net has the name of the constant "
+                       "generator 'vcc'",
+                       OUT_PATH);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+    expect_baseline(OUT_PATH);
+}
+
+/* Review M1: gens_have is per module. m1's own `.names vcc` $sop is its generator; m2 reads
+ * $_CONST1_ and must still write its own. */
+static void test_plain_const_generator_found_per_module(void) {
+    odin3_module *m1 = new_module(design, "m1");
+    odin3_net_id out_y = port_net(m1, "y", ODIN3_DIR_OUT);
+    odin3_net_id vcc = new_net(m1, "vcc");
+    new_sop_one(m1, vcc);
+    new_buffer(m1, vcc, out_y);
+    odin3_module *m2 = new_module(design, "m2");
+    odin3_net_id out_o = port_net(m2, "o", ODIN3_DIR_OUT);
+    new_cell(m2, "$_CONST1_", &out_o, 1);
+    expect_written_twice(".model m1\n.outputs y\n.names vcc\n1\n.names vcc y\n1 1\n.end\n\n"
+                         ".model m2\n.outputs o\n.names vcc\n1\n.names vcc o\n1 1\n.end\n");
+}
+
 static void test_out_of_memory_sweep_constants(void) {
     build_const_module(design);
     oom_sweep();
@@ -1360,6 +1435,9 @@ int main(void) {
     RUN_TEST(test_plain_const_name_fallback);
     RUN_TEST(test_plain_const_sop_is_generator);
     RUN_TEST(test_plain_const_port_names);
+    RUN_TEST(test_plain_const_port_sop_is_generator);
+    RUN_TEST(test_plain_const_port_named_sop_refused);
+    RUN_TEST(test_plain_const_generator_found_per_module);
     RUN_TEST(test_out_of_memory_sweep_constants);
     return UNITY_END();
 }

@@ -375,8 +375,7 @@ static bool is_generator(const blif_writer *wr, odin3_net_id net, odin3_bytes na
         !same_bytes(name, odin3_bytes_cstr("unconn"))) {
         return false;
     }
-    odin3_pin_id driver =
-        odin3_net_valid(net) ? odin3_net_driver(wr->module, net) : (odin3_pin_id){0};
+    odin3_pin_id driver = odin3_net_driver(wr->module, net); /* none for no net */
     return odin3_pin_valid(driver) && wr->builtin[WR_SOP].v != 0 &&
            odin3_node_type(wr->module, odin3_pin_node(wr->module, driver)).v ==
                wr->builtin[WR_SOP].v &&
@@ -496,8 +495,7 @@ static const uint64_t GEN_OWNER = (uint64_t)1 << PIN_KEY_SHIFT;
  * `vcc`, and `unconn` for x and z), GEN_NONE for any other net and in the VTR dialect, which
  * reads constants by §9.2 (source_gen). */
 static wr_gen plain_gen(const blif_writer *wr, odin3_net_id net) {
-    odin3_pin_id driver =
-        odin3_net_valid(net) ? odin3_net_driver(wr->module, net) : (odin3_pin_id){0};
+    odin3_pin_id driver = odin3_net_driver(wr->module, net); /* none for no net or a dead one */
     if (wr->vtr || !odin3_pin_valid(driver) ||
         !odin3_blif_vtr_const_cell(wr->module, odin3_pin_node(wr->module, driver))) {
         return GEN_NONE;
@@ -810,11 +808,26 @@ static odin3_status name_model(blif_writer *wr) {
     return st;
 }
 
+/* True when net is written under name (gen_names ID id): its own name, or for an unnamed net the
+ * first port bit name on it (name_net). */
+static bool written_as(const blif_writer *wr, odin3_net_id net, uint32_t id, odin3_bytes name) {
+    uint32_t real = odin3_net_name(wr->module, net);
+    uint64_t first = 0;
+    if (real != 0) {
+        return same_bytes(str_bytes(wr, real), name);
+    }
+    return odin3_u64map_get(wr->net_port, net.v, &first) && first == id;
+}
+
 /*
  * Plain (spec 3E §9.4): reserves the name of generator gen, which the module reads, against the
  * nets named after it (claims → GEN_OWNER, name_named_plain; gen_names, so no generated name
- * takes it). A port bit claimed it first: allowed when its net is that generator (a $_CONST*_
- * net of that value, or a zero-input $sop as §9.3 says), else refused.
+ * takes it). A port bit claimed it first: allowed when its net is that generator, else refused
+ * (one driver per name, R16). The net is that generator when it is the $_CONST*_ net of that value
+ * (it writes no line; its port bit needs no buffer), or a zero-input $sop of that value (§9.3,
+ * is_generator) written under that very name, its own or (unnamed) its first port bit's: then
+ * the $sop's line is the generator (gens_have). A $sop net written under another name would
+ * need a port buffer beside the generator, two drivers of the name.
  */
 static odin3_status reserve_generator(blif_writer *wr, wr_gen gen) {
     odin3_bytes name = odin3_bytes_cstr(GEN_NAMES[gen]);
@@ -828,7 +841,11 @@ static odin3_status reserve_generator(blif_writer *wr, wr_gen gen) {
         return odin3_u64map_put(wr->claims, (odin3_kv){id, GEN_OWNER});
     }
     odin3_net_id net = {(uint32_t)owner};
-    if (plain_gen(wr, net) == gen || is_generator(wr, net, name)) {
+    if (plain_gen(wr, net) == gen) {
+        return ODIN3_OK;
+    }
+    if (is_generator(wr, net, name) && written_as(wr, net, id, name)) {
+        wr->gens_have |= 1U << gen;
         return ODIN3_OK;
     }
     return wr_refuse(wr, "a port bit on another net has the name of the constant generator",
@@ -837,13 +854,13 @@ static odin3_status reserve_generator(blif_writer *wr, wr_gen gen) {
 
 /* Plain (spec 3E §9.4): wr->gens_used = the generators the module's pins and port bits read (a
  * $_CONST*_ net with a pin besides its driver), each reserved (reserve_generator); gens_have
- * starts empty (name_named_plain fills it). */
+ * starts empty (reserve_generator and name_named_plain fill it). */
 static odin3_status reserve_generators(blif_writer *wr) {
     wr->gens_used = 0;
     wr->gens_have = 0;
     for (uint32_t i = 1; i < odin3_module_net_end(wr->module); i++) {
         odin3_net_id net = {i};
-        wr_gen gen = odin3_net_live(wr->module, net) ? plain_gen(wr, net) : GEN_NONE;
+        wr_gen gen = plain_gen(wr, net); /* GEN_NONE for a dead net: it has no pins */
         if (gen != GEN_NONE && odin3_net_pins(wr->module, net).count > 1) {
             wr->gens_used |= 1U << gen;
         }
