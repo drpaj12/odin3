@@ -274,33 +274,47 @@ static uint32_t unit_library(odin3_elab1 *e1, odin3_ast_id unit) {
     return info.library;
 }
 
+/* The definition kind of a UNIT child; 0 for one that defines nothing (a directive). */
+static uint8_t def_kind_of(const odin3_elab1 *e1, odin3_ast_id node) {
+    switch (odin3_ast_kind_of(e1->parsed, node)) {
+    case ODIN3_AST_MODULE:
+        return is_blackbox(e1, node) ? ODIN3_DEF_BLACKBOX : ODIN3_DEF_MODULE;
+    case ODIN3_AST_UDP_DECL:
+        return ODIN3_DEF_UDP;
+    case ODIN3_AST_CONFIG_DECL:
+        return ODIN3_DEF_CONFIG;
+    default:
+        return 0;
+    }
+}
+
 /* One UNIT's definitions; Q7 and S2 at a design unit's UDP_DECL and CONFIG_DECL. */
 static odin3_status unit_defs(odin3_elab1 *e1, odin3_ast_id unit, bool library_unit) {
     odin3_elab_def where = {.library_unit = library_unit, .library = unit_library(e1, unit)};
     odin3_ast_span kids = odin3_ast_children(e1->parsed, unit);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
-        odin3_ast_id node = kids.ids[i];
-        odin3_ast_kind kind = odin3_ast_kind_of(e1->parsed, node);
-        const char *name = odin3_ast_name_str(e1->parsed, node);
-        if (kind == ODIN3_AST_MODULE) {
-            st = add_def(e1, node, is_blackbox(e1, node) ? ODIN3_DEF_BLACKBOX : ODIN3_DEF_MODULE,
-                         &where);
-        } else if (kind == ODIN3_AST_UDP_DECL) {
-            st = add_def(e1, node, ODIN3_DEF_UDP, &where);
-            if (!library_unit) {
-                odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, node),
-                                  "user-defined primitive '%s' is not supported", name);
-            }
-        } else if (kind == ODIN3_AST_CONFIG_DECL) {
-            st = add_def(e1, node, ODIN3_DEF_CONFIG, &where);
-            if (!library_unit) {
-                odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, node),
-                                  "configuration '%s' is not supported", name);
-            }
+        uint8_t kind = def_kind_of(e1, kids.ids[i]);
+        st = kind != 0 ? add_def(e1, kids.ids[i], kind, &where) : ODIN3_OK;
+        bool rejected = kind == ODIN3_DEF_UDP || kind == ODIN3_DEF_CONFIG;
+        if (st == ODIN3_OK && rejected && !library_unit) {
+            odin3_elab1_reject_def(e1, (uint32_t)e1->defs.len - 1);
         }
     }
     return st;
+}
+
+void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def) {
+    odin3_elab1_defx *ext = defx_at(e1, def);
+    const odin3_elab_def *rec = def_at(e1, def);
+    if (ext->reported || odin3_elab1_pending(e1, rec->node)) {
+        return;
+    }
+    ext->reported = true;
+    odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, rec->node),
+                      rec->kind == ODIN3_DEF_UDP ? "user-defined primitive '%s' is not supported"
+                                                 : "configuration '%s' is not supported",
+                      text_of(e1, rec->name));
 }
 
 odin3_status odin3_elab1_collect_defs(odin3_elab1 *e1) {

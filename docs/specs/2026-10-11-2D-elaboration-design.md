@@ -63,6 +63,12 @@ line, which the writer now emits for the design's top. Second, EL-47 now says th
 the unreleased v4 (ruling I1, plan point (c)). It no longer says "one bump", and it says that
 IR change C has no ABI mirror (plan point (d)).
 
+v4.5 (2026-10-12; the 2D Task 10 review, errata): definitions are located at their keyword, not
+their name, which the parsed store does not locate (EL-6's taken names, §9.1's Hierarchy texts; Q7
+and S2 were at their nodes already); EL-6 item 4's Q7 is at the `UDP_DECL`, as §9.1 says; the
+taken-name check runs when a definition is reached, and names a built-in cell type with its own
+text; EL-7 rejects a `(* blackbox *)` module given as the top; §17 #25 records `(* top *)`.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -263,7 +269,8 @@ in order:
    libraries define it, an info line names the one taken: `module 'N' found in libraries 'A',
    'B'; using 'A.N'`);
 3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins);
-4. a `UDP_DECL` `N` → Q7's error at the instance;
+4. a `UDP_DECL` `N` → Q7's error, at the `UDP_DECL` (§9.1: at the definition, whether or not
+   it is instantiated; a library unit's UDP when an instance resolves to it), not at the instance;
 5. a registered cell type `N` of granularity `hard` or `blackbox` (a tech library read earlier,
    e.g. `single_port_ram`; a model a BLIF read declared) → an instance of that type (EL-11);
 6. with `--auto-blackbox`, an implicit black box (EL-11);
@@ -281,14 +288,18 @@ never fail with `INVALID_ARG` on user input:
 - a design or library `MODULE` (not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
   registered cell type of granularity `hard` or `blackbox` — a tech library's `adder`,
   `multiply`, `single_port_ram`, or a model a BLIF read declared — is the located error, at the
-  `MODULE`'s name: `module 'adder' has the name of cell type 'adder' registered by an earlier
+  `MODULE`'s keyword (the parsed store records no location for a name; 2C §4.2 step 4 locates
+  `duplicate_module` there too): `module 'adder' has the name of cell type 'adder' registered by an earlier
   read (hard cell); rename the module` (`(black box)` for a declared model). The design unit
   does not shadow the cell type: an instance `adder u(…)` in the same design would otherwise mean
   two things. Parmys fails the same way ("Re-definition of module" against its
   `vtr_primitives.v`);
 - a `MODULE` whose name is a module created by an earlier `read_verilog` run of the same design
   (a second read in one script) is `duplicate_module: module 'm' is already defined by an
-  earlier read (run N)` at the `MODULE`'s name (2C's kind, F27).
+  earlier read (run N)` at the `MODULE`'s keyword (2C's kind, F27). The check runs when the
+  definition is reached from the top (the definitions stage 1 is about to specialize); a module
+  named after a built-in cell type is `module '$add' has the name of built-in cell type '$add';
+  rename the module` (v4.5).
 
 ### 3.2 Top selection (EL-7)
 
@@ -296,7 +307,9 @@ The top is chosen before anything is elaborated, from the parsed store:
 
 - **Given** (`--top`, else the project's `top`, `[lib.]mod`): the named design-unit or
   library-unit `MODULE`; not found → `unknown_top` (at `top_at`, unlocated for `--top`); found in
-  several libraries without a `lib.` prefix → `ambiguous_top` listing `lib.mod` for each.
+  several libraries without a `lib.` prefix → `ambiguous_top` listing `lib.mod` for each; a
+  `(* blackbox *)` module → `unknown_top: 'm' is a black box ((* blackbox *)), not a module to
+  elaborate` (v4.5: a black box is never a `MODULE` of the elaborated form, EL-4).
 - **Automatic** (DESIGN §4.0, kept): the candidates are the design-unit `MODULE`s that are not
   black boxes and that no design-unit or library-unit `MODULE` instantiates, by name, anywhere
   in its body (every generate branch counts; the parsed form is all there is before
@@ -1583,7 +1596,7 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   'u' must be connected to a net`; `output port 'p' of instance 'u' is connected to a constant`;
   `connection of 'p' to instance array 'u' is W bits; expected P or N×P`; `module 'adder' has the
   name of cell type 'adder' registered by an earlier read (hard cell); rename the module` (or
-  `(black box)`), at the `MODULE`'s name (EL-6, F9); `duplicate_module: module 'm' is already
+  `(black box)`), at the `MODULE`'s keyword (EL-6, F9); `duplicate_module: module 'm' is already
   defined by an earlier read (run N)` (EL-6, F27).
 - **Constants (EL-12–EL-18)**: `<what> is not constant (it reads 'x')` where `<what>` is one of
   `range bound`, `replication count`, `parameter 'P'`, `generate condition`, `generate loop
@@ -2198,6 +2211,7 @@ and reported, never relaxed (2A's rule).
 | 22 | an unsized literal of exactly a ranged parameter's width stays unsized (extends by its top bit) | same (`simplify.cc` 2381–2390, verified) | sized to the range | matches Yosys's values |
 | 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
 | 24 | a `$pow` read from BLIF (a `.subckt $pow`, as Yosys's `write_blif` writes it) is unsigned: `A_SIGNED` = `B_SIGNED` = 0, the widths implied by the formals | `write_blif` writes `.subckt $pow` with no parameters (unless `-param`, which the Parmys script does not use), so its own BLIF loses the operands' signedness too | — | BLIF carries no sign; no Parmys golden has a negative exponent (controller ruling on the Task 1 review) |
+| 25 | a module's `(* top *)` attribute does not choose the top (EL-7's rule decides) | `hierarchy` takes a `(* top *)` module before `-auto-top` (`passes/hierarchy/hierarchy.cc` 1008–1013 in VTR's 0.55) | — | DESIGN §4.0's top rule; no VTR benchmark or micro uses the attribute (v4.5) |
 
 ## 18. Implementation split (EL-51)
 

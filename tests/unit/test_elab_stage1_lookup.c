@@ -52,6 +52,8 @@ void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
     odin3_elab_test_pend(ODIN3_ELAB_STAGE1, ODIN3_AST_NET_DECL, false);
+    odin3_elab_test_pend(ODIN3_ELAB_STAGE1, ODIN3_AST_MODULE, false);
+    odin3_elab_test_pend(ODIN3_ELAB_STAGE1, ODIN3_AST_UDP_DECL, false);
     odin3_elab_test_set_hooks(NULL);
     odin3_elab_test_set_limits(NULL);
     odin3_pass_options opts = odin3_pass_get_options();
@@ -169,6 +171,48 @@ static void test_lookup_library_unit_last(void) {
     TEST_ASSERT_EQUAL_STRING("work", str(def.library));
 }
 
+/* One other library defines it: no info line (it names several libraries only). */
+static void test_lookup_single_other_library(void) {
+    static const et_src srcs[] = {
+        {"t.v", "module t;\n  sub u ();\nendmodule\n"},
+        {"l2.v", "module sub;\nendmodule\n"},
+    };
+    et_src proj = {"p.o3proj", "file verilog t.v\nfile verilog l2.v library lib2\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_stage1(&req, &rs);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_real_errors(&rs), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "found in libraries"));
+    odin3_elab_def def;
+    TEST_ASSERT_EQUAL_INT(ODIN3_RES_MODULE, resolve("sub", "work", &def).kind);
+    TEST_ASSERT_EQUAL_STRING("lib2", str(def.library));
+}
+
+/* Every instantiation of a body is resolved, each unresolved one reported at itself. */
+static void test_lookup_every_instance(void) {
+    run_one("t.v", "module t;\n  foo u1 ();\n  bar u2 ();\nendmodule\n");
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:2:3: error: unresolved_module: module 'foo' is not defined");
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:3:3: error: unresolved_module: module 'bar' is not defined");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, et_real_errors(&rs), et_log(&rs));
+}
+
+/* `(* blackbox *)` is true as Yosys reads it: no value or a 1 bit; `= 0` is an ordinary module. */
+static void test_blackbox_attribute_value(void) {
+    run_one("b.v", "(* blackbox = 0 *)\nmodule b0;\nendmodule\n(* blackbox = 1 *)\nmodule b1;\n"
+                   "endmodule\n(* blackbox *)\nmodule b2;\nendmodule\n");
+    odin3_elab_def def;
+    TEST_ASSERT_EQUAL_INT(ODIN3_RES_MODULE, resolve("b0", "work", &def).kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DEF_MODULE, def.kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_RES_MODULE, resolve("b1", "work", &def).kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DEF_BLACKBOX, def.kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_RES_MODULE, resolve("b2", "work", &def).kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DEF_BLACKBOX, def.kind);
+    /* b0 is the only candidate: black boxes never are (EL-7). */
+    et_expect(&rs, ODIN3_LOG_INFO,
+              "top module 'work.b0' chosen: the only module no other module instantiates");
+}
+
 /* Q7 at the UDP_DECL, once, with or without an instance; the instance resolves to it silently. */
 static void test_udp_rejected(void) {
     static const char udp[] = "primitive p (y, a);\n  output y;\n  input a;\n"
@@ -194,6 +238,31 @@ static void test_config_rejected(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     TEST_ASSERT_NULL(rs.elab);
+}
+
+/* A library unit's UDP: Q7 once an instance resolves to it, never for one nothing instantiates. */
+static void test_library_udp_rejected_when_used(void) {
+    static const et_src srcs[] = {
+        {"t.v", "module t (input a, output y);\n  p g1 (y, a);\n  p g2 (y, a);\nendmodule\n"},
+        {"cells.v", "primitive q (y, a);\n  output y;\n  input a;\n  table\n    0 : 1;\n"
+                    "  endtable\nendprimitive\nprimitive p (y, a);\n  output y;\n  input a;\n"
+                    "  table\n    0 : 1;\n  endtable\nendprimitive\n"},
+    };
+    et_src proj = {"p.o3proj", "file verilog t.v\nlibfile verilog cells.v\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_stage1(&req, &rs);
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "cells.v:8:1: error: user-defined primitive 'p' is not supported");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_real_errors(&rs), et_log(&rs));
+}
+
+/* A forced-pending UDP_DECL gives its pending line instead of Q7 (point (l)). */
+static void test_pending_forced_udp(void) {
+    odin3_elab_test_pend(ODIN3_ELAB_STAGE1, ODIN3_AST_UDP_DECL, true);
+    run_one("p.v", "primitive p (y, a);\n  output y;\n  input a;\n  table\n    0 : 1;\n"
+                   "  endtable\nendprimitive\nmodule t;\nendmodule\n");
+    et_expect(&rs, ODIN3_LOG_ERROR, "p.v:1:1: error: " PENDING ": 'UDP_DECL'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
 }
 
 /* --- cell types, unresolved and implicit black boxes ---------------------------------------- */
@@ -250,6 +319,15 @@ static void test_taken_hard_cell(void) {
               "earlier read (hard cell); rename the module");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+}
+
+/* A taken module is not elaborated: its body is not walked (nothing depends on a failed item). */
+static void test_taken_body_not_walked(void) {
+    et_src src = {"a.v", "module adder;\n  foo u ();\nendmodule\n"};
+    et_req req = {&src, 1, "read_techlib " ODIN3_LIB_DIR "/vtr.o3lib", NULL, NULL};
+    et_stage1(&req, &rs);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_ERROR, "unresolved_module"));
 }
 
 static const char k_blif[] = ".model top\n.inputs a\n.outputs y\n.subckt bb a=a y=y\n.end\n\n"
@@ -408,6 +486,78 @@ static void test_top_generate_branch_counts(void) {
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_real_errors(&rs), et_log(&rs));
 }
 
+/* An instantiation in each generate form counts: a loop body, a case body, a plain region. */
+static void expect_t_only_candidate(const char *text) {
+    run_one("t.v", text);
+    et_expect(&rs, ODIN3_LOG_INFO,
+              "top module 'work.t' chosen: the only module no other module instantiates");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_real_errors(&rs), et_log(&rs));
+}
+
+static void test_top_generate_for_counts(void) {
+    expect_t_only_candidate("module t;\n  genvar i;\n  generate\n"
+                            "    for (i = 0; i < 2; i = i + 1) begin : g\n      sub u ();\n"
+                            "    end\n  endgenerate\nendmodule\nmodule sub;\nendmodule\n");
+}
+
+static void test_top_generate_case_counts(void) {
+    expect_t_only_candidate("module t;\n  generate\n    case (1)\n      0: sub u ();\n"
+                            "      default: ;\n    endcase\n  endgenerate\nendmodule\n"
+                            "module sub;\nendmodule\n");
+}
+
+static void test_top_generate_region_counts(void) {
+    expect_t_only_candidate("module t;\n  generate\n    sub u ();\n  endgenerate\nendmodule\n"
+                            "module sub;\nendmodule\n");
+}
+
+/* Library units are never top candidates nor named as not elaborated (DESIGN §4.0). */
+static void test_top_library_units_excluded(void) {
+    static const et_src srcs[] = {
+        {"t.v", "module t;\n  sub u ();\nendmodule\n"},
+        {"cells.v", "module sub;\nendmodule\nmodule unused;\nendmodule\n"},
+    };
+    et_src proj = {"p.o3proj", "file verilog t.v\nlibfile verilog cells.v\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_stage1(&req, &rs);
+    et_expect(&rs, ODIN3_LOG_INFO,
+              "top module 'work.t' chosen: the only module no other module instantiates");
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "not elaborated"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_real_errors(&rs), et_log(&rs));
+}
+
+/* A black box is no candidate, but what its body instantiates counts (EL-7 counts every MODULE);
+ * given as the top it is an error (EL-4: a black box is never a MODULE). */
+static void test_top_blackbox_excluded(void) {
+    static const char text[] = "(* blackbox *)\nmodule bb;\n  x u ();\nendmodule\n"
+                               "module x;\nendmodule\nmodule t;\nendmodule\n";
+    run_one("t.v", text);
+    et_expect(&rs, ODIN3_LOG_INFO,
+              "top module 'work.t' chosen: the only module no other module instantiates");
+    et_expect(&rs, ODIN3_LOG_INFO, "not instantiated under the top, not elaborated: 'bb', 'x'");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    et_free(&rs);
+    set_cli_top("bb");
+    run_one("t.v", text);
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "unknown_top: 'bb' is a black box ((* blackbox *)), not a module to elaborate");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+}
+
+/* A given top takes the design unit over a library unit of the same name. */
+static void test_top_given_prefers_design_unit(void) {
+    set_cli_top("sub");
+    static const et_src srcs[] = {
+        {"t.v", "module sub;\nendmodule\nmodule t;\n  other o ();\nendmodule\n"},
+        {"cells.v", "module sub;\nendmodule\nmodule other;\nendmodule\n"},
+    };
+    et_src proj = {"p.o3proj", "file verilog t.v\nlibfile verilog cells.v\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_stage1(&req, &rs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rs.dump.data, "(MODULE:sub @t.v:1:1"), rs.dump.data);
+}
+
 /* --- pending kinds (point (l), ruling C3) ---------------------------------------------------- */
 
 static void test_pending_forced_kind(void) {
@@ -424,6 +574,24 @@ static void test_pending_always(void) {
     run_one("t.v", "module t;\n  always @* ;\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_ERROR, "t.v:2:3: error: " PENDING ": 'ALWAYS'");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+}
+
+/* A kind stage 1 handles, forced pending: its line replaces it (the table is consulted). */
+static void test_pending_forced_module(void) {
+    odin3_elab_test_pend(ODIN3_ELAB_STAGE1, ODIN3_AST_MODULE, true);
+    run_one("t.v", "module t;\n  wire a;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
+    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:1:1: error: " PENDING ": 'MODULE'");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+    TEST_ASSERT_NULL(rs.elab);
+}
+
+/* A design unit's directive and a reached module's attribute are pending until they land. */
+static void test_pending_directive_and_attribute(void) {
+    run_one("d.v", "`timescale 1ns/1ps\n(* keep *)\nmodule t;\nendmodule\n");
+    et_expect(&rs, ODIN3_LOG_ERROR, "d.v:1:1: error: " PENDING ": 'DIRECTIVE'");
+    et_expect(&rs, ODIN3_LOG_ERROR, "d.v:2:4: error: " PENDING ": 'ATTR'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, rs.errors, et_log(&rs));
 }
 
 /* What odin3_elab_pending answers for (stage, kind or feature). */
@@ -747,18 +915,45 @@ static void test_oom(void) {
     TEST_ASSERT_TRUE(oom_sweep(ODIN3_OK) > 10);
 }
 
+/* The library paths (review I1): a given top in several libraries, then an instance resolved
+ * across libraries with its info line. */
+static void test_oom_libraries(void) {
+    sub_two_libs("sub");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
+    TEST_ASSERT_TRUE(oom_sweep(ODIN3_ERR_PARSE) > 10);
+    et_free(&rs);
+    set_cli_top(NULL);
+    static const et_src srcs[] = {
+        {"t.v", "module t;\n  sub u ();\nendmodule\n"},
+        {"l2.v", "module sub;\nendmodule\n"},
+        {"l3.v", "module sub;\nendmodule\n"},
+    };
+    et_src proj = {"p.o3proj", "file verilog t.v\nfile verilog l2.v library lib2\n"
+                               "file verilog l3.v library lib3\n"};
+    et_req req = {srcs, 3, "read_project p.o3proj", &proj, NULL};
+    et_stage1(&req, &rs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status); /* the pending INSTANTIATION */
+    TEST_ASSERT_TRUE(oom_sweep(ODIN3_ERR_PARSE) > 10);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_lookup_own_library_first);
     RUN_TEST(test_lookup_several_libraries);
     RUN_TEST(test_lookup_library_unit_last);
+    RUN_TEST(test_lookup_single_other_library);
+    RUN_TEST(test_lookup_every_instance);
+    RUN_TEST(test_blackbox_attribute_value);
     RUN_TEST(test_udp_rejected);
     RUN_TEST(test_config_rejected);
+    RUN_TEST(test_library_udp_rejected_when_used);
+    RUN_TEST(test_pending_forced_udp);
     RUN_TEST(test_celltype_resolves);
     RUN_TEST(test_dollar_name_unresolved);
     RUN_TEST(test_undefined_unresolved);
     RUN_TEST(test_auto_blackbox);
     RUN_TEST(test_taken_hard_cell);
+    RUN_TEST(test_taken_body_not_walked);
     RUN_TEST(test_taken_blackbox);
     RUN_TEST(test_taken_module_of_earlier_read);
     RUN_TEST(test_blackbox_module_reuses_cell);
@@ -771,8 +966,16 @@ int main(void) {
     RUN_TEST(test_top_several_libraries);
     RUN_TEST(test_top_unreachable_info);
     RUN_TEST(test_top_generate_branch_counts);
+    RUN_TEST(test_top_generate_for_counts);
+    RUN_TEST(test_top_generate_case_counts);
+    RUN_TEST(test_top_generate_region_counts);
+    RUN_TEST(test_top_library_units_excluded);
+    RUN_TEST(test_top_blackbox_excluded);
+    RUN_TEST(test_top_given_prefers_design_unit);
     RUN_TEST(test_pending_forced_kind);
     RUN_TEST(test_pending_always);
+    RUN_TEST(test_pending_forced_module);
+    RUN_TEST(test_pending_directive_and_attribute);
     RUN_TEST(test_pending_tables);
     RUN_TEST(test_pending_report);
     RUN_TEST(test_warn_once_and_cap);
@@ -788,5 +991,6 @@ int main(void) {
     RUN_TEST(test_entry_store_checks);
     RUN_TEST(test_misuse);
     RUN_TEST(test_oom);
+    RUN_TEST(test_oom_libraries);
     return UNITY_END();
 }

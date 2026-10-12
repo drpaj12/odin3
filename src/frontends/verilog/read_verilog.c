@@ -196,17 +196,21 @@ odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
 
 /* --- steps 4 and 5 ------------------------------------------------------------------------- */
 
-/* The library of a design UNIT: its FILE buffer's (0 when it has none; DESIGN §4.0 "design
- * units are identified by library and name"). */
+/* The library of a design UNIT: its FILE buffer's, "work" when it has none, as 2D's lookup reads
+ * it (DESIGN §4.0 "design units are identified by library and name"). A "work" never interned
+ * is 0, which then no other unit can carry either. */
 static uint32_t unit_library(odin3_rv *rv, odin3_ast_id unit) {
     odin3_srcman *sm = NULL;
     odin3_srcbuf_info info;
-    if (odin3_design_get_srcman(rv->design, &sm) != ODIN3_OK ||
-        !odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, odin3_ast_loc(rv->ast, unit)),
-                                  &info)) {
-        return 0;
+    if (odin3_design_get_srcman(rv->design, &sm) == ODIN3_OK &&
+        odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, odin3_ast_loc(rv->ast, unit)),
+                                 &info) &&
+        info.library != 0) {
+        return info.library;
     }
-    return info.library;
+    uint32_t work = 0;
+    (void)odin3_strtab_find(odin3_design_strtab(rv->design), odin3_bytes_cstr(k_work), &work);
+    return work;
 }
 
 /* The module and UDP names one design UNIT defines: a (library, name) already in seen is
@@ -374,6 +378,7 @@ static odin3_status parse_args(odin3_bytes args, rv_args *out) {
             continue;
         }
         if (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0) {
+            /* "option" is 2D Task 10's text; other passes say "unknown argument" (1D style). */
             odin3_log(ODIN3_LOG_ERROR, "read_verilog: unknown option '%.*s'", (int)word.len,
                       (const char *)word.ptr);
             return ODIN3_ERR_INVALID_ARG;

@@ -797,8 +797,9 @@ with a script is an error ("use the pass option").
    module (a library module with a design unit's name stays in the store — it is append-only
    — and is reported with an info line; 2D's lookup takes the design unit; a second library
    definition likewise stays and is ignored, first file wins).
-4. **`duplicate_module`** (M11, 2B §8): two design units defining one module or UDP name →
-   located error at the second definition (its `module`/`primitive` keyword: the node's loc;
+4. **`duplicate_module`** (M11, 2B §8): two design units defining one module or UDP name in one
+   library (DESIGN §4.0: design units are identified by library and name; a buffer without a
+   library is `work`; amended by 2D Task 10) → located error at the second definition (its `module`/`primitive` keyword: the node's loc;
    the name itself carries no location), names [the module]; counts toward the error cap.
 5. **Unnamed instances** (2A rule 4): every `INSTANCE` with name 0 under an `INSTANTIATION`
    whose module name is not a `UDP_DECL` of this store → located error "instance of 'm' has no

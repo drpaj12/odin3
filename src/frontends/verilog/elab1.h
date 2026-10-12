@@ -105,9 +105,9 @@ void odin3_elab1_error(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) ODI
 
 /*
  * A warning at parsed_node's location, once per (parsed node, message format) for the run, so a
- * construct elaborated several times warns once (point (v); the format's text is hashed into the
- * key's low 32 bits). Out of memory for the key latches ODIN3_ERR_NO_MEMORY (odin3_elab1_status)
- * and logs nothing.
+ * construct elaborated several times warns once (point (v): the key is the node's ID and the
+ * format's index in the run's format list, formats compared by text). Out of memory for the key
+ * latches ODIN3_ERR_NO_MEMORY (odin3_elab1_status) and logs nothing.
  */
 void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...)
     ODIN3_PRINTF(3, 4);
@@ -125,10 +125,22 @@ uint32_t odin3_elab1_errors(const odin3_elab1 *e1);
 odin3_status odin3_elab1_status(const odin3_elab1 *e1);
 
 /*
- * Point (l): parsed_node's kind is pending in stage 1. Logs its located line once per kind per
- * run (odin3_elab_pend_report) and counts it as an error under the cap.
+ * Point (l): true when parsed_node's kind is pending in stage 1 (odin3_elab_pending, the table or
+ * a test's force); its located line is then logged once per kind per run
+ * (odin3_elab_pend_report) and counted as an error under the cap. False when stage 1 elaborates
+ * the kind: the caller handles the node.
  */
-void odin3_elab1_pend(odin3_elab1 *e1, odin3_ast_id parsed_node);
+bool odin3_elab1_pending(odin3_elab1 *e1, odin3_ast_id parsed_node);
+
+/*
+ * A node stage 1 reached whose kind is neither pending nor handled: a 2D bug (a kind left the
+ * table without its code). Logs "stage 1: no elaboration of '<KIND>' (a 2D bug)" at the node and
+ * latches ODIN3_ERR_CHECK (odin3_elab1_status).
+ */
+void odin3_elab1_unhandled(odin3_elab1 *e1, odin3_ast_id parsed_node);
+
+/* Reports parsed_node pending, or (not pending) as unhandled: stage 1 handles no kind of it yet. */
+void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node);
 
 /* --- definitions and lookup (elab1_lookup.c) ------------------------------------------------ */
 
@@ -150,6 +162,12 @@ uint32_t odin3_elab1_def_count(const odin3_elab1 *e1);
 const odin3_elab_def *odin3_elab1_def(const odin3_elab1 *e1, uint32_t def);
 
 /*
+ * Q7 or S2 at UDP or configuration definition def (§9.1: at the definition, whether or not it is
+ * instantiated), once; the pending line instead when its kind is pending (point (l)).
+ */
+void odin3_elab1_reject_def(odin3_elab1 *e1, uint32_t def);
+
+/*
  * EL-6: what name (a strtab ID) instantiated in a module of library resolves to, in order: a
  * design-unit MODULE in library; one in another library, the first in store order (several
  * libraries: the info line "module 'N' found in libraries 'A', 'B'; using 'A.N'", once per name);
@@ -166,7 +184,8 @@ odin3_elab_res odin3_elab1_resolve(odin3_elab1 *e1, uint32_t name, uint32_t libr
 /*
  * EL-7. Given (opts.top "[lib.]mod"): that design- or library-unit MODULE (a design unit shadows
  * a library unit); not found → "unknown_top: 'm' is not a defined module", several libraries
- * without a prefix → "ambiguous_top: 'm' is defined in several libraries: 'a.m', 'b.m'", both at
+ * without a prefix → "ambiguous_top: 'm' is defined in several libraries: 'a.m', 'b.m'", a black
+ * box → "unknown_top: 'm' is a black box ((* blackbox *)), not a module to elaborate", all at
  * top_at (unlocated when 0). Automatic: the one design-unit MODULE (not a black box) that no
  * MODULE instantiates by name anywhere in its body (info "top module 'lib.m' chosen: the only
  * module no other module instantiates"); none → no_top, several → ambiguous_top, unlocated, the
@@ -187,10 +206,11 @@ odin3_status odin3_elab1_reach(odin3_elab1 *e1, uint32_t top);
 
 /*
  * Task 10's pass W: a new ELABORATED store with one UNIT named after the top and one MODULE per
- * reached non-black-box definition, in BFS order, each with its parsed range and name, a ports
- * LIST when the source has one, a params LIST when it would hold entries. Every unit-level
- * directive, module attribute, port, parameter and item whose kind is pending is reported
- * (odin3_elab1_pend) and left out. *out receives the unsealed store (owned by the caller).
+ * reached non-black-box definition whose name is not taken (that one failed), in BFS order, each
+ * with its parsed range and name, a ports LIST when the source has one, a params LIST when it would
+ * hold entries. Every unit-level directive, module attribute, port, parameter and item whose kind
+ * is pending is reported (odin3_elab1_not_yet) and left out; a MODULE whose kind is forced pending
+ * is reported and not written. *out receives the unsealed store (owned by the caller).
  * ODIN3_ERR_NO_MEMORY or a builder's status (nothing in *out).
  */
 odin3_status odin3_elab1_write_unit(odin3_elab1 *e1, odin3_ast **out);
@@ -236,7 +256,8 @@ struct odin3_elab1 {
     odin3_u64map *by_name;      /* name → (first def + 1) | (last def + 1) << 32 */
     odin3_u64map *instantiated; /* names any MODULE body instantiates */
     odin3_u64map *noted;        /* names whose resolve info line is logged */
-    odin3_u64map *warned;       /* warn_once keys */
+    odin3_u64map *warned;       /* warn_once keys: parsed node << 32 | format index */
+    odin3_vec warn_fmts;        /* const char *: the warning formats in first-use order */
     bool pend_seen[ODIN3_PEND_END];
 };
 

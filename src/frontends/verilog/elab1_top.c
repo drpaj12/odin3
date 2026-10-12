@@ -102,8 +102,9 @@ static e1_top_name split_top(const odin3_elab1 *e1, const char *text) {
     return split;
 }
 
-/* ambiguous_top for a given name defined in several libraries: 'lib.mod' for each. */
-static void ambiguous_given(odin3_elab1 *e1, uint32_t name, const char *text) {
+/* ambiguous_top for a given name defined in several libraries: 'lib.mod' for each. PARSE once
+ * reported; NO_MEMORY (latched, nothing logged) when the list cannot be built. */
+static odin3_status ambiguous_given(odin3_elab1 *e1, uint32_t name, const char *text) {
     odin3_strbuf list;
     odin3_strbuf_init(&list);
     odin3_status st = ODIN3_OK;
@@ -123,6 +124,7 @@ static void ambiguous_given(odin3_elab1 *e1, uint32_t name, const char *text) {
                           list.data);
     }
     odin3_strbuf_free(&list);
+    return st != ODIN3_OK ? st : ODIN3_ERR_PARSE;
 }
 
 static odin3_status given_top(odin3_elab1 *e1, uint32_t *def) {
@@ -132,13 +134,20 @@ static odin3_status given_top(odin3_elab1 *e1, uint32_t *def) {
     if (found.design == 0 && found.libunit == 0) {
         found = find_named(e1, (e1_top_name){e1->opts.top, 0});
         if (found.n_design > 1) {
-            ambiguous_given(e1, e1->opts.top, text);
-            return ODIN3_ERR_PARSE;
+            return ambiguous_given(e1, e1->opts.top, text);
         }
     }
     uint32_t at = found.design != 0 ? found.design : found.libunit;
     if (at == 0) {
         odin3_elab1_error(e1, e1->opts.top_at, "unknown_top: '%s' is not a defined module", text);
+        return ODIN3_ERR_PARSE;
+    }
+    if (odin3_elab1_def(e1, at - 1)->kind == ODIN3_DEF_BLACKBOX) {
+        /* EL-4: a black box is never a MODULE, so it cannot head the UNIT (review m1). */
+        odin3_elab1_error(e1, e1->opts.top_at,
+                          "unknown_top: '%s' is a black box ((* blackbox *)), not a module to "
+                          "elaborate",
+                          text);
         return ODIN3_ERR_PARSE;
     }
     *def = at - 1;
@@ -267,14 +276,7 @@ static odin3_status reach_instance(odin3_elab1 *e1, odin3_ast_id inst, uint32_t 
         return reach_def(e1, res.def);
     }
     if (res.kind == ODIN3_RES_UDP) {
-        odin3_elab1_defx *ext = defx_at(e1, res.def);
-        const odin3_elab_def *udp = odin3_elab1_def(e1, res.def);
-        if (udp->library_unit && !ext->reported) {
-            ext->reported = true; /* a design unit's UDP was reported by collect_defs */
-            odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, udp->node),
-                              "user-defined primitive '%s' is not supported",
-                              text_of(e1, udp->name));
-        }
+        odin3_elab1_reject_def(e1, res.def); /* a design unit's UDP: reported already */
     } else if (res.kind == ODIN3_RES_NONE) {
         odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, inst),
                           "unresolved_module: module '%s' is not defined", text_of(e1, name));

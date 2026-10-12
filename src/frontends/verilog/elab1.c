@@ -30,6 +30,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Debug builds check the elaborated store whatever the options say (EL-2 step 2). */
 #ifdef NDEBUG
@@ -91,13 +92,32 @@ void odin3_elab1_error(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) {
     va_end(args);
 }
 
+/* The index of format fmt among the run's warning formats (point (v)), registered on first use;
+ * NO_MEMORY when it cannot be. */
+static odin3_status format_index(odin3_elab1 *e1, const char *fmt, uint32_t *index) {
+    for (size_t i = 0; i < e1->warn_fmts.len; i++) {
+        if (strcmp(*(const char *const *)odin3_vec_cat(&e1->warn_fmts, i), fmt) == 0) {
+            *index = (uint32_t)i;
+            return ODIN3_OK;
+        }
+    }
+    const char **slot = (const char **)odin3_vec_push(&e1->warn_fmts);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = fmt;
+    *index = (uint32_t)e1->warn_fmts.len - 1;
+    return ODIN3_OK;
+}
+
 void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...) {
-    uint64_t key = (uint64_t)parsed_node.v << E1_KEY_SHIFT |
-                   (uint32_t)odin3_hash_bytes(odin3_bytes_cstr(fmt), 0);
-    if (odin3_u64map_get(e1->warned, key, NULL)) {
+    uint32_t index = 0;
+    odin3_status st = format_index(e1, fmt, &index);
+    uint64_t key = (uint64_t)parsed_node.v << E1_KEY_SHIFT | index;
+    if (st == ODIN3_OK && odin3_u64map_get(e1->warned, key, NULL)) {
         return;
     }
-    odin3_status st = odin3_u64map_put(e1->warned, (odin3_kv){key, 1});
+    st = st != ODIN3_OK ? st : odin3_u64map_put(e1->warned, (odin3_kv){key, 1});
     if (st != ODIN3_OK) {
         e1->fatal = e1->fatal != ODIN3_OK ? e1->fatal : st;
         return;
@@ -127,14 +147,31 @@ odin3_status odin3_elab1_status(const odin3_elab1 *e1) {
     return e1->fatal;
 }
 
-void odin3_elab1_pend(odin3_elab1 *e1, odin3_ast_id parsed_node) {
+bool odin3_elab1_pending(odin3_elab1 *e1, odin3_ast_id parsed_node) {
     uint32_t kind = (uint32_t)odin3_ast_kind_of(e1->parsed, parsed_node);
-    if (kind >= ODIN3_PEND_END || e1->pend_seen[kind]) {
-        return;
+    if (!odin3_elab_pending(ODIN3_ELAB_STAGE1, kind)) {
+        return false;
+    }
+    if (e1->pend_seen[kind]) {
+        return true;
     }
     odin3_loc loc = odin3_ast_loc(e1->parsed, parsed_node);
     if (error_slot(e1, loc)) {
         odin3_elab_pend_report(e1->design, loc, kind, e1->pend_seen);
+    }
+    return true;
+}
+
+void odin3_elab1_unhandled(odin3_elab1 *e1, odin3_ast_id parsed_node) {
+    odin3_diag(e1->design, ODIN3_LOG_ERROR, odin3_ast_loc(e1->parsed, parsed_node),
+               "stage 1: no elaboration of '%s' (a 2D bug)",
+               odin3_ast_kind_name(odin3_ast_kind_of(e1->parsed, parsed_node)));
+    e1->fatal = e1->fatal != ODIN3_OK ? e1->fatal : ODIN3_ERR_CHECK;
+}
+
+void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node) {
+    if (!odin3_elab1_pending(e1, parsed_node)) {
+        odin3_elab1_unhandled(e1, parsed_node);
     }
 }
 
@@ -170,6 +207,7 @@ static void init_containers(odin3_elab1 *e1) {
     odin3_vec_init(&e1->ports, sizeof(odin3_ast_id));
     odin3_vec_init(&e1->insts, sizeof(odin3_ast_id));
     odin3_vec_init(&e1->order, sizeof(uint32_t));
+    odin3_vec_init(&e1->warn_fmts, sizeof(const char *));
 }
 
 odin3_status odin3_elab1_create(odin3_pass_ctx *ctx, odin3_ast *parsed, const odin3_elab_opts *opts,
@@ -221,6 +259,7 @@ void odin3_elab1_destroy(odin3_elab1 *e1) {
     odin3_vec_free(&e1->ports);
     odin3_vec_free(&e1->insts);
     odin3_vec_free(&e1->order);
+    odin3_vec_free(&e1->warn_fmts);
     odin3_u64map_destroy(e1->by_name);
     odin3_u64map_destroy(e1->instantiated);
     odin3_u64map_destroy(e1->noted);
@@ -237,12 +276,12 @@ static odin3_ast_spec spec_from(const odin3_elab1 *e1, uint32_t kind, odin3_ast_
                             .end = odin3_ast_end(e1->parsed, from).v};
 }
 
-/* Reports every entry of a parsed list (a slot LIST's entries or a module's items) pending: no
- * kind inside a module has landed in stage 1 yet (Task 11 writes the first). */
+/* Every entry of a parsed list (a slot LIST's entries or a module's items): no kind inside a
+ * module has landed in stage 1 yet (Task 11 writes the first), so each is pending. */
 static void pend_span(odin3_elab1 *e1, odin3_ast_span span) {
-    for (uint32_t i = 0; i < span.n && !e1->stopped; i++) {
+    for (uint32_t i = 0; i < span.n && !e1->stopped && e1->fatal == ODIN3_OK; i++) {
         if (span.ids[i].v != 0) {
-            odin3_elab1_pend(e1, span.ids[i]);
+            odin3_elab1_not_yet(e1, span.ids[i]);
         }
     }
 }
@@ -268,10 +307,7 @@ enum { E1_SLOT_PARAMS = 0, E1_SLOT_PORTS = 1, E1_MODULE_SLOTS = 2 };
 /* One MODULE shell of definition def (name, range, the ports LIST); its contents reported. */
 static odin3_status write_module(odin3_elab1 *e1, const odin3_elab_def *def, odin3_ast_id *out) {
     odin3_ast_id node = def->node;
-    odin3_ast_span attrs = odin3_ast_attrs(e1->parsed, node);
-    if (attrs.n > 0) {
-        odin3_elab1_pend(e1, attrs.ids[0]);
-    }
+    pend_span(e1, odin3_ast_attrs(e1->parsed, node));
     odin3_ast_id slots[E1_MODULE_SLOTS] = {{0}, {0}};
     odin3_ast_id params = odin3_ast_child(e1->parsed, node, E1_SLOT_PARAMS);
     odin3_ast_id ports = odin3_ast_child(e1->parsed, node, E1_SLOT_PORTS);
@@ -294,7 +330,7 @@ static void pend_unit_directives(odin3_elab1 *e1) {
         odin3_ast_span kids = odin3_ast_children(e1->parsed, odin3_ast_root(e1->parsed, idx));
         for (uint32_t i = 0; i < kids.n && !e1->stopped; i++) {
             if (odin3_ast_kind_of(e1->parsed, kids.ids[i]) == ODIN3_AST_DIRECTIVE) {
-                odin3_elab1_pend(e1, kids.ids[i]);
+                odin3_elab1_not_yet(e1, kids.ids[i]);
             }
         }
     }
@@ -306,8 +342,12 @@ static odin3_status push_modules(odin3_elab1 *e1) {
     for (size_t i = 0; st == ODIN3_OK && i < e1->order.len; i++) {
         uint32_t idx = *(const uint32_t *)odin3_vec_cat(&e1->order, i);
         const odin3_elab_def *def = odin3_elab1_def(e1, idx);
-        if (def->kind != ODIN3_DEF_MODULE) {
-            continue; /* a black box becomes a cell type (EL-11), never a MODULE */
+        const odin3_elab1_defx *ext = odin3_vec_cat(&e1->defx, idx);
+        if (def->kind != ODIN3_DEF_MODULE || ext->taken != ODIN3_TAKEN_NONE) {
+            continue; /* a black box becomes a cell type (EL-11); a taken name failed (EL-44) */
+        }
+        if (odin3_elab1_pending(e1, def->node)) {
+            continue;
         }
         odin3_ast_id module = {0};
         st = write_module(e1, def, &module);
@@ -368,7 +408,7 @@ static odin3_status stage1_steps(odin3_elab1 *e1, odin3_ast **elab) {
     if (st == ODIN3_OK && !e1->stopped) {
         st = odin3_elab1_select_top(e1, &top);
         if (st == ODIN3_ERR_PARSE) {
-            return ODIN3_OK; /* reported; nothing to walk from */
+            return e1->fatal; /* reported (or out of memory): nothing to walk from */
         }
     }
     if (st == ODIN3_OK && !e1->stopped) {
@@ -392,6 +432,10 @@ odin3_status odin3_elab_stage1(odin3_pass_ctx *ctx, odin3_ast *parsed, const odi
     st = st != ODIN3_OK ? st : stage1_steps(e1, &elab);
     if (st == ODIN3_OK && (e1->errors > 0 || e1->stopped)) {
         st = ODIN3_ERR_PARSE; /* §2.3: any stage-1 error destroys the elaborated store */
+    }
+    if (st == ODIN3_OK && elab == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_elab_stage1: internal: no store written, no error");
+        st = ODIN3_ERR_CHECK; /* a 2D bug, never user input (§9.3) */
     }
     st = st != ODIN3_OK ? st : odin3_ast_finish(elab);
     if (st != ODIN3_OK) {
@@ -464,5 +508,5 @@ odin3_status odin3_elab_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_ast
     body_hooks(elab);
     st = odin3_elab_stage2(ctx, elab, &options);
     odin3_status held = hand_over_elab(design, elab);
-    return st != ODIN3_OK ? st : held;
+    return held == ODIN3_ERR_NO_MEMORY || st == ODIN3_OK ? held : st; /* NO_MEMORY first */
 }
