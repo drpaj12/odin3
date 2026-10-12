@@ -48,6 +48,8 @@ static void print_usage(FILE *out) {
                 "  -f LIST          read a file list first (read_project --format f LIST)\n"
                 "  --revision R     the Quartus revision every read_project reads\n"
                 "  --abc-script FILE the ABC script of every abc pass (below abc --script)\n"
+                "  --opt-snapshot DIR write the design before and after every changing opt step\n"
+                "                   (DIR must exist: NNNN-<sub>-before.il, -after.il)\n"
                 "  --dump-project   write the project record as JSON after the scripts\n"
                 "  --diag-paths given|resolved\n"
                 "                   name files in diagnostics as given (default) or absolute\n"
@@ -95,11 +97,13 @@ typedef struct cli_state {
     /* --abc-script FILE, NULL for none */
     const char *abc_script;
     bool linked_abc; /* the linked ABC engine is registered (--version names it) */
+    const char *opt_snapshot; /* --opt-snapshot DIR, NULL for none */
 } cli_state;
 
 /* The options that take a value. */
-static const char *const k_value_options[] = {
-    "--plugin", "--top", "-p", "--project", "-f", "--revision", "--diag-paths", "--abc-script"};
+static const char *const k_value_options[] = {"--plugin",     "--top",        "-p",
+                                              "--project",    "-f",           "--revision",
+                                              "--diag-paths", "--abc-script", "--opt-snapshot"};
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
 static bool option_value(char **argv, int argc, int *at, const char **value) {
@@ -191,6 +195,12 @@ static bool is_regular_file(const char *path) {
     return stat(path, &info) == 0 && S_ISREG(info.st_mode);
 }
 
+/* True when path names a directory (symbolic links followed). */
+static bool is_directory(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
+}
+
 /* An option with its value (loads a plugin, records the rest). */
 static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--plugin") == 0) {
@@ -208,11 +218,15 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
         return bad_value(arg, value, "no such file");
     }
+    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
+        return bad_value(arg, value, "no such directory");
+    }
     state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);
     state->top = strcmp(arg, "--top") == 0 ? value : state->top;
     state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
     state->abc_script = strcmp(arg, "--abc-script") == 0 ? value : state->abc_script;
+    state->opt_snapshot = strcmp(arg, "--opt-snapshot") == 0 ? value : state->opt_snapshot;
     return EXIT_OK;
 }
 
@@ -424,5 +438,6 @@ int main(int argc, char **argv) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }
+    odin3_opt_set_snapshot_dir(state.opt_snapshot);
     return run_scripts(argv, argc, &state);
 }

@@ -17,6 +17,7 @@
  * library units.
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
+ * ABI v4 (cont., 2F): odin3_opt_set_snapshot_dir.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -306,6 +307,16 @@ odin3_status odin3_pass_set_revision(const char *revision);
  * Fails only with ODIN3_ERR_NO_MEMORY (the old path is kept).
  */
 odin3_status odin3_pass_set_abc_script(const char *path);
+
+/*
+ * Makes every later opt-family sub-pass call that changes the design write its design as RTLIL
+ * text before and after into dir (the CLI's --opt-snapshot; 2F OP-16), as
+ * <dir>/<NNNN>-<sub>-before.il and <dir>/<NNNN>-<sub>-after.il: NNNN is the call sequence (four
+ * digits from 0001, counted from this call) and <sub> the sub-pass (opt_expr, opt_merge, ...).
+ * dir must exist; it is copied. NULL turns snapshots off. Process-wide. An allocation failure is
+ * logged and leaves snapshots off.
+ */
+void odin3_opt_set_snapshot_dir(const char *dir);
 
 /*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false

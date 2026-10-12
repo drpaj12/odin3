@@ -102,4 +102,56 @@ odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
  */
 odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
 
+/* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
+
+/* A pass's parsed arguments (plan point (c)). */
+typedef struct odin3_opt_args {
+    odin3_opt_opts opts;
+    bool stats, full_rescan; /* --opt-stats, --opt-full-rescan */
+} odin3_opt_args;
+
+/*
+ * Parses args (the words after the pass name) for pass ("opt", "opt_expr", ..., "opt_clean"):
+ * Yosys's spellings and a `--` spelling of each; -full implies -mux_undef -mux_bool -undriven -fine
+ * (opt_expr, opt) and -fine (opt_reduce); --opt-stats everywhere, --opt-full-rescan on opt and
+ * opt_expr. *out is zeroed first. An unknown word logs "<pass>: unknown argument '<arg>'" and gives
+ * ODIN3_ERR_INVALID_ARG, as does an unknown pass or a NULL out.
+ */
+odin3_status odin3_opt_parse_args(const char *pass, odin3_bytes args, odin3_opt_args *out);
+
+/* The sub-passes odin3_opt_call runs, in the order of opt's script. */
+typedef enum odin3_opt_sub {
+    ODIN3_OPT_SUB_EXPR,
+    ODIN3_OPT_SUB_MERGE,
+    ODIN3_OPT_SUB_MUXTREE,
+    ODIN3_OPT_SUB_REDUCE,
+    ODIN3_OPT_SUB_SHARE,
+    ODIN3_OPT_SUB_DFF,
+    ODIN3_OPT_SUB_CLEAN,
+    ODIN3_OPT_N_SUBS
+} odin3_opt_sub;
+
+typedef struct odin3_opt_call_req {
+    odin3_pass_ctx *ctx;
+    odin3_design *design;
+    odin3_opt_sub sub;
+    const odin3_opt_opts *opts;
+    odin3_opt_counts *counts;
+} odin3_opt_call_req;
+
+/*
+ * One sub-pass call: the on_call test hook, the budget check (over budget logs "<pass> needs more
+ * than N bytes (...)", the pass being ctx's, and gives ODIN3_ERR_PARSE), the "before" snapshot when
+ * a snapshot directory is set, the sub-pass, in Debug odin3_check_design FAST, and the snapshot
+ * files when the call changed anything. *changed is set to whether it did (the growth of the
+ * sub-pass's counters in counts). A sub-pass that is still a stub logs "<sub>: not available yet
+ * (2F)" and gives ODIN3_ERR_INVALID_ARG. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ */
+odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
+
+/* odin3_opt_set_snapshot_dir is public (odin3.h); register.c defines it. */
+
+/* --opt-stats: INFO "opt: rule <name> N" per non-zero rule or opt_dff action counter, by name. */
+void odin3_opt_print_stats(const odin3_opt_counts *counts);
+
 #endif

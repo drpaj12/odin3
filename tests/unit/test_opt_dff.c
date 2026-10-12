@@ -623,6 +623,9 @@ static const emit_case k_emit_table[] = {
     {F_CLK | F_CE, "$dffe"},
     {F_CLK | F_ARST, "$adff"},
     {F_CLK | F_ARST | F_CE, "$adffe"},
+    /* arst before aload (clocked_type's precedence, Task 2 review m-1 T1): Yosys's opt_dff never
+     * makes the combination; FfData::emit picks the arst type */
+    {F_CLK | F_ARST | F_ALOAD, "$adff"},
     {F_CLK | F_ALOAD, "$aldff"},
     {F_CLK | F_ALOAD | F_CE, "$aldffe"},
     {F_CLK | F_SRST, "$sdff"},
@@ -821,11 +824,47 @@ static void test_ff_emit_oom(void) {
     printf("ff_emit OOM: %u partial points on the tie path\n", partial[1]);
 }
 
+/* Task 2 review m-1 T10: the const-D rule is for a plain latch; an $adlatch with a constant D
+ * keeps its aload (D stays the AD data) and its arst. */
+static void test_ff_const_adlatch(void) {
+    build("module \\m\n  wire input 1 \\e\n  wire input 2 \\r\n  wire width 2 \\q\n"
+          "  cell $adlatch \\j\n    parameter \\WIDTH 2\n    parameter \\EN_POLARITY 1\n"
+          "    parameter \\ARST_POLARITY 1\n    parameter \\ARST_VALUE 2'10\n"
+          "    connect \\EN \\e\n    connect \\ARST \\r\n    connect \\D 2'01\n"
+          "    connect \\Q \\q\n  end\nend\n");
+    odin3_ffdata ff;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ff_load(&fx.oc, node_named("j"), &ff));
+    TEST_ASSERT_TRUE(ff.has_aload && ff.has_arst && !ff.has_clk);
+    TEST_ASSERT_EQUAL_size_t(2, ff.sig_ad.len);
+    TEST_ASSERT_EQUAL_UINT32(wnet("e", 0).v, ff.sig_aload.v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("r", 0).v, ff.sig_arst.v);
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_ff_emit(&fx.oc, &ff, &node), last_error);
+    TEST_ASSERT_EQUAL_STRING("$adlatch", type_name(node));
+    odin3_ffdata_free(&ff);
+    check_full();
+}
+
+/* Task 2 review m-1 T13: an x init on a fine FF whose node had INIT 2 (don't care) keeps the 2. */
+static void test_ff_fine_keeps_dont_care(void) {
+    build("module \\m\n  wire input 1 \\c\n  wire input 2 \\d\n  wire output 3 \\q\n"
+          "  cell $_DFF_P_ \\g\n    parameter \\INIT 2\n    connect \\C \\c\n"
+          "    connect \\D \\d\n    connect \\Q \\q\n  end\nend\n");
+    odin3_ffdata ff;
+    odin3_node_id node = reemit("g", &ff);
+    TEST_ASSERT_EQUAL_STRING("$_DFF_P_", type_name(node));
+    TEST_ASSERT_EQUAL_INT64(2, param_of(node, "INIT")->i);
+    odin3_ffdata_free(&ff);
+    check_full();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ff_load_each_type);
     RUN_TEST(test_ff_fine_keeps_type);
     RUN_TEST(test_ff_const_latch);
+    RUN_TEST(test_ff_const_adlatch);
+    RUN_TEST(test_ff_fine_keeps_dont_care);
     RUN_TEST(test_ff_misuse);
     RUN_TEST(test_ff_slice);
     RUN_TEST(test_ff_emit_table);
