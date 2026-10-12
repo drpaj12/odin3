@@ -76,6 +76,7 @@ add_library(odin3_core OBJECT
     src/frontends/blif/reader.c
     src/backends/blif/writer.c
     src/backends/blif/vtr.c
+    src/backends/blif/isop.c
     src/passes/manager.c
     src/passes/builtin.c
     src/passes/write_formats.c
@@ -477,6 +478,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    # 3E-5: odin3_blif_isop, the irredundant cover write_blif writes a $lut as.
+    odin3_add_unit_test(test_blif_isop)
     # 3E: write_blif --vtr (tests/unit/blif_vtr_test.c: read a BLIF text, run write_blif).
     odin3_add_unit_test(test_blif_vtr)
     target_sources(test_blif_vtr PRIVATE tests/unit/blif_vtr_test.c tests/unit/proc_fixture.c

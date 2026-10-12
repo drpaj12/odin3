@@ -4,6 +4,7 @@
 
 #include "ir/celltype.h"
 #include "ir/ids.h"
+#include "ir/lut.h"
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "ir/value.h"
@@ -158,6 +159,7 @@ enum { SOP_COVER_PARAM = 1 }; /* $sop parameters WIDTH, COVER (ir/cells/sop.c) *
 
 /* The registry names the preflight and the classes tell apart. */
 static const char SOP_NAME[] = "$sop";
+static const char LUT_NAME[] = "$lut";
 static const char UNCONN_NAME[] = "unconn";
 
 /* True when name is one of the n names of list. */
@@ -259,7 +261,9 @@ static uint64_t tt_mask(uint32_t inputs) {
     return inputs >= TT_WORD_SHIFT ? UINT64_MAX : ((uint64_t)1 << ((uint64_t)1 << inputs)) - 1U;
 }
 
-/* Sets in tt the minterms the row (`inputs` plane characters) covers. */
+/* Sets in tt the minterms the row (`inputs` plane characters) covers: value with each subset of
+ * the don't-care inputs, in increasing order, rather than a scan of all 2^k minterms per row (3E-1
+ * final review M9). */
 static void tt_add_row(const uint8_t *row, uint32_t inputs, uint64_t *tt) {
     uint32_t care = 0;
     uint32_t value = 0;
@@ -267,11 +271,13 @@ static void tt_add_row(const uint8_t *row, uint32_t inputs, uint64_t *tt) {
         care |= row[j] != '-' ? 1U << j : 0U;
         value |= row[j] == '1' ? 1U << j : 0U;
     }
-    for (uint32_t minterm = 0; minterm < 1U << inputs; minterm++) {
-        if ((minterm & care) == value) {
-            tt[minterm >> TT_WORD_SHIFT] |= (uint64_t)1 << (minterm & (TT_WORD_BITS - 1U));
-        }
-    }
+    uint32_t dont = ~care & ((1U << inputs) - 1U);
+    uint32_t sub = 0;
+    do {
+        uint32_t minterm = value | sub;
+        tt[minterm >> TT_WORD_SHIFT] |= (uint64_t)1 << (minterm & (TT_WORD_BITS - 1U));
+        sub = (sub - dont) & dont; /* the next subset; 0 again after the last */
+    } while (sub != 0);
 }
 
 /* tt = the function of rows (k <= 16), as odin3_blif_vtr_eval states. */
@@ -293,8 +299,40 @@ static void tt_of_rows(const odin3_blif_vtr_rows *rows, uint64_t *tt) {
     }
 }
 
+/* True and params = node's WIDTH and LUT when node is a $lut of a valid WIDTH (3D AB-2). */
+static bool lut_params(const odin3_module *module, odin3_node_id node, odin3_value *params) {
+    const char *type =
+        odin3_celltype_get(odin3_module_design(module), odin3_node_type(module, node))->name;
+    if (strcmp(type, LUT_NAME) != 0) {
+        return false;
+    }
+    params[ODIN3_LUT_P_WIDTH] = *odin3_node_param(module, node, ODIN3_LUT_P_WIDTH);
+    params[ODIN3_LUT_P_LUT] = *odin3_node_param(module, node, ODIN3_LUT_P_LUT);
+    const odin3_value *width = &params[ODIN3_LUT_P_WIDTH];
+    return width->kind == ODIN3_VAL_INT && width->i >= 1 && width->i <= ODIN3_LUT_MAX_WIDTH;
+}
+
+/* True and *inputs = the inputs of a `.names` cell (odin3_blif_vtr_rows_of) or of a $lut. */
+static bool names_inputs(const odin3_module *module, odin3_node_id node, uint32_t *inputs) {
+    odin3_blif_vtr_rows rows;
+    odin3_value params[2];
+    if (odin3_blif_vtr_rows_of(module, node, &rows)) {
+        *inputs = rows.inputs;
+        return true;
+    }
+    if (lut_params(module, node, params)) {
+        *inputs = (uint32_t)params[ODIN3_LUT_P_WIDTH].i;
+        return true;
+    }
+    return false;
+}
+
 bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_t *tt) {
     odin3_blif_vtr_rows rows;
+    odin3_value params[2];
+    if (lut_params(module, node, params)) { /* the mask is the table (3E §18, M9) */
+        return odin3_lut_table(params, tt, odin3_lut_words((uint32_t)params[ODIN3_LUT_P_WIDTH].i));
+    }
     if (!odin3_blif_vtr_rows_of(module, node, &rows) || rows.inputs > ODIN3_BLIF_VTR_MAX_K) {
         return false;
     }
@@ -304,11 +342,10 @@ bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_
 
 odin3_blif_vtr_fn odin3_blif_vtr_function(const odin3_module *module, odin3_node_id node) {
     uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
-    odin3_blif_vtr_rows rows;
-    if (!odin3_blif_vtr_rows_of(module, node, &rows) || !odin3_blif_vtr_eval(module, node, tt)) {
+    uint32_t k = 0;
+    if (!names_inputs(module, node, &k) || !odin3_blif_vtr_eval(module, node, tt)) {
         return ODIN3_BLIF_VTR_FN_NONE;
     }
-    uint32_t k = rows.inputs;
     bool zero = true;
     bool one = true;
     for (uint32_t word = 0; word < tt_words(k); word++) {
@@ -342,6 +379,7 @@ typedef enum vtr_kind {
     VK_CONST,
     VK_SOP,
     VK_GATE,
+    VK_LUT,
     VK_DFF_P,
     VK_DFF_N,
     VK_DLATCH,
@@ -361,7 +399,7 @@ static const vtr_named_kind KINDS[] = {
     {"$_XOR_", VK_GATE},      {"$_NAND_", VK_GATE},       {"$_NOR_", VK_GATE},
     {"$_XNOR_", VK_GATE},     {"$_MUX_", VK_GATE},        {"$_DFF_P_", VK_DFF_P},
     {"$_DFF_N_", VK_DFF_N},   {"$_DLATCH_P_", VK_DLATCH}, {"$_DLATCH_N_", VK_DLATCH},
-    {"$_FF_", VK_FF},
+    {"$_FF_", VK_FF},         {"$lut", VK_LUT},
 };
 
 static vtr_kind kind_of(const char *name) {
@@ -548,7 +586,8 @@ static bool cover_mixed(const odin3_value *cover) {
     return on && off;
 }
 
-/* E7 (its stored inputs, plan 3E point (g)), then E8 for a $sop; else one .names. */
+/* E7 (its stored inputs, plan 3E point (g)), then E8 for a $sop; else one .names (a $lut's from
+ * odin3_blif_isop, 3E-5). */
 static odin3_status check_names(vtr_walk *walk, odin3_node_id node, vtr_kind kind) {
     odin3_pinslice pins = odin3_node_pins(walk->top, node);
     uint32_t inputs = 0;
@@ -775,6 +814,7 @@ static odin3_status check_node(vtr_walk *walk, odin3_node_id node) {
         return check_latch(walk, node);
     case VK_SOP:
     case VK_GATE:
+    case VK_LUT:
         return check_names(walk, node, kind);
     default:
         return check_other(walk, node, def);

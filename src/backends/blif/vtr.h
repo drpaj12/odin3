@@ -80,8 +80,8 @@ typedef struct odin3_blif_vtr_plan {
  * own refusal only below the cap). Each refusal is `error: write_blif: --vtr: <§11 text>`; past
  * ODIN3_BLIF_VTR_MAX_ERRORS they are counted only, then `write_blif: --vtr: N more errors not
  * shown` follows. report (zeroed first) counts the refusals and what the write will emit:
- * `names` the $sop and gate cells (.names lines of cells; generators and port buffers the writer
- * adds are not counted), `latches` the $_DFF_P_ cells, `subckts` the hard cells; per pin,
+ * `names` the $sop, gate and $lut cells (.names lines of cells; generators and port buffers the
+ * writer adds are not counted), `latches` the $_DFF_P_ cells, `subckts` the hard cells; per pin,
  * `x_to_gnd` the X and UNDRIVEN .names inputs (not those of a cell §6 writes as a constant
  * generator, whose inputs are dropped), .latch D pins and output-port bits, `x_to_unconn` the X
  * and UNDRIVEN non-clock inputs of hard cells, `unconn_logic` the class-U .names inputs (as for
@@ -177,11 +177,13 @@ bool odin3_blif_vtr_rows_of(const odin3_module *module, odin3_node_id node,
 
 /*
  * The truth table of a `.names` cell (odin3_blif_vtr_rows_of) with k <= ODIN3_BLIF_VTR_MAX_K
- * inputs: bit i of tt (word i / 64, bit i % 64) is the output when input j is bit j of i. tt must
+ * inputs, or of a $lut (k = WIDTH; its LUT parameter, read as the table: odin3_lut_table, input j
+ * = A[j]): bit i of tt (word i / 64, bit i % 64) is the output when input j is bit j of i. tt must
  * hold ODIN3_BLIF_VTR_TT_WORDS words; the first max(1, 2^k / 64) are written, bits from 2^k up
  * zero. A cover with rows of output `1` is their OR (rows of output `0` in a mixed cover, E8, are
  * ignored, as the $sop simulator does); one with only `0` rows is the complement of their OR; no
- * rows is constant 0. Returns false, tt untouched, for any other cell or k > 16. O(rows * 2^k).
+ * rows is constant 0. Returns false, tt untouched, for any other cell, k > 16 or a $lut whose
+ * parameters its verify refuses. O(2^k + the minterms of each row).
  */
 bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_t *tt);
 
@@ -195,10 +197,10 @@ typedef enum odin3_blif_vtr_fn {
     ODIN3_BLIF_VTR_FN_INV,      /* k = 1: its complement */
 } odin3_blif_vtr_fn;
 
-/* The function of node by odin3_blif_vtr_eval. The writer writes a cell with k >= 1 of a CONST
- * function as the zero-input generator `.names <y>` (no rows, or the row `1`), its inputs
- * dropped; of BUF/INV as `.names <a> <y>` with the one row `1 1`/`0 1`; a zero-input $sop as
- * stored. */
+/* The function of node (a `.names` cell or a $lut) by odin3_blif_vtr_eval. The writer writes a
+ * cell with k >= 1 of a CONST function as the zero-input generator `.names <y>` (no rows, or the
+ * row `1`), its inputs dropped; of BUF/INV as `.names <a> <y>` with the one row `1 1`/`0 1` (a
+ * $lut's odin3_blif_isop cover is that row); a zero-input $sop as stored. */
 odin3_blif_vtr_fn odin3_blif_vtr_function(const odin3_module *module, odin3_node_id node);
 
 /* True when node is a $_CONST0_, $_CONST1_, $_CONSTX_ or $_CONSTZ_ (written as no line; §9). */

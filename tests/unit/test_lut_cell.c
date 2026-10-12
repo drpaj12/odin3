@@ -1,8 +1,9 @@
 /*
  * test_lut_cell.c — the $lut cell (3D spec §2, AB-2; docs/IR.md "LUT cells"): its registry entry
  * (ruling I5), verify, const_value, simulate, the table helpers of ir/lut.h, the engine word layout
- * (I10), and its JSON and RTLIL forms. The module of json_form and rtlil_form is also written to
- * ODIN3_LUT_OUT/lut.json and lut.il, the inputs of CTests lut_json_yosys and lut_rtlil_yosys.
+ * (I10), and its JSON, RTLIL and BLIF forms (the BLIF one 3E-5's `.names`). The module of json_form
+ * and rtlil_form is also written to ODIN3_LUT_OUT/lut.json and lut.il, the inputs of CTests
+ * lut_json_yosys and lut_rtlil_yosys.
  */
 #include "backends/blif/writer.h"
 #include "backends/dot/writer.h"
@@ -657,47 +658,40 @@ static void test_rtlil_form_msb_first(void) {
     odin3_strbuf_free(&text);
 }
 
-/* --- interim BLIF, Verilog and DOT forms (until 3E-5 and 3D Task 9; docs/IR.md) ----------- */
+/* --- the BLIF form (3E-5), interim Verilog and DOT forms (until 3D Task 9; docs/IR.md) ----- */
 
-/* write_blif of a one-$lut module: INVALID_ARG with the refusal line, or OK and the .subckt. */
-/* One BLIF case: the $lut's WIDTH and table (MSB first), and the .subckt expected (NULL: refused).
- */
+/* One BLIF case: the $lut's WIDTH and table (MSB first), and the `.names` it is written as. */
 typedef struct blif_case {
     uint32_t width;
     const char *msb_first;
-    const char *subckt;
+    const char *names;
 } blif_case;
 
+/* write_blif of a one-$lut module is OK, logs nothing, and holds the case's `.names`. */
 static void expect_blif(const blif_case *bc) {
-    const char *msb_first = bc->msb_first;
-    const char *subckt = bc->subckt;
-    (void)build_lut_module(bc->width, msb_first);
+    (void)build_lut_module(bc->width, bc->msb_first);
     char path[PATH_MAX_LEN];
-    out_path(path, "interim.blif");
+    out_path(path, "lut.blif");
     log_count = 0;
-    odin3_status st = odin3_blif_write(design, path);
-    if (subckt == NULL) {
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, st, msb_first);
-        TEST_ASSERT_EQUAL_UINT32(1, log_count);
-        expect_in(log_lines[0], ": model 'm': parameters neither declared nor implied by the "
-                                "connected formals have no BLIF form; cannot write a cell of "
-                                "'$lut'");
-    } else {
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, msb_first);
-        expect_in(slurp(path), subckt);
-    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write(design, path), bc->msb_first);
+    TEST_ASSERT_EQUAL_UINT32(0, log_count);
+    expect_in(slurp(path), bc->names);
     odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
 }
 
-/* write_blif refuses every $lut but the WIDTH-1 identity, which is a .subckt (review I1). */
-static void test_interim_blif(void) {
+/* write_blif writes every $lut as `.names A[0] … Y` with odin3_blif_isop's cover (3E-5), a
+ * constant one as the zero-input `.names y`; it no longer refuses any (review I1's interim). */
+static void test_blif_form(void) {
     static const blif_case k_cases[] = {
-        {2, "0110", NULL},
-        {2, "1000", NULL},
-        {1, "01", NULL},
-        {1, "10", "\n.subckt $lut A[0]=a[0] Y=y\n"},
+        {2, "0110", "\n.names a[0] a[1] y\n10 1\n01 1\n.cname u\n"},
+        {2, "1000", "\n.names a[0] a[1] y\n11 1\n.cname u\n"},
+        {2, "1110", "\n.names a[0] a[1] y\n00 0\n.cname u\n"},
+        {1, "01", "\n.names a[0] y\n0 1\n.cname u\n"},
+        {1, "10", "\n.names a[0] y\n1 1\n.cname u\n"},
+        {2, "0000", "\n.names y\n.cname u\n"},
+        {2, "1111", "\n.names y\n1\n.cname u\n"},
     };
     for (size_t i = 0; i < sizeof k_cases / sizeof k_cases[0]; i++) {
         expect_blif(&k_cases[i]);
@@ -856,7 +850,7 @@ int main(void) {
     RUN_TEST(test_json_form_msb_first);
     RUN_TEST(test_rtlil_form);
     RUN_TEST(test_rtlil_form_msb_first);
-    RUN_TEST(test_interim_blif);
+    RUN_TEST(test_blif_form);
     RUN_TEST(test_interim_verilog_dot);
     RUN_TEST(test_oom_lut_params);
     RUN_TEST(test_oom_from_engine);

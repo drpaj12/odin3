@@ -3,7 +3,8 @@
  * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2); the preflight's
  * refusals E1-E12, its cap, the source classes and the report (3E Task 3); emission: the header,
  * generators, cells, latches and port buffers (3E Task 4); hard blocks: the sorted .subckt
- * formals, clock pins and the stubs, and Task 4's review minors (3E Task 5).
+ * formals, clock pins and the stubs, and Task 4's review minors (3E Task 5); $lut through
+ * odin3_blif_isop's cover, E7 and the constant and 1-input normalisation (3E-5, Task 9).
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
@@ -2829,6 +2830,140 @@ static void test_ir_change_d_cells_refused(void) {
     }
 }
 
+/* --- $lut (3E-5, plan 3E point (b): the --vtr row and its normalisation) ------------------- */
+
+enum { LUT_TEST_MAX_K = 7 };
+
+/* A $lut's WIDTH and table: bit i of `table` is LUT[i] (i taken mod 64 above 6 inputs). */
+typedef struct lut_case {
+    uint32_t width;
+    uint64_t table;
+} lut_case;
+
+/* tc's design: a hand top with scalar inputs a, b, … (WIDTH of them) and output y, and one $lut
+ * of the case on them (A[j] = the j-th input) driving y. Its node. */
+static odin3_node_id hand_lut(lut_case lc) {
+    static const char *const NAMES[LUT_TEST_MAX_K] = {"a", "b", "c", "d", "e", "f", "g"};
+    static uint8_t bits[1U << LUT_TEST_MAX_K];
+    TEST_ASSERT_TRUE(lc.width >= 1 && lc.width <= LUT_TEST_MAX_K);
+    odin3_module *top = hand_top();
+    odin3_net_id ins[LUT_TEST_MAX_K];
+    for (uint32_t j = 0; j < lc.width; j++) {
+        ins[j] = hand_scalar(top, NAMES[j], ODIN3_DIR_IN);
+    }
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    for (uint32_t i = 0; i < 1U << lc.width; i++) {
+        bits[i] = (uint8_t)(((lc.table >> (i % 64U)) & 1U) != 0 ? ODIN3_BIT_1 : ODIN3_BIT_0);
+    }
+    odin3_value params[2] = {odin3_value_int(lc.width), {.kind = ODIN3_VAL_BITS}};
+    params[1].bits = bits;
+    params[1].len = 1U << lc.width;
+    odin3_celltype_id lut = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$lut"), &lut));
+    odin3_node_spec spec = {.type = lut, .params = params, .n_params = 2};
+    const odin3_netvec ports[] = {{ins, lc.width}, {&y_net, 1}};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top, &spec, ports, &node));
+    return node;
+}
+
+/* hand_lut(lc) written with --vtr is want (after `.model top`); it counts as one .names. */
+static void expect_lut_vtr(lut_case lc, const char *want) {
+    (void)hand_lut(lc);
+    TEST_ASSERT_EQUAL_STRING(want, write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().names);
+    bvt_free(&tc);
+}
+
+/* The plain writer's cells (test_blif_writer's lut_plain) give the same rows under --vtr: the
+ * shorter ISOP, the off-set's when it has fewer rows. */
+static void test_lut_vtr_rows(void) {
+    expect_lut_vtr((lut_case){2, 0x8}, ".inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n");
+    expect_lut_vtr((lut_case){3, 0xE8},
+                   ".inputs a b c\n.outputs y\n.names a b c y\n-11 1\n1-1 1\n11- 1\n.end\n");
+    expect_lut_vtr((lut_case){2, 0xE}, ".inputs a b\n.outputs y\n.names a b y\n00 0\n.end\n");
+    expect_lut_vtr((lut_case){2, 0x0}, ".inputs a b\n.outputs y\n.names y\n.end\n");
+}
+
+/* A 1-input LUT has one row (§6 normalisation 2). */
+static void test_lut_vtr_one_input(void) {
+    expect_lut_vtr((lut_case){1, 0x2}, ".inputs a\n.outputs y\n.names a y\n1 1\n.end\n");
+    expect_lut_vtr((lut_case){1, 0x1}, ".inputs a\n.outputs y\n.names a y\n0 1\n.end\n");
+}
+
+/* A constant LUT is the zero-input generator under its output (§6 normalisation 1), for the
+ * width classes 1 (part of a word), 3 and 6 (a whole word); its dropped inputs read no x. */
+static void test_lut_vtr_constant_widths(void) {
+    static const uint32_t widths[] = {1, 3, 6};
+    static const char *const inputs[] = {".inputs a\n", ".inputs a b c\n", ".inputs a b c d e f\n"};
+    char want[LINE_BUF];
+    for (size_t i = 0; i < sizeof widths / sizeof widths[0]; i++) {
+        TEST_ASSERT_TRUE(snprintf(want, sizeof want, "%s.outputs y\n.names y\n1\n.end\n",
+                                  inputs[i]) < (int)sizeof want);
+        expect_lut_vtr((lut_case){widths[i], UINT64_MAX}, want);
+        TEST_ASSERT_TRUE(snprintf(want, sizeof want, "%s.outputs y\n.names y\n.end\n", inputs[i]) <
+                         (int)sizeof want);
+        expect_lut_vtr((lut_case){widths[i], 0}, want);
+    }
+    odin3_node_id lut = hand_lut((lut_case){3, UINT64_MAX});
+    pin_to_const(lut, (pin_at){0, 1}, "$_CONSTX_");
+    TEST_ASSERT_EQUAL_STRING(".inputs a b c\n.outputs y\n.names y\n1\n.end\n", write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(0, vtr_report().x_to_gnd);
+}
+
+/* E7 counts a LUT's stored inputs (point (g)): WIDTH 7 under K = 6 is refused, a constant one
+ * too; --lut-k 7 writes it. An x input of a LUT reads gnd (§9.2). */
+static void test_lut_vtr_e7_and_x(void) {
+    odin3_node_id lut = hand_lut((lut_case){7, 0x8});
+    const char *want = line_of("write_blif: --vtr: top: $lut '$c%u': 7 inputs exceed K=6 (run "
+                               "abc, or pass --lut-k)",
+                               lut.v);
+    expect_refused((refusal){"--vtr --lut-k 6 out.blif", want});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr --lut-k 7 out.blif", &out),
+                                  tc.log.data);
+    bvt_free(&tc);
+    lut = hand_lut((lut_case){7, 0});
+    expect_refused((refusal){"--vtr --lut-k 6 out.blif",
+                             line_of("write_blif: --vtr: top: $lut '$c%u': 7 inputs exceed K=6 "
+                                     "(run abc, or pass --lut-k)",
+                                     lut.v)});
+    bvt_free(&tc);
+    lut = hand_lut((lut_case){2, 0x8});
+    pin_to_const(lut, (pin_at){0, 1}, "$_CONSTX_");
+    TEST_ASSERT_EQUAL_STRING(".inputs a b\n.outputs y\n.names gnd\n.names a gnd y\n11 1\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().x_to_gnd);
+}
+
+/* A --vtr write of a LUT (the ISOP's arena and cover): NO_MEMORY with no file until it succeeds,
+ * then the same bytes as without the sweep. */
+static void test_out_of_memory_sweep_lut(void) {
+    char path[PATH_BUF];
+    (void)hand_lut((lut_case){3, 0xE8});
+    path_in_dir("api.blif", path);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        done = api_oom_step(fail_at, path, &opts);
+    }
+    TEST_ASSERT_TRUE(done);
+    odin3_strbuf api;
+    odin3_strbuf_init(&api);
+    slurp_into(path, &api);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_EQUAL_STRING(text_of(&out), text_of(&api));
+    odin3_strbuf_free(&api);
+}
+
+/* 3E-5: $lut. */
+static void run_task_9(void) {
+    RUN_TEST(test_lut_vtr_rows);
+    RUN_TEST(test_lut_vtr_one_input);
+    RUN_TEST(test_lut_vtr_constant_widths);
+    RUN_TEST(test_lut_vtr_e7_and_x);
+    RUN_TEST(test_out_of_memory_sweep_lut);
+}
+
 /* Task 5: hard blocks. */
 static void run_task_5(void) {
     RUN_TEST(test_formals_sorted);
@@ -2964,5 +3099,6 @@ int main(void) {
     run_task_3_and_more();
     run_task_4();
     run_task_5();
+    run_task_9();
     return UNITY_END();
 }
