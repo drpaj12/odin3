@@ -12,6 +12,7 @@
 #include "ast/ast.h"
 #include "ast/check.h"
 #include "ast/kinds.h"
+#include "ast/symtab.h"
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -71,11 +72,12 @@ static void run_one(const char *text) {
     run_req(text, NULL, NULL);
 }
 
-/* A run that must succeed: OK, no error, and the store passes check FULL. */
+/* A run that must succeed: OK, no error, the store passes check FULL and binds (EL-5). */
 static void expect_clean(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.elab, ODIN3_CHECK_FULL));
+    et_expect_binds(&rs);
 }
 
 static void run_clean(const char *text) {
@@ -627,6 +629,49 @@ static void test_implicit_widths(void) {
     expect_conn(instance("u"), 0, "d", "");
 }
 
+/* A black box's body adds no port to an implicit black box's union (Task 12 review n3, Q10). */
+static void test_blackbox_body_not_in_union(void) {
+    run_req("(* blackbox *) module bb (input a);\n  foo f (.zz(a));\nendmodule\n"
+            "module top; wire x;\n  bb b (.a(x));\n  foo u (.p(x));\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,bb,foo", module_names());
+    expect_port(expect_blackbox("foo", 1), 0, "p inout");
+}
+
+static bool port_signed(odin3_ast_id module, uint32_t pos) {
+    odin3_ast_id port = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, module, 1), pos);
+    return (odin3_ast_flags(rs.elab, port) & ODIN3_AST_F_PORT_DECL_SIGNED) != 0;
+}
+
+/* The symbol the binder made for port of the MODULE named module (in library work). */
+static const odin3_symbol *bound_port(const char *module, const char *port) {
+    const odin3_symtab *st = odin3_ast_symtab(rs.elab);
+    odin3_scope_id lib = odin3_scope_first_child(st, (odin3_scope_id){1});
+    odin3_scope_id box = odin3_scope_child(st, lib, et_intern(&rs, module), ODIN3_SCOPE_NO_INDEX);
+    const odin3_symbol *sym =
+        odin3_symbol_get(st, odin3_symtab_lookup_local(st, box, et_intern(&rs, port)));
+    TEST_ASSERT_NOT_NULL_MESSAGE(sym, port);
+    return sym;
+}
+
+/* A black-box port keeps its SIGNED flag, in its PORT_DECL and in the symbol the binder makes
+ * (Task 12 review n3, Q11; divergence #23's stage-2 side). */
+static void test_blackbox_port_signed(void) {
+    run_one("(* blackbox *) module bb (input signed [3:0] a, inout signed io, output y);\n"
+            "endmodule\nmodule top; wire [3:0] x; wire z, w;\n  bb u (.a(x), .io(z), .y(w));\n"
+            "endmodule\n");
+    expect_clean();
+    odin3_ast_id module = expect_blackbox("bb", 3);
+    expect_port(module, 1, "io inout");
+    TEST_ASSERT_TRUE(port_signed(module, 0));
+    TEST_ASSERT_TRUE(port_signed(module, 1));
+    TEST_ASSERT_FALSE(port_signed(module, 2));
+    const odin3_symbol *io = bound_port("bb", "io");
+    TEST_ASSERT_EQUAL_UINT16(ODIN3_SYM_F_PORT | ODIN3_SYM_F_SIGNED, io->flags);
+    TEST_ASSERT_EQUAL_UINT8(1 + ODIN3_AST_PORT_DECL_INOUT, io->dir);
+}
+
 static void test_implicit_needs_named(void) {
     run_req("module top; wire x;\n  foo u3 (x);\nendmodule\n", &k_auto, NULL);
     expect_only_error("t.v:2:7: error: implicit black box 'foo' needs named connections");
@@ -765,6 +810,8 @@ int main(void) {
     RUN_TEST(test_celltype_array);
     RUN_TEST(test_implicit_union);
     RUN_TEST(test_implicit_widths);
+    RUN_TEST(test_blackbox_body_not_in_union);
+    RUN_TEST(test_blackbox_port_signed);
     RUN_TEST(test_implicit_needs_named);
     RUN_TEST(test_implicit_width_mismatch);
     RUN_TEST(test_instance_cap);

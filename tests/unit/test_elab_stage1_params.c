@@ -79,12 +79,13 @@ static void run_one(const char *text) {
     et_stage1(&req, &rs);
 }
 
-/* A run that must succeed: OK, no error, and the store passes check FULL. */
+/* A run that must succeed: OK, no error, the store passes check FULL and binds (EL-5). */
 static void run_clean(const char *text) {
     run_one(text);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.elab, ODIN3_CHECK_FULL));
+    et_expect_binds(&rs);
 }
 
 /* A run with the project file p.o3proj (its text; read by the pre-script) over t.v. */

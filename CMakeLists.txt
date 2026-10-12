@@ -174,6 +174,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval.c
     src/frontends/elab/ceval_expr.c
     src/frontends/elab/ceval_interp.c
+    src/frontends/elab/bind.c
     src/frontends/verilog/read_verilog.c
     src/frontends/verilog/read_verilog_lib.c
     src/frontends/verilog/elab1.c
@@ -775,6 +776,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_elab_stage1_inst PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
+    odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)

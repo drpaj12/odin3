@@ -128,6 +128,24 @@ written named, by the type's parameter at their position, in the type's paramete
 §17 #29 records IEEE. (5) §9.1 gains the texts of Task 12's agent defaults; §17 #27 and #28 record
 gate arrays and the output rule.
 
+v4.9 (2026-10-12; 2D Task 13, the binder, and the Task 12 review's notes n1 and n2). (1) EL-4: a
+black-box `MODULE`'s `PARAM_DECL`s are bare (no `RANGE`, `SIGNED` or `DT`: the value's `NUMBER`
+carries width and sign), and its ports are always written as `wire` ports (`integer`: `signed
+[31:0]`). (2) EL-4 lists the texts of the binder's store-shape checks, three of them agent defaults
+for rows the v4.8 list left without one: a system task other than `$readmemh`/`$readmemb`, a range
+bound that is not a `NUMBER`, a generate index that is not a 32-bit `NUMBER`. (3) EL-5 is made
+exact (agent defaults): one `LIBRARY` per library, from each `MODULE`'s `FILE` buffer (`work` when
+it has none), holding the `MODULE` symbols, which no expression name reaches; an `INSTANTIATION`
+resolves to its `MODULE` symbol by name across libraries (names are unique in the `UNIT`, point
+(q)), or to nothing for a registered cell type; a function's scope holds a `VAR` named like it, its
+result, and a `CALL` from inside skips it; an `integer` is `signed [31:0]`; a localparam symbol is
+`SIGNED` as its value; the resolution array also maps every declaring node to its symbol; a net
+declaration assignment is a `CONTINUOUS` assignment; a `HIER_NAME` that ends in an indexed
+component is E21; a `CALL` or `TASK_CALL` naming nothing is `'f' is not declared`; a range bound
+outside int32 is the width error at the bound, an x or z bound `range bound has x or z bits`.
+(4) The `IMPLICIT` flag is not set by the binder: the elaborated form has no marker for stage 1's
+implicit-net `NET_DECL` yet (Task 15).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -246,9 +264,9 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` specialization and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` (an implicit one's ports `inout`, `NET` = 1 + `wire`, at their EL-11 widths), the params LIST of a `(* blackbox *)` specialization with one `PARAM_DECL` per `parameter` holding its final value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where first reached, implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` specialization and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` specialization with one bare `PARAM_DECL` per `parameter` holding its final value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where first reached, implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24) |
-| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type) |
+| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
 | `VAR_DECL` | sub `reg` or `integer`; a declarator's `E?` is a variable initialiser (N8: `initial name = e`, EL-40) |
 | implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25) |
@@ -284,6 +302,21 @@ points at source text. Every elaborated node that comes from one parsed node cop
 `{loc, end}`; nodes stage 1 creates (a genvar's `NUMBER`, a resolved `CONNECTION`) take the
 range of the node that caused them.
 
+The binder (EL-5) checks the rows that `odin3_ast_check` rule 7 does not, before anything reaches
+the IR. A violation is a misuse of the seam, a located `elaborated form: <rule>` and
+`ODIN3_ERR_INVALID_ARG` (counted against the error cap), where `<rule>` is (v4.9; the last three
+are agent defaults): `'WHILE' outside a function`; `system function '$x' (only $signed and
+$unsigned are allowed)`; `system task '$x' outside an initial block` (a `$readmemh`/`$readmemb`);
+`edge and level events in one event list`; `'TIMING_STMT' outside an always`; `intra-assignment
+control`; `a count that is not a NUMBER of 0 or more` (a `REPEAT` or `REPLICATE` count); `a select
+bound or width that is not a NUMBER` (the object itself may be any expression, as the `SELECT` row
+says); `instance 'u' does not connect every port of 'm' once, in port order` (a `MODULE` of the
+store); `port 'p' without a net kind` (a module port that is neither a net nor a `reg`/`integer`
+variable); `parameter 'P' is not a localparam with a NUMBER or STRING value`; `unnamed block 'b'
+with declarations` (`b` its first declaration); `system task '$x' (only $readmemh and $readmemb are
+allowed)`; `a range bound that is not a NUMBER`; `a generate index that is not a 32-bit NUMBER` (a
+`GEN_BLOCK` index or a `HIER_NAME` index).
+
 ### 2.5 Binding: the symbol table of an elaborated store (EL-5)
 
 Stage 2 starts with `odin3_elab_bind(elab, &binding)`: one pre-order sweep that creates the 2A
@@ -297,7 +330,8 @@ symbol table (`odin3_symtab_create`) and a resolution array.
   `INSTANCE`, `BLOCK` (named blocks and generate blocks), `FUNCTION`, `TASK`; `sub`, `flags`
   (`SIGNED`, `PORT`, `IMPLICIT`), `dir`, packed and unpacked dims (int32; a bound outside int32
   is EL-46's width error), `decl`/`declarator`.
-- **Resolution**: `odin3_elab_binding { odin3_sym_id *sym_of; uint32_t n; }`, indexed by
+- **Resolution**: `odin3_elab_binding { odin3_sym_id *sym_of; uint32_t n; odin3_u64map
+  *scope_of; }` (`src/frontends/elab/elab_internal.h`), `sym_of` indexed by
   elaborated node ID (4 bytes per node), filled for every `IDENT`, `HIER_NAME`, `CALL`,
   `TASK_CALL` and `INSTANTIATION` by `odin3_symtab_lookup` from the node's scope outward. A
   name declared later in the same scope resolves (Yosys collects a scope's declarations first;
@@ -313,6 +347,38 @@ symbol table (`odin3_symtab_create`) and a resolution array.
 
 Cost O(nodes) with one `u64map` probe per name. The binding is stage 2's (freed with it); the
 symbol table belongs to the store.
+
+Made exact by 2D Task 13 (v4.9, agent defaults):
+
+- **Libraries and modules.** A `MODULE`'s library is its `FILE` buffer's (2A §3.1; `work` when the
+  buffer has none). The `MODULE` symbols live in their `LIBRARY` scopes, so no name of an
+  expression reaches them (a lookup stops at the `MODULE` scope). An `INSTANTIATION` resolves by
+  name to the store's `MODULE` of that name, in any library (names are unique in the `UNIT`, point
+  (q); a second `MODULE` of one name is M11), or to nothing: a registered cell type, which stage 2
+  finds in the registry.
+- **Symbols.** A module port is a `NET` (its `NET` field) or a `VAR` (`DT` `reg`/`integer`); a
+  function or task port is a `VAR`. An `integer` is `signed [31:0]`. A localparam is `SIGNED` as its
+  value's `NUMBER`, and a `STRING` value is stored as its bits (L10). A function's scope holds a
+  `VAR` named like it, of its return type: its result, which a `CALL` of the function from inside
+  it skips. Generate-loop iterations share the `BLOCK` symbol of the first. A black box's
+  `PARAM_DECL`s are checked but not bound, and its items (none in the EL-4 form) are not walked.
+- **Resolution array.** Besides references, every declaring node (`DECLARATOR`, `INSTANCE`,
+  `MODULE`, `GEN_BLOCK`, named `SEQ_BLOCK`, `FUNCTION_DECL`, `TASK_DECL`) maps to the symbol it
+  declares; `odin3_elab_scope_of` maps each scope-opening node to its scope.
+- **Assignments.** A net declaration assignment (N7) is a `CONTINUOUS` assignment of its
+  `DECLARATOR`; an lvalue's names are found through selects and concatenations, one record per
+  name and assigning node. Task output arguments are not recorded here (Task 23).
+- **References into scopes.** The first component is found from the current scope outward to the
+  module (a `BLOCK` symbol), the others in the reached scope (EL-22). A component naming no block
+  is E21; a block without that index is `'g[5].t' does not exist (generate block 'g[5]' was not
+  elaborated)`; a last component with an index is E21; a last name not declared in the reached
+  scope is `'blk.x' is not declared`. A `CALL` or `TASK_CALL` naming nothing is `'f' is not
+  declared`.
+- **Bounds.** A range bound outside int32 is EL-46's width error at the bound (`width |b| + 1`), a
+  packed range wider than the cap the width error at the `RANGE`, an x or z bound `range bound has
+  x or z bits`. Unpacked dimensions have no width cap here (memory sizes are EL-27's).
+- **Not yet.** The `IMPLICIT` flag is not set: the elaborated form has no marker for the implicit
+  nets' `NET_DECL` (Task 15 decides one).
 
 ## 3. Hierarchy
 
@@ -1687,8 +1753,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   `constant function recursion deeper than 1024 in 'f'`; `constant evaluation of <what> nested
   deeper than 256` (the C re-entry cap, v4.6; 1024 when the call-depth cap is reached first);
   `replication count N is negative`;
-  `replication count has x or z bits`; `zero-width concatenation`; `width N exceeds the limit of
-  1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
+  `replication count has x or z bits`; `range bound has x or z bits` (the binder, v4.9);
+  `zero-width concatenation`; `width N exceeds the limit of 1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
 - **Generate (EL-19–EL-22)**: `'i' is not a genvar`; `generate loop must assign genvar 'i' in its
   initialisation and step`; `genvar 'i' is already used by an enclosing loop`; `generate loop of
   'i' repeats the value N`; `port declarations are not allowed in a generate block`; `'g[5].t'

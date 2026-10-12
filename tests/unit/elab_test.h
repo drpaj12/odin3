@@ -15,8 +15,10 @@
 #define ODIN3_TESTS_UNIT_ELAB_TEST_H
 
 #include "ast/ast.h"
+#include "ast/check.h"
 #include "ast/print.h"
 #include "frontends/elab/elab.h"
+#include "frontends/elab/elab_internal.h"
 #include "frontends/project/project.h"
 #include "frontends/verilog/elab1.h"
 #include "frontends/verilog/preproc.h"
@@ -305,6 +307,16 @@ static inline void et_stage1(const et_req *req, et_result *out) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                               odin3_ast_dump(out->elab, odin3_ast_root(out->elab, 0), &out->dump));
     }
+}
+
+/* The elaborated store binds (EL-5: the seam stage 2 reads) and then passes check FULL, rule 8
+ * included. A store binds once: its symbol table stays with it. */
+static inline void et_expect_binds(const et_result *res) {
+    odin3_elab_binding binding = {0};
+    odin3_status st = odin3_elab_bind(res->elab, &binding);
+    odin3_elab_binding_free(&binding);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, et_log(res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(res->elab, ODIN3_CHECK_FULL));
 }
 
 /* Frees everything, removes the files and the directory, restores the working directory and the
