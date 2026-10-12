@@ -101,6 +101,8 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pass.c
     src/passes/budget.c
     src/passes/ffinit.c
+    src/passes/abc/alias.c
+    src/passes/abc/allow.c
     src/ir/value.c
     src/ir/design.c
     src/ir/celltype.c
@@ -412,6 +414,9 @@ if(BUILD_TESTING)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
+    odin3_add_unit_test(test_abc_alias_table)
+    target_compile_definitions(test_abc_alias_table PRIVATE
+        ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)
