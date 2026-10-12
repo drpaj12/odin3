@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # run-reject: the Verilog negative cases (tests/verilog/reject, reject-2d, ignore-2d). See run_reject.py.
+# With --elaborate each case is pass, pending (2D's "not available yet" line) or fail.
 # Exit codes: 0 pass, 1 a case failed, 2 usage/input error, 77 (--elaborate) every case pending.
 set -euo pipefail
 exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/run_reject.py" "$@"

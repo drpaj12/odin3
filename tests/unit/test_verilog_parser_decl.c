@@ -178,14 +178,16 @@ static void test_nonansi_ports(void) {
                 "    _))");
 }
 
-static void test_leading_empty_port(void) {
-    expect_item("module m (, a); endmodule", 1,
-                "(LIST @x.v:1:10\n"
-                "  (PORT_REF @x.v:1:11\n"
-                "    _)\n"
-                "  (PORT_REF:a @x.v:1:13\n"
-                "    _))");
-    expect_printed("module m (, a); endmodule", 0, "module m (\n  ,\n  a\n);\nendmodule\n");
+/* Only the last non-ANSI port may be empty (a trailing comma): Yosys 0.55 rejects an empty port
+ * anywhere else with a syntax error (PR 2D-3 final review m5). */
+static void test_empty_port_not_last_is_a_syntax_error(void) {
+    expect_error("module m (, a); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:11: error: syntax: unexpected ','\n");
+    expect_error("module n (a, , b); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:14: error: syntax: unexpected ',', expecting identifier or ')' or '.' or "
+                 "'{'\n");
+    expect_error("module n (,); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:11: error: syntax: unexpected ','\n");
 }
 
 /* A body port declaration is an item (IN_HEADER clear); input reg / input integer keep DT. */
@@ -633,7 +635,7 @@ int main(void) {
     RUN_TEST(test_ansi_ports);
     RUN_TEST(test_unsigned_sets_no_flag);
     RUN_TEST(test_nonansi_ports);
-    RUN_TEST(test_leading_empty_port);
+    RUN_TEST(test_empty_port_not_last_is_a_syntax_error);
     RUN_TEST(test_body_port_declarations);
     RUN_TEST(test_parameter_item);
     RUN_TEST(test_header_parameters);

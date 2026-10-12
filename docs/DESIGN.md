@@ -243,7 +243,9 @@ and are never top candidates. Instances of Altera megafunctions in RTL (`altsync
 library, not the project; in a VQM netlist, instances of the device primitives the VQM reader
 knows (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_obuf`,
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library grows in
-Phase 6) resolve through that library. Any other unresolved instance is `unresolved_module`.
+Phase 6) resolve through that library. Any other unresolved instance is `unresolved_module`,
+unless `read_verilog --auto-blackbox` makes it an implicit black box (2D EL-11: named
+connections, `inout` ports sized by the first instance, an info line naming it).
 
 *Errors* are located at the project-file or source line (`file:line`) where there is one:
 `missing_file`, `unknown_key`, `unknown_option`, `unknown_file_type`, `unsupported_input_type`,

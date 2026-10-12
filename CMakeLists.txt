@@ -174,9 +174,20 @@ add_library(odin3_core OBJECT
     src/frontends/elab/ceval.c
     src/frontends/elab/ceval_expr.c
     src/frontends/elab/ceval_interp.c
+    src/frontends/elab/bind.c
     src/frontends/verilog/read_verilog.c
     src/frontends/verilog/read_verilog_lib.c
-    src/frontends/verilog/elab_stub.c
+    src/frontends/verilog/elab1.c
+    src/frontends/verilog/elab1_lookup.c
+    src/frontends/verilog/elab1_top.c
+    src/frontends/verilog/elab1_params.c
+    src/frontends/verilog/elab1_spec.c
+    src/frontends/verilog/elab1_expand.c
+    src/frontends/verilog/elab1_write.c
+    src/frontends/verilog/elab1_inst.c
+    src/frontends/verilog/elab1_bbox.c
+    src/frontends/elab/elab_pending.c
+    src/frontends/elab/elab2_stub.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -740,6 +751,33 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_elab_interp)
     target_include_directories(test_elab_interp PRIVATE ${_gen})
     add_dependencies(test_elab_interp verilog_generated)
+    # 2D Task 10: stage 1's context, lookup, top, pending kinds, ownership (tests/unit/elab_test.h
+    # writes each case's files into a fresh directory under elab_tmp).
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/elab_tmp)
+    odin3_add_unit_test(test_elab_stage1_lookup)
+    target_include_directories(test_elab_stage1_lookup PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_lookup verilog_generated)
+    target_compile_definitions(test_elab_stage1_lookup PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    # 2D Task 11: parameters, specializations, passes E/W, defparam and project push-down.
+    odin3_add_unit_test(test_elab_stage1_params)
+    target_include_directories(test_elab_stage1_params PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_params verilog_generated)
+    target_compile_definitions(test_elab_stage1_params PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    # 2D Task 12: instances, connections, arrays, black boxes and cell types.
+    odin3_add_unit_test(test_elab_stage1_inst)
+    target_include_directories(test_elab_stage1_inst PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_inst verilog_generated)
+    target_compile_definitions(test_elab_stage1_inst PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
+    odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)

@@ -355,6 +355,14 @@ ODIN3_EXPORT odin3_status odin3_ast_get_root_at(const odin3_ast *ast, uint32_t i
     return ODIN3_OK;
 }
 
+ODIN3_EXPORT odin3_status odin3_ast_get_library_units_from(const odin3_ast *ast, uint32_t *index) {
+    if (ast == NULL || index == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    *index = odin3_ast_library_units_from(ast);
+    return ODIN3_OK;
+}
+
 /* --- builders -------------------------------------------------------------------------------- */
 
 /*

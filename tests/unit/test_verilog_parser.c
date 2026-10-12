@@ -735,7 +735,7 @@ static void test_module_parse_oom(void) {
         "  wire (strong0, pull1) #(1:2:3) w = a, v [0:1];\n  assign {y, v[0]} = 4'hF;\n"
         "  defparam u.W = 2;\n  specify (a => y) = 1; endspecify\nendmodule\n"
         "primitive p (y, a); endprimitive\n"
-        "module n (.p(x), , {q, r[1:0]}, .e());\n  (* k = 1.5 *) trireg (small) #(1, 2) t;\n"
+        "module n (.p(x), {q, r[1:0]}, .e(), );\n  (* k = 1.5 *) trireg (small) #(1, 2) t;\n"
         "  assign #(1, 2, 3) s[3-:2] = x, g[0].u.w[1+:2] = x, m[1][3:0] = x;\n"
         "  parameter z = \"s\", e = \"\";\n  `default_nettype none\nendmodule\n";
     odin3_ast_id unit = {0};

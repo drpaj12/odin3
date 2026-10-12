@@ -33,6 +33,8 @@ void odin3_symtab_destroy(odin3_symtab *st) {
     odin3_vec_free(&st->dims);
     odin3_u64map_destroy(st->by_name);
     odin3_u64map_destroy(st->children);
+    odin3_u64map_destroy(st->tails);
+    odin3_u64map_destroy(st->indexed);
     odin3_arena_destroy(st->arena);
     odin3_util_free(st);
 }
@@ -49,9 +51,12 @@ static odin3_symtab *symtab_alloc(odin3_ast *ast) {
     st->symbols = odin3_pagevec_create(sizeof(odin3_symbol));
     st->by_name = odin3_u64map_create(0);
     st->children = odin3_u64map_create(0);
+    st->tails = odin3_u64map_create(0);
+    st->indexed = odin3_u64map_create(0);
     st->arena = odin3_arena_create(0);
     if (st->scopes == NULL || st->symbols == NULL || st->by_name == NULL || st->children == NULL ||
-        st->arena == NULL || odin3_pagevec_push(st->scopes, NULL) == NULL ||
+        st->tails == NULL || st->indexed == NULL || st->arena == NULL ||
+        odin3_pagevec_push(st->scopes, NULL) == NULL ||
         odin3_pagevec_push(st->symbols, NULL) == NULL) {
         odin3_symtab_destroy(st);
         return NULL;
@@ -148,8 +153,8 @@ static const char *scope_spec_why(const odin3_symtab *st, const odin3_scope_spec
 }
 
 /*
- * Links scope id (named name, not yet linked) into its chain at slot; the map entry for a new
- * head was put by the caller.
+ * Links scope id (named name, not yet linked) into its chain at slot; the map entries were put by
+ * links_put.
  */
 static void chain_link(odin3_symtab *st, odin3_scope_id id, odin3_chain_slot slot) {
     scope_at(st, id)->same_name_next = slot.cur;
@@ -158,14 +163,50 @@ static void chain_link(odin3_symtab *st, odin3_scope_id id, odin3_chain_slot slo
     }
 }
 
-/* Puts the map entry (parent, name) -> id when slot makes id the chain's head; NO_MEMORY. */
-static odin3_status head_put(odin3_symtab *st, odin3_scope_key key, odin3_scope_id id,
-                             odin3_chain_slot slot) {
-    if (slot.prev.v != 0) {
-        return ODIN3_OK;
+/* The head and tail entries of a new chain (two new keys): both or, on NO_MEMORY, neither. */
+static odin3_status chain_new(odin3_symtab *st, uint64_t pair, odin3_scope_id id) {
+    odin3_status status = odin3_u64map_put(st->children, (odin3_kv){pair, id.v});
+    if (status != ODIN3_OK) {
+        return status;
     }
-    odin3_kv entry = {odin3_symtab_key(key.parent.v, key.name), id.v};
-    return odin3_u64map_put(st->children, entry);
+    status = odin3_u64map_put(st->tails, (odin3_kv){pair, id.v});
+    if (status != ODIN3_OK) {
+        (void)odin3_u64map_remove(st->children, pair);
+    }
+    return status;
+}
+
+/*
+ * Puts the map entries that link scope id at key's slot (a position found absent): its indexed
+ * entry, and the chain's head and tail where id becomes them. All or nothing: NO_MEMORY leaves the
+ * maps as they were. Only new keys allocate (the indexed entry; head and tail of a new chain); an
+ * existing chain's head or tail is overwritten in place, which cannot fail.
+ */
+static odin3_status links_put(odin3_symtab *st, odin3_scope_key key, odin3_scope_id id,
+                              odin3_chain_slot slot) {
+    uint64_t pair = odin3_symtab_key(key.parent.v, key.name);
+    uint64_t index_key = odin3_symtab_index_key(key);
+    bool collided = odin3_u64map_get(st->indexed, index_key, NULL); /* another position's key */
+    odin3_status status =
+        collided ? ODIN3_OK : odin3_u64map_put(st->indexed, (odin3_kv){index_key, id.v});
+    bool fresh = slot.prev.v == 0 && slot.cur.v == 0; /* the chain's first member */
+    if (status == ODIN3_OK && fresh) {
+        status = chain_new(st, pair, id);
+    }
+    if (status != ODIN3_OK) {
+        if (!collided) {
+            (void)odin3_u64map_remove(st->indexed, index_key);
+        }
+        return status;
+    }
+    if (!fresh && slot.prev.v == 0) {
+        status = odin3_u64map_put(st->children, (odin3_kv){pair, id.v}); /* a new head */
+    }
+    if (status == ODIN3_OK && !fresh && slot.cur.v == 0) {
+        status = odin3_u64map_put(st->tails, (odin3_kv){pair, id.v}); /* a new tail */
+    }
+    st->index_collided = st->index_collided || collided;
+    return status;
 }
 
 static const char *const CLASH = "a scope with this parent, name and index exists";
@@ -205,7 +246,7 @@ odin3_status odin3_scope_new(odin3_symtab *st, const odin3_scope_spec *spec, odi
     }
     odin3_status status = reserve_record(st->scopes);
     if (status == ODIN3_OK && spec->name != 0) {
-        status = head_put(st, key, id, slot);
+        status = links_put(st, key, id, slot);
     }
     if (status != ODIN3_OK) {
         return status;
@@ -238,7 +279,7 @@ odin3_status odin3_scope_set_name(odin3_symtab *st, odin3_scope_id scope, uint32
     if (slot.found) {
         return misuse("odin3_scope_set_name", CLASH);
     }
-    odin3_status status = head_put(st, key, scope, slot);
+    odin3_status status = links_put(st, key, scope, slot);
     if (status != ODIN3_OK) {
         return status;
     }

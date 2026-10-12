@@ -658,6 +658,13 @@ blocks, functions and tasks, so one `u64map` keyed `(scope << 32) | name` → sy
 all; named child scopes are found through a second map `(parent << 32) | name` → the first
 same-named child, chained in index order, so `odin3_scope_child(st, parent, name, index)`
 resolves `g[0]` (G7) and `odin3_scope_child(st, parent, name, NO_INDEX)` a plain block.
+Amendment (2D Task 13 fix round, review I1): a third map `(parent << 32) | name` → the chain's
+last member makes an insert past the tail (a generate loop's next iteration) O(1), and a fourth,
+a hash of `(parent, name, index)` → the scope there, makes `odin3_scope_child` O(1); a hash
+collision only sends that lookup back to the chain walk. The chain stays strictly ascending (rule
+8 also checks the tail and that every member is found by its position), front and middle inserts
+walk it as before, and the API is unchanged. Without them a 40,000-iteration loop bound in 4.65 s
+(quadratic); with them, iterations that each read their predecessor bind in 0.06 s (Release).
 
 **Symbols** (pagevec, IDs from 1):
 

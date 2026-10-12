@@ -63,6 +63,104 @@ line, which the writer now emits for the design's top. Second, EL-47 now says th
 the unreleased v4 (ruling I1, plan point (c)). It no longer says "one bump", and it says that
 IR change C has no ABI mirror (plan point (d)).
 
+v4.5 (2026-10-12; the 2D Task 10 review, errata): definitions are located at their keyword, not
+their name, which the parsed store does not locate (EL-6's taken names, §9.1's Hierarchy texts; Q7
+and S2 were at their nodes already); EL-6 item 4's Q7 is at the `UDP_DECL`, as §9.1 says; the
+taken-name check runs when a definition is reached, and names a built-in cell type with its own
+text; EL-7 rejects a `(* blackbox *)` module given as the top; §17 #25 records `(* top *)`.
+
+v4.6 (2026-10-12; 2D Task 11, agent defaults). (1) A C re-entry cap, `ODIN3_ELAB_MAX_REENTRY_DEPTH`
+= 256, bounds the constant evaluations nested in C (a typer callback's run, a host's re-entry such
+as a lazily evaluated parameter; §4.6, §11) apart from the call-depth cap, which still counts them
+with the function frames: 1024 C levels needed 4–6 MB of stack under gcc ASan and overflowed under
+clang ASan with fuzzer flags. Past it: `constant evaluation of <what> nested deeper than 256`. (2)
+EL-9's key counts `UNSIZED` only for an unsigned value whose top bit is 1, the one case where it
+changes how the value extends: `#(.W(8))` and `#(.W(32'sd8))` on `parameter integer W` share, while
+`'hFFFFFFFF` and `32'hFFFFFFFF` on an untyped `P` are two specializations of one spelling (the
+second takes `$2`). (3) A parameter is named in EL-9's name when an override applies to it and its
+final value differs from what its default expression gives in that specialization. (4) Point (q)'s
+taken names: a definition of another name, a specialization made so far, a registered cell type
+(two libraries' definitions of one name: the second specialization takes `$2`). (5) Pending
+overrides keep one entry per path, the one of highest precedence (the others can never win); the
+key holds each one's path, source and value. (6) *Reversed by v4.7:* the top's specialization keeps
+its definition's name (EL-9). (7) Locations: the defparam errors and warning at the
+defparam's target (its `HIER_NAME`); the project texts at the project line; the localparam and
+unknown-parameter errors at the `CONNECTION`; the mixing error at the first value of the other
+form; `too many parameter values` at the first surplus value; the specialization cap at the
+`INSTANTIATION`; the depth cap and the recursion error at the `INSTANCE` (a module instantiating
+itself with the same parameters: `recursive instantiation of 'm'`, no "through"). An override of a
+localparam has the localparam text from a `#()` or a `defparam`, the project text from a project
+line. (8) Instances of one `INSTANTIATION` that land in different specializations are written as
+one `INSTANTIATION` per run of consecutive instances sharing one (EL-4).
+
+v4.7 (2026-10-12; the 2D Task 11 review, controller rulings I1 and I2, verified on Yosys 0.55).
+(1) The top's specialization keeps its definition's name whatever its parameters and pending
+overrides (EL-9), as Yosys's `chparam` and `hierarchy -chparam` do; v4.6 item (6) is reversed. (2)
+Erratum to EL-16: an override value is sized before it is converted. Yosys passes `#()`,
+`defparam` and `chparam` values into a `$paramod` as an `RTLIL::Const`, which has no `is_unsized`:
+`m #(.P('hFFFFFFFF))`, `m #('hFFFFFFFF)`, `defparam a.P = 'hFFFFFFFF` and a ranged `[31:0] P`
+overridden with it all give `64'h00000000ffffffff` in a 64-bit context, like `32'hFFFFFFFF`; only
+a default `parameter P = 'hFFFFFFFF` gives all ones, and `#(.P(-1))` keeps its sign. (3) v4.6 item
+(2) is corrected: the key keeps `UNSIZED` for an unsigned value whose top bit is not 0 (1, x or z),
+since an unsized value repeats an x or z top bit where a sized one extends with 0 (Yosys: a default
+`'hx0` gives `64'hxxxxxxxxxxxxxxx0`, an override `32'hxxxxxxx0` gives `64'h00000000xxxxxxx0`; two
+specializations). With (2), `'hFFFFFFFF` and `32'hFFFFFFFF` overrides now share one. (4) Project
+numbers are sized like every override (2) and keep the literal's sign, as the same text in a `#()`
+would (`16` is `32'sd16`, `8'hFF` unsigned, `-3` the literal negated), so `param top.u1.W 3` names
+`m$W=3`; `chparam -set W 3` makes an unsigned `RTLIL::Const` instead (`$paramod\leaf\W=32'…011`):
+divergence §17 #26. (5) Override paths join their components with
+the unit separator (0x1F), which no identifier holds, so an escaped `\a.b` is one component; names
+and messages print `.`. (6) The `<what>` of a parameter's declared range is `range bound of
+parameter 'P'`, so a nesting or constant error there names the parameter. (7) The forms of landed
+kinds that later tasks land (ordered connections, instance arrays, a defparam reaching a cell
+type, a body port, a specparam, a time or real variable, `tri0`/`tri1`/`trireg`, a hierarchical
+call) have a table of their own beside point (l)'s, which the "tables empty" assertions of Tasks
+16 and 24 also check.
+
+v4.8 (2026-10-12; the 2D Task 12 review, controller rulings). (1) Black boxes are ports-only
+`MODULE`s of the elaborated form (EL-4, EL-5, EL-11): a `(* blackbox *)` specialization's and an
+implicit black box's, with a synthesized `ATTR` `blackbox`, their ports and (a `(* blackbox *)`
+one) final parameter values; their instances connect by port like a module's; stage 2 registers a
+black-box cell type from each (IR-7b). (2) A `SELECT` of any expression is an instance-array slice
+read at the object's self-determined width (EL-4). (3) A cell type's ordered `#()` values are
+written named, by the type's parameter at their position, in the type's parameter order (EL-4).
+(4) EL-10 states that the lowest index gets the low bits for either range direction (Yosys 0.55);
+§17 #29 records IEEE. (5) §9.1 gains the texts of Task 12's agent defaults; §17 #27 and #28 record
+gate arrays and the output rule.
+
+v4.10 (2026-10-12; the PR 2D-3 final review, controller ruling I2 and minors m1, m3, m5). (1) EL-9,
+EL-11, EL-4: a `(* blackbox *)` definition keeps its base name for every specialization (Yosys
+0.55: `module \bb`, `cell \bb` with `parameter \W 8`), one ports-only `MODULE` from its default
+specialization, its instances carrying their values; Task 19 declares one cell type under that
+name and `write_blif --vtr` writes `.subckt <base>` (§17 #30). (2) EL-9's key text names each
+pending entry's source. (3) EL-11: an implicit black box's width from an instance array's first
+connection is one element's when N divides it. (4) EL-24: 2C rejects an empty non-ANSI port other
+than a trailing comma, as Yosys does (§17 #31).
+
+v4.9 (2026-10-12; 2D Task 13, the binder, and the Task 12 review's notes n1 and n2). (1) EL-4: a
+black-box `MODULE`'s `PARAM_DECL`s are bare (no `RANGE`, `SIGNED` or `DT`: the value's `NUMBER`
+carries width and sign), and its ports are always written as `wire` ports (`integer`: `signed
+[31:0]`). (2) EL-4 lists the texts of the binder's store-shape checks, three of them agent defaults
+for rows the v4.8 list left without one: a system task other than `$readmemh`/`$readmemb`, a range
+bound that is not a `NUMBER`, a generate index that is not a 32-bit `NUMBER`. (3) EL-5 is made
+exact (agent defaults): one `LIBRARY` per library, from each `MODULE`'s `FILE` buffer (`work` when
+it has none), holding the `MODULE` symbols, which no expression name reaches; an `INSTANTIATION`
+resolves to its `MODULE` symbol by name across libraries (names are unique in the `UNIT`, point
+(q)), or to nothing for a registered cell type; a function's scope holds a `VAR` named like it, its
+result, and a `CALL` from inside skips it; an `integer` is `signed [31:0]`; a localparam symbol is
+`SIGNED` as its value; the resolution array also maps every declaring node to its symbol; a net
+declaration assignment is a `CONTINUOUS` assignment; a `HIER_NAME` that ends in an indexed
+component is E21; a `CALL` or `TASK_CALL` naming nothing is `'f' is not declared`; a range bound
+outside int32 is the width error at the bound, an x or z bound `range bound has x or z bits`.
+(4) The `IMPLICIT` flag is not set by the binder: the elaborated form has no marker for stage 1's
+implicit-net `NET_DECL` yet (Task 15). (5) Fix round 1 (the Task 13 review): the binder also
+rejects four rows that were carried (an `INSTANCE` with a `RANGE`, a `tri0`/`tri1`/`trireg` net, a
+switch-level or pull gate, `vectored`/`scalared`), and a name that resolves to an instance,
+function or task is `'u' is not a net, variable or parameter` (Yosys 0.55: "Failed to detect width
+for identifier"); a block's name binds to its `BLOCK` symbol until Task 18 decides (Yosys makes it
+an implicit net). 2A's symbol table gains O(1) chain appends and position lookups (2A §8
+amendment).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -181,9 +279,9 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; never a `(* blackbox *)` module (those become black-box types, EL-11); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24) |
-| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type) |
+| `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
 | `VAR_DECL` | sub `reg` or `integer`; a declarator's `E?` is a variable initialiser (N8: `initial name = e`, EL-40) |
 | implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25) |
@@ -193,8 +291,8 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `TIMING_STMT` | only as the statement of an `ALWAYS`; elsewhere its `DELAY` was dropped with T11's warning and the statement kept |
 | `BLOCKING_ASSIGN`, `NONBLOCKING_ASSIGN` | no intra-assignment control |
 | `INITIAL` | kept (D2), delays dropped as above |
-| `INSTANTIATION` | name = the specialization's name (EL-9), or the registered cell type or black box it instantiates (EL-11); one `INSTANCE` per instance (arrays expanded, element names `u[3]`); params LIST: for a module, one named `CONNECTION` per `parameter` of the specialization in declaration order with its final value (2A §4.6); for a cell type or black box, the overrides as given, values resolved, ordered ones with name 0 |
-| `INSTANCE` | named; no `RANGE`; connections: for a module, one named `CONNECTION` per port in port order (`E` absent = unconnected); for a cell type or black box, as written |
+| `INSTANTIATION` | name = the specialization's name (EL-9; a `(* blackbox *)` specialization's too), the implicit black box's, or the registered cell type it instantiates (EL-11); one `INSTANCE` per instance (arrays expanded, element names `u[3]`); params LIST: for a module or a `(* blackbox *)` specialization, one named `CONNECTION` per `parameter` of the specialization in declaration order with its final value (2A §4.6); for a cell type, the values given (`#()`, `defparam`, project) one per parameter by EL-8's precedence, each named (an ordered one by the type's parameter at its position, v4.8), in the type's parameter order, converted to the parameter's kind; for an implicit black box, the overrides as given, values resolved, ordered ones with name 0 (2A §4.6: no definition names them) |
+| `INSTANCE` | named; no `RANGE`; connections: for a module, a `(* blackbox *)` specialization or an implicit black box, one named `CONNECTION` per port of its `MODULE` in port order (`E` absent = unconnected; an implicit black box's ports are the union of every instance's, v4.8); for a cell type, as written |
 | `GATE_DECL` | sub ∈ `and nand or nor xor xnor buf not bufif0 bufif1 notif0 notif1`; no `STRENGTH`/`DELAY`; gate arrays expanded; unnamed instances keep name 0 |
 | `FUNCTION_DECL`, `TASK_DECL` | kept per specialization (and per generate scope that declares them); ranges with `NUMBER` bounds; ports LIST of `PORT_DECL`, one declarator each (non-ANSI inputs moved there in order); locals LIST; body |
 | `SEQ_BLOCK` | named, or unnamed with no locals; an unnamed block with declarations is named `$unnamed_block$<k>` (k = 1, 2, … per module in source order; Yosys's `-sv` name) |
@@ -206,7 +304,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `TASK_CALL{SYSTEM}` | only `$readmemh`/`$readmemb` inside an `INITIAL` (S4); other system tasks were removed with S3's warning |
 | `IDENT` | resolves to a declaration in scope (binder, EL-5); genvar reads are `NUMBER`s (32-bit signed) |
 | `HIER_NAME` | only references into the module's own generate scopes and named blocks (G7), indices `NUMBER` |
-| `SELECT` | `[m:l]` bounds and `+:`/`-:` widths are `NUMBER`s; bit indices and `+:` bases any expression |
+| `SELECT` | `[m:l]` bounds and `+:`/`-:` widths are `NUMBER`s; bit indices and `+:` bases any expression; for an instance-array slice (EL-10) the object may be any expression (v4.8): it is read at its self-determined width, bit 0 its LSB, and the bounds are offsets into that value (Yosys's `extract` on the connection) |
 | `REPLICATE` | count `NUMBER` ≥ 0 |
 | `REAL` | absent (only delays held one) |
 | `ATTR` | value absent, `NUMBER` or `STRING` |
@@ -219,6 +317,23 @@ points at source text. Every elaborated node that comes from one parsed node cop
 `{loc, end}`; nodes stage 1 creates (a genvar's `NUMBER`, a resolved `CONNECTION`) take the
 range of the node that caused them.
 
+The binder (EL-5) checks the rows that `odin3_ast_check` rule 7 does not, before anything reaches
+the IR. A violation is a misuse of the seam, a located `elaborated form: <rule>` and
+`ODIN3_ERR_INVALID_ARG` (counted against the error cap), where `<rule>` is (v4.9; the last three
+are agent defaults): `'WHILE' outside a function`; `system function '$x' (only $signed and
+$unsigned are allowed)`; `system task '$x' outside an initial block` (a `$readmemh`/`$readmemb`);
+`edge and level events in one event list`; `'TIMING_STMT' outside an always`; `intra-assignment
+control`; `a count that is not a NUMBER of 0 or more` (a `REPEAT` or `REPLICATE` count); `a select
+bound or width that is not a NUMBER` (the object itself may be any expression, as the `SELECT` row
+says); `instance 'u' does not connect every port of 'm' once, in port order` (a `MODULE` of the
+store); `port 'p' without a net kind` (a module port that is neither a net nor a `reg`/`integer`
+variable); `parameter 'P' is not a localparam with a NUMBER or STRING value`; `unnamed block 'b'
+with declarations` (`b` its first declaration); `system task '$x' (only $readmemh and $readmemb are
+allowed)`; `a range bound that is not a NUMBER`; `a generate index that is not a 32-bit NUMBER` (a
+`GEN_BLOCK` index or a `HIER_NAME` index); and, from the fix round, `instance 'u' with a range`
+(arrays are expanded); `net 'w' of kind 'tri0'` (`tri1`, `trireg`; a port's `NET` field too);
+`switch-level or pull gate 'nmos'`; `'vectored' on a net declaration` (`'scalared'`).
+
 ### 2.5 Binding: the symbol table of an elaborated store (EL-5)
 
 Stage 2 starts with `odin3_elab_bind(elab, &binding)`: one pre-order sweep that creates the 2A
@@ -226,12 +341,14 @@ symbol table (`odin3_symtab_create`) and a resolution array.
 
 - **Scopes**: `DESIGN` → one `LIBRARY` (the library of the specialization's definition) →
   `MODULE` per `MODULE` node → `GENERATE` per `GEN_BLOCK` (index from the slot), `BLOCK` per
-  named `SEQ_BLOCK`, `FUNCTION`, `TASK`.
+  named `SEQ_BLOCK`, `FUNCTION`, `TASK`. A black-box `MODULE` (EL-4, v4.8) has a scope holding
+  its ports only, and an `INSTANTIATION` naming it resolves to it like any module's.
 - **Symbols**: one per declarator (`NET`, `VAR`, `LOCALPARAM` with `odin3_symbol_set_value`),
   `INSTANCE`, `BLOCK` (named blocks and generate blocks), `FUNCTION`, `TASK`; `sub`, `flags`
   (`SIGNED`, `PORT`, `IMPLICIT`), `dir`, packed and unpacked dims (int32; a bound outside int32
   is EL-46's width error), `decl`/`declarator`.
-- **Resolution**: `odin3_elab_binding { odin3_sym_id *sym_of; uint32_t n; }`, indexed by
+- **Resolution**: `odin3_elab_binding { odin3_sym_id *sym_of; uint32_t n; odin3_u64map
+  *scope_of; }` (`src/frontends/elab/elab_internal.h`), `sym_of` indexed by
   elaborated node ID (4 bytes per node), filled for every `IDENT`, `HIER_NAME`, `CALL`,
   `TASK_CALL` and `INSTANTIATION` by `odin3_symtab_lookup` from the node's scope outward. A
   name declared later in the same scope resolves (Yosys collects a scope's declarations first;
@@ -248,6 +365,43 @@ symbol table (`odin3_symtab_create`) and a resolution array.
 Cost O(nodes) with one `u64map` probe per name. The binding is stage 2's (freed with it); the
 symbol table belongs to the store.
 
+Made exact by 2D Task 13 (v4.9, agent defaults):
+
+- **Libraries and modules.** A `MODULE`'s library is its `FILE` buffer's (2A §3.1; `work` when the
+  buffer has none). The `MODULE` symbols live in their `LIBRARY` scopes, so no name of an
+  expression reaches them (a lookup stops at the `MODULE` scope). An `INSTANTIATION` resolves by
+  name to the store's `MODULE` of that name, in any library (names are unique in the `UNIT`, point
+  (q); a second `MODULE` of one name is M11), or to nothing: a registered cell type, which stage 2
+  finds in the registry.
+- **Symbols.** A module port is a `NET` (its `NET` field) or a `VAR` (`DT` `reg`/`integer`); a
+  function or task port is a `VAR`. An `integer` is `signed [31:0]`. A localparam is `SIGNED` as its
+  value's `NUMBER`, and a `STRING` value is stored as its bits (L10). A function's scope holds a
+  `VAR` named like it, of its return type: its result, which a `CALL` of the function from inside
+  it skips. Generate-loop iterations share the `BLOCK` symbol of the first. A black box's
+  `PARAM_DECL`s are checked but not bound, and its items (none in the EL-4 form) are not walked.
+- **Resolution array.** Besides references, every declaring node (`DECLARATOR`, `INSTANCE`,
+  `MODULE`, `GEN_BLOCK`, named `SEQ_BLOCK`, `FUNCTION_DECL`, `TASK_DECL`) maps to the symbol it
+  declares; `odin3_elab_scope_of` maps each scope-opening node to its scope.
+- **Assignments.** A net declaration assignment (N7) is a `CONTINUOUS` assignment of its
+  `DECLARATOR`; an lvalue's names are found through selects and concatenations, one record per
+  name and assigning node. Task output arguments are not recorded here (Task 23).
+- **References into scopes.** The first component is found from the current scope outward to the
+  module (a `BLOCK` symbol), the others in the reached scope (EL-22). A component naming no block
+  is E21; a block without that index is `'g[5].t' does not exist (generate block 'g[5]' was not
+  elaborated)`; a last component with an index is E21; a last name not declared in the reached
+  scope is `'blk.x' is not declared`. A `CALL` or `TASK_CALL` naming nothing is `'f' is not
+  declared`.
+- **Bounds.** A range bound outside int32 is EL-46's width error at the bound (`width |b| + 1`), a
+  packed range wider than the cap the width error at the `RANGE`, an x or z bound `range bound has
+  x or z bits`. Unpacked dimensions have no width cap here (memory sizes are EL-27's).
+- **Names that are not values.** An `IDENT` or `HIER_NAME` that resolves to an `INSTANCE`,
+  `FUNCTION` or `TASK` is `'u' is not a net, variable or parameter` (Yosys 0.55: "Failed to detect
+  width for identifier"). One that resolves to a `BLOCK` binds to it: Yosys 0.55 makes a generate
+  block's name an implicit net (`Identifier '\g' is implicitly declared`), which Task 18 (or
+  Task 15) implements or records as a divergence.
+- **Not yet.** The `IMPLICIT` flag is not set: the elaborated form has no marker for the implicit
+  nets' `NET_DECL` (Task 15 defines one and makes the binder set the flag from it).
+
 ## 3. Hierarchy
 
 ### 3.1 Module lookup (EL-6)
@@ -263,7 +417,8 @@ in order:
    libraries define it, an info line names the one taken: `module 'N' found in libraries 'A',
    'B'; using 'A.N'`);
 3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins);
-4. a `UDP_DECL` `N` → Q7's error at the instance;
+4. a `UDP_DECL` `N` → Q7's error, at the `UDP_DECL` (§9.1: at the definition, whether or not
+   it is instantiated; a library unit's UDP when an instance resolves to it), not at the instance;
 5. a registered cell type `N` of granularity `hard` or `blackbox` (a tech library read earlier,
    e.g. `single_port_ram`; a model a BLIF read declared) → an instance of that type (EL-11);
 6. with `--auto-blackbox`, an implicit black box (EL-11);
@@ -281,14 +436,18 @@ never fail with `INVALID_ARG` on user input:
 - a design or library `MODULE` (not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
   registered cell type of granularity `hard` or `blackbox` — a tech library's `adder`,
   `multiply`, `single_port_ram`, or a model a BLIF read declared — is the located error, at the
-  `MODULE`'s name: `module 'adder' has the name of cell type 'adder' registered by an earlier
+  `MODULE`'s keyword (the parsed store records no location for a name; 2C §4.2 step 4 locates
+  `duplicate_module` there too): `module 'adder' has the name of cell type 'adder' registered by an earlier
   read (hard cell); rename the module` (`(black box)` for a declared model). The design unit
   does not shadow the cell type: an instance `adder u(…)` in the same design would otherwise mean
   two things. Parmys fails the same way ("Re-definition of module" against its
   `vtr_primitives.v`);
 - a `MODULE` whose name is a module created by an earlier `read_verilog` run of the same design
   (a second read in one script) is `duplicate_module: module 'm' is already defined by an
-  earlier read (run N)` at the `MODULE`'s name (2C's kind, F27).
+  earlier read (run N)` at the `MODULE`'s keyword (2C's kind, F27). The check runs when the
+  definition is reached from the top (the definitions stage 1 is about to specialize); a module
+  named after a built-in cell type is `module '$add' has the name of built-in cell type '$add';
+  rename the module` (v4.5).
 
 ### 3.2 Top selection (EL-7)
 
@@ -296,7 +455,9 @@ The top is chosen before anything is elaborated, from the parsed store:
 
 - **Given** (`--top`, else the project's `top`, `[lib.]mod`): the named design-unit or
   library-unit `MODULE`; not found → `unknown_top` (at `top_at`, unlocated for `--top`); found in
-  several libraries without a `lib.` prefix → `ambiguous_top` listing `lib.mod` for each.
+  several libraries without a `lib.` prefix → `ambiguous_top` listing `lib.mod` for each; a
+  `(* blackbox *)` module → `unknown_top: 'm' is a black box ((* blackbox *)), not a module to
+  elaborate` (v4.5: a black box is never a `MODULE` of the elaborated form, EL-4).
 - **Automatic** (DESIGN §4.0, kept): the candidates are the design-unit `MODULE`s that are not
   black boxes and that no design-unit or library-unit `MODULE` instantiates, by name, anywhere
   in its body (every generate branch counts; the parsed form is all there is before
@@ -363,7 +524,8 @@ Rules:
   `W`; `param top.u_wide.W` is the pending `("u_wide.W", v)` of the top, pushed down like a
   `defparam`. A path that never reaches a parameter is an error at the project line
   (`param 'top.u_wide.X' does not name a parameter`). Values are numbers (`16`, `-3`, `8'hFF`,
-  through `odin3_ast_number_parse`, sized as a literal of that text) or strings.
+  through `odin3_ast_number_parse`, sized as a literal of that text and then sized like every
+  override, its sign kept, v4.7) or strings.
 - **Paths that end at a cell-type instance** (a `defparam` or project `param` whose instance is a
   hard or black-box cell, EL-11, such as `defparam ram.ADDR_WIDTH = 10` on a `single_port_ram`)
   set that node's parameter, converted to the type's parameter kind (INT: the value as a signed
@@ -380,8 +542,13 @@ another parameter, so the key is the resolved vector, not the override list: `#(
 `#(.W(32'sd8))` on `parameter integer W` share a specialization, while on an untyped `W` they
 differ (8 is 32-bit signed, `4'd8` 4-bit unsigned: different expressions inside). Key =
 (definition, for each `parameter` in order: width, signedness, string flag, bits; the pending
-list sorted by path). Hash: `odin3_hash_bytes` (`util/hash.h`) over the key bytes; equality is
-exact. Two instances with equal keys share one specialization and one IR module.
+list sorted by path, each entry as (path, source, value)). The source (`#()`, `defparam` or
+project line) is part of the key because at its target a pending entry competes with the child's
+own `#()` by EL-8's precedence, so two equal values from different sources can give different
+results; an equal-valued pending from another source is another specialization, whose name takes
+the `$2` suffix (`mid$u_leaf.W=4` and `mid$u_leaf.W=4$2`; v4.10). Hash: `odin3_hash_bytes`
+(`util/hash.h`) over the key bytes; equality is exact. Two instances with equal keys share one
+specialization and one IR module.
 
 **Names** (IR-7): the definition's name when every `parameter` has its default value and nothing
 is pending (Yosys derives a `$paramod` name as soon as any override is given, even one equal to
@@ -390,7 +557,14 @@ its default, in declaration order, then `$<path>=v` for each pending entry. A va
 plain decimal when it is a 32-bit signed value without x/z (`W=8`, `W=-3`); otherwise
 `<width>'<s>b<bits>` (`INIT=4'b10x0`, `S=8'sb11110000`); a string as `"text"` with `"` and `\`
 escaped. A name longer than `ODIN3_ELAB_MAX_MODULE_NAME` (128 bytes) becomes
-`base$h<16 hex digits of the key hash>`. A name already taken by another definition or
+`base$h<16 hex digits of the key hash>`. The top's specialization keeps its definition's name
+whatever its parameters and pending overrides, as Yosys `chparam` and `hierarchy -chparam` do
+(verified on 0.55); VTR and BLIF `.model` expect it, and Task 17's `odin3_design_set_top` takes it.
+A specialization of the top's definition with default values can then only come from recursion; it
+takes `top$2` (v4.7). Every specialization of a **`(* blackbox *)` definition** takes the
+definition's name, whatever its parameters (v4.10; Yosys 0.55 keeps `module \bb` and gives the
+cell `parameter \W 8`, never a `$paramod`): its instances are told apart by their parameter
+values, not by name (EL-11). A name already taken by another definition or
 specialization, or by a registered cell type of the design (`odin3_celltype_find`; EL-6's
 "names already taken"), gets `$2`, `$3`, … appended (checked against every definition name of
 the store, every specialization made so far and the design's cell-type table), so names are
@@ -443,7 +617,11 @@ and makes one specialization per level.
   expression of width W, against a port of width P, with N elements: W = P → every element gets
   the whole expression; W = N × P → element k gets bits `[(k − min(hi,lo)) × P +: P]` of it
   (`SELECT` nodes in the elaborated form); anything else → "connection of 'p' to instance
-  array 'u' is W bits; expected P or N×P". Gate arrays slice terminals the same way with P = 1.
+  array 'u' is W bits; expected P or N×P". The lowest index gets the low bits whatever the
+  range's direction: Yosys normalizes the range (`simplify.cc` 2055–2058), names element *i*
+  `[min + i]` and gives it `extract(P × i, P)` (`hierarchy.cc` 595); verified on 0.55, `ub[0:3]`
+  on `bus[7:0]` gives `ub[0]` `bus[1:0]` (§17 #29 for IEEE). Gate arrays slice terminals the same
+  way with P = 1 ("connection K of instance array 'g' is W bits; expected 1 or N"; §17 #27).
 - **Port expressions** (I3): an input connection is any expression; an output or inout
   connection must be a net lvalue (identifier, constant selects, concatenation of those);
   anything else is "output port 'p' of instance 'u' must be connected to a net" (and a constant
@@ -462,11 +640,22 @@ and makes one specialization per level.
 ### 3.6 Black boxes, hard cells and undefined modules (EL-11)
 
 - **`(* blackbox *)` modules** in the sources (Yosys's attribute): the body is ignored (an info
-  line if it is not empty), the ports are evaluated per specialization, and stage 2 registers a
-  black-box cell type per specialization (IR-7b; granularity `blackbox`, the specialization's
-  name, its ports in port order). When a cell type of that name is already registered (a tech
-  library's `single_port_ram`), IR-7b's compatibility check by port name applies and the
-  registered type is reused; a mismatch is a located error naming the port.
+  line if it is not empty). A black box keeps its **base name** whatever its parameters (v4.10,
+  Yosys 0.55; EL-9): stage 1 still specializes it per resolved parameter vector and checks each
+  instance's connections against that specialization's ports (EL-10; Yosys's `hierarchy` derives
+  the same per-parameter port widths for the check and then drops the derived module), but writes
+  **one** ports-only black-box `MODULE` per definition, named after it, with the ports and
+  `PARAM_DECL` values of its **default** specialization (Yosys's `module \bb`), queued once when no
+  instance uses the defaults; every `INSTANTIATION` of the definition is named after it and carries
+  its final values in its params LIST (EL-4: the cell's parameters). Stage 2 (Task 19) registers one
+  black-box cell type per such `MODULE` (IR-7b; granularity `blackbox`, the definition's name, its
+  ports in port order) instead of creating an IR module; each cell takes its `INSTANTIATION`'s
+  values as cell parameters and its own specialization's port widths (a port whose width depends
+  on a parameter makes the type parametric, IR-7b). `write_blif --vtr` (3E) therefore writes
+  `.subckt <base name>`, which an architecture model of that name matches; no `$`-suffixed black-box
+  name reaches a writer. When a cell type of that name is already registered (a tech library's
+  `single_port_ram`), IR-7b's compatibility check by port name applies and the registered type is
+  reused whatever the parameters; a mismatch is a located error naming the port.
 - **Registered cell types** (EL-6 item 5): parameters by name must be parameters of the type
   ("cell type 't' has no parameter 'P'"); ordered values map to the type's parameters in its
   declaration order; parameters not given are inferred from the connections' widths
@@ -476,8 +665,14 @@ and makes one specialization per level.
 - **Undefined modules** are `unresolved_module` (DESIGN §4.0; Parmys's `hierarchy -check` rejects
   them too). With `--auto-blackbox`, an undefined module instead becomes an implicit black box
   per distinct name: every instance must use named connections ("implicit black box 'm' needs
-  named connections"), its ports are the union of the names used, the first instance fixes each
-  port's width (later instances must agree), all ports are `inout`, and an info line names it.
+  named connections"), its ports are the union of the names used (every instantiation of the name
+  in the sources, in source order), the first elaborated connection with an expression fixes each
+  port's width (from an instance array of N elements, a width W that N divides fixes W / N, the
+  element's slice, else W: EL-10's two forms, read with the slice preferred; later instances must
+  agree, an array's connection being one element's width or N times it; 1 bit when no connection
+  gives one; v4.10), all ports are
+  `inout`, an info line names it, and it is written as a ports-only black-box `MODULE` (EL-4,
+  v4.8).
   This is coverage row I7's black box (B §2.23.1) without guessing directions.
 - Cell-type instances keep their parameter values as node parameters; module instances keep the
   overridden values as node attributes `parameter:<NAME>` (BITS or STRING; IR-7's "source-level
@@ -639,7 +834,9 @@ Typing of a `parameter` or `localparam` (IEEE §12.2; Yosys `simplify` for `AST_
 | `real`, `realtime`, `time` | P4's error ("parameter type 'real' is not supported") |
 
 An override (EL-8) is converted the same way, so a ranged or `integer` parameter keeps its type
-and an untyped one takes the override's type. Evaluation is lazy and in declaration order: a
+and an untyped one takes the override's type; the override's value is sized first, its sign kept
+(v4.7: Yosys passes overrides as `RTLIL::Const`, without `is_unsized`), so only a default keeps
+`UNSIZED`. Evaluation is lazy and in declaration order: a
 parameter whose value reads a later parameter evaluates that one first (allowed, as in Yosys); a
 cycle is "parameter 'P' depends on itself" at `P`'s declaration. A parameter value that reads a
 net or variable is "parameter 'P' is not constant (it reads 'x')". In a generate block (and in
@@ -658,9 +855,10 @@ a replication count, an attribute value, a `for`-loop bound in stage 2, …) is 
   a call pushes a frame, `return` (end of body) pops it. No C recursion, so recursive constant
   functions (K8) work up to `ODIN3_ELAB_MAX_CALL_DEPTH` (1024) frames. The cap also counts every
   evaluation nested in C inside another: a typer callback's (a replication count, a bound, a
-  return range) and a host's re-entry (a lazily evaluated parameter read by another, §4.5), so a
-  2000-link `localparam` chain stops with `constant evaluation of parameter 'P1025' nested
-  deeper than 1024` instead of exhausting the C stack.
+  return range) and a host's re-entry (a lazily evaluated parameter read by another, §4.5), and
+  those C nestings alone are bounded by `ODIN3_ELAB_MAX_REENTRY_DEPTH` (256, v4.6), so a 2000-link
+  `localparam` chain stops with `constant evaluation of parameter 'P257' nested deeper than 256`
+  instead of exhausting the C stack.
 - **Locals**: the function's ports, its result variable (named like the function; width from the
   return range, 32 bits for `integer`, 1 bit by default; sign from `signed`/`integer`), its local
   declarations and named-block declarations, each a value of its declared width initialised to x.
@@ -815,8 +1013,10 @@ one per bit, unless it is a memory (EL-27):
 - **`input reg`/`input integer`** (M12, D5): accepted as a net with "input 'a' is declared as a
   variable ('reg'); it is treated as a net".
 - **`inout`** (M7) ports are `$port_inout` (EL-29 says what may drive them).
-- **Empty positions** (`(a, , b)`, a trailing comma, 2C §3.6) are kept as positions for ordered
-  connections (EL-10) and are not ports. **Port expressions** `.x(a)`, `{a, b}`, `a[3:0]` in a
+- **Empty positions**: only a trailing comma (`(a, b, )`, 2C §3.6) reaches 2D; 2C rejects
+  `(a, , b)` and `(, a)` with a located syntax error, as Yosys 0.55 does (2C §3.1 (k); §17 #31;
+  v4.10). The trailing one is kept as a position for ordered connections (EL-10) and is not a port.
+  **Port expressions** `.x(a)`, `{a, b}`, `a[3:0]` in a
   header are M6: "port expression in a module port list is not supported".
 - **Order**: header order. Stage 2 creates the ports with `odin3_module_add_port` in that order,
   for every specialization before any module body (IR-7: a module's ports must exist before
@@ -1580,10 +1780,14 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   parameter` (at the project line); `recursive instantiation of 'm' (through 'a', 'b')`; `instance
   hierarchy deeper than 1024 at 'u'; recursive instantiation of 'm'?`; `cell type 't' has no
   parameter 'P'`; `implicit black box 'm' needs named connections`; `output port 'p' of instance
-  'u' must be connected to a net`; `output port 'p' of instance 'u' is connected to a constant`;
-  `connection of 'p' to instance array 'u' is W bits; expected P or N×P`; `module 'adder' has the
+  'u' must be connected to a net`; `output port 'p' of instance 'u' is connected to a constant`
+  (`inout port 'p' …` for an inout, v4.8); `connection of 'p' to instance array 'u' is W bits;
+  expected P or N×P`; `connection K of instance array 'g' is W bits; expected 1 or N` (a gate
+  terminal, v4.8); `cell type 't' has no port 'p'`; `too many parameter values for cell type 't'
+  (N given, M parameters)`; `implicit black box 'm': port 'a' is P bits at its first instance;
+  this connection is W bits`; `module 'adder' has the
   name of cell type 'adder' registered by an earlier read (hard cell); rename the module` (or
-  `(black box)`), at the `MODULE`'s name (EL-6, F9); `duplicate_module: module 'm' is already
+  `(black box)`), at the `MODULE`'s keyword (EL-6, F9); `duplicate_module: module 'm' is already
   defined by an earlier read (run N)` (EL-6, F27).
 - **Constants (EL-12–EL-18)**: `<what> is not constant (it reads 'x')` where `<what>` is one of
   `range bound`, `replication count`, `parameter 'P'`, `generate condition`, `generate loop
@@ -1592,14 +1796,16 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   (reasons: `it reads module variable 'x'`, `it calls task 't'`, `it calls system task '$x'`, `it
   assigns 'x', which is not local`); `constant evaluation of 'f' exceeds 67108864 steps`;
   `constant function recursion deeper than 1024 in 'f'`; `constant evaluation of <what> nested
-  deeper than 1024`; `replication count N is negative`;
-  `replication count has x or z bits`; `zero-width concatenation`; `width N exceeds the limit of
-  1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
+  deeper than 256` (the C re-entry cap, v4.6; 1024 when the call-depth cap is reached first);
+  `replication count N is negative`;
+  `replication count has x or z bits`; `range bound has x or z bits` (the binder, v4.9);
+  `zero-width concatenation`; `width N exceeds the limit of 1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
 - **Generate (EL-19–EL-22)**: `'i' is not a genvar`; `generate loop must assign genvar 'i' in its
   initialisation and step`; `genvar 'i' is already used by an enclosing loop`; `generate loop of
   'i' repeats the value N`; `port declarations are not allowed in a generate block`; `'g[5].t'
   does not exist (generate block 'g[5]' was not elaborated)`.
-- **Declarations and ports (EL-23–EL-29)**: `'x' is not declared`; `'x' is not declared
+- **Declarations and ports (EL-23–EL-29)**: `'x' is not declared`; `'u' is not a net, variable
+  or parameter` (the binder, v4.9); `'x' is not declared
   (`default_nettype is none)`; `port 'a' is not declared`; `'x' is declared as a port but is not
   in the port list`; `port 'q' is declared with ranges [3:0] and [7:0]`; `'w' is a wired net (wand)
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
@@ -1720,6 +1926,7 @@ guards, reported as a located `ODIN3_ERR_PARSE` naming the cap, and lowered in t
 | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 | all unrolled loop iterations of a run; nested loops multiply, and this stops a 2^20 × 2^20 bomb long before memory does |
 | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 | statements plus expression nodes per top-level constant evaluation (a `while (1)` in a constant function) |
 | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 | constant-function recursion and inline nesting; real recursive constant functions are < 64 deep |
+| `ODIN3_ELAB_MAX_REENTRY_DEPTH` | 256 | constant evaluations nested in C (typer callbacks, host re-entries; v4.6): each takes 4–6 KiB of C stack under ASan, where a function frame takes none |
 | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 | instance nesting below the top; real designs ≈ 10 (mcml: 7) |
 | `ODIN3_ELAB_MAX_SPECIALIZATIONS` | 2^16 | modules made; lenet makes 138 |
 | `ODIN3_ELAB_MAX_INSTANCES` | 2^24 | instance and gate nodes per run (instance-array bombs) |
@@ -2198,6 +2405,13 @@ and reported, never relaxed (2A's rule).
 | 22 | an unsized literal of exactly a ranged parameter's width stays unsized (extends by its top bit) | same (`simplify.cc` 2381–2390, verified) | sized to the range | matches Yosys's values |
 | 23 | a wider output connection of a cell type or `(* blackbox *)` port is zero-extended | sign-extended when the black box's port is `signed` | sign per the port | IR-7b ports carry no signedness |
 | 24 | a `$pow` read from BLIF (a `.subckt $pow`, as Yosys's `write_blif` writes it) is unsigned: `A_SIGNED` = `B_SIGNED` = 0, the widths implied by the formals | `write_blif` writes `.subckt $pow` with no parameters (unless `-param`, which the Parmys script does not use), so its own BLIF loses the operands' signedness too | — | BLIF carries no sign; no Parmys golden has a negative exponent (controller ruling on the Task 1 review) |
+| 25 | a module's `(* top *)` attribute does not choose the top (EL-7's rule decides) | `hierarchy` takes a `(* top *)` module before `-auto-top` (`passes/hierarchy/hierarchy.cc` 1008–1013 in VTR's 0.55) | — | DESIGN §4.0's top rule; no VTR benchmark or micro uses the attribute (v4.5) |
+| 26 | a project number keeps its literal's sign (`param top.u.W 3` is a signed 32-bit 3) | `chparam -set W 3` makes an unsigned `RTLIL::Const` | — | a project value means what the same text means in a `#()` (v4.7); only an untyped parameter in signed arithmetic sees the difference |
+| 27 | gate arrays (`and g[1:0] (y, a, b)`) are expanded per EL-10 with P = 1 | fails: "Cell arrays of primitives are currently not supported", ending in an assertion at `simplify.cc` 2755 (verified on 0.55) | legal (Q5) | coverage row Q5; Parmys fails where 2D succeeds, so no golden can disagree (v4.8) |
+| 28 | an output or inout connected to anything but a net lvalue (`a + b`, `w[i]`) is EL-10's error | elaborated, with "Drivers conflicting" warnings; only a constant output is an error | not a net lvalue: illegal | EL-10 I3; the constant cases match Yosys's own error (v4.8) |
+| 29 | an instance array's lowest index gets the connection's low bits whatever the range's direction | same (verified on 0.55) | bits are distributed by range position (the left index gets the leftmost bits), which differs for ascending ranges | the exit bar is Parmys (v4.8) |
+| 30 | a parameterized `(* blackbox *)` module keeps its name and one ports-only `MODULE` (the defaults' ports); each `INSTANTIATION` carries **every** parameter's final value | same name and module, the module's ports at the defaults' widths (verified on 0.55: PR 2D-3 final review probe 17; `pb #(.W(2))` beside a default `pb` in the fix round); the cell's `parameter`s are only the overrides given (none for a default instance) | — | EL-4: an `INSTANTIATION`'s params LIST holds the specialization's final values for every module instance; the values are the same, only the defaulted ones are spelled out (v4.10) |
+| 31 | an empty non-ANSI port anywhere but last (`module n(a, , b)`, `(, a)`) is a syntax error; a trailing comma is accepted | same ("syntax error, unexpected ','"; verified on 0.55: probe 20, and `(, a)` and `(a, b, )` in the fix round) | legal (`port ::= [port_expression]`) | Yosys; IEEE's empty position has no use but a dropped connection (v4.10) |
 
 ## 18. Implementation split (EL-51)
 

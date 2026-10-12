@@ -4,6 +4,7 @@
  * remap after compact, check rule 8, and OOM.
  */
 #include "ast/ast.h"
+#include "ast/ast_test.h"
 #include "ast/kinds.h"
 #include "ast/symtab.h"
 #include "ir/design.h"
@@ -14,6 +15,7 @@
 #include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/u64map.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -27,6 +29,8 @@ enum {
     FILL_NAME = 100000,
     MAP_FILLS = 40,
     BIG_BITS = 70000,
+    LAST_ERROR = 512,
+    COLLIDING_MASK = 1, /* two indexed keys: almost every position collides */
 };
 
 static odin3_design *design;
@@ -34,12 +38,15 @@ static odin3_ast *ast;
 static odin3_symtab *st;
 static odin3_ast_id nodes[NODES + 1]; /* nodes[1..NODES] are IDENTs */
 static size_t errors_logged;
+static char last_error[LAST_ERROR]; /* the last error line logged */
 
 static void capture_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)msg;
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors_logged++;
+        size_t len = strlen(msg) < LAST_ERROR - 1 ? strlen(msg) : LAST_ERROR - 1;
+        memcpy(last_error, msg, len);
+        last_error[len] = '\0';
     }
 }
 
@@ -79,6 +86,7 @@ void setUp(void) {
 
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
+    odin3_symtab_test_set_index_mask(UINT64_MAX);
     odin3_log_set_sink(NULL, NULL);
     odin3_ast_destroy(ast);
     ast = NULL;
@@ -295,6 +303,102 @@ static void test_generate_indices(void) {
     TEST_ASSERT_EQUAL_UINT32(gm.v, odin3_scope_get(st, plain)->same_name_next.v);
     TEST_ASSERT_EQUAL_UINT32(g2.v, child(tr.top, gname, 2).v);
     assert_check_ok();
+}
+
+/* The order positions of chain g of top, after build_orders. */
+static const int64_t k_orders[] = {
+    ODIN3_SCOPE_NO_INDEX, -1, 0, 2, 4, 6, 7, 8, 10, 11, 12, 14, 16, 18, 19, 40};
+static const int64_t k_absent[] = {-2, 1, 3, 5, 9, 13, 17, 20, 39, 41, INT32_MAX, INT32_MIN};
+
+/* An unnamed GENERATE scope at key's parent and index, then named key's name (set_name). */
+static void name_later(odin3_scope_key key) {
+    odin3_scope_id anon = scope((odin3_scope_spec){.kind = ODIN3_SCOPE_GENERATE,
+                                                   .index = (int32_t)key.order,
+                                                   .has_index = true,
+                                                   .parent = key.parent});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_scope_set_name(st, anon, key.name));
+}
+
+/* Appends 0, 2, …, 18 (past the tail), then middle (7), end (19), front (-1) and a plain block
+ * (first of all), then set_name into the middle (11) and at the end (40). */
+static odin3_scope_id build_orders(uint32_t gname) {
+    tree tr = base_tree();
+    for (int32_t i = 0; i <= 18; i += 2) {
+        indexed(tr.top, gname, i);
+    }
+    indexed(tr.top, gname, 7);
+    indexed(tr.top, gname, 19);
+    indexed(tr.top, gname, -1);
+    named(ODIN3_SCOPE_BLOCK, tr.top, gname);
+    name_later((odin3_scope_key){tr.top, gname, 11});
+    name_later((odin3_scope_key){tr.top, gname, 40});
+    return tr.top;
+}
+
+/* The chain holds exactly k_orders, strictly ascending; each is found, each absent order is not,
+ * each duplicate clashes; rule 8 (tails and the indexed map included) passes. */
+static void expect_orders(odin3_scope_id top, uint32_t gname) {
+    size_t count = sizeof k_orders / sizeof k_orders[0];
+    odin3_scope_id at = child(top, gname, k_orders[0]);
+    for (size_t i = 0; i < count; i++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, at.v, "chain too short");
+        TEST_ASSERT_EQUAL_INT64(k_orders[i], odin3_scope_order(odin3_scope_get(st, at)));
+        TEST_ASSERT_EQUAL_UINT32(at.v, child(top, gname, k_orders[i]).v);
+        at = odin3_scope_get(st, at)->same_name_next;
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, at.v);
+    for (size_t i = 0; i < sizeof k_absent / sizeof k_absent[0]; i++) {
+        TEST_ASSERT_EQUAL_UINT32(0, child(top, gname, k_absent[i]).v);
+    }
+    for (size_t i = 1; i < count; i++) {
+        odin3_scope_spec again = {.kind = ODIN3_SCOPE_GENERATE,
+                                  .name = gname,
+                                  .index = (int32_t)k_orders[i],
+                                  .has_index = true,
+                                  .parent = top};
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, try_scope(again));
+    }
+    errors_logged = 0;
+    assert_check_ok();
+}
+
+/* Same-name chains (2D Task 13 fix round, I1): an insert past the tail is O(1), an exact position
+ * lookup O(1); front and middle inserts and set_name keep the chain strictly ascending. */
+static void test_chain_orders(void) {
+    uint32_t gname = intern("g");
+    odin3_scope_id top = build_orders(gname);
+    TEST_ASSERT_FALSE(st->index_collided);
+    expect_orders(top, gname);
+}
+
+/* With the indexed keys narrowed to two, positions collide: lookups fall back to the chain walk
+ * and stay exact. */
+static void test_chain_orders_collided(void) {
+    odin3_symtab_test_set_index_mask(COLLIDING_MASK);
+    fresh_ast();
+    uint32_t gname = intern("g");
+    odin3_scope_id top = build_orders(gname);
+    TEST_ASSERT_TRUE(st->index_collided);
+    expect_orders(top, gname);
+}
+
+/* Rule 8 sees a wrong tail and an indexed entry that names another scope. */
+static void test_chain_check_corrupt(void) {
+    tree tr = base_tree();
+    uint32_t gname = intern("g");
+    odin3_scope_id g0 = indexed(tr.top, gname, 0);
+    odin3_scope_id g1 = indexed(tr.top, gname, 1);
+    uint64_t pair = odin3_symtab_key(tr.top.v, gname);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_u64map_put(st->tails, (odin3_kv){pair, g0.v}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_symtab_check(st, ast));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "scope name chain tail wrong"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_u64map_put(st->tails, (odin3_kv){pair, g1.v}));
+    assert_check_ok();
+    uint64_t key = odin3_symtab_index_key((odin3_scope_key){tr.top, gname, 1});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_u64map_put(st->indexed, (odin3_kv){key, g0.v}));
+    TEST_ASSERT_EQUAL_UINT32(0, child(tr.top, gname, 1).v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_symtab_check(st, ast));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "scope not found by its (parent, name, index)"));
 }
 
 static void test_set_name(void) {
@@ -737,6 +841,9 @@ int main(void) {
     RUN_TEST(test_library_scopes);
     RUN_TEST(test_scope_shape_misuse);
     RUN_TEST(test_generate_indices);
+    RUN_TEST(test_chain_orders);
+    RUN_TEST(test_chain_orders_collided);
+    RUN_TEST(test_chain_check_corrupt);
     RUN_TEST(test_set_name);
     RUN_TEST(test_lookup_outward_and_shadowing);
     RUN_TEST(test_symbol_misuse);
