@@ -1828,6 +1828,32 @@ class ProgressTest(RunnerTestBase):
         self.assertEqual(lines, (self.out / "harness.log").read_text().splitlines())
 
 
+class RetentionFailedOnlyTest(RetentionBase):
+    def test_retention_clears_only_failed_run_dirs(self) -> None:
+        """Retention thins failed jobs' run directories only: a complete key of six ok P jobs
+        (older than every failed one, so they would go first) keeps every parse file and
+        gzipped netlist while seven failed jobs are cut to KEEP_FAILED run directories."""
+        designs = ("ch_intrinsics", "stereovision3", "diffeq2", "diffeq1", "mkPktMerge", "sha")
+        kept = ("parse_results.txt", "qor_results.txt", "vpr.out", "vpr.crit_path.out",
+                "parmys.out", "abc0.out")
+        ok_files = {}
+        for i, design in enumerate(designs):
+            job = self.make("aaaaaaaaaaaa", design, "ok", 1000.0 + i)
+            for name in (*kept, f"{design}.pre-vpr.blif.gz"):
+                (job / "run" / name).write_text(f"{design} {name}\n")
+            ok_files[design] = sorted(p.name for p in (job / "run").iterdir())
+        (self.leg_dir() / "aaaaaaaaaaaa" / "planned.json").write_text(
+            json.dumps({"designs": sorted(designs)}))
+        failed = [self.make("bbbbbbbbbbbb", f"f{i}", "failed", 2000.0 + i) for i in range(7)]
+        qor_sched.prune(self.out, VTR12, K6, "P", planned=True)
+        for design in designs:
+            run = self.leg_dir() / "aaaaaaaaaaaa" / design / "run"
+            self.assertEqual(sorted(p.name for p in run.iterdir()), ok_files[design], design)
+        self.assertEqual([(job / "run").is_dir() for job in failed],
+                         [False, False, True, True, True, True, True])
+        self.assertTrue(all((job / "status").read_text() == "failed\n" for job in failed))
+
+
 class FixRound6Test(RetentionBase):
     """Task 6 fix round 1: planned.json, the planned-set retention, after_run, DrainError."""
 
