@@ -1013,7 +1013,8 @@ static void test_port_rename_warning(void) {
     TEST_ASSERT_EQUAL_STRING(".inputs %re\n.outputs y\n.names %re y\n1 1\n.end\n", write_vtr());
     TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "warn: write_blif: --vtr: port"));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: port 're' "
-                                                     "written as '%re' (VPR cannot read 're')\n"),
+                                                     "written as '%re' (not a legal name "
+                                                     "for VTR's BLIF readers)\n"),
                                  tc.log.data);
 }
 
@@ -1028,13 +1029,66 @@ static void test_port_rename_once_per_port(void) {
         starts_with(write_vtr(), ".inputs a%20b[0] a%20b[1] a%20b[2]\n.outputs y[0] y[1] y[2]\n"),
         text_of(&out));
     TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "warn: write_blif: --vtr: port"));
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data,
-                                        "warn: write_blif: --vtr: port 'a b' "
-                                        "written as 'a%20b' (VPR cannot read 'a b')\n"),
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: port 'a b' "
+                                                     "written as 'a%20b' (not a legal name for "
+                                                     "VTR's BLIF readers)\n"),
                                  tc.log.data);
     TEST_ASSERT_NOT_NULL_MESSAGE(
         strstr(tc.log.data,
                "info: write_blif: --vtr: 3 names legalised (first: 'a b[0]' -> 'a%20b[0]')\n"),
+        tc.log.data);
+}
+
+/* A top's name, how the VTR dialect writes it, and how many `names legalised` lines that logs. */
+typedef struct model_case {
+    const char *name;
+    const char *written;
+    uint32_t renames;
+} model_case;
+
+/* A top named want.name (hand IR: one buffer a -> y) is written `.model <want.written>`. */
+static void expect_model_written(model_case want) {
+    read_ok(TWO_MODELS, false); /* the directory and the sink */
+    empty_design();
+    odin3_module_id id = {0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_module_create(tc.design, intern(want.name), (odin3_prov_id){0}, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(tc.design, id));
+    odin3_module *top = odin3_module_get(tc.design, id);
+    odin3_net_id in = hand_scalar(top, "a", ODIN3_DIR_IN); /* ports in this order */
+    hand_buffer(top, in, hand_scalar(top, "y", ODIN3_DIR_OUT));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out),
+                                  text_of(&tc.log));
+    char header[LINE_BUF];
+    header_of(ODIN3_BLIF_VTR_DEFAULT_K, header);
+    line_of("%s.model %s\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n", header, want.written);
+    TEST_ASSERT_EQUAL_STRING(want_line, out.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(want.renames, count_of(tc.log.data, "names legalised"),
+                                     tc.log.data);
+    bvt_free(&tc);
+}
+
+/* The top's `.model` name takes VB-10 rules 1 and 2 (a blank, a `\`, a leading `.`) but never
+ * rule 3, since a model name is no net (`NIL` stays); the rename is counted and, being the
+ * file's first name, is the info line's `first` (3E-1 final review M3). */
+static void test_model_name_legalised(void) {
+    expect_model_written((model_case){"a b", "a%20b", 1});
+    expect_model_written((model_case){".end", "%2Eend", 1});
+    expect_model_written((model_case){"x\\y", "x%5Cy", 1});
+    expect_model_written((model_case){"NIL", "NIL", 0});
+    read_ok(TWO_MODELS, false);
+    empty_design();
+    odin3_module_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_module_create(tc.design, intern("p q"), (odin3_prov_id){0}, &id));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(tc.design, id));
+    odin3_module *top = odin3_module_get(tc.design, id);
+    odin3_net_id in = hand_scalar(top, "a b", ODIN3_DIR_IN); /* ports in this order */
+    hand_buffer(top, in, hand_scalar(top, "y", ODIN3_DIR_OUT));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data,
+               "info: write_blif: --vtr: 2 names legalised (first: 'p q' -> 'p%20q')\n"),
         tc.log.data);
 }
 
@@ -2857,6 +2911,7 @@ static void run_tasks_1_2(void) {
     RUN_TEST(test_declared_index_plain);
     RUN_TEST(test_port_rename_warning);
     RUN_TEST(test_port_rename_once_per_port);
+    RUN_TEST(test_model_name_legalised);
     RUN_TEST(test_port_collision_refused);
     RUN_TEST(test_hard_cell_clock);
     RUN_TEST(test_blackbox_clock_unknown);

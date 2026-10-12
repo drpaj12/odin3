@@ -21,6 +21,16 @@ and expects either ``DIR/<name>.vtr.blif`` or ``DIR/<name>.err``:
   ``<name>.debug.err`` when that exists: a Debug build checks the IR after every pass, so it can
   refuse an input at ``read_blif`` before the writer sees it (a multi-driver net, E12).
 
+A written case then runs the round trip of §16.3 step 1 (step 5: CI on the fixtures), as the
+3E-1 final review's erratum amends it: ``W2 = write_blif --vtr (read_blif W1)``, and
+
+- when the write of W1 legalised no name (no ``names legalised`` info line, ``renamed == 0``),
+  W1 == W2 byte for byte;
+- otherwise W1 and W2 are compared under the VB-10 decode (``vtr_normalized``: continuations
+  joined, comment lines dropped, every name decoded to a fixed point), and the byte comparison
+  is not applied: VB-10 escapes the ``%`` of an escape again (``\\`` -> ``%5C`` -> ``%255C``), so
+  W2 differs from W1 by design. A ``note`` line names such a case.
+
 Then ``blif-vtr-check --strict`` runs on every expected ``.vtr.blif`` (skipped with a note
 without ``--checker``: the checker lands in 3E-2). An expected file that no case owns fails.
 
@@ -51,6 +61,10 @@ DEBUG_ERR_SUFFIX = ".debug.err"
 RUN_TIMEOUT = 300  # seconds per odin3 run; the fixtures take milliseconds
 HEADER = re.compile(r"^# Odin III \S+ write_blif --vtr \(K=(\d+), names (short|provenance)\)$")
 ERROR_PREFIX = "odin3: error: "
+# VB-10 item 9's info line; its count is the report's `renamed` (§16.3 step 1, amended).
+RENAMED = re.compile(r"^odin3: info: write_blif: --vtr: (\d+) names legalised ", re.MULTILINE)
+# A VB-10 escape: `%` and two upper-case hex digits (plan 3E point (o)).
+ESCAPE = re.compile(rb"%([0-9A-F]{2})")
 TRAILER = re.compile(r"^odin3: error: (pass \S+: |-p: command \d+: )")
 
 
@@ -73,6 +87,7 @@ class Outcome:
     written: str | None
     errors: str
     detail: str  # why the run itself is wrong (empty when it is consistent)
+    renamed: int = 0  # the names the write legalised (VB-10 item 9's count)
 
 
 def read_text(path: Path) -> str:
@@ -113,18 +128,27 @@ def error_lines(stderr: str) -> str:
     return "".join(line + "\n" for line in kept)
 
 
-def run_case(odin3: Path, case: Case, work: Path) -> Outcome:
-    out = work / (case.name + OUT_SUFFIX)
-    script = (
-        f'read_techlib "{LIBRARY}"; read_blif "{case.source.name}"; write_blif --vtr "{out}"'
-    )
-    proc = subprocess.run(
+def rewrite(odin3: Path, source: Path, out: Path) -> subprocess.CompletedProcess[bytes]:
+    """odin3 reads source (from its directory, by its basename) and writes it --vtr to out."""
+    script = f'read_techlib "{LIBRARY}"; read_blif "{source.name}"; write_blif --vtr "{out}"'
+    return subprocess.run(
         [str(odin3), "-p", script],
-        cwd=case.source.parent,
+        cwd=source.parent,
         capture_output=True,
         timeout=RUN_TIMEOUT,
         check=False,
     )
+
+
+def renamed_of(stderr: str) -> int:
+    """The `names legalised` count of a write's log, 0 when it has no such line."""
+    match = RENAMED.search(stderr)
+    return int(match[1]) if match is not None else 0
+
+
+def run_case(odin3: Path, case: Case, work: Path) -> Outcome:
+    out = work / (case.name + OUT_SUFFIX)
+    proc = rewrite(odin3, case.source, out)
     stderr = proc.stderr.decode("utf-8", errors="surrogateescape")
     written = read_text(out) if out.is_file() else None
     detail = ""
@@ -134,7 +158,63 @@ def run_case(odin3: Path, case: Case, work: Path) -> Outcome:
         detail = f"odin3 exited {proc.returncode} but left a file"
     elif proc.returncode != 0 and error_lines(stderr) == "":
         detail = f"odin3 exited {proc.returncode} with no error line:\n{stderr}"
-    return Outcome(written, error_lines(stderr) if written is None else "", detail)
+    errors = error_lines(stderr) if written is None else ""
+    return Outcome(written, errors, detail, renamed_of(stderr))
+
+
+def vb10_decode(name: bytes) -> bytes:
+    """name with VB-10 undone to a fixed point: rule 3's `%` prefix (a `%` not followed by two
+    upper-case hex digits) dropped, then every `%XX` replaced by its byte, until nothing changes.
+    One step inverts one write exactly (point (o)); the fixed point makes a name written twice
+    (`%255C`) decode like one written once (`%5C`), both to `\\`."""
+    while True:
+        step = name[1:] if name.startswith(b"%") and ESCAPE.match(name) is None else name
+        step = ESCAPE.sub(lambda m: bytes([int(m[1], 16)]), step)
+        if step == name:
+            return name
+        name = step
+
+
+def vtr_normalized(text: bytes) -> list[list[bytes]]:
+    """A --vtr file as token lines: ` \\` continuations joined, `#` comment lines and blank lines
+    dropped, and every name (each side of a `formal=actual`) VB-10-decoded (vb10_decode)."""
+    lines = []
+    for line in text.replace(b"\\\n", b" ").split(b"\n"):
+        tokens = line.split()
+        if not tokens or tokens[0].startswith(b"#"):
+            continue
+        lines.append([b"=".join(vb10_decode(part) for part in tok.split(b"=")) for tok in tokens])
+    return lines
+
+
+def round_trip_verdict(w1: bytes, w2: bytes, renamed: int) -> tuple[str | None, str]:
+    """§16.3 step 1 as amended (3E-1 final review I1): (why it fails or None, the comparison
+    applied, "bytes" or "decoded"). renamed == 0 needs W1 == W2 byte for byte; renamed > 0 needs
+    W1 and W2 equal under vtr_normalized, and the byte comparison is not applied."""
+    if renamed == 0:
+        return (None if w1 == w2 else "W1 != W2 byte for byte (no name legalised)"), "bytes"
+    same = vtr_normalized(w1) == vtr_normalized(w2)
+    return (None if same else "W1 and W2 differ under the VB-10 decode"), "decoded"
+
+
+def round_trip(odin3: Path, name: str, work: Path, renamed: int) -> str | None:
+    """W2 from work/<name>.vtr.blif (W1), then round_trip_verdict; None when it holds."""
+    w1 = work / (name + OUT_SUFFIX)
+    w2 = work / (name + ".w2" + OUT_SUFFIX)
+    proc = rewrite(odin3, w1, w2)
+    if proc.returncode != 0 or not w2.is_file():
+        sys.stdout.write(proc.stderr.decode("utf-8", errors="surrogateescape"))
+        return f"round trip: odin3 exited {proc.returncode} on W1"
+    why, mode = round_trip_verdict(w1.read_bytes(), w2.read_bytes(), renamed)
+    if why is not None:
+        show_diff(read_text(w1), read_text(w2), "W1", "W2")
+        return f"round trip: {why}"
+    if mode == "decoded":
+        print(
+            f"note {name}: round trip: {renamed} names legalised, so W1 and W2 are compared "
+            "under the VB-10 decode (byte comparison not applied)"
+        )
+    return None
 
 
 def normalize_header(text: str) -> str:
@@ -206,11 +286,14 @@ def write_missing(case: Case, fixtures: Path, outcome: Outcome) -> bool:
 def check_case(odin3: Path, case: Case, fixtures: Path, write: bool) -> str | None:
     with tempfile.TemporaryDirectory(prefix="vtr-fixtures.") as tmp:
         outcome = run_case(odin3, case, Path(tmp))
-    if outcome.detail:
-        return outcome.detail
-    if write and write_missing(case, fixtures, outcome):
-        return None
-    return compare(case, fixtures, outcome)
+        if outcome.detail:
+            return outcome.detail
+        if write and write_missing(case, fixtures, outcome):
+            return None
+        why = compare(case, fixtures, outcome)
+        if why is None and outcome.written is not None:
+            why = round_trip(odin3, case.name, Path(tmp), outcome.renamed)
+        return why
 
 
 def orphans(fixtures: Path, cases: list[Case]) -> list[str]:

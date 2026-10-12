@@ -59,11 +59,10 @@ bool odin3_blif_vtr_reserved(odin3_bytes name) {
     return false;
 }
 
-odin3_status odin3_blif_vtr_legal_name(odin3_bytes name, odin3_strbuf *out) {
+odin3_status odin3_blif_vtr_legal_bytes(odin3_bytes name, odin3_strbuf *out) {
     size_t start = out->len;
     const unsigned char *bytes = name.ptr;
-    odin3_status st =
-        odin3_blif_vtr_reserved(name) ? odin3_strbuf_append(out, odin3_bytes_cstr("%")) : ODIN3_OK;
+    odin3_status st = ODIN3_OK;
     size_t run = 0; /* start of the pending run of kept bytes */
     for (size_t i = 0; st == ODIN3_OK && i < name.len; i++) {
         if (byte_legal(bytes[i]) && !(i == 0 && bytes[i] == '.')) {
@@ -78,6 +77,17 @@ odin3_status odin3_blif_vtr_legal_name(odin3_bytes name, odin3_strbuf *out) {
     if (st == ODIN3_OK) {
         st = odin3_strbuf_append(out, (odin3_bytes){bytes + run, name.len - run});
     }
+    if (st != ODIN3_OK) {
+        truncate_to(out, start);
+    }
+    return st;
+}
+
+odin3_status odin3_blif_vtr_legal_name(odin3_bytes name, odin3_strbuf *out) {
+    size_t start = out->len;
+    odin3_status st =
+        odin3_blif_vtr_reserved(name) ? odin3_strbuf_append(out, odin3_bytes_cstr("%")) : ODIN3_OK;
+    st = st == ODIN3_OK ? odin3_blif_vtr_legal_bytes(name, out) : st;
     if (st != ODIN3_OK) {
         truncate_to(out, start);
     }
@@ -1103,7 +1113,8 @@ odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
         report->errors = 1;
         return ODIN3_ERR_INVALID_ARG;
     }
-    /* module IDs run from 1 to odin3_design_module_end - 1; all but the top are skipped */
+    /* Module IDs run from 1 to odin3_design_module_end - 1, every one live: the IR has no way to
+     * remove a module (no odin3_module_live exists), so all but the top are skipped (§5). */
     report->modules_skipped = odin3_design_module_end(design) - 2;
     plan->top = odin3_module_get((odin3_design *)design, top);
     plan->k = odin3_blif_vtr_k(opts);

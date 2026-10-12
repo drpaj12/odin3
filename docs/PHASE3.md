@@ -365,6 +365,30 @@ then the options considered.
       registered `$add`… cells) until 2E/2F land; a spike at most (`$mem_v2`, `$sdffe` don't
       match our registry).
 
+## Decisions after approval
+
+21. **3E-1 `write_blif --vtr`: a ruling and the agent defaults** (2026-10-12; 3E spec v2.2 §23,
+    from the 3E-1 final review).
+    - **Ruling (Peter, I1): the round trip.** W1 == W2 byte for byte is required only when the
+      W1 write legalised no name (`renamed == 0`). Otherwise W1 and W2 are compared under
+      `--vtr-normalize`, whose VB-10 decode runs to a fixed point (`%255C` and `%5C` both decode
+      to `\`). The escape set stays: `\` is escaped although VPR reads it mid-name, so the 25
+      Parmys k6 goldens with a mid-name `\` are compared that way (3E §16.3 step 1).
+    - Agent defaults, for Peter's review:
+      - `--vtr` drops the plain dialect's `.cname`/`.attr`/`.param` lines (eblif only; §5).
+      - E12 counts OUT pins only; an INOUT pin is on a node E6 or E9 refuses already.
+      - A clock port that only rule 8 renames gets its own warning, naming VTR's latch clock
+        domains (`|`, `_^_`); other port renames read "not a legal name for VTR's BLIF readers".
+      - The fixtures `neg_e8_mixed` and `neg_e12_multidriver` pin the reader's and Debug
+        `check`'s lines, since those refuse first; E8 and E12 are pinned by unit tests.
+      - E11 (1C's "parameters cannot be recovered from BLIF formals") is kept under `--vtr`,
+        although `--vtr` writes every formal bit.
+      - A latch or hard-cell clock on `unconn` (class U) is a warning, not E3; 3E-4 puts one such
+        file through a full VPR run.
+      - Undeclared hard-cell formals are scalar per type and port (widest width 1), not per node
+        (§8.2 erratum), so every instance matches its stub.
+      - The top's `.model` name gets VB-10 rules 1 and 2 (not rule 3) and counts as renamed.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this

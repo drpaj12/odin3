@@ -143,8 +143,10 @@ static odin3_status wr_fail(blif_writer *wr, odin3_status st) {
     return wr->st;
 }
 
-/* Logs "path: model '<model>': <what> '<name>'" (unless quiet_refusal) and fails with
- * ODIN3_ERR_INVALID_ARG. */
+/* Logs "<path>: model '<model>': <what> '<name>'" (unless quiet_refusal) and fails with
+ * ODIN3_ERR_INVALID_ARG. <path> is wr->path: the output path when writing, but `write_blif: --vtr`
+ * (ODIN3_BLIF_VTR_WHO) on the preflight's naming run (odin3_blif_vtr_name_top), which opens no
+ * file, so a VB-10 naming refusal reads as one of the writer's §11 lines. */
 static odin3_status wr_refuse(blif_writer *wr, const char *what, const char *name) {
     if (!wr->quiet_refusal) {
         odin3_log(ODIN3_LOG_ERROR, "%s: model '%s': %s '%s'", wr->path, wr->model, what, name);
@@ -588,8 +590,11 @@ static odin3_status port_bit_token(blif_writer *wr, wr_portbit where, bool *chan
 /*
  * The warning for a port whose bit name VB-10 changed (wr->token now, wr->orig before, wr->legal
  * its rules 1-3 form): `<p>` is the port's base name and `<legal>` its written form (the token
- * without its `[i]`). VPR cannot read the name when rules 1-3 changed it; when only rule 8 did
- * (a clock port), VPR can, and the text names VTR's latch clock domains instead.
+ * without its `[i]`). When rules 1-3 changed it, the name is reserved or holds a byte VB-10
+ * escapes. Not every such name is one VPR refuses (it reads `re` off a `.latch` line and a
+ * mid-name `\`), so the text says "not a legal name for VTR's BLIF readers": VPR and VTR's ABC
+ * stage together (3E-1 final review M12). When only rule 8 changed it (a clock port), the text
+ * names VTR's latch clock domains instead.
  */
 static void port_warning(const blif_writer *wr, uint32_t port) {
     odin3_bytes base = port_base(wr, wr->module, port);
@@ -598,8 +603,9 @@ static void port_warning(const blif_writer *wr, uint32_t port) {
     int legal_len = (int)(wr->token.len - (wr->orig.len - base.len)); /* both end in one `[i]` */
     if (!same_bytes(buf_bytes(&wr->legal), buf_bytes(&wr->orig))) {
         odin3_log(ODIN3_LOG_WARN,
-                  ODIN3_BLIF_VTR_PREFIX "port '%.*s' written as '%.*s' (VPR cannot read '%.*s')",
-                  base_len, base_text, legal_len, wr->token.data, base_len, base_text);
+                  ODIN3_BLIF_VTR_PREFIX "port '%.*s' written as '%.*s' (not a legal name for VTR's "
+                                        "BLIF readers)",
+                  base_len, base_text, legal_len, wr->token.data);
         return;
     }
     odin3_log(ODIN3_LOG_WARN,
@@ -724,9 +730,27 @@ static odin3_status name_node_pins(blif_writer *wr, odin3_node_id node) {
     return ODIN3_OK;
 }
 
-/* Names the module: (VTR: its clock nets first, for VB-10 rule 8) port bit names, then every live
- * net (ID order), then the unconnected pins of .names, .latch and port cells (VTR: and the
- * unconnected outputs of hard cells). */
+/* note_renamed's key for the top's `.model` name: below every net ID, so it is the info line's
+ * first when it changed (the first line of the file that names anything). */
+enum { MODEL_KEY = 0 };
+
+/* VTR: VB-10 rules 1 and 2 on the top's `.model` name, counted as renamed when they change it
+ * (rule 3 never: a model name is no net; 3E-1 final review M3). */
+static odin3_status name_model(blif_writer *wr) {
+    odin3_bytes model = str_bytes(wr, odin3_module_name(wr->module));
+    odin3_strbuf_clear(&wr->orig);
+    odin3_strbuf_clear(&wr->legal);
+    odin3_status st = odin3_strbuf_append(&wr->orig, model);
+    st = st == ODIN3_OK ? odin3_blif_vtr_legal_bytes(model, &wr->legal) : st;
+    if (st == ODIN3_OK && !same_bytes(buf_bytes(&wr->legal), model)) {
+        st = note_renamed(wr, MODEL_KEY, buf_bytes(&wr->legal));
+    }
+    return st;
+}
+
+/* Names the module: (VTR: its `.model` name, then its clock nets, for VB-10 rule 8) port bit
+ * names, then every live net (ID order), then the unconnected pins of .names, .latch and port
+ * cells (VTR: and the unconnected outputs of hard cells). */
 static odin3_status name_module(blif_writer *wr) {
     const odin3_module *module = wr->module;
     wr->gen_names = odin3_strtab_create();
@@ -735,7 +759,8 @@ static odin3_status name_module(blif_writer *wr) {
     if (wr->gen_names == NULL || wr->claims == NULL || wr->net_port == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st = wr->vtr ? find_clocks(wr) : ODIN3_OK;
+    odin3_status st = wr->vtr ? name_model(wr) : ODIN3_OK;
+    st = st == ODIN3_OK && wr->vtr ? find_clocks(wr) : st;
     st = st == ODIN3_OK ? claim_ports(wr) : st;
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_net_end(module); i++) {
         if (odin3_net_live(module, (odin3_net_id){i})) {
@@ -1721,6 +1746,24 @@ static uint32_t written_module(const odin3_design *design, uint32_t pos) {
     return pos <= top ? pos - 1 : pos;
 }
 
+/* `.model <name>`; VTR writes the name in VB-10 rules 1 and 2 (name_model counted it). */
+static odin3_status write_model_line(blif_writer *wr) {
+    odin3_bytes model = str_bytes(wr, odin3_module_name(wr->module));
+    odin3_status st = ODIN3_OK;
+    if (wr->vtr) {
+        odin3_strbuf_clear(&wr->legal);
+        st = odin3_blif_vtr_legal_bytes(model, &wr->legal);
+        model = buf_bytes(&wr->legal);
+    }
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    wr_begin(wr, ".model");
+    wr_token(wr, model);
+    wr_end(wr);
+    return ODIN3_OK;
+}
+
 /* Writes the pos-th model (from 1); models after the first follow a blank line. */
 static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     uint32_t id = written_module(wr->design, pos);
@@ -1735,9 +1778,7 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     if (pos > 1) {
         wr_newline(wr);
     }
-    wr_begin(wr, ".model");
-    wr_token(wr, str_bytes(wr, odin3_module_name(wr->module)));
-    wr_end(wr);
+    st = st == ODIN3_OK ? write_model_line(wr) : st;
     st = st == ODIN3_OK ? write_module_ports(wr) : st;
     if (st == ODIN3_OK && !wr->vtr) {
         write_clock(wr); /* VPR has no .clock (spec 3E R3) */

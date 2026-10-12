@@ -132,6 +132,11 @@ odin3_blif_src_class odin3_blif_vtr_plan_class(const odin3_blif_vtr_plan *plan, 
  * ODIN3_ERR_NO_MEMORY leaves out as it was. */
 odin3_status odin3_blif_vtr_legal_name(odin3_bytes name, odin3_strbuf *out);
 
+/* VB-10 rules 1 and 2 alone (odin3_blif_vtr_legal_name without rule 3's `%` prefix): the form of
+ * the top's `.model` name, which is never a net, so no reserved word applies to it (3E-1 final
+ * review M3). ODIN3_ERR_NO_MEMORY leaves out as it was. */
+odin3_status odin3_blif_vtr_legal_bytes(odin3_bytes name, odin3_strbuf *out);
+
 /* VB-10 rule 3's reserved names: the whole name is one of `re fe ah al as NIL 0 1 2 3` (the
  * `.latch` tokens, R2) or `gnd vcc unconn` (the generators, VB-9), or it starts with `out:` (VPR's
  * outpad blocks, R12). Case-sensitive. */

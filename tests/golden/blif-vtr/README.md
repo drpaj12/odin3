@@ -16,6 +16,13 @@ It then compares the result with one expected file:
 - `<name>.err`: a refusal. The refusal must leave no file, and its `odin3: error:` lines must
   match this file. The pass manager's trailers (`pass <p>: …`, `-p: command …`) are left out.
 
+A written case then runs the round trip of spec §16.3 step 1 (as the 3E-1 final review's erratum
+amends it): `W2 = write_blif --vtr (read_blif W1)`. When the W1 write legalised no name (no
+`names legalised` info line), W1 == W2 byte for byte. Otherwise W1 and W2 are compared under the
+VB-10 decode (continuations joined, comment lines dropped, every name decoded to a fixed point),
+and the byte comparison is not applied: VB-10 escapes the `%` of its own escapes again (`\` ->
+`%5C` -> `%255C`). The driver prints a `note` line for such a case (`shiftx.parmys`).
+
 Last, `blif-vtr-check --strict` runs on every expected `.vtr.blif`. This step needs `--checker`,
 which 3E-2 adds. `--write` writes the expected file of a case that has none; it never overwrites
 one. Every expected file in this directory must belong to a case. The inputs run smallest first.
@@ -39,6 +46,7 @@ without `.blif`.
 
 | case | expected | why |
 |---|---|---|
+| `shiftx.parmys` | `.vtr.blif` | A copy of the Parmys k6 golden `regression/verilog/common/shiftx/shiftx.parmys.blif` (it cannot join `sample.txt`: `tests/golden/blif/` is not 3E's). One of the 25 Parmys k6 goldens with a mid-name `\` (`$2\buffer[7:0][k]`), which VB-10 rule 1 writes `%5C`: 8 names legalised. The expected file is the golden in that sense, with `unconn` kept on the `.names` inputs (the §9.2 warning). Its round trip is compared under the VB-10 decode, not byte for byte; `tests/tools/test_vtr_fixtures.py` pins both (spec §16.3 step 1, erratum). |
 | `two_clock` | `.vtr.blif` | Two `.latch` lines on different clocks. Unchanged (Parmys's form; `stereovision3` has two clocks). |
 | `ram_slice_unconn_addr` | `.vtr.blif` | Review Focus 2. This is a declared `single_port_ram` slice that uses 5 of the 15 address bits. `addr[5]` … `addr[13]` are on Parmys's `unconn` (class U) and `addr[14]` is on a net nothing drives (x). All of them are written `=unconn`, an open pin in VPR. The input's formals are unsorted; the output sorts them (§8.2). |
 | `ram_one_bit_slice_scalar` | `.vtr.blif` | An undeclared 1-bit RAM slice read from `data[0]=`/`out[0]=`. It is written with scalar `data=`, `out=` and `we=`, in both the formals and the library stub (§8.2, §8.3; spec risk "scalar against indexed formals"). |
@@ -58,6 +66,11 @@ without `.blif`.
 | `neg_e8_mixed` | `.err` | A cover that mixes on-set and off-set rows. **The BLIF reader refuses it first**, so the line is the reader's. E8 itself needs hand IR and is pinned by `test_blif_vtr` (`test_e8_mixed_cover`). |
 | `neg_e10_hier` | `.err` | E10: the top instantiates another model. |
 | `neg_e12_multidriver` | `.err`, `.debug.err` | E12: two `.names` drive `y`. A Debug build checks the IR after every pass (CLAUDE.md rule 3), so `check` refuses the input at `read_blif` before the writer sees it. The driver therefore also accepts `<name>.debug.err`, which holds that `check` line. CI's CTest runs the Debug build; the Release CLI gives the E12 line. |
+
+Four E-classes have no fixture, and `test_blif_vtr` pins each: E4 (no BLIF form: a tri-state
+cell), E9 (an inout port: BLIF has none), E11 (a hard cell whose parameters its formals do not
+give back: `read_blif` infers them from the formals, so only hand IR makes one) and E13 (no top:
+`read_blif` always sets one, and the driver runs no `.o3` scripts on hand IR).
 
 `<name>.debug.err` is written by hand; `--write` never writes it. It exists only for this case.
 When it is the file that matches, the driver prints a `note` line saying so. In the Debug CTest,

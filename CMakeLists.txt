@@ -723,6 +723,8 @@ if(BUILD_TESTING)
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
     list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
+    # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
+    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
     # The project-input corpus (tests/golden/projects) parses to its expected records in every
     # format. The oracle half (`project-fixtures oracle`) needs Yosys and GHDL and runs locally.

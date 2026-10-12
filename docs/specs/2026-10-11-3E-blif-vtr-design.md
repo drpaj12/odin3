@@ -1,6 +1,7 @@
 # 3E — `write_blif --vtr`: design
 
-Status: v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (§14.1 item 6 marked a
+Status: v2.2 (2026-10-12): v2.1 plus the errata of the 3E-1 final review (§23; Peter's ruling on
+the round trip, §16.3 step 1). v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (§14.1 item 6 marked a
 3H request; constant LUT objects return as `$_CONST0_`/`$_CONST1_`, §4.2; constants are not traced
 through buffers, §9.1). v2: v2 applies review 1 (`3EH-review1`: 5 important, 12 minor; dispositions
 in §22) and the controller's rulings: constants as zero-input generators plus checker rule C5b
@@ -49,7 +50,8 @@ non-black-box model; reading the arch XML in C (decision 5: Phase 3 needs no C X
 Success: every `status=ok` k6_frac golden (467 Parmys + 456 Odin II) either becomes a `--vtr`
 file that VPR reads (`vpr --exit_before_pack on`, §16.4) or is refused with a VB-11 error whose
 class VPR also rejects in the original; every Parmys k6_frac golden that is written is
-`netlist-compare`-identical to its source; `--vtr` is idempotent through `read_blif`; the checker
+`netlist-compare`-identical to its source; `--vtr` is idempotent through `read_blif` (byte for
+byte when no name is legalised, else under `--vtr-normalize`; §16.3 step 1); the checker
 agrees with VPR on the whole corpus; the 19 route through `-start abc` (the R leg of 3H); the
 gate passes.
 
@@ -126,6 +128,11 @@ Survey of the 21 `vtr/` Parmys goldens on k6_frac (the 19 plus `arm_core` and `s
    in Parmys files; one non-black-box model everywhere.
 9. **Names**: `$auto$rtlil.cc:3203:MuxGate$1084`, `memory_controller_address~26`,
    `single_port_ram^MEM~0-7^out~0`: all VPR-legal; port bits are Yosys's `name~index` scalars.
+   **Erratum (3E-1 final review I1):** 25 of the 467 also hold a mid-name `\`
+   (`$techmap$auto$hard_block.cc:122:cell_hard_block$54.$2\buffer[7:0][0]`, from shift
+   lowering; `shiftx` and the `*_variable_*_wide` operators). VPR reads it (R1), but VB-10 rule
+   1 escapes it (§10), so these files are renamed and their round trip is compared under
+   `--vtr-normalize` (§16.3 step 1).
 
 Odin II goldens (456 on k6): latch init `3` (211 files), `0`/`1` (2 each), `fe` in 6 files;
 92 files have a `.names` wider than 6 (VPR rejects them, R4); `\` continuations without a space
@@ -188,7 +195,10 @@ typedef struct odin3_blif_vtr_report {
 
 /* Checks that the design's top can be written in the VTR dialect with opts (lut_k resolved).
  * Logs each refusal (VB-11, at most ODIN3_BLIF_VTR_MAX_ERRORS, then one count line) and fills
- * report. Returns ODIN3_OK when report->errors == 0, ODIN3_ERR_INVALID_ARG when it is not or an
+ * report. When nothing is refused it also logs the clean run's lines, in this order: §5's
+ * modules-skipped info line, the constant and `unconn` clock warnings (§7 item 3, §8.2), the
+ * `unconn`-on-logic warning (§9.2), the renaming warnings and info line (§10 items 5 and 9) and
+ * the summary line (§11); the write logs none of them again (3E-1 final review M6). Returns ODIN3_OK when report->errors == 0, ODIN3_ERR_INVALID_ARG when it is not or an
  * argument is NULL, ODIN3_ERR_NO_MEMORY. Reads only; O(nodes + pins). */
 odin3_status odin3_blif_vtr_preflight(const odin3_design *design,
                                       const odin3_blif_write_opts *opts,
@@ -254,7 +264,7 @@ In this order, byte-deterministic (§13):
      resolved to an absolute path (§13: no working-directory path in the file); none before 3D
      lands.
    - a blank line.
-2. `.model <top>`.
+2. `.model <top>`, the name in VB-10 rules 1 and 2 (§10 item 10).
 3. `.inputs` and `.outputs` exactly as the plain writer (port order; one line per run of one
    direction; ` \` wrapping at 100 columns), with VB-10 names. **No `.clock`** (R3).
 4. **Constant generators** (§9): `.names gnd`, then `.names vcc` + `1`, then `.names unconn`, each
@@ -264,6 +274,11 @@ In this order, byte-deterministic (§13):
 7. `.end`.
 8. **Stubs** (§8.3): for each hard cell type used by a live node of the top, sorted by name in
    byte order, a blank line, `.model <m>`, `.inputs …`, `.outputs …`, `.blackbox`, `.end`.
+
+**No eblif directives**: `.cname`, `.attr`, `.param` and `.conn` are never written (VPR reads
+them only with `--circuit_format eblif`, §1). The `.cname`/`.attr`/`.param` lines the plain
+dialect writes for a cell are dropped under `--vtr` (agent default, PHASE3 #21; 3E-1 final review
+M5).
 
 Modules other than the top are not written (R13); when there are any, the info line
 `write_blif: --vtr: N modules besides the top '<top>' not written` is logged. An instance of one
@@ -318,6 +333,10 @@ gate and `$lut` with at least one input is evaluated on its truth table (k ≤ 1
 Unit tests cover a 1-input `$sop` with 0, 1, 2 and 3 rows, a constant 2-input `$sop` (`-- 1`, no
 rows), a constant `$lut` of each width class, and a 1-input `$lut`.
 
+E7 counts a cell's **stored** inputs and runs before this normalisation (plan 3E point (g)), so a
+cell with more than K inputs whose function is constant is refused rather than written as a
+generator. `abc` never produces one, so this is noted, not changed (3E-1 final review M10).
+
 ## 7. Latches (VB-7)
 
 1. **Form**: `.latch <D> <Q> re <C> <init>`; all five fields always (VPR's warning for an untyped
@@ -328,7 +347,12 @@ rows), a constant `$lut` of each width class, and a 1-input `$lut`.
 3. **Clock**: the `C` pin's net. Unconnected or undriven C is E3 (VPR "Latch must have a clock").
    A constant C (`$_CONST*_` or a constant `$sop`) is written (VPR accepts it) with the warning
    `write_blif: --vtr: <loc>: $_DFF_P_ '<cell>': clock is the constant <0|1|x>; VPR will never
-   clock it`.
+   clock it`. A C on `unconn` (class U, §9.1) is written `re unconn` with the warning `<loc>:
+   <type> '<cell>': clock is 'unconn'; VPR will never clock it` (plan point (j); agent default,
+   not E3). VPR's `latch()` accepts it and `process_circuit` then removes the `unconn` net (R14),
+   leaving a latch with no clock net, which `--exit_before_pack` never looks at again. **3E-4
+   (Task 11) puts one such file through a full VPR run** (pack, place, route) before 3H relies on
+   it (3E-1 final review M8).
 4. **D**: an x, unconnected or undriven D is written as `gnd` (counted in `x_to_gnd`), the value
    ABC assigns it (decision 12: "DC treated as 0").
 5. **Q**: an unconnected Q gets its own net (`$p<pin ID>`-style generated name, VB-10), since a
@@ -386,8 +410,9 @@ One stub per hard type used by a live node of the top, sorted by type name:
   against the arch, so an unused stub for a model the arch lacks would be fatal);
 - an **undeclared** library cell gets a stub with its library port order, each port at the
   largest width any live instance uses (per port, the maximum over nodes of the node's width),
-  scalar when that maximum is 1 and the library width expression is the literal `1` or the
-  instance formals are scalar (8.2), else `p[0] … p[w−1]`.
+  scalar exactly when that maximum is 1, else `p[0] … p[w−1]`: the same per-type choice every
+  instance's formals make (the §8.2 erratum; a port whose width expression is the literal `1`
+  always has maximum 1).
 
 VPR checks the stub's ports against the arch (R13), never against the instances; 1C's reader
 checks the instances against the stub (IR-7b), which the maximum-width rule satisfies.
@@ -464,7 +489,11 @@ unaffected; Odin III-built fixtures that expected `.subckt $_CONST0_` are update
 1. **Legal bytes**: `0x21`–`0x7E` except `=` `"` `#` `\` `%` (R1; `%` is the escape). Any other
    byte (blank, control, non-ASCII, the five) is written `%XX` (two upper-case hex digits). `#`
    is escaped although VPR would read it mid-name (R1), because VTR's ABC stage and our own
-   `abc --via-blif` exchange strip `#` to the end of the line.
+   `abc --via-blif` exchange strip `#` to the end of the line. `\` is escaped everywhere too,
+   although VPR reads it mid-name (R1; only a `\` before the end of the line is a continuation);
+   the escape set stays as it is (Peter, 2026-10-12, 3E-1 final review I1). The cost: rule 1
+   escapes the `%` of its own escapes on a second write (`\` → `%5C` → `%255C`), so a renamed
+   design is not byte-idempotent through `read_blif` (§16.3 step 1).
 2. **Leading `.`** is written `%2E` (a name equal to a directive would lex as one).
 3. **Reserved whole names**: `re fe ah al as NIL 0 1 2 3` (R2), `gnd vcc unconn` (VB-9, unless
    the net is that generator), and any name starting `out:` (R12: outpad blocks are
@@ -482,7 +511,10 @@ unaffected; Odin III-built fixtures that expected `.subckt $_CONST0_` are update
    `-Wno-WIDTHEXPAND`). None of the 19 has such a top port (or1200's `[31:2]` ports are on
    submodules; its top is `or1200_flat`). A BLIF-read design's wires are `[w−1:0]`, so goldens
    are unaffected. A port's own legalised name is reported once per
-   port: `write_blif: --vtr: port '<p>' written as '<legal>' (VPR cannot read '<p>')`.
+   port: `write_blif: --vtr: port '<p>' written as '<legal>' (not a legal name for VTR's BLIF
+   readers)` (3E-1 final review M12: VPR itself reads `re` off a `.latch` line and a mid-name
+   `\`, and `gnd`/`vcc`/`unconn`/`out:` are our conventions, so the text names VPR and VTR's ABC
+   stage together; a port that only rule 8 renames gets the clock-domain text of item 8).
 6. **Short** (default): the net's own name, else its primary wire bit, else `$n<net ID>` (1C).
 7. **Provenance** (`--name-style provenance`, 3E-6): `hier/<short name>@file:line` from the
    net's provenance record, as the 1F Verilog writer builds it, then rules 1–4 (blanks in paths
@@ -499,7 +531,12 @@ unaffected; Odin III-built fixtures that expected `.subckt $_CONST0_` are update
    contain neither `|` nor `_^_`. On a net used as a latch or hard-block clock, `|` is written
    `%7C` and the `^` of `_^_` as `%5E` (`_%5E_`); checker rule C-S5 enforces it.
 9. **Renaming info**: one line, `write_blif: --vtr: N names legalised (first: '<orig>' ->
-   '<legal>')`, when N > 0.
+   '<legal>')`, when N > 0. N is the report's `renamed`: the `.model` name (item 10), port bit
+   names and net names that VB-10 changed; the `.model` name, when it changed, is the `first`.
+10. **The top's `.model` name** gets rules 1 and 2, never rule 3 (a model name is no net, so no
+   reserved word applies; `.model NIL` stays). VPR tokenises it with the same lexer and uses it
+   for its output file names. The 1C reader reads the escaped name back unchanged (3E-1 final
+   review M3).
 
 ## 11. Preflight and errors (VB-11)
 
@@ -699,16 +736,36 @@ CTest driver `blif_vtr_fixtures` with `odin3 -p "read_techlib lib/vtr.o3lib; rea
 and the writer agree). Fixtures: the committed `tests/golden/blif/*.parmys.blif` sample (adder
 chain, `ff`, `dffsre`, `pow`), a two-clock design, a RAM slice with `unconn` addresses, a
 `multiply` with narrow inputs, an Odin II file with init 3 and `\` continuations, a constant
-output, an x output, and one negative fixture per E-class with its expected log
-(`<name>.err`). `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline texts.
+output, an x output, a Parmys k6 golden with a mid-name `\` (`shiftx.parmys`, copied in as
+`shiftx.parmys.in.blif` since `tests/golden/blif/` is not 3E's; §16.3 step 1's renamed case), and
+one negative fixture per E-class with its expected log (`<name>.err`). E4 and E9 have no BLIF
+form, and E11 and E13 need hand IR or an `.o3` script the driver does not run, so those four are
+pinned by §16.1 only (3E-1 final review M7). The driver then runs §16.3 step 1 on every written
+case. `tests/tools/test_blif_vtr_check.py` covers C1–C9 and C-S1–4 on inline texts.
 
 ### 16.3 Round trip with our BLIF reader (local; CI on fixtures)
 
 `tools/blif-roundtrip --vtr` (a new mode of the 1C script) on a golden tree, smallest first:
 
-1. `W1 = write_blif --vtr (read_blif G)`; `W2 = write_blif --vtr (read_blif W1)`. **Oracle:
-   W1 == W2 byte for byte** (idempotence; the header line is identical because nothing in it
-   depends on the run).
+1. `W1 = write_blif --vtr (read_blif G)`; `W2 = write_blif --vtr (read_blif W1)`.
+   **Erratum (3E-1 final review I1; Peter's ruling, 2026-10-12).** Rule 1 of §10 escapes `%`,
+   so a name the write of W1 legalised comes back one level deeper in W2 (`$2\buffer` →
+   `$2%5Cbuffer` → `$2%255Cbuffer`; `NIL` → `%NIL` → `%25NIL`), and the reader does not decode.
+   The oracle is therefore split on the report's `renamed` count of the W1 write (the `names
+   legalised` info line, §10 item 9):
+   - `renamed == 0`: **W1 == W2 byte for byte** (idempotence; the header line is identical
+     because nothing in it depends on the run);
+   - `renamed > 0` (the 25 Parmys k6 goldens with a mid-name `\`, §3 item 9, and any Odin III
+     design with a reserved or illegal name): **W1 and W2 identical under `--vtr-normalize`**,
+     whose VB-10 decode runs to a fixed point (one decoding step inverts one write exactly,
+     point (o); repeating it until nothing changes decodes `%255C` and `%5C` alike, to `\`);
+     the byte comparison is not applied. Such files are listed `decoded`.
+
+   The escape set stays as it is (§10 item 1). CI runs this step on every written fixture
+   (`blif_vtr_fixtures`; the decode is `vtr_normalized` in `tools/blif-vtr-check/vtr_fixtures.py`
+   until 3E-4's `--vtr-normalize` lands, and must agree with it), and `test_vtr_fixtures` pins
+   it on `shiftx.parmys` (renamed 8: byte comparison not applied, decoded comparison passes) and
+   `two_clock` (renamed 0: bytes).
 2. **Parmys k6 goldens**: `netlist-compare G W1` identical (exit 0) for every written file. The
    survey (§3) predicts all 463 non-refused files; the 4 `fe` files must be refused with E1. A file
    that holds a constant cover with inputs or a 1-input cover without exactly one row (§6
@@ -717,7 +774,8 @@ output, an x output, and one negative fixture per E-class with its expected log
 3. **Odin II k6 goldens**: `netlist-compare --vtr-normalize G W1` identical. `--vtr-normalize`
    (new flag, 3E-4) applies the writer's documented rewrites to both sides before
    canonicalising: latch init 3 → 2; an omitted `.subckt` input formal bit ≡ `=unconn`; `.clock`
-   lines dropped; VB-10 names decoded; §6's constant and 1-input normalisation. The 6 `fe` files → E1, the 92 files with `.names` wider than
+   lines dropped; VB-10 names decoded to a fixed point (step 1); §6's constant and 1-input
+   normalisation. The 6 `fe` files → E1, the 92 files with `.names` wider than
    6 → E7, the 2 multi-driver files → E12; each refused file's original is also rejected by VPR
    (§16.4).
 4. `equiv-check G W1` on every Odin II golden written in step 3 that has no RAM (PHASE0 #8) and
@@ -838,7 +896,7 @@ critique (PHASE0 §A.1).
 | 3E-2 checker | `blif-vtr-check` C1–C9 with C5b, C-S1–5; `vtr-models extract/check/check-lib`; the two committed JSON files; `tests/vtr/blif-bad/` (one file per rule, C5b included); unittest; CI wiring (the checker over 16.2's expected files) | none (parallel with 3E-1) | Opus `high`; Sonnet `high` for the negative-fixture corpus |
 | 3E-3 plain constants | §9.4 alone: the plain dialect's `$_CONST*_` → `gnd`/`vcc`/`unconn` (PHASE3 #20; 2F confirms it is not 2F's change), the 1C/1F fixture updates; 2H depends on it | 3E-1 (shares the generator code) | Opus `high` |
 | 3E-4 evidence | `blif-roundtrip --vtr`, `netlist-compare --vtr-normalize`, `vtr-read-check` (on 3H's `qor_heavy`); the full k6 sweeps of §16.3–16.4 run by the controller under the heavy lock, smallest first; report and PHASE3 checklist entry | 3E-1, 3E-2, 3H-1 (`qor_heavy`) | Opus `high` for the scripts; Sonnet `high` to run the sweeps (in the background, watched with Monitor) and write the report |
-| 3E-5 `$lut` | `odin3_blif_isop` and the `$lut` row of §6, to §4.2's requirement only; lands **right after 3D's `$lut` registry PR and before 3D's `abc` pass PR**, so P′/M1 never waits on it | 3D's `$lut` registry PR | Opus `high` |
+| 3E-5 `$lut` | `odin3_blif_isop` and the `$lut` row of §6, to §4.2's requirement only; reads `$lut`'s mask directly as the truth table and caches each node's `odin3_blif_vtr_fn` in the plan (3E-1 rebuilds a table by scanning 2^k minterms per row, up to four times per cell: harmless at K = 6, 2^31 steps at K = 16; final review M9), and resolves cell kinds by type ID once instead of `strcmp` per node (M11); lands **right after 3D's `$lut` registry PR and before 3D's `abc` pass PR**, so P′/M1 never waits on it | 3D's `$lut` registry PR | Opus `high` |
 | 3E-6 provenance names | `--name-style provenance` (§10 item 7) | 1F's provenance naming, 3D's first-location rule; needed only for Oprov at M3 | Opus `high` |
 
 Lanes: 3E-1 ‖ 3E-2 → 3E-3 and 3E-4; 3E-5 directly after 3D's `$lut` registry PR; 3E-6 any time
@@ -907,3 +965,19 @@ switch: Opus `high` for 3E-1/2/3/5/6 sessions, Sonnet `high` for the 3E-4 sweep 
 | E17 | 3E-1 size; plain-mode constants | applied: 3E-3 is its own PR; 2F checked (not 2F's change) |
 
 No minor finding was rejected.
+
+## 23. Errata after the 3E-1 final review (v2.2, 2026-10-12)
+
+| # | Finding | Disposition |
+|---|---|---|
+| I1 | `--vtr` not byte-idempotent for a renamed name (§10 rule 1 against §16.3 step 1) | applied (Peter's ruling): §16.3 step 1 split on `renamed`; `--vtr-normalize` decodes to a fixed point; escape set kept (§10 item 1); §1 and §3 item 9 amended; `shiftx.parmys` fixture and `test_vtr_fixtures` |
+| M3 | the top's `.model` name written raw | applied: rules 1 and 2 (§10 item 10, §5 item 2), counted in `renamed` |
+| M5 | `--vtr` drops `.cname`/`.attr`/`.param` unstated | applied: §5; the Task 3–5 agent defaults logged in PHASE3 #21 |
+| M6 | §8.3 and §4.1 stale | applied |
+| M7 | E4, E9, E11, E13 without a fixture | applied: stated in §16.2 and the fixture README |
+| M8 | a class-U clock leaves a latch with no clock net in VPR | applied: §7 item 3, a full VPR run in 3E-4 Task 11 |
+| M9, M11 | truth tables rebuilt per use; kinds by `strcmp` | applied as 3E-5 requirements (§18) |
+| M10 | E7 before the constant normalisation | noted in §6 |
+| M12 | port warning overstated VPR | applied: §10 item 5's new text |
+| M2, M13 | `PASSES.md` row; `wr_refuse`'s comment | applied (no spec text) |
+| M4 | `modules_skipped` = `module_end − 2` counts dead modules | kept: the IR cannot remove a module (every ID below `module_end` is live), so the count is exact; the code comment now says so |
