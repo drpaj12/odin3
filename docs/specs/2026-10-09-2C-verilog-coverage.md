@@ -188,7 +188,7 @@ targets.
 
 | # | Construct | 1364-2005 | 1364.1 | Books | Odin II | micro/vtr/koios | Yosys | Verdict |
 |---|---|---|---|---|---|---|---|---|
-| E1 | Bitwise `~ & \| ^ ~^ ^~` | §5.1.8 | S | C p.42 | OK= | most | Y | MUST |
+| E1 | Bitwise `~ & \| ^ ~^ ^~`; binary `~& ~\|` (not in A.8.6; added at 2C Task 10, read as `~(a & b)`, `~(a \| b)`) | §5.1.8 | S | C p.42 | OK= | most; binary `~& ~\|` 6 micros (`operators/binary_nand`, `binary_nor`, …) | Y | MUST |
 | E2 | Reduction `& ~& \| ~\| ^ ~^` | §5.1.9 | S | C p.42–43 | `& \| ~& ~\|` OK=. **`^`/`~^` on a 4-bit or wider operand crashes** (assert in `blif_writer.cpp:597/611`) | ~14/4/10 (`~` forms) | Y | MUST |
 | E3 | Logical `! && \|\|` | §5.1.7 | S | C p.43 | OK= | — | Y | MUST |
 | E4 | `+ - *`, unary `-`, unary `+` | §5.1.3 | S | C p.41; B p.22–24 | OK; **unary `+` SIGSEGV** (*pr2_unary_plus_only*) | — | Y | MUST |

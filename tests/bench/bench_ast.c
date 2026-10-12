@@ -4,15 +4,16 @@
  * check FULL with and without locations, destroy). Run it from a Release build; smallest first.
  * Usage: bench_ast [path-to-mcml.v]   (default $VTR_ROOT/vtr_flow/benchmarks/verilog/mcml.v)
  *
- * bench_ast --parse <file>... (2C spec §7.6, plan Task 10): each file, smallest first, in a child
- * process of its own (so the peak RSS is the file's): the 2B preprocessor and the 2C parser on a
- * fresh design, timed separately, then check FULL; then `read_verilog --parse-only`'s reader
- * (odin3_read_verilog_files, steps 1-7) on another fresh design, timed end to end. One line per
- * file (bytes, nodes, comments, odin3_ast_bytes_reserved, odin3_srcman_bytes_reserved, strtab
- * growth, the times, peak RSS), then the targets: mcml.v AST + srcman <= 20 MB and parse-only
- * <= 1 s, and the files given in <= 5 s in total (read_verilog end to end; the target is
- * for the .v files of $VTR_ROOT/vtr_flow/benchmarks/verilog; koios times are reported only,
- * point (n)).
+ * bench_ast --parse [--set-target] <file>... (2C spec §7.6, plan Task 10): each file, smallest
+ * first, in a child process of its own (so the peak RSS is the file's): the 2B preprocessor and
+ * the 2C parser on a fresh design, timed separately, then check FULL; then `read_verilog
+ * --parse-only`'s reader (odin3_read_verilog_files, steps 1-7) on another fresh design, timed
+ * end to end. One line per file (bytes, nodes, comments, odin3_ast_bytes_reserved,
+ * odin3_srcman_bytes_reserved, strtab growth, the times, peak RSS), then the targets: mcml.v
+ * AST + srcman <= 20 MB and parse-only <= 1 s when mcml.v is given, and with --set-target the
+ * files given in <= 5 s in total (read_verilog end to end; the target is for the .v files of
+ * $VTR_ROOT/vtr_flow/benchmarks/verilog, koios times are reported only, point (n)). Exit 1 when
+ * a file fails or an applied target is missed.
  */
 #include "ast/ast.h"
 #include "ast/ast_internal.h"
@@ -725,17 +726,35 @@ static void parse_line(const parse_file *file, const parse_result *res) {
 }
 
 /* mcml.v's two targets. */
-static void parse_mcml_targets(const parse_result *res) {
+/* mcml.v's two targets; 1 when one is missed. */
+static int parse_mcml_targets(const parse_result *res) {
     double memory = (double)(res->ast_bytes + res->sm_bytes);
+    bool memory_ok = memory <= MEMORY_TARGET;
+    bool time_ok = res->read_secs <= PARSE_ONLY_TARGET;
     printf("mcml.v AST + srcman               : %9.0f B  (target <= 20,000,000 B: %s)\n", memory,
-           verdict(memory <= MEMORY_TARGET));
+           verdict(memory_ok));
     printf("mcml.v parse-only (read_verilog)  : %9.3f s  (pp %.3f s + parse %.3f s; target <= "
            "1.000 s: %s)\n",
-           res->read_secs, res->pp_secs, res->parse_secs,
-           verdict(res->read_secs <= PARSE_ONLY_TARGET));
+           res->read_secs, res->pp_secs, res->parse_secs, verdict(time_ok));
+    return memory_ok && time_ok ? 0 : 1;
 }
 
-static int bench_parse(int nfiles, char **paths) {
+/* The total line: the set target only when the caller asked for it (--set-target). */
+static int parse_total(int nfiles, double total, double staged, bool set_target) {
+    if (!set_target) {
+        printf("%d files given, read_verilog total: %9.3f s  (pp + parse %.3f s)\n", nfiles, total,
+               staged);
+        return 0;
+    }
+    printf("%d files given, read_verilog total: %9.3f s  (pp + parse %.3f s; set target <= "
+           "5.000 s: %s)\n",
+           nfiles, total, staged, verdict(total <= SET_TARGET));
+    return total <= SET_TARGET ? 0 : 1;
+}
+
+/* Exit 0 every file read and every target applied met; 1 a file failed or a target was missed
+ * (each miss also prints MISSED); 2 usage. */
+static int bench_parse(int nfiles, char **paths, bool set_target) {
     static parse_file files[PARSE_MAX_FILES];
     if (nfiles <= 0 || nfiles > PARSE_MAX_FILES) {
         fprintf(stderr, "bench_ast --parse: 1 to %d files\n", PARSE_MAX_FILES);
@@ -760,13 +779,10 @@ static int bench_parse(int nfiles, char **paths) {
         total += res.read_secs;
         staged += res.pp_secs + res.parse_secs;
         if (strcmp(base_name(files[i].path), "mcml.v") == 0) {
-            parse_mcml_targets(&res);
+            rc |= parse_mcml_targets(&res);
         }
     }
-    printf("%d files, read_verilog total     : %9.3f s  (pp + parse %.3f s; target for "
-           "verilog/*.v <= 5.000 s: %s)\n",
-           nfiles, total, staged, verdict(rc == 0 && total <= SET_TARGET));
-    return rc;
+    return rc | parse_total(nfiles, total, staged, set_target);
 }
 
 static int quiet_run(void) {
@@ -777,7 +793,9 @@ static int quiet_run(void) {
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "--parse") == 0) {
         (void)quiet_run();
-        return bench_parse(argc - 2, argv + 2);
+        bool set_target = argc > 2 && strcmp(argv[2], "--set-target") == 0;
+        int skip = set_target ? 3 : 2;
+        return bench_parse(argc - skip, argv + skip, set_target);
     }
     char path[1024];
     if (argc > 1) {

@@ -502,23 +502,11 @@ static bool pc_special_lead(const pc_oracle *orc, odin3_ast_id node, odin3_bytes
     }
 }
 
-/* The parser's reading of a binary `~&` / `~|` (2C Task 10): UNARY[~] at the same loc as its
- * operand, a BINARY[&] or BINARY[|]; its first token is the BINARY's. */
-static bool pc_binary_not(const odin3_ast *ast, odin3_ast_id node) {
-    if (odin3_ast_kind_of(ast, node) != ODIN3_AST_UNARY ||
-        odin3_ast_sub(ast, node) != ODIN3_AST_UNARY_NOT || odin3_ast_nchild(ast, node) != 1) {
-        return false;
-    }
-    odin3_ast_id operand = odin3_ast_child(ast, node, 0);
-    uint32_t sub = operand.v != 0 ? odin3_ast_sub(ast, operand) : 0;
-    return operand.v != 0 && odin3_ast_kind_of(ast, operand) == ODIN3_AST_BINARY &&
-           (sub == ODIN3_AST_BINARY_AND || sub == ODIN3_AST_BINARY_OR) &&
-           odin3_ast_loc(ast, operand).v == odin3_ast_loc(ast, node).v;
-}
+static bool pc_binary_not(const pc_oracle *orc, odin3_ast_id node);
 
 static bool pc_sub_spelled(const pc_oracle *orc, odin3_ast_id node, odin3_bytes tok) {
     const odin3_ast *ast = orc->read->ast;
-    if (pc_binary_not(ast, node)) {
+    if (pc_binary_not(orc, node)) {
         return true; /* checked as its operand */
     }
     if (odin3_ast_kind_of(ast, node) == ODIN3_AST_EVENT_EXPR &&
@@ -594,6 +582,35 @@ static pc_span pc_span_of(const pc_oracle *orc, odin3_ast_id node) {
     span.from = 2ULL * span.first;
     span.to = 2ULL * span.last + 1;
     return span;
+}
+
+/* The parser's reading of a binary `~&` / `~|` (2C Task 10): UNARY[~] at the same loc as its
+ * operand, a BINARY[&] or BINARY[|], whose operator token (the first after its left operand and
+ * any closing parentheses) is `~&` or `~|`; its first token is the BINARY's. A written
+ * `~(a & b)` has `&` there, so its UNARY moved onto its operand still fails. */
+static bool pc_binary_not(const pc_oracle *orc, odin3_ast_id node) {
+    const odin3_ast *ast = orc->read->ast;
+    if (odin3_ast_kind_of(ast, node) != ODIN3_AST_UNARY ||
+        odin3_ast_sub(ast, node) != ODIN3_AST_UNARY_NOT || odin3_ast_nchild(ast, node) != 1) {
+        return false;
+    }
+    odin3_ast_id operand = odin3_ast_child(ast, node, 0);
+    uint32_t sub = operand.v != 0 ? odin3_ast_sub(ast, operand) : 0;
+    if (operand.v == 0 || odin3_ast_kind_of(ast, operand) != ODIN3_AST_BINARY ||
+        (sub != ODIN3_AST_BINARY_AND && sub != ODIN3_AST_BINARY_OR) ||
+        odin3_ast_loc(ast, operand).v != odin3_ast_loc(ast, node).v) {
+        return false;
+    }
+    pc_span left = pc_span_of(orc, odin3_ast_child(ast, operand, 0));
+    if (!left.known || left.empty) {
+        return false;
+    }
+    uint32_t i = left.last + 1;
+    while (i < orc->ntok && pc_text_is(pc_tok_text(orc, i), ")")) {
+        i++;
+    }
+    return i < orc->ntok &&
+           pc_text_is(pc_tok_text(orc, i), sub == ODIN3_AST_BINARY_AND ? "~&" : "~|");
 }
 
 static odin3_ast_kind pc_parent_kind(const pc_oracle *orc, odin3_ast_id node) {

@@ -916,8 +916,11 @@ if(BUILD_TESTING)
     # benchmark together when VTR_ROOT is set at configure time (koios/lenet.v last, point (n));
     # every committed BLIF through odin3-write --verilog (Review Focus 1). They are heavy sweeps
     # (label `sweep`, outside the -j4 gate): parse-corpus --heavy skips them with 77 unless
-    # ODIN3_HEAVY_OK=1, so run them as `ODIN3_HEAVY_OK=1 ctest --preset release -L sweep` inside
-    # the heavy slice. Switch them to odin3_add_sweep_test() (2E plan C1) when 2E-1 lands it.
+    # ODIN3_HEAVY_OK=1, and then re-runs itself under the heavy-run protocol (flock on
+    # /tmp/claude-1000/odin3-heavy.lock, systemd-run --scope in odin3-heavy.slice, MemoryMax=6G,
+    # no swap), or under ODIN3_HEAVY_RUN when it is set (tools/heavy-run once 2E-1 lands it).
+    # Run them as `ODIN3_HEAVY_OK=1 ctest --preset release -L sweep`. Switch them to
+    # odin3_add_sweep_test() (2E plan C1) when 2E-1 lands it.
     set(_parse_corpus ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/parse_corpus.py
                       --heavy --check $<TARGET_FILE:odin3-parse-check>)
     add_test(NAME verilog_micro_parse
@@ -930,10 +933,14 @@ if(BUILD_TESTING)
     set(_parse_sweeps verilog_micro_parse verilog_writer_parse)
     if(DEFINED ENV{VTR_ROOT})
         set(_vtr_verilog $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog)
-        file(GLOB _vtr_benchmarks ${_vtr_verilog}/*.v ${_vtr_verilog}/koios/*.v)
+        file(GLOB _vtr_benchmarks CONFIGURE_DEPENDS ${_vtr_verilog}/*.v ${_vtr_verilog}/koios/*.v)
+    endif()
+    if(_vtr_benchmarks)
         add_test(NAME verilog_vtr_parse
             COMMAND ${_parse_corpus} --root ${_vtr_verilog} ${_vtr_benchmarks})
         list(APPEND _parse_sweeps verilog_vtr_parse)
+    elseif(DEFINED ENV{VTR_ROOT})
+        message(STATUS "verilog_vtr_parse not registered: no benchmarks under $ENV{VTR_ROOT}")
     endif()
     set_tests_properties(${_parse_sweeps} PROPERTIES LABELS sweep RUN_SERIAL TRUE
                          SKIP_RETURN_CODE 77 TIMEOUT 43200)

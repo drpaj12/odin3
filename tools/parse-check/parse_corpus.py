@@ -1,7 +1,7 @@
 """parse-corpus: a corpus of Verilog files through odin3-parse-check (2C spec §7.4, plan Task 10).
 
     parse-corpus --check <odin3-parse-check> [--expect-fail F] [--writer <odin3-write>]
-                 [--root R] [--heavy] <dir or file>...
+                 [--root R] [--tmp D] [--heavy] <dir or file>...
 
 Collects every ``.v`` under the given directories (and the given files), sorts them by size,
 smallest first (the memory rule), and runs ``odin3-parse-check <file>`` on each, one at a time:
@@ -10,7 +10,9 @@ per file and a summary go to stdout.
 
 With --writer the inputs are ``.blif`` files instead: each is first written as structural
 Verilog with ``odin3-write --verilog <tmp>.v <blif>`` (Review Focus 1: the escaped names our own
-writer emits must read back), and the temporary file is checked.
+writer emits must read back), and the temporary file is checked. The temporary files go under
+--tmp (default /tmp/claude-<uid>/parse-corpus, never the bare /tmp: written netlists can be GBs);
+one over 2B's 2^28-byte source-file cap is that BLIF's failure without running the check.
 
 The expect-fail list F holds ``<relative path> <one-line reason>`` lines (blank lines and ``#``
 comments ignored); a path is relative to --root when the file is under it, else to the directory
@@ -19,7 +21,17 @@ listed; an unlisted failure, a listed file that passes, or a listed path that na
 file fails the run.
 
 --heavy marks a heavy sweep (plan point (n), 2E plan C1): unless ODIN3_HEAVY_OK=1 the run is
-skipped with exit 77, so a sweep reached from the -j4 gate does not run.
+skipped with exit 77, so a sweep reached from the -j4 gate does not run. With ODIN3_HEAVY_OK=1 the
+run re-executes itself under the heavy-run protocol, one heavy job machine-wide in the 6 GB slice:
+
+    flock /tmp/claude-1000/odin3-heavy.lock systemd-run --user --scope -q
+          --slice=odin3-heavy.slice -p MemoryMax=6G -p MemorySwapMax=0 <this run>
+
+with ODIN3_HEAVY_SLICE=1 set for the inner run (which then sweeps directly). ODIN3_HEAVY_RUN
+replaces that prefix (a shell-quoted command, e.g. ``tools/heavy-run`` once 2E-1 lands it; empty:
+no wrapper, for CI runners without a user systemd).
+
+A file whose check runs past an hour is that file's failure.
 
 Exit codes: 0 pass, 1 an unexpected result, 2 usage or input error, 77 skipped (--heavy).
 """
@@ -28,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -37,8 +50,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
+EXIT_TIMEOUT = 124
 TIMEOUT_S = 3600
 TAIL_LINES = 4
+SOURCE_CAP = 1 << 28  # 2B's per-file source cap (ODIN3_PP_MAX_SOURCE_BYTES)
+HEAVY_LOCK = "/tmp/claude-1000/odin3-heavy.lock"
+HEAVY_PREFIX = (
+    "flock", HEAVY_LOCK, "systemd-run", "--user", "--scope", "-q", "--slice=odin3-heavy.slice",
+    "-p", "MemoryMax=6G", "-p", "MemorySwapMax=0",
+)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -111,9 +131,16 @@ def first_error(text: str) -> str:
 
 
 def run(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(cmd), capture_output=True, text=True, errors="replace", timeout=TIMEOUT_S, check=False
-    )
+    """cmd's result; a run past TIMEOUT_S is killed and reported as an error, not raised."""
+    try:
+        return subprocess.run(
+            list(cmd), capture_output=True, text=True, errors="replace", timeout=TIMEOUT_S,
+            check=False,
+        )  # fmt: skip
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            list(cmd), EXIT_TIMEOUT, "", f"error: timed out after {TIMEOUT_S} s"
+        )
 
 
 def check_one(check: str, writer: str | None, item: Input, tmp: Path) -> Outcome:
@@ -124,6 +151,12 @@ def check_one(check: str, writer: str | None, item: Input, tmp: Path) -> Outcome
         wrote = run([writer, "--verilog", str(target), str(item.path)])
         if wrote.returncode != 0:
             why = f"odin3-write exit {wrote.returncode}: {first_error(wrote.stdout + wrote.stderr)}"
+            target.unlink(missing_ok=True)
+            return Outcome(False, time.monotonic() - start, why)
+        size = target.stat().st_size
+        if size > SOURCE_CAP:
+            target.unlink()
+            why = f"the written Verilog is {size} bytes, over 2B's source-file cap of {SOURCE_CAP}"
             return Outcome(False, time.monotonic() - start, why)
     try:
         proc = run([check, str(target)])
@@ -150,7 +183,8 @@ def verdict(item: Input, outcome: Outcome, expect: dict[str, str]) -> tuple[str,
 def sweep(opts: argparse.Namespace, items: list[Input], expect: dict[str, str]) -> int:
     counts = {"ok": 0, "xfail": 0, "fail": 0, "xpass": 0}
     start = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="parse-corpus-") as tmp:
+    opts.tmp.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="parse-corpus-", dir=opts.tmp) as tmp:
         for item in items:
             outcome = check_one(opts.check, opts.writer, item, Path(tmp))
             line, bad = verdict(item, outcome, expect)
@@ -175,16 +209,40 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--expect-fail", type=Path, help="<relative path> <reason> lines")
     parser.add_argument("--writer", help="odin3-write: check .blif files through write_verilog")
     parser.add_argument("--root", type=Path, help="make listed paths relative to this directory")
-    parser.add_argument("--heavy", action="store_true", help="skip (77) unless ODIN3_HEAVY_OK=1")
+    parser.add_argument(
+        "--tmp", type=Path, default=Path(f"/tmp/claude-{os.getuid()}/parse-corpus"),
+        help="where --writer's temporary Verilog goes",
+    )  # fmt: skip
+    parser.add_argument(
+        "--heavy", action="store_true",
+        help="skip (77) unless ODIN3_HEAVY_OK=1, then run under the heavy-run protocol",
+    )  # fmt: skip
     parser.add_argument("inputs", nargs="+", help="directories or files")
     return parser.parse_args(argv)
 
 
+def heavy_prefix() -> list[str]:
+    """The heavy-run wrapper: ODIN3_HEAVY_RUN (shell-quoted; empty: none), else HEAVY_PREFIX."""
+    custom = os.environ.get("ODIN3_HEAVY_RUN")
+    return shlex.split(custom) if custom is not None else list(HEAVY_PREFIX)
+
+
+def run_heavy(args: Sequence[str]) -> int:
+    """This run again under heavy_prefix(), marked ODIN3_HEAVY_SLICE=1; its exit code."""
+    cmd = [*heavy_prefix(), sys.executable, str(Path(__file__).resolve()), *args]
+    env = {**os.environ, "ODIN3_HEAVY_SLICE": "1"}
+    sys.stdout.flush()
+    return subprocess.run(cmd, env=env, check=False).returncode
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    opts = parse_args(sys.argv[1:] if argv is None else argv)
+    args = list(sys.argv[1:] if argv is None else argv)
+    opts = parse_args(args)
     if opts.heavy and os.environ.get("ODIN3_HEAVY_OK") != "1":
         print("parse-corpus: skipped: a heavy sweep (set ODIN3_HEAVY_OK=1 to run it)")
         return EXIT_SKIP
+    if opts.heavy and os.environ.get("ODIN3_HEAVY_SLICE") != "1":
+        return run_heavy(args)
     try:
         expect = read_expect(opts.expect_fail) if opts.expect_fail is not None else {}
         root = opts.root.resolve() if opts.root is not None else None

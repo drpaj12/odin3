@@ -25,6 +25,7 @@ jobs:
   #     # CMake registers verilog_vtr_parse (vtr_flow/benchmarks/verilog/*.v and koios/*.v,
   #     # koios/lenet.v last).
   #     - run: cmake --preset release && cmake --build --preset release -j4
-  #     - run: ODIN3_HEAVY_OK=1 ctest --preset release -L sweep -R '^verilog_(micro|vtr|writer)_parse$'
+  #     # ODIN3_HEAVY_RUN= (empty): no flock/slice wrapper on a runner without a user systemd.
+  #     - run: ODIN3_HEAVY_OK=1 ODIN3_HEAVY_RUN= ctest --preset release -L sweep -R '^verilog_(micro|vtr|writer)_parse$'
   #     # The generator against Yosys, 5,000 seeds (2C §7.5, Task 11's verilog_gen_vs_yosys).
   #     - run: ctest --preset release -R '^verilog_gen_vs_yosys$'  # with --seeds 5000

@@ -224,6 +224,20 @@ static void test_binary_nand_and_its_shifted_unary(void) {
     expect_fail(needles);
 }
 
+/* Review M2: the exception for a binary `~&` does not cover a written `~(a | b)` (line 27)
+ * whose UNARY is moved onto its operand: the operator after `a` is `|`, not `~|`. */
+static void test_written_not_moved_onto_its_operand(void) {
+    odin3_ast_id unary = find(ODIN3_AST_UNARY, NULL, 2);
+    odin3_ast_id binary = odin3_ast_child(rd.ast, unary, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_BINARY, odin3_ast_kind_of(rd.ast, binary));
+    TEST_ASSERT_NOT_EQUAL_UINT32(odin3_ast_loc(rd.ast, binary).v, odin3_ast_loc(rd.ast, unary).v);
+    expect_pass();
+    set_range(unary, odin3_ast_loc(rd.ast, binary), odin3_ast_end(rd.ast, binary));
+    const char *const needles[] = {"t.v:27:16: error: location oracle: UNARY",
+                                   "starts at 'a', which does not spell it", NULL};
+    expect_fail(needles);
+}
+
 /* `a` of `a & b` moved one token right: it now starts at '&', which does not spell it. */
 static void test_ident_shifted_by_one_token(void) {
     odin3_ast_id ident = find(ODIN3_AST_IDENT, "a", 2);
@@ -431,5 +445,6 @@ int main(void) {
     RUN_TEST(test_stream_length_mismatch);
     RUN_TEST(test_token_loc_off_its_offset);
     RUN_TEST(test_binary_nand_and_its_shifted_unary);
+    RUN_TEST(test_written_not_moved_onto_its_operand);
     return UNITY_END();
 }
