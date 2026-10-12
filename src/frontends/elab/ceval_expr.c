@@ -612,6 +612,7 @@ static odin3_status ex_call(odin3_ceval *ev, const ev_task *task) {
 odin3_status ev_do_expr(odin3_ceval *ev, const ev_task *task) {
     odin3_ast_id node = {task->node};
     odin3_status st = ev_step(ev, node);
+    st = st == ODIN3_OK ? ev_bytes_note(ev, node, ex_final(ev, task).width) : st;
     if (st != ODIN3_OK) {
         return st;
     }

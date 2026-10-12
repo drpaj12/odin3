@@ -114,13 +114,58 @@ odin3_status odin3_cval_to_number(odin3_arena *arena, const odin3_cval *val, odi
  * val at `width` bits (EL-13): an UNSIZED value repeats its top bit (Yosys bitsAsConst), a sized
  * one is sign-extended when is_signed and zero-extended otherwise (x and z top bits repeat too);
  * truncation keeps the low bits. The result is sized and not STRING, with SIGNED = is_signed,
- * even at the same width. EL-16's typed-parameter conversion must therefore not call this when
- * the widths are equal: Yosys keeps the constant, UNSIZED and STRING included (simplify.cc
- * 2381-2390), so the caller copies it (odin3_cval_copy) and sets only SIGNED. INVALID_ARG
- * (logged) for NULL or a width of 0 or above the cap; NO_MEMORY.
+ * even at the same width. EL-16's typed-parameter conversion is odin3_cval_to_param, not this:
+ * at equal widths Yosys keeps the constant, UNSIZED and STRING included (simplify.cc 2381-2390).
+ * INVALID_ARG (logged) for NULL or a width of 0 or above the cap; NO_MEMORY.
  */
 odin3_status odin3_cval_resize(odin3_arena *arena, const odin3_cval *val, uint32_t width,
                                bool is_signed, odin3_cval *out);
+
+/* EL-16's declaration forms of a parameter or localparam (odin3_cparam_type.mode). */
+typedef enum odin3_cparam_mode {
+    ODIN3_CPARAM_UNTYPED, /* `parameter P = e` */
+    ODIN3_CPARAM_SIGNED,  /* `parameter signed P = e`: no range */
+    ODIN3_CPARAM_SIZED    /* `parameter [m:l] P` (signed or not) or `parameter integer P` */
+} odin3_cparam_mode;
+
+/* A parameter's declared type: its mode, and for SIZED its width (|m - l| + 1; integer: 32) and
+ * sign (`signed` written; integer: signed). */
+typedef struct odin3_cparam_type {
+    uint8_t mode; /* odin3_cparam_mode */
+    uint32_t width;
+    bool is_signed;
+} odin3_cparam_type;
+
+/*
+ * EL-16's conversion of a parameter's value (self-determined) to its declared type, the one rule
+ * for every default, localparam, #() and defparam override, project override, cell-type target
+ * and generate-block parameter (spec §4.5; Yosys simplify.cc 2381-2390):
+ *  - UNTYPED: val as it is (width, SIGNED, UNSIZED and STRING kept);
+ *  - SIGNED: val's width and flags, SIGNED set;
+ *  - SIZED at another width: val extended by its OWN sign (an UNSIZED val does not repeat its
+ *    top bit here: Yosys's extend_u0) or truncated to decl->width; sized, not STRING, SIGNED =
+ *    decl->is_signed;
+ *  - SIZED at val's width: val kept whole, SIGNED = decl->is_signed, UNSIZED and STRING kept
+ *    (the Yosys quirk of §17 #22: `localparam [31:0] Q = 'hFFFFFFFF` stays unsized, so it fills
+ *    a 64-bit context with ones, where `[35:0]` zero-extends).
+ * A zero-width val (the empty {0{…}}) is copied as it is. The result is a copy in arena. Never
+ * call odin3_cval_resize for this: it drops UNSIZED at equal widths. INVALID_ARG (logged) for a
+ * NULL argument, an unknown mode or a SIZED width of 0 or above the cap; NO_MEMORY (*out
+ * unchanged on failure).
+ */
+odin3_status odin3_cval_to_param(odin3_arena *arena, const odin3_cval *val,
+                                 const odin3_cparam_type *decl, odin3_cval *out);
+
+/*
+ * The bytes of a string value (L10; the inverse of odin3_cval_from_string), for writing a STRING
+ * node or an EL-9 name: width / 8 bytes, the most significant byte first, NUL-terminated in
+ * arena (the terminator not counted in out->len). Every byte is kept, NUL included, except that
+ * 8'h00 (the value of "") gives zero bytes, so odin3_cval_from_string of the result gives val's
+ * bits back. Callers check STRING themselves (any value of whole known bytes converts).
+ * INVALID_ARG (logged) for a NULL argument, a width that is not a multiple of 8 or an x or z
+ * bit; NO_MEMORY.
+ */
+odin3_status odin3_cval_string_bytes(odin3_arena *arena, const odin3_cval *val, odin3_bytes *out);
 
 /* Bit pos (0 = LSB); x for a position at or above the width. */
 odin3_bit odin3_cval_bit(const odin3_cval *val, uint32_t pos);

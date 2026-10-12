@@ -317,6 +317,75 @@ odin3_status odin3_cval_resize(odin3_arena *arena, const odin3_cval *val, uint32
     return ODIN3_OK;
 }
 
+/* odin3_cval_to_param's misuse checks. */
+static odin3_status param_args_ok(const odin3_arena *arena, const odin3_cval *val,
+                                  const odin3_cparam_type *decl, const odin3_cval *out) {
+    if (arena == NULL || val == NULL || decl == NULL || out == NULL) {
+        return misuse("odin3_cval_to_param", "NULL argument");
+    }
+    if (decl->mode > ODIN3_CPARAM_SIZED) {
+        return misuse("odin3_cval_to_param", "unknown mode");
+    }
+    if (decl->mode == ODIN3_CPARAM_SIZED && !width_ok(decl->width)) {
+        return misuse("odin3_cval_to_param", "width out of range");
+    }
+    return ODIN3_OK;
+}
+
+odin3_status odin3_cval_to_param(odin3_arena *arena, const odin3_cval *val,
+                                 const odin3_cparam_type *decl, odin3_cval *out) {
+    odin3_status st = param_args_ok(arena, val, decl, out);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    bool sized = decl->mode == ODIN3_CPARAM_SIZED;
+    uint8_t sign = decl->mode == ODIN3_CPARAM_SIGNED || (sized && decl->is_signed)
+                       ? (uint8_t)ODIN3_CVAL_SIGNED
+                       : 0;
+    if (val->width == 0) { /* the empty value: no planes to copy */
+        *out = (odin3_cval){.flags = val->flags};
+        return ODIN3_OK;
+    }
+    odin3_cval res;
+    if (decl->mode == ODIN3_CPARAM_UNTYPED) {
+        st = odin3_cval_copy(arena, val, &res);
+    } else if (!sized || val->width == decl->width) { /* re-signed, kept whole (§17 #22) */
+        st = odin3_cval_copy(arena, val, &res);
+        res.flags = (uint8_t)((val->flags & ~ODIN3_CVAL_SIGNED) | sign);
+    } else { /* by its own sign: an unsized value does not repeat its top bit (extend_u0) */
+        odin3_cval plain = *val;
+        plain.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED;
+        st = odin3_cval_resize(arena, &plain, decl->width, (val->flags & ODIN3_CVAL_SIGNED) != 0,
+                               &res);
+        res.flags = sign;
+    }
+    if (st == ODIN3_OK) {
+        *out = res;
+    }
+    return st;
+}
+
+odin3_status odin3_cval_string_bytes(odin3_arena *arena, const odin3_cval *val, odin3_bytes *out) {
+    if (arena == NULL || val == NULL || out == NULL) {
+        return misuse("odin3_cval_string_bytes", "NULL argument");
+    }
+    if (val->width % BYTE_BITS != 0 || !odin3_cval_is_known(val)) {
+        return misuse("odin3_cval_string_bytes", "not whole bytes of 0/1 bits");
+    }
+    bool empty = val->width == BYTE_BITS && val->aval[0] == 0; /* "" */
+    size_t len = empty ? 0 : val->width / BYTE_BITS;
+    char *text = odin3_arena_alloc(arena, len + 1);
+    if (text == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < len; i++) {
+        size_t pos = (len - 1 - i) * BYTE_BITS; /* the first byte is the most significant */
+        text[i] = (char)((val->aval[pos / WORD_BITS] >> (pos % WORD_BITS)) & BYTE_MASK);
+    }
+    *out = (odin3_bytes){text, len};
+    return ODIN3_OK;
+}
+
 odin3_bit odin3_cval_bit(const odin3_cval *val, uint32_t pos) {
     if (val == NULL || pos >= val->width) {
         return ODIN3_BIT_X;

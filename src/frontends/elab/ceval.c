@@ -6,9 +6,9 @@
  *
  * Every API call runs the machine on the stacks above what it found and leaves them as it found
  * them (ev_mark / ev_unwind), so a host callback may call the evaluator again. The typer's
- * callbacks run nested evaluations the same way; inside an active evaluation each counts as one
- * level of the call-depth cap, as a function frame does (2D Task 9 ruling: the C stack they use
- * is bounded by that cap).
+ * callbacks run nested evaluations the same way; inside an active evaluation each, and each
+ * host re-entry, counts as one level of the call-depth cap, as a function frame does (2D Task 9
+ * ruling: the C stack they use is bounded by that cap).
  */
 #include "frontends/elab/ceval.h"
 
@@ -37,14 +37,16 @@
 #include <string.h>
 
 enum {
-    EV_MSG = 512,           /* a diagnostic's text */
-    EV_MEM_CHUNK = 1024,    /* a frame's locals arena chunk */
-    EV_TMP_CHUNK = 4096,    /* a frame's temporaries arena chunk */
-    EV_TMP_RENEW = 1 << 20, /* renew a frame's temporaries above this many bytes */
-    EV_INT_BITS = 32,       /* integer */
-    EV_TIME_BITS = 64,      /* time */
-    EV_BYTE_BITS = 8,       /* a string character */
-    EV_BYTES_EVERY = 4096   /* steps between two checks of the byte budget */
+    EV_MSG = 512,             /* a diagnostic's text */
+    EV_MEM_CHUNK = 1024,      /* a frame's locals arena chunk */
+    EV_TMP_CHUNK = 4096,      /* a frame's temporaries arena chunk */
+    EV_TMP_RENEW = 1 << 20,   /* renew a frame's temporaries above this many bytes */
+    EV_INT_BITS = 32,         /* integer */
+    EV_TIME_BITS = 64,        /* time */
+    EV_BYTE_BITS = 8,         /* a string character */
+    EV_BYTES_EVERY = 4096,    /* steps between two checks of the byte budget */
+    EV_BYTES_SLACK = 1 << 20, /* bytes of values made between two checks of the byte budget */
+    EV_NODE_VALUES = 4        /* values a node may make: two operand extensions, result, fit */
 };
 
 static const uint32_t EV_NO_SCOPE = UINT32_MAX; /* no frame: names go to the host */
@@ -340,6 +342,7 @@ static void ev_enter(odin3_ceval *ev) {
     if (ev->depth == 0) {
         ev->steps = 0;
         ev->work = 0;
+        ev->fresh = 0;
     }
     ev->depth++;
 }
@@ -373,13 +376,27 @@ static uint32_t ev_local_named(const odin3_ceval *ev, uint32_t scope, uint32_t n
     return UINT32_MAX;
 }
 
-/* The host's symbol must be a usable CONST or SIGNAL (a host bug otherwise). */
+/* A CONST's value agrees with its type: the width, SIGNED and UNSIZED (ceval.h, odin3_csym). */
+static bool ev_value_fits_type(const odin3_csym *sym) {
+    bool is_signed = (sym->value.flags & ODIN3_CVAL_SIGNED) != 0;
+    bool is_unsized = (sym->value.flags & ODIN3_CVAL_UNSIZED) != 0;
+    return sym->value.width == sym->type.width && is_signed == sym->type.is_signed &&
+           is_unsized == sym->type.is_unsized;
+}
+
+/* The host's symbol must be a usable CONST or SIGNAL, its type, value and range in agreement
+ * (the typer reads the type, the evaluator the value and the range): a host bug otherwise. */
 static odin3_status ev_check_sym(const odin3_csym *sym) {
     if (sym->type.width == 0) {
         return misuse("host lookup gave a width of 0");
     }
-    if (sym->kind == ODIN3_CSYM_CONST && sym->value.width != sym->type.width) {
-        return misuse("host lookup gave a value of another width than its type");
+    if (sym->kind == ODIN3_CSYM_CONST && !ev_value_fits_type(sym)) {
+        return misuse("host lookup gave a value whose width or flags differ from its type");
+    }
+    uint64_t span = sym->msb >= sym->lsb ? (uint64_t)sym->msb - (uint64_t)sym->lsb
+                                         : (uint64_t)sym->lsb - (uint64_t)sym->msb;
+    if (span != (uint64_t)sym->type.width - 1) {
+        return misuse("host lookup gave a range of another width than its type");
     }
     return ODIN3_OK;
 }
@@ -599,19 +616,23 @@ static odin3_status ev_evaluation_cap(const odin3_ceval *ev, odin3_ast_id node, 
                     cap, unit);
 }
 
-/* The bytes the evaluator holds: every frame's arenas and its stacks. */
+/* The bytes the evaluator holds: every frame's arenas, its stacks and every level's typer. */
 static uint64_t ev_bytes_held(const odin3_ceval *ev) {
     uint64_t bytes = ev->tasks.cap * ev->tasks.elem_size + ev->values.cap * ev->values.elem_size +
                      ev->frames.cap * ev->frames.elem_size + ev->locals.cap * ev->locals.elem_size +
-                     ev->roots.cap * ev->roots.elem_size;
+                     ev->roots.cap * ev->roots.elem_size + ev->typers.cap * ev->typers.elem_size;
     for (uint32_t k = 0; k < ev->frames.len; k++) {
         const odin3_ceval_frame *fr = ev_frame(ev, k);
         bytes += odin3_arena_bytes_reserved(fr->mem) + odin3_arena_bytes_reserved(fr->tmp);
     }
+    for (size_t k = 0; k < ev->typers.len; k++) {
+        bytes += odin3_ctype_bytes(((odin3_ctype *const *)ev->typers.data)[k]);
+    }
     return bytes;
 }
 
-odin3_status ev_bytes_check(const odin3_ceval *ev, odin3_ast_id node) {
+odin3_status ev_bytes_check(odin3_ceval *ev, odin3_ast_id node) {
+    ev->fresh = 0;
     uint64_t cap = odin3_elab_limits_get()->max_bytes;
     if (ev_bytes_held(ev) <= cap) {
         return ODIN3_OK;
@@ -635,6 +656,11 @@ odin3_status ev_steps(odin3_ceval *ev, odin3_ast_id node, uint64_t count) {
 
 odin3_status ev_step(odin3_ceval *ev, odin3_ast_id node) {
     return ev_steps(ev, node, 1);
+}
+
+odin3_status ev_bytes_note(odin3_ceval *ev, odin3_ast_id node, uint32_t width) {
+    ev->fresh += (uint64_t)odin3_cval_words(width) * 2 * sizeof(uint64_t) * EV_NODE_VALUES;
+    return ev->fresh >= EV_BYTES_SLACK ? ev_bytes_check(ev, node) : ODIN3_OK;
 }
 
 odin3_status ev_work(odin3_ceval *ev, odin3_ast_id node, uint64_t products) {
@@ -667,6 +693,17 @@ static odin3_status ev_nest_check(const odin3_ceval *ev, odin3_ast_id node, cons
     }
     return ev_error(ev, node, "constant function recursion deeper than %" PRIu32 " in '%s'", cap,
                     name);
+}
+
+/* A host's re-entry (a lazy parameter read through lookup, a store callback) nests one more
+ * evaluation in C: counted with the function frames and callback runs against the call-depth
+ * cap (final review, finding 1). No check for the outermost call. */
+static odin3_status ev_reentry_check(const odin3_ceval *ev, odin3_ast_id node, const char *what) {
+    uint32_t cap = odin3_elab_limits_get()->max_call_depth;
+    if (ev->depth == 0 || ev_function_frames(ev) + ev->nest + 1 <= cap) {
+        return ODIN3_OK;
+    }
+    return ev_error(ev, node, "constant evaluation of %s nested deeper than %" PRIu32, what, cap);
 }
 
 /* The innermost function frame's name, "" when none. */
@@ -998,15 +1035,21 @@ static odin3_status ev_copy_out(odin3_arena *arena, const odin3_cval *val, odin3
 
 /* Evaluates api->req; *nonconst tells a non-constant stop (PARSE) from an error. */
 static odin3_status ev_evaluate(odin3_ceval *ev, const ev_api *api, bool *nonconst) {
+    const char *what = api->req->what != NULL ? api->req->what : "expression";
+    odin3_status st = ev_reentry_check(ev, api->req->expr, what);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     ev_mark mark = ev_mark_take(ev);
+    ev->nest += ev->depth > 0 ? 1U : 0U;  /* counted against the call-depth cap */
     ev->level += ev->depth > 0 ? 1U : 0U; /* a host's re-entry types with a typer of its own */
     ev_enter(ev);
     ev->quiet = api->quiet;
     ev->nonconst = false;
     ev->clog2 = 0;
-    ev->what = api->req->what != NULL ? api->req->what : "expression";
+    ev->what = what;
     uint32_t base = 0;
-    odin3_status st = ev_frame_push(ev, (odin3_ast_id){0}, (odin3_ast_id){0}, &base);
+    st = ev_frame_push(ev, (odin3_ast_id){0}, (odin3_ast_id){0}, &base);
     odin3_etype ctx = api->req->context;
     ev_task root = {.op = EV_ROOT,
                     .node = api->req->expr.v,
@@ -1063,7 +1106,13 @@ odin3_status odin3_ceval_exec(odin3_ceval *ev, odin3_ast_id stmt, const odin3_ce
     if (ev == NULL || is_const == NULL || !ev_is_kind_class(ev->ast, stmt, ODIN3_AST_CLS_S)) {
         return misuse("odin3_ceval_exec: NULL argument or a node that is not a statement");
     }
+    odin3_status st = ev_reentry_check(ev, stmt, "statement");
+    if (st != ODIN3_OK) {
+        *is_const = false;
+        return st;
+    }
     ev_mark mark = ev_mark_take(ev);
+    ev->nest += ev->depth > 0 ? 1U : 0U;
     ev->level += ev->depth > 0 ? 1U : 0U;
     ev_enter(ev);
     ev->quiet = true;
@@ -1071,7 +1120,7 @@ odin3_status odin3_ceval_exec(odin3_ceval *ev, odin3_ast_id stmt, const odin3_ce
     ev->clog2 = 0;
     ev->what = "statement";
     uint32_t base = 0;
-    odin3_status st = ev_frame_push(ev, (odin3_ast_id){0}, (odin3_ast_id){0}, &base);
+    st = ev_frame_push(ev, (odin3_ast_id){0}, (odin3_ast_id){0}, &base);
     if (st == ODIN3_OK) {
         ev_frame(ev, base)->store = store;
         st = ev_push(ev, (ev_task){.op = ST_STMT, .node = stmt.v, .frame = base});

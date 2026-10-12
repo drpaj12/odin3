@@ -156,10 +156,15 @@ static void test_create_large_initial_cap(void) {
 
 static void test_growth_keeps_entries(void) {
     odin3_u64map *map = odin3_u64map_create(0);
+    size_t empty_bytes = odin3_u64map_bytes(map);
+    TEST_ASSERT_TRUE(empty_bytes > 0);
+    TEST_ASSERT_EQUAL_UINT(0, odin3_u64map_bytes(NULL));
     for (uint64_t i = 0; i < GROW_N; i++) {
         put_ok(map, i, i + 1);
     }
     TEST_ASSERT_EQUAL_UINT(GROW_N, odin3_u64map_count(map));
+    TEST_ASSERT_TRUE(odin3_u64map_bytes(map) >=
+                     empty_bytes + (size_t)GROW_N * 2 * sizeof(uint64_t));
     for (uint64_t i = 0; i < GROW_N; i++) {
         expect_entry(map, (odin3_kv){i, i + 1});
     }

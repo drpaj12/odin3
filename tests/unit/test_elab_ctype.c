@@ -561,6 +561,21 @@ static void test_deep_chain(void) {
     }
 }
 
+/* The bytes a typer holds grow with the nodes it types (the evaluator's byte budget counts every
+ * level's typer: final review, finding 7). */
+static void test_typer_bytes(void) {
+    uint64_t before = odin3_ctype_bytes(ty);
+    TEST_ASSERT_TRUE(before > 0);
+    TEST_ASSERT_EQUAL_UINT64(0, odin3_ctype_bytes(NULL));
+    odin3_ast_id acc = id("a");
+    for (uint32_t k = 1; k < CHAIN_TERMS; k++) {
+        acc = bin(ODIN3_AST_BINARY_ADD, acc, id("t"));
+    }
+    type_ok(acc, CTX16);
+    TEST_ASSERT_TRUE(odin3_ctype_bytes(ty) >=
+                     before + (uint64_t)CHAIN_TERMS * 2 * sizeof(uint64_t));
+}
+
 /* --- every operator class and role in a context wider than the operands -------------------- */
 
 /* Expected finals in context 16 for s (8, signed) op t (4, signed), per operator class. */
@@ -1016,6 +1031,7 @@ int main(void) {
     RUN_TEST(test_unsized_parameters);
     RUN_TEST(test_width_cap);
     RUN_TEST(test_deep_chain);
+    RUN_TEST(test_typer_bytes);
     RUN_TEST(test_binary_classes);
     RUN_TEST(test_unary_classes);
     RUN_TEST(test_self_determined_roles);

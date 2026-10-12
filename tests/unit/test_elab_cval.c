@@ -1057,6 +1057,111 @@ static void test_print_strings(void) {
     TEST_ASSERT_EQUAL_STRING("16'b0110000x01100010", printed(&val));
 }
 
+/* --- EL-16's parameter conversion and string bytes (final review, finding 2) ---------------- */
+
+static odin3_cval to_param(const odin3_cval *val, uint8_t mode, uint32_t width, bool is_signed) {
+    odin3_cval out = {0};
+    const odin3_cparam_type decl = {mode, width, is_signed};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_to_param(arena, val, &decl, &out));
+    return out;
+}
+
+/* The value as an operand of a 64-bit unsigned context (an UNSIZED value repeats its top bit). */
+static const char *in_context64(const odin3_cval *val) {
+    odin3_cval out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_resize(arena, val, 64, false, &out));
+    return text_of(&out);
+}
+
+/* Review Focus 2 (plan, stage 1): `localparam P = 'hFFFFFFFF; localparam [31:0] Q = …;
+ * localparam [35:0] R = …;` into 64 bits: P and Q all ones, R zero-extended. */
+static void test_to_param_pqr(void) {
+    odin3_cval ones = lit("", "'h", "FFFFFFFF");
+    TEST_ASSERT_EQUAL_UINT32(32, ones.width);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_UNSIZED, ones.flags);
+    odin3_cval par = to_param(&ones, ODIN3_CPARAM_UNTYPED, 0, false); /* P */
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_UNSIZED, par.flags);
+    TEST_ASSERT_EQUAL_STRING(repeat('1', 64), in_context64(&par));
+    par = to_param(&ones, ODIN3_CPARAM_SIZED, 32, false); /* Q: equal width keeps UNSIZED */
+    TEST_ASSERT_EQUAL_UINT32(32, par.width);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_UNSIZED, par.flags);
+    TEST_ASSERT_EQUAL_STRING(repeat('1', 64), in_context64(&par));
+    par = to_param(&ones, ODIN3_CPARAM_SIZED, 36, false); /* R: extended by its own sign */
+    TEST_ASSERT_EQUAL_UINT32(36, par.width);
+    TEST_ASSERT_EQUAL_UINT8(0, par.flags);
+    char want[65];
+    memset(want, '0', 32);
+    memset(want + 32, '1', 32);
+    want[64] = '\0';
+    TEST_ASSERT_EQUAL_STRING(want, in_context64(&par));
+    par = to_param(&ones, ODIN3_CPARAM_SIZED, 32, true); /* integer: re-signed, still unsized */
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_SIGNED | ODIN3_CVAL_UNSIZED, par.flags);
+    TEST_ASSERT_EQUAL_STRING(repeat('1', 64), in_context64(&par));
+}
+
+static void test_to_param_modes(void) {
+    odin3_cval val = cv("1010", 0);
+    odin3_cval par = to_param(&val, ODIN3_CPARAM_SIGNED, 0, false); /* `signed`: width kept */
+    TEST_ASSERT_EQUAL_STRING("1010", text_of(&par));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_SIGNED, par.flags);
+    val = cv("1010", ODIN3_CVAL_SIGNED);
+    par = to_param(&val, ODIN3_CPARAM_SIZED, 8, false); /* extended by the value's own sign */
+    TEST_ASSERT_EQUAL_STRING("11111010", text_of(&par));
+    TEST_ASSERT_EQUAL_UINT8(0, par.flags);
+    par = to_param(&val, ODIN3_CPARAM_UNTYPED, 0, false);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_SIGNED, par.flags);
+    val = cv("11110000", 0);
+    par = to_param(&val, ODIN3_CPARAM_SIZED, 4, true); /* truncated */
+    TEST_ASSERT_EQUAL_STRING("0000", text_of(&par));
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_SIGNED, par.flags);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr("AB"), &val));
+    par = to_param(&val, ODIN3_CPARAM_SIZED, 16, true); /* equal width: STRING kept */
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_CVAL_STRING | ODIN3_CVAL_SIGNED, par.flags);
+    par = to_param(&val, ODIN3_CPARAM_SIZED, 24, false); /* another width: a plain number */
+    TEST_ASSERT_EQUAL_STRING("000000000100000101000010", text_of(&par));
+    TEST_ASSERT_EQUAL_UINT8(0, par.flags);
+    odin3_cval empty = {0};
+    par = to_param(&empty, ODIN3_CPARAM_SIZED, 8, false); /* {0{…}}: as it is */
+    TEST_ASSERT_EQUAL_UINT32(0, par.width);
+    val = cv("01", 0);
+    const odin3_cparam_type sized = {ODIN3_CPARAM_SIZED, 4, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_to_param(arena, &val, &sized, &val)); /* aliased */
+    TEST_ASSERT_EQUAL_STRING("0001", text_of(&val));
+    const odin3_cparam_type bad_mode = {ODIN3_CPARAM_SIZED + 1, 4, false};
+    const odin3_cparam_type bad_width = {ODIN3_CPARAM_SIZED, 0, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_cval_to_param(arena, &val, &bad_mode, &par));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_cval_to_param(arena, &val, &bad_width, &par));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_cval_to_param(arena, &val, NULL, &par));
+    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
+}
+
+static void test_string_bytes(void) {
+    odin3_cval val = {0};
+    odin3_bytes text = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr("AB"), &val));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_string_bytes(arena, &val, &text));
+    TEST_ASSERT_EQUAL_size_t(2, text.len);
+    TEST_ASSERT_EQUAL_STRING("AB", text.ptr);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, odin3_bytes_cstr(""), &val));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_string_bytes(arena, &val, &text));
+    TEST_ASSERT_EQUAL_size_t(0, text.len); /* 8'h00 is "" */
+    TEST_ASSERT_EQUAL_STRING("", text.ptr);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, (odin3_bytes){"a\0b", 3}, &val));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_string_bytes(arena, &val, &text));
+    TEST_ASSERT_EQUAL_size_t(3, text.len); /* a NUL inside is kept */
+    TEST_ASSERT_EQUAL_MEMORY("a\0b", text.ptr, 3);
+    odin3_cval back = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cval_from_string(arena, text, &back));
+    TEST_ASSERT_TRUE(odin3_cval_equal(&val, &back));
+    val = cv("0110000x01100010", ODIN3_CVAL_STRING);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_cval_string_bytes(arena, &val, &text));
+    val = cv("011000010110", ODIN3_CVAL_STRING);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_cval_string_bytes(arena, &val, &text));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_cval_string_bytes(arena, NULL, &text));
+    TEST_ASSERT_EQUAL_size_t(3, errors_logged);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_const_table);
@@ -1090,5 +1195,8 @@ int main(void) {
     RUN_TEST(test_oom);
     RUN_TEST(test_oom_operators);
     RUN_TEST(test_oom_print);
+    RUN_TEST(test_to_param_pqr);
+    RUN_TEST(test_to_param_modes);
+    RUN_TEST(test_string_bytes);
     return UNITY_END();
 }

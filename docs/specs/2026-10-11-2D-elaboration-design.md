@@ -599,7 +599,11 @@ Yosys (§14.5).
 Declared divergences in constant functions (2D Task 9 fix round 1, rows for §17 by Task 27):
 `casez`/`casex` treat z (x and z) on either side as wildcards as IEEE §9.5.1 does, where Yosys
 0.55's `eval_const_function` never matches a wildcard; and arguments take the input's width as
-context (§4.6), where Yosys's constant path evaluates them self-determined.
+context (§4.6), where Yosys's constant path evaluates them self-determined. Every other bit
+follows Yosys's `==`, which leaves IEEE too: a plain `case` item, and any non-wildcard bit of a
+`casez`/`casex` item or case value, matches only a known equal 0 or 1, so an x or z bit there
+never matches (`case (4'b1x00) 4'b1x00:` and `casez (4'b1x00) 4'b1x00:` take neither branch;
+IEEE's `===` would take both).
 
 ### 4.4 Literals, strings, x and z (EL-15)
 
@@ -652,15 +656,19 @@ a replication count, an attribute value, a `for`-loop bound in stage 2, …) is 
 
 - **Frames**: an explicit stack of `odin3_ceval_frame { decl, statement cursor stack, locals }`;
   a call pushes a frame, `return` (end of body) pops it. No C recursion, so recursive constant
-  functions (K8) work up to `ODIN3_ELAB_MAX_CALL_DEPTH` (1024) frames.
+  functions (K8) work up to `ODIN3_ELAB_MAX_CALL_DEPTH` (1024) frames. The cap also counts every
+  evaluation nested in C inside another: a typer callback's (a replication count, a bound, a
+  return range) and a host's re-entry (a lazily evaluated parameter read by another, §4.5), so a
+  2000-link `localparam` chain stops with `constant evaluation of parameter 'P1025' nested
+  deeper than 1024` instead of exhausting the C stack.
 - **Locals**: the function's ports, its result variable (named like the function; width from the
   return range, 32 bits for `integer`, 1 bit by default; sign from `signed`/`integer`), its local
   declarations and named-block declarations, each a value of its declared width initialised to x.
   `integer` locals are 32-bit signed.
 - **Statements**: blocking assignment (to a local, with bit/part selects with constant indices),
-  `if`, `case`/`casez`/`casex` (EL-36's matching, constant), `for`, `while` (F2: only here),
-  `repeat`, named and unnamed `begin … end`, calls of other functions (constant or not: the
-  callee is interpreted too). `$display`-family tasks are ignored silently inside a function (as
+  `if`, `case`/`casez`/`casex` (constant; matching as §4.3's declared divergences say), `for`,
+  `while` (F2: only here), `repeat`, named and unnamed `begin … end`, calls of other functions
+  (constant or not: the callee is interpreted too). `$display`-family tasks are ignored silently inside a function (as
   Yosys); any other system task, a task call, a nonblocking assignment, a timing control, a read
   of a module-level net or variable, a hierarchical name, or an assignment to anything but a local
   makes the call non-constant: "function 'f' is not a constant function: <reason>" when the
@@ -1582,7 +1590,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   argument`; `parameter 'P' depends on itself`; `function 'f' is not a constant function: <reason>`
   (reasons: `it reads module variable 'x'`, `it calls task 't'`, `it calls system task '$x'`, `it
   assigns 'x', which is not local`); `constant evaluation of 'f' exceeds 67108864 steps`;
-  `constant function recursion deeper than 1024 in 'f'`; `replication count N is negative`;
+  `constant function recursion deeper than 1024 in 'f'`; `constant evaluation of <what> nested
+  deeper than 1024`; `replication count N is negative`;
   `replication count has x or z bits`; `zero-width concatenation`; `width N exceeds the limit of
   1048576 bits`. (An unsized constant in a concatenation is a warning, EL-13.)
 - **Generate (EL-19–EL-22)**: `'i' is not a genvar`; `generate loop must assign genvar 'i' in its

@@ -34,6 +34,9 @@ bool odin3_u64map_remove(odin3_u64map *map, uint64_t key);
 
 size_t odin3_u64map_count(const odin3_u64map *map);
 
+/* Bytes the map holds (its header and slot array), for memory budgets; 0 for NULL. */
+size_t odin3_u64map_bytes(const odin3_u64map *map);
+
 /*
  * Iteration: start with *cursor = 0, call until false. Order is unspecified. The map must not
  * be modified between the first and last call (debug assert).

@@ -74,6 +74,9 @@ odin3_status odin3_ctype_create(odin3_ast *ast, const odin3_ctype_host *host, od
 /* Frees the typer; NULL is a no-op. */
 void odin3_ctype_destroy(odin3_ctype *ty);
 
+/* Bytes the typer holds (its type map and stacks), for the evaluator's byte budget; 0 for NULL. */
+uint64_t odin3_ctype_bytes(const odin3_ctype *ty);
+
 /*
  * Types the expression at root (spec §4.2) in context: width 0 = self-determined (the root's
  * final type is its self type, context's sign ignored); otherwise the root's final type is
@@ -131,6 +134,7 @@ typedef enum odin3_csym_kind {
  * declared range as written (an unranged value: width - 1 and 0; integer: 31 and 0), so bit and
  * part selects find their bits; for CONST, value is the value, of type.width bits with SIGNED and
  * UNSIZED as type says (STRING kept), owned by the host and valid until the evaluation ends.
+ * The evaluator checks that type, value and range agree (INVALID_ARG, logged, otherwise).
  * decl is the declaration: the DECLARATOR (CONST, SIGNAL), the FUNCTION_DECL or the TASK_DECL;
  * name the strtab ID of the name, for diagnostics (needed for a HIER_NAME, which has none).
  */
@@ -199,7 +203,11 @@ typedef struct odin3_ceval odin3_ceval;
 
 /*
  * An evaluator for ast with a copy of *host, and its typer. INVALID_ARG (logged) for a NULL
- * argument or callback; NO_MEMORY (*out unchanged).
+ * argument or callback; NO_MEMORY (*out unchanged). Each nesting level (a run nested in a typer
+ * callback, a host's re-entry) gets a typer of its own when first reached; the typers, and the
+ * node types they map, live until odin3_ceval_destroy (bounded by the call-depth cap and the
+ * nodes typed, and counted in the byte budget). A caller that evaluates many unrelated scopes
+ * (one module specialization after another) may make one evaluator per scope to release them.
  */
 odin3_status odin3_ceval_create(odin3_ast *ast, const odin3_ceval_host *host, odin3_ceval **out);
 
@@ -235,7 +243,9 @@ typedef struct odin3_ceval_req {
  * (a read of a net or variable), `function 'f' is not a constant function: <reason>`, an E20
  * `system function '$name' is not supported`, a typer error, or a cap (call depth, steps,
  * loop iterations, width, the word-operation budget of * / % ** and a single '**', the byte
- * budget of the evaluator's own memory); a host callback's failure status;
+ * budget of the evaluator's own memory; the call depth counts function frames, typer-callback runs
+ * and host re-entries together: `constant evaluation of <what> nested deeper than N` for a
+ * re-entry, e.g. a chain of lazily evaluated parameters); a host callback's failure status;
  * INVALID_ARG (logged) for a NULL argument or a root that is not an expression; NO_MEMORY.
  * *out is unchanged on failure.
  */

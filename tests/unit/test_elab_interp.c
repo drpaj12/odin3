@@ -27,7 +27,7 @@
 
 enum {
     MSG = 512,
-    MAX_PARAMS = 32,
+    MAX_PARAMS = 2048, /* the 2000-link parameter chain */
     MAX_WRITES = 16,
     OOM_LIMIT = 100000,
     DEEP = 400, /* recursion through a replication count: two depth units per level */
@@ -145,6 +145,10 @@ typedef struct param_entry {
 static param_entry params[MAX_PARAMS];
 static uint32_t n_params;
 
+/* A host bug to inject into lookup's answers (final review, finding 4). */
+enum { CORRUPT_NONE, CORRUPT_FLAGS, CORRUPT_RANGE };
+static int corrupt;
+
 /* The declared type and range of a declaration (literal bounds; integer: [31:0] signed). */
 static void declared(odin3_ast_id decl, odin3_csym *sym) {
     odin3_ast_kind kind = odin3_ast_kind_of(res.ast, decl);
@@ -252,7 +256,14 @@ static odin3_status host_lookup(void *user, odin3_ast_id ref, odin3_csym *out) {
     if (odin3_ast_kind_of(res.ast, ref) == ODIN3_AST_SELECT) {
         return lookup_word(ref, out);
     }
-    return lookup_name(ref, odin3_ast_name_str(res.ast, ref), out);
+    odin3_status st = lookup_name(ref, odin3_ast_name_str(res.ast, ref), out);
+    if (corrupt == CORRUPT_FLAGS && out->kind == ODIN3_CSYM_CONST) {
+        out->value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* the type still says unsized */
+    }
+    if (corrupt == CORRUPT_RANGE && out->kind == ODIN3_CSYM_SIGNAL) {
+        out->type.width = 16; /* the range still says [7:0] */
+    }
+    return st;
 }
 
 static odin3_status host_callee(void *user, odin3_ast_id call, odin3_csym *out) {
@@ -294,6 +305,7 @@ void setUp(void) {
     errors_logged = 0;
     warnings_logged = 0;
     n_params = 0;
+    corrupt = CORRUPT_NONE;
     source = NULL;
 }
 
@@ -884,10 +896,19 @@ static void test_argument_context(void) {
           "  localparam A = h(8'hFF + 8'h01);\n"
           "  localparam B = k(8'hF7);\n"
           "  localparam C = h(-4'sd1);\n"
+          "  function [15:0] h16(input [15:0] a); h16 = a; endfunction\n"
+          "  function [7:0] g(input [7:0] b); g = h16(b + 8'd1) >> 8; endfunction\n"
+          "  function integer two(input integer n); two = n; endfunction\n"
+          "  localparam D = g(8'hFF);\n"
+          "  localparam E = {two(2){8'hAB}} + 64'd0;\n"
           "endmodule\n");
     TEST_ASSERT_EQUAL_INT64(256, param_int("A"));
     TEST_ASSERT_EQUAL_INT64(7, param_int("B"));     /* truncated to the input */
     TEST_ASSERT_EQUAL_INT64(0x1FF, param_int("C")); /* a signed argument sign-extends */
+    /* final review, finding 8: the 16-bit context reaches a call inside a function (b + 1 is
+     * 9'h100), and a replication count from a call inside a 64-bit context */
+    TEST_ASSERT_EQUAL_INT64(1, param_int("D"));
+    TEST_ASSERT_EQUAL_INT64(0xABAB, param_int("E"));
 }
 
 /* Yosys 0.55 (probe p4.v) for each value. */
@@ -1099,8 +1120,8 @@ static void test_retype_after_recursion(void) {
           "endmodule\n");
     TEST_ASSERT_EQUAL_INT64(63, param_int("A"));
     TEST_ASSERT_EQUAL_INT64(1023, param_int("B"));
-    TEST_ASSERT_EQUAL_INT64(7, param_int("C")); /* the deeper frame's {3{…}} is wider: stale */
-    TEST_ASSERT_EQUAL_INT64(7, param_int("D")); /* types would give 25 (probe p7.v) */
+    TEST_ASSERT_EQUAL_INT64(7, param_int("C")); /* re-typed after the deeper frame's {3{…}} */
+    TEST_ASSERT_EQUAL_INT64(7, param_int("D")); /* likewise (probe p7.v) */
 }
 
 /* §9.1's <what> of the typer's constants, and their x/z error. */
@@ -1565,6 +1586,129 @@ static void test_oom_exec(void) {
     TEST_ASSERT_EQUAL_STRING("8'b00001001", printed(&writes[3].value));
 }
 
+/* --- final review ---------------------------------------------------------------------------- */
+
+/* `module m; localparam P0 = P1 + 1; … localparam P<links> = 0; endmodule`, in `values`. */
+static const char *chain_source(int links) {
+    odin3_strbuf sb;
+    odin3_strbuf_init(&sb);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&sb, odin3_bytes_cstr("module m;\n")));
+    for (int k = 0; k < links; k++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_strbuf_appendf(&sb, "  localparam P%d = P%d + 1;\n", k, k + 1));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_appendf(&sb, "  localparam P%d = 0;\nendmodule\n", links));
+    char *text = odin3_arena_strndup(values, sb.data, sb.len);
+    TEST_ASSERT_NOT_NULL(text);
+    odin3_strbuf_free(&sb);
+    return text;
+}
+
+/* Finding 1: each link of a lazily evaluated parameter chain re-enters the evaluator from the
+ * host's lookup (about 4 KiB of C stack under ASan); a chain within the call-depth cap works. */
+static void test_parameter_chain(void) {
+    parse(chain_source(1000));
+    TEST_ASSERT_EQUAL_INT64(1000, param_int("P0"));
+    TEST_ASSERT_EQUAL_INT(0, errors_logged);
+}
+
+/* Finding 1: the re-entries count against the call-depth cap, so a 2000-link chain (a stack
+ * overflow under ASan before) is a located error at the 1025th nested evaluation. */
+static void test_parameter_chain_cap(void) {
+    parse(chain_source(2000));
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P0", &val));
+    expect_error(at("P1026 + 1", 1),
+                 "constant evaluation of parameter 'P1025' nested deeper than 1024");
+}
+
+/* Finding 4: a host answer whose type disagrees with its value or range is a host bug. */
+static void test_host_symbol_checks(void) {
+    parse("module m;\n"
+          "  wire [7:0] w;\n"
+          "  localparam P = 'hFFFFFFFF;\n"
+          "  localparam A = P + 64'd0;\n"
+          "  localparam B = w[3:0];\n"
+          "endmodule\n");
+    odin3_cval val = {0};
+    corrupt = CORRUPT_FLAGS;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, eval_param("A", &val));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last, "host lookup gave a value whose width or flags "
+                                              "differ from its type"),
+                                 last);
+    corrupt = CORRUPT_RANGE;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, eval_param("B", &val));
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(last, "host lookup gave a range of another width than its type"), last);
+    corrupt = CORRUPT_NONE;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eval_param("A", &val));
+    TEST_ASSERT_EQUAL_STRING("64'b1111111111111111111111111111111111111111111111111111111111111111",
+                             printed(&val));
+}
+
+/* Finding 5: a statement-free expression is held to the byte budget as its values are made,
+ * not only every 4096 steps: 255 additions at 65536 bits (511 steps, about 12 MiB of
+ * temporaries) under a 4 MiB budget. */
+static void test_byte_budget_wide_expression(void) {
+    odin3_strbuf sb;
+    odin3_strbuf_init(&sb);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_strbuf_append(&sb, odin3_bytes_cstr("module m;\n"
+                                                            "  localparam W = {65536{1'b1}};\n"
+                                                            "  localparam A = W")));
+    for (int k = 0; k < 255; k++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&sb, odin3_bytes_cstr(" + W")));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&sb, odin3_bytes_cstr(";\nendmodule\n")));
+    char *text = odin3_arena_strndup(values, sb.data, sb.len);
+    odin3_strbuf_free(&sb);
+    TEST_ASSERT_NOT_NULL(text);
+    parse(text);
+    lower_bytes((uint64_t)4 << 20);
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("A", &val));
+    TEST_ASSERT_TRUE_MESSAGE(strstr(last, ": error: elaboration needs more than 4194304 bytes "
+                                          "(the budget is 60% of physical memory)") != NULL,
+                             last);
+    TEST_ASSERT_EQUAL_INT(1, errors_logged);
+}
+
+/* Finding 6: an lvalue atom with more than 8 index expressions (a 7-dimensional word with a
+ * part select) is refused, not written at a position read from the wrong stack slots. */
+static void test_lvalue_index_cap(void) {
+    parse("module m;\n"
+          "  reg [7:0] m [0:1][0:1][0:1][0:1][0:1][0:1][0:1];\n"
+          "  initial m[0][0][0][0][0][0][0][3:0] = 4'd5;\n"
+          "  initial m[0][0][0][0][0][0][1][7] = 1'b1;\n"
+          "endmodule\n");
+    n_writes = 0;
+    stored_known = true;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_cval_new(values, &(odin3_cval_spec){8, 0, ODIN3_BIT_0}, &stored));
+    bool is_const = true;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                          odin3_ceval_exec(ev, initial_stmt(1), &STORE, &is_const));
+    TEST_ASSERT_FALSE(is_const);
+    TEST_ASSERT_EQUAL_UINT32(0, n_writes);
+    expect_error(at("m[0][0][0][0][0][0][0][3:0]", 1),
+                 "assignment to a select with more than 8 indices is not supported");
+    errors_logged = 0;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_ceval_exec(ev, initial_stmt(2), &STORE, &is_const), logged.data);
+    TEST_ASSERT_TRUE(is_const); /* 8 indices: the most an atom takes */
+    TEST_ASSERT_EQUAL_UINT32(1, n_writes);
+    TEST_ASSERT_EQUAL_STRING("8'b10000000", printed(&writes[0].value));
+}
+
+static void run_final_review(void) {
+    RUN_TEST(test_parameter_chain);
+    RUN_TEST(test_parameter_chain_cap);
+    RUN_TEST(test_host_symbol_checks);
+    RUN_TEST(test_byte_budget_wide_expression);
+    RUN_TEST(test_lvalue_index_cap);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_clog2_loop);
@@ -1622,5 +1766,6 @@ int main(void) {
     RUN_TEST(test_oom_nested);
     RUN_TEST(test_oom);
     RUN_TEST(test_oom_exec);
+    run_final_review();
     return UNITY_END();
 }

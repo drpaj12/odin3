@@ -8,7 +8,7 @@
  * typer saw it), the localparams, each input with its argument (evaluated in the caller's frame
  * with the input's width as context: the Task 8 handoff), the other variables, then the body.
  * Every variable starts all x. Statements: blocking assignments to locals (bit and part selects
- * included; in exec also to the store), if, case/casez/casex (EL-36's matching), for, while,
+ * included; in exec also to the store), if, case/casez/casex (in_case_match), for, while,
  * repeat, blocks (a named block's declarations are made at each entry, x again, as Yosys does)
  * and $display-family tasks (ignored). Anything else stops the call as §4.6 and §9.1 say.
  */
@@ -40,9 +40,6 @@ enum {
     IN_FOR_BODY = 3,
     IN_MAX_ATOM_INDICES = 8 /* index values of one lvalue atom we read at a time */
 };
-
-/* The localparam modes of EL-16 (FN_PARAM's spare). */
-enum { PM_UNTYPED, PM_SIGNED, PM_SIZED };
 
 /* ST_LOOP phases. */
 enum { LP_START, LP_TEST, LP_DECIDE, LP_COUNT, LP_REPEAT };
@@ -310,17 +307,17 @@ odin3_status ev_do_result(odin3_ceval *ev, const ev_task *task) {
 
 /* --- declarations -------------------------------------------------------------------------- */
 
-/* A localparam's EL-16 mode and target width (FN_PARAM's spare and a). */
+/* A localparam's EL-16 mode (odin3_cparam_mode) and target type (FN_PARAM's spare, a, sign). */
 static void in_param_mode(const odin3_ceval *ev, odin3_ast_id decl, const odin3_etype *type,
                           ev_task *param) {
     bool ranged = odin3_ast_child(ev->ast, decl, IN_RANGE).v != 0;
     uint32_t dt = ((uint32_t)odin3_ast_flags(ev->ast, decl) & ODIN3_AST_F_PARAM_DECL_DT_MASK) >>
                   ODIN3_AST_F_PARAM_DECL_DT_SHIFT;
-    param->spare = PM_UNTYPED;
+    param->spare = ODIN3_CPARAM_UNTYPED;
     if (ranged || dt == ODIN3_AST_DT_INTEGER) {
-        param->spare = PM_SIZED;
+        param->spare = ODIN3_CPARAM_SIZED;
     } else if (type->is_signed) {
-        param->spare = PM_SIGNED;
+        param->spare = ODIN3_CPARAM_SIGNED;
     }
     param->a = type->width;
     param->sign = type->is_signed ? 1 : 0;
@@ -386,34 +383,14 @@ odin3_status ev_do_decl(odin3_ceval *ev, const ev_task *task) {
     return st;
 }
 
-/* EL-16's conversion of a localparam's value: untyped as is; `signed` re-signed; a range or
- * integer extended by the value's own sign (an unsized value does not repeat its top bit here,
- * as Yosys's extend_u0) or truncated, or kept whole when its width is right. */
-static odin3_status in_param_value(odin3_arena *arena, const ev_task *task, odin3_cval *val) {
-    uint8_t sign = task->sign != 0 ? (uint8_t)ODIN3_CVAL_SIGNED : 0;
-    if (task->spare == PM_UNTYPED || val->width == 0) {
-        return odin3_cval_copy(arena, val, val);
-    }
-    if (task->spare == PM_SIGNED || val->width == task->a) {
-        odin3_status st = odin3_cval_copy(arena, val, val);
-        val->flags = (uint8_t)((val->flags & ~ODIN3_CVAL_SIGNED) | sign);
-        return st;
-    }
-    odin3_cval plain = *val;
-    plain.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED;
-    bool own = (val->flags & ODIN3_CVAL_SIGNED) != 0;
-    odin3_status st = odin3_cval_resize(arena, &plain, task->a, own, val);
-    val->flags = sign;
-    return st;
-}
-
 odin3_status ev_do_param(odin3_ceval *ev, const ev_task *task) {
     odin3_cval val = ev_pop_value(ev);
-    odin3_status st = in_param_value(ev_tmp(ev, task->frame), task, &val); /* copied on declare */
+    const odin3_cparam_type decl = {task->spare, task->a, task->sign != 0}; /* EL-16 (cval.h) */
+    odin3_status st = odin3_cval_to_param(ev_tmp(ev, task->frame), &val, &decl, &val);
     if (st != ODIN3_OK) {
         return st;
     }
-    bool sized = task->spare == PM_SIZED;
+    bool sized = task->spare == ODIN3_CPARAM_SIZED;
     in_new_local req = {
         (odin3_ast_id){task->node},
         {val.width, (val.flags & ODIN3_CVAL_SIGNED) != 0, (val.flags & ODIN3_CVAL_UNSIZED) != 0},
@@ -517,7 +494,8 @@ static odin3_status in_atoms(const odin3_ceval *ev, odin3_ast_id lhs, odin3_vec 
     return st;
 }
 
-/* The index expressions of an atom, in evaluation order (innermost select first). */
+/* The index expressions of an atom, in evaluation order (innermost select first): the first
+ * IN_MAX_ATOM_INDICES into out; returns how many it has (ev_do_assign refuses more). */
 static uint32_t in_atom_indices(const odin3_ast *ast, odin3_ast_id atom, odin3_ast_id *out) {
     uint32_t count = 0;
     uint32_t depth = 0;
@@ -527,14 +505,32 @@ static uint32_t in_atom_indices(const odin3_ast *ast, odin3_ast_id atom, odin3_a
         for (uint32_t k = 1; k < level; k++) {
             sel = odin3_ast_child(ast, sel, 0);
         }
-        for (uint32_t k = 1; k < odin3_ast_nchild(ast, sel) && count < IN_MAX_ATOM_INDICES; k++) {
+        for (uint32_t k = 1; k < odin3_ast_nchild(ast, sel); k++) {
             odin3_ast_id idx = odin3_ast_child(ast, sel, k);
-            if (idx.v != 0) {
-                out[count++] = idx;
+            if (idx.v != 0 && count < IN_MAX_ATOM_INDICES) {
+                out[count] = idx;
             }
+            count += idx.v != 0 ? 1U : 0U;
         }
     }
     return count;
+}
+
+/* Pushes the index expressions of an lvalue atom (the last runs first); more than
+ * IN_MAX_ATOM_INDICES is a located error (a 7-dimensional word with a part select). */
+static odin3_status in_push_indices(odin3_ceval *ev, uint32_t frame, odin3_ast_id atom) {
+    odin3_ast_id idx[IN_MAX_ATOM_INDICES];
+    uint32_t count = in_atom_indices(ev->ast, atom, idx);
+    if (count > IN_MAX_ATOM_INDICES) {
+        return ev_error(ev, atom,
+                        "assignment to a select with more than %d indices is not supported",
+                        IN_MAX_ATOM_INDICES);
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t j = count; j > 0 && st == ODIN3_OK; j--) {
+        st = ev_push(ev, in_root(idx[j - 1], frame, in_self()));
+    }
+    return st;
 }
 
 static odin3_status in_assign_begin(odin3_ceval *ev, const ev_task *task) {
@@ -566,11 +562,8 @@ odin3_status ev_do_assign(odin3_ceval *ev, const ev_task *task) {
                            .op = ST_STORE, .node = task->node, .frame = task->frame, .a = task->a})
              : st;
     for (size_t k = atoms.len; k > 0 && st == ODIN3_OK; k--) {
-        odin3_ast_id idx[IN_MAX_ATOM_INDICES];
-        odin3_ast_id atom = {*(const uint32_t *)odin3_vec_cat(&atoms, k - 1)};
-        for (uint32_t j = in_atom_indices(ev->ast, atom, idx); j > 0 && st == ODIN3_OK; j--) {
-            st = ev_push(ev, in_root(idx[j - 1], task->frame, in_self()));
-        }
+        st = in_push_indices(ev, task->frame,
+                             (odin3_ast_id){*(const uint32_t *)odin3_vec_cat(&atoms, k - 1)});
     }
     odin3_vec_free(&atoms);
     return st;
@@ -817,10 +810,11 @@ odin3_status ev_do_if(odin3_ceval *ev, const ev_task *task) {
     return next.v != 0 ? ev_push(ev, in_task(ST_STMT, next, task->frame)) : ODIN3_OK;
 }
 
-/* EL-36 and IEEE 1364-2005 §9.5.1: casez ignores the bits that are z in the item or in the case
- * value, casex those that are x or z in either (fix round 1, finding 6); every other bit must
- * be a known 0 or 1 on both sides and equal (Yosys's == truth, so a plain case item with x
- * never matches). */
+/* A hybrid (spec §4.3's declared divergences): the wildcards are IEEE 1364-2005 §9.5.1's, so
+ * casez ignores the bits that are z in the item or in the case value and casex those that are
+ * x or z in either (fix round 1, finding 6); every other bit must be a known 0 or 1 on both
+ * sides and equal, as Yosys's == truth: a plain case item with an x or z bit, and a non-wildcard
+ * x bit of a casez item or value, never match (IEEE's === would). */
 static bool in_case_match(const odin3_cval *val, const odin3_cval *item, uint32_t sub) {
     if (val->width == 0 || item->width == 0) {
         return val->width == item->width;

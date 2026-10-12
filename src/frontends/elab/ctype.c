@@ -737,6 +737,15 @@ void odin3_ctype_destroy(odin3_ctype *ty) {
     odin3_util_free(ty);
 }
 
+uint64_t odin3_ctype_bytes(const odin3_ctype *ty) {
+    if (ty == NULL) {
+        return 0;
+    }
+    return sizeof *ty + odin3_u64map_bytes(ty->types) +
+           ty->self_stack.cap * ty->self_stack.elem_size +
+           ty->ctx_stack.cap * ty->ctx_stack.elem_size;
+}
+
 static bool ct_is_expression(const odin3_ast *ast, odin3_ast_id node) {
     if (node.v == 0 || node.v >= odin3_ast_node_end(ast).v) {
         return false;

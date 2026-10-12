@@ -95,6 +95,10 @@ size_t odin3_u64map_count(const odin3_u64map *map) {
     return map->count;
 }
 
+size_t odin3_u64map_bytes(const odin3_u64map *map) {
+    return map != NULL ? sizeof *map + map->cap * sizeof *map->slots : 0;
+}
+
 /* Index of key's slot, or map->cap if absent. */
 static size_t find_index(const odin3_u64map *map, uint64_t key) {
     size_t mask = map->cap - 1;

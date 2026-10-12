@@ -15,11 +15,12 @@
  *    their frame: a recursive call at the same level types the same nodes in another frame).
  * The only re-entry is through the typer's callbacks (function pointers): typing a replication
  * count, a part-select bound or a function's return range evaluates it with a nested ev_run on
- * the stacks above the caller's. Those nested runs count against the call-depth cap with the
- * function frames (the 2D Task 9 ruling), which bounds the C stack: about 2.5 KiB a level under
- * ASan (1024 levels, a return range calling itself, need about 3 MiB of the 8 MiB default, a
- * margin of about 2.7x; less without ASan). A host's own re-entry (lazy parameters through
- * lookup, Task 11) adds C depth this cap does not count.
+ * the stacks above the caller's. A host's own re-entry (a lazy parameter through lookup, Task 11;
+ * a store callback) nests the same way. Both count against the call-depth cap with the function
+ * frames (the 2D Task 9 ruling; final review, finding 1), which bounds the C stack: about
+ * 2.5 KiB a level under ASan for a nested run (1024 levels, a return range calling itself, need
+ * about 3 MiB of the 8 MiB default) and about 4 KiB for a re-entry through the test host (a
+ * 1024-link parameter chain, about 4 MiB); less without ASan.
  *
  * Levels: every nested run (and every API call made from a host callback) raises the level, and
  * each level has its own typer. A frame types and reads types through the typer of the level it
@@ -143,6 +144,7 @@ struct odin3_ceval {
     const char *what; /* §9.1's <what> of the evaluation running */
     uint64_t steps;   /* statements and expression nodes of the outermost evaluation */
     uint64_t work;    /* word products of the outermost evaluation's * / % ** */
+    uint64_t fresh;   /* bytes of values made (estimated) since the last byte-budget check */
 };
 
 /* A name resolved in a scope: a local of the scope frame, or the host's symbol. */
@@ -260,8 +262,16 @@ odin3_status ev_steps(odin3_ceval *ev, odin3_ast_id node, uint64_t count);
 odin3_status ev_work(odin3_ceval *ev, odin3_ast_id node, uint64_t products);
 
 /* The byte budget (§11's ODIN3_ELAB_MAX_BYTES, the hook's max_bytes) against the bytes the
- * evaluator holds: `elaboration needs more than N bytes (…)` at node (finding 5). */
-odin3_status ev_bytes_check(const odin3_ceval *ev, odin3_ast_id node);
+ * evaluator holds (its arenas, stacks and every level's typer): `elaboration needs more than N
+ * bytes (…)` at node (finding 5). Checked at frame push, local declaration, every 4096 steps and
+ * after every 1 MiB of values made (ev_bytes_note). */
+odin3_status ev_bytes_check(odin3_ceval *ev, odin3_ast_id node);
+
+/* Notes the values an expression node of `width` bits may make (its operands' extensions, its
+ * result and its fit) and checks the byte budget once 1 MiB has been made since the last check:
+ * a statement-free expression of wide operators cannot overshoot it by more than that (final
+ * review, finding 5). */
+odin3_status ev_bytes_note(odin3_ceval *ev, odin3_ast_id node, uint32_t width);
 
 /* The nodes of node's subtree (an explicit stack; NO_MEMORY), for ev_steps. */
 odin3_status ev_subtree_size(const odin3_ceval *ev, odin3_ast_id node, uint64_t *out);
