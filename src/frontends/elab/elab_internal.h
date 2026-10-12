@@ -620,10 +620,10 @@ typedef struct odin3_elab2_claim_req {
  *    the same net twice in one request is a conflict at the second), located at req->node;
  *  - `'u' is a uwire and has a second driver (first at f.v:L:C)`;
  *  - `supply0`/`supply1` nets are driven by the shared constants, so any driver is A4's error;
- *  - wired nets (`wand wor triand trior`) collect drivers instead (EL-26): the bit is granted
- *    without a table entry (odin3_elab2_lvalue_claim redirects the driver onto a fresh net and
- *    odin3_elab2_wired chains them; this net-only function cannot redirect, so a caller that may
- *    meet a wired net uses the lvalue form);
+ *  - wired nets (`wand wor triand trior`) collect drivers instead (EL-26), which needs the driver
+ *    redirected onto a fresh net (odin3_elab2_lvalue_claim does, odin3_elab2_wired chains them);
+ *    this net-only function cannot, so a wired net in req is ODIN3_ERR_INVALID_ARG (logged,
+ * *granted false, nothing recorded): the caller uses the lvalue form;
  *  - ODIN3_DRV_TRIBUF is legal only on a net of a top-level output or inout port
  *    (`tri-state driver on 'x' is supported only on a top-level output or inout port (D3)`), and
  *    shares a net only with other tristate drivers and inout pins; ODIN3_DRV_INOUT_PIN shares a net
@@ -769,7 +769,8 @@ odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req)
 odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name);
 
 /*
- * Instances (EL-10, EL-11): INSTANTIATION node instantiation, every INSTANCE below it: a node of
+ * Instances (EL-10, EL-11). instantiation is the holder, an INSTANTIATION node (not an INSTANCE:
+ * the AST has no parent pointer); every INSTANCE below it becomes a node of
  * the module's cell type (a module of the store, a black box, or a registered cell type) with its
  * SOURCE record at the INSTANCE, the INSTANTIATION's attributes and, for a module or black box,
  * one `parameter:<NAME>` attribute (BITS or STRING) per parameter of its params LIST. Inputs are
@@ -783,26 +784,32 @@ odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, u
  * parameters are inferred from the connection widths (odin3_celltype_infer_params). Errors are
  * located and counted (ODIN3_ERR_PARSE, the caller goes on with the next item). INVALID_ARG for a
  * node that is not an INSTANTIATION, or no module being emitted; NO_MEMORY.
+ *
+ * A source black box has one set of port widths (the default specialization's: the elaborated form
+ * keeps no more), so an instance that gives a non-string parameter another value than its default
+ * is the located error `width of port 'p' of black-box instance 'u' (module 'bb') cannot be
+ * determined: parameter 'W' is overridden and the port has a range` (the first port with a range);
+ * a port without a range, and a registered cell type (whose widths IR-7b infers), are unaffected.
  */
 odin3_status odin3_elab2_instance(odin3_elab2 *e2, odin3_ast_id instantiation);
 
 /*
- * Gates (Q1-Q3), lowered as Yosys's simplify does: GATE_DECL node gate_decl, every INSTANCE below
- * it. and/or/xor: a left fold over the inputs of two-input word cells (one bit each for one-bit
- * terminals), the last driving the output; nand/nor/xnor: the fold, then $not; buf/not: one
- * assignment of the (inverted) input per output; bufif0/bufif1/notif0/notif1: a $tribuf with D3's
- * rules (the enable inverted through $not for the *if0 forms, the data for the notif forms).
- * Statuses as odin3_elab2_instance.
+ * Gates (Q1-Q3), lowered as Yosys's simplify does. gate_decl is the holder, a GATE_DECL node (not
+ * one of its INSTANCEs); every INSTANCE below it is lowered. and/or/xor: a left fold over the
+ * inputs of two-input word cells (one bit each for one-bit terminals), the last driving the output;
+ * nand/nor/xnor: the fold, then $not; buf/not: one assignment of the (inverted) input per output;
+ * bufif0/bufif1/notif0/notif1: a $tribuf with D3's rules (the enable inverted through $not for the
+ * *if0 forms, the data for the notif forms). Statuses as odin3_elab2_instance.
  */
 odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl);
 
 /*
  * EL-11: declares the black-box cell type of a `(* blackbox *)` or implicit black-box MODULE
  * (odin3_celltype_declare_blackbox, once per definition, under its base name): its ports in port
- * order, a parameter per PARAM_DECL, and for a port whose width equals the default of an INT
- * parameter that some instance overrides, that parameter as its width (the type is then
- * parametric). A mismatch with a registered type is the located error `black box 'x' does not
- * match the registered cell type: <why>`. Called by odin3_elab2_ports.
+ * order at the default specialization's widths, a parameter per PARAM_DECL (the type is never
+ * parametric: odin3_elab2_instance refuses an instance whose parameters could change a width). A
+ * mismatch with a registered type is the located error `black box 'x' does not match the registered
+ * cell type: <why>`. Called by odin3_elab2_ports.
  */
 odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node);
 
