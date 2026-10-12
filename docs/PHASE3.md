@@ -461,6 +461,22 @@ then the options considered.
       - `print_stats`' `nd` counts CO buffers and constants, while the MiniLUT count does not.
         QoR rows name which count they report.
 
+23. **3E-3 plain constants: the agent defaults** (2026-10-12; plan point (p), from the 3E-3
+    reviews).
+    - Plain `write_blif` writes `.names gnd`, `.names vcc` / `1` and `.names unconn` per module,
+      and only for the constants that module uses. Designs without constant cells write
+      byte-identical text.
+    - A net already named `gnd`, `vcc` or `unconn` becomes `$n<ID>` only in a module that uses
+      that generator (BLIF names are per model).
+    - A zero-input constant `$sop` whose net is unnamed and drives a port named like the
+      generator counts as that generator. If its net has another name, it is refused, so no name
+      ever has two drivers.
+    - A port bit named like a generator is refused unless its net is that generator.
+    - The generators follow `.clock`.
+    - **For 2H:** Parmys writes all three generators unconditionally. `netlist-compare` therefore
+      ignores an unreferenced zero-input `.names gnd`/`vcc`/`unconn`, so the "identical" leg is
+      not lost to equivalence. That change lands with 2H's comparison work.
+
 ## Risks
 
 1. **ABC global state.** `Abc_Start` runs once per process. The frame is thread-local in this
