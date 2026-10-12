@@ -159,6 +159,9 @@ enum { ODIN3_VP_SPEC_SUB_SHIFT = 8, ODIN3_VP_SPEC_FLAGS_SHIFT = 16, ODIN3_VP_SPE
 
 /* *out = node 0 (an absent optional slot, an inert alternative). */
 odin3_status vp_none(odin3_vp_ctx *ctx, odin3_ast_id *out);
+/* A stray `;` as a module item (PHASE2 #16, as Yosys 0.55 and Icarus): no node (*out = 0) and a
+ * located warning "empty module item ';' ignored" at the `;`. */
+odin3_status vp_empty_item(odin3_vp_ctx *ctx, const odin3_vp_loc *at, odin3_ast_id *out);
 /* *out = node (a parenthesised expression is the expression itself). */
 odin3_status vp_pass(odin3_vp_ctx *ctx, odin3_ast_id node, odin3_ast_id *out);
 /* *out = left | right (two specs or flag sets). */

@@ -514,7 +514,9 @@ mintypmax_pair: expression ':' expression  { VP($$, vp_list_two(ctx, $1, $3, &$$
 /* ==== A.1.4 Module items — Task 4 ==== */
 
 /* An item's node is made without its attributes, so its range starts at its own first token
- * (point (g)); several (* *) instances merge into one attach. */
+ * (point (g)); several (* *) instances merge into one attach. A stray `;` is an empty item with a
+ * warning and no node (PHASE2 #16, as Yosys 0.55 and Icarus); module_items also lists a generate
+ * region's and a generate block's items, where Yosys accepts it too. */
 module_items: %empty                   { VP($$, vp_mark(ctx, &$$)); }
             | module_items module_item { VP($$, vp_item_next(ctx, $1, $2, &$$)); }
             ;
@@ -524,6 +526,7 @@ module_item: attrs_opt item_decl       { VP($$, vp_item(ctx, $1, &@2, $2, &$$));
            | attrs_opt gate_item       { VP($$, vp_gate(ctx, $1, &@2, $2, &$$)); }  /* Task 7 */
            | defparam_list ';'         { VP($$, vp_none(ctx, &$$)); }
            | directive
+           | ';'                       { VP($$, vp_empty_item(ctx, &@1, &$$)); }  /* PHASE2 #16 */
            | error ';'                 { VP($$, vp_none(ctx, &$$)); }
            ;
 
