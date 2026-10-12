@@ -23,14 +23,14 @@
     "addr1": 15,
     "addr2": 15,
     "clk": 1,
-    "data1": 32,
-    "data2": 32,
+    "data1": 1,
+    "data2": 1,
     "we1": 1,
     "we2": 1
    },
    "outputs": {
-    "out1": 32,
-    "out2": 32
+    "out1": 1,
+    "out2": 1
    }
   },
   "multiply": {
@@ -50,11 +50,11 @@
    "inputs": {
     "addr": 15,
     "clk": 1,
-    "data": 64,
+    "data": 1,
     "we": 1
    },
    "outputs": {
-    "out": 64
+    "out": 1
    }
   }
  },

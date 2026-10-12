@@ -609,7 +609,7 @@ Effort cues:
   - `check-lib lib/vtr.o3lib` against the committed k6 JSON → exit 0;
   - a library cell `adder` with an extra port `x` → `vtr-models: check-lib: adder: port 'x' is not on the model`;
   - `clk` without `clock` → `vtr-models: check-lib: single_port_ram: port 'clk' clock flag differs from the model`.
-- The committed k6 JSON equals spec §2's table: `adder`, `multiply` (`a` 36, `b` 36, `out` 72), `single_port_ram` (`we` 1, `addr` 15, `data` 64, `clk` 1, `out` 64, clocks `["clk"]`) and `dual_port_ram` (32-bit data, 15-bit addresses); `lut_size` 6; `ram_addr_width` 15. The EArch JSON has the same model set.
+- The committed k6 JSON equals spec §2's table: `adder`, `multiply` (`a` 36, `b` 36, `out` 72), `single_port_ram` (`we` 1, `addr` 15, `data` 1, `clk` 1, `out` 1, clocks `["clk"]`) and `dual_port_ram` (1-bit data, 15-bit addresses; spec §24 erratum, 2026-10-12: VPR makes memory data ports 1 bit); `lut_size` 6; `ram_addr_width` 15. The EArch JSON has the same model set.
 - CTest `vtr_models_check` (label `unit`): `vtr-models check tests/vtr/arch/*.models.json` and `check-lib lib/vtr.o3lib` → exit 0.
 - CTest `blif_vtr_check_bad` (label `unit`): every `tests/vtr/blif-bad/*.blif` → exit 1 with exactly one violation, whose message class matches the file's prefix. Every `strict/*.blif` → exit 0 without `--strict` and exit 1 with it. That VPR rejects exactly the top-level files is verified by Task 11's `--bad-corpus` run.
 

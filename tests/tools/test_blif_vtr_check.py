@@ -27,11 +27,11 @@ K6_MODELS = {
         "adder": {"inputs": {"a": 1, "b": 1, "cin": 1}, "outputs": {"cout": 1, "sumout": 1},
                   "clocks": []},
         "multiply": {"inputs": {"a": 36, "b": 36}, "outputs": {"out": 72}, "clocks": []},
-        "single_port_ram": {"inputs": {"we": 1, "addr": 15, "data": 64, "clk": 1},
-                            "outputs": {"out": 64}, "clocks": ["clk"]},
-        "dual_port_ram": {"inputs": {"we1": 1, "we2": 1, "addr1": 15, "addr2": 15, "data1": 32,
-                                     "data2": 32, "clk": 1},
-                          "outputs": {"out1": 32, "out2": 32}, "clocks": ["clk"]},
+        "single_port_ram": {"inputs": {"we": 1, "addr": 15, "data": 1, "clk": 1},
+                            "outputs": {"out": 1}, "clocks": ["clk"]},
+        "dual_port_ram": {"inputs": {"we1": 1, "we2": 1, "addr1": 15, "addr2": 15, "data1": 1,
+                                     "data2": 1, "clk": 1},
+                          "outputs": {"out1": 1, "out2": 1}, "clocks": ["clk"]},
     },
 }
 HEADER = "# Odin III 0.0.0 write_blif --vtr (K=6, names short)\n\n"

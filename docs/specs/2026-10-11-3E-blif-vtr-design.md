@@ -1,6 +1,8 @@
 # 3E — `write_blif --vtr`: design
 
-Status: v2.2 (2026-10-12): v2.1 plus the errata of the 3E-1 final review (§23; Peter's ruling on
+Status: v2.3 (2026-10-12): v2.2 plus the §24 erratum of the 3E Task 7 review (I1: VPR makes
+the data ports of memory-class pb_types 1 bit wide; §2's table, R11, §15.2 and §16.4 corrected).
+v2.2 (2026-10-12): v2.1 plus the errata of the 3E-1 final review (§23; Peter's ruling on
 the round trip, §16.3 step 1). v2.1 (2026-10-11), approved in re-review 2 with touch-ups applied (§14.1 item 6 marked a
 3H request; constant LUT objects return as `$_CONST0_`/`$_CONST1_`, §4.2; constants are not traced
 through buffers, §9.1). v2: v2 applies review 1 (`3EH-review1`: 5 important, 12 minor; dispositions
@@ -74,7 +76,7 @@ Read at `3c9a4d23`. VPR parses BLIF with libblifparse, then builds the atom netl
 | R8 | `.latch` init ∈ {0, 1, 2, 3} (2 = don't care, 3 = unknown) | `blif_parser.y` `latch_init` | parse error |
 | R9 | `.subckt` model must be an arch `<model>` | `read_blif.cpp` `subckt()` | `Subckt instantiates model '%s', but no such model exists in the architecture file.` |
 | R10 | `.subckt` formal `p` or `p[i]` (index split from the end, `p` = bit 0) must be a port of that model with `i` < the port's size | `read_blif.cpp` `find_model_port`, `split_index` | `Found no matching port '%s' on architecture model '%s'` / `Port '%s' on architecture model '%s' exceeds port width (%d bits)` |
-| R11 | A model port's size is the largest `num_pins` among the pb_types whose `blif_model` is `.subckt <model>` | `arch_util.cpp` (model_port->size = max) | — |
+| R11 | A model port's size is the largest `num_pins` among the pb_types whose `blif_model` is `.subckt <model>`, except that the `port_class="data*"` ports of a `class="memory"` pb_type count 1: `ProcessMemoryClass` moves its `blif_model` to a `memory_slice` child whose data pins it forces to one bit, before `SyncModelsPbTypes` sizes the model (§24) | `arch_util.cpp` (`ProcessMemoryClass`; `SyncModelsPbTypes`: model_port->size = max) | — |
 | R12 | Block names: `.names` and `.latch` blocks take their output net's name, a `.subckt` the net of its first **output formal in written order**, outpads `out:<name>`; so formal order decides `.subckt` block names; two blocks with one name are an error | `read_blif.cpp` `subckt()`, `outputs()` | `Duplicate blocks named '%s' found in netlist. Existing block of type '%s' conflicts with subckt of type '%s'.` |
 | R13 | Exactly one non-black-box model (the first one found is the top); every `.blackbox` model must be an arch model whose declared ports exist | `read_blif.cpp` `determine_main_netlist_index`, `blackbox()`, `verify_blackbox_model` | `Found multiple models with primitives. Only one model can contain primitives, the others must be blackboxes.` / `Blackbox BLIF model '%s' has no equivalent architecture model.` |
 | R14 | The net named `unconn` and the block named `unconn` are deleted after reading; their pins stay with no net (open) | `read_circuit.cpp` `process_circuit` | warning at verbosity > 1 |
@@ -82,14 +84,15 @@ Read at `3c9a4d23`. VPR parses BLIF with libblifparse, then builds the atom netl
 | R16 | One driver per net: a second driver aborts while the netlist is built | `netlist.tpp` `associate_pin_with_net` | assertion `Must be no existing net driver` |
 
 The arch's `<models>` (k6_frac and EArch alike) and the port sizes R11 derives (computed
-2026-10-11 from the k6_frac XML; EArch gives the same set):
+2026-10-11 from the k6_frac XML; EArch gives the same set; the RAM data ports corrected to 1 on
+2026-10-12, §24, from the Task 7 review; `tests/vtr/arch/*.models.json` hold the extracted sizes):
 
 | Model | Inputs (size) | Outputs (size) | Clock |
 |---|---|---|---|
 | `adder` | `a` 1, `b` 1, `cin` 1 | `cout` 1, `sumout` 1 | — |
 | `multiply` | `a` 36, `b` 36 | `out` 72 | — |
-| `single_port_ram` | `we` 1, `addr` 15, `data` 64, `clk` 1 | `out` 64 | `clk` |
-| `dual_port_ram` | `we1` 1, `we2` 1, `addr1` 15, `addr2` 15, `data1` 32, `data2` 32, `clk` 1 | `out1` 32, `out2` 32 | `clk` |
+| `single_port_ram` | `we` 1, `addr` 15, `data` 1, `clk` 1 | `out` 1 | `clk` |
+| `dual_port_ram` | `we1` 1, `we2` 1, `addr1` 15, `addr2` 15, `data1` 1, `data2` 1, `clk` 1 | `out1` 1, `out2` 1 | `clk` |
 
 K is 6 on both arches (`determine_lut_size`; EArch's largest `.names` pb_type is also 6).
 
@@ -698,7 +701,8 @@ JSON (`tests/vtr/arch/<arch>.models.json`, committed for k6_frac and EArch):
                       "clocks": []}, "...": {}}}
 ```
 
-Widths follow R11 (the largest `num_pins` over the model's pb_types); `lut_size` and
+Widths follow R11 (the largest `num_pins` over the model's pb_types, memory-class data ports
+1); `lut_size` and
 `ram_addr_width` come from VTR's own `vtr.log_parse.determine_lut_size` /
 `determine_memory_addr_width`, run as `$VTR_ROOT/.venv/bin/python` with
 `PYTHONPATH=$VTR_ROOT/vtr_flow/scripts/python_libs` (decision 5: VTR's readers, not ours); `extract`
@@ -826,10 +830,11 @@ statistics, then stop: VPR's whole reader at a fraction of a route's cost. **Ora
   W; and on `tests/vtr/blif-bad/*.blif` (one file per C-check, committed with the VPR message it
   draws, verified by this script) VPR rejects exactly the files the checker rejects.
 
-Scope: `--exit_before_pack` checks reading only. Whether a hard block can be *packed* (a RAM
-slice using all 15 address bits and 64 data bits passes R10/R11, since sizes are per-port
-maxima, yet no memory mode holds it) is 3C's to guarantee and 3H's runs to show, not the
-checker's.
+Scope: `--exit_before_pack` checks reading only. Whether a hard block can be *packed* (R10/R11
+check each port's size alone: a RAM `.subckt` is a 1-bit data slice, §24, and the slices of one
+memory must share their address and control nets to fill a memory mode) is 3C's to guarantee and
+3H's runs to show, not the checker's. (Corrected 2026-10-12, §24: the earlier text had a slice
+with 64 data bits passing R10/R11, which VPR refuses.)
 
 The sweep is a VTR-set sweep under the standing rules. It uses 3H's shared heavy convention
 (`tools/vtr-qor/qor_heavy.py`, imported, 3H §7.1): it re-executes itself as `flock
@@ -981,3 +986,10 @@ No minor finding was rejected.
 | M12 | port warning overstated VPR | applied: §10 item 5's new text |
 | M2, M13 | `PASSES.md` row; `wr_refuse`'s comment | applied (no spec text) |
 | M4 | `modules_skipped` = `module_end − 2` counts dead modules | kept: the IR cannot remove a module (every ID below `module_end` is live), so the count is exact; the code comment now says so |
+
+## 24. Erratum after the 3E Task 7 review (v2.3, 2026-10-12)
+
+| # | Finding | Disposition |
+|---|---|---|
+| I1 | §2's RAM data widths (`data` 64/`out` 64; `data1`/`data2`/`out1`/`out2` 32) are not VPR's model sizes. libarchfpga's `ProcessMemoryClass` (`arch_util.cpp`, run on every `class="memory"` pb_type before `SyncModelsPbTypes`) moves the `blif_model` to a `memory_slice` child and forces each `port_class="data*"` port to 1 pin, so VPR refuses `data[1]` with `Port 'data[1]' on architecture model 'single_port_ram' exceeds port width (1 bits)` | applied (controller's ruling): R11 states the memory-class rule; §2's table gives the data ports 1; §15.2 and §16.4 corrected; `vtr-models extract` mirrors the rule and the committed `tests/vtr/arch/*.models.json` were regenerated; corpus file `tests/vtr/blif-bad/c7_ram_data_bit.blif`. `lib/vtr.o3lib` (`DATA_WIDTH` default 1) still passes `check-lib`. |
+| M3 | `extract` did not refuse a pb_type port whose direction or `is_clock` differs from its model, as `SyncModelsPbTypes` does | applied: `extract` refuses both (exit 1) |

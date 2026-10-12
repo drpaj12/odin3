@@ -1,5 +1,6 @@
 <!-- A tiny arch for tests/tools/test_vtr_models.py: the <models> and pb_types vtr-models reads.
-     The RAM's widths differ across its two pb_types (R11 takes the largest num_pins per port);
+     The RAM's widths differ across its two pb_types (R11 takes the largest num_pins per port,
+     and a class="memory" pb_type's data ports count 1, as VPR's ProcessMemoryClass makes them);
      the fracturable LUT gives K=6 (a 5-LUT and a 6-LUT .names); RAM addresses reach 15. -->
 <architecture>
   <models>

@@ -8,10 +8,12 @@ Usage::
 
 ``extract`` writes the models JSON (``schema`` 1, ``arch``, ``arch_sha256``, ``vtr_commit``,
 ``lut_size``, ``ram_addr_width``, ``models``). A model port's width follows R11: the largest
-``num_pins`` over the pb_types whose ``blif_model`` is ``.subckt <model>``. ``lut_size`` and
-``ram_addr_width`` come from VTR's own ``vtr.log_parse`` (decision 5: VTR's readers, not ours),
-run as ``$VTR_ROOT/.venv/bin/python -I``; ``extract`` refuses when they disagree with its own
-pb_type count.
+``num_pins`` over the pb_types whose ``blif_model`` is ``.subckt <model>``, where the
+``port_class="data*"`` ports of a ``class="memory"`` pb_type count 1 (VPR's ProcessMemoryClass);
+a pb_type port whose direction or ``is_clock`` differs from its model is refused, as VPR does.
+``lut_size`` and ``ram_addr_width`` come from VTR's own ``vtr.log_parse`` (decision 5: VTR's
+readers, not ours), run as ``$VTR_ROOT/.venv/bin/python -I``; ``extract`` refuses when they
+disagree with its own pb_type count.
 
 ``check`` checks the JSON's schema, and with ``--arch`` also that the arch's sha256 and content
 (the models, ``lut_size`` and ``ram_addr_width``, counted from the XML) still match.
@@ -104,9 +106,13 @@ def _int_attr(elem: ET.Element, name: str, where: str) -> int:
         raise Failure(f"{where}: '{name}' is not an integer", 1) from None
 
 
-def _declared_models(root: ET.Element) -> dict[str, tuple[list[str], list[str], list[str]]]:
+# Each model: its input ports, output ports and clock ports, in XML order.
+Declared = dict[str, tuple[list[str], list[str], list[str]]]
+
+
+def _declared_models(root: ET.Element) -> Declared:
     """Each <models>/<model>: its input ports, output ports and clock ports, in XML order."""
-    declared: dict[str, tuple[list[str], list[str], list[str]]] = {}
+    declared: Declared = {}
     for model in root.findall("./models/model"):
         name = model.get("name", "")
         inputs = [p.get("name", "") for p in model.findall("./input_ports/port")]
@@ -117,8 +123,37 @@ def _declared_models(root: ET.Element) -> dict[str, tuple[list[str], list[str], 
     return declared
 
 
-def _subckt_widths(root: ET.Element) -> dict[str, dict[str, int]]:
-    """R11: per model, per port, the largest num_pins over its .subckt pb_types."""
+def _pin_count(pb: ET.Element, port: ET.Element, where: str) -> int:
+    """A pb_type port's pins as VPR sizes the model from it. A ``class="memory"`` pb_type's
+    ``port_class="data*"`` ports count 1: libarchfpga's ProcessMemoryClass moves the blif_model
+    to a 1-bit ``memory_slice`` child and forces its data pins to one bit before
+    SyncModelsPbTypes sizes the model (so single_port_ram's data/out are 1, not 64)."""
+    pins = _int_attr(port, "num_pins", where)
+    if pb.get("class") == "memory" and port.get("port_class", "").startswith("data"):
+        return 1
+    return pins
+
+
+def _sync_problem(decl: tuple[list[str], list[str], list[str]], port: ET.Element) -> str | None:
+    """SyncModelsPbTypes' refusals for one pb_type port: the direction, and for an input the
+    is_clock flag (a <clock> is a clock), must equal the model port's. None when it agrees or
+    the port is not on the model (reported by _model_entry)."""
+    inputs, outputs, clocks = decl
+    name = port.get("name", "")
+    if name in inputs:
+        if port.tag == "output":
+            return "direction differs from the model"
+        if (port.tag == "clock") != (name in clocks):
+            return "is_clock differs from the model"
+    elif name in outputs and port.tag != "output":
+        return "direction differs from the model"
+    return None
+
+
+def _subckt_widths(root: ET.Element, declared: Declared,
+                   problems: list[str]) -> dict[str, dict[str, int]]:
+    """R11: per model, per port, the largest pin count (_pin_count) over its .subckt pb_types;
+    each port's direction and is_clock are checked against the model (_sync_problem)."""
     widths: dict[str, dict[str, int]] = {}
     for pb in root.iter("pb_type"):
         blif = pb.get("blif_model", "")
@@ -131,7 +166,10 @@ def _subckt_widths(root: ET.Element) -> dict[str, dict[str, int]]:
                 continue
             port = child.get("name", "")
             where = f"{model}: pb_type '{pb.get('name', '')}' port '{port}'"
-            ports[port] = max(ports.get(port, 0), _int_attr(child, "num_pins", where))
+            ports[port] = max(ports.get(port, 0), _pin_count(pb, child, where))
+            problem = _sync_problem(declared[model], child) if model in declared else None
+            if problem is not None:
+                problems.append(f"{where}: {problem}")
     return widths
 
 
@@ -182,10 +220,11 @@ def arch_facts(arch: Path, command: str) -> ArchFacts:
 
 def _facts(root: ET.Element) -> ArchFacts:
     problems: list[str] = []
-    widths = _subckt_widths(root)
+    declared = _declared_models(root)
+    widths = _subckt_widths(root, declared, problems)
     models = {
         name: _model_entry(name, decl, widths.get(name, {}), problems)
-        for name, decl in sorted(_declared_models(root).items())
+        for name, decl in sorted(declared.items())
     }
     for name in sorted(set(widths) - set(models)):
         problems.append(f"{name}: a pb_type's .subckt model is not in <models>")

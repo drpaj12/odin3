@@ -1,0 +1,14 @@
+# vpr: Port 'data[1]' on architecture model 'single_port_ram' exceeds port width (1 bits)
+# C7: a RAM data bit above 0. VPR's ProcessMemoryClass makes every data port of a memory-class
+# pb_type 1 bit wide (a slice), so single_port_ram's model has data and out of size 1.
+.model top
+.inputs clk we a0 d0 d1
+.outputs y
+.subckt single_port_ram clk=clk we=we addr=a0 data=d0 data[1]=d1 out=y
+.end
+
+.model single_port_ram
+.inputs we addr data clk
+.outputs out
+.blackbox
+.end

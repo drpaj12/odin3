@@ -38,7 +38,7 @@ MULTI_DRIVER = {"elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
 # off-set rows; and the files of 3E's VPR negative corpus, tests/vtr/blif-bad, that our reader
 # refuses as VPR does); they test a refusal, not the walk.
 READ_REJECTS = {"neg_e8_mixed.in.blif", "c5_row_width.blif", "c6_init4.blif", "c7_no_port.blif",
-                "c7_twice.blif", "c7_wide_port.blif"}
+                "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif"}
 
 try:
     import cffi  # noqa: F401
