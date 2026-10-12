@@ -103,6 +103,7 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_pass.c
     src/passes/budget.c
     src/passes/ffinit.c
+    src/passes/opt/kit.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -537,6 +538,9 @@ if(BUILD_TESTING)
     target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
+    # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
+    odin3_add_unit_test(test_opt_kit)
+    target_sources(test_opt_kit PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_alias_table)
     target_compile_definitions(test_abc_alias_table PRIVATE
         ODIN3_ABC_RC="${PROJECT_SOURCE_DIR}/third_party/abc/abc.rc")
