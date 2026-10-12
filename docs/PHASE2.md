@@ -617,3 +617,13 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    - *Heavy runs:* the three sweep CTests are registered through `odin3_add_sweep_test()`, so
      `tools/heavy-run` alone gates (77 without `ODIN3_HEAVY_OK=1`), locks, caps and decides
      nesting; `parse-corpus` keeps no heavy logic (`--heavy` removed; Task 10 re-review R1/R2).
+
+16. **Peter's rulings of 2026-10-12** (Peter: "Accept all recommendations other than 6").
+    - **A stray `;` module item is accepted with a warning,** as Yosys 0.55 and Icarus accept
+      it. This replaces 2C's rejection in #15's declared divergences.
+    - **Confirmed agent defaults:**
+      - 2E §20 #18: 2E gives Verilog's value where Yosys 0.55's `casez` mux grouping gives wrong
+        logic (correctness over parity);
+      - 2D: the top keeps its plain name under parameter overrides, as `chparam` does;
+      - 2D: black boxes are ports-only `(* blackbox *)` MODULEs;
+      - 2D divergence 26: project parameter numbers keep their sign.
