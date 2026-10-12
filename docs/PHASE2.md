@@ -573,10 +573,13 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
        (`'.*' (implicit port connections) is SystemVerilog, not Verilog-2005`, spec §3.1; Yosys
        accepts it under `-sv`, the Parmys mode). A design with either form reads in Parmys and
        not in Odin III;
-     - *a stray `;` module item is a syntax error* (Task 11, 2C-2 final review): `wire a;;` is
-       rejected, as Annex A has no empty module item; Yosys 0.55 (with or without `-sv`) and
-       Icarus accept it. No corpus file has one. Open for Peter: accept it leniently like
-       Yosys/Icarus (the reviewer's recommendation) or keep rejecting;
+     - *a stray `;` module item is accepted with a warning (PHASE2 #16)* (Task 11, 2C-2 final
+       review; Peter's ruling): `wire a;;` or a lone `;` between items makes no node and logs
+       `<file>:<line>:<col>: warning: empty module item ';' ignored`, as Yosys 0.55 (with or
+       without `-sv`) and Icarus accept it, though Annex A has no empty module item. The rule is
+       in `module_items`, so a generate region's and a generate block's items take it too (Yosys
+       accepts both); a `;` at unit level, in a port list or in a declarator list stays a syntax
+       error. No corpus file has one;
      - *more lenient than Parmys*: `macromodule` is a module (1364-2005 §12.1); Yosys has no
        such keyword, so every `keywords/macromodule` micro fails in Parmys at its `macromodule`;
      - *lenient forms 2D judges* (parse-lenient, no tree change): module items of any kind in a

@@ -403,6 +403,61 @@ static void test_assign_to_an_expression_is_a_syntax_error(void) {
                  "x.v:1:20: error: syntax: unexpected '+', expecting '.' or '=' or '['\n");
 }
 
+/* --- stray `;` module items (PHASE2 #16) -------------------------------------------------- */
+
+/* A source with stray `;`s, the same text without them (laid out so every node keeps its
+ * location) and the exact log the source gives. */
+typedef struct stray_case {
+    const char *src;
+    const char *plain;
+    const char *want_log;
+} stray_case;
+
+/* sc.src parses to sc.plain's tree, logging exactly sc.want_log. */
+static void expect_same_tree(stray_case sc) {
+    vt_result want;
+    parse_ok(sc.plain, &want);
+    vt_result got;
+    vt_parse("x.v", sc.src, &got);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, got.status);
+    TEST_ASSERT_EQUAL_UINT32(0, got.errors);
+    TEST_ASSERT_EQUAL_STRING(sc.want_log, got.log.data != NULL ? got.log.data : "");
+    TEST_ASSERT_EQUAL_STRING(want.dump.data, got.dump.data);
+    vt_free(&got);
+    vt_free(&want);
+}
+
+static void test_stray_semicolon_is_an_empty_item(void) {
+    expect_same_tree((stray_case){"module m;\n  wire a;;\n  wire b;\nendmodule\n",
+                                  "module m;\n  wire a;\n  wire b;\nendmodule\n",
+                                  "x.v:2:10: warning: empty module item ';' ignored\n"});
+    expect_same_tree((stray_case){"module m;\n  wire a;\n  ;\n  wire b;\nendmodule\n",
+                                  "module m;\n  wire a;\n   \n  wire b;\nendmodule\n",
+                                  "x.v:3:3: warning: empty module item ';' ignored\n"});
+    /* Right after the header, and twice in a row: one warning each. */
+    expect_same_tree((stray_case){"module m(a);;; input a;\nendmodule\n",
+                                  "module m(a);   input a;\nendmodule\n",
+                                  "x.v:1:13: warning: empty module item ';' ignored\n"
+                                  "x.v:1:14: warning: empty module item ';' ignored\n"});
+    /* module_items also lists a generate region's and a generate block's items (Yosys too). */
+    expect_same_tree(
+        (stray_case){"module m;\ngenerate ; if (1) begin wire w;; end endgenerate\nendmodule\n",
+                     "module m;\ngenerate   if (1) begin wire w;  end endgenerate\nendmodule\n",
+                     "x.v:2:10: warning: empty module item ';' ignored\n"
+                     "x.v:2:32: warning: empty module item ';' ignored\n"});
+}
+
+/* Only a module item may be empty: a `;` at unit level, in a port list or in a declarator list
+ * stays a syntax error. */
+static void test_stray_semicolon_elsewhere_is_a_syntax_error(void) {
+    expect_error("; module m; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:1: error: syntax: unexpected ';'\n");
+    expect_error("module m (a;); endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:12: error: syntax: unexpected ';', expecting ')' or ',' or '.' or '['\n");
+    expect_error("module m; wire a,; endmodule", ODIN3_ERR_PARSE,
+                 "x.v:1:18: error: syntax: unexpected ';', expecting identifier\n");
+}
+
 /* --- units, directives, opaque bodies ------------------------------------------------------- */
 
 static void test_directives(void) {
@@ -592,6 +647,8 @@ int main(void) {
     RUN_TEST(test_assign_strength_delay_lvalues);
     RUN_TEST(test_assign_hierarchical_and_mintypmax);
     RUN_TEST(test_assign_to_an_expression_is_a_syntax_error);
+    RUN_TEST(test_stray_semicolon_is_an_empty_item);
+    RUN_TEST(test_stray_semicolon_elsewhere_is_a_syntax_error);
     RUN_TEST(test_directives);
     RUN_TEST(test_opaque_units_and_specify);
     RUN_TEST(test_attributes_merge_and_attach);
