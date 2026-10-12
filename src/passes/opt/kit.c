@@ -66,8 +66,7 @@ const odin3_opt_test_hooks *odin3_opt_test_hooks_now(void) {
 
 /* --- small helpers -------------------------------------------------------------------------- */
 
-/* The registered type named name, none when the design has none (no allocation, no log). */
-static odin3_celltype_id type_named(const odin3_design *design, const char *name) {
+odin3_celltype_id odin3_kit_type_named(const odin3_design *design, const char *name) {
     uint32_t str = 0;
     odin3_celltype_id id = {0};
     if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) ||
@@ -75,6 +74,24 @@ static odin3_celltype_id type_named(const odin3_design *design, const char *name
         return (odin3_celltype_id){0};
     }
     return id;
+}
+
+odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net) {
+    odin3_net_id *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = net;
+    return ODIN3_OK;
+}
+
+int odin3_kit_cmp_u64(const void *lhs, const void *rhs) {
+    uint64_t left = *(const uint64_t *)lhs;
+    uint64_t right = *(const uint64_t *)rhs;
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
 }
 
 /* The index of the port of def named name, def->n_ports when it has none. */
@@ -179,7 +196,7 @@ odin3_status odin3_opt_canon_consts(odin3_opt_ctx *oc) {
     odin3_celltype_id types[ODIN3_OPT_N_CONST];
     odin3_net_id kept[ODIN3_OPT_N_CONST] = {{0}};
     for (uint32_t i = 0; i < ODIN3_OPT_N_CONST; i++) {
-        types[i] = type_named(oc->design, k_const_types[i]);
+        types[i] = odin3_kit_type_named(oc->design, k_const_types[i]);
     }
     odin3_status st = ODIN3_OK;
     uint32_t end = odin3_module_node_end(oc->module);
@@ -257,7 +274,7 @@ odin3_status odin3_opt_const_net(odin3_opt_ctx *oc, odin3_bit bit, odin3_net_id 
         *out = cached;
         return ODIN3_OK;
     }
-    odin3_celltype_id type = type_named(oc->design, k_const_types[idx]);
+    odin3_celltype_id type = odin3_kit_type_named(oc->design, k_const_types[idx]);
     if (!odin3_celltype_valid(type)) {
         odin3_log(ODIN3_LOG_ERROR, "opt: cell type '%s' is not registered", k_const_types[idx]);
         return ODIN3_ERR_INVALID_ARG;
@@ -879,7 +896,7 @@ odin3_status odin3_kit_invert_map(odin3_opt_ctx *oc) {
                                                            "$_MUX_"};
     odin3_celltype_id types[INV_UNARY + INV_MUX];
     for (uint32_t i = 0; i < INV_UNARY + INV_MUX; i++) {
-        types[i] = type_named(oc->design, names[i]);
+        types[i] = odin3_kit_type_named(oc->design, names[i]);
     }
     size_t end = odin3_module_net_end(oc->module);
     odin3_vec_clear(&oc->invert);
@@ -944,7 +961,7 @@ typedef struct topo_state {
 static void topo_mark(topo_state *ts, const odin3_design *design) {
     odin3_celltype_id types[N_EVALUABLE];
     for (uint32_t i = 0; i < N_EVALUABLE; i++) {
-        types[i] = type_named(design, k_evaluable[i]);
+        types[i] = odin3_kit_type_named(design, k_evaluable[i]);
     }
     for (uint32_t id = 1; id < ts->end; id++) {
         odin3_node_id node = {id};

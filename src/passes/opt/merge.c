@@ -227,15 +227,6 @@ static void port_operands(merge_state *ms, odin3_node_id node, uint32_t port, od
     }
 }
 
-static int cmp_u64(const void *lhs, const void *rhs) {
-    uint64_t left = *(const uint64_t *)lhs;
-    uint64_t right = *(const uint64_t *)rhs;
-    if (left == right) {
-        return 0;
-    }
-    return left < right ? -1 : 1;
-}
-
 /* Shorter first, then lexicographic. */
 static int cmp_run(const uint64_t *lhs, size_t nl, const uint64_t *rhs, size_t nr) {
     if (nl != nr) {
@@ -252,7 +243,7 @@ static int cmp_run(const uint64_t *lhs, size_t nl, const uint64_t *rhs, size_t n
 /* Sorts vec's words; with unify, drops the repeats. */
 static void sort_words(odin3_vec *vec, bool unify) {
     if (vec->len > 1) {
-        qsort(vec->data, vec->len, sizeof(uint64_t), cmp_u64);
+        qsort(vec->data, vec->len, sizeof(uint64_t), odin3_kit_cmp_u64);
     }
     if (!unify || vec->len < 2) {
         return;

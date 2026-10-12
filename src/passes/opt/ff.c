@@ -85,16 +85,6 @@ static const ff_kind *kind_of(const odin3_design *design, odin3_celltype_id type
     return NULL;
 }
 
-static odin3_celltype_id type_named(const odin3_design *design, const char *name) {
-    uint32_t str = 0;
-    odin3_celltype_id id = {0};
-    if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) ||
-        !odin3_celltype_find(design, str, &id)) {
-        return (odin3_celltype_id){0};
-    }
-    return id;
-}
-
 static uint32_t param_named(const odin3_celltype_def *def, const char *name) {
     uint32_t i = 0;
     while (i < def->n_params && strcmp(def->params[i].name, name) != 0) {
@@ -180,15 +170,6 @@ static odin3_net_id net_at(const odin3_vec *vec, uint32_t idx) {
     return *(const odin3_net_id *)odin3_vec_cat(vec, idx);
 }
 
-static odin3_status push_net(odin3_vec *vec, odin3_net_id net) {
-    odin3_net_id *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = net;
-    return ODIN3_OK;
-}
-
 static odin3_status push_bit(odin3_vec *vec, odin3_bit bit) {
     odin3_bit *slot = odin3_vec_push(vec);
     if (slot == NULL) {
@@ -253,7 +234,7 @@ static odin3_status read_port(const odin3_module *module, odin3_node_id node, ui
     odin3_vec *vec = vec_slot(ff, name);
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; vec != NULL && st == ODIN3_OK && k < pins.count; k++) {
-        st = push_net(vec, odin3_pin_net(module, (odin3_pin_id){pins.first.v + k}));
+        st = odin3_kit_push_net(vec, odin3_pin_net(module, (odin3_pin_id){pins.first.v + k}));
     }
     return st;
 }
@@ -518,7 +499,7 @@ static const char *fine_type(const odin3_ffdata *ff) {
 static odin3_status emit_type(const odin3_opt_ctx *oc, const odin3_ffdata *ff,
                               odin3_celltype_id *out) {
     const char *name = ff->is_fine ? fine_type(ff) : word_type(ff);
-    *out = name != NULL ? type_named(oc->design, name) : (odin3_celltype_id){0};
+    *out = name != NULL ? odin3_kit_type_named(oc->design, name) : (odin3_celltype_id){0};
     if (!odin3_celltype_valid(*out)) {
         odin3_log(ODIN3_LOG_ERROR, "opt: ff_emit: no registered cell type %s for this FF",
                   name != NULL ? name : "(fine)");
@@ -644,7 +625,7 @@ static odin3_status arst_to_aload(odin3_opt_ctx *oc, odin3_ffdata *ff) {
     for (uint32_t i = 0; st == ODIN3_OK && i < ff->width; i++) {
         odin3_net_id net = {0};
         st = odin3_opt_const_net(oc, bit_at(&ff->val_arst, i), &net);
-        st = st == ODIN3_OK ? push_net(&ff->sig_ad, net) : st;
+        st = st == ODIN3_OK ? odin3_kit_push_net(&ff->sig_ad, net) : st;
     }
     if (st != ODIN3_OK) {
         odin3_vec_clear(&ff->sig_ad);

@@ -161,6 +161,17 @@ odin3_status odin3_kit_rebuild_node(odin3_opt_ctx *oc, const odin3_kit_rebuild *
  */
 odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to);
 
+/*
+ * The registered cell type named name, none ({0}) when the design has none; no allocation, no log.
+ */
+odin3_celltype_id odin3_kit_type_named(const odin3_design *design, const char *name);
+
+/* Appends net to vec (elements odin3_net_id). NO_MEMORY with vec unchanged. */
+odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net);
+
+/* qsort comparison of two uint64_t, ascending. */
+int odin3_kit_cmp_u64(const void *lhs, const void *rhs);
+
 /* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 

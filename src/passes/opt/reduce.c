@@ -137,16 +137,6 @@ typedef struct rd_state {
     uint32_t groups;
 } rd_state;
 
-static odin3_celltype_id type_named(const odin3_design *design, const char *name) {
-    uint32_t str = 0;
-    odin3_celltype_id id = {0};
-    if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) ||
-        !odin3_celltype_find(design, str, &id)) {
-        return (odin3_celltype_id){0};
-    }
-    return id;
-}
-
 static uint32_t port_named(const odin3_design *design, odin3_celltype_id type, const char *name) {
     if (type.v == 0) {
         return NONE_PORT;
@@ -165,7 +155,7 @@ static void state_init(rd_state *rs, odin3_opt_ctx *oc) {
     rs->oc = oc;
     rs->m = oc->module;
     for (int i = 0; i < T_COUNT; i++) {
-        rs->types[i] = type_named(oc->design, k_type_names[i]);
+        rs->types[i] = odin3_kit_type_named(oc->design, k_type_names[i]);
     }
     rs->mem_wr_en = port_named(oc->design, rs->types[T_MEM], "WR_EN");
     rs->memwr_en = port_named(oc->design, rs->types[T_MEMWR], "EN");
@@ -228,15 +218,6 @@ static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
     return ODIN3_OK;
 }
 
-static odin3_status push_net(odin3_vec *vec, odin3_net_id net) {
-    odin3_net_id *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = net;
-    return ODIN3_OK;
-}
-
 /* vec = n zeroed uint32_t elements. */
 static odin3_status zero_u32(odin3_vec *vec, size_t n) {
     odin3_vec_clear(vec);
@@ -253,15 +234,6 @@ static void truncate_vec(odin3_vec *vec, size_t len) {
     }
 }
 
-static int cmp_u64(const void *lhs, const void *rhs) {
-    uint64_t left = *(const uint64_t *)lhs;
-    uint64_t right = *(const uint64_t *)rhs;
-    if (left == right) {
-        return 0;
-    }
-    return left < right ? -1 : 1;
-}
-
 /* Sorts vec[from ..) and drops the repeats (Yosys's sort_and_unify). */
 static void sort_unify(odin3_vec *vec, size_t from) {
     uint64_t *data = (uint64_t *)vec->data + from;
@@ -269,7 +241,7 @@ static void sort_unify(odin3_vec *vec, size_t from) {
     if (count < 2) {
         return;
     }
-    qsort(data, count, sizeof *data, cmp_u64);
+    qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
     size_t kept = 1;
     for (size_t i = 1; i < count; i++) {
         if (data[i] != data[kept - 1]) {
@@ -309,7 +281,7 @@ static gather_status gather_port(const rd_state *rs, odin3_node_id node, uint32_
         if (!odin3_net_valid(net)) {
             return GATHER_OPEN;
         }
-        if ((nets != NULL && push_net(nets, net) != ODIN3_OK) ||
+        if ((nets != NULL && odin3_kit_push_net(nets, net) != ODIN3_OK) ||
             (keys != NULL && push_u64(keys, net_key(rs->m, net)) != ODIN3_OK)) {
             return GATHER_OOM;
         }
@@ -493,7 +465,7 @@ static odin3_status member_rebuild(rd_state *rs, const member *mb) {
     for (size_t i = 0; st == ODIN3_OK && i < mb->cur_len; i++) {
         odin3_net_id net = {0};
         st = key_net(rs, ((const uint64_t *)rs->pool.data)[mb->cur_off + i], &net);
-        st = st == ODIN3_OK ? push_net(&rs->new_a, net) : st;
+        st = st == ODIN3_OK ? odin3_kit_push_net(&rs->new_a, net) : st;
     }
     if (st != ODIN3_OK) {
         return st;
@@ -825,12 +797,12 @@ static odin3_status bits_inputs(rd_state *rs) {
     const uint32_t *kept = rs->kept.data;
     odin3_status st = ODIN3_OK;
     for (size_t k = 0; st == ODIN3_OK && k < rs->kept.len; k++) {
-        st = push_net(&rs->new_a, ((const odin3_net_id *)rs->an.data)[kept[k]]);
+        st = odin3_kit_push_net(&rs->new_a, ((const odin3_net_id *)rs->an.data)[kept[k]]);
     }
     for (size_t slice = 0; st == ODIN3_OK && slice < slices; slice++) {
         for (size_t k = 0; st == ODIN3_OK && k < rs->kept.len; k++) {
             const odin3_net_id *bn = rs->bn.data;
-            st = push_net(&rs->new_b, bn[slice * width + kept[k]]);
+            st = odin3_kit_push_net(&rs->new_b, bn[slice * width + kept[k]]);
         }
     }
     return st;
@@ -848,7 +820,7 @@ static odin3_status bits_sources(rd_state *rs, odin3_node_id fresh, size_t slice
             uint32_t group = ((const uint32_t *)rs->rep.data)[i];
             net = ((const odin3_net_id *)rs->tmp.data)[((const uint32_t *)rs->pos.data)[group]];
         }
-        st = push_net(&rs->srcs, net);
+        st = odin3_kit_push_net(&rs->srcs, net);
     }
     return st;
 }
@@ -1020,7 +992,8 @@ static odin3_status make_group_or(rd_state *rs, uint32_t group, odin3_prov_id pr
     odin3_vec_clear(&rs->srcs);
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
-        st = push_net(&rs->srcs, ((const odin3_net_id *)rs->sn.data)[gorder[gstart[group] + k]]);
+        st = odin3_kit_push_net(&rs->srcs,
+                                ((const odin3_net_id *)rs->sn.data)[gorder[gstart[group] + k]]);
     }
     made_cell *rec = st == ODIN3_OK ? odin3_vec_push(&rs->made) : NULL;
     if (st == ODIN3_OK && rec == NULL) {
@@ -1058,11 +1031,12 @@ static odin3_status groups_build(rd_state *rs, size_t width, odin3_prov_id prov)
         const uint32_t count = ((const uint32_t *)rs->gstart.data)[group + 1U] - start;
         const uint32_t first = ((const uint32_t *)rs->gorder.data)[start];
         for (size_t k = 0; st == ODIN3_OK && k < width; k++) {
-            st = push_net(&rs->new_b, ((const odin3_net_id *)rs->bn.data)[first * width + k]);
+            st = odin3_kit_push_net(&rs->new_b,
+                                    ((const odin3_net_id *)rs->bn.data)[first * width + k]);
         }
         odin3_net_id sel = ((const odin3_net_id *)rs->sn.data)[first];
         st = st == ODIN3_OK && count > 1 ? make_group_or(rs, group, prov, &sel) : st;
-        st = st == ODIN3_OK ? push_net(&rs->new_s, sel) : st;
+        st = st == ODIN3_OK ? odin3_kit_push_net(&rs->new_s, sel) : st;
     }
     return st;
 }
