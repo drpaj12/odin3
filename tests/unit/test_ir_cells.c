@@ -25,13 +25,21 @@ enum {
     BAD_INIT = 4,
     SOP_WIDTH = 3,
     ROW_LEN = 4,
-    N_TYPES = 56,
+    N_TYPES = 67,
     STRUCTURAL_TYPES = 7,
-    SOP_INDEX = 52,  /* the last 1B type; 2D appends after it (plan point (f)) */
-    NEG_INDEX = 53,  /* the first of the nine 2D word cells (IR change A, EL-31) */
-    POW_INDEX = 61,  /* the last of the nine */
-    PROC_INDEX = 62, /* the process cell (IR change B, EL-33), after the nine */
-    BUILTIN_COUNT = 63,
+    SOP_INDEX = 52,   /* the last 1B type; 2D appends after it (plan point (f)) */
+    NEG_INDEX = 53,   /* the first of the nine 2D word cells (IR change A, EL-31) */
+    POW_INDEX = 61,   /* the last of the nine */
+    PROC_INDEX = 62,  /* the process cell (IR change B, EL-33), after the nine */
+    ADFFE_INDEX = 63, /* the first of the eleven 2E flip-flops and latches (IR change D, §13) */
+    SR_INDEX = 73,    /* the last of the eleven */
+    BUILTIN_COUNT = 74,
+    FF_WIDE = 4, /* WIDTH of the pin-count and verify cases below */
+    FF_WIDE_PINS = 11,
+    DFFSRE_WIDTH = 3,
+    DFFSRE_PINS = 14,
+    SR_WIDTH = 2,
+    SR_PINS = 6,
     POW_A_WIDTH = 4,
     POW_B_WIDTH = 3,
     POW_Y_WIDTH = 5,
@@ -41,12 +49,16 @@ enum {
 static odin3_design *design;
 static uint32_t errors_logged;
 static char last_error[LOG_TEXT];
+static char first_error[LOG_TEXT]; /* the first error since it was last cleared */
 
 static void count_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         errors_logged++;
         (void)snprintf(last_error, sizeof last_error, "%s", msg);
+        if (first_error[0] == '\0') {
+            (void)snprintf(first_error, sizeof first_error, "%s", msg);
+        }
     }
 }
 
@@ -148,6 +160,17 @@ static const expect k_expect[] = {
     {"$shiftx", WORD, 0, "IIO", {1, 1, 1}},
     {"$pow", WORD, 0, "IIO", {1, 1, 1}},
     {"$proc", WORD, ODIN3_CT_PROCESS, "IO", {0, 1}},
+    {"$adffe", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$sdffe", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$sdffce", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$aldff", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$aldffe", WORD, 0, "IIIIIO", {1, 1, 1, 1, 1, 1}},
+    {"$dffsr", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$dffsre", WORD, 0, "IIIIIO", {1, 1, 1, 1, 1, 1}},
+    {"$dlatch", WORD, 0, "IIO", {1, 1, 1}},
+    {"$adlatch", WORD, 0, "IIIO", {1, 1, 1, 1}},
+    {"$dlatchsr", WORD, 0, "IIIIO", {1, 1, 1, 1, 1}},
+    {"$sr", WORD, 0, "IIO", {1, 1, 1}},
 };
 #define N_EXPECT (sizeof k_expect / sizeof k_expect[0])
 
@@ -520,6 +543,199 @@ static void test_shiftx_is_not_simulated(void) {
                                  last_error);
 }
 
+/* --- the eleven 2E flip-flops and latches (IR change D, 2E spec §13, PR-19) ------------------- */
+
+/* Each cell's ports and parameters, in order (Yosys 0.55 simlib); Q is the only output. */
+typedef struct ff_row {
+    const char *name;
+    const char *ports;
+    const char *params;
+} ff_row;
+
+static const ff_row k_ffcells[] = {
+    {"$adffe", "CLK ARST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ARST_POLARITY ARST_VALUE"},
+    {"$sdffe", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE"},
+    {"$sdffce", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE"},
+    {"$aldff", "CLK ALOAD AD D Q", "WIDTH CLK_POLARITY ALOAD_POLARITY"},
+    {"$aldffe", "CLK ALOAD AD EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ALOAD_POLARITY"},
+    {"$dffsr", "CLK SET CLR D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY"},
+    {"$dffsre", "CLK SET CLR EN D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY EN_POLARITY"},
+    {"$dlatch", "EN D Q", "WIDTH EN_POLARITY"},
+    {"$adlatch", "EN ARST D Q", "WIDTH EN_POLARITY ARST_POLARITY ARST_VALUE"},
+    {"$dlatchsr", "EN SET CLR D Q", "WIDTH EN_POLARITY SET_POLARITY CLR_POLARITY"},
+    {"$sr", "SET CLR Q", "WIDTH SET_POLARITY CLR_POLARITY"},
+};
+enum { N_FFCELLS = sizeof k_ffcells / sizeof k_ffcells[0] };
+
+/* The blank-separated words of list must be the count names got(i), in order. */
+typedef const char *(*name_at)(const odin3_celltype_def *def, uint32_t idx);
+static const char *port_name_at(const odin3_celltype_def *def, uint32_t idx) {
+    return def->ports[idx].name;
+}
+static const char *param_name_at(const odin3_celltype_def *def, uint32_t idx) {
+    return def->params[idx].name;
+}
+
+static void check_word_list(const odin3_celltype_def *def, const char *list, uint32_t count,
+                            name_at got) {
+    uint32_t idx = 0;
+    for (const char *word = list; *word != '\0'; idx++) {
+        size_t len = strcspn(word, " ");
+        TEST_ASSERT_LESS_THAN_UINT32_MESSAGE(count, idx, def->name);
+        const char *name = got(def, idx);
+        TEST_ASSERT_TRUE_MESSAGE(strlen(name) == len && strncmp(word, name, len) == 0, name);
+        word += len + (word[len] == ' ' ? 1 : 0);
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(count, idx, def->name);
+}
+
+/* Only Q is an output; a verify hook and no simulate or const_value hook. */
+static void check_ff_dirs(const odin3_celltype_def *def) {
+    TEST_ASSERT_NULL_MESSAGE(def->simulate, def->name);
+    TEST_ASSERT_NULL_MESSAGE(def->const_value, def->name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(def->verify, def->name);
+    for (uint32_t k = 0; k < def->n_ports; k++) {
+        bool is_q = strcmp(def->ports[k].name, "Q") == 0;
+        TEST_ASSERT_EQUAL_MESSAGE(is_q ? ODIN3_DIR_OUT : ODIN3_DIR_IN, def->ports[k].dir,
+                                  def->name);
+    }
+}
+
+/* WIDTH and the polarities are INT with default 1; each *_VALUE is BITS with one default bit. */
+static void check_ff_param_kinds(const odin3_celltype_def *def) {
+    for (uint32_t k = 0; k < def->n_params; k++) {
+        const odin3_param_def *param = &def->params[k];
+        bool is_value = strstr(param->name, "_VALUE") != NULL;
+        TEST_ASSERT_EQUAL_MESSAGE(is_value ? ODIN3_VAL_BITS : ODIN3_VAL_INT, param->kind,
+                                  param->name);
+        TEST_ASSERT_EQUAL_MESSAGE(param->kind, param->dflt.kind, param->name);
+        uint32_t dflt = is_value ? param->dflt.len : (uint32_t)param->dflt.i;
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, dflt, param->name);
+    }
+}
+
+/* Row i of the table: built-in ID ADFFE_INDEX + i, found by name, its ports and parameters. */
+static void check_ff_row(uint32_t row_idx) {
+    const ff_row *row = &k_ffcells[row_idx];
+    odin3_celltype_id id = find_type(row->name);
+    TEST_ASSERT_NOT_EQUAL_MESSAGE(0, id.v, row->name);
+    const odin3_celltype_def *def = odin3_celltype_get(design, id);
+    TEST_ASSERT_EQUAL_PTR_MESSAGE(odin3_builtin_celltypes[ADFFE_INDEX + row_idx], def, row->name);
+    TEST_ASSERT_EQUAL_STRING(row->name, def->name);
+    check_word_list(def, row->ports, def->n_ports, port_name_at);
+    check_word_list(def, row->params, def->n_params, param_name_at);
+    check_ff_dirs(def);
+    check_ff_param_kinds(def);
+}
+
+/* IDs 63..73 after $proc, in §13's order; found by name in a fresh design; the table's ports
+ * (only Q an output), parameters and their kinds (WIDTH and polarities INT, *_VALUE BITS). */
+static void test_ffcell_table(void) {
+    TEST_ASSERT_EQUAL_UINT32(BUILTIN_COUNT, odin3_builtin_celltype_count);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_proc, odin3_builtin_celltypes[PROC_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_adffe, odin3_builtin_celltypes[ADFFE_INDEX]);
+    TEST_ASSERT_EQUAL_PTR(&odin3_cell_sr, odin3_builtin_celltypes[SR_INDEX]);
+    TEST_ASSERT_EQUAL_UINT32(SR_INDEX - ADFFE_INDEX + 1, (uint32_t)N_FFCELLS);
+    for (uint32_t i = 0; i < N_FFCELLS; i++) {
+        check_ff_row(i);
+    }
+}
+
+/* A node of the named type with params (NULL: the defaults); its ID, or 0 when refused. */
+static odin3_node_id ff_node(odin3_module *mod, const char *type, const odin3_value *params) {
+    const odin3_celltype_def *def = get_def(type);
+    odin3_value dflt[MAX_PARAMS];
+    defaults_of(def, dflt);
+    odin3_node_spec spec = {find_type(type), 0, (odin3_prov_id){0}, params != NULL ? params : dflt,
+                            def->n_params};
+    odin3_node_id node = {0};
+    (void)odin3_node_create(mod, &spec, &node);
+    return node;
+}
+
+/* type with params is refused: INVALID_ARG, an error logged, no node created. */
+static void expect_ff_refused(odin3_module *mod, const char *type, const odin3_value *params) {
+    const odin3_celltype_def *def = get_def(type);
+    odin3_node_spec spec = {find_type(type), 0, (odin3_prov_id){0}, params, def->n_params};
+    uint32_t before = odin3_module_node_end(mod);
+    odin3_node_id node = {0};
+    errors_logged = 0;
+    first_error[0] = '\0';
+    TEST_ASSERT_EQUAL_MESSAGE(ODIN3_ERR_INVALID_ARG, odin3_node_create(mod, &spec, &node), type);
+    TEST_ASSERT_GREATER_THAN_UINT32_MESSAGE(0, errors_logged, type);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, node.v, type);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(before, odin3_module_node_end(mod), type);
+}
+
+static const uint8_t k_bits4[FF_WIDE] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_0, ODIN3_BIT_0};
+static const uint8_t k_bits3[FF_WIDE - 1] = {ODIN3_BIT_0, ODIN3_BIT_1, ODIN3_BIT_0};
+static const uint8_t k_bits2[SR_WIDTH] = {ODIN3_BIT_1, ODIN3_BIT_0};
+
+static odin3_value bits_of(const uint8_t *bits, uint32_t len) {
+    odin3_value val = {ODIN3_VAL_BITS, 0, bits, len, 0, 0};
+    return val;
+}
+
+/* Pin counts are the sum of the port widths. */
+static void ffcell_pins(odin3_module *mod) {
+    const odin3_value adffe[5] = {odin3_value_int(FF_WIDE), odin3_value_int(1), odin3_value_int(0),
+                                  odin3_value_int(1), bits_of(k_bits4, FF_WIDE)};
+    odin3_node_id node = ff_node(mod, "$adffe", adffe);
+    TEST_ASSERT_NOT_EQUAL(0, node.v);
+    TEST_ASSERT_EQUAL_UINT32(FF_WIDE_PINS, odin3_node_pins(mod, node).count);
+    const odin3_value dffsre[5] = {odin3_value_int(DFFSRE_WIDTH), odin3_value_int(1),
+                                   odin3_value_int(0), odin3_value_int(1), odin3_value_int(0)};
+    node = ff_node(mod, "$dffsre", dffsre);
+    TEST_ASSERT_NOT_EQUAL(0, node.v);
+    TEST_ASSERT_EQUAL_UINT32(DFFSRE_PINS, odin3_node_pins(mod, node).count);
+    const odin3_value sr[3] = {odin3_value_int(SR_WIDTH), odin3_value_int(1), odin3_value_int(0)};
+    node = ff_node(mod, "$sr", sr);
+    TEST_ASSERT_NOT_EQUAL(0, node.v);
+    TEST_ASSERT_EQUAL_UINT32(SR_PINS, odin3_node_pins(mod, node).count);
+}
+
+/* Bad polarities, widths and values are refused with nothing created. */
+static void ffcell_verify(odin3_module *mod) {
+    const odin3_value aldff[3] = {odin3_value_int(1), odin3_value_int(2), odin3_value_int(1)};
+    expect_ff_refused(mod, "$aldff", aldff);
+    const odin3_value dlatch[2] = {odin3_value_int(0), odin3_value_int(1)};
+    expect_ff_refused(mod, "$dlatch", dlatch);
+    const odin3_value adlatch[4] = {odin3_value_int(FF_WIDE), odin3_value_int(1),
+                                    odin3_value_int(1), bits_of(k_bits3, FF_WIDE - 1)};
+    expect_ff_refused(mod, "$adlatch", adlatch);
+    TEST_ASSERT_EQUAL_STRING("cell parameter ARST_VALUE must be 4 bits", first_error);
+    const odin3_value sdffce[5] = {odin3_value_int(SR_WIDTH), odin3_value_int(1),
+                                   odin3_value_int(1), odin3_value_int(1), odin3_value_int(0)};
+    expect_ff_refused(mod, "$sdffce", sdffce);
+    const odin3_value sdffce_ok[5] = {odin3_value_int(SR_WIDTH), odin3_value_int(1),
+                                      odin3_value_int(1), odin3_value_int(1),
+                                      bits_of(k_bits2, SR_WIDTH)};
+    TEST_ASSERT_NOT_EQUAL(0, ff_node(mod, "$sdffce", sdffce_ok).v);
+}
+
+static void test_ffcell_pins_and_verify(void) {
+    odin3_module *mod = new_module("m");
+    ffcell_pins(mod);
+    ffcell_verify(mod);
+}
+
+/* simulate is NULL for all eleven: the 1E build refuses a $dlatch with the hookless-cell text. */
+static void test_ffcell_no_sim(void) {
+    odin3_module *mod = new_module("m");
+    odin3_node_id node = ff_node(mod, "$dlatch", NULL);
+    TEST_ASSERT_NOT_EQUAL(0, node.v);
+    odin3_sim *sim = NULL;
+    last_error[0] = '\0';
+    TEST_ASSERT_EQUAL(ODIN3_ERR_INVALID_ARG,
+                      odin3_sim_build(design, odin3_module_id_of(mod), &sim));
+    TEST_ASSERT_NULL(sim);
+    char want[LOG_TEXT];
+    (void)snprintf(want, sizeof want,
+                   "cannot simulate `$dlatch` (node `#%u`): the cell type has no simulate hook",
+                   node.v);
+    TEST_ASSERT_EQUAL_STRING(want, last_error);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_builtin_has_expected_shape);
@@ -538,5 +754,8 @@ int main(void) {
     RUN_TEST(test_nine_cells_hooks);
     RUN_TEST(test_pow_node_pins);
     RUN_TEST(test_shiftx_is_not_simulated);
+    RUN_TEST(test_ffcell_table);
+    RUN_TEST(test_ffcell_pins_and_verify);
+    RUN_TEST(test_ffcell_no_sim);
     return UNITY_END();
 }

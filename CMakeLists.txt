@@ -479,6 +479,12 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
+    # 2E Task 1: test_verilog_writer also writes rtlil/ffcells.v (IR change D's eleven cells),
+    # beside test_rtlil_writer's ffcells.il, for CTest ffcells_yosys_read (ODIN3_YOSYS055 block).
+    target_sources(test_verilog_writer PRIVATE tests/unit/ffcells_fixture.c)
+    target_compile_definitions(test_verilog_writer PRIVATE
+        ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
+    set_tests_properties(test_verilog_writer PROPERTIES FIXTURES_SETUP ffcells)
     # The writers' Yosys checks run when Yosys is found (workspace build first, then PATH) and
     # are ignored otherwise (CI has no Yosys).
     find_program(ODIN3_YOSYS_EXE yosys HINTS $ENV{HOME}/odin3-ws/external/yosys/build)
@@ -502,6 +508,7 @@ if(BUILD_TESTING)
     # Yosys 0.55 round trip (rtlil_yosys_roundtrip, in the ODIN3_YOSYS055 block below).
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rtlil)
     odin3_add_unit_test(test_rtlil_writer)
+    target_sources(test_rtlil_writer PRIVATE tests/unit/ffcells_fixture.c)
     target_compile_definitions(test_rtlil_writer PRIVATE
         ODIN3_RTLIL_OUT="${PROJECT_BINARY_DIR}/rtlil")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP rtlil_fixtures)
@@ -513,6 +520,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_elab_interp)
     target_include_directories(test_elab_interp PRIVATE ${_gen})
     add_dependencies(test_elab_interp verilog_generated)
+    set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
@@ -860,5 +868,13 @@ if(BUILD_TESTING)
                     ${ODIN3_YOSYS055} ${PROJECT_BINARY_DIR}/rtlil)
         set_tests_properties(rtlil_yosys_roundtrip PROPERTIES
             LABELS differential FIXTURES_REQUIRED rtlil_fixtures)
+        # 2E Task 1 (IR change D, plan point (b)): Yosys 0.55 reads the eleven word flip-flops
+        # and latches as test_rtlil_writer writes them (ffcells.il; Yosys's cell checker) and as
+        # test_verilog_writer writes them (ffcells.v, generic instances; -icells).
+        add_test(NAME ffcells_yosys_read
+            COMMAND ${ODIN3_YOSYS055} -q -p
+                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/ffcells.il; check -assert; write_rtlil -; design -reset; read_verilog -icells ${PROJECT_BINARY_DIR}/rtlil/ffcells.v; hierarchy -check")
+        set_tests_properties(ffcells_yosys_read PROPERTIES
+            LABELS differential FIXTURES_REQUIRED ffcells)
     endif()
 endif()

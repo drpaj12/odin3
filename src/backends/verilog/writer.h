@@ -85,7 +85,8 @@ typedef struct odin3_verilog_opts {
  * D;`; `$_FF_`: clocked by `(* gclk *) wire $gclk` (Yosys global clock); INIT 0/1 add `initial
  * q = 1'b0|1'b1;`, INIT 2/3 add nothing (undefined start value). `$dff`/`$dffe`/`$adff`/`$sdff`
  * likewise, with enable, async or sync reset. A built-in cell whose outputs are all unconnected is
- * omitted. Any other cell (module, hard, black-box, `$mem*`, `$shiftx`, `$pow`, plugin types) is
+ * omitted. Any other cell (module, hard, black-box, `$mem*`, `$shiftx`, `$pow`, the eleven word
+ * flip-flops and latches of 2E's IR change D such as `$dffsr` and `$dlatch`, plugin types) is
  * a module instance with named port connections in port order and, unless it instantiates a
  * module, every parameter as `#(.P(value))` (INT decimal, BITS `N'b…` MSB first, STRING quoted
  * byte-exact, COVER rows quoted); Yosys reads a built-in one as its internal cell only with

@@ -6,7 +6,8 @@
 /*
  * Append only: a type's index is its built-in ID. 2D IR change A (EL-31) appended the nine word
  * cells from $neg to $pow after $sop (index 52), so IDs 0..52 did not move, and IR change B
- * (EL-33) then appended the process cell $proc (index 62; 2D plan point (f)).
+ * (EL-33) then appended the process cell $proc (index 62; 2D plan point (f)). 2E's IR change D
+ * (2E spec §13) appended the eleven word flip-flops and latches $adffe … $sr (indices 63..73).
  */
 const odin3_celltype_def *const odin3_builtin_celltypes[] = {
     &odin3_cell_port_in,    &odin3_cell_port_out,    &odin3_cell_port_inout,
@@ -30,6 +31,10 @@ const odin3_celltype_def *const odin3_builtin_celltypes[] = {
     &odin3_cell_xnor,       &odin3_cell_reduce_xnor, &odin3_cell_reduce_bool,
     &odin3_cell_logic_not,  &odin3_cell_logic_and,   &odin3_cell_logic_or,
     &odin3_cell_shiftx,     &odin3_cell_pow,         &odin3_cell_proc,
+    &odin3_cell_adffe,      &odin3_cell_sdffe,       &odin3_cell_sdffce,
+    &odin3_cell_aldff,      &odin3_cell_aldffe,      &odin3_cell_dffsr,
+    &odin3_cell_dffsre,     &odin3_cell_dlatch,      &odin3_cell_adlatch,
+    &odin3_cell_dlatchsr,   &odin3_cell_sr,
 };
 
 const uint32_t odin3_builtin_celltype_count =

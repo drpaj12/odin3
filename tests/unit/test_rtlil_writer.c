@@ -7,6 +7,7 @@
  * round trip (CTest rtlil_yosys_roundtrip).
  */
 #include "backends/rtlil/writer.h"
+#include "ffcells_fixture.h"
 #include "ir/celltype.h"
 #include "ir/check.h"
 #include "ir/design.h"
@@ -34,8 +35,9 @@
 #endif
 
 enum { LOG_CAP = 4096, TEXT_MAX = 1 << 16, PATH_MAX_LEN = 512, OOM_LIMIT = 4000, ARENA = 1024 };
-/* EVERY_CELL_MIN: the `$` types 2D-1 registers that test_every_cell writes (review probe A). */
-enum { CELL_PORTS_MAX = 16, CELL_PINS_MAX = 64, NAME_MAX_LEN = 64, EVERY_CELL_MIN = 46 };
+/* EVERY_CELL_MIN: the `$` types 2D-1 (46) and 2E-1 (the eleven flip-flops and latches of IR change
+ * D) register that test_every_cell writes (review probe A). */
+enum { CELL_PORTS_MAX = 16, CELL_PINS_MAX = 64, NAME_MAX_LEN = 64, EVERY_CELL_MIN = 57 };
 
 static odin3_design *design;
 static odin3_prov_id prov;
@@ -804,6 +806,50 @@ static void test_every_cell(void) {
     save_fixture("every_cell");
 }
 
+/* --- the eleven flip-flops and latches (2E IR change D, §13) -------------------------------- */
+
+/* $aldff (WIDTH 1) is written generically: simlib's parameters and ports, in order. */
+static void test_rtlil_aldff(void) {
+    odin3_module *mod = new_module("m");
+    odin3_net_id clk = bit_of(mod, port(mod, "clk", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id aload = bit_of(mod, port(mod, "aload", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id ad = bit_of(mod, port(mod, "ad", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id dat = bit_of(mod, port(mod, "d", ODIN3_DIR_IN, 0, 0), 0);
+    odin3_net_id out = bit_of(mod, port(mod, "q", ODIN3_DIR_OUT, 0, 0), 0);
+    odin3_value params[3] = {odin3_value_int(1), odin3_value_int(1), odin3_value_int(1)};
+    odin3_netvec ports[5] = {{&clk, 1}, {&aload, 1}, {&ad, 1}, {&dat, 1}, {&out, 1}};
+    uint32_t k = cell(mod, (cell_req){"$aldff", NULL, params, 3, ports}).v;
+    char want[LOG_CAP];
+    (void)snprintf(want, sizeof want,
+                   "  cell $aldff $c%u\n"
+                   "    parameter \\WIDTH 1\n"
+                   "    parameter \\CLK_POLARITY 1\n"
+                   "    parameter \\ALOAD_POLARITY 1\n"
+                   "    connect \\CLK \\clk\n"
+                   "    connect \\ALOAD \\aload\n"
+                   "    connect \\AD \\ad\n"
+                   "    connect \\D \\d\n"
+                   "    connect \\Q \\q\n"
+                   "  end\n",
+                   k);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rtlil(), want), text.data);
+}
+
+/* Module ffcells (all eleven, WIDTH 2) to ffcells.il, the input of CTest ffcells_yosys_read. */
+static void test_ffcells_fixture(void) {
+    (void)ffcells_build(design);
+    (void)rtlil();
+    for (uint32_t i = 0; i < FFCELLS_COUNT; i++) {
+        char line[LOG_CAP];
+        (void)snprintf(line, sizeof line, "  cell %s \\c_%s", ffcells_types[i],
+                       ffcells_types[i] + 1);
+        expect_line(line);
+    }
+    expect_line("    parameter \\ARST_VALUE 2'01");
+    expect_line("    parameter \\CLR_POLARITY 0");
+    save_fixture("ffcells");
+}
+
 /* --- refusals and the atomic write --------------------------------------------------------- */
 
 /* A node of type tname named u (params NULL: the defaults) in module r must be refused with
@@ -988,6 +1034,8 @@ int main(void) {
     RUN_TEST(test_module_names_like_ids);
     RUN_TEST(test_top_attribute);
     RUN_TEST(test_every_cell);
+    RUN_TEST(test_rtlil_aldff);
+    RUN_TEST(test_ffcells_fixture);
     RUN_TEST(test_refuses_dff_p);
     RUN_TEST(test_refuses_dff_n);
     RUN_TEST(test_refuses_dlatch_p);

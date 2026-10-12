@@ -231,6 +231,17 @@ spec §5.2. An entry declares:
   Only the clock pins of SEQ_EDGE cells must come from primary inputs; a latch enable may come
   from logic.
 
+**The built-in table** (`src/ir/cells/builtin.c`) is append-only: a type's index is its built-in
+ID, so IDs never move. IDs 0–52 are 1B's set (structural and constant types, the word cells, the
+bit cells, `$sop`); 53–61 are 2D's IR change A (`$neg` … `$pow`), 62 is IR change B (`$proc`,
+IR-19), and 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
+$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), 74 types
+in all. IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT,
+≥ 1), polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
+`ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.
+Like `$dff $dffe $adff $sdff` they have word granularity, flags 0 and no simulate hook (1E
+simulates the netlist view), so they are legal in the RTLIL view only.
+
 **The 1E hooks.** `simulate(const odin3_sim_cell *cell)` evaluates one cell; NULL means the type
 cannot be simulated. Its contract is in `src/sim/cell.h`:
 - values are 2-state, one byte per net bit;
