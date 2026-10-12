@@ -1255,6 +1255,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
   - empty positions are recorded for EL-10.
 - `odin3_status odin3_elab1_decls(odin3_elab1 *e1, uint32_t scope, odin3_ast_id item);` completes Task 11's declarations: no `STRENGTH`/`DELAY`/`VECTORED`/`SCALARED`; initialisers kept.
 - `odin3_status odin3_elab1_implicit(odin3_elab1 *e1, uint32_t spec);`: implicit nets per EL-25, first in the `MODULE`'s items, in first-use order, of the `` `default_nettype `` kind in effect.
+  - *Carry from Task 13's review:* define the elaborated form's marker of the implicit nets' `NET_DECL` (for example a `NET_DECL` flag or a synthesized `ATTR`) in EL-4, **and** make the binder set `ODIN3_SYM_F_IMPLICIT` from it (EL-5 lists the flag; nothing sets it yet).
 - `uint8_t odin3_elab1_nettype_at(const odin3_elab1 *e1, odin3_ast_id module_node);`: the last `DIRECTIVE[default_nettype]` before the module in stream order, reset by `` `resetall ``.
 - `odin3_status odin3_elab1_subroutine(odin3_elab1 *e1, odin3_ast_id decl, uint32_t scope);`: non-ANSI inputs move to the ports `LIST`, one declarator each; locals go to `LIST`.
 - `ALWAYS`, `INITIAL` and every statement kind are written per EL-4.
@@ -1398,6 +1399,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - ABI:
   - `typedef struct odin3_elab_options { uint32_t top; uint32_t top_at; bool nolatches, nomem2reg, auto_blackbox; uint32_t reserved[4]; } odin3_elab_options;`
   - `odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast, const odin3_elab_options *opts);` (point (b)), with the paragraph and the run-ID caveat. `reserved` must be zero, else `INVALID_ARG`.
+  - *Carry from Task 13's review (m4):* on this path `odin3_ast_check` rule 7 runs **in every build** (not only Debug or `--check`) before `odin3_elab_bind`, since an adapter's store is untrusted; a violation is `INVALID_ARG`. The binder checks only the rows rule 7 does not (EL-4, v4.9).
 - CLI: `odin3 --elab-only a.v b.v` ≡ `-p "read_verilog a.v b.v; stats"`. With a script it fails with point (w)'s text.
 
 **Tests (`test_elab_stage2_wires.c`; `et_read(const et_req *req, et_result *out)` added to `elab_test.h` runs the whole pass):**
@@ -1440,6 +1442,7 @@ The host declares `a`, `b` `[7:0]` unsigned; `s` `signed [7:0]`; `t` `signed [3:
 - `typedef struct odin3_elab2_reads { odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out); void *user; } odin3_elab2_reads;` is the `rv` substitution hook (Task 21); NULL outside processes.
 - `typedef struct odin3_elab2_expr_req { odin3_ast_id expr; odin3_etype context; const odin3_net_id *dest; const odin3_elab2_reads *reads; } odin3_elab2_expr_req;`: `dest` is NULL, or `context.width` nets the outermost cell drives by construction (EL-28).
 - `odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);` types the expression and emits it post-order. All-constant operands fold through `odin3_cval_op`.
+  - *Carry from Task 13's review (m1):* an `IDENT` or `HIER_NAME` that names a generate block or named block binds to its `BLOCK` symbol (the binder rejects instance, function and task names with `'u' is not a net, variable or parameter`). Yosys 0.55 makes such a name an implicit net (`Warning: Identifier '\g' is implicitly declared`); the binder's symbol table cannot hold a net beside the block of one name, so Task 18 (or Task 15, declaring it in stage 1) decides: an implicit net with the warning, as Yosys, or an error recorded as a §17 divergence.
   - An unsized `localparam` read takes `UNSIZED` from its declarator's `NUMBER` (payload width 0), because the symtab value holds only bits and sign (review I11).
 - `odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);` (A1, moved here from Task 19; review R1):
   - it assigns by construction (`dest`) or by merge (`odin3_net_merge`), with the same-net no-op;

@@ -280,9 +280,12 @@ struct odin3_symtab {
     odin3_vec assigns;      /* odin3_sym_assign; ID = index + 1 */
     odin3_vec dims;         /* odin3_dim */
     odin3_u64map *by_name;  /* (scope << 32) | name -> symbol */
-    odin3_u64map *children; /* (parent << 32) | name -> first same-named child */
+    odin3_u64map *children; /* (parent << 32) | name -> first same-named child (the chain's head) */
+    odin3_u64map *tails;    /* (parent << 32) | name -> last same-named child (the chain's tail) */
+    odin3_u64map *indexed;  /* odin3_symtab_index_key(position) -> the named scope there */
     odin3_arena *arena;     /* value payloads */
     odin3_scope_id design;  /* the DESIGN scope, 0 until made */
+    bool index_collided;    /* two positions share an indexed key: a miss there is not conclusive */
 };
 
 /* Frees the table; called only by odin3_ast_destroy. NULL is a no-op. */
@@ -314,6 +317,20 @@ typedef struct odin3_chain_slot {
     bool found;
 } odin3_chain_slot;
 
+/*
+ * Key's slot in its chain (strictly ascending in order). O(1) for a key past the chain's tail (an
+ * ascending insert: a generate loop's next iteration), else a walk from the head (a front or middle
+ * insert, or a duplicate). Exact either way.
+ */
 odin3_chain_slot odin3_symtab_chain_find(const odin3_symtab *st, odin3_scope_key key);
+
+/* The indexed map's key of a chain position: a hash of (parent, name, order). */
+uint64_t odin3_symtab_index_key(odin3_scope_key key);
+
+/*
+ * The scope at key exactly (0 when none): O(1) through the indexed map, which holds every named
+ * scope; a chain walk only for a miss after two positions shared a key (index_collided).
+ */
+odin3_scope_id odin3_symtab_chain_get(const odin3_symtab *st, odin3_scope_key key);
 
 #endif

@@ -144,7 +144,13 @@ declaration assignment is a `CONTINUOUS` assignment; a `HIER_NAME` that ends in 
 component is E21; a `CALL` or `TASK_CALL` naming nothing is `'f' is not declared`; a range bound
 outside int32 is the width error at the bound, an x or z bound `range bound has x or z bits`.
 (4) The `IMPLICIT` flag is not set by the binder: the elaborated form has no marker for stage 1's
-implicit-net `NET_DECL` yet (Task 15).
+implicit-net `NET_DECL` yet (Task 15). (5) Fix round 1 (the Task 13 review): the binder also
+rejects four rows that were carried (an `INSTANCE` with a `RANGE`, a `tri0`/`tri1`/`trireg` net, a
+switch-level or pull gate, `vectored`/`scalared`), and a name that resolves to an instance,
+function or task is `'u' is not a net, variable or parameter` (Yosys 0.55: "Failed to detect width
+for identifier"); a block's name binds to its `BLOCK` symbol until Task 18 decides (Yosys makes it
+an implicit net). 2A's symbol table gains O(1) chain appends and position lookups (2A §8
+amendment).
 
 ## 1. Purpose and scope (EL-1)
 
@@ -315,7 +321,9 @@ store); `port 'p' without a net kind` (a module port that is neither a net nor a
 variable); `parameter 'P' is not a localparam with a NUMBER or STRING value`; `unnamed block 'b'
 with declarations` (`b` its first declaration); `system task '$x' (only $readmemh and $readmemb are
 allowed)`; `a range bound that is not a NUMBER`; `a generate index that is not a 32-bit NUMBER` (a
-`GEN_BLOCK` index or a `HIER_NAME` index).
+`GEN_BLOCK` index or a `HIER_NAME` index); and, from the fix round, `instance 'u' with a range`
+(arrays are expanded); `net 'w' of kind 'tri0'` (`tri1`, `trireg`; a port's `NET` field too);
+`switch-level or pull gate 'nmos'`; `'vectored' on a net declaration` (`'scalared'`).
 
 ### 2.5 Binding: the symbol table of an elaborated store (EL-5)
 
@@ -377,8 +385,13 @@ Made exact by 2D Task 13 (v4.9, agent defaults):
 - **Bounds.** A range bound outside int32 is EL-46's width error at the bound (`width |b| + 1`), a
   packed range wider than the cap the width error at the `RANGE`, an x or z bound `range bound has
   x or z bits`. Unpacked dimensions have no width cap here (memory sizes are EL-27's).
+- **Names that are not values.** An `IDENT` or `HIER_NAME` that resolves to an `INSTANCE`,
+  `FUNCTION` or `TASK` is `'u' is not a net, variable or parameter` (Yosys 0.55: "Failed to detect
+  width for identifier"). One that resolves to a `BLOCK` binds to it: Yosys 0.55 makes a generate
+  block's name an implicit net (`Identifier '\g' is implicitly declared`), which Task 18 (or
+  Task 15) implements or records as a divergence.
 - **Not yet.** The `IMPLICIT` flag is not set: the elaborated form has no marker for the implicit
-  nets' `NET_DECL` (Task 15 decides one).
+  nets' `NET_DECL` (Task 15 defines one and makes the binder set the flag from it).
 
 ## 3. Hierarchy
 
@@ -1759,7 +1772,8 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   initialisation and step`; `genvar 'i' is already used by an enclosing loop`; `generate loop of
   'i' repeats the value N`; `port declarations are not allowed in a generate block`; `'g[5].t'
   does not exist (generate block 'g[5]' was not elaborated)`.
-- **Declarations and ports (EL-23–EL-29)**: `'x' is not declared`; `'x' is not declared
+- **Declarations and ports (EL-23–EL-29)**: `'x' is not declared`; `'u' is not a net, variable
+  or parameter` (the binder, v4.9); `'x' is not declared
   (`default_nettype is none)`; `port 'a' is not declared`; `'x' is declared as a port but is not
   in the port list`; `port 'q' is declared with ranges [3:0] and [7:0]`; `'w' is a wired net (wand)
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at

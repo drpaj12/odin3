@@ -481,6 +481,34 @@ static void bd_param_value(bd_run *br, odin3_sym_id sym, odin3_ast_id value) {
 
 /* --- declarations --------------------------------------------------------------------------- */
 
+/* A net kind the elaborated form excludes (EL-4: tri0, tri1, trireg) on declarator, named. */
+static void bd_net_kind(bd_run *br, odin3_ast_id declarator, uint32_t kind) {
+    if (kind == ODIN3_AST_NET_DECL_TRI0 || kind == ODIN3_AST_NET_DECL_TRI1 ||
+        kind == ODIN3_AST_NET_DECL_TRIREG) {
+        const odin3_ast_kind_info *info = odin3_ast_kind_info_of(ODIN3_AST_NET_DECL);
+        bd_shape(br, declarator, "net '%s' of kind '%s'", bd_name(br, declarator),
+                 info->sub_names[kind]);
+    }
+}
+
+/* A NET_DECL has no `vectored` or `scalared` (EL-4). */
+static void bd_net_decl(bd_run *br, odin3_ast_id node) {
+    uint16_t flags = odin3_ast_flags(br->ast, node);
+    if ((flags & ODIN3_AST_F_NET_DECL_VECTORED) != 0) {
+        bd_shape(br, node, "'vectored' on a net declaration");
+    }
+    if ((flags & ODIN3_AST_F_NET_DECL_SCALARED) != 0) {
+        bd_shape(br, node, "'scalared' on a net declaration");
+    }
+}
+
+/* A GATE_DECL is a logic gate, not a switch-level or pull one (EL-4). */
+static void bd_gate(bd_run *br, odin3_ast_id node) {
+    if (odin3_ast_sub(br->ast, node) >= ODIN3_AST_GATE_DECL_NMOS) {
+        bd_shape(br, node, "switch-level or pull gate '%s'", odin3_ast_sub_name(br->ast, node));
+    }
+}
+
 /* A port's symbol: a module port is a net (its NET field) or a reg/integer variable (its DT); a
  * function or task port is a variable. */
 static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, bool subroutine) {
@@ -494,6 +522,9 @@ static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, b
     if (!subroutine && !is_var && (net == 0 || dt != ODIN3_AST_DT_NONE)) {
         bd_shape(br, declarator, "port '%s' without a net kind", bd_name(br, declarator));
         net = 1U + (uint32_t)ODIN3_AST_NET_DECL_WIRE; /* declared all the same: no cascade */
+    }
+    if (!is_var) {
+        bd_net_kind(br, declarator, net - 1U);
     }
     uint32_t var_sub =
         dt == ODIN3_AST_DT_INTEGER ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
@@ -522,6 +553,9 @@ _Static_assert(ODIN3_AST_F_NET_DECL_SIGNED == ODIN3_AST_F_VAR_DECL_SIGNED,
 static void bd_object(bd_run *br, const bd_frame *decl, odin3_ast_id declarator) {
     bool is_net = decl->kind == ODIN3_AST_NET_DECL;
     uint32_t sub = odin3_ast_sub(br->ast, decl->node);
+    if (is_net) {
+        bd_net_kind(br, declarator, sub);
+    }
     odin3_symbol_spec spec = {
         .name = odin3_ast_name(br->ast, declarator),
         .scope = decl->scope,
@@ -829,6 +863,9 @@ static uint32_t bd_port_name(const bd_run *br, odin3_ast_id port) {
 /* An INSTANCE: its symbol (a named one) and, for a MODULE of the store, one named CONNECTION per
  * port of that MODULE in port order (EL-4). */
 static void bd_instance(bd_run *br, const bd_frame *up, odin3_ast_id node) {
+    if (bd_child(br, node, 0).v != 0) { /* arrays are expanded (EL-4) */
+        bd_shape(br, node, "instance '%s' with a range", bd_name(br, node));
+    }
     if (odin3_ast_name(br->ast, node) != 0) {
         odin3_symbol_spec spec = {.name = odin3_ast_name(br->ast, node),
                                   .scope = up->scope,
@@ -1013,6 +1050,28 @@ static bool bd_visit_expr(bd_run *br, const bd_frame *up, const bd_frame *fr) {
     }
 }
 
+/* Declarations and instances; true: skip the node's children. */
+static bool bd_visit_decl(bd_run *br, const bd_frame *up, const bd_frame *fr) {
+    switch (fr->kind) {
+    case ODIN3_AST_DECLARATOR:
+        bd_declarator(br, up, fr->node);
+        return false;
+    case ODIN3_AST_RANGE:
+        return true; /* constant bounds, read by the declaration that owns it */
+    case ODIN3_AST_NET_DECL:
+        bd_net_decl(br, fr->node);
+        return false;
+    case ODIN3_AST_GATE_DECL:
+        bd_gate(br, fr->node);
+        return false;
+    case ODIN3_AST_INSTANCE:
+        bd_instance(br, up, fr->node);
+        return false;
+    default:
+        return bd_visit_expr(br, up, fr);
+    }
+}
+
 /* The node of fr, entered under up (NULL for the UNIT); true: skip its children. */
 static bool bd_visit(bd_run *br, const bd_frame *up, bd_frame *fr) {
     if (up == NULL) {
@@ -1028,11 +1087,6 @@ static bool bd_visit(bd_run *br, const bd_frame *up, bd_frame *fr) {
     case ODIN3_AST_LIST:
         bd_list_role(br, up, fr);
         return false;
-    case ODIN3_AST_DECLARATOR:
-        bd_declarator(br, up, fr->node);
-        return false;
-    case ODIN3_AST_RANGE:
-        return true; /* constant bounds, read by the declaration that owns it */
     case ODIN3_AST_GEN_BLOCK:
         return bd_gen_block(br, fr);
     case ODIN3_AST_SEQ_BLOCK:
@@ -1040,14 +1094,11 @@ static bool bd_visit(bd_run *br, const bd_frame *up, bd_frame *fr) {
     case ODIN3_AST_FUNCTION_DECL:
     case ODIN3_AST_TASK_DECL:
         return bd_subroutine(br, fr);
-    case ODIN3_AST_INSTANCE:
-        bd_instance(br, up, fr->node);
-        return false;
     case ODIN3_AST_INITIAL:
         fr->ctx = (uint8_t)(fr->ctx | BD_IN_INITIAL);
         return false;
     default:
-        return bd_visit_expr(br, up, fr);
+        return bd_visit_decl(br, up, fr);
     }
 }
 
@@ -1087,13 +1138,25 @@ static void bd_sweep(bd_run *br, odin3_ast_id unit) {
 
 /* --- resolution ----------------------------------------------------------------------------- */
 
+/* A name of an expression (IDENT or HIER_NAME node, text its spelling) resolved to sym: a net,
+ * variable or parameter; an instance, function or task is an error (Yosys: "Failed to detect width
+ * for identifier"). A block's name binds to its BLOCK symbol (Task 18's carry: Yosys makes it an
+ * implicit net). */
+static void bd_value_name(bd_run *br, odin3_ast_id node, odin3_sym_id sym, const char *text) {
+    const odin3_symbol *rec = odin3_symbol_get(br->st, sym);
+    if (rec == NULL) {
+        bd_error(br, node, "'%s' is not declared", text);
+    } else if (rec->kind == ODIN3_SYM_INSTANCE || rec->kind == ODIN3_SYM_FUNCTION ||
+               rec->kind == ODIN3_SYM_TASK) {
+        bd_error(br, node, "'%s' is not a net, variable or parameter", text);
+    } else {
+        bd_set_sym(br, node, sym);
+    }
+}
+
 static void bd_resolve_ident(bd_run *br, const bd_ref *ref) {
     odin3_sym_id sym = bd_lookup(br, ref->scope, odin3_ast_name(br->ast, ref->node));
-    if (sym.v == 0) {
-        bd_error(br, ref->node, "'%s' is not declared", bd_name(br, ref->node));
-        return;
-    }
-    bd_set_sym(br, ref->node, sym);
+    bd_value_name(br, ref->node, sym, bd_name(br, ref->node));
 }
 
 /* A CALL names a FUNCTION (its own result variable aside), a TASK_CALL a TASK. */
@@ -1226,12 +1289,8 @@ static void bd_resolve_hier(bd_run *br, const bd_ref *ref) {
         bd_error(br, ref->node, "hierarchical reference '%s' is not supported", br->text.data);
         return;
     }
-    odin3_sym_id sym = odin3_symtab_lookup_local(br->st, scope, last->name);
-    if (sym.v == 0) {
-        bd_error(br, ref->node, "'%s' is not declared", br->text.data);
-        return;
-    }
-    bd_set_sym(br, ref->node, sym);
+    bd_value_name(br, ref->node, odin3_symtab_lookup_local(br->st, scope, last->name),
+                  br->text.data);
 }
 
 static void bd_resolve(bd_run *br) {

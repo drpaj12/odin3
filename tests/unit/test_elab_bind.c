@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 enum {
     MAX_LINES = 64,
@@ -36,7 +37,10 @@ enum {
     OOM_MIN_FAILURES = 20,
     LOW_CAP = 3, /* a lowered error cap */
     ALL_ONES = 32,
+    WIDE = 40000, /* generate-loop iterations of the timing test */
 };
+
+static const double WIDE_BUDGET_S = 1.0; /* the wide loop's CPU budget in Release */
 
 static odin3_design *design;
 static et_tree tree;
@@ -743,6 +747,44 @@ static void test_module_name_not_value(void) {
     expect_failure(ODIN3_ERR_PARSE, "b.v:4:1: error: 't' is not declared");
 }
 
+/* An instance, function or task name is no value (Yosys: "Failed to detect width for identifier");
+ * a generate block's name binds to its BLOCK symbol (Task 18's carry: Yosys makes it an implicit
+ * net). Review m1. */
+static void test_not_a_value(void) {
+    eb_inst inst_u = {"cell", "u", {0}, NULL, 0};
+    eb_subr fn = {.name = "f"};
+    eb_subr task = {.name = "k"};
+    eb_block gen = {"g", {0}, NULL, 0};
+    const odin3_ast_id g_parts[] = {ident("g"), ident("u2")};
+    eb_block inner = {"h", {0}, NULL, 0};
+    et_line(&tree, 3);
+    odin3_ast_id use_u = ident("u");
+    et_line(&tree, 4);
+    odin3_ast_id use_f = ident("f");
+    et_line(&tree, 5);
+    odin3_ast_id use_k = ident("k");
+    et_line(&tree, 6);
+    odin3_ast_id use_hier = eb_hier(&tree, g_parts, 2);
+    odin3_ast_id use_g = ident("g");
+    eb_inst inst_u2 = {"cell", "u2", {0}, NULL, 0};
+    const odin3_ast_id in_g[] = {eb_instance(&tree, &inst_u2), eb_gen_block(&tree, &inner)};
+    gen.items = in_g;
+    gen.n = 2;
+    const odin3_ast_id items[] = {wire("y", no_range()),      eb_instance(&tree, &inst_u),
+                                  eb_function(&tree, &fn),    eb_task(&tree, &task),
+                                  eb_gen_block(&tree, &gen),  cont(ident("y"), use_u),
+                                  cont(ident("y"), use_f),    cont(ident("y"), use_k),
+                                  cont(ident("y"), use_hier), cont(ident("y"), use_g)};
+    odin3_ast_id module = top_of(items, 10);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, bind());
+    expect_line("b.v:3:1: error: 'u' is not a net, variable or parameter");
+    expect_line("b.v:4:1: error: 'f' is not a net, variable or parameter");
+    expect_line("b.v:5:1: error: 'k' is not a net, variable or parameter");
+    expect_line("b.v:6:1: error: 'g.u2' is not a net, variable or parameter");
+    TEST_ASSERT_EQUAL_UINT32(4, error_count());
+    (void)module;
+}
+
 /* A MODULE whose FILE buffer belongs to library mylib is in a LIBRARY scope of that name; an
  * INSTANTIATION in work still resolves to it. */
 static void test_library_scopes(void) {
@@ -873,8 +915,13 @@ static void test_unpacked_bounds(void) {
     et_col(&tree, 1);
     const odin3_ast_id far[] = {eb_range(&tree, wide)};
     eb_decl far_mem = {.sub = ODIN3_AST_VAR_DECL_REG, .name = "far", .dims = far, .n_dims = 1};
-    const odin3_ast_id items[] = {eb_var(&tree, &mem), eb_var(&tree, &far_mem)};
-    (void)top_of(items, 2);
+    /* the int32 edges themselves are bounds (review m3) */
+    const odin3_ast_id edges[] = {
+        eb_range(&tree, (eb_bounds){eb_int(&tree, INT32_MIN), eb_int(&tree, INT32_MAX)})};
+    eb_decl edge_mem = {.sub = ODIN3_AST_VAR_DECL_REG, .name = "edge", .dims = edges, .n_dims = 1};
+    const odin3_ast_id items[] = {eb_var(&tree, &mem), eb_var(&tree, &far_mem),
+                                  eb_var(&tree, &edge_mem)};
+    (void)top_of(items, 3);
     expect_failure(ODIN3_ERR_PARSE,
                    "b.v:3:14: error: width 34359738369 exceeds the limit of 1048576 bits");
     odin3_scope_id lib = odin3_scope_first_child(symtab(), (odin3_scope_id){1});
@@ -882,6 +929,10 @@ static void test_unpacked_bounds(void) {
     odin3_dim_span span = odin3_symbol_unpacked(symtab(), local_id(mod, "mem"));
     TEST_ASSERT_EQUAL_UINT32(1, span.n);
     TEST_ASSERT_EQUAL_INT32(1 << 21, span.dims[0].lsb); /* bound, though the binding failed */
+    span = odin3_symbol_unpacked(symtab(), local_id(mod, "edge"));
+    TEST_ASSERT_EQUAL_UINT32(1, span.n);
+    TEST_ASSERT_EQUAL_INT32(INT32_MIN, span.dims[0].msb);
+    TEST_ASSERT_EQUAL_INT32(INT32_MAX, span.dims[0].lsb);
 }
 
 /* A packed range wider than the cap (at the RANGE) and an x bound. */
@@ -1129,6 +1180,76 @@ static void test_shape_instance_extra(void) {
                  "'m' once, in port order");
 }
 
+/* The four EL-4 rows carried from Task 13's first report (review m2). */
+static void test_shape_instance_range(void) {
+    odin3_ast_id range = vec(1);
+    et_line(&tree, 15);
+    const odin3_ast_id kids[] = {range};
+    odin3_ast_id inst = eb_node(&tree, (eb_shape){ODIN3_AST_INSTANCE, 0, 0, "u"}, kids, 1);
+    const odin3_ast_id holder[] = {{0}, inst};
+    const odin3_ast_id items[] = {
+        eb_node(&tree, (eb_shape){ODIN3_AST_INSTANTIATION, 0, 0, "cell"}, holder, 2)};
+    (void)top_of(items, 1);
+    expect_shape("b.v:15:1: error: elaborated form: instance 'u' with a range");
+}
+
+static void test_shape_net_kind(void) {
+    et_line(&tree, 16);
+    eb_decl tri = {.sub = ODIN3_AST_NET_DECL_TRI1, .name = "w"};
+    const odin3_ast_id items[] = {eb_net(&tree, &tri)};
+    (void)top_of(items, 1);
+    expect_shape("b.v:16:1: error: elaborated form: net 'w' of kind 'tri1'");
+}
+
+static void test_shape_port_trireg(void) {
+    et_line(&tree, 17);
+    eb_decl charge = {
+        .sub = ODIN3_AST_PORT_DECL_INPUT,
+        .flags = (uint16_t)((1U + ODIN3_AST_NET_DECL_TRIREG) << ODIN3_AST_F_PORT_DECL_NET_SHIFT),
+        .name = "p"};
+    const odin3_ast_id ports[] = {eb_port(&tree, &charge)};
+    odin3_ast_id module = module_of("t", eb_list(&tree, ports, 1), NULL, 0);
+    (void)eb_unit(&tree, &module, 1);
+    expect_shape("b.v:17:1: error: elaborated form: net 'p' of kind 'trireg'");
+}
+
+static void test_shape_switch_gate(void) {
+    const odin3_ast_id terms[] = {{0},
+                                  eb_conn(&tree, NULL, ident("y")),
+                                  eb_conn(&tree, NULL, ident("y")),
+                                  eb_conn(&tree, NULL, ident("y"))};
+    odin3_ast_id inst = eb_node(&tree, (eb_shape){ODIN3_AST_INSTANCE, 0, 0, NULL}, terms, 4);
+    et_line(&tree, 18);
+    const odin3_ast_id gate_kids[] = {{0}, {0}, inst};
+    odin3_ast_id gate = eb_node(
+        &tree, (eb_shape){ODIN3_AST_GATE_DECL, ODIN3_AST_GATE_DECL_NMOS, 0, NULL}, gate_kids, 3);
+    const odin3_ast_id items[] = {wire("y", no_range()), gate};
+    (void)top_of(items, 2);
+    expect_shape("b.v:18:1: error: elaborated form: switch-level or pull gate 'nmos'");
+}
+
+static void test_shape_vectored(void) {
+    et_line(&tree, 19);
+    eb_decl vectored = {.sub = ODIN3_AST_NET_DECL_WIRE,
+                        .flags = ODIN3_AST_F_NET_DECL_VECTORED,
+                        .range = vec(3),
+                        .name = "w"};
+    const odin3_ast_id items[] = {eb_net(&tree, &vectored)};
+    (void)top_of(items, 1);
+    expect_shape("b.v:19:1: error: elaborated form: 'vectored' on a net declaration");
+}
+
+static void test_shape_scalared(void) {
+    et_line(&tree, 20);
+    eb_decl scalared = {.sub = ODIN3_AST_NET_DECL_WIRE,
+                        .flags = ODIN3_AST_F_NET_DECL_SCALARED,
+                        .range = vec(3),
+                        .name = "w"};
+    const odin3_ast_id items[] = {eb_net(&tree, &scalared)};
+    (void)top_of(items, 1);
+    expect_shape("b.v:20:1: error: elaborated form: 'scalared' on a net declaration");
+}
+
 static void test_shape_port_net_kind(void) {
     et_line(&tree, 1);
     et_col(&tree, 17);
@@ -1203,6 +1324,49 @@ typedef struct oom_case {
     odin3_status done;
 } oom_case;
 
+/* Iteration i of the wide loop: g[i]: begin wire c; assign c = g[i-1].c; end (no assignment for
+ * i = 0); *use gets the HIER_NAME. */
+static odin3_ast_id wide_iteration(int32_t index, odin3_ast_id *use) {
+    odin3_ast_id body[2] = {wire("c", no_range()), {0}};
+    uint32_t count = 1;
+    if (index > 0) {
+        const odin3_ast_id parts[] = {eb_index(&tree, "g", index - 1), ident("c")};
+        *use = eb_hier(&tree, parts, 2);
+        body[1] = cont(ident("c"), *use);
+        count = 2;
+    }
+    eb_block blk = {"g", eb_int(&tree, index), body, count};
+    return eb_gen_block(&tree, &blk);
+}
+
+/* A generate loop of WIDE iterations, each but the first reading its predecessor (g[i-1].c, the
+ * carry-chain idiom), binds in linear time: inserts past a chain's tail and position lookups are
+ * O(1) (review I1; 40,000 took 4.65 s in Release before). Release (NDEBUG) bounds the CPU time. */
+static void test_wide_loop(void) {
+    static odin3_ast_id items[2 + WIDE]; /* params and ports slots stay 0 */
+    odin3_ast_id last_use = {0};
+    for (int32_t i = 0; i < WIDE; i++) {
+        items[2 + i] = wide_iteration(i, &last_use);
+    }
+    odin3_ast_id module = eb_node(&tree, (eb_shape){ODIN3_AST_MODULE, 0, 0, "t"}, items, 2 + WIDE);
+    (void)eb_unit(&tree, &module, 1);
+    clock_t start = clock();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bind(), all_lines());
+    double seconds = (double)(clock() - start) / CLOCKS_PER_SEC;
+    odin3_scope_id mod = odin3_elab_scope_of(&bnd, module);
+    odin3_scope_id before = odin3_scope_child(symtab(), mod, name_id("g"), WIDE - 2);
+    TEST_ASSERT_EQUAL_UINT32(local_id(before, "c").v, odin3_elab_sym_of(&bnd, last_use).v);
+    char note[LINE_BYTES];
+    int got = snprintf(note, sizeof note, "bind of %d iterations: %.3f s CPU", WIDE, seconds);
+    TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof note);
+    TEST_MESSAGE(note);
+#ifdef NDEBUG
+    TEST_ASSERT_TRUE_MESSAGE(seconds < WIDE_BUDGET_S, note);
+#else
+    (void)WIDE_BUDGET_S; /* sanitizer builds are not timed */
+#endif
+}
+
 /* One bind of a fresh store with the allocation after `limit` ones failing: true when it gives
  * done; a failure is NO_MEMORY with nothing bound, the partial symbol table staying with the store
  * (it passes rule 8 and is freed with it). */
@@ -1276,6 +1440,7 @@ int main(void) {
     RUN_TEST(test_duplicate_blocks);
     RUN_TEST(test_duplicate_modules);
     RUN_TEST(test_module_name_not_value);
+    RUN_TEST(test_not_a_value);
     RUN_TEST(test_library_scopes);
     RUN_TEST(test_hierarchical_through_instance);
     RUN_TEST(test_hierarchical_call);
@@ -1301,12 +1466,19 @@ int main(void) {
     RUN_TEST(test_shape_instance_ports);
     RUN_TEST(test_shape_instance_count);
     RUN_TEST(test_shape_instance_extra);
+    RUN_TEST(test_shape_instance_range);
+    RUN_TEST(test_shape_net_kind);
+    RUN_TEST(test_shape_port_trireg);
+    RUN_TEST(test_shape_switch_gate);
+    RUN_TEST(test_shape_vectored);
+    RUN_TEST(test_shape_scalared);
     RUN_TEST(test_shape_port_net_kind);
     RUN_TEST(test_shape_parameter);
     RUN_TEST(test_shape_unnamed_block);
     RUN_TEST(test_shape_range_bound);
     RUN_TEST(test_shape_generate_index);
     RUN_TEST(test_deep_nesting);
+    RUN_TEST(test_wide_loop);
     RUN_TEST(test_oom);
     return UNITY_END();
 }

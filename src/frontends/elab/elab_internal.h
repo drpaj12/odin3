@@ -51,7 +51,8 @@ typedef struct odin3_elab_binding {
  *    (first at f.v:L:C)`; `hierarchical reference 'u.w' is not supported`; `'g[5].t' does not
  *    exist (generate block 'g[5]' was not elaborated)`; `'f' is not a function`; `'t' is not a
  *    task`; `width N exceeds the limit of M bits` (a packed range, or a bound outside int32);
- *    `range bound has x or z bits`;
+ *    `range bound has x or z bits`; `'u' is not a net, variable or parameter` (a name of an
+ *    instance, function or task; a block's name binds to its BLOCK symbol, Task 18's carry);
  *  - EL-4 violations, the rows rule 7 does not check (a misuse of the seam), then
  *    ODIN3_ERR_INVALID_ARG: `elaborated form: <rule>` (spec §2.4, v4.9).
  * ODIN3_ERR_NO_MEMORY stops at once. On any failure *out is emptied (nothing to free) and the
