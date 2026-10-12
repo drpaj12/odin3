@@ -65,6 +65,59 @@ class CheckRulesTest(unittest.TestCase):
         text = "void f(int n) { assert(n > 0); raise(SIGINT); }\n"
         self.assertEqual(self.check("src/passes/opt.c", text), [])
 
+    def test_assert_in_abc_adapter_is_flagged(self) -> None:
+        """3D §4.1: --wrap=__assert_fail would report the adapter's own asserts as ABC's."""
+        found = self.check("adapters/abc/session.c", "void f(int x) {\n    assert(x);\n}\n")
+        expected = [
+            "adapters/abc/session.c:2: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)"
+        ]
+        self.assertEqual(found, expected)
+        self.assertEqual(len(self.check("adapters/abc/guard.h", "#define A(x) assert (x)\n")), 1)
+
+    def test_adapter_assert_macro_is_allowed(self) -> None:
+        text = (
+            "odin3_status f(int x) {\n    ODIN3_ADAPTER_ASSERT(x > 0);\n"
+            "    static_assert(1, \"ok\");\n    return ODIN3_OK;\n}\n"
+        )
+        self.assertEqual(self.check("adapters/abc/session.c", text), [])
+        # Outside adapters/abc/, assert() stays allowed (decision 2026-10-08, #6).
+        self.assertEqual(self.check("adapters/slang/shim.c", "void f(int x) { assert(x); }\n"), [])
+
+    _STOP = "static _Noreturn void adp_offthread_stop(void) {\n    __builtin_trap();\n}\n"
+
+    def test_trap_in_offthread_stop_is_allowed(self) -> None:
+        """PHASE3 #28 (ruling (a)): the adapter's off-thread stop is the one trap outside check."""
+        self.assertEqual(self.check("adapters/abc/guard.c", "/* x */\n" + self._STOP), [])
+
+    def test_trap_elsewhere_in_abc_adapter_is_refused(self) -> None:
+        """The allowance is that one function in guard.c: every other trap is still refused."""
+        msg = "abort/trap is only allowed in src/ir/check*.c"
+        other_fn = self._STOP + "void f(void) {\n    __builtin_trap();\n}\n"
+        cases = (
+            ("adapters/abc/guard.c", other_fn, 5),  # another function in guard.c
+            ("adapters/abc/guard.c", "void f(void) {\n    __builtin_trap();\n}\n", 2),
+            ("adapters/abc/session.c", self._STOP, 2),  # the same function, another file
+            ("adapters/abc/bridge.c", "void f(void) {\n    __builtin_trap();\n}\n", 2),
+            ("adapters/abc/x/guard.c", self._STOP, 2),  # not adapters/abc/guard.c itself
+        )
+        for path, text, line in cases:
+            with self.subTest(path=path, text=text):
+                self.assertEqual(self.check(path, text), [f"{path}:{line}: {msg}"])
+
+    def test_offthread_stop_allows_only_the_trap(self) -> None:
+        """abort() and raise(SIGABRT) stay refused even inside the allowed function."""
+        for call in ("abort();", "raise(SIGABRT);", "__builtin_trap(); abort();"):
+            text = f"static _Noreturn void adp_offthread_stop(void) {{\n    {call}\n}}\n"
+            with self.subTest(call=call):
+                self.assertEqual(len(self.check("adapters/abc/guard.c", text)), 1)
+
+    def test_trap_in_src_outside_check_is_refused(self) -> None:
+        """The adapter's allowance does not reach src/: there a trap is still check-only."""
+        for path in ("src/passes/abc/engine.c", "src/ir/design.c", "src/passes/abc/guard.c"):
+            with self.subTest(path=path):
+                self.assertEqual(len(self.check(path, self._STOP)), 1)
+        self.assertEqual(self.check("src/ir/check.c", self._STOP), [])
+
     def test_goto_other_label_is_flagged(self) -> None:
         found = self.check("src/util/vec.c", "void f(void) { goto out; out: ; }\n")
         self.assertEqual(found, ["src/util/vec.c:1: goto may only target the 'cleanup' label"])

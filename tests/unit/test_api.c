@@ -33,9 +33,11 @@ static void test_abi_version_matches_header(void) {
 static void test_check_status_has_a_name(void) {
     TEST_ASSERT_EQUAL_INT(6, ODIN3_ERR_CHECK);
     TEST_ASSERT_EQUAL_INT(7, ODIN3_ERR_PARSE);
-    TEST_ASSERT_EQUAL_INT(8, ODIN3_STATUS_COUNT);
+    TEST_ASSERT_EQUAL_INT(8, ODIN3_ERR_ENGINE);
+    TEST_ASSERT_EQUAL_INT(9, ODIN3_STATUS_COUNT); /* 3D's ODIN3_ERR_ENGINE stays v4 (Q4) */
     TEST_ASSERT_EQUAL_STRING("ODIN3_ERR_CHECK", odin3_status_string(ODIN3_ERR_CHECK));
     TEST_ASSERT_EQUAL_STRING("ODIN3_ERR_PARSE", odin3_status_string(ODIN3_ERR_PARSE));
+    TEST_ASSERT_EQUAL_STRING("ODIN3_ERR_ENGINE", odin3_status_string(ODIN3_ERR_ENGINE));
 }
 
 static void test_every_status_has_a_name(void) {

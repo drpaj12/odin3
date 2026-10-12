@@ -3,8 +3,12 @@
 
 - exit()/_exit()/_Exit()/quick_exit() only under src/cli/ (the bare name is matched, so function
   pointers and macro aliases are caught too);
-- abort(), raise(SIGABRT) and __builtin_trap() only in src/ir/check*.c (the debug-build `check`);
-  assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6);
+- abort(), raise(SIGABRT) and __builtin_trap() only in src/ir/check*.c (the debug-build `check`),
+  with one exception: __builtin_trap() in the body of adp_offthread_stop in adapters/abc/guard.c,
+  the linked-ABC adapter's off-thread stop (Peter's ruling (a), PHASE3 #28);
+  assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6),
+  except in adapters/abc/: the adapter links with --wrap=__assert_fail, which would report its own
+  failures as ABC's, so it uses ODIN3_ADAPTER_ASSERT instead (3D spec §4.1);
 - goto only to the single `cleanup` label.
 
 Bison (.y) and Flex (.l) sources compile inside generated translation units that the rest of the
@@ -45,6 +49,12 @@ _TOKENS = re.compile(
 _EXIT = re.compile(r"\b(?:exit|_exit|_Exit|quick_exit)\b")
 _ABORT = re.compile(r"\babort\b|\b__builtin_trap\b|\braise\s*\(\s*SIGABRT\b")
 _GOTO = re.compile(r"\bgoto\s+(\w+)")
+_ASSERT = re.compile(r"\bassert\s*\(")
+# PHASE3 #28 (Peter's ruling (a), 2026-10-12): the ABC adapter's off-thread stop is the one trap
+# outside `check`. The allowance covers __builtin_trap only, and only in this function's body in
+# this file; anywhere else in adapters/abc/ or src/, a trap is still refused.
+_TRAP_FILE = ("adapters", "abc", "guard.c")
+_TRAP_FUNCTION = re.compile(r"\badp_offthread_stop\s*\(\s*void\s*\)\s*\{")
 
 
 def strip_comments_and_strings(text: str) -> str:
@@ -60,17 +70,42 @@ def violations(path: str, text: str) -> list[str]:
     return found
 
 
+def _trap_lines(posix: PurePosixPath, code: str) -> set[int]:
+    """The lines of adp_offthread_stop's body in adapters/abc/guard.c (PHASE3 #28), else none."""
+    match = _TRAP_FUNCTION.search(code) if posix.parts == _TRAP_FILE else None
+    if match is None:
+        return set()
+    depth = 0
+    for end in range(match.end() - 1, len(code)):
+        depth += {"{": 1, "}": -1}.get(code[end], 0)
+        if depth == 0:
+            break
+    first = code.count("\n", 0, match.start()) + 1
+    return set(range(first, code.count("\n", 0, end) + 2))
+
+
+def _abort_refused(line: str, lineno: int, trap_lines: set[int]) -> bool:
+    """An abort/trap match on a line that the PHASE3 #28 allowance does not cover."""
+    calls = _ABORT.findall(line)
+    return bool(calls) and not (lineno in trap_lines and set(calls) == {"__builtin_trap"})
+
+
 def _c_violations(path: str, text: str) -> list[str]:
-    """The exit/abort/goto rules (every file)."""
+    """The exit/abort/goto rules (every file) and the assert rule (adapters/abc/)."""
     posix = PurePosixPath(path)
     in_cli = posix.parts[:2] == ("src", "cli")
     is_check = posix.parts[:2] == ("src", "ir") and posix.name.startswith("check")
+    in_abc_adapter = posix.parts[:2] == ("adapters", "abc")
+    code = strip_comments_and_strings(text)
+    trap_lines = _trap_lines(posix, code)
     found: list[str] = []
-    for lineno, line in enumerate(strip_comments_and_strings(text).splitlines(), 1):
+    for lineno, line in enumerate(code.splitlines(), 1):
         if _EXIT.search(line) and not in_cli:
             found.append(f"{path}:{lineno}: exit() is only allowed under src/cli/")
-        if _ABORT.search(line) and not is_check:
+        if _abort_refused(line, lineno, trap_lines) and not is_check:
             found.append(f"{path}:{lineno}: abort/trap is only allowed in src/ir/check*.c")
+        if _ASSERT.search(line) and in_abc_adapter:
+            found.append(f"{path}:{lineno}: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)")
         for match in _GOTO.finditer(line):
             if match.group(1) != "cleanup":
                 found.append(f"{path}:{lineno}: goto may only target the 'cleanup' label")

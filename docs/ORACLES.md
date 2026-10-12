@@ -27,6 +27,17 @@ Recorded 2026-10-08 (Phase 0 §4).
 - **Two ABCs.** Goldens come from VTR's ABC; `tools/equiv-check` uses Odin III's own ABC by default
   (`$ODIN3_ABC` overrides). Equivalence verdicts must not depend on which one runs — if they ever
   disagree, that is a bug report.
+- **Odin III's ABC is pinned and built once** (3D spec AB-5). `cmake/abc_pin.cmake` holds the
+  commit above as `ODIN3_ABC_COMMIT`; configure stops with `third_party/abc is at <sha>;
+  ORACLES.md pins <pin>` when the submodule is elsewhere, so move both together. The build makes
+  ABC's `libabc-pic` (PIC static archive, linked into the adapter from 3D-2) with `-g -O2` in
+  Debug and `-O2 -DNDEBUG` in Release, `ABC_NO_HISTORY` (no `abc.history`), and never
+  `odin3_flags` or the sanitisers. The `abc` tool is the target `odin3_abc_exe` (ABC's `main.c`
+  linked to `libabc-pic`, output `build/<preset>/third_party/abc/abc`); it is what `ODIN3_ABC`
+  points at in CTest; build it alone with `--target odin3_abc_exe` (or `abc_tool`). ABC's own
+  `abc` and `libabc` targets are not built: `--target abc` is ABC's upstream tool (output
+  `abc-upstream`, on the non-PIC `libabc`), which compiles all of ABC a second time and does not
+  update `third_party/abc/abc`.
 - **Yosys now builds with CMake** (`cmake -B build -G Ninja && ninja -C build`); its old
   `make -j` instructions no longer apply.
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.

@@ -207,6 +207,14 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
   __builtin_trap()`). `tools/check_rules.py` gains the rule "no `assert(` in `adapters/abc/`".
   `__builtin_trap` outside `check` is a documented exception for this directory (Peter, in 3D-2's
   review).
+  - **Ruled (2026-10-12, 3D-2, plan point (a); PHASE3 #28):** the off-thread stop (§4.2) is
+    `__builtin_trap()` (`SIGILL`, exit status 132), replacing the interim `raise(SIGKILL)`;
+    `test_abc_adapter` pins `SIGILL`. The exception is that single call site:
+    `tools/check_rules.py` allows `__builtin_trap` only in `adp_offthread_stop` in
+    `adapters/abc/guard.c`, and CLAUDE.md's "trap only in `check`" rule names it. A trap
+    anywhere else in `adapters/abc/` is still refused, so `ODIN3_ADAPTER_ASSERT` keeps the clean
+    return that 3D-2 ships (an assertion records `ASSERT`, disables the engine and returns
+    `ODIN3_ERR_ENGINE`); question 2 of point (a) was not taken up.
 
 ### 4.2 Symbols and process control (AB-6)
 
@@ -214,10 +222,15 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
 -Wl,--exclude-libs,ALL -Wl,--version-script=adapters/abc/exports.map -Wl,-z,defs
 -Wl,--wrap=exit -Wl,--wrap=_exit -Wl,--wrap=abort -Wl,--wrap=__assert_fail
 -Wl,--wrap=system -Wl,--wrap=popen -Wl,--wrap=fork -Wl,--wrap=execv -Wl,--wrap=execvp
--Wl,--wrap=signal
+-Wl,--wrap=execl -Wl,--wrap=signal -Wl,--wrap=dlopen
 ```
 
 `exports.map` is `{ global: odin3_plugin_init; odin3_abc_adapter_init; local: *; };`.
+
+`-Wl,-z,defs` is dropped for sanitized clang builds only (3D-2 Task 5, agent default): clang links
+no sanitizer runtime into a shared object, because the executable carries it, so every
+`__asan_*`/`__ubsan_*` reference in the adapter would be undefined. gcc, Release and unsanitized
+clang builds keep it.
 
 `--wrap=sym` rewrites the undefined references to `sym` **in the objects of this link**, which
 includes the members taken from the static `libabc-pic.a`. `guard.c` defines the wrappers and never
@@ -244,20 +257,28 @@ The wrappers:
     `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
     saved original stderr fd, then executes `__builtin_trap()`. A `longjmp` across threads would
     be undefined behaviour, and the trap imports nothing.
-- **Process control:**
-  - `__wrap_system`, `__wrap_fork`, `__wrap_execv` and `__wrap_execvp` return −1;
-  - `__wrap_popen` returns NULL;
+  - **Ruled (2026-10-12, PHASE3 #28):** this stop is the trap (exit status 132), which replaced
+    the interim `raise(SIGKILL)`; see §4.1's note.
+- **Process control and code loading:**
+  - `__wrap_system`, `__wrap_fork`, `__wrap_execv`, `__wrap_execvp` and `__wrap_execl` return −1;
+  - `__wrap_popen` and `__wrap_dlopen` return NULL;
   - `__wrap_signal` returns `SIG_ERR`.
 
   All of them set `errno = EPERM` and add `ABC tried to <call>; refused` to the session's output.
-  The allow-list makes them unreachable; they are kept as defence in depth.
+  The allow-list makes all but `dlopen` unreachable; they are kept as defence in depth.
+  - `dlopen` is reached at every frame's creation. `Abc_FrameInit` runs `Libs_Init`
+    (`base/main/libSupport.c`), which would `dlopen` each `libabc_*.so` in the working directory
+    or in `$ABC_LIB_PATH` and call its `abc_init`, outside every wrap.
+  - Refused, it loads nothing (3D-2 Task 5 review, finding C1).
+  - `test_abc_adapter` plants such a library in both places.
 
 **Checks:**
 
 - `symbol_rules` is `check-symbols.sh libodin3 example_plugin odin3_abc`.
 - `abc_adapter_exports` is `check-symbols.sh --only odin3_plugin_init,odin3_abc_adapter_init
-  --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,execv,execvp,signal
-  <libodin3_abc.so>`. This is a new mode: the exported functions must equal `--only`, and nothing
+  --forbid exit,_exit,_Exit,quick_exit,abort,system,popen,fork,vfork,execv,execvp,execl,execle,
+  execlp,execve,execvpe,fexecve,posix_spawn,posix_spawnp,signal,dlopen,dlmopen <libodin3_abc.so>`
+  (one comma list). This is a new mode: the exported functions must equal `--only`, and nothing
   in `--forbid` may be imported.
 - `abi_exports` is unchanged.
 
@@ -286,7 +307,7 @@ The rule "bump on the first incompatible change after a release" stands.
 
 ```c
 /* --- the ABC engine (3D) -------------------------------------------------------------------- */
-enum { ODIN3_ABC_ENGINE_VERSION = 1 };
+enum { ODIN3_ABC_ENGINE_VERSION = 1, ODIN3_ABC_FAIL_TEXT_BYTES = 256 };
 
 typedef enum odin3_abc_fail_kind {
     ODIN3_ABC_FAIL_NONE = 0,
@@ -302,11 +323,12 @@ typedef enum odin3_abc_fail_kind {
 typedef struct odin3_abc_fail {
     uint32_t kind; /* odin3_abc_fail_kind */
     int32_t code;
-    char text[256]; /* NUL-terminated detail, "" when none */
+    char text[ODIN3_ABC_FAIL_TEXT_BYTES]; /* NUL-terminated detail, "" when none */
 } odin3_abc_fail;
 
-/* One line of ABC's output (stdout and stderr merged), without its newline; valid during the
- * call only, and called only from inside an engine call. */
+/* One line of ABC's output (stdout and stderr merged), without its newline and without trailing
+ * blanks or '\r'; valid during the call only, and called only from inside an engine call. The
+ * callback must not call the engine: it runs while the call that produced the line finishes. */
 typedef void (*odin3_abc_text_fn)(void *user, const char *line);
 
 /* Odin III's exchange layout, equal to ABC's MiniAIG at the pin (aig/miniaig/miniaig.h; the
@@ -346,8 +368,10 @@ typedef struct odin3_abc_luts {
  * get_luts: the & space's mapping with ci_from, owned by the session until close or the next
  *   call. RESULT.
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
- *   MiniAIG literal or -1 per object, valid until close. RESULT.
+ *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
  * close: frees all the session returned; after an escape, leaks ABC's state and disables.
+ * Every call of a session must come from the thread that opened it; the linked engine treats a
+ * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
  */
 typedef struct odin3_abc_engine {
     uint32_t version;       /* ODIN3_ABC_ENGINE_VERSION */
@@ -366,9 +390,11 @@ typedef struct odin3_abc_engine {
 
 /*
  * Makes *engine (copied; self and the strings must outlive the process) the process's ABC engine.
- * ODIN3_ERR_INVALID_ARG (logged) for NULL, another version, a NULL function, a non-NULL reserved
- * slot, an abc_commit that is not 40 lower-case hex digits, or an engine already registered
- * ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL engine or name, another version, a NULL function, a
+ * non-NULL reserved slot, an abc_commit that is not 40 lower-case hex digits, or an engine already
+ * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final;
+ * an engine call from another thread than the session's own disables the linked engine for the
+ * process (see odin3_abc_engine).
  */
 odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
 ```
@@ -1501,6 +1527,8 @@ flip-flops`. `<file>` is the script path as given.
 | ERROR | `abc: linked ABC is disabled by an earlier failure in this process`; `abc: linked ABC is busy (another session is open)` | `ENGINE`, `DISABLED`/`BUSY` |
 | ERROR | `abc: ABC returned a malformed network: <why>`, `<why>` ∈ `N primary inputs, expected M`; `N outputs, expected M`; `N registers, more than the M it was given`; `register J carries no input register's name`; `a latch with init <v> (all were sent at 0)`; `a LUT with N inputs (at most 16)`; `a LUT with N inputs exceeds --lut K`; `an unknown output '<name>'`; `a .subckt`; `no mapping in the & space` | `ENGINE`, `RESULT` |
 | FATAL (stderr, then trap) | `odin3: linked ABC called <exit\|abort\|assert> outside its session thread; stopping` | AB-6 |
+
+The FATAL row's stop is the trap (Peter's ruling (a), PHASE3 #28, 2026-10-12; §4.1).
 | ERROR / INFO | the project and CLI texts of §10.2 | §10 |
 
 ## 12. Performance (AB-29)
@@ -1592,6 +1620,7 @@ thread), added with `Cmd_CommandAdd`, and access to `CmdSplitLine`.
   - `o3test_exit 3` gives `EXIT` code 3 with fds restored, then `DISABLED`;
   - `o3test_assert` gives `ASSERT`;
   - `o3test_thread_exit` dies by `SIGILL` after the "outside its session thread" line (I6).
+    Ruled (2026-10-12, PHASE3 #28): the stop is the trap, and the test expects `SIGILL` (§4.1).
 - **Checked is what runs.** `CmdSplitLine`'s argv equals the checker's words on every accepted test,
   alias and fuzz-corpus command.
 - **Symbols.** `symbol_rules` with the adapter; `abc_adapter_exports`; `abc_adapter_no_assert`
