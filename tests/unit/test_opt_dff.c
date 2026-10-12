@@ -38,6 +38,7 @@ enum { LOG_TEXT = 512, OOM_LIMIT = 4000, N_WORD = 15 };
 
 static char last_error[LOG_TEXT];
 static uint32_t n_errors;
+static uint32_t n_discard; /* errors saying the design must be discarded (a half-done rewrite) */
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
@@ -47,6 +48,7 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
         memcpy(last_error, msg, len);
         last_error[len] = '\0';
         n_errors++;
+        n_discard += strstr(msg, "discard it") != NULL ? 1U : 0U;
     }
 }
 
@@ -765,15 +767,17 @@ static void test_ff_emit_rebuild(void) {
 /* --- out of memory ---------------------------------------------------------------------------- */
 
 /* After an emit of \f: undone (the old FF, its init written back), partial (the tie path only:
- * kit_connect's merges cannot be reserved, Task 1's concern 1) or done. */
+ * kit_connect's merges cannot be reserved, Task 1's concern 1; logged as "discard it") or done. */
 static void oom_expect(odin3_status st, odin3_node_id node, bool tie, uint32_t *partial) {
     odin3_node_id old = node_named("f");
     bool undone = st != ODIN3_OK && odin3_node_valid(old) && odin3_node_live(fx.module, old);
     if (undone) {
         TEST_ASSERT_EQUAL_STRING("$adff", type_name(old));
         TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q", 1)));
+        TEST_ASSERT_EQUAL_UINT32(0, n_discard);
     } else if (st != ODIN3_OK) {
-        TEST_ASSERT_TRUE(tie); /* the rebuild path is undone at every point */
+        TEST_ASSERT_TRUE(tie);                  /* the rebuild path is undone at every point */
+        TEST_ASSERT_EQUAL_UINT32(1, n_discard); /* the half-done rewrite says so, once */
         (*partial)++;
     } else if (tie) {
         TEST_ASSERT_EQUAL_UINT32(const_net(ODIN3_BIT_1).v, wnet("q", 1).v);
@@ -792,6 +796,7 @@ static bool emit_oom_step(long fail, bool tie, uint32_t *partial) {
     ff.has_ce = !tie;
     ff.sig_ce = wnet("r", 0);
     odin3_node_id node = {0};
+    n_discard = 0;
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = odin3_ff_emit(&fx.oc, &ff, &node);
     odin3_util_set_alloc_fail_after(-1);

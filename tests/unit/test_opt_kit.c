@@ -39,12 +39,14 @@ static const char *const BLIF_PATH = "odin3_opt_kit_test.blif";
 
 static char last_error[LOG_TEXT];
 static uint32_t n_errors;
+static uint32_t n_discard; /* errors saying the design must be discarded (a half-done rewrite) */
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     if (level == ODIN3_LOG_ERROR) {
         (void)snprintf(last_error, sizeof last_error, "%s", msg);
         n_errors++;
+        n_discard += strstr(msg, "discard it") != NULL ? 1U : 0U;
     }
 }
 
@@ -94,6 +96,7 @@ void setUp(void) {
     memset(&fx, 0, sizeof fx);
     last_error[0] = '\0';
     n_errors = 0;
+    n_discard = 0;
     odin3_log_set_sink(sink, NULL);
 }
 
@@ -284,6 +287,20 @@ static void test_const_net_on_demand(void) {
     check_full();
 }
 
+/* A cached constant net that lost its driver is not handed out again: a new one is made. */
+static void test_const_net_stale(void) {
+    build(k_consts);
+    odin3_net_id zero = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_const_net(&fx.oc, ODIN3_BIT_0, &zero));
+    odin3_node_id made = {odin3_module_node_end(fx.module) - 1};
+    TEST_ASSERT_EQUAL_UINT32(type_of("$_CONST0_").v, odin3_node_type(fx.module, made).v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(fx.module, made));
+    odin3_net_id again = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_const_net(&fx.oc, ODIN3_BIT_0, &again));
+    TEST_ASSERT_NOT_EQUAL_UINT32(zero.v, again.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_0, odin3_net_const_value(fx.module, again));
+}
+
 /* --- kit_connect -------------------------------------------------------------------------- */
 
 static const char *const k_alias = "module \\m\n"
@@ -354,6 +371,25 @@ static void test_connect_self(void) {
     TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(fx.module, net_w));
     TEST_ASSERT_EQUAL_UINT32(net_w.v, pin_net_of(node_named("r"), "A", 0).v);
     check_full();
+}
+
+/* Multi-bit with a swap: y[0] <- y[1] merges the two nets, so bit 1's y[0] resolves to the kept net
+ * and is left undriven (fed back to itself) rather than merging a dead net. */
+static void test_connect_swap(void) {
+    build("module \\m\n"
+          "  wire width 2 input 1 \\a\n  wire width 2 input 2 \\b\n"
+          "  wire width 2 output 3 \\o\n  wire width 2 \\y\n"
+          "  cell $and \\g\n    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n"
+          "    parameter \\Y_WIDTH 2\n    connect \\A \\a\n    connect \\B \\b\n"
+          "    connect \\Y \\y\n  end\n"
+          "  cell $not \\r\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\y\n    connect \\Y \\o\n  end\n"
+          "end\n");
+    odin3_net_id src[2] = {wnet("y", 1), wnet("y", 0)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, connect_to(node_named("g"), src, 2));
+    check_full();
+    TEST_ASSERT_EQUAL_UINT32(wnet("y", 0).v, wnet("y", 1).v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_driver_count(fx.module, wnet("y", 0)));
 }
 
 static void test_connect_port(void) {
@@ -553,6 +589,40 @@ static void test_rebuild_width_mismatch(void) {
     check_full();
 }
 
+/* Outputs pair in order, not by index: $adff's Q (port 3) is $adffe's Q (port 4), given as the old
+ * node's nets; any other nets for it are refused. */
+static void test_rebuild_moves_output(void) {
+    build("module \\m\n"
+          "  wire input 1 \\c\n  wire input 2 \\r\n  wire input 3 \\e\n  wire input 4 \\d\n"
+          "  wire output 5 \\q\n"
+          "  cell $adff \\f\n    connect \\CLK \\c\n    connect \\ARST \\r\n"
+          "    connect \\D \\d\n    connect \\Q \\q\n  end\n"
+          "end\n");
+    odin3_node_id old = node_named("f");
+    odin3_net_id nets[5] = {wnet("c", 0), wnet("r", 0), wnet("e", 0), wnet("d", 0), wnet("q", 0)};
+    odin3_netvec ports[5] = {
+        {&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}, {&nets[3], 1}, {&nets[4], 1}};
+    odin3_kit_begin_rewrite(&fx.oc);
+    odin3_kit_rebuild req = {old, {type_of("$adffe"), NULL, 0, ports, {0}}};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_kit_rebuild_node(&fx.oc, &req, &node),
+                                  last_error);
+    TEST_ASSERT_FALSE(odin3_node_live(fx.module, old));
+    TEST_ASSERT_EQUAL_UINT32(type_of("$adffe").v, odin3_node_type(fx.module, node).v);
+    TEST_ASSERT_EQUAL_UINT32(node.v, node_named("f").v);
+    TEST_ASSERT_EQUAL_UINT32(nets[4].v, wnet("q", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(nets[4].v, pin_net_of(node, "Q", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(nets[2].v, pin_net_of(node, "EN", 0).v);
+    check_full();
+    ports[4] = (odin3_netvec){&nets[3], 1}; /* Q on d: not the old node's */
+    odin3_kit_rebuild bad = {node, {type_of("$adffe"), NULL, 0, ports, {0}}};
+    odin3_node_id other = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_kit_rebuild_node(&fx.oc, &bad, &other));
+    TEST_ASSERT_EQUAL_STRING("opt: kit_rebuild_node: output Q is not the old node's", last_error);
+    TEST_ASSERT_TRUE(odin3_node_live(fx.module, node));
+    check_full();
+}
+
 static void test_prov_parents(void) {
     build("module \\m\n"
           "  wire input 1 \\a\n"
@@ -587,12 +657,16 @@ static void test_invert_map(void) {
           "    connect \\S \\s\n    connect \\Y \\ms\n  end\n"
           "  cell $not \\n2\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
           "    connect \\A \\v\n    connect \\Y \\nv\n  end\n"
+          "  wire width 2 \\lw\n"
+          "  cell $logic_not \\l2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\a\n    connect \\Y \\lw\n  end\n"
           "end\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_invert_map(&fx.oc));
     TEST_ASSERT_EQUAL_UINT32(wnet("a", 0).v, odin3_kit_inverse(&fx.oc, wnet("na", 0)).v);
     TEST_ASSERT_EQUAL_UINT32(wnet("a", 0).v, odin3_kit_inverse(&fx.oc, wnet("la", 0)).v);
     TEST_ASSERT_EQUAL_UINT32(wnet("s", 0).v, odin3_kit_inverse(&fx.oc, wnet("ms", 0)).v);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_kit_inverse(&fx.oc, wnet("nv", 0)).v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_kit_inverse(&fx.oc, wnet("lw", 0)).v); /* a wide Y: no */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_kit_inverse(&fx.oc, wnet("a", 0)).v);
 }
 
@@ -632,6 +706,50 @@ static void test_topo_order(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_topo(&fx.oc, &order, &sorted));
     TEST_ASSERT_TRUE(sorted);
     static const uint32_t want[] = {9, 7, 5};
+    expect_order(&order, want, 3);
+    odin3_vec_free(&order);
+}
+
+/* A mux is an inverter only for A = 1, B = 0: A = 0, B = 1 is a buffer of S. */
+static void test_invert_mux01(void) {
+    build("module \\m\n"
+          "  wire input 1 \\s\n  wire output 2 \\y\n  wire output 3 \\z\n"
+          "  wire \\k0\n  wire \\k1\n"
+          "  cell $_CONST0_ \\c0\n    connect \\Y \\k0\n  end\n"
+          "  cell $_CONST1_ \\c1\n    connect \\Y \\k1\n  end\n"
+          "  cell $_MUX_ \\m1\n    connect \\A \\k0\n    connect \\B \\k1\n"
+          "    connect \\S \\s\n    connect \\Y \\y\n  end\n"
+          "  cell $_MUX_ \\m2\n    connect \\A \\k1\n    connect \\B \\k0\n"
+          "    connect \\S \\s\n    connect \\Y \\z\n  end\n"
+          "end\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_invert_map(&fx.oc));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_kit_inverse(&fx.oc, wnet("y", 0)).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("s", 0).v, odin3_kit_inverse(&fx.oc, wnet("z", 0)).v);
+}
+
+/* Two readers ready at once after g: the tie goes to the lower node ID (OP-14). */
+static void test_topo_ties(void) {
+    build("module \\m\n"
+          "  wire width 2 input 1 \\a\n  wire width 2 input 2 \\b\n"
+          "  wire width 2 output 3 \\o1\n  wire width 2 output 4 \\o2\n  wire width 2 \\t\n"
+          "  cell $and \\g\n    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n"
+          "    parameter \\Y_WIDTH 2\n    connect \\A \\a\n    connect \\B \\b\n"
+          "    connect \\Y \\t\n  end\n"
+          "  cell $not \\r1\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\t\n    connect \\Y \\o1\n  end\n"
+          "  cell $xor \\r2\n    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n"
+          "    parameter \\Y_WIDTH 2\n    connect \\A \\t\n    connect \\B \\a\n"
+          "    connect \\Y \\o2\n  end\n"
+          "end\n");
+    uint32_t gate = node_named("g").v;
+    uint32_t r1 = node_named("r1").v;
+    uint32_t r2 = node_named("r2").v;
+    odin3_vec order;
+    odin3_vec_init(&order, sizeof(odin3_node_id));
+    bool sorted = false;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_topo(&fx.oc, &order, &sorted));
+    TEST_ASSERT_TRUE(sorted);
+    const uint32_t want[] = {gate, r1 < r2 ? r1 : r2, r1 < r2 ? r2 : r1};
     expect_order(&order, want, 3);
     odin3_vec_free(&order);
 }
@@ -799,19 +917,23 @@ static bool connect_oom_step(long fail, uint32_t *merge_phase) {
     odin3_net_id nets[SNAP];
     uint32_t count = snapshot_pins(gate, nets, SNAP);
     odin3_net_id net_a = wnet("a", 0);
+    n_discard = 0;
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = connect_to(gate, &net_a, 1);
     odin3_util_set_alloc_fail_after(-1);
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
     check_full();
     if (st == ODIN3_OK) {
+        TEST_ASSERT_EQUAL_UINT32(0, n_discard);
         return true;
     }
     if (odin3_node_live(fx.module, gate)) {
         expect_pins(gate, nets, count);
         TEST_ASSERT_FALSE(fx.oc.changed);
+        TEST_ASSERT_EQUAL_UINT32(0, n_discard);
         return false;
     }
+    TEST_ASSERT_EQUAL_UINT32(1, n_discard);
     (*merge_phase)++;
     expect_merged_or_undriven(net_a);
     return false;
@@ -867,13 +989,28 @@ static odin3_status run_reads(odin3_vec *order, bool *sorted, odin3_net_id *zero
     return st == ODIN3_OK ? odin3_kit_topo(&fx.oc, order, sorted) : st;
 }
 
-static bool reads_oom_step(long fail) {
+/* 1 when g2.B lost its constant (a failed canon merge), which must have logged "discard it". */
+static uint32_t expect_half_done(odin3_status st) {
+    odin3_net_id g2_b = pin_net_of(node_named("g2"), "B", 0);
+    uint32_t lost = odin3_net_driver_count(fx.module, g2_b) == 0 ? 1U : 0U;
+    TEST_ASSERT_TRUE(lost == 0 || st != ODIN3_OK);
+    TEST_ASSERT_EQUAL_UINT32(lost, n_discard);
+    return lost;
+}
+
+/*
+ * One run of the reads with a failure after `fail` allocations; true when done. A failure in
+ * canon's merge after c2's delete leaves g2.B undriven where it read 1 (the function changed): it
+ * must log "discard it" once (I1); *half_done counts it. Every other failure logs no such error.
+ */
+static bool reads_oom_step(long fail, uint32_t *half_done) {
     build(k_consts);
     odin3_vec order;
     odin3_vec_init(&order, sizeof(odin3_node_id));
     bool sorted = false;
     odin3_net_id zero = {0};
     uint32_t live = live_nodes();
+    n_discard = 0;
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = run_reads(&order, &sorted, &zero);
     odin3_util_set_alloc_fail_after(-1);
@@ -882,15 +1019,18 @@ static bool reads_oom_step(long fail) {
     check_full();
     TEST_ASSERT_TRUE(odin3_node_live(fx.module, (odin3_node_id){5}));
     TEST_ASSERT_TRUE(live_nodes() >= live - 1 && live_nodes() <= live + 1);
+    *half_done += expect_half_done(st);
     return st == ODIN3_OK;
 }
 
 static void test_reads_oom(void) {
     bool done = false;
+    uint32_t half_done = 0;
     for (long fail = 0; fail < OOM_LIMIT && !done; fail++) {
-        done = reads_oom_step(fail);
+        done = reads_oom_step(fail, &half_done);
     }
     TEST_ASSERT_TRUE(done);
+    TEST_ASSERT_TRUE(half_done >= 1); /* the review's point on k_consts is still reached */
 }
 
 /* --- test hooks ------------------------------------------------------------------------------ */
@@ -914,9 +1054,11 @@ int main(void) {
     RUN_TEST(test_canon_consts);
     RUN_TEST(test_canon_leaves_sop);
     RUN_TEST(test_const_net_on_demand);
+    RUN_TEST(test_const_net_stale);
     RUN_TEST(test_connect_alias);
     RUN_TEST(test_connect_constant);
     RUN_TEST(test_connect_self);
+    RUN_TEST(test_connect_swap);
     RUN_TEST(test_connect_port);
     RUN_TEST(test_connect_misuse);
     RUN_TEST(test_new_cell);
@@ -924,9 +1066,12 @@ int main(void) {
     RUN_TEST(test_rebuild_same_signature);
     RUN_TEST(test_rebuild_new_type);
     RUN_TEST(test_rebuild_width_mismatch);
+    RUN_TEST(test_rebuild_moves_output);
     RUN_TEST(test_prov_parents);
     RUN_TEST(test_invert_map);
     RUN_TEST(test_topo_order);
+    RUN_TEST(test_invert_mux01);
+    RUN_TEST(test_topo_ties);
     RUN_TEST(test_topo_loop);
     RUN_TEST(test_keep);
     RUN_TEST(test_keep_bits);

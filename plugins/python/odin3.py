@@ -282,11 +282,18 @@ class Design:
         return self.odin3.text(self.get(function, "const char *", *args))
 
     def run_pass(self, name: str, args: str = "") -> None:
-        """Run one pass (odin3_design_run_pass); raises Odin3Error with its status."""
+        """Run one pass (odin3_design_run_pass); raises Odin3Error with its status.
+
+        After a failed pass the design is valid but may no longer compute what its input did:
+        discard it (close it) rather than keep using or writing it.
+        """
         self.call("odin3_design_run_pass", name.encode(), args.encode())
 
     def run_script(self, text: str, origin: str = "python") -> None:
-        """Run a pass script, its errors located by command (odin3_design_run_script)."""
+        """Run a pass script, its errors located by command (odin3_design_run_script).
+
+        After a failed pass the design must be discarded, as for run_pass.
+        """
         keep = self.odin3.ffi.new("char[]", origin.encode())  # alive during the call
         src = (keep, self.odin3.lib.ODIN3_SCRIPT_BY_COMMAND)
         self.call("odin3_design_run_script", text.encode(), src)

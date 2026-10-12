@@ -9,8 +9,15 @@
  * its attributes) leaves the rewrite undone: whatever the build made is removed again. A rewrite's
  * first destructive step is one atomic IR call (odin3_node_delete or odin3_node_replace); the
  * merges that follow kit_rebuild_node's are into nets that just lost a pin and add no alias, so
- * they find room already. kit_connect's merges can still run out of memory (the IR has no way to
- * reserve them): the IR is then valid, the bits merged so far connected and the others undriven.
+ * they find room already. kit_connect's merges and canon_consts' merge can still run out of
+ * memory (the IR has no way to reserve them): the IR is then valid, the bits merged so far
+ * connected and the others undriven, so the module may no longer compute what it did (canon: a
+ * reader of the dropped constant reads an undriven net). Any failure after a rewrite's destructive
+ * step logs "opt: out of memory in the middle of a rewrite in module '<m>': the design no longer
+ * matches its input; discard it"; the caller must then discard the design. Undoing is best effort:
+ * an undone rebuild may leave an unused DERIVED record and count its pins in pins_created, and
+ * under repeated failures its new node may stay live on fresh, unread nets (the IR valid, the
+ * function kept).
  */
 #ifndef ODIN3_PASSES_OPT_KIT_H
 #define ODIN3_PASSES_OPT_KIT_H
@@ -122,9 +129,11 @@ odin3_status odin3_kit_new_cell(odin3_opt_ctx *oc, const odin3_kit_cell *cell, o
 /*
  * kit_rebuild_node's request. cell.ports may be NULL: every input port then takes old_node's nets
  * (the port widths must agree) and every output is fresh. Output entries must be nets NULL or
- * exactly old_node's output nets. cell.prov 0 asks for a DERIVED record with parent [old_node's
- * record] in the current operation (one is begun when none has been); a record-less old node gives
- * prov 0.
+ * exactly the nets of old_node's paired output: outputs pair in order, not by port index ($adff's
+ * Q, port 3, pairs with $adffe's Q, port 4). cell.prov 0 asks for a DERIVED record with parent
+ * [old_node's record] in the current operation; when none has been begun one is, which hides a
+ * caller that forgot odin3_kit_begin_rewrite (two rewrites then share an operation, against OP-15):
+ * callers begin one per rewrite. A record-less old node gives prov 0.
  */
 typedef struct odin3_kit_rebuild {
     odin3_node_id old_node;

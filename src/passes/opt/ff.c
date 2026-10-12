@@ -752,11 +752,7 @@ static odin3_status emit_cell(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_celltyp
     odin3_status st = plan_open(oc, ff, &plan);
     odin3_kit_cell cell = {type, plan.params, plan.def->n_params, plan.ports, {0}};
     if (st == ODIN3_OK && ff->node.v != 0) {
-        /* Q left to the kit: the old node's Q nets (same place or merged back), as checked */
-        for (uint32_t i = 0; i < plan.def->n_ports; i++) {
-            plan.ports[i] =
-                plan.def->ports[i].dir == ODIN3_DIR_IN ? plan.ports[i] : (odin3_netvec){NULL, 0};
-        }
+        /* Q is sig_q, the old node's Q nets: the kit pairs it with the old Q, wherever that sits */
         odin3_kit_rebuild req = {ff->node, cell};
         st = odin3_kit_rebuild_node(oc, &req, out);
     } else if (st == ODIN3_OK) {

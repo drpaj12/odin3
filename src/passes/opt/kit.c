@@ -134,6 +134,20 @@ void odin3_opt_ctx_free(odin3_opt_ctx *oc) {
     odin3_vec_free(&oc->dirty);
 }
 
+/* A failure after a rewrite's destructive step: the IR stays valid but may no longer compute what
+ * the input did, so the caller must discard the design (logged distinctly from an undone failure).
+ */
+static odin3_status half_done(const odin3_opt_ctx *oc, odin3_status st) {
+    if (st != ODIN3_OK) {
+        const odin3_strtab *tab = odin3_design_strtab(oc->design);
+        odin3_log(ODIN3_LOG_ERROR,
+                  "opt: out of memory in the middle of a rewrite in module '%s': the design no "
+                  "longer matches its input; discard it",
+                  odin3_strtab_get(tab, odin3_module_name(oc->module)));
+    }
+    return st;
+}
+
 /* --- constants (OP-2) ----------------------------------------------------------------------- */
 
 static const char *const k_const_types[ODIN3_OPT_N_CONST] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_",
@@ -156,7 +170,7 @@ static odin3_status drop_const(odin3_opt_ctx *oc, odin3_node_id node, odin3_net_
                                odin3_net_id net) {
     odin3_status st = odin3_node_delete(oc->module, node);
     if (st == ODIN3_OK && net.v != keep.v) {
-        st = odin3_net_merge(oc->module, (odin3_net_pair){keep, net});
+        st = half_done(oc, odin3_net_merge(oc->module, (odin3_net_pair){keep, net}));
     }
     return st;
 }
@@ -354,7 +368,7 @@ odin3_status odin3_kit_connect(odin3_opt_ctx *oc, const odin3_kit_conn *conn) {
     st = st == ODIN3_OK ? odin3_node_delete(oc->module, conn->node) : st;
     if (st == ODIN3_OK) {
         oc->changed = true;
-        st = merge_outputs(oc, conn, ynets, &merged);
+        st = half_done(oc, merge_outputs(oc, conn, ynets, &merged));
     }
     odin3_vec_free(&merged);
     odin3_util_free(ynets);
@@ -550,8 +564,16 @@ static bool netvec_equal(odin3_netvec lhs, odin3_netvec rhs) {
     return true;
 }
 
-/* An output entry: given nets must be the old node's; afterwards it is empty (fresh or handed
- * over). */
+/* The k-th non-input port of def from port `from` on, def->n_ports when there is none. */
+static uint32_t next_output(const odin3_celltype_def *def, uint32_t from) {
+    while (from < def->n_ports && def->ports[from].dir == ODIN3_DIR_IN) {
+        from++;
+    }
+    return from;
+}
+
+/* An output entry: given nets must be those of the old node's paired output (outputs pair in
+ * order, as rb_merge_back merges them); afterwards it is empty (fresh or handed over). */
 static odin3_status rb_output(rebuild_job *job, uint32_t port, odin3_netvec old) {
     cell_plan *plan = &job->plan;
     if (plan->ports[port].nets != NULL && !netvec_equal(plan->ports[port], old)) {
@@ -588,20 +610,16 @@ static odin3_status rb_ports(rebuild_job *job) {
     job->same = job->req->cell.type.v == odin3_node_type(job->oc->module, job->req->old_node).v &&
                 plan->def->n_ports == job->old_def->n_ports;
     odin3_status st = ODIN3_OK;
+    uint32_t j = next_output(job->old_def, 0);
     for (uint32_t i = 0; st == ODIN3_OK && i < plan->def->n_ports; i++) {
-        odin3_netvec old = old_port_nets(job, i);
-        st = plan->def->ports[i].dir == ODIN3_DIR_IN ? rb_input(job, i, old)
-                                                     : rb_output(job, i, old);
+        if (plan->def->ports[i].dir == ODIN3_DIR_IN) {
+            st = rb_input(job, i, old_port_nets(job, i));
+        } else {
+            st = rb_output(job, i, old_port_nets(job, j));
+            j = next_output(job->old_def, j + 1);
+        }
     }
     return st;
-}
-
-/* The k-th non-input port of def from port `from` on, def->n_ports when there is none. */
-static uint32_t next_output(const odin3_celltype_def *def, uint32_t from) {
-    while (from < def->n_ports && def->ports[from].dir == ODIN3_DIR_IN) {
-        from++;
-    }
-    return from;
 }
 
 /* The fresh path pairs output ports in order: same count, equal widths (INVALID_ARG else). */
@@ -748,7 +766,8 @@ static odin3_status rb_commit(rebuild_job *job) {
     job->oc->changed = true;
     st = job->same ? ODIN3_OK : rb_merge_back(job);
     /* the name left the map with the old node, so re-inserting it does not grow the map */
-    return st == ODIN3_OK && name != 0 ? odin3_node_rename(module, job->node, name) : st;
+    st = st == ODIN3_OK && name != 0 ? odin3_node_rename(module, job->node, name) : st;
+    return half_done(job->oc, st);
 }
 
 odin3_status odin3_kit_rebuild_node(odin3_opt_ctx *oc, const odin3_kit_rebuild *req,
