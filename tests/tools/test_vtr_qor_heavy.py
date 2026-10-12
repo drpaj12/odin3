@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -34,6 +35,14 @@ GIB = 1024**3
 DF_72 = f"Mounted on       Avail\n/mnt/c     {72 * GIB}\n"
 DF_ARGV = [qor_heavy.DF_BIN, "-B1", "--output=target,avail", "/mnt/c"]
 XL_NESTED = "--xl inside odin3-heavy.slice (6G): run the xl job on its own"
+
+
+def df_done() -> mock.MagicMock:
+    """A finished fake df process printing DF_72."""
+    proc = mock.MagicMock()
+    proc.communicate.return_value = (DF_72, None)
+    proc.returncode = 0
+    return proc
 
 
 class HeavyTestBase(unittest.TestCase):
@@ -397,9 +406,8 @@ class RulingTest(HeavyTestBase):
         self.assertTrue(self.record.exists())
 
     def test_disk_free_ignores_hook(self) -> None:
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=DF_72)
         with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True), \
-                mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
+                mock.patch("qor_heavy.subprocess.Popen", return_value=df_done()) as run:
             self.assertEqual(qor_heavy.disk_free_gib(), 72)
         self.assertEqual(run.call_args.args[0], DF_ARGV)
         if Path("/mnt/c").is_dir():  # the real df on /mnt/c, never the fake's 999999
@@ -496,10 +504,27 @@ class ReaderTest(HeavyTestBase):
     def test_disk_free_argv(self) -> None:
         """The production argv is df on /mnt/c by absolute path (M6c, M3)."""
         self.assertIn(qor_heavy.DF_BIN, ("/usr/bin/df", "/bin/df"))
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=DF_72)
-        with mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
+        with mock.patch("qor_heavy.subprocess.Popen", return_value=df_done()) as run:
             self.assertEqual(qor_heavy.disk_free_gib(), 72)
         self.assertEqual(run.call_args.args[0], DF_ARGV)
+
+    def test_disk_free_hung(self) -> None:
+        """A df past DF_TIMEOUT_S is killed and reaped within DF_REAP_S; one that will not be
+        reaped (stuck in the kernel) is let go, never waited for without a bound."""
+        began = time.monotonic()
+        with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3), \
+                self.assertRaises(HeavyError) as err:
+            self.disk_free("exec sleep 600")
+        self.assert_heavy(err, 5, "cannot read free space of /mnt/c")
+        self.assertLess(time.monotonic() - began, 10)
+        stuck = mock.MagicMock()
+        stuck.communicate.side_effect = subprocess.TimeoutExpired("df", 0.3)
+        stuck.wait.side_effect = subprocess.TimeoutExpired("df", 1.0)
+        with mock.patch("qor_heavy.subprocess.Popen", return_value=stuck), \
+                self.assertRaises(HeavyError):
+            qor_heavy.disk_free_gib()
+        stuck.kill.assert_called_once_with()
+        stuck.wait.assert_called_once_with(timeout=qor_heavy.DF_REAP_S)
 
     def test_mem_available(self) -> None:
         meminfo = self.tmp / "meminfo"

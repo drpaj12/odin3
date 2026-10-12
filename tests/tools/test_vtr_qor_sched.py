@@ -1262,8 +1262,12 @@ class CgroupKillTest(RunnerTestBase):
                                                             "name": "next"}])]
         with mock.patch.object(qor_sched, "CGROUP_DRAIN_S", 0.3):
             summary, lines = self.run_jobs(jobs, self.opts())
-        self.assertIn(f"vtr-qor: {self.cg} still holds processes [1] after 0.3 s; stopping",
-                      lines)
+        error = f"P sha: failed (drain): {self.cg} still holds processes [1] after 0.3 s; stopping"
+        self.assertIn(f"vtr-qor: {error}", lines)
+        self.assertIn("vtr-qor: [1/2] P sha failed 0.0 s (A, j1)", lines)
+        self.assertEqual([(r.job.design, r.status, r.error) for r in summary.results],
+                         [("sha", "failed", error), ("next", "skipped", "not started")])
+        self.assertEqual((self.job_dir("sha") / "status").read_text(), "failed\n")
         self.assertEqual((summary.exit_code, self.starts()), (2, []))
 
     def test_no_cgroup_no_job(self) -> None:
@@ -1476,6 +1480,24 @@ class AdmissionTest(RunnerTestBase):
         self.set_mem(7.0)
         self.assertEqual(qor_sched.admit(opts, running=0), "go")
 
+    def test_admission_mem_limit(self) -> None:
+        """MemAvailable short for PAUSE_LIMIT_S without a break stops the run (exit 5, no
+        compaction hint); a recovery in between starts the count again."""
+        self.set_mem(6.5)
+        clock = FakeClock()
+        jobs = [self.job(d, [{"stamp": str(self.stamps), "name": d}]) for d in ("a", "b")]
+        summary, lines = self.run_jobs(jobs, self.opts(clock=clock, sleep=clock.sleep))
+        self.assertEqual(lines[:3], [
+            "vtr-qor: waiting: 6.5 GiB available (< 7)",
+            "vtr-qor: MemAvailable stayed below 7 GiB for 2 h; stopping (2 jobs not started)",
+            "vtr-qor: done: 0 ok, 0 failed, 0 capped, 0 timeout, 2 skipped in 2:00:00"])
+        self.assertEqual((sum(clock.sleeps), summary.exit_code, self.starts()), (7200, 5, []))
+        # Short for 1 h, fine, short again for 1 h: the count restarted, so no stop.
+        clock = FakeClock()
+        clock.on_sleep = lambda n: self.set_mem(8.0 if n == 60 else 6.5)
+        summary, lines = self.run_jobs(jobs, self.opts(clock=clock, sleep=clock.sleep))
+        self.assertEqual((summary.exit_code, self.starts()), (0, ["a", "b"]))
+
     def test_admit_running(self) -> None:
         """With a job running only the floor counts: 15 GiB goes on, 9 stops; memory is not
         read."""
@@ -1621,17 +1643,16 @@ class RetentionTest(RunnerTestBase):
         self.make("incomplete00", "ch_intrinsics", "failed", 2.0)
         self.prune(designs=None)  # no set: no key is pruned
         self.assertEqual(self.names(), sorted([*keys, "incomplete00"]))
-        self.prune()
-        self.assertEqual(self.names(), sorted([*keys[2:], "incomplete00"]))
-        self.assertTrue(incomplete.exists())
+        self.prune()  # the old incomplete key goes too: 3 complete keys are newer (M7)
+        self.assertEqual(self.names(), keys[2:])
+        self.assertFalse(incomplete.exists())
         # latest is never pruned, even when older keys would be.
         (self.leg_dir() / "latest").write_text(keys[2] + "\n")
         for i in range(5, 8):
             for design in ("sha", "ch_intrinsics"):
                 self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
         self.prune()
-        self.assertEqual(self.names(),
-                         sorted([keys[2], *(f"{i:012x}" for i in range(5, 8)), "incomplete00"]))
+        self.assertEqual(self.names(), sorted([keys[2], *(f"{i:012x}" for i in range(5, 8))]))
 
     def test_retention_complete_means_the_whole_set(self) -> None:
         """Point (f): a key holding only some designs of the set (a smoke or seed run) is not
@@ -1651,9 +1672,29 @@ class RetentionTest(RunnerTestBase):
         (raw / "ch_intrinsics.pre-vpr.blif").write_text(".model x\n")
         self.prune()  # complete: 0, 2, 3 only (1 has a failed job, 4 an un-gzipped netlist)
         self.assertEqual(self.names(), [f"{i:012x}" for i in range(5)])
-        (raw / "ch_intrinsics.pre-vpr.blif").unlink()  # 4 complete now: 0 is the 4th newest
+        (raw / "ch_intrinsics.pre-vpr.blif").unlink()  # 4 complete now: 0 is the 4th newest,
+        self.prune()  # and 1 (incomplete) is older than 3 complete keys (M7)
+        self.assertEqual(self.names(), [f"{i:012x}" for i in range(2, 5)])
+
+    def test_retention_old_incomplete_keys(self) -> None:
+        """An incomplete key goes once 3 complete keys are newer than it, unless it is latest
+        or the run's own."""
+        for i in range(1, 4):
+            for design in ("sha", "ch_intrinsics"):
+                self.make(f"{i:012x}", design, "ok", 1_000_000.0 + i)
+        self.make("aaaaaaaaaaaa", "sha", "failed", 1.0)       # older than all 3: goes
+        self.make("bbbbbbbbbbbb", "sha", "ok", 1_000_002.5)   # newer than one: stays
+        self.make("cccccccccccc", "sha", "failed", 2.0)       # old but latest: stays
+        self.make("dddddddddddd", "sha", "failed", 3.0)       # old but the run's: stays
+        (self.leg_dir() / "latest").write_text("cccccccccccc\n")
+        self.prune(protect=("dddddddddddd",))
+        self.assertEqual(self.names(), ["000000000001", "000000000002", "000000000003",
+                                        "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"])
+        # With only 2 newer complete keys, an old incomplete key stays.
+        qor_heavy.safe_rmtree(self.leg_dir() / "000000000003", self.out)
+        self.make("eeeeeeeeeeee", "sha", "failed", 1.0)
         self.prune()
-        self.assertEqual(self.names(), [f"{i:012x}" for i in range(1, 5)])
+        self.assertIn("eeeeeeeeeeee", self.names())
 
     def test_retention_protects_the_run(self) -> None:
         for i in range(5):

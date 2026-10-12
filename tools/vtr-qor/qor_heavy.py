@@ -30,6 +30,7 @@ keyword parameters that ``inside_heavy_run``, ``verify_scope`` and ``reexec_unde
 from __future__ import annotations
 
 import argparse
+import contextlib
 import fcntl
 import os
 import pwd
@@ -58,6 +59,8 @@ DF_BIN = "/usr/bin/df" if Path("/usr/bin/df").exists() else "/bin/df"
 DF_CMD: tuple[str, ...] = (DF_BIN, "-B1", "--output=target,avail", WIN_C)
 # The longest a df of /mnt/c may take (a stalled drvfs mount can block statfs).
 DF_TIMEOUT_S = 30.0
+# How long a killed df is waited for before it is let go (it may be stuck in the kernel).
+DF_REAP_S = 1.0
 
 PREFIX = "vtr-qor: "
 EXIT_USAGE = 2
@@ -300,11 +303,22 @@ def disk_free_gib() -> int:
     ``statfs`` on WSL's ``/mnt/c`` can hang while Windows stalls, and a hung reader must not hold
     the heavy lock. Any failure is E-QH11."""
     try:
-        proc = subprocess.run(list(DF_CMD), capture_output=True, text=True, check=False,
-                              timeout=DF_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        proc = subprocess.Popen(list(DF_CMD), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, text=True)
+    except OSError as exc:
         raise HeavyError(EXIT_DISK, MSG_DF) from exc
-    return parse_df(proc.returncode, proc.stdout)
+    try:
+        stdout, _ = proc.communicate(timeout=DF_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        # Kill it and reap it within DF_REAP_S; a df stuck in the kernel is let go, never
+        # waited for without a bound (subprocess.run's timeout would wait on it).
+        proc.kill()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=DF_REAP_S)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        raise HeavyError(EXIT_DISK, MSG_DF) from exc
+    return parse_df(proc.returncode, stdout)
 
 
 def mem_available_gib(meminfo: Path = Path("/proc/meminfo")) -> float:

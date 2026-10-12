@@ -546,6 +546,15 @@ class RunSummary:
     exit_code: int
 
 
+class DrainError(HeavyError):
+    """The job cgroup did not empty: no further job may start. ``result`` is the job's record
+    once ``run_one`` has written it."""
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(code, message)
+        self.result: JobResult | None = None
+
+
 @dataclass(frozen=True)
 class CommandOutcome:
     """One command's end: ``kind`` is ``exit`` (with ``returncode``), ``timeout``, ``aborted``
@@ -605,10 +614,12 @@ def hms(seconds: float) -> str:
 
 @dataclass
 class _Admission:
-    """Admission state across polls: when ``C:`` went short, and whether memory is awaited."""
+    """Admission state across polls: when ``C:`` went short, since when memory is awaited, and
+    which of the two stopped the run (``disk`` or ``memory``)."""
 
     paused_since: float | None = None
-    mem_waiting: bool = False
+    mem_since: float | None = None
+    stop_reason: str = ""
 
 
 def _environ() -> Mapping[str, str]:
@@ -889,7 +900,7 @@ def _drain(cgroup: Path, proc: subprocess.Popen[bytes], *, terminate: bool) -> i
         limit = time.monotonic() + CGROUP_DRAIN_S
         while not _emptied(cgroup, proc):
             if time.monotonic() >= limit:
-                raise HeavyError(EXIT_USAGE, f"{cgroup} still holds processes "
+                raise DrainError(EXIT_USAGE, f"{cgroup} still holds processes "
                                              f"{_members(cgroup)} after {CGROUP_DRAIN_S:g} s; "
                                              "stopping")
             _send(_members(cgroup), signal.SIGKILL)
@@ -1130,7 +1141,18 @@ def _prepare(job: Job, opts: RunOptions, attempt_start: float) -> str:
 
 def run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     """Run one job alone from a fresh attempt, inside the verified heavy run (spec §7.4). An ok
-    job is cleaned up (spec §7.5) before its ``metrics.json`` is written."""
+    job is cleaned up (spec §7.5) before its ``metrics.json`` is written. When the job cgroup
+    will not empty, the job is recorded ``failed`` (drain) and the DrainError, carrying that
+    result, goes on to stop the run."""
+    try:
+        return _run_one(job, opts, finish)
+    except DrainError as exc:
+        error = f"{_label(job)}: failed (drain): {exc.message}"
+        exc.result = _end_job(job, opts, opts.clock(), (FAILED, error, None))
+        raise
+
+
+def _run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
     scope = _heavy_scope(opts)
     began = opts.clock()
     deadline = began + opts.job_timeout_s[job.group]
@@ -1152,9 +1174,10 @@ def run_one(job: Job, opts: RunOptions, finish: Finish) -> JobResult:
 
 def admit(opts: RunOptions, *, running: int) -> str:
     """Spec §7.3. With jobs running, only the floor: ``stop`` below ``DISK_FLOOR_GIB``. Before
-    a job: ``wait`` while ``C:`` is under ``MIN_DISK_FREE_GIB`` (``stop`` once that has lasted
-    ``PAUSE_LIMIT_S``) or ``MemAvailable`` under ``MIN_MEM_AVAILABLE_GIB``, else ``go``. Prints
-    the paused, resumed and waiting lines once per episode. HeavyError when a reader fails."""
+    a job: ``wait`` while ``C:`` is under ``MIN_DISK_FREE_GIB`` or ``MemAvailable`` under
+    ``MIN_MEM_AVAILABLE_GIB``, ``stop`` once either has lasted ``PAUSE_LIMIT_S`` without a break
+    (``opts.admission.stop_reason`` says which), else ``go``. Prints the paused, resumed and
+    waiting lines once per episode. HeavyError when a reader fails."""
     free = qor_heavy.disk_free_gib()
     if running > 0:
         return STOP if free < DISK_FLOOR_GIB else GO
@@ -1166,6 +1189,7 @@ def admit(opts: RunOptions, *, running: int) -> str:
             _emit(opts, f"paused: C: has {free} GiB free (< {MIN_DISK_FREE_GIB} GiB); "
                         f"checking every {POLL_S} s")
         elif now - state.paused_since >= PAUSE_LIMIT_S:
+            state.stop_reason = "disk"
             return STOP
         return WAIT
     if state.paused_since is not None:
@@ -1173,12 +1197,16 @@ def admit(opts: RunOptions, *, running: int) -> str:
         _emit(opts, f"resumed: C: has {free} GiB free")
     mem = qor_heavy.mem_available_gib(opts.meminfo)
     if mem < MIN_MEM_AVAILABLE_GIB:
-        if not state.mem_waiting:
-            state.mem_waiting = True
+        now = opts.clock()
+        if state.mem_since is None:
+            state.mem_since = now
             shown = math.floor(mem * MEM_DECIMALS) / MEM_DECIMALS
             _emit(opts, f"waiting: {shown:.1f} GiB available (< {MIN_MEM_AVAILABLE_GIB})")
+        elif now - state.mem_since >= PAUSE_LIMIT_S:
+            state.stop_reason = "memory"
+            return STOP
         return WAIT
-    state.mem_waiting = False
+    state.mem_since = None
     return GO
 
 
@@ -1326,16 +1354,24 @@ def _key_complete(jobs: Sequence[_JobDir], designs: Collection[str]) -> bool:
     return bool(jobs) and all(j.complete for j in jobs) and set(designs) <= done
 
 
+def _key_when(key: Path, jobs: Sequence[_JobDir]) -> float:
+    return max((j.when for j in jobs), default=key.lstat().st_mtime)
+
+
 def _prune_keys(keys: Mapping[Path, list[_JobDir]], designs: Collection[str],
                 protect: Collection[str], root: Path, keep_keys: int) -> None:
-    """Spec §5.4: the ``keep_keys`` newest complete keys stay; a protected key is never
-    deleted (it counts among the newest when it is complete); a key that is not complete is not
-    touched."""
-    complete = [(max(j.when for j in jobs), key.name, key) for key, jobs in keys.items()
-                if _key_complete(jobs, designs)]
-    complete.sort(reverse=True)
-    for _, name, key in complete[keep_keys:]:
-        if name not in protect:
+    """Spec §5.4: the ``keep_keys`` newest complete keys stay; an incomplete key goes once
+    ``keep_keys`` complete keys are newer than it. A protected key (``latest``, the run's own) is
+    never deleted; it counts among the newest when it is complete."""
+    complete = sorted(((_key_when(key, jobs), key.name, key) for key, jobs in keys.items()
+                       if _key_complete(jobs, designs)), reverse=True)
+    doomed = [key for _, _, key in complete[keep_keys:]]
+    if len(complete) >= keep_keys:
+        oldest_kept = complete[keep_keys - 1][0] if keep_keys > 0 else math.inf
+        doomed += [key for key, jobs in keys.items() if not _key_complete(jobs, designs)
+                   and _key_when(key, jobs) < oldest_kept]
+    for key in sorted(doomed):
+        if key.name not in protect:
             qor_heavy.safe_rmtree(key, root)
 
 
@@ -1462,10 +1498,16 @@ def _after_ok(run: _Run, job: Job) -> bool:
 
 
 def _stop_for_pause(run: _Run, index: int) -> None:
+    """E-QH11 (or its memory twin): admission waited ``PAUSE_LIMIT_S``; exit 5."""
     hours = PAUSE_LIMIT_S // SECONDS_PER_HOUR
-    run.log.emit(f"C: stayed below {MIN_DISK_FREE_GIB} GiB free for {hours} h; stopping "
-                 f"({run.not_started(index)} jobs not started)")
-    run.log.emit(HINT_COMPACT)
+    left = run.not_started(index)
+    if run.opts.admission.stop_reason == "memory":
+        run.log.emit(f"MemAvailable stayed below {MIN_MEM_AVAILABLE_GIB} GiB for {hours} h; "
+                     f"stopping ({left} jobs not started)")
+    else:
+        run.log.emit(f"C: stayed below {MIN_DISK_FREE_GIB} GiB free for {hours} h; stopping "
+                     f"({left} jobs not started)")
+        run.log.emit(HINT_COMPACT)
     run.stop(EXIT_DISK, index)
 
 
@@ -1537,6 +1579,15 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
         while index < len(ordered):
             try:
                 going = _step(run, index)
+            except DrainError as exc:  # the job ran but its cgroup will not empty: stop
+                if exc.result is not None:
+                    log.emit(exc.result.error)
+                    run.results.append(exc.result)
+                    log.job(index + 1, len(ordered), exc.result)
+                else:
+                    log.emit(exc.message)
+                run.stop(exc.code, len(run.results))
+                going = False
             except HeavyError as exc:  # a reader failed between jobs (E-QH11 or meminfo)
                 log.emit(exc.message)
                 run.stop(exc.code, len(run.results))
