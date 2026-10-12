@@ -2381,10 +2381,15 @@ static void passrun_with_info(const char *name, const char *info) {
 }
 
 /* Plan 3D point (g): one `# abc:` line per run named abc with information, in run order, between
- * the `# Odin III` line and the blank line; other runs, and abc runs without information, none. */
+ * the `# Odin III` line and the blank line; other runs, and abc runs without information, none.
+ * The first abc run is run 1: the design is emptied (keeping tc's directory) before it opens, and
+ * read_blif is run 2. */
 static void test_vtr_header_abc_runs(void) {
     read_ok(GATES, false);
+    empty_design();
     passrun_with_info("abc", ABC_RUN_1);
+    read_ok(GATES, false);
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_passrun_end(tc.design));
     passrun_with_info("abc", NULL);
     passrun_with_info("other", "K=5");
     passrun_with_info("abc", ABC_RUN_2);

@@ -772,11 +772,11 @@ odin3_status odin3_design_get_passrun_count(const odin3_design *design, uint32_t
  * The row of pass run `run` (1 .. count - 1, see odin3_design_get_passrun_count): *name gets its
  * pass name, *args the text after the pass name as the script or caller gave it, trimmed, and
  * *info its run information, blank-separated key=value words the pass recorded (a value holding a
- * blank, `"` or `\` is in double quotes with `\"` and `\\`; `abc` writes `script=… sha256=… abc=…
- * K=… exchange=… depth=…`); "" for none. A pass sets its information at most once, while it
- * runs; rows never change afterwards. The strings are owned by the design and, unlike the
- * conventions' strings, stay valid until the design is destroyed. ODIN3_ERR_INVALID_ARG, as the
- * conventions say, for run 0, run >= count or any NULL output.
+ * blank or any other byte outside `!`..`~`, a `"` or a `\` is in double quotes with `\"` and `\\`;
+ * `abc` writes `script=… sha256=… abc=… K=… exchange=… depth=…`); "" for none. A pass sets its
+ * information at most once, while it runs; rows never change afterwards. Strings as the
+ * conventions say (see Strings). ODIN3_ERR_INVALID_ARG, as the conventions say, for run 0,
+ * run >= count or any NULL output.
  */
 odin3_status odin3_design_get_passrun(const odin3_design *design, uint32_t run, const char **name,
                                       const char **args, const char **info);

@@ -12,16 +12,23 @@ either skip as Skipped, never as Passed.
 ProcWalkTest (2D Task 6) walks Task 3's $proc node P1 through the ABI. No front end makes one
 yet, so it loads the test-only odin3_procfix library ($ODIN3_PROC_LIB: libodin3's objects plus
 odin3_test_proc_design, which builds P1) instead of libodin3.
+
+PassrunInfoTest (3D Task 8) formats run information with the core's odin3_passrun_info_append
+(through odin3_procfix's odin3_test_passrun_info hook) and reads it back with tools/vtr-qor's
+`# abc:` parser (qor_netstats.abc_header), so the two agree on which values need quotes.
 """
 
 from __future__ import annotations
 
 import io
 import os
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import qor_netstats
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VTR_LIB = REPO_ROOT / "lib" / "vtr.o3lib"
@@ -346,3 +353,81 @@ class ProcWalkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# Script paths as a user may give them (3D §8.5: recorded as given), each with bytes that a
+# blank-splitting reader could mistake for a separator: Python's str.isspace() is true for VT, FF,
+# 0x1c-0x1f, U+0085 and U+00A0 as well as space, tab, CR and LF.
+SCRIPT_PATHS = [
+    "lib/abc/vtr.abc",
+    "builtin:lib/abc/vtr.abc",
+    "dir with blanks/a.abc",
+    "tab\there.abc",
+    "nbsp\u00a0here.abc",
+    "nel\u0085here.abc",
+    "vt\x0bhere.abc",
+    "ff\x0chere.abc",
+    "us\x1fhere.abc",
+    "del\x7fhere.abc",
+    'quote"and\\backslash.abc',
+]
+SHA256 = "0123456789abcdef" * 4
+ABC_COMMIT = "0123456789abcdef0123456789abcdef01234567"
+INFO_CAP = 4096
+
+
+@unittest.skipUnless(HAVE_CFFI or REQUIRE_CFFI, "cffi not installed")
+@unittest.skipUnless(PROC_LIB, "ODIN3_PROC_LIB not set (run CTest python_walk)")
+class PassrunInfoTest(unittest.TestCase):
+    """The core's run-information words read back by qor_netstats (3D Task 8, fix round 1)."""
+
+    odin3: Odin3
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not HAVE_CFFI:
+            raise AssertionError("ODIN3_REQUIRE_CFFI=1 but cffi is not installed")
+        assert PROC_LIB is not None
+        cls.odin3 = Odin3(Path(PROC_LIB))
+        cls.odin3.ffi.cdef(
+            "odin3_status odin3_test_passrun_info(const char *const *pairs, uint32_t count,"
+            " char *out, size_t cap);"
+        )
+
+    def info(self, words: list[tuple[str, str]]) -> bytes:
+        """The run information the core formats from words, as bytes."""
+        ffi = self.odin3.ffi
+        keep = [ffi.new("char[]", text.encode()) for word in words for text in word]
+        out = ffi.new("char[]", INFO_CAP)
+        pairs = ffi.new("const char *[]", keep)
+        self.odin3.call("odin3_test_passrun_info", pairs, len(words), out, INFO_CAP)
+        return bytes(ffi.string(out))
+
+    def abc_words(self, script: str) -> list[tuple[str, str]]:
+        return [("script", script), ("sha256", SHA256), ("abc", ABC_COMMIT), ("K", "6"),
+                ("exchange", "blif"), ("depth", "3")]
+
+    def test_qor_netstats_reads_every_script_path(self) -> None:
+        for script in SCRIPT_PATHS:
+            with self.subTest(script=script):
+                line = self.info(self.abc_words(script))
+                bare = all("!" <= c <= "~" and c not in '"\\' for c in script)
+                self.assertEqual(line.startswith(b'script="'), not bare)
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "d.blif"
+                    path.write_bytes(b"# Odin III 0.0.0 write_blif --vtr (K=6, names short)\n"
+                                     b"# abc: " + line + b"\n\n.model top\n.end\n")
+                    header = qor_netstats.abc_header(path)
+                assert header is not None
+                self.assertEqual(header.script, script)
+                self.assertEqual((header.sha256, header.abc), (SHA256, ABC_COMMIT))
+                self.assertEqual((header.k, header.exchange, header.depth), ("6", "blif", 3))
+
+    def test_one_line_values_only(self) -> None:
+        for script in ("cr\rhere.abc", "lf\nhere.abc"):
+            with self.subTest(script=script), self.odin3.capture_log() as log:
+                with self.assertRaises(Odin3Error) as ctx:
+                    self.info(self.abc_words(script))
+                self.assertEqual(ctx.exception.status, self.odin3.lib.ODIN3_ERR_INVALID_ARG)
+                self.assertEqual([rec.message for rec in log],
+                                 ["odin3_passrun_info_append: invalid argument value"])

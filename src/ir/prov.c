@@ -310,34 +310,43 @@ odin3_status odin3_passrun_set_info(const odin3_pass_ctx *ctx, uint32_t info_str
 
 /* --- run information: the word formatter ---------------------------------------------------- */
 
-/* Lowest and highest bytes of an information key (printable ASCII, no blank). */
-enum { INFO_KEY_MIN = '!', INFO_KEY_MAX = '~' };
+/* Lowest and highest bytes of a bare information word (printable ASCII, no blank). A key is made
+ * of them alone; a value with any other byte is quoted, so no reader's idea of a blank (Python's
+ * str.isspace() includes VT, FF, 0x1c-0x1f, U+0085 and U+00A0) can split it. */
+enum { INFO_BARE_MIN = '!', INFO_BARE_MAX = '~' };
+
+/* True for a printable ASCII byte other than a blank: a key's bytes (but `=`, `"` and `\`), and
+ * those a value may hold unquoted (but `"` and `\`). */
+static bool info_bare(unsigned char byte) {
+    return byte >= INFO_BARE_MIN && byte <= INFO_BARE_MAX;
+}
 
 static bool info_key_ok(const char *key) {
     if (key == NULL || key[0] == '\0') {
         return false;
     }
     for (const char *at = key; *at != '\0'; at++) {
-        if (*at < INFO_KEY_MIN || *at > INFO_KEY_MAX || strchr("=\"\\", *at) != NULL) {
+        if (!info_bare((unsigned char)*at) || strchr("=\"\\", *at) != NULL) {
             return false;
         }
     }
     return true;
 }
 
-/* *quote: the value needs double quotes; false when it cannot be written (NUL, CR or LF). */
+/* *quote: the value needs double quotes (a byte outside `!`..`~`, a `"` or a `\`); false when it
+ * cannot be written (NUL, CR or LF: the information is one line). */
 static bool info_value_ok(odin3_bytes value, bool *quote) {
     *quote = false;
     if (value.ptr == NULL && value.len > 0) {
         return false;
     }
-    const char *chars = value.ptr;
+    const unsigned char *bytes = value.ptr;
     for (size_t i = 0; i < value.len; i++) {
-        char chr = chars[i];
-        if (chr == '\0' || chr == '\r' || chr == '\n') {
+        unsigned char byte = bytes[i];
+        if (byte == '\0' || byte == '\r' || byte == '\n') {
             return false;
         }
-        *quote = *quote || chr == ' ' || chr == '\t' || chr == '"' || chr == '\\';
+        *quote = *quote || !info_bare(byte) || byte == '"' || byte == '\\';
     }
     return true;
 }

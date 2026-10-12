@@ -628,9 +628,12 @@ if(BUILD_TESTING)
     target_sources(test_abi_values PRIVATE tests/unit/proc_fixture.c
                                            tests/unit/proc_fixture_core.c)
     # Test-only, never installed: libodin3's objects plus odin3_test_proc_design (Task 3's P1), so
-    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6).
+    # the Python walk reaches a $proc node through the ABI before a front end makes one (2D Task 6),
+    # and odin3_test_passrun_info (3D Task 8), so it checks qor_netstats' `# abc:` parser against the
+    # run information the core formats.
     add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
-                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c)
+                tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c
+                tests/unit/passrun_fixture_lib.c)
     set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
     target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
                                                      ${PROJECT_SOURCE_DIR}/include)

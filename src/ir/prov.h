@@ -154,8 +154,9 @@ odin3_status odin3_passrun_set_info(const odin3_pass_ctx *ctx, uint32_t info_str
 
 /*
  * Appends the word key=value to out, after one blank when out is not empty (IR-12's run
- * information). A value holding a blank (space or tab), `"` or `\` is written in double quotes,
- * with `\"` and `\\`; an empty value is `key=`. INVALID_ARG (logged
+ * information). A value holding a byte outside `!`..`~` (a blank, any other control byte, DEL or a
+ * non-ASCII byte), a `"` or a `\` is written in double quotes, with `\"` and `\\`, so that no
+ * reader splits it; an empty value is `key=`. INVALID_ARG (logged
  * "odin3_passrun_info_append: invalid argument <out|key|value>") for a NULL out; a NULL or empty
  * key, or one with a byte outside `!`..`~` or `=`, `"` or `\`; a value with NULL bytes and a
  * non-zero length, or holding a NUL, CR or LF (the information is one line). NO_MEMORY. out is

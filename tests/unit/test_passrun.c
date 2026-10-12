@@ -10,6 +10,7 @@
 #include "odin3/odin3.h"
 #include "passes/manager.h"
 #include "unity.h"
+#include "util/alloc.h"
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -189,11 +190,11 @@ static void test_args_kept_as_given(void) {
     TEST_ASSERT_EQUAL_STRING("\"t.blif\"", str_of(row_of(1).args));
 }
 
-/* A run whose pass fails keeps its row and its arguments. */
+/* A run whose pass fails keeps its row and its arguments, a one-byte argument included. */
 static void test_failed_pass_keeps_args(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_p("t_args -y"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_p("t_args y"));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_passrun_end(design));
-    TEST_ASSERT_EQUAL_STRING("-y", str_of(row_of(1).args));
+    TEST_ASSERT_EQUAL_STRING("y", str_of(row_of(1).args));
 }
 
 /* A reader that opens its own run (odin3_pass_run_begin) records no arguments. */
@@ -297,6 +298,54 @@ static void test_info_append(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "q", "\""));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "e", ""));
     TEST_ASSERT_EQUAL_STRING("t=\"a\tb\" q=\"\\\"\" e=", out.data);
+    odin3_strbuf_clear(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&out, odin3_bytes_cstr("a")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "K", "6"));
+    TEST_ASSERT_EQUAL_STRING("a K=6", out.data); /* the blank after a one-byte buffer too */
+    odin3_strbuf_free(&out);
+}
+
+/* I1: every byte outside `!`..`~` quotes the value (Python's str.isspace() splits on VT, FF,
+ * 0x1c-0x1f, U+0085 and U+00A0); DEL and `~`/`!` at the edges. */
+static void test_info_append_quotes_non_printing(void) {
+    odin3_strbuf out;
+    odin3_strbuf_init(&out);
+    /* each escape is followed by `z`, which is not a hex digit */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "nbsp", "a\xc2\xa0z.abc"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "vt", "a\x0bz"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "us", "a\x1fz"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "del", "a\x7fz"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "edges", "!~"));
+    TEST_ASSERT_EQUAL_STRING("nbsp=\"a\xc2\xa0z.abc\" vt=\"a\x0bz\" us=\"a\x1fz\" del=\"a\x7fz\" "
+                             "edges=!~",
+                             out.data);
+    odin3_strbuf_free(&out);
+}
+
+/* Out of memory at every allocation of a growing quoted append leaves the buffer as it was. */
+static void test_info_append_out_of_memory(void) {
+    const char value[] =
+        "a b c d e f g h i j k l m n o p q r s t u v w x y z \" A B C D E F G H I J K "
+        "L M N O P Q R S T U V W X Y Z \\ 0 1 2 3 4 5 6 7 8 9 a b c d e f g h i j k";
+    odin3_strbuf out;
+    odin3_strbuf_init(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, append(&out, "K", "6"));
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    long failed = 0;
+    for (long after = 0; st == ODIN3_ERR_NO_MEMORY && after < 64; after++) {
+        odin3_util_set_alloc_fail_after(after);
+        st = append(&out, "x", value);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            TEST_ASSERT_EQUAL_STRING("K=6", out.data);
+            TEST_ASSERT_EQUAL_size_t(3, out.len);
+            failed++;
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_GREATER_OR_EQUAL_INT32(2, failed); /* the growth fails mid-word at least once */
+    TEST_ASSERT_EQUAL_INT(0, strncmp(out.data, "K=6 x=\"a b c", strlen("K=6 x=\"a b c")));
     odin3_strbuf_free(&out);
 }
 
@@ -312,6 +361,8 @@ static void test_info_append_refusals(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, append(&out, NULL, "1"));
     odin3_strbuf_clear(&log_text);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, append(&out, "s", "a\nb"));
+    expect_only_error("odin3_passrun_info_append: invalid argument value");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, append(&out, "s", "a\rb"));
     expect_only_error("odin3_passrun_info_append: invalid argument value");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_passrun_info_append(&out, "s", (odin3_bytes){"a\0b", 3}));
@@ -389,16 +440,18 @@ static void test_abi_count_and_bounds(void) {
     TEST_ASSERT_EQUAL_STRING("", info);
 }
 
-/* The strings outlive later passes (they live in the strtab). */
-static void test_abi_strings_outlive_passes(void) {
+/* Rows never change: fetched again after later passes (as the conventions say), a row reads the
+ * same. */
+static void test_abi_rows_unchanged_by_passes(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("read_blif t.blif"));
     const char *name = NULL;
     const char *args = NULL;
     const char *info = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_passrun(design, 1, &name, &args, &info));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_p("t_args -x; compact; stats; t_args -x"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_passrun(design, 1, &name, &args, &info));
     TEST_ASSERT_EQUAL_STRING("read_blif", name);
     TEST_ASSERT_EQUAL_STRING("t.blif", args);
+    TEST_ASSERT_EQUAL_STRING("", info);
 }
 
 /* --- main ----------------------------------------------------------------------------------- */
@@ -444,10 +497,12 @@ int main(void) {
     RUN_TEST(test_set_info_no_run);
     RUN_TEST(test_set_info_bad_str);
     RUN_TEST(test_info_append);
+    RUN_TEST(test_info_append_quotes_non_printing);
+    RUN_TEST(test_info_append_out_of_memory);
     RUN_TEST(test_info_append_refusals);
     RUN_TEST(test_compact_keeps_rows);
     RUN_TEST(test_abi_count_and_bounds);
-    RUN_TEST(test_abi_strings_outlive_passes);
+    RUN_TEST(test_abi_rows_unchanged_by_passes);
     int failures = UNITY_END();
     odin3_strbuf_free(&log_text);
     return leave_test_dir() ? failures : EXIT_FAILURE;
