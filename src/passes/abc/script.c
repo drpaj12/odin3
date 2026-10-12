@@ -35,11 +35,20 @@
  *    yet it does not end a script as mapped;
  *  - choices: &if refuses the choices a plain &get copied from the network (Gia_ManChoiceLevel,
  *    giaIf.c:836), and print_xcut a network with choices (Abc_NtkCrossCut, abcUtil.c:2052).
+ *
+ * PR 3D-4's final review (rulings C1, C2, I1; agent defaults, PHASE3 decision 27):
+ *  - linked ABC maps LUTs of at most ODIN3_ABC_MAX_LUT_LINKED (12) inputs: {K} above it is
+ *    refused, if/&if -K must be 2..12, and &get -m may not copy the BLIF network's nodes (of any
+ *    width) as LUTs; wider mappings crash &st and &synch2 (dauGia.c:451), in Release too;
+ *  - value ranges a letter list cannot express (k_abc_ranges): -E at least 1, refactor -N at least
+ *    2, each letter alone as `-X <n>` (a valued letter eats the next word, read as 0);
+ *  - mfs and print_xcut need a network some command rebuilt, not the BLIF one (dangling nodes).
  */
 #include "passes/abc/script.h"
 
 #include "ir/lut.h"
 #include "passes/abc/abc.h"
+#include "passes/abc/abc_test.h"
 #include "util/alloc.h"
 #include "util/arena.h"
 #include "util/attr.h"
@@ -94,6 +103,7 @@ typedef struct abc_item {
 /* What one check needs: the request, the arena of the result, the worklists and step 11's state. */
 typedef struct abc_parse {
     const char *given;
+    odin3_abc_limits lim; /* the caps of this parse (the defaults, or a test's lower ones) */
     uint32_t lut_k;
     bool uses_k;
     uint8_t ntk, gia;    /* ABC_EMPTY, ABC_AIG, ABC_MAPPED or ABC_LOGIC */
@@ -135,6 +145,33 @@ typedef struct abc_request {
 typedef struct abc_from {
     const char *pre, *name, *post;
 } abc_from;
+
+/* --- limits -------------------------------------------------------------------------------- */
+
+static const odin3_abc_limits k_abc_default_limits = {
+    ODIN3_ABC_MAX_SCRIPT_BYTES, ODIN3_ABC_MAX_LINE_BYTES, ODIN3_ABC_MAX_COMMANDS,
+    ODIN3_ABC_MAX_WORDS, ODIN3_ABC_MAX_ALIAS_DEPTH};
+
+/* The caps every parse copies at its start (odin3_abc_test_set_limits lowers them). */
+static odin3_abc_limits abc_limits = {ODIN3_ABC_MAX_SCRIPT_BYTES, ODIN3_ABC_MAX_LINE_BYTES,
+                                      ODIN3_ABC_MAX_COMMANDS, ODIN3_ABC_MAX_WORDS,
+                                      ODIN3_ABC_MAX_ALIAS_DEPTH};
+
+static uint32_t lowered(uint32_t value, uint32_t cap) {
+    return value < cap ? value : cap;
+}
+
+void odin3_abc_test_set_limits(const odin3_abc_limits *limits) {
+    if (limits == NULL) {
+        abc_limits = k_abc_default_limits;
+        return;
+    }
+    abc_limits.script_bytes = lowered(limits->script_bytes, k_abc_default_limits.script_bytes);
+    abc_limits.line_bytes = lowered(limits->line_bytes, k_abc_default_limits.line_bytes);
+    abc_limits.commands = lowered(limits->commands, k_abc_default_limits.commands);
+    abc_limits.words = lowered(limits->words, k_abc_default_limits.words);
+    abc_limits.alias_depth = lowered(limits->alias_depth, k_abc_default_limits.alias_depth);
+}
 
 /* --- messages ------------------------------------------------------------------------------- */
 
@@ -292,6 +329,19 @@ static bool int_part_in_cap(const abc_mantissa *mt) {
     return leading_in_cap(&int_only, lead);
 }
 
+/* Reads a number word (is_number holds) into its mantissa and decimal exponent. */
+static long read_number(const char *word, abc_mantissa *mt) {
+    const char *at = word + (word[0] == '+' || word[0] == '-');
+    *mt = (abc_mantissa){at, strspn(at, "0123456789"), at, 0};
+    const char *rest = at + mt->int_len;
+    if (*rest == '.') {
+        mt->frac = rest + 1;
+        mt->frac_len = strspn(mt->frac, "0123456789");
+        rest = mt->frac + mt->frac_len;
+    }
+    return *rest == 'e' || *rest == 'E' ? exponent_of(rest + 1) : 0;
+}
+
 /*
  * Step 9's cap (fix round 1, ruling C2) on a number word: it must lie in 0 ..
  * ODIN3_ABC_MAX_NUMBER both as atoi reads it (its integer digits; atoi wraps past INT_MAX) and as
@@ -302,16 +352,39 @@ static bool number_in_cap(const char *word) {
     if (word[0] == '-') {
         return false;
     }
-    const char *at = word + (word[0] == '+');
-    abc_mantissa mt = {at, strspn(at, "0123456789"), at, 0};
-    const char *rest = at + mt.int_len;
-    if (*rest == '.') {
-        mt.frac = rest + 1;
-        mt.frac_len = strspn(mt.frac, "0123456789");
-        rest = mt.frac + mt.frac_len;
-    }
-    long exp = *rest == 'e' || *rest == 'E' ? exponent_of(rest + 1) : 0;
+    abc_mantissa mt;
+    long exp = read_number(word, &mt);
     return int_part_in_cap(&mt) && value_in_cap(&mt, exp);
+}
+
+/* The digits from index on, count of them (zeros past the end), as an integer (count <= 7). */
+static long digits_value(const abc_mantissa *mt, size_t index, long count) {
+    size_t total = mt->int_len + mt->frac_len;
+    long value = 0;
+    for (size_t i = index; i < index + (size_t)count; i++) {
+        value = value * ABC_DECIMAL + (i < total ? mantissa_at(mt, i) - '0' : 0);
+    }
+    return value;
+}
+
+/* The value atoi reads from a number word within the cap: its integer digits. */
+static long atoi_value(const char *word) {
+    abc_mantissa mt;
+    (void)read_number(word, &mt);
+    return digits_value(&mt, 0, (long)mt.int_len);
+}
+
+/* The integer part of the value atof reads from a number word within the cap, exactly. */
+static long atof_floor(const char *word) {
+    abc_mantissa mt;
+    long exp = read_number(word, &mt);
+    size_t total = mt.int_len + mt.frac_len;
+    size_t lead = 0;
+    while (lead < total && mantissa_at(&mt, lead) == '0') {
+        lead++;
+    }
+    long int_digits = (long)mt.int_len - (long)lead + exp;
+    return lead == total || int_digits <= 0 ? 0 : digits_value(&mt, lead, int_digits);
 }
 
 /* An echo argument: printable, without a blank, a quote, `!`, `;`, `#`, `{` or `}`. */
@@ -331,8 +404,9 @@ static odin3_status end_word(abc_scan *sc) {
     if (sc->word_len == 0) {
         return ODIN3_OK;
     }
-    if (sc->n_words == ODIN3_ABC_MAX_WORDS) {
-        return abc_fail(sc->ps, sc->line, "command has more than %d words", ODIN3_ABC_MAX_WORDS);
+    if (sc->n_words == sc->ps->lim.words) {
+        return abc_fail(sc->ps, sc->line, "command has more than %" PRIu32 " words",
+                        sc->ps->lim.words);
     }
     char *copy = odin3_arena_strndup(sc->ps->arena, sc->word, sc->word_len);
     if (copy == NULL) {
@@ -398,11 +472,18 @@ static odin3_status scan_brace(abc_scan *sc) {
     if (sc->ps->lut_k == 0) {
         return abc_fail(sc->ps, sc->line, "the script uses {K} but abc was given no --lut");
     }
+    if (sc->ps->lut_k > ODIN3_ABC_MAX_LUT_LINKED) {
+        return abc_fail(sc->ps, sc->line,
+                        "the script uses {K} = %" PRIu32 ", but linked ABC maps LUTs of at most "
+                        "%d inputs ('&st' and '&synch2' crash on wider ones at the pin)",
+                        sc->ps->lut_k, ODIN3_ABC_MAX_LUT_LINKED);
+    }
     sc->ps->uses_k = true;
     sc->pos += ABC_K_TOKEN - 1;
     sc->line_len += ABC_K_TOKEN - 1;
-    if (sc->line_len > ODIN3_ABC_MAX_LINE_BYTES) {
-        return abc_fail(sc->ps, sc->line, "line longer than %d bytes", ODIN3_ABC_MAX_LINE_BYTES);
+    if (sc->line_len > sc->ps->lim.line_bytes) {
+        return abc_fail(sc->ps, sc->line, "line longer than %" PRIu32 " bytes",
+                        sc->ps->lim.line_bytes);
     }
     uint32_t k = sc->ps->lut_k; /* 2 .. 16: at most two digits */
     if (k >= ABC_DECIMAL) {
@@ -458,8 +539,9 @@ static odin3_status scan_byte(abc_scan *sc) {
     if (byte == '\0') {
         return abc_fail(sc->ps, sc->line, "abc script contains a NUL byte");
     }
-    if (++sc->line_len > ODIN3_ABC_MAX_LINE_BYTES) {
-        return abc_fail(sc->ps, sc->line, "line longer than %d bytes", ODIN3_ABC_MAX_LINE_BYTES);
+    if (++sc->line_len > sc->ps->lim.line_bytes) {
+        return abc_fail(sc->ps, sc->line, "line longer than %" PRIu32 " bytes",
+                        sc->ps->lim.line_bytes);
     }
     return sc->in_comment ? ODIN3_OK : scan_text(sc, byte);
 }
@@ -572,9 +654,9 @@ static odin3_status append_extra(abc_parse *ps, abc_item *last, const abc_item *
 /* Replaces item, whose word 0 names alias, by the alias's commands on the worklist (step 7). */
 static odin3_status expand(abc_parse *ps, const abc_item *item, const odin3_abc_alias *alias) {
     const char *outer = item->alias;
-    if (item->depth >= ODIN3_ABC_MAX_ALIAS_DEPTH) {
-        return abc_fail(ps, item->line, "alias '%s' expands more than %d levels deep",
-                        outer != NULL ? outer : alias->name, ODIN3_ABC_MAX_ALIAS_DEPTH);
+    if (item->depth >= ps->lim.alias_depth) {
+        return abc_fail(ps, item->line, "alias '%s' expands more than %" PRIu32 " levels deep",
+                        outer != NULL ? outer : alias->name, ps->lim.alias_depth);
     }
     if (outer == NULL) {
         outer = odin3_arena_strndup(ps->arena, alias->name, strlen(alias->name));
@@ -692,6 +774,76 @@ static odin3_status check_positional(const abc_parse *ps, const abc_item *item,
     return ODIN3_OK;
 }
 
+/* The reason a value range exists, for its message. */
+static const char k_abc_why_lut[] = "linked ABC maps LUTs of at most 12 inputs ('&st' and "
+                                    "'&synch2' crash on wider ones at the pin)";
+static const char k_abc_why_crash[] = "a smaller value crashes ABC at the pin (a3001b72)";
+
+/* An option whose value must lie in [min, max] (final review C1 and I1). ABC's getopt lets a
+ * valued letter eat the next word, and atoi or atof of an option word is 0, so the letter must
+ * stand alone as `-<letter> <number>`. */
+typedef struct abc_range {
+    const char *name;
+    char letter;
+    bool atof_reads; /* the value is a float (atof), else an integer (atoi) */
+    long min, max;
+    const char *why;
+} abc_range;
+
+static const abc_range k_abc_ranges[] = {
+    {"if", 'K', false, ODIN3_ABC_LUT_MIN, ODIN3_ABC_MAX_LUT_LINKED, k_abc_why_lut},
+    {"&if", 'K', false, ODIN3_ABC_LUT_MIN, ODIN3_ABC_MAX_LUT_LINKED, k_abc_why_lut},
+    {"if", 'E', true, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"&if", 'E', true, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"refactor", 'N', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash}};
+
+/* Whether words[at] is `-<letter>` alone, followed by a number word in the range. */
+static bool range_holds(const abc_item *item, uint32_t at, const abc_range *rule) {
+    const char *word = item->words[at];
+    if (word[1] != rule->letter || word[2] != '\0' || at + 1 >= item->n_words) {
+        return false;
+    }
+    const char *value = item->words[at + 1];
+    if (!is_number(value) || !number_in_cap(value)) {
+        return false;
+    }
+    /* min and max are integers, so value >= min exactly when floor(value) >= min; every atof
+     * rule's max is the number cap, which number_in_cap already holds exactly */
+    long read = rule->atof_reads ? atof_floor(value) : atoi_value(value);
+    return read >= rule->min && read <= rule->max;
+}
+
+/* Step 9's value ranges for one rule over the command's option words. */
+static odin3_status check_range(const abc_parse *ps, const abc_item *item, const abc_range *rule) {
+    for (uint32_t i = 1; i < item->n_words; i++) {
+        const char *word = item->words[i];
+        if (!is_option(word) || strchr(word + 1, rule->letter) == NULL ||
+            range_holds(item, i, rule)) {
+            continue;
+        }
+        abc_from from = from_alias(item);
+        return abc_fail(ps, item->line,
+                        "option '-%c' of '%s'%s%s%s must stand alone as '-%c <n>' with <n> from "
+                        "%ld to %ld: %s",
+                        rule->letter, rule->name, from.pre, from.name, from.post, rule->letter,
+                        rule->min, rule->max, rule->why);
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status check_ranges(const abc_parse *ps, const abc_item *item,
+                                 const odin3_abc_command_info *row) {
+    for (size_t i = 0; i < sizeof k_abc_ranges / sizeof k_abc_ranges[0]; i++) {
+        if (strcmp(k_abc_ranges[i].name, row->name) == 0) {
+            odin3_status st = check_range(ps, item, &k_abc_ranges[i]);
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+    }
+    return ODIN3_OK;
+}
+
 /* Step 9: each argument is an option without a file, string or crash letter, or a value. */
 static odin3_status check_args(const abc_parse *ps, const abc_item *item,
                                const odin3_abc_command_info *row) {
@@ -706,7 +858,8 @@ static odin3_status check_args(const abc_parse *ps, const abc_item *item,
         }
         n_positional += !option;
     }
-    return check_positional(ps, item, row, n_positional);
+    odin3_status st = check_positional(ps, item, row, n_positional);
+    return st == ODIN3_OK ? check_ranges(ps, item, row) : st;
 }
 
 /* Whether letter occurs in an option word of item, anywhere (the conservative reading). */
@@ -823,10 +976,11 @@ static void apply_choices(abc_parse *ps, const abc_item *item, const odin3_abc_c
     }
 }
 
-/* Step 11's state rules: the BLIF & rule; &if needs an unmapped & space (PHASE3 #22) without
- * choices &get copied; print_xcut needs a network without choices (fix round 1, ruling I1). */
-static odin3_status check_state(const abc_parse *ps, const abc_item *item,
-                                const odin3_abc_command_info *row) {
+/* Step 11's & space rules: the BLIF & rule; &if needs an unmapped & space (PHASE3 #22) without
+ * choices &get copied (fix round 1, I1); &get -m may not copy the BLIF network's nodes as LUTs,
+ * whose width is unknown (final review C1). */
+static odin3_status check_gia_rules(const abc_parse *ps, const abc_item *item,
+                                    const odin3_abc_command_info *row) {
     abc_from from = from_alias(item);
     bool if_gia = row->effect == ODIN3_ABC_FX_GIA_MAPPED;
     if (row->name[0] == '&' && row->effect != ODIN3_ABC_FX_GIA_GET && ps->gia == ABC_EMPTY) {
@@ -847,11 +1001,41 @@ static odin3_status check_state(const abc_parse *ps, const abc_item *item,
                         "'&get' copied; add '&st'",
                         row->name, from.pre, from.name, from.post);
     }
+    if (row->effect == ODIN3_ABC_FX_GIA_GET && get_state(ps, item) == ABC_LOGIC) {
+        return abc_fail(ps, item->line,
+                        "'%s'%s%s%s with -m would keep the nodes of the network the BLIF exchange "
+                        "reads as LUTs of any width, but linked ABC maps LUTs of at most %d "
+                        "inputs ('&st' and '&synch2' crash on wider ones at the pin); add "
+                        "'strash' first",
+                        row->name, from.pre, from.name, from.post, ODIN3_ABC_MAX_LUT_LINKED);
+    }
+    return ODIN3_OK;
+}
+
+/* Commands that need a network some command has rebuilt, not the one the BLIF exchange reads,
+ * which can hold dangling nodes (final review C2: mfs asserts in Abc_MfsComputeRoots, mfsWin.c:105,
+ * and SIGSEGVs in Release; print_xcut asserts in Abc_NtkCrossCut, abcUtil.c:2052). */
+static const char *const k_abc_need_rebuilt[] = {"mfs", "print_xcut"};
+
+/* Step 11's network rules: print_xcut needs no choices (fix round 1, I1); mfs and print_xcut need
+ * a rebuilt network (final review C2). */
+static odin3_status check_ntk_rules(const abc_parse *ps, const abc_item *item,
+                                    const odin3_abc_command_info *row) {
+    abc_from from = from_alias(item);
     if (strcmp(row->name, "print_xcut") == 0 && ps->ntk_choices) {
         return abc_fail(ps, item->line,
                         "'%s'%s%s%s needs a network without choices, which it has here; add "
                         "'strash'",
                         row->name, from.pre, from.name, from.post);
+    }
+    for (size_t i = 0; ps->ntk == ABC_LOGIC && i < sizeof k_abc_need_rebuilt / sizeof(char *);
+         i++) {
+        if (strcmp(row->name, k_abc_need_rebuilt[i]) == 0) {
+            return abc_fail(ps, item->line,
+                            "'%s'%s%s%s cannot run on the network the BLIF exchange reads, which "
+                            "can hold dangling nodes; add 'strash' before it",
+                            row->name, from.pre, from.name, from.post);
+        }
     }
     return ODIN3_OK;
 }
@@ -859,7 +1043,10 @@ static odin3_status check_state(const abc_parse *ps, const abc_item *item,
 /* Step 11: the state rules, then the effect on the spaces and their choices. */
 static odin3_status check_space(abc_parse *ps, const abc_item *item,
                                 const odin3_abc_command_info *row) {
-    odin3_status st = check_state(ps, item, row);
+    odin3_status st = check_gia_rules(ps, item, row);
+    if (st == ODIN3_OK) {
+        st = check_ntk_rules(ps, item, row);
+    }
     if (st == ODIN3_OK) {
         apply_effect(ps, item, row);
         apply_choices(ps, item, row);
@@ -896,9 +1083,9 @@ static odin3_status check_command(abc_parse *ps, const abc_item *item) {
     if (st == ODIN3_OK) {
         st = check_args(ps, item, row);
     }
-    if (st == ODIN3_OK && ps->cmds.len >= ODIN3_ABC_MAX_COMMANDS) {
-        st = abc_fail(ps, item->line, "script expands to more than %d commands",
-                      ODIN3_ABC_MAX_COMMANDS);
+    if (st == ODIN3_OK && ps->cmds.len >= ps->lim.commands) {
+        st = abc_fail(ps, item->line, "script expands to more than %" PRIu32 " commands",
+                      ps->lim.commands);
     }
     if (st == ODIN3_OK) {
         st = check_space(ps, item, row);
@@ -974,10 +1161,10 @@ static odin3_status finish(abc_parse *ps, const abc_request *req, odin3_abc_scri
 
 /* The checks, in memory: size, the byte pass, the command pass, the output. */
 static odin3_status parse_bytes(const abc_request *req, odin3_abc_script *out) {
-    abc_parse ps = {.given = req->given, .lut_k = req->lut_k};
-    if (req->len > ODIN3_ABC_MAX_SCRIPT_BYTES) {
-        return abc_fail(&ps, ABC_NO_LINE, "abc script is larger than %d bytes",
-                        ODIN3_ABC_MAX_SCRIPT_BYTES);
+    abc_parse ps = {.given = req->given, .lim = abc_limits, .lut_k = req->lut_k};
+    if (req->len > ps.lim.script_bytes) {
+        return abc_fail(&ps, ABC_NO_LINE, "abc script is larger than %" PRIu32 " bytes",
+                        ps.lim.script_bytes);
     }
     bool blif = req->exchange == ODIN3_ABC_EXCHANGE_BLIF;
     ps.ntk = blif ? ABC_LOGIC : ABC_AIG;
@@ -1006,26 +1193,29 @@ static odin3_status parse_bytes(const abc_request *req, odin3_abc_script *out) {
     return st;
 }
 
-/* Reads at most ODIN3_ABC_MAX_SCRIPT_BYTES + 1 bytes of path into a new buffer (enough to see
- * that a larger file is too large). */
-static odin3_status read_script(const char *path, uint8_t **bytes, size_t *len) {
-    FILE *file = fopen(path, "rb");
+/* Reads at most the script cap + 1 bytes of src->resolved into a new buffer (enough to see that
+ * a larger file is too large). The message names the file as given (§7.3; final review M3). */
+static odin3_status read_script(const odin3_abc_script_src *src, uint8_t **bytes, size_t *len) {
+    FILE *file = fopen(src->resolved, "rb");
     if (file == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "abc: %s: cannot read the script: %s", path, strerror(errno));
+        odin3_log(ODIN3_LOG_ERROR, "abc: %s: cannot read the script: %s", src->given,
+                  strerror(errno));
         return ODIN3_ERR_IO;
     }
-    uint8_t *buf = odin3_util_malloc((size_t)ODIN3_ABC_MAX_SCRIPT_BYTES + 1);
+    size_t cap = (size_t)abc_limits.script_bytes + 1;
+    uint8_t *buf = odin3_util_malloc(cap);
     if (buf == NULL) {
         (void)fclose(file);
         return ODIN3_ERR_NO_MEMORY;
     }
     errno = 0;
-    size_t got = fread(buf, 1, (size_t)ODIN3_ABC_MAX_SCRIPT_BYTES + 1, file);
+    size_t got = fread(buf, 1, cap, file);
     bool failed = ferror(file) != 0;
     int err = errno != 0 ? errno : EIO;
     (void)fclose(file);
     if (failed) {
-        odin3_log(ODIN3_LOG_ERROR, "abc: %s: cannot read the script: %s", path, strerror(err));
+        odin3_log(ODIN3_LOG_ERROR, "abc: %s: cannot read the script: %s", src->given,
+                  strerror(err));
         odin3_util_free(buf);
         return ODIN3_ERR_IO;
     }
@@ -1056,7 +1246,7 @@ odin3_status odin3_abc_script_parse(const odin3_abc_script_src *src, uint32_t lu
     }
     uint8_t *owned = NULL;
     if (src->text.ptr == NULL) {
-        odin3_status st = read_script(src->resolved, &owned, &req.len);
+        odin3_status st = read_script(src, &owned, &req.len);
         if (st != ODIN3_OK) {
             return st;
         }

@@ -76,20 +76,46 @@
  *   dch -s          abc.c:18692 fSynthesis: asserts CoNum % 3 == 0 (Gia_ManToAigSkip,
  *                               giaAig.c:372), on any network whose outputs are not a multiple of 3
  *
+ * PR 3D-4's final review (C2, I1), on its eight design shapes (below):
+ *
+ *   print_latch -s  abc.c:1925  fPrintSccs: asserts Abc_NtkIsStrash (Abc_AigConst1, abcAig.c:685)
+ *                               unless right after strash; SIGSEGV in the Release abc
+ *   &if -j, -b, -i  abc.c:45448, 45423, 45445  fEnableCheck07, fUseCheck1, fUseCheck2: assert in
+ *                               If_ObjPerformMappingAnd (ifMap.c:352) for K 2..3 and in
+ *                               Gia_ManFromIfGetConfig2 (giaIf.c:2163) for -j at K 4..8
+ *   mfs -p          abc.c:5718  fPower: after a K >= 12 mapping asserts nVarsAB <= 8
+ *                               (Int_ManPrepareInter, satInter.c:963)
+ *   lutpack -o      abc.c:5350  fOldAlgo: asserts in Abc_NtkUpdateLevel (abcTiming.c:1446)
+ *
+ * script.c adds what a letter list cannot say: if/&if -K at most 12 (abc.c:22908, 45209; wider
+ * mappings crash &st and &synch2, dauGia.c:451), -E at least 1 (abc.c:23055, 45337; If_Cut
+ * AreaDerefed, ifCut.c:1117) and refactor -N at least 2 (abc.c:8434; Abc_NodeFindCut,
+ * abcReconv.c:280), each as `-X <n>` alone; and the BLIF-start rules for &get -m, mfs and
+ * print_xcut.
+ *
  * print_box crashes with any option, so it is a refused row of class CRASH.
  *
- * How the others were checked: every option of every allowed command was mapped to the variable
- * its case assigns, and the usage texts were searched for dump, file, write, save, record and log.
- * Then each allowed command ran once in the abc tool at the pin, once per option (numeric options
- * with 2), on a strashed, a mapped, a & and a &-mapped network, each run in an empty directory: the
- * only files created came from the options above. Task 11's first audit then ran option pairs and
- * small values with the Release abc, where NDEBUG compiles ABC's assert out, so it saw signals
- * only (review I2). Its fix round 1 re-ran with the Debug abc, on scripts the checker accepts:
- * every allowed command at default options in 14 states, every option pair, every valued option
- * at 0, 1, 3, 64, 1000 and 1000000, zero to two positional numbers, and the print and & pairs
- * after a mapping step, on Task 10's sequential design (8 inputs, 4 outputs, 4 latches) and
- * combinational one (4 inputs, 2 outputs): 11,764 runs, clean. Triples, larger networks and
- * longer command sequences were not run, so the lists may still be incomplete.
+ * How the lists were checked, and what that covers:
+ *  - Task 10: every option of every allowed command was mapped to the variable its case assigns,
+ *    and the usage texts were searched for dump, file, write, save, record and log; then each
+ *    command ran once per option (value 2) on a strashed, a mapped, a & and a &-mapped network.
+ *  - Task 11's first audit: option pairs (value 2) and single values 0, 1, 64, -1, 3 and 1000,
+ *    with the Release abc, where NDEBUG compiles ABC's assert out (signals only).
+ *  - Task 11 fix round 1: the Debug abc, on scripts the checker accepted: every command at default
+ *    options in 14 states, option pairs, valued options at 0, 1, 3, 64, 1000 and 1000000, zero to
+ *    two positional numbers, print and & pairs after a mapping step; all at K 4 or 6, on two
+ *    designs only (8 inputs, 4 outputs, 4 latches; 4 inputs, 2 outputs; every node at most 4
+ *    inputs, no dangling node): 11,764 runs, clean.
+ *  - The final review then found nine more classes on eight new shapes (a buffer, constant
+ *    outputs, a one-latch loop, a 5-input/3-latch block, an 8-input block, one 20-input node, 600
+ *    random nodes with 60 latches and dangling nodes, the same with numeric names) and K 2, 3 and
+ *    13..16. Its fix ran the Debug abc on those eight shapes, on scripts the checker accepts: every
+ *    command at default options in 14 states, in 12 states built with if or &if at K 2, 3 and 12,
+ *    and every option of if, &if, mfs, mfs2, lutpack and &mfs at K 2, 3 and 12: 14,376 runs,
+ *    clean.
+ *  - Not run: option triples, values other than those listed, other shapes and sizes, and
+ *    longer command sequences. The lists are what these runs found, not a proof; ABC's asserts
+ *    depend on the design as much as on the options (PHASE3 decision 27).
  *
  * Then the refused rows: §7.5's "among others" (files, process, latches), every registered
  * read_* and write_* command with read and write, the & space's &r, &w, &read_* and &write_*
@@ -126,16 +152,16 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* mapping */
     {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "scY"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tM"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tMp"},
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
-    {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
+    {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "o"},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "M"},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swY"},
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swYjbi"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
     /* printing: the 34 print_* commands at the pin but print_constr, print_status, print_box,
      * print_cone and print_npn;
@@ -153,7 +179,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"print_gs", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_io", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_kmap", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_latch", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_latch", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "s"},
     {"print_level", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_lib", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_library", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},

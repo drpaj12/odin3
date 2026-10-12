@@ -22,7 +22,9 @@
  *      rules, re-derived here) from the exchange's start ends in the reported final space,
  *      mapped, and never runs an & command on an empty & space, &if on a mapped one or on
  *      choices a plain &get copied, nor print_xcut on a network with choices;
- *    - uses_k implies a K, and the SHA-256 is that of the script's bytes;
+ *    - `-K` of if/&if is 2..12 and `-E` at least 1, refactor `-N` at least 2, each alone; &get
+ *      -m, mfs and print_xcut never run on the network the BLIF exchange reads;
+ *    - uses_k implies a K of at most 12, and the SHA-256 is that of the script's bytes;
  *  - accepted through BLIF implies accepted in memory, with the same lines;
  *  - no leak, no sanitizer report, no hang (libFuzzer's -rss_limit_mb and -timeout).
  *
@@ -58,7 +60,8 @@ enum {
     NO_CHOICES = 0,
     NATIVE = 1,
     COPIED = 2,
-    CAP = 1000000
+    CAP = 1000000,
+    LUT_LINKED = 12
 };
 
 static const char k_name[] = "f.abc";
@@ -209,6 +212,21 @@ static bool balancing(const char *const *words, uint32_t n, const char *letters)
     return false;
 }
 
+/* The BLIF-start rules (final review C1, C2): &get -m may not copy the read network's nodes as
+ * LUTs, and mfs and print_xcut need a network some command rebuilt. */
+static void check_start_rules(const model *md, const odin3_abc_command_info *row,
+                              const char *const *words, uint32_t n) {
+    if (md->ntk != LOGIC) {
+        return;
+    }
+    if (row->effect == ODIN3_ABC_FX_GIA_GET && toggled(words, n, 'm') && !toggled(words, n, 'c')) {
+        fail("&get -m of the network the BLIF exchange reads was accepted");
+    }
+    if (strcmp(row->name, "mfs") == 0 || strcmp(row->name, "print_xcut") == 0) {
+        fail("mfs or print_xcut on the network the BLIF exchange reads was accepted");
+    }
+}
+
 /* The state rules an accepted command must satisfy; a violation traps. */
 static void check_state_rules(const model *md, const odin3_abc_command_info *row) {
     bool amp = row->name[0] == '&';
@@ -267,6 +285,7 @@ static void replay_gia(model *md, const odin3_abc_command_info *row, const char 
 static void replay(model *md, const odin3_abc_command_info *row, const char *const *words,
                    uint32_t n) {
     check_state_rules(md, row);
+    check_start_rules(md, row, words, n);
     switch (row->effect) {
     case ODIN3_ABC_FX_NTK_AIG:
     case ODIN3_ABC_FX_NTK_MAPPED:
@@ -300,6 +319,29 @@ static bool number_in_cap(const char *word) {
     return value >= 0.0 && value <= (double)CAP && int_part <= CAP;
 }
 
+/* The value ranges (final review C1, I1): `-K` 2..12 and `-E` >= 1 for if and &if, `-N` >= 2 for
+ * refactor; each letter alone as `-X <n>`. strtod/strtol read the value here. */
+static void check_range(const char *name, const char *const *words, uint32_t n) {
+    bool mapper = strcmp(name, "if") == 0 || strcmp(name, "&if") == 0;
+    for (uint32_t i = 1; i < n; i++) {
+        bool k = mapper && option_word(words[i]) && strchr(words[i] + 1, 'K') != NULL;
+        bool e = mapper && option_word(words[i]) && strchr(words[i] + 1, 'E') != NULL;
+        bool nn = strcmp(name, "refactor") == 0 && option_word(words[i]) &&
+                  strchr(words[i] + 1, 'N') != NULL;
+        if (!k && !e && !nn) {
+            continue;
+        }
+        if (words[i][2] != '\0' || i + 1 >= n || !number_word(words[i + 1])) {
+            fail("a ranged option that does not stand alone was accepted");
+        }
+        long ival = strtol(words[i + 1], NULL, 10);
+        double fval = strtod(words[i + 1], NULL);
+        if ((k && (ival < 2 || ival > LUT_LINKED)) || (e && fval < 1.0) || (nn && ival < 2)) {
+            fail("a ranged option outside its range was accepted");
+        }
+    }
+}
+
 /* The arguments of an accepted command. */
 static void check_args(const odin3_abc_command_info *row, const char *const *words, uint32_t n) {
     bool echo = strcmp(row->name, "echo") == 0;
@@ -321,6 +363,7 @@ static void check_args(const odin3_abc_command_info *row, const char *const *wor
     if (strcmp(row->name, "print_kmap") == 0 && positional >= 2) {
         fail("print_kmap with two arguments was accepted");
     }
+    check_range(row->name, words, n);
 }
 
 /* One accepted command: its line's bytes, word 0, the arguments, the alias, the source line. */
@@ -425,8 +468,8 @@ static odin3_status check_once(const odin3_abc_script_src *src, uint32_t lut_k, 
     if (st == ODIN3_OK) {
         check_accepted(out, exchange, n_lines);
         check_sha(out, src->text.ptr, src->text.len);
-        if (out->uses_k && lut_k == 0) {
-            fail("uses_k without a K");
+        if (out->uses_k && (lut_k == 0 || lut_k > LUT_LINKED)) {
+            fail("uses_k without a K, or with a K above 12");
         }
     } else if (st == ODIN3_ERR_PARSE) {
         check_rejected(n_lines);

@@ -4,6 +4,7 @@
 #ifndef ODIN3_PASSES_ABC_ABC_TEST_H
 #define ODIN3_PASSES_ABC_ABC_TEST_H
 
+#include "passes/abc/abc.h"
 #include "passes/abc/script.h"
 
 #include <stdint.h>
@@ -14,5 +15,12 @@
  * the abc.rc table.
  */
 void odin3_abc_test_set_aliases(const odin3_abc_alias *table, uint32_t n);
+
+/*
+ * Makes the checker use *limits instead of the ODIN3_ABC_MAX_* caps (the caps-at-their-limits
+ * tests). A test may only lower a cap: each field is clamped to its default (the byte pass's
+ * buffers are sized by the defaults). NULL restores the defaults.
+ */
+void odin3_abc_test_set_limits(const odin3_abc_limits *limits);
 
 #endif

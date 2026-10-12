@@ -1,7 +1,8 @@
 /*
  * abc_script_cases.c — the scripts test_abc_script accepts (abc_script_cases.h): one per accepted
  * example of the plan's Task 11 list, plus the forms the checker's output must keep for
- * CmdSplitLine (option clusters, attached values, signed and exponent numbers, echo words).
+ * CmdSplitLine (option clusters, signed and exponent numbers, echo words). ABC's getopt has no
+ * attached values: `-K6` is the cluster `-K -6`, which the checker refuses (final review M2).
  */
 #include "abc_script_cases.h"
 
@@ -11,7 +12,7 @@
 
 const abc_script_case k_abc_script_accepted[] = {
     {"if -K {K}", 6, ODIN3_ABC_EXCHANGE_AIG},
-    {"if -K {K}", 16, ODIN3_ABC_EXCHANGE_BLIF},
+    {"if -K {K}", 12, ODIN3_ABC_EXCHANGE_BLIF},
     {"b -l\nif -K 6\n", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"resyn -v\nif -K 6\n", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"strash\r\nif -K 6\r\n", 0, ODIN3_ABC_EXCHANGE_BLIF},
@@ -30,7 +31,7 @@ const abc_script_case k_abc_script_accepted[] = {
     {"strash; if -g; if -K 6", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"&if -K 6 -u", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"&if -K 6; &put", 0, ODIN3_ABC_EXCHANGE_AIG},
-    {"if -K6 -vm", 0, ODIN3_ABC_EXCHANGE_AIG},
+    {"if -vm -K 6", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"strash; dch; &get -s; &if -K 6; &put; print_xcut", 0, ODIN3_ABC_EXCHANGE_BLIF},
     {"&get -m -c; &if -K 6 -C 1000000", 0, ODIN3_ABC_EXCHANGE_BLIF},
     {"if -K {K} -v; print_stats; time; echo {K}", 6, ODIN3_ABC_EXCHANGE_AIG},

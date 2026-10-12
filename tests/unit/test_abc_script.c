@@ -57,6 +57,7 @@ void setUp(void) {
 void tearDown(void) {
     odin3_util_set_alloc_fail_after(-1);
     odin3_abc_test_set_aliases(NULL, 0);
+    odin3_abc_test_set_limits(NULL);
     odin3_log_set_sink(NULL, NULL);
 }
 
@@ -271,8 +272,8 @@ static void test_k_substitution(void) {
     TEST_ASSERT_EQUAL_STRING("if -K 6", script.cmds[0].line);
     TEST_ASSERT_TRUE(script.uses_k);
     odin3_abc_script_free(&script);
-    accept("if -K{K} -C {K}{K}", (run){16, AIG}, &script);
-    TEST_ASSERT_EQUAL_STRING("if -K16 -C 1616", script.cmds[0].line);
+    accept("if -K {K} -C {K}{K}", (run){12, AIG}, &script);
+    TEST_ASSERT_EQUAL_STRING("if -K 12 -C 1212", script.cmds[0].line);
     odin3_abc_script_free(&script);
     accept("# {K} in a comment\nif -K 6", k_mem, &script);
     TEST_ASSERT_FALSE(script.uses_k);
@@ -517,7 +518,7 @@ static void test_arguments(void) {
         refuse_argument(bad[i]);
     }
     odin3_abc_script script;
-    accept("if -K 6 -C 8 -D 6 -E +6 -F 6.5 -W 6e3 -X 6.5E-3 -Z 0.25e+2 -K6 -vm", k_mem, &script);
+    accept("if -K 6 -C 8 -D 6 -E +6 -F 6.5 -W 6e3 -X 6.5E-3 -Z 0.25e+2 -vm", k_mem, &script);
     odin3_abc_script_free(&script);
     accept("echo hello-world\nif -K 6", k_mem, &script);
     TEST_ASSERT_EQUAL_STRING("echo hello-world", script.cmds[0].line);
@@ -577,11 +578,11 @@ static void test_file_and_crash_options(void) {
         crash_seen += check_crash_options(odin3_abc_command_at(i));
     }
     /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i;
-     * crashes: if scY, &if swY, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr NFS,
-     * mfs tM, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M (Task 10 fix rounds 1-3, Task
-     * 11's audit and its fix round 1) */
+     * crashes: if scY, &if swYjbi, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr
+     * NFS, mfs tMp, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M, lutpack o, print_latch s
+     * (Task 10 fix rounds 1-3, Task 11's audit, its fix round 1 and the final review) */
     TEST_ASSERT_EQUAL_UINT32(16, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(28, crash_seen);
+    TEST_ASSERT_EQUAL_UINT32(34, crash_seen);
 }
 
 static void test_options_from_alias(void) {
@@ -661,6 +662,112 @@ static void test_refused_print_commands(void) {
     odin3_abc_script script;
     accept("print_kmap 1; print_kmap -n; if -K 6", k_mem, &script);
     odin3_abc_script_free(&script);
+}
+
+/* Final review C1: linked ABC maps LUTs of at most 12 inputs; {K} and every -K stay at or below. */
+static void test_k_linked_cap(void) {
+    refuse("if -K {K}", (run){13, AIG},
+           "t.abc:1: the script uses {K} = 13, but linked ABC maps LUTs of at most 12 inputs "
+           "('&st' and '&synch2' crash on wider ones at the pin)");
+    refuse("strash\n&if -K {K}", (run){16, AIG},
+           "t.abc:2: the script uses {K} = 16, but linked ABC maps LUTs of at most 12 inputs "
+           "('&st' and '&synch2' crash on wider ones at the pin)");
+    odin3_abc_script script;
+    accept("if -K {K}; echo {K}", (run){12, BLIF}, &script);
+    odin3_abc_script_free(&script);
+    accept("if -K 6", (run){16, AIG}, &script); /* --lut 16 without {K} maps to 6 */
+    odin3_abc_script_free(&script);
+}
+
+/* The expected range refusal: the command, its option letter and the text after them. */
+typedef struct range_msg {
+    const char *cmd;
+    char letter;
+    const char *rule;
+} range_msg;
+
+/* text is refused by the range rule msg describes. */
+static void refuse_range(const char *text, range_msg msg) {
+    char want[384];
+    int wrote = snprintf(want, sizeof want, "t.abc:1: option '-%c' of '%s' %s", msg.letter, msg.cmd,
+                         msg.rule);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+    refuse(text, k_mem, want);
+}
+
+static const char k_range_k[] =
+    "must stand alone as '-K <n>' with <n> from 2 to 12: linked ABC maps "
+    "LUTs of at most 12 inputs ('&st' and '&synch2' crash on wider "
+    "ones at the pin)";
+static const char k_range_e[] =
+    "must stand alone as '-E <n>' with <n> from 1 to 1000000: a smaller "
+    "value crashes ABC at the pin (a3001b72)";
+static const char k_range_n[] =
+    "must stand alone as '-N <n>' with <n> from 2 to 1000000: a smaller "
+    "value crashes ABC at the pin (a3001b72)";
+
+/* Final review C1, I1 and M2: -K 2..12, -E >= 1 and refactor -N >= 2, each alone as `-X <n>`
+ * (a valued letter eats the next word, and atoi/atof of an option word is 0). */
+static void test_value_ranges(void) {
+    static const char *const bad_k[] = {"if -K 13", "if -K 1",    "if -K6",     "if -vK 6",
+                                        "if -K",    "if -K -v 6", "if -K 13e-1"};
+    for (size_t i = 0; i < sizeof bad_k / sizeof bad_k[0]; i++) {
+        refuse_range(bad_k[i], (range_msg){"if", 'K', k_range_k});
+    }
+    refuse_range("&if -K 16", (range_msg){"&if", 'K', k_range_k});
+    static const char *const bad_e[] = {"if -K 6 -E 0", "if -K 6 -E 0.5", "if -K 6 -E 1e-9",
+                                        "if -E -K 6", "if -K 6 -vE 2"};
+    for (size_t i = 0; i < sizeof bad_e / sizeof bad_e[0]; i++) {
+        refuse_range(bad_e[i], (range_msg){"if", 'E', k_range_e});
+    }
+    refuse_range("&if -K 6 -E 0.0", (range_msg){"&if", 'E', k_range_e});
+    refuse_range("refactor -N 1; if -K 6", (range_msg){"refactor", 'N', k_range_n});
+    refuse("strash\nrf -N 0; if -K 6", k_mem,
+           "t.abc:2: option '-N' of 'refactor' (from alias 'rf') must stand alone as '-N <n>' "
+           "with <n> from 2 to 1000000: a smaller value crashes ABC at the pin (a3001b72)");
+    static const char *const fine[] = {"if -K 2",
+                                       "if -K 12",
+                                       "if -K 12.9",
+                                       "if -K 6 -E 1",
+                                       "if -K 6 -E 1.5",
+                                       "if -K 6 -E 0.1e1",
+                                       "refactor -N 2; if -K 6",
+                                       "&if -K 6 -E 1000000"};
+    for (size_t i = 0; i < sizeof fine / sizeof fine[0]; i++) {
+        odin3_abc_script script;
+        accept(fine[i], k_mem, &script);
+        odin3_abc_script_free(&script);
+    }
+}
+
+/* Final review M4: the caps through odin3_abc_test_set_limits, at and past each lowered one. */
+static void test_limits_lowered(void) {
+    odin3_abc_limits lim = {64, ODIN3_ABC_MAX_LINE_BYTES, 3, 4, 2};
+    odin3_abc_test_set_limits(&lim);
+    odin3_abc_script script;
+    accept_bytes(pad_to("if -K 6\n", 64), k_mem, &script);
+    odin3_abc_script_free(&script);
+    refuse_bytes(pad_to("if -K 6\n", 65), k_mem, "t.abc: abc script is larger than 64 bytes");
+    accept("if -K 6 -v", k_mem, &script); /* 4 words */
+    odin3_abc_script_free(&script);
+    refuse("if -K 6 -v -v", k_mem, "t.abc:1: command has more than 4 words");
+    accept("b; b; if -K 6", k_mem, &script);
+    odin3_abc_script_free(&script);
+    refuse("b; b; b; if -K 6", k_mem, "t.abc:1: script expands to more than 3 commands");
+    static const odin3_abc_alias deep[] = {{"x0", "x1"}, {"x1", "x2"}, {"x2", "if -K 6"}};
+    odin3_abc_test_set_aliases(deep, 3);
+    refuse("x0", k_mem, "t.abc:1: alias 'x0' expands more than 2 levels deep");
+    accept("x1", k_mem, &script);
+    odin3_abc_script_free(&script);
+    lim = (odin3_abc_limits){ODIN3_ABC_MAX_SCRIPT_BYTES, 16, 3, 4, 2};
+    odin3_abc_test_set_limits(&lim);
+    accept("if -K 6 -v      ", k_mem, &script); /* 16 bytes */
+    odin3_abc_script_free(&script);
+    refuse("if -K 6 -v       ", k_mem, "t.abc:1: line longer than 16 bytes");
+    odin3_abc_limits high = {1U << 30, 1U << 30, 1U << 30, 1U << 30, 1U << 30};
+    odin3_abc_test_set_limits(&high); /* clamped to the defaults */
+    refuse_bytes(pad_to("if -K 6\n", ODIN3_ABC_MAX_SCRIPT_BYTES + 1), k_mem,
+                 "t.abc: abc script is larger than 65536 bytes");
 }
 
 /* --- the count (step 10) -------------------------------------------------------------------- */
@@ -804,16 +911,46 @@ static void test_choices(void) {
 /* Review M1: the BLIF start is a logic network. &get -m keeps its mapping, so &if refuses it,
  * yet it is not a mapping the script made, so it does not end a script. */
 static void test_blif_logic_start(void) {
-    refuse("&get -m\n&if -K 6", k_blif,
-           "t.abc:2: '&if' needs an unmapped network in the & space, which is mapped here; add "
-           "'&st'");
-    refuse("&get -m", k_blif, k_unmapped);
-    refuse("&get -m; &put; mfs2", k_blif, k_unmapped);
+    static const char k_get_m[] =
+        "t.abc:1: '&get' with -m would keep the nodes of the network the BLIF exchange reads as "
+        "LUTs of any width, but linked ABC maps LUTs of at most 12 inputs ('&st' and '&synch2' "
+        "crash on wider ones at the pin); add 'strash' first";
+    refuse("&get -m\n&if -K 6", k_blif, k_get_m);
+    refuse("&get -m", k_blif, k_get_m);
+    refuse("&get -m; &put; mfs2", k_blif, k_get_m);
     refuse("print_stats", k_blif, k_unmapped);
     expect_space("&get -m; &if -K 6", k_mem, GIA);
     expect_space("&get -m -c; &if -K 6", k_blif, GIA);
     expect_space("mfs2; if -K 6", k_blif, NTK);
-    expect_space("if -K 6; &get -m", k_blif, GIA);
+    expect_space("if -K 6; &get -m; &st; &if -K 6", k_blif, GIA);
+}
+
+/* Final review C2: mfs and print_xcut need a network some command rebuilt, not the one the BLIF
+ * exchange reads (dangling nodes); a strash, a mapper or any AIG-producing command rebuilds it. */
+static void test_blif_start_rebuild(void) {
+    static const char k_mfs[] = "t.abc:1: 'mfs' cannot run on the network the BLIF exchange "
+                                "reads, which can hold dangling nodes; add 'strash' before it";
+    refuse("mfs; if -K 6", k_blif, k_mfs);
+    refuse("cleanup; sweep; mfs; if -K 6", k_blif, k_mfs);
+    refuse("print_xcut; if -K 6", k_blif,
+           "t.abc:1: 'print_xcut' cannot run on the network the BLIF exchange reads, which can "
+           "hold dangling nodes; add 'strash' before it");
+    static const char *const fine[] = {"strash; if -K 6; mfs", "strash; print_xcut; if -K 6",
+                                       "if -K 6; mfs -v", "&get; &put; print_xcut; if -K 6"};
+    for (size_t i = 0; i < sizeof fine / sizeof fine[0]; i++) {
+        expect_space(fine[i], k_blif, NTK);
+    }
+    expect_space("mfs; if -K 6", k_mem, NTK);
+}
+
+/* Review M1's two surviving mutants: an ntk keep-command after an & mapping moves the current
+ * space back to the unmapped ntk, and &mfs keeps the choices &get copied. */
+static void test_step11_mutants(void) {
+    refuse("&if -K 6; mfs2", k_mem, k_unmapped);
+    refuse("&if -K 6; &put; strash; &get -n; &if -K 6; sweep", k_mem, k_unmapped);
+    refuse("strash; dch; &get; &mfs\n&if -K 6", k_blif,
+           "t.abc:2: '&if' needs a network in the & space without the choices that '&get' "
+           "copied; add '&st'");
 }
 
 /* --- output (step 12) ----------------------------------------------------------------------- */
@@ -953,16 +1090,14 @@ static void test_io_errors(void) {
     odin3_abc_script_src missing = {"nope.abc", "/nonexistent-odin3/nope.abc", {NULL, 0}};
     g_lines = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_abc_script_parse(&missing, 6, AIG, &out));
-    TEST_ASSERT_EQUAL_STRING(
-        "abc: /nonexistent-odin3/nope.abc: cannot read the script: No such file or directory",
-        g_last);
+    TEST_ASSERT_EQUAL_STRING("abc: nope.abc: cannot read the script: No such file or directory",
+                             g_last);
     TEST_ASSERT_EQUAL_size_t(1, g_lines);
     make_dir();
     odin3_abc_script_src dir = {"d", g_dir, {NULL, 0}};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_abc_script_parse(&dir, 6, AIG, &out));
     char want[LINE_MAX_LOG];
-    int wrote =
-        snprintf(want, sizeof want, "abc: %s: cannot read the script: %s", g_dir, strerror(EISDIR));
+    int wrote = snprintf(want, sizeof want, "abc: d: cannot read the script: %s", strerror(EISDIR));
     TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
     TEST_ASSERT_EQUAL_STRING(want, g_last);
     TEST_ASSERT_NULL(out.arena);
@@ -1052,6 +1187,9 @@ int main(void) {
     RUN_TEST(test_number_cap);
     RUN_TEST(test_number_cap_forms);
     RUN_TEST(test_refused_print_commands);
+    RUN_TEST(test_k_linked_cap);
+    RUN_TEST(test_value_ranges);
+    RUN_TEST(test_limits_lowered);
     RUN_TEST(test_count_cap);
     RUN_TEST(test_refuse_unmapped_end);
     RUN_TEST(test_blif_gia_empty);
@@ -1060,6 +1198,8 @@ int main(void) {
     RUN_TEST(test_balancing_mappers);
     RUN_TEST(test_choices);
     RUN_TEST(test_blif_logic_start);
+    RUN_TEST(test_blif_start_rebuild);
+    RUN_TEST(test_step11_mutants);
     RUN_TEST(test_accepted_cases);
     RUN_TEST(test_sha256);
     RUN_TEST(test_accessors);

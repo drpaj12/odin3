@@ -139,7 +139,7 @@ typedef struct odin3_abc_script {
  * ODIN3_ABC_LUT_MIN to ODIN3_LUT_MAX_WIDTH); exchange is an odin3_abc_exchange (abc.h).
  * Returns ODIN3_OK; ODIN3_ERR_PARSE after logging exactly one error, `abc: <given>:<line>: …` (or
  * `abc: <given>: …` for the size and the unmapped end); ODIN3_ERR_IO (logged as `abc:
- * <resolved>: cannot read the script: <strerror>`) when the file cannot be read;
+ * <given>: cannot read the script: <strerror>`, the file as given) when it cannot be read;
  * ODIN3_ERR_INVALID_ARG (logged) for a NULL src, given or out, no text and no path, or a bad
  * lut_k or exchange; ODIN3_ERR_NO_MEMORY (not logged). *out is untouched on failure, and the
  * caller frees a filled one with odin3_abc_script_free. Never includes or calls ABC.

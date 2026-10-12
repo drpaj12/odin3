@@ -820,7 +820,7 @@ directory.
 | Option | Meaning | Errors |
 |---|---|---|
 | `--script <file>` | this run's script (AB-20) | no value; unreadable (`ODIN3_ERR_IO`) |
-| `--lut <K>` | replaces `{K}`; every result LUT has ≤ K inputs | not an integer from 2 to 16 |
+| `--lut <K>` | replaces `{K}`; every result LUT has ≤ K inputs | not an integer from 2 to 16; with linked ABC a script that uses `{K}` needs K ≤ 12 (§7.3 step 5) |
 | `--via-blif <dir>` | BLIF exchange in `<dir>` (AB-15) | a byte refused by AB-15 in the path; cannot create (`IO`) |
 | `--log <file>` | ABC's raw output, truncated at pass start, each run headed `# abc run <r>: module '<m>', <domain>` (agent default) | cannot open (`IO`) |
 | `--prov fine\|cone` | `cone` skips the name map; default `fine` (agent default) | another value |
@@ -873,6 +873,9 @@ file as given, and nothing changes.
 5. **`{K}`.**
    - It becomes K in decimal.
    - Without `--lut`: `<file>:<line>: the script uses {K} but abc was given no --lut`.
+   - With `--lut` above 12, an in-process limit of linked ABC (PR 3D-4 final review, ruling C1):
+     `<file>:<line>: the script uses {K} = <k>, but linked ABC maps LUTs of at most 12 inputs
+     ('&st' and '&synch2' crash on wider ones at the pin)`.
    - Any other `{` or `}`: `<file>:<line>: unknown substitution '<text>' (only {K} is defined)`.
 6. **Words.** Split at spaces and tabs. More than 64: `<file>:<line>: command has more than 64
    words`.
@@ -905,6 +908,16 @@ file as given, and nothing changes.
      > *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings C2, I1 and M5: large values
      > allocate without bound (`scorr -F`, `mfs -M`, `&st -M`, …) or wrap through `atoi`
      > (`4294967296` is 0), and `-0e5` would reach getopt as the cluster `-0 -e -5`.)*
+   - **Value ranges** (`k_abc_ranges` in `script.c`). `if`/`&if -K` 2 to 12, `if`/`&if -E` at
+     least 1 and `refactor -N` at least 2, each letter alone as `-<x> <n>` (a valued letter eats
+     the next word, which `atoi`/`atof` read as 0): `<file>:<line>: option '-<x>' of '<cmd>' must
+     stand alone as '-<x> <n>' with <n> from <min> to <max>: <why>`, where `<why>` is `linked ABC
+     maps LUTs of at most 12 inputs ('&st' and '&synch2' crash on wider ones at the pin)` for
+     `-K` and `a smaller value crashes ABC at the pin (a3001b72)` otherwise.
+     > *(Erratum, PR 3D-4 final review, 2026-10-12, rulings C1, I1 and M2: with K 13 to 16, `&st`
+     > and `&synch2` on a mapped `&` network assert or crash in `Dsm_ManTruthToGia` (dauGia.c:451),
+     > in Release too; `-E 0` and `refactor -N 0`/`1` assert. `-K6` is the cluster `-K -6` to
+     > ABC's getopt, not an attached value, so it is refused.)*
    - **File and string options** (I12). `allow.c` lists, per allowed command, the options that
      read or write a file, or that take a string, read at the pin from each command's
      `Extra_UtilGetopt` handling, usage text and the code each option enables. Those are refused,
@@ -948,6 +961,21 @@ file as given, and nothing changes.
     > new. Which commands keep or drop choices was run at the pin: `strash`, `balance`, `dc2`,
     > `fraig`, `scorr`, `drw`, `drf`, `ifraig`, `cleanup`, `scleanup`, `if`, `&st` and `&if` drop
     > them; `rewrite`, `refactor`, `resub` and `fraig_sweep` refuse a network with choices.)*
+    - **The BLIF start** (PR 3D-4 final review, rulings C1 and C2). `&get -m` would keep the
+      nodes of the network `read` gives as LUTs of any width: `<file>:<line>: '&get' with -m would
+      keep the nodes of the network the BLIF exchange reads as LUTs of any width, but linked ABC
+      maps LUTs of at most 12 inputs ('&st' and '&synch2' crash on wider ones at the pin); add
+      'strash' first`. `mfs` and `print_xcut` while `ntk` is still that network, which can hold
+      dangling nodes (`Abc_MfsComputeRoots`, mfsWin.c:105, SIGSEGV in Release;
+      `Abc_NtkCrossCut`): `<file>:<line>: '<cmd>' cannot run on the network the BLIF exchange
+      reads, which can hold dangling nodes; add 'strash' before it`. `ntk` stays *logic* until a
+      command rebuilds it (any `ntk := aig` or `ntk := mapped` effect, or `&put`); `cleanup`,
+      `sweep` and `mfs2` keep it, a conservative choice.
+    > *(Erratum, PR 3D-4 final review, 2026-10-12, review M5: the Task 11 erratum below claimed
+    > that an accepted script "runs no command ABC refuses for its state". That holds only for the
+    > rules listed in this step (the empty `&` space, `&if` on a mapping or on copied choices,
+    > `print_xcut`, the BLIF start). Other commands can still fail at run time, as P3-1's `command
+    > '<cmd>' failed` (`strash; mfs`, `dch; rewrite`, `if -K 6; scorr`).)*
     > *(Erratum, 3D Task 11, 2026-10-12, agent defaults for Peter. Read at the pin so that an
     > accepted script ends mapped and runs no command ABC refuses for its state: (1) the `&if` rule
     > above, which covers `&if` after `&get -m` of a mapped `ntk` (the spike's case), after `&if`
@@ -1066,7 +1094,26 @@ and glibc aborts) and `&if -w` (with `-g` or `-x`); `allow.c` cites each crash s
 values), `if -Y` and `&if -Y` (100000), and `dch -s` (a network whose outputs are not a multiple
 of 3). `print_cone` (any sequential logic network) and `print_npn` (its truth table: a division by
 zero for 0, an overrun of `word pTruth[16]` for 257 or more digits) crash with any option and are
-refused like `print_box`.
+refused like `print_box`. And `print_latch -s` (unless right after `strash`), `&if -j -b -i` (K 2
+to 8), `mfs -p` (after a mapping of K 12 or more) and `lutpack -o`.
+
+> *(Erratum, PR 3D-4 final review, 2026-10-12, rulings C2, I1 and I2: `print_latch -s`, `&if -j
+> -b -i`, `mfs -p` and `lutpack -o` are new, with step 9's value ranges and step 11's BLIF-start
+> rules. Exactly what has been run against these lists, all in the pinned `abc` tool with each
+> script in a fresh directory: Task 10, each option once (value 2) in four states on one small
+> design; Task 11's first audit, option pairs and small values with the **Release** tool
+> (assertions compiled out, so signals only); Task 11 fix round 1, the **Debug** tool on 11,764
+> checker-accepted scripts at K 4 or 6 on two designs (8 inputs, 4 outputs, 4 latches; 4 inputs,
+> 2 outputs; no node wider than 4 inputs, no dangling node); the final review, about 20,000 Debug
+> runs on eight shapes (a buffer, constant outputs, a one-latch loop, a 5-input/3-latch block, an
+> 8-input block, one 20-input node, 600 random nodes with 60 latches and dangling nodes, the same
+> with numeric names) at K 2, 3 and 13 to 16, which found nine more classes; its fix, 14,376
+> Debug runs of checker-accepted scripts on those eight shapes: every command at default options
+> in 14 states and in 12 states built with `if` or `&if` at K 2, 3 and 12, and every option of
+> `if`, `&if`, `mfs`, `mfs2`, `lutpack` and `&mfs` at K 2, 3 and 12, all clean. Not run: option
+> triples, other values, shapes and sizes, and longer sequences. The fix-round-1 erratum below
+> said "no crash" of its two designs only; the lists record what these runs found and do not
+> converge, since ABC's asserts depend on the design (PHASE3 decision 27).)*
 
 > *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings C1, C2 and I1: `print_cone`,
 > `print_npn` and the options from `resub -F` to `dch -s` above are new, and step 9 caps numbers
@@ -1157,6 +1204,7 @@ These are constants in `src/passes/abc/abc.h`, lowered in tests through `odin3_a
 | `ODIN3_ABC_MAX_SCRIPT_BYTES`, `_LINE_BYTES`, `_COMMANDS` | 65,536; 4,096; 1,024 (P3-1) | script error |
 | `ODIN3_ABC_MAX_WORDS`, `_ALIAS_DEPTH` | 64; 8 (the table's deepest is 3) | script error |
 | `ODIN3_ABC_MAX_NUMBER` | 1,000,000 (every number argument; Task 11 fix round 1) | script error |
+| `ODIN3_ABC_MAX_LUT_LINKED` | 12: `{K}` and `if`/`&if -K` with linked ABC (PR 3D-4 final review C1; `--lut` itself stays 2 to 16) | script error |
 | `--lut` | 2 to 16 (`ODIN3_LUT_MAX_WIDTH`, MiniLUT's limit) | argument error |
 | `ODIN3_ABC_MAX_DOMAINS` | 64 per module | `abc: module '<m>' has N clock domains; at most 64` (`PARSE`) |
 | `ODIN3_ABC_MAX_AIG_OBJS` | 2^26 | `abc: module '<m>', <domain>: the AIG needs more than 67108864 objects` (`PARSE`) |

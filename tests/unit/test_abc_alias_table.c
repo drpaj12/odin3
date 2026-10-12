@@ -150,15 +150,15 @@ static const odin3_abc_command_info k_allowed[] = {
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "scY"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tM"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tMp"},
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
-    {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
+    {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "o"},
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "M"},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swY"},
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swYjbi"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
     {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -173,7 +173,7 @@ static const odin3_abc_command_info k_allowed[] = {
     {"print_gs", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_io", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_kmap", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_latch", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_latch", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "s"},
     {"print_level", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_lib", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_library", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -840,6 +840,16 @@ static void test_refusals_fix_round1(void) {
     }
 }
 
+/* The final review of PR 3D-4 (C2, I1): print_latch -s, &if -j -b -i, mfs -p and lutpack -o. */
+static void test_refusals_final_review(void) {
+    static const char *const k_cmds[] = {"print_latch", "&if", "&if", "&if", "mfs", "lutpack"};
+    static const char k_letters[] = "sjbipo";
+    TEST_ASSERT_EQUAL_UINT32(COUNT_OF(k_cmds), (uint32_t)strlen(k_letters));
+    for (uint32_t i = 0; i < COUNT_OF(k_cmds); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(crash_opt(k_cmds[i], k_letters[i]), k_cmds[i]);
+    }
+}
+
 /* print_box crashes with any option, so it is a refused row; a crash option refuses a script. */
 static void test_crash_command(void) {
     expect_row("print_box", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
@@ -946,6 +956,7 @@ int main(void) {
     RUN_TEST(test_crash_refusals_round3);
     RUN_TEST(test_refusals_task11);
     RUN_TEST(test_refusals_fix_round1);
+    RUN_TEST(test_refusals_final_review);
     RUN_TEST(test_files_rows_pinned);
     RUN_TEST(test_rc_parser_forms);
     RUN_TEST(test_print_rows);

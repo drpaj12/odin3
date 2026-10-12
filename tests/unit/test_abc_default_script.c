@@ -104,10 +104,24 @@ static void test_no_lut(void) {
     TEST_ASSERT_NULL(script.arena);
 }
 
+/* --lut 13 to 16 are legal, but linked ABC maps at most 12 inputs (final review C1). */
+static void test_k_above_linked_cap(void) {
+    odin3_abc_script script = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_default(13, ODIN3_ABC_EXCHANGE_AIG, &script));
+    TEST_ASSERT_EQUAL_STRING(
+        "abc: builtin:lib/abc/vtr.abc:10: the script uses {K} = 13, but linked "
+        "ABC maps LUTs of at most 12 inputs ('&st' and '&synch2' crash on "
+        "wider ones at the pin)",
+        g_last);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_default(12, ODIN3_ABC_EXCHANGE_AIG, &script));
+    odin3_abc_script_free(&script);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bytes_equal_file);
     RUN_TEST(test_commands_k6);
     RUN_TEST(test_no_lut);
+    RUN_TEST(test_k_above_linked_cap);
     return UNITY_END();
 }
