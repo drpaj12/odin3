@@ -30,6 +30,9 @@ SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
 SCOPE = "odin3-heavy-4242-1760000000000000000.scope"
 CAP_6G = "6442450944"
 CAP_9G = "9663676416"
+GIB = 1024**3
+DF_72 = f"Mounted on       Avail\n/mnt/c     {72 * GIB}\n"
+DF_ARGV = [qor_heavy.DF_BIN, "-B1", "--output=target,avail", "/mnt/c"]
 XL_NESTED = "--xl inside odin3-heavy.slice (6G): run the xl job on its own"
 
 
@@ -394,11 +397,11 @@ class RulingTest(HeavyTestBase):
         self.assertTrue(self.record.exists())
 
     def test_disk_free_ignores_hook(self) -> None:
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="Avail\n   72\n")
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=DF_72)
         with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True), \
                 mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
             self.assertEqual(qor_heavy.disk_free_gib(), 72)
-        self.assertEqual(run.call_args.args[0], ["df", "-B1G", "--output=avail", "/mnt/c"])
+        self.assertEqual(run.call_args.args[0], DF_ARGV)
         if Path("/mnt/c").is_dir():  # the real df on /mnt/c, never the fake's 999999
             with mock.patch.dict(os.environ, self.hooks_env(self.root), clear=True):
                 self.assertNotEqual(qor_heavy.disk_free_gib(), 999999)
@@ -474,8 +477,14 @@ class ReaderTest(HeavyTestBase):
             return qor_heavy.disk_free_gib()
 
     def test_disk_free(self) -> None:
-        self.assertEqual(self.disk_free(r"printf 'Avail\n  117\n'"), 117)
-        for body in ("exit 1", r"printf 'Avail\n  lots\n'", ":"):
+        def df_says(target: str, avail: str) -> str:
+            return f"printf 'Mounted on       Avail\\n{target}     {avail}\\n'"
+
+        self.assertEqual(self.disk_free(df_says("/mnt/c", str(117 * GIB))), 117)
+        self.assertEqual(self.disk_free(df_says("/mnt/c", str(10 * GIB - 1))), 9)  # floored
+        for body in ("exit 1", df_says("/mnt/c", "lots"), ":", r"printf 'Mounted on  Avail\n'",
+                     df_says("/", str(900 * GIB)),  # /mnt/c not mounted: df reports /
+                     df_says("/mnt/c/x", str(900 * GIB))):
             with self.assertRaises(HeavyError) as err:
                 self.disk_free(body)
             self.assert_heavy(err, 5, "cannot read free space of /mnt/c")
@@ -485,11 +494,12 @@ class ReaderTest(HeavyTestBase):
         self.assertEqual(err.exception.code, 5)
 
     def test_disk_free_argv(self) -> None:
-        """The production argv is df on /mnt/c (M6c)."""
-        done = subprocess.CompletedProcess(args=[], returncode=0, stdout="Avail\n   72\n")
+        """The production argv is df on /mnt/c by absolute path (M6c, M3)."""
+        self.assertIn(qor_heavy.DF_BIN, ("/usr/bin/df", "/bin/df"))
+        done = subprocess.CompletedProcess(args=[], returncode=0, stdout=DF_72)
         with mock.patch("qor_heavy.subprocess.run", return_value=done) as run:
             self.assertEqual(qor_heavy.disk_free_gib(), 72)
-        self.assertEqual(run.call_args.args[0], ["df", "-B1G", "--output=avail", "/mnt/c"])
+        self.assertEqual(run.call_args.args[0], DF_ARGV)
 
     def test_mem_available(self) -> None:
         meminfo = self.tmp / "meminfo"
@@ -570,6 +580,15 @@ class DeletionTest(HeavyTestBase):
             err, 2, f"refusing to delete {real}: {real / 'y'} is on another file system")
         self.assertTrue((real / "y").is_dir())
         self.assertIsNone(qor_heavy._other_device(real, os.stat(root).st_dev))
+        gone = str(real / "y" / "gone")
+        vanished = FileNotFoundError(2, "No such file or directory", gone)
+        with mock.patch.object(qor_heavy, "_other_device", side_effect=vanished), \
+                self.assertRaises(HeavyError) as err:
+            qor_heavy.safe_rmtree(real, root)
+        self.assert_heavy(err, 2, f"refusing to delete {real}: {gone} changed during the check")
+        self.assertTrue((real / "y").is_dir())
+        with self.assertRaises(FileNotFoundError):
+            qor_heavy._other_device(real / "absent", os.stat(root).st_dev)
         self.assertEqual(qor_heavy._other_device(real, -1), real)
 
     def test_out_dir_roots(self) -> None:

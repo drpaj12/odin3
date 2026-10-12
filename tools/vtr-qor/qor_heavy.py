@@ -51,7 +51,10 @@ WORK_SUBDIR = Path("odin3-ws") / "work"
 SELF_CGROUP = Path("/proc/self/cgroup")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
 FD9 = Path("/proc/self/fd/9")
-DF_CMD: tuple[str, ...] = ("df", "-B1G", "--output=avail", "/mnt/c")
+WIN_C = "/mnt/c"
+# df by absolute path (never PATH): /usr/bin/df, or /bin/df without the merged /usr.
+DF_BIN = "/usr/bin/df" if Path("/usr/bin/df").exists() else "/bin/df"
+DF_CMD: tuple[str, ...] = (DF_BIN, "-B1", "--output=target,avail", WIN_C)
 
 PREFIX = "vtr-qor: "
 EXIT_USAGE = 2
@@ -62,6 +65,7 @@ HEAVY_RUN_SKIPPED = 77
 SIGNAL_EXIT_BASE = 128
 MIB = 1024**2
 KIB_PER_GIB = 1024**2
+GIB = 1024**3
 
 MSG_NOT_CONTROLLER = "heavy runs are the controller's: set ODIN3_HEAVY_OK=1"
 MSG_XL_NOT_OK = "--xl needs ODIN3_HEAVY_XL_OK=1 (an idle machine; the controller starts it)"
@@ -275,19 +279,21 @@ def scope_peak_mib(scope: ScopeInfo) -> int | None:
 
 
 def disk_free_gib() -> int:
-    """Free GiB on ``C:`` from ``df -B1G --output=avail /mnt/c`` (``DF_CMD``; never an
-    environment override, so a leaked variable cannot defeat admission)."""
+    """Free whole GiB on ``C:`` (floored) from ``df -B1 --output=target,avail /mnt/c``
+    (``DF_CMD``; never an environment override, so a leaked variable cannot defeat admission).
+    The reported mount point must be ``/mnt/c``: with ``C:`` unmounted, ``df`` would silently
+    report the file system holding the directory (the VHDX), so that is E-QH11 too."""
     try:
         proc = subprocess.run(list(DF_CMD), capture_output=True, text=True, check=False)
     except OSError as exc:
         raise HeavyError(EXIT_DISK, MSG_DF) from exc
     lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if proc.returncode != 0 or not lines:
+    if proc.returncode != 0 or len(lines) < 2:
         raise HeavyError(EXIT_DISK, MSG_DF)
-    last = lines[-1].removesuffix("G")
-    if not last.isdigit():
+    fields = lines[-1].rsplit(None, 1)
+    if len(fields) != 2 or fields[0] != WIN_C or not fields[1].isdigit():
         raise HeavyError(EXIT_DISK, MSG_DF)
-    return int(last)
+    return int(fields[1]) // GIB
 
 
 def mem_available_gib(meminfo: Path = Path("/proc/meminfo")) -> float:
@@ -328,10 +334,11 @@ def check_out_dir(out: Path, home: Path) -> Path:
 
 
 def _other_device(real: Path, device: int) -> Path | None:
-    """The first entry at or below ``real`` (symlinks not followed) on another file system."""
+    """The first entry at or below ``real`` (symlinks not followed) whose ``st_dev`` differs from
+    ``device``, or None. An entry that vanishes during the walk raises its ``OSError``."""
     if os.lstat(real).st_dev != device:
         return real
-    for top, dirs, files in os.walk(real, followlinks=False):
+    for top, dirs, files in os.walk(real, followlinks=False, onerror=_raise):
         for name in (*dirs, *files):
             entry = Path(top) / name
             if os.lstat(entry).st_dev != device:
@@ -339,11 +346,17 @@ def _other_device(real: Path, device: int) -> Path | None:
     return None
 
 
+def _raise(exc: OSError) -> None:
+    raise exc
+
+
 def safe_rmtree(path: Path, root: Path) -> None:
     """Delete ``path`` (a tree or a file; absent is a no-op) only when it lies strictly under
     ``root`` both as spelled (no ``..``) and after ``realpath``, no component from ``root`` down to
-    ``path`` is a symlink, nothing to delete is on another file system than ``root`` (a bind
-    mount), and ``root`` itself is a permitted ``--out`` (E-QH12). The checks run before the
+    ``path`` is a symlink, no entry to delete has another ``st_dev`` than ``root`` (a mount of
+    another file system, such as a bind mount from another disk; a bind mount of a directory on
+    the same file system has the same ``st_dev`` and is not detected), and ``root`` itself is a
+    permitted ``--out`` (E-QH12). The checks run before the
     deletion, so a component swapped for a symlink in between is not caught (one user; accepted);
     ``shutil.rmtree`` itself never follows a symlink inside the tree."""
     not_under = HeavyError(EXIT_USAGE, f"refusing to delete {path}: not under {root}")
@@ -364,7 +377,13 @@ def safe_rmtree(path: Path, root: Path) -> None:
         raise not_under
     if not real.exists():
         return
-    foreign = _other_device(real, os.stat(real_root).st_dev)
+    try:
+        foreign = _other_device(real, os.stat(real_root).st_dev)
+    except OSError as exc:  # the tree changed under the check: refuse, never a bare OSError
+        where = exc.filename if isinstance(exc.filename, str) else real
+        raise HeavyError(
+            EXIT_USAGE, f"refusing to delete {path}: {where} changed during the check"
+        ) from exc
     if foreign is not None:
         raise HeavyError(
             EXIT_USAGE, f"refusing to delete {path}: {foreign} is on another file system"
