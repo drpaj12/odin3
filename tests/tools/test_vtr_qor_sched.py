@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -523,6 +524,7 @@ MIB = 1024**2
 KIB_PER_GIB = 1024**2
 VTR12 = PIN[:12]
 KEY12 = "0123456789ab"
+START_LINE = re.compile(r"vtr-qor: \[\d+/\d+\] \S+ \S+ start")
 SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
 HINT = ("vtr-qor: free C: by compacting the WSL disk (wsl --shutdown, then Optimize-VHD or "
         "diskpart compact vdisk; Peter's hands)")
@@ -680,11 +682,17 @@ class RunnerTestBase(unittest.TestCase):
             meminfo=self.meminfo, **kwargs)
 
     def run_jobs(self, jobs: list[Job], opts: qor_sched.RunOptions,
-                 finish: qor_sched.Finish = finish_ok) -> tuple[qor_sched.RunSummary, list[str]]:
+                 finish: qor_sched.Finish = finish_ok, *, starts: bool = False
+                 ) -> tuple[qor_sched.RunSummary, list[str]]:
+        """Run and return the stderr lines; the per-job ``start`` lines (pinned by
+        test_run_lines) are left out unless ``starts``."""
         err = io.StringIO()
         with redirect_stderr(err):
             summary = qor_sched.run_jobs(jobs, opts, finish)
-        return summary, err.getvalue().splitlines()
+        lines = err.getvalue().splitlines()
+        if not starts:
+            lines = [line for line in lines if not START_LINE.fullmatch(line)]
+        return summary, lines
 
     def stamp_lines(self) -> list[list[str]]:
         if not self.stamps.exists():
@@ -1611,7 +1619,9 @@ class CleanupTest(RunnerTestBase):
                          ["sha.pre-vpr.blif.gz", "vpr.out", "vtr_flow.out"])
 
 
-class RetentionTest(RunnerTestBase):
+class RetentionBase(RunnerTestBase):
+    """Retention fixtures: a P leg directory with keys and jobs made by hand."""
+
     def leg_dir(self, leg: str = "P") -> Path:
         return self.out / VTR12 / K6 / leg
 
@@ -1634,6 +1644,8 @@ class RetentionTest(RunnerTestBase):
     def names(self) -> list[str]:
         return sorted(p.name for p in self.leg_dir().iterdir() if p.is_dir())
 
+
+class RetentionTest(RetentionBase):
     def test_retention_keys(self) -> None:
         keys = [f"{i:012x}" for i in range(5)]
         for i, key in enumerate(keys):
@@ -1803,15 +1815,90 @@ class ProgressTest(RunnerTestBase):
     def test_run_lines(self) -> None:
         jobs = [self.job("sha", [{}]), self.job("mcml", [{"exit": 2}], group="B")]
         clock = FakeClock()  # elapsed times are pinned by test_progress_lines
-        summary, lines = self.run_jobs(jobs, self.opts(clock=clock))
+        summary, lines = self.run_jobs(jobs, self.opts(clock=clock), starts=True)
         flow = self.job_dir("mcml") / "run" / "vtr_flow.out"
         python = Path(sys.executable).name
         self.assertEqual(lines, [
+            "vtr-qor: [1/2] P sha start",
             "vtr-qor: [1/2] P sha ok 0.0 s (A, j1)",
+            "vtr-qor: [2/2] P mcml start",
             f"vtr-qor: P mcml: {python} exited 2; see {flow}",
             "vtr-qor: [2/2] P mcml failed 0.0 s (B, j1)",
             "vtr-qor: done: 1 ok, 1 failed, 0 capped, 0 timeout, 0 skipped in 0:00:00"])
         self.assertEqual(lines, (self.out / "harness.log").read_text().splitlines())
+
+
+class FixRound6Test(RetentionBase):
+    """Task 6 fix round 1: planned.json, the planned-set retention, after_run, DrainError."""
+
+    def test_planned_written_before_jobs(self) -> None:
+        seen: list[object] = []
+
+        def finish(job: Job, start: float) -> dict[str, object]:
+            seen.append(qor_sched.read_planned(job.job_dir.parent))
+            return finish_ok(job, start)
+
+        jobs = [self.job("sha", [{}]), self.job("ch_intrinsics", [{}])]
+        summary, _ = self.run_jobs(jobs, self.opts(), finish)
+        self.assertEqual(summary.exit_code, 0)
+        both = frozenset({"sha", "ch_intrinsics"})
+        self.assertEqual(seen, [both, both])
+        self.run_jobs([self.job("mcml", [{}], group="B")], self.opts())
+        self.assertEqual(qor_sched.read_planned(self.leg_dir() / KEY12), both | {"mcml"})
+
+    def test_read_planned_refusals(self) -> None:
+        key = self.leg_dir() / "aaaaaaaaaaaa"
+        key.mkdir(parents=True)
+        self.assertIsNone(qor_sched.read_planned(key))
+        for bad in ("[]", '{"designs": "sha"}', '{"designs": ["a/b"]}', "nope"):
+            (key / "planned.json").write_text(bad)
+            self.assertIsNone(qor_sched.read_planned(key), bad)
+        (key / "planned.json").unlink()
+        (key / "planned.json").symlink_to(self.tmp / "x")
+        with self.assertRaisesRegex(HeavyError, "is a symlink"):
+            qor_sched.read_planned(key)
+
+    def test_prune_by_own_planned_set(self) -> None:
+        """Each key is complete by its own planned.json; a key without one never is."""
+        for i, key in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc",
+                                 "dddddddddddd")):
+            self.make(key, "sha", "ok", 1000.0 + i)
+            (self.leg_dir() / key / "planned.json").write_text('{"designs": ["sha"]}')
+        self.make("eeeeeeeeeeee", "sha", "ok", 2000.0)  # complete jobs, but no planned set
+        self.make("ffffffffffff", "sha", "ok", 900.0)
+        (self.leg_dir() / "ffffffffffff" / "planned.json").write_text(
+            '{"designs": ["sha", "mcml"]}')  # planned mcml never ran: incomplete, old
+        qor_sched.prune(self.out, VTR12, K6, "P", planned=True)
+        self.assertEqual(self.names(), ["bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd",
+                                        "eeeeeeeeeeee"])
+
+    def test_after_run_before_done(self) -> None:
+        got: list[list[str]] = []
+
+        def after(results: object) -> None:
+            assert isinstance(results, list | tuple)
+            got.append([r.status for r in results])
+            qor_sched._emit(opts, "after")
+            raise HeavyError(2, "after failed")
+
+        opts = self.opts(after_run=after)
+        summary, lines = self.run_jobs([self.job("sha", [{}])], opts)
+        self.assertEqual((summary.exit_code, got), (0, [["ok"]]))
+        self.assertEqual(lines[-3:-1], ["vtr-qor: after", "vtr-qor: after failed"])
+        self.assertTrue(lines[-1].startswith("vtr-qor: done: 1 ok"))
+
+    def test_drain_error_in_finish_stops_the_run(self) -> None:
+        """Review M4: a busy cgroup left by a command finish ran stops the run at once; the
+        next job is not started (so its directory is not wiped)."""
+        def finish(job: Job, start: float) -> dict[str, object]:
+            raise qor_sched.DrainError(2, "cg still holds processes [1] after 60 s; stopping")
+
+        other = self.job("ch_intrinsics", [{"stamp": str(self.stamps), "name": "ch"}])
+        summary, lines = self.run_jobs([self.job("sha", [{}]), other], self.opts(), finish)
+        self.assertEqual(summary.exit_code, 2)
+        self.assertEqual([r.status for r in summary.results], ["failed", "skipped"])
+        self.assertIn("failed (drain)", summary.results[0].error)
+        self.assertEqual(self.starts(), [])
 
 
 if __name__ == "__main__":

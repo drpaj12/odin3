@@ -637,7 +637,10 @@ class RunOptions:
     ``clock``'s scale) and ``expected_s`` gate the nightly's starts (plan Task 13); ``prepare``
     runs after each fresh attempt (Task 6 writes ``job.json`` there, so failed jobs keep it);
     ``retain_designs`` is the set a key must hold complete before retention may prune it (None:
-    no key is pruned, only failed run directories)."""
+    no key is pruned, only failed run directories); ``retain_planned`` makes each key's own
+    planned set (``planned.json``) that set instead (plan point (f) as ruled in Task 6 fix round
+    1); ``after_run`` runs after retention and before the ``done:`` line (Task 6 moves
+    ``latest`` there), with every job's final result recorded."""
 
     jobs: int = 1
     job_timeout_s: Mapping[str, int] = JOB_TIMEOUT_S
@@ -653,6 +656,8 @@ class RunOptions:
     expected_s: Callable[[Job], float] | None = None
     prepare: Callable[[Job, float], None] | None = None
     retain_designs: frozenset[str] | None = None
+    retain_planned: bool = False
+    after_run: Callable[[Sequence[JobResult]], None] | None = None
     admission: _Admission = field(default_factory=_Admission, init=False, repr=False,
                                   compare=False)
     log: HarnessLog | None = field(default=None, init=False, repr=False, compare=False)
@@ -1083,6 +1088,8 @@ def _finish(job: Job, finish: Finish, attempt_start: float
     try:
         metrics = finish(job, attempt_start)
         json.dumps(metrics)  # metrics.json must be writable
+    except DrainError:  # a command finish ran left its cgroup busy: the run must stop
+        raise
     except HeavyError as exc:
         return FAILED, exc.message, None
     except Exception as exc:  # a broken finish must not stop an unattended run
@@ -1350,28 +1357,67 @@ def _scan_leg(leg_dir: Path) -> dict[Path, list[_JobDir]]:
     return keys
 
 
-def _key_complete(jobs: Sequence[_JobDir], designs: Collection[str]) -> bool:
+def _key_complete(jobs: Sequence[_JobDir], designs: Collection[str] | None) -> bool:
     """Point (f): every design of the set has a complete job under the key, and every job
-    present is complete."""
+    present is complete. No set (a key without ``planned.json``): never complete."""
+    if designs is None:
+        return False
     done = {j.path.name for j in jobs if j.complete}
     return bool(jobs) and all(j.complete for j in jobs) and set(designs) <= done
+
+
+PLANNED = "planned.json"
+
+
+def read_planned(key_dir: Path) -> frozenset[str] | None:
+    """The designs ever planned under a leg key (``<key12>/planned.json``), or None when there is
+    no such file or it is not a list of design names. A symlink is refused (E-QH12)."""
+    path = key_dir / PLANNED
+    if path.is_symlink():
+        raise _symlink_refusal(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    designs = data.get("designs") if isinstance(data, dict) else None
+    if not isinstance(designs, list) or not all(isinstance(d, str) and DESIGN_NAME.fullmatch(d)
+                                                for d in designs):
+        return None
+    return frozenset(designs)
+
+
+def write_planned(jobs: Sequence[Job]) -> None:
+    """Add each job's design to its leg key's ``planned.json`` (atomic): the key's own planned
+    set, which a key must hold complete to be complete (``latest``, retention)."""
+    keys: dict[Path, set[str]] = {}
+    for job in jobs:
+        keys.setdefault(job.job_dir.parent, set()).add(job.design)
+    for key_dir, designs in keys.items():
+        if key_dir.is_symlink():
+            raise _symlink_refusal(key_dir)
+        key_dir.mkdir(parents=True, exist_ok=True)
+        union = sorted(designs | (read_planned(key_dir) or frozenset()))
+        if read_planned(key_dir) != frozenset(union):
+            _write_atomic(key_dir / PLANNED, json.dumps({"designs": union}, indent=1) + "\n")
 
 
 def _key_when(key: Path, jobs: Sequence[_JobDir]) -> float:
     return max((j.when for j in jobs), default=key.lstat().st_mtime)
 
 
-def _prune_keys(keys: Mapping[Path, list[_JobDir]], designs: Collection[str],
-                protect: Collection[str], root: Path, keep_keys: int) -> None:
+def _prune_keys(keys: Mapping[Path, list[_JobDir]], designs: Collection[str] | None,
+                protect: Collection[str], root: Path, keep_keys: int, planned: bool) -> None:
     """Spec §5.4: the ``keep_keys`` newest complete keys stay; an incomplete key goes once
     ``keep_keys`` complete keys are newer than it. A protected key (``latest``, the run's own) is
-    never deleted; it counts among the newest when it is complete."""
+    never deleted; it counts among the newest when it is complete. With ``planned``, each key's
+    own ``planned.json`` is its set."""
+    sets = {key: read_planned(key) if planned else designs for key in keys}
     complete = sorted(((_key_when(key, jobs), key.name, key) for key, jobs in keys.items()
-                       if _key_complete(jobs, designs)), reverse=True)
+                       if _key_complete(jobs, sets[key])), reverse=True)
     doomed = [key for _, _, key in complete[keep_keys:]]
     if len(complete) >= keep_keys:
         oldest_kept = complete[keep_keys - 1][0] if keep_keys > 0 else math.inf
-        doomed += [key for key, jobs in keys.items() if not _key_complete(jobs, designs)
+        doomed += [key for key, jobs in keys.items() if not _key_complete(jobs, sets[key])
                    and _key_when(key, jobs) < oldest_kept]
     for key in sorted(doomed):
         if key.name not in protect:
@@ -1395,10 +1441,11 @@ def _prune_failed(keys: Mapping[Path, list[_JobDir]], root: Path) -> None:
 
 def prune(out: Path, vtr12: str, arch: str, leg: str, *,
           designs: Collection[str] | None = None, protect: Collection[str] = (),
-          keep_keys: int = KEEP_KEYS) -> None:
+          keep_keys: int = KEEP_KEYS, planned: bool = False) -> None:
     """Retention for ``<out>/<vtr12>/<arch>/<leg>`` (spec §5.4). A key is complete only when
-    every one of ``designs`` (the set, e.g. ``sets.json``'s gate and extra) is complete under it;
-    without ``designs`` no key is pruned, only failed run directories. The keys in ``protect``
+    every one of ``designs`` (the set, e.g. ``sets.json``'s gate and extra) is complete under it,
+    or with ``planned`` every design of the key's own ``planned.json``; with neither, no key is
+    pruned, only failed run directories. The keys in ``protect``
     (the current run's) and ``latest`` are never deleted. A symlink anywhere on the way is refused
     (E-QH12), never followed; deletions go through ``safe_rmtree`` under ``out``."""
     leg_dir = out / vtr12 / arch / leg
@@ -1412,9 +1459,9 @@ def prune(out: Path, vtr12: str, arch: str, leg: str, *,
     if (leg_dir / "latest").is_symlink():
         raise _symlink_refusal(leg_dir / "latest")
     keys = _scan_leg(leg_dir)
-    if designs is not None:
+    if designs is not None or planned:
         kept = {*protect, _read_word(leg_dir / "latest") or ""}
-        _prune_keys(keys, designs, kept, out, keep_keys)
+        _prune_keys(keys, designs, kept, out, keep_keys, planned)
     remaining = {key: jobs for key, jobs in keys.items() if key.exists()}
     _prune_failed(remaining, out)
 
@@ -1427,7 +1474,7 @@ def _prune_after(jobs: Sequence[Job], opts: RunOptions) -> None:
     for leg_dir, own in legs.items():
         try:
             prune(opts.out, leg_dir.parents[1].name, leg_dir.parent.name, leg_dir.name,
-                  designs=opts.retain_designs, protect=own)
+                  designs=opts.retain_designs, protect=own, planned=opts.retain_planned)
         except (HeavyError, OSError) as exc:
             _emit(opts, exc.message if isinstance(exc, HeavyError) else f"prune: {exc}")
 
@@ -1531,6 +1578,7 @@ def _step(run: _Run, index: int) -> bool:
     if gate == STOP:
         _stop_for_pause(run, index)
         return False
+    run.log.emit(f"[{index + 1}/{n}] {job.leg} {job.design} start")
     result = run_one(job, run.opts, run.finish)
     if result.error:
         run.log.emit(result.error)
@@ -1560,6 +1608,15 @@ def _exit_code(results: Sequence[JobResult], stop_code: int) -> int:
     return EXIT_OK
 
 
+def _after_run(opts: RunOptions, results: Sequence[JobResult]) -> None:
+    if opts.after_run is None:
+        return
+    try:
+        opts.after_run(results)
+    except (HeavyError, OSError) as exc:  # the run's own result stands
+        _emit(opts, exc.message if isinstance(exc, HeavyError) else f"after the run: {exc}")
+
+
 def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummary:
     """Run every job, one at a time (point (w)): group A then group B in plan order, each
     admitted first (spec §7.3), each fcheck right after its own job; retention after the run.
@@ -1568,11 +1625,13 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
     ``finish(job, attempt_start)`` builds the job's metrics (plan Task 6) once all its commands
     exited 0; its ``routed.vpr_status`` must be ``success``. It must not write ``metrics.json``:
     the runner cleans the job up (spec §7.5), writes ``<J>/status``, then ``metrics.json`` last
-    (atomic, with the planned key and the status), so an ok ``metrics.json`` means complete."""
+    (atomic, with the planned key and the status), so an ok ``metrics.json`` means complete.
+    Each leg key's ``planned.json`` gains the run's designs before any job starts."""
     _check_jobs_option(opts)
     _check_layout(jobs, opts)
     ordered = _grouped(jobs)
     _heavy_scope(opts)
+    write_planned(ordered)
     log = HarnessLog(opts.out)
     opts.log = log
     began = opts.clock()
@@ -1605,6 +1664,7 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
     with suppress(OSError):  # an empty job cgroup is removed (the scope's stop removes it too)
         os.rmdir(job_cgroup(_heavy_scope(opts)))
     _prune_after(ordered, opts)
+    _after_run(opts, run.results)
     log.done(run.results, opts.clock() - began)
     return RunSummary(tuple(run.results), run.stop_code == EXIT_DISK,
                       _exit_code(run.results, run.stop_code))

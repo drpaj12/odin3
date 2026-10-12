@@ -20,6 +20,7 @@ import json
 import os
 import pwd
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -68,8 +69,14 @@ circuit = Path(args[0])
 temp = Path(args[args.index("-temp_dir") + 1])
 start = args[args.index("-start") + 1] if "-start" in args else None
 design = circuit.stem
-with (Path(__file__).resolve().parents[2] / "calls.log").open("a") as log:
+root = Path(__file__).resolve().parents[2]
+with (root / "calls.log").open("a") as log:
     log.write(f"{{design}} {{start or 'full'}}\\n")
+if (root / "fail").exists():
+    sys.exit(3)
+if (root / "sleep").exists():
+    import time
+    time.sleep(float((root / "sleep").read_text()))
 temp.mkdir(exist_ok=True)
 pre = temp / f"{{design}}.pre-vpr.blif"
 if start is None:
@@ -110,6 +117,8 @@ from pathlib import Path
 if sys.argv[1:] == ["--help"]:
     print(Path(__file__).with_name("help.txt").read_text())
     sys.exit(0)
+if Path(__file__).with_name("fail").exists():
+    sys.exit(1)
 script = sys.argv[sys.argv.index("-p") + 1]
 Path(script.split()[-1]).write_text({ABC_LINE + BLIF!r})
 """
@@ -328,6 +337,10 @@ class DryRunTest(CliTestBase):
         code, out, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,sha",
                                 "--dry-run")
         self.assertEqual([line.split()[3] for line in out.splitlines()], ["cached", "run"])
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        (job / "status").unlink()  # half done: metrics.json ok, no status
+        code, out, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--dry-run")
+        self.assertEqual(out.split()[3], "run")
 
     def test_isolated_import(self) -> None:
         """Point (u): ``python3 -I vtr_qor.py --help`` works; the shim prints the same."""
@@ -364,12 +377,37 @@ class InputTest(CliTestBase):
         code, _, err = self.cli("run", "--leg", "P", "--set", "smoke")
         self.assertEqual(code, 2)
         self.assertEqual(err, f"vtr-qor: VTR at {self.vtr} has 1 modified tracked files\n")
-        # --allow-vtr-drift proceeds, report-only: job.json says so.
+
+    def test_drift_flag_never_waives_a_modified_tree(self) -> None:
+        """Ruling I1 (the reviewer's reproduction): --allow-vtr-drift on a modified tree at the
+        pin is refused, so nothing is cached under the clean key and latest does not move; the
+        clean run afterwards starts VTR."""
+        (self.vtr / "README").write_text("patched VPR, say\n")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--allow-vtr-drift")
+        self.assertEqual(code, 2)
+        self.assertEqual(err, f"vtr-qor: VTR at {self.vtr} has 1 modified tracked files\n")
+        self.assertEqual(self.calls(), [])
+        self.assertFalse((self.out / self.pin[:12]).exists())
+        _git(self.vtr, "checkout", "-q", "--", "README")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls(), ["ch_intrinsics full"])
+
+    def test_drift_run_is_report_only(self) -> None:
+        """VTR at another commit with --allow-vtr-drift: its own vtr12, job.json says drift,
+        and latest never moves."""
+        (self.vtr / "README").write_text("moved on\n")
+        _git(self.vtr, "commit", "-q", "-am", "next")
+        other = _git(self.vtr, "rev-parse", "HEAD")
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
                                 "--allow-vtr-drift")
         self.assertEqual(code, 0, err)
-        (job,) = self.job_dirs("P", "ch_intrinsics")
+        (job,) = sorted((self.out / other[:12] / K6 / "P").glob("*/ch_intrinsics"))
         self.assertIs(self.load(job / "job.json")["vtr_drift"], True)
+        self.assertEqual((job / "status").read_text(), "ok\n")
+        self.assertFalse((job.parents[1] / "latest").exists())
+        self.assertFalse((self.out / self.pin[:12]).exists())
 
     def test_clean_vtr_not_drift(self) -> None:
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
@@ -440,6 +478,7 @@ class RunTest(CliTestBase):
         self.assertEqual(len(self.calls()), 2)
         new = self.harness_lines()[before:]
         self.assertFalse(any(ran.search(line) for line in new), new)
+        self.assertFalse(any(line.endswith(" start") for line in new), new)
         self.assertEqual(sum(line.endswith(" cached") for line in new), 2)
 
         self.assertEqual(self.cli(*args, "--rerun")[0], 0)
@@ -547,31 +586,56 @@ class RunTest(CliTestBase):
 
     def test_failed_job_keeps_job_json(self) -> None:
         """A VTR failure: no metrics.json, exit 1, job.json from the prepare hook."""
-        flow = self.vtr / "vtr_flow" / "scripts" / "run_vtr_flow.py"
-        flow.write_text(flow.read_text() + "sys.exit(3)\n")
-        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
-                                "--allow-vtr-drift")
+        (self.vtr / "fail").write_text("")  # untracked: the tree stays clean
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
         self.assertEqual(code, 1, err)
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.assertEqual((job / "status").read_text(), "failed\n")
         self.assertFalse((job / "metrics.json").exists())
-        self.assertIsNone(self.load(job / "job.json")["ended"])
+        self.assertEqual(self.load(job / "job.json")["ended"],  # M7: the status file's time
+                         vtr_qor._utc((job / "status").stat().st_mtime))
 
-    def test_latest_only_when_complete(self) -> None:
-        """latest moves only once every design of the full set is complete under the key, and
-        only after the run; status reports it."""
-        with mock.patch.object(vtr_qor, "full_set", return_value=("ch_intrinsics", "spree")):
-            self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
-            latest = self.out / self.pin[:12] / K6 / "P" / "latest"
-            self.assertFalse(latest.exists())
-            code, _, err = self.cli("run", "--leg", "P", "--designs", "spree")
-            self.assertEqual(code, 0, err)
-            (job,) = self.job_dirs("P", "spree")
-            self.assertEqual(latest.read_text(), f"{job.parent.name}\n")
-            self.assertIn(f"vtr-qor: latest: P {job.parent.name}", err)
-            code, out, _ = self.cli("status")
-        self.assertEqual(code, 0)
-        self.assertEqual(out, f"{K6} P latest {job.parent.name} ok 2 failed 0 age 0d\n")
+    def latest(self, leg: str) -> Path:
+        return self.out / self.pin[:12] / K6 / leg / "latest"
+
+    def test_latest_own_planned_set(self) -> None:
+        """Point (f) as ruled: a leg key is complete when its own planned set (planned.json, the
+        union of every run under it) is; latest is logged before done:, and status reports
+        it."""
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        key12 = job.parent.name
+        self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+        self.assertEqual(self.load(job.parent / "planned.json"), {"designs": ["ch_intrinsics"]})
+        lines = self.harness_lines()
+        at = lines.index(f"vtr-qor: latest: P {key12}")
+        self.assertTrue(lines[at + 1].startswith("vtr-qor: done: 1 ok"), lines)
+        # A second design joins the planned set; latest stays (still complete).
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "spree")[0], 0)
+        self.assertEqual(self.load(job.parent / "planned.json"),
+                         {"designs": ["ch_intrinsics", "spree"]})
+        code, out, _ = self.cli("status")
+        self.assertEqual((code, out), (0, f"{K6} P latest {key12} ok 2 failed 0 age 0d\n"))
+
+    def test_latest_retracted(self) -> None:
+        """Review M2: a rerun of the latest key that fails makes it incomplete: latest goes."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        self.assertTrue(self.latest("P").exists())
+        (self.vtr / "fail").write_text("")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun")
+        self.assertEqual(code, 1, err)
+        self.assertFalse(self.latest("P").exists())
+        self.assertIn("retracted (no longer complete)", err)
+
+    def test_latest_per_leg(self) -> None:
+        """--leg P,O with O's front end failing: only P's latest."""
+        (self.bin / "fail").write_text("")
+        code, _, err = self.cli("run", "--leg", "P,O", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 1, err)
+        self.assertTrue(self.latest("P").exists())
+        self.assertFalse(self.latest("O").exists())
+        self.assertTrue((self.latest("P").parent).is_dir())
 
     def test_stage_and_job_timeout(self) -> None:
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
@@ -580,6 +644,88 @@ class RunTest(CliTestBase):
         (job,) = self.job_dirs("P", "ch_intrinsics")
         argv = self.load(job / "job.json")["commands"][0]["argv"]
         self.assertEqual(argv[argv.index("-timeout") + 1], "77")
+
+    def test_job_timeout(self) -> None:
+        """--job-timeout reaches the runner: a 1 s limit on a 30 s VTR is a timeout (exit 3)."""
+        (self.vtr / "sleep").write_text("30")
+        start = time.monotonic()
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--job-timeout", "1")
+        self.assertEqual(code, 3, err)
+        self.assertLess(time.monotonic() - start, 20)
+        self.assertIn("vtr-qor: P ch_intrinsics: timeout after 1 s", err)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        self.assertEqual((job / "status").read_text(), "timeout\n")
+
+    def test_keep_netlists(self) -> None:
+        """--keep-netlists keeps O's <J>/<d>.blif and pre-VPR netlist (point (n))."""
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "ch_intrinsics",
+                                "--keep-netlists")
+        self.assertEqual(code, 0, err)
+        (job,) = self.job_dirs("O", "ch_intrinsics")
+        self.assertTrue((job / "ch_intrinsics.blif").is_file())
+        self.assertTrue((job / "run" / "ch_intrinsics.pre-vpr.blif").is_file())
+        self.assertFalse((job / "ch_intrinsics.blif.sha256").exists())
+
+    def test_retention_after_run(self) -> None:
+        """Retention runs after a run, by each key's own planned set: with three older complete
+        keys, the run's own (fourth) key prunes the oldest; latest is protected."""
+        leg = self.out / self.pin[:12] / K6 / "P"
+        now = time.time()
+        for i, key in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc")):
+            job = leg / key / "ch_intrinsics"
+            (job / "run").mkdir(parents=True)
+            (job / "status").write_text("ok\n")
+            (job / "metrics.json").write_text(json.dumps({"status": "ok"}))
+            (leg / key / "planned.json").write_text(json.dumps({"designs": ["ch_intrinsics"]}))
+            os.utime(job / "status", (now - 1000 + i, now - 1000 + i))
+        incomplete = leg / "dddddddddddd" / "sha"  # no planned.json: never complete
+        incomplete.mkdir(parents=True)
+        os.utime(incomplete, (now - 5000, now - 5000))
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        (job,) = [j for j in self.job_dirs("P", "ch_intrinsics")
+                  if j.parent.name not in ("bbbbbbbbbbbb", "cccccccccccc")]
+        self.assertEqual(sorted(p.name for p in leg.iterdir() if p.is_dir()),
+                         sorted(["bbbbbbbbbbbb", "cccccccccccc", job.parent.name]))
+
+    def test_oprime_metrics(self) -> None:
+        """O': VTR's abc_depth (no exchange), and the front-end cost adds VTR's ABC stage to
+        frontend.time (0.5 + 0.5 s)."""
+        code, _, err = self.cli("run", "--leg", "Oprime", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        (job,) = self.job_dirs("Oprime", "ch_intrinsics")
+        metrics = self.load(job / "metrics.json")
+        self.assertEqual((metrics["netlist"]["abc_depth"], metrics["netlist"]["abc_exchange"]),
+                         (3, None))
+        self.assertEqual((metrics["cost"]["frontend_wall_s"],
+                          metrics["cost"]["frontend_peak_rss_mib"]), (1.0, 20))
+        self.assertEqual(self.calls(), ["ch_intrinsics abc"])
+
+    def test_odin3_commit(self) -> None:
+        """Review M5: odin3_commit only for an odin3 built in this repo (with -dirty), never
+        for P."""
+        _git(self.repo, "init", "-q")
+        _git(self.repo, "add", "-A")
+        _git(self.repo, "commit", "-q", "-m", "repo")
+        head = _git(self.repo, "rev-parse", "HEAD")
+        inside = self.repo / "build" / "odin3"
+        inside.parent.mkdir()
+        inside.write_bytes(self.odin3.read_bytes())
+        inside.chmod(0o755)
+        (inside.parent / "help.txt").write_text((self.bin / "help.txt").read_text())
+        code, _, err = run_main(vtr_qor.main, [
+            "run", "--leg", "P,O", "--designs", "ch_intrinsics", "--vtr-root", str(self.vtr),
+            "--odin3", str(inside), "--out", str(self.out)])
+        self.assertEqual(code, 0, err)
+        (p_job,) = self.job_dirs("P", "ch_intrinsics")
+        (o_job,) = self.job_dirs("O", "ch_intrinsics")
+        self.assertIsNone(self.load(p_job / "metrics.json")["odin3_commit"])
+        self.assertEqual(self.load(o_job / "metrics.json")["odin3_commit"], head)
+        (self.repo / "lib" / "vtr.o3lib").write_text("edited\n")
+        self.assertEqual(vtr_qor.odin3_commit(("O",), inside), f"{head}-dirty")
+        self.assertIsNone(vtr_qor.odin3_commit(("O",), self.odin3))  # built elsewhere
+        self.assertIsNone(vtr_qor.odin3_commit(("P",), inside))
 
 
 class StatusCleanTest(CliTestBase):
@@ -590,6 +736,7 @@ class StatusCleanTest(CliTestBase):
         (job / "run").mkdir()
         if status == "ok":
             (job / "metrics.json").write_text(json.dumps({"status": "ok"}))
+        (job.parent / "planned.json").write_text(json.dumps({"designs": [design]}))
         for path in (job / "status", job):
             os.utime(path, (when, when))
         return job
@@ -611,11 +758,60 @@ class StatusCleanTest(CliTestBase):
         for i, key in enumerate(("aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc")):
             self.make(key, "ch_intrinsics", "ok", now - 100 * (3 - i))
         leg = self.out / self.pin[:12] / K6 / "P"
-        with mock.patch.object(vtr_qor, "full_set", return_value=("ch_intrinsics",)):
-            code, _, err = self.cli("clean", "--keep", "1")
+        code, _, err = self.cli("clean", "--keep", "1")
         self.assertEqual(code, 0, err)
         self.assertEqual(sorted(p.name for p in leg.iterdir()), ["cccccccccccc"])
         self.assertIn("2 keys and 0 failed run directories removed", err)
+
+    def test_status_while_a_run_churns(self) -> None:
+        """Review M1 (the reviewer's reproduction): job directories created and deleted while
+        status reads them never crash it."""
+        import threading
+        leg = self.out / self.pin[:12] / K6 / "P"
+        self.make("aaaaaaaaaaaa", "sha", "ok", time.time())
+        stop = threading.Event()
+
+        def churn() -> None:
+            job = leg / "bbbbbbbbbbbb" / "ch_intrinsics"
+            while not stop.is_set():
+                job.mkdir(parents=True, exist_ok=True)
+                (job / "status").write_text("ok\n")
+                (leg / "latest").write_text("bbbbbbbbbbbb\n")
+                (job / "status").unlink()
+                job.rmdir()
+                job.parent.rmdir()
+                (leg / "latest").unlink()
+
+        thread = threading.Thread(target=churn)
+        thread.start()
+        try:
+            end = time.monotonic() + 1.0
+            while time.monotonic() < end:
+                vtr_qor.status_line(K6, "P", leg, time.time())
+        finally:
+            stop.set()
+            thread.join()
+
+    def test_os_error_is_a_message(self) -> None:
+        """An OSError outside the runner's handling prints vtr-qor: <message>, exit 2."""
+        def broken(args: object, argv: object) -> int:
+            raise PermissionError(13, "Permission denied", "/x/status")
+
+        with mock.patch.dict(vtr_qor.COMMANDS, {"status": broken}):
+            code, _, err = self.cli("status")
+        self.assertEqual((code, err), (2, "vtr-qor: [Errno 13] Permission denied: '/x/status'\n"))
+
+    def test_latest_files(self) -> None:
+        leg = self.out / "leg"
+        leg.mkdir(parents=True)
+        (leg / "latest").write_text("not a key\n")
+        self.assertIsNone(vtr_qor.read_latest(leg))
+        (leg / "latest").unlink()
+        (leg / "latest").symlink_to(self.tmp / "elsewhere")
+        self.assertIsNone(vtr_qor.read_latest(leg))
+        with self.assertRaisesRegex(qor_heavy.HeavyError, "is a symlink"):
+            vtr_qor.write_latest(leg, "aaaaaaaaaaaa")
+        self.assertFalse((self.tmp / "elsewhere").exists())
 
     def test_clean_refuses_symlink(self) -> None:
         self.make("aaaaaaaaaaaa", "sha", "ok", time.time())
@@ -626,6 +822,11 @@ class StatusCleanTest(CliTestBase):
 
 
 class DoctorTest(CliTestBase):
+    def setUp(self) -> None:
+        super().setUp()
+        # doctor run by hand: not inside a heavy run (no descriptor 9 on the lock).
+        self.stack.enter_context(mock.patch.object(qor_heavy, "FD9", self.tmp / "no-fd9"))
+
     def doctor(self) -> tuple[int, list[str]]:
         code, out, err = self.cli("doctor")
         self.assertEqual(err, "")
@@ -669,11 +870,59 @@ class DoctorTest(CliTestBase):
                       failed["FAIL  heavy-run"])
         self.assertEqual(failed["FAIL  disk"], "FAIL  disk: C: has 15 GiB free (< 20 GiB)")
         self.assertEqual(failed["FAIL  memory"], "FAIL  memory: MemAvailable 6.9 GiB (< 7)")
-        self.assertRegex(failed["FAIL  lock"], rf"{self.lock} is busy \(WRITE lock held by pid "
-                                                rf"{os.getpid()}\)$")
+        self.assertEqual(failed["FAIL  lock"], f"FAIL  lock: {self.lock} is busy (WRITE lock held "
+                                               f"by pid {os.getpid()}: another heavy run)")
         self.assertIn("is Yosys 0.56, ORACLES.md pins Yosys 0.55", failed["FAIL  yosys"])
         self.assertIn("ok  legs: P R; Pprime missing 'abc'; Oprime missing 'read_verilog'; "
                       "O missing 'read_verilog'; Oprov missing 'read_verilog'", lines)
+
+    def test_doctor_more_failures(self) -> None:
+        """I2: every other item's FAIL: the systemd probe, verilator, an unexecutable vpr and
+        heavy-run."""
+        (self.vtr / "vpr" / "vpr").chmod(0o644)
+        self.heavy_run.chmod(0o644)
+        (self.bin / "verilator").unlink()
+        empty = self.tmp / "empty-bin"  # PATH without verilator (true for the fake time)
+        empty.mkdir()
+        (empty / "true").symlink_to(shutil.which("true") or "/bin/true")
+        false = shutil.which("false") or "/bin/false"
+        with mock.patch.object(vtr_qor, "SYSTEMD_PROBE", (false,)), \
+                mock.patch.dict(os.environ, {"PATH": str(empty)}):
+            code, lines = self.doctor()
+        self.assertEqual(code, 1)
+        failed = {line.split(":")[0]: line for line in lines if line.startswith("FAIL")}
+        self.assertEqual(set(failed), {f"FAIL  {item}" for item in (
+            "vtr", "vpr", "verilator", "heavy-run", "systemd-run")})  # vtr: vpr's mode bit
+        self.assertEqual(failed["FAIL  vpr"], f"FAIL  vpr: {self.vtr / 'vpr' / 'vpr'} missing")
+        self.assertEqual(failed["FAIL  verilator"], "FAIL  verilator: verilator is not on PATH")
+        self.assertEqual(failed["FAIL  heavy-run"],
+                         f"FAIL  heavy-run: {self.heavy_run} is not executable")
+        self.assertEqual(failed["FAIL  systemd-run"], f"FAIL  systemd-run: {false} failed (exit 1)")
+
+    def test_doctor_lock_holders(self) -> None:
+        """Review M3: inside a heavy run, the run's own lock is ok (decided from the cgroup and
+        descriptor 9); a build's shared lock is ok; the variable alone proves nothing."""
+        with open(self.lock, "a") as holder:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            self.assertEqual(vtr_qor._lock_item()[0], False)  # env says slice; no fd 9
+            elsewhere = self.tmp / "fd9-elsewhere"
+            elsewhere.symlink_to(self.tmp / "self-cgroup")  # descriptor 9 on another file
+            with mock.patch.object(qor_heavy, "FD9", elsewhere):
+                self.assertEqual(vtr_qor._lock_item()[0], False)
+            fd9 = self.tmp / "fd9"
+            with mock.patch.object(qor_heavy, "FD9", fd9):
+                self.assertEqual(vtr_qor._lock_item(),
+                                 (True, f"{self.lock} held by this heavy run "
+                                        "(odin3-heavy.slice)"))
+                outside = self.tmp / "outside-cgroup"
+                outside.write_text("0::/user.slice/app.slice/term.scope\n")
+                with mock.patch.object(qor_heavy, "SELF_CGROUP", outside):
+                    self.assertEqual(vtr_qor._lock_item()[0], False)  # fd 9 alone neither
+            fcntl.flock(holder, fcntl.LOCK_UN)
+            fcntl.flock(holder, fcntl.LOCK_SH)
+            ok, detail = vtr_qor._lock_item()
+        self.assertTrue(ok)
+        self.assertIn("shared by a build (READ lock", detail)
 
     def test_doctor_without_vtr(self) -> None:
         code, out, _ = run_main(vtr_qor.main, ["doctor", "--vtr-root", str(self.tmp / "none"),
@@ -695,13 +944,6 @@ class DoctorTest(CliTestBase):
 
 
 class PinsTest(unittest.TestCase):
-    def test_full_set(self) -> None:
-        """The set a key must hold complete: the gate and extras on k6, the smoke set on EArch."""
-        self.assertEqual(vtr_qor.full_set(SETS, "k6"),
-                         qor_sched.select_designs(SETS, ("gate", "extra"), ()))
-        self.assertEqual(len(vtr_qor.full_set(SETS, "k6")), 21)
-        self.assertEqual(vtr_qor.full_set(SETS, "earch"), SETS.smoke)
-
     def test_oracles_pins(self) -> None:
         """The pins doctor checks are ORACLES.md's."""
         text = (REPO_ROOT / "docs" / "ORACLES.md").read_text()

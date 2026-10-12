@@ -16,11 +16,15 @@ spec §9. The common options are §9's: ``--vtr-root`` (default ``$VTR_ROOT``, e
   ``tools/heavy-run``, or in place when already inside one) and runs the jobs one at a time
   (``qor_sched.run_jobs``). ``finish_job`` builds each job's ``metrics.json`` record, and
   ``prepare_job``/``finish_job`` write ``job.json``. Only after the runner has recorded every
-  job's final status does ``latest`` move, and only to a complete leg key.
+  job's final status (its ``after_run`` hook, before the ``done:`` line) does ``latest`` move:
+  to a leg key whose own planned set (``planned.json``, every design ever planned under it) is
+  complete; it is retracted when this run's key is no longer complete. ``--allow-vtr-drift``
+  waives only a VTR at another commit (report-only: its own ``<vtr12>``, never ``latest``); a
+  modified tracked tree is always refused.
 - ``status`` prints one line per (arch, leg) of the current VTR commit:
   ``<arch> <leg> latest <key12|-> ok <n> failed <m> age <d>d``.
 - ``clean [--keep N]`` runs retention (spec §5.4, ``qor_sched.prune``) over every
-  ``<vtr12>/<arch>/<leg>``.
+  ``<vtr12>/<arch>/<leg>``, each key judged by its own planned set.
 
 ``VTR_ROOT`` and ``ODIN3_QOR_DIR`` are the spec's configuration (§3, §5.1). No production path
 reads a test hook from the environment: tests replace the module seams (``MEMINFO``, ``CPUINFO``,
@@ -95,6 +99,7 @@ ABC_STAGE_GLOBS = tuple(g for g in qor_parse.STAGE_GLOBS if g != "parmys.out")
 NOT_OK = frozenset({qor_sched.FAILED, qor_sched.CAPPED, qor_sched.TIMEOUT, qor_sched.ABORTED})
 KEY12_TEXT = re.compile(r"[0-9a-f]{12}")
 LATEST = "latest"
+HEAVY_SLICES = ("odin3-heavy.slice", qor_heavy.XL_SLICE)
 VERDICTS_SKIPPED = MappingProxyType({"fcheck": "skipped", "equiv": "skipped", "rerun": "skipped"})
 
 # Read VTR's own vtr/paths.py by file (not ``import vtr``, whose package imports the whole flow),
@@ -166,24 +171,25 @@ def _vtr_state(vtr_root: Path) -> tuple[str, int]:
 
 
 def _check_vtr(vtr_root: Path, allow_drift: bool) -> tuple[str, bool]:
-    """The commit and whether it drifts from the pin (another commit or a modified tracked
-    file); a drift is E-QH2 unless ``allow_drift`` (a report-only run, point (p))."""
+    """The commit and whether it drifts from the pin. Another commit is E-QH2 unless
+    ``allow_drift`` (a report-only run, point (p)): its own ``<vtr12>`` and keys. Modified
+    tracked files are always E-QH2: the keys hold the commit only, so a modified tree would
+    cache its results under the clean tree's keys (Task 6 ruling I1)."""
     commit, modified = _vtr_state(vtr_root)
     pin = qor_legs.VTR_PIN
-    drift = commit != pin or modified > 0
-    if drift and not allow_drift:
-        if commit != pin:
-            raise HeavyError(EXIT_USAGE, f"VTR at {vtr_root} is {commit[:12]}, ORACLES.md pins "
-                                         f"{pin[:12]} (use --allow-vtr-drift for a report-only "
-                                         "run)")
+    if modified > 0:
         raise HeavyError(EXIT_USAGE, f"VTR at {vtr_root} has {modified} modified tracked files")
+    drift = commit != pin
+    if drift and not allow_drift:
+        raise HeavyError(EXIT_USAGE, f"VTR at {vtr_root} is {commit[:12]}, ORACLES.md pins "
+                                     f"{pin[:12]} (use --allow-vtr-drift for a report-only run)")
     return commit, drift
 
 
 def check_vtr(vtr_root: Path, allow_drift: bool) -> str:
-    """VTR's full commit, after E-QH1 (no checkout at ``vtr_root``) and E-QH2 (not the pin, or
-    tracked files modified: ``git status --porcelain --untracked-files=no``), which
-    ``allow_drift`` waives for a report-only run."""
+    """VTR's full commit, after E-QH1 (no checkout at ``vtr_root``) and E-QH2: modified tracked
+    files (``git status --porcelain --untracked-files=no``) always; another commit than the pin
+    unless ``allow_drift`` (a report-only run)."""
     return _check_vtr(vtr_root, allow_drift)[0]
 
 
@@ -199,14 +205,6 @@ def _legs(text: str) -> tuple[str, ...]:
     if not names:
         raise HeavyError(EXIT_USAGE, "--leg names no leg")
     return tuple(dict.fromkeys(qor_legs.normalise_leg(name) for name in names))
-
-
-def full_set(sets: Sets, arch: str) -> tuple[str, ...]:
-    """The designs a leg key must hold complete (point (f)) for ``latest`` and retention: the
-    gate and the extras on k6, the smoke set on EArch (its only set, spec §2)."""
-    if qor_legs.arch_base(arch) == qor_legs.ARCH_BASES["earch"]:
-        return qor_sched.select_designs(sets, ("smoke",), ())
-    return qor_sched.select_designs(sets, ("gate", "extra"), ())
 
 
 def odin3_passes(odin3: Path) -> frozenset[str]:
@@ -479,28 +477,75 @@ def write_latest(leg_dir: Path, key12: str) -> None:
 
 
 def read_latest(leg_dir: Path) -> str | None:
+    """The key12 ``latest`` names; None when it is missing, a symlink, or not a key12."""
     latest = leg_dir / LATEST
-    if latest.is_symlink() or not latest.is_file():
+    try:
+        if latest.is_symlink() or not latest.is_file():
+            return None
+        word = latest.read_text(encoding="utf-8", errors="replace").strip()
+    except FileNotFoundError:
         return None
-    word = latest.read_text(encoding="utf-8", errors="replace").strip()
     return word if KEY12_TEXT.fullmatch(word) else None
 
 
-def update_latest(req: PlanRequest, sets: Sets) -> list[str]:
-    """After the run (every job's status recorded): each leg of ``req`` whose leg key now holds
-    the arch's full set complete (point (f); ``qor_sched.job_complete`` against the planned job
-    keys) gets ``latest``. Returns the ``<leg> <key12>`` pairs written."""
-    full = full_set(sets, req.arch)
-    jobs = qor_sched.plan_jobs(dataclasses.replace(req, designs=full, rerun=False), sets)
-    written = []
-    for leg in dict.fromkeys(job.leg for job in jobs):
-        mine = [job for job in jobs if job.leg == leg]
-        if all(qor_sched.job_complete(job) for job in mine):
-            leg_dir = mine[0].job_dir.parents[1]
-            if read_latest(leg_dir) != mine[0].key12:
-                write_latest(leg_dir, mine[0].key12)
-            written.append(f"{leg} {mine[0].key12}")
-    return written
+def _leg_complete(req: PlanRequest, sets: Sets, leg: str, key_dir: Path) -> bool:
+    """Point (f) as ruled (Task 6 fix round 1): every design of the leg key's own planned set
+    (``planned.json``) has a complete job under its *planned* job key."""
+    planned = qor_sched.read_planned(key_dir)
+    if not planned:
+        return False
+    jobs = qor_sched.plan_jobs(dataclasses.replace(req, legs=(leg,), designs=tuple(planned),
+                                                   rerun=False), sets)
+    return all(qor_sched.job_complete(job) for job in jobs)
+
+
+def update_latest(req: PlanRequest, sets: Sets, *, drift: bool) -> list[str]:
+    """After the run (every job's status recorded), per leg of ``req``: a leg key that now holds
+    its planned set complete becomes ``latest``; a ``latest`` naming this run's key that is no
+    longer complete is retracted (``latest`` is the newest *complete* key, spec §5.2). A drift
+    run (VTR at another commit) is report-only and never moves ``latest``. Returns the lines to
+    log."""
+    lines = []
+    for leg in dict.fromkeys(qor_legs.normalise_leg(name) for name in req.legs):
+        jobs = qor_sched.plan_jobs(dataclasses.replace(req, legs=(leg,)), sets)
+        if not jobs:
+            continue
+        key_dir, key12 = jobs[0].job_dir.parent, jobs[0].key12
+        leg_dir = key_dir.parent
+        complete = _leg_complete(req, sets, leg, key_dir)
+        current = read_latest(leg_dir)
+        if complete and not drift and current != key12:
+            write_latest(leg_dir, key12)
+            lines.append(f"latest: {leg} {key12}")
+        elif not complete and current == key12:
+            _refuse_symlink(leg_dir / LATEST)
+            qor_heavy.safe_rmtree(leg_dir / LATEST, req.out)
+            lines.append(f"latest: {leg} {key12} retracted (no longer complete)")
+    return lines
+
+
+def _end_job_records(results: Sequence[qor_sched.JobResult]) -> None:
+    """``job.json``'s ``ended`` for the jobs that ended without metrics (``finish_job`` sets it
+    for ok ones): the time their ``status`` was written."""
+    for result in results:
+        record_path, status = result.job.job_dir / "job.json", result.job.job_dir / "status"
+        try:
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            ended = status.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        if isinstance(record, dict) and record.get("ended") is None:
+            record["ended"] = _utc(ended)
+            _write_json(record_path, record)
+
+
+def after_run(results: Sequence[qor_sched.JobResult], *, req: PlanRequest, sets: Sets,
+              ctx: RunContext) -> None:
+    """The runner's last step before its ``done:`` line: ``job.json`` ends, then ``latest``
+    (logged to ``harness.log``)."""
+    _end_job_records(results)
+    for line in update_latest(req, sets, drift=ctx.vtr_drift):
+        _warn(ctx, [f"{PREFIX}{line}"])
 
 
 # -- run ---------------------------------------------------------------------------------------
@@ -531,12 +576,20 @@ def _check_run_options(args: argparse.Namespace, opts: RunOptions) -> None:
                                      "(the controller's, point (d))")
 
 
-def _odin3_commit(legs: Sequence[str]) -> str | None:
-    if all(leg == "P" for leg in legs):
+def odin3_commit(legs: Sequence[str], odin3: Path) -> str | None:
+    """The commit of the checkout ``odin3`` was built in, when that is this repo (``--odin3``
+    under ``REPO_ROOT``), with ``-dirty`` when tracked files are modified; else None (P-only
+    runs too). ``odin3_build`` stays the binary's identity."""
+    repo = Path(os.path.realpath(qor_legs.REPO_ROOT))
+    if all(leg == "P" for leg in legs) or repo not in Path(os.path.realpath(odin3)).parents:
         return None
-    proc = _git(qor_legs.REPO_ROOT, "rev-parse", "HEAD")
-    text = proc.stdout.strip() if proc is not None and proc.returncode == 0 else ""
-    return text if re.fullmatch(r"[0-9a-f]{40}", text) else None
+    head = _git(repo, "rev-parse", "HEAD")
+    text = head.stdout.strip() if head is not None and head.returncode == 0 else ""
+    if not re.fullmatch(r"[0-9a-f]{40}", text):
+        return None
+    status = _git(repo, "status", "--porcelain", "--untracked-files=no")
+    dirty = status is None or status.returncode != 0 or bool(status.stdout.strip())
+    return f"{text}-dirty" if dirty else text
 
 
 def _plan_lines(jobs: Sequence[Job]) -> list[str]:
@@ -574,18 +627,13 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
         for line in _plan_lines(jobs):
             print(f"{PREFIX}plan: {line}", file=sys.stderr)
     opts.keep_netlists = frozenset(legs) if args.keep_netlists else frozenset()
-    opts.retain_designs = frozenset(full_set(sets, args.arch))
+    opts.retain_planned = True
     ctx = RunContext(vtr_root=vtr_root, arch_xml=qor_legs.arch_xml_path(vtr_root, args.arch),
-                     vtr_commit=commit, vtr_drift=drift, odin3_commit=_odin3_commit(legs),
+                     vtr_commit=commit, vtr_drift=drift, odin3_commit=odin3_commit(legs, odin3),
                      opts=opts)
     opts.prepare = functools.partial(prepare_job, ctx=ctx)
+    opts.after_run = functools.partial(after_run, req=req, sets=sets, ctx=ctx)
     summary = qor_sched.run_jobs(jobs, opts, functools.partial(finish_job, ctx=ctx))
-    try:
-        for pair in update_latest(req, sets):
-            print(f"{PREFIX}latest: {pair}", file=sys.stderr)
-    except (HeavyError, OSError) as exc:  # the run's own result stands
-        detail = exc.message if isinstance(exc, HeavyError) else str(exc)
-        print(f"{PREFIX}latest not updated: {detail}", file=sys.stderr)
     return summary.exit_code
 
 
@@ -593,20 +641,31 @@ def cmd_run(args: argparse.Namespace, argv: Sequence[str]) -> int:
 
 
 def _subdirs(directory: Path) -> list[Path]:
-    """The directories in ``directory``, symlinks skipped (never followed)."""
-    if directory.is_symlink() or not directory.is_dir():
+    """The directories in ``directory``, symlinks skipped (never followed). A live run creates
+    and deletes entries meanwhile: one that vanishes is skipped, and so is a vanished
+    ``directory``."""
+    try:
+        if directory.is_symlink() or not directory.is_dir():
+            return []
+        return sorted(p for p in directory.iterdir() if p.is_dir() and not p.is_symlink())
+    except FileNotFoundError:
         return []
-    return sorted(p for p in directory.iterdir() if p.is_dir() and not p.is_symlink())
 
 
 def _job_statuses(key_dirs: Sequence[Path]) -> list[tuple[str, float]]:
+    """(status word, mtime) of every job; a file that vanishes while it is read is skipped."""
     found = []
     for key_dir in key_dirs:
         for job_dir in _subdirs(key_dir):
             status = job_dir / "status"
-            if status.is_file() and not status.is_symlink():
+            try:
+                if status.is_symlink():
+                    continue
+                when = status.stat().st_mtime
                 word = status.read_text(encoding="utf-8", errors="replace").strip()
-                found.append((word, status.stat().st_mtime))
+            except FileNotFoundError:
+                continue
+            found.append((word, when))
     return found
 
 
@@ -644,14 +703,6 @@ def cmd_status(args: argparse.Namespace, argv: Sequence[str]) -> int:
     return EXIT_OK
 
 
-def _full_set_of_base(sets: Sets, arch_base: str) -> tuple[str, ...] | None:
-    """The full set of an arch directory; None for an unknown arch (no key is pruned)."""
-    for short, base in qor_legs.ARCH_BASES.items():
-        if base == arch_base:
-            return full_set(sets, short)
-    return None
-
-
 def _failed_runs(leg_dir: Path) -> int:
     """The run directories kept for diagnosis (jobs that ended without a result)."""
     count = 0
@@ -665,20 +716,19 @@ def _failed_runs(leg_dir: Path) -> int:
 
 
 def cmd_clean(args: argparse.Namespace, argv: Sequence[str]) -> int:
-    """Retention (spec §5.4) over every ``<vtr12>/<arch>/<leg>`` under ``--out``."""
+    """Retention (spec §5.4) over every ``<vtr12>/<arch>/<leg>`` under ``--out``; a key is
+    complete when its own planned set is (``planned.json``)."""
     out = _out(args)
-    sets = qor_sched.load_sets()
     for vtr_dir in _subdirs(out):
         if not KEY12_TEXT.fullmatch(vtr_dir.name):
             continue
         for arch_dir in _subdirs(vtr_dir):
-            designs = _full_set_of_base(sets, arch_dir.name)
             for leg in qor_sched.PLAN_LEG_ORDER:
                 leg_dir = arch_dir / leg
                 if not leg_dir.is_dir():
                     continue
                 keys, runs = len(_subdirs(leg_dir)), _failed_runs(leg_dir)
-                qor_sched.prune(out, vtr_dir.name, arch_dir.name, leg, designs=designs,
+                qor_sched.prune(out, vtr_dir.name, arch_dir.name, leg, planned=True,
                                 keep_keys=args.keep)
                 print(f"{PREFIX}clean: {leg_dir}: {keys - len(_subdirs(leg_dir))} keys and "
                       f"{runs - _failed_runs(leg_dir)} failed run directories removed",
@@ -821,12 +871,39 @@ def lock_holders(lock: Path) -> list[tuple[str, str]]:
     return holders
 
 
+def heavy_run_holding(lock: Path) -> str | None:
+    """The heavy slice this process runs in when it holds ``lock`` as ``tools/heavy-run``'s
+    child does: its cgroup lies in a heavy slice and the inherited descriptor 9 is the lock.
+    Decided from the cgroup and the descriptor, never from an environment variable."""
+    try:
+        text = qor_heavy.SELF_CGROUP.read_text(encoding="utf-8")
+        target = os.readlink(qor_heavy.FD9)
+    except OSError:
+        return None
+    if os.path.realpath(target) != os.path.realpath(lock):
+        return None
+    cgroup = next((line[3:] for line in text.splitlines() if line.startswith("0::")), "")
+    for heavy_slice in HEAVY_SLICES:
+        if f"/{heavy_slice}/" in cgroup:
+            return heavy_slice
+    return None
+
+
 def _lock_item() -> CheckResult:
+    """Free, or held by this very heavy run (doctor inside the nightly), is ok; a build's shared
+    lock is ok too (``heavy-run`` waits for it, writer first); another heavy run is a FAIL."""
     lock = qor_heavy.HEAVY_LOCK
+    own = heavy_run_holding(lock)
+    if own is not None:
+        return True, f"{lock} held by this heavy run ({own})"
     holders = lock_holders(lock)
+    writers = [(mode, pid) for mode, pid in holders if mode != "READ"]
+    if writers:
+        mode, pid = writers[0]
+        return False, f"{lock} is busy ({mode} lock held by pid {pid}: another heavy run)"
     if holders:
-        mode, pid = holders[0]
-        return False, f"{lock} is busy ({mode} lock held by pid {pid})"
+        return True, (f"{lock} shared by a build (READ lock held by pid {holders[0][1]}); "
+                      "heavy-run waits for it")
     return True, f"{lock} free"
 
 
@@ -946,6 +1023,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except HeavyError as exc:
         print(f"{PREFIX}{exc.message}", file=sys.stderr, flush=True)
         return exc.code
+    except OSError as exc:  # a file system error outside the runner's own handling
+        print(f"{PREFIX}{exc}", file=sys.stderr, flush=True)
+        return EXIT_USAGE
 
 
 if __name__ == "__main__":
