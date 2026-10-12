@@ -207,6 +207,7 @@ linked `PRIVATE` to `libodin3` and `libabc-pic` through the C++ driver.
   __builtin_trap()`). `tools/check_rules.py` gains the rule "no `assert(` in `adapters/abc/`".
   `__builtin_trap` outside `check` is a documented exception for this directory (Peter, in 3D-2's
   review).
+  - **Interim (2026-10-12, 3D-2, plan point (a)):** until Peter rules on point (a), the adapter ships the clean return for `ODIN3_ADAPTER_ASSERT` (an assertion records `ASSERT`, disables the engine and returns `ODIN3_ERR_ENGINE`) and `raise(SIGKILL)` for the off-thread stop; `test_abc_adapter` pins `SIGKILL`. The trap below is the intended design.
 
 ### 4.2 Symbols and process control (AB-6)
 
@@ -249,6 +250,8 @@ The wrappers:
     `odin3: linked ABC called <exit|abort|assert> outside its session thread; stopping` to the
     saved original stderr fd, then executes `__builtin_trap()`. A `longjmp` across threads would
     be undefined behaviour, and the trap imports nothing.
+  - **Interim (2026-10-12):** until Peter rules on plan point (a), this stop is `raise(SIGKILL)`
+    (exit status 137, no core), not the trap; see §4.1's note.
 - **Process control and code loading:**
   - `__wrap_system`, `__wrap_fork`, `__wrap_execv`, `__wrap_execvp` and `__wrap_execl` return −1;
   - `__wrap_popen` and `__wrap_dlopen` return NULL;
@@ -316,8 +319,9 @@ typedef struct odin3_abc_fail {
     char text[ODIN3_ABC_FAIL_TEXT_BYTES]; /* NUL-terminated detail, "" when none */
 } odin3_abc_fail;
 
-/* One line of ABC's output (stdout and stderr merged), without its newline; valid during the
- * call only, and called only from inside an engine call. */
+/* One line of ABC's output (stdout and stderr merged), without its newline and without trailing
+ * blanks or '\r'; valid during the call only, and called only from inside an engine call. The
+ * callback must not call the engine: it runs while the call that produced the line finishes. */
 typedef void (*odin3_abc_text_fn)(void *user, const char *line);
 
 /* Odin III's exchange layout, equal to ABC's MiniAIG at the pin (aig/miniaig/miniaig.h; the
@@ -357,8 +361,10 @@ typedef struct odin3_abc_luts {
  * get_luts: the & space's mapping with ci_from, owned by the session until close or the next
  *   call. RESULT.
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
- *   MiniAIG literal or -1 per object, valid until close. RESULT.
+ *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
  * close: frees all the session returned; after an escape, leaks ABC's state and disables.
+ * Every call of a session must come from the thread that opened it; the linked engine treats a
+ * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
  */
 typedef struct odin3_abc_engine {
     uint32_t version;       /* ODIN3_ABC_ENGINE_VERSION */
@@ -379,7 +385,9 @@ typedef struct odin3_abc_engine {
  * Makes *engine (copied; self and the strings must outlive the process) the process's ABC engine.
  * ODIN3_ERR_INVALID_ARG (logged) for a NULL engine or name, another version, a NULL function, a
  * non-NULL reserved slot, an abc_commit that is not 40 lower-case hex digits, or an engine already
- * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final.
+ * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final;
+ * an engine call from another thread than the session's own disables the linked engine for the
+ * process (see odin3_abc_engine).
  */
 odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
 ```
@@ -1512,6 +1520,9 @@ flip-flops`. `<file>` is the script path as given.
 | ERROR | `abc: linked ABC is disabled by an earlier failure in this process`; `abc: linked ABC is busy (another session is open)` | `ENGINE`, `DISABLED`/`BUSY` |
 | ERROR | `abc: ABC returned a malformed network: <why>`, `<why>` ∈ `N primary inputs, expected M`; `N outputs, expected M`; `N registers, more than the M it was given`; `register J carries no input register's name`; `a latch with init <v> (all were sent at 0)`; `a LUT with N inputs (at most 16)`; `a LUT with N inputs exceeds --lut K`; `an unknown output '<name>'`; `a .subckt`; `no mapping in the & space` | `ENGINE`, `RESULT` |
 | FATAL (stderr, then trap) | `odin3: linked ABC called <exit\|abort\|assert> outside its session thread; stopping` | AB-6 |
+
+The FATAL row's stop is `raise(SIGKILL)` until Peter rules on plan point (a) (interim, 2026-10-12;
+§4.1).
 | ERROR / INFO | the project and CLI texts of §10.2 | §10 |
 
 ## 12. Performance (AB-29)
@@ -1603,6 +1614,8 @@ thread), added with `Cmd_CommandAdd`, and access to `CmdSplitLine`.
   - `o3test_exit 3` gives `EXIT` code 3 with fds restored, then `DISABLED`;
   - `o3test_assert` gives `ASSERT`;
   - `o3test_thread_exit` dies by `SIGILL` after the "outside its session thread" line (I6).
+    Interim (2026-10-12): until Peter rules on plan point (a), the stop is `raise(SIGKILL)`, and
+    the test expects `SIGKILL` (§4.1).
 - **Checked is what runs.** `CmdSplitLine`'s argv equals the checker's words on every accepted test,
   alias and fuzz-corpus command.
 - **Symbols.** `symbol_rules` with the adapter; `abc_adapter_exports`; `abc_adapter_no_assert`

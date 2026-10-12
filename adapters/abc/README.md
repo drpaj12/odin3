@@ -81,6 +81,11 @@ The link wraps `exit`, `_exit`, `abort`, `__assert_fail`, `system`, `popen`, `fo
     and `test_abc_adapter` pins `SIGKILL`.
   - The alternative under review is a trap (`__builtin_trap()`, `SIGILL`).
   - ABC started no thread in the spike's runs (PHASE3 decision 22).
+  - The same applies at process exit. ABC's C++ objects have 8 static initialisers
+    (`_GLOBAL__sub_I_Glucose*.cpp`, `UfarCmd.cpp`), whose destructors `__cxa_atexit` runs during
+    `exit()`. An `exit`, `abort` or failed assertion inside one of them runs with no guard
+    active, so it would stop `odin3` there, losing the exit status and any unflushed stdout. By
+    reading, they are trivial option tables that call none of these.
 - **Process control and code loading are refused.**
   - `system`, `fork`, `execv`, `execvp` and `execl` return −1; `popen` and `dlopen` return NULL;
     `signal` returns `SIG_ERR`.

@@ -1635,8 +1635,9 @@ typedef struct odin3_abc_fail {
     char text[ODIN3_ABC_FAIL_TEXT_BYTES]; /* NUL-terminated detail, "" when none */
 } odin3_abc_fail;
 
-/* One line of ABC's output (stdout and stderr merged), without its newline; valid during the
- * call only, and called only from inside an engine call. */
+/* One line of ABC's output (stdout and stderr merged), without its newline and without trailing
+ * blanks or '\r'; valid during the call only, and called only from inside an engine call. The
+ * callback must not call the engine: it runs while the call that produced the line finishes. */
 typedef void (*odin3_abc_text_fn)(void *user, const char *line);
 
 /* Odin III's exchange layout, equal to ABC's MiniAIG at the pin (aig/miniaig/miniaig.h; the
@@ -1676,8 +1677,10 @@ typedef struct odin3_abc_luts {
  * get_luts: the & space's mapping with ci_from, owned by the session until close or the next
  *   call. RESULT.
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
- *   MiniAIG literal or -1 per object, valid until close. RESULT.
+ *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
  * close: frees all the session returned; after an escape, leaks ABC's state and disables.
+ * Every call of a session must come from the thread that opened it; the linked engine treats a
+ * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
  */
 typedef struct odin3_abc_engine {
     uint32_t version;       /* ODIN3_ABC_ENGINE_VERSION */
@@ -1698,7 +1701,9 @@ typedef struct odin3_abc_engine {
  * Makes *engine (copied; self and the strings must outlive the process) the process's ABC engine.
  * ODIN3_ERR_INVALID_ARG (logged) for a NULL engine or name, another version, a NULL function, a
  * non-NULL reserved slot, an abc_commit that is not 40 lower-case hex digits, or an engine already
- * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final.
+ * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final;
+ * an engine call from another thread than the session's own disables the linked engine for the
+ * process (see odin3_abc_engine).
  */
 odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
 

@@ -502,6 +502,12 @@ ABC under the ABC license (see copyright.txt in the ABC root) with the explicit 
 rIC3 author.
 **************************************************************************************************/
 
+Odin III's note (2026-10-12): ABC commit 583e966ab (2026-08-10, "pdr: add GipSAT, an
+IC3-specialized SAT solver ported from rIC3") added this port. rIC3's LICENSE file is the
+GNU GPL v3 at tag v1.5.2, the ported version, and the BSD 3-Clause License (Copyright (c)
+2026, Yuheng Su) on its master branch today, from the same copyright holder; both read at
+github.com/gipsyh/rIC3 on 2026-10-12. The header above states the port's licence.
+
 
 ==============================================================================
 saucy
@@ -520,3 +526,8 @@ Notice: third_party/abc/src/base/abci/abcSaucy.c
  * Copyright (C) 2004, The Regents of the University of Michigan
  * See the LICENSE file for details.
  */
+
+Odin III's note (2026-10-12): the LICENSE file this header names is not in ABC's tree
+(third_party/abc at the pinned commit), and has not been since the file was added in
+2013 (ABC commit 60bb6dbf6). Its terms were not located; the header above is reproduced
+as found.
