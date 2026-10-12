@@ -1,0 +1,4 @@
+{"schema": 1, "pair": ["O", "P"], "set": "gate",
+ "metrics": ["num_clb", "min_chan_width", "critical_path_delay_ns", "crit_path_routed_wirelength"],
+ "geomean_max": 1.20, "per_design_max": 1.50,
+ "equal_or_explained": ["num_mult", "num_memories"]}
