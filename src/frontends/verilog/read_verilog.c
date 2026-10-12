@@ -1,8 +1,10 @@
 /*
- * read_verilog.c — the read_verilog pass (2C spec §4, VP-18/VP-19): its arguments and file list
+ * read_verilog.c — the read_verilog pass (2C spec §4, VP-18/VP-19): its arguments (the flags
+ * --parse-only, and 2D's --nolatches, --nomem2reg and --auto-blackbox, EL-3) and file list
  * (direct paths or the project record), the reader shared with odin3-parse-check (steps 1–7:
  * preprocess and parse every file into one store, libraries through read_verilog_lib.c,
- * duplicate_module, unnamed instances, seal and check) and the hand-over of step 8.
+ * duplicate_module, unnamed instances, seal and check) and the hand-over of step 8 to 2D's
+ * odin3_elab_run.
  */
 #include "frontends/verilog/read_verilog.h"
 
@@ -10,6 +12,7 @@
 #include "ast/check.h"
 #include "ast/kinds.h"
 #include "ast/srcman.h"
+#include "frontends/elab/elab.h"
 #include "frontends/project/paths.h"
 #include "frontends/project/project.h"
 #include "frontends/verilog/elab.h"
@@ -47,6 +50,9 @@ enum { RV_ALWAYS_CHECK = 1 };
 
 /* getcwd's buffer: first try and largest (a working directory deeper than 1 MB is refused). */
 enum { MS_PER_S = 1000, NS_PER_MS = 1000000, CWD_BUF = 4096, CWD_MAX = 1 << 20 };
+
+/* duplicate_module keys: library << 32 | name. */
+enum { RV_LIBRARY_SHIFT = 32 };
 
 /* The library name of a file given directly to the pass (the record's default library). */
 static const char k_work[] = "work";
@@ -190,11 +196,25 @@ odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
 
 /* --- steps 4 and 5 ------------------------------------------------------------------------- */
 
-/* The module and UDP names one design UNIT defines: a name already in seen is duplicate_module
- * (M11, 2B §8), located at this second definition (its MODULE or UDP_DECL node) and counted
- * against the cap. */
+/* The library of a design UNIT: its FILE buffer's (0 when it has none; DESIGN §4.0 "design
+ * units are identified by library and name"). */
+static uint32_t unit_library(odin3_rv *rv, odin3_ast_id unit) {
+    odin3_srcman *sm = NULL;
+    odin3_srcbuf_info info;
+    if (odin3_design_get_srcman(rv->design, &sm) != ODIN3_OK ||
+        !odin3_srcman_buffer_info(sm, odin3_srcman_buffer_of(sm, odin3_ast_loc(rv->ast, unit)),
+                                  &info)) {
+        return 0;
+    }
+    return info.library;
+}
+
+/* The module and UDP names one design UNIT defines: a (library, name) already in seen is
+ * duplicate_module (M11, 2B §8), located at this second definition (its MODULE or UDP_DECL node)
+ * and counted against the cap. One name in two libraries is two design units (2D EL-6). */
 static odin3_status unit_duplicates(odin3_rv *rv, odin3_ast_id unit, odin3_u64map *seen) {
     odin3_ast_span items = odin3_ast_children(rv->ast, unit);
+    uint64_t library = (uint64_t)unit_library(rv, unit) << RV_LIBRARY_SHIFT;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < items.n; i++) {
         odin3_ast_kind kind = odin3_ast_kind_of(rv->ast, items.ids[i]);
@@ -202,8 +222,8 @@ static odin3_status unit_duplicates(odin3_rv *rv, odin3_ast_id unit, odin3_u64ma
             continue;
         }
         uint32_t name = odin3_ast_name(rv->ast, items.ids[i]);
-        if (!odin3_u64map_get(seen, name, NULL)) {
-            st = odin3_u64map_put(seen, (odin3_kv){name, 1});
+        if (!odin3_u64map_get(seen, library | name, NULL)) {
+            st = odin3_u64map_put(seen, (odin3_kv){library | name, 1});
             continue;
         }
         odin3_vl_report(&rv->vl, ODIN3_LOG_ERROR, odin3_ast_loc(rv->ast, items.ids[i]),
@@ -323,21 +343,38 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
 
 /* --- the pass: arguments and the file list ------------------------------------------------- */
 
-/* read_verilog's arguments: the flag and the files (odin3_bytes views into the script). */
+/* read_verilog's arguments: the flags, the elaboration options they set (EL-3; the top stays 0
+ * for odin3_elab_run's step 1) and the files (odin3_bytes views into the script). */
 typedef struct rv_args {
     bool parse_only;
+    odin3_elab_opts elab;
     odin3_vec files;
 } rv_args;
+
+/* A flag word: true when it is one of the pass's flags (and sets it). */
+static bool set_flag(odin3_bytes word, rv_args *out) {
+    if (odin3_pass_arg_is(word, "--parse-only")) {
+        out->parse_only = true;
+    } else if (odin3_pass_arg_is(word, "--nolatches")) {
+        out->elab.nolatches = true;
+    } else if (odin3_pass_arg_is(word, "--nomem2reg")) {
+        out->elab.nomem2reg = true;
+    } else if (odin3_pass_arg_is(word, "--auto-blackbox")) {
+        out->elab.auto_blackbox = true;
+    } else {
+        return false;
+    }
+    return true;
+}
 
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
-        if (odin3_pass_arg_is(word, "--parse-only")) {
-            out->parse_only = true;
+        if (set_flag(word, out)) {
             continue;
         }
         if (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0) {
-            odin3_log(ODIN3_LOG_ERROR, "read_verilog: unknown argument '%.*s'", (int)word.len,
+            odin3_log(ODIN3_LOG_ERROR, "read_verilog: unknown option '%.*s'", (int)word.len,
                       (const char *)word.ptr);
             return ODIN3_ERR_INVALID_ARG;
         }
@@ -459,18 +496,19 @@ static odin3_status collect_sources(odin3_design *design, const rv_args *args, o
 
 /* --- the pass: step 8 ------------------------------------------------------------------------ */
 
-/* Hands the store to the design; with parse_only it stays held until the design is destroyed
- * (AST-15), otherwise 2D's entry runs and the parsed store is dropped (kept under ALL, AST-16). */
-static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, bool parse_only) {
+/* Hands the store to the design; with --parse-only it stays held until the design is destroyed
+ * (AST-15), otherwise 2D's entry runs with the pass's options (its step 3 drops the parsed store,
+ * kept under ALL, AST-16; the drop here is then a no-op, plan point (a)). */
+static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args *args) {
     odin3_status st = odin3_design_set_ast(ctx->design, ast);
     if (st != ODIN3_OK) {
         odin3_ast_destroy(ast);
         return st;
     }
-    if (parse_only) {
+    if (args->parse_only) {
         return ODIN3_OK;
     }
-    st = odin3_elab_run(ctx, ctx->design, ast, NULL);
+    st = odin3_elab_run(ctx, ctx->design, ast, &args->elab);
     odin3_design_drop_ast(ctx->design, ctx->run, ODIN3_AST_FORM_PARSED);
     return st;
 }
@@ -478,7 +516,7 @@ static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, bool parse_on
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
-    rv_args parsed = {.parse_only = false};
+    rv_args parsed = {.parse_only = false, .elab = {0}};
     odin3_vec_init(&parsed.files, sizeof(odin3_bytes));
     odin3_vec srcs;
     odin3_vec_init(&srcs, sizeof(odin3_pp_source));
@@ -489,7 +527,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
         odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL};
         st = odin3_read_verilog_files(design, &opts, &ast);
     }
-    st = st != ODIN3_OK ? st : hand_over(ctx, ast, parsed.parse_only);
+    st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
     return st;
@@ -497,9 +535,11 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
-    "read_verilog [--parse-only] [<file>...]: read Verilog-2005 (the project's Verilog files, or "
-    "the files given) into one parsed AST with -v/-y libraries; --parse-only keeps it "
-    "(write_verilog_ast prints it), otherwise elaboration (2D) follows",
+    "read_verilog [--parse-only] [--nolatches] [--nomem2reg] [--auto-blackbox] [<file>...]: read "
+    "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
+    "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
+    "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
+    "memories unless forced, --auto-blackbox makes an undefined module a black box",
     read_verilog_run,
     NULL,
     false,

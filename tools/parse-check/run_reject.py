@@ -17,10 +17,13 @@ any line (a 2D handover file may raise another row's error first) — the exit s
 for an .err (zero for a .warn), and no line reports ODIN3_ERR_INVALID_ARG, ODIN3_ERR_CHECK or a
 check failure (a builder or check failure on user input is a 2C bug).
 
-With --elaborate a case that does not pass but prints the 2D stub's ``elaboration is not
-available yet (2D)`` is pending, not failed: the handover cases run as soon as 2D replaces the
-stub. Exit codes: 0 every case passes (or passes or is pending), 1 any case fails, 2 usage or
-input error, 77 (--elaborate) every case is pending.
+With --elaborate each case is judged on its own (2D plan point (l), review I4): **pass** as
+above; else **pending** when a line contains ``elaboration is not available yet (2D)`` — 2D's
+located line for a construct whose elaboration has not landed (``f.v:3:5: error: elaboration is
+not available yet (2D): 'ALWAYS'``) or stage 2's unlocated stub text — listed, not failed; else
+**fail**. The summary line is ``run-reject: pass N, pending P, fail F``. Exit codes: 0 every case
+passes or is pending, 1 any case fails, 2 usage or input error, 77 (--elaborate) every case is
+pending.
 """
 
 from __future__ import annotations
@@ -82,7 +85,7 @@ def candidates(expect: Expect, output: str, elaborate: bool) -> list[str]:
 
 
 def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
-    """Pass, pending (--elaborate and the 2D stub) or fail, with the reason."""
+    """Pass, pending (--elaborate and a not-yet-available line of 2D) or fail, with the reason."""
     lines = log_lines(output)
     found = any(
         line.startswith(expect.prefix) and expect.text in line
@@ -93,7 +96,7 @@ def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
     if found and exit_ok and not forbidden:
         return Verdict("pass", "")
     if elaborate and any(STUB_TEXT in line for line in lines):
-        return Verdict("pending", "2D stub")
+        return Verdict("pending", "2D: not available yet")
     if not found:
         why = f"no line '{expect.prefix} ...{expect.text}...'"
     elif not exit_ok:

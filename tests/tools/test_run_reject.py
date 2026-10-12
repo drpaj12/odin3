@@ -29,7 +29,8 @@ sys.stdout.write(lines[1] if len(lines) > 1 else "")
 sys.exit(int(lines[0]))
 """
 
-STUB = "odin3: error: elaboration is not available yet (2D)\n"
+STUB_TEXT = "elaboration is not available yet (2D)"
+STUB = "odin3: error: " + STUB_TEXT + "\n"
 INVALID = "odin3: error: pass read_verilog: failed: ODIN3_ERR_INVALID_ARG\n"
 
 
@@ -133,6 +134,30 @@ class RunRejectTest(unittest.TestCase):
         code, out, _ = self.run_tool("--elaborate")
         self.assertEqual(code, 0)
         self.assertIn("pass 1, pending 1, fail 0", out)
+
+    def test_elaborate_located_pending_line_is_pending(self) -> None:
+        located = "odin3: error: a.v:2:3: error: " + STUB_TEXT + ": 'ALWAYS'\n"
+        self.case("a", "a.v:4:1: error:\nx\n", 1, located)
+        self.case("b", "b.v:2:1: error:\ny\n", 1, "odin3: error: b.v:2:1: error: y\n")
+        code, out, err = self.run_tool("--elaborate")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "run-reject: pass 1, pending 1, fail 0\n")
+        self.assertIn("PENDING a.v: 2D: not available yet", err)
+
+    def test_elaborate_all_pending_located_or_not_exits_77(self) -> None:
+        located = "odin3: error: a.v:2:3: error: " + STUB_TEXT + ": 'NET_DECL'\n"
+        self.case("a", "a.v:4:1: error:\nx\n", 1, located)
+        self.case("b", "b.v:2:1: warning:\ny\n", 1, STUB, suffix=".warn")
+        code, out, _ = self.run_tool("--elaborate")
+        self.assertEqual(code, 77)
+        self.assertEqual(out, "run-reject: pass 0, pending 2, fail 0\n")
+
+    def test_elaborate_missing_line_without_pending_text_fails(self) -> None:
+        self.case("a", "a.v:2:1: error:\nx\n", 1, "odin3: error: a.v:9:9: error: other\n")
+        code, out, err = self.run_tool("--elaborate")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "run-reject: pass 0, pending 0, fail 1\n")
+        self.assertIn("FAIL a.v: no line 'a.v:2:1: error: ...x...'", err)
 
     def test_elaborate_fail_exits_1(self) -> None:
         self.case("a", "a.v:2:1: error:\nx\n", 1, "odin3: error: a.v:2:1: error: y\n")

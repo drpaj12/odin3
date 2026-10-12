@@ -1,11 +1,15 @@
 /*
  * elab_test.h — hidden test hooks of elaboration (2D; never part of the ABI): the caps a test
- * may lower (spec §11), and, from Task 10, the stage hooks. The elaborator reads the caps in
- * force through odin3_elab_limits_get, so a lowered cap is hit cheaply.
+ * may lower (spec §11), the forced pending kinds (plan point (l)) and the stage hooks. The
+ * elaborator reads the caps and hooks in force through odin3_elab_limits_get and
+ * odin3_elab_test_hooks_get, so a lowered cap is hit cheaply.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_TEST_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_TEST_H
 
+#include "ast/ast.h"
+
+#include <stdbool.h>
 #include <stdint.h>
 
 /* The caps of §11 (elab.h), as the elaborator reads them; the defaults are the named caps. */
@@ -38,5 +42,41 @@ void odin3_elab_test_set_limits(const odin3_elab_limits *limits);
 
 /* The caps in force: the defaults unless a test lowered them. Never NULL. */
 const odin3_elab_limits *odin3_elab_limits_get(void);
+
+/*
+ * Forces kind_or_feature (an AST kind or an odin3_elab_pend_feature, elab.h) pending in stage
+ * (ODIN3_ELAB_STAGE1 or _STAGE2) when pending is true, so plan point (l)'s mechanism stays
+ * testable once the tables are empty; false removes the force (the table decides again).
+ * Process-wide, until changed; out-of-range arguments are ignored.
+ */
+void odin3_elab_test_pend(uint8_t stage, uint32_t kind_or_feature, bool pending);
+
+/*
+ * The stage hooks (all off when zero): drop_log_entry N > 0 makes stage 1's pass W skip the Nth
+ * decision-log entry (Task 11); on_body_start(user, module) runs as stage 2 starts the body of
+ * each elaborated MODULE (Task 17; until then odin3_elab_run calls it once per MODULE of the
+ * elaborated store just before the stage-2 stub).
+ */
+typedef struct odin3_elab_test_hooks {
+    uint32_t drop_log_entry;
+    void (*on_body_start)(void *user, odin3_ast_id module_node);
+    void *user;
+} odin3_elab_test_hooks;
+
+/* Installs a copy of *hooks process-wide (NULL: every hook off). */
+void odin3_elab_test_set_hooks(const odin3_elab_test_hooks *hooks);
+
+/* The hooks in force (all zero unless a test installed some). Never NULL. */
+const odin3_elab_test_hooks *odin3_elab_test_hooks_get(void);
+
+struct odin3_elab_opts; /* elab.h */
+
+/*
+ * The options the last odin3_elab_run used, after its step 1 (the pass's flags, the top filled
+ * from --top or the project), so a test sees what read_verilog passed; all zero before any run.
+ * odin3_elab_test_note_opts is how odin3_elab_run records them.
+ */
+const struct odin3_elab_opts *odin3_elab_test_last_opts(void);
+void odin3_elab_test_note_opts(const struct odin3_elab_opts *opts);
 
 #endif

@@ -13,7 +13,8 @@
  * provenance visitors, logging.
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
- * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
+ * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot,
+ * library units.
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  *
@@ -1461,6 +1462,16 @@ odin3_status odin3_ast_get_form(const odin3_ast *ast, uint32_t *form);
 odin3_status odin3_ast_get_run(const odin3_ast *ast, uint32_t *run);
 odin3_status odin3_ast_get_root_count(const odin3_ast *ast, uint32_t *count);
 odin3_status odin3_ast_get_root_at(const odin3_ast *ast, uint32_t index, uint32_t *root);
+
+/*
+ * (ABI v4, 2D) *index gets where the library UNITs of a parsed store begin (2C §4.2 step 3, 2A
+ * §9 (b)): the root index of the first UNIT read from a -v library file or a -y library
+ * directory. Every root before it came from a design file, every root at or past it from a
+ * library; 0 when the store has none (a read always has a design UNIT first, so root 0 is never
+ * a library UNIT) and for an elaborated store. Fails only with ODIN3_ERR_INVALID_ARG, as the
+ * conventions say.
+ */
+odin3_status odin3_ast_get_library_units_from(const odin3_ast *ast, uint32_t *index);
 
 /* --- AST builders (adapters; spec §5) ------------------------------------------------------- */
 

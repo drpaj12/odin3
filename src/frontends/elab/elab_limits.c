@@ -1,6 +1,6 @@
 /*
  * elab_limits.c — the caps in force (elab.h, elab_test.h): the §11 defaults, the byte budget
- * from physical memory, and the test hook that lowers them process-wide.
+ * from physical memory, the test hook that lowers them process-wide, and the stage hooks.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -104,4 +104,24 @@ const odin3_elab_limits *odin3_elab_limits_get(void) {
         g_ready = true;
     }
     return &g_limits;
+}
+
+static odin3_elab_test_hooks g_hooks;
+
+void odin3_elab_test_set_hooks(const odin3_elab_test_hooks *hooks) {
+    g_hooks = hooks != NULL ? *hooks : (odin3_elab_test_hooks){0};
+}
+
+const odin3_elab_test_hooks *odin3_elab_test_hooks_get(void) {
+    return &g_hooks;
+}
+
+static odin3_elab_opts g_last_opts;
+
+void odin3_elab_test_note_opts(const odin3_elab_opts *opts) {
+    g_last_opts = opts != NULL ? *opts : (odin3_elab_opts){0};
+}
+
+const odin3_elab_opts *odin3_elab_test_last_opts(void) {
+    return &g_last_opts;
 }
