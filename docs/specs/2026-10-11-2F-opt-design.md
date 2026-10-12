@@ -399,7 +399,12 @@ levels deep, else re-queued as non-pure. Ports never enabled are dead: a mux wit
 becomes wiring, with several a narrower `$pmux`/`$mux`, with none it is deleted. The recursion of
 `eval_mux`/`eval_mux_port` becomes an explicit frame stack (CLAUDE.md: no recursion); a global
 budget of **100,000** evaluations per module, as in Yosys, stops the analysis with the warning of
-§16 and changes nothing in that module. Count: `opt_muxtree: removed N multiplexer ports`.
+§16 and changes nothing in that module (§17 row 18). Roots are evaluated from the last mux to the
+first, then the re-queued ones last-in first-out: Yosys's cell dictionary and pool iterate newest
+first, and the order is observable (a root promoted to pure prunes later evaluations; over 3,000 random
+layered DAGs, most with re-queues, agree with Yosys 0.55 only in this order). The
+known-bit replacements are kept aside and applied with the dead ports. Count:
+`opt_muxtree: removed N multiplexer ports`.
 
 ## 8. `opt_reduce` (OP-8)
 
@@ -687,6 +692,9 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 14 | the commutative swap only when `A_SIGNED == B_SIGNED` | merges mixed-sign commutative cells with swapped operands (unsound) | OP-13: with mixed signs, sext(x)+zext(y) differs from sext(y)+zext(x) (Yosys's `calc.cc` extends each operand by its own sign; `simlib.v` reads mixed signs as unsigned) |
 | 15 | `opt_reduce` sorts a reduction's inputs by key (constants by value, then net ID) and rebuilds the cell only when its input set changed (or had repeats) | sorts by wire name, and `setPort`s the sorted `A` of every reduction it visits, counted or not | same function and the same change count (3,400 random designs, `-fine` or not, `$mem` write enables or not, compared with Yosys 0.55 over cell types, widths, constant inputs and change counts); only the order of a unique, constant-free input vector differs |
 | 16 | `opt_reduce` leaves a cell with an unconnected input pin alone | has no open pins (an undriven wire is a full-width signal) | a missed rewrite, never a wrong one |
+| 17 | `opt_muxtree`'s `replace_known` reads a data bit that is a select of the same mux as 1 in the slice of that select and 0 in the others and in A | compares an index into the distinct select nets (constants counting as one) with the slice number | the two agree unless a select repeats (or a constant repeats before it); Yosys 0.55 then writes 0 for a slice's own select (`B = { t s y }`, `S = { t s s }` gives `{ 0 0 y }`), which changes the function when only that select is set (OP-13) |
+| 18 | `opt_muxtree` that gives up (100,000 evaluations in a module) changes nothing in that module | has already replaced known bits in place by then | the replacements are applied with the dead ports at the end; a run that finished is identical |
+| 19 | `opt_muxtree` treats a `$mux`/`$pmux` with an unconnected pin, a second driver on a Y net or port widths that disagree with its parameters as a non-mux node | has no open pins | a missed rewrite, never a wrong one |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

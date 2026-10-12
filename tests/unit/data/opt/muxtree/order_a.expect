@@ -1,0 +1,14 @@
+# yosys 0.55 (VTR build): read_rtlil order_a.il; opt_muxtree; write_rtlil   (hand-written input, read unedited by both)
+# a random layered mux DAG (fan-out > 1 everywhere) from a scratch generator: Yosys evaluates the roots in descending cell order, so the promotion of a non-pure root to a pure one prunes later evaluations
+# normalised by name: see the top of test_opt_muxtree.c
+cell $mux WIDTH=1 A=s1:0 B=y12:0 S=s0:0 Y=y14:0
+cell $mux WIDTH=1 A=y10:0 B=1 S=s0:0 Y=y12:0
+cell $mux WIDTH=1 A=y12:0 B=y12:0 S=s2:0 Y=y13:0
+cell $mux WIDTH=1 A=y2:0 B=y2:0 S=s1:0 Y=y5:0
+cell $pmux WIDTH=1 S_WIDTH=2 A=1 B=0 0 S=s1:0 s0:0 Y=y0:0
+cell $pmux WIDTH=1 S_WIDTH=2 A=y0:0 B=y0:0 1 S=s0:0 s2:0 Y=y2:0
+cell $pmux WIDTH=1 S_WIDTH=2 A=y5:0 B=0 y5:0 S=s2:0 s1:0 Y=y10:0
+wire y1:0 -> 1
+wire y4:0 -> y2:0
+wire y8:0 -> y5:0
+removed 17

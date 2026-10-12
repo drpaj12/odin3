@@ -142,6 +142,27 @@ odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
 odin3_status odin3_opt_reduce_run(odin3_pass_ctx *ctx, odin3_design *design,
                                   const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
+/* --- 2F Task 10: opt_muxtree (OP-7) --------------------------------------------------------- */
+
+/*
+ * opt_muxtree (2F spec §7, Yosys opt_muxtree.cc) over every module of design, in creation order,
+ * except those with live $proc nodes (INFO "opt_muxtree: module 'm' has processes; skipped"). Per
+ * module: the $mux and $pmux nodes are indexed (a root is a mux with a Y bit that a non-mux node,
+ * a mux select, a $port_out or a `keep` wire uses, or that more than one mux reads); each root is
+ * evaluated with reference-counted knowledge of active and inactive selects, a non-pure root met
+ * below another root in place up to three levels deep and otherwise re-queued, an explicit frame
+ * stack standing for the recursion; ports never enabled are dead and are removed (one live port:
+ * Y connected to its data; several: a narrower $pmux or a $mux; none: the node is deleted), and
+ * data bits known to be 0 or 1 under the selects of the enclosing ports become constants. After
+ * ODIN3_OPT_MUXTREE_MAX_EVALS evaluations in a module the analysis stops, WARN "opt_muxtree: module
+ * 'm': giving up after N evaluations", and that module is not changed. Adds the dead ports to
+ * counts->muxtree_ports; logs INFO "opt_muxtree: removed N multiplexer ports" and a DEBUG line per
+ * dead port. INVALID_ARG (logged) for a NULL argument; NO_MEMORY, possibly after some rewrites (the
+ * IR stays valid; each rewrite builds before its first destructive step).
+ */
+odin3_status odin3_opt_muxtree_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */

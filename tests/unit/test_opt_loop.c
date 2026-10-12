@@ -202,7 +202,10 @@ static void test_parse_unknown(void) {
 
 /* One line per pass that is still a stub: each later task removes its own. */
 static const char *const k_stub_passes[] = {
-    "opt", "opt_expr", "opt_muxtree", "opt_share", "opt_dff",
+    "opt",
+    "opt_expr",
+    "opt_share",
+    "opt_dff",
 };
 
 static void test_stubs(void) {
@@ -272,6 +275,34 @@ static void test_call_changed_and_hook(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
     TEST_ASSERT_FALSE(changed); /* a second call removes nothing */
     TEST_ASSERT_EQUAL_UINT32(2, hook_calls);
+    check_full();
+}
+
+/* opt_muxtree through the wrapper and through the pass manager (Task 10). */
+static void test_call_muxtree(void) {
+    build("module \\m\n  wire input 1 \\s\n  wire input 2 \\a\n  wire input 3 \\b\n"
+          "  wire input 4 \\c\n  wire output 5 \\y\n  wire \\t\n"
+          "  cell $mux \\i\n    parameter \\WIDTH 1\n    connect \\A \\b\n    connect \\B \\a\n"
+          "    connect \\S \\s\n    connect \\Y \\t\n  end\n"
+          "  cell $mux \\o\n    parameter \\WIDTH 1\n    connect \\A \\c\n    connect \\B \\t\n"
+          "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n");
+    odin3_opt_opts opts;
+    memset(&opts, 0, sizeof opts);
+    odin3_opt_counts counts;
+    memset(&counts, 0, sizeof counts);
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_MUXTREE, &opts, &counts};
+    bool changed = false;
+    n_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_TRUE(changed);
+    TEST_ASSERT_EQUAL_UINT32(1, counts.muxtree_ports);
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO, "opt_muxtree: removed 1 multiplexer ports"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_FALSE(changed);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_muxtree", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO, "opt_muxtree: removed 0 multiplexer ports"));
     check_full();
 }
 
@@ -484,6 +515,7 @@ int main(void) {
     RUN_TEST(test_stubs);
     RUN_TEST(test_call_stub);
     RUN_TEST(test_call_changed_and_hook);
+    RUN_TEST(test_call_muxtree);
     RUN_TEST(test_snapshot);
     RUN_TEST(test_snapshot_failure);
     RUN_TEST(test_snapshot_unwritable);
