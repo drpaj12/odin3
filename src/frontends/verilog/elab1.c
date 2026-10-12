@@ -296,6 +296,12 @@ static void init_containers(odin3_elab1 *e1) {
     odin3_vec_init(&e1->log, sizeof(odin3_elab_decision));
     odin3_vec_init(&e1->edges, sizeof(odin3_elab1_edge));
     odin3_vec_init(&e1->frames, sizeof(odin3_elab1_frame));
+    odin3_vec_init(&e1->inst_ovr, sizeof(odin3_elab_override));
+    odin3_vec_init(&e1->conns, sizeof(odin3_elab1_conn));
+    odin3_vec_init(&e1->given, sizeof(odin3_elab1_given));
+    odin3_vec_init(&e1->gparams, sizeof(odin3_elab1_gparam));
+    odin3_vec_init(&e1->bboxes, sizeof(odin3_elab1_bbox));
+    odin3_vec_init(&e1->bbports, sizeof(odin3_elab1_bbport));
 }
 
 /* The maps and arenas; false when one could not be made. */
@@ -308,11 +314,15 @@ static bool make_tables(odin3_elab1 *e1) {
     e1->spec_hash = odin3_u64map_create(0);
     e1->spec_names = odin3_u64map_create(0);
     e1->port_pos = odin3_u64map_create(0);
+    e1->conn_seen = odin3_u64map_create(0);
+    e1->bbox_names = odin3_u64map_create(0);
+    e1->bbport_ix = odin3_u64map_create(0);
     e1->arena = odin3_arena_create(0);
     e1->scratch = odin3_arena_create(0);
     return e1->by_name != NULL && e1->instantiated != NULL && e1->noted != NULL &&
            e1->warned != NULL && e1->said != NULL && e1->spec_hash != NULL &&
-           e1->spec_names != NULL && e1->port_pos != NULL && e1->arena != NULL &&
+           e1->spec_names != NULL && e1->port_pos != NULL && e1->conn_seen != NULL &&
+           e1->bbox_names != NULL && e1->bbport_ix != NULL && e1->arena != NULL &&
            e1->scratch != NULL;
 }
 
@@ -363,6 +373,15 @@ void odin3_elab1_destroy(odin3_elab1 *e1) {
     odin3_vec_free(&e1->log);
     odin3_vec_free(&e1->edges);
     odin3_vec_free(&e1->frames);
+    odin3_vec_free(&e1->inst_ovr);
+    odin3_vec_free(&e1->conns);
+    odin3_vec_free(&e1->given);
+    odin3_vec_free(&e1->gparams);
+    odin3_vec_free(&e1->bboxes);
+    odin3_vec_free(&e1->bbports);
+    odin3_u64map_destroy(e1->conn_seen);
+    odin3_u64map_destroy(e1->bbox_names);
+    odin3_u64map_destroy(e1->bbport_ix);
     odin3_u64map_destroy(e1->by_name);
     odin3_u64map_destroy(e1->instantiated);
     odin3_u64map_destroy(e1->noted);

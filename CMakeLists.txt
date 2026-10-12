@@ -183,6 +183,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_spec.c
     src/frontends/verilog/elab1_expand.c
     src/frontends/verilog/elab1_write.c
+    src/frontends/verilog/elab1_inst.c
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2_stub.c
     src/ir/cells/builtin.c
@@ -766,6 +767,13 @@ if(BUILD_TESTING)
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
+    # 2D Task 12: instances, connections, arrays, black boxes and cell types.
+    odin3_add_unit_test(test_elab_stage1_inst)
+    target_include_directories(test_elab_stage1_inst PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_inst verilog_generated)
+    target_compile_definitions(test_elab_stage1_inst PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
 
     add_executable(test_api tests/unit/test_api.c)

@@ -21,9 +21,6 @@
 static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 12: gates (ordered connections and arrays are forms of Task 11's kinds,
-             * reported through odin3_elab1_pend_form until Task 12). */
-            [ODIN3_AST_GATE_DECL] = true,
             /* Task 14: generate and scope names. */
             [ODIN3_AST_GENERATE] = true,
             [ODIN3_AST_GEN_FOR] = true,
@@ -134,17 +131,15 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
 static const bool k_forms[ODIN3_ELAB_STAGES + 1][ODIN3_AST_KIND_COUNT] = {
     [ODIN3_ELAB_STAGE1] =
         {
-            /* Task 12: ordered connections, instance arrays, a defparam on a cell type. */
-            [ODIN3_AST_CONNECTION] = true,
-            [ODIN3_AST_INSTANCE] = true,
-            [ODIN3_AST_DEFPARAM] = true,
             /* Task 15: a port declared in the body. */
             [ODIN3_AST_PORT_DECL] = true,
-            /* Task 16: specparam, time/real variables, tri0/tri1/trireg, hierarchical calls. */
+            /* Task 16: specparam, time/real variables, tri0/tri1/trireg, hierarchical calls,
+             * switch-level and pull gates (Q6). */
             [ODIN3_AST_PARAM_DECL] = true,
             [ODIN3_AST_VAR_DECL] = true,
             [ODIN3_AST_NET_DECL] = true,
             [ODIN3_AST_CALL] = true,
+            [ODIN3_AST_GATE_DECL] = true,
         },
 };
 

@@ -263,7 +263,8 @@ bool odin3_elab1_reach_def(odin3_elab1 *e1, uint32_t def) {
         }
         return false; /* what depends on it is skipped silently (EL-44) */
     }
-    return rec->kind == ODIN3_DEF_MODULE; /* a black box's body is ignored (EL-11) */
+    /* a black box is specialized too (EL-11: its ports per specialization; its body ignored) */
+    return rec->kind == ODIN3_DEF_MODULE || rec->kind == ODIN3_DEF_BLACKBOX;
 }
 
 odin3_status odin3_elab1_not_elaborated(odin3_elab1 *e1) {

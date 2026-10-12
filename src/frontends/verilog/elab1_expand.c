@@ -15,6 +15,7 @@
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/project/project.h"
+#include "ir/celltype.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
@@ -331,6 +332,7 @@ void odin3_elab1_env_destroy(odin3_elab1_env *env) {
     if (env == NULL) {
         return;
     }
+    odin3_ctype_destroy(env->types);
     odin3_ceval_destroy(env->ev);
     odin3_vec_free(&env->slots);
     odin3_vec_free(&env->ranges);
@@ -728,7 +730,6 @@ typedef struct e1_pass {
     odin3_vec dps;            /* e1_dp */
     odin3_u64map *dp_by_inst; /* instance name → (first dp + 1) | (last dp + 1) << 32 */
     odin3_vec list;           /* odin3_elab_override: one INSTANTIATION's #() values */
-    odin3_vec ovr;            /* odin3_elab_override: one instance's overrides */
 } e1_pass;
 
 static odin3_status push_override(odin3_vec *vec, const odin3_elab_override *ovr) {
@@ -780,8 +781,7 @@ static uint32_t find_id(const odin3_elab1 *e1, odin3_bytes bytes) {
     return odin3_strtab_find(odin3_design_strtab(e1->design), bytes, &id) ? id : 0;
 }
 
-/* The unknown-target error of a pushed-down override (a defparam's or a project line's). */
-static void bad_target(odin3_elab1 *e1, const odin3_elab_override *ovr) {
+void odin3_elab1_bad_target(odin3_elab1 *e1, const odin3_elab_override *ovr) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     odin3_status st = odin3_elab1_override_text(e1, ovr, &text);
@@ -816,7 +816,7 @@ static odin3_status collect_defparam(e1_pass *ps, odin3_ast_id item) {
                                .from = item};
     uint32_t inst = odin3_ast_name(ast, parts.ids[0]);
     if (parts.n < 2 || !is_instance(ps, inst)) {
-        bad_target(ps->e1, &ovr);
+        odin3_elab1_bad_target(ps->e1, &ovr);
         return ODIN3_OK;
     }
     odin3_strbuf rest;
@@ -852,7 +852,7 @@ static odin3_status split_pending(e1_pass *ps, const odin3_elab_override *ovr) {
     const char *dot = strchr(path, ODIN3_ELAB_PATH_SEP);
     uint32_t inst = dot != NULL ? find_id(ps->e1, (odin3_bytes){path, (size_t)(dot - path)}) : 0;
     if (inst == 0 || !is_instance(ps, inst)) {
-        bad_target(ps->e1, ovr);
+        odin3_elab1_bad_target(ps->e1, ovr);
         return ODIN3_OK;
     }
     odin3_elab_override down = *ovr;
@@ -879,6 +879,30 @@ static odin3_status collect_overrides(e1_pass *ps) {
 
 /* --- the #() values of an INSTANTIATION (EL-8) ------------------------------------------- */
 
+/* What a #() is for: a definition's `parameter`s, a cell type's parameters (EL-11), or an
+ * implicit black box's (any, ordered ones kept unnamed). */
+typedef struct e1_ptarget {
+    const char *what; /* "module" or "cell type" (the too-many error) */
+    const char *name;
+    uint32_t def;                   /* a definition, else E1_NONE */
+    const odin3_celltype_def *type; /* a cell type, else NULL */
+    uint32_t n_params;              /* E1_NONE: no limit (an implicit black box) */
+} e1_ptarget;
+
+static e1_ptarget def_target(const odin3_elab1 *e1, uint32_t target) {
+    const odin3_elab_def *def = odin3_elab1_def(e1, target);
+    return (e1_ptarget){"module", odin3_elab1_str(e1, def->name), target, NULL,
+                        def->n_header_params + def->n_body_params};
+}
+
+static e1_ptarget res_target(const odin3_elab1 *e1, const odin3_elab_res *res, uint32_t name) {
+    if (res->kind != ODIN3_RES_CELLTYPE) {
+        return (e1_ptarget){"module", odin3_elab1_str(e1, name), E1_NONE, NULL, E1_NONE};
+    }
+    const odin3_celltype_def *type = odin3_celltype_get(e1->design, res->type);
+    return (e1_ptarget){"cell type", type->name, E1_NONE, type, type->n_params};
+}
+
 /* The ordered/named form of the CONNECTION entries; the mixing error at the first entry whose
  * form differs from the first's. */
 static odin3_status param_forms(e1_pass *ps, odin3_ast_id item, odin3_ast_span entries,
@@ -899,7 +923,23 @@ static odin3_status param_forms(e1_pass *ps, odin3_ast_id item, odin3_ast_span e
     return ODIN3_OK;
 }
 
-/* One #() value: evaluated where it is written, for the target's parameter named param. */
+/* The parameter the ordered value idx goes to (0: an implicit black box's stays unnamed). */
+static odin3_status ordered_name(e1_pass *ps, const e1_ptarget *tg, uint32_t idx, uint32_t *name) {
+    *name = 0;
+    if (tg->type != NULL) {
+        return odin3_design_intern(ps->e1->design, odin3_bytes_cstr(tg->type->params[idx].name),
+                                   name);
+    }
+    if (tg->def != E1_NONE) {
+        const odin3_elab_def *def = odin3_elab1_def(ps->e1, tg->def);
+        *name = odin3_ast_name(ps->e1->parsed, *(const odin3_ast_id *)odin3_vec_cat(
+                                                   &ps->e1->params, def->first_param + idx));
+    }
+    return ODIN3_OK;
+}
+
+/* One #() value: evaluated where it is written, for the target's parameter named param (0: an
+ * ordered value of an implicit black box). */
 static odin3_status param_value_of(e1_pass *ps, odin3_ast_id entry, uint32_t param,
                                    uint8_t source) {
     const odin3_ast *ast = ps->e1->parsed;
@@ -912,36 +952,47 @@ static odin3_status param_value_of(e1_pass *ps, odin3_ast_id entry, uint32_t par
                                .order = entry.v,
                                .at = odin3_ast_loc(ast, entry),
                                .from = entry};
-    odin3_elab1_eval_req req = {expr, param_what(ps->env, param), &ovr.base};
+    odin3_elab1_eval_req req = {expr, param != 0 ? param_what(ps->env, param) : "parameter value",
+                                &ovr.base};
     odin3_status st = odin3_elab1_eval(ps->env, &req, &ovr.value);
     ovr.value.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED; /* an override is sized (v4.7) */
     return st != ODIN3_OK ? st : push_override(&ps->list, &ovr);
 }
 
-/* The #() of item for definition target into ps->list: PARSE after mixing, too many values or
- * a value that is not constant. */
-static odin3_status param_list(e1_pass *ps, odin3_ast_id item, uint32_t target) {
+/* More ordered values than the target has parameters (§9.1), at the first surplus one. */
+static odin3_status too_many(e1_pass *ps, const e1_ptarget *tg, odin3_ast_span entries) {
+    if (tg->n_params == E1_NONE || entries.n <= tg->n_params) {
+        return ODIN3_OK;
+    }
+    odin3_elab1_error(ps->e1, odin3_ast_loc(ps->e1->parsed, entries.ids[tg->n_params]),
+                      "too many parameter values for %s '%s' (%" PRIu32 " given, %" PRIu32
+                      " parameters)",
+                      tg->what, tg->name, entries.n, tg->n_params);
+    return ODIN3_ERR_PARSE;
+}
+
+/* #() entry idx (named, or ordered: the target's idx-th parameter) into ps->list. */
+static odin3_status param_entry(e1_pass *ps, const e1_ptarget *tg, odin3_ast_id entry, uint32_t idx,
+                                bool named) {
+    uint32_t param = odin3_ast_name(ps->e1->parsed, entry);
+    odin3_status st = named ? ODIN3_OK : ordered_name(ps, tg, idx, &param);
+    return st != ODIN3_OK
+               ? st
+               : param_value_of(ps, entry, param, named ? ODIN3_OVR_NAMED : ODIN3_OVR_ORDERED);
+}
+
+/* The #() of item for target into ps->list: PARSE after mixing, too many values or a value that
+ * is not constant. */
+static odin3_status param_list(e1_pass *ps, odin3_ast_id item, const e1_ptarget *tg) {
     const odin3_ast *ast = ps->e1->parsed;
     odin3_vec_clear(&ps->list);
     odin3_ast_span entries = odin3_ast_children(ast, odin3_ast_child(ast, item, 0));
     bool named = false;
     odin3_status st = param_forms(ps, item, entries, &named);
-    const odin3_elab_def *def = odin3_elab1_def(ps->e1, target);
-    uint32_t n_params = def->n_header_params + def->n_body_params;
-    if (st == ODIN3_OK && !named && entries.n > n_params) {
-        odin3_elab1_error(ps->e1, odin3_ast_loc(ast, entries.ids[n_params]),
-                          "too many parameter values for module '%s' (%" PRIu32 " given, %" PRIu32
-                          " parameters)",
-                          odin3_elab1_str(ps->e1, def->name), entries.n, n_params);
-        st = ODIN3_ERR_PARSE;
-    }
+    st = st != ODIN3_OK || named ? st : too_many(ps, tg, entries);
     odin3_status worst = st;
     for (uint32_t i = 0; st == ODIN3_OK && i < entries.n; i++) {
-        uint32_t param = named ? odin3_ast_name(ast, entries.ids[i])
-                               : odin3_ast_name(ast, *(const odin3_ast_id *)odin3_vec_cat(
-                                                         &ps->e1->params, def->first_param + i));
-        odin3_status one =
-            param_value_of(ps, entries.ids[i], param, named ? ODIN3_OVR_NAMED : ODIN3_OVR_ORDERED);
+        odin3_status one = param_entry(ps, tg, entries.ids[i], i, named);
         st = one == ODIN3_ERR_PARSE ? ODIN3_OK : one;
         worst = worst != ODIN3_OK ? worst : one;
     }
@@ -968,35 +1019,46 @@ static odin3_status add_edge(e1_pass *ps, odin3_ast_id inst, uint32_t child) {
     return ODIN3_OK;
 }
 
-/* The overrides of instance inst: the #() values, then the defparams and pending overrides
- * that name it. */
+/* The overrides of instance inst into odin3_elab1.inst_ovr: the #() values, then the defparams
+ * and pending overrides that name it. */
 static odin3_status instance_overrides(e1_pass *ps, uint32_t inst) {
-    odin3_vec_clear(&ps->ovr);
+    odin3_vec *out = &ps->e1->inst_ovr;
+    odin3_vec_clear(out);
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < ps->list.len; i++) {
-        st = push_override(&ps->ovr, odin3_vec_cat(&ps->list, i));
+        st = push_override(out, odin3_vec_cat(&ps->list, i));
     }
     for (uint32_t at = first_dp(ps, inst); st == ODIN3_OK && at != 0;) {
         const e1_dp *dp = odin3_vec_cat(&ps->dps, at - 1);
-        st = push_override(&ps->ovr, &dp->ovr);
+        st = push_override(out, &dp->ovr);
         at = dp->next;
     }
     return st;
 }
 
-/* One INSTANCE of a module definition: its specialization (EL-9), logged with an edge. */
-static odin3_status module_instance(e1_pass *ps, odin3_ast_id item, odin3_ast_id inst,
-                                    uint32_t target) {
-    const odin3_ast *ast = ps->e1->parsed;
-    if (odin3_ast_child(ast, inst, 0).v != 0) {
-        odin3_elab1_pend_form(ps->e1, inst); /* an instance array: Task 12 */
-        return log_decision(ps, inst, ODIN3_DECISION_SKIPPED);
-    }
-    odin3_status st = instance_overrides(ps, odin3_ast_name(ast, inst));
+/* The instance cap (point (aa)) for the elements of desc's INSTANCE (an array's folded range), at
+ * its INSTANTIATION or GATE_DECL. PARSE after a diagnostic. */
+static odin3_status count_elements(e1_pass *ps, const odin3_elab_inst *desc) {
+    odin3_elab1_array arr;
+    odin3_status st = odin3_elab1_fold_array(ps->e1, desc->instance, &arr);
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_elab_spec_req req = {target, ps->ovr.data, (uint32_t)ps->ovr.len,
+    return odin3_elab1_count_instances(ps->e1, desc->instantiation, arr.n) ? ODIN3_OK
+                                                                           : ODIN3_ERR_PARSE;
+}
+
+/* One INSTANCE (an array: all its elements) of a module or `(* blackbox *)` definition: its
+ * specialization (EL-9), logged with an edge. */
+static odin3_status module_instance(e1_pass *ps, odin3_ast_id item, odin3_ast_id inst,
+                                    uint32_t target) {
+    odin3_elab_inst desc = {item, inst, 0, {ODIN3_RES_MODULE, target, {0}}, E1_NONE};
+    odin3_status st = count_elements(ps, &desc);
+    st = st != ODIN3_OK ? st : instance_overrides(ps, odin3_ast_name(ps->e1->parsed, inst));
+    if (st != ODIN3_OK) {
+        return st == ODIN3_ERR_PARSE ? log_decision(ps, inst, ODIN3_DECISION_SKIPPED) : st;
+    }
+    odin3_elab_spec_req req = {target, ps->e1->inst_ovr.data, (uint32_t)ps->e1->inst_ovr.len,
                                odin3_elab1_spec_at(ps->e1, ps->spec)->depth + 1};
     ps->e1->creating = (odin3_elab1_creating){inst, item, ps->def};
     uint32_t child = 0;
@@ -1008,26 +1070,20 @@ static odin3_status module_instance(e1_pass *ps, odin3_ast_id item, odin3_ast_id
     return st != ODIN3_OK ? st : add_edge(ps, inst, child);
 }
 
-/* Every INSTANCE of item logged with value; a defparam or pending override that names one of
- * an instance written as given (a cell type, a black box) is Task 12's (pending). */
+/* Every INSTANCE of item logged with value. */
 static odin3_status log_all(e1_pass *ps, odin3_ast_id item, int32_t value) {
     odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, item);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANTIATION); st == ODIN3_OK && i < kids.n;
          i++) {
-        uint32_t name = odin3_ast_name(ps->e1->parsed, kids.ids[i]);
-        uint32_t at = value == ODIN3_DECISION_AS_GIVEN ? first_dp(ps, name) : 0;
-        for (; at != 0; at = ((const e1_dp *)odin3_vec_cat(&ps->dps, at - 1))->next) {
-            odin3_elab1_pend_at(ps->e1, ((const e1_dp *)odin3_vec_cat(&ps->dps, at - 1))->ovr.at,
-                                ODIN3_AST_DEFPARAM);
-        }
         st = log_decision(ps, kids.ids[i], value);
     }
     return st;
 }
 
 static odin3_status module_instances(e1_pass *ps, odin3_ast_id item, uint32_t target) {
-    odin3_status st = param_list(ps, item, target);
+    e1_ptarget tg = def_target(ps->e1, target);
+    odin3_status st = param_list(ps, item, &tg);
     if (st == ODIN3_ERR_PARSE) {
         return log_all(ps, item, ODIN3_DECISION_SKIPPED);
     }
@@ -1035,6 +1091,40 @@ static odin3_status module_instances(e1_pass *ps, odin3_ast_id item, uint32_t ta
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANTIATION);
          st == ODIN3_OK && i < kids.n && !ps->e1->stopped; i++) {
         st = module_instance(ps, item, kids.ids[i], target);
+    }
+    return st;
+}
+
+/* One INSTANCE of a cell type or an implicit black box (EL-11): its ports (implicit) and its
+ * parameter record, logged by the record. */
+static odin3_status given_instance(e1_pass *ps, odin3_ast_id item, odin3_ast_id inst,
+                                   const odin3_elab_res *res) {
+    odin3_elab1 *e1 = ps->e1;
+    odin3_elab_inst desc = {item, inst, 0, *res, E1_NONE};
+    odin3_status st = count_elements(ps, &desc);
+    st = st != ODIN3_OK ? st : instance_overrides(ps, odin3_ast_name(e1->parsed, inst));
+    if (st == ODIN3_OK && res->kind == ODIN3_RES_IMPLICIT_BLACKBOX) {
+        st = odin3_elab1_auto_blackbox(e1, &desc);
+    }
+    st = st != ODIN3_OK ? st : odin3_elab1_celltype_params(e1, &desc);
+    if (st == ODIN3_ERR_PARSE) {
+        return log_decision(ps, inst, ODIN3_DECISION_SKIPPED);
+    }
+    return st != ODIN3_OK
+               ? st
+               : log_decision(ps, inst, odin3_elab1_given_decision((uint32_t)e1->given.len - 1));
+}
+
+static odin3_status given_instances(e1_pass *ps, odin3_ast_id item, const odin3_elab_res *res) {
+    e1_ptarget tg = res_target(ps->e1, res, odin3_ast_name(ps->e1->parsed, item));
+    odin3_status st = param_list(ps, item, &tg);
+    if (st == ODIN3_ERR_PARSE) {
+        return log_all(ps, item, ODIN3_DECISION_SKIPPED);
+    }
+    odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, item);
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANTIATION);
+         st == ODIN3_OK && i < kids.n && !ps->e1->stopped; i++) {
+        st = given_instance(ps, item, kids.ids[i], res);
     }
     return st;
 }
@@ -1049,13 +1139,10 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
         if (odin3_elab1_reach_def(e1, res.def)) {
             return module_instances(ps, item, res.def);
         }
-        return log_all(ps, item,
-                       odin3_elab1_def(e1, res.def)->kind == ODIN3_DEF_BLACKBOX
-                           ? ODIN3_DECISION_AS_GIVEN
-                           : ODIN3_DECISION_SKIPPED);
+        return log_all(ps, item, ODIN3_DECISION_SKIPPED);
     case ODIN3_RES_CELLTYPE:
     case ODIN3_RES_IMPLICIT_BLACKBOX:
-        return log_all(ps, item, ODIN3_DECISION_AS_GIVEN);
+        return given_instances(ps, item, &res);
     case ODIN3_RES_UDP:
         odin3_elab1_reject_def(e1, res.def);
         return log_all(ps, item, ODIN3_DECISION_SKIPPED);
@@ -1065,6 +1152,18 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
                           odin3_elab1_str(e1, name));
         return log_all(ps, item, ODIN3_DECISION_SKIPPED);
     }
+}
+
+/* The instance cap over a GATE_DECL's instances (an array's elements each count). */
+static odin3_status gate_counts(e1_pass *ps, odin3_ast_id item) {
+    odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, item);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_GATE_DECL);
+         st != ODIN3_ERR_NO_MEMORY && i < kids.n && !ps->e1->stopped; i++) {
+        odin3_elab_inst desc = {item, kids.ids[i], 0, {ODIN3_RES_NONE, 0, {0}}, E1_NONE};
+        st = count_elements(ps, &desc);
+    }
+    return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
 }
 
 /* Every declaration evaluated (EL-23: ranges folded; EL-16: values), in declaration order. */
@@ -1085,8 +1184,8 @@ static odin3_status evaluate_all(odin3_elab1_env *env) {
     return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
 }
 
-/* The specialization's parameter values as the winning overrides of its environment. */
-static void preload(odin3_elab1_env *env, const odin3_elab1_spec *spec) {
+void odin3_elab1_env_preload(odin3_elab1_env *env, uint32_t spec_idx) {
+    const odin3_elab1_spec *spec = odin3_elab1_spec_at(env->e1, spec_idx);
     const odin3_elab_def *def = odin3_elab1_def(env->e1, spec->def);
     for (uint32_t k = 0; k < spec->n_values; k++) {
         odin3_ast_id decl =
@@ -1106,8 +1205,11 @@ static odin3_status expand_items(e1_pass *ps) {
     st = st != ODIN3_OK ? st : collect_overrides(ps);
     odin3_ast_span kids = odin3_ast_children(ps->e1->parsed, ps->env->module);
     for (uint32_t i = E1_ITEMS; st == ODIN3_OK && i < kids.n && !ps->e1->stopped; i++) {
-        if (odin3_ast_kind_of(ps->e1->parsed, kids.ids[i]) == ODIN3_AST_INSTANTIATION) {
+        odin3_ast_kind kind = odin3_ast_kind_of(ps->e1->parsed, kids.ids[i]);
+        if (kind == ODIN3_AST_INSTANTIATION) {
             st = instantiation(ps, kids.ids[i]);
+        } else if (kind == ODIN3_AST_GATE_DECL) {
+            st = gate_counts(ps, kids.ids[i]);
         }
     }
     return st;
@@ -1119,7 +1221,8 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     e1_pass ps = {.e1 = e1, .spec = spec, .def = odin3_elab1_spec_at(e1, spec)->def};
     odin3_vec_init(&ps.dps, sizeof(e1_dp));
     odin3_vec_init(&ps.list, sizeof(odin3_elab_override));
-    odin3_vec_init(&ps.ovr, sizeof(odin3_elab_override));
+    odin3_vec_clear(&e1->given); /* the parameter records pass W of this specialization reads */
+    odin3_vec_clear(&e1->gparams);
     ps.dp_by_inst = odin3_u64map_create(0);
     odin3_status st =
         ps.dp_by_inst != NULL ? odin3_elab1_env_create(e1, ps.def, &e1->env) : ODIN3_ERR_NO_MEMORY;
@@ -1127,7 +1230,7 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     size_t first_edge = e1->edges.len;
     if (st == ODIN3_OK) {
         ps.env = e1->env;
-        preload(ps.env, odin3_elab1_spec_at(e1, spec));
+        odin3_elab1_env_preload(ps.env, spec);
         st = expand_items(&ps);
     }
     odin3_elab1_spec *rec = odin3_vec_at(&e1->specs, spec);
@@ -1138,6 +1241,5 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec) {
     odin3_vec_free(&ps.dps);
     odin3_u64map_destroy(ps.dp_by_inst);
     odin3_vec_free(&ps.list);
-    odin3_vec_free(&ps.ovr);
     return st;
 }

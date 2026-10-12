@@ -3,9 +3,10 @@
  * diagnostics (the error cap, warn-once, infos, the pending kinds of plan point (l)), the
  * definition table and module lookup (EL-6), top selection (EL-7), and (Task 11) parameters with
  * their precedence and types (EL-8, EL-16), the specialization table and its FIFO queue (EL-9,
- * §3.4), pass E's environments and pass W's writer of the elaborated store (EL-4). Stage 1 never
- * touches the IR; it reads the design's cell types, modules and project record. Every traversal
- * uses an explicit stack (odin3_ast_cursor, a frame vec) or a worklist.
+ * §3.4), pass E's environments and pass W's writer of the elaborated store (EL-4), and (Task 12)
+ * instances: connections, instance and gate arrays, black boxes and cell-type parameters (EL-10,
+ * EL-11). Stage 1 never touches the IR; it reads the design's cell types, modules and project
+ * record. Every traversal uses an explicit stack (odin3_ast_cursor, a frame vec) or a worklist.
  */
 #ifndef ODIN3_FRONTENDS_VERILOG_ELAB1_H
 #define ODIN3_FRONTENDS_VERILOG_ELAB1_H
@@ -160,9 +161,9 @@ void odin3_elab1_unhandled(odin3_elab1 *e1, odin3_ast_id parsed_node);
 void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node);
 
 /*
- * Point (l)'s line for a form of a landed kind whose elaboration a later task lands (Task 11's
- * split: ordered connections and instance arrays, Task 12; a port declared in the body, Task 15;
- * a specparam, a real or time variable and a rejected net type, Task 16): the node's kind is
+ * Point (l)'s line for a form of a landed kind whose elaboration a later task lands (a port
+ * declared in the body, Task 15; a specparam, a real or time variable, a rejected net type, a
+ * hierarchical call and a switch-level or pull gate, Task 16): the node's kind is
  * reported as pending (once per kind per run, counted as an error) while the forms table
  * (odin3_elab_pending_form) lists it, and as unhandled (a 2D bug) once it does not.
  */
@@ -223,8 +224,9 @@ odin3_status odin3_elab1_select_top(odin3_elab1 *e1, uint32_t *def);
 /*
  * Definition def is reached (the top, or an instance resolved to it): it is marked for the
  * not-elaborated line, and a MODULE whose name an earlier read took reports its error once, at
- * its keyword (EL-6). True when it can be specialized (a MODULE whose name is free); false for a
- * taken name (what depends on it is skipped silently, EL-44) or a black box.
+ * its keyword (EL-6). True when it can be specialized (a MODULE whose name is free, or a
+ * `(* blackbox *)` definition, whose specializations carry its ports: Task 12); false for a taken
+ * name (what depends on it is skipped silently, EL-44).
  */
 bool odin3_elab1_reach_def(odin3_elab1 *e1, uint32_t def);
 
@@ -301,17 +303,18 @@ typedef struct odin3_elab_override {
 } odin3_elab_override;
 
 /*
- * One decision of pass E, replayed by pass W in order (§3.4): Task 11 logs one per INSTANCE of a
- * module item, its value the child specialization (>= 0), ODIN3_DECISION_AS_GIVEN for an instance
- * written as given (a cell type, a black box: EL-4) or ODIN3_DECISION_SKIPPED (a failed one).
- * Task 14 adds the generate decisions.
+ * One decision of pass E, replayed by pass W in order (§3.4): one per INSTANCE of a module item
+ * (an instance array included), its value the child specialization (>= 0; a module or a
+ * `(* blackbox *)` definition), ODIN3_DECISION_GIVEN_BASE − k for a cell-type or implicit
+ * black-box instance whose parameters are odin3_elab1.given record k (Task 12), or
+ * ODIN3_DECISION_SKIPPED (a failed one). Task 14 adds the generate decisions.
  */
 typedef struct odin3_elab_decision {
     odin3_ast_id node;
     int32_t value;
 } odin3_elab_decision;
 
-enum { ODIN3_DECISION_SKIPPED = -1, ODIN3_DECISION_AS_GIVEN = -2 };
+enum { ODIN3_DECISION_SKIPPED = -1, ODIN3_DECISION_GIVEN_BASE = -3 };
 
 /* A specialization asked for: the definition, its overrides (any order), its depth below the
  * top. */
@@ -366,7 +369,9 @@ odin3_status odin3_elab1_expand(odin3_elab1 *e1, uint32_t spec);
  * through the 2A builders (EL-4: the header parameters as PARAM_DECL[localparam]{IN_HEADER} with
  * their final values, spelled per point (bb); ANSI PORT_DECLs, one declarator each; NET_DECL and
  * VAR_DECL with NUMBER bounds; CONT_ASSIGN; INSTANTIATIONs named after their specializations,
- * with one named CONNECTION per parameter and per port), left on the store's pending stack.
+ * with one named CONNECTION per parameter and per port; Task 12: ordered connections resolved,
+ * instance and gate arrays expanded with sliced connections, cell-type and black-box instances
+ * with their parameters, GATE_DECL), left on the store's pending stack.
  * Pending kinds are reported (odin3_elab_pend_report) and nothing is built after any error. A
  * log not consumed exactly is "stage 1: decision log of 'm' not replayed (N of M entries)" and
  * ODIN3_ERR_CHECK (a 2D bug, §16 item 4). The elaborated-node cap applies at every make
@@ -384,6 +389,214 @@ odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec);
  */
 odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def);
 
+/* --- instances, connections, arrays, black boxes, cell types (Task 12, elab1_inst.c) ------- */
+
+/*
+ * One instance being elaborated: its INSTANTIATION (or GATE_DECL), its INSTANCE, the scope it is
+ * in (0, the module scope; Task 14 adds the generate scopes), what its module name resolved to
+ * (EL-6; kind ODIN3_RES_NONE for a gate) and spec: for a module or a `(* blackbox *)` definition
+ * the child specialization, for a cell type or an implicit black box its parameter record
+ * (odin3_elab1.given, once made), else UINT32_MAX.
+ */
+typedef struct odin3_elab_inst {
+    odin3_ast_id instantiation;
+    odin3_ast_id instance;
+    uint32_t scope;
+    odin3_elab_res target;
+    uint32_t spec;
+} odin3_elab_inst;
+
+/*
+ * One connection as odin3_elab1_connect resolved it (odin3_elab1.conns): for a module, one per
+ * named port in port order (conn 0: unconnected); for a cell type, a black box or a gate, one
+ * per connection as written. name is the port's (0 for an ordered connection to a type port the
+ * strtab has no ID for, a gate terminal, an implicit black box's ordered value); dir an
+ * odin3_dir; pos the port's position (UINT32_MAX: none). odin3_elab1_inst_array fills the
+ * array plan: port_width P (0: unknown, the expression goes whole), width W (the expression's
+ * self-determined width) and sliced (W = N × P: each element gets its P bits).
+ */
+typedef struct odin3_elab1_conn {
+    uint32_t name;
+    uint8_t dir;
+    uint32_t pos;
+    odin3_ast_id conn;
+    odin3_ast_id expr;
+    uint32_t port_width;
+    uint32_t width;
+    bool sliced;
+} odin3_elab1_conn;
+
+/* An instance array's range as folded (odin3_elab1.array): elements left … right, n of them. */
+typedef struct odin3_elab1_array {
+    int32_t left;
+    int32_t right;
+    uint32_t n;
+} odin3_elab1_array;
+
+/*
+ * One parameter of a cell-type or implicit black-box instance (EL-4: "the overrides as given,
+ * values resolved"): its name (0: an ordered value of an implicit black box), the override that
+ * won (EL-8; its value as evaluated, sized, with its literal's base, at, and from: the #()
+ * CONNECTION or DEFPARAM, 0 for a project line), and, for a cell type, the type's parameter kind
+ * (odin3_value_kind) with the converted integer of an INT; as_given for an implicit black box's
+ * values, written as evaluated.
+ */
+typedef struct odin3_elab1_gparam {
+    uint32_t name;
+    bool as_given;
+    uint8_t kind;
+    int64_t num;
+    odin3_elab_override ovr;
+} odin3_elab1_gparam;
+
+/* The parameters of one such instance: odin3_elab1.gparams[first .. + count), and its target. */
+typedef struct odin3_elab1_given {
+    odin3_elab_res target;
+    uint32_t first;
+    uint32_t count;
+} odin3_elab1_given;
+
+/*
+ * A port of a specialization as stage 1 evaluates it (odin3_elab1_spec_ports, black boxes): its
+ * name (0 for an empty position), direction (odin3_dir), width with its declared range and sign;
+ * width 0 when the declaration could not be evaluated (reported where it is elaborated).
+ */
+typedef struct odin3_elab1_port {
+    uint32_t name;
+    uint8_t dir;
+    uint32_t width;
+    int64_t msb;
+    int64_t lsb;
+    bool is_signed;
+    bool scalar;
+} odin3_elab1_port;
+
+/*
+ * A black box stage 1 met (EL-11): a `(* blackbox *)` specialization (spec, name the
+ * specialization's) or an implicit black box (--auto-blackbox; spec UINT32_MAX), with its ports in
+ * order through odin3_elab1.bbports (first_port + 1 … chained by next; 0 = none).
+ */
+typedef struct odin3_elab1_bbox {
+    uint32_t name;
+    uint32_t spec;
+    bool implicit;
+    uint32_t first_port;
+    uint32_t last_port;
+    uint32_t n_ports;
+} odin3_elab1_bbox;
+
+/* One port of a black box: the port as evaluated (an implicit one: inout, the width of its first
+ * connection with an expression, 0 until one), where it was first seen, the next port + 1. */
+typedef struct odin3_elab1_bbport {
+    odin3_elab1_port port;
+    odin3_ast_id at;
+    uint32_t next;
+} odin3_elab1_bbport;
+
+/*
+ * EL-10: inst's connections resolved into odin3_elab1.conns (see odin3_elab1_conn). For a
+ * module or a `(* blackbox *)` definition, ordered connections map to positions (a connection with
+ * an expression to an empty header position warns "connection N of instance 'u' goes to an unnamed
+ * port position and is ignored", once) and named ones to ports by name; a cell type's ports are
+ * its type's. Errors (§9.1): "instance 'u' mixes ordered and named connections" (at the INSTANCE),
+ * "instance 'u' of 'm' has N connections but 'm' has M ports" (at the INSTANCE), "module 'm' has
+ * no port 'p'" ("cell type 't' has no port 'p'"), "port 'p' of instance 'u' is connected twice",
+ * and for an output or inout port (I3) "output port 'p' of instance 'u' must be connected to a
+ * net" / "… is connected to a constant" (`inout port` for an inout), each at the CONNECTION. A
+ * gate's terminals and an implicit black box's connections are taken as written. ODIN3_OK;
+ * ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_connect(odin3_elab1 *e1, const odin3_elab_inst *inst);
+
+/*
+ * EL-10 instance arrays (I6, Q5): inst's range folded into odin3_elab1.array (elements left …
+ * right, Yosys's names u[left] … u[right]) and each connection of odin3_elab1.conns (resolved
+ * first) planned: of width W against a port of P bits (gates: P = 1) and N elements, W = P goes
+ * whole to every element, W = N × P is sliced (the element at index i gets bits
+ * [|i − right| × P +: P], the right element the low bits, as Yosys and IEEE), anything else is
+ * "connection of 'p' to instance array 'u' is W bits; expected P or N×P" ("connection K of
+ * instance array 'g'" for a gate terminal) at the CONNECTION. Widths are self-determined, typed
+ * over pass E's environment. ODIN3_OK; ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_inst_array(odin3_elab1 *e1, const odin3_elab_inst *inst);
+
+/*
+ * EL-8 cell-type targets and EL-11: the parameters of a cell-type or implicit black-box instance
+ * from odin3_elab1.inst_ovr (its #() values, then the defparams and project lines that reach it),
+ * one per name by EL-8's precedence (a lost defparam warns as for a module), appended to
+ * odin3_elab1.given as one record. A cell type's ordered values map to its parameters in
+ * declaration order; each name must be one of its parameters ("cell type 't' has no parameter
+ * 'P'"; a project line: "param 'top.u.P' does not name a parameter"; more ordered values than
+ * parameters: "too many parameter values for cell type 't' (N given, M parameters)"), and each
+ * value is converted to the parameter's kind (INT: a signed 64-bit integer, else "value of
+ * parameter 'P' of cell type 't' is not an integer"; BITS: the bits; STRING: the value). Stage 2
+ * infers the parameters not given (odin3_celltype_infer_params). An implicit black box keeps the
+ * values as given (ordered ones name 0). A path deeper than one name is the defparam (or project)
+ * target error: a cell type has no hierarchy. ODIN3_OK; ODIN3_ERR_PARSE after a diagnostic;
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst *inst);
+
+/*
+ * EL-11 for a `(* blackbox *)` definition's specialization spec (agent default: the brief names a
+ * definition; the ports are per specialization): the info line "body of black box 'm' is
+ * ignored" once per definition when its body holds anything but port and parameter
+ * declarations, and the specialization's ports, evaluated with its parameter values (errors
+ * reported), recorded in the black-box table. ODIN3_OK; ODIN3_ERR_PARSE after a diagnostic;
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec);
+
+/*
+ * EL-11 --auto-blackbox: inst of an implicit black box adds its named connections' ports to the
+ * black box (the union of the names used, all inout, in first-use order); the first connection
+ * with an expression fixes a port's width, and a later one of another width is "implicit black
+ * box 'm': port 'a' is P bits at its first instance; this connection is W bits" (an array
+ * element's slice counts). An ordered connection is "implicit black box 'm' needs named
+ * connections" (at the INSTANCE). ODIN3_OK; ODIN3_ERR_PARSE; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_auto_blackbox(odin3_elab1 *e1, const odin3_elab_inst *inst);
+
+/* The black-box table: its count, entry idx, and port idx (NULL past the count). */
+uint32_t odin3_elab1_bbox_count(const odin3_elab1 *e1);
+const odin3_elab1_bbox *odin3_elab1_bbox_at(const odin3_elab1 *e1, uint32_t idx);
+const odin3_elab1_bbport *odin3_elab1_bbport_at(const odin3_elab1 *e1, uint32_t idx);
+
+/*
+ * The ports of specialization spec (one per position of its definition), evaluated quietly once
+ * with its parameter values and kept in the run arena; NULL with *n 0 out of memory (latched).
+ */
+const odin3_elab1_port *odin3_elab1_spec_ports(odin3_elab1 *e1, uint32_t spec, uint32_t *n);
+
+/*
+ * The instance cap (point (aa)): n more instance or gate nodes, at holder (an INSTANTIATION or
+ * GATE_DECL): "elaboration makes more than N instances", fatal, past the cap. True when they fit.
+ */
+bool odin3_elab1_count_instances(odin3_elab1 *e1, odin3_ast_id holder, uint64_t n);
+
+/* An INSTANCE's array range folded (range bounds, 32-bit), n = |left − right| + 1. ODIN3_OK;
+ * ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_fold_array(odin3_elab1 *e1, odin3_ast_id instance, odin3_elab1_array *out);
+
+/* A connection expression's self-determined width, typed over pass E's environment (an
+ * undeclared name is an implicit 1-bit net, EL-25). ODIN3_OK; ODIN3_ERR_PARSE after a
+ * diagnostic; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_expr_width(odin3_elab1 *e1, odin3_ast_id expr, uint32_t *width);
+
+/* Whether expr is a constant in pass E's environment, quietly (odin3_ceval_try; an expression
+ * reading an undeclared name or a scope reference is not), with its value in *val. ODIN3_OK;
+ * the evaluator's errors (caps) as PARSE after their diagnostic; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_try_constant(odin3_elab1 *e1, odin3_ast_id expr, odin3_cval *val,
+                                      bool *is_const);
+
+/* The self-determined width of node, a subexpression of the last expression typed (0: none). */
+uint32_t odin3_elab1_typed_width(const odin3_elab1 *e1, odin3_ast_id node);
+
+/* The decision value of a cell-type or implicit black-box instance with given record idx, and
+ * back (ODIN3_DECISION_GIVEN_BASE − idx). */
+int32_t odin3_elab1_given_decision(uint32_t idx);
+uint32_t odin3_elab1_given_of(int32_t decision);
+
 /* --- internals (elab1*.c only) ------------------------------------------------------------ */
 
 /* Why a MODULE's name is taken (EL-6), recorded by collect_defs and reported when reached. */
@@ -399,11 +612,13 @@ typedef enum odin3_elab1_taken {
 typedef struct odin3_elab1_defx {
     uint32_t first_inst; /* odin3_elab1.insts[first_inst .. + n_inst) */
     uint32_t n_inst;
-    uint32_t next;      /* the next definition of the same name + 1, 0 = none */
-    uint8_t taken;      /* odin3_elab1_taken */
-    bool reached;       /* reached from the top (odin3_elab1_reach_def) */
-    bool ports_indexed; /* its port names are in odin3_elab1.port_pos */
-    bool reported;      /* its Q7 (a library unit's UDP) or taken-name error is logged */
+    uint32_t next;            /* the next definition of the same name + 1, 0 = none */
+    uint8_t taken;            /* odin3_elab1_taken */
+    bool reached;             /* reached from the top (odin3_elab1_reach_def) */
+    bool ports_indexed;       /* its port names are in odin3_elab1.port_pos, dirs in port_dirs */
+    bool reported;            /* its Q7 (a library unit's UDP) or taken-name error is logged */
+    bool body_noted;          /* a black box's "body … is ignored" info is logged (Task 12) */
+    const uint8_t *port_dirs; /* odin3_dir per port position (run arena; Task 12) */
 } odin3_elab1_defx;
 
 /* One specialization (EL-9): everything lives in the run arena. */
@@ -424,6 +639,9 @@ typedef struct odin3_elab1_spec {
     uint32_t n_log;
     uint32_t first_edge; /* odin3_elab1.edges[first_edge .. + n_edges) */
     uint32_t n_edges;
+    const odin3_elab1_port *ports; /* odin3_elab1_spec_ports, once computed (Task 12) */
+    uint32_t n_ports;
+    bool ports_done;
 } odin3_elab1_spec;
 
 /* One edge of the specialization graph: an instance of spec `from` specialized as `to`. */
@@ -493,12 +711,16 @@ typedef struct odin3_elab1_env {
     odin3_vec ranges;     /* odin3_elab1_range */
     odin3_u64map *ranged; /* RANGE node → index into ranges */
     bool quiet;           /* diagnostics dropped (the default-value comparison of EL-9) */
+    odin3_ctype *types;   /* the connection typer over this environment (Task 12), lazily made */
 } odin3_elab1_env;
 
 /* A new environment of definition def with every declaration of its module scope recorded (no
  * value evaluated yet). ODIN3_ERR_NO_MEMORY (*out NULL). */
 odin3_status odin3_elab1_env_create(odin3_elab1 *e1, uint32_t def, odin3_elab1_env **out);
 void odin3_elab1_env_destroy(odin3_elab1_env *env);
+
+/* The specialization spec's parameter values as the winning overrides of env (pass E's start). */
+void odin3_elab1_env_preload(odin3_elab1_env *env, uint32_t spec);
 
 /* The slot index of name in scope, UINT32_MAX when none. */
 uint32_t odin3_elab1_env_find(const odin3_elab1_env *env, uint32_t scope, uint32_t name);
@@ -556,6 +778,16 @@ uint8_t odin3_elab1_key_flags(const odin3_cval *val);
 /* Equal for the key: width, key flags and both planes. */
 bool odin3_elab1_same_value(const odin3_cval *lhs, const odin3_cval *rhs);
 
+/* EL-8's precedence: true when lhs takes precedence over rhs (by source, then stream order). */
+bool odin3_elab1_override_beats(const odin3_elab_override *lhs, const odin3_elab_override *rhs);
+
+/* A defparam that loses to a named override warns, once, at its target (EL-8). */
+void odin3_elab1_override_lost(odin3_elab1 *e1, const odin3_elab_override *loser,
+                               const odin3_elab_override *winner);
+
+/* The unknown-target error of a pushed-down override (a defparam's or a project line's). */
+void odin3_elab1_bad_target(odin3_elab1 *e1, const odin3_elab_override *ovr);
+
 /* Point (l)'s line for kind at loc (a project line: no node), once per kind, counted. */
 void odin3_elab1_pend_at(odin3_elab1 *e1, odin3_loc loc, uint32_t kind);
 
@@ -605,6 +837,18 @@ struct odin3_elab1 {
     odin3_u64map *port_pos;   /* def << 32 | port name → position + 1 (built per def) */
     odin3_elab1_env *env;     /* pass E's environment of the specialization being written */
     odin3_elab1_creating creating;
+    /* Task 12 */
+    uint64_t n_instances;     /* instance and gate nodes made so far (point (aa)'s cap) */
+    odin3_vec inst_ovr;       /* odin3_elab_override: the instance's #() values, defparams, … */
+    odin3_vec conns;          /* odin3_elab1_conn: odin3_elab1_connect's result */
+    odin3_elab1_array array;  /* odin3_elab1_inst_array's range */
+    odin3_u64map *conn_seen;  /* the names connected so far of the instance being resolved */
+    odin3_vec given;          /* odin3_elab1_given, per specialization (pass E to pass W) */
+    odin3_vec gparams;        /* odin3_elab1_gparam */
+    odin3_vec bboxes;         /* odin3_elab1_bbox */
+    odin3_vec bbports;        /* odin3_elab1_bbport */
+    odin3_u64map *bbox_names; /* implicit black box name → index + 1; spec | 1 << 63 → idx + 1 */
+    odin3_u64map *bbport_ix;  /* bbox << 32 | port name → bbports index + 1 */
 };
 
 /* A diagnostic logged once (odin3_elab1_report, odin3_elab1_error). */

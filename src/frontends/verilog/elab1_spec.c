@@ -135,16 +135,17 @@ static uint32_t reduce_pending(const odin3_elab1 *e1, odin3_elab_override *pendi
 /* --- names (EL-9, point (q)) ---------------------------------------------------------------- */
 
 /* True when text names a definition of another name, a specialization made so far or a
- * registered cell type. */
-static bool name_taken(const odin3_elab1 *e1, uint32_t def_name, odin3_bytes text) {
+ * registered cell type (but a `(* blackbox *)` definition's own name: IR-7b reuses that type). */
+static bool name_taken(const odin3_elab1 *e1, const odin3_elab_def *def, odin3_bytes text) {
     uint32_t id = 0;
     if (!odin3_strtab_find(odin3_design_strtab(e1->design), text, &id)) {
         return false;
     }
     odin3_celltype_id type;
+    bool reused = def->kind == ODIN3_DEF_BLACKBOX && id == def->name;
     return odin3_u64map_get(e1->spec_names, id, NULL) ||
-           odin3_celltype_find(e1->design, id, &type) ||
-           (id != def_name && odin3_u64map_get(e1->by_name, id, NULL));
+           (!reused && odin3_celltype_find(e1->design, id, &type)) ||
+           (id != def->name && odin3_u64map_get(e1->by_name, id, NULL));
 }
 
 /* An override path as names print it: its components joined by '.'. */
@@ -199,8 +200,7 @@ static odin3_status spec_name(odin3_elab1 *e1, const odin3_elab1_params_out *res
     odin3_strbuf_init(&cand);
     st = st != ODIN3_OK ? st : odin3_strbuf_append(&cand, (odin3_bytes){base.data, base.len});
     for (uint32_t suffix = E1_FIRST_SUFFIX;
-         st == ODIN3_OK && name_taken(e1, def->name, (odin3_bytes){cand.data, cand.len});
-         suffix++) {
+         st == ODIN3_OK && name_taken(e1, def, (odin3_bytes){cand.data, cand.len}); suffix++) {
         odin3_strbuf_clear(&cand);
         st = odin3_strbuf_appendf(&cand, "%s$%" PRIu32, base.data, suffix);
     }
@@ -556,6 +556,11 @@ static odin3_status run_specs(odin3_elab1 *e1) {
         uint32_t def = odin3_elab1_spec_at(e1, i)->def;
         if (odin3_elab1_pending(e1, odin3_elab1_def(e1, def)->node)) {
             continue; /* a MODULE forced pending (point (l)'s hook) */
+        }
+        if (odin3_elab1_def(e1, def)->kind == ODIN3_DEF_BLACKBOX) {
+            odin3_status bb = odin3_elab1_blackbox(e1, i); /* no MODULE (EL-4, EL-11) */
+            st = bb == ODIN3_ERR_PARSE || bb == ODIN3_OK ? e1->fatal : bb;
+            continue;
         }
         st = odin3_elab1_expand(e1, i);
         st = st != ODIN3_OK ? st : odin3_elab1_write(e1, i);

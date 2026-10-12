@@ -833,17 +833,19 @@ static void test_later_forms_pending(void) {
     }
 }
 
-/* Ordered connections and instance arrays are Task 12's: point (l)'s line for their kind. */
-static void test_task12_forms_pending(void) {
-    run_one("module m (input a); endmodule\nmodule top; wire p;\n  m u (p);\nendmodule\n");
-    expect_only_error("t.v:3:8: error: elaboration is not available yet (2D): 'CONNECTION'");
+/* Ordered connections and instance arrays landed with Task 12 (they were pending here). */
+static void test_task12_forms_landed(void) {
+    run_clean("module m (input a); endmodule\nmodule top; wire p;\n  m u (p);\nendmodule\n");
+    odin3_ast_id inst = find_in((odin3_ast_id){0}, ODIN3_AST_INSTANCE, "u");
+    TEST_ASSERT_EQUAL_STRING("a", name_of(odin3_ast_child(rs.elab, inst, 1)));
     et_free(&rs);
-    run_one("module m (input a); endmodule\nmodule top;\n  m u [1:0] ();\nendmodule\n");
-    expect_only_error("t.v:3:5: error: elaboration is not available yet (2D): 'INSTANCE'");
+    run_clean("module m (input a); endmodule\nmodule top;\n  m u [1:0] ();\nendmodule\n");
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, find_in((odin3_ast_id){0}, ODIN3_AST_INSTANCE, "u[1]").v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, find_in((odin3_ast_id){0}, ODIN3_AST_INSTANCE, "u[0]").v);
 }
 
-/* A cell-type instance is written as given (values resolved; Task 12 checks them); a defparam
- * on it is Task 12's (pending). */
+/* A cell-type instance keeps its parameters as given, values resolved (EL-4); a defparam on it
+ * adds one (Task 12, EL-8's cell-type targets). */
 static void test_cell_type_as_given(void) {
     et_src src = {"t.v", "module top; wire c;\n"
                          "  single_port_ram #(.ADDR_WIDTH(4'd10)) ram (.clk(c));\nendmodule\n"};
@@ -859,7 +861,11 @@ static void test_cell_type_as_given(void) {
     src.text = "module top; wire c;\n  single_port_ram ram (.clk(c));\n"
                "defparam ram.DATA_WIDTH = 8;\nendmodule\n";
     et_stage1(&req, &rs);
-    expect_only_error("t.v:3:10: error: elaboration is not available yet (2D): 'DEFPARAM'");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    inst = find_in((odin3_ast_id){0}, ODIN3_AST_INSTANTIATION, "single_port_ram");
+    conn = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, inst, 0), 0);
+    TEST_ASSERT_EQUAL_STRING("DATA_WIDTH", name_of(conn));
+    TEST_ASSERT_EQUAL_INT64(8, number_int(odin3_ast_child(rs.elab, conn, 0)));
 }
 
 static void test_self_recursion(void) {
@@ -991,11 +997,11 @@ static void test_reported_once(void) {
 /* m4: the forms of landed kinds that later tasks land have a table of their own; a form not in it
  * is a 2D bug. */
 static void test_pending_forms_table(void) {
-    TEST_ASSERT_EQUAL_UINT32(8, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1));
+    TEST_ASSERT_EQUAL_UINT32(6, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1)); /* Task 12 */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE2));
-    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_CONNECTION));
-    TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_MODULE));
-    TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_CONNECTION));
+    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_PORT_DECL));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_CONNECTION));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_PORT_DECL));
     run_clean(M_W "module top; m u ();\nendmodule\n");
     odin3_elab1 *e1 = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_create(&rs.ctx, rs.parsed, &rs.opts, &e1));
@@ -1134,7 +1140,7 @@ int main(void) {
     RUN_TEST(test_empty_string);
     RUN_TEST(test_project_top_parameters);
     RUN_TEST(test_connection_errors);
-    RUN_TEST(test_task12_forms_pending);
+    RUN_TEST(test_task12_forms_landed);
     RUN_TEST(test_later_forms_pending);
     RUN_TEST(test_cell_type_as_given);
     RUN_TEST(test_self_recursion);

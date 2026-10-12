@@ -6,14 +6,17 @@
  * body's parameters and localparams, and each INSTANTIATION named after its specialization with
  * one named CONNECTION per parameter and per port; expressions as written, but with the select
  * bounds and widths and the replication counts folded to NUMBERs (the elaborated form's resolved
- * constants). A kind not landed yet is reported (point (l)); after any error nothing is built,
- * though the walk goes on to report.
+ * constants). Task 12 adds ordered connections (resolved by elab1_inst.c), instance and gate
+ * arrays expanded to their elements with sliced connections, cell-type and black-box instances
+ * with their parameter records, and GATE_DECL. A kind not landed yet is reported (point (l));
+ * after any error nothing is built, though the walk goes on to report.
  */
 #include "frontends/verilog/elab1.h"
 
 #include "ast/ast.h"
 #include "ast/kinds.h"
 #include "ast/srcman.h"
+#include "frontends/elab/ceval.h"
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -39,7 +42,7 @@ enum {
     E1_INT_BITS = 32,
     E1_NET_RANGE_SLOT = 1,
     E1_NET_DELAY_SLOT = 2,
-    E1_KEY_SHIFT = 32
+    E1_INT64_BITS = 64
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -57,7 +60,6 @@ typedef struct e1w {
     uint32_t used;
     bool replay_failed;
     bool dropped;
-    odin3_u64map *conns; /* INSTANCE << 32 | port name → its named CONNECTION */
 } e1w;
 
 static bool live(const e1w *wr) {
@@ -629,8 +631,8 @@ static const char *given_what(const e1w *wr, odin3_ast_id entry) {
     return got > 0 && (size_t)got < len ? what : "parameter value";
 }
 
-/* The params LIST of an instance written as given (a cell type, a black box: EL-4): the
- * overrides as given, their values resolved (Task 12 checks them against the type). */
+/* The params LIST of a `(* blackbox *)` instance (EL-4): the overrides as given, their values
+ * resolved. */
 static odin3_ast_id w_given_params(e1w *wr, odin3_ast_id item) {
     odin3_ast_id list = odin3_ast_child(wr->ast, item, 0);
     if (list.v == 0) {
@@ -658,134 +660,335 @@ static odin3_ast_id w_given_params(e1w *wr, odin3_ast_id item) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
-/* The port names of definition def in odin3_elab1.port_pos, once (review m3: a lookup by name
- * is then O(1), not a scan of the ports). */
-static bool index_ports(e1w *wr, uint32_t def) {
-    odin3_elab1_defx *ext = odin3_vec_at(&wr->e1->defx, def);
-    const odin3_elab_def *rec = odin3_elab1_def(wr->e1, def);
-    odin3_status st = ODIN3_OK;
-    for (uint32_t k = 0; !ext->ports_indexed && st == ODIN3_OK && k < rec->n_positions; k++) {
-        odin3_ast_id port =
-            *(const odin3_ast_id *)odin3_vec_cat(&wr->e1->ports, rec->first_port + k);
-        uint64_t key = (uint64_t)def << E1_KEY_SHIFT | odin3_ast_name(wr->ast, port);
-        bool named = odin3_ast_name(wr->ast, port) != 0;
-        st = named && !odin3_u64map_get(wr->e1->port_pos, key, NULL)
-                 ? odin3_u64map_put(wr->e1->port_pos, (odin3_kv){key, (uint64_t)k + 1})
-                 : ODIN3_OK;
+/* A cell type's INT parameter (EL-8): the 32-bit integer form when it fits, else 64 signed bits. */
+static odin3_ast_id w_int_param(e1w *wr, int64_t num, odin3_ast_id from) {
+    if (num >= INT32_MIN && num <= INT32_MAX) {
+        return w_int(wr, num, from);
     }
+    odin3_cval_int wide = {num, E1_INT64_BITS, true};
+    odin3_cval val = {0};
+    odin3_status st = odin3_cval_from_i64(wr->env->arena, &wide, &val);
     if (st != ODIN3_OK) {
         fail(wr, st);
-        return false;
+        return (odin3_ast_id){0};
     }
-    ext->ports_indexed = true;
-    return true;
+    return w_value(wr, &val, ODIN3_AST_NUMBER_BIN, from);
 }
 
-/* Whether definition def has a port named name. */
-static bool has_port(const e1w *wr, uint32_t def, uint32_t name) {
-    return odin3_u64map_get(wr->e1->port_pos, (uint64_t)def << E1_KEY_SHIFT | name, NULL);
-}
-
-/* One named connection of inst, checked (EL-10, §9.1) and recorded by name. False after a
- * diagnostic or out of memory. */
-static bool check_connection(e1w *wr, odin3_ast_id inst, uint32_t def, odin3_ast_id conn) {
-    uint32_t name = odin3_ast_name(wr->ast, conn);
-    odin3_loc at = odin3_ast_loc(wr->ast, conn);
-    if (name == 0) {
-        odin3_elab1_pend_form(wr->e1, conn); /* an ordered connection: Task 12 */
-        return false;
-    }
-    if (!has_port(wr, def, name)) {
-        odin3_elab1_error(wr->e1, at, "module '%s' has no port '%s'",
-                          odin3_elab1_str(wr->e1, odin3_elab1_def(wr->e1, def)->name),
-                          odin3_elab1_str(wr->e1, name));
-        return false;
-    }
-    uint64_t key = (uint64_t)inst.v << E1_KEY_SHIFT | name;
-    if (odin3_u64map_get(wr->conns, key, NULL)) {
-        odin3_elab1_error(wr->e1, at, "port '%s' of instance '%s' is connected twice",
-                          odin3_elab1_str(wr->e1, name), odin3_ast_name_str(wr->ast, inst));
-        return false;
-    }
-    odin3_status st = odin3_u64map_put(wr->conns, (odin3_kv){key, conn.v});
-    if (st != ODIN3_OK) {
-        fail(wr, st);
-    }
-    return st == ODIN3_OK;
-}
-
-/* The named connections of inst checked against def's ports; an ordered one is Task 12's
- * (pending). False after a diagnostic. */
-static bool check_connections(e1w *wr, odin3_ast_id inst, uint32_t def) {
-    if (!index_ports(wr, def)) {
-        return false;
-    }
-    odin3_ast_span conns = odin3_ast_children(wr->ast, inst);
-    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANCE); i < conns.n; i++) {
-        if (!check_connection(wr, inst, def, conns.ids[i])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-/* The connection of inst named name (0 when none). */
-static odin3_ast_id named_connection(const e1w *wr, odin3_ast_id inst, uint32_t name) {
-    uint64_t conn = 0;
-    bool found = odin3_u64map_get(wr->conns, (uint64_t)inst.v << E1_KEY_SHIFT | name, &conn);
-    return (odin3_ast_id){found ? (uint32_t)conn : 0};
-}
-
-/* A module INSTANCE: one named CONNECTION per port in port order (EL-4), unconnected ones
- * without an expression. */
-static odin3_ast_id w_module_instance(e1w *wr, odin3_ast_id inst, uint32_t child) {
-    uint32_t def_idx = odin3_elab1_spec_at(wr->e1, child)->def;
-    const odin3_elab_def *def = odin3_elab1_def(wr->e1, def_idx);
-    if (!check_connections(wr, inst, def_idx)) {
-        halt(wr);
+/* The params LIST of a cell-type or implicit black-box instance from its record (EL-4, EL-8):
+ * absent when nothing was given. */
+static odin3_ast_id w_record_params(e1w *wr, odin3_ast_id item, uint32_t record) {
+    const odin3_elab1_given *rec = odin3_vec_cat(&wr->e1->given, record);
+    if (rec->count == 0 && odin3_ast_child(wr->ast, item, 0).v == 0) {
         return (odin3_ast_id){0};
     }
     uint32_t mark = w_mark(wr);
-    w_push(wr, (odin3_ast_id){0});
-    for (uint32_t k = 0; k < def->n_positions; k++) {
-        odin3_ast_id port =
-            *(const odin3_ast_id *)odin3_vec_cat(&wr->e1->ports, def->first_port + k);
-        uint32_t name = odin3_ast_name(wr->ast, port);
-        if (name == 0) {
-            continue; /* an unnamed position (non-ANSI): Tasks 12 and 15 */
-        }
-        odin3_ast_id conn = named_connection(wr, inst, name);
-        e1w_conn out = {name, {0}, conn.v != 0 ? conn : inst};
-        out.value = conn.v != 0 ? w_expr(wr, odin3_ast_child(wr->ast, conn, 0)) : out.value;
-        w_push(wr, w_connection(wr, &out));
-    }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_INSTANCE, inst);
-    spec.name = odin3_ast_name(wr->ast, inst);
-    return w_make_marked(wr, &spec, mark, inst);
-}
-
-/* An INSTANCE written as given: its connections as written (an array is Task 12's). */
-static odin3_ast_id w_given_instance(e1w *wr, odin3_ast_id inst) {
-    if (odin3_ast_child(wr->ast, inst, 0).v != 0) {
-        odin3_elab1_pend_form(wr->e1, inst);
-        halt(wr);
-        return (odin3_ast_id){0};
-    }
-    uint32_t mark = w_mark(wr);
-    w_push(wr, (odin3_ast_id){0});
-    odin3_ast_span conns = odin3_ast_children(wr->ast, inst);
-    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_INSTANCE); i < conns.n; i++) {
-        e1w_conn conn = {odin3_ast_name(wr->ast, conns.ids[i]),
-                         w_expr(wr, odin3_ast_child(wr->ast, conns.ids[i], 0)), conns.ids[i]};
+    for (uint32_t i = 0; i < rec->count; i++) {
+        odin3_elab1_gparam gp =
+            *(const odin3_elab1_gparam *)odin3_vec_cat(&wr->e1->gparams, rec->first + i);
+        odin3_ast_id from = gp.ovr.from.v != 0 ? gp.ovr.from : item;
+        odin3_ast_id value = !gp.as_given && gp.kind == ODIN3_VAL_INT
+                                 ? w_int_param(wr, gp.num, from)
+                                 : w_value(wr, &gp.ovr.value, gp.ovr.base, from);
+        e1w_conn conn = {gp.name, value, from};
         w_push(wr, w_connection(wr, &conn));
     }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_INSTANCE, inst);
-    spec.name = odin3_ast_name(wr->ast, inst);
-    return w_make_marked(wr, &spec, mark, inst);
+    odin3_ast_id list = odin3_ast_child(wr->ast, item, 0);
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_LIST, list.v != 0 ? list : item);
+    return w_make_marked(wr, &spec, mark, list.v != 0 ? list : item);
 }
 
-/* The INSTANTIATIONs written for item so far: consecutive instances of one specialization share
- * one (EL-4: its name is the specialization's). */
+/* --- array slices (EL-10: element i gets bits [|i − right| × P +: P]) --------------------- */
+
+/* A SELECT of obj: the bit idx_hi when bit, else the part [idx_hi:idx_lo], bounds NUMBERs. */
+typedef struct e1w_sel {
+    odin3_ast_id obj; /* written already */
+    int64_t hi;
+    int64_t lo;
+    bool bit;
+} e1w_sel;
+
+static odin3_ast_id w_select(e1w *wr, const e1w_sel *sel, odin3_ast_id from) {
+    uint32_t mark = w_mark(wr);
+    w_push(wr, sel->obj);
+    w_push(wr, w_int(wr, sel->hi, from));
+    odin3_ast_id lsb = {0};
+    if (!sel->bit) {
+        lsb = w_int(wr, sel->lo, from);
+    }
+    w_push(wr, lsb);
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_SELECT, from);
+    spec.sub = sel->bit ? ODIN3_AST_SELECT_BIT : ODIN3_AST_SELECT_PART;
+    return w_make_marked(wr, &spec, mark, from);
+}
+
+/* A slice to write: the bits [off, off + width) of expr's value (bit 0 its LSB). */
+typedef struct e1w_slice {
+    odin3_ast_id expr;
+    uint64_t off;
+    uint32_t width;
+} e1w_slice;
+
+/* A net or variable (not a memory) named by ident: its declared range in *msb, *lsb. */
+static bool plain_signal(e1w *wr, odin3_ast_id ident, int64_t *msb, int64_t *lsb) {
+    uint32_t idx = odin3_elab1_env_find(wr->env, 0, odin3_ast_name(wr->ast, ident));
+    const odin3_elab1_slot *slot = idx != E1_NONE ? odin3_elab1_env_slot(wr->env, idx) : NULL;
+    if (slot == NULL || slot->entry.kind != ODIN3_ENTRY_SIGNAL || slot->n_unpacked != 0 ||
+        slot->state != ODIN3_E1_DONE) {
+        return false;
+    }
+    *msb = slot->msb;
+    *lsb = slot->lsb;
+    return true;
+}
+
+/* The slice of a select of ident whose value's bit k is ident[right + k × dir]. */
+typedef struct e1w_rebase {
+    odin3_ast_id ident;
+    int64_t right;
+    int64_t dir;
+} e1w_rebase;
+
+static odin3_ast_id w_rebased(e1w *wr, const e1w_rebase *rb, const e1w_slice *sl) {
+    int64_t off = (int64_t)sl->off;
+    e1w_sel sel = {w_expr(wr, rb->ident), rb->right + (off + sl->width - 1) * rb->dir,
+                   rb->right + off * rb->dir, sl->width == 1};
+    return w_select(wr, &sel, sl->expr);
+}
+
+/* A name's slice in its declared indices (its LSB is its right index); 0 when not a plain net. */
+static odin3_ast_id w_slice_ident(e1w *wr, const e1w_slice *sl) {
+    int64_t msb = 0;
+    int64_t lsb = 0;
+    if (!plain_signal(wr, sl->expr, &msb, &lsb)) {
+        return (odin3_ast_id){0};
+    }
+    e1w_rebase rb = {sl->expr, lsb, msb >= lsb ? 1 : -1};
+    return w_rebased(wr, &rb, sl);
+}
+
+/* A constant bound of a select, quietly (a variable +: base is not one). */
+static bool quiet_int(e1w *wr, odin3_ast_id expr, int64_t *out) {
+    odin3_cval val = {0};
+    bool is_const = false;
+    odin3_status st = odin3_elab1_try_constant(wr->e1, expr, &val, &is_const);
+    if (st != ODIN3_OK) {
+        stop_on(wr, st);
+    }
+    return st == ODIN3_OK && is_const && odin3_cval_to_i64(&val, out);
+}
+
+/* The bounds [left:right] of a constant part select (+: and -: in its name's direction). */
+static bool part_bounds(e1w *wr, odin3_ast_id sel, bool down, int64_t bounds[2]) {
+    int64_t first = 0;
+    int64_t second = 0;
+    if (!quiet_int(wr, odin3_ast_child(wr->ast, sel, 1), &first) ||
+        !quiet_int(wr, odin3_ast_child(wr->ast, sel, 2), &second)) {
+        return false;
+    }
+    int64_t span = second - 1;
+    switch (odin3_ast_sub(wr->ast, sel)) {
+    case ODIN3_AST_SELECT_PART:
+        bounds[0] = first;
+        bounds[1] = second;
+        return true;
+    case ODIN3_AST_SELECT_PART_PLUS: /* [b+w-1:b] or [b:b+w-1] */
+        bounds[0] = down ? first + span : first;
+        bounds[1] = down ? first : first + span;
+        return true;
+    case ODIN3_AST_SELECT_PART_MINUS: /* [b:b-w+1] or [b-w+1:b] */
+        bounds[0] = down ? first : first - span;
+        bounds[1] = down ? first - span : first;
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* A constant part select of a plain net, rebased; 0 when it is not one. */
+static odin3_ast_id w_slice_select(e1w *wr, const e1w_slice *sl) {
+    odin3_ast_id base = odin3_ast_child(wr->ast, sl->expr, 0);
+    int64_t msb = 0;
+    int64_t lsb = 0;
+    int64_t bounds[2] = {0, 0};
+    if (odin3_ast_kind_of(wr->ast, base) != ODIN3_AST_IDENT ||
+        odin3_ast_sub(wr->ast, sl->expr) == ODIN3_AST_SELECT_BIT ||
+        !plain_signal(wr, base, &msb, &lsb) || !part_bounds(wr, sl->expr, msb >= lsb, bounds)) {
+        return (odin3_ast_id){0};
+    }
+    e1w_rebase rb = {base, bounds[1], bounds[0] >= bounds[1] ? 1 : -1};
+    return w_rebased(wr, &rb, sl);
+}
+
+/* A constant's slice as a NUMBER (sized, unsigned); 0 when expr is not a constant. */
+static odin3_ast_id w_slice_const(e1w *wr, const e1w_slice *sl) {
+    odin3_cval val = {0};
+    bool is_const = false;
+    odin3_status st = odin3_elab1_try_constant(wr->e1, sl->expr, &val, &is_const);
+    if (st != ODIN3_OK) {
+        stop_on(wr, st);
+    }
+    if (st != ODIN3_OK || !is_const) {
+        return (odin3_ast_id){0};
+    }
+    odin3_cval_part part = {&val, (int64_t)sl->off, sl->width};
+    odin3_cval bits = {0};
+    st = odin3_cval_select(wr->env->arena, &part, &bits);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return (odin3_ast_id){0};
+    }
+    return w_value(wr, &bits, ODIN3_AST_NUMBER_BIN, sl->expr);
+}
+
+/* One leaf's slice: a name, a constant part select, a constant, else a SELECT of the
+ * expression's own value (bit 0 its LSB; stage 2 reads such a select so, EL-10). */
+static odin3_ast_id w_slice_leaf(e1w *wr, const e1w_slice *sl) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, sl->expr);
+    odin3_ast_id made = {0};
+    if (kind == ODIN3_AST_IDENT) {
+        made = w_slice_ident(wr, sl);
+    } else if (kind == ODIN3_AST_SELECT) {
+        made = w_slice_select(wr, sl);
+    }
+    if (made.v == 0 && live(wr) && kind != ODIN3_AST_CONCAT) {
+        made = w_slice_const(wr, sl);
+    }
+    if (made.v != 0 || !live(wr)) {
+        return made;
+    }
+    int64_t off = (int64_t)sl->off;
+    e1w_sel sel = {w_expr(wr, sl->expr), off + sl->width - 1, off, sl->width == 1};
+    return w_select(wr, &sel, sl->expr);
+}
+
+/* A concatenation's slice: the slices of the elements it covers, MSB first (one alone). */
+static odin3_ast_id w_slice_concat(e1w *wr, const e1w_slice *sl) {
+    odin3_ast_span kids = odin3_ast_children(wr->ast, sl->expr);
+    uint64_t total = 0;
+    for (uint32_t i = 0; i < kids.n; i++) {
+        total += odin3_elab1_typed_width(wr->e1, kids.ids[i]);
+    }
+    uint32_t mark = w_mark(wr);
+    uint32_t pieces = 0;
+    odin3_ast_id last = {0};
+    uint64_t end = sl->off + sl->width;
+    for (uint32_t i = 0; i < kids.n; i++) {
+        uint32_t width = odin3_elab1_typed_width(wr->e1, kids.ids[i]);
+        uint64_t lo = total - width;
+        total = lo;
+        uint64_t from = sl->off > lo ? sl->off : lo;
+        uint64_t to = end < lo + width ? end : lo + width;
+        if (from >= to) {
+            continue;
+        }
+        e1w_slice part = {kids.ids[i], from - lo, (uint32_t)(to - from)};
+        last = part.width == width ? w_expr(wr, kids.ids[i]) : w_slice_leaf(wr, &part);
+        w_push(wr, last);
+        pieces++;
+    }
+    if (pieces == 1) {
+        if (live(wr)) {
+            odin3_ast_unwind(wr->out, mark);
+        }
+        return last;
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_CONCAT, sl->expr);
+    return w_make_marked(wr, &spec, mark, sl->expr);
+}
+
+static odin3_ast_id w_slice(e1w *wr, const e1w_slice *sl) {
+    if (odin3_ast_kind_of(wr->ast, sl->expr) == ODIN3_AST_CONCAT) {
+        return w_slice_concat(wr, sl);
+    }
+    return w_slice_leaf(wr, sl);
+}
+
+/* --- instances: elements and connections (EL-10) ------------------------------------------ */
+
+/* One INSTANCE to write: its name, whether its connections are named by port (a module's), and
+ * for an array element its index (bit offsets |index − right| × P). */
+typedef struct e1w_elem {
+    odin3_ast_id inst;
+    uint32_t name;
+    bool by_port;
+    bool element;
+    int64_t index;
+} e1w_elem;
+
+static odin3_ast_id w_conn_value(e1w *wr, const odin3_elab1_conn *rec, const e1w_elem *el) {
+    if (rec->expr.v == 0) {
+        return (odin3_ast_id){0};
+    }
+    if (!el->element || !rec->sliced) {
+        return w_expr(wr, rec->expr);
+    }
+    int64_t right = wr->e1->array.right;
+    uint64_t step =
+        el->index >= right ? (uint64_t)(el->index - right) : (uint64_t)(right - el->index);
+    e1w_slice sl = {rec->expr, step * rec->port_width, rec->port_width};
+    return w_slice(wr, &sl);
+}
+
+static odin3_ast_id w_element(e1w *wr, const e1w_elem *el) {
+    uint32_t mark = w_mark(wr);
+    w_push(wr, (odin3_ast_id){0});
+    for (size_t i = 0; i < wr->e1->conns.len && wr->st == ODIN3_OK; i++) {
+        odin3_elab1_conn rec = *(const odin3_elab1_conn *)odin3_vec_cat(&wr->e1->conns, i);
+        e1w_conn out = {el->by_port ? rec.name : odin3_ast_name(wr->ast, rec.conn),
+                        w_conn_value(wr, &rec, el), rec.conn.v != 0 ? rec.conn : el->inst};
+        w_push(wr, w_connection(wr, &out));
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_INSTANCE, el->inst);
+    spec.name = el->name;
+    return w_make_marked(wr, &spec, mark, el->inst);
+}
+
+/* The name of element index of the array instance inst: "u[3]" (EL-4, Yosys's names). */
+static uint32_t element_name(e1w *wr, odin3_ast_id inst, int64_t index) {
+    char text[ODIN3_LOG_BUF];
+    int got =
+        snprintf(text, sizeof text, "%s[%" PRId64 "]", odin3_ast_name_str(wr->ast, inst), index);
+    uint32_t name = 0;
+    odin3_status st = got > 0 && (size_t)got < sizeof text
+                          ? odin3_ast_intern(wr->out, (odin3_bytes){text, (size_t)got}, &name)
+                          : ODIN3_ERR_CHECK;
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+    }
+    return name;
+}
+
+/* The INSTANCE nodes of inst: its connections resolved and checked (EL-10), then one INSTANCE,
+ * or one per array element from left to right, sliced as planned. */
+static void w_instances(e1w *wr, const odin3_elab_inst *inst, bool by_port) {
+    odin3_status st = odin3_elab1_connect(wr->e1, inst);
+    bool array = odin3_ast_child(wr->ast, inst->instance, 0).v != 0;
+    st = st != ODIN3_OK || !array ? st : odin3_elab1_inst_array(wr->e1, inst);
+    if (st != ODIN3_OK) {
+        stop_on(wr, st);
+        return;
+    }
+    e1w_elem el = {inst->instance, odin3_ast_name(wr->ast, inst->instance), by_port, false, 0};
+    if (!array) {
+        w_push(wr, w_element(wr, &el));
+        return;
+    }
+    const odin3_elab1_array *arr = &wr->e1->array;
+    int64_t dir = arr->left >= arr->right ? -1 : 1;
+    el.element = true;
+    uint32_t count = live(wr) ? arr->n : 1; /* not building: one walk reports what is pending */
+    for (uint32_t k = 0; k < count && wr->st == ODIN3_OK; k++) {
+        el.index = arr->left + dir * (int64_t)k;
+        el.name = element_name(wr, inst->instance, el.index);
+        w_push(wr, w_element(wr, &el));
+    }
+}
+
+/* --- INSTANTIATIONs ------------------------------------------------------------------------- */
+
+/* The INSTANTIATIONs written for item so far: consecutive instances of one decision (one
+ * specialization, or one parameter record) share one (EL-4: its name is the specialization's). */
 typedef struct e1w_group {
     bool open;
     int32_t value;
@@ -803,6 +1006,33 @@ static void close_group(e1w *wr, odin3_ast_id item, e1w_group *group) {
     w_push(wr, w_make_marked(wr, &spec, group->mark, item));
 }
 
+/* The instance a decision describes (its target and specialization or record). */
+static odin3_elab_inst decided(const e1w *wr, odin3_ast_id item, odin3_ast_id kid, int32_t value) {
+    odin3_elab_inst inst = {item, kid, 0, {ODIN3_RES_NONE, 0, {0}}, E1_NONE};
+    if (value >= 0) {
+        inst.target.kind = ODIN3_RES_MODULE;
+        inst.target.def = odin3_elab1_spec_at(wr->e1, (uint32_t)value)->def;
+        inst.spec = (uint32_t)value;
+    } else {
+        inst.spec = odin3_elab1_given_of(value);
+        inst.target = ((const odin3_elab1_given *)odin3_vec_cat(&wr->e1->given, inst.spec))->target;
+    }
+    return inst;
+}
+
+/* The params LIST of a new INSTANTIATION group: a module specialization's values, a
+ * `(* blackbox *)` instance's as given, or a cell type's or implicit black box's record. */
+static odin3_ast_id w_group_params(e1w *wr, odin3_ast_id item, const odin3_elab_inst *inst,
+                                   bool module) {
+    if (module) {
+        return w_spec_params(wr, item, inst->spec);
+    }
+    if (inst->target.kind == ODIN3_RES_MODULE) {
+        return w_given_params(wr, item);
+    }
+    return w_record_params(wr, item, inst->spec);
+}
+
 static void w_instantiation(e1w *wr, odin3_ast_id item) {
     e1w_group group = {false, 0, 0};
     odin3_ast_span kids = odin3_ast_children(wr->ast, item);
@@ -812,18 +1042,48 @@ static void w_instantiation(e1w *wr, odin3_ast_id item) {
             halt(wr); /* reported in pass E, or a failed replay */
             continue;
         }
+        odin3_elab_inst inst = decided(wr, item, kids.ids[i], value);
+        bool module =
+            value >= 0 && odin3_elab1_def(wr->e1, inst.target.def)->kind == ODIN3_DEF_MODULE;
         if (group.open && value != group.value) {
             close_group(wr, item, &group);
         }
         if (!group.open) {
             group = (e1w_group){true, value, w_mark(wr)};
-            w_push(wr, value >= 0 ? w_spec_params(wr, item, (uint32_t)value)
-                                  : w_given_params(wr, item));
+            w_push(wr, w_group_params(wr, item, &inst, module));
         }
-        w_push(wr, value >= 0 ? w_module_instance(wr, kids.ids[i], (uint32_t)value)
-                              : w_given_instance(wr, kids.ids[i]));
+        w_instances(wr, &inst, module);
     }
     close_group(wr, item, &group);
+}
+
+/* The switch-level and pull gates (Q6) are Task 16's REJECTs. */
+static bool switch_level(uint32_t sub) {
+    return sub >= ODIN3_AST_GATE_DECL_NMOS;
+}
+
+/* GATE_DECL without STRENGTH and DELAY (EL-4), its arrays expanded (P = 1), unnamed instances
+ * keeping name 0. */
+static odin3_ast_id w_gate(e1w *wr, odin3_ast_id item) {
+    uint32_t sub = odin3_ast_sub(wr->ast, item);
+    if (switch_level(sub)) {
+        odin3_elab1_pend_form(wr->e1, item);
+        halt(wr);
+        return (odin3_ast_id){0};
+    }
+    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 0));
+    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 1));
+    uint32_t mark = w_mark(wr);
+    w_push(wr, (odin3_ast_id){0});
+    w_push(wr, (odin3_ast_id){0});
+    odin3_ast_span kids = odin3_ast_children(wr->ast, item);
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_GATE_DECL); i < kids.n; i++) {
+        odin3_elab_inst inst = {item, kids.ids[i], 0, {ODIN3_RES_NONE, 0, {0}}, E1_NONE};
+        w_instances(wr, &inst, false);
+    }
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_GATE_DECL, item);
+    spec.sub = (uint8_t)sub;
+    return w_make_marked(wr, &spec, mark, item);
 }
 
 /* --- the module ----------------------------------------------------------------------------- */
@@ -854,6 +1114,9 @@ static void w_item(e1w *wr, odin3_ast_id item) {
         break;
     case ODIN3_AST_INSTANTIATION:
         w_instantiation(wr, item);
+        break;
+    case ODIN3_AST_GATE_DECL:
+        w_push(wr, w_gate(wr, item));
         break;
     case ODIN3_AST_DEFPARAM:
         break; /* resolved in pass E; absent from the elaborated form */
@@ -920,16 +1183,11 @@ odin3_status odin3_elab1_write(odin3_elab1 *e1, uint32_t spec) {
         return ODIN3_ERR_CHECK; /* pass E did not run: a 2D bug */
     }
     wr.cursor = wr.spec->first_log;
-    wr.conns = odin3_u64map_create(0);
-    if (wr.conns == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
     odin3_ast_id module = w_module(&wr);
     odin3_status st = wr.st;
     st = st != ODIN3_OK || e1->stopped ? st : w_replay_done(&wr);
     w_push(&wr, module);
     st = st != ODIN3_OK ? st : wr.st;
-    odin3_u64map_destroy(wr.conns);
     odin3_elab1_env_destroy(e1->env);
     e1->env = NULL;
     return st;

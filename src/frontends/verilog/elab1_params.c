@@ -25,8 +25,7 @@
 
 static const uint32_t E1_NONE = UINT32_MAX;
 
-/* True when a takes precedence over b (EL-8: by source, then the first defparam). */
-static bool beats(const odin3_elab_override *lhs, const odin3_elab_override *rhs) {
+bool odin3_elab1_override_beats(const odin3_elab_override *lhs, const odin3_elab_override *rhs) {
     return lhs->source != rhs->source ? lhs->source < rhs->source : lhs->order < rhs->order;
 }
 
@@ -40,10 +39,9 @@ static const char *target_text(odin3_elab1 *e1, const odin3_elab_override *ovr, 
     return buf->data != NULL ? buf->data : "";
 }
 
-/* A defparam that loses to a named override warns, once, at its target (EL-8). The instance
- * named is the component before the parameter. */
-static void lost(odin3_elab1 *e1, const odin3_elab_override *loser,
-                 const odin3_elab_override *winner) {
+/* The instance named is the component before the parameter. */
+void odin3_elab1_override_lost(odin3_elab1 *e1, const odin3_elab_override *loser,
+                               const odin3_elab_override *winner) {
     if (loser->source != ODIN3_OVR_DEFPARAM || winner->source != ODIN3_OVR_NAMED) {
         return;
     }
@@ -97,11 +95,11 @@ static odin3_status apply(odin3_elab1_env *env, const odin3_elab_override *ovr) 
     if (!slot->overridden) {
         slot->overridden = true;
         slot->ovr = *ovr;
-    } else if (beats(ovr, &slot->ovr)) {
-        lost(env->e1, &slot->ovr, ovr);
+    } else if (odin3_elab1_override_beats(ovr, &slot->ovr)) {
+        odin3_elab1_override_lost(env->e1, &slot->ovr, ovr);
         slot->ovr = *ovr;
     } else {
-        lost(env->e1, ovr, &slot->ovr);
+        odin3_elab1_override_lost(env->e1, ovr, &slot->ovr);
     }
     return ODIN3_OK;
 }

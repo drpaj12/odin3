@@ -118,10 +118,11 @@ bool odin3_elab_pending(uint8_t stage, uint32_t kind_or_feature);
 
 /*
  * The forms of landed kinds that a later task lands (spec v4.7; review m4): a kind stage 1 writes,
- * in a form it does not yet (stage 1: ordered connections and instance arrays (CONNECTION,
- * INSTANCE) and a defparam reaching a cell type (DEFPARAM), Task 12; a port declared in the body
- * (PORT_DECL), Task 15; a specparam (PARAM_DECL), a time or real variable (VAR_DECL), tri0, tri1
- * and trireg (NET_DECL) and a hierarchical call (CALL), Task 16). Such a form is reported with
+ * in a form it does not yet (stage 1: a port declared in the body (PORT_DECL), Task 15; a
+ * specparam (PARAM_DECL), a time or real variable (VAR_DECL), tri0, tri1 and trireg (NET_DECL), a
+ * hierarchical call (CALL) and a switch-level or pull gate (GATE_DECL, Q6), Task 16; Task 12
+ * landed ordered connections, instance arrays and defparams on cell types). Such a form is
+ * reported with
  * point (l)'s line for its kind only while its entry is here; each task removes the entry it lands
  * with its code, and the "tables empty" assertions of Tasks 16 and 24 count these too.
  * odin3_elab_pending_form: whether kind has a pending form in stage; _count: how many kinds do.
