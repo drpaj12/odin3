@@ -29,14 +29,17 @@ Tasks 10-15 add the rest of spec §9. The common options are §9's: ``--vtr-root
   nothing) reads one key per leg (``--keys`` or ``latest``) under the pin's ``<vtr12>`` (the
   VTR checkout's with ``--allow-vtr-drift``), keeps the designs of ``--set`` (default
   ``gate,extra``), gates them (``tests/vtr/qor``'s ``bands.json`` and TSVs; a TSV that does not
-  exist yet is empty), reads VTR's golden for the cross-check when P is in the table, and
+  exist yet is empty) over ``gate_designs`` (on k6 the 19 in ``--set``, on EArch the smoke
+  set; none: not gated), reads VTR's golden rows of the table's arch for the cross-check when
+  P is in the table, and
   writes ``<out>/tables/<YYYYMMDD-HHMM of the header date>-<label>/`` (``qor.md``,
   ``runs.csv``, ``ratios.csv``, ``runs.json``), printing the directory.
 - ``gate <table dir>`` prints ``Gate (decision 3): PASS|FAIL|INCOMPLETE``, then the violations,
   from the table's ``runs.json``; exit 0, 1 or 3.
 - ``publish <table dir>`` (the controller's) needs ``ODIN3_QOR_PUBLISH=1`` (E-QH15). It copies
-  the four files to ``~/odin3-ws/golden/qor/<vtr12>/<label>/`` (``~`` is ``$HOME``) and prints
-  the ``git -C ~/odin3-ws/golden add`` and ``commit`` lines to run.
+  the four files to ``~/odin3-ws/golden/qor/<vtr12>/<label>/`` (``~`` is ``$HOME``) through
+  ``.<label>.tmp`` and one rename, refuses an existing label unless ``--force``, and prints the
+  ``git -C ~/odin3-ws/golden add`` and ``commit`` lines to run.
 
 The harness must be ``tools/heavy-run``'s direct child (``heavy-run tools/vtr-qor/vtr-qor run
 …``, or ``ODIN3_HEAVY_OK=1 tools/vtr-qor/vtr-qor run …``, which re-runs itself that way): one job
@@ -63,7 +66,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,6 +93,7 @@ DEFAULT_OUT_REL = Path("odin3-ws") / "work" / "vtr-qor"
 ODIN3_REL = Path("build") / "release" / "src" / "cli" / "odin3"
 VTR_PATHS_REL = Path("vtr_flow") / "scripts" / "python_libs" / "vtr" / "paths.py"
 ARCHES = ("k6", "earch")
+EARCH = "earch"
 # Machine readers (module seams for the tests).
 MEMINFO = Path("/proc/meminfo")
 CPUINFO = Path("/proc/cpuinfo")
@@ -807,13 +811,21 @@ def _table_vtr12(args: argparse.Namespace) -> str:
     return qor_legs.VTR_PIN[:qor_sched.KEY12]
 
 
-def _golden(args: argparse.Namespace) -> qor_table.GoldenXcheck:
+def _golden(args: argparse.Namespace, arch: str) -> qor_table.GoldenXcheck:
     vtr_root = _vtr_root(args)
     try:
-        return qor_table.load_golden_xcheck(vtr_root)
+        return qor_table.load_golden_xcheck(vtr_root, arch=arch)
     except (OSError, ValueError) as exc:
         raise HeavyError(EXIT_USAGE, f"table: cannot read VTR's golden results under "
                                      f"{vtr_root}: {exc}") from exc
+
+
+def gate_designs(sets: Sets, arch_key: str, selected: Collection[str]) -> tuple[str, ...]:
+    """The designs a table gates over (agent default, Task 9 fix round 1): §6.2's 19 on k6,
+    narrowed to the table's ``--set`` (``--set smoke`` gates over the smoke set); on EArch the
+    smoke set, its only set (§2). Empty: the table is not gated."""
+    base = sets.smoke if arch_key == EARCH else sets.gate
+    return tuple(design for design in base if design in selected)
 
 
 def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
@@ -832,17 +844,20 @@ def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
         explanations, divergences, exceptions = (_tsv_rows(name) for name in TSV_INPUTS)
     except (OSError, ValueError) as exc:
         raise HeavyError(EXIT_USAGE, f"table: {exc}") from exc
+    gate_set = gate_designs(sets, args.arch, designs)
     verdict = qor_table.gate(qor_table.GateInputs(
-        runs=runs, bands=bands, gate_set=sets.gate, explanations=explanations,
-        divergences=divergences, equiv_exceptions=exceptions))
-    golden = _golden(args) if "P" in legs else None
+        runs=runs, bands=bands, gate_set=gate_set, explanations=explanations,
+        divergences=divergences, equiv_exceptions=exceptions)) if gate_set else None
+    golden = _golden(args, arch) if "P" in legs else None
     header = qor_table.table_header(runs, arch=arch, label=label, vtr12=vtr12)
     table_dir = out / "tables" / f"{qor_table.table_stamp(header)}-{label}"
     table_dir.mkdir(parents=True, exist_ok=True)
     qor_table.write_md(runs, verdict, header, table_dir / "qor.md", golden=golden, bands=bands,
-                       divergences=divergences, equiv_exceptions=exceptions)
-    qor_table.write_csv(runs, table_dir / "runs.csv", table_dir / "ratios.csv", bands=bands)
-    qor_table.write_json(runs, verdict, header, table_dir / "runs.json", bands=bands)
+                       divergences=divergences, equiv_exceptions=exceptions, gate_set=gate_set)
+    qor_table.write_csv(runs, table_dir / "runs.csv", table_dir / "ratios.csv", bands=bands,
+                        gate_set=gate_set)
+    qor_table.write_json(runs, verdict, header, table_dir / "runs.json", bands=bands,
+                         gate_set=gate_set)
     print(table_dir)
     return EXIT_OK
 
@@ -865,7 +880,8 @@ def cmd_gate(args: argparse.Namespace, argv: Sequence[str]) -> int:
     data = _table_json(args.table_dir, "gate")
     gate_object = data.get("gate")
     if not isinstance(gate_object, dict):
-        raise HeavyError(EXIT_USAGE, f"gate: {args.table_dir}: the table has no gate verdict")
+        raise HeavyError(EXIT_USAGE, f"gate: {os.path.abspath(args.table_dir)}: the table is "
+                                     "not gated (no gate design in it)")
     state = qor_table.verdict_state(gate_object)
     print(f"Gate (decision 3): {state}")
     violations = gate_object.get("violations")
@@ -882,8 +898,27 @@ def _publish_target(header: Mapping[str, object]) -> tuple[str, str]:
     return vtr12, label
 
 
+def _remove_table_dir(path: Path) -> None:
+    """Remove a published table directory left by ``publish`` itself (its four files, then the
+    directory). Anything else in it, or a symlink, is refused: nothing else in odin3-golden is
+    ever deleted."""
+    if path.is_symlink():
+        raise HeavyError(EXIT_USAGE, f"publish: refusing {path}: it is a symlink")
+    if not path.exists():
+        return
+    others = sorted(p.name for p in path.iterdir() if p.name not in qor_table.TABLE_FILES)
+    if others:
+        raise HeavyError(EXIT_USAGE, f"publish: refusing to remove {path}: it holds "
+                                     f"{', '.join(others)}")
+    for name in qor_table.TABLE_FILES:
+        (path / name).unlink(missing_ok=True)
+    path.rmdir()
+
+
 def cmd_publish(args: argparse.Namespace, argv: Sequence[str]) -> int:
-    """Copy a table's four files to odin3-golden (the controller's step, E-QH15)."""
+    """Copy a table's four files to odin3-golden (the controller's step, E-QH15): into
+    ``.<label>.tmp``, then renamed into place, so a label holds one whole table. An existing
+    label is refused unless ``--force``."""
     if os.environ.get(PUBLISH_ENV) != "1":
         raise HeavyError(EXIT_USAGE, E_QH15)
     source = Path(os.path.abspath(args.table_dir))
@@ -894,12 +929,21 @@ def cmd_publish(args: argparse.Namespace, argv: Sequence[str]) -> int:
                if not (source / name).is_file() or (source / name).is_symlink()]
     if missing:
         raise HeavyError(EXIT_USAGE, f"publish: {source} lacks {', '.join(missing)}")
-    target = Path.home() / GOLDEN_REL / "qor" / vtr12 / label
-    target.mkdir(parents=True, exist_ok=True)
+    parent = Path.home() / GOLDEN_REL / "qor" / vtr12
+    target = parent / label
+    if target.is_symlink() or (target.exists() and not args.force):
+        raise HeavyError(EXIT_USAGE, f"publish: {target} exists (--force replaces it)")
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp, old = parent / f".{label}.tmp", parent / f".{label}.old"
+    _remove_table_dir(tmp)
+    _remove_table_dir(old)
+    tmp.mkdir()
     for name in qor_table.TABLE_FILES:
-        tmp = target / f".{name}.tmp"
-        shutil.copyfile(source / name, tmp)
-        os.replace(tmp, target / name)
+        shutil.copyfile(source / name, tmp / name)
+    if target.exists():
+        os.rename(target, old)
+    os.rename(tmp, target)
+    _remove_table_dir(old)
     print(f"git -C ~/odin3-ws/golden add qor/{vtr12}/{label}")
     print(f'git -C ~/odin3-ws/golden commit -m "qor: {label} ({vtr12})"')
     return EXIT_OK
@@ -1190,6 +1234,7 @@ def _parser() -> argparse.ArgumentParser:
     publish = sub.add_parser("publish", parents=[common],
                              help="copy a table to odin3-golden (controller only)")
     publish.add_argument("table_dir", type=Path, metavar="TABLE_DIR")
+    publish.add_argument("--force", action="store_true", help="replace a published label")
     return parser
 
 

@@ -92,8 +92,9 @@ tri-state or a multi-driver net is a located error.
 
 - [ ] Decisions 2–20 answered (or kept as agent defaults); DESIGN §4.0 amended for decision 1
 - [x] 3H: Parmys baseline (P) on the 19, `-temp_dir ~/odin3-ws/work/vtr-qor`, table generator
-  (run 2026-10-12, key `6baf6f3cfaf9`, 1:08 wall, published `qor/3c9a4d23b27d/P-baseline`;
-  decision 25)
+  (run 2026-10-12, key `6baf6f3cfaf9`, 1:08 wall; rendered to
+  `~/odin3-ws/work/vtr-qor/tables/20261012-0803-P-baseline`; publishing to the golden repo is
+  Peter's step; decision 25)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
 - [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
   leg routes all 19
@@ -504,9 +505,9 @@ then the options considered.
       (M9) and resolving cell kinds by type ID instead of `strcmp` (M11).
 25. **3H: the Parmys baseline (P), first run** (2026-10-12; 3H plan Task 7, rendered by Task 9).
     The run is `vtr-qor run --arch k6 --leg P --set gate,extra` through `tools/heavy-run`, from
-    `main` 2068618. The table is `vtr-qor table --legs P --label P-baseline`, written to
-    `~/odin3-ws/work/vtr-qor/tables/20261012-0803-P-baseline/` and published to odin3-golden
-    `qor/3c9a4d23b27d/P-baseline/`.
+    `main` 2068618. The table is `vtr-qor table --legs P --label P-baseline`, rendered to
+    `~/odin3-ws/work/vtr-qor/tables/20261012-0803-P-baseline/`. Publishing it to the golden
+    repo (`qor/3c9a4d23b27d/P-baseline/`, `vtr-qor publish`) is Peter's step.
     - **Outcome.** All 21 jobs are `ok` with `vpr_status=success`, under key `6baf6f3cfaf9`
       (now `latest`). Exit 0, with nothing capped or timed out.
     - **Wall time: 1:08:46** for the 18 jobs this run started. The three smallest were reused

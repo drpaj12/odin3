@@ -652,6 +652,96 @@ class TableCliTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in target.iterdir()), sorted(qor_table.TABLE_FILES))
         self.assertEqual(self.files(target), self.files(table_dir))
 
+    def test_publish_refusals(self) -> None:
+        """Review I2/M3: only ODIN3_QOR_PUBLISH=1, a valid header, all four files; an existing
+        label only with --force, replaced whole; nothing written under HOME on a refusal."""
+        table_dir = self.made()
+        home = self.root / "home"
+        home.mkdir()
+        target = home / "odin3-ws" / "golden" / "qor" / "3c9a4d23b27d" / "fixture"
+
+        def publish(*extra: str, where: Path = table_dir) -> tuple[int, str, str]:
+            return run_main(vtr_qor.main, ["publish", str(where), *extra])
+
+        bad = self.root / "bad"
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            for value in ("0", "", "yes", "1 "):
+                os.environ["ODIN3_QOR_PUBLISH"] = value
+                self.assertEqual(publish(), (2, "", E_QH15 + "\n"), value)
+            os.environ["ODIN3_QOR_PUBLISH"] = "1"
+            shutil.copytree(table_dir, bad)
+            (bad / "runs.csv").unlink()
+            code, _, err = publish(where=bad)
+            self.assertEqual((code, err), (2, f"vtr-qor: publish: {bad} lacks runs.csv\n"))
+            shutil.copy(table_dir / "runs.csv", bad / "runs.csv")
+            data = json.loads((bad / "runs.json").read_text(encoding="utf-8"))
+            for field_, value in (("label", "../x"), ("label", ".hidden"), ("vtr12", "../..")):
+                data["header"] = {**data["header"], "label": "fixture", "vtr12": VTR12,
+                                  field_: value}
+                (bad / "runs.json").write_text(json.dumps(data), encoding="utf-8")
+                code, _, err = publish(where=bad)
+                self.assertEqual((code, err), (2, "vtr-qor: publish: the table header has no "
+                                                  "valid vtr12 and label\n"), value)
+            self.assertEqual(list(home.iterdir()), [])
+            self.assertEqual(publish()[0], 0)
+            code, _, err = publish()
+            self.assertEqual((code, err), (2, f"vtr-qor: publish: {target} exists (--force "
+                                              "replaces it)\n"))
+            other = self.made("other")
+            (other / "runs.json").write_text((other / "runs.json").read_text(
+                encoding="utf-8").replace('"label": "other"', '"label": "fixture"'),
+                encoding="utf-8")
+            self.assertEqual(publish("--force", where=other)[0], 0)
+            self.assertEqual(self.files(target), self.files(other))
+            self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["fixture"])
+            stray = target.parent / ".fixture.tmp"
+            stray.mkdir()
+            (stray / "notes.txt").write_text("x", encoding="utf-8")
+            code, _, err = publish("--force")
+            self.assertEqual((code, err), (2, f"vtr-qor: publish: refusing to remove {stray}: "
+                                              "it holds notes.txt\n"))
+            self.assertEqual(self.files(target), self.files(other))
+
+    def test_smoke_and_extra_sets(self) -> None:
+        """Review M2: --set smoke gates over the smoke set; a table without gate designs is
+        not gated."""
+        table_dir = self.made("smoke", "P,O")
+        code, out, err = self.table("P,O", "smoke", "--set", "smoke")
+        self.assertEqual(code, 0, err)
+        smoke = Path(out.strip())
+        self.assertEqual(self.gate(smoke), (0, ["Gate (decision 3): PASS"]))
+        md = (smoke / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("| **geomean (5)** |  |  | **1.150** |", md)  # (1.375 * 0.88)^2 * 1.375
+        self.assertNotIn("| sha |", md)
+        self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,5,", (smoke / "ratios.csv").read_text(
+            encoding="utf-8"))
+        self.assertNotEqual(smoke, table_dir)
+        code, out, err = self.table("P,O", "extras", "--set", "extra")
+        self.assertEqual(code, 0, err)
+        extras = Path(out.strip())
+        md = (extras / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("## Gate (decision 3): not gated\n", md)
+        self.assertIsNone(json.loads((extras / "runs.json").read_text(encoding="utf-8"))["gate"])
+        code, _, err = run_main(vtr_qor.main, ["gate", str(extras)])
+        self.assertEqual((code, err), (2, f"vtr-qor: gate: {extras}: the table is not gated "
+                                          "(no gate design in it)\n"))
+
+    def test_earch_table(self) -> None:
+        """Review M1: an EArch table gates over the smoke set and has no k6 cross-check."""
+        shutil.copytree(self.out / VTR12 / ARCH, self.out / VTR12 / "EArch")
+        code, out, err = run_main(vtr_qor.main, [
+            "table", "--arch", "earch", "--out", str(self.out), "--vtr-root", str(FAKE_VTR),
+            "--legs", "P,O", "--label", "earch"])
+        self.assertEqual(code, 0, err)
+        table_dir = Path(out.strip())
+        self.assertEqual(self.gate(table_dir), (0, ["Gate (decision 3): PASS"]))
+        md = (table_dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("# Odin III QoR — EArch — earch", md)
+        self.assertIn("| **geomean (5)** |", md)
+        self.assertIn("golden has no row for these designs on EArch; no cross-check.", md)
+        self.assertNotIn("| CLB P | CLB golden |", md)
+        self.assertEqual(vtr_qor.gate_designs(qor_sched.load_sets(), "earch", {"sha"}), ())
+
     def test_p_only_table(self) -> None:
         table_dir = self.made("p-only", "P")
         md = (table_dir / "qor.md").read_text(encoding="utf-8")
@@ -774,6 +864,78 @@ class WriterTest(unittest.TestCase):
                          + qor_legs.VTR_PIN + ",")
         ratios = (self.dir / "ratios.csv").read_text(encoding="utf-8").splitlines()
         self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,18,", "\n".join(ratios))
+
+    def test_noise_floor_and_name_style(self) -> None:
+        """Review I2/M5: both sections render; the noise floor shows min and max."""
+        runs = table(legs=("P", "O"))
+        for design in GATE:
+            scale = {"sha": 0.95, "bgm": 1.05}.get(design, 1.0)
+            runs.append(run("R", design, scale))
+            runs.append(run("Oprov", design, override={"vpr_time_s": 2.0}
+                            if design == "sha" else None))
+        qor_table.write_md(runs, verdict(runs), header(runs), self.dir / "qor.md", golden=None)
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("## Noise floor\n", md)
+        self.assertIn("| metric | R/P geomean (19) | min | max |", md)
+        self.assertIn("| num_clb | 1.000 | 0.950 (sha) | 1.050 (bgm) |", md)
+        self.assertIn("## Name style\n", md)
+        self.assertIn("| sha | 1.0 | 2.0 | 2.000 |  |  |  |", md)
+        self.assertIn("| bgm | 1.0 | 1.0 | 1.000 |  |  |  |", md)
+
+    def test_md_checks_divergences_marks(self) -> None:
+        """Review I2: divergence rows, the equiv exception note, the ? mark, -dirty."""
+        runs = replace(table(), run("O", "sha", override={"fcheck": "skipped"}))
+        runs = replace(runs, run("O", "mcml", override={"fcheck": "fail"}))
+        runs = replace(runs, run("O", "stereovision3", override={"equiv": "multiclock"}))
+        o_bgm = run("O", "bgm")
+        dirty = {**o_bgm.metrics, "odin3_commit": "f" * 40 + "-dirty", "odin3_build": "e" * 64}
+        runs = replace(runs, Run(o_bgm.leg, o_bgm.design, o_bgm.arch, o_bgm.key12, o_bgm.status,
+                                 o_bgm.gating, dirty))
+        exceptions = [("stereovision3", "multiclock", "two clocks")]
+        divergences = [("ch_intrinsics", "mem-init-dropped", "decision 6 step 5"),
+                       ("not_a_design", "baseline-fails", "elsewhere")]
+        got = verdict(runs, exceptions=exceptions, divergences=divergences)
+        self.assertEqual(got.state, "INCOMPLETE")
+        qor_table.write_md(runs, got, header(runs), self.dir / "qor.md", golden=None,
+                           divergences=divergences, equiv_exceptions=exceptions)
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        rows = {line.split(" | ")[0][2:]: line for line in md.splitlines()
+                if line.startswith("| ") and line.endswith((" ✓ |", " ✗ |", " ? |"))}
+        self.assertTrue(rows["sha"].endswith(" ? |"))
+        self.assertTrue(rows["mcml"].endswith(" ✗ |"))
+        self.assertTrue(rows["bgm"].endswith(" ✓ |"))
+        self.assertIn("| stereovision3 | pass | pass | multiclock (exception: multiclock) | same |",
+                      md)
+        self.assertIn("## Declared divergences\n\n| design | class | text |\n|---|---|---|\n"
+                      "| ch_intrinsics | mem-init-dropped | decision 6 step 5 |\n", md)
+        self.assertNotIn("not_a_design", md)
+        self.assertIn(" · odin3 ffffffffffff-dirty (build eeeeeeeeeeee) · ", md)
+        qor_table.write_md(table(), verdict(table()), header(table()), self.dir / "q2.md",
+                           golden=None)
+        self.assertIn("## Declared divergences\n\nNone.\n",
+                      (self.dir / "q2.md").read_text(encoding="utf-8"))
+
+    def test_golden_equal_values_ok(self) -> None:
+        """VTR's rule: equal values pass whatever the band; otherwise the band decides."""
+        golden = qor_table.GoldenXcheck(values={("sha", "num_clb"): 100.0},
+                                        bands={"num_clb": (1.1, 1.2)})
+        self.assertEqual(qor_table.golden_ratio(golden, 100.0, "sha", "num_clb"), (1.0, "ok"))
+        self.assertEqual(qor_table.golden_ratio(golden, 110.0, "sha", "num_clb"), (1.1, "ok"))
+        self.assertEqual(qor_table.golden_ratio(golden, 121.0, "sha", "num_clb"),
+                         (1.21, "outside"))
+        k6 = qor_table.load_golden_xcheck(FAKE_VTR, arch=ARCH)
+        self.assertEqual(len(k6.values), len(qor_table.load_golden_xcheck(FAKE_VTR).values))
+        self.assertEqual(dict(qor_table.load_golden_xcheck(FAKE_VTR, arch="EArch").values), {})
+
+    def test_runs_json_status_word(self) -> None:
+        runs = replace(table(), run("O", "sha", status="failed"))
+        qor_table.write_json(runs, verdict(runs), header(runs), self.dir / "runs.json")
+        data = json.loads((self.dir / "runs.json").read_text(encoding="utf-8"))
+        sha = next(r for r in data["runs"] if (r["leg"], r["design"]) == ("O", "sha"))
+        self.assertEqual((sha["status"], sha["key12"], sha["packed"]["num_clb"]),
+                         ("failed", "0123456789ab", 100))
+        self.assertEqual(data["gate"]["pass"], False)
+        self.assertIn("table: sha has no ok O job", data["gate"]["violations"])
 
     def test_fmt_value(self) -> None:
         self.assertEqual(qor_table.fmt_value("critical_path_delay_ns", 9.3045), "9.305")

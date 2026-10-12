@@ -604,6 +604,7 @@ DISPLAY_LEGS = {"Oprime": "O'", "Pprime": "P'"}
 # The legs whose ABC exchange is named (point (e)): their depth comes from the ``# abc:`` header.
 EXCHANGE_LEGS = ("Pprime", "O", "Oprov")
 TICK, CROSS, OPEN = "✓", "✗", "?"
+NOT_GATED = "not gated"
 RUNS_HEADER = (
     "arch", "design", "leg", "key12", "status", "gating", "vpr_status", "luts", "ffs", "adders",
     "mults", "ram_slices", "depth", "abc_depth", "num_clb", "num_memories", "num_mult",
@@ -776,6 +777,7 @@ class _Layout:
     extra: tuple[str, ...]
     bands: Bands
     bounds: tuple[float, float]
+    arch: str
 
     def ok(self, leg: str, design: str) -> Run | None:
         run = self.index.get((leg, design))
@@ -797,7 +799,8 @@ class _Layout:
         return geomean_n([self.ratio(pair, design, name) for design in designs])
 
 
-def _layout(runs: Sequence[Run], bands: Bands | None) -> _Layout:
+def _layout(runs: Sequence[Run], bands: Bands | None,
+            gate_set: Sequence[str] | None = None) -> _Layout:
     sets = qor_sched.load_sets()
     bands = bands if bands is not None else load_bands(BANDS_JSON)
     rank = {design: i for i, design in enumerate((*sets.gate, *sets.extra))}
@@ -806,9 +809,11 @@ def _layout(runs: Sequence[Run], bands: Bands | None) -> _Layout:
                                           _leg_rank(r.leg), r.leg))
     legs = sorted({r.leg for r in runs}, key=lambda leg: (_leg_rank(leg), leg))
     return _Layout(runs=ordered, designs=tuple(designs), legs=tuple(legs),
-                   index=index_runs(ordered), gate=sets.gate,
+                   index=index_runs(ordered),
+                   gate=sets.gate if gate_set is None else tuple(gate_set),
                    extra=tuple(d for d in sets.extra if d in designs), bands=bands,
-                   bounds=(bands.geomean_max, bands.per_design_max))
+                   bounds=(bands.geomean_max, bands.per_design_max),
+                   arch=ordered[0].arch if ordered else "")
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -868,14 +873,15 @@ def _ratio_rows(layout: _Layout, pair: tuple[str, str], arch: str) -> list[list[
 
 
 def write_csv(runs: Sequence[Run], runs_path: Path, ratios_path: Path, *,
-              bands: Bands | None = None) -> None:
+              bands: Bands | None = None, gate_set: Sequence[str] | None = None) -> None:
     """``runs.csv`` (one row per run) and ``ratios.csv`` (one row per pair and design, then
     ``GEOMEAN_GATE`` and ``GEOMEAN_EXTRA`` per pair), §6.4's headers, RFC 4180 with ``\\n``.
     A pair is written when both its legs are in the table. A geomean row's ``n`` is the number
     of its set's designs with an ``ok`` run on both legs; each metric's own count of defined
     ratios is in ``runs.json``. ``bands`` defaults to the committed ``bands.json`` (its
-    metrics are the gated ones, §6.1; its bounds set the 4-decimal rule)."""
-    layout = _layout(runs, bands)
+    metrics are the gated ones, §6.1; its bounds set the 4-decimal rule). ``gate_set`` is the
+    ``GEOMEAN_GATE`` set (default: the 19)."""
+    layout = _layout(runs, bands, gate_set)
     arch = layout.runs[0].arch if layout.runs else ""
     _write_text(runs_path, _csv([RUNS_HEADER, *(_run_cells(layout, r) for r in layout.runs)]))
     rows: list[Sequence[str]] = [RATIOS_HEADER]
@@ -933,11 +939,11 @@ def verdict_state(gate_object: Mapping[str, object]) -> str:
 
 
 def write_json(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, path: Path,
-               *, bands: Bands | None = None) -> None:
+               *, bands: Bands | None = None, gate_set: Sequence[str] | None = None) -> None:
     """``runs.json``: ``{"schema", "header", "runs": [metrics.json objects], "geomeans":
     [per pair, set and metric: geomean and n of |S|], "gate": {"pass", "violations"}}``
-    (``"gate": null`` without a verdict), sorted keys, indent 1."""
-    layout = _layout(runs, bands)
+    (``"gate": null`` without a verdict: the table is not gated), sorted keys, indent 1."""
+    layout = _layout(runs, bands, gate_set)
     data = {"schema": TABLE_SCHEMA, "header": _header_json(header),
             "runs": [_run_json(run) for run in layout.runs], "geomeans": _geomeans_json(layout),
             "gate": verdict_json(verdict)}
@@ -999,7 +1005,8 @@ def _bands(path: Path) -> dict[str, tuple[float, float]]:
     return bands
 
 
-def _golden_values(path: Path) -> dict[tuple[str, str], float]:
+def _golden_values(path: Path, arch: str | None) -> dict[tuple[str, str], float]:
+    """The numeric cells of each row (of ``<arch>.xml`` only, when ``arch`` is given)."""
     lines = [line.rstrip("\t") for line in path.read_text(encoding="utf-8").splitlines()]
     if not lines:
         raise ValueError(f"{path}: empty")
@@ -1009,6 +1016,8 @@ def _golden_values(path: Path) -> dict[tuple[str, str], float]:
     values = {}
     for line in lines[1:]:
         cells = dict(zip(columns, line.split("\t"), strict=False))
+        if arch is not None and Path(cells.get("arch", "")).stem != arch:
+            continue
         design = Path(cells.get("circuit", "")).stem
         for column, cell in cells.items():
             try:
@@ -1020,13 +1029,14 @@ def _golden_values(path: Path) -> dict[tuple[str, str], float]:
     return values
 
 
-def load_golden_xcheck(vtr_root: Path) -> GoldenXcheck:
-    """Read ``vtr_reg_qor_chain``'s ``golden_results.txt`` and the pass requirements its
-    ``config.txt`` names (under ``vtr_flow/parse/pass_requirements``). OSError or ValueError
-    when they cannot be read."""
+def load_golden_xcheck(vtr_root: Path, *, arch: str | None = None) -> GoldenXcheck:
+    """Read ``vtr_reg_qor_chain``'s ``golden_results.txt`` (only the rows of ``<arch>.xml``
+    when ``arch`` is given: the task is k6-only, so an EArch table gets no values) and the pass
+    requirements its ``config.txt`` names (under ``vtr_flow/parse/pass_requirements``). OSError
+    or ValueError when they cannot be read."""
     config_dir = vtr_root / XCHECK_TASK
     name = _config_value(config_dir / "config.txt", PASS_REQUIREMENTS_KEY)
-    return GoldenXcheck(values=_golden_values(config_dir / "golden_results.txt"),
+    return GoldenXcheck(values=_golden_values(config_dir / "golden_results.txt", arch),
                         bands=_bands(vtr_root / PASS_REQUIREMENTS_DIR / name))
 
 
@@ -1068,11 +1078,13 @@ def _geomean_cell(layout: _Layout, pair: tuple[str, str], name: str, designs: Se
 
 
 def _max_cell(layout: _Layout, pair: tuple[str, str], name: str,
-              designs: Sequence[str]) -> str:
+              designs: Sequence[str], *, lowest: bool = False) -> str:
+    """The largest ratio and its design (the smallest with ``lowest``); the first wins ties."""
     best: tuple[float, str] | None = None
     for design in designs:
         value = layout.ratio(pair, design, name)
-        if value is not None and (best is None or value > best[0]):
+        if value is not None and (best is None or (value < best[0] if lowest
+                                                   else value > best[0])):
             best = (value, design)
     return "" if best is None else f"{fmt_ratio(best[0], layout.bounds)} ({best[1]})"
 
@@ -1117,8 +1129,10 @@ def _md_gate(layout: _Layout, verdict: Verdict | None) -> list[str]:
     pair = layout.bands.pair
     if pair[0] not in layout.legs:
         return []
-    state = verdict.state if verdict is not None else "not computed"
-    violations = verdict.violations if verdict is not None else ()
+    if verdict is None or not layout.gate:
+        return [f"## Gate (decision 3): {NOT_GATED}", "",
+                "No gate design in this table (spec §6.2 gates the 19 on k6).", ""]
+    state, violations = verdict.state, verdict.violations
     lines = [f"## Gate (decision 3): {state}", ""]
     lines += _md_table(_compare_header(layout, pair, True),
                        _compare_rows(layout, pair, layout.gate, violations))
@@ -1261,9 +1275,11 @@ def _md_noise(layout: _Layout) -> list[str]:
     if pair not in layout.pairs():
         return []
     rows = [[name, _geomean_cell(layout, pair, name, layout.gate),
+             _max_cell(layout, pair, name, layout.gate, lowest=True),
              _max_cell(layout, pair, name, layout.gate)] for name in layout.bands.metrics]
-    return ["## Noise floor", "", *_md_table(
-        ["metric", f"R/P geomean ({len(layout.gate)})", "max"], rows)]
+    return ["## Noise floor", "", "VPR's own spread runs both ways: the smallest and the largest "
+            "R/P bound it.", "", *_md_table(
+                ["metric", f"R/P geomean ({len(layout.gate)})", "min", "max"], rows)]
 
 
 def _verdict_cell(run: Run | None, name: str) -> str:
@@ -1356,6 +1372,10 @@ def _md_xcheck(layout: _Layout, golden: GoldenXcheck | None) -> list[str]:
     head.append("outside")
     bands = ", ".join(f"{column} {golden.bands[column][0]:.2f}–{golden.bands[column][1]:.2f}"
                       for _, column in XCHECK if column in golden.bands)
+    if not any(design == d for design, _ in golden.values for d in layout.designs):
+        return ["## Cross-check against VTR's golden", "",
+                f"VTR's `vtr_reg_qor_chain` golden has no row for these designs on {layout.arch}"
+                "; no cross-check.", ""]
     lines = ["## Cross-check against VTR's golden", "",
              "P against VTR's `golden_results.txt` for `vtr_reg_qor_chain` (another machine and "
              "VPR revision), with the bands of its pass requirements: " + (bands or "none") + ". "
@@ -1383,12 +1403,15 @@ def _md_title(header: TableHeader) -> list[str]:
 def write_md(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, path: Path, *,
              golden: GoldenXcheck | None, bands: Bands | None = None,
              divergences: Sequence[tuple[str, str, str]] = (),
-             equiv_exceptions: Sequence[tuple[str, str, str]] = ()) -> None:
+             equiv_exceptions: Sequence[tuple[str, str, str]] = (),
+             gate_set: Sequence[str] | None = None) -> None:
     """``qor.md``: §6.3's sections in order. The gate section (with the non-gating rows) only
     when O is in the table; Netlist, Packed, Routed and Cost always; Attribution, Noise floor,
     Declared divergences and Name style when their legs are in it; the functional check when P
-    or O is; the cross-check against VTR's golden whenever P is (and ``golden`` is given)."""
-    layout = _layout(runs, bands)
+    or O is; the cross-check against VTR's golden whenever P is (and ``golden`` is given).
+    ``gate_set`` is the set the gate rows cover (default: the 19); an empty one, or no
+    ``verdict``, writes the gate section as not gated."""
+    layout = _layout(runs, bands, gate_set)
     lines = _md_title(header)
     lines += _md_gate(layout, verdict)
     lines += _md_netlist(layout) + _md_packed(layout) + _md_routed(layout) + _md_cost(layout)
