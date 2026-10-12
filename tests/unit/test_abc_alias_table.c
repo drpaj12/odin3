@@ -152,13 +152,13 @@ static const odin3_abc_command_info k_allowed[] = {
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
-    {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", ""},
+    {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "m"},
     {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "s"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
-    {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cone", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -801,6 +801,13 @@ static void test_crash_refusals(void) {
     TEST_ASSERT_TRUE(crash_opt("&dch", 'm'));
 }
 
+/* Fix round 3: &put -e after a mapping step, and print_auto -O past the last output. */
+static void test_crash_refusals_round3(void) {
+    TEST_ASSERT_TRUE(crash_opt("&put", 'e'));
+    TEST_ASSERT_TRUE(crash_opt("print_auto", 'O'));
+    TEST_ASSERT_TRUE(uses_refused_opt("&get -n; &if -K 6; &put -e"));
+}
+
 /* print_box crashes with any option, so it is a refused row; a crash option refuses a script. */
 static void test_crash_command(void) {
     expect_row("print_box", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
@@ -904,6 +911,7 @@ int main(void) {
     RUN_TEST(test_option_refused_aliases);
     RUN_TEST(test_crash_refusals);
     RUN_TEST(test_crash_command);
+    RUN_TEST(test_crash_refusals_round3);
     RUN_TEST(test_files_rows_pinned);
     RUN_TEST(test_rc_parser_forms);
     RUN_TEST(test_print_rows);

@@ -29,6 +29,10 @@
  *   if -s           abc.c:23125 fDelayOptLut: If_CutLutBalanceEval (ifDelay.c:387)
  *   &if -s          abc.c:45416 fDelayOptLut: If_CutLutBalanceEval (ifDelay.c:387)
  *   &dch -m         abc.c:50024 fMinLevel: Gia_ManChoiceMinLevel_rec (giaEquiv.c:571)
+ *   &put -e         abc.c:35243 fFindEnables: on a mapped & network (after &if or &get -m),
+ *                               Abc_NtkFromMappedGia_rec (abcDar.c:896; fix round 3)
+ *   print_auto -O   abc.c:2652  Output: an index past the last output reads a stray BDD
+ *                               (Extra_SupportArray, extraBddMisc.c:550; fix round 3)
  *
  * print_box crashes with any option, so it is a refused row of class CRASH.
  *
@@ -79,7 +83,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
-    {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", ""},
+    {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "m"},
@@ -87,7 +91,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
     /* printing: the 34 print_* commands at the pin but print_constr, print_status and print_box;
      * print_mint is registered only under ABC_USE_CUDD (on in the pinned build) */
-    {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cone", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},

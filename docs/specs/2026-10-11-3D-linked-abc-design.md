@@ -1013,10 +1013,16 @@ options that read or write a file, or take a string, are refused too (AB-21 step
 `-b -d`, `rewrite -x`, `resub -P -D`, `scorr -P -e -f`, `if -S -J -f`, `&if -S -J` and `&ps -D`.
 
 Crash options, refused too (§7.3 step 9): `if -s` and `&if -s` (`If_CutLutBalanceEval`,
-ifDelay.c:387) and `&dch -m` (`Gia_ManChoiceMinLevel_rec`, giaEquiv.c:571). `print_box` crashes
+ifDelay.c:387), `&dch -m` (`Gia_ManChoiceMinLevel_rec`, giaEquiv.c:571), `&put -e` on a mapped
+`&` network, after `&if` or `&get -m` (`Abc_NtkFromMappedGia_rec`, abcDar.c:896), and
+`print_auto -O` (an output index past the last output; `Extra_SupportArray`,
+extraBddMisc.c:550). `print_box` crashes
 with any option (`If_LibBoxPrint` on the NULL box library, ifLibBox.c:350) and is refused with
 the class ending of §7.3 step 8.
 
+> *(Erratum, 3D Task 10 review fix round 3, 2026-10-12: `&put -e` (found by the reviewer) and
+> `print_auto -O` added. Every allowed command was then run once per option after a mapping step
+> (`&if`, `&get -m`, `if`), with and without latches.)*
 > *(Erratum, 3D Task 10 review fix round 2, 2026-10-12: crash options and the `print_box` refusal
 > are new. They were found by running each allowed command once per option on one small design,
 > so the list is not complete; AB-21's fuzzer (Task 11) or a later task should widen it.)*
