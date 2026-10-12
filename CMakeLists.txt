@@ -1104,6 +1104,8 @@ if(BUILD_TESTING)
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+    endif()
+
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
     # (tools/verilog-gen/compare.py; 200 seeds here, 5,000 locally). The oracle is VTR's Yosys
     # (0.55, docs/ORACLES.md) when the workspace has it, else ODIN3_YOSYS (CI's).

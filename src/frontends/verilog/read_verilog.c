@@ -500,4 +500,7 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog [--parse-only] [<file>...]: read Verilog-2005 (the project's Verilog files, or "
     "the files given) into one parsed AST with -v/-y libraries; --parse-only keeps it "
     "(write_verilog_ast prints it), otherwise elaboration (2D) follows",
-    read_verilog_run, NULL, false};
+    read_verilog_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_OK};

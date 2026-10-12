@@ -714,6 +714,6 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_preprocess,
                                                       &odin3_pass_write_rtlil,
                                                       &odin3_pass_proc,
-                                                       &odin3_read_verilog_pass};
+                                                      &odin3_read_verilog_pass};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);
