@@ -1863,6 +1863,27 @@ static void test_constshift(void) {
     expect_wire("y", 4, "0000");
 }
 
+/*
+ * A z in a constant shift amount: plain opt_expr's constshift reads it as 0, and -keepdc (where
+ * constshift wants a fully defined amount) leaves the fold, which gives all x.
+ *   yosys -p "read_rtlil shlz.il; opt_expr"          -> connect \\y 4'0110
+ *   yosys -p "read_rtlil shlz.il; opt_expr -keepdc"  -> connect \\y 4'x
+ */
+static const char K_SHL_Z[] = "module \\m\n  wire width 4 output 1 \\y\n  cell $shl \\c\n"
+                              "    parameter \\A_WIDTH 4\n    parameter \\B_WIDTH 2\n"
+                              "    parameter \\Y_WIDTH 4\n    connect \\A 4'0011\n"
+                              "    connect \\B 2'z1\n    connect \\Y \\y\n  end\nend\n";
+
+static void test_shift_z_amount(void) {
+    build_run(K_SHL_Z);
+    expect_wire("y", 4, "0110");
+    memset(&fx.counts, 0, sizeof fx.counts);
+    fx.opts.keepdc = true;
+    build_run(K_SHL_Z);
+    expect_wire("y", 4, "xxxx");
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.folded);
+}
+
 /* yosys -p "read_rtlil shiftx_trim.il; opt_expr": A narrowed to a2 */
 static void test_shiftx_trim(void) {
     build_run(K_SHIFTX_TRIM);
@@ -2587,6 +2608,37 @@ static void test_expr_oom(void) {
     printf("opt_expr OOM: %ld failing allocation points\n", failures);
 }
 
+/* replace_undriven under out of memory: a net that is not replaced keeps its init bit. (The sweep
+ * never fails inside replace_net between the init removal and the constant net: the constant node
+ * is made without an allocation that can fail there; the test pins the invariant.) */
+/* While w[1] (init 1) is still undriven, wire w still has its init bit. */
+static void expect_init_kept(void) {
+    odin3_wire_id wire = odin3_module_find_wire(fx.res.module, intern("w"));
+    const odin3_value *init =
+        odin3_attr_get(fx.res.module, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, intern("init"));
+    if (cbit(wnet("w", 1)) != '?') {
+        return;
+    }
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, init->bits[1]);
+}
+
+static void test_undriven_oom_keeps_init(void) {
+    fx.opts.undriven = true;
+    bool done = false;
+    for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
+        build(K_UNDRIVEN);
+        odin3_util_set_alloc_fail_after(fail);
+        odin3_status st = odin3_opt_expr_run(&fx.ctx, fx.res.module, &fx.opts, &fx.counts);
+        odin3_util_set_alloc_fail_after(-1);
+        done = st == ODIN3_OK;
+        TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+        expect_init_kept();
+        check_full();
+    }
+    TEST_ASSERT_TRUE(done);
+}
+
 static void run_logic_tests(void) {
     RUN_TEST(test_const_and);
     RUN_TEST(test_and_bit_inverse);
@@ -2615,6 +2667,7 @@ static void run_logic_tests(void) {
 }
 
 static void run_arith_tests(void) {
+    RUN_TEST(test_shift_z_amount);
     RUN_TEST(test_pow_signed_base);
     RUN_TEST(test_eqneq_empty);
     RUN_TEST(test_eqneq_resize);
@@ -2643,6 +2696,7 @@ static void run_arith_tests(void) {
 }
 
 static void run_mux_and_driver_tests(void) {
+    RUN_TEST(test_undriven_oom_keeps_init);
     RUN_TEST(test_mux_undef_all_x);
     RUN_TEST(test_mux_sel01_empty);
     RUN_TEST(test_eqneq_resize_resumes);

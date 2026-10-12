@@ -48,12 +48,12 @@ static wire_facts facts_of(const odin3_expr_ctx *ec, odin3_net_id net) {
 /* Replaces one undriven net by its init value or x; the used init bits go. */
 static odin3_status replace_net(odin3_expr_ctx *ec, odin3_net_id net) {
     odin3_bit init = odin3_ffinit_get(ec->module, net);
-    odin3_status st = ODIN3_OK;
-    if (init != ODIN3_BIT_X) {
+    odin3_net_id value = {0};
+    /* the constant net first: it can allocate, and a failure must leave the init as it was */
+    odin3_status st = odin3_opt_const_net(ec->oc, init, &value);
+    if (st == ODIN3_OK && init != ODIN3_BIT_X) {
         st = odin3_ffinit_remove(ec->module, net, NULL);
     }
-    odin3_net_id value = {0};
-    st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, init, &value) : st;
     st = st == ODIN3_OK ? odin3_net_merge(ec->module, (odin3_net_pair){value, net}) : st;
     if (st == ODIN3_OK) {
         ec->oc->changed = true;
