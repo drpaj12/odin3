@@ -35,9 +35,10 @@ enum {
     E1_SLOT_PORTS = 1,
     E1_ITEMS = 2,
     E1_KEY_SHIFT = 32,
-    E1_LV_NET = 0,   /* a net lvalue (I3) */
-    E1_LV_CONST = 1, /* a constant part */
-    E1_LV_OTHER = 2  /* anything else */
+    E1_LV_NET = 0,       /* a net lvalue (I3) */
+    E1_LV_CONST = 1,     /* a constant part */
+    E1_LV_OTHER = 2,     /* anything else */
+    TY_INTEGER_BITS = 32 /* an `integer` function result */
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
@@ -70,13 +71,23 @@ static odin3_status ty_error(odin3_elab1_env *env, odin3_ast_id node, const char
     return ODIN3_ERR_PARSE;
 }
 
+static odin3_status ty_slot(odin3_elab1_env *env, odin3_ast_id node, uint32_t idx,
+                            odin3_etype *out);
+
 static odin3_status ty_ident(odin3_elab1_env *env, odin3_ast_id node, odin3_etype *out) {
     const odin3_ast *ast = env->e1->parsed;
-    uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(ast, node));
+    uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(ast, node));
     if (idx == E1_NONE) {
         *out = (odin3_etype){1, false, false}; /* an implicit net (EL-25; Task 15 declares it) */
         return ODIN3_OK;
     }
+    return ty_slot(env, node, idx, out);
+}
+
+/* The type of slot idx, named at node. */
+static odin3_status ty_slot(odin3_elab1_env *env, odin3_ast_id node, uint32_t idx,
+                            odin3_etype *out) {
+    const odin3_ast *ast = env->e1->parsed;
     uint8_t kind = odin3_elab1_env_slot(env, idx)->entry.kind;
     if (kind != ODIN3_ENTRY_PARAM && kind != ODIN3_ENTRY_LOCALPARAM && kind != ODIN3_ENTRY_SIGNAL &&
         kind != ODIN3_ENTRY_GENVAR) {
@@ -107,7 +118,7 @@ static odin3_status ty_word(odin3_elab1_env *env, odin3_ast_id sel, odin3_etype 
         depth++;
     }
     uint32_t idx = odin3_ast_kind_of(ast, obj) == ODIN3_AST_IDENT
-                       ? odin3_elab1_env_find(env, 0, odin3_ast_name(ast, obj))
+                       ? odin3_elab1_env_lookup(env, odin3_ast_name(ast, obj))
                        : E1_NONE;
     if (idx == E1_NONE || odin3_elab1_env_slot(env, idx)->entry.kind != ODIN3_ENTRY_SIGNAL ||
         odin3_elab1_env_slot(env, idx)->n_unpacked != depth) {
@@ -121,23 +132,51 @@ static odin3_status ty_word(odin3_elab1_env *env, odin3_ast_id sel, odin3_etype 
     return st;
 }
 
-/* A user function's call: FUNCTION_DECL is pending until Task 15; an unknown name is an error. */
-static odin3_status ty_call(odin3_elab1_env *env, odin3_ast_id call) {
+/* A user function's call is typed at its declared result (EL-17, §17 #17): its range folded where
+ * the function is declared, `integer` as 32 signed bits, else one bit. */
+static odin3_status ty_function(odin3_elab1_env *env, uint32_t idx, odin3_etype *out) {
+    const odin3_ast *ast = env->e1->parsed;
+    odin3_ast_id decl = odin3_elab1_env_slot(env, idx)->entry.decl;
+    uint32_t scope = odin3_elab1_env_slot(env, idx)->scope;
+    uint32_t flags = odin3_ast_flags(ast, decl);
+    uint32_t dt = (flags & (uint32_t)ODIN3_AST_F_FUNCTION_DECL_DT_MASK) >>
+                  (uint32_t)ODIN3_AST_F_FUNCTION_DECL_DT_SHIFT;
+    *out = (odin3_etype){1, (flags & ODIN3_AST_F_FUNCTION_DECL_SIGNED) != 0, false};
+    if (dt == ODIN3_AST_DT_INTEGER) {
+        *out = (odin3_etype){TY_INTEGER_BITS, true, false};
+        return ODIN3_OK;
+    }
+    odin3_ast_id range = odin3_ast_child(ast, decl, 0);
+    if (range.v == 0) {
+        return ODIN3_OK;
+    }
+    int64_t msb = 0;
+    int64_t lsb = 0;
+    uint32_t saved = env->cur_scope;
+    env->cur_scope = scope;
+    odin3_status st = odin3_elab1_env_range(env, range, &msb, &lsb);
+    env->cur_scope = saved;
+    if (st == ODIN3_OK) {
+        out->width = (uint32_t)(msb >= lsb ? msb - lsb : lsb - msb) + 1U;
+    }
+    return st;
+}
+
+/* A call: a user function at its declared width; a system function or an unknown name is an
+ * error. */
+static odin3_status ty_call(odin3_elab1_env *env, odin3_ast_id call, odin3_etype *out) {
     odin3_elab1 *e1 = env->e1;
     if ((odin3_ast_flags(e1->parsed, call) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
         if (!env->quiet) {
-            odin3_elab1_pend_form(e1, call); /* E20 and the others: Task 16 */
+            (void)odin3_elab1_reject(e1, call); /* E20, E21 */
         }
         return ODIN3_ERR_PARSE;
     }
-    uint32_t idx = odin3_elab1_env_find(env, 0, odin3_ast_name(e1->parsed, call));
+    uint32_t idx = odin3_elab1_env_lookup(env, odin3_ast_name(e1->parsed, call));
     if (idx == E1_NONE || odin3_elab1_env_slot(env, idx)->entry.kind != ODIN3_ENTRY_FUNCTION) {
         return ty_error(env, call, odin3_ast_name_str(e1->parsed, call));
     }
-    if (!env->quiet) {
-        odin3_elab1_not_yet(e1, odin3_elab1_env_slot(env, idx)->entry.decl);
-    }
-    return ODIN3_ERR_PARSE;
+    return ty_function(env, idx, out);
 }
 
 static odin3_status ty_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
@@ -148,12 +187,12 @@ static odin3_status ty_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
     case ODIN3_AST_IDENT:
         return ty_ident(env, node, out);
     case ODIN3_AST_CALL:
-        return ty_call(env, node);
-    default: /* a HIER_NAME: Task 14 */
-        if (!env->quiet) {
-            odin3_elab1_not_yet(env->e1, node);
-        }
-        return ODIN3_ERR_PARSE;
+        return ty_call(env, node, out);
+    default: { /* a HIER_NAME into the generate blocks (G7) */
+        uint32_t idx = 0;
+        odin3_status st = odin3_elab1_scope_target(env, node, &idx);
+        return st != ODIN3_OK ? st : ty_slot(env, node, idx, out);
+    }
     }
 }
 
@@ -577,7 +616,7 @@ static odin3_status reads_unknown(const odin3_elab1 *e1, odin3_ast_id expr, bool
         *out = ev == ODIN3_AST_ENTER &&
                (kind == ODIN3_AST_HIER_NAME ||
                 (kind == ODIN3_AST_IDENT &&
-                 odin3_elab1_env_find(e1->env, 0, odin3_ast_name(e1->parsed, node)) == E1_NONE));
+                 odin3_elab1_env_lookup(e1->env, odin3_ast_name(e1->parsed, node)) == E1_NONE));
     }
     odin3_ast_cursor_free(&cur);
     return st;

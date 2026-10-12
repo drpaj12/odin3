@@ -37,6 +37,7 @@
 
 enum {
     BD_SCRATCH_CHUNK = 4096,    /* the scratch arena's chunk */
+    BD_SHIFT = 32,              /* holder << 32 | name */
     BD_SCRATCH_RENEW = 1 << 20, /* scratch bytes after which the arena is replaced */
     BD_INTEGER_BITS = 32,       /* an `integer`: signed [31:0] */
 };
@@ -62,6 +63,7 @@ typedef enum bd_num {
 } bd_num;
 
 static const char k_blackbox[] = "blackbox";
+static const char k_implicit[] = "implicit"; /* the ATTR marking stage 1's implicit nets */
 static const char k_work[] = "work";
 
 /* One node of the sweep's path from the UNIT. */
@@ -110,6 +112,8 @@ typedef struct bd_run {
     odin3_vec parts;       /* bd_part: one HIER_NAME */
     odin3_strbuf text;     /* one HIER_NAME's path */
     odin3_u64map *modules; /* MODULE name -> MODULE node */
+    odin3_u64map *held;    /* holder << 32 | name: a declaration directly in a MODULE or GEN_BLOCK
+                              holding a GEN_BLOCK (holder << 32: the holder is indexed) */
     odin3_scope_id design_scope;
     uint32_t work_lib; /* strtab ID of "work" */
     uint32_t errors;
@@ -509,6 +513,15 @@ static void bd_gate(bd_run *br, odin3_ast_id node) {
     }
 }
 
+/* A net port's value (`output wire w = e`, or a merged `wire w = e`, C-1) is a net declaration
+ * assignment, queued (CONTINUOUS) as a NET_DECL's is. */
+static void bd_port_value(bd_run *br, odin3_ast_id declarator, bool variable) {
+    if (!variable && bd_child(br, declarator, 0).v != 0) {
+        bd_assign net_assign = {declarator, declarator, ODIN3_ASSIGN_CONTINUOUS};
+        bd_push_assign(br, &net_assign);
+    }
+}
+
 /* A port's symbol: a module port is a net (its NET field) or a reg/integer variable (its DT); a
  * function or task port is a variable. */
 static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, bool subroutine) {
@@ -544,10 +557,13 @@ static void bd_port(bd_run *br, const bd_frame *decl, odin3_ast_id declarator, b
         bd_integer_type(&spec);
     }
     bd_unpacked(br, declarator, bd_declare(br, &spec, declarator));
+    bd_port_value(br, declarator, is_var); /* a subroutine port is a variable */
 }
 
 _Static_assert(ODIN3_AST_F_NET_DECL_SIGNED == ODIN3_AST_F_VAR_DECL_SIGNED,
                "NET_DECL and VAR_DECL share the SIGNED bit");
+
+static bool bd_has_marker(const bd_run *br, odin3_ast_id node, const char *text);
 
 /* A NET_DECL's or VAR_DECL's declarator; a net declaration assignment is queued (CONTINUOUS). */
 static void bd_object(bd_run *br, const bd_frame *decl, odin3_ast_id declarator) {
@@ -568,6 +584,10 @@ static void bd_object(bd_run *br, const bd_frame *decl, odin3_ast_id declarator)
         .decl = decl->node,
         .declarator = declarator,
     };
+    if (is_net && bd_has_marker(br, decl->node, k_implicit)) {
+        spec.flags =
+            (uint16_t)(spec.flags | ODIN3_SYM_F_IMPLICIT); /* EL-4: stage 1's implicit net */
+    }
     bd_packed(br, bd_child(br, decl->node, is_net ? 1 : 0), &spec);
     if (!is_net && sub == ODIN3_AST_VAR_DECL_INTEGER) {
         bd_integer_type(&spec);
@@ -692,18 +712,23 @@ static void bd_modules(bd_run *br, odin3_ast_id unit) {
 
 /* --- scopes of the sweep -------------------------------------------------------------------- */
 
-static bool bd_is_blackbox(const bd_run *br, odin3_ast_id module) {
+/* Whether node carries the value-less ATTR text (the elaborated form's markers). */
+static bool bd_has_marker(const bd_run *br, odin3_ast_id node, const char *text) {
     uint32_t id = 0;
-    if (!odin3_strtab_find(odin3_design_strtab(br->design), odin3_bytes_cstr(k_blackbox), &id)) {
+    if (!odin3_strtab_find(odin3_design_strtab(br->design), odin3_bytes_cstr(text), &id)) {
         return false;
     }
-    odin3_ast_span attrs = odin3_ast_attrs(br->ast, module);
+    odin3_ast_span attrs = odin3_ast_attrs(br->ast, node);
     for (uint32_t i = 0; i < attrs.n; i++) {
         if (odin3_ast_name(br->ast, attrs.ids[i]) == id) {
             return true;
         }
     }
     return false;
+}
+
+static bool bd_is_blackbox(const bd_run *br, odin3_ast_id module) {
+    return bd_has_marker(br, module, k_blackbox);
 }
 
 /* A MODULE frame: the scope declared for it (none for a duplicate: its subtree is skipped). */
@@ -759,6 +784,83 @@ static bool bd_block_symbol(bd_run *br, const odin3_scope_spec *spec, odin3_ast_
     return bd_declare(br, &sym, node).v != 0;
 }
 
+/* The names one item of a holder declares (its declarators, instances, or its own name). */
+static odin3_status bd_hold_item(bd_run *br, odin3_ast_id holder, odin3_ast_id item) {
+    odin3_status st = ODIN3_OK;
+    switch (bd_kind(br, item)) {
+    case ODIN3_AST_NET_DECL:
+    case ODIN3_AST_VAR_DECL:
+    case ODIN3_AST_PARAM_DECL:
+    case ODIN3_AST_PORT_DECL:
+    case ODIN3_AST_INSTANTIATION:
+    case ODIN3_AST_GATE_DECL: {
+        odin3_ast_span tail = bd_tail(br, item);
+        for (uint32_t i = 0; st == ODIN3_OK && i < tail.n; i++) {
+            uint64_t key = (uint64_t)holder.v << BD_SHIFT | odin3_ast_name(br->ast, tail.ids[i]);
+            st = odin3_u64map_put(br->held, (odin3_kv){key, 1});
+        }
+        return st;
+    }
+    case ODIN3_AST_FUNCTION_DECL:
+    case ODIN3_AST_TASK_DECL:
+        return odin3_u64map_put(
+            br->held,
+            (odin3_kv){(uint64_t)holder.v << BD_SHIFT | odin3_ast_name(br->ast, item), 1});
+    default:
+        return ODIN3_OK;
+    }
+}
+
+/* True when holder (a MODULE or GEN_BLOCK) declares name directly, besides its blocks: indexed
+ * once per holder. */
+static bool bd_holds(bd_run *br, odin3_ast_id holder, uint32_t name) {
+    uint64_t base = (uint64_t)holder.v << BD_SHIFT;
+    if (!odin3_u64map_get(br->held, base, NULL)) {
+        odin3_ast_span kids = odin3_ast_children(br->ast, holder);
+        odin3_status st = odin3_u64map_put(br->held, (odin3_kv){base, 1});
+        for (uint32_t i = 0; st == ODIN3_OK && i < kids.n; i++) {
+            bool list = kids.ids[i].v != 0 && bd_kind(br, kids.ids[i]) == ODIN3_AST_LIST;
+            odin3_ast_span entries = list ? odin3_ast_children(br->ast, kids.ids[i])
+                                          : (odin3_ast_span){kids.ids + i, kids.ids[i].v != 0};
+            for (uint32_t j = 0; st == ODIN3_OK && j < entries.n; j++) {
+                st = bd_hold_item(br, holder, entries.ids[j]); /* a module's ports, parameters */
+            }
+        }
+        bd_latch(br, st);
+    }
+    return odin3_u64map_get(br->held, base | name, NULL);
+}
+
+/* True for a name stage 1 gives an unnamed block: `genblk` and digits (EL-21; a user's block of
+ * that name is named, but reaches the same rule only when stage 1 padded it). */
+static bool bd_genblk_name(const bd_run *br, uint32_t name) {
+    const char *text = bd_str(br, name);
+    static const char prefix[] = "genblk";
+    size_t len = sizeof prefix - 1;
+    if (strncmp(text, prefix, len) != 0 || text[len] == '\0') {
+        return false;
+    }
+    for (const char *ch = text + len; *ch != '\0'; ch++) {
+        if (*ch < '0' || *ch > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A GEN_BLOCK's BLOCK symbol, unless its holder declares the name later (the block came first, so
+ * no symbol holds the name yet): Yosys keeps both, an implicit `genblk1` beside a later `wire
+ * genblk1` (EL-21), and the block is then reached through its scope alone. False after M11. */
+static bool bd_gen_symbol(bd_run *br, const odin3_scope_spec *spec, odin3_ast_id node) {
+    const bd_frame *up = bd_frame_at(br, 0);
+    if (up != NULL && bd_genblk_name(br, spec->name) &&
+        odin3_symtab_lookup_local(br->st, spec->parent, spec->name).v == 0 &&
+        bd_holds(br, up->node, spec->name)) {
+        return true;
+    }
+    return bd_block_symbol(br, spec, node);
+}
+
 /* A GEN_BLOCK: its GENERATE scope (index from its slot) and BLOCK symbol. True: skip it. */
 static bool bd_gen_block(bd_run *br, bd_frame *fr) {
     odin3_scope_spec spec = {.kind = ODIN3_SCOPE_GENERATE,
@@ -770,7 +872,7 @@ static bool bd_gen_block(bd_run *br, bd_frame *fr) {
         return true;
     }
     spec.has_index = slot.v != 0;
-    if (spec.name != 0 && !bd_block_symbol(br, &spec, fr->node)) {
+    if (spec.name != 0 && !bd_gen_symbol(br, &spec, fr->node)) {
         return true;
     }
     fr->scope = bd_scope(br, &spec);
@@ -1257,6 +1359,18 @@ static const bd_part *bd_part_at(const bd_run *br, size_t idx) {
     return odin3_vec_cat(&br->parts, idx);
 }
 
+/* The generate block part names beside rec, a net or other declaration of its name declared
+ * after the block (EL-21: Yosys keeps both); 0 when there is none. */
+static odin3_scope_id bd_block_beside(const bd_run *br, const odin3_symbol *rec,
+                                      const bd_part *part) {
+    if (rec == NULL || rec->kind == ODIN3_SYM_BLOCK) {
+        return (odin3_scope_id){0};
+    }
+    odin3_scope_id child = odin3_scope_child(br->st, rec->scope, part->name, part->index);
+    const odin3_scope *found = child.v != 0 ? odin3_scope_get(br->st, child) : NULL;
+    return found != NULL && found->kind == ODIN3_SCOPE_GENERATE ? child : (odin3_scope_id){0};
+}
+
 /* The scope reached through the generate and named blocks of every component but the last of a
  * HIER_NAME (EL-22), the first found from scope outward; 0 after its error. */
 static odin3_scope_id bd_hier_scope(bd_run *br, odin3_ast_id node, odin3_scope_id scope) {
@@ -1265,6 +1379,11 @@ static odin3_scope_id bd_hier_scope(bd_run *br, odin3_ast_id node, odin3_scope_i
         odin3_sym_id sym = i == 0 ? bd_lookup(br, scope, part->name)
                                   : odin3_symtab_lookup_local(br->st, scope, part->name);
         const odin3_symbol *rec = odin3_symbol_get(br->st, sym);
+        odin3_scope_id beside = bd_block_beside(br, rec, part);
+        if (beside.v != 0) {
+            scope = beside; /* a generate block beside a later declaration of its name (EL-21) */
+            continue;
+        }
         if (rec == NULL || rec->kind != ODIN3_SYM_BLOCK) {
             bd_error(br, node, "hierarchical reference '%s' is not supported", br->text.data);
             return (odin3_scope_id){0};
@@ -1392,8 +1511,9 @@ static odin3_status bd_open(bd_run *br, odin3_ast *elab, odin3_elab_binding *out
     out->sym_of = odin3_util_calloc((size_t)out->n * sizeof *out->sym_of);
     out->scope_of = odin3_u64map_create(0);
     br->modules = odin3_u64map_create(0);
+    br->held = odin3_u64map_create(0);
     br->scratch = odin3_arena_create(BD_SCRATCH_CHUNK);
-    if (out->sym_of == NULL || out->scope_of == NULL || br->modules == NULL ||
+    if (out->sym_of == NULL || out->scope_of == NULL || br->modules == NULL || br->held == NULL ||
         br->scratch == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -1412,6 +1532,7 @@ static void bd_close(bd_run *br) {
     odin3_vec_free(&br->parts);
     odin3_strbuf_free(&br->text);
     odin3_u64map_destroy(br->modules);
+    odin3_u64map_destroy(br->held);
     odin3_arena_destroy(br->scratch);
 }
 

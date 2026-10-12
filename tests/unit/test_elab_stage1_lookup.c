@@ -571,8 +571,9 @@ static void test_pending_forced_kind(void) {
 
 /* Before Task 15 an always block is pending. */
 static void test_pending_always(void) {
-    run_one("t.v", "module t;\n  always @* ;\nendmodule\n");
-    et_expect(&rs, ODIN3_LOG_ERROR, "t.v:2:3: error: " PENDING ": 'ALWAYS'");
+    run_one("t.v", "module t;\n  reg r;\n  always r = 1;\nendmodule\n"); /* T6 (Task 16) */
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:3:3: error: always block without an event control is not supported");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
 }
 
@@ -589,9 +590,8 @@ static void test_pending_forced_module(void) {
 /* A design unit's directive and a reached module's attribute are pending until they land. */
 static void test_pending_directive_and_attribute(void) {
     run_one("d.v", "`timescale 1ns/1ps\n(* keep *)\nmodule t;\nendmodule\n");
-    et_expect(&rs, ODIN3_LOG_ERROR, "d.v:1:1: error: " PENDING ": 'DIRECTIVE'");
-    et_expect(&rs, ODIN3_LOG_ERROR, "d.v:2:4: error: " PENDING ": 'ATTR'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, rs.errors, et_log(&rs));
+    et_expect(&rs, ODIN3_LOG_WARN, "d.v:1:1: warning: `timescale is ignored"); /* L18 (Task 16) */
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
 }
 
 /* What odin3_elab_pending answers for (stage, kind or feature). */
@@ -608,8 +608,12 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_CONFIG_DECL, false},
     {ODIN3_ELAB_STAGE1, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 11 */
     {ODIN3_ELAB_STAGE1, ODIN3_AST_GATE_DECL, false},     /* landed by Task 12 */
-    {ODIN3_ELAB_STAGE1, ODIN3_AST_GEN_FOR, true},
-    {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, true},
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_GEN_FOR, false},       /* landed by Task 14 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_HIER_NAME, false},     /* landed by Task 14 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS, false},        /* landed by Task 15 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_ATTR, false},
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_DELAY, false},     /* landed by Task 16 */
+    {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, false}, /* landed by Task 16 */
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, true},

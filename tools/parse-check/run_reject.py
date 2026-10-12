@@ -1,6 +1,6 @@
 """run-reject: the Verilog negative cases (2C spec §7.3, plan Task 9 points (i), (j)).
 
-    run-reject [--elaborate] <odin3> <dir>
+    run-reject [--elaborate [--pending A4.v,T9.v]] <odin3> <dir>
 
 Every ``<case>.v`` in <dir> (smallest first) runs in <dir> under its basename, with the default
 given paths (plan point (j)): ``odin3 --parse-only <case>.v``, or with --elaborate
@@ -24,9 +24,11 @@ above; else **fail** on a forbidden line, a signal or a status other than 0 and 
 review I2: a crash never hides behind a pending line); else **pending** when a line contains
 ``elaboration is not available yet (2D)`` — 2D's located line for a construct whose elaboration
 has not landed (``f.v:3:5: error: elaboration is not available yet (2D): 'ALWAYS'``) or stage 2's
-unlocated stub text — listed, not failed; else **fail**. The summary line is ``run-reject: pass
-N, pending P, fail F``. Exit codes: 0 every case passes or is pending, 1 any case fails, 2 usage
-or input error, 77 (--elaborate) every case is pending.
+unlocated stub text — listed, not failed; else **fail**. A ``.warn`` case whose warning is found
+passes although the run fails on that stub text alone (stage 1 is done; stage 2 is the stub). The
+summary line is ``run-reject: pass N, pending P, fail F``. With ``--pending`` the set of pending
+cases must be exactly the one given (else exit 1). Exit codes: 0 every case passes or is
+pending, 1 any case fails, 2 usage or input error, 77 (--elaborate) every case is pending.
 """
 
 from __future__ import annotations
@@ -120,7 +122,11 @@ def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
         return Verdict("fail", f"forbidden line: {forbidden[0]}")
     if code not in (0, EXIT_ODIN3_FAIL):  # a signal (< 0) or a crash's status: never pending
         return Verdict("fail", f"exit status {code}")
-    if elaborate and any(STUB_TEXT in line for line in lines):
+    stub = any(STUB_TEXT in line for line in lines)
+    if elaborate and stub and found and not expect.is_error and code == EXIT_ODIN3_FAIL:
+        # stage 1 warned as expected; only stage 2's unlocated stub failed the run (until Task 17)
+        return Verdict("pass", "")
+    if elaborate and stub:
         return Verdict("pending", "2D: not available yet")
     if not found:
         return Verdict("fail", f"no line '{expect.prefix} ...{expect.text}...'")
@@ -152,7 +158,9 @@ def cases_of(directory: Path) -> list[Path]:
     return sorted(directory.glob("*.v"), key=lambda p: (p.stat().st_size, p.name))
 
 
-def summarize(verdicts: dict[str, Verdict], elaborate: bool) -> int:
+def summarize(
+    verdicts: dict[str, Verdict], elaborate: bool, expect_pending: set[str] | None = None
+) -> int:
     counts = {s: sum(v.status == s for v in verdicts.values()) for s in ("pass", "pending", "fail")}
     for name, verdict in verdicts.items():
         if verdict.status != "pass":
@@ -160,7 +168,14 @@ def summarize(verdicts: dict[str, Verdict], elaborate: bool) -> int:
     print(f"run-reject: pass {counts['pass']}, pending {counts['pending']}, fail {counts['fail']}")
     if counts["fail"] > 0:
         return EXIT_FAIL
-    if elaborate and counts["pending"] == len(verdicts):
+    pending = {name for name, verdict in verdicts.items() if verdict.status == "pending"}
+    if expect_pending is not None and pending != expect_pending:
+        print(
+            f"run-reject: pending {sorted(pending)}, expected exactly {sorted(expect_pending)}",
+            file=sys.stderr,
+        )
+        return EXIT_FAIL
+    if elaborate and expect_pending is None and counts["pending"] == len(verdicts):
         return EXIT_SKIP
     return EXIT_OK
 
@@ -169,6 +184,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="run-reject", description="the Verilog negative cases")
     parser.add_argument(
         "--elaborate", action="store_true", help="read_verilog without --parse-only"
+    )
+    parser.add_argument(
+        "--pending",
+        help="comma-separated cases (e.g. A4.v,T9.v) that must be pending, and no other "
+        "(2D: the cases stage 2 will report); empty = none pending",
     )
     parser.add_argument("odin3", help="the odin3 executable")
     parser.add_argument("dir", type=Path, help="the case directory")
@@ -190,7 +210,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"run-reject: {case}: {exc}", file=sys.stderr)
             return EXIT_USAGE
         verdicts[case.name] = judge(expect, code, output, args.elaborate)
-    return summarize(verdicts, args.elaborate)
+    expect_pending = (
+        {name for name in args.pending.split(",") if name} if args.pending is not None else None
+    )
+    return summarize(verdicts, args.elaborate, expect_pending)
 
 
 if __name__ == "__main__":

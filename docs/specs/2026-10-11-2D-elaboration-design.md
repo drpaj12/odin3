@@ -128,15 +128,6 @@ written named, by the type's parameter at their position, in the type's paramete
 §17 #29 records IEEE. (5) §9.1 gains the texts of Task 12's agent defaults; §17 #27 and #28 record
 gate arrays and the output rule.
 
-v4.10 (2026-10-12; the PR 2D-3 final review, controller ruling I2 and minors m1, m3, m5). (1) EL-9,
-EL-11, EL-4: a `(* blackbox *)` definition keeps its base name for every specialization (Yosys
-0.55: `module \bb`, `cell \bb` with `parameter \W 8`), one ports-only `MODULE` from its default
-specialization, its instances carrying their values; Task 19 declares one cell type under that
-name and `write_blif --vtr` writes `.subckt <base>` (§17 #30). (2) EL-9's key text names each
-pending entry's source. (3) EL-11: an implicit black box's width from an instance array's first
-connection is one element's when N divides it. (4) EL-24: 2C rejects an empty non-ANSI port other
-than a trailing comma, as Yosys does (§17 #31).
-
 v4.9 (2026-10-12; 2D Task 13, the binder, and the Task 12 review's notes n1 and n2). (1) EL-4: a
 black-box `MODULE`'s `PARAM_DECL`s are bare (no `RANGE`, `SIGNED` or `DT`: the value's `NUMBER`
 carries width and sign), and its ports are always written as `wire` ports (`integer`: `signed
@@ -160,6 +151,59 @@ function or task is `'u' is not a net, variable or parameter` (Yosys 0.55: "Fail
 for identifier"); a block's name binds to its `BLOCK` symbol until Task 18 decides (Yosys makes it
 an implicit net). 2A's symbol table gains O(1) chain appends and position lookups (2A §8
 amendment).
+
+v4.10 (2026-10-12; the PR 2D-3 final review, controller ruling I2 and minors m1, m3, m5). (1) EL-9,
+EL-11, EL-4: a `(* blackbox *)` definition keeps its base name for every specialization (Yosys
+0.55: `module \bb`, `cell \bb` with `parameter \W 8`), one ports-only `MODULE` from its default
+specialization, its instances carrying their values; Task 19 declares one cell type under that
+name and `write_blif --vtr` writes `.subckt <base>` (§17 #30). (2) EL-9's key text names each
+pending entry's source. (3) EL-11: an implicit black box's width from an instance array's first
+connection is one element's when N divides it. (4) EL-24: 2C rejects an empty non-ANSI port other
+than a trailing comma, as Yosys does (§17 #31).
+
+v4.11 (2026-10-12; 2D Task 15, agent defaults). (1) EL-4: the implicit nets' `NET_DECL` carries a
+value-less `ATTR` `implicit` (synthesized, like `blackbox`); the binder sets `ODIN3_SYM_F_IMPLICIT`
+from it (EL-5). (2) EL-24, EL-25: a `PORT_DECL` (the header's or the body's) and a `NET_DECL`/`VAR_DECL` of its name
+merge in either order (Yosys 0.55 accepts `module m(output q); reg q;`); an `input` declared `reg`/`integer` is a net (an `integer` one a `signed [31:0]`);
+a port expression in the header makes the body's unlisted-port errors moot (M6 is the one error);
+`` `default_nettype `` and `` `resetall `` are read by stage 1 and dropped (the other directives stay
+Task 16's). (3) EL-4: a `REPEAT` count below 0 is 0; an `always` without an event control, a delay
+or event control inside a statement and a system task other than `$readmemh`/`$readmemb` in an
+`initial` stay Task 16's (T6, T11, T12, S3). (4) §17 #35 records the rejections of what Yosys accepts.
+
+v4.12 (2026-10-12; 2D Task 15 fix round 1). (1) EL-19, EL-4: a block, function or task local or
+port hides a genvar of the same name (Verilog scoping). (2) EL-4: `$unnamed_block$<k>` is keyed by the
+source block, so generate iterations share k. (3) EL-4: untyped function and task ports have
+`NET` = 1 + `wire`; an `ATTR` `NUMBER` is unsized. (4) §17 #35 gains the Informational divergences.
+
+v4.13 (2026-10-12; 2D Task 15b). (1) EL-4: `localparam` and `parameter` declarations in a function,
+task or named block are accepted (Yosys 0.55 parity, Verilog-2005 block_item_declaration), written
+as `PARAM_DECL[localparam]` in the locals LIST with their final values, evaluated in a scope of
+their own under the enclosing one; a `parameter` there is a localparam. (2) §17 #35 loses the
+`localparam` half.
+
+v4.14 (2026-10-12; 2D Task 16). (1) §9.1/§9.2: stage 1 reports the REJECT and IGNORE rows in one
+scan per definition (`elab1_diag.c`), in source order, over the whole body including generate
+branches that are not selected; a definition whose scan reported an error is not expanded or
+written. (2) Agent defaults, §17 #36: an intra-assignment or statement event control outside an
+always's own is T12 (inside a function K12); `$readmemh`/`$readmemb` outside an `initial` is stage
+1's error `$readmemh is supported only in an initial block`; an edge/level mix is located at the
+`EVENT_CONTROL`; the arguments of an ignored system task are not scanned; a charge strength is
+warned even on the `trireg` that N15 rejects.
+
+v4.15 (2026-10-12; the PR 2D-4 final review, controller rulings C-1, I-1, I-2, I-3 and minors). (1)
+EL-4, EL-24 (C-1): a net or variable declaration merged into a port keeps its value and its
+attributes. The written port's `DECLARATOR` holds the value (`E?`: the net declaration assignment of
+a net port, the initial value of a `reg`/`integer` port, the slot an ANSI `output reg q = 1'b1`
+already used) and the `PORT_DECL` carries the attributes of both declarations (the later one wins a
+name both give, as Yosys 0.55 does); the binder queues the `CONTINUOUS` assignment of a net port
+that has a value. A value on both declarations is the error `port 'q' has a value in both of its
+declarations` (§17 #37). (2) EL-22 (I-1): a path into a named `begin`/`end` block of an `always` or
+`initial` (`blk.count`) is accepted by stage 1 and resolved by the binder. (3) I-2: a user function
+call in a connection stage 1 must size has its declared result width (§17 #17). (4) §9.3, §17 #36:
+a module whose scan found an error skips passes E and W, so its children are not reached; the info
+`not instantiated under the top` is not logged once an error was. (5) §17 #35's columns are
+corrected, #37 and #38 are new, and the changelog is in order.
 
 ## 1. Purpose and scope (EL-1)
 
@@ -280,11 +324,11 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
 | `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from it (EL-11), never an IR module |
-| `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24) |
+| `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
 | `VAR_DECL` | sub `reg` or `integer`; a declarator's `E?` is a variable initialiser (N8: `initial name = e`, EL-40) |
-| implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25) |
+| implicit nets | declared: one `NET_DECL[kind]` with one declarator per implicit net, `loc` = the first use, placed first among the `MODULE`'s items in first-use order; kind = the `` `default_nettype `` in effect (EL-25); marked by one value-less `ATTR` `implicit` (synthesized, v4.11) on the `NET_DECL`, from which the binder sets `ODIN3_SYM_F_IMPLICIT` (EL-5) |
 | `GEN_BLOCK` | every selected generate block, named (the user's name or `genblk<n>`, EL-21), with a `NUMBER` index slot (32-bit signed) for loop iterations; nesting kept, since scopes name things (EL-21) |
 | `CONT_ASSIGN` | no `STRENGTH`/`DELAY` slots |
 | `ALWAYS` | sub `always` over `TIMING_STMT`[`EVENT_CONTROL`, S]; the event list is `STAR`, or all `EVENT_EXPR[posedge|negedge]`, or all `EVENT_EXPR[none]` (mixed lists are rejected, EL-34) |
@@ -294,8 +338,8 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `INSTANTIATION` | name = the specialization's name (EL-9; a `(* blackbox *)` specialization's too), the implicit black box's, or the registered cell type it instantiates (EL-11); one `INSTANCE` per instance (arrays expanded, element names `u[3]`); params LIST: for a module or a `(* blackbox *)` specialization, one named `CONNECTION` per `parameter` of the specialization in declaration order with its final value (2A §4.6); for a cell type, the values given (`#()`, `defparam`, project) one per parameter by EL-8's precedence, each named (an ordered one by the type's parameter at its position, v4.8), in the type's parameter order, converted to the parameter's kind; for an implicit black box, the overrides as given, values resolved, ordered ones with name 0 (2A §4.6: no definition names them) |
 | `INSTANCE` | named; no `RANGE`; connections: for a module, a `(* blackbox *)` specialization or an implicit black box, one named `CONNECTION` per port of its `MODULE` in port order (`E` absent = unconnected; an implicit black box's ports are the union of every instance's, v4.8); for a cell type, as written |
 | `GATE_DECL` | sub ∈ `and nand or nor xor xnor buf not bufif0 bufif1 notif0 notif1`; no `STRENGTH`/`DELAY`; gate arrays expanded; unnamed instances keep name 0 |
-| `FUNCTION_DECL`, `TASK_DECL` | kept per specialization (and per generate scope that declares them); ranges with `NUMBER` bounds; ports LIST of `PORT_DECL`, one declarator each (non-ANSI inputs moved there in order); locals LIST; body |
-| `SEQ_BLOCK` | named, or unnamed with no locals; an unnamed block with declarations is named `$unnamed_block$<k>` (k = 1, 2, … per module in source order; Yosys's `-sv` name) |
+| `FUNCTION_DECL`, `TASK_DECL` | kept per specialization (and per generate scope that declares them); ranges with `NUMBER` bounds; ports LIST of `PORT_DECL`, one declarator each (non-ANSI inputs moved there in order; as for module ports, an untyped port's `NET` field is 1 + `wire`, never 0, v4.12); locals LIST (`VAR_DECL`s and, v4.13, `PARAM_DECL[localparam]` with the final value: a `parameter` there is a localparam, nothing overrides it; a read in a constant position folds in the function's or block's own scope, an expression read stays an `IDENT` that the binder gives the local's value; a local param hides a module parameter or genvar of the same name); body. A block, function or task local or port hides a genvar of the same name (v4.12) |
+| `SEQ_BLOCK` | named, or unnamed with no locals; a block's locals LIST may hold `PARAM_DECL[localparam]` entries as a function's does (v4.13); an unnamed block with declarations is named `$unnamed_block$<k>` (k = 1, 2, … per module in the source order of the source block: every generate iteration of one block shares its k; Yosys's `-sv` name) |
 | `FOR` | kept (stage 2 unrolls, EL-37) |
 | `REPEAT` | count `NUMBER` ≥ 0 |
 | `WHILE` | only inside `FUNCTION_DECL` bodies |
@@ -307,7 +351,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | `SELECT` | `[m:l]` bounds and `+:`/`-:` widths are `NUMBER`s; bit indices and `+:` bases any expression; for an instance-array slice (EL-10) the object may be any expression (v4.8): it is read at its self-determined width, bit 0 its LSB, and the bounds are offsets into that value (Yosys's `extract` on the connection) |
 | `REPLICATE` | count `NUMBER` ≥ 0 |
 | `REAL` | absent (only delays held one) |
-| `ATTR` | value absent, `NUMBER` or `STRING` |
+| `ATTR` | value absent, `NUMBER` or `STRING`; the `NUMBER` is unsized (width 0; Yosys keeps 32-bit signed), which is fine for a constant attribute (v4.12) |
 | absent kinds | 2A §4.6's list (`DIRECTIVE UDP_DECL CONFIG_DECL SPECIFY_BLOCK DEFPARAM GENERATE GEN_FOR GEN_IF GEN_CASE GENVAR_DECL DELAY STRENGTH MINTYPMAX PROC_CONT_ASSIGN WAIT DISABLE EVENT_TRIGGER FOREVER PAR_BLOCK EVENT_DECL PORT_REF`) |
 
 Expressions are otherwise kept as written: a `localparam` read stays an `IDENT` (the binder
@@ -399,8 +443,8 @@ Made exact by 2D Task 13 (v4.9, agent defaults):
   width for identifier"). One that resolves to a `BLOCK` binds to it: Yosys 0.55 makes a generate
   block's name an implicit net (`Identifier '\g' is implicitly declared`), which Task 18 (or
   Task 15) implements or records as a divergence.
-- **Not yet.** The `IMPLICIT` flag is not set: the elaborated form has no marker for the implicit
-  nets' `NET_DECL` (Task 15 defines one and makes the binder set the flag from it).
+- **Implicit nets** (v4.11). The `IMPLICIT` flag is set on the declarators of a `NET_DECL` carrying
+  the value-less `ATTR` `implicit` (EL-4).
 
 ## 3. Hierarchy
 
@@ -966,7 +1010,12 @@ block or a named block of the **same module** is resolved component by component
 reached scope (G7: `g[0].t`, `blk.count`). Any other hierarchical name — through an instance,
 upward, or into a function — is E21: "hierarchical reference 'u.w' is not supported". Indices
 must be constant (after stage 1 they are `NUMBER`s). A reference into a block that was not
-selected is "'g[5].t' does not exist (generate block 'g[5]' was not elaborated)".
+selected is "'g[5].t' does not exist (generate block 'g[5]' was not elaborated)". A named
+`begin`/`end` block here means one of an `always` or `initial` of the same module scope (a block
+inside a function or task is not reachable by this path, E21): stage 1 accepts a path whose first
+component names one (v4.15: `blk.count`, before or after the block, inside a generate block too) and
+leaves the member to the binder ("'blk.nope' is not declared", §17 #38); a constant position that
+reads one is E21.
 
 ## 6. Nets, variables and ports
 
@@ -1007,7 +1056,11 @@ one per bit, unless it is a memory (EL-27):
   list". A later `wire`/`reg`/`integer` declaration of a port name (M1: `output q; reg [3:0] q;`)
   merges into the port: the type comes from it; ranges must agree when both are written ("port
   'q' is declared with ranges [3:0] and [7:0]"), else the written one wins; `signed` on either
-  makes it signed (IEEE §12.3.3).
+  makes it signed (IEEE §12.3.3). The merge keeps everything the second declaration says (v4.15):
+  its value (`output w; wire w = ~a;` drives `w`; `output q; reg q = 1'b1;` initialises `q`) goes
+  into the port's `DECLARATOR` (EL-4's `PORT_DECL` row) and its attributes (`(* keep *) wire q;`)
+  join the port's own, in either order and for an ANSI port redeclared in the body. A value on both
+  declarations is "port 'q' has a value in both of its declarations" (§17 #37).
 - **Untyped ports** are `wire` (also under `` `default_nettype none `` — Yosys does not complain,
   IEEE arguably does; follow Yosys). `output reg`/`output integer` are variables (M3).
 - **`input reg`/`input integer`** (M12, D5): accepted as a net with "input 'a' is declared as a
@@ -1807,7 +1860,7 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 - **Declarations and ports (EL-23–EL-29)**: `'x' is not declared`; `'u' is not a net, variable
   or parameter` (the binder, v4.9); `'x' is not declared
   (`default_nettype is none)`; `port 'a' is not declared`; `'x' is declared as a port but is not
-  in the port list`; `port 'q' is declared with ranges [3:0] and [7:0]`; `'w' is a wired net (wand)
+  in the port list`; `port 'q' is declared with ranges [3:0] and [7:0]`; `port 'q' has a value in both of its declarations`; `'w' is a wired net (wand)
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
   f.v:L:C)`; `memory 'm' of N bits exceeds the limit of 1073741824 bits`; `'m' is a memory; select
   a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `tri-state
@@ -1872,7 +1925,12 @@ the final summary line (EL-2).
 - Stage 1 continues after an error at the next item (or the next module), so one run reports
   several; anything that depends on a failed item (an instance of a module whose parameters did
   not resolve, a block of a generate whose condition failed) is skipped silently, never reported
-  twice. Stage 2 does not start after any stage-1 error.
+  twice. The exception, recorded deliberately (v4.15, §17 #36): the REJECT scan runs first, once per
+  definition, and a module whose scan found an error skips passes E and W altogether. Its other
+  errors of those passes (an undeclared name under `` `default_nettype none ``, a port range
+  conflict, a bad parameter value) and its children's (their REJECT rows too: the children are never reached) are reported only
+  after the scanned error is fixed; the info `not instantiated under the top` is not logged once an
+  error was. Stage 2 does not start after any stage-1 error.
 - Stage 2 skips the offending construct and continues (EL-2); a module whose ports could not be
   built stops stage 2 (its instances could not be created).
 - Fatal at once: `ODIN3_ERR_NO_MEMORY`, every cap of §11 that guards memory (width, loop
@@ -2412,6 +2470,13 @@ and reported, never relaxed (2A's rule).
 | 29 | an instance array's lowest index gets the connection's low bits whatever the range's direction | same (verified on 0.55) | bits are distributed by range position (the left index gets the leftmost bits), which differs for ascending ranges | the exit bar is Parmys (v4.8) |
 | 30 | a parameterized `(* blackbox *)` module keeps its name and one ports-only `MODULE` (the defaults' ports); each `INSTANTIATION` carries **every** parameter's final value | same name and module, the module's ports at the defaults' widths (verified on 0.55: PR 2D-3 final review probe 17; `pb #(.W(2))` beside a default `pb` in the fix round); the cell's `parameter`s are only the overrides given (none for a default instance) | — | EL-4: an `INSTANTIATION`'s params LIST holds the specialization's final values for every module instance; the values are the same, only the defaulted ones are spelled out (v4.10) |
 | 31 | an empty non-ANSI port anywhere but last (`module n(a, , b)`, `(, a)`) is a syntax error; a trailing comma is accepted | same ("syntax error, unexpected ','"; verified on 0.55: probe 20, and `(, a)` and `(a, b, )` in the fix round) | legal (`port ::= [port_expression]`) | Yosys; IEEE's empty position has no use but a dropped connection (v4.10) |
+| 32 | a user-named generate block and another declaration of its name in one scope (`wire g;` … `begin : g`) is M11's error (`'g' is already declared (first at …)`); an implicit `genblk<n>` beside a later user declaration of that name is accepted, as Yosys does (EL-21) | both accepted: the wire is `g`, the block's objects `g[0].t` (verified on 0.55, Task 14's batch, c9) | a generate block's name is declared in its scope: a clash is an error | IEEE: a name that is both a net and a block is ambiguous in a HIER_NAME (Task 14) |
+| 33 | two generate constructs with one user block name in one scope (`if (1) begin : a … end` twice) are M11's error (`'a' is already declared (first at …)`) | both accepted and merged: `a.genblk1.q` and `a.z` (verified on 0.55, Task 14 review, M1) | the second declaration of a block name in a scope is an error | IEEE: a scope's names are unique; Yosys has no such check on generate blocks (Task 14 review) |
+| 34 | a user block `genblk2` beside an implicit `genblk2` (two sibling `GEN_BLOCK`s of one name) is M11's error from the binder, after stage 1 has accepted the store; stage 1's naming does not pad past a user-named block | both accepted and merged: `genblk2.a` and `genblk2.b` (verified on 0.55, Task 14 review, M2) | the same name twice in a scope: an error | Yosys's seen set never holds a user-named block (`named_genblk`, EL-21), so only the binder sees the clash (Task 14 review) |
+| 35 | stage 1 errors on a non-variable, non-parameter declaration in a block, function or task (`event`: "this declaration is not supported in a block or a subroutine") and on a repeated declaration of one name beyond the legal port pair (`wire x; reg x;`, `wire x; wire x;`: "'x' is already declared (first at …)", M11) | `event` in a block is a syntax error (as here); the repeated declarations are accepted and make one wire (probed on 0.55). A `localparam` in a function is accepted, as here since v4.13. Informational, Yosys accepts and we reject: a local param whose value reads a net (`localparam P = w;` in a function: "parameter 'P' is not constant (it reads 'w')") and a repeated local param name (`localparam A = 3; localparam A = 4;`, Yosys keeps the last; M11 here). Informational, we accept more than Yosys: `output q; reg [3:0] q;` (Yosys: "Incompatible re-declaration of wire"), `reg q; output q;` (reg before the direction; Yosys: "neither input nor output"), `` `default_nettype wand`` (Yosys errors "Unsupported default nettype" at the directive; we error only at the first implicit use of tri0). Informational, we reject more than Yosys: `{-1{a}}`, `{2'bx1{a}}` and `{0{a}}` alone, and `parameter P = q;` with q undeclared. Informational, Yosys rejects and we accept: a duplicate block name in two `always` blocks (stage 2 or the binder may catch it) | a name is declared once per scope: the repeated forms are errors | the plan's rulings (Task 15): a repeated name is an error, and the list records where Yosys and stage 1 differ so no later task reads one as a bug (v4.12, v4.13, v4.15) |
+| 36 | stage 1's REJECT scan covers every parsed node of a reached module, including generate branches no condition selects; its statement-level rules (T12, K12, F2) read the enclosing construct | a construct is rejected only when the elaborator reaches it | — | one scan per definition gives deterministic, source-ordered errors and the same text for every specialization (Task 16) Because of it a module whose scan found an error skips passes E and W (§9.3, v4.15): its errors of those passes, and its children's REJECT rows, appear only after it is fixed |
+| 37 | a port declaration and the net or variable declaration merged into it that both carry a value (`module m(input a, output wire w = a); wire w = ~a;`, `output reg q = 1'b0; reg q = 1'b1;`) are the error "port 'w' has a value in both of its declarations" at the second declaration | accepted: two drivers of `w` (`connect \w \a` and `connect \w $not…`), or two init processes for `q` (verified on 0.55, the PR 2D-4 final review's fixes) | a net is declared once with at most one declaration assignment; a variable has one initial value | the declaration assignment of a port is one value in the port's `DECLARATOR` (EL-4, v4.15); a second would have to be dropped or resolved, and both readings are silent wrong answers |
+| 38 | a path into a named procedural block whose member does not exist (`blk.nope`) is the binder's error "'blk.nope' is not declared" | warning "Identifier `\blk.nope' is implicitly declared" and a new one-bit wire `blk.nope` (verified on 0.55, the PR 2D-4 final review's fixes) | an undeclared name is an error | Yosys treats the dotted path as one identifier and declares it implicitly (v4.15) |
 
 ## 18. Implementation split (EL-51)
 

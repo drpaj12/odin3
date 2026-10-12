@@ -190,6 +190,9 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_write.c
     src/frontends/verilog/elab1_inst.c
     src/frontends/verilog/elab1_bbox.c
+    src/frontends/verilog/elab1_gen.c
+    src/frontends/verilog/elab1_decl.c
+    src/frontends/verilog/elab1_diag.c
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2_stub.c
     src/ir/cells/builtin.c
@@ -792,6 +795,28 @@ if(BUILD_TESTING)
     target_compile_definitions(test_elab_stage1_inst PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 14: generate, scope names and references.
+    odin3_add_unit_test(test_elab_stage1_gen)
+    target_include_directories(test_elab_stage1_gen PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_gen verilog_generated)
+    target_compile_definitions(test_elab_stage1_gen PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 15: declarations, ports, implicit nets, blocks and subroutines.
+    odin3_add_unit_test(test_elab_stage1_decl)
+    target_include_directories(test_elab_stage1_decl PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_decl verilog_generated)
+    target_compile_definitions(test_elab_stage1_decl PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # 2D Task 16: the REJECT and IGNORE rows, the error cap, the empty stage-1 tables.
+    odin3_add_unit_test(test_elab_stage1_diag)
+    target_include_directories(test_elab_stage1_diag PRIVATE ${_gen})
+    add_dependencies(test_elab_stage1_diag verilog_generated)
+    target_compile_definitions(test_elab_stage1_diag PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp"
+        ODIN3_COVERAGE_DIR="${PROJECT_SOURCE_DIR}/tests/verilog/coverage"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)
     set_tests_properties(test_rtlil_writer PROPERTIES FIXTURES_SETUP "rtlil_fixtures;ffcells")
@@ -1262,11 +1287,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_handover_parse
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_handover_cases})
     set_tests_properties(verilog_handover_parse PROPERTIES LABELS verilog)
+    # Task 16: stage 1 reports every row; A4, T9 and T10 are stage 2's (Task 19, 24) and stay
+    # pending until the stage-2 stub is gone (Task 17); none of the ignore cases is.
+    set(_handover_pending_reject-2d "A4.v,T9.v,T10.v")
+    set(_handover_pending_ignore-2d "")
     foreach(_handover reject-2d ignore-2d)
         string(REPLACE "-" "_" _handover_test "verilog_${_handover}")
         add_test(NAME ${_handover_test}
             COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/parse-check/run_reject.py
-                    --elaborate $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
+                    --elaborate "--pending=${_handover_pending_${_handover}}"
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/verilog/${_handover})
         set_tests_properties(${_handover_test} PROPERTIES LABELS verilog SKIP_RETURN_CODE 77)
     endforeach()
 

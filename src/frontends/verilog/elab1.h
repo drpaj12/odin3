@@ -130,6 +130,11 @@ void odin3_elab1_report(odin3_elab1 *e1, odin3_log_level level, odin3_loc loc, c
 void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...)
     ODIN3_PRINTF(3, 4);
 
+/* odin3_elab1_warn_once with the once-key a different node from the one the warning is located
+ * at (a specparam's declarator keys a warning located at its PARAM_DECL). */
+void odin3_elab1_warn_once_at(odin3_elab1 *e1, odin3_ast_id key_node, odin3_ast_id at,
+                              const char *fmt, ...) ODIN3_PRINTF(4, 5);
+
 /* An info line at loc (unlocated when loc is 0). */
 void odin3_elab1_info(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 
@@ -168,6 +173,42 @@ void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node);
  * (odin3_elab_pending_form) lists it, and as unhandled (a 2D bug) once it does not.
  */
 void odin3_elab1_pend_form(odin3_elab1 *e1, odin3_ast_id parsed_node);
+
+/* --- REJECT and IGNORE rows (elab1_diag.c; §9.1, §9.2) ---------------------------------------- */
+
+/*
+ * The REJECT rows that need only the node itself (L9, M11 excepted, N17, N18, E20, E21, T6, T13,
+ * T14, T15, T16, T19, F4, Q6, N15, an edge/level mix): reports the node's error, at its
+ * location and counted under the cap, and returns ODIN3_ERR_PARSE; ODIN3_OK when the node is not
+ * one (nothing is logged). The rows that depend on the context (T12, K12, F2) are the scan's.
+ */
+odin3_status odin3_elab1_reject(odin3_elab1 *e1, odin3_ast_id node);
+
+/*
+ * The IGNORE rows' warnings for the node itself and the slots it holds (the ten rows of §9.2),
+ * once per parsed node for the run (point (v)); ODIN3_OK, or the latched ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_ignore(odin3_elab1 *e1, odin3_ast_id node);
+
+/*
+ * The scan of definition def's body (a MODULE): every node, in source order, goes through
+ * odin3_elab1_reject and odin3_elab1_ignore, and the context rows (T12, K12, F2) are checked.
+ * Once per definition (the first specialization to run); *failed is set when it reported an
+ * error, and the definition's specializations then skip passes E and W (EL-44). The scan stops
+ * at the error cap. ODIN3_OK; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_scan(odin3_elab1 *e1, uint32_t def, bool *failed);
+
+/*
+ * Whether the elaborated form keeps the system call: for a CALL (kind ODIN3_AST_CALL) `$signed`,
+ * `$unsigned` and `$clog2` (folded); for a TASK_CALL `$readmemh` and `$readmemb` (kept only inside
+ * an INITIAL, which the caller checks). The one list the scan (E20, S3) and pass W share. False
+ * for a NULL name or any other kind.
+ */
+bool odin3_elab1_system_kept(odin3_ast_kind kind, const char *name);
+
+/* The unit-level directive node (outside any module): its IGNORE warning, unless it is read. */
+void odin3_elab1_ignore_directive(odin3_elab1 *e1, odin3_ast_id directive);
 
 /* --- definitions and lookup (elab1_lookup.c) ------------------------------------------------ */
 
@@ -247,7 +288,8 @@ typedef enum odin3_elab_entry_kind {
     ODIN3_ENTRY_GENVAR,
     ODIN3_ENTRY_FUNCTION,
     ODIN3_ENTRY_TASK,
-    ODIN3_ENTRY_INSTANCE /* an instance name (a defparam path's first component) */
+    ODIN3_ENTRY_INSTANCE, /* an instance name (a defparam path's first component) */
+    ODIN3_ENTRY_BLOCK     /* a user-named generate block of a construct in the scope (Task 14) */
 } odin3_elab_entry_kind;
 
 /*
@@ -307,7 +349,9 @@ typedef struct odin3_elab_override {
  * (an instance array included), its value the child specialization (>= 0; a module or a
  * `(* blackbox *)` definition), ODIN3_DECISION_GIVEN_BASE − k for a cell-type or implicit
  * black-box instance whose parameters are odin3_elab1.given record k (Task 12), or
- * ODIN3_DECISION_SKIPPED (a failed one). Task 14 adds the generate decisions.
+ * ODIN3_DECISION_SKIPPED (a failed one). Task 14 adds the generate decisions: a GEN_IF's 0
+ * (then), 1 (else) or ODIN3_DECISION_SKIPPED (none); a GEN_CASE's item index or
+ * ODIN3_DECISION_SKIPPED; a GEN_FOR's iteration count n, then n entries of its genvar values.
  */
 typedef struct odin3_elab_decision {
     odin3_ast_id node;
@@ -663,6 +707,8 @@ typedef struct odin3_elab1_defx {
     bool reported;            /* its Q7 (a library unit's UDP) or taken-name error is logged */
     bool body_noted;          /* a black box's "body … is ignored" info is logged (Task 12) */
     bool bb_default_asked;    /* a black box's default specialization was requested (EL-11) */
+    bool scanned;             /* its body went through odin3_elab1_scan (Task 16) */
+    bool scan_failed;         /* … and the scan reported an error: passes E and W skip it */
     const uint8_t *port_dirs; /* odin3_dir per port position (run arena; Task 12) */
     uint32_t bb_name;         /* a black box: the name all its specializations share; 0 = none */
 } odin3_elab1_defx;
@@ -723,7 +769,11 @@ typedef struct odin3_elab1_slot {
     uint8_t state; /* odin3_elab1_state */
     uint8_t base;  /* the NUMBER sub of an unsized value's literal */
     bool overridden;
+    bool bound;          /* GENVAR: holds a generate loop's value (entry.value, Task 14) */
     uint32_t n_unpacked; /* SIGNAL: the unpacked dimensions (a memory) */
+    odin3_ast_id group2; /* SIGNAL: the NET_DECL/VAR_DECL merged into a body PORT_DECL (EL-24), or
+                            the PORT_DECL merged into a net; 0 when none (Task 15) */
+    odin3_ast_id decl2;  /* its DECLARATOR */
     int64_t msb;         /* the declared range; an unranged value: width - 1 and 0 */
     int64_t lsb;
     odin3_elab_override ovr; /* PARAM: the override that won */
@@ -745,9 +795,82 @@ typedef struct odin3_elab1_range {
     int64_t lsb;
 } odin3_elab1_range;
 
-/* An environment (EL-12): the scopes of one definition's elaboration, their declarations
- * (slots, by scope << 32 | name), the folded ranges and the evaluator whose host it is. Task 11
- * has the module scope (0) only; Task 14 adds the generate scopes. */
+/* --- generate scopes (Task 14; EL-19–EL-22) ------------------------------------------------ */
+
+typedef enum odin3_elab_scope_kind {
+    ODIN3_ESCOPE_MODULE = 0,
+    ODIN3_ESCOPE_BLOCK,
+    ODIN3_ESCOPE_LOCAL /* a function, task or block that declares parameters (Task 15b) */
+} odin3_elab_scope_kind;
+
+/*
+ * One scope of an environment: the module (scope 0) or one elaborated generate block (one per
+ * selected branch, one per loop iteration). name is the block's name (the user's or EL-21's
+ * `genblk<n>`; 0 for the module), index the iteration's genvar value when has_index, parent the
+ * enclosing scope (UINT32_MAX for the module), counter label_genblks's counter of the scope: the
+ * GEN_IF, GEN_FOR and GEN_CASE constructs met so far in its pre-order walk. Each scope's set of
+ * `genblk*` names seen so far is internal to elab1_gen.c, copied from the parent on entry.
+ */
+typedef struct odin3_elab_scope {
+    uint8_t kind; /* odin3_elab_scope_kind */
+    uint32_t name;
+    int32_t index;
+    bool has_index;
+    uint32_t parent;
+    uint32_t counter;
+} odin3_elab_scope;
+
+/* Where a scope's items are, beside odin3_elab_scope: child slot of holder (a GEN_BLOCK, a bare
+ * item or a NULL_STMT), and the seen-set sequence number at its creation (its copy). */
+typedef struct odin3_elab1_scope_x {
+    odin3_ast_id holder;
+    uint32_t slot;
+    uint32_t seq;
+} odin3_elab1_scope_x;
+
+/* One component of a hierarchical path: a name and an optional index. */
+typedef struct odin3_elab1_comp {
+    uint32_t name;
+    int32_t index;
+    bool has_index;
+} odin3_elab1_comp;
+
+/* An environment (EL-12): the scopes of one definition's elaboration (Task 14: the module and its
+ * elaborated generate blocks), their declarations (slots, by scope << 32 | name), the folded
+ * ranges (by scope << 32 | RANGE) and the evaluator whose host it is. */
+/* One port of a module as pass E merged it (EL-24): the header position's declaration and the body
+ * declarations of its name. name 0: an empty position (EL-10). */
+typedef struct odin3_elab1_mport {
+    uint32_t name;
+    uint8_t dir; /* ODIN3_AST_PORT_DECL_* */
+    uint8_t dt;  /* ODIN3_AST_DT_*: none, reg or integer */
+    uint8_t net; /* 1 + the net kind of a net port, else 0 (a variable) */
+    bool is_signed;
+    bool ansi;
+    bool as_integer;    /* an `input integer`, treated as a signed [31:0] net (M12) */
+    odin3_ast_id range; /* the RANGE that gives the port's type, or 0 */
+    odin3_ast_id group; /* the PORT_DECL (its attributes and location) */
+    odin3_ast_id decl;  /* the DECLARATOR, or the empty position's PORT_REF */
+    /* The NET_DECL or VAR_DECL merged into the port (EL-24), else 0, and its DECLARATOR: the
+     * written port takes its value (E?) and its attributes (C-1). obj_first: it was declared
+     * before the port's own PORT_DECL, so the PORT_DECL's attributes win a name both give. */
+    odin3_ast_id obj_group;
+    odin3_ast_id obj_decl;
+    bool obj_first;
+} odin3_elab1_mport;
+
+/* An implicit net (EL-25): its name and the first use. */
+typedef struct odin3_elab1_implicit_net {
+    uint32_t name;
+    odin3_ast_id use;
+} odin3_elab1_implicit_net;
+
+/* A frame of the implicit-net scan: a node, or the end of a scope that node opened. */
+typedef struct odin3_elab1_scan_frame {
+    odin3_ast_id node;
+    bool leave;
+} odin3_elab1_scan_frame;
+
 typedef struct odin3_elab1_env {
     odin3_elab1 *e1;
     uint32_t def;
@@ -760,6 +883,24 @@ typedef struct odin3_elab1_env {
     odin3_u64map *ranged; /* RANGE node → index into ranges */
     bool quiet;           /* diagnostics dropped (the default-value comparison of EL-9) */
     odin3_ctype *types;   /* the connection typer over this environment (Task 12), lazily made */
+    /* Task 14 */
+    odin3_vec scopes;    /* odin3_elab_scope; scope 0 is the module */
+    odin3_vec scope_x;   /* odin3_elab1_scope_x, one per scope */
+    uint32_t cur_scope;  /* where lookups start and declarations are recorded */
+    odin3_u64map *seen;  /* scope << 32 | genblk* name → the sequence number it was seen at */
+    odin3_u64map *kids;  /* scope << 32 | block name → its first elaborated scope + 1 */
+    odin3_u64map *procs; /* scope << 32 | name of a named begin/end block of an always or initial */
+    odin3_u64map *iters; /* first scope << 32 | (uint32_t)index → the iteration's scope + 1 */
+    uint32_t seq;        /* the seen-set clock */
+    uint32_t made_first; /* the scopes the last odin3_elab1_gen_* made: [first, first + n) */
+    uint32_t made_n;
+    /* Task 15 */
+    odin3_vec ports;         /* odin3_elab1_mport: the merged port list (odin3_elab1_ports) */
+    odin3_vec implicit;      /* odin3_elab1_implicit_net, in first-use order */
+    odin3_u64map *imp_names; /* implicit (or reported-undeclared) names → 1 */
+    odin3_u64map *locals;    /* names of the enclosing blocks and subroutines → depth count */
+    odin3_vec scan;          /* odin3_elab1_scan_frame: the implicit-net scan's stack */
+    uint8_t nettype;         /* the module's `default_nettype (odin3_elab1_nettype_at) */
 } odin3_elab1_env;
 
 /* A new environment of definition def with every declaration of its module scope recorded (no
@@ -770,8 +911,16 @@ void odin3_elab1_env_destroy(odin3_elab1_env *env);
 /* The specialization spec's parameter values as the winning overrides of env (pass E's start). */
 void odin3_elab1_env_preload(odin3_elab1_env *env, uint32_t spec);
 
+/* A declaration of env->cur_scope (proto->scope): the first of a name wins; a generate block's
+ * name that clashes with another declaration of the scope is M11's error (EL-21). NO_MEMORY. */
+odin3_status odin3_elab1_env_add(odin3_elab1_env *env, const odin3_elab1_slot *proto);
+
 /* The slot index of name in scope, UINT32_MAX when none. */
 uint32_t odin3_elab1_env_find(const odin3_elab1_env *env, uint32_t scope, uint32_t name);
+
+/* The slot index of name from env->cur_scope outward to the module (EL-22), UINT32_MAX when none.
+ */
+uint32_t odin3_elab1_env_lookup(const odin3_elab1_env *env, uint32_t name);
 odin3_elab1_slot *odin3_elab1_env_slot(odin3_elab1_env *env, uint32_t idx);
 
 /* The value of PARAM or LOCALPARAM slot idx (EL-16), evaluated on first use; the SIGNAL type of a
@@ -792,6 +941,13 @@ typedef struct odin3_elab1_eval_req {
 } odin3_elab1_eval_req;
 odin3_status odin3_elab1_eval(odin3_elab1_env *env, const odin3_elab1_eval_req *req,
                               odin3_cval *out);
+
+/* The same with the value and the evaluator's temporaries in arena (a scratch arena of
+ * ODIN3_E1_TMP_CHUNK bytes per chunk, freed by the caller): what a value that outlives the call
+ * is not. Lazily evaluated parameters still live in the environment's arena. */
+enum { ODIN3_E1_TMP_CHUNK = 2048 };
+odin3_status odin3_elab1_eval_in(odin3_elab1_env *env, odin3_arena *arena,
+                                 const odin3_elab1_eval_req *req, odin3_cval *out);
 
 /* A constant folded to a 32-bit signed integer (point (bb)): x or z bits are "<what> has x or z
  * bits", a value outside int32 the width error. */
@@ -849,6 +1005,145 @@ const char *odin3_elab1_str(const odin3_elab1 *e1, uint32_t id);
 /* The specialization spec (NULL past the count). */
 const odin3_elab1_spec *odin3_elab1_spec_at(const odin3_elab1 *e1, uint32_t spec);
 
+/* --- generate (Task 14; elab1_gen.c) -------------------------------------------------------- */
+
+/*
+ * Pass E of one generate construct in scope (EL-19, EL-20, EL-21): its constant parts evaluated in
+ * scope, its decision logged (odin3_elab_decision), and the generate block(s) it selects made as
+ * new scopes, child of scope, named by EL-21 (env->made_first, made_n; a loop's iterations in
+ * order, each binding the genvar to its value). The construct's expressions enter scope's seen set
+ * in Yosys's pre-order. ODIN3_OK after a diagnostic too (nothing is selected, the log says so);
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_gen_for(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);
+odin3_status odin3_elab1_gen_if(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);
+odin3_status odin3_elab1_gen_case(odin3_elab1 *e1, odin3_ast_id node, uint32_t scope);
+
+/* label_genblks (EL-21): `genblk<counter>`, zeros inserted after `genblk` while the name is in the
+ * seen set of scope; interned into *name. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_genblk_name(odin3_elab1 *e1, uint32_t scope, uint32_t counter,
+                                     uint32_t *name);
+
+/* G7: hier_name (a HIER_NAME) read in scope resolved through the module's generate blocks to a
+ * declaration of the reached scope; E21 "hierarchical reference 'u.w' is not supported", "'g[5].t'
+ * does not exist (generate block 'g[5]' was not elaborated)" or "'b.x' is not declared"
+ * otherwise. A path whose first component names a named begin/end block of an always or initial
+ * in scope (`blk.count`, I-1) is accepted unchecked: the binder finds its member. ODIN3_ERR_PARSE
+ * after the diagnostic; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope);
+
+/* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
+ * dropped while env->quiet). */
+odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t *slot);
+
+/* The scopes of a new environment (scope 0, the module) and their tables; freed by _gen_free. */
+odin3_status odin3_elab1_gen_init(odin3_elab1_env *env);
+void odin3_elab1_gen_free(odin3_elab1_env *env);
+
+/* The items of scope: children [*first, *end) of *node (a GEN_BLOCK's items, a bare item, none for
+ * a NULL_STMT body; the module's items for scope 0). */
+void odin3_elab1_scope_items(const odin3_elab1_env *env, uint32_t scope, odin3_ast_id *node,
+                             uint32_t *first, uint32_t *end);
+
+/* The components of hier (a HIER_NAME) in the environment's arena, their indices folded in
+ * env->cur_scope ("generate block index"). ODIN3_ERR_PARSE after a diagnostic; NO_MEMORY. */
+odin3_status odin3_elab1_hier_comps(odin3_elab1_env *env, odin3_ast_id hier,
+                                    odin3_elab1_comp **out);
+
+/* A new scope of kind ODIN3_ESCOPE_LOCAL under parent, for the localparams of a function, task or
+ * named block (Task 15b; made by the writer after pass E's scopes, so it never shifts their
+ * numbers): nothing finds it by name. *out its index. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_scope_local(odin3_elab1_env *env, uint32_t parent, uint32_t *out);
+
+/* The parameters of group (a PARAM_DECL of a function, task or block) as localparam entries of
+ * env->cur_scope (a `parameter` there is a localparam; a specparam is ignored). NO_MEMORY. */
+odin3_status odin3_elab1_env_add_params(odin3_elab1_env *env, odin3_ast_id group);
+
+/* The scope record (NULL past the count) and its extension. */
+const odin3_elab_scope *odin3_elab1_scope_at(const odin3_elab1_env *env, uint32_t scope);
+const odin3_elab1_scope_x *odin3_elab1_scope_ext(const odin3_elab1_env *env, uint32_t scope);
+
+/* Every name starting with `genblk` in node's subtree (a HIER_NAME's path aside) enters scope's
+ * seen set, in pre-order (label_genblks's default case). ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_gen_seen(odin3_elab1_env *env, odin3_ast_id node, uint32_t scope);
+
+/* --- declarations, ports, implicit nets, subroutines (Task 15, elab1_decl.c) ---------------- */
+
+/* The net type nothing is implicit under (`default_nettype none). */
+enum { ODIN3_NETTYPE_NONE = 0xFF };
+
+/*
+ * EL-25: the `default_nettype in effect for module_node (a parsed MODULE): the last
+ * DIRECTIVE[default_nettype] before it in project stream order (the UNITs in order, directives
+ * inside earlier modules included; one inside a module warns "`default_nettype inside a module
+ * takes effect at the next module"), `resetall clearing it; as an ODIN3_AST_NET_DECL_* sub, or
+ * ODIN3_NETTYPE_NONE. The table is built on the first call (an out-of-memory latches
+ * odin3_elab1_status and answers wire).
+ */
+uint8_t odin3_elab1_nettype_at(odin3_elab1 *e1, odin3_ast_id module_node);
+
+/*
+ * EL-24: the ports of specialization spec's module merged into env->ports (e1->env), in header
+ * order: ANSI declarators as written, each non-ANSI name with its body PORT_DECL and the net or
+ * variable declaration that follows or precedes it. Errors: "port 'a' is not declared", "'x' is
+ * declared as a port but is not in the port list", "port 'q' is declared with ranges [3:0] and
+ * [7:0]", M6's "port expression in a module port list is not supported"; M12's warning for
+ * `input reg`. ODIN3_OK (errors are counted); ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_ports(odin3_elab1 *e1, uint32_t spec);
+
+/*
+ * EL-25 (pass E, one module or generate-scope item at a time): every identifier of item (an
+ * expression, statement or connection; not a constant position, a name used as function, task or
+ * module, or a block's or subroutine's own local) that resolves to nothing becomes an implicit net
+ * of env's implicit list (first use order) with the warning "'x' is implicitly declared", or the
+ * error "'x' is not declared (`default_nettype is none)" or N15's "net type 'tri0' is not
+ * supported". ODIN3_OK (errors are counted); ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_implicit(odin3_elab1_env *env, odin3_ast_id item);
+
+/* Enter (+1) or leave (-1) the names a SEQ_BLOCK, FUNCTION_DECL or TASK_DECL declares for its body
+ * (its ports and locals, and a subroutine's own name) in map (name -> depth count). Shared by the
+ * implicit-net scan and the writer's genvar shadowing (EL-19). ODIN3_OK; ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_scope_names(odin3_u64map *map, const odin3_ast *ast, odin3_ast_id node,
+                                     bool enter);
+
+/* The NET_DECL sub an implicit net of `default_nettype type has (wire/tri → wire, wand/triand →
+ * wand, wor/trior → wor, uwire). */
+uint8_t odin3_elab1_implicit_sub(uint8_t nettype);
+
+/* True for a DIRECTIVE stage 1 reads (`default_nettype, `resetall) and drops from the elaborated
+ * form; the other directives are Task 16's. */
+bool odin3_elab1_directive_handled(const odin3_elab1 *e1, odin3_ast_id directive);
+
+/* Frees the Task 15 tables of env. */
+void odin3_elab1_decl_free(odin3_elab1_env *env);
+
+/* How a path's leading components walk through generate blocks (odin3_elab1_scope_walk). */
+typedef enum odin3_elab1_walked {
+    ODIN3_WALK_STOP = 0, /* comps[used] is not a block (or every component was used) */
+    ODIN3_WALK_NOT_ELAB, /* comps[used] is a block that was not elaborated (that index) */
+    ODIN3_WALK_BAD,      /* comps[used] names a block with an index it lacks, or no index */
+    ODIN3_WALK_PROC      /* comps[used] names a begin/end block of an always or initial (I-1) */
+} odin3_elab1_walked;
+
+/* A path to walk: comps[0 .. count) from scope; where the walk stopped. */
+typedef struct odin3_elab1_path {
+    const odin3_elab1_comp *comps;
+    uint32_t count;
+    uint32_t scope;
+} odin3_elab1_path;
+
+typedef struct odin3_elab1_reach {
+    uint32_t reached; /* the scope comps[used] is to be found in */
+    uint32_t used;    /* the components walked through blocks */
+} odin3_elab1_reach;
+
+/* path's components walked through the elaborated generate blocks: the first found from
+ * path->scope outward, the next ones inside the block reached. */
+odin3_elab1_walked odin3_elab1_scope_walk(const odin3_elab1_env *env, const odin3_elab1_path *path,
+                                          odin3_elab1_reach *out);
+
 struct odin3_elab1 {
     odin3_pass_ctx *ctx;
     odin3_design *design;
@@ -897,6 +1192,10 @@ struct odin3_elab1 {
     odin3_vec bbports;        /* odin3_elab1_bbport */
     odin3_u64map *bbox_names; /* implicit black box name → index + 1; spec | 1 << 63 → idx + 1 */
     odin3_u64map *bbport_ix;  /* bbox << 32 | port name → bbports index + 1 */
+    /* Task 14 */
+    uint64_t n_gen_iters; /* generate-loop iterations unrolled so far (the run-level cap) */
+    /* Task 15 */
+    odin3_u64map *nettypes; /* MODULE node → its `default_nettype (odin3_elab1_nettype_at) */
 };
 
 /* A diagnostic logged once (odin3_elab1_report, odin3_elab1_error). */

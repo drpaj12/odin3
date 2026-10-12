@@ -552,6 +552,30 @@ static void test_assignments(void) {
     expect_assigns(local(mod, "a"), (assigns_want){0, {0}, ODIN3_ASSIGN_BLOCKING});
 }
 
+/* A net port with a value (`output w; wire w = ~a;` merged by stage 1, or `output wire w = a`)
+ * queues its declaration assignment as a CONTINUOUS one, like a NET_DECL's; a variable port's
+ * value (`output reg q = 1'b1`) is an initial value and queues nothing. */
+static void test_port_value_assign(void) {
+    eb_decl net = {.sub = ODIN3_AST_PORT_DECL_OUTPUT,
+                   .flags = eb_wire_port(),
+                   .name = "w",
+                   .value = eb_int(&tree, 1)};
+    eb_decl var = {.sub = ODIN3_AST_PORT_DECL_OUTPUT,
+                   .flags = (uint16_t)(ODIN3_AST_DT_REG << ODIN3_AST_F_PORT_DECL_DT_SHIFT),
+                   .name = "q",
+                   .value = eb_int(&tree, 1)};
+    const odin3_ast_id ports[] = {eb_port(&tree, &net), eb_port(&tree, &var)};
+    odin3_ast_id module = module_of("t", eb_list(&tree, ports, 2), NULL, 0);
+    (void)eb_unit(&tree, &module, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bind(), all_lines());
+    odin3_scope_id mod = odin3_elab_scope_of(&bnd, module);
+    odin3_ast_id declarator = odin3_ast_child(tree.ast, ports[0], 1);
+    expect_assigns(local(mod, "w"), (assigns_want){1, declarator, ODIN3_ASSIGN_CONTINUOUS});
+    TEST_ASSERT_EQUAL_UINT16(ODIN3_SYM_F_PORT | ODIN3_SYM_F_ASSIGNED_CONTINUOUS,
+                             local(mod, "w")->flags);
+    expect_assigns(local(mod, "q"), (assigns_want){0, {0}, ODIN3_ASSIGN_BLOCKING});
+}
+
 /* {p1, p2} = …: both assigned; {q, q} = …: one record. */
 static void test_concat_lvalues(void) {
     const odin3_ast_id pair[] = {ident("p1"), ident("p2")};
@@ -638,6 +662,34 @@ static void test_symbol_forms(void) {
     TEST_ASSERT_EQUAL_UINT32(local_id(mod, "f").v, odin3_elab_sym_of(&bnd, fx.call).v);
 }
 
+/* Task 15b: a localparam in a function's and in a named block's locals LIST is a LOCALPARAM symbol
+ * of that scope, hiding the module's; a read inside resolves to it. */
+static void test_local_params_bound(void) {
+    odin3_ast_id read_fn = ident("N");
+    odin3_ast_id read_blk = ident("K");
+    const odin3_ast_id fn_locals[] = {eb_localparam(&tree, "N", eb_int(&tree, 2))};
+    eb_subr fn = {
+        .name = "f", .locals = eb_list(&tree, fn_locals, 1), .body = blocking(ident("f"), read_fn)};
+    const odin3_ast_id blk_locals[] = {eb_localparam(&tree, "K", eb_int(&tree, 6))};
+    const odin3_ast_id stmts[] = {blocking(ident("r"), read_blk)};
+    eb_block blk = {"blk", eb_list(&tree, blk_locals, 1), stmts, 1};
+    odin3_ast_id named = eb_named_block(&tree, &blk);
+    const odin3_ast_id items[] = {reg("r", (odin3_ast_id){0}),
+                                  eb_localparam(&tree, "N", eb_int(&tree, 8)),
+                                  eb_function(&tree, &fn), eb_initial(&tree, named)};
+    odin3_ast_id module = module_of("t", (odin3_ast_id){0}, items, 4);
+    (void)eb_unit(&tree, &module, 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bind(), all_lines());
+    odin3_scope_id mod = odin3_elab_scope_of(&bnd, module);
+    odin3_scope_id fscope = odin3_scope_child(symtab(), mod, name_id("f"), ODIN3_SCOPE_NO_INDEX);
+    odin3_scope_id bscope = odin3_scope_child(symtab(), mod, name_id("blk"), ODIN3_SCOPE_NO_INDEX);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_SYM_LOCALPARAM, local(fscope, "N")->kind);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_SYM_LOCALPARAM, local(bscope, "K")->kind);
+    TEST_ASSERT_EQUAL_UINT32(local_id(fscope, "N").v, odin3_elab_sym_of(&bnd, read_fn).v);
+    TEST_ASSERT_EQUAL_UINT32(local_id(bscope, "K").v, odin3_elab_sym_of(&bnd, read_blk).v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(local_id(mod, "N").v, local_id(fscope, "N").v);
+}
+
 /* A black box's scope holds its ports only; its INSTANTIATION resolves to its MODULE symbol; a
  * cell type's to nothing. */
 static void test_blackbox(void) {
@@ -719,6 +771,29 @@ static void test_duplicate_blocks(void) {
     expect_line("b.v:4:1: error: 'g' is already declared (first at b.v:3:1)");
     expect_line("b.v:5:1: error: 'n' is already declared (first at b.v:2:1)");
     TEST_ASSERT_EQUAL_UINT32(2, error_count());
+}
+
+/* A named block, then a declaration of its name: M11 at the declaration, in both orders (the
+ * review's M4: only an implicit `genblk<n>` yields to a later declaration, EL-21). */
+static void test_block_then_declaration(void) {
+    et_line(&tree, 2);
+    eb_block named = {"g", eb_int(&tree, 0), NULL, 0};
+    odin3_ast_id gen = eb_gen_block(&tree, &named);
+    et_line(&tree, 3);
+    const odin3_ast_id items[] = {gen, wire("g", no_range())};
+    (void)top_of(items, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, bind());
+    expect_line("b.v:3:1: error: 'g' is already declared (first at b.v:2:1)");
+    TEST_ASSERT_EQUAL_UINT32(1, error_count());
+}
+
+/* The implicit name yields: `genblk1` then `wire genblk1` binds both (Yosys keeps both). */
+static void test_implicit_block_then_declaration(void) {
+    eb_block implicit = {"genblk1", {0}, NULL, 0};
+    const odin3_ast_id items[] = {eb_gen_block(&tree, &implicit), wire("genblk1", no_range())};
+    (void)top_of(items, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bind());
+    TEST_ASSERT_EQUAL_UINT32(0, error_count());
 }
 
 /* Two MODULEs of one name, in two libraries: M11 at the second (names are unique in a UNIT, point
@@ -1422,36 +1497,8 @@ static void test_oom(void) {
     oom_sweep(&errors);
 }
 
-int main(void) {
-    UNITY_BEGIN();
-    RUN_TEST(test_symbols_objects);
-    RUN_TEST(test_symbols_localparam);
-    RUN_TEST(test_symbols_ports_and_scopes);
-    RUN_TEST(test_scopes_top);
-    RUN_TEST(test_scopes_module);
-    RUN_TEST(test_resolution);
-    RUN_TEST(test_scope_of);
-    RUN_TEST(test_assignments);
-    RUN_TEST(test_concat_lvalues);
-    RUN_TEST(test_symbol_forms);
-    RUN_TEST(test_blackbox);
-    RUN_TEST(test_undeclared);
-    RUN_TEST(test_duplicate);
-    RUN_TEST(test_duplicate_blocks);
-    RUN_TEST(test_duplicate_modules);
-    RUN_TEST(test_module_name_not_value);
-    RUN_TEST(test_not_a_value);
-    RUN_TEST(test_library_scopes);
-    RUN_TEST(test_hierarchical_through_instance);
-    RUN_TEST(test_hierarchical_call);
-    RUN_TEST(test_hier_missing);
-    RUN_TEST(test_hier_indexed_end);
-    RUN_TEST(test_not_function_or_task);
-    RUN_TEST(test_width);
-    RUN_TEST(test_unpacked_bounds);
-    RUN_TEST(test_width_and_xz);
-    RUN_TEST(test_error_cap);
-    RUN_TEST(test_misuse);
+/* The elaborated-form shape checks, the stress cases and the OOM sweep. */
+static void run_shape_tests(void) {
     RUN_TEST(test_shape_while);
     RUN_TEST(test_shape_system_function);
     RUN_TEST(test_shape_system_task);
@@ -1480,5 +1527,42 @@ int main(void) {
     RUN_TEST(test_deep_nesting);
     RUN_TEST(test_wide_loop);
     RUN_TEST(test_oom);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_symbols_objects);
+    RUN_TEST(test_symbols_localparam);
+    RUN_TEST(test_local_params_bound);
+    RUN_TEST(test_symbols_ports_and_scopes);
+    RUN_TEST(test_scopes_top);
+    RUN_TEST(test_scopes_module);
+    RUN_TEST(test_resolution);
+    RUN_TEST(test_scope_of);
+    RUN_TEST(test_assignments);
+    RUN_TEST(test_port_value_assign);
+    RUN_TEST(test_concat_lvalues);
+    RUN_TEST(test_symbol_forms);
+    RUN_TEST(test_blackbox);
+    RUN_TEST(test_undeclared);
+    RUN_TEST(test_duplicate);
+    RUN_TEST(test_duplicate_blocks);
+    RUN_TEST(test_block_then_declaration);
+    RUN_TEST(test_implicit_block_then_declaration);
+    RUN_TEST(test_duplicate_modules);
+    RUN_TEST(test_module_name_not_value);
+    RUN_TEST(test_not_a_value);
+    RUN_TEST(test_library_scopes);
+    RUN_TEST(test_hierarchical_through_instance);
+    RUN_TEST(test_hierarchical_call);
+    RUN_TEST(test_hier_missing);
+    RUN_TEST(test_hier_indexed_end);
+    RUN_TEST(test_not_function_or_task);
+    RUN_TEST(test_width);
+    RUN_TEST(test_unpacked_bounds);
+    RUN_TEST(test_width_and_xz);
+    RUN_TEST(test_error_cap);
+    RUN_TEST(test_misuse);
+    run_shape_tests();
     return UNITY_END();
 }

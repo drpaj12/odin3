@@ -4,7 +4,7 @@
  * still pending, the forced entries of the test hook, and the once-per-kind located error.
  *
  * Each task that lands a kind deletes its line in the same commit; the comments name the task
- * point (l) stages it in. Task 16 asserts the stage-1 table is empty, Task 24 both.
+ * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 24 asserts stage 2's.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -19,53 +19,7 @@
 #include <stdint.h>
 
 static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
-    [ODIN3_ELAB_STAGE1] =
-        {
-            /* Task 14: generate and scope names. */
-            [ODIN3_AST_GENERATE] = true,
-            [ODIN3_AST_GEN_FOR] = true,
-            [ODIN3_AST_GEN_IF] = true,
-            [ODIN3_AST_GEN_CASE] = true,
-            [ODIN3_AST_GEN_BLOCK] = true,
-            [ODIN3_AST_GENVAR_DECL] = true,
-            [ODIN3_AST_HIER_NAME] = true,
-            /* Task 15: non-ANSI ports, attributes, subroutines, processes and every statement
-             * kind (a port declared in the body: odin3_elab1_pend_form). */
-            [ODIN3_AST_PORT_REF] = true,
-            [ODIN3_AST_ATTR] = true,
-            [ODIN3_AST_FUNCTION_DECL] = true,
-            [ODIN3_AST_TASK_DECL] = true,
-            [ODIN3_AST_ALWAYS] = true,
-            [ODIN3_AST_INITIAL] = true,
-            [ODIN3_AST_SEQ_BLOCK] = true,
-            [ODIN3_AST_BLOCKING_ASSIGN] = true,
-            [ODIN3_AST_NONBLOCKING_ASSIGN] = true,
-            [ODIN3_AST_IF] = true,
-            [ODIN3_AST_CASE] = true,
-            [ODIN3_AST_CASE_ITEM] = true,
-            [ODIN3_AST_FOR] = true,
-            [ODIN3_AST_WHILE] = true,
-            [ODIN3_AST_REPEAT] = true,
-            [ODIN3_AST_TIMING_STMT] = true,
-            [ODIN3_AST_TASK_CALL] = true,
-            [ODIN3_AST_NULL_STMT] = true,
-            [ODIN3_AST_EVENT_CONTROL] = true,
-            [ODIN3_AST_EVENT_EXPR] = true,
-            /* Task 16: the REJECT and IGNORE kinds. */
-            [ODIN3_AST_DIRECTIVE] = true,
-            [ODIN3_AST_EVENT_DECL] = true,
-            [ODIN3_AST_STRENGTH] = true,
-            [ODIN3_AST_DELAY] = true,
-            [ODIN3_AST_SPECIFY_BLOCK] = true,
-            [ODIN3_AST_PAR_BLOCK] = true,
-            [ODIN3_AST_PROC_CONT_ASSIGN] = true,
-            [ODIN3_AST_FOREVER] = true,
-            [ODIN3_AST_WAIT] = true,
-            [ODIN3_AST_DISABLE] = true,
-            [ODIN3_AST_EVENT_TRIGGER] = true,
-            [ODIN3_AST_REAL] = true,
-            [ODIN3_AST_MINTYPMAX] = true,
-        },
+    [ODIN3_ELAB_STAGE1] = {false}, /* Task 16 landed the last stage-1 kinds: empty */
     [ODIN3_ELAB_STAGE2] =
         {
             /* Task 17: the store, scopes, declarations and ports. */
@@ -129,18 +83,7 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
 
 /* The forms of landed kinds still pending (elab.h, odin3_elab_pending_form). */
 static const bool k_forms[ODIN3_ELAB_STAGES + 1][ODIN3_AST_KIND_COUNT] = {
-    [ODIN3_ELAB_STAGE1] =
-        {
-            /* Task 15: a port declared in the body. */
-            [ODIN3_AST_PORT_DECL] = true,
-            /* Task 16: specparam, time/real variables, tri0/tri1/trireg, hierarchical calls,
-             * switch-level and pull gates (Q6). */
-            [ODIN3_AST_PARAM_DECL] = true,
-            [ODIN3_AST_VAR_DECL] = true,
-            [ODIN3_AST_NET_DECL] = true,
-            [ODIN3_AST_CALL] = true,
-            [ODIN3_AST_GATE_DECL] = true,
-        },
+    [ODIN3_ELAB_STAGE1] = {false}, /* every stage-1 form landed with Task 16: empty */
 };
 
 bool odin3_elab_pending_form(uint8_t stage, uint32_t kind) {
