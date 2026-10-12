@@ -1,0 +1,7 @@
+{
+  "description": "The ABC script an .o3proj names does not exist.",
+  "features": ["negative", "missing file", "abc_script"],
+  "phase": 2,
+  "formats": ["o3proj"],
+  "error": {"kind": "missing_file", "at": "project.o3proj:3", "names": ["abc/none.abc"]}
+}

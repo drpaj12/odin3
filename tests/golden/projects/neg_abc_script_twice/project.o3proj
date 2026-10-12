@@ -1,0 +1,4 @@
+# neg_abc_script_twice: abc_script may appear once (3D AB-27).
+file verilog src/top.v
+abc_script abc/map.abc
+abc_script abc/map.abc

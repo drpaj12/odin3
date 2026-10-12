@@ -1,0 +1,3 @@
+# neg_abc_script_missing: the ABC script does not exist.
+file verilog src/top.v
+abc_script abc/none.abc

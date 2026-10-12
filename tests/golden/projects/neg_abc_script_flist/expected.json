@@ -1,0 +1,7 @@
+{
+  "description": "A -f list has no form for the ABC script: -abc_script is an unknown option.",
+  "features": ["negative", "unknown option", "abc_script"],
+  "phase": 2,
+  "formats": ["f"],
+  "error": {"kind": "unknown_option", "at": "files.f:2", "names": ["-abc_script"]}
+}

@@ -686,6 +686,8 @@ static const corpus_case k_corpus[] = {
      "files.f:2:1: error: unknown_file_type: no language for file: 'src/notes.txt'", false},
     {"neg_unknown_option", "files.f",
      "files.f:2:1: error: unknown_option: unknown option: '-bogus'", false},
+    {"neg_abc_script_flist", "files.f",
+     "files.f:2:1: error: unknown_option: unknown option: '-abc_script'", false},
 };
 
 /* A case's expected.json, NUL-terminated. */

@@ -1,0 +1,5 @@
+# o3proj_abc_script: the ABC script the abc pass runs (3D AB-27; PHASE3 decision 1).
+# A path resolved against this file; Phase 2 stores it, the abc pass (3D) runs it.
+file verilog src/top.v
+top top
+abc_script abc/map.abc
