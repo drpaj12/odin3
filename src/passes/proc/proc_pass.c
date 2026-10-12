@@ -1,7 +1,7 @@
 /*
  * proc_pass.c — the proc pass (2E spec §2, PR-2 to PR-4): its definition and options, the
- * per-module schedule with its atomicity (PR-3), the statistics and info lines (§2.3), the caps
- * (§16) and the test hooks (proc_test.h, plan point (h)).
+ * per-module schedule with its atomicity (PR-3), the dispatch to the phases, step F (point (f)),
+ * the statistics and info lines (§2.3), the caps (§16) and the test hooks (proc_test.h).
  */
 #include "passes/proc/proc.h"
 
@@ -65,8 +65,14 @@ odin3_proc_limits odin3_proc_limits_now(void) {
 }
 
 void odin3_proc_test_set_hooks(const odin3_proc_test_hooks *hooks) {
-    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL};
+    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL, NULL};
     g_hooks = hooks != NULL ? *hooks : k_none;
+}
+
+void odin3_proc_hook_expand(odin3_net_id net, bool set_undef) {
+    if (g_hooks.on_expand != NULL) {
+        g_hooks.on_expand(g_hooks.user, net, set_undef);
+    }
 }
 
 /* --- one run -------------------------------------------------------------------------------- */
@@ -76,11 +82,10 @@ typedef struct proc_run {
     odin3_design *design;
     odin3_proc_opts opts;
     odin3_proc_stats *stats;
-    uint32_t reported; /* pending phases reported (bit per phase) */
-    bool failed;       /* a module failed: the rest of the run only analyses */
-    bool stopped;      /* E6 or E7: the run stops */
-    uint32_t kept;     /* --stop-after: processes re-encoded */
-    double start;      /* ms, for the info line */
+    bool failed;   /* a module failed: the rest of the run only analyses */
+    bool stopped;  /* E6 or E7: the run stops */
+    uint32_t kept; /* --stop-after: processes re-encoded */
+    double start;  /* ms, for the info line */
 } proc_run;
 
 static double now_ms(void) {
@@ -89,7 +94,7 @@ static double now_ms(void) {
     return (double)ts.tv_sec * MS_PER_S + (double)ts.tv_nsec / NS_PER_MS;
 }
 
-/* --- phases (point (h)) -------------------------------------------------------------------- */
+/* --- phases --------------------------------------------------------------------------------- */
 
 /* The clock pre-check phase: E4 first (Yosys raises it in proc_arst, before proc_dff's E1 and
  * E5), then the clocks (§5.5, §11). */
@@ -99,8 +104,7 @@ static odin3_status proc_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw) {
 }
 
 /* The phase itself: clean and rmdead (2E Task 4), prune (Task 5), arst and the clock pre-check
- * (Task 6); the rest are still pending (proc_pending.c), and Tasks 7-9 dispatch theirs here as
- * their pending entries go. */
+ * (Task 6), mux (Task 7), latch (Task 8), ff (Task 9). */
 static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phase, odin3_pw *pw) {
     switch (phase) {
     case ODIN3_PROC_PH_CLEAN:
@@ -113,8 +117,15 @@ static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phas
         return odin3_pw_arst(mctx, pw);
     case ODIN3_PROC_PH_CLOCKS:
         return proc_clocks(mctx, pw);
+    case ODIN3_PROC_PH_MUX:
+        return odin3_proc_mux(mctx, pw);
+    case ODIN3_PROC_PH_LATCH:
+        return odin3_proc_latches(mctx);
+    case ODIN3_PROC_PH_FF:
+        return odin3_proc_ffs(mctx, pw);
     default:
-        return odin3_proc_pending_run(mctx, phase);
+        odin3_log(ODIN3_LOG_ERROR, "proc: internal: no phase %d", (int)phase);
+        return ODIN3_ERR_INVALID_ARG;
     }
 }
 
@@ -178,7 +189,7 @@ static odin3_status collect_procs(const odin3_proc_mctx *mctx, odin3_vec *nodes)
 
 /*
  * One process: the budget, decode, then the analysis phases up to last. ODIN3_ERR_PARSE when the
- * process has an error (a phase's, a pending phase's, E6 or E7), else ODIN3_OK or a failure.
+ * process has an error (a phase's, E6 or E7), else ODIN3_OK or a failure.
  */
 static odin3_status analyse_one(odin3_proc_mctx *mctx, odin3_node_id node, odin3_proc_phase last) {
     odin3_status st = odin3_proc_budget(mctx, odin3_node_prov(mctx->module, node));
@@ -271,11 +282,14 @@ static odin3_status proc_lower(odin3_proc_mctx *mctx) {
 
 /*
  * Step F: opt_expr -keepdc on the lowered module (§2.2; 2F §4.8), skipped under --noopt and
- * --stop-after. Until the pre-merge step of point (f) adds the call to odin3_opt_expr_run (2F-2),
- * only the test hook runs, stats->opt_expr stays zero and the info line has no opt_expr part.
+ * --stop-after: the test hook on_step_f. Point (f)'s pre-merge step (whichever of 2E-3 and 2F-2
+ * merges second) adds, after the hook, the call odin3_opt_expr_run(mctx->ctx, mctx->module,
+ * &(odin3_opt_opts){.keepdc = true}, &counts) with a zeroed local odin3_opt_expr_counts added
+ * into mctx->stats->opt_expr (that call's own Debug check, 2F §4.8, is the only check) and the
+ * info line's opt_expr part. Until then stats->opt_expr stays zero and the line has no such part.
  */
-static void proc_step_f(const proc_run *run, const odin3_proc_mctx *mctx) {
-    if (run->opts.noopt || run->opts.stop_after != ODIN3_PROC_STOP_NONE) {
+static void proc_step_f(const odin3_proc_mctx *mctx) {
+    if (mctx->opts->noopt || mctx->opts->stop_after != ODIN3_PROC_STOP_NONE) {
         return;
     }
     if (g_hooks.on_step_f != NULL) {
@@ -296,18 +310,6 @@ static odin3_status proc_reencode(odin3_proc_mctx *mctx) {
     return st == ODIN3_OK ? odin3_proc_apply_merges(mctx) : st;
 }
 
-/* The end of step A (point (h)): a pending lowering phase fails the module before any change. A
- * phase hook fakes the phases (proc_test.h), so it must handle every pending lowering phase and
- * the check is skipped while one is installed. */
-static bool lowering_pending(odin3_proc_mctx *mctx) {
-    odin3_proc_phase first = odin3_proc_pending_first();
-    if (g_hooks.phase != NULL || first < ODIN3_PROC_PH_MUX || first >= ODIN3_PROC_N_PHASES) {
-        return false;
-    }
-    (void)odin3_proc_pending_run(mctx, first);
-    return true;
-}
-
 /* Steps B-F, or the re-encoding of --stop-after, on a module whose analysis succeeded. */
 static odin3_status proc_change(proc_run *run, odin3_proc_mctx *mctx) {
     if (run->opts.stop_after != ODIN3_PROC_STOP_NONE) {
@@ -319,7 +321,7 @@ static odin3_status proc_change(proc_run *run, odin3_proc_mctx *mctx) {
     if (st == ODIN3_OK) {
         run->stats->processes_lowered += (uint32_t)mctx->pws.len;
         run->stats->modules_lowered++;
-        proc_step_f(run, mctx);
+        proc_step_f(mctx);
     }
     return st;
 }
@@ -340,15 +342,11 @@ static odin3_status proc_module(proc_run *run, odin3_module *module) {
     }
     mctx.opts = &run->opts;
     mctx.stats = run->stats;
-    mctx.reported = &run->reported;
     bool failed = false;
     odin3_proc_phase last = run->opts.stop_after == ODIN3_PROC_STOP_NONE
                                 ? ODIN3_PROC_PH_CLOCKS
                                 : (odin3_proc_phase)(run->opts.stop_after - 1);
     st = proc_analyse(&mctx, last, &failed);
-    if (st == ODIN3_OK && !failed && !run->failed && run->opts.stop_after == ODIN3_PROC_STOP_NONE) {
-        failed = lowering_pending(&mctx);
-    }
     if (st == ODIN3_OK && !failed && !run->failed) {
         st = proc_change(run, &mctx);
         failed = st == ODIN3_ERR_PARSE; /* E6 while lowering */

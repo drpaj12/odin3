@@ -370,7 +370,9 @@ review):* a tripped switch keeps its flags, `parallel_case` included, and never 
 except that a constant compare with no 0/1 bit (all `-`, x or z) still empties the pool: every
 later constant compare, the cases left without compares and the default are then removed and the
 switch gains `FULL_CASE`, exactly as in Yosys, whose pool is empty after such a compare whether it
-took it or not (this also keeps an all-`-` item from reaching §6's append with an empty select).
+took it or not (so after an all-`-` item only non-constant items remain, as in Yosys; with
+`parallel_case` such an item still brings the all-`-` item to §6's append with an empty select,
+which §6 lowers, *amended, 2E Task 7*).
 *Amended (2E Task 6, carry-over N1):* a default case reached past the trip empties the pool the same
 way (Yosys's `take_all`): every later constant compare, the cases then left without compares and a
 later default go, and the switch gains `FULL_CASE`, wherever the default stands.
@@ -518,9 +520,17 @@ deleted. All signals are raw (§4).
 first) is inserted into `odin3_proc_snips`: a partition of the assigned bits into runs, split
 where an `lhs` overlaps an existing run partly (Yosys `SigSnippets::insert`, made iterative with
 a worklist; identical runs are stored once). Snippets are processed in creation order (Yosys
-iterates a hash pool; the order changes only creation order). A **switch cache** records, per
-switch, which snippets any action below it assigns (a `u64map` keyed `switch << 32 | snippet`),
-so a snippet visits only switches that can change it.
+iterates a hash pool; the order changes only creation order). *Amended (2E Task 7):* a split's
+pieces are new snippets, after every older one; a run matching a whole snippet leaves it in
+place (Yosys erases and re-inserts it). A **switch cache** records, per switch, which snippets
+any action below it assigns (a `u64map` keyed `switch << 32 | snippet`), so a snippet visits only
+switches that can change it. Once the partition is final, every `lhs` is a concatenation of whole
+snippets (a split cuts a snippet into contiguous runs, and an insert matches bit for bit), so an
+action that assigns a bit of a snippet assigns all of it: step 1 below is the rhs slice of the
+case's last action assigning the snippet (kept per case and snippet, O(1) per visit), and the
+`full_case` mask is all or nothing per snippet. Yosys also strips each snippet's bits from the
+actions as it goes (`remove2`), which changes neither a later snippet's tree nor the mask (each
+switch's mask is computed before any of its cases is visited).
 
 **One tree per snippet** `sig`, from the root with default value x
 (`signal_to_mux_tree(case, sig, defval)`, an explicit stack of case and switch frames):
@@ -545,6 +555,11 @@ so a snippet visits only switches that can change it.
      `result` → `result = value`, no cell; else a select (below) and a new open mux `$mux(A =
      result, B = value, S = select)`, `result` = its output. A group of k appended cases becomes
      one `$pmux` (B slices and S bits in append order; A from the first); one entry stays `$mux`.
+     *Amended (2E Task 7):* an append whose select is empty (below) makes `value` the result with
+     no cell, as gen_mux does, and ends the open mux, so the next case of the group opens a new
+     one on that result (§20 #17); an append with no compare at all (a default inside a
+     `parallel_case` or simple parallel group, never from 2D, whose default is last) has the
+     select 0, where Yosys builds a `$reduce_or` of zero bits, which the IR does not have.
 3. Return `result`.
 
 **Selects** (`gen_cmp`): for each compare of the case, the bits where it is `-` are dropped from
@@ -553,18 +568,45 @@ both the compare and the switch signal; a compare that is then empty makes the c
 costs no `$eq`); anything else is `$eq(A = signal bits, B = compare bits, A_SIGNED = B_SIGNED =
 0, Y_WIDTH = 1)`, where an x compare bit stays a pin on the x constant net and a non-constant
 item (2D C8) is its nets. Several compares are ORed by `$reduce_or` (`A_WIDTH` = their count).
-Yosys's quirks are kept on purpose, so that `proc-diff` is exact: an `$eq` made before a later
-compare turned out empty stays (dead, removed by `opt`); a mux stays open across a group
-boundary when the boundary case built no cell, so the next case appends to it. An all-`-`
-compare in an append (Yosys asserts there) cannot follow rmdead: such an item takes the whole
-pool, so rmdead removes every later item and the default (with or without `parallel_case`,
-verified), the item is the last case, the reverse walk meets it first, `gen_mux` returns its
-value without a cell, and nothing is ever appended to it; reaching it is an internal error
-(`ODIN3_ERR_CHECK`).
+Yosys's first quirk is kept on purpose, so that `proc-diff` is exact: an `$eq` made before a
+later compare turned out empty stays (dead, removed by `opt`). *Amended (2E Task 7 fix round,
+§20 #18):* its second, a mux left open across a group boundary when the boundary case built no
+cell, is not kept. When gen_mux makes the case's value the result with no cell because the case
+has no compare or its select is empty, while a mux of a later case is open, Yosys keeps that mux
+open, an earlier case of the next group appends to it, and since its output no longer reaches
+the result that case's value is lost: Yosys 0.55 lowers `casez (s) 2'b00: y = x0; 2'b01: y = a;
+2'b??: y = a; k: y = b; endcase` (rmdead keeps the non-constant item `k` after `2'b??`) to `y =
+a`, where Verilog gives `x0` for `s = 2'b00` (2E Task 7 review: `miter -equiv` against `y = (s ==
+2'b00) ? x0 : a` fails at `s = 00, a = 1, x0 = 0`; Yosys's `eval` of its own netlist gives `y =
+0` for `s = 00, x0 = 1, a = 0`; Icarus gives `y = 1`). 2E ends the open mux on those two no-cell
+paths (it becomes a node with no sinks), so the earlier case opens a new mux on the result and
+keeps Verilog's priority. The `value == result` path needs no change: an open mux is then the
+result itself. The netlist differs from Yosys's only where Yosys appends to such a dead mux
+(review: byte-identical in 319 of 330 random processes, the same normal form in 4 more, and
+`sat`-equivalent in all 323 Yosys lowers, where the appended value happened to equal the result).
+*Amended
+(2E Task 7, replacing the claim that an all-`-` compare cannot reach an append):* rmdead removes
+only constant items after an item matching every value, so a non-constant item after it (2D C8)
+survives, and in a `parallel_case` switch, where every case is one group, the reverse walk opens
+a mux for it and then appends the all-`-` item with an empty select, where Yosys 0.55 asserts
+(`ctrl_sig.size() == 1`, proc_mux.cc:264; verified on `parallel_case {2'--: … | \k: …}`). 2E
+lowers it as above (§20 #17): the item's value becomes the result and an earlier item of the
+group opens a new mux on it, so for that snippet the item wins over the later items, as in
+Verilog's first-match order, while the earlier items keep `$pmux` semantics among themselves on
+the new mux (checked by simulation; Yosys has no result to compare with). Where
+the item's value equals the open mux's `A` it is skipped, as every such append is, and the later
+items' mux stands: `parallel_case` allows both, since the item overlaps every other item. In
+a switch without `parallel_case` an all-`-` item always ends its group (nothing is left in the
+pool for the next case), so it reaches only gen_mux.
 
-**Emission.** Muxes are records until the process's trees are done (so an append never resizes a
-node); then each becomes one `odin3_node_create_connected` (`$mux` with `WIDTH`, or `$pmux` with
-`WIDTH`, `S_WIDTH`). Every cell this phase creates drives fresh nets; each snippet's final value
+**Emission.** Muxes are records (so an append never resizes a node) until no case can append to
+them any more, then each becomes one `odin3_node_create_connected` (`$mux` with `WIDTH`, or
+`$pmux` with `WIDTH`, `S_WIDTH`). *Amended (2E Task 7):* a record ends when the next mux of its
+switch opens (before that mux's select is built), when an append ends it (above), or when its
+switch's walk is done; its `Y` is on nets made when it opened, which are deleted again if the
+phase stops (out of memory, E6) before the node exists. So every select of a mux, appended ones
+included, is created before the mux's node (Yosys creates the mux before the selects appended
+to it); creation order is 2E's own (§20 #14). Every cell this phase creates drives fresh nets; each snippet's final value
 is a **connection** `sig ← value` (Yosys `module->connect`), applied with the process's
 promotions at merge point M1 (§7). Constant inputs are pins on the shared constant nets.
 
@@ -578,9 +620,18 @@ promotions at merge point M1 (§7). Constant inputs are pins on the shared const
 | `full_case`, or every value listed (rmdead marks it) | as above, with x for the bits every item assigns, so the default leg is x (2D adds an x default under `full_case`, EL-36) |
 | case items that assign the same value as the default | no mux stage for them (`value == result`) |
 
-Cost: O(cells created + Σ over snippets of the cases on their paths); the pattern pools of the
-grouping step are capped as in §5.2 (past the cap the remaining cases start new groups, W5b,
-equivalent).
+Cost: O(cells created + Σ over snippets of the cases on their paths + Σ over snippets of the
+switches of the cases they visit). *Amended (2E Task 7 review M1):* the last term is Yosys's own
+loop (`swcache.check(sw)` for every switch of a visited case, per snippet), so N independent `if`s
+in one block, each assigning its own signal, cost O(N²): 1000 take 21 ms and 4000 take 349 ms
+(Release, the mux phase alone); a per-(case, snippet) index of the touching switches would make
+it linear without changing the order. Each switch's groups (and its simple-parallel test) are
+computed once, on its first visit, where Yosys recomputes them for every snippet (the same groups:
+they depend on the switch only), so W5b is given once per switch. The pattern pools of the
+grouping step are capped per pool (rmdead's live pools share theirs, §16): *amended (2E Task 7
+review M2)*, when a take passes the cap, the next case starts a new group with a fresh pool and
+grouping then resumes as before, so the groups are only smaller (W5b) and the result is
+equivalent.
 
 ## 7. Connections, merges and the net map (PR-13)
 
@@ -637,10 +688,18 @@ Per process (node-ID order), per `ALWAYS` sync action `lhs ← rhs` (live view):
    child)` and likewise moves a `B` pin on `out` to x; no children → false; else an "or" rule
    over the sorted children. Ports are read live, the snapshot is used only by quickcheck, as in
    Yosys. The memo makes the walk linear in the cone; Yosys walks without one, exponentially on
-   shared (diamond) cones, and on a second visit of a mux whose pin it already moved reads x
-   there and drops that branch, so on a shared cone with a direct feedback input 2E's hold
-   condition keeps a branch Yosys drops (§20 #15; a legal design must not fail where Parmys
-   succeeds slowly). A Debug assertion checks that no `(net, set_undef)` is expanded twice.
+   shared (diamond) cones (§20 #15: speed only; a legal design must not fail where Parmys
+   succeeds slowly). *Amended (2E Task 8 review M3):* v2 said Yosys's second visit of a mux whose
+   pin it had moved reads x there and drops a branch 2E keeps; that cannot happen, since a net
+   reached twice within one `out` has two readers at the join, so no pin below it moves. A Debug
+   assertion checks that no `(net, set_undef)` is expanded twice.
+   *Amended (2E Task 8):* the key's `set_undef` is the walk's value at the net, after its
+   readers are counted. In a snapshot that matches the IR a net reached twice within one `out` has
+   two readers, so both visits have the same key and the memo also gives Yosys's own result there;
+   the two keys of one net arise only when a pin moved after the database was built, which
+   `latch_memo_set_undef` uses. A `(net, set_undef)` reached again while it is still being
+   expanded (a combinational cycle of muxes that does not pass through `out`, such as `assign w =
+   s ? b : w;` in the cone) reads as false, where Yosys's recursion never ends (§20 #19).
 4. False → no latch for that bit; else a latch bit with hold rule n.
 5. **No-latch bits** are recorded connections `out ← in` (merged at M2); their `init` bits are
    removed (§10).
@@ -652,7 +711,10 @@ Per process (node-ID order), per `ALWAYS` sync action `lhs ← rhs` (live view):
    their holds (even of one); two terms give their `$and`. A candidate whose `out` resolves to a
    constant net is skipped, as Yosys skips a latch bit with no wire (`w != nullptr`); 2D never
    merges an `always` output into a constant (EL-40, A4), so reaching it is an internal error
-   (`ODIN3_ERR_CHECK`).
+   (`ODIN3_ERR_CHECK`). *Amended (2E Task 8):* the check covers every `lhs` bit of an `ALWAYS`
+   action and runs before quickcheck, since a constant `out` never passes quickcheck (the snapshot
+   holds no constant) and a no-latch connection into a constant would merge a driven net into the
+   constant net.
 
 **Fix-up** (`fixup_muxes`): from every generated `$dlatch`, breadth-first upstream through
 drivers of input nets, visiting only Yosys's "internal" combinational types (in the registry:
@@ -661,7 +723,15 @@ $gt $add $sub $mul $div $mod $pow $mux $pmux $tribuf $sop`), each `$mux`/`$pmux`
 `B` slices that are all x/z are dropped with their select bits; none left → `B = A`, `S` =
 constant 0; `A` all x/z with some valid slice → `A` = the last valid slice; one select → `$mux`,
 more → `$pmux`. A changed mux is deleted and re-created on the same `Y` nets, keeping its
-provenance and attributes (IR-12: a rewiring keeps records). Then M2.
+provenance and attributes (IR-12: a rewiring keeps records). Then M2. *Amended (2E Task 8):*
+`$reduce_*` and `$logic_*` are every such type of the registry (`$reduce_and`, `_or`, `_xor`,
+`_xnor`, `_bool`; `$logic_not`, `_and`, `_or`). `$lut`, which 3D appended to the registry after this
+list was written and which Yosys's list also has, is left out as the list says; no `$lut` exists
+before `proc`. The walk is one breadth-first queue seeded with every `$dlatch` in creation order,
+and a re-created mux is marked visited. The latch step's cells (holds, `EN`'s `$not`, `$dlatch`)
+take `pw->lowered` and the `$proc` node's attributes (§14). The database is built when the first
+process with an `ALWAYS` action is reached (Yosys always builds it; with no such action there is
+nothing to observe) and its per-net snapshot is freed after M2.
 
 Verified example (default mode): `always @* if (en) y = a;` gives `$mux(A = a, B = a, S = en)`
 (the `y` input moved to x, then `A` := the valid `B` slice), `$dlatch(D = mux, Q = y, EN =
@@ -680,11 +750,18 @@ lenet.v, §19); find_mux_feedback O(cone) per latch bit with the memo.
 
 ## 9. Flip-flops (PR-15)
 
-`odin3_proc_ffs(m, pw)` is `proc_dff`, after the latch step (live view throughout).
+`odin3_proc_ffs(m, pw)` is `proc_dff`, after the latch step. *Amended (2E-3 final review I1):* the
+sync signals and values are read in the live view; the left-hand sides stay as decoded, so the
+groups and their bit order are Yosys's, which sorts the names a process was written with (before
+`assign_map`). A bit whose net a merge of this lowering dropped (M2 keeping an earlier-declared
+wire, as `always @* y = q[1];` does) sorts by the key it had then (`odin3_proc_raw_key`), not by the
+live net's, which would permute the register.
 
-**Groups** (`find_any_lvalue`): take the first action `lhs` of the first sync that has one,
-sorted and deduplicated; for each sync, intersect it with that sync's assigned bits when the
-intersection is not empty. That group is one register; its bits are removed from every action;
+**Groups** (`find_any_lvalue`): take the first action `lhs` of the **last** sync that has one
+(*amended, 2E Task 9*: Yosys's `break` leaves only the loop over one sync's actions, so each later
+sync's first `lhs` replaces the earlier one; verified on 0.55, `ff_edge_chunks`), sorted and
+deduplicated; for each sync, intersect it with that sync's assigned bits when the intersection is
+not empty. That group is one register; its bits are removed from every action;
 repeat until no sync assigns anything. With 2D's bodies (one sync action per output chunk, 2D
 v4.2 EL-35 step 4) a group is one variable's chunk, as in Yosys, so a register's `Q` is the
 whole wire whenever the block assigns the whole wire (what `fsm_detect` needs, 2F's S-P splice).
@@ -713,6 +790,17 @@ in sync order; the edge sync gives `insig` (bits it does not assign stay z). The
 Registers drive the group's own output nets (undriven since the node was deleted), so no merge is
 needed. The cell gets the `$proc` node's attributes (Yosys copies `proc->attributes`). Cost
 O(groups × sync actions) per process, Yosys's bound; groups ≈ output wires.
+
+*Amended (2E Task 9):* the helper cells of steps 1–3 (`$not`, `$reduce_or`, `$mux`) take
+`pw->lowered` as their record but no attributes, as Yosys's `Module::Not`, `ReduceOr` and `Mux`
+add none; in the statistics each cell counts by its type (the `$mux` cells as `$mux`, the `$not`
+and `$reduce_or` cells as helpers). Rules' values, the group and `insig` are compared in the live
+view (§4), so two resets whose values are one net collapse, where Yosys compares the values as
+written (§20 #1). W3 names the reset as written; *amended (2E-3 final review M3)*, with several
+equal non-constant resets collapsed into one trigger it names all of them as W4 does (the first
+three, then `…`): `… while asynchronous resets ('r1', 'r2') are active; …`. The errors step A rules out (a group without an edge
+sync or with two, an `ALWAYS` action left by the latch step, a register output on a constant net)
+are internal errors (`ODIN3_ERR_CHECK`).
 
 ## 10. Initial values (PR-16)
 
@@ -811,7 +899,10 @@ leaving 2F's `ff_emit` partial. None is recommended.
 - **One operation per process** (`odin3_prov_begin_op`), since lowering a process is one
   decomposition (IR-12). Records (`odin3_prov_derive`, hash-consed, IR-13):
   - a `$mux`/`$pmux` and the `$eq`/`$reduce_or` cells of its selects: parents = [the switch's
-    record, then the record of each case it selects, in case order];
+    record, then the record of each case it selects, in case order]; *amended (2E Task 7, the
+    plan's interface):* the record is the switch's, [its record, then every case's in case
+    order], shared by all its muxes and selects, since a select is made before the cases its mux
+    will gather are known;
   - a register, latch, and the helper cells of §8 and §9 (`$not`, `$and`, `$reduce_or`, `$mux`):
     parents = [the `$proc` node's record];
   - a body element without a record (provenance 0) falls back to the node's record.
@@ -860,7 +951,7 @@ assertion.) The options' messages are in §2.3.
 |---|---|---|
 | W1 | each `$dlatch` (§8) | `latch inferred for 'y': the always block does not assign it on every path` |
 | W2 | `init` removed from a combinational output (§10) | `initial value of 'y' is ignored: 'y' is assigned in a combinational always block` |
-| W3 | `$aldff` (§9) | `'q' takes a non-constant value while asynchronous reset 'rst' is active; it is built as an asynchronous-load register ($aldff)` |
+| W3 | `$aldff` (§9) | `'q' takes a non-constant value while asynchronous reset 'rst' is active; it is built as an asynchronous-load register ($aldff)` (several collapsed resets: `… while asynchronous resets ('r1', 'r2') are active; …`, the first three, then `…`; 2E-3 final review M3) |
 | W4 | `$dffsr` (§9) | `'q' has asynchronous resets with different values ('r1', 'r2'); it is built as a set/reset register ($dffsr)` (more than three resets: the first three, then `…`) |
 | W5a | rmdead pool cap, at the switch's record | `case analysis needs more than 16777216 pattern bits; no more dead cases are removed from this case statement` |
 | W5b | mux grouping pool cap, at the switch's record | `case analysis needs more than 16777216 pattern bits; the remaining items of this case statement are not grouped into a $pmux` |
@@ -1022,7 +1113,7 @@ expected cells as `write_rtlil` text of the module.
   fix-up rule, deferred M2 merges (two processes whose feedback crosses: no latch, as Yosys),
   `init` removal (W2) including a temporary with no wire (nothing removed, no warning), the
   walk's memo on a diamond chain of 30 shared muxes (linear; the Debug assertion holds; the hold
-  condition equals the memoised definition, §20 #15), a candidate resolving to a constant net
+  condition equals Yosys's, §20 #15), a candidate resolving to a constant net
   (internal error).
 - `test_proc_ff.c`: grouping, `$dff`/`$adff` with both polarities, collapse with one and two
   equal resets, the self-reset mux, `$dffsr` (W4), `$aldff` (W3), attributes copied.
@@ -1086,8 +1177,15 @@ Exit 0 identical, 1 differ (diff kept), 2 error. Yosys's `proc` here sees exactl
 removes unused cells and wires and joins connected names. `netlist-compare --implicit-models`
 (new, 2E) treats a `.subckt` of an undefined `$`-model as a black box whose formals are those
 used, outputs being `Y`, `Q`, `X`, `CO`, `RD_DATA`. Known exceptions go to
-`tests/proc/diff_expect.txt` with a reason (expected: none; §20 items 8, 9 and 15 can only arise
-with latches on shared mux cones).
+`tests/proc/diff_expect.txt` with a reason (*amended, 2E-3 final review I1, M6*: §20 #8 does show
+in `proc-diff`, as the input order of a hold's `$reduce_or` when two processes' holds share
+hash-consed rules (1 in 520 random modules in Task 8, 1 in 400 in the final review) and when two
+latches share a mux, so Task 10's normaliser canonicalises the input order of the commutative
+`$reduce_or`, or the files are listed; #9 changes creation order only, which the normaliser drops,
+since a register's bits follow the decoded names; #15 is speed only). *Amended (2E Task 7 fix round):* §20 #18 differs on purpose
+where Yosys 0.55 gives wrong logic (a case appended to a mux that no longer reaches the result);
+`proc-diff` flags such inputs, and so does an equivalence check against a Parmys golden, with 2E
+the correct side; they are listed there with that reason. §20 #17's inputs make Yosys assert.
 
 ### 18.4 Bisect
 
@@ -1180,7 +1278,7 @@ peak RSS):
 | lenet.v, the Phase 2 script through `proc`, peak RSS | ≤ 3.0 GB |
 | the 31 VTR files, total `proc --noopt` | ≤ 0.5 s |
 | the 33 Koios files, total `proc --noopt` | ≤ 8 s |
-| complexity | O(body + cells and pins created) per process, plus Yosys's own super-linear points: clean's sweeps O(body × sweeps), sweeps up to the number of nested or sequential switches it inlines or empties one per sweep (§5.1; quadratic on those shapes, kept for oracle parity), pattern pools (capped), quickcheck O(actions × mux cone), groups O(outputs × sync actions) |
+| complexity | O(body + cells and pins created) per process, plus Yosys's own super-linear points: clean's sweeps O(body × sweeps), sweeps up to the number of nested or sequential switches it inlines or empties one per sweep (§5.1; quadratic on those shapes, kept for oracle parity), pattern pools (capped), quickcheck O(actions × mux cone), groups O(outputs × sync actions); *amended (2E-3 final review M4)*: mux's per-snippet scan of the switches of each visited case (§6; N independent `if`s in one block are O(N²): 13 ms at N = 1000, 210 ms at 4000, Release, the whole pass) and arst's `apply_reset` O(reset actions × body) (§5.4; N registers under one reset are O(N²): 21 ms at 500, 331 ms at 2000) |
 
 Step F's time is 2F's (`opt_expr`, 2F §19) and is reported separately.
 
@@ -1198,22 +1296,31 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 
 | # | 2E | Yosys 0.55 `proc` | Parmys | Why |
 |---|---|---|---|---|
-| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept |
+| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux, and dff (the collapse's rule values, the self-reset value; *amended, 2E-3 final review M2*) | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept. In dff: two resets whose values are one net under two names collapse into `$aldff(ALOAD = r1 \| r2)` where Yosys builds a `$dffsr`, and a reset value that is the register's own output under another name gives the self-reset `$mux` + `$dff` where Yosys builds `$aldff(AD = Q)`; both equivalent |
 | 2 | no `proc_rom` | runs it | `-norom` | the exit bar is Parmys |
 | 3 | the trailing `opt_expr -keepdc` is 2F's code, called by `proc` (absent until 2F-2 lands) | its own | same | one `opt_expr` (§24 item 5) |
 | 4 | no `proc_init` | runs it | runs it | 2D emits `init` attributes directly |
 | 5 | `$aldff` when the reset value is not made of constant nets | `ConstEval` may prove it constant (`$adff`) | same | 2D folds constant cells; equivalent |
 | 6 | `check_signal` stops after 1024 hops | recurses until the stack overflows on a cycle | same | robustness |
 | 7 | pattern pools capped (W5a/W5b; rmdead's nested pools share the cap) | unbounded | same | memory rule. Past a W5a trip the switch keeps its later items and its flags, without `FULL_CASE` unless a default is reached: Yosys's semantics on the body with those items kept. Equal or more defined values unless the switch is `parallel_case` and a dead item or default is kept; then inputs selecting two or more items may give x where Yosys gives a value, or a dead item's value where Yosys keeps the fall-through value: not a refinement (verified on 0.55, 2E Task 5 review). Constant items after a compare with no 0/1 bit (all `-`, x or z), or after a default, are still removed, and a default still gives `FULL_CASE` (§5.2; *amended, 2E Task 6*: after the default the result is Yosys's; the default itself is kept where Yosys drops it as dead). A block whose items cover every value without a default can gain an always-enabled latch (no `FULL_CASE`, so the hold stays; equivalent values, a `$dlatch` and W1 more; verified on 0.55). W5b: extra groups, equivalent. (*Amended, 2E Task 5 review*: the switch no longer loses `parallel_case`.) |
-| 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites) |
-| 9 | bits ordered by (primary wire ID, bit) | by name-interning order, then offset | same | reproducible; creation order only |
+| 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites), and in the order of a hold's `$reduce_or` inputs when two processes' holds share hash-consed rules (rule IDs follow creation order; *amended, 2E Task 8*: 1 of 520 random modules, identical under Yosys's order) |
+| 9 | bits ordered by (primary wire ID, bit); a register's bits by the key each decoded bit had before proc's merges (*amended, 2E-3 final review I1*) | by name-interning order, then offset | same | reproducible; creation order, and the order of a group that spans wires, only (within a wire both are offset order; a merge at M2 no longer permutes a register) |
 | 10 | W1, W2 are warnings | logged | logged | DESIGN §6 "latch detection (warn)" |
 | 11 | errors E1–E5 located, house style | `ERROR: Multiple edge sensitive events found for this signal!` etc. | same | same conditions, better text |
 | 12 | no `$memwr`, no `proc_memwr` | `$memwr_v2` | same | 2D collects `$mem` (2D §17 #15); E4 guards the reset case |
 | 13 | SV attribute checks (`always_ff`, …), `$global_clock`, any-edge, `-global_arst`, `-ifx`, `-nomux` not provided | provided | — | not producible by Verilog-2005 bodies; Phase 5 revisits |
 | 14 | cells unnamed (`$c<ID>` when written) | `$procmux$N`, `$procdff$N` | same | names carry no meaning; provenance does |
-| 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones; a second visit of a mux whose pin it moved to x drops that branch | same | linear time, no error on legal input; differs only on shared cones with a direct feedback input, where Yosys's hold depends on visiting order |
+| 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones | same | memoised: linear time where Yosys is exponential on shared cones; no observable difference in consistent IR (a net reached twice within one `out` has two readers at the join, so no pin moves below it; *amended, 2E Task 8 review M3*: v2 claimed a difference on shared cones with a direct feedback input) |
 | 16 | E3 when `apply_reset`'s value has not settled after 100 rounds (*amended, 2E Task 6*) | errors at `count > 100`, tested before its unchanged test: at round 102 | same | the brief's cap semantics (the cap's rounds, lowered by the test hook); differs only on a chain of 100–101 substitutions |
+| 17 | an append whose select is empty (an all-`-` item in a `parallel_case` group, reached when rmdead keeps a later non-constant item) makes the item's value the result and ends the open mux (§6); a default appended to a group has select 0 (*2E Task 7*) | asserts `ctrl_sig.size() == 1` (proc_mux.cc:264); the default's select is a `$reduce_or` of zero bits | same (crashes) | valid input (`(* parallel_case *) casez … 2'b??: …; k: …`); Verilog's first-match order; the IR has no zero-width `$reduce_or` (same values) |
+| 18 | gen_mux's no-cell paths (no compare, or an empty select) end the open mux, so an earlier case of the next group opens a new mux (§6; *2E Task 7 fix round*) | keeps the mux open; the next group's case appends to it although its output no longer reaches the result, and that case's value is lost: wrong logic, e.g. `casez (s) 2'b00: y=x0; 2'b01: y=a; 2'b??: y=a; k: y=b;` gives `y = a` (`miter`/`sat`, Yosys's `eval`, Icarus: 2E Task 7 review) | same | 2E gives Verilog's value; the netlists differ only on such inputs, where `proc-diff` and an equivalence check against a Parmys golden flag them with 2E the correct side (§18.3) |
+| 19 | a combinational cycle of muxes in the latch walk's cone (not through `out`) reads as no feedback there (§8 step 3; *2E Task 8*) | recurses until the stack overflows | same | robustness, as #6; valid Verilog (`assign w = s ? b : w;`) reaches it |
+
+*Kept from Yosys (2E Task 7 review, a note, not a divergence):* clean (§5.1, Task 4) removes an
+empty item of a `parallel_case` switch, as Yosys's `proc_clean` does, so with a default the
+inputs that match only that item take the default, where Verilog (with or without
+`parallel_case`) leaves the signals unchanged; the review's first-match interpreter saw it in 3 of
+328 random processes, and 2E keeps Yosys's choice.
 
 ## 21. Review focus
 

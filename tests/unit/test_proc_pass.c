@@ -1,15 +1,23 @@
 /*
- * test_proc_pass.c — the proc pass skeleton (2E spec §2, §12, §15, §16; plan Task 3): options,
+ * test_proc_pass.c — the proc pass (2E spec §2, §12, §15, §16; plan Tasks 3 and 9): options,
  * the per-module schedule and its atomicity (Review Focus 4), statistics and info lines, step F,
- * --stop-after's re-encoding, the byte budget (E6), the error cap (E7), orphan nets, determinism,
- * the pending phases (point (h)) and out of memory. The phases are fakes installed through
- * proc_test.h: every analysis phase succeeds, except CLEAN on a process whose node carries the
- * attribute fake_error, which reports `fake error` at the process; mux, latch and ff do nothing
- * (step B itself deletes the node).
+ * --stop-after's re-encoding, the byte budget (E6), the error cap (E7), orphan nets, determinism
+ * and out of memory, first with fake phases, then with the real ones.
  *
- * Yosys re-derivation: none. These tests pin the schedule with fake phases; the real phases'
- * tests (Tasks 4-9) each record their yosys-phase command.
+ * The fakes are installed through proc_test.h: every analysis phase succeeds, except CLEAN on a
+ * process whose node carries the attribute fake_error, which reports `fake error` at the process;
+ * mux, latch and ff do nothing (step B itself deletes the node). The real-phase tests (Task 9,
+ * the section "real phases") install no hook.
+ *
+ * Yosys re-derivation: none for the fake-phase tests. The real-phase tests reuse bodies whose
+ * Yosys 0.55 runs are recorded in test_proc_ff.c (ff_dff, ff_adff), test_proc_arst.c
+ * (clocks_e1a, clocks_e1b), test_proc_mux.c (mux_dead_eq) and test_proc_latch.c
+ * (latch_verified_example); the whole-pass result is the sum of those, with
+ *   tools/proc-check/yosys-phase --yosys $VTR_ROOT/build/bin/yosys --upto dff <test>.il
+ * as the command for any of them (E1 is Yosys's `Multiple edge sensitive events found for this
+ * signal!`, §20 #11; E6 has no Yosys counterpart).
  */
+#include "ir/celltype.h"
 #include "ir/check.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -34,7 +42,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifndef ODIN3_DOCS_DIR
 #error "ODIN3_DOCS_DIR must name the docs directory"
@@ -47,6 +57,7 @@ enum {
     MODULES_MAX = 8,
     BODIES_MAX = 8,
     OOM_LIMIT = 4000,
+    REAL_OOM_LIMIT = 40000,
     CAP_PROCS = 25,
     DOC_MAX = 1 << 20,
 };
@@ -164,7 +175,7 @@ static void fake_step_f(void *user, odin3_module_id module) {
 
 static void install_fakes(void) {
     memset(&fakes, 0, sizeof fakes);
-    odin3_proc_test_hooks hooks = {fake_phase, fake_step_f, &fakes};
+    odin3_proc_test_hooks hooks = {fake_phase, fake_step_f, NULL, &fakes};
     odin3_proc_test_set_hooks(&hooks);
 }
 
@@ -617,37 +628,28 @@ static void test_determinism(void) {
     odin3_strbuf_free(&second);
 }
 
-/* Point (h): without hooks the first pending phase reports once and nothing changes. Task 4 changes
- * the phase to 'prune', Task 5 'arst', Task 6 'mux', Task 7 'latch', Task 8 'ff'; Task 9 deletes
- * this test. */
-static void test_pending_stub(void) {
-    odin3_proc_test_set_hooks(NULL);
-    pb_result res;
-    build(M1_TEXT, &res);
-    saved_bodies before = save_bodies(&res, "m1");
-    odin3_node_id first = pb_proc(&res, "m1", 0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pass_run(&res, "proc", ""));
-    char errs[4][LOG_TEXT];
-    TEST_ASSERT_TRUE(errors_seen(errs, 4) >= 1);
-    TEST_ASSERT_EQUAL_STRING("odin3: error: proc: 'mux' is not available yet (2E)", errs[0]);
-    size_t pending = 0;
-    for (size_t i = 0; i < n_lines && i < LOG_LINES; i++) {
-        pending += strstr(lines[i], "is not available yet") != NULL ? 1 : 0;
-    }
-    TEST_ASSERT_EQUAL_size_t(1, pending);
-    TEST_ASSERT_EQUAL_UINT32(first.v, pb_proc(&res, "m1", 0).v);
-    saved_bodies after = save_bodies(&res, "m1");
-    TEST_ASSERT_EQUAL_UINT32(2, after.count);
-    for (uint32_t i = 0; i < after.count; i++) {
-        TEST_ASSERT_TRUE(odin3_value_equal(&before.body[i], &after.body[i]));
-    }
-    TEST_ASSERT_EQUAL(ODIN3_PROC_PH_MUX, odin3_proc_pending_first());
-    pb_free(&res);
-}
-
 /* --- out of memory ------------------------------------------------------------------------- */
 
-/* One injection: NO_MEMORY or OK, valid IR (ASan finds a leak at exit). True once it succeeds. */
+/*
+ * Whether the injected failure fired: probes up to fail + 1 allocations, one of which fails when it
+ * did not (fewer than fail + 1 allocations were made). Leaves the hook disabled. A sweep that ends
+ * only when the failure did not fire is not cut short by a failure the code absorbs.
+ */
+static bool injection_fired(long fail) {
+    for (long i = 0; i <= fail; i++) {
+        void *probe = odin3_util_malloc(1);
+        if (probe == NULL) {
+            return false;
+        }
+        odin3_util_free(probe);
+    }
+    odin3_util_set_alloc_fail_after(-1);
+    return true;
+}
+
+/* One injection: NO_MEMORY or OK, valid IR (ASan finds a leak at exit). True once the run makes
+ * no more allocations than fail (review M2 of 2E Task 8: an absorbed failure no longer ends the
+ * sweep). */
 static bool oom_step(long fail) {
     pb_result res;
     install_fakes();
@@ -659,14 +661,14 @@ static bool oom_step(long fail) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(res.design, name, &ctx));
     odin3_util_set_alloc_fail_after(fail);
     odin3_status st = odin3_proc_run(&ctx, res.design, NULL, NULL);
-    odin3_util_set_alloc_fail_after(-1);
+    bool fired = injection_fired(fail);
     TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, "status");
     check_full(&res);
     if (st == ODIN3_OK) {
         TEST_ASSERT_FALSE(odin3_design_has_processes(res.design));
     }
     pb_free(&res);
-    return st == ODIN3_OK;
+    return !fired;
 }
 
 static void test_oom(void) {
@@ -675,6 +677,448 @@ static void test_oom(void) {
         done = oom_step(fail);
     }
     TEST_ASSERT_TRUE(done);
+}
+
+/* --- real phases (Task 9): no hooks -------------------------------------------------------- */
+
+/* The raw error lines (the sink's text, no prefix), in order. */
+static size_t errors_raw(char out[][LOG_TEXT], size_t max) {
+    size_t count = 0;
+    for (size_t i = 0; i < n_lines && i < LOG_LINES; i++) {
+        if (levels[i] != ODIN3_LOG_ERROR) {
+            continue;
+        }
+        if (count < max) {
+            int len = snprintf(out[count], LOG_TEXT, "%s", lines[i]);
+            TEST_ASSERT_TRUE(len >= 0 && len < LOG_TEXT);
+        }
+        count++;
+    }
+    return count;
+}
+
+/* m1: ff_dff's body (test_proc_ff.c). */
+#define DFF_MODULE(name)                                                                           \
+    "module \\" name "\n  wire input 1 \\clk\n  wire input 2 \\d\n  wire output 3 \\q\n"           \
+    "  wire \\t0\n  process $p\n    assign \\t0 \\d\n    sync posedge \\clk\n"                     \
+    "      update \\q \\t0\n  end\nend\n"
+
+/* m2: clocks_e1a's body (test_proc_arst.c), at t.v:9.3: two root switches, so arst finds no
+ * reset and q keeps two edge events (E1a). */
+#define E1A_MODULE                                                                                 \
+    "module \\m2\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\a\n"                \
+    "  wire input 4 \\b\n  wire input 5 \\d\n  wire output 6 \\q\n  wire \\t0\n"                   \
+    "  attribute \\src \"t.v:9.3\"\n  process $p\n"                                                \
+    "    switch \\a\n      case 1'1\n        assign \\t0 \\d\n    end\n"                           \
+    "    switch \\b\n      case 1'1\n        assign \\t0 1'0\n    end\n"                           \
+    "    sync posedge \\clk\n      update \\q \\t0\n"                                              \
+    "    sync posedge \\rst\n      update \\q \\t0\n  end\nend\n"
+
+/* m3: clocks_e1b's body (test_proc_arst.c), at t.v:20.3: `@(posedge clk or negedge clk)` (E1b). */
+#define E1B_MODULE                                                                                 \
+    "module \\m3\n  wire input 1 \\clk\n  wire input 2 \\d\n  wire output 3 \\q\n  wire \\t0\n"    \
+    "  attribute \\src \"t.v:20.3\"\n  process $p\n    assign \\t0 \\d\n"                          \
+    "    sync posedge \\clk\n      update \\q \\t0\n"                                              \
+    "    sync negedge \\clk\n      update \\q \\t0\n  end\nend\n"
+
+/* Review Focus 4 with the real phases (finding 16): m1 is lowered, m2 fails with E1a located at
+ * its always and keeps its node, m3 is analysed after the failure (its own E1b shows it) and keeps
+ * its node too. */
+static void test_atomicity_real_e1a(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    build(DFF_MODULE("m1") E1A_MODULE E1B_MODULE, &res);
+    odin3_proc_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(&res, NULL, &stats));
+    char errs[4][LOG_TEXT];
+    TEST_ASSERT_EQUAL_size_t(2, errors_raw(errs, 4));
+    TEST_ASSERT_EQUAL_STRING("t.v:9:3: error: 'q' is clocked by both 'clk' and 'rst'; a second "
+                             "edge event must be an asynchronous reset tested by the block's only "
+                             "top-level 'if'",
+                             errs[0]);
+    TEST_ASSERT_EQUAL_STRING("t.v:20:3: error: 'q' is clocked by both edges of 'clk'; dual-edge "
+                             "registers are not supported",
+                             errs[1]);
+    TEST_ASSERT_EQUAL_STRING(
+        "proc: 1 processes in 1 modules lowered; 2 modules keep their processes (2 errors)",
+        proc_info());
+    TEST_ASSERT_EQUAL_UINT32(0, proc_count(&res, "m1"));
+    TEST_ASSERT_EQUAL_UINT32(1, proc_count(&res, "m2"));
+    TEST_ASSERT_EQUAL_UINT32(1, proc_count(&res, "m3"));
+    TEST_ASSERT_EQUAL_UINT32(1, stats.cells[ODIN3_PROC_K_DFF]);
+    TEST_ASSERT_EQUAL_UINT32(2, stats.errors);
+    TEST_ASSERT_EQUAL_UINT32(2, stats.modules_failed);
+    pb_free(&res);
+}
+
+enum { BUDGET_TEST_PINS = 64, BUDGET_SEARCH = 1 << 24 };
+
+/* A 15-item case on a 4-bit select, 8 bits wide, at t.v:5.3: the mux step makes 15 $eq (9 pins
+ * each) and a $pmux of 151 pins before the register, so with budget_pins 64 it checks the budget
+ * at least twice. */
+static const char *const k_budget_text =
+    "module \\m\n  wire input 1 \\clk\n  wire width 4 input 2 \\s\n  wire width 8 input 3 \\a\n"
+    "  wire width 8 input 4 \\b\n  wire width 8 output 5 \\q\n  wire width 8 \\t0\n"
+    "  attribute \\src \"t.v:5.3\"\n  process $p\n    switch \\s\n"
+    "      case 4'0001\n        assign \\t0 \\a\n      case 4'0010\n        assign \\t0 \\b\n"
+    "      case 4'0011\n        assign \\t0 \\a\n      case 4'0100\n        assign \\t0 \\b\n"
+    "      case 4'0101\n        assign \\t0 \\a\n      case 4'0110\n        assign \\t0 \\b\n"
+    "      case 4'0111\n        assign \\t0 \\a\n      case 4'1000\n        assign \\t0 \\b\n"
+    "      case 4'1001\n        assign \\t0 \\a\n      case 4'1010\n        assign \\t0 \\b\n"
+    "      case 4'1011\n        assign \\t0 \\a\n      case 4'1100\n        assign \\t0 \\b\n"
+    "      case 4'1101\n        assign \\t0 \\a\n      case 4'1110\n        assign \\t0 \\b\n"
+    "      case 4'1111\n        assign \\t0 \\a\n      case\n        assign \\t0 8'00000000\n"
+    "    end\n    sync posedge \\clk\n      update \\q \\t0\n  end\nend\n";
+
+/* A module and the pins between in-cell budget checks for a budget test. */
+typedef struct budget_case {
+    const char *text;
+    uint32_t pins;
+} budget_case;
+
+/* proc --noopt on a new build of the case's text with its budget_pins and the budget's limit at
+ * limit, check FULL before and after; true when the module changed (its $proc nodes are gone). */
+static bool budget_probe(budget_case bc, uint64_t limit, odin3_status *st) {
+    pb_result res;
+    build(bc.text, &res);
+    odin3_proc_limits limits = odin3_proc_limits_now();
+    limits.budget_pins = bc.pins;
+    odin3_proc_test_set_limits(&limits);
+    odin3_budget_test_set_limit(limit);
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    *st = run_proc(&res, &noopt, NULL);
+    bool changed = proc_count(&res, "m") == 0;
+    pb_free(&res);
+    return changed;
+}
+
+/* The count of live nodes of type `type` in mod. */
+static uint32_t count_nodes(const pb_result *res, const odin3_module *mod, const char *type) {
+    uint32_t count = 0;
+    for (uint32_t i = 1; i < odin3_module_node_end(mod); i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(mod, node) &&
+            strcmp(odin3_celltype_get(res->design, odin3_node_type(mod, node))->name, type) == 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/* The smallest limit at which proc changes the module, i.e. what the budget measures once step A is
+ * done (the value odin3_design_bytes_reserved reports then, plus proc's working forms, which the
+ * check counts too): below it the boundary check before step B fails; the design's own bytes leave
+ * the module unchanged, 2^24 bytes more lower it completely. */
+static uint64_t budget_threshold(budget_case bc) {
+    pb_result res;
+    build(bc.text, &res);
+    uint64_t lo = odin3_design_bytes_reserved(res.design);
+    pb_free(&res);
+    uint64_t hi = lo + BUDGET_SEARCH;
+    odin3_status st = ODIN3_OK;
+    TEST_ASSERT_FALSE(budget_probe(bc, lo, &st));
+    TEST_ASSERT_TRUE(budget_probe(bc, hi, &st));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    while (hi - lo > 1) {
+        uint64_t mid = lo + (hi - lo) / 2;
+        if (budget_probe(bc, mid, &st)) {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    return hi;
+}
+
+/* proc --noopt on a new build of the case at its threshold: ODIN3_ERR_PARSE with exactly the
+ * located E6 at `at` (file:line:col); the design is left in *res, checked FULL. */
+static void budget_stop(budget_case bc, const char *at, pb_result *res) {
+    uint64_t limit = budget_threshold(bc);
+    build(bc.text, res);
+    odin3_proc_limits limits = odin3_proc_limits_now();
+    limits.budget_pins = bc.pins;
+    odin3_proc_test_set_limits(&limits);
+    odin3_budget_test_set_limit(limit);
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(res, &noopt, NULL));
+    char want[LOG_TEXT];
+    int len = snprintf(want, sizeof want,
+                       "%s: error: proc needs more than %llu bytes (the design's budget is 60%% of "
+                       "physical memory)",
+                       at, (unsigned long long)limit);
+    TEST_ASSERT_TRUE(len > 0 && len < LOG_TEXT);
+    char errs[2][LOG_TEXT];
+    TEST_ASSERT_EQUAL_size_t(1, errors_raw(errs, 2));
+    TEST_ASSERT_EQUAL_STRING(want, errs[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, proc_count(res, "m"));
+}
+
+/*
+ * Review Focus 5 with the real phases (finding 15): at the threshold every process-boundary check
+ * passes, and the first check inside the lowering, when the mux step's 8th $eq brings its pins to
+ * 72, stops proc with the located E6 at the process being lowered. The module is left incomplete
+ * (seven $eq, no $pmux, no register) and valid.
+ */
+static void test_budget_e6_mid_lowering(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_text, BUDGET_TEST_PINS}, "t.v:5:3", &res);
+    /* the 8th $eq brings the pins to 72: its check, the first inside the mux step, stops proc */
+    TEST_ASSERT_EQUAL_UINT32(7, count_nodes(&res, res.module, "$eq"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$pmux"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dff"));
+    pb_free(&res);
+}
+
+/* latch_verified_example's body at t.v:7.3. */
+static const char *const k_budget_latch_text =
+    "module \\m\n  wire input 1 \\en\n  wire input 2 \\a\n  wire output 3 \\y\n  wire \\t0\n"
+    "  wire \\t1\n  attribute \\src \"t.v:7.3\"\n  process $p\n    assign \\t0 \\t1\n"
+    "    switch \\en\n      case 1'1\n        assign \\t1 \\a\n      case\n"
+    "        assign \\t1 \\y\n    end\n    sync always\n      update \\y \\t0\n  end\nend\n";
+
+/* `if (en) q <= d;` (2D's body: the root default t0 <- q) at t.v:3.3. */
+static const char *const k_budget_ff_text =
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\en\n  wire input 3 \\d\n"
+    "  wire output 4 \\q\n  wire \\t0\n  attribute \\src \"t.v:3.3\"\n  process $p\n"
+    "    assign \\t0 \\q\n    switch \\en\n      case 1'1\n        assign \\t0 \\d\n    end\n"
+    "    sync posedge \\clk\n      update \\q \\t0\n  end\nend\n";
+
+/* The latch step's own budget check (2E-3 final review M5): with no check inside a cell (the
+ * default 2^16 pins), the first check after step B is the latch step's, at its process, before the
+ * holds and the $dlatch: the mux exists, no latch does. */
+static void test_budget_e6_at_latch(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_latch_text, ODIN3_PROC_BUDGET_PINS}, "t.v:7:3", &res);
+    TEST_ASSERT_EQUAL_UINT32(1, count_nodes(&res, res.module, "$mux"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dlatch"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$not"));
+    pb_free(&res);
+}
+
+/* The flip-flop step's budget check (M5): a clocked block has no ALWAYS action, so after step B the
+ * next check is the one before its flip-flops: the mux exists, the $dff does not. */
+static void test_budget_e6_at_ff(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_ff_text, ODIN3_PROC_BUDGET_PINS}, "t.v:3:3", &res);
+    TEST_ASSERT_EQUAL_UINT32(1, count_nodes(&res, res.module, "$mux"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dff"));
+    pb_free(&res);
+}
+
+/* mux_dead_eq's body (test_proc_mux.c) as a real process, with a case rmdead removes (2'10, after
+ * 2'-- covers every value) that assigned and read the unnamed $tmp1: after proc $tmp1's net, on
+ * no pin of anything left, is deleted (step E, finding 16). */
+static void test_real_orphans(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    build("module \\m\n  wire width 2 input 1 \\s\n  wire input 2 \\a\n  wire output 3 \\y\n"
+          "  wire \\t1\n  wire $tmp1\n  process $p\n    switch \\s\n"
+          "      case 2'01, 2'--\n        assign \\t1 \\a\n"
+          "      case 2'10\n        assign $tmp1 \\a\n        assign \\t1 $tmp1\n    end\n"
+          "    sync always\n      update \\y \\t1\n  end\nend\n",
+          &res);
+    odin3_module *mod = res.module;
+    odin3_net_id tmp = last_tmp_net(mod);
+    TEST_ASSERT_TRUE(odin3_net_live(mod, tmp));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, NULL, NULL));
+    TEST_ASSERT_FALSE(odin3_net_live(mod, tmp));
+    TEST_ASSERT_EQUAL_UINT32(wire_net0(&res, mod, "a").v, wire_net0(&res, mod, "y").v);
+    pb_free(&res);
+}
+
+/* ff_adff's process and latch_verified_example's in one module (their temporaries renamed). */
+static const char *const k_adff_latch_text =
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\d\n"
+    "  wire output 4 \\q\n  wire \\t0\n  wire input 5 \\en\n  wire input 6 \\a\n"
+    "  wire output 7 \\y\n  wire \\l0\n  wire \\l1\n"
+    "  process $p1\n    switch \\rst\n      case 1'1\n        assign \\t0 1'0\n"
+    "      case\n        assign \\t0 \\d\n    end\n"
+    "    sync posedge \\clk\n      update \\q \\t0\n"
+    "    sync posedge \\rst\n      update \\q \\t0\n  end\n"
+    "  process $p2\n    assign \\l0 \\l1\n    switch \\en\n      case 1'1\n"
+    "        assign \\l1 \\a\n      case\n        assign \\l1 \\y\n    end\n"
+    "    sync always\n      update \\y \\l0\n  end\nend\n";
+
+/* True when text is `<digits>.<digit> ms`. */
+static bool is_ms(const char *text) {
+    size_t digits = strspn(text, "0123456789");
+    return digits > 0 && text[digits] == '.' && text[digits + 1] >= '0' &&
+           text[digits + 1] <= '9' && strcmp(text + digits + 2, " ms") == 0;
+}
+
+/* The success info line under --noopt, matching ^proc: 2 processes in 1 modules: 0 \$dff, 1
+ * \$adff, 0 \$aldff, 0 \$dffsr, 1 \$dlatch, 1 \$mux, 0 \$pmux; [0-9]+\.[0-9] ms$, and the
+ * statistics: 6 helpers (the latch's two $not, two $reduce_or and $and, the $adff's $reduce_or)
+ * and one W1. */
+static void test_info_line_success(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    build(k_adff_latch_text, &res);
+    odin3_proc_stats stats;
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &noopt, &stats));
+    const char *info = proc_info();
+    const char *want = "proc: 2 processes in 1 modules: 0 $dff, 1 $adff, 0 $aldff, 0 $dffsr, "
+                       "1 $dlatch, 1 $mux, 0 $pmux; ";
+    TEST_ASSERT_EQUAL_INT(0, strncmp(want, info, strlen(want)));
+    TEST_ASSERT_TRUE_MESSAGE(is_ms(info + strlen(want)), info);
+    TEST_ASSERT_EQUAL_UINT32(6, stats.cells[ODIN3_PROC_K_HELPER]);
+    TEST_ASSERT_EQUAL_UINT32(1, stats.warnings[ODIN3_PROC_W1]);
+    TEST_ASSERT_EQUAL_UINT32(2, stats.processes_lowered);
+    TEST_ASSERT_EQUAL_UINT32(0, stats.opt_expr.folded); /* step F has no call yet (point (f)) */
+    pb_free(&res);
+}
+
+/*
+ * Every construct of Tasks 4-9 in one module: a switch on a net tied to a constant (clean folds
+ * it), a case listing every value (rmdead drops its default), a casez whose second item is dead,
+ * prune's promotions, the reset forms of arst ($adff, the self-reset mux, $dffsr from two resets
+ * with W4, $aldff with W3), mux trees ($mux, $pmux, a priority chain), a latch (W1) and a
+ * combinational output whose init goes (W2), and $dff on both edges.
+ */
+static const char *const k_every_text =
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\r2\n"
+    "  wire input 4 \\d\n  wire input 5 \\e\n  wire input 6 \\a\n  wire input 7 \\en\n"
+    "  wire width 2 input 8 \\s\n  wire width 8 input 9 \\dw\n  wire output 10 \\q\n"
+    "  wire output 11 \\u\n  wire output 12 \\sr\n  wire output 13 \\l\n"
+    "  wire width 8 output 14 \\w\n  wire output 15 \\y\n  attribute \\init 2'01\n"
+    "  wire width 2 output 16 \\z\n  wire output 17 \\v\n  wire \\k\n  wire \\nr2\n"
+    "  wire \\t0\n  wire \\u0\n  wire \\s0\n  wire \\l0\n  wire width 8 \\w0\n  wire \\y0\n"
+    "  wire \\y1\n  wire width 2 \\z0\n  wire \\v0\n  connect \\k 1'0\n"
+    "  cell $logic_not $c1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\r2\n    connect \\Y \\nr2\n  end\n"
+    "  process $p1\n    assign \\u0 \\u\n    switch \\rst\n"
+    "      case 1'1\n        assign \\t0 1'0\n"
+    "      case\n        assign \\t0 \\d\n        assign \\u0 \\e\n    end\n"
+    "    sync posedge \\clk\n      update \\q \\t0\n      update \\u \\u0\n"
+    "    sync posedge \\rst\n      update \\q \\t0\n      update \\u \\u0\n  end\n"
+    "  process $p2\n    switch \\rst\n      case 1'1\n        assign \\s0 1'0\n      case\n"
+    "        switch \\nr2\n          case 1'1\n            assign \\s0 1'1\n"
+    "          case\n            assign \\s0 \\d\n        end\n    end\n"
+    "    sync posedge \\clk\n      update \\sr \\s0\n"
+    "    sync posedge \\rst\n      update \\sr \\s0\n"
+    "    sync negedge \\r2\n      update \\sr \\s0\n  end\n"
+    "  process $p3\n    assign \\l0 \\l\n    switch \\rst\n      case 1'1\n"
+    "        assign \\l0 \\a\n    end\n"
+    "    sync posedge \\clk\n      update \\l \\l0\n"
+    "    sync posedge \\rst\n      update \\l \\l0\n  end\n"
+    "  process $p4\n    assign \\w0 \\w\n    switch \\k\n      case 1'1\n"
+    "        assign \\w0 8'00000000\n    end\n    switch \\en\n      case 1'1\n"
+    "        assign \\w0 \\dw\n    end\n    sync negedge \\clk\n      update \\w \\w0\n  end\n"
+    "  process $p5\n    assign \\y0 \\y1\n    switch \\en\n      case 1'1\n"
+    "        assign \\y1 \\a\n      case\n        assign \\y1 \\y\n    end\n"
+    "    sync always\n      update \\y \\y0\n  end\n"
+    "  process $p6\n    switch \\s\n      case 2'00\n        assign \\z0 2'01\n"
+    "      case 2'01\n        assign \\z0 2'10\n      case 2'10\n        assign \\z0 2'11\n"
+    "      case 2'11\n        assign \\z0 2'00\n      case\n        assign \\z0 2'xx\n"
+    "    end\n    sync always\n      update \\z \\z0\n  end\n"
+    "  process $p7\n    switch \\s\n      case 2'1-\n        assign \\v0 \\a\n"
+    "      case 2'11\n        assign \\v0 \\d\n      case 2'-1\n        assign \\v0 \\e\n"
+    "      case\n        assign \\v0 1'0\n    end\n"
+    "    sync posedge \\clk\n      update \\v \\v0\n  end\nend\n";
+
+/* One run of every construct: its write_rtlil text (a fresh build each time). */
+static void rtlil_real(odin3_strbuf *out, odin3_proc_stats *stats) {
+    pb_result res;
+    build(k_every_text, &res);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, NULL, stats));
+    TEST_ASSERT_FALSE(odin3_design_has_processes(res.design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_rtlil(&res, out));
+    pb_free(&res);
+}
+
+/* Two runs of every construct give byte-identical write_rtlil text; the run uses each kind. */
+static void test_real_determinism(void) {
+    odin3_proc_test_set_hooks(NULL);
+    odin3_strbuf first;
+    odin3_strbuf second;
+    odin3_strbuf_init(&first);
+    odin3_strbuf_init(&second);
+    odin3_proc_stats stats;
+    rtlil_real(&first, &stats);
+    rtlil_real(&second, NULL);
+    TEST_ASSERT_TRUE(first.len > 0);
+    TEST_ASSERT_EQUAL_STRING(first.data, second.data);
+    static const odin3_proc_kind k_kinds[] = {
+        ODIN3_PROC_K_DFF,   ODIN3_PROC_K_ADFF,   ODIN3_PROC_K_ALDFF,
+        ODIN3_PROC_K_DFFSR, ODIN3_PROC_K_DLATCH, ODIN3_PROC_K_MUX,
+        ODIN3_PROC_K_PMUX,  ODIN3_PROC_K_EQ,     ODIN3_PROC_K_HELPER};
+    for (size_t i = 0; i < sizeof k_kinds / sizeof k_kinds[0]; i++) {
+        TEST_ASSERT_TRUE(stats.cells[k_kinds[i]] > 0);
+    }
+    static const odin3_proc_warning k_warns[] = {ODIN3_PROC_W1, ODIN3_PROC_W2, ODIN3_PROC_W3,
+                                                 ODIN3_PROC_W4};
+    for (size_t i = 0; i < sizeof k_warns / sizeof k_warns[0]; i++) {
+        TEST_ASSERT_EQUAL_UINT32(1, stats.warnings[k_warns[i]]);
+    }
+    odin3_strbuf_free(&first);
+    odin3_strbuf_free(&second);
+}
+
+/* §2.3's postcondition: after a successful run the design has no processes, write_blif runs (it
+ * refused the design before), and a second proc logs `proc: no processes`. */
+/* A new private directory in dir (beside the test's working directory, so parallel runs never
+ * share it) and the path of out.blif in it. */
+static void temp_blif(char *dir, char *path) {
+    int len = snprintf(dir, LOG_TEXT, "odin3_proc_XXXXXX");
+    TEST_ASSERT_TRUE(len > 0 && len < LOG_TEXT);
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    len = snprintf(path, LOG_TEXT, "%s/out.blif", dir);
+    TEST_ASSERT_TRUE(len > 0 && len < LOG_TEXT);
+}
+
+static void test_postcondition(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    build(DFF_MODULE("m"), &res);
+    char dir[LOG_TEXT];
+    char path[LOG_TEXT];
+    temp_blif(dir, path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "write_blif", path));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_run(&res, "proc", ""));
+    TEST_ASSERT_FALSE(odin3_design_has_processes(res.design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_run(&res, "write_blif", path));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pass_run(&res, "proc", ""));
+    TEST_ASSERT_EQUAL_STRING("proc: no processes", proc_info());
+    TEST_ASSERT_EQUAL_INT(0, remove(path));
+    TEST_ASSERT_EQUAL_INT(0, rmdir(dir));
+    pb_free(&res);
+}
+
+/* One injection over the whole pass on every construct: NO_MEMORY or OK, valid IR, no leak (ASan
+ * at exit). True once the run makes no more allocations than fail. */
+static bool real_oom_step(long fail) {
+    pb_result res;
+    build(k_every_text, &res);
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(res.design, odin3_bytes_cstr("proc"), &name));
+    odin3_pass_ctx ctx;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(res.design, name, &ctx));
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_proc_run(&ctx, res.design, NULL, NULL);
+    bool fired = injection_fired(fail);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, "status");
+    check_full(&res);
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_FALSE(odin3_design_has_processes(res.design));
+    }
+    pb_free(&res);
+    return !fired;
+}
+
+static void test_real_oom(void) {
+    odin3_proc_test_set_hooks(NULL);
+    bool done = false;
+    long fail = 0;
+    for (; fail < REAL_OOM_LIMIT && !done; fail++) {
+        done = real_oom_step(fail);
+    }
+    TEST_ASSERT_TRUE(done);
+    TEST_ASSERT_TRUE(fail > 1);
 }
 
 /* --- docs ---------------------------------------------------------------------------------- */
@@ -706,7 +1150,15 @@ int main(void) {
     RUN_TEST(test_limits_clamped);
     RUN_TEST(test_orphans);
     RUN_TEST(test_determinism);
-    RUN_TEST(test_pending_stub);
+    RUN_TEST(test_atomicity_real_e1a);
+    RUN_TEST(test_budget_e6_mid_lowering);
+    RUN_TEST(test_budget_e6_at_latch);
+    RUN_TEST(test_budget_e6_at_ff);
+    RUN_TEST(test_real_orphans);
+    RUN_TEST(test_info_line_success);
+    RUN_TEST(test_real_determinism);
+    RUN_TEST(test_postcondition);
+    RUN_TEST(test_real_oom);
     RUN_TEST(test_oom);
     RUN_TEST(test_docs);
     return UNITY_END();
