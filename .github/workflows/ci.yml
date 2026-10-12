@@ -91,12 +91,12 @@ jobs:
           cmake --preset debug
           cmake --build --preset debug
           ctest --preset debug --output-on-failure
-      - name: Fuzz smoke (clang libFuzzer, ASan + UBSan; 2B §10.5, 2C §7.5)
+      - name: Fuzz smoke (clang libFuzzer, ASan + UBSan; 2B §10.5, 2C §7.5, 3D §13.7)
         if: matrix.cc == 'clang'
         run: |
           cmake -S . -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug \
             -DODIN3_FUZZ=ON -DODIN3_WITH_ABC=OFF
-          cmake --build build/fuzz --target fuzz_pp fuzz_verilog
+          cmake --build build/fuzz --target fuzz_pp fuzz_verilog fuzz_abc_script
           ctest --test-dir build/fuzz -L fuzz --output-on-failure
       - name: Release configure and build (ABC already covered by the debug build)
         run: |

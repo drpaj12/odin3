@@ -1,12 +1,18 @@
 /*
- * script.h — the ABC script checker's data (3D spec §7.4, §7.5): the alias table copied from the
- * pinned ABC's abc.rc, and the allow-list of ABC commands with the class, the effect on the two
- * network spaces and the file or string options of each. Task 11 adds the parser's declarations.
- * Pure C: nothing here includes or links ABC.
+ * script.h — the ABC script checker (3D spec §7.3, AB-21) and its data (§7.4, §7.5): the alias
+ * table copied from the pinned ABC's abc.rc, the allow-list of ABC commands with the class, the
+ * effect on the two network spaces and the file, string and crash options of each, and the
+ * embedded default script (§7.7, AB-23). Pure C: nothing here includes or links ABC.
  */
 #ifndef ODIN3_PASSES_ABC_SCRIPT_H
 #define ODIN3_PASSES_ABC_SCRIPT_H
 
+#include "odin3/odin3.h"
+#include "util/arena.h"
+#include "util/hash.h"
+#include "util/sha256.h"
+
+#include <stdbool.h>
 #include <stdint.h>
 
 /* One `alias` line of abc.rc: `alias <name> <expansion>`, the expansion's words joined by one
@@ -85,5 +91,77 @@ uint32_t odin3_abc_command_count(void);
 
 /* The row at index (§7.5's order), or NULL at or past odin3_abc_command_count(). */
 const odin3_abc_command_info *odin3_abc_command_at(uint32_t index);
+
+/* --- The checker (§7.3, AB-21) --------------------------------------------------------------- */
+
+/*
+ * Where a script comes from. given is the path as given (the CLI or project word), or
+ * ODIN3_ABC_DEFAULT_SCRIPT_NAME; every message names it. When text.ptr is NULL the checker reads
+ * the file at resolved; otherwise text holds the bytes (resolved may then be NULL).
+ */
+typedef struct odin3_abc_script_src {
+    const char *given;
+    const char *resolved;
+    odin3_bytes text;
+} odin3_abc_script_src;
+
+/* The network space a script ends in (§7.3 step 11): ABC's Abc_Ntk space or its & (Gia) space. */
+typedef enum odin3_abc_space { ODIN3_ABC_SPACE_NTK = 0, ODIN3_ABC_SPACE_GIA = 1 } odin3_abc_space;
+
+/*
+ * One checked command. line holds its words after alias expansion and {K}, joined by one blank
+ * and NUL-terminated, so ABC's CmdSplitLine splits it into exactly those words. src_line is the
+ * script line it came from (1-based). alias is the outermost alias that produced it, or NULL.
+ */
+typedef struct odin3_abc_cmd {
+    const char *line;
+    uint32_t src_line;
+    const char *alias;
+} odin3_abc_cmd;
+
+/*
+ * A checked script: cmds[0..n_cmds) in run order, uses_k (the script holds {K}), final_space (an
+ * odin3_abc_space, mapped by construction) and the SHA-256 of the bytes read, before any
+ * expansion, as 64 lower-case hex digits. Every string lives in arena, which the script owns.
+ */
+typedef struct odin3_abc_script {
+    const odin3_abc_cmd *cmds;
+    uint32_t n_cmds;
+    bool uses_k;
+    uint8_t final_space;
+    char sha256_hex[ODIN3_SHA256_HEX_CHARS]; /* 65: 64 digits and the NUL */
+    odin3_arena *arena;
+} odin3_abc_script;
+
+/*
+ * Checks a script (AB-21's twelve steps, in order: one pass over the bytes, then one over the
+ * expanded commands) and, when it passes, fills *out. lut_k replaces {K} (0: no --lut; else from
+ * ODIN3_ABC_LUT_MIN to ODIN3_LUT_MAX_WIDTH); exchange is an odin3_abc_exchange (abc.h).
+ * Returns ODIN3_OK; ODIN3_ERR_PARSE after logging exactly one error, `abc: <given>:<line>: …` (or
+ * `abc: <given>: …` for the size and the unmapped end); ODIN3_ERR_IO (logged as `abc:
+ * <resolved>: cannot read the script: <strerror>`) when the file cannot be read;
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL src, given or out, no text and no path, or a bad
+ * lut_k or exchange; ODIN3_ERR_NO_MEMORY (not logged). *out is untouched on failure, and the
+ * caller frees a filled one with odin3_abc_script_free. Never includes or calls ABC.
+ */
+odin3_status odin3_abc_script_parse(const odin3_abc_script_src *src, uint32_t lut_k,
+                                    uint32_t exchange, odin3_abc_script *out);
+
+/* Frees what odin3_abc_script_parse filled and zeroes *script. NULL and a zeroed script are
+ * no-ops. */
+void odin3_abc_script_free(odin3_abc_script *script);
+
+/* The command at index, or NULL for a NULL script or an index at or past n_cmds. */
+const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32_t index);
+
+/* --- The default script (§7.7, AB-23) ------------------------------------------------------- */
+
+/* The name messages and the run information give the embedded default script. */
+#define ODIN3_ABC_DEFAULT_SCRIPT_NAME "builtin:lib/abc/vtr.abc"
+
+/* lib/abc/vtr.abc's bytes, embedded at build time (generated/abc/default_script.c), and their
+ * number (no NUL is counted or relied on). */
+extern const unsigned char odin3_abc_default_script[];
+extern const uint32_t odin3_abc_default_script_len;
 
 #endif

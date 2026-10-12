@@ -921,6 +921,21 @@ file as given, and nothing changes.
       in the & space, which the BLIF exchange starts empty; add '&get'`.
     - The script must end with its current space *mapped*: `<file>: the script leaves the network
       unmapped; end it with a LUT mapper such as 'if -K {K}'`. An empty script ends unmapped.
+    - `&if` on a *mapped* `gia` (PHASE3 #22; ABC's `Gia_ManHasMapping` check, abc.c:45512):
+      `<file>:<line>: '&if' needs an unmapped network in the & space, which is mapped here; add
+      '&st'`.
+    > *(Erratum, 3D Task 11, 2026-10-12, agent defaults for Peter. Read at the pin so that an
+    > accepted script ends mapped and runs no command ABC refuses for its state: (1) the `&if` rule
+    > above, which covers `&if` after `&get -m` of a mapped `ntk` (the spike's case), after `&if`
+    > and after `&mfs`; `&lf` and `&of` refuse it too but are not allowed. (2) `&get` keeps the
+    > mapping only with `-m` and without `-c` (abc.c:35113–35118, abcFunc.c:1075); ABC's flags
+    > toggle and `&get` takes no option values, so the parity of each letter in the option words
+    > before its first other word decides. (3) `if` with `-g`, `-x`, `-y` or `-u`, and `&if` with
+    > `-g`, `-x` or `-y`, balance into an AIG instead of mapping (abcIf.c:177–180,
+    > giaIf.c:3077–3080); any occurrence of such a letter counts. (4) Step 9 checks every letter
+    > of an option cluster (`-vb` is `-v -b` to ABC's getopt). (5) Steps 9 and 11 name an alias
+    > as step 8 does: `'<cmd>' (from alias '<a>')`. (6) Steps 1–6 run over all the bytes before
+    > step 7, so a byte error on a later line wins over a command error on an earlier one.)*
 12. **Output.** An `odin3_abc_script`: the expanded lines (each NUL-terminated, with its line and
     alias), `uses_k`, the final space and the SHA-256.
 
