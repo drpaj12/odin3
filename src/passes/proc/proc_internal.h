@@ -193,6 +193,34 @@ odin3_status odin3_proc_orphans(odin3_proc_mctx *mctx);
  */
 odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at);
 
+/* --- step A: the decision-tree phases (§5) ------------------------------------------------- */
+
+/*
+ * clean (§5.1, PR-7; proc_clean.c): Yosys 0.55's proc_clean_case on case case_index of pw, swept
+ * until a sweep sets Yosys's did_something (an empty action, empty switch, inline, or a parallel or
+ * trailing empty case removed; a constant switch folded or a full_case switch emptied does not).
+ * max_depth -1 is the whole tree; arst passes 1. With case_index 0 and max_depth -1 it is
+ * proc_clean on the process: first every sync action with an empty lhs, then every sync without
+ * actions, is removed. An inlined switch stays in its parent's list with no cases until the
+ * parent's walk reaches it again, as in Yosys. No recursion. ODIN3_ERR_NO_MEMORY (pw stays a valid
+ * tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL pw or a case index past its cases.
+ */
+odin3_status odin3_pw_clean(odin3_pw *pw, uint32_t case_index, int32_t max_depth);
+
+/* odin3_pw_clean's max_depth for the whole tree (proc_clean's own call). */
+enum { ODIN3_PW_CLEAN_WHOLE_TREE = -1 };
+
+/*
+ * rmdead (§5.2, PR-8; proc_rmdead.c): Yosys 0.55's proc_rmdead on every switch of pw's root case,
+ * depth first, cases in order, each switch with its own pool (odin3_fdpool when its signal has no
+ * constant bit and every compare is fully defined, else odin3_ppool): compares the pool does not
+ * take are removed, a non-default case left without compares is removed, a default case takes
+ * all, and a switch whose pool ends empty gains ODIN3_SWITCH_FULL_CASE. A pattern pool past the cap
+ * gives W5a once for its switch (at the switch's record, else the process's) and keeps the rest of
+ * that switch. ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
+ */
+odin3_status odin3_pw_rmdead(odin3_proc_mctx *mctx, odin3_pw *pw);
+
 /* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
 
 /* The first pending phase in schedule order, ODIN3_PROC_N_PHASES when none is pending. */

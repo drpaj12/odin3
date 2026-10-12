@@ -59,4 +59,7 @@ typedef struct odin3_proc_test_hooks {
 /* Installs the hooks (copied; NULL clears them). */
 void odin3_proc_test_set_hooks(const odin3_proc_test_hooks *hooks);
 
+/* The sweeps of the last odin3_pw_clean call, its last (no did_something) one included. */
+uint32_t odin3_proc_test_clean_sweeps(void);
+
 #endif
