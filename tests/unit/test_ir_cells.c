@@ -40,6 +40,7 @@ enum {
     DFFSRE_PINS = 14,
     SR_WIDTH = 2,
     SR_PINS = 6,
+    FF_ROW_WIDTH = 3, /* the WIDTH of k_ffcells' pin counts */
     POW_A_WIDTH = 4,
     POW_B_WIDTH = 3,
     POW_Y_WIDTH = 5,
@@ -550,20 +551,27 @@ typedef struct ff_row {
     const char *name;
     const char *ports;
     const char *params;
+    const char *widths; /* per port: '1' a 1-bit scalar port, 'W' WIDTH bits */
+    uint32_t pins;      /* the node's pin count at WIDTH FF_ROW_WIDTH */
 } ff_row;
 
 static const ff_row k_ffcells[] = {
-    {"$adffe", "CLK ARST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ARST_POLARITY ARST_VALUE"},
-    {"$sdffe", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE"},
-    {"$sdffce", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE"},
-    {"$aldff", "CLK ALOAD AD D Q", "WIDTH CLK_POLARITY ALOAD_POLARITY"},
-    {"$aldffe", "CLK ALOAD AD EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ALOAD_POLARITY"},
-    {"$dffsr", "CLK SET CLR D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY"},
-    {"$dffsre", "CLK SET CLR EN D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY EN_POLARITY"},
-    {"$dlatch", "EN D Q", "WIDTH EN_POLARITY"},
-    {"$adlatch", "EN ARST D Q", "WIDTH EN_POLARITY ARST_POLARITY ARST_VALUE"},
-    {"$dlatchsr", "EN SET CLR D Q", "WIDTH EN_POLARITY SET_POLARITY CLR_POLARITY"},
-    {"$sr", "SET CLR Q", "WIDTH SET_POLARITY CLR_POLARITY"},
+    {"$adffe", "CLK ARST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ARST_POLARITY ARST_VALUE",
+     "111WW", 9},
+    {"$sdffe", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE",
+     "111WW", 9},
+    {"$sdffce", "CLK SRST EN D Q", "WIDTH CLK_POLARITY EN_POLARITY SRST_POLARITY SRST_VALUE",
+     "111WW", 9},
+    {"$aldff", "CLK ALOAD AD D Q", "WIDTH CLK_POLARITY ALOAD_POLARITY", "11WWW", 11},
+    {"$aldffe", "CLK ALOAD AD EN D Q", "WIDTH CLK_POLARITY EN_POLARITY ALOAD_POLARITY", "11W1WW",
+     12},
+    {"$dffsr", "CLK SET CLR D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY", "1WWWW", 13},
+    {"$dffsre", "CLK SET CLR EN D Q", "WIDTH CLK_POLARITY SET_POLARITY CLR_POLARITY EN_POLARITY",
+     "1WW1WW", 14},
+    {"$dlatch", "EN D Q", "WIDTH EN_POLARITY", "1WW", 7},
+    {"$adlatch", "EN ARST D Q", "WIDTH EN_POLARITY ARST_POLARITY ARST_VALUE", "11WW", 8},
+    {"$dlatchsr", "EN SET CLR D Q", "WIDTH EN_POLARITY SET_POLARITY CLR_POLARITY", "1WWWW", 13},
+    {"$sr", "SET CLR Q", "WIDTH SET_POLARITY CLR_POLARITY", "WWW", 9},
 };
 enum { N_FFCELLS = sizeof k_ffcells / sizeof k_ffcells[0] };
 
@@ -614,6 +622,24 @@ static void check_ff_param_kinds(const odin3_celltype_def *def) {
     }
 }
 
+/* Each port's width at WIDTH FF_ROW_WIDTH (1-bit ports scalar), and their sum the row's pins. */
+static void check_ff_widths(odin3_celltype_id id, const ff_row *row) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, id);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE((uint32_t)strlen(row->widths), def->n_ports, row->name);
+    odin3_value params[MAX_PARAMS];
+    defaults_of(def, params);
+    params[0] = odin3_value_int(FF_ROW_WIDTH);
+    uint32_t pins = 0;
+    for (uint32_t k = 0; k < def->n_ports; k++) {
+        bool one = row->widths[k] == '1';
+        uint32_t width = odin3_celltype_port_width(design, id, params, k);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(one ? 1 : FF_ROW_WIDTH, width, def->ports[k].name);
+        TEST_ASSERT_EQUAL_MESSAGE(one, def->ports[k].scalar, def->ports[k].name);
+        pins += width;
+    }
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(row->pins, pins, row->name);
+}
+
 /* Row i of the table: built-in ID ADFFE_INDEX + i, found by name, its ports and parameters. */
 static void check_ff_row(uint32_t row_idx) {
     const ff_row *row = &k_ffcells[row_idx];
@@ -626,6 +652,7 @@ static void check_ff_row(uint32_t row_idx) {
     check_word_list(def, row->params, def->n_params, param_name_at);
     check_ff_dirs(def);
     check_ff_param_kinds(def);
+    check_ff_widths(id, row);
 }
 
 /* IDs 63..73 after $proc, in §13's order; found by name in a fresh design; the table's ports

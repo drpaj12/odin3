@@ -873,8 +873,12 @@ if(BUILD_TESTING)
         # test_verilog_writer writes them (ffcells.v, generic instances; -icells).
         add_test(NAME ffcells_yosys_read
             COMMAND ${ODIN3_YOSYS055} -q -p
-                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/ffcells.il; check -assert; write_rtlil -; design -reset; read_verilog -icells ${PROJECT_BINARY_DIR}/rtlil/ffcells.v; hierarchy -check")
+                    "read_rtlil ${PROJECT_BINARY_DIR}/rtlil/ffcells.il; check -assert; write_rtlil -; design -reset; read_verilog -icells ${PROJECT_BINARY_DIR}/rtlil/ffcells.v; hierarchy -check; check -assert")
         set_tests_properties(ffcells_yosys_read PROPERTIES
             LABELS differential FIXTURES_REQUIRED ffcells)
+        # test_verilog_writer's own -icells check of the eleven runs on this 0.55 too, never on
+        # the workspace 0.69 of ODIN3_YOSYS.
+        set_property(TEST test_verilog_writer APPEND PROPERTY
+            ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
     endif()
 endif()

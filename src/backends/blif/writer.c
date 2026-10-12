@@ -936,10 +936,37 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
     }
 }
 
+/*
+ * The word flip-flops and latches of 2E's IR change D (2E spec §13): BLIF's `.latch` cannot carry
+ * their resets, enables and polarities, so the netlist-view writer refuses them (`lower` maps them
+ * to bit cells first).
+ */
+static const char *const NO_BLIF_FORM[] = {"$adffe",   "$sdffe",    "$sdffce", "$aldff",
+                                           "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
+                                           "$adlatch", "$dlatchsr", "$sr"};
+
+/* True for a built-in word cell type named in NO_BLIF_FORM. */
+static bool lacks_blif_form(const odin3_celltype_def *def) {
+    if (def->gran != ODIN3_GRAN_WORD) {
+        return false;
+    }
+    for (size_t i = 0; i < sizeof NO_BLIF_FORM / sizeof NO_BLIF_FORM[0]; i++) {
+        if (strcmp(def->name, NO_BLIF_FORM[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
-    if (odin3_celltype_get(wr->design, type)->gran == ODIN3_GRAN_PORT) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
+    if (def->gran == ODIN3_GRAN_PORT) {
         return ODIN3_OK;
+    }
+    if (lacks_blif_form(def)) {
+        return wr_refuse(
+            wr, "word flip-flops and latches have no BLIF form; cannot write a cell of", def->name);
     }
     wr_builtin which = builtin_of(wr, type);
     odin3_status st = ODIN3_OK;

@@ -34,7 +34,10 @@
  *
  * Cells: `$sop` → `.names` (its pins' nets, then the cover rows as stored; a zero-input cover is
  * one output character per row); `$_DFF_P_`/`$_DFF_N_`/`$_DLATCH_P_`/`$_DLATCH_N_` → `.latch in
- * out re|fe|ah|al ctrl init` and `$_FF_` → `.latch in out init` (init always written); any other
+ * out re|fe|ah|al ctrl init` and `$_FF_` → `.latch in out init` (init always written); the eleven
+ * word flip-flops and latches of 2E's IR change D (`$adffe $sdffe $sdffce $aldff $aldffe $dffsr
+ * $dffsre $dlatch $adlatch $dlatchsr $sr`) are refused, `path: model 'm': word flip-flops and
+ * latches have no BLIF form; cannot write a cell of '$dlatch'`; any other
  * type → `.subckt type formal=actual …` in port order (a declared type's in its declaration's
  * order), unconnected pins skipped, formals by port
  * name (`p[k]` for bit k of a port that is not scalar — as the type's declaration writes it when
@@ -64,12 +67,13 @@
  * Errors (logged): ODIN3_ERR_IO when the temporary cannot be created, a write fails or the rename
  * fails ("path: cannot open …", "path:line: write failed …", "path: cannot rename …");
  * ODIN3_ERR_INVALID_ARG for a NULL argument, a port of direction INOUT, two ports of one BLIF name
- * on different nets, a `.subckt` cell with parameters the reader would not derive or with both
- * ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out of memory. The text goes to a
- * private temporary beside path (util/file.h), renamed over path on success; on any failure only
- * the temporary is removed, so an existing file at path keeps its old contents (a write into a
- * directory that refuses the temporary, such as /dev, is "cannot open"). Names are written as they
- * are: a name holding blanks or other characters BLIF cannot carry is not escaped.
+ * on different nets, an IR change D flip-flop or latch, a `.subckt` cell with parameters the reader
+ * would not derive or with both ports of one BLIF name connected; ODIN3_ERR_NO_MEMORY on out of
+ * memory. The text goes to a private temporary beside path (util/file.h), renamed over path on
+ * success; on any failure only the temporary is removed, so an existing file at path keeps its old
+ * contents (a write into a directory that refuses the temporary, such as /dev, is "cannot open").
+ * Names are written as they are: a name holding blanks or other characters BLIF cannot carry is not
+ * escaped.
  */
 odin3_status odin3_blif_write(const odin3_design *design, const char *path);
 

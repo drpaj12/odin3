@@ -1059,6 +1059,34 @@ static void test_2d_signed_word_cell_is_refused(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "cannot write a cell of '$neg'"), last_error);
 }
 
+/* The eleven word flip-flops and latches of 2E's IR change D (2E spec §13) have no BLIF form:
+ * each, at its defaults (so a .subckt would be implied), is refused with the exact message and
+ * the destination is not written. */
+static void test_ir_change_d_cells_are_refused(void) {
+    static const char *const types[] = {"$adffe",   "$sdffe",    "$sdffce", "$aldff",
+                                        "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
+                                        "$adlatch", "$dlatchsr", "$sr"};
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++) {
+        odin3_design *des = odin3_design_create();
+        TEST_ASSERT_NOT_NULL(des);
+        odin3_module *module = new_module(des, "top");
+        odin3_node_spec spec = {.type = type_named(des, types[i])};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, NULL));
+        (void)remove(OUT_PATH);
+        last_error[0] = '\0';
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, odin3_blif_write(des, OUT_PATH),
+                                      types[i]);
+        char want[MSG_MAX];
+        (void)snprintf(want, sizeof want,
+                       "%s: model 'top': word flip-flops and latches have no BLIF form; cannot "
+                       "write a cell of '%s'",
+                       OUT_PATH, types[i]);
+        TEST_ASSERT_EQUAL_STRING(want, last_error);
+        TEST_ASSERT_NOT_EQUAL_INT_MESSAGE(0, remove(OUT_PATH), types[i]); /* never created */
+        odin3_design_destroy(des);
+    }
+}
+
 /* Writing design under every allocation failure gives NO_MEMORY, never a crash or a leak, and
  * a write that succeeds gives the reference text. */
 static void oom_sweep(void) {
@@ -1145,6 +1173,7 @@ int main(void) {
     RUN_TEST(test_unrecoverable_parameters_are_refused);
     RUN_TEST(test_2d_word_cells_as_subckt);
     RUN_TEST(test_2d_signed_word_cell_is_refused);
+    RUN_TEST(test_ir_change_d_cells_are_refused);
     RUN_TEST(test_top_first_model_spacing);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);

@@ -140,12 +140,11 @@ static const odin3_port_def k_adffe_ports[] = {
     ODIN3_PORT_BIT("CLK", ODIN3_DIR_IN), ODIN3_PORT_BIT("ARST", ODIN3_DIR_IN),
     ODIN3_PORT_BIT("EN", ODIN3_DIR_IN), ODIN3_PORT_VEC("D", ODIN3_DIR_IN, "WIDTH"),
     ODIN3_PORT_VEC("Q", ODIN3_DIR_OUT, "WIDTH")};
-static const odin3_port_def k_sdffe_ports[] = {/* also $sdffce */
-                                               ODIN3_PORT_BIT("CLK", ODIN3_DIR_IN),
-                                               ODIN3_PORT_BIT("SRST", ODIN3_DIR_IN),
-                                               ODIN3_PORT_BIT("EN", ODIN3_DIR_IN),
-                                               ODIN3_PORT_VEC("D", ODIN3_DIR_IN, "WIDTH"),
-                                               ODIN3_PORT_VEC("Q", ODIN3_DIR_OUT, "WIDTH")};
+/* also $sdffce */
+static const odin3_port_def k_sdffe_ports[] = {
+    ODIN3_PORT_BIT("CLK", ODIN3_DIR_IN), ODIN3_PORT_BIT("SRST", ODIN3_DIR_IN),
+    ODIN3_PORT_BIT("EN", ODIN3_DIR_IN), ODIN3_PORT_VEC("D", ODIN3_DIR_IN, "WIDTH"),
+    ODIN3_PORT_VEC("Q", ODIN3_DIR_OUT, "WIDTH")};
 static const odin3_port_def k_aldff_ports[] = {
     ODIN3_PORT_BIT("CLK", ODIN3_DIR_IN), ODIN3_PORT_BIT("ALOAD", ODIN3_DIR_IN),
     ODIN3_PORT_VEC("AD", ODIN3_DIR_IN, "WIDTH"), ODIN3_PORT_VEC("D", ODIN3_DIR_IN, "WIDTH"),
@@ -180,10 +179,10 @@ static const odin3_port_def k_sr_ports[] = {ODIN3_PORT_VEC("SET", ODIN3_DIR_IN, 
 static const odin3_param_def k_adffe_params[] = {
     ODIN3_P_INT("WIDTH", 1), ODIN3_P_INT("CLK_POLARITY", 1), ODIN3_P_INT("EN_POLARITY", 1),
     ODIN3_P_INT("ARST_POLARITY", 1), ODIN3_P_BITS("ARST_VALUE", odin3_cells_zero_bit, 1)};
-static const odin3_param_def k_sdffe_params[] =
-    {/* also $sdffce */
-     ODIN3_P_INT("WIDTH", 1), ODIN3_P_INT("CLK_POLARITY", 1), ODIN3_P_INT("EN_POLARITY", 1),
-     ODIN3_P_INT("SRST_POLARITY", 1), ODIN3_P_BITS("SRST_VALUE", odin3_cells_zero_bit, 1)};
+/* also $sdffce */
+static const odin3_param_def k_sdffe_params[] = {
+    ODIN3_P_INT("WIDTH", 1), ODIN3_P_INT("CLK_POLARITY", 1), ODIN3_P_INT("EN_POLARITY", 1),
+    ODIN3_P_INT("SRST_POLARITY", 1), ODIN3_P_BITS("SRST_VALUE", odin3_cells_zero_bit, 1)};
 static const odin3_param_def k_aldff_params[] = {
     ODIN3_P_INT("WIDTH", 1), ODIN3_P_INT("CLK_POLARITY", 1), ODIN3_P_INT("ALOAD_POLARITY", 1)};
 static const odin3_param_def k_aldffe_params[] = {
@@ -210,7 +209,8 @@ static const odin3_param_def k_sr_params[] = {
 static odin3_status adffe_verify(const odin3_value *params) {
     return ff_table_verify(params, k_adffe_params, ODIN3_NELEM(k_adffe_params));
 }
-static odin3_status sdffe_verify(const odin3_value *params) { /* also $sdffce */
+/* also $sdffce */
+static odin3_status sdffe_verify(const odin3_value *params) {
     return ff_table_verify(params, k_sdffe_params, ODIN3_NELEM(k_sdffe_params));
 }
 static odin3_status aldff_verify(const odin3_value *params) {

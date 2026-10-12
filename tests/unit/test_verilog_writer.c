@@ -1483,15 +1483,22 @@ static void test_ffcells_fixture(void) {
     expect_not("(* blackbox *)");
 }
 
-/* Yosys reads all eleven instances as its internal cells with read_verilog -icells. */
+/* Yosys 0.55 (VTR's, the 2D-2F oracle: $ODIN3_YOSYS055, which CMake sets when its
+ * ODIN3_YOSYS055 block finds it; never the workspace 0.69 of $ODIN3_YOSYS) reads all eleven
+ * instances as its internal cells with read_verilog -icells. Ignored without it. */
 static void test_ffcells_yosys_reads_icells(void) {
+    char *yosys = getenv("ODIN3_YOSYS055");
+    if (yosys == NULL || yosys[0] == '\0') {
+        TEST_IGNORE_MESSAGE("ODIN3_YOSYS055 not set (no Yosys 0.55): check skipped");
+    }
     (void)ffcells_build(design);
     (void)write_text();
     char script[SCRIPT_BUF];
     (void)snprintf(script, sizeof script,
                    "read_verilog -icells %s; hierarchy -check -top ffcells; check -assert",
                    out_path);
-    yosys_runs(script);
+    char *argv[] = {yosys, "-q", "-p", script, NULL};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, run_tool(argv, aux_path), "yosys 0.55 rejected ffcells.v");
 }
 
 /* --- aliases, feed-throughs and names ------------------------------------------------------ */
