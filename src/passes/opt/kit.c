@@ -20,9 +20,12 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- test hooks (opt_test.h) ---------------------------------------------------------------- */
@@ -92,6 +95,56 @@ int odin3_kit_cmp_u64(const void *lhs, const void *rhs) {
         return 0;
     }
     return left < right ? -1 : 1;
+}
+
+odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value) {
+    uint32_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = value;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value) {
+    uint64_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = value;
+    return ODIN3_OK;
+}
+
+void odin3_kit_truncate(odin3_vec *vec, size_t len) {
+    while (vec->len > len) {
+        odin3_vec_pop(vec);
+    }
+}
+
+void odin3_kit_sort_unify(odin3_vec *vec, size_t from) {
+    uint64_t *data = (uint64_t *)vec->data + from;
+    size_t count = vec->len - from;
+    if (count < 2) {
+        return;
+    }
+    qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
+    size_t kept = 1;
+    for (size_t i = 1; i < count; i++) {
+        if (data[i] != data[kept - 1]) {
+            data[kept++] = data[i];
+        }
+    }
+    odin3_kit_truncate(vec, from + kept);
+}
+
+void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size) {
+    uint32_t name = odin3_node_name(oc->module, node);
+    const char *text = name == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(oc->design), name);
+    if (text != NULL) {
+        (void)snprintf(out, size, "%s", text);
+    } else {
+        (void)snprintf(out, size, "$c%" PRIu32, node.v);
+    }
 }
 
 /* The index of the port of def named name, def->n_ports when it has none. */

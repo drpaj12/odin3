@@ -603,17 +603,6 @@ static odin3_status reset_table(merge_state *ms) {
 
 enum { LABEL_MAX = 128 };
 
-static void node_label(const merge_state *ms, odin3_node_id node, char *out) {
-    uint32_t name = odin3_node_name(ms->m, node);
-    const char *text =
-        name == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(ms->oc->design), name);
-    if (text != NULL) {
-        (void)snprintf(out, LABEL_MAX, "%s", text);
-    } else {
-        (void)snprintf(out, LABEL_MAX, "$c%" PRIu32, node.v);
-    }
-}
-
 /* ms->srcs = survivor's output nets; an unconnected pin gets a fresh net first. */
 static odin3_status survivor_nets(merge_state *ms, odin3_node_id surv, uint32_t port) {
     odin3_vec_clear(&ms->srcs);
@@ -694,8 +683,8 @@ static odin3_status merge_pair(merge_state *ms, odin3_node_id surv, odin3_node_i
     }
     char keep_label[LABEL_MAX];
     char drop_label[LABEL_MAX];
-    node_label(ms, surv, keep_label);
-    node_label(ms, drop, drop_label);
+    odin3_kit_node_label(ms->oc, surv, keep_label, sizeof keep_label);
+    odin3_kit_node_label(ms->oc, drop, drop_label, sizeof drop_label);
     odin3_prov_id drop_prov = odin3_node_prov(ms->m, drop);
     odin3_kit_conn conn = {drop, port, ms->srcs.data, (uint32_t)ms->srcs.len};
     st = odin3_kit_connect(ms->oc, &conn);

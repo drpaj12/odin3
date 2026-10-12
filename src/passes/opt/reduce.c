@@ -200,55 +200,14 @@ static void state_free(rd_state *rs) {
 
 /* --- small helpers ---------------------------------------------------------------------------- */
 
-static odin3_status push_u64(odin3_vec *vec, uint64_t value) {
-    uint64_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = value;
-    return ODIN3_OK;
-}
-
-static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
-    uint32_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = value;
-    return ODIN3_OK;
-}
-
 /* vec = n zeroed uint32_t elements. */
 static odin3_status zero_u32(odin3_vec *vec, size_t n) {
     odin3_vec_clear(vec);
     odin3_status st = odin3_vec_reserve(vec, n);
     for (size_t i = 0; st == ODIN3_OK && i < n; i++) {
-        st = push_u32(vec, 0);
+        st = odin3_kit_push_u32(vec, 0);
     }
     return st;
-}
-
-static void truncate_vec(odin3_vec *vec, size_t len) {
-    while (vec->len > len) {
-        odin3_vec_pop(vec);
-    }
-}
-
-/* Sorts vec[from ..) and drops the repeats (Yosys's sort_and_unify). */
-static void sort_unify(odin3_vec *vec, size_t from) {
-    uint64_t *data = (uint64_t *)vec->data + from;
-    size_t count = vec->len - from;
-    if (count < 2) {
-        return;
-    }
-    qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
-    size_t kept = 1;
-    for (size_t i = 1; i < count; i++) {
-        if (data[i] != data[kept - 1]) {
-            data[kept++] = data[i];
-        }
-    }
-    truncate_vec(vec, from + kept);
 }
 
 /* The key of a net: its constant's value, else N_CONST + its ID. */
@@ -282,7 +241,7 @@ static gather_status gather_port(const rd_state *rs, odin3_node_id node, uint32_
             return GATHER_OPEN;
         }
         if ((nets != NULL && odin3_kit_push_net(nets, net) != ODIN3_OK) ||
-            (keys != NULL && push_u64(keys, net_key(rs->m, net)) != ODIN3_OK)) {
+            (keys != NULL && odin3_kit_push_u64(keys, net_key(rs->m, net)) != ODIN3_OK)) {
             return GATHER_OOM;
         }
     }
@@ -313,13 +272,13 @@ static odin3_status member_add(rd_state *rs, odin3_node_id node) {
     }
     mb->node = node.v;
     mb->width = (uint32_t)rs->acc.len;
-    sort_unify(&rs->acc, 0);
+    odin3_kit_sort_unify(&rs->acc, 0);
     mb->old_off = rs->pool.len;
     mb->old_len = rs->acc.len;
     mb->cur_off = mb->old_off;
     mb->cur_len = mb->old_len;
     for (size_t i = 0; i < rs->acc.len; i++) {
-        odin3_status st = push_u64(&rs->pool, ((const uint64_t *)rs->acc.data)[i]);
+        odin3_status st = odin3_kit_push_u64(&rs->pool, ((const uint64_t *)rs->acc.data)[i]);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -353,7 +312,8 @@ static bool child_of(const rd_state *rs, odin3_net_id net, child_ref *out) {
 /* acc += the keys a reader of mb's Y takes. */
 static odin3_status copy_cur(rd_state *rs, const member *mb) {
     for (size_t i = 0; i < mb->cur_len; i++) {
-        odin3_status st = push_u64(&rs->acc, ((const uint64_t *)rs->pool.data)[mb->cur_off + i]);
+        odin3_status st =
+            odin3_kit_push_u64(&rs->acc, ((const uint64_t *)rs->pool.data)[mb->cur_off + i]);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -368,16 +328,17 @@ static step_result key_step(rd_state *rs, const frame *top, uint64_t key) {
     const uint64_t absorbing = rs->is_or ? 1U : 0U;
     if (key < N_CONST) {
         if (key == absorbing) {
-            truncate_vec(&rs->acc, top->acc_start);
-            rs->st = push_u64(&rs->acc, key);
+            odin3_kit_truncate(&rs->acc, top->acc_start);
+            rs->st = odin3_kit_push_u64(&rs->acc, key);
             return STEP_STOP;
         }
-        rs->st = key == 1U - absorbing ? ODIN3_OK : push_u64(&rs->acc, key); /* x, z stay */
+        rs->st =
+            key == 1U - absorbing ? ODIN3_OK : odin3_kit_push_u64(&rs->acc, key); /* x, z stay */
         return STEP_NEXT;
     }
     child_ref child = {0, 0};
     if (!child_of(rs, (odin3_net_id){(uint32_t)(key - N_CONST)}, &child)) {
-        rs->st = push_u64(&rs->acc, key);
+        rs->st = odin3_kit_push_u64(&rs->acc, key);
         return STEP_NEXT;
     }
     member *cm = member_at(rs, child.mem);
@@ -391,7 +352,8 @@ static step_result key_step(rd_state *rs, const frame *top, uint64_t key) {
         }
         return STEP_CHILD;
     }
-    rs->st = child.ybit == 0 ? copy_cur(rs, cm) : push_u64(&rs->acc, 0); /* Y[1..] are 0 */
+    rs->st =
+        child.ybit == 0 ? copy_cur(rs, cm) : odin3_kit_push_u64(&rs->acc, 0); /* Y[1..] are 0 */
     return STEP_NEXT;
 }
 
@@ -401,8 +363,9 @@ static odin3_status frame_finish(rd_state *rs) {
     const frame *fr = odin3_vec_cat(&rs->frames, rs->frames.len - 1U);
     member *mb = member_at(rs, fr->mem);
     const size_t start = fr->acc_start;
-    sort_unify(&rs->acc, start);
-    odin3_status st = rs->acc.len == start ? push_u64(&rs->acc, rs->is_or ? 0U : 1U) : ODIN3_OK;
+    odin3_kit_sort_unify(&rs->acc, start);
+    odin3_status st =
+        rs->acc.len == start ? odin3_kit_push_u64(&rs->acc, rs->is_or ? 0U : 1U) : ODIN3_OK;
     const size_t len = rs->acc.len - start;
     const uint64_t *res = (const uint64_t *)rs->acc.data + start;
     const uint64_t *old = (const uint64_t *)rs->pool.data + mb->old_off;
@@ -412,11 +375,11 @@ static odin3_status frame_finish(rd_state *rs) {
         mb->cur_off = rs->pool.len;
         mb->cur_len = len;
         for (size_t i = 0; st == ODIN3_OK && i < len; i++) {
-            st = push_u64(&rs->pool, ((const uint64_t *)rs->acc.data)[start + i]);
+            st = odin3_kit_push_u64(&rs->pool, ((const uint64_t *)rs->acc.data)[start + i]);
         }
     }
     mb->state = ST_DONE;
-    truncate_vec(&rs->acc, start);
+    odin3_kit_truncate(&rs->acc, start);
     odin3_vec_pop(&rs->frames);
     return st;
 }
@@ -559,7 +522,7 @@ static odin3_status wren_mark(rd_state *rs, odin3_net_id net) {
     }
     *(uint8_t *)odin3_vec_at(&rs->wren, net.v) = 1;
     rs->any_wren = true;
-    return push_u32(&rs->stack, net.v);
+    return odin3_kit_push_u32(&rs->stack, net.v);
 }
 
 static odin3_status wren_mark_port(rd_state *rs, odin3_node_id node, uint32_t port) {
@@ -657,7 +620,7 @@ static odin3_status group_direct(rd_state *rs, const run_set *set) {
                 break;
             }
         }
-        st = push_u32(&rs->rep, found);
+        st = odin3_kit_push_u32(&rs->rep, found);
     }
     return st;
 }
@@ -674,8 +637,8 @@ static odin3_status group_item(rd_state *rs, odin3_u64map *map, const run_set *s
             break;
         }
     }
-    odin3_status st = push_u32(&rs->rep, found);
-    st = st == ODIN3_OK ? push_u32(&rs->next, found == item ? (uint32_t)head : 0U) : st;
+    odin3_status st = odin3_kit_push_u32(&rs->rep, found);
+    st = st == ODIN3_OK ? odin3_kit_push_u32(&rs->next, found == item ? (uint32_t)head : 0U) : st;
     if (st == ODIN3_OK && found == item) {
         st = odin3_u64map_put(map, (odin3_kv){hash, (uint64_t)item + 1U});
     }
@@ -769,9 +732,9 @@ static odin3_status bits_plan(rd_state *rs) {
     odin3_vec_clear(&rs->tup);
     odin3_status st = odin3_vec_reserve(&rs->tup, width * tuple_len);
     for (size_t i = 0; st == ODIN3_OK && i < width; i++) {
-        st = push_u64(&rs->tup, ((const uint64_t *)rs->ak.data)[i]);
+        st = odin3_kit_push_u64(&rs->tup, ((const uint64_t *)rs->ak.data)[i]);
         for (size_t slice = 0; st == ODIN3_OK && slice < slices; slice++) {
-            st = push_u64(&rs->tup, ((const uint64_t *)rs->bk.data)[slice * width + i]);
+            st = odin3_kit_push_u64(&rs->tup, ((const uint64_t *)rs->bk.data)[slice * width + i]);
         }
     }
     const run_set set = {rs->tup.data, width, tuple_len};
@@ -782,7 +745,7 @@ static odin3_status bits_plan(rd_state *rs) {
         if (!tuple_uniform(run_at(&set, i), tuple_len) &&
             ((const uint32_t *)rs->rep.data)[i] == i) {
             *(uint32_t *)odin3_vec_at(&rs->pos, i) = (uint32_t)rs->kept.len;
-            st = push_u32(&rs->kept, (uint32_t)i);
+            st = odin3_kit_push_u32(&rs->kept, (uint32_t)i);
         }
     }
     return st;

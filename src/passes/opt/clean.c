@@ -227,13 +227,6 @@ static const char *name_text(const clean_state *cs, uint32_t str) {
     return str == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(cs->oc->design), str);
 }
 
-static void node_label(const clean_state *cs, odin3_node_id node, char *out) {
-    const char *text = name_text(cs, odin3_node_name(cs->m, node));
-    int len = text != NULL ? snprintf(out, LABEL_MAX, "%s", text)
-                           : snprintf(out, LABEL_MAX, "$c%" PRIu32, node.v);
-    (void)len;
-}
-
 static uint32_t type_id_of(const odin3_design *design, const char *name) {
     uint32_t str = 0;
     odin3_celltype_id id = {0};
@@ -434,7 +427,7 @@ static odin3_status drop_ff_init(clean_state *cs, odin3_node_id node) {
 
 static void log_removed(const clean_state *cs, odin3_node_id node, const odin3_celltype_def *def) {
     char label[LABEL_MAX];
-    node_label(cs, node, label);
+    odin3_kit_node_label(cs->oc, node, label, sizeof label);
     odin3_log(ODIN3_LOG_DEBUG, "opt_clean: module '%s': removing unused %s '%s'",
               name_text(cs, odin3_module_name(cs->m)), def->name, label);
 }

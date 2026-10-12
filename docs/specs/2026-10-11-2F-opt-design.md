@@ -572,7 +572,8 @@ sub-pass call (agent default; Release: off).
 **Termination of each sub-pass invocation.** Every inner loop is over a finite work list that only
 shrinks or is refilled by strictly simplifying rewrites: `opt_expr`'s rounds stop when a round
 rewrites nothing, which the ranking below bounds; `opt_merge` sweeps strictly decrease the number of
-candidates; `opt_muxtree` is bounded by its evaluation budget; `opt_reduce`'s worker runs strictly
+candidates; `opt_muxtree` is bounded by its evaluation budget (the budget counts eval_mux entries, not their
+cost: each entry on an S-way `$pmux` costs O(S²), O(W·S) more with `replace_known`, as in Yosys); `opt_reduce`'s worker runs strictly
 decrease the number of reduction inputs driven by a same-type reduction (inlining adds inputs, so
 the total count is not the measure) or the mux port count; `opt_dff`'s work list receives only
 sliced FFs, whose bit count is smaller than the FF they came from, or FFs whose feature set strictly
@@ -767,7 +768,7 @@ one 60% limit. Exceeding it is fatal with `opt needs more than N bytes (the desi
 | lenet.v, the opt passes of the Phase 2 script (the trio, then the main `opt` on ≈ 661k cells) | ≤ 15 s |
 | lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before `compact`) | ≤ 25% |
 | the 31 VTR files, opt passes of the Phase 2 script, total | ≤ 3 s |
-| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(mux ports × budget) worst case; `opt_merge` O(candidate pins) expected |
+| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(budget × S²) worst case, each eval of an S-way `$pmux` costing O(S²) (O(W·S) more for `replace_known` on W-bit data), as Yosys; `opt_merge` O(candidate pins) expected |
 | per `opt` invocation | O(iterations × pins) worst case; iterations ≤ sequential depth of constant-register chains + a small constant on the corpus |
 
 The bench prints per file cells/nets/pins before and after, iterations, time per sub-pass, rewrites

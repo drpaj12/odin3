@@ -519,6 +519,22 @@ static void test_replace_dup_select(void) {
     expect_removed(0);
 }
 
+/* A $pmux of one select with a replaced bit and no dead port stays a $pmux (Yosys 0.55 keeps the
+ * type; a dead port would make it a $mux or wiring). */
+static void test_replace_keeps_pmux(void) {
+    build("module \\m\n  wire input 1 \\s\n  wire input 2 \\u\n  wire input 3 \\a\n"
+          "  wire input 4 \\c\n  wire output 5 \\y\n  wire \\t\n" PMUX("pm", "1", "\\s", "\\a",
+                                                                       "\\u", "\\t")
+              MUX("outer", "\\c", "\\t", "\\s", "\\y") "end\n");
+    run_muxtree();
+    odin3_node_id node = node_named("pm");
+    TEST_ASSERT_EQUAL_STRING("$pmux", type_name(node));
+    TEST_ASSERT_EQUAL_INT64(1, pint(node, PRM_S_WIDTH));
+    expect_port(node, MUX_A, "1");
+    expect_port(node, MUX_B, "a");
+    expect_removed(0);
+}
+
 /* Widths above one: the knowledge applies per bit. */
 static void test_replace_wide(void) {
     build("module \\m\n  wire input 1 \\s\n  wire input 2 \\u\n  wire width 2 input 3 \\b\n"
@@ -1089,6 +1105,7 @@ int main(void) {
     RUN_TEST(test_replace_ctrl);
     RUN_TEST(test_replace_dup_select);
     RUN_TEST(test_replace_wide);
+    RUN_TEST(test_replace_keeps_pmux);
     RUN_TEST(test_narrow);
     RUN_TEST(test_unconnected_pin);
     RUN_TEST(test_loop);

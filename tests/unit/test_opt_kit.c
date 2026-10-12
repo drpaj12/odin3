@@ -1049,6 +1049,55 @@ static void test_limits_clamped(void) {
     TEST_ASSERT_NULL(odin3_opt_test_hooks_now()->on_call);
 }
 
+/* The vector helpers: pushes, truncate, sort_unify of a tail, push OOM. */
+static void test_vec_helpers(void) {
+    odin3_vec vec;
+    odin3_vec_init(&vec, sizeof(uint64_t));
+    static const uint64_t k_in[] = {9, 3, 3, 7, 1, 9, 1};
+    for (size_t i = 0; i < sizeof k_in / sizeof k_in[0]; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_push_u64(&vec, k_in[i]));
+    }
+    odin3_kit_sort_unify(&vec, 1); /* the first element stays where it is */
+    static const uint64_t k_want[] = {9, 1, 3, 7, 9};
+    TEST_ASSERT_EQUAL_UINT64(sizeof k_want / sizeof k_want[0], vec.len);
+    TEST_ASSERT_EQUAL_UINT64_ARRAY(k_want, vec.data, vec.len);
+    odin3_kit_truncate(&vec, 2);
+    TEST_ASSERT_EQUAL_UINT64(2, vec.len);
+    odin3_kit_truncate(&vec, 10);
+    TEST_ASSERT_EQUAL_UINT64(2, vec.len);
+    odin3_vec_free(&vec);
+    odin3_vec_init(&vec, sizeof(uint32_t));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_push_u32(&vec, 5));
+    TEST_ASSERT_EQUAL_UINT32(5, *(const uint32_t *)odin3_vec_cat(&vec, 0));
+    odin3_vec_free(&vec);
+    odin3_vec_init(&vec, sizeof(uint32_t));
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_kit_push_u32(&vec, 1));
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_kit_push_u64(&vec, 1));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_UINT64(0, vec.len);
+    odin3_vec_free(&vec);
+}
+
+/* The log label of a node: its name, else $c<ID>, truncated to the buffer. */
+static void test_node_label(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  cell $_NOT_ \\inverter\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    odin3_node_id node = node_named("inverter");
+    char label[32];
+    odin3_kit_node_label(&fx.oc, node, label, sizeof label);
+    TEST_ASSERT_EQUAL_STRING("inverter", label);
+    char small[4];
+    odin3_kit_node_label(&fx.oc, node, small, sizeof small);
+    TEST_ASSERT_EQUAL_STRING("inv", small);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_rename(fx.module, node, 0));
+    char want[32];
+    (void)snprintf(want, sizeof want, "$c%u", (unsigned)node.v);
+    odin3_kit_node_label(&fx.oc, node, label, sizeof label);
+    TEST_ASSERT_EQUAL_STRING(want, label);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_canon_consts);
@@ -1082,5 +1131,7 @@ int main(void) {
     RUN_TEST(test_new_cell_oom);
     RUN_TEST(test_reads_oom);
     RUN_TEST(test_limits_clamped);
+    RUN_TEST(test_vec_helpers);
+    RUN_TEST(test_node_label);
     return UNITY_END();
 }

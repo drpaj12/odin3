@@ -172,6 +172,22 @@ odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net);
 /* qsort comparison of two uint64_t, ascending. */
 int odin3_kit_cmp_u64(const void *lhs, const void *rhs);
 
+/* Appends value to vec (elements uint32_t / uint64_t). NO_MEMORY with vec unchanged. */
+odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value);
+odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value);
+
+/* Drops elements from the end of vec until len elements are left (no-op when it has fewer). */
+void odin3_kit_truncate(odin3_vec *vec, size_t len);
+
+/* Sorts vec[from ..) (elements uint64_t) and drops the repeats (Yosys's sort_and_unify). */
+void odin3_kit_sort_unify(odin3_vec *vec, size_t from);
+
+/*
+ * Writes the label of node for a log line into out (size bytes, truncated): its name, else
+ * "$c<ID>" (spec section 16).
+ */
+void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size);
+
 /* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 

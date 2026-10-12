@@ -152,47 +152,6 @@ static void state_free(mux_state *ms) {
     odin3_util_free(ms->overlay);
 }
 
-static odin3_status push_u64(odin3_vec *vec, uint64_t value) {
-    uint64_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = value;
-    return ODIN3_OK;
-}
-
-static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
-    uint32_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = value;
-    return ODIN3_OK;
-}
-
-static void truncate_vec(odin3_vec *vec, size_t len) {
-    while (vec->len > len) {
-        odin3_vec_pop(vec);
-    }
-}
-
-/* Sorts vec[from ..) (uint64_t) and drops the repeats. */
-static void sort_unify(odin3_vec *vec, size_t from) {
-    uint64_t *data = (uint64_t *)vec->data + from;
-    size_t count = vec->len - from;
-    if (count < 2) {
-        return;
-    }
-    qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
-    size_t kept = 1;
-    for (size_t i = 1; i < count; i++) {
-        if (data[i] != data[kept - 1]) {
-            data[kept++] = data[i];
-        }
-    }
-    truncate_vec(vec, from + kept);
-}
-
 static odin3_net_id pin_net_at(const mux_state *ms, odin3_pinslice ps, uint32_t bit) {
     return odin3_pin_net(ms->m, (odin3_pin_id){ps.first.v + bit});
 }
@@ -340,12 +299,12 @@ static odin3_status port_inputs(mux_state *ms, const mux_info *mi, uint32_t port
     pi->first = (uint32_t)ms->inmux.len;
     for (uint32_t k = 0; k < mi->width; k++) {
         const uint32_t drv = ms->drv[pin_net_at(ms, ps, base + k).v];
-        odin3_status st = drv != 0 ? push_u64(&ms->inmux, drv - 1U) : ODIN3_OK;
+        odin3_status st = drv != 0 ? odin3_kit_push_u64(&ms->inmux, drv - 1U) : ODIN3_OK;
         if (st != ODIN3_OK) {
             return st;
         }
     }
-    sort_unify(&ms->inmux, pi->first);
+    odin3_kit_sort_unify(&ms->inmux, pi->first);
     pi->count = (uint32_t)(ms->inmux.len - pi->first);
     return ODIN3_OK;
 }
@@ -379,11 +338,11 @@ static odin3_status build_ctrls(mux_state *ms, mux_info *mi) {
     mi->ctrl0 = (uint32_t)ms->ctrls.len;
     for (uint32_t port = 0; port + 1U < mi->n_ports; port++) {
         const uint32_t ctrl = ms->pt[mi->port0 + port].ctrl;
-        if (ctrl != NO_NET && push_u64(&ms->ctrls, ctrl) != ODIN3_OK) {
+        if (ctrl != NO_NET && odin3_kit_push_u64(&ms->ctrls, ctrl) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
-    sort_unify(&ms->ctrls, mi->ctrl0);
+    odin3_kit_sort_unify(&ms->ctrls, mi->ctrl0);
     mi->n_ctrl = (uint32_t)(ms->ctrls.len - mi->ctrl0);
     return ODIN3_OK;
 }
@@ -426,13 +385,13 @@ static odin3_status collect_pairs(mux_state *ms) {
             const port_info *pi = &ms->pt[mi->port0 + port];
             const uint64_t *in = (const uint64_t *)ms->inmux.data + pi->first;
             for (uint32_t k = 0; k < pi->count; k++) {
-                if (push_u64(&ms->pairs, (in[k] << PAIR_SHIFT) | user) != ODIN3_OK) {
+                if (odin3_kit_push_u64(&ms->pairs, (in[k] << PAIR_SHIFT) | user) != ODIN3_OK) {
                     return ODIN3_ERR_NO_MEMORY;
                 }
             }
         }
     }
-    sort_unify(&ms->pairs, 0);
+    odin3_kit_sort_unify(&ms->pairs, 0);
     return ODIN3_OK;
 }
 
@@ -657,7 +616,7 @@ static odin3_status port_enter(mux_state *ms, frame *fr) {
             continue;
         }
         parent->visited = 1;
-        odin3_status st = push_u32(&ms->parents, (uint32_t)in[k]);
+        odin3_status st = odin3_kit_push_u32(&ms->parents, (uint32_t)in[k]);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -672,7 +631,7 @@ static void port_leave(mux_state *ms, const frame *fr) {
     for (uint32_t k = 0; k < fr->npar; k++) {
         ms->mx[parent[k]].visited = 0;
     }
-    truncate_vec(&ms->parents, fr->par0);
+    odin3_kit_truncate(&ms->parents, fr->par0);
     port_knowledge(ms, &ms->mx[fr->mux], fr->port, false);
 }
 
@@ -684,7 +643,7 @@ static odin3_status requeue(mux_state *ms, uint32_t index) {
         return ODIN3_OK;
     }
     mi->rerun = 1;
-    return push_u32(&ms->rerun_q, index);
+    return odin3_kit_push_u32(&ms->rerun_q, index);
 }
 
 /* The child frame for parent `index` of the port frame fr, as eval_mux_port calls eval_mux. */
@@ -776,14 +735,8 @@ static const char *module_name(const mux_state *ms) {
 
 static void log_dead(const mux_state *ms, const mux_info *mi, uint32_t port) {
     const odin3_node_id node = {mi->node};
-    const uint32_t name = odin3_node_name(ms->m, node);
     char label[LABEL_MAX];
-    if (name != 0) {
-        (void)snprintf(label, sizeof label, "%s",
-                       odin3_strtab_get(odin3_design_strtab(ms->oc->design), name));
-    } else {
-        (void)snprintf(label, sizeof label, "$c%" PRIu32, node.v);
-    }
+    odin3_kit_node_label(ms->oc, node, label, sizeof label);
     odin3_log(ODIN3_LOG_DEBUG,
               "opt_muxtree: module '%s': dead port %" PRIu32 "/%" PRIu32 " on %s '%s'",
               module_name(ms), port + 1U, mi->n_ports,
@@ -857,9 +810,12 @@ static odin3_status narrow_mux(mux_state *ms, const mux_info *mi) {
     odin3_kit_rebuild req;
     memset(&req, 0, sizeof req);
     req.old_node = (odin3_node_id){mi->node};
-    req.cell.type = sel == 1U ? ms->t_mux : ms->t_pmux;
+    /* No dead port (only bits replaced): the type stays, a one-select $pmux too (as Yosys). */
+    const bool as_mux = sel == 1U && (ms->live.len < mi->n_ports ||
+                                      odin3_node_type(ms->m, req.old_node).v == ms->t_mux.v);
+    req.cell.type = as_mux ? ms->t_mux : ms->t_pmux;
     req.cell.params = params;
-    req.cell.n_params = sel == 1U ? 1U : PRM_PMUX_N;
+    req.cell.n_params = as_mux ? 1U : PRM_PMUX_N;
     req.cell.ports = ports;
     odin3_node_id fresh = {0};
     odin3_kit_begin_rewrite(ms->oc);
@@ -875,7 +831,7 @@ static odin3_status rewrite_mux(mux_state *ms, uint32_t index) {
         if (!ms->pt[mi->port0 + port].enabled) {
             log_dead(ms, mi, port);
             dead++;
-        } else if (push_u32(&ms->live, port) != ODIN3_OK) {
+        } else if (odin3_kit_push_u32(&ms->live, port) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
