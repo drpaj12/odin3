@@ -272,6 +272,11 @@ static const char *text_of(const odin3_strbuf *buf) {
     return buf->len > 0 ? buf->data : "";
 }
 
+/* buf's bytes as odin3_bytes. */
+static odin3_bytes buf_of(const odin3_strbuf *buf) {
+    return (odin3_bytes){buf->data, buf->len};
+}
+
 /* The whole file at path into buf, empty for a NULL path (Unity fails when it cannot be read). */
 static void slurp_into(const char *path, odin3_strbuf *buf) {
     odin3_strbuf_clear(buf);
@@ -619,6 +624,82 @@ static void test_legal_name_injective_fe(void) {
     expect_legal(odin3_bytes_cstr("%FE"), "%25FE");
 }
 
+/* Every name of up to INJ_LEN bytes over an alphabet of the bytes the rules turn on, with its legal
+ * form and its clock form: all forms of different names differ, and every form is VPR-legal. */
+enum { INJ_ALPHABET = 16, INJ_LEN = 3, INJ_NAMES = 1 + 16 + 16 * 16 + 16 * 16 * 16, FORM_MAX = 32 };
+
+static const char INJ_BYTES[INJ_ALPHABET] = {'%', '2', '5', 'f', 'e', 'F', 'E', '.',
+                                             'r', ' ', '|', '^', '_', '0', 'N', '\xFE'};
+
+typedef struct inj_form {
+    char text[FORM_MAX];
+    uint32_t name;
+} inj_form;
+
+static int inj_cmp(const void *left, const void *right) {
+    return strcmp(((const inj_form *)left)->text, ((const inj_form *)right)->text);
+}
+
+/* Name number index: its length, then its bytes in base INJ_ALPHABET. */
+static size_t inj_name(uint32_t index, char *name) {
+    size_t len = 0;
+    uint32_t span = 1;
+    while (index >= span) {
+        index -= span;
+        span *= INJ_ALPHABET;
+        len++;
+    }
+    for (size_t i = 0; i < len; i++, index /= INJ_ALPHABET) {
+        name[i] = INJ_BYTES[index % INJ_ALPHABET];
+    }
+    return len;
+}
+
+/* True when text (len bytes) is VPR-legal: printable, none of `="#\`, no leading `.`. */
+static bool vpr_legal(const char *text, size_t len) {
+    bool legal = len == 0 || text[0] != '.';
+    for (size_t i = 0; i < len; i++) {
+        unsigned char byte = (unsigned char)text[i];
+        legal = legal && byte >= 0x21 && byte <= 0x7E && strchr("=\"#\\", byte) == NULL;
+    }
+    return legal;
+}
+
+/* The form in buf into form, checked VPR-legal. */
+static void inj_store(const odin3_strbuf *buf, inj_form *form, uint32_t name) {
+    const char *text = text_of(buf);
+    TEST_ASSERT_TRUE(buf->len < FORM_MAX);
+    TEST_ASSERT_TRUE_MESSAGE(vpr_legal(text, buf->len), text);
+    memcpy(form->text, text, buf->len + 1);
+    form->name = name;
+}
+
+static void test_legal_name_injective_generated(void) {
+    static inj_form forms[2 * INJ_NAMES];
+    odin3_strbuf legal;
+    odin3_strbuf clock;
+    odin3_strbuf_init(&legal);
+    odin3_strbuf_init(&clock);
+    for (uint32_t i = 0; i < INJ_NAMES; i++) {
+        char name[INJ_LEN];
+        size_t len = inj_name(i, name);
+        odin3_strbuf_clear(&legal);
+        odin3_strbuf_clear(&clock);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_blif_vtr_legal_name((odin3_bytes){name, len}, &legal));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_clock_name(buf_of(&legal), &clock));
+        inj_store(&legal, &forms[(size_t)2 * i], i);
+        inj_store(&clock, &forms[(size_t)2 * i + 1], i);
+    }
+    qsort(forms, (size_t)2 * INJ_NAMES, sizeof forms[0], inj_cmp);
+    for (uint32_t i = 1; i < 2 * INJ_NAMES; i++) {
+        bool same = strcmp(forms[i - 1].text, forms[i].text) == 0;
+        TEST_ASSERT_TRUE_MESSAGE(!same || forms[i - 1].name == forms[i].name, forms[i].text);
+    }
+    odin3_strbuf_free(&legal);
+    odin3_strbuf_free(&clock);
+}
+
 /* Rule 3's list as odin3_blif_vtr_reserved has it: whole names, and the `out:` prefix. */
 static void test_reserved_names(void) {
     static const char *const yes[] = {"re", "fe", "ah",  "al",  "as",     "NIL",  "0",    "1",
@@ -920,6 +1001,82 @@ static void test_port_collision_refused(void) {
     TEST_ASSERT_EQUAL_UINT32(1, report.errors);
 }
 
+/* A `single_port_ram` (1G hard cell) clock gets rule 8. */
+static const char *const RAM_CLOCK =
+    ".model top\n"
+    ".inputs e d a w\n"
+    ".outputs o\n"
+    ".names e x|y\n"
+    "1 1\n"
+    ".subckt single_port_ram clk=x|y data[0]=d addr[0]=a we=w out[0]=o\n"
+    ".end\n";
+
+static void test_hard_cell_clock(void) {
+    read_ok(RAM_CLOCK, true);
+    const char *body = write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, ".names e x%7Cy\n1 1\n"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, " clk=x%7Cy"), body);
+    TEST_ASSERT_NULL_MESSAGE(strstr(body, "x|y"), body);
+}
+
+/* Without the library the same cell is a black box with no known clock: the name stays. */
+static void test_blackbox_clock_unknown(void) {
+    read_ok(RAM_CLOCK, false);
+    const char *body = write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, " clk=x|y"), body);
+}
+
+/* A clock that is a port bit: the port is written in its rule-8 form everywhere, and the warning
+ * says why (VPR itself reads `c|k`). */
+static void test_clock_port_bit(void) {
+    read_ok(".model top\n.inputs c|k d\n.outputs q\n.latch d q re c|k 2\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".inputs c%7Ck d\n.outputs q\n.latch d q re c%7Ck 2\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(tc.log.data, "warn: write_blif: --vtr:"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: clock port 'c|k' "
+                                                     "written as 'c%7Ck' (VTR's latch clock "
+                                                     "domains cannot hold '|' or '_^_')\n"),
+                                 tc.log.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data,
+               "info: write_blif: --vtr: 1 names legalised (first: 'c|k' -> 'c%7Ck')\n"),
+        tc.log.data);
+}
+
+/* An output port `re` whose net is named `y`: the port bit is renamed (and buffered) while the net
+ * keeps its name, and it counts in N. */
+static void test_port_renamed_net_named(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id in = hand_scalar(top, "i", ODIN3_DIR_IN);
+    odin3_net_id re_net = hand_scalar(top, "re", ODIN3_DIR_OUT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, re_net, intern("y")));
+    hand_buffer(top, in, re_net);
+    TEST_ASSERT_EQUAL_STRING(".inputs i\n.outputs %re\n.names i y\n1 1\n.names y %re\n1 1\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data, "info: write_blif: --vtr: 1 names legalised (first: 're' -> '%re')\n"),
+        tc.log.data);
+}
+
+/* Port bits are named before nets, but the info line's first is the lowest net ID: an internal
+ * net `a b` created before the port `c d`. */
+static void test_first_is_lowest_net(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id ab = hand_net(top, "a b");
+    odin3_net_id cd = hand_scalar(top, "c d", ODIN3_DIR_IN);
+    odin3_net_id o_net = hand_scalar(top, "o", ODIN3_DIR_OUT);
+    TEST_ASSERT_TRUE(ab.v < cd.v);
+    hand_buffer(top, cd, ab);
+    hand_buffer(top, ab, o_net);
+    TEST_ASSERT_EQUAL_STRING(
+        ".inputs c%20d\n.outputs o\n.names c%20d a%20b\n1 1\n.names a%20b o\n1 1\n.end\n",
+        write_vtr());
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(tc.log.data,
+               "info: write_blif: --vtr: 2 names legalised (first: 'a b' -> 'a%20b')\n"),
+        tc.log.data);
+}
+
 /* Three illegal net names in a chain i -> `a b` -> `c=d` -> `.e` -> o. */
 static void three_illegal(void) {
     odin3_module *top = hand_top();
@@ -1139,6 +1296,7 @@ int main(void) {
     RUN_TEST(test_legal_name_table);
     RUN_TEST(test_legal_name_injective_fe);
     RUN_TEST(test_reserved_names);
+    RUN_TEST(test_legal_name_injective_generated);
     RUN_TEST(test_clock_name_rule);
     RUN_TEST(test_escaped_names_distinct);
     RUN_TEST(test_collision_falls_back);
@@ -1147,6 +1305,11 @@ int main(void) {
     RUN_TEST(test_port_rename_warning);
     RUN_TEST(test_port_rename_once_per_port);
     RUN_TEST(test_port_collision_refused);
+    RUN_TEST(test_hard_cell_clock);
+    RUN_TEST(test_blackbox_clock_unknown);
+    RUN_TEST(test_clock_port_bit);
+    RUN_TEST(test_port_renamed_net_named);
+    RUN_TEST(test_first_is_lowest_net);
     RUN_TEST(test_info_line);
     RUN_TEST(test_generator_keeps_name);
     RUN_TEST(test_help_string);

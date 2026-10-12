@@ -104,9 +104,10 @@ typedef struct blif_writer {
     bool log_names;                       /* log the port warnings (the preflight's naming run) */
     odin3_strbuf orig;                    /* the last name legalise rewrote, as it was */
     odin3_strbuf legal;                   /* scratch for legalise */
-    uint32_t renamed;                     /* nets written under a name VB-10 changed */
-    uint32_t first_renamed;               /* the lowest such net ID; 0 when none */
-    odin3_strbuf first_orig, first_legal; /* that net's name before and after */
+    uint32_t renamed;                     /* written names VB-10 changed (note_renamed) */
+    bool have_first;                      /* first_key, first_orig, first_legal are set */
+    uint32_t first_key;                   /* the lowest net ID of such a name */
+    odin3_strbuf first_orig, first_legal; /* that name before and after */
     /* the module being written */
     const odin3_module *module;
     odin3_strtab *gen_names; /* its port bit names, then its generated names */
@@ -333,14 +334,18 @@ static odin3_status legalise(blif_writer *wr, odin3_strbuf *buf, odin3_net_id ne
     return st;
 }
 
-/* Counts net as written under a name VB-10 changed (wr->orig before, written after), keeping the
- * pair of the lowest such net ID for the info line. */
-static odin3_status note_renamed(blif_writer *wr, odin3_net_id net, odin3_bytes written) {
+/*
+ * Counts one written name VB-10 changed (wr->orig before, written after): a port bit name, or a
+ * net's own or wire bit name. key is the net ID it names (UINT32_MAX for an unconnected port
+ * bit); the pair of the lowest key, the earliest noted on a tie, is kept for the info line.
+ */
+static odin3_status note_renamed(blif_writer *wr, uint32_t key, odin3_bytes written) {
     wr->renamed++;
-    if (wr->first_renamed != 0 && wr->first_renamed < net.v) {
+    if (wr->have_first && wr->first_key <= key) {
         return ODIN3_OK;
     }
-    wr->first_renamed = net.v;
+    wr->have_first = true;
+    wr->first_key = key;
     odin3_strbuf_clear(&wr->first_orig);
     odin3_strbuf_clear(&wr->first_legal);
     odin3_status st = odin3_strbuf_append(&wr->first_orig, buf_bytes(&wr->orig));
@@ -460,7 +465,7 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     st = found && name_free(wr, (odin3_bytes){wr->cand.data, wr->cand.len}, self)
              ? take_name(wr, key)
              : take_numbered(wr, key);
-    return st == ODIN3_OK && changed ? note_renamed(wr, self, gen_get(wr, key)) : st;
+    return st == ODIN3_OK && changed ? note_renamed(wr, self.v, gen_get(wr, key)) : st;
 }
 
 /* The name net is written under: its generated or port bit name when it has one, else its own. */
@@ -555,26 +560,39 @@ static odin3_status port_bit_token(blif_writer *wr, wr_portbit where, bool *chan
 }
 
 /*
- * A port bit whose name VB-10 changed (wr->token now, wr->orig before): the warning, once per port
- * (*warned) and only on the logging run; and the net counts as renamed when it is unnamed and has
- * no earlier port bit, since it is then written under this name (name_net).
+ * The warning for a port whose bit name VB-10 changed (wr->token now, wr->orig before, wr->legal
+ * its rules 1-3 form): `<p>` is the port's base name and `<legal>` its written form (the token
+ * without its `[i]`). VPR cannot read the name when rules 1-3 changed it; when only rule 8 did
+ * (a clock port), VPR can, and the text names VTR's latch clock domains instead.
+ */
+static void port_warning(const blif_writer *wr, uint32_t port) {
+    odin3_bytes base = port_base(wr, wr->module, port);
+    int base_len = (int)base.len;
+    const char *base_text = base.ptr;
+    int legal_len = (int)(wr->token.len - (wr->orig.len - base.len)); /* both end in one `[i]` */
+    if (!same_bytes(buf_bytes(&wr->legal), buf_bytes(&wr->orig))) {
+        odin3_log(ODIN3_LOG_WARN,
+                  ODIN3_BLIF_VTR_PREFIX "port '%.*s' written as '%.*s' (VPR cannot read '%.*s')",
+                  base_len, base_text, legal_len, wr->token.data, base_len, base_text);
+        return;
+    }
+    odin3_log(ODIN3_LOG_WARN,
+              ODIN3_BLIF_VTR_PREFIX "clock port '%.*s' written as '%.*s' (VTR's latch clock "
+                                    "domains cannot hold '|' or '_^_')",
+              base_len, base_text, legal_len, wr->token.data);
+}
+
+/*
+ * A port bit whose name VB-10 changed: the warning, once per port (*warned) and only on the
+ * logging run; and the written port bit name counts as renamed, under its net's ID (the net, if
+ * it takes the same name, is not counted again: name_named_vtr).
  */
 static odin3_status port_renamed(blif_writer *wr, uint32_t port, odin3_net_id net, bool *warned) {
     if (wr->log_names && !*warned) {
-        odin3_bytes base = port_base(wr, wr->module, port);
-        size_t index_len = wr->orig.len - base.len; /* the `[i]` both names end with, if any */
-        odin3_log(ODIN3_LOG_WARN,
-                  ODIN3_BLIF_VTR_PREFIX "port '%.*s' written as '%.*s' (VPR cannot read '%.*s')",
-                  (int)base.len, (const char *)base.ptr, (int)(wr->token.len - index_len),
-                  wr->token.data, (int)base.len, (const char *)base.ptr);
+        port_warning(wr, port);
         *warned = true;
     }
-    uint64_t owner = 0;
-    if (!odin3_net_valid(net) || odin3_net_name(wr->module, net) != 0 ||
-        odin3_u64map_get(wr->net_port, net.v, &owner)) {
-        return ODIN3_OK;
-    }
-    return note_renamed(wr, net, buf_bytes(&wr->token));
+    return note_renamed(wr, odin3_net_valid(net) ? net.v : UINT32_MAX, buf_bytes(&wr->token));
 }
 
 /* Reserves the port bit name in wr->token for net (none for an unconnected port pin); the first
@@ -639,10 +657,12 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     }
     uint32_t id = 0;
     uint64_t owner = 0;
-    bool taken = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id) &&
-                 !(odin3_u64map_get(wr->claims, id, &owner) && owner == net.v);
-    st = taken ? take_numbered(wr, net.v) : take_name(wr, net.v);
-    return st == ODIN3_OK && changed ? note_renamed(wr, net, gen_get(wr, net.v)) : st;
+    bool found = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id);
+    bool own_port = found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
+    st = found && !own_port ? take_numbered(wr, net.v) : take_name(wr, net.v);
+    /* a net under its own port bit's name was counted with the port bit (port_renamed) */
+    return st == ODIN3_OK && changed && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v))
+                                                  : st;
 }
 
 /* Chooses the name net is written under: its own name unless a port bit of another net has it
@@ -1461,7 +1481,7 @@ odin3_status odin3_blif_vtr_name_top(const odin3_design *design, const odin3_bli
         st = wr_fail(&wr, name_module(&wr));
     }
     report->renamed = wr.renamed;
-    if (st == ODIN3_OK && wr.renamed > 0) {
+    if (st == ODIN3_OK && wr.have_first) {
         odin3_log(ODIN3_LOG_INFO,
                   ODIN3_BLIF_VTR_PREFIX "%u names legalised (first: '%.*s' -> '%.*s')",
                   (unsigned)wr.renamed, (int)wr.first_orig.len, wr.first_orig.data,

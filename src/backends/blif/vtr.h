@@ -64,12 +64,16 @@ odin3_status odin3_blif_vtr_clock_name(odin3_bytes legal, odin3_strbuf *out);
 
 /* Defined in writer.c, whose naming machinery it runs: names the design's top as the VTR dialect
  * writes it (VB-10: rules 1-3 and 8 before 1C's uniqueness fallback; spec 3E §10) without writing
- * anything, logs the warning `write_blif: --vtr: port '<p>' written as '<legal>' (VPR cannot read
- * '<p>')` once per port whose bit names changed, and, when N > 0 nets are written under a name
- * VB-10 changed, the info line `write_blif: --vtr: N names legalised (first: '<orig>' ->
- * '<legal>')` for the lowest such net ID; sets report->renamed = N. The top must exist (E13 is
- * the caller's). Returns ODIN3_OK; ODIN3_ERR_INVALID_ARG (logged) when two ports on different
- * nets end up with one BLIF name; ODIN3_ERR_NO_MEMORY. */
+ * anything. Logs, once per port whose bit names changed, the warning `write_blif: --vtr: port
+ * '<p>' written as '<legal>' (VPR cannot read '<p>')`, or, when rule 8 alone changed them (a
+ * clock port), `write_blif: --vtr: clock port '<p>' written as '<legal>' (VTR's latch clock
+ * domains cannot hold '|' or '_^_')`. N counts the written names VB-10 changed: each port bit
+ * name, and each net's own or wire bit name (a net written under its own port bit's name counts
+ * once). When N > 0, logs the info line `write_blif: --vtr: N names legalised (first: '<orig>' ->
+ * '<legal>')` for the name of the lowest net ID (an unconnected port bit sorts last; on a tie, the
+ * port bit); sets report->renamed = N. The top must exist (E13 is the caller's). Returns ODIN3_OK;
+ * ODIN3_ERR_INVALID_ARG (logged) when two ports on different nets end up with one BLIF name;
+ * ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_blif_vtr_name_top(const odin3_design *design, const odin3_blif_write_opts *opts,
                                      odin3_blif_vtr_report *report);
 
