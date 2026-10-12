@@ -579,7 +579,9 @@ def _alive(pid: int) -> bool:
     return stat.rsplit(")", 1)[1].split()[0] not in ("Z", "X")
 
 
-def _wait_dead(pids: list[int], limit_s: float = 5.0) -> bool:
+def _wait_dead(pids: list[int], limit_s: float = 30.0) -> bool:
+    """True once no pid in ``pids`` is alive (it returns as soon as that holds; the default
+    limit is generous because a SIGKILLed process can take a while to be scheduled under load)."""
     end = time.monotonic() + limit_s
     while time.monotonic() < end:
         if not any(_alive(pid) for pid in pids):
@@ -948,10 +950,9 @@ class CommandTest(RunnerTestBase):
         through the whole grace period."""
         flag, pids = self.tmp / "term", self.tmp / "pids"
         spec = {"on_term": str(flag), "spawn_sleep": 600, "pids": str(pids), "sleep": 600}
-        frozen = time.time()
-        opts = self.opts(clock=lambda: time.time() if pids.exists() else frozen,
+        began = frozen = time.monotonic()
+        opts = self.opts(clock=lambda: time.monotonic() if pids.exists() else frozen,
                          job_timeout_s={"A": 1, "B": 1})
-        began = time.monotonic()
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 60.0):
             result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
         self.assertEqual(result.status, "timeout")
@@ -1062,14 +1063,17 @@ class OutcomeTest(RunnerTestBase):
         SIGKILL after KILL_GRACE_S (0.5 s here); neither PID survives."""
         pids = self.tmp / "pids"
         spec = {"ignore_term": True, "spawn_sleep": 600, "pids": str(pids), "sleep": 600}
-        frozen = time.time()
+        # One monotonic clock for the job's deadline and for ``took``, held at ``began`` until
+        # the fake ignores SIGTERM (it may start slowly under load): the 1 s timeout then counts
+        # from no earlier than ``began`` and the 0.5 s grace follows it, so took >= 1.5 holds
+        # however the run is scheduled. (The wall clock read before ``began`` let a preemption
+        # or a WSL clock step eat that margin.)
+        began = frozen = time.monotonic()
 
         def clock() -> float:
-            """Real time, held until the fake ignores SIGTERM (it may start slowly under load)."""
-            return time.time() if pids.exists() else frozen
+            return time.monotonic() if pids.exists() else frozen
 
         opts = self.opts(clock=clock, sleep=time.sleep, job_timeout_s={"A": 1, "B": 1})
-        began = time.monotonic()
         with mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
             summary, lines = self.run_jobs([self.job("sha", [spec])], opts)
         took = time.monotonic() - began
@@ -1078,7 +1082,7 @@ class OutcomeTest(RunnerTestBase):
         self.assertIn("vtr-qor: P sha: timeout after 1 s",
                       (self.out / "harness.log").read_text().splitlines())
         self.assertGreaterEqual(took, 1.5)
-        self.assertLess(took, 30)
+        self.assertLess(took, 60)  # far below the fake's 600 s: the kill, not the job, ended it
         self.assertTrue(_wait_dead([int(p) for p in pids.read_text().split()]))
         self.assertEqual(summary.exit_code, 3)
         self.assertEqual((self.job_dir("sha") / "status").read_text(), "timeout\n")
@@ -1298,7 +1302,7 @@ class DfTest(RunnerTestBase):
         with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
             summary, lines = self.run_jobs([self.job("sha", [{"stamp": str(self.stamps),
                                                               "name": "sha"}])], self.opts())
-        self.assertLess(time.monotonic() - began, 20)
+        self.assertLess(time.monotonic() - began, 60)  # the hung df sleeps 600 s
         self.assertEqual(lines[0], "vtr-qor: cannot read free space of /mnt/c")
         self.assertEqual((summary.exit_code, self.starts()), (5, []))
 
@@ -1308,7 +1312,7 @@ class DfTest(RunnerTestBase):
         with mock.patch.object(qor_heavy, "DF_TIMEOUT_S", 0.3):
             summary, _ = self.run_jobs([self.job("sha", [spec])],
                                        self.opts(clock=ScaledClock(600)))
-        self.assertLess(time.monotonic() - began, 20)
+        self.assertLess(time.monotonic() - began, 60)  # the hung df sleeps 600 s
         self.assertEqual((summary.results[0].status, summary.results[0].error, summary.exit_code),
                          ("aborted", "cannot read free space of /mnt/c", 5))
 
@@ -1323,8 +1327,8 @@ class DfTest(RunnerTestBase):
         with mock.patch.object(qor_sched, "POLL_S", 0.05), \
                 mock.patch.object(qor_sched, "KILL_GRACE_S", 0.5):
             result = qor_sched.run_one(self.job("sha", [spec]), opts, finish_ok)
-        self.assertEqual(result.status, "timeout")
-        self.assertLess(time.monotonic() - began, 15)
+        self.assertEqual(result.status, "timeout")  # not aborted by the df probe's 30 s limit
+        self.assertLess(time.monotonic() - began, 25)
 
 
 class CompletionTest(RunnerTestBase):

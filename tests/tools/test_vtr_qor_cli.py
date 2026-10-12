@@ -785,13 +785,13 @@ class RunTest(CliTestBase):
         self.assertEqual(argv[argv.index("-timeout") + 1], "77")
 
     def test_job_timeout(self) -> None:
-        """--job-timeout reaches the runner: a 1 s limit on a 30 s VTR is a timeout (exit 3)."""
-        (self.vtr / "sleep").write_text("30")
+        """--job-timeout reaches the runner: a 1 s limit on a 300 s VTR is a timeout (exit 3)."""
+        (self.vtr / "sleep").write_text("300")
         start = time.monotonic()
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
                                 "--job-timeout", "1")
         self.assertEqual(code, 3, err)
-        self.assertLess(time.monotonic() - start, 20)
+        self.assertLess(time.monotonic() - start, 120)  # far below the fake VTR's 300 s
         self.assertIn("vtr-qor: P ch_intrinsics: timeout after 1 s", err)
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.assertEqual((job / "status").read_text(), "timeout\n")

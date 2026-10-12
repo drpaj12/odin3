@@ -111,7 +111,9 @@ zero_init() {
 # Whether ABC refuses BLIF $2 for a signal defined more than once (work files in $1).
 abc_refuses_multi_driver() {
     run_capped "$1/abc-md.log" "$1/rss.abc-md" "$SC_ABC" -q "read_blif $2" >/dev/null || true
-    cat "$1/abc-md.log" "$1/abc-md.log.err" | grep -q 'is defined more than once'
+    # grep reads the files itself: `cat | grep -q` under pipefail fails when grep exits on a
+    # match in the first file while cat still writes the second (SIGPIPE).
+    grep -q 'is defined more than once' "$1/abc-md.log" "$1/abc-md.log.err"
 }
 
 now() { date +%s.%N; }
@@ -251,7 +253,7 @@ worker() {
         status=excluded note="built-in cell without a simulate hook: $nohook"
     elif grep -qE '^bb (single_port_ram|dual_port_ram)$' <<<"$facts"; then
         status=excluded note="RAM (Phase 4): $(sed -n 's/^bb //p' <<<"$facts" | xargs)"
-    elif grep -E '^bb ' <<<"$facts" | grep -qvE '^bb (adder|multiply)$'; then
+    elif grep -E '^bb ' <<<"$facts" | grep -vE '^bb (adder|multiply)$' >/dev/null; then
         status=excluded note="black box without a model: $(sed -n 's/^bb //p' <<<"$facts" | xargs)"
     elif grep -qE '^edge (ah|al|as|none)$' <<<"$facts"; then
         status=excluded note="latch type the references do not model: $(sed -n 's/^edge //p' <<<"$facts" | xargs)"

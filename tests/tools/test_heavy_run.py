@@ -294,8 +294,8 @@ class NestingTest(FakeTools):
             for env_slice in ("odin3-heavy.slice", ""):  # the variable does not matter
                 start = time.monotonic()
                 run = self.inside(HEAVY_RUN, "echo", "never", fd9=False, env_slice=env_slice,
-                                  ODIN3_HEAVY_OK="1", ODIN3_HEAVY_WAIT="30")
-                self.assertLess(time.monotonic() - start, 10.0)
+                                  ODIN3_HEAVY_OK="1", ODIN3_HEAVY_WAIT="60")
+                self.assertLess(time.monotonic() - start, 30.0)  # a lock wait would last 60 s
                 self.assertEqual(run.returncode, 2)
                 self.assertEqual(run.stdout, "")
                 self.assertEqual(run.stderr, "heavy-run: nested heavy-run lost the lock "
@@ -304,7 +304,7 @@ class NestingTest(FakeTools):
                 start = time.monotonic()
                 run = self.inside(BUILD_LOCKED, "--preset", "debug", fd9=False,
                                   env_slice=env_slice)
-                self.assertLess(time.monotonic() - start, 10.0)
+                self.assertLess(time.monotonic() - start, 30.0)
                 self.assertEqual(run.returncode, 2)
                 self.assertIn("build-locked: refused inside a heavy run (odin3-heavy.slice)",
                               run.stderr)
@@ -358,10 +358,10 @@ class NestingTest(FakeTools):
                  f"{{ {BASH} {BUILD_LOCKED} --preset debug; echo build=$?; }}")
         start = time.monotonic()
         run = self.run_tool(HEAVY_RUN, BASH, "-c", inner, ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_WAIT="5")
+                            ODIN3_HEAVY_WAIT="60")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "inner\nbuild=2\n")
-        self.assertLess(time.monotonic() - start, 5.0)
+        self.assertLess(time.monotonic() - start, 30.0)  # a wait on its own lock lasts 60 s
 
     def test_python_driver_must_pass_fd9(self) -> None:
         """A Python driver's nested step runs in place with pass_fds=(9,), and fails at once
@@ -376,11 +376,11 @@ class NestingTest(FakeTools):
                  f"exec python3 -I -c \"$1\"")
         start = time.monotonic()
         run = self.run_tool(HEAVY_RUN, BASH, "-c", inner, "job", driver, ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_WAIT="5")
+                            ODIN3_HEAVY_WAIT="60")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "step\nrc=0\nrc=2\n")
         self.assertIn("pass_fds=(9,)", run.stderr)
-        self.assertLess(time.monotonic() - start, 5.0)
+        self.assertLess(time.monotonic() - start, 30.0)  # a wait on its own lock lasts 60 s
 
 
 class RealLockTest(FakeTools):
