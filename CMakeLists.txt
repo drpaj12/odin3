@@ -184,6 +184,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_expand.c
     src/frontends/verilog/elab1_write.c
     src/frontends/verilog/elab1_inst.c
+    src/frontends/verilog/elab1_bbox.c
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2_stub.c
     src/ir/cells/builtin.c

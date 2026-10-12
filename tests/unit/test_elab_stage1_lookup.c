@@ -953,15 +953,16 @@ static void test_unhandled_kind(void) {
     odin3_elab1_destroy(e1);
 }
 
-/* n2: a black box's body is never walked: its instance of an undefined module is not reported,
- * and the instance of the black box is written as given (Task 11). */
+/* n2: a black box's body is never walked: its instance of an undefined module is not reported;
+ * the black box is a ports-only MODULE (Task 12 fix round, EL-4 v4.8). */
 static void test_blackbox_body_unwalked(void) {
     run_one("t.v", "module t;\n  bb x ();\nendmodule\n(* blackbox *)\nmodule bb;\n  foo y ();\n"
                    "endmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_ERROR, "unresolved_module"));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rs.dump.data, "(INSTANTIATION:bb @t.v:2:3"), rs.dump.data);
-    TEST_ASSERT_NULL(strstr(rs.dump.data, "(MODULE:bb"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(rs.dump.data, "(MODULE:bb"), rs.dump.data);
+    TEST_ASSERT_NULL(strstr(rs.dump.data, "(INSTANTIATION:foo"));
 }
 
 /* Arms an allocation failure once, as stage 2 starts (the on_body_start hook). */

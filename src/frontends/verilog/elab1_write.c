@@ -105,15 +105,22 @@ static void w_push(e1w *wr, odin3_ast_id id) {
     }
 }
 
-/* The elaborated-node cap before a make (point (aa)): fatal at the node being written. */
-static bool w_room(e1w *wr, odin3_ast_id from) {
-    uint32_t made = odin3_ast_node_end(wr->out).v - 1;
-    if (made < wr->e1->limits->max_elab_nodes) {
+bool odin3_elab1_node_room(odin3_elab1 *e1, odin3_ast_id from) {
+    uint32_t made = odin3_ast_node_end(e1->elab).v - 1;
+    if (made < e1->limits->max_elab_nodes) {
         return true;
     }
-    odin3_elab1_fatal(wr->e1, odin3_ast_loc(wr->ast, from),
+    odin3_elab1_fatal(e1, odin3_ast_loc(e1->parsed, from),
                       "elaboration needs more than %" PRIu32 " elaborated nodes",
-                      wr->e1->limits->max_elab_nodes);
+                      e1->limits->max_elab_nodes);
+    return false;
+}
+
+/* The elaborated-node cap before a make (point (aa)): fatal at the node being written. */
+static bool w_room(e1w *wr, odin3_ast_id from) {
+    if (odin3_elab1_node_room(wr->e1, from)) {
+        return true;
+    }
     halt(wr);
     return false;
 }
@@ -145,62 +152,79 @@ static odin3_ast_id w_number(e1w *wr, const odin3_ast_number *num, odin3_ast_spe
     return w_make_marked(wr, spec, odin3_ast_mark(wr->out), from);
 }
 
-/* A known 32-bit value as a NUMBER: sub DEC, SIGNED, payload width 32 (the integer form). */
-static odin3_ast_id w_int(e1w *wr, int64_t value, odin3_ast_id from) {
-    if (!live(wr)) {
-        return (odin3_ast_id){0};
+/* A STRING value as a STRING node's spec (the empty string: EMPTY, no name). */
+static odin3_status string_spec(odin3_elab1 *e1, odin3_arena *arena, const odin3_cval *val,
+                                odin3_ast_spec *spec) {
+    odin3_bytes bytes = {NULL, 0};
+    odin3_status st = odin3_cval_string_bytes(arena, val, &bytes);
+    spec->kind = ODIN3_AST_STRING;
+    if (st == ODIN3_OK && bytes.len == 0) {
+        spec->flags = ODIN3_AST_F_STRING_EMPTY;
+    } else if (st == ODIN3_OK) {
+        st = odin3_ast_intern(e1->elab, bytes, &spec->name);
     }
-    odin3_cval_int num = {value, E1_INT_BITS, true};
-    odin3_cval val = {0};
-    odin3_ast_number payload;
-    odin3_status st = odin3_cval_from_i64(wr->env->arena, &num, &val);
-    st = st != ODIN3_OK ? st : odin3_cval_to_number(wr->env->arena, &val, &payload);
-    if (st != ODIN3_OK) {
-        fail(wr, st);
-        return (odin3_ast_id){0};
-    }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NUMBER, from);
-    spec.sub = ODIN3_AST_NUMBER_DEC;
-    spec.flags = ODIN3_AST_F_NUMBER_SIGNED;
-    return w_number(wr, &payload, &spec, from);
+    return st;
 }
 
-/* A STRING value as a STRING node (the empty string: EMPTY, no name). */
-static odin3_ast_id w_string(e1w *wr, const odin3_cval *val, odin3_ast_id from) {
-    odin3_bytes bytes = {NULL, 0};
-    odin3_status st = odin3_cval_string_bytes(wr->env->arena, val, &bytes);
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_STRING, from);
-    if (st == ODIN3_OK && bytes.len == 0) {
-        spec.flags = ODIN3_AST_F_STRING_EMPTY;
-    } else if (st == ODIN3_OK) {
-        st = odin3_ast_intern(wr->out, bytes, &spec.name);
+/* A NUMBER's spec and payload for a value (point (bb)), or num in the integer form. */
+static odin3_status number_spec(odin3_elab1 *e1, odin3_arena *arena, const odin3_elab1_leaf *leaf,
+                                odin3_ast_spec *spec) {
+    odin3_cval_int num = {leaf->num, E1_INT_BITS, true};
+    odin3_cval made = {0};
+    const odin3_cval *val = leaf->val;
+    odin3_status st = val == NULL ? odin3_cval_from_i64(arena, &num, &made) : ODIN3_OK;
+    val = val == NULL ? &made : val;
+    odin3_ast_number payload;
+    st = st != ODIN3_OK ? st : odin3_cval_to_number(arena, val, &payload);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_ast_number_new(e1->elab, (odin3_loc){spec->loc}, &payload, &spec->payload);
+    bool unsized = leaf->val != NULL && (val->flags & ODIN3_CVAL_UNSIZED) != 0;
+    spec->kind = ODIN3_AST_NUMBER;
+    spec->sub = unsized ? leaf->base : (uint8_t)ODIN3_AST_NUMBER_BIN;
+    spec->sub = leaf->val == NULL ? (uint8_t)ODIN3_AST_NUMBER_DEC : spec->sub;
+    spec->flags = (val->flags & ODIN3_CVAL_SIGNED) != 0 ? ODIN3_AST_F_NUMBER_SIGNED : 0;
+    return st;
+}
+
+odin3_status odin3_elab1_make_leaf(odin3_elab1 *e1, odin3_arena *arena,
+                                   const odin3_elab1_leaf *leaf, odin3_ast_id *out) {
+    *out = (odin3_ast_id){0};
+    if (!odin3_elab1_node_room(e1, leaf->from)) {
+        return ODIN3_ERR_PARSE;
     }
+    odin3_ast_spec spec = {.loc = odin3_ast_loc(e1->parsed, leaf->from).v,
+                           .end = odin3_ast_end(e1->parsed, leaf->from).v};
+    bool string = leaf->val != NULL && (leaf->val->flags & ODIN3_CVAL_STRING) != 0;
+    odin3_status st =
+        string ? string_spec(e1, arena, leaf->val, &spec) : number_spec(e1, arena, leaf, &spec);
+    return st != ODIN3_OK ? st : odin3_ast_make(e1->elab, &spec, NULL, 0, out);
+}
+
+/* A leaf through odin3_elab1_make_leaf while building. */
+static odin3_ast_id w_leaf(e1w *wr, const odin3_elab1_leaf *leaf) {
+    odin3_ast_id id = {0};
+    if (!live(wr)) {
+        return id;
+    }
+    odin3_status st = odin3_elab1_make_leaf(wr->e1, wr->env->arena, leaf, &id);
     if (st != ODIN3_OK) {
-        fail(wr, st);
-        return (odin3_ast_id){0};
+        stop_on(wr, st);
     }
-    return w_make_marked(wr, &spec, odin3_ast_mark(wr->out), from);
+    return id;
+}
+
+/* A known 32-bit value as a NUMBER: sub DEC, SIGNED, payload width 32 (the integer form). */
+static odin3_ast_id w_int(e1w *wr, int64_t value, odin3_ast_id from) {
+    odin3_elab1_leaf leaf = {NULL, 0, value, from};
+    return w_leaf(wr, &leaf);
 }
 
 /* A final value (a parameter's, a CONNECTION's): a STRING, or a NUMBER whose sub is the source
  * literal's base while unsized (payload width 0) and BIN otherwise, SIGNED per value. */
 static odin3_ast_id w_value(e1w *wr, const odin3_cval *val, uint8_t base, odin3_ast_id from) {
-    if (!live(wr)) {
-        return (odin3_ast_id){0};
-    }
-    if ((val->flags & ODIN3_CVAL_STRING) != 0) {
-        return w_string(wr, val, from);
-    }
-    odin3_ast_number payload;
-    odin3_status st = odin3_cval_to_number(wr->env->arena, val, &payload);
-    if (st != ODIN3_OK) {
-        fail(wr, st);
-        return (odin3_ast_id){0};
-    }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NUMBER, from);
-    spec.sub = (val->flags & ODIN3_CVAL_UNSIZED) != 0 ? base : (uint8_t)ODIN3_AST_NUMBER_BIN;
-    spec.flags = (val->flags & ODIN3_CVAL_SIGNED) != 0 ? ODIN3_AST_F_NUMBER_SIGNED : 0;
-    return w_number(wr, &payload, &spec, from);
+    odin3_elab1_leaf leaf = {val, base, 0, from};
+    return w_leaf(wr, &leaf);
 }
 
 /* A declaration's RANGE with its folded bounds (pass E folded them). */
@@ -621,45 +645,6 @@ static odin3_ast_id w_spec_params(e1w *wr, odin3_ast_id item, uint32_t child) {
     return w_make_marked(wr, &list, mark, item);
 }
 
-/* §9.1's <what> of a value written as given: "parameter 'P'" for a named one (in the
- * environment's arena), "parameter value" for an ordered one. */
-static const char *given_what(const e1w *wr, odin3_ast_id entry) {
-    const char *name = odin3_ast_name_str(wr->ast, entry);
-    size_t len = strlen(name) + sizeof "parameter ''";
-    char *what = name[0] != '\0' ? odin3_arena_alloc(wr->env->arena, len) : NULL;
-    int got = what != NULL ? snprintf(what, len, "parameter '%s'", name) : -1;
-    return got > 0 && (size_t)got < len ? what : "parameter value";
-}
-
-/* The params LIST of a `(* blackbox *)` instance (EL-4): the overrides as given, their values
- * resolved. */
-static odin3_ast_id w_given_params(e1w *wr, odin3_ast_id item) {
-    odin3_ast_id list = odin3_ast_child(wr->ast, item, 0);
-    if (list.v == 0) {
-        return list;
-    }
-    uint32_t mark = w_mark(wr);
-    odin3_ast_span entries = odin3_ast_children(wr->ast, list);
-    for (uint32_t i = 0; i < entries.n; i++) {
-        odin3_ast_id expr = odin3_ast_child(wr->ast, entries.ids[i], 0);
-        odin3_ast_id value = {0};
-        if (expr.v != 0) {
-            odin3_cval val = {0};
-            uint8_t base = ODIN3_AST_NUMBER_DEC;
-            odin3_elab1_eval_req req = {expr, given_what(wr, entries.ids[i]), &base};
-            odin3_status st = odin3_elab1_eval(wr->env, &req, &val);
-            if (st != ODIN3_OK) {
-                stop_on(wr, st);
-            }
-            value = st == ODIN3_OK ? w_value(wr, &val, base, expr) : value;
-        }
-        e1w_conn conn = {odin3_ast_name(wr->ast, entries.ids[i]), value, entries.ids[i]};
-        w_push(wr, w_connection(wr, &conn));
-    }
-    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_LIST, list);
-    return w_make_marked(wr, &spec, mark, list);
-}
-
 /* A cell type's INT parameter (EL-8): the 32-bit integer form when it fits, else 64 signed bits. */
 static odin3_ast_id w_int_param(e1w *wr, int64_t num, odin3_ast_id from) {
     if (num >= INT32_MIN && num <= INT32_MAX) {
@@ -923,9 +908,9 @@ static odin3_ast_id w_conn_value(e1w *wr, const odin3_elab1_conn *rec, const e1w
     if (!el->element || !rec->sliced) {
         return w_expr(wr, rec->expr);
     }
-    int64_t right = wr->e1->array.right;
-    uint64_t step =
-        el->index >= right ? (uint64_t)(el->index - right) : (uint64_t)(right - el->index);
+    const odin3_elab1_array *arr = &wr->e1->array;
+    int64_t low = arr->left < arr->right ? arr->left : arr->right;
+    uint64_t step = (uint64_t)(el->index - low); /* the lowest index the low bits (EL-10) */
     e1w_slice sl = {rec->expr, step * rec->port_width, rec->port_width};
     return w_slice(wr, &sl);
 }
@@ -1020,15 +1005,11 @@ static odin3_elab_inst decided(const e1w *wr, odin3_ast_id item, odin3_ast_id ki
     return inst;
 }
 
-/* The params LIST of a new INSTANTIATION group: a module specialization's values, a
- * `(* blackbox *)` instance's as given, or a cell type's or implicit black box's record. */
-static odin3_ast_id w_group_params(e1w *wr, odin3_ast_id item, const odin3_elab_inst *inst,
-                                   bool module) {
-    if (module) {
-        return w_spec_params(wr, item, inst->spec);
-    }
+/* The params LIST of a new INSTANTIATION group: a specialization's final values (a module's or a
+ * `(* blackbox *)` definition's), or a cell type's or implicit black box's record. */
+static odin3_ast_id w_group_params(e1w *wr, odin3_ast_id item, const odin3_elab_inst *inst) {
     if (inst->target.kind == ODIN3_RES_MODULE) {
-        return w_given_params(wr, item);
+        return w_spec_params(wr, item, inst->spec);
     }
     return w_record_params(wr, item, inst->spec);
 }
@@ -1043,16 +1024,15 @@ static void w_instantiation(e1w *wr, odin3_ast_id item) {
             continue;
         }
         odin3_elab_inst inst = decided(wr, item, kids.ids[i], value);
-        bool module =
-            value >= 0 && odin3_elab1_def(wr->e1, inst.target.def)->kind == ODIN3_DEF_MODULE;
+        bool by_port = inst.target.kind != ODIN3_RES_CELLTYPE; /* EL-4 v4.8 */
         if (group.open && value != group.value) {
             close_group(wr, item, &group);
         }
         if (!group.open) {
             group = (e1w_group){true, value, w_mark(wr)};
-            w_push(wr, w_group_params(wr, item, &inst, module));
+            w_push(wr, w_group_params(wr, item, &inst));
         }
-        w_instances(wr, &inst, module);
+        w_instances(wr, &inst, by_port);
     }
     close_group(wr, item, &group);
 }

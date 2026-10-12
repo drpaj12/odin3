@@ -459,7 +459,8 @@ typedef struct odin3_elab1_given {
 /*
  * A port of a specialization as stage 1 evaluates it (odin3_elab1_spec_ports, black boxes): its
  * name (0 for an empty position), direction (odin3_dir), width with its declared range and sign;
- * width 0 when the declaration could not be evaluated (reported where it is elaborated).
+ * width 0 when the declaration could not be evaluated (reported where it is elaborated); decl,
+ * the parsed node it comes from (an ANSI DECLARATOR or a PORT_REF; 0 for an implicit port).
  */
 typedef struct odin3_elab1_port {
     uint32_t name;
@@ -469,17 +470,20 @@ typedef struct odin3_elab1_port {
     int64_t lsb;
     bool is_signed;
     bool scalar;
+    odin3_ast_id decl;
 } odin3_elab1_port;
 
 /*
- * A black box stage 1 met (EL-11): a `(* blackbox *)` specialization (spec, name the
- * specialization's) or an implicit black box (--auto-blackbox; spec UINT32_MAX), with its ports in
- * order through odin3_elab1.bbports (first_port + 1 … chained by next; 0 = none).
+ * A black box stage 1 met (EL-11; elab1_bbox.c): a `(* blackbox *)` specialization (spec, name the
+ * specialization's) or an implicit black box (--auto-blackbox; spec UINT32_MAX, at its first
+ * INSTANTIATION), with its ports in order through odin3_elab1.bbports (first_port + 1 … chained
+ * by next; 0 = none). Each is written as a ports-only black-box MODULE (EL-4, v4.8).
  */
 typedef struct odin3_elab1_bbox {
     uint32_t name;
     uint32_t spec;
     bool implicit;
+    odin3_ast_id at;
     uint32_t first_port;
     uint32_t last_port;
     uint32_t n_ports;
@@ -494,8 +498,10 @@ typedef struct odin3_elab1_bbport {
 } odin3_elab1_bbport;
 
 /*
- * EL-10: inst's connections resolved into odin3_elab1.conns (see odin3_elab1_conn). For a
- * module or a `(* blackbox *)` definition, ordered connections map to positions (a connection with
+ * EL-10: inst's connections resolved into odin3_elab1.conns (see odin3_elab1_conn): one per port
+ * in port order for a module, a `(* blackbox *)` definition or an implicit black box (the union of
+ * its ports, EL-4 v4.8), as written for a cell type or a gate. For a module or a `(* blackbox *)`
+ * definition, ordered connections map to positions (a connection with
  * an expression to an empty header position warns "connection N of instance 'u' goes to an unnamed
  * port position and is ignored", once) and named ones to ports by name; a cell type's ports are
  * its type's. Errors (§9.1): "instance 'u' mixes ordered and named connections" (at the INSTANCE),
@@ -513,7 +519,8 @@ odin3_status odin3_elab1_connect(odin3_elab1 *e1, const odin3_elab_inst *inst);
  * right, Yosys's names u[left] … u[right]) and each connection of odin3_elab1.conns (resolved
  * first) planned: of width W against a port of P bits (gates: P = 1) and N elements, W = P goes
  * whole to every element, W = N × P is sliced (the element at index i gets bits
- * [|i − right| × P +: P], the right element the low bits, as Yosys and IEEE), anything else is
+ * [(i − min(left, right)) × P +: P]: the lowest index the low bits whatever the range's
+ * direction, EL-10, as Yosys 0.55 normalizes the range), anything else is
  * "connection of 'p' to instance array 'u' is W bits; expected P or N×P" ("connection K of
  * instance array 'g'" for a gate terminal) at the CONNECTION. Widths are self-determined, typed
  * over pass E's environment. ODIN3_OK; ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY.
@@ -538,29 +545,66 @@ odin3_status odin3_elab1_inst_array(odin3_elab1 *e1, const odin3_elab_inst *inst
 odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst *inst);
 
 /*
- * EL-11 for a `(* blackbox *)` definition's specialization spec (agent default: the brief names a
- * definition; the ports are per specialization): the info line "body of black box 'm' is
- * ignored" once per definition when its body holds anything but port and parameter
+ * EL-11 for a `(* blackbox *)` definition's specialization spec (elab1_bbox.c; agent default: the
+ * brief names a definition; the ports are per specialization): the info line "body of black box
+ * 'm' is ignored" once per definition when its body holds anything but port and parameter
  * declarations, and the specialization's ports, evaluated with its parameter values (errors
- * reported), recorded in the black-box table. ODIN3_OK; ODIN3_ERR_PARSE after a diagnostic;
- * ODIN3_ERR_NO_MEMORY.
+ * reported), recorded in the black-box table and, without errors so far, written as its
+ * ports-only black-box MODULE (EL-4, v4.8) on the store's pending stack. ODIN3_OK;
+ * ODIN3_ERR_PARSE after a diagnostic; ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec);
 
 /*
- * EL-11 --auto-blackbox: inst of an implicit black box adds its named connections' ports to the
- * black box (the union of the names used, all inout, in first-use order); the first connection
- * with an expression fixes a port's width, and a later one of another width is "implicit black
- * box 'm': port 'a' is P bits at its first instance; this connection is W bits" (an array
+ * After every specialization (EL-4 v4.8): each implicit black box, in first-use order, written as
+ * its ports-only black-box MODULE (inout ports at their EL-11 widths, 1 bit when no connection
+ * gave one) on the store's pending stack; nothing after an error. ODIN3_OK; ODIN3_ERR_NO_MEMORY;
+ * ODIN3_ERR_PARSE after the elaborated-node cap's fatal error.
+ */
+odin3_status odin3_elab1_write_implicit(odin3_elab1 *e1);
+
+/*
+ * EL-11 --auto-blackbox: inst of an implicit black box (elab1_bbox.c). The black box's ports, made
+ * when its name is first met, are the union of the names every instantiation of the name in the
+ * sources connects (all inout, in source order; a black box's own body excluded); the first
+ * connection with an expression fixes a port's width, and a later one of another width is "implicit
+ * black box 'm': port 'a' is P bits at its first instance; this connection is W bits" (an array
  * element's slice counts). An ordered connection is "implicit black box 'm' needs named
  * connections" (at the INSTANCE). ODIN3_OK; ODIN3_ERR_PARSE; ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab1_auto_blackbox(odin3_elab1 *e1, const odin3_elab_inst *inst);
 
-/* The black-box table: its count, entry idx, and port idx (NULL past the count). */
-uint32_t odin3_elab1_bbox_count(const odin3_elab1 *e1);
+/* The black-box table (internal): entry idx and port idx (NULL past the count); the implicit black
+ * box named name + 1 (0: none); the port of box named name + 1 (0: none). */
 const odin3_elab1_bbox *odin3_elab1_bbox_at(const odin3_elab1 *e1, uint32_t idx);
 const odin3_elab1_bbport *odin3_elab1_bbport_at(const odin3_elab1 *e1, uint32_t idx);
+uint32_t odin3_elab1_implicit_box(const odin3_elab1 *e1, uint32_t name);
+uint32_t odin3_elab1_bbox_port(const odin3_elab1 *e1, uint32_t box, uint32_t name);
+
+/* Every port of specialization spec into ports (room for its definition's positions), evaluated
+ * in a fresh environment with its parameter values; quiet drops the diagnostics. The worst
+ * status (ODIN3_ERR_PARSE when a port failed). */
+odin3_status odin3_elab1_eval_ports(odin3_elab1 *e1, uint32_t spec, bool quiet,
+                                    odin3_elab1_port *ports);
+
+/*
+ * A NUMBER or STRING leaf of the elaborated store at from's {loc, end} (pass W's spellings, point
+ * (bb)): val's (a STRING; a NUMBER of sub base while unsized, else BIN, SIGNED per value), or, with
+ * val NULL, num in the 32-bit integer form (DEC, SIGNED, payload width 32). Scratch bits in arena.
+ * The elaborated-node cap is checked first (odin3_elab1_node_room). ODIN3_OK; ODIN3_ERR_PARSE
+ * after the cap's fatal error; ODIN3_ERR_NO_MEMORY.
+ */
+typedef struct odin3_elab1_leaf {
+    const odin3_cval *val;
+    uint8_t base;
+    int64_t num;
+    odin3_ast_id from;
+} odin3_elab1_leaf;
+odin3_status odin3_elab1_make_leaf(odin3_elab1 *e1, odin3_arena *arena,
+                                   const odin3_elab1_leaf *leaf, odin3_ast_id *out);
+
+/* The elaborated-node cap before a make (point (aa)): false after its fatal error at from. */
+bool odin3_elab1_node_room(odin3_elab1 *e1, odin3_ast_id from);
 
 /*
  * The ports of specialization spec (one per position of its definition), evaluated quietly once

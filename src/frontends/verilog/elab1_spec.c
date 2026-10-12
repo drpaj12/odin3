@@ -558,7 +558,7 @@ static odin3_status run_specs(odin3_elab1 *e1) {
             continue; /* a MODULE forced pending (point (l)'s hook) */
         }
         if (odin3_elab1_def(e1, def)->kind == ODIN3_DEF_BLACKBOX) {
-            odin3_status bb = odin3_elab1_blackbox(e1, i); /* no MODULE (EL-4, EL-11) */
+            odin3_status bb = odin3_elab1_blackbox(e1, i); /* a ports-only MODULE (EL-4 v4.8) */
             st = bb == ODIN3_ERR_PARSE || bb == ODIN3_OK ? e1->fatal : bb;
             continue;
         }
@@ -567,6 +567,13 @@ static odin3_status run_specs(odin3_elab1 *e1) {
         st = st != ODIN3_OK ? st : e1->fatal;
     }
     return st;
+}
+
+/* The implicit black boxes' MODULEs, after every specialization (EL-4 v4.8); the node cap's
+ * fatal error is counted, not returned. */
+static odin3_status implicit_modules(odin3_elab1 *e1) {
+    odin3_status st = odin3_elab1_write_implicit(e1);
+    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
 }
 
 /* The UNIT named after the top's specialization, its tail the MODULEs left above mark. */
@@ -593,6 +600,7 @@ odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def) {
         st = top_spec(e1, top_def);
     }
     st = st != ODIN3_OK ? st : run_specs(e1);
+    st = st != ODIN3_OK || e1->stopped ? st : implicit_modules(e1);
     st = st != ODIN3_OK || e1->stopped ? st : check_acyclic(e1);
     st = st != ODIN3_OK || e1->stopped ? st : odin3_elab1_not_elaborated(e1);
     bool clean = st == ODIN3_OK && e1->fatal == ODIN3_OK && e1->errors == 0 && !e1->stopped &&

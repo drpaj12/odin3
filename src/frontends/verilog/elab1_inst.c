@@ -41,7 +41,6 @@ enum {
 };
 
 static const uint32_t E1_NONE = UINT32_MAX;
-static const uint64_t E1_SPEC_KEY = (uint64_t)1 << 63;
 
 static const char *str_of(const odin3_elab1 *e1, uint32_t id) {
     return odin3_elab1_str(e1, id);
@@ -333,7 +332,8 @@ static odin3_status eval_port(odin3_elab1_env *env, uint32_t pos, odin3_elab1_po
     const odin3_elab_def *rec = odin3_elab1_def(e1, env->def);
     const odin3_elab1_defx *ext = odin3_vec_cat(&e1->defx, env->def);
     odin3_ast_id port = *(const odin3_ast_id *)odin3_vec_cat(&e1->ports, rec->first_port + pos);
-    *out = (odin3_elab1_port){.name = odin3_ast_name(e1->parsed, port), .dir = ext->port_dirs[pos]};
+    *out = (odin3_elab1_port){
+        .name = odin3_ast_name(e1->parsed, port), .dir = ext->port_dirs[pos], .decl = port};
     uint32_t idx = out->name != 0 ? odin3_elab1_env_find(env, 0, out->name) : E1_NONE;
     if (idx == E1_NONE || odin3_elab1_env_slot(env, idx)->entry.kind != ODIN3_ENTRY_SIGNAL) {
         return ODIN3_OK; /* an empty position, or a port Task 15 reports undeclared */
@@ -351,10 +351,8 @@ static odin3_status eval_port(odin3_elab1_env *env, uint32_t pos, odin3_elab1_po
     return ODIN3_OK;
 }
 
-/* Every port of specialization spec into ports (room for its positions), in a fresh environment
- * with its parameter values; quiet drops the diagnostics. The worst status. */
-static odin3_status eval_ports(odin3_elab1 *e1, uint32_t spec, bool quiet,
-                               odin3_elab1_port *ports) {
+odin3_status odin3_elab1_eval_ports(odin3_elab1 *e1, uint32_t spec, bool quiet,
+                                    odin3_elab1_port *ports) {
     uint32_t def = odin3_elab1_spec_at(e1, spec)->def;
     odin3_status st = index_def_ports(e1, def);
     odin3_elab1_env *env = NULL;
@@ -381,7 +379,8 @@ const odin3_elab1_port *odin3_elab1_spec_ports(odin3_elab1 *e1, uint32_t spec, u
         uint32_t count = odin3_elab1_def(e1, rec->def)->n_positions;
         odin3_elab1_port *ports =
             odin3_arena_alloc(e1->arena, (size_t)(count > 0 ? count : 1) * sizeof *ports);
-        odin3_status st = ports != NULL ? eval_ports(e1, spec, true, ports) : ODIN3_ERR_NO_MEMORY;
+        odin3_status st =
+            ports != NULL ? odin3_elab1_eval_ports(e1, spec, true, ports) : ODIN3_ERR_NO_MEMORY;
         if (st == ODIN3_ERR_NO_MEMORY || ports == NULL) {
             latch(e1, ODIN3_ERR_NO_MEMORY);
             return NULL;
@@ -393,118 +392,6 @@ const odin3_elab1_port *odin3_elab1_spec_ports(odin3_elab1 *e1, uint32_t spec, u
     }
     *n = rec->n_ports;
     return rec->ports;
-}
-
-/* --- the black-box table ------------------------------------------------------------------ */
-
-uint32_t odin3_elab1_bbox_count(const odin3_elab1 *e1) {
-    return (uint32_t)e1->bboxes.len;
-}
-
-const odin3_elab1_bbox *odin3_elab1_bbox_at(const odin3_elab1 *e1, uint32_t idx) {
-    return idx < e1->bboxes.len ? odin3_vec_cat(&e1->bboxes, idx) : NULL;
-}
-
-const odin3_elab1_bbport *odin3_elab1_bbport_at(const odin3_elab1 *e1, uint32_t idx) {
-    return idx < e1->bbports.len ? odin3_vec_cat(&e1->bbports, idx) : NULL;
-}
-
-/* The black box keyed key (an implicit name, or E1_SPEC_KEY | spec), created on first use. */
-static odin3_status bbox_get(odin3_elab1 *e1, uint64_t key, const odin3_elab1_bbox *proto,
-                             uint32_t *idx) {
-    uint64_t at = 0;
-    if (odin3_u64map_get(e1->bbox_names, key, &at)) {
-        *idx = (uint32_t)at - 1;
-        return ODIN3_OK;
-    }
-    odin3_elab1_bbox *slot = odin3_vec_push(&e1->bboxes);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = *proto;
-    *idx = (uint32_t)e1->bboxes.len - 1;
-    odin3_status st = odin3_u64map_put(e1->bbox_names, (odin3_kv){key, e1->bboxes.len});
-    if (st != ODIN3_OK) {
-        odin3_vec_pop(&e1->bboxes);
-    }
-    return st;
-}
-
-/* The port of black box bbox named name, index + 1 (0: none). */
-static uint32_t bbport_find(const odin3_elab1 *e1, uint32_t bbox, uint32_t name) {
-    uint64_t at = 0;
-    return odin3_u64map_get(e1->bbport_ix, (uint64_t)bbox << E1_KEY_SHIFT | name, &at)
-               ? (uint32_t)at
-               : 0;
-}
-
-/* A port appended to black box bbox (its chain kept in order). */
-static odin3_status bbport_add(odin3_elab1 *e1, uint32_t bbox, const odin3_elab1_port *port,
-                               odin3_ast_id at) {
-    odin3_elab1_bbport *slot = odin3_vec_push(&e1->bbports);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = (odin3_elab1_bbport){*port, at, 0};
-    uint32_t self = (uint32_t)e1->bbports.len;
-    odin3_status st =
-        port->name != 0
-            ? odin3_u64map_put(e1->bbport_ix,
-                               (odin3_kv){(uint64_t)bbox << E1_KEY_SHIFT | port->name, self})
-            : ODIN3_OK;
-    if (st != ODIN3_OK) {
-        odin3_vec_pop(&e1->bbports);
-        return st;
-    }
-    odin3_elab1_bbox *box = odin3_vec_at(&e1->bboxes, bbox);
-    if (box->last_port != 0) {
-        ((odin3_elab1_bbport *)odin3_vec_at(&e1->bbports, box->last_port - 1))->next = self;
-    } else {
-        box->first_port = self;
-    }
-    box->last_port = self;
-    box->n_ports++;
-    return ODIN3_OK;
-}
-
-/* Whether a `(* blackbox *)` definition has a body to ignore: an item other than a port or
- * parameter declaration. */
-static bool has_body(const odin3_elab1 *e1, odin3_ast_id module) {
-    odin3_ast_span kids = odin3_ast_children(e1->parsed, module);
-    for (uint32_t i = E1_ITEMS; i < kids.n; i++) {
-        odin3_ast_kind kind = odin3_ast_kind_of(e1->parsed, kids.ids[i]);
-        if (kind != ODIN3_AST_PORT_DECL && kind != ODIN3_AST_PARAM_DECL) {
-            return true;
-        }
-    }
-    return false;
-}
-
-odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec) {
-    const odin3_elab1_spec *rec = odin3_elab1_spec_at(e1, spec);
-    const odin3_elab_def *def = odin3_elab1_def(e1, rec->def);
-    odin3_elab1_defx *ext = odin3_vec_at(&e1->defx, rec->def);
-    if (!ext->body_noted) {
-        ext->body_noted = true;
-        if (has_body(e1, def->node)) {
-            odin3_elab1_info(e1, odin3_ast_loc(e1->parsed, def->node),
-                             "body of black box '%s' is ignored", str_of(e1, def->name));
-        }
-    }
-    uint32_t count = def->n_positions;
-    odin3_elab1_port *ports =
-        odin3_arena_alloc(e1->arena, (size_t)(count > 0 ? count : 1) * sizeof *ports);
-    odin3_status st = ports != NULL ? eval_ports(e1, spec, false, ports) : ODIN3_ERR_NO_MEMORY;
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    odin3_elab1_bbox proto = {.name = rec->name, .spec = spec};
-    uint32_t box = 0;
-    st = bbox_get(e1, E1_SPEC_KEY | spec, &proto, &box);
-    for (uint32_t k = 0; st == ODIN3_OK && k < count; k++) {
-        st = ports[k].name != 0 ? bbport_add(e1, box, &ports[k], def->node) : ODIN3_OK;
-    }
-    return st;
 }
 
 /* --- connections (EL-10) ------------------------------------------------------------------- */
@@ -876,18 +763,48 @@ static odin3_status by_position(e1_connect *cx) {
     return ODIN3_OK;
 }
 
-/* A gate's terminals or an implicit black box's connections, as written. */
-static odin3_status take_as_written(odin3_elab1 *e1, const odin3_elab_inst *inst) {
-    bool gate = odin3_ast_kind_of(e1->parsed, inst->instantiation) == ODIN3_AST_GATE_DECL;
+/* A gate's terminals, as written. */
+static odin3_status gate_terms(odin3_elab1 *e1, const odin3_elab_inst *inst) {
     odin3_ast_span conns = inst_conns(e1, inst->instance);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < conns.n; i++) {
-        odin3_elab1_conn rec = {.name = odin3_ast_name(e1->parsed, conns.ids[i]),
-                                .dir = gate ? (uint8_t)ODIN3_DIR_IN : (uint8_t)ODIN3_DIR_INOUT,
-                                .pos = gate ? i : E1_NONE,
+        odin3_elab1_conn rec = {.dir = ODIN3_DIR_IN,
+                                .pos = i,
                                 .conn = conns.ids[i],
                                 .expr = odin3_ast_child(e1->parsed, conns.ids[i], 0)};
         st = push_conn(e1, &rec);
+    }
+    return st;
+}
+
+/* An implicit black box's instance: one entry per port of the black box's union, in its port
+ * order (EL-4 v4.8), each with the instance's connection of that name (pass E checked them). */
+static odin3_status by_union(odin3_elab1 *e1, const odin3_elab_inst *inst) {
+    uint32_t box = odin3_elab1_implicit_box(e1, odin3_ast_name(e1->parsed, inst->instantiation));
+    if (box == 0) {
+        return ODIN3_ERR_CHECK; /* pass E made it: a 2D bug */
+    }
+    odin3_ast_span conns = inst_conns(e1, inst->instance);
+    uint64_t self = (uint64_t)inst->instance.v << E1_KEY_SHIFT;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < conns.n; i++) {
+        uint32_t name = odin3_ast_name(e1->parsed, conns.ids[i]);
+        st = odin3_u64map_put(e1->conn_seen, (odin3_kv){self | name, conns.ids[i].v});
+    }
+    uint32_t pos = 0;
+    for (uint32_t at = odin3_elab1_bbox_at(e1, box - 1)->first_port; st == ODIN3_OK && at != 0;
+         pos++) {
+        const odin3_elab1_bbport *port = odin3_elab1_bbport_at(e1, at - 1);
+        uint64_t conn = 0;
+        bool connected = odin3_u64map_get(e1->conn_seen, self | port->port.name, &conn);
+        odin3_elab1_conn rec = {.name = port->port.name, .dir = ODIN3_DIR_INOUT, .pos = pos};
+        rec.conn = (odin3_ast_id){connected ? (uint32_t)conn : 0};
+        rec.expr = connected ? odin3_ast_child(e1->parsed, rec.conn, 0) : (odin3_ast_id){0};
+        at = port->next;
+        st = push_conn(e1, &rec);
+    }
+    for (uint32_t i = 0; i < conns.n; i++) {
+        (void)odin3_u64map_remove(e1->conn_seen, self | odin3_ast_name(e1->parsed, conns.ids[i]));
     }
     return st;
 }
@@ -911,9 +828,11 @@ static odin3_status target_of(odin3_elab1 *e1, const odin3_elab_inst *inst, e1_t
 
 odin3_status odin3_elab1_connect(odin3_elab1 *e1, const odin3_elab_inst *inst) {
     odin3_vec_clear(&e1->conns);
-    if (odin3_ast_kind_of(e1->parsed, inst->instantiation) == ODIN3_AST_GATE_DECL ||
-        inst->target.kind == ODIN3_RES_IMPLICIT_BLACKBOX) {
-        return take_as_written(e1, inst);
+    if (odin3_ast_kind_of(e1->parsed, inst->instantiation) == ODIN3_AST_GATE_DECL) {
+        return gate_terms(e1, inst);
+    }
+    if (inst->target.kind == ODIN3_RES_IMPLICIT_BLACKBOX) {
+        return by_union(e1, inst);
     }
     e1_target tg = {.kind_text = "module", .name = ""};
     odin3_status st = target_of(e1, inst, &tg);
@@ -934,9 +853,8 @@ odin3_status odin3_elab1_connect(odin3_elab1 *e1, const odin3_elab_inst *inst) {
     st = st != ODIN3_OK ? st : resolve_all(&cx, named);
     st = st != ODIN3_OK ? st : check_outputs(&cx);
     st = st == ODIN3_OK && cx.bad ? ODIN3_ERR_PARSE : st;
-    bool by_port =
-        tg.type == NULL && odin3_elab1_def(e1, inst->target.def)->kind == ODIN3_DEF_MODULE;
-    return st == ODIN3_OK && by_port ? by_position(&cx) : st;
+    /* a module's and a black box's connections by port (EL-4 v4.8), a cell type's as written */
+    return st == ODIN3_OK && tg.type == NULL ? by_position(&cx) : st;
 }
 
 /* --- instance arrays (I6, Q5) -------------------------------------------------------------- */
@@ -1019,11 +937,8 @@ static uint32_t port_width(odin3_elab1 *e1, const odin3_elab_inst *inst,
                    ? odin3_celltype_port_width(e1->design, inst->target.type, vals, rec->pos)
                    : 0;
     }
-    uint64_t box = 0;
-    if (!odin3_u64map_get(e1->bbox_names, odin3_ast_name(e1->parsed, inst->instantiation), &box)) {
-        return 0;
-    }
-    uint32_t at = bbport_find(e1, (uint32_t)box - 1, rec->name);
+    uint32_t box = odin3_elab1_implicit_box(e1, odin3_ast_name(e1->parsed, inst->instantiation));
+    uint32_t at = box != 0 ? odin3_elab1_bbox_port(e1, box - 1, rec->name) : 0;
     return at != 0 ? ((const odin3_elab1_bbport *)odin3_vec_cat(&e1->bbports, at - 1))->port.width
                    : 0;
 }
@@ -1200,90 +1115,4 @@ odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst 
     }
     *rec = (odin3_elab1_given){inst->target, first, (uint32_t)e1->gparams.len - first};
     return worst;
-}
-
-/* --- implicit black boxes (--auto-blackbox) ------------------------------------------------- */
-
-/* One named connection of an implicit black-box instance: its port added (first use) or its
- * width checked against the first (an array element's slice counts). */
-static odin3_status auto_port(e1_connect *cx, uint32_t box, odin3_ast_id conn) {
-    odin3_elab1 *e1 = cx->e1;
-    uint32_t name = odin3_ast_name(e1->parsed, conn);
-    uint32_t at = bbport_find(e1, box, name);
-    if (at == 0) {
-        odin3_elab1_port port = {.name = name, .dir = ODIN3_DIR_INOUT};
-        odin3_status st = bbport_add(e1, box, &port, conn);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-        at = (uint32_t)e1->bbports.len;
-    }
-    odin3_ast_id expr = odin3_ast_child(e1->parsed, conn, 0);
-    uint32_t width = 0;
-    odin3_status st = expr.v != 0 ? odin3_elab1_expr_width(e1, expr, &width) : ODIN3_OK;
-    odin3_elab1_bbport *rec = odin3_vec_at(&e1->bbports, at - 1);
-    if (st != ODIN3_OK || expr.v == 0) {
-        return st;
-    }
-    uint32_t want = rec->port.width;
-    if (want == 0) {
-        rec->port.width = width;
-        rec->port.msb = (int64_t)width - 1;
-        rec->port.scalar = width == 1;
-        return ODIN3_OK;
-    }
-    if (width == want || width == (uint64_t)e1->array.n * want) {
-        return ODIN3_OK;
-    }
-    odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, conn),
-                      "implicit black box '%s': port '%s' is %" PRIu32
-                      " bits at its first instance; this connection is %" PRIu32 " bits",
-                      odin3_ast_name_str(e1->parsed, cx->inst->instantiation), str_of(e1, name),
-                      want, width);
-    cx->bad = true;
-    return ODIN3_OK;
-}
-
-/* An implicit black box's instance needs named connections, each port once. */
-static odin3_status auto_named(e1_connect *cx) {
-    odin3_elab1 *e1 = cx->e1;
-    odin3_ast_span conns = inst_conns(e1, cx->inst->instance);
-    for (uint32_t i = 0; i < conns.n; i++) {
-        if (odin3_ast_name(e1->parsed, conns.ids[i]) == 0) {
-            odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, cx->inst->instance),
-                              "implicit black box '%s' needs named connections",
-                              odin3_ast_name_str(e1->parsed, cx->inst->instantiation));
-            return ODIN3_ERR_PARSE;
-        }
-    }
-    return ODIN3_OK;
-}
-
-odin3_status odin3_elab1_auto_blackbox(odin3_elab1 *e1, const odin3_elab_inst *inst) {
-    e1_target tg = {.kind_text = "module", .name = ""};
-    e1_connect cx = {e1, inst, &tg, false};
-    odin3_status st = auto_named(&cx);
-    st = st != ODIN3_OK ? st : odin3_elab1_fold_array(e1, inst->instance, &e1->array);
-    uint32_t name = odin3_ast_name(e1->parsed, inst->instantiation);
-    odin3_elab1_bbox proto = {.name = name, .spec = E1_NONE, .implicit = true};
-    uint32_t box = 0;
-    st = st != ODIN3_OK ? st : bbox_get(e1, name, &proto, &box);
-    odin3_ast_span conns = inst_conns(e1, inst->instance);
-    for (uint32_t i = 0; st == ODIN3_OK && i < conns.n; i++) {
-        uint32_t port = odin3_ast_name(e1->parsed, conns.ids[i]);
-        if (odin3_u64map_get(e1->conn_seen, seen_key(&cx, port), NULL)) {
-            odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, conns.ids[i]),
-                              "port '%s' of instance '%s' is connected twice", str_of(e1, port),
-                              inst_name(e1, inst));
-            cx.bad = true;
-            continue;
-        }
-        st = odin3_u64map_put(e1->conn_seen, (odin3_kv){seen_key(&cx, port), 1});
-        st = st != ODIN3_OK ? st : auto_port(&cx, box, conns.ids[i]);
-    }
-    for (uint32_t i = 0; i < conns.n; i++) {
-        (void)odin3_u64map_remove(e1->conn_seen,
-                                  seen_key(&cx, odin3_ast_name(e1->parsed, conns.ids[i])));
-    }
-    return st == ODIN3_OK && cx.bad ? ODIN3_ERR_PARSE : st;
 }

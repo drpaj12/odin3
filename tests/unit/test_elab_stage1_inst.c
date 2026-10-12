@@ -91,17 +91,6 @@ static void expect_only_error(const char *line) {
     TEST_ASSERT_NULL(rs.elab);
 }
 
-/* Stage 1 again over rs.parsed through elab1.h, the context kept for its tables. */
-static odin3_elab1 *run_context(void) {
-    odin3_elab1 *e1 = NULL;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_create(&rs.ctx, rs.parsed, &rs.opts, &e1));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_collect_defs(e1));
-    uint32_t top = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_select_top(e1, &top));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_elab1_run_queue(e1, top));
-    return e1;
-}
-
 /* --- reading the elaborated store ---------------------------------------------------------- */
 
 static const char *name_of(odin3_ast_id node) {
@@ -228,6 +217,42 @@ static int64_t param_value(const char *param) {
     }
     TEST_FAIL_MESSAGE(param);
     return 0;
+}
+
+/* The black-box MODULE named name (EL-4 v4.8): the `blackbox` ATTR without a value, n_ports ports,
+ * no items. */
+static odin3_ast_id expect_blackbox(const char *name, uint32_t n_ports) {
+    odin3_ast_id module = find(ODIN3_AST_MODULE, name);
+    TEST_ASSERT_NOT_EQUAL_UINT32_MESSAGE(0, module.v, name);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, module));
+    odin3_ast_span attrs = odin3_ast_attrs(rs.elab, module);
+    TEST_ASSERT_EQUAL_UINT32(1, attrs.n);
+    TEST_ASSERT_EQUAL_STRING("blackbox", name_of(attrs.ids[0]));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, attrs.ids[0], 0).v);
+    TEST_ASSERT_EQUAL_UINT32(n_ports,
+                             odin3_ast_nchild(rs.elab, odin3_ast_child(rs.elab, module, 1)));
+    return module;
+}
+
+/* Port pos of module as "name dir [msb:lsb]" (no range when scalar); a wire, IN_HEADER. */
+static void expect_port(odin3_ast_id module, uint32_t pos, const char *want) {
+    odin3_ast_id port = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, module, 1), pos);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_PORT_DECL, odin3_ast_kind_of(rs.elab, port));
+    uint16_t flags = odin3_ast_flags(rs.elab, port);
+    TEST_ASSERT_TRUE((flags & ODIN3_AST_F_PORT_DECL_IN_HEADER) != 0);
+    TEST_ASSERT_EQUAL_UINT32(1U + ODIN3_AST_NET_DECL_WIRE,
+                             (flags & ODIN3_AST_F_PORT_DECL_NET_MASK) >>
+                                 ODIN3_AST_F_PORT_DECL_NET_SHIFT);
+    char text[TEXT_BUF];
+    odin3_ast_id range = odin3_ast_child(rs.elab, port, 0);
+    const char *decl = name_of(odin3_ast_child(rs.elab, port, 1));
+    const char *dir = odin3_ast_sub_name(rs.elab, port);
+    int got = range.v == 0 ? snprintf(text, sizeof text, "%s %s", decl, dir)
+                           : snprintf(text, sizeof text, "%s %s [%lld:%lld]", decl, dir,
+                                      (long long)number_int(odin3_ast_child(rs.elab, range, 0)),
+                                      (long long)number_int(odin3_ast_child(rs.elab, range, 1)));
+    TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof text);
+    TEST_ASSERT_EQUAL_STRING(want, text);
 }
 
 /* --- connections (EL-10) ------------------------------------------------------------------- */
@@ -377,10 +402,14 @@ static void test_gate_array(void) {
 
 /* An ascending array gives its right element the low bits (Yosys, IEEE): u[0] the high ones. */
 static void test_ascending_array(void) {
-    run_clean(M2 "module top;\n  wire [0:3] bus; wire [1:0] q2;\n"
-                 "  m2 u[0:1] (.d(bus), .q(q2));\nendmodule\n");
-    expect_conn(instance("u[0]"), 0, "d", "bus[0:1]");
-    expect_conn(instance("u[1]"), 0, "d", "bus[2:3]");
+    run_clean(M2 "module top;\n  wire [0:3] bus; wire [7:0] bus8; wire [1:0] q2;\n"
+                 "  m2 u[0:1] (.d(bus), .q(q2));\n  m2 ub[0:3] (.d(bus8), .q(q2));\nendmodule\n");
+    expect_conn(instance("u[0]"), 0, "d", "bus[2:3]"); /* the lowest index the low bits */
+    expect_conn(instance("u[1]"), 0, "d", "bus[0:1]");
+    expect_conn(instance("ub[0]"), 0, "d", "bus8[1:0]");
+    expect_conn(instance("ub[3]"), 0, "d", "bus8[7:6]");
+    odin3_ast_id holder = find(ODIN3_AST_INSTANTIATION, "m2");
+    TEST_ASSERT_EQUAL_STRING("u[0]", name_of(odin3_ast_child(rs.elab, holder, 1))); /* left first */
 }
 
 /* Slices of a part select, a concatenation, a constant, and (a SELECT of its own value, bit 0 its
@@ -423,6 +452,18 @@ static void test_output_constant(void) {
         "t.v:4:16: error: output port 'q' of instance 'u' is connected to a constant");
 }
 
+/* I3 on an inout, and a variable-index select is no net lvalue (review m3). */
+static void test_output_inout_and_index(void) {
+    run_one("module mi (inout [3:0] p);\nendmodule\nmodule top;\n  mi u (.p(4'd3));\n"
+            "endmodule\n");
+    expect_only_error("t.v:4:9: error: inout port 'p' of instance 'u' is connected to a constant");
+    et_free(&rs);
+    run_one(M_OUT "module top; wire a; wire [7:0] w; wire [2:0] i;\n  mo u (.a(a), .q(w[i]));\n"
+                  "endmodule\n");
+    expect_only_error(
+        "t.v:4:16: error: output port 'q' of instance 'u' must be connected to a net");
+}
+
 /* Nets, constant selects and their concatenations are net lvalues. */
 static void test_output_lvalues(void) {
     run_clean(M_OUT "module top; wire a; wire [7:0] w; wire [1:0] p;\n"
@@ -437,10 +478,14 @@ static void test_blackbox_module(void) {
             "module top; wire [3:0] x; wire z;\n  bb u (.y(z), .a(x));\nendmodule\n");
     expect_clean();
     et_expect(&rs, ODIN3_LOG_INFO, "t.v:1:16: info: body of black box 'bb' is ignored");
-    TEST_ASSERT_EQUAL_STRING("top", module_names());
+    TEST_ASSERT_EQUAL_STRING("top,bb", module_names());
+    odin3_ast_id module = expect_blackbox("bb", 2);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, module, 0).v); /* no parameters */
+    expect_port(module, 0, "a input [3:0]");
+    expect_port(module, 1, "y output");
     odin3_ast_id inst = instance("u");
-    expect_conn(inst, 0, "y", "z"); /* as written */
-    expect_conn(inst, 1, "a", "x");
+    expect_conn(inst, 0, "a", "x"); /* by port, in port order (EL-4 v4.8) */
+    expect_conn(inst, 1, "y", "z");
 }
 
 static void test_blackbox_specializations(void) {
@@ -451,19 +496,20 @@ static void test_blackbox_specializations(void) {
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_INFO, "black box"));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=2").v);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, find(ODIN3_AST_INSTANTIATION, "pb$W=3").v);
-    TEST_ASSERT_EQUAL_STRING("top", module_names());
-    odin3_elab1 *e1 = run_context();
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_elab1_bbox_count(e1));
+    TEST_ASSERT_EQUAL_STRING("top,pb$W=2,pb$W=3", module_names());
+    static const char *const ports[] = {"a input [1:0]", "a input [2:0]"};
     for (uint32_t i = 0; i < 2; i++) {
-        const odin3_elab1_bbox *box = odin3_elab1_bbox_at(e1, i);
-        TEST_ASSERT_EQUAL_STRING(i == 0 ? "pb$W=2" : "pb$W=3", odin3_elab1_str(e1, box->name));
-        TEST_ASSERT_EQUAL_UINT32(1, box->n_ports);
-        const odin3_elab1_bbport *port = odin3_elab1_bbport_at(e1, box->first_port - 1);
-        TEST_ASSERT_EQUAL_STRING("a", odin3_elab1_str(e1, port->port.name));
-        TEST_ASSERT_EQUAL_UINT32(i + 2, port->port.width);
-        TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port->port.dir);
+        odin3_ast_id module = expect_blackbox(i == 0 ? "pb$W=2" : "pb$W=3", 1);
+        expect_port(module, 0, ports[i]);
+        odin3_ast_id params = odin3_ast_child(rs.elab, module, 0);
+        TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_nchild(rs.elab, params));
+        odin3_ast_id decl = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, params, 0), 1);
+        TEST_ASSERT_EQUAL_STRING("W", name_of(decl));
+        TEST_ASSERT_EQUAL_INT64(i + 2, number_int(odin3_ast_child(rs.elab, decl, 0)));
     }
-    odin3_elab1_destroy(e1);
+    odin3_ast_id holder = find(ODIN3_AST_INSTANTIATION, "pb$W=3");
+    odin3_ast_id value = odin3_ast_child(rs.elab, odin3_ast_child(rs.elab, holder, 0), 0);
+    TEST_ASSERT_EQUAL_STRING("W", name_of(value)); /* the final values, as for a module */
 }
 
 /* --- cell types (EL-8's cell-type targets, EL-11) ------------------------------------------ */
@@ -504,6 +550,17 @@ static void test_celltype_not_integer(void) {
                       "'single_port_ram' is not an integer");
 }
 
+/* The params LIST is in the type's parameter order whatever the source's (review m3). */
+static void test_celltype_param_order(void) {
+    run_req(RAM_TOP("#(.DATA_WIDTH(8), .ADDR_WIDTH(4))", ""), NULL, TECHLIB);
+    expect_clean();
+    odin3_ast_id list =
+        odin3_ast_child(rs.elab, find(ODIN3_AST_INSTANTIATION, "single_port_ram"), 0);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_ast_nchild(rs.elab, list));
+    TEST_ASSERT_EQUAL_STRING("ADDR_WIDTH", name_of(odin3_ast_child(rs.elab, list, 0)));
+    TEST_ASSERT_EQUAL_STRING("DATA_WIDTH", name_of(odin3_ast_child(rs.elab, list, 1)));
+}
+
 /* Ordered values map to the type's parameters in declaration order, and are written named. */
 static void test_celltype_ordered(void) {
     run_req(RAM_TOP("#(9, 4)", ""), NULL, TECHLIB);
@@ -541,23 +598,33 @@ static void test_implicit_union(void) {
             "  foo u2 (.a(x2), .c(z));\nendmodule\n",
             &k_auto, NULL);
     expect_clean();
-    odin3_elab1 *e1 = run_context();
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_elab1_bbox_count(e1));
-    const odin3_elab1_bbox *box = odin3_elab1_bbox_at(e1, 0);
-    TEST_ASSERT_TRUE(box->implicit);
-    TEST_ASSERT_EQUAL_STRING("foo", odin3_elab1_str(e1, box->name));
-    TEST_ASSERT_EQUAL_UINT32(3, box->n_ports);
-    static const char *const names[] = {"a", "b", "c"};
-    uint32_t at = box->first_port;
-    for (uint32_t i = 0; i < 3; i++) {
-        const odin3_elab1_bbport *port = odin3_elab1_bbport_at(e1, at - 1);
-        TEST_ASSERT_EQUAL_STRING(names[i], odin3_elab1_str(e1, port->port.name));
-        TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, port->port.dir);
-        TEST_ASSERT_EQUAL_UINT32(1, port->port.width);
-        at = port->next;
-    }
-    TEST_ASSERT_EQUAL_UINT32(0, at);
-    odin3_elab1_destroy(e1);
+    TEST_ASSERT_EQUAL_STRING("top,foo", module_names());
+    odin3_ast_id module = expect_blackbox("foo", 3);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, module, 0).v);
+    expect_port(module, 0, "a inout");
+    expect_port(module, 1, "b inout");
+    expect_port(module, 2, "c inout");
+    odin3_ast_id one = instance("u1");
+    expect_conn(one, 0, "a", "x"); /* one per port of the union, in its order */
+    expect_conn(one, 1, "b", "y");
+    expect_conn(one, 2, "c", "");
+    expect_conn(instance("u2"), 1, "b", "");
+    expect_conn(instance("u2"), 2, "c", "z");
+}
+
+/* An implicit black box's port takes its first connection's width; a port no connection gives
+ * a width to is 1 bit; the union covers instances in other modules too. */
+static void test_implicit_widths(void) {
+    run_req("module sub; wire [5:0] s;\n  foo f (.d(s));\nendmodule\n"
+            "module top; wire [3:0] x;\n  foo u (.a(x), .e());\n  sub v ();\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    TEST_ASSERT_EQUAL_STRING("top,sub,foo", module_names());
+    odin3_ast_id module = expect_blackbox("foo", 3);
+    expect_port(module, 0, "d inout [5:0]"); /* the union in source order */
+    expect_port(module, 1, "a inout [3:0]");
+    expect_port(module, 2, "e inout");
+    expect_conn(instance("u"), 0, "d", "");
 }
 
 static void test_implicit_needs_named(void) {
@@ -683,6 +750,7 @@ int main(void) {
     RUN_TEST(test_array_slice_forms);
     RUN_TEST(test_output_not_a_net);
     RUN_TEST(test_output_constant);
+    RUN_TEST(test_output_inout_and_index);
     RUN_TEST(test_output_lvalues);
     RUN_TEST(test_blackbox_module);
     RUN_TEST(test_blackbox_specializations);
@@ -691,10 +759,12 @@ int main(void) {
     RUN_TEST(test_celltype_defparam);
     RUN_TEST(test_celltype_project_wins);
     RUN_TEST(test_celltype_not_integer);
+    RUN_TEST(test_celltype_param_order);
     RUN_TEST(test_celltype_ordered);
     RUN_TEST(test_celltype_errors);
     RUN_TEST(test_celltype_array);
     RUN_TEST(test_implicit_union);
+    RUN_TEST(test_implicit_widths);
     RUN_TEST(test_implicit_needs_named);
     RUN_TEST(test_implicit_width_mismatch);
     RUN_TEST(test_instance_cap);
