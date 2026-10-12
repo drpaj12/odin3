@@ -210,6 +210,9 @@ add_library(odin3_core OBJECT
     src/frontends/elab/elab_pending.c
     src/frontends/elab/elab2.c
     src/frontends/elab/elab2_wires.c
+    src/frontends/elab/elab2_expr.c
+    src/frontends/elab/elab2_select.c
+    src/frontends/elab/elab2_assign.c
     src/ir/cells/builtin.c
     src/ir/cells/port.c
     src/ir/cells/const.c
@@ -861,6 +864,13 @@ if(BUILD_TESTING)
     target_include_directories(test_elab_stage2_wires PRIVATE ${_gen})
     add_dependencies(test_elab_stage2_wires verilog_generated)
     target_compile_definitions(test_elab_stage2_wires PRIVATE
+        ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
+    # 2D Task 18: expressions and selects to word cells, continuous and net declaration
+    # assignments (EL-28, EL-30, EL-31, EL-32 reads).
+    odin3_add_unit_test(test_elab_stage2_expr)
+    target_include_directories(test_elab_stage2_expr PRIVATE ${_gen})
+    add_dependencies(test_elab_stage2_expr verilog_generated)
+    target_compile_definitions(test_elab_stage2_expr PRIVATE
         ODIN3_ELAB_TMP="${PROJECT_BINARY_DIR}/elab_tmp")
     # 2D Task 13: the binder and the EL-4 store-shape rows (hand-built elaborated stores).
     odin3_add_unit_test(test_elab_bind)

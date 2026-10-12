@@ -5,7 +5,9 @@
  *
  * Each task that lands a kind deletes its line in the same commit; the comments name the task
  * point (l) stages it in. Task 16 emptied the stage-1 tables; Task 17 removed stage 2's store,
- * scope, declaration and port kinds; Task 24 asserts the rest of stage 2's table is empty.
+ * scope, declaration and port kinds; Task 18 its expression and continuous-assignment kinds (and
+ * added the driver check as a feature Task 19 removes); Task 24 asserts the rest of stage 2's
+ * table is empty.
  */
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
@@ -24,21 +26,10 @@ static const bool k_pending[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END] = {
     [ODIN3_ELAB_STAGE2] =
         {
             /* Task 17 landed the store, scopes, declarations and ports: nothing is left of it. */
-            /* Task 18: continuous assignments and expressions. */
-            [ODIN3_AST_CONT_ASSIGN] = true,
-            [ODIN3_AST_NET_ASSIGN] = true,
-            [ODIN3_AST_NUMBER] = true,
-            [ODIN3_AST_STRING] = true,
-            [ODIN3_AST_IDENT] = true,
-            [ODIN3_AST_HIER_NAME] = true,
-            [ODIN3_AST_SELECT] = true,
-            [ODIN3_AST_CONCAT] = true,
-            [ODIN3_AST_REPLICATE] = true,
-            [ODIN3_AST_UNARY] = true,
-            [ODIN3_AST_BINARY] = true,
-            [ODIN3_AST_TERNARY] = true,
-            [ODIN3_AST_CALL] = true,
+            /* Task 18 landed continuous assignments and expressions (memory reads and user calls
+             * inside them report their own lines; Tasks 20 and 23). */
             /* Task 19: instances, gates, drivers. */
+            [ODIN3_PEND_DRIVERS] = true,
             [ODIN3_AST_INSTANTIATION] = true,
             [ODIN3_AST_INSTANCE] = true,
             [ODIN3_AST_CONNECTION] = true,
@@ -91,6 +82,7 @@ static const char *const k_feature_names[ODIN3_PEND_END - ODIN3_AST_KIND_COUNT] 
     "continuous-context call",
     "variable index into a register array",
     "memory write",
+    "two-driver check",
 };
 
 static bool g_forced[ODIN3_ELAB_STAGES + 1][ODIN3_PEND_END];

@@ -205,6 +205,15 @@ a module whose scan found an error skips passes E and W, so its children are not
 `not instantiated under the top` is not logged once an error was. (5) §17 #35's columns are
 corrected, #37 and #38 are new, and the changelog is in order.
 
+v4.16 (2026-10-12; 2D Task 18, agent defaults). (1) EL-30: a ternary's `$mux` is as wide as its
+branches as generated (an identifier at its own width) and the result is then extended to the
+context, as Yosys's `genrtlil.cc` does (verified on 0.55: `assign y32 = c ? a : b;` is a `$mux` of
+`WIDTH` 8 and 24 zero bits); the comparison row says operands are typed at their common width
+(an identifier is still generated at its own width: `a < t` is `$lt` with `A_WIDTH` 8, `B_WIDTH` 4,
+verified). (2) EL-32: the text of an out-of-range bit select, an x or z constant index (§17 #40)
+and the generate-block name read as a value (§17 #39). (3) EL-28: until Task 19's driver table
+lands, an lhs net that has a driver already is the pending line `two-driver check`.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1280,11 +1289,11 @@ signed only if it is signed and its context is signed), so the cell extends its 
 | `~a`, `-a`, `+a` | operand extended to the final width by wiring first, then `$not`, `$neg`†; `+a` is the extended operand (no cell) |
 | `&a ~&a \|a ~\|a ^a ~^a` | `$reduce_and`, `$reduce_and` (1 bit) + `$logic_not`†, `$reduce_or`, `$reduce_or` (1 bit) + `$logic_not`†, `$reduce_xor`, `$reduce_xnor`†; `Y_WIDTH` = max(final, 1), operand self-determined (`~&`/`~\|` as Yosys's parser builds them, `verilog_parser.y` `OP_NAND`/`OP_NOR`: the reduction's `Y_WIDTH` is 1, the `$logic_not`'s is max(final, 1); v4) |
 | `!a`, `a && b`, `a \|\| b` | `$logic_not`†, `$logic_and`†, `$logic_or`†; operands self-determined; `Y_WIDTH` = max(final, 1) |
-| `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands generated at their common width and sign (EL-13), `Y_WIDTH` = max(final, 1) |
+| `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands typed at their common width and sign (EL-13) and generated as any operand is (an identifier at its own width, an unsized constant at the common width), `Y_WIDTH` = max(final, 1) |
 | `a === b`, `a !== b` (E9) | both sides constant: folded exactly (4-state `===`); one side a constant with x/z bits (after both are brought to their common width and sign, EL-13): a **wildcard compare**, as in Parmys — `$eq`/`$ne` over only the bit positions where the constant is 0 or 1 (the other operand's bits at those positions, selected by wiring), so an x/z bit matches any value; no 0/1 position left → constant 1 (`===`) or 0 (`!==`); warning "'===' compares against x/z bits; they match any value". Verified on 0.55 through the Parmys script: `a !== 4'b1x00` becomes `~a[3] \| a[1] \| a[0]`, the x bit dropped. Neither side has x/z: `$eq`/`$ne` with "'===' is treated as '==' (synthesis has no x or z)" |
 | `a << b`, `a <<< b`, `a >> b`, `a >>> b` | `$shl` (both left shifts: `$sshl` ≡ `$shl` in simlib), `$shr`, `$sshr`; `A` at the context width and sign, `B` self-determined unsigned (`B_SIGNED` 0) |
 | `a ** b` | `$shl(1, b)` when `a` is the constant 2 and `b` is unsigned (Yosys's rewrite), else `$pow`†; `B_SIGNED` = `b`'s own sign |
-| `c ? a : b` | `c` constant and fully 0/1: the chosen branch only (Yosys); else `$mux(A = b, B = a, S = c')` with `WIDTH` = final width, where `c'` = `c` if 1 bit else `$reduce_bool`†(`c`) |
+| `c ? a : b` | `c` constant and fully 0/1: the chosen branch only (Yosys), extended to the context; else `$mux(A = b, B = a, S = c')` with `WIDTH` = the wider branch as generated (the narrower is extended to it by wiring, by the ternary's sign), the result then extended to the context (v4.16; Yosys), where `c'` = `c` if 1 bit else `$reduce_bool`†(`c`). All three constant: folded (IEEE Table 5-21 for an x condition) |
 | `{a, b}`, `{n{a}}` | wiring (no cell); result zero-extended to context |
 | `$signed(a)`, `$unsigned(a)` | the operand's bits, with the new sign |
 | identifiers, selects | EL-32 |
@@ -1333,7 +1342,8 @@ lowering for `$pow` and `$shiftx` — stays in Appendix A for reference (§20 it
   indices (descending or ascending by the wire's range, EL-23). A part select written in the
   opposite direction of the declaration (`x[0:3]` of `[7:0]`) is "part-select [0:3] of 'x' is
   reversed relative to its declaration [7:0]". Bits outside the range read x with Yosys's warning
-  ("range select [9:6] of 'x' is out of bounds; bits outside [7:0] are x").
+  ("range select [9:6] of 'x' is out of bounds; bits outside [7:0] are x"; one bit: "bit select [9] of 'x' is out of
+  bounds; the bit is x"). A constant index with an x or z bit reads x, silently (§17 #40).
 - **Non-constant reads** (E15, E16): `$shiftx` with `A` = the whole wire, `Y_WIDTH` = the select
   width, `B` = the index (for `-:`: base − width + 1) offset to a bit position: minus the wire's
   low index when it is not 0 (a `$sub`, signed), and for an ascending range `(width − w) − pos`
@@ -2477,6 +2487,8 @@ and reported, never relaxed (2A's rule).
 | 36 | stage 1's REJECT scan covers every parsed node of a reached module, including generate branches no condition selects; its statement-level rules (T12, K12, F2) read the enclosing construct | a construct is rejected only when the elaborator reaches it | — | one scan per definition gives deterministic, source-ordered errors and the same text for every specialization (Task 16) Because of it a module whose scan found an error skips passes E and W (§9.3, v4.15): its errors of those passes, and its children's REJECT rows, appear only after it is fixed |
 | 37 | a port declaration and the net or variable declaration merged into it that both carry a value (`module m(input a, output wire w = a); wire w = ~a;`, `output reg q = 1'b0; reg q = 1'b1;`) are the error "port 'w' has a value in both of its declarations" at the second declaration | accepted: two drivers of `w` (`connect \w \a` and `connect \w $not…`), or two init processes for `q` (verified on 0.55, the PR 2D-4 final review's fixes) | a net is declared once with at most one declaration assignment; a variable has one initial value | the declaration assignment of a port is one value in the port's `DECLARATOR` (EL-4, v4.15); a second would have to be dropped or resolved, and both readings are silent wrong answers |
 | 38 | a path into a named procedural block whose member does not exist (`blk.nope`) is the binder's error "'blk.nope' is not declared" | warning "Identifier `\blk.nope' is implicitly declared" and a new one-bit wire `blk.nope` (verified on 0.55, the PR 2D-4 final review's fixes) | an undeclared name is an error | Yosys treats the dotted path as one identifier and declares it implicitly (v4.15) |
+| 39 | a generate block's or named block's name read as a value (`assign o = gb;`) is the binder-bound error `'gb' is not a net, variable or parameter` | an implicit one-bit net `gb`, with the warning "Identifier `\gb' is implicitly declared" (verified on 0.55: `connect \o \gb`) | an undeclared name is an error | the symbol table cannot hold a net beside the block of one name; the case is a typo in practice (Task 18, Task 13's carry m1) |
+| 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
 
 ## 18. Implementation split (EL-51)
 
