@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# blif-vtr-check: the VPR-free BLIF checker (spec 3E §15.1). See blif_vtr_check.py.
+# Exit codes: 0 every file legal, 1 any violation, 2 usage, I/O or an unreadable models file.
+set -euo pipefail
+exec python3 -I "$(dirname "$0")/blif_vtr_check.py" "$@"

@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -102,6 +103,50 @@ class FixtureRoundTripTest(unittest.TestCase):
             self.assertEqual(0, renamed)
             self.assertEqual(w1, w2)
             self.assertEqual((None, "bytes"), vtr_fixtures.round_trip_verdict(w1, w2, renamed))
+
+
+CHECKER = helpers.REPO_ROOT / "tools" / "blif-vtr-check" / "blif-vtr-check"
+
+
+class StrictExceptionTest(unittest.TestCase):
+    """The checker step: --strict on every expected file, but STRICT_EXCEPTIONS without it, and
+    an exception that --strict no longer needs fails."""
+
+    def check(self, name: str, blif: Path) -> tuple[str | None, str]:
+        log = io.StringIO()
+        with contextlib.redirect_stdout(log):
+            why = vtr_fixtures.check_expected(CHECKER, name, blif)
+        return why, log.getvalue()
+
+    def test_shiftx_needs_its_exception(self) -> None:
+        blif = FIXTURES / "shiftx.parmys.vtr.blif"
+        why, log = self.check("shiftx.parmys", blif)
+        self.assertIsNone(why)
+        self.assertIn("note shiftx.parmys: blif-vtr-check without --strict (C-S2", log)
+        why, log = self.check("not_excepted", blif)
+        self.assertEqual("blif-vtr-check --strict exited 1", why)
+        self.assertIn("net 'unconn' feeds a .names/.latch pin", log)
+
+    @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (run CTest python_tools)")
+    def test_writer_log_pairs_shiftx(self) -> None:
+        # Task 11's oracle (spec §16.4): a W whose C-S2 lines pair with the writer's class-U
+        # warning passes --strict --writer-log; the plain --strict run still fails.
+        with tempfile.TemporaryDirectory(prefix="vtr-log.") as tmp:
+            w = Path(tmp) / "w.blif"
+            proc = vtr_fixtures.rewrite(Path(str(ODIN3)), FIXTURES / "shiftx.parmys.in.blif", w)
+            self.assertEqual(0, proc.returncode)
+            log = Path(tmp) / "w.log"
+            log.write_bytes(proc.stderr)
+            self.assertIn(b"net 'unconn' feeds 7 .names/.latch pins", proc.stderr)
+            self.assertEqual(1, vtr_fixtures.check_file(CHECKER, w, True).returncode)
+            paired = subprocess.run([str(CHECKER), "--strict", "--writer-log", str(log), str(w)],
+                                    capture_output=True, text=True, check=False, timeout=60)
+            self.assertEqual((0, ""), (paired.returncode, paired.stdout))
+
+    def test_stale_exception_fails(self) -> None:
+        why, _ = self.check("shiftx.parmys", FIXTURES / "two_clock.vtr.blif")
+        self.assertEqual("in STRICT_EXCEPTIONS but passes blif-vtr-check --strict "
+                         "(drop the exception)", why)
 
 
 if __name__ == "__main__":

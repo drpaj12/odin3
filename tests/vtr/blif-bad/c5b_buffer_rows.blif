@@ -1,0 +1,9 @@
+# vpr: Assertion 'truth_table.size() == 1' failed (One truth-table row)
+# C5b: a 1-input .names with two cover rows; absorb_buffer_luts asserts exactly one.
+.model top
+.inputs a
+.outputs y
+.names a y
+1 1
+1 1
+.end

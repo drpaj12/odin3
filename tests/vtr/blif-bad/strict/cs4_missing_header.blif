@@ -1,0 +1,7 @@
+# C-S4: no Odin III header line; VPR accepts the file.
+.model top
+.inputs a b
+.outputs y
+.names a b y
+11 1
+.end

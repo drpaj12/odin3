@@ -1,0 +1,64 @@
+{
+ "arch": "EArch.xml",
+ "arch_sha256": "096931c368d37b5224ea38ef4aff8cb3c1abf19068c57c022acb1b1e331f38cd",
+ "lut_size": 6,
+ "models": {
+  "adder": {
+   "clocks": [],
+   "inputs": {
+    "a": 1,
+    "b": 1,
+    "cin": 1
+   },
+   "outputs": {
+    "cout": 1,
+    "sumout": 1
+   }
+  },
+  "dual_port_ram": {
+   "clocks": [
+    "clk"
+   ],
+   "inputs": {
+    "addr1": 15,
+    "addr2": 15,
+    "clk": 1,
+    "data1": 1,
+    "data2": 1,
+    "we1": 1,
+    "we2": 1
+   },
+   "outputs": {
+    "out1": 1,
+    "out2": 1
+   }
+  },
+  "multiply": {
+   "clocks": [],
+   "inputs": {
+    "a": 36,
+    "b": 36
+   },
+   "outputs": {
+    "out": 72
+   }
+  },
+  "single_port_ram": {
+   "clocks": [
+    "clk"
+   ],
+   "inputs": {
+    "addr": 15,
+    "clk": 1,
+    "data": 1,
+    "we": 1
+   },
+   "outputs": {
+    "out": 1
+   }
+  }
+ },
+ "ram_addr_width": 15,
+ "schema": 1,
+ "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
+}

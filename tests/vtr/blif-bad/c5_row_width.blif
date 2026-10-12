@@ -1,0 +1,8 @@
+# vpr: Mismatched .names single-output cover row. names connected to 3 net(s), but cover row has 2 element(s)
+# C5: a cover row with one plane character for two inputs.
+.model top
+.inputs a b
+.outputs y
+.names a b y
+1 1
+.end

@@ -1,0 +1,7 @@
+# Odin III 0.0.0 write_blif --vtr (K=6, names short)
+# C-S1: latch init 3 (unknown); VPR accepts it, but VTR's ABC rejects it, so --vtr writes 2.
+.model top
+.inputs d clk
+.outputs q
+.latch d q re clk 3
+.end

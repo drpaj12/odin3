@@ -1,0 +1,13 @@
+# vpr: Port 'a[1]' on architecture model 'adder' exceeds port width (1 bits)
+# C7: a formal bit beyond the model port's width (R11: the largest num_pins over its pb_types).
+.model top
+.inputs a b c d
+.outputs y
+.subckt adder a=a a[1]=d b=b cin=c sumout=y
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

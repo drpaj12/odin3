@@ -1,0 +1,13 @@
+# vpr: Duplicate blocks named 'out:y' found in netlist.
+# C8: a .subckt named after its first output net 'out:y', which is also the output pad of y.
+.model top
+.inputs a b c
+.outputs y
+.subckt adder a=a b=b cin=c sumout=out:y
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end
