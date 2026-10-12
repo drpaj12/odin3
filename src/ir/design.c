@@ -75,10 +75,8 @@ static uint64_t module_bytes(const odin3_module *module) {
     bytes += vec_bytes(&module->aliases) + vec_bytes(&module->ports) +
              vec_bytes(&module->port_defs) + vec_bytes(&module->attrs) +
              vec_bytes(&module->dead_pin_names);
-    bytes += odin3_u64map_bytes(module->node_names) +
-             odin3_u64map_bytes(module->net_names) +
-             odin3_u64map_bytes(module->wire_names) +
-             odin3_u64map_bytes(module->attr_heads) +
+    bytes += odin3_u64map_bytes(module->node_names) + odin3_u64map_bytes(module->net_names) +
+             odin3_u64map_bytes(module->wire_names) + odin3_u64map_bytes(module->attr_heads) +
              odin3_u64map_bytes(module->dead_pins);
     return bytes;
 }
