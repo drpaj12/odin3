@@ -1,0 +1,53 @@
+{
+ "abc_script_sha256": null,
+ "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
+ "cost": {
+  "frontend_peak_rss_mib": 100,
+  "frontend_wall_s": 10.0,
+  "max_vpr_mem_mib": 300,
+  "vpr_time_s": 20.0,
+  "vpr_total_runtime_s": 18.0
+ },
+ "design": "LU32PEEng",
+ "elapsed_s": 30.0,
+ "error": "",
+ "gating": true,
+ "key": "1111111111111111111111111111111111111111111111111111111111111111",
+ "leg": "P",
+ "netlist": {
+  "abc_depth": 5,
+  "abc_exchange": null,
+  "adders": 10,
+  "blif_sha256": "1818181818181818181818181818181818181818181818181818181818181818",
+  "depth": 5,
+  "ffs": 100,
+  "luts": 1000,
+  "mults": 2,
+  "ram_slices": 4
+ },
+ "odin3_build": null,
+ "odin3_commit": null,
+ "packed": {
+  "device_height": 20,
+  "device_width": 20,
+  "num_clb": 200,
+  "num_memories": 1,
+  "num_mult": 2
+ },
+ "routed": {
+  "crit_path_routed_wirelength": 1000,
+  "critical_path_delay_ns": 2.5,
+  "fmax_mhz": 400.0,
+  "min_chan_width": 50,
+  "vpr_status": "success"
+ },
+ "schema": 1,
+ "started": "2026-10-12T01:36:00Z",
+ "status": "ok",
+ "verdicts": {
+  "equiv": "skipped",
+  "fcheck": "pass",
+  "rerun": "skipped"
+ },
+ "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
+}

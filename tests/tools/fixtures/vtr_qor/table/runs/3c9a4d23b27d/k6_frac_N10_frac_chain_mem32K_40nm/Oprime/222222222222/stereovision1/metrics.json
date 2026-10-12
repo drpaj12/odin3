@@ -1,0 +1,53 @@
+{
+ "abc_script_sha256": null,
+ "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
+ "cost": {
+  "frontend_peak_rss_mib": 150,
+  "frontend_wall_s": 6.0,
+  "max_vpr_mem_mib": 300,
+  "vpr_time_s": 20.0,
+  "vpr_total_runtime_s": 18.0
+ },
+ "design": "stereovision1",
+ "elapsed_s": 30.0,
+ "error": "",
+ "gating": true,
+ "key": "2222222222222222222222222222222222222222222222222222222222222222",
+ "leg": "Oprime",
+ "netlist": {
+  "abc_depth": 5,
+  "abc_exchange": null,
+  "adders": 10,
+  "blif_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "depth": 5,
+  "ffs": 100,
+  "luts": 1050,
+  "mults": 2,
+  "ram_slices": 0
+ },
+ "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
+ "packed": {
+  "device_height": 20,
+  "device_width": 20,
+  "num_clb": 220,
+  "num_memories": 0,
+  "num_mult": 2
+ },
+ "routed": {
+  "crit_path_routed_wirelength": 1050,
+  "critical_path_delay_ns": 2.5,
+  "fmax_mhz": 400.0,
+  "min_chan_width": 55,
+  "vpr_status": "success"
+ },
+ "schema": 1,
+ "started": "2026-10-12T04:22:00Z",
+ "status": "ok",
+ "verdicts": {
+  "equiv": "skipped",
+  "fcheck": "skipped",
+  "rerun": "skipped"
+ },
+ "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
+}

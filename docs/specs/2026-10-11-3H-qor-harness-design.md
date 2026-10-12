@@ -687,7 +687,11 @@ Prefix `vtr-qor: `; lower case; no final period; paths absolute.
 | E-QH12 | `refusing to delete <path>: not under <root>` / `refusing to delete <path>: <component> is a symlink` | 2 |
 | E-QH13 | `table: no complete key for leg <L> on <arch>` / `table: <d> has no ok <L> job` (a gate design: the gate fails) | 1 |
 | E-QH14 | `gate: FAIL: <metric> missing for <d> (<leg>)` / `gate: FAIL: <metric> geomean O/P <x> > 1.20` / `gate: FAIL: <metric> <d> O/P <x> > 1.50` / `gate: FAIL: <metric> <d> O <a> != P <b> (no row in explanations.tsv)` / `gate: FAIL: <d> O fcheck fail (no row in divergences.tsv)` / `gate: FAIL: <d> O fcheck error` / `gate: FAIL: <d> equiv differs` / `gate: FAIL: <d> equiv <timeout\|error> (not in equiv-exceptions.tsv)` / `gate: FAIL: <d> rerun differs` / `gate: FAIL: <d> O vpr_status=<s>` / `gate: INCOMPLETE: <d> <leg> is <status> (reference); rerun it` (exit 3) | 1 |
+| E-QH14a | `gate: FAIL: <d> O fcheck <v>` (any O verdict other than `pass`, `fail`, `skipped`, e.g. `capped`) / `gate: FAIL: <d> equiv <v> (not in equiv-exceptions.tsv)` (any verdict other than `equivalent`, `ram`, `differs`, `skipped`) / `gate: FAIL: <d> rerun <v>` (any verdict other than `same`, `skipped`) / `gate: FAIL: <metric> missing for <d> (<leg>)` also for rule 4's `num_mult`/`num_memories` | 1 |
+| E-QH14b | `gate: INCOMPLETE: <d> O <fcheck\|equiv\|rerun> <skipped\|missing> (not run); run it` / `gate: INCOMPLETE: <d> P fcheck is <error\|capped> (reference); rerun it` / `gate: INCOMPLETE: no <O\|P> leg in the table` / `gate: INCOMPLETE: <d> <leg> is missing (reference); rerun it` (no reference job at all) | 3 |
 | E-QH15 | `publish: set ODIN3_QOR_PUBLISH=1 (controller only; agents never write ~/odin3-ws/golden)` | 2 |
+
+**E-QH14a/E-QH14b (2026-10-12, agent default from the 3H Task 8 review, ruling D1; the controller may override).** A check that did not run (`skipped`, or no verdict) is unmeasured, so the gate is INCOMPLETE (exit 3), not FAIL: nightly runs fcheck and `rerun-check` on group A only, so FAIL here would make every nightly gate FAIL for good. The other texts generalise E-QH14's for verdicts §10 did not list, and name the cases where P's side, not Odin III, leaves a design undecided (§8.1).
 
 ## 11. Caps (QH-11)
 

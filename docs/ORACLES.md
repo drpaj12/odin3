@@ -32,6 +32,12 @@ Recorded 2026-10-08 (Phase 0 §4).
 - Smoke test passed: `run_vtr_flow.py blink.v EArch.xml --route_chan_width 100` → `EArch/blink OK`.
   Odin II on `blink.v` exits 0. `tools/run-oracle.sh` runs each front end alone with
   `run_vtr_flow.py -start <tool> -end <tool>`.
+- **The VTR pin check.** `tools/vtr-qor/vtr-qor doctor` checks that `$VTR_ROOT` is at the commit
+  in the table above and has no modified tracked files
+  (`git status --porcelain --untracked-files=no`). `vtr-qor run` refuses either case (E-QH2),
+  except that `--allow-vtr-drift` lets a run at another commit go ahead as report-only. The pin
+  is also `VTR_PIN` in `tools/vtr-qor/qor_legs.py`: moving VTR updates both, and every P job's
+  key changes with it.
 
 ## Rebuilding
 

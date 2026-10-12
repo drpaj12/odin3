@@ -1,0 +1,3 @@
+# A fixture: the two lines load_golden_xcheck reads from VTR's config.txt
+circuits_dir=benchmarks/verilog
+pass_requirements_file=pass_requirements.txt  # the bands
