@@ -2,8 +2,10 @@
  * elab2_assign.c — stage 2's signals, word cells and continuous assignments (2D Task 18; EL-28,
  * EL-30, EL-31): signals in the scratch arena and the wiring that extends and truncates them, the
  * one function that makes a word cell with genrtlil's parameter rules and the cell-pins cap of
- * point (aa), and the assignment of a right side to a net lvalue (by construction when a cell
- * drives the lhs nets, else by merge). The expression walk is elab2_expr.c, selects elab2_select.c.
+ * point (aa), the net lvalue (an assignment's, an instance output's or a gate output's) and the
+ * assignment of a right side to it (Task 19: claimed first; by construction when a cell drives the
+ * lhs nets, else by merge). The expression walk is elab2_expr.c, selects elab2_select.c, the driver
+ * tables elab2_drive.c.
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
@@ -314,87 +316,107 @@ odin3_status odin3_elab2_cell(odin3_elab2 *e2, const odin3_elab2_cell_req *req, 
     return st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);
 }
 
-/* --- continuous assignments (EL-28) ---------------------------------------------------------- */
+/* --- lvalues: the nets a continuous assignment, an instance output or a gate output drives ---- */
 
-/* One assignment being made: its lhs nets (LSB first, net 0 for a bit that is dropped), the nets
- * merged away so far and where the lhs is, for the diagnostics. */
-typedef struct asg_run {
-    odin3_elab2 *e2;
-    odin3_vec lhs;     /* odin3_net_id */
-    odin3_vec work;    /* odin3_ast_id: the lhs nodes still to take apart */
-    odin3_u64map *fwd; /* a net merged away -> the net that replaced it, made on first merge */
-    odin3_loc at;
-    bool dropped; /* some lhs bit lies outside its net */
-} asg_run;
+void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv) {
+    odin3_vec_init(&lv->nets, sizeof(odin3_net_id));
+    odin3_vec_init(&lv->bits, sizeof(odin3_elab2_lvbit));
+    odin3_vec_init(&lv->work, sizeof(odin3_ast_id));
+    lv->dropped = false;
+}
 
-static const char *asg_name(const asg_run *ar, const odin3_symbol *rec) {
-    return odin3_strtab_get(odin3_design_strtab(ar->e2->design), rec->name);
+void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv) {
+    odin3_vec_free(&lv->nets);
+    odin3_vec_free(&lv->bits);
+    odin3_vec_free(&lv->work);
+}
+
+static const char *lv_name(const odin3_elab2 *e2, const odin3_symbol *rec) {
+    return odin3_strtab_get(odin3_design_strtab(e2->design), rec->name);
 }
 
 /* The net or variable the IDENT or HIER_NAME names, with its wire; NULL after the error. */
-static const odin3_symbol *asg_symbol(asg_run *ar, odin3_ast_id name, bool word) {
-    odin3_elab2 *e2 = ar->e2;
+static const odin3_symbol *lv_symbol(odin3_elab2 *e2, odin3_ast_id name, bool word) {
     const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, name));
     odin3_loc loc = odin3_ast_loc(e2->elab, name);
     if (rec == NULL || (rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR)) {
         odin3_elab2_error(e2, loc, "'%s' is not a net or variable",
-                          rec != NULL ? asg_name(ar, rec) : odin3_ast_name_str(e2->elab, name));
+                          rec != NULL ? lv_name(e2, rec) : odin3_ast_name_str(e2->elab, name));
     } else if (rec->n_unpacked > 0) {
         odin3_elab2_error(e2, loc,
                           word ? "continuous assignment to a word of memory '%s' is not supported"
                                : "'%s' is a memory; select a word",
-                          asg_name(ar, rec));
+                          lv_name(e2, rec));
     } else if (rec->ir_wire.v == 0 || rec->ir_module.v != e2->mod_id.v) {
         odin3_elab2_error(e2, loc, "'%s' is not a net or variable of this module",
-                          asg_name(ar, rec));
+                          lv_name(e2, rec));
     } else {
         return rec;
     }
     return NULL;
 }
 
-static odin3_status asg_push(asg_run *ar, odin3_net_id net) {
-    odin3_net_id *slot = odin3_vec_push(&ar->lhs);
-    if (slot == NULL) {
+/* One lvalue bit: its net (0 for a bit outside its net) and where it came from. */
+static odin3_status lv_push(odin3_elab2_lvalue *lv, odin3_net_id net, odin3_elab2_lvbit bit) {
+    odin3_net_id *slot = odin3_vec_push(&lv->nets);
+    odin3_elab2_lvbit *info = slot != NULL ? odin3_vec_push(&lv->bits) : NULL;
+    if (info == NULL) {
+        if (slot != NULL) {
+            odin3_vec_pop(&lv->nets);
+        }
         return ODIN3_ERR_NO_MEMORY;
     }
     *slot = net;
+    *info = bit;
     return ODIN3_OK;
 }
 
 /* Every bit of the symbol's wire. */
-static odin3_status asg_whole(asg_run *ar, const odin3_symbol *rec) {
-    uint32_t width = odin3_wire_width(ar->e2->mod, rec->ir_wire);
+static odin3_status lv_whole(const odin3_elab2 *e2, odin3_elab2_lvalue *lv, const odin3_symbol *rec,
+                             odin3_ast_id node) {
+    uint32_t width = odin3_wire_width(e2->mod, rec->ir_wire);
     odin3_status st = ODIN3_OK;
     for (uint32_t bit = 0; st == ODIN3_OK && bit < width; bit++) {
-        st = asg_push(ar, odin3_wire_net(ar->e2->mod, rec->ir_wire, bit));
+        st = lv_push(lv, odin3_wire_net(e2->mod, rec->ir_wire, bit),
+                     (odin3_elab2_lvbit){{rec->ir_wire, bit}, node, true});
     }
     return st;
 }
 
-static odin3_status asg_name_target(asg_run *ar, odin3_ast_id name) {
-    const odin3_symbol *rec = asg_symbol(ar, name, false);
-    return rec == NULL ? ODIN3_ERR_PARSE : asg_whole(ar, rec);
+static odin3_status lv_name_target(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id name) {
+    const odin3_symbol *rec = lv_symbol(e2, name, false);
+    return rec == NULL ? ODIN3_ERR_PARSE : lv_whole(e2, lv, rec, name);
 }
 
+/* The select being taken apart: its node, the net it selects from, the object and its range. */
+typedef struct lv_sel {
+    odin3_ast_id node;
+    const odin3_symbol *rec;
+    const odin3_elab2_selobj *obj;
+    const odin3_elab2_selrange *range;
+} lv_sel;
+
 /* The bits a constant select of the net covers, from the lsb; the ones outside it are dropped. */
-static odin3_status asg_select_bits(asg_run *ar, odin3_ast_id sel, const odin3_symbol *rec,
-                                    const odin3_elab2_selobj *obj,
-                                    const odin3_elab2_selrange *range) {
-    odin3_elab2 *e2 = ar->e2;
+static odin3_status lv_select_bits(odin3_elab2 *e2, odin3_elab2_lvalue *lv, const lv_sel *ls) {
+    odin3_ast_id sel = ls->node;
+    const odin3_symbol *rec = ls->rec;
+    const odin3_elab2_selobj *obj = ls->obj;
+    const odin3_elab2_selrange *range = ls->range;
     bool outside = false;
     odin3_status st = ODIN3_OK;
     for (uint32_t j = 0; st == ODIN3_OK && j < range->width; j++) {
         int64_t pos = odin3_elab2_sel_pos(obj, odin3_elab2_sel_index(range, j));
         outside |= pos < 0;
         odin3_net_id net = {0};
+        odin3_elab2_lvbit bit = {{{0}, 0}, sel, false};
         if (pos >= 0) {
             net = odin3_wire_net(e2->mod, rec->ir_wire, (uint32_t)pos);
+            bit.wb = (odin3_wirebit){rec->ir_wire, (uint32_t)pos};
         }
-        st = asg_push(ar, net);
+        st = lv_push(lv, net, bit);
     }
     if (outside) {
-        ar->dropped = true;
+        lv->dropped = true;
         odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, sel),
                          "assignment to bits outside '%s' [%d:%d] is ignored", obj->name,
                          (int)obj->msb, (int)obj->lsb);
@@ -403,8 +425,7 @@ static odin3_status asg_select_bits(asg_run *ar, odin3_ast_id sel, const odin3_s
 }
 
 /* A bit or part select target: its index must be constant (IEEE 6.1.2; Yosys rejects it too). */
-static odin3_status asg_select(asg_run *ar, odin3_ast_id sel) {
-    odin3_elab2 *e2 = ar->e2;
+static odin3_status lv_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel) {
     odin3_ast_id object = odin3_ast_child(e2->elab, sel, 0);
     odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, object);
     if (kind != ODIN3_AST_IDENT && kind != ODIN3_AST_HIER_NAME) {
@@ -413,7 +434,7 @@ static odin3_status asg_select(asg_run *ar, odin3_ast_id sel) {
                           "concatenation of them");
         return ODIN3_ERR_PARSE;
     }
-    const odin3_symbol *rec = asg_symbol(ar, object, true);
+    const odin3_symbol *rec = lv_symbol(e2, object, true);
     if (rec == NULL) {
         return ODIN3_ERR_PARSE;
     }
@@ -435,13 +456,15 @@ static odin3_status asg_select(asg_run *ar, odin3_ast_id sel) {
             "continuous assignment to '%s' with a non-constant index is not supported", obj.name);
         return ODIN3_ERR_PARSE;
     }
-    return asg_select_bits(ar, sel, rec, &obj, &range);
+    lv_sel ls = {sel, rec, &obj, &range};
+    return lv_select_bits(e2, lv, &ls);
 }
 
-static odin3_status asg_push_parts(asg_run *ar, odin3_ast_id concat) {
-    odin3_ast_span parts = odin3_ast_children(ar->e2->elab, concat);
+static odin3_status lv_push_parts(const odin3_elab2 *e2, odin3_elab2_lvalue *lv,
+                                  odin3_ast_id concat) {
+    odin3_ast_span parts = odin3_ast_children(e2->elab, concat);
     for (uint32_t i = 0; i < parts.n; i++) {
-        odin3_ast_id *slot = odin3_vec_push(&ar->work);
+        odin3_ast_id *slot = odin3_vec_push(&lv->work);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
@@ -451,132 +474,149 @@ static odin3_status asg_push_parts(asg_run *ar, odin3_ast_id concat) {
 }
 
 /* One lhs node taken apart. */
-static odin3_status asg_node(asg_run *ar, odin3_ast_id node) {
-    switch (odin3_ast_kind_of(ar->e2->elab, node)) {
+static odin3_status lv_node(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id node) {
+    switch (odin3_ast_kind_of(e2->elab, node)) {
     case ODIN3_AST_CONCAT:
-        return asg_push_parts(ar, node);
+        return lv_push_parts(e2, lv, node);
     case ODIN3_AST_IDENT:
     case ODIN3_AST_HIER_NAME:
-        return asg_name_target(ar, node);
+    case ODIN3_AST_DECLARATOR:
+        return lv_name_target(e2, lv, node);
     case ODIN3_AST_SELECT:
-        return asg_select(ar, node);
+        return lv_select(e2, lv, node);
     default:
-        odin3_elab2_error(ar->e2, odin3_ast_loc(ar->e2->elab, node),
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node),
                           "the target of a continuous assignment must be a net, variable or "
                           "concatenation of them");
         return ODIN3_ERR_PARSE;
     }
 }
 
-/* The lhs nets of a NET_ASSIGN's lvalue (identifiers, constant selects, concatenations). */
-static odin3_status asg_lvalue(asg_run *ar, odin3_ast_id lhs) {
-    odin3_ast_id *slot = odin3_vec_push(&ar->work);
+odin3_status odin3_elab2_lvalue_make(odin3_elab2 *e2, odin3_ast_id lhs, odin3_elab2_lvalue *lv) {
+    odin3_ast_id *slot = odin3_vec_push(&lv->work);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *slot = lhs;
     odin3_status st = ODIN3_OK;
-    while (st == ODIN3_OK && ar->work.len > 0) {
-        odin3_ast_id node = *(const odin3_ast_id *)odin3_vec_cat(&ar->work, ar->work.len - 1);
-        odin3_vec_pop(&ar->work);
-        st = asg_node(ar, node);
+    while (st == ODIN3_OK && lv->work.len > 0) {
+        odin3_ast_id node = *(const odin3_ast_id *)odin3_vec_cat(&lv->work, lv->work.len - 1);
+        odin3_vec_pop(&lv->work);
+        st = lv_node(e2, lv, node);
     }
     return st;
 }
+
+/* --- continuous assignments (EL-28) ---------------------------------------------------------- */
+
+/* One assignment being made: its lvalue, the nodes and what the diagnostics need. */
+typedef struct asg_run {
+    odin3_elab2 *e2;
+    odin3_elab2_lvalue lv;
+    odin3_ast_id lhs, rhs;
+} asg_run;
 
 /* The lhs and rhs of net_assign: a NET_ASSIGN, or a DECLARATOR with its declaration assignment. */
-static odin3_status asg_parts(asg_run *ar, odin3_ast_id node, odin3_ast_id *rhs) {
+static odin3_status asg_parts(asg_run *ar, odin3_ast_id node) {
     const odin3_elab2 *e2 = ar->e2;
     if (odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_DECLARATOR) {
-        *rhs = odin3_ast_child(e2->elab, node, 0);
-        ar->at = odin3_ast_loc(e2->elab, node);
-        return asg_name_target(ar, node);
+        ar->rhs = odin3_ast_child(e2->elab, node, 0);
+        ar->lhs = node;
+    } else {
+        ar->lhs = odin3_ast_child(e2->elab, node, 0);
+        ar->rhs = odin3_ast_child(e2->elab, node, 1);
     }
-    odin3_ast_id lhs = odin3_ast_child(e2->elab, node, 0);
-    *rhs = odin3_ast_child(e2->elab, node, 1);
-    ar->at = odin3_ast_loc(e2->elab, lhs);
-    return asg_lvalue(ar, lhs);
+    return odin3_elab2_lvalue_make(ar->e2, ar->lhs, &ar->lv);
 }
 
-/* Task 19's check, interim: an lhs net that has a driver already is two drivers. */
-static odin3_status asg_conflict(const asg_run *ar) {
-    odin3_elab2_pend_feature(ar->e2, ar->at, ODIN3_PEND_DRIVERS);
-    return ODIN3_ERR_PARSE;
-}
-
-static odin3_status asg_check_drivers(const asg_run *ar) {
-    for (size_t i = 0; i < ar->lhs.len; i++) {
-        odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&ar->lhs, i);
-        if (net.v != 0 && odin3_net_driver_count(ar->e2->mod, net) > 0) {
-            return asg_conflict(ar);
-        }
-    }
-    return ODIN3_OK;
-}
-
-/* A net after the merges so far. */
-static odin3_net_id asg_resolve(const asg_run *ar, odin3_net_id net) {
-    uint64_t next = 0;
-    while (ar->fwd != NULL && odin3_u64map_get(ar->fwd, net.v, &next)) {
-        net.v = (uint32_t)next;
-    }
-    return net;
-}
-
-/* lhs takes the value of rhs: the same net is done; else rhs is kept and lhs merged into it. */
-static odin3_status asg_bit(asg_run *ar, odin3_net_id lhs, odin3_net_id rhs) {
-    lhs = asg_resolve(ar, lhs);
-    rhs = asg_resolve(ar, rhs);
-    if (lhs.v == rhs.v) {
-        return ODIN3_OK;
-    }
-    if (odin3_net_driver_count(ar->e2->mod, lhs) > 0) {
-        return asg_conflict(ar);
-    }
-    if (ar->fwd == NULL) {
-        ar->fwd = odin3_u64map_create(0);
-        if (ar->fwd == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-    }
-    odin3_status st = odin3_u64map_put(ar->fwd, (odin3_kv){lhs.v, rhs.v});
-    return st != ODIN3_OK ? st : odin3_net_merge(ar->e2->mod, (odin3_net_pair){rhs, lhs});
-}
-
-/* Every lhs bit takes its rhs bit (ext has exactly the lhs width). */
-static odin3_status asg_connect(asg_run *ar, const odin3_sig *ext) {
-    odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < ar->lhs.len; i++) {
-        odin3_net_id lhs = *(const odin3_net_id *)odin3_vec_cat(&ar->lhs, i);
-        if (lhs.v == 0) {
+/* A `reg` target is accepted as a net, with Yosys's warning (once per piece of the lvalue). */
+static void asg_warn_variables(const asg_run *ar) {
+    odin3_ast_id last = {0};
+    for (size_t i = 0; i < ar->lv.bits.len; i++) {
+        odin3_ast_id piece = ((const odin3_elab2_lvbit *)ar->lv.bits.data)[i].node;
+        if (piece.v == last.v) {
             continue;
         }
-        odin3_net_id rhs = {0};
-        odin3_sig one = {&ext->bits[i], 1, false};
-        st = odin3_elab2_to_nets(ar->e2, &one, &rhs);
-        st = st != ODIN3_OK ? st : asg_bit(ar, lhs, rhs);
+        last = piece;
+        odin3_ast_id name = piece;
+        while (odin3_ast_kind_of(ar->e2->elab, name) == ODIN3_AST_SELECT) {
+            name = odin3_ast_child(ar->e2->elab, name, 0);
+        }
+        const odin3_symbol *rec =
+            odin3_symbol_get(ar->e2->st, odin3_elab_sym_of(&ar->e2->bind, name));
+        if (rec != NULL && rec->kind == ODIN3_SYM_VAR) {
+            odin3_elab2_warn(ar->e2, odin3_ast_loc(ar->e2->elab, piece),
+                             "'%s' is a variable assigned by a continuous assignment; treated as "
+                             "a net",
+                             lv_name(ar->e2, rec));
+        }
     }
-    return st;
-}
-
-/* The rhs at the lhs width (context {L, true, false}), by construction when it can. */
-static odin3_status asg_rhs(asg_run *ar, odin3_ast_id rhs) {
-    uint32_t width = (uint32_t)ar->lhs.len;
-    const odin3_net_id *dest = ar->dropped ? NULL : (const odin3_net_id *)ar->lhs.data;
-    odin3_elab2_expr_req req = {rhs, {width, true, false}, dest, NULL};
-    odin3_sig sig;
-    odin3_status st = odin3_elab2_expr(ar->e2, &req, &sig);
-    st = st != ODIN3_OK ? st : odin3_elab2_extend(ar->e2, &sig, width, sig.is_signed, &sig);
-    return st != ODIN3_OK ? st : asg_connect(ar, &sig);
 }
 
 static bool asg_all_dropped(const asg_run *ar) {
-    for (size_t i = 0; i < ar->lhs.len; i++) {
-        if (((const odin3_net_id *)ar->lhs.data)[i].v != 0) {
+    for (size_t i = 0; i < ar->lv.nets.len; i++) {
+        if (((const odin3_net_id *)ar->lv.nets.data)[i].v != 0) {
             return false;
         }
     }
     return true;
+}
+
+/* The rhs at the lhs width (context {L, true, false}), by construction when it can. */
+static odin3_status asg_rhs(asg_run *ar) {
+    uint32_t width = (uint32_t)ar->lv.nets.len;
+    const odin3_net_id *dest = ar->lv.dropped ? NULL : (const odin3_net_id *)ar->lv.nets.data;
+    odin3_elab2_expr_req req = {ar->rhs, {width, true, false}, dest, NULL};
+    odin3_sig sig;
+    odin3_status st = odin3_elab2_expr(ar->e2, &req, &sig);
+    st = st != ODIN3_OK ? st : odin3_elab2_extend(ar->e2, &sig, width, sig.is_signed, &sig);
+    odin3_elab2_lvconn conn = {&ar->lv, &sig, ODIN3_DRV_ASSIGN, ar->lhs, ar->rhs};
+    return st != ODIN3_OK ? st : odin3_elab2_lvalue_connect(ar->e2, &conn);
+}
+
+/* Whether branch is the constant z (every bit, at the width of the context). */
+static bool asg_is_z(odin3_elab2 *e2, odin3_ast_id branch, uint32_t width) {
+    if (odin3_ast_kind_of(e2->elab, branch) != ODIN3_AST_NUMBER) {
+        return false;
+    }
+    odin3_sig sig;
+    odin3_elab2_expr_req req = {branch, {width, true, false}, NULL, NULL};
+    if (odin3_elab2_expr(e2, &req, &sig) != ODIN3_OK) {
+        return false;
+    }
+    odin3_status st = odin3_elab2_extend(e2, &sig, width, sig.is_signed, &sig);
+    for (uint32_t i = 0; st == ODIN3_OK && i < width; i++) {
+        if (sig.bits[i] != odin3_sb_of_bit(ODIN3_BIT_Z)) {
+            return false;
+        }
+    }
+    return st == ODIN3_OK;
+}
+
+/* `c ? d : 'bz` and `c ? 'bz : d` (D3): the $tribuf driving the lvalue; *handled says whether the
+ * rhs was one. */
+static odin3_status asg_tribuf(asg_run *ar, bool *handled) {
+    odin3_elab2 *e2 = ar->e2;
+    *handled = false;
+    uint32_t width = (uint32_t)ar->lv.nets.len;
+    if (odin3_ast_kind_of(e2->elab, ar->rhs) != ODIN3_AST_TERNARY) {
+        return ODIN3_OK;
+    }
+    odin3_ast_id first = odin3_ast_child(e2->elab, ar->rhs, 1);
+    odin3_ast_id second = odin3_ast_child(e2->elab, ar->rhs, 2);
+    bool first_z = asg_is_z(e2, first, width);
+    bool second_z = asg_is_z(e2, second, width);
+    if (first_z == second_z) {
+        return ODIN3_OK;
+    }
+    *handled = true;
+    odin3_elab2_tri_req tri = {.lv = &ar->lv,
+                               .data_node = first_z ? second : first,
+                               .cond_node = odin3_ast_child(e2->elab, ar->rhs, 0),
+                               .invert = first_z,
+                               .node = ar->rhs,
+                               .claim = ar->lhs};
+    return odin3_elab2_tribuf(e2, &tri);
 }
 
 odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign) {
@@ -587,16 +627,22 @@ odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign) {
         return ODIN3_ERR_INVALID_ARG;
     }
     asg_run ar = {.e2 = e2};
-    odin3_vec_init(&ar.lhs, sizeof(odin3_net_id));
-    odin3_vec_init(&ar.work, sizeof(odin3_ast_id));
-    odin3_ast_id rhs = {0};
-    odin3_status st = asg_parts(&ar, net_assign, &rhs);
-    st = st != ODIN3_OK ? st : asg_check_drivers(&ar);
-    if (st == ODIN3_OK && !asg_all_dropped(&ar)) {
-        st = asg_rhs(&ar, rhs);
+    odin3_elab2_lvalue_init(&ar.lv);
+    odin3_status st = asg_parts(&ar, net_assign);
+    bool handled = false;
+    if (st == ODIN3_OK) {
+        asg_warn_variables(&ar);
+        st = asg_tribuf(&ar, &handled);
     }
-    odin3_vec_free(&ar.lhs);
-    odin3_vec_free(&ar.work);
-    odin3_u64map_destroy(ar.fwd);
+    bool granted = false;
+    odin3_elab2_lvclaim claim = {&ar.lv, ODIN3_DRV_ASSIGN, ar.lhs, false, NULL, NULL};
+    st = st != ODIN3_OK || handled ? st : odin3_elab2_lvalue_claim(e2, &claim, &granted);
+    if (st == ODIN3_OK && !handled && !granted) {
+        st = ODIN3_ERR_PARSE;
+    }
+    if (st == ODIN3_OK && !handled && !asg_all_dropped(&ar)) {
+        st = asg_rhs(&ar);
+    }
+    odin3_elab2_lvalue_free(&ar.lv);
     return st;
 }

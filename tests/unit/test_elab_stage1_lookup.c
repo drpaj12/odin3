@@ -616,11 +616,14 @@ static const pend_case k_pend_cases[] = {
     {ODIN3_ELAB_STAGE1, ODIN3_AST_DIRECTIVE, false}, /* landed by Task 16 */
     {ODIN3_ELAB_STAGE1, ODIN3_PEND_COMB_CALL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_WRITE, true},
-    {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_READ, true},    /* Task 20 */
-    {ODIN3_ELAB_STAGE2, ODIN3_PEND_DRIVERS, true},     /* Task 19 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_CONT_ASSIGN, false}, /* landed by Task 18 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_BINARY, false},      /* landed by Task 18 */
-    {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, false},      /* landed by Task 17 */
+    {ODIN3_ELAB_STAGE2, ODIN3_PEND_MEM_READ, true},      /* Task 20 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANTIATION, false}, /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_INSTANCE, false},      /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CONNECTION, false},    /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_GATE_DECL, false},     /* landed by Task 19 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_CONT_ASSIGN, false},   /* landed by Task 18 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_BINARY, false},        /* landed by Task 18 */
+    {ODIN3_ELAB_STAGE2, ODIN3_AST_MODULE, false},        /* landed by Task 17 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_NET_DECL, false},
     {ODIN3_ELAB_STAGE2, ODIN3_AST_ALWAYS, true},    /* Task 21 */
     {ODIN3_ELAB_STAGE2, ODIN3_AST_DEFPARAM, false}, /* never in an elaborated store */
@@ -710,7 +713,7 @@ static odin3_status read_through_pass(odin3_keep_ast keep, body_probe *probe) {
     et_setup(&req, &rs);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(rs.design, keep));
     *probe = (body_probe){rs.design, 0, true};
-    odin3_elab_test_hooks hooks = {0, probe_body, probe, 0};
+    odin3_elab_test_hooks hooks = {0, probe_body, probe, 0, NULL};
     odin3_elab_test_set_hooks(&hooks);
     return odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
 }
@@ -1019,7 +1022,7 @@ static void seven_stores(void) {
 static bool hand_over_step(long after, int *missed) {
     seven_stores();
     arm_at arm = {after, false};
-    odin3_elab_test_hooks hooks = {0, arm_failure, &arm, 0};
+    odin3_elab_test_hooks hooks = {0, arm_failure, &arm, 0, NULL};
     odin3_elab_test_set_hooks(&hooks);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("e.v"));
     odin3_util_set_alloc_fail_after(-1);

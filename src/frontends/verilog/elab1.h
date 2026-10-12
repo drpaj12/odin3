@@ -1036,6 +1036,12 @@ odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint
  * dropped while env->quiet). */
 odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t *slot);
 
+/* odin3_elab1_scope_target that also accepts a path into a named begin/end block of an always or
+ * initial (`blk.count`, I-1): *block is then that SEQ_BLOCK of the parsed store (the typer of a
+ * connection finds the member's declaration in it); otherwise *block is 0 and *slot the target. */
+odin3_status odin3_elab1_scope_proc(odin3_elab1_env *env, odin3_ast_id hier_name,
+                                    odin3_ast_id *block, uint32_t *slot);
+
 /* The scopes of a new environment (scope 0, the module) and their tables; freed by _gen_free. */
 odin3_status odin3_elab1_gen_init(odin3_elab1_env *env);
 void odin3_elab1_gen_free(odin3_elab1_env *env);

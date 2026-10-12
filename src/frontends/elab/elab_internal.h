@@ -5,8 +5,10 @@
  * rule 7 does not. The second part (Task 17) is stage 2's context: the IR modules, their ports and
  * wires, provenance, attributes, the error cap and the byte budget (elab2.c, elab2_wires.c). The
  * third (Task 18) is expressions: signals to word cells, selects and continuous assignments
- * (elab2_expr.c, elab2_select.c, elab2_assign.c). Later tasks add drivers, instances, processes and
- * memories to it.
+ * (elab2_expr.c, elab2_select.c, elab2_assign.c). The fourth (Task 19) is drivers, instances and
+ * gates: the driver table and claims, wired nets, tri-state, the lvalue an output takes apart
+ * (elab2_drive.c, elab2_assign.c), instances, black boxes and gates (elab2_inst.c). Later tasks add
+ * processes and memories to it.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
@@ -180,6 +182,8 @@ struct odin3_elab2 {
     odin3_ctype *ty;       /* the expression typer (Task 18), made on first use */
     odin3_vec frames;      /* the expression walk's frames (Task 18) */
     odin3_vec vals;        /* the expression walk's value stack: odin3_sig (Task 18) */
+    odin3_u64map *bboxes;  /* black-box MODULE node ID -> its cell type ID (Task 19, EL-11) */
+    struct odin3_elab2_drive *drive; /* the driver tables of the module being emitted (Task 19) */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
@@ -254,12 +258,13 @@ odin3_status odin3_elab2_ports(odin3_elab2 *e2, odin3_ast_id module_node);
 
 /*
  * Emits the body of the module whose ports odin3_elab2_ports made: calls the on_body_start test
- * hook, checks the budget, then EL-28's steps in order (Task 17: (1) the wires; every construct
- * of steps (2)–(8) whose elaboration has not landed is point (l)'s located error, once per kind,
- * and is skipped, so the rest of the module is emitted). ODIN3_OK even after located errors (they
- * are counted); ODIN3_ERR_PARSE when the stage must stop (the error cap, a fatal cap, the
- * budget); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a node whose ports were not made. A
- * black-box MODULE is skipped.
+ * hook, checks the budget, then EL-28's steps in order ((1) the wires, (2) the pre-scan, (4) the
+ * instances and gates, (5) the continuous assignments, (7) the wired nets, then the end-of-module
+ * warnings; every construct of the other steps whose elaboration has not landed is point (l)'s
+ * located error, once per kind, and is skipped, so the rest of the module is emitted). ODIN3_OK
+ * even after located errors (they are counted); ODIN3_ERR_PARSE when the stage must stop (the error
+ * cap, a fatal cap, the budget); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a node whose ports
+ * were not made. A black-box MODULE is skipped.
  */
 odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node);
 
@@ -560,10 +565,245 @@ int odin3_elab2_sig_i64(const odin3_sig *sig, int64_t *out);
  * same-net no-op. The lhs is a net or variable, a constant bit or part select of one, or a
  * concatenation of those; a non-constant select is `continuous assignment to 'y' with a
  * non-constant index is not supported`, bits outside the net are dropped with `assignment to bits
- * outside 'y' [7:0] is ignored`. An lhs net that has a driver already is Task 19's two-driver
- * check: until it lands the pending line `two-driver check` and nothing is attached. Statuses as
+ * outside 'y' [7:0] is ignored`. Task 19: every lhs bit is claimed before anything is attached
+ * (A4, `uwire`, `supply`, wired nets, the tri-state and `inout` rules: odin3_elab2_claim), a
+ * `reg` target warns `'r' is a variable assigned by a continuous assignment; treated as a net`,
+ * and `c ? d : 'bz` (either branch an all-z constant) is a `$tribuf` (D3). Statuses as
  * odin3_elab2_expr.
  */
 odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);
+
+/* --- stage 2: drivers, instances, gates, wired nets (Task 19; EL-10, EL-11, EL-26, EL-28, EL-29)
+ * -- */
+
+/* What drives a net bit, by the driver table (a vec of odin3_drv indexed by net ID). */
+typedef enum odin3_drv_kind {
+    ODIN3_DRV_NONE = 0,
+    ODIN3_DRV_PORT_IN,   /* an input port of the module (driven from outside) */
+    ODIN3_DRV_CONST,     /* a shared constant net, or a supply net */
+    ODIN3_DRV_CELL,      /* the output of a cell 2D made */
+    ODIN3_DRV_INSTANCE,  /* an output pin of an instance */
+    ODIN3_DRV_GATE,      /* a gate's output */
+    ODIN3_DRV_ASSIGN,    /* a continuous assignment */
+    ODIN3_DRV_PROCESS,   /* a process (Task 21) */
+    ODIN3_DRV_INOUT_PIN, /* an inout pin: the module's own inout port, or a child's */
+    ODIN3_DRV_TRIBUF     /* a $tribuf output (D3) */
+} odin3_drv_kind;
+
+/* One entry of the driver table: the kind and the AST node of the driver (0: none located). */
+typedef struct odin3_drv {
+    uint8_t kind; /* odin3_drv_kind */
+    odin3_ast_id node;
+} odin3_drv;
+
+/* The tables of one module's drivers (elab2_drive.c); opaque to everything else. */
+struct odin3_elab2_drive;
+
+/*
+ * A driver to claim: n net bits (LSB first; net 0 is a dropped bit, skipped), the kind of driver
+ * and its AST node (A4's "also driven at" place of a later conflict, and the place of this one's
+ * error).
+ */
+typedef struct odin3_elab2_claim_req {
+    const odin3_net_id *nets;
+    uint32_t n;
+    uint8_t kind; /* odin3_drv_kind */
+    odin3_ast_id node;
+} odin3_elab2_claim_req;
+
+/*
+ * Checks every bit of req against the driver table BEFORE anything is attached, and records the
+ * driver on each bit when all pass: *granted true. A conflict is a located error (counted; the
+ * first conflicting bit only) and *granted false with nothing recorded, so the caller attaches
+ * nothing:
+ *  - A4: `'y[3]' has two drivers (also driven at f.v:L:C)` (a whole-net conflict names the net;
+ *    the same net twice in one request is a conflict at the second), located at req->node;
+ *  - `'u' is a uwire and has a second driver (first at f.v:L:C)`;
+ *  - `supply0`/`supply1` nets are driven by the shared constants, so any driver is A4's error;
+ *  - wired nets (`wand wor triand trior`) collect drivers instead (EL-26): the bit is granted
+ *    without a table entry (odin3_elab2_lvalue_claim redirects the driver onto a fresh net and
+ *    odin3_elab2_wired chains them; this net-only function cannot redirect, so a caller that may
+ *    meet a wired net uses the lvalue form);
+ *  - ODIN3_DRV_TRIBUF is legal only on a net of a top-level output or inout port
+ *    (`tri-state driver on 'x' is supported only on a top-level output or inout port (D3)`), and
+ *    shares a net only with other tristate drivers and inout pins; ODIN3_DRV_INOUT_PIN shares a net
+ *    only with those, and with ordinary logic is `net 'x' is driven by inout port 'p' of instance
+ *    'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)`.
+ * ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a kind past the
+ * enum, or no module being emitted.
+ */
+odin3_status odin3_elab2_claim(odin3_elab2 *e2, const odin3_elab2_claim_req *req, bool *granted);
+
+/*
+ * Step (2) of EL-28 for the module being emitted: starts the driver tables (input ports are
+ * ODIN3_DRV_PORT_IN, the module's inout ports ODIN3_DRV_INOUT_PIN, both at the port's declarator),
+ * makes `supply0`/`supply1` nets the shared constant nets, registers `uwire` and wired nets, and
+ * scans every `always` block's lvalues: the always-assigned bit set (odin3_elab2_always_assigned;
+ * EL-27 reads it too; a non-constant index marks the whole object) and the wired-net check `'w' is
+ * a wired net (wand) and cannot be assigned in an always block` (located at the lvalue, counted).
+ * Status as odin3_elab2_module.
+ */
+odin3_status odin3_elab2_prescan(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/* True when an always block of the module being emitted assigns bit `bit` of the object symbol
+ * names (a memory: bit 0 is the whole memory); false before the pre-scan. */
+bool odin3_elab2_always_assigned(const odin3_elab2 *e2, odin3_sym_id sym, uint32_t bit);
+
+/*
+ * Step (7) of EL-28 (EL-26): each wired wire (`wand`/`triand` -> $and, `wor`/`trior` -> $or) bit
+ * is driven by a chain over its drivers in source order, the last cell driving the wire's nets
+ * (k drivers: k - 1 two-input word cells of the wire's width when every driver covers the whole
+ * wire, else one-bit cells per bit); a bit with one driver is that driver's net merged into the
+ * wire's (pin-based, IR-15) and one with none stays undriven. Every cell's SOURCE record is the
+ * wire's declarator. Status as odin3_elab2_module.
+ */
+odin3_status odin3_elab2_wired(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/*
+ * The end of the module's emission (EL-28): once per module, `'w' is never driven` for each wire
+ * that is not a port with a net that has sinks and no driver, at its declarator, and the pending
+ * `'p' and 'q' are connected only to each other and are never driven` of the self-assignments of
+ * odin3_elab2_assign whose net is still undriven (their wires are not reported twice). Status as
+ * odin3_elab2_module.
+ */
+odin3_status odin3_elab2_undriven(odin3_elab2 *e2);
+
+/* Forgets the driver tables (a new module starts); frees them when e2 is destroyed. */
+void odin3_elab2_drive_reset(odin3_elab2 *e2);
+void odin3_elab2_drive_free(odin3_elab2 *e2);
+
+/*
+ * Merges drop into keep (odin3_net_merge) and remembers it: odin3_elab2_resolve follows the
+ * forwarding to the net a net became, for ones recorded before the merge. keep == drop and a dead
+ * net are ODIN3_ERR_INVALID_ARG from the IR, so callers compare first.
+ */
+odin3_status odin3_elab2_merge(odin3_elab2 *e2, odin3_net_pair pair);
+odin3_net_id odin3_elab2_resolve(const odin3_elab2 *e2, odin3_net_id net);
+
+/* One bit of an lvalue: the wire bit it came from (wire 0: none), the piece of the lvalue naming
+ * it (an identifier or select node) and whether the piece names the whole wire. */
+typedef struct odin3_elab2_lvbit {
+    odin3_wirebit wb;
+    odin3_ast_id node;
+    bool whole;
+} odin3_elab2_lvbit;
+
+/* An lvalue taken apart: nets[i] and bits[i] for result bit i (LSB first); net 0 and wire 0 for a
+ * bit outside its net. */
+typedef struct odin3_elab2_lvalue {
+    odin3_vec nets; /* odin3_net_id */
+    odin3_vec bits; /* odin3_elab2_lvbit */
+    odin3_vec work; /* odin3_ast_id: the nodes still to take apart */
+    bool dropped;   /* some bit lies outside its net */
+} odin3_elab2_lvalue;
+
+void odin3_elab2_lvalue_init(odin3_elab2_lvalue *lv);
+void odin3_elab2_lvalue_free(odin3_elab2_lvalue *lv);
+
+/*
+ * Takes lhs apart: an identifier of a net or variable, a constant bit or part select of one, or a
+ * concatenation of those (EL-28); the located errors of odin3_elab2_assign (`'x' is not a net or
+ * variable`, a memory, `continuous assignment to 'y' with a non-constant index is not supported`,
+ * bits outside the net warned and dropped) are counted and ODIN3_ERR_PARSE. A `reg` target warns
+ * `'r' is a variable assigned by a continuous assignment; treated as a net` when as_assign.
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_lvalue_make(odin3_elab2 *e2, odin3_ast_id lhs, odin3_elab2_lvalue *lv);
+
+/*
+ * The claim of an lvalue's bits as odin3_elab2_claim (with the names of the bits for the
+ * messages, the first driver's place from the wire-bit claims, and every lvalue bit remembered as
+ * driven by node when record is set). A wired bit is redirected onto a fresh net, replacing the
+ * lvalue's net and recording the driver for odin3_elab2_wired. kind ODIN3_DRV_INOUT_PIN also
+ * takes port and instance (names for the inout message).
+ */
+typedef struct odin3_elab2_lvclaim {
+    odin3_elab2_lvalue *lv;
+    uint8_t kind; /* odin3_drv_kind */
+    odin3_ast_id node;
+    bool record;
+    const char *port, *instance; /* ODIN3_DRV_INOUT_PIN only */
+} odin3_elab2_lvclaim;
+
+odin3_status odin3_elab2_lvalue_claim(odin3_elab2 *e2, const odin3_elab2_lvclaim *req,
+                                      bool *granted);
+
+/*
+ * Every lvalue bit takes its bit of sig (which has exactly the lvalue's width): the same net
+ * as the lvalue's bit is a driver made by construction (recorded in the table as kind), another
+ * net is merged (the signal's kept, odin3_elab2_merge) and the lvalue bit remembered as driven by
+ * node; the same net with no driver at all is a self-assignment (reported by odin3_elab2_undriven).
+ * Bits claimed with record already are not recorded twice. ODIN3_ERR_NO_MEMORY.
+ */
+typedef struct odin3_elab2_lvconn {
+    odin3_elab2_lvalue *lv;
+    const odin3_sig *sig;
+    uint8_t kind; /* odin3_drv_kind */
+    odin3_ast_id node;
+    odin3_ast_id rhs; /* the right side, for the self-assignment warning (0: none) */
+} odin3_elab2_lvconn;
+
+odin3_status odin3_elab2_lvalue_connect(odin3_elab2 *e2, const odin3_elab2_lvconn *req);
+
+/*
+ * A $tribuf driving an lvalue (D3, Q3): the lvalue's bits are claimed as ODIN3_DRV_TRIBUF at
+ * claim (so every D3 and A4 rule applies and nothing is made on a conflict), then one cell with
+ * WIDTH the lvalue's width: A the data (data_node generated at the lvalue's width, or the signal
+ * data, extended by its sign; inverted through a $not when invert_data), EN the condition
+ * (cond_node generated self-determined, or the signal cond; a one-bit condition as is, a wider one
+ * through $reduce_bool; inverted through $not (one bit) or $logic_not (wider) when invert), Y the
+ * lvalue's nets (fresh ones for a dropped bit). node is the cell's SOURCE record and attributes.
+ * Errors as odin3_elab2_assign.
+ */
+typedef struct odin3_elab2_tri_req {
+    odin3_elab2_lvalue *lv;
+    odin3_ast_id data_node, cond_node;
+    const odin3_sig *data, *cond;
+    bool invert, invert_data;
+    odin3_ast_id node, claim;
+} odin3_elab2_tri_req;
+
+odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req);
+
+/* The IR name of a net, variable or instance symbol: its scope path and its name, interned. */
+odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name);
+
+/*
+ * Instances (EL-10, EL-11): INSTANTIATION node instantiation, every INSTANCE below it: a node of
+ * the module's cell type (a module of the store, a black box, or a registered cell type) with its
+ * SOURCE record at the INSTANCE, the INSTANTIATION's attributes and, for a module or black box,
+ * one `parameter:<NAME>` attribute (BITS or STRING) per parameter of its params LIST. Inputs are
+ * generated at their self-determined width and sign (odin3_elab2_expr), resized to the port with
+ * Yosys's hierarchy rules (I4) and the warning `port 'a' of instance 'u' (module 'sub') is 8
+ * bits; the connection of 4 bits is extended` / `... is truncated` (none for a constant);
+ * an unconnected input is the $_CONSTX_ net; an output or inout takes a net lvalue (odin3_elab2_
+ * lvalue_make) whose bits are claimed (ODIN3_DRV_INSTANCE, ODIN3_DRV_INOUT_PIN): bits past the
+ * port are driven by the port's top bit when the child declares the port signed, else by 0, and
+ * port bits past the connection (an unconnected output) go to fresh nets. A cell type's missing
+ * parameters are inferred from the connection widths (odin3_celltype_infer_params). Errors are
+ * located and counted (ODIN3_ERR_PARSE, the caller goes on with the next item). INVALID_ARG for a
+ * node that is not an INSTANTIATION, or no module being emitted; NO_MEMORY.
+ */
+odin3_status odin3_elab2_instance(odin3_elab2 *e2, odin3_ast_id instantiation);
+
+/*
+ * Gates (Q1-Q3), lowered as Yosys's simplify does: GATE_DECL node gate_decl, every INSTANCE below
+ * it. and/or/xor: a left fold over the inputs of two-input word cells (one bit each for one-bit
+ * terminals), the last driving the output; nand/nor/xnor: the fold, then $not; buf/not: one
+ * assignment of the (inverted) input per output; bufif0/bufif1/notif0/notif1: a $tribuf with D3's
+ * rules (the enable inverted through $not for the *if0 forms, the data for the notif forms).
+ * Statuses as odin3_elab2_instance.
+ */
+odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl);
+
+/*
+ * EL-11: declares the black-box cell type of a `(* blackbox *)` or implicit black-box MODULE
+ * (odin3_celltype_declare_blackbox, once per definition, under its base name): its ports in port
+ * order, a parameter per PARAM_DECL, and for a port whose width equals the default of an INT
+ * parameter that some instance overrides, that parameter as its width (the type is then
+ * parametric). A mismatch with a registered type is the located error `black box 'x' does not
+ * match the registered cell type: <why>`. Called by odin3_elab2_ports.
+ */
+odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node);
 
 #endif
