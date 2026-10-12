@@ -91,11 +91,31 @@ static double now_ms(void) {
 
 /* --- phases (point (h)) -------------------------------------------------------------------- */
 
-/* The phase itself. Every phase is still pending (proc_pending.c); Tasks 4-9 dispatch theirs here
- * as their pending entries go. */
+/* The clock pre-check phase: E4 first (Yosys raises it in proc_arst, before proc_dff's E1 and
+ * E5), then the clocks (§5.5, §11). */
+static odin3_status proc_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw) {
+    odin3_status st = odin3_pw_check_memwr(mctx, pw);
+    return st == ODIN3_OK ? odin3_pw_check_clocks(mctx, pw) : st;
+}
+
+/* The phase itself: clean and rmdead (2E Task 4), prune (Task 5), arst and the clock pre-check
+ * (Task 6); the rest are still pending (proc_pending.c), and Tasks 7-9 dispatch theirs here as
+ * their pending entries go. */
 static odin3_status proc_real_phase(odin3_proc_mctx *mctx, odin3_proc_phase phase, odin3_pw *pw) {
-    (void)pw;
-    return odin3_proc_pending_run(mctx, phase);
+    switch (phase) {
+    case ODIN3_PROC_PH_CLEAN:
+        return odin3_pw_clean(pw, 0, ODIN3_PW_CLEAN_WHOLE_TREE);
+    case ODIN3_PROC_PH_RMDEAD:
+        return odin3_pw_rmdead(mctx, pw);
+    case ODIN3_PROC_PH_PRUNE:
+        return odin3_pw_prune(mctx, pw);
+    case ODIN3_PROC_PH_ARST:
+        return odin3_pw_arst(mctx, pw);
+    case ODIN3_PROC_PH_CLOCKS:
+        return proc_clocks(mctx, pw);
+    default:
+        return odin3_proc_pending_run(mctx, phase);
+    }
 }
 
 /* One phase call: the test hook when it handles the call, else the real phase. */
@@ -276,10 +296,12 @@ static odin3_status proc_reencode(odin3_proc_mctx *mctx) {
     return st == ODIN3_OK ? odin3_proc_apply_merges(mctx) : st;
 }
 
-/* The end of step A (point (h)): a pending lowering phase fails the module before any change. */
+/* The end of step A (point (h)): a pending lowering phase fails the module before any change. A
+ * phase hook fakes the phases (proc_test.h), so it must handle every pending lowering phase and
+ * the check is skipped while one is installed. */
 static bool lowering_pending(odin3_proc_mctx *mctx) {
     odin3_proc_phase first = odin3_proc_pending_first();
-    if (first < ODIN3_PROC_PH_MUX || first >= ODIN3_PROC_N_PHASES) {
+    if (g_hooks.phase != NULL || first < ODIN3_PROC_PH_MUX || first >= ODIN3_PROC_N_PHASES) {
         return false;
     }
     (void)odin3_proc_pending_run(mctx, first);

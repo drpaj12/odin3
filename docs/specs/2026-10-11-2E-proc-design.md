@@ -294,8 +294,12 @@ which registers and latches are created, never their structure (§20).
 ### 5.1 clean (PR-7)
 
 `odin3_pw_clean(pw, case_index, max_depth)` is `proc_clean_case` (Yosys `proc_clean.cc`), with
-`max_depth` −1 for the whole tree and 1 when arst calls it. Repeated until a sweep changes
-nothing. In each case, in order:
+`max_depth` −1 for the whole tree and 1 when arst calls it. Repeated while a sweep sets Yosys's
+`did_something` (*amended, 2E Task 4 review*: not "until a sweep changes nothing"): an empty
+action, a switch without cases, an inline, and a parallel or trailing empty case removed set it;
+the constant rule and the full_case rule do not, so a sweep that only folds or empties a
+full_case switch is the last (Yosys 0.55 then keeps the caseless switch, `switch \s` / `end`,
+verified). In each case, in order:
 
 1. Remove every action whose `lhs` is empty (2E never decodes one; arst and the ff phase create
    them).
@@ -308,15 +312,30 @@ nothing. In each case, in order:
      case is removed, and if the match is the first case the signal is cleared.
    - **Inline.** If the switch is its parent case's **first** switch, has exactly one case, and
      its signal is empty or that case has no compares: append the case's actions to the parent's
-     actions, insert its switches at the front of the parent's switches, unlink the switch.
+     actions, insert its switches at the front of the parent's switches, and empty the switch: it
+     keeps its slot, without cases, until the parent's walk reaches it and rule 2 removes it
+     (*amended, 2E Task 4*: Yosys clears `sw->cases` and erases the switch later; when no switch
+     moves in front of it, the slot survives into the next sweep, and that extra sweep is
+     observable: a full_case switch emptied after it is then removed, verified on 0.55).
    - **Otherwise** recurse (depth permitting) into each case, then remove empty cases (no actions,
      no switches): under `FULL_CASE` only when *all* are empty (then all go); under
      `PARALLEL_CASE` without `FULL_CASE`, every empty case; otherwise only trailing empty cases.
-3. A sync action whose `lhs` is empty is removed; a sync with no actions is removed.
+3. Syncs (*amended, 2E Task 4*: only in the whole-process call, `case_index` 0 and `max_depth`
+   −1, once before the sweeps, as Yosys's `proc_clean()`; arst's call never touches syncs): a sync
+   action whose `lhs` is empty is removed; a sync with no actions is removed.
 
 The "first switch" condition keeps order: appended actions run before every later switch only
-when no switch precedes the inlined one. Cost O(body) per sweep; every change removes or merges
-an object, so sweeps ≤ objects + 1 (1–3 in practice). Recorded counts feed only the statistics.
+when no switch precedes the inlined one. Cost O(body) per sweep, and every sweep walks the whole
+subtree again, as Yosys's does; every change that sets `did_something` removes or merges an
+object, so sweeps ≤ objects + 2. Usually 1–3, but **O(body × sweeps) is quadratic** on shapes
+where each sweep changes one level (*amended, 2E Task 4 review I1*, kept for oracle parity): a
+nest of `if (s) ;` with empty branches peels one level per sweep, a nest of single-case
+switches or N sequential switches on a constant inline one per sweep (N + 2 sweeps). The last
+shape is also a 2E exposure Yosys does not have: `wire en = 1'b0; … if (en) …` repeated in one
+block is a switch on a constant net in 2E's net view (§4), which clean folds and inlines one per
+sweep, where Yosys sees a wire name and runs one sweep. `test_clean_work_count` pins the
+sweeps and frame steps of both shapes at depth 200 (both ≈ 2 × 200 × 202 steps), so a later
+worklist may only lower them. Recorded counts feed only the statistics.
 
 ### 5.2 rmdead (PR-8)
 
@@ -344,7 +363,19 @@ complete coverage is removed as dead).
 
 A pool past `ODIN3_PROC_MAX_PATTERN_BITS` (§16) stops this switch's analysis: its remaining cases
 and compares are kept, `FULL_CASE` is not set, and the warning of §15 (W5a) is given once for
-the switch. The result is equivalent (dead cases cost cells, never meaning). Cost: O(compares ×
+the switch. *Amended (2E Task 4 review M2, M3):* the pattern pools of the switches being processed
+at once (a switch and those nested in its current case) share the cap, so nesting cannot
+multiply it; the pool that grows past it stops and drops its patterns. *Amended (2E Task 5
+review):* a tripped switch keeps its flags, `parallel_case` included, and never gains `FULL_CASE`,
+except that a constant compare with no 0/1 bit (all `-`, x or z) still empties the pool: every
+later constant compare, the cases left without compares and the default are then removed and the
+switch gains `FULL_CASE`, exactly as in Yosys, whose pool is empty after such a compare whether it
+took it or not (this also keeps an all-`-` item from reaching §6's append with an empty select).
+*Amended (2E Task 6, carry-over N1):* a default case reached past the trip empties the pool the same
+way (Yosys's `take_all`): every later constant compare, the cases then left without compares and a
+later default go, and the switch gains `FULL_CASE`, wherever the default stands.
+The result is Yosys's semantics on the body with the remaining items kept, with the divergences
+§20 #7 lists. Cost: O(compares ×
 width) for the defined pool; the pattern pool is O(patterns × width) per operation and can grow
 with the number of overlapping wildcard items, hence the cap.
 
@@ -412,21 +443,30 @@ order is their priority in the ff phase (first = highest).
 - **`apply_reset(sig)`** computes the value the reset forces: `rspec` = the assign view of `sig`;
   `rval` starts all `SM` except `rspec`'s constant bits. Repeat: apply the root case to it
   (`apply_const`), map `rval` through the assign view, stop when fully constant or unchanged,
-  else `rspec = rval`; after `ODIN3_PROC_MAX_ARST_ROUNDS` (100, Yosys's) rounds it is error E3.
+  else `rspec = rval`; a value not settled after `ODIN3_PROC_MAX_ARST_ROUNDS` (100) rounds is
+  error E3 (*amended, 2E Task 6*: Yosys tests `count > 100` before its unchanged test, so it
+  errors at round 102; §20 #16).
   `apply_const(case)`: every action replaces matching `rspec` bits in `rval` (by `rhs`, or by
   `SM` when the case is "unknown"); then for each switch: one with an empty signal descends into
   every case with the current flag and then, because an empty signal never passes
   `check_signal`, once more as unknown (Yosys's fall-through, kept); one whose signal passes
   `check_signal` against the reset descends, as known, only into the first case with a compare
   equal to the 1-bit `polarity` value, or the first default; any other switch descends into
-  every case as unknown. `SM` left in the result is error E2. The
+  every case as unknown. (*Amended, 2E Task 6:* the second visit of an empty-signal switch writes
+  every position the first wrote, so 2E makes only the unknown one: the same result in linear
+  time.) `SM` left in the result is error E2. The
   result may be a non-constant signal without `SM` (a register not reset by the block, whose root
   default `t0(q) = q` survives prune): the ff phase handles it (§9).
 - **`eliminate_const(case, polarity)`**: in each switch of the case whose signal passes
   `check_signal`, the cases that match `polarity` are removed, the first other case keeps its body
   with its compares cleared, every case after it is removed, and the signal is cleared; switches
   that do not pass are descended into. Then the case is cleaned with depth 1 (§5.1) until stable,
-  which inlines the surviving branch.
+  which inlines the surviving branch. (*Amended, 2E Task 6:* proc_arst calls it only on the root,
+  whose only switch has the reset's signal itself, so `check_signal` holds at once and the descent
+  never runs; 2E eliminates that switch and cleans the root.)
+
+*Amended (2E Task 6):* arst reports one error per process, the first (Yosys aborts there), and the
+process's analysis stops.
 
 | Source (2D bodies, EL-34/EL-36) | Found | Sync after arst | Cells (§9) |
 |---|---|---|---|
@@ -451,6 +491,13 @@ would raise (Yosys raises them in `proc_dff`, after the muxes are built):
   different nets → E1a, naming both;
 - a bit assigned only by level syncs (possible only for a body that arrives with level syncs:
   arst always leaves one edge sync) → E5.
+
+*Amended (2E Task 6):* the bits are those of edge and level sync actions (`ALWAYS` syncs are the
+latch phase's), in the live view, sorted by `odin3_proc_bit_key`. One error per process: the
+first bit in that order with an error, named (§15) with the run of following bits of its wire that
+have the same error. Two edge syncs on the same net and the same edge are E1a (naming the net
+twice); E1b is only for opposite edges. E4 (§11) is checked first, as Yosys raises it in
+`proc_arst`, before `proc_dff`'s errors.
 
 So: one clock per register, `POSEDGE` → `CLK_POLARITY` 1, `NEGEDGE` → 0; any further edge
 events of the block must be resets found by arst. Different blocks may use different clocks (the
@@ -831,8 +878,8 @@ through `odin3_proc_test_set_limits` (`proc_test.h`, as 2A–2D do):
 | Cap | Value | Why / on reaching it |
 |---|---|---|
 | `ODIN3_PROC_MAX_ERRORS` | 20 | as 2C/2D; E7 |
-| `ODIN3_PROC_MAX_PATTERN_BITS` | 2^24 per pattern pool | `BitPatternPool` can grow with overlapping wildcard items; ≤ 4 MB per pool; past it W5a/W5b and an equivalent, coarser result |
-| `ODIN3_PROC_MAX_ARST_ROUNDS` | 100 | Yosys's limit; E3 |
+| `ODIN3_PROC_MAX_PATTERN_BITS` | 2^24 pattern bits (two per position, padding excluded): for rmdead's live pools together (§5.2), and per mux-grouping pool | `BitPatternPool` can grow with overlapping wildcard items. *Amended (2E Task 4 review M2):* the words of the pools under the cap stay ≤ 5.2 MB (widths 12–16 are the worst: 32 positions per word, and at most 3^w patterns), and a take briefly holds about twice that plus its index; past the cap W5a/W5b and the result §20 #7 describes |
+| `ODIN3_PROC_MAX_ARST_ROUNDS` | 100 | Yosys's limit, counted as §20 #16 says; E3 |
 | `ODIN3_PROC_MAX_SIGNAL_WALK` | 1024 driver hops | only a cycle of inverters reaches it; `check_signal` answers false |
 | design byte budget | 60% of physical memory (2D's formula, `ODIN3_BUDGET_FRACTION`) | **one budget for the whole design**, not one per pass: checked at each process boundary and every 2^16 created pins against `odin3_design_bytes_reserved(design)` (new read-only IR accessor, 2E-1 Task 3: every module's stores, arenas and pin pools plus the strtab, provenance store and tombstones) + `odin3_ast_bytes_reserved` of every AST store the design holds + 2E's working forms. Since it measures what is held, not a per-pass estimate, 2D's, 2E's and 2F's checks cannot add up to more than 60% (2D and 2F are invited to call the same `odin3_budget_check`, §23). E6, fatal (memory rule: a host OOM kills the WSL VM) |
 
@@ -959,7 +1006,7 @@ expected cells as `write_rtlil` text of the module.
   first/later, with `-` and x compares kept, the inline's first-switch condition, the three
   empty-case rules); rmdead with both pools (a `case` listing every value gains `FULL_CASE` and
   loses its default; `casez 2'b1?` then `2'b10` removes the second; a non-constant item stops
-  nothing), the pattern cap (W5a, equivalent result).
+  nothing), the pattern cap (W5a, §20 #7's result, `parallel_case` kept, the all-`-` rule).
 - `test_proc_prune.c`: promotion of a root assignment, no promotion when a later switch assigns
   the bit, removal of overwritten actions, the intersection over cases with and without a
   default, `FULL_CASE`.
@@ -1133,7 +1180,7 @@ peak RSS):
 | lenet.v, the Phase 2 script through `proc`, peak RSS | ≤ 3.0 GB |
 | the 31 VTR files, total `proc --noopt` | ≤ 0.5 s |
 | the 33 Koios files, total `proc --noopt` | ≤ 8 s |
-| complexity | O(body + cells and pins created) per process, plus Yosys's own super-linear points: pattern pools (capped), quickcheck O(actions × mux cone), groups O(outputs × sync actions) |
+| complexity | O(body + cells and pins created) per process, plus Yosys's own super-linear points: clean's sweeps O(body × sweeps), sweeps up to the number of nested or sequential switches it inlines or empties one per sweep (§5.1; quadratic on those shapes, kept for oracle parity), pattern pools (capped), quickcheck O(actions × mux cone), groups O(outputs × sync actions) |
 
 Step F's time is 2F's (`opt_expr`, 2F §19) and is reported separately.
 
@@ -1157,7 +1204,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 4 | no `proc_init` | runs it | runs it | 2D emits `init` attributes directly |
 | 5 | `$aldff` when the reset value is not made of constant nets | `ConstEval` may prove it constant (`$adff`) | same | 2D folds constant cells; equivalent |
 | 6 | `check_signal` stops after 1024 hops | recurses until the stack overflows on a cycle | same | robustness |
-| 7 | pattern pools capped (W5a/W5b) | unbounded | same | memory rule; equivalent, coarser |
+| 7 | pattern pools capped (W5a/W5b; rmdead's nested pools share the cap) | unbounded | same | memory rule. Past a W5a trip the switch keeps its later items and its flags, without `FULL_CASE` unless a default is reached: Yosys's semantics on the body with those items kept. Equal or more defined values unless the switch is `parallel_case` and a dead item or default is kept; then inputs selecting two or more items may give x where Yosys gives a value, or a dead item's value where Yosys keeps the fall-through value: not a refinement (verified on 0.55, 2E Task 5 review). Constant items after a compare with no 0/1 bit (all `-`, x or z), or after a default, are still removed, and a default still gives `FULL_CASE` (§5.2; *amended, 2E Task 6*: after the default the result is Yosys's; the default itself is kept where Yosys drops it as dead). A block whose items cover every value without a default can gain an always-enabled latch (no `FULL_CASE`, so the hold stays; equivalent values, a `$dlatch` and W1 more; verified on 0.55). W5b: extra groups, equivalent. (*Amended, 2E Task 5 review*: the switch no longer loses `parallel_case`.) |
 | 8 | processes in node-ID order | process dictionary order | same | determinism; differs only when two latches share a mux (set-undef rewrites) |
 | 9 | bits ordered by (primary wire ID, bit) | by name-interning order, then offset | same | reproducible; creation order only |
 | 10 | W1, W2 are warnings | logged | logged | DESIGN §6 "latch detection (warn)" |
@@ -1166,6 +1213,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 | 13 | SV attribute checks (`always_ff`, …), `$global_clock`, any-edge, `-global_arst`, `-ifx`, `-nomux` not provided | provided | — | not producible by Verilog-2005 bodies; Phase 5 revisits |
 | 14 | cells unnamed (`$c<ID>` when written) | `$procmux$N`, `$procdff$N` | same | names carry no meaning; provenance does |
 | 15 | find_mux_feedback memoised per `(net, set_undef)` (§8) | no memo: exponential on shared cones; a second visit of a mux whose pin it moved to x drops that branch | same | linear time, no error on legal input; differs only on shared cones with a direct feedback input, where Yosys's hold depends on visiting order |
+| 16 | E3 when `apply_reset`'s value has not settled after 100 rounds (*amended, 2E Task 6*) | errors at `count > 100`, tested before its unchanged test: at round 102 | same | the brief's cap semantics (the cap's rounds, lowered by the test hook); differs only on a chain of 100–101 substitutions |
 
 ## 21. Review focus
 

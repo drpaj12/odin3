@@ -193,6 +193,115 @@ odin3_status odin3_proc_orphans(odin3_proc_mctx *mctx);
  */
 odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at);
 
+/* --- step A: the decision-tree phases (§5) ------------------------------------------------- */
+
+/*
+ * clean (§5.1, PR-7; proc_clean.c): Yosys 0.55's proc_clean_case on case case_index of pw, swept
+ * again while a sweep sets Yosys's did_something (an empty action, empty switch, inline, or a
+ * parallel or trailing empty case removed; a constant switch folded or a full_case switch emptied
+ * sets none). Each sweep walks the subtree from case_index, as Yosys's does, so the cost is
+ * O(subtree x sweeps) (§19). max_depth -1 is the whole tree; arst passes 1. With case_index 0 and
+ * max_depth -1 it is proc_clean on the process: first every sync action with an empty lhs, then
+ * every sync without actions, is removed. An inlined switch stays in its parent's list with no
+ * cases until the parent's walk reaches it again, as in Yosys. No recursion. ODIN3_ERR_NO_MEMORY
+ * (pw stays a valid tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL pw or a case index past its
+ * cases.
+ */
+odin3_status odin3_pw_clean(odin3_pw *pw, uint32_t case_index, int32_t max_depth);
+
+/* odin3_pw_clean's max_depth for the whole tree (proc_clean's own call). */
+enum { ODIN3_PW_CLEAN_WHOLE_TREE = -1 };
+
+/*
+ * rmdead (§5.2, PR-8; proc_rmdead.c): Yosys 0.55's proc_rmdead on every switch of pw's root case,
+ * depth first, cases in order, each switch with its own pool (odin3_fdpool when its signal has no
+ * constant bit and every compare is fully defined, else odin3_ppool): compares the pool does not
+ * take are removed, a non-default case left without compares is removed, a default case takes
+ * all, and a switch whose pool ends empty gains ODIN3_SWITCH_FULL_CASE. The pattern pools of the
+ * switches being processed (a switch and the ones nested in its current case) share the cap: past
+ * it the pool that grew stops (odin3_ppool_stop), and its switch keeps the rest of its cases and
+ * compares and its flags, without full_case (§20 #7), and gets W5a once (at the switch's record,
+ * else the process's); only a constant compare without 0/1 bits, or a default case, still empties
+ * it (every later constant compare goes, as does a later default, and the switch gains
+ * full_case), as in Yosys.
+ * ODIN3_ERR_NO_MEMORY (pw stays a valid tree).
+ */
+odin3_status odin3_pw_rmdead(odin3_proc_mctx *mctx, odin3_pw *pw);
+
+/*
+ * prune (§5.3, PR-9; proc_prune.c): Yosys 0.55's proc_prune on pw in the raw view (its decoded
+ * nets). From the root case, each case's switches run last to first, then its actions last to
+ * first; a switch runs its cases in order, each from the state it was entered with, and adds the
+ * bits newly assigned in every case when it is full_case or has a default. An action bit already
+ * assigned later on the path goes, and so does a constant bit; a root action bit assigned nowhere
+ * later in the process (not in `affected`) is promoted. Actions left with no bits are removed,
+ * the others keep their remaining bits in order; each root action that promotes bits appends one
+ * promotion (lhs <- rhs in its bit order, its record) to pw->promoted, which step B and
+ * --stop-after apply. Uses mctx's scratch index (all zero again on return, also on failure) for
+ * the per-net marks and counts, so it costs O(body + lhs bits). ODIN3_ERR_NO_MEMORY (pw stays a
+ * valid tree); ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a pw without a root case, or an
+ * action whose lhs and rhs differ in length.
+ */
+odin3_status odin3_pw_prune(odin3_proc_mctx *mctx, odin3_pw *pw);
+
+/* --- step A: asynchronous resets and the clock pre-check (§5.4, §5.5, §11) ------------------ */
+
+/* A 1-bit switch signal and the net it may stand for (proc_arst.c). */
+typedef struct odin3_proc_sigref {
+    odin3_net_id signal, ref;
+} odin3_proc_sigref;
+
+/*
+ * Yosys 0.55's check_signal (§5.4): whether sr.signal is sr.ref seen through simple logic. Both
+ * are read as the working form reads a net (a constant net as its constant, then the net map), and
+ * the walk follows each net's driver (odin3_net_driver) while it is the 1-bit Y of $reduce_or or
+ * $reduce_bool (on to A), $logic_not or $not (on to A, polarity flipped), or $eq / $ne with a
+ * fully constant A (on to B) or else B (on to A), flipped for $eq unless that constant has a 1
+ * bit, for $ne when it has one. True when it reaches ref, with *polarity flipped once per
+ * inversion; false (polarity unchanged) at a constant, a net without such a driver, a port that is
+ * not one bit wide, or after odin3_proc_limits_now().max_signal_walk hops (a cycle of inverters,
+ * where Yosys recurses until its stack overflows). Never allocates; O(hops).
+ */
+bool odin3_proc_check_signal(odin3_proc_mctx *mctx, odin3_proc_sigref sr, bool *polarity);
+
+/*
+ * arst (§5.4, PR-10; proc_arst.c): Yosys 0.55's proc_arst without -global_arst. While the root
+ * case has exactly one switch, each edge sync is tried in order (polarity: POSEDGE) against the
+ * switch's signal (odin3_proc_check_signal). With several edge syncs the first that passes is an
+ * asynchronous reset: it becomes LEVEL1 (from POSEDGE) or LEVEL0, joins the level syncs, each of
+ * its actions gets rhs = the value the reset forces (apply_reset, in the assign view: a bit mapped
+ * through pw->promoted, lhs to rhs as Yosys's SigMap joins them, then through the net map), and
+ * the switch's cases for the reset value go, the first other one surviving without compares,
+ * inlined by a clean of the root at depth 1. With one edge sync it is a VHDL-style edge test: the
+ * same elimination with the polarity inverted. When anything was found the syncs are reordered:
+ * level, then edge, then the rest. Errors (at pw->prov, ODIN3_ERR_PARSE, the first one only): E2
+ * when a reset value keeps an ODIN3_PW_SM bit; E3 when it has not settled after
+ * odin3_proc_limits_now().max_arst_rounds rounds. Uses mctx's scratch index (zero again on
+ * return). ODIN3_ERR_NO_MEMORY (pw stays a valid tree); ODIN3_ERR_INVALID_ARG (logged) for a
+ * NULL argument or a pw without a root case.
+ */
+odin3_status odin3_pw_arst(odin3_proc_mctx *mctx, odin3_pw *pw);
+
+/*
+ * The clock pre-check (§5.5, PR-11; proc_clock.c), after arst: the errors Yosys's proc_dff would
+ * raise, before anything changes. Every lhs bit of an edge or level sync action, in the live view
+ * (odin3_proc_find) and sorted by odin3_proc_bit_key: a bit two edge syncs update is E1b when both
+ * are on one net with opposite edges, else E1a naming the first two in sync order; a bit only
+ * level syncs update is E5. The first bit in that order with an error is reported (at pw->prov,
+ * ODIN3_ERR_PARSE), named with the run of following bits on its wire that have the same error.
+ * ALWAYS syncs are ignored (the latch phase empties them first). ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_pw_check_clocks(odin3_proc_mctx *mctx, const odin3_pw *pw);
+
+/*
+ * E4 (§11, plan point (n); proc_clock.c), after arst: when pw has a level sync, the first net on
+ * an O pin of pw->node (pin order) that no sync action updates and that sits on a WR_EN, WR_ADDR
+ * or WR_DATA pin of a $mem gives "memory '<MEMID>' is written in an always block with
+ * asynchronous reset '<the first level sync's signal>'" (at pw->prov, ODIN3_ERR_PARSE). Uses
+ * mctx's scratch index (zero again on return). ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_pw_check_memwr(odin3_proc_mctx *mctx, const odin3_pw *pw);
+
 /* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
 
 /* The first pending phase in schedule order, ODIN3_PROC_N_PHASES when none is pending. */
