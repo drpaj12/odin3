@@ -118,7 +118,7 @@ Effort cues:
 8. **`pyproject.toml` and `tests/tools/__init__.py`.** Task 6 appends `tools/blif-vtr-check`, Task 7 `tools/vtr-models` and Task 11 `tools/vtr-read-check` to `[tool.ruff] src`, to `[tool.mypy] mypy_path` and to the `sys.path` tuple. 3H-1 appends `tools/vtr-qor` and 3D-5 `tools/abc-check`. In flight, 2D-2 and 2E-1 append `tools/elab-check` and `tools/proc-check`. Append entries; keep both.
 9. **`tools/netlist-compare/netlist_compare.py`.** Task 10 adds `--vtr-normalize` (a pre-canonicalisation rewrite). 2E Task 10 adds `--implicit-models`. Separate flags and functions; keep both.
 10. **`tools/blif-roundtrip/blif-roundtrip` and `odin3-blif-rt.c`.** Task 10 adds `--vtr`. Nothing else in flight touches them.
-11. **`tools/vtr-qor/qor_heavy.py`** (3H-1) is used only: `reexec_under_lock` from `vtr-read-check`, and its `verify-scope` command from `blif-roundtrip` (point (a)). 3E never edits `tools/vtr-qor/`.
+11. **`tools/vtr-qor/qor_heavy.py`** (3H-1) is used only: `reexec_under_lock` from `vtr-read-check`, and its `require-heavy` command from `blif-roundtrip` (point (a)). 3E never edits `tools/vtr-qor/`.
 12. **Heavy-run files** (`tools/heavy-run`, `tools/build-locked`, `cmake/Odin3Sweep.cmake`) are 2E-1's. 3E never copies or edits them. Task 11's CTests and every controller sweep wait for them on main.
 13. **The project grammar `abc_script`** (3D-6: `src/frontends/project/*`, `tests/golden/projects/*`, `project_fixtures.py`): **no 3E change.**
 14. **Docs.**
