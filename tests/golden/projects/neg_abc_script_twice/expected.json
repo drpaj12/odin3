@@ -1,0 +1,7 @@
+{
+  "description": "An .o3proj names its ABC script twice.",
+  "features": ["negative", "syntax", "abc_script"],
+  "phase": 2,
+  "formats": ["o3proj"],
+  "error": {"kind": "syntax", "at": "project.o3proj:4", "names": ["abc_script"]}
+}

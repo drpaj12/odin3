@@ -321,6 +321,8 @@ static void test_arity(void) {
         {"limit m\n", USAGE("1", "limit <libcell> <count>")},
         {"patterns\n", USAGE("1", "patterns <file.o3lib>")},
         {"flow\n", USAGE("1", "flow <script.o3>")},
+        {"abc_script\n", USAGE("1", "abc_script <file>")},
+        {"abc_script a.abc b.abc\n", USAGE("1", "abc_script <file>")},
         {"import\n", USAGE("1", "import <file.qpf|file.qsf> [revision <name>]")},
         {"import a.qsf revision\n", USAGE("1", "import <file.qpf|file.qsf> [revision <name>]")},
         {"import a.qsf rev r\n", USAGE("1", "import <file.qpf|file.qsf> [revision <name>]")},
@@ -575,7 +577,7 @@ static void test_split_errors(void) {
                              field("rules"));
 }
 
-/* --- flow, import -------------------------------------------------------------------------- */
+/* --- flow, abc_script, import -------------------------------------------------------------- */
 
 static void test_flow(void) {
     expect_text("flow $D/flow.o3\n\nflow $D/flow.o3\n",
@@ -585,6 +587,28 @@ static void test_flow(void) {
     /* given twice is checked before the path */
     expect_text("flow $D/flow.o3\nflow nope.o3\n",
                 "p.o3proj:2:1: error: syntax: flow given twice: 'flow'");
+}
+
+/* abc_script (3D AB-27): the path as given and resolved against the file, at its word. */
+static void test_abc_script(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_tree("abc_script.o3proj"));
+    TEST_ASSERT_EQUAL_INT(0, errors);
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    TEST_ASSERT_EQUAL_STRING("abc/map.abc", odin3_strtab_get(tab, proj->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING(ODIN3_O3PROJ_DATA "/abc/map.abc",
+                             odin3_strtab_get(tab, proj->abc_script.resolved));
+    TEST_ASSERT_EQUAL_STRING("abc_script.o3proj:3:12", loc_text(proj->abc_script.at));
+    TEST_ASSERT_EQUAL_STRING("\"abc/map.abc\"", field("abc_script"));
+    expect_text("abc_script $D/abc/map.abc\nfile verilog $D/src/a.v\n\nabc_script $D/abc/map.abc\n",
+                "p.o3proj:4:1: error: syntax: abc_script given twice: 'abc_script'");
+    /* given twice is checked before the path */
+    expect_text("abc_script $D/abc/map.abc\nabc_script abc/none.abc\n",
+                "p.o3proj:2:1: error: syntax: abc_script given twice: 'abc_script'");
+    expect_text("top t\n\nabc_script abc/none.abc\n",
+                "p.o3proj:3:12: error: missing_file: file not found: '$T/abc/none.abc'");
+    /* a directory is not a script */
+    expect_text("abc_script $D/abc\n", "p.o3proj:1:12: error: missing_file: file not found: "
+                                       "'$D/abc'");
 }
 
 static void test_import_records(void) {
@@ -702,6 +726,7 @@ int main(void) {
     RUN_TEST(test_map_cells_stripped);
     RUN_TEST(test_split_errors);
     RUN_TEST(test_flow);
+    RUN_TEST(test_abc_script);
     RUN_TEST(test_import_records);
     RUN_TEST(test_import_errors);
     RUN_TEST(test_out_of_memory);

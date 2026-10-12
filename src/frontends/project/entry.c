@@ -1,6 +1,6 @@
 /*
- * entry.c — read_project's core (PRJ-16): the entry and its format, the reader, --top, finish and
- * the info lines; a failed read drops the record.
+ * entry.c — read_project's core (PRJ-16): the entry and its format, the reader, --top,
+ * --abc-script, finish and the info lines; a failed read drops the record.
  */
 #include "frontends/project/project.h"
 
@@ -173,6 +173,36 @@ static odin3_status apply_top(odin3_project *proj, const odin3_project_request *
     return res;
 }
 
+/* --abc-script replaces the project's abc_script (3D AB-27): resolved against the working
+ * directory, it must be a regular file; *replaced = the old abc_script's given form when the
+ * resolved paths differ (0 otherwise), for the info line logged after finish. */
+static odin3_status apply_abc_script(odin3_project *proj, const odin3_project_request *req,
+                                     uint32_t *replaced) {
+    *replaced = 0;
+    if (req->abc_script == NULL) {
+        return ODIN3_OK;
+    }
+    odin3_bytes given = odin3_bytes_cstr(req->abc_script);
+    odin3_strbuf resolved;
+    odin3_strbuf_init(&resolved);
+    odin3_status res = entry_path(given, &resolved);
+    if (res == ODIN3_OK && odin3_path_stat(resolved.data) != ODIN3_PATH_FILE) {
+        res = unlocated(proj, ODIN3_PROJ_ERR_MISSING_FILE, "file not found", &given);
+    }
+    odin3_proj_path script = {0, 0, {0}};
+    res = res != ODIN3_OK ? res : odin3_project_intern(proj, given, &script.given);
+    res = res != ODIN3_OK ? res
+                          : odin3_project_intern(proj, (odin3_bytes){resolved.data, resolved.len},
+                                                 &script.resolved);
+    odin3_proj_path old = proj->abc_script;
+    if (res == ODIN3_OK && (old.given == 0 || old.resolved != script.resolved)) {
+        proj->abc_script = script; /* the same file keeps the project's line */
+        *replaced = old.given;
+    }
+    odin3_strbuf_free(&resolved);
+    return res;
+}
+
 /* "<entry>: <what>: A, B, …" when ids is not empty. */
 static odin3_status info_line(const odin3_project *proj, const odin3_vec *ids, const char *what) {
     if (ids->len == 0) {
@@ -195,13 +225,20 @@ static odin3_status info_line(const odin3_project *proj, const odin3_vec *ids, c
 
 static odin3_status read_entry(odin3_project *proj, const odin3_project_request *req) {
     uint32_t replaced = 0;
+    uint32_t replaced_script = 0;
     odin3_status res = set_entry(proj, req);
     res = res != ODIN3_OK ? res : run_reader(proj, req);
     res = res != ODIN3_OK ? res : apply_top(proj, req, &replaced);
+    res = res != ODIN3_OK ? res : apply_abc_script(proj, req, &replaced_script);
     res = res != ODIN3_OK ? res : odin3_project_finish(proj);
+    const char *entry = str_text(proj, proj->entry.given);
     if (res == ODIN3_OK && replaced != 0) { /* logged once the read can no longer fail */
-        odin3_log(ODIN3_LOG_INFO, "%s: --top %s replaces the project top %s",
-                  str_text(proj, proj->entry.given), req->top, str_text(proj, replaced));
+        odin3_log(ODIN3_LOG_INFO, "%s: --top %s replaces the project top %s", entry, req->top,
+                  str_text(proj, replaced));
+    }
+    if (res == ODIN3_OK && replaced_script != 0) {
+        odin3_log(ODIN3_LOG_INFO, "%s: --abc-script %s replaces the project abc_script %s", entry,
+                  req->abc_script, str_text(proj, replaced_script));
     }
     res = res != ODIN3_OK ? res : info_line(proj, &proj->ignored, "ignored");
     return res != ODIN3_OK ? res

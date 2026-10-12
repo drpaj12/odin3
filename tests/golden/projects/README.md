@@ -43,8 +43,8 @@ joins when the Odin II XML reader lands. Negative cases are phase 2, except
 
 Formats: `o3proj` = `project.o3proj`, `-f` = `files.f`, `qsf` = the case's `.qpf` (or the
 `.qsf` given in `entry`), `odin2` = `odin2.xml`. A format is absent when it cannot express the
-case (`-f`: no parameters, libraries, arch or rules; `.qsf`: always a top; Odin II XML: only
-Verilog/BLIF files, an arch file, an output and optimizations).
+case (`-f`: no parameters, libraries, arch, rules or ABC script; `.qsf`: always a top; Odin II
+XML: only Verilog/BLIF files, an arch file, an output and optimizations).
 
 | Case | Phase | Features | Formats | Oracle / expected error |
 |---|---|---|---|---|
@@ -62,6 +62,7 @@ Verilog/BLIF files, an arch file, an output and optimizations).
 | `mixed_vhdl_top` | 5 | mixed, vhdl top, verilog | o3proj -f qsf | ghdl+yosys |
 | `multi_dir` | 2 | verilog, multi-file, directories, odin2 inputs form | o3proj -f qsf odin2 | yosys |
 | `nested_f` | 2 | verilog, nested -f, -F, incdir | o3proj -f | yosys |
+| `o3proj_abc_script` | 2 | verilog, abc_script | o3proj | yosys |
 | `o3proj_arch_rules` | 2 | verilog, arch, available, hide, cell, map, thresholds, limit, patterns, flow | o3proj | yosys |
 | `odin2_arch` | 2 | verilog, odin2 arch_file, odin2 optimizations, split | o3proj odin2 | yosys |
 | `param_instance` | 2 | verilog, instance params | o3proj qsf | yosys |
@@ -84,6 +85,9 @@ Verilog/BLIF files, an arch file, an output and optimizations).
 | `vhdl_split_units` | 5 | vhdl, analysis order, secondary units | o3proj -f qsf | ghdl+yosys |
 | `vhdl_two_libs` | 5 | vhdl, libraries, top in a library | o3proj qsf | ghdl+yosys |
 | `vhdl_work` | 5 | vhdl, multi-file, work | o3proj -f qsf | ghdl+yosys |
+| `neg_abc_script_flist` | 2 | negative, unknown option, abc_script | -f | `unknown_option` |
+| `neg_abc_script_missing` | 2 | negative, missing file, abc_script | o3proj | `missing_file` |
+| `neg_abc_script_twice` | 2 | negative, syntax, abc_script | o3proj | `syntax` |
 | `neg_ambiguous_revision` | 2 | negative, ambiguous revision, import | o3proj qsf | `ambiguous_revision` |
 | `neg_ambiguous_top` | 2 | negative, ambiguous top | o3proj -f odin2 | `ambiguous_top` |
 | `neg_dependency_cycle` | 5 | negative, dependency cycle, vhdl | o3proj -f qsf | `dependency_cycle` |
@@ -148,9 +152,11 @@ none (`qsf_vqm`: Yosys has no Cyclone V primitive library; Phase 6).
 
 ### The normalized record
 
-Every key is always present, in this order. Paths are relative to the case directory, `/`
-separated, normalized: a reader records each path as given and as resolved (absolute), and the
-test harness makes the absolute path relative to the case directory before comparing.
+Every key is always present, in this order (`files libfiles libdirs libext incdirs defines top
+params arch rules inventory overrides flow abc_script output ignored duplicates`). Paths are
+relative to the case directory, `/` separated, normalized: a reader records each path as given
+and as resolved (absolute), and the test harness makes the absolute path relative to the case
+directory before comparing.
 
 | Key | Value |
 |---|---|
@@ -166,6 +172,7 @@ test harness makes the absolute path relative to the case directory before compa
 | `inventory` | `available`: `[{cell, count}]` |
 | `overrides` | `hide` (`cell`), `cell` (`name`, `from`, `params`) |
 | `flow` | flow script path or null (stored, not executed) |
+| `abc_script` | the ABC script path or null (stored; `abc` uses it, 3D §7.2) |
 | `output` | Odin II `<output>`: `{path, format}` or null |
 | `ignored` | sorted, unique names of ignored `.qsf`/`.qip` assignments and commands (`LOCATION` for pins, `-hdl_version`) or Odin II elements/attributes; one info line `info: <file>: ignored: A, B, …` |
 | `duplicates` | sorted paths listed more than once (read once); one info line |

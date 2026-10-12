@@ -91,6 +91,7 @@ void tearDown(void) {
     odin3_log_set_sink(NULL, NULL);
     (void)odin3_pass_set_revision(NULL);
     (void)odin3_pass_set_top_name(NULL);
+    (void)odin3_pass_set_abc_script(NULL);
     odin3_pass_options opts = odin3_pass_get_options();
     opts.diag_paths = ODIN3_SRCFMT_GIVEN;
     odin3_pass_set_options(opts);
@@ -243,6 +244,30 @@ static void test_top_option(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", P "/p.o3proj"));
     TEST_ASSERT_EQUAL_STRING("other", str(project()->top));
     TEST_ASSERT_EQUAL_STRING(P "/p.o3proj: --top other replaces the project top top", info);
+}
+
+/* 3D's --abc-script (the option, as the CLI sets it through odin3_pass_set_abc_script) replaces
+ * the project's abc_script, with an info line; a missing file fails the read; cleared, the
+ * project's own stays. */
+static void test_abc_script_option(void) {
+    const char *entry = C "/o3proj_abc_script/project.o3proj";
+    const char *cli = C "/neg_abc_script_twice/abc/map.abc";
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(cli));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", entry));
+    TEST_ASSERT_EQUAL_STRING(cli, str(project()->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING(C "/o3proj_abc_script/project.o3proj: --abc-script " C
+                               "/neg_abc_script_twice/abc/map.abc replaces the project abc_script "
+                               "abc/map.abc",
+                             info);
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(C "/none.abc"));
+    expect(ODIN3_ERR_PARSE, "missing_file: file not found: '" C "/none.abc'",
+           run("read_project", entry));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", entry));
+    TEST_ASSERT_EQUAL_STRING("abc/map.abc", str(project()->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING("", info);
 }
 
 /* --- dump_project -------------------------------------------------------------------------- */
@@ -494,6 +519,7 @@ int main(void) {
     RUN_TEST(test_revision_setter);
     RUN_TEST(test_revision_setter_oom);
     RUN_TEST(test_top_option);
+    RUN_TEST(test_abc_script_option);
     RUN_TEST(test_dump_project_misuse);
     RUN_TEST(test_dump_project_file);
     RUN_TEST(test_diag_paths_option);

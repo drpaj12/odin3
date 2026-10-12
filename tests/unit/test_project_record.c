@@ -1,7 +1,8 @@
 /*
  * test_project_record.c — unit tests for the project record (PRJ-1..4): design ownership, project
  * file loading, builders and their located errors, finish, the JSON dump (hand-built, empty,
- * escapes, the single_file corpus case) and an OOM sweep with the record dropped.
+ * escapes, the single_file corpus case), the --abc-script request (3D AB-27) and an OOM sweep with
+ * the record dropped.
  */
 #include "ast/srcman.h"
 #include "frontends/project/paths.h"
@@ -21,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef ODIN3_PROJECT_FIXTURES
@@ -28,6 +30,7 @@
 #endif
 
 enum { LONG_EXT = 4096, PATH_BUF = 512, MSG_MAX = 4096, OOM_LIMIT = 400, FIXTURE_MAX = 1 << 16 };
+enum { CWD_BUF = 4096 };
 
 static odin3_design *design;
 static odin3_project *proj;
@@ -36,6 +39,8 @@ static char tmp[PATH_BUF / 2];
 static char captured[MSG_MAX];
 static char info[MSG_MAX];
 static int errors;
+static int infos;
+static char cwd[CWD_BUF];
 
 static void sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
@@ -43,8 +48,24 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
         errors++;
         (void)snprintf(captured, sizeof captured, "%s", msg);
     } else if (level == ODIN3_LOG_INFO) {
+        infos++;
         (void)snprintf(info, sizeof info, "%s", msg);
     }
+}
+
+/* A fresh temporary directory in tmp, in getcwd()'s form: the read resolves against getcwd(),
+ * which sees through a symlinked TMPDIR. */
+static void make_tmp(void) {
+    const char *base = getenv("TMPDIR");
+    (void)snprintf(tmp, sizeof tmp, "%s/odin3_record_XXXXXX",
+                   base != NULL && base[0] != '\0' ? base : "/tmp");
+    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    char real[CWD_BUF];
+    TEST_ASSERT_EQUAL_INT(0, chdir(tmp));
+    TEST_ASSERT_NOT_NULL(getcwd(real, sizeof real));
+    TEST_ASSERT_EQUAL_INT(0, chdir(cwd));
+    TEST_ASSERT_TRUE(strlen(real) < sizeof tmp);
+    memcpy(tmp, real, strlen(real) + 1);
 }
 
 void setUp(void) {
@@ -52,15 +73,14 @@ void setUp(void) {
     captured[0] = '\0';
     info[0] = '\0';
     errors = 0;
+    infos = 0;
+    TEST_ASSERT_NOT_NULL(getcwd(cwd, sizeof cwd));
     odin3_strbuf_init(&text);
     design = odin3_design_create();
     TEST_ASSERT_NOT_NULL(design);
     proj = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_record_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    make_tmp();
 }
 
 static const char *in_tmp(const char *rel, char *buf) {
@@ -69,13 +89,16 @@ static const char *in_tmp(const char *rel, char *buf) {
 }
 
 void tearDown(void) {
-    static const char *const files[] = {"p.f", "q.f", "lines.f", "empty.f", "big.f"};
+    static const char *const files[] = {"p.f",      "q.f",      "lines.f", "empty.f",    "big.f",
+                                        "p.o3proj", "e.o3proj", "cli.abc", "abc/map.abc"};
     char path[PATH_BUF];
     odin3_util_set_alloc_fail_after(-1);
     odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(0, chdir(cwd));
     for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
         (void)unlink(in_tmp(files[i], path));
     }
+    (void)rmdir(in_tmp("abc", path));
     TEST_ASSERT_EQUAL_INT(0, rmdir(tmp));
     odin3_strbuf_free(&text);
     odin3_design_destroy(design);
@@ -599,6 +622,7 @@ static const char k_empty[] = "{\n"
                               "  \"inventory\": [],\n"
                               "  \"overrides\": [],\n"
                               "  \"flow\": null,\n"
+                              "  \"abc_script\": null,\n"
                               "  \"output\": null,\n"
                               "  \"ignored\": [],\n"
                               "  \"duplicates\": []\n"
@@ -643,6 +667,7 @@ static const char k_full[] =
     "\"name\": \"mult_27\", \"from\": \"multiply\", \"params\": {\"A_WIDTH\": \"27\", \"B\": "
     "\"\"}}, {\"override\": \"cell\", \"name\": \"c\", \"from\": \"d\", \"params\": {}}],\n"
     "  \"flow\": \"/p/flow.o3\",\n"
+    "  \"abc_script\": \"/p/abc/map.abc\",\n"
     "  \"output\": {\"path\": \"/p/out/x.blif\", \"format\": \"blif\"},\n"
     "  \"ignored\": [\"-hdl_version\", \"LOCATION\"],\n"
     "  \"duplicates\": [\"/p/a.v\"]\n"
@@ -798,6 +823,7 @@ static odin3_status build_overrides(void) {
 
 static odin3_status build_tail(void) {
     odin3_status st = make_path("/p/flow.o3", &proj->flow);
+    st = st != ODIN3_OK ? st : make_path("/p/abc/map.abc", &proj->abc_script);
     st = st != ODIN3_OK ? st : intern("/p/out/x.blif", &proj->output.path);
     st = st != ODIN3_OK ? st : intern("blif", &proj->output.format);
     proj->output.present = true;
@@ -933,6 +959,79 @@ static bool oom_try(long fail_after) {
     return false;
 }
 
+/* --- the --abc-script request (3D AB-27) ------------------------------------------------- */
+
+/* tmp holds p.o3proj (abc_script abc/map.abc), e.o3proj (none), abc/map.abc and cli.abc; the
+ * working directory is tmp. */
+static void abc_script_tree(void) {
+    char path[PATH_BUF];
+    TEST_ASSERT_EQUAL_INT(0, mkdir(in_tmp("abc", path), S_IRWXU));
+    write_file("abc/map.abc", odin3_bytes_cstr("strash; dch -f; if -K {K}\n"));
+    write_file("cli.abc", odin3_bytes_cstr("strash\n"));
+    write_file("p.o3proj", odin3_bytes_cstr("# p\n\nabc_script abc/map.abc\n"));
+    write_file("e.o3proj", odin3_bytes_cstr("# no abc_script\n"));
+    TEST_ASSERT_EQUAL_INT(0, chdir(tmp));
+}
+
+/* A fresh design (the record of the last read dropped with it) and the read of req. */
+static odin3_status read_request(const odin3_project_request *req) {
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    proj = NULL;
+    errors = 0;
+    infos = 0;
+    captured[0] = '\0';
+    info[0] = '\0';
+    odin3_status st = odin3_project_read(design, req);
+    proj = odin3_design_project(design);
+    return st;
+}
+
+static void test_request_abc_script(void) {
+    abc_script_tree();
+    char path[PATH_BUF];
+    odin3_project_request req = {"p.o3proj", 0, NULL, NULL, "cli.abc"};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_request(&req));
+    TEST_ASSERT_EQUAL_STRING("cli.abc", str_of(proj->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING(in_tmp("cli.abc", path), str_of(proj->abc_script.resolved));
+    TEST_ASSERT_EQUAL_UINT32(0, proj->abc_script.at.v);
+    TEST_ASSERT_EQUAL_INT(1, infos);
+    TEST_ASSERT_EQUAL_STRING("p.o3proj: --abc-script cli.abc replaces the project abc_script "
+                             "abc/map.abc",
+                             info);
+    /* the same file: no info line, the project's line kept */
+    req.abc_script = in_tmp("abc/map.abc", path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_request(&req));
+    TEST_ASSERT_EQUAL_STRING("abc/map.abc", str_of(proj->abc_script.given));
+    TEST_ASSERT_TRUE(proj->abc_script.at.v != 0);
+    TEST_ASSERT_EQUAL_INT(0, infos);
+    /* no project abc_script: the request sets it, no info line */
+    req = (odin3_project_request){"e.o3proj", 0, NULL, NULL, "cli.abc"};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_request(&req));
+    TEST_ASSERT_EQUAL_STRING("cli.abc", str_of(proj->abc_script.given));
+    TEST_ASSERT_EQUAL_INT(0, infos);
+    /* no request: the project's own */
+    req = (odin3_project_request){"p.o3proj", 0, NULL, NULL, NULL};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_request(&req));
+    TEST_ASSERT_EQUAL_STRING("abc/map.abc", str_of(proj->abc_script.given));
+}
+
+static void test_request_abc_script_missing(void) {
+    abc_script_tree();
+    static const char *const bad[] = {"none.abc", "abc", ""};
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        odin3_project_request req = {"p.o3proj", 0, NULL, NULL, bad[i]};
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_request(&req));
+        char want[MSG_MAX];
+        int len = snprintf(want, sizeof want, "missing_file: file not found: '%s'", bad[i]);
+        TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+        TEST_ASSERT_EQUAL_STRING(want, captured);
+        TEST_ASSERT_EQUAL_INT(1, errors);
+        TEST_ASSERT_NULL(proj); /* the record is dropped */
+    }
+}
+
 static void test_out_of_memory_drops_the_record(void) {
     bool succeeded = false;
     long tries = 0;
@@ -1066,6 +1165,8 @@ int main(void) {
     RUN_TEST(test_dump_rare_branches);
     RUN_TEST(test_builders_unchanged_on_no_memory);
     RUN_TEST(test_dump_single_file_matches_corpus);
+    RUN_TEST(test_request_abc_script);
+    RUN_TEST(test_request_abc_script_missing);
     RUN_TEST(test_out_of_memory_drops_the_record);
     return UNITY_END();
 }

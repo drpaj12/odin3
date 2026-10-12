@@ -172,7 +172,8 @@ typedef struct odin3_project {
     odin3_vec defines, params, arch, rules, rule_cells, inventory, overrides, override_params;
     uint32_t top; /* "mod" or "lib.mod" as given; 0 = auto */
     odin3_loc top_at;
-    odin3_proj_path flow; /* given 0 = none ("" is never a word) */
+    odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
+    odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
     struct {
         bool present;
         uint32_t path, format; /* path: normalized absolute; format: lower-cased */
@@ -394,10 +395,10 @@ odin3_status odin3_project_finish(odin3_project *proj);
 /*
  * Appends the record as JSON: "{\n", one `  "key": value` line per README key in README order
  * (files libfiles libdirs libext incdirs defines top params arch rules inventory overrides flow
- * output ignored duplicates), each array or object on one line with Python's ", " and ": "
- * separators, "}\n". Paths are resolved; top, flow, output and a bare define's value are null when
- * absent. Strings are UTF-8 with JSON escapes for '"', '\\' and control bytes; a byte that is not
- * part of valid UTF-8 is written as \u00XX. NO_MEMORY (out unchanged).
+ * abc_script output ignored duplicates), each array or object on one line with Python's ", " and
+ * ": " separators, "}\n". Paths are resolved; top, flow, abc_script, output and a bare define's
+ * value are null when absent. Strings are UTF-8 with JSON escapes for '"', '\\' and control bytes;
+ * a byte that is not part of valid UTF-8 is written as \u00XX. NO_MEMORY (out unchanged).
  */
 odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out);
 
@@ -433,10 +434,11 @@ odin3_status odin3_read_odin2(odin3_project *proj, const odin3_proj_path *file);
 
 /* What read_project reads. */
 typedef struct odin3_project_request {
-    const char *entry;    /* as given; a relative entry resolves against the working directory */
-    uint8_t format;       /* odin3_proj_format; 0: from the entry's suffix */
-    const char *revision; /* --revision; NULL: none ("" is a revision) */
-    const char *top;      /* 1D's --top; NULL: none */
+    const char *entry;      /* as given; a relative entry resolves against the working directory */
+    uint8_t format;         /* odin3_proj_format; 0: from the entry's suffix */
+    const char *revision;   /* --revision; NULL: none ("" is a revision) */
+    const char *top;        /* 1D's --top; NULL: none */
+    const char *abc_script; /* --abc-script (3D AB-27); NULL: none; relative to the working dir */
 } odin3_project_request;
 
 /*
@@ -448,7 +450,11 @@ typedef struct odin3_project_request {
  * `syntax` ("--revision needs a .qpf or .qsf entry"). Then the reader runs; then req->top replaces
  * the project's top (an info line
  * "<entry>: --top <new> replaces the project top <old>" when they differ; a bad name is an
- * unlocated `syntax`); then finish and the info lines "<entry>: ignored: A, B, …" and "<entry>:
+ * unlocated `syntax`); then req->abc_script, which must be a regular file (else an unlocated
+ * `missing_file`, names [as given]), replaces the project's abc_script (given = the CLI word, at
+ * {0}; an info line "<entry>: --abc-script <new> replaces the project abc_script <old>", both as
+ * given, when the resolved paths differ; the same resolved path keeps the project's line); then
+ * finish and the info lines "<entry>: ignored: A, B, …" and "<entry>:
  * listed more than once, read once: P, …" (resolved paths), each only when non-empty; <entry> is
  * the entry as given; every info line is logged after finish. Errors: PARSE (logged once), IO,
  * NO_MEMORY — each drops the record (odin3_design_drop_project); INVALID_ARG for a NULL req or

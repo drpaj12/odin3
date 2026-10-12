@@ -1,0 +1,3 @@
+# the ABC script the abc pass runs (3D AB-27): a path, resolved against this file
+file verilog src/a.v
+abc_script abc/map.abc

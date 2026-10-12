@@ -1,0 +1,27 @@
+{
+  "description": ".o3proj naming the ABC script of the abc pass (stored, not applied).",
+  "features": ["verilog", "abc_script"],
+  "phase": 2,
+  "formats": ["o3proj"],
+  "project": {
+    "files": [{"path": "src/top.v", "language": "verilog", "library": "work"}],
+    "libfiles": [],
+    "libdirs": [],
+    "libext": [],
+    "incdirs": [],
+    "defines": [],
+    "top": "top",
+    "params": [],
+    "arch": [],
+    "rules": [],
+    "inventory": [],
+    "overrides": [],
+    "flow": null,
+    "abc_script": "abc/map.abc",
+    "output": null,
+    "ignored": [],
+    "duplicates": []
+  },
+  "resolved": {"top": "work.top", "units": ["work.top"], "read": ["src/top.v"], "order": ["src/top.v"]},
+  "oracle": "yosys"
+}

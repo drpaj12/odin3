@@ -14,7 +14,7 @@
  * ABI v4 (Phase 2, 2A): the source manager and AST stores (kinds, sub-kinds, flags, caps, read
  * and build functions, keep levels); odin3_source gains the raw source-manager loc.
  * ABI v4 (cont., 2D): $proc processes and process counts, value kind PROC, pass processes slot.
- * ABI v4 (cont., 3D): pass-run arguments and run information.
+ * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -283,6 +283,16 @@ odin3_status odin3_pass_set_top_name(const char *name);
  * (the old revision is kept).
  */
 odin3_status odin3_pass_set_revision(const char *revision);
+
+/*
+ * Sets the ABC script path of later passes (the CLI's --abc-script; 3D AB-20, AB-27), as given:
+ * read_project resolves it against the working directory and replaces the project's abc_script
+ * with it (an info line when they differ; a path that is not a regular file makes that
+ * read_project fail with missing_file), and the abc pass runs it when no project was read; an
+ * `abc --script` argument wins for its run. NULL clears it. The string is copied. Process-wide.
+ * Fails only with ODIN3_ERR_NO_MEMORY (the old path is kept).
+ */
+odin3_status odin3_pass_set_abc_script(const char *path);
 
 /*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false

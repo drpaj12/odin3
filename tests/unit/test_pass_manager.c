@@ -604,6 +604,35 @@ static void test_top_option_used_by_hierarchy(void) {
     TEST_ASSERT_EQUAL_STRING("b", top_name());
 }
 
+/* odin3_pass_set_abc_script (3D AB-27) fills the option with a copy of the path, as given; the
+ * other options are kept. */
+static void test_abc_script_option_set(void) {
+    odin3_pass_set_options((odin3_pass_options){.check = true, .top = "b"});
+    char path[] = "abc/map.abc";
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(path));
+    path[0] = 'X';
+    odin3_pass_options opts = odin3_pass_get_options();
+    TEST_ASSERT_EQUAL_STRING("abc/map.abc", opts.abc_script);
+    TEST_ASSERT_TRUE(opts.abc_script != path);
+    TEST_ASSERT_TRUE(opts.check);
+    TEST_ASSERT_EQUAL_STRING("b", opts.top);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script("other.abc"));
+    TEST_ASSERT_EQUAL_STRING("other.abc", odin3_pass_get_options().abc_script);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(NULL));
+    TEST_ASSERT_NULL(odin3_pass_get_options().abc_script);
+}
+
+/* Out of memory, the setter fails with NO_MEMORY and the path set before stays. */
+static void test_abc_script_option_oom(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script("keep.abc"));
+    odin3_util_set_alloc_fail_after(0);
+    odin3_status st = odin3_pass_set_abc_script("new.abc");
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_EQUAL_STRING("keep.abc", odin3_pass_get_options().abc_script);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_abc_script(NULL));
+}
+
 /* --- scripts -----------------------------------------------------------------------------------
  */
 
@@ -1327,6 +1356,8 @@ int main(void) {
     RUN_TEST(test_top_option_applies_to_read_blif);
     RUN_TEST(test_top_option_names_no_module);
     RUN_TEST(test_top_option_used_by_hierarchy);
+    RUN_TEST(test_abc_script_option_set);
+    RUN_TEST(test_abc_script_option_oom);
     RUN_TEST(test_script_runs_in_order);
     RUN_TEST(test_script_args_reach_the_pass);
     RUN_TEST(test_script_unknown_pass_by_line);

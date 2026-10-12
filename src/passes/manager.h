@@ -69,7 +69,10 @@ const odin3_pass_def *odin3_pass_at(uint32_t index);
  * `hierarchy` uses it when given no `--top` (DESIGN §4.0: --top wins). revision: `--revision`
  * for `read_project` when has_revision ("" is a revision; NULL otherwise), caller-owned like top;
  * a read_project's own --revision wins. diag_paths: how diagnostics name files (`--diag-paths`,
- * PRJ-18), set on the design before each pass (odin3_design_set_diag_paths).
+ * PRJ-18), set on the design before each pass (odin3_design_set_diag_paths). abc_script: the ABC
+ * script path as given (`--abc-script`, 3D AB-20, AB-27), NULL for none; caller-owned like top;
+ * `read_project` replaces the project's abc_script with it, and the abc pass runs it when no
+ * project was read (an `abc --script` argument wins for its run).
  */
 typedef struct odin3_pass_options {
     bool check;
@@ -77,6 +80,7 @@ typedef struct odin3_pass_options {
     const char *revision;
     bool has_revision;
     odin3_srcfmt diag_paths;
+    const char *abc_script;
 } odin3_pass_options;
 
 void odin3_pass_set_options(odin3_pass_options opts);

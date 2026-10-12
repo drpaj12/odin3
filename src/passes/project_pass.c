@@ -129,8 +129,9 @@ static odin3_status parse_read_args(odin3_bytes args, read_args *out) {
     return st;
 }
 
-/* Fills the design's project record (odin3_project_read) with the option's top and revision; a
- * --revision argument wins over the option. Runs no front end; a flow is stored, not run. */
+/* Fills the design's project record (odin3_project_read) with the option's top, revision and ABC
+ * script (3D AB-27); a --revision argument wins over the option. Runs no front end; a flow is
+ * stored, not run. */
 static odin3_status read_project_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)ctx;
@@ -147,7 +148,7 @@ static odin3_status read_project_run(odin3_pass_ctx *ctx, odin3_design *design, 
     }
     if (st == ODIN3_OK) {
         odin3_pass_options opts = odin3_pass_get_options();
-        odin3_project_request req = {entry.data, parsed.format, NULL, opts.top};
+        odin3_project_request req = {entry.data, parsed.format, NULL, opts.top, opts.abc_script};
         if (parsed.revision.ptr != NULL) {
             req.revision = revision.data != NULL ? revision.data : "";
         } else if (opts.has_revision) {

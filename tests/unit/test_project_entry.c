@@ -84,7 +84,7 @@ static odin3_status read_req(const odin3_project_request *req) {
 }
 
 static odin3_status read_entry(const char *entry) {
-    odin3_project_request req = {entry, 0, NULL, NULL};
+    odin3_project_request req = {entry, 0, NULL, NULL, NULL};
     return read_req(&req);
 }
 
@@ -139,7 +139,7 @@ static void test_format_by_request(void) {
     TEST_ASSERT_EQUAL_STRING(D "/list.o3proj:1:1: error: unknown_key: unknown key: 'src/a.v'",
                              captured);
     fresh_design();
-    odin3_project_request req = {D "/list.o3proj", ODIN3_PROJ_FORMAT_FLIST, NULL, NULL};
+    odin3_project_request req = {D "/list.o3proj", ODIN3_PROJ_FORMAT_FLIST, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PROJ_FORMAT_FLIST, project()->format);
     TEST_ASSERT_EQUAL_UINT32(1, (uint32_t)project()->files.len);
@@ -165,17 +165,17 @@ static void test_entry_errors(void) {
     /* .xml is an Odin II config (2B-4), as is any entry with format ODIN2 */
     expect_failure(read_entry(D "/k6.xml"), ODIN3_ERR_PARSE,
                    D "/k6.xml:1:1: error: syntax: root must be <config>: 'architecture'");
-    odin3_project_request req = {D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2, NULL, NULL};
+    odin3_project_request req = {D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2, NULL, NULL, NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE,
                    D "/all.o3proj:1:1: error: syntax: text before the root element");
     /* a .qip with --format qsf is read as a .qsf */
-    req = (odin3_project_request){D "/q/ip.qip", ODIN3_PROJ_FORMAT_QUARTUS, NULL, NULL};
+    req = (odin3_project_request){D "/q/ip.qip", ODIN3_PROJ_FORMAT_QUARTUS, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("ip", str(project()->top));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_project_read(design, NULL));
     /* a format that is neither 0 nor an odin3_proj_format: misuse, no record touched */
     fresh_design();
-    req = (odin3_project_request){D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2 + 1, NULL, NULL};
+    req = (odin3_project_request){D "/all.o3proj", ODIN3_PROJ_FORMAT_ODIN2 + 1, NULL, NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, read_req(&req));
     TEST_ASSERT_NULL(odin3_design_project(design));
     TEST_ASSERT_EQUAL_INT(0, errors);
@@ -183,16 +183,16 @@ static void test_entry_errors(void) {
 
 /* --revision needs a Quartus entry; it chooses among a .qpf's revisions ("" is one). */
 static void test_revision(void) {
-    odin3_project_request req = {D "/all.o3proj", 0, "fast", NULL};
+    odin3_project_request req = {D "/all.o3proj", 0, "fast", NULL, NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE,
                    "syntax: --revision needs a .qpf or .qsf entry");
-    req = (odin3_project_request){D "/q/proj.qpf", 0, "small", NULL};
+    req = (odin3_project_request){D "/q/proj.qpf", 0, "small", NULL, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("small", str(project()->top));
     TEST_ASSERT_TRUE(project()->has_revision);
     TEST_ASSERT_EQUAL_STRING("small", str(project()->revision));
     fresh_design();
-    req = (odin3_project_request){D "/q/proj.qpf", 0, "", NULL};
+    req = (odin3_project_request){D "/q/proj.qpf", 0, "", NULL, NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE, "unknown_revision: no such revision: ''");
     expect_failure(read_entry(D "/q/proj.qpf"), ODIN3_ERR_PARSE,
                    D "/q/proj.qpf:1:1: error: ambiguous_revision: several revisions; choose one "
@@ -222,7 +222,7 @@ static void test_failure_drops_record(void) {
 /* --- --top and the info lines -------------------------------------------------------------- */
 
 static void test_top_replaces(void) {
-    odin3_project_request req = {D "/all.o3proj", 0, NULL, "other"};
+    odin3_project_request req = {D "/all.o3proj", 0, NULL, "other", NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("other", str(project()->top));
     TEST_ASSERT_EQUAL_UINT32(0, project()->top_at.v);
@@ -239,12 +239,12 @@ static void test_top_replaces(void) {
     TEST_ASSERT_EQUAL_INT(1, ninfos);
     fresh_design();
     /* no project top: --top sets it, no info line */
-    req = (odin3_project_request){D "/list.o3proj", ODIN3_PROJ_FORMAT_FLIST, NULL, "lib.t"};
+    req = (odin3_project_request){D "/list.o3proj", ODIN3_PROJ_FORMAT_FLIST, NULL, "lib.t", NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_req(&req));
     TEST_ASSERT_EQUAL_STRING("lib.t", str(project()->top));
     TEST_ASSERT_EQUAL_INT(0, ninfos);
     fresh_design();
-    req = (odin3_project_request){D "/all.o3proj", 0, NULL, "a b"};
+    req = (odin3_project_request){D "/all.o3proj", 0, NULL, "a b", NULL};
     expect_failure(read_req(&req), ODIN3_ERR_PARSE, "syntax: bad top name: 'a b'");
 }
 
@@ -258,6 +258,21 @@ static void test_info_lines(void) {
     TEST_ASSERT_EQUAL_STRING(D "/q/dups.qsf: ignored: -hdl_version, LOCATION", infos[0]);
     TEST_ASSERT_EQUAL_STRING(
         D "/q/dups.qsf: listed more than once, read once: " D "/lib/l.v, " D "/src/a.v", infos[1]);
+}
+
+/* 3D AB-27: a Quartus ABC_SCRIPT is ignored and listed like any assignment and sets no
+ * abc_script, also when imported; the importing .o3proj sets it. */
+static void test_qsf_abc_script_ignored(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(D "/q/abc.qsf"));
+    TEST_ASSERT_EQUAL_UINT32(0, project()->abc_script.given);
+    TEST_ASSERT_EQUAL_INT(1, ninfos);
+    TEST_ASSERT_EQUAL_STRING(D "/q/abc.qsf: ignored: ABC_SCRIPT", infos[0]);
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(D "/import_abc.o3proj"));
+    TEST_ASSERT_EQUAL_STRING("flow.o3", str(project()->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING(D "/flow.o3", str(project()->abc_script.resolved));
+    TEST_ASSERT_EQUAL_INT(1, ninfos);
+    TEST_ASSERT_EQUAL_STRING(D "/import_abc.o3proj: ignored: ABC_SCRIPT", infos[0]);
 }
 
 /* --- corpus -------------------------------------------------------------------------------- */
@@ -364,10 +379,11 @@ static void sweep(const odin3_project_request *req) {
 
 static void test_out_of_memory(void) {
     static const odin3_project_request reqs[] = {
-        {D "/all.o3proj", 0, NULL, "other"},
-        {D "/q/proj.qpf", 0, "fast", NULL},
-        {D "/q/dups.qsf", 0, NULL, NULL},
-        {ODIN3_PROJECT_FIXTURES "/odin2_arch/odin2.xml", 0, NULL, NULL},
+        {D "/all.o3proj", 0, NULL, "other", NULL},
+        {D "/q/proj.qpf", 0, "fast", NULL, NULL},
+        {D "/q/dups.qsf", 0, NULL, NULL, NULL},
+        {ODIN3_PROJECT_FIXTURES "/odin2_arch/odin2.xml", 0, NULL, NULL, NULL},
+        {D "/abc_script.o3proj", 0, NULL, NULL, D "/flow.o3"}, /* any extension */
     };
     for (size_t i = 0; i < sizeof reqs / sizeof reqs[0]; i++) {
         sweep(&reqs[i]);
@@ -385,6 +401,7 @@ int main(void) {
     RUN_TEST(test_failure_drops_record);
     RUN_TEST(test_top_replaces);
     RUN_TEST(test_info_lines);
+    RUN_TEST(test_qsf_abc_script_ignored);
     RUN_TEST(test_corpus_cases);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();

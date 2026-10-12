@@ -54,7 +54,9 @@ filled from a script or a project file (PHASE1 #18). It holds:
 - the **architecture**: tech libraries and architecture files (`read_arch`, §6 step 7: `.o3lib`,
   later VPR XML or an Altera device), in load order;
 - **partial-mapping rules** (§7), so a project says how its design meets that architecture;
-- optionally the flow itself (a pass script, as `odin3 script.o3`), so one file reproduces a run.
+- optionally the flow itself (a pass script, as `odin3 script.o3`), so one file reproduces a run;
+- optionally the **ABC script** the `abc` pass runs (§6 step 10), so that soft-logic
+  optimisation is part of what one file reproduces.
 
 **Architecture at the project level.** The project states what the target offers, not only
 which files describe it, so the mapper (and a reader of the project) sees the available hard
@@ -94,7 +96,8 @@ Ways to fill it (all produce the same record; a script may also list files direc
 - **native project file** `.o3proj` (`read_project <file>`): line-oriented like `.o3lib`
   (`file verilog rtl/top.v`, `incdir rtl/include`, `define WIDTH=8`, `top top`,
   `param top.WIDTH 16`, `arch k6_frac_N10_mem32K.o3lib`, `map * $mul to multiply min_width 9`,
-  `limit multiply 40`, `available multiply 112`, `hide dual_port_ram`, `flow synth.o3`);
+  `limit multiply 40`, `available multiply 112`, `hide dual_port_ram`, `flow synth.o3`,
+  `abc_script vtr.abc`);
 - **EDA file list** (`-f files.f`): source files, `+incdir+`, `+define+`, `-v`/`-y` library
   files and directories with `+libext+`, nested `-f`/`-F`, `-top`;
 - **Quartus `.qsf` / `.qpf` import**: design files (`VERILOG_FILE`, `SYSTEMVERILOG_FILE`,
@@ -145,8 +148,10 @@ word both are ordinary (`+define+D=#1`). A string macro keeps its quotes in its 
   [min_width|max_width|min_depth <n>]…`; `split <subject> [width] [depth min|max|<n>]`
   (memory splitting, Odin II's `<memory>`); `limit <cell> <n>`; `patterns <file.o3lib>`.
   Scopes are `*`, a module, or an instance path `top.u_a.u_b` (`*` wildcards); `.` separates.
-- `flow <script.o3>` (once); `import <file.qpf|file.qsf> [revision <name>]` reads a Quartus
-  project into this one (its top counts as this project's `top`).
+- `flow <script.o3>` (once); `abc_script <file>` (once): the ABC script of the `abc` pass, a
+  path (never inline text), any extension; `import <file.qpf|file.qsf> [revision <name>]` reads
+  a Quartus project into this one (its top counts as this project's `top`; an imported `.qsf`
+  cannot set `abc_script`, the importing `.o3proj` can).
 
 *`-f` lists.* A bare word is a source file (library `work`). Entries of the outermost list, and
 of every list reached through `-f <list>` — from the outermost list or from any nested list,
@@ -210,6 +215,16 @@ threshold_size="N">` → `map * $add to adder min_width N`, `<memory split_memor
 split_memory_depth="min|max|N">` → `split $mem [width] [depth …]`; their other attributes
 (`fixed`, `fracture`, `padding`, adder `size`) and other elements (`mix_soft_hard_blocks`,
 `debug_outputs`, …) are ignored and listed (`optimizations/multiply@fixed`). No top.
+
+*The ABC script.* Only `.o3proj` names one; a `-f` list has no form for it (`-abc_script` is
+`unknown_option`), Quartus has no such assignment (an `ABC_SCRIPT` assignment is ignored and
+listed like any other), Odin II XML never had one. The CLI loads one with `--abc-script
+<file>`, resolved against the working directory. Precedence, as for `--top` and `--revision`:
+`abc --script <file>` (that run only) beats `--abc-script`, which beats the project's
+`abc_script`, which beats the built-in `lib/abc/vtr.abc`. `read_project` puts `--abc-script`
+into the record, with the info line `<entry>: --abc-script <new> replaces the project
+abc_script <old>` when they differ. The language, `{K}`, the allowed commands and the caps are
+in the 3D spec §7.
 
 *Sources.* `` `include `` searches the including file's directory, then the include path in
 order (the first match wins; an include of a file already being included is `include_cycle`).

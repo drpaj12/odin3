@@ -1,0 +1,3 @@
+# an imported .qsf cannot set abc_script (its ABC_SCRIPT is ignored); this file can
+import q/abc.qsf
+abc_script flow.o3
