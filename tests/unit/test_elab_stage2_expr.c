@@ -419,9 +419,13 @@ static void test_assign_out_of_range_bits(void) {
 
 /* Constant selects and concatenations as targets; the lsb of a concatenation is its last part. */
 static void test_assign_select_and_concat_targets(void) {
-    read_clean("  wire [15:0] y16_src;\n  assign y[3:0] = a4;\n  assign y[4] = c;\n  assign "
-               "{y[7:6], y[5]} = {c4[1:0], c};\n"
-               "  assign {y2, y1} = y16_src;\n");
+    read_body("  wire [15:0] y16_src;\n  assign y[3:0] = a4;\n  assign y[4] = c;\n  assign "
+              "{y[7:6], y[5]} = {c4[1:0], c};\n"
+              "  assign {y2, y1} = y16_src;\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_warning((at_loc){1, 15}, "'y16_src' is never driven"); /* Task 19: it has sinks */
+    TEST_ASSERT_EQUAL_UINT32(1, soft_warnings());
+    expect_ir_ok();
     TEST_ASSERT_EQUAL_UINT32(0, count_logic());
     expect_same_nets((bits_of){"y", 0}, (bits_of){"a4", 0}, 4);
     TEST_ASSERT_EQUAL_UINT32(wnet("c", 0).v, wnet("y", 4).v);
@@ -432,18 +436,17 @@ static void test_assign_select_and_concat_targets(void) {
     expect_same_nets((bits_of){"y2", 0}, (bits_of){"y16_src", 8}, 8);
 }
 
-/* assign a = b; assign b = a: the same net, so the second is a no-op (no merge, no error). */
+/* assign a = b; assign b = a: the same net, so the second is a no-op (no merge, no error); nothing
+ * drives it, which Task 19 warns about once. */
 static void test_same_net_assignment_noop(void) {
-    read_clean("  wire p, q;\n  assign p = q;\n  assign q = p;\n  assign o1 = p;\n");
+    read_body("  wire p, q;\n  assign p = q;\n  assign q = p;\n  assign o1 = p;\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_warning((at_loc){3, 10},
+                   "'p' and 'q' are connected only to each other and are never driven");
+    TEST_ASSERT_EQUAL_UINT32(1, soft_warnings());
+    expect_ir_ok();
     TEST_ASSERT_EQUAL_UINT32(wnet("p", 0).v, wnet("q", 0).v);
     TEST_ASSERT_EQUAL_UINT32(wnet("o1", 0).v, wnet("q", 0).v);
-}
-
-/* A second driver of one net is Task 19's check; until it lands the assignment is pending. */
-static void test_second_driver_pending(void) {
-    read_failing("  assign y = a;\n  assign y = b;\n");
-    expect_error((at_loc){2, 10}, "elaboration is not available yet (2D): 'two-driver check'");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
 }
 
 /* --- E22, unsized constants, E23 ------------------------------------------------------------- */
@@ -1553,7 +1556,6 @@ static void test_oom_sweep(void) {
     X(test_assign_out_of_range_bits)                                                               \
     X(test_assign_select_and_concat_targets)                                                       \
     X(test_same_net_assignment_noop)                                                               \
-    X(test_second_driver_pending)                                                                  \
     X(test_context_width_e22)                                                                      \
     X(test_context_width_wide)                                                                     \
     X(test_unsized_constants)                                                                      \

@@ -57,13 +57,18 @@ void odin3_elab_test_pend(uint8_t stage, uint32_t kind_or_feature, bool pending)
  * decision-log entry (Task 11); on_body_start(user, module) runs as stage 2 starts the body of
  * each elaborated MODULE that has one (Task 17; a black box has none); refuse_port N > 0 makes
  * stage 2 treat the Nth port it creates in the run as refused by the IR (Task 17, the failure
- * path of odin3_elab2_ports: an IR refusal cannot otherwise be provoked by valid input).
+ * path of odin3_elab2_ports: an IR refusal cannot otherwise be provoked by valid input);
+ * after_prescan(user, e2, module) runs when the pre-scan of a module (step (2), Task 19) is done,
+ * so a test can read what it collected (odin3_elab2_always_assigned).
  */
+struct odin3_elab2; /* elab_internal.h */
+
 typedef struct odin3_elab_test_hooks {
     uint32_t drop_log_entry;
     void (*on_body_start)(void *user, odin3_ast_id module_node);
     void *user;
     uint32_t refuse_port;
+    void (*after_prescan)(void *user, struct odin3_elab2 *e2, odin3_ast_id module_node);
 } odin3_elab_test_hooks;
 
 /* Installs a copy of *hooks process-wide (NULL: every hook off). */

@@ -211,8 +211,33 @@ context, as Yosys's `genrtlil.cc` does (verified on 0.55: `assign y32 = c ? a : 
 `WIDTH` 8 and 24 zero bits); the comparison row says operands are typed at their common width
 (an identifier is still generated at its own width: `a < t` is `$lt` with `A_WIDTH` 8, `B_WIDTH` 4,
 verified). (2) EL-32: the text of an out-of-range bit select, an x or z constant index (§17 #40)
-and the generate-block name read as a value (§17 #39). (3) fix round 1: a self-determined operand's cell sign follows genrtlil (§17), plain decimals stay 32 bits (§17 #41), non-constant `+:`/`-:` reads are simpler than Yosys's (§17 #42). (4) EL-28: until Task 19's driver table
-lands, an lhs net that has a driver already is the pending line `two-driver check`.
+and the generate-block name read as a value (§17 #39). (3) fix round 1: a self-determined operand's cell sign follows genrtlil (§17), plain decimals stay 32 bits (§17 #41), non-constant `+:`/`-:` reads are simpler than Yosys's (§17 #42).
+
+v4.17 (2026-10-12; 2D Task 19, agent defaults). (1) EL-28: the driver table is per net and a second
+table, the claims, is per (wire, bit): `assign y = a; assign y = b;` merges y's net into a's (which
+its port drives), so only y's own claim tells A4 where y was first driven (3:10, not the port's
+place); every driver of a wire bit (assign, instance output, gate, `$tribuf`) leaves one, and a
+net entry says what drives the net itself (input ports, cell outputs, tri-state drivers). A bit
+claimed by a merge is not a driver of the net it joined (`assign out = tmp; assign tmp = a & b;`
+is legal). Instances and gates (step 4) are emitted before the continuous assignments (step 5) in
+two walks of the items. (2) A4 for one lvalue naming a net twice (`{n4[0], n4[0]} = …`) is an error
+at the later part (§17 #44); `'r' is a variable assigned by a continuous assignment; treated as a
+net` is located at the lvalue. (3) EL-10: the resize warning is located at the `CONNECTION`, names
+the module as the `INSTANTIATION` does (`sub`, `sub$W=8`), and is "extended" when the connection is
+narrower than the port and "truncated" when wider, for outputs too (Yosys: "Resizing cell port
+… from W bits to P bits"). (4) EL-11: the elaborated form does not carry a black box's
+per-instance port widths, so the black-box cell type makes a port parametric on the first integer
+parameter that some instance overrides and whose default equals the port's default width (a
+heuristic; §17 #46); a registered type of the name is matched by port name and reused. (5) EL-11:
+`parameter:<NAME>` is written for every parameter of a module instance's params LIST (the
+elaborated form does not say which were overridden). (6) EL-26: a bit with one driver is merged
+into the wire's net in step (7) (pin-based, IR-15) because the driver's net is only known then;
+chains are word cells when every driver covers the whole wire, else one-bit cells. (7) EL-28:
+`'w' is never driven` is for wires that are not ports (rule 4 of `check` covers a port), and a
+self-assignment's warning `'q' and 'p' are connected only to each other and are never driven` names
+the right side first, as the example does. (8) EL-30's `$tribuf` data and enable: the data is
+generated at the lvalue's width, a one-bit enable is used as is, a wider one goes through
+`$reduce_bool` (`$logic_not` when inverted).
 
 ## 1. Purpose and scope (EL-1)
 
@@ -2493,6 +2518,10 @@ and reported, never relaxed (2A's rule).
 | 41 | a plain decimal (`1`, `5`) keeps its 32 bits in any context; the apostrophe forms (`'d1`, `'h3`, `33'd1`) are widened to it. The AST does not record the apostrophe, so a signed unsized decimal is taken as plain: `'sd5` is (wrongly) kept at 32 bits too | same, except `'sd5`, which Yosys widens (verified on 0.55: `y64 = a + 1` is `$add` with `B_WIDTH` 32, `a + 'd1` 64; `c ? a : 5` a 32-bit `$mux`) | an unsized literal is context-determined | matches Yosys's cells for every form but `'sd` (Task 18 fix round 1) |
 | 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||` or a ternary condition) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
+| 44 | one lvalue naming a net twice (`assign {n4[0], n4[0]} = c4[1:0] + 2'd1;`) is A4's error at the second part | accepted: one `$add` with two `Y` pins on `n4[0]`; the later `check` warns "multiple conflicting drivers" (verified on 0.55: `yosys -p "read_verilog t.v; proc; opt; check"`) | legal but multiply driven | an invalid IR otherwise (rule 4); the review carried it from Task 18 (Task 19) |
+| 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port, and are D3's error anywhere else | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19) |
+| 46 | a black box's port is parametric on the first integer parameter some instance overrides whose default equals the port's default width; any other port keeps its default width in every cell | each cell's ports have the widths of its own specialization | — | the elaborated form (EL-4) keeps only the default specialization's ports; stage 1 has checked each instance against its own (Task 19; a width formula such as `[W:0]` is not recovered) |
+| 47 | in step (7) a wired bit with one driver is that driver's net merged into the wire's | no gate for one driver, the driver connected to the wire | — | the driver's net is only known after the assignments; the merge is pin-based (Task 19) |
 
 ## 18. Implementation split (EL-51)
 

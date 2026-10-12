@@ -214,7 +214,7 @@ static uint32_t symbol_width(const odin3_symbol *rec) {
 }
 
 /* The IR name of rec: its scope path ('.'-joined) and its own name, interned. */
-static odin3_status wire_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name) {
+odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name) {
     odin3_strbuf_clear(&e2->text);
     path_req path = {rec->scope, E2_NAME_SEP, true};
     odin3_status st = path_append(e2, &path);
@@ -248,7 +248,7 @@ static odin3_status wire_one(odin3_elab2 *e2, odin3_ast_id decl, odin3_ast_id de
                             .lsb = rec->has_packed ? rec->packed.lsb : 0,
                             .is_signed = (rec->flags & ODIN3_SYM_F_SIGNED) != 0};
     odin3_status st = odin3_elab2_reserve_nets(e2, width, loc);
-    st = st != ODIN3_OK ? st : wire_name(e2, rec, &spec.name);
+    st = st != ODIN3_OK ? st : odin3_elab2_scoped_name(e2, rec, &spec.name);
     if (st == ODIN3_OK && odin3_module_find_wire(e2->mod, spec.name).v != 0) {
         odin3_elab2_error(e2, loc, "'%s' is already declared",
                           odin3_strtab_get(odin3_design_strtab(e2->design), spec.name));
@@ -465,7 +465,7 @@ odin3_status odin3_elab2_ports(odin3_elab2 *e2, odin3_ast_id module_node) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (odin3_elab2_is_blackbox(e2, module_node)) {
-        return ODIN3_OK; /* Task 19 declares its cell type (EL-11); never an IR module */
+        return odin3_elab2_blackbox(e2, module_node); /* a cell type (EL-11), never an IR module */
     }
     odin3_status st = odin3_elab2_budget(e2);
     st = st != ODIN3_OK ? st : create_module(e2, module_node);

@@ -315,9 +315,8 @@ static void test_implicit_net(void) {
     odin3_wire_id implicit = wire_named(top, "q");
     TEST_ASSERT_NULL(
         odin3_attr_get(top, (odin3_objref){ODIN3_OBJ_WIRE, implicit.v}, id_of("implicit")));
-    /* the instance is Task 19's */
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:2:3: error: elaboration is not available yet (2D): 'INSTANTIATION'");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status,
+                                  et_log(&rs)); /* the instance landed (Task 19) */
 }
 
 /* --- ports (EL-24, IR change C) -------------------------------------------------------------- */
@@ -416,7 +415,7 @@ static void test_ports_before_bodies(void) {
                          "  sub #(.W(4)) u2 (.a(i[3:0]), .y());\nendmodule\n"};
     et_req req = {&src, 1, NULL, NULL, NULL};
     body_probe probe = {0};
-    odin3_elab_test_hooks hooks = {0, probe_body, &probe, 0};
+    odin3_elab_test_hooks hooks = {0, probe_body, &probe, 0, NULL};
     odin3_elab_test_set_hooks(&hooks);
     et_setup(&req, &rs);
     probe.design = rs.design;
@@ -429,7 +428,7 @@ static void test_ports_before_bodies(void) {
     expect_wire(module_named("top"), "i", (wire_shape){7, 0, false});
     expect_wire(module_named("sub$W=8"), "a", (wire_shape){7, 0, false});
     expect_wire(module_named("sub$W=4"), "y", (wire_shape){3, 0, false});
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status); /* the instances are Task 19's */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     expect_ir_ok();
 }
 
@@ -608,15 +607,15 @@ static void test_top_and_summary(void) {
     TEST_ASSERT_EQUAL_UINT32(1 + 2 + 4, summary_nets(summary_line())); /* a, y and w */
 }
 
-/* A specialization counts as one: top, sub (the default's name) and sub$W=8 would be 3 (1). */
+/* A specialization counts as one: top, sub (the default's name) and sub$W=8 are 3 modules (1). */
 static void test_summary_specialization_count(void) {
     read_text("module sub #(parameter W = 1) (output o);\nendmodule\n"
               "module top;\n  sub #(.W(8)) u1 ();\n  sub u2 ();\nendmodule\n",
               ODIN3_KEEP_AST_NONE);
-    /* the instances are Task 19's: the pass fails, so no summary and no top */
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
-    TEST_ASSERT_EQUAL_INT(-1, find_with_prefix("read_verilog: elaborated top"));
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_top(rs.design).v);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_NOT_NULL(strstr(summary_line(), "3 modules (1 specializations), "));
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_id_of(module_named("top")).v,
+                             odin3_design_top(rs.design).v);
     TEST_ASSERT_EQUAL_UINT32(3, odin3_design_module_end(rs.design) - 1);
     expect_ir_ok();
 }
@@ -727,7 +726,7 @@ static void test_refused_port_stops_stage(void) {
                          "module top (input i, output o);\n  sub u (.a(i), .y(o));\nendmodule\n"};
     et_req req = {&src, 1, NULL, NULL, NULL};
     body_count count = {0};
-    odin3_elab_test_hooks hooks = {0, count_body, &count, 3};
+    odin3_elab_test_hooks hooks = {0, count_body, &count, 3, NULL};
     odin3_elab_test_set_hooks(&hooks);
     et_setup(&req, &rs);
     rs.status = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
@@ -1353,14 +1352,11 @@ static void test_abi_module_named_like_cell_type(void) {
 
 /* What the quiet sink saw of a run (it allocates nothing, so an injected failure is not its). */
 static bool g_saw_missing_file;
-static bool g_saw_pending_instance;
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
     (void)level;
     (void)user;
     g_saw_missing_file |= strstr(msg, "missing_file:") != NULL;
-    g_saw_pending_instance |=
-        strstr(msg, "elaboration is not available yet (2D): 'INSTANTIATION'") != NULL;
 }
 
 static const char k_three[] =
@@ -1369,9 +1365,9 @@ static const char k_three[] =
     "module top (input [7:0] i, output [7:0] o);\n  sub #(.W(8)) u1 (.a(i), .y(o));\n"
     "  sub #(.W(4)) u2 (.a(i[3:0]), .y());\nendmodule\n";
 
-/* A read that ran to its own end: the three modules with their ports (the PARSE is the pending
- * instances). An earlier failure can also end as PARSE when the preprocessor reports a file it
- * could not read (2C), so a run counts as complete only with the modules there. */
+/* A read that ran to its own end: the three modules with their ports. An earlier failure can also
+ * end as PARSE when the preprocessor reports a file it could not read (2C), so a run counts as
+ * complete only with the modules there. */
 static bool read_complete(void) {
     if (odin3_design_module_end(rs.design) != 4) {
         return false;
@@ -1402,15 +1398,14 @@ static void expect_ir_ok_quiet(void) {
 static odin3_status read_failing_at(long limit) {
     fresh_quiet_design();
     g_saw_missing_file = false;
-    g_saw_pending_instance = false;
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
     /* PARSE is only ever 2C's missing_file (the open 2C item: an injected failure in the
-     * preprocessor reads as a missing file) or the read's own pending instances; any other PARSE
-     * is a stage-2 failure returned as a user error. */
-    TEST_ASSERT_TRUE(st == ODIN3_ERR_NO_MEMORY ||
-                     (st == ODIN3_ERR_PARSE && (g_saw_missing_file || g_saw_pending_instance)));
+     * preprocessor reads as a missing file); any other PARSE is a stage-2 failure returned as a
+     * user error. */
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
+                     (st == ODIN3_ERR_PARSE && g_saw_missing_file));
     expect_ir_ok_quiet();
     return st;
 }
@@ -1418,7 +1413,7 @@ static odin3_status read_failing_at(long limit) {
 /* Every allocation of the whole read fails in turn (stage 2's among them): the status is NO_MEMORY
  * (or 2C's PARSE for a file it could not read), the IR made so far passes check FULL, nothing
  * leaks (ASan's leak check ends the process), until the read completes (OOM_SETTLE runs in a
- * row); the instances are Task 19's, so a complete read is PARSE. */
+ * row). */
 static void test_oom_sweep(void) {
     et_src src = {"t.v", k_three};
     et_req req = {&src, 1, NULL, NULL, NULL};
@@ -1428,8 +1423,7 @@ static void test_oom_sweep(void) {
     for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
         odin3_status st = read_failing_at(limit);
         failures += st == ODIN3_ERR_NO_MEMORY ? 1U : 0U;
-        settled =
-            st == ODIN3_ERR_PARSE && g_saw_pending_instance && read_complete() ? settled + 1 : 0;
+        settled = st == ODIN3_OK && read_complete() ? settled + 1 : 0;
     }
     TEST_ASSERT_EQUAL_UINT32(OOM_SETTLE, settled);
     TEST_ASSERT_GREATER_THAN_UINT32(100, failures);

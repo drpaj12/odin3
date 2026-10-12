@@ -204,7 +204,7 @@ odin3_status odin3_elab1_gen_seen(odin3_elab1_env *env, odin3_ast_id node, uint3
         }
         if (st == ODIN3_OK && proc_block(ast, node, at)) {
             st = odin3_u64map_put(
-                env->procs, (odin3_kv){(uint64_t)scope << G_SHIFT | odin3_ast_name(ast, at), 1});
+                env->procs, (odin3_kv){(uint64_t)scope << G_SHIFT | odin3_ast_name(ast, at), at.v});
         }
     }
     odin3_ast_cursor_free(&cur);
@@ -787,10 +787,17 @@ static odin3_status ref_error(const odin3_elab1_env *env, const g_ref *ref, cons
     return st != ODIN3_OK ? st : ODIN3_ERR_PARSE;
 }
 
+/* Where a path into a begin/end block was found: *seen set, and *block (when not NULL) the
+ * SEQ_BLOCK of the parsed store. */
+typedef struct g_proc {
+    bool *seen;
+    odin3_ast_id *block;
+} g_proc;
+
 /* The target of hier_name; when proc is not NULL a path into a begin/end block of an always or
- * initial is accepted (*proc set, *slot G_NONE): its member is the binder's to find. */
+ * initial is accepted (*proc->seen set, *slot G_NONE): its member is the binder's to find. */
 static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t *slot,
-                              bool *proc) {
+                              const g_proc *proc) {
     *slot = G_NONE;
     odin3_elab1_comp *comps = NULL;
     odin3_status st = odin3_elab1_hier_comps(env, hier_name, &comps);
@@ -803,7 +810,13 @@ static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint
     ref.walked = odin3_elab1_scope_walk(env, &ref.path, &reach);
     ref.used = reach.used;
     if (proc != NULL && ref.walked == ODIN3_WALK_PROC && reach.used + 1 < count) {
-        *proc = true;
+        uint64_t block = 0;
+        *proc->seen = true;
+        if (proc->block != NULL &&
+            odin3_u64map_get(env->procs,
+                             (uint64_t)reach.reached << G_SHIFT | comps[reach.used].name, &block)) {
+            *proc->block = (odin3_ast_id){(uint32_t)block};
+        }
         return ODIN3_OK;
     }
     if (ref.walked != ODIN3_WALK_STOP || ref.used == 0 || ref.used + 1 != count ||
@@ -824,12 +837,21 @@ odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_na
     return target_of(env, hier_name, slot, NULL);
 }
 
+odin3_status odin3_elab1_scope_proc(odin3_elab1_env *env, odin3_ast_id hier_name,
+                                    odin3_ast_id *block, uint32_t *slot) {
+    bool seen = false;
+    g_proc proc = {&seen, block};
+    *block = (odin3_ast_id){0};
+    return target_of(env, hier_name, slot, &proc);
+}
+
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope) {
     odin3_elab1_env *env = e1->env;
     uint32_t saved = env->cur_scope;
     env->cur_scope = scope;
     uint32_t slot = 0;
-    bool proc = false;
+    bool seen = false;
+    g_proc proc = {&seen, NULL};
     odin3_status st = target_of(env, hier_name, &slot, &proc);
     env->cur_scope = saved;
     return st;

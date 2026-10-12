@@ -142,6 +142,23 @@ static int64_t number_int(odin3_ast_id node) {
 
 /* A leaf of the elaborated store as text: IDENT name, SELECT name[a] / name[a:b] over a name, a
  * NUMBER's value. */
+/* A select's object as text: a name, or the parts of a HIER_NAME joined with dots. */
+static const char *object_text(odin3_ast_id obj) {
+    static char buf[TEXT_BUF];
+    if (odin3_ast_kind_of(rs.elab, obj) != ODIN3_AST_HIER_NAME) {
+        return name_of(obj);
+    }
+    size_t at = 0;
+    buf[0] = '\0';
+    for (uint32_t i = 0; i < odin3_ast_nchild(rs.elab, obj); i++) {
+        int got = snprintf(buf + at, sizeof buf - at, "%s%s", i > 0 ? "." : "",
+                           name_of(odin3_ast_child(rs.elab, obj, i)));
+        TEST_ASSERT_TRUE(got > 0 && (size_t)got < sizeof buf - at);
+        at += (size_t)got;
+    }
+    return buf;
+}
+
 static void spell_leaf(odin3_ast_id expr, char *buf, size_t len) {
     odin3_ast_kind kind = odin3_ast_kind_of(rs.elab, expr);
     int got = -1;
@@ -153,8 +170,8 @@ static void spell_leaf(odin3_ast_id expr, char *buf, size_t len) {
         odin3_ast_id obj = odin3_ast_child(rs.elab, expr, 0);
         odin3_ast_id lsb = odin3_ast_child(rs.elab, expr, 2);
         long long msb = (long long)number_int(odin3_ast_child(rs.elab, expr, 1));
-        got = lsb.v == 0 ? snprintf(buf, len, "%s[%lld]", name_of(obj), msb)
-                         : snprintf(buf, len, "%s[%lld:%lld]", name_of(obj), msb,
+        got = lsb.v == 0 ? snprintf(buf, len, "%s[%lld]", object_text(obj), msb)
+                         : snprintf(buf, len, "%s[%lld:%lld]", object_text(obj), msb,
                                     (long long)number_int(lsb));
     }
     TEST_ASSERT_TRUE_MESSAGE(got > 0 && (size_t)got < len, odin3_ast_kind_name(kind));
@@ -381,6 +398,18 @@ static void test_array_slices(void) {
         expect_conn(inst, 0, "d", slices[k]);
         expect_conn(inst, 1, "q", "q2");
     }
+}
+
+/* Task 19 (review carry): a member of a named begin/end block of a process in a typed connection
+ * (an instance array) types as its declaration; the slices are cut as for any other expression. */
+static void test_array_proc_block_member(void) {
+    run_one("module sub (input [1:0] a, output o);\nendmodule\n"
+            "module top (input clk, output [1:0] o);\n"
+            "  always @(posedge clk) begin : blk\n    reg [3:0] count;\n    count = 4'd1;\n  end\n"
+            "  sub u[1:0] (.a(blk.count), .o(o));\nendmodule\n");
+    expect_clean();
+    expect_conn(instance("u[0]"), 0, "a", "blk.count[1:0]");
+    expect_conn(instance("u[1]"), 0, "a", "blk.count[3:2]");
 }
 
 static void test_array_width_error(void) {
@@ -890,6 +919,7 @@ int main(void) {
     RUN_TEST(test_unnamed_position);
     RUN_TEST(test_portless_instance);
     RUN_TEST(test_array_slices);
+    RUN_TEST(test_array_proc_block_member);
     RUN_TEST(test_array_width_error);
     RUN_TEST(test_gate_array);
     RUN_TEST(test_ascending_array);
