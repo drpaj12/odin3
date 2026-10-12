@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil basic_rxor_multiset.il; opt_merge; write_rtlil
+# flags:
+cell $reduce_xor \one
+cell $reduce_xor \other

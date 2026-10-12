@@ -1,0 +1,3 @@
+# yosys 0.55 (VTR build): read_rtlil pmux_all_a.il; opt_reduce; write_rtlil
+# input: the module of tests/opt/opt_reduce_pmux.ys; the port ids 0..3 are written 1..4 (proc_build.c's wire option wants a number from 1) (case 2: B = { A A })
+# flags:

@@ -1,0 +1,3 @@
+# yosys 0.55 (VTR build): read_rtlil basic_add_same.il; opt_merge; write_rtlil
+# flags:
+cell $add $add$basic_add_same.v:5$2

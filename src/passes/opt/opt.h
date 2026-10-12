@@ -105,6 +105,66 @@ odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
  */
 odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
 
+/* --- 2F Task 8: opt_merge (OP-6) ------------------------------------------------------------ */
+
+/*
+ * opt_merge (2F spec §6, Yosys opt_merge.cc) over every module of design: nodes with the same
+ * type, parameters and (normalised) input operands, and for FFs the same Q init, are merged into
+ * the earlier one (the later when only it has `keep`); the sweeps repeat until one merges nothing.
+ * Candidates are word and bit nodes except $mem, $tribuf, $_TBUF_, $proc, constants, nodes without
+ * exactly one output port, $mux/$pmux under opts->nomux, and (opts->keepdc) FFs whose init is not
+ * fully defined. Each class is then closed with one rebuild of its survivor whose DERIVED record
+ * has the parents [survivor, drops in ID order]. Adds the drops to counts->merge_removed; logs
+ * INFO "opt_merge: removed N cells" and a DEBUG line per drop. INVALID_ARG (logged) for a NULL
+ * argument; NO_MEMORY, possibly after some modules were merged (the IR stays valid; the survivors
+ * of the classes dropped so far then keep no DERIVED provenance parents, because the classes are
+ * only closed after the sweeps).
+ */
+odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                 const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
+/* --- 2F Task 9: opt_reduce (OP-8) ----------------------------------------------------------- */
+
+/*
+ * opt_reduce (2F spec §8, Yosys opt_reduce.cc) over every module of design. Per module, until a
+ * worker run changes nothing: $reduce_or then $reduce_and (inputs sorted by net ID and
+ * de-duplicated, an absorbing constant makes the input that constant alone, neutral constants go,
+ * inputs driven by a reduction of the same type are replaced by that reduction's inputs, an empty
+ * input becomes the neutral constant; the child is processed first, through an explicit stack, and
+ * stays for opt_clean), then for each $mux and $pmux: with opts->fine, or when its Y feeds a $mem
+ * WR_EN (Yosys's mem_wren_sigs), opt_mux_bits (Y bits whose input tuples are equal share one bit,
+ * bits whose tuple is one repeated value become that value), then opt_pmux (B slices equal to A
+ * are dropped, equal slices are grouped by a hash of their operand vectors in first-occurrence
+ * order and their S bits ORed by a new $reduce_or; no slice left: Y = A; one left: a $mux). Adds
+ * the changes to counts->reduce_changes; logs INFO "opt_reduce: performed N changes". A cell with
+ * an unconnected input pin is left alone. INVALID_ARG (logged) for a NULL argument; NO_MEMORY,
+ * possibly after some rewrites (the IR stays valid; each rewrite builds before its first
+ * destructive step).
+ */
+odin3_status odin3_opt_reduce_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                  const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
+/* --- 2F Task 10: opt_muxtree (OP-7) --------------------------------------------------------- */
+
+/*
+ * opt_muxtree (2F spec §7, Yosys opt_muxtree.cc) over every module of design, in creation order,
+ * except those with live $proc nodes (INFO "opt_muxtree: module 'm' has processes; skipped"). Per
+ * module: the $mux and $pmux nodes are indexed (a root is a mux with a Y bit that a non-mux node,
+ * a mux select, a $port_out or a `keep` wire uses, or that more than one mux reads); each root is
+ * evaluated with reference-counted knowledge of active and inactive selects, a non-pure root met
+ * below another root in place up to three levels deep and otherwise re-queued, an explicit frame
+ * stack standing for the recursion; ports never enabled are dead and are removed (one live port:
+ * Y connected to its data; several: a narrower $pmux or a $mux; none: the node is deleted), and
+ * data bits known to be 0 or 1 under the selects of the enclosing ports become constants. After
+ * ODIN3_OPT_MUXTREE_MAX_EVALS evaluations in a module the analysis stops, WARN "opt_muxtree: module
+ * 'm': giving up after N evaluations", and that module is not changed. Adds the dead ports to
+ * counts->muxtree_ports; logs INFO "opt_muxtree: removed N multiplexer ports" and a DEBUG line per
+ * dead port. INVALID_ARG (logged) for a NULL argument; NO_MEMORY, possibly after some rewrites (the
+ * IR stays valid; each rewrite builds before its first destructive step).
+ */
+odin3_status odin3_opt_muxtree_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                   const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */

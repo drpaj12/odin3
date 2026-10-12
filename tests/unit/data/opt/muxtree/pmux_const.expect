@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil pmux_const.il; opt_muxtree; write_rtlil   (hand-written input, read unedited by both)
+# normalised by name: see the top of test_opt_muxtree.c
+wire y:0 -> c:0
+wire y:1 -> c:0
+removed 3

@@ -154,6 +154,56 @@ typedef struct odin3_kit_rebuild {
 odin3_status odin3_kit_rebuild_node(odin3_opt_ctx *oc, const odin3_kit_rebuild *req,
                                     odin3_node_id *out);
 
+/*
+ * Copies the attributes of node `from` onto node `to`, in first-set order (what kit_rebuild_node
+ * does for the node it rebuilds; a rewrite that builds its replacement with kit_new_cell calls it
+ * too). NO_MEMORY (some attributes may have been copied).
+ */
+odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to);
+
+/*
+ * The registered cell type named name, none ({0}) when the design has none; no allocation, no log.
+ */
+odin3_celltype_id odin3_kit_type_named(const odin3_design *design, const char *name);
+
+/* Appends net to vec (elements odin3_net_id). NO_MEMORY with vec unchanged. */
+odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net);
+
+/* qsort comparison of two uint64_t, ascending. */
+int odin3_kit_cmp_u64(const void *lhs, const void *rhs);
+
+/* "Not found" of odin3_kit_port_index and odin3_kit_param_index; odin3_node_port and
+ * odin3_node_param accept it (an empty slice, NULL). */
+#define ODIN3_KIT_NONE UINT32_MAX
+
+/* The index of the port (parameter) of def called name, ODIN3_KIT_NONE when it has none. */
+uint32_t odin3_kit_port_index(const odin3_celltype_def *def, const char *name);
+uint32_t odin3_kit_param_index(const odin3_celltype_def *def, const char *name);
+
+/*
+ * The vector helpers below work on odin3_vec of 32- and 64-bit words and sit here, not in
+ * util/vec.h, because they are specific to the opt passes' side tables (net IDs, keys, indices);
+ * they allocate through odin3_vec, so NO_MEMORY leaves the vec unchanged.
+ */
+/* Appends value to vec (elements uint32_t / uint64_t). NO_MEMORY with vec unchanged. */
+odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value);
+odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value);
+
+/* Drops elements from the end of vec until len elements are left (no-op when it has fewer). */
+void odin3_kit_truncate(odin3_vec *vec, size_t len);
+
+/*
+ * Sorts vec[from ..) (elements uint64_t) and drops the repeats (Yosys's sort_and_unify).
+ * Requires from <= vec->len (a larger from would wrap the count).
+ */
+void odin3_kit_sort_unify(odin3_vec *vec, size_t from);
+
+/*
+ * Writes the label of node for a log line into out (size bytes, truncated): its name, else
+ * "$c<ID>" (spec section 16).
+ */
+void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size);
+
 /* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 

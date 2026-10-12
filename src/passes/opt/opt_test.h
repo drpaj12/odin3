@@ -1,10 +1,12 @@
 /*
  * opt_test.h — test hooks of the opt family (2F plan Task 1, Global Constraints): lowered caps and
- * a call hook. Never part of the ABI. The hooks live in kit.c.
+ * a call hook. Never part of the ABI. The limits and the call hook live in kit.c, the key-hash
+ * hooks in merge.c (opt_merge) and reduce.c (opt_reduce).
  */
 #ifndef ODIN3_PASSES_OPT_OPT_TEST_H
 #define ODIN3_PASSES_OPT_OPT_TEST_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 /* The caps of opt.h that tests lower: ODIN3_OPT_MAX_ITERATIONS, ODIN3_OPT_MUXTREE_MAX_EVALS. */
@@ -32,5 +34,17 @@ void odin3_opt_test_set_hooks(const odin3_opt_test_hooks *hooks);
 
 /* The hooks in force (all NULL when none are installed); never NULL. */
 const odin3_opt_test_hooks *odin3_opt_test_hooks_now(void);
+
+/*
+ * Replaces opt_merge's key hash (finding 29): fn gets the encoded key's bytes; NULL restores the
+ * real hash. Tests pass a constant to put every key on one collision chain.
+ */
+void odin3_opt_merge_test_set_key_hash(uint64_t (*fn)(const void *key, size_t len));
+
+/*
+ * Replaces opt_reduce's operand-vector hash: fn gets the keys' bytes; NULL restores the real hash.
+ * Tests pass a constant to put every group on one collision chain.
+ */
+void odin3_opt_reduce_test_set_key_hash(uint64_t (*fn)(const void *key, size_t len));
 
 #endif

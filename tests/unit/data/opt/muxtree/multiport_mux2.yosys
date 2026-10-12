@@ -1,0 +1,7 @@
+# yosys 0.55 (VTR build): read_rtlil multiport_mux2.il; opt_muxtree; write_rtlil   (hand-written input, read unedited)
+# THIS IS YOSYS'S UNSOUND OUTPUT, kept as evidence only (multiport_mux2.expect is ours): C feeds M's A and B, replace_known writes {1,1} into C.A
+# eval: yosys -p "read_rtlil multiport_mux2.il; eval -set s 0 -set t 0 -set b 0 -show y" gives y = 1'0; the same on the opt_muxtree output gives y = 1'1
+# normalised by name: see the top of test_opt_muxtree.c
+cell $mux WIDTH=1 A=c:1 B=c:0 S=s:0 Y=y:0
+cell $mux WIDTH=2 A=1 1 B=b:0 b:1 S=t:0 Y=c:0 c:1
+removed 0

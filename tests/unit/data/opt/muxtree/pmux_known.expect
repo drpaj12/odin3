@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil pmux_known.il; opt_muxtree; write_rtlil   (hand-written input, read unedited by both)
+# normalised by name: see the top of test_opt_muxtree.c
+cell $mux WIDTH=1 A=c:0 B=p:0 S=s:0 Y=y:0
+wire t:0 -> p:0
+removed 2

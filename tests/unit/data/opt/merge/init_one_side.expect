@@ -1,0 +1,6 @@
+# yosys 0.55 (VTR build): read_rtlil init_one_side.il; opt_merge; write_rtlil
+# input: Yosys 0.55's own write_rtlil of init_one_side.v, edited by hand in one place: CLK_POLARITY written 1 instead of 1'1 (proc_build.c reads plain integer parameters; the 2D-1 read_rtlil gap), both cells
+# flags:
+init \o 1'0
+cell $dff \ffo
+cell $dff \ffp

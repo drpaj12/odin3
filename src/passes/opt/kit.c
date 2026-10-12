@@ -20,9 +20,12 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- test hooks (opt_test.h) ---------------------------------------------------------------- */
@@ -66,8 +69,7 @@ const odin3_opt_test_hooks *odin3_opt_test_hooks_now(void) {
 
 /* --- small helpers -------------------------------------------------------------------------- */
 
-/* The registered type named name, none when the design has none (no allocation, no log). */
-static odin3_celltype_id type_named(const odin3_design *design, const char *name) {
+odin3_celltype_id odin3_kit_type_named(const odin3_design *design, const char *name) {
     uint32_t str = 0;
     odin3_celltype_id id = {0};
     if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) ||
@@ -77,14 +79,90 @@ static odin3_celltype_id type_named(const odin3_design *design, const char *name
     return id;
 }
 
-/* The index of the port of def named name, def->n_ports when it has none. */
-static uint32_t port_named(const odin3_celltype_def *def, const char *name) {
+odin3_status odin3_kit_push_net(odin3_vec *vec, odin3_net_id net) {
+    odin3_net_id *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = net;
+    return ODIN3_OK;
+}
+
+int odin3_kit_cmp_u64(const void *lhs, const void *rhs) {
+    uint64_t left = *(const uint64_t *)lhs;
+    uint64_t right = *(const uint64_t *)rhs;
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
+}
+
+uint32_t odin3_kit_port_index(const odin3_celltype_def *def, const char *name) {
     for (uint32_t i = 0; i < def->n_ports; i++) {
         if (strcmp(def->ports[i].name, name) == 0) {
             return i;
         }
     }
-    return def->n_ports;
+    return ODIN3_KIT_NONE;
+}
+
+uint32_t odin3_kit_param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return ODIN3_KIT_NONE;
+}
+
+odin3_status odin3_kit_push_u32(odin3_vec *vec, uint32_t value) {
+    uint32_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = value;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_kit_push_u64(odin3_vec *vec, uint64_t value) {
+    uint64_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = value;
+    return ODIN3_OK;
+}
+
+void odin3_kit_truncate(odin3_vec *vec, size_t len) {
+    while (vec->len > len) {
+        odin3_vec_pop(vec);
+    }
+}
+
+void odin3_kit_sort_unify(odin3_vec *vec, size_t from) {
+    if (vec->data == NULL || vec->len - from < 2) {
+        return; /* nothing to sort (and no pointer arithmetic on a null storage) */
+    }
+    uint64_t *data = (uint64_t *)vec->data + from;
+    size_t count = vec->len - from;
+    qsort(data, count, sizeof *data, odin3_kit_cmp_u64);
+    size_t kept = 1;
+    for (size_t i = 1; i < count; i++) {
+        if (data[i] != data[kept - 1]) {
+            data[kept++] = data[i];
+        }
+    }
+    odin3_kit_truncate(vec, from + kept);
+}
+
+void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out, size_t size) {
+    uint32_t name = odin3_node_name(oc->module, node);
+    const char *text = name == 0 ? NULL : odin3_strtab_get(odin3_design_strtab(oc->design), name);
+    if (text != NULL) {
+        (void)snprintf(out, size, "%s", text);
+    } else {
+        (void)snprintf(out, size, "$c%" PRIu32, node.v);
+    }
 }
 
 /* The net on bit 0 of port `port` of node, none when the port is empty or unconnected. */
@@ -179,7 +257,7 @@ odin3_status odin3_opt_canon_consts(odin3_opt_ctx *oc) {
     odin3_celltype_id types[ODIN3_OPT_N_CONST];
     odin3_net_id kept[ODIN3_OPT_N_CONST] = {{0}};
     for (uint32_t i = 0; i < ODIN3_OPT_N_CONST; i++) {
-        types[i] = type_named(oc->design, k_const_types[i]);
+        types[i] = odin3_kit_type_named(oc->design, k_const_types[i]);
     }
     odin3_status st = ODIN3_OK;
     uint32_t end = odin3_module_node_end(oc->module);
@@ -257,7 +335,7 @@ odin3_status odin3_opt_const_net(odin3_opt_ctx *oc, odin3_bit bit, odin3_net_id 
         *out = cached;
         return ODIN3_OK;
     }
-    odin3_celltype_id type = type_named(oc->design, k_const_types[idx]);
+    odin3_celltype_id type = odin3_kit_type_named(oc->design, k_const_types[idx]);
     if (!odin3_celltype_valid(type)) {
         odin3_log(ODIN3_LOG_ERROR, "opt: cell type '%s' is not registered", k_const_types[idx]);
         return ODIN3_ERR_INVALID_ARG;
@@ -670,8 +748,7 @@ static odin3_status gather_attr(void *ctx, uint32_t key_str, const odin3_value *
     return ODIN3_OK;
 }
 
-/* Copies the attributes of from onto to, in first-set order. */
-static odin3_status copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
+odin3_status odin3_kit_copy_attrs(odin3_module *module, odin3_node_id from, odin3_node_id to) {
     odin3_vec items;
     odin3_vec_init(&items, sizeof(attr_item));
     odin3_status st =
@@ -719,7 +796,7 @@ static odin3_status rb_build(rebuild_job *job) {
                  ? odin3_node_create_connected(oc->module, &spec, job->plan.ports, &job->node)
                  : st;
     }
-    return st == ODIN3_OK ? copy_attrs(oc->module, job->req->old_node, job->node) : st;
+    return st == ODIN3_OK ? odin3_kit_copy_attrs(oc->module, job->req->old_node, job->node) : st;
 }
 
 /* Undoes rb_build: the new node and its fresh nets go again (best effort under OOM). */
@@ -838,8 +915,8 @@ enum { INV_UNARY = 3, INV_MUX = 2 };
 /* The net node inverts (Y -> A of a 1-bit unary inverter), none otherwise. */
 static odin3_net_id unary_source(const odin3_module *module, const odin3_celltype_def *def,
                                  odin3_node_id node) {
-    uint32_t port_a = port_named(def, "A");
-    uint32_t port_y = port_named(def, "Y");
+    uint32_t port_a = odin3_kit_port_index(def, "A");
+    uint32_t port_y = odin3_kit_port_index(def, "Y");
     if (odin3_node_port(module, node, port_a).count != 1 ||
         odin3_node_port(module, node, port_y).count != 1) {
         return (odin3_net_id){0};
@@ -850,15 +927,15 @@ static odin3_net_id unary_source(const odin3_module *module, const odin3_celltyp
 /* S of a 1-bit mux with A = 1 and B = 0 (Y = !S), none otherwise. */
 static odin3_net_id mux_source(const odin3_module *module, const odin3_celltype_def *def,
                                odin3_node_id node) {
-    uint32_t port_a = port_named(def, "A");
-    uint32_t port_b = port_named(def, "B");
+    uint32_t port_a = odin3_kit_port_index(def, "A");
+    uint32_t port_b = odin3_kit_port_index(def, "B");
     if (odin3_node_port(module, node, port_a).count != 1 ||
         odin3_node_port(module, node, port_b).count != 1 ||
         odin3_net_const_value(module, port_net0(module, node, port_a)) != ODIN3_CONST_1 ||
         odin3_net_const_value(module, port_net0(module, node, port_b)) != ODIN3_CONST_0) {
         return (odin3_net_id){0};
     }
-    return port_net0(module, node, port_named(def, "S"));
+    return port_net0(module, node, odin3_kit_port_index(def, "S"));
 }
 
 /* The source net of node when it is an inverter of the map (*y_net its Y), none otherwise. */
@@ -868,7 +945,7 @@ static odin3_net_id invert_source(const odin3_module *module, const odin3_cellty
     const odin3_celltype_def *def = odin3_celltype_get(odin3_module_design(module), type);
     for (uint32_t i = 0; i < INV_UNARY + INV_MUX; i++) {
         if (types[i].v != 0 && types[i].v == type.v) {
-            *y_net = port_net0(module, node, port_named(def, "Y"));
+            *y_net = port_net0(module, node, odin3_kit_port_index(def, "Y"));
             return i < INV_UNARY ? unary_source(module, def, node) : mux_source(module, def, node);
         }
     }
@@ -880,7 +957,7 @@ odin3_status odin3_kit_invert_map(odin3_opt_ctx *oc) {
                                                            "$_MUX_"};
     odin3_celltype_id types[INV_UNARY + INV_MUX];
     for (uint32_t i = 0; i < INV_UNARY + INV_MUX; i++) {
-        types[i] = type_named(oc->design, names[i]);
+        types[i] = odin3_kit_type_named(oc->design, names[i]);
     }
     size_t end = odin3_module_net_end(oc->module);
     odin3_vec_clear(&oc->invert);
@@ -945,7 +1022,7 @@ typedef struct topo_state {
 static void topo_mark(topo_state *ts, const odin3_design *design) {
     odin3_celltype_id types[N_EVALUABLE];
     for (uint32_t i = 0; i < N_EVALUABLE; i++) {
-        types[i] = type_named(design, k_evaluable[i]);
+        types[i] = odin3_kit_type_named(design, k_evaluable[i]);
     }
     for (uint32_t id = 1; id < ts->end; id++) {
         odin3_node_id node = {id};

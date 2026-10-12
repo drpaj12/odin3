@@ -349,7 +349,9 @@ lands (PHASE2 #13, 2D §14.6; not 2F's change).
 erases `$tribuf`/`$_TBUF_` from its cell set), `$proc`,
 port and constant nodes (constants are canonical, OP-2), `$mux`/`$pmux` under `-nomux`, and
 `module`/`blackbox`/`hard` nodes (Yosys merges user cells only with `-share_all`, which Parmys
-never passes); with `-keepdc`, FFs whose init is not fully defined.
+never passes); with `-keepdc`, FFs whose init is not fully defined. Nodes with no output port or
+with more than one are not candidates either, because `kit_connect` redirects exactly one output
+port; this misses Yosys's `$memwr` merges (§17 row 13).
 
 **Key** of a node: its cell type ID; its parameters in declaration order (values compared
 exactly: INT, BITS bit by bit, STRING by strtab ID); and its input pins as a sequence of
@@ -358,7 +360,8 @@ is constant, so a constant `$sop` and a `$_CONST1_` pin agree. Normalisations, f
 `hash_cell_inputs`/`compare_cell_parameters_and_connections`:
 
 - `$and $or $xor $xnor $add $mul $logic_and $logic_or $_AND_ $_OR_ $_XOR_`: the A and B operand
-  vectors ordered (lexicographic on (kind, value)) — the commutative swap;
+  vectors ordered (lexicographic on (kind, value)) — the commutative swap — only when `A_SIGNED`
+  equals `B_SIGNED` (or the type has neither; §17 row 14);
 - `$reduce_xor $reduce_xnor`: A's operands sorted (a multiset);
 - `$reduce_and $reduce_or $reduce_bool`: A sorted and de-duplicated (a set);
 - `$pmux`: the (S bit, B slice) pairs sorted, then A;
@@ -396,7 +399,13 @@ levels deep, else re-queued as non-pure. Ports never enabled are dead: a mux wit
 becomes wiring, with several a narrower `$pmux`/`$mux`, with none it is deleted. The recursion of
 `eval_mux`/`eval_mux_port` becomes an explicit frame stack (CLAUDE.md: no recursion); a global
 budget of **100,000** evaluations per module, as in Yosys, stops the analysis with the warning of
-§16 and changes nothing in that module. Count: `opt_muxtree: removed N multiplexer ports`.
+§16 and changes nothing in that module (§17 row 18). Roots are evaluated from the last mux to the
+first, then the re-queued ones last-in first-out: Yosys's cell dictionary and pool iterate newest
+first, and the order is observable (a root promoted to pure prunes later evaluations; observed in a scratch
+differential on several thousand random layered DAGs, most with re-queues, which agreed with Yosys
+0.55 only in this order; the generator is not committed and lands with the corpus work of Task 15/18). The
+known-bit replacements are kept aside and applied with the dead ports. Count:
+`opt_muxtree: removed N multiplexer ports`.
 
 ## 8. `opt_reduce` (OP-8)
 
@@ -564,7 +573,8 @@ sub-pass call (agent default; Release: off).
 **Termination of each sub-pass invocation.** Every inner loop is over a finite work list that only
 shrinks or is refilled by strictly simplifying rewrites: `opt_expr`'s rounds stop when a round
 rewrites nothing, which the ranking below bounds; `opt_merge` sweeps strictly decrease the number of
-candidates; `opt_muxtree` is bounded by its evaluation budget; `opt_reduce`'s worker runs strictly
+candidates; `opt_muxtree` is bounded by its evaluation budget (the budget counts eval_mux entries, not their
+cost: each entry on an S-way `$pmux` costs O(S²), O(W·S) more with `replace_known`, as in Yosys); `opt_reduce`'s worker runs strictly
 decrease the number of reduction inputs driven by a same-type reduction (inlining adds inputs, so
 the total count is not the measure) or the mux port count; `opt_dff`'s work list receives only
 sliced FFs, whose bit count is smaller than the FF they came from, or FFs whose feature set strictly
@@ -674,12 +684,20 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 4 | ties and candidate order by node ID | by name or container order | determinism without names; may change which of two equal rewrites fires first |
 | 5 | rules on cells outside the registry are not ported; fine FFs keep their type | `$alu`, `$eqx`, `$_DFFE_*`… rules | those cells do not occur in Odin III's Phase 2 IR |
 | 6 | `opt_share` operand order by net ID | `std::map` by wire name | competing merges may differ; equivalent |
-| 7 | CSE survivor = lowest ID (unless `keep`) | first in the cell dict | names only |
+| 7 | CSE survivor = lowest ID (unless `keep`) | the later cell (its cell dict walks newest first) | names only |
 | 8 | x-with-init substitution only in `replace_undriven` | also in `opt_clean` | rare (2D folds `initial`-only regs, EL-40); x stays x, a refinement |
 | 9 | loop cap 10,000 | none | safety net |
 | 10 | `compact` after `opt` | — | IR-6 |
 | 11 | Odin III log text (§16) | Yosys text | — |
 | 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
+| 13 | `opt_merge` candidates have exactly one output port, so `$memwr` (no output) never merges | merges `$memwr` | `kit_connect` redirects one output port; a missed merge, never a wrong one |
+| 14 | the commutative swap only when `A_SIGNED == B_SIGNED` | merges mixed-sign commutative cells with swapped operands (unsound) | OP-13: with mixed signs, sext(x)+zext(y) differs from sext(y)+zext(x) (Yosys's `calc.cc` extends each operand by its own sign; `simlib.v` reads mixed signs as unsigned) |
+| 15 | `opt_reduce` sorts a reduction's inputs by key (constants by value, then net ID) and rebuilds the cell only when its input set changed (or had repeats) | sorts by wire name, and `setPort`s the sorted `A` of every reduction it visits, counted or not | same function and the same change count (observed in a scratch differential on a few thousand random designs, `-fine` or not, `$mem` write enables or not, compared with Yosys 0.55 over cell types, widths, constant inputs and change counts; the generator is not committed and lands with Task 15/18); only the order of a unique, constant-free input vector differs |
+| 16 | `opt_reduce` and `opt_merge` leave a cell with an unconnected input pin alone (`opt_merge`: it is no candidate) | has no open pins (an undriven wire is a full-width signal) | a missed rewrite, never a wrong one; two cells with dangling inputs are not known to read the same value |
+| 17 | `opt_muxtree`'s `replace_known` reads a data bit that is a select of the same mux as 1 in the slice of that select and 0 in the others and in A | compares an index into the distinct select nets (constants counting as one) with the slice number | the two agree unless a select repeats (or a constant repeats before it); Yosys 0.55 then writes 0 for a slice's own select (`B = { t s y }`, `S = { t s s }` gives `{ 0 0 y }`), which changes the function when only that select is set (OP-13) |
+| 18 | `opt_muxtree` that gives up (100,000 evaluations in a module) changes nothing in that module | has already replaced known bits in place by then | the replacements are applied with the dead ports at the end; a run that finished is identical |
+| 19 | `opt_muxtree` treats a `$mux`/`$pmux` with an unconnected pin, a second driver on a Y net or port widths that disagree with its parameters as a non-mux node | has no open pins | a missed rewrite, never a wrong one |
+| 20 | `opt_muxtree` makes no known-bit replacement in a mux whose output reaches more than one (user, port) pair (nor in the non-root muxes below it); its dead-port analysis is unchanged | `replace_known` writes the first port's knowledge into the mux's data bits, the second port's opposite knowledge never wins | OP-13: Yosys 0.55 turns `C = $mux(A=s0,…)` feeding `$pmux(B={c c}, S={s1 s0})` into `A = 1'1`, and `eval` gives y = 0 before and y = 1 after (`tests/unit/data/opt/muxtree/multiport_*.yosys`); a few missed constants |
 
 ## 18. Files, interfaces and data structures (OP-17)
 
@@ -752,7 +770,7 @@ one 60% limit. Exceeding it is fatal with `opt needs more than N bytes (the desi
 | lenet.v, the opt passes of the Phase 2 script (the trio, then the main `opt` on ≈ 661k cells) | ≤ 15 s |
 | lenet.v, peak RSS growth over the post-`proc` IR (side arrays, CSE table, dead objects before `compact`) | ≤ 25% |
 | the 31 VTR files, opt passes of the Phase 2 script, total | ≤ 3 s |
-| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(mux ports × budget) worst case; `opt_merge` O(candidate pins) expected |
+| per sub-pass call | O(pins) full sweep (O(dirty pins) for `opt_expr` after the first iteration); `opt_muxtree` O(budget × S²) worst case, each eval of an S-way `$pmux` costing O(S²) (O(W·S) more for `replace_known` on W-bit data), as Yosys; `opt_merge` O(candidate pins) expected |
 | per `opt` invocation | O(iterations × pins) worst case; iterations ≤ sequential depth of constant-register chains + a small constant on the corpus |
 
 The bench prints per file cells/nets/pins before and after, iterations, time per sub-pass, rewrites
