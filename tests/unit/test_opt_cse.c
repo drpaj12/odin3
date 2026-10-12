@@ -219,6 +219,25 @@ static void test_cse_not_commutative(void) {
     not_commutative();
 }
 
+/* A_SIGNED != B_SIGNED: sext(a) + zext(b) is not sext(b) + zext(a), so no swap (OP-13, §17). */
+#define SIGN_TEXT(sa, sb)                                                                          \
+    "module \\m\n  wire width 2 input 1 \\a\n  wire width 2 input 2 \\b\n"                         \
+    "  wire width 4 output 3 \\y\n  wire width 4 output 4 \\z\n"                                   \
+    "  cell $add \\c1\n    parameter \\A_SIGNED " sa "\n    parameter \\B_SIGNED " sb "\n"         \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 4\n" AB         \
+    "    connect \\Y \\y\n  end\n"                                                                 \
+    "  cell $add \\c2\n    parameter \\A_SIGNED " sa "\n    parameter \\B_SIGNED " sb "\n"         \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 4\n" BA         \
+    "    connect \\Y \\z\n  end\nend\n"
+
+static void test_cse_mixed_sign(void) {
+    run_pair(SIGN_TEXT("1", "0"), false);
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("$add"));
+    tearDown();
+    setUp();
+    run_pair(SIGN_TEXT("1", "1"), true); /* equal signs: the swap applies */
+}
+
 /* --- sets and multisets ---------------------------------------------------------------------- */
 
 #define RED_TEXT(type, wa, wb, sa, sb)                                                             \
@@ -700,7 +719,8 @@ static void test_cse_provenance(void) {
 #define OOM_TEXT                                                                                   \
     "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n"                   \
     "  wire input 4 \\s0\n  wire input 5 \\s1\n  wire output 6 \\y\n  wire output 7 \\z\n"         \
-    "  wire output 8 \\q1\n  wire output 9 \\q2\n  wire output 10 \\p1\n  wire output 11 \\p2\n"   \
+    "  attribute \\init 1'1\n  wire output 8 \\q1\n  attribute \\init 1'1\n  wire output 9 \\q2\n" \
+    "  wire output 10 \\p1\n  wire output 11 \\p2\n"                                               \
     "  cell $and \\c1\n" AB "    connect \\Y \\y\n  end\n"                                         \
     "  cell $and \\c2\n" BA "    connect \\Y \\z\n  end\n"                                         \
     "  cell $dff \\f1\n    parameter \\CLK_POLARITY 1\n    parameter \\WIDTH 1\n"                  \
@@ -723,6 +743,19 @@ static void oom_run_once(long fail, bool *done) {
     *done = st == ODIN3_OK;
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
     check_full();
+    /* OP-2: whichever point failed, both registers still start at 1 (review I1) */
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q1")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q2")));
+}
+
+/* The wires of the module that carry an `init` attribute. */
+static uint32_t init_wires(void) {
+    uint32_t hits = 0;
+    for (uint32_t id = 1; id < odin3_module_wire_end(fx.module); id++) {
+        odin3_objref ref = {ODIN3_OBJ_WIRE, id};
+        hits += odin3_attr_get(fx.module, ref, intern("init")) != NULL ? 1U : 0U;
+    }
+    return hits;
 }
 
 static void test_cse_oom(void) {
@@ -735,6 +768,7 @@ static void test_cse_oom(void) {
     TEST_ASSERT_TRUE(done);
     TEST_ASSERT_TRUE(failures > 5);
     TEST_ASSERT_EQUAL_UINT32(3, fx.counts.merge_removed); /* and, dff, pmux */
+    TEST_ASSERT_EQUAL_UINT32(1, init_wires());            /* the dropped Q's copy is cleared */
     printf("opt_merge OOM: %ld failing allocation points\n", failures);
 }
 
@@ -742,6 +776,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_cse_commutative);
     RUN_TEST(test_cse_not_commutative);
+    RUN_TEST(test_cse_mixed_sign);
     RUN_TEST(test_cse_reduce_sets);
     RUN_TEST(test_cse_pmux_pairs);
     RUN_TEST(test_cse_params);

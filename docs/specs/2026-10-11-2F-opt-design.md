@@ -349,7 +349,9 @@ lands (PHASE2 #13, 2D §14.6; not 2F's change).
 erases `$tribuf`/`$_TBUF_` from its cell set), `$proc`,
 port and constant nodes (constants are canonical, OP-2), `$mux`/`$pmux` under `-nomux`, and
 `module`/`blackbox`/`hard` nodes (Yosys merges user cells only with `-share_all`, which Parmys
-never passes); with `-keepdc`, FFs whose init is not fully defined.
+never passes); with `-keepdc`, FFs whose init is not fully defined. Nodes with no output port or
+with more than one are not candidates either, because `kit_connect` redirects exactly one output
+port; this misses Yosys's `$memwr` merges (§17 row 13).
 
 **Key** of a node: its cell type ID; its parameters in declaration order (values compared
 exactly: INT, BITS bit by bit, STRING by strtab ID); and its input pins as a sequence of
@@ -358,7 +360,8 @@ is constant, so a constant `$sop` and a `$_CONST1_` pin agree. Normalisations, f
 `hash_cell_inputs`/`compare_cell_parameters_and_connections`:
 
 - `$and $or $xor $xnor $add $mul $logic_and $logic_or $_AND_ $_OR_ $_XOR_`: the A and B operand
-  vectors ordered (lexicographic on (kind, value)) — the commutative swap;
+  vectors ordered (lexicographic on (kind, value)) — the commutative swap — only when `A_SIGNED`
+  equals `B_SIGNED` (or the type has neither; §17 row 14);
 - `$reduce_xor $reduce_xnor`: A's operands sorted (a multiset);
 - `$reduce_and $reduce_or $reduce_bool`: A sorted and de-duplicated (a set);
 - `$pmux`: the (S bit, B slice) pairs sorted, then A;
@@ -674,12 +677,14 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 4 | ties and candidate order by node ID | by name or container order | determinism without names; may change which of two equal rewrites fires first |
 | 5 | rules on cells outside the registry are not ported; fine FFs keep their type | `$alu`, `$eqx`, `$_DFFE_*`… rules | those cells do not occur in Odin III's Phase 2 IR |
 | 6 | `opt_share` operand order by net ID | `std::map` by wire name | competing merges may differ; equivalent |
-| 7 | CSE survivor = lowest ID (unless `keep`) | first in the cell dict | names only |
+| 7 | CSE survivor = lowest ID (unless `keep`) | the later cell (its cell dict walks newest first) | names only |
 | 8 | x-with-init substitution only in `replace_undriven` | also in `opt_clean` | rare (2D folds `initial`-only regs, EL-40); x stays x, a refinement |
 | 9 | loop cap 10,000 | none | safety net |
 | 10 | `compact` after `opt` | — | IR-6 |
 | 11 | Odin III log text (§16) | Yosys text | — |
 | 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
+| 13 | `opt_merge` candidates have exactly one output port, so `$memwr` (no output) never merges | merges `$memwr` | `kit_connect` redirects one output port; a missed merge, never a wrong one |
+| 14 | the commutative swap only when `A_SIGNED == B_SIGNED` | merges mixed-sign commutative cells with swapped operands (unsound) | OP-13: with mixed signs, sext(x)+zext(y) differs from sext(y)+zext(x) (Yosys's `calc.cc` extends each operand by its own sign; `simlib.v` reads mixed signs as unsigned) |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

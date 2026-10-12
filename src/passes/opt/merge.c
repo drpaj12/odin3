@@ -12,9 +12,14 @@
  * nothing. Then each class is closed with one rebuild of its survivor whose DERIVED record has the
  * parents [survivor, drops in ID order] (plan point (p), spec §25 item 4).
  *
- * Differences from Yosys, all of them spec choices: Yosys visits its cell dictionary in reverse
- * creation order and so keeps the later of two equal cells; §6 keeps the earlier. Nodes with no
- * output port, or with more than one, are never candidates (kit_connect redirects one output).
+ * Differences from Yosys (spec §17): Yosys walks its cell dictionary newest first and so keeps the
+ * later of two equal cells, §6 the earlier (a spec choice, row 7). Nodes with no output port, or
+ * with more than one, are never candidates, because kit_connect redirects one output port: this
+ * misses Yosys's merges of `$memwr` (row 13). The commutative swap applies only when A_SIGNED ==
+ * B_SIGNED, where Yosys swaps mixed-sign operands too (row 14, OP-13).
+ *
+ * An FF merge never loses an init (OP-2): the dropped Q's init bits are only read before
+ * kit_connect, and only after it succeeds is the survivor's net settled to one init bit.
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
@@ -319,7 +324,28 @@ static void put_run(merge_state *ms, const odin3_vec *run) {
     }
 }
 
-/* $and, $add, ...: the A and B operand vectors, the smaller one first. */
+/* Index of the parameter called name, NONE_PORT when the type has none. */
+static uint32_t param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return NONE_PORT;
+}
+
+/* True unless A_SIGNED and B_SIGNED both exist and differ (OP-13: sext(x) + zext(y) is not
+ * sext(y) + zext(x), so a mixed-sign cell keeps its operand order). */
+static bool signs_agree(const merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
+    uint32_t sa = param_index(def, "A_SIGNED");
+    uint32_t sb = param_index(def, "B_SIGNED");
+    if (sa == NONE_PORT || sb == NONE_PORT) {
+        return true;
+    }
+    return odin3_node_param(ms->m, node, sa)->i == odin3_node_param(ms->m, node, sb)->i;
+}
+
+/* $and, $add, ...: the A and B operand vectors, the smaller one first (equal signs only). */
 static void key_commutative(merge_state *ms, odin3_node_id node, const odin3_celltype_def *def) {
     uint32_t pa = port_index(def, "A");
     uint32_t pb = port_index(def, "B");
@@ -327,7 +353,8 @@ static void key_commutative(merge_state *ms, odin3_node_id node, const odin3_cel
     odin3_vec_clear(&ms->tb);
     port_operands(ms, node, pa, &ms->ta);
     port_operands(ms, node, pb, &ms->tb);
-    bool swap = cmp_run(words(&ms->ta), ms->ta.len, words(&ms->tb), ms->tb.len) > 0;
+    bool swap = signs_agree(ms, node, def) &&
+                cmp_run(words(&ms->ta), ms->ta.len, words(&ms->tb), ms->tb.len) > 0;
     put_run(ms, swap ? &ms->tb : &ms->ta);
     put_run(ms, swap ? &ms->ta : &ms->tb);
     const uint32_t skip[2] = {pa, pb};
@@ -619,8 +646,8 @@ static odin3_status survivor_nets(merge_state *ms, odin3_node_id surv, uint32_t 
     return ODIN3_OK;
 }
 
-/* An FF's Q inits of the dropped node, saved into ms->bits and removed (Yosys remove_init). */
-static odin3_status take_inits(merge_state *ms, odin3_node_id drop, uint32_t port) {
+/* The dropped FF's Q init bits into ms->bits (x for an unconnected pin). Reads only. */
+static odin3_status read_drop_inits(merge_state *ms, odin3_node_id drop, uint32_t port) {
     odin3_vec_clear(&ms->bits);
     odin3_pinslice ps = odin3_node_port(ms->m, drop, port);
     for (uint32_t k = 0; k < ps.count; k++) {
@@ -629,41 +656,48 @@ static odin3_status take_inits(merge_state *ms, odin3_node_id drop, uint32_t por
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        *slot = ODIN3_BIT_X;
-        if (odin3_net_valid(net)) {
-            *slot = odin3_ffinit_get(ms->m, net);
-            odin3_status st = odin3_ffinit_remove(ms->m, net, NULL);
-            if (st != ODIN3_OK) {
-                return st;
-            }
-        }
+        *slot = odin3_net_valid(net) ? odin3_ffinit_get(ms->m, net) : ODIN3_BIT_X;
     }
     return ODIN3_OK;
 }
 
-/* The dropped node's init moves to the survivor's Q where the survivor's is x. */
-static odin3_status give_inits(merge_state *ms) {
+/*
+ * After kit_connect: where the dropped Q had a defined init, the survivor's net now has it twice
+ * (the keys are equal, so the bits agree); set_init writes it once and clears the copy, Yosys's
+ * remove_init on the dropped Q. Each step keeps the net's init value, so a failure loses nothing.
+ */
+static odin3_status settle_inits(merge_state *ms) {
     const odin3_net_id *nets = ms->srcs.data;
     const odin3_bit *bits = ms->bits.data;
     for (size_t k = 0; k < ms->srcs.len && k < ms->bits.len; k++) {
-        if (bits[k] != ODIN3_BIT_X && odin3_ffinit_get(ms->m, nets[k]) == ODIN3_BIT_X) {
-            odin3_status st = odin3_ffinit_set(ms->m, nets[k], bits[k]);
-            if (st != ODIN3_OK) {
-                return st;
-            }
+        if ((bits[k] != ODIN3_BIT_0 && bits[k] != ODIN3_BIT_1) || !odin3_net_live(ms->m, nets[k])) {
+            continue;
+        }
+        odin3_status st = odin3_ffinit_set(ms->m, nets[k], odin3_ffinit_get(ms->m, nets[k]));
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;
 }
 
-/* Drops `drop` into `surv`: its outputs go to the survivor's nets, the node is deleted. */
+static void log_merge(const merge_state *ms, const char *drop_label, const char *keep_label) {
+    odin3_log(ODIN3_LOG_DEBUG, "opt_merge: module '%s': '%s' is identical to '%s'",
+              odin3_strtab_get(odin3_design_strtab(ms->oc->design), odin3_module_name(ms->m)),
+              drop_label, keep_label);
+}
+
+/*
+ * Drops `drop` into `surv`: its outputs go to the survivor's nets, the node is deleted. Everything
+ * that allocates runs before kit_connect, the first destructive step (OP-2).
+ */
 static odin3_status merge_pair(merge_state *ms, odin3_node_id surv, odin3_node_id drop,
                                bool is_ff) {
     const odin3_celltype_def *def =
         odin3_celltype_get(ms->oc->design, odin3_node_type(ms->m, drop));
     uint32_t port = out_port(def);
     odin3_status st = survivor_nets(ms, surv, port);
-    st = st == ODIN3_OK && is_ff ? take_inits(ms, drop, port) : st;
+    st = st == ODIN3_OK && is_ff ? read_drop_inits(ms, drop, port) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -671,16 +705,16 @@ static odin3_status merge_pair(merge_state *ms, odin3_node_id surv, odin3_node_i
     char drop_label[LABEL_MAX];
     node_label(ms, surv, keep_label);
     node_label(ms, drop, drop_label);
-    odin3_log(ODIN3_LOG_DEBUG, "opt_merge: module '%s': '%s' is identical to '%s'",
-              odin3_strtab_get(odin3_design_strtab(ms->oc->design), odin3_module_name(ms->m)),
-              drop_label, keep_label);
-    ms->into[drop.v] = surv.v;
-    ms->dprov[drop.v] = odin3_node_prov(ms->m, drop);
+    odin3_prov_id drop_prov = odin3_node_prov(ms->m, drop);
     odin3_kit_conn conn = {drop, port, ms->srcs.data, (uint32_t)ms->srcs.len};
     st = odin3_kit_connect(ms->oc, &conn);
-    st = st == ODIN3_OK && is_ff ? give_inits(ms) : st;
-    ms->removed++;
-    return st;
+    if (!odin3_node_live(ms->m, drop)) { /* deleted, even if a later merge step failed */
+        log_merge(ms, drop_label, keep_label);
+        ms->into[drop.v] = surv.v;
+        ms->dprov[drop.v] = drop_prov;
+        ms->removed++;
+    }
+    return st == ODIN3_OK && is_ff ? settle_inits(ms) : st;
 }
 
 /* --- the sweeps ---------------------------------------------------------------------------------
