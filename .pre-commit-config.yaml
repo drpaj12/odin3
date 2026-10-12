@@ -7,10 +7,11 @@ repos:
     rev: v6.0.0
     hooks:
       # tests/micro/ is verbatim upstream Verilog (some are whitespace/syntax tests): never rewrite it
+      # tests/tools/fixtures/vtr_qor/ holds VTR's own output: parse rows end with a tab
       - id: trailing-whitespace
-        exclude: '^tests/micro/'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/'
       - id: end-of-file-fixer
-        exclude: '^tests/micro/'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/'
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=500']

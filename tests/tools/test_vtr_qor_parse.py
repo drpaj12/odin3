@@ -12,6 +12,8 @@ import math
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +102,14 @@ class FixtureTest(unittest.TestCase):
                                      "total_wirelength", "total_runtime", "num_clb",
                                      "min_chan_width", "crit_path_delay"])
 
+    def test_results_keep_vtrs_trailing_tab(self) -> None:
+        """The pre-commit hooks must not rewrite the fixtures: VTR ends each row with a tab."""
+        for name in ("parse_results.txt", "qor_results.txt"):
+            lines = (FIXTURES / "blink_P" / name).read_bytes().split(b"\n")
+            self.assertEqual(len(lines), 3, name)
+            self.assertEqual(lines[2], b"", name)
+            self.assertTrue(lines[0].endswith(b"\t") and lines[1].endswith(b"\t"), name)
+
     def test_frontend_time(self) -> None:
         self.assertEqual(qor_parse.read_time_v(FIXTURES / "frontend" / "frontend.time"),
                          TimeV(0.0, 20))
@@ -123,6 +133,14 @@ class CommandTest(unittest.TestCase):
         for cmd in cmds:
             self.assertEqual(cmd.env, (("PYTHONPATH", LIBS),))
             self.assertEqual(cmd.cwd, run_dir)
+
+    def test_stderr_goes_to_its_own_file(self) -> None:
+        run_dir = Path("/w/j/run")
+        cmds = qor_parse.parse_commands(V, PY, run_dir, ARCH, "sha.v")
+        self.assertEqual([c.stderr for c in cmds],
+                         [run_dir / "parse_results.err", run_dir / "qor_results.err"])
+        for cmd in cmds:
+            self.assertNotEqual(cmd.stderr, cmd.stdout)
 
     def test_arch_name_is_the_xml_file(self) -> None:
         cmds = qor_parse.parse_commands(V, PY, Path("/r"), Path("/a/b/EArch.xml"), "x.blif")
@@ -183,6 +201,19 @@ class ReadParseResultsTest(TempTest):
                 self.assertEqual(caught.exception.message,
                                  f"P sha: malformed {name}.txt; job failed")
 
+    def test_stderr_in_its_own_file_leaves_the_results_whole(self) -> None:
+        """A parse script that warns on stderr, run with the commands' redirections."""
+        script = self.write("warn.py", "import sys\nsys.stderr.write('DeprecationWarning: x\\n')\n"
+                            "print('a\\tb\\t')\nprint('1\\t2\\t')\n")
+        cmd = qor_parse.parse_commands(V, Path(sys.executable), self.tmp, ARCH, "x.v")[0]
+        self.assertIsNotNone(cmd.stderr)
+        with cmd.stdout.open("w") as out, (cmd.stderr or cmd.stdout).open("w") as err:
+            subprocess.run([sys.executable, "-B", str(script)], stdout=out, stderr=err, check=True)
+        self.assertIn("DeprecationWarning", (cmd.stderr or cmd.stdout).read_text())
+        self.assertEqual(
+            qor_parse.read_parse_results(cmd.stdout, not_before=0.0, label="P x"),
+            {"a": "1", "b": "2"})
+
     def test_trailing_blank_lines_and_crlf_tolerated(self) -> None:
         path = self.write("p.txt", "a\tb\t\r\n1\t\t\r\n\n\n")
         self.assertEqual(qor_parse.read_parse_results(path, not_before=0.0, label="x"),
@@ -191,8 +222,9 @@ class ReadParseResultsTest(TempTest):
 
 class PresentTest(unittest.TestCase):
     def test_absent(self) -> None:
-        for text in ("-1", "", "nan", "inf", None, "-1.0", " -1 ", "NaN", "-inf", "Infinity",
-                     "abc", "1_000", "0x10", "1,5", "1.2.3", "--1", "1e999", " "):
+        for text in ("\u0663", "1\u0663", "-1", "", "nan", "inf", None, "-1.0", " -1 ", "NaN",
+                     "-inf", "Infinity", "abc", "1_000", "0x10", "1,5", "1.2.3", "--1", "1e999",
+                     " "):
             with self.subTest(text=text):
                 self.assertIsNone(qor_parse.present(text))
 
@@ -238,6 +270,12 @@ class TimeVTest(TempTest):
         self.assertEqual(qor_parse.read_time_v(only_wall), TimeV(2.5, None))
         only_rss = self.write("r", "\tMaximum resident set size (kbytes): 2048\n")
         self.assertEqual(qor_parse.read_time_v(only_rss), TimeV(None, 2))
+
+    def test_truncated_lines_do_not_count(self) -> None:
+        cut_rss = self.write("a", "\tMaximum resident set size (kbytes): 347")
+        self.assertEqual(qor_parse.read_time_v(cut_rss), TimeV(None, None))
+        cut_wall = self.write("b", "\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:1")
+        self.assertEqual(qor_parse.read_time_v(cut_wall), TimeV(None, None))
 
     def test_unparseable_elapsed_is_none(self) -> None:
         self.assertEqual(self.read("garbage"), TimeV(None, 68))
@@ -428,6 +466,7 @@ class MetricsTest(unittest.TestCase):
                 got = qor_parse.metrics_from_parse(dict(self.PARSE, critical_path_delay=delay),
                                                    self.QOR)
                 self.assertIsNone(got["routed"]["fmax_mhz"])
+                self.assertIsNone(got["routed"]["critical_path_delay_ns"])
 
     def test_mem_rounds_half_up(self) -> None:
         for kib, mib in (("0", 0), ("511", 0), ("512", 1), ("1023", 1), ("1024", 1),

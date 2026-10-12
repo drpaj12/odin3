@@ -98,13 +98,15 @@ class LegContext:
 
 @dataclass(frozen=True)
 class Command:
-    """One subprocess: ``argv`` run in ``cwd`` with stdout and stderr both to ``stdout``.
+    """One subprocess: ``argv`` run in ``cwd`` with stdout to ``stdout``, and stderr to
+    ``stderr`` when that is set, else to ``stdout`` as well.
     ``env`` holds the overrides applied on top of the caller's environment (empty: unchanged)."""
 
     argv: tuple[str, ...]
     cwd: Path
     stdout: Path
     env: tuple[tuple[str, str], ...]
+    stderr: Path | None = None
 
 
 def normalise_leg(name: str) -> str:

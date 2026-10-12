@@ -30,6 +30,8 @@ VPR_CONFIG_REL = Path("vtr_flow") / "parse" / "parse_config" / "vpr_standard.txt
 QOR_CONFIG_REL = Path("vtr_flow") / "parse" / "qor_config" / "qor_standard.txt"
 PARSE_RESULTS = "parse_results.txt"
 QOR_RESULTS = "qor_results.txt"
+# The parse scripts' stderr goes here, not into the results (spec §4.2 redirects stdout only).
+STDERR_SUFFIX = ".err"
 # VTR prints this for a key none of its patterns matched (log_parse: the default value).
 ABSENT = "-1"
 KIB_PER_MIB = 1024
@@ -45,10 +47,11 @@ STAGE_GLOBS = (
 )
 VPR_LOGS = ("vpr.out", "vpr.crit_path.out")
 
-_NUMBER = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+# ASCII digits only: ``\d`` and ``float`` also take other scripts' digits.
+_NUMBER = re.compile(r"[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", re.ASCII)
 _ELAPSED_LINE = re.compile(r"^\s*Elapsed \(wall clock\) time \(h:mm:ss or m:ss\): (\S+)\s*$")
-_ELAPSED_VALUE = re.compile(r"(?:(\d+):)?(\d+):(\d+(?:\.\d*)?)")
-_MAXRSS_LINE = re.compile(r"^\s*Maximum resident set size \(kbytes\): (\d+)\s*$")
+_ELAPSED_VALUE = re.compile(r"(?:([0-9]+):)?([0-9]+):([0-9]+(?:\.[0-9]*)?)", re.ASCII)
+_MAXRSS_LINE = re.compile(r"^\s*Maximum resident set size \(kbytes\): ([0-9]+)\s*$", re.ASCII)
 # VTR matches its patterns as ^.*<regex>.*$ (log_parse.ParsePattern).
 _VPR_FLOW_TIME = re.compile(r"^.*The entire flow of VPR took (.*) seconds.*$")
 
@@ -59,7 +62,11 @@ def parse_commands(
     vtr_root: Path, python: Path, run_dir: Path, arch_xml: Path, circuit: str
 ) -> list[Command]:
     """The two parse commands of spec §4.2: ``vpr_standard`` into ``parse_results.txt`` and
-    ``qor_standard`` into ``qor_results.txt`` (both in ``run_dir``)."""
+    ``qor_standard`` into ``qor_results.txt`` (both in ``run_dir``).
+
+    Only stdout goes to the results file, as the spec's ``>`` does; stderr goes to
+    ``parse_results.err`` / ``qor_results.err``, so a warning from the parse script cannot make
+    a finished job's results ``malformed``."""
     libs = vtr_root / PYTHON_LIBS_REL
     commands = []
     for config, out in ((VPR_CONFIG_REL, PARSE_RESULTS), (QOR_CONFIG_REL, QOR_RESULTS)):
@@ -72,7 +79,9 @@ def parse_commands(
             f"circuit={circuit}",
             "script_params=common",
         )
-        commands.append(Command(argv, run_dir, run_dir / out, (("PYTHONPATH", str(libs)),)))
+        stdout = run_dir / out
+        commands.append(Command(argv, run_dir, stdout, (("PYTHONPATH", str(libs)),),
+                                stdout.with_suffix(STDERR_SUFFIX)))
     return commands
 
 
@@ -140,12 +149,17 @@ def read_time_v(path: Path) -> TimeV:
     """Wall seconds and peak RSS (MiB, rounded half up) from the ``time -v`` blocks in ``path``.
 
     Several blocks (a log that holds more than one timed command) add their wall times and take
-    the largest peak. A file that is missing or carries no such lines gives ``None``."""
+    the largest peak. That suits VTR's stage logs; a ``frontend.time`` appended to by a re-run
+    (``time -a``) would be double-counted, so the runner must write it afresh. A line without
+    its newline may be cut short and does not count. A file that is missing or carries no such
+    lines gives ``None``."""
     wall: float | None = None
     peak_kib: int | None = None
     try:
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
+                if not line.endswith("\n"):
+                    continue
                 elapsed = _ELAPSED_LINE.match(line)
                 if elapsed is not None:
                     seconds = _elapsed_seconds(elapsed.group(1))
@@ -164,7 +178,10 @@ def read_time_v(path: Path) -> TimeV:
 
 def vpr_time_s(run_dir: Path) -> float | None:
     """The sum of every ``The entire flow of VPR took N seconds`` in ``vpr.out`` and
-    ``vpr.crit_path.out`` (spec §4.2), or ``None`` when there is none or one is unreadable."""
+    ``vpr.crit_path.out`` (spec §4.2), or ``None`` when there is none or one is unreadable.
+
+    A log that does not exist is skipped, so the sum cannot tell a fixed-width run (``vpr.out``
+    only) from a min-W run that lost ``vpr.crit_path.out``: the caller checks ``vpr_status``."""
     total = 0.0
     found = False
     for name in VPR_LOGS:
@@ -199,7 +216,11 @@ class StageCost:
 
 def stage_costs(run_dir: Path, globs: Sequence[str], label: str) -> StageCost:
     """Wall times summed and peak RSS maximised over every log in ``run_dir`` the ``globs``
-    match (each file once). A log without ``time -v`` lines is named in a warning (spec §4.4)."""
+    match (each file once). A log without ``time -v`` lines is named in a warning (spec §4.4).
+
+    VTR's last ``blackbox_latches.pl --vanilla`` step reopens ``restore_latch<last>.out`` for
+    writing, so that log holds the ``--vanilla`` run and the last domain's own restore step is not
+    counted: about one Perl pass short, a negligible cost."""
     files = sorted({p for pattern in globs for p in run_dir.glob(pattern) if p.is_file()})
     wall = 0.0
     peak = 0
@@ -235,8 +256,14 @@ def _mem_mib(text: str | None) -> int | None:
     return None if kib is None else math.floor(kib / KIB_PER_MIB + HALF)
 
 
+def _delay_ns(text: str | None) -> float | None:
+    """The critical path delay; zero or negative is not a delay, so it is missing."""
+    delay = present(text)
+    return delay if delay is not None and delay > 0 else None
+
+
 def _fmax_mhz(delay_ns: float | None) -> float | None:
-    return MHZ_PER_NS / delay_ns if delay_ns is not None and delay_ns > 0 else None
+    return None if delay_ns is None else MHZ_PER_NS / delay_ns
 
 
 def metrics_from_parse(
@@ -246,7 +273,7 @@ def metrics_from_parse(
 
     ``parse`` is ``parse_results.txt`` and ``qor`` is ``qor_results.txt``. An absent key, VTR's
     ``-1`` or an unreadable value is ``None``."""
-    delay = present(parse.get("critical_path_delay"))
+    delay = _delay_ns(parse.get("critical_path_delay"))
     return {
         "packed": {
             "num_clb": _count(parse.get("num_clb")),
