@@ -919,6 +919,41 @@ static void test_mux_nonconst_then_const(void) {
     fx_close(&fx);
 }
 
+/* mux_repeated_value.il, proc_mux alone (rmdead would remove the repeat): a value listed twice
+ * makes the switch not simple parallel, so the pool puts the second 2'01 in a new group: a chain
+ * of two $mux, not one $pmux. */
+static void test_mux_repeated_value(void) {
+    static const char *const k_cells[] = {
+        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[1 0] Y=[c0]",
+        "$mux WIDTH=1 A=[c] B=[b] S=[c0] Y=[c1]",
+        "$eq A_SIGNED=0 B_SIGNED=0 A_WIDTH=2 B_WIDTH=2 Y_WIDTH=1 A=[s[0] s[1]] B=[1 0] Y=[c2]",
+        "$mux WIDTH=1 A=[c1] B=[a] S=[c2] Y=[t1]",
+    };
+    fixture fx;
+    mux_run(&fx, (mux_case){"module \\m\n"
+                            "  wire width 2 input 1 \\s\n"
+                            "  wire input 2 \\a\n"
+                            "  wire input 3 \\b\n"
+                            "  wire input 4 \\c\n"
+                            "  wire output 5 \\y\n"
+                            "  wire \\t1\n"
+                            "  process $p\n"
+                            "    switch \\s\n"
+                            "      case 2'01\n"
+                            "        assign \\t1 \\a\n"
+                            "      case 2'01\n"
+                            "        assign \\t1 \\b\n"
+                            "      case\n"
+                            "        assign \\t1 \\c\n"
+                            "    end\n"
+                            "    sync always\n"
+                            "      update \\y \\t1\n"
+                            "  end\n"
+                            "end\n",
+                            PRE_NONE, k_cells, N_OF(k_cells)});
+    fx_close(&fx);
+}
+
 /* --- snippets --------------------------------------------------------------------------------- */
 
 /* The nets of the wires named by names, one bit each (bit 0), as stored bits. */
@@ -1499,6 +1534,7 @@ int main(void) {
     RUN_TEST(test_mux_x_compare);
     RUN_TEST(test_mux_nonconst_item);
     RUN_TEST(test_mux_nonconst_then_const);
+    RUN_TEST(test_mux_repeated_value);
     RUN_TEST(test_mux_snips_partition);
     RUN_TEST(test_mux_snippets_split);
     RUN_TEST(test_mux_pattern_cap_w5b);
