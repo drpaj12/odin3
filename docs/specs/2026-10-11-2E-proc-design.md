@@ -752,9 +752,11 @@ lenet.v, §19); find_mux_feedback O(cone) per latch bit with the memo.
 
 `odin3_proc_ffs(m, pw)` is `proc_dff`, after the latch step (live view throughout).
 
-**Groups** (`find_any_lvalue`): take the first action `lhs` of the first sync that has one,
-sorted and deduplicated; for each sync, intersect it with that sync's assigned bits when the
-intersection is not empty. That group is one register; its bits are removed from every action;
+**Groups** (`find_any_lvalue`): take the first action `lhs` of the **last** sync that has one
+(*amended, 2E Task 9*: Yosys's `break` leaves only the loop over one sync's actions, so each later
+sync's first `lhs` replaces the earlier one; verified on 0.55, `ff_edge_chunks`), sorted and
+deduplicated; for each sync, intersect it with that sync's assigned bits when the intersection is
+not empty. That group is one register; its bits are removed from every action;
 repeat until no sync assigns anything. With 2D's bodies (one sync action per output chunk, 2D
 v4.2 EL-35 step 4) a group is one variable's chunk, as in Yosys, so a register's `Q` is the
 whole wire whenever the block assigns the whole wire (what `fsm_detect` needs, 2F's S-P splice).
@@ -783,6 +785,16 @@ in sync order; the edge sync gives `insig` (bits it does not assign stay z). The
 Registers drive the group's own output nets (undriven since the node was deleted), so no merge is
 needed. The cell gets the `$proc` node's attributes (Yosys copies `proc->attributes`). Cost
 O(groups × sync actions) per process, Yosys's bound; groups ≈ output wires.
+
+*Amended (2E Task 9):* the helper cells of steps 1–3 (`$not`, `$reduce_or`, `$mux`) take
+`pw->lowered` as their record but no attributes, as Yosys's `Module::Not`, `ReduceOr` and `Mux`
+add none; in the statistics each cell counts by its type (the `$mux` cells as `$mux`, the `$not`
+and `$reduce_or` cells as helpers). Rules' values, the group and `insig` are compared in the live
+view (§4), so two resets whose values are one net collapse, where Yosys compares the values as
+written (§20 #1). W3 names the first reset as written (with several equal non-constant resets,
+collapsed into one trigger, the first of them). The errors step A rules out (a group without an edge
+sync or with two, an `ALWAYS` action left by the latch step, a register output on a constant net)
+are internal errors (`ODIN3_ERR_CHECK`).
 
 ## 10. Initial values (PR-16)
 

@@ -88,7 +88,6 @@ add_library(odin3_core OBJECT
     src/passes/proc/pw_encode.c
     src/passes/proc/proc_emit.c
     src/passes/proc/proc_diag.c
-    src/passes/proc/proc_pending.c
     src/passes/proc/proc_clean.c
     src/passes/proc/proc_rmdead.c
     src/passes/proc/proc_prune.c
@@ -97,6 +96,7 @@ add_library(odin3_core OBJECT
     src/passes/proc/proc_snip.c
     src/passes/proc/proc_mux.c
     src/passes/proc/proc_latch.c
+    src/passes/proc/proc_ff.c
     src/passes/proc/ppool.c
     src/passes/proc/proc_pass.c
     src/passes/budget.c
@@ -408,6 +408,8 @@ if(BUILD_TESTING)
     target_sources(test_proc_mux PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_proc_latch)
     target_sources(test_proc_latch PRIVATE tests/unit/proc_build.c)
+    odin3_add_unit_test(test_proc_ff)
+    target_sources(test_proc_ff PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_budget)
     odin3_add_unit_test(test_ffinit)
     odin3_add_unit_test(test_ast_srcman)

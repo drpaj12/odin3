@@ -1,7 +1,7 @@
 /*
  * proc_test.h — test hooks of the proc pass (2E spec §16, §18.1; plan point (h)): lowered caps,
- * and fake phases that let the schedule, atomicity, statistics and step F be tested before the
- * real phases land. Never part of the ABI.
+ * and fake phases that let the schedule, atomicity, statistics and step F be tested on their own.
+ * Never part of the ABI.
  */
 #ifndef ODIN3_PASSES_PROC_PROC_TEST_H
 #define ODIN3_PASSES_PROC_PROC_TEST_H
@@ -47,12 +47,11 @@ typedef struct odin3_proc_phase_call {
 
 /*
  * phase: called before each phase; when it returns true the hook replaced the phase and *st is its
- * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE). While it is
- * installed the end-of-step-A check for pending lowering phases (plan point (h)) is skipped, so it
- * must handle every lowering phase still pending. on_step_f: called at step F for each lowered
- * module (unless --noopt or --stop-after). on_expand: called by the latch phase's walk each time
- * it expands a mux bit, with the net and the walk's set_undef there (2E Task 8; §8's memo expands
- * each (net, set_undef) at most once per latch output). Any of them may be NULL.
+ * status (a phase reports a user error with odin3_proc_error and ODIN3_ERR_PARSE); returning false
+ * runs the real phase. on_step_f: called at step F for each lowered module (unless --noopt or
+ * --stop-after). on_expand: called by the latch phase's walk each time it expands a mux bit, with
+ * the net and the walk's set_undef there (2E Task 8; §8's memo expands each (net, set_undef) at
+ * most once per latch output). Any of them may be NULL.
  */
 typedef struct odin3_proc_test_hooks {
     bool (*phase)(void *user, const odin3_proc_phase_call *call, odin3_status *st);

@@ -1,8 +1,8 @@
 /*
  * proc_internal.h — one module's lowering state for the proc pass (2E spec §3, §7, §14, §15, §17):
  * the module context, its constant nets and the shared scratch index (Task 2); the net map and
- * merges, the cell helper, provenance, orphans, the pending phases and diagnostics (Task 3); the
- * latch database and the latch phase (Task 8).
+ * merges, the cell helper, provenance, orphans and diagnostics (Task 3); the latch database and
+ * the latch phase (Task 8); the flip-flop phase (Task 9).
  */
 #ifndef ODIN3_PASSES_PROC_PROC_INTERNAL_H
 #define ODIN3_PASSES_PROC_PROC_INTERNAL_H
@@ -57,8 +57,7 @@ struct odin3_proc_mctx {
     bool stopped;               /* the run stops: the error cap (E7) or the byte budget (E6) */
     uint64_t pins_since_budget; /* pins created since the last budget check */
     uint32_t init_key;          /* strtab ID of `init`, 0 until a phase needs it (Task 8) */
-    uint32_t *reported; /* the run's pending phases already reported (bit per phase), or NULL */
-    uint64_t pw_bytes;  /* bytes of the working forms decoded so far: the budget's extra */
+    uint64_t pw_bytes;          /* bytes of the working forms decoded so far: the budget's extra */
     odin3_celltype_id types[ODIN3_PROC_N_TYPES]; /* odin3_proc_type's cache, filled at init */
     odin3_proc_ldb *ldb; /* Task 8: the latch database, NULL until the latch phase builds it */
 };
@@ -473,19 +472,32 @@ bool odin3_proc_ldb_latch(const odin3_proc_mctx *mctx, uint32_t index, odin3_nod
 /* Calls the test hook on_expand (proc_test.h), if one is installed (proc_pass.c owns the hooks). */
 void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
 
-/* --- pending phases (plan point (h); proc_pending.c, deleted by Task 9) --------------------- */
-
-/* The first pending phase in schedule order, ODIN3_PROC_N_PHASES when none is pending. */
-odin3_proc_phase odin3_proc_pending_first(void);
-
-/* True when phase is still pending. */
-bool odin3_proc_pending(odin3_proc_phase phase);
+/* --- step D: flip-flops (§9, PR-15; proc_ff.c) --------------------------------------------- */
 
 /*
- * A pending phase reached: logs "proc: '<phase>' is not available yet (2E)" the first time in the
- * run (*mctx->reported), counting it as an error, and returns ODIN3_ERR_PARSE.
+ * The flip-flop phase (§9, PR-15), Yosys 0.55's proc_dff for pw after the latch step, in the live
+ * view: every edge and level sync's signal and actions are first read through the net map. Then,
+ * while a sync assigns anything, find_any_lvalue gives a group (the first non-empty action lhs of
+ * the last sync that has one, as Yosys's loop leaves it, sorted by odin3_proc_bit_key and unified,
+ * then narrowed to its common part with each sync's bits where that part is not empty), one
+ * register: each level sync action meeting it gives a rule (its value, z where the action does not
+ * assign; its signal), the edge sync's actions give insig (z where none assigns). Rules whose
+ * values are all equal collapse into one LEVEL1 rule on $reduce_or of their triggers (the signal,
+ * or a $not of it for LEVEL0, made first); one rule whose value is the group itself becomes insig =
+ * $mux(insig, group, trigger). Then: several rules give W4 and $dffsr (SET and CLR from $mux chains
+ * built from the last rule to the first, starting from 0; CLK_POLARITY from the edge, SET_POLARITY
+ * = CLR_POLARITY = 1); one rule whose value is not made of constant nets gives W3 and $aldff
+ * (ALOAD_POLARITY 1); else $adff (ARST_POLARITY 1, ARST_VALUE the constant) or $dff. WIDTH is the
+ * group's width, CLK_POLARITY 1 for POSEDGE and 0 for NEGEDGE; the register's Q is the group's own
+ * nets and it copies the $proc node's attributes; every cell has pw->lowered as its record. W3
+ * names the first reset as written, W4 the first three and then `…`, both at pw->prov. The group's
+ * bits then leave every action, so the syncs end empty. ODIN3_ERR_CHECK (logged "proc: internal:
+ * ...") for what step A or the latch step rules out: an ALWAYS sync with an action, a group without
+ * an edge sync or with two, a register output on a constant net; ODIN3_ERR_NO_MEMORY and E6
+ * (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR; ODIN3_ERR_INVALID_ARG (logged)
+ * for a NULL argument. O(groups x sync actions x width), Yosys's bound.
  */
-odin3_status odin3_proc_pending_run(odin3_proc_mctx *mctx, odin3_proc_phase phase);
+odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw);
 
 /* --- diagnostics (§15, plan point (k); proc_diag.c) ----------------------------------------- */
 
