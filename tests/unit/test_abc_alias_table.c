@@ -164,11 +164,11 @@ static const odin3_abc_command_info k_allowed[] = {
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_delay", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "pd"},
     {"print_exdc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_factor", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_fanio", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_gates", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_fanio", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "m"},
+    {"print_gates", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "v"},
     {"print_genlib", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_gs", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_io", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -189,7 +189,7 @@ static const odin3_abc_command_info k_allowed[] = {
     {"print_tim", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_unate", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_xcut", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"&ps", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "D", ""},
+    {"&ps", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "D", "as"},
     {"time", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"echo", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
 };
@@ -850,6 +850,17 @@ static void test_refusals_final_review(void) {
     }
 }
 
+/* The final review's addendum: print_gates -v, print_fanio -m, &ps -a -s, print_dsd -p -d. */
+static void test_refusals_addendum(void) {
+    static const char *const k_cmds[] = {"print_gates", "print_fanio", "&ps",
+                                         "&ps",         "print_dsd",   "print_dsd"};
+    static const char k_letters[] = "vmaspd";
+    TEST_ASSERT_EQUAL_UINT32(COUNT_OF(k_cmds), (uint32_t)strlen(k_letters));
+    for (uint32_t i = 0; i < COUNT_OF(k_cmds); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(crash_opt(k_cmds[i], k_letters[i]), k_cmds[i]);
+    }
+}
+
 /* print_box crashes with any option, so it is a refused row; a crash option refuses a script. */
 static void test_crash_command(void) {
     expect_row("print_box", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
@@ -957,6 +968,7 @@ int main(void) {
     RUN_TEST(test_refusals_task11);
     RUN_TEST(test_refusals_fix_round1);
     RUN_TEST(test_refusals_final_review);
+    RUN_TEST(test_refusals_addendum);
     RUN_TEST(test_files_rows_pinned);
     RUN_TEST(test_rc_parser_forms);
     RUN_TEST(test_print_rows);

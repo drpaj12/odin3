@@ -579,10 +579,11 @@ static void test_file_and_crash_options(void) {
     }
     /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i;
      * crashes: if scY, &if swYjbi, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr
-     * NFS, mfs tMp, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M, lutpack o, print_latch s
-     * (Task 10 fix rounds 1-3, Task 11's audit, its fix round 1 and the final review) */
+     * NFS, mfs tMp, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M, lutpack o, print_latch s,
+     * print_gates v, print_fanio m, &ps as, print_dsd pd (Task 10 fix rounds 1-3, Task 11's
+     * audit, its fix round 1, the final review and its addendum) */
     TEST_ASSERT_EQUAL_UINT32(16, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(34, crash_seen);
+    TEST_ASSERT_EQUAL_UINT32(40, crash_seen); /* 34 + the addendum's six letters */
 }
 
 static void test_options_from_alias(void) {
@@ -654,14 +655,66 @@ static void test_refused_print_commands(void) {
            "t.abc:2: abc command 'print_cone' (from alias 'pcon') is not allowed: it crashes ABC "
            "at the pin (a3001b72)");
     refuse("print_kmap 1 2", k_mem,
-           "t.abc:1: abc command 'print_kmap' with 2 or more arguments is not allowed: it crashes "
-           "ABC at the pin (a3001b72)");
+           "t.abc:1: abc command 'print_kmap' with an argument is not allowed: it crashes ABC at "
+           "the pin (a3001b72)");
     refuse("strash; pk -n 1 2 3", k_mem,
-           "t.abc:1: abc command 'print_kmap' (from alias 'pk') with 2 or more arguments is not "
-           "allowed: it crashes ABC at the pin (a3001b72)");
+           "t.abc:1: abc command 'print_kmap' (from alias 'pk') with an argument is not allowed: "
+           "it crashes ABC at the pin (a3001b72)");
     odin3_abc_script script;
-    accept("print_kmap 1; print_kmap -n; if -K 6", k_mem, &script);
+    accept("print_kmap; print_kmap -n; print_level; print_io; if -K 6", k_mem, &script);
     odin3_abc_script_free(&script);
+}
+
+/* One of the addendum's crash-letter scripts: refused at line for cmd's -letter. */
+typedef struct crash_case {
+    const char *text, *letter, *cmd;
+    uint32_t line;
+} crash_case;
+
+static void refuse_crash_case(const crash_case *cs) {
+    char want[256];
+    int wrote = snprintf(want, sizeof want,
+                         "t.abc:%u: option '-%s' of '%s' crashes ABC at the pin (a3001b72) and is "
+                         "not allowed",
+                         (unsigned)cs->line, cs->letter, cs->cmd);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+    refuse(cs->text, k_blif, want);
+}
+
+/* `<cmd> 8` after a mapping: a node-naming print with an argument is refused. */
+static void refuse_named(const char *cmd) {
+    char text[64];
+    char want[256];
+    int wrote = snprintf(text, sizeof text, "strash; if -K 6; %s 8", cmd);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+    wrote = snprintf(want, sizeof want,
+                     "t.abc:1: abc command '%s' with an argument is not allowed: it crashes ABC at "
+                     "the pin (a3001b72)",
+                     cmd);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+    refuse(text, k_blif, want);
+}
+
+/* The final review's addendum: its print-family crash scripts, replayed, are refused. */
+static void test_addendum_print_crashers(void) {
+    static const crash_case cases[] = {{"print_gates -v; if -K 6", "v", "print_gates", 1},
+                                       {"strash; &get; &if -K 6\n&ps -a", "a", "&ps", 2},
+                                       {"strash; if -K 6; &get -m\n&ps -a", "a", "&ps", 2},
+                                       {"strash; if -K 6\nprint_fanio -m", "m", "print_fanio", 2},
+                                       {"strash; &get; &if -K 6\n&ps -s", "s", "&ps", 2},
+                                       {"strash; if -K 6\nprint_dsd -p", "p", "print_dsd", 2},
+                                       {"print_dsd -d; if -K 6", "d", "print_dsd", 1}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        refuse_crash_case(&cases[i]);
+    }
+    static const char *const named[] = {"print_kmap", "print_level", "print_factor", "print_io",
+                                        "print_delay"};
+    for (size_t i = 0; i < sizeof named / sizeof named[0]; i++) {
+        refuse_named(named[i]);
+    }
+    refuse("strash; if -K 6; print_factor -s 8", k_blif,
+           "t.abc:1: abc command 'print_factor' with an argument is not allowed: it crashes ABC "
+           "at the pin (a3001b72)");
 }
 
 /* Final review C1: linked ABC maps LUTs of at most 12 inputs; {K} and every -K stay at or below. */
@@ -1187,6 +1240,7 @@ int main(void) {
     RUN_TEST(test_number_cap);
     RUN_TEST(test_number_cap_forms);
     RUN_TEST(test_refused_print_commands);
+    RUN_TEST(test_addendum_print_crashers);
     RUN_TEST(test_k_linked_cap);
     RUN_TEST(test_value_ranges);
     RUN_TEST(test_limits_lowered);

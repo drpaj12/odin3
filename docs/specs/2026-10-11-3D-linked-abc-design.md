@@ -902,9 +902,15 @@ file as given, and nothing changes.
      exactly in decimal; a number that starts with `-` is refused, since ABC's getopt reads it as
      an option cluster: `<file>:<line>: argument '<w>' of '<cmd>' is not a number from 0 to
      1000000`.
-   - **Positional words.** `print_kmap` with two or more of them prints the 6-variable functions
-     they name, and `Abc_Show6VarFunc` asserts (abcPrint.c:2057): `<file>:<line>: abc command
-     'print_kmap' with 2 or more arguments is not allowed: it crashes ABC at the pin (a3001b72)`.
+   - **Positional words.** `print_kmap`, `print_level`, `print_factor`, `print_io` and
+     `print_delay` take none: they name nodes (or, for `print_kmap` with two, the 6-variable
+     functions `Abc_Show6VarFunc` prints, abcPrint.c:2057), and a name that is no node, or a latch
+     output or an output, crashes ABC: `<file>:<line>: abc command '<cmd>' with an argument is not
+     allowed: it crashes ABC at the pin (a3001b72)`.
+     > *(Erratum, PR 3D-4 final review addendum, 2026-10-12: was `print_kmap` with two or more
+     > words only; `print_kmap 8` naming a latch output or an output kills the Release `abc`, and
+     > `print_level 8`, `print_factor 8` assert. A batch flow has no use for a numeric node name,
+     > and a BLIF net may be named by digits.)*
      > *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings C2, I1 and M5: large values
      > allocate without bound (`scorr -F`, `mfs -M`, `&st -M`, …) or wrap through `atoi`
      > (`4294967296` is 0), and `-0e5` would reach getopt as the cluster `-0 -e -5`.)*
@@ -1095,7 +1101,21 @@ values), `if -Y` and `&if -Y` (100000), and `dch -s` (a network whose outputs ar
 of 3). `print_cone` (any sequential logic network) and `print_npn` (its truth table: a division by
 zero for 0, an overrun of `word pTruth[16]` for 257 or more digits) crash with any option and are
 refused like `print_box`. And `print_latch -s` (unless right after `strash`), `&if -j -b -i` (K 2
-to 8), `mfs -p` (after a mapping of K 12 or more) and `lutpack -o`.
+to 8), `mfs -p` (after a mapping of K 12 or more) and `lutpack -o`. And `print_gates -v`,
+`print_fanio -m`, `&ps -a -s` and `print_dsd -p -d`.
+
+> *(Erratum, PR 3D-4 final review addendum, 2026-10-12: `print_gates -v` (SIGSEGV at the BLIF
+> start, Release too), `print_fanio -m` (SIGSEGV after `if` on a 2,243-node block, Release too),
+> `&ps -a` (`Gia_NodeMffcSize`, giaUtil.c:1229, SIGSEGV in Release) and `-s`
+> (`Gia_ManDfsSlacksPrint`, giaMan.c:1261), and `print_dsd -p` (`Kit_TruthPrintProfile`,
+> kitTruth.c:2211) and `-d` (`Dau_DecFindSets_int`, dauNonDsd.c:472) are new, with step 9's
+> positional rule for the node-naming prints; 40 crash letters in all. They come from the
+> reviewer's sweep of 14,434 scripts (13,178 accepted) on nine more shapes (a 60-deep chain, a
+> 300-output fan-out, PI-driven and duplicated outputs with a latch chain, a 100-latch chain, a
+> 2,243-node block with 200 latches and 12-input nodes, constant-driven latches, `ff.odin`,
+> `hand_wide`, numeric names), which found no crash in the optimisation, mapping and `&`
+> commands at default options; its only other residue is time (`print_auto`/`print_unate` BDDs
+> over 120 s on 2,243 nodes, PHASE3 #27).)*
 
 > *(Erratum, PR 3D-4 final review, 2026-10-12, rulings C2, I1 and I2: `print_latch -s`, `&if -j
 > -b -i`, `mfs -p` and `lutpack -o` are new, with step 9's value ranges and step 11's BLIF-start

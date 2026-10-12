@@ -87,6 +87,17 @@
  *                               (Int_ManPrepareInter, satInter.c:963)
  *   lutpack -o      abc.c:5350  fOldAlgo: asserts in Abc_NtkUpdateLevel (abcTiming.c:1446)
  *
+ * The final review's addendum (14,434 scripts on nine more shapes; Debug abc, Release where
+ * marked):
+ *
+ *   print_gates -v  at the BLIF start: SIGSEGV, Release too
+ *   print_fanio -m  after if, on a 2,243-node block: SIGSEGV, Release too
+ *   &ps -a, -s      -a on a mapped & network: Gia_NodeMffcSize (giaUtil.c:1229), SIGSEGV in
+ *                   Release; -s: asserts nTotal > 0 (Gia_ManDfsSlacksPrint, giaMan.c:1261)
+ *   print_dsd -p, -d  -p after if with 1-input nodes: Kit_TruthPrintProfile nVars >= 2
+ *                   (kitTruth.c:2211); -d at the BLIF start: Dau_DecFindSets_int
+ *                   (dauNonDsd.c:472)
+ *
  * script.c adds what a letter list cannot say: if/&if -K at most 12 (abc.c:22908, 45209; wider
  * mappings crash &st and &synch2, dauGia.c:451), -E at least 1 (abc.c:23055, 45337; If_Cut
  * AreaDerefed, ifCut.c:1117) and refactor -N at least 2 (abc.c:8434; Abc_NodeFindCut,
@@ -170,11 +181,11 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_delay", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "pd"},
     {"print_exdc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_factor", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_fanio", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_gates", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_fanio", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "m"},
+    {"print_gates", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "v"},
     {"print_genlib", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_gs", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_io", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -195,7 +206,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"print_tim", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_unate", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_xcut", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"&ps", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "D", ""},
+    {"&ps", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "D", "as"},
     {"time", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"echo", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     /* refused, files: print_constr and print_status take files (§7.5) */

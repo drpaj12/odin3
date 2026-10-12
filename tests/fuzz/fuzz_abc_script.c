@@ -17,7 +17,8 @@
  *      an abc.rc alias;
  *    - every argument is an option or a number from 0 to 1,000,000 as strtod and atoi read it
  *      (echo: any such printable word), no option letter is one of its row's file, string or
- *      crash options, and print_kmap has at most one positional word;
+ *      crash options, and print_kmap, print_level, print_factor, print_io and print_delay
+ *      have no positional word;
  *    - replaying §7.5's effects (with the checker's &get, &if, balancing, BLIF-start and choice
  *      rules, re-derived here) from the exchange's start ends in the reported final space,
  *      mapped, and never runs an & command on an empty & space, &if on a mapped one or on
@@ -360,8 +361,12 @@ static void check_args(const odin3_abc_command_info *row, const char *const *wor
             fail("an argument that is not a number from 0 to 1000000 was accepted");
         }
     }
-    if (strcmp(row->name, "print_kmap") == 0 && positional >= 2) {
-        fail("print_kmap with two arguments was accepted");
+    static const char *const k_no_positional[] = {"print_kmap", "print_level", "print_factor",
+                                                  "print_io", "print_delay"};
+    for (size_t i = 0; positional > 0 && i < sizeof k_no_positional / sizeof(char *); i++) {
+        if (strcmp(row->name, k_no_positional[i]) == 0) {
+            fail("a node-naming print with a positional word was accepted");
+        }
     }
     check_range(row->name, words, n);
 }

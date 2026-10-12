@@ -30,7 +30,8 @@
  *  - every number word lies in 0 .. ODIN3_ABC_MAX_NUMBER, read both as atoi and as atof read it
  *    (large values allocate without bound or wrap through atoi), and no number starts with `-`
  *    (ABC's getopt would read it as an option cluster);
- *  - print_kmap with two or more positional words is refused (Abc_Show6VarFunc asserts);
+ *  - print_kmap, print_level, print_factor, print_io and print_delay take no positional words
+ *    (they name nodes; a non-node name crashes ABC; the final review's addendum);
  *  - the BLIF start is a logic network (ABC_LOGIC): &get -m keeps its mapping, so &if refuses it,
  *    yet it does not end a script as mapped;
  *  - choices: &if refuses the choices a plain &get copied from the network (Gia_ManChoiceLevel,
@@ -749,26 +750,23 @@ static odin3_status check_value(const abc_parse *ps, const abc_item *item,
     return ODIN3_OK;
 }
 
-/* Commands whose positional words crash ABC past a count (fix round 1, ruling I1): print_kmap
- * with two words prints the 6-variable functions they name, and Abc_Show6VarFunc asserts. */
-typedef struct abc_positional {
-    const char *name;
-    uint32_t max_words;
-} abc_positional;
-
-static const abc_positional k_abc_positional[] = {{"print_kmap", 1}};
+/* Commands that may take no positional words (fix round 1, ruling I1; the final review's
+ * addendum): they name nodes, or for print_kmap with two words the 6-variable functions it
+ * prints, and a name that is no node, or a latch output or output, crashes ABC at the pin
+ * (Abc_NodeMffcSize, Abc_NodeIsConst, Abc_NodePrintFactor, Abc_Show6VarFunc; SIGSEGV in Release
+ * for print_kmap). A batch flow has no use for a numeric node name. */
+static const char *const k_abc_no_positional[] = {"print_kmap", "print_level", "print_factor",
+                                                  "print_io", "print_delay"};
 
 static odin3_status check_positional(const abc_parse *ps, const abc_item *item,
                                      const odin3_abc_command_info *row, uint32_t n_positional) {
-    for (size_t i = 0; i < sizeof k_abc_positional / sizeof k_abc_positional[0]; i++) {
-        const abc_positional *rule = &k_abc_positional[i];
-        if (strcmp(rule->name, row->name) == 0 && n_positional > rule->max_words) {
+    for (size_t i = 0; n_positional > 0 && i < sizeof k_abc_no_positional / sizeof(char *); i++) {
+        if (strcmp(k_abc_no_positional[i], row->name) == 0) {
             abc_from from = from_alias(item);
             return abc_fail(ps, item->line,
-                            "abc command '%s'%s%s%s with %u or more arguments is not allowed: it "
-                            "crashes ABC at the pin (a3001b72)",
-                            row->name, from.pre, from.name, from.post,
-                            (unsigned)rule->max_words + 1);
+                            "abc command '%s'%s%s%s with an argument is not allowed: it crashes "
+                            "ABC at the pin (a3001b72)",
+                            row->name, from.pre, from.name, from.post);
         }
     }
     return ODIN3_OK;
