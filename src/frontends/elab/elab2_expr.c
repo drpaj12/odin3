@@ -68,6 +68,22 @@ static bool ex_param_unsized(const odin3_elab2 *e2, const odin3_symbol *rec) {
     return num != NULL && num->width == 0;
 }
 
+/* A plain decimal (`5`) keeps its 32 bits in Yosys 0.55 whatever the context; only the apostrophe
+ * forms (`'d5`, `'h3`) are widened to it. The AST does not record the apostrophe, so a signed
+ * unsized decimal stands for the plain form (`'sd5` is taken as plain too; spec 17 #41). */
+static bool ex_plain_decimal(const odin3_ast *ast, odin3_ast_id num) {
+    const odin3_ast_number *payload = odin3_ast_number_of(ast, num);
+    return payload != NULL && payload->width == 0 &&
+           odin3_ast_sub(ast, num) == ODIN3_AST_NUMBER_DEC &&
+           (odin3_ast_flags(ast, num) & ODIN3_AST_F_NUMBER_SIGNED) != 0;
+}
+
+/* Whether the NUMBER at num (or the one a parameter's declarator holds) extends to its context. */
+static bool ex_widens(const odin3_ast *ast, odin3_ast_id num) {
+    const odin3_ast_number *payload = odin3_ast_number_of(ast, num);
+    return payload != NULL && payload->width == 0 && !ex_plain_decimal(ast, num);
+}
+
 static odin3_status ex_name_error(odin3_elab2 *e2, odin3_ast_id node, const char *fmt,
                                   const char *name) {
     odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node), fmt, name);
@@ -112,8 +128,7 @@ static odin3_status ex_select_leaf(odin3_elab2 *e2, odin3_ast_id node) {
     if (rec == NULL || rec->n_unpacked == 0 || rec->n_unpacked != depth) {
         return ODIN3_OK;
     }
-    odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node),
-                      "elaboration is not available yet (2D): 'memory read'");
+    odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, node), ODIN3_PEND_MEM_READ);
     return ODIN3_ERR_PARSE;
 }
 
@@ -259,8 +274,8 @@ static odin3_status ex_number(ex_run *run, const ex_frame *frame, odin3_sig *out
         return st;
     }
     uint32_t width = ex_final(e2, frame->node).width;
-    return ex_bits_sig(e2, &lit.value,
-                       lit.is_unsized && width > lit.value.len ? width : lit.value.len, out);
+    bool wide = lit.is_unsized && ex_widens(e2->elab, frame->node) && width > lit.value.len;
+    return ex_bits_sig(e2, &lit.value, wide ? width : lit.value.len, out);
 }
 
 static odin3_status ex_string(ex_run *run, const ex_frame *frame, odin3_sig *out) {
@@ -298,7 +313,9 @@ static odin3_status ex_name(ex_run *run, const ex_frame *frame, odin3_sig *out) 
         return ex_wire_sig(run, rec, out);
     }
     uint32_t width = ex_final(e2, frame->node).width;
-    bool wide = ex_param_unsized(e2, rec) && width > rec->value.len;
+    bool wide = ex_param_unsized(e2, rec) &&
+                ex_widens(e2->elab, odin3_ast_child(e2->elab, rec->declarator, 0)) &&
+                width > rec->value.len;
     return ex_bits_sig(e2, &rec->value, wide ? width : rec->value.len, out);
 }
 
@@ -307,6 +324,40 @@ static odin3_status ex_name(ex_run *run, const ex_frame *frame, odin3_sig *out) 
 /* Operand idx of the node on the frame (a copy: pushing a result moves the stack). */
 static odin3_sig ex_operand(const odin3_elab2 *e2, const ex_frame *frame, uint32_t idx) {
     return *(const odin3_sig *)odin3_vec_cat(&e2->vals, e2->vals.len - frame->next + idx);
+}
+
+/* The sign genrtlil gives an operand it generates self-determined (genRTLIL() without hints):
+ * a name, select or call is unsigned there whatever it is declared as, a unary ~ - + is its
+ * operand's, anything else (a literal, an arithmetic or bitwise operator, a ternary) has the
+ * sign the typer found. The cells of reductions, `!`, `&&`, `||` and a ternary's $reduce_bool
+ * read it as A_SIGNED / B_SIGNED (Yosys 0.55: `&s` is A_SIGNED 0, `&(s + t)` is 1). */
+static bool ex_gen_sign(const odin3_elab2 *e2, odin3_ast_id node) {
+    const odin3_ast *ast = e2->elab;
+    while (odin3_ast_kind_of(ast, node) == ODIN3_AST_UNARY) {
+        uint32_t sub = odin3_ast_sub(ast, node);
+        if (sub != ODIN3_AST_UNARY_PLUS && sub != ODIN3_AST_UNARY_MINUS &&
+            sub != ODIN3_AST_UNARY_NOT) {
+            break;
+        }
+        node = odin3_ast_child(ast, node, 0);
+    }
+    switch (odin3_ast_kind_of(ast, node)) {
+    case ODIN3_AST_IDENT:
+    case ODIN3_AST_HIER_NAME:
+    case ODIN3_AST_SELECT:
+    case ODIN3_AST_CALL:
+        return false;
+    default:
+        return ex_final(e2, node).is_signed;
+    }
+}
+
+/* Operand idx of the node, stamped with the sign its cell reads (ex_gen_sign). */
+static odin3_sig ex_self_operand(const odin3_elab2 *e2, const ex_frame *frame, uint32_t idx) {
+    odin3_sig sig = ex_operand(e2, frame, idx);
+    odin3_ast_id kid = odin3_ast_child(e2->elab, frame->node, idx);
+    sig.is_signed = ex_gen_sign(e2, kid);
+    return sig;
 }
 
 static uint32_t ex_max(uint32_t lhs, uint32_t rhs) {
@@ -356,7 +407,7 @@ static odin3_status ex_unary_logic(ex_run *run, const ex_frame *frame, const ex_
                                    odin3_sig *out) {
     odin3_elab2 *e2 = run->e2;
     odin3_etype fin = ex_final(e2, frame->node);
-    odin3_sig arg = ex_operand(e2, frame, 0);
+    odin3_sig arg = ex_self_operand(e2, frame, 0);
     uint32_t width = ex_max(fin.width, 1);
     if (!op->negated || ex_foldable(&arg)) {
         return ex_binop(run, frame->node,
@@ -533,8 +584,9 @@ static odin3_status ex_binary(ex_run *run, const ex_frame *frame, odin3_sig *out
         return ex_case_eq(run, frame, op, out);
     }
     odin3_etype fin = ex_final(e2, frame->node);
-    odin3_sig lhs = ex_operand(e2, frame, 0);
-    odin3_sig rhs = ex_operand(e2, frame, 1);
+    bool logic = op->cls == CLS_LOGIC;
+    odin3_sig lhs = logic ? ex_self_operand(e2, frame, 0) : ex_operand(e2, frame, 0);
+    odin3_sig rhs = logic ? ex_self_operand(e2, frame, 1) : ex_operand(e2, frame, 1);
     uint32_t width = ex_max(fin.width, 1);
     if (op->cls == CLS_ARITH) {
         width = ex_max(width, ex_max(lhs.width, rhs.width));
@@ -599,7 +651,7 @@ static odin3_status ex_ternary_fold(odin3_elab2 *e2, const odin3_sig *cond,
 static odin3_status ex_ternary_mux(ex_run *run, const ex_frame *frame, const odin3_sig *branches,
                                    odin3_sig *out) {
     odin3_sig select;
-    odin3_status st = ex_select_bit(run, frame, ex_operand(run->e2, frame, 0), &select);
+    odin3_status st = ex_select_bit(run, frame, ex_self_operand(run->e2, frame, 0), &select);
     uint32_t width = branches[0].width;
     odin3_elab2_cell_req req = {ODIN3_E2T_MUX, frame->node, &branches[1],
                                 &branches[0],  width,       ex_dest(run, frame->node, width),

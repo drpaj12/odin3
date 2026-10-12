@@ -211,7 +211,7 @@ context, as Yosys's `genrtlil.cc` does (verified on 0.55: `assign y32 = c ? a : 
 `WIDTH` 8 and 24 zero bits); the comparison row says operands are typed at their common width
 (an identifier is still generated at its own width: `a < t` is `$lt` with `A_WIDTH` 8, `B_WIDTH` 4,
 verified). (2) EL-32: the text of an out-of-range bit select, an x or z constant index (§17 #40)
-and the generate-block name read as a value (§17 #39). (3) EL-28: until Task 19's driver table
+and the generate-block name read as a value (§17 #39). (3) fix round 1: a self-determined operand's cell sign follows genrtlil (§17), plain decimals stay 32 bits (§17 #41), non-constant `+:`/`-:` reads are simpler than Yosys's (§17 #42). (4) EL-28: until Task 19's driver table
 lands, an lhs net that has a driver already is the pending line `two-driver check`.
 
 ## 1. Purpose and scope (EL-1)
@@ -1289,7 +1289,7 @@ signed only if it is signed and its context is signed), so the cell extends its 
 | `~a`, `-a`, `+a` | operand extended to the final width by wiring first, then `$not`, `$neg`†; `+a` is the extended operand (no cell) |
 | `&a ~&a \|a ~\|a ^a ~^a` | `$reduce_and`, `$reduce_and` (1 bit) + `$logic_not`†, `$reduce_or`, `$reduce_or` (1 bit) + `$logic_not`†, `$reduce_xor`, `$reduce_xnor`†; `Y_WIDTH` = max(final, 1), operand self-determined (`~&`/`~\|` as Yosys's parser builds them, `verilog_parser.y` `OP_NAND`/`OP_NOR`: the reduction's `Y_WIDTH` is 1, the `$logic_not`'s is max(final, 1); v4) |
 | `!a`, `a && b`, `a \|\| b` | `$logic_not`†, `$logic_and`†, `$logic_or`†; operands self-determined; `Y_WIDTH` = max(final, 1) |
-| `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands typed at their common width and sign (EL-13) and generated as any operand is (an identifier at its own width, an unsized constant at the common width), `Y_WIDTH` = max(final, 1) |
+| `a == != < <= > >= b` | `$eq $ne $lt $le $gt $ge`; operands typed at their common width and sign (EL-13) and generated as any operand is (an identifier at its own width, an unsized apostrophe-form constant such as `'d1` or `'h3` at the common width, a plain decimal such as `1` at its own 32 bits, §17 #41), `Y_WIDTH` = max(final, 1) |
 | `a === b`, `a !== b` (E9) | both sides constant: folded exactly (4-state `===`); one side a constant with x/z bits (after both are brought to their common width and sign, EL-13): a **wildcard compare**, as in Parmys — `$eq`/`$ne` over only the bit positions where the constant is 0 or 1 (the other operand's bits at those positions, selected by wiring), so an x/z bit matches any value; no 0/1 position left → constant 1 (`===`) or 0 (`!==`); warning "'===' compares against x/z bits; they match any value". Verified on 0.55 through the Parmys script: `a !== 4'b1x00` becomes `~a[3] \| a[1] \| a[0]`, the x bit dropped. Neither side has x/z: `$eq`/`$ne` with "'===' is treated as '==' (synthesis has no x or z)" |
 | `a << b`, `a <<< b`, `a >> b`, `a >>> b` | `$shl` (both left shifts: `$sshl` ≡ `$shl` in simlib), `$shr`, `$sshr`; `A` at the context width and sign, `B` self-determined unsigned (`B_SIGNED` 0) |
 | `a ** b` | `$shl(1, b)` when `a` is the constant 2 and `b` is unsigned (Yosys's rewrite), else `$pow`†; `B_SIGNED` = `b`'s own sign |
@@ -1345,10 +1345,11 @@ lowering for `$pow` and `$shiftx` — stays in Appendix A for reference (§20 it
   ("range select [9:6] of 'x' is out of bounds; bits outside [7:0] are x"; one bit: "bit select [9] of 'x' is out of
   bounds; the bit is x"). A constant index with an x or z bit reads x, silently (§17 #40).
 - **Non-constant reads** (E15, E16): `$shiftx` with `A` = the whole wire, `Y_WIDTH` = the select
-  width, `B` = the index (for `-:`: base − width + 1) offset to a bit position: minus the wire's
+  width, `B` = the index (for `-:`: base − width + 1, one `$sub(base, w − 1)`) offset to a bit position: minus the wire's
   low index when it is not 0 (a `$sub`, signed), and for an ascending range `(width − w) − pos`
-  (a `$sub`); `B_SIGNED` is set when an offset was subtracted or when the index is 32 bits or
-  wider — genrtlil's computation, so the cells match Yosys's.
+  (a `$sub`); `B_SIGNED` is set when an offset was subtracted, when the index is 32 bits or
+  wider or when the index is signed — genrtlil's offset arithmetic with a simpler base for `+:`/`-:` (§17 #42); a
+  bit select's cells match Yosys's.
 - **Non-constant writes** in a process (`y[s] = d`, `y[b +: 4] <= d`) are rewritten to a `case`
   over the position with one item per in-range position, each assigning that constant slice,
   no default (an out-of-range write changes nothing): Yosys's case method (`nowrshmsk`), chosen
@@ -2489,6 +2490,8 @@ and reported, never relaxed (2A's rule).
 | 38 | a path into a named procedural block whose member does not exist (`blk.nope`) is the binder's error "'blk.nope' is not declared" | warning "Identifier `\blk.nope' is implicitly declared" and a new one-bit wire `blk.nope` (verified on 0.55, the PR 2D-4 final review's fixes) | an undeclared name is an error | Yosys treats the dotted path as one identifier and declares it implicitly (v4.15) |
 | 39 | a generate block's or named block's name read as a value (`assign o = gb;`) is the binder-bound error `'gb' is not a net, variable or parameter` | an implicit one-bit net `gb`, with the warning "Identifier `\gb' is implicitly declared" (verified on 0.55: `connect \o \gb`) | an undeclared name is an error | the symbol table cannot hold a net beside the block of one name; the case is a typo in practice (Task 18, Task 13's carry m1) |
 | 40 | a constant select index with an x or z bit (`w[1'bx]`) reads x bits; as an lhs it is the non-constant error | the index is read with x as 0 (verified on 0.55: `a[1'bx]` is `a[0]`, `y[1'bx] = c` drives `y[0]`) | an x or z index reads x (IEEE 1364-2005 4.2.1) | E17: the don't-care resolution of Parmys's `$shiftx` for variable indices; a constant x is the same case (Task 18) |
+| 41 | a plain decimal (`1`, `5`) keeps its 32 bits in any context; the apostrophe forms (`'d1`, `'h3`, `33'd1`) are widened to it. The AST does not record the apostrophe, so a signed unsized decimal is taken as plain: `'sd5` is (wrongly) kept at 32 bits too | same, except `'sd5`, which Yosys widens (verified on 0.55: `y64 = a + 1` is `$add` with `B_WIDTH` 32, `a + 'd1` 64; `c ? a : 5` a 32-bit `$mux`) | an unsized literal is context-determined | matches Yosys's cells for every form but `'sd` (Task 18 fix round 1) |
+| 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 
 ## 18. Implementation split (EL-51)
 
