@@ -171,13 +171,20 @@ static bool reject_events(odin3_elab1 *e1, odin3_ast_id node) {
            rej(e1, node, "edge and level events in one event list are not supported");
 }
 
-static bool kept_system(const char *name) {
-    return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
-           strcmp(name, "$clog2") == 0;
+bool odin3_elab1_system_kept(odin3_ast_kind kind, const char *name) {
+    if (name == NULL) {
+        return false;
+    }
+    if (kind == ODIN3_AST_CALL) {
+        return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
+               strcmp(name, "$clog2") == 0;
+    }
+    return kind == ODIN3_AST_TASK_CALL &&
+           (strcmp(name, "$readmemh") == 0 || strcmp(name, "$readmemb") == 0);
 }
 
 static bool read_task(const char *name) {
-    return strcmp(name, "$readmemh") == 0 || strcmp(name, "$readmemb") == 0;
+    return odin3_elab1_system_kept(ODIN3_AST_TASK_CALL, name);
 }
 
 /* E20 and E21: a system function that is not kept, a hierarchical call. */
@@ -189,7 +196,8 @@ static bool reject_call(odin3_elab1 *e1, odin3_ast_id node) {
         if ((flags & ODIN3_AST_F_CALL_HIER) != 0) {
             return rej(e1, node, "hierarchical reference '%s' is not supported", name);
         }
-        return (flags & ODIN3_AST_F_CALL_SYSTEM) != 0 && !kept_system(name) &&
+        return (flags & ODIN3_AST_F_CALL_SYSTEM) != 0 &&
+               !odin3_elab1_system_kept(ODIN3_AST_CALL, name) &&
                rej(e1, node, "system function '%s' is not supported", name);
     }
     return (flags & ODIN3_AST_F_TASK_CALL_HIER) != 0 &&
@@ -325,9 +333,11 @@ static void ignore_gate(odin3_elab1 *e1, odin3_ast_id node) {
 static void ignore_specparam(odin3_elab1 *e1, odin3_ast_id node) {
     const odin3_ast *ast = e1->parsed;
     odin3_ast_span decls = odin3_ast_children(ast, node);
-    for (uint32_t i = 0; i < decls.n; i++) {
-        odin3_elab1_warn_once_at(e1, decls.ids[i], node, "specparam '%s' is ignored",
-                                 odin3_ast_name_str(ast, decls.ids[i]));
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_PARAM_DECL); i < decls.n; i++) {
+        if (decls.ids[i].v != 0) { /* the leading slot (RANGE?) is not a declarator */
+            odin3_elab1_warn_once_at(e1, decls.ids[i], node, "specparam '%s' is ignored",
+                                     odin3_ast_name_str(ast, decls.ids[i]));
+        }
     }
 }
 

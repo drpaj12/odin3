@@ -199,6 +199,14 @@ odin3_status odin3_elab1_ignore(odin3_elab1 *e1, odin3_ast_id node);
  */
 odin3_status odin3_elab1_scan(odin3_elab1 *e1, uint32_t def, bool *failed);
 
+/*
+ * Whether the elaborated form keeps the system call: for a CALL (kind ODIN3_AST_CALL) `$signed`,
+ * `$unsigned` and `$clog2` (folded); for a TASK_CALL `$readmemh` and `$readmemb` (kept only inside
+ * an INITIAL, which the caller checks). The one list the scan (E20, S3) and pass W share. False
+ * for a NULL name or any other kind.
+ */
+bool odin3_elab1_system_kept(odin3_ast_kind kind, const char *name);
+
 /* The unit-level directive node (outside any module): its IGNORE warning, unless it is read. */
 void odin3_elab1_ignore_directive(odin3_elab1 *e1, odin3_ast_id directive);
 

@@ -2,7 +2,8 @@
  * test_elab_stage1_diag.c — 2D Task 16: the REJECT and IGNORE rows of stage 1 (EL-42, EL-43,
  * EL-44; §9.1, §9.2). One source per row, each asserting the exact located line §9's tables
  * name; a warning once per parsed node (a generate loop, a module specialized twice); the error
- * cap; resuming at the next item and module; the stage-1 pending tables empty, with every
+ * cap; resuming at the next item and module; OOM sweeps over the IGNORE and REJECT paths; the
+ * stage-1 pending tables empty, with every
  * coverage row running stage 1 without the not-available line. Sources are parsed by 2C
  * (elab_test.h).
  */
@@ -29,7 +30,16 @@
 #error "ODIN3_COVERAGE_DIR must name tests/verilog/coverage"
 #endif
 
-enum { ROW_SOURCE_MAX = 64, COVERAGE_MAX = 512, CAP_VARS = 25, CAP_ERRORS = 20, CAP_TEXT = 4096 };
+enum {
+    ROW_SOURCE_MAX = 64,
+    COVERAGE_MAX = 512,
+    CAP_VARS = 25,
+    CAP_ERRORS = 20,
+    CAP_TEXT = 4096,
+    OOM_LIMIT = 400000,
+    OOM_SETTLE = 64,
+    OOM_MIN_FAILS = 20
+};
 
 static et_result rs;
 
@@ -60,6 +70,7 @@ static void run_one(const char *text) {
 typedef struct row {
     const char *text;
     const char *line; /* the whole located line, without the logger's prefix */
+    uint32_t warns;   /* IGNORE rows: the exact number of warnings the source logs */
 } row;
 
 /* The row's source fails stage 1 with exactly the line (and maybe other errors). */
@@ -70,7 +81,7 @@ static void expect_rejected(const row *rw) {
     TEST_ASSERT_NULL(rs.elab);
 }
 
-#define REJECT(text, line) expect_rejected(&(const row){(text), (line)})
+#define REJECT(text, line) expect_rejected(&(const row){(text), (line), 0})
 
 static void test_reject_expression_and_declaration_rows(void) {
     REJECT("module m(output [7:0] y);\n  assign y = 1.5;\nendmodule\n",
@@ -150,29 +161,33 @@ static void test_reject_function_rows(void) {
 
 /* --- IGNORE rows ---------------------------------------------------------------------------- */
 
-/* The source passes stage 1 with the warning and its store checks and binds. */
+/* The source passes stage 1 with the warning (and exactly rw->warns warnings in all: no spurious
+ * second line), and its store checks and binds. */
 static void expect_ignored(const row *rw) {
     run_one(rw->text);
     et_expect(&rs, ODIN3_LOG_WARN, rw->line);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(rw->warns, et_count_with(&rs, ODIN3_LOG_WARN, ""),
+                                     et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.elab, ODIN3_CHECK_FULL));
     et_expect_binds(&rs);
 }
 
-#define IGNORED(text, line) expect_ignored(&(const row){(text), (line)})
+#define IGNORED(text, line) expect_ignored(&(const row){(text), (line), 1})
+#define IGNORED_OF(text, line, warns) expect_ignored(&(const row){(text), (line), (warns)})
 
 static void test_ignore_directive_rows(void) {
     IGNORED("`timescale 1ns/1ps\nmodule m;\nendmodule\n",
             "t.v:1:1: warning: `timescale is ignored");
-    IGNORED("`celldefine\nmodule m;\nendmodule\n`endcelldefine\n",
-            "t.v:1:1: warning: `celldefine is ignored");
-    IGNORED("`celldefine\nmodule m;\nendmodule\n`endcelldefine\n",
-            "t.v:4:1: warning: `endcelldefine is ignored");
-    IGNORED("`unconnected_drive pull1\nmodule m;\nendmodule\n`nounconnected_drive\n",
-            "t.v:1:1: warning: `unconnected_drive is ignored");
-    IGNORED("`unconnected_drive pull1\nmodule m;\nendmodule\n`nounconnected_drive\n",
-            "t.v:4:1: warning: `nounconnected_drive is ignored");
+    IGNORED_OF("`celldefine\nmodule m;\nendmodule\n`endcelldefine\n",
+               "t.v:1:1: warning: `celldefine is ignored", 2);
+    IGNORED_OF("`celldefine\nmodule m;\nendmodule\n`endcelldefine\n",
+               "t.v:4:1: warning: `endcelldefine is ignored", 2);
+    IGNORED_OF("`unconnected_drive pull1\nmodule m;\nendmodule\n`nounconnected_drive\n",
+               "t.v:1:1: warning: `unconnected_drive is ignored", 2);
+    IGNORED_OF("`unconnected_drive pull1\nmodule m;\nendmodule\n`nounconnected_drive\n",
+               "t.v:4:1: warning: `nounconnected_drive is ignored", 2);
     IGNORED("module m;\n`pragma protect\nendmodule\n", "t.v:2:1: warning: `pragma is ignored");
     IGNORED("module m;\n`timescale 1ns/1ps\nendmodule\n",
             "t.v:2:1: warning: `timescale is ignored");
@@ -193,6 +208,18 @@ static void test_ignore_declaration_rows(void) {
     IGNORED("module m(input a, output y);\n  wire scalared [3:0] w;\n  assign w = {4{a}};\n"
             "  assign y = w[0];\nendmodule\n",
             "t.v:2:3: warning: 'scalared' is ignored");
+}
+
+/* P7: one warning per specparam declarator, named, and none for the absent RANGE slot. */
+static void test_specparam_one_warning_each(void) {
+    IGNORED_OF(
+        "module m(input a, output y);\n  specparam p = 1, q = 2;\n  assign y = a;\nendmodule\n",
+        "t.v:2:3: warning: specparam 'p' is ignored", 2);
+    et_expect(&rs, ODIN3_LOG_WARN, "t.v:2:3: warning: specparam 'q' is ignored");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&rs, ODIN3_LOG_WARN, "specparam ''"),
+                                     et_log(&rs));
+    IGNORED("module m(input a, output y);\n  specparam [3:0] r = 1;\n  assign y = a;\nendmodule\n",
+            "t.v:2:3: warning: specparam 'r' is ignored");
 }
 
 static void test_charge_strength_row(void) {
@@ -313,6 +340,78 @@ static void test_failed_parameter_adds_no_second_error(void) {
     et_expect(&rs, ODIN3_LOG_ERROR, "t.v:1:15: error: parameter type 'real' is not supported");
 }
 
+/* --- out of memory ---------------------------------------------------------------------------- */
+
+static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)level;
+    (void)msg;
+    (void)user;
+}
+
+/* One step of a sweep: the allocation limit, the parsed store's node count, the status a run
+ * that does not run out of memory returns. */
+typedef struct oom_at {
+    long limit;
+    uint32_t nodes;
+    odin3_status done;
+} oom_at;
+
+static odin3_status oom_step(const oom_at *at) {
+    odin3_ast *elab = NULL;
+    odin3_util_set_alloc_fail_after(at->limit);
+    odin3_status st = odin3_elab_stage1(&rs.ctx, rs.parsed, &rs.opts, &elab);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE_MESSAGE(st == at->done || st == ODIN3_ERR_NO_MEMORY, "status");
+    TEST_ASSERT_TRUE(st == ODIN3_OK ? elab != NULL : elab == NULL);
+    TEST_ASSERT_EQUAL_UINT32(at->nodes, odin3_ast_node_end(rs.parsed).v);
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(elab, ODIN3_CHECK_FULL));
+    }
+    odin3_ast_destroy(elab);
+    return st;
+}
+
+/* Every allocation of stage 1 over the parsed source fails in turn: each run returns NO_MEMORY or
+ * the status done, frees what it made (ASan's leak check at exit), and the parsed store is kept. */
+static void oom_sweep(odin3_status done) {
+    uint32_t nodes = odin3_ast_node_end(rs.parsed).v;
+    odin3_log_set_sink(quiet_sink, NULL);
+    int failed = 0;
+    int settled = 0;
+    for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
+        oom_at at = {limit, nodes, done};
+        bool oom = oom_step(&at) == ODIN3_ERR_NO_MEMORY;
+        failed += oom ? 1 : 0;
+        settled = oom ? 0 : settled + 1;
+    }
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(OOM_SETTLE, settled);
+    TEST_ASSERT_TRUE(failed > OOM_MIN_FAILS);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.parsed, ODIN3_CHECK_FULL));
+}
+
+/* The IGNORE paths (the warn-once map, its format list, the scan's frames, pass W's drops). */
+static void test_oom_ignore_rows(void) {
+    run_one("`timescale 1ns/1ps\nmodule m(input a, b, output y, z, output reg x);\n"
+            "  specparam p = 1, q = 2;\n  wire #2 w;\n  assign #1 w = a;\n"
+            "  assign (strong0, strong1) y = w;\n  and #3 g (z, a, b);\n"
+            "  specify\n    (a => y) = 1;\n  endspecify\n"
+            "  initial begin\n    #3 x = a;\n    $display(\"x = %b\", x);\n    x = #2 b;\n  end\n"
+            "  always @(posedge a) x <= #1 b;\nendmodule\n`celldefine\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    oom_sweep(ODIN3_OK);
+}
+
+/* The REJECT paths: the scan's errors, a skipped definition, the next module's scan. */
+static void test_oom_reject_rows(void) {
+    run_one("module a(input c);\n  real r;\n  always @(posedge c or c) r = 1;\n"
+            "  initial $display($random);\nendmodule\n"
+            "module top(input c);\n  a u (c);\n  wire #1 w = c;\n  event e;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, rs.status, et_log(&rs));
+    oom_sweep(ODIN3_ERR_PARSE);
+}
+
 /* --- the tables, the coverage rows -------------------------------------------------------------
  */
 
@@ -383,6 +482,7 @@ int main(void) {
     RUN_TEST(test_reject_function_rows);
     RUN_TEST(test_ignore_directive_rows);
     RUN_TEST(test_ignore_declaration_rows);
+    RUN_TEST(test_specparam_one_warning_each);
     RUN_TEST(test_charge_strength_row);
     RUN_TEST(test_ignore_assignment_and_gate_rows);
     RUN_TEST(test_ignore_block_and_task_rows);
@@ -392,6 +492,8 @@ int main(void) {
     RUN_TEST(test_error_cap);
     RUN_TEST(test_resume_at_next_item_and_module);
     RUN_TEST(test_failed_parameter_adds_no_second_error);
+    RUN_TEST(test_oom_ignore_rows);
+    RUN_TEST(test_oom_reject_rows);
     RUN_TEST(test_stage1_tables_are_empty);
     RUN_TEST(test_coverage_rows_run_stage_1);
     return UNITY_END();

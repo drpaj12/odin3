@@ -375,15 +375,9 @@ static bool copyable(odin3_ast_kind kind) {
 /* Whether a CALL (system function) or TASK_CALL (system task) is one the elaborated form keeps
  * or folds; the rest are rejected (E20) or dropped (S3). */
 static bool keeps_system(const e1w *wr, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
     const char *name = odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node));
-    if (name == NULL) {
-        return false;
-    }
-    if (odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_CALL) {
-        return strcmp(name, "$signed") == 0 || strcmp(name, "$unsigned") == 0 ||
-               strcmp(name, "$clog2") == 0;
-    }
-    return wr->in_initial && (strcmp(name, "$readmemh") == 0 || strcmp(name, "$readmemb") == 0);
+    return (kind == ODIN3_AST_CALL || wr->in_initial) && odin3_elab1_system_kept(kind, name);
 }
 
 /* Whether node is walked: a kind not landed is reported (pending, or a 2D bug). */
@@ -702,8 +696,8 @@ static bool dropped_task(const e1w *wr, odin3_ast_id node) {
     return node.v != 0 && odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_TASK_CALL &&
            (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_TASK_CALL_SYSTEM) != 0 &&
            (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_TASK_CALL_HIER) == 0 &&
-           strcmp(odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)), "$readmemh") != 0 &&
-           strcmp(odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)), "$readmemb") != 0;
+           !odin3_elab1_system_kept(ODIN3_AST_TASK_CALL,
+                                    odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)));
 }
 
 /* The statement a TIMING_STMT outside an ALWAYS stands for (T11: its delay is dropped and the

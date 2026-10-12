@@ -226,6 +226,43 @@ class RunRejectTest(unittest.TestCase):
         self.case("w", "w.v:2:3: warning:\ndelay is ignored\n", 1, output, suffix=".warn")
         self.assertEqual(self.run_tool("--elaborate")[0], 1)
 
+    def test_pending_set_mismatch_exits_1(self) -> None:
+        """2D Task 16: --pending names the exact pending set; another set is a failure."""
+        self.case("a", "a.v:2:1: error:\nx\n", 1, STUB)
+        self.case("b", "b.v:2:1: error:\ny\n", 1, "odin3: error: b.v:2:1: error: y\n")
+        code, out, err = self.run_tool("--elaborate", "--pending=b.v")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "run-reject: pass 1, pending 1, fail 0\n")
+        self.assertIn("pending ['a.v'], expected exactly ['b.v']", err)
+        self.assertEqual(self.run_tool("--elaborate", "--pending=a.v")[0], 0)
+        self.assertEqual(self.run_tool("--elaborate", "--pending=a.v,b.v")[0], 1)
+
+    def test_empty_pending_means_none_pending(self) -> None:
+        self.case("a", "a.v:2:1: error:\nx\n", 1, "odin3: error: a.v:2:1: error: x\n")
+        code, out, _ = self.run_tool("--elaborate", "--pending=")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "run-reject: pass 1, pending 0, fail 0\n")
+        self.case("b", "b.v:2:1: error:\ny\n", 1, STUB)
+        code, _, err = self.run_tool("--elaborate", "--pending=")
+        self.assertEqual(code, 1)
+        self.assertIn("pending ['b.v'], expected exactly []", err)
+
+    def test_warning_found_with_the_stage2_stub_passes(self) -> None:
+        """Stage 1 warned as expected; only stage 2's unlocated stub failed the run."""
+        output = "odin3: warning: w.v:2:3: warning: delay is ignored\n" + STUB + FAILED_PARSE
+        self.case("w", "w.v:2:3: warning:\ndelay is ignored\n", 1, output, suffix=".warn")
+        code, out, _ = self.run_tool("--elaborate", "--pending=")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "run-reject: pass 1, pending 0, fail 0\n")
+
+    def test_warning_not_found_with_the_stage2_stub_stays_pending(self) -> None:
+        output = "odin3: warning: w.v:9:9: warning: other\n" + STUB + FAILED_PARSE
+        self.case("w", "w.v:2:3: warning:\ndelay is ignored\n", 1, output, suffix=".warn")
+        code, out, err = self.run_tool("--elaborate", "--pending=w.v")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "run-reject: pass 0, pending 1, fail 0\n")
+        self.assertIn("PENDING w.v: 2D: not available yet", err)
+
     def test_error_expectation_does_not_match_a_warning(self) -> None:
         self.case("c", "c.v:3:5: error:\nboom\n", 1, "odin3: warning: c.v:3:5: warning: boom\n")
         self.assertEqual(self.run_tool()[0], 1)
