@@ -710,6 +710,17 @@ def _set_inputs(netlist: blif.Netlist, implicit: frozenset[str]) -> None:
                               for f, a in cell.conns]
 
 
+def _parse_implicit(text: str, path: str) -> blif.Netlist:
+    """Parse BLIF text; every undefined $-model it instantiates becomes a black-box stub."""
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text = scalar_blackbox_pins(text)
+    stubs, implicit = implicit_stubs(text)
+    netlist = blif.parse_text(text + stubs, path)
+    _set_inputs(netlist, implicit)
+    return netlist
+
+
 def load(path: str, implicit_models: bool) -> blif.Netlist:
     """Parse a BLIF file; with implicit_models, undefined $-models become black-box stubs."""
     if not implicit_models:
@@ -718,13 +729,9 @@ def load(path: str, implicit_models: bool) -> blif.Netlist:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
-    if text and not text.endswith("\n"):
-        text += "\n"
-    text = scalar_blackbox_pins(text)
-    stubs, implicit = implicit_stubs(text)
-    netlist = blif.parse_text(text + stubs, path)
-    _set_inputs(netlist, implicit)
-    return netlist
+    return _parse_implicit(text, path)
+
+
 # --------------------------------------------------------------------------- --vtr rewrites
 
 
@@ -1016,13 +1023,15 @@ def _read_bytes(path: str) -> bytes:
         raise blif.BlifError(f"{path}: cannot read: {exc}") from exc
 
 
-def _load(path: str, vtr: bool, written: bool) -> blif.Netlist:
+def _load(path: str, vtr: bool, written: bool, implicit_models: bool = False) -> blif.Netlist:
     """The parsed file; with vtr, read as bytes (surrogateescape) and vtr_normalize'd (its names
-    decoded when written: the second of two files)."""
+    decoded when written: the second of two files); with implicit_models, undefined $-models
+    become black-box stubs."""
     if not vtr:
-        return blif.parse_file(path)
+        return load(path, implicit_models)
     text = _read_bytes(path).decode("utf-8", "surrogateescape")
-    return vtr_normalize(blif.parse_text(text, path), written)
+    netlist = _parse_implicit(text, path) if implicit_models else blif.parse_text(text, path)
+    return vtr_normalize(netlist, written)
 
 
 def _rewrite_diff(w1: bytes, w2: bytes, name_a: str, name_b: str) -> list[str]:
@@ -1054,10 +1063,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.vtr_rewrite and (args.canon or args.vtr_normalize or args.keep_attrs):
         ap.error("--vtr-rewrite compares token lines; it takes no other option but --quiet")
     try:
-        canon = [canonicalize(load(f, args.implicit_models), args.keep_attrs) for f in files]
         if args.vtr_rewrite:
             return _vtr_rewrite(files, args.quiet)
-        canon = [canonicalize(_load(f, args.vtr_normalize, k == 1), args.keep_attrs)
+        canon = [canonicalize(_load(f, args.vtr_normalize, k == 1, args.implicit_models),
+                              args.keep_attrs)
                  for k, f in enumerate(files)]
     except blif.BlifError as exc:
         print(f"{TOOL}: {_printable(str(exc))}", file=sys.stderr)

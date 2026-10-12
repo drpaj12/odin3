@@ -860,7 +860,7 @@ if(BUILD_TESTING)
     set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)
         set_tests_properties(blif_roundtrip_vtr_fixtures PROPERTIES
-            ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:abc>")
+            ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
     endif()
     # Its negative: a damaged W1 must fail the oracles.
     add_test(NAME blif_roundtrip_vtr_detects_corruption
@@ -896,7 +896,7 @@ if(BUILD_TESTING)
                     --out $ENV{HOME}/odin3-ws/work/blif-roundtrip-vtr-k6 ${ODIN3_GOLDEN_K6})
         if(ODIN3_WITH_ABC)
             set_tests_properties(blif_roundtrip_vtr_k6 PROPERTIES
-                ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:abc>")
+                ENVIRONMENT "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
         endif()
         odin3_add_sweep_test(vtr_read_check_k6 LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/vtr-read-check/vtr-read-check
