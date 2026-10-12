@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil init_split_bits.il; opt_merge; write_rtlil
+# flags:
+init \o 2'x1
+cell $dff \ffp

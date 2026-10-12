@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): read_rtlil init_one_side.il; opt_merge; write_rtlil
+# flags:
+init \o 1'0
+cell $dff \ffo
+cell $dff \ffp

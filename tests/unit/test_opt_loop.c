@@ -202,7 +202,7 @@ static void test_parse_unknown(void) {
 
 /* One line per pass that is still a stub: each later task removes its own. */
 static const char *const k_stub_passes[] = {
-    "opt", "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
+    "opt", "opt_expr", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
 };
 
 static void test_stubs(void) {
@@ -231,12 +231,12 @@ static void test_call_stub(void) {
     memset(&opts, 0, sizeof opts);
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
-    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_MERGE, &opts, &counts};
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_EXPR, &opts, &counts};
     bool changed = true;
     n_lines = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));
     TEST_ASSERT_FALSE(changed);
-    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, "opt_merge: not available yet (2F)"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, "opt_expr: not available yet (2F)"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(NULL, &changed));
     req.sub = ODIN3_OPT_N_SUBS;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));

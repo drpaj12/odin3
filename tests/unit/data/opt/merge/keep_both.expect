@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil keep_both.il; opt_merge; write_rtlil
+# flags:
+cell $_DFF_P_ \ffo
+cell $_DFF_P_ \ffp

@@ -105,6 +105,22 @@ odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
  */
 odin3_status odin3_opt_keep_modules(odin3_design *design, odin3_vec *keep);
 
+/* --- 2F Task 8: opt_merge (OP-6) ------------------------------------------------------------ */
+
+/*
+ * opt_merge (2F spec §6, Yosys opt_merge.cc) over every module of design: nodes with the same
+ * type, parameters and (normalised) input operands, and for FFs the same Q init, are merged into
+ * the earlier one (the later when only it has `keep`); the sweeps repeat until one merges nothing.
+ * Candidates are word and bit nodes except $mem, $tribuf, $_TBUF_, $proc, constants, nodes without
+ * exactly one output port, $mux/$pmux under opts->nomux, and (opts->keepdc) FFs whose init is not
+ * fully defined. Each class is then closed with one rebuild of its survivor whose DERIVED record
+ * has the parents [survivor, drops in ID order]. Adds the drops to counts->merge_removed; logs
+ * INFO "opt_merge: removed N cells" and a DEBUG line per drop. INVALID_ARG (logged) for a NULL
+ * argument; NO_MEMORY, possibly after some modules were merged (the IR stays valid).
+ */
+odin3_status odin3_opt_merge_run(odin3_pass_ctx *ctx, odin3_design *design,
+                                 const odin3_opt_opts *opts, odin3_opt_counts *counts);
+
 /* --- 2F Task 4: registrations, options, the sub-pass call wrapper (OP-12, OP-16) ------------ */
 
 /* A pass's parsed arguments (plan point (c)). */

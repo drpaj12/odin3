@@ -1,0 +1,4 @@
+# yosys 0.55 (VTR build): read_rtlil init_keepdc_undef.il; opt_merge -keepdc; write_rtlil
+# flags: -keepdc
+cell $dff \ffo
+cell $dff \ffp

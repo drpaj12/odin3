@@ -49,7 +49,7 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
  * 6; opt_merge: 8; opt_reduce: 9; opt_muxtree: 10; opt_dff: 11 and 12; opt: 13; opt_share: 14).
  */
 static const char *const k_stubs[] = {
-    "opt", "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
+    "opt", "opt_expr", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
 };
 
 static bool is_stub(const char *name) {
@@ -206,6 +206,7 @@ typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
 
 /* The sub-pass bodies; NULL while a sub-pass is a stub (the odin3_opt_<sub>_run of its task). */
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
+    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
     [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
 };
 
