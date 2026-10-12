@@ -8,6 +8,7 @@
 #include "ast/kinds.h"
 #include "ast/srcman.h"
 #include "ast/symtab.h"
+#include "frontends/elab/ceval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
 #include "frontends/elab/elab_test.h"
@@ -149,8 +150,9 @@ odin3_status odin3_elab2_create(odin3_pass_ctx *ctx, odin3_ast *elab, const odin
     e2->next_check = E2_BUDGET_EVERY;
     odin3_strbuf_init(&e2->text);
     odin3_vec_init(&e2->built, sizeof(odin3_module_id));
-    odin3_vec_init(&e2->stack, sizeof(odin3_ast_id));
+    odin3_vec_init(&e2->stack, sizeof(odin3_elab2_item));
     odin3_vec_init(&e2->chain, sizeof(odin3_scope_id));
+    odin3_vec_init(&e2->vals, sizeof(odin3_sig));
     e2->modules = odin3_u64map_create(0);
     e2->warned = odin3_u64map_create(0);
     e2->scratch = odin3_arena_create(0);
@@ -176,6 +178,9 @@ void odin3_elab2_destroy(odin3_elab2 *e2) {
     odin3_vec_free(&e2->built);
     odin3_vec_free(&e2->stack);
     odin3_vec_free(&e2->chain);
+    odin3_vec_free(&e2->frames);
+    odin3_vec_free(&e2->vals);
+    odin3_ctype_destroy(e2->ty);
     odin3_strbuf_free(&e2->text);
     odin3_util_free(e2);
 }
@@ -214,6 +219,7 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     e2->mod_id = (odin3_module_id){(uint32_t)id};
     e2->mod = odin3_module_get(e2->design, e2->mod_id);
     e2->mod_node = module_node;
+    e2->scope = (odin3_scope_id){0};
     e2->mod_name = odin3_ast_name(e2->elab, module_node);
     memset(e2->const_net, 0, sizeof e2->const_net);
     return ODIN3_OK;
@@ -278,22 +284,43 @@ void odin3_elab2_fatal(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) {
     e2->stopped = true;
 }
 
-void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) {
-    /* Warn once per (loc, format) (point (v)); a 64-bit hash collision would drop one warning. */
-    uint64_t key =
-        odin3_hash_combine(odin3_hash_bytes(odin3_bytes_cstr(fmt), ODIN3_HASH_SEED), loc.v);
+/* Marks a warning key as given: true when it was new (false after a map failure, latched). */
+static bool warn_new(odin3_elab2 *e2, uint64_t key) {
     if (odin3_u64map_get(e2->warned, key, NULL)) {
-        return;
+        return false;
     }
     odin3_status st = odin3_u64map_put(e2->warned, (odin3_kv){key, 1});
     if (st != ODIN3_OK) {
         e2->fatal = e2->fatal != ODIN3_OK ? e2->fatal : st;
+        return false;
+    }
+    return true;
+}
+
+void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) {
+    /* Warn once per (loc, format) (point (v)); a 64-bit hash collision would drop one warning. */
+    uint64_t key =
+        odin3_hash_combine(odin3_hash_bytes(odin3_bytes_cstr(fmt), ODIN3_HASH_SEED), loc.v);
+    if (!warn_new(e2, key)) {
         return;
     }
     va_list args;
     va_start(args, fmt);
     vreport(e2, ODIN3_LOG_WARN, loc, fmt, args);
     va_end(args);
+}
+
+void odin3_elab2_warn_msg(odin3_elab2 *e2, odin3_loc loc, const char *msg) {
+    uint64_t key =
+        odin3_hash_combine(odin3_hash_bytes(odin3_bytes_cstr(msg), ODIN3_HASH_SEED), loc.v);
+    if (!warn_new(e2, key)) {
+        return;
+    }
+    if (loc.v != 0) {
+        odin3_diag(e2->design, ODIN3_LOG_WARN, loc, "%s", msg);
+    } else {
+        odin3_log(ODIN3_LOG_WARN, "%s", msg);
+    }
 }
 
 void odin3_elab2_pend_feature(odin3_elab2 *e2, odin3_loc loc, uint32_t feature) {
@@ -377,63 +404,89 @@ odin3_status odin3_elab2_account(odin3_elab2 *e2, const odin3_elab2_counts *made
 
 /* --- one module's body (EL-28's order) ------------------------------------------------------- */
 
-/* Pushes the items of GEN_BLOCK or MODULE node (its tail after nslots slots) so the first pops
- * first. */
-static odin3_status push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots) {
+/* Pushes the items of GEN_BLOCK or MODULE node (its tail after nslots slots), in the scope they
+ * are in, so the first pops first. */
+static odin3_status push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslots,
+                               odin3_scope_id scope) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, node);
     for (uint32_t i = kids.n; i > nslots; i--) {
-        odin3_ast_id *slot = odin3_vec_push(&e2->stack);
+        odin3_elab2_item *slot = odin3_vec_push(&e2->stack);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        *slot = kids.ids[i - 1];
+        *slot = (odin3_elab2_item){kids.ids[i - 1], scope};
     }
     return ODIN3_OK;
 }
 
+/* A located error is counted and the walk goes on with the next item; anything else (memory, a
+ * fatal cap's stop, a 2D bug) ends it. */
+static odin3_status carry_on(odin3_status st) {
+    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+}
+
+/* One declarator's initialiser: a net's is a continuous assignment (Task 18), a variable's an
+ * initial block (Task 24, pending until it lands). The symbol says which. */
+static odin3_status declarator_initialiser(odin3_elab2 *e2, odin3_ast_id declarator) {
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, declarator));
+    uint32_t feature = rec != NULL && rec->kind == ODIN3_SYM_VAR ? (uint32_t)ODIN3_AST_INITIAL
+                                                                 : (uint32_t)ODIN3_AST_NET_ASSIGN;
+    if (odin3_elab_pending(ODIN3_ELAB_STAGE2, feature)) {
+        odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator), feature);
+        return ODIN3_OK;
+    }
+    return carry_on(odin3_elab2_assign(e2, declarator));
+}
+
 /* A declaration's initialisers, read from the DECLARATOR in the same slot for a body declaration
- * and a port (ANSI or merged from a non-ANSI one): `wire w = e;` is an assignment (Task 18),
- * `reg r = v;` an initial block (Task 24); each is pending until it lands. The symbol says which
- * (a net, or a variable). */
-static void declaration_initialisers(odin3_elab2 *e2, odin3_ast_id decl) {
+ * and a port (ANSI or merged from a non-ANSI one). */
+static odin3_status declaration_initialisers(odin3_elab2 *e2, odin3_ast_id decl) {
     odin3_ast_span kids = odin3_ast_children(e2->elab, decl);
-    for (uint32_t i = 0; i < kids.n; i++) {
-        if (kids.ids[i].v == 0 ||
-            odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_DECLARATOR ||
-            odin3_ast_child(e2->elab, kids.ids[i], 0).v == 0) {
-            continue;
-        }
-        const odin3_symbol *rec =
-            odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, kids.ids[i]));
-        uint32_t feature = rec != NULL && rec->kind == ODIN3_SYM_VAR
-                               ? (uint32_t)ODIN3_AST_INITIAL
-                               : (uint32_t)ODIN3_AST_NET_ASSIGN;
-        if (odin3_elab_pending(ODIN3_ELAB_STAGE2, feature)) {
-            odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, kids.ids[i]), feature);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
+        if (kids.ids[i].v != 0 &&
+            odin3_ast_kind_of(e2->elab, kids.ids[i]) == ODIN3_AST_DECLARATOR &&
+            odin3_ast_child(e2->elab, kids.ids[i], 0).v != 0) {
+            st = declarator_initialiser(e2, kids.ids[i]);
         }
     }
+    return st;
 }
 
 /* The initialisers of the module's ports (its ports LIST is the second slot). */
-static void port_initialisers(odin3_elab2 *e2, odin3_ast_id module_node) {
+static odin3_status port_initialisers(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_ast_span ports = odin3_ast_children(e2->elab, odin3_ast_child(e2->elab, module_node, 1));
-    for (uint32_t i = 0; i < ports.n; i++) {
-        declaration_initialisers(e2, ports.ids[i]);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < ports.n; i++) {
+        st = declaration_initialisers(e2, ports.ids[i]);
     }
+    return st;
 }
 
-/* One module item in steps (2)–(8): descends into generate blocks, ignores what step (1) did or
- * the scope kinds, and reports every other kind that is still pending. */
+/* The NET_ASSIGNs of a CONT_ASSIGN (its tail), each through odin3_elab2_assign. */
+static odin3_status cont_assign(odin3_elab2 *e2, odin3_ast_id node) {
+    odin3_ast_span kids = odin3_ast_children(e2->elab, node);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_CONT_ASSIGN);
+         st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
+        st = carry_on(odin3_elab2_assign(e2, kids.ids[i]));
+    }
+    return st;
+}
+
+/* One module item in steps (2)-(8): descends into generate blocks, ignores what step (1) did or
+ * the scope kinds, emits what has landed and reports every other kind that is still pending. */
 static odin3_status item_step(odin3_elab2 *e2, odin3_ast_id item) {
     switch (odin3_ast_kind_of(e2->elab, item)) {
     case ODIN3_AST_GEN_BLOCK:
-        return odin3_elab2_pending(e2, item) ? ODIN3_OK : push_items(e2, item, 1);
+        return odin3_elab2_pending(e2, item)
+                   ? ODIN3_OK
+                   : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_NET_DECL:
     case ODIN3_AST_VAR_DECL:
-        if (!odin3_elab2_pending(e2, item)) {
-            declaration_initialisers(e2, item);
-        }
-        return ODIN3_OK;
+        return odin3_elab2_pending(e2, item) ? ODIN3_OK : declaration_initialisers(e2, item);
+    case ODIN3_AST_CONT_ASSIGN:
+        return odin3_elab2_pending(e2, item) ? ODIN3_OK : cont_assign(e2, item);
     case ODIN3_AST_PARAM_DECL:
     case ODIN3_AST_FUNCTION_DECL:
     case ODIN3_AST_TASK_DECL:
@@ -447,15 +500,19 @@ static odin3_status item_step(odin3_elab2 *e2, odin3_ast_id item) {
     }
 }
 
-/* Steps (2)–(8) so far: the walk over the items that reports what has not landed. */
+/* Steps (2)-(8) so far: the walk over the items. */
 static odin3_status items_walk(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_vec_clear(&e2->stack);
-    port_initialisers(e2, module_node);
-    odin3_status st = push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE));
+    e2->scope = (odin3_scope_id){0};
+    odin3_status st = port_initialisers(e2, module_node);
+    st = st != ODIN3_OK ? st
+                        : push_items(e2, module_node, odin3_ast_slot_count(ODIN3_AST_MODULE),
+                                     (odin3_scope_id){0});
     while (st == ODIN3_OK && e2->stack.len > 0 && !e2->stopped) {
-        odin3_ast_id item = *(odin3_ast_id *)odin3_vec_at(&e2->stack, e2->stack.len - 1);
+        odin3_elab2_item item = *(odin3_elab2_item *)odin3_vec_at(&e2->stack, e2->stack.len - 1);
         odin3_vec_pop(&e2->stack);
-        st = item_step(e2, item);
+        e2->scope = item.scope;
+        st = item_step(e2, item.node);
     }
     return st != ODIN3_OK ? st : e2->fatal;
 }

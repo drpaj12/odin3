@@ -758,25 +758,28 @@ static void test_pending_always(void) {
 
 /* A kind reported once however many times it occurs; other kinds each have their line. */
 static void test_pending_once_per_kind(void) {
-    read_text("module top;\n  wire a, b;\n  assign a = 1;\n  assign b = 1;\n  initial a = 0;\n"
-              "endmodule\n",
+    read_text("module top;\n  reg a;\n  always @(*) a = 1;\n  always @(*) a = 0;\n"
+              "  initial a = 0;\nendmodule\n",
               ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: elaboration is not available yet (2D): 'CONT_ASSIGN'");
+              "t.v:3:3: error: elaboration is not available yet (2D): 'ALWAYS'");
     et_expect(&rs, ODIN3_LOG_ERROR,
               "t.v:5:3: error: elaboration is not available yet (2D): 'INITIAL'");
     TEST_ASSERT_EQUAL_UINT32(2, diag_errors());
 }
 
-/* A declaration's initialiser waits for Task 18 (net) and Task 24 (variable). */
+/* A declaration's initialiser: a net's is a continuous assignment (Task 18), a variable's waits
+ * for Task 24. */
 static void test_pending_initialisers(void) {
     read_text("module top;\n  wire a = 1;\n  reg r = 0;\nendmodule\n", ODIN3_KEEP_AST_NONE);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rs.status);
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:2:8: error: elaboration is not available yet (2D): 'NET_ASSIGN'");
+    TEST_ASSERT_EQUAL_INT(-1, et_find(&rs, ODIN3_LOG_ERROR,
+                                      "t.v:2:8: error: elaboration is not available yet (2D): "
+                                      "'NET_ASSIGN'"));
     et_expect(&rs, ODIN3_LOG_ERROR,
               "t.v:3:7: error: elaboration is not available yet (2D): 'INITIAL'");
+    TEST_ASSERT_EQUAL_UINT32(1, diag_errors());
     TEST_ASSERT_TRUE(has_wire(module_named("top"), "a"));
     TEST_ASSERT_TRUE(has_wire(module_named("top"), "r"));
 }

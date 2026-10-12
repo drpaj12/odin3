@@ -3,8 +3,10 @@
  * the binding (EL-5): the symbol table of an elaborated store and the resolution array stage 2
  * reads, filled by the binder (bind.c), which also checks the rows of the EL-4 form that 2A's check
  * rule 7 does not. The second part (Task 17) is stage 2's context: the IR modules, their ports and
- * wires, provenance, attributes, the error cap and the byte budget (elab2.c, elab2_wires.c). Later
- * tasks add expressions, drivers, instances, processes and memories to it.
+ * wires, provenance, attributes, the error cap and the byte budget (elab2.c, elab2_wires.c). The
+ * third (Task 18) is expressions: signals to word cells, selects and continuous assignments
+ * (elab2_expr.c, elab2_select.c, elab2_assign.c). Later tasks add drivers, instances, processes and
+ * memories to it.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
@@ -12,6 +14,7 @@
 #include "ast/ast.h"
 #include "ast/srcman.h"
 #include "ast/symtab.h"
+#include "frontends/elab/ceval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
 #include "ir/celltype.h"
@@ -172,13 +175,17 @@ struct odin3_elab2 {
     odin3_u64map *warned;  /* (loc, format) hashes of the warnings given */
     odin3_vec built;       /* odin3_module_id of every module made, in order */
     odin3_strbuf text;     /* a name or path being built */
-    odin3_vec stack;       /* odin3_ast_id worklist of the item walk */
+    odin3_vec stack;       /* odin3_elab2_item worklist of the item walk */
     odin3_vec chain;       /* odin3_scope_id, innermost first, of a scope path being built */
+    odin3_ctype *ty;       /* the expression typer (Task 18), made on first use */
+    odin3_vec frames;      /* the expression walk's frames (Task 18) */
+    odin3_vec vals;        /* the expression walk's value stack: odin3_sig (Task 18) */
     /* the module being emitted */
     odin3_module *mod;
     odin3_module_id mod_id;
     odin3_ast_id mod_node;
-    uint32_t mod_name; /* strtab ID of the specialization's name */
+    odin3_scope_id scope; /* the scope of the item being emitted (0: the module's own) */
+    uint32_t mod_name;    /* strtab ID of the specialization's name */
     odin3_net_id const_net[ODIN3_E2_CONSTS];
     /* errors, accounting */
     uint32_t errors;
@@ -191,6 +198,13 @@ struct odin3_elab2 {
     uint32_t ports_made; /* ports created (the refuse_port test hook counts them) */
     bool pend_seen[ODIN3_PEND_END];
 };
+
+/* One item of the module walk: a node of the module or of a generate block, and the scope it is
+ * in (0: the module's own). */
+typedef struct odin3_elab2_item {
+    odin3_ast_id node;
+    odin3_scope_id scope;
+} odin3_elab2_item;
 
 /* The IR objects a step created, for the byte estimate and the 2^16-object budget check. */
 typedef struct odin3_elab2_counts {
@@ -335,5 +349,221 @@ odin3_status odin3_elab2_budget(odin3_elab2 *e2);
 
 /* True once the stage was stopped (the cap, a fatal cap, the budget). */
 bool odin3_elab2_stopped(const odin3_elab2 *e2);
+
+/*
+ * One warning whose text is msg (as the typer reports them), once per (loc, text): a repeat of the
+ * same text at the same place is dropped, a different text at it is not. No format is interpreted.
+ */
+void odin3_elab2_warn_msg(odin3_elab2 *e2, odin3_loc loc, const char *msg);
+
+/* --- stage 2: expressions, selects, assignments (Task 18; EL-28, EL-30, EL-31, EL-32) -------- */
+
+/* The sigbit of a constant bit, and the tests of the encoding. */
+static inline odin3_sigbit odin3_sb_of_bit(odin3_bit bit) {
+    return ODIN3_SB_CONST | (odin3_sigbit)bit;
+}
+
+/* True for a constant 0, 1, x or z (not ODIN3_SB_ANY, not a net). */
+static inline bool odin3_sb_is_const(odin3_sigbit sb) {
+    return (sb & ODIN3_SB_CONST) != 0 && (sb & ~ODIN3_SB_CONST) < (odin3_sigbit)ODIN3_E2_CONSTS;
+}
+
+/* The constant a constant sigbit holds (undefined for any other). */
+static inline odin3_bit odin3_sb_bit(odin3_sigbit sb) {
+    return (odin3_bit)(sb & ~ODIN3_SB_CONST);
+}
+
+/*
+ * A signal of `width` bits in the stage-2 scratch arena (valid until the module ends), every bit
+ * the constant 0, unsigned. A width of 0 gives an empty signal. ODIN3_ERR_NO_MEMORY; *out is
+ * unchanged on failure.
+ */
+odin3_status odin3_elab2_sig_new(odin3_elab2 *e2, uint32_t width, odin3_sig *out);
+
+/*
+ * The `rv` substitution hook of the process generator (Task 21): inside a process the current value
+ * of a net replaces the net, bit by bit. NULL outside processes (and in every Task 18 call).
+ */
+typedef struct odin3_elab2_reads {
+    odin3_status (*bit)(void *user, odin3_net_id net, odin3_sigbit *out);
+    void *user;
+} odin3_elab2_reads;
+
+/*
+ * One expression to generate. context is odin3_ctype_expr's (width 0: self-determined; an
+ * assignment passes {L(lhs), true, false}). dest is NULL, or holds context.width nets that the
+ * outermost cell drives by construction (EL-28) when that cell is exactly that wide; nothing else
+ * ever uses it. reads is NULL outside processes.
+ */
+typedef struct odin3_elab2_expr_req {
+    odin3_ast_id expr;
+    odin3_etype context;
+    const odin3_net_id *dest;
+    const odin3_elab2_reads *reads;
+} odin3_elab2_expr_req;
+
+/*
+ * Types the expression (odin3_ctype_expr over the store's names: nets and variables by their wire,
+ * parameters by their value, EL-13) and emits it post-order with explicit stacks (no recursion),
+ * each node yielding a signal (EL-30). An operator whose operands are all constant is folded by the
+ * evaluator (odin3_cval_op: no cell); otherwise one word cell per operator, with genrtlil's
+ * parameters (operand widths as generated: an identifier or select at its own width, an unsized
+ * constant and a concatenation at the context width; *_SIGNED = the operand's sign in context;
+ * Y_WIDTH = the node's final width, max(final, 1) for comparisons, reductions and logical
+ * operators), the node's attributes and its SOURCE record. Extension and truncation are wiring.
+ * *out is the root's signal at the width it was generated (not extended to the context), signed as
+ * the root is in context. An identifier that names a generate or named block is `'x' is not a net,
+ * variable or parameter` (Yosys makes an implicit net; §17); a memory word read is the pending
+ * `memory read` line (Task 20); a call of a user function is the pending continuous-context call
+ * (Task 23). ODIN3_ERR_PARSE after a located error (counted; the caller goes on with the next
+ * item) or when a fatal cap stopped the stage (the cell-pins cap of point (aa), the net-bits cap,
+ * the byte budget); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a node that is no expression or
+ * a stage with no module being emitted. Nothing is attached for an expression that failed before
+ * its last cell; cells made earlier stay (valid, unused).
+ */
+odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
+
+/*
+ * odin3_elab2_expr for a SELECT node (EL-32 reads): constant selects (the bits at the declared
+ * indices; out-of-range bits are x with the warning `range select [9:6] of 'w' is out of bounds;
+ * bits outside [7:0] are x`, or `bit select [9] of 'w' is out of bounds; the bit is x`; a part
+ * select written against its declaration is the error `part-select [0:3] of 'w' is reversed
+ * relative to its declaration [7:0]`) and non-constant reads through $shiftx with genrtlil's
+ * offset computation. INVALID_ARG (logged) for a node that is not a SELECT; otherwise as
+ * odin3_elab2_expr.
+ */
+odin3_status odin3_elab2_select(odin3_elab2 *e2, const odin3_elab2_expr_req *req, odin3_sig *out);
+
+/*
+ * One word cell (EL-30, EL-31) with genrtlil's parameter rules: A_WIDTH, B_WIDTH = the widths of
+ * a and b as given, A_SIGNED, B_SIGNED = their is_signed, Y_WIDTH = y_width (a $mux: WIDTH =
+ * y_width, A = a, B = b, S = the one bit of s). Y drives dest (y_width nets, already made) when
+ * given, else y_width fresh unnamed nets. The node's attributes and SOURCE record (scope: the
+ * item being emitted) go on the cell. The cell-pins cap (point (aa)) is checked first: over it,
+ * `cell of N pins exceeds the limit of M pins` at node (fatal), ODIN3_ERR_PARSE and nothing is
+ * made. *y is the Y signal, unsigned. Constants in a and b become the module's constant nets.
+ * type must be one of the word types of odin3_elab2_type (ODIN3_E2T_ADD .. ODIN3_E2T_MUX), else
+ * ODIN3_ERR_INVALID_ARG (logged). ODIN3_ERR_NO_MEMORY with the IR unchanged but for constant nets.
+ */
+typedef struct odin3_elab2_cell_req {
+    odin3_elab2_type type;
+    odin3_ast_id node;
+    const odin3_sig *a, *b;
+    uint32_t y_width;
+    const odin3_net_id *dest;
+    const odin3_sig *s; /* $mux only (added to the brief's fields at the end: agent default) */
+} odin3_elab2_cell_req;
+
+odin3_status odin3_elab2_cell(odin3_elab2 *e2, const odin3_elab2_cell_req *req, odin3_sig *ysig);
+
+/*
+ * The nets of sig's bits, LSB first, into nets[0 .. sig->width): a net as is, a constant bit the
+ * module's constant net (ODIN3_SB_ANY: the $_CONSTX_ net), made on first use. ODIN3_ERR_NO_MEMORY;
+ * ODIN3_ERR_INVALID_ARG (logged) with no module being emitted.
+ */
+odin3_status odin3_elab2_to_nets(odin3_elab2 *e2, const odin3_sig *sig, odin3_net_id *nets);
+
+/*
+ * sig at `width` bits (EL-13): truncated to its low bits, or extended by repeating its top bit
+ * when is_signed (the constant 0 for an empty signal) and with the constant 0 otherwise. Wiring
+ * only: no cell and no net. out->is_signed = is_signed. ODIN3_ERR_NO_MEMORY; *out is unchanged
+ * on failure. out may be in.
+ */
+odin3_status odin3_elab2_extend(odin3_elab2 *e2, const odin3_sig *in, uint32_t width,
+                                bool is_signed, odin3_sig *out);
+
+/* --- selects: the object, the range and the bit positions (elab2_select.c) ------------------ */
+
+/* The object of a select: its declared range as written, its width and its name for messages. */
+typedef struct odin3_elab2_selobj {
+    int32_t msb, lsb;
+    uint32_t width;
+    const char *name;
+} odin3_elab2_selobj;
+
+/* What a select covers: the indices left .. right as written (left is the most significant bit
+ * of the result), `width` bits. constant: the index was a constant (always for [m:l]); known: and
+ * it has no x or z bit (else the result is all x and left, right are 0). */
+typedef struct odin3_elab2_selrange {
+    int64_t left, right;
+    uint32_t width;
+    bool constant, known;
+} odin3_elab2_selrange;
+
+/* The declared index of bit j of the result (bit 0 is the right end). */
+static inline int64_t odin3_elab2_sel_index(const odin3_elab2_selrange *range, uint32_t bit) {
+    return range->left >= range->right ? range->right + (int64_t)bit : range->right - (int64_t)bit;
+}
+
+/*
+ * The bit position (LSB first) of declared index idx in obj, or -1 outside it: lsb + k for a
+ * descending range (msb >= lsb), lsb - k for an ascending one.
+ */
+int64_t odin3_elab2_sel_pos(const odin3_elab2_selobj *obj, int64_t idx);
+
+/*
+ * The object of a select, from the node it names: an IDENT or HIER_NAME of a net, variable or
+ * parameter has its declared range (none: [0:0] for a net or variable, [width-1:0] for a
+ * parameter) and name; any other node has [width-1:0] and the name `expression`. width is the
+ * signal's width.
+ */
+void odin3_elab2_sel_object(const odin3_elab2 *e2, odin3_ast_id object, uint32_t width,
+                            odin3_elab2_selobj *out);
+
+/*
+ * What SELECT node select covers in obj: [m:l] from its two NUMBER bounds (a range written
+ * against the declaration is the error `part-select [0:3] of 'x' is reversed relative to its
+ * declaration [7:0]`, ODIN3_ERR_PARSE), a bit select from index, a [b +: w] or [b -: w] from index
+ * (the base) and its NUMBER width, oriented as the declaration. index is the evaluated index
+ * (NULL for [m:l]); one with a non-constant bit makes range->constant false, one with an x or z
+ * bit range->known false. ODIN3_OK otherwise.
+ */
+odin3_status odin3_elab2_sel_range(odin3_elab2 *e2, odin3_ast_id select,
+                                   const odin3_elab2_selobj *obj, const odin3_sig *index,
+                                   odin3_elab2_selrange *range);
+
+/* What the walk hands a SELECT's emission: its operands already emitted, and the lhs nets the
+ * root may drive by construction (dest, dest_width of them; NULL when this is not the root). */
+typedef struct odin3_elab2_selargs {
+    odin3_ast_id node;
+    const odin3_sig *object;
+    const odin3_sig *index; /* NULL for [m:l] */
+    const odin3_net_id *dest;
+    uint32_t dest_width;
+} odin3_elab2_selargs;
+
+/* The signal of the select (unsigned): constant or $shiftx, as odin3_elab2_select. */
+odin3_status odin3_elab2_select_emit(odin3_elab2 *e2, const odin3_elab2_selargs *args,
+                                     odin3_sig *out);
+
+/*
+ * The value of a NUMBER node (a select bound or width, a replication count: EL-4 makes them
+ * NUMBERs) as an integer, in *out, with *known false when it has an x or z bit (or is outside
+ * int64). ODIN3_ERR_INVALID_ARG (logged: a misuse of the seam) for another kind of node;
+ * ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab2_number_i64(odin3_elab2 *e2, odin3_ast_id node, int64_t *out, bool *known);
+
+/*
+ * The value of a signal of constant 0 and 1 bits as an integer (two's complement when
+ * sig->is_signed; a value past int64 saturates), in *out. Returns 1 for such a signal, 0 for a
+ * constant one with an x or z bit (*out untouched) and -1 when a bit is a net (or ODIN3_SB_ANY).
+ */
+int odin3_elab2_sig_i64(const odin3_sig *sig, int64_t *out);
+
+/*
+ * A continuous assignment (EL-28; A1): net_assign is a NET_ASSIGN (lhs, rhs) or a DECLARATOR with a
+ * value (a net declaration assignment `wire w = e;`, N7). The rhs is generated at max(L(lhs),
+ * L(rhs)) (context {L(lhs), true, false}), truncated or extended to L(lhs) by its sign, and each
+ * lhs bit becomes the rhs bit: by construction when the rhs is a cell made for it (its Y pins are
+ * the lhs nets), else by merging the two nets (odin3_net_merge: the rhs net is kept), with the
+ * same-net no-op. The lhs is a net or variable, a constant bit or part select of one, or a
+ * concatenation of those; a non-constant select is `continuous assignment to 'y' with a
+ * non-constant index is not supported`, bits outside the net are dropped with `assignment to bits
+ * outside 'y' [7:0] is ignored`. An lhs net that has a driver already is Task 19's two-driver
+ * check: until it lands the pending line `two-driver check` and nothing is attached. Statuses as
+ * odin3_elab2_expr.
+ */
+odin3_status odin3_elab2_assign(odin3_elab2 *e2, odin3_ast_id net_assign);
 
 #endif
