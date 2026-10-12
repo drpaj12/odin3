@@ -329,7 +329,9 @@ def odin3_build_id(odin3: Path, env: Mapping[str, str] | None = None) -> str:
 @dataclass(frozen=True)
 class Job:
     """One (leg, design) job. ``key`` is the job key, ``key12`` the leg key's first 12 hex
-    digits (the directory); ``job_dir`` is ``<out>/<vtr12>/<arch base>/<leg>/<key12>/<d>``."""
+    digits (the directory); ``job_dir`` is ``<out>/<vtr12>/<arch base>/<leg>/<key12>/<d>``.
+    ``inputs`` are the key inputs the planner hashed (``job.json`` records them); None only for
+    jobs built by hand."""
 
     leg: str
     design: str
@@ -341,6 +343,7 @@ class Job:
     job_dir: Path
     commands: tuple[Command, ...]
     cached: bool
+    inputs: KeyInputs | None = None
 
 
 @dataclass(frozen=True)
@@ -449,7 +452,7 @@ def _plan_job(leg: str, design: str, req: PlanRequest, sets: Sets, com: _Common)
         gating=com.arch == qor_legs.ARCH_BASES["k6"] and design in sets.gate,
         key=key, key12=key12, job_dir=job_dir,
         commands=tuple(qor_legs.build_commands(leg, design, ctx)),
-        cached=not req.rerun and is_cached(job_dir, key),
+        cached=not req.rerun and is_cached(job_dir, key), inputs=inputs,
     )
 
 
