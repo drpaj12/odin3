@@ -1,0 +1,22 @@
+arch	circuit	script_params	num_clb	vpr_status	min_chan_width	crit_path_routed_wirelength	critical_path_delay	vtr_max_mem
+k6_frac_N10_frac_chain_mem32K_40nm.xml	ch_intrinsics.v	common	160	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	stereovision3.v	common	200	success	50	1000	-1	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	diffeq2.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	diffeq1.v	common	200	success	40	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	mkPktMerge.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	raygentop.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	sha.v	common	200	success	50	1000	2.4	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	boundtop.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	mkSMAdapter4B.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	or1200.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	stereovision0.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	stereovision1.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	mkDelayWorker32B.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	stereovision2.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	blob_merge.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	LU8PEEng.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	bgm.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	mcml.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	LU32PEEng.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	spree.v	common	200	success	50	1000	2.5	70.00 MiB	
+k6_frac_N10_frac_chain_mem32K_40nm.xml	arm_core.v	common	200	success	50	1000	2.5	70.00 MiB	

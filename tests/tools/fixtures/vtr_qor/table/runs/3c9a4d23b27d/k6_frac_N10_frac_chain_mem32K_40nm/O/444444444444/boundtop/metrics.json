@@ -1,0 +1,53 @@
+{
+ "abc_script_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+ "arch": "k6_frac_N10_frac_chain_mem32K_40nm",
+ "cost": {
+  "frontend_peak_rss_mib": 200,
+  "frontend_wall_s": 5.0,
+  "max_vpr_mem_mib": 330,
+  "vpr_time_s": 22.0,
+  "vpr_total_runtime_s": 20.0
+ },
+ "design": "boundtop",
+ "elapsed_s": 30.0,
+ "error": "",
+ "gating": true,
+ "key": "4444444444444444444444444444444444444444444444444444444444444444",
+ "leg": "O",
+ "netlist": {
+  "abc_depth": 4,
+  "abc_exchange": "aig",
+  "adders": 10,
+  "blif_sha256": "0707070707070707070707070707070707070707070707070707070707070707",
+  "depth": 4,
+  "ffs": 100,
+  "luts": 1100,
+  "mults": 2,
+  "ram_slices": 4
+ },
+ "odin3_build": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+ "odin3_commit": "0123456789abcdef0123456789abcdef01234567",
+ "packed": {
+  "device_height": 21,
+  "device_width": 21,
+  "num_clb": 176,
+  "num_memories": 1,
+  "num_mult": 2
+ },
+ "routed": {
+  "crit_path_routed_wirelength": 1050,
+  "critical_path_delay_ns": 2.5,
+  "fmax_mhz": 400.0,
+  "min_chan_width": 60,
+  "vpr_status": "success"
+ },
+ "schema": 1,
+ "started": "2026-10-13T04:14:00Z",
+ "status": "ok",
+ "verdicts": {
+  "equiv": "ram",
+  "fcheck": "pass",
+  "rerun": "same"
+ },
+ "vtr_commit": "3c9a4d23b27d187bd67c79dc01a18ff1ffc21d9b"
+}

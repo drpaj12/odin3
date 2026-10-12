@@ -1,0 +1,3 @@
+#Packing (included)
+num_clb;Range(0.90,1.10)  # VTR's own band
+num_memories;Range(0.9,1.10)

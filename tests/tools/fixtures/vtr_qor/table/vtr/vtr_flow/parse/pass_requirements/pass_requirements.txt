@@ -1,0 +1,8 @@
+%include "common/pass_requirements.fixture.txt"
+
+#Routing
+min_chan_width;Range(0.25,1.30)
+routed_wirelength;RangeAbs(0.60,1.50,5)
+crit_path_routed_wirelength;Range(0.60,1.50)
+critical_path_delay;Range(0.50,1.40)
+vpr_status;Equal()

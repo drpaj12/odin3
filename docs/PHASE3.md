@@ -91,7 +91,9 @@ tri-state or a multi-driver net is a located error.
 ## Checklist
 
 - [ ] Decisions 2–20 answered (or kept as agent defaults); DESIGN §4.0 amended for decision 1
-- [ ] 3H: Parmys baseline (P) on the 19, `-temp_dir ~/odin3-ws/work/vtr-qor`, table generator
+- [x] 3H: Parmys baseline (P) on the 19, `-temp_dir ~/odin3-ws/work/vtr-qor`, table generator
+  (run 2026-10-12, key `6baf6f3cfaf9`, 1:08 wall, published `qor/3c9a4d23b27d/P-baseline`;
+  decision 25)
 - [ ] 3E `write_blif --vtr`: Parmys goldens round-trip through it and route via `-start abc`
 - [ ] 3D linked ABC: adapter builds; `abc` pass; script ruling (#1); deterministic; **M1**: P′
   leg routes all 19
@@ -331,6 +333,17 @@ then the options considered.
       `-timeout` 2 h). Successful run directories are deleted down to their logs and QoR
       files, and the run pauses below 20 GB free on `C:`. The P leg is cached per VTR commit.
     - (b) Everything at `-j1` (about 4–5 h per set of legs). (c) A cloud runner.
+    - **Agent default (3H, 2026-10-12; 3H spec §7.1, §19).** One cgroup scope per heavy run,
+      `MemoryMax=6G` and `MemorySwapMax=0`, under the heavy lock (`tools/heavy-run`,
+      `odin3-heavy.slice`), replaces (a)'s per-job `prlimit` RSS cap and
+      `run_vtr_flow -limit_memory_usage`.
+      - Both old caps are no-ops here. Linux ignores `RLIMIT_RSS`. VTR applies its `ulimit -Sv`
+        only when `Path("ulimit").exists()` (`python_libs/vtr/util.py`), which is never true.
+      - One 6 GiB scope for the whole run is also stricter than 6 GiB per job: three such jobs
+        would exceed 60% of 24 GiB.
+      - The first P run measured the largest peak, `LU32PEEng`'s VPR, at 2,264 MiB (decision 25).
+      - The harness runs one job at a time (3H plan point (w)), not (a)'s `-j3`. Task 15 logs
+        that against this decision.
 18. **CI scope.** Recommend (a). VTR takes about an hour to build per cache miss, which does not
     fit `ci`.
     - (a) `ci` runs:
@@ -489,6 +502,62 @@ then the options considered.
       still written, unreferenced. The round trip is identical.
     - Deferred to 3E-4, to be measured by its sweeps: spec §18's per-node `odin3_blif_vtr_fn` cache
       (M9) and resolving cell kinds by type ID instead of `strcmp` (M11).
+25. **3H: the Parmys baseline (P), first run** (2026-10-12; 3H plan Task 7, rendered by Task 9).
+    The run is `vtr-qor run --arch k6 --leg P --set gate,extra` through `tools/heavy-run`, from
+    `main` 2068618. The table is `vtr-qor table --legs P --label P-baseline`, written to
+    `~/odin3-ws/work/vtr-qor/tables/20261012-0803-P-baseline/` and published to odin3-golden
+    `qor/3c9a4d23b27d/P-baseline/`.
+    - **Outcome.** All 21 jobs are `ok` with `vpr_status=success`, under key `6baf6f3cfaf9`
+      (now `latest`). Exit 0, with nothing capped or timed out.
+    - **Wall time: 1:08:46** for the 18 jobs this run started. The three smallest were reused
+      from T8's cached jobs. The plan had estimated 4–4.5 h. The longest jobs were `mcml`
+      (2,028 s) and `LU32PEEng` (1,316 s).
+    - **ABC-stage peak RSS: first measurement** (3H §7.1 step 1). These are the `time -v`
+      figures of `abc*.out` and the stage's helper logs:
+
+      | design | MiB |
+      |---|---|
+      | `mcml` | 364 |
+      | `LU32PEEng` | 351 |
+      | `stereovision2` | 152 |
+      | `bgm` | 121 |
+      | `LU8PEEng` | 113 |
+      | every other design | ≤ 76 |
+
+      Parmys peaked at 1,186 MiB (`LU32PEEng`) and 973 MiB (`mcml`). VPR peaked at 2,264 and
+      2,224 MiB on the same two. Everything is far below the 6 GiB cap.
+    - **Against VTR's golden** (`vtr_reg_qor_chain`, VTR's CI runner; report-only, PHASE3 exit
+      item 5).
+      - Geomeans of P/golden over the 19:
+
+        | metric | geomean |
+        |---|---|
+        | `num_clb` | 1.000 |
+        | min W | 0.995 |
+        | CPD | 1.000 |
+        | wirelength | 1.001 |
+
+        The 2 extras are 1.000 on all four.
+      - No metric is outside VTR's `pass_requirements.txt` bands.
+      - 16 gate designs and both extras match exactly. The 3 that differ:
+
+        | design | W | CPD | wirelength |
+        |---|---|---|---|
+        | `diffeq2` | 68 vs 58 (1.172) | 0.976 | 0.941 |
+        | `diffeq1` | 50 vs 62 (0.806) | 1.013 | 1.065 |
+        | `LU8PEEng` | 84 vs 88 (0.955) | 1.002 | 1.009 |
+    - **`parmys_equals_golden`** (3H point (l)) is `true` on all 21. The run's Parmys BLIF is
+      byte-identical to odin3-golden's.
+    - **`depth` against VTR's `abc_depth`** (T2's local check) is equal on 19 of 21. Two differ:
+      - **`stereovision3`: 2 against 4.** It has two clocks. VTR maps one domain at a time, so
+        its figure is one domain's, while `depth` cuts at every latch.
+      - **`raygentop`: 3 against 4.** ABC's own `if` mapping reports `Del = 3.00`.
+        - The mapped netlist has 359 identity buffers (ABC's PO buffers). One of them follows a
+          depth-3 LUT path.
+        - ABC's final `print_stats` `lev` counts that buffer as a level, so it reads 4.
+        - `depth` skips identity buffers (3H §4.1; VPR absorbs them), so it reads 3.
+        - Recounting the kept `raygentop.pre-vpr.blif.gz` with a buffer as one level gives 4.
+          On `sha` and `boundtop` the same recount leaves the depth unchanged.
 
 ## Risks
 

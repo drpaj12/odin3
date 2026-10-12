@@ -1,22 +1,32 @@
-"""Tests for tools/vtr-qor/qor_table.py, the verdict half (3H plan Task 8; spec §6.1, §6.2, T3).
+"""Tests for tools/vtr-qor/qor_table.py and the ``table``/``gate``/``publish`` subcommands (3H
+plan Tasks 8 and 9; spec §6, T3, T7).
 
-The runs are synthetic: built in the test, or written as a small job tree under a temporary
-directory. Nothing here runs VTR.
+The runs are synthetic: built in the test, written as a small job tree under a temporary
+directory, or copied from the committed fixture tree ``fixtures/vtr_qor/table/runs`` (P, O', P'
+and O on the 19 + 2; its README records the hand-computed geomeans). Nothing here runs VTR or
+writes ``~/odin3-ws/golden``: ``publish`` runs with ``HOME`` pointed at a temporary directory.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import tempfile
+import time
 import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from unittest import mock
 
 import qor_legs
 import qor_sched
 import qor_table
-from qor_heavy import HeavyError
+import vtr_qor
+from qor_heavy import HEAVY_DIR, HeavyError
 from qor_table import Bands, GateInputs, Run, Verdict
+
+from .helpers import FIXTURES, run_main
 
 REPO = qor_legs.REPO_ROOT
 BANDS_JSON = REPO / "tests" / "vtr" / "qor" / "bands.json"
@@ -515,6 +525,263 @@ class LoadRunsTest(unittest.TestCase):
         self.assertEqual(refused({"O'": "aaaaaaaaaaaa"}, ["P", "Oprime"]),
                          f"table: no complete key for leg Oprime on {ARCH}")
         self.assertEqual(len(qor_table.load_runs(self.root, VTR12, ARCH, {})), 1)
+
+
+# ---------------------------------------------------------------- Task 9: the writers and CLI
+
+TABLE_FIXTURE = FIXTURES / "vtr_qor" / "table"
+EXPECTED = TABLE_FIXTURE / "expected"
+FAKE_VTR = TABLE_FIXTURE / "vtr"
+FIXTURE_DIR = "20261013-0441-fixture"  # the newest job.json end time: O arm_core
+RUNS_CSV_HEADER = (
+    "arch,design,leg,key12,status,gating,vpr_status,luts,ffs,adders,mults,ram_slices,depth,"
+    "abc_depth,num_clb,num_memories,num_mult,device_width,device_height,min_chan_width,"
+    "critical_path_delay_ns,fmax_mhz,crit_path_routed_wirelength,frontend_wall_s,"
+    "frontend_peak_rss_mib,vpr_time_s,vpr_total_runtime_s,max_vpr_mem_mib,fcheck,equiv,rerun,"
+    "blif_sha256,vtr_commit,odin3_commit")
+RATIOS_CSV_HEADER = (
+    "arch,pair,design,n,luts,ffs,adders,mults,ram_slices,depth,num_clb,num_memories,num_mult,"
+    "min_chan_width,critical_path_delay_ns,crit_path_routed_wirelength,frontend_wall_s,"
+    "frontend_peak_rss_mib,vpr_time_s,max_vpr_mem_mib")
+E_QH15 = ("vtr-qor: publish: set ODIN3_QOR_PUBLISH=1 (controller only; agents never write "
+          "~/odin3-ws/golden)")
+
+
+def header(runs: Sequence[Run], label: str = "t") -> qor_table.TableHeader:
+    return qor_table.table_header(runs, arch=ARCH, label=label, vtr12=VTR12)
+
+
+class TableCliTest(unittest.TestCase):
+    """``vtr-qor table``, ``gate`` and ``publish`` over a copy of the fixture tree."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-table-test-")
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.out = self.root / "out"
+        shutil.copytree(TABLE_FIXTURE / "runs", self.out)
+
+    def job(self, leg: str, design: str) -> Path:
+        keys = {"P": "111111111111", "Oprime": "222222222222", "Pprime": "333333333333",
+                "O": "444444444444"}
+        return self.out / VTR12 / ARCH / leg / keys[leg] / design
+
+    def table(self, legs: str = "P,O',P',O", label: str = "fixture",
+              *extra: str) -> tuple[int, str, str]:
+        return run_main(vtr_qor.main, ["table", "--out", str(self.out), "--vtr-root",
+                                       str(FAKE_VTR), "--legs", legs, "--label", label, *extra])
+
+    def made(self, label: str = "fixture", legs: str = "P,O',P',O") -> Path:
+        code, out, err = self.table(legs, label)
+        self.assertEqual(code, 0, err)
+        table_dir = Path(out.strip())
+        self.assertEqual(table_dir.parent, self.out / "tables")
+        return table_dir
+
+    def files(self, table_dir: Path) -> dict[str, bytes]:
+        return {name: (table_dir / name).read_bytes() for name in qor_table.TABLE_FILES}
+
+    def gate(self, table_dir: Path) -> tuple[int, list[str]]:
+        code, out, err = run_main(vtr_qor.main, ["gate", str(table_dir)])
+        self.assertEqual(err, "")
+        return code, out.splitlines()
+
+    def test_table_golden_files(self) -> None:
+        table_dir = self.made()
+        self.assertEqual(table_dir.name, FIXTURE_DIR)
+        for name in qor_table.TABLE_FILES:
+            self.assertEqual((table_dir / name).read_text(encoding="utf-8"),
+                             (EXPECTED / name).read_text(encoding="utf-8"), name)
+            self.assertEqual((table_dir / name).read_bytes(), (EXPECTED / name).read_bytes(),
+                             name)
+
+    def test_table_twice_identical(self) -> None:
+        """T7: identical bytes with every file's mtime and the clock changed."""
+        first = self.files(self.made())
+        later = time.time() + 86400 * 400
+        for path in self.out.rglob("*"):
+            os.utime(path, (later, later))
+        with mock.patch("time.time", return_value=later), \
+                mock.patch("time.time_ns", return_value=int(later * 1e9)):
+            second = self.files(self.made())
+        self.assertEqual(first, second)
+
+    def test_csv_headers(self) -> None:
+        table_dir = self.made()
+        runs = (table_dir / "runs.csv").read_text(encoding="utf-8").split("\n")
+        ratios = (table_dir / "ratios.csv").read_text(encoding="utf-8").split("\n")
+        self.assertEqual(runs[0], RUNS_CSV_HEADER)
+        self.assertEqual(ratios[0], RATIOS_CSV_HEADER)
+        self.assertEqual(len(runs), 84 + 2)  # 21 designs x 4 legs, the header, the last "\n"
+        # 4 pairs (O/P, O'/P, P'/P, O/O'): 21 design rows and 2 geomean rows each.
+        self.assertEqual(len(ratios), 4 * (21 + 2) + 2)
+        self.assertNotIn("\r", (table_dir / "runs.csv").read_text(encoding="utf-8"))
+
+    def test_gate_cli(self) -> None:
+        self.assertEqual(self.gate(self.made("pass")), (0, ["Gate (decision 3): PASS"]))
+        data = json.loads((self.job("O", "sha") / "metrics.json").read_text(encoding="utf-8"))
+        data["packed"]["num_clb"] = 400
+        (self.job("O", "sha") / "metrics.json").write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(self.gate(self.made("fail")), (1, [
+            "Gate (decision 3): FAIL", "gate: FAIL: num_clb sha O/P 2.000 > 1.50"]))
+        (self.job("P", "mcml") / "status").write_text("capped\n", encoding="utf-8")
+        code, lines = self.gate(self.made("incomplete"))
+        self.assertEqual(code, 3)
+        self.assertEqual(lines, ["Gate (decision 3): INCOMPLETE",
+                                 "gate: INCOMPLETE: mcml P is capped (reference); rerun it",
+                                 "gate: FAIL: num_clb sha O/P 2.000 > 1.50"])
+        code, out, err = run_main(vtr_qor.main, ["gate", str(self.root)])
+        self.assertEqual(code, 2)
+        self.assertIn(f"vtr-qor: gate: {self.root / 'runs.json'}: not a table", err)
+
+    def test_publish(self) -> None:
+        table_dir = self.made()
+        home = self.root / "home"
+        home.mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(home)}):
+            os.environ.pop("ODIN3_QOR_PUBLISH", None)
+            code, out, err = run_main(vtr_qor.main, ["publish", str(table_dir)])
+            self.assertEqual((code, out, err), (2, "", E_QH15 + "\n"))
+            self.assertEqual(list(home.iterdir()), [])
+            os.environ["ODIN3_QOR_PUBLISH"] = "1"
+            code, out, err = run_main(vtr_qor.main, ["publish", str(table_dir)])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, "git -C ~/odin3-ws/golden add qor/3c9a4d23b27d/fixture\n"
+                              'git -C ~/odin3-ws/golden commit -m "qor: fixture (3c9a4d23b27d)"\n')
+        target = home / "odin3-ws" / "golden" / "qor" / "3c9a4d23b27d" / "fixture"
+        self.assertEqual(sorted(p.name for p in target.iterdir()), sorted(qor_table.TABLE_FILES))
+        self.assertEqual(self.files(target), self.files(table_dir))
+
+    def test_p_only_table(self) -> None:
+        table_dir = self.made("p-only", "P")
+        md = (table_dir / "qor.md").read_text(encoding="utf-8")
+        self.assertNotIn("## Gate", md)
+        self.assertNotIn("## Non-gating rows", md)
+        self.assertIn("## Cross-check against VTR's golden", md)
+        self.assertIn("| ch_intrinsics | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |", md)
+        self.assertIn("| ch_intrinsics | 200 | 160 | 1.250 | 50 | 50 | 1.000 | 2.500 | 2.500 | "
+                      "1.000 | 1000 | 1000 | 1.000 | num_clb |", md)
+        self.assertIn("| **geomean (19)** |  |  | 1.012 |  |  | 1.012 |  |  | 1.000 (18/19) |"
+                      "  |  | 1.000 |  |", md)
+        self.assertNotIn("| O |", md)
+        self.assertIn("legs P 111111111111\n", md)
+        self.assertEqual(self.gate(table_dir), (3, [
+            "Gate (decision 3): INCOMPLETE", "gate: INCOMPLETE: no O leg in the table"]))
+        ratios = (table_dir / "ratios.csv").read_text(encoding="utf-8")
+        self.assertEqual(ratios, RATIOS_CSV_HEADER + "\n")
+
+    def test_table_refusals(self) -> None:
+        code, _, err = self.table("P", "../x")
+        self.assertEqual(code, 2)
+        self.assertIn("--label '../x' is not a name", err)
+        code, _, err = self.table("P", "x", "--keys", "O=444444444444")
+        self.assertEqual((code, err), (2, "vtr-qor: --keys names leg O, which --legs does not\n"))
+        code, _, err = self.table("P", "x", "--keys", "P")
+        self.assertEqual(code, 2)
+        code, _, err = run_main(vtr_qor.main, ["table", "--out", str(self.out), "--vtr-root",
+                                               str(self.root), "--legs", "P", "--label", "x"])
+        self.assertEqual(code, 2)
+        self.assertIn("table: cannot read VTR's golden results under", err)
+        code, _, err = self.table("P,Oprov", "x")
+        self.assertEqual((code, err), (1, "vtr-qor: table: no complete key for leg Oprov on "
+                                          f"{ARCH}\n"))
+        self.assertFalse((self.out / "tables").exists())
+
+    def test_table_keys_and_sets(self) -> None:
+        code, out, err = self.table("P", "keyed", "--keys", "P=111111111111", "--set", "gate")
+        self.assertEqual(code, 0, err)
+        runs = (Path(out.strip()) / "runs.csv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(runs), 1 + 19)
+        self.assertNotIn("spree", "".join(runs))
+
+
+class WriterTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.dir = Path(self._tmp.name)
+
+    def test_md_four_decimals_near_bound(self) -> None:
+        for scale, text in ((1.2004, "1.2004"), (1.150, "1.150")):
+            runs = table(scale)
+            verdict_ = verdict(runs)
+            qor_table.write_md(runs, verdict_, header(runs), self.dir / "qor.md", golden=None)
+            qor_table.write_csv(runs, self.dir / "runs.csv", self.dir / "ratios.csv")
+            md = (self.dir / "qor.md").read_text(encoding="utf-8")
+            self.assertIn(f"| **geomean (19)** |  |  | **{text}** |", md)
+            gm = [line for line in (self.dir / "ratios.csv").read_text(encoding="utf-8")
+                  .splitlines() if ",GEOMEAN_GATE," in line]
+            self.assertEqual(len(gm), 1)
+            self.assertIn(f",{text},", gm[0])
+        runs = table(1.2004)
+        qor_table.write_md(runs, verdict(runs), header(runs), self.dir / "qor.md", golden=None)
+        md = (self.dir / "qor.md").read_text(encoding="utf-8")
+        self.assertIn("## Gate (decision 3): FAIL", md)
+        self.assertIn("- gate: FAIL: num_clb geomean O/P 1.2004 > 1.20", md)
+        self.assertIn("| sha | 100 | 120.04 | 1.2004 |", md)
+
+    def test_header_from_newest_job(self) -> None:
+        def with_job(r: Run, ended: str, cpu: str) -> Run:
+            return Run(r.leg, r.design, r.arch, r.key12, r.status, r.gating, r.metrics,
+                       {"ended": ended, "host": {"cpu": cpu, "mem_gib": 23.5}})
+        runs = table()
+        runs = [with_job(r, "2026-10-12T01:00:00Z", "old") for r in runs]
+        runs = replace(runs, with_job(run("P", "sha"), "2026-10-14T09:08:07Z", "new"))
+        got = header(runs, "lab")
+        self.assertEqual((got.date_utc, got.host), ("2026-10-14T09:08:07Z", "new, 23.5 GiB"))
+        self.assertEqual(qor_table.table_stamp(got), "20261014-0908")
+        self.assertEqual(dict(got.legs), {"P": "0123456789ab", "O": "0123456789ab"})
+        self.assertIsNone(got.odin3_commit12)
+        bare = header(table())  # no job.json: metrics.json has no start either
+        self.assertEqual((bare.date_utc, bare.host), ("unknown", "unknown"))
+        self.assertEqual(qor_table.table_stamp(bare), "00000000-0000")
+
+    def test_golden_xcheck(self) -> None:
+        golden = qor_table.load_golden_xcheck(FAKE_VTR)
+        self.assertEqual(dict(golden.bands), {
+            "num_clb": (0.9, 1.1), "num_memories": (0.9, 1.1), "min_chan_width": (0.25, 1.3),
+            "crit_path_routed_wirelength": (0.6, 1.5), "critical_path_delay": (0.5, 1.4)})
+        self.assertEqual(golden.values[("ch_intrinsics", "num_clb")], 160.0)
+        self.assertEqual(golden.values[("stereovision3", "critical_path_delay")], -1.0)
+        self.assertNotIn(("sha", "vtr_max_mem"), golden.values)  # "70.00 MiB": not a number
+        ratio_ = qor_table.golden_ratio
+        self.assertEqual(ratio_(golden, 200.0, "ch_intrinsics", "num_clb"), (1.25, "outside"))
+        self.assertEqual(ratio_(golden, 50.0, "diffeq1", "min_chan_width"), (1.25, "ok"))
+        self.assertEqual(ratio_(golden, 2.5, "stereovision3", "critical_path_delay"), (None, ""))
+        self.assertEqual(ratio_(golden, None, "sha", "num_clb"), (None, ""))
+        self.assertEqual(ratio_(golden, 1.0, "sha", "num_mult"), (None, ""))
+        with self.assertRaises(OSError):
+            qor_table.load_golden_xcheck(self.dir)
+
+    def test_verdict_state(self) -> None:
+        state = qor_table.verdict_state
+        self.assertEqual(state({"pass": True, "violations": []}), "PASS")
+        self.assertEqual(state({"pass": False, "violations": ["gate: FAIL: x"]}), "FAIL")
+        self.assertEqual(state({"pass": False, "violations": [
+            "gate: FAIL: x", "gate: INCOMPLETE: no O leg in the table"]}), "INCOMPLETE")
+        for verdict_ in (Verdict("PASS", ()), Verdict("FAIL", ("table: bgm has no ok O job",)),
+                         Verdict("INCOMPLETE", ("gate: INCOMPLETE: no P leg in the table",))):
+            got = qor_table.verdict_json(verdict_)
+            assert got is not None
+            self.assertEqual(state(got), verdict_.state)
+
+    def test_numbers_from_ok_runs_only(self) -> None:
+        runs = replace(table(), run("O", "sha", status="failed"))
+        qor_table.write_csv(runs, self.dir / "runs.csv", self.dir / "ratios.csv")
+        row = next(line for line in (self.dir / "runs.csv").read_text(encoding="utf-8")
+                   .splitlines() if ",sha,O," in line)
+        self.assertEqual(row, f"{ARCH},sha,O,0123456789ab,failed,true" + "," * 27
+                         + qor_legs.VTR_PIN + ",")
+        ratios = (self.dir / "ratios.csv").read_text(encoding="utf-8").splitlines()
+        self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,18,", "\n".join(ratios))
+
+    def test_fmt_value(self) -> None:
+        self.assertEqual(qor_table.fmt_value("critical_path_delay_ns", 9.3045), "9.305")
+        self.assertEqual(qor_table.fmt_value("vpr_time_s", 4.0600000000000005), "4.1")
+        self.assertEqual(qor_table.fmt_value("max_vpr_mem_mib", 2264.4), "2264")
+        self.assertEqual(qor_table.fmt_value("num_clb", 131.0), "131")
+        self.assertEqual(qor_table.fmt_value("num_clb", None), "")
+        self.assertEqual(qor_table.leg_name("Pprime"), "P'")
 
 
 if __name__ == "__main__":
