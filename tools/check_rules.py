@@ -4,7 +4,9 @@
 - exit()/_exit()/_Exit()/quick_exit() only under src/cli/ (the bare name is matched, so function
   pointers and macro aliases are caught too);
 - abort(), raise(SIGABRT) and __builtin_trap() only in src/ir/check*.c (the debug-build `check`);
-  assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6);
+  assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6),
+  except in adapters/abc/: the adapter links with --wrap=__assert_fail, which would report its own
+  failures as ABC's, so it uses ODIN3_ADAPTER_ASSERT instead (3D spec §4.1);
 - goto only to the single `cleanup` label.
 
 Bison (.y) and Flex (.l) sources compile inside generated translation units that the rest of the
@@ -45,6 +47,7 @@ _TOKENS = re.compile(
 _EXIT = re.compile(r"\b(?:exit|_exit|_Exit|quick_exit)\b")
 _ABORT = re.compile(r"\babort\b|\b__builtin_trap\b|\braise\s*\(\s*SIGABRT\b")
 _GOTO = re.compile(r"\bgoto\s+(\w+)")
+_ASSERT = re.compile(r"\bassert\s*\(")
 
 
 def strip_comments_and_strings(text: str) -> str:
@@ -61,16 +64,19 @@ def violations(path: str, text: str) -> list[str]:
 
 
 def _c_violations(path: str, text: str) -> list[str]:
-    """The exit/abort/goto rules (every file)."""
+    """The exit/abort/goto rules (every file) and the assert rule (adapters/abc/)."""
     posix = PurePosixPath(path)
     in_cli = posix.parts[:2] == ("src", "cli")
     is_check = posix.parts[:2] == ("src", "ir") and posix.name.startswith("check")
+    in_abc_adapter = posix.parts[:2] == ("adapters", "abc")
     found: list[str] = []
     for lineno, line in enumerate(strip_comments_and_strings(text).splitlines(), 1):
         if _EXIT.search(line) and not in_cli:
             found.append(f"{path}:{lineno}: exit() is only allowed under src/cli/")
         if _ABORT.search(line) and not is_check:
             found.append(f"{path}:{lineno}: abort/trap is only allowed in src/ir/check*.c")
+        if _ASSERT.search(line) and in_abc_adapter:
+            found.append(f"{path}:{lineno}: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)")
         for match in _GOTO.finditer(line):
             if match.group(1) != "cleanup":
                 found.append(f"{path}:{lineno}: goto may only target the 'cleanup' label")

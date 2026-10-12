@@ -65,6 +65,30 @@ class CheckRulesTest(unittest.TestCase):
         text = "void f(int n) { assert(n > 0); raise(SIGINT); }\n"
         self.assertEqual(self.check("src/passes/opt.c", text), [])
 
+    def test_assert_in_abc_adapter_is_flagged(self) -> None:
+        """3D §4.1: --wrap=__assert_fail would report the adapter's own asserts as ABC's."""
+        found = self.check("adapters/abc/session.c", "void f(int x) {\n    assert(x);\n}\n")
+        expected = [
+            "adapters/abc/session.c:2: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)"
+        ]
+        self.assertEqual(found, expected)
+        self.assertEqual(len(self.check("adapters/abc/guard.h", "#define A(x) assert (x)\n")), 1)
+
+    def test_adapter_assert_macro_is_allowed(self) -> None:
+        text = (
+            "odin3_status f(int x) {\n    ODIN3_ADAPTER_ASSERT(x > 0);\n"
+            "    static_assert(1, \"ok\");\n    return ODIN3_OK;\n}\n"
+        )
+        self.assertEqual(self.check("adapters/abc/session.c", text), [])
+        # Outside adapters/abc/, assert() stays allowed (decision 2026-10-08, #6).
+        self.assertEqual(self.check("adapters/slang/shim.c", "void f(int x) { assert(x); }\n"), [])
+
+    def test_trap_in_abc_adapter_is_refused(self) -> None:
+        """Point (a): no trap allowance for the adapter until Peter rules."""
+        found = self.check("adapters/abc/guard.c", "void f(void) {\n    __builtin_trap();\n}\n")
+        expected = ["adapters/abc/guard.c:2: abort/trap is only allowed in src/ir/check*.c"]
+        self.assertEqual(found, expected)
+
     def test_goto_other_label_is_flagged(self) -> None:
         found = self.check("src/util/vec.c", "void f(void) { goto out; out: ; }\n")
         self.assertEqual(found, ["src/util/vec.c:1: goto may only target the 'cleanup' label"])

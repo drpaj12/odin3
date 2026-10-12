@@ -1,0 +1,1 @@
+{ global: odin3_plugin_init; odin3_abc_adapter_init; local: *; };

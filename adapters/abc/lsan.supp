@@ -1,0 +1,9 @@
+# LeakSanitizer suppressions for the linked ABC (3D spec §4.1), used by test_abc_adapter.
+# ABC is never instrumented, but ASan's allocator still sees its mallocs. Only ABC's own functions
+# are named here (a frame anchored at the start of its name): a leak of the adapter's or of
+# Odin III's (odin3_*, adp_*) must never be suppressed.
+leak:^Abc_
+leak:^Gia_
+leak:^Cmd_
+leak:^Extra_
+leak:^Mem_
