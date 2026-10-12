@@ -36,6 +36,7 @@ typedef struct inst_target {
     odin3_celltype_id type;
     const odin3_celltype_def *def;
     bool is_module; /* an IR module of the store (not a black box or a registered type) */
+    bool fixed;     /* a black box declared from its MODULE: ports at the default widths only */
 } inst_target;
 
 /* One port of the instance: its connection, what was generated for it and its pins' nets. */
@@ -64,6 +65,10 @@ static const char *str_of(const odin3_elab2 *e2, uint32_t id) {
     return str != NULL ? str : "";
 }
 
+/* e2->bboxes values: the cell type ID, and BBOX_FIXED when the type was declared from the MODULE
+ * (a registered type of the name is reused as it is, its widths following IR-7b's inference). */
+#define BBOX_FIXED (1ULL << 32)
+
 /* The cell type of the INSTANTIATION: a module of the store, a black box, or a registered type. */
 static odin3_status inst_find_target(inst_run *run, bool *found) {
     odin3_elab2 *e2 = run->e2;
@@ -74,6 +79,7 @@ static odin3_status inst_find_target(inst_run *run, bool *found) {
     if (rec != NULL && rec->kind == ODIN3_SYM_MODULE) {
         if (odin3_u64map_get(e2->bboxes, rec->decl.v, &value)) {
             run->tg.type = (odin3_celltype_id){(uint32_t)value};
+            run->tg.fixed = (value & BBOX_FIXED) != 0;
         } else if (odin3_u64map_get(e2->modules, rec->decl.v, &value)) {
             run->tg.type = odin3_module_celltype(
                 odin3_module_get(e2->design, (odin3_module_id){(uint32_t)value}));
@@ -235,8 +241,9 @@ static uint32_t port_seen_width(const port_conn *pc) {
  * (odin3_celltype_infer_params, IR-7b), then the given ones. */
 static odin3_status inst_params(inst_run *run) {
     const odin3_celltype_def *def = run->tg.def;
-    if (def->n_params == 0) {
-        return ODIN3_OK;
+    if (def->n_params == 0 || run->params != NULL) {
+        return ODIN3_OK; /* nothing to work out, or already done (a black box's, before its ports)
+                          */
     }
     odin3_elab2 *e2 = run->e2;
     uint32_t *seen = odin3_arena_alloc(e2->scratch, (size_t)def->n_ports * sizeof *seen);
@@ -250,6 +257,31 @@ static odin3_status inst_params(inst_run *run) {
     }
     odin3_status st = odin3_celltype_infer_params(e2->design, run->tg.type, seen, run->params);
     return st != ODIN3_OK ? st : inst_given_params(run);
+}
+
+/* A source black box keeps one set of port widths (the default specialization's, EL-4), so an
+ * instance that gives a parameter another value cannot be built when a ported range might depend
+ * on it: the width of the port cannot be determined (fail closed: a guessed width would change a
+ * correct connection). A port without a range cannot depend on a parameter, and a string value is
+ * taken as not touching a range. */
+static odin3_status inst_fixed_widths(inst_run *run) {
+    const odin3_celltype_def *def = run->tg.def;
+    const odin3_param_def *changed = NULL;
+    for (uint32_t k = 0; k < def->n_params && changed == NULL; k++) {
+        bool differs = !odin3_value_equal(&run->params[k], &def->params[k].dflt);
+        changed = differs && def->params[k].kind != ODIN3_VAL_STRING ? &def->params[k] : NULL;
+    }
+    for (uint32_t i = 0; changed != NULL && i < def->n_ports; i++) {
+        if (def->ports[i].scalar) {
+            continue;
+        }
+        odin3_elab2_error(run->e2, odin3_ast_loc(run->e2->elab, run->instance),
+                          "width of port '%s' of black-box instance '%s' (module '%s') cannot be "
+                          "determined: parameter '%s' is overridden and the port has a range",
+                          def->ports[i].name, run->name, run->module_name, changed->name);
+        return ODIN3_ERR_PARSE;
+    }
+    return ODIN3_OK;
 }
 
 /* --- widths and the resize of I4 ---------------------------------------------------------------
@@ -518,7 +550,11 @@ static odin3_status inst_one(inst_run *run) {
     inst_map_connections(run);
     odin3_node_id node = {0};
     bool granted = false;
-    st = inst_generate(run);
+    if (run->tg.fixed) {
+        st = inst_params(run);
+        st = st != ODIN3_OK ? st : inst_fixed_widths(run);
+    }
+    st = st != ODIN3_OK ? st : inst_generate(run);
     st = st != ODIN3_OK ? st : inst_params(run);
     st = st != ODIN3_OK ? st : inst_widths(run);
     st = st != ODIN3_OK ? st : inst_claims(run, &granted);
@@ -812,13 +848,12 @@ odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl) {
 /* --- black boxes (EL-11) -----------------------------------------------------------------------
  */
 
-/* The cell type being declared from a black-box MODULE: its ports once with constant widths (the
- * declaration IR-7b compares) and once with the width parameters found, and its parameters. */
+/* The cell type being declared from a black-box MODULE: its ports at the default widths (the
+ * declaration IR-7b compares) and its parameters. */
 typedef struct bbox_decl {
-    odin3_port_def *fixed, *sized;
+    odin3_port_def *fixed;
     odin3_param_def *params;
     uint32_t n_ports, n_params;
-    bool *overridden; /* per parameter: some instance gives it another value than its default */
 } bbox_decl;
 
 static odin3_dir bbox_dir(uint32_t sub) {
@@ -833,8 +868,7 @@ static odin3_status bbox_ports(odin3_elab2 *e2, odin3_ast_id module_node, bbox_d
     odin3_ast_span ports = odin3_ast_children(e2->elab, odin3_ast_child(e2->elab, module_node, 1));
     bd->n_ports = ports.n;
     bd->fixed = odin3_arena_alloc(e2->scratch, (size_t)(ports.n + 1U) * sizeof *bd->fixed);
-    bd->sized = odin3_arena_alloc(e2->scratch, (size_t)(ports.n + 1U) * sizeof *bd->sized);
-    if (bd->fixed == NULL || bd->sized == NULL) {
+    if (bd->fixed == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     for (uint32_t i = 0; i < ports.n; i++) {
@@ -851,7 +885,6 @@ static odin3_status bbox_ports(odin3_elab2 *e2, odin3_ast_id module_node, bbox_d
                               .width =
                                   rec->has_packed ? (uint32_t)(span < 0 ? -span : span) + 1U : 1U};
         bd->fixed[i] = def;
-        bd->sized[i] = def;
     }
     return ODIN3_OK;
 }
@@ -891,71 +924,18 @@ static odin3_status bbox_params(odin3_elab2 *e2, odin3_ast_id module_node, bbox_
         total += kids > slots ? kids - slots : 0U;
     }
     bd->params = odin3_arena_alloc(e2->scratch, (size_t)(total + 1U) * sizeof *bd->params);
-    bd->overridden = odin3_arena_alloc(e2->scratch, (size_t)(total + 1U) * sizeof(bool));
-    if (bd->params == NULL || bd->overridden == NULL) {
+    if (bd->params == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && list.v != 0 && i < decls.n; i++) {
         odin3_ast_span kids = odin3_ast_children(e2->elab, decls.ids[i]);
         for (uint32_t k = slots; st == ODIN3_OK && k < kids.n; k++) {
-            bd->overridden[bd->n_params] = false;
             st = bbox_param(e2, kids.ids[k], &bd->params[bd->n_params]);
             bd->n_params++;
         }
     }
     return st;
-}
-
-/* The parameter of the black box named name; -1 for none. */
-static int64_t bbox_param_index(const bbox_decl *bd, const char *name) {
-    for (uint32_t k = 0; k < bd->n_params; k++) {
-        if (strcmp(bd->params[k].name, name) == 0) {
-            return (int64_t)k;
-        }
-    }
-    return -1;
-}
-
-/* Marks the parameters one INSTANTIATION gives another integer value than the default. */
-static void bbox_note_overrides(odin3_elab2 *e2, odin3_ast_id node, bbox_decl *bd) {
-    odin3_ast_span list = odin3_ast_children(e2->elab, odin3_ast_child(e2->elab, node, 0));
-    for (uint32_t i = 0; i < list.n; i++) {
-        int64_t at = bbox_param_index(bd, odin3_ast_name_str(e2->elab, list.ids[i]));
-        odin3_value value;
-        if (at >= 0 && bd->params[at].kind == ODIN3_VAL_INT &&
-            param_value(e2, &bd->params[at], odin3_ast_child(e2->elab, list.ids[i], 0), &value) ==
-                ODIN3_OK &&
-            value.i != bd->params[at].dflt.i) {
-            bd->overridden[at] = true;
-        }
-    }
-}
-
-/* Which parameters some INSTANTIATION of the definition gives a value other than the default. */
-static void bbox_overrides(odin3_elab2 *e2, odin3_ast_id module_node, bbox_decl *bd) {
-    uint32_t name = odin3_ast_name(e2->elab, module_node);
-    uint32_t end = odin3_ast_node_end(e2->elab).v;
-    for (uint32_t id = 1; id < end; id++) {
-        odin3_ast_id node = {id};
-        if (odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_INSTANTIATION &&
-            odin3_ast_name(e2->elab, node) == name) {
-            bbox_note_overrides(e2, node, bd);
-        }
-    }
-}
-
-/* A port whose width equals the default of an overridden integer parameter takes it as its width
- * parameter (IR-7b); the first such parameter wins. */
-static void bbox_width_params(bbox_decl *bd) {
-    for (uint32_t i = 0; i < bd->n_ports; i++) {
-        for (uint32_t k = 0; k < bd->n_params && bd->sized[i].width_param == NULL; k++) {
-            if (bd->overridden[k] && bd->params[k].kind == ODIN3_VAL_INT &&
-                bd->params[k].dflt.i == (int64_t)bd->sized[i].width) {
-                bd->sized[i].width_param = bd->params[k].name;
-            }
-        }
-    }
 }
 
 /* A registered type of that name: the declaration must match it (IR-7b), else the located error. */
@@ -985,25 +965,23 @@ odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node) {
     bbox_decl bd = {0};
     odin3_status st = bbox_ports(e2, module_node, &bd);
     st = st != ODIN3_OK ? st : bbox_params(e2, module_node, &bd);
-    if (st == ODIN3_OK) {
-        bbox_overrides(e2, module_node, &bd);
-    }
     odin3_celltype_id registered = {0};
     uint32_t name = odin3_ast_name(e2->elab, module_node);
     bool taken = st == ODIN3_OK && odin3_celltype_find(e2->design, name, &registered);
     if (st == ODIN3_OK && taken) {
         st = bbox_match(e2, module_node, &bd, registered);
-    } else if (st == ODIN3_OK) {
-        bbox_width_params(&bd);
     }
     odin3_celltype_def def = {.name = str_of(e2, name),
                               .gran = ODIN3_GRAN_BLACKBOX,
-                              .ports = taken ? bd.fixed : bd.sized,
+                              .ports = bd.fixed,
                               .n_ports = bd.n_ports,
                               .params = bd.params,
                               .n_params = bd.n_params};
     odin3_celltype_id id = {0};
     st = st != ODIN3_OK ? st : odin3_celltype_declare_blackbox(e2->design, &def, &id);
-    st = st != ODIN3_OK ? st : odin3_u64map_put(e2->bboxes, (odin3_kv){module_node.v, id.v});
+    st = st != ODIN3_OK
+             ? st
+             : odin3_u64map_put(e2->bboxes,
+                                (odin3_kv){module_node.v, id.v | (taken ? 0ULL : BBOX_FIXED)});
     return st == ODIN3_ERR_INVALID_ARG ? ODIN3_ERR_PARSE : st;
 }

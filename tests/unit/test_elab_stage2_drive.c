@@ -951,12 +951,12 @@ static uint32_t blackbox_types(void) {
 }
 
 /* A `(* blackbox *)` definition: one cell type under its base name, declared once, each cell with
- * its INSTANTIATION's values and its own widths; never an IR module. */
+ * its INSTANTIATION's values and the declared widths; never an IR module. */
 static void test_blackbox_base_name(void) {
     read_src("(* blackbox *) module bb #(parameter W = 4) (input [W-1:0] a, output [W-1:0] o);\n"
              "endmodule\n"
-             "module top (input [7:0] x, input [3:0] y, output [7:0] ox, output [3:0] oy);\n"
-             "  bb #(.W(8)) u1 (.a(x), .o(ox));\n"
+             "module top (input [3:0] x, input [3:0] y, output [3:0] ox, output [3:0] oy);\n"
+             "  bb #(.W(4)) u1 (.a(x), .o(ox));\n"
              "  bb u2 (.a(y), .o(oy));\nendmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32(0, soft_warnings());
@@ -969,24 +969,87 @@ static void test_blackbox_base_name(void) {
     odin3_node_id u1 = instance_node("u1");
     odin3_node_id u2 = instance_node("u2");
     TEST_ASSERT_EQUAL_UINT32(type.v, odin3_node_type(top(), u1).v);
-    TEST_ASSERT_EQUAL_INT64(8, node_param(u1, "W"));
+    TEST_ASSERT_EQUAL_INT64(4, node_param(u1, "W"));
     TEST_ASSERT_EQUAL_INT64(4, node_param(u2, "W"));
-    expect_pins_are(u1, "a", (bits_of){"x", 0}, 8);
-    expect_pins_are(u2, "a", (bits_of){"y", 0}, 4);
-    expect_pins_are(u1, "o", (bits_of){"ox", 0}, 8);
+    expect_pins_are(u1, "a", (bits_of){"x", 0}, 4);
+    expect_pins_are(u2, "o", (bits_of){"oy", 0}, 4);
     expect_ir_ok();
 }
 
-/* A black box whose widths do not depend on its parameters is a plain type. */
-static void test_blackbox_fixed_widths(void) {
-    read_src("(* blackbox *) module fx #(parameter MODE = 1) (input [7:0] a, output o);\n"
+/* Ports without a range cannot depend on a parameter, and a string value does not touch a range:
+ * those overrides are exact. */
+static void test_blackbox_override_exact_cases(void) {
+    read_src("(* blackbox *) module fx #(parameter MODE = 1) (input a, output o);\nendmodule\n"
+             "(* blackbox *) module st #(parameter NAME = \"x\") (input [7:0] a, output [7:0] o);\n"
              "endmodule\n"
-             "module top (input [7:0] x, output o1, output o2);\n"
-             "  fx #(.MODE(2)) u1 (.a(x), .o(o1));\n  fx u2 (.a(x), .o(o2));\nendmodule\n");
+             "module top (input [7:0] x, output o1, output [7:0] o2);\n"
+             "  fx #(.MODE(2)) u1 (.a(x[0]), .o(o1));\n"
+             "  st #(.NAME(\"y\")) u2 (.a(x), .o(o2));\nendmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
     TEST_ASSERT_EQUAL_INT64(2, node_param(instance_node("u1"), "MODE"));
-    TEST_ASSERT_EQUAL_INT64(1, node_param(instance_node("u2"), "MODE"));
-    expect_pins_are(instance_node("u1"), "a", (bits_of){"x", 0}, 8);
+    expect_pins_are(instance_node("u2"), "a", (bits_of){"x", 0}, 8);
+    expect_ir_ok();
+}
+
+#define BB_TOP(ports, params, conns)                                                               \
+    "(* blackbox *) module bb " params " (" ports ");\nendmodule\n"                                \
+    "module top (input [15:0] x, input [7:0] kk, output [15:0] y, output [7:0] y8);\n" conns       \
+    "endmodule\n"
+
+/* The instance with a parameter overridden is refused when a port with a range might follow it;
+ * the instance without an override beside it is built. The cases are the review's (Yosys 0.55
+ * derives each port from its own range, which the elaborated form no longer has). */
+/* What the refusal names: the first ranged port, the overridden parameter, the instance's place. */
+typedef struct refusal {
+    const char *port, *param;
+    at_loc at;
+} refusal;
+
+static void expect_width_refused(const char *text, refusal want) {
+    read_failing(text);
+    char msg[256];
+    TEST_ASSERT_TRUE(snprintf(msg, sizeof msg,
+                              "width of port '%s' of black-box instance 'u1' (module 'bb') cannot "
+                              "be determined: parameter '%s' is overridden and the port has a "
+                              "range",
+                              want.port, want.param) > 0);
+    expect_error(want.at, msg);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_module_find_node(top(), id_of("u1")).v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_module_find_node(top(), id_of("u2")).v);
+}
+
+/* (a) an unrelated fixed-width port beside the parameterized ones. */
+static void test_blackbox_width_refused_unrelated_port(void) {
+    expect_width_refused(BB_TOP("input [W-1:0] a, input [7:0] k, output [W-1:0] o",
+                                "#(parameter W = 8)",
+                                "  bb #(.W(16)) u1 (.a(x), .k(kk), .o(y));\n"
+                                "  bb u2 (.a(x[7:0]), .k(kk), .o(y8));\n"),
+                         (refusal){"a", "W", {4, 16}});
+}
+
+/* (b) a range that is not a bare parameter. */
+static void test_blackbox_width_refused_formula(void) {
+    expect_width_refused(
+        BB_TOP("input [W:0] a, output o", "#(parameter W = 8)",
+               "  bb #(.W(16)) u1 (.a(x), .o(y[0]));\n  bb u2 (.a(x[8:0]), .o(y[1]));\n"),
+        (refusal){"a", "W", {4, 16}});
+}
+
+/* (c) two parameters with one default. */
+static void test_blackbox_width_refused_shared_default(void) {
+    expect_width_refused(BB_TOP("input [WA-1:0] a, input [2*WB-1:0] b, output o",
+                                "#(parameter WA = 8, WB = 8)",
+                                "  bb #(.WB(16)) u1 (.a(x[7:0]), .b(x), .o(y[0]));\n"
+                                "  bb u2 (.a(x[7:0]), .b(x), .o(y[1]));\n"),
+                         (refusal){"a", "WB", {4, 17}});
+}
+
+/* An override that does not evaluate is reported, not read as "not overridden". */
+static void test_blackbox_override_unevaluable(void) {
+    read_failing(BB_TOP("input [W-1:0] a, output o", "#(parameter W = 8)",
+                        "  bb #(.W(4'bx010)) u1 (.a(x[7:0]), .o(y[0]));\n"));
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1, diag_errors());
 }
 
 /* A source black box named like a registered type reuses it, whatever its parameters. */
@@ -1176,13 +1239,35 @@ static void test_claim_api(void) {
     expect_error((at_loc){1, 1}, "'w[0]' has two drivers (also driven at t.v:1:1)");
 }
 
+static void probe_wired_claim(void *user, odin3_elab2 *e2, odin3_ast_id module) {
+    bool *granted = user;
+    odin3_wire_id wire = odin3_module_find_wire(e2->mod, id_of("w"));
+    odin3_net_id net = odin3_wire_net(e2->mod, wire, 0);
+    odin3_elab2_claim_req req = {&net, 1, ODIN3_DRV_CELL, module};
+    *granted = true;
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_elab2_claim(e2, &req, granted));
+}
+
+/* The net-only claim refuses a wired net (it cannot redirect the driver). */
+static void test_claim_api_refuses_wired(void) {
+    bool granted = true;
+    odin3_elab_test_hooks hooks = {0, NULL, NULL, 0, NULL};
+    hooks.user = &granted;
+    hooks.after_prescan = probe_wired_claim;
+    odin3_elab_test_set_hooks(&hooks);
+    read_src("module top (output o);\n  wand w;\nendmodule\n");
+    odin3_elab_test_set_hooks(NULL);
+    TEST_ASSERT_FALSE(granted);
+}
+
 /* --- a design with all of it, determinism, out of memory ----------------------------------------
  */
 
 static const char k_rich[] =
     "module sub #(parameter W = 4) (input [W-1:0] a, output [W-1:0] o, inout p);\n"
     "  assign o = a;\nendmodule\n"
-    "(* blackbox *) module bb #(parameter W = 4) (input [W-1:0] a, output [W-1:0] o);\nendmodule\n"
+    "(* blackbox *) module bb #(parameter W = 8) (input [W-1:0] a, output [W-1:0] o);\nendmodule\n"
     "module top (input [7:0] a, input [7:0] b, input en, input c, inout io, output [7:0] y,\n"
     "            output [7:0] z, output g1, output g2, output t1, output [7:0] w2);\n"
     "  wire [7:0] s1, s2;\n  wand [7:0] w;\n  wire bus;\n  supply1 hi;\n  uwire u;\n"
@@ -1338,7 +1423,11 @@ static void test_oom_sweep(void) {
     X(test_cell_type_inference)                                                                    \
     X(test_cell_type_given_parameter)                                                              \
     X(test_blackbox_base_name)                                                                     \
-    X(test_blackbox_fixed_widths)                                                                  \
+    X(test_blackbox_override_exact_cases)                                                          \
+    X(test_blackbox_width_refused_unrelated_port)                                                  \
+    X(test_blackbox_width_refused_formula)                                                         \
+    X(test_blackbox_width_refused_shared_default)                                                  \
+    X(test_blackbox_override_unevaluable)                                                          \
     X(test_blackbox_reuses_registered_type)                                                        \
     X(test_blackbox_mismatch)                                                                      \
     X(test_gate_and)                                                                               \
@@ -1351,6 +1440,7 @@ static void test_oom_sweep(void) {
     X(test_three_module_summary)                                                                   \
     X(test_escaped_name_is_not_a_specialization)                                                   \
     X(test_claim_api)                                                                              \
+    X(test_claim_api_refuses_wired)                                                                \
     X(test_rich_design)                                                                            \
     X(test_deterministic)                                                                          \
     X(test_oom_sweep)

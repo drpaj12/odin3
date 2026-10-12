@@ -551,6 +551,15 @@ odin3_status odin3_elab2_claim(odin3_elab2 *e2, const odin3_elab2_claim_req *req
     if (dr == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    for (uint32_t i = 0; i < req->n; i++) {
+        if (info_get(dr, req->nets[i]).wrec != 0) {
+            odin3_log(
+                ODIN3_LOG_ERROR,
+                "odin3_elab2_claim: a wired net needs odin3_elab2_lvalue_claim (it redirects)");
+            *granted = false;
+            return ODIN3_ERR_INVALID_ARG;
+        }
+    }
     claim_run run = {.e2 = e2,
                      .dr = dr,
                      .nets = req->nets,
