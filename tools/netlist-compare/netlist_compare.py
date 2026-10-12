@@ -36,14 +36,16 @@ Canonical form (per model; the first model stays first, the rest are sorted by n
 * ``.param`` is semantic and always kept; ``.cname``/``.attr`` are dropped unless
   ``--keep-attrs``.
 
-``--implicit-models`` (2E §18.3, for Yosys ``write_blif -icells``): a ``.subckt`` of a
-``$``-prefixed model the file does not define is a black box whose formals are those the file
-uses; a formal whose port (the name before any ``[bit]``) is ``Y``, ``Q``, ``X``, ``CO`` or
-``RD_DATA`` is an output, every other one an input.  The stub models are listed in the canonical
-form like any black box.  The ``A`` bits of an implicit ``$reduce_and``/``_or``/``_xor``/``_xnor``/
-``_bool`` are a set: their order cannot change ``Y``, so ``A[k]`` is compared as ``A`` (this is
-how ``proc-diff`` absorbs §20 #8's ``$reduce_or`` input order).  A model the file defines is used
-as written.
+``--implicit-models`` (2E §18.3, for Yosys ``write_blif -blackbox -icells -param``; without
+``-blackbox`` a hard block's model is missing): a ``.subckt`` of a ``$``-prefixed model the file
+does not define is a black box whose formals are those the file uses; a formal whose port (the
+name before any ``[bit]``) is ``Y``, ``Q``, ``X``, ``CO`` or ``RD_DATA`` is an output, and so is
+``DATA`` of ``$memrd``/``$memrd_v2`` and ``CTRL_OUT`` of ``$fsm`` (``$memwr``'s ``DATA`` is an
+input, so those two are per model); every other formal is an input.  The stub models are listed
+in the canonical form like any black box.  The ``A`` bits of an implicit ``$reduce_and``/
+``_or``/``_xor``/``_xnor``/``_bool`` are a set: their order cannot change ``Y``, so ``A[k]`` is
+compared as ``A`` (this is how ``proc-diff`` absorbs §20 #8's ``$reduce_or`` input order).
+A model the file defines is used as written.
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -69,6 +71,11 @@ import blif  # noqa: E402
 TOOL = "netlist-compare"
 # --implicit-models: the ports of an undefined $-model that are outputs (2E §18.3).
 IMPLICIT_OUTPUTS = frozenset({"Y", "Q", "X", "CO", "RD_DATA"})
+# ... and the outputs only some models have (another model's DATA is an input: $memwr).
+IMPLICIT_MODEL_OUTPUTS: dict[str, frozenset[str]] = {
+    "$memrd": frozenset({"DATA"}), "$memrd_v2": frozenset({"DATA"}),
+    "$fsm": frozenset({"CTRL_OUT"}),
+}
 # --implicit-models: implicit models whose A bits are a set (a reduction's order is irrelevant).
 SET_INPUT_MODELS = frozenset({"$reduce_and", "$reduce_or", "$reduce_xor", "$reduce_xnor",
                               "$reduce_bool"})
@@ -588,8 +595,9 @@ def implicit_stubs(text: str) -> tuple[str, frozenset[str]]:
     lines: list[str] = []
     names = sorted(name for name in used if name not in defined)
     for name in names:
-        outs = [f for f in used[name] if _port_of(f) in IMPLICIT_OUTPUTS]
-        ins = [f for f in used[name] if _port_of(f) not in IMPLICIT_OUTPUTS]
+        out_ports = IMPLICIT_OUTPUTS | IMPLICIT_MODEL_OUTPUTS.get(name, frozenset())
+        outs = [f for f in used[name] if _port_of(f) in out_ports]
+        ins = [f for f in used[name] if _port_of(f) not in out_ports]
         lines.append(f".model {name}")
         lines += [" ".join([d, *ports]) for d, ports in ((".inputs", ins), (".outputs", outs))
                   if ports]

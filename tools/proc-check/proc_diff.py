@@ -14,17 +14,20 @@ smallest first, by 2D's ``elab_sweep.collect`` when it is importable, else by ``
    the three pre-``proc`` passes; ``--with-opt`` runs ``proc`` in place of ``proc --noopt``.
    ``a.il`` must hold no ``process`` (else ``proc-diff: a.il still holds processes``, exit 2).
 2. **Side B.** ``Y -p "read_rtlil in.il; hierarchy -top T; proc -norom -noopt; opt_clean -purge;
-   write_blif -icells -param b.blif"`` (``proc -norom`` with ``--with-opt``; without ``--top``,
-   ``hierarchy -auto-top``).
-3. **A's BLIF.** ``Y -p "read_rtlil a.il; hierarchy -top T; opt_clean -purge; write_blif -icells
-   -param a.blif"``.
-4. **Normalise and compare.** In both files every ``.param P <bits>`` whose P is listed in
-   ``int_params.txt`` (the registry's INT parameters, 2E plan point (o)) and whose value is at most
-   32 bits of 0/1 becomes its decimal value (Yosys writes an INT parameter as 32 bits, a polarity
-   it built from a constant as 1 bit), and a port-to-port buffer (``.names x y`` / ``1 1``) reads
-   the root of its buffer chain, so the order of ``connect`` lines across processes (§20 #8)
-   cannot matter. Then ``netlist-compare --implicit-models a.blif b.blif``, which also compares a
-   ``$reduce_or``'s inputs as a set (§20 #8).
+   write_blif -blackbox -icells -param b.blif"`` (``proc -norom`` with ``--with-opt``; without
+   ``--top``, ``hierarchy -auto-top``).
+3. **A's BLIF.** ``Y -p "read_rtlil a.il; hierarchy -top T; opt_clean -purge; write_blif
+   -blackbox -icells -param a.blif"``. ``-blackbox`` (fix round 1, amending the brief) writes each
+   black-box or hard module's interface, so a design with a hard block can be compared.
+4. **Normalise and compare.** Into a copy of each file (``a.norm.blif``, ``b.norm.blif``; made
+   from the original every time, so bisect's repeats are safe), every ``.param P <bits>`` whose P
+   is listed in ``int_params.txt`` (the registry's INT parameters, 2E plan point (o)) and whose
+   value is at most 32 bits of 0/1 becomes its decimal value (Yosys writes an INT parameter as
+   32 bits, a polarity it built from a constant as 1 bit), and a port-to-port buffer (``.names x
+   y`` / ``1 1``) reads the root of its buffer chain (a buffer on a cycle stays as written), so
+   the order of ``connect`` lines across processes (§20 #8) cannot matter. Then ``netlist-compare
+   --implicit-models a.norm.blif b.norm.blif``, which also compares a ``$reduce_or``'s inputs as
+   a set (§20 #8).
 
 ``--bisect`` (§18.4): when a file differs, for X in clean, rmdead, prune, arst, Odin III runs step
 1's input through ``proc --stop-after X; write_rtlil a_X.il``, Yosys finishes it with the remaining
@@ -37,7 +40,8 @@ differs, ``no phase differs``.
 proc --noopt; write_rtlil <slug>.il"``. Otherwise it is refused (exit 2) and nothing is written.
 
 Documented divergences (§20): #8 and #9 are absorbed by the normaliser; Yosys 0.55's assertion on
-an empty select (#17) is recognised and reported as an expected difference, not a failure. Other
+an empty select (#17), on side B only, is recognised and reported as an expected difference, not
+a failure (side A's BLIF is still made from ``a.il``). Other
 known differences go in ``--expect-fail F``: lines ``<relative path> <one-line reason>`` (``#``
 comments allowed), the path relative to the directory given (or the file as given). A reason that
 cites ``§20 #N`` for N in 8, 9, 16, 17, 18 must see that divergence's outcome: a difference (#8,
@@ -45,7 +49,8 @@ cites ``§20 #N`` for N in 8, 9, 16, 17, 18 must see that divergence's outcome: 
 outcome that contradicts its cited divergence fails the run.
 
 Every child runs through ``memcap.run(argv, cap)`` from ``tools/elab-check/memcap.py`` (2D-6),
-imported lazily (point (t)); while it is missing a run exits 2 with ``proc-diff:
+imported lazily (point (t)), with ``capture_output=True`` when it takes that keyword (proc-diff
+reads every child's output); while it is missing a run exits 2 with ``proc-diff:
 tools/elab-check/memcap.py is missing (2D-6)``. A Yosys whose ``-V`` is not 0.55 is refused unless
 ``--allow-version V`` names it (the nightly drift job only).
 
@@ -57,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import inspect
 import re
 import shutil
 import sys
@@ -144,7 +150,7 @@ def _hierarchy(opts: Options) -> str:
 
 def _yosys_argv(opts: Options, rtlil: Path, passes: Iterable[str], blif_out: Path) -> list[str]:
     script = [f"read_rtlil {rtlil}", _hierarchy(opts), *passes, "opt_clean -purge",
-              f"write_blif -icells -param {blif_out}"]
+              f"write_blif -blackbox -icells -param {blif_out}"]
     return [opts.yosys, "-p", "; ".join(script)]
 
 
@@ -168,9 +174,14 @@ def step_a_blif(opts: Options, work: Path) -> list[str]:
     return _yosys_argv(opts, work / "a.il", [], work / "a.blif")
 
 
+def norm_path(blif_path: Path) -> Path:
+    """Where step 4 writes the normalised copy of a BLIF file (the original is kept)."""
+    return blif_path.with_name(blif_path.stem + ".norm.blif")
+
+
 def step_compare(work: Path, a_blif: Path) -> list[str]:
-    return [sys.executable, str(NETLIST_COMPARE_PY), "--implicit-models", str(a_blif),
-            str(work / "b.blif")]
+    return [sys.executable, str(NETLIST_COMPARE_PY), "--implicit-models",
+            str(norm_path(a_blif)), str(norm_path(work / "b.blif"))]
 
 
 def bisect_passes(phase: str, with_opt: bool) -> list[str]:
@@ -237,10 +248,13 @@ def _buffers(lines: Sequence[str]) -> dict[int, tuple[str, str]]:
     return found
 
 
-def _root(net: str, drives: dict[str, str]) -> str:
+def _root(net: str, drives: dict[str, str]) -> str | None:
+    """The root of net's buffer chain, or None when the chain runs into a cycle."""
     seen = {net}
-    while net in drives and drives[net] not in seen:
+    while net in drives:
         net = drives[net]
+        if net in seen:
+            return None
         seen.add(net)
     return net
 
@@ -253,7 +267,9 @@ def _buffer_roots(lines: list[str]) -> None:
         in_model = {i: io for i, io in buffers.items() if start <= i < end}
         drives = {out: inp for inp, out in in_model.values()}
         for i, (inp, out) in in_model.items():
-            lines[i] = f".names {_root(inp, drives)} {out}"
+            root = _root(inp, drives)
+            if root is not None:  # a buffer on a cycle stays as written
+                lines[i] = f".names {root} {out}"
 
 
 def normalise_text(text: str, ints: frozenset[str]) -> str:
@@ -263,8 +279,11 @@ def normalise_text(text: str, ints: frozenset[str]) -> str:
     return "".join(f"{line}\n" for line in lines)
 
 
-def normalise_file(path: Path, ints: frozenset[str]) -> None:
-    path.write_text(normalise_text(path.read_text(encoding="utf-8"), ints), encoding="utf-8")
+def normalise_file(path: Path, ints: frozenset[str]) -> Path:
+    """Writes the normalised copy of path (always from the original, so repeating it is safe)."""
+    out = norm_path(path)
+    out.write_text(normalise_text(path.read_text(encoding="utf-8"), ints), encoding="utf-8")
+    return out
 
 
 # --------------------------------------------------------------------------- children
@@ -290,6 +309,18 @@ class Child:
     stderr: str
 
 
+def _capture_kwargs(run: Callable[..., Any]) -> dict[str, bool]:
+    """``capture_output=True`` when memcap.run takes it: proc-diff reads each child's output
+    (§20 #16's E3, #17's assert, the diff), so a memcap that captures only on request must."""
+    try:
+        params = inspect.signature(run).parameters.values()
+    except (TypeError, ValueError):
+        return {}
+    if any(p.name == "capture_output" or p.kind is p.VAR_KEYWORD for p in params):
+        return {"capture_output": True}
+    return {}
+
+
 def _text(value: Any) -> str:
     if value is None:
         return ""
@@ -311,7 +342,7 @@ class Runner:
             if self.memcap is None:
                 raise ProcDiffError("tools/elab-check/memcap.py is missing (2D-6)")
         try:
-            done = self.memcap.run(argv, self.cap)
+            done = self.memcap.run(argv, self.cap, **_capture_kwargs(self.memcap.run))
         except OSError as exc:
             return Child(EXIT_ERROR, "", f"cannot run {argv[0]}: {exc}")
         except (ValueError, RuntimeError) as exc:  # e.g. a cap above memcap's limit
@@ -348,29 +379,40 @@ def _failed_step(step: str, tool: str, child: Child) -> Outcome:
 
 
 def _compare(runner: Runner, argv: list[str], ints: frozenset[str]) -> Child:
-    """Normalises both BLIF files in place, then runs netlist-compare on them."""
-    for blif_path in (Path(argv[-2]), Path(argv[-1])):
+    """Writes the normalised copies netlist-compare reads (argv's last two paths, each from its
+    original, never from an earlier copy), then runs netlist-compare on them."""
+    for norm in (Path(argv[-2]), Path(argv[-1])):
+        original = norm.with_name(norm.name.removesuffix(".norm.blif") + ".blif")
         try:
-            normalise_file(blif_path, ints)
+            normalise_file(original, ints)
         except (OSError, UnicodeDecodeError) as exc:
-            return Child(EXIT_ERROR, "", f"cannot read {blif_path}: {exc}")
+            return Child(EXIT_ERROR, "", f"cannot read {original}: {exc}")
     return runner.run(argv)
+
+
+def _compare_outcome(child: Child, work: Path) -> Outcome:
+    if child.code == EXIT_SAME:
+        return Outcome(EXIT_SAME, "identical")
+    if child.code == EXIT_DIFFER:
+        (work / "diff.txt").write_text(child.stdout, encoding="utf-8")
+        return Outcome(EXIT_DIFFER, OUT_DIFFER, lines=child.stdout.splitlines())
+    return _failed_step("compare", "netlist-compare", child)
 
 
 def _run_steps(runner: Runner, opts: Options, src: Path, work: Path,
                ints: frozenset[str]) -> Outcome:
+    known: Outcome | None = None  # §20 #17: B asserted; A's BLIF is still made from a.il
     for step, tool, build in STEPS:
         argv = build(opts, src, work)
-        child = _compare(runner, argv, ints) if step == "compare" else runner.run(argv)
         if step == "compare":
-            if child.code == EXIT_SAME:
-                return Outcome(EXIT_SAME, "identical")
-            if child.code == EXIT_DIFFER:
-                (work / "diff.txt").write_text(child.stdout, encoding="utf-8")
-                return Outcome(EXIT_DIFFER, OUT_DIFFER, lines=child.stdout.splitlines())
+            return known or _compare_outcome(_compare(runner, argv, ints), work)
+        child = runner.run(argv)
         if child.code != 0:
-            return _failed_step(step, tool, child)
-        if step == "A" and _PROCESS_LINE.search(_read(work / "a.il")):
+            failed = _failed_step(step, tool, child)
+            if failed.known is None:
+                return failed
+            known = failed
+        elif step == "A" and _PROCESS_LINE.search(_read(work / "a.il")):
             return Outcome(EXIT_ERROR, "error", "a.il still holds processes")
     raise AssertionError("unreachable: the compare step returns")
 
@@ -496,10 +538,17 @@ def _describe(outcome: Outcome) -> str:
 # --------------------------------------------------------------------------- the run
 
 
-def _work_dir(keep: str | None, item: Item) -> Path:
+def _work_dir(keep: str | None, item: Item, used: set[str]) -> Path:
+    """A temporary directory, or ``DIR/<sanitised rel>`` (``-2``, ``-3``… when names collide)."""
     if keep is None:
         return Path(tempfile.mkdtemp(prefix=f"proc-diff-{item.path.stem}-"))
-    work = Path(keep) / re.sub(r"[^\w.-]", "_", item.rel.removesuffix(".v"))
+    base = re.sub(r"[^\w.-]", "_", item.rel.removesuffix(".v"))
+    slug, n = base, 1
+    while slug in used:
+        n += 1
+        slug = f"{base}-{n}"
+    used.add(slug)
+    work = Path(keep) / slug
     work.mkdir(parents=True, exist_ok=True)
     return work
 
@@ -511,9 +560,10 @@ class Run:
     ints: frozenset[str]
     keep: str | None
     do_bisect: bool
+    used: set[str] = field(default_factory=set)
 
     def one(self, item: Item) -> Outcome:
-        work = _work_dir(self.keep, item)
+        work = _work_dir(self.keep, item, self.used)
         outcome = _run_steps(self.runner, self.opts, item.path.resolve(), work, self.ints)
         if outcome.kind == OUT_DIFFER:
             if self.do_bisect:
@@ -554,7 +604,17 @@ def _report(item: Item, line: str, outcome: Outcome) -> None:
         print(f"  {extra}")
 
 
+def warn_names(items: Sequence[Item], expect: dict[str, str]) -> None:
+    """Warns about a name two files share (one expect entry covers both) and stale entries."""
+    names = [item.rel for item in items]
+    for rel in sorted({rel for rel in names if names.count(rel) > 1}):
+        print(f"{TOOL}: warning: several files are named '{rel}'", file=sys.stderr)
+    for rel in sorted(set(expect) - set(names)):
+        print(f"{TOOL}: warning: expect-fail entry '{rel}' matches no file", file=sys.stderr)
+
+
 def run_all(run: Run, items: Sequence[Item], expect: dict[str, str], write: bool) -> int:
+    warn_names(items, expect)
     worst = EXIT_SAME
     every_identical = True
     for item in items:
@@ -614,6 +674,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_all(run, items, expect, args.write)
     except ProcDiffError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:  # e.g. a 2D-6/2D-7 module of another shape: an error, not "differ"
+        print(f"{TOOL}: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
 

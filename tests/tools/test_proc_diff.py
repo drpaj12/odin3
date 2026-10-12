@@ -67,10 +67,10 @@ shutil.copyfile(pick if os.path.exists(pick) else os.path.join(blifs, "default.b
 
 FAKE_MEMCAP = """import json, os, subprocess
 
-def run(argv, cap):
+def run(argv, cap, capture_output=False):
     with open(os.environ["FAKE_MEMCAP_LOG"], "a") as log:
         log.write(json.dumps({"argv": list(argv), "cap": cap}) + "\\n")
-    return subprocess.run(argv, capture_output=True, text=True, check=False)
+    return subprocess.run(argv, capture_output=capture_output, text=True, check=False)
 """
 
 FAKE_ELAB_SWEEP = """from pathlib import Path
@@ -168,13 +168,13 @@ class ProcDiffTest(unittest.TestCase):
             "write_rtlil {W}/in.il; proc --noopt; write_rtlil {W}/a.il")])
         self.assertEqual(argvs[2], [str(self.yosys), "-p", self.sub(
             "read_rtlil {W}/in.il; hierarchy -auto-top; proc -norom -noopt; opt_clean -purge; "
-            "write_blif -icells -param {W}/b.blif")])
+            "write_blif -blackbox -icells -param {W}/b.blif")])
         self.assertEqual(argvs[3], [str(self.yosys), "-p", self.sub(
             "read_rtlil {W}/a.il; hierarchy -auto-top; opt_clean -purge; "
-            "write_blif -icells -param {W}/a.blif")])
+            "write_blif -blackbox -icells -param {W}/a.blif")])
         self.assertEqual(argvs[4], [sys.executable, str(proc_diff.NETLIST_COMPARE_PY),
-                                    "--implicit-models", self.sub("{W}/a.blif"),
-                                    self.sub("{W}/b.blif")])
+                                    "--implicit-models", self.sub("{W}/a.norm.blif"),
+                                    self.sub("{W}/b.norm.blif")])
         self.assertEqual(len(argvs), 5)
         self.assertIn("t.v: identical", out)
 
@@ -186,9 +186,9 @@ class ProcDiffTest(unittest.TestCase):
             "read_verilog --nolatches {F}; write_rtlil {W}/in.il; proc; write_rtlil {W}/a.il")])
         self.assertEqual(self.scripts()[1:], [
             self.sub("read_rtlil {W}/in.il; hierarchy -top top; proc -norom; opt_clean -purge; "
-                     "write_blif -icells -param {W}/b.blif"),
+                     "write_blif -blackbox -icells -param {W}/b.blif"),
             self.sub("read_rtlil {W}/a.il; hierarchy -top top; opt_clean -purge; "
-                     "write_blif -icells -param {W}/a.blif"),
+                     "write_blif -blackbox -icells -param {W}/a.blif"),
         ])
 
     def test_each_option_alone(self) -> None:
@@ -213,7 +213,7 @@ class ProcDiffTest(unittest.TestCase):
                 hier = "hierarchy -top m" if option == "--top" else "hierarchy -auto-top"
                 self.assertEqual(self.scripts()[1], self.sub(
                     f"read_rtlil {{W}}/in.il; {hier}; {b_proc}; opt_clean -purge; "
-                    "write_blif -icells -param {W}/b.blif"))
+                    "write_blif -blackbox -icells -param {W}/b.blif"))
 
     def test_mem_cap_reaches_every_child(self) -> None:
         self.assertEqual(self.run_tool("--mem-cap", "2G")[0], 0)
@@ -243,7 +243,7 @@ class ProcDiffTest(unittest.TestCase):
         self.set_blif("a", DFF_BLIF.format(pol="00000000000000000000000000000001"))
         code, out, err = self.run_tool()
         self.assertEqual(code, 0, out + err)
-        a_blif = (self.keep / "t" / "a.blif").read_text()
+        a_blif = (self.keep / "t" / "a.norm.blif").read_text()
         self.assertIn(".param CLK_POLARITY 1\n", a_blif)
         self.assertIn(".param WIDTH 1\n", a_blif)
 
@@ -388,7 +388,8 @@ class ProcDiffTest(unittest.TestCase):
                 self.sub("read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
                          f"proc --stop-after {phase}; write_rtlil {{W}}/a_{phase}.il"),
                 self.sub(f"read_rtlil {{W}}/a_{phase}.il; hierarchy -top top; {tail}; "
-                         f"opt_clean -purge; write_blif -icells -param {{W}}/a_{phase}.blif"),
+                         "opt_clean -purge; write_blif -blackbox -icells -param "
+                         f"{{W}}/a_{phase}.blif"),
             ]
         self.assertEqual(self.scripts()[3:], want)
 
@@ -512,6 +513,123 @@ class ProcDiffTest(unittest.TestCase):
         self.assertIsNone(proc_diff.cited("§20 #7 cap"))
         self.assertIsNone(proc_diff.cited("#18 without the section"))
         self.assertEqual(set(proc_diff.DIVERGENCES), {8, 9, 16, 17, 18})
+
+    # -- fix round 1 -------------------------------------------------------------------------
+
+    def test_bisect_normalises_from_the_originals(self) -> None:
+        """I1: a decimal 10 in a normalised file must not be re-read as binary (10 -> 2)."""
+        ten = "0" * 28 + "1010"
+        body = ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n" \
+               f".param A_WIDTH {ten}\n.end\n"
+        for stem in ("in", "a_clean", "a_rmdead", "a_prune", "a_arst"):
+            self.set_blif(stem, body)
+        self.set_blif("a", body.replace("A[0]=a A[1]=b", "A[0]=a A[1]=a"))
+        code, out, _ = self.run_tool("--bisect")
+        self.assertEqual(code, 1)
+        self.assertIn("t.v: differs: no phase differs", out)
+        work = self.keep / "t"
+        self.assertIn(f".param A_WIDTH {ten}", (work / "b.blif").read_text())
+        self.assertIn(".param A_WIDTH 10\n", (work / "b.norm.blif").read_text())
+        # A partial result whose width really is 2 is a difference, not a match with b's copy.
+        self.set_blif("a_prune", body.replace(ten, "0" * 30 + "10"))
+        code, out, _ = self.run_tool("--bisect")
+        self.assertIn("t.v: differs: first difference after prune", out)
+
+    def test_normalising_twice_is_safe(self) -> None:
+        path = self.dir / "x.blif"
+        path.write_text(".param WIDTH " + "0" * 28 + "1010\n", encoding="utf-8")
+        ints = proc_diff.load_int_params()
+        for _ in range(3):
+            self.assertEqual(proc_diff.normalise_file(path, ints).read_text(),
+                             ".param WIDTH 10\n")
+
+    def test_hard_block_model_is_compared(self) -> None:
+        """I2: with -blackbox Yosys writes the hard block's interface, so it compares."""
+        text = (".model top\n.inputs a clk\n.outputs y\n"
+                ".subckt single_port_ram addr=a clk=clk out=y\n.end\n"
+                ".model single_port_ram\n.inputs addr clk\n.outputs out\n.blackbox\n.end\n")
+        self.set_blif("default", text)
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertTrue(all("write_blif -blackbox -icells -param" in s
+                            for s in self.scripts()[1:]))
+
+    def test_constant_cover_is_not_a_buffer(self) -> None:
+        """M1: `.names a y` with rows `1 1`, `0 1` is constant 1, not a buffer of a."""
+        text = ".model top\n.names a y\n1 1\n0 1\n.names y z\n1 1\n.end\n"
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()), text)
+
+    def test_buffer_roots_are_per_model(self) -> None:
+        """M2: a net name reused in another model is another net."""
+        text = (".model top\n.names a b\n1 1\n.names b c\n1 1\n.end\n"
+                ".model sub\n.names x a\n1 1\n.names a c\n1 1\n.end\n")
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()), (
+            ".model top\n.names a b\n1 1\n.names a c\n1 1\n.end\n"
+            ".model sub\n.names x a\n1 1\n.names x c\n1 1\n.end\n"))
+
+    def test_buffer_cycle_stays(self) -> None:
+        """M4: a cycle of two buffers is not two self-loops."""
+        text = ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n.end\n"
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()), text)
+        head = ".model top\n.inputs a\n.outputs y1 y2\n"
+        self.set_blif("in", head + ".names y1 y2\n1 1\n.names y2 y1\n1 1\n.end\n")
+        self.set_blif("a", head + ".names y1 y1\n1 1\n.names y2 y2\n1 1\n.end\n")
+        self.assertEqual(self.run_tool()[0], 1)
+
+    def test_assert_and_e3_only_on_their_side(self) -> None:
+        """M3: the #17 assert counts on side B only, E3 on side A only."""
+        assert17 = "ERROR: Assert `ctrl_sig.size() == 1' failed in passes/proc/proc_mux.cc:264."
+        code, out, _ = self.run_tool(env={"FAKE_YOSYS_FAIL": "a", "FAKE_YOSYS_MSG": assert17})
+        self.assertEqual(code, 2)
+        self.assertIn("t.v: error: yosys exited 1 (step A-BLIF)", out)
+        cite16 = self.expect("t.v §20 #16 chain\n")
+        e3 = "error: asynchronous reset 'r' does not settle the value of 'q' after 100"
+        code, out, _ = self.run_tool("--expect-fail", cite16,
+                                     env={"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": e3})
+        self.assertEqual(code, 1)
+        self.assertIn("listed as §20 #16 (odin3-e3), but error", out)
+
+    def test_17_still_builds_a_blif(self) -> None:
+        """Side A's BLIF is still made from a.il after Yosys asserts on side B."""
+        env = {"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": "Assert `ctrl_sig.size() == 1'"}
+        self.assertEqual(self.run_tool(env=env)[0], 0)
+        self.assertEqual(len(self.scripts()), 3)  # A, B, A-BLIF; nothing to compare
+        self.assertTrue(self.scripts()[-1].startswith(self.sub("read_rtlil {W}/a.il")))
+        self.assertEqual(len(self.argvs()), 4)  # -V, A, B, A-BLIF: no netlist-compare
+
+    def test_unexpected_exception_exits_2(self) -> None:
+        """M5: a 2D module of another shape is an error, not a difference."""
+        sweep = self.dir / "elab_sweep.py"
+        sweep.write_text("def collect(paths):\n    raise TypeError('other shape')\n",
+                         encoding="utf-8")
+        with mock.patch.object(proc_diff, "ELAB_SWEEP_PY", sweep):
+            code, _, err = self.run_tool()
+        self.assertEqual(code, 2)
+        self.assertIn("internal error: TypeError: other shape", err)
+
+    def test_name_collisions_and_stale_entries(self) -> None:
+        """M8: two t.v get two work directories; shared names and stale entries are warned."""
+        other = self.dir / "other"
+        other.mkdir()
+        (other / "t.v").write_text("module top; endmodule // other\n", encoding="utf-8")
+        listed = self.expect("nope.v typo\n")
+        code, _, err = self.run_tool("--expect-fail", listed,
+                                     inputs=(str(self.rows), str(other)))
+        self.assertEqual(code, 0)
+        self.assertTrue((self.keep / "t").is_dir())
+        self.assertTrue((self.keep / "t-2").is_dir())
+        self.assertIn("warning: several files are named 't.v'", err)
+        self.assertIn("warning: expect-fail entry 'nope.v' matches no file", err)
+
+    def test_memcap_capture_keyword(self) -> None:
+        """M9: capture_output=True is passed when memcap.run takes it (the #17 test needs the
+        output), and a memcap.run(argv, cap) that always captures is called with two."""
+        self.memcap.write_text(
+            FAKE_MEMCAP.replace(", capture_output=False", "")
+            .replace("capture_output=capture_output", "capture_output=True"), encoding="utf-8")
+        env = {"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": "Assert `ctrl_sig.size() == 1'"}
+        code, out, _ = self.run_tool(env=env)
+        self.assertEqual(code, 0, out)
+        self.assertIn("expected difference (§20 #17", out)
 
     # -- the wrapper -----------------------------------------------------------------------
 

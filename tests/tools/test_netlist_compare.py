@@ -265,6 +265,17 @@ class CompareTest(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertIn("more than one driver", err)
 
+    def test_implicit_models_per_model_outputs(self) -> None:
+        """DATA is $memrd's output but $memwr's input; CTRL_OUT is $fsm's output."""
+        text = (".model top\n.inputs c a d\n.outputs y z\n"
+                ".subckt $memrd CLK=c ADDR=a DATA=y\n.subckt $memwr CLK=c ADDR=a DATA=d\n"
+                ".subckt $fsm CLK=c CTRL_IN=d CTRL_OUT=z\n.end\n")
+        code, out, _ = compare("--implicit-models", "--canon", self.write("a.blif", text))
+        self.assertEqual(code, 0)
+        self.assertIn(".model $memrd\n.inputs ADDR\n.inputs CLK\n.outputs DATA\n", out)
+        self.assertIn(".model $memwr\n.inputs ADDR\n.inputs CLK\n.inputs DATA\n.blackbox", out)
+        self.assertIn(".model $fsm\n.inputs CLK\n.inputs CTRL_IN\n.outputs CTRL_OUT\n", out)
+
     def test_implicit_models_canon_lists_the_stub(self) -> None:
         code, out, _ = compare("--implicit-models", "--canon", self.write("a.blif", self.DFF))
         self.assertEqual(code, 0)

@@ -1187,6 +1187,22 @@ where Yosys 0.55 gives wrong logic (a case appended to a mux that no longer reac
 `proc-diff` flags such inputs, and so does an equivalence check against a Parmys golden, with 2E
 the correct side; they are listed there with that reason. §20 #17's inputs make Yosys assert.
 
+*Amended (2E Task 10 and its fix round), as landed:* the usage adds `[--bisect] [--expect-fail F]
+[--allow-version V]`, and `<file>…` may name directories (all files sorted by size, smallest
+first). Both `write_blif` lines are `write_blif -blackbox -icells -param` (without `-blackbox`
+Yosys omits a hard block's model, so every design with one would exit 2). Step 4 writes
+normalised copies (`*.norm.blif`), always from the originals, so `--bisect`'s repeated compares
+are exact: INT parameters (`tools/proc-check/int_params.txt`, equal to the registry's INT names
+by `test_ir_cells`) of at most 32 bits of 0/1 become decimal (a wider value, such as a `$mem`
+`INIT`, is kept); a port-to-port buffer reads the root of its buffer chain, unless the chain is a
+cycle, so the order of `connect` lines across processes does not matter; and `netlist-compare
+--implicit-models` compares the `A` bits of an implicit `$reduce_*` as a set (§20 #8). Implicit
+outputs also include `DATA` of `$memrd`/`$memrd_v2` and `CTRL_OUT` of `$fsm`. Side B failing
+with Yosys's `ctrl_sig.size() == 1` assertion is recognised as §20 #17 (an expected difference,
+exit 0; `a.il` still goes through step 3); `--expect-fail` lines are `<relative path> <reason>`,
+and a reason citing `§20 #N` for N in 8, 9, 16, 17, 18 must see that divergence's outcome (a
+difference; E3 on side A; the assertion on side B), or the run fails.
+
 ### 18.4 Bisect
 
 `proc-diff --bisect`: for X in clean, rmdead, prune, arst, Odin III runs step 1's input through
