@@ -134,10 +134,17 @@ A BLIF round trip turns a `$lut` into the `$sop` with that cover.
 > ports `A` (in, `WIDTH` bits, LSB first) and `Y` (out, 1 bit). `Y = LUT[i]` with `i = Σ A[j]·2^j`,
 > and `LUT[i]` is bit *i* of the parameter counted from its least significant bit: Yosys `$lut`
 > semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
-> is, and it simulates (1E). Writers print it as an irredundant cover (3E's `odin3_blif_isop`: a
-> BLIF `.names`, a sum of products in Verilog) and as Yosys `$lut` in JSON; a BLIF round trip turns
-> it into the `$sop` with that cover. `abc` is its only producer in Phase 3 and never makes a
-> constant one; DESIGN §5.2's `$_LUT_K_` is this cell.
+> is, and it simulates (1E). The writers today: `write_json` and `write_rtlil` write it as Yosys
+> `$lut` (`LUT` MSB first; RTLIL spells the output of a constant one as the constant),
+> `write_verilog` as a generic instance `\$lut #(.WIDTH(…), .LUT(…))` (`LUT` MSB first),
+> `write_dot` as a node labelled `$lut`, and `write_blif` refuses it ("… have no BLIF form;
+> cannot write a cell of '$lut'"), except the WIDTH-1 identity, which it writes as `.subckt $lut`.
+> 3E-5 makes `write_blif` print it as an irredundant cover (3E's `odin3_blif_isop`: a BLIF
+> `.names`, so a BLIF round trip turns it into the `$sop` with that cover), and 3D Task 9 makes
+> `write_verilog` print that cover as a sum of products. `abc` is its only producer in Phase 3 and
+> never makes a constant one.
+>
+> *(Erratum, 3D-1 final review, 2026-10-12: the writer sentences now say what each writer does at 3D-1 and what 3E-5 and Task 9 change; `$_LUT_K_` no longer exists in DESIGN §5.2.)*
 
 **DESIGN §5.2**: "`$sop` (BLIF `.names` covers) and `$_LUT_K_`" becomes "`$sop` (BLIF `.names`
 covers) and `$lut` (a K-input LUT, Yosys semantics; `docs/IR.md` LUT cells)".

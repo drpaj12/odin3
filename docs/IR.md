@@ -56,7 +56,8 @@ use one shared node per value per module (`$_CONST0_`, `$_CONST1_`, `$_CONSTX_`,
 one output pin each). The BLIF reader keeps a zero-input `.names` as the `$sop` cell it was
 (round trip, PHASE1 #2). Cell types may supply a `const_value` hook (0, 1, x, z or "not
 constant"), and `odin3_net_const_value(net)` asks the driver's type, so passes have one
-predicate for "is this net constant" across `$_CONST*_` and constant `$sop`s.
+predicate for "is this net constant" across `$_CONST*_`, constant `$sop`s and constant `$lut`s (a
+`$lut` whose table is all 0 or all 1 is constant whatever its inputs; 3D, `docs/IR.md` LUT cells).
 
 ## 2. IDs
 
@@ -234,10 +235,11 @@ spec §5.2. An entry declares:
 **The built-in table** (`src/ir/cells/builtin.c`) is append-only: a type's index is its built-in
 ID, so IDs never move. IDs 0–52 are 1B's set (structural and constant types, the word cells, the
 bit cells, `$sop`); 53–61 are 2D's IR change A (`$neg` … `$pow`), 62 is IR change B (`$proc`,
-IR-19), and 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
-$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), 74 types
-in all. IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT,
-≥ 1), polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
+IR-19), 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
+$sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), and 74 is
+3D's `$lut` (`lut.c`; its ID is named only through `odin3_lut_builtin_index`), 75 types in all.
+IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT, ≥ 1),
+polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
 `ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.
 Like `$dff $dffe $adff $sdff` they have word granularity, flags 0 and no simulate hook (1E
 simulates the netlist view), so they are legal in the RTLIL view only.
@@ -317,6 +319,21 @@ clock, or `$_DLATCH_P_` (`ah`) / `$_DLATCH_N_` (`al`), each with an `INIT` int p
 (BLIF: 0, 1, 2 = don't care, 3 = unknown; 2 and 3 both round-trip). A latch with no type or
 clock (`.latch in out [init]`) is `$_FF_` (global clock); `as` is rejected in Phase 1 (no golden
 uses it). `.subckt` → a node of the named type (IR-7b).
+
+**LUT cells (3D).** `$lut` (`src/ir/cells/lut.c`, granularity `bit`) has parameters `WIDTH`
+(int, 1 to 16, `ODIN3_LUT_MAX_WIDTH`) and `LUT` (bits: exactly 2^`WIDTH` bits, each 0 or 1), and
+ports `A` (in, `WIDTH` bits, LSB first) and `Y` (out, 1 bit). `Y = LUT[i]` with `i = Σ A[j]·2^j`,
+and `LUT[i]` is bit *i* of the parameter counted from its least significant bit: Yosys `$lut`
+semantics (text forms write `LUT` MSB first). Its `const_value` is 0 or 1 when every `LUT` bit
+is, and it simulates (1E). The writers today: `write_json` and `write_rtlil` write it as Yosys
+`$lut` (`LUT` MSB first; RTLIL spells the output of a constant one as the constant),
+`write_verilog` as a generic instance `\$lut #(.WIDTH(…), .LUT(…))` (`LUT` MSB first),
+`write_dot` as a node labelled `$lut`, and `write_blif` refuses it ("… have no BLIF form;
+cannot write a cell of '$lut'"), except the WIDTH-1 identity, which it writes as `.subckt $lut`.
+3E-5 makes `write_blif` print it as an irredundant cover (3E's `odin3_blif_isop`: a BLIF
+`.names`, so a BLIF round trip turns it into the `$sop` with that cover), and 3D Task 9 makes
+`write_verilog` print that cover as a sum of products. `abc` is its only producer in Phase 3 and
+never makes a constant one.
 
 **IR-11 Registration.** Built-in and plugin cell-type *definitions* live in a process-global
 registry (built-ins from a static table compiled from `src/ir/cells/`; plugins add theirs at load
