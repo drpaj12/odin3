@@ -79,6 +79,19 @@ class RunRejectTest(unittest.TestCase):
         self.case("c", "c.v:3:5: error:\nboom\n", 1, output)
         self.assertEqual(self.run_tool()[0], 1)
 
+    def test_parse_only_matches_the_first_error(self) -> None:
+        output = "odin3: error: c.v:2:1: error: spurious\nodin3: error: c.v:3:5: error: boom\n"
+        self.case("c", "c.v:3:5: error:\nboom\n", 1, output)
+        self.assertEqual(self.run_tool()[0], 1)
+        output = "odin3: warning: c.v:2:1: warning: w\nodin3: error: c.v:3:5: error: boom\n"
+        self.case("c", "c.v:3:5: error:\nboom\n", 1, output + "odin3: error: c.v:4:1: error: x\n")
+        self.assertEqual(self.run_tool()[0], 0)
+
+    def test_elaborate_matches_any_error_line(self) -> None:
+        output = "odin3: error: c.v:2:1: error: other row\nodin3: error: c.v:3:5: error: boom\n"
+        self.case("c", "c.v:3:5: error:\nboom\n", 1, output)
+        self.assertEqual(self.run_tool("--elaborate")[0], 0)
+
     def test_error_needs_a_nonzero_exit(self) -> None:
         self.case("c", "c.v:3:5: error:\nboom\n", 0, "odin3: error: c.v:3:5: error: boom\n")
         code, _, err = self.run_tool()

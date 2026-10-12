@@ -148,6 +148,11 @@ real, an identifier or a parenthesised list), so it reads as delay `5` and liter
   `~^`/`^~` both → `XNOR`, `~&`, `~|`, `**`, `+:`, `-:`, `->`, `=`, `<=` (one token; the grammar
   tells assignment from comparison by position), `@`, `#`, `,`, `;`, `:`, `.`, `?`, `(`, `)`,
   `[`, `]`, `{`, `}`) and the attribute brackets (§2.7).
+- SystemVerilog's implicit port connection `.*` (the two bytes adjacent) is one located error
+  at the `.`, "'.*' (implicit port connections) is SystemVerilog, not Verilog-2005", and both
+  bytes are dropped, so `m u (.*);` gives that error alone rather than "unexpected *)" from
+  `*)` lexed as `ATTR_CLOSE` (2C-1 final review, ruled into Task 9; `.*` has no 1364-2005
+  reading, so no valid input changes). `. *` is two tokens and a plain syntax error.
 - Blanks `[ \t\r\n\f]+` are skipped.
 
 ### 2.5 Keyword sets and `` `begin_keywords `` (VP-6)

@@ -17,6 +17,7 @@
 #include "util/hash.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -27,7 +28,9 @@
 
 enum { PATH_BUF = 1024 };
 
-/* Line 6 holds `assign w = a & b;`; every construct the faults below touch has its own line. */
+/* Line 6 holds `assign z = a & b;`; every construct the faults below touch has its own line.
+ * Module mc (lines 16-24) adds a macro use (line 18: a BINARY whose first operand lies in the
+ * expansion buffer) and a metacomment (line 20). */
 static const char k_source[] = "// the oracle's fixture\n"
                                "module leaf #(parameter W = 1) (input a, output y);\n"
                                "  assign y = a;\n"
@@ -42,6 +45,15 @@ static const char k_source[] = "// the oracle's fixture\n"
                                "  endgenerate\n"
                                "  defparam u.W = 3;\n"
                                "  and g1 (y, a, b);\n"
+                               "endmodule\n"
+                               "`define PC_A a\n"
+                               "module mc (input [1:0] s, input a, b, output reg y, output q);\n"
+                               "  assign q = `PC_A & b;\n"
+                               "  always @*\n"
+                               "    case (s) // synopsys full_case\n"
+                               "      0: y = a;\n"
+                               "      default: y = b;\n"
+                               "    endcase\n"
                                "endmodule\n";
 
 static char cwd[PATH_BUF];
@@ -100,6 +112,23 @@ static odin3_ast_id find(odin3_ast_kind kind, const char *name, uint32_t nth) {
         }
     }
     TEST_FAIL_MESSAGE("no such node");
+    return (odin3_ast_id){0};
+}
+
+/* The node of kind, named name, on line `line` of t.v (its file location). */
+static odin3_ast_id find_at(odin3_ast_kind kind, const char *name, uint32_t line) {
+    odin3_srcman *sm = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(rd.design, &sm));
+    odin3_ast_id end = odin3_ast_node_end(rd.ast);
+    for (odin3_ast_id node = {1}; node.v < end.v; node.v++) {
+        odin3_srcpos pos;
+        if (odin3_ast_kind_of(rd.ast, node) == kind &&
+            strcmp(odin3_ast_name_str(rd.ast, node), name) == 0 &&
+            odin3_srcman_decode(sm, odin3_ast_loc(rd.ast, node), &pos) && pos.line == line) {
+            return node;
+        }
+    }
+    TEST_FAIL_MESSAGE("no such node on the line");
     return (odin3_ast_id){0};
 }
 
@@ -171,7 +200,7 @@ static void move_end(odin3_ast_id node, int delta) {
 static void test_clean_file_passes(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_root_count(rd.ast));
     TEST_ASSERT_TRUE(rd.tokens.len > 0);
-    TEST_ASSERT_TRUE(rd.stream.len == strlen(k_source));
+    TEST_ASSERT_TRUE(rd.stream.len > 0);
     expect_pass();
 }
 
@@ -263,6 +292,102 @@ static void test_restored_range_passes(void) {
     expect_pass();
 }
 
+/* The left edge (review I1): a BINARY moved to start at the '=' before its first operand. */
+static void test_binary_starts_at_equals(void) {
+    odin3_ast_id binary = find(ODIN3_AST_BINARY, NULL, 1);
+    odin3_range range = range_of(binary);
+    set_range(binary, token(token_at(range.loc) - 1)->loc, range.end);
+    const char *const needles[] = {"t.v:6:12: error: location oracle: BINARY",
+                                   "starts before its first child at '='", NULL};
+    expect_fail(needles);
+}
+
+/* A NET_ASSIGN moved to start at its CONT_ASSIGN's 'assign'. */
+static void test_net_assign_starts_at_assign(void) {
+    odin3_ast_id assign = find(ODIN3_AST_CONT_ASSIGN, NULL, 2);
+    odin3_ast_id net = odin3_ast_child(rd.ast, assign, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_AST_NET_ASSIGN, odin3_ast_kind_of(rd.ast, net));
+    set_range(net, odin3_ast_loc(rd.ast, assign), odin3_ast_end(rd.ast, net));
+    const char *const needles[] = {"t.v:6:3: error: location oracle: NET_ASSIGN",
+                                   "starts before its first child at 'assign'", NULL};
+    expect_fail(needles);
+}
+
+/* Spec §7.2's I2 class: an item starting at the previous ';' (the end of line 5). */
+static void test_item_starts_at_previous_semicolon(void) {
+    odin3_ast_id assign = find(ODIN3_AST_CONT_ASSIGN, NULL, 2);
+    odin3_range range = range_of(assign);
+    set_range(assign, token(token_at(range.loc) - 1)->loc, range.end);
+    const char *const needles[] = {"t.v:5:35: error: location oracle: CONT_ASSIGN",
+                                   "starts at the closer ';'", NULL};
+    expect_fail(needles);
+}
+
+/* Tightness: a header PORT_DECL stretched over the ',' after its last declarator. */
+static void test_ends_past_last_child(void) {
+    move_end(find(ODIN3_AST_PORT_DECL, NULL, 3), 1);
+    const char *const needles[] = {"t.v:5:11: error: location oracle: PORT_DECL",
+                                   "ends past its last child at ','", NULL};
+    expect_fail(needles);
+}
+
+/* A loc inside a token: MODULE t one byte into 'module'. */
+static void test_loc_inside_a_token(void) {
+    odin3_ast_id module = find(ODIN3_AST_MODULE, "t", 1);
+    odin3_range range = range_of(module);
+    set_range(module, (odin3_loc){range.loc.v + 1}, range.end);
+    const char *const needles[] = {"t.v:5:2: error: location oracle: MODULE:t",
+                                   "does not start at a token", NULL};
+    expect_fail(needles);
+}
+
+/* A zero-width node inside a token ('wire' of line 10). */
+static void test_empty_node_off_a_boundary(void) {
+    odin3_ast_id decl = find(ODIN3_AST_NET_DECL, NULL, 1);
+    odin3_ast_id declarator = odin3_ast_child(rd.ast, decl, 3);
+    odin3_loc inside = {odin3_ast_loc(rd.ast, decl).v + 1};
+    set_range(declarator, inside, inside);
+    const char *const needles[] = {"t.v:10:8: error: location oracle: DECLARATOR:v",
+                                   "is empty but not at a token boundary", NULL};
+    expect_fail(needles);
+}
+
+/* A metacomment's ATTR moved one byte off its comment. */
+static void test_metacomment_attr_off_its_comment(void) {
+    odin3_ast_id attr = find(ODIN3_AST_ATTR, "full_case", 1);
+    odin3_range range = range_of(attr);
+    set_range(attr, (odin3_loc){range.loc.v + 1}, (odin3_loc){range.end.v + 1});
+    const char *const needles[] = {"t.v:20:15: error: location oracle: ATTR:full_case",
+                                   "is not at a metacomment", NULL};
+    expect_fail(needles);
+}
+
+/* Containment in stream order: the BINARY of line 18 starts in the macro's expansion buffer,
+ * so only the token map can see `b` stretched over the ';'. */
+static void test_child_outside_parent_in_the_stream(void) {
+    move_end(find_at(ODIN3_AST_IDENT, "b", 18), 1);
+    const char *const needles[] = {"location oracle: IDENT:b", "lies outside its parent",
+                                   "in the stream", NULL};
+    expect_fail(needles);
+}
+
+/* The token map and the stream bytes disagree on the stream's length. */
+static void test_stream_length_mismatch(void) {
+    rd.stream.len--;
+    const char *const needles[] = {"the token map does not end at the stream's end", NULL};
+    expect_fail(needles);
+    rd.stream.len++;
+}
+
+/* A token whose loc is not the stream map's loc at its offset (its end is still right). */
+static void test_token_loc_off_its_offset(void) {
+    odin3_ast_id assign = find(ODIN3_AST_CONT_ASSIGN, NULL, 2);
+    odin3_vp_loc *tok = odin3_vec_at(&rd.tokens, token_at(odin3_ast_loc(rd.ast, assign)));
+    tok->loc.v--;
+    const char *const needles[] = {"t.v:6:2: error: location oracle: token", "not the map's", NULL};
+    expect_fail(needles);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_clean_file_passes);
@@ -275,5 +400,15 @@ int main(void) {
     RUN_TEST(test_defparam_end);
     RUN_TEST(test_gate_end);
     RUN_TEST(test_restored_range_passes);
+    RUN_TEST(test_binary_starts_at_equals);
+    RUN_TEST(test_net_assign_starts_at_assign);
+    RUN_TEST(test_item_starts_at_previous_semicolon);
+    RUN_TEST(test_ends_past_last_child);
+    RUN_TEST(test_loc_inside_a_token);
+    RUN_TEST(test_empty_node_off_a_boundary);
+    RUN_TEST(test_metacomment_attr_off_its_comment);
+    RUN_TEST(test_child_outside_parent_in_the_stream);
+    RUN_TEST(test_stream_length_mismatch);
+    RUN_TEST(test_token_loc_off_its_offset);
     return UNITY_END();
 }

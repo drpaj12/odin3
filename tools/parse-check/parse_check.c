@@ -28,7 +28,13 @@
 #include <string.h>
 #include <unistd.h>
 
-enum { PC_CWD_BYTES = 4096, PC_MSG_BYTES = 512, PC_DECIMAL = 10 };
+enum {
+    PC_CWD_BYTES = 4096,
+    PC_MSG_BYTES = 512,
+    PC_DECIMAL = 10,
+    PC_DECIMAL_DIGITS = 19, /* the most that always fit in 64 bits */
+    PC_VALUE_BITS = 64
+};
 
 /* The library a directly given file belongs to (the pass's default for direct files). */
 static const char k_work[] = "work";
@@ -170,6 +176,22 @@ static uint32_t pc_token_len(pc_oracle *orc, odin3_srcman_cursor *cur, uint32_t 
     return 0;
 }
 
+/* A token's loc is its first byte's: the stream map's loc at its offset (not the end of input,
+ * which carries the last token's end). */
+static void pc_check_token_loc(pc_oracle *orc, odin3_srcman_cursor *cur, uint32_t idx) {
+    const odin3_vp_loc *tok = &orc->toks[idx];
+    if (idx + 1 == orc->ntok || tok->off >= orc->read->stream.len) {
+        return;
+    }
+    odin3_loc want = odin3_srcman_cursor_loc(cur, tok->off);
+    if (want.v != tok->loc.v) {
+        odin3_diag(orc->read->design, ODIN3_LOG_ERROR, tok->loc,
+                   "location oracle: token %u at stream offset %u: loc %u, not the map's %u",
+                   (unsigned)idx, (unsigned)tok->off, (unsigned)tok->loc.v, (unsigned)want.v);
+        orc->failures++;
+    }
+}
+
 static odin3_status pc_map_put(odin3_u64map *map, uint32_t key, uint32_t value) {
     uint64_t old = 0;
     if (key == 0 || odin3_u64map_get(map, key, &old)) {
@@ -198,6 +220,7 @@ static odin3_status pc_oracle_open(pc_oracle *orc, const pc_read *read) {
     odin3_srcman_cursor_init(&cur, sm, read->stream_buf.v);
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < orc->ntok; i++) {
+        pc_check_token_loc(orc, &cur, i);
         orc->lens[i] = pc_token_len(orc, &cur, i);
         st = pc_map_put(orc->starts, orc->toks[i].loc.v, i);
         st = st != ODIN3_OK ? st : pc_map_put(orc->ends, orc->toks[i].end.v, i);
@@ -375,6 +398,7 @@ static const pc_rule k_rules[ODIN3_AST_KIND_COUNT] = {
     [ODIN3_AST_EVENT_CONTROL] = {PC_LEAD_PREFIX, 0, "@", NULL},
     [ODIN3_AST_EVENT_EXPR] = {PC_LEAD_SUB, 0, NULL, NULL},
     [ODIN3_AST_NUMBER] = {PC_LEAD_NUMBER, 0, NULL, NULL},
+    [ODIN3_AST_REAL] = {PC_LEAD_PREFIX, 0, "0|1|2|3|4|5|6|7|8|9", NULL},
     [ODIN3_AST_STRING] = {PC_LEAD_PREFIX, 0, "\"", NULL},
     [ODIN3_AST_IDENT] = {PC_LEAD_NAME, 0, NULL, NULL},
     [ODIN3_AST_CONCAT] = {PC_LEAD_WORD, 0, "{", "}"},
@@ -396,28 +420,55 @@ static bool pc_name_spelled(const pc_oracle *orc, odin3_ast_id node, odin3_bytes
     return len == name.len && memcmp(text, name.ptr, name.len) == 0;
 }
 
+/* The decimal digits of text ('_' allowed) as a value; false for another byte or one past
+ * PC_DECIMAL_DIGITS digits. */
+static bool pc_decimal(odin3_bytes text, uint64_t *value) {
+    const uint8_t *bytes = text.ptr;
+    uint32_t digits = 0;
+    *value = 0;
+    for (size_t i = 0; i < text.len; i++) {
+        if (bytes[i] == '_') {
+            continue;
+        }
+        if (bytes[i] < '0' || bytes[i] > '9' || ++digits > PC_DECIMAL_DIGITS) {
+            return false;
+        }
+        *value = *value * PC_DECIMAL + (uint64_t)(bytes[i] - '0');
+    }
+    return digits > 0;
+}
+
+/* The stored bits of num as a value; false with an x/z bit or a 1 past bit 63. */
+static bool pc_bits_value(const odin3_ast_number *num, uint64_t *value) {
+    *value = 0;
+    for (uint32_t i = 0; i < num->nbits; i++) {
+        if (num->bits[i] > 1 || (num->bits[i] == 1 && i >= PC_VALUE_BITS)) {
+            return false;
+        }
+        *value |= (uint64_t)num->bits[i] << (i < PC_VALUE_BITS ? i : 0);
+    }
+    return true;
+}
+
 /* A NUMBER's first piece: its size (the width in decimal) when it has one, else a base (`'h`)
- * or the digits of a plain decimal. */
+ * or a plain decimal's digits, which spell its value. */
 static bool pc_number_spelled(const pc_oracle *orc, odin3_ast_id node, odin3_bytes tok) {
     const odin3_ast_number *num = odin3_ast_number_of(orc->read->ast, node);
-    const uint8_t *text = tok.ptr;
     if (num == NULL || tok.len == 0) {
         return false;
     }
-    if (num->width == 0) {
-        return text[0] == '\'' || (text[0] >= '0' && text[0] <= '9');
+    uint64_t written = 0;
+    uint64_t stored = 0;
+    if (num->width != 0) {
+        return pc_decimal(tok, &written) && written == num->width;
     }
-    uint64_t value = 0;
-    for (size_t i = 0; i < tok.len; i++) {
-        if (text[i] == '_') {
-            continue;
-        }
-        if (text[i] < '0' || text[i] > '9' || value > UINT32_MAX) {
-            return false;
-        }
-        value = value * PC_DECIMAL + (uint64_t)(text[i] - '0');
+    if (((const uint8_t *)tok.ptr)[0] == '\'') {
+        return true;
     }
-    return value == num->width;
+    if (!pc_decimal(tok, &written)) { /* longer than PC_DECIMAL_DIGITS: digits only */
+        return pc_text_starts_any(tok, "0|1|2|3|4|5|6|7|8|9");
+    }
+    return pc_bits_value(num, &stored) && stored == written;
 }
 
 /* Kinds whose name rule has exceptions: a hierarchical call is named by its path, a dotted or
@@ -617,6 +668,54 @@ static void pc_check_end(pc_oracle *orc, odin3_ast_id node, const pc_span *span)
     }
 }
 
+/* The tokens that may precede a node's first child inside it (kinds without a leading word);
+ * NULL when the kind has no left-edge rule. */
+static const char *pc_openers(const pc_oracle *orc, odin3_ast_id node) {
+    const odin3_ast *ast = orc->read->ast;
+    switch (odin3_ast_kind_of(ast, node)) {
+    case ODIN3_AST_BINARY:
+    case ODIN3_AST_SELECT:
+    case ODIN3_AST_TERNARY:
+    case ODIN3_AST_MINTYPMAX:
+    case ODIN3_AST_HIER_NAME:
+    case ODIN3_AST_NET_ASSIGN:
+    case ODIN3_AST_BLOCKING_ASSIGN:
+    case ODIN3_AST_NONBLOCKING_ASSIGN:
+        return "(";
+    case ODIN3_AST_CASE_ITEM:
+        return "(|default|:";
+    case ODIN3_AST_LIST:
+        return "(|#";
+    case ODIN3_AST_CONNECTION:
+    case ODIN3_AST_PORT_REF:
+        return odin3_ast_name(ast, node) == 0 ? "(" : NULL;
+    default:
+        return NULL;
+    }
+}
+
+/* The node's start: only openers (and the first child's attributes) before its first child (a
+ * node never takes a leading token of its parent's, such as '=' or 'assign'). */
+static void pc_check_start(pc_oracle *orc, odin3_ast_id node, const pc_span *span) {
+    const char *openers = pc_openers(orc, node);
+    pc_kids kids = pc_kids_of(orc, node);
+    if (openers == NULL || !kids.any) {
+        return;
+    }
+    uint64_t stop = (kids.from + 1) / 2; /* the first child's first token */
+    bool in_attr = false; /* the first child's own attributes, `(* … *)`, precede it (point (g)) */
+    for (uint64_t i = span->first; i < stop && i < orc->ntok; i++) {
+        odin3_bytes text = pc_tok_text(orc, (uint32_t)i);
+        if (in_attr || pc_text_is(text, "(*")) {
+            in_attr = !pc_text_is(text, "*)");
+        } else if (!pc_text_in(text, openers)) {
+            pc_fail(orc, node, "starts before its first child at '%.*s' (token %u)", (int)text.len,
+                    (const char *)text.ptr, (unsigned)i);
+            return;
+        }
+    }
+}
+
 /* Single-token kinds end at their first token's end. */
 static bool pc_single_token(odin3_ast_kind kind) {
     return kind == ODIN3_AST_IDENT || kind == ODIN3_AST_STRING || kind == ODIN3_AST_REAL;
@@ -677,6 +776,7 @@ static void pc_check_node(pc_oracle *orc, odin3_ast_id node) {
     if (pc_single_token(kind) && span.last != span.first) {
         pc_fail(orc, node, "spans %u tokens, not 1", (unsigned)(span.last - span.first + 1));
     }
+    pc_check_start(orc, node, &span);
     pc_check_end(orc, node, &span);
 }
 

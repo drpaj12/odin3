@@ -11,7 +11,9 @@ tests/verilog/reject-2d and ignore-2d). Its expectation is ``<case>.err`` or ``<
     line 2  a substring of that same diagnostic line
 
 The logger's ``odin3: <level>: `` prefix is removed from each output line before matching. A
-case passes when some line starts with line 1 and contains line 2, the exit status is non-zero
+case passes when a line starts with line 1 and contains line 2 — for an .err without
+--elaborate, the first error line (the error a 2C case pins; cascades may follow), otherwise
+any line (a 2D handover file may raise another row's error first) — the exit status is non-zero
 for an .err (zero for a .warn), and no line reports ODIN3_ERR_INVALID_ARG, ODIN3_ERR_CHECK or a
 check failure (a builder or check failure on user input is a 2C bug).
 
@@ -33,6 +35,7 @@ from pathlib import Path
 
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
 STUB_TEXT = "elaboration is not available yet (2D)"
+ERROR = "odin3: error: "
 LOGGER_PREFIX = re.compile(r"^odin3: (?:error|warning|info|debug): ")
 FORBIDDEN = re.compile(r"ODIN3_ERR_INVALID_ARG|ODIN3_ERR_CHECK|^(?:ast check|check|pp_check): ")
 TIMEOUT_S = 120
@@ -68,10 +71,23 @@ def log_lines(output: str) -> list[str]:
     return [LOGGER_PREFIX.sub("", line) for line in output.splitlines()]
 
 
+def candidates(expect: Expect, output: str, elaborate: bool) -> list[str]:
+    """The lines the expectation may match: a 2C .err case pins the first error line (cascades
+    may follow); otherwise any line."""
+    lines = log_lines(output)
+    if not expect.is_error or elaborate:
+        return lines
+    raws = output.splitlines()
+    return [line for raw, line in zip(raws, lines, strict=True) if raw.startswith(ERROR)][:1]
+
+
 def judge(expect: Expect, code: int, output: str, elaborate: bool) -> Verdict:
     """Pass, pending (--elaborate and the 2D stub) or fail, with the reason."""
     lines = log_lines(output)
-    found = any(line.startswith(expect.prefix) and expect.text in line for line in lines)
+    found = any(
+        line.startswith(expect.prefix) and expect.text in line
+        for line in candidates(expect, output, elaborate)
+    )
     forbidden = [line for line in lines if FORBIDDEN.search(line)]
     exit_ok = code != 0 if expect.is_error else code == 0
     if found and exit_ok and not forbidden:

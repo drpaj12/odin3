@@ -1,2 +1,2 @@
-unterminated_attribute.v:4:3: error:
+unterminated_attribute.v:5:3: error:
 syntax: unexpected assign
