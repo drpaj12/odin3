@@ -3,8 +3,9 @@
 #
 # Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
 #
-# - Refused (exit 2) inside a heavy run (ODIN3_HEAVY_SLICE set): its shared lock would wait forever
-#   on the heavy run's exclusive one.
+# - Refused (exit 2) inside a heavy run (ODIN3_HEAVY_SLICE set, and this process in that slice and
+#   holding the heavy lock, as heavy-run checks): its shared lock would wait forever on the heavy
+#   run's exclusive one. A stale ODIN3_HEAVY_SLICE is ignored with a warning.
 # - Writer preference: while any $DIR/odin3-heavy.queued.<pid> names a live tools/heavy-run (one
 #   waiting for the lock), it waits, so a stream of overlapping builds cannot starve a queued
 #   heavy job. A flag whose PID is dead, or is now another program (a reused PID after a
@@ -17,13 +18,34 @@
 # every ODIN3_HEAVY_POLL seconds (default 5).
 set -uo pipefail
 
-if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
-    echo "build-locked: refused inside a heavy run ($ODIN3_HEAVY_SLICE): the build would wait" \
-        "forever on the heavy lock; build before starting the heavy run" >&2
-    exit 2
-fi
 dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
 lock=$dir/odin3-heavy.lock
+
+# True when this shell really runs inside a heavy run: its cgroup is under the slice
+# $ODIN3_HEAVY_SLICE names, and one of its descriptors (fd 9, inherited from heavy-run) holds the
+# heavy lock. The variable alone is not evidence: one leaked into another environment must not
+# run a job uncapped and unlocked. ODIN3_HEAVY_CGROUP replaces /proc/self/cgroup (tests only).
+inside_heavy_run() {
+    local cgroup fd want
+    cgroup=$(cat "${ODIN3_HEAVY_CGROUP:-/proc/self/cgroup}" 2>/dev/null) || return 1
+    [[ $cgroup == */"$ODIN3_HEAVY_SLICE"/* ]] || return 1
+    want=$(readlink -f "$lock" 2>/dev/null) || return 1
+    for fd in /proc/$$/fd/*; do
+        [[ $(readlink "$fd" 2>/dev/null) == "$want" ]] && return 0
+    done
+    return 1
+}
+
+if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
+    if inside_heavy_run; then
+        echo "build-locked: refused inside a heavy run ($ODIN3_HEAVY_SLICE): the build would" \
+            "wait forever on the heavy lock; build before starting the heavy run" >&2
+        exit 2
+    fi
+    echo "build-locked: warning: ODIN3_HEAVY_SLICE=$ODIN3_HEAVY_SLICE is set outside a heavy" \
+        "run (not in that slice, or no heavy lock held); ignoring it" >&2
+    unset ODIN3_HEAVY_SLICE
+fi
 poll=${ODIN3_HEAVY_POLL:-5}
 mkdir -p "$dir" || exit 2
 
