@@ -316,6 +316,10 @@ static bool string_escape(vl_string *str) {
         return true;
     }
     char ch = str->bytes[str->pos + 1];
+    if (ch == 0) {
+        str->pos++; /* a NUL cannot be escaped into a string: the loop reports it, 2A §4.5 */
+        return true;
+    }
     if (ch >= '0' && ch <= '7') {
         return string_octal(str);
     }

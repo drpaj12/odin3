@@ -681,6 +681,19 @@ static void test_string_nul_escape(void) {
     TEST_ASSERT_TRUE(err_flag);
 }
 
+/* A backslash before a raw NUL escapes nothing: the NUL is the "unexpected byte" error a raw NUL
+ * in a string gets, never a string byte (an interned NUL was INVALID_ARG; fuzz_verilog). */
+static void test_string_backslash_nul(void) {
+    open_n("\"a\\\0b\" \"\\\0", 10);
+    expect_name(TOK_STRING, (tok_range){0, 6}, "ab");
+    expect_name(TOK_STRING, (tok_range){7, 3}, "");
+    TEST_ASSERT_EQUAL_STRING("t.v:1:4: error: unexpected byte 0x00\n"
+                             "t.v:1:10: error: unexpected byte 0x00\n"
+                             "t.v:1:8: error: unterminated string\n",
+                             logged());
+    TEST_ASSERT_TRUE(err_flag);
+}
+
 static void test_string_unterminated(void) {
     open_text("\"abc\r\nx \"d\\");
     expect_name(TOK_STRING, (tok_range){0, 4}, "abc");
@@ -1360,6 +1373,7 @@ static void run_tokens(void) {
     RUN_TEST(test_string_unknown_escape_warns);
     RUN_TEST(test_string_unknown_escape_of_raw_byte);
     RUN_TEST(test_string_nul_escape);
+    RUN_TEST(test_string_backslash_nul);
     RUN_TEST(test_string_unterminated);
     RUN_TEST(test_string_cap);
     RUN_TEST(test_string_cap_hook);
