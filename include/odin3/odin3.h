@@ -17,7 +17,7 @@
  * library units.
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
- * ABI v4 (cont., 2F): odin3_opt_set_snapshot_dir.
+ * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -313,10 +313,12 @@ odin3_status odin3_pass_set_abc_script(const char *path);
  * text before and after into dir (the CLI's --opt-snapshot; 2F OP-16), as
  * <dir>/<NNNN>-<sub>-before.il and <dir>/<NNNN>-<sub>-after.il: NNNN is the call sequence (four
  * digits from 0001, counted from this call) and <sub> the sub-pass (opt_expr, opt_merge, ...).
- * dir must exist; it is copied. NULL turns snapshots off. Process-wide. An allocation failure is
- * logged and leaves snapshots off.
+ * dir must exist; it is copied. NULL turns snapshots off. Process-wide. Every call restarts the
+ * sequence at 0001. A snapshot that cannot be written (a cell with no RTLIL form, an I/O error)
+ * logs WARN "opt: snapshot skipped: <reason>" and the sub-pass call goes on with its own result.
+ * Fails only with ODIN3_ERR_NO_MEMORY (the old directory and sequence are kept).
  */
-void odin3_opt_set_snapshot_dir(const char *dir);
+odin3_status odin3_pass_set_opt_snapshot(const char *dir);
 
 /*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false

@@ -522,14 +522,22 @@ Per module without live `$proc` nodes (others are skipped, §3), as `rmunused_mo
 3. Dead nodes are deleted in ID order; a dead FF's Q init bits are removed.
 4. Nets left with no pins, no wire membership and no aliases are deleted.
 5. A wire is deleted when every one of its nets has no pins, unless it is a port wire, has `keep`
-   or a defined `init` bit. With `-purge` also a public wire (name not starting with `$`) that is
-   not the name a live net depends on: for each bit, the net has no pins or the wire is not the
-   net's primary. A used public wire that is its net's primary name stays (Yosys 0.55 probe:
-   `w = a&b; y = ~w` keeps `w` under `-purge`; a wire that is only an alias is dropped). Its nets
-   stay, only the name goes. `$`-named used wires stay (IR-2; §17 #3).
-6. `init` cleanup (`rmunused_module_init`, Yosys 0.55): an init bit is removed only where the net
-   is constant-driven with the opposite value, with the warning of §16. Every other init stays,
-   silently (an unused wire with init, and a used non-FF net with init, keep it).
+   or a defined `init` bit. **Without `-purge`** (Yosys 0.55, the `!purge_mode &&
+   check_public_name && (... || s1 != s2)` branch) a public wire (name not starting with `$`) also
+   stays when one of its nets has another wire membership (the net's primary is another wire bit,
+   or an alias is another wire bit) or was constant-driven before step 3 (the same mark as step 6):
+   `wire c; connect c 1'0` and two unused aliased wires keep their names. With `-purge` also a
+   public wire that is not the name a live net depends on: for each bit, the net has no pins or
+   the wire is not the net's primary. A used public wire that is its net's primary name stays
+   (Yosys 0.55 probe: `w = a&b; y = ~w` keeps `w` under `-purge`; a wire that is only an alias is
+   dropped). Its nets stay, only the name goes. `$`-named used wires stay (IR-2; §17 #3).
+6. `init` normalisation (Yosys 0.55 `rmunused_module_signals`, which runs before the wire decision
+   of step 5, so Odin III runs it between steps 3 and 5): (a) an init on a net that was
+   constant-driven (decided before step 3 deletes the dead `$_CONST*_` node) is removed whatever
+   its value, silently, and is no change; (b) when more than one wire membership of a net carries
+   a defined bit, the net keeps exactly one (its primary first), also silently. There is no
+   conflict warning: Yosys's "Initial value conflict" is unreachable after this step. Every other
+   init stays (an unused wire with init, and a used non-FF net with init, keep it).
 
 Count: `opt_clean: removed N unused cells, M unused nets and W unused wires`. Yosys's
 "driver-driver conflict" warning has no counterpart (check rule 4).
@@ -647,8 +655,8 @@ lines DEBUG.
 | DEBUG | `opt_dff: module 'm': <action> on <type> '<cell>'`; `<action>` ∈ `removing never-active <port>`, `handling always-active <port>`, `handling const clock`, `handling D = Q`, `adding SRST`, `adding EN`, `setting constant <v> at bit K` | every `opt_dff` change |
 | DEBUG | `opt_clean: module 'm': removing unused <type> '<cell>'` | every removed node |
 | WARN | `opt: module 'm': no fixed point after 10000 iterations; stopping` | the cap (OP-12) |
+| WARN | `opt: snapshot skipped: <reason>` | a `--opt-snapshot` file that cannot be written (a cell with no RTLIL form, an I/O error); the call goes on and returns its own status |
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
-| WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict"; the only init `opt_clean` removes (§10 step 6) |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
 | ERROR | `opt needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (§19; `ODIN3_ERR_PARSE`) |
 
@@ -671,7 +679,7 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 9 | loop cap 10,000 | none | safety net |
 | 10 | `compact` after `opt` | — | IR-6 |
 | 11 | Odin III log text (§16) | Yosys text | — |
-| 12 | no `opt_dff -sat` | available | Parmys does not use it |
+| 12 | no `opt_dff -sat`, `-simple-dffe`; no `-share_all` (`opt_dff`, `opt_merge`, `opt`) | available | Parmys uses none of them |
 
 ## 18. Files, interfaces and data structures (OP-17)
 
@@ -689,8 +697,8 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | `tools/opt-check/` | `opt-rules`, `opt-equiv`, `opt-diff`, `gen-fold-table`, `order-probe.sh` |
 | `tests/unit/test_opt_*.c`, `tests/opt/`, `tests/bench/bench_opt.c` | §20 |
 
-No public ABI change (passes are reached through the pass manager); `docs/PASSES.md` gains eight
-rows. Side arrays indexed by net or node ID (fanout counts, liveness marks, order, mux port
+One additive ABI v4 setter, `odin3_pass_set_opt_snapshot` (the passes are reached through the
+pass manager); `docs/PASSES.md` gains eight rows. Side arrays indexed by net or node ID (fanout counts, liveness marks, order, mux port
 tables) come from `util/vec`, sized at the store length and freed after each call; the CSE table
 is a `u64map` plus a chain `vec`; `fold.c` uses a per-call arena.
 

@@ -45,8 +45,8 @@ static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
 
 /*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt: Task 13;
- * opt_expr: 6; opt_merge: 8; opt_muxtree: 9; opt_reduce: 10; opt_share: 11 or 12; opt_dff: 12).
+ * Point (e): the passes that are still stubs. Each later task removes its own line (opt_expr: Task
+ * 6; opt_merge: 8; opt_reduce: 9; opt_muxtree: 10; opt_dff: 11 and 12; opt: 13; opt_share: 14).
  */
 static const char *const k_stubs[] = {
     "opt", "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff",
@@ -91,7 +91,7 @@ static const opt_word k_words[] = {
     {"nodffe", OPTS_AT(nodffe), ONLY(P_OPT) | ONLY(P_DFF), false},
     {"nosdff", OPTS_AT(nosdff), ONLY(P_OPT) | ONLY(P_DFF), false},
     {"purge", OPTS_AT(purge), ONLY(P_OPT) | ONLY(P_CLEAN), false},
-    {"nomux", OPTS_AT(nomux), ONLY(P_OPT) | ONLY(P_MERGE), false},
+    {"nomux", OPTS_AT(nomux), ONLY(P_MERGE), false},
     {"fast", OPTS_AT(fast), ONLY(P_OPT), false},
     {"noff", OPTS_AT(noff), ONLY(P_OPT), false},
     {"opt-stats", offsetof(odin3_opt_args, stats), ALL_PASSES, true},
@@ -171,16 +171,18 @@ static odin3_strbuf g_snap_dir;
 static bool g_snap_on;
 static uint32_t g_snap_seq;
 
-ODIN3_EXPORT void odin3_opt_set_snapshot_dir(const char *dir) {
-    odin3_strbuf_free(&g_snap_dir);
-    odin3_strbuf_init(&g_snap_dir);
-    g_snap_on = false;
-    g_snap_seq = 0;
-    if (dir != NULL && odin3_strbuf_append(&g_snap_dir, odin3_bytes_cstr(dir)) == ODIN3_OK) {
-        g_snap_on = true;
-    } else if (dir != NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "opt: out of memory; snapshots are off");
+ODIN3_EXPORT odin3_status odin3_pass_set_opt_snapshot(const char *dir) {
+    odin3_strbuf copy;
+    odin3_strbuf_init(&copy);
+    if (dir != NULL && odin3_strbuf_append(&copy, odin3_bytes_cstr(dir)) != ODIN3_OK) {
+        odin3_strbuf_free(&copy);
+        return ODIN3_ERR_NO_MEMORY;
     }
+    odin3_strbuf_free(&g_snap_dir);
+    g_snap_dir = copy;
+    g_snap_on = dir != NULL;
+    g_snap_seq = 0;
+    return ODIN3_OK;
 }
 
 /* <dir>/<seq>-<sub>-<which>.il holding text. */
@@ -274,6 +276,14 @@ static odin3_status snapshot_after(const odin3_opt_call_req *req, uint32_t seq,
     return st;
 }
 
+/* A snapshot that cannot be written never changes the call's result (R2): WARN, then go on. */
+static bool snapshot_ok(odin3_status st) {
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_WARN, "opt: snapshot skipped: %s", odin3_status_string(st));
+    }
+    return st == ODIN3_OK;
+}
+
 static bool request_valid(const odin3_opt_call_req *req, const bool *changed) {
     bool ok = req != NULL && changed != NULL && req->ctx != NULL && req->design != NULL &&
               req->opts != NULL && req->counts != NULL && (unsigned)req->sub < ODIN3_OPT_N_SUBS;
@@ -300,8 +310,9 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
     odin3_strbuf before;
     odin3_strbuf_init(&before);
     const uint32_t seq = g_snap_on ? ++g_snap_seq : 0;
-    if (st == ODIN3_OK && g_snap_on) {
-        st = odin3_rtlil_text(req->design, &before);
+    bool snap = st == ODIN3_OK && g_snap_on;
+    if (snap) {
+        snap = snapshot_ok(odin3_rtlil_text(req->design, &before));
     }
     const uint64_t measure = change_measure(req->counts, req->sub);
     if (st == ODIN3_OK) {
@@ -311,8 +322,8 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
         st = debug_check(req->design);
     }
     *changed = st == ODIN3_OK && change_measure(req->counts, req->sub) > measure;
-    if (*changed && g_snap_on) {
-        st = snapshot_after(req, seq, &before);
+    if (*changed && snap) {
+        (void)snapshot_ok(snapshot_after(req, seq, &before));
     }
     odin3_strbuf_free(&before);
     return st;
@@ -380,7 +391,7 @@ typedef struct pass_desc {
     odin3_opt_sub sub; /* ODIN3_OPT_N_SUBS for opt itself (Task 13) */
 } pass_desc;
 
-static pass_desc g_desc[P_COUNT] = {
+static const pass_desc g_desc[P_COUNT] = {
     {P_OPT, ODIN3_OPT_N_SUBS},        {P_EXPR, ODIN3_OPT_SUB_EXPR},
     {P_MERGE, ODIN3_OPT_SUB_MERGE},   {P_MUXTREE, ODIN3_OPT_SUB_MUXTREE},
     {P_REDUCE, ODIN3_OPT_SUB_REDUCE}, {P_SHARE, ODIN3_OPT_SUB_SHARE},
@@ -412,23 +423,30 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
 }
 
 #define OPT_DEF(sym, idx, help_text)                                                               \
-    const odin3_pass_def sym = {k_pass_names[idx], help_text, opt_pass_run,                        \
-                                &g_desc[idx],      false,     ODIN3_PASS_PROCESSES_OK}
+    const odin3_pass_def sym = {k_pass_names[idx],    help_text, opt_pass_run,                     \
+                                (void *)&g_desc[idx], false,     ODIN3_PASS_PROCESSES_OK}
 
 OPT_DEF(odin3_pass_opt, P_OPT,
         "opt [-fast] [-full] [-keepdc] [-mux_undef] [-mux_bool] [-undriven] [-noclkinv] [-fine] "
-        "[-nodffe] [-nosdff] [-noff] [-purge]: optimise the design to a fixed point (opt_expr, "
+        "[-nodffe] [-nosdff] [-noff] [-purge] [--opt-full-rescan] [--opt-stats]: optimise the "
+        "design to a fixed point (opt_expr, "
         "opt_merge, opt_muxtree, opt_reduce, opt_share, opt_dff, opt_clean)");
 OPT_DEF(odin3_pass_opt_expr, P_EXPR,
-        "opt_expr [-mux_undef] [-mux_bool] [-undriven] [-noclkinv] [-fine] [-full] [-keepdc]: "
-        "constant folding and simple rewrites of cells");
-OPT_DEF(odin3_pass_opt_merge, P_MERGE,
-        "opt_merge [-nomux] [-keepdc]: merge identical cells (common subexpressions)");
-OPT_DEF(odin3_pass_opt_muxtree, P_MUXTREE, "opt_muxtree: remove dead ports of multiplexer trees");
+        "opt_expr [-mux_undef] [-mux_bool] [-undriven] [-noclkinv] [-fine] [-full] [-keepdc] "
+        "[--opt-full-rescan] [--opt-stats]: constant folding and simple rewrites of cells");
+OPT_DEF(
+    odin3_pass_opt_merge, P_MERGE,
+    "opt_merge [-nomux] [-keepdc] [--opt-stats]: merge identical cells (common subexpressions)");
+OPT_DEF(odin3_pass_opt_muxtree, P_MUXTREE,
+        "opt_muxtree [--opt-stats]: remove dead ports of multiplexer trees");
 OPT_DEF(odin3_pass_opt_reduce, P_REDUCE,
-        "opt_reduce [-fine] [-full]: simplify large OR/AND/MUX cells with duplicate inputs");
-OPT_DEF(odin3_pass_opt_share, P_SHARE, "opt_share: merge cells that share operands under a mux");
+        "opt_reduce [-fine] [-full] [--opt-stats]: simplify large OR/AND/MUX cells with duplicate "
+        "inputs");
+OPT_DEF(odin3_pass_opt_share, P_SHARE,
+        "opt_share [--opt-stats]: merge cells that share operands under a mux");
 OPT_DEF(odin3_pass_opt_dff, P_DFF,
-        "opt_dff [-nodffe] [-nosdff] [-keepdc]: simplify flip-flops (constant controls, enables, "
+        "opt_dff [-nodffe] [-nosdff] [-keepdc] [--opt-stats]: simplify flip-flops (constant "
+        "controls, enables, "
         "synchronous resets)");
-OPT_DEF(odin3_pass_opt_clean, P_CLEAN, "opt_clean [-purge]: remove unused cells and wires");
+OPT_DEF(odin3_pass_opt_clean, P_CLEAN,
+        "opt_clean [-purge] [--opt-stats]: remove unused cells and wires");

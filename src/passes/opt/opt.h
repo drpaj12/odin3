@@ -67,9 +67,9 @@ typedef struct odin3_opt_counts {
     uint32_t clean_cells, clean_nets, clean_wires, iterations;
     /*
      * 2F Task 3: opt_clean's did_something events (buffers wired, non-constant nodes removed, wires
-     * deleted, init bits removed). Beyond the briefed fields: odin3_opt_clean_run has no changed
+     * deleted). Beyond the briefed fields: odin3_opt_clean_run has no changed
      * output, and those events are not all in clean_cells/clean_wires (Yosys counts neither the
-     * buffers nor the inits, and constants have no Yosys counterpart); the loop reads this one.
+     * buffers, and constants have no Yosys counterpart); the loop reads this one.
      */
     uint32_t clean_changes;
 } odin3_opt_counts;
@@ -81,10 +81,13 @@ typedef struct odin3_opt_counts {
  * except those with live $proc nodes (INFO "opt_clean: module 'm' has processes; skipped"). Per
  * module: `$_BUF_` nodes without `keep` become wiring; liveness spreads back from the module's
  * ports, `keep` wires and `keep` nodes (instances of `keep` modules included); dead nodes are
- * deleted in ID order (a dead FF's Q init bits go with it); an `init` bit goes only where its net
- * is constant-driven with the opposite value (WARN), every other init stays; wires whose nets have
- * no pins are deleted (also, with opts->purge, public wires that are not the primary name of a net
- * with pins; ports, `keep` and initialised wires stay); nets left with no pins, wire or aliases are
+ * deleted in ID order (a dead FF's Q init bits go with it); init is normalised as Yosys 0.55 does,
+ * silently and without a change: an `init` on a net that was constant-driven (decided before the
+ * dead `$_CONST*_` node goes) is removed whatever its value, and a net with more than one defined
+ * `init` membership keeps one (primary first); wires whose nets have no pins are deleted, except
+ * that without opts->purge a public wire stays when one of its nets has another wire membership or
+ * was constant-driven (with opts->purge, public wires that are not the primary name of a net with
+ * pins go; ports, `keep` and initialised wires stay); nets left with no pins, wire or aliases are
  * deleted. Dead `$_CONST*_` nodes have no Yosys counterpart: they are removed silently, uncounted
  * and without a change. It adds into counts (clean_cells, clean_nets, clean_wires, clean_changes)
  * and logs the INFO line "opt_clean: removed N unused cells, M unused nets and W unused wires"
@@ -149,7 +152,7 @@ typedef struct odin3_opt_call_req {
  */
 odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
 
-/* odin3_opt_set_snapshot_dir is public (odin3.h); register.c defines it. */
+/* odin3_pass_set_opt_snapshot is public (odin3.h); register.c defines it. */
 
 /* --opt-stats: INFO "opt: rule <name> N" per non-zero rule or opt_dff action counter, by name. */
 void odin3_opt_print_stats(const odin3_opt_counts *counts);

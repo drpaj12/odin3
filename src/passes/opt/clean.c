@@ -210,6 +210,7 @@ typedef struct clean_state {
     odin3_module *m;
     const clean_shared *sh;
     uint8_t *node_live, *net_live;
+    uint8_t *net_const; /* nets that were constant-driven before the sweep */
     odin3_node_id *stack;
     uint32_t sp;
     odin3_u64map *memwr_head; /* MEMID string -> index+1 of the newest $memwr; 0 once marked */
@@ -230,66 +231,6 @@ static void node_label(const clean_state *cs, odin3_node_id node, char *out) {
     const char *text = name_text(cs, odin3_node_name(cs->m, node));
     int len = text != NULL ? snprintf(out, LABEL_MAX, "%s", text)
                            : snprintf(out, LABEL_MAX, "$c%" PRIu32, node.v);
-    (void)len;
-}
-
-/* Wire bit `w` (`w[k]` for a wire of several bits, k its declared index), `$w<ID>` unnamed. */
-static void wirebit_label(const clean_state *cs, odin3_wirebit wb, char *out) {
-    const char *wname = name_text(cs, odin3_wire_name(cs->m, wb.wire));
-    int len = 0;
-    if (wname == NULL) {
-        len = snprintf(out, LABEL_MAX, "$w%" PRIu32, wb.wire.v);
-    } else if (odin3_wire_width(cs->m, wb.wire) == 1) {
-        len = snprintf(out, LABEL_MAX, "%s", wname);
-    } else {
-        len = snprintf(out, LABEL_MAX, "%s[%" PRId32 "]", wname,
-                       odin3_wire_index(cs->m, wb.wire, wb.bit));
-    }
-    (void)len;
-}
-
-/* True when wire bit wb carries a defined (0 or 1) `init` bit. */
-static bool wirebit_init_defined(const clean_state *cs, odin3_wirebit wb) {
-    uint32_t key = 0;
-    if (!odin3_wire_valid(wb.wire) ||
-        !odin3_strtab_find(odin3_design_strtab(cs->oc->design), odin3_bytes_cstr("init"), &key)) {
-        return false;
-    }
-    odin3_objref obj = {ODIN3_OBJ_WIRE, wb.wire.v};
-    const odin3_value *val = odin3_attr_get(cs->m, obj, key);
-    return val != NULL && val->kind == ODIN3_VAL_BITS && wb.bit < val->len &&
-           (val->bits[wb.bit] == ODIN3_BIT_0 || val->bits[wb.bit] == ODIN3_BIT_1);
-}
-
-/* The first wire bit of net (primary, then aliases oldest first) that has a defined `init`. */
-static bool init_source(const clean_state *cs, odin3_net_id net, odin3_wirebit *out) {
-    *out = odin3_net_primary(cs->m, net);
-    if (wirebit_init_defined(cs, *out)) {
-        return true;
-    }
-    uint32_t cursor = 0;
-    odin3_net_alias alias;
-    while (odin3_net_alias_next(cs->m, net, &cursor, &alias)) {
-        if (wirebit_init_defined(cs, alias.wb)) {
-            *out = alias.wb;
-            return true;
-        }
-    }
-    return false;
-}
-
-/* The net's name, else the wire bit that holds its init, else `$n<ID>`. */
-static void net_label(const clean_state *cs, odin3_net_id net, char *out) {
-    const char *text = name_text(cs, odin3_net_name(cs->m, net));
-    odin3_wirebit wb;
-    int len = 0;
-    if (text != NULL) {
-        len = snprintf(out, LABEL_MAX, "%s", text);
-    } else if (init_source(cs, net, &wb)) {
-        wirebit_label(cs, wb, out);
-    } else {
-        len = snprintf(out, LABEL_MAX, "$n%" PRIu32, net.v);
-    }
     (void)len;
 }
 
@@ -418,16 +359,38 @@ static odin3_status scan_node_roots(clean_state *cs) {
     return ODIN3_OK;
 }
 
-/* The roots among the wires: every net of a `keep` wire. */
+/* Marks the nets driven by a constant node; the sweep is about to delete the dead ones. */
+static void mark_const_nets(clean_state *cs) {
+    for (uint32_t id = 1; id < odin3_module_net_end(cs->m); id++) {
+        odin3_net_id net = {id};
+        if (odin3_net_live(cs->m, net) && odin3_net_const_value(cs->m, net) != ODIN3_CONST_NONE) {
+            cs->net_const[id] = 1;
+        }
+    }
+}
+
+/* A public wire that names a constant stays without -purge (Yosys keeps `connect c 1'0`), so its
+ * constant driver stays too: a later run then keeps the wire again. */
+static bool names_constant(const clean_state *cs, odin3_wire_id wire, uint32_t bit) {
+    const char *text = name_text(cs, odin3_wire_name(cs->m, wire));
+    odin3_net_id net = odin3_wire_net(cs->m, wire, bit);
+    return !cs->oc->opts->purge && text != NULL && text[0] != '$' && odin3_net_valid(net) &&
+           cs->net_const[net.v] != 0;
+}
+
+/* The roots among the wires: every net of a `keep` wire, and the constants public wires name. */
 static void scan_wire_roots(clean_state *cs) {
     for (uint32_t id = 1; id < odin3_module_wire_end(cs->m); id++) {
         odin3_wire_id wire = {id};
         odin3_objref obj = {ODIN3_OBJ_WIRE, id};
-        if (!odin3_wire_live(cs->m, wire) || !odin3_kit_keep(cs->oc, obj)) {
+        if (!odin3_wire_live(cs->m, wire)) {
             continue;
         }
+        bool keep = odin3_kit_keep(cs->oc, obj);
         for (uint32_t bit = 0; bit < odin3_wire_width(cs->m, wire); bit++) {
-            mark_net(cs, odin3_wire_net(cs->m, wire, bit));
+            if (keep || names_constant(cs, wire, bit)) {
+                mark_net(cs, odin3_wire_net(cs->m, wire, bit));
+            }
         }
     }
 }
@@ -512,37 +475,23 @@ static odin3_status sweep(clean_state *cs) {
 /* --- step 6: init bits --------------------------------------------------------------------------
  */
 
-/* True when the net is constant-driven with the opposite of its init; then it warns. */
-static bool warn_conflict(const clean_state *cs, odin3_net_id net, odin3_bit init) {
-    odin3_const driven = odin3_net_const_value(cs->m, net);
-    bool conflict = (driven == ODIN3_CONST_0 && init == ODIN3_BIT_1) ||
-                    (driven == ODIN3_CONST_1 && init == ODIN3_BIT_0);
-    if (conflict) {
-        char label[LABEL_MAX];
-        net_label(cs, net, label);
-        odin3_log(ODIN3_LOG_WARN,
-                  "opt_clean: module '%s': initial value conflict for '%s': driven by 1'%c, init "
-                  "1'%c",
-                  name_text(cs, odin3_module_name(cs->m)), label,
-                  driven == ODIN3_CONST_1 ? '1' : '0', init == ODIN3_BIT_1 ? '1' : '0');
-    }
-    return conflict;
-}
-
-/* Yosys 0.55: an init goes only where the net is constant-driven with the opposite value (WARN);
- * every other init stays, silently. */
+/*
+ * Yosys 0.55 rmunused_module_signals: an init on a net that was constant-driven goes, whatever its
+ * value; a net with several defined init memberships keeps one (primary first). Both silent: no
+ * counter, no change.
+ */
 static odin3_status clean_init(clean_state *cs) {
     for (uint32_t id = 1; id < odin3_module_net_end(cs->m); id++) {
         odin3_net_id net = {id};
         odin3_bit init = odin3_net_live(cs->m, net) ? odin3_ffinit_get(cs->m, net) : ODIN3_BIT_X;
-        if ((init != ODIN3_BIT_0 && init != ODIN3_BIT_1) || !warn_conflict(cs, net, init)) {
+        if (init != ODIN3_BIT_0 && init != ODIN3_BIT_1) {
             continue;
         }
-        odin3_status st = odin3_ffinit_remove(cs->m, net, NULL);
+        odin3_status st = cs->net_const[id] != 0 ? odin3_ffinit_remove(cs->m, net, NULL)
+                                                 : odin3_ffinit_set(cs->m, net, init);
         if (st != ODIN3_OK) {
             return st;
         }
-        note_change(cs);
     }
     return ODIN3_OK;
 }
@@ -601,6 +550,45 @@ static bool wire_purgeable(const clean_state *cs, odin3_wire_id wire) {
     return true;
 }
 
+/* True when the net has a wire membership other than bit `bit` of `wire`. */
+static bool net_has_other_wire(const clean_state *cs, odin3_net_id net, odin3_wire_id wire,
+                               uint32_t bit) {
+    odin3_wirebit prim = odin3_net_primary(cs->m, net);
+    if (odin3_wire_valid(prim.wire) && (prim.wire.v != wire.v || prim.bit != bit)) {
+        return true;
+    }
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    while (odin3_net_alias_next(cs->m, net, &cursor, &alias)) {
+        if (odin3_wire_valid(alias.wb.wire) && (alias.wb.wire.v != wire.v || alias.wb.bit != bit)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Without -purge (Yosys `s1 != s2`): a public wire that aliases a wire or was a constant stays. */
+static bool wire_keeps_name(const clean_state *cs, odin3_wire_id wire) {
+    if (!wire_public(cs, wire)) {
+        return false;
+    }
+    for (uint32_t bit = 0; bit < odin3_wire_width(cs->m, wire); bit++) {
+        odin3_net_id net = odin3_wire_net(cs->m, wire, bit);
+        if (odin3_net_valid(net) &&
+            (cs->net_const[net.v] != 0 || net_has_other_wire(cs, net, wire, bit))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool wire_deletable(const clean_state *cs, odin3_wire_id wire) {
+    if (cs->oc->opts->purge) {
+        return wire_unused(cs, wire) || wire_purgeable(cs, wire);
+    }
+    return wire_unused(cs, wire) && !wire_keeps_name(cs, wire);
+}
+
 static odin3_status clean_wires(clean_state *cs) {
     for (uint32_t id = 1; id < odin3_module_wire_end(cs->m); id++) {
         odin3_wire_id wire = {id};
@@ -609,7 +597,7 @@ static odin3_status clean_wires(clean_state *cs) {
             odin3_kit_keep(cs->oc, obj) || wire_has_init(cs, wire)) {
             continue;
         }
-        if (!wire_unused(cs, wire) && !(cs->oc->opts->purge && wire_purgeable(cs, wire))) {
+        if (!wire_deletable(cs, wire)) {
             continue;
         }
         odin3_status st = odin3_wire_delete(cs->m, wire);
@@ -647,15 +635,16 @@ static odin3_status clean_nets(clean_state *cs) {
  * ------------------------------------------------------------------------------------ */
 
 static odin3_status stages(clean_state *cs) {
+    mark_const_nets(cs);
     odin3_status st = scan_node_roots(cs);
     if (st == ODIN3_OK) {
         scan_wire_roots(cs);
         st = drain(cs);
     }
     st = st == ODIN3_OK ? sweep(cs) : st;
+    st = st == ODIN3_OK ? clean_init(cs) : st;
     st = st == ODIN3_OK ? clean_wires(cs) : st;
-    st = st == ODIN3_OK ? clean_nets(cs) : st;
-    return st == ODIN3_OK ? clean_init(cs) : st;
+    return st == ODIN3_OK ? clean_nets(cs) : st;
 }
 
 static odin3_status clean_module(odin3_opt_ctx *oc, const clean_shared *sh, clean_tally *out) {
@@ -669,16 +658,18 @@ static odin3_status clean_module(odin3_opt_ctx *oc, const clean_shared *sh, clea
     odin3_vec_init(&cs.memwr, sizeof(memwr_link));
     cs.node_live = odin3_util_calloc((size_t)node_end);
     cs.net_live = odin3_util_calloc((size_t)odin3_module_net_end(cs.m));
+    cs.net_const = odin3_util_calloc((size_t)odin3_module_net_end(cs.m));
     cs.stack = odin3_util_calloc(sizeof *cs.stack * (size_t)node_end);
     cs.memwr_head = odin3_u64map_create(0);
-    if (st == ODIN3_OK && (cs.node_live == NULL || cs.net_live == NULL || cs.stack == NULL ||
-                           cs.memwr_head == NULL)) {
+    if (st == ODIN3_OK && (cs.node_live == NULL || cs.net_live == NULL || cs.net_const == NULL ||
+                           cs.stack == NULL || cs.memwr_head == NULL)) {
         st = ODIN3_ERR_NO_MEMORY;
     }
     st = st == ODIN3_OK ? stages(&cs) : st;
     *out = cs.t;
     odin3_util_free(cs.node_live);
     odin3_util_free(cs.net_live);
+    odin3_util_free(cs.net_const);
     odin3_util_free(cs.stack);
     odin3_u64map_destroy(cs.memwr_head);
     odin3_vec_free(&cs.memwr);

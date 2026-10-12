@@ -75,7 +75,7 @@ void setUp(void) {
 
 void tearDown(void) {
     odin3_budget_test_set_limit(0);
-    odin3_opt_set_snapshot_dir(NULL);
+    (void)odin3_pass_set_opt_snapshot(NULL);
     odin3_opt_test_set_hooks(NULL);
     pb_free(&res);
     odin3_log_set_sink(NULL, NULL);
@@ -156,8 +156,7 @@ static const parse_case k_parse_ok[] = {
     {"opt_clean", "-purge", M_PURGE},
     {"opt_merge", "-nomux -keepdc", M_NOMUX | M_KEEPDC},
     {"opt_dff", "-nodffe -nosdff -keepdc --opt-stats", M_NODFFE | M_NOSDFF | M_KEEPDC | M_STATS},
-    {"opt", "-fast -noff --nodffe -nosdff -nomux -purge",
-     M_FAST | M_NOFF | M_NODFFE | M_NOSDFF | M_NOMUX | M_PURGE},
+    {"opt", "-fast -noff --nodffe -nosdff -purge", M_FAST | M_NOFF | M_NODFFE | M_NOSDFF | M_PURGE},
     {"opt_expr", "--opt-full-rescan", M_RESCAN},
     {"opt", "--opt-full-rescan --opt-stats", M_RESCAN | M_STATS},
     {"opt_muxtree", "", 0},
@@ -187,6 +186,7 @@ static void expect_unknown(const char *pass, const char *arg) {
 static void test_parse_unknown(void) {
     expect_unknown("opt_dff", "-sat");
     expect_unknown("opt_merge", "-share_all");
+    expect_unknown("opt", "-nomux"); /* nomux is internal to opt's first opt_merge */
     expect_unknown("opt_muxtree", "-fine");
     expect_unknown("opt_reduce", "--opt-full-rescan");
     expect_unknown("opt_clean", "-opt-stats"); /* --opt-stats has only the long spelling */
@@ -275,6 +275,32 @@ static void test_call_changed_and_hook(void) {
     check_full();
 }
 
+/* A clean call that only wires a buffer, or only deletes a wire, still reports `changed`. */
+static void test_changed_measure(void) {
+    odin3_opt_opts opts;
+    memset(&opts, 0, sizeof opts);
+    odin3_opt_counts counts;
+    memset(&counts, 0, sizeof counts);
+    bool changed = false;
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\t\n"
+          "  cell $_BUF_ \\b\n    connect \\A \\a\n    connect \\Y \\t\n  end\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\t\n    connect \\Y \\y\n  end\nend\n");
+    odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_TRUE(changed);
+    TEST_ASSERT_EQUAL_UINT32(0, counts.clean_cells); /* only the buffer wiring changed */
+    pb_free(&res);
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\dead\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    req.ctx = &res.ctx;
+    req.design = res.design;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_TRUE(changed);
+    TEST_ASSERT_EQUAL_UINT32(0, counts.clean_cells); /* only a wire went */
+    TEST_ASSERT_EQUAL_UINT32(1, counts.clean_wires);
+    check_full();
+}
+
 static char *slurp(const char *path) {
     FILE *file = fopen(path, "rb");
     TEST_ASSERT_NOT_NULL_MESSAGE(file, path);
@@ -330,7 +356,7 @@ static void test_snapshot(void) {
     odin3_strbuf_init(&want_before);
     odin3_strbuf_init(&want_after);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &want_before));
-    odin3_opt_set_snapshot_dir(dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_opt_snapshot(dir));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &want_after));
     TEST_ASSERT_TRUE(strcmp(want_before.data, want_after.data) != 0);
@@ -344,11 +370,59 @@ static void test_snapshot(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
     expect_absent(&before2);
     expect_absent(&after2);
+    /* setting the directory again restarts the sequence at 0001 (and replaces the old copy) */
+    pb_free(&res);
+    build(DEAD_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_opt_snapshot(dir));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
+    expect_file(&before1, &want_before);
+    expect_file(&after1, &want_after);
+    expect_absent(&before2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_opt_snapshot(NULL)); /* off: no more files */
+    pb_free(&res);
+    build(DEAD_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
+    expect_absent(&before2);
     odin3_strbuf_free(&want_before);
     odin3_strbuf_free(&want_after);
     remove_file(&before1);
     remove_file(&after1);
     TEST_ASSERT_EQUAL_INT(0, rmdir(dir)); /* exactly those two files were there */
+}
+
+static void expect_snapshot_warned(void) {
+    TEST_ASSERT_TRUE(count_prefix("opt: snapshot skipped: ") >= 1);
+}
+
+/* R2: a snapshot that cannot be written warns and the call goes on with its own result. A $_DFF_P_
+ * has no RTLIL form: the "before" text cannot be made, the pass still cleans. */
+static void test_snapshot_failure(void) {
+    char dir[] = "/tmp/odin3-opt-loop-XXXXXX";
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\t\n  wire \\q\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"
+          "  cell $_NOT_ \\dead\n    connect \\A \\a\n    connect \\Y \\t\n  end\n"
+          "  cell $_DFF_P_ \\f\n    connect \\C \\a\n    connect \\D \\a\n    connect \\Q \\q\n"
+          "  end\nend\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_opt_snapshot(dir));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
+    expect_snapshot_warned();
+    uint32_t dead_name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(res.design, odin3_bytes_cstr("dead"), &dead_name));
+    odin3_node_id dead = odin3_module_find_node(res.module, dead_name);
+    TEST_ASSERT_FALSE(odin3_node_valid(dead) && odin3_node_live(res.module, dead));
+    TEST_ASSERT_EQUAL_INT(0, rmdir(dir)); /* no file was written */
+    check_full();
+}
+
+/* An unwritable directory: the "after" write fails, the status stays OK. */
+static void test_snapshot_unwritable(void) {
+    build(DEAD_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_opt_snapshot("/nonexistent-odin3-dir/x"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", ""));
+    expect_snapshot_warned();
+    check_full();
 }
 
 static void test_budget(void) {
@@ -411,6 +485,9 @@ int main(void) {
     RUN_TEST(test_call_stub);
     RUN_TEST(test_call_changed_and_hook);
     RUN_TEST(test_snapshot);
+    RUN_TEST(test_snapshot_failure);
+    RUN_TEST(test_snapshot_unwritable);
+    RUN_TEST(test_changed_measure);
     RUN_TEST(test_budget);
     RUN_TEST(test_processes_flag);
     RUN_TEST(test_stats);

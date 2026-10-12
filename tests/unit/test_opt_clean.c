@@ -1,15 +1,16 @@
 /*
  * test_opt_clean.c — opt_clean (2F spec OP-10, §10; plan Task 3): the buffer wiring, liveness
  * (ports, `keep` wires and nodes, instances of `keep` modules, black boxes, $mem and
- * $memrd/$memwr), the deletion order and the DEBUG lines, a dead FF's init, wires (`-purge`), the
- * init cleanup and its warning, modules with processes, constants (carry M-d) and out of memory.
+ * $memrd/$memwr), the deletion order and the DEBUG lines, a dead FF's init, wires (public aliases
+ * and constants without `-purge`, `-purge`), the silent init normalisation, modules with processes,
+ * constants (carry M-d) and out of memory.
  *
- * Yosys re-derivation (0.55, the VTR build, one batched run; see the Task 3 report):
- * `yosys -p "read_rtlil X.il; opt_clean [-purge]; write_rtlil"`. The init rules, the instance
- * removal and the `$_BUF_` wiring are Yosys's; the net counts are 2F §10's (Odin III names are
- * wires over nets; IR-2, §17 #3).
- * `-purge` keeps a used public wire that is its net's primary name; an init goes only on a constant
- * of the opposite value (both re-derived, Task 3 review).
+ * Yosys parity (0.55, the VTR build; probes `yosys -p "read_rtlil X.il; opt_clean [-purge];
+ * write_rtlil"`, PR #80 review): the init rules (opt_clean.cc rmunused_module_signals: an init on a
+ * constant-driven net goes whatever its value, a duplicate init survives only on one alias, both
+ * silently), the public-wire rule (without -purge an aliased or constant public wire stays; with
+ * it only the primary name of a net with pins), the instance removal and the `$_BUF_` wiring are
+ * Yosys's; the net counts are 2F §10's (Odin III names are wires over nets; IR-2, §17 #3).
  */
 #include "ir/celltype.h"
 #include "ir/check.h"
@@ -24,6 +25,7 @@
 #include "proc_build.h"
 #include "unity.h"
 #include "util/alloc.h"
+#include "util/attr.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -383,6 +385,8 @@ static void test_clean_ff_init(void) {
     TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires);
 }
 
+/* An init on a constant-driven net goes, silently, whatever its value; an init on a driven net
+ * stays. */
 static void test_clean_init_conflict(void) {
     build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire $tmp1\n"
           "  attribute \\init 1'1\n  wire \\w\n  attribute \\init 1'0\n  wire \\u\n  connect \\w "
@@ -392,15 +396,11 @@ static void test_clean_init_conflict(void) {
           "  cell $_AND_ \\n3\n    connect \\A $tmp1\n    connect \\B \\u\n    connect \\Y \\y\n"
           "  end\nend\n");
     run_clean();
-    TEST_ASSERT_EQUAL_UINT32(1, count_level(ODIN3_LOG_WARN)); /* w only; u's init stays, silent */
-    TEST_ASSERT_EQUAL_UINT32(
-        1, count_lines(ODIN3_LOG_WARN,
-                       "opt_clean: module 'm': initial value conflict for 'w': driven by 1'0, "
-                       "init 1'1"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_level(ODIN3_LOG_WARN)); /* Yosys prints no conflict */
     TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("w")));
     TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(fx.module, wnet("u"))); /* kept, silently */
     TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("w"))); /* it has pins: stays */
-    TEST_ASSERT_TRUE(fx.counts.clean_changes >= 1);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_changes);          /* removing it is no change */
 }
 
 /* --- wires ------------------------------------------------------------------------------------ */
@@ -479,22 +479,138 @@ static void test_clean_purge_alias(void) {
     TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires); /* and the other name went */
 }
 
-/* An aliased net with no pins and no primary wire is kept (clean_nets' alias guard). */
+#define PINLESS_ALIAS_TEXT                                                                         \
+    "module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\p\n"                            \
+    "  attribute \\keep 1\n  wire \\k\n  connect \\p \\k\n"                                        \
+    "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"
+
+/* Expects p and k live or not, and the pinless net alive. */
+static void expect_pinless(bool p_live, odin3_net_id net) {
+    const wire_expect list[] = {{"p", p_live}, {"k", true}};
+    expect_wires(list, sizeof list / sizeof list[0]);
+    TEST_ASSERT_TRUE(odin3_net_live(fx.module, net));
+}
+
+/* A pinless aliased net: without -purge the public alias p stays (Yosys s1 != s2) beside the
+ * `keep` wire k; with -purge p goes and the net survives through k (clean_nets' alias guard). */
 static void test_clean_net_alias_survives(void) {
-    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\p\n"
-          "  attribute \\keep 1\n  wire \\k\n  connect \\p \\k\n"
-          "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    build(PINLESS_ALIAS_TEXT);
     odin3_net_id net = wnet("k");
     TEST_ASSERT_EQUAL_UINT32(net.v, wnet("p").v);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_net_pins(fx.module, net).count);
     run_clean();
-    TEST_ASSERT_FALSE(odin3_wire_live(fx.module, wire_named("p")));
-    TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("k")));
-    TEST_ASSERT_TRUE(odin3_net_live(fx.module, net));
+    expect_pinless(true, net);
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_wires);
+    fx.opts.purge = true;
+    run_clean();
+    expect_pinless(false, net);
     TEST_ASSERT_EQUAL_UINT32(net.v, wnet("k").v);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires);
 }
 
-/* A used non-FF net keeps its init, silently; a constant of the same value is no conflict. */
+#define UNUSED_ALIAS_TEXT                                                                          \
+    "module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\c\n  wire \\u1\n"               \
+    "  wire \\u2\n  wire $d1\n  wire $d2\n  connect \\c 1'0\n  connect \\u2 \\u1\n"                \
+    "  connect $d2 $d1\n"                                                                          \
+    "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"
+
+/* Fixtures A and B: without -purge a public wire that is a constant (A) or an alias (B) stays
+ * though nothing reads it; the `$` twins of B go (no public name). With -purge all of them go. */
+static void test_clean_public_alias_and_const_kept(void) {
+    build(UNUSED_ALIAS_TEXT);
+    run_clean();
+    const wire_expect list[] = {
+        {"c", true}, {"u1", true}, {"u2", true}, {"$d1", false}, {"$d2", false}};
+    expect_wires(list, sizeof list / sizeof list[0]);
+    TEST_ASSERT_EQUAL_UINT32(2, fx.counts.clean_wires);
+    run_clean(); /* a second run changes nothing */
+    TEST_ASSERT_EQUAL_UINT32(2, fx.counts.clean_wires);
+}
+
+static void test_clean_public_alias_and_const_purge(void) {
+    fx.opts.purge = true;
+    build(UNUSED_ALIAS_TEXT);
+    run_clean();
+    const wire_expect list[] = {
+        {"c", false}, {"u1", false}, {"u2", false}, {"$d1", false}, {"$d2", false}};
+    expect_wires(list, sizeof list / sizeof list[0]);
+    TEST_ASSERT_EQUAL_UINT32(5, fx.counts.clean_wires);
+}
+
+/* Multi-bit -purge: v[0] only aliases w[0] but v[1] is the primary name of a net with a reader, so
+ * v stays; of the fully aliased pair s and t, the primary name stays and the other goes. */
+static void test_clean_purge_multibit(void) {
+    fx.opts.purge = true;
+    build("module \\m\n  wire width 2 input 1 \\a\n  wire width 2 output 2 \\y\n"
+          "  wire width 2 \\w\n  wire width 2 \\v\n  wire width 2 \\s\n  wire width 2 \\t\n"
+          "  wire width 2 \\x\n  connect \\v [0] \\w [0]\n  connect \\t \\s\n"
+          "  cell $not \\g\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\a\n    connect \\Y \\w\n  end\n"
+          "  cell $not \\r\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\v\n    connect \\Y \\x\n  end\n"
+          "  cell $not \\r2\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\x\n    connect \\Y \\s\n  end\n"
+          "  cell $not \\r3\n    parameter \\A_WIDTH 2\n    parameter \\Y_WIDTH 2\n"
+          "    connect \\A \\t\n    connect \\Y \\y\n  end\nend\n");
+    run_clean();
+    const wire_expect list[] = {{"v", true}, {"x", true}};
+    expect_wires(list, sizeof list / sizeof list[0]);
+    TEST_ASSERT_EQUAL_INT(1, (int)odin3_wire_live(fx.module, wire_named("s")) +
+                                 (int)odin3_wire_live(fx.module, wire_named("t")));
+}
+
+/* A `keep` wire is a liveness root: the logic driving it stays though nothing reads it. */
+static void test_clean_keep_wire_root(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  attribute \\keep 1\n  wire \\k\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\k\n  end\n"
+          "  cell $_NOT_ \\g\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    run_clean();
+    TEST_ASSERT_TRUE(alive("n"));
+    TEST_ASSERT_TRUE(alive("g"));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_cells);
+    TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("k")));
+}
+
+/* Instance `name` of module `child_id` inside module `parent_id` (no connections). */
+typedef struct module_link {
+    uint32_t parent, child; /* module IDs */
+} module_link;
+
+static void add_instance(module_link link, const char *name) {
+    odin3_module *parent = odin3_module_get(fx.res.design, (odin3_module_id){link.parent});
+    odin3_module *child = odin3_module_get(fx.res.design, (odin3_module_id){link.child});
+    odin3_node_spec spec = {odin3_module_celltype(child), intern(name), {0}, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(parent, &spec, &node));
+}
+
+/* Keep spreads through a chain whose parents have the lower module IDs: top (1) > mid (2) > leaf
+ * (3, a `keep` wire). The instances are added after the build (the text cannot refer forward). */
+static void test_clean_keep_chain_forward(void) {
+    build("module \\top\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  cell $_NOT_ \\g\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"
+          "module \\mid\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  cell $_NOT_ \\g\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n"
+          "module \\leaf\n  wire input 1 \\a\n  wire output 2 \\y\n  attribute \\keep 1\n"
+          "  wire \\w\n  cell $_NOT_ \\k\n    connect \\A \\a\n    connect \\Y \\w\n  end\n"
+          "  cell $_NOT_ \\g\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    add_instance((module_link){2, 3}, "ul");
+    add_instance((module_link){1, 2}, "um");
+    odin3_vec keep;
+    odin3_vec_init(&keep, sizeof(bool));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_keep_modules(fx.res.design, &keep));
+    char text[8];
+    flags_text(&keep, text);
+    TEST_ASSERT_EQUAL_STRING("111", text);
+    odin3_vec_free(&keep);
+    run_clean();
+    odin3_module *top = odin3_module_get(fx.res.design, (odin3_module_id){1});
+    odin3_node_id um = odin3_module_find_node(top, intern("um"));
+    TEST_ASSERT_TRUE(odin3_node_valid(um) && odin3_node_live(top, um)); /* top's instance stays */
+}
+
+/* A used non-FF net keeps its init, silently; a constant-driven net loses it whatever the value. */
 static void test_clean_init_kept(void) {
     build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
           "  attribute \\init 1'1\n  wire \\u\n  attribute \\init 1'1\n  wire \\c\n"
@@ -505,7 +621,65 @@ static void test_clean_init_kept(void) {
     run_clean();
     TEST_ASSERT_EQUAL_UINT32(0, count_level(ODIN3_LOG_WARN));
     TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("u")));
-    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("c")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("c")));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_changes);
+}
+
+/* Fixture E: init 0 on a net driven by 1'0 (the same value) goes too. */
+static void test_clean_init_const_same_value(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  attribute \\init 1'0\n  wire \\c\n  connect \\c 1'0\n"
+          "  cell $_AND_ \\n2\n    connect \\A \\a\n    connect \\B \\c\n    connect \\Y \\y\n"
+          "  end\nend\n");
+    run_clean();
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("c")));
+    TEST_ASSERT_EQUAL_UINT32(0, count_level(ODIN3_LOG_WARN));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_changes);
+}
+
+/* Counts the wire's defined init bits (BITS attribute `init`), 0 when it has none. */
+static uint32_t wire_init_bits(const char *name) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(fx.res.design), odin3_bytes_cstr("init"), &key)) {
+        return 0;
+    }
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire_named(name).v};
+    const odin3_value *val = odin3_attr_get(fx.module, obj, key);
+    uint32_t bits = 0;
+    for (uint32_t k = 0; val != NULL && val->kind == ODIN3_VAL_BITS && k < val->len; k++) {
+        bits += val->bits[k] == ODIN3_BIT_0 || val->bits[k] == ODIN3_BIT_1 ? 1U : 0U;
+    }
+    return bits;
+}
+
+/* Fixture D: two names of one live FF's Q net both carry init 1; one membership keeps it. */
+static void test_clean_init_alias_duplicate(void) {
+    build("module \\m\n  wire input 1 \\c\n  wire input 2 \\d\n  wire output 3 \\y\n"
+          "  attribute \\init 1'1\n  wire \\q\n  attribute \\init 1'1\n  wire \\q2\n"
+          "  connect \\q2 \\q\n"
+          "  cell $_DFF_P_ \\f\n    connect \\C \\c\n    connect \\D \\d\n    connect \\Q \\q\n  "
+          "end\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\q2\n    connect \\Y \\y\n  end\nend\n");
+    TEST_ASSERT_EQUAL_UINT32(wnet("q").v, wnet("q2").v);
+    TEST_ASSERT_EQUAL_UINT32(2, wire_init_bits("q") + wire_init_bits("q2"));
+    run_clean();
+    TEST_ASSERT_EQUAL_UINT32(1, wire_init_bits("q") + wire_init_bits("q2"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("q")));
+    TEST_ASSERT_EQUAL_UINT32(0, count_level(ODIN3_LOG_WARN));
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_changes);
+}
+
+/* A dead non-FF node's driven net keeps its init (only a dead FF's Q init goes with it). */
+static void test_clean_dead_nonff_keeps_init(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  attribute \\init 1'1\n  wire \\t\n"
+          "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"
+          "  cell $_NOT_ \\dead\n    connect \\A \\a\n    connect \\Y \\t\n  end\nend\n");
+    odin3_net_id net = wnet("t");
+    run_clean();
+    TEST_ASSERT_FALSE(alive("dead"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, net));
+    TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("t"))); /* the init keeps the wire */
 }
 
 /* --- processes and constants -------------------------------------------------------------------
@@ -626,6 +800,14 @@ int main(void) {
     RUN_TEST(test_clean_purge_alias);
     RUN_TEST(test_clean_net_alias_survives);
     RUN_TEST(test_clean_init_kept);
+    RUN_TEST(test_clean_init_const_same_value);
+    RUN_TEST(test_clean_init_alias_duplicate);
+    RUN_TEST(test_clean_dead_nonff_keeps_init);
+    RUN_TEST(test_clean_public_alias_and_const_kept);
+    RUN_TEST(test_clean_public_alias_and_const_purge);
+    RUN_TEST(test_clean_purge_multibit);
+    RUN_TEST(test_clean_keep_wire_root);
+    RUN_TEST(test_clean_keep_chain_forward);
     RUN_TEST(test_clean_skips_processes);
     RUN_TEST(test_clean_constants_silent);
     RUN_TEST(test_clean_misuse);

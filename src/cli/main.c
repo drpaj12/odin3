@@ -409,6 +409,14 @@ static int run_scripts(char **argv, int argc, const cli_state *state) {
     return st == ODIN3_OK ? EXIT_OK : EXIT_FAIL;
 }
 
+/* The options that are copied strings; false when one runs out of memory. */
+static bool apply_string_options(const cli_state *state) {
+    return odin3_pass_set_top_name(state->top) == ODIN3_OK &&
+           odin3_pass_set_revision(state->revision) == ODIN3_OK &&
+           odin3_pass_set_abc_script(state->abc_script) == ODIN3_OK &&
+           odin3_pass_set_opt_snapshot(state->opt_snapshot) == ODIN3_OK;
+}
+
 int main(int argc, char **argv) {
     cli_state state = {0};
     state.linked_abc = init_linked_abc();
@@ -432,12 +440,9 @@ int main(int argc, char **argv) {
     }
     odin3_pass_set_check(state.check);
     odin3_pass_set_diag_paths(state.resolved);
-    if (odin3_pass_set_top_name(state.top) != ODIN3_OK ||
-        odin3_pass_set_revision(state.revision) != ODIN3_OK ||
-        odin3_pass_set_abc_script(state.abc_script) != ODIN3_OK) {
+    if (!apply_string_options(&state)) {
         (void)fprintf(stderr, "odin3: out of memory\n");
         return EXIT_FAIL;
     }
-    odin3_opt_set_snapshot_dir(state.opt_snapshot);
     return run_scripts(argv, argc, &state);
 }
