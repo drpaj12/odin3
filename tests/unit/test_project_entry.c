@@ -260,6 +260,21 @@ static void test_info_lines(void) {
         D "/q/dups.qsf: listed more than once, read once: " D "/lib/l.v, " D "/src/a.v", infos[1]);
 }
 
+/* 3D AB-27: a Quartus ABC_SCRIPT is ignored and listed like any assignment and sets no
+ * abc_script, also when imported; the importing .o3proj sets it. */
+static void test_qsf_abc_script_ignored(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(D "/q/abc.qsf"));
+    TEST_ASSERT_EQUAL_UINT32(0, project()->abc_script.given);
+    TEST_ASSERT_EQUAL_INT(1, ninfos);
+    TEST_ASSERT_EQUAL_STRING(D "/q/abc.qsf: ignored: ABC_SCRIPT", infos[0]);
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_entry(D "/import_abc.o3proj"));
+    TEST_ASSERT_EQUAL_STRING("flow.o3", str(project()->abc_script.given));
+    TEST_ASSERT_EQUAL_STRING(D "/flow.o3", str(project()->abc_script.resolved));
+    TEST_ASSERT_EQUAL_INT(1, ninfos);
+    TEST_ASSERT_EQUAL_STRING(D "/import_abc.o3proj: ignored: ABC_SCRIPT", infos[0]);
+}
+
 /* --- corpus -------------------------------------------------------------------------------- */
 
 /* The "project" object of a case's expected.json, as the dump spells it. */
@@ -386,6 +401,7 @@ int main(void) {
     RUN_TEST(test_failure_drops_record);
     RUN_TEST(test_top_replaces);
     RUN_TEST(test_info_lines);
+    RUN_TEST(test_qsf_abc_script_ignored);
     RUN_TEST(test_corpus_cases);
     RUN_TEST(test_out_of_memory);
     return UNITY_END();

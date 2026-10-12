@@ -53,6 +53,21 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
     }
 }
 
+/* A fresh temporary directory in tmp, in getcwd()'s form: the read resolves against getcwd(),
+ * which sees through a symlinked TMPDIR. */
+static void make_tmp(void) {
+    const char *base = getenv("TMPDIR");
+    (void)snprintf(tmp, sizeof tmp, "%s/odin3_record_XXXXXX",
+                   base != NULL && base[0] != '\0' ? base : "/tmp");
+    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    char real[CWD_BUF];
+    TEST_ASSERT_EQUAL_INT(0, chdir(tmp));
+    TEST_ASSERT_NOT_NULL(getcwd(real, sizeof real));
+    TEST_ASSERT_EQUAL_INT(0, chdir(cwd));
+    TEST_ASSERT_TRUE(strlen(real) < sizeof tmp);
+    memcpy(tmp, real, strlen(real) + 1);
+}
+
 void setUp(void) {
     odin3_log_set_sink(sink, NULL);
     captured[0] = '\0';
@@ -65,10 +80,7 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(design);
     proj = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
-    const char *base = getenv("TMPDIR");
-    (void)snprintf(tmp, sizeof tmp, "%s/odin3_record_XXXXXX",
-                   base != NULL && base[0] != '\0' ? base : "/tmp");
-    TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
+    make_tmp();
 }
 
 static const char *in_tmp(const char *rel, char *buf) {
@@ -1012,7 +1024,8 @@ static void test_request_abc_script_missing(void) {
         odin3_project_request req = {"p.o3proj", 0, NULL, NULL, bad[i]};
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, read_request(&req));
         char want[MSG_MAX];
-        (void)snprintf(want, sizeof want, "missing_file: file not found: '%s'", bad[i]);
+        int len = snprintf(want, sizeof want, "missing_file: file not found: '%s'", bad[i]);
+        TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
         TEST_ASSERT_EQUAL_STRING(want, captured);
         TEST_ASSERT_EQUAL_INT(1, errors);
         TEST_ASSERT_NULL(proj); /* the record is dropped */
