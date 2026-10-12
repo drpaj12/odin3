@@ -234,21 +234,21 @@ static odin3_status ranges_agree(odin3_elab1_env *env, const odin3_elab1_mport *
     return st;
 }
 
-/* The type fields a merged net or variable declaration gives the port (N15 and N17 stay
- * Task 16's, reported at the declaration). */
+/* The type fields a merged net or variable declaration gives the port (N15 and N17 are rejected
+ * at the declaration). */
 static void merge_type(odin3_elab1_env *env, odin3_ast_id obj, odin3_elab1_mport *port) {
     const odin3_ast *ast = env->e1->parsed;
     uint32_t sub = odin3_ast_sub(ast, obj);
     if (odin3_ast_kind_of(ast, obj) == ODIN3_AST_NET_DECL) {
         port->net = port->net != 0 ? port->net : (uint8_t)(1U + sub);
         if (sub >= ODIN3_AST_NET_DECL_TRI0 && sub <= ODIN3_AST_NET_DECL_TRIREG) {
-            odin3_elab1_pend_form(env->e1, obj); /* N15 */
+            (void)odin3_elab1_reject(env->e1, obj); /* N15 */
         }
     } else if (sub == ODIN3_AST_VAR_DECL_REG || sub == ODIN3_AST_VAR_DECL_INTEGER) {
         uint8_t dt = sub == ODIN3_AST_VAR_DECL_REG ? ODIN3_AST_DT_REG : ODIN3_AST_DT_INTEGER;
         port->dt = port->dt != ODIN3_AST_DT_NONE ? port->dt : dt;
     } else {
-        odin3_elab1_pend_form(env->e1, obj); /* N17: a time or real variable */
+        (void)odin3_elab1_reject(env->e1, obj); /* N17: a time or real variable */
     }
     port->is_signed =
         port->is_signed || (odin3_ast_flags(ast, obj) & ODIN3_AST_F_NET_DECL_SIGNED) != 0;

@@ -136,7 +136,7 @@ static odin3_status ty_call(odin3_elab1_env *env, odin3_ast_id call) {
     odin3_elab1 *e1 = env->e1;
     if ((odin3_ast_flags(e1->parsed, call) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
         if (!env->quiet) {
-            odin3_elab1_pend_form(e1, call); /* E20 and the others: Task 16 */
+            (void)odin3_elab1_reject(e1, call); /* E20, E21 */
         }
         return ODIN3_ERR_PARSE;
     }

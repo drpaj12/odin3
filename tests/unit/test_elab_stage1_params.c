@@ -816,16 +816,15 @@ static void test_connection_errors(void) {
 /* Forms of landed kinds that later tasks land report their kind (point (l)): a hierarchical call
  * (E21, Task 16), an always without an event control (T6), a specparam (P7) and a time variable
  * (N17, Task 16), a rejected net type (N15). */
-static void test_later_forms_pending(void) {
+static void test_task16_rows_reported(void) {
     static const char *const cases[][2] = {
         {"module top (output y);\n  assign y = u.f(1);\nendmodule\n",
-         "t.v:2:14: error: " PENDING ": 'CALL'"},
+         "t.v:2:14: error: hierarchical reference 'u.f' is not supported"},
         {"module top;\n  reg r;\n  always r = 1;\nendmodule\n",
-         "t.v:3:3: error: " PENDING ": 'ALWAYS'"},
-        {"module top;\n  specparam p = 1;\nendmodule\n",
-         "t.v:2:3: error: " PENDING ": 'PARAM_DECL'"},
-        {"module top;\n  time t;\nendmodule\n", "t.v:2:3: error: " PENDING ": 'VAR_DECL'"},
-        {"module top;\n  tri0 n;\nendmodule\n", "t.v:2:3: error: " PENDING ": 'NET_DECL'"},
+         "t.v:3:3: error: always block without an event control is not supported"},
+        {"module top;\n  time t;\nendmodule\n",
+         "t.v:2:3: error: variable type 'time' is not supported"},
+        {"module top;\n  tri0 n;\nendmodule\n", "t.v:2:3: error: net type 'tri0' is not supported"},
     };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         run_one(cases[i][0]);
@@ -999,9 +998,9 @@ static void test_reported_once(void) {
 /* m4: the forms of landed kinds that later tasks land have a table of their own; a form not in it
  * is a 2D bug. */
 static void test_pending_forms_table(void) {
-    TEST_ASSERT_EQUAL_UINT32(10, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1)); /* Task 15 */
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE1)); /* Task 16 */
     TEST_ASSERT_EQUAL_UINT32(0, odin3_elab_pending_form_count(ODIN3_ELAB_STAGE2));
-    TEST_ASSERT_TRUE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS));
+    TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_ALWAYS));
     TEST_ASSERT_FALSE(odin3_elab_pending_form(ODIN3_ELAB_STAGE1, ODIN3_AST_CONNECTION));
     TEST_ASSERT_FALSE(odin3_elab_pending_form(0, ODIN3_AST_ALWAYS));
     run_clean(M_W "module top; m u ();\nendmodule\n");
@@ -1165,7 +1164,7 @@ int main(void) {
     RUN_TEST(test_project_top_parameters);
     RUN_TEST(test_connection_errors);
     RUN_TEST(test_task12_forms_landed);
-    RUN_TEST(test_later_forms_pending);
+    RUN_TEST(test_task16_rows_reported);
     RUN_TEST(test_cell_type_as_given);
     RUN_TEST(test_self_recursion);
     RUN_TEST(test_unbounded_recursion);

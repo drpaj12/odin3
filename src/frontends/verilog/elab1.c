@@ -176,10 +176,14 @@ static odin3_status format_index(odin3_elab1 *e1, const char *fmt, uint32_t *ind
     return ODIN3_OK;
 }
 
-void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...) {
+static void vwarn_once(odin3_elab1 *e1, uint32_t key_node, odin3_ast_id at, const char *fmt,
+                       va_list args) ODIN3_PRINTF(4, 0);
+
+static void vwarn_once(odin3_elab1 *e1, uint32_t key_node, odin3_ast_id at, const char *fmt,
+                       va_list args) {
     uint32_t index = 0;
     odin3_status st = format_index(e1, fmt, &index);
-    uint64_t key = (uint64_t)parsed_node.v << E1_KEY_SHIFT | index;
+    uint64_t key = (uint64_t)key_node << E1_KEY_SHIFT | index;
     if (st == ODIN3_OK && odin3_u64map_get(e1->warned, key, NULL)) {
         return;
     }
@@ -188,9 +192,21 @@ void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char
         e1->fatal = e1->fatal != ODIN3_OK ? e1->fatal : st;
         return;
     }
+    emit(e1, ODIN3_LOG_WARN, odin3_ast_loc(e1->parsed, at), fmt, args);
+}
+
+void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    emit(e1, ODIN3_LOG_WARN, odin3_ast_loc(e1->parsed, parsed_node), fmt, args);
+    vwarn_once(e1, parsed_node.v, parsed_node, fmt, args);
+    va_end(args);
+}
+
+void odin3_elab1_warn_once_at(odin3_elab1 *e1, odin3_ast_id key_node, odin3_ast_id at,
+                              const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vwarn_once(e1, key_node.v, at, fmt, args);
     va_end(args);
 }
 

@@ -472,18 +472,17 @@ static void test_readmem(void) {
     run_one(
         "module m;\n  reg [7:0] mem [0:3];\n  always @* $readmemh(\"f.hex\", mem);\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:13: error: elaboration is not available yet (2D): 'TASK_CALL'");
+              "t.v:3:13: error: $readmemh is supported only in an initial block");
 }
 
 /* What Task 16 still owns stays a located pending line, never a 2D bug. */
-static void test_task16_stays_pending(void) {
+static void test_task16_rows_in_blocks(void) {
     run_one("module m(input c);\n  reg r;\n  always r = 1;\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:3: error: elaboration is not available yet (2D): 'ALWAYS'");
+              "t.v:3:3: error: always block without an event control is not supported");
     run_one("module m(input c);\n  reg r;\n  always @(c) $display(\"x\");\nendmodule\n");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, rs.errors, et_log(&rs));
-    et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:3:15: error: elaboration is not available yet (2D): 'TASK_CALL'");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    expect_warn("t.v:3:15: warning: system task '$display' is ignored");
 }
 
 /* --- Task 15b: parameters in functions, tasks and named blocks ------------------------------ */
@@ -526,6 +525,22 @@ static void test_local_param_scoping(void) {
     expect_warn("t.v:2:13: warning: declaration in an unnamed block is a SystemVerilog extension; "
                 "the block is named '$unnamed_block$1'");
     EXPECT_SEQ("(SEQ_BLOCK:$unnamed_block$1", "(PARAM_DECL.localparam", "(DECLARATOR:A");
+    /* a named block's parameter scope ends at its close: the later read is the module's */
+    run_clean("module m(output reg [3:0] y, input c);\n  localparam W = 4;\n"
+              "  always @* begin : b\n    localparam W = 2;\n    y[W-1:0] = c;\n  end\n"
+              "  always @* y[W-1:0] = c;\nendmodule\n");
+    EXPECT_SEQ("(SEQ_BLOCK:b", "32'sd1", "32'sd0", "(ALWAYS", "32'sd3", "32'sd0");
+}
+
+/* A subroutine port with a net keyword and no data type keeps the written NET (v4.12 m1 only
+ * defaults an untyped port). */
+static void test_subroutine_port_net_kept(void) {
+    run_clean("module m(input c, output y);\n  function f;\n    input wor a;\n    f = a;\n"
+              "  endfunction\n  assign y = f(c);\nendmodule\n");
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(PORT_DECL.input [IN_HEADER NET=4]", "(DECLARATOR:a");
+    run_clean("module m(input c, output y);\n  function f;\n    input a;\n    f = a;\n"
+              "  endfunction\n  assign y = f(c);\nendmodule\n");
+    EXPECT_SEQ("(FUNCTION_DECL:f", "(PORT_DECL.input [IN_HEADER NET=1]", "(DECLARATOR:a");
 }
 
 /* Yosys 0.55 probe a10, a13: a later local param may be read first; a typed one is truncated. */
@@ -635,9 +650,10 @@ int main(void) {
     RUN_TEST(test_readmem);
     RUN_TEST(test_local_params);
     RUN_TEST(test_local_param_scoping);
+    RUN_TEST(test_subroutine_port_net_kept);
     RUN_TEST(test_local_param_values);
     RUN_TEST(test_local_param_errors);
-    RUN_TEST(test_task16_stays_pending);
+    RUN_TEST(test_task16_rows_in_blocks);
     RUN_TEST(test_oom);
     return UNITY_END();
 }

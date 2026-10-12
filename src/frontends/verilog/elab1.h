@@ -130,6 +130,11 @@ void odin3_elab1_report(odin3_elab1 *e1, odin3_log_level level, odin3_loc loc, c
 void odin3_elab1_warn_once(odin3_elab1 *e1, odin3_ast_id parsed_node, const char *fmt, ...)
     ODIN3_PRINTF(3, 4);
 
+/* odin3_elab1_warn_once with the once-key a different node from the one the warning is located
+ * at (a specparam's declarator keys a warning located at its PARAM_DECL). */
+void odin3_elab1_warn_once_at(odin3_elab1 *e1, odin3_ast_id key_node, odin3_ast_id at,
+                              const char *fmt, ...) ODIN3_PRINTF(4, 5);
+
 /* An info line at loc (unlocated when loc is 0). */
 void odin3_elab1_info(odin3_elab1 *e1, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 
@@ -168,6 +173,34 @@ void odin3_elab1_not_yet(odin3_elab1 *e1, odin3_ast_id parsed_node);
  * (odin3_elab_pending_form) lists it, and as unhandled (a 2D bug) once it does not.
  */
 void odin3_elab1_pend_form(odin3_elab1 *e1, odin3_ast_id parsed_node);
+
+/* --- REJECT and IGNORE rows (elab1_diag.c; §9.1, §9.2) ---------------------------------------- */
+
+/*
+ * The REJECT rows that need only the node itself (L9, M11 excepted, N17, N18, E20, E21, T6, T13,
+ * T14, T15, T16, T19, F4, Q6, N15, an edge/level mix): reports the node's error, at its
+ * location and counted under the cap, and returns ODIN3_ERR_PARSE; ODIN3_OK when the node is not
+ * one (nothing is logged). The rows that depend on the context (T12, K12, F2) are the scan's.
+ */
+odin3_status odin3_elab1_reject(odin3_elab1 *e1, odin3_ast_id node);
+
+/*
+ * The IGNORE rows' warnings for the node itself and the slots it holds (the ten rows of §9.2),
+ * once per parsed node for the run (point (v)); ODIN3_OK, or the latched ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_ignore(odin3_elab1 *e1, odin3_ast_id node);
+
+/*
+ * The scan of definition def's body (a MODULE): every node, in source order, goes through
+ * odin3_elab1_reject and odin3_elab1_ignore, and the context rows (T12, K12, F2) are checked.
+ * Once per definition (the first specialization to run); *failed is set when it reported an
+ * error, and the definition's specializations then skip passes E and W (EL-44). The scan stops
+ * at the error cap. ODIN3_OK; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_scan(odin3_elab1 *e1, uint32_t def, bool *failed);
+
+/* The unit-level directive node (outside any module): its IGNORE warning, unless it is read. */
+void odin3_elab1_ignore_directive(odin3_elab1 *e1, odin3_ast_id directive);
 
 /* --- definitions and lookup (elab1_lookup.c) ------------------------------------------------ */
 
@@ -666,6 +699,8 @@ typedef struct odin3_elab1_defx {
     bool reported;            /* its Q7 (a library unit's UDP) or taken-name error is logged */
     bool body_noted;          /* a black box's "body … is ignored" info is logged (Task 12) */
     bool bb_default_asked;    /* a black box's default specialization was requested (EL-11) */
+    bool scanned;             /* its body went through odin3_elab1_scan (Task 16) */
+    bool scan_failed;         /* … and the scan reported an error: passes E and W skip it */
     const uint8_t *port_dirs; /* odin3_dir per port position (run arena; Task 12) */
     uint32_t bb_name;         /* a black box: the name all its specializations share; 0 = none */
 } odin3_elab1_defx;

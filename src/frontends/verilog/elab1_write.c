@@ -118,6 +118,13 @@ static void w_push(e1w *wr, odin3_ast_id id) {
     }
 }
 
+/* A body item pushed unless it came to nothing (every declarator merged into a port). */
+static void w_push_item(e1w *wr, odin3_ast_id id) {
+    if (id.v != 0) {
+        w_push(wr, id);
+    }
+}
+
 bool odin3_elab1_node_room(odin3_elab1 *e1, odin3_ast_id from) {
     uint32_t made = odin3_ast_node_end(e1->elab).v - 1;
     if (made < e1->limits->max_elab_nodes) {
@@ -366,7 +373,7 @@ static bool copyable(odin3_ast_kind kind) {
 }
 
 /* Whether a CALL (system function) or TASK_CALL (system task) is one the elaborated form keeps
- * or folds; the rest are Task 16's (E20, S3). */
+ * or folds; the rest are rejected (E20) or dropped (S3). */
 static bool keeps_system(const e1w *wr, odin3_ast_id node) {
     const char *name = odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node));
     if (name == NULL) {
@@ -395,7 +402,7 @@ static bool w_enter(e1w *wr, odin3_ast_id node) {
     uint16_t flags = call ? odin3_ast_flags(wr->ast, node) : 0;
     if ((flags & ODIN3_AST_F_CALL_HIER) != 0 ||
         ((flags & ODIN3_AST_F_CALL_SYSTEM) != 0 && !keeps_system(wr, node))) {
-        odin3_elab1_pend_form(wr->e1, node); /* E21, E20, S3: Task 16 */
+        (void)odin3_elab1_reject(wr->e1, node); /* E21, E20: reported by the scan */
         halt(wr);
         return false;
     }
@@ -549,7 +556,7 @@ static odin3_ast_id w_param_decl(e1w *wr, odin3_ast_id group, bool in_header);
 static odin3_ast_id w_local_var(e1w *wr, odin3_ast_id group) {
     uint32_t sub = odin3_ast_sub(wr->ast, group);
     if (sub != ODIN3_AST_VAR_DECL_REG && sub != ODIN3_AST_VAR_DECL_INTEGER) {
-        odin3_elab1_pend_form(wr->e1, group); /* N17 (Task 16) */
+        (void)odin3_elab1_reject(wr->e1, group); /* N17 */
         halt(wr);
         return (odin3_ast_id){0};
     }
@@ -596,7 +603,7 @@ static odin3_ast_id w_locals(e1w *wr, odin3_ast_id list) {
         } else if (odin3_ast_kind_of(wr->ast, entry) == ODIN3_AST_VAR_DECL) {
             w_push(wr, w_local_var(wr, entry));
         } else if (odin3_ast_kind_of(wr->ast, entry) == ODIN3_AST_PARAM_DECL) {
-            w_push(wr, w_param_decl(wr, entry, false));
+            w_push_item(wr, w_param_decl(wr, entry, false));
         } else {
             w_local_other(wr, entry);
         }
@@ -680,9 +687,37 @@ static void w_block_scope(e1w *wr, odin3_ast_id node, bool at, bool enter) {
     }
 }
 
+/* A NULL_STMT standing for node (a statement the elaborated form drops, or one that was absent). */
+static odin3_ast_id w_null_make(e1w *wr, odin3_ast_id node) {
+    odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NULL_STMT, node);
+    return w_make_marked(wr, &spec, w_mark(wr), node);
+}
+
+static void w_null_stmt(e1w *wr, odin3_ast_id node) {
+    w_push(wr, w_null_make(wr, node));
+}
+
+/* Whether node is a system task other than the ones the elaborated form keeps (S3: removed). */
+static bool dropped_task(const e1w *wr, odin3_ast_id node) {
+    return node.v != 0 && odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_TASK_CALL &&
+           (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_TASK_CALL_SYSTEM) != 0 &&
+           (odin3_ast_flags(wr->ast, node) & ODIN3_AST_F_TASK_CALL_HIER) == 0 &&
+           strcmp(odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)), "$readmemh") != 0 &&
+           strcmp(odin3_elab1_str(wr->e1, odin3_ast_name(wr->ast, node)), "$readmemb") != 0;
+}
+
+/* The statement a TIMING_STMT outside an ALWAYS stands for (T11: its delay is dropped and the
+ * statement kept); node itself when it is none. 0 when the timing control had no statement. */
+static odin3_ast_id untimed(const e1w *wr, odin3_ast_id node) {
+    while (node.v != 0 && odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_TIMING_STMT) {
+        node = odin3_ast_child(wr->ast, node, 1);
+    }
+    return node;
+}
+
 /* The child idx of node when it is more than a copy: a block's declarations, the control of an
- * assignment (Task 16), a TIMING_STMT outside an ALWAYS (T12, Task 16), an absent statement of a
- * TIMING_STMT (a NULL_STMT). True when the child was written. */
+ * assignment (dropped, T11), an absent statement of a TIMING_STMT (a NULL_STMT). True when the
+ * child was written. */
 static bool copy_special(e1w *wr, odin3_ast_id node, uint32_t idx, odin3_ast_id kid) {
     odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, node);
     bool assign = kind == ODIN3_AST_BLOCKING_ASSIGN || kind == ODIN3_AST_NONBLOCKING_ASSIGN;
@@ -691,16 +726,11 @@ static bool copy_special(e1w *wr, odin3_ast_id node, uint32_t idx, odin3_ast_id 
         return true;
     }
     if (kind == ODIN3_AST_TIMING_STMT && idx == 1 && kid.v == 0) {
-        odin3_ast_spec spec = spec_of(wr, ODIN3_AST_NULL_STMT, node);
-        w_push(wr, w_make_marked(wr, &spec, w_mark(wr), node));
+        w_null_stmt(wr, node);
         return true;
     }
-    bool stray = kid.v != 0 && kind != ODIN3_AST_ALWAYS &&
-                 odin3_ast_kind_of(wr->ast, kid) == ODIN3_AST_TIMING_STMT;
-    if ((assign && idx == 1 && kid.v != 0) || stray) {
-        odin3_elab1_pend_form(wr->e1, assign ? node : kid); /* T11, T12: Task 16 */
-        halt(wr);
-        w_push(wr, (odin3_ast_id){0});
+    if (assign && idx == 1 && kid.v != 0) {
+        w_push(wr, (odin3_ast_id){0}); /* the intra-assignment delay: ignored (T11) */
         return true;
     }
     return false;
@@ -723,6 +753,30 @@ static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark) {
         spec.name = w_unnamed(wr, node);
     }
     return w_make_marked(wr, &spec, mark, node);
+}
+
+/* Child *kid of node as the elaborated form has it: a delay in front of a statement stripped
+ * (T11), a system task removed (S3: omitted from a block, a NULL_STMT elsewhere). True when
+ * the child was written here. */
+static bool copy_dropped(e1w *wr, odin3_ast_id node, uint32_t idx, odin3_ast_id *kid) {
+    odin3_ast_id orig = *kid;
+    if (orig.v == 0 || odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_ALWAYS) {
+        return false;
+    }
+    odin3_ast_id inner = untimed(wr, orig);
+    if (inner.v == 0) {
+        w_null_stmt(wr, orig); /* `#5;` */
+        return true;
+    }
+    if (dropped_task(wr, inner)) {
+        bool in_block = odin3_ast_kind_of(wr->ast, node) == ODIN3_AST_SEQ_BLOCK && idx >= 1;
+        if (!in_block) {
+            w_null_stmt(wr, inner);
+        }
+        return true;
+    }
+    *kid = inner;
+    return false;
 }
 
 static bool push_frame(e1w *wr, odin3_ast_id node) {
@@ -753,8 +807,11 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
         uint32_t idx = top->next++;
         w_block_scope(wr, node, idx == 0, true);
         odin3_ast_id kid = kids.ids[idx];
-        const char *role = kid.v != 0 ? fold_role(wr->ast, node, idx) : NULL;
         odin3_ast_id made = {0};
+        if (copy_dropped(wr, node, idx, &kid)) {
+            return;
+        }
+        const char *role = kid.v != 0 ? fold_role(wr->ast, node, idx) : NULL;
         if (copy_special(wr, node, idx, kid)) {
             return;
         }
@@ -785,6 +842,11 @@ static void copy_step(e1w *wr, size_t base, odin3_ast_id *result) {
 static odin3_ast_id w_expr(e1w *wr, odin3_ast_id root) {
     odin3_ast_id result = {0};
     size_t base = wr->e1->frames.len;
+    odin3_ast_id inner = untimed(wr, root);
+    if (root.v != 0 && (inner.v == 0 || dropped_task(wr, inner))) {
+        return w_null_make(wr, root); /* a task body that is a delay alone, or a system task */
+    }
+    root = inner;
     if (root.v == 0 || !w_enter(wr, root) || w_special(wr, root, &result) ||
         !push_frame(wr, root)) {
         return result;
@@ -841,9 +903,7 @@ static void w_declarators(e1w *wr, odin3_ast_id group, odin3_ast_id (*write)(e1w
 /* PARAM_DECL[localparam] with the final values (EL-4); RANGE, SIGNED and DT kept as declared. */
 static odin3_ast_id w_param_decl(e1w *wr, odin3_ast_id group, bool in_header) {
     if (odin3_ast_sub(wr->ast, group) == ODIN3_AST_PARAM_DECL_SPECPARAM) {
-        odin3_elab1_pend_form(wr->e1, group); /* P7: Task 16 */
-        halt(wr);
-        return (odin3_ast_id){0};
+        return (odin3_ast_id){0}; /* P7: ignored (warned by the scan), not in the elaborated form */
     }
     uint16_t flags = odin3_ast_flags(wr->ast, group) &
                      (uint16_t)(ODIN3_AST_F_PARAM_DECL_SIGNED | ODIN3_AST_F_PARAM_DECL_DT_MASK);
@@ -896,14 +956,6 @@ static odin3_ast_id w_ports(e1w *wr, odin3_ast_id list) {
     return w_make_marked(wr, &spec, mark, list);
 }
 
-/* A slot the elaborated form drops (STRENGTH, DELAY): Task 16's warnings; pending until then. */
-static void w_dropped_slot(e1w *wr, odin3_ast_id slot) {
-    if (slot.v != 0) {
-        odin3_elab1_not_yet(wr->e1, slot);
-        halt(wr);
-    }
-}
-
 /* Whether decl (a declarator of a NET_DECL or VAR_DECL) was merged into a body port (EL-24). */
 static bool merged_decl(const e1w *wr, odin3_ast_id decl) {
     if (wr->scope != 0) {
@@ -940,12 +992,10 @@ static odin3_ast_id w_net_decl(e1w *wr, odin3_ast_id group) {
     uint32_t sub = odin3_ast_sub(wr->ast, group);
     if (sub == ODIN3_AST_NET_DECL_TRI0 || sub == ODIN3_AST_NET_DECL_TRI1 ||
         sub == ODIN3_AST_NET_DECL_TRIREG) {
-        odin3_elab1_pend_form(wr->e1, group); /* N15: Task 16 */
+        (void)odin3_elab1_reject(wr->e1, group); /* N15 */
         halt(wr);
         return (odin3_ast_id){0};
     }
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, group, 0));
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, group, E1_NET_DELAY_SLOT));
     if (unmerged_count(wr, group) == 0) {
         return (odin3_ast_id){0}; /* every declarator is a port's (EL-24) */
     }
@@ -964,7 +1014,7 @@ static odin3_ast_id w_net_decl(e1w *wr, odin3_ast_id group) {
 static odin3_ast_id w_var_decl(e1w *wr, odin3_ast_id group) {
     uint32_t sub = odin3_ast_sub(wr->ast, group);
     if (sub != ODIN3_AST_VAR_DECL_REG && sub != ODIN3_AST_VAR_DECL_INTEGER) {
-        odin3_elab1_pend_form(wr->e1, group);
+        (void)odin3_elab1_reject(wr->e1, group); /* N17 */
         halt(wr);
         return (odin3_ast_id){0};
     }
@@ -990,8 +1040,6 @@ static odin3_ast_id w_net_assign(e1w *wr, odin3_ast_id assign) {
 
 /* CONT_ASSIGN without its STRENGTH and DELAY slots (EL-4). */
 static odin3_ast_id w_cont_assign(e1w *wr, odin3_ast_id item) {
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 0));
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 1));
     uint32_t mark = w_mark(wr);
     w_push(wr, (odin3_ast_id){0});
     w_push(wr, (odin3_ast_id){0});
@@ -1473,12 +1521,10 @@ static bool switch_level(uint32_t sub) {
 static odin3_ast_id w_gate(e1w *wr, odin3_ast_id item) {
     uint32_t sub = odin3_ast_sub(wr->ast, item);
     if (switch_level(sub)) {
-        odin3_elab1_pend_form(wr->e1, item);
+        (void)odin3_elab1_reject(wr->e1, item); /* Q6 */
         halt(wr);
         return (odin3_ast_id){0};
     }
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 0));
-    w_dropped_slot(wr, odin3_ast_child(wr->ast, item, 1));
     uint32_t mark = w_mark(wr);
     w_push(wr, (odin3_ast_id){0});
     w_push(wr, (odin3_ast_id){0});
@@ -1591,21 +1637,14 @@ static void w_close_block(e1w *wr, const e1w_frame *frame) {
 
 /* --- the module ----------------------------------------------------------------------------- */
 
-/* A body item pushed unless it came to nothing (every declarator merged into a port). */
-static void w_push_item(e1w *wr, odin3_ast_id id) {
-    if (id.v != 0) {
-        w_push(wr, id);
-    }
-}
-
 /* ALWAYS and INITIAL: the statement tree copied (T6: an always without an event control is
- * Task 16's). */
+ * rejected). */
 static odin3_ast_id w_process(e1w *wr, odin3_ast_id item) {
     odin3_ast_id first = odin3_ast_child(wr->ast, item, 0);
     if (odin3_ast_kind_of(wr->ast, item) == ODIN3_AST_ALWAYS &&
         odin3_ast_sub(wr->ast, item) == ODIN3_AST_ALWAYS_ALWAYS && first.v != 0 &&
         odin3_ast_kind_of(wr->ast, first) != ODIN3_AST_TIMING_STMT) {
-        odin3_elab1_pend_form(wr->e1, item);
+        (void)odin3_elab1_reject(wr->e1, item); /* T6 */
         halt(wr);
         return (odin3_ast_id){0};
     }
@@ -1650,7 +1689,7 @@ static void w_sub_entries(e1w *wr, odin3_ast_id list, bool ports) {
         } else if (kind == ODIN3_AST_VAR_DECL) {
             w_push(wr, w_local_var(wr, group));
         } else if (kind == ODIN3_AST_PARAM_DECL) {
-            w_push(wr, w_param_decl(wr, group, false));
+            w_push_item(wr, w_param_decl(wr, group, false));
         } else {
             w_local_other(wr, group);
         }
@@ -1719,8 +1758,14 @@ static void w_behaviour(e1w *wr, odin3_ast_id item) {
 static void w_item(e1w *wr, odin3_ast_id item) {
     wr->env->cur_scope = wr->scope; /* a halted body may have left a parameter scope */
     odin3_ast_kind kind = odin3_ast_kind_of(wr->ast, item);
-    if (kind == ODIN3_AST_DIRECTIVE && odin3_elab1_directive_handled(wr->e1, item)) {
-        return; /* `default_nettype and `resetall: read by odin3_elab1_nettype_at */
+    if (kind == ODIN3_AST_DIRECTIVE || kind == ODIN3_AST_SPECIFY_BLOCK) {
+        return; /* `default_nettype and `resetall: read by odin3_elab1_nettype_at; the rest ignored
+                 */
+    }
+    if (kind == ODIN3_AST_EVENT_DECL) {
+        (void)odin3_elab1_reject(wr->e1, item); /* N18 */
+        halt(wr);
+        return;
     }
     if (odin3_elab1_pending(wr->e1, item)) {
         halt(wr);
@@ -1731,7 +1776,7 @@ static void w_item(e1w *wr, odin3_ast_id item) {
     }
     switch (kind) {
     case ODIN3_AST_PARAM_DECL:
-        w_push(wr, w_param_decl(wr, item, false));
+        w_push_item(wr, w_param_decl(wr, item, false));
         break;
     case ODIN3_AST_NET_DECL:
         w_push_item(wr, w_net_decl(wr, item));

@@ -555,16 +555,15 @@ static odin3_status check_acyclic(odin3_elab1 *e1) {
 /* --- the queue (§3.4) ---------------------------------------------------------------------- */
 
 /* The directives of the design UNITs other than `default_nettype and `resetall (Task 15 reads
- * those: odin3_elab1_nettype_at): Task 16's. */
-static void pend_unit_directives(odin3_elab1 *e1) {
+ * those: odin3_elab1_nettype_at) warn that they are ignored (L18, L21). */
+static void ignore_unit_directives(odin3_elab1 *e1) {
     uint32_t from = odin3_ast_library_units_from(e1->parsed);
     uint32_t units = from != 0 ? from : odin3_ast_root_count(e1->parsed);
     for (uint32_t idx = 0; idx < units && !e1->stopped; idx++) {
         odin3_ast_span kids = odin3_ast_children(e1->parsed, odin3_ast_root(e1->parsed, idx));
         for (uint32_t i = 0; i < kids.n && !e1->stopped; i++) {
-            if (odin3_ast_kind_of(e1->parsed, kids.ids[i]) == ODIN3_AST_DIRECTIVE &&
-                !odin3_elab1_directive_handled(e1, kids.ids[i])) {
-                odin3_elab1_not_yet(e1, kids.ids[i]);
+            if (odin3_ast_kind_of(e1->parsed, kids.ids[i]) == ODIN3_AST_DIRECTIVE) {
+                odin3_elab1_ignore_directive(e1, kids.ids[i]);
             }
         }
     }
@@ -609,7 +608,12 @@ static odin3_status run_specs(odin3_elab1 *e1) {
             st = run_blackbox(e1, i);
             continue;
         }
-        st = odin3_elab1_expand(e1, i);
+        bool rejected = false;
+        st = odin3_elab1_scan(e1, def, &rejected);
+        if (rejected) {
+            continue; /* its REJECT rows are reported; what depends on it is skipped (EL-44) */
+        }
+        st = st != ODIN3_OK ? st : odin3_elab1_expand(e1, i);
         st = st != ODIN3_OK ? st : odin3_elab1_write(e1, i);
         st = st != ODIN3_OK ? st : e1->fatal;
     }
@@ -641,7 +645,7 @@ odin3_status odin3_elab1_run_queue(odin3_elab1 *e1, uint32_t top_def) {
     if (st != ODIN3_OK) {
         return st;
     }
-    pend_unit_directives(e1);
+    ignore_unit_directives(e1);
     uint32_t mark = odin3_ast_mark(e1->elab);
     if (odin3_elab1_reach_def(e1, top_def)) {
         st = top_spec(e1, top_def);
