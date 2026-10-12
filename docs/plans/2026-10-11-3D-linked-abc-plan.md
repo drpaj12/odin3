@@ -1170,7 +1170,7 @@ The rows are §7.5's, and each command name is verified at the pin.
   - (a) runs the same `read_blif; abc --lut 6 [--via-blif D]; write_blif` in two processes and compares `write_blif` and (BLIF) `abc<r>.in.blif`, `.cmd` and `.out.blif` byte for byte, never `.log` or `--log`;
   - (b) runs A, then B, then a fresh A in one `odin3 -p` script, for the default script and for `strash; fraig; if -K 6`, and compares the two A outputs;
   - (c) runs (a)'s first process, sleeps 60 s, runs it again, and compares the two (§13.8 (c));
-  - (d) runs (a)'s command once with `--odin3` (Release, `build/release/odin3`) and once with `--odin3-debug` (Debug, `build/debug/odin3`) and compares `write_blif` (§13.8 (d); both build trees must exist, else exit 2);
+  - (d) runs (a)'s command once with `--odin3` (Release, `build/release/odin3`) and once with `--odin3-debug` (Debug, `build/debug/odin3`) and compares `write_blif` (§13.8 (d); both build trees must exist, else exit 2). It is for the micros only (the committed BLIFs and the k6 `regression/` goldens): a path under a `vtr/` golden directory is refused with exit 2 (re-review N1);
   - it prints `same` or `differs <file>` per design. Exit 0 when all are the same, else 1. It passes the caller's environment through unchanged and, on golden paths, calls `qor_heavy.require_heavy()` first.
 - `bench_abc --one <file.blif> [--lut K] [--via-blif DIR] [--exe ABC]` prints the columns of point (v). `bench_abc_set` runs it on the k6 goldens except `mcml` and `LU32PEEng`, smallest first.
 
