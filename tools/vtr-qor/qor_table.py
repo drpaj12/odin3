@@ -605,6 +605,24 @@ DISPLAY_LEGS = {"Oprime": "O'", "Pprime": "P'"}
 EXCHANGE_LEGS = ("Pprime", "O", "Oprov")
 TICK, CROSS, OPEN = "✓", "✗", "?"
 NOT_GATED = "not gated"
+DECISION3 = "Gate (decision 3)"
+# Agent default (Task 9 fix round 1): EArch tables gate over the smoke set; never decision 3's.
+EARCH_ARCH = "EArch"
+EARCH_SMOKE_GATE = "Gate (EArch smoke; agent default, not decision 3)"
+
+
+def gate_title(arch: str) -> str:
+    """The gate section's and ``vtr-qor gate``'s title: decision 3's only on k6."""
+    return EARCH_SMOKE_GATE if arch == EARCH_ARCH else DECISION3
+
+
+def narrowed_reason(n: int) -> str:
+    """Ruling N1: a k6 table without all 19 gate designs is not gated (and INCOMPLETE)."""
+    return f"decision 3 needs the 19 (this table has {n})"
+
+
+def narrowed_verdict(n: int) -> Verdict:
+    return Verdict(state=INCOMPLETE, violations=(f"gate: INCOMPLETE: {narrowed_reason(n)}",))
 RUNS_HEADER = (
     "arch", "design", "leg", "key12", "status", "gating", "vpr_status", "luts", "ffs", "adders",
     "mults", "ram_slices", "depth", "abc_depth", "num_clb", "num_memories", "num_mult",
@@ -1125,15 +1143,17 @@ def _compare_header(layout: _Layout, pair: tuple[str, str], ok: bool) -> list[st
     return head + (["ok"] if ok else [])
 
 
-def _md_gate(layout: _Layout, verdict: Verdict | None) -> list[str]:
+def _md_gate(layout: _Layout, verdict: Verdict | None, narrowed: int | None) -> list[str]:
     pair = layout.bands.pair
     if pair[0] not in layout.legs:
         return []
+    title = gate_title(layout.arch)
+    if narrowed is not None:
+        return [f"## {title}: {NOT_GATED} — {narrowed_reason(narrowed)}", ""]
     if verdict is None or not layout.gate:
-        return [f"## Gate (decision 3): {NOT_GATED}", "",
-                "No gate design in this table (spec §6.2 gates the 19 on k6).", ""]
+        return [f"## {title}: {NOT_GATED}", "", "No gate design in this table.", ""]
     state, violations = verdict.state, verdict.violations
-    lines = [f"## Gate (decision 3): {state}", ""]
+    lines = [f"## {title}: {state}", ""]
     lines += _md_table(_compare_header(layout, pair, True),
                        _compare_rows(layout, pair, layout.gate, violations))
     lines += [f"- {line}" for line in violations] or ["No violations."]
@@ -1404,16 +1424,17 @@ def write_md(runs: Sequence[Run], verdict: Verdict | None, header: TableHeader, 
              golden: GoldenXcheck | None, bands: Bands | None = None,
              divergences: Sequence[tuple[str, str, str]] = (),
              equiv_exceptions: Sequence[tuple[str, str, str]] = (),
-             gate_set: Sequence[str] | None = None) -> None:
+             gate_set: Sequence[str] | None = None, narrowed: int | None = None) -> None:
     """``qor.md``: §6.3's sections in order. The gate section (with the non-gating rows) only
     when O is in the table; Netlist, Packed, Routed and Cost always; Attribution, Noise floor,
     Declared divergences and Name style when their legs are in it; the functional check when P
     or O is; the cross-check against VTR's golden whenever P is (and ``golden`` is given).
     ``gate_set`` is the set the gate rows cover (default: the 19); an empty one, or no
-    ``verdict``, writes the gate section as not gated."""
+    ``verdict``, writes the gate section as not gated; so does ``narrowed`` (a k6 table holding
+    only that many of the 19, ruling N1), with its reason."""
     layout = _layout(runs, bands, gate_set)
     lines = _md_title(header)
-    lines += _md_gate(layout, verdict)
+    lines += _md_gate(layout, verdict, narrowed)
     lines += _md_netlist(layout) + _md_packed(layout) + _md_routed(layout) + _md_cost(layout)
     lines += _md_attribution(layout) + _md_noise(layout)
     lines += _md_checks(layout, equiv_exceptions) + _md_divergences(layout, divergences)

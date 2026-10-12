@@ -698,33 +698,59 @@ class TableCliTest(unittest.TestCase):
             stray.mkdir()
             (stray / "notes.txt").write_text("x", encoding="utf-8")
             code, _, err = publish("--force")
-            self.assertEqual((code, err), (2, f"vtr-qor: publish: refusing to remove {stray}: "
-                                              "it holds notes.txt\n"))
+            self.assertEqual((code, err), (2, "vtr-qor: publish: refusing to replace or remove "
+                                              f"{stray}: it holds notes.txt\n"))
             self.assertEqual(self.files(target), self.files(other))
+            (stray / "notes.txt").unlink()
+            stray.rmdir()
+            # Review N2: a label holding another file is refused before any rename.
+            (target / "README").write_text("x", encoding="utf-8")
+            code, _, err = publish("--force")
+            self.assertEqual((code, err), (2, "vtr-qor: publish: refusing to replace or remove "
+                                              f"{target}: it holds README\n"))
+            self.assertEqual(sorted(p.name for p in target.parent.iterdir()), ["fixture"])
+            self.assertEqual(self.files(target), self.files(other))
+            # Review N3: a symlinked label is refused, --force or not.
+            real = self.root / "elsewhere"
+            real.mkdir()
+            linked = target.parent / "linked"
+            linked.symlink_to(real)
+            data = json.loads((table_dir / "runs.json").read_text(encoding="utf-8"))
+            data["header"]["label"] = "linked"
+            shutil.copytree(table_dir, self.root / "linked-table")
+            (self.root / "linked-table" / "runs.json").write_text(json.dumps(data),
+                                                                   encoding="utf-8")
+            for extra in ((), ("--force",)):
+                code, _, err = publish(*extra, where=self.root / "linked-table")
+                self.assertEqual((code, err), (2, f"vtr-qor: publish: refusing {linked}: it is "
+                                                  "a symlink\n"), extra)
+            self.assertEqual(list(real.iterdir()), [])
 
     def test_smoke_and_extra_sets(self) -> None:
-        """Review M2: --set smoke gates over the smoke set; a table without gate designs is
-        not gated."""
-        table_dir = self.made("smoke", "P,O")
-        code, out, err = self.table("P,O", "smoke", "--set", "smoke")
-        self.assertEqual(code, 0, err)
-        smoke = Path(out.strip())
-        self.assertEqual(self.gate(smoke), (0, ["Gate (decision 3): PASS"]))
-        md = (smoke / "qor.md").read_text(encoding="utf-8")
-        self.assertIn("| **geomean (5)** |  |  | **1.150** |", md)  # (1.375 * 0.88)^2 * 1.375
-        self.assertNotIn("| sha |", md)
-        self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,5,", (smoke / "ratios.csv").read_text(
-            encoding="utf-8"))
-        self.assertNotEqual(smoke, table_dir)
-        code, out, err = self.table("P,O", "extras", "--set", "extra")
-        self.assertEqual(code, 0, err)
-        extras = Path(out.strip())
-        md = (extras / "qor.md").read_text(encoding="utf-8")
-        self.assertIn("## Gate (decision 3): not gated\n", md)
-        self.assertIsNone(json.loads((extras / "runs.json").read_text(encoding="utf-8"))["gate"])
-        code, _, err = run_main(vtr_qor.main, ["gate", str(extras)])
-        self.assertEqual((code, err), (2, f"vtr-qor: gate: {extras}: the table is not gated "
-                                          "(no gate design in it)\n"))
+        """Ruling N1 (review addendum's reproduction): on k6, decision 3 needs all 19, so a
+        table narrowed by --set is not gated and INCOMPLETE (exit 3), never a 5-design PASS."""
+        for sets, n in (("smoke", 5), ("extra", 0), ("gate", 19)):
+            code, out, err = self.table("P,O',P',O", f"set-{sets}", "--set", sets)
+            self.assertEqual(code, 0, err)
+            table_dir = Path(out.strip())
+            md = (table_dir / "qor.md").read_text(encoding="utf-8")
+            if n == 19:
+                self.assertEqual(self.gate(table_dir), (0, ["Gate (decision 3): PASS"]))
+                self.assertIn("## Gate (decision 3): PASS\n", md)
+                continue
+            reason = f"decision 3 needs the 19 (this table has {n})"
+            self.assertIn(f"## Gate (decision 3): not gated — {reason}\n", md)
+            self.assertNotIn("**geomean (", md.split("## Netlist")[0])
+            self.assertNotIn("## Gate (decision 3): PASS", md)
+            self.assertEqual(self.gate(table_dir), (3, [
+                "Gate (decision 3): INCOMPLETE", f"gate: INCOMPLETE: {reason}"]))
+            ratios = (table_dir / "ratios.csv").read_text(encoding="utf-8")
+            self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,{n},", ratios)  # n of the 19
+            geomeans = json.loads((table_dir / "runs.json").read_text(encoding="utf-8"))
+            want = ("O/P", "GEOMEAN_GATE", "num_clb")
+            gate_rows = [g for g in geomeans["geomeans"]
+                         if (g["pair"], g["set"], g["metric"]) == want]
+            self.assertEqual([(g["n"], g["of"]) for g in gate_rows], [(n, 19)])
 
     def test_earch_table(self) -> None:
         """Review M1: an EArch table gates over the smoke set and has no k6 cross-check."""
@@ -734,9 +760,12 @@ class TableCliTest(unittest.TestCase):
             "--legs", "P,O", "--label", "earch"])
         self.assertEqual(code, 0, err)
         table_dir = Path(out.strip())
-        self.assertEqual(self.gate(table_dir), (0, ["Gate (decision 3): PASS"]))
+        title = "Gate (EArch smoke; agent default, not decision 3)"
+        self.assertEqual(self.gate(table_dir), (0, [f"{title}: PASS"]))
         md = (table_dir / "qor.md").read_text(encoding="utf-8")
         self.assertIn("# Odin III QoR — EArch — earch", md)
+        self.assertIn(f"## {title}: PASS\n", md)
+        self.assertNotIn("Gate (decision 3)", md)
         self.assertIn("| **geomean (5)** |", md)
         self.assertIn("golden has no row for these designs on EArch; no cross-check.", md)
         self.assertNotIn("| CLB P | CLB golden |", md)

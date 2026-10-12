@@ -29,13 +29,15 @@ Tasks 10-15 add the rest of spec §9. The common options are §9's: ``--vtr-root
   nothing) reads one key per leg (``--keys`` or ``latest``) under the pin's ``<vtr12>`` (the
   VTR checkout's with ``--allow-vtr-drift``), keeps the designs of ``--set`` (default
   ``gate,extra``), gates them (``tests/vtr/qor``'s ``bands.json`` and TSVs; a TSV that does not
-  exist yet is empty) over ``gate_designs`` (on k6 the 19 in ``--set``, on EArch the smoke
-  set; none: not gated), reads VTR's golden rows of the table's arch for the cross-check when
-  P is in the table, and
-  writes ``<out>/tables/<YYYYMMDD-HHMM of the header date>-<label>/`` (``qor.md``,
-  ``runs.csv``, ``ratios.csv``, ``runs.json``), printing the directory.
-- ``gate <table dir>`` prints ``Gate (decision 3): PASS|FAIL|INCOMPLETE``, then the violations,
-  from the table's ``runs.json``; exit 0, 1 or 3.
+  exist yet is empty) over ``gate_designs``: on k6 decision 3 needs all 19 (a table narrowed by
+  ``--set`` is "not gated" and INCOMPLETE, ruling N1); on EArch the smoke set, an agent default
+  never titled decision 3 (none: not gated). It reads VTR's golden rows of the table's arch
+  for the cross-check when P is in the table, and writes
+  ``<out>/tables/<YYYYMMDD-HHMM of the header date>-<label>/`` (``qor.md``, ``runs.csv``,
+  ``ratios.csv``, ``runs.json``), printing the directory.
+- ``gate <table dir>`` prints ``Gate (decision 3): PASS|FAIL|INCOMPLETE`` (an EArch table's
+  title says it is not decision 3's), then the violations, from the table's ``runs.json``;
+  exit 0, 1 or 3 (2 when the table is not gated).
 - ``publish <table dir>`` (the controller's) needs ``ODIN3_QOR_PUBLISH=1`` (E-QH15). It copies
   the four files to ``~/odin3-ws/golden/qor/<vtr12>/<label>/`` (``~`` is ``$HOME``) through
   ``.<label>.tmp`` and one rename, refuses an existing label unless ``--force``, and prints the
@@ -821,9 +823,9 @@ def _golden(args: argparse.Namespace, arch: str) -> qor_table.GoldenXcheck:
 
 
 def gate_designs(sets: Sets, arch_key: str, selected: Collection[str]) -> tuple[str, ...]:
-    """The designs a table gates over (agent default, Task 9 fix round 1): §6.2's 19 on k6,
-    narrowed to the table's ``--set`` (``--set smoke`` gates over the smoke set); on EArch the
-    smoke set, its only set (§2). Empty: the table is not gated."""
+    """The gate designs a table holds: on k6 §6.2's 19 that its ``--set`` includes (decision 3
+    gates only when all 19 are there, ruling N1); on EArch the smoke set, its only set (§2; an
+    agent default, never decision 3's gate). Empty on EArch: the table is not gated."""
     base = sets.smoke if arch_key == EARCH else sets.gate
     return tuple(design for design in base if design in selected)
 
@@ -845,15 +847,21 @@ def cmd_table(args: argparse.Namespace, argv: Sequence[str]) -> int:
     except (OSError, ValueError) as exc:
         raise HeavyError(EXIT_USAGE, f"table: {exc}") from exc
     gate_set = gate_designs(sets, args.arch, designs)
-    verdict = qor_table.gate(qor_table.GateInputs(
-        runs=runs, bands=bands, gate_set=gate_set, explanations=explanations,
-        divergences=divergences, equiv_exceptions=exceptions)) if gate_set else None
+    narrowed = len(gate_set) if args.arch != EARCH and len(gate_set) != len(sets.gate) else None
+    if narrowed is not None:
+        gate_set = sets.gate  # GEOMEAN_GATE stays over the 19; n shows how many are there
+        verdict: qor_table.Verdict | None = qor_table.narrowed_verdict(narrowed)
+    else:
+        verdict = qor_table.gate(qor_table.GateInputs(
+            runs=runs, bands=bands, gate_set=gate_set, explanations=explanations,
+            divergences=divergences, equiv_exceptions=exceptions)) if gate_set else None
     golden = _golden(args, arch) if "P" in legs else None
     header = qor_table.table_header(runs, arch=arch, label=label, vtr12=vtr12)
     table_dir = out / "tables" / f"{qor_table.table_stamp(header)}-{label}"
     table_dir.mkdir(parents=True, exist_ok=True)
     qor_table.write_md(runs, verdict, header, table_dir / "qor.md", golden=golden, bands=bands,
-                       divergences=divergences, equiv_exceptions=exceptions, gate_set=gate_set)
+                       divergences=divergences, equiv_exceptions=exceptions, gate_set=gate_set,
+                       narrowed=narrowed)
     qor_table.write_csv(runs, table_dir / "runs.csv", table_dir / "ratios.csv", bands=bands,
                         gate_set=gate_set)
     qor_table.write_json(runs, verdict, header, table_dir / "runs.json", bands=bands,
@@ -883,7 +891,9 @@ def cmd_gate(args: argparse.Namespace, argv: Sequence[str]) -> int:
         raise HeavyError(EXIT_USAGE, f"gate: {os.path.abspath(args.table_dir)}: the table is "
                                      "not gated (no gate design in it)")
     state = qor_table.verdict_state(gate_object)
-    print(f"Gate (decision 3): {state}")
+    header = data["header"]
+    arch = header.get("arch") if isinstance(header, dict) else None
+    print(f"{qor_table.gate_title(arch if isinstance(arch, str) else '')}: {state}")
     violations = gate_object.get("violations")
     for line in violations if isinstance(violations, list) else []:
         print(line)
@@ -898,18 +908,25 @@ def _publish_target(header: Mapping[str, object]) -> tuple[str, str]:
     return vtr12, label
 
 
-def _remove_table_dir(path: Path) -> None:
-    """Remove a published table directory left by ``publish`` itself (its four files, then the
-    directory). Anything else in it, or a symlink, is refused: nothing else in odin3-golden is
-    ever deleted."""
+def _check_table_dir(path: Path) -> None:
+    """Refuse a symlink, or a directory holding anything but the four table files (absent is
+    fine): only such a directory is ever replaced or removed by ``publish``."""
     if path.is_symlink():
         raise HeavyError(EXIT_USAGE, f"publish: refusing {path}: it is a symlink")
     if not path.exists():
         return
     others = sorted(p.name for p in path.iterdir() if p.name not in qor_table.TABLE_FILES)
     if others:
-        raise HeavyError(EXIT_USAGE, f"publish: refusing to remove {path}: it holds "
+        raise HeavyError(EXIT_USAGE, f"publish: refusing to replace or remove {path}: it holds "
                                      f"{', '.join(others)}")
+
+
+def _remove_table_dir(path: Path) -> None:
+    """Remove a published table directory left by ``publish`` itself (its four files, then the
+    directory), after ``_check_table_dir``: nothing else in odin3-golden is ever deleted."""
+    _check_table_dir(path)
+    if not path.exists():
+        return
     for name in qor_table.TABLE_FILES:
         (path / name).unlink(missing_ok=True)
     path.rmdir()
@@ -931,8 +948,11 @@ def cmd_publish(args: argparse.Namespace, argv: Sequence[str]) -> int:
         raise HeavyError(EXIT_USAGE, f"publish: {source} lacks {', '.join(missing)}")
     parent = Path.home() / GOLDEN_REL / "qor" / vtr12
     target = parent / label
-    if target.is_symlink() or (target.exists() and not args.force):
+    if target.is_symlink():
+        raise HeavyError(EXIT_USAGE, f"publish: refusing {target}: it is a symlink")
+    if target.exists() and not args.force:
         raise HeavyError(EXIT_USAGE, f"publish: {target} exists (--force replaces it)")
+    _check_table_dir(target)  # review N2: refuse before any rename, never strand a file
     parent.mkdir(parents=True, exist_ok=True)
     tmp, old = parent / f".{label}.tmp", parent / f".{label}.old"
     _remove_table_dir(tmp)
