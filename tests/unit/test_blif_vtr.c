@@ -2753,6 +2753,28 @@ static void test_stub_dead_nodes(void) {
                                  body);
 }
 
+/* 2E-1's eleven IR change D cells (plain write_blif refuses them in write_cell): under --vtr the
+ * preflight refuses each first, the asynchronous flip-flops with E1b (plan point (e)), the others
+ * as word cells with E5. */
+static void test_ir_change_d_cells_refused(void) {
+    static const char *const async_ffs[] = {"$adffe", "$aldff", "$aldffe", "$dffsr", "$dffsre"};
+    static const char *const word_cells[] = {"$sdffe",   "$sdffce",   "$dlatch",
+                                             "$adlatch", "$dlatchsr", "$sr"};
+    for (size_t i = 0; i < sizeof async_ffs / sizeof async_ffs[0]; i++) {
+        odin3_node_id node = hand_cell(hand_top(), async_ffs[i], NULL, 0);
+        expect_preflight_refused(
+            line_of("write_blif: --vtr: top: %s '$c%u': %s", async_ffs[i], node.v, E1B));
+        bvt_free(&tc);
+    }
+    for (size_t i = 0; i < sizeof word_cells / sizeof word_cells[0]; i++) {
+        odin3_node_id node = hand_cell(hand_top(), word_cells[i], NULL, 0);
+        expect_preflight_refused(line_of("write_blif: --vtr: top: %s '$c%u': not a netlist cell "
+                                         "(run lower)",
+                                         word_cells[i], node.v));
+        bvt_free(&tc);
+    }
+}
+
 /* Task 5: hard blocks. */
 static void run_task_5(void) {
     RUN_TEST(test_formals_sorted);
@@ -2770,6 +2792,7 @@ static void run_task_5(void) {
     RUN_TEST(test_mixed_width_formals_reread);
     RUN_TEST(test_declared_one_bit_vector_kept);
     RUN_TEST(test_stub_dead_nodes);
+    RUN_TEST(test_ir_change_d_cells_refused);
     odin3_strbuf_free(&flat);
 }
 
