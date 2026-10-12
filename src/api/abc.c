@@ -13,8 +13,7 @@
 
 enum { ABC_COMMIT_DIGITS = 40, ABC_ENGINE_FUNCTIONS = 6 };
 
-/* abc_commit: exactly ABC_COMMIT_DIGITS lower-case hex digits (reads at most one byte past them).
- */
+/* abc_commit: exactly ABC_COMMIT_DIGITS lower-case hex digits; stops at the first non-hex byte. */
 static bool abc_commit_ok(const char *commit) {
     if (commit == NULL) {
         return false;
@@ -93,5 +92,11 @@ ODIN3_EXPORT odin3_status odin3_abc_engine_register(const odin3_abc_engine *engi
     if (st != ODIN3_OK) {
         return st;
     }
-    return odin3_abc_engine_set(engine); /* logs "abc engine already registered (<name>)" */
+    const char *registered = odin3_abc_engine_registered_name();
+    if (registered != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_abc_engine_register: abc engine already registered (%s)",
+                  registered);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_abc_engine_set(engine);
 }

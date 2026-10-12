@@ -17,11 +17,13 @@ const odin3_abc_engine *odin3_abc_engine_get(void);
 
 /*
  * Stores a copy of *engine (the strings and self are not copied: they must outlive the process)
- * as the registered engine, which is final. engine must be a table odin3_abc_engine_register has
- * validated. ODIN3_ERR_INVALID_ARG for a NULL engine (not logged), or when an engine is already
- * registered, logged as "odin3_abc_engine_register: abc engine already registered (<name>)" with
- * the registered engine's name; nothing is stored then.
+ * as the registered engine, which is final. engine must be a validated table (the caller checks
+ * it). ODIN3_ERR_INVALID_ARG for a NULL engine or when an engine is already registered; nothing is
+ * stored then. Never logs: the caller reports the failure.
  */
 odin3_status odin3_abc_engine_set(const odin3_abc_engine *engine);
+
+/* The registered engine's name (never the test override's), or NULL when none is registered. */
+const char *odin3_abc_engine_registered_name(void);
 
 #endif

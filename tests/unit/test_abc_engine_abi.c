@@ -129,6 +129,34 @@ static void test_null_name(void) {
     expect_refused(&engine, "odin3_abc_engine_register: invalid argument engine");
 }
 
+enum { FUNCTION_COUNT = 6, RESERVED_COUNT = 4 };
+
+/* A valid table named "fake" with function fn (0 .. 5, table order) NULL. */
+static odin3_abc_engine without_function(size_t fn) {
+    odin3_abc_engine engine = valid_engine("fake");
+    switch (fn) {
+    case 0:
+        engine.open = NULL;
+        break;
+    case 1:
+        engine.load_aig = NULL;
+        break;
+    case 2:
+        engine.exec = NULL;
+        break;
+    case 3:
+        engine.get_luts = NULL;
+        break;
+    case 4:
+        engine.name_map = NULL;
+        break;
+    default:
+        engine.close = NULL;
+        break;
+    }
+    return engine;
+}
+
 static void test_null_exec(void) {
     odin3_abc_engine engine = valid_engine("fake");
     engine.exec = NULL;
@@ -136,9 +164,20 @@ static void test_null_exec(void) {
     /* Table order: open is named before exec. */
     engine.open = NULL;
     expect_refused(&engine, "odin3_abc_engine_register: engine 'fake' has no 'open' function");
-    engine = valid_engine("fake");
-    engine.close = NULL;
-    expect_refused(&engine, "odin3_abc_engine_register: engine 'fake' has no 'close' function");
+}
+
+static void test_each_null_function(void) {
+    static const char *const names[FUNCTION_COUNT] = {"open",     "load_aig", "exec",
+                                                      "get_luts", "name_map", "close"};
+    for (size_t fn = 0; fn < FUNCTION_COUNT; fn++) {
+        char want[LINE_CAP];
+        int len =
+            snprintf(want, sizeof want,
+                     "odin3_abc_engine_register: engine 'fake' has no '%s' function", names[fn]);
+        TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+        odin3_abc_engine engine = without_function(fn);
+        expect_refused(&engine, want);
+    }
 }
 
 static void test_reserved_set(void) {
@@ -146,6 +185,42 @@ static void test_reserved_set(void) {
     odin3_abc_engine engine = valid_engine("fake");
     engine.reserved[2] = &marker;
     expect_refused(&engine, "odin3_abc_engine_register: engine 'fake': reserved[2] must be NULL");
+}
+
+static void test_each_reserved_set(void) {
+    static int marker;
+    for (size_t slot = 0; slot < RESERVED_COUNT; slot++) {
+        char want[LINE_CAP];
+        int len =
+            snprintf(want, sizeof want,
+                     "odin3_abc_engine_register: engine 'fake': reserved[%zu] must be NULL", slot);
+        TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
+        odin3_abc_engine engine = valid_engine("fake");
+        engine.reserved[slot] = &marker;
+        expect_refused(&engine, want);
+    }
+}
+
+/* Several faults at once: functions, then reserved, then abc_commit, one line each time. */
+static void test_group_order(void) {
+    static int marker;
+    odin3_abc_engine engine = valid_engine("fake");
+    engine.get_luts = NULL;
+    engine.reserved[0] = &marker;
+    engine.abc_commit = "BAD";
+    expect_refused(&engine, "odin3_abc_engine_register: engine 'fake' has no 'get_luts' function");
+    engine.get_luts = fake_get_luts;
+    expect_refused(&engine, "odin3_abc_engine_register: engine 'fake': reserved[0] must be NULL");
+    engine.reserved[0] = NULL;
+    expect_refused(&engine, "odin3_abc_engine_register: engine 'fake': abc_commit 'BAD' is not 40 "
+                            "lower-case hex digits");
+    /* The version comes before everything, the name before the functions. */
+    engine.version = 2;
+    engine.exec = NULL;
+    expect_refused(&engine, "odin3_abc_engine_register: engine version 2, expected 1");
+    engine.version = ODIN3_ABC_ENGINE_VERSION;
+    engine.name = NULL;
+    expect_refused(&engine, "odin3_abc_engine_register: invalid argument engine");
 }
 
 static void expect_bad_commit(const char *commit) {
@@ -206,8 +281,11 @@ int main(void) {
     RUN_TEST(test_other_version);
     RUN_TEST(test_null_name);
     RUN_TEST(test_null_exec);
+    RUN_TEST(test_each_null_function);
     RUN_TEST(test_reserved_set);
+    RUN_TEST(test_each_reserved_set);
     RUN_TEST(test_bad_commit);
+    RUN_TEST(test_group_order);
     RUN_TEST(test_register_then_final);
     RUN_TEST(test_override);
     return UNITY_END();

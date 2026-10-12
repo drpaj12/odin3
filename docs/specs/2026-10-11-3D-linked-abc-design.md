@@ -366,9 +366,9 @@ typedef struct odin3_abc_engine {
 
 /*
  * Makes *engine (copied; self and the strings must outlive the process) the process's ABC engine.
- * ODIN3_ERR_INVALID_ARG (logged) for NULL, another version, a NULL function, a non-NULL reserved
- * slot, an abc_commit that is not 40 lower-case hex digits, or an engine already registered
- * ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL engine or name, another version, a NULL function, a
+ * non-NULL reserved slot, an abc_commit that is not 40 lower-case hex digits, or an engine already
+ * registered ("abc engine already registered (<name>)"). Process-wide, not thread-safe, final.
  */
 odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
 ```

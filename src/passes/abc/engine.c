@@ -4,7 +4,6 @@
  */
 #include "passes/abc/engine.h"
 #include "passes/abc/abc_test.h"
-#include "util/log.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -22,17 +21,16 @@ const odin3_abc_engine *odin3_abc_engine_get(void) {
 }
 
 odin3_status odin3_abc_engine_set(const odin3_abc_engine *engine) {
-    if (engine == NULL) {
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if (have_registered) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_abc_engine_register: abc engine already registered (%s)",
-                  registered.name);
+    if (engine == NULL || have_registered) {
         return ODIN3_ERR_INVALID_ARG;
     }
     registered = *engine;
     have_registered = true;
     return ODIN3_OK;
+}
+
+const char *odin3_abc_engine_registered_name(void) {
+    return have_registered ? registered.name : NULL;
 }
 
 void odin3_abc_test_set_engine(const odin3_abc_engine *engine) {
