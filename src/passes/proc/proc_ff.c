@@ -1,10 +1,12 @@
 /*
  * proc_ff.c — the flip-flop phase of proc (2E spec §9, §14, §15; PR-15; plan Task 9): Yosys
- * 0.55's proc_dff for one process after the latch step, in the live view. The sync actions are
- * first read through the net map; then, while a sync assigns anything, find_any_lvalue gives the
- * next group, one register: the level syncs' rules and the edge sync's value, the collapse of
- * equal rules into one $reduce_or trigger, the self-reset $mux, and the cell ($dffsr, $aldff,
- * $adff or $dff), each step in proc_dff's order. The group's bits then leave every action.
+ * 0.55's proc_dff for one process after the latch step. The sync signals and right-hand sides are
+ * first read through the net map (the live view); the left-hand sides stay as decoded, so the
+ * groups and their bit order are Yosys's, which sorts the names a process was written with. Then,
+ * while a sync assigns anything, find_any_lvalue gives the next group, one register: the level
+ * syncs' rules and the edge sync's value, the collapse of equal rules into one $reduce_or trigger,
+ * the self-reset $mux, and the cell ($dffsr, $aldff, $adff or $dff), each step in proc_dff's order.
+ * The group's bits then leave every action.
  */
 #include "passes/proc/proc_internal.h"
 
@@ -33,7 +35,7 @@ enum {
     ALDFF_PARAMS = 3, /* $aldff: WIDTH, CLK_POLARITY, ALOAD_POLARITY */
     DFFSR_PARAMS = 4, /* $dffsr: WIDTH, CLK_POLARITY, SET_POLARITY, CLR_POLARITY */
     REG_INPUTS = 4,   /* the most input ports of a register: $aldff's and $dffsr's */
-    W4_NAMES = 3      /* W4 names the first three resets (§15) */
+    W4_NAMES = 3      /* W3 and W4 name the first three resets (§15) */
 };
 
 #define NO_SYNC UINT32_MAX
@@ -50,11 +52,12 @@ typedef struct ff_rule {
 typedef struct ff_ctx {
     odin3_proc_mctx *mctx;
     odin3_pw *pw;
-    odin3_pw_sig sig;         /* the group: its distinct live bits in key order */
-    odin3_pw_sig insig;       /* the edge sync's value, z where it does not assign */
-    uint32_t edge;            /* the edge sync's index, NO_SYNC before one is met */
-    odin3_vec rules;          /* ff_rule, in sync and action order */
-    odin3_pw_bit first_reset; /* the first rule's trigger, before the collapse (W3) */
+    odin3_pw_sig sig;   /* the group: its distinct raw bits in odin3_proc_raw_key order */
+    odin3_pw_sig live;  /* the group's nets: sig through the net map */
+    odin3_pw_sig insig; /* the edge sync's value, z where it does not assign */
+    uint32_t edge;      /* the edge sync's index, NO_SYNC before one is met */
+    odin3_vec rules;    /* ff_rule, in sync and action order */
+    odin3_vec resets;   /* odin3_pw_bit: every rule's signal, before the collapse (W3, W4) */
 } ff_ctx;
 
 static odin3_status ff_internal(const char *what) {
@@ -83,27 +86,35 @@ static odin3_status ff_bit(odin3_pw *pw, odin3_pw_bit bit, odin3_pw_sig *out) {
 
 /* --- the live view ------------------------------------------------------------------------- */
 
-/* *sig = a new run of its bits through the net map; ODIN3_ERR_CHECK when lhs and a bit is a
- * constant (a register output merged into a constant net is a 2E bug, as in the latch phase). */
-static odin3_status ff_live_run(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_sig *sig, bool lhs) {
-    odin3_pw_sig run = {0, 0};
-    odin3_status st = odin3_pw_sig_new(pw, odin3_pw_sig_bits(pw, *sig), sig->len, &run);
-    if (st != ODIN3_OK || run.len == 0) {
+/* *out = a new run of sig's bits through the net map (the live view). */
+static odin3_status ff_live_run(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_sig sig,
+                                odin3_pw_sig *out) {
+    odin3_status st = odin3_pw_sig_new(pw, odin3_pw_sig_bits(pw, sig), sig.len, out);
+    if (st != ODIN3_OK || out->len == 0) {
         return st; /* an empty run: no bits, and no offset on a NULL pointer */
     }
-    odin3_pw_bit *bits = (odin3_pw_bit *)pw->bits.data + run.first;
-    for (uint32_t i = 0; i < run.len; i++) {
+    odin3_pw_bit *bits = (odin3_pw_bit *)pw->bits.data + out->first;
+    for (uint32_t i = 0; i < out->len; i++) {
         bits[i] = odin3_proc_find(mctx, bits[i]);
-        if (lhs && (bits[i] & ODIN3_PW_CONST) != 0) {
-            return ff_internal("register output on a constant net");
-        }
     }
-    *sig = run;
     return ODIN3_OK;
 }
 
-/* Every edge and level sync's signal and actions through the net map (the live view, §4). The
- * latch phase empties every ALWAYS sync first, so one with an action is a 2E bug. */
+/* ODIN3_ERR_CHECK when a bit of lhs resolves to a constant (a register output merged into a
+ * constant net is a 2E bug, as in the latch phase). */
+static odin3_status ff_check_lhs(odin3_proc_mctx *mctx, const odin3_pw *pw, odin3_pw_sig lhs) {
+    const odin3_pw_bit *bits = odin3_pw_sig_bits(pw, lhs);
+    for (uint32_t i = 0; i < lhs.len; i++) {
+        if ((odin3_proc_find(mctx, bits[i]) & ODIN3_PW_CONST) != 0) {
+            return ff_internal("register output on a constant net");
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* Every edge and level sync's signal and right-hand sides through the net map (the live view,
+ * §4); the left-hand sides stay as decoded. The latch phase empties every ALWAYS sync first, so
+ * one with an action is a 2E bug. */
 static odin3_status ff_live(odin3_proc_mctx *mctx, odin3_pw *pw) {
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < pw->syncs.len; i++) {
@@ -116,8 +127,8 @@ static odin3_status ff_live(odin3_proc_mctx *mctx, odin3_pw *pw) {
         sync->signal = odin3_proc_find(mctx, sync->signal);
         for (size_t j = 0; st == ODIN3_OK && j < sync->actions.len; j++) {
             odin3_pw_action *act = odin3_vec_at(&sync->actions, j);
-            st = ff_live_run(mctx, pw, &act->lhs, true);
-            st = st == ODIN3_OK ? ff_live_run(mctx, pw, &act->rhs, false) : st;
+            st = ff_check_lhs(mctx, pw, act->lhs);
+            st = st == ODIN3_OK ? ff_live_run(mctx, pw, act->rhs, &act->rhs) : st;
         }
     }
     return st;
@@ -371,11 +382,12 @@ static odin3_status ff_self_reset(ff_ctx *fc) {
         return ODIN3_OK;
     }
     const ff_rule *rule = odin3_vec_cat(&fc->rules, 0);
-    if (!odin3_pw_sig_equal(fc->pw, rule->value, fc->sig)) {
+    if (!odin3_pw_sig_equal(fc->pw, rule->value, fc->live)) {
         return ODIN3_OK;
     }
     bool high = rule->type == ODIN3_SYNC_LEVEL1;
-    odin3_pw_sig ins[MUX_INPUTS] = {high ? fc->insig : fc->sig, high ? fc->sig : fc->insig, {0, 0}};
+    odin3_pw_sig ins[MUX_INPUTS] = {
+        high ? fc->insig : fc->live, high ? fc->live : fc->insig, {0, 0}};
     odin3_status st = ff_bit(fc->pw, rule->signal, &ins[2]);
     st = st == ODIN3_OK ? ff_mux(fc, ins, &fc->insig) : st;
     if (st == ODIN3_OK) {
@@ -397,50 +409,72 @@ static const char *text_of(const odin3_strbuf *buf) {
     return buf->data != NULL ? buf->data : "";
 }
 
-/* W4: the group and its resets' names, the first three and then `…` when there are more. */
-static odin3_status ff_warn_w4(const ff_ctx *fc) {
+/* Appends the names of the resets' signals (n of them) as W3 and W4 list them: 'r1', 'r2', the
+ * first three and then `…` when there are more. */
+static odin3_status ff_put_names(const ff_ctx *fc, const odin3_pw_bit *signals, size_t n,
+                                 odin3_strbuf *list) {
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < n && i < W4_NAMES; i++) {
+        st = i > 0 ? odin3_strbuf_append(list, odin3_bytes_cstr(", ")) : ODIN3_OK;
+        st = st == ODIN3_OK ? ff_put_name(fc, signals[i], list) : st;
+    }
+    if (st == ODIN3_OK && n > W4_NAMES) {
+        st = odin3_strbuf_append(list, odin3_bytes_cstr(", …"));
+    }
+    return st;
+}
+
+/* The texts W3 and W4 fill in: the group's name and the list of its resets' names. */
+typedef struct ff_texts {
     odin3_strbuf group;
     odin3_strbuf list;
-    odin3_strbuf_init(&group);
-    odin3_strbuf_init(&list);
-    odin3_status st =
-        odin3_proc_name_bits(fc->mctx, odin3_pw_sig_bits(fc->pw, fc->sig), fc->sig.len, &group);
-    const ff_rule *rules = fc->rules.data;
-    for (size_t i = 0; st == ODIN3_OK && i < fc->rules.len && i < W4_NAMES; i++) {
-        st = i > 0 ? odin3_strbuf_append(&list, odin3_bytes_cstr(", ")) : ODIN3_OK;
-        st = st == ODIN3_OK ? ff_put_name(fc, rules[i].signal, &list) : st;
-    }
-    if (st == ODIN3_OK && fc->rules.len > W4_NAMES) {
-        st = odin3_strbuf_append(&list, odin3_bytes_cstr(", …"));
-    }
+} ff_texts;
+
+/* Both texts for fc's group and resets (fc->resets); free them with ff_texts_free. */
+static odin3_status ff_texts_make(const ff_ctx *fc, ff_texts *texts) {
+    odin3_strbuf_init(&texts->group);
+    odin3_strbuf_init(&texts->list);
+    odin3_status st = odin3_proc_name_bits(fc->mctx, odin3_pw_sig_bits(fc->pw, fc->live),
+                                           fc->live.len, &texts->group);
+    return st == ODIN3_OK ? ff_put_names(fc, fc->resets.data, fc->resets.len, &texts->list) : st;
+}
+
+static void ff_texts_free(ff_texts *texts) {
+    odin3_strbuf_free(&texts->group);
+    odin3_strbuf_free(&texts->list);
+}
+
+/* W4: the group and its resets' names. */
+static odin3_status ff_warn_w4(const ff_ctx *fc) {
+    ff_texts texts;
+    odin3_status st = ff_texts_make(fc, &texts);
     if (st == ODIN3_OK) {
         odin3_proc_warn(fc->mctx, ODIN3_PROC_W4, fc->pw->prov,
                         "'%s' has asynchronous resets with different values (%s); it is built as "
                         "a set/reset register ($dffsr)",
-                        text_of(&group), text_of(&list));
+                        text_of(&texts.group), text_of(&texts.list));
     }
-    odin3_strbuf_free(&group);
-    odin3_strbuf_free(&list);
+    ff_texts_free(&texts);
     return st;
 }
 
-/* W3: the group and the first reset's name (before the collapse). */
+/* W3: the group and every reset that collapsed into the trigger, as written: §15's text for one,
+ * `asynchronous resets ('r1', 'r2') are active` for several. */
 static odin3_status ff_warn_w3(const ff_ctx *fc) {
-    odin3_strbuf group;
-    odin3_strbuf rst;
-    odin3_strbuf_init(&group);
-    odin3_strbuf_init(&rst);
-    odin3_status st =
-        odin3_proc_name_bits(fc->mctx, odin3_pw_sig_bits(fc->pw, fc->sig), fc->sig.len, &group);
-    st = st == ODIN3_OK ? odin3_proc_name_bits(fc->mctx, &fc->first_reset, 1, &rst) : st;
-    if (st == ODIN3_OK) {
+    ff_texts texts;
+    odin3_status st = ff_texts_make(fc, &texts);
+    if (st == ODIN3_OK && fc->resets.len == 1) {
         odin3_proc_warn(fc->mctx, ODIN3_PROC_W3, fc->pw->prov,
-                        "'%s' takes a non-constant value while asynchronous reset '%s' is active; "
+                        "'%s' takes a non-constant value while asynchronous reset %s is active; "
                         "it is built as an asynchronous-load register ($aldff)",
-                        text_of(&group), text_of(&rst));
+                        text_of(&texts.group), text_of(&texts.list));
+    } else if (st == ODIN3_OK) {
+        odin3_proc_warn(fc->mctx, ODIN3_PROC_W3, fc->pw->prov,
+                        "'%s' takes a non-constant value while asynchronous resets (%s) are "
+                        "active; it is built as an asynchronous-load register ($aldff)",
+                        text_of(&texts.group), text_of(&texts.list));
     }
-    odin3_strbuf_free(&group);
-    odin3_strbuf_free(&rst);
+    ff_texts_free(&texts);
     return st;
 }
 
@@ -455,7 +489,7 @@ static odin3_status ff_clock(const ff_ctx *fc, odin3_pw_sig *clk, int64_t *polar
 
 /* The register cell: Q on the group's own nets, the $proc node's attributes (§9, §14). */
 static odin3_status ff_register(const ff_ctx *fc, odin3_proc_cell cell) {
-    cell.output = &fc->sig;
+    cell.output = &fc->live;
     cell.attrs_from = fc->pw;
     return ff_add(fc, cell, NULL);
 }
@@ -594,15 +628,27 @@ static odin3_status ff_emit(const ff_ctx *fc) {
                                                             : ff_aldff(fc, rule);
 }
 
+/* fc->resets = every rule's signal, in rule order (the names W3 and W4 give). */
+static odin3_status ff_note_resets(ff_ctx *fc) {
+    odin3_vec_clear(&fc->resets);
+    if (odin3_vec_reserve(&fc->resets, fc->rules.len) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < fc->rules.len; i++) {
+        *(odin3_pw_bit *)odin3_vec_push(&fc->resets) =
+            ((const ff_rule *)odin3_vec_cat(&fc->rules, i))->signal; /* reserved */
+    }
+    return ODIN3_OK;
+}
+
 /* One group (fc->sig): its rules and edge value, the collapse, the self reset, the register. */
 static odin3_status ff_group(ff_ctx *fc) {
     odin3_vec_clear(&fc->rules);
     fc->edge = NO_SYNC;
-    odin3_status st = ff_fill(fc->pw, ODIN3_PW_SZ, fc->sig.len, &fc->insig);
+    odin3_status st = ff_live_run(fc->mctx, fc->pw, fc->sig, &fc->live);
+    st = st == ODIN3_OK ? ff_fill(fc->pw, ODIN3_PW_SZ, fc->sig.len, &fc->insig) : st;
     st = st == ODIN3_OK ? ff_gather(fc) : st;
-    if (st == ODIN3_OK && fc->rules.len > 0) {
-        fc->first_reset = ((const ff_rule *)odin3_vec_cat(&fc->rules, 0))->signal;
-    }
+    st = st == ODIN3_OK ? ff_note_resets(fc) : st;
     st = st == ODIN3_OK ? ff_collapse(fc) : st;
     st = st == ODIN3_OK ? ff_self_reset(fc) : st;
     return st == ODIN3_OK ? ff_emit(fc) : st;
@@ -613,8 +659,9 @@ odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw) {
         odin3_log(ODIN3_LOG_ERROR, "proc: ffs: no module context or process");
         return ODIN3_ERR_INVALID_ARG;
     }
-    ff_ctx fc = {mctx, pw, {0, 0}, {0, 0}, NO_SYNC, {0}, 0};
+    ff_ctx fc = {mctx, pw, {0, 0}, {0, 0}, {0, 0}, NO_SYNC, {0}, {0}};
     odin3_vec_init(&fc.rules, sizeof(ff_rule));
+    odin3_vec_init(&fc.resets, sizeof(odin3_pw_bit));
     odin3_status st = ff_live(mctx, pw);
     bool more = st == ODIN3_OK;
     while (more) {
@@ -624,5 +671,6 @@ odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw) {
         more = more && st == ODIN3_OK;
     }
     odin3_vec_free(&fc.rules);
+    odin3_vec_free(&fc.resets);
     return st;
 }

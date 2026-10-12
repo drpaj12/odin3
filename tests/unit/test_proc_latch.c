@@ -967,6 +967,72 @@ static void test_latch_self_hold(void) {
     fx_close(&fx);
 }
 
+/* latch_fixup_before_m2.il (2E-3 final review I3): $p1 is --nolatches style (t1 = c ? a : x, no
+ * feedback: a no-latch connection y1 <- t1, deferred to M2); $p2 holds y2 through the ?: mux
+ * m = e ? y1 : y2. The fix-up walks upstream from y2's latch through m but stops at y1, whose
+ * connection to $p1's mux is not made yet (Yosys's sigmap predates proc_dlatch's connects), so
+ * $p1's mux keeps A = x. Yosys 0.55 --upto dlatch gives the same cells (compared as a set). */
+static void test_latch_fixup_before_m2(void) {
+    static const char *const k_cells[] = {
+        "$mux WIDTH=1 A=[x] B=[a] S=[c] Y=[t1]", /* $p1's no-latch mux: A stays x */
+        NOT1("c", "c1"),
+        OR1("1", "c2"),
+        AND1("c1", "c2", "c3"),
+        NOT1("e", "c4"),
+        OR1("1", "c5"),
+        AND1("c4", "c5", "c6"),
+        OR1("c6", "c7"),
+        OR1("c7", "c8"),
+        AND1("c", "c8", "c9"),
+        "$reduce_or A_SIGNED=0 A_WIDTH=2 Y_WIDTH=1 A=[c3 c9] Y=[c10]",
+        NOT1("c10", "c11"),
+        DLATCH("1", "c11", "t2", "y2"),
+        "$mux WIDTH=1 A=[m] B=[m] S=[c] Y=[t2]",
+        "$mux WIDTH=1 A=[t1] B=[t1] S=[e] Y=[m]"}; /* the ?: mux, re-created */
+    fixture fx;
+    fx_open(&fx, "module \\m\n"
+                 "  wire input 1 \\c\n"
+                 "  wire input 2 \\e\n"
+                 "  wire input 3 \\a\n"
+                 "  wire input 4 \\d\n"
+                 "  wire output 5 \\y1\n"
+                 "  wire output 6 \\y2\n"
+                 "  wire \\t1\n"
+                 "  wire \\t2\n"
+                 "  wire \\m\n"
+                 "  cell $mux $c1\n"
+                 "    parameter \\WIDTH 1\n"
+                 "    connect \\A \\y2\n"
+                 "    connect \\B \\y1\n"
+                 "    connect \\S \\e\n"
+                 "    connect \\Y \\m\n"
+                 "  end\n"
+                 "  process $p1\n"
+                 "    assign \\t1 1'x\n"
+                 "    switch \\c\n"
+                 "      case 1'1\n"
+                 "        assign \\t1 \\a\n"
+                 "    end\n"
+                 "    sync always\n"
+                 "      update \\y1 \\t1\n"
+                 "  end\n"
+                 "  process $p2\n"
+                 "    assign \\t2 \\y2\n"
+                 "    switch \\c\n"
+                 "      case 1'1\n"
+                 "        assign \\t2 \\m\n"
+                 "    end\n"
+                 "    sync always\n"
+                 "      update \\y2 \\t2\n"
+                 "  end\n"
+                 "end\n");
+    fx_step_b(&fx);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_latch(&fx));
+    expect_cells(&fx, k_cells, N_OF(k_cells));
+    TEST_ASSERT_EQUAL_UINT32(1, fx.stats.warnings[ODIN3_PROC_W1]);
+    fx_close(&fx);
+}
+
 /* --- crossed feedback, snapshot and live view (Review Focus 2, internal risk #4) ----------- */
 
 /* latch_crossed_feedback.il: two blocks feeding each other (y1 = y2 and y2 = y1 through promoted
@@ -1575,6 +1641,7 @@ int main(void) {
     RUN_TEST(test_latch_incomplete_case);
     RUN_TEST(test_latch_memo_per_out);
     RUN_TEST(test_latch_self_hold);
+    RUN_TEST(test_latch_fixup_before_m2);
     RUN_TEST(test_latch_crossed_feedback);
     RUN_TEST(test_latch_snapshot_vs_live);
     RUN_TEST(test_latch_init_removed);

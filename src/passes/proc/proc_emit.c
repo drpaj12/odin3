@@ -20,6 +20,7 @@
 #include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <assert.h>
@@ -84,6 +85,8 @@ void odin3_proc_mctx_free(odin3_proc_mctx *mctx) {
     }
     odin3_vec_free(&mctx->pws);
     odin3_proc_ldb_free(mctx);
+    odin3_u64map_destroy(mctx->dropped);
+    mctx->dropped = NULL;
     odin3_vec_free(&mctx->scratch);
     odin3_vec_free(&mctx->touched);
     odin3_vec_free(&mctx->netmap);
@@ -274,6 +277,29 @@ static odin3_net_pair net_pair(const odin3_module *module, root_pair roots) {
     return pair;
 }
 
+uint64_t odin3_proc_raw_key(const odin3_proc_mctx *mctx, odin3_pw_bit bit) {
+    uint64_t key = 0;
+    if (!is_const(bit) && mctx->dropped != NULL && odin3_u64map_get(mctx->dropped, bit, &key)) {
+        return key;
+    }
+    return odin3_proc_bit_key(mctx->module, bit);
+}
+
+/* Records drop's key before a merge kills it (odin3_proc_raw_key), when drop has a primary wire. */
+static odin3_status record_dropped(odin3_proc_mctx *mctx, odin3_net_id drop) {
+    if (!odin3_wire_valid(odin3_net_primary(mctx->module, drop).wire)) {
+        return ODIN3_OK;
+    }
+    if (mctx->dropped == NULL) {
+        mctx->dropped = odin3_u64map_create(0);
+        if (mctx->dropped == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    return odin3_u64map_put(mctx->dropped,
+                            (odin3_kv){drop.v, odin3_proc_bit_key(mctx->module, drop.v)});
+}
+
 /* One merge of resolved, distinct roots; drop's entry becomes keep (or the constant). */
 static odin3_status merge_roots(odin3_proc_mctx *mctx, root_pair roots) {
     if (is_const(roots.lhs) && is_const(roots.rhs)) {
@@ -297,7 +323,8 @@ static odin3_status merge_roots(odin3_proc_mctx *mctx, root_pair roots) {
         return two_driven(mctx, roots.lhs, roots.rhs);
     }
 #endif
-    odin3_status st = odin3_net_merge(mctx->module, pair);
+    odin3_status st = record_dropped(mctx, pair.drop);
+    st = st == ODIN3_OK ? odin3_net_merge(mctx->module, pair) : st;
     if (st == ODIN3_OK) {
         *(odin3_pw_bit *)odin3_vec_at(&mctx->netmap, pair.drop.v) = entry;
     }
@@ -613,7 +640,8 @@ odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at) {
     uint64_t extra = mctx->pw_bytes + (uint64_t)mctx->scratch.cap * mctx->scratch.elem_size +
                      (uint64_t)mctx->netmap.cap * mctx->netmap.elem_size +
                      (uint64_t)mctx->pending.cap * mctx->pending.elem_size +
-                     odin3_proc_ldb_bytes(mctx);
+                     odin3_proc_ldb_bytes(mctx) +
+                     (mctx->dropped != NULL ? odin3_u64map_bytes(mctx->dropped) : 0);
     odin3_status st = odin3_budget_check(mctx->ctx, mctx->design, extra);
     if (st != ODIN3_ERR_PARSE) {
         return st;

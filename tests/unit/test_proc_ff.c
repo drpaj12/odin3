@@ -408,6 +408,10 @@ static odin3_wire_id wire_named(const fixture *fx, const char *name) {
     return wire;
 }
 
+static odin3_net_id wire_net(const fixture *fx, const char *name, uint32_t bit) {
+    return odin3_wire_net(fx->res.module, wire_named(fx, name), bit);
+}
+
 #define N_OF(a) ((uint32_t)(sizeof(a) / sizeof((a)[0])))
 
 /* Runs the whole of step A, step B, the latch phase and the flip-flop phase on text, which must
@@ -644,6 +648,36 @@ static void test_ff_dffsr_four_resets(void) {
     fx_close(&fx);
 }
 
+#define MUX2(a, b, s, y) "$mux WIDTH=2 A=[" a "] B=[" b "] S=[" s "] Y=[" y "[0] " y "[1]]"
+#define NOT2(a, y) "$not A_SIGNED=0 A_WIDTH=2 Y_WIDTH=2 A=[" a "] Y=[" y "[0] " y "[1]]"
+#define DFFSR2                                                                                     \
+    "$dffsr WIDTH=2 CLK_POLARITY=1 SET_POLARITY=1 CLR_POLARITY=1 CLK=[clk] SET=[c3[0] c3[1]] "     \
+    "CLR=[c5[0] c5[1]] D=[d[0] d[1]] Q=[q[0] q[1]]"
+
+/* ff_dffsr_bit1.il (2E-3 final review M1): two 2-bit resets whose values differ in bit 1 only
+ * (2'00, 2'10) are not equal, so $dffsr of WIDTH 2 with W4, not a collapsed $adff. A hand-built
+ * body (arst leaves level syncs alone). */
+static void test_ff_dffsr_bit1(void) {
+    static const char *const k_cells[] = {MUX2("0 0", "0 1", "r2", "c0"),
+                                          NOT2("0 1", "c1"),
+                                          MUX2("0 0", "c1[0] c1[1]", "r2", "c2"),
+                                          MUX2("c0[0] c0[1]", "0 0", "r1", "c3"),
+                                          NOT2("0 0", "c4"),
+                                          MUX2("c2[0] c2[1]", "c4[0] c4[1]", "r1", "c5"),
+                                          DFFSR2};
+    fixture fx;
+    ff_run(&fx,
+           "module \\m\n  wire input 1 \\clk\n  wire input 2 \\r1\n  wire input 3 \\r2\n"
+           "  wire width 2 input 4 \\d\n  wire width 2 output 5 \\q\n  process $p\n"
+           "    sync high \\r1\n      update \\q 2'00\n    sync high \\r2\n      update \\q 2'10\n"
+           "    sync posedge \\clk\n      update \\q \\d\n  end\nend\n",
+           k_cells, N_OF(k_cells));
+    expect_one_warning("odin3: warning: proc: module 'm': 'q' has asynchronous resets with "
+                       "different values ('r1', 'r2'); it is built as a set/reset register "
+                       "($dffsr)");
+    fx_close(&fx);
+}
+
 /* ff_aldff.il: `@(posedge clk or posedge rst) if (rst) q <= a;` (2D's default-mode body: the root
  * default t0 <- q): the reset value is a, not constant, so $aldff with ALOAD the $reduce_or's Y,
  * AD = a and D = q (the root default), and W3. */
@@ -725,6 +759,26 @@ static void test_ff_edge_chunks(void) {
     fx_close(&fx);
 }
 
+/* ff_merged_bit.il (2E-3 final review I1): `always @* y = q[1];` with y declared first, so M2 keeps
+ * y's net and q[1]'s becomes its alias. The register's bits stay in q's order, as Yosys sorts the
+ * names the process was written with (Q = \q, `connect \y \q [1]`): the group is ordered by each
+ * bit's key before the merge (odin3_proc_raw_key), not by the live net's (y's, which sorts first).
+ */
+static void test_ff_merged_bit_order(void) {
+    static const char *const k_cells[] = {
+        "$dff WIDTH=3 CLK_POLARITY=1 CLK=[clk] D=[d[0] d[1] d[2]] Q=[q[0] q[1] q[2]]"};
+    fixture fx;
+    ff_run(&fx,
+           "module \\m\n  wire input 1 \\clk\n  wire width 3 input 2 \\d\n  wire output 3 \\y\n"
+           "  wire width 3 output 4 \\q\n  wire width 3 \\t0\n  wire \\t1\n"
+           "  process $p0\n    assign \\t1 \\q [1]\n    sync always\n      update \\y \\t1\n  end\n"
+           "  process $p1\n    assign \\t0 \\d\n    sync posedge \\clk\n      update \\q \\t0\n"
+           "  end\nend\n",
+           k_cells, N_OF(k_cells));
+    TEST_ASSERT_EQUAL_UINT32(wire_net(&fx, "y", 0).v, wire_net(&fx, "q", 1).v);
+    fx_close(&fx);
+}
+
 /* ff_self_clocked.il: `always @(posedge a) a <= ~a;` (EL-33 re-review N1): CLK and Q on a's net. */
 static void test_ff_self_clocked(void) {
     static const char *const k_cells[] = {DFF("1", "a", "na", "a")};
@@ -792,8 +846,8 @@ static void test_ff_helper_records(void) {
 
 /* The live view (§4): a merge made after step A (here by hand, as M1 or M2 could) joins the two
  * resets' values w1 and w2, so the rules are equal and collapse into one $reduce_or trigger and one
- * $aldff (W3 names the first reset). Yosys compares these values as written (§20 #1), so this test
- * has no Yosys run; read as written they would differ and give a $dffsr. */
+ * $aldff (W3 names both resets, 2E-3 final review M3). Yosys compares these values as written (§20
+ * #1), so this test has no Yosys run; read as written they would differ and give a $dffsr. */
 static void test_ff_live_view(void) {
     static const char *const k_cells[] = {
         "$reduce_or A_SIGNED=0 A_WIDTH=2 Y_WIDTH=1 A=[r1 r2] Y=[c0]",
@@ -812,8 +866,8 @@ static void test_ff_live_view(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, fx_ff(&fx));
     expect_cells(&fx, k_cells, N_OF(k_cells));
     expect_one_warning("odin3: warning: proc: module 'm': 'q' takes a non-constant value while "
-                       "asynchronous reset 'r1' is active; it is built as an asynchronous-load "
-                       "register ($aldff)");
+                       "asynchronous resets ('r1', 'r2') are active; it is built as an "
+                       "asynchronous-load register ($aldff)");
     fx_close(&fx);
 }
 
@@ -971,10 +1025,12 @@ int main(void) {
     RUN_TEST(test_ff_self_reset);
     RUN_TEST(test_ff_dffsr);
     RUN_TEST(test_ff_dffsr_four_resets);
+    RUN_TEST(test_ff_dffsr_bit1);
     RUN_TEST(test_ff_aldff);
     RUN_TEST(test_ff_groups_by_chunk);
     RUN_TEST(test_ff_group_narrowed);
     RUN_TEST(test_ff_edge_chunks);
+    RUN_TEST(test_ff_merged_bit_order);
     RUN_TEST(test_ff_self_clocked);
     RUN_TEST(test_ff_const_clock);
     RUN_TEST(test_ff_attrs);

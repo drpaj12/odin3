@@ -17,6 +17,7 @@
 #include "passes/proc/pw.h"
 #include "util/attr.h"
 #include "util/str.h"
+#include "util/u64map.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
@@ -59,7 +60,8 @@ struct odin3_proc_mctx {
     uint32_t init_key;          /* strtab ID of `init`, 0 until a phase needs it (Task 8) */
     uint64_t pw_bytes;          /* bytes of the working forms decoded so far: the budget's extra */
     odin3_celltype_id types[ODIN3_PROC_N_TYPES]; /* odin3_proc_type's cache, filled at init */
-    odin3_proc_ldb *ldb; /* Task 8: the latch database, NULL until the latch phase builds it */
+    odin3_proc_ldb *ldb;   /* Task 8: the latch database, NULL until the latch phase builds it */
+    odin3_u64map *dropped; /* net -> its odin3_proc_bit_key when a merge dropped it (NULL: none) */
 };
 
 /*
@@ -114,12 +116,20 @@ odin3_pw_bit odin3_proc_find(odin3_proc_mctx *mctx, odin3_pw_bit bit);
 odin3_status odin3_proc_connect(odin3_proc_mctx *mctx, odin3_pw_bit lhs, odin3_pw_bit rhs);
 
 /*
+ * The key a process's raw (decoded) bit sorts by where Yosys sorts the names it was written with
+ * (proc_dff's find_any_lvalue): odin3_proc_bit_key, except that a net a merge of this module's
+ * lowering dropped (now dead, its wire bit an alias of the kept net) keeps the key it had then.
+ */
+uint64_t odin3_proc_raw_key(const odin3_proc_mctx *mctx, odin3_pw_bit bit);
+
+/*
  * Applies the pending connections in record order (§7, M1 and M2) and empties the list, also on
  * failure. Both sides are resolved (odin3_proc_find); equal sides are skipped. A constant side
  * merges the other net into the module's shared constant net (keep = the constant net, and the
  * other net's entry becomes the constant); otherwise keep is the net whose primary wire is a port
  * wire, else the one with a primary wire, else the lower ID, and a tie at either level keeps the
- * lower net ID (plan point (u)). Then odin3_net_merge(keep, drop), and drop's entry becomes keep.
+ * lower net ID (plan point (u)). Then odin3_net_merge(keep, drop), and drop's entry becomes keep;
+ * a dropped net with a primary wire first records its key (odin3_proc_raw_key).
  * ODIN3_ERR_CHECK (logged "proc: internal: merging two driven nets '<a>' and '<b>'") for two
  * different constants, and in Debug for two sides that both have a driver (every lhs is a
  * temporary or output of a deleted $proc); ODIN3_ERR_NO_MEMORY; the IR's status of a merge.
@@ -475,27 +485,29 @@ void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
 /* --- step D: flip-flops (§9, PR-15; proc_ff.c) --------------------------------------------- */
 
 /*
- * The flip-flop phase (§9, PR-15), Yosys 0.55's proc_dff for pw after the latch step, in the live
- * view: every edge and level sync's signal and actions are first read through the net map. Then,
- * while a sync assigns anything, find_any_lvalue gives a group (the first non-empty action lhs of
- * the last sync that has one, as Yosys's loop leaves it, sorted by odin3_proc_bit_key and unified,
- * then narrowed to its common part with each sync's bits where that part is not empty), one
- * register: each level sync action meeting it gives a rule (its value, z where the action does not
- * assign; its signal), the edge sync's actions give insig (z where none assigns). Rules whose
- * values are all equal collapse into one LEVEL1 rule on $reduce_or of their triggers (the signal,
- * or a $not of it for LEVEL0, made first); one rule whose value is the group itself becomes insig =
+ * The flip-flop phase (§9, PR-15), Yosys 0.55's proc_dff for pw after the latch step. Every edge
+ * and level sync's signal and right-hand sides are first read through the net map (the live view);
+ * the left-hand sides stay as decoded, so the groups and their bit order are Yosys's. Then, while a
+ * sync assigns anything, find_any_lvalue gives a group (the first non-empty action lhs of the last
+ * sync that has one, as Yosys's loop leaves it, sorted by odin3_proc_raw_key and unified, then
+ * narrowed to its common part with each sync's bits where that part is not empty), one register:
+ * each level sync action meeting it gives a rule (its value, z where the action does not assign;
+ * its signal), the edge sync's actions give insig (z where none assigns). Rules whose values are
+ * all equal (as nets) collapse into one LEVEL1 rule on $reduce_or of their triggers (the signal, or
+ * a $not of it for LEVEL0, made first); one rule whose value is the group's nets becomes insig =
  * $mux(insig, group, trigger). Then: several rules give W4 and $dffsr (SET and CLR from $mux chains
  * built from the last rule to the first, starting from 0; CLK_POLARITY from the edge, SET_POLARITY
  * = CLR_POLARITY = 1); one rule whose value is not made of constant nets gives W3 and $aldff
  * (ALOAD_POLARITY 1); else $adff (ARST_POLARITY 1, ARST_VALUE the constant) or $dff. WIDTH is the
- * group's width, CLK_POLARITY 1 for POSEDGE and 0 for NEGEDGE; the register's Q is the group's own
- * nets and it copies the $proc node's attributes; every cell has pw->lowered as its record. W3
- * names the first reset as written, W4 the first three and then `…`, both at pw->prov. The group's
- * bits then leave every action, so the syncs end empty. ODIN3_ERR_CHECK (logged "proc: internal:
- * ...") for what step A or the latch step rules out: an ALWAYS sync with an action, a group without
- * an edge sync or with two, a register output on a constant net; ODIN3_ERR_NO_MEMORY and E6
- * (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR; ODIN3_ERR_INVALID_ARG (logged)
- * for a NULL argument. O(groups x sync actions x width), Yosys's bound.
+ * group's width, CLK_POLARITY 1 for POSEDGE and 0 for NEGEDGE; the register's Q is the group's nets
+ * and it copies the $proc node's attributes; every cell has pw->lowered as its record. W3 and W4
+ * name the resets as written (every rule's signal, before the collapse: the first three, then `…`),
+ * at pw->prov. The group's bits then leave every action, so the syncs end empty. ODIN3_ERR_CHECK
+ * (logged "proc: internal: ...") for what step A or the latch step rules out: an ALWAYS sync with
+ * an action, a group without an edge sync or with two, a register output on a constant net;
+ * ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR;
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument. O(groups x sync actions x width), Yosys's
+ * bound.
  */
 odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw);
 

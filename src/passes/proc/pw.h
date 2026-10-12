@@ -189,8 +189,9 @@ bool odin3_pw_sig_is_fully_undef(const odin3_pw *pw, odin3_pw_sig sig);
 bool odin3_pw_sig_as_bool(const odin3_pw *pw, odin3_pw_sig sig);
 
 /*
- * Yosys sort_and_unify: *out = a new run of s's distinct bits sorted by odin3_proc_bit_key.
- * ODIN3_ERR_NO_MEMORY.
+ * Yosys sort_and_unify: *out = a new run of s's distinct bits sorted by odin3_proc_raw_key
+ * (odin3_proc_bit_key, except that a net a merge of the module's lowering dropped sorts by the key
+ * it had then, as Yosys sorts the names a process was written with). ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_pw_sig_sort_unify(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_sig sig,
                                      odin3_pw_sig *out);

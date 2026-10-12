@@ -359,7 +359,7 @@ static void distinct_bits(odin3_proc_mctx *mctx, const odin3_pw *pw, odin3_pw_si
             consts_seen |= mask;
         }
         keyed_bit *item = odin3_vec_push(items); /* reserved for sig.len */
-        item->key = odin3_proc_bit_key(mctx->module, bit);
+        item->key = odin3_proc_raw_key(mctx, bit);
         item->bit = bit;
     }
 }

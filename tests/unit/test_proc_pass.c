@@ -770,13 +770,19 @@ static const char *const k_budget_text =
     "      case 4'1111\n        assign \\t0 \\a\n      case\n        assign \\t0 8'00000000\n"
     "    end\n    sync posedge \\clk\n      update \\q \\t0\n  end\nend\n";
 
-/* proc --noopt on a new build of k_budget_text with budget_pins 64 and the budget's limit at
- * limit, check FULL before and after; true when the module changed (its $proc node is gone). */
-static bool budget_probe(uint64_t limit, odin3_status *st) {
+/* A module and the pins between in-cell budget checks for a budget test. */
+typedef struct budget_case {
+    const char *text;
+    uint32_t pins;
+} budget_case;
+
+/* proc --noopt on a new build of the case's text with its budget_pins and the budget's limit at
+ * limit, check FULL before and after; true when the module changed (its $proc nodes are gone). */
+static bool budget_probe(budget_case bc, uint64_t limit, odin3_status *st) {
     pb_result res;
-    build(k_budget_text, &res);
+    build(bc.text, &res);
     odin3_proc_limits limits = odin3_proc_limits_now();
-    limits.budget_pins = BUDGET_TEST_PINS;
+    limits.budget_pins = bc.pins;
     odin3_proc_test_set_limits(&limits);
     odin3_budget_test_set_limit(limit);
     const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
@@ -799,29 +805,23 @@ static uint32_t count_nodes(const pb_result *res, const odin3_module *mod, const
     return count;
 }
 
-/*
- * Review Focus 5 with the real phases (finding 15): the limit is what the budget measures once
- * step A is done (the value odin3_design_bytes_reserved reports then, plus proc's working forms,
- * which the check counts too), found as the smallest limit at which the module changes; every
- * process-boundary check passes there, and the first check inside the lowering, when the mux
- * step's 8th $eq brings its pins to 72, stops proc with the located E6 at the process being
- * lowered. The module is left incomplete (seven $eq, no $pmux, no register) and valid.
- */
-/* The smallest limit at which proc changes the module: below it the boundary check before step B
- * fails; the design's own bytes leave it unchanged, 2^24 bytes more lower it completely. */
-static uint64_t budget_threshold(void) {
+/* The smallest limit at which proc changes the module, i.e. what the budget measures once step A is
+ * done (the value odin3_design_bytes_reserved reports then, plus proc's working forms, which the
+ * check counts too): below it the boundary check before step B fails; the design's own bytes leave
+ * the module unchanged, 2^24 bytes more lower it completely. */
+static uint64_t budget_threshold(budget_case bc) {
     pb_result res;
-    build(k_budget_text, &res);
+    build(bc.text, &res);
     uint64_t lo = odin3_design_bytes_reserved(res.design);
     pb_free(&res);
     uint64_t hi = lo + BUDGET_SEARCH;
     odin3_status st = ODIN3_OK;
-    TEST_ASSERT_FALSE(budget_probe(lo, &st));
-    TEST_ASSERT_TRUE(budget_probe(hi, &st));
+    TEST_ASSERT_FALSE(budget_probe(bc, lo, &st));
+    TEST_ASSERT_TRUE(budget_probe(bc, hi, &st));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
     while (hi - lo > 1) {
         uint64_t mid = lo + (hi - lo) / 2;
-        if (budget_probe(mid, &st)) {
+        if (budget_probe(bc, mid, &st)) {
             hi = mid;
         } else {
             lo = mid;
@@ -830,30 +830,80 @@ static uint64_t budget_threshold(void) {
     return hi;
 }
 
-static void test_budget_e6_mid_lowering(void) {
-    odin3_proc_test_set_hooks(NULL);
-    uint64_t hi = budget_threshold();
-    pb_result res;
-    build(k_budget_text, &res);
+/* proc --noopt on a new build of the case at its threshold: ODIN3_ERR_PARSE with exactly the
+ * located E6 at `at` (file:line:col); the design is left in *res, checked FULL. */
+static void budget_stop(budget_case bc, const char *at, pb_result *res) {
+    uint64_t limit = budget_threshold(bc);
+    build(bc.text, res);
     odin3_proc_limits limits = odin3_proc_limits_now();
-    limits.budget_pins = BUDGET_TEST_PINS;
+    limits.budget_pins = bc.pins;
     odin3_proc_test_set_limits(&limits);
-    odin3_budget_test_set_limit(hi);
+    odin3_budget_test_set_limit(limit);
     const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(&res, &noopt, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(res, &noopt, NULL));
     char want[LOG_TEXT];
     int len = snprintf(want, sizeof want,
-                       "t.v:5:3: error: proc needs more than %llu bytes (the design's budget is "
-                       "60%% of physical memory)",
-                       (unsigned long long)hi);
+                       "%s: error: proc needs more than %llu bytes (the design's budget is 60%% of "
+                       "physical memory)",
+                       at, (unsigned long long)limit);
     TEST_ASSERT_TRUE(len > 0 && len < LOG_TEXT);
     char errs[2][LOG_TEXT];
     TEST_ASSERT_EQUAL_size_t(1, errors_raw(errs, 2));
     TEST_ASSERT_EQUAL_STRING(want, errs[0]);
-    TEST_ASSERT_EQUAL_UINT32(0, proc_count(&res, "m"));
+    TEST_ASSERT_EQUAL_UINT32(0, proc_count(res, "m"));
+}
+
+/*
+ * Review Focus 5 with the real phases (finding 15): at the threshold every process-boundary check
+ * passes, and the first check inside the lowering, when the mux step's 8th $eq brings its pins to
+ * 72, stops proc with the located E6 at the process being lowered. The module is left incomplete
+ * (seven $eq, no $pmux, no register) and valid.
+ */
+static void test_budget_e6_mid_lowering(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_text, BUDGET_TEST_PINS}, "t.v:5:3", &res);
     /* the 8th $eq brings the pins to 72: its check, the first inside the mux step, stops proc */
     TEST_ASSERT_EQUAL_UINT32(7, count_nodes(&res, res.module, "$eq"));
     TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$pmux"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dff"));
+    pb_free(&res);
+}
+
+/* latch_verified_example's body at t.v:7.3. */
+static const char *const k_budget_latch_text =
+    "module \\m\n  wire input 1 \\en\n  wire input 2 \\a\n  wire output 3 \\y\n  wire \\t0\n"
+    "  wire \\t1\n  attribute \\src \"t.v:7.3\"\n  process $p\n    assign \\t0 \\t1\n"
+    "    switch \\en\n      case 1'1\n        assign \\t1 \\a\n      case\n"
+    "        assign \\t1 \\y\n    end\n    sync always\n      update \\y \\t0\n  end\nend\n";
+
+/* `if (en) q <= d;` (2D's body: the root default t0 <- q) at t.v:3.3. */
+static const char *const k_budget_ff_text =
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\en\n  wire input 3 \\d\n"
+    "  wire output 4 \\q\n  wire \\t0\n  attribute \\src \"t.v:3.3\"\n  process $p\n"
+    "    assign \\t0 \\q\n    switch \\en\n      case 1'1\n        assign \\t0 \\d\n    end\n"
+    "    sync posedge \\clk\n      update \\q \\t0\n  end\nend\n";
+
+/* The latch step's own budget check (2E-3 final review M5): with no check inside a cell (the
+ * default 2^16 pins), the first check after step B is the latch step's, at its process, before the
+ * holds and the $dlatch: the mux exists, no latch does. */
+static void test_budget_e6_at_latch(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_latch_text, ODIN3_PROC_BUDGET_PINS}, "t.v:7:3", &res);
+    TEST_ASSERT_EQUAL_UINT32(1, count_nodes(&res, res.module, "$mux"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dlatch"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$not"));
+    pb_free(&res);
+}
+
+/* The flip-flop step's budget check (M5): a clocked block has no ALWAYS action, so after step B the
+ * next check is the one before its flip-flops: the mux exists, the $dff does not. */
+static void test_budget_e6_at_ff(void) {
+    odin3_proc_test_set_hooks(NULL);
+    pb_result res;
+    budget_stop((budget_case){k_budget_ff_text, ODIN3_PROC_BUDGET_PINS}, "t.v:3:3", &res);
+    TEST_ASSERT_EQUAL_UINT32(1, count_nodes(&res, res.module, "$mux"));
     TEST_ASSERT_EQUAL_UINT32(0, count_nodes(&res, res.module, "$dff"));
     pb_free(&res);
 }
@@ -1102,6 +1152,8 @@ int main(void) {
     RUN_TEST(test_determinism);
     RUN_TEST(test_atomicity_real_e1a);
     RUN_TEST(test_budget_e6_mid_lowering);
+    RUN_TEST(test_budget_e6_at_latch);
+    RUN_TEST(test_budget_e6_at_ff);
     RUN_TEST(test_real_orphans);
     RUN_TEST(test_info_line_success);
     RUN_TEST(test_real_determinism);

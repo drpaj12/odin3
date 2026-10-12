@@ -627,6 +627,51 @@ static void test_mux_full_case_nested_partial(void) {
     fx_close(&fx);
 }
 
+/* mux_full_case_two_snippets.il (2E-3 final review I2): a full_case switch assigns a0 in every case
+ * and b0 in one only, so the mask is per snippet: a's default leg is x, b's keeps the hold b (a
+ * mask computed once per switch would give b x too and lose its latch). Yosys 0.55 --upto mux
+ * builds the same cells (its creation order puts b's first). */
+static void test_mux_full_case_two_snippets(void) {
+    static const char *const k_cells[] = {
+        EQ1("s", "c0"),
+        "$pmux WIDTH=1 S_WIDTH=2 A=[x] B=[d 1] S=[s c0] Y=[c1] full_case=1",
+        "$mux WIDTH=1 A=[a] B=[c1] S=[c] Y=[a0]",
+        EQ1("s", "c3"),
+        "$mux WIDTH=1 A=[b] B=[0] S=[c3] Y=[c4] full_case=1",
+        "$mux WIDTH=1 A=[b] B=[c4] S=[c] Y=[b0]",
+    };
+    fixture fx;
+    mux_run(&fx, (mux_case){"module \\m\n"
+                            "  wire input 1 \\s\n"
+                            "  wire input 2 \\c\n"
+                            "  wire input 3 \\d\n"
+                            "  wire output 4 \\a\n"
+                            "  wire output 5 \\b\n"
+                            "  wire \\a0\n"
+                            "  wire \\b0\n"
+                            "  process $p\n"
+                            "    assign \\a0 \\a\n"
+                            "    assign \\b0 \\b\n"
+                            "    switch \\c\n"
+                            "      case 1'1\n"
+                            "        attribute \\full_case 1\n"
+                            "        switch \\s\n"
+                            "          case 1'0\n"
+                            "            assign \\a0 1'1\n"
+                            "            assign \\b0 1'0\n"
+                            "          case 1'1\n"
+                            "            assign \\a0 \\d\n"
+                            "        end\n"
+                            "    end\n"
+                            "    sync always\n"
+                            "      update \\a \\a0\n"
+                            "      update \\b \\b0\n"
+                            "  end\n"
+                            "end\n",
+                            PRE_UPTO_ARST, k_cells, N_OF(k_cells)});
+    fx_close(&fx);
+}
+
 static void test_mux_full_case_under_partial(void) {
     fixture fx;
     static const char *const k_under[] = {
@@ -1582,6 +1627,7 @@ int main(void) {
     RUN_TEST(test_mux_full_case_nested);
     RUN_TEST(test_mux_full_case_nested_partial);
     RUN_TEST(test_mux_full_case_under_partial);
+    RUN_TEST(test_mux_full_case_two_snippets);
     RUN_TEST(test_mux_items_eq_default);
     RUN_TEST(test_mux_open_across_boundary);
     RUN_TEST(test_mux_open_boundary_nonconst);
