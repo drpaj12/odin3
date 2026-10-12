@@ -522,11 +522,14 @@ Per module without live `$proc` nodes (others are skipped, §3), as `rmunused_mo
 3. Dead nodes are deleted in ID order; a dead FF's Q init bits are removed.
 4. Nets left with no pins, no wire membership and no aliases are deleted.
 5. A wire is deleted when every one of its nets has no pins, unless it is a port wire, has `keep`
-   or a defined `init` bit; with `-purge` also a wire whose name does not start with `$`
-   (Yosys's public names) — its nets stay, only the name goes. Yosys also drops `$`-named wires
-   that are still used; Odin III keeps them as names (IR-2; §17 #3).
-6. `init` cleanup (`rmunused_module_init`): an init bit on a net that no FF drives is removed; on
-   a constant net whose value differs it is removed with the warning of §16.
+   or a defined `init` bit. With `-purge` also a public wire (name not starting with `$`) that is
+   not the name a live net depends on: for each bit, the net has no pins or the wire is not the
+   net's primary. A used public wire that is its net's primary name stays (Yosys 0.55 probe:
+   `w = a&b; y = ~w` keeps `w` under `-purge`; a wire that is only an alias is dropped). Its nets
+   stay, only the name goes. `$`-named used wires stay (IR-2; §17 #3).
+6. `init` cleanup (`rmunused_module_init`, Yosys 0.55): an init bit is removed only where the net
+   is constant-driven with the opposite value, with the warning of §16. Every other init stays,
+   silently (an unused wire with init, and a used non-FF net with init, keep it).
 
 Count: `opt_clean: removed N unused cells, M unused nets and W unused wires`. Yosys's
 "driver-driver conflict" warning has no counterpart (check rule 4).
@@ -645,7 +648,7 @@ lines DEBUG.
 | DEBUG | `opt_clean: module 'm': removing unused <type> '<cell>'` | every removed node |
 | WARN | `opt: module 'm': no fixed point after 10000 iterations; stopping` | the cap (OP-12) |
 | WARN | `opt_muxtree: module 'm': giving up after 100000 evaluations` | Yosys's "Giving up (too many iterations)" |
-| WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict" |
+| WARN | `opt_clean: module 'm': initial value conflict for <net>: driven by 1'<v>, init 1'<i>` | Yosys's "Initial value conflict"; the only init `opt_clean` removes (§10 step 6) |
 | ERROR | `<pass>: unknown argument '<arg>'` | an unknown option (`INVALID_ARG`, the 1D style) |
 | ERROR | `opt needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (§19; `ODIN3_ERR_PARSE`) |
 

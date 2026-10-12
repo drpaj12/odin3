@@ -6,8 +6,10 @@
  *
  * Yosys re-derivation (0.55, the VTR build, one batched run; see the Task 3 report):
  * `yosys -p "read_rtlil X.il; opt_clean [-purge]; write_rtlil"`. The init rules, the instance
- * removal and the `$_BUF_` wiring are Yosys's; the net counts, `-purge` on used wires and the init
- * removal on non-FF nets are 2F §10's (Odin III names are wires over nets; IR-2, §17 #3).
+ * removal and the `$_BUF_` wiring are Yosys's; the net counts are 2F §10's (Odin III names are
+ * wires over nets; IR-2, §17 #3).
+ * `-purge` keeps a used public wire that is its net's primary name; an init goes only on a constant
+ * of the opposite value (both re-derived, Task 3 review).
  */
 #include "ir/celltype.h"
 #include "ir/check.h"
@@ -390,15 +392,15 @@ static void test_clean_init_conflict(void) {
           "  cell $_AND_ \\n3\n    connect \\A $tmp1\n    connect \\B \\u\n    connect \\Y \\y\n"
           "  end\nend\n");
     run_clean();
-    TEST_ASSERT_EQUAL_UINT32(1, count_level(ODIN3_LOG_WARN)); /* w only; u's init is silent */
+    TEST_ASSERT_EQUAL_UINT32(1, count_level(ODIN3_LOG_WARN)); /* w only; u's init stays, silent */
     TEST_ASSERT_EQUAL_UINT32(
         1, count_lines(ODIN3_LOG_WARN,
                        "opt_clean: module 'm': initial value conflict for 'w': driven by 1'0, "
                        "init 1'1"));
     TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("w")));
-    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("u")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_0, odin3_ffinit_get(fx.module, wnet("u"))); /* kept, silently */
     TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("w"))); /* it has pins: stays */
-    TEST_ASSERT_TRUE(fx.counts.clean_changes >= 2);
+    TEST_ASSERT_TRUE(fx.counts.clean_changes >= 1);
 }
 
 /* --- wires ------------------------------------------------------------------------------------ */
@@ -435,27 +437,75 @@ static void test_clean_wires(void) {
                                  {"w", true},               /* used */
                                  {"$x", true}};             /* used, and a $-name: kept (§17 #3) */
     expect_wires(first, sizeof first / sizeof first[0]);
-    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_X, odin3_ffinit_get(fx.module, wnet("iw"))); /* init goes */
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("iw"))); /* init stays */
     TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires);
     TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_nets);
     TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_cells);
-    run_clean(); /* the next call: iw has no init left, so it goes */
-    const wire_expect second[] = {{"iw", false}, {"kp", true}};
-    expect_wires(second, sizeof second / sizeof second[0]);
-    TEST_ASSERT_EQUAL_UINT32(2, fx.counts.clean_wires);
+    run_clean(); /* nothing changes: the init is Yosys's to keep */
+    expect_wires(first, sizeof first / sizeof first[0]);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires);
 }
 
 static void test_clean_purge(void) {
     fx.opts.purge = true;
     build(WIRES_TEXT);
     run_clean();
-    const wire_expect list[] = {{"w", false}, /* a public name: purged ... */
+    const wire_expect list[] = {{"w", true}, /* used, and its net's primary name: stays */
                                 {"$x", true}, {"a", true},    {"kp", true},
                                 {"iw", true}, {"dead", false}};
     expect_wires(list, sizeof list / sizeof list[0]);
-    /* ... but its net stays with both pins (n1's Y and n2's A) */
     TEST_ASSERT_EQUAL_UINT32(2, odin3_net_pins(fx.module, port_net("n1", 1)).count);
-    TEST_ASSERT_EQUAL_UINT32(2, fx.counts.clean_wires);
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires);
+}
+
+#define ALIAS_TEXT                                                                                 \
+    "module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\v\n  wire \\w\n"                \
+    "  connect \\v \\w\n"                                                                          \
+    "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\w\n  end\n"                        \
+    "  cell $_NOT_ \\n2\n    connect \\A \\v\n    connect \\Y \\y\n  end\nend\n"
+
+/* Without -purge both names of a net with pins stay; with it, only the non-primary alias goes. */
+static void test_clean_purge_alias(void) {
+    build(ALIAS_TEXT);
+    odin3_net_id net = wnet("w");
+    odin3_wire_id primary = odin3_net_primary(fx.module, net).wire;
+    TEST_ASSERT_EQUAL_UINT32(net.v, wnet("v").v);
+    run_clean();
+    TEST_ASSERT_EQUAL_UINT32(0, fx.counts.clean_wires);
+    fx.opts.purge = true;
+    run_clean();
+    TEST_ASSERT_TRUE(odin3_wire_live(fx.module, primary)); /* the primary name stays */
+    TEST_ASSERT_TRUE(odin3_net_live(fx.module, net));
+    TEST_ASSERT_EQUAL_UINT32(1, fx.counts.clean_wires); /* and the other name went */
+}
+
+/* An aliased net with no pins and no primary wire is kept (clean_nets' alias guard). */
+static void test_clean_net_alias_survives(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n  wire \\p\n"
+          "  attribute \\keep 1\n  wire \\k\n  connect \\p \\k\n"
+          "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n");
+    odin3_net_id net = wnet("k");
+    TEST_ASSERT_EQUAL_UINT32(net.v, wnet("p").v);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_net_pins(fx.module, net).count);
+    run_clean();
+    TEST_ASSERT_FALSE(odin3_wire_live(fx.module, wire_named("p")));
+    TEST_ASSERT_TRUE(odin3_wire_live(fx.module, wire_named("k")));
+    TEST_ASSERT_TRUE(odin3_net_live(fx.module, net));
+    TEST_ASSERT_EQUAL_UINT32(net.v, wnet("k").v);
+}
+
+/* A used non-FF net keeps its init, silently; a constant of the same value is no conflict. */
+static void test_clean_init_kept(void) {
+    build("module \\m\n  wire input 1 \\a\n  wire output 2 \\y\n"
+          "  attribute \\init 1'1\n  wire \\u\n  attribute \\init 1'1\n  wire \\c\n"
+          "  connect \\c 1'1\n"
+          "  cell $_NOT_ \\n1\n    connect \\A \\a\n    connect \\Y \\u\n  end\n"
+          "  cell $_AND_ \\n2\n    connect \\A \\u\n    connect \\B \\c\n    connect \\Y \\y\n"
+          "  end\nend\n");
+    run_clean();
+    TEST_ASSERT_EQUAL_UINT32(0, count_level(ODIN3_LOG_WARN));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("u")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_BIT_1, odin3_ffinit_get(fx.module, wnet("c")));
 }
 
 /* --- processes and constants -------------------------------------------------------------------
@@ -573,6 +623,9 @@ int main(void) {
     RUN_TEST(test_clean_init_conflict);
     RUN_TEST(test_clean_wires);
     RUN_TEST(test_clean_purge);
+    RUN_TEST(test_clean_purge_alias);
+    RUN_TEST(test_clean_net_alias_survives);
+    RUN_TEST(test_clean_init_kept);
     RUN_TEST(test_clean_skips_processes);
     RUN_TEST(test_clean_constants_silent);
     RUN_TEST(test_clean_misuse);

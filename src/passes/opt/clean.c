@@ -512,19 +512,8 @@ static odin3_status sweep(clean_state *cs) {
 /* --- step 6: init bits --------------------------------------------------------------------------
  */
 
-static bool driven_by_ff(const clean_state *cs, odin3_net_id net) {
-    odin3_pinlist pins = odin3_net_pins(cs->m, net);
-    uint32_t drivers = odin3_net_driver_count(cs->m, net);
-    for (uint32_t i = 0; i < drivers && i < pins.count; i++) {
-        odin3_node_id node = odin3_pin_node(cs->m, pins.pins[i]);
-        if (odin3_ff_is_ff(cs->oc, odin3_node_type(cs->m, node))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static void warn_conflict(const clean_state *cs, odin3_net_id net, odin3_bit init) {
+/* True when the net is constant-driven with the opposite of its init; then it warns. */
+static bool warn_conflict(const clean_state *cs, odin3_net_id net, odin3_bit init) {
     odin3_const driven = odin3_net_const_value(cs->m, net);
     bool conflict = (driven == ODIN3_CONST_0 && init == ODIN3_BIT_1) ||
                     (driven == ODIN3_CONST_1 && init == ODIN3_BIT_0);
@@ -537,17 +526,18 @@ static void warn_conflict(const clean_state *cs, odin3_net_id net, odin3_bit ini
                   name_text(cs, odin3_module_name(cs->m)), label,
                   driven == ODIN3_CONST_1 ? '1' : '0', init == ODIN3_BIT_1 ? '1' : '0');
     }
+    return conflict;
 }
 
-/* An init bit on a net that no FF drives means nothing: removed (silently unless it conflicts). */
+/* Yosys 0.55: an init goes only where the net is constant-driven with the opposite value (WARN);
+ * every other init stays, silently. */
 static odin3_status clean_init(clean_state *cs) {
     for (uint32_t id = 1; id < odin3_module_net_end(cs->m); id++) {
         odin3_net_id net = {id};
         odin3_bit init = odin3_net_live(cs->m, net) ? odin3_ffinit_get(cs->m, net) : ODIN3_BIT_X;
-        if ((init != ODIN3_BIT_0 && init != ODIN3_BIT_1) || driven_by_ff(cs, net)) {
+        if ((init != ODIN3_BIT_0 && init != ODIN3_BIT_1) || !warn_conflict(cs, net, init)) {
             continue;
         }
-        warn_conflict(cs, net, init);
         odin3_status st = odin3_ffinit_remove(cs->m, net, NULL);
         if (st != ODIN3_OK) {
             return st;
@@ -594,6 +584,23 @@ static bool wire_public(const clean_state *cs, odin3_wire_id wire) {
     return text != NULL && text[0] != '$';
 }
 
+/* -purge: a public wire may go unless it is the primary name of a net that still has pins. */
+static bool wire_purgeable(const clean_state *cs, odin3_wire_id wire) {
+    if (!wire_public(cs, wire)) {
+        return false;
+    }
+    for (uint32_t bit = 0; bit < odin3_wire_width(cs->m, wire); bit++) {
+        odin3_net_id net = odin3_wire_net(cs->m, wire, bit);
+        odin3_wirebit prim =
+            odin3_net_valid(net) ? odin3_net_primary(cs->m, net) : (odin3_wirebit){{0}, 0};
+        if (odin3_net_valid(net) && odin3_net_pins(cs->m, net).count > 0 && prim.wire.v == wire.v &&
+            prim.bit == bit) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static odin3_status clean_wires(clean_state *cs) {
     for (uint32_t id = 1; id < odin3_module_wire_end(cs->m); id++) {
         odin3_wire_id wire = {id};
@@ -602,7 +609,7 @@ static odin3_status clean_wires(clean_state *cs) {
             odin3_kit_keep(cs->oc, obj) || wire_has_init(cs, wire)) {
             continue;
         }
-        if (!wire_unused(cs, wire) && !(cs->oc->opts->purge && wire_public(cs, wire))) {
+        if (!wire_unused(cs, wire) && !(cs->oc->opts->purge && wire_purgeable(cs, wire))) {
             continue;
         }
         odin3_status st = odin3_wire_delete(cs->m, wire);

@@ -81,15 +81,15 @@ typedef struct odin3_opt_counts {
  * except those with live $proc nodes (INFO "opt_clean: module 'm' has processes; skipped"). Per
  * module: `$_BUF_` nodes without `keep` become wiring; liveness spreads back from the module's
  * ports, `keep` wires and `keep` nodes (instances of `keep` modules included); dead nodes are
- * deleted in ID order (a dead FF's Q init bits go with it); `init` bits on nets no FF drives are
- * removed (WARN when a 0/1 constant net disagrees); wires whose nets have no pins are deleted
- * (also, with opts->purge, every other wire named without a leading `$`; ports, `keep` and
- * initialised wires stay); nets left with no pins, wire or aliases are deleted. Dead `$_CONST*_`
- * nodes have no Yosys counterpart: they are removed silently, uncounted and without a change.
- * It adds into counts (clean_cells, clean_nets, clean_wires, clean_changes) and logs the INFO line
- * "opt_clean: removed N unused cells, M unused nets and W unused wires" (this call's totals).
- * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument; ODIN3_ERR_NO_MEMORY, possibly after some
- * modules were cleaned (the IR stays valid).
+ * deleted in ID order (a dead FF's Q init bits go with it); an `init` bit goes only where its net
+ * is constant-driven with the opposite value (WARN), every other init stays; wires whose nets have
+ * no pins are deleted (also, with opts->purge, public wires that are not the primary name of a net
+ * with pins; ports, `keep` and initialised wires stay); nets left with no pins, wire or aliases are
+ * deleted. Dead `$_CONST*_` nodes have no Yosys counterpart: they are removed silently, uncounted
+ * and without a change. It adds into counts (clean_cells, clean_nets, clean_wires, clean_changes)
+ * and logs the INFO line "opt_clean: removed N unused cells, M unused nets and W unused wires"
+ * (this call's totals). ODIN3_ERR_INVALID_ARG (logged) for a NULL argument; ODIN3_ERR_NO_MEMORY,
+ * possibly after some modules were cleaned (the IR stays valid).
  */
 odin3_status odin3_opt_clean_run(odin3_pass_ctx *ctx, odin3_design *design,
                                  const odin3_opt_opts *opts, odin3_opt_counts *counts);
