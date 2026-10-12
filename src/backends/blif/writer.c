@@ -32,7 +32,8 @@ enum {
     WRAP_MARK = 2,     /* the ` \` that ends a wrapped line */
     INDENT = 2,        /* continuation lines start with two spaces */
     IO_BUFFER = 1 << 20,
-    PIN_KEY_SHIFT = 32, /* generated-name key: a net ID, or 1 << 32 | pin ID */
+    PIN_KEY_SHIFT = 32,  /* generated-name key: a net ID, or 1 << 32 | pin ID */
+    TYPE_KEY_SHIFT = 32, /* widest-width key: type ID << 32 | port index */
 };
 
 /* The built-in cell types written as .names and .latch; everything else is a .subckt. */
@@ -123,6 +124,9 @@ typedef struct blif_writer {
     bool scan;          /* a dry run of the cells and buffers: nothing is written */
     uint32_t gens_used; /* generators a pin or buffer reads (1 << wr_gen) */
     uint32_t gens_have; /* generators a written zero-input $sop already is (1 << wr_gen) */
+    /* VTR (§8.2, §8.3): type ID << 32 | port -> the widest width a live hard node of the top
+     * gives that port (built on first use, build_widest) */
+    odin3_u64map *widest;
 } blif_writer;
 
 /* --- errors and output --------------------------------------------------------------------- */
@@ -1392,13 +1396,58 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
     return wr->st;
 }
 
+/* Raises the widest width recorded for port `at` of node's type to the node's. */
+static odin3_status widen(blif_writer *wr, const odin3_module *top, odin3_node_id node,
+                          uint32_t at) {
+    uint64_t key = (uint64_t)odin3_node_type(top, node).v << TYPE_KEY_SHIFT | at;
+    uint64_t have = 0;
+    uint32_t width = odin3_node_port(top, node, at).count;
+    bool found = odin3_u64map_get(wr->widest, key, &have);
+    return found && have >= width ? ODIN3_OK : odin3_u64map_put(wr->widest, (odin3_kv){key, width});
+}
+
+/* VTR: wr->widest, over the live hard nodes of the top (once). */
+static odin3_status build_widest(blif_writer *wr) {
+    if (wr->widest != NULL) {
+        return ODIN3_OK;
+    }
+    const odin3_module *top =
+        odin3_module_get((odin3_design *)wr->design, odin3_design_top(wr->design));
+    wr->widest = odin3_u64map_create(0);
+    odin3_status st = wr->widest != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(top); i++) {
+        odin3_node_id node = {i};
+        odin3_celltype_id type = odin3_node_type(top, node);
+        if (!odin3_node_live(top, node) || !hard_type(wr->design, type)) {
+            continue;
+        }
+        for (uint32_t at = 0; st == ODIN3_OK && at < odin3_celltype_get(wr->design, type)->n_ports;
+             at++) {
+            st = widen(wr, top, node, at);
+        }
+    }
+    return st;
+}
+
+/* The widest width a live node of the top gives port `at` of type (build_widest ran). */
+static uint32_t widest_of(const blif_writer *wr, odin3_celltype_id type, uint32_t at) {
+    uint64_t width = 0;
+    (void)odin3_u64map_get(wr->widest, (uint64_t)type.v << TYPE_KEY_SHIFT | at, &width);
+    return (uint32_t)width;
+}
+
 /* VTR (spec 3E §8.2): whether the formals of port `at` of type, `width` bits at the node, are
- * written `p` rather than `p[k]`: one bit, spelled so by the declaration when the type has one
- * (the round trip), else always (Parmys's scalar `data=`, `we=`, `out=`). */
+ * written `p` rather than `p[k]`: a declared type as its declaration spells the port (one bit
+ * only; the round trip); an undeclared one per type, when the widest width any live node gives
+ * the port is 1 (Parmys's scalar `data=`, `we=`, `out=`), so every instance agrees with the stub
+ * (§8.3) and our reader accepts them all. */
 static bool vtr_formal_scalar(const blif_writer *wr, odin3_celltype_id type, uint32_t at,
                               uint32_t width) {
     uint32_t index = 0;
-    return width == 1 && (declared_of(wr, type, &index) == NULL || formal_scalar(wr, type, at));
+    if (declared_of(wr, type, &index) != NULL) {
+        return width == 1 && formal_scalar(wr, type, at);
+    }
+    return widest_of(wr, type, at) == 1;
 }
 
 /* VTR (§8.2): every bit of port `at` of node as `formal=actual`, bits beyond the node's width
@@ -1447,9 +1496,12 @@ static odin3_status write_subckt_vtr(blif_writer *wr, odin3_node_id node) {
     if (subckt_params_ok(wr, node, def) != ODIN3_OK) {
         return wr->st;
     }
+    odin3_status st = build_widest(wr);
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
     wr_begin(wr, ".subckt");
     wr_token(wr, odin3_bytes_cstr(def->name));
-    odin3_status st = ODIN3_OK;
     for (uint32_t at = next_port_by_name(def, UINT32_MAX); st == ODIN3_OK && at < def->n_ports;
          at = next_port_by_name(def, at)) {
         st = subckt_port_vtr(wr, node, at);
@@ -1771,37 +1823,23 @@ static odin3_status used_hard_types(const blif_writer *wr, const odin3_module *t
     return ODIN3_OK;
 }
 
-/* ports[i].width = the widest port i of type is on a live node of top (§8.3). */
-static void widest_ports(const odin3_module *top, odin3_celltype_id type, odin3_port_def *ports,
-                         uint32_t n_ports) {
-    for (uint32_t i = 1; i < odin3_module_node_end(top); i++) {
-        odin3_node_id node = {i};
-        if (!odin3_node_live(top, node) || odin3_node_type(top, node).v != type.v) {
-            continue;
-        }
-        for (uint32_t at = 0; at < n_ports; at++) {
-            uint32_t width = odin3_node_port(top, node, at).count;
-            ports[at].width = width > ports[at].width ? width : ports[at].width;
-        }
-    }
-}
-
 /* The stub of an undeclared library cell (§8.3): its ports in library order, each at the widest
  * width a live node of top gives it, `p` (scalar) when that is 1 (as its formals, §8.2), else
  * `p[0] … p[w-1]`. */
-static odin3_status write_lib_stub(blif_writer *wr, const odin3_module *top,
-                                   odin3_celltype_id type) {
+static odin3_status write_lib_stub(blif_writer *wr, odin3_celltype_id type) {
     const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
-    odin3_port_def *ports = odin3_util_calloc(sizeof *ports * (def->n_ports + 1U));
+    odin3_status st = build_widest(wr);
+    odin3_port_def *ports =
+        st == ODIN3_OK ? odin3_util_calloc(sizeof *ports * (def->n_ports + 1U)) : NULL;
     if (ports == NULL) {
         return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
     for (uint32_t at = 0; at < def->n_ports; at++) {
-        ports[at] = (odin3_port_def){.name = def->ports[at].name, .dir = def->ports[at].dir};
-    }
-    widest_ports(top, type, ports, def->n_ports);
-    for (uint32_t at = 0; at < def->n_ports; at++) {
-        ports[at].scalar = ports[at].width == 1;
+        uint32_t width = widest_of(wr, type, at);
+        ports[at] = (odin3_port_def){.name = def->ports[at].name,
+                                     .dir = def->ports[at].dir,
+                                     .scalar = width == 1,
+                                     .width = width};
     }
     odin3_celltype_def stub = {.name = def->name, .ports = ports, .n_ports = def->n_ports};
     write_blackbox_model(wr, &stub);
@@ -1828,7 +1866,7 @@ static odin3_status write_stubs(blif_writer *wr) {
         if (decl != NULL) {
             write_blackbox_model(wr, decl);
         } else {
-            (void)write_lib_stub(wr, top, stub->type);
+            (void)write_lib_stub(wr, stub->type);
         }
     }
     odin3_vec_free(&stubs);
@@ -1948,6 +1986,7 @@ static void wr_free(blif_writer *wr) {
     odin3_strbuf_free(&wr->first_legal);
     odin3_u64map_destroy(wr->type_module);
     odin3_u64map_destroy(wr->declared);
+    odin3_u64map_destroy(wr->widest);
 }
 
 /* The options' refusals for odin3_blif_write_with (plan 3E points (m) and (n)), before the

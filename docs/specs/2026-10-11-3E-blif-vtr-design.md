@@ -358,7 +358,10 @@ node's parameters give):
 
 - the formal is the port name when the port's width expression is the literal `1` **or** the
   node's width for that port is 1 (Parmys's scalar `data=`, §3 item 5), else `<port>[k]`; a
-  declared model's scalar flags win when the type is declared (round trip);
+  declared model's scalar flags win when the type is declared (round trip); **erratum (Task 5
+  review I1):** for an undeclared type the choice is per type and port, not per node: `p` only
+  when the widest width any live node gives the port is 1 (the stub's rule, §8.3), so every
+  instance agrees with the stub and our reader (IR-7b) reads the file back;
 - an **input** bit's actual is its net's VB-10 name; when the pin is unconnected, its net
   undriven, or its net x (`$_CONSTX_`, `$_CONSTZ_`), the actual is `unconn` (counted in
   `x_to_unconn`): VPR leaves the pin open (R14), as Parmys does;

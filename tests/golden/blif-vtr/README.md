@@ -46,10 +46,12 @@ without `.blif`.
 | `odin2_init3_cont` | `.vtr.blif` | Odin II's form: latch init `3` is written `2` (init `0` is kept). The input's `\` continuations, with no blank before the backslash, are joined by the reader. The writer rewraps them at 100 columns with ` \`. |
 | `const_output` | `.vtr.blif` | Review Focus 4: constants on output ports, each with one driver. A zero-input `.names` on the port is kept as it is, with no buffer. The constant cover `.names a y1` / `- 1` becomes the generator `.names y1` / `1`. Parmys's buffer from `vcc` is unchanged. |
 | `x_output` | `.vtr.blif` | An output nothing drives, and an output buffered from a net nothing drives. Both read x as `gnd` through a buffer, and the `gnd` generator is emitted. |
+| `ram_dual_port_clock` | `.vtr.blif` | A `dual_port_ram`, whose formals are given in library order, is written sorted as Parmys sorts them: `addr1[*] addr2[*] clk data1 data2 out1 out2 we1 we2`. Its stub is in library order. A `single_port_ram` whose `clk` is the constant `gnd` is written `clk=gnd`; the writer warns about it, and the warning is not compared. |
 | `subckt_unconnected_outputs_named` | `.vtr.blif` | Two adders whose `cout` nobody reads. Each gets its own `$p<pin ID>` net, so every output bit is written and the block names are distinct (R12). |
 | `neg_e1_fe` | `.err` | E1: an `fe` latch. |
 | `neg_e2_ah` | `.err` | E2: an `ah` latch. |
 | `neg_e3_untyped` | `.err` | E3: an untyped latch (`$_FF_`, no clock). |
+| `neg_e3b_ram_clk_open` | `.err` | E3b: a RAM's `clk` is on a net nothing drives. |
 | `neg_e5_word` | `.err` | E5: the word cell `$add`. |
 | `neg_e6_implicit` | `.err` | E6: an implicit black box. |
 | `neg_e7_wide` | `.err` | E7: a 7-input `.names` (K = 6). |
@@ -58,3 +60,9 @@ without `.blif`.
 | `neg_e12_multidriver` | `.err`, `.debug.err` | E12: two `.names` drive `y`. A Debug build checks the IR after every pass (CLAUDE.md rule 3), so `check` refuses the input at `read_blif` before the writer sees it. The driver therefore also accepts `<name>.debug.err`, which holds that `check` line. CI's CTest runs the Debug build; the Release CLI gives the E12 line. |
 
 `<name>.debug.err` is written by hand; `--write` never writes it. It exists only for this case.
+When it is the file that matches, the driver prints a `note` line saying so. In the Debug CTest,
+two cases never reach the writer, and their E-classes are pinned by `test_blif_vtr` instead:
+`neg_e8_mixed` (the reader refuses it) and `neg_e12_multidriver` (`check` refuses it).
+
+The driver's own negative test is `tests/golden/blif-vtr-corrupt/`, run by CTest
+`blif_vtr_fixtures_detects_corruption`.

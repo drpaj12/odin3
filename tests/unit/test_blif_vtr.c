@@ -2695,6 +2695,64 @@ static void test_out_of_memory_sweep_stubs(void) {
     odin3_strbuf_free(&api);
 }
 
+/* Review I1 (spec 3E §8.2 erratum): an undeclared type used at widths 1 and 2 writes `p[k]` on
+ * every instance, as its stub does, so our own reader reads the output back. */
+static void test_mixed_width_formals_reread(void) {
+    read_ok(".model top\n.inputs c d a0 a1 w\n.outputs o1 o2 o3\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 we=w out[0]=o1\n"
+            ".subckt single_port_ram clk=c data[0]=d data[1]=d addr[0]=a0 addr[1]=a1 we=w "
+            "out[0]=o2 out[1]=o3\n.end\n",
+            true);
+    const char *body = unwrapped(write_vtr());
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(body, ".subckt single_port_ram addr[0]=a0 clk=c data[0]=d out[0]=o1 we=w\n"
+                     ".subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=c data[0]=d data[1]=d "
+                     "out[0]=o2 out[1]=o3 we=w\n.end\n\n.model single_port_ram\n"
+                     ".inputs clk data[0] data[1] addr[0] addr[1] we\n.outputs out[0] out[1]\n"),
+        body);
+    odin3_strbuf written;
+    odin3_strbuf_init(&written);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&written, buf_of(&out)));
+    bvt_free(&tc);
+    read_ok(written.data, true); /* IR-7b: the instances match the stub */
+    odin3_strbuf_free(&written);
+    write_vtr();
+}
+
+/* Review M3 (agent default 1): a declared 1-bit vector port stays `p[0]`, as declared, and the
+ * output reads back to the same bytes. */
+static void test_declared_one_bit_vector_kept(void) {
+    static const char *const body =
+        ".inputs c d a w\n.outputs o\n"
+        ".subckt single_port_ram addr[0]=a clk=c data[0]=d out[0]=o we=w\n.end\n\n"
+        ".model single_port_ram\n.inputs clk we addr[0] data[0]\n.outputs out[0]\n.blackbox\n"
+        ".end\n";
+    char text[LINE_BUF * 2];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text, ".model top\n%s", body) < (int)sizeof text);
+    read_ok(text, true);
+    TEST_ASSERT_EQUAL_STRING(body, write_vtr());
+}
+
+/* Review M7: a deleted hard node neither gets a stub nor widens one. */
+static void test_stub_dead_nodes(void) {
+    read_ok(".model top\n.inputs c d a0 a1 w x\n.outputs o1 o2 s\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 we=w out[0]=o1\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 addr[1]=a1 we=w out[0]=o2\n"
+            ".subckt adder a=x b=x cin=x sumout=s\n.end\n",
+            true);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_node_delete(top_of(), (odin3_node_id){nth_node("adder", 0)}));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_node_delete(top_of(), (odin3_node_id){nth_node("single_port_ram", 1)}));
+    const char *body = write_vtr();
+    TEST_ASSERT_NULL_MESSAGE(strstr(body, ".model adder"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(body, ".subckt single_port_ram addr=a0 clk=c data=d out=o1 we=w\n"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\n.model single_port_ram\n.inputs clk data addr "
+                                              "we\n.outputs out\n.blackbox\n.end\n"),
+                                 body);
+}
+
 /* Task 5: hard blocks. */
 static void run_task_5(void) {
     RUN_TEST(test_formals_sorted);
@@ -2709,6 +2767,9 @@ static void run_task_5(void) {
     RUN_TEST(test_constant_cover_k8);
     RUN_TEST(test_output_on_unconn_and_open_gate_output);
     RUN_TEST(test_out_of_memory_sweep_stubs);
+    RUN_TEST(test_mixed_width_formals_reread);
+    RUN_TEST(test_declared_one_bit_vector_kept);
+    RUN_TEST(test_stub_dead_nodes);
     odin3_strbuf_free(&flat);
 }
 

@@ -1,0 +1,12 @@
+# ram_dual_port_clock: a dual_port_ram (two numbered port families) with formals in library
+# order, written sorted (addr1 addr2 clk data1 data2 out1 out2 we1 we2), and a single_port_ram
+# whose clk is the constant gnd: written clk=gnd (VPR accepts it; the writer warns)
+.model rams
+.inputs clk a0 a1 b0 b1 d1 d2 w
+.outputs q1 q2 r
+.names gnd
+.names vcc
+1
+.subckt dual_port_ram clk=clk data2[0]=d2 data1[0]=d1 addr2[0]=b0 addr2[1]=b1 addr1[0]=a0 addr1[1]=a1 we2=vcc we1=w out2[0]=q2 out1[0]=q1
+.subckt single_port_ram clk=gnd data[0]=d1 addr[0]=a0 we=w out[0]=r
+.end

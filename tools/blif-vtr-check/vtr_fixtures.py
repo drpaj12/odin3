@@ -185,6 +185,7 @@ def compare(case: Case, fixtures: Path, outcome: Outcome) -> str | None:
     if outcome.errors == read_text(err):
         return None
     if debug.is_file() and outcome.errors == read_text(debug):
+        print(f"note {case.name}: matched {debug.name}, not {err.name} (refused before the writer)")
         return None
     show_diff(read_text(err), outcome.errors, err.name, "errors")
     return f"error lines differ from {err.name}"

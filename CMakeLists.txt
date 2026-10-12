@@ -616,6 +616,13 @@ if(BUILD_TESTING)
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
                      --odin3 $<TARGET_FILE:odin3> --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr)
     set_tests_properties(blif_vtr_fixtures PROPERTIES LABELS unit)
+    # The driver's own negative: a deliberately wrong expected file must be reported.
+    add_test(NAME blif_vtr_fixtures_detects_corruption
+             COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-vtr-check/vtr-fixtures
+                     --odin3 $<TARGET_FILE:odin3>
+                     --dir ${PROJECT_SOURCE_DIR}/tests/golden/blif-vtr-corrupt)
+    set_tests_properties(blif_vtr_fixtures_detects_corruption PROPERTIES LABELS unit
+        PASS_REGULAR_EXPRESSION "FAIL corrupt: differs from corrupt.vtr.blif")
     # The goldens' distinct black-box stanzas (tools/golden-blackboxes) against lib/vtr.o3lib.
     add_test(NAME blif_roundtrip_techlib
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
