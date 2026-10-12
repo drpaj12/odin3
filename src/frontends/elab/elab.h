@@ -15,10 +15,12 @@
 #include <stdint.h>
 
 /*
- * The caps of §11, exact, plus ODIN3_ELAB_MAX_POW_WORK: a constant `**` costs up to
- * (width - 2) square-and-multiply steps of ceil(width / 64)^2 word products each, O(w^3), which
- * the width cap alone does not bound (2D Task 9 ruling); its estimate is checked before the
- * operation (`constant '**' of N bits exceeds the limit of M word operations`).
+ * The caps of §11, exact, plus ODIN3_ELAB_MAX_EVAL_WORK (2D Task 9 ruling and fix round 1): the
+ * word products one top-level constant evaluation may spend in * / % ** (ceil(width / 64)^2 for
+ * each * / %; a ** up to (width - 2) square-and-multiply steps of that, O(w^3), which the width
+ * cap alone does not bound). A single ** is checked before it runs (`constant '**' of N bits
+ * exceeds the limit of M word operations`), the running total before each operation
+ * (`constant evaluation of 'f' exceeds M word operations`).
  */
 enum {
     ODIN3_ELAB_MAX_ERRORS = 20,                /* errors per run; then elaboration stops */
@@ -37,7 +39,7 @@ enum {
     ODIN3_ELAB_MAX_INIT_BITS = 1 << 26,        /* initial-value bits materialised per run */
     ODIN3_ELAB_MAX_READMEM_BYTES = 1 << 28,    /* one $readmem file */
     ODIN3_ELAB_MAX_MODULE_NAME = 128,          /* longer specialization names are hashed */
-    ODIN3_ELAB_MAX_POW_WORK = 1 << 30,         /* word products of one constant '**' (Task 9) */
+    ODIN3_ELAB_MAX_EVAL_WORK = 1 << 30,        /* word products of one constant evaluation */
     ODIN3_ELAB_MAX_BYTES_PERCENT = 60          /* the byte budget: this % of physical RAM */
 };
 

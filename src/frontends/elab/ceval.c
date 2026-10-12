@@ -43,7 +43,8 @@ enum {
     EV_TMP_RENEW = 1 << 20, /* renew a frame's temporaries above this many bytes */
     EV_INT_BITS = 32,       /* integer */
     EV_TIME_BITS = 64,      /* time */
-    EV_BYTE_BITS = 8        /* a string character */
+    EV_BYTE_BITS = 8,       /* a string character */
+    EV_BYTES_EVERY = 4096   /* steps between two checks of the byte budget */
 };
 
 static const uint32_t EV_NO_SCOPE = UINT32_MAX; /* no frame: names go to the host */
@@ -112,6 +113,11 @@ odin3_status ev_nonconst_read(odin3_ceval *ev, uint32_t scope, odin3_ast_id node
     return ev_nonconst_fn(ev, scope, node, reason, ev_str(ev, name));
 }
 
+/* The typer's callbacks (defined below; every level's typer gets them). */
+static odin3_status ev_leaf(void *user, odin3_ast_id node, odin3_etype *out);
+static odin3_status ev_constant(void *user, odin3_ast_id node, int64_t *out);
+static void ev_report_cb(void *user, odin3_log_level level, odin3_loc loc, const char *msg);
+
 /* --- stacks and frames --------------------------------------------------------------------- */
 
 odin3_status ev_push(odin3_ceval *ev, ev_task task) {
@@ -154,7 +160,41 @@ odin3_arena *ev_tmp(const odin3_ceval *ev, uint32_t idx) {
     return ev_frame(ev, idx)->tmp;
 }
 
+/* The typer of level `level`, made (with every level below) when first needed. */
+static odin3_status ev_typer_at(odin3_ceval *ev, uint32_t level) {
+    while (ev->typers.len <= level) {
+        const odin3_ctype_host host = {ev_leaf, ev_constant, ev_report_cb, ev};
+        odin3_ctype *ty = NULL;
+        odin3_status st = odin3_ctype_create(ev->ast, &host, &ty);
+        odin3_ctype **slot = st == ODIN3_OK ? (odin3_ctype **)odin3_vec_push(&ev->typers) : NULL;
+        if (slot == NULL) {
+            odin3_ctype_destroy(ty);
+            return st == ODIN3_OK ? ODIN3_ERR_NO_MEMORY : st;
+        }
+        *slot = ty;
+    }
+    return ODIN3_OK;
+}
+
+odin3_ctype *ev_types(const odin3_ceval *ev, uint32_t idx) {
+    uint32_t level = idx < ev->frames.len ? ev_frame(ev, idx)->level : 0;
+    return ((odin3_ctype *const *)ev->typers.data)[level];
+}
+
+/* A function's frame types its body's nodes in its level's typer: the frames below of the same
+ * function and level must re-type their open roots when control returns to them. */
+static void ev_mark_dirty(odin3_ceval *ev, odin3_ast_id decl) {
+    for (uint32_t k = 0; decl.v != 0 && k < ev->frames.len; k++) {
+        odin3_ceval_frame *fr = odin3_vec_at(&ev->frames, k);
+        fr->dirty = fr->dirty || (fr->decl.v == decl.v && fr->level == ev->level);
+    }
+}
+
 odin3_status ev_frame_push(odin3_ceval *ev, odin3_ast_id decl, odin3_ast_id call, uint32_t *idx) {
+    odin3_status st = ev_typer_at(ev, ev->level);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     odin3_arena *mem = odin3_arena_create(EV_MEM_CHUNK);
     odin3_arena *tmp = mem != NULL ? odin3_arena_create(EV_TMP_CHUNK) : NULL;
     odin3_ceval_frame *fr = tmp != NULL ? odin3_vec_push(&ev->frames) : NULL;
@@ -170,8 +210,12 @@ odin3_status ev_frame_push(odin3_ceval *ev, odin3_ast_id decl, odin3_ast_id call
                               (uint32_t)ev->tasks.len,
                               mem,
                               tmp,
-                              NULL};
+                              NULL,
+                              ev->level,
+                              false};
     *idx = (uint32_t)ev->frames.len - 1;
+    ev_mark_dirty(ev, decl);
+    ((odin3_ceval_frame *)odin3_vec_at(&ev->frames, *idx))->dirty = false;
     return ODIN3_OK;
 }
 
@@ -213,14 +257,15 @@ static odin3_status ev_tmp_renew(odin3_ceval *ev, uint32_t idx) {
 
 typedef struct ev_mark {
     size_t tasks, values, frames, locals, roots;
-    uint32_t scope, clog2;
+    uint32_t scope, clog2, nest, level, cur;
     bool quiet, nonconst;
     const char *what;
 } ev_mark;
 
 static ev_mark ev_mark_take(const odin3_ceval *ev) {
     return (ev_mark){ev->tasks.len, ev->values.len, ev->frames.len, ev->locals.len, ev->roots.len,
-                     ev->scope,     ev->clog2,      ev->quiet,      ev->nonconst,   ev->what};
+                     ev->scope,     ev->clog2,      ev->nest,       ev->level,      ev->cur,
+                     ev->quiet,     ev->nonconst,   ev->what};
 }
 
 static void ev_unwind(odin3_ceval *ev, const ev_mark *mark) {
@@ -241,6 +286,9 @@ static void ev_unwind(odin3_ceval *ev, const ev_mark *mark) {
     }
     ev->scope = mark->scope;
     ev->clog2 = mark->clog2;
+    ev->nest = mark->nest;
+    ev->level = mark->level;
+    ev->cur = mark->cur;
     ev->quiet = mark->quiet;
     ev->nonconst = mark->nonconst;
     ev->what = mark->what;
@@ -291,6 +339,7 @@ static odin3_status ev_run(odin3_ceval *ev, size_t base) {
 static void ev_enter(odin3_ceval *ev) {
     if (ev->depth == 0) {
         ev->steps = 0;
+        ev->work = 0;
     }
     ev->depth++;
 }
@@ -416,9 +465,12 @@ ev_span ev_select_span(const ev_sel_req *req) {
 static odin3_status ev_type_in(odin3_ceval *ev, uint32_t scope, odin3_ast_id root,
                                odin3_etype context) {
     uint32_t saved = ev->scope;
+    uint32_t saved_cur = ev->cur;
     ev->scope = scope;
-    odin3_status st = odin3_ctype_expr(ev->ty, root, context);
+    ev->cur = scope < ev->frames.len ? ev_frame(ev, scope)->level : 0;
+    odin3_status st = odin3_ctype_expr(ev_types(ev, scope), root, context);
     ev->scope = saved;
+    ev->cur = saved_cur;
     return st;
 }
 
@@ -443,6 +495,11 @@ void ev_root_close(odin3_ceval *ev, odin3_ast_id node) {
 }
 
 odin3_status ev_retype(odin3_ceval *ev, uint32_t scope) {
+    odin3_ceval_frame *fr = odin3_vec_at(&ev->frames, scope);
+    if (!fr->dirty) {
+        return ODIN3_OK; /* nothing of its level and function typed its nodes since */
+    }
+    fr->dirty = false;
     size_t first = ev->roots.len;
     while (first > 0 && ((const ev_root *)ev->roots.data)[first - 1].frame == scope) {
         first--;
@@ -453,8 +510,11 @@ odin3_status ev_retype(odin3_ceval *ev, uint32_t scope) {
         if (root.typing) {
             continue; /* its typing is running further down the C stack */
         }
+        uint64_t size = 0;
+        st = ev_subtree_size(ev, (odin3_ast_id){root.node}, &size);
+        st = st == ODIN3_OK ? ev_steps(ev, (odin3_ast_id){root.node}, size) : st;
         ((ev_root *)ev->roots.data)[k].typing = true;
-        st = ev_type_in(ev, scope, (odin3_ast_id){root.node}, root.context);
+        st = st == ODIN3_OK ? ev_type_in(ev, scope, (odin3_ast_id){root.node}, root.context) : st;
         ((ev_root *)ev->roots.data)[k].typing = false;
     }
     return st;
@@ -517,19 +577,83 @@ void ev_pop_int(odin3_ceval *ev, int64_t *out, bool *known) {
 
 /* --- caps ---------------------------------------------------------------------------------- */
 
-odin3_status ev_step(odin3_ceval *ev, odin3_ast_id node) {
-    uint32_t cap = odin3_elab_limits_get()->max_eval_steps;
-    if (++ev->steps <= cap) {
-        return ODIN3_OK;
-    }
+/* The outermost function frame (the one whose evaluation the caps name), or UINT32_MAX. */
+static uint32_t ev_outermost_function(const odin3_ceval *ev) {
     for (uint32_t k = 0; k < ev->frames.len; k++) {
-        const odin3_ceval_frame *fr = ev_frame(ev, k);
-        if (fr->decl.v != 0) {
-            return ev_error(ev, fr->call, "constant evaluation of '%s' exceeds %" PRIu32 " steps",
-                            ev_frame_name(ev, k), cap);
+        if (ev_frame(ev, k)->decl.v != 0) {
+            return k;
         }
     }
-    return ev_error(ev, node, "constant evaluation exceeds %" PRIu32 " steps", cap);
+    return UINT32_MAX;
+}
+
+/* `constant evaluation of 'f' exceeds <limit>`, at f's call (no function: at node). */
+static odin3_status ev_evaluation_cap(const odin3_ceval *ev, odin3_ast_id node, uint32_t cap,
+                                      const char *unit) {
+    uint32_t outer = ev_outermost_function(ev);
+    if (outer == UINT32_MAX) {
+        return ev_error(ev, node, "constant evaluation exceeds %" PRIu32 " %s", cap, unit);
+    }
+    return ev_error(ev, ev_frame(ev, outer)->call,
+                    "constant evaluation of '%s' exceeds %" PRIu32 " %s", ev_frame_name(ev, outer),
+                    cap, unit);
+}
+
+/* The bytes the evaluator holds: every frame's arenas and its stacks. */
+static uint64_t ev_bytes_held(const odin3_ceval *ev) {
+    uint64_t bytes = ev->tasks.cap * ev->tasks.elem_size + ev->values.cap * ev->values.elem_size +
+                     ev->frames.cap * ev->frames.elem_size + ev->locals.cap * ev->locals.elem_size +
+                     ev->roots.cap * ev->roots.elem_size;
+    for (uint32_t k = 0; k < ev->frames.len; k++) {
+        const odin3_ceval_frame *fr = ev_frame(ev, k);
+        bytes += odin3_arena_bytes_reserved(fr->mem) + odin3_arena_bytes_reserved(fr->tmp);
+    }
+    return bytes;
+}
+
+odin3_status ev_bytes_check(const odin3_ceval *ev, odin3_ast_id node) {
+    uint64_t cap = odin3_elab_limits_get()->max_bytes;
+    if (ev_bytes_held(ev) <= cap) {
+        return ODIN3_OK;
+    }
+    return ev_error(ev, node,
+                    "elaboration needs more than %" PRIu64
+                    " bytes (the budget is 60%% of physical memory)",
+                    cap);
+}
+
+odin3_status ev_steps(odin3_ceval *ev, odin3_ast_id node, uint64_t count) {
+    uint32_t cap = odin3_elab_limits_get()->max_eval_steps;
+    uint64_t before = ev->steps;
+    ev->steps += count;
+    if (ev->steps > cap) {
+        return ev_evaluation_cap(ev, node, cap, "steps");
+    }
+    bool crossed = before / EV_BYTES_EVERY != ev->steps / EV_BYTES_EVERY;
+    return crossed ? ev_bytes_check(ev, node) : ODIN3_OK; /* the byte budget, now and then */
+}
+
+odin3_status ev_step(odin3_ceval *ev, odin3_ast_id node) {
+    return ev_steps(ev, node, 1);
+}
+
+odin3_status ev_work(odin3_ceval *ev, odin3_ast_id node, uint64_t products) {
+    uint32_t cap = odin3_elab_limits_get()->max_eval_work;
+    ev->work += products;
+    return ev->work <= cap ? ODIN3_OK : ev_evaluation_cap(ev, node, cap, "word operations");
+}
+
+odin3_status ev_subtree_size(const odin3_ceval *ev, odin3_ast_id node, uint64_t *out) {
+    odin3_ast_cursor cur;
+    odin3_status st = odin3_ast_cursor_init(&cur, ev->ast, node);
+    odin3_ast_event event = ODIN3_AST_ENTER;
+    odin3_ast_id at = {0};
+    *out = 0;
+    while (st == ODIN3_OK && odin3_ast_cursor_next(&cur, &event, &at)) {
+        *out += event == ODIN3_AST_ENTER ? 1U : 0U;
+    }
+    odin3_ast_cursor_free(&cur);
+    return st;
 }
 
 /* The call-depth cap before a nested run inside an evaluation (name: for the message). */
@@ -632,7 +756,8 @@ static odin3_status ev_nested_begin(odin3_ceval *ev, odin3_ast_id node, const ch
     odin3_status st = out->nested ? ev_nest_check(ev, node, name) : ODIN3_OK;
     if (st == ODIN3_OK) {
         ev_enter(ev);
-        ev->nest += out->nested ? 1U : 0U;
+        ev->nest += out->nested ? 1U : 0U; /* counted against the call-depth cap */
+        ev->level++;                       /* its frames type with a typer of their own */
         ev->clog2 = 0;
         ev->nonconst = false;
     }
@@ -641,9 +766,8 @@ static odin3_status ev_nested_begin(odin3_ceval *ev, odin3_ast_id node, const ch
 
 static void ev_nested_end(odin3_ceval *ev, const ev_nested *nst) {
     bool nonconst = ev->nonconst;
-    ev_unwind(ev, &nst->mark);
+    ev_unwind(ev, &nst->mark);               /* restores nest and level */
     ev->nonconst = ev->nonconst || nonconst; /* the outer evaluation stops for the same reason */
-    ev->nest -= nst->nested ? 1U : 0U;
     ev->depth--;
 }
 
@@ -699,6 +823,25 @@ static odin3_status ev_call_type(odin3_ceval *ev, odin3_ast_id call, odin3_etype
     return st == ODIN3_OK ? ev_decl_type_of(ev, &req, out, &msb, &lsb) : st;
 }
 
+/* A system call the typer could not type: a built-in with another argument count than 1, or
+ * E20 for any other $name. */
+static odin3_status ev_system_call(const odin3_ceval *ev, odin3_ast_id node) {
+    static const char *const BUILT_IN[] = {"$signed", "$unsigned", "$clog2"};
+    const char *name = odin3_ast_name_str(ev->ast, node);
+    uint32_t args = 0;
+    for (uint32_t k = 0; k < odin3_ast_nchild(ev->ast, node); k++) {
+        args += odin3_ast_child(ev->ast, node, k).v != 0 ? 1U : 0U;
+    }
+    for (size_t k = 0; k < sizeof BUILT_IN / sizeof BUILT_IN[0]; k++) {
+        if (strcmp(name, BUILT_IN[k]) == 0) {
+            return ev_error(ev, node,
+                            "system function '%s' has 1 input; %" PRIu32 " arguments given", name,
+                            args);
+        }
+    }
+    return ev_error(ev, node, "system function '%s' is not supported", name);
+}
+
 /* A memory word's type (width 0: an ordinary select), for the typer. */
 static odin3_status ev_word_type(odin3_ceval *ev, odin3_ast_id node, odin3_etype *out) {
     odin3_csym sym;
@@ -716,8 +859,7 @@ static odin3_status ev_leaf(void *user, odin3_ast_id node, odin3_etype *out) {
         return ev_word_type(ev, node, out);
     case ODIN3_AST_CALL:
         if ((odin3_ast_flags(ev->ast, node) & ODIN3_AST_F_CALL_SYSTEM) != 0) {
-            return ev_error(ev, node, "system function '%s' is not supported",
-                            odin3_ast_name_str(ev->ast, node));
+            return ev_system_call(ev, node);
         }
         return ev_call_type(ev, node, out);
     default: {
@@ -739,11 +881,15 @@ static odin3_status ev_constant(void *user, odin3_ast_id node, int64_t *out) {
     if (st != ODIN3_OK) {
         return st;
     }
-    const char *what = odin3_ctype_constant_what(ev->ty);
+    const char *what =
+        odin3_ctype_constant_what(((odin3_ctype *const *)ev->typers.data)[nst.mark.cur]);
     ev->what = what;
     uint32_t scope = nst.mark.scope;
     if (scope >= ev->frames.len) {
         st = ev_frame_push(ev, (odin3_ast_id){0}, (odin3_ast_id){0}, &scope);
+        if (st == ODIN3_OK) { /* node was typed by the calling typer: read its types there */
+            ((odin3_ceval_frame *)odin3_vec_at(&ev->frames, scope))->level = nst.mark.cur;
+        }
     }
     st =
         st == ODIN3_OK ? ev_push(ev, (ev_task){.op = EV_EXPR, .node = node.v, .frame = scope}) : st;
@@ -778,9 +924,10 @@ odin3_status odin3_ceval_create(odin3_ast *ast, const odin3_ceval_host *host, od
     ev->ast = ast;
     ev->host = *host;
     ev->scope = EV_NO_SCOPE;
-    odin3_ctype_host types = {ev_leaf, ev_constant, ev_report_cb, ev};
-    odin3_status st = odin3_ctype_create(ast, &types, &ev->ty);
+    odin3_vec_init(&ev->typers, sizeof(odin3_ctype *));
+    odin3_status st = ev_typer_at(ev, 0);
     if (st != ODIN3_OK) {
+        odin3_vec_free(&ev->typers);
         odin3_util_free(ev);
         return st;
     }
@@ -807,12 +954,15 @@ void odin3_ceval_destroy(odin3_ceval *ev) {
     odin3_vec_free(&ev->locals);
     odin3_vec_free(&ev->roots);
     odin3_vec_free(&ev->word);
-    odin3_ctype_destroy(ev->ty);
+    for (size_t k = 0; k < ev->typers.len; k++) {
+        odin3_ctype_destroy(((odin3_ctype **)ev->typers.data)[k]);
+    }
+    odin3_vec_free(&ev->typers);
     odin3_util_free(ev);
 }
 
 odin3_ctype *odin3_ceval_types(odin3_ceval *ev) {
-    return ev != NULL ? ev->ty : NULL;
+    return ev != NULL ? *(odin3_ctype **)odin3_vec_at(&ev->typers, 0) : NULL; /* level 0 */
 }
 
 bool odin3_ceval_word_index(const odin3_ceval *ev, uint32_t idx, int64_t *out) {
@@ -849,6 +999,7 @@ static odin3_status ev_copy_out(odin3_arena *arena, const odin3_cval *val, odin3
 /* Evaluates api->req; *nonconst tells a non-constant stop (PARSE) from an error. */
 static odin3_status ev_evaluate(odin3_ceval *ev, const ev_api *api, bool *nonconst) {
     ev_mark mark = ev_mark_take(ev);
+    ev->level += ev->depth > 0 ? 1U : 0U; /* a host's re-entry types with a typer of its own */
     ev_enter(ev);
     ev->quiet = api->quiet;
     ev->nonconst = false;
@@ -913,6 +1064,7 @@ odin3_status odin3_ceval_exec(odin3_ceval *ev, odin3_ast_id stmt, const odin3_ce
         return misuse("odin3_ceval_exec: NULL argument or a node that is not a statement");
     }
     ev_mark mark = ev_mark_take(ev);
+    ev->level += ev->depth > 0 ? 1U : 0U;
     ev_enter(ev);
     ev->quiet = true;
     ev->nonconst = false;

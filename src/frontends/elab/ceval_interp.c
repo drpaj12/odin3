@@ -99,20 +99,29 @@ typedef struct in_new_local {
     const odin3_cval *value; /* a localparam's value; NULL: all x */
 } in_new_local;
 
-/* A re-entered block's variable of the same width: its planes become all x again, in place. */
+/* A re-entered block's declaration of the same width reuses its planes in place: a variable's
+ * become all x again, a localparam's take its new value (fix round 1, finding 2: nothing grows
+ * the frame's arena per iteration). */
 static bool in_redeclare(odin3_ceval *ev, uint32_t idx, const in_new_local *req) {
     ev_local *loc = odin3_vec_at(&ev->locals, idx);
-    if (req->value != NULL || loc->value.width != req->type.width || loc->value.width == 0) {
+    if (loc->value.width != req->type.width || loc->value.width == 0) {
         return false;
     }
     size_t words = odin3_cval_words(loc->value.width);
+    loc->visible = true;
+    if (req->value != NULL) {
+        memcpy(loc->value.aval, req->value->aval, words * sizeof *loc->value.aval);
+        memcpy(loc->value.bval, req->value->bval, words * sizeof *loc->value.bval);
+        loc->value.flags = req->value->flags;
+        loc->type = req->type;
+        return true;
+    }
     memset(loc->value.aval, UINT8_MAX, words * sizeof *loc->value.aval);
     memset(loc->value.bval, UINT8_MAX, words * sizeof *loc->value.bval);
     uint32_t used = loc->value.width % ODIN3_CVAL_WORD_BITS;
     uint64_t top = used == 0 ? UINT64_MAX : ((uint64_t)1 << used) - 1;
     loc->value.aval[words - 1] &= top;
     loc->value.bval[words - 1] &= top;
-    loc->visible = true;
     return true;
 }
 
@@ -127,8 +136,12 @@ static odin3_status in_declare(odin3_ceval *ev, uint32_t frame, const in_new_loc
     }
     odin3_cval val = {0};
     odin3_arena *mem = ev_frame(ev, frame)->mem;
-    odin3_status st = req->value != NULL ? odin3_cval_copy(mem, req->value, &val)
-                                         : ev_filled(mem, req->type, ODIN3_BIT_X, &val);
+    odin3_status st = ev_bytes_check(ev, req->decl);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = req->value != NULL ? odin3_cval_copy(mem, req->value, &val)
+                            : ev_filled(mem, req->type, ODIN3_BIT_X, &val);
     if (st == ODIN3_OK && idx == UINT32_MAX) {
         st = odin3_vec_push(&ev->locals) != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
         idx = (uint32_t)ev->locals.len - 1;
@@ -241,6 +254,7 @@ odin3_status ev_do_call(odin3_ceval *ev, const ev_task *task) {
     st = st == ODIN3_OK ? in_depth_check(ev, call) : st;
     uint32_t frame = 0;
     st = st == ODIN3_OK ? ev_frame_push(ev, decl, call, &frame) : st;
+    st = st == ODIN3_OK ? ev_bytes_check(ev, call) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -395,7 +409,7 @@ static odin3_status in_param_value(odin3_arena *arena, const ev_task *task, odin
 
 odin3_status ev_do_param(odin3_ceval *ev, const ev_task *task) {
     odin3_cval val = ev_pop_value(ev);
-    odin3_status st = in_param_value(ev_frame(ev, task->frame)->mem, task, &val);
+    odin3_status st = in_param_value(ev_tmp(ev, task->frame), task, &val); /* copied on declare */
     if (st != ODIN3_OK) {
         return st;
     }
@@ -408,8 +422,7 @@ odin3_status ev_do_param(odin3_ceval *ev, const ev_task *task) {
         true,
         &val};
     if (val.width == 0) { /* a zero-width localparam reads as one 0 bit */
-        st = ev_filled(ev_frame(ev, task->frame)->mem, (odin3_etype){1, false, false}, ODIN3_BIT_0,
-                       &val);
+        st = ev_filled(ev_tmp(ev, task->frame), (odin3_etype){1, false, false}, ODIN3_BIT_0, &val);
         req.type.width = 1;
         req.msb = 0;
     }
@@ -458,9 +471,10 @@ odin3_status ev_do_return(odin3_ceval *ev, const ev_task *task) {
     }
     ev_frame_pop(ev);
     st = ev_retype(ev, task->a); /* a recursive call typed the caller's nodes in its own frame */
-    st = st == ODIN3_OK ? ev_fit(ev_tmp(ev, task->a), &val,
-                                 odin3_ctype_final(ev->ty, (odin3_ast_id){task->node}))
-                        : st;
+    st = st == ODIN3_OK
+             ? ev_fit(ev_tmp(ev, task->a), &val,
+                      odin3_ctype_final(ev_types(ev, task->a), (odin3_ast_id){task->node}))
+             : st;
     return st == ODIN3_OK ? ev_push_value(ev, &val) : st;
 }
 
@@ -530,7 +544,7 @@ static odin3_status in_assign_begin(odin3_ceval *ev, const ev_task *task) {
     if (st != ODIN3_OK) {
         return st;
     }
-    uint32_t width = odin3_ctype_final(ev->ty, lhs).width;
+    uint32_t width = odin3_ctype_final(ev_types(ev, task->frame), lhs).width;
     st = ev_push(
         ev,
         (ev_task){.op = ST_ASSIGN, .node = stmt.v, .frame = task->frame, .phase = 1, .a = width});
@@ -777,7 +791,7 @@ odin3_status ev_do_store(odin3_ceval *ev, const ev_task *task) {
     for (size_t k = 0; k < atoms.len && st == ODIN3_OK; k++) {
         in_write wr = {{*(const uint32_t *)odin3_vec_cat(&atoms, k)}, {0}, depth - 1, 0};
         wr.n_idx = in_atom_indices(ev->ast, wr.atom, idx);
-        uint32_t width = odin3_ctype_final(ev->ty, wr.atom).width;
+        uint32_t width = odin3_ctype_final(ev_types(ev, task->frame), wr.atom).width;
         hi -= width;
         const odin3_cval_part part = {&rhs, hi, width};
         st =
@@ -803,8 +817,10 @@ odin3_status ev_do_if(odin3_ceval *ev, const ev_task *task) {
     return next.v != 0 ? ev_push(ev, in_task(ST_STMT, next, task->frame)) : ODIN3_OK;
 }
 
-/* EL-36: casez ignores the item's z bits, casex its x and z bits; every other bit must be a
- * known 0 or 1 on both sides and equal (Yosys's == truth). */
+/* EL-36 and IEEE 1364-2005 §9.5.1: casez ignores the bits that are z in the item or in the case
+ * value, casex those that are x or z in either (fix round 1, finding 6); every other bit must
+ * be a known 0 or 1 on both sides and equal (Yosys's == truth, so a plain case item with x
+ * never matches). */
 static bool in_case_match(const odin3_cval *val, const odin3_cval *item, uint32_t sub) {
     if (val->width == 0 || item->width == 0) {
         return val->width == item->width;
@@ -812,9 +828,9 @@ static bool in_case_match(const odin3_cval *val, const odin3_cval *item, uint32_
     for (uint32_t word = 0; word < odin3_cval_words(val->width); word++) {
         uint64_t ignore = 0;
         if (sub == ODIN3_AST_CASE_CASEZ) {
-            ignore = item->bval[word] & ~item->aval[word];
+            ignore = (item->bval[word] & ~item->aval[word]) | (val->bval[word] & ~val->aval[word]);
         } else if (sub == ODIN3_AST_CASE_CASEX) {
-            ignore = item->bval[word];
+            ignore = item->bval[word] | val->bval[word];
         }
         uint64_t unknown = (val->bval[word] | item->bval[word]) & ~ignore;
         uint64_t differ = (val->aval[word] ^ item->aval[word]) & ~ignore;
@@ -828,11 +844,14 @@ static bool in_case_match(const odin3_cval *val, const odin3_cval *item, uint32_
 /* Folds expr's self-determined type into the case type *acc. */
 static odin3_status in_case_fold(odin3_ceval *ev, uint32_t frame, odin3_ast_id expr,
                                  odin3_etype *acc) {
-    odin3_status st = ev_root_open(ev, frame, expr, in_self());
+    uint64_t size = 0; /* typing every item again each time: the step budget sees it */
+    odin3_status st = ev_subtree_size(ev, expr, &size);
+    st = st == ODIN3_OK ? ev_steps(ev, expr, size) : st;
+    st = st == ODIN3_OK ? ev_root_open(ev, frame, expr, in_self()) : st;
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_etype self = odin3_ctype_final(ev->ty, expr);
+    odin3_etype self = odin3_ctype_final(ev_types(ev, frame), expr);
     ev_root_close(ev, expr);
     acc->width = self.width > acc->width ? self.width : acc->width;
     acc->is_signed = acc->is_signed && self.is_signed;
@@ -1017,12 +1036,18 @@ static odin3_status in_block(odin3_ceval *ev, const ev_task *task) {
     return st == ODIN3_OK ? in_push_decls(ev, list, task->frame, false) : st;
 }
 
-/* The $display family (§4.6: ignored inside a function, as Yosys). */
+/* The $display family (§4.6: ignored inside a function, as Yosys), by exact name: the eight
+ * bases with no suffix or b, h or o (so $writememh is not one; fix round 1, finding 8). */
 static bool in_display_task(const char *name) {
     static const char *const FAMILY[] = {"$display",  "$write",  "$strobe",  "$monitor",
                                          "$fdisplay", "$fwrite", "$fstrobe", "$fmonitor"};
     for (size_t k = 0; k < sizeof FAMILY / sizeof FAMILY[0]; k++) {
-        if (strncmp(name, FAMILY[k], strlen(FAMILY[k])) == 0) {
+        size_t len = strlen(FAMILY[k]);
+        if (strncmp(name, FAMILY[k], len) != 0) {
+            continue;
+        }
+        const char *rest = name + len;
+        if (rest[0] == '\0' || (rest[1] == '\0' && strchr("bho", rest[0]) != NULL)) {
             return true;
         }
     }

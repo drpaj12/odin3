@@ -53,7 +53,7 @@ static odin3_elab_limits defaults(void) {
         .max_net_bits = ODIN3_ELAB_MAX_NET_BITS,
         .max_init_bits = ODIN3_ELAB_MAX_INIT_BITS,
         .max_readmem_bytes = ODIN3_ELAB_MAX_READMEM_BYTES,
-        .max_pow_work = ODIN3_ELAB_MAX_POW_WORK,
+        .max_eval_work = ODIN3_ELAB_MAX_EVAL_WORK,
         .max_memory_bits = ODIN3_ELAB_MAX_MEMORY_BITS,
         .max_bytes = odin3_elab_default_max_bytes(),
     };
@@ -92,7 +92,7 @@ void odin3_elab_test_set_limits(const odin3_elab_limits *limits) {
         .max_net_bits = clamp32(limits->max_net_bits, dflt.max_net_bits),
         .max_init_bits = clamp32(limits->max_init_bits, dflt.max_init_bits),
         .max_readmem_bytes = clamp32(limits->max_readmem_bytes, dflt.max_readmem_bytes),
-        .max_pow_work = clamp32(limits->max_pow_work, dflt.max_pow_work),
+        .max_eval_work = clamp32(limits->max_eval_work, dflt.max_eval_work),
         .max_memory_bits = clamp64(limits->max_memory_bits, dflt.max_memory_bits),
         .max_bytes = clamp64(limits->max_bytes, dflt.max_bytes),
     };

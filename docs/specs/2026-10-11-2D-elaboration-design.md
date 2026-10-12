@@ -596,6 +596,11 @@ words above (O(n²/64²) for `*`, `/`, `%`, `**` at width n ≤ 2^20 — at most
 operations, the reason the width cap is 2^20). A fuzz test compares every operator against
 Yosys (§14.5).
 
+Declared divergences in constant functions (2D Task 9 fix round 1, rows for §17 by Task 27):
+`casez`/`casex` treat z (x and z) on either side as wildcards as IEEE §9.5.1 does, where Yosys
+0.55's `eval_const_function` never matches a wildcard; and arguments take the input's width as
+context (§4.6), where Yosys's constant path evaluates them self-determined.
+
 ### 4.4 Literals, strings, x and z (EL-15)
 
 - A `NUMBER` becomes a value through `odin3_ast_number_value` (2A §4.5, Yosys's sizing):

@@ -234,7 +234,8 @@ typedef struct odin3_ceval_req {
  * planes. Returns OK; PARSE after a located diagnostic: `<what> is not constant (it reads 'x')`
  * (a read of a net or variable), `function 'f' is not a constant function: <reason>`, an E20
  * `system function '$name' is not supported`, a typer error, or a cap (call depth, steps,
- * loop iterations, width, the '**' work bound); a host callback's failure status;
+ * loop iterations, width, the word-operation budget of * / % ** and a single '**', the byte
+ * budget of the evaluator's own memory); a host callback's failure status;
  * INVALID_ARG (logged) for a NULL argument or a root that is not an expression; NO_MEMORY.
  * *out is unchanged on failure.
  */

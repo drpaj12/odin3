@@ -87,14 +87,14 @@ static odin3_bit ex_empty_reduce(odin3_cop op) {
     }
 }
 
-static odin3_etype ex_final(const odin3_ceval *ev, odin3_ast_id node) {
-    return odin3_ctype_final(ev->ty, node);
+/* The task's node's final type, from the typer of its frame's level. */
+static odin3_etype ex_final(const odin3_ceval *ev, const ev_task *task) {
+    return odin3_ctype_final(ev_types(ev, task->frame), (odin3_ast_id){task->node});
 }
 
 /* Fits val to node's final type in frame's temporaries and pushes it. */
 static odin3_status ex_push_fit(odin3_ceval *ev, const ev_task *task, odin3_cval val) {
-    odin3_status st =
-        ev_fit(ev_tmp(ev, task->frame), &val, ex_final(ev, (odin3_ast_id){task->node}));
+    odin3_status st = ev_fit(ev_tmp(ev, task->frame), &val, ex_final(ev, task));
     return st == ODIN3_OK ? ev_push_value(ev, &val) : st;
 }
 
@@ -247,7 +247,7 @@ odin3_status ev_do_sel(odin3_ceval *ev, const ev_task *task) {
         return st;
     }
     (void)ev_pop_value(ev);
-    odin3_etype self = odin3_ctype_self(ev->ty, node);
+    odin3_etype self = odin3_ctype_self(ev_types(ev, task->frame), node);
     odin3_cval val = {0};
     if (!known || obj.width == 0 || span.width != self.width) {
         st = ev_filled(ev_tmp(ev, task->frame), (odin3_etype){self.width, false, false},
@@ -320,16 +320,30 @@ static uint32_t ex_log2_ceil(uint32_t width) {
     return bits;
 }
 
+/* True when a ** is resolved without multiplying (const_pow): an x/z operand, a negative
+ * exponent, a zero base or a zero exponent. */
+static bool ex_pow_cheap(const odin3_cval *base, const odin3_cval *exp) {
+    if (!odin3_cval_is_known(base) || !odin3_cval_is_known(exp)) {
+        return true;
+    }
+    bool negative =
+        (exp->flags & ODIN3_CVAL_SIGNED) != 0 && odin3_cval_bit(exp, exp->width - 1) == ODIN3_BIT_1;
+    return negative || ex_bit_length(base) == 0 || ex_bit_length(exp) == 0;
+}
+
 /*
  * The ** bound (2D Task 9 ruling): square-and-multiply steps (the exponent's bits; an odd base
- * repeats after width - 2, an even one is 0 after about log2(width)) times ceil(width/64)^2.
+ * repeats after width - 2, an even one is 0 after about log2(width)) times ceil(width/64)^2,
+ * checked alone before it runs; *work is what it costs (0 for the cheap cases).
  */
-static odin3_status ex_pow_bound(const odin3_ceval *ev, odin3_ast_id node, const odin3_cval *base,
-                                 const odin3_cval *exp) {
-    if (!odin3_cval_is_known(base) || !odin3_cval_is_known(exp)) {
+static odin3_status ex_pow_bound(const odin3_ceval *ev, odin3_ast_id node,
+                                 const odin3_cop_args *args, uint64_t *work) {
+    const odin3_cval *base = args->a;
+    *work = 0;
+    if (ex_pow_cheap(base, args->b)) {
         return ODIN3_OK;
     }
-    uint64_t steps = ex_bit_length(exp);
+    uint64_t steps = ex_bit_length(args->b);
     bool odd = odin3_cval_bit(base, 0) == ODIN3_BIT_1;
     uint64_t period = (uint64_t)ex_log2_ceil(base->width) + 1; /* even: 0 from here on */
     if (odd) {
@@ -337,15 +351,35 @@ static odin3_status ex_pow_bound(const odin3_ceval *ev, odin3_ast_id node, const
     }
     steps = steps < period ? steps : period;
     uint64_t words = odin3_cval_words(base->width);
-    uint64_t work = steps * words * words;
-    uint32_t cap = odin3_elab_limits_get()->max_pow_work;
-    if (work <= cap) {
+    *work = steps * words * words;
+    uint32_t cap = odin3_elab_limits_get()->max_eval_work;
+    if (*work <= cap) {
         return ODIN3_OK;
     }
     return ev_error(ev, node,
                     "constant '**' of %" PRIu32 " bits exceeds the limit of %" PRIu32
                     " word operations",
                     base->width, cap);
+}
+
+/* The word products * / % ** cost (finding 4: the step budget must see wide operations). */
+static odin3_status ex_charge(odin3_ceval *ev, odin3_ast_id node, const odin3_cop_args *args) {
+    uint64_t words = odin3_cval_words(args->width);
+    uint64_t work = 0;
+    odin3_status st = ODIN3_OK;
+    switch (args->op) {
+    case ODIN3_COP_MUL:
+    case ODIN3_COP_DIV:
+    case ODIN3_COP_MOD:
+        work = words * words;
+        break;
+    case ODIN3_COP_POW:
+        st = ex_pow_bound(ev, node, args, &work);
+        break;
+    default:
+        return ODIN3_OK;
+    }
+    return st == ODIN3_OK ? ev_work(ev, node, work) : st;
 }
 
 /* A 1-bit 0 for an empty operand that is read as a number. */
@@ -359,7 +393,7 @@ static odin3_status ex_zero_bit(odin3_arena *arena, odin3_cval *val) {
 /* A UNARY or BINARY operator: operands popped, the result at the final type pushed. */
 static odin3_status ex_operator(odin3_ceval *ev, const ev_task *task, odin3_cop op, bool binary) {
     odin3_ast_id node = {task->node};
-    odin3_etype final = ex_final(ev, node);
+    odin3_etype final = ex_final(ev, task);
     odin3_arena *tmp = ev_tmp(ev, task->frame);
     odin3_cval rhs = binary ? ev_pop_value(ev) : (odin3_cval){0};
     odin3_cval lhs = ev_pop_value(ev);
@@ -374,10 +408,8 @@ static odin3_status ex_operator(odin3_ceval *ev, const ev_task *task, odin3_cop 
     }
     odin3_status st = cls == EX_CTX ? ODIN3_OK : ex_zero_bit(tmp, &lhs);
     st = st == ODIN3_OK && binary ? ex_zero_bit(tmp, &rhs) : st;
-    if (st == ODIN3_OK && op == ODIN3_COP_POW) {
-        st = ex_pow_bound(ev, node, &lhs, &rhs);
-    }
     const odin3_cop_args args = {op, &lhs, binary ? &rhs : NULL, final.width, final.is_signed};
+    st = st == ODIN3_OK ? ex_charge(ev, node, &args) : st;
     st = st == ODIN3_OK ? odin3_cval_op(tmp, &args, &out) : st;
     return st == ODIN3_OK ? ev_push_value(ev, &out) : st;
 }
@@ -469,7 +501,7 @@ odin3_status ev_do_tern(odin3_ceval *ev, const ev_task *task) {
  * and a string only when unsigned and of whole bytes. Phase 0: both branches merge bit by bit
  * (an x condition), and the result is no string. */
 odin3_status ev_do_merge(odin3_ceval *ev, const ev_task *task) {
-    odin3_etype final = ex_final(ev, (odin3_ast_id){task->node});
+    odin3_etype final = ex_final(ev, task);
     if (task->phase == 1) {
         odin3_cval val = ev_pop_value(ev);
         val.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED;
@@ -543,7 +575,7 @@ odin3_status ev_do_sys(odin3_ceval *ev, const ev_task *task) {
     odin3_status st = arg.width != 0 ? odin3_cval_copy(tmp, &arg, &out) : ODIN3_OK;
     out.flags = (uint8_t)((arg.flags & ODIN3_CVAL_UNSIZED) |
                           (kind == EX_SYS_SIGNED ? ODIN3_CVAL_SIGNED : 0));
-    st = st == ODIN3_OK ? ev_fit(tmp, &out, ex_final(ev, node)) : st;
+    st = st == ODIN3_OK ? ev_fit(tmp, &out, ex_final(ev, task)) : st;
     out.flags &= (uint8_t)~ODIN3_CVAL_UNSIZED;
     return st == ODIN3_OK ? ev_push_value(ev, &out) : st;
 }

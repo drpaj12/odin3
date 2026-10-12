@@ -12,11 +12,19 @@
  *    one per interpreted function call, each with its locals and two arenas;
  *  - locals: every frame's variables and localparams, a frame's from its `locals` index;
  *  - roots: the expressions typed and still being evaluated (re-typed when a call returns into
- *    their frame: a recursive call types the same nodes in another frame).
+ *    their frame: a recursive call at the same level types the same nodes in another frame).
  * The only re-entry is through the typer's callbacks (function pointers): typing a replication
  * count, a part-select bound or a function's return range evaluates it with a nested ev_run on
  * the stacks above the caller's. Those nested runs count against the call-depth cap with the
- * function frames (the 2D Task 9 ruling), which bounds the C stack.
+ * function frames (the 2D Task 9 ruling), which bounds the C stack: about 2.5 KiB a level under
+ * ASan (1024 levels, a return range calling itself, need about 3 MiB of the 8 MiB default, a
+ * margin of about 2.7x; less without ASan). A host's own re-entry (lazy parameters through
+ * lookup, Task 11) adds C depth this cap does not count.
+ *
+ * Levels: every nested run (and every API call made from a host callback) raises the level, and
+ * each level has its own typer. A frame types and reads types through the typer of the level it
+ * was pushed at, so a run nested inside a typing still in progress (a count calling the same
+ * function) never overwrites the entries that typing is building (fix round 1, finding 1).
  */
 #ifndef ODIN3_FRONTENDS_ELAB_CEVAL_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_CEVAL_INTERNAL_H
@@ -91,6 +99,8 @@ typedef struct odin3_ceval_frame {
     odin3_arena *mem;               /* its locals' values */
     odin3_arena *tmp;               /* its expression temporaries, renewed between statements */
     const odin3_ceval_store *store; /* exec's base frame: the module's variables; else NULL */
+    uint32_t level;                 /* the nesting level it was pushed at: its typer */
+    bool dirty; /* a frame of the same function and level typed its nodes since: re-type them */
 } odin3_ceval_frame;
 
 /* A function's (or block's) variable, port, result or localparam. */
@@ -115,7 +125,8 @@ typedef struct ev_root {
 struct odin3_ceval {
     odin3_ast *ast;
     odin3_ceval_host host;
-    odin3_ctype *ty;
+    odin3_vec typers; /* odin3_ctype *, one per level; typers[0] is odin3_ceval_types' */
+    uint32_t cur;     /* the level of the typer running (its constant callback's <what>) */
     odin3_vec tasks;  /* ev_task */
     odin3_vec values; /* odin3_cval */
     odin3_vec frames; /* odin3_ceval_frame */
@@ -123,13 +134,15 @@ struct odin3_ceval {
     odin3_vec roots;  /* ev_root */
     odin3_vec word;   /* int64_t: the indices of the memory word of the store call running */
     uint32_t depth;   /* API calls and callback runs active */
-    uint32_t nest;    /* callback runs inside an active evaluation (C nesting) */
+    uint32_t nest;    /* callback runs inside an active evaluation (C nesting, counted) */
+    uint32_t level;   /* nested runs and re-entrant API calls: the typer level */
     uint32_t scope;   /* the frame whose names the typer's leaf callback resolves */
     uint32_t clog2;   /* $clog2 arguments being evaluated (the <what> becomes theirs) */
     bool quiet;       /* try / exec: no diagnostic for non-constant input */
     bool nonconst;    /* a non-constant input stopped the evaluation */
     const char *what; /* §9.1's <what> of the evaluation running */
     uint64_t steps;   /* statements and expression nodes of the outermost evaluation */
+    uint64_t work;    /* word products of the outermost evaluation's * / % ** */
 };
 
 /* A name resolved in a scope: a local of the scope frame, or the host's symbol. */
@@ -197,6 +210,9 @@ uint32_t ev_function_frames(const odin3_ceval *ev);
 
 /* --- names, types, values (ceval.c) -------------------------------------------------------- */
 
+/* The typer of frame idx's level (typers[0] for an index past the stack). */
+odin3_ctype *ev_types(const odin3_ceval *ev, uint32_t idx);
+
 /*
  * Resolves the IDENT or HIER_NAME ref in frame scope: a visible local of that frame, else the
  * host's CONST or SIGNAL. A name the host does not know is reported (`'x' is not declared`);
@@ -236,6 +252,19 @@ odin3_status ev_filled(odin3_arena *arena, odin3_etype type, odin3_bit fill, odi
 
 /* Counts one step (a statement or an expression node) against the budget; the cap's error. */
 odin3_status ev_step(odin3_ceval *ev, odin3_ast_id node);
+
+/* Counts `count` steps at once (typing work the budget must see); the cap's error at node. */
+odin3_status ev_steps(odin3_ceval *ev, odin3_ast_id node, uint64_t count);
+
+/* Counts `products` word products of a * / % ** against the work budget (finding 4). */
+odin3_status ev_work(odin3_ceval *ev, odin3_ast_id node, uint64_t products);
+
+/* The byte budget (§11's ODIN3_ELAB_MAX_BYTES, the hook's max_bytes) against the bytes the
+ * evaluator holds: `elaboration needs more than N bytes (…)` at node (finding 5). */
+odin3_status ev_bytes_check(const odin3_ceval *ev, odin3_ast_id node);
+
+/* The nodes of node's subtree (an explicit stack; NO_MEMORY), for ev_steps. */
+odin3_status ev_subtree_size(const odin3_ceval *ev, odin3_ast_id node, uint64_t *out);
 
 /* --- diagnostics (ceval.c) ----------------------------------------------------------------- */
 

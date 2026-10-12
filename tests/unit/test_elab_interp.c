@@ -810,7 +810,7 @@ static void test_pow_bound(void) {
     TEST_ASSERT_EQUAL_INT64(161, param_int("C")); /* 3^200 mod 256 */
     TEST_ASSERT_EQUAL_INT64(2187, param_int("D"));
     odin3_elab_limits lim = *odin3_elab_limits_get();
-    lim.max_pow_work = 200; /* 200 bits: 4 words, 16 products a step */
+    lim.max_eval_work = 200; /* 200 bits: 4 words, 16 products a step */
     odin3_elab_test_set_limits(&lim);
     TEST_ASSERT_EQUAL_INT64(0, param_int("B")); /* even base: 9 steps (0 after 2^8 > 200) */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("A", &val)); /* odd base: 16 steps */
@@ -846,7 +846,7 @@ static void test_call_nesting(void) {
 }
 
 static void test_call_nesting_default_cap(void) {
-    parse(NEST_SRC); /* 1024 levels of C nesting through the typer under ASan: no overflow */
+    parse(NEST_SRC); /* 512 C levels (a frame and a nesting each), under ASan: no overflow */
     odin3_cval val = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("D", &val));
     expect_error(at("d(n - 1)", 1), "constant function recursion deeper than 1024 in 'd'");
@@ -1168,18 +1168,6 @@ static void test_local_declarations(void) {
     TEST_ASSERT_EQUAL_INT64(-1, param_int("D")); /* integer: signed */
 }
 
-/* Temporaries are renewed between statements: 4096 iterations on 2048-bit values make several
- * MiB of them, and the result is unchanged. */
-static void test_long_loop_temporaries(void) {
-    parse("module m;\n"
-          "  function [2047:0] f(input integer n); integer k; begin f = 0; "
-          "for (k = 0; k < n; k = k + 1) f = (f + 3) ^ {2048{1'b0}}; end endfunction\n"
-          "  localparam A = f(4096);\n"
-          "  localparam B = A[31:0];\n"
-          "endmodule\n");
-    TEST_ASSERT_EQUAL_INT64(3 * 4096, param_int("B"));
-}
-
 /* --- a store keyed by name and word index, for exec ---------------------------------------- */
 
 typedef struct cell {
@@ -1372,6 +1360,188 @@ static void expect_fact8(void) {
     TEST_ASSERT_EQUAL_INT64(40320, out);
 }
 
+/* --- fix round 1 ---------------------------------------------------------------------------- */
+
+/* Finding 1: a recursive call made from a width expression (a replication count) while the
+ * caller's statement is still being typed. Yosys 0.55 (probe p8.v): 12, 28672, 28672, 13 and
+ * 245761; the levels' own typers keep the caller's entries. */
+static void test_recursive_widths(void) {
+    parse("module m;\n"
+          "  function automatic integer d(input integer n);\n"
+          "    if (n == 0) d = 1; else d = {{n{1'b1}}, {d(n - 1){1'b0}}};\n"
+          "  endfunction\n"
+          "  function automatic integer e(input integer n);\n"
+          "    e = {{(n + 1){1'b1}}, {((n > 0) ? e(n - 1) : 1){1'b0}}};\n"
+          "  endfunction\n"
+          "  function automatic integer g(input integer n);\n"
+          "    if (n == 0) g = 1; else g = {{(n * 2){1'b1}}, {g(n - 1){1'b0}}, 1'b1};\n"
+          "  endfunction\n"
+          "  localparam D2 = d(2);\n"
+          "  localparam D3 = d(3);\n"
+          "  localparam E2 = e(2);\n"
+          "  localparam G1 = g(1);\n"
+          "  localparam G2 = g(2);\n"
+          "endmodule\n");
+    TEST_ASSERT_EQUAL_INT64(12, param_int("D2"));
+    TEST_ASSERT_EQUAL_INT64(28672, param_int("D3"));
+    TEST_ASSERT_EQUAL_INT64(28672, param_int("E2"));
+    TEST_ASSERT_EQUAL_INT64(13, param_int("G1"));
+    TEST_ASSERT_EQUAL_INT64(245761, param_int("G2"));
+}
+
+static void lower_bytes(uint64_t bytes) {
+    odin3_elab_limits lim = *odin3_elab_limits_get();
+    lim.max_bytes = bytes;
+    odin3_elab_test_set_limits(&lim);
+}
+
+/* Finding 2: a named block's localparam reuses its storage at each entry. 4096 entries of a
+ * 65536-bit localparam (16 KiB a copy, 64 MiB if each copy stayed) fit an 8 MiB budget. */
+static void test_block_localparam_reuse(void) {
+    parse("module m;\n"
+          "  function integer f(input integer n); integer i; begin f = 0;\n"
+          "    for (i = 0; i < n; i = i + 1) begin : b localparam [65535:0] Q = 1; "
+          "f = f + Q[0]; end\n"
+          "  end endfunction\n"
+          "  localparam P = f(4096);\n"
+          "endmodule\n");
+    lower_bytes((uint64_t)8 << 20);
+    TEST_ASSERT_EQUAL_INT64(4096, param_int("P"));
+    TEST_ASSERT_EQUAL_INT(0, errors_logged);
+}
+
+/* Temporaries are renewed between statements: 4096 iterations on 2048-bit values make about
+ * 6 MiB of them, which a 4 MiB budget refuses unless they are renewed. */
+static void test_long_loop_temporaries(void) {
+    parse("module m;\n"
+          "  function [2047:0] f(input integer n); integer k; begin f = 0; "
+          "for (k = 0; k < n; k = k + 1) f = (f + 3) ^ {2048{1'b0}}; end endfunction\n"
+          "  localparam A = f(4096);\n"
+          "  localparam B = A[31:0];\n"
+          "endmodule\n");
+    lower_bytes((uint64_t)4 << 20);
+    TEST_ASSERT_EQUAL_INT64(3 * 4096, param_int("B"));
+}
+
+/* Finding 5: the evaluator's memory against the byte budget (the hook lowers it). */
+static void test_byte_budget(void) {
+    parse("module m;\n"
+          "  function automatic integer r(input integer n); reg [1048575:0] big; begin "
+          "big = 0; r = (n <= 0) ? 0 : r(n - 1) + 1; end endfunction\n"
+          "  localparam P = r(64);\n"
+          "endmodule\n");
+    lower_bytes((uint64_t)4 << 20); /* 256 KiB a frame */
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P", &val));
+    TEST_ASSERT_TRUE_MESSAGE(strstr(last, ": error: elaboration needs more than 4194304 bytes "
+                                          "(the budget is 60% of physical memory)") != NULL,
+                             last);
+    TEST_ASSERT_EQUAL_INT(1, errors_logged);
+}
+
+/* Finding 4: * / % ** charge their word products to a per-evaluation work budget; a ** that
+ * const_pow resolves without multiplying is never refused. */
+static void test_work_budget(void) {
+    parse("module m;\n"
+          "  function [255:0] f(input integer n); integer k; begin f = 3; "
+          "for (k = 0; k < n; k = k + 1) f = f * 3; end endfunction\n"
+          "  localparam A = f(10);\n"
+          "  localparam B = f(1000);\n"
+          "  localparam C = 200'd5 ** -8'sd1;\n"
+          "  localparam D = 200'd0 ** 16'hFFFF;\n"
+          "endmodule\n");
+    odin3_elab_limits lim = *odin3_elab_limits_get();
+    lim.max_eval_work = 1000; /* 256 bits: 16 products a multiply */
+    odin3_elab_test_set_limits(&lim);
+    TEST_ASSERT_EQUAL_INT64(177147, param_int("A")); /* 3^11, 10 multiplies */
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("B", &val));
+    expect_error(at("f(1000)", 1), "constant evaluation of 'f' exceeds 1000 word operations");
+    lim.max_eval_work = 16; /* one 256-bit multiply; the cheap ** below cost none */
+    odin3_elab_test_set_limits(&lim);
+    TEST_ASSERT_EQUAL_INT64(0, param_int("C")); /* a negative exponent: no multiply */
+    TEST_ASSERT_EQUAL_INT64(0, param_int("D")); /* a zero base: no multiply */
+}
+
+/* Finding 3: a return range calling its own function nests in C through the typer alone (no
+ * frame): 1024 levels at the default cap, about 2.5 KiB each under ASan. */
+static void test_return_range_chain(void) {
+    parse("module m;\n"
+          "  function [f(1):0] f(input integer n); f = n; endfunction\n"
+          "  localparam P = f(1);\n"
+          "endmodule\n");
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("P", &val));
+    expect_error(at("[f(1):0]", 1), "constant function recursion deeper than 1024 in 'f'");
+}
+
+/* Finding 6: IEEE 1364-2005 §9.5.1: z (casez) or x and z (casex) on either side match. */
+static void test_casez_both_sides(void) {
+    parse("module m;\n"
+          "  function f(input [3:0] v); casez (v) 4'b0110: f = 1; default: f = 0; endcase "
+          "endfunction\n"
+          "  function fx(input [3:0] v); casex (v) 4'b0110: fx = 1; default: fx = 0; endcase "
+          "endfunction\n"
+          "  localparam A = f(4'bz110);\n"
+          "  localparam B = f(4'bx110);\n"
+          "  localparam C = fx(4'bx110);\n"
+          "endmodule\n");
+    TEST_ASSERT_EQUAL_INT64(1, param_int("A"));
+    TEST_ASSERT_EQUAL_INT64(0, param_int("B")); /* casez: x is no wildcard */
+    TEST_ASSERT_EQUAL_INT64(1, param_int("C"));
+}
+
+/* Finding 8: the $display family by exact name ($writememh is not one of them). */
+static void test_display_names(void) {
+    parse("module m;\n"
+          "  reg [7:0] mem [0:3];\n"
+          "  function integer f(input integer n); begin $writeh(n); $fdisplayb(1, n); f = n; end "
+          "endfunction\n"
+          "  function integer g(input integer n); begin $writememh(\"x.hex\", mem); g = n; end "
+          "endfunction\n"
+          "  localparam A = f(3);\n"
+          "  localparam B = g(3);\n"
+          "endmodule\n");
+    TEST_ASSERT_EQUAL_INT64(3, param_int("A"));
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("B", &val));
+    expect_error(at("$writememh", 1),
+                 "function 'g' is not a constant function: it calls system task '$writememh'");
+}
+
+/* Finding 9: a built-in with another argument count than 1. */
+static void test_builtin_arity(void) {
+    parse("module m;\n"
+          "  localparam A = $clog2(1, 2);\n"
+          "endmodule\n");
+    odin3_cval val = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, eval_param("A", &val));
+    expect_error(at("$clog2", 1), "system function '$clog2' has 1 input; 2 arguments given");
+}
+
+/* Finding 7: an OOM sweep through the nested runs: a return range, a count, a part-select
+ * lvalue and a case, each calling a function from the typer's callbacks (the review's source). */
+static odin3_status oom_nested(void) {
+    odin3_ceval_req req = {param_expr("G"), {0, false, false}, "parameter 'G'"};
+    return odin3_ceval_expr(ev, &req, values, &oom_val);
+}
+
+static void test_oom_nested(void) {
+    parse("module m;\n"
+          "  localparam W = 3;\n"
+          "  function [W:0] h(input integer n); h = n + 1; endfunction\n"
+          "  function [h(2):0] g(input integer n); reg [7:0] t; begin t = 0; "
+          "t[h(1) +: 2] = 2'b11; case (n) 1: g = {h(n){1'b1}}; default: g = t; endcase end "
+          "endfunction\n"
+          "  localparam G = g(5) + g(1);\n"
+          "endmodule\n");
+    TEST_ASSERT_TRUE(oom_sweep(oom_nested) > 100);
+    int64_t out = 0;
+    TEST_ASSERT_TRUE(odin3_cval_to_i64(&oom_val, &out));
+    TEST_ASSERT_EQUAL_INT64(12 + 3, out); /* t = 8'b00001100; {2{1'b1}} */
+    TEST_ASSERT_EQUAL_INT(0, errors_logged);
+}
+
 static void test_oom(void) {
     parse(FACT_SRC);
     TEST_ASSERT_TRUE(oom_sweep(oom_expr) > 20); /* the sweep did inject failures */
@@ -1441,6 +1611,15 @@ int main(void) {
     RUN_TEST(test_exec_x_index_and_input);
     RUN_TEST(test_misuse);
     RUN_TEST(test_misuse_exec);
+    RUN_TEST(test_recursive_widths);
+    RUN_TEST(test_block_localparam_reuse);
+    RUN_TEST(test_byte_budget);
+    RUN_TEST(test_work_budget);
+    RUN_TEST(test_return_range_chain);
+    RUN_TEST(test_casez_both_sides);
+    RUN_TEST(test_display_names);
+    RUN_TEST(test_builtin_arity);
+    RUN_TEST(test_oom_nested);
     RUN_TEST(test_oom);
     RUN_TEST(test_oom_exec);
     return UNITY_END();
