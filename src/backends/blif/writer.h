@@ -125,7 +125,22 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * port bit already has falls back to `$n<ID>`, `$n<ID>$1`, …; nets in ID order). A net named
  * `gnd`/`vcc`/`unconn` that a zero-input $sop of value 0/1/0 drives keeps its name. Port bits are
  * named by their wire's declared index, as in the plain dialect. The top is named once, by the
- * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds. */
+ * preflight (odin3_blif_vtr_plan_build), and written under the names its plan holds.
+ *
+ * VTR output (spec 3E §5-§9): the header line `# Odin III <version> write_blif --vtr (K=<K>,
+ * names short|provenance)` and a blank line; `.model <top>`; `.inputs`/`.outputs` (no `.clock`);
+ * the generators `.names gnd`, `.names vcc` / `1`, `.names unconn` that some pin or buffer reads,
+ * in that order, each left out when a written zero-input $sop already is it; the cells in node ID
+ * order; the port buffers; `.end`. No other module, black-box model, `.cname`, `.attr` or
+ * `.param` is written. Cells: a $sop or a Yosys gate is a `.names` (§6's gate rows; a cell with
+ * inputs whose function is constant is the zero-input generator on its output, a 1-input one has
+ * the one row `1 1` or `0 1`, any other keeps its rows); a $_CONST*_ writes no line; $_DFF_P_ is
+ * `.latch <D> <Q> re <C> <init>` with init 0 1 2 2 for INIT 0 1 2 3; a hard cell is a `.subckt`.
+ * An input pin reads, by its net's class (odin3_blif_vtr_net_class): 0 `gnd`, 1 `vcc`, x or
+ * undriven (an unconnected pin included) `gnd` (`unconn` on a `.subckt` input), Parmys's `unconn`
+ * `unconn`, else the net's name. An output-port bit on a $_CONST*_, undriven or `unconn` net gets
+ * a buffer from `gnd`/`vcc`/`gnd`/`unconn`; one on a net a constant $sop or cell drives under
+ * another name gets that generator again under its own name (one driver per net). */
 odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
                                    const odin3_blif_write_opts *opts);
 

@@ -117,6 +117,10 @@ typedef struct blif_writer {
         *gen; /* net ID or 1 << 32 | pin ID -> gen_names ID it is written under (or NULL) */
     odin3_u64map *port_of; /* port wire -> port index (NULL until needed) */
     odin3_u64map *clocks;  /* VTR: nets on a .latch control or a hard-cell clock input -> 1 */
+    /* VTR emission (spec 3E §5, §9.3) */
+    bool scan;          /* a dry run of the cells and buffers: nothing is written */
+    uint32_t gens_used; /* generators a pin or buffer reads (1 << wr_gen) */
+    uint32_t gens_have; /* generators a written zero-input $sop already is (1 << wr_gen) */
 } blif_writer;
 
 /* --- errors and output --------------------------------------------------------------------- */
@@ -143,7 +147,7 @@ static odin3_status wr_refuse(blif_writer *wr, const char *what, const char *nam
 }
 
 static void wr_put(blif_writer *wr, odin3_bytes data) {
-    if (wr->st != ODIN3_OK || data.len == 0) {
+    if (wr->scan || wr->st != ODIN3_OK || data.len == 0) {
         return;
     }
     errno = 0;
@@ -488,11 +492,14 @@ static odin3_bytes pin_name(const blif_writer *wr, odin3_pin_id pin) {
 }
 
 /* True for a node whose pins are written by net name even when unconnected (.names, .latch and
- * port nodes); .subckt skips unconnected pins. */
+ * port nodes; in the VTR dialect the gates too, written as .names); .subckt skips unconnected
+ * pins. */
 static bool names_every_pin(const blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
+    odin3_blif_vtr_rows rows;
     return builtin_of(wr, type) != WR_BUILTINS ||
-           odin3_celltype_get(wr->design, type)->gran == ODIN3_GRAN_PORT;
+           odin3_celltype_get(wr->design, type)->gran == ODIN3_GRAN_PORT ||
+           (wr->vtr && odin3_blif_vtr_rows_of(wr->module, node, &rows));
 }
 
 /* Generates names for the unconnected pins of a node written by pin (see names_every_pin). */
@@ -715,6 +722,91 @@ static odin3_status name_module(blif_writer *wr) {
     return st;
 }
 
+/* --- VTR: constants, x and `unconn` (spec 3E §9) -------------------------------------------- */
+
+/* The generators (§9.3), in the order §5 item 4 writes them. */
+typedef enum wr_gen { GEN_GND, GEN_VCC, GEN_UNCONN, GEN_COUNT, GEN_NONE = GEN_COUNT } wr_gen;
+
+static const char *const GEN_NAMES[GEN_COUNT] = {"gnd", "vcc", "unconn"};
+
+/* The generator a pin reads instead of net (§9.2; `hard` for a .subckt input, which reads x as
+ * `unconn`, open in VPR, where logic reads it as `gnd`), GEN_NONE when it reads net by its name.
+ * An unconnected pin is UNDRIVEN. */
+static wr_gen source_gen(const blif_writer *wr, odin3_net_id net, bool hard) {
+    switch (odin3_blif_vtr_net_class(wr->module, net)) {
+    case ODIN3_BLIF_SRC_0:
+        return GEN_GND;
+    case ODIN3_BLIF_SRC_1:
+        return GEN_VCC;
+    case ODIN3_BLIF_SRC_X:
+    case ODIN3_BLIF_SRC_UNDRIVEN:
+        return hard ? GEN_UNCONN : GEN_GND;
+    case ODIN3_BLIF_SRC_U:
+        return GEN_UNCONN;
+    default:
+        return GEN_NONE;
+    }
+}
+
+/* The name of gen, which counts as used. */
+static odin3_bytes gen_use(blif_writer *wr, wr_gen gen) {
+    wr->gens_used |= 1U << gen;
+    return odin3_bytes_cstr(GEN_NAMES[gen]);
+}
+
+/* The name an input pin reads its source under (§9.2): its generator, else its net's name. */
+static odin3_bytes source_name(blif_writer *wr, odin3_pin_id pin, bool hard) {
+    wr_gen gen = source_gen(wr, odin3_pin_net(wr->module, pin), hard);
+    return gen == GEN_NONE ? pin_name(wr, pin) : gen_use(wr, gen);
+}
+
+/* A zero-input $sop written under a generator's name is that generator (§9.3: VB-10 keeps the
+ * name only for the generator of that value, is_generator). */
+static void note_generator(blif_writer *wr, odin3_bytes name) {
+    for (uint32_t gen = 0; gen < GEN_COUNT; gen++) {
+        if (same_bytes(name, odin3_bytes_cstr(GEN_NAMES[gen]))) {
+            wr->gens_have |= 1U << gen;
+        }
+    }
+}
+
+/* The constant (0 or 1) of the $sop or gate driving net when §6 writes it as a generator (a
+ * zero-input $sop, or a cell whose function is constant), else -1; -1 for class U too, whose
+ * output-port bits are buffered from `unconn` as read. */
+static int const_driver(const blif_writer *wr, odin3_net_id net) {
+    odin3_pin_id driver =
+        odin3_net_valid(net) ? odin3_net_driver(wr->module, net) : (odin3_pin_id){0};
+    if (!odin3_pin_valid(driver) || odin3_blif_vtr_net_class(wr->module, net) == ODIN3_BLIF_SRC_U) {
+        return -1;
+    }
+    odin3_blif_vtr_fn fn = odin3_blif_vtr_function(wr->module, odin3_pin_node(wr->module, driver));
+    if (fn == ODIN3_BLIF_VTR_FN_CONST0 || fn == ODIN3_BLIF_VTR_FN_CONST1) {
+        return fn == ODIN3_BLIF_VTR_FN_CONST1 ? 1 : 0;
+    }
+    return -1;
+}
+
+/* `.names <name>`, with the row `1` for value 1: a zero-input generator. */
+static void write_constant(blif_writer *wr, odin3_bytes name, int value) {
+    wr_begin(wr, ".names");
+    wr_token(wr, name);
+    wr_end(wr);
+    if (value == 1) {
+        wr_put(wr, odin3_bytes_cstr("1"));
+        wr_newline(wr);
+    }
+}
+
+/* §5 item 4: each generator a pin or buffer reads that no written zero-input $sop already is, in
+ * the order gnd, vcc, unconn. */
+static void write_generators(blif_writer *wr) {
+    for (uint32_t gen = 0; gen < GEN_COUNT; gen++) {
+        if (((wr->gens_used & ~wr->gens_have) >> gen & 1U) != 0) {
+            write_constant(wr, odin3_bytes_cstr(GEN_NAMES[gen]), gen == GEN_VCC ? 1 : 0);
+        }
+    }
+}
+
 /* --- ports --------------------------------------------------------------------------------- */
 
 /* The directive of a port's direction; INOUT has none in BLIF. */
@@ -800,14 +892,47 @@ static odin3_status port_bit_buffer(blif_writer *wr, uint32_t at, odin3_pin_id p
     return st;
 }
 
+/*
+ * VTR: an output-port bit (§9.2). A net a constant $sop or cell drives is that cell's generator:
+ * nothing more under the bit's own name, else the generator again under the bit's name (one
+ * driver per net, R16; no buffer). A bit on a $_CONST*_, undriven or unconnected, or of class U
+ * gets a buffer from gnd/vcc/gnd/unconn. Any other bit is port_bit_buffer's.
+ */
+static odin3_status out_bit_vtr(blif_writer *wr, uint32_t at, odin3_pin_id pin) {
+    odin3_net_id net = odin3_pin_net(wr->module, pin);
+    bool changed = false;
+    odin3_status st =
+        port_bit_token(wr, (wr_portbit){at, odin3_pin_bit(wr->module, pin)}, &changed);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    int value = const_driver(wr, net);
+    wr_gen gen = value < 0 ? source_gen(wr, net, false) : GEN_NONE;
+    odin3_bytes name = gen != GEN_NONE ? gen_use(wr, gen) : net_name(wr, net);
+    if (gen == GEN_NONE && same_bytes(name, buf_bytes(&wr->token))) {
+        return ODIN3_OK;
+    }
+    if (value >= 0) {
+        write_constant(wr, buf_bytes(&wr->token), value);
+    } else {
+        port_buffer(wr, ODIN3_DIR_OUT, name);
+    }
+    return ODIN3_OK;
+}
+
 /* After the cells: a buffer for each port bit whose net is written under another name (the net
- * has its own name, or it is on several port bits). */
+ * has its own name, or it is on several port bits); in the VTR dialect, output-port bits are
+ * out_bit_vtr's. */
 static odin3_status write_port_buffers(blif_writer *wr) {
+    const odin3_celltype_def *def =
+        odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < odin3_module_port_count(wr->module); i++) {
         odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
+        bool vtr_out = wr->vtr && def->ports[i].dir == ODIN3_DIR_OUT;
         for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
-            st = port_bit_buffer(wr, i, (odin3_pin_id){pins.first.v + k});
+            odin3_pin_id pin = {pins.first.v + k};
+            st = vtr_out ? out_bit_vtr(wr, i, pin) : port_bit_buffer(wr, i, pin);
         }
     }
     return st != ODIN3_OK ? wr_fail(wr, st) : wr->st;
@@ -872,10 +997,23 @@ static void pin_token(blif_writer *wr, odin3_node_id node, uint32_t port) {
     wr_token(wr, pin_name(wr, odin3_node_port(wr->module, node, port).first));
 }
 
+/* Cover rows (inputs + 1 bytes each, no blanks) as lines `<plane> <out>` (`<out>` alone for
+ * zero inputs). */
+static void write_rows(blif_writer *wr, const uint8_t *bits, uint32_t len, uint32_t inputs) {
+    const char *rows = (const char *)bits;
+    for (uint32_t at = 0; at + inputs < len; at += inputs + 1) {
+        if (inputs > 0) {
+            wr_put(wr, (odin3_bytes){rows + at, inputs});
+            wr_put(wr, odin3_bytes_cstr(" "));
+        }
+        wr_put(wr, (odin3_bytes){rows + at + inputs, 1});
+        wr_newline(wr);
+    }
+}
+
 /* `.names` with the A pins and Y, then the cover rows as stored. */
 static odin3_status write_names(blif_writer *wr, odin3_node_id node) {
     const odin3_value *cover = odin3_node_param(wr->module, node, SOP_COVER);
-    uint32_t inputs = cover->cover_inputs;
     wr_begin(wr, ".names");
     odin3_pinslice in = odin3_node_port(wr->module, node, 0);
     for (uint32_t k = 0; k < in.count; k++) {
@@ -883,14 +1021,41 @@ static odin3_status write_names(blif_writer *wr, odin3_node_id node) {
     }
     pin_token(wr, node, 1);
     wr_end(wr);
-    const char *rows = (const char *)cover->bits;
-    for (uint32_t at = 0; at + inputs < cover->len; at += inputs + 1) {
-        if (inputs > 0) {
-            wr_put(wr, (odin3_bytes){rows + at, inputs});
-            wr_put(wr, odin3_bytes_cstr(" "));
-        }
-        wr_put(wr, (odin3_bytes){rows + at + inputs, 1});
+    write_rows(wr, cover->bits, cover->len, cover->cover_inputs);
+    return wr->st;
+}
+
+/*
+ * VTR: a $sop or gate as `.names` (spec 3E §6) with its inputs read per §9.2. A cell with inputs
+ * whose function is constant is the zero-input generator on its output (its inputs dropped); a
+ * 1-input one has the one row `1 1` or `0 1`; any other is written with its rows (a $sop's as
+ * stored, a gate's from §6's table), a zero-input $sop included.
+ */
+static odin3_status write_names_vtr(blif_writer *wr, odin3_node_id node,
+                                    const odin3_blif_vtr_rows *rows) {
+    odin3_blif_vtr_fn fn =
+        rows->inputs > 0 ? odin3_blif_vtr_function(wr->module, node) : ODIN3_BLIF_VTR_FN_COVER;
+    bool constant = fn == ODIN3_BLIF_VTR_FN_CONST0 || fn == ODIN3_BLIF_VTR_FN_CONST1;
+    odin3_pinslice pins = odin3_node_pins(wr->module, node);
+    odin3_bytes out = pin_name(wr, (odin3_pin_id){pins.first.v + rows->inputs});
+    if (constant) {
+        write_constant(wr, out, fn == ODIN3_BLIF_VTR_FN_CONST1 ? 1 : 0);
+        return wr->st;
+    }
+    wr_begin(wr, ".names");
+    for (uint32_t k = 0; k < rows->inputs; k++) {
+        wr_token(wr, source_name(wr, (odin3_pin_id){pins.first.v + k}, false));
+    }
+    wr_token(wr, out);
+    wr_end(wr);
+    if (rows->inputs == 0) {
+        note_generator(wr, out);
+    }
+    if (fn == ODIN3_BLIF_VTR_FN_BUF || fn == ODIN3_BLIF_VTR_FN_INV) {
+        wr_put(wr, odin3_bytes_cstr(fn == ODIN3_BLIF_VTR_FN_BUF ? "1 1" : "0 1"));
         wr_newline(wr);
+    } else {
+        write_rows(wr, rows->bits, rows->len, rows->inputs);
     }
     return wr->st;
 }
@@ -912,6 +1077,22 @@ static odin3_status write_latch(blif_writer *wr, odin3_node_id node, wr_builtin 
         return wr_fail(wr, st);
     }
     wr_token_built(wr);
+    wr_end(wr);
+    return wr->st;
+}
+
+/* VTR: `.latch <D> <Q> re <C> <init>` (spec 3E §7): D and C read per §9.2, an unconnected Q
+ * under its generated `$p<pin ID>`, init 0 1 2 2 for INIT 0 1 2 3. */
+static odin3_status write_latch_vtr(blif_writer *wr, odin3_node_id node) {
+    static const char *const INIT_WORDS[] = {"0", "1", "2", "2"};
+    int64_t init = odin3_node_param(wr->module, node, LATCH_INIT)->i;
+    bool known = init >= 0 && (uint64_t)init < sizeof INIT_WORDS / sizeof INIT_WORDS[0];
+    wr_begin(wr, ".latch");
+    wr_token(wr, source_name(wr, odin3_node_port(wr->module, node, TYPED_D).first, false));
+    pin_token(wr, node, TYPED_Q);
+    wr_token(wr, odin3_bytes_cstr(LATCH_WORDS[WR_DFF_P]));
+    wr_token(wr, source_name(wr, odin3_node_port(wr->module, node, CTRL_PORT).first, false));
+    wr_token(wr, odin3_bytes_cstr(known ? INIT_WORDS[init] : INIT_WORDS[2]));
     wr_end(wr);
     return wr->st;
 }
@@ -1095,6 +1276,13 @@ odin3_status odin3_blif_params_check(const odin3_design *design, const odin3_mod
     return params_check((wr_implied){design, module, node, NULL, NULL, NULL}, bad, ok);
 }
 
+/* The actual of a connected .subckt pin: its net's name; in the VTR dialect, an input's source
+ * per §9.2 (x reads `unconn`). */
+static odin3_bytes subckt_actual(blif_writer *wr, odin3_dir dir, odin3_pin_id pin) {
+    return wr->vtr && dir == ODIN3_DIR_IN ? source_name(wr, pin, true)
+                                          : net_name(wr, odin3_pin_net(wr->module, pin));
+}
+
 /* The connected pins of port `at` of node as `formal=actual` tokens. */
 static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
@@ -1105,8 +1293,8 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
     odin3_pinslice pins = odin3_node_port(wr->module, node, at);
     odin3_status st = ODIN3_OK;
     for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
-        odin3_net_id net = odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k});
-        if (!odin3_net_valid(net)) {
+        odin3_pin_id pin = {pins.first.v + k};
+        if (!odin3_net_valid(odin3_pin_net(wr->module, pin))) {
             continue;
         }
         if (renamed && formal_taken(wr, node, (wr_portbit){at, k}, base)) {
@@ -1115,7 +1303,8 @@ static odin3_status subckt_port(blif_writer *wr, odin3_node_id node, uint32_t at
         }
         st = bit_token(wr, scalar, base, formal_index(wr, type, (wr_portbit){at, k}));
         st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, odin3_bytes_cstr("=")) : st;
-        st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, net_name(wr, net)) : st;
+        st = st == ODIN3_OK ? odin3_strbuf_append(&wr->token, subckt_actual(wr, port->dir, pin))
+                            : st;
         if (st == ODIN3_OK) {
             wr_token_built(wr);
         }
@@ -1223,6 +1412,23 @@ static bool lacks_blif_form(const blif_writer *wr, odin3_celltype_id type) {
     return false;
 }
 
+/* VTR: one cell (spec 3E §6): a $sop or gate as .names, a $_CONST*_ as no line (its readers
+ * read gnd/vcc/unconn, §9), $_DFF_P_ as .latch, a hard cell as .subckt (the preflight refused
+ * every other cell). No .cname/.attr/.param: VPR reads them in extended BLIF only (R3). */
+static odin3_status write_cell_vtr(blif_writer *wr, odin3_node_id node) {
+    odin3_blif_vtr_rows rows;
+    if (odin3_blif_vtr_rows_of(wr->module, node, &rows)) {
+        return write_names_vtr(wr, node, &rows);
+    }
+    if (odin3_blif_vtr_const_cell(wr->module, node)) {
+        return wr->st;
+    }
+    if (builtin_of(wr, odin3_node_type(wr->module, node)) == WR_DFF_P) {
+        return write_latch_vtr(wr, node);
+    }
+    return write_subckt(wr, node);
+}
+
 static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
     const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
@@ -1232,6 +1438,9 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     if (lacks_blif_form(wr, type)) {
         return wr_refuse(
             wr, "word flip-flops and latches have no BLIF form; cannot write a cell of", def->name);
+    }
+    if (wr->vtr) {
+        return write_cell_vtr(wr, node);
     }
     wr_builtin which = builtin_of(wr, type);
     odin3_status st = ODIN3_OK;
@@ -1244,6 +1453,36 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     }
     if (st == ODIN3_OK) {
         write_cell_extras(wr, node);
+    }
+    return wr->st;
+}
+
+/* The cells in node ID order (port nodes write nothing). */
+static odin3_status write_cells(blif_writer *wr) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(wr->module); i++) {
+        if (odin3_node_live(wr->module, (odin3_node_id){i})) {
+            st = write_cell(wr, (odin3_node_id){i});
+        }
+    }
+    return st;
+}
+
+/* VTR (spec 3E §5 item 4): a dry run of the cells and the port buffers, which writes nothing,
+ * finds the generators they read and those a zero-input $sop already is; the others are then
+ * written. */
+static odin3_status write_vtr_generators(blif_writer *wr) {
+    uint32_t line = wr->line;
+    wr->scan = true;
+    odin3_status st = write_cells(wr);
+    if (st == ODIN3_OK) {
+        st = write_port_buffers(wr);
+    }
+    wr->scan = false;
+    wr->line = line;
+    wr->col = 0;
+    if (st == ODIN3_OK) {
+        write_generators(wr);
     }
     return wr->st;
 }
@@ -1347,11 +1586,10 @@ static odin3_status write_module(blif_writer *wr, uint32_t pos) {
     if (st == ODIN3_OK && !wr->vtr) {
         write_clock(wr); /* VPR has no .clock (spec 3E R3) */
     }
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(wr->module); i++) {
-        if (odin3_node_live(wr->module, (odin3_node_id){i})) {
-            st = write_cell(wr, (odin3_node_id){i});
-        }
+    if (st == ODIN3_OK && wr->vtr) {
+        st = write_vtr_generators(wr);
     }
+    st = st == ODIN3_OK ? write_cells(wr) : st;
     if (st == ODIN3_OK) {
         (void)write_port_buffers(wr);
     }

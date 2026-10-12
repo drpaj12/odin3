@@ -80,11 +80,23 @@ typedef struct odin3_blif_vtr_plan {
  * shown` follows. report (zeroed first) counts the refusals and what the write will emit:
  * `names` the $sop and gate cells (.names lines of cells; generators and port buffers the writer
  * adds are not counted), `latches` the $_DFF_P_ cells, `subckts` the hard cells; per pin,
- * `x_to_gnd` the X and UNDRIVEN .names inputs, .latch D pins and output-port bits,
- * `x_to_unconn` the X and UNDRIVEN non-clock inputs of hard cells, `unconn_logic` the class-U
- * .names inputs and .latch D pins (of cells not refused); `renamed` (VB-10) and
- * `modules_skipped`. Returns as odin3_blif_vtr_preflight (out of memory logged `write_blif:
- * --vtr: out of memory`).
+ * `x_to_gnd` the X and UNDRIVEN .names inputs (not those of a cell §6 writes as a constant
+ * generator, whose inputs are dropped), .latch D pins and output-port bits, `x_to_unconn` the X
+ * and UNDRIVEN non-clock inputs of hard cells, `unconn_logic` the class-U .names inputs (as for
+ * x_to_gnd) and .latch D pins (of cells not refused); `renamed` (VB-10) and `modules_skipped`.
+ *
+ * When nothing is refused it then logs, in this order (plan 3E point (k)): the info line
+ * `write_blif: --vtr: N modules besides the top '<top>' not written` when N > 0; per node in ID
+ * order, the warnings `<loc>: $_DFF_P_ '<cell>': clock is the constant <0|1>; VPR will never
+ * clock it` (§7 item 3), `<loc>: <type> '<cell>': clock input '<port>' is the constant <0|1>; VPR
+ * will never clock it` (a hard cell's clock input) and `<loc>: <type> '<cell>': clock is
+ * 'unconn'; VPR will never clock it` (point (j)); the warning `write_blif: --vtr: net 'unconn'
+ * feeds N .names/.latch pins; VPR leaves them open (run abc first)` when unconn_logic N > 0; and
+ * the summary info line `write_blif: --vtr: '<top>': N .names, M .latch, S .subckt (adder A,
+ * multiply B, single_port_ram C, dual_port_ram D), K=<K>; x bits: X to gnd, Y open (unconn)`,
+ * the types with count 0 left out of the parentheses and the parentheses left out when none is
+ * left. Returns as odin3_blif_vtr_preflight (out of memory logged `write_blif: --vtr: out of
+ * memory`).
  */
 odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
                                        const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan,
@@ -128,5 +140,56 @@ odin3_status odin3_blif_vtr_clock_name(odin3_bytes legal, odin3_strbuf *out);
 
 /* The K the VTR dialect writes with: opts->lut_k, or ODIN3_BLIF_VTR_DEFAULT_K when it is 0. */
 uint32_t odin3_blif_vtr_k(const odin3_blif_write_opts *opts);
+
+/* --- emission (spec 3E §6, VB-6) ----------------------------------------------------------- */
+
+/* The cover a `.names` cell is written from: a $sop's rows as stored, or a Yosys gate's rows of
+ * §6's table. Rows are inputs + 1 bytes each (no blank): one plane character `0`/`1`/`-` per
+ * input, input j in column j, then the output character. The node's first `inputs` pins are its
+ * inputs in that order, and its last pin is the output. */
+typedef struct odin3_blif_vtr_rows {
+    const uint8_t *bits;
+    uint32_t len;    /* bytes, a multiple of inputs + 1 */
+    uint32_t inputs; /* k */
+} odin3_blif_vtr_rows;
+
+/* True and *rows = node's cover when node (a live node of module) is a $sop or one of the gates
+ * $_BUF_ $_NOT_ $_AND_ $_OR_ $_XOR_ $_NAND_ $_NOR_ $_XNOR_ $_MUX_ (§6: `1 1`; `0 1`; `11 1`;
+ * `1- 1`, `-1 1`; `10 1`, `01 1`; `0- 1`, `-0 1`; `00 1`; `11 1`, `00 1`; `1-0 1`, `-11 1` with
+ * pins A B S). False, *rows untouched, for any other cell. The rows are static or the node's. */
+bool odin3_blif_vtr_rows_of(const odin3_module *module, odin3_node_id node,
+                            odin3_blif_vtr_rows *rows);
+
+/* Words of a truth table of ODIN3_BLIF_VTR_MAX_K inputs (2^16 bits). */
+#define ODIN3_BLIF_VTR_TT_WORDS 1024U
+
+/*
+ * The truth table of a `.names` cell (odin3_blif_vtr_rows_of) with k <= ODIN3_BLIF_VTR_MAX_K
+ * inputs: bit i of tt (word i / 64, bit i % 64) is the output when input j is bit j of i. tt must
+ * hold ODIN3_BLIF_VTR_TT_WORDS words; the first max(1, 2^k / 64) are written, bits from 2^k up
+ * zero. A cover with rows of output `1` is their OR (rows of output `0` in a mixed cover, E8, are
+ * ignored, as the $sop simulator does); one with only `0` rows is the complement of their OR; no
+ * rows is constant 0. Returns false, tt untouched, for any other cell or k > 16. O(rows * 2^k).
+ */
+bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_t *tt);
+
+/* What a `.names` cell computes, for §6's normalisation. */
+typedef enum odin3_blif_vtr_fn {
+    ODIN3_BLIF_VTR_FN_NONE = 0, /* no `.names` cell, or k > 16 */
+    ODIN3_BLIF_VTR_FN_COVER,    /* none of the below: written as its rows */
+    ODIN3_BLIF_VTR_FN_CONST0,   /* constant 0 (any k, k = 0 included) */
+    ODIN3_BLIF_VTR_FN_CONST1,   /* constant 1 */
+    ODIN3_BLIF_VTR_FN_BUF,      /* k = 1: the input */
+    ODIN3_BLIF_VTR_FN_INV,      /* k = 1: its complement */
+} odin3_blif_vtr_fn;
+
+/* The function of node by odin3_blif_vtr_eval. The writer writes a cell with k >= 1 of a CONST
+ * function as the zero-input generator `.names <y>` (no rows, or the row `1`), its inputs
+ * dropped; of BUF/INV as `.names <a> <y>` with the one row `1 1`/`0 1`; a zero-input $sop as
+ * stored. */
+odin3_blif_vtr_fn odin3_blif_vtr_function(const odin3_module *module, odin3_node_id node);
+
+/* True when node is a $_CONST0_, $_CONST1_, $_CONSTX_ or $_CONSTZ_ (written as no line; §9). */
+bool odin3_blif_vtr_const_cell(const odin3_module *module, odin3_node_id node);
 
 #endif

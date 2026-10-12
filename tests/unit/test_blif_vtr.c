@@ -1,7 +1,8 @@
 /*
  * test_blif_vtr.c — unit tests for write_blif --vtr (spec 3E §16.1): options, arguments, the API's
  * own refusals, E13 and the process refusal (3E Task 1); VB-10 names (3E Task 2); the preflight's
- * refusals E1-E12, its cap, the source classes and the report (3E Task 3).
+ * refusals E1-E12, its cap, the source classes and the report (3E Task 3); emission: the header,
+ * generators, cells, latches and port buffers (3E Task 4).
  */
 #include "backends/blif/vtr.h"
 #include "backends/blif/writer.h"
@@ -576,13 +577,18 @@ static void test_preflight_report_and_k(void) {
     odin3_blif_vtr_report report = {.errors = 7, .renamed = 3};
     odin3_strbuf_clear(&tc.log);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
-    TEST_ASSERT_EQUAL_STRING("", tc.log.data);
+    TEST_ASSERT_EQUAL_STRING(
+        "info: write_blif: --vtr: 1 modules besides the top 'top' not written\n"
+        "info: write_blif: --vtr: 'top': 1 .names, 0 .latch, 0 .subckt, K=6; "
+        "x bits: 0 to gnd, 0 open (unconn)\n",
+        tc.log.data);
     TEST_ASSERT_EQUAL_UINT32(0, report.errors);
     TEST_ASSERT_EQUAL_UINT32(0, report.renamed);
     TEST_ASSERT_EQUAL_UINT32(1, report.modules_skipped);
     opts.lut_k = 16;
     TEST_ASSERT_EQUAL_UINT32(16, odin3_blif_vtr_k(&opts));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    odin3_strbuf_clear(&tc.log);
     opts.lut_k = 17;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -907,7 +913,8 @@ static const char *vtr_body(void) {
 
 /* `--vtr out.blif` succeeds; the body after `.model top`. */
 static const char *write_vtr(void) {
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    odin3_status st = bvt_write(&tc, "--vtr out.blif", &out);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, text_of(&tc.log));
     return vtr_body();
 }
 
@@ -1175,8 +1182,9 @@ static void test_generator_keeps_name(void) {
     read_ok(".model top\n.inputs a\n.outputs y\n.names a vcc\n1 1\n.names gnd\n1\n"
             ".names vcc gnd y\n11 1\n.end\n",
             false);
-    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names a %vcc\n1 1\n.names %gnd\n1\n"
-                             ".names %vcc %gnd y\n11 1\n.end\n",
+    /* %gnd is constant 1 (class 1): its reader reads the generator vcc (§9.2) */
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names vcc\n1\n.names a %vcc\n1 1\n"
+                             ".names %gnd\n1\n.names %vcc vcc y\n11 1\n.end\n",
                              write_vtr());
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "info: write_blif: --vtr: 2 names legalised"),
                                  tc.log.data);
@@ -1962,6 +1970,442 @@ static void test_out_of_memory_sweep_renames(void) {
     odin3_strbuf_free(&api);
 }
 
+/* --- emission: header, generators, cells, latches, port buffers (3E Task 4) ------------------ */
+
+/* One cell of each Yosys gate type (spec 3E §6's table). */
+static const char *const GATES = ".model top\n"
+                                 ".inputs a b s\n"
+                                 ".outputs y0 y1 y2 y3 y4 y5 y6 y7 y8\n"
+                                 ".subckt $_BUF_ A=a Y=y0\n"
+                                 ".subckt $_NOT_ A=a Y=y1\n"
+                                 ".subckt $_AND_ A=a B=b Y=y2\n"
+                                 ".subckt $_OR_ A=a B=b Y=y3\n"
+                                 ".subckt $_XOR_ A=a B=b Y=y4\n"
+                                 ".subckt $_NAND_ A=a B=b Y=y5\n"
+                                 ".subckt $_NOR_ A=a B=b Y=y6\n"
+                                 ".subckt $_XNOR_ A=a B=b Y=y7\n"
+                                 ".subckt $_MUX_ A=a B=b S=s Y=y8\n"
+                                 ".end\n";
+
+/* GATES written with --vtr, after the header and `.model top`. */
+static const char *const GATES_BODY = ".inputs a b s\n"
+                                      ".outputs y0 y1 y2 y3 y4 y5 y6 y7 y8\n"
+                                      ".names a y0\n1 1\n"
+                                      ".names a y1\n0 1\n"
+                                      ".names a b y2\n11 1\n"
+                                      ".names a b y3\n1- 1\n-1 1\n"
+                                      ".names a b y4\n10 1\n01 1\n"
+                                      ".names a b y5\n0- 1\n-0 1\n"
+                                      ".names a b y6\n00 1\n"
+                                      ".names a b y7\n11 1\n00 1\n"
+                                      ".names a b s y8\n1-0 1\n-11 1\n"
+                                      ".end\n";
+
+/* The whole file: the header, a blank line, `.model top`, then the body. */
+static void test_gate_covers(void) {
+    char want[LINE_BUF * 4];
+    read_ok(GATES, false);
+    header_of(ODIN3_BLIF_VTR_DEFAULT_K, want);
+    TEST_ASSERT_TRUE(strlen(want) + strlen(".model top\n") + strlen(GATES_BODY) < sizeof want);
+    (void)strncat(want, ".model top\n", sizeof want - strlen(want) - 1);
+    (void)strncat(want, GATES_BODY, sizeof want - strlen(want) - 1);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    TEST_ASSERT_EQUAL_STRING(want, text_of(&out));
+}
+
+static void test_latch_init_map(void) {
+    read_ok(".model top\n.inputs clk d0 d1 d2 d3\n.outputs q0 q1 q2 q3\n"
+            ".latch d0 q0 re clk 0\n.latch d1 q1 re clk 1\n.latch d2 q2 re clk 2\n"
+            ".latch d3 q3 re clk 3\n.end\n",
+            false);
+    TEST_ASSERT_EQUAL_STRING(".inputs clk d0 d1 d2 d3\n.outputs q0 q1 q2 q3\n"
+                             ".latch d0 q0 re clk 0\n.latch d1 q1 re clk 1\n"
+                             ".latch d2 q2 re clk 2\n.latch d3 q3 re clk 2\n.end\n",
+                             write_vtr());
+}
+
+/* The VTR report of tc's design (preflight, default K), which must pass. */
+static odin3_blif_vtr_report vtr_report(void) {
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    odin3_blif_vtr_report report = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    return report;
+}
+
+static void test_latch_x_d(void) {
+    read_ok(".model top\n.inputs d clk\n.outputs q\n.latch d q re clk 2\n.end\n", false);
+    pin_to_const((odin3_node_id){node_of("$_DFF_P_")}, (pin_at){1, 0}, "$_CONSTX_");
+    TEST_ASSERT_EQUAL_STRING(".inputs d clk\n.outputs q\n.names gnd\n.latch gnd q re clk 2\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().x_to_gnd);
+}
+
+static void test_latch_const_clock(void) {
+    odin3_module *top = hand_top();
+    odin3_node_id dff = hand_dff_open_clock(top);
+    pin_to_const(dff, (pin_at){0, 0}, "$_CONST1_");
+    TEST_ASSERT_EQUAL_STRING(".inputs d\n.outputs q\n.names vcc\n1\n.latch d q re vcc 2\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: top: $_DFF_P_ '$c%u': clock is "
+                                      "the constant 1; VPR will never clock it\n",
+                                      dff.v)),
+        tc.log.data);
+    bvt_free(&tc); /* a Parmys gnd (constant 0) and unconn (point (j)) as clocks */
+    read_ok(".model top\n.inputs d\n.outputs q p\n.names gnd\n.names unconn\n"
+            ".latch d q re gnd 2\n.latch d p re unconn 2\n.end\n",
+            false);
+    TEST_ASSERT_EQUAL_STRING(".inputs d\n.outputs q p\n.names gnd\n.names unconn\n"
+                             ".latch d q re gnd 2\n.latch d p re unconn 2\n.end\n",
+                             write_vtr());
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tc.log.data, "warn: write_blif: --vtr: t.blif:6: $_DFF_P_ "
+                                                     "'$c"),
+                                 tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1,
+                                     count_of(tc.log.data, "': clock is the constant 0; VPR "
+                                                           "will never clock it\n"),
+                                     tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1, count_of(tc.log.data, "': clock is 'unconn'; VPR will never clock it\n"), tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(tc.log.data, "feeds")); /* a clock is no logic pin */
+}
+
+/* Pin `port` (bit 0) of node onto net. */
+static void pin_onto(odin3_node_id node, uint32_t port, odin3_net_id net) {
+    odin3_module *top = top_of();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_connect(top, odin3_node_port(top, node, port).first, net));
+}
+
+/* An unconnected Q is written under its own `$p<pin ID>` (§7 item 5); an unconnected .names input
+ * reads gnd (x_to_gnd), never a dangling name. */
+static void test_unconnected_pins(void) {
+    odin3_module *top = hand_top();
+    odin3_net_id c_net = hand_scalar(top, "c", ODIN3_DIR_IN);
+    odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
+    odin3_net_id y_net = hand_scalar(top, "y", ODIN3_DIR_OUT);
+    odin3_node_id dff = hand_cell(top, "$_DFF_P_", NULL, 0);
+    pin_onto(dff, 0, c_net);
+    pin_onto(dff, 1, d_net);
+    odin3_node_id gate = hand_cell(top, "$_AND_", NULL, 0);
+    pin_onto(gate, 0, d_net);
+    pin_onto(gate, 2, y_net);
+    TEST_ASSERT_EQUAL_STRING(line_of(".inputs c d\n.outputs y\n.names gnd\n.latch d $p%u re c 2\n"
+                                     ".names d gnd y\n11 1\n.end\n",
+                                     odin3_node_port(top, dff, 2).first.v),
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().x_to_gnd);
+}
+
+/* Point (j) on a hard cell's clock input: a constant (written gnd) and Parmys's unconn. */
+static void test_hard_clock_warnings(void) {
+    read_ok(RAM4, true);
+    uint32_t ram = node_of("single_port_ram");
+    pin_to_const((odin3_node_id){ram}, (pin_at){0, 0}, "$_CONST0_");
+    write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " clk=gnd "), out.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: t.blif:4: single_port_ram '$c%u': "
+                                      "clock input 'clk' is the constant 0; VPR will never clock "
+                                      "it\n",
+                                      ram)),
+        tc.log.data);
+    bvt_free(&tc);
+    read_ok(".model top\n.inputs d a w\n.outputs o\n.names unconn\n"
+            ".subckt single_port_ram clk=unconn data[0]=d addr[0]=a we=w out[0]=o\n.end\n",
+            true);
+    write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " clk=unconn "), out.data);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, line_of("warn: write_blif: --vtr: t.blif:5: single_port_ram '$c%u': "
+                                      "clock is 'unconn'; VPR will never clock it\n",
+                                      node_of("single_port_ram"))),
+        tc.log.data);
+}
+
+/* One 1-input .names on a with the rows given (blank-separated lines) written as want. */
+static void expect_one_input(const char *rows, const char *want) {
+    char text[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text,
+                              ".model top\n.inputs a\n.outputs y\n.names a y\n"
+                              "%s.end\n",
+                              rows) < LINE_BUF);
+    read_ok(text, false);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, write_vtr(), rows);
+    bvt_free(&tc);
+}
+
+static void test_one_input_cover_normalised(void) {
+    expect_one_input("", ".inputs a\n.outputs y\n.names y\n.end\n");
+    expect_one_input("1 1\n", ".inputs a\n.outputs y\n.names a y\n1 1\n.end\n");
+    expect_one_input("1 1\n1 1\n", ".inputs a\n.outputs y\n.names a y\n1 1\n.end\n");
+    expect_one_input("0 1\n1 1\n0 1\n", ".inputs a\n.outputs y\n.names y\n1\n.end\n");
+    expect_one_input("0 0\n", ".inputs a\n.outputs y\n.names a y\n1 1\n.end\n"); /* off-set */
+    expect_one_input("1 0\n", ".inputs a\n.outputs y\n.names a y\n0 1\n.end\n");
+    expect_one_input("- 0\n", ".inputs a\n.outputs y\n.names y\n.end\n");
+}
+
+static void test_constant_cover_with_inputs(void) {
+    read_ok(".model top\n.inputs a b\n.outputs y\n.names a b y\n-- 1\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".inputs a b\n.outputs y\n.names y\n1\n.end\n", write_vtr());
+    /* its dropped inputs are not counted: x on one of them is no x bit to gnd */
+    pin_to_const((odin3_node_id){node_of("$sop")}, (pin_at){0, 0}, "$_CONSTX_");
+    TEST_ASSERT_EQUAL_STRING(".inputs a b\n.outputs y\n.names y\n1\n.end\n", write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(0, vtr_report().x_to_gnd);
+    bvt_free(&tc);
+    read_ok(".model top\n.inputs a b\n.outputs y\n.names a b y\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".inputs a b\n.outputs y\n.names y\n.end\n", write_vtr());
+}
+
+/* The lines of text that are `.names y` or a .names line ending in ` y`. */
+static uint32_t names_driving_y(const char *text) {
+    uint32_t count = 0;
+    for (const char *at = text; *at != '\0';) {
+        const char *end = strchr(at, '\n');
+        size_t len = end != NULL ? (size_t)(end - at) : strlen(at);
+        bool names = starts_with(at, ".names ");
+        count += names && len >= 2 && at[len - 2] == ' ' && at[len - 1] == 'y' ? 1U : 0U;
+        at += end != NULL ? len + 1 : len;
+    }
+    return count;
+}
+
+/* Review Focus 4. */
+static void test_const_sop_on_output_one_driver(void) {
+    read_ok(".model top\n.outputs y\n.names y\n1\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".outputs y\n.names y\n1\n.end\n", write_vtr());
+    TEST_ASSERT_NULL(strstr(out.data, "vcc"));
+    TEST_ASSERT_EQUAL_UINT32(1, names_driving_y(out.data));
+}
+
+/* A constant cell whose net has another name than the output-port bit: the generator again under
+ * the bit's name, no buffer (one driver per net, §9.2). */
+static void test_const_on_output_named_net(void) {
+    odin3_module *top = hand_top();
+    odin3_node_id sop = hand_sop(top, 0, "1");
+    odin3_net_id y_net = odin3_pin_net(top, odin3_node_port(top, sop, 1).first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, y_net, intern("n")));
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names n\n1\n.names y\n1\n.end\n",
+                             write_vtr());
+    bvt_free(&tc);
+    top = hand_top();
+    sop = hand_sop(top, 2, "0-01-0"); /* a normalised constant 0 cell */
+    y_net = odin3_pin_net(top, odin3_node_port(top, sop, 1).first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, y_net, intern("n")));
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names n\n.names y\n.end\n", write_vtr());
+}
+
+/* A new cell of the constant type const_type driving net (a net with no driver). */
+static void drive_const(odin3_net_id net, const char *const_type) {
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern(const_type), &type));
+    odin3_node_spec spec = {.type = type};
+    const odin3_netvec ports[] = {{&net, 1}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top_of(), &spec, ports, NULL));
+}
+
+/* $_CONST1_ on output y, which the .names reads too. */
+static void test_const_cell_on_output_buffered(void) {
+    read_ok(".model top\n.inputs a\n.outputs y z\n.names a y z\n11 1\n.end\n", false);
+    drive_const(net_named("y"), "$_CONST1_");
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y z\n.names vcc\n1\n.names a vcc z\n11 1\n"
+                             ".names vcc y\n1 1\n.end\n",
+                             write_vtr());
+}
+
+static void test_x_output(void) {
+    read_ok(".model top\n.outputs y\n.end\n", false);
+    TEST_ASSERT_EQUAL_STRING(".outputs y\n.names gnd\n.names gnd y\n1 1\n.end\n", write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().x_to_gnd);
+    bvt_free(&tc); /* $_CONSTX_ on an output-port bit, and one undriven */
+    odin3_module *top = hand_top();
+    drive_const(hand_scalar(top, "y", ODIN3_DIR_OUT), "$_CONSTX_");
+    (void)hand_scalar(top, "z", ODIN3_DIR_OUT);
+    TEST_ASSERT_EQUAL_STRING(".outputs y z\n.names gnd\n.names gnd y\n1 1\n.names gnd z\n1 1\n"
+                             ".end\n",
+                             write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(2, vtr_report().x_to_gnd);
+}
+
+/* Parmys's unconn on a .names input and on a RAM address bit. */
+static void test_unconn_logic_warns(void) {
+    read_ok(".model top\n.inputs c d a0 a1 a3 w\n.outputs o y\n.names unconn\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 addr[1]=a1 addr[2]=unconn "
+            "addr[3]=a3 we=w out[0]=o\n.names unconn a1 y\n11 1\n.end\n",
+            true);
+    write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " addr[2]=unconn "), out.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "\n.names unconn a1 y\n11 1\n"), out.data);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".names unconn\n"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1,
+                                     count_of(tc.log.data, "warn: write_blif: --vtr: net 'unconn' "
+                                                           "feeds 1 .names/.latch pins; VPR "
+                                                           "leaves them open (run abc first)\n"),
+                                     tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(1, tc.warnings);
+    TEST_ASSERT_EQUAL_UINT32(1, vtr_report().unconn_logic);
+}
+
+static void test_generator_is_sop(void) {
+    static const char *const body = ".inputs a\n.outputs y\n.names gnd\n.names a gnd y\n10 1\n"
+                                    ".end\n";
+    char text[LINE_BUF];
+    TEST_ASSERT_TRUE(snprintf(text, sizeof text, ".model top\n%s", body) < LINE_BUF);
+    read_ok(text, false);
+    TEST_ASSERT_EQUAL_STRING(body, write_vtr());
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".names gnd\n"));
+    bvt_free(&tc); /* a signal named gnd, and the generator gnd for an undriven output */
+    read_ok(".model top\n.inputs a\n.outputs y z\n.names a gnd\n1 1\n.names gnd y\n1 1\n.end\n",
+            false);
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y z\n.names gnd\n.names a %gnd\n1 1\n"
+                             ".names %gnd y\n1 1\n.names gnd z\n1 1\n.end\n",
+                             write_vtr());
+}
+
+/* §5 item 4's order gnd, vcc, unconn, each once; a .subckt input reads x as unconn. */
+static void test_generators_in_order(void) {
+    read_ok(".model top\n.inputs x y z\n.outputs s c t\n"
+            ".subckt adder a=x b=y cin=z cout=c sumout=s\n.names x y z t\n111 1\n.end\n",
+            true);
+    odin3_node_id adder = {node_of("adder")};
+    pin_to_const(adder, (pin_at){2, 0}, "$_CONSTX_");
+    pin_to_const(adder, (pin_at){1, 0}, "$_CONST1_");
+    pin_to_const(adder, (pin_at){0, 0}, "$_CONST0_");
+    pin_to_const((odin3_node_id){node_of("$sop")}, (pin_at){0, 2}, "$_CONST1_");
+    TEST_ASSERT_EQUAL_STRING(".inputs x y z\n.outputs s c t\n.names gnd\n.names vcc\n1\n"
+                             ".names unconn\n"
+                             ".subckt adder a=gnd b=vcc cin=unconn cout=c sumout=s\n"
+                             ".names x y vcc t\n111 1\n.end\n",
+                             write_vtr());
+    odin3_blif_vtr_report report = vtr_report();
+    TEST_ASSERT_EQUAL_UINT32(1, report.x_to_unconn);
+    TEST_ASSERT_EQUAL_UINT32(0, report.x_to_gnd);
+}
+
+static void test_header_exact(void) {
+    char first[LINE_BUF];
+    read_ok(GATES, false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
+    TEST_ASSERT_TRUE(snprintf(first, sizeof first,
+                              "# Odin III %s write_blif --vtr (K=6, names short)\n\n.model top\n",
+                              odin3_version_string()) < LINE_BUF);
+    TEST_ASSERT_TRUE_MESSAGE(starts_with(text_of(&out), first), text_of(&out));
+}
+
+static void test_summary_line(void) {
+    read_ok(".model top\n.inputs a b c d e w\n.outputs y1 y2 q s1 s2 s3 o\n"
+            ".subckt $_AND_ A=a B=b Y=y1\n.subckt $_AND_ A=b B=a Y=y2\n.latch d q re c 2\n"
+            ".subckt adder a=a b=b cin=d cout=k1 sumout=s1\n"
+            ".subckt adder a=a b=b cin=k1 cout=k2 sumout=s2\n"
+            ".subckt adder a=a b=b cin=k2 cout=k3 sumout=s3\n"
+            ".subckt single_port_ram clk=c data[0]=d addr[0]=e we=w out[0]=o\n.end\n",
+            true);
+    pin_to_const((odin3_node_id){node_of("single_port_ram")}, (pin_at){2, 0}, "$_CONSTX_");
+    write_vtr();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data, "info: write_blif: --vtr: 'top': 2 .names, 1 .latch, 4 .subckt "
+                              "(adder 3, single_port_ram 1), K=6; x bits: 0 to gnd, 1 open "
+                              "(unconn)\n"),
+        tc.log.data);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " addr[0]=unconn "), out.data);
+    bvt_free(&tc);
+    read_ok(GATES, false);
+    write_vtr();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1,
+                                     count_of(tc.log.data, "info: write_blif: --vtr: 'top': 9 "
+                                                           ".names, 0 .latch, 0 .subckt, K=6; x "
+                                                           "bits: 0 to gnd, 0 open (unconn)\n"),
+                                     tc.log.data);
+}
+
+static void test_other_modules_info(void) {
+    read_ok(TWO_MODELS, false);
+    write_vtr();
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1,
+        count_of(tc.log.data,
+                 "info: write_blif: --vtr: 1 modules besides the top 'top' not written\n"),
+        tc.log.data);
+    TEST_ASSERT_EQUAL_UINT32(1, count_of(out.data, ".model"));
+}
+
+static void test_deterministic(void) {
+    odin3_strbuf first;
+    odin3_strbuf_init(&first);
+    read_ok(GATES, false);
+    write_vtr();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(&first, buf_of(&out)));
+    write_vtr();
+    TEST_ASSERT_EQUAL_STRING(text_of(&first), text_of(&out));
+    odin3_strbuf_free(&first);
+}
+
+/* Controller ruling (Task 3 review, I2): --vtr writes no .cname/.attr/.param (VPR reads them in
+ * extended BLIF only, R3); plain still does. */
+static void test_vtr_no_extended_directives(void) {
+    read_ok(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.cname n1\n.attr src \"x.v:3\"\n"
+            ".param P 1\n.end\n",
+            false);
+    TEST_ASSERT_EQUAL_STRING(".inputs a\n.outputs y\n.names a y\n1 1\n.end\n", write_vtr());
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "out.blif", &out));
+    TEST_ASSERT_NOT_NULL(strstr(out.data, "\n.cname n1\n.attr src \"x.v:3\"\n.param P 1\n"));
+    bvt_free(&tc);
+    read_golden("hand_cname");
+    write_vtr();
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".cname"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".attr"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(out.data, ".param"));
+}
+
+/* A full --vtr write of GATES under an allocation failure at every step: NO_MEMORY with no file,
+ * until it succeeds with the pass's bytes. */
+static void test_out_of_memory_sweep_gates(void) {
+    char path[PATH_BUF];
+    read_ok(GATES, false);
+    path_in_dir("api.blif", path);
+    odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0};
+    bool done = false;
+    for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
+        done = api_oom_step(fail_at, path, &opts);
+    }
+    TEST_ASSERT_TRUE(done);
+    odin3_strbuf api;
+    odin3_strbuf_init(&api);
+    slurp_into(path, &api);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out));
+    TEST_ASSERT_EQUAL_STRING(text_of(&out), text_of(&api));
+    odin3_strbuf_free(&api);
+}
+
+/* Task 4: emission. */
+static void run_task_4(void) {
+    RUN_TEST(test_gate_covers);
+    RUN_TEST(test_latch_init_map);
+    RUN_TEST(test_latch_x_d);
+    RUN_TEST(test_latch_const_clock);
+    RUN_TEST(test_unconnected_pins);
+    RUN_TEST(test_hard_clock_warnings);
+    RUN_TEST(test_one_input_cover_normalised);
+    RUN_TEST(test_constant_cover_with_inputs);
+    RUN_TEST(test_const_sop_on_output_one_driver);
+    RUN_TEST(test_const_on_output_named_net);
+    RUN_TEST(test_const_cell_on_output_buffered);
+    RUN_TEST(test_x_output);
+    RUN_TEST(test_unconn_logic_warns);
+    RUN_TEST(test_generator_is_sop);
+    RUN_TEST(test_generators_in_order);
+    RUN_TEST(test_header_exact);
+    RUN_TEST(test_summary_line);
+    RUN_TEST(test_other_modules_info);
+    RUN_TEST(test_deterministic);
+    RUN_TEST(test_vtr_no_extended_directives);
+    RUN_TEST(test_out_of_memory_sweep_gates);
+}
+
 /* Tasks 1 and 2: options, arguments, the API, E13, names. */
 static void run_tasks_1_2(void) {
     RUN_TEST(test_unknown_argument);
@@ -2048,5 +2492,6 @@ int main(void) {
     UNITY_BEGIN();
     run_tasks_1_2();
     run_task_3_and_more();
+    run_task_4();
     return UNITY_END();
 }

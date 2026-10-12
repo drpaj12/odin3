@@ -1,5 +1,5 @@
-/* vtr.c — the VTR dialect's preflight (spec 3E VB-11), resolved options (VB-4) and legal names
- * (VB-10). */
+/* vtr.c — the VTR dialect's preflight (spec 3E VB-11) and what a clean write logs, resolved
+ * options (VB-4), legal names (VB-10), and the `.names` covers and their normalisation (VB-6). */
 #include "backends/blif/vtr.h"
 
 #include "ir/celltype.h"
@@ -192,6 +192,131 @@ odin3_blif_src_class odin3_blif_vtr_net_class(const odin3_module *module, odin3_
     default:
         return ODIN3_BLIF_SRC_SIGNAL;
     }
+}
+
+/* --- .names cells: covers, truth tables, §6's normalisation ------------------------------- */
+
+/* §6's gate covers, rows without blanks (inputs + 1 bytes each). */
+typedef struct vtr_gate_rows {
+    const char *name;
+    const char *rows;
+    uint32_t inputs;
+} vtr_gate_rows;
+
+static const vtr_gate_rows GATE_ROWS[] = {
+    {"$_BUF_", "11", 1},    {"$_NOT_", "01", 1},      {"$_AND_", "111", 2},
+    {"$_OR_", "1-1-11", 2}, {"$_XOR_", "101011", 2},  {"$_NAND_", "0-1-01", 2},
+    {"$_NOR_", "001", 2},   {"$_XNOR_", "111001", 2}, {"$_MUX_", "1-01-111", 3},
+};
+
+enum {
+    TT_WORD_BITS = 64,
+    TT_WORD_SHIFT = 6, /* log2(TT_WORD_BITS) */
+    BUF_TABLE = 2,     /* a 1-input table f(0) = 0, f(1) = 1: bits 0b10 */
+    ONE_INPUT_MASK = 3,
+};
+
+bool odin3_blif_vtr_rows_of(const odin3_module *module, odin3_node_id node,
+                            odin3_blif_vtr_rows *rows) {
+    const char *type =
+        odin3_celltype_get(odin3_module_design(module), odin3_node_type(module, node))->name;
+    if (strcmp(type, SOP_NAME) == 0) {
+        const odin3_value *cover = odin3_node_param(module, node, SOP_COVER_PARAM);
+        *rows = (odin3_blif_vtr_rows){cover->bits, cover->len, cover->cover_inputs};
+        return true;
+    }
+    for (size_t i = 0; i < sizeof GATE_ROWS / sizeof GATE_ROWS[0]; i++) {
+        if (strcmp(type, GATE_ROWS[i].name) == 0) {
+            *rows = (odin3_blif_vtr_rows){(const uint8_t *)GATE_ROWS[i].rows,
+                                          (uint32_t)strlen(GATE_ROWS[i].rows), GATE_ROWS[i].inputs};
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Words of a truth table of `inputs` inputs. */
+static uint32_t tt_words(uint32_t inputs) {
+    uint64_t bits = (uint64_t)1 << inputs;
+    return bits <= TT_WORD_BITS ? 1U : (uint32_t)(bits >> TT_WORD_SHIFT);
+}
+
+/* The mask of the valid bits of each word of a table of `inputs` inputs. */
+static uint64_t tt_mask(uint32_t inputs) {
+    return inputs >= TT_WORD_SHIFT ? UINT64_MAX : ((uint64_t)1 << ((uint64_t)1 << inputs)) - 1U;
+}
+
+/* Sets in tt the minterms the row (`inputs` plane characters) covers. */
+static void tt_add_row(const uint8_t *row, uint32_t inputs, uint64_t *tt) {
+    uint32_t care = 0;
+    uint32_t value = 0;
+    for (uint32_t j = 0; j < inputs; j++) {
+        care |= row[j] != '-' ? 1U << j : 0U;
+        value |= row[j] == '1' ? 1U << j : 0U;
+    }
+    for (uint32_t minterm = 0; minterm < 1U << inputs; minterm++) {
+        if ((minterm & care) == value) {
+            tt[minterm >> TT_WORD_SHIFT] |= (uint64_t)1 << (minterm & (TT_WORD_BITS - 1U));
+        }
+    }
+}
+
+/* tt = the function of rows (k <= 16), as odin3_blif_vtr_eval states. */
+static void tt_of_rows(const odin3_blif_vtr_rows *rows, uint64_t *tt) {
+    uint32_t k = rows->inputs;
+    uint32_t step = k + 1U;
+    bool on = false;
+    for (uint32_t at = k; at < rows->len; at += step) {
+        on = on || rows->bits[at] == '1';
+    }
+    memset(tt, 0, sizeof *tt * tt_words(k));
+    for (uint32_t at = 0; at + k < rows->len; at += step) {
+        if (rows->bits[at + k] == (on ? '1' : '0')) {
+            tt_add_row(rows->bits + at, k, tt);
+        }
+    }
+    for (uint32_t word = 0; !on && rows->len > 0 && word < tt_words(k); word++) {
+        tt[word] = ~tt[word] & tt_mask(k); /* only off-set rows: the complement */
+    }
+}
+
+bool odin3_blif_vtr_eval(const odin3_module *module, odin3_node_id node, uint64_t *tt) {
+    odin3_blif_vtr_rows rows;
+    if (!odin3_blif_vtr_rows_of(module, node, &rows) || rows.inputs > ODIN3_BLIF_VTR_MAX_K) {
+        return false;
+    }
+    tt_of_rows(&rows, tt);
+    return true;
+}
+
+odin3_blif_vtr_fn odin3_blif_vtr_function(const odin3_module *module, odin3_node_id node) {
+    uint64_t tt[ODIN3_BLIF_VTR_TT_WORDS];
+    odin3_blif_vtr_rows rows;
+    if (!odin3_blif_vtr_rows_of(module, node, &rows) || rows.inputs > ODIN3_BLIF_VTR_MAX_K) {
+        return ODIN3_BLIF_VTR_FN_NONE;
+    }
+    tt_of_rows(&rows, tt);
+    uint32_t k = rows.inputs;
+    bool zero = true;
+    bool one = true;
+    for (uint32_t word = 0; word < tt_words(k); word++) {
+        zero = zero && tt[word] == 0;
+        one = one && tt[word] == tt_mask(k);
+    }
+    if (zero || one) {
+        return zero ? ODIN3_BLIF_VTR_FN_CONST0 : ODIN3_BLIF_VTR_FN_CONST1;
+    }
+    if (k == 1) {
+        return (tt[0] & ONE_INPUT_MASK) == BUF_TABLE ? ODIN3_BLIF_VTR_FN_BUF
+                                                     : ODIN3_BLIF_VTR_FN_INV;
+    }
+    return ODIN3_BLIF_VTR_FN_COVER;
+}
+
+bool odin3_blif_vtr_const_cell(const odin3_module *module, odin3_node_id node) {
+    const char *type =
+        odin3_celltype_get(odin3_module_design(module), odin3_node_type(module, node))->name;
+    return name_in(type, CONST_CELLS, sizeof CONST_CELLS / sizeof CONST_CELLS[0]);
 }
 
 /* --- the walk ------------------------------------------------------------------------------ */
@@ -434,6 +559,10 @@ static odin3_status check_names(vtr_walk *walk, odin3_node_id node, vtr_kind kin
         return refuse_cell(walk, node, E8_TEXT);
     }
     walk->report->names++;
+    odin3_blif_vtr_fn fn = odin3_blif_vtr_function(walk->top, node);
+    if (fn == ODIN3_BLIF_VTR_FN_CONST0 || fn == ODIN3_BLIF_VTR_FN_CONST1) {
+        return ODIN3_OK; /* written as a zero-input generator: its inputs are dropped (§6) */
+    }
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_pin_id pin = {pins.first.v + k};
         if (odin3_pin_dir(walk->top, pin) == ODIN3_DIR_IN) {
@@ -765,6 +894,131 @@ static odin3_status walk_top(vtr_walk *walk) {
     return st;
 }
 
+/* --- what a clean write logs (plan 3E point (k)) ------------------------------------------- */
+
+static const char NEVER_CLOCKED[] = "; VPR will never clock it";
+
+/* The warning for a clock pin (a $_DFF_P_'s C, or bit 0 of a hard cell's clock input `port`,
+ * NULL for the latch) of class cls: a constant (§7 item 3) or `unconn` (point (j)). */
+static odin3_status warn_clock(vtr_walk *walk, odin3_node_id node, const char *port,
+                               odin3_blif_src_class cls) {
+    if (cls != ODIN3_BLIF_SRC_0 && cls != ODIN3_BLIF_SRC_1 && cls != ODIN3_BLIF_SRC_U) {
+        return ODIN3_OK;
+    }
+    odin3_status st = cell_head(walk, node);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    char value = cls == ODIN3_BLIF_SRC_1 ? '1' : '0';
+    if (cls == ODIN3_BLIF_SRC_U) {
+        odin3_log(ODIN3_LOG_WARN, VTR_PREFIX "%s: clock is 'unconn'%s", walk->head.data,
+                  NEVER_CLOCKED);
+    } else if (port == NULL) {
+        odin3_log(ODIN3_LOG_WARN, VTR_PREFIX "%s: clock is the constant %c%s", walk->head.data,
+                  value, NEVER_CLOCKED);
+    } else {
+        odin3_log(ODIN3_LOG_WARN, VTR_PREFIX "%s: clock input '%s' is the constant %c%s",
+                  walk->head.data, port, value, NEVER_CLOCKED);
+    }
+    return ODIN3_OK;
+}
+
+/* The clock warnings of one node: a $_DFF_P_'s C, each clock input of a hard cell. */
+static odin3_status warn_node(vtr_walk *walk, odin3_node_id node) {
+    odin3_celltype_id type = odin3_node_type(walk->top, node);
+    const odin3_celltype_def *def = odin3_celltype_get(walk->design, type);
+    if (kind_of(def->name) == VK_DFF_P) {
+        return warn_clock(walk, node, NULL, pin_class(walk, node, LATCH_C));
+    }
+    const odin3_techlib_cell *lib = odin3_celltype_lib(walk->design, type);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && st == ODIN3_OK &&
+                         i < lib->n_ports && i < def->n_ports;
+         i++) {
+        if (lib->ports[i].clock && def->ports[i].dir == ODIN3_DIR_IN) {
+            st = warn_clock(walk, node, def->ports[i].name, pin_class(walk, node, i));
+        }
+    }
+    return st;
+}
+
+/* The hard types the summary line counts, in its order (spec 3E §11). */
+static const char *const SUMMARY_TYPES[] = {"adder", "multiply", "single_port_ram",
+                                            "dual_port_ram"};
+enum { SUMMARY_TYPE_COUNT = sizeof SUMMARY_TYPES / sizeof SUMMARY_TYPES[0] };
+
+/* counts[j] = the live hard cells of the top of type SUMMARY_TYPES[j]. */
+static void count_summary_types(const vtr_walk *walk, uint32_t *counts) {
+    for (uint32_t i = 1; i < odin3_module_node_end(walk->top); i++) {
+        odin3_node_id node = {i};
+        odin3_celltype_id type = odin3_node_type(walk->top, node);
+        const odin3_techlib_cell *lib =
+            odin3_node_live(walk->top, node) ? odin3_celltype_lib(walk->design, type) : NULL;
+        const char *name = odin3_celltype_get(walk->design, type)->name;
+        for (uint32_t j = 0;
+             lib != NULL && lib->kind == ODIN3_TECHLIB_HARD && j < SUMMARY_TYPE_COUNT; j++) {
+            counts[j] += strcmp(name, SUMMARY_TYPES[j]) == 0 ? 1U : 0U;
+        }
+    }
+}
+
+/* walk->text = ` (adder A, …)` over the live hard cells of the top (types with 0 left out), or
+ * nothing when every count is 0. */
+static odin3_status summary_types(vtr_walk *walk) {
+    uint32_t counts[SUMMARY_TYPE_COUNT] = {0};
+    count_summary_types(walk, counts);
+    odin3_strbuf_clear(&walk->text);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t j = 0; st == ODIN3_OK && j < SUMMARY_TYPE_COUNT; j++) {
+        if (counts[j] > 0) {
+            st = odin3_strbuf_appendf(&walk->text, "%s%s %u", walk->text.len == 0 ? " (" : ", ",
+                                      SUMMARY_TYPES[j], (unsigned)counts[j]);
+        }
+    }
+    return st == ODIN3_OK && walk->text.len > 0
+               ? odin3_strbuf_append(&walk->text, odin3_bytes_cstr(")"))
+               : st;
+}
+
+/* The summary info line (spec 3E §11). */
+static odin3_status log_summary(vtr_walk *walk) {
+    const odin3_blif_vtr_report *report = walk->report;
+    odin3_status st = summary_types(walk);
+    if (st == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_INFO,
+                  VTR_PREFIX "'%s': %u .names, %u .latch, %u .subckt%s, K=%u; x bits: %u to gnd, "
+                             "%u open (unconn)",
+                  odin3_strtab_get(walk->tab, odin3_module_name(walk->top)),
+                  (unsigned)report->names, (unsigned)report->latches, (unsigned)report->subckts,
+                  walk->text.len > 0 ? walk->text.data : "", (unsigned)walk->k,
+                  (unsigned)report->x_to_gnd, (unsigned)report->x_to_unconn);
+    }
+    return st;
+}
+
+/* What a write with no refusal logs (vtr.h, odin3_blif_vtr_plan_build). */
+static odin3_status log_notes(vtr_walk *walk) {
+    const odin3_blif_vtr_report *report = walk->report;
+    const char *top = odin3_strtab_get(walk->tab, odin3_module_name(walk->top));
+    if (report->modules_skipped > 0) {
+        odin3_log(ODIN3_LOG_INFO, VTR_PREFIX "%u modules besides the top '%s' not written",
+                  (unsigned)report->modules_skipped, top);
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(walk->top); i++) {
+        if (odin3_node_live(walk->top, (odin3_node_id){i})) {
+            st = warn_node(walk, (odin3_node_id){i});
+        }
+    }
+    if (st == ODIN3_OK && report->unconn_logic > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  VTR_PREFIX "net 'unconn' feeds %u .names/.latch pins; VPR leaves them open "
+                             "(run abc first)",
+                  (unsigned)report->unconn_logic);
+    }
+    return st == ODIN3_OK ? log_summary(walk) : st;
+}
+
 /* --- the plan ------------------------------------------------------------------------------ */
 
 /* VB-10 last: its warnings and info only when nothing was refused, its refusal below the cap. */
@@ -780,8 +1034,10 @@ static odin3_status name_top(const odin3_blif_write_opts *opts, odin3_blif_vtr_p
     return st;
 }
 
-/* The walk over the top (the plan's design, top and K are set): the nodes, the nets. */
-static odin3_status walk_plan(odin3_blif_vtr_plan *plan, odin3_blif_vtr_report *report) {
+/* The walk over the top (the plan's design, top and K are set): the nodes, the nets, the names,
+ * then, when nothing was refused, what a clean write logs (log_notes). */
+static odin3_status walk_plan(const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan,
+                              odin3_blif_vtr_report *report) {
     vtr_walk walk = {.design = plan->design,
                      .top = plan->top,
                      .tab = odin3_design_strtab(plan->design),
@@ -792,9 +1048,18 @@ static odin3_status walk_plan(odin3_blif_vtr_plan *plan, odin3_blif_vtr_report *
     odin3_strbuf_init(&walk.text);
     plan->classes = odin3_u64map_create(0);
     odin3_status st = plan->classes != NULL ? walk_top(&walk) : ODIN3_ERR_NO_MEMORY;
+    bool log_oom = true;
+    if (st == ODIN3_OK) {
+        st = name_top(opts, plan, report);
+        log_oom = false; /* naming logs its own */
+    }
+    if (st == ODIN3_OK && report->errors == 0) {
+        st = log_notes(&walk);
+        log_oom = true;
+    }
     odin3_strbuf_free(&walk.head);
     odin3_strbuf_free(&walk.text);
-    if (st == ODIN3_ERR_NO_MEMORY) {
+    if (st == ODIN3_ERR_NO_MEMORY && log_oom) {
         odin3_log(ODIN3_LOG_ERROR, VTR_PREFIX "out of memory");
     }
     return st;
@@ -824,8 +1089,7 @@ odin3_status odin3_blif_vtr_plan_build(const odin3_design *design,
     report->modules_skipped = odin3_design_module_end(design) - 2;
     plan->top = odin3_module_get((odin3_design *)design, top);
     plan->k = odin3_blif_vtr_k(opts);
-    st = walk_plan(plan, report);
-    st = st == ODIN3_OK ? name_top(opts, plan, report) : st;
+    st = walk_plan(opts, plan, report);
     if (st == ODIN3_OK && report->errors > ODIN3_BLIF_VTR_MAX_ERRORS) {
         odin3_log(ODIN3_LOG_ERROR, VTR_PREFIX "%u more errors not shown",
                   (unsigned)(report->errors - ODIN3_BLIF_VTR_MAX_ERRORS));
