@@ -15,11 +15,13 @@
  *      quote, `!`, `;`, `#`, `{`, `}` or tab, from a line within the input;
  *    - every word 0 has an allowed row of the allow-list and is no alias name; the alias is NULL or
  *      an abc.rc alias;
- *    - every argument is an option or a number (echo: any such printable word), and no option
- *      letter is one of its row's file, string or crash options;
- *    - replaying §7.5's effects (with the checker's &get, &if and balancing rules, re-derived
- *      here) from the exchange's start ends in the reported final space, mapped, and never runs
- *      an & command on an empty & space nor &if on a mapped one;
+ *    - every argument is an option or a number from 0 to 1,000,000 as strtod and atoi read it
+ *      (echo: any such printable word), no option letter is one of its row's file, string or
+ *      crash options, and print_kmap has at most one positional word;
+ *    - replaying §7.5's effects (with the checker's &get, &if, balancing, BLIF-start and choice
+ *      rules, re-derived here) from the exchange's start ends in the reported final space,
+ *      mapped, and never runs an & command on an empty & space, &if on a mapped one or on
+ *      choices a plain &get copied, nor print_xcut on a network with choices;
  *    - uses_k implies a K, and the SHA-256 is that of the script's bytes;
  *  - accepted through BLIF implies accepted in memory, with the same lines;
  *  - no leak, no sanitizer report, no hang (libFuzzer's -rss_limit_mb and -timeout).
@@ -37,6 +39,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int LLVMFuzzerInitialize(int *argc, char ***argv);
@@ -50,7 +53,12 @@ enum {
     MAX_SPLIT = 1024,
     EMPTY = 0,
     AIG_STATE = 1,
-    MAPPED = 2
+    MAPPED = 2,
+    LOGIC = 3, /* the BLIF start: a logic network, mapped but not by the script */
+    NO_CHOICES = 0,
+    NATIVE = 1,
+    COPIED = 2,
+    CAP = 1000000
 };
 
 static const char k_name[] = "f.abc";
@@ -168,6 +176,8 @@ static uint32_t split(const char *line, char *buf, const char **words) {
 
 typedef struct model {
     int ntk, gia, cur; /* cur: ODIN3_ABC_SPACE_NTK or _GIA */
+    bool ntk_choices;  /* the network holds choices (dch, or &put of a & space with them) */
+    int gia_choices;   /* NO_CHOICES, NATIVE (dch-made, &get -s) or COPIED (a plain &get) */
 } model;
 
 static bool has_letter(const char *const *words, uint32_t n, char letter) {
@@ -199,67 +209,117 @@ static bool balancing(const char *const *words, uint32_t n, const char *letters)
     return false;
 }
 
-/* One command's effect on the model; traps on a state the checker must have refused. */
-static void replay(model *md, const odin3_abc_command_info *row, const char *const *words,
-                   uint32_t n) {
-    if (row->name[0] == '&' && strcmp(row->name, "&get") != 0 && md->gia == EMPTY) {
+/* The state rules an accepted command must satisfy; a violation traps. */
+static void check_state_rules(const model *md, const odin3_abc_command_info *row) {
+    bool amp = row->name[0] == '&';
+    if (amp && strcmp(row->name, "&get") != 0 && md->gia == EMPTY) {
         fail("an & command on an empty & space was accepted");
     }
+    if (row->effect == ODIN3_ABC_FX_GIA_MAPPED && (md->gia == MAPPED || md->gia == LOGIC)) {
+        fail("&if on a mapped & space was accepted");
+    }
+    if (row->effect == ODIN3_ABC_FX_GIA_MAPPED && md->gia_choices == COPIED) {
+        fail("&if on choices a plain &get copied was accepted");
+    }
+    if (strcmp(row->name, "print_xcut") == 0 && md->ntk_choices) {
+        fail("print_xcut on a network with choices was accepted");
+    }
+}
+
+static void replay_ntk(model *md, const odin3_abc_command_info *row, const char *const *words,
+                       uint32_t n) {
     switch (row->effect) {
     case ODIN3_ABC_FX_NTK_AIG:
         md->ntk = AIG_STATE;
-        md->cur = ODIN3_ABC_SPACE_NTK;
         break;
     case ODIN3_ABC_FX_NTK_MAPPED:
         md->ntk = balancing(words, n, "gxyu") ? AIG_STATE : MAPPED;
-        md->cur = ODIN3_ABC_SPACE_NTK;
         break;
     case ODIN3_ABC_FX_NTK_PUT:
         md->ntk = md->gia;
-        md->cur = ODIN3_ABC_SPACE_NTK;
         break;
+    default:
+        break;
+    }
+    md->ntk_choices = row->effect == ODIN3_ABC_FX_NTK_PUT ? md->gia_choices != NO_CHOICES
+                                                          : strcmp(row->name, "dch") == 0;
+    md->cur = ODIN3_ABC_SPACE_NTK;
+}
+
+static void replay_gia(model *md, const odin3_abc_command_info *row, const char *const *words,
+                       uint32_t n) {
+    if (row->effect == ODIN3_ABC_FX_GIA_GET) {
+        bool keeps = (md->ntk == MAPPED || md->ntk == LOGIC) && toggled(words, n, 'm') &&
+                     !toggled(words, n, 'c');
+        md->gia = keeps ? md->ntk : AIG_STATE;
+        md->gia_choices = !md->ntk_choices ? NO_CHOICES : toggled(words, n, 's') ? NATIVE : COPIED;
+    } else if (row->effect == ODIN3_ABC_FX_GIA_AIG) {
+        md->gia = AIG_STATE;
+        md->gia_choices = strcmp(row->name, "&st") == 0 ? NO_CHOICES : NATIVE;
+    } else if (row->effect == ODIN3_ABC_FX_GIA_MAPPED) {
+        md->gia = balancing(words, n, "gxy") ? AIG_STATE : MAPPED;
+        md->gia_choices = NO_CHOICES;
+    }
+    md->cur = ODIN3_ABC_SPACE_GIA;
+}
+
+/* One command's effect on the model, after the rules (an independent reading of step 11). */
+static void replay(model *md, const odin3_abc_command_info *row, const char *const *words,
+                   uint32_t n) {
+    check_state_rules(md, row);
+    switch (row->effect) {
+    case ODIN3_ABC_FX_NTK_AIG:
+    case ODIN3_ABC_FX_NTK_MAPPED:
+    case ODIN3_ABC_FX_NTK_PUT:
     case ODIN3_ABC_FX_NTK_KEEP:
-        md->cur = ODIN3_ABC_SPACE_NTK;
+        replay_ntk(md, row, words, n);
         break;
     case ODIN3_ABC_FX_GIA_GET:
-        md->gia = md->ntk == MAPPED && toggled(words, n, 'm') && !toggled(words, n, 'c')
-                      ? MAPPED
-                      : AIG_STATE;
-        md->cur = ODIN3_ABC_SPACE_GIA;
-        break;
     case ODIN3_ABC_FX_GIA_AIG:
-        md->gia = AIG_STATE;
-        md->cur = ODIN3_ABC_SPACE_GIA;
-        break;
     case ODIN3_ABC_FX_GIA_MAPPED:
-        if (md->gia == MAPPED) {
-            fail("&if on a mapped & space was accepted");
-        }
-        md->gia = balancing(words, n, "gxy") ? AIG_STATE : MAPPED;
-        md->cur = ODIN3_ABC_SPACE_GIA;
-        break;
     case ODIN3_ABC_FX_GIA_KEEP:
-        md->cur = ODIN3_ABC_SPACE_GIA;
+        replay_gia(md, row, words, n);
         break;
     default:
         break;
     }
 }
 
+/* The number cap, read by the C library (the fuzzer never sets a locale): the value as strtod
+ * reads it, and the integer digits as atoi reads them, lie in 0 .. 1000000. The checker's exact
+ * reading is stricter, so this holds for every number it accepts. */
+static bool number_in_cap(const char *word) {
+    if (word[0] == '-') {
+        return false;
+    }
+    double value = strtod(word, NULL);
+    unsigned long long int_part = 0;
+    for (const char *at = word + (word[0] == '+'); is_digit(*at) && int_part <= CAP; at++) {
+        int_part = int_part * 10 + (unsigned long long)(*at - '0');
+    }
+    return value >= 0.0 && value <= (double)CAP && int_part <= CAP;
+}
+
 /* The arguments of an accepted command. */
 static void check_args(const odin3_abc_command_info *row, const char *const *words, uint32_t n) {
     bool echo = strcmp(row->name, "echo") == 0;
+    uint32_t positional = 0;
     for (uint32_t i = 1; i < n; i++) {
         const char *word = words[i];
-        if (!option_word(word)) {
-            if (!number_word(word) && !echo) {
-                fail("an argument that is neither an option nor a number was accepted");
+        if (option_word(word)) {
+            if (strpbrk(word + 1, row->file_opts) != NULL ||
+                strpbrk(word + 1, row->crash_opts) != NULL) {
+                fail("a file, string or crash option was accepted");
             }
             continue;
         }
-        if (strpbrk(word + 1, row->file_opts) != NULL || strpbrk(word + 1, row->crash_opts)) {
-            fail("a file, string or crash option was accepted");
+        positional++;
+        if (!echo && (!number_word(word) || !number_in_cap(word))) {
+            fail("an argument that is not a number from 0 to 1000000 was accepted");
         }
+    }
+    if (strcmp(row->name, "print_kmap") == 0 && positional >= 2) {
+        fail("print_kmap with two arguments was accepted");
     }
 }
 
@@ -309,8 +369,9 @@ static void check_accepted(const odin3_abc_script *script, uint32_t exchange, ui
     if (g_count.lines != 0 || script->n_cmds == 0 || script->n_cmds > ODIN3_ABC_MAX_COMMANDS) {
         fail("an accepted script logged a line or has 0 or more than 1024 commands");
     }
-    model md = {AIG_STATE, exchange == ODIN3_ABC_EXCHANGE_BLIF ? EMPTY : AIG_STATE,
-                ODIN3_ABC_SPACE_NTK};
+    bool blif = exchange == ODIN3_ABC_EXCHANGE_BLIF;
+    model md = {blif ? LOGIC : AIG_STATE, blif ? EMPTY : AIG_STATE, ODIN3_ABC_SPACE_NTK, false,
+                NO_CHOICES};
     for (uint32_t i = 0; i < script->n_cmds; i++) {
         uint32_t n = 0;
         const odin3_abc_command_info *row =

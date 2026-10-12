@@ -31,10 +31,12 @@ const abc_script_case k_abc_script_accepted[] = {
     {"&if -K 6 -u", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"&if -K 6; &put", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"if -K6 -vm", 0, ODIN3_ABC_EXCHANGE_AIG},
+    {"strash; dch; &get -s; &if -K 6; &put; print_xcut", 0, ODIN3_ABC_EXCHANGE_BLIF},
+    {"&get -m -c; &if -K 6 -C 1000000", 0, ODIN3_ABC_EXCHANGE_BLIF},
     {"if -K {K} -v; print_stats; time; echo {K}", 6, ODIN3_ABC_EXCHANGE_AIG},
     {"compress2rs; dch -f; if -K {K} -v; mfs2 -v; lutpack", 4, ODIN3_ABC_EXCHANGE_BLIF},
     {"print_stats -v\t;\t&ps ;; if -K 6 ;", 0, ODIN3_ABC_EXCHANGE_AIG},
-    {"scorr -v -F 2; fraig -C 100; if -K 6 -D 1.5e3 -E +2 -W -0.5", 0, ODIN3_ABC_EXCHANGE_AIG},
+    {"scorr -v -C 2; fraig -C 100; if -K 6 -D 1.5e3 -E +2 -W 0.5", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"&st; &synch2; &dch; &if -K 6; &mfs; &ps", 0, ODIN3_ABC_EXCHANGE_AIG},
     {"# lib/abc/vtr.abc's commands, one line\nstrash; ifraig -v; scorr -v; dc2 -v; dch -f; "
      "if -K {K} -v; mfs2 -v; print_stats",

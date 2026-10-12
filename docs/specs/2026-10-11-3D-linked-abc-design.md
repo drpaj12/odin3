@@ -894,6 +894,17 @@ file as given, and nothing changes.
      `[-+]?[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?`; `echo` takes any printable word without `{`, `}` or
      `!`.
    - Otherwise: `<file>:<line>: argument '<w>' of '<cmd>' is neither an option nor a number`.
+   - **Number cap.** Every number but `echo`'s lies in 0 to 1,000,000 (`ODIN3_ABC_MAX_NUMBER`),
+     both as `atoi` reads it (its integer digits) and as `atof` reads it (all of it), compared
+     exactly in decimal; a number that starts with `-` is refused, since ABC's getopt reads it as
+     an option cluster: `<file>:<line>: argument '<w>' of '<cmd>' is not a number from 0 to
+     1000000`.
+   - **Positional words.** `print_kmap` with two or more of them prints the 6-variable functions
+     they name, and `Abc_Show6VarFunc` asserts (abcPrint.c:2057): `<file>:<line>: abc command
+     'print_kmap' with 2 or more arguments is not allowed: it crashes ABC at the pin (a3001b72)`.
+     > *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings C2, I1 and M5: large values
+     > allocate without bound (`scorr -F`, `mfs -M`, `&st -M`, …) or wrap through `atoi`
+     > (`4294967296` is 0), and `-0e5` would reach getopt as the cluster `-0 -e -5`.)*
    - **File and string options** (I12). `allow.c` lists, per allowed command, the options that
      read or write a file, or that take a string, read at the pin from each command's
      `Extra_UtilGetopt` handling, usage text and the code each option enables. Those are refused,
@@ -913,17 +924,30 @@ file as given, and nothing changes.
 10. **Count.** More than 1,024 commands after expansion: `<file>:<line>: script expands to more
     than 1024 commands`.
 11. **Spaces and mapping.** `ntk` (the `Abc_Ntk` space) and `gia` (the `&` space) are each
-    *empty*, *aig* or *mapped*.
-    - At the start, in-memory: both *aig*. BLIF: `ntk` *aig* and `gia` *empty*.
+    *empty*, *aig*, *mapped* or *logic* (a network with a mapping the script did not make).
+    - At the start, in-memory: both *aig*. BLIF: `ntk` *logic* (`read` gives SOP nodes) and `gia`
+      *empty*. `&get -m` keeps *logic* as it keeps *mapped*, and `&put` carries it back.
     - §7.5 gives each command's effect. The current space is that of the last command that changes
       or moves a network, starting at `ntk`.
     - An `&` command other than `&get` on an empty `gia`: `<file>:<line>: '<cmd>' needs a network
       in the & space, which the BLIF exchange starts empty; add '&get'`.
     - The script must end with its current space *mapped*: `<file>: the script leaves the network
       unmapped; end it with a LUT mapper such as 'if -K {K}'`. An empty script ends unmapped.
-    - `&if` on a *mapped* `gia` (PHASE3 #22; ABC's `Gia_ManHasMapping` check, abc.c:45512):
-      `<file>:<line>: '&if' needs an unmapped network in the & space, which is mapped here; add
-      '&st'`.
+    - `&if` on a *mapped* or *logic* `gia` (PHASE3 #22; ABC's `Gia_ManHasMapping` check,
+      abc.c:45512): `<file>:<line>: '&if' needs an unmapped network in the & space, which is
+      mapped here; add '&st'`.
+    - **Choices.** `dch` makes them in `ntk`, `&dch` and `&synch2` in `gia`; `&put` carries
+      `gia`'s to `ntk`, and `&get` copies `ntk`'s (natively with `-s`); every other command that
+      rebuilds a space drops them. `&if` on choices that a plain `&get` copied
+      (`Gia_ManChoiceLevel`, giaIf.c:836): `<file>:<line>: '&if' needs a network in the & space
+      without the choices that '&get' copied; add '&st'`. `print_xcut` on an `ntk` with choices
+      (`Abc_NtkCrossCut`, abcUtil.c:2052): `<file>:<line>: 'print_xcut' needs a network without
+      choices, which it has here; add 'strash'`.
+    > *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings M1 and I1: the BLIF start is
+    > *logic*, so `&get -m; &if` is refused there as ABC refuses it, and the two choice rules are
+    > new. Which commands keep or drop choices was run at the pin: `strash`, `balance`, `dc2`,
+    > `fraig`, `scorr`, `drw`, `drf`, `ifraig`, `cleanup`, `scleanup`, `if`, `&st` and `&if` drop
+    > them; `rewrite`, `refactor`, `resub` and `fraig_sweep` refuse a network with choices.)*
     > *(Erratum, 3D Task 11, 2026-10-12, agent defaults for Peter. Read at the pin so that an
     > accepted script ends mapped and runs no command ABC refuses for its state: (1) the `&if` rule
     > above, which covers `&if` after `&get -m` of a mapped `ntk` (the spike's case), after `&if`
@@ -954,8 +978,7 @@ until the table follows.
 
 **One-word aliases** (→ expansion):
 
-- Usable: `b` balance, `cl` cleanup, `f` fraig, `fs` fraig_sweep, `lp` lutpack, `pcon`
-  print_cone, `pd` print_dsd, `pex` print_exdc -d, `pf` print_factor, `pfan` print_fanio, `pg`
+- Usable: `b` balance, `cl` cleanup, `f` fraig, `fs` fraig_sweep, `lp` lutpack, `pd` print_dsd, `pex` print_exdc -d, `pf` print_factor, `pfan` print_fanio, `pg`
   print_gates, `pl` print_level, `plat` print_latch, `pio` print_io, `pk` print_kmap, `pm`
   print_miter, `ps` print_stats, `psu` print_supp, `psy` print_symm, `pun`
   print_unate, `rw` rewrite, `rwz` rewrite -z, `rf` refactor, `rfz` refactor -z, `rs` resub, `rsz`
@@ -965,10 +988,11 @@ until the table follows.
   Process: `hi`, `q`, `sa`. Latches: `fr`, `r3`, `r3f`, `r3b`, `ret`, `dret`. Other: `cg`, `clp`,
   `cs`, `el`, `esd`, `fsto`, `fres`, `ft`, `ic`, `ren`, `re`, `rez`, `ssw`, `tr0`, `tr1`, `u`.
   Option: `psb` (print_stats -b; `-b` writes `<spec>_best.blif`, §7.3 step 9), `sif` (if -s;
-  `-s` crashes ABC at the pin, §7.3 step 9).
+  `-s` crashes ABC at the pin, §7.3 step 9). Crashes: `pcon` (print_cone, §7.5).
 
 > *(Erratum, 3D Task 10 review C1, 2026-10-12: `psb` moved from usable to refused.)*
 > *(Erratum, 3D Task 10 review fix round 2, 2026-10-12: `sif` moved from usable to refused.)*
+> *(Erratum, 3D Task 11 review fix round 1, 2026-10-12: `pcon` moved from usable to refused.)*
 
 **Usable script aliases:**
 
@@ -1021,7 +1045,7 @@ of AB-21.
 | `&st`, `&synch2`, `&dch` | `&` space | gia | gia := aig |
 | `&if` | `&` space | gia | gia := mapped |
 | `&mfs` | `&` space | gia | keeps |
-| the 31 `print_*` commands at the pin except `print_constr` and `print_status` (which take files) and `print_box` (which crashes); `&ps`; `time`; `echo` | printing | — | none (output logged at INFO) |
+| the 29 `print_*` commands at the pin except `print_constr` and `print_status` (which take files) and `print_box`, `print_cone` and `print_npn` (which crash); `&ps`; `time`; `echo` | printing | — | none (output logged at INFO) |
 
 Agent defaults: the `print_*` set as listed, and `&ps` as the `&`-space print. Per command, the
 options that read or write a file, or take a string, are refused too (AB-21 step 9): `print_stats`
@@ -1037,16 +1061,32 @@ with any option (`If_LibBoxPrint` on the NULL box library, ifLibBox.c:350) and i
 the class ending of §7.3 step 8. Also `dc2 -f` and `drw -f` (fanout off with `-l`), `drw -C -N`
 and `drf -C` (0), `scorr -N` (more constraints than outputs), `if -c` (with `-g`), `mfs -t` (with
 `-C 2`), `mfs2 -Z` (64), `dch -W`, `&synch2 -W` and `&dch -W` (0: the simulation words overrun
-and glibc aborts) and `&if -w` (with `-g` or `-x`); `allow.c` cites each crash site.
+and glibc aborts) and `&if -w` (with `-g` or `-x`); `allow.c` cites each crash site. And
+`resub -F` (10 or more), `scorr -F -S`, `mfs -M`, `mfs2 -M`, `&mfs -M` and `&st -M` (large
+values), `if -Y` and `&if -Y` (100000), and `dch -s` (a network whose outputs are not a multiple
+of 3). `print_cone` (any sequential logic network) and `print_npn` (its truth table: a division by
+zero for 0, an overrun of `word pTruth[16]` for 257 or more digits) crash with any option and are
+refused like `print_box`.
 
+> *(Erratum, 3D Task 11 review fix round 1, 2026-10-12, rulings C1, C2 and I1: `print_cone`,
+> `print_npn` and the options from `resub -F` to `dch -s` above are new, and step 9 caps numbers
+> at 1,000,000. Coverage, corrected (review I2): Task 11's first audit ran the **Release** `abc`
+> tool, where `NDEBUG` compiles ABC's `assert` out, so it saw signals only; that is why it missed
+> `resub -F 64` and `dch -s`. Its option letters came from each command's `Extra_UtilGetopt`
+> string and its designs were Task 10's two: sequential (8 inputs, 4 outputs, 4 latches, so 8
+> COs) and combinational (4 inputs, 2 outputs); its values were small integers. The fix round
+> re-ran the **Debug** `abc` (assertions on) on those designs, only on scripts the checker
+> accepts: every allowed command at default options in 14 states (the BLIF start, `strash`,
+> `if`, `&if; &put`, `&get -m`, `dch`, `&dch; &put`, `&synch2`, `scorr`, `lutpack`, `&get -n` in
+> both starts, `&if`, `dch; &get -s`), every option pair (valued at 2), every valued option at 0,
+> 1, 3, 64, 1,000 and 1,000,000, zero to two positional numbers, and the print and `&` pairs
+> after a mapping step: 11,764 runs, no crash, file or timeout. Triples, larger networks and
+> longer sequences remain unrun.)*
 > *(Erratum, 3D Task 11, 2026-10-12: `scorr -I` (stopping at that iteration writes `srm.blif`),
-> `mfs2 -i` (with `-j` it writes `unroll_dump.blif`) and the crash options of the sentence above
-> are new. Task 11 ran every pair of each allowed command's other options (valued ones at 2) and
-> each valued option alone at 0, 1, 64, -1, 3 and 1000, on the two Task 10 designs, and the pairs
-> of the print and `&` commands after `if`, `&if` and `&get -m`: 9,242 runs of the pinned `abc`
-> tool, then the pairs again with the new lists, clean. As with `-O`, a crash that depends on the
-> value refuses the whole option. Triples, other values and networks, and longer sequences remain
-> unrun.)*
+> `mfs2 -i` (with `-j` it writes `unroll_dump.blif`) and the crash options from `dc2 -f` to `&if
+> -w` above are new. Task 11 ran every pair of each allowed command's other options (valued ones
+> at 2) and each valued option alone at 0, 1, 64, -1, 3 and 1000 with the Release `abc`; see the
+> fix round 1 erratum above for what that covered.)*
 
 > *(Erratum, 3D Task 10 review fix round 3, 2026-10-12: `&put -e` (found by the reviewer) and
 > `print_auto -O` added. Every allowed command was then run once per option after a mapping step
@@ -1064,7 +1104,8 @@ Refused, among others:
 - **process:** `quit` (which returns −1 and does not call `exit()`, `cmd.c:386`), `exit`, `cd`,
   `ls`, `alias`, `unalias`, `set`, `unset`, `history`, `load_plugin`;
 - **latches:** `retime`, `dretime`, `fretime`, `zero`, `init`, `undc`, `cycle` (P3-12);
-- **crashes:** `print_box` (fix round 2 erratum above).
+- **crashes:** `print_box` (fix round 2 erratum above), `print_cone` and `print_npn` (Task 11
+  fix round 1).
 
 The classes are a table in `allow.c`; an unlisted name is "other".
 
@@ -1115,6 +1156,7 @@ These are constants in `src/passes/abc/abc.h`, lowered in tests through `odin3_a
 |---|---|---|
 | `ODIN3_ABC_MAX_SCRIPT_BYTES`, `_LINE_BYTES`, `_COMMANDS` | 65,536; 4,096; 1,024 (P3-1) | script error |
 | `ODIN3_ABC_MAX_WORDS`, `_ALIAS_DEPTH` | 64; 8 (the table's deepest is 3) | script error |
+| `ODIN3_ABC_MAX_NUMBER` | 1,000,000 (every number argument; Task 11 fix round 1) | script error |
 | `--lut` | 2 to 16 (`ODIN3_LUT_MAX_WIDTH`, MiniLUT's limit) | argument error |
 | `ODIN3_ABC_MAX_DOMAINS` | 64 per module | `abc: module '<m>' has N clock domains; at most 64` (`PARSE`) |
 | `ODIN3_ABC_MAX_AIG_OBJS` | 2^26 | `abc: module '<m>', <domain>: the AIG needs more than 67108864 objects` (`PARSE`) |

@@ -13,6 +13,9 @@ enum {
     ODIN3_ABC_MAX_COMMANDS = 1024,      /* commands after alias expansion */
     ODIN3_ABC_MAX_WORDS = 64,           /* words of one command, before alias expansion */
     ODIN3_ABC_MAX_ALIAS_DEPTH = 8,      /* nested alias expansions (abc.rc's deepest is 3) */
+    ODIN3_ABC_MAX_NUMBER = 1000000,     /* every number argument lies in 0 .. this (Task 11 fix
+                                           round 1, ruling C2: large values crash ABC, and atoi
+                                           wraps) */
     ODIN3_ABC_LUT_MIN = 2               /* the smallest --lut */
 };
 

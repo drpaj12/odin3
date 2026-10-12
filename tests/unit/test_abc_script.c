@@ -517,7 +517,7 @@ static void test_arguments(void) {
         refuse_argument(bad[i]);
     }
     odin3_abc_script script;
-    accept("if -K 6 -C 8 -D -6 -E +6 -F 6.5 -W 6e3 -X 6.5E-3 -Y 0.25e+2 -K6 -vm", k_mem, &script);
+    accept("if -K 6 -C 8 -D 6 -E +6 -F 6.5 -W 6e3 -X 6.5E-3 -Z 0.25e+2 -K6 -vm", k_mem, &script);
     odin3_abc_script_free(&script);
     accept("echo hello-world\nif -K 6", k_mem, &script);
     TEST_ASSERT_EQUAL_STRING("echo hello-world", script.cmds[0].line);
@@ -577,10 +577,11 @@ static void test_file_and_crash_options(void) {
         crash_seen += check_crash_options(odin3_abc_command_at(i));
     }
     /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i;
-     * crashes: if sc, &if sw, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr N,
-     * mfs t, mfs2 Z, dch W, &synch2 W (Task 10 fix rounds 1-3, Task 11's audit) */
+     * crashes: if scY, &if swY, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr NFS,
+     * mfs tM, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M (Task 10 fix rounds 1-3, Task
+     * 11's audit and its fix round 1) */
     TEST_ASSERT_EQUAL_UINT32(16, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(18, crash_seen);
+    TEST_ASSERT_EQUAL_UINT32(28, crash_seen);
 }
 
 static void test_options_from_alias(void) {
@@ -590,6 +591,76 @@ static void test_options_from_alias(void) {
     refuse("strash; sif", k_mem,
            "t.abc:1: option '-s' of 'if' (from alias 'sif') crashes ABC at the pin (a3001b72) "
            "and is not allowed");
+}
+
+/* `if -K 6 -C <word>` is accepted. */
+static void accept_number(const char *word) {
+    char text[64];
+    int wrote = snprintf(text, sizeof text, "if -K 6 -C %s", word);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+    odin3_abc_script script;
+    accept(text, k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+/* `if -K 6 -C <word>` is refused by the number cap. */
+static void refuse_number(const char *word) {
+    char text[64];
+    char want[160];
+    int wrote = snprintf(text, sizeof text, "if -K 6 -C %s", word);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+    wrote = snprintf(want, sizeof want,
+                     "t.abc:1: argument '%s' of 'if' is not a number from 0 to 1000000", word);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+    refuse(text, k_mem, want);
+}
+
+/* Fix round 1, ruling C2: every number lies in 0 .. 1000000, both as atoi and as atof read it. */
+static void test_number_cap(void) {
+    static const char *const fine[] = {
+        "0",         "1000000",    "+5",     "0.5",         "999999.999", "1e6",        "1E+6",
+        "1000000.0", "0001000000", "1e-300", "0.000001e12", "100000e1",   "0e999999999"};
+    for (size_t i = 0; i < sizeof fine / sizeof fine[0]; i++) {
+        accept_number(fine[i]);
+    }
+    static const char *const out[] = {
+        "1000001",      "1e7", "4294967296", "99999999999", "1000000.5", "5000000e-1", "1e300",
+        "0.0000011e12", "-1",  "-0",         "-0.5",        "+1000001",  "1000000e01", "-1e5"};
+    for (size_t i = 0; i < sizeof out / sizeof out[0]; i++) {
+        refuse_number(out[i]);
+    }
+}
+
+/* The cap holds for positional numbers and through aliases; echo prints any word. */
+static void test_number_cap_forms(void) {
+    refuse("print_level 4294967296", k_mem,
+           "t.abc:1: argument '4294967296' of 'print_level' is not a number from 0 to 1000000");
+    refuse("strash\nrs -K 6 -N 9999999", k_mem,
+           "t.abc:2: argument '9999999' of 'resub' (from alias 'rs') is not a number from 0 to "
+           "1000000");
+    odin3_abc_script script;
+    accept("echo 99999999999 -1; if -K 6", k_mem, &script);
+    TEST_ASSERT_EQUAL_STRING("echo 99999999999 -1", script.cmds[0].line);
+    odin3_abc_script_free(&script);
+}
+
+/* Fix round 1, rulings C1 and I1: print_npn and print_cone are refused, and print_kmap with two
+ * words (its 6-variable functions). */
+static void test_refused_print_commands(void) {
+    refuse("print_npn 0", k_mem,
+           "t.abc:1: abc command 'print_npn' is not allowed: it crashes ABC at the pin (a3001b72)");
+    refuse("strash\npcon", k_mem,
+           "t.abc:2: abc command 'print_cone' (from alias 'pcon') is not allowed: it crashes ABC "
+           "at the pin (a3001b72)");
+    refuse("print_kmap 1 2", k_mem,
+           "t.abc:1: abc command 'print_kmap' with 2 or more arguments is not allowed: it crashes "
+           "ABC at the pin (a3001b72)");
+    refuse("strash; pk -n 1 2 3", k_mem,
+           "t.abc:1: abc command 'print_kmap' (from alias 'pk') with 2 or more arguments is not "
+           "allowed: it crashes ABC at the pin (a3001b72)");
+    odin3_abc_script script;
+    accept("print_kmap 1; print_kmap -n; if -K 6", k_mem, &script);
+    odin3_abc_script_free(&script);
 }
 
 /* --- the count (step 10) -------------------------------------------------------------------- */
@@ -695,6 +766,54 @@ static void test_balancing_mappers(void) {
     }
     expect_space("strash; if -g; if -K 6", k_mem, NTK);
     expect_space("&if -K 6 -u", k_mem, GIA);
+}
+
+/* Fix round 1, ruling I1: &if cannot map the choices a plain &get copied (Gia_ManChoiceLevel),
+ * and print_xcut needs a network without choices (Abc_NtkCrossCut). */
+static void test_choices(void) {
+    static const char k_copied[] = "t.abc:2: '&if' needs a network in the & space without the "
+                                   "choices that '&get' copied; add '&st'";
+    static const char *const copied[] = {"strash; dch\n&get; &if -K 6",
+                                         "strash; dch -f; &get -m\n&if -K 6",
+                                         "strash; &get -n; &dch; &put; &get\n&if -K 6",
+                                         "strash; &get -n; &synch2; &put; &get\n&if -K 6",
+                                         "strash; dch; dch; &get -s; &put; &get\n&if -K 6"};
+    for (size_t i = 0; i < sizeof copied / sizeof copied[0]; i++) {
+        refuse(copied[i], k_blif, k_copied);
+    }
+    static const char k_xcut[] = "t.abc:2: 'print_xcut' needs a network without choices, which it "
+                                 "has here; add 'strash'";
+    refuse("strash; dch\nprint_xcut", k_blif, k_xcut);
+    refuse("&dch; &put\nprint_xcut", k_mem, k_xcut);
+    static const char *const fine[] = {"strash; dch; &get -s; &if -K 6",
+                                       "strash; dch; &get; &st; &if -K 6",
+                                       "strash; dch; strash; &get; &if -K 6",
+                                       "strash; dch; balance; print_xcut; if -K 6",
+                                       "strash; dch; if -K 6; print_xcut",
+                                       "strash; &get -n; &dch; &if -K 6",
+                                       "strash; &get -n; &synch2; &if -K 6",
+                                       "strash; dch; &get; &dch; &if -K 6",
+                                       "strash; dch; if -K 6"};
+    for (size_t i = 0; i < sizeof fine / sizeof fine[0]; i++) {
+        odin3_abc_script script;
+        accept(fine[i], k_blif, &script);
+        odin3_abc_script_free(&script);
+    }
+}
+
+/* Review M1: the BLIF start is a logic network. &get -m keeps its mapping, so &if refuses it,
+ * yet it is not a mapping the script made, so it does not end a script. */
+static void test_blif_logic_start(void) {
+    refuse("&get -m\n&if -K 6", k_blif,
+           "t.abc:2: '&if' needs an unmapped network in the & space, which is mapped here; add "
+           "'&st'");
+    refuse("&get -m", k_blif, k_unmapped);
+    refuse("&get -m; &put; mfs2", k_blif, k_unmapped);
+    refuse("print_stats", k_blif, k_unmapped);
+    expect_space("&get -m; &if -K 6", k_mem, GIA);
+    expect_space("&get -m -c; &if -K 6", k_blif, GIA);
+    expect_space("mfs2; if -K 6", k_blif, NTK);
+    expect_space("if -K 6; &get -m", k_blif, GIA);
 }
 
 /* --- output (step 12) ----------------------------------------------------------------------- */
@@ -930,12 +1049,17 @@ int main(void) {
     RUN_TEST(test_arguments);
     RUN_TEST(test_file_and_crash_options);
     RUN_TEST(test_options_from_alias);
+    RUN_TEST(test_number_cap);
+    RUN_TEST(test_number_cap_forms);
+    RUN_TEST(test_refused_print_commands);
     RUN_TEST(test_count_cap);
     RUN_TEST(test_refuse_unmapped_end);
     RUN_TEST(test_blif_gia_empty);
     RUN_TEST(test_final_space);
     RUN_TEST(test_if_after_mapping);
     RUN_TEST(test_balancing_mappers);
+    RUN_TEST(test_choices);
+    RUN_TEST(test_blif_logic_start);
     RUN_TEST(test_accepted_cases);
     RUN_TEST(test_sha256);
     RUN_TEST(test_accessors);

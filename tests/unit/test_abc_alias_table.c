@@ -23,9 +23,11 @@ enum {
     DEPTH_LIMIT = 8,        /* ODIN3_ABC_MAX_ALIAS_DEPTH */
     REAL_MAX_DEPTH = 3,     /* &resyn2rs -> resyn2rs -> b -> balance */
     ABC_RC_ALIASES = 112,   /* `alias` lines of abc.rc at a3001b72 */
-    PRINT_STAR_ROWS = 31,   /* the allowed print_* commands (§7.5, print_box erratum) */
-    ALLOWED_ROWS = 61,      /* §7.5's allowed commands */
-    FILES_ROWS = 92         /* rows of class FILES */
+    PRINT_STAR_ROWS =
+        29, /* the allowed print_* commands (§7.5, print_box erratum, Task 11 C1/I1) */
+    ALLOWED_ROWS =
+        59, /* §7.5's allowed commands (Task 11 fix round 1: 61 less print_cone, print_npn) */
+    FILES_ROWS = 92 /* rows of class FILES */
 };
 
 typedef struct pair {
@@ -39,16 +41,16 @@ typedef struct refused {
 
 /* §7.4: usable one-word aliases and their expansions. */
 static const pair k_usable_words[] = {
-    {"b", "balance"},        {"cl", "cleanup"},        {"f", "fraig"},
-    {"fs", "fraig_sweep"},   {"lp", "lutpack"},        {"pcon", "print_cone"},
-    {"pd", "print_dsd"},     {"pex", "print_exdc -d"}, {"pf", "print_factor"},
-    {"pfan", "print_fanio"}, {"pg", "print_gates"},    {"pl", "print_level"},
-    {"plat", "print_latch"}, {"pio", "print_io"},      {"pk", "print_kmap"},
-    {"pm", "print_miter"},   {"ps", "print_stats"},    {"psu", "print_supp"},
-    {"psy", "print_symm"},   {"pun", "print_unate"},   {"rw", "rewrite"},
-    {"rwz", "rewrite -z"},   {"rf", "refactor"},       {"rfz", "refactor -z"},
-    {"rs", "resub"},         {"rsz", "resub -z"},      {"scl", "scleanup"},
-    {"st", "strash"},        {"sw", "sweep"},
+    {"b", "balance"},         {"cl", "cleanup"},      {"f", "fraig"},
+    {"fs", "fraig_sweep"},    {"lp", "lutpack"},      {"pd", "print_dsd"},
+    {"pex", "print_exdc -d"}, {"pf", "print_factor"}, {"pfan", "print_fanio"},
+    {"pg", "print_gates"},    {"pl", "print_level"},  {"plat", "print_latch"},
+    {"pio", "print_io"},      {"pk", "print_kmap"},   {"pm", "print_miter"},
+    {"ps", "print_stats"},    {"psu", "print_supp"},  {"psy", "print_symm"},
+    {"pun", "print_unate"},   {"rw", "rewrite"},      {"rwz", "rewrite -z"},
+    {"rf", "refactor"},       {"rfz", "refactor -z"}, {"rs", "resub"},
+    {"rsz", "resub -z"},      {"scl", "scleanup"},    {"st", "strash"},
+    {"sw", "sweep"},
 };
 
 /* §7.4: refused one-word aliases and the class of their command (OTHER: no row). */
@@ -77,7 +79,7 @@ static const refused k_refused_words[] = {
     {"ren", ODIN3_ABC_CLASS_OTHER},    {"re", ODIN3_ABC_CLASS_OTHER},
     {"rez", ODIN3_ABC_CLASS_OTHER},    {"ssw", ODIN3_ABC_CLASS_OTHER},
     {"tr0", ODIN3_ABC_CLASS_OTHER},    {"tr1", ODIN3_ABC_CLASS_OTHER},
-    {"u", ODIN3_ABC_CLASS_OTHER},
+    {"u", ODIN3_ABC_CLASS_OTHER},      {"pcon", ODIN3_ABC_CLASS_CRASH},
 };
 
 /* §7.4's table of usable script aliases, verbatim. */
@@ -135,33 +137,32 @@ static const odin3_abc_command_info k_allowed[] = {
     {"balance", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "x", ""},
     {"refactor", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", ""},
+    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", "F"},
     {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "f"},
     {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "fCN"},
     {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "C"},
-    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "W"},
+    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "Ws"},
     {"ifraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig_sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "N"},
+    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "NFS"},
     {"sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
-    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "sc"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "t"},
-    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "Z"},
+    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "scY"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tM"},
+    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
-    {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
+    {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "M"},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "sw"},
-    {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swY"},
+    {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
     {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_cone", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_delay", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_exdc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -180,7 +181,6 @@ static const odin3_abc_command_info k_allowed[] = {
     {"print_mffc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_mint", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_miter", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_npn", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_profile", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_sharing", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_stats", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "bd", ""},
@@ -711,13 +711,12 @@ static uint32_t allowed_print_star_rows(void) {
 /* The 34 print_* commands at the pin but print_constr, print_status (files) and print_box. */
 static void test_print_rows(void) {
     static const char *const k_print_star[] = {
-        "print_auto",   "print_buf",   "print_cell",    "print_cone",    "print_delay",
-        "print_dsd",    "print_exdc",  "print_factor",  "print_fanio",   "print_gates",
-        "print_genlib", "print_gs",    "print_io",      "print_kmap",    "print_latch",
-        "print_level",  "print_lib",   "print_library", "print_lut",     "print_mffc",
-        "print_mint",   "print_miter", "print_npn",     "print_profile", "print_sharing",
-        "print_stats",  "print_supp",  "print_symm",    "print_tim",     "print_unate",
-        "print_xcut"};
+        "print_auto",  "print_buf",     "print_cell",    "print_delay", "print_dsd",
+        "print_exdc",  "print_factor",  "print_fanio",   "print_gates", "print_genlib",
+        "print_gs",    "print_io",      "print_kmap",    "print_latch", "print_level",
+        "print_lib",   "print_library", "print_lut",     "print_mffc",  "print_mint",
+        "print_miter", "print_profile", "print_sharing", "print_stats", "print_supp",
+        "print_symm",  "print_tim",     "print_unate",   "print_xcut"};
     TEST_ASSERT_EQUAL_UINT32(PRINT_STAR_ROWS, COUNT_OF(k_print_star));
     expect_rows(NAME_LIST(k_print_star), ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE);
     TEST_ASSERT_EQUAL_UINT32(PRINT_STAR_ROWS, allowed_print_star_rows());
@@ -821,6 +820,20 @@ static void test_refusals_task11(void) {
     static const char *const k_cmds[] = {"dc2", "drw",  "drw", "drw",     "drf",  "scorr", "if",
                                          "mfs", "mfs2", "dch", "&synch2", "&dch", "&if"};
     static const char k_letters[] = "ffCNCNctZWWWw";
+    TEST_ASSERT_EQUAL_UINT32(COUNT_OF(k_cmds), (uint32_t)strlen(k_letters));
+    for (uint32_t i = 0; i < COUNT_OF(k_cmds); i++) {
+        TEST_ASSERT_TRUE_MESSAGE(crash_opt(k_cmds[i], k_letters[i]), k_cmds[i]);
+    }
+}
+
+/* Task 11 fix round 1 (review C1, C2, I1): print_cone and print_npn are refused rows; the options
+ * that crash at or past the number cap, and dch -s, are crash options. */
+static void test_refusals_fix_round1(void) {
+    expect_row("print_cone", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
+    expect_row("print_npn", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE);
+    static const char *const k_cmds[] = {"resub", "scorr", "scorr", "mfs", "mfs2",
+                                         "&mfs",  "&st",   "if",    "&if", "dch"};
+    static const char k_letters[] = "FFSMMMMYYs";
     TEST_ASSERT_EQUAL_UINT32(COUNT_OF(k_cmds), (uint32_t)strlen(k_letters));
     for (uint32_t i = 0; i < COUNT_OF(k_cmds); i++) {
         TEST_ASSERT_TRUE_MESSAGE(crash_opt(k_cmds[i], k_letters[i]), k_cmds[i]);
@@ -932,6 +945,7 @@ int main(void) {
     RUN_TEST(test_crash_command);
     RUN_TEST(test_crash_refusals_round3);
     RUN_TEST(test_refusals_task11);
+    RUN_TEST(test_refusals_fix_round1);
     RUN_TEST(test_files_rows_pinned);
     RUN_TEST(test_rc_parser_forms);
     RUN_TEST(test_print_rows);

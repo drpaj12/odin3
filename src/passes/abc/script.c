@@ -25,6 +25,16 @@
  *  - `if` with -g, -x, -y or -u, and `&if` with -g, -x or -y, give an AIG, not a mapping
  *    (fDelayOpt, fDsdBalance, fUserRecLib, fUserSesLib: abcIf.c:177-180, giaIf.c:3077-3080).
  *    Any occurrence of such a letter counts as on (a conservative reading of the toggles).
+ *
+ * Task 11 review fix round 1 (rulings C2, I1 and M1, M5):
+ *  - every number word lies in 0 .. ODIN3_ABC_MAX_NUMBER, read both as atoi and as atof read it
+ *    (large values allocate without bound or wrap through atoi), and no number starts with `-`
+ *    (ABC's getopt would read it as an option cluster);
+ *  - print_kmap with two or more positional words is refused (Abc_Show6VarFunc asserts);
+ *  - the BLIF start is a logic network (ABC_LOGIC): &get -m keeps its mapping, so &if refuses it,
+ *    yet it does not end a script as mapped;
+ *  - choices: &if refuses the choices a plain &get copied from the network (Gia_ManChoiceLevel,
+ *    giaIf.c:836), and print_xcut a network with choices (Abc_NtkCrossCut, abcUtil.c:2052).
  */
 #include "passes/abc/script.h"
 
@@ -53,11 +63,24 @@ enum {
     ABC_K_TOKEN = 3,      /* the bytes of `{K}` */
     ABC_SUBST_SHOW = 32,  /* name bytes an unknown substitution's message shows */
     ABC_DECIMAL = 10,
+    ABC_CAP_DIGITS = 7,         /* the digits of ODIN3_ABC_MAX_NUMBER */
+    ABC_EXP_SATURATE = 1000000, /* any exponent past the line cap's digits */
     ABC_ARENA_CHUNK = 16384
 };
 
-/* A network space's state (§7.3 step 11). */
-enum { ABC_EMPTY = 0, ABC_AIG = 1, ABC_MAPPED = 2 };
+/* The smallest and largest numbers of ABC_CAP_DIGITS digits. */
+enum { ABC_CAP_DIGITS_MIN = 1000000, ABC_CAP_DIGITS_MAX = 9999999 };
+_Static_assert((long)ODIN3_ABC_MAX_NUMBER >= (long)ABC_CAP_DIGITS_MIN &&
+                   (long)ODIN3_ABC_MAX_NUMBER <= (long)ABC_CAP_DIGITS_MAX,
+               "ABC_CAP_DIGITS is the number of digits of ODIN3_ABC_MAX_NUMBER");
+
+/* A network space's state (§7.3 step 11). ABC_LOGIC is the BLIF start: a logic network that has
+ * a mapping for &get -m and &if, but not one the script made (review M1). */
+enum { ABC_EMPTY = 0, ABC_AIG = 1, ABC_MAPPED = 2, ABC_LOGIC = 3 };
+
+/* The choices a space holds (fix round 1, ruling I1): none; native ones (dch, &dch, &synch2,
+ * &get -s), which &if maps; or ones a plain &get copied, which &if cannot. */
+enum { ABC_CHOICES_NONE = 0, ABC_CHOICES_NATIVE = 1, ABC_CHOICES_COPIED = 2 };
 
 /* One command's words: a raw command of the byte pass, or an item of the alias worklist. */
 typedef struct abc_item {
@@ -73,8 +96,10 @@ typedef struct abc_parse {
     const char *given;
     uint32_t lut_k;
     bool uses_k;
-    uint8_t ntk, gia; /* ABC_EMPTY, ABC_AIG or ABC_MAPPED */
-    uint8_t cur;      /* odin3_abc_space: the space of the last command that changed a network */
+    uint8_t ntk, gia;    /* ABC_EMPTY, ABC_AIG, ABC_MAPPED or ABC_LOGIC */
+    uint8_t cur;         /* odin3_abc_space: the space of the last command that changed a network */
+    bool ntk_choices;    /* the network holds choices */
+    uint8_t gia_choices; /* the & space's ABC_CHOICES_* */
     odin3_arena *arena;
     odin3_vec raw;   /* abc_item: the byte pass's commands, in order */
     odin3_vec stack; /* abc_item: the alias worklist; the top is the next command */
@@ -196,6 +221,97 @@ static bool is_number(const char *word) {
         }
     }
     return *end == '\0';
+}
+
+/* A number word's digits before and after its point. */
+typedef struct abc_mantissa {
+    const char *int_part;
+    size_t int_len;
+    const char *frac;
+    size_t frac_len;
+} abc_mantissa;
+
+static char mantissa_at(const abc_mantissa *mt, size_t index) {
+    if (index < mt->int_len) {
+        return mt->int_part[index];
+    }
+    return mt->frac[index - mt->int_len];
+}
+
+/* The decimal exponent at `at` (after the `e`), saturated at +/-ABC_EXP_SATURATE. */
+static long exponent_of(const char *at) {
+    bool negative = *at == '-';
+    at += *at == '-' || *at == '+';
+    long exp = 0;
+    for (; is_digit(*at); at++) {
+        exp = exp * ABC_DECIMAL + (*at - '0');
+        exp = exp > ABC_EXP_SATURATE ? ABC_EXP_SATURATE : exp;
+    }
+    return negative ? -exp : exp;
+}
+
+/* Whether the ABC_CAP_DIGITS digits from index on (zeros past the end), and every nonzero digit
+ * after them, keep the number at most ODIN3_ABC_MAX_NUMBER. */
+static bool leading_in_cap(const abc_mantissa *mt, size_t index) {
+    size_t total = mt->int_len + mt->frac_len;
+    long value = 0;
+    for (size_t i = index; i < index + ABC_CAP_DIGITS; i++) {
+        value = value * ABC_DECIMAL + (i < total ? mantissa_at(mt, i) - '0' : 0);
+    }
+    for (size_t i = index + ABC_CAP_DIGITS; i < total && value == ODIN3_ABC_MAX_NUMBER; i++) {
+        value += mantissa_at(mt, i) != '0';
+    }
+    return value <= ODIN3_ABC_MAX_NUMBER;
+}
+
+/* atof's reading: the value, exactly in decimal, is at most ODIN3_ABC_MAX_NUMBER. */
+static bool value_in_cap(const abc_mantissa *mt, long exp) {
+    size_t total = mt->int_len + mt->frac_len;
+    size_t lead = 0;
+    while (lead < total && mantissa_at(mt, lead) == '0') {
+        lead++;
+    }
+    if (lead == total) {
+        return true; /* zero */
+    }
+    long int_digits = (long)mt->int_len - (long)lead + exp;
+    if (int_digits != ABC_CAP_DIGITS) {
+        return int_digits < ABC_CAP_DIGITS;
+    }
+    return leading_in_cap(mt, lead);
+}
+
+/* atoi's reading: the digits before the point, as an integer, are at most ODIN3_ABC_MAX_NUMBER. */
+static bool int_part_in_cap(const abc_mantissa *mt) {
+    size_t lead = strspn(mt->int_part, "0"); /* a non-digit always follows the integer digits */
+    size_t len = mt->int_len - lead;
+    if (len != ABC_CAP_DIGITS) {
+        return len < ABC_CAP_DIGITS;
+    }
+    abc_mantissa int_only = {mt->int_part, mt->int_len, NULL, 0};
+    return leading_in_cap(&int_only, lead);
+}
+
+/*
+ * Step 9's cap (fix round 1, ruling C2) on a number word: it must lie in 0 ..
+ * ODIN3_ABC_MAX_NUMBER both as atoi reads it (its integer digits; atoi wraps past INT_MAX) and as
+ * atof reads it (all of it). A word that starts with `-` is refused: besides being negative or
+ * zero, ABC's getopt would read it as an option cluster (review M5).
+ */
+static bool number_in_cap(const char *word) {
+    if (word[0] == '-') {
+        return false;
+    }
+    const char *at = word + (word[0] == '+');
+    abc_mantissa mt = {at, strspn(at, "0123456789"), at, 0};
+    const char *rest = at + mt.int_len;
+    if (*rest == '.') {
+        mt.frac = rest + 1;
+        mt.frac_len = strspn(mt.frac, "0123456789");
+        rest = mt.frac + mt.frac_len;
+    }
+    long exp = *rest == 'e' || *rest == 'E' ? exponent_of(rest + 1) : 0;
+    return int_part_in_cap(&mt) && value_in_cap(&mt, exp);
 }
 
 /* An echo argument: printable, without a blank, a quote, `!`, `;`, `#`, `{` or `}`. */
@@ -531,26 +647,66 @@ static odin3_status check_option(const abc_parse *ps, const abc_item *item,
     return ODIN3_OK;
 }
 
-/* Step 9: each argument is an option or a number (echo: any printable word). */
-static odin3_status check_args(const abc_parse *ps, const abc_item *item,
-                               const odin3_abc_command_info *row) {
-    bool echo = strcmp(row->name, "echo") == 0;
-    for (uint32_t i = 1; i < item->n_words; i++) {
-        const char *word = item->words[i];
-        odin3_status st = ODIN3_OK;
-        if (is_option(word)) {
-            st = check_option(ps, item, row, word);
-        } else if (!is_number(word) && !(echo && is_echo_word(word))) {
+/* Step 9 for a word that is not an option: echo prints any printable word; every other command
+ * takes a number from 0 to ODIN3_ABC_MAX_NUMBER (fix round 1, ruling C2). */
+static odin3_status check_value(const abc_parse *ps, const abc_item *item,
+                                const odin3_abc_command_info *row, const char *word) {
+    if (strcmp(row->name, "echo") == 0 && is_echo_word(word)) {
+        return ODIN3_OK;
+    }
+    abc_from from = from_alias(item);
+    if (!is_number(word)) {
+        return abc_fail(ps, item->line,
+                        "argument '%s' of '%s'%s%s%s is neither an option nor a number", word,
+                        row->name, from.pre, from.name, from.post);
+    }
+    if (!number_in_cap(word)) {
+        return abc_fail(ps, item->line, "argument '%s' of '%s'%s%s%s is not a number from 0 to %d",
+                        word, row->name, from.pre, from.name, from.post, ODIN3_ABC_MAX_NUMBER);
+    }
+    return ODIN3_OK;
+}
+
+/* Commands whose positional words crash ABC past a count (fix round 1, ruling I1): print_kmap
+ * with two words prints the 6-variable functions they name, and Abc_Show6VarFunc asserts. */
+typedef struct abc_positional {
+    const char *name;
+    uint32_t max_words;
+} abc_positional;
+
+static const abc_positional k_abc_positional[] = {{"print_kmap", 1}};
+
+static odin3_status check_positional(const abc_parse *ps, const abc_item *item,
+                                     const odin3_abc_command_info *row, uint32_t n_positional) {
+    for (size_t i = 0; i < sizeof k_abc_positional / sizeof k_abc_positional[0]; i++) {
+        const abc_positional *rule = &k_abc_positional[i];
+        if (strcmp(rule->name, row->name) == 0 && n_positional > rule->max_words) {
             abc_from from = from_alias(item);
-            st = abc_fail(ps, item->line,
-                          "argument '%s' of '%s'%s%s%s is neither an option nor a number", word,
-                          row->name, from.pre, from.name, from.post);
-        }
-        if (st != ODIN3_OK) {
-            return st;
+            return abc_fail(ps, item->line,
+                            "abc command '%s'%s%s%s with %u or more arguments is not allowed: it "
+                            "crashes ABC at the pin (a3001b72)",
+                            row->name, from.pre, from.name, from.post,
+                            (unsigned)rule->max_words + 1);
         }
     }
     return ODIN3_OK;
+}
+
+/* Step 9: each argument is an option without a file, string or crash letter, or a value. */
+static odin3_status check_args(const abc_parse *ps, const abc_item *item,
+                               const odin3_abc_command_info *row) {
+    uint32_t n_positional = 0;
+    for (uint32_t i = 1; i < item->n_words; i++) {
+        const char *word = item->words[i];
+        bool option = is_option(word);
+        odin3_status st =
+            option ? check_option(ps, item, row, word) : check_value(ps, item, row, word);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        n_positional += !option;
+    }
+    return check_positional(ps, item, row, n_positional);
 }
 
 /* Whether letter occurs in an option word of item, anywhere (the conservative reading). */
@@ -582,10 +738,12 @@ static uint8_t mapper_state(const abc_item *item, const odin3_abc_command_info *
     return letter_any(item, balancing) ? ABC_AIG : ABC_MAPPED;
 }
 
-/* &get: the & space keeps the network's mapping only with -m and without -c. */
+/* &get: the & space keeps the network's mapping (ABC_MAPPED, or the BLIF start's ABC_LOGIC)
+ * only with -m and without -c. */
 static uint8_t get_state(const abc_parse *ps, const abc_item *item) {
-    bool keeps = ps->ntk == ABC_MAPPED && letter_on(item, 'm') && !letter_on(item, 'c');
-    return keeps ? ABC_MAPPED : ABC_AIG;
+    bool has_mapping = ps->ntk == ABC_MAPPED || ps->ntk == ABC_LOGIC;
+    bool keeps = has_mapping && letter_on(item, 'm') && !letter_on(item, 'c');
+    return keeps ? ps->ntk : ABC_AIG;
 }
 
 /* §7.5's effect of an allowed command on the two spaces (step 11). */
@@ -626,24 +784,87 @@ static void apply_effect(abc_parse *ps, const abc_item *item, const odin3_abc_co
     }
 }
 
-/* Step 11: the & space must hold a network, and &if needs it unmapped; then the effect. */
-static odin3_status check_space(abc_parse *ps, const abc_item *item,
+/* &get copies the network's choices: natively with -s, else as a copy &if cannot map. */
+static uint8_t get_choices(const abc_parse *ps, const abc_item *item) {
+    if (!ps->ntk_choices) {
+        return ABC_CHOICES_NONE;
+    }
+    return letter_on(item, 's') ? ABC_CHOICES_NATIVE : ABC_CHOICES_COPIED;
+}
+
+/*
+ * Choices (fix round 1, ruling I1), read at the pin: dch makes them in the network, &dch and
+ * &synch2 in the & space; &put carries the & space's choices to the network and &get copies the
+ * network's; every other command that rebuilds a space drops them (strash, balance, dc2, fraig,
+ * scorr, drw, drf, ifraig, cleanup, scleanup, if, &st and &if were run; rewrite, refactor, resub
+ * and fraig_sweep refuse a network with choices at run time).
+ */
+static void apply_choices(abc_parse *ps, const abc_item *item, const odin3_abc_command_info *row) {
+    switch (row->effect) {
+    case ODIN3_ABC_FX_NTK_AIG:
+    case ODIN3_ABC_FX_NTK_MAPPED:
+    case ODIN3_ABC_FX_NTK_KEEP:
+        ps->ntk_choices = strcmp(row->name, "dch") == 0;
+        break;
+    case ODIN3_ABC_FX_NTK_PUT:
+        ps->ntk_choices = ps->gia_choices != ABC_CHOICES_NONE;
+        break;
+    case ODIN3_ABC_FX_GIA_GET:
+        ps->gia_choices = get_choices(ps, item);
+        break;
+    case ODIN3_ABC_FX_GIA_AIG:
+        ps->gia_choices = strcmp(row->name, "&st") == 0 ? ABC_CHOICES_NONE : ABC_CHOICES_NATIVE;
+        break;
+    case ODIN3_ABC_FX_GIA_MAPPED:
+        ps->gia_choices = ABC_CHOICES_NONE;
+        break;
+    default:
+        break; /* printing, &mfs: the choices stay */
+    }
+}
+
+/* Step 11's state rules: the BLIF & rule; &if needs an unmapped & space (PHASE3 #22) without
+ * choices &get copied; print_xcut needs a network without choices (fix round 1, ruling I1). */
+static odin3_status check_state(const abc_parse *ps, const abc_item *item,
                                 const odin3_abc_command_info *row) {
     abc_from from = from_alias(item);
+    bool if_gia = row->effect == ODIN3_ABC_FX_GIA_MAPPED;
     if (row->name[0] == '&' && row->effect != ODIN3_ABC_FX_GIA_GET && ps->gia == ABC_EMPTY) {
         return abc_fail(ps, item->line,
                         "'%s'%s%s%s needs a network in the & space, which the BLIF exchange "
                         "starts empty; add '&get'",
                         row->name, from.pre, from.name, from.post);
     }
-    if (row->effect == ODIN3_ABC_FX_GIA_MAPPED && ps->gia == ABC_MAPPED) {
+    if (if_gia && (ps->gia == ABC_MAPPED || ps->gia == ABC_LOGIC)) {
         return abc_fail(ps, item->line,
                         "'%s'%s%s%s needs an unmapped network in the & space, which is mapped "
                         "here; add '&st'",
                         row->name, from.pre, from.name, from.post);
     }
-    apply_effect(ps, item, row);
+    if (if_gia && ps->gia_choices == ABC_CHOICES_COPIED) {
+        return abc_fail(ps, item->line,
+                        "'%s'%s%s%s needs a network in the & space without the choices that "
+                        "'&get' copied; add '&st'",
+                        row->name, from.pre, from.name, from.post);
+    }
+    if (strcmp(row->name, "print_xcut") == 0 && ps->ntk_choices) {
+        return abc_fail(ps, item->line,
+                        "'%s'%s%s%s needs a network without choices, which it has here; add "
+                        "'strash'",
+                        row->name, from.pre, from.name, from.post);
+    }
     return ODIN3_OK;
+}
+
+/* Step 11: the state rules, then the effect on the spaces and their choices. */
+static odin3_status check_space(abc_parse *ps, const abc_item *item,
+                                const odin3_abc_command_info *row) {
+    odin3_status st = check_state(ps, item, row);
+    if (st == ODIN3_OK) {
+        apply_effect(ps, item, row);
+        apply_choices(ps, item, row);
+    }
+    return st;
 }
 
 /* Appends the checked command: its words joined by one blank (step 12). */
@@ -758,8 +979,9 @@ static odin3_status parse_bytes(const abc_request *req, odin3_abc_script *out) {
         return abc_fail(&ps, ABC_NO_LINE, "abc script is larger than %d bytes",
                         ODIN3_ABC_MAX_SCRIPT_BYTES);
     }
-    ps.ntk = ABC_AIG;
-    ps.gia = req->exchange == ODIN3_ABC_EXCHANGE_BLIF ? ABC_EMPTY : ABC_AIG;
+    bool blif = req->exchange == ODIN3_ABC_EXCHANGE_BLIF;
+    ps.ntk = blif ? ABC_LOGIC : ABC_AIG;
+    ps.gia = blif ? ABC_EMPTY : ABC_AIG;
     ps.cur = ODIN3_ABC_SPACE_NTK;
     odin3_vec_init(&ps.raw, sizeof(abc_item));
     odin3_vec_init(&ps.stack, sizeof(abc_item));

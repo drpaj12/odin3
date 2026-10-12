@@ -38,9 +38,10 @@
  *   print_auto -O   abc.c:2652  Output: an index past the last output reads a stray BDD
  *                               (Extra_SupportArray, extraBddMisc.c:550; fix round 3)
  *
- * Task 11's bounded audit (every pair of each allowed command's other options, valued ones at 2,
- * and each valued option alone at 0, 1 and 64, on the same two designs) found these, each
- * backtraced in the Debug abc; a value-dependent crash refuses the whole option, as -O does:
+ * Task 11's first audit (every pair of each allowed command's other options, valued ones at 2,
+ * and each valued option alone at 0, 1, 64, -1, 3 and 1000, on the same two designs, with the
+ * Release abc) found these, each backtraced in the Debug abc; a value-dependent crash refuses the
+ * whole option, as -O does:
  *
  *   dc2 -f          abc.c:18480 fFanout: off with -l asserts p->pFanData
  *                               (Aig_ManStartReverseLevels, aigTiming.c:146)
@@ -60,16 +61,35 @@
  *   &if -w          abc.c:45472 fVerboseTrace: with -g or -x it traces the LUT levels of an AIG
  *                               that has no mapping (Gia_ManLutLevel, giaIf.c:170)
  *
+ * Task 11 review fix round 1 (rulings C2 and I1; step 9 also caps every number at 1000000). Each
+ * was reproduced in the Debug abc; the first four crash at or below the cap, the next three only
+ * far past it (2^31-1), and the ruling refuses them all:
+ *
+ *   resub -F        abc.c:8726  nLevelsOdc 10 or more asserts nLevels < 10
+ *                               (Abc_NtkDontCareAlloc, abcOdc.c:171)
+ *   scorr -F        abc.c:25861 nFramesK 1000000 (Ssw_SmlStart, sswSim.c:1152)
+ *   mfs -M          abc.c:5672  nWinMax 1000000 (Vec_PtrPush, mfsDiv.c:233)
+ *   if -Y, &if -Y   abc.c:23009, 45300  nAndArea 100000 asserts (If_CutAreaDerefed, ifCut.c:1117)
+ *   scorr -S        abc.c:25894 nFramesAddSim
+ *   mfs2 -M, &mfs -M  abc.c:5846, 56018  nWinSizeMax
+ *   &st -M          abc.c:37064 Multi
+ *   dch -s          abc.c:18692 fSynthesis: asserts CoNum % 3 == 0 (Gia_ManToAigSkip,
+ *                               giaAig.c:372), on any network whose outputs are not a multiple of 3
+ *
  * print_box crashes with any option, so it is a refused row of class CRASH.
  *
  * How the others were checked: every option of every allowed command was mapped to the variable
  * its case assigns, and the usage texts were searched for dump, file, write, save, record and log.
  * Then each allowed command ran once in the abc tool at the pin, once per option (numeric options
  * with 2), on a strashed, a mapped, a & and a &-mapped network, each run in an empty directory: the
- * only files created came from the options above. Task 11 then ran option pairs, the values 0, 1,
- * 64, -1, 3 and 1000, and the print and & commands' pairs after if, &if and &get -m (above; clean
- * once the lists held its findings). Triples, other values, other networks and longer command
- * sequences were not run, so the lists may still be incomplete.
+ * only files created came from the options above. Task 11's first audit then ran option pairs and
+ * small values with the Release abc, where NDEBUG compiles ABC's assert out, so it saw signals
+ * only (review I2). Its fix round 1 re-ran with the Debug abc, on scripts the checker accepts:
+ * every allowed command at default options in 14 states, every option pair, every valued option
+ * at 0, 1, 3, 64, 1000 and 1000000, zero to two positional numbers, and the print and & pairs
+ * after a mapping step, on Task 10's sequential design (8 inputs, 4 outputs, 4 latches) and
+ * combinational one (4 inputs, 2 outputs): 11,764 runs, clean. Triples, larger networks and
+ * longer command sequences were not run, so the lists may still be incomplete.
  *
  * Then the refused rows: §7.5's "among others" (files, process, latches), every registered
  * read_* and write_* command with read and write, the & space's &r, &w, &read_* and &write_*
@@ -91,38 +111,38 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"balance", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"rewrite", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "x", ""},
     {"refactor", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", ""},
+    {"resub", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PD", "F"},
     {"dc2", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "f"},
     {"drw", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "fCN"},
     {"drf", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "C"},
-    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "W"},
+    {"dch", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", "Ws"},
     {"ifraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
     {"fraig_sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "", ""},
-    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "N"},
+    {"scorr", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_AIG, "PefI", "NFS"},
     /* optimisation: keeps */
     {"sweep", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"cleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     {"scleanup", ODIN3_ABC_CLASS_OPT, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* mapping */
-    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "sc"},
-    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "t"},
-    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "Z"},
+    {"if", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_MAPPED, "SJf", "scY"},
+    {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tM"},
+    {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", ""},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
-    {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", ""},
+    {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "M"},
     {"&synch2", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "W"},
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
-    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "sw"},
-    {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", ""},
-    /* printing: the 34 print_* commands at the pin but print_constr, print_status and print_box;
+    {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swY"},
+    {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
+    /* printing: the 34 print_* commands at the pin but print_constr, print_status, print_box,
+     * print_cone and print_npn;
      * print_mint is registered only under ABC_USE_CUDD (on in the pinned build) */
     {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_cone", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_delay", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_dsd", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_exdc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -141,7 +161,6 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"print_mffc", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_mint", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_miter", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
-    {"print_npn", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_profile", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_sharing", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_stats", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "bd", ""},
@@ -264,6 +283,12 @@ static const odin3_abc_command_info k_abc_commands[] = {
     /* refused, crashes ABC at the pin: If_LibBoxPrint dereferences the NULL box library
      * (ifCom.c:521, ifLibBox.c:350), and a script cannot load one */
     {"print_box", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE, "", ""},
+    /* print_cone asserts Abc_NtkIsStrash on any sequential logic network (Abc_AigConst1,
+     * abcAig.c:685, from abc.c:3124); print_npn's truth table divides by zero for 0
+     * (Extra_PermSchedule, extraUtilMisc.c:2209), asserts for 5 (dauNpn.c:976) and overruns
+     * word pTruth[16] for 257 or more digits (abc.c:2365, 2387; Task 11 review C1, I1) */
+    {"print_cone", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE, "", ""},
+    {"print_npn", ODIN3_ABC_CLASS_CRASH, ODIN3_ABC_FX_NONE, "", ""},
     /* refused, latches (PHASE3 #12) */
     {"retime", ODIN3_ABC_CLASS_LATCHES, ODIN3_ABC_FX_NONE, "", ""},
     {"dretime", ODIN3_ABC_CLASS_LATCHES, ODIN3_ABC_FX_NONE, "", ""},

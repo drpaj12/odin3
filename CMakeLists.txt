@@ -962,8 +962,9 @@ if(BUILD_TESTING)
         add_test(NAME fuzz_abc_script_seed_inputs
             COMMAND $<TARGET_FILE:fuzz_abc_script> -runs=0 -timeout=60 -rss_limit_mb=2048
                     ${_fa_seeds})
+        # -seed=1: every CI run explores the same inputs, so a finding reproduces from its log.
         add_test(NAME fuzz_abc_script_smoke
-            COMMAND $<TARGET_FILE:fuzz_abc_script> -max_total_time=60 -timeout=10
+            COMMAND $<TARGET_FILE:fuzz_abc_script> -seed=1 -max_total_time=60 -timeout=10
                     -rss_limit_mb=2048 -max_len=8192 -print_funcs=0 -print_final_stats=1
                     ${_fa_corpus} ${_fa_seeds})
         set_tests_properties(fuzz_abc_script_seed_inputs fuzz_abc_script_smoke PROPERTIES
@@ -976,6 +977,9 @@ if(BUILD_TESTING)
             COMMAND timeout 3h $<TARGET_FILE:fuzz_abc_script> -max_total_time=3600 -timeout=10
                     -rss_limit_mb=2048 -max_len=70000 -print_funcs=0 -print_final_stats=1
                     ${_fa_corpus} ${_fa_seeds})
+        if(_fuzz_env)
+            set_tests_properties(fuzz_abc_script_long PROPERTIES ENVIRONMENT "${_fuzz_env}")
+        endif()
     endif()
 
     # 2B §10.4: the preprocessor against Icarus and Yosys over the probes, the backtick micros
