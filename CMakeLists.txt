@@ -335,6 +335,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_pp PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_pp PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_verilog.c: the Verilog parser's crash fuzzer (2C §7.5).
+    add_executable(fuzz_verilog tests/fuzz/fuzz_verilog.c)
+    target_include_directories(fuzz_verilog PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_verilog PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_verilog PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -862,6 +867,35 @@ if(BUILD_TESTING)
             set_tests_properties(fuzz_pp_default_caps fuzz_pp_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
+
+        # 2C §7.5: the parser's seeds (`fuzz_seeds.py`): two BOM-prefixed files (Review Focus 5),
+        # then the coverage rows and the syntax micros, smallest first, each as a raw input and
+        # as a token stream, and twenty generated modules. fuzz_verilog_seed_inputs runs each
+        # seed once; fuzz_verilog_smoke fuzzes 10 s per mode (raw, token stream). Long runs are
+        # local (one worker, 2 GB RSS).
+        set(_fv_seeds ${PROJECT_BINARY_DIR}/fuzz_verilog_seeds)
+        set(_fv_corpus ${PROJECT_BINARY_DIR}/fuzz_verilog_corpus)
+        file(MAKE_DIRECTORY ${_fv_corpus})
+        add_test(NAME fuzz_verilog_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/fuzz_seeds.py
+                    ${_fv_seeds} ${PROJECT_SOURCE_DIR}/tests/verilog/coverage
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax --generated 20)
+        set_tests_properties(fuzz_verilog_seeds PROPERTIES FIXTURES_SETUP fuzz_verilog_seeds
+                             LABELS fuzz)
+        add_test(NAME fuzz_verilog_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_verilog> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    ${_fv_seeds})
+        set(_fv_smoke -max_total_time=10 -timeout=10 -rss_limit_mb=2048 -print_funcs=0
+                      -print_final_stats=1 ${_fv_corpus} ${_fv_seeds})
+        add_test(NAME fuzz_verilog_smoke
+            COMMAND sh -c "FUZZ_VERILOG_MODE=raw \"$0\" \"$@\" && FUZZ_VERILOG_MODE=tokens \"$0\" \"$@\""
+                    $<TARGET_FILE:fuzz_verilog> ${_fv_smoke})
+        set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_verilog_seeds LABELS fuzz TIMEOUT 300)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
     endif()
 
     # 2B §10.4: the preprocessor against Icarus and Yosys over the probes, the backtick micros
@@ -1066,5 +1100,23 @@ if(BUILD_TESTING)
         # the workspace 0.69 of ODIN3_YOSYS.
         set_property(TEST test_verilog_writer APPEND PROPERTY
             ENVIRONMENT "ODIN3_YOSYS055=${ODIN3_YOSYS055}")
+    # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
+    # (tools/verilog-gen/compare.py; 200 seeds here, 5,000 locally). The oracle is VTR's Yosys
+    # (0.55, docs/ORACLES.md) when the workspace has it, else ODIN3_YOSYS (CI's).
+    find_program(ODIN3_YOSYS_VTR yosys
+                 PATHS $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin
+                 NO_DEFAULT_PATH)
+    set(_gen_yosys ${ODIN3_YOSYS_VTR})
+    if(NOT _gen_yosys)
+        set(_gen_yosys ${ODIN3_YOSYS})
+    endif()
+    if(_gen_yosys)
+        add_test(NAME verilog_gen_vs_yosys
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/verilog-gen/compare.py
+                    --odin3 $<TARGET_FILE:odin3> --parse-check $<TARGET_FILE:odin3-parse-check>
+                    --yosys ${_gen_yosys} --seeds 1..200)
+        set_tests_properties(verilog_gen_vs_yosys PROPERTIES LABELS verilog TIMEOUT 900)
+    else()
+        message(STATUS "verilog_gen_vs_yosys not registered: needs yosys")
     endif()
 endif()
