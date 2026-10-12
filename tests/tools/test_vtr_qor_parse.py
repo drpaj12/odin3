@@ -35,7 +35,10 @@ TIME_V = (
 
 
 def run_fixtures() -> list[Path]:
-    return sorted(p.parent for p in FIXTURES.glob("*/expected.json"))
+    # netstats/ is the qor_netstats fixtures (its expected.json has another layout).
+    return sorted(
+        p.parent for p in FIXTURES.glob("*/expected.json") if p.parent.name != "netstats"
+    )
 
 
 def read_results(fixture: Path, name: str) -> dict[str, str]:

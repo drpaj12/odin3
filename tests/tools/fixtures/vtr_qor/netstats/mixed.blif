@@ -1,0 +1,42 @@
+# mixed.blif: hand-written for qor_netstats (3H Task 4, T2).
+# 3 LUTs (n1, n2, d), 2 identity buffers (z: 1 1, rb: 0 0), 1 constant generator (gnd),
+# 1 latch, 1 adder, 1 multiply, 1 single_port_ram; depth 2 (hard blocks cut the path).
+.model mixed
+.inputs a b
+.inputs clk
+.outputs y z
+.names gnd
+.names a b n1
+11 1
+.names n1 b n2
+10 1
+01 1
+.names n2 z
+1 1
+.subckt adder a=n2 b=gnd cin=gnd cout=c sumout=s
+.subckt multiply a[0]=s b[0]=b out[0]=m
+.subckt single_port_ram addr[0]=m we=b data[0]=a clk=clk out[0]=r
+.names r rb
+0 0
+.names rb s d
+10 1
+.latch d y re clk 2
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end
+
+.model multiply
+.inputs a[0] b[0]
+.outputs out[0]
+.blackbox
+.end
+
+.model single_port_ram
+.inputs addr[0] we data[0] clk
+.outputs out[0]
+.blackbox
+.end

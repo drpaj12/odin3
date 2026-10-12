@@ -1,0 +1,65 @@
+{
+ "files": {
+  "and_latch.parmys.blif": {
+   "adders": 0,
+   "blif_sha256": "8a0eb121f8f1ac8c484f0755d5c920a507d8b3da10d166b39025482d4f15df1b",
+   "buffers": 0,
+   "depth": 1,
+   "ffs": 1,
+   "luts": 1,
+   "mults": 0,
+   "ram_slices": 0
+  },
+  "blink.parmys.blif": {
+   "adders": 6,
+   "blif_sha256": "114c3c9646c3a5c132781d71247fcc08843f665dc1e12384855dbfaf481c4126",
+   "buffers": 0,
+   "depth": 1,
+   "ffs": 5,
+   "luts": 6,
+   "mults": 0,
+   "ram_slices": 0
+  },
+  "ch_intrinsics.parmys.blif": {
+   "adders": 0,
+   "blif_sha256": "2225f6728786355e187e469f680a8934a460decb3a5f0422925bc2dbb00081f6",
+   "buffers": 65,
+   "depth": 8,
+   "ffs": 210,
+   "luts": 395,
+   "mults": 0,
+   "ram_slices": 8
+  },
+  "multiclock_output_and_latch.parmys.blif": {
+   "adders": 2,
+   "blif_sha256": "c6f9ae23beaaa8c056a649a2b16410413eceba8372e0949b536c2672808e6f4f",
+   "buffers": 0,
+   "depth": 1,
+   "ffs": 3,
+   "luts": 3,
+   "mults": 0,
+   "ram_slices": 0
+  },
+  "multiclock_reader_writer.parmys.blif": {
+   "adders": 8,
+   "blif_sha256": "6ecbf3a9776bd272acbec2496ff4c343424420da94b1355e72a9f005f256b8e7",
+   "buffers": 9,
+   "depth": 9,
+   "ffs": 11,
+   "luts": 51,
+   "mults": 0,
+   "ram_slices": 0
+  },
+  "single_wire.parmys.blif": {
+   "adders": 0,
+   "blif_sha256": "3b25b264317b810f3d15426f1ba674ae01f37381df0e45f0d4476f8b3937bad1",
+   "buffers": 1,
+   "depth": 0,
+   "ffs": 0,
+   "luts": 0,
+   "mults": 0,
+   "ram_slices": 0
+  }
+ },
+ "source": "Parmys golden BLIFs copied from ~/odin3-ws/golden/EArch. Counts and depth from an independent recursive reference (hard-block pin directions read from the stub models), subckt counts from awk, hashes from sha256sum; nothing here came from qor_netstats."
+}
