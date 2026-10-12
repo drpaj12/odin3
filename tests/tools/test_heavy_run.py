@@ -54,7 +54,7 @@ FAKE_SYSTEMD_RUN = """#!{bash}
 flag=no
 [[ -n $(ls "$ODIN3_HEAVY_DIR"/odin3-heavy.queued.$PPID 2>/dev/null) ]] && flag=yes
 echo "systemd-run $* | slice=${{ODIN3_HEAVY_SLICE:-}} flag=$flag" >>"$FAKE_LOG"
-while [[ $1 == -* ]]; do shift; done
+while [[ $1 == -* ]]; do [[ $1 == -p ]] && shift; shift; done
 exec "$@"
 """
 FAKE_CMAKE = """#!{bash}
@@ -137,7 +137,8 @@ class HeavyRunTest(FakeTools):
         # ... and removed once the lock is held; the job runs in a named scope of the slice
         unit = re.fullmatch(r"systemd-run --user --scope -q "
                             r"--unit=(odin3-heavy-[0-9]+-[0-9]+) "
-                            r"--slice=odin3-heavy\.slice echo hi \| slice=odin3-heavy\.slice "
+                            r"--slice=odin3-heavy\.slice -p OOMPolicy=continue echo hi "
+                            r"\| slice=odin3-heavy\.slice "
                             r"flag=no", calls[2])
         self.assertIsNotNone(unit, calls[2])
         assert unit is not None
@@ -199,7 +200,8 @@ class HeavyRunTest(FakeTools):
                                    "MemoryMax=9G MemorySwapMax=0")
         self.assertRegex(calls[2], r"^systemd-run --user --scope -q "
                                    r"--unit=odin3-heavy-[0-9]+-[0-9]+ "
-                                   r"--slice=odin3-heavyxl\.slice true \| slice=odin3-heavyxl")
+                                   r"--slice=odin3-heavyxl\.slice -p OOMPolicy=continue true "
+                                   r"\| slice=odin3-heavyxl")
 
     def test_skips_without_ok(self) -> None:
         run = self.run_tool(HEAVY_RUN, "true")
@@ -335,7 +337,7 @@ class NestingTest(FakeTools):
         self.assertEqual(run.stdout, "hi\n")
         calls = self.calls()
         self.assertTrue(calls[1].startswith("flock -x -w 14400 9 "), calls)  # the lock is taken
-        self.assertIn("--slice=odin3-heavy.slice echo hi", calls[2])
+        self.assertIn("--slice=odin3-heavy.slice -p OOMPolicy=continue echo hi", calls[2])
 
     def test_stale_variable_does_not_stop_a_build(self) -> None:
         run = self.run_tool(BUILD_LOCKED, "--preset", "debug",

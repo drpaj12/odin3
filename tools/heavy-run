@@ -38,7 +38,9 @@
 #   the lock lives as long as the job's processes, even if this wrapper is killed. A wait past
 #   ODIN3_HEAVY_WAIT seconds exits 77 with "heavy-run: lock busy for <N> s; skipped". Builds take
 #   the same lock shared.
-# - Then runs `systemd-run --user --scope -q --unit=odin3-heavy-<pid>-<ns> --slice=S <cmd...>`, stops
+# - Then runs `systemd-run --user --scope -q --unit=odin3-heavy-<pid>-<ns> --slice=S
+#   -p OOMPolicy=continue <cmd...>` (with systemd's default OOMPolicy=stop, one OOM-killed process
+#   stops the whole scope, harness included, so a capped job could never be recorded), stops
 #   that scope once the job returns (a stray descendant would keep the lock), then stops S itself
 #   (memcap.py's children run in scopes of their own under S, without the lock, and would outlive
 #   it), and exits with the job's status. A scope systemd-run cannot create reads as the job's
@@ -160,7 +162,7 @@ elif [[ $rc -ne 0 ]]; then
     exit 2
 fi
 unit=odin3-heavy-$$-$(date +%s%N) # unique even when a SIGKILLed run's scope and PID linger
-systemd-run --user --scope -q --unit="$unit" --slice="$slice" "$@"
+systemd-run --user --scope -q --unit="$unit" --slice="$slice" -p OOMPolicy=continue "$@"
 rc=$?
 systemctl --user stop "$unit.scope" >/dev/null 2>&1
 if [[ $dir == /tmp/claude-1000 || ${ODIN3_HEAVY_STOP_SLICE:-} == 1 ]]; then
