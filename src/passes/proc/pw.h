@@ -105,9 +105,13 @@ odin3_status odin3_pw_decode(const odin3_proc_mctx *mctx, odin3_node_id node, od
  * ODIN3_PW_SA becomes ANY. Only cases, switches and syncs reachable from the root are encoded.
  * The new node takes pw->prov and pw->attrs; it is created before pw->node, when live, is
  * deleted, so a failure leaves the old node (a shared constant node encode had to create may
- * remain); on success pw->node is the new node. ODIN3_ERR_INVALID_ARG (logged) for a bit that is
- * not a live net of the module, an lhs bit that is a constant, ODIN3_PW_SM, a case or switch
- * reached twice, or a body odin3_proc_body_verify rejects; ODIN3_ERR_NO_MEMORY.
+ * remain); on success pw->node is the new node. A failed delete of the old node disconnects and
+ * deletes the new one; each delete stores a record and the IR has no way to reserve it, so under
+ * sustained out of memory that second delete can fail too, leaving the new node live with no pins
+ * beside the old one (the run is failing with ODIN3_ERR_NO_MEMORY anyway; spec §16, PR-22).
+ * ODIN3_ERR_INVALID_ARG (logged) for a bit that is not a live net of the module, an lhs bit that is
+ * a constant, ODIN3_PW_SM, a case or switch reached twice, or a body odin3_proc_body_verify
+ * rejects; ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_pw_encode(odin3_proc_mctx *mctx, odin3_pw *pw);
 
@@ -161,7 +165,10 @@ odin3_status odin3_pw_sig_remove2(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_
 
 /*
  * Yosys in.a.extract(pattern, &in.b), in in.a's position order: *out = a new run of in.b[i] (or
- * in.a[i] when in.b is empty) for each position i whose in.a bit is a net of pattern.
+ * in.a[i] when in.b is empty) for each position i whose in.a bit is a net of pattern. Yosys's
+ * SigSpec-pattern overload walks the pattern chunk by chunk, so it differs for an unsorted pattern
+ * ({a b c}.extract({c a}, &{p q r}) is {r p} there) or a repeated pattern bit; Yosys's proc passes
+ * extract only with sorted patterns (proc_dff), where the two agree.
  * ODIN3_ERR_INVALID_ARG (logged) when in.b is neither empty nor in.a's length; NO_MEMORY.
  */
 odin3_status odin3_pw_sig_extract(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_pair in,

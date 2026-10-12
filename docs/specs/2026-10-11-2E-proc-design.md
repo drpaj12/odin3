@@ -848,7 +848,11 @@ super-linear steps are the ones capped above.
 **Out of memory.** Every IR call reserves before it mutates (IR-15); 2E's own vectors are freed
 on every path. `ODIN3_ERR_NO_MEMORY` stops at once (PR-3). Unit tests inject a failure at every
 allocation (`odin3_util_set_alloc_fail_after`) and assert `NO_MEMORY`, no leak, and a passing
-`odin3_check_design` FULL.
+`odin3_check_design` FULL. One residue is accepted (2E Task 2 review M2): `odin3_node_delete`
+stores a record and the IR cannot reserve it, so when `odin3_pw_encode` (`--stop-after`) fails to
+delete the old node and then also fails to delete the new one it just made, that new `$proc` node
+stays live with no pins beside the old one; it takes two failures in a row, and the run is
+failing with `ODIN3_ERR_NO_MEMORY` anyway.
 
 ## 17. Files, data structures and API (PR-23)
 
@@ -892,7 +896,7 @@ odin3_status odin3_budget_check(odin3_pass_ctx *ctx, const odin3_design *design,
                                 uint64_t extra_bytes);                         /* src/passes */
 
 /* proc_internal.h — one module's lowering */
-odin3_status odin3_pw_decode(odin3_proc_mctx *m, odin3_node_id node, odin3_pw *out);
+odin3_status odin3_pw_decode(const odin3_proc_mctx *m, odin3_node_id node, odin3_pw *out);
 odin3_status odin3_pw_encode(odin3_proc_mctx *m, odin3_pw *pw);   /* --stop-after */
 void odin3_pw_free(odin3_pw *pw);
 odin3_status odin3_pw_clean(odin3_pw *pw, uint32_t case_index, int32_t max_depth);

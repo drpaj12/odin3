@@ -4,13 +4,16 @@
 #
 # Usage: tools/heavy-run [--xl] <cmd...>
 #
+# - Nested: inside a heavy run (ODIN3_HEAVY_SLICE set) the caller already holds the lock and is
+#   in the slice, so <cmd...> runs as is (taking the lock again would wait on the caller itself).
+#   --xl inside odin3-heavy.slice exits 2: the 6G cap would still apply.
 # - Exits 77 (CTest's skip) unless ODIN3_HEAVY_OK=1; with --xl it also needs ODIN3_HEAVY_XL_OK=1,
 #   which the controller exports by hand only when no agent is running. Also 77 without
 #   systemd-run, or when the slice cannot be set up (no systemd --user manager).
 # - Slice S is odin3-heavy.slice (MemoryMax=6G), or with --xl odin3-heavyxl.slice (9G). systemd
-#   nests a slice under the one its name extends at a dash, so the plan's odin3-heavy-xl.slice
-#   would sit inside odin3-heavy.slice and keep its 6G cap; odin3-heavyxl.slice is a sibling.
-#   Both caps are set with `systemctl --user set-property --runtime S MemoryMax=.. MemorySwapMax=0`.
+#   nests a slice under the one its name extends at a dash, so odin3-heavy-xl.slice would sit
+#   inside odin3-heavy.slice and keep its 6G cap; odin3-heavyxl.slice is a sibling. Both caps are
+#   set with `systemctl --user set-property --runtime S MemoryMax=.. MemorySwapMax=0`.
 # - Exports ODIN3_HEAVY_SLICE=S: a tool that starts children (memcap.py) starts each with
 #   `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE ...`, so every child stays inside S
 #   (a bare nested --scope lands in app.slice, outside the cap).
@@ -18,14 +21,18 @@
 #   so tools/build-locked starts no new build meanwhile. The flag is removed once the lock is held,
 #   and on any exit.
 # - The lock: an exclusive flock(2) on $DIR/odin3-heavy.lock, taken on file descriptor 9 with
-#   `flock -x -w ${ODIN3_HEAVY_WAIT:-14400} 9` (a timeout is told apart from the job's own exit
-#   status, and the flag goes as soon as the lock is held); the job inherits the descriptor, so
-#   the lock lives exactly as long as the job's processes. A wait past ODIN3_HEAVY_WAIT seconds
-#   exits 77 with "heavy-run: lock busy for <N> s; skipped". Builds take the same lock shared.
-# - Then runs `systemd-run --user --scope -q --slice=S <cmd...>` and exits with its status.
+#   `flock -x -w ${ODIN3_HEAVY_WAIT:-14400} 9` (so a timeout is told apart from the job's own exit
+#   status, and the flag goes as soon as the lock is held). The job inherits the descriptor, so
+#   the lock lives as long as the job's processes, even if this wrapper is killed. A wait past
+#   ODIN3_HEAVY_WAIT seconds exits 77 with "heavy-run: lock busy for <N> s; skipped". Builds take
+#   the same lock shared.
+# - Then runs `systemd-run --user --scope -q --unit=odin3-heavy-<pid> --slice=S <cmd...>`, stops
+#   that scope once the job returns (a stray descendant would keep the lock), and exits with the
+#   job's status. A scope systemd-run cannot create reads as the job's failure (systemd-run's own
+#   status), which a sweep reports.
 #
-# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only). Never start a build
-# under heavy-run: the build's shared lock would wait forever on this exclusive one.
+# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only). tools/build-locked
+# refuses to run under heavy-run: its shared lock would wait forever on this exclusive one.
 set -uo pipefail
 
 skip() {
@@ -41,6 +48,13 @@ fi
 if [[ $# -eq 0 ]]; then
     echo "usage: heavy-run [--xl] <cmd...>" >&2
     exit 2
+fi
+if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
+    if [[ $xl -eq 1 && $ODIN3_HEAVY_SLICE != odin3-heavyxl.slice ]]; then
+        echo "heavy-run: --xl inside $ODIN3_HEAVY_SLICE (6G): run the xl job on its own" >&2
+        exit 2
+    fi
+    exec "$@"
 fi
 if [[ ${ODIN3_HEAVY_OK:-} != 1 ]]; then
     skip "ODIN3_HEAVY_OK is not 1"
@@ -87,4 +101,8 @@ elif [[ $rc -ne 0 ]]; then
     echo "heavy-run: flock failed (exit $rc)" >&2
     exit 2
 fi
-systemd-run --user --scope -q --slice="$slice" "$@"
+unit=odin3-heavy-$$
+systemd-run --user --scope -q --unit="$unit" --slice="$slice" "$@"
+rc=$?
+systemctl --user stop "$unit.scope" >/dev/null 2>&1
+exit $rc

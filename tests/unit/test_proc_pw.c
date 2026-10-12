@@ -35,8 +35,8 @@ enum {
     LOG_TEXT = 256,
     OOM_LIMIT = 2000,
     ARENA_CHUNK = 1024,
-    PBITS_MAX = 16,
-    ARR_MAX = 8,
+    PBITS_MAX = 40,
+    ARR_MAX = 16,
     SAVE_WORDS = 128,
     KEY_SHIFT = 32,
 };
@@ -501,6 +501,93 @@ static void test_roundtrip_identity_p2(void) {
     roundtrip(p2_node(&nets));
 }
 
+/*
+ * A richer body in 2D's canonical layout (review M6): 2-bit chunked actions, a switch nested in a
+ * case, a multi-compare case with a '-' bit, x and z constants, both switch flags, two syncs.
+ * I = [clk, rst, s0, s1, d0, d1, c0, c1, cx, cz] (net-ID order), O = [q0, q1, t0, t1]:
+ *   root: t <- q; switch s { 2'01: t <- d; switch[full,par] rst { 1'1: t[0] <- x, t[1] <- z | *: }
+ *                            | 2'1-, 2'00: t <- 2'10 }
+ *   @posedge clk [q <- t]; @negedge rst [q <- 2'00]
+ */
+enum {
+    R_CLK = IN | 0,
+    R_RST = IN | 1,
+    R_S0 = IN | 2,
+    R_S1 = IN | 3,
+    R_D0 = IN | 4,
+    R_D1 = IN | 5,
+    R_C0 = IN | 6,
+    R_C1 = IN | 7,
+    R_CX = IN | 8,
+    R_CZ = IN | 9,
+    R_Q0 = OUT | 0,
+    R_Q1 = OUT | 1,
+    R_T0 = OUT | 2,
+    R_T1 = OUT | 3,
+};
+
+static void rich_body(body_buf *buf) {
+    memset(buf, 0, sizeof *buf);
+    const odin3_pbit pbits[] = {R_T0, R_T1, R_Q0, R_Q1,  R_S0, R_S1, R_C1, R_C0, R_T0,
+                                R_T1, R_D0, R_D1, R_RST, ANY,  R_C1, R_C0, R_C0, R_T0,
+                                R_T1, R_C0, R_C1, R_C1,  R_T0, R_CX, R_T1, R_CZ, R_Q0,
+                                R_Q1, R_T0, R_T1, R_Q0,  R_Q1, R_C0, R_C0};
+    memcpy(buf->pbits, pbits, sizeof pbits);
+    const odin3_pspan compares[] = {{6, 2}, {13, 2}, {15, 2}, {21, 1}};
+    memcpy(buf->compares, compares, sizeof compares);
+    const odin3_proc_action actions[] = {{{0, 2}, {2, 2}, {0}},   {{8, 2}, {10, 2}, {0}},
+                                         {{17, 2}, {19, 2}, {0}}, {{22, 1}, {23, 1}, {0}},
+                                         {{24, 1}, {25, 1}, {0}}, {{26, 2}, {28, 2}, {0}},
+                                         {{30, 2}, {32, 2}, {0}}};
+    memcpy(buf->actions, actions, sizeof actions);
+    const odin3_proc_case cases[] = {{0, 0, 0, 1, 0, 1, {0}},
+                                     {0, 1, 1, 1, 1, 1, {0}},
+                                     {1, 2, 2, 1, 2, 0, {0}},
+                                     {3, 1, 3, 2, 2, 0, {0}},
+                                     {4, 0, 5, 0, 2, 0, {0}}};
+    memcpy(buf->cases, cases, sizeof cases);
+    buf->switches[0] = (odin3_proc_switch){{4, 2}, 1, 2, 0, {0}};
+    buf->switches[1] = (odin3_proc_switch){
+        {12, 1}, 3, 2, ODIN3_SWITCH_FULL_CASE | ODIN3_SWITCH_PARALLEL_CASE, {0}};
+    buf->syncs[0] = (odin3_proc_sync){ODIN3_SYNC_POSEDGE, R_CLK, 5, 1};
+    buf->syncs[1] = (odin3_proc_sync){ODIN3_SYNC_NEGEDGE, R_RST, 6, 1};
+    link_body(buf, (body_counts){34, 4, 7, 5, 2, 2});
+}
+
+/* The rich body's node on fresh wires and constant nets, its pins in net-ID order. */
+static odin3_node_id rich_node(void) {
+    odin3_net_id in[10];
+    odin3_net_id outs[4];
+    in[0] = wire1("clk");
+    in[1] = wire1("rst");
+    odin3_wire_id wires[4] = {new_wire("s", 2), new_wire("d", 2), new_wire("q", 2),
+                              new_wire("t", 2)};
+    for (uint32_t bit = 0; bit < 2; bit++) {
+        in[2 + bit] = odin3_wire_net(module, wires[0], bit);
+        in[4 + bit] = odin3_wire_net(module, wires[1], bit);
+        outs[bit] = odin3_wire_net(module, wires[2], bit);
+        outs[2 + bit] = odin3_wire_net(module, wires[3], bit);
+    }
+    const char *const consts[] = {"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"};
+    for (uint32_t i = 0; i < 4; i++) {
+        in[6 + i] = const_net(consts[i]);
+    }
+    body_buf buf;
+    rich_body(&buf);
+    odin3_value params[3] = {odin3_value_int(10), odin3_value_int(4), {0}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_proc_body_pack(arena, &buf.body, &params[ODIN3_PROC_P_BODY]));
+    odin3_node_spec spec = {proc_type, 0, prov, params, 3};
+    odin3_netvec ports[2] = {{in, 10}, {outs, 4}};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &node));
+    return node;
+}
+
+static void test_roundtrip_identity_rich(void) {
+    roundtrip(rich_node());
+}
+
 /* Encode copies the attributes onto the new node. */
 static void test_encode_keeps_attrs(void) {
     p_nets nets;
@@ -691,6 +778,56 @@ static void test_sig_sort_unify(void) {
                                 SIG(&pw, sn.b, ODIN3_PW_SX, ODIN3_PW_S1, sn.b, ODIN3_PW_S1), &out));
     expect_sig(&pw, out, (const odin3_pw_bit[]){ODIN3_PW_S1, ODIN3_PW_SX, sn.b}, 3);
     TEST_ASSERT_EQUAL_UINT32(0, mctx.touched.len);
+    odin3_pw_free(&pw);
+}
+
+/*
+ * sort_unify orders by (wire, bit), not by net ID (review M6): a net with no wire made first sorts
+ * last, and a 2-bit wire whose bit 0 is the later net sorts bit 0 first.
+ */
+static void test_sig_sort_unify_by_wire_bit(void) {
+    odin3_net_id unnamed = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, prov, &unnamed));
+    odin3_net_id net_a = wire1("a");
+    odin3_net_id early = {0};
+    odin3_net_id late = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, prov, &early));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, 0, prov, &late));
+    odin3_wire_spec spec = {intern("w"), 1, 0, false, prov};
+    const odin3_net_id bits[2] = {late, early}; /* bit 0 is the later net */
+    odin3_wire_id wire = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(module, &spec, bits, &wire));
+    odin3_pw pw;
+    pw_empty(&pw);
+    odin3_pw_sig out = {0, 0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_pw_sig_sort_unify(&mctx, &pw, SIG(&pw, unnamed.v, early.v, net_a.v, late.v), &out));
+    expect_sig(&pw, out, (const odin3_pw_bit[]){net_a.v, late.v, early.v, unnamed.v}, 4);
+    odin3_pw_free(&pw);
+}
+
+/* Empty signals on an empty working form give empty runs, not out of memory (review M1). */
+static void test_sig_empty_runs(void) {
+    odin3_pw pw;
+    pw_empty(&pw);
+    odin3_pw_sig empty = {0, 0};
+    odin3_pw_sig out = {1, 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pw_sig_new(&pw, NULL, 0, &out));
+    TEST_ASSERT_EQUAL_UINT32(0, out.len);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pw_sig_sort_unify(&mctx, &pw, empty, &out));
+    TEST_ASSERT_EQUAL_UINT32(0, out.len);
+    odin3_pw_replace req = {empty, empty, empty, empty};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pw_sig_replace(&mctx, &pw, &req, &out));
+    TEST_ASSERT_EQUAL_UINT32(0, out.len);
+    odin3_pw_pair pair = {{1, 1}, {1, 1}};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_pw_sig_remove2(&mctx, &pw, (odin3_pw_pair){empty, empty}, empty, &pair));
+    TEST_ASSERT_EQUAL_UINT32(0, pair.a.len + pair.b.len);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_pw_sig_extract(&mctx, &pw, (odin3_pw_pair){empty, empty}, empty, &out));
+    TEST_ASSERT_EQUAL_UINT32(0, out.len);
+    TEST_ASSERT_EQUAL_UINT32(0, pw.bits.len);
     odin3_pw_free(&pw);
 }
 
@@ -1213,6 +1350,7 @@ int main(void) {
     RUN_TEST(test_decode_refusals);
     RUN_TEST(test_roundtrip_identity_p1);
     RUN_TEST(test_roundtrip_identity_p2);
+    RUN_TEST(test_roundtrip_identity_rich);
     RUN_TEST(test_encode_keeps_attrs);
     RUN_TEST(test_encode_after_edit);
     RUN_TEST(test_sig_replace_remove2_extract);
@@ -1220,6 +1358,8 @@ int main(void) {
     RUN_TEST(test_sig_predicates);
     RUN_TEST(test_sig_equal);
     RUN_TEST(test_sig_sort_unify);
+    RUN_TEST(test_sig_sort_unify_by_wire_bit);
+    RUN_TEST(test_sig_empty_runs);
     RUN_TEST(test_sig_new_from_own_bits);
     RUN_TEST(test_bit_key);
     RUN_TEST(test_bit_key_merged);

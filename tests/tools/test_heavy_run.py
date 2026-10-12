@@ -1,13 +1,19 @@
 """Tests for tools/heavy-run, tools/build-locked and odin3_add_sweep_test (2E plan point (p), ruling
-C1), over fake flock, systemctl and systemd-run scripts on PATH that log their argv.
+C1).
 
-The live probe at the end runs the real heavy-run (`true`) and reads the slice's cap back; it is
-skipped without a systemd --user manager, and when the heavy lock stays busy for 10 s.
+Every test runs under a private ODIN3_HEAVY_DIR, so the gate never touches the machine's heavy
+lock or its queued flags. The argv tests use fake flock, systemctl and systemd-run scripts on PATH
+that log their argv; the lock tests use the real flock(1) with the fake systemd-run (which runs
+the job in place) to show that the lock is held for the job's whole life. The live probe at the
+end runs the real heavy-run (`true`) and reads the slice's cap back; it is skipped without a
+systemd --user manager.
 """
 
 from __future__ import annotations
 
+import fcntl
 import os
+import re
 import shutil
 import signal
 import stat
@@ -15,38 +21,41 @@ import subprocess
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 
 from . import helpers
 
 HEAVY_RUN = helpers.REPO_ROOT / "tools" / "heavy-run"
 BUILD_LOCKED = helpers.REPO_ROOT / "tools" / "build-locked"
-DEFAULT_DIR = Path("/tmp/claude-1000")
 BASH = shutil.which("bash") or "/bin/bash"
 SKIP = 77
+WAIT_S = 10.0
 
 # Each fake appends one line per call to $FAKE_LOG: its name and argv, then key=value facts.
 FAKE_SYSTEMCTL = """#!{bash}
 echo "systemctl $*" >>"$FAKE_LOG"
 exit "${{FAKE_SYSTEMCTL_RC:-0}}"
 """
-# flock: heavy-run calls `flock -x -w N 9` on its lock descriptor; build-locked execs
-# `flock -s LOCK cmake --build ...` (logged, not run).
+# flock: heavy-run calls `flock -x -w N 9` on its lock descriptor; build-locked probes with
+# `flock -s -n LOCK true`, then execs `flock -s LOCK cmake --build ...` (logged, not run).
 FAKE_FLOCK = """#!{bash}
-dir=${{ODIN3_HEAVY_DIR:-/tmp/claude-1000}}
 flag=no
-[[ -e $dir/odin3-heavy.queued.$PPID ]] && flag=yes
+[[ -e $ODIN3_HEAVY_DIR/odin3-heavy.queued.$PPID ]] && flag=yes
 fd9=$(readlink /proc/$$/fd/9 2>/dev/null || echo none)
 echo "flock $* | flag=$flag fd9=$fd9" >>"$FAKE_LOG"
 exit "${{FAKE_FLOCK_RC:-0}}"
 """
+# systemd-run runs the job in place, as the real `--scope` does (the job keeps fd 9).
 FAKE_SYSTEMD_RUN = """#!{bash}
-dir=${{ODIN3_HEAVY_DIR:-/tmp/claude-1000}}
 flag=no
-[[ -n $(ls "$dir"/odin3-heavy.queued.$PPID 2>/dev/null) ]] && flag=yes
+[[ -n $(ls "$ODIN3_HEAVY_DIR"/odin3-heavy.queued.$PPID 2>/dev/null) ]] && flag=yes
 echo "systemd-run $* | slice=${{ODIN3_HEAVY_SLICE:-}} flag=$flag" >>"$FAKE_LOG"
 while [[ $1 == -* ]]; do shift; done
 exec "$@"
+"""
+FAKE_CMAKE = """#!{bash}
+echo "cmake $*" >>"$FAKE_LOG"
 """
 
 
@@ -55,8 +64,23 @@ def _write_exec(path: Path, text: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def _lock_free(lock: Path) -> bool:
+    """True when nobody holds lock: a non-blocking exclusive flock(1) succeeds."""
+    run = subprocess.run(["flock", "-n", "-x", str(lock), "true"], timeout=30, check=False)
+    return run.returncode == 0
+
+
+def _wait_for(cond: Callable[[], bool], what: str) -> None:
+    deadline = time.monotonic() + WAIT_S
+    while time.monotonic() < deadline:
+        if cond():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for {what}")
+
+
 class FakeTools(unittest.TestCase):
-    """A temporary bin directory of fakes put first on PATH, and their log."""
+    """A temporary bin directory of fakes first on PATH, their log, and a private heavy dir."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -66,15 +90,23 @@ class FakeTools(unittest.TestCase):
         _write_exec(self.bin / "systemctl", FAKE_SYSTEMCTL)
         _write_exec(self.bin / "flock", FAKE_FLOCK)
         _write_exec(self.bin / "systemd-run", FAKE_SYSTEMD_RUN)
+        _write_exec(self.bin / "cmake", FAKE_CMAKE)
         self.log = self.dir / "fake.log"
+        self.heavy = self.dir / "heavy"
+        self.lock = self.heavy / "odin3-heavy.lock"
         self.env = {
             k: v for k, v in os.environ.items() if not k.startswith(("ODIN3_HEAVY", "FAKE_"))
         }
         self.env["PATH"] = f"{self.bin}:{os.environ.get('PATH', '/usr/bin:/bin')}"
         self.env["FAKE_LOG"] = str(self.log)
+        self.env["ODIN3_HEAVY_DIR"] = str(self.heavy)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
+
+    def real_flock(self) -> None:
+        """Use the real flock(1) instead of the fake."""
+        (self.bin / "flock").unlink()
 
     def calls(self) -> list[str]:
         return self.log.read_text().splitlines() if self.log.exists() else []
@@ -89,68 +121,64 @@ class HeavyRunTest(FakeTools):
         run = self.run_tool(HEAVY_RUN, "echo", "hi", ODIN3_HEAVY_OK="1")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stdout, "hi\n")
-        self.assertEqual(self.calls(), [
-            "systemctl --user set-property --runtime odin3-heavy.slice MemoryMax=6G "
-            "MemorySwapMax=0",
-            # the flag is written before the wait, on the lock's descriptor
-            f"flock -x -w 14400 9 | flag=yes fd9={DEFAULT_DIR}/odin3-heavy.lock",
-            # and removed once the lock is held
-            "systemd-run --user --scope -q --slice=odin3-heavy.slice echo hi"
-            " | slice=odin3-heavy.slice flag=no",
-        ])
+        calls = self.calls()
+        self.assertEqual(len(calls), 4, calls)
+        self.assertEqual(calls[0], "systemctl --user set-property --runtime odin3-heavy.slice "
+                                   "MemoryMax=6G MemorySwapMax=0")
+        # the flag is written before the wait, which is on the lock's descriptor ...
+        self.assertEqual(calls[1], f"flock -x -w 14400 9 | flag=yes fd9={self.lock}")
+        # ... and removed once the lock is held; the job runs in a named scope of the slice
+        unit = re.fullmatch(r"systemd-run --user --scope -q --unit=(odin3-heavy-[0-9]+) "
+                            r"--slice=odin3-heavy\.slice echo hi \| slice=odin3-heavy\.slice "
+                            r"flag=no", calls[2])
+        self.assertIsNotNone(unit, calls[2])
+        assert unit is not None
+        self.assertEqual(calls[3], f"systemctl --user stop {unit.group(1)}.scope")
+        self.assertEqual(sorted(p.name for p in self.heavy.iterdir()), ["odin3-heavy.lock"])
 
     def test_the_flag_names_the_pid(self) -> None:
-        heavy_dir = self.dir / "heavy"
         script = self.dir / "show-flag"
         _write_exec(script, '#!{bash}\nls "$ODIN3_HEAVY_DIR" >>"$FAKE_LOG"\n')
         _write_exec(self.bin / "flock", '#!{bash}\nls "$ODIN3_HEAVY_DIR" >>"$FAKE_LOG"\n'
                     'cat "$ODIN3_HEAVY_DIR"/odin3-heavy.queued.* >>"$FAKE_LOG"\n')
-        run = self.run_tool(HEAVY_RUN, str(script), ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_DIR=str(heavy_dir))
+        run = self.run_tool(HEAVY_RUN, str(script), ODIN3_HEAVY_OK="1")
         self.assertEqual(run.returncode, 0, run.stderr)
         calls = self.calls()
         flag = next(line for line in calls if line.startswith("odin3-heavy.queued."))
         self.assertEqual(calls[calls.index(flag) + 1], flag.rsplit(".", 1)[1])  # its PID inside
-        self.assertEqual(calls[-1], "odin3-heavy.lock")  # the job runs without the flag
-        self.assertEqual(sorted(p.name for p in heavy_dir.iterdir()), ["odin3-heavy.lock"])
+        self.assertEqual(calls[-2], "odin3-heavy.lock")  # the job runs without the flag
+        self.assertEqual(sorted(p.name for p in self.heavy.iterdir()), ["odin3-heavy.lock"])
 
     def test_lock_timeout_skips(self) -> None:
-        heavy_dir = self.dir / "heavy"
-        run = self.run_tool(HEAVY_RUN, "echo", "hi", ODIN3_HEAVY_OK="1", FAKE_FLOCK_RC="1",
-                            ODIN3_HEAVY_DIR=str(heavy_dir))
+        run = self.run_tool(HEAVY_RUN, "echo", "hi", ODIN3_HEAVY_OK="1", FAKE_FLOCK_RC="1")
         self.assertEqual(run.returncode, SKIP)
         self.assertEqual(run.stderr, "heavy-run: lock busy for 14400 s; skipped\n")
         self.assertFalse(any(line.startswith("systemd-run") for line in self.calls()))
-        self.assertEqual([p.name for p in heavy_dir.iterdir()], ["odin3-heavy.lock"])
+        self.assertEqual([p.name for p in self.heavy.iterdir()], ["odin3-heavy.lock"])
 
     def test_wait_is_odin3_heavy_wait(self) -> None:
         run = self.run_tool(HEAVY_RUN, "true", ODIN3_HEAVY_OK="1", ODIN3_HEAVY_WAIT="5",
-                            FAKE_FLOCK_RC="1", ODIN3_HEAVY_DIR=str(self.dir / "heavy"))
+                            FAKE_FLOCK_RC="1")
         self.assertEqual(run.returncode, SKIP)
         self.assertIn("lock busy for 5 s", run.stderr)
         self.assertTrue(self.calls()[1].startswith("flock -x -w 5 9 "))
 
     def test_job_status_is_returned(self) -> None:
-        run = self.run_tool(HEAVY_RUN, "sh", "-c", "exit 1", ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_DIR=str(self.dir / "heavy"))
+        run = self.run_tool(HEAVY_RUN, "sh", "-c", "exit 1", ODIN3_HEAVY_OK="1")
         self.assertEqual(run.returncode, 1)  # a job's exit 1 is not a busy lock
 
     def test_xl_slice(self) -> None:
-        heavy_dir = str(self.dir / "heavy")
-        run = self.run_tool(HEAVY_RUN, "--xl", "true", ODIN3_HEAVY_OK="1",
-                            ODIN3_HEAVY_DIR=heavy_dir)
+        run = self.run_tool(HEAVY_RUN, "--xl", "true", ODIN3_HEAVY_OK="1")
         self.assertEqual(run.returncode, SKIP)
         self.assertIn("ODIN3_HEAVY_XL_OK", run.stderr)
         self.assertEqual(self.calls(), [])
-        run = self.run_tool(HEAVY_RUN, "--xl", "true", ODIN3_HEAVY_OK="1", ODIN3_HEAVY_XL_OK="1",
-                            ODIN3_HEAVY_DIR=heavy_dir)
+        run = self.run_tool(HEAVY_RUN, "--xl", "true", ODIN3_HEAVY_OK="1", ODIN3_HEAVY_XL_OK="1")
         self.assertEqual(run.returncode, 0, run.stderr)
         calls = self.calls()
         self.assertEqual(calls[0], "systemctl --user set-property --runtime odin3-heavyxl.slice "
                                    "MemoryMax=9G MemorySwapMax=0")
-        self.assertTrue(calls[2].startswith(
-            "systemd-run --user --scope -q --slice=odin3-heavyxl.slice true | "
-            "slice=odin3-heavyxl.slice"))
+        self.assertRegex(calls[2], r"^systemd-run --user --scope -q --unit=odin3-heavy-[0-9]+ "
+                                   r"--slice=odin3-heavyxl\.slice true \| slice=odin3-heavyxl")
 
     def test_skips_without_ok(self) -> None:
         run = self.run_tool(HEAVY_RUN, "true")
@@ -166,8 +194,7 @@ class HeavyRunTest(FakeTools):
         self.assertEqual(run.stderr, "heavy-run: systemd-run not found; skipped\n")
 
     def test_skips_without_a_user_manager(self) -> None:
-        run = self.run_tool(HEAVY_RUN, "true", ODIN3_HEAVY_OK="1", FAKE_SYSTEMCTL_RC="1",
-                            ODIN3_HEAVY_DIR=str(self.dir / "heavy"))
+        run = self.run_tool(HEAVY_RUN, "true", ODIN3_HEAVY_OK="1", FAKE_SYSTEMCTL_RC="1")
         self.assertEqual(run.returncode, SKIP)
         self.assertIn("cannot set up odin3-heavy.slice", run.stderr)
 
@@ -175,49 +202,153 @@ class HeavyRunTest(FakeTools):
         run = self.run_tool(HEAVY_RUN, ODIN3_HEAVY_OK="1")
         self.assertEqual(run.returncode, 2)
 
+    def test_default_dir(self) -> None:
+        for tool in (HEAVY_RUN, BUILD_LOCKED):
+            self.assertIn("dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}", tool.read_text())
+
+
+class NestingTest(FakeTools):
+    """Inside a heavy run (ODIN3_HEAVY_SLICE set) heavy-run runs the job as is; builds refuse."""
+
+    def test_nested_heavy_run_runs_in_place(self) -> None:
+        run = self.run_tool(HEAVY_RUN, "echo", "inner", ODIN3_HEAVY_SLICE="odin3-heavy.slice")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, "inner\n")
+        self.assertEqual(self.calls(), [])  # no slice set-up, no lock, no scope
+
+    def test_nested_xl(self) -> None:
+        run = self.run_tool(HEAVY_RUN, "--xl", "true", ODIN3_HEAVY_SLICE="odin3-heavy.slice")
+        self.assertEqual(run.returncode, 2)
+        self.assertEqual(run.stderr, "heavy-run: --xl inside odin3-heavy.slice (6G): run the xl "
+                                     "job on its own\n")
+        run = self.run_tool(HEAVY_RUN, "--xl", "echo", "xl",
+                            ODIN3_HEAVY_SLICE="odin3-heavyxl.slice")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, "xl\n")
+
+    def test_build_locked_refused_inside(self) -> None:
+        run = self.run_tool(BUILD_LOCKED, "--preset", "debug",
+                            ODIN3_HEAVY_SLICE="odin3-heavy.slice")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("build-locked: refused inside a heavy run (odin3-heavy.slice)", run.stderr)
+        self.assertEqual(self.calls(), [])
+
+    def test_nested_with_the_real_lock(self) -> None:
+        """A heavy run whose job calls heavy-run and build-locked: no wait on its own lock."""
+        self.real_flock()
+        inner = (f"{BASH} {HEAVY_RUN} echo inner && "
+                 f"{{ {BASH} {BUILD_LOCKED} --preset debug; echo build=$?; }}")
+        start = time.monotonic()
+        run = self.run_tool(HEAVY_RUN, BASH, "-c", inner, ODIN3_HEAVY_OK="1",
+                            ODIN3_HEAVY_WAIT="5")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, "inner\nbuild=2\n")
+        self.assertLess(time.monotonic() - start, 5.0)
+
+
+class RealLockTest(FakeTools):
+    """The real flock(1): the job holds the lock for its whole life, the wrapper's fate aside."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.real_flock()
+
+    def test_lock_is_held_by_the_job_and_released_after(self) -> None:
+        probe = f"flock -n -x {self.lock} true && echo free || echo held"
+        run = self.run_tool(HEAVY_RUN, BASH, "-c", probe, ODIN3_HEAVY_OK="1")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout, "held\n")
+        self.assertTrue(_lock_free(self.lock))
+
+    def test_lock_survives_a_sigkilled_wrapper(self) -> None:
+        pid_file = self.dir / "job.pid"
+        go = self.dir / "go"
+        job = f"echo $$ >{pid_file}; while [ ! -e {go} ]; do sleep 0.05; done"
+        wrapper = subprocess.Popen([BASH, str(HEAVY_RUN), BASH, "-c", job],
+                                   env={**self.env, "ODIN3_HEAVY_OK": "1"},
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            _wait_for(pid_file.exists, "the job to start")
+            self.assertFalse(_lock_free(self.lock))
+            wrapper.send_signal(signal.SIGKILL)
+            wrapper.wait(timeout=30)
+            self.assertFalse(_lock_free(self.lock))  # the running job still holds it
+        finally:
+            go.touch()
+            wrapper.kill()
+            wrapper.wait(timeout=30)
+        _wait_for(lambda: _lock_free(self.lock), "the lock to be released")
+
+    def test_busy_lock_skips(self) -> None:
+        self.heavy.mkdir()
+        holder = os.open(self.lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            run = self.run_tool(HEAVY_RUN, "echo", "never", ODIN3_HEAVY_OK="1",
+                                ODIN3_HEAVY_WAIT="1")
+        finally:
+            os.close(holder)
+        self.assertEqual(run.returncode, SKIP)
+        self.assertEqual(run.stdout, "")
+        self.assertEqual(run.stderr, "heavy-run: lock busy for 1 s; skipped\n")
+        self.assertEqual([p.name for p in self.heavy.iterdir()], ["odin3-heavy.lock"])
+
+    def test_build_waits_for_the_holder(self) -> None:
+        self.heavy.mkdir()
+        holder = os.open(self.lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            build = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
+                                     env=self.env, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
+            time.sleep(1.0)
+            self.assertIsNone(build.poll())
+            self.assertEqual(self.calls(), [])
+        finally:
+            os.close(holder)
+        _, err = build.communicate(timeout=30)
+        self.assertEqual(build.returncode, 0)
+        self.assertEqual(err, f"build-locked: waiting for the heavy run that holds {self.lock}\n")
+        self.assertEqual(self.calls(), ["cmake --build --preset debug"])
+
 
 class BuildLockedTest(FakeTools):
     def test_waits_for_a_live_queued_heavy_run(self) -> None:
-        heavy_dir = self.dir / "heavy"
-        heavy_dir.mkdir()
+        self.heavy.mkdir()
         dead = subprocess.Popen(["true"])
         dead.wait()
-        (heavy_dir / f"odin3-heavy.queued.{dead.pid}").write_text(f"{dead.pid}\n")
-        live = subprocess.Popen(["sleep", "30"])
+        dead_flag = self.heavy / f"odin3-heavy.queued.{dead.pid}"
+        dead_flag.write_text(f"{dead.pid}\n")
+        # a live PID that is not a heavy-run (a reused PID): stale too
+        other = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        other_flag = self.heavy / f"odin3-heavy.queued.{other.pid}"
+        other_flag.write_text(f"{other.pid}\n")
+        live = subprocess.Popen([BASH, "-c", "exec -a heavy-run sleep 30"],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:
-            (heavy_dir / f"odin3-heavy.queued.{live.pid}").write_text(f"{live.pid}\n")
+            (self.heavy / f"odin3-heavy.queued.{live.pid}").write_text(f"{live.pid}\n")
             build = subprocess.Popen(
                 [BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
-                env={**self.env, "ODIN3_HEAVY_DIR": str(heavy_dir), "ODIN3_HEAVY_POLL": "0.1"},
+                env={**self.env, "ODIN3_HEAVY_POLL": "0.1"},
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             time.sleep(1.0)
             self.assertIsNone(build.poll())  # still waiting for the live heavy run
             self.assertEqual(self.calls(), [])
+            self.assertFalse(dead_flag.exists())
+            self.assertFalse(other_flag.exists())
             live.send_signal(signal.SIGTERM)
             live.wait()
             _, err = build.communicate(timeout=30)
         finally:
-            live.kill()
-            live.wait()
+            for proc in (live, other):
+                proc.kill()
+                proc.wait()
         self.assertEqual(build.returncode, 0)
         self.assertEqual(err, f"build-locked: waiting for queued heavy run {live.pid}\n")
         self.assertEqual(self.calls(), [
-            f"flock -s {heavy_dir}/odin3-heavy.lock cmake --build --preset debug"
-            " | flag=no fd9=none"])
-
-    def test_default_lock(self) -> None:
-        if any(DEFAULT_DIR.glob("odin3-heavy.queued.*")):
-            self.skipTest("a heavy run is queued on this machine")
-        try:
-            run = subprocess.run([BASH, str(BUILD_LOCKED), "--preset", "debug", "-j4"],
-                                 env=self.env, capture_output=True, text=True, timeout=30,
-                                 check=False)
-        except subprocess.TimeoutExpired:
-            self.skipTest("a heavy run was queued meanwhile")
-        self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(self.calls(), [
-            f"flock -s {DEFAULT_DIR}/odin3-heavy.lock cmake --build --preset debug -j4"
-            " | flag=no fd9=none"])
+            f"flock -s -n {self.lock} true | flag=no fd9=none",
+            f"flock -s {self.lock} cmake --build --preset debug | flag=no fd9=none"])
 
 
 class SweepTestFunctionTest(unittest.TestCase):
@@ -247,9 +378,10 @@ class LiveProbeTest(unittest.TestCase):
         if not _user_manager():
             self.skipTest("no systemd-run --user")
         env = {k: v for k, v in os.environ.items() if not k.startswith("ODIN3_HEAVY")}
-        run = subprocess.run([BASH, str(HEAVY_RUN), "true"],
-                             env={**env, "ODIN3_HEAVY_OK": "1", "ODIN3_HEAVY_WAIT": "10"},
-                             capture_output=True, text=True, timeout=120, check=False)
+        with tempfile.TemporaryDirectory() as heavy:  # never the machine's lock
+            run = subprocess.run([BASH, str(HEAVY_RUN), "true"],
+                                 env={**env, "ODIN3_HEAVY_OK": "1", "ODIN3_HEAVY_DIR": heavy},
+                                 capture_output=True, text=True, timeout=120, check=False)
         if run.returncode == SKIP:
             self.skipTest(run.stderr.strip())
         self.assertEqual(run.returncode, 0, run.stderr)

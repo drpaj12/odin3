@@ -3,30 +3,49 @@
 #
 # Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
 #
-# Writer preference first: while any $DIR/odin3-heavy.queued.<pid> names a live PID (a
-# tools/heavy-run waiting for the lock), it waits, so a stream of overlapping builds cannot starve
-# a queued heavy job; a flag naming a dead PID (a heavy-run killed with SIGKILL) is ignored. Then
-# it runs `exec flock -s $DIR/odin3-heavy.lock cmake --build <args>`: builds share the lock with
-# each other and exclude a heavy run, which takes it exclusively. Exits with cmake's status.
+# - Refused (exit 2) inside a heavy run (ODIN3_HEAVY_SLICE set): its shared lock would wait forever
+#   on the heavy run's exclusive one.
+# - Writer preference: while any $DIR/odin3-heavy.queued.<pid> names a live tools/heavy-run (one
+#   waiting for the lock), it waits, so a stream of overlapping builds cannot starve a queued
+#   heavy job. A flag whose PID is dead, or is now another program (a reused PID after a
+#   heavy-run was SIGKILLed), is stale: it is removed and ignored.
+# - Then it takes $DIR/odin3-heavy.lock shared: builds share it with each other and exclude a
+#   heavy run, which takes it exclusively. When a heavy run holds it, it says so before waiting,
+#   then runs `exec flock -s $DIR/odin3-heavy.lock cmake --build <args>`; exits with cmake's status.
 #
 # DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only); the flags are polled
-# every ODIN3_HEAVY_POLL seconds (default 5). Never run a build under tools/heavy-run.
+# every ODIN3_HEAVY_POLL seconds (default 5).
 set -uo pipefail
 
+if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
+    echo "build-locked: refused inside a heavy run ($ODIN3_HEAVY_SLICE): the build would wait" \
+        "forever on the heavy lock; build before starting the heavy run" >&2
+    exit 2
+fi
 dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
+lock=$dir/odin3-heavy.lock
 poll=${ODIN3_HEAVY_POLL:-5}
 mkdir -p "$dir" || exit 2
 
-# The PID of the first queued heavy run that is still alive, or nothing.
+# True when pid is a running tools/heavy-run.
+is_heavy_run() {
+    local cmdline
+    [[ $1 =~ ^[0-9]+$ ]] || return 1
+    cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline") || return 1
+    [[ $cmdline == *heavy-run* ]]
+}
+
+# The PID of the first queued heavy run that is still alive, or nothing; stale flags are removed.
 queued_pid() {
     local flag pid
     for flag in "$dir"/odin3-heavy.queued.*; do
         [[ -e $flag ]] || continue
         pid=${flag##*.}
-        if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        if is_heavy_run "$pid"; then
             echo "$pid"
             return
         fi
+        rm -f "$flag"
     done
 }
 
@@ -38,4 +57,7 @@ while pid=$(queued_pid) && [[ -n $pid ]]; do
     fi
     sleep "$poll"
 done
-exec flock -s "$dir/odin3-heavy.lock" cmake --build "$@"
+if ! flock -s -n "$lock" true; then
+    echo "build-locked: waiting for the heavy run that holds $lock" >&2
+fi
+exec flock -s "$lock" cmake --build "$@"
