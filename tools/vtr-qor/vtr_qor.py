@@ -503,8 +503,10 @@ def update_latest(req: PlanRequest, sets: Sets, *, drift: bool) -> list[str]:
     """After the run (every job's status recorded), per leg of ``req``: a leg key that now holds
     its planned set complete becomes ``latest``; a ``latest`` naming this run's key that is no
     longer complete is retracted (``latest`` is the newest *complete* key, spec §5.2). A drift
-    run (VTR at another commit) is report-only and never moves ``latest``. Returns the lines to
-    log."""
+    run (VTR at another commit) is report-only and never moves ``latest``. A key's planned set
+    grows only after ``latest`` is retracted from it (``qor_sched.write_planned``). A transient
+    read error makes a job look incomplete here, so it may retract ``latest`` until the next run
+    of that key (review N3; accepted). Returns the lines to log."""
     lines = []
     for leg in dict.fromkeys(qor_legs.normalise_leg(name) for name in req.legs):
         jobs = qor_sched.plan_jobs(dataclasses.replace(req, legs=(leg,)), sets)

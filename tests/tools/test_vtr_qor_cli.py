@@ -72,8 +72,14 @@ design = circuit.stem
 root = Path(__file__).resolve().parents[2]
 with (root / "calls.log").open("a") as log:
     log.write(f"{{design}} {{start or 'full'}}\\n")
-if (root / "fail").exists():
+fail = root / "fail"  # empty: every design fails; else the designs named
+if fail.exists() and (not fail.read_text().split() or design in fail.read_text().split()):
     sys.exit(3)
+term = root / "term"  # the designs whose start stops the harness (SIGTERM to its parent)
+if term.exists() and design in term.read_text().split():
+    import os, signal, time
+    os.kill(os.getppid(), signal.SIGTERM)
+    time.sleep(30)
 if (root / "sleep").exists():
     import time
     time.sleep(float((root / "sleep").read_text()))
@@ -627,6 +633,52 @@ class RunTest(CliTestBase):
         self.assertEqual(code, 1, err)
         self.assertFalse(self.latest("P").exists())
         self.assertIn("retracted (no longer complete)", err)
+
+    def test_latest_never_on_a_growing_key(self) -> None:
+        """Review I3 (the reviewer's reproduction): a run that adds spree to the latest key and
+        is stopped (SIGTERM, exit 143) when spree starts leaves no latest on the now incomplete
+        key; status says so. The run that completes the key sets latest again."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        key12 = job.parent.name
+        self.assertTrue(self.latest("P").exists())
+        (self.vtr / "term").write_text("spree\n")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,spree")
+        self.assertEqual(code, 143, err)
+        self.assertEqual(self.load(job.parent / "planned.json"),
+                         {"designs": ["ch_intrinsics", "spree"]})
+        self.assertFalse(self.latest("P").exists())
+        self.assertIn(f"vtr-qor: latest: P {key12} retracted (its planned set grows)",
+                      self.harness_lines())
+        code, out, _ = self.cli("status")
+        self.assertEqual(out, f"{K6} P latest - ok 1 failed 0 age 0d\n")
+        (self.vtr / "term").unlink()
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "spree")[0], 0)
+        self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
+
+    def test_latest_judged_by_planned_set(self) -> None:
+        """Review N1: a key whose planned spree failed stays without latest even when a later
+        run of only its complete design (cached) ends ok."""
+        (self.vtr / "fail").write_text("spree\n")
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,spree")
+        self.assertEqual(code, 1, err)
+        self.assertFalse(self.latest("P").exists())
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertIn("] P ch_intrinsics cached", err)
+        self.assertFalse(self.latest("P").exists())
+
+    def test_no_planned_set_never_complete(self) -> None:
+        """Review N2: a key without planned.json is never complete, so never latest."""
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
+        (job,) = self.job_dirs("P", "ch_intrinsics")
+        self.latest("P").unlink()
+        (job.parent / "planned.json").unlink()
+        req = qor_sched.PlanRequest(legs=("P",), designs=("ch_intrinsics",), arch="k6",
+                                    out=self.out, vtr_root=self.vtr, odin3=self.odin3,
+                                    rerun=False)
+        self.assertEqual(vtr_qor.update_latest(req, SETS, drift=False), [])
+        self.assertFalse(self.latest("P").exists())
 
     def test_latest_per_leg(self) -> None:
         """--leg P,O with O's front end failing: only P's latest."""

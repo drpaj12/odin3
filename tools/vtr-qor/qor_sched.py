@@ -1367,6 +1367,7 @@ def _key_complete(jobs: Sequence[_JobDir], designs: Collection[str] | None) -> b
 
 
 PLANNED = "planned.json"
+LATEST = "latest"
 
 
 def read_planned(key_dir: Path) -> frozenset[str] | None:
@@ -1386,19 +1387,32 @@ def read_planned(key_dir: Path) -> frozenset[str] | None:
     return frozenset(designs)
 
 
-def write_planned(jobs: Sequence[Job]) -> None:
+def write_planned(jobs: Sequence[Job]) -> list[str]:
     """Add each job's design to its leg key's ``planned.json`` (atomic): the key's own planned
-    set, which a key must hold complete to be complete (``latest``, retention)."""
-    keys: dict[Path, set[str]] = {}
+    set, which a key must hold complete to be complete (``latest``, retention).
+
+    A set that grows makes its key incomplete, so a ``latest`` naming that key is retracted
+    first (Task 6 review I3): a run stopped before the new designs complete never leaves
+    ``latest`` on an incomplete key; the run's end sets it again once the key completes.
+    Returns the ``<leg> <key12>`` of each retraction."""
+    keys: dict[Path, tuple[Job, set[str]]] = {}
     for job in jobs:
-        keys.setdefault(job.job_dir.parent, set()).add(job.design)
-    for key_dir, designs in keys.items():
-        if key_dir.is_symlink():
-            raise _symlink_refusal(key_dir)
+        keys.setdefault(job.job_dir.parent, (job, set()))[1].add(job.design)
+    retracted = []
+    for key_dir, (job, designs) in keys.items():
+        for path in (key_dir.parent, key_dir, key_dir.parent / LATEST):
+            if path.is_symlink():
+                raise _symlink_refusal(path)
         key_dir.mkdir(parents=True, exist_ok=True)
-        union = sorted(designs | (read_planned(key_dir) or frozenset()))
-        if read_planned(key_dir) != frozenset(union):
-            _write_atomic(key_dir / PLANNED, json.dumps({"designs": union}, indent=1) + "\n")
+        before = read_planned(key_dir) or frozenset()
+        union = sorted(designs | before)
+        if frozenset(union) == before:
+            continue
+        if _read_word(key_dir.parent / LATEST) == key_dir.name:
+            qor_heavy.safe_rmtree(key_dir.parent / LATEST, job_out_root(job))
+            retracted.append(f"{job.leg} {key_dir.name}")
+        _write_atomic(key_dir / PLANNED, json.dumps({"designs": union}, indent=1) + "\n")
+    return retracted
 
 
 def _key_when(key: Path, jobs: Sequence[_JobDir]) -> float:
@@ -1631,9 +1645,10 @@ def run_jobs(jobs: Sequence[Job], opts: RunOptions, finish: Finish) -> RunSummar
     _check_layout(jobs, opts)
     ordered = _grouped(jobs)
     _heavy_scope(opts)
-    write_planned(ordered)
     log = HarnessLog(opts.out)
     opts.log = log
+    for retracted in write_planned(ordered):
+        log.emit(f"latest: {retracted} retracted (its planned set grows)")
     began = opts.clock()
     run = _Run(ordered, opts, finish, log)
     with _signals_as_exit():

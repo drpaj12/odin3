@@ -1846,6 +1846,24 @@ class FixRound6Test(RetentionBase):
         self.run_jobs([self.job("mcml", [{}], group="B")], self.opts())
         self.assertEqual(qor_sched.read_planned(self.leg_dir() / KEY12), both | {"mcml"})
 
+    def test_growing_planned_set_retracts_latest(self) -> None:
+        """Review I3: latest naming a key is retracted before that key's planned set grows,
+        and kept when the set does not grow."""
+        key = self.leg_dir() / KEY12
+        key.mkdir(parents=True)
+        (key / "planned.json").write_text('{"designs": ["sha"]}')
+        latest = self.leg_dir() / "latest"
+        latest.write_text(f"{KEY12}\n")
+        self.assertEqual(qor_sched.write_planned([self.job("sha", [{}])]), [])
+        self.assertTrue(latest.exists())
+        self.assertEqual(qor_sched.write_planned([self.job("mcml", [{}], group="B")]),
+                         [f"P {KEY12}"])
+        self.assertFalse(latest.exists())
+        self.assertEqual(qor_sched.read_planned(key), frozenset({"sha", "mcml"}))
+        latest.write_text("aaaaaaaaaaaa\n")  # another key's latest is left alone
+        self.assertEqual(qor_sched.write_planned([self.job("ch_intrinsics", [{}])]), [])
+        self.assertEqual(latest.read_text(), "aaaaaaaaaaaa\n")
+
     def test_read_planned_refusals(self) -> None:
         key = self.leg_dir() / "aaaaaaaaaaaa"
         key.mkdir(parents=True)
