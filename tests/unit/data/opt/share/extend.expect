@@ -1,0 +1,5 @@
+# yosys 0.55 (VTR build): ulimit -v 3000000; yosys -q -p 'read_rtlil extend.il; opt_share; write_rtlil'
+cell $add A_WIDTH=8 B_WIDTH=16 Y_WIDTH=16
+cell $neg A_WIDTH=16 Y_WIDTH=16
+cell $pmux WIDTH=16 S_WIDTH=3
+cell $pmux WIDTH=16 S_WIDTH=3

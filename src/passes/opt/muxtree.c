@@ -873,6 +873,7 @@ static odin3_status rewrite_mux(mux_state *ms, uint32_t index) {
     }
     odin3_status st = ODIN3_OK;
     if (ms->live.len == 0) {
+        odin3_kit_note_outputs(ms->oc, (odin3_node_id){mi->node});
         st = odin3_node_delete(ms->m, (odin3_node_id){mi->node});
         ms->oc->changed = st == ODIN3_OK ? true : ms->oc->changed;
     } else if (ms->live.len == 1) {

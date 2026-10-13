@@ -1,0 +1,9 @@
+# Odin III's Phase 2 opt script (2F spec section 3, OP-3; Parmys lines 1-4 and 6 of synthesis.tcl).
+# `proc` ends with opt_expr -keepdc (step F), so no separate opt_expr follows it. `opt` never
+# compacts (IR-6 unchanged, PHASE2 #19): the script compacts after it.
+opt_expr
+opt_clean
+opt -nodffe -nosdff
+proc
+opt
+compact

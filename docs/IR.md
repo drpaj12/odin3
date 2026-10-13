@@ -88,6 +88,7 @@ skip dead objects. Because churn (opt; lower → abc → read-back loops) leaves
   (so output order is unchanged) and frees dead slots;
 - it invalidates every module-local ID held outside the IR, including C ABI handles; only the
   pass manager calls it, at named pipeline points (after `opt`, after each ABC read-back);
+  `compact` runs as the pass `compact`;
 - before freeing, it appends one **tombstone** per dead node, net and wire (module, kind, cell
   type, name, prov; for a node also its parameters and the names of the nets its pins were last
   connected to, PHASE1 #14) to a design-global tombstone table, so history keeps pointing at what existed

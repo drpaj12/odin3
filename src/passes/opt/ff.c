@@ -579,10 +579,12 @@ static odin3_status tie_nets(odin3_opt_ctx *oc, const odin3_net_id *nets, const 
             continue;
         }
         oc->changed = true;
+        odin3_kit_note_change(oc);
         if (oc->defer_ties) {
             odin3_kit_defer_tie(oc, src[i], nets[i]);
             continue;
         }
+        odin3_kit_note_net(oc, nets[i]);
         odin3_status st = odin3_net_merge(oc->module, (odin3_net_pair){src[i], nets[i]});
         if (st != ODIN3_OK) {
             return st;
@@ -1039,6 +1041,7 @@ static odin3_status shrink_commit(odin3_opt_ctx *oc, shrink_job *job) {
         return st;
     }
     oc->changed = true;
+    odin3_kit_note_change(oc);
     st = tie_nets(oc, job->nets, job->src, job->n_tie);
     st = st == ODIN3_OK && job->made.v != 0 && job->name != 0
              ? odin3_node_rename(oc->module, job->made, job->name)
