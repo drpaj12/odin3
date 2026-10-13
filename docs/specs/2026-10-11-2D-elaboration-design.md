@@ -388,6 +388,28 @@ cycle check and an IR object budget per loop (`ODIN3_ELAB_MAX_LOOP_OBJECTS`, §1
 Documentation: §17 #70 states what Yosys does with `initial tk(7)`, rows 71 and 72 (reviews M1, M2), the
 warnings of Task 24 are in §9.2, the duplicate v4.22 entry is merged. Messages added to §9.1: see §9.1.
 
+v4.25 (2026-10-13; 2D Task 25 review fix, controller ruling I2, agent default Peter may override). §14.2:
+the 54 "hand-written" `.elab` goldens are seeded from `elab-check --write` and accepted as regression
+locks, not independent derivations; line 2 of each says so, and the 19 PARAM_DECL/GEN_BLOCK rows were
+hand-checked against IEEE 1364-2005 (0 disagreements; the defparam order follows EL-8, not IEEE, as
+documented). The expected-failure list is 14 rows (110 rows equivalent); its entries carry the expected
+failure text.
+
+v4.26 (2026-10-13; 2D Task 26, agent defaults). (1) §14.4: `project-fixtures compare --with-frontend --yosys Y
+--equiv-check E` runs the bridge on every positive phase-2 Verilog case and format (odin3's `read_project;
+read_verilog --nolatches; write_rtlil`, the shared Yosys back end, `equiv-check` against `ref.blif`). A
+non-equivalent result reruns `ref.cmd` with the 0.55 given: if that disagrees with `ref.blif` the case is
+reported `oracle drift`, if Yosys dies of a signal there it is `oracle crash`, neither is a failure; else it is
+a 2D failure. (2) §14.5: `elab-sweep` (`tools/elab-check/elab-sweep`, library `elab_sweep`) is the one driver
+of `verilog_micro_elab`, `elab_equiv_micro`, the VTR sweeps and `--bench`; the micros that fail before the
+bridge are listed in `micro_expect_fail.txt` (71 entries: the 50 of 2C's list, the micros 2C parses but whose
+elaboration is rejected, none of which has a Parmys golden), the ones the bridge finds not equivalent in
+`micro_equiv_expect_fail.txt` (agent default: a separate file, since `equiv_expect_fail.txt` holds coverage-row
+names). A reason that starts with `xl` marks a file for the oversized run (skipped by the 6G sweeps, run alone
+with `--xl`). `elab-equiv` exits 3 (`oracle crash`) when Yosys dies of a signal on the source (0.55 segfaults
+on recursive instantiation, where 2D reports "recursive instantiation of 'top'") and reports a child killed by
+its cap as `out of memory (cap 4G)`. (3) `micro-top` follows nested golden groups (`keywords/assign/assign_wide`).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -2467,10 +2489,15 @@ every Yosys run below is Parmys's Yosys 0.55 (`$VTR_ROOT/build/bin/yosys`) unles
 exercising the row's variants (starting from 2C's coverage file of the row, minus the
 parse-only variants that do not elaborate), with:
 
-- `<row>.elab`: the stage-1 golden, `odin3_ast_dump` of the elaborated store. Hand-written
-  (`# hand-written`, `--write` refuses it) for the ≈ 40 semantics-heavy rows: M1, M2, M12, P1–P6,
-  P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23, G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6;
-  generated and reviewed once for the rest.
+- `<row>.elab`: the stage-1 golden, `odin3_ast_dump` of the elaborated store. For the 54
+  semantics-heavy rows: M1, M2, M12, P1–P6, P8, N2, N7–N13, E8, E9, E12, E15, E16, E22, E23,
+  G1–G7, C4–C9, T7, T18, F1, K1–K11, I3, I6, the file starts `# hand-written` (the marker `--write`
+  refuses to overwrite) but is **seeded from `elab-check --write`**, a regression lock, not an
+  independent derivation (Task 25 review I2). Line 2 says so, and for the 19 rows with a
+  `PARAM_DECL` or `GEN_BLOCK` (K3, K5, K7, K8, G1–G7, P1–P6, P8, T18) that the parameter values,
+  generate block names and indices and surviving branches were checked by hand against the source
+  and IEEE 1364-2005 (`task-25-golden-check.md`). All 54 rows are in the Yosys-equivalent set, which
+  covers the netlist only. The rest are generated and reviewed once.
 - `<row>.il`: the stage-2 golden, `write_rtlil` output **without** `--nolatches` (the default
   path: root hold actions), and `<row>.nolatches.il` for every row with a combinational `always`
   (the review's F25: both latch modes are 2D's to get right; 2E's latch tests cover what `proc`

@@ -1,0 +1,84 @@
+# generated: elab-check --write
+(UNIT:e14_const_select @E14_constant_selects.v:2:1
+  (MODULE:e14_const_select @E14_constant_selects.v:2:1
+    _
+    (LIST @E14_constant_selects.v:2:25
+      (PORT_DECL.input [IN_HEADER NET=1] @E14_constant_selects.v:2:26
+        (RANGE @E14_constant_selects.v:2:32
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:33 32'sd7)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:35 32'sd0))
+        (DECLARATOR:a @E14_constant_selects.v:2:38
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E14_constant_selects.v:2:41
+        _
+        (DECLARATOR:y1 @E14_constant_selects.v:2:48
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E14_constant_selects.v:2:52
+        (RANGE @E14_constant_selects.v:2:59
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:60 32'sd3)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:62 32'sd0))
+        (DECLARATOR:y2 @E14_constant_selects.v:2:65
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E14_constant_selects.v:2:69
+        _
+        (DECLARATOR:y3 @E14_constant_selects.v:2:76
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E14_constant_selects.v:2:80
+        (RANGE @E14_constant_selects.v:2:87
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:88 32'sd7)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:2:90 32'sd0))
+        (DECLARATOR:y4 @E14_constant_selects.v:2:93
+          _)))
+    (CONT_ASSIGN @E14_constant_selects.v:3:3
+      _
+      _
+      (NET_ASSIGN @E14_constant_selects.v:3:10
+        (IDENT:y1 @E14_constant_selects.v:3:10)
+        (SELECT.bit @E14_constant_selects.v:3:15
+          (IDENT:a @E14_constant_selects.v:3:15)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:3:17 0)
+          _)))
+    (CONT_ASSIGN @E14_constant_selects.v:4:3
+      _
+      _
+      (NET_ASSIGN @E14_constant_selects.v:4:10
+        (IDENT:y2 @E14_constant_selects.v:4:10)
+        (SELECT.part @E14_constant_selects.v:4:15
+          (IDENT:a @E14_constant_selects.v:4:15)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:4:17 32'sd7)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:4:19 32'sd4))))
+    (CONT_ASSIGN @E14_constant_selects.v:5:3
+      _
+      _
+      (NET_ASSIGN @E14_constant_selects.v:5:10
+        (IDENT:y3 @E14_constant_selects.v:5:10)
+        (SELECT.bit @E14_constant_selects.v:5:15
+          (IDENT:a @E14_constant_selects.v:5:15)
+          (BINARY.+ @E14_constant_selects.v:5:17
+            (NUMBER.dec [SIGNED] @E14_constant_selects.v:5:17 2)
+            (NUMBER.dec [SIGNED] @E14_constant_selects.v:5:21 1))
+          _)))
+    (CONT_ASSIGN @E14_constant_selects.v:6:3
+      _
+      _
+      (NET_ASSIGN @E14_constant_selects.v:6:10
+        (SELECT.part @E14_constant_selects.v:6:10
+          (IDENT:y4 @E14_constant_selects.v:6:10)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:6:13 32'sd1)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:6:15 32'sd0))
+        (SELECT.part @E14_constant_selects.v:6:20
+          (IDENT:a @E14_constant_selects.v:6:20)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:6:22 32'sd1)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:6:24 32'sd0))))
+    (CONT_ASSIGN @E14_constant_selects.v:7:3
+      _
+      _
+      (NET_ASSIGN @E14_constant_selects.v:7:10
+        (SELECT.bit @E14_constant_selects.v:7:10
+          (IDENT:y4 @E14_constant_selects.v:7:10)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:7:13 2)
+          _)
+        (SELECT.bit @E14_constant_selects.v:7:18
+          (IDENT:a @E14_constant_selects.v:7:18)
+          (NUMBER.dec [SIGNED] @E14_constant_selects.v:7:20 3)
+          _)))))

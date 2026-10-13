@@ -1,0 +1,110 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:g1_region @G1_generate_region.v:2:1
+  (MODULE:g1_region @G1_generate_region.v:2:1
+    _
+    (LIST @G1_generate_region.v:2:18
+      (PORT_DECL.input [IN_HEADER NET=1] @G1_generate_region.v:2:19
+        _
+        (DECLARATOR:clk @G1_generate_region.v:2:25
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @G1_generate_region.v:2:30
+        (RANGE @G1_generate_region.v:2:36
+          (NUMBER.dec [SIGNED] @G1_generate_region.v:2:37 32'sd3)
+          (NUMBER.dec [SIGNED] @G1_generate_region.v:2:39 32'sd0))
+        (DECLARATOR:a @G1_generate_region.v:2:42
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G1_generate_region.v:2:45
+        (RANGE @G1_generate_region.v:2:52
+          (NUMBER.dec [SIGNED] @G1_generate_region.v:2:53 32'sd3)
+          (NUMBER.dec [SIGNED] @G1_generate_region.v:2:55 32'sd0))
+        (DECLARATOR:y @G1_generate_region.v:2:58
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @G1_generate_region.v:2:61
+        _
+        (DECLARATOR:q @G1_generate_region.v:2:72
+          _)))
+    (NET_DECL.wire @G1_generate_region.v:5:5
+      _
+      (RANGE @G1_generate_region.v:5:10
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:5:11 32'sd3)
+        (NUMBER.dec [SIGNED] @G1_generate_region.v:5:13 32'sd0))
+      _
+      (DECLARATOR:t @G1_generate_region.v:5:16
+        _))
+    (CONT_ASSIGN @G1_generate_region.v:6:5
+      _
+      _
+      (NET_ASSIGN @G1_generate_region.v:6:12
+        (IDENT:t @G1_generate_region.v:6:12)
+        (UNARY.~ @G1_generate_region.v:6:16
+          (IDENT:a @G1_generate_region.v:6:17))))
+    (GEN_BLOCK:g @G1_generate_region.v:7:35
+      (NUMBER.dec [SIGNED] @G1_generate_region.v:7:35 32'sd0)
+      (CONT_ASSIGN @G1_generate_region.v:8:7
+        _
+        _
+        (NET_ASSIGN @G1_generate_region.v:8:14
+          (SELECT.bit @G1_generate_region.v:8:14
+            (IDENT:y @G1_generate_region.v:8:14)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:16 32'sd0)
+            _)
+          (SELECT.bit @G1_generate_region.v:8:21
+            (IDENT:t @G1_generate_region.v:8:21)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:23 32'sd0)
+            _))))
+    (GEN_BLOCK:g @G1_generate_region.v:7:35
+      (NUMBER.dec [SIGNED] @G1_generate_region.v:7:35 32'sd1)
+      (CONT_ASSIGN @G1_generate_region.v:8:7
+        _
+        _
+        (NET_ASSIGN @G1_generate_region.v:8:14
+          (SELECT.bit @G1_generate_region.v:8:14
+            (IDENT:y @G1_generate_region.v:8:14)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:16 32'sd1)
+            _)
+          (SELECT.bit @G1_generate_region.v:8:21
+            (IDENT:t @G1_generate_region.v:8:21)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:23 32'sd1)
+            _))))
+    (GEN_BLOCK:g @G1_generate_region.v:7:35
+      (NUMBER.dec [SIGNED] @G1_generate_region.v:7:35 32'sd2)
+      (CONT_ASSIGN @G1_generate_region.v:8:7
+        _
+        _
+        (NET_ASSIGN @G1_generate_region.v:8:14
+          (SELECT.bit @G1_generate_region.v:8:14
+            (IDENT:y @G1_generate_region.v:8:14)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:16 32'sd2)
+            _)
+          (SELECT.bit @G1_generate_region.v:8:21
+            (IDENT:t @G1_generate_region.v:8:21)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:23 32'sd2)
+            _))))
+    (GEN_BLOCK:g @G1_generate_region.v:7:35
+      (NUMBER.dec [SIGNED] @G1_generate_region.v:7:35 32'sd3)
+      (CONT_ASSIGN @G1_generate_region.v:8:7
+        _
+        _
+        (NET_ASSIGN @G1_generate_region.v:8:14
+          (SELECT.bit @G1_generate_region.v:8:14
+            (IDENT:y @G1_generate_region.v:8:14)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:16 32'sd3)
+            _)
+          (SELECT.bit @G1_generate_region.v:8:21
+            (IDENT:t @G1_generate_region.v:8:21)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:8:23 32'sd3)
+            _))))
+    (ALWAYS.always @G1_generate_region.v:10:5
+      (TIMING_STMT @G1_generate_region.v:10:12
+        (EVENT_CONTROL @G1_generate_region.v:10:12
+          _
+          (EVENT_EXPR.posedge @G1_generate_region.v:10:14
+            (IDENT:clk @G1_generate_region.v:10:22)))
+        (NONBLOCKING_ASSIGN @G1_generate_region.v:11:7
+          (IDENT:q @G1_generate_region.v:11:7)
+          _
+          (SELECT.bit @G1_generate_region.v:11:12
+            (IDENT:a @G1_generate_region.v:11:12)
+            (NUMBER.dec [SIGNED] @G1_generate_region.v:11:14 0)
+            _))))))

@@ -1,0 +1,106 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:k9_tasks @K9_tasks.v:2:1
+  (MODULE:k9_tasks @K9_tasks.v:2:1
+    _
+    (LIST @K9_tasks.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:2:18
+        _
+        (DECLARATOR:clk @K9_tasks.v:2:24
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:2:29
+        (RANGE @K9_tasks.v:2:35
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:36 32'sd3)
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:38 32'sd0))
+        (DECLARATOR:a @K9_tasks.v:2:41
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:2:29
+        (RANGE @K9_tasks.v:2:35
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:36 32'sd3)
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:38 32'sd0))
+        (DECLARATOR:b @K9_tasks.v:2:44
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @K9_tasks.v:2:47
+        (RANGE @K9_tasks.v:2:58
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:59 32'sd3)
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:61 32'sd0))
+        (DECLARATOR:s @K9_tasks.v:2:64
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @K9_tasks.v:2:47
+        (RANGE @K9_tasks.v:2:58
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:59 32'sd3)
+          (NUMBER.dec [SIGNED] @K9_tasks.v:2:61 32'sd0))
+        (DECLARATOR:d @K9_tasks.v:2:67
+          _)))
+    (TASK_DECL:add @K9_tasks.v:3:3
+      (LIST @K9_tasks.v:3:13
+        (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:3:13
+          (RANGE @K9_tasks.v:3:19
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:20 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:22 32'sd0))
+          (DECLARATOR:x @K9_tasks.v:3:25
+            _))
+        (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:3:28
+          (RANGE @K9_tasks.v:3:34
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:35 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:37 32'sd0))
+          (DECLARATOR:z @K9_tasks.v:3:40
+            _))
+        (PORT_DECL.output [IN_HEADER NET=1] @K9_tasks.v:3:43
+          (RANGE @K9_tasks.v:3:50
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:51 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:3:53 32'sd0))
+          (DECLARATOR:r @K9_tasks.v:3:56
+            _)))
+      (LIST @K9_tasks.v:3:59)
+      (BLOCKING_ASSIGN @K9_tasks.v:4:5
+        (IDENT:r @K9_tasks.v:4:5)
+        _
+        (BINARY.+ @K9_tasks.v:4:9
+          (IDENT:x @K9_tasks.v:4:9)
+          (IDENT:z @K9_tasks.v:4:13))))
+    (TASK_DECL:sub @K9_tasks.v:6:3
+      (LIST @K9_tasks.v:7:5
+        (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:7:5
+          (RANGE @K9_tasks.v:7:11
+            (NUMBER.dec [SIGNED] @K9_tasks.v:7:12 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:7:14 32'sd0))
+          (DECLARATOR:x @K9_tasks.v:7:17
+            _))
+        (PORT_DECL.input [IN_HEADER NET=1] @K9_tasks.v:8:5
+          (RANGE @K9_tasks.v:8:11
+            (NUMBER.dec [SIGNED] @K9_tasks.v:8:12 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:8:14 32'sd0))
+          (DECLARATOR:z @K9_tasks.v:8:17
+            _))
+        (PORT_DECL.output [IN_HEADER NET=1] @K9_tasks.v:9:5
+          (RANGE @K9_tasks.v:9:12
+            (NUMBER.dec [SIGNED] @K9_tasks.v:9:13 32'sd3)
+            (NUMBER.dec [SIGNED] @K9_tasks.v:9:15 32'sd0))
+          (DECLARATOR:r @K9_tasks.v:9:18
+            _)))
+      (LIST @K9_tasks.v:6:12)
+      (SEQ_BLOCK @K9_tasks.v:10:5
+        _
+        (BLOCKING_ASSIGN @K9_tasks.v:11:7
+          (IDENT:r @K9_tasks.v:11:7)
+          _
+          (BINARY.- @K9_tasks.v:11:11
+            (IDENT:x @K9_tasks.v:11:11)
+            (IDENT:z @K9_tasks.v:11:15)))))
+    (ALWAYS.always @K9_tasks.v:14:3
+      (TIMING_STMT @K9_tasks.v:14:10
+        (EVENT_CONTROL @K9_tasks.v:14:10
+          _
+          (EVENT_EXPR.posedge @K9_tasks.v:14:12
+            (IDENT:clk @K9_tasks.v:14:20)))
+        (SEQ_BLOCK @K9_tasks.v:14:25
+          _
+          (TASK_CALL:add @K9_tasks.v:15:5
+            (IDENT:a @K9_tasks.v:15:9)
+            (IDENT:b @K9_tasks.v:15:12)
+            (IDENT:s @K9_tasks.v:15:15))
+          (TASK_CALL:sub @K9_tasks.v:16:5
+            (IDENT:a @K9_tasks.v:16:9)
+            (IDENT:b @K9_tasks.v:16:12)
+            (IDENT:d @K9_tasks.v:16:15)))))))

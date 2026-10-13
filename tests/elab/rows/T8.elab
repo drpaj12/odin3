@@ -1,0 +1,53 @@
+# generated: elab-check --write
+(UNIT:t8_nonblocking @T8_nonblocking.v:2:1
+  (MODULE:t8_nonblocking @T8_nonblocking.v:2:1
+    _
+    (LIST @T8_nonblocking.v:2:23
+      (PORT_DECL.input [IN_HEADER NET=1] @T8_nonblocking.v:2:24
+        _
+        (DECLARATOR:clk @T8_nonblocking.v:2:30
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T8_nonblocking.v:2:24
+        _
+        (DECLARATOR:d @T8_nonblocking.v:2:35
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T8_nonblocking.v:2:38
+        (RANGE @T8_nonblocking.v:2:44
+          (NUMBER.dec [SIGNED] @T8_nonblocking.v:2:45 32'sd3)
+          (NUMBER.dec [SIGNED] @T8_nonblocking.v:2:47 32'sd0))
+        (DECLARATOR:v @T8_nonblocking.v:2:50
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T8_nonblocking.v:2:53
+        _
+        (DECLARATOR:q1 @T8_nonblocking.v:2:64
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T8_nonblocking.v:2:53
+        _
+        (DECLARATOR:q2 @T8_nonblocking.v:2:68
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T8_nonblocking.v:2:72
+        (RANGE @T8_nonblocking.v:2:83
+          (NUMBER.dec [SIGNED] @T8_nonblocking.v:2:84 32'sd3)
+          (NUMBER.dec [SIGNED] @T8_nonblocking.v:2:86 32'sd0))
+        (DECLARATOR:qv @T8_nonblocking.v:2:89
+          _)))
+    (ALWAYS.always @T8_nonblocking.v:3:3
+      (TIMING_STMT @T8_nonblocking.v:3:10
+        (EVENT_CONTROL @T8_nonblocking.v:3:10
+          _
+          (EVENT_EXPR.posedge @T8_nonblocking.v:3:12
+            (IDENT:clk @T8_nonblocking.v:3:20)))
+        (SEQ_BLOCK @T8_nonblocking.v:3:25
+          _
+          (NONBLOCKING_ASSIGN @T8_nonblocking.v:4:5
+            (IDENT:q1 @T8_nonblocking.v:4:5)
+            _
+            (IDENT:d @T8_nonblocking.v:4:11))
+          (NONBLOCKING_ASSIGN @T8_nonblocking.v:5:5
+            (IDENT:q2 @T8_nonblocking.v:5:5)
+            _
+            (IDENT:q1 @T8_nonblocking.v:5:11))
+          (NONBLOCKING_ASSIGN @T8_nonblocking.v:6:5
+            (IDENT:qv @T8_nonblocking.v:6:5)
+            _
+            (IDENT:v @T8_nonblocking.v:6:11)))))))

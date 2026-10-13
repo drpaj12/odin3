@@ -1,0 +1,40 @@
+# yosys 0.55 (VTR build): read_rtlil const.il; opt_dff -keepdc; write_rtlil
+# input: Yosys 0.55's own write_rtlil of the `read_verilog -icells` heredoc of tests/opt/opt_dff_const.ys in the Yosys source (const.il), edited by sed in two places: `parameter \X_POLARITY 1'b` written `b` and `parameter signed \WIDTH` written `parameter \WIDTH` (proc_build.c reads plain integer polarity and width parameters; the 2D-1 read_rtlil gap), in every cell
+# flags: -keepdc
+cell $adff ARST_POLARITY=1 ARST_VALUE=6'111000 CLK_POLARITY=1 WIDTH=6
+cell $adffe ARST_POLARITY=1 ARST_VALUE=6'111000 CLK_POLARITY=1 EN_POLARITY=0 WIDTH=6
+cell $adlatch ARST_POLARITY=1 ARST_VALUE=6'111000 EN_POLARITY=0 WIDTH=6
+cell $dff CLK_POLARITY=1 WIDTH=2
+cell $dffe CLK_POLARITY=1 EN_POLARITY=1 WIDTH=2
+cell $dffsr CLK_POLARITY=1 CLR_POLARITY=1 SET_POLARITY=0 WIDTH=6
+cell $dffsre CLK_POLARITY=1 CLR_POLARITY=0 EN_POLARITY=0 SET_POLARITY=1 WIDTH=6
+cell $dlatch EN_POLARITY=1 WIDTH=2
+cell $dlatchsr CLR_POLARITY=1 EN_POLARITY=0 SET_POLARITY=1 WIDTH=6
+cell $sdff CLK_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=6'111000 WIDTH=6
+cell $sdffce CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=6'111000 WIDTH=6
+cell $sdffe CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=6'111000 WIDTH=6
+const Q 0 0
+const Q 15 1
+const Q 16 0
+const Q 23 1
+const Q 24 0
+const Q 3 1
+const Q 31 1
+const Q 32 0
+const Q 39 1
+const Q 4 0
+const Q 40 0
+const Q 47 1
+const Q 48 0
+const Q 55 1
+const Q 56 0
+const Q 63 1
+const Q 64 0
+const Q 67 1
+const Q 68 0
+const Q 7 1
+const Q 75 1
+const Q 76 0
+const Q 8 0
+const Q 83 1
+init Q x010101xx010101xx01xx010101xx010101xx010101xx010101xx010101xx010101xx010101xx01xx01x

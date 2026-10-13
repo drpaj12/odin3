@@ -1,0 +1,139 @@
+# generated: elab-check --write
+(UNIT:q1_gates @Q1_gates.v:2:1
+  (MODULE:q1_gates @Q1_gates.v:2:1
+    _
+    (LIST @Q1_gates.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @Q1_gates.v:2:18
+        _
+        (DECLARATOR:a @Q1_gates.v:2:24
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @Q1_gates.v:2:18
+        _
+        (DECLARATOR:b @Q1_gates.v:2:27
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @Q1_gates.v:2:18
+        _
+        (DECLARATOR:c @Q1_gates.v:2:30
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y1 @Q1_gates.v:2:40
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y2 @Q1_gates.v:2:44
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y3 @Q1_gates.v:2:48
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y4 @Q1_gates.v:2:52
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y5 @Q1_gates.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y6 @Q1_gates.v:2:60
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y7 @Q1_gates.v:2:64
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q1_gates.v:2:33
+        _
+        (DECLARATOR:y8 @Q1_gates.v:2:68
+          _)))
+    (GATE_DECL.and @Q1_gates.v:3:3
+      _
+      _
+      (INSTANCE:g1 @Q1_gates.v:3:7
+        _
+        (CONNECTION @Q1_gates.v:3:11
+          (IDENT:y1 @Q1_gates.v:3:11))
+        (CONNECTION @Q1_gates.v:3:15
+          (IDENT:a @Q1_gates.v:3:15))
+        (CONNECTION @Q1_gates.v:3:18
+          (IDENT:b @Q1_gates.v:3:18))))
+    (GATE_DECL.nand @Q1_gates.v:4:3
+      _
+      _
+      (INSTANCE @Q1_gates.v:4:8
+        _
+        (CONNECTION @Q1_gates.v:4:9
+          (IDENT:y2 @Q1_gates.v:4:9))
+        (CONNECTION @Q1_gates.v:4:13
+          (IDENT:a @Q1_gates.v:4:13))
+        (CONNECTION @Q1_gates.v:4:16
+          (IDENT:b @Q1_gates.v:4:16))
+        (CONNECTION @Q1_gates.v:4:19
+          (IDENT:c @Q1_gates.v:4:19))))
+    (GATE_DECL.or @Q1_gates.v:5:3
+      _
+      _
+      (INSTANCE:g3 @Q1_gates.v:5:6
+        _
+        (CONNECTION @Q1_gates.v:5:10
+          (IDENT:y3 @Q1_gates.v:5:10))
+        (CONNECTION @Q1_gates.v:5:14
+          (IDENT:a @Q1_gates.v:5:14))
+        (CONNECTION @Q1_gates.v:5:17
+          (IDENT:b @Q1_gates.v:5:17))
+        (CONNECTION @Q1_gates.v:5:20
+          (IDENT:c @Q1_gates.v:5:20))))
+    (GATE_DECL.nor @Q1_gates.v:6:3
+      _
+      _
+      (INSTANCE @Q1_gates.v:6:7
+        _
+        (CONNECTION @Q1_gates.v:6:8
+          (IDENT:y4 @Q1_gates.v:6:8))
+        (CONNECTION @Q1_gates.v:6:12
+          (IDENT:a @Q1_gates.v:6:12))
+        (CONNECTION @Q1_gates.v:6:15
+          (IDENT:b @Q1_gates.v:6:15))))
+    (GATE_DECL.xor @Q1_gates.v:7:3
+      _
+      _
+      (INSTANCE:g5 @Q1_gates.v:7:7
+        _
+        (CONNECTION @Q1_gates.v:7:11
+          (IDENT:y5 @Q1_gates.v:7:11))
+        (CONNECTION @Q1_gates.v:7:15
+          (IDENT:a @Q1_gates.v:7:15))
+        (CONNECTION @Q1_gates.v:7:18
+          (IDENT:b @Q1_gates.v:7:18))))
+    (GATE_DECL.xnor @Q1_gates.v:8:3
+      _
+      _
+      (INSTANCE @Q1_gates.v:8:8
+        _
+        (CONNECTION @Q1_gates.v:8:9
+          (IDENT:y6 @Q1_gates.v:8:9))
+        (CONNECTION @Q1_gates.v:8:13
+          (IDENT:a @Q1_gates.v:8:13))
+        (CONNECTION @Q1_gates.v:8:16
+          (IDENT:b @Q1_gates.v:8:16))
+        (CONNECTION @Q1_gates.v:8:19
+          (IDENT:c @Q1_gates.v:8:19))))
+    (GATE_DECL.buf @Q1_gates.v:9:3
+      _
+      _
+      (INSTANCE:g7 @Q1_gates.v:9:7
+        _
+        (CONNECTION @Q1_gates.v:9:11
+          (IDENT:y7 @Q1_gates.v:9:11))
+        (CONNECTION @Q1_gates.v:9:15
+          (IDENT:a @Q1_gates.v:9:15))))
+    (GATE_DECL.not @Q1_gates.v:10:3
+      _
+      _
+      (INSTANCE @Q1_gates.v:10:7
+        _
+        (CONNECTION @Q1_gates.v:10:8
+          (IDENT:y8 @Q1_gates.v:10:8))
+        (CONNECTION @Q1_gates.v:10:12
+          (IDENT:a @Q1_gates.v:10:12))))))

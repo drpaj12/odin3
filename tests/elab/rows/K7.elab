@@ -1,0 +1,86 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:k7_const_func @K7_constant_functions.v:2:1
+  (MODULE:k7_const_func @K7_constant_functions.v:2:1
+    (LIST @K7_constant_functions.v:2:22
+      (PARAM_DECL.localparam [IN_HEADER] @K7_constant_functions.v:2:24
+        _
+        (DECLARATOR:N @K7_constant_functions.v:2:34
+          (NUMBER.dec [SIGNED] @K7_constant_functions.v:2:34 10))))
+    (LIST @K7_constant_functions.v:2:42
+      (PORT_DECL.input [IN_HEADER NET=1] @K7_constant_functions.v:2:43
+        (RANGE @K7_constant_functions.v:2:49
+          (NUMBER.dec [SIGNED] @K7_constant_functions.v:2:50 32'sd3)
+          (NUMBER.dec [SIGNED] @K7_constant_functions.v:2:61 32'sd0))
+        (DECLARATOR:a @K7_constant_functions.v:2:64
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @K7_constant_functions.v:2:67
+        (RANGE @K7_constant_functions.v:2:74
+          (NUMBER.dec [SIGNED] @K7_constant_functions.v:2:75 32'sd31)
+          (NUMBER.dec [SIGNED] @K7_constant_functions.v:2:78 32'sd0))
+        (DECLARATOR:y @K7_constant_functions.v:2:81
+          _)))
+    (PARAM_DECL.localparam @K7_constant_functions.v:3:3
+      _
+      (DECLARATOR:W @K7_constant_functions.v:3:14
+        (NUMBER.bin [SIGNED] @K7_constant_functions.v:3:14 32'sb00000000000000000000000000000100)))
+    (FUNCTION_DECL:clog2 [DT=2] @K7_constant_functions.v:4:3
+      _
+      (LIST @K7_constant_functions.v:4:27
+        (PORT_DECL.input [IN_HEADER DT=2] @K7_constant_functions.v:4:27
+          _
+          (DECLARATOR:value @K7_constant_functions.v:4:41
+            _)))
+      (LIST @K7_constant_functions.v:5:5
+        (VAR_DECL.integer @K7_constant_functions.v:5:5
+          _
+          (DECLARATOR:v @K7_constant_functions.v:5:13
+            _)))
+      (SEQ_BLOCK @K7_constant_functions.v:6:5
+        _
+        (BLOCKING_ASSIGN @K7_constant_functions.v:7:7
+          (IDENT:v @K7_constant_functions.v:7:7)
+          _
+          (BINARY.- @K7_constant_functions.v:7:11
+            (IDENT:value @K7_constant_functions.v:7:11)
+            (NUMBER.dec [SIGNED] @K7_constant_functions.v:7:19 1)))
+        (FOR @K7_constant_functions.v:8:7
+          (BLOCKING_ASSIGN @K7_constant_functions.v:8:12
+            (IDENT:clog2 @K7_constant_functions.v:8:12)
+            _
+            (NUMBER.dec [SIGNED] @K7_constant_functions.v:8:20 0))
+          (BINARY.> @K7_constant_functions.v:8:23
+            (IDENT:v @K7_constant_functions.v:8:23)
+            (NUMBER.dec [SIGNED] @K7_constant_functions.v:8:27 0))
+          (BLOCKING_ASSIGN @K7_constant_functions.v:8:30
+            (IDENT:clog2 @K7_constant_functions.v:8:30)
+            _
+            (BINARY.+ @K7_constant_functions.v:8:38
+              (IDENT:clog2 @K7_constant_functions.v:8:38)
+              (NUMBER.dec [SIGNED] @K7_constant_functions.v:8:46 1)))
+          (BLOCKING_ASSIGN @K7_constant_functions.v:9:9
+            (IDENT:v @K7_constant_functions.v:9:9)
+            _
+            (BINARY.>> @K7_constant_functions.v:9:13
+              (IDENT:v @K7_constant_functions.v:9:13)
+              (NUMBER.dec [SIGNED] @K7_constant_functions.v:9:18 1))))))
+    (NET_DECL.wire @K7_constant_functions.v:12:3
+      _
+      (RANGE @K7_constant_functions.v:12:8
+        (NUMBER.dec [SIGNED] @K7_constant_functions.v:12:9 32'sd4)
+        (NUMBER.dec [SIGNED] @K7_constant_functions.v:12:11 32'sd0))
+      _
+      (DECLARATOR:t @K7_constant_functions.v:12:14
+        _))
+    (CONT_ASSIGN @K7_constant_functions.v:13:3
+      _
+      _
+      (NET_ASSIGN @K7_constant_functions.v:13:10
+        (IDENT:t @K7_constant_functions.v:13:10)
+        (IDENT:a @K7_constant_functions.v:13:14)))
+    (CONT_ASSIGN @K7_constant_functions.v:14:3
+      _
+      _
+      (NET_ASSIGN @K7_constant_functions.v:14:10
+        (IDENT:y @K7_constant_functions.v:14:10)
+        (IDENT:W @K7_constant_functions.v:14:14)))))

@@ -296,7 +296,10 @@ def load_module(name: str, path: Path) -> ModuleType | None:
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         return None
+    if str(path.parent) not in sys.path:  # its sibling imports (elab_sweep imports memcap)
+        sys.path.insert(0, str(path.parent))
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # @dataclass looks its module up in sys.modules
     spec.loader.exec_module(module)
     return module
 
@@ -481,7 +484,8 @@ def collect(paths: Sequence[str]) -> list[Item]:
     if sweep is None or not hasattr(sweep, "collect"):
         return _walk(paths)
     roots = [Path(p) for p in paths if Path(p).is_dir()]
-    return [Item(Path(f), _relative(Path(f), roots)) for f in sweep.collect(list(paths))]
+    found = [Path(getattr(f, "path", f)) for f in sweep.collect(list(paths))]  # 2D-7a: Item
+    return [Item(f, _relative(f, roots)) for f in found]
 
 
 # --------------------------------------------------------------------------- expect lists

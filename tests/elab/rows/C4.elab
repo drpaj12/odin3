@@ -1,0 +1,64 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:c4_multi_item @C4_multi_expression_items.v:2:1
+  (MODULE:c4_multi_item @C4_multi_expression_items.v:2:1
+    _
+    (LIST @C4_multi_expression_items.v:2:22
+      (PORT_DECL.input [IN_HEADER NET=1] @C4_multi_expression_items.v:2:23
+        (RANGE @C4_multi_expression_items.v:2:29
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:30 32'sd2)
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:32 32'sd0))
+        (DECLARATOR:s @C4_multi_expression_items.v:2:35
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C4_multi_expression_items.v:2:38
+        (RANGE @C4_multi_expression_items.v:2:44
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:45 32'sd3)
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:47 32'sd0))
+        (DECLARATOR:a @C4_multi_expression_items.v:2:50
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C4_multi_expression_items.v:2:38
+        (RANGE @C4_multi_expression_items.v:2:44
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:45 32'sd3)
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:47 32'sd0))
+        (DECLARATOR:b @C4_multi_expression_items.v:2:53
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C4_multi_expression_items.v:2:56
+        (RANGE @C4_multi_expression_items.v:2:67
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:68 32'sd3)
+          (NUMBER.dec [SIGNED] @C4_multi_expression_items.v:2:70 32'sd0))
+        (DECLARATOR:y @C4_multi_expression_items.v:2:73
+          _)))
+    (ALWAYS.always @C4_multi_expression_items.v:3:3
+      (TIMING_STMT @C4_multi_expression_items.v:3:10
+        (EVENT_CONTROL [STAR] @C4_multi_expression_items.v:3:10
+          _)
+        (CASE.case @C4_multi_expression_items.v:4:5
+          (IDENT:s @C4_multi_expression_items.v:4:11)
+          (CASE_ITEM @C4_multi_expression_items.v:5:7
+            (BLOCKING_ASSIGN @C4_multi_expression_items.v:5:25
+              (IDENT:y @C4_multi_expression_items.v:5:25)
+              _
+              (IDENT:a @C4_multi_expression_items.v:5:29))
+            (NUMBER.dec @C4_multi_expression_items.v:5:7 3'd0)
+            (NUMBER.dec @C4_multi_expression_items.v:5:13 3'd1)
+            (NUMBER.dec @C4_multi_expression_items.v:5:19 3'd2))
+          (CASE_ITEM @C4_multi_expression_items.v:6:7
+            (BLOCKING_ASSIGN @C4_multi_expression_items.v:6:19
+              (IDENT:y @C4_multi_expression_items.v:6:19)
+              _
+              (IDENT:b @C4_multi_expression_items.v:6:23))
+            (NUMBER.dec @C4_multi_expression_items.v:6:7 3'd3)
+            (NUMBER.dec @C4_multi_expression_items.v:6:13 3'd4))
+          (CASE_ITEM @C4_multi_expression_items.v:7:7
+            (BLOCKING_ASSIGN @C4_multi_expression_items.v:7:13
+              (IDENT:y @C4_multi_expression_items.v:7:13)
+              _
+              (BINARY.& @C4_multi_expression_items.v:7:17
+                (IDENT:a @C4_multi_expression_items.v:7:17)
+                (IDENT:b @C4_multi_expression_items.v:7:21)))
+            (NUMBER.dec @C4_multi_expression_items.v:7:7 3'd5))
+          (CASE_ITEM [DEFAULT] @C4_multi_expression_items.v:8:7
+            (BLOCKING_ASSIGN @C4_multi_expression_items.v:8:16
+              (IDENT:y @C4_multi_expression_items.v:8:16)
+              _
+              (NUMBER.dec @C4_multi_expression_items.v:8:20 4'd0))))))))

@@ -1,0 +1,47 @@
+# generated: elab-check --write
+(UNIT:l16_ifdef @L16_ifdef_nesting.v:4:1
+  (MODULE:l16_ifdef @L16_ifdef_nesting.v:4:1
+    _
+    (LIST @L16_ifdef_nesting.v:4:18
+      (PORT_DECL.input [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:19
+        _
+        (DECLARATOR:a @L16_ifdef_nesting.v:4:25
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:19
+        _
+        (DECLARATOR:b @L16_ifdef_nesting.v:4:28
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:19
+        _
+        (DECLARATOR:c @L16_ifdef_nesting.v:4:31
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:34
+        _
+        (DECLARATOR:y @L16_ifdef_nesting.v:4:41
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:34
+        _
+        (DECLARATOR:z @L16_ifdef_nesting.v:4:44
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L16_ifdef_nesting.v:4:34
+        _
+        (DECLARATOR:w @L16_ifdef_nesting.v:4:47
+          _)))
+    (CONT_ASSIGN @L16_ifdef_nesting.v:7:3
+      _
+      _
+      (NET_ASSIGN @L16_ifdef_nesting.v:7:10
+        (IDENT:y @L16_ifdef_nesting.v:7:10)
+        (IDENT:a @L16_ifdef_nesting.v:7:14)))
+    (CONT_ASSIGN @L16_ifdef_nesting.v:19:3
+      _
+      _
+      (NET_ASSIGN @L16_ifdef_nesting.v:19:10
+        (IDENT:z @L16_ifdef_nesting.v:19:10)
+        (IDENT:b @L16_ifdef_nesting.v:19:14)))
+    (CONT_ASSIGN @L16_ifdef_nesting.v:26:3
+      _
+      _
+      (NET_ASSIGN @L16_ifdef_nesting.v:26:10
+        (IDENT:w @L16_ifdef_nesting.v:26:10)
+        (IDENT:c @L16_ifdef_nesting.v:26:14)))))

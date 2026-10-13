@@ -1,0 +1,254 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:p6_defparam @P6_defparam.v:11:1
+  (MODULE:p6_defparam @P6_defparam.v:11:1
+    _
+    (LIST @P6_defparam.v:11:20
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:11:21
+        (RANGE @P6_defparam.v:11:27
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:28 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:30 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:11:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:11:36
+        (RANGE @P6_defparam.v:11:43
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:46 32'sd0))
+        (DECLARATOR:y1 @P6_defparam.v:11:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:11:36
+        (RANGE @P6_defparam.v:11:43
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:44 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:46 32'sd0))
+        (DECLARATOR:y2 @P6_defparam.v:11:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:11:57
+        (RANGE @P6_defparam.v:11:64
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:65 32'sd15)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:11:68 32'sd0))
+        (DECLARATOR:y3 @P6_defparam.v:11:71
+          _)))
+    (INSTANTIATION:p6_leaf$W=2 @P6_defparam.v:12:3
+      (LIST @P6_defparam.v:12:3
+        (CONNECTION:W @P6_defparam.v:12:3
+          (NUMBER.bin [SIGNED] @P6_defparam.v:12:3 32'sb00000000000000000000000000000010)))
+      (INSTANCE:u1 @P6_defparam.v:12:11
+        _
+        (CONNECTION:a @P6_defparam.v:12:15
+          (IDENT:a @P6_defparam.v:12:18))
+        (CONNECTION:y @P6_defparam.v:12:22
+          (IDENT:y1 @P6_defparam.v:12:25))))
+    (INSTANTIATION:p6_mid$u_leaf.W=3 @P6_defparam.v:13:3
+      _
+      (INSTANCE:u_mid @P6_defparam.v:13:10
+        _
+        (CONNECTION:a @P6_defparam.v:13:17
+          (IDENT:a @P6_defparam.v:13:20))
+        (CONNECTION:y @P6_defparam.v:13:24
+          (IDENT:y2 @P6_defparam.v:13:27))))
+    (GEN_BLOCK:g @P6_defparam.v:17:33
+      (NUMBER.dec [SIGNED] @P6_defparam.v:17:33 32'sd0)
+      (INSTANTIATION:p6_leaf$W=5 @P6_defparam.v:18:5
+        (LIST @P6_defparam.v:18:5
+          (CONNECTION:W @P6_defparam.v:18:5
+            (NUMBER.bin [SIGNED] @P6_defparam.v:18:5 32'sb00000000000000000000000000000101)))
+        (INSTANCE:u @P6_defparam.v:18:13
+          _
+          (CONNECTION:a @P6_defparam.v:18:16
+            (IDENT:a @P6_defparam.v:18:19))
+          (CONNECTION:y @P6_defparam.v:18:23
+            (SELECT.part_plus @P6_defparam.v:18:26
+              (IDENT:y3 @P6_defparam.v:18:26)
+              (BINARY.* @P6_defparam.v:18:29
+                (NUMBER.dec [SIGNED] @P6_defparam.v:18:29 8)
+                (NUMBER.dec [SIGNED] @P6_defparam.v:18:33 32'sd0))
+              (NUMBER.dec [SIGNED] @P6_defparam.v:18:38 32'sd8))))))
+    (GEN_BLOCK:g @P6_defparam.v:17:33
+      (NUMBER.dec [SIGNED] @P6_defparam.v:17:33 32'sd1)
+      (INSTANTIATION:p6_leaf @P6_defparam.v:18:5
+        (LIST @P6_defparam.v:18:5
+          (CONNECTION:W @P6_defparam.v:18:5
+            (NUMBER.dec [SIGNED] @P6_defparam.v:18:5 1)))
+        (INSTANCE:u @P6_defparam.v:18:13
+          _
+          (CONNECTION:a @P6_defparam.v:18:16
+            (IDENT:a @P6_defparam.v:18:19))
+          (CONNECTION:y @P6_defparam.v:18:23
+            (SELECT.part_plus @P6_defparam.v:18:26
+              (IDENT:y3 @P6_defparam.v:18:26)
+              (BINARY.* @P6_defparam.v:18:29
+                (NUMBER.dec [SIGNED] @P6_defparam.v:18:29 8)
+                (NUMBER.dec [SIGNED] @P6_defparam.v:18:33 32'sd1))
+              (NUMBER.dec [SIGNED] @P6_defparam.v:18:38 32'sd8))))))
+    (GEN_BLOCK:h @P6_defparam.v:22:35
+      (NUMBER.dec [SIGNED] @P6_defparam.v:22:35 32'sd0)
+      (INSTANTIATION:p6_leaf$W=6 @P6_defparam.v:23:7
+        (LIST @P6_defparam.v:23:7
+          (CONNECTION:W @P6_defparam.v:23:7
+            (NUMBER.bin [SIGNED] @P6_defparam.v:23:7 32'sb00000000000000000000000000000110)))
+        (INSTANCE:u @P6_defparam.v:23:15
+          _
+          (CONNECTION:a @P6_defparam.v:23:18
+            (IDENT:a @P6_defparam.v:23:21))
+          (CONNECTION:y @P6_defparam.v:23:25
+            _)))))
+  (MODULE:p6_leaf$W=2 @P6_defparam.v:2:1
+    _
+    (LIST @P6_defparam.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:2:17
+        (RANGE @P6_defparam.v:2:23
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:24 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:26 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:2:32
+        (RANGE @P6_defparam.v:2:39
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:40 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:42 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:2:45
+          _)))
+    (PARAM_DECL.localparam @P6_defparam.v:3:3
+      _
+      (DECLARATOR:W @P6_defparam.v:3:13
+        (NUMBER.bin [SIGNED] @P6_defparam.v:3:13 32'sb00000000000000000000000000000010)))
+    (CONT_ASSIGN @P6_defparam.v:4:3
+      _
+      _
+      (NET_ASSIGN @P6_defparam.v:4:10
+        (IDENT:y @P6_defparam.v:4:10)
+        (BINARY.+ @P6_defparam.v:4:14
+          (IDENT:a @P6_defparam.v:4:14)
+          (IDENT:W @P6_defparam.v:4:18)))))
+  (MODULE:p6_mid$u_leaf.W=3 @P6_defparam.v:7:1
+    _
+    (LIST @P6_defparam.v:7:15
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:7:16
+        (RANGE @P6_defparam.v:7:22
+          (NUMBER.dec [SIGNED] @P6_defparam.v:7:23 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:7:25 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:7:28
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:7:31
+        (RANGE @P6_defparam.v:7:38
+          (NUMBER.dec [SIGNED] @P6_defparam.v:7:39 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:7:41 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:7:44
+          _)))
+    (INSTANTIATION:p6_leaf$W=3 @P6_defparam.v:8:3
+      (LIST @P6_defparam.v:8:3
+        (CONNECTION:W @P6_defparam.v:8:3
+          (NUMBER.bin [SIGNED] @P6_defparam.v:8:3 32'sb00000000000000000000000000000011)))
+      (INSTANCE:u_leaf @P6_defparam.v:8:11
+        _
+        (CONNECTION:a @P6_defparam.v:8:19
+          (IDENT:a @P6_defparam.v:8:22))
+        (CONNECTION:y @P6_defparam.v:8:26
+          (IDENT:y @P6_defparam.v:8:29)))))
+  (MODULE:p6_leaf$W=5 @P6_defparam.v:2:1
+    _
+    (LIST @P6_defparam.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:2:17
+        (RANGE @P6_defparam.v:2:23
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:24 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:26 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:2:32
+        (RANGE @P6_defparam.v:2:39
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:40 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:42 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:2:45
+          _)))
+    (PARAM_DECL.localparam @P6_defparam.v:3:3
+      _
+      (DECLARATOR:W @P6_defparam.v:3:13
+        (NUMBER.bin [SIGNED] @P6_defparam.v:3:13 32'sb00000000000000000000000000000101)))
+    (CONT_ASSIGN @P6_defparam.v:4:3
+      _
+      _
+      (NET_ASSIGN @P6_defparam.v:4:10
+        (IDENT:y @P6_defparam.v:4:10)
+        (BINARY.+ @P6_defparam.v:4:14
+          (IDENT:a @P6_defparam.v:4:14)
+          (IDENT:W @P6_defparam.v:4:18)))))
+  (MODULE:p6_leaf @P6_defparam.v:2:1
+    _
+    (LIST @P6_defparam.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:2:17
+        (RANGE @P6_defparam.v:2:23
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:24 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:26 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:2:32
+        (RANGE @P6_defparam.v:2:39
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:40 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:42 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:2:45
+          _)))
+    (PARAM_DECL.localparam @P6_defparam.v:3:3
+      _
+      (DECLARATOR:W @P6_defparam.v:3:13
+        (NUMBER.dec [SIGNED] @P6_defparam.v:3:13 1)))
+    (CONT_ASSIGN @P6_defparam.v:4:3
+      _
+      _
+      (NET_ASSIGN @P6_defparam.v:4:10
+        (IDENT:y @P6_defparam.v:4:10)
+        (BINARY.+ @P6_defparam.v:4:14
+          (IDENT:a @P6_defparam.v:4:14)
+          (IDENT:W @P6_defparam.v:4:18)))))
+  (MODULE:p6_leaf$W=6 @P6_defparam.v:2:1
+    _
+    (LIST @P6_defparam.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:2:17
+        (RANGE @P6_defparam.v:2:23
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:24 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:26 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:2:32
+        (RANGE @P6_defparam.v:2:39
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:40 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:42 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:2:45
+          _)))
+    (PARAM_DECL.localparam @P6_defparam.v:3:3
+      _
+      (DECLARATOR:W @P6_defparam.v:3:13
+        (NUMBER.bin [SIGNED] @P6_defparam.v:3:13 32'sb00000000000000000000000000000110)))
+    (CONT_ASSIGN @P6_defparam.v:4:3
+      _
+      _
+      (NET_ASSIGN @P6_defparam.v:4:10
+        (IDENT:y @P6_defparam.v:4:10)
+        (BINARY.+ @P6_defparam.v:4:14
+          (IDENT:a @P6_defparam.v:4:14)
+          (IDENT:W @P6_defparam.v:4:18)))))
+  (MODULE:p6_leaf$W=3 @P6_defparam.v:2:1
+    _
+    (LIST @P6_defparam.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @P6_defparam.v:2:17
+        (RANGE @P6_defparam.v:2:23
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:24 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:26 32'sd0))
+        (DECLARATOR:a @P6_defparam.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @P6_defparam.v:2:32
+        (RANGE @P6_defparam.v:2:39
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:40 32'sd7)
+          (NUMBER.dec [SIGNED] @P6_defparam.v:2:42 32'sd0))
+        (DECLARATOR:y @P6_defparam.v:2:45
+          _)))
+    (PARAM_DECL.localparam @P6_defparam.v:3:3
+      _
+      (DECLARATOR:W @P6_defparam.v:3:13
+        (NUMBER.bin [SIGNED] @P6_defparam.v:3:13 32'sb00000000000000000000000000000011)))
+    (CONT_ASSIGN @P6_defparam.v:4:3
+      _
+      _
+      (NET_ASSIGN @P6_defparam.v:4:10
+        (IDENT:y @P6_defparam.v:4:10)
+        (BINARY.+ @P6_defparam.v:4:14
+          (IDENT:a @P6_defparam.v:4:14)
+          (IDENT:W @P6_defparam.v:4:18))))))

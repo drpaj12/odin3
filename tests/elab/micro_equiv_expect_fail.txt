@@ -1,0 +1,8 @@
+# The micros of tests/micro/verilog that elab_equiv_micro (elab-sweep --equiv, Yosys 0.55) finds
+# not equivalent, one per line: `<path relative to tests/micro/verilog> <one-line reason>` (2D
+# spec 14.5). The micros in tests/elab/micro_expect_fail.txt fail before the bridge and are
+# listed there only. elab-sweep fails the run on an unlisted failure and on a listed file that
+# now passes; an entry names the divergence (spec 17 row) or the Yosys behaviour it comes from.
+#
+# Empty until the first full bridge run (Task 26 ran only the five smallest micros; the
+# controller's `ODIN3_HEAVY_OK=1 ctest --preset sweep -R elab_equiv_micro` fills it in).

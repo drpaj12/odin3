@@ -1,0 +1,40 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:p3_ranged_signed @P3_ranged_signed_parameter.v:2:1
+  (MODULE:p3_ranged_signed @P3_ranged_signed_parameter.v:2:1
+    _
+    (LIST @P3_ranged_signed_parameter.v:2:25
+      (PORT_DECL.output [IN_HEADER NET=1] @P3_ranged_signed_parameter.v:2:26
+        (RANGE @P3_ranged_signed_parameter.v:2:33
+          (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:2:34 32'sd7)
+          (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:2:36 32'sd0))
+        (DECLARATOR:y @P3_ranged_signed_parameter.v:2:39
+          _)))
+    (PARAM_DECL.localparam @P3_ranged_signed_parameter.v:3:3
+      (RANGE @P3_ranged_signed_parameter.v:3:13
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:3:14 32'sd3)
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:3:16 32'sd0))
+      (DECLARATOR:P @P3_ranged_signed_parameter.v:3:19
+        (NUMBER.bin @P3_ranged_signed_parameter.v:3:19 4'b1001)))
+    (PARAM_DECL.localparam [SIGNED] @P3_ranged_signed_parameter.v:4:3
+      (RANGE @P3_ranged_signed_parameter.v:4:20
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:4:21 32'sd7)
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:4:23 32'sd0))
+      (DECLARATOR:S @P3_ranged_signed_parameter.v:4:26
+        (NUMBER.bin [SIGNED] @P3_ranged_signed_parameter.v:4:26 8'sb11111101)))
+    (PARAM_DECL.localparam [SIGNED] @P3_ranged_signed_parameter.v:5:3
+      _
+      (DECLARATOR:Q @P3_ranged_signed_parameter.v:5:20
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:5:20 1)))
+    (PARAM_DECL.localparam [SIGNED] @P3_ranged_signed_parameter.v:6:3
+      (RANGE @P3_ranged_signed_parameter.v:6:21
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:6:22 32'sd3)
+        (NUMBER.dec [SIGNED] @P3_ranged_signed_parameter.v:6:24 32'sd0))
+      (DECLARATOR:LS @P3_ranged_signed_parameter.v:6:27
+        (NUMBER.bin [SIGNED] @P3_ranged_signed_parameter.v:6:27 4'sb1000)))
+    (CONT_ASSIGN @P3_ranged_signed_parameter.v:7:3
+      _
+      _
+      (NET_ASSIGN @P3_ranged_signed_parameter.v:7:10
+        (IDENT:y @P3_ranged_signed_parameter.v:7:10)
+        (IDENT:S @P3_ranged_signed_parameter.v:7:14)))))

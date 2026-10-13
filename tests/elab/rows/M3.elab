@@ -1,0 +1,93 @@
+# generated: elab-check --write
+(UNIT:m3_top @M3_output_reg_integer.v:12:1
+  (MODULE:m3_top @M3_output_reg_integer.v:12:1
+    _
+    (LIST @M3_output_reg_integer.v:12:15
+      (PORT_DECL.input [IN_HEADER NET=1] @M3_output_reg_integer.v:12:16
+        _
+        (DECLARATOR:a @M3_output_reg_integer.v:12:22
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M3_output_reg_integer.v:12:25
+        _
+        (DECLARATOR:q1 @M3_output_reg_integer.v:12:32
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M3_output_reg_integer.v:12:25
+        _
+        (DECLARATOR:q2 @M3_output_reg_integer.v:12:36
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M3_output_reg_integer.v:12:40
+        (RANGE @M3_output_reg_integer.v:12:47
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:48 32'sd3)
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:50 32'sd0))
+        (DECLARATOR:r1 @M3_output_reg_integer.v:12:53
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M3_output_reg_integer.v:12:57
+        (RANGE @M3_output_reg_integer.v:12:64
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:65 32'sd31)
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:68 32'sd0))
+        (DECLARATOR:n1 @M3_output_reg_integer.v:12:71
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M3_output_reg_integer.v:12:57
+        (RANGE @M3_output_reg_integer.v:12:64
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:65 32'sd31)
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:12:68 32'sd0))
+        (DECLARATOR:n2 @M3_output_reg_integer.v:12:75
+          _)))
+    (INSTANTIATION:m3_ansi @M3_output_reg_integer.v:13:3
+      _
+      (INSTANCE:u1 @M3_output_reg_integer.v:13:11
+        _
+        (CONNECTION:a @M3_output_reg_integer.v:13:15
+          (IDENT:a @M3_output_reg_integer.v:13:18))
+        (CONNECTION:q @M3_output_reg_integer.v:13:22
+          (IDENT:q1 @M3_output_reg_integer.v:13:25))
+        (CONNECTION:r @M3_output_reg_integer.v:13:30
+          (IDENT:r1 @M3_output_reg_integer.v:13:33))
+        (CONNECTION:n @M3_output_reg_integer.v:13:38
+          (IDENT:n1 @M3_output_reg_integer.v:13:41))))
+    (INSTANTIATION:m3_nonansi @M3_output_reg_integer.v:14:3
+      _
+      (INSTANCE:u2 @M3_output_reg_integer.v:14:14
+        _
+        (CONNECTION:a @M3_output_reg_integer.v:14:18
+          (IDENT:a @M3_output_reg_integer.v:14:21))
+        (CONNECTION:q @M3_output_reg_integer.v:14:25
+          (IDENT:q2 @M3_output_reg_integer.v:14:28))
+        (CONNECTION:n @M3_output_reg_integer.v:14:33
+          (IDENT:n2 @M3_output_reg_integer.v:14:36)))))
+  (MODULE:m3_ansi @M3_output_reg_integer.v:2:1
+    _
+    (LIST @M3_output_reg_integer.v:2:16
+      (PORT_DECL.input [IN_HEADER NET=1] @M3_output_reg_integer.v:2:17
+        _
+        (DECLARATOR:a @M3_output_reg_integer.v:2:23
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @M3_output_reg_integer.v:2:26
+        _
+        (DECLARATOR:q @M3_output_reg_integer.v:2:37
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @M3_output_reg_integer.v:2:40
+        (RANGE @M3_output_reg_integer.v:2:51
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:2:52 32'sd3)
+          (NUMBER.dec [SIGNED] @M3_output_reg_integer.v:2:54 32'sd0))
+        (DECLARATOR:r @M3_output_reg_integer.v:2:57
+          _))
+      (PORT_DECL.output [IN_HEADER DT=2] @M3_output_reg_integer.v:2:60
+        _
+        (DECLARATOR:n @M3_output_reg_integer.v:2:75
+          _))))
+  (MODULE:m3_nonansi @M3_output_reg_integer.v:5:1
+    _
+    (LIST @M3_output_reg_integer.v:5:19
+      (PORT_DECL.input [IN_HEADER NET=1] @M3_output_reg_integer.v:6:3
+        _
+        (DECLARATOR:a @M3_output_reg_integer.v:6:9
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @M3_output_reg_integer.v:7:3
+        _
+        (DECLARATOR:q @M3_output_reg_integer.v:7:10
+          _))
+      (PORT_DECL.output [IN_HEADER DT=2] @M3_output_reg_integer.v:8:3
+        _
+        (DECLARATOR:n @M3_output_reg_integer.v:8:10
+          _)))))

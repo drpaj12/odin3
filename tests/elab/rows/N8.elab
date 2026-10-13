@@ -1,0 +1,44 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:n8_var_init @N8_var_initialiser.v:2:1
+  (MODULE:n8_var_init @N8_var_initialiser.v:2:1
+    _
+    (LIST @N8_var_initialiser.v:2:20
+      (PORT_DECL.output [IN_HEADER NET=1] @N8_var_initialiser.v:2:21
+        (RANGE @N8_var_initialiser.v:2:28
+          (NUMBER.dec [SIGNED] @N8_var_initialiser.v:2:29 32'sd3)
+          (NUMBER.dec [SIGNED] @N8_var_initialiser.v:2:31 32'sd0))
+        (DECLARATOR:y @N8_var_initialiser.v:2:34
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N8_var_initialiser.v:2:37
+        _
+        (DECLARATOR:z @N8_var_initialiser.v:2:44
+          _)))
+    (VAR_DECL.reg @N8_var_initialiser.v:3:3
+      (RANGE @N8_var_initialiser.v:3:7
+        (NUMBER.dec [SIGNED] @N8_var_initialiser.v:3:8 32'sd3)
+        (NUMBER.dec [SIGNED] @N8_var_initialiser.v:3:10 32'sd0))
+      (DECLARATOR:r @N8_var_initialiser.v:3:13
+        (NUMBER.dec @N8_var_initialiser.v:3:17 4'd5)))
+    (VAR_DECL.reg @N8_var_initialiser.v:4:3
+      _
+      (DECLARATOR:s @N8_var_initialiser.v:4:7
+        (NUMBER.bin @N8_var_initialiser.v:4:11 1'b1))
+      (DECLARATOR:t @N8_var_initialiser.v:4:17
+        (NUMBER.bin @N8_var_initialiser.v:4:21 1'b0)))
+    (VAR_DECL.integer @N8_var_initialiser.v:5:3
+      _
+      (DECLARATOR:n @N8_var_initialiser.v:5:11
+        (NUMBER.dec [SIGNED] @N8_var_initialiser.v:5:15 7)))
+    (CONT_ASSIGN @N8_var_initialiser.v:6:3
+      _
+      _
+      (NET_ASSIGN @N8_var_initialiser.v:6:10
+        (IDENT:y @N8_var_initialiser.v:6:10)
+        (IDENT:r @N8_var_initialiser.v:6:14)))
+    (CONT_ASSIGN @N8_var_initialiser.v:7:3
+      _
+      _
+      (NET_ASSIGN @N8_var_initialiser.v:7:10
+        (IDENT:z @N8_var_initialiser.v:7:10)
+        (IDENT:s @N8_var_initialiser.v:7:14)))))

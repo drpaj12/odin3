@@ -1,0 +1,108 @@
+# generated: elab-check --write
+(UNIT:t5_initial @T5_initial.v:2:1
+  (MODULE:t5_initial @T5_initial.v:2:1
+    _
+    (LIST @T5_initial.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @T5_initial.v:2:20
+        _
+        (DECLARATOR:clk @T5_initial.v:2:26
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T5_initial.v:2:31
+        (RANGE @T5_initial.v:2:37
+          (NUMBER.dec [SIGNED] @T5_initial.v:2:38 32'sd3)
+          (NUMBER.dec [SIGNED] @T5_initial.v:2:40 32'sd0))
+        (DECLARATOR:addr @T5_initial.v:2:43
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @T5_initial.v:2:49
+        (RANGE @T5_initial.v:2:56
+          (NUMBER.dec [SIGNED] @T5_initial.v:2:57 32'sd7)
+          (NUMBER.dec [SIGNED] @T5_initial.v:2:59 32'sd0))
+        (DECLARATOR:y @T5_initial.v:2:62
+          _)))
+    (VAR_DECL.reg @T5_initial.v:3:3
+      (RANGE @T5_initial.v:3:7
+        (NUMBER.dec [SIGNED] @T5_initial.v:3:8 32'sd7)
+        (NUMBER.dec [SIGNED] @T5_initial.v:3:10 32'sd0))
+      (DECLARATOR:r @T5_initial.v:3:13
+        _))
+    (VAR_DECL.reg @T5_initial.v:4:3
+      (RANGE @T5_initial.v:4:7
+        (NUMBER.dec [SIGNED] @T5_initial.v:4:8 32'sd7)
+        (NUMBER.dec [SIGNED] @T5_initial.v:4:10 32'sd0))
+      (DECLARATOR:mem @T5_initial.v:4:13
+        _
+        (RANGE @T5_initial.v:4:17
+          (NUMBER.dec [SIGNED] @T5_initial.v:4:18 32'sd0)
+          (NUMBER.dec [SIGNED] @T5_initial.v:4:20 32'sd15))))
+    (VAR_DECL.reg @T5_initial.v:5:3
+      (RANGE @T5_initial.v:5:7
+        (NUMBER.dec [SIGNED] @T5_initial.v:5:8 32'sd7)
+        (NUMBER.dec [SIGNED] @T5_initial.v:5:10 32'sd0))
+      (DECLARATOR:rom @T5_initial.v:5:13
+        _
+        (RANGE @T5_initial.v:5:17
+          (NUMBER.dec [SIGNED] @T5_initial.v:5:18 32'sd0)
+          (NUMBER.dec [SIGNED] @T5_initial.v:5:20 32'sd15))))
+    (VAR_DECL.integer @T5_initial.v:6:3
+      _
+      (DECLARATOR:i @T5_initial.v:6:11
+        _))
+    (INITIAL @T5_initial.v:7:3
+      (BLOCKING_ASSIGN @T5_initial.v:7:11
+        (IDENT:r @T5_initial.v:7:11)
+        _
+        (NUMBER.dec @T5_initial.v:7:15 8'd5)))
+    (INITIAL @T5_initial.v:8:3
+      (SEQ_BLOCK @T5_initial.v:8:11
+        _
+        (FOR @T5_initial.v:9:5
+          (BLOCKING_ASSIGN @T5_initial.v:9:10
+            (IDENT:i @T5_initial.v:9:10)
+            _
+            (NUMBER.dec [SIGNED] @T5_initial.v:9:14 0))
+          (BINARY.< @T5_initial.v:9:17
+            (IDENT:i @T5_initial.v:9:17)
+            (NUMBER.dec [SIGNED] @T5_initial.v:9:21 16))
+          (BLOCKING_ASSIGN @T5_initial.v:9:25
+            (IDENT:i @T5_initial.v:9:25)
+            _
+            (BINARY.+ @T5_initial.v:9:29
+              (IDENT:i @T5_initial.v:9:29)
+              (NUMBER.dec [SIGNED] @T5_initial.v:9:33 1)))
+          (BLOCKING_ASSIGN @T5_initial.v:10:7
+            (SELECT.bit @T5_initial.v:10:7
+              (IDENT:mem @T5_initial.v:10:7)
+              (IDENT:i @T5_initial.v:10:11)
+              _)
+            _
+            (NUMBER.dec @T5_initial.v:10:16 8'd0)))))
+    (INITIAL @T5_initial.v:12:3
+      (TASK_CALL:$readmemh [SYSTEM] @T5_initial.v:12:11
+        (STRING:"t5_init.hex" @T5_initial.v:12:21)
+        (IDENT:rom @T5_initial.v:12:36)))
+    (INITIAL @T5_initial.v:13:3
+      (TASK_CALL:$readmemb [SYSTEM] @T5_initial.v:13:11
+        (STRING:"t5_init.bin" @T5_initial.v:13:21)
+        (IDENT:rom @T5_initial.v:13:36)
+        (NUMBER.dec [SIGNED] @T5_initial.v:13:41 0)
+        (NUMBER.dec [SIGNED] @T5_initial.v:13:44 7)))
+    (INITIAL @T5_initial.v:14:3
+      (SEQ_BLOCK @T5_initial.v:14:11
+        _
+        (NULL_STMT @T5_initial.v:15:5)))
+    (CONT_ASSIGN @T5_initial.v:18:3
+      _
+      _
+      (NET_ASSIGN @T5_initial.v:18:10
+        (IDENT:y @T5_initial.v:18:10)
+        (BINARY.^ @T5_initial.v:18:14
+          (BINARY.^ @T5_initial.v:18:14
+            (SELECT.bit @T5_initial.v:18:14
+              (IDENT:mem @T5_initial.v:18:14)
+              (IDENT:addr @T5_initial.v:18:18)
+              _)
+            (SELECT.bit @T5_initial.v:18:26
+              (IDENT:rom @T5_initial.v:18:26)
+              (IDENT:addr @T5_initial.v:18:30)
+              _))
+          (IDENT:r @T5_initial.v:18:38))))))

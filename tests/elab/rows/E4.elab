@@ -1,0 +1,138 @@
+# generated: elab-check --write
+(UNIT:e4_arith @E4_add_sub_mul.v:2:1
+  (MODULE:e4_arith @E4_add_sub_mul.v:2:1
+    _
+    (LIST @E4_add_sub_mul.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @E4_add_sub_mul.v:2:18
+        (RANGE @E4_add_sub_mul.v:2:24
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:25 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:27 32'sd0))
+        (DECLARATOR:a @E4_add_sub_mul.v:2:30
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E4_add_sub_mul.v:2:18
+        (RANGE @E4_add_sub_mul.v:2:24
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:25 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:27 32'sd0))
+        (DECLARATOR:b @E4_add_sub_mul.v:2:33
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E4_add_sub_mul.v:2:18
+        (RANGE @E4_add_sub_mul.v:2:24
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:25 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:27 32'sd0))
+        (DECLARATOR:c @E4_add_sub_mul.v:2:36
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y1 @E4_add_sub_mul.v:2:52
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y2 @E4_add_sub_mul.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y3 @E4_add_sub_mul.v:2:60
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y4 @E4_add_sub_mul.v:2:64
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y5 @E4_add_sub_mul.v:2:68
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y6 @E4_add_sub_mul.v:2:72
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y7 @E4_add_sub_mul.v:2:76
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E4_add_sub_mul.v:2:39
+        (RANGE @E4_add_sub_mul.v:2:46
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:47 32'sd7)
+          (NUMBER.dec [SIGNED] @E4_add_sub_mul.v:2:49 32'sd0))
+        (DECLARATOR:y8 @E4_add_sub_mul.v:2:80
+          _)))
+    (CONT_ASSIGN @E4_add_sub_mul.v:3:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:3:10
+        (IDENT:y1 @E4_add_sub_mul.v:3:10)
+        (BINARY.+ @E4_add_sub_mul.v:3:15
+          (IDENT:a @E4_add_sub_mul.v:3:15)
+          (IDENT:b @E4_add_sub_mul.v:3:19))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:4:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:4:10
+        (IDENT:y2 @E4_add_sub_mul.v:4:10)
+        (BINARY.- @E4_add_sub_mul.v:4:15
+          (IDENT:a @E4_add_sub_mul.v:4:15)
+          (IDENT:b @E4_add_sub_mul.v:4:19))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:5:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:5:10
+        (IDENT:y3 @E4_add_sub_mul.v:5:10)
+        (BINARY.* @E4_add_sub_mul.v:5:15
+          (IDENT:a @E4_add_sub_mul.v:5:15)
+          (IDENT:b @E4_add_sub_mul.v:5:19))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:6:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:6:10
+        (IDENT:y4 @E4_add_sub_mul.v:6:10)
+        (UNARY.- @E4_add_sub_mul.v:6:15
+          (IDENT:a @E4_add_sub_mul.v:6:16))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:7:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:7:10
+        (IDENT:y5 @E4_add_sub_mul.v:7:10)
+        (UNARY.+ @E4_add_sub_mul.v:7:15
+          (IDENT:a @E4_add_sub_mul.v:7:16))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:8:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:8:10
+        (IDENT:y6 @E4_add_sub_mul.v:8:10)
+        (BINARY.+ @E4_add_sub_mul.v:8:15
+          (IDENT:a @E4_add_sub_mul.v:8:15)
+          (BINARY.* @E4_add_sub_mul.v:8:19
+            (IDENT:b @E4_add_sub_mul.v:8:19)
+            (IDENT:c @E4_add_sub_mul.v:8:23)))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:9:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:9:10
+        (IDENT:y7 @E4_add_sub_mul.v:9:10)
+        (BINARY.- @E4_add_sub_mul.v:9:15
+          (BINARY.- @E4_add_sub_mul.v:9:15
+            (IDENT:a @E4_add_sub_mul.v:9:15)
+            (IDENT:b @E4_add_sub_mul.v:9:19))
+          (IDENT:c @E4_add_sub_mul.v:9:23))))
+    (CONT_ASSIGN @E4_add_sub_mul.v:10:3
+      _
+      _
+      (NET_ASSIGN @E4_add_sub_mul.v:10:10
+        (IDENT:y8 @E4_add_sub_mul.v:10:10)
+        (BINARY.* @E4_add_sub_mul.v:10:15
+          (UNARY.- @E4_add_sub_mul.v:10:15
+            (IDENT:a @E4_add_sub_mul.v:10:16))
+          (IDENT:b @E4_add_sub_mul.v:10:20))))))

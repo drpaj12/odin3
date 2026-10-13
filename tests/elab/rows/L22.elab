@@ -1,0 +1,169 @@
+# generated: elab-check --write
+(UNIT:l22_top @L22_begin_keywords.v:28:1
+  (MODULE:l22_top @L22_begin_keywords.v:28:1
+    _
+    (LIST @L22_begin_keywords.v:28:16
+      (PORT_DECL.input [IN_HEADER NET=1] @L22_begin_keywords.v:28:17
+        _
+        (DECLARATOR:a @L22_begin_keywords.v:28:23
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L22_begin_keywords.v:28:26
+        (RANGE @L22_begin_keywords.v:28:32
+          (NUMBER.dec [SIGNED] @L22_begin_keywords.v:28:33 32'sd1)
+          (NUMBER.dec [SIGNED] @L22_begin_keywords.v:28:35 32'sd0))
+        (DECLARATOR:b @L22_begin_keywords.v:28:38
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:28:41
+        _
+        (DECLARATOR:y1 @L22_begin_keywords.v:28:48
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:28:41
+        _
+        (DECLARATOR:y2 @L22_begin_keywords.v:28:52
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:28:41
+        _
+        (DECLARATOR:y3 @L22_begin_keywords.v:28:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:28:41
+        _
+        (DECLARATOR:y4 @L22_begin_keywords.v:28:60
+          _)))
+    (NET_DECL.wire @L22_begin_keywords.v:29:3
+      _
+      _
+      _
+      (DECLARATOR:unused @L22_begin_keywords.v:29:8
+        _))
+    (INSTANTIATION:l22_1995 @L22_begin_keywords.v:30:3
+      _
+      (INSTANCE:u1 @L22_begin_keywords.v:30:12
+        _
+        (CONNECTION:a @L22_begin_keywords.v:30:16
+          (IDENT:a @L22_begin_keywords.v:30:19))
+        (CONNECTION:y @L22_begin_keywords.v:30:23
+          (IDENT:y1 @L22_begin_keywords.v:30:26))))
+    (INSTANTIATION:l22_2001 @L22_begin_keywords.v:31:3
+      _
+      (INSTANCE:u2 @L22_begin_keywords.v:31:12
+        _
+        (CONNECTION:a @L22_begin_keywords.v:31:16
+          (IDENT:b @L22_begin_keywords.v:31:16))
+        (CONNECTION:uwire @L22_begin_keywords.v:31:19
+          (IDENT:unused @L22_begin_keywords.v:31:19))))
+    (INSTANTIATION:l22_noconfig @L22_begin_keywords.v:32:3
+      _
+      (INSTANCE:u3 @L22_begin_keywords.v:32:16
+        _
+        (CONNECTION:a @L22_begin_keywords.v:32:20
+          (IDENT:a @L22_begin_keywords.v:32:20))
+        (CONNECTION:config @L22_begin_keywords.v:32:23
+          (IDENT:y3 @L22_begin_keywords.v:32:23))))
+    (INSTANTIATION:l22_2005 @L22_begin_keywords.v:33:3
+      _
+      (INSTANCE:u4 @L22_begin_keywords.v:33:12
+        _
+        (CONNECTION:a @L22_begin_keywords.v:33:16
+          (IDENT:a @L22_begin_keywords.v:33:19))
+        (CONNECTION:y @L22_begin_keywords.v:33:23
+          (IDENT:y4 @L22_begin_keywords.v:33:26))))
+    (CONT_ASSIGN @L22_begin_keywords.v:34:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:34:10
+        (IDENT:y2 @L22_begin_keywords.v:34:10)
+        (IDENT:unused @L22_begin_keywords.v:34:15))))
+  (MODULE:l22_1995 @L22_begin_keywords.v:3:1
+    _
+    (LIST @L22_begin_keywords.v:3:17
+      (PORT_DECL.input [IN_HEADER NET=1] @L22_begin_keywords.v:4:3
+        _
+        (DECLARATOR:a @L22_begin_keywords.v:4:9
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:5:3
+        _
+        (DECLARATOR:y @L22_begin_keywords.v:5:10
+          _)))
+    (NET_DECL.wire @L22_begin_keywords.v:6:3
+      _
+      _
+      _
+      (DECLARATOR:generate @L22_begin_keywords.v:6:8
+        _))
+    (CONT_ASSIGN @L22_begin_keywords.v:7:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:7:10
+        (IDENT:generate @L22_begin_keywords.v:7:10)
+        (IDENT:a @L22_begin_keywords.v:7:21)))
+    (CONT_ASSIGN @L22_begin_keywords.v:8:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:8:10
+        (IDENT:y @L22_begin_keywords.v:8:10)
+        (IDENT:generate @L22_begin_keywords.v:8:14))))
+  (MODULE:l22_2001 @L22_begin_keywords.v:11:1
+    _
+    (LIST @L22_begin_keywords.v:11:17
+      (PORT_DECL.input [SIGNED IN_HEADER NET=1] @L22_begin_keywords.v:11:18
+        (RANGE @L22_begin_keywords.v:11:31
+          (NUMBER.dec [SIGNED] @L22_begin_keywords.v:11:32 32'sd1)
+          (NUMBER.dec [SIGNED] @L22_begin_keywords.v:11:34 32'sd0))
+        (DECLARATOR:a @L22_begin_keywords.v:11:37
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:11:40
+        _
+        (DECLARATOR:uwire @L22_begin_keywords.v:11:47
+          _)))
+    (CONT_ASSIGN @L22_begin_keywords.v:12:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:12:10
+        (IDENT:uwire @L22_begin_keywords.v:12:10)
+        (IDENT:a @L22_begin_keywords.v:12:18))))
+  (MODULE:l22_noconfig @L22_begin_keywords.v:17:1
+    _
+    (LIST @L22_begin_keywords.v:17:21
+      (PORT_DECL.input [IN_HEADER NET=1] @L22_begin_keywords.v:17:22
+        _
+        (DECLARATOR:a @L22_begin_keywords.v:17:28
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:17:31
+        _
+        (DECLARATOR:config @L22_begin_keywords.v:17:38
+          _)))
+    (CONT_ASSIGN @L22_begin_keywords.v:18:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:18:10
+        (IDENT:config @L22_begin_keywords.v:18:10)
+        (IDENT:a @L22_begin_keywords.v:18:19))))
+  (MODULE:l22_2005 @L22_begin_keywords.v:22:1
+    _
+    (LIST @L22_begin_keywords.v:22:17
+      (PORT_DECL.input [IN_HEADER NET=1] @L22_begin_keywords.v:22:18
+        _
+        (DECLARATOR:a @L22_begin_keywords.v:22:24
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L22_begin_keywords.v:22:27
+        _
+        (DECLARATOR:y @L22_begin_keywords.v:22:34
+          _)))
+    (NET_DECL.uwire @L22_begin_keywords.v:23:3
+      _
+      _
+      _
+      (DECLARATOR:w @L22_begin_keywords.v:23:9
+        _))
+    (CONT_ASSIGN @L22_begin_keywords.v:24:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:24:10
+        (IDENT:w @L22_begin_keywords.v:24:10)
+        (IDENT:a @L22_begin_keywords.v:24:14)))
+    (CONT_ASSIGN @L22_begin_keywords.v:25:3
+      _
+      _
+      (NET_ASSIGN @L22_begin_keywords.v:25:10
+        (IDENT:y @L22_begin_keywords.v:25:10)
+        (IDENT:w @L22_begin_keywords.v:25:14)))))

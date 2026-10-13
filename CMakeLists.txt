@@ -121,6 +121,13 @@ add_library(odin3_core OBJECT
     src/passes/opt/merge.c
     src/passes/opt/muxtree.c
     src/passes/opt/reduce.c
+    src/passes/opt/dff.c
+    src/passes/opt/dff_state.c
+    src/passes/opt/dff_gates.c
+    src/passes/opt/dff_rules.c
+    src/passes/opt/dff_constbits.c
+    src/passes/opt/dff_merge.c
+    src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
@@ -478,6 +485,11 @@ add_executable(odin3-parse-check tools/parse-check/odin3-parse-check.c
 target_include_directories(odin3-parse-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3-parse-check PRIVATE odin3_core odin3_flags)
 
+# --- elab-check: the elaboration coverage-row driver (2D §14.2, plan Task 25) -------------------
+add_executable(elab-check tools/elab-check/elab-check.c)
+target_include_directories(elab-check PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(elab-check PRIVATE odin3_core odin3_flags)
+
 # --- odin3-sim-vectors: the simulator's random-vector driver (tools/sim-check, 1E) --------------
 add_executable(odin3-sim-vectors tools/sim-check/odin3-sim-vectors.c)
 target_include_directories(odin3-sim-vectors PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -590,9 +602,11 @@ if(BUILD_TESTING)
     # 2F Task 1: the opt context and the rewrite kit (every test_opt_* links proc_build.c).
     odin3_add_unit_test(test_opt_kit)
     target_sources(test_opt_kit PRIVATE tests/unit/proc_build.c)
-    # 2F Task 2: the FF model (Tasks 11-12 extend test_opt_dff with opt_dff's rules).
+    # 2F Task 2: the FF model; Tasks 11-12: opt_dff's rules (test_opt_dff).
     odin3_add_unit_test(test_opt_dff)
     target_sources(test_opt_dff PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_opt_dff PRIVATE
+        ODIN3_DFF_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/dff")
     # 2F Task 3: opt_clean.
     odin3_add_unit_test(test_opt_clean)
     target_sources(test_opt_clean PRIVATE tests/unit/proc_build.c)
@@ -1202,7 +1216,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(abc_adapter_no_assert PROPERTIES LABELS unit)
     set(_tools_env "ODIN3_SIM_VECTORS=$<TARGET_FILE:odin3-sim-vectors>"
-                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>")
+                   "ODIN3_PARSE_CHECK=$<TARGET_FILE:odin3-parse-check>"
+                   "ODIN3_ELAB_CHECK=$<TARGET_FILE:elab-check>")
     if(ODIN3_WITH_ABC)
         # REQUIRE makes the ABC-backed tests fail, not skip, if this ABC is unusable.
         list(APPEND _tools_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>" "ODIN3_REQUIRE_ABC=1")
@@ -1399,6 +1414,30 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME verilog_coverage
         COMMAND $<TARGET_FILE:odin3-parse-check> --smallest-first ${_coverage_rows})
     set_tests_properties(verilog_coverage PROPERTIES LABELS verilog)
+
+    # 2D Task 25 (spec 14.2): the 125 coverage rows of tests/elab/rows elaborate, pass check FULL
+    # and match their goldens, smallest first, in both latch modes (the nolatches goldens exist for
+    # every row with a combinational always).
+    file(STRINGS ${PROJECT_SOURCE_DIR}/tests/elab/rows/rows.txt _elab_row_lines)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 ${PROJECT_SOURCE_DIR}/tests/elab/rows/rows.txt)
+    set(_elab_rows_all "")
+    set(_elab_rows_comb "")
+    foreach(_line IN LISTS _elab_row_lines)
+        if(_line MATCHES "^[A-Z][0-9]+ ([^ ]+) comb=([01]) clocks=[0-9]+$")
+            list(APPEND _elab_rows_all ${PROJECT_SOURCE_DIR}/tests/elab/rows/${CMAKE_MATCH_1})
+            if(CMAKE_MATCH_2 STREQUAL "1")
+                list(APPEND _elab_rows_comb ${PROJECT_SOURCE_DIR}/tests/elab/rows/${CMAKE_MATCH_1})
+            endif()
+        else()
+            message(FATAL_ERROR "tests/elab/rows/rows.txt: bad line '${_line}'")
+        endif()
+    endforeach()
+    add_test(NAME elab_coverage
+        COMMAND elab-check --smallest-first ${_elab_rows_all})
+    add_test(NAME elab_coverage_nolatches
+        COMMAND elab-check --nolatches --smallest-first ${_elab_rows_comb})
+    set_tests_properties(elab_coverage elab_coverage_nolatches PROPERTIES LABELS elab)
     # 2C §7.3: the negative cases (odin3 --parse-only in the case directory), and the 2D handover
     # cases (read_verilog without --parse-only; pending, exit 77, while 2D's entry is the stub).
     add_test(NAME verilog_reject
@@ -1445,6 +1484,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     odin3_add_sweep_test(verilog_micro_parse LABEL sweep
         COMMAND ${_parse_corpus}
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/verilog/micro_expect_fail.txt
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+    # 2D Task 26 (spec 14.5): every micro under `odin3 --elab-only`, smallest first, with
+    # --top from its Parmys golden (micro-top); failures only as listed in
+    # tests/elab/micro_expect_fail.txt. Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep -R
+    # verilog_micro_elab`. Two 3G jobs fit the heavy slice's 6G (two 4G jobs do not).
+    odin3_add_sweep_test(verilog_micro_elab LABEL sweep
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                --odin3 $<TARGET_FILE:odin3>
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 3G
+                --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
+                --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
     odin3_add_sweep_test(verilog_writer_parse LABEL sweep
         COMMAND ${_parse_corpus} --writer $<TARGET_FILE:odin3-write>
@@ -1655,6 +1705,36 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
         set_tests_properties(proc_diff_rows proc_bridge_rows PROPERTIES
             LABELS proc SKIP_RETURN_CODE 77 TIMEOUT 600)
+        # 2D Task 25 (spec 14.2): elab-equiv on every coverage row, smallest first, except the
+        # rows with several clocks (goldens only) and those in tests/elab/equiv_expect_fail.txt.
+        odin3_add_sweep_test(elab_coverage_equiv LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/run-rows-equiv
+                    --elab-equiv ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --rows ${PROJECT_SOURCE_DIR}/tests/elab/rows
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/equiv_expect_fail.txt)
+        # 2D Task 26 (spec 14.5): the micros through the bridge (elab-equiv per file, Yosys
+        # 0.55), smallest first. The micros that fail before the bridge are in
+        # micro_expect_fail.txt; the ones the bridge finds not equivalent in
+        # micro_equiv_expect_fail.txt. A Yosys crash is an `oracle crash`, not a failure.
+        odin3_add_sweep_test(elab_equiv_micro LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                    --odin3 $<TARGET_FILE:odin3> --equiv --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_equiv_expect_fail.txt
+                    --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+        # 2D Task 26 (spec 14.4): the project corpus's positive phase-2 Verilog cases through the
+        # bridge against their ref.blif (oracle drift against the recorded 0.69 is reported, not
+        # failed), and the negative front-end cases' kind, location and names. In the gate.
+        add_test(NAME project_corpus_frontend
+            COMMAND ${Python3_EXECUTABLE}
+                    ${PROJECT_SOURCE_DIR}/tools/project-fixtures/project_fixtures.py compare
+                    --odin3 $<TARGET_FILE:odin3> --with-frontend --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+        set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys

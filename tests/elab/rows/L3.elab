@@ -1,0 +1,55 @@
+# generated: elab-check --write
+(UNIT:l3_escaped @L3_escaped_identifiers.v:2:1
+  (MODULE:l3_escaped @L3_escaped_identifiers.v:2:1
+    _
+    (LIST @L3_escaped_identifiers.v:2:19
+      (PORT_DECL.input [IN_HEADER NET=1] @L3_escaped_identifiers.v:2:20
+        _
+        (DECLARATOR:a+b @L3_escaped_identifiers.v:2:26
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L3_escaped_identifiers.v:2:20
+        _
+        (DECLARATOR:bus[0] @L3_escaped_identifiers.v:2:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L3_escaped_identifiers.v:2:43
+        _
+        (DECLARATOR:module @L3_escaped_identifiers.v:2:50
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L3_escaped_identifiers.v:2:43
+        _
+        (DECLARATOR:1st @L3_escaped_identifiers.v:2:60
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L3_escaped_identifiers.v:2:43
+        _
+        (DECLARATOR:y @L3_escaped_identifiers.v:2:67
+          _)))
+    (NET_DECL.wire @L3_escaped_identifiers.v:3:3
+      _
+      _
+      _
+      (DECLARATOR:wire @L3_escaped_identifiers.v:3:8
+        _))
+    (CONT_ASSIGN @L3_escaped_identifiers.v:4:3
+      _
+      _
+      (NET_ASSIGN @L3_escaped_identifiers.v:4:10
+        (IDENT:wire @L3_escaped_identifiers.v:4:10)
+        (IDENT:a+b @L3_escaped_identifiers.v:4:18)))
+    (CONT_ASSIGN @L3_escaped_identifiers.v:5:3
+      _
+      _
+      (NET_ASSIGN @L3_escaped_identifiers.v:5:10
+        (IDENT:module @L3_escaped_identifiers.v:5:10)
+        (IDENT:wire @L3_escaped_identifiers.v:5:20)))
+    (CONT_ASSIGN @L3_escaped_identifiers.v:6:3
+      _
+      _
+      (NET_ASSIGN @L3_escaped_identifiers.v:6:10
+        (IDENT:1st @L3_escaped_identifiers.v:6:10)
+        (IDENT:bus[0] @L3_escaped_identifiers.v:6:17)))
+    (CONT_ASSIGN @L3_escaped_identifiers.v:7:3
+      _
+      _
+      (NET_ASSIGN @L3_escaped_identifiers.v:7:10
+        (IDENT:y @L3_escaped_identifiers.v:7:10)
+        (IDENT:a+b @L3_escaped_identifiers.v:7:15)))))

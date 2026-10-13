@@ -1,0 +1,67 @@
+# generated: elab-check --write
+(UNIT:l19_top @L19_default_nettype.v:17:1
+  (MODULE:l19_top @L19_default_nettype.v:17:1
+    _
+    (LIST @L19_default_nettype.v:17:16
+      (PORT_DECL.input [IN_HEADER NET=1] @L19_default_nettype.v:17:17
+        _
+        (DECLARATOR:a @L19_default_nettype.v:17:23
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L19_default_nettype.v:17:26
+        _
+        (DECLARATOR:y1 @L19_default_nettype.v:17:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L19_default_nettype.v:17:26
+        _
+        (DECLARATOR:y2 @L19_default_nettype.v:17:37
+          _)))
+    (INSTANTIATION:l19_none @L19_default_nettype.v:18:3
+      _
+      (INSTANCE:u1 @L19_default_nettype.v:18:12
+        _
+        (CONNECTION:a @L19_default_nettype.v:18:16
+          (IDENT:a @L19_default_nettype.v:18:19))
+        (CONNECTION:y @L19_default_nettype.v:18:23
+          (IDENT:y1 @L19_default_nettype.v:18:26))))
+    (INSTANTIATION:l19_wire @L19_default_nettype.v:19:3
+      _
+      (INSTANCE:u2 @L19_default_nettype.v:19:12
+        _
+        (CONNECTION:a @L19_default_nettype.v:19:16
+          (IDENT:a @L19_default_nettype.v:19:19))
+        (CONNECTION:y @L19_default_nettype.v:19:23
+          (IDENT:y2 @L19_default_nettype.v:19:26)))))
+  (MODULE:l19_none @L19_default_nettype.v:3:1
+    _
+    (LIST @L19_default_nettype.v:3:17
+      (PORT_DECL.input [IN_HEADER NET=1] @L19_default_nettype.v:3:18
+        _
+        (DECLARATOR:a @L19_default_nettype.v:3:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L19_default_nettype.v:3:32
+        _
+        (DECLARATOR:y @L19_default_nettype.v:3:44
+          _)))
+    (CONT_ASSIGN @L19_default_nettype.v:4:3
+      _
+      _
+      (NET_ASSIGN @L19_default_nettype.v:4:10
+        (IDENT:y @L19_default_nettype.v:4:10)
+        (IDENT:a @L19_default_nettype.v:4:14))))
+  (MODULE:l19_wire @L19_default_nettype.v:14:1
+    _
+    (LIST @L19_default_nettype.v:14:17
+      (PORT_DECL.input [IN_HEADER NET=1] @L19_default_nettype.v:14:18
+        _
+        (DECLARATOR:a @L19_default_nettype.v:14:24
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L19_default_nettype.v:14:27
+        _
+        (DECLARATOR:y @L19_default_nettype.v:14:34
+          _)))
+    (CONT_ASSIGN @L19_default_nettype.v:15:3
+      _
+      _
+      (NET_ASSIGN @L19_default_nettype.v:15:10
+        (IDENT:y @L19_default_nettype.v:15:10)
+        (IDENT:a @L19_default_nettype.v:15:14)))))
