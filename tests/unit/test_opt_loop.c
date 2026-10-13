@@ -1178,23 +1178,32 @@ static odin3_status oom_run_at(const char *text, long fail, char **out) {
     return st;
 }
 
+typedef struct oom_points {
+    long absorbed, failed, quiet;
+} oom_points;
+
+/* The run failing at allocation `fail`: an OK run must give want's text. */
+static void oom_point(const char *text, long fail, const char *want, oom_points *pts) {
+    char *got = NULL;
+    bool ok = oom_run_at(text, fail, &got) == ODIN3_OK;
+    if (ok) {
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(want, got, "an absorbed failure changed the output");
+    }
+    free(got);
+    pts->absorbed += ok ? 1 : 0;
+    pts->failed += ok ? 0 : 1;
+    pts->quiet = ok ? pts->quiet + 1 : 0;
+}
+
 static void oom_fallback_sweep(const char *text) {
     char *want = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, oom_run_at(text, -1, &want));
-    long absorbed = 0;
-    long failed = 0;
-    long quiet = 0;
-    for (long fail = 0; fail < OOM_LIMIT && quiet < OOM_TAIL; fail++) {
-        char *got = NULL;
-        bool ok = oom_run_at(text, fail, &got) == ODIN3_OK;
-        if (ok) {
-            TEST_ASSERT_EQUAL_STRING_MESSAGE(want, got, "an absorbed failure changed the output");
-        }
-        free(got);
-        absorbed += ok ? 1 : 0;
-        failed += ok ? 0 : 1;
-        quiet = ok ? quiet + 1 : 0;
+    oom_points pts = {0, 0, 0};
+    for (long fail = 0; fail < OOM_LIMIT && pts.quiet < OOM_TAIL; fail++) {
+        oom_point(text, fail, want, &pts);
     }
+    long absorbed = pts.absorbed;
+    long failed = pts.failed;
     free(want);
     printf("opt OOM fallback: %ld failing points, %ld absorbed (full sweep, same output)\n", failed,
            absorbed);
