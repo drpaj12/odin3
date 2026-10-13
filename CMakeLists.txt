@@ -1807,7 +1807,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(project_corpus_frontend PROPERTIES LABELS tools)
         # 2F Task 16 (spec 20.1): opt_rules plus Yosys 0.55 on the same in.il: its cover point (or
         # log line) for the rule must fire and its per-module cell histogram must equal Odin III's.
-        # 139 small files, not a sweep. Rows marked dev=N are the documented spec 17 divergences.
+        # 141 small files, not a sweep. Rows marked dev=N are the documented spec 17 divergences.
         add_test(NAME opt_rules_yosys
             COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-rules
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}

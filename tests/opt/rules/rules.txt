@@ -16,7 +16,7 @@
 #          (eqneq.isneq, .empty and .resize fire first), const.$shl $shr $sshr $shiftx (constshift
 #          fires first), tribuf_en1 and tribuf_en0 (no Verilog or BLIF construct makes $tribuf)
 #   muxtree: a dead $pmux port (Odin III's proc makes the muxes of the tests/unit cases)
-#   dff:   always_active_set, ad_eq_q, clr_set_to_arst, const_bit_x, const_bit_z
+#   dff:   always_active_set, ad_eq_q, clr_set_to_arst
 
 expr/and_or_buffer and_or_buffer opt.opt_expr.and_or_buffer
 expr/bitwise_logic_one_const bitwise_logic_one_const opt.opt_expr.bitwise_logic_one_const
@@ -144,6 +144,8 @@ dff/always_active_en opt_dff.always_active_en log:Removing\salways-active\sEN
 dff/always_active_srst opt_dff.always_active_srst log:Handling\salways-active\sSRST
 dff/const_bit_0 opt_dff.const_bit_0 log:Setting\sconstant\s0-bit
 dff/const_bit_1 opt_dff.const_bit_1 log:Setting\sconstant\s1-bit
+dff/const_bit_x opt_dff.const_bit_x log:Setting\sconstant\s1-bit
+dff/const_bit_z opt_dff.const_bit_z log:Setting\sconstant\s1-bit
 dff/const_clk opt_dff.const_clk log:Handling\sconst\sCLK
 dff/d_eq_q opt_dff.d_eq_q log:Handling\sD\s=\sQ
 dff/never_active_aload opt_dff.never_active_aload log:Removing\snever-active\sasync\sload
