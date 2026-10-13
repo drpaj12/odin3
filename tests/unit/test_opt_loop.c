@@ -14,8 +14,8 @@
 #include "passes/manager.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
-#include "sim/prng.h"
 #include "proc_build.h"
+#include "sim/prng.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -1102,15 +1102,15 @@ static void test_opt_stats_driver(void) {
 
 /* y = ~a beside a dead gate on b; the hook below deletes the gate on y. */
 #define SIMCHECK_TEXT                                                                              \
-    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"                \
-    "  wire \\t\n"                                                                                \
-    "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"                     \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire output 3 \\y\n"                    \
+    "  wire \\t\n"                                                                                 \
+    "  cell $_NOT_ \\n\n    connect \\A \\a\n    connect \\Y \\y\n  end\n"                         \
     "  cell $_NOT_ \\dead\n    connect \\A \\b\n    connect \\Y \\t\n  end\nend\n"
 #define SIMCHECK_CONST_X "  wire \\u\n  cell $_CONSTX_ \\cx\n    connect \\Y \\u\n  end\n"
 #define SIMCHECK_PMUX                                                                              \
-    "  wire width 2 \\s2\n  wire \\pv\n"                                                         \
-    "  cell $pmux \\pm\n    parameter \\WIDTH 1\n    parameter \\S_WIDTH 2\n"                   \
-    "    connect \\A \\a\n    connect \\B 2'11\n    connect \\S \\s2\n"                        \
+    "  wire width 2 \\s2\n  wire \\pv\n"                                                           \
+    "  cell $pmux \\pm\n    parameter \\WIDTH 1\n    parameter \\S_WIDTH 2\n"                      \
+    "    connect \\A \\a\n    connect \\B 2'11\n    connect \\S \\s2\n"                            \
     "    connect \\Y \\pv\n  end\n"
 
 /* The deliberately wrong rewrite: opt_clean "also" removes the live gate, so y is never driven. */
@@ -1131,9 +1131,9 @@ static uint32_t first_cycle_with_a_zero(void) {
     odin3_prng prng;
     odin3_prng_seed(&prng, 1);
     for (uint32_t cycle = 0; cycle < SIMCHECK_CYCLES; cycle++) {
-        bool a = odin3_prng_bit(&prng);
+        bool in_a = odin3_prng_bit(&prng);
         (void)odin3_prng_bit(&prng);
-        if (!a) {
+        if (!in_a) {
             return cycle;
         }
     }
@@ -1162,9 +1162,9 @@ static void test_simcheck_catches_a_wrong_rewrite(void) {
     install_wrong_rewrite();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
     char want[LINE_MAX_LEN];
-    int len = snprintf(want, sizeof want,
-                       "opt: opt_clean: simulation differs on module 'm' at cycle %u",
-                       (unsigned)first_cycle_with_a_zero());
+    int len =
+        snprintf(want, sizeof want, "opt: opt_clean: simulation differs on module 'm' at cycle %u",
+                 (unsigned)first_cycle_with_a_zero());
     TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof want);
     TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, want));
     /* without the option the same rewrite goes unseen */
@@ -1223,7 +1223,9 @@ static void test_simcheck_build_failure_is_quiet(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
     TEST_ASSERT_EQUAL_UINT32(0, count_errors());
     TEST_ASSERT_EQUAL_UINT32(0, count_prefix("sim"));
-    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt_clean: removed 0 unused cells, 0 unused nets and 0 unused wires"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_INFO,
+                       "opt_clean: removed 0 unused cells, 0 unused nets and 0 unused wires"));
 }
 
 /* A module for the OOM sweep: a dead mux port, a duplicate gate, a constant pipeline. */

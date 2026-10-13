@@ -164,30 +164,45 @@ static odin3_status build_quiet(odin3_design *design, odin3_module_id id, odin3_
     return st;
 }
 
+/* Sizes out->bits from the first simulator; false (nothing held) when the module is not worth
+ * tracing, NO_MEMORY on failure. */
+static odin3_status alloc_trace(const odin3_sim *sim, simcheck_trace *out, bool *worth) {
+    out->n_out = output_bits(sim);
+    uint64_t bytes = (uint64_t)out->n_out * SIMCHECK_CYCLES * SIMCHECK_SEEDS;
+    *worth = bytes != 0 && bytes <= SIMCHECK_MAX_BYTES;
+    if (!*worth) {
+        return ODIN3_OK;
+    }
+    out->bits = odin3_util_calloc((size_t)bytes);
+    return out->bits != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+}
+
+/* Builds the simulator of one seed and records its trace into out->bits. */
+static odin3_status trace_seed(odin3_design *design, odin3_module_id id, uint32_t seed,
+                               simcheck_trace *out, bool *worth) {
+    odin3_sim *sim = NULL;
+    odin3_status st = build_quiet(design, id, &sim);
+    *worth = true;
+    if (st == ODIN3_OK && out->bits == NULL) {
+        st = alloc_trace(sim, out, worth);
+    }
+    if (st == ODIN3_OK && *worth) {
+        size_t row = (size_t)out->n_out * SIMCHECK_CYCLES;
+        run_seed(sim, seed, out->bits + (size_t)(seed - 1) * row);
+    }
+    odin3_sim_destroy(sim);
+    return st;
+}
+
 /* Fills *out; *usable is false (and nothing is held) when the module cannot be simulated. */
 static odin3_status trace_module(odin3_design *design, odin3_module_id id, simcheck_trace *out,
                                  bool *usable) {
     *out = (simcheck_trace){id, 0, NULL};
     *usable = false;
     for (uint32_t seed = 1; seed <= SIMCHECK_SEEDS; seed++) {
-        odin3_sim *sim = NULL;
-        odin3_status st = build_quiet(design, id, &sim);
-        if (st == ODIN3_OK && out->bits == NULL) {
-            out->n_out = output_bits(sim);
-            uint64_t bytes = (uint64_t)out->n_out * SIMCHECK_CYCLES * SIMCHECK_SEEDS;
-            if (bytes == 0 || bytes > SIMCHECK_MAX_BYTES) {
-                odin3_sim_destroy(sim);
-                return ODIN3_OK;
-            }
-            out->bits = odin3_util_calloc((size_t)bytes);
-            st = out->bits != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-        }
-        if (st == ODIN3_OK) {
-            size_t row = (size_t)out->n_out * SIMCHECK_CYCLES;
-            run_seed(sim, seed, out->bits + (size_t)(seed - 1) * row);
-        }
-        odin3_sim_destroy(sim);
-        if (st != ODIN3_OK) {
+        bool worth = true;
+        odin3_status st = trace_seed(design, id, seed, out, &worth);
+        if (st != ODIN3_OK || !worth) {
             odin3_util_free(out->bits);
             out->bits = NULL;
             return st == ODIN3_ERR_INVALID_ARG ? ODIN3_OK : st;
@@ -275,7 +290,8 @@ static odin3_status compare_module(odin3_design *design, const simcheck_trace *o
     }
     odin3_status st = trace_module(design, old->module, &now, &usable);
     uint32_t cycle = 0;
-    if (st == ODIN3_OK && usable && now.n_out == old->n_out && first_difference(old, &now, &cycle)) {
+    if (st == ODIN3_OK && usable && now.n_out == old->n_out &&
+        first_difference(old, &now, &cycle)) {
         odin3_log(ODIN3_LOG_ERROR, "opt: %s: simulation differs on module '%s' at cycle %u", sub,
                   odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(mod)),
                   (unsigned)cycle);

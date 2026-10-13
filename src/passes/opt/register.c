@@ -290,7 +290,7 @@ static bool request_valid(const odin3_opt_call_req *req, const bool *changed) {
 /* The sub-pass body, the after_run test hook, the Debug check and the --opt-simcheck comparison
  * (sim is NULL without the option). */
 static odin3_status run_checked(const odin3_opt_call_req *req, const odin3_opt_test_hooks *hooks,
-                                odin3_opt_simcheck *sim) {
+                                const odin3_opt_simcheck *sim) {
     const char *name = k_sub_names[req->sub];
     odin3_status st = k_sub_run[req->sub](req->ctx, req->design, req->opts, req->counts);
     if (st == ODIN3_OK && hooks->after_run != NULL) {
