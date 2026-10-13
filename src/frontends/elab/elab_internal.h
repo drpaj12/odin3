@@ -148,6 +148,7 @@ typedef enum odin3_elab2_type {
     ODIN3_E2T_LOGIC_OR,
     ODIN3_E2T_MUX,
     ODIN3_E2T_TRIBUF,
+    ODIN3_E2T_PMUX,
     ODIN3_E2T_MEM,
     ODIN3_E2T_PROC,
     ODIN3_E2T_CONST0,
@@ -706,11 +707,11 @@ typedef struct odin3_elab2_claim_req {
  *    redirected onto a fresh net (odin3_elab2_lvalue_claim does, odin3_elab2_wired chains them);
  *    this net-only function cannot, so a wired net in req is ODIN3_ERR_INVALID_ARG (logged,
  * *granted false, nothing recorded): the caller uses the lvalue form;
- *  - ODIN3_DRV_TRIBUF is legal only on a net of a top-level output or inout port
- *    (`tri-state driver on 'x' is supported only on a top-level output or inout port (D3)`), and
- *    shares a net only with other tristate drivers and inout pins; ODIN3_DRV_INOUT_PIN shares a net
- *    only with those, and with ordinary logic is `net 'x' is driven by inout port 'p' of instance
- *    'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)`.
+ *  - ODIN3_DRV_TRIBUF shares a net only with other tristate drivers and inout pins;
+ *    ODIN3_DRV_INOUT_PIN shares a net only with those, and with ordinary logic is `net 'x' is
+ *    driven by inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are
+ *    not supported (D3)`. Whether a tri-state net may stay one (a top-level port) or becomes logic
+ *    is decided at the end of the module (odin3_elab2_tri_logic), not here.
  * ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG (logged) for a NULL argument, a kind past the
  * enum, or no module being emitted.
  */
@@ -927,6 +928,20 @@ typedef struct odin3_elab2_tri_req {
 } odin3_elab2_tri_req;
 
 odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req);
+
+/*
+ * Step (7b) of EL-28 (EL-29, spec 17 #79), after every net of the module is merged: the `$tribuf`
+ * cells of nets that reach no port of the top module become logic as Yosys's `tribuf -logic` does
+ * (a cell with a net on a top-level output or inout port keeps its handling). The cells whose Y is
+ * the same list of nets are one group, in source order; a group becomes one `$pmux` (WIDTH the
+ * nets, S_WIDTH the drivers) whose A is x (no driver enabled), B the drivers' data in order, S
+ * their enables and Y the nets, and the `$tribuf` cells are deleted. One warning per group, at its
+ * first driver: `tri-state drivers on internal net 'data' converted to logic (no driver enabled: x;
+ * several enabled: undefined)`. Located errors, the cell left alone: Y lists that overlap without
+ * being the same, a Y with both top-level port and internal nets, an inout port of a module below
+ * the top, an inout pin of a child instance on the net. Status as odin3_elab2_module.
+ */
+odin3_status odin3_elab2_tri_logic(odin3_elab2 *e2);
 
 /* The IR name of a net, variable or instance symbol: its scope path and its name, interned. */
 odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, uint32_t *name);

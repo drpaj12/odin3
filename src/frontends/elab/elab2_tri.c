@@ -79,7 +79,7 @@ static odin3_status tri_operands(odin3_elab2 *e2, const odin3_elab2_tri_req *req
 
 /* The tristate cell: A (data), EN, Y (the lvalue's nets, fresh ones for dropped bits). */
 static odin3_status tri_cell(odin3_elab2 *e2, const odin3_elab2_tri_req *req, const odin3_sig *data,
-                             odin3_net_id enable) {
+                             odin3_net_id enable, odin3_node_id *made_node) {
     uint32_t width = data->width;
     uint64_t pins = 2ULL * width + 1U;
     odin3_loc at = odin3_ast_loc(e2->elab, req->node);
@@ -113,6 +113,7 @@ static odin3_status tri_cell(odin3_elab2 *e2, const odin3_elab2_tri_req *req, co
     odin3_netvec ports[3] = {{data_nets, width}, {&enable, 1}, {out_nets, width}};
     odin3_node_id node = {0};
     st = st != ODIN3_OK ? st : odin3_node_create_connected(e2->mod, &spec, ports, &node);
+    *made_node = node;
     st = st != ODIN3_OK ? st
                         : odin3_elab2_attrs(e2, req->node, (odin3_objref){ODIN3_OBJ_NODE, node.v});
     odin3_elab2_counts made = {1, (uint32_t)pins, fresh, 0};
@@ -127,10 +128,27 @@ static odin3_status tri_invert_data(odin3_elab2 *e2, const odin3_elab2_tri_req *
     return odin3_elab2_cell(e2, &nreq, data);
 }
 
+/* Notes the cell: at the end of the module it becomes logic when its nets reach no top-level port
+ * (odin3_elab2_tri_logic). */
+static odin3_status tri_record(odin3_elab2 *e2, const odin3_elab2_tri_req *req,
+                               odin3_node_id node) {
+    odin3_elab2_tri_rec *rec = odin3_vec_push(&e2->drive->tribufs);
+    if (rec == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *rec = (odin3_elab2_tri_rec){node, req->claim.v != 0 ? req->claim : req->node};
+    return ODIN3_OK;
+}
+
+/* True for a request with a module, an lvalue, and a data and a condition (node or signal). */
+static bool tri_req_ok(const odin3_elab2 *e2, const odin3_elab2_tri_req *req) {
+    return req != NULL && req->lv != NULL && e2->mod != NULL &&
+           (req->data_node.v != 0 || req->data != NULL) &&
+           (req->cond_node.v != 0 || req->cond != NULL);
+}
+
 odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req) {
-    if (req == NULL || req->lv == NULL || e2->mod == NULL ||
-        (req->data_node.v == 0 && req->data == NULL) ||
-        (req->cond_node.v == 0 && req->cond == NULL)) {
+    if (!tri_req_ok(e2, req)) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_tribuf: bad argument");
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -143,8 +161,10 @@ odin3_status odin3_elab2_tribuf(odin3_elab2 *e2, const odin3_elab2_tri_req *req)
     odin3_sig data;
     odin3_sig cond;
     odin3_net_id enable = {0};
+    odin3_node_id node = {0};
     st = tri_operands(e2, req, &data, &cond);
     st = st == ODIN3_OK && req->invert_data ? tri_invert_data(e2, req, &data) : st;
     st = st != ODIN3_OK ? st : tri_enable(e2, req, &cond, &enable);
-    return st != ODIN3_OK ? st : tri_cell(e2, req, &data, enable);
+    st = st != ODIN3_OK ? st : tri_cell(e2, req, &data, enable, &node);
+    return st != ODIN3_OK ? st : tri_record(e2, req, node);
 }

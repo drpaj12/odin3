@@ -421,6 +421,17 @@ Parmys's n-bit `adder` is a soft module. (4) D3 (internal tri-state nets to mux 
 a `$pmux` of the data by the enables over an x default) is ruled accepted but not yet implemented; EL-29
 and §17 #45 still describe the error until it lands.
 
+v4.28 (2026-10-13; 2D-7b, D3 lands; PHASE2 #20). (1) EL-29 (§6.7): the `$tribuf` cells of nets that
+reach no top-level port become logic at the end of each module, as Yosys's `tribuf -logic` does. The cells
+that drive the same list of nets are one group, and a group is one `$pmux` (A = x, B the data with the last
+driver first, S the enables); one warning per group names the net (§9.2). Cells on a net of a top-level output
+or inout port keep their handling. A net with a tri-state driver and another kind of driver stays A4's
+error. Four located errors replace the old one (§9.1). (2) §17 #45 is narrowed and #79 added (the
+evidence, the several-enabled case, the single-driver case). (3) `elab-equiv --yosys-tribuf` runs
+`tribuf -logic` after `proc; flatten` on side B; plain `proc` shorts the drivers, so a bus is not comparable
+without it. Micro `syntax/multi_assignment` and `tests/elab/accept/D3_*.v` are `elab-equiv` equivalent; the
+micro leaves `micro_expect_fail.txt`.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -439,8 +450,8 @@ AST as the seam (PHASE2 #8 Q3).
 
 Not in 2D: `proc` (2E: switches → muxes, syncs → `$dff*`, latch detection and its warning),
 `opt` (2F), memory port analysis and mapping (Phase 4 `memory_infer`), `flatten`,
-SystemVerilog (Phase 5 appends AST kinds; stage 2 handles the elaborated subset), tri-state
-inside modules (D3), and everything the 2A/2B/2C specs own.
+SystemVerilog (Phase 5 appends AST kinds; stage 2 handles the elaborated subset), and everything
+the 2A/2B/2C specs own.
 
 Success: every MUST and SHOULD row elaborates and is equivalent to Yosys on its coverage case
 (§14.2); every REJECT row gives the located error of §9 and every IGNORE row the warning; every
@@ -1439,7 +1450,8 @@ the AST node), and checks **before** attaching a new driver:
 - a second driver of a plain net bit is A4's error with both places ("'y[3]' has two drivers
   (also driven at f.v:9:12)"), and the new driver is not attached (the IR stays valid);
 - a second process driving a bit is T10's error (EL-41);
-- wired nets collect drivers (EL-26); tri-state drivers follow EL-29.
+- wired nets collect drivers (EL-26); tri-state drivers follow EL-29 (those on internal nets become
+  `$pmux` logic at the end of the module, step 7b).
 
 So no multi-driven net is ever built. A net with no driver is legal (x; IR check rule 4 warns
 in `check`, and 2D warns once per wire that has sinks and no driver: "'w' is never driven").
@@ -1452,20 +1464,65 @@ gates (EL-26); (8) `$mem` cells (EL-27). Steps 3–5 may merge nets; steps 6–8
 
 ### 6.7 Tri-state (EL-29)
 
-D3: a `z` drive becomes `$tribuf` (word, tristate flag, `WIDTH`, ports `A`, `EN`, `Y`) only when
-the driven net is a port of the **top** module that is `output` or `inout`:
+D3: a `z` drive becomes a `$tribuf` (word, tristate flag, `WIDTH`, ports `A`, `EN`, `Y`), and the
+cell then goes one of two ways at the end of the module's emission (step 7b of EL-28, after every net is
+merged, so the order of the assignments does not matter). Peter's ruling of 2026-10-13: a tri-state
+driver on an internal net is mux logic, as Yosys's `tribuf -logic` makes it; FPGAs have no internal
+tri-states.
 
 - `assign y = en ? d : 'bz;` (either branch all z) → `$tribuf(A = d, EN = reduce_bool(en), Y = y)`
   (the branches' order sets an inverted enable through `$not`);
 - `bufif1 (y, d, en)`, `bufif0`, `notif1`, `notif0` (Q3) → `$tribuf` with `EN = en` or `~en`
   and `A = d` or `~d`;
-- several tri-state drivers on one top-level port are legal (a bus; IR check rule 4 allows
-  tristate drivers to share a net); any other driver there is A4's error;
 - `assign y = 'bz;` alone drives `$_CONSTZ_`.
 
-Anywhere else (an internal net, a port of a module that is not the top) a `z` drive or a
-`bufif`/`notif` is "tri-state driver on 'x' is supported only on a top-level output or inout port
-(D3)". An `inout` port read inside the module reads its net.
+**Top-level ports keep the `$tribuf`.** A cell with a net on a `$port_out` or `$port_inout` of the top
+module is left as it is: several such drivers are a bus (IR check rule 4 allows tristate drivers to
+share a net), and any other kind of driver there is A4's error. Yosys's `tribuf -logic` also leaves a
+`$tribuf` when any bit of the net is an output port, so a bus that is assigned straight to an output
+(`assign y = bus;`) is a top-level tri-state, whichever statement comes first.
+
+**Every other tri-state driver becomes logic.** Which nets: the cells whose nets reach no port of the top
+module (an internal wire, an output of a module below the top). Which drivers: all the drivers of the net
+must be tri-state drivers (`cond ? val : 'z`, either branch all z, or a gate primitive above); a net with
+a tri-state driver and another driver (an `assign`, a cell, a process, an instance output) is A4's error
+"'t' has two drivers (also driven at f.v:L:C)", and so is a net driven by outputs of two child instances
+(nets are never merged across modules). Why a mixed net stays an error: an ordinary driver always drives a
+value, so while a tri-state enable is on the net has two drivers, and while all are off a value that is
+not the don't care of the ruling; Yosys 0.55 shorts them, and there is no choice that is sound for every
+input. How the drivers combine: the cells whose `Y` is the same list of nets are one group, in source
+order. A group becomes one `$pmux` (`WIDTH` the nets, `S_WIDTH` the number of drivers):
+
+| port | value |
+|---|---|
+| `A` | x, for every bit: no driver is enabled (a don't care) |
+| `B` | the drivers' `A` (data), `WIDTH` bits each, **the last driver in the source first** |
+| `S` | the drivers' `EN`, in the order of `B` |
+| `Y` | the nets |
+
+and its `$tribuf` cells are deleted. The order is Yosys's: `tribuf` walks the module's cell table, which
+iterates newest first, and `opt` resolves the x of `A` against that order, so a different order would make
+the netlist differ from the oracle's in the don't care case (found by `elab-equiv`: the first version put the
+first driver first and `D3_bus_one_hot` was not equivalent when no driver was enabled). **Several enabled
+at once:** the value is undefined, as for any `$pmux` (Yosys's formal model gives x; its gate lowering
+and the simulator give the OR of the selected data, and the netlist 2D writes does the same, being the same
+cell). Real bus contention has no meaning on an FPGA, so 2D does not invent a priority; the
+warning says so. **One driver:** Yosys connects `Y = A` and drops the enable; 2D keeps a one-select
+`$pmux` over x (the enable is visible), which `opt` reduces to the same netlist (verified equivalent,
+`D3_single_driver`).
+
+Errors, each located at the (first) driver and leaving the `$tribuf` in place: the drivers of one net
+cover **overlapping but different** bit lists (`assign b[3:0] = ...; assign b[5:2] = ...;`: Yosys does not
+merge those either, and a `$pmux` per list would be several drivers); one driver covers **both
+top-level port bits and internal nets** (`assign {y, t} = ...`); a tri-state driver on an **`inout` port of
+a module below the top**; an **`inout` pin of a child instance** on the net. Drivers of disjoint bit
+ranges are separate groups.
+
+The warning (§9.2), once per group: "tri-state drivers on internal net 'data' converted to logic (no driver
+enabled: x; several enabled: undefined)", located at the first driver, naming the wire (`bus`, `bus[3]`,
+`bus[7:4]`).
+
+An `inout` port read inside the module reads its net.
 
 **`inout` ports of instantiated modules** (the review's F22). An instance's `inout` pin is a
 driver of the connected net (IR-3, driver partition) and may share it with other `inout` pins and
@@ -1473,7 +1530,9 @@ driver of the connected net (IR-3, driver partition) and may share it with other
 driver — the net is the child's to drive, and when it reaches a top-level `inout` the bus is D3's
 legal case. A net driven both by an `inout` pin and by ordinary logic (an `assign`, a cell, a
 process, an instance output) is an internal tri-state bus: "net 'x' is driven by inout port 'p'
-of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)". (The
+of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)". The same
+net with a tri-state driver that would become logic is the same error with "an inout pin cannot share a net
+with converted tri-state drivers" in place of the last clause. (The
 three corpus micros with `inout` are Parmys-rejected, PHASE2 #6 D3.)
 
 ## 7. Expressions to word cells
@@ -2117,8 +2176,11 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
   f.v:L:C)`; `memory 'm' of N bits exceeds the limit of 1073741824 bits`; `'m' is a memory; select
   a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `non-constant index
-  into 'y' is not supported in a concatenation target`; `tri-state
-  driver on 'x' is supported only on a top-level output or inout port (D3)`; `net 'x' is driven by
+  into 'y' is not supported in a concatenation target`; D3's four (EL-29, v4.28): `tri-state drivers on
+  internal net 'x' overlap without driving the same bits (D3)`, `tri-state driver on 'x' mixes a top-level
+  port bit and an internal net (D3)`, `tri-state driver on 'p' of an inout port of a module below the top
+  is not supported (D3)`, `net 'x' is driven by inout port 'p' of instance 'u' and by logic at f.v:L:C; an
+  inout pin cannot share a net with converted tri-state drivers (D3)`; `net 'x' is driven by
   inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not
   supported (D3)`; `array 'w' cannot be a memory (it is written in a combinational block) and
   --nomem2reg is set`.
@@ -2157,6 +2219,7 @@ specialized twice — warns once, keyed by its parsed node):
 | S1 | the `SPECIFY_BLOCK` | `specify block is ignored` |
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
 | T6 | the `ALWAYS` | `always without an event control treated as always @*` (accepted, not ignored: §8.2) |
+| D3 | the first tri-state driver of the net | `tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)` (accepted: §6.7; once per net) |
 | T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)`, or `... on one control path (also at f.v:L:C); simulation and synthesis may differ` (accepted: §8.9) |
 
 Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
@@ -2747,7 +2810,7 @@ and reported, never relaxed (2A's rule).
 | 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||`, a ternary condition or a concatenation) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`, `{~s, a}`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
 | 44 | one lvalue naming a net twice (`assign {n4[0], n4[0]} = c4[1:0] + 2'd1;`) is A4's error at the second part | accepted: one `$add` with two `Y` pins on `n4[0]`; the later `check` warns "multiple conflicting drivers" (verified on 0.55: `yosys -p "read_verilog t.v; proc; opt; check"`) | legal but multiply driven | an invalid IR otherwise (rule 4); the review carried it from Task 18 (Task 19) |
-| 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port, and are D3's error anywhere else | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19) |
+| 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port; on any other net they become logic (#79) | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19); #79 supersedes the error for internal nets |
 | 46 | the port widths of a source `(* blackbox *)` instance are exact for its parameter set (v4.19), as Yosys 0.55's connections are: a width expression over the cell's parameters, one table entry per set; two sets with equal IR integer values but literals of different sizes and a port width that depends on the size (`$bits`-like ranges, `~W`) are a located error; the cell's parameters are all of the set's (see #30) | the cell's connections have the widths of its own set (`hierarchy` derives the module for the check and drops it; verified on 0.55: `bb #(.W(16))` beside a default `bb` in one module, ranges `[W-1:0]`, `[W:0]`, `[2*W-1:0]`, a fixed `[7:0]` port, two parameters with one default, a string override; `module \bb` keeps the defaults' widths); an **instance array** is sliced by the *default* module's port width (`bb #(.W(16)) v[1:0] (.a(x2))` with a 16-bit `x2` is accepted, the elements extended to 16 bits; with a 32-bit one it is an error "Array cell … has invalid port vs. signal size") | — | 2D checks and slices an overridden array by its own set's widths (EL-10), so it accepts `x2` of 2 x 16 bits (Yosys refuses) and reads a 16-bit one as EL-10 does, not as Yosys's default-width slices; the `$bits`-like clash above has no Yosys counterpart (Yosys never names the set); `write_rtlil` stubs show `attribute \dynports 1` when a port width varies between sets, where Yosys sets it for any parameter-dependent range A string override of a black-box parameter whose default is numeric (`bb #(.MODE("fast")) u` against `parameter MODE = 1`) is the located error `value of parameter 'MODE' of 'bb' is not an integer`; Yosys 0.55 accepts it (verified: `hierarchy -top top; write_rtlil` keeps `parameter \MODE "fast"` on the cell and `parameter \MODE 1` on the module): fail-closed and rare, deferred. |
 | 47 | in step (7) a wired bit with one driver is that driver's net merged into the wire's | no gate for one driver, the driver connected to the wire | — | the driver's net is only known after the assignments; the merge is pin-based (Task 19) |
 | 48 | `(* nomem2reg *)` on an array exempts it from rules 2-6 only: a net array is still registers (rule 1), and a module's `(* nomem2reg *)` exempts every array of the module from rules 2-6 | `(* nomem2reg *)` skips the array, rule 1 included (a module's skips the whole mem2reg block): `(* nomem2reg *) wire [3:0] w [0:3]` stays a memory (verified on 0.55: `yosys -p "read_verilog t.v; write_rtlil"` shows `memory width 4 size 4 \w`) | — | the words of a net array are driven by `assign`, which no `$mem` write port can take; EL-27 already says rules 2-6 (Task 20) |
@@ -2781,6 +2844,7 @@ and reported, never relaxed (2A's rule).
 | 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
 | 77 | a bit assigned by both `=` and `<=` is accepted with a warning (T9; Peter 2026-10-13, PHASE2 #20); on one control path the warning says that simulation and synthesis may differ | Yosys 0.55 accepts it without a word: each assignment is an action and the last on a path wins (verified: `elab-equiv` equivalent for `q = a; q <= b;`, `q <= b; q = a;`, if/case arms, `full/matmul`; `syntax/multi_clock_reader_writer` equals Yosys's netlist under a merged-clock abstraction, `equiv-check` being single-clock) | a simulator applies the nonblocking update after the blocking ones, so `q <= b; q = a;` ends as `b` there and `a` in the netlist | Parmys compatibility; the warning marks the case where the netlist and a simulation disagree |
 | 78 | `adder #(W) u (...)` (a positional or named width, bus connections) on the library's hard `adder` is the located error "too many parameter values for cell type 'adder' (1 given, 0 parameters); the library cell has fixed port widths (an n-bit adder is a soft module Parmys supplies, not modelled: spec 17 #78)"; micros `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` stay in `micro_expect_fail.txt` (2D-7b ruling) | Parmys reads `vtr_primitives.v`, whose `adder #(WIDTH=1)` is a soft module (`assign {cout, sumout} = a + b + cin`, buses a, b, sumout, 1-bit cin and cout) that its adder pass maps to a chain of 1-bit hard adders (the goldens' `adder_hard_block` netlist) | — | `lib/vtr.o3lib` declares `adder` as the 1-bit hard block the BLIF goldens instantiate (ports a, b, cin, cout, sumout; no parameter), and the writers, the BLIF reader's IR-7b check and the simulator rely on that; binding `#(W)` to a parameter would need a W-bit hard adder with no BLIF form (VPR reads 1-bit adders only) or the soft module and the chain mapping, which are 3E/Phase 4's. Bit-exact: nothing is dropped, the elaboration fails |
+| 79 | a tri-state driver on an internal net (a net with no bit on a top-level output or inout port once all merges are done) becomes mux logic, as `tribuf -logic`: the drivers of one net list are one `$pmux` (A = x, B = data with the last driver first, S = enables) and the warning "tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)" names it (D3; Peter 2026-10-13, PHASE2 #20). With several enables on at once the value is undefined (the `$pmux` rule; the netlist is the OR of the selected data); with none it is x; a net with a tri-state and an ordinary driver, overlapping but different bit lists, a driver over port and internal bits, a module-below-top `inout` and a child `inout` pin on the net stay located errors (§6.7) | Yosys 0.55 plain (`read_verilog; proc`) shorts the drivers: every driver's data reaches the net whatever the enables (micro `syntax/multi_assignment` becomes `busout = enable ? data : f` with `data` driven by the four data inputs at once, so `equiv-check` rejects its b.blif: "more than one driver"). With `tribuf -logic` after `proc; flatten` (`elab-equiv --yosys-tribuf`) the micro and `tests/elab/accept/D3_{single_driver,bus_one_hot,below_top}.v` are equivalent. `tribuf -logic` also keeps a `$tribuf` on any net with a bit on an output port, which 2D matches; it merges with the newest driver first and 2D follows it | a simulator gives z while no driver is on and x for contention; the netlist gives x (a don't care `opt` may resolve to any driver) and the OR of the data | Parmys reads the micro (it shorts the drivers, the same as plain Yosys); the ruling follows the oracle's `tribuf -logic`, the one Yosys flow that treats the construct as a bus; the warning names the risky net | the netlist is not the golden Parmys gives for `multi_assignment` (shorted drivers): it models a bus, which is what the source says. The don't care case is the part a user must not rely on |
 
 ## 18. Implementation split (EL-51)
 

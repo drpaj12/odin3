@@ -341,6 +341,15 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(unmapped.count("-nodffe -nosdff"), 4)
         self.assertEqual(plain, unmapped.replace(" -nodffe -nosdff", "").replace("dffunmap; ", ""))
 
+    # -- side B as `tribuf -logic` (D3, spec 17 #79) -------------------------------------------
+
+    def test_yosys_tribuf_adds_one_step_after_flatten(self) -> None:
+        plain = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif")
+        tri = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", tribuf=True)
+        self.assertNotIn("tribuf", plain)
+        self.assertIn("proc; flatten; tribuf -logic; opt;", tri)
+        self.assertEqual(plain, tri.replace("tribuf -logic; ", ""))
+
     # -- the cap ---------------------------------------------------------------------------
 
     def test_every_child_goes_through_memcap(self) -> None:

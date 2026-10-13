@@ -193,6 +193,20 @@ static uint32_t count_of(const char *type) {
     return count;
 }
 
+/* Live nodes of a type over every module of the design. */
+static uint32_t count_in_all(const char *type) {
+    uint32_t count = 0;
+    for (uint32_t index = 1; index < odin3_design_module_end(rs.design); index++) {
+        const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){index});
+        uint32_t here = 0;
+        while (nth_in(module, type, here).v != 0) {
+            here++;
+        }
+        count += here;
+    }
+    return count;
+}
+
 /* The cells 2D made: neither a port nor a constant driver. */
 static uint32_t count_logic(void) {
     const odin3_module *module = top();
@@ -693,24 +707,131 @@ static void test_assign_and_tribuf(void) {
     expect_error((at_loc){3, 10}, "'y' has two drivers (also driven at t.v:2:10)");
 }
 
-/* An internal net cannot be tri-state (D3), and neither can a port of a module below the top. */
-static void test_tribuf_internal(void) {
-    read_failing(TRI_HEAD
-                 "  wire t;\n  assign t = en ? d[0] : 'bz;\n  assign y = {7'b0, t};\nendmodule\n");
-    expect_error(
-        (at_loc){3, 10},
-        "tri-state driver on 't' is supported only on a top-level output or inout port (D3)");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
+/* --- internal tri-state nets become logic (D3, Peter 2026-10-13; spec 17 #79) ------------------
+ */
+
+#define TRI_WARN_TAIL " converted to logic (no driver enabled: x; several enabled: undefined)"
+
+/* One driver on an internal net: a $pmux of one select over an x default; no $tribuf is left. */
+static void test_tribuf_internal_single(void) {
+    read_src(TRI_HEAD
+             "  wire t;\n  assign t = en ? d[0] : 'bz;\n  assign y = {7'b0, ~t};\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, diag_errors(), et_log(&rs));
+    expect_warning((at_loc){3, 10}, "tri-state drivers on internal net 't'" TRI_WARN_TAIL);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, soft_warnings(), et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32(0, count_of("$tribuf"));
-    et_free(&rs);
-    memset(&rs, 0, sizeof rs);
-    read_failing("module sub (input d, input en, output y);\n"
-                 "  assign y = en ? d : 'bz;\nendmodule\n"
-                 "module top (input d, input en, output y);\n"
-                 "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
+    odin3_node_id pm = only_node("$pmux");
+    TEST_ASSERT_EQUAL_INT64(1, param_of(pm, "WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(1, param_of(pm, "S_WIDTH"));
+    TEST_ASSERT_EQUAL_UINT32(const_net_of(ODIN3_BIT_X).v, pin_net(pm, "A", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("d", 0).v, pin_net(pm, "B", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("en", 0).v, pin_net(pm, "S", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(wnet("t", 0).v, pin_net(pm, "Y", 0).v);
+    expect_ir_ok();
+}
+
+#define BUS_HEAD                                                                                   \
+    "module top (input [7:0] d0, input [7:0] d1, input [7:0] d2, input [2:0] en,\n"                \
+    "            output [7:0] y);\n  wire [7:0] bus;\n"
+
+/* Three drivers of one 8-bit net: one $pmux, A = x, B = d2 d1 d0 (the last driver in the source
+ * first, as Yosys's tribuf makes it), S = the three enables in the same order, Y = the net. One
+ * warning, at the first driver. */
+static void test_tribuf_internal_bus(void) {
+    read_src(BUS_HEAD "  assign bus = en[0] ? d0 : 8'bz;\n"
+                      "  assign bus = en[1] ? d1 : 8'bz;\n"
+                      "  assign bus = en[2] ? d2 : 8'bz;\n"
+                      "  assign y = ~bus;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_warning((at_loc){4, 10}, "tri-state drivers on internal net 'bus'" TRI_WARN_TAIL);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, soft_warnings(), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$tribuf"));
+    odin3_node_id pm = only_node("$pmux");
+    TEST_ASSERT_EQUAL_INT64(8, param_of(pm, "WIDTH"));
+    TEST_ASSERT_EQUAL_INT64(3, param_of(pm, "S_WIDTH"));
+    for (uint32_t bit = 0; bit < 8; bit++) {
+        TEST_ASSERT_EQUAL_UINT32(const_net_of(ODIN3_BIT_X).v, pin_net(pm, "A", bit).v);
+        TEST_ASSERT_EQUAL_UINT32(wnet("d2", bit).v, pin_net(pm, "B", bit).v);
+        TEST_ASSERT_EQUAL_UINT32(wnet("d1", bit).v, pin_net(pm, "B", 8 + bit).v);
+        TEST_ASSERT_EQUAL_UINT32(wnet("d0", bit).v, pin_net(pm, "B", 16 + bit).v);
+    }
+    for (uint32_t k = 0; k < 3; k++) {
+        TEST_ASSERT_EQUAL_UINT32(wnet("en", 2U - k).v, pin_net(pm, "S", k).v);
+    }
+    expect_pins_are(pm, "Y", (bits_of){"bus", 0}, 8);
+    expect_ir_ok();
+}
+
+/* Drivers of disjoint bits of one net are separate groups: one $pmux each. */
+static void test_tribuf_internal_disjoint(void) {
+    read_src(BUS_HEAD "  assign bus[3:0] = en[0] ? d0[3:0] : 4'bz;\n"
+                      "  assign bus[7:4] = en[1] ? d1[3:0] : 4'bz;\n"
+                      "  assign y = ~bus;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$tribuf"));
+    TEST_ASSERT_EQUAL_UINT32(2, count_of("$pmux"));
+    expect_ir_ok();
+}
+
+/* A port of a module below the top is not a top-level port: its tri-state driver becomes logic. */
+static void test_tribuf_below_top(void) {
+    read_src("module sub (input d, input en, output y);\n"
+             "  assign y = en ? d : 'bz;\nendmodule\n"
+             "module top (input d, input en, output y);\n"
+             "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_warning((at_loc){2, 10}, "tri-state drivers on internal net 'y'" TRI_WARN_TAIL);
+    TEST_ASSERT_EQUAL_UINT32(0, count_in_all("$tribuf"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_in_all("$pmux"));
+    expect_ir_ok();
+}
+
+/* A net with a tri-state driver and an ordinary one stays A4's located error (spec 17 #79). */
+static void test_tribuf_internal_mixed(void) {
+    read_failing(TRI_HEAD "  wire t;\n  assign t = en ? d[0] : 'bz;\n  assign t = d[1];\n"
+                          "  assign y = {7'b0, ~t};\nendmodule\n");
+    expect_error((at_loc){4, 10}, "'t' has two drivers (also driven at t.v:3:10)");
+}
+
+/* Drivers that overlap without covering the same bits cannot be merged: a located error. */
+static void test_tribuf_internal_overlap(void) {
+    read_failing(BUS_HEAD "  assign bus[3:0] = en[0] ? d0[3:0] : 4'bz;\n"
+                          "  assign bus[5:2] = en[1] ? d1[3:0] : 4'bz;\n"
+                          "  assign y = ~bus;\nendmodule\n");
     expect_error(
-        (at_loc){2, 10},
-        "tri-state driver on 'y' is supported only on a top-level output or inout port (D3)");
+        (at_loc){5, 10},
+        "tri-state drivers on internal net 'bus[5:2]' overlap without driving the same bits "
+        "(D3)");
+}
+
+/* One driver over a top-level port bit and an internal bit: split it (a located error). */
+static void test_tribuf_port_and_internal(void) {
+    read_failing("module top (input d, input en, output y, output q);\n  wire t;\n"
+                 "  assign {y, t} = en ? {d, d} : 2'bz;\n  assign q = ~t;\nendmodule\n");
+    expect_error((at_loc){3, 10},
+                 "tri-state driver on 't' mixes a top-level port bit and an internal net (D3)");
+}
+
+/* An inout port of a module below the top cannot be converted (its pin is a driver too). */
+static void test_tribuf_below_top_inout(void) {
+    read_failing("module sub (input d, input en, inout p);\n"
+                 "  assign p = en ? d : 'bz;\nendmodule\n"
+                 "module top (input d, input en, inout p);\n"
+                 "  sub u (.d(d), .en(en), .p(p));\nendmodule\n");
+    expect_error((at_loc){2, 10},
+                 "tri-state driver on 'p' of an inout port of a module below the top is not "
+                 "supported (D3)");
+}
+
+/* A child's inout pin and a converted tri-state driver on one net: a located error. */
+static void test_tribuf_with_child_inout(void) {
+    read_failing("module sub (inout p);\nendmodule\n"
+                 "module top (input d, input en);\n  wire bus;\n  sub u (.p(bus));\n"
+                 "  assign bus = en ? d : 'bz;\nendmodule\n");
+    expect_error((at_loc){6, 10},
+                 "net 'bus' is driven by inout port 'p' of instance 'u' and by logic at "
+                 "t.v:6:10; an inout pin cannot share a net with converted tri-state drivers (D3)");
 }
 
 /* A lone 'bz is the constant, wherever. */
@@ -1647,6 +1768,15 @@ static void test_oom_sweep_blackbox_sets(void) {
     X(test_wand_with_cell_driver)                                                                  \
     X(test_wired_always)                                                                           \
     X(test_always_assigned_bits)                                                                   \
+    X(test_tribuf_internal_single)                                                                 \
+    X(test_tribuf_internal_bus)                                                                    \
+    X(test_tribuf_internal_disjoint)                                                               \
+    X(test_tribuf_below_top)                                                                       \
+    X(test_tribuf_internal_mixed)                                                                  \
+    X(test_tribuf_internal_overlap)                                                                \
+    X(test_tribuf_port_and_internal)                                                               \
+    X(test_tribuf_below_top_inout)                                                                 \
+    X(test_tribuf_with_child_inout)                                                                \
     X(test_tribuf_assign)                                                                          \
     X(test_tribuf_inverted)                                                                        \
     X(test_tribuf_wide_condition)                                                                  \
@@ -1654,7 +1784,6 @@ static void test_oom_sweep_blackbox_sets(void) {
     X(test_two_tribufs)                                                                            \
     X(test_tribuf_on_inout)                                                                        \
     X(test_assign_and_tribuf)                                                                      \
-    X(test_tribuf_internal)                                                                        \
     X(test_z_alone)                                                                                \
     X(test_child_inouts)                                                                           \
     X(test_child_inout_and_logic)                                                                  \

@@ -44,6 +44,31 @@ typedef struct odin3_elab2_loop_note {
     odin3_ast_id lhs, rhs;
 } odin3_elab2_loop_note;
 
+/* A `$tribuf` on an internal net, to become logic at the end of the module (odin3_elab2_tri_logic):
+ * the cell and the place of its driver. */
+typedef struct odin3_elab2_tri_rec {
+    odin3_node_id node;
+    odin3_ast_id at;
+} odin3_elab2_tri_rec;
+
+/* The port and the node's name of an inout pin of a child instance. */
+typedef struct odin3_elab2_inout_pin {
+    const char *port, *instance;
+} odin3_elab2_inout_pin;
+
+/* What a net with a tri-state driver is, once the module's nets are all merged (D3). */
+typedef enum odin3_tri_net {
+    ODIN3_TRI_NET_INTERNAL,        /* no port of the module */
+    ODIN3_TRI_NET_PORT,            /* a $port_out or $port_inout of the top module */
+    ODIN3_TRI_NET_BELOW_TOP_INOUT, /* a $port_inout of a module below the top */
+    ODIN3_TRI_NET_CHILD_INOUT      /* internal, with an inout pin of a child instance */
+} odin3_tri_net;
+
+/* The class of net in the module being emitted; *pin is the child's port and instance names for
+ * ODIN3_TRI_NET_CHILD_INOUT. */
+odin3_tri_net odin3_elab2_tri_net(const odin3_elab2 *e2, odin3_net_id net,
+                                  odin3_elab2_inout_pin *pin);
+
 struct odin3_elab2_drive {
     odin3_vec drv;         /* odin3_drv per net ID, as far as a net was claimed */
     odin3_vec info;        /* odin3_elab2_net_info per net ID */
@@ -57,6 +82,7 @@ struct odin3_elab2_drive {
     odin3_vec wired;       /* odin3_elab2_wired_rec */
     odin3_vec abits;       /* uint8_t: one flag per bit of an object assigned in an always */
     odin3_vec loops;       /* odin3_elab2_loop_note */
+    odin3_vec tribufs;     /* odin3_elab2_tri_rec: the $tribuf cells of internal nets */
     uint32_t stmts;        /* statements that drove a wired net */
     bool is_top;
 };

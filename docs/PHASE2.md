@@ -64,7 +64,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    - D2 initial values: constant `initial` assignments, declaration initialisers and
      `$readmemh/b` set FF/RAM init values; other `initial` content ignored with a warning;
    - D3 tri-state: parse all; `z` drives elaborate to `$tribuf` only on top-level `inout`/output
-     ports; an internal tri-state net is a located error until the IR has a tri-state net model;
+     ports; an internal tri-state net is a located error until the IR has a tri-state net model
+     (superseded by #20: it becomes `$pmux` logic, as `tribuf -logic`);
    - D4 `wand/wor/triand/trior` resolve as AND/OR of their drivers; `uwire` is a `wire` with a
      single-driver check;
    - D5 illegal-but-Parmys-accepted forms (`input reg`, `input integer`) accepted with a located
@@ -691,7 +692,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     - **Exit-bar exceptions that need Peter** (the 2D-7b triage of the micro sweep, which has
       539 files: 460 pass, 79 listed, 0 unexpected). These 9 have Parmys goldens, so they are not
       Parmys exceptions; each is listed in `tests/elab/micro_expect_fail.txt`:
-      - 7 are rejected on purpose, soundness first (Yosys accepts them): `always` without an event
+      - (Superseded by #20: T6, D3 and T9 are now accepted with warnings; the adder gap stays an
+        explained error.) 7 are rejected on purpose, soundness first (Yosys accepts them): `always` without an event
         control (T6: `keywords/task_endtask/{inside_port,outside_port,task_call_function,
         task_call_task}`), a tri-state driver on an internal net (D3: `syntax/multi_assignment`), a
         bit assigned by both `=` and `<=` (T9: `full/matmul`, `syntax/multi_clock_reader_writer`);
@@ -793,9 +795,11 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       single-clock). T10 (two blocks, one bit) stays an error.
     - **D3**: an internal tri-state net becomes mux logic as `tribuf -logic` does (`$pmux` of the
       data by the enables, x when none is enabled); top-level output and inout tri-states keep
-      their handling. Ruled; not yet implemented (micro `syntax/multi_assignment`), see the 2D-7b
-      report. Yosys 0.55's own flow does not mux that micro (it shorts the four drivers' data), so
-      its equivalence is judged against `tribuf -logic`, not the plain Parmys flow.
+      their handling. **Done** (spec §6.7, §9.2, §17 #79): micro `syntax/multi_assignment` and
+      `tests/elab/accept/D3_{single_driver,bus_one_hot,below_top}.v` are `elab-equiv --yosys-tribuf`
+      equivalent. Yosys 0.55's plain flow shorts the four drivers' data, so the equivalence is
+      judged against `tribuf -logic` after `proc; flatten`, not the plain Parmys flow. Several enables
+      at once: undefined, as a `$pmux`; a mixed tri-state and ordinary net stays an error.
     - **Adder**: `adder #(W)` on the hard `adder` stays an error, now explained (§17 #78): the
       library cell is the 1-bit hard block; Parmys's n-bit adder is a soft module of
       `vtr_primitives.v` mapped to a chain of 1-bit hard adders (3E/Phase 4).

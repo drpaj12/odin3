@@ -80,6 +80,7 @@ static const char *const k_type_names[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_LOGIC_OR] = "$logic_or",
     [ODIN3_E2T_MUX] = "$mux",
     [ODIN3_E2T_TRIBUF] = "$tribuf",
+    [ODIN3_E2T_PMUX] = "$pmux",
     [ODIN3_E2T_MEM] = "$mem",
     [ODIN3_E2T_PROC] = "$proc",
     [ODIN3_E2T_CONST0] = "$_CONST0_",
@@ -687,6 +688,7 @@ static odin3_status emissions(odin3_elab2 *e2, odin3_ast_id module_node) {
     st = st != ODIN3_OK || e2->stopped ? st : initial_values(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_PROCESSES);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_wired(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_tri_logic(e2);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_emit(e2);
     return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_undriven(e2);
 }

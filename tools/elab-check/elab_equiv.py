@@ -3,7 +3,7 @@
 Usage::
 
     elab-equiv --odin3 O --yosys Y --equiv-check E [--top T] [--mem-cap BYTES] [--keep DIR]
-               [--allow-version V] [--a-only] [--unmap-enables] [--techlib T] FILE
+               [--allow-version V] [--a-only] [--unmap-enables] [--yosys-tribuf] [--techlib T] FILE
 
 Side A is Odin III's elaboration and side B Yosys's own, both through one Yosys back end, so x is
 resolved by the same ``opt`` on both and a difference is 2D's (or a documented divergence):
@@ -20,6 +20,15 @@ resolved by the same ``opt`` on both and a difference is 2D's (or a documented d
 ``--unmap-enables`` keeps enables out of the flip-flops on both sides (``opt -nodffe -nosdff``
 and a ``dffunmap`` before ``techmap``): ``memory_map`` and ``opt_dff`` make enabled flip-flops,
 which ``equiv-check`` cannot read as ``.gate`` cells (2D Task 24's memory bridge).
+
+``--yosys-tribuf`` runs ``tribuf -logic`` after ``proc; flatten`` on side B only (after the flatten,
+so that a child's output port is an internal net, as 2D sees it). Plain ``read_verilog; proc``
+shorts the several drivers of an internal net (every driver's data reaches the net, whatever the
+enables say), so a design with internal tri-state buses is not comparable without it. 2D converts
+them itself (D3, spec 17 #79: a ``$pmux`` over an x default, as ``tribuf -logic`` does), so side A
+needs no flag. ``tribuf -logic`` leaves a bus that reaches an output port a ``$tribuf``, which 2D's
+side A keeps too, but ``equiv-check`` cannot read that: use the option on designs whose tri-states
+are all internal.
 
 ``--a-only`` stops after ``a.blif`` (kept in ``--keep DIR``): the hand-off to 2H (plan point (m)),
 which compares side A's netlist with Parmys's goldens. ``--keep DIR`` keeps every file; without it
@@ -67,8 +76,8 @@ TAIL_LINES = 20  # lines of a failing child's output shown
 # Yosys's script after the read: hierarchy (the top is chosen by --top or found), proc, then the
 # Parmys-style flattening to gates (the one back end both sides share).
 BACK_END = (
-    "proc; flatten; opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; {unmap}techmap; "
-    "opt -fast{o}; "
+    "proc; flatten; {tribuf}opt{o}; memory -nomap; opt{o}; memory_map; opt -full{o}; "
+    "{unmap}techmap; opt -fast{o}; "
     "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; write_blif -gates -undef + unconn {blif}"
 )
 _ORACLE_RE = re.compile(r"\bYosys 0\.55(?:[^0-9]|$)")
@@ -117,6 +126,7 @@ class Options:
     a_only: bool
     unmap: bool = False
     techlib: str | None = None
+    yosys_tribuf: bool = False
 
 
 def wants_auto_blackbox(source: Path) -> bool:
@@ -132,11 +142,14 @@ def wants_auto_blackbox(source: Path) -> bool:
     )
 
 
-def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False) -> str:
-    """Yosys's ``-p`` script: the read, the hierarchy, the shared back end writing ``blif``."""
+def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False,
+                 tribuf: bool = False) -> str:
+    """Yosys's ``-p`` script: the read, the hierarchy, the shared back end writing ``blif``.
+    ``tribuf``: ``tribuf -logic`` after ``proc; flatten`` (side B of ``--yosys-tribuf``)."""
     hierarchy = f"hierarchy -top {top}" if top else "hierarchy -auto-top"
     flags = " -nodffe -nosdff" if unmap else ""
-    back_end = BACK_END.format(blif=blif, unmap="dffunmap; " if unmap else "", o=flags)
+    back_end = BACK_END.format(blif=blif, unmap="dffunmap; " if unmap else "", o=flags,
+                               tribuf="tribuf -logic; " if tribuf else "")
     return f"{read}; {hierarchy}; {back_end}"
 
 
@@ -204,7 +217,7 @@ class Bridge:
 
     def side_b(self) -> None:
         read = f"read_verilog -sv -nolatches {self.opts.source}"
-        self.blif("side B", read, "b.blif", oracle=True)
+        self.blif("side B", read, "b.blif", oracle=True, tribuf=self.opts.yosys_tribuf)
 
     def probe_oracle(self, rejected: EquivError) -> None:
         """odin3 rejected the file: if Yosys dies of a signal on the same source, that is an
@@ -218,8 +231,9 @@ class Bridge:
         except EquivError:
             pass
 
-    def blif(self, what: str, read: str, name: str, oracle: bool = False) -> None:
-        script = yosys_script(read, self.opts.top, name, self.opts.unmap)
+    def blif(self, what: str, read: str, name: str, oracle: bool = False,
+             tribuf: bool = False) -> None:
+        script = yosys_script(read, self.opts.top, name, self.opts.unmap, tribuf)
         self.must(f"Yosys {what}", [self.opts.yosys, "-p", script], oracle)
         if not (self.work / name).is_file():
             raise EquivError(f"Yosys {what} wrote no {name}")
@@ -295,13 +309,16 @@ def parse(argv: Sequence[str] | None) -> Options:
     ap.add_argument("--a-only", action="store_true", help="stop after a.blif (the 2H hand-off)")
     ap.add_argument("--unmap-enables", action="store_true",
                     help="dffunmap before techmap (the memory bridge's enabled flip-flops)")
+    ap.add_argument("--yosys-tribuf", action="store_true",
+                    help="side B runs tribuf -logic after proc; flatten (internal tri-state buses)")
     ap.add_argument("--techlib", metavar="T", help="a .o3lib read first on side A (hard blocks)")
     ap.add_argument("file", type=Path, help="the Verilog file")
     args = ap.parse_args(argv)
     return Options(exe(args.odin3), exe(args.yosys), exe(args.equiv_check), args.file.resolve(),
                    args.top,
                    args.mem_cap, args.keep, args.allow_version, args.a_only, args.unmap_enables,
-                   str(Path(args.techlib).resolve()) if args.techlib else None)
+                   str(Path(args.techlib).resolve()) if args.techlib else None,
+                   args.yosys_tribuf)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
