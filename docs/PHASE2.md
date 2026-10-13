@@ -630,3 +630,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       - 2D: the top keeps its plain name under parameter overrides, as `chparam` does;
       - 2D: black boxes are ports-only `(* blackbox *)` MODULEs;
       - 2D divergence 26: project parameter numbers keep their sign.
+
+17. **IR-8 amendment approved** (Peter, 2026-10-13: "IR-8 approved"). A black box may carry table
+    width rules: the width of a port of a `(* blackbox *)` module with several parameter sets is
+    a lookup of the cell's parameter values (docs/IR.md IR-8, IR-7b; `src/ir/celltype.h`). Merged
+    with 2D-5 (#86).

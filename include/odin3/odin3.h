@@ -1537,8 +1537,8 @@ typedef struct odin3_elab_options {
  * black-box carrier whose ports or parameters differ from its definition's) or has a symbol table
  * already (so a second call on one store); ODIN3_ERR_NO_MEMORY (the IR made so far stays valid);
  * ODIN3_ERR_CHECK (logged) for an inconsistency inside the stage itself (a 2D bug, never a property
- * of the input). A failed call leaves the store bound to its symbol table, so a second call on it,
- * whatever the first returned, is ODIN3_ERR_INVALID_ARG.
+ * of the input). Once a call has bound the store to its symbol table, the store stays bound even
+ * if that call fails, so any later call on it is ODIN3_ERR_INVALID_ARG.
  */
 odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast,
                                  const odin3_elab_options *opts);

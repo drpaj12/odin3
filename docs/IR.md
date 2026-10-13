@@ -186,7 +186,7 @@ reader run is recorded from 1C on): the cell type, the parameter values the decl
 (`odin3_design_declared_model_params`), and the declaration as written — its ports in declared
 order with their widths and scalar flags (`odin3_design_declared_model_decl`) — so the BLIF writer
 reproduces the `.model … .blackbox` stanzas in their original order and spelling (PHASE1 #2).
-A black box may carry table width rules (IR-8, amended 2026-10-12, pending Peter's approval; the
+A black box may carry table width rules (IR-8, amended 2026-10-12, approved by Peter 2026-10-13; the
 elaborator gives a `(* blackbox *)` module with several parameter sets exact per-set widths): the
 width of such a port is a lookup of the cell's parameter values, not an INT width parameter, so
 the ports it sizes are not inferred (above) and keep the declared model's defaults. Ports are
@@ -230,7 +230,7 @@ spec §5.2. An entry declares:
   not round-trip through BLIF. Callers that size ports of cells whose parameters may be unlisted
   use `odin3_celltype_port_width_checked`: the unchecked `odin3_celltype_port_width` returns 0
   for the undefined case;
-  (amended 2026-10-12, 2D black-box widths; pending Peter's approval)
+  (amended 2026-10-12, 2D black-box widths; approved by Peter 2026-10-13)
 - parameters: name, kind, default. Signedness of word-level operands is a parameter
   (`A_SIGNED`, `B_SIGNED`), as in Yosys;
 - hooks, each may be NULL: `verify` (consistency beyond widths), `const_value` (IR-4),
