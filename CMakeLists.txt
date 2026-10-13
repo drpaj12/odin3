@@ -1483,6 +1483,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     odin3_add_sweep_test(verilog_micro_elab LABEL sweep
         COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                 --odin3 $<TARGET_FILE:odin3>
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                 --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)

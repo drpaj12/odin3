@@ -34,7 +34,6 @@ keywords/defparam/defparam_simple_failure.v [ambiguous_top: no top given and sev
 keywords/defparam/defparam_string.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects: no golden, so no --top, and 'simple_op' and 'param' are both uninstantiated (ambiguous_top)
 keywords/macromodule/multiple_topmodules.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'simple_op2' are both uninstantiated (ambiguous_top)
 syntax/top_and.v [top_and.v:19:2: error: unresolved_module: module 'and_primitive' is not defined] Parmys rejects: module 'and_primitive' is not defined (19:2; unresolved_module)
-large/LargeRam.v [LargeRam.v:27:1: error: unresolved_module: module 'single_port_ram' is not defined] Parmys rejects: module 'single_port_ram' is not defined (27:1; unresolved_module: a hard block the tree lacks)
 large/paj_boundtop_hierarchy_no_mem.v [paj_boundtop_hierarchy_no_mem.v:225:701: error: 'debugcount01' has two drivers] Parmys rejects: the two boundcontroller instances (224:701, 225:701) both drive 'debugcount01', a typo in the source; 2D reports two drivers (spec 17); Yosys accepts it
 keywords/.generic/wire_test.v [no_top: no top given and no module is defined] Parmys rejects: a template with no module of its own (no_top); the keywords/*/*.vh files that include it supply the module
 #
@@ -98,3 +97,16 @@ preprocessor/nested_operation_define.v [nested_operation_define.v:9:5: error: sy
 preprocessor/undef.v [undef.v:10:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (10:5; A.1.4 has no system task item)
 keywords/automatic/recursive_task.v [recursive_task.v:9:17: error: syntax: unexpected integer, expecting identifier] illegal Verilog-2005: `task automatic integer` (a task has no return type, 9:17) closed by `endfunction`
 syntax/fir_scu_rtl_restructured_for_cmm_exp.v [fir_scu_rtl_restructured_for_cmm_exp.v:94:11: error: syntax: unexpected identifier] illegal Verilog-2005: a module instance inside an `always` block (94:11)
+#
+# --- 2D-7b triage (the micros left over once the sweep reads lib/vtr.o3lib for the hard blocks) --
+# Deliberate rejections (2D spec §9; Yosys accepts them, 2D rejects on purpose, soundness first):
+keywords/task_endtask/inside_port.v [inside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
+keywords/task_endtask/outside_port.v [outside_port.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
+keywords/task_endtask/task_call_function.v [task_call_function.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
+keywords/task_endtask/task_call_task.v [task_call_task.v:6:2: error: always block without an event control is not supported] 2D spec 9 T6: an always without an event control is rejected
+syntax/multi_assignment.v [multi_assignment.v:8:8: error: tri-state driver on 'data' is supported only on a top-level output or inout port (D3)] 2D spec 7 D3 (EL-29): a tri-state driver on an internal net is rejected
+full/matmul.v [matmul.v:35:4: error: 'direction_tmp' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)
+syntax/multi_clock_reader_writer.v [multi_clock_reader_writer.v:77:5: error: 'register' is assigned with both '=' and '<='] 2D spec 9 T9: a bit assigned by both = and <= is rejected (REJECT, coverage audit B 2.2.4)
+# Real gaps (Parmys accepts, the spec does not reject):
+micro/adder_hard_block.v [adder_hard_block.v:12:13: error: too many parameter values for cell type 'adder' (1 given, 0 parameters)] GAP (2D-7b): positional width #(W) and bus connections on the hard adder (lib/vtr.o3lib's adder has 1-bit ports, no parameter; Parmys builds a W-bit adder chain)
+micro/hard_adder_cin_propagation.v [hard_adder_cin_propagation.v:10:10: error: too many parameter values for cell type 'adder' (1 given, 0 parameters)] GAP (2D-7b): positional width #(W) and bus connections on the hard adder (lib/vtr.o3lib's adder has 1-bit ports, no parameter; Parmys builds a W-bit adder chain)

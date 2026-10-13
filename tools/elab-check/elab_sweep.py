@@ -301,6 +301,7 @@ class Config:
     caps: dict[str, int]
     tops: dict[str, str]
     golden_root: Path | None
+    techlib: str | None = None
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -331,6 +332,9 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [cfg.odin3, *(["--top", top] if top else []), "--elab-only", str(item.path)]
+    if cfg.techlib:  # the arch's hard blocks (adder, multiply, *_port_ram) come from a tech library
+        argv = [cfg.odin3, *(["--top", top] if top else []), "-p",
+                f"read_techlib {cfg.techlib}; read_verilog {item.path}; stats"]
     done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
@@ -514,6 +518,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--mem-cap", default="4G", help="per child (default 4G)")
     ap.add_argument("--cap-for", action="append", default=[], metavar="SUFFIX=CAP",
                     help="a larger cap for one file, which then runs alone (e.g. koios/lenet.v=5G)")
+    ap.add_argument("--techlib", type=Path,
+                    help="read this tech library (.o3lib) before each file: the hard blocks "
+                         "(adder, multiply, single/dual_port_ram) the micros instantiate")
     ap.add_argument("--tops", type=Path, help="one `<file> <top>` per line")
     ap.add_argument("--golden-root", type=Path, default=None,
                     help="the Parmys golden tree for --top (default: micro-top's)")
@@ -548,7 +555,8 @@ def build_config(args: argparse.Namespace) -> Config:
     return Config(os.path.abspath(shutil.which(args.odin3) or args.odin3),
                   _abs(args.yosys) if args.equiv else None,
                   _abs(args.equiv_check) if args.equiv else None,
-                  _abs(args.bench) if args.bench else None, cap, caps, tops, golden)
+                  _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
+                  _abs(args.techlib) if args.techlib else None)
 
 
 def _abs(tool: str | None) -> str | None:
