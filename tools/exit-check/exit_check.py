@@ -16,7 +16,9 @@ each design:
 1. its Parmys golden is found: ``D/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`` for a
    micro under ``micro/verilog`` (``micro-top``'s rule), ``D/vtr/<name>/<name>.parmys.blif`` for a
    VTR benchmark under ``benchmarks/verilog``; ``D`` defaults to the k6_frac tree of
-   ``micro-top``. A design without one (Parmys rejected it, or it was capped) is an ``error``;
+   ``micro-top``. A design whose golden does not exist and whose oracle run left no ``.prov`` at all (the oracle never ran
+   on it: the 41 Koios designs have no k6_frac golden) is **skipped (no golden)**, counted apart
+   and no failure; one with a ``.prov`` (Parmys rejected it, or it was capped) is an ``error``;
 2. ``sp-splice`` (Odin III's front end through ``opt`` and ``proc``, then Yosys 0.55 with Parmys
    for the rest of VTR's script) runs with the same ``--arch`` and ``--top`` (the golden's first
    ``.model``) and the same Parmys config as the goldens' run (VTR's
@@ -78,8 +80,8 @@ from elab_equiv import format_cap  # noqa: E402
 
 TOOL = "exit-check"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
-IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR, SKIP = (
-    "identical", "equivalent", "eq-x", "differs", "error", "skip")
+IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR, SKIP, NO_GOLDEN = (
+    "identical", "equivalent", "eq-x", "differs", "error", "skip", "no-golden")
 PASSING = (IDENTICAL, EQUIVALENT)
 CLASS_ORDER = (IDENTICAL, EQUIVALENT, EQ_X, DIFFERS, ERROR)
 TIMEOUT_S = elab_sweep.TIMEOUT_S
@@ -355,6 +357,8 @@ def pipeline(cfg: Config, item: elab_sweep.Item, work: Path, log: list[str]) -> 
     golden = golden_path(cfg.golden_root, item.path)
     problem = golden_problem(golden)
     if problem:
+        if not golden.with_suffix(".prov").is_file():  # the oracle never ran on it
+            return Result(NO_GOLDEN, why=f"{golden.name} does not exist")
         return Result(ERROR, why=problem)
     try:
         top = str(elab_sweep.load_micro_top().first_model(golden))
@@ -394,6 +398,8 @@ def verdict(item: elab_sweep.Item, result: Result,
     entry = expect.get(item.rel)
     if result.kind == SKIP:
         return "skip", f"skip       {head}: {result.why}"
+    if result.kind == NO_GOLDEN:
+        return "nogolden", f"skipped    {head}: no golden: {result.why}"
     if entry is None:
         return result.kind, f"{result.kind:<10} {head}" + (f": {result.why}" if result.why
                                                           else "")
@@ -464,7 +470,8 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float) -
     detail = ", ".join(f"{n} {kind}" for kind, n in sorted(state.listed.items()))
     lines.append(f"  {'listed' + (' (' + detail + ')' if detail else ''):<24}{listed:>8}")
     for extra, label in (("XPASS", "listed but passing"), ("hard", "listed, hard failure"),
-                         ("needle", "listed, wrong needle"), ("skip", "skipped")):
+                         ("needle", "listed, wrong needle"), ("skip", "skipped"),
+                         ("nogolden", "skipped (no golden)")):
         if counts.get(extra):
             lines.append(f"  {label:<24}{counts[extra]:>8}")
     if stale:
@@ -474,7 +481,8 @@ def summary_lines(state: Sweep, total: int, stale: Sequence[str], secs: float) -
                  f"{counts.get(EQUIVALENT, 0)} equivalent, {counts.get(EQ_X, 0)} equivalent "
                  f"outside x-cones, {counts.get(DIFFERS, 0)} differs, {counts.get(ERROR, 0)} "
                  f"error, {listed} listed, {counts.get('XPASS', 0)} listed but passing, "
-                 f"{len(stale)} stale, {secs:.1f} s")
+                 f"{len(stale)} stale, {counts.get('nogolden', 0)} skipped (no golden), "
+                 f"{secs:.1f} s")
     return lines
 
 

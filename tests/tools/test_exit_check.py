@@ -339,6 +339,19 @@ class ArgvTest(ExitCheckCase):
 
 
 class ListedTest(ExitCheckCase):
+    def test_a_design_the_oracle_never_ran_on_is_skipped_not_an_error(self) -> None:
+        self.micro("g", "ok", "IDENT\n")
+        self.micro("g", "koios", "x\n", top=None)
+        code, out, err = self.run_tool()
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("skipped    g/koios.v", out)
+        self.assertIn("no golden: koios.parmys.blif does not exist", out)
+        self.assertIn("skipped (no golden)", out)
+        self.assertIn("1 skipped (no golden)", out)
+        self.assertIn("2 designs: 1 identical", out)
+        self.assertEqual(len(self.calls("sp-splice")), 1)
+        self.assertNotIn("error      g/koios.v", out)
+
     def test_no_golden_is_an_error_and_may_be_listed(self) -> None:
         self.micro("g", "rej", "x\n", top=None)
         prov = self.golden / "regression" / "verilog" / "g" / "rej" / "rej.parmys.prov"

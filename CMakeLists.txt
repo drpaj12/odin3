@@ -1943,7 +1943,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # four biggest files 5G, alone, in the 6G slice). Exceptions: tests/exit/micro_expect.txt
         # (the 103 micros Parmys rejects) and tests/exit/vtr_expect.txt; a `differs` is listed
         # only with a proven reason. exit_vtr runs the 31 files directly under
-        # benchmarks/verilog (the Koios designs have no k6_frac golden). Run as
+        # benchmarks/verilog (the Koios designs have no k6_frac golden; exit-check skips a design
+        # without one and counts it apart, and CMake adds koios/ only when goldens exist). Run as
         # `ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^exit_'` from a Release build.
         set(_exit_arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml)
         if(DEFINED ENV{VTR_ROOT} AND EXISTS ${_exit_arch})
@@ -1958,6 +1959,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                         ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
             file(GLOB _exit_vtr_files CONFIGURE_DEPENDS $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog/*.v)
+            # The Koios designs (41) have no k6_frac Parmys golden: they join the sweep only when
+            # the golden tree has a vtr/koios directory (else exit-check would skip them anyway).
+            set(_exit_golden $ENV{HOME}/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm)
+            if(IS_DIRECTORY ${_exit_golden}/vtr/koios)
+                file(GLOB _exit_koios_files CONFIGURE_DEPENDS
+                     $ENV{VTR_ROOT}/vtr_flow/benchmarks/verilog/koios/*.v)
+                list(APPEND _exit_vtr_files ${_exit_koios_files})
+            endif()
             if(_exit_vtr_files)
                 odin3_add_sweep_test(exit_vtr LABEL sweep
                     COMMAND ${_exit_check}
