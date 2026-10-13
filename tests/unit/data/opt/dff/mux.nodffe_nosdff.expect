@@ -1,0 +1,30 @@
+# yosys 0.55 (VTR build): read_rtlil mux.il; opt_dff -nodffe -nosdff; write_rtlil
+# input: Yosys 0.55's own write_rtlil of the read_verilog -icells heredoc of tests/opt/opt_dff_mux.ys (mux.il), edited by sed in two places: `parameter \X_POLARITY 1'b` written `b` and `parameter signed \WIDTH` written `parameter \WIDTH` (proc_build.c reads plain integer polarity and width parameters; the 2D-1 read_rtlil gap), in every cell
+# flags: -nodffe -nosdff
+cell $adff ARST_POLARITY=1 ARST_VALUE=2'10 CLK_POLARITY=1 WIDTH=2
+cell $adffe ARST_POLARITY=1 ARST_VALUE=2'10 CLK_POLARITY=1 EN_POLARITY=0 WIDTH=2
+cell $dff CLK_POLARITY=1 WIDTH=2
+cell $dffe CLK_POLARITY=1 EN_POLARITY=1 WIDTH=2
+cell $dffsr CLK_POLARITY=1 CLR_POLARITY=1 SET_POLARITY=0 WIDTH=2
+cell $dffsre CLK_POLARITY=1 CLR_POLARITY=1 EN_POLARITY=0 SET_POLARITY=0 WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $mux WIDTH=2
+cell $sdff CLK_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=2'10 WIDTH=2
+cell $sdffce CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=2'10 WIDTH=2
+cell $sdffe CLK_POLARITY=1 EN_POLARITY=1 SRST_POLARITY=1 SRST_VALUE=2'10 WIDTH=2

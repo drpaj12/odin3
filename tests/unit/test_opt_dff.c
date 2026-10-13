@@ -1943,8 +1943,11 @@ static const char *const k_cases[] = {
     "arst_always",     "arst_never",   "clk",        "const",           "qd",
     "sr_always",       "sr_never_clr", "sr_clr_na",  "sr_never_set",    "sr_set_na",
     "sr_arst_merge",   "srst_always",  "srst_never", "aload_always_sr", "aload_always_arst",
-    "dq_ce_over_srst",
+    "dq_ce_over_srst", "mux",
 };
+
+/* The mux case also runs with the merges switched off (the flags line of each .expect). */
+static const char *const k_mux_flags[] = {".nodffe", ".nosdff", ".nodffe_nosdff"};
 
 static void read_case(const char *name, const char *ext, char *buf) {
     char path[LOG_TEXT];
@@ -2062,6 +2065,8 @@ static void parse_expect(char *text, summary *want, odin3_opt_opts *opts) {
     memset(want, 0, sizeof *want);
     memset(opts, 0, sizeof *opts);
     opts->keepdc = strstr(text, "# flags: -keepdc") != NULL;
+    opts->nodffe = strstr(text, "# flags: -nodffe") != NULL;
+    opts->nosdff = strstr(text, "-nosdff\n") != NULL;
     for (char *line = strtok(text, "\n"); line != NULL; line = strtok(NULL, "\n")) {
         if (line[0] != '#') {
             add_item(want, line);
@@ -2099,6 +2104,11 @@ static void test_dff_yosys_cases(void) {
         tearDown();
         setUp();
         run_case(k_cases[i], ".keepdc");
+        tearDown();
+        setUp();
+    }
+    for (size_t i = 0; i < sizeof k_mux_flags / sizeof k_mux_flags[0]; i++) {
+        run_case("mux", k_mux_flags[i]);
         tearDown();
         setUp();
     }
