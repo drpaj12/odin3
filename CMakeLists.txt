@@ -1488,11 +1488,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # 2D Task 26 (spec 14.5): every micro under `odin3 --elab-only`, smallest first, with
     # --top from its Parmys golden (micro-top); failures only as listed in
     # tests/elab/micro_expect_fail.txt. Run as `ODIN3_HEAVY_OK=1 ctest --preset sweep -R
-    # verilog_micro_elab`.
+    # verilog_micro_elab`. Two 3G jobs fit the heavy slice's 6G (two 4G jobs do not).
     odin3_add_sweep_test(verilog_micro_elab LABEL sweep
         COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
                 --odin3 $<TARGET_FILE:odin3>
-                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 2 --mem-cap 3G
                 --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/micro_expect_fail.txt
                 --root ${PROJECT_SOURCE_DIR}/tests/micro/verilog
                 ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
