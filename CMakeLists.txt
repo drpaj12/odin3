@@ -521,6 +521,14 @@ target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
 add_executable(bench_opt tests/bench/bench_opt.c)
 target_include_directories(bench_opt PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
 target_link_libraries(bench_opt PRIVATE odin3_core odin3_flags)
+# tests/bench/bench_guard.h (shared with bench_elab, 2D) refuses a Debug or sanitized binary.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+    target_compile_definitions(bench_opt PRIVATE ODIN3_BENCH_RELEASE)
+else()
+    add_test(NAME bench_opt_refuses_debug COMMAND bench_opt --one /dev/null)
+    set_tests_properties(bench_opt_refuses_debug PROPERTIES
+        PASS_REGULAR_EXPRESSION "needs a Release build")
+endif()
 
 # --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
 if(ODIN3_FUZZ)

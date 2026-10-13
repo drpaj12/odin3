@@ -97,7 +97,13 @@ static const char *const k_keys[] = {"bench_opt file=",
                                      " full_rw_clean=",
                                      " full_rules=",
                                      " rss_proc_kib=",
-                                     " rss_peak_kib="};
+                                     " rss_proc_cur_kib=",
+                                     " rss_opt_kib=",
+                                     " rss_opt_growth_pct=",
+                                     " rss_compact_kib=",
+                                     " rss_full_kib=",
+                                     " rss_peak_kib=",
+                                     " rss_src="};
 
 /* The value text of `key` (up to the next blank) into out. */
 static void value_of(const char *line, const char *key, char *out, size_t cap) {
@@ -157,6 +163,8 @@ static void assert_tiny_values(const char *line) {
     assert_at_least(line, " iters=", 1);
     assert_at_least(line, " setup_rounds=", 1);
     assert_at_least(line, " rss_peak_kib=", number(line, " rss_proc_kib="));
+    assert_at_least(line, " rss_peak_kib=", number(line, " rss_opt_kib="));
+    assert_at_least(line, " rss_proc_cur_kib=", 1);
     TEST_ASSERT_LESS_THAN_UINT32((uint32_t)number(line, " cells0="),
                                  (uint32_t)number(line, " cells1="));
 }

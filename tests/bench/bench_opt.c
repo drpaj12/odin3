@@ -15,14 +15,30 @@
  *     ... `t_clean`), opt_expr's per-round setup (`t_setup`: the invert map, the FF-polarity scan
  *     and the global topological sort, which the Task 13 review asked to see apart; it is part of
  *     `t_expr`), and the rewrites per sub-pass (`rw_*`) and per rule family (`rules=`);
- *   - the dead objects at the peak (after the main `opt`, before `compact`), `t_compact`, the
- *     RSS peak after `proc` and at the end (compact's transient copy is not budget-gated: the
- *     end-of-run peak includes it).
+ *   - the dead objects at the peak (after the main `opt`, before `compact`), `t_compact`;
+ *   - The RSS columns (KiB). Each is the PEAK OF ITS OWN PHASE, not the process-lifetime
+ *     ru_maxrss (which would hide opt's growth under the read's and `proc`'s larger peak): before
+ *     each phase the kernel's high-water mark is reset (write "5" to /proc/self/clear_refs) and
+ *     VmHWM is read from /proc/self/status afterwards. The read's own peak is excluded.
+ *       rss_proc_kib      peak of the trio (opt_expr; opt_clean; opt -nodffe -nosdff) and `proc`
+ *       rss_proc_cur_kib  current RSS after `proc`: the post-proc IR, the baseline of the target
+ *       rss_opt_kib       peak of the main `opt`, before `compact`
+ *       rss_opt_growth_pct 100 * (rss_opt_kib - rss_proc_cur_kib) / rss_proc_cur_kib: spec 19's
+ *                         "peak RSS growth over the post-proc IR, before the script's compact"
+ *                         (at most 25 percent for lenet.v); THIS is the column the target uses
+ *       rss_compact_kib   peak of `compact` (its transient copy is not budget-gated)
+ *       rss_full_kib      peak of `opt -full`
+ *       rss_peak_kib      the largest of the four peaks
+ *       rss_src           hwm: the peaks are VmHWM readings; cur: clear_refs was unavailable and
+ *                         each "peak" is only the RSS at the end of its phase (a lower bound).
+ *     A phase's peak is at least the RSS when it starts, so a phase that allocates less than
+ *     what is already resident reads as that baseline.
  * The times come from opt_test.h's on_call and on_expr_setup hooks; the counts from the INFO lines
  * the passes log under --opt-stats, read through a log sink.
  */
 #include "bench_opt.h"
 
+#include "bench_guard.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "passes/opt/opt_test.h"
@@ -35,8 +51,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 enum { N_SUBS = 7, MAX_FAMILIES = 24, FAMILY_LEN = 24, RULE_NAME_LEN = 96, ARGS_LEN = 1100 };
 
@@ -76,7 +94,11 @@ typedef struct bench_row {
     ir_size before, proc, after, peak;
     phase script, full;
     double t_compact;
-    long rss_proc_kib, rss_peak_kib;
+    /* Per-phase RSS in KiB (see "The RSS columns" in the header): the peak of the trio and `proc`,
+     * the current RSS after `proc`, the peaks of the main `opt`, `compact` and `opt -full`, the
+     * largest of them, and whether the peaks are VmHWM readings (true) or end-of-phase RSS. */
+    long rss_proc_kib, rss_proc_cur_kib, rss_opt_kib, rss_compact_kib, rss_full_kib, rss_peak_kib;
+    bool rss_hwm;
 } bench_row;
 
 /* The recorder the hooks and the sink fill: the phase being timed (NULL: nothing), the sub-pass
@@ -95,9 +117,59 @@ static double now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-static long max_rss_kib(void) {
-    struct rusage usage;
-    return getrusage(RUSAGE_SELF, &usage) == 0 ? usage.ru_maxrss : -1;
+/* --- RSS: each phase's own peak ---------------------------------------------------------------- */
+
+/* The KiB after `key` (e.g. "VmHWM:") in /proc/self/status, or -1. */
+static long status_kib(const char *key) {
+    FILE *f = fopen("/proc/self/status", "r");
+    if (f == NULL) {
+        return -1;
+    }
+    char line[256];
+    long kib = -1;
+    size_t len = strlen(key);
+    while (fgets(line, sizeof line, f) != NULL) {
+        if (strncmp(line, key, len) == 0) {
+            kib = strtol(line + len, NULL, 10);
+            break;
+        }
+    }
+    (void)fclose(f);
+    return kib;
+}
+
+/* The current resident set in KiB (/proc/self/statm field 2), or -1. */
+static long current_rss_kib(void) {
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (f == NULL) {
+        return -1;
+    }
+    long size = 0;
+    long pages = -1;
+    if (fscanf(f, "%ld %ld", &size, &pages) != 2) {
+        pages = -1;
+    }
+    (void)fclose(f);
+    long page_kib = sysconf(_SC_PAGESIZE) / 1024;
+    return pages < 0 ? -1 : pages * page_kib;
+}
+
+/* Starts a phase: resets the kernel's high-water mark (VmHWM) to the current RSS through
+ * /proc/self/clear_refs ("5"). False when that is unavailable; the peaks then fall back to the
+ * RSS at the end of each phase. */
+static bool rss_phase_begin(void) {
+    FILE *f = fopen("/proc/self/clear_refs", "w");
+    if (f == NULL) {
+        return false;
+    }
+    bool ok = fputs("5", f) >= 0;
+    return fclose(f) == 0 && ok;
+}
+
+/* The peak since rss_phase_begin (hwm: VmHWM), else the current RSS. */
+static long rss_phase_peak(bool hwm) {
+    long kib = hwm ? status_kib("VmHWM:") : -1;
+    return kib >= 0 ? kib : current_rss_kib();
 }
 
 /* --- the hooks ------------------------------------------------------------------------------- */
@@ -270,21 +342,36 @@ static odin3_status run_script_pass(odin3_design *design, phase *ph, const char 
     return st;
 }
 
+static long max_of(long a, long b) {
+    return a > b ? a : b;
+}
+
 static odin3_status run_script(odin3_design *design, bench_row *row) {
     odin3_status st = ODIN3_OK;
+    row->rss_hwm = rss_phase_begin();
     for (size_t i = 0; st == ODIN3_OK && i < sizeof k_pre / sizeof k_pre[0]; i++) {
         st = run_script_pass(design, &row->script, k_pre[i]);
     }
     st = st == ODIN3_OK ? run_script_pass(design, NULL, k_proc) : st;
-    row->rss_proc_kib = max_rss_kib();
+    row->rss_proc_kib = rss_phase_peak(row->rss_hwm);
+    row->rss_proc_cur_kib = current_rss_kib();
     measure_size(design, &row->proc);
+    (void)rss_phase_begin();
     st = st == ODIN3_OK ? run_script_pass(design, &row->script, k_main) : st;
+    row->rss_opt_kib = rss_phase_peak(row->rss_hwm);
     measure_size(design, &row->peak);
+    (void)rss_phase_begin();
     double start = now_seconds();
     st = st == ODIN3_OK ? run_script_pass(design, NULL, k_compact) : st;
     row->t_compact = now_seconds() - start;
+    row->rss_compact_kib = rss_phase_peak(row->rss_hwm);
     measure_size(design, &row->after);
-    return st == ODIN3_OK ? run_script_pass(design, &row->full, k_full) : st;
+    (void)rss_phase_begin();
+    st = st == ODIN3_OK ? run_script_pass(design, &row->full, k_full) : st;
+    row->rss_full_kib = rss_phase_peak(row->rss_hwm);
+    row->rss_peak_kib = max_of(max_of(row->rss_proc_kib, row->rss_opt_kib),
+                               max_of(row->rss_compact_kib, row->rss_full_kib));
+    return st;
 }
 
 /* --- the line -------------------------------------------------------------------------------- */
@@ -348,7 +435,13 @@ static bool format_row(const bench_row *row, const char *name, char *buf, size_t
     put(&out, " dead_nodes=%" PRIu64 " dead_nets=%" PRIu64 " dead_wires=%" PRIu64,
         row->peak.dead_nodes, row->peak.dead_nets, row->peak.dead_wires);
     put_phase(&out, "full_", &row->full);
-    put(&out, " rss_proc_kib=%ld rss_peak_kib=%ld", row->rss_proc_kib, row->rss_peak_kib);
+    double base = (double)row->rss_proc_cur_kib;
+    put(&out, " rss_proc_kib=%ld rss_proc_cur_kib=%ld rss_opt_kib=%ld rss_opt_growth_pct=%.1f",
+        row->rss_proc_kib, row->rss_proc_cur_kib, row->rss_opt_kib,
+        base > 0 ? 100.0 * ((double)row->rss_opt_kib - base) / base : 0.0);
+    put(&out, " rss_compact_kib=%ld rss_full_kib=%ld rss_peak_kib=%ld rss_src=%s",
+        row->rss_compact_kib, row->rss_full_kib, row->rss_peak_kib,
+        row->rss_hwm ? "hwm" : "cur");
     return !out.full;
 }
 
@@ -366,7 +459,6 @@ odin3_status bench_opt_design(odin3_design *design, const char *name, char *buf,
     odin3_status st = run_script(design, row);
     odin3_log_set_sink(NULL, NULL);
     odin3_opt_test_set_hooks(NULL);
-    row->rss_peak_kib = max_rss_kib();
     if (st == ODIN3_OK && !format_row(row, name, buf, cap)) {
         st = ODIN3_ERR_INVALID_ARG;
     }
@@ -398,11 +490,37 @@ odin3_status bench_opt_one(const char *path, char *buf, size_t cap) {
 }
 
 #ifndef BENCH_OPT_NO_MAIN
+/* One discarded pass in a forked child (so the measured pass starts from a process that never held
+ * the warm-up's heap, and its RSS readings stay its own): warms the page cache and the CPU. Skipped
+ * for a file over WARMUP_MAX_BYTES (lenet-size inputs would double the run). */
+enum { WARMUP_MAX_BYTES = 4 << 20 };
+
+static void warm_up(const char *path) {
+    struct stat sb;
+    if (stat(path, &sb) != 0 || sb.st_size > WARMUP_MAX_BYTES) {
+        return;
+    }
+    (void)fflush(NULL);
+    pid_t pid = fork();
+    if (pid == 0) {
+        char line[BENCH_OPT_LINE];
+        _exit(bench_opt_one(path, line, sizeof line) == ODIN3_OK ? 0 : 1);
+    }
+    if (pid > 0) {
+        int status = 0;
+        (void)waitpid(pid, &status, 0);
+    }
+}
+
 int main(int argc, char **argv) {
+    if (bench_refuse_unoptimized(argv[0]) != 0) {
+        return 2;
+    }
     if (argc != 3 || strcmp(argv[1], "--one") != 0) {
         (void)fprintf(stderr, "usage: bench_opt --one FILE\n");
         return 2;
     }
+    warm_up(argv[2]);
     char line[BENCH_OPT_LINE];
     odin3_status st = bench_opt_one(argv[2], line, sizeof line);
     if (st != ODIN3_OK) {
