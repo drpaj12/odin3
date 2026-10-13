@@ -1600,6 +1600,78 @@ static void test_dff_nodffe_nosdff(void) {
     fx.opts.nodffe = true;
     run_dff();
     expect_ff("$sdff");
+    /* both flags at once: neither merge runs, whatever the order of the two muxes */
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1")
+                  MUX1("my", "\\m1", "1'0", "\\r", "\\m2") FF_ON("\\m2")));
+    fx.opts.nodffe = true;
+    fx.opts.nosdff = true;
+    run_dff();
+    expect_ff("$dff");
+    expect_pin(first_ff(), "D", wnet("m2", 0));
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1")
+                  MUX1("my", "\\q", "\\m1", "\\e", "\\m2") FF_ON("\\m2")));
+    fx.opts.nodffe = true;
+    fx.opts.nosdff = true;
+    run_dff();
+    expect_ff("$dff");
+    expect_pin(first_ff(), "D", wnet("m2", 0));
+}
+
+/* Review I1: every FF made from a (* keep *) FF keeps its attributes, so opt_clean keeps it. */
+static void expect_node_attrs(odin3_node_id node) {
+    odin3_objref ref = {ODIN3_OBJ_NODE, node.v};
+    TEST_ASSERT_NOT_NULL(odin3_attr_get(fx.module, ref, intern("keep")));
+    TEST_ASSERT_NOT_NULL(odin3_attr_get(fx.module, ref, intern("foo")));
+}
+
+static void expect_attrs_everywhere(uint32_t n_ffs) {
+    uint32_t seen = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module); id++) {
+        odin3_node_id node = {id};
+        bool is_ff = odin3_node_live(fx.module, node) &&
+                     odin3_ff_is_ff(&fx.oc, odin3_node_type(fx.module, node));
+        if (is_ff) {
+            expect_node_attrs(node);
+        }
+        seen += is_ff ? 1U : 0U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(n_ffs, seen);
+}
+
+static void keep_case(const char *text, uint32_t n_ffs) {
+    build(text);
+    run_dff();
+    TEST_ASSERT_EQUAL_UINT32(n_ffs, count_ffs());
+    expect_attrs_everywhere(n_ffs);
+    odin3_opt_counts counts;
+    memset(&counts, 0, sizeof counts);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_clean_run(&fx.ctx, fx.res.design, &fx.opts, &counts));
+    TEST_ASSERT_EQUAL_UINT32(n_ffs, count_ffs()); /* Q is unread: only keep saves them */
+    expect_attrs_everywhere(n_ffs);
+}
+
+#define KEEP_ATTRS "  attribute \\keep 1\n  attribute \\foo \"bar\"\n"
+#define KEEP_WIRES                                                                                 \
+    "  wire input 1 \\clk\n  wire input 2 \\d\n  wire input 3 \\r\n  wire input 4 \\e\n"           \
+    "  wire width 2 input 5 \\dd\n  wire width 2 \\q\n  wire \\m1\n  wire \\m2\n"
+
+static void test_dff_merge_keeps_attrs(void) {
+    /* all merged: one FF whose D is an EN mux then an SRST mux -> one $sdffce */
+    keep_case(MOD(KEEP_WIRES MUX1("mx", "\\q [0]", "\\d", "\\e", "\\m1")
+                      MUX1("my", "\\m1", "1'0", "\\r", "\\m2") KEEP_ATTRS
+                  "  cell $dff \\f\n" PW PCLK CCLK
+                  "    connect \\D \\m2\n    connect \\Q \\q [0]\n  end\n"),
+              1);
+    /* partly merged: bit 0 leaves the 2-bit FF, bit 1 stays: both FFs carry the attributes */
+    keep_case(MOD(KEEP_WIRES MUX1("mx", "\\q [0]", "\\d", "\\e", "\\m1") KEEP_ATTRS
+                  "  cell $dff \\f\n    parameter \\WIDTH 2\n" PCLK CCLK
+                  "    connect \\D { \\dd [1] \\m1 }\n    connect \\Q \\q\n  end\n"),
+              2);
+    /* SRST merge of a partly merged FF */
+    keep_case(MOD(KEEP_WIRES MUX1("mx", "\\d", "1'0", "\\r", "\\m1") KEEP_ATTRS
+                  "  cell $dff \\f\n    parameter \\WIDTH 2\n" PCLK CCLK
+                  "    connect \\D { \\dd [1] \\m1 }\n    connect \\Q \\q\n  end\n"),
+              2);
 }
 
 static void test_dff_single_user(void) {
@@ -1941,6 +2013,7 @@ static void test_dff_pattern_depth(void) {
         "  cell $dff \\f2\n" PW PCLK CCLK "    connect \\D \\m2\n    connect \\Q \\q2\n  end\n"    \
         "  cell $mux \\x3\n" PW "    connect \\A \\q3 [0]\n    connect \\B \\d\n"                  \
         "    connect \\S \\e\n    connect \\Y \\m3\n  end\n"                                       \
+        "  attribute \\keep 1\n  attribute \\foo \"bar\"\n" /* the group FFs copy these (I1) */    \
         "  cell $dff \\f3\n    parameter \\WIDTH 2\n" PCLK CCLK                                    \
         "    connect \\D { \\dd [1] \\m3 }\n    connect \\Q \\q3\n  end\n"                         \
         "  cell $mux \\x4\n" PW "    connect \\A \\d\n    connect \\B \\q4\n    connect \\S \\r\n" \
@@ -2353,6 +2426,7 @@ static void run_merge_tests(void) {
     RUN_TEST(test_dff_srst_then_en);
     RUN_TEST(test_dff_en_then_srst);
     RUN_TEST(test_dff_nodffe_nosdff);
+    RUN_TEST(test_dff_merge_keeps_attrs);
     RUN_TEST(test_dff_single_user);
     RUN_TEST(test_dff_no_aload_srst);
     RUN_TEST(test_dff_feedback_patterns);

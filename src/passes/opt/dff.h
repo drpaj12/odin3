@@ -147,7 +147,7 @@ typedef struct odin3_dff_xmark {
 typedef struct odin3_dff_plan {
     odin3_vec bits;  /* odin3_dff_bitplan, one per FF bit */
     odin3_vec keys;  /* uint64_t */
-    odin3_vec nodes; /* uint32_t */
+    odin3_vec nodes; /* uint64_t */
     odin3_vec marks; /* odin3_dff_xmark */
 } odin3_dff_plan;
 

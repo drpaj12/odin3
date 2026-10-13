@@ -28,6 +28,7 @@
 #include "passes/opt/ff.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
+#include "util/hash.h"
 #include "util/u64map.h"
 #include "util/vec.h"
 
@@ -37,8 +38,6 @@
 #include <string.h>
 
 static const uint32_t NO_GROUP = UINT32_MAX;
-static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
-static const uint64_t FNV_PRIME = 0x100000001b3ULL;
 
 /* --- grouping --------------------------------------------------------------------------------- */
 
@@ -70,9 +69,9 @@ static const uint64_t *key_words(const odin3_dff_plan *plan, const odin3_dff_bit
 
 static uint64_t key_hash(const odin3_dff_plan *plan, const odin3_dff_bitplan *bp) {
     const uint64_t *words = key_words(plan, bp);
-    uint64_t hash = FNV_OFFSET; /* FNV-1a over the words */
+    uint64_t hash = 0;
     for (uint32_t k = 0; k < bp->key_len; k++) {
-        hash = (hash ^ words[k]) * FNV_PRIME;
+        hash = odin3_hash_combine(hash, words[k]);
     }
     return hash;
 }
@@ -377,9 +376,8 @@ static odin3_status group_emit(merge_job *job, uint32_t gidx) {
     if (out.v != 0) { /* kept to be deleted on a later failure; room was reserved */
         (void)odin3_kit_push_u32(&job->made, out.v);
     }
-    if (st == ODIN3_OK) {
-        odin3_dff_note(ds, job->is_srst ? ODIN3_OPT_DFF_ADD_SRST : ODIN3_OPT_DFF_ADD_EN, "");
-    }
+    /* the old node's attributes (keep included) go on every group FF, before the old node goes */
+    st = st == ODIN3_OK ? odin3_kit_copy_attrs(ds->oc->module, ds->cell, out) : st;
     odin3_ffdata_free(&nf);
     ds->prov_ready = false;
     return st;
@@ -463,6 +461,9 @@ static odin3_status job_run(merge_job *job) {
     if (st != ODIN3_OK && odin3_node_live(ds->oc->module, ds->cell)) {
         job_undo(job); /* nothing destructive happened: the IR is as it was but for dead gates */
         return st;
+    }
+    for (size_t k = 0; st == ODIN3_OK && k < job->made.len; k++) { /* committed: count them */
+        odin3_dff_note(ds, job->is_srst ? ODIN3_OPT_DFF_ADD_SRST : ODIN3_OPT_DFF_ADD_EN, "");
     }
     for (size_t k = 0; st == ODIN3_OK && ds->queue != NULL && k < job->made.len; k++) {
         st = odin3_kit_push_u32(ds->queue, ((const uint32_t *)job->made.data)[k]);
