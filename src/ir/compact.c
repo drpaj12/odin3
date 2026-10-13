@@ -585,6 +585,8 @@ static void commit(compact_ctx *ctx) {
     swap_in(ctx);
     out_free(&ctx->out);
     odin3_module_dead_pins_free(module); /* every dead node is gone */
+    module->journal.overflow = true;     /* the IDs it holds are stale */
+    module->journal.len = 0;
 }
 
 /* Every fallible step: numbering, the new containers, the copies, the tombstone room. */

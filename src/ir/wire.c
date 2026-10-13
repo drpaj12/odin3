@@ -241,6 +241,7 @@ void odin3_wire_commit(odin3_module *module, const odin3_wire_plan *plan) {
         if (plan->given != NULL) {
             bind_bit(module, plan->given[k], wb);
             rec->nets[k] = plan->given[k];
+            ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, plan->given[k].v);
         } else {
             rec->nets[k] = new_member_net(module, spec->prov, wb);
         }
@@ -333,6 +334,8 @@ odin3_status odin3_wire_add_alias(odin3_module *module, odin3_wirebit wb, odin3_
         alias_push(module, net, (odin3_net_alias){wb, 0});
     }
     wire->nets[wb.bit] = net;
+    ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, net.v);
+    ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, old.v);
     return ODIN3_OK;
 }
 
@@ -367,6 +370,7 @@ odin3_status odin3_wire_delete(odin3_module *module, odin3_wire_id wire) {
     }
     for (uint32_t k = 0; k < rec->width; k++) {
         membership_drop(module, rec->nets[k], (odin3_wirebit){wire, k});
+        ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, rec->nets[k].v);
     }
     if (rec->name != 0) {
         (void)odin3_u64map_remove(module->wire_names, rec->name);

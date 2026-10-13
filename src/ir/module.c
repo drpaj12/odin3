@@ -16,6 +16,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 static const unsigned MODULE_SHIFT = ODIN3_MODULE_PAGE_SHIFT;
 static const unsigned WIRE_SHIFT = ODIN3_WIRE_PAGE_SHIFT;
@@ -179,6 +180,58 @@ odin3_wire_id odin3_module_find_wire(const odin3_module *module, uint32_t name_s
     return (odin3_wire_id){find_name(module->wire_names, name_str)};
 }
 
+/* --- the change journal -------------------------------------------------------------------- */
+
+void odin3_module_journal_begin(odin3_module *module) {
+    module->journal.len = 0;
+    module->journal.on = true;
+    module->journal.overflow = false;
+}
+
+void odin3_module_journal_end(odin3_module *module) {
+    odin3_util_free(module->journal.ent);
+    memset(&module->journal, 0, sizeof module->journal);
+}
+
+bool odin3_module_journal_get(const odin3_module *module, const uint64_t **entries, size_t *count) {
+    *entries = module->journal.ent;
+    *count = module->journal.len;
+    return module->journal.on && !module->journal.overflow;
+}
+
+void odin3_module_journal_drop(odin3_module *module, size_t n) {
+    odin3_module_journal *jr = &module->journal;
+    if (n >= jr->len) {
+        jr->len = 0;
+        return;
+    }
+    memmove(jr->ent, jr->ent + n, (jr->len - n) * sizeof *jr->ent);
+    jr->len -= n;
+}
+
+void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id) {
+    odin3_module_journal *jr = &module->journal;
+    uint64_t entry = ((uint64_t)kind << 32) | id;
+    if (!jr->on || jr->overflow || (jr->len > 0 && jr->ent[jr->len - 1] == entry)) {
+        return;
+    }
+    if (jr->len >= ODIN3_JOURNAL_MAX) {
+        jr->overflow = true;
+        return;
+    }
+    if (jr->len == jr->cap) {
+        size_t cap = jr->cap == 0 ? 1024U : jr->cap * 2U;
+        uint64_t *grown = odin3_util_realloc(jr->ent, cap * sizeof *grown);
+        if (grown == NULL) { /* the reader falls back to "everything changed" */
+            jr->overflow = true;
+            return;
+        }
+        jr->ent = grown;
+        jr->cap = cap;
+    }
+    jr->ent[jr->len++] = entry;
+}
+
 /* --- module lifetime ----------------------------------------------------------------------- */
 
 void odin3_module_dead_pins_free(odin3_module *module) {
@@ -205,6 +258,7 @@ static void module_destroy(odin3_module *module) {
     odin3_u64map_destroy(module->attr_heads);
     odin3_vec_free(&module->attrs);
     odin3_module_dead_pins_free(module);
+    odin3_util_free(module->journal.ent);
     odin3_arena_destroy(module->arena);
     odin3_util_free(module);
 }

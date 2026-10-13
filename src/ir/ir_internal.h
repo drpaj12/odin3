@@ -186,6 +186,13 @@ typedef struct odin3_attr_rec {
     const odin3_value *value;
 } odin3_attr_rec;
 
+/* The change journal's store: entries kind << 32 | ID; len and cap in entries. */
+typedef struct odin3_module_journal {
+    uint64_t *ent;
+    size_t len, cap;
+    bool on, overflow;
+} odin3_module_journal;
+
 struct odin3_module {
     odin3_design *design;
     odin3_module_id id;
@@ -221,7 +228,16 @@ struct odin3_module {
      * one away; compact keeps it (only live nodes survive).
      */
     uint32_t proc_count;
+    odin3_module_journal journal; /* the change journal (module.h) */
 };
+
+/* Appends to the journal when it is on (module.h's odin3_module_journal_add). */
+#define ODIN3_JOURNAL_NOTE(module, kind, id)                  \
+    do {                                                      \
+        if ((module)->journal.on) {                           \
+            odin3_module_journal_add((module), (kind), (id)); \
+        }                                                     \
+    } while (0)
 
 /*
  * Records node's pin net names in the module's dead-pin table (before its pins are disconnected

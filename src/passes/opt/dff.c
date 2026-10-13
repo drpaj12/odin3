@@ -30,6 +30,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -71,6 +72,10 @@ odin3_status odin3_dff_commit(odin3_dff_state *ds) {
 }
 
 static odin3_status visit_ff(odin3_dff_state *ds, odin3_node_id node) {
+    if (!odin3_dff_dirty_visit(ds, node)) {
+        odin3_kit_begin_rewrite(ds->oc); /* what the load would count: the operation numbers hold */
+        return ODIN3_OK;
+    }
     bool usable = false;
     odin3_status st = odin3_dff_state_load(ds, node, &usable);
     for (size_t i = 0;
@@ -97,6 +102,41 @@ static odin3_status collect_ffs(const odin3_opt_ctx *oc, odin3_vec *list) {
     return st;
 }
 
+#ifndef NDEBUG
+/* Debug: the FFs the dirty set skipped, visited in full now, must change nothing (the rules, then
+ * the constant bits). Run with the mux snapshot of the call still alive. */
+static void check_skipped(odin3_dff_state *ds, bool constbits) {
+    const uint32_t end = ds->dirty.active ? ds->dirty.first_new : 0U;
+    const uint32_t ops = ds->oc->pass->op;
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_node_id node = {id};
+        if (!odin3_node_live(ds->oc->module, node) || (ds->dirty.marks[id] & 1U) != 0 ||
+            !odin3_ff_is_ff(ds->oc, odin3_node_type(ds->oc->module, node))) {
+            continue;
+        }
+        uint32_t changed = ds->n_changed;
+        uint32_t bits = ds->n_bits;
+        odin3_status st = ODIN3_OK;
+        if (constbits) {
+            st = odin3_dff_visit_constbits(ds, node);
+        } else {
+            bool usable = false;
+            st = odin3_dff_state_load(ds, node, &usable);
+            for (size_t i = 0; st == ODIN3_OK && usable && i < sizeof k_rules / sizeof k_rules[0];
+                 i++) {
+                st = k_rules[i](ds);
+            }
+            ds->changed = ds->changed && usable;
+        }
+        assert(st != ODIN3_OK || (ds->n_changed == changed && ds->n_bits == bits && !ds->changed &&
+                                  !ds->gone && !ds->counted));
+        (void)changed;
+        (void)bits;
+    }
+    ds->oc->pass->op = ops;
+}
+#endif
+
 static odin3_status module_rules(odin3_dff_state *ds) {
     odin3_vec list;
     odin3_vec_init(&list, sizeof(uint32_t));
@@ -109,6 +149,12 @@ static odin3_status module_rules(odin3_dff_state *ds) {
     }
     ds->queue = NULL;
     odin3_vec_free(&list);
+    st = st == ODIN3_OK ? odin3_dff_dirty_extend(ds) : st;
+#ifndef NDEBUG
+    if (st == ODIN3_OK && ds->dirty.active) {
+        check_skipped(ds, false);
+    }
+#endif
     odin3_dff_muxes_free(&ds->muxes);
     return st;
 }
@@ -120,9 +166,18 @@ static odin3_status module_constbits(odin3_dff_state *ds) {
         odin3_node_id node = {id};
         if (odin3_node_live(ds->oc->module, node) &&
             odin3_ff_is_ff(ds->oc, odin3_node_type(ds->oc->module, node))) {
-            st = odin3_dff_visit_constbits(ds, node);
+            if (odin3_dff_dirty_visit(ds, node)) {
+                st = odin3_dff_visit_constbits(ds, node);
+            } else {
+                odin3_kit_begin_rewrite(ds->oc);
+            }
         }
     }
+#ifndef NDEBUG
+    if (st == ODIN3_OK && ds->dirty.active) {
+        check_skipped(ds, true);
+    }
+#endif
     return st;
 }
 
@@ -133,7 +188,8 @@ typedef struct dff_totals {
 static odin3_status dff_module(odin3_opt_ctx *oc, dff_totals *totals) {
     odin3_dff_state ds;
     odin3_dff_state_init(&ds, oc);
-    odin3_status st = odin3_opt_canon_consts(oc);
+    odin3_status st = odin3_dff_dirty_begin(&ds);
+    st = st == ODIN3_OK ? odin3_opt_canon_consts(oc) : st;
     oc->defer_ties = true;
     st = st == ODIN3_OK ? module_rules(&ds) : st;
     st = st == ODIN3_OK ? module_constbits(&ds) : st;

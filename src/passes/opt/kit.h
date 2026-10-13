@@ -324,4 +324,12 @@ void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc);
 /* The bytes the module's marks hold (the budget check's side arrays). */
 uint64_t odin3_opt_dirty_bytes(const odin3_opt_ctx *oc);
 
+/*
+ * opt_dff's incremental mode (dff_dirty.c). odin3_opt_dff_prime starts the module's IR change
+ * journal (module.h) and marks the module as swept once by opt_dff; false outside an incremental
+ * session. odin3_opt_dff_primed says it was (and the session ends the journal).
+ */
+bool odin3_opt_dff_prime(odin3_opt_ctx *oc);
+bool odin3_opt_dff_primed(const odin3_opt_ctx *oc);
+
 #endif

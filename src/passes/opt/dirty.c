@@ -41,6 +41,7 @@ struct odin3_opt_modstate {
     uint32_t n_dirty[N_PHASES]; /* nodes with DIRTY0 / DIRTY1 set */
     bool all;                   /* every node counts as dirty (opt_expr sweeps) */
     bool changed;               /* a kit rewrite touched the module since the iteration began */
+    bool dff_primed;            /* opt_dff has swept the module and the IR journal is on (dff_dirty.c) */
 };
 
 static struct {
@@ -71,6 +72,11 @@ odin3_status odin3_opt_session_begin(odin3_design *design, bool incremental) {
 }
 
 void odin3_opt_session_end(void) {
+    for (uint32_t i = 1; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
+        if (g_sess.mods[i].dff_primed) {
+            odin3_module_journal_end(odin3_module_get(g_sess.design, (odin3_module_id){i}));
+        }
+    }
     for (uint32_t i = 0; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
         odin3_util_free(g_sess.mods[i].bits);
     }
@@ -266,4 +272,19 @@ void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc) {
     if (oc != NULL && oc->mod != NULL) {
         oc->mod->all = true;
     }
+}
+
+/* --- opt_dff's side ---------------------------------------------------------------------------- */
+
+bool odin3_opt_dff_primed(const odin3_opt_ctx *oc) {
+    return oc != NULL && oc->mod != NULL && g_sess.incremental && oc->mod->dff_primed;
+}
+
+bool odin3_opt_dff_prime(odin3_opt_ctx *oc) {
+    if (oc == NULL || oc->mod == NULL || !g_sess.incremental) {
+        return false;
+    }
+    odin3_module_journal_begin(oc->module);
+    oc->mod->dff_primed = true;
+    return true;
 }

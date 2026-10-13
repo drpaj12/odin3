@@ -277,6 +277,17 @@ static srst_move srst_move_of(const odin3_dff_state *ds, const eat_step *step, o
     return stop;
 }
 
+/*
+ * A walk that ran out its step cap (the module's mux bit count) went round a mux loop, and where it
+ * stops depends on that count, which changes with muxes anywhere in the module: the FF journals
+ * itself, so opt_dff's incremental mode (dff_dirty.c) visits it again.
+ */
+static void note_guard(const odin3_dff_state *ds, size_t guard) {
+    if (guard > ds->muxes.bits.len) {
+        odin3_module_journal_add(ds->oc->module, ODIN3_JOURNAL_NODE, ds->cell.v);
+    }
+}
+
 /* Rule 10's walk for one bit: the muxes with a constant on one side. */
 static odin3_status srst_walk(const odin3_dff_state *ds, uint32_t idx, bit_acc *acc) {
     const odin3_ffdata *ff = &ds->ff;
@@ -285,8 +296,8 @@ static odin3_status srst_walk(const odin3_dff_state *ds, uint32_t idx, bit_acc *
     odin3_net_id dnet = acc->dnet;
     eat_step step;
     odin3_status st = ODIN3_OK;
-    for (size_t guard = 0;
-         st == ODIN3_OK && guard <= ds->muxes.bits.len && eat_next(ds, dnet, &step); guard++) {
+    size_t guard = 0;
+    for (; st == ODIN3_OK && guard <= ds->muxes.bits.len && eat_next(ds, dnet, &step); guard++) {
         srst_move move = srst_move_of(ds, &step, qnet, reset);
         if (move.kind == 0) {
             break;
@@ -296,6 +307,7 @@ static odin3_status srst_walk(const odin3_dff_state *ds, uint32_t idx, bit_acc *
         st = odin3_kit_push_u64(&acc->ctrls, ctrl_word(step.s, move.kind == 1));
         st = st == ODIN3_OK ? odin3_kit_push_u64(&acc->nodes, step.view.mb->node) : st;
     }
+    note_guard(ds, guard);
     acc->dnet = dnet;
     acc->reset = reset;
     return st;
@@ -599,8 +611,9 @@ static odin3_status search_keep(const search *sr, bit_acc *acc) {
 static odin3_status en_walk(const odin3_dff_state *ds, odin3_net_id qnet, bit_acc *acc) {
     eat_step step;
     odin3_status st = ODIN3_OK;
-    for (size_t guard = 0;
-         st == ODIN3_OK && guard <= ds->muxes.bits.len && eat_next(ds, acc->dnet, &step); guard++) {
+    size_t guard = 0;
+    for (; st == ODIN3_OK && guard <= ds->muxes.bits.len && eat_next(ds, acc->dnet, &step);
+         guard++) {
         bool hold_a = step.a.v == qnet.v;
         if (!hold_a && step.b.v != qnet.v) {
             break;
@@ -609,6 +622,7 @@ static odin3_status en_walk(const odin3_dff_state *ds, odin3_net_id qnet, bit_ac
         st = odin3_kit_push_u64(&acc->ctrls, ctrl_word(step.s, hold_a));
         st = st == ODIN3_OK ? odin3_kit_push_u64(&acc->nodes, step.view.mb->node) : st;
     }
+    note_guard(ds, guard);
     return st;
 }
 
