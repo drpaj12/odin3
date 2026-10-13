@@ -166,6 +166,7 @@ class PresetsTest(unittest.TestCase):
         xl = self.presets["sweep-xl"]
         self.assertEqual(xl["configurePreset"], "release")
         self.assertEqual(xl["filter"]["include"]["label"], "sweep-xl")
+        self.assertEqual(xl["environment"]["ODIN3_HEAVY_OK"], "1")
         self.assertNotIn("ODIN3_HEAVY_XL_OK", json.dumps(self.presets))
 
 
@@ -291,6 +292,19 @@ class RunRowsEquivTest(unittest.TestCase):
         self.assertEqual(run_rows_equiv.sweep(bridge, self.rows, {}), 1)  # B1 fails
         self.assertEqual(run_rows_equiv.sweep(bridge, self.rows, {"B1": "why"}), 0)
         self.assertEqual(run_rows_equiv.sweep(bridge, self.rows, {"A1": "x", "B1": "y"}), 1)
+
+    def test_expected_failure_needs_its_needle(self) -> None:
+        bridge = [str(self.bridge)]
+        rows = [r for r in self.rows if r.row == "B1"]
+        self.assertEqual(run_rows_equiv.sweep(bridge, rows, {"B1": "w"}, {"B1": "boom"}), 1)
+        self.assertEqual(run_rows_equiv.sweep(bridge, rows, {"B1": "w"}, {"B1": ""}), 0)
+
+    def test_expect_fail_needle_syntax(self) -> None:
+        path = self.dir / "expect.txt"
+        path.write_text("B1 [some text] because\nA1 plain\n", encoding="utf-8")
+        self.assertEqual(
+            run_rows_equiv.read_expect(path), {"B1": ("some text", "because"), "A1": ("", "plain")}
+        )
 
     def test_a_row_with_several_clocks_is_not_run(self) -> None:
         bridge = [str(self.bridge)]

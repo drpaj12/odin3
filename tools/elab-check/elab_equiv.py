@@ -86,6 +86,19 @@ class Options:
     unmap: bool = False
 
 
+def wants_auto_blackbox(source: Path) -> bool:
+    """True when the file's head holds the ``// elab-check: ... --auto-blackbox`` directive, the
+    same in-file spelling elab-check honours (a line after line 1, within the first 1024 bytes)."""
+    try:
+        head = source.read_bytes()[:1024].decode("utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(
+        line.startswith("// elab-check:") and "--auto-blackbox" in line
+        for line in head.split("\n")[1:]
+    )
+
+
 def yosys_script(read: str, top: str | None, blif: str, unmap: bool = False) -> str:
     """Yosys's ``-p`` script: the read, the hierarchy, the shared back end writing ``blif``."""
     hierarchy = f"hierarchy -top {top}" if top else "hierarchy -auto-top"
@@ -136,8 +149,9 @@ class Bridge:
 
     def side_a(self) -> None:
         opts = self.opts
+        flags = "--nolatches --auto-blackbox" if wants_auto_blackbox(opts.source) else "--nolatches"
         odin3 = [opts.odin3, *(["--top", opts.top] if opts.top else []), "-p",
-                 f"read_verilog --nolatches {opts.source}; write_rtlil a.il"]
+                 f"read_verilog {flags} {opts.source}; write_rtlil a.il"]
         self.must("odin3 (side A)", odin3)
         if not (self.work / "a.il").is_file():
             raise EquivError("odin3 (side A) wrote no a.il")

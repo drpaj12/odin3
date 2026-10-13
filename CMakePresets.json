@@ -61,7 +61,8 @@
       "configurePreset": "release",
       "output": { "outputOnFailure": true },
       "execution": { "jobs": 1 },
-      "filter": { "include": { "label": "sweep-xl" } }
+      "filter": { "include": { "label": "sweep-xl" } },
+      "environment": { "ODIN3_HEAVY_OK": "1" }
     }
   ]
 }
