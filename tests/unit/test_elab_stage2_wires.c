@@ -1365,9 +1365,7 @@ static const char k_three[] =
     "module top (input [7:0] i, output [7:0] o);\n  sub #(.W(8)) u1 (.a(i), .y(o));\n"
     "  sub #(.W(4)) u2 (.a(i[3:0]), .y());\nendmodule\n";
 
-/* A read that ran to its own end: the three modules with their ports. An earlier failure can also
- * end as PARSE when the preprocessor reports a file it could not read (2C), so a run counts as
- * complete only with the modules there. */
+/* A read that ran to its own end: the three modules with their ports. */
 static bool read_complete(void) {
     if (odin3_design_module_end(rs.design) != 4) {
         return false;
@@ -1401,19 +1399,16 @@ static odin3_status read_failing_at(long limit) {
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
-    /* PARSE is only ever 2C's missing_file (the open 2C item: an injected failure in the
-     * preprocessor reads as a missing file); any other PARSE is a stage-2 failure returned as a
-     * user error. */
-    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
-                     (st == ODIN3_ERR_PARSE && g_saw_missing_file));
+    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    TEST_ASSERT_FALSE(g_saw_missing_file);
     expect_ir_ok_quiet();
     return st;
 }
 
-/* Every allocation of the whole read fails in turn (stage 2's among them): the status is NO_MEMORY
- * (or 2C's PARSE for a file it could not read), the IR made so far passes check FULL, nothing
- * leaks (ASan's leak check ends the process), until the read completes (OOM_SETTLE runs in a
- * row). */
+/* Every allocation of the whole read fails in turn (stage 2's among them): the status is NO_MEMORY,
+ * the IR made so far passes check FULL, nothing leaks (ASan's leak check ends the process), until
+ * the read completes (OOM_SETTLE runs in a row). */
 static void test_oom_sweep(void) {
     et_src src = {"t.v", k_three};
     et_req req = {&src, 1, NULL, NULL, NULL};

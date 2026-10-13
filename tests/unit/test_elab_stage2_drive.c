@@ -1521,13 +1521,11 @@ static odin3_status read_failing_at(long limit) {
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
-    /* PARSE is only ever 2C's missing_file (an injected failure in the preprocessor reads as a
-     * missing file, the open 2C item); any other PARSE is stage 2 returning a user error. */
+    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
     char why[64];
     TEST_ASSERT_TRUE(snprintf(why, sizeof why, "limit %ld status %d", limit, (int)st) > 0);
-    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
-                                 (st == ODIN3_ERR_PARSE && g_saw_missing_file),
-                             why);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, why);
+    TEST_ASSERT_FALSE_MESSAGE(g_saw_missing_file, why);
     odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
     return st;
