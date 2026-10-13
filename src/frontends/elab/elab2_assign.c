@@ -496,7 +496,7 @@ static odin3_status lv_word_of(odin3_elab2 *e2, odin3_ast_id word, const odin3_e
             odin3_elab2_mem_word_index(e2, word, k), {0, false, false}, NULL, NULL};
         st = odin3_elab2_expr(e2, &req, &idx[k]);
     }
-    odin3_elab2_mem_rd rd = {ref->mem, word, idx, ref->n, NULL};
+    odin3_elab2_mem_rd rd = {ref->mem, word, idx, ref->n};
     st = st != ODIN3_OK ? st : odin3_elab2_mem_word(e2, &rd, true, out);
     if (st == ODIN3_OK && out->kind == ODIN3_WORD_VARIABLE) {
         odin3_elab2_error(

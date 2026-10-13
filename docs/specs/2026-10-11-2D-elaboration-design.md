@@ -244,6 +244,11 @@ the right side first, as the example does. (8) EL-30's `$tribuf` data and enable
 generated at the lvalue's width, a one-bit enable is used as is, a wider one goes through
 `$reduce_bool` (`$logic_not` when inverted).
 
+v4.18 (2026-10-12; 2D Task 20 fix round 1, controller ruling I1). EL-27 rule 4 no longer treats an
+array inside a concatenation lvalue as a complex lvalue: Yosys 0.55 splits concatenation lvalues
+before mem2reg, so `{m[wa], t} <= {a, a};` with `assign y = m[ra];` keeps one memory and prints no
+`replacing memory` warning (verified: `yosys -p "read_verilog t.v; proc; stat"`).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -1181,8 +1186,9 @@ elaborated module by stage 2 before it emits anything):
 2. **written in an asynchronous block**: assigned in an `always` whose event list does not have
    exactly one edge event (combinational, or with an asynchronous reset);
 3. **read after a blocking write in the same block** (Yosys `MEM2REG_FL_EQ2`);
-4. **complex lvalue**: the array appears inside the index of an lvalue or in a concatenation
-   lvalue;
+4. **complex lvalue**: the array appears inside the index of an lvalue (a concatenation lvalue
+   is split into its parts first, as Yosys does: `{m[wa], t} <= x` is judged by rules 2, 3 and 5
+   on the part `m[wa]`, not by this rule);
 5. **constant writes only**: every write outside `initial` blocks uses a constant index (Yosys
    `CONST_LHS` without `VAR_LHS`);
 6. **initial-only init with `nomeminit`**: written in `initial` and elsewhere while `nomeminit` is
