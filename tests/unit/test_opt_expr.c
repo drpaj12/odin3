@@ -851,7 +851,8 @@ static const char K_IDENTWRT_ADD[] = "module \\m\n"
                                      "  end\n"
                                      "end\n";
 
-/* fuzz_opt's finding (§17 #55): a mixed-sign $sub of 0 extends A with zeros, not its sign. */
+/* fuzz_opt's finding (§17 #55): a mixed-sign $sub of 0 whose A (3 bits, signed) reaches Y (7 bits).
+ */
 static const char K_IDENTWRT_MIXED[] = "module \\m\n"
                                        "  wire width 3 input 1 \\a3\n"
                                        "  wire width 7 output 2 \\y\n"
@@ -1954,17 +1955,13 @@ static void test_identwrt(void) {
     }
 }
 
-/* §17 #55: A - 0 with A signed and B unsigned is an unsigned operation, so the 3-bit A reaches the
- * 7-bit Y zero-extended (Yosys 0.55's $pos sign-extends it: a miscompile, OP-13 outranks parity) */
-static void test_identwrt_mixed_sign_zero_extends(void) {
+/* §17 #55: a mixed-sign A - 0 is left alone: Yosys 0.55 (a `$pos` with A's own flag) and the
+ * registry evaluator (mixed is unsigned) extend A differently, and no rewrite is right under both
+ * (#30) */
+static void test_identwrt_leaves_a_mixed_sign_cell(void) {
     build_run(K_IDENTWRT_MIXED);
-    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sub"));
-    for (uint32_t k = 0; k < 3; k++) {
-        expect_same(wnet("y", k), wnet("a3", k), "y is a3");
-    }
-    for (uint32_t k = 3; k < 7; k++) {
-        TEST_ASSERT_EQUAL_CHAR('0', cbit(wnet("y", k)));
-    }
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
 }
 
 /* -keepdc has no consume_x round: a + 0 stays (identwrt is consume_x only) */
@@ -4205,7 +4202,7 @@ static void run_arith_tests(void) {
     RUN_TEST(test_shiftx_trim);
     RUN_TEST(test_identwrt);
     RUN_TEST(test_identwrt_needs_consume_x);
-    RUN_TEST(test_identwrt_mixed_sign_zero_extends);
+    RUN_TEST(test_identwrt_leaves_a_mixed_sign_cell);
     RUN_TEST(test_pow_shift_two);
     RUN_TEST(test_pow_shift_eight);
     RUN_TEST(test_pow_overflow);

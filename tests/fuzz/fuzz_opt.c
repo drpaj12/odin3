@@ -307,8 +307,11 @@ static void render_binary(build *b, const char *type, uint32_t y, bool same, boo
     uint32_t a = same ? y : pick_width(b);
     uint32_t bw = same ? y : pick_width(b);
     put(&b->out, "  cell %s $c%u\n", type, (unsigned)b->cur);
-    param(b, "A_SIGNED", bit_of(b));
-    param(b, "B_SIGNED", shift ? 0U : bit_of(b));
+    unsigned is_signed = bit_of(b);
+    /* Both flags alike: what a mixed-sign cell means is open (spec 17 #30, #55), and the two
+     * repros of that class are in tests/fuzz/fuzz_opt_regress. */
+    param(b, "A_SIGNED", is_signed);
+    param(b, "B_SIGNED", shift ? 0U : is_signed);
     param(b, "A_WIDTH", a);
     param(b, "B_WIDTH", bw);
     param(b, "Y_WIDTH", y);

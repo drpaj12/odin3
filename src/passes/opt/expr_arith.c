@@ -167,10 +167,14 @@ odin3_status odin3_expr_rule_identwrt(odin3_expr_ctx *ec) {
         return ODIN3_OK;
     }
     odin3_expr_port port = side == IW_A ? PORT_A : PORT_B;
-    /* The operation is signed only when both operands are, so a mixed cell extends the kept
-     * operand with zeros whatever its own flag says (Yosys 0.55 keeps the operand's own flag in
-     * its $pos: a miscompile, §17 #55; found by fuzz_opt's --opt-simcheck). */
-    bool is_signed = odin3_expr_both_signed(ec);
+    bool is_signed = odin3_expr_param(ec, side == IW_A ? ODIN3_EXPR_P_BIN_ASIGNED
+                                                       : ODIN3_EXPR_P_BIN_BSIGNED) != 0;
+    /* A mixed-sign cell whose kept operand is signed: Yosys 0.55 sign-extends it (a `$pos` with its
+     * own flag) but the registry evaluator reads the cell unsigned and zero-extends it, so no
+     * rewrite is right under both and the cell stays (§17 #30, #55; found by fuzz_opt). */
+    if (is_signed && !odin3_expr_both_signed(ec)) {
+        return ODIN3_OK;
+    }
     odin3_opt_rule rule = side == IW_A ? ODIN3_OPT_RULE_IDENTWRT_A : ODIN3_OPT_RULE_IDENTWRT_B;
     uint32_t y_width = odin3_expr_y_width(ec);
     odin3_expr_sig operand;
