@@ -30,6 +30,11 @@ parser's code; the tree shapes are the 2A slot table (``docs/specs/2026-10-09-2A
 for the ``proc`` differential (``proc_profile.py``; its first line lists the features used), no
 ``F.ast``.
 
+``--opt`` (2F Task 18) is the profile for the ``opt`` differential (``opt_profile.py``; the first
+line lists the features used, each a counted production): constants and ``x`` in operands, ``case``
+with and without ``default``, repeated sub-expressions, enable and reset nests, constant shifts and
+power-of-two multiplies; no ``F.ast``.
+
 Exit 0 written, 2 usage or I/O error.
 """
 
@@ -44,6 +49,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import opt_profile
 import proc_profile
 
 # --- the tree -------------------------------------------------------------------------------
@@ -2320,6 +2326,16 @@ def write_proc(seed: int, out: Path) -> int:
     return 0
 
 
+def write_opt(seed: int, out: Path) -> int:
+    """``--opt``: the opt profile's module for seed into out."""
+    try:
+        out.write_text(opt_profile.generate(seed).text, encoding="utf-8")
+    except OSError as exc:
+        print(f"verilog_gen: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--seed", type=int, required=True)
@@ -2328,8 +2344,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--no-ast", action="store_true", help="do not write F.ast")
     parser.add_argument("--proc", action="store_true",
                         help="the proc profile (always blocks, resets, latches, memories)")
+    parser.add_argument("--opt", action="store_true",
+                        help="the opt profile (constants, x, case, enables, resets, shifts)")
     args = parser.parse_args(argv)
     out = Path(args.out)
+    if args.opt:
+        if args.mutate or args.proc:
+            parser.error("--opt cannot be combined with --mutate or --proc")
+        return write_opt(args.seed, out)
     if args.proc:
         if args.mutate:
             parser.error("--proc and --mutate cannot be combined")
