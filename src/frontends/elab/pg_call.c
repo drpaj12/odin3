@@ -569,6 +569,20 @@ static odin3_status comb_run(call_run *cr, odin3_sig *result) {
     return st != ODIN3_OK ? st : wire_sig(e2, wire, (res->flags & ODIN3_SYM_F_SIGNED) != 0, result);
 }
 
+/* The call's block on a builder of its own: the open block (an edge event's expression being
+ * generated while its ALWAYS is built) is put aside and brought back, never cleared (I7). */
+static odin3_status comb_nested(call_run *cr, odin3_sig *result) {
+    odin3_pg *pg = cr->pg;
+    pg_saved saved;
+    odin3_status st = pg_block_save(pg, &saved);
+    st = st != ODIN3_OK ? st : comb_run(cr, result);
+    while (pg->calls.len > 0) {
+        frame_exit(pg);
+    }
+    pg_block_restore(pg, &saved);
+    return st;
+}
+
 odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *result) {
     if (odin3_ast_kind_of(pg->e2->elab, call) != ODIN3_AST_CALL || result == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_pg_comb_call: not a CALL, or no result");
@@ -580,11 +594,7 @@ odin3_status odin3_pg_comb_call(odin3_pg *pg, odin3_ast_id call, odin3_sig *resu
     st = st != ODIN3_OK ? st : info_check(pg, &cr.info);
     st = st != ODIN3_OK ? st : formals_make(&cr);
     st = st != ODIN3_OK ? st : call_args(&cr, NULL);
-    st = st != ODIN3_OK ? st : comb_run(&cr, result);
-    while (pg->calls.len > 0) {
-        frame_exit(pg);
-    }
-    return st;
+    return st != ODIN3_OK ? st : comb_nested(&cr, result);
 }
 
 odin3_status odin3_elab2_comb_call(odin3_elab2 *e2, odin3_ast_id call, odin3_sig *out) {
@@ -796,7 +806,13 @@ odin3_status odin3_elab2_comb_word(odin3_elab2 *e2, const odin3_elab2_regs_rd *r
     odin3_wire_id wire = {0};
     odin3_status st = odin3_elab2_pg_get(e2, &pg);
     st = st != ODIN3_OK ? st : word_wire(e2, rd, &wire);
+    pg_saved saved;
+    bool saving = st == ODIN3_OK;
+    st = saving ? pg_block_save(pg, &saved) : st; /* the open block is put aside (I7) */
     st = st != ODIN3_OK ? st : word_block(pg, rd, wire);
+    if (saving) {
+        pg_block_restore(pg, &saved);
+    }
     return st != ODIN3_OK ? st
                           : wire_sig(e2, wire, odin3_elab2_mem_get(e2, rd->mem)->is_signed, out);
 }

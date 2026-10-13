@@ -247,6 +247,21 @@ static void test_runtime_if_loops_over_overlapping_halves_conflict(void) {
     pt_expect_error((at_loc){6, 53}, "'w[3]' is assigned in two always blocks (also at t.v:5:53)");
 }
 
+/* PR 2D-6 review I7: an edge event that reads a word of a register array with a variable index
+ * builds a block of its own while the ALWAYS is open; the open block is put aside, never cleared
+ * (it was `'' is assigned in two always blocks`). */
+static void test_edge_event_word_read_keeps_the_open_block(void) {
+    pt_read_src("module t(input [1:0] s, input d, input [7:0] x, output reg q);\n"
+                  "  reg [3:0] m [0:3];\n"
+                  "  always @(posedge m[s][0]) q <= d;\n"
+                  "  always @* begin m[0] = x[3:0]; m[1] = x[7:4]; m[2] = x[1:0]; m[3] = x[5:2]; end\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    pt_expect_warning((at_loc){2, 13}, "replacing memory 'm' with list of registers; see t.v:4");
+    TEST_ASSERT_EQUAL_UINT32(3, pt_count_of("$proc"));
+    pt_expect_ir_ok();
+}
+
 /* Task 22's carry: inside an unrolled loop a branch on the variable folds in every iteration. */
 static void test_loop_folds_branches(void) {
     pt_read_clean("module t(input [3:0] a, output reg [3:0] y);\n  integer i;\n"
@@ -924,6 +939,7 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_loops_over_overlapping_halves_conflict)                                                 \
     X(test_runtime_if_loops_over_disjoint_halves_are_no_conflict)                                  \
     X(test_runtime_if_loops_over_overlapping_halves_conflict)                                      \
+    X(test_edge_event_word_read_keeps_the_open_block)                                              \
     X(test_for_unrolled)                                                                           \
     X(test_for_variable_read_outside)                                                              \
     X(test_for_counts_down)                                                                        \

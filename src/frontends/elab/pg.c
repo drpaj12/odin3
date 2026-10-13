@@ -33,10 +33,9 @@ static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
     odin3_u64map **const all[] = {
         &pg->out_of, &pg->group, &pg->lv,  &pg->rv,    &pg->slot_head, &pg->dead_nets, &pg->reads,
         &pg->listed, &pg->seen,  &pg->swl, &pg->folds, &pg->active,    &pg->assigned};
+    _Static_assert(sizeof all / sizeof all[0] == PG_MAP_COUNT, "PG_MAP_COUNT");
     return all[index];
 }
-
-enum { PG_MAP_COUNT = 13 };
 
 /* An empty map: the same one when it is empty already. */
 static odin3_status map_fresh(odin3_u64map **map) {
@@ -80,15 +79,21 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->fsyms, sizeof(uint32_t));
 }
 
-static void vecs_free(odin3_pg *pg) {
+/* Every vector of the generator, with the address of each (the block's lists and the scratch). */
+static odin3_vec *pg_vec(odin3_pg *pg, size_t index) {
     odin3_vec *const all[] = {&pg->outs,   &pg->chunks,  &pg->undo,  &pg->pool,      &pg->dead,
                               &pg->cmps,   &pg->acts,    &pg->cases, &pg->sws,       &pg->syncs,
                               &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
                               &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
                               &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs,
                               &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late};
-    for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
-        odin3_vec_free(all[i]);
+    _Static_assert(sizeof all / sizeof all[0] == PG_VEC_COUNT, "PG_VEC_COUNT");
+    return all[index];
+}
+
+static void vecs_free(odin3_pg *pg) {
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        odin3_vec_free(pg_vec(pg, i));
     }
 }
 
@@ -141,7 +146,7 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->exiting = false;
     pg->has_memw = false;
     pg->groups = 0;
-    pg->block_no++;
+    pg->block_no = ++pg->block_seq;
     odin3_u64map_destroy(pg->e2->bound);
     pg->e2->bound = NULL;
     pg->cur = PG_ROOT;
@@ -149,6 +154,52 @@ odin3_status pg_block_reset(odin3_pg *pg) {
         st = ODIN3_ERR_NO_MEMORY;
     }
     return st;
+}
+
+odin3_status pg_block_save(odin3_pg *pg, pg_saved *sv) {
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        sv->vecs[i] = *pg_vec(pg, i);
+    }
+    for (size_t i = 0; i < PG_MAP_COUNT; i++) {
+        sv->maps[i] = *pg_maps(pg, i);
+        *pg_maps(pg, i) = NULL;
+    }
+    sv->bound = pg->e2->bound;
+    sv->call = pg->e2->call;
+    pg->e2->bound = NULL;
+    sv->scalars = (pg_saved_scalars){pg->always, pg->control, pg->body, pg->prov, pg->cur,
+                                     pg->groups, pg->block_no, pg->edge,    pg->track_reads,
+                                     pg->failed, pg->scan_frame, pg->scanning, pg->has_memw};
+    vecs_init(pg); /* the saved ones are kept, not freed: these are the nested block's own */
+    return pg_block_reset(pg);
+}
+
+void pg_block_restore(odin3_pg *pg, const pg_saved *sv) {
+    vecs_free(pg);
+    for (size_t i = 0; i < PG_MAP_COUNT; i++) {
+        odin3_u64map_destroy(*pg_maps(pg, i));
+        *pg_maps(pg, i) = sv->maps[i];
+    }
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        *pg_vec(pg, i) = sv->vecs[i];
+    }
+    odin3_u64map_destroy(pg->e2->bound);
+    pg->e2->bound = sv->bound;
+    pg->e2->call = sv->call;
+    const pg_saved_scalars *sc = &sv->scalars;
+    pg->always = sc->always;
+    pg->control = sc->control;
+    pg->body = sc->body;
+    pg->prov = sc->prov;
+    pg->cur = sc->cur;
+    pg->groups = sc->groups;
+    pg->block_no = sc->block_no;
+    pg->edge = sc->edge;
+    pg->track_reads = sc->track_reads;
+    pg->failed = sc->failed;
+    pg->scan_frame = sc->scan_frame;
+    pg->scanning = sc->scanning;
+    pg->has_memw = sc->has_memw;
 }
 
 odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {

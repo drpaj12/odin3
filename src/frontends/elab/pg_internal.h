@@ -231,13 +231,37 @@ struct odin3_pg {
     odin3_u64map
         *kind_head; /* the same key -> 1 + the index in kind_more of its latest further record */
     odin3_vec kind_more; /* pg_kind_rec: the further assignments of that kind, on other paths */
-    uint32_t block_no;   /* the blocks begun so far (pg_block_reset counts them) */
+    uint32_t block_no;   /* the open block's number (pg_block_reset takes the next of block_seq) */
+    uint32_t block_seq;  /* the blocks begun so far */
 };
 
 /* --- pg.c: the builder ------------------------------------------------------------------------ */
 
 /* Forgets the block (the maps, the vectors, the nets) and makes the root case. */
 odin3_status pg_block_reset(odin3_pg *pg);
+
+/* A block built inside another one (a continuous-context call or word read met while the open
+ * block is generating, such as the index of an edge event) gets its own builder: pg_block_save
+ * puts the open block's vectors, maps and fields aside and starts an empty block; pg_block_restore
+ * frees what the nested block left and brings the open block back. Nothing live is ever cleared
+ * (PR 2D-6 review I7). The module-wide records (T9, the loop reads) are shared. */
+enum { PG_VEC_COUNT = 29, PG_MAP_COUNT = 13 };
+typedef struct pg_saved_scalars {
+    odin3_ast_id always, control, body;
+    odin3_prov_id prov;
+    uint32_t cur, groups, block_no;
+    bool edge, track_reads, failed, scan_frame, scanning, has_memw;
+} pg_saved_scalars;
+typedef struct pg_saved {
+    odin3_vec vecs[PG_VEC_COUNT];
+    odin3_u64map *maps[PG_MAP_COUNT];
+    odin3_u64map *bound;
+    odin3_ast_id call; /* the walker's current call (pg_block_reset clears it) */
+    pg_saved_scalars scalars;
+} pg_saved;
+/* Always pair a save with a restore, even when the save fails (the nested block is then freed). */
+odin3_status pg_block_save(odin3_pg *pg, pg_saved *sv);
+void pg_block_restore(odin3_pg *pg, const pg_saved *sv);
 
 bool pg_lv_get(const odin3_pg *pg, odin3_net_id net, odin3_net_id *out);
 odin3_status pg_lv_set(odin3_pg *pg, odin3_net_id net, odin3_net_id target);
