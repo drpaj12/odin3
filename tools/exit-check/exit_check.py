@@ -16,9 +16,10 @@ each design:
 1. its Parmys golden is found: ``D/regression/verilog/<group>/<leaf>/<leaf>.parmys.blif`` for a
    micro under ``micro/verilog`` (``micro-top``'s rule), ``D/vtr/<name>/<name>.parmys.blif`` for a
    VTR benchmark under ``benchmarks/verilog``; ``D`` defaults to the k6_frac tree of
-   ``micro-top``. A design whose golden does not exist and whose oracle run left no ``.prov`` at all (the oracle never ran
-   on it: the 41 Koios designs have no k6_frac golden) is **skipped (no golden)**, counted apart
-   and no failure; one with a ``.prov`` (Parmys rejected it, or it was capped) is an ``error``;
+   ``micro-top``. A design whose golden does not exist and whose oracle run left no ``.prov`` at
+   all (the oracle never ran on it: the 41 Koios designs have no k6_frac golden) is **skipped (no
+   golden)**, counted apart and no failure; one with a ``.prov`` (Parmys rejected it, or it was
+   capped) is an ``error``;
 2. ``sp-splice`` (Odin III's front end through ``opt`` and ``proc``, then Yosys 0.55 with Parmys
    for the rest of VTR's script) runs with the same ``--arch`` and ``--top`` (the golden's first
    ``.model``) and the same Parmys config as the goldens' run (VTR's
@@ -330,6 +331,9 @@ def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) ->
             ", ".join(cones)), cones=cones)
     if code == 1:
         return Result(DIFFERS, why=differs_why(text))
+    inconclusive = re.search(r"^equiv-check: (inconclusive: .*)$", text, re.MULTILINE)
+    if code == 2 and inconclusive:  # a guessed black-box pairing failed: no verdict either way
+        return Result(ERROR, why=one_line(inconclusive.group(1)))
     return compare_failure(got, cap, "equiv-check")
 
 

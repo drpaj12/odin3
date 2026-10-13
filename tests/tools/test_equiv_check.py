@@ -327,7 +327,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         flats = [equiv_check.flatten(blif.parse_file(a, gates=True), match_unnamed=True)
                  for _ in range(2)]
         self.assertTrue(all(f.blackboxes[0].anon for f in flats))
-        self.assertEqual(equiv_check.pair_unnamed(flats), 1)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (1, 0))
         equiv_check.match_blackboxes(flats)
         self.assertEqual(flats[0].blackboxes[0].key, flats[1].blackboxes[0].key)
 
@@ -623,7 +623,7 @@ class UnnamedBlackBoxTest(unittest.TestCase):
     def test_unique_signatures_pair_whatever_the_names_and_order(self) -> None:
         flats = self.flats(self.two_boxes("$m~1", "$m~2"),
                            self.two_boxes("$m~9", "$m~4", swap=True))
-        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         equiv_check.match_blackboxes(flats)
         by_inputs = [{(b.inputs["addr"], b.inputs["data"]): b.key for b in f.blackboxes}
                      for f in flats]
@@ -638,7 +638,7 @@ class UnnamedBlackBoxTest(unittest.TestCase):
 
         flats = self.flats(twins("$t~1", "$t~2", "$t~1", "$t~2"),
                            twins("$t~9", "$t~4", "$t~4", "$t~9"))
-        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         equiv_check.match_blackboxes(flats)
         for flat in flats:
             self.assertEqual([n for n in flat.inputs if n.startswith("bbout:")],
@@ -656,19 +656,33 @@ class UnnamedBlackBoxTest(unittest.TestCase):
         code, out, err = check("--match-unnamed", a, b)
         self.assertEqual(code, 0, out + err)
 
-    def test_same_signature_different_nets_is_ambiguous_exit_2(self) -> None:
-        """a2 computes the same function as a, but through another net: the two boxes cannot be
-        told apart by their inputs, and are not interchangeable (a and a2 are different nets)."""
-        def text(first: str, second: str) -> str:
-            return (self.HEAD + ".names a b a2\n11 1\n10 1\n" + self.ram(first, "a")
-                    + self.ram(second, "a2") + f".names {first} {second} y\n11 1\n"
-                    ".names c z\n1 1\n.end\n")
+    def copies(self, first: str, second: str, y_from: str, z_from: str) -> str:
+        """Two registers computing one function (r1, r2), each addressing a box: the boxes have
+        one signature and different input nets."""
+        return (self.HEAD + ".names a b d\n11 1\n.latch d r1 re clk 0\n.latch d r2 re clk 0\n"
+                + self.ram(first, "r1") + self.ram(second, "r2")
+                + f".names {y_from} c y\n11 1\n.names {z_from} z\n1 1\n.end\n")
 
-        a = self.write("a.blif", text("$m~1", "$m~2"))
-        b = self.write("b.blif", text("$m~7", "$m~8"))
-        code, _, err = check("--match-unnamed", a, b)
-        self.assertEqual(code, 2, err)
-        self.assertIn("ambiguous: 2 in A and 2 in B", err)
+    def test_copies_are_paired_in_order_and_proved(self) -> None:
+        flats = self.flats(self.copies("$m~1", "$m~2", "$m~1", "$m~2"),
+                           self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 2))
+        if ABC is None and not REQUIRE_ABC:
+            return
+        a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
+        b = self.write("b.blif", self.copies("$m~7", "$m~8", "$m~7", "$m~8"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 0, out + err)
+
+    @needs_abc
+    def test_a_guessed_pairing_that_fails_is_inconclusive_exit_2(self) -> None:
+        """The same copies read the other way round: the file-order guess is wrong, and 'not
+        equivalent' would be a false verdict (the netlists are equivalent)."""
+        a = self.write("a.blif", self.copies("$m~1", "$m~2", "$m~1", "$m~2"))
+        b = self.write("b.blif", self.copies("$m~7", "$m~8", "$m~8", "$m~7"))
+        code, out, err = check("--match-unnamed", a, b)
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("inconclusive: 2 unnamed black-box pair(s) were guessed", err)
 
     def test_box_whose_inputs_differ_is_left_over_exit_2(self) -> None:
         a = self.write("a.blif", self.HEAD + self.ram("$m~1", "a") + self.ram("$m~2", "b")
@@ -695,7 +709,7 @@ class UnnamedBlackBoxTest(unittest.TestCase):
                 + ".names $m~1 $m~2 y\n11 1\n.names c z\n1 1\n.end\n")
         flats = self.flats(text, text)
         self.assertEqual([b.anon for b in flats[0].blackboxes], [False, True])
-        self.assertEqual(equiv_check.pair_unnamed(flats), 1)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (1, 0))
         equiv_check.match_blackboxes(flats)
 
     def test_pairs_through_latches_with_other_names(self) -> None:
@@ -706,7 +720,7 @@ class UnnamedBlackBoxTest(unittest.TestCase):
                     f".names {latch} z\n1 1\n.end\n")
 
         flats = self.flats(text("$m~1", "$m~2", "$dff~3^Q~0"), text("$m~5", "$m~6", "q"))
-        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         if ABC is None and not REQUIRE_ABC:
             return
         code, out, err = check("--match-unnamed", self.write("a.blif", text("$m~1", "$m~2", "x")),
@@ -717,7 +731,7 @@ class UnnamedBlackBoxTest(unittest.TestCase):
     def test_a_wrong_pairing_is_never_equivalent(self) -> None:
         """Cross the pairing by hand: the check on the paired cut points must reject it."""
         flats = self.flats(self.two_boxes("$m~1", "$m~2"), self.two_boxes("$m~1", "$m~2"))
-        self.assertEqual(equiv_check.pair_unnamed(flats), 2)
+        self.assertEqual(equiv_check.pair_unnamed(flats), (2, 0))
         args = argparse.Namespace(timeout=60, keep_temp=False)
         assert ABC is not None
 
@@ -755,13 +769,16 @@ class BbmatchTest(unittest.TestCase):
         result = bbmatch.pair(a, b)
         self.assertEqual(result.pairs, [(0, 2), (1, 0), (2, 1)])
         self.assertEqual(result.twins, [([1, 2], [0, 1])])
-        self.assertFalse(result.ambiguous or result.only_a or result.only_b)
+        self.assertFalse(result.only_a or result.only_b or result.guessed)
 
-    def test_not_interchangeable_is_ambiguous(self) -> None:
-        a = [self.sig(b"1", "x"), self.sig(b"1", "y")]
-        b = [self.sig(b"1", "x"), self.sig(b"1", "x")]
+    def test_not_interchangeable_is_split_by_structure_then_guessed(self) -> None:
+        a = [bbmatch.Signature(b"1", ("x",), 5), bbmatch.Signature(b"1", ("y",), 6)]
+        b = [bbmatch.Signature(b"1", ("u",), 6), bbmatch.Signature(b"1", ("w",), 5)]
         result = bbmatch.pair(a, b)
-        self.assertEqual((result.pairs, result.ambiguous), ([], [([0, 1], [0, 1])]))
+        self.assertEqual((result.pairs, result.guessed, result.exact), ([(0, 1), (1, 0)], 2, []))
+        same = [bbmatch.Signature(b"1", ("x",), 5), bbmatch.Signature(b"1", ("y",), 5)]
+        result = bbmatch.pair(same, b)
+        self.assertEqual((result.pairs, result.guessed), ([(0, 0), (1, 1)], 2))
 
     def test_counts_must_agree(self) -> None:
         result = bbmatch.pair([self.sig(b"1", "x"), self.sig(b"1", "x")], [self.sig(b"1", "x")])
@@ -771,7 +788,7 @@ class BbmatchTest(unittest.TestCase):
         loop = [blif.Names(inputs=["q"], output="p", rows=[("1", "1")]),
                 blif.Names(inputs=["p"], output="q", rows=[("1", "1")])]
         with self.assertRaises(bbmatch.SimError):
-            bbmatch.simulate(loop, [], [], [], lambda n: n)
+            bbmatch.signatures(loop, [], [], [], lambda n: n)
 
 
 if __name__ == "__main__":

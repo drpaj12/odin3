@@ -31,6 +31,7 @@ See ``equiv_check``'s docstring for why that makes any pairing sound.
 
 from __future__ import annotations
 
+import collections
 import hashlib
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -38,10 +39,11 @@ from dataclasses import dataclass
 import blif
 
 LANES = 128
-CYCLES = 10
+CYCLES = 48
 MASK = (1 << LANES) - 1
 _LANE_BYTES = LANES // 8
 _DIGEST_BYTES = 16
+REFINE_ROUNDS = 8
 
 
 @dataclass(frozen=True)
@@ -64,19 +66,22 @@ class Signature:
 
     digest: bytes
     identity: tuple[str, ...]
+    struct: int = 0  # colour of the box's input cones (``refine``), a tie-break only
 
 
 @dataclass
 class Pairing:
     """The result of ``pair``: index pairs (A, B); ``twins``, the groups of several interchangeable
-    boxes among them (their members are paired in order); ``ambiguous``, groups of equal
-    signature that cannot be told apart; and the indices left over on each side."""
+    boxes among them (their members are paired in order); the indices left over on each side;
+    and ``guessed``, the number of pairs chosen by structure or file order among boxes that
+    simulation could not tell apart and whose input nets differ."""
 
     pairs: list[tuple[int, int]]
     twins: list[tuple[list[int], list[int]]]
-    ambiguous: list[tuple[list[int], list[int]]]
     only_a: list[int]
     only_b: list[int]
+    guessed: int
+    exact: list[tuple[int, int]]  # the pairs whose signature is unique on both sides
 
 
 class SimError(Exception):
@@ -91,6 +96,22 @@ def _vector(*parts: bytes | str) -> int:
         hasher.update(len(raw).to_bytes(4, "little"))
         hasher.update(raw)
     return int.from_bytes(hasher.digest(), "little")
+
+
+_QUARTER = LANES // 4
+_Q_MASKS = [((1 << _QUARTER) - 1) << (q * _QUARTER) for q in range(4)]
+
+
+def _stimulus(name: str, cycle: int) -> int:
+    """A primary input's vector.  Plain random words saturate deep decode logic at a constant
+    (an AND of twenty inputs is never 1), so the four quarters of the lanes are biased: 1/2, 7/8,
+    1/8 and 15/16 ones."""
+    words = [_vector("pi", name, str(cycle), str(k)) for k in range(12)]
+    half = words[0] & _Q_MASKS[0]
+    high = (words[1] | words[2] | words[3]) & _Q_MASKS[1]
+    low = (words[4] & words[5] & words[6]) & _Q_MASKS[2]
+    top = (words[7] | words[8] | words[9] | words[10] | words[11]) & _Q_MASKS[3]
+    return half | high | low | top
 
 
 def _bytes(value: int) -> bytes:
@@ -199,19 +220,11 @@ def _next_digest(digest: bytes, box: BoxSpec, vals: dict[str, int]) -> bytes:
     return hasher.digest()
 
 
-def simulate(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
-             inputs: Sequence[str], boxes: Sequence[BoxSpec],
-             pi_key: Callable[[str], str]) -> list[Signature]:
-    """The signature of each of ``boxes``, from simulating the flat netlist ``names``/``latches``.
-
-    ``inputs`` are the flat primary inputs (the boxes' free output nets included); ``pi_key``
-    names a primary input in the way both netlists share.  Raises SimError on a loop."""
-    covers = [_compile(c) for c in names]
-    free = {net for box in boxes for _, net in box.outputs}
-    pis = [n for n in inputs if n not in free]
+def _digests(covers: Sequence[_Cover], order: Sequence[_Cover], latches: Sequence[blif.Latch],
+             pis: Sequence[str], boxes: Sequence[BoxSpec],
+             pi_key: Callable[[str], str]) -> list[bytes]:
+    """The final history digest of each box, from simulating the netlist."""
     state = {latch.output: MASK if latch.init == "1" else 0 for latch in latches}
-    sources = set(pis) | free | set(state)
-    order = _topological(covers, sources)
     nets = {n for c in covers for n in (c[0], *c[1])} | {lat.input for lat in latches}
     nets |= {net for box in boxes for _, net in box.inputs}
     base = dict.fromkeys(nets - {c[0] for c in covers}, 0)
@@ -220,7 +233,7 @@ def simulate(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
         vals = dict(base)
         vals.update(state)
         for net in pis:
-            vals[net] = _vector("pi", pi_key(net), str(cycle))
+            vals[net] = _stimulus(pi_key(net), cycle)
         for box, digest in zip(boxes, digests, strict=True):
             key = digest if box.seed is None else f"{box.cell_type}\0{box.seed}".encode()
             for pin, net in box.outputs:
@@ -228,9 +241,64 @@ def simulate(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
         _evaluate(order, vals)
         digests = [_next_digest(d, box, vals) for box, d in zip(boxes, digests, strict=True)]
         state = {latch.output: vals[latch.input] for latch in latches}
+    return digests
+
+
+def _cover_colour(cover: _Cover, colours: dict[str, int]) -> int:
+    rows = frozenset((tuple(sorted(colours[n] for n in pos)),
+                      tuple(sorted(colours[n] for n in neg))) for pos, neg in cover[2])
+    return hash((cover[3], rows))
+
+
+def refine(covers: Sequence[_Cover], order: Sequence[_Cover], latches: Sequence[blif.Latch],
+           pis: Sequence[str], boxes: Sequence[BoxSpec],
+           pi_key: Callable[[str], str]) -> list[int]:
+    """A structural colour per box (colour refinement): equal colours mean the input cones of
+    the boxes are isomorphic given the primary input names.  A latch or a box output takes the
+    colour of what feeds it, round after round, until no colour is told apart any more.  Used
+    only to split a group that simulation cannot split."""
+    zero = hash((True, frozenset()))  # an undriven net, like a constant-0 cover
+    sources = {n: hash(("pi", pi_key(n))) for n in pis}
+    sources.update((lat.output, hash(("q", lat.init, 0))) for lat in latches)
+    sources.update((net, hash(("free", b.cell_type, b.params, pin, b.seed)))
+                   for b in boxes for pin, net in b.outputs)
+    inputs_of: list[tuple[int, ...]] = []
+    for _ in range(REFINE_ROUNDS):
+        colours = collections.defaultdict(lambda: zero, sources)
+        for cover in order:
+            colours[cover[0]] = _cover_colour(cover, colours)
+        inputs_of = [tuple(colours[n] for _, n in box.inputs) for box in boxes]
+        fresh = dict(sources)
+        for lat in latches:
+            fresh[lat.output] = hash(("q", lat.init, colours[lat.input]))
+        for box, ins in zip(boxes, inputs_of, strict=True):
+            for pin, net in box.outputs:
+                fresh[net] = hash(("free", box.cell_type, box.params, pin,
+                                   box.seed if box.seed is not None else ins))
+        settled = len(set(fresh.values())) == len(set(sources.values()))
+        sources = fresh
+        if settled:
+            break
+    return [hash((box.cell_type, box.params, ins)) for box, ins in zip(boxes, inputs_of,
+                                                                         strict=True)]
+
+
+def signatures(names: Sequence[blif.Names], latches: Sequence[blif.Latch],
+               inputs: Sequence[str], boxes: Sequence[BoxSpec],
+               pi_key: Callable[[str], str]) -> list[Signature]:
+    """The signature of each of ``boxes``, from simulating the flat netlist ``names``/``latches``.
+
+    ``inputs`` are the flat primary inputs (the boxes' free output nets included); ``pi_key``
+    names a primary input in the way both netlists share.  Raises SimError on a loop."""
+    covers = [_compile(c) for c in names]
+    free = {net for box in boxes for _, net in box.outputs}
+    pis = [n for n in inputs if n not in free]
+    order = _topological(covers, set(pis) | free | {lat.output for lat in latches})
+    digests = _digests(covers, order, latches, pis, boxes, pi_key)
+    colours = refine(covers, order, latches, pis, boxes, pi_key)
     canon = canonical_drivers(names)
-    return [Signature(d, tuple(canon(net) for _, net in box.inputs))
-            for box, d in zip(boxes, digests, strict=True)]
+    return [Signature(d, tuple(canon(net) for _, net in box.inputs), c)
+            for box, d, c in zip(boxes, digests, colours, strict=True)]
 
 
 def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
@@ -239,7 +307,7 @@ def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
     for side, sigs in enumerate((sigs_a, sigs_b)):
         for index, sig in enumerate(sigs):
             groups.setdefault(sig.digest, ([], []))[side].append(index)
-    result = Pairing([], [], [], [], [])
+    result = Pairing([], [], [], [], 0, [])
     for list_a, list_b in groups.values():
         if len(list_a) != len(list_b):
             result.only_a += list_a
@@ -249,12 +317,32 @@ def pair(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature]) -> Pairing:
             result.pairs += zip(list_a, list_b, strict=True)
             if len(list_a) > 1:
                 result.twins.append((list_a, list_b))
+            else:
+                result.exact.append((list_a[0], list_b[0]))
         else:
-            result.ambiguous.append((list_a, list_b))
+            _split_by_structure(sigs_a, sigs_b, (list_a, list_b), result)
     result.pairs.sort()
+    result.exact.sort()
     result.only_a.sort()
     result.only_b.sort()
     return result
+
+
+def _split_by_structure(sigs_a: Sequence[Signature], sigs_b: Sequence[Signature],
+                        group: tuple[list[int], list[int]], result: Pairing) -> None:
+    """Pair a group that simulation cannot split (same signature, different input nets) by the
+    colour of the input cones, then in file order inside one colour; if the colours do not split
+    it into equal parts, the whole group in file order.  These pairs are guesses --
+    ``result.guessed`` counts them -- that the equivalence check must confirm."""
+    parts: dict[int, tuple[list[int], list[int]]] = {}
+    for side, (sigs, members) in enumerate(((sigs_a, group[0]), (sigs_b, group[1]))):
+        for index in members:
+            parts.setdefault(sigs[index].struct, ([], []))[side].append(index)
+    if any(len(a) != len(b) for a, b in parts.values()):
+        parts = {0: group}
+    for list_a, list_b in parts.values():
+        result.pairs += zip(list_a, list_b, strict=True)
+        result.guessed += len(list_a)
 
 
 def _interchangeable(sigs: Sequence[Signature], group: Sequence[int]) -> bool:

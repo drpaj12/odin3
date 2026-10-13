@@ -57,29 +57,37 @@ boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (ex
 blocks and numbers their output nets with counters (``$mul~14[0]``,
 ``dual_port_ram^MEM~0-30^out1[0]``) that differ between two runs.  The signature of a box is its
 cell type, its parameters, its port widths and the function of each of its input bits.  Both
-netlists are simulated on the same random vectors (primary inputs by normalised name, latches
-from their init values, cut boxes as free outputs driven by a pseudo-random function of their
-type and input history, see ``bbmatch``), so an input bit's response vector identifies the
-function that drives it, even through latches whose names differ.  Boxes are then paired:
+netlists are simulated on the same random vectors (biased, primary inputs by normalised name,
+latches from their init values, cut boxes as free outputs driven by a pseudo-random function of
+their type and input history, see ``bbmatch``), so an input bit's response vector identifies the
+function that drives it, even through latches whose names differ.  Boxes are then paired, in
+rounds: the boxes whose signature is unique on both sides are anchored (driven by a shared name
+from then on, as if they had a ``.cname``) and the simulation repeats, which separates logic that
+a stuck cone had made look alike.  When a round anchors nothing more:
 
 - one box with a signature on each side: paired;
-- several with one signature on each side: paired in file order only if they are interchangeable
-  (the same input net on every pin, constants and buffers looked through), else exit 2;
-- anything else (no partner, a different count, a signature that differs because the logic in
-  front of the box differs): exit 2, listing the boxes.  A genuine difference upstream of a box
-  can show as exit 2 here instead of as "not equivalent".
+- several with one signature on each side whose input nets are the same on every pin (constants
+  and buffers looked through) are interchangeable: paired in file order, and their outputs are
+  one shared free variable per pin;
+- several with one signature but different input nets (copies of one register, say) are split
+  by the structure of their input cones (colour refinement) and paired in file order inside a
+  part: these are *guesses*;
+- no partner, or a different count: exit 2, listing the boxes.  A genuine difference upstream of
+  a box shows as exit 2 here, not as "not equivalent".
 
 Soundness: the signature only *proposes* a pairing; it is never trusted.  After pairing, each
 pair is an ordinary named cut point and the normal ABC check runs: the outputs of paired boxes are
 one shared free input, and the input pins of paired boxes are compared as primary outputs.  The
-two netlists are called equivalent only if every paired pair has the same cell type, parameters
-and port widths and provably the same function on every input pin, and everything else is
-equivalent given any values of the free outputs; since a (deterministic) box with the same
-inputs has the same outputs, and the proof held for every value the shared outputs could take,
-the netlists are equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes
-the proof of some pin fail, so the verdict is "not equivalent", never "equivalent"; sampling
-can only lose a match, not create a false one.  As before, a box's internal behaviour is assumed,
-not checked (RAM contents, initial state).
+two netlists are called equivalent only if every pair has the same cell type, parameters and port
+widths and provably the same function on every input pin, and everything else is equivalent for
+any values of the free outputs; since a (deterministic) box with the same inputs has the same
+outputs, and the proof held for every value the shared outputs could take, the netlists are
+equivalent.  A wrong pairing (boxes of the same type whose inputs differ) makes the proof of some
+pin fail, so the verdict is never "equivalent"; sampling can only lose a match, not create a
+false one.  The converse is not claimed: when guessed pairs exist and the check fails, the
+guess may be at fault, so the result is "inconclusive" (exit 2) and not "not equivalent" (a
+failure outside the guesses, an x-cone result and an equivalence are all still verdicts).  As
+before, a box's internal behaviour is assumed, not checked (RAM contents, initial state).
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
@@ -114,6 +122,7 @@ import blif  # noqa: E402
 TOOL = "equiv-check"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TIMEOUT = 600
+MATCH_ROUNDS = 12  # most simulate-and-anchor rounds of pair_unnamed
 
 # Verdict strings printed by ABC (see third_party/abc/src):
 #   cec  -> Abc_NtkCecFraig, base/abci/abcVerify.c:207,210,233,237 (and :174,:185 strash)
@@ -550,12 +559,13 @@ def _compare_boxes(key: str, box_a: BlackBox, box_b: BlackBox) -> list[str]:
     return []
 
 
-def _spec(box: BlackBox) -> bbmatch.BoxSpec:
-    """The simulator's view of a cut box: pins in port order, named boxes seeded by name."""
+def _spec(box: BlackBox, anchor: str | None = None) -> bbmatch.BoxSpec:
+    """The simulator's view of a cut box: pins in port order, named (or anchored) boxes seeded by
+    their name."""
     def ordered(pins: dict[str, str]) -> tuple[tuple[str, str], ...]:
         return tuple(sorted(pins.items(), key=lambda kv: _formal_order(kv[0])))
 
-    return bbmatch.BoxSpec(box.cell_type, box.params, None if box.anon else box.key,
+    return bbmatch.BoxSpec(box.cell_type, box.params, anchor or (None if box.anon else box.key),
                            ordered(box.inputs), ordered(box.free))
 
 
@@ -592,49 +602,85 @@ def _merge_outputs(flat: Flat, group: Sequence[BlackBox]) -> None:
         box.free = {pin: group[0].free[pin] for pin in box.free}
 
 
-def _signatures(flat: Flat, normalize: bool) -> list[bbmatch.Signature]:
+def _signatures(flat: Flat, normalize: bool, anchors: dict[int, str]) -> list[bbmatch.Signature]:
+    """Signatures of all boxes of ``flat``; ``anchors`` (box index -> pair name) seeds boxes that
+    are already paired like named ones."""
     def pi_key(net: str) -> str:
         return normalize_io_name(net, flat.top) if normalize else net
 
+    specs = [_spec(b, anchors.get(i)) for i, b in enumerate(flat.blackboxes)]
     try:
-        return bbmatch.simulate(flat.names, flat.latches, flat.inputs,
-                                [_spec(b) for b in flat.blackboxes], pi_key)
+        return bbmatch.signatures(flat.names, flat.latches, flat.inputs, specs, pi_key)
     except bbmatch.SimError as exc:
         raise EquivError(f"{flat.path}: cannot simulate the netlist to match unnamed black "
                          f"boxes: {exc}") from exc
 
 
-def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> int:
+@dataclass
+class _Matching:
+    """The outcome of ``_match_rounds`` in black-box indices of the two flats."""
+
+    pairs: list[tuple[int, int]]
+    twins: list[tuple[list[int], list[int]]]
+    only: tuple[list[int], list[int]]
+    guessed: int
+
+
+def _match_rounds(flats: Sequence[Flat], normalize: bool) -> _Matching:
+    """Simulate and pair, round after round.  The boxes whose signature is unique on both sides
+    are anchored -- from the next round on they are driven by a shared name, as if they had a
+    ``.cname`` -- so that logic behind them, which a stuck cone had made look alike, becomes
+    distinguishable.  Stops when a round anchors nothing new (or after ``MATCH_ROUNDS``)."""
+    anon = [[i for i, b in enumerate(f.blackboxes) if b.anon] for f in flats]
+    anchors: list[dict[int, str]] = [{}, {}]
+    anchored: list[tuple[int, int]] = []
+    for rnd in range(MATCH_ROUNDS):
+        sigs = [_signatures(f, normalize, a) for f, a in zip(flats, anchors, strict=True)]
+        free = [[i for i in ids if i not in a] for ids, a in zip(anon, anchors, strict=True)]
+        result = bbmatch.pair([sigs[0][i] for i in free[0]], [sigs[1][i] for i in free[1]])
+        if not result.exact or rnd == MATCH_ROUNDS - 1:
+            break
+        for i, j in result.exact:
+            name = f"@{len(anchored)}"
+            anchors[0][free[0][i]] = anchors[1][free[1][j]] = name
+            anchored.append((free[0][i], free[1][j]))
+
+    def box(side: int, group: list[int]) -> list[int]:
+        return [free[side][i] for i in group]
+
+    return _Matching(
+        anchored + [(free[0][i], free[1][j]) for i, j in result.pairs],
+        [(box(0, a), box(1, b)) for a, b in result.twins],
+        (box(0, result.only_a), box(1, result.only_b)), result.guessed)
+
+
+def pair_unnamed(flats: Sequence[Flat], normalize: bool = True) -> tuple[int, int]:
     """Pair the unnamed black boxes (``anon``) of the two flats by simulation signature (see
-    ``bbmatch``) and give each pair one key in both; returns the number of pairs.
+    ``bbmatch``) and give each pair one key in both; returns (pairs, guessed).
 
     A box is paired when its signature -- type, parameters, ports and the response of each input
     bit -- is the only one of its kind on both sides, or when several have it and they are
-    interchangeable (the same input net on every pin).  Anything else raises EquivError (exit 2)
-    listing the boxes left over or ambiguous."""
+    interchangeable (the same input net on every pin).  Boxes with one signature but different
+    input nets (copies of one register, say) are split by the structure of their input cones and
+    paired in file order inside a part: ``guessed`` counts those pairs, and a "not equivalent"
+    verdict is then no verdict (see ``_check``).  Boxes with no partner raise EquivError
+    (exit 2), listing them."""
     fa, fb = flats
     if not any(b.anon for f in flats for b in f.blackboxes):
-        return 0
-    sigs = [_signatures(f, normalize) for f in flats]
-    idx = [[i for i, b in enumerate(f.blackboxes) if b.anon] for f in flats]
-    result = bbmatch.pair([sigs[0][i] for i in idx[0]], [sigs[1][i] for i in idx[1]])
-    lines = [f"  only in A: {_describe(fa.blackboxes[idx[0][i]], fa)}" for i in result.only_a]
-    lines += [f"  only in B: {_describe(fb.blackboxes[idx[1][i]], fb)}" for i in result.only_b]
-    for group_a, group_b in result.ambiguous:
-        lines.append(f"  ambiguous: {len(group_a)} in A and {len(group_b)} in B have one "
-                     "signature but different input nets; first in A: "
-                     f"{_describe(fa.blackboxes[idx[0][group_a[0]]], fa)}")
+        return 0, 0
+    match = _match_rounds(flats, normalize)
+    lines = [f"  only in A: {_describe(fa.blackboxes[i], fa)}" for i in match.only[0]]
+    lines += [f"  only in B: {_describe(fb.blackboxes[i], fb)}" for i in match.only[1]]
     if lines:
         raise EquivError("unnamed black-box instances cannot be matched one-to-one (matched "
                          "by simulation signature: type, parameters, ports and input functions; "
                          "an instance whose inputs differ between the files is left over)",
                          "\n".join(lines))
-    _rekey(fb, {fb.blackboxes[idx[1][j]].key: fa.blackboxes[idx[0][i]].key
-                for i, j in result.pairs})
-    for group_a, group_b in result.twins:
-        _merge_outputs(fa, [fa.blackboxes[idx[0][i]] for i in group_a])
-        _merge_outputs(fb, [fb.blackboxes[idx[1][j]] for j in group_b])
-    return len(result.pairs)
+    _rekey(fb, {fb.blackboxes[j].key: fa.blackboxes[i].key for i, j in match.pairs})
+    for group_a, group_b in match.twins:
+        _merge_outputs(fa, [fa.blackboxes[i] for i in group_a])
+        _merge_outputs(fb, [fb.blackboxes[j] for j in group_b])
+    return len(match.pairs), match.guessed
 
 
 def match_blackboxes(flats: Sequence[Flat]) -> None:
@@ -923,12 +969,14 @@ def _check(args: argparse.Namespace) -> int:
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
                      not args.no_io_normalize, check=False, match_unnamed=args.match_unnamed)
              for n in nets]
-    paired = pair_unnamed(flats, not args.no_io_normalize) if args.match_unnamed else 0
+    paired, guessed = (pair_unnamed(flats, not args.no_io_normalize) if args.match_unnamed
+                       else (0, 0))
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
     if paired:
-        notice(f"{paired} unnamed black-box instance(s) paired by simulation signature")
+        notice(f"{paired} unnamed black-box instance(s) paired by simulation signature"
+               + (f" ({guessed} of them guessed by structure)" if guessed else ""))
     cuts = sum(len(f.blackboxes) for f in flats)
     if cuts:
         notice(f"{cuts // 2} black-box instance(s) cut: outputs are free inputs shared by both "
@@ -950,11 +998,16 @@ def _check(args: argparse.Namespace) -> int:
     abc = find_abc(args.abc)
     verdict, verb, output = prove(flats, maps, abc, args)
     print(f"{TOOL}: {'equivalent' if verdict else 'NOT equivalent'} (abc {verb})")
-    if not verdict:
-        print(output.rstrip())
-        if args.x_report:
-            return x_report(flats, maps, abc, args)
-    return 0 if verdict else 1
+    if verdict:
+        return 0
+    print(output.rstrip())
+    code = x_report(flats, maps, abc, args) if args.x_report else 1
+    if code == 1 and guessed:
+        print(f"{TOOL}: inconclusive: {guessed} unnamed black-box pair(s) were guessed (equal "
+              "signatures, different input nets, split by structure and file order), so \"not "
+              "equivalent\" may only mean a wrong guess", file=sys.stderr)
+        return 2
+    return code
 
 
 def _parser() -> argparse.ArgumentParser:
