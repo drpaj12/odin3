@@ -45,6 +45,7 @@ static odin3_ast *ast_alloc(odin3_design *design) {
     odin3_vec_init(&ast->payloads, sizeof(odin3_ast_payload_rec));
     odin3_vec_init(&ast->units, sizeof(odin3_ast_id));
     odin3_vec_init(&ast->unit_flags, sizeof(uint8_t));
+    odin3_vec_init(&ast->streams, sizeof(odin3_ast_stream));
     odin3_vec_init(&ast->pending, sizeof(odin3_ast_id));
     odin3_vec_init(&ast->heights, sizeof(uint16_t));
     odin3_vec_init(&ast->comments, sizeof(odin3_ast_comment));
@@ -89,6 +90,7 @@ void odin3_ast_destroy(odin3_ast *ast) {
     odin3_vec_free(&ast->payloads);
     odin3_vec_free(&ast->units);
     odin3_vec_free(&ast->unit_flags);
+    odin3_vec_free(&ast->streams);
     odin3_vec_free(&ast->pending);
     odin3_vec_free(&ast->heights);
     odin3_vec_free(&ast->comments);
@@ -616,6 +618,24 @@ uint8_t odin3_ast_unit_flags(const odin3_ast *ast, uint32_t root_idx) {
     return ast != NULL && root_idx < ast->unit_flags.len
                ? *(const uint8_t *)odin3_vec_cat(&ast->unit_flags, root_idx)
                : 0;
+}
+
+odin3_status odin3_ast_keep_stream(odin3_ast *ast, const odin3_ast_stream *src) {
+    if (ast == NULL || src == NULL) {
+        return misuse("odin3_ast_keep_stream", "NULL argument");
+    }
+    char *copy = odin3_arena_strndup(ast->arena, (const char *)src->text.ptr, src->text.len);
+    odin3_ast_stream *slot = copy != NULL ? odin3_vec_push(&ast->streams) : NULL;
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = *src;
+    slot->text = (odin3_bytes){copy, src->text.len};
+    return ODIN3_OK;
+}
+
+const odin3_ast_stream *odin3_ast_stream_at(const odin3_ast *ast, uint32_t idx) {
+    return ast != NULL && idx < ast->streams.len ? odin3_vec_cat(&ast->streams, idx) : NULL;
 }
 
 uint32_t odin3_ast_comment_count(const odin3_ast *ast) {

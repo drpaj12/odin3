@@ -657,7 +657,7 @@ static int parse_read(const char *path, parse_result *res) {
     double start = now_seconds();
     int rc = design == NULL || parse_source(design, path, &src) != 0 ||
              odin3_read_verilog_files(
-                 design, &(odin3_rv_opts){&src, 1, (odin3_passrun_id){1}, NULL}, &ast) != ODIN3_OK;
+                 design, &(odin3_rv_opts){&src, 1, (odin3_passrun_id){1}, NULL, false}, &ast) != ODIN3_OK;
     res->read_secs = now_seconds() - start;
     odin3_ast_destroy(ast);
     odin3_design_destroy(design);

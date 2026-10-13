@@ -751,8 +751,11 @@ black boxes): a library unit has a body and is fully elaborated where it is inst
   kept library store, in read order, after the design files and before the `-v`/`-y` files, as
   **library `UNIT`s** (EL-6 item 3: never a top candidate, shadowed by a design unit of the same name,
   the first definition wins, an already read file is skipped). Each such `UNIT` carries the
-  `ODIN3_UNIT_*` flags of its read (`odin3_ast_unit_flags`). The files are parsed again under the later
-  read's defines and include directories; a kept unit costs only that parse.
+  `ODIN3_UNIT_*` flags of its read (`odin3_ast_unit_flags`). The store keeps each design file's
+  **preprocessed stream** (`odin3_ast_keep_stream`), so the files are parsed again from exactly the
+  text the `--lib` read's own defines, macros (a macro an earlier file of that read defined included)
+  and include directories produced, never under the later read's (a `` `ifdef `` in a library file
+  is decided once, by the read that kept it; PR 2D-7b review I1); a kept unit costs only that parse.
 - **Per-unit flags.** The flags of the *supplying* read replace, never add to, the design read's:
   a module defined by a `--lib` read elaborates under that read's `--nolatches` and `--nomem2reg`
   whatever the reading design says, and the design read's flags do not reach it. Stage 1 writes the
