@@ -43,6 +43,8 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include "bench_guard.h"
+
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -262,9 +264,9 @@ static void print_line(const bench_args *args, const bench_result *res) {
     (void)fflush(stdout);
 }
 
-/* One file: read, elaborate, count, print; the line comes before the teardown, whose time is
- * nobody's concern. */
-static int bench_one(const bench_args *args) {
+/* One pass over FILE: read, elaborate, count; when print, the line comes before the teardown,
+ * whose time is nobody's concern. */
+static int measure(const bench_args *args, bool print) {
     bench_result res = {0};
     odin3_design *design = NULL;
     odin3_pass_ctx ctx = {0};
@@ -272,15 +274,21 @@ static int bench_one(const bench_args *args) {
     odin3_ast *elab = NULL;
     int rc = open_design(args, &design, &ctx) || read_file(args, &ctx, &parsed, &res);
     rc = rc || elaborate(args, &ctx, parsed, &elab, &res);
-    if (rc == 0) {
+    if (rc == 0 && print) {
         count_design(design, &res);
         print_line(args, &res);
-    } else {
+    } else if (rc != 0) {
         fprintf(stderr, "bench_elab: %s: failed\n", args->file);
     }
     odin3_ast_destroy(elab);
     odin3_design_destroy(design);
     return rc;
+}
+
+/* One warm-up pass (page cache, allocator and first-touch costs, torn down and discarded), then
+ * the measured one. */
+static int bench_one(const bench_args *args) {
+    return measure(args, false) || measure(args, true);
 }
 
 static int usage(void) {
@@ -289,6 +297,9 @@ static int usage(void) {
 }
 
 int main(int argc, char **argv) {
+    if (bench_refuse_unoptimized(argv[0]) != 0) {
+        return 2;
+    }
     bench_args args = {NULL, NULL, true};
     for (int i = 1; i < argc; i++) {
         bool more = i + 1 < argc;

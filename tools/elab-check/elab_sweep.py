@@ -247,21 +247,24 @@ def slice_limit() -> int | None:
     return int(text) if text.isdigit() else None
 
 
-def check_jobs(jobs: int, cap: int) -> None:
-    """Refuse J x cap above 60% of MemTotal, or above the heavy slice's MemoryMax."""
+def check_jobs(jobs: int, cap: int, alone: Sequence[int] = ()) -> None:
+    """Refuse J x cap above 60% of MemTotal, or above the heavy slice's MemoryMax. A ``--cap-for``
+    file larger than ``cap`` runs alone (``Sweep.run``), so each ``alone`` cap is checked as one
+    job against the same limits."""
     if jobs < 1:
         raise UsageError(f"--jobs {jobs} is not positive")
     total = memcap.mem_total()
     limit = total * memcap.CAP_FRACTION_PERCENT // 100
-    if jobs * cap > limit:
-        raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_cap(cap)} = {format_cap(jobs * cap)} exceeds "
-            f"{memcap.CAP_FRACTION_PERCENT}% of MemTotal ({limit / GIB:.1f}G)")
     in_slice = slice_limit()
-    if in_slice is not None and jobs * cap > in_slice:
-        raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_cap(cap)} exceeds the heavy slice's "
-            f"MemoryMax ({format_cap(in_slice)})")
+    for width, size in [(jobs, cap), *((1, big) for big in alone if big > cap)]:
+        label = f"--jobs {width} x --mem-cap {format_cap(size)}" if width > 1 \
+            else f"--cap-for {format_cap(size)} (alone)"
+        if width * size > limit:
+            raise UsageError(f"{label} = {format_cap(width * size)} exceeds "
+                             f"{memcap.CAP_FRACTION_PERCENT}% of MemTotal ({limit / GIB:.1f}G)")
+        if in_slice is not None and width * size > in_slice:
+            raise UsageError(f"{label} exceeds the heavy slice's MemoryMax "
+                             f"({format_cap(in_slice)})")
 
 
 # ---- running one file -------------------------------------------------------------------------
@@ -339,7 +342,7 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
     argv = [cfg.odin3, *(["--top", top] if top else []), "--elab-only", str(item.path)]
     if cfg.techlib:  # the arch's hard blocks (adder, multiply, *_port_ram) come from a tech library
         argv = [cfg.odin3, *(["--top", top] if top else []), "-p",
-                f"read_techlib {cfg.techlib}; read_verilog {item.path}; stats"]
+                f"read_techlib {cfg.techlib}; read_verilog --nolatches {item.path}; stats"]
     done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
@@ -599,7 +602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         cfg = build_config(args)
-        check_jobs(args.jobs, cfg.cap)
+        check_jobs(args.jobs, cfg.cap, list(cfg.caps.values()))
         memcap.check_cap(max([cfg.cap, *cfg.caps.values()]))
         # an uncappable ASan binary skips the whole run before any file starts
         for tool in (cfg.odin3, cfg.bench):

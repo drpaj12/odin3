@@ -10,6 +10,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -209,6 +211,60 @@ class LimitsTest(SweepTestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(caps, [4 * GIB, 5 * GIB])
         self.assertLess(out.index("small.v"), out.index("lenet.v"))
+
+    def test_techlib_run_still_elaborates_with_nolatches(self) -> None:
+        item = elab_sweep.Item(self.write("a/x.v"), "a/x.v", 1)
+        cfg = elab_sweep.Config(str(self.odin3), None, None, None, GIB, {}, {}, None,
+                                techlib="/lib/t.o3lib")
+        seen: list[list[str]] = []
+
+        def spy(argv: list[str], cap: int, start: float) -> tuple[None, elab_sweep.Outcome]:
+            seen.append(list(argv))
+            return None, elab_sweep.Outcome("fail", 0.0, "spy")
+
+        with mock.patch.object(elab_sweep, "run_child", spy):
+            elab_sweep.run_elab(cfg, item, GIB)
+        self.assertIn(f"read_techlib /lib/t.o3lib; read_verilog --nolatches {item.path}; stats",
+                      seen[0])
+
+    def test_a_cap_for_file_starts_with_nothing_else_in_flight(self) -> None:
+        for n in range(4):
+            self.write(f"a/s{n}.v", "x" * (n + 1))
+        self.write("koios/lenet.v", "x" * 50)
+        live = [0]
+        at_start: dict[int, int] = {}
+        lock = threading.Lock()
+        real = memcap.run
+
+        def spy(argv: list[str], cap: int, *a: object, **k: object) -> object:
+            with lock:
+                live[0] += 1
+                at_start[cap] = max(at_start.get(cap, 0), live[0])
+            time.sleep(0.05)
+            try:
+                return real(argv, cap, *a, **k)  # type: ignore[arg-type]
+            finally:
+                with lock:
+                    live[0] -= 1
+
+        with mock.patch.object(memcap, "run", spy):
+            code, _, err = self.run_tool(
+                "--jobs", "2", "--cap-for", "koios/lenet.v=5G", "--root", str(self.dir),
+                str(self.dir / "a"), str(self.dir / "koios"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(at_start[5 * GIB], 1)
+
+    def test_a_cap_for_file_is_checked_alone_against_the_slice(self) -> None:
+        self.write("koios/lenet.v", "x")
+        argv = ["--jobs", "2", "--mem-cap", "2G", "--cap-for", "koios/lenet.v=5G", "--root",
+                str(self.dir), str(self.dir / "koios")]
+        with mock.patch.object(elab_sweep, "slice_limit", return_value=4 * GIB):
+            code, _, err = self.run_tool(*argv)
+        self.assertEqual(code, 2)
+        self.assertIn("--cap-for 5G (alone)", err)
+        with mock.patch.object(elab_sweep, "slice_limit", return_value=6 * GIB):
+            code, _, err = self.run_tool(*argv)
+        self.assertEqual(code, 0, err)
 
 
 class VerdictTest(SweepTestCase):
