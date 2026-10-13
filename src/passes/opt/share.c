@@ -447,42 +447,57 @@ static odin3_status group_facts(sh_state *ss) {
 
 /* --- building --------------------------------------------------------------------------------- */
 
-static odin3_status remember(sh_state *ss, odin3_node_id node) {
-    odin3_node_id *dst = odin3_vec_push(&ss->made);
-    if (dst == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
+/* Creates a cell and records it in `made` in one step: room is reserved first, so the push cannot
+ * fail once the cell exists and the rollback always sees it. */
+static odin3_status new_cell(sh_state *ss, const odin3_kit_cell *cell, odin3_node_id *out) {
+    odin3_status st = odin3_vec_reserve(&ss->made, ss->made.len + 1U);
+    st = st == ODIN3_OK ? odin3_kit_new_cell(ss->oc, cell, out) : st;
+    if (st == ODIN3_OK) {
+        *(odin3_node_id *)odin3_vec_push(&ss->made) = *out;
     }
-    *dst = node;
-    return ODIN3_OK;
+    return st;
 }
 
-/* Deletes a node this rewrite made and the output nets it leaves without pins (best effort). */
-static void undo_node(sh_state *ss, odin3_node_id node, uint32_t out_port) {
+/* Deletes a node this rewrite made and the output nets it leaves without pins; the first failure
+ * is returned (a delete can fail on allocation) and the rest is still tried. */
+static odin3_status undo_node(sh_state *ss, odin3_node_id node, uint32_t out_port) {
     if (!odin3_node_live(ss->m, node)) {
-        return;
+        return ODIN3_OK;
     }
     odin3_vec_clear(&ss->tmp);
-    (void)push_port(ss, &ss->tmp, node, out_port);
-    (void)odin3_node_delete(ss->m, node);
+    odin3_status first = push_port(ss, &ss->tmp, node, out_port);
+    odin3_status st = odin3_node_delete(ss->m, node);
+    first = first == ODIN3_OK ? st : first;
     for (size_t i = 0; i < ss->tmp.len; i++) {
         odin3_net_id net = *nets_at(&ss->tmp, i);
         if (odin3_net_valid(net) && odin3_net_live(ss->m, net) &&
             odin3_net_pins(ss->m, net).count == 0) {
-            (void)odin3_net_delete(ss->m, net);
+            st = odin3_net_delete(ss->m, net);
+            first = first == ODIN3_OK ? st : first;
         }
     }
+    return first;
 }
 
-/* Undoes the made nodes, newest first; the output port of each is its last one. */
-static void undo_made(sh_state *ss) {
+/* Undoes the made nodes, newest first; the output port of each is its last one. Returns the first
+ * failure. */
+static odin3_status undo_made(sh_state *ss) {
+    odin3_status first = ODIN3_OK;
     while (ss->made.len > 0) {
         const odin3_node_id node =
             *(const odin3_node_id *)odin3_vec_cat(&ss->made, ss->made.len - 1U);
         const odin3_celltype_def *def =
             odin3_celltype_get(ss->oc->design, odin3_node_type(ss->m, node));
-        undo_node(ss, node, def->n_ports - 1U);
+        odin3_status st = undo_node(ss, node, def->n_ports - 1U);
+        first = first == ODIN3_OK ? st : first;
         odin3_vec_pop(&ss->made);
     }
+    return first;
+}
+
+/* An undone failure stays plain; a rollback that itself failed leaves dead cells: half done. */
+static odin3_status rolled_back(sh_state *ss, odin3_status st) {
+    return undo_made(ss) == ODIN3_OK ? st : odin3_kit_half_done(ss->oc, st);
 }
 
 /* The canonical net of constant bit `bit`. */
@@ -514,8 +529,7 @@ static odin3_status negate_last(sh_state *ss, odin3_prov_id prov) {
     const odin3_netvec ports[NEG_PORTS] = {{nets_at(&ss->opnd, first), ss->wn}, {NULL, 0}};
     odin3_kit_cell cell = {ss->neg, params, NEG_PARAMS, ports, prov};
     odin3_node_id node = {0};
-    odin3_status st = odin3_kit_new_cell(ss->oc, &cell, &node);
-    st = st == ODIN3_OK ? remember(ss, node) : st;
+    odin3_status st = new_cell(ss, &cell, &node);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -588,8 +602,7 @@ static odin3_status make_mux(sh_state *ss, odin3_prov_id prov, odin3_node_id *ou
                                            {NULL, 0}};
     odin3_kit_cell cell = {single ? ss->mux : ss->pmux, params, single ? 1U : PRM_PMUX_N, ports,
                            prov};
-    odin3_status st = odin3_kit_new_cell(ss->oc, &cell, out);
-    return st == ODIN3_OK ? remember(ss, *out) : st;
+    return new_cell(ss, &cell, out);
 }
 
 /* The new cell: the lead's type and parameters, the shared operand, the new mux's Y. */
@@ -612,8 +625,7 @@ static odin3_status make_op(sh_state *ss, odin3_node_id lead, odin3_node_id mux_
     ports[ss->shared_port] = (odin3_netvec){ss->shared.data, (uint32_t)ss->shared.len};
     ports[mport] = (odin3_netvec){ss->tmp.data, (uint32_t)ss->tmp.len};
     odin3_kit_cell cell = {odin3_node_type(ss->m, lead), params, N_BIN_PARAMS, ports, prov};
-    st = odin3_kit_new_cell(ss->oc, &cell, out);
-    st = st == ODIN3_OK ? remember(ss, *out) : st;
+    st = new_cell(ss, &cell, out);
     return st == ODIN3_OK ? odin3_kit_copy_attrs(ss->m, lead, *out) : st;
 }
 
@@ -656,8 +668,7 @@ static odin3_status commit(sh_state *ss, odin3_node_id op) {
         st = odin3_node_rename(ss->m, op, name);
     }
     if (st != ODIN3_OK && !any_member_gone(ss)) {
-        undo_made(ss);
-        return st;
+        return rolled_back(ss, st);
     }
     return st == ODIN3_OK ? st : odin3_kit_half_done(ss->oc, st);
 }
@@ -677,8 +688,7 @@ static odin3_status apply_group(sh_state *ss) {
     st = st == ODIN3_OK ? make_op(ss, *(const odin3_node_id *)ss->byid.data, mux_new, prov, &op)
                         : st;
     if (st != ODIN3_OK) {
-        undo_made(ss);
-        return st;
+        return rolled_back(ss, st);
     }
     st = commit(ss, op);
     ss->merged += st == ODIN3_OK ? (uint32_t)ss->byid.len : 0U;

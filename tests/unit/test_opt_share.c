@@ -982,15 +982,52 @@ static void count_half_done(void) {
     }
 }
 
-/* One run with the fail-th allocation failing; the IR is valid and every start state is kept. */
-static void oom_run_once(long fail, bool *done) {
+/* Live non-port nodes none of whose output nets has a reading pin: logic left unread. */
+static uint32_t dead_cells(void) {
+    uint32_t dead = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module); id++) {
+        odin3_node_id node = {id};
+        const odin3_celltype_def *def =
+            odin3_celltype_get(fx.res.design, odin3_node_type(fx.module, node));
+        if (!odin3_node_live(fx.module, node) || def->gran == ODIN3_GRAN_PORT) {
+            continue;
+        }
+        bool read = false;
+        for (uint32_t port = 0; port < def->n_ports; port++) {
+            odin3_pinslice ps = odin3_node_port(fx.module, node, port);
+            for (uint32_t bit = 0; bit < ps.count; bit++) {
+                odin3_pin_id pin = {ps.first.v + bit};
+                odin3_net_id net = odin3_pin_net(fx.module, pin);
+                if (odin3_pin_reads(fx.module, pin) || !odin3_net_valid(net)) {
+                    continue;
+                }
+                odin3_pinlist pl = odin3_net_pins(fx.module, net);
+                for (uint32_t i = 0; i < pl.count; i++) {
+                    read = read || odin3_pin_reads(fx.module, pl.pins[i]);
+                }
+            }
+        }
+        dead += read ? 0U : 1U;
+    }
+    return dead;
+}
+
+/* One run with the fail-th allocation failing (sticky: every one from the fail-th on); the IR is
+ * valid, and a failure is either undone completely (no dead cell, the cell count of the groups
+ * done) or reported by the discard line. */
+static void oom_run_once(long fail, bool sticky, bool *done) {
     pb_free(&fx.res);
     memset(&fx.counts, 0, sizeof fx.counts);
     build(OOM_TEXT);
     const uint32_t cells = count_live();
+    TEST_ASSERT_EQUAL_UINT32(0, dead_cells());
     n_lines = 0;
     const long half_before = g_half_done;
-    odin3_util_set_alloc_fail_after(fail);
+    if (sticky) {
+        odin3_util_set_alloc_fail_from(fail);
+    } else {
+        odin3_util_set_alloc_fail_after(fail);
+    }
     odin3_status st = odin3_opt_share_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
     odin3_util_set_alloc_fail_after(-1);
     *done = st == ODIN3_OK;
@@ -998,23 +1035,36 @@ static void oom_run_once(long fail, bool *done) {
     TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
     check_full();
     if (st != ODIN3_OK && g_half_done == half_before) {
-        /* undone: nothing but a canonical constant node (the x of a $pmux's A) is left over */
-        TEST_ASSERT_TRUE(count_live() >= cells && count_live() <= cells + 1U);
+        const uint32_t merged = fx.counts.share_merged;
+        TEST_ASSERT_EQUAL_UINT32(0, dead_cells());
+        /* a $neg per add/sub and $pmux group (net +1 each), the x constant node once */
+        const uint32_t want = cells + (merged >= 4U ? 1U : 0U) + (merged >= 7U ? 1U : 0U);
+        TEST_ASSERT_TRUE(count_live() == want || count_live() == want + 1U);
     }
 }
 
-static void test_share_oom(void) {
+static void oom_sweep(bool sticky) {
     bool done = false;
     long failures = 0;
+    const long half_start = g_half_done;
     for (long fail = 0; !done && fail < OOM_LIMIT; fail++) {
-        oom_run_once(fail, &done);
+        oom_run_once(fail, sticky, &done);
         failures += done ? 0 : 1;
     }
     TEST_ASSERT_TRUE(done);
     TEST_ASSERT_EQUAL_UINT32(OOM_MERGED, fx.counts.share_merged);
-    TEST_ASSERT_TRUE(failures > 50 && g_half_done > 0 && g_half_done < failures);
-    printf("opt_share OOM: %ld failing allocation points, %ld in the middle of a kit merge\n",
-           failures, g_half_done);
+    TEST_ASSERT_TRUE(failures > 50 && g_half_done > half_start &&
+                     g_half_done - half_start < failures);
+    printf("opt_share OOM (%s): %ld failing allocation points, %ld in the middle of a kit merge\n",
+           sticky ? "sticky" : "one-shot", failures, g_half_done - half_start);
+}
+
+static void test_share_oom(void) {
+    oom_sweep(false);
+}
+
+static void test_share_oom_sticky(void) {
+    oom_sweep(true);
 }
 
 int main(void) {
@@ -1039,5 +1089,6 @@ int main(void) {
     RUN_TEST(test_share_determinism);
     RUN_TEST(test_share_bad_arguments);
     RUN_TEST(test_share_oom);
+    RUN_TEST(test_share_oom_sticky);
     return UNITY_END();
 }
