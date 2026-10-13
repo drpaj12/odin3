@@ -25,19 +25,20 @@ each run's work directory are kept and named.
   of itself, so a difference proves nothing): counted and shown, never a failure; the bridge on
   the same seed is the arbiter.
 - ``elab-equiv`` exit 3 is an ``oracle crash`` (Yosys died of a signal): counted and shown, never a
-  failure; exit 77 is a skip.
+  failure by itself; exit 77 is a skip.
+- A seed with a tie, a crash or a skip is ``unverified``. The run fails (exit 1) when more than 10%
+  of its seeds are unverified, or when all of them are; the summary prints the count.
 - ``--yosys-069 Y2`` (the nightly drift job): every ``proc-diff`` run that Yosys 0.55 passes runs
   again with ``--yosys Y2 --allow-version 0.69``; a difference there is ``oracle drift``, reported
   and counted, never a failure. A 0.55 failure is a failure whatever 0.69 says.
 
-Exit 0 every seed ok, 1 a seed failed, 2 usage or setup error. Children run with the lock
+Exit 0 every seed ok, 1 a seed failed or too many are unverified, 2 usage or setup error. Children run with the lock
 descriptor of ``tools/heavy-run`` inherited and a per-child memory cap (``--mem-cap``, default 3G).
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import subprocess
 import sys
@@ -63,9 +64,9 @@ GIB = 1 << 30
 DEFAULT_CAP = 3 * GIB
 TAIL_LINES = 6
 TOP = "t"  # every generated module
-TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
+CHILD_TIMEOUT_S = 3600  # a child past an hour is that seed's failure
+MAX_UNVERIFIED = 0.10  # a run whose unverified seeds exceed this share fails
 DRIFT_VERSION = "0.69"
-LOCK_FD = 9  # tools/heavy-run's lock descriptor, kept open in the children
 _RANGE = re.compile(r"(\d+)\.\.(\d+)")
 
 
@@ -102,19 +103,22 @@ def parse_seeds(text: str) -> range:
     return range(int(match.group(1)), int(match.group(2)) + 1)
 
 
-def lock_fds() -> tuple[int, ...]:
-    try:
-        os.fstat(LOCK_FD)
-    except OSError:
-        return ()
-    return (LOCK_FD,)
+def memcap() -> ModuleType:
+    """tools/elab-check/memcap.py: the heavy lock's descriptor and the trio's probe."""
+    module = proc_diff.load_module("memcap", proc_diff.MEMCAP_PY)
+    if module is None:
+        raise GenDiffError(f"{proc_diff.MEMCAP_PY} is missing")
+    return module
 
 
 def child(argv: Sequence[str]) -> tuple[int, str]:
     """(exit code, stdout + stderr) of a tool, the heavy lock's descriptor passed on."""
     try:
         done = subprocess.run([str(a) for a in argv], capture_output=True, text=True,
-                              errors="replace", check=False, pass_fds=lock_fds())
+                              errors="replace", check=False, pass_fds=memcap().lock_fds(),
+                              timeout=CHILD_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        return EXIT_USAGE, f"timed out after {CHILD_TIMEOUT_S} s: {argv[0]}"
     except OSError as exc:
         return EXIT_USAGE, f"cannot run {argv[0]}: {exc}"
     return done.returncode, (done.stdout or "") + (done.stderr or "")
@@ -122,10 +126,11 @@ def child(argv: Sequence[str]) -> tuple[int, str]:
 
 def trio_available(odin3: str) -> bool:
     """True once ``opt`` exists: the trio's flags run on an empty design (2F-5)."""
-    code, out = child([odin3, "-p", TRIO_PROBE])
+    probe = memcap().TRIO_PROBE
+    code, out = child([odin3, "-p", probe])
     if code != 0:
         reason = (out.strip().splitlines() or ["no output"])[-1]
-        print(f"{TOOL}: trio: skipped ({TRIO_PROBE} exit {code}: {reason})")
+        print(f"{TOOL}: trio: skipped ({probe} exit {code}: {reason})")
     return code == 0
 
 
@@ -210,6 +215,18 @@ def run_seed(cfg: Config, seed: int, profile: ModuleType) -> tuple[SeedResult, P
     return result, source
 
 
+def unverified(result: SeedResult) -> bool:
+    """True when nothing proved the seed: a tie, an oracle crash or a skip left it unchecked
+    (the bridge is the arbiter of a tie, and runs on latch-free seeds only)."""
+    return bool(result.ties or result.crashes or result.skips)
+
+
+def too_many_unverified(count: int, total: int) -> bool:
+    """A run that verified nothing, or left more than ``MAX_UNVERIFIED`` of its seeds
+    unverified, must not pass."""
+    return count > 0 and (count == total or count > MAX_UNVERIFIED * total)
+
+
 def report(result: SeedResult, source: Path) -> None:
     if result.failures:
         print(f"seed {result.seed}: FAIL {'; '.join(result.failures)}; file kept: {source}")
@@ -246,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = parse_args(sys.argv[1:] if argv is None else argv)
         seeds = parse_seeds(args.seeds)
         profile = load_profile()
+        memcap()
     except GenDiffError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
         return EXIT_USAGE
@@ -256,7 +274,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cfg = Config(args.odin3, args.yosys, args.equiv_check, args.yosys_069, trio, args.mem_cap,
                  work.resolve())
     print(f"{TOOL}: seeds {args.seeds}, files under {cfg.work}")
-    failed = drifted = crashed = tied = 0
+    failed = drifted = crashed = tied = unproven = 0
     for seed in seeds:
         result, source = run_seed(cfg, seed, profile)
         report(result, source)
@@ -264,10 +282,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         drifted += bool(result.drift)
         crashed += bool(result.crashes)
         tied += bool(result.ties)
+        unproven += unverified(result)
     print(f"{TOOL}: {len(seeds)} seeds, {len(seeds) - failed} not failed, {failed} failed, "
-          f"{drifted} oracle drift, {crashed} oracle crashes, {tied} compare ties")
+          f"{drifted} oracle drift, {crashed} oracle crashes, {tied} compare ties, "
+          f"{unproven} unverified")
+    if too_many_unverified(unproven, len(seeds)) and not failed:
+        print(f"{TOOL}: FAIL: {unproven} of {len(seeds)} seeds unverified (a tie, an oracle "
+              f"crash or a skip; the limit is {MAX_UNVERIFIED:.0%}, and never all)")
+        return EXIT_FAIL
     return EXIT_FAIL if failed else EXIT_OK
-
 
 if __name__ == "__main__":
     sys.exit(main())

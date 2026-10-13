@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 import proc_rows
+import run_rows_equiv
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROC = REPO_ROOT / "tests" / "proc"
@@ -28,6 +29,20 @@ YOSYS_V_RE = re.compile(r"^// yosys -V: Yosys 0\.55 \(")
 
 def _rows() -> list[proc_rows.Row]:
     return proc_rows.parse_rows((ROWS / "rows.txt").read_text(encoding="utf-8"))
+
+
+class ExpectFailNeedlesTest(unittest.TestCase):
+    """A needle keeps an expected failure specific: a cap kill or a crash must not match it."""
+
+    def test_every_non_xl_entry_has_a_needle(self) -> None:
+        lists = sorted(PROC.glob("*_expect_fail.txt"))
+        self.assertGreaterEqual(len(lists), 4)
+        for path in lists:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                parsed = run_rows_equiv.parse_expect_line(line)
+                if parsed is None or re.match(r"xl\b", parsed[2]):
+                    continue
+                self.assertNotEqual(parsed[1], "", f"{path.name}: {parsed[0]} has no [needle]")
 
 
 class RowsShapeTest(unittest.TestCase):

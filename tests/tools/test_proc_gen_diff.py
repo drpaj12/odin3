@@ -210,21 +210,44 @@ class ProcGenDiffTest(unittest.TestCase):
         self.assertIn("FAIL", out)
         self.assertNotIn("oracle drift:", out)
 
-    def test_an_oracle_crash_is_counted_and_not_a_failure(self) -> None:
+    def test_a_run_of_only_oracle_crashes_fails_as_unverified(self) -> None:
         seed = seed_with(latch=False)
         code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
                                      env={"FAKE_EE_RC": "3"})
-        self.assertEqual(code, 0, out)
+        self.assertEqual(code, 1, out)
         self.assertIn("oracle crash", out)
         self.assertIn("1 oracle crashes", out)
+        self.assertIn("1 unverified", out)
+        self.assertIn("FAIL: 1 of 1 seeds unverified", out)
 
-    def test_a_compare_tie_is_counted_and_not_a_failure(self) -> None:
+    def test_a_run_of_only_compare_ties_fails_as_unverified(self) -> None:
+        code, out, _ = self.run_tool("--seeds", "3..8", "--no-trio", env={"FAKE_PD_RC": "3"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("compare tie", out)
+        self.assertIn("6 unverified", out)
+        self.assertNotIn("seed 3: FAIL", out)
+
+    def test_a_run_of_only_skips_fails_as_unverified(self) -> None:
         seed = seed_with(latch=False)
         code, out, _ = self.run_tool("--seeds", f"{seed}..{seed}", "--no-trio",
-                                     env={"FAKE_PD_RC": "3"})
-        self.assertEqual(code, 0, out)
-        self.assertIn("compare tie", out)
-        self.assertNotIn("FAIL", out)
+                                     env={"FAKE_EE_RC": "77"})
+        self.assertEqual(code, 1, out)
+        self.assertIn("1 unverified", out)
+
+    def test_the_unverified_limit_is_ten_percent_and_never_all(self) -> None:
+        limit = proc_gen_diff.too_many_unverified
+        self.assertFalse(limit(0, 10))
+        self.assertFalse(limit(1, 10))  # exactly 10%
+        self.assertTrue(limit(2, 10))
+        self.assertTrue(limit(1, 1))
+        self.assertFalse(limit(0, 1))
+
+    def test_a_hung_child_times_out_as_a_failure(self) -> None:
+        hang = _exe(self.dir / "hang", "#!/bin/sh\nsleep 5\n")
+        with mock.patch.object(proc_gen_diff, "CHILD_TIMEOUT_S", 0.2):
+            code, out = proc_gen_diff.child([str(hang)])
+        self.assertNotEqual(code, 0)
+        self.assertIn("timed out", out)
 
     def test_the_trio_is_probed_with_the_trio_flags(self) -> None:
         seed = seed_with(latch=False)
