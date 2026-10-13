@@ -368,7 +368,10 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
 def run_bench(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     assert cfg.bench is not None
-    done, failed = run_child([cfg.bench, "--one", str(item.path)], cap, start)
+    argv = [cfg.bench, "--one", str(item.path)]
+    if cfg.techlib:
+        argv += ["--techlib", cfg.techlib]
+    done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
         return failed

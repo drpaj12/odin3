@@ -179,18 +179,18 @@ static void fake_step_f(void *user, odin3_module_id module) {
 static void on_step(void *user, odin3_proc_step step, bool begin, const odin3_proc_mctx *mctx) {
     static const char *const k_names[] = {"A", "B", "C", "D", "E", "F"};
     fake_state *state = user;
-    char word[8];
-    TEST_ASSERT_NOT_NULL(mctx);
-    TEST_ASSERT_TRUE((unsigned)step < ODIN3_PROC_N_STEPS);
-    if (step == ODIN3_PROC_STEP_BUDGET) {
-        TEST_ASSERT_TRUE(state->depth > 0); /* a budget check nests in a step */
-        (void)snprintf(word, sizeof word, "%s ", begin ? "b" : "e");
-    } else {
+    char word[8] = "?";
+    if (mctx != NULL && step == ODIN3_PROC_STEP_BUDGET) {
+        /* a budget check nests in a step: outside one it is traced as "!" */
+        (void)snprintf(word, sizeof word, "%s%s ", state->depth > 0 ? "" : "!", begin ? "b" : "e");
+    } else if (mctx != NULL && step < ODIN3_PROC_STEP_BUDGET) {
         state->depth += begin ? 1 : -1;
         (void)snprintf(word, sizeof word, "%s%c ", k_names[step], begin ? '+' : '-');
     }
-    TEST_ASSERT_TRUE(strlen(state->trace) + strlen(word) < sizeof state->trace);
-    (void)strcat(state->trace, word);
+    size_t used = strlen(state->trace);
+    if (used + strlen(word) < sizeof state->trace) {
+        (void)memcpy(state->trace + used, word, strlen(word) + 1);
+    }
 }
 
 static void install_fakes(void) {

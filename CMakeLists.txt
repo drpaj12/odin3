@@ -512,6 +512,15 @@ add_executable(bench_pp tests/bench/bench_pp.c)
 target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
 
+# 2E Task 13 (spec 19): one file per run, `bench_proc --one FILE`, for `elab-sweep --bench`.
+add_executable(bench_proc tests/bench/bench_proc.c)
+target_include_directories(bench_proc PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(bench_proc PRIVATE odin3_core odin3_flags)
+# tests/bench/bench_guard.h (2D's, byte-identical) refuses a Debug or sanitized binary.
+if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug" AND NOT ODIN3_SANITIZE)
+    target_compile_definitions(bench_proc PRIVATE ODIN3_BENCH_RELEASE)
+endif()
+
 # --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
 if(ODIN3_FUZZ)
     # tests/fuzz/fuzz_pp.c: the preprocessor's crash fuzzer (2B §10.5).
@@ -1249,7 +1258,28 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
     # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
     list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
+    # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
+    list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # 2E Task 13 (spec 19): bench_proc prints the columns the targets are judged from. A Debug or
+    # sanitized build refuses to run (tests/bench/bench_guard.h, exit 2: its times are not the
+    # targets'); a Release build's smoke runs `--one` on two micros (a case under a combinational
+    # block; a memory under a clocked process) and checks every column. The full bench is
+    # `elab-sweep --bench build/release/bench_proc --mem-cap 6G` (tools/proc-check/
+    # bench-proc-report report LOG prints the targets); tests/proc/bench_expect_fail.txt lists the
+    # three macro-only include files.
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR ODIN3_SANITIZE)
+        add_test(NAME bench_proc_refuses_debug COMMAND bench_proc --one /dev/null)
+        set_tests_properties(bench_proc_refuses_debug PROPERTIES LABELS tools
+            PASS_REGULAR_EXPRESSION "needs a Release build")
+    else()
+        odin3_add_sweep_test(bench_proc_smoke LABEL sweep
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/bench-proc-report smoke
+                    --bench $<TARGET_FILE:bench_proc>
+                    --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/keywords/always/case_default.v
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/syntax/inferred_SPram.v)
+    endif()
     # 3E §15.1/§15.2: the VPR negative corpus. Every tests/vtr/blif-bad/*.blif has exactly one
     # violation of its prefix's class; every strict/*.blif passes without --strict and fails with
     # it. (That VPR rejects exactly the top-level files is Task 11's --bad-corpus run.)

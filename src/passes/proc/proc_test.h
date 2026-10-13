@@ -75,7 +75,7 @@ typedef struct odin3_proc_test_hooks {
     void (*on_step_f)(void *user, odin3_module_id module);
     void (*on_expand)(void *user, odin3_net_id net, bool set_undef);
     void *user;
-    void (*on_step)(void *user, odin3_proc_step step, bool begin, const odin3_proc_mctx *m);
+    void (*on_step)(void *user, odin3_proc_step step, bool begin, const odin3_proc_mctx *mctx);
 } odin3_proc_test_hooks;
 
 /* Installs the hooks (copied; NULL clears them). */

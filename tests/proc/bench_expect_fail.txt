@@ -1,0 +1,9 @@
+# tests/proc/bench_expect_fail.txt: the files the full `bench_proc` set (the 31 VTR and 33 Koios
+# benchmarks, one set by size, `elab-sweep --bench B --mem-cap 6G`) does not time (2E plan Task 13).
+# Format as vtr_expect_fail.txt. Not that file: its `xl` line for koios/lenet.v is a run class of
+# the Yosys-side sweeps, and the bench runs lenet.v (Odin III's side fits the 6G slice).
+# The three Koios `*_include.v` files hold one `define each and no module: odin3 has nothing to
+# lower.
+koios/hard_mem_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/complex_dsp_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
+koios/hard_block_include.v [no_top: no top given and no module is defined] a macro-only include file: no module
