@@ -383,7 +383,7 @@ latches the other half nor conflicts with a second block writing it (review I2; 
 marks the actuals of a task's output and inout formals as assigned (review I1). (4) EL-40: a `$readmem`
 address is hex digits only and at most 2^40, a located error otherwise (`bad address`, `address out of range`);
 an over-wide word is truncated with one warning per call (§17 #73; reviews I3, I4). (5) Caps: the inline call
-nesting cap 256 (`ODIN3_ELAB_MAX_INLINE_DEPTH`, §17 #74, review I6 interim) and, for endless unrolled loops, a
+nesting cap 1024 (`ODIN3_ELAB_MAX_INLINE_DEPTH`, a heap cap since 2D-7, §17 #74, review I6) and, for endless unrolled loops, a
 cycle check and an IR object budget per loop (`ODIN3_ELAB_MAX_LOOP_OBJECTS`, §17 #75, review M3). (6)
 Documentation: §17 #70 states what Yosys does with `initial tk(7)`, rows 71 and 72 (reviews M1, M2), the
 warnings of Task 24 are in §9.2, the duplicate v4.22 entry is merged. Messages added to §9.1: see §9.1.
@@ -410,6 +410,38 @@ with `--xl`). `elab-equiv` exits 3 (`oracle crash`) when Yosys dies of a signal 
 on recursive instantiation, where 2D reports "recursive instantiation of 'top'") and reports a child killed by
 its cap as `out of memory (cap 4G)`. (3) `micro-top` follows nested golden groups (`keywords/assign/assign_wide`).
 
+v4.27 (2026-10-13; 2D-7b, Peter 2026-10-13 "accept T6/D3/T9 with warnings", PHASE2 #20). (1) T6 is
+accepted (§8.2, §9.2, §17 #76): an `always` with no event control is `always @*`, with a located
+warning. The T6 row leaves §9.1. (2) T9 is accepted (§8.9, §9.2, §17 #77): `=` and `<=` on one
+bit follow Yosys (every assignment is an action, the last on a path wins) with a warning that
+names the variable, and on one control path adds that simulation and synthesis may differ. T10
+stays an error. The T9 row leaves §9.1; `reject-2d` holds 23 cases and `ignore-2d` 12. (3) The hard `adder`'s positional width
+(`adder #(W)`) stays a located error that now says why (§17 #78): the library cell is the 1-bit hard block;
+Parmys's n-bit `adder` is a soft module (v4.29: it elaborates once `vtr_primitives.v` is read with `--lib`, §3.1a). (4) D3 (internal tri-state nets to mux logic, as `tribuf -logic`:
+a `$pmux` of the data by the enables over an x default) is ruled accepted but not yet implemented; EL-29
+and §17 #45 still describe the error until it lands.
+
+v4.28 (2026-10-13; 2D-7b, D3 lands; PHASE2 #20). (1) EL-29 (§6.7): the `$tribuf` cells of nets that
+reach no top-level port become logic at the end of each module, as Yosys's `tribuf -logic` does. The cells
+that drive the same list of nets are one group, and a group is one `$pmux` (A = x, B the data with the last
+driver first, S the enables); one warning per group names the net (§9.2). Cells on a net of a top-level output
+or inout port keep their handling. A net with a tri-state driver and another kind of driver stays A4's
+error. Four located errors replace the old one (§9.1). (2) §17 #45 is narrowed and #79 added (the
+evidence, the several-enabled case, the single-driver case). (3) `elab-equiv --yosys-tribuf` runs
+`tribuf -logic` after `proc; flatten` on side B; plain `proc` shorts the drivers, so a bus is not comparable
+without it. Micro `syntax/multi_assignment` and `tests/elab/accept/D3_*.v` are `elab-equiv` equivalent; the
+micro leaves `micro_expect_fail.txt`.
+
+v4.29 (2026-10-13; 2D-7b library read, agent defaults; PHASE2 #20). (1) New §3.1a: `read_verilog
+--lib` keeps a read's modules as library units for later reads, each elaborated where a later design
+instantiates it and under the flags (`--nolatches`, `--nomem2reg`) of the read that supplied it; it is
+not Yosys `read_verilog -lib` (no black boxes). (2) EL-6: a `--lib` unit is exempt from the "has the name
+of cell type" error, and an instance resolves to the unit or to the hard cell by the parameter rule of
+§3.1a. (3) EL-3 gains `--lib`; EL-4 gains the MODULE attributes `odin3_lib*`. (4) §17 #78 is rewritten
+(the `adder #(W)` micros now elaborate, equivalent to Yosys with `vtr_primitives.v` read as a library) and
+#80 added (the structural gap to the Parmys goldens). (5) `elab-equiv` and `elab-sweep` take `--lib FILE`;
+`tests/elab/lib/vtr_primitives.v` is a copy of Parmys's file (trailing blanks stripped) for the micro sweeps.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -428,8 +460,8 @@ AST as the seam (PHASE2 #8 Q3).
 
 Not in 2D: `proc` (2E: switches → muxes, syncs → `$dff*`, latch detection and its warning),
 `opt` (2F), memory port analysis and mapping (Phase 4 `memory_infer`), `flatten`,
-SystemVerilog (Phase 5 appends AST kinds; stage 2 handles the elaborated subset), tri-state
-inside modules (D3), and everything the 2A/2B/2C specs own.
+SystemVerilog (Phase 5 appends AST kinds; stage 2 handles the elaborated subset), and everything
+the 2A/2B/2C specs own.
 
 Success: every MUST and SHOULD row elaborates and is equivalent to Yosys on its coverage case
 (§14.2); every REJECT row gives the located error of §9 and every IGNORE row the warning; every
@@ -488,7 +520,8 @@ typedef struct odin3_elab_opts {
 } odin3_elab_opts;
 ```
 
-`read_verilog` gains `--nolatches`, `--nomem2reg` and `--auto-blackbox` (all off by default);
+`read_verilog` gains `--nolatches`, `--nomem2reg` and `--auto-blackbox` (all off by default) and
+`--lib` (§3.1a: keep the modules as library units, elaborate nothing);
 `--top` is the 1D pass option (`odin3_pass_get_options().top`), which replaces the project top
 (PHASE2 #9). Project parameters (`param top[.inst…].name value`, PRJ records) are read from the
 design's project record by stage 1 (EL-8). The ABI mirror `odin3_elab_options` has the same
@@ -529,7 +562,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept; ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -666,7 +699,9 @@ in order:
 2. a design-unit `MODULE` `N` in another library, the first in project order (when several
    libraries define it, an info line names the one taken: `module 'N' found in libraries 'A',
    'B'; using 'A.N'`);
-3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins);
+3. a library-unit `MODULE` `N`, the first in store order (2C: first file wins); a unit of a
+   `read_verilog --lib` read is one (§3.1a), and when a hard or black-box cell type of the same name
+   is registered, §3.1a's parameter rule decides between item 3 and item 5;
 4. a `UDP_DECL` `N` → Q7's error, at the `UDP_DECL` (§9.1: at the definition, whether or not
    it is instantiated; a library unit's UDP when an instance resolves to it), not at the instance;
 5. a registered cell type `N` of granularity `hard` or `blackbox` (a tech library read earlier,
@@ -683,7 +718,7 @@ name, and `odin3_module_create` refuses a name that is already a cell type). Sta
 every definition it is about to specialize, before stage 2 creates anything, so the IR call can
 never fail with `INVALID_ARG` on user input:
 
-- a design or library `MODULE` (not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
+- a design or `-v`/`-y` library `MODULE` (a `--lib` unit is exempt: §3.1a; not a `(* blackbox *)` one, which IR-7b reuses) whose name is a
   registered cell type of granularity `hard` or `blackbox` — a tech library's `adder`,
   `multiply`, `single_port_ram`, or a model a BLIF read declared — is the located error, at the
   `MODULE`'s keyword (the parsed store records no location for a name; 2C §4.2 step 4 locates
@@ -698,6 +733,64 @@ never fail with `INVALID_ARG` on user input:
   definition is reached from the top (the definitions stage 1 is about to specialize); a module
   named after a built-in cell type is `module '$add' has the name of built-in cell type '$add';
   rename the module` (v4.5).
+
+### 3.1a Library reads: `read_verilog --lib` (2D-7b)
+
+Two problems have one cause: a file of modules cannot be kept for a later design read. Parmys reads
+`vtr_primitives.v` (the n-bit soft `adder`, `multiply`, the RAM wrappers) as real modules, with
+`-nomem2reg` for that read only, and the design after it; and the hard `adder` of a tech library is
+1-bit, so `adder #(W)` has no module to mean. This is **not** Yosys `read_verilog -lib` (which makes
+black boxes): a library unit has a body and is fully elaborated where it is instantiated.
+
+- **The read.** `read_verilog --lib [--nolatches] [--nomem2reg] FILE...` preprocesses and parses the
+  files as a design read does (syntax errors are reported at this read), makes no IR, elaborates
+  nothing (so a file of several uninstantiated modules is not `ambiguous_top`), and keeps its parsed
+  store in the design (as `--parse-only` does) marked with the read's flags. `--auto-blackbox` is
+  refused with `--lib` (it is an option of the design read). `--top` is not looked at.
+- **Later reads.** A `read_verilog` (including another `--lib`) first reads again the files of every
+  kept library store, in read order, after the design files and before the `-v`/`-y` files, as
+  **library `UNIT`s** (EL-6 item 3: never a top candidate, shadowed by a design unit of the same name,
+  the first definition wins, an already read file is skipped). Each such `UNIT` carries the
+  `ODIN3_UNIT_*` flags of its read (`odin3_ast_unit_flags`). The store keeps each design file's
+  **preprocessed stream** (`odin3_ast_keep_stream`), so the files are parsed again from exactly the
+  text the `--lib` read's own defines, macros (a macro an earlier file of that read defined included)
+  and include directories produced, never under the later read's (a `` `ifdef `` in a library file
+  is decided once, by the read that kept it; PR 2D-7b review I1); a kept unit costs only that parse.
+  **Limitation (re-review):** only a `--lib` read's design files are kept as streams; units it
+  resolves through its own `-v`/`-y` library files are not, and are preprocessed again under the
+  later read's macros. Pass such files to `--lib` directly when their `` `ifdef ``s matter.
+- **Per-unit flags.** The flags of the *supplying* read replace, never add to, the design read's:
+  a module defined by a `--lib` read elaborates under that read's `--nolatches` and `--nomem2reg`
+  whatever the reading design says, and the design read's flags do not reach it. Stage 1 writes the
+  elaborated `MODULE` of such a unit with the value-less attributes `odin3_lib` (the marker) and
+  `odin3_lib_nolatches` / `odin3_lib_nomem2reg` when set; stage 2 (`odin3_elab2_enter`) reads them
+  and uses them for that module in place of the run's options. `--auto-blackbox` is a design-read
+  option and stays the run's. The attributes are not copied to the IR.
+- **Unused units.** A library unit nothing instantiates is dropped without a message (the "not
+  instantiated under the top" info line lists design units only).
+- **Precedence against a hard cell.** A `--lib` unit may carry the name of a registered hard or
+  black-box cell type (`adder`, `multiply`, `single_port_ram`): it is exempt from the "has the name
+  of cell type" error of EL-6, because a design that reads both a tech library and
+  `vtr_primitives.v` is exactly Parmys's situation. Which one an instance means is never silent, and
+  is decided by the instance's `#()`:
+  1. every value fits a parameter of the cell (no `#()`; ordered values no more than the cell's
+     parameters; every named parameter one of the cell's): the **hard cell**, with one info line per
+     name (`instance of 'adder' uses the hard cell 'adder': its parameters fit the cell, so the
+     library unit of that name (read with --lib) is not used`). The 1-bit `adder u(...)` therefore
+     stays the hard block the BLIF goldens instantiate;
+  2. otherwise (`adder #(4)`, `adder #(.WIDTH(4))`) the **library unit**, with the warning `instance of
+     'adder' uses the library unit 'adder' (read with --lib), not the hard cell of that name: its
+     parameters do not fit the cell`, once per `INSTANTIATION`.
+  The decision reads only the parameter list (not port names or widths). A design that wants one
+  meaning everywhere reads no `--lib` file defining the name, or no tech library defining the cell.
+  The unit's modules take the `$2` suffix on a clash with the cell type (EL-9), so
+  `odin3_module_create` never sees the name; a shadowing unit cannot be the `--top` (`unknown_top:
+  'adder' is a library unit with the name of a registered cell type, so it cannot be the top;
+  rename it`).
+- **Decided here (agent defaults).** The flag spelling `--lib`; precedence by parameter fit; the
+  kept store is re-parsed rather than copied (the elaborated form has no way to merge two stores);
+  nothing is elaborated before a design instantiates it (so an error inside a unused unit is never
+  reported, unlike Parmys, which simplifies every module: §17 #2).
 
 ### 3.2 Top selection (EL-7)
 
@@ -1428,7 +1521,8 @@ the AST node), and checks **before** attaching a new driver:
 - a second driver of a plain net bit is A4's error with both places ("'y[3]' has two drivers
   (also driven at f.v:9:12)"), and the new driver is not attached (the IR stays valid);
 - a second process driving a bit is T10's error (EL-41);
-- wired nets collect drivers (EL-26); tri-state drivers follow EL-29.
+- wired nets collect drivers (EL-26); tri-state drivers follow EL-29 (those on internal nets become
+  `$pmux` logic at the end of the module, step 7b).
 
 So no multi-driven net is ever built. A net with no driver is legal (x; IR check rule 4 warns
 in `check`, and 2D warns once per wire that has sinks and no driver: "'w' is never driven").
@@ -1441,20 +1535,65 @@ gates (EL-26); (8) `$mem` cells (EL-27). Steps 3–5 may merge nets; steps 6–8
 
 ### 6.7 Tri-state (EL-29)
 
-D3: a `z` drive becomes `$tribuf` (word, tristate flag, `WIDTH`, ports `A`, `EN`, `Y`) only when
-the driven net is a port of the **top** module that is `output` or `inout`:
+D3: a `z` drive becomes a `$tribuf` (word, tristate flag, `WIDTH`, ports `A`, `EN`, `Y`), and the
+cell then goes one of two ways at the end of the module's emission (step 7b of EL-28, after every net is
+merged, so the order of the assignments does not matter). Peter's ruling of 2026-10-13: a tri-state
+driver on an internal net is mux logic, as Yosys's `tribuf -logic` makes it; FPGAs have no internal
+tri-states.
 
 - `assign y = en ? d : 'bz;` (either branch all z) → `$tribuf(A = d, EN = reduce_bool(en), Y = y)`
   (the branches' order sets an inverted enable through `$not`);
 - `bufif1 (y, d, en)`, `bufif0`, `notif1`, `notif0` (Q3) → `$tribuf` with `EN = en` or `~en`
   and `A = d` or `~d`;
-- several tri-state drivers on one top-level port are legal (a bus; IR check rule 4 allows
-  tristate drivers to share a net); any other driver there is A4's error;
 - `assign y = 'bz;` alone drives `$_CONSTZ_`.
 
-Anywhere else (an internal net, a port of a module that is not the top) a `z` drive or a
-`bufif`/`notif` is "tri-state driver on 'x' is supported only on a top-level output or inout port
-(D3)". An `inout` port read inside the module reads its net.
+**Top-level ports keep the `$tribuf`.** A cell with a net on a `$port_out` or `$port_inout` of the top
+module is left as it is: several such drivers are a bus (IR check rule 4 allows tristate drivers to
+share a net), and any other kind of driver there is A4's error. Yosys's `tribuf -logic` also leaves a
+`$tribuf` when any bit of the net is an output port, so a bus that is assigned straight to an output
+(`assign y = bus;`) is a top-level tri-state, whichever statement comes first.
+
+**Every other tri-state driver becomes logic.** Which nets: the cells whose nets reach no port of the top
+module (an internal wire; an output port of a module below the top is a located error, since the instance may drive a top-level port where the `$tribuf` must stay and a module is elaborated before its parents are known). Which drivers: all the drivers of the net
+must be tri-state drivers (`cond ? val : 'z`, either branch all z, or a gate primitive above); a net with
+a tri-state driver and another driver (an `assign`, a cell, a process, an instance output) is A4's error
+"'t' has two drivers (also driven at f.v:L:C)", and so is a net driven by outputs of two child instances
+(nets are never merged across modules). Why a mixed net stays an error: an ordinary driver always drives a
+value, so while a tri-state enable is on the net has two drivers, and while all are off a value that is
+not the don't care of the ruling; Yosys 0.55 shorts them, and there is no choice that is sound for every
+input. How the drivers combine: the cells whose `Y` is the same list of nets are one group, in source
+order. A group becomes one `$pmux` (`WIDTH` the nets, `S_WIDTH` the number of drivers):
+
+| port | value |
+|---|---|
+| `A` | x, for every bit: no driver is enabled (a don't care) |
+| `B` | the drivers' `A` (data), `WIDTH` bits each, **the last driver in the source first** |
+| `S` | the drivers' `EN`, in the order of `B` |
+| `Y` | the nets |
+
+and its `$tribuf` cells are deleted. The order is Yosys's: `tribuf` walks the module's cell table, which
+iterates newest first, and `opt` resolves the x of `A` against that order, so a different order would make
+the netlist differ from the oracle's in the don't care case (found by `elab-equiv`: the first version put the
+first driver first and `D3_bus_one_hot` was not equivalent when no driver was enabled). **Several enabled
+at once:** the value is undefined, as for any `$pmux` (Yosys's formal model gives x; its gate lowering
+and the simulator give the OR of the selected data, and the netlist 2D writes does the same, being the same
+cell). Real bus contention has no meaning on an FPGA, so 2D does not invent a priority; the
+warning says so. **One driver:** Yosys connects `Y = A` and drops the enable; 2D keeps a one-select
+`$pmux` over x (the enable is visible), which `opt` reduces to the same netlist (verified equivalent,
+`D3_single_driver`).
+
+Errors, each located at the (first) driver and leaving the `$tribuf` in place: the drivers of one net
+cover **overlapping but different** bit lists (`assign b[3:0] = ...; assign b[5:2] = ...;`: Yosys does not
+merge those either, and a `$pmux` per list would be several drivers); one driver covers **both
+top-level port bits and internal nets** (`assign {y, t} = ...`); a tri-state driver on an **`inout` or `output` port of
+a module below the top**; an **`inout` pin of a child instance** on the net. Drivers of disjoint bit
+ranges are separate groups.
+
+The warning (§9.2), once per group: "tri-state drivers on internal net 'data' converted to logic (no driver
+enabled: x; several enabled: undefined)", located at the first driver, naming the wire (`bus`, `bus[3]`,
+`bus[7:4]`).
+
+An `inout` port read inside the module reads its net.
 
 **`inout` ports of instantiated modules** (the review's F22). An instance's `inout` pin is a
 driver of the connected net (IR-3, driver partition) and may share it with other `inout` pins and
@@ -1462,7 +1601,9 @@ driver of the connected net (IR-3, driver partition) and may share it with other
 driver — the net is the child's to drive, and when it reaches a top-level `inout` the bus is D3's
 legal case. A net driven both by an `inout` pin and by ordinary logic (an `assign`, a cell, a
 process, an instance output) is an internal tri-state bus: "net 'x' is driven by inout port 'p'
-of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)". (The
+of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not supported (D3)". The same
+net with a tri-state driver that would become logic is the same error with "an inout pin cannot share a net
+with converted tri-state drivers" in place of the last clause. (The
 three corpus micros with `inout` are Parmys-rejected, PHASE2 #6 D3.)
 
 ## 7. Expressions to word cells
@@ -1756,9 +1897,17 @@ From the `ALWAYS`'s `EVENT_CONTROL`:
   pure combinatorial block … use of @* instead of @(...)") and never names a missing signal.
 - Edge and level events in one list: "edge and level events in one event list are not supported"
   (Yosys: "Found non-synthesizable event list").
-- `always` with no event control (T6), an event control inside the body (T12), `wait` (T13),
-  `->` (T14), `fork` (T15), procedural `assign`/`deassign`/`force`/`release` (T16), `disable`
+- `always` with no event control (T6, accepted: below), an event control inside the body (T12),
+  `wait` (T13), `->` (T14), `fork` (T15), procedural `assign`/`deassign`/`force`/`release` (T16), `disable`
   (T19), `forever` (F4): stage 1's errors (§9.1). Delays (T11) were dropped with a warning.
+- **T6 (accepted, Peter 2026-10-13, 2D-7b)**: an `always` (not `always_ff`/`always_comb`/
+  `always_latch`) whose statement is not led by an event control, with no timing at all or with a
+  delay (`always #5 clk = ~clk`, the delay itself T11's warning), is `always @*`: stage 1 writes
+  `ALWAYS(TIMING_STMT(EVENT_CONTROL[star], body))`, the one form the elaborated store's check
+  allows, and the generator builds the one `ALWAYS` sync of `@*` (EL-34, T2). Warning at the
+  `ALWAYS`: "always without an event control treated as always @*" (§9.2, once per parsed
+  node). This is Yosys 0.55's reading (a process with no sync rule is combinational). A delay
+  in front of an event control (`always #5 @(a) …`) is not T6: the inner control is T12's error.
 
 ### 8.3 The process generator (EL-35)
 
@@ -1912,10 +2061,11 @@ Non-constant calls are **inlined** (K1–K11), as Yosys's `simplify` does:
   constant is "function 'f' can be called only with constant arguments (it uses 'while')".
 - **Recursion** without constant arguments cannot be inlined: "recursive call of 'f' cannot be
   inlined (its arguments are not constant)". Inlining depth is capped at
-  `ODIN3_ELAB_MAX_INLINE_DEPTH` (256, v4.24; or `ODIN3_ELAB_MAX_CALL_DEPTH` if lower): a call in an
-  expression is inlined by C recursion (the walker reaches it through `pg_call_hook`, which runs the
-  body with a nested `pg_run`), so the cap bounds the C stack; the hoist that removes the recursion is
-  2D-7's (§17 #74).
+  `ODIN3_ELAB_MAX_INLINE_DEPTH` (1024; or `ODIN3_ELAB_MAX_CALL_DEPTH` if lower), a resource cap on
+  heap records: a call is inlined from an explicit frame stack (2D-7; the walker is suspendable and
+  the statement code pushes a frame for each expression and each call), so one call inside another
+  costs no C stack. Only an index, a case selector or item, or a copy-out target that holds a call is
+  still run by a nested frame loop (C recursion, capped at 128 levels; §17 #74).
 - `automatic` (K8) changes nothing for inlining (every call gets fresh variables anyway).
 - K12 (a timing control or a non-blocking assignment in a function) is stage 1's error. Argument
   count must match ("function 'f' has 2 inputs; 3 arguments given"); a task enable without
@@ -1990,9 +2140,22 @@ is attached (EL-28), with both locations from the symbol table's assignment list
 
 - **T10**: a bit that is an output of two `always` blocks: "'r[2]' is assigned in two always
   blocks (also at f.v:14:9)". (Different bits of one variable in different blocks are legal.)
-- **T9**: a bit assigned by both `=` and `<=` (in one block or several, source assignments only;
-  inlined task outputs count as `=`): "'r' is assigned with both '=' and '<=' (also at
-  f.v:20:5)" — REJECT per the coverage audit (B §2.2.4), where Yosys accepts.
+- **T9 (accepted, Peter 2026-10-13, 2D-7b)**: a bit assigned by both `=` and `<=` (in one block
+  or several, source assignments only; inlined task outputs count as `=`) follows Yosys 0.55:
+  every assignment is an action and the last one on a path wins (the `=` also updates the value
+  later statements of the block read, EL-35). A warning names the variable, at the later
+  assignment of the other kind, once per variable: "'r' is assigned with both '=' and '<='
+  (also at f.v:20:5)". When the other kind's first assignment can run in the same evaluation of
+  the same block (the root, one an arm and the other after its switch, arms of different
+  switches; not different arms of one `if` or `case`), the warning is "'r' is assigned with both
+  '=' and '<=' on one control path (also at f.v:20:5); simulation and synthesis may differ"
+  (simulation applies a nonblocking update after the blocking ones, Yosys's last action wins:
+  `q <= b; q = a;` is `q = b` in a simulator and `q = a` in the netlist). Both warnings may come
+  once per variable. Each new assignment is compared with every recorded assignment of the
+  other kind to the bit in the block (one record per distinct control path, so the cost is bounded
+  by the block's structure), so a same-path pair after an exclusive first pair also gets the
+  "simulation and synthesis may differ" warning. Two
+  blocks assigning one bit remain T10's error.
 - **A4**: EL-28. A bit driven by a process and by a continuous assignment, gate or instance is A4.
 - Loop variables (EL-35) and function and task locals are exempt: they are not outputs.
 
@@ -2019,8 +2182,6 @@ cases (2C §7.3) expect, at the node named:
 | E20 | the `CALL` | `system function '$random' is not supported` |
 | E21 | the `HIER_NAME`/`CALL`/`TASK_CALL` | `hierarchical reference 'u.w' is not supported` |
 | A4 | the second driver | `'y[3]' has two drivers (also driven at f.v:L:C)` (a whole-net conflict names the net: `'y' has two drivers …`) |
-| T6 | the `ALWAYS` | `always block without an event control is not supported` |
-| T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)` |
 | T10 | the later block's assignment | `'r[2]' is assigned in two always blocks (also at f.v:L:C)` |
 | T12 | the inner `TIMING_STMT` | `event control inside an always body is not supported` |
 | T13 | the `WAIT` | `'wait' is not supported` |
@@ -2038,9 +2199,10 @@ cases (2C §7.3) expect, at the node named:
 | F2 | the `WHILE` | `'while' is supported only in constant functions` |
 
 (L14 is 2B's error and M11's duplicate module is 2C's `duplicate_module`; 2D raises every other
-REJECT, including M11's other duplicates. The `reject-2d/` handover holds 25 cases: the 22 rows
-other than L14 and M11, 2C plan point (i), and the REJECT parts of N15, P4 and F2 tabulated
-above.)
+REJECT, including M11's other duplicates. The `reject-2d/` handover holds 23 cases: the 20 rows
+other than L14, M11, T6 and T9, 2C plan point (i), and the REJECT parts of N15, P4 and F2
+tabulated above. T6 and T9 are accepted since 2D-7b, with a warning each: `ignore-2d/T6` and
+`ignore-2d/T9`.)
 
 Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 
@@ -2088,8 +2250,11 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
   and cannot be assigned in an always block`; `'u' is a uwire and has a second driver (first at
   f.v:L:C)`; `memory 'm' of N bits exceeds the limit of 1073741824 bits`; `'m' is a memory; select
   a word`; `continuous assignment to 'y' with a non-constant index is not supported`; `non-constant index
-  into 'y' is not supported in a concatenation target`; `tri-state
-  driver on 'x' is supported only on a top-level output or inout port (D3)`; `net 'x' is driven by
+  into 'y' is not supported in a concatenation target`; D3's four (EL-29, v4.28): `tri-state drivers on
+  internal net 'x' overlap without driving the same bits (D3)`, `tri-state driver on 'x' mixes a top-level
+  port bit and an internal net (D3)`, `tri-state driver on 'p' of an inout port of a module below the top
+  is not supported (D3)`, `tri-state driver on 'y' of an output port of a module below the top is not supported: the instance may drive a top-level port, where z must stay (D3)`, `net 'x' is driven by inout port 'p' of instance 'u' and by logic at f.v:L:C; an
+  inout pin cannot share a net with converted tri-state drivers (D3)`; `net 'x' is driven by
   inout port 'p' of instance 'u' and by logic at f.v:L:C; internal tri-state nets are not
   supported (D3)`; `array 'w' cannot be a memory (it is written in a combinational block) and
   --nomem2reg is set`.
@@ -2099,7 +2264,7 @@ Other errors, by area (exact texts; `N`, `M`, names and locations filled in):
 - **Processes (EL-34–EL-40)**: `posedge on 'x', which is N bits; a 1-bit signal is needed` (and
   `negedge`); `edge and level events in one event list are not supported`; `for-loop condition is
   not constant (it reads 'x')`; `for-loop initialisation and step must assign the same variable`;
-  `loop variable 'i' is assigned in the loop body`; `loop exceeds 1048576 iterations`; `for-loop never ends: 'k' takes the value 7 again`; `loop creates more than 2097152 IR objects (is it endless?)`; `function call nesting deeper than 256 at 'f'`;
+  `loop variable 'i' is assigned in the loop body`; `loop exceeds 1048576 iterations`; `for-loop never ends: 'k' takes the value 7 again`; `loop creates more than 2097152 IR objects (is it endless?)`; `function call nesting deeper than 1024 at 'f'`;
   `unrolled loops exceed 16777216 iterations in this design`; `function 'f' can be called only
   with constant arguments (it uses 'while')`; `recursive call of 'f' cannot be inlined (its
   arguments are not constant)`; `output argument N of task 't' must be a variable`; `cannot open
@@ -2127,6 +2292,9 @@ specialized twice — warns once, keyed by its parsed node):
 | Q4 | the `DELAY`/`STRENGTH` | `gate delay is ignored` / `gate drive strength is ignored` |
 | S1 | the `SPECIFY_BLOCK` | `specify block is ignored` |
 | S3 | the `TASK_CALL` | `system task '$display' is ignored` (any system task but `$readmemh`/`$readmemb`) |
+| T6 | the `ALWAYS` | `always without an event control treated as always @*` (accepted, not ignored: §8.2) |
+| D3 | the first tri-state driver of the net | `tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)` (accepted: §6.7; once per net) |
+| T9 | the later assignment | `'r' is assigned with both '=' and '<=' (also at f.v:L:C)`, or `... on one control path (also at f.v:L:C); simulation and synthesis may differ` (accepted: §8.9) |
 
 Other warnings: D1's two (EL-36), at the attribute; D2's two (EL-40); D5/M12 (EL-24); M10 `'x' is implicitly
 declared`; T3 (EL-34); E9's two (EL-30: `'===' is treated as '==' (synthesis has no x or z)`,
@@ -2209,7 +2377,7 @@ guards, reported as a located `ODIN3_ERR_PARSE` naming the cap, and lowered in t
 | `ODIN3_ELAB_MAX_TOTAL_ITERATIONS` | 2^24 | all unrolled loop iterations of a run; nested loops multiply, and this stops a 2^20 × 2^20 bomb long before memory does |
 | `ODIN3_ELAB_MAX_EVAL_STEPS` | 2^26 | statements plus expression nodes per top-level constant evaluation (a `while (1)` in a constant function) |
 | `ODIN3_ELAB_MAX_CALL_DEPTH` | 1024 | constant-function recursion and inline nesting; real recursive constant functions are < 64 deep |
-| `ODIN3_ELAB_MAX_INLINE_DEPTH` | 256 | calls inlined inside one another in an expression (C recursion, v4.24); the lower of this and `ODIN3_ELAB_MAX_CALL_DEPTH` applies; the located error is `function call nesting deeper than 256 at 'f'` |
+| `ODIN3_ELAB_MAX_INLINE_DEPTH` | 1024 | calls inlined inside one another (heap records of the call frames, not C stack, since 2D-7; v4.24 had C recursion and 256); the lower of this and `ODIN3_ELAB_MAX_CALL_DEPTH` applies; the located error is `function call nesting deeper than 1024 at 'f'` |
 | `ODIN3_ELAB_MAX_LOOP_OBJECTS` | 2^21 | IR objects (nodes, pins, nets, wires) one unrolled procedural loop may create before it is called endless (v4.24); the cycle check of a loop whose test and step read only its variable stops the classic unsigned countdown first |
 | `ODIN3_ELAB_MAX_REENTRY_DEPTH` | 256 | constant evaluations nested in C (typer callbacks, host re-entries; v4.6): each takes 4–6 KiB of C stack under ASan, where a function frame takes none |
 | `ODIN3_ELAB_MAX_HIER_DEPTH` | 1024 | instance nesting below the top; real designs ≈ 10 (mcml: 7) |
@@ -2379,8 +2547,11 @@ bullets above differ from it, this note and `writer.h` win. The eight difference
    derives the instances). `Cell::known()` is now true for these instances, so Yosys counts only
    their input connections as users, and `opt_clean` *removes* a black-box instance whose
    outputs are unused (without stubs it kept every instance); 2F's `opt_clean` mirrors this (2F
-   §10). Yosys's `write_blif` writes only the low `min(connection, stub port)` bits of a
-   parameterised instance, on both sides of a BLIF comparison.
+   §10). Yosys's `write_blif` writes only the low `min(connection, stub port)` bits of an instance
+   whose type has a module in the design (`backends/blif/blif.cc:428`); the `elab-equiv` back end
+   therefore runs `delete =A:blackbox` before `write_blif` (2D-7b: `single_port_ram` with
+   `DATA_WIDTH 8` had come out 1 bit wide on side A only), so the instances are written at their
+   own widths on both sides.
 8. **Which nets get `wire $n`.** A net is spelled as a net of its own, and declared as a wire,
    exactly when it is live, not constant, and its primary is not a bit of a *named* wire
    (`odin3_proc_sig_is_net`). So the nets of unnamed wires, and nets with no wire at all, are
@@ -2517,7 +2688,7 @@ bin/yosys`, Parmys's; 0.69 `read_rtlil` was also verified to accept the format):
 - **A** (2D under test): `odin3 -p "read_verilog --nolatches F; write_rtlil a.il"`, then
   `yosys -p "read_rtlil a.il; hierarchy -top T; proc; flatten; opt; memory -nomap; opt;
   memory_map; opt -full; techmap; opt -fast; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean;
-  write_blif -gates -undef + unconn a.blif"`;
+  delete =A:blackbox; write_blif -gates -undef + unconn a.blif"`;
 - **B** (oracle): the same script with `read_verilog -sv -nolatches F` in place of
   `read_rtlil a.il`;
 - `tools/equiv-check/equiv-check a.blif b.blif` (exit 0 equivalent).
@@ -2530,7 +2701,7 @@ writer's text is valid RTLIL. The bridge is also 2E's and 2F's oracle later (the
 
 ### 14.4 The 2C handover
 
-`tests/verilog/reject-2d/` (25 cases: 22 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (10 rows), already registered
+`tests/verilog/reject-2d/` (23 cases: 20 rows plus the REJECT parts of N15, P4 and F2) and `tests/verilog/ignore-2d/` (12 rows, T6 and T9 added by 2D-7b), already registered
 by 2C as `verilog_reject_2d`/`verilog_ignore_2d` and skipped while `odin3_elab_run` is a stub,
 turn on with 2D; their `.err`/`.warn` texts are §9's tables. The project corpus's Verilog cases
 (2B §10.2 `--with-frontend`) run: the positive phase-2 cases (`auto_top`, `param_instance`,
@@ -2683,7 +2854,7 @@ and reported, never relaxed (2A's rule).
 | 9 | automatic top = the single uninstantiated module, else an error | deepest hierarchy, ties to the last defined | — | DESIGN §4.0 and the project corpus; the micro harness passes `--top` |
 | 10 | any undeclared identifier is an implicit net (warning) | same | only net lvalues and port connections | Parmys compatibility |
 | 11 | an edge on a multi-bit signal is an error | same | uses the LSB | Yosys |
-| 12 | T9, T10, A4 are errors | accepted (A4/T10 later flagged by `check`; T9 silently, verified) | T9/T10 legal in simulation | the coverage audit's REJECT verdicts |
+| 12 | T10, A4 are errors (T9 was one until 2D-7b, see #77) | accepted (A4/T10 later flagged by `check`) | T10 legal in simulation | the coverage audit's REJECT verdicts |
 | 13 | `===`/`!==`: exact fold when both constant; a wildcard compare over the 0/1 positions when one side has x/z constant bits (warning); `$eq`/`$ne` otherwise | `$eqx`/`$nex`; `techmap` drops the x bits, giving the same wildcard compare (verified through the Parmys script) | x/z compared literally (always false against a signal in hardware) | matches Parmys's netlist |
 | 14 | no `$pos` or `$sshl`; extension is wiring; constants folded at elaboration | `$pos`, `$sshl`; folding in `opt` | — | IR-1; same netlist after `opt` |
 | 15 | memories are collected into one `$mem` at elaboration (raw-index ports, simlib applies `OFFSET`) | `$memrd`/`$memwr`/`$meminit` + `memory_collect` (raw-index ports) | — | the IR has no memory record |
@@ -2716,7 +2887,7 @@ and reported, never relaxed (2A's rule).
 | 42 | a non-constant `x[b -: w]` is one `$sub(b, w − 1)` on the index as generated, `x[b +: w]` has no cell for the base; `B_SIGNED` follows the index | `-:`: `$add(zext32(b), 1)`, `$sub(_, w)`, then a 32-bit signed `$shiftx`; `+:`: `$add(zext32(b), 0)` and the same `$shiftx` (verified on 0.55) | — | the plan mandates `b − (w − 1)`; the values are equal modulo 2^32 and the `$shiftx` reads the same bits (Task 18 fix round 1) |
 | 43 | in a self-determined position (the operand of a reduction, `!`, `&&`, `||`, a ternary condition or a concatenation) an inner unary `~`, `-` or `+` over a signed name (`!(-s)`, `{~s, a}`) keeps `A_SIGNED` 1 on its cell | the inner cell has `A_SIGNED` 0: genrtlil passes no sign hint down a unary operator (verified on 0.55) | — | parameter only, the values are identical; deferred (Task 18 fix round 2) |
 | 44 | one lvalue naming a net twice (`assign {n4[0], n4[0]} = c4[1:0] + 2'd1;`) is A4's error at the second part | accepted: one `$add` with two `Y` pins on `n4[0]`; the later `check` warns "multiple conflicting drivers" (verified on 0.55: `yosys -p "read_verilog t.v; proc; opt; check"`) | legal but multiply driven | an invalid IR otherwise (rule 4); the review carried it from Task 18 (Task 19) |
-| 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port, and are D3's error anywhere else | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19) |
+| 45 | a ternary with an all-`z` branch and `bufif`/`notif` become one `$tribuf` on a top-level output or inout port; on any other net they become logic (#79) | a `$mux` with a `z` input (and "Yosys has only limited support for tri-state logic"), `$tribuf` only after `tribuf` | tri-state nets | D3: the IR allows tristate drivers only on a bus that reaches a top port (Task 19); #79 supersedes the error for internal nets |
 | 46 | the port widths of a source `(* blackbox *)` instance are exact for its parameter set (v4.19), as Yosys 0.55's connections are: a width expression over the cell's parameters, one table entry per set; two sets with equal IR integer values but literals of different sizes and a port width that depends on the size (`$bits`-like ranges, `~W`) are a located error; the cell's parameters are all of the set's (see #30) | the cell's connections have the widths of its own set (`hierarchy` derives the module for the check and drops it; verified on 0.55: `bb #(.W(16))` beside a default `bb` in one module, ranges `[W-1:0]`, `[W:0]`, `[2*W-1:0]`, a fixed `[7:0]` port, two parameters with one default, a string override; `module \bb` keeps the defaults' widths); an **instance array** is sliced by the *default* module's port width (`bb #(.W(16)) v[1:0] (.a(x2))` with a 16-bit `x2` is accepted, the elements extended to 16 bits; with a 32-bit one it is an error "Array cell … has invalid port vs. signal size") | — | 2D checks and slices an overridden array by its own set's widths (EL-10), so it accepts `x2` of 2 x 16 bits (Yosys refuses) and reads a 16-bit one as EL-10 does, not as Yosys's default-width slices; the `$bits`-like clash above has no Yosys counterpart (Yosys never names the set); `write_rtlil` stubs show `attribute \dynports 1` when a port width varies between sets, where Yosys sets it for any parameter-dependent range A string override of a black-box parameter whose default is numeric (`bb #(.MODE("fast")) u` against `parameter MODE = 1`) is the located error `value of parameter 'MODE' of 'bb' is not an integer`; Yosys 0.55 accepts it (verified: `hierarchy -top top; write_rtlil` keeps `parameter \MODE "fast"` on the cell and `parameter \MODE 1` on the module): fail-closed and rare, deferred. |
 | 47 | in step (7) a wired bit with one driver is that driver's net merged into the wire's | no gate for one driver, the driver connected to the wire | — | the driver's net is only known after the assignments; the merge is pin-based (Task 19) |
 | 48 | `(* nomem2reg *)` on an array exempts it from rules 2-6 only: a net array is still registers (rule 1), and a module's `(* nomem2reg *)` exempts every array of the module from rules 2-6 | `(* nomem2reg *)` skips the array, rule 1 included (a module's skips the whole mem2reg block): `(* nomem2reg *) wire [3:0] w [0:3]` stays a memory (verified on 0.55: `yosys -p "read_verilog t.v; write_rtlil"` shows `memory width 4 size 4 \w`) | — | the words of a net array are driven by `assign`, which no `$mem` write port can take; EL-27 already says rules 2-6 (Task 20) |
@@ -2733,20 +2904,29 @@ and reported, never relaxed (2A's rule).
 | 59 | a call frame's variables are plain process-local temporaries: `O` pins assigned in the case tree and by no sync action | Yosys makes `$0\f$func$…` temporaries for them and a sync action `update \f$func$…v 4'x` that drives the wire to x (verified on 0.55: `yosys -p "read_verilog f.v; write_rtlil"` on `q <= inc(d)`) | — | the sync action is a dead register after `opt`; EL-38's "no flip-flop for `v` or `inc`" |
 | 60 | the actual of an input is read directly by the body (`$add` reads `d`, not the frame's `v`) | Yosys 0.55 does the same: `connect \A \d` (blocking assignment updates `rv`) | — | none: the brief's "reading the frame temporary of `v`" is the net the process also drives |
 | 61 | a continuous-context call is a `$proc` whose output is the result variable's own wire; the expression reads that wire | Yosys wraps the call in `always @*` over `\f$func$…$result` and `connect`s the lhs to it | — | none |
-| 62 | outputs of an `if`/`case` inside an unrolled loop are counted over every iteration's branches by the scan; the generator folds the taken branch per iteration | Yosys unrolls first, so a branch dead in every iteration writes nothing and its target is no output | scan-time unrolling (cost: the body scanned once per iteration) | none since v4.24 (review I2): emit drops every output no action assigns (its hold, sync update and driver claim), so the variable-indexed loop write `y[i] = a[i]` of a half of `y` holds and claims only that half, a branch dead in every iteration leaves its target unheld, and two blocks writing disjoint halves are no conflict; a real overlap is still `'y[3]' is assigned in two always blocks` (`call-bridge/loops_disjoint_halves.v`); **open (2D-7, PR 2D-6 re-review N1):** a loop write under a runtime `if`/`case` (`if (a[i]) w[i] = b[i]; else w[i] = 0;`) still claims the whole of `w`, because the switch's exit action covers the whole object, so two blocks writing disjoint halves that way get a false `'w[0]' is assigned in two always blocks`. Yosys accepts it. The design is rejected loudly, never miscompiled. |
+| 62 | outputs of an `if`/`case` inside an unrolled loop are counted over every iteration's branches by the scan; the generator folds the taken branch per iteration | Yosys unrolls first, so a branch dead in every iteration writes nothing and its target is no output | scan-time unrolling (cost: the body scanned once per iteration) | none since v4.24 (review I2): emit drops every output no action assigns (its hold, sync update and driver claim), so the variable-indexed loop write `y[i] = a[i]` of a half of `y` holds and claims only that half, a branch dead in every iteration leaves its target unheld, and two blocks writing disjoint halves are no conflict; a real overlap is still `'y[3]' is assigned in two always blocks` (`call-bridge/loops_disjoint_halves.v`); a loop write under a runtime `if`/`case` (`if (a[i]) w[i] = b[i]; else w[i] = 0;`) claims only the bits some arm assigns (PR 2D-6 re-review N1, fixed in 2D-7b: a switch's exit action drives a target bit only where an arm assigned its case temporary), so two blocks writing disjoint halves that way are no conflict (`call-bridge/loops_if_else_both_halves.v` and the three siblings) while a real overlap is still rejected. |
 | 63 | a register-array word with a variable index is supported for one-dimensional arrays only; a multi-dimensional one is the located error `non-constant index into the multi-dimensional register array 'm' is not supported` | Yosys's `mem2reg_as_needed_pass2` handles every dimension | the row-major address as a case selector | rare; the flattened address needs `$mul`/`$add` cells before the switch |
 | 64 | the variables of a memory write join the open switches when the statement is built, and the root's start-of-block actions go in then | Yosys inserts `addr = x; data = x; en = 0` at the start of the top block when it simplifies the statement, before any process is generated | the scan listing them (it cannot count the writes of an unrolled loop or a call) | none in the body: the same cases, actions and temporaries a listed variable would give (bridge `mem-bridge`) |
 | 65 | a word of a memory inside a nested concatenation target, and a non-constant bit or part select of a word, are located errors | Yosys splits the outer concatenation only (a nested one is not split) and shifts the data and the enable for a variable select | — | rare; both are refused loudly, never mis-written |
 | 66 | two `always` blocks writing one word in one cycle: the later block's port wins (the priority is `$mem` v1's implicit later-port-wins; no `WR_PRIORITY_MASK` is emitted) | Yosys gives a port priority over the ports of its own process only (`current_memwr_visible`); across processes the result is undefined | IEEE 1364-2005 11: a race | `elab-equiv` reports NOT equivalent on a source that enables both (the bridge sources keep the enables exclusive) |
-| 67 | `$readmemh/b` inside an `if` or a loop of an `initial` is a located error | Yosys reads it when the condition is constant or the loop unrolls | — | rare; the statement-level `$readmem` is the supported form |
+| 67 | `$readmemh/b` inside a loop of an `initial`, or an `if` whose condition is not constant, is a located error | Yosys reads it when the loop unrolls or the condition is constant | an `if` with a constant condition is the branch it takes (2D-7b: `if (INITIALIZE_FIFO == "yes") $readmemh(...)` in `dnnweaver.v`, else-if chains followed); a loop is not unrolled here | rare; the statement-level `$readmem` is the supported form |
 | 68 | `$readmemh/b` loads the words that fit and warns once per call (`$readmemh of 'f' dropped N words outside the array (the first at address A)`) when the file has words past the last array word or after an `@addr` outside the array | Yosys drops those words silently | IEEE 1364-2005 17.2.8: an address outside the range is an error and the load ends | a write is never dropped silently; the in-range words are kept |
 | 69 | a register array read with a variable index past its end (`m[ra]`, 3-bit `ra`, 4 words) reads x | Yosys's mem2reg truncates the address to `ceil_log2(size)` bits, so `ra` = 4..7 aliases words 0..3 | IEEE 1364-2005 7.4.1: an out-of-range read is x | `elab-equiv` reports NOT equivalent on such a source (the bridge sources keep the index in range); #50 covers constant indices |
 | 70 | a task call as a statement of an `initial` block is not applied: `task call in an initial block is not applied and is ignored` | Yosys applies the call (verified on 0.55): when an `always` block also assigns the register, `initial tk(7);` gives it the `init` attribute 7; when none does, it drives the register constant (`connect \r 4'0111`) | — | rare; assign in the `initial` block itself |
 | 71 | a signed `case` with a negative sized literal item beside a wider unsigned item (`case (sa) -4'sd1: ...; 8'd15: ...`, `sa` a `reg signed [3:0]`) takes the first item as the 8-bit `8'hFF` (the unary minus is context-determined to the case width, IEEE 1364-2005 5.5.1), so for `sa = -1` (zero-extended to `8'h0F` beside the unsigned `8'd15`) the second item matches | Yosys 0.55 gives the first item `8'h0F` (verified by `elab-equiv`: for `sa = -1` Yosys takes the first item, `y0 = 1`, Odin the second, `y0 = 3`; `sa == -4'sd1` agrees, only the case path differs) | IEEE 1364-2005 5.5.1 | Yosys evaluates the item without the case width. The bridge sources keep the items of one signedness |
 | 72 | a function with a side effect on a variable `r`, called in an lvalue index while the right-hand side reads `r` (`y0[fi(a)] = r[0]`): the target is generated first, so the call's side effect is applied before the right-hand side reads `r` | Yosys 0.55 orders the call and the right-hand side's read of `r` otherwise (verified: `elab-equiv` reports NOT equivalent) | IEEE 1364-2005 leaves the order open (11.4) | a race by the standard; the bridge sources have no side effect in an index |
 | 73 | `$readmemh/b` truncates a word with non-zero digits beyond the memory's width and warns once per call (`$readmemh of 'f' truncated N words wider than the memory's W bits (the first, 'w', at line L)`); leading zeros are no loss and no warning | Yosys 0.55 warns per word (`Literal has a width of 8 bit, but value requires 9 bit`) and truncates | IEEE 1364-2005 17.2.8: the file's word is sized to the memory | a write is never dropped silently; one warning per call as #68 (review I4) |
-| 74 | a call in an expression is inlined by C recursion (`pg_run` to the walker to `pg_call_hook` to `pg_run`); the nesting is capped at 256 (`function call nesting deeper than 256 at 'f'`), so a deep chain of non-recursive functions is a located error, not a stack overflow | Yosys inlines by AST rewriting to any depth | running the call after the expression walk (the walker hands back a placeholder) | the hoist is 2D-7's (plan constraint ledger: "No recursion in `src/`", deviation recorded); the cap is far above real designs (chains of 3 to 10) |
+| 74 | a call is inlined from an explicit frame stack (2D-7, review I6): the expression walker is suspendable at a call, the statement code (an assignment's value, an if's condition, a call's actuals) pushes a generation frame for it and the frame loop pushes a call frame above, so one call inside another costs heap, never C stack; the nesting is capped at 1024 (`function call nesting deeper than 1024 at 'f'`, a resource cap). An index, a case selector or item, or a copy-out target that holds a call is still run by a nested frame loop (C recursion), capped at 128 levels (`function call nesting deeper than 128 at 'f'`); so is a call nested in a call's actuals in a continuous `assign` (`assign y = f(f(f(a)));`, PR 2D-7b review M9: the same cap and message; `tests/tools/test_inline_stack.py` runs 1000 deep under a 2 MiB stack); the cells, nets and names are those of the former recursion | Yosys inlines by AST rewriting to any depth | hoisting the calls out of the expression into temporaries first: it would run every callee body before the operators to its left, renumbering their nets, and read the variables a callee writes after it | the output is byte-identical to the recursive version (checked on the call, proc, case and mem bridges, the coverage rows and the micros); the rest of the C-recursive sites are exotic (a call inside an index or selector nested over 128 deep) |
 | 75 | an unrolled `for` that never ends (`reg [3:0] k; for (k = 7; k >= 0; k = k - 1)`) is the located error `for-loop never ends: 'k' takes the value 7 again` when its test and step read only the variable (Brent's cycle check), else `loop creates more than 2097152 IR objects (is it endless?)` (`ODIN3_ELAB_MAX_LOOP_OBJECTS`) or the iteration cap `loop exceeds 1048576 iterations` | Yosys 0.55 has no limit: it unrolls until it runs out of memory | the caps of EL-37 | review M3: the cap used to fire only after 5.7 GB of cells |
+| 76 | an `always` with no event control (`always x = a;`, `always #5 clk = ~clk;`) is `always @*`, with the warning "always without an event control treated as always @*" (T6; Peter 2026-10-13, PHASE2 #20) | Yosys 0.55 reads it the same way: the process has no sync rule, so it is combinational (verified: micros `task_endtask/{inside_port,outside_port,task_call_function,task_call_task}` are `elab-equiv`-equivalent) | an `always` with no timing runs forever in simulation (a zero-delay loop hangs) | accepted for Parmys compatibility; the warning names the risky construct |
+| 77 | a bit assigned by both `=` and `<=` is accepted with a warning (T9; Peter 2026-10-13, PHASE2 #20); on one control path the warning says that simulation and synthesis may differ | Yosys 0.55 accepts it without a word: each assignment is an action and the last on a path wins (verified: `elab-equiv` equivalent for `q = a; q <= b;`, `q <= b; q = a;`, if/case arms, `full/matmul`; `syntax/multi_clock_reader_writer` equals Yosys's netlist under a merged-clock abstraction, `equiv-check` being single-clock) | a simulator applies the nonblocking update after the blocking ones, so `q <= b; q = a;` ends as `b` there and `a` in the netlist | Parmys compatibility; the warning marks the case where the netlist and a simulation disagree |
+| 78 | `adder #(W) u (...)` (a positional or named width, bus connections) on the library's 1-bit hard `adder` with no `--lib` unit of that name is the located error "too many parameter values for cell type 'adder' (1 given, 0 parameters); the library cell has fixed port widths (an n-bit adder is a soft module Parmys supplies: read its vtr_primitives.v with read_verilog --lib, spec 3.1a)". With `read_verilog --lib vtr_primitives.v` the instance takes the library unit (the n-bit soft `adder #(WIDTH)`), with a warning (§3.1a precedence); micros `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` elaborate and are `elab-equiv` equivalent to Yosys 0.55 with the same file read as a library (2D-7b) | Parmys reads `vtr_primitives.v`, whose `adder #(WIDTH=1)` is a soft module (`assign {cout, sumout} = a + b + cin`, buses a, b, sumout, 1-bit cin and cout) that its adder pass maps to a chain of 1-bit hard adders (the goldens' `adder_hard_block` netlist) | the 2D result is the soft module's `$add`, not the chain (see #80); a 1-bit `adder u(...)` keeps the hard cell even when the library is read | `lib/vtr.o3lib` declares `adder` as the 1-bit hard block the BLIF goldens instantiate (ports a, b, cin, cout, sumout; no parameter), and the writers, the BLIF reader's IR-7b check and the simulator rely on that; the n-bit instance needs the soft module, which the library read supplies. Bit-exact: the function is the same (`elab-equiv`), the structure is not |
+| 79 | a tri-state driver on an internal net (a net with no bit on a top-level output or inout port once all merges are done) becomes mux logic, as `tribuf -logic`: the drivers of one net list are one `$pmux` (A = x, B = data with the last driver first, S = enables) and the warning "tri-state drivers on internal net 'data' converted to logic (no driver enabled: x; several enabled: undefined)" names it (D3; Peter 2026-10-13, PHASE2 #20). With several enables on at once the value is undefined (the `$pmux` rule; the netlist is the OR of the selected data); with none it is x; a net with a tri-state and an ordinary driver, overlapping but different bit lists, a driver over port and internal bits, a module-below-top `inout` or `output` port (review I1: the instance may drive a top-level port) and a child `inout` pin on the net stay located errors (§6.7) | Yosys 0.55 plain (`read_verilog; proc`) shorts the drivers: every driver's data reaches the net whatever the enables (micro `syntax/multi_assignment` becomes `busout = enable ? data : f` with `data` driven by the four data inputs at once, so `equiv-check` rejects its b.blif: "more than one driver"). With `tribuf -logic` after `proc; flatten` (`elab-equiv --yosys-tribuf`) the micro and `tests/elab/accept/D3_{single_driver,bus_one_hot,disjoint_halves}.v` are equivalent. `tribuf -logic` also keeps a `$tribuf` on any net with a bit on an output port, which 2D matches; it merges with the newest driver first and 2D follows it | a simulator gives z while no driver is on and x for contention; the netlist gives x (a don't care `opt` may resolve to any driver) and the OR of the data | Parmys reads the micro (it shorts the drivers, the same as plain Yosys); the ruling follows the oracle's `tribuf -logic`, the one Yosys flow that treats the construct as a bus; the warning names the risky net | known divergence for 2H: the netlist is not the golden Parmys gives for `multi_assignment` (Parmys keeps only `bus0`; Yosys shorts the four drivers), so the 2H table shows "differs" there. Constant enables (`1'b1 ? d : 'bz`) are not comparable with Yosys (it folds them into a plain connection, equiv-check then sees two drivers); 2D gives a `$pmux` over the constant selects (unit test `test_tribuf_constant_enables`). The netlist is not the golden Parmys gives for `multi_assignment` (shorted drivers): it models a bus, which is what the source says. The don't care case is the part a user must not rely on Another known divergence for 2H (PR 2D-7b review M8): `y = bus | const` (a bus read through logic) is converted by 2D (`z | 0` is x by Verilog semantics), while Yosys `opt` folds `bus | 0` into the top-level output and keeps the `$_TBUF_`s, so `elab-equiv --yosys-tribuf` exits 2 (`only in B: $_TBUF_`); it is loud, never a false verdict. |
+| 80 | a `read_verilog --lib` unit that shares a hard or black-box cell type's name (`vtr_primitives.v`'s `adder`, `multiply`, `single_port_ram` beside a tech library) is chosen per instance by the parameter rule of §3.1a, not always (Parmys: always the soft module, because it reads no cell of that name) | Parmys resolves every instance of `adder` to the soft module of `vtr_primitives.v` and maps it to hard adders later, in its own pass; the structural result for `adder #(W)` is a chain of 1-bit hard adders, ours a W-bit `$add` (2D-7b: `micro/adder_hard_block` and `micro/hard_adder_cin_propagation` are equivalent to Yosys but not netlist-identical to the Parmys goldens until 3E maps soft adders) | a 1-bit or parameterless `adder`, and `single_port_ram`/`dual_port_ram` with the cell's own parameters, stay the hard cells even when `vtr_primitives.v` is read; Parmys would build the soft RAM wrapper and map it later | an unconditional unit-over-cell rule would turn every 1-bit hard adder of a design into `$add` silently (review M5); a unit-never rule would make `adder #(W)` unreachable. The parameter rule keeps the golden-compatible meaning of every instance the cell can express and warns on each one it cannot | Bit-exact in function; the choice is logged (info or warning), never silent |
+| 81 | an unused declared signal (a `reg`, an `integer` a `for` unrolls, a `wire` nothing reads) is a net with no pins; the IR check (rule 4) does not warn on a pinless net of a *named* wire. A callee's unused local gets an unnamed frame wire with no pin, which is deleted when the module is emitted (`rule 4: net has no pins` stays for a net of no wire or of an unnamed wire: a leak) | Yosys keeps a declared wire with no connections until `opt_clean`, and drops nothing at `read_verilog` | warning on every declared unused signal (286 on mkPktMerge: the warning hid real leaks); deleting declared signals (a design may name them in a later pass) | Peter's ruling of 2026-10-12 (PHASE2 #6): "net has no pins" is not a warning; IR.md rule 4 states the exemption; the only output change is the removal of one unreferenced `wire $nN` line per unused callee local |
+| 82 | a variable-offset select write (`y[{1'b1,s} +: 2] = a;`, the case method of EL-32) followed in the same block by a `case`/`casez`/`casex` with two arms that write the same values (two empty `?` arms and a default; two arms with equal bodies) is emitted as written: the write's temporaries feed both arms' case temporaries, so one mux output feeds two slices of one `$pmux` | Yosys 0.55 `opt` (`opt_muxtree`) loses the write when `proc` is followed by `opt`: the first slice's select knowledge is written into the data pins of the mux the two slices share (the same bug as 2F's OP-13, §17 row 20 of the 2F spec: `n = $pmux(...)` feeding `$pmux(B = {n n}, S = {a1 !a1})` gives `y = 0` after `opt_muxtree` and `y = 2'b10` before; a hand-written `case (s)` source shows it on Yosys's own front end; Yosys 0.69 fixes it) | — | not a 2D miscompile (Task 28's seed 23 report said so; the root-cause check: `eval` of the RTLIL before opt, 2E `proc` + 2F `opt` and Yosys 0.69 agree, 0.55 does not). `elab-equiv` against 0.55 says NOT equivalent for the five sources of `tests/verilog/oracle-bug/`; `elab_oracle_muxtree_bug` pins both verdicts (0.69 equivalent, 0.55 not) and goes stale when 0.55 is fixed. 2D keeps Yosys's per-case temporaries (EL-36) rather than emit a different shape for one oracle's bug |
+| 83 | `mem[i][p:q] <= d;` and `mem[i][b +: w] <= d;` (a bit or part select of a word of a register array whose index is a variable, in a process, including a `for` loop variable) is the located error `non-constant index into 'mem' is not supported here` | accepted (verified on 0.55: `mem[i0][2:0] <= a[2:0]` in a `for` loop) | — | the whole-word case of EL-27 writes every word's bits through one case over the words; a sub-word write needs a per-word bit range in the lvalue and in `pg_regs_apply` (reads and writes, blocking and non-blocking). Fail-closed and rare (Task 28 seed 134); the fuzz generator avoids it (`elab_profile.mem_index`). |
+| 84 | a non-ANSI port merged with a `reg` or net that has unpacked dimensions (`output q; reg [3:0] q [0:1];`, either order) is the located error `'q' is a port and its declaration has unpacked dimensions; a port cannot be an array` at the declarator with the dimensions (PR 2D-7b review M10; it was dropped in silence) | Yosys 0.55 accepts it: the one-bit port `q` stays undriven and the array `q` is a separate memory (or registers `q[0]`, `q[1]`), so a design that writes `q[0]` does not drive the port | keeping the port and the array apart as Yosys does: nothing in a real design relies on it, and it needs a second symbol of one name in stage 2 | `test_port_with_unpacked_dimensions` (both orders; the legal merge stays clean); Yosys 0.55 probe |
 
 ## 18. Implementation split (EL-51)
 

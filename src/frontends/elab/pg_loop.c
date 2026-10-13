@@ -310,7 +310,7 @@ static odin3_status for_assign(odin3_pg *pg, odin3_ast_id loop, uint32_t slot, c
     odin3_ast_id assign = odin3_ast_child(pg->e2->elab, loop, slot);
     need nd = {loop, odin3_ast_child(pg->e2->elab, assign, 2), what};
     odin3_status st = need_constant(pg, &nd);
-    return st != ODIN3_OK ? st : pg_exec_assign(pg, assign);
+    return st != ODIN3_OK ? st : pg_exec_assign_sync(pg, assign);
 }
 
 /* The test of a for loop: false ends it; a true condition admits an iteration and runs the body. */

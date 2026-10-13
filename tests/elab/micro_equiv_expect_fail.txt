@@ -6,3 +6,7 @@
 #
 # Empty until the first full bridge run (Task 26 ran only the five smallest micros; the
 # controller's `ODIN3_HEAVY_OK=1 ctest --preset sweep -R elab_equiv_micro` fills it in).
+
+# 2D-7b review I3: T9 accepted `=` and `<=` mixed across two clocks. equiv-check is single-clock; the
+# 33-latch design is equal to Yosys's netlist under a merged-clock abstraction only (spec 17 #77).
+syntax/multi_clock_reader_writer.v [more than one clock domain] equiv-check cannot read a netlist with two clocks (tool limit; 'unsupported: more than one clock domain'); equal to Yosys's netlist under a merged-clock abstraction (33 latches, single-clock check), spec 17 #77

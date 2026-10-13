@@ -167,6 +167,23 @@ static bool at_cap(odin3_rv *rv, odin3_loc at) {
     return true;
 }
 
+/* Parses one preprocessed stream into the store: a UNIT, or the stream's located errors. */
+static odin3_status parse_text(odin3_rv *rv, odin3_bytes text, odin3_srcbuf_id buffer,
+                               uint32_t given) {
+    odin3_vp_stream vs = {text, buffer, given};
+    odin3_ast_id unit = {0};
+    odin3_status st = odin3_verilog_parse_stream(&rv->vl, rv->ast, &vs, &unit);
+    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+}
+
+odin3_status odin3_rv_parse_kept(odin3_rv *rv, const odin3_ast_stream *kept) {
+    if (at_cap(rv, (odin3_loc){0})) {
+        return ODIN3_OK;
+    }
+    rv->bytes += kept->text.len;
+    return parse_text(rv, kept->text, kept->buffer, kept->given);
+}
+
 odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
     if (at_cap(rv, src->at)) {
         return ODIN3_OK;
@@ -182,10 +199,16 @@ odin3_status odin3_rv_read(odin3_rv *rv, const odin3_pp_source *src) {
         return st;
     }
     rv->bytes += stream.text.len;
-    odin3_vp_stream vs = {stream.text, stream.stream, src->given};
-    odin3_ast_id unit = {0};
-    st = odin3_verilog_parse_stream(&rv->vl, rv->ast, &vs, &unit);
-    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+    if (rv->keep) {
+        odin3_ast_stream kept = {src->given, src->resolved, src->library, stream.stream,
+                                 stream.text};
+        st = odin3_ast_keep_stream(rv->ast, &kept);
+        if (st != ODIN3_OK) {
+            rv->vl.stop = true;
+            return st;
+        }
+    }
+    return parse_text(rv, stream.text, stream.stream, src->given);
 }
 
 /* --- steps 4 and 5 ------------------------------------------------------------------------- */
@@ -302,9 +325,11 @@ static odin3_status seal(odin3_rv *rv, double start) {
 /* Steps 2–6 after the run is open: the files, the libraries, the two checks, the verdict. */
 static odin3_status read_all(odin3_rv *rv, const odin3_rv_opts *opts) {
     odin3_status st = ODIN3_OK;
+    rv->keep = opts->keep_streams;
     for (uint32_t i = 0; st == ODIN3_OK && i < opts->nfiles && !rv->vl.stop; i++) {
         st = odin3_rv_read(rv, &opts->files[i]);
     }
+    rv->keep = false;
     rv->ndesign = odin3_ast_root_count(rv->ast);
     st = st != ODIN3_OK ? st : odin3_rv_resolve_libraries(rv);
     st = st != ODIN3_OK ? st : check_duplicates(rv);
@@ -345,6 +370,7 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
  * for odin3_elab_run's step 1) and the files (odin3_bytes views into the script). */
 typedef struct rv_args {
     bool parse_only;
+    bool lib; /* --lib: keep the modules as library units for later reads (2D-7b) */
     odin3_elab_opts elab;
     odin3_vec files;
 } rv_args;
@@ -353,6 +379,8 @@ typedef struct rv_args {
 static bool set_flag(odin3_bytes word, rv_args *out) {
     if (odin3_pass_arg_is(word, "--parse-only")) {
         out->parse_only = true;
+    } else if (odin3_pass_arg_is(word, "--lib")) {
+        out->lib = true;
     } else if (odin3_pass_arg_is(word, "--nolatches")) {
         out->elab.nolatches = true;
     } else if (odin3_pass_arg_is(word, "--nomem2reg")) {
@@ -363,6 +391,18 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         return false;
     }
     return true;
+}
+
+/* --lib reads and keeps; it elaborates nothing, so --auto-blackbox (a design read's option) has
+ * nothing to act on and is refused rather than silently dropped. */
+static odin3_status check_lib_args(const rv_args *args) {
+    if (args->lib && args->elab.auto_blackbox) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: --lib cannot be combined with --auto-blackbox (it is an option of "
+                  "the design read)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
 }
 
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
@@ -383,7 +423,7 @@ static odin3_status parse_args(odin3_bytes args, rv_args *out) {
         }
         *slot = word;
     }
-    return ODIN3_OK;
+    return check_lib_args(out);
 }
 
 /* One file given directly: its path as given, resolved against the working directory. */
@@ -495,14 +535,31 @@ static odin3_status collect_sources(odin3_design *design, const rv_args *args, o
 
 /* --- the pass: step 8 ------------------------------------------------------------------------ */
 
-/* Hands the store to the design; with --parse-only it stays held until the design is destroyed
- * (AST-15), otherwise 2D's entry runs with the pass's options (its step 3 drops the parsed store,
- * kept under ALL, AST-16; the drop here is then a no-op, plan point (a)). */
+/* The flags of a --lib read on every root of its store (the carrier of later reads, 2D-7b). */
+static odin3_status mark_library(odin3_ast *ast, const rv_args *args) {
+    unsigned flags = ODIN3_UNIT_LIB;
+    flags |= args->elab.nolatches ? ODIN3_UNIT_NOLATCHES : 0U;
+    flags |= args->elab.nomem2reg ? ODIN3_UNIT_NOMEM2REG : 0U;
+    return odin3_ast_mark_units(ast, 0, odin3_ast_root_count(ast), (uint8_t)flags);
+}
+
+/* Hands the store to the design; with --lib it stays held for later reads, with --parse-only it
+ * stays held until the design is destroyed (AST-15), otherwise 2D's entry runs with the pass's
+ * options (its step 3 drops the parsed store, kept under ALL, AST-16; the drop here is then a
+ * no-op, plan point (a)). */
 static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args *args) {
-    odin3_status st = odin3_design_set_ast(ctx->design, ast);
+    odin3_status st = args->lib ? mark_library(ast, args) : ODIN3_OK;
+    st = st != ODIN3_OK ? st : odin3_design_set_ast(ctx->design, ast);
     if (st != ODIN3_OK) {
         odin3_ast_destroy(ast);
         return st;
+    }
+    if (args->lib) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "read_verilog --lib: %" PRIu32 " units kept as library units (elaborated where a "
+                  "later read instantiates them)",
+                  odin3_ast_root_count(ast));
+        return ODIN3_OK;
     }
     if (args->parse_only) {
         return ODIN3_OK;
@@ -523,7 +580,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs);
     odin3_ast *ast = NULL;
     if (st == ODIN3_OK) {
-        odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL};
+        odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
         st = odin3_read_verilog_files(design, &opts, &ast);
     }
     st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
@@ -534,11 +591,15 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
-    "read_verilog [--parse-only] [--nolatches] [--nomem2reg] [--auto-blackbox] [<file>...]: read "
+    "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
+    "[<file>...]: "
+    "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
-    "memories unless forced, --auto-blackbox makes an undefined module a black box",
+    "memories unless forced, --auto-blackbox makes an undefined module a black box; --lib keeps "
+    "the modules as library units for later reads (elaborated, under this read's --nolatches and "
+    "--nomem2reg, only where a later design instantiates them)",
     read_verilog_run,
     NULL,
     false,

@@ -146,14 +146,19 @@ static bool reject_stmt(odin3_elab1 *e1, odin3_ast_id node) {
     }
 }
 
-/* T6: an always block must start with an event control (`always_comb` and the like need none). */
-static bool reject_always(odin3_elab1 *e1, odin3_ast_id node) {
+/* T6 (accepted, Peter 2026-10-13): an `always` that does not start with an event control (no
+ * timing at all, or a delay) is `always @*`, as Yosys reads it; the warning is once per node.
+ * `always_comb` and the like need none. */
+static bool note_always(odin3_elab1 *e1, odin3_ast_id node) {
     const odin3_ast *ast = e1->parsed;
     odin3_ast_id first = kid(ast, node, 0);
     bool ok = odin3_ast_sub(ast, node) != ODIN3_AST_ALWAYS_ALWAYS ||
               (is_kind(ast, first, ODIN3_AST_TIMING_STMT) &&
                is_kind(ast, kid(ast, first, 0), ODIN3_AST_EVENT_CONTROL));
-    return !ok && rej(e1, node, "always block without an event control is not supported");
+    if (!ok) {
+        odin3_elab1_warn_once(e1, node, "always without an event control treated as always @*");
+    }
+    return false;
 }
 
 /* An event list holds edge events or level events, not both. */
@@ -208,7 +213,7 @@ static bool reject_call(odin3_elab1 *e1, odin3_ast_id node) {
 static bool reject_free(odin3_elab1 *e1, odin3_ast_id node) {
     switch (odin3_ast_kind_of(e1->parsed, node)) {
     case ODIN3_AST_ALWAYS:
-        return reject_always(e1, node);
+        return note_always(e1, node);
     case ODIN3_AST_EVENT_CONTROL:
         return reject_events(e1, node);
     case ODIN3_AST_CALL:

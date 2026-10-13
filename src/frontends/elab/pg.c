@@ -20,6 +20,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -33,10 +34,9 @@ static odin3_u64map **pg_maps(odin3_pg *pg, size_t index) {
     odin3_u64map **const all[] = {
         &pg->out_of, &pg->group, &pg->lv,  &pg->rv,    &pg->slot_head, &pg->dead_nets, &pg->reads,
         &pg->listed, &pg->seen,  &pg->swl, &pg->folds, &pg->active,    &pg->assigned};
+    _Static_assert(sizeof all / sizeof all[0] == PG_MAP_COUNT, "PG_MAP_COUNT");
     return all[index];
 }
-
-enum { PG_MAP_COUNT = 13 };
 
 /* An empty map: the same one when it is empty already. */
 static odin3_status map_fresh(odin3_u64map **map) {
@@ -78,17 +78,26 @@ static void vecs_init(odin3_pg *pg) {
     odin3_vec_init(&pg->loops, sizeof(pg_loop));
     odin3_vec_init(&pg->calls, sizeof(pg_callrec));
     odin3_vec_init(&pg->fsyms, sizeof(uint32_t));
+    odin3_vec_init(&pg->walks, sizeof(odin3_elab2_walk));
+    odin3_vec_init(&pg->cruns, sizeof(pg_crun *));
 }
 
-static void vecs_free(odin3_pg *pg) {
+/* Every vector of the generator, with the address of each (the block's lists and the scratch). */
+static odin3_vec *pg_vec(odin3_pg *pg, size_t index) {
     odin3_vec *const all[] = {&pg->outs,   &pg->chunks,  &pg->undo,  &pg->pool,      &pg->dead,
                               &pg->cmps,   &pg->acts,    &pg->cases, &pg->sws,       &pg->syncs,
                               &pg->slots,  &pg->frames,  &pg->work,  &pg->items,     &pg->runs,
                               &pg->run_l,  &pg->run_r,   &pg->blk,   &pg->blk_marks, &pg->sw_pool,
                               &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1, &pg->sw_rv,     &pg->cmp_sigs,
-                              &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late};
-    for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
-        odin3_vec_free(all[i]);
+                              &pg->loops,  &pg->calls,   &pg->fsyms, &pg->late,      &pg->walks,
+                              &pg->cruns};
+    _Static_assert(sizeof all / sizeof all[0] == PG_VEC_COUNT, "PG_VEC_COUNT");
+    return all[index];
+}
+
+static void vecs_free(odin3_pg *pg) {
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        odin3_vec_free(pg_vec(pg, i));
     }
 }
 
@@ -100,6 +109,11 @@ void odin3_pg_destroy(odin3_pg *pg) {
         odin3_u64map_destroy(*pg_maps(pg, i));
     }
     odin3_u64map_destroy(pg->kinds);
+    odin3_u64map_destroy(pg->kind_at);
+    odin3_u64map_destroy(pg->mixed_seen);
+    odin3_u64map_destroy(pg->kind_head);
+    odin3_vec_free(&pg->kind_more);
+    odin3_vec_free(&pg->fwires);
     odin3_u64map_destroy(pg->loopout);
     odin3_u64map_destroy(pg->tvis);
     vecs_free(pg);
@@ -115,11 +129,16 @@ void odin3_elab2_pg_free(odin3_elab2 *e2) {
 
 odin3_status pg_block_reset(odin3_pg *pg) {
     pg_frames_unwind(pg);
+    /* every driver aborts above its base, so no call run or walk is left to leak its saved lvalue
+     * or to skip restoring pg->lvs (review M6): a future mistake is a crash here, not corrupt state
+     */
+    assert(pg->cruns.len == 0 && pg->walks.len == 0);
     odin3_vec *const lists[] = {
         &pg->outs,  &pg->chunks,    &pg->undo,    &pg->pool,   &pg->dead,    &pg->cmps,
         &pg->acts,  &pg->cases,     &pg->sws,     &pg->syncs,  &pg->slots,   &pg->frames,
         &pg->blk,   &pg->blk_marks, &pg->sw_pool, &pg->sw_ctx, &pg->sw_nets, &pg->sw_t1,
-        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms,   &pg->late};
+        &pg->sw_rv, &pg->cmp_sigs,  &pg->loops,   &pg->calls,  &pg->fsyms,   &pg->late,
+        &pg->walks, &pg->cruns};
     for (size_t i = 0; i < sizeof lists / sizeof lists[0]; i++) {
         odin3_vec_clear(lists[i]);
     }
@@ -134,8 +153,10 @@ odin3_status pg_block_reset(odin3_pg *pg) {
     pg->failed = false;
     pg->scan_frame = false;
     pg->scanning = false;
+    pg->exiting = false;
     pg->has_memw = false;
     pg->groups = 0;
+    pg->block_no = ++pg->block_seq;
     odin3_u64map_destroy(pg->e2->bound);
     pg->e2->bound = NULL;
     pg->cur = PG_ROOT;
@@ -143,6 +164,53 @@ odin3_status pg_block_reset(odin3_pg *pg) {
         st = ODIN3_ERR_NO_MEMORY;
     }
     return st;
+}
+
+odin3_status pg_block_save(odin3_pg *pg, pg_saved *sv) {
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        sv->vecs[i] = *pg_vec(pg, i);
+    }
+    for (size_t i = 0; i < PG_MAP_COUNT; i++) {
+        sv->maps[i] = *pg_maps(pg, i);
+        *pg_maps(pg, i) = NULL;
+    }
+    sv->bound = pg->e2->bound;
+    sv->call = pg->e2->call;
+    pg->e2->bound = NULL;
+    sv->scalars =
+        (pg_saved_scalars){pg->always,     pg->control,  pg->body,    pg->prov,        pg->cur,
+                           pg->groups,     pg->block_no, pg->edge,    pg->track_reads, pg->failed,
+                           pg->scan_frame, pg->scanning, pg->has_memw};
+    vecs_init(pg); /* the saved ones are kept, not freed: these are the nested block's own */
+    return pg_block_reset(pg);
+}
+
+void pg_block_restore(odin3_pg *pg, const pg_saved *sv) {
+    vecs_free(pg);
+    for (size_t i = 0; i < PG_MAP_COUNT; i++) {
+        odin3_u64map_destroy(*pg_maps(pg, i));
+        *pg_maps(pg, i) = sv->maps[i];
+    }
+    for (size_t i = 0; i < PG_VEC_COUNT; i++) {
+        *pg_vec(pg, i) = sv->vecs[i];
+    }
+    odin3_u64map_destroy(pg->e2->bound);
+    pg->e2->bound = sv->bound;
+    pg->e2->call = sv->call;
+    const pg_saved_scalars *sc = &sv->scalars;
+    pg->always = sc->always;
+    pg->control = sc->control;
+    pg->body = sc->body;
+    pg->prov = sc->prov;
+    pg->cur = sc->cur;
+    pg->groups = sc->groups;
+    pg->block_no = sc->block_no;
+    pg->edge = sc->edge;
+    pg->track_reads = sc->track_reads;
+    pg->failed = sc->failed;
+    pg->scan_frame = sc->scan_frame;
+    pg->scanning = sc->scanning;
+    pg->has_memw = sc->has_memw;
 }
 
 odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {
@@ -163,7 +231,15 @@ odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {
     odin3_elab2_lvalue_init(&pg->slv);
     pg->lvs.procedural = true;
     pg->kinds = odin3_u64map_create(0);
-    odin3_status st = pg->kinds != NULL ? pg_block_reset(pg) : ODIN3_ERR_NO_MEMORY;
+    pg->kind_at = odin3_u64map_create(0);
+    pg->mixed_seen = odin3_u64map_create(0);
+    pg->kind_head = odin3_u64map_create(0);
+    odin3_vec_init(&pg->kind_more, sizeof(pg_kind_rec));
+    odin3_vec_init(&pg->fwires, sizeof(pg_fwire));
+    odin3_status st =
+        pg->kinds != NULL && pg->kind_at != NULL && pg->mixed_seen != NULL && pg->kind_head != NULL
+            ? pg_block_reset(pg)
+            : ODIN3_ERR_NO_MEMORY;
     if (st != ODIN3_OK) {
         odin3_pg_destroy(pg);
         return st;
@@ -297,14 +373,20 @@ static odin3_status act_slots(odin3_pg *pg, const pg_act *act, uint32_t index) {
 }
 
 /* The nets a user assignment's action drives: emit drops the outputs no such action drives, so a
- * variable-indexed loop write holds and claims only the bits it writes (PR 2D-6 review I2). */
+ * variable-indexed loop write holds and claims only the bits it writes (PR 2D-6 review I2). A
+ * switch's exit action (pg->exiting) drives a target bit only where some arm assigned its case
+ * temporary, so a loop write under a runtime `if` claims only the bits an arm writes (N1). */
 static odin3_status note_assigned(odin3_pg *pg, const pg_act_req *req) {
     for (uint32_t i = 0; i < req->n; i++) {
-        if ((req->lhs[i] & ODIN3_SB_CONST) == 0) {
-            odin3_status st = odin3_u64map_put(pg->assigned, (odin3_kv){req->lhs[i], 1});
-            if (st != ODIN3_OK) {
-                return st;
-            }
+        if ((req->lhs[i] & ODIN3_SB_CONST) != 0) {
+            continue;
+        }
+        if (pg->exiting && !odin3_u64map_get(pg->assigned, req->rhs[i], NULL)) {
+            continue;
+        }
+        odin3_status st = odin3_u64map_put(pg->assigned, (odin3_kv){req->lhs[i], 1});
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;
@@ -622,43 +704,189 @@ static odin3_status place_of(const odin3_pg *pg, odin3_ast_id node, odin3_strbuf
                                                 odin3_design_diag_paths(pg->e2->design));
 }
 
-/* T9, once per statement: `'r' is assigned with both '=' and '<=' (also at f.v:L:C)`. */
-static odin3_status mixed_error(odin3_pg *pg, const pg_asg *asg, uint32_t bit, odin3_ast_id first) {
+/* Two cases of one block (0-based ids). */
+typedef struct pg_case_pair {
+    uint32_t early, late;
+} pg_case_pair;
+
+/* Whether case pair.late follows case pair.early in the same switch (the arms are linked in
+ * order, 1-based). */
+static bool same_switch(const odin3_pg *pg, pg_case_pair pair) {
+    for (uint32_t at = ((const pg_case *)odin3_vec_cat(&pg->cases, pair.early))->next; at != 0;
+         at = ((const pg_case *)odin3_vec_cat(&pg->cases, at - 1U))->next) {
+        if (at - 1U == pair.late) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether two cases of one block lie in different arms of one switch, so that at most one of the
+ * assignments in them runs per evaluation (arms of an if or case); anything else can run in the
+ * same evaluation (the root, an arm and what follows its switch, arms of different switches). */
+static bool paths_exclusive(const odin3_pg *pg, pg_case_pair paths) {
+    for (uint32_t i = paths.early; i != PG_ROOT;
+         i = ((const pg_case *)odin3_vec_cat(&pg->cases, i))->parent) {
+        for (uint32_t j = paths.late; j != PG_ROOT;
+             j = ((const pg_case *)odin3_vec_cat(&pg->cases, j))->parent) {
+            if (i != j &&
+                (same_switch(pg, (pg_case_pair){i, j}) || same_switch(pg, (pg_case_pair){j, i}))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* T9 (accepted, Peter 2026-10-13): where is the other kind's first assignment (block number << 32
+ * | its case); whether it and the one being made can run in one evaluation of one block. */
+static bool one_control_path(const odin3_pg *pg, uint64_t where) {
+    uint32_t block = (uint32_t)(where >> GROUP_SHIFT);
+    uint32_t then = (uint32_t)(where & UINT32_MAX);
+    return block == pg->block_no && !paths_exclusive(pg, (pg_case_pair){then, pg->cur});
+}
+
+/* The T9 warning, once per variable and kind of warning: `'r' is assigned with both '=' and '<='
+ * (also at f.v:L:C)`, and on one control path also that simulation and synthesis may differ. */
+static odin3_status mixed_warn(odin3_pg *pg, const pg_mixed_subject *subj, odin3_ast_id first,
+                               bool same_path) {
     odin3_elab2 *e2 = pg->e2;
-    odin3_wirebit wb = ((const odin3_elab2_lvbit *)odin3_vec_cat(&asg->lv->bits, bit))->wb;
+    uint64_t key = (subj->id << 1) | (same_path ? 1U : 0U);
+    uint64_t seen = 0;
+    if (odin3_u64map_get(pg->mixed_seen, key, &seen)) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_u64map_put(pg->mixed_seen, (odin3_kv){key, 1});
     odin3_strbuf place;
     odin3_strbuf_init(&place);
-    odin3_status st = place_of(pg, first, &place);
+    st = st != ODIN3_OK ? st : place_of(pg, first, &place);
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_strbuf_appendf(
+                   &text, "'%s' is assigned with both '=' and '<='%s (also at %s)%s", subj->name,
+                   same_path ? " on one control path" : "", place.data != NULL ? place.data : "?",
+                   same_path ? "; simulation and synthesis may differ" : "");
     if (st == ODIN3_OK) {
-        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, asg->stmt),
-                          "'%s' is assigned with both '=' and '<=' (also at %s)",
-                          wb.wire.v != 0 ? odin3_strtab_get(odin3_design_strtab(e2->design),
-                                                            odin3_wire_name(e2->mod, wb.wire))
-                                         : "net",
-                          place.data != NULL ? place.data : "?");
-        st = ODIN3_ERR_PARSE;
+        odin3_elab2_warn_msg(e2, odin3_ast_loc(e2->elab, subj->stmt), text.data);
     }
+    odin3_strbuf_free(&text);
     odin3_strbuf_free(&place);
     return st;
 }
 
-/* T9 (EL-41): a bit assigned with both `=` and `<=`, in one block or several. The first
- * assignment of each bit is remembered for the module. */
+/* The first assignment of each kind to a net, kept for the module (key: net << 1 | blocking). */
+static odin3_status mixed_record(odin3_pg *pg, odin3_ast_id stmt, uint64_t key) {
+    uint64_t at = ((uint64_t)pg->block_no << GROUP_SHIFT) | pg->cur;
+    odin3_status st = odin3_u64map_put(pg->kinds, (odin3_kv){key, stmt.v});
+    return st != ODIN3_OK ? st : odin3_u64map_put(pg->kind_at, (odin3_kv){key, at});
+}
+
+/* Whether an assignment of the kind key at `at` is already recorded: the first, or in the list of
+ * further ones. The list holds one record per distinct path, so it is bounded by the block's
+ * control structure and not by the number of assignments. */
+static bool mixed_known(const odin3_pg *pg, uint64_t key, uint64_t at) {
+    uint64_t first = 0;
+    uint64_t head = 0;
+    if (odin3_u64map_get(pg->kind_at, key, &first) && first == at) {
+        return true;
+    }
+    (void)odin3_u64map_get(pg->kind_head, key, &head);
+    for (; head != 0;
+         head = ((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->next) {
+        if (((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->at == at) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Records the assignment under key: the first one in the maps, a later one on a new path in the
+ * list. */
+odin3_status pg_mixed_remember(odin3_pg *pg, odin3_ast_id stmt, uint64_t key) {
+    uint64_t unused = 0;
+    if (!odin3_u64map_get(pg->kinds, key, &unused)) {
+        return mixed_record(pg, stmt, key);
+    }
+    uint64_t at = ((uint64_t)pg->block_no << GROUP_SHIFT) | pg->cur;
+    if (mixed_known(pg, key, at)) {
+        return ODIN3_OK;
+    }
+    uint64_t head = 0;
+    (void)odin3_u64map_get(pg->kind_head, key, &head);
+    pg_kind_rec *rec = odin3_vec_push(&pg->kind_more);
+    if (rec == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *rec = (pg_kind_rec){at, stmt.v, (uint32_t)head};
+    return odin3_u64map_put(pg->kind_head, (odin3_kv){key, (uint64_t)pg->kind_more.len});
+}
+
+/* A recorded assignment of the other kind that can run in the same evaluation as the one being
+ * made: its statement in *stmt. The first one is tried by the caller. */
+static bool mixed_later_pair(const odin3_pg *pg, uint64_t other_key, uint32_t *stmt) {
+    uint64_t head = 0;
+    (void)odin3_u64map_get(pg->kind_head, other_key, &head);
+    for (; head != 0;
+         head = ((const pg_kind_rec *)odin3_vec_cat(&pg->kind_more, head - 1U))->next) {
+        const pg_kind_rec *rec = odin3_vec_cat(&pg->kind_more, head - 1U);
+        if (one_control_path(pg, rec->at)) {
+            *stmt = rec->stmt;
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The warnings for one subject against the other kind's record: the first assignment of that
+ * kind, and when that one is on an exclusive path, the later ones (each warning is once per
+ * variable). */
+odin3_status pg_mixed_check(odin3_pg *pg, const pg_mixed_subject *subj, uint64_t other_key) {
+    uint64_t other = 0;
+    uint64_t where = 0;
+    if (!odin3_u64map_get(pg->kinds, other_key, &other) ||
+        !odin3_u64map_get(pg->kind_at, other_key, &where)) {
+        return ODIN3_OK;
+    }
+    bool same = one_control_path(pg, where);
+    odin3_status st = mixed_warn(pg, subj, (odin3_ast_id){(uint32_t)other}, same);
+    uint32_t later = 0;
+    if (st == ODIN3_OK && !same && mixed_later_pair(pg, other_key, &later)) {
+        st = mixed_warn(pg, subj, (odin3_ast_id){later}, true);
+    }
+    return st;
+}
+
+/* The subject of target bit `bit` of asg: its wire's name (else "net"), keyed by the wire (else
+ * the net). */
+static pg_mixed_subject mixed_net_subject(const odin3_pg *pg, const pg_asg *asg, uint32_t bit) {
+    odin3_wirebit wb = ((const odin3_elab2_lvbit *)odin3_vec_cat(&asg->lv->bits, bit))->wb;
+    odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, bit);
+    return (pg_mixed_subject){
+        wb.wire.v != 0 ? (uint64_t)wb.wire.v : ((uint64_t)1 << GROUP_SHIFT) | net.v,
+        wb.wire.v != 0 ? odin3_strtab_get(odin3_design_strtab(pg->e2->design),
+                                          odin3_wire_name(pg->e2->mod, wb.wire))
+                       : "net",
+        asg->stmt};
+}
+
+/* T9 (EL-41, accepted): a bit assigned with both `=` and `<=`, in one block or several, follows
+ * Yosys's semantics (every assignment is an action; the last one on a path wins) with a warning.
+ * The assignments of each kind to a bit are remembered for the module, one per distinct path. */
 odin3_status pg_check_mixed(odin3_pg *pg, const pg_asg *asg) {
-    uint64_t mine = (uint64_t)(asg->blocking ? 2U : 1U) << GROUP_SHIFT;
+    uint64_t mine = asg->blocking ? 1U : 0U;
     for (uint32_t i = 0; i < asg->lv->nets.len; i++) {
         odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, i);
-        uint64_t prev = 0;
+        uint64_t mine_key = ((uint64_t)net.v << 1) | mine;
         if (net.v == 0) {
             continue;
         }
-        if (!odin3_u64map_get(pg->kinds, net.v, &prev)) {
-            odin3_status st = odin3_u64map_put(pg->kinds, (odin3_kv){net.v, mine | asg->stmt.v});
-            if (st != ODIN3_OK) {
-                return st;
-            }
-        } else if ((prev & ~(uint64_t)UINT32_MAX) != mine) {
-            return mixed_error(pg, asg, i, (odin3_ast_id){(uint32_t)prev});
+        pg_mixed_subject subj = mixed_net_subject(pg, asg, i);
+        odin3_status st = pg_mixed_remember(pg, asg->stmt, mine_key);
+        st = st != ODIN3_OK ? st : pg_mixed_check(pg, &subj, mine_key ^ 1U);
+        if (st != ODIN3_OK) {
+            return st;
         }
     }
     return ODIN3_OK;

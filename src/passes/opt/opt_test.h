@@ -57,4 +57,14 @@ void odin3_opt_merge_test_set_key_hash(uint64_t (*fn)(const void *key, size_t le
  */
 void odin3_opt_reduce_test_set_key_hash(uint64_t (*fn)(const void *key, size_t len));
 
+#ifndef NDEBUG
+/*
+ * Debug builds only: opt_dff's check of the FFs it skipped (dff.c). skip, when set, is asked for
+ * every FF and a true answer makes opt_dff skip that FF whatever the journal says; violations,
+ * when not NULL, counts the skipped FFs the check finds would change instead of aborting. Both
+ * NULL restores the defaults. Tests use it to inject a skip that is wrong.
+ */
+void odin3_opt_test_dff_skip(bool (*skip)(uint32_t node), uint32_t *violations);
+#endif
+
 #endif

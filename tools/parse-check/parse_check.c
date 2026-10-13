@@ -109,7 +109,7 @@ odin3_status pc_read_file(const char *path, pc_read *out) {
     odin3_pp_source src;
     odin3_status st = pc_source(out->design, path, &src);
     if (st == ODIN3_OK) {
-        odin3_rv_opts opts = {&src, 1, (odin3_passrun_id){1}, &out->tokens};
+        odin3_rv_opts opts = {&src, 1, (odin3_passrun_id){1}, &out->tokens, false};
         st = odin3_read_verilog_files(out->design, &opts, &out->ast);
     }
     if (st == ODIN3_OK && odin3_ast_root_count(out->ast) != 1) {

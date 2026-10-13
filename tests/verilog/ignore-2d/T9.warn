@@ -1,0 +1,2 @@
+T9.v:5:5: warning:
+'r' is assigned with both '=' and '<=' on one control path (also at T9.v:4:5); simulation and synthesis may differ

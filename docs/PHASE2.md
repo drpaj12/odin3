@@ -64,7 +64,8 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
    - D2 initial values: constant `initial` assignments, declaration initialisers and
      `$readmemh/b` set FF/RAM init values; other `initial` content ignored with a warning;
    - D3 tri-state: parse all; `z` drives elaborate to `$tribuf` only on top-level `inout`/output
-     ports; an internal tri-state net is a located error until the IR has a tri-state net model;
+     ports; an internal tri-state net is a located error until the IR has a tri-state net model
+     (superseded by #20: it becomes `$pmux` logic, as `tribuf -logic`);
    - D4 `wand/wor/triand/trior` resolve as AND/OR of their drivers; `uwire` is a `wire` with a
      single-driver check;
    - D5 illegal-but-Parmys-accepted forms (`input reg`, `input integer`) accepted with a located
@@ -636,9 +637,189 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     a lookup of the cell's parameter values (docs/IR.md IR-8, IR-7b; `src/ir/celltype.h`). Merged
     with 2D-5 (#86).
 
+18. **2D elaboration: what landed, the amendments, the evidence and the open items** (2D Tasks
+    1–27, 2026-10-11 … 13; spec `docs/specs/2026-10-11-2D-elaboration-design.md` v4.26; plan
+    `docs/plans/2026-10-11-2D-elaboration-plan.md`). Agent defaults throughout; Peter may override
+    any of them.
+    - **Landed:** PR 2D-1 (#54: IR changes, `write_rtlil`, ABI additions), 2D-2 (#56: constants),
+      2D-3 (#79: hierarchy, parameters, specializations, binder), 2D-4 (#81: generate,
+      declarations, REJECT/IGNORE), 2D-5 (#86: wires, expressions, drivers, memories, exact
+      black-box widths), 2D-6 (#88: processes), 2D-7a (#90: `elab-check`, `elab-sweep`, coverage
+      rows and goldens, the project-corpus frontend, the micro sweep), 2D-7b (this entry: the VTR
+      sweep, `bench_elab`).
+    - **The three IR changes, landed, for Peter's review** (agent defaults ruled in #13, confirmed
+      in #14; IR-8's table width rules were approved in #17):
+      - **A** — nine registry cells with Yosys simlib semantics: `$neg $xnor $reduce_xnor
+        $reduce_bool $logic_not $logic_and $logic_or $shiftx $pow` (`src/ir/cells/`);
+      - **B** — processes as `$proc` cells with real `I`/`O` ports and an opaque `BODY`
+        (`ODIN3_VAL_PROC`, validated by `verify`), the `ODIN3_CT_PROCESS` type flag, the
+        per-module process counter and `odin3_pass_def.processes` (default `REFUSE`; IR-19);
+      - **C** — `odin3_port_spec` gains `has_range`, `msb`, `lsb`, `is_signed` (no ABI mirror).
+    - **ABI v4 kept, unreleased** (ruling I1, plan point (c); spec v4.4 EL-47: the "one bump" text
+      is gone). Every 2D addition is additive in 1D's sense. **Decision item:** the one bump of
+      `ODIN3_ABI_VERSION` is made at the first release or at the Phase-2 close, whichever is first.
+    - **Peter's rulings of 2026-10-12 (19:51), recorded:** (3) stage 1 specializes black-box
+      definitions per parameter set, so each instance has exact port widths (landed with 2D-5:
+      `elab1_bbox.c`, `elab2_bbox.c`); (4) Task 18's Yosys-matching widths are kept (comparison
+      operands keep their own widths; a ternary's `$mux` is at the branch width and then extended);
+      (5) a value on both declarations of a port stays an error (spec §17 #37); (6) the post-read
+      check "net has sinks and no driver" stays a warning and "net has no pins" becomes info (a
+      small follow-up; the 2D ledger tracks it).
+    - **Spec amendments and errata** (`docs/specs/2026-10-11-2D-elaboration-design.md`, header and
+      change notes):
+      - the two v4 amendments from the plan review, both following Yosys 0.55: EL-39's write
+        temporaries start each block as `addr = x`, `data = x`, `en = 0` (not `en = 0` alone: a
+        path that never writes left `addr`/`data` unassigned, a combinational loop after `proc`);
+        EL-30 lowers `~&a`/`~|a` to `$logic_not` of the reduction (not `$not`);
+      - **erratum of plan point (h)**: a sync on an `OUT` position is legal for edge and level
+        syncs (§8.1 is normative and carries re-review N1); §14.1's "a sync signal that is an OUT
+        position" among the rejected bodies is a stale v2 phrase;
+      - **spec v4.4 errata** (the 2D-1 final review, I1 and M1): §13 gains an implementation note
+        with the exact `write_rtlil` text 2D-1 ships (`src/backends/rtlil/writer.h`; eight places
+        where it differs from §13's bullets, and the `attribute \top 1` line for the design's top),
+        which 2E-1 and 2F-1 read; EL-47 says the ABI stays at the unreleased v4 and that IR
+        change C has no ABI mirror;
+      - the divergences from Yosys/Parmys and from IEEE 1364-2005 are spec §17 (75 rows, #1–#75),
+        by reference; the open one for Peter is EL-8 (the first `defparam` wins, as in Yosys;
+        IEEE 1364-2005 §12.2 makes the last one win).
+    - **Parmys exceptions added to #4** (micros Parmys itself rejects; for these 2D rejects too, the
+      reasons are in `tests/elab/micro_expect_fail.txt`, 79 entries): the 20 micros 2C parses and
+      2D's elaboration rejects (a name declared twice, `'x' has two drivers`, a recursive call that
+      cannot be inlined, a procedural `assign`, a non-constant index into a multi-dimensional
+      register array, …); the 8 `*_failure` micros; the 14 SystemVerilog named-argument micros; the
+      3 splicing micros (#11); the 13 includer-macro fragments (#12); the 12 illegal-Verilog-2005
+      micros of #15. On top of #15's list.
+    - **Exit-bar exceptions that need Peter** (the 2D-7b triage of the micro sweep, which has
+      539 files: 460 pass, 79 listed, 0 unexpected). These 9 have Parmys goldens, so they are not
+      Parmys exceptions; each is listed in `tests/elab/micro_expect_fail.txt`:
+      - (Superseded by #20: T6, D3 and T9 are now accepted with warnings; the adder gap stays an
+        explained error.) 7 are rejected on purpose, soundness first (Yosys accepts them): `always` without an event
+        control (T6: `keywords/task_endtask/{inside_port,outside_port,task_call_function,
+        task_call_task}`), a tri-state driver on an internal net (D3: `syntax/multi_assignment`), a
+        bit assigned by both `=` and `<=` (T9: `full/matmul`, `syntax/multi_clock_reader_writer`);
+      - 2 are gaps for 2D-7b: positional width `#(W)` and bus connections on the hard `adder`
+        (`micro/adder_hard_block`, `micro/hard_adder_cin_propagation`; Parmys builds a W-bit adder
+        chain from the 1-bit hard block).
+    - **Plan points (a)–(bb) as agent defaults** (plan section "Spec points made exact here";
+      Task 27 logs them here, each reversible):
+      - (a) `odin3_elab_run(ctx, design, parsed, opts)` takes the options; the parsed store is
+        handed to the design first and dropped by the entry's step 3, never destroyed by it;
+      - (b) the ABI form is `odin3_ast_elaborate(design, ast, opts)` on a held, sealed
+        `ELABORATED` store; (c) ABI v4 stays (above); (d) IR change C has no ABI mirror;
+      - (e) `ODIN3_VAL_PROC` is one 8-byte-aligned blob in canonical case/switch/action order,
+        written field by field into zeroed memory (so copy, compare, `compact` and tombstones need
+        nothing); `verify` checks the layout without allocating;
+      - (f) the nine cells, then `$proc`, are appended after `$sop` (built-in IDs 0–52 do not
+        move; the count is 63); (g) `$proc`: ports `I`/`O`, defaults `I_WIDTH` 0, `O_WIDTH` 1, an
+        empty `BODY` that `verify` rejects, flag `ODIN3_CT_PROCESS` = 32, and only the built-in
+        may have a `PROC` parameter;
+      - (h) a sync on an `OUT` position is legal (erratum above); (i) the `processes` check runs
+        in `run_def` before `odin3_pass_run_begin`, so a refused pass opens no run;
+      - (j) the header split (`cval.h`, `ceval.h`, `elab.h`, `elab_internal.h`, `pg.h`,
+        `elab_test.h`, `elab1.h`); (k) the run-level iteration cap crosses the seam without a
+        field (stage 2 starts at the number of indexed `GEN_BLOCK`s);
+      - (l) not-yet-built constructs were a located error `elaboration is not available yet (2D)`
+        until the tables emptied (`elab_no_pending` asserts they are empty);
+      - (m) `--x-report` and the defined-output miter stay in 2H (below);
+      - (n) every sweep runs through `tools/heavy-run` in the 6G slice (the 9G slice for
+        `sweep-xl`), every child through `memcap.py`; `--jobs J` is refused when `J × cap` exceeds
+        60% of `MemTotal` or the slice; builds go through `tools/build-locked`; the 64 VTR and
+        Koios files are one set, smallest first, `lenet.v` last;
+      - (o) a micro's `--top` is the first `.model` of its Parmys golden (`tools/elab-check/
+        micro-top`); (p) Yosys 0.55 is found beside VTR's build and must say `Yosys 0.55`; 0.69 is
+        the nightly drift check only; (q) name collisions take `$2`, `$3`, … in specialization
+        order, and a name over 128 bytes is hashed before the check; (r) a `$proc` prints as
+        `$proc$<file>:<line>$<ID>`; (s) one sigspec spelling, `odin3_proc_sigspec`;
+      - (t) `tests/bench/bench_elab.c`, run per file by `elab-sweep --bench`; (u) the test files
+        `test_elab_stage1_*.c` and `test_elab_stage2_*.c`; (v) a construct elaborated several times
+        warns once; (w) the texts §9 leaves open; (x) `processes` is `OK` for `read_project`,
+        `dump_project`, `preprocess` and `read_verilog`; (y) a relative `$readmem` path resolves
+        against the directory of the call's file; (z) the text and count fixes (54 hand-written
+        rows; `$clog2`'s error text); (aa) the cap texts; (bb) the spelling of `NUMBER`s stage 1
+        creates (32-bit decimal integers for counts and bounds, an unsized parameter keeps its
+        base, everything else binary).
+    - **Evidence tools** (Tasks 25–27): `elab-check` (125 coverage rows, 20 with `--nolatches`, 125
+      `--stage1`); `elab-equiv` (the Yosys 0.55 bridge, exit 3 = oracle crash); `elab-sweep` (micro
+      sweep `verilog_micro_elab` and `elab_equiv_micro`, the VTR sweep `verilog_vtr_elab` and
+      `elab_equiv_vtr` / `elab_equiv_vtr_xl`, `--bench`); `bench-report` (the §15 targets, the
+      smoke). The expected-failure lists are `tests/elab/{micro_expect_fail,micro_equiv_expect_fail,
+      vtr_expect_fail,vtr_equiv_expect_fail}.txt`. A memory-cap kill, a signal and a timeout are
+      never listed as expected (Task 26's rule), so the plan's candidate `out of memory (cap 8G)`
+      entry for `koios/lenet.v` is the `xl` run class in `vtr_equiv_expect_fail.txt` instead: the
+      `elab_equiv_vtr_xl` run reports the Yosys side's peak RSS or its cap outcome.
+    - **Heavy runs** (controller, Release build, lanes idle; `ODIN3_HEAVY_OK=1`):
+      ```
+      tools/build-locked --preset release -j6
+      ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^(verilog_vtr_elab|bench_elab_smoke)$'
+      ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^elab_equiv_vtr$'
+      ODIN3_HEAVY_OK=1 ODIN3_HEAVY_XL_OK=1 ctest --preset sweep-xl -R '^elab_equiv_vtr_xl$'  # no agent running
+      VTR=$VTR_ROOT/vtr_flow/benchmarks/verilog
+      tools/heavy-run tools/elab-check/elab-sweep --odin3 build/release/odin3 \
+        --bench build/release/bench_elab --bench-report elab --techlib lib/vtr.o3lib \
+        --jobs 1 --mem-cap 3G --cap-for koios/lenet.v=5G --expect-fail tests/elab/vtr_expect_fail.txt \
+        --root $VTR $VTR/*.v $VTR/koios/*.v
+      ```
+    - **Results.** Smoke subset (Task 27, Release, dev machine: the five smallest designs and
+      `mcml.v`; the three `koios/*_include.v` files are the listed `define-only fragments):
+      ```
+      bench: file=mcml.v bytes=650837 parse_ms=19.197 stage1_ms=25.487 bind_ms=3.580 stage2_ms=250.370 elab_ms=279.437 parsed_nodes=78229 parsed_bytes=4235356 elab_nodes=67039 elab_bytes=3369948 modules=36 specs=0 cells=2449 procs=121 mems=0 nodes=3372 nets=335520 wires=6057 pins=592190 est_pins_B=21555716 est_nets_B=16104960 est_nodes_B=161856 est_wires_B=387648 est_bodies_B=2928856 est_elab_B=3369948 est_total_B=44508984 est_stage1_B=7605304 ir_B=42099248 rss_kib=59552
+      elab-sweep: 9 files, 6 passed, 3 expected failures, 0 unexpected failures, 0 listed but passing, 0 oracle crashes, 0 skipped, 0 stale entries, 0.3 s
+      bench targets (spec 15):
+        ok     mcml.v stage 1 + stage 2: 0.279 s (target <= 0.5 s)
+        ok     mcml.v peak RSS: 60.981 MB (target <= 200 MB)
+      ```
+      The full 64-file bench output (every line, `lenet.v` last, with the §15 target block), the
+      `verilog_vtr_elab` run log and the `elab_equiv_vtr` / `elab_equiv_vtr_xl` summaries replace
+      this block when the controller has run them; a missed target is investigated with its
+      estimate terms and reported, never relaxed (2A's rule).
+    - **2H backlog item** (plan point (m); spec §14.6 items 3–5, owned by 2H): `equiv-check
+      --x-report` (when two netlists are not equivalent, recompute with every primary output and
+      latch input whose sequential fan-in cone reaches `unconn` or an x constant removed, and report
+      the removed outputs by name), its latch handling and its exit-code contract, and the
+      defined-output miter (x as a free input `u`; prove that Odin III's output agrees with Parmys
+      wherever it is defined). Their input is `elab-equiv --a-only --keep DIR`, which writes side
+      A's netlist as `a.blif` with Parmys's `write_blif -gates -undef + unconn` convention for
+      comparison with the goldens. The 2H table has four outcomes per design: identical,
+      equivalent, equivalent outside x-cones, differs (#13's exit-bar ruling).
+
 19. **IR-6 unchanged** (Peter, 2026-10-13: "do recommended"). `opt` does not compact; scripts run
     `compact` after `opt` (the Phase 2 script is `opt; compact`). This withdraws the 2F Task 13
     IR-6 amendment (spec 2F §17 #39). The sub-passes never compact either.
+
+20. **Peter 2026-10-13: accept T6/D3/T9 with warnings** (2D-7b carry; Peter: "accept all 3").
+    Parmys accepts the seven micros that use them, so 2D accepts the constructs with a located
+    warning each (spec §8.2, §8.9, §9.2, §17 #76-#78):
+    - **T6**: an `always` with no event control is `always @*` ("always without an event control
+      treated as always @*"). Micros `keywords/task_endtask/{inside_port,outside_port,
+      task_call_function,task_call_task}` are `elab-equiv` equivalent to Yosys 0.55.
+    - **T9**: `=` and `<=` on one bit follow Yosys (every assignment is an action, the last one on
+      a path wins) and warn, naming the variable; on one control path the warning also says that
+      simulation and synthesis may differ. `full/matmul` is equivalent; `syntax/
+      multi_clock_reader_writer` is equivalent under a merged-clock abstraction (`equiv-check` is
+      single-clock). T10 (two blocks, one bit) stays an error.
+    - **D3**: an internal tri-state net becomes mux logic as `tribuf -logic` does (`$pmux` of the
+      data by the enables, x when none is enabled); top-level output and inout tri-states keep
+      their handling. **Done** (spec §6.7, §9.2, §17 #79): micro `syntax/multi_assignment` and
+      `tests/elab/accept/D3_{single_driver,bus_one_hot,below_top}.v` are `elab-equiv --yosys-tribuf`
+      equivalent. Yosys 0.55's plain flow shorts the four drivers' data, so the equivalence is
+      judged against `tribuf -logic` after `proc; flatten`, not the plain Parmys flow. Several enables
+      at once: undefined, as a `$pmux`; a mixed tri-state and ordinary net stays an error.
+    - **Adder**: `adder #(W)` on the hard `adder` is an error unless `vtr_primitives.v` is read with
+      `read_verilog --lib` (the library-unit read below, spec §3.1a, §17 #78): the library cell is the 1-bit hard block;
+      Parmys's n-bit adder is a soft module of that file. With it the micros elaborate and are
+      `elab-equiv` equivalent; matching Parmys's chain of 1-bit hard adders is 3E's (§17 #80).
+    - **The library-unit read** (agent default, spec §3.1a, §17 #78, #80; the S-P splice of
+      2F-5 and the two `adder #(W)` micros). `read_verilog --lib [--nolatches] [--nomem2reg] FILE...`
+      keeps a read's modules as library units for later reads (not Yosys `-lib`: no black boxes).
+      They are never top candidates, are dropped without a word when unused, and each is elaborated
+      where a design instantiates it under the flags of the read that supplied it (the design read's
+      flags do not reach it). A unit named like a hard cell (`adder`) replaces the cell for an
+      instance only when the instance's `#()` does not fit the cell, with a warning; otherwise the
+      cell stays, with an info line. `tools/opt-check/sp-splice` (2F-5, not on this branch) reads
+      `vtr_primitives.v` with `--lib --nomem2reg` in place of its plain read; `elab-equiv` and
+      `elab-sweep` take `--lib FILE`. The loose ends of the 2D-7b review (M5) are closed: the "3E"
+      wording, the exemption of a library unit from the cell-name check, and the structural gap to the
+        Parmys goldens (§17 #80).
 
 21. **2E `proc`: what landed, the agent defaults and the bench** (2E Task 13, 2026-10-13; spec §19,
     §20, §23; plan points (a)–(u)). Landed as PRs 2E-1 to 2E-4 (the last as 2E-4b). Peter reviews the IR items below;
@@ -717,8 +898,11 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       only, passes no top and defaults to 4G, hence `--mem-cap 6G`); `tests/proc/
       bench_expect_fail.txt` lists the three macro-only Koios include files (no module), the two
       `bwave_like.fixed.*` files (ambiguous top: `bench_proc` has no `--top` and `elab-sweep
-      --bench` passes none, a 2D follow-up) and `eltwise_layer.v` and `dnnweaver.v` (the reader
-      rejects them until 2D-7b; each XPASSes then and its line goes), so 26 Koios files are timed.
+      --bench` passes none, a 2D follow-up) (`eltwise_layer.v` and `dnnweaver.v` were listed too, as
+      rejected until 2D-7b: eltwise_layer's line went with T9's acceptance, dnnweaver's with the
+      2D-7b carry fix, a string parameter widened by `?:` with a NUL byte, an unlocated
+      `ODIN3_ERR_INVALID_ARG`, and a `$readmemh` under a constant `if`, §17 #67), so 28 Koios
+      files are timed.
       `tools/proc-check/bench-proc-report report --expect-fail tests/proc/bench_expect_fail.txt
       LOG` prints §19's targets from the sweep's output and exits 1 on a MISSED one, with the
       estimate terms and step times of the files it names. A file or set missing from the log, or a
@@ -741,3 +925,18 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       <= 8 s in total. A miss is investigated with the printed terms and reported, never relaxed.
     - **Sweeps' summaries and `sweep-xl` (lenet.v, Yosys side, 9G slice): not yet run (needs an
       idle machine).**
+
+22. **IR change journal approved** (Peter, 2026-10-13, option 1a; IR-18a in `docs/IR.md`; spec 2F
+    §19). `opt_dff` and `opt_clean` skip work that the IR's change journal shows cannot have
+    changed: after its first sweep of a module in an `opt` invocation, `opt_dff` visits only the
+    flip-flops whose cone the journal touched; `opt_clean` skips a module's sweep when its last
+    sweep changed nothing and the journal's mutation count, the design's keep-module flags and
+    `-purge` are all as then. Conditions Peter set: every new allocation (the journal's growth,
+    the dirty marks, the walk arrays, the keep-flag copy) is reached by an OOM sweep and falls
+    back to a full sweep with the IR valid and the output byte-identical (`test_opt_oom_fallback`);
+    the journal's bytes count in `opt`'s budget, its 16 MB cap kept (`test_budget_journal`); Debug
+    builds sweep the modules `opt_clean` would skip and abort if one changes anything, and visit
+    every flip-flop `opt_dff` skipped, each at its own position in the sweep, likewise (a skipped
+    flip-flop that the sweep itself dirtied is covered). Nothing outside `opt` may depend on the journal.
+    The output is byte-identical to the full sweeps (82 files in 41 designs; `rescan-compare`; the mcml.v `opt` time of 0.87 s is
+    `bench_opt`'s median on an idle machine, 1.0 s under load).

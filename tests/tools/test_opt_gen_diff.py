@@ -58,8 +58,8 @@ class ProfileTest(unittest.TestCase):
             self.assertEqual(out.read_text(encoding="utf-8"), opt_profile.generate(5).text)
             self.assertFalse(out.with_suffix(".ast").exists())
 
-    def test_opt_is_exclusive_with_proc_and_mutate(self) -> None:
-        for other in ("--proc", "--mutate"):
+    def test_opt_is_exclusive_with_proc_elab_and_mutate(self) -> None:
+        for other in ("--proc", "--elab", "--mutate"):
             code, _, _ = helpers.run_main(verilog_gen.main, ["--opt", other, "--seed", "1",
                                                               "--out", "/dev/null"])
             self.assertEqual(code, 2, other)

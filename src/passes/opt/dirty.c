@@ -41,6 +41,13 @@ struct odin3_opt_modstate {
     uint32_t n_dirty[N_PHASES]; /* nodes with DIRTY0 / DIRTY1 set */
     bool all;                   /* every node counts as dirty (opt_expr sweeps) */
     bool changed;               /* a kit rewrite touched the module since the iteration began */
+    bool dff_primed; /* opt_dff has swept the module and the IR journal is on (dff_dirty.c) */
+    /* opt_clean's early-out (clean.c): the last sweep changed nothing, at journal gen clean_gen,
+     * with -purge as clean_purge and the design's keep flags at clean_epoch */
+    uint64_t dff_bytes; /* the bytes opt_dff's dirty marks hold (dff_dirty.c) */
+    bool clean_valid, clean_purge;
+    uint64_t clean_gen;
+    uint32_t clean_epoch;
 };
 
 static struct {
@@ -48,6 +55,9 @@ static struct {
     struct odin3_opt_modstate *mods; /* indexed by module ID */
     uint32_t n_mods;
     bool incremental;
+    bool *keep_prev; /* the keep flags of the last opt_clean call, and their epoch number */
+    size_t n_keep_prev;
+    uint32_t keep_epoch;
 } g_sess;
 
 odin3_status odin3_opt_session_begin(odin3_design *design, bool incremental) {
@@ -71,10 +81,16 @@ odin3_status odin3_opt_session_begin(odin3_design *design, bool incremental) {
 }
 
 void odin3_opt_session_end(void) {
+    for (uint32_t i = 1; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
+        if (g_sess.mods[i].dff_primed) {
+            odin3_module_journal_end(odin3_module_get(g_sess.design, (odin3_module_id){i}));
+        }
+    }
     for (uint32_t i = 0; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
         odin3_util_free(g_sess.mods[i].bits);
     }
     odin3_util_free(g_sess.mods);
+    odin3_util_free(g_sess.keep_prev);
     memset(&g_sess, 0, sizeof g_sess);
 }
 
@@ -259,11 +275,92 @@ void odin3_opt_dirty_settle(odin3_opt_ctx *oc) {
 }
 
 uint64_t odin3_opt_dirty_bytes(const odin3_opt_ctx *oc) {
-    return oc != NULL && oc->mod != NULL ? (uint64_t)oc->mod->n_bits : 0U;
+    if (oc == NULL || oc->mod == NULL) {
+        return 0U;
+    }
+    return (uint64_t)oc->mod->n_bits + oc->mod->dff_bytes + odin3_opt_journal_bytes();
+}
+
+void odin3_opt_dff_note_bytes(const odin3_opt_ctx *oc, uint64_t bytes) {
+    if (oc != NULL && oc->mod != NULL) {
+        oc->mod->dff_bytes = bytes;
+    }
 }
 
 void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc) {
     if (oc != NULL && oc->mod != NULL) {
         oc->mod->all = true;
     }
+}
+
+/* --- opt_dff's side ----------------------------------------------------------------------------
+ */
+
+bool odin3_opt_dff_primed(const odin3_opt_ctx *oc) {
+    return oc != NULL && oc->mod != NULL && g_sess.incremental && oc->mod->dff_primed;
+}
+
+bool odin3_opt_dff_prime(odin3_opt_ctx *oc) {
+    if (oc == NULL || oc->mod == NULL || !g_sess.incremental) {
+        return false;
+    }
+    odin3_module_journal_begin(oc->module);
+    oc->mod->dff_primed = true;
+    return true;
+}
+
+/* --- opt_clean's side ----------------------------------------------------------------------------
+ */
+
+void odin3_opt_clean_keep(const bool *flags, size_t n) {
+    if (!g_sess.incremental) {
+        return;
+    }
+    if (g_sess.keep_prev != NULL && g_sess.n_keep_prev == n &&
+        (n == 0 || memcmp(g_sess.keep_prev, flags, n * sizeof *flags) == 0)) {
+        return;
+    }
+    g_sess.keep_epoch++;
+    bool *copy = odin3_util_realloc(g_sess.keep_prev, n == 0 ? 1U : n * sizeof *flags);
+    if (copy == NULL) { /* no copy to compare with: the next call counts as different too */
+        odin3_util_free(g_sess.keep_prev);
+        g_sess.keep_prev = NULL;
+        g_sess.n_keep_prev = 0;
+        return;
+    }
+    memcpy(copy, flags, n * sizeof *flags);
+    g_sess.keep_prev = copy;
+    g_sess.n_keep_prev = n;
+}
+
+bool odin3_opt_clean_skippable(const odin3_opt_ctx *oc) {
+    if (oc == NULL || oc->mod == NULL || !g_sess.incremental || !oc->mod->clean_valid ||
+        !odin3_module_journal_on(oc->module)) {
+        return false;
+    }
+    return oc->mod->clean_purge == oc->opts->purge && oc->mod->clean_epoch == g_sess.keep_epoch &&
+           oc->mod->clean_gen == odin3_module_journal_gen(oc->module);
+}
+
+void odin3_opt_clean_done(const odin3_opt_ctx *oc, const odin3_clean_start *start, bool ok) {
+    if (oc == NULL || oc->mod == NULL || !g_sess.incremental) {
+        return;
+    }
+    uint64_t gen = odin3_module_journal_gen(oc->module);
+    oc->mod->clean_valid =
+        ok && start->journal_on && odin3_module_journal_on(oc->module) && gen == start->gen;
+    oc->mod->clean_gen = gen;
+    oc->mod->clean_purge = oc->opts->purge;
+    oc->mod->clean_epoch = g_sess.keep_epoch;
+}
+
+uint64_t odin3_opt_journal_bytes(void) {
+    uint64_t total = 0;
+    for (uint32_t i = 1; g_sess.mods != NULL && i <= g_sess.n_mods; i++) {
+        if (g_sess.mods[i].dff_primed) {
+            total +=
+                odin3_module_journal_bytes(odin3_module_get(g_sess.design, (odin3_module_id){i}));
+        }
+    }
+    return total;
 }

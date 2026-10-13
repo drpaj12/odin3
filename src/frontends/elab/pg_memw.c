@@ -387,6 +387,70 @@ static odin3_status mw_start(mw_write *mw) {
     return st;
 }
 
+/* --- T9 on a memory word (PR 2D-7b review I3) ---------------------------------------------------
+ *
+ * The net records of T9 (pg.c) see nothing of a word whose address is a variable, so a memory
+ * keeps records of its own under keys with bit 63 set: one per constant word, one for the
+ * variable-address writes, and one for every write. A constant-address write is checked against
+ * its word's and the variable-address writes' record of the other kind, a variable-address write
+ * against any write of the other kind. */
+
+enum {
+    MK_FLAG = 63,
+    MK_CLASS_SHIFT = 61,
+    MK_MEM_SHIFT = 29,
+    MK_WORD_BITS = 28,
+    MK_MEM_ID_SHIFT = 32
+};
+typedef enum { MK_WORD = 0, MK_VAR = 1, MK_ANY = 2 } mk_class;
+
+static uint64_t mem_key(uint32_t mem, mk_class cls, uint32_t word) {
+    return ((uint64_t)1 << MK_FLAG) | ((uint64_t)cls << MK_CLASS_SHIFT) |
+           ((uint64_t)mem << MK_MEM_SHIFT) | ((uint64_t)word << 1);
+}
+
+/* The constant word an address names (false: it has a bit that is not 0 or 1, or is too large). */
+static bool const_word(const odin3_sig *addr, uint32_t *word) {
+    uint64_t value = 0;
+    for (uint32_t k = 0; addr != NULL && k < addr->width; k++) {
+        odin3_sigbit sb = addr->bits[k];
+        if (!odin3_sb_is_const(sb) ||
+            (odin3_sb_bit(sb) != ODIN3_BIT_0 && odin3_sb_bit(sb) != ODIN3_BIT_1)) {
+            return false;
+        }
+        if (odin3_sb_bit(sb) == ODIN3_BIT_1) {
+            if (k >= MK_WORD_BITS) {
+                return false;
+            }
+            value |= (uint64_t)1 << k;
+        }
+    }
+    *word = (uint32_t)value;
+    return addr != NULL;
+}
+
+odin3_status pg_mem_check_mixed(odin3_pg *pg, const pg_mem_ref *ref) {
+    const odin3_elab2 *e2 = pg->e2;
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
+    uint32_t word = 0;
+    bool known = const_word(ref->addr, &word);
+    uint64_t mine = ref->blocking ? 1U : 0U;
+    pg_mixed_subject subj = {
+        ((uint64_t)2 << MK_MEM_ID_SHIFT) | ref->mem,
+        odin3_strtab_get(odin3_design_strtab(e2->design), odin3_symbol_get(e2->st, mem->sym)->name),
+        ref->stmt};
+    uint64_t own = known ? mem_key(ref->mem, MK_WORD, word) : mem_key(ref->mem, MK_VAR, 0);
+    odin3_status st = pg_mixed_remember(pg, ref->stmt, own | mine);
+    st =
+        st != ODIN3_OK ? st : pg_mixed_remember(pg, ref->stmt, mem_key(ref->mem, MK_ANY, 0) | mine);
+    if (st == ODIN3_OK && !known) {
+        return pg_mixed_check(pg, &subj, (mem_key(ref->mem, MK_ANY, 0)) | (mine ^ 1U));
+    }
+    st = st != ODIN3_OK ? st : pg_mixed_check(pg, &subj, own | (mine ^ 1U));
+    return st != ODIN3_OK ? st
+                          : pg_mixed_check(pg, &subj, mem_key(ref->mem, MK_VAR, 0) | (mine ^ 1U));
+}
+
 odin3_status pg_mem_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     odin3_elab2 *e2 = pg->e2;
     odin3_sigbit clock = 0;
@@ -406,6 +470,8 @@ odin3_status pg_mem_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     }
     mw_write mw = {pg, req->stmt, pg->lvs.memw.mem, {{0}}};
     odin3_status st = mw_address(&mw, &mw.var[MW_ADDR].value);
+    pg_mem_ref tref = {mw.mem, &mw.var[MW_ADDR].value, req->stmt, req->blocking};
+    st = st != ODIN3_OK ? st : pg_mem_check_mixed(pg, &tref);
     st = st != ODIN3_OK ? st : mw_data_en(&mw, req->rhs, mem->width, &tg);
     st = st != ODIN3_OK ? st : mw_variables(&mw, mem, &tg);
     st = st != ODIN3_OK ? st : mw_start(&mw);

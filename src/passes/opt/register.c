@@ -12,6 +12,7 @@
 #include "passes/manager.h"
 #include "passes/opt/expr.h"
 #include "passes/opt/fold.h"
+#include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
 #include "passes/opt/opt_test.h"
 #include "util/attr.h"
@@ -216,9 +217,10 @@ static uint64_t change_measure(const odin3_opt_counts *counts, odin3_opt_sub sub
 }
 
 /* An upper bound of one call's side arrays: they are a few words per net, node and pin, a fraction
- * of what the design itself reserves for them. */
+ * of what the design itself reserves for them; plus the change journals (they live outside the
+ * design's arenas, up to 16 MB per module). */
 static uint64_t call_extra_bytes(const odin3_design *design) {
-    return odin3_design_bytes_reserved(design) / 2U;
+    return odin3_design_bytes_reserved(design) / 2U + odin3_opt_journal_bytes();
 }
 
 static odin3_status budget_gate(const odin3_opt_call_req *req) {

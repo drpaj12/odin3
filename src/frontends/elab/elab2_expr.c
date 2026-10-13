@@ -40,6 +40,7 @@ typedef struct ex_frame {
 typedef struct ex_run {
     odin3_elab2 *e2;
     const odin3_elab2_expr_req *req;
+    odin3_elab2_walk *walk; /* a suspendable walk, or NULL */
 } ex_run;
 
 /* --- the typer's host (EL-13) ---------------------------------------------------------------- */
@@ -828,6 +829,10 @@ static odin3_status ex_user_call(ex_run *run, const ex_frame *frame, odin3_sig *
         return ex_from_cval(e2, &val, out);
     }
     const odin3_elab2_reads *reads = run->req->reads;
+    if (reads != NULL && reads->call != NULL && run->walk != NULL) {
+        run->walk->call = frame->node; /* ex_step holds the frame; the caller runs the call */
+        return ODIN3_OK;
+    }
     if (reads != NULL && reads->call != NULL) {
         return reads->call(reads->user, frame->node, out);
     }
@@ -971,6 +976,12 @@ static odin3_status ex_step(ex_run *run) {
     odin3_vec_pop(&e2->frames);
     odin3_sig sig;
     odin3_status st = ex_node(run, &done, &sig);
+    if (st == ODIN3_OK && run->walk != NULL && run->walk->call.v != 0) {
+        run->walk->held_next =
+            done.next; /* suspended at a call: its frame is held for the resume */
+        run->walk->held_pick = done.pick;
+        return ODIN3_OK;
+    }
     return st != ODIN3_OK ? st : ex_finish(run, &done, &sig);
 }
 
@@ -987,7 +998,7 @@ odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, 
     }
     /* re-entrant: a user call inlined by the walker generates its own expressions on the stacks
      * above this one's */
-    ex_run run = {e2, req};
+    ex_run run = {e2, req, NULL};
     size_t frame_base = e2->frames.len;
     size_t val_base = e2->vals.len;
     odin3_status st = ex_typer(e2);
@@ -1006,6 +1017,51 @@ odin3_status odin3_elab2_expr(odin3_elab2 *e2, const odin3_elab2_expr_req *req, 
         odin3_vec_pop(&e2->vals);
     }
     return st;
+}
+
+odin3_status odin3_elab2_walk_begin(odin3_elab2 *e2, const odin3_elab2_expr_req *req,
+                                    odin3_elab2_walk *walk) {
+    if (e2->mod == NULL || !ex_is_expression(e2, req->expr)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_walk_begin: not an expression, or no module");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *walk = (odin3_elab2_walk){*req, e2->frames.len, e2->vals.len, {0}, 0, 0};
+    odin3_status st = ex_typer(e2);
+    st = st != ODIN3_OK ? st : odin3_ctype_expr(e2->ty, req->expr, req->context);
+    return st != ODIN3_OK ? st : ex_open(e2, req->expr);
+}
+
+odin3_status odin3_elab2_walk_run(odin3_elab2 *e2, odin3_elab2_walk *walk) {
+    ex_run run = {e2, &walk->req, walk};
+    odin3_status st = ODIN3_OK;
+    while (st == ODIN3_OK && e2->frames.len > walk->frame_base && walk->call.v == 0) {
+        st = ex_step(&run);
+    }
+    return st;
+}
+
+odin3_status odin3_elab2_walk_resume(odin3_elab2 *e2, odin3_elab2_walk *walk,
+                                     const odin3_sig *value) {
+    ex_run run = {e2, &walk->req, walk};
+    ex_frame held = {walk->call, walk->held_next, walk->held_pick};
+    odin3_sig sig = *value;
+    walk->call = (odin3_ast_id){0};
+    return ex_finish(&run, &held, &sig);
+}
+
+void odin3_elab2_walk_take(odin3_elab2 *e2, odin3_elab2_walk *walk, odin3_sig *out) {
+    *out = *(const odin3_sig *)odin3_vec_cat(&e2->vals, walk->val_base);
+    odin3_elab2_walk_abort(e2, walk);
+}
+
+void odin3_elab2_walk_abort(odin3_elab2 *e2, odin3_elab2_walk *walk) {
+    while (e2->frames.len > walk->frame_base) {
+        odin3_vec_pop(&e2->frames);
+    }
+    while (e2->vals.len > walk->val_base) {
+        odin3_vec_pop(&e2->vals);
+    }
+    walk->call = (odin3_ast_id){0};
 }
 
 /* --- types without generating, and constant-ness by the AST --------------------------------- */

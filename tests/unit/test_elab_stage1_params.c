@@ -814,14 +814,12 @@ static void test_connection_errors(void) {
 }
 
 /* Forms of landed kinds that later tasks land report their kind (point (l)): a hierarchical call
- * (E21, Task 16), an always without an event control (T6), a specparam (P7) and a time variable
+ * (E21, Task 16), a specparam (P7) and a time variable
  * (N17, Task 16), a rejected net type (N15). */
 static void test_task16_rows_reported(void) {
     static const char *const cases[][2] = {
         {"module top (output y);\n  assign y = u.f(1);\nendmodule\n",
          "t.v:2:14: error: hierarchical reference 'u.f' is not supported"},
-        {"module top;\n  reg r;\n  always r = 1;\nendmodule\n",
-         "t.v:3:3: error: always block without an event control is not supported"},
         {"module top;\n  time t;\nendmodule\n",
          "t.v:2:3: error: variable type 'time' is not supported"},
         {"module top;\n  tri0 n;\nendmodule\n", "t.v:2:3: error: net type 'tri0' is not supported"},

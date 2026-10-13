@@ -80,6 +80,7 @@ static const char *const k_type_names[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_LOGIC_OR] = "$logic_or",
     [ODIN3_E2T_MUX] = "$mux",
     [ODIN3_E2T_TRIBUF] = "$tribuf",
+    [ODIN3_E2T_PMUX] = "$pmux",
     [ODIN3_E2T_MEM] = "$mem",
     [ODIN3_E2T_PROC] = "$proc",
     [ODIN3_E2T_CONST0] = "$_CONST0_",
@@ -225,6 +226,32 @@ bool odin3_elab2_is_blackbox(const odin3_elab2 *e2, odin3_ast_id module) {
     return false;
 }
 
+/* Whether module carries the value-less attribute named text. */
+static bool module_has_attr(const odin3_elab2 *e2, odin3_ast_id module, const char *text) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(e2->design), odin3_bytes_cstr(text), &key)) {
+        return false;
+    }
+    odin3_ast_span attrs = odin3_ast_attrs(e2->elab, module);
+    for (uint32_t i = 0; i < attrs.n; i++) {
+        if (odin3_ast_name(e2->elab, attrs.ids[i]) == key) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The options of the module: those of its `--lib` read when it came from one (stage 1 marked it
+ * `odin3_lib`, its flags `odin3_lib_nolatches` and `odin3_lib_nomem2reg`), else the run's. */
+static void module_options(odin3_elab2 *e2, odin3_ast_id module) {
+    e2->mod_nolatches = e2->opts.nolatches;
+    e2->mod_nomem2reg = e2->opts.nomem2reg;
+    if (module_has_attr(e2, module, "odin3_lib")) {
+        e2->mod_nolatches = module_has_attr(e2, module, "odin3_lib_nolatches");
+        e2->mod_nomem2reg = module_has_attr(e2, module, "odin3_lib_nomem2reg");
+    }
+}
+
 odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     uint64_t id = 0;
     if (!odin3_u64map_get(e2->modules, module_node.v, &id)) {
@@ -241,6 +268,7 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node) {
     e2->mod_id = (odin3_module_id){(uint32_t)id};
     e2->mod = odin3_module_get(e2->design, e2->mod_id);
     e2->mod_node = module_node;
+    module_options(e2, module_node);
     e2->scope = (odin3_scope_id){0};
     e2->mod_name = odin3_ast_name(e2->elab, module_node);
     memset(e2->const_net, 0, sizeof e2->const_net);
@@ -687,13 +715,15 @@ static odin3_status emissions(odin3_elab2 *e2, odin3_ast_id module_node) {
     st = st != ODIN3_OK || e2->stopped ? st : initial_values(e2, module_node);
     st = st != ODIN3_OK || e2->stopped ? st : items_walk(e2, module_node, PHASE_PROCESSES);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_wired(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_tri_logic(e2);
     st = st != ODIN3_OK || e2->stopped ? st : odin3_elab2_mem_emit(e2);
     return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_undriven(e2);
 }
 
 static odin3_status steps_after_wires(odin3_elab2 *e2, odin3_ast_id module_node) {
     odin3_status st = prescans(e2, module_node);
-    return st != ODIN3_OK || e2->stopped ? st : emissions(e2, module_node);
+    st = st != ODIN3_OK || e2->stopped ? st : emissions(e2, module_node);
+    return st != ODIN3_OK || e2->stopped ? st : odin3_elab2_sweep_frames(e2);
 }
 
 odin3_status odin3_elab2_module(odin3_elab2 *e2, odin3_ast_id module_node) {
@@ -733,8 +763,12 @@ static odin3_status each_module(odin3_elab2 *e2,
 
 /* Binds the store (EL-5) and makes the context's symbol table the store's. */
 static odin3_status bind_store(odin3_elab2 *e2) {
+    double started = odin3_now_ms();
     odin3_status st = odin3_elab_bind(e2->elab, &e2->bind);
     e2->st = odin3_ast_symtab(e2->elab);
+    if (e2->opts.bind_ms_out != NULL) {
+        *e2->opts.bind_ms_out = odin3_now_ms() - started;
+    }
     return st;
 }
 
@@ -790,7 +824,7 @@ static bool specialization_suffix(const char *seg) {
 }
 
 /* A specialization's name has one of those suffixes after a '$' (stage 1 marks nothing else). */
-static bool is_specialization(const char *name) {
+bool odin3_elab2_is_specialization(const char *name) {
     for (const char *at = name[0] != '\0' ? strchr(name + 1, '$') : NULL; at != NULL;
          at = strchr(at + 1, '$')) {
         if (specialization_suffix(at + 1)) {
@@ -804,7 +838,7 @@ static void count_module(const odin3_elab2 *e2, odin3_module_id id, summary *sum
     const odin3_module *mod = odin3_module_get(e2->design, id);
     const char *name = odin3_strtab_get(odin3_design_strtab(e2->design), odin3_module_name(mod));
     sum->modules++;
-    sum->specializations += is_specialization(name) ? 1U : 0U;
+    sum->specializations += odin3_elab2_is_specialization(name) ? 1U : 0U;
     for (uint32_t net = 1; net < odin3_module_net_end(mod); net++) {
         sum->nets += odin3_net_live(mod, (odin3_net_id){net}) ? 1U : 0U;
     }

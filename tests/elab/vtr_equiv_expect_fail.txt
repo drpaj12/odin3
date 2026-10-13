@@ -1,0 +1,17 @@
+# The VTR and Koios files that elab_equiv_vtr (elab-sweep --equiv, Yosys 0.55) finds not
+# equivalent, and the oversized run class, one per line:
+# `<path> [needle] <one-line reason>` (2D spec 14.5, plan Task 27), the path relative to
+# $VTR_ROOT/vtr_flow/benchmarks/verilog. The files in tests/elab/vtr_expect_fail.txt fail before
+# the bridge and are listed there only. elab-sweep fails the run on an unlisted failure and on a
+# listed file that now passes; an entry names the divergence (spec 17 row) or the Yosys behaviour it
+# comes from. A Yosys crash is an `oracle crash` (exit 3 of elab-equiv), counted, never an entry.
+#
+# koios/lenet.v is an `xl` entry, a run class, not an expectation: elab_equiv_vtr skips it and
+# elab_equiv_vtr_xl (sweep-xl, `tools/heavy-run --xl`, an 8G child cap) runs it alone and it must
+# pass. Task 27 planned a candidate `out of memory (cap 8G)` entry here, "removed if it passes";
+# Task 26's rule forbids it (a memory-cap kill is never an expected failure), so a cap outcome
+# fails that test and is reported with the peak RSS instead.
+koios/lenet.v xl: Yosys 0.55 side ~7 GB (spec 15: 1.78 GB RSS read only; the bridge adds proc, memory_map, techmap, abc); the xl run reports the peak RSS or the cap outcome
+# --- tool limits found by the smoke run (the first full bridge run extends this list) ---
+multiclock_separate_and_latch.v [more than one clock domain] equiv-check cannot read a netlist with two clocks (tool limit; 'unsupported: more than one clock domain'); the file's elaboration is checked by the verilog_vtr_elab sweep and the micros' goldens
+multiclock_output_and_latch.v [more than one clock domain] equiv-check cannot read a netlist with two clocks (tool limit; 'unsupported: more than one clock domain'); the file's elaboration is checked by the verilog_vtr_elab sweep

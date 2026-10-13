@@ -4,8 +4,7 @@ Usage::
 
     elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E [--pass proc] | --proc-diff --yosys Y
                | --opt-equiv --yosys Y | --opt-diff --yosys Y [--opt-arg ARG]... | --opt-run
-               | --bench B]
-               [--trio auto|on|off] [--also-no-trio] [--nolatches]
+               | --bench B [--bench-report P]] [--trio auto|on|off] [--also-no-trio] [--nolatches]
                [--expect-fail F]...
                [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]... [--tops F] [--golden-root D]
                [--root R] [--xl] [--skip-over BYTES] [--partial] <dir or file>...
@@ -24,7 +23,11 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
 - ``--equiv`` (needs ``--yosys`` and ``--equiv-check``): ``elab-equiv`` on the file (§14.3).
   Its exit 3 is an ``oracle crash`` (Yosys died of a signal, e.g. 0.55 on recursive
   instantiation): counted and shown, neither a mismatch nor a 2D failure.
-- ``--bench B``: ``B --one FILE``; the child's stdout line follows the file's line as ``bench:``.
+- ``--bench B``: ``B --one FILE [--techlib T]`` (``bench_elab`` for 2D, ``bench_proc`` for 2E;
+  ``--techlib`` is passed on); the child's stdout line follows the file's line as ``bench:``.
+  ``--bench-report P`` then prints the targets of profile ``P`` from those lines
+  (``bench_report.py``: ``elab`` is spec §15's table, ``proc`` is 2E's spec §19) and fails the run
+  when one is MISSED.
 - ``--proc-diff`` (needs ``--yosys``; 2E Task 12): ``proc-diff`` on the file (Odin III's ``proc``
   against Yosys 0.55's on the same RTLIL; ``--top`` as in the default mode, ``--techlib`` passed
   on, ``--nolatches`` optional). With ``--equiv``, ``--pass proc`` makes the bridge end after
@@ -78,6 +81,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
+import bench_report
 import memcap
 from elab_equiv import GIB, MIB, format_cap
 from run_rows_equiv import parse_expect_line
@@ -271,21 +275,24 @@ def slice_limit() -> int | None:
     return int(text) if text.isdigit() else None
 
 
-def check_jobs(jobs: int, cap: int) -> None:
-    """Refuse J x cap above 60% of MemTotal, or above the heavy slice's MemoryMax."""
+def check_jobs(jobs: int, cap: int, alone: Sequence[int] = ()) -> None:
+    """Refuse J x cap above 60% of MemTotal, or above the heavy slice's MemoryMax. A ``--cap-for``
+    file larger than ``cap`` runs alone (``Sweep.run``), so each ``alone`` cap is checked as one
+    job against the same limits."""
     if jobs < 1:
         raise UsageError(f"--jobs {jobs} is not positive")
     total = memcap.mem_total()
     limit = total * memcap.CAP_FRACTION_PERCENT // 100
-    if jobs * cap > limit:
-        raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_cap(cap)} = {format_cap(jobs * cap)} exceeds "
-            f"{memcap.CAP_FRACTION_PERCENT}% of MemTotal ({limit / GIB:.1f}G)")
     in_slice = slice_limit()
-    if in_slice is not None and jobs * cap > in_slice:
-        raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_cap(cap)} exceeds the heavy slice's "
-            f"MemoryMax ({format_cap(in_slice)})")
+    for width, size in [(jobs, cap), *((1, big) for big in alone if big > cap)]:
+        label = f"--jobs {width} x --mem-cap {format_cap(size)}" if width > 1 \
+            else f"--cap-for {format_cap(size)} (alone)"
+        if width * size > limit:
+            raise UsageError(f"{label} = {format_cap(width * size)} exceeds "
+                             f"{memcap.CAP_FRACTION_PERCENT}% of MemTotal ({limit / GIB:.1f}G)")
+        if in_slice is not None and width * size > in_slice:
+            raise UsageError(f"{label} exceeds the heavy slice's MemoryMax "
+                             f"({format_cap(in_slice)})")
 
 
 # ---- running one file -------------------------------------------------------------------------
@@ -311,6 +318,11 @@ def child_why(done: subprocess.CompletedProcess[str], cap: int) -> str:
     return f"exit {code}: {first_error(text)}"
 
 
+# Texts of elab-equiv's own errors that are never a listed rejection: its children's cap kill and
+# a tool it cannot run.
+BRIDGE_HARD = ("out of memory (cap ", "is not an executable file", "cannot run ")
+
+
 def child_outcome(done: subprocess.CompletedProcess[str], cap: int, secs: float) -> Outcome:
     """The failed Outcome of a child that exited non-zero: its whole output is kept for the
     expect-fail needle, and a signal or cap kill is ``hard`` (never an expected failure)."""
@@ -330,6 +342,8 @@ class Config:
     tops: dict[str, str]
     golden_root: Path | None
     techlib: str | None = None
+    bench_report: str | None = None
+    libs: tuple[str, ...] = ()  # files read as library units first (--lib; 2D-7b)
     proc_diff: bool = False
     opt_tool: str = ""  # "opt-equiv", "opt-diff" (2F Task 17) or "opt-run" (Task 18)
     opt_args: tuple[str, ...] = ()
@@ -371,9 +385,11 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [cfg.odin3, *(["--top", top] if top else []), "--elab-only", str(item.path)]
-    if cfg.techlib:  # the arch's hard blocks (adder, multiply, *_port_ram) come from a tech library
+    if cfg.techlib or cfg.libs:  # hard blocks (adder, ...) from a tech library, soft ones --lib
+        pre = f"read_techlib {cfg.techlib}; " if cfg.techlib else ""
+        pre += "".join(f"read_verilog --lib --nomem2reg --nolatches {lib}; " for lib in cfg.libs)
         argv = [cfg.odin3, *(["--top", top] if top else []), "-p",
-                f"read_techlib {cfg.techlib}; read_verilog {item.path}; stats"]
+                f"{pre}read_verilog --nolatches {item.path}; stats"]
     done, failed = run_child(argv, cap, start)
     if done is None:
         assert failed is not None
@@ -493,7 +509,9 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     top = top_for(item, cfg.tops, cfg.golden_root)
     argv = [sys.executable, str(ELAB_EQUIV), "--odin3", cfg.odin3, "--yosys", cfg.yosys,
             "--equiv-check", cfg.equiv_check, "--mem-cap", str(cap), "--unmap-enables",
-            *(["--top", top] if top else []), *proc_flags(cfg), str(item.path)]
+            *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
+            *[arg for lib in cfg.libs for arg in ("--lib", lib)],
+            *(["--lib-nomem2reg"] if cfg.libs else []), *proc_flags(cfg), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
@@ -511,7 +529,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
         return Outcome("skip", secs, "cannot be capped")
     if code == EQUIV_DIFFER:
         return Outcome("fail", secs, "NOT equivalent: " + first_error(text), text)
-    return Outcome("fail", secs, first_error(text) or f"exit {code}", text, hard=code < 0)
+    return Outcome("fail", secs, first_error(text) or f"exit {code}", text,
+                   hard=code < 0 or any(mark in text for mark in BRIDGE_HARD))
 
 
 def run_file(cfg: Config, item: Item) -> Outcome:
@@ -558,6 +577,14 @@ def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -
     return "FAIL", f"FAIL  {head}: {outcome.why}"
 
 
+def parse_bench(text: str) -> dict[str, str]:
+    """The columns of a bench line; a line that is not key=value words has none."""
+    try:
+        return bench_report.parse_line(text)
+    except ValueError:
+        return {}
+
+
 class Sweep:
     def __init__(self, cfg: Config, expect: dict[str, Expect], jobs: int, xl: bool) -> None:
         self.cfg = cfg
@@ -566,6 +593,7 @@ class Sweep:
         self.xl = xl
         self.counts = {"ok": 0, "xfail": 0, "FAIL": 0, "XPASS": 0, "crash": 0, "skip": 0}
         self.skipped_run = False
+        self.bench_rows: dict[str, dict[str, str]] = {}
         self.max_iterations = (0, "")  # opt-run: the largest `opt` iteration count and its file
 
     def note_iterations(self, item: Item, output: str) -> None:
@@ -578,6 +606,7 @@ class Sweep:
         print(line, flush=True)
         if outcome.kind == "ok" and self.cfg.mode() == "bench" and outcome.output:
             print(f"bench: {outcome.output}", flush=True)
+            self.bench_rows[item.rel] = parse_bench(outcome.output)
         if outcome.kind == "ok" and self.cfg.opt_tool == "opt-run":
             self.note_iterations(item, outcome.output)
         self.counts[cls] += 1
@@ -632,7 +661,12 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
               f"({state.max_iterations[1] or 'none'}; the cap is 10000)")
     if state.skipped_run and not counts["ok"] + counts["xfail"]:
         return EXIT_SKIP
-    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale else EXIT_OK
+    missed = False
+    if cfg.bench_report:
+        lines, missed = bench_report.report(cfg.bench_report, state.bench_rows,
+                                            frozenset(expect))
+        print("\n".join(lines))
+    return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed else EXIT_OK
 
 
 # ---- arguments --------------------------------------------------------------------------------
@@ -646,6 +680,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--yosys", help="the Yosys 0.55 binary (--equiv)")
     ap.add_argument("--equiv-check", help="tools/equiv-check/equiv-check (--equiv)")
     ap.add_argument("--bench", metavar="B", help="start `B --one FILE` per file")
+    ap.add_argument("--bench-report", metavar="PROFILE",
+                    help="after a --bench sweep, print the targets of this profile (elab, proc)")
     ap.add_argument("--proc-diff", action="store_true", dest="proc_diff",
                     help="run proc-diff (Odin III's proc against Yosys 0.55's) per file")
     ap.add_argument("--opt-equiv", action="store_true", dest="opt_equiv",
@@ -673,6 +709,9 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--techlib", type=Path,
                     help="read this tech library (.o3lib) before each file: the hard blocks "
                          "(adder, multiply, single/dual_port_ram) the micros instantiate")
+    ap.add_argument("--lib", type=Path, action="append", default=[], metavar="FILE",
+                    help="read FILE as library units (read_verilog --lib --nomem2reg) before each "
+                         "file: Parmys's vtr_primitives.v, for the micros' `adder #(W)`")
     ap.add_argument("--tops", type=Path, help="one `<file> <top>` per line")
     ap.add_argument("--golden-root", type=Path, default=None,
                     help="the Parmys golden tree for --top (default: micro-top's)")
@@ -692,6 +731,11 @@ def build_config(args: argparse.Namespace) -> Config:
                          "cannot be combined")
     if (args.opt_equiv or args.opt_diff) and not args.yosys:
         raise UsageError("--opt-equiv and --opt-diff need --yosys")
+    if args.bench_report and not args.bench:
+        raise UsageError("--bench-report needs --bench")
+    if args.bench_report and args.bench_report not in bench_report.PROFILES:
+        raise UsageError(f"unknown bench profile {args.bench_report!r} "
+                         f"(known: {', '.join(bench_report.PROFILES)})")
     if args.equiv and not (args.yosys and args.equiv_check):
         raise UsageError("--equiv needs --yosys and --equiv-check")
     if args.proc_diff and not args.yosys:
@@ -713,15 +757,19 @@ def build_config(args: argparse.Namespace) -> Config:
     if golden is None:
         golden = load_micro_top().DEFAULT_ROOT
     tops = read_tops(args.tops) if args.tops else {}
-    return Config(os.path.abspath(shutil.which(args.odin3) or args.odin3),
-                  _abs(args.yosys) if yosys_mode else None,
-                  _abs(args.equiv_check) if args.equiv else None,
-                  _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
-                  _abs(args.techlib) if args.techlib else None, bool(args.proc_diff),
-                  "opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
-                  else "opt-run" if args.opt_run else "",
-                  tuple(args.opt_arg), args.stop_pass == "proc", args.trio == "off",
-                  bool(args.also_no_trio), bool(args.nolatches))
+    return Config(
+        odin3=os.path.abspath(shutil.which(args.odin3) or args.odin3),
+        yosys=_abs(args.yosys) if yosys_mode else None,
+        equiv_check=_abs(args.equiv_check) if args.equiv else None,
+        bench=_abs(args.bench) if args.bench else None, cap=cap, caps=caps, tops=tops,
+        golden_root=golden, techlib=_abs(args.techlib) if args.techlib else None,
+        bench_report=args.bench_report, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
+        proc_diff=bool(args.proc_diff),
+        opt_tool="opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
+        else "opt-run" if args.opt_run else "",
+        opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
+        no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
+        nolatches=bool(args.nolatches))
 
 
 def _abs(tool: str | None) -> str | None:
@@ -749,7 +797,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         cfg = build_config(args)
-        check_jobs(args.jobs, cfg.cap)
+        check_jobs(args.jobs, cfg.cap, list(cfg.caps.values()))
         memcap.check_cap(max([cfg.cap, *cfg.caps.values()]))
         # an uncappable ASan binary skips the whole run before any file starts
         for tool in (cfg.odin3, cfg.bench):
