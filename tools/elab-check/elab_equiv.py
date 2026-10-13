@@ -148,7 +148,7 @@ def wants_auto_blackbox(source: Path) -> bool:
 
 
 def wants_yosys_tribuf(source: Path) -> bool:
-    """True when the file asks for ``--yosys-tribuf``: its side B runs ``tribuf -logic`` (a file whose
+    """True when the file asks for ``--yosys-tribuf`` (its side B runs ``tribuf -logic``: the
     tri-state buses odin3 turns into logic, 2D-7b review I3)."""
     return wants_directive(source, "--yosys-tribuf")
 
@@ -228,7 +228,8 @@ class Bridge:
 
     def side_b(self) -> None:
         read = f"read_verilog -sv -nolatches {self.opts.source}"
-        self.blif("side B", read, "b.blif", oracle=True, tribuf=self.opts.yosys_tribuf or wants_yosys_tribuf(self.opts.source))
+        tribuf = self.opts.yosys_tribuf or wants_yosys_tribuf(self.opts.source)
+        self.blif("side B", read, "b.blif", oracle=True, tribuf=tribuf)
 
     def probe_oracle(self, rejected: EquivError) -> None:
         """odin3 rejected the file: if Yosys dies of a signal on the same source, that is an

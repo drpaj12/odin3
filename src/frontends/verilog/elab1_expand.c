@@ -1283,16 +1283,10 @@ static odin3_status too_many(e1_pass *ps, const e1_ptarget *tg, odin3_ast_span e
     if (tg->n_params == E1_NONE || entries.n <= tg->n_params) {
         return ODIN3_OK;
     }
-    /* a library cell with no parameter at all (the hard `adder`: 1-bit ports) says why: Parmys's
-     * n-bit `adder #(W)` is a soft module of vtr_primitives.v, not a library cell (spec 17 #78) */
-    const char *why = tg->type != NULL && tg->n_params == 0
-                          ? "; the library cell has fixed port widths (an n-bit adder is a soft "
-                            "module Parmys supplies, not modelled: spec 17 #78)"
-                          : "";
-    odin3_elab1_error(ps->e1, odin3_ast_loc(ps->e1->parsed, entries.ids[tg->n_params]),
-                      "too many parameter values for %s '%s' (%" PRIu32 " given, %" PRIu32
-                      " parameters)%s",
-                      tg->what, tg->name, entries.n, tg->n_params, why);
+    odin3_elab1_error(
+        ps->e1, odin3_ast_loc(ps->e1->parsed, entries.ids[tg->n_params]),
+        "too many parameter values for %s '%s' (%" PRIu32 " given, %" PRIu32 " parameters)%s",
+        tg->what, tg->name, entries.n, tg->n_params, odin3_elab1_fixed_width_why(tg->type));
     return ODIN3_ERR_PARSE;
 }
 

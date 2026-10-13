@@ -1003,6 +1003,10 @@ bool odin3_elab1_override_beats(const odin3_elab_override *lhs, const odin3_elab
 void odin3_elab1_override_lost(odin3_elab1 *e1, const odin3_elab_override *loser,
                                const odin3_elab_override *winner);
 
+/* The reason a width parameter of the hard library `adder` (no parameter, 1-bit ports) is refused,
+ * as a "; ..." suffix of an error; "" for any other cell type (spec 17 #78). */
+const char *odin3_elab1_fixed_width_why(const odin3_celltype_def *type);
+
 /* The unknown-target error of a pushed-down override (a defparam's or a project line's). */
 void odin3_elab1_bad_target(odin3_elab1 *e1, const odin3_elab_override *ovr);
 

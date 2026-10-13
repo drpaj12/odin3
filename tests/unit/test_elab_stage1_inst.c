@@ -738,6 +738,16 @@ static void test_celltype_adder_has_no_width_parameter(void) {
                       "soft module Parmys supplies, not modelled: spec 17 #78)");
 }
 
+/* The named form gets the same reason (review M1). */
+static void test_celltype_adder_named_width_parameter(void) {
+    run_req("module top (input a, b, ci, output s, co);\n"
+            "  adder #(.WIDTH(2)) u (.a(a), .b(b), .cin(ci), .sumout(s), .cout(co));\nendmodule\n",
+            NULL, TECHLIB);
+    expect_only_error("t.v:2:11: error: cell type 'adder' has no parameter 'WIDTH'; the library "
+                      "cell has fixed port widths (an n-bit adder is a soft module Parmys "
+                      "supplies, not modelled: spec 17 #78)");
+}
+
 static void test_celltype_errors(void) {
     run_req(RAM_TOP("#(1, 2, 3)", ""), NULL, TECHLIB);
     expect_only_error("t.v:2:27: error: too many parameter values for cell type 'single_port_ram' "
@@ -994,6 +1004,7 @@ int main(void) {
     RUN_TEST(test_celltype_ordered);
     RUN_TEST(test_celltype_errors);
     RUN_TEST(test_celltype_adder_has_no_width_parameter);
+    RUN_TEST(test_celltype_adder_named_width_parameter);
     RUN_TEST(test_celltype_array);
     RUN_TEST(test_implicit_union);
     RUN_TEST(test_implicit_widths);

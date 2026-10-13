@@ -780,6 +780,18 @@ static void test_tribuf_internal_mixed(void) {
     expect_error((at_loc){4, 10}, "'t' has two drivers (also driven at t.v:3:10)");
 }
 
+/* Constant enables (review M6, probe d3c): Yosys folds them into a plain connection and equiv-check
+ * then cannot compare, so the accepted behaviour is pinned here: a $pmux over the constant selects.
+ */
+static void test_tribuf_constant_enables(void) {
+    read_src(BUS_HEAD "  assign bus = 1'b1 ? d0 : 8'bz;\n  assign bus = 1'b0 ? d1 : 8'bz;\n"
+                      "  assign y = ~bus;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of("$tribuf"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$pmux"));
+    expect_ir_ok();
+}
+
 /* Drivers that overlap without covering the same bits cannot be merged: a located error. */
 static void test_tribuf_internal_overlap(void) {
     read_failing(BUS_HEAD "  assign bus[3:0] = en[0] ? d0[3:0] : 4'bz;\n"
@@ -1759,6 +1771,7 @@ static void test_oom_sweep_blackbox_sets(void) {
     X(test_tribuf_internal_disjoint)                                                               \
     X(test_tribuf_below_top)                                                                       \
     X(test_tribuf_internal_mixed)                                                                  \
+    X(test_tribuf_constant_enables)                                                                \
     X(test_tribuf_internal_overlap)                                                                \
     X(test_tribuf_port_and_internal)                                                               \
     X(test_tribuf_below_top_inout)                                                                 \

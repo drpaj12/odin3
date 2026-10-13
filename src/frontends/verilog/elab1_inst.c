@@ -1105,6 +1105,13 @@ static odin3_elab1_gparam *given_named(odin3_elab1 *e1, uint32_t first, uint32_t
     return NULL;
 }
 
+const char *odin3_elab1_fixed_width_why(const odin3_celltype_def *type) {
+    return type != NULL && type->n_params == 0 && strcmp(type->name, "adder") == 0
+               ? "; the library cell has fixed port widths (an n-bit adder is a soft module Parmys "
+                 "supplies, not modelled: spec 17 #78)"
+               : "";
+}
+
 /* A cell type's unknown parameter (§9.1; a project line keeps its own text). */
 static void no_param(odin3_elab1 *e1, const odin3_celltype_def *type,
                      const odin3_elab_override *ovr) {
@@ -1112,8 +1119,8 @@ static void no_param(odin3_elab1 *e1, const odin3_celltype_def *type,
         odin3_elab1_bad_target(e1, ovr);
         return;
     }
-    odin3_elab1_error(e1, ovr->at, "cell type '%s' has no parameter '%s'", type->name,
-                      str_of(e1, ovr->path));
+    odin3_elab1_error(e1, ovr->at, "cell type '%s' has no parameter '%s'%s", type->name,
+                      str_of(e1, ovr->path), odin3_elab1_fixed_width_why(type));
 }
 
 /* One override: checked against the type, kept per name by EL-8's precedence. */
