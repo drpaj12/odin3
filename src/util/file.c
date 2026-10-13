@@ -56,11 +56,16 @@ static odin3_status attach_stream(odin3_atomic_file *file, int fd) {
 }
 
 odin3_status odin3_atomic_file_open(odin3_atomic_file *file, const char *path) {
-    *file = (odin3_atomic_file){.fp = NULL, .path = path};
+    *file = (odin3_atomic_file){.fp = NULL, .path = path, .to_stdout = false};
     odin3_strbuf_init(&file->tmp_path);
     if (path == NULL || path[0] == '\0') {
         odin3_log(ODIN3_LOG_ERROR, "atomic_file_open: no destination path");
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (strcmp(path, "-") == 0) {
+        file->fp = stdout;
+        file->to_stdout = true;
+        return ODIN3_OK;
     }
     odin3_status status = odin3_strbuf_appendf(&file->tmp_path, "%s.XXXXXX", path);
     if (status != ODIN3_OK) {
@@ -75,7 +80,24 @@ odin3_status odin3_atomic_file_open(odin3_atomic_file *file, const char *path) {
     return attach_stream(file, fd);
 }
 
+/* Closing the "-" destination: flush stdout, leave it open, nothing to rename. */
+static odin3_status close_stdout(odin3_atomic_file *file, odin3_status status) {
+    odin3_status result = status;
+    errno = 0;
+    if (fflush(file->fp) != 0 && result == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "-: write failed: %s", strerror(errno));
+        result = ODIN3_ERR_IO;
+    }
+    file->fp = NULL;
+    file->to_stdout = false;
+    odin3_strbuf_free(&file->tmp_path);
+    return result;
+}
+
 odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status status) {
+    if (file->to_stdout) {
+        return close_stdout(file, status);
+    }
     odin3_status result = status;
     if (file->fp != NULL) {
         errno = 0;

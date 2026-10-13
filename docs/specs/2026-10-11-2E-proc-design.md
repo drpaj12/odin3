@@ -1148,6 +1148,20 @@ proc`) and, when it has a combinational block, `<slug>.nolatches.il`. Goldens ar
 `<slug>.err`. CTests: `proc_rows` (goldens), `proc_diff_rows` (§18.3), `proc_bridge_rows`
 (§18.5, `--nolatches` mode).
 
+*Amended (2E Task 11), as landed:* 48 rows (43 lowered, 5 errors); `tools/proc-check/proc-rows`
+(`goldens`, `diff`, `bridge`) runs the three CTests and `tests/tools/test_proc_rows.py` checks the
+shape. The goldens are compared through a file, not `write_rtlil -`: odin3's `write_rtlil -` writes
+a file named `-` (it is not standard output). An `.err` file holds the located error lines
+(`F:L:C: error: …`, without the `odin3: error: ` prefix); `err_second_root_if.err` has one line,
+for `'q'`, since one error per process is reported (§5.4, Task 6; Yosys aborts there too). The
+bridge adds `elab-equiv --async2sync` (Yosys's `async2sync` before `techmap` on both sides:
+`equiv-check` reads no `.gate` flip-flop with an asynchronous reset, set or load) and runs every
+row with `--unmap-enables --async2sync --top t`. Three rows cannot be checked by the bridge, and
+`tests/proc/bridge_expect.txt` asserts that each fails in exactly that way: `self_clocked`
+(`equiv-check`: latch clocked by an internal net), `two_clocks_module` (one clock domain only) and
+`arst_rename_wire` (§20 #1). `diff_expect.txt` is empty: the 43 rows are identical to Yosys 0.55 in
+both latch modes (`--no-trio`; the trio runs once `opt` exists, 2F-5).
+
 ### 18.3 `proc-diff`: 2E against Yosys `proc` on the same RTLIL
 
 `tools/proc-check/proc-diff --odin3 O --yosys Y [--top T] [--nolatches] [--no-trio] [--with-opt]
@@ -1213,7 +1227,10 @@ difference; E3 on side A; the assertion on side B), or the run fails.
 it with the remaining sub-passes (after `clean`:
 `proc_rmdead; proc_prune; proc_arst; proc_mux; proc_dlatch; proc_dff; proc_memwr; proc_clean`,
 and so on), then step 3–4 above. The first X whose result differs from b.blif names the phase at
-fault. Run by the rows CTest on failure and by hand.
+fault. Run by the rows CTest on failure and by hand. *(Added, 2E Task 12, 2E-4a review M5.)*
+Bisect cannot separate the working-form round trip (decode, encode) from `clean`:
+`--stop-after` offers no phase before `clean`, so a fault there reports `first difference
+after clean`.
 
 ### 18.5 The bridge (end to end)
 
@@ -1234,11 +1251,21 @@ shape `fsm` needs (one register per chunk, §9, 2D v4.2).
 - Every sweep feeds 2E the input of §18.3 step 1 (after the pre-`proc` passes) and, nightly,
   also `--no-trio`.
 - `proc_diff_micro` and `proc_bridge_micro`: every micro that 2D elaborates (539 files, the
-  multi-file ones through their includer; `--top` from the Parmys golden, 2D point (o)); expected
-  failures in `tests/proc/micro_expect_fail.txt` with reasons: the five micros 2E rejects
-  (`always_posedge_negedge`, `bm_function_1`, `bm_function_2`, `matrix_multiplication` with E1;
-  `paj_top_hierarchy_no_mem` with E2), asserted to fail with those exact errors, plus 2D's own
-  list; the four Parmys rejects that 2E lowers (§4) are asserted to lower in both input modes.
+  multi-file ones through their includer; `--top` from the Parmys golden, 2D point (o)), as
+  `elab-sweep --proc-diff` and `elab-sweep --equiv --pass proc` (2D's collection, sizes, caps, `--tops`,
+  `xl` skips and `[needle]` expect lists; a signal, a cap kill or a timeout is never an expected
+  failure). Expected failures in `tests/proc/micro_expect_fail.txt`, one line each with a needle:
+  2D's own list (copied) plus the micros 2E rejects, asserted to fail with those errors:
+  `always_posedge_negedge`, `bm_function_1`, `bm_function_2` (E1a) and `paj_top_hierarchy_no_mem`
+  (E2). (*Corrected, 2E Task 12*: the brief's fifth, `matrix_multiplication`, is
+  `syntax/matrix_multiplication.v`, which 2D already rejects for a non-constant index into a
+  multi-dimensional array; there is no `large/` one. The kind is asserted by odin3's message text,
+  which does not print the `E1a`/`E2` code.) `proc_diff_micro_lowers` asserts that the Parmys rejects 2E
+  lowers (`paj_framebuftop_hierarchy_no_mem`, `paj_raygentop_hierarchy_no_mem`,
+  `diffeq_f_systemC`) lower and are identical in both input modes, with `tests/proc/paj_boundtop_typo_fixed.v`
+  standing in for `paj_boundtop_hierarchy_no_mem` (a 2D reject: `'debugcount01' has two drivers`, a typo
+  in the source, fixed in the copy). Without `opt` (2F-5) the trio input does not exist: the sweeps run
+  `--no-trio` and say `trio: skipped`.
 
 - `proc_diff_vtr` and `proc_bridge_vtr`: the 31 VTR and 33 Koios files as one set sorted by size
   (lenet.v last, 8 GiB cap alone), when `VTR_ROOT` is set; nightly.
@@ -1315,7 +1342,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 
 | # | 2E | Yosys 0.55 `proc` | Parmys | Why |
 |---|---|---|---|---|
-| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux, and dff (the collapse's rule values, the self-reset value; *amended, 2E-3 final review M2*) | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept. In dff: two resets whose values are one net under two names collapse into `$aldff(ALOAD = r1 \| r2)` where Yosys builds a `$dffsr`, and a reset value that is the register's own output under another name gives the self-reset `$mux` + `$dff` where Yosys builds `$aldff(AD = Q)`; both equivalent |
+| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux, and dff (the collapse's rule values, the self-reset value; *amended, 2E-3 final review M2*) | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept. In dff: two resets whose values are one net under two names collapse into `$aldff(ALOAD = r1 \| r2)` where Yosys builds a `$dffsr`, and a reset value that is the register's own output under another name gives the self-reset `$mux` + `$dff` where Yosys builds `$aldff(AD = Q)`; both equivalent. *Row evidence (2E Task 11):* `arst_rename_wire` (`wire r2 = rst; … if (r2)`, and `wire r3 = ~rn; … if (r3)` under `negedge rn`): Yosys 0.55's own `read_verilog -sv; proc` stops with `Multiple edge sensitive events found for this signal!` (its `check_signal` follows cells, not plain wires, and `opt_expr; opt_clean` first does not help: the module still has processes), so the bridge cannot run it (`bridge_expect.txt`); 2E lowers it to the same `$adff`s as Yosys's `proc` on 2D's RTLIL (`proc-diff` identical in both latch modes), and that netlist is equivalent (`equiv-check`, `async2sync` back end) to Yosys's lowering of the wire-free source `if (rst)` / `if (~rn)`, while a changed reset value (9 to 8) is reported not equivalent: 2E is the correct side |
 | 2 | no `proc_rom` | runs it | `-norom` | the exit bar is Parmys |
 | 3 | the trailing `opt_expr -keepdc` is 2F's code, called by `proc` (absent until 2F-2 lands) | its own | same | one `opt_expr` (§24 item 5) |
 | 4 | no `proc_init` | runs it | runs it | 2D emits `init` attributes directly |

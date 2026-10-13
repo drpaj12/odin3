@@ -4,7 +4,7 @@ Usage::
 
     proc-diff --odin3 O --yosys Y [--top T] [--nolatches] [--no-trio] [--with-opt] [--bisect]
               [--mem-cap B] [--keep DIR] [--write] [--expect-fail F] [--allow-version V]
-              <file or dir>...
+              [--techlib L] <file or dir>...
 
 For each Verilog file F (a directory contributes its ``.v`` files; every file is sorted by size,
 smallest first, by 2D's ``elab_sweep.collect`` when it is importable, else by ``os.stat``):
@@ -54,8 +54,13 @@ reads every child's output); while it is missing a run exits 2 with ``proc-diff:
 tools/elab-check/memcap.py is missing (2D-6)``. A Yosys whose ``-V`` is not 0.55 is refused unless
 ``--allow-version V`` names it (the nightly drift job only).
 
+A difference that survives ``SHUFFLE_TRIES`` reordered copies of side A is checked once more: when
+netlist-compare tells either side from a reordered copy of itself (tied cells it cannot order, e.g.
+twin ``$eq`` cells feeding a chain of muxes), the file is a ``tie``, not a difference (exit 3): the
+verdict is unconfirmed, and the bridge (``elab-equiv``) is the arbiter.
+
 Exit 0 identical (or only expected differences), 1 differ (the work directory is kept and named),
-2 error.
+2 error, 3 tie (only ties, no difference).
 """
 
 from __future__ import annotations
@@ -63,6 +68,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import inspect
+import random
 import re
 import shutil
 import sys
@@ -88,8 +94,12 @@ GIB = 1 << 30
 DEFAULT_CAP = 4 * GIB  # 2E plan point (p): 4 GiB per child by default
 INT_PARAM_BITS = 32  # Yosys writes an INT parameter as 32 bits
 STDERR_TAIL = 20  # lines of a failing child's output shown
+STDERR_ERRORS = 10  # and the first error lines of all of it
+SHUFFLE_TRIES = 8  # netlist-compare reruns on a reordered copy of side A before "differs" stands
+CELL_STARTS = (".subckt", ".names", ".latch", ".gate", ".mlatch")
 
-EXIT_SAME, EXIT_DIFFER, EXIT_ERROR = 0, 1, 2
+EXIT_SAME, EXIT_DIFFER, EXIT_ERROR, EXIT_TIE = 0, 1, 2, 3
+SIGNAL_EXIT = 128  # a shell-style 128+N exit for a signal N
 
 TRIO = ("opt_expr", "opt_clean", "opt -nodffe -nosdff")
 BISECT_PHASES = ("clean", "rmdead", "prune", "arst")
@@ -100,6 +110,9 @@ ODIN3_E3 = "does not settle the value of"  # §15 E3, §20 #16
 
 # §20's divergences proc-diff knows: the outcome each one shows, and what it is.
 OUT_DIFFER, OUT_ASSERT, OUT_E3 = "differ", "yosys-assert", "odin3-e3"
+OUT_TIE = "tie"
+TIE_TEXT = ("tie: netlist-compare cannot order this netlist's tied cells (a reordered copy of a "
+            "side differs from it), so the difference is unconfirmed")
 DIVERGENCES: dict[int, tuple[str, str]] = {
     8: (OUT_DIFFER, "processes in node-ID order (two latches sharing a mux)"),
     9: (OUT_DIFFER, "bits ordered by primary wire (a group spanning wires)"),
@@ -130,13 +143,15 @@ class Options:
     trio: bool = True
     with_opt: bool = False
     cap: int = DEFAULT_CAP
+    techlib: str | None = None  # read_techlib before read_verilog (the micros' hard blocks)
 
 
 # --------------------------------------------------------------------------- the four steps
 
 
 def _read_verilog(opts: Options, src: Path) -> str:
-    return f"read_verilog{' --nolatches' if opts.nolatches else ''} {src}"
+    tech = f"read_techlib {opts.techlib}; " if opts.techlib else ""
+    return f"{tech}read_verilog{' --nolatches' if opts.nolatches else ''} {src}"
 
 
 def _odin3_argv(opts: Options, commands: Iterable[str]) -> list[str]:
@@ -242,7 +257,8 @@ def _buffers(lines: Sequence[str]) -> dict[int, tuple[str, str]]:
         tokens = line.split()
         if len(tokens) != 3 or tokens[0] != ".names" or i + 1 == len(lines):
             continue
-        more_rows = i + 2 < len(lines) and lines[i + 2].strip()[:1] in ("0", "1", "-")
+        rest = next((r.strip() for r in lines[i + 2:] if r.strip()), "")  # blank lines skipped
+        more_rows = rest[:1] in ("0", "1", "-")
         if lines[i + 1].split() == ["1", "1"] and not more_rows:
             found[i] = (tokens[1], tokens[2])
     return found
@@ -286,17 +302,67 @@ def normalise_file(path: Path, ints: frozenset[str]) -> Path:
     return out
 
 
+def shuffle_cells(text: str, seed: int) -> str:
+    """The same netlist with the cells of each model in another order (deterministic per seed).
+
+    A cell is its ``.subckt``/``.names``/``.latch`` line and the ``.param``/cover lines after it.
+    netlist-compare's canonical form can depend on cell order when a model holds tied cells
+    that refinement cannot tell apart (twin ``$eq`` cells feeding a chain of muxes); a reordered
+    copy then canonicalises differently, and an *identical* verdict is sound whichever order gave
+    it (the canonical text is always a renaming of the input), so a difference is only reported
+    when no reordering of side A agrees with side B."""
+    rng = random.Random(seed)
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        out.append(lines[i])
+        i += 1
+        if not lines[i - 1].startswith(".model"):
+            continue
+        header: list[str] = []
+        while i < len(lines) and not lines[i].startswith(CELL_STARTS + (".end",)):
+            header.append(lines[i])
+            i += 1
+        blocks: list[list[str]] = []
+        while i < len(lines) and not lines[i].startswith(".end"):
+            if lines[i].startswith(CELL_STARTS) or not blocks:
+                blocks.append([])
+            blocks[-1].append(lines[i])
+            i += 1
+        rng.shuffle(blocks)
+        out += header + [line for block in blocks for line in block]
+    return "".join(f"{line}\n" for line in out)
+
+
+def shuffled_path(norm: Path, number: int) -> Path:
+    return norm.with_name(f"{norm.stem}.shuf{number}.blif")
+
+
 # --------------------------------------------------------------------------- children
 
 
-def _load_module(name: str, path: Path) -> ModuleType | None:
+def load_module(name: str, path: Path) -> ModuleType | None:
+    """Imports the Python file at path as module name; None when it is missing or unloadable."""
     if not path.is_file():
         return None
+    loaded = sys.modules.get(name)
+    loaded_file = getattr(loaded, "__file__", None)
+    if loaded_file is not None and Path(loaded_file).resolve() == path.resolve():
+        return loaded  # one module object per file: tests patch it, sp_splice shares it
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         return None
+    if str(path.parent) not in sys.path:  # its sibling imports (elab_sweep imports memcap)
+        sys.path.insert(0, str(path.parent))
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.modules.get(name)
+    sys.modules[name] = module  # @dataclass looks its module up in sys.modules while it runs
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous is not None:  # another file's module of that name stays the one imported
+            sys.modules[name] = previous
     return module
 
 
@@ -338,7 +404,7 @@ class Runner:
 
     def run(self, argv: list[str]) -> Child:
         if self.memcap is None:
-            self.memcap = _load_module("memcap", MEMCAP_PY)
+            self.memcap = load_module("memcap", MEMCAP_PY)
             if self.memcap is None:
                 raise ProcDiffError("tools/elab-check/memcap.py is missing (2D-6)")
         try:
@@ -366,7 +432,13 @@ class Outcome:
 
 
 def _tail(child: Child) -> list[str]:
-    return (child.stdout + child.stderr).splitlines()[-STDERR_TAIL:]
+    """The first ``STDERR_ERRORS`` error lines, then the last ``STDERR_TAIL`` lines: a failing
+    child's errors come before its warnings and its summary, and an expect-fail needle (elab-sweep)
+    is matched against what is printed."""
+    lines = (child.stdout + child.stderr).splitlines()
+    errors = [line for line in lines if "error" in line.lower()][:STDERR_ERRORS]
+    tail = lines[-STDERR_TAIL:]
+    return errors + [line for line in tail if line not in errors]
 
 
 def _failed_step(step: str, tool: str, child: Child) -> Outcome:
@@ -374,8 +446,11 @@ def _failed_step(step: str, tool: str, child: Child) -> Outcome:
     if step == "B" and YOSYS_ASSERT_17 in output:
         return Outcome(EXIT_DIFFER, OUT_ASSERT, DIVERGENCES[17][1], known=17)
     kind = OUT_E3 if step == "A" and ODIN3_E3 in output else "error"
-    return Outcome(EXIT_ERROR, kind, f"{tool} exited {child.code} (step {step})",
-                   lines=_tail(child))
+    how = f"{tool} exited {child.code}"
+    if child.code < 0 or child.code >= SIGNAL_EXIT:  # a cap kill or crash: elab-sweep reads it
+        signal = -child.code if child.code < 0 else child.code - SIGNAL_EXIT
+        how = f"{tool} crashed (signal {signal})"
+    return Outcome(EXIT_ERROR, kind, f"{how} (step {step})", lines=_tail(child))
 
 
 def _compare(runner: Runner, argv: list[str], ints: frozenset[str]) -> Child:
@@ -387,15 +462,45 @@ def _compare(runner: Runner, argv: list[str], ints: frozenset[str]) -> Child:
             normalise_file(original, ints)
         except (OSError, UnicodeDecodeError) as exc:
             return Child(EXIT_ERROR, "", f"cannot read {original}: {exc}")
-    return runner.run(argv)
+    child = runner.run(argv)
+    if child.code != EXIT_DIFFER:
+        return child
+    side_a = Path(argv[-2])
+    for number in range(1, SHUFFLE_TRIES + 1):  # see shuffle_cells: identical is always sound
+        copy = shuffled_path(side_a, number)
+        copy.write_text(shuffle_cells(side_a.read_text(encoding="utf-8"), number),
+                        encoding="utf-8")
+        again = runner.run([*argv[:-2], str(copy), argv[-1]])
+        if again.code != EXIT_DIFFER:
+            return again
+    if _order_dependent(runner, argv):
+        return Child(EXIT_TIE, child.stdout, child.stderr)
+    return child
+
+
+def _order_dependent(runner: Runner, argv: list[str]) -> bool:
+    """True when netlist-compare tells either side from a reordered copy of itself: it cannot
+    order this netlist's tied cells, so a difference between the two sides proves nothing."""
+    for side in (Path(argv[-2]), Path(argv[-1])):
+        for number in range(SHUFFLE_TRIES + 1, SHUFFLE_TRIES + 3):
+            copy = shuffled_path(side, number)
+            copy.write_text(shuffle_cells(side.read_text(encoding="utf-8"), number),
+                            encoding="utf-8")
+            if runner.run([*argv[:-2], str(side), str(copy)]).code == EXIT_DIFFER:
+                return True
+    return False
 
 
 def _compare_outcome(child: Child, work: Path) -> Outcome:
-    if child.code == EXIT_SAME:
+    if child.code == EXIT_SAME:  # overwritten, so a rerun under --keep never shows an older diff
+        (work / "diff.txt").write_text("identical\n", encoding="utf-8")
         return Outcome(EXIT_SAME, "identical")
     if child.code == EXIT_DIFFER:
         (work / "diff.txt").write_text(child.stdout, encoding="utf-8")
         return Outcome(EXIT_DIFFER, OUT_DIFFER, lines=child.stdout.splitlines())
+    if child.code == EXIT_TIE:
+        (work / "diff.txt").write_text(child.stdout, encoding="utf-8")
+        return Outcome(EXIT_TIE, OUT_TIE, TIE_TEXT, lines=[TIE_TEXT, *child.stdout.splitlines()])
     return _failed_step("compare", "netlist-compare", child)
 
 
@@ -476,11 +581,12 @@ def _walk(paths: Sequence[str]) -> list[Item]:
 
 def collect(paths: Sequence[str]) -> list[Item]:
     """Every file, smallest first: 2D's elab_sweep.collect when importable, else os.stat."""
-    sweep = _load_module("elab_sweep", ELAB_SWEEP_PY)
+    sweep = load_module("elab_sweep", ELAB_SWEEP_PY)
     if sweep is None or not hasattr(sweep, "collect"):
         return _walk(paths)
     roots = [Path(p) for p in paths if Path(p).is_dir()]
-    return [Item(Path(f), _relative(Path(f), roots)) for f in sweep.collect(list(paths))]
+    found = [Path(getattr(f, "path", f)) for f in sweep.collect(list(paths))]  # 2D-7a: Item
+    return [Item(f, _relative(f, roots)) for f in found]
 
 
 # --------------------------------------------------------------------------- expect lists
@@ -530,8 +636,15 @@ def verdict(outcome: Outcome, reason: str | None) -> tuple[int, str]:
     return EXIT_SAME, f"expected failure ({reason}): {_describe(outcome)}"
 
 
+def _worse(a: int, b: int) -> int:
+    """The graver exit code: error over difference over tie over identical."""
+    rank = {EXIT_SAME: 0, EXIT_TIE: 1, EXIT_DIFFER: 2, EXIT_ERROR: 3}
+    return a if rank.get(a, 3) >= rank.get(b, 3) else b
+
+
 def _describe(outcome: Outcome) -> str:
-    text = {EXIT_SAME: "identical", EXIT_DIFFER: "differs"}.get(outcome.code, "error")
+    text = {EXIT_SAME: "identical", EXIT_DIFFER: "differs", EXIT_TIE: "tie"}.get(outcome.code,
+                                                                                   "error")
     return f"{text}: {outcome.detail}" if outcome.detail else text
 
 
@@ -565,8 +678,8 @@ class Run:
     def one(self, item: Item) -> Outcome:
         work = _work_dir(self.keep, item, self.used)
         outcome = _run_steps(self.runner, self.opts, item.path.resolve(), work, self.ints)
-        if outcome.kind == OUT_DIFFER:
-            if self.do_bisect:
+        if outcome.kind in (OUT_DIFFER, OUT_TIE):
+            if self.do_bisect and outcome.kind == OUT_DIFFER:
                 outcome.detail = bisect(self.runner, self.opts, item.path.resolve(), work,
                                         self.ints)
             outcome.lines.insert(0, f"files kept in {work}")
@@ -578,7 +691,10 @@ class Run:
 def check_version(runner: Runner, yosys: str, allow: str | None) -> None:
     child = runner.run([yosys, "-V"])
     version = child.stdout.strip()
-    if child.code != 0 or not yosys_phase.version_ok(version, allow):
+    if child.code != 0:
+        why = child.stderr.strip() or f"exit {child.code}"
+        raise ProcDiffError(f"cannot run {yosys} -V: {why}")
+    if not yosys_phase.version_ok(version, allow):
         raise ProcDiffError(f"{yosys} is '{version}', not Yosys 0.55 "
                             "(--allow-version accepts another)")
 
@@ -623,7 +739,7 @@ def run_all(run: Run, items: Sequence[Item], expect: dict[str, str], write: bool
         _report(item, line, outcome)
         if code != EXIT_SAME and outcome.code == EXIT_ERROR:
             print(f"{TOOL}: {outcome.detail}", file=sys.stderr)
-        worst = max(worst, code)
+        worst = _worse(worst, code)
         every_identical = every_identical and outcome.code == EXIT_SAME
     if len(items) > 1:
         print(f"{TOOL}: {len(items)} files, exit {worst}")
@@ -656,6 +772,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--write", action="store_true", help="write goldens when identical")
     ap.add_argument("--expect-fail", metavar="F", help="expected failures with reasons")
     ap.add_argument("--allow-version", metavar="V", help="accept a Yosys whose -V names V")
+    ap.add_argument("--techlib", metavar="L", help="read_techlib L before each file (hard blocks)")
     ap.add_argument("inputs", nargs="+", metavar="FILE_OR_DIR")
     return ap
 
@@ -663,7 +780,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     opts = Options(odin3=args.odin3, yosys=args.yosys, top=args.top, nolatches=args.nolatches,
-                   trio=not args.no_trio, with_opt=args.with_opt, cap=args.mem_cap)
+                   trio=not args.no_trio, with_opt=args.with_opt, cap=args.mem_cap,
+                   techlib=args.techlib)
     runner = Runner(cap=args.mem_cap)
     try:
         expect = load_expect(args.expect_fail)

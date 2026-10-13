@@ -179,6 +179,55 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
                          + self.BACK + "b.blif")
 
+    # -- --pass proc (2E spec 18.5, point (r)) ----------------------------------------------
+
+    TRIO = "opt_expr; opt_clean; opt -nodffe -nosdff; "
+
+    def test_pass_proc_side_a_is_exactly_the_phase2_script_up_to_proc(self) -> None:
+        code, out, err = self.run_tool("--pass", "proc", "--top", "t")
+        self.assertEqual(code, 0, out + err)
+        work = str(self.keep.resolve())
+        f = str(self.src)
+        self.assertEqual(self.calls(), [
+            ["yosys", "-V", work],
+            ["odin3", "--top", "t", "-p",
+             f"read_verilog --nolatches {f}; " + self.TRIO + "proc; write_rtlil a.il", work],
+            ["yosys", "-p", "read_rtlil a.il; hierarchy -top t; " + self.BACK + "a.blif", work],
+            ["yosys", "-p", f"read_verilog -sv -nolatches {f}; hierarchy -top t; " + self.BACK
+             + "b.blif", work],
+            ["yosys", "-p", "read_rtlil a.il; write_rtlil b.il", work],
+            ["equiv-check", "a.blif", "b.blif", work],
+        ])
+
+    def test_pass_proc_no_trio_drops_the_three_passes(self) -> None:
+        code, out, err = self.run_tool("--pass", "proc", "--no-trio")
+        self.assertEqual(code, 0, out + err)
+        f = str(self.src)
+        self.assertEqual(self.calls()[1][2],
+                         f"read_verilog --nolatches {f}; proc; write_rtlil a.il")
+
+    def test_pass_elab_is_the_default_and_ignores_the_trio(self) -> None:
+        self.run_tool("--no-trio")
+        f = str(self.src)
+        self.assertEqual(self.calls()[1][2], f"read_verilog --nolatches {f}; write_rtlil a.il")
+        self.run_tool("--pass", "elab")
+        self.assertEqual(self.calls()[-5][2], f"read_verilog --nolatches {f}; write_rtlil a.il")
+
+    def test_pass_proc_side_b_and_back_end_unchanged(self) -> None:
+        self.run_tool("--pass", "proc", "--unmap-enables", "--top", "t")
+        f = str(self.src)
+        calls = self.calls()
+        self.assertEqual(calls[3][2], elab_equiv.yosys_script(
+            f"read_verilog -sv -nolatches {f}", "t", "b.blif", unmap=True))
+        self.assertEqual(calls[2][2], elab_equiv.yosys_script(
+            "read_rtlil a.il", "t", "a.blif", unmap=True))
+
+    def test_pass_other_than_elab_or_proc_is_a_usage_error(self) -> None:
+        code, _, err = self.run_tool("--pass", "opt")
+        self.assertEqual(code, 2)
+        self.assertIn("invalid choice", err)
+        self.assertEqual(self.calls(), [])
+
     def test_nolatches_on_both_sides(self) -> None:
         self.run_tool()
         scripts = [c[2] for c in self.calls() if c[0] in ("odin3", "yosys") and "-p" in c]
@@ -330,6 +379,21 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("dffunmap; techmap", unmapped)
         self.assertEqual(unmapped.count("-nodffe -nosdff"), 4)
         self.assertEqual(plain, unmapped.replace(" -nodffe -nosdff", "").replace("dffunmap; ", ""))
+
+    def test_async2sync_adds_one_step_before_the_flop_mapping(self) -> None:
+        plain = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif")
+        a2s = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", async2sync=True)
+        self.assertNotIn("async2sync", plain)
+        self.assertIn("memory_map; opt -full; async2sync; techmap", a2s)
+        self.assertEqual(plain, a2s.replace("async2sync; ", ""))
+        both = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", unmap=True,
+                                       async2sync=True)
+        self.assertIn("async2sync; dffunmap; techmap", both)
+
+    def test_async2sync_flag_reaches_both_sides(self) -> None:
+        self.run_tool("--async2sync", "--top", "t")
+        scripts = [c[2] for c in self.calls() if c[0] == "yosys" and "-p" in c]
+        self.assertEqual(sum("async2sync; techmap" in s for s in scripts), 2)
 
     # -- the cap ---------------------------------------------------------------------------
 

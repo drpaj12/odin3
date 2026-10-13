@@ -67,13 +67,19 @@ odin3_proc_limits odin3_proc_limits_now(void) {
 }
 
 void odin3_proc_test_set_hooks(const odin3_proc_test_hooks *hooks) {
-    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL, NULL};
+    static const odin3_proc_test_hooks k_none = {NULL, NULL, NULL, NULL, NULL};
     g_hooks = hooks != NULL ? *hooks : k_none;
 }
 
 void odin3_proc_hook_expand(odin3_net_id net, bool set_undef) {
     if (g_hooks.on_expand != NULL) {
         g_hooks.on_expand(g_hooks.user, net, set_undef);
+    }
+}
+
+void odin3_proc_hook_step(const odin3_proc_mctx *mctx, int step, bool begin) {
+    if (g_hooks.on_step != NULL) {
+        g_hooks.on_step(g_hooks.user, (odin3_proc_step)step, begin, mctx);
     }
 }
 
@@ -260,20 +266,46 @@ static odin3_status lower_mux(odin3_proc_mctx *mctx, odin3_pw *pw) {
     return st == ODIN3_OK ? odin3_proc_apply_merges(mctx) : st;
 }
 
-/* Steps B-E (§2.2): mux per process, the module's latches (ending with M2), flip-flops per
- * process, orphan nets. Any failure stops at once (NO_MEMORY, E6), leaving valid IR. */
-static odin3_status proc_lower(odin3_proc_mctx *mctx) {
+/* Step B: mux per process. */
+static odin3_status proc_lower_mux(odin3_proc_mctx *mctx) {
     odin3_status st = ODIN3_OK;
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_B, true);
     for (size_t i = 0; st == ODIN3_OK && i < mctx->pws.len; i++) {
         st = lower_mux(mctx, odin3_vec_at(&mctx->pws, i));
     }
-    st = st == ODIN3_OK ? proc_phase(mctx, ODIN3_PROC_PH_LATCH, NULL) : st;
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_B, false);
+    return st;
+}
+
+/* Step D: flip-flops per process. */
+static odin3_status proc_lower_ffs(odin3_proc_mctx *mctx) {
+    odin3_status st = ODIN3_OK;
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_D, true);
     for (size_t i = 0; st == ODIN3_OK && i < mctx->pws.len; i++) {
         odin3_pw *pw = odin3_vec_at(&mctx->pws, i);
         st = odin3_proc_budget(mctx, pw->prov);
         st = st == ODIN3_OK ? proc_phase(mctx, ODIN3_PROC_PH_FF, pw) : st;
     }
-    return st == ODIN3_OK ? odin3_proc_orphans(mctx) : st;
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_D, false);
+    return st;
+}
+
+/* Steps B-E (§2.2): mux per process, the module's latches (ending with M2), flip-flops per
+ * process, orphan nets. Any failure stops at once (NO_MEMORY, E6), leaving valid IR. */
+static odin3_status proc_lower(odin3_proc_mctx *mctx) {
+    odin3_status st = proc_lower_mux(mctx);
+    if (st == ODIN3_OK) {
+        odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_C, true);
+        st = proc_phase(mctx, ODIN3_PROC_PH_LATCH, NULL);
+        odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_C, false);
+    }
+    st = st == ODIN3_OK ? proc_lower_ffs(mctx) : st;
+    if (st == ODIN3_OK) {
+        odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_E, true);
+        st = odin3_proc_orphans(mctx);
+        odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_E, false);
+    }
+    return st;
 }
 
 /*
@@ -302,7 +334,9 @@ static odin3_status proc_step_f(const odin3_proc_mctx *mctx) {
     odin3_opt_opts opts;
     memset(&opts, 0, sizeof opts);
     opts.keepdc = true;
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_F, true);
     odin3_status st = odin3_opt_expr_run(mctx->ctx, mctx->module, &opts, &counts);
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_F, false);
     if (mctx->stats != NULL) {
         add_expr_counts(&mctx->stats->opt_expr, &counts);
     }
@@ -358,7 +392,9 @@ static odin3_status proc_module(proc_run *run, odin3_module *module) {
     odin3_proc_phase last = run->opts.stop_after == ODIN3_PROC_STOP_NONE
                                 ? ODIN3_PROC_PH_CLOCKS
                                 : (odin3_proc_phase)(run->opts.stop_after - 1);
+    odin3_proc_hook_step(&mctx, ODIN3_PROC_STEP_A, true);
     st = proc_analyse(&mctx, last, &failed);
+    odin3_proc_hook_step(&mctx, ODIN3_PROC_STEP_A, false);
     if (st == ODIN3_OK && !failed && !run->failed) {
         st = proc_change(run, &mctx);
         failed = st == ODIN3_ERR_PARSE; /* E6 while lowering */

@@ -119,7 +119,11 @@ def wrap(argv: Sequence[str], cap_bytes: int) -> tuple[list[str], Callable[[], N
     return list(argv), limit
 
 
-def _lock_fds() -> tuple[int, ...]:
+TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
+
+
+def lock_fds() -> tuple[int, ...]:
+    """The heavy lock's descriptor when open (tools/heavy-run holds it), to pass on to a child."""
     try:
         os.fstat(LOCK_FD)
     except OSError:
@@ -137,7 +141,7 @@ def run(argv: Sequence[str], cap_bytes: int, capture_output: bool = False, *,
     cmd, preexec = wrap(argv, cap_bytes)
     kwargs: dict[str, Any] = {"capture_output": capture_output, "text": True, "errors": "replace",
                               "check": False, "cwd": cwd, "env": env, "timeout": timeout,
-                              "pass_fds": _lock_fds()}
+                              "pass_fds": lock_fds()}
     if preexec is not None:
         kwargs["preexec_fn"] = preexec
     return subprocess.run(cmd, **kwargs)  # noqa: S603

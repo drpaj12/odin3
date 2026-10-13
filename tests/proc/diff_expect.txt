@@ -1,0 +1,6 @@
+# tests/proc/diff_expect.txt: rows where Odin III's proc differs from Yosys 0.55's on purpose.
+# Format (proc-diff --expect-fail): <path relative to tests/proc/rows> <one-line reason>
+# One entry (§20 #17); every other lowering row is identical to Yosys 0.55
+# (proc-diff --no-trio, 2E Task 11). A reason citing §20 #N (8, 9, 16, 17, 18) must see that
+# divergence's outcome.
+parallel_case_nonconst_append.v §20 #17: Yosys 0.55 asserts (ctrl_sig.size() == 1) on the empty select; 2E lowers it (proc_rows holds the golden)

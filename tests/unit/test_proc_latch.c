@@ -103,7 +103,7 @@ static void on_expand(void *user, odin3_net_id net, bool set_undef) {
 
 static void install_expand_hook(void) {
     memset(&expands, 0, sizeof expands);
-    odin3_proc_test_hooks hooks = {NULL, NULL, on_expand, &expands};
+    odin3_proc_test_hooks hooks = {NULL, NULL, on_expand, &expands, NULL};
     odin3_proc_test_set_hooks(&hooks);
 }
 
