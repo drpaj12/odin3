@@ -1278,6 +1278,9 @@ static void test_abi_options_and_misuse(void) {
     odin3_elab_options bad = {0};
     bad.reserved[3] = 1;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(rs.design, store.ast, &bad));
+    bad.reserved[3] = 0;
+    bad.reserved_pad = 1; /* the byte after the flags is reserved too */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(rs.design, store.ast, &bad));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(NULL, store.ast, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(rs.design, NULL, NULL));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_module_end(rs.design) - 1);
@@ -1345,6 +1348,8 @@ static void test_abi_module_named_like_cell_type(void) {
               "rename the module");
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_top(rs.design).v);
     expect_ir_ok();
+    /* the failed call left the store bound to its symbol table: a second call is refused */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_ast_elaborate(rs.design, store.ast, NULL));
 }
 
 /* --- out of memory -----------------------------------------------------------------------------
@@ -1352,10 +1357,11 @@ static void test_abi_module_named_like_cell_type(void) {
 
 /* What the quiet sink saw of a run (it allocates nothing, so an injected failure is not its). */
 static bool g_saw_missing_file;
+static bool g_saw_error; /* any ERROR-level line of the run */
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)level;
     (void)user;
+    g_saw_error |= level == ODIN3_LOG_ERROR;
     g_saw_missing_file |= strstr(msg, "missing_file:") != NULL;
 }
 
@@ -1392,17 +1398,33 @@ static void expect_ir_ok_quiet(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
 }
 
+/* A swallowed failure is an OK read that is incomplete or that logged an error. */
+static void check_not_swallowed(odin3_status st) {
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_FALSE_MESSAGE(g_saw_error, "an OK read logged an error");
+        TEST_ASSERT_TRUE_MESSAGE(read_complete(), "an OK read is incomplete");
+    }
+}
+
+/* What a run with an injected allocation failure may leave: the status, no missing file, the
+ * IR whole, and no swallowed failure (an OK read is complete and logged no error). */
+static void check_run(odin3_status st) {
+    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    TEST_ASSERT_FALSE(g_saw_missing_file);
+    check_not_swallowed(st);
+    expect_ir_ok_quiet();
+}
+
 /* One run of the whole read with the limit-th allocation failing. */
 static odin3_status read_failing_at(long limit) {
     fresh_quiet_design();
     g_saw_missing_file = false;
+    g_saw_error = false;
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
-    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
-    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
-    TEST_ASSERT_FALSE(g_saw_missing_file);
-    expect_ir_ok_quiet();
+    check_run(st);
     return st;
 }
 

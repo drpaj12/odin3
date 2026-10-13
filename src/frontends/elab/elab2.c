@@ -296,6 +296,13 @@ void odin3_elab2_fatal(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) {
     e2->stopped = true;
 }
 
+void odin3_elab2_count_parse(odin3_elab2 *e2, odin3_loc loc) {
+    if (e2->errors == 0 && !e2->stopped) {
+        odin3_elab2_error(e2, loc,
+                          "internal error: a construct failed without a located error (a 2D bug)");
+    }
+}
+
 /* Marks a warning key as given: true when it was new (false after a map failure, latched). */
 static bool warn_new(odin3_elab2 *e2, uint64_t key) {
     if (odin3_u64map_get(e2->warned, key, NULL)) {
@@ -432,9 +439,19 @@ static odin3_status push_items(odin3_elab2 *e2, odin3_ast_id node, uint32_t nslo
 }
 
 /* A located error is counted and the walk goes on with the next item; anything else (memory, a
- * fatal cap's stop, a 2D bug) ends it. */
-static odin3_status carry_on(odin3_status st) {
-    return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+ * fatal cap's stop, a 2D bug) ends it. A PARSE with no error counted at all is counted here as an
+ * internal error, so the read can never succeed with the item dropped. */
+static odin3_status carry_on(odin3_elab2 *e2, odin3_loc loc, odin3_status st) {
+    if (st != ODIN3_ERR_PARSE) {
+        return st;
+    }
+    odin3_elab2_count_parse(e2, loc);
+    return ODIN3_OK;
+}
+
+/* One net assignment (a continuous assignment or a declarator's initialiser), carried on. */
+static odin3_status assign_one(odin3_elab2 *e2, odin3_ast_id node) {
+    return carry_on(e2, odin3_ast_loc(e2->elab, node), odin3_elab2_assign(e2, node));
 }
 
 /* One declarator's initialiser: a net's is a continuous assignment (Task 18), a variable's an
@@ -447,7 +464,7 @@ static odin3_status declarator_initialiser(odin3_elab2 *e2, odin3_ast_id declara
         odin3_elab2_pend_feature(e2, odin3_ast_loc(e2->elab, declarator), feature);
         return ODIN3_OK;
     }
-    return carry_on(odin3_elab2_assign(e2, declarator));
+    return assign_one(e2, declarator);
 }
 
 /* A declaration's initialisers, read from the DECLARATOR in the same slot for a body declaration
@@ -481,9 +498,15 @@ static odin3_status cont_assign(odin3_elab2 *e2, odin3_ast_id node) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = odin3_ast_slot_count(ODIN3_AST_CONT_ASSIGN);
          st == ODIN3_OK && i < kids.n && !e2->stopped; i++) {
-        st = carry_on(odin3_elab2_assign(e2, kids.ids[i]));
+        st = assign_one(e2, kids.ids[i]);
     }
     return st;
+}
+
+/* One instantiation or gate declaration through its emitter, carried on after a counted error. */
+static odin3_status emit_one(odin3_elab2 *e2, odin3_ast_id item,
+                             odin3_status (*emit)(odin3_elab2 *, odin3_ast_id)) {
+    return carry_on(e2, odin3_ast_loc(e2->elab, item), emit(e2, item));
 }
 
 /* The two walks over the items, in EL-28's order: (4) instances and gates, then (5) the continuous
@@ -499,9 +522,9 @@ static odin3_status instance_step(odin3_elab2 *e2, odin3_ast_id item) {
                    ? ODIN3_OK
                    : push_items(e2, item, 1, odin3_elab_scope_of(&e2->bind, item));
     case ODIN3_AST_INSTANTIATION:
-        return carry_on(odin3_elab2_instance(e2, item));
+        return emit_one(e2, item, odin3_elab2_instance);
     case ODIN3_AST_GATE_DECL:
-        return carry_on(odin3_elab2_gate(e2, item));
+        return emit_one(e2, item, odin3_elab2_gate);
     default:
         return ODIN3_OK;
     }

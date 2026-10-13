@@ -96,11 +96,13 @@ struct odin3_width_expr {
 
 /*
  * One port. Width rule, first match wins: width_fn (any function of the parameters), else
- * width_expr (an integer expression over INT parameters of the same type), else width_param (the
- * name of an INT parameter of the same type), else the constant width. scalar records whether the
- * port is written without brackets (writers reproduce it). is_signed records a signed module port
- * (odin3_module_add_port sets it; IR-7, 2D IR change C) for writers and the elaborator; it is
- * false on every other type. It is internal: the ABI's odin3_plugin_port has no sign.
+ * width_expr (an integer expression over INT parameters, or a lookup of all the parameter values
+ * in a closed table, see odin3_width_expr; a table's type accepts only its table's parameter
+ * sets), else width_param (the name of an INT parameter of the same type), else the constant
+ * width. scalar records whether the port is written without brackets (writers reproduce it).
+ * is_signed records a signed module port (odin3_module_add_port sets it; IR-7, 2D IR change C)
+ * for writers and the elaborator; it is false on every other type. It is internal: the ABI's
+ * odin3_plugin_port has no sign.
  */
 typedef struct odin3_port_def {
     const char *name;
@@ -182,7 +184,9 @@ const odin3_celltype_def *odin3_celltype_get(const odin3_design *design, odin3_c
  * Width of port `port` of type id for the given parameter values (one per parameter definition;
  * may be NULL only for a type without parameters). 0 when id or port is out of range, the width
  * parameter is not an INT in [0, UINT32_MAX], or the width expression fails to evaluate (logged;
- * also 0, unlogged, when a width expression runs out of memory).
+ * also 0, unlogged, when a width expression runs out of memory). Callers that size cells whose
+ * parameters may be outside a table width rule (a black box with several parameter sets) use
+ * odin3_celltype_port_width_checked, which tells that case from a width of 0.
  */
 uint32_t odin3_celltype_port_width(const odin3_design *design, odin3_celltype_id id,
                                    const odin3_value *params, uint32_t port);

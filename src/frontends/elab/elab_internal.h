@@ -7,8 +7,9 @@
  * third (Task 18) is expressions: signals to word cells, selects and continuous assignments
  * (elab2_expr.c, elab2_select.c, elab2_assign.c). The fourth (Task 19) is drivers, instances and
  * gates: the driver table and claims, wired nets, tri-state, the lvalue an output takes apart
- * (elab2_drive.c, elab2_assign.c), instances, black boxes and gates (elab2_inst.c). Later tasks add
- * processes and memories to it.
+ * (elab2_drive.c, elab2_assign.c), instances and gates (elab2_inst.c), black-box cell types
+ * (elab2_bbox.c). The fifth is memories (elab2_mem.c, elab2_memscan.c, elab2_memport.c). Later
+ * tasks add processes to it.
  */
 #ifndef ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
 #define ODIN3_FRONTENDS_ELAB_ELAB_INTERNAL_H
@@ -249,8 +250,8 @@ odin3_status odin3_elab2_enter(odin3_elab2 *e2, odin3_ast_id module_node);
  * (IR change C), `scalar` set for a port without a range, a SOURCE record at its PORT_DECL, the
  * attributes of the declaration, and the port symbol's ir_module and ir_wire are recorded
  * (odin3_symbol_set_ir). It runs for every MODULE before any body (EL-2); a black-box MODULE (an
- * ATTR `blackbox`) makes no module: Task 19 registers its cell type. A module that cannot be made
- * (its name is a cell type already, or the IR refuses a port) is a located error and
+ * ATTR `blackbox`) makes no module: it declares its cell type (odin3_elab2_blackbox). A module that
+ * cannot be made (its name is a cell type already, or the IR refuses a port) is a located error and
  * ODIN3_ERR_PARSE, and the caller stops stage 2. The net-bits cap (point (aa)) and the byte
  * budget apply. ODIN3_ERR_NO_MEMORY and ODIN3_ERR_INVALID_ARG (a node that is not a MODULE of
  * the store, or already made) as usual; the IR stays valid.
@@ -322,6 +323,15 @@ odin3_status odin3_elab2_attrs(odin3_elab2 *e2, odin3_ast_id node, odin3_objref 
 void odin3_elab2_error(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 void odin3_elab2_fatal(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
 void odin3_elab2_warn(odin3_elab2 *e2, odin3_loc loc, const char *fmt, ...) ODIN3_PRINTF(3, 4);
+
+/*
+ * The safety net of an ODIN3_ERR_PARSE ("counted, go on"): a producer that returned it without
+ * raising any error would let the read succeed with the construct missing (end_status looks at
+ * the error count). This counts one located internal error at loc when no error is counted yet
+ * (and the stage was not stopped: the cap's stop line is the count). Call it for every PARSE a
+ * producer returns that the walk absorbs.
+ */
+void odin3_elab2_count_parse(odin3_elab2 *e2, odin3_loc loc);
 
 /*
  * True when node's kind (or the feature) is pending in stage 2 (point (l)): its located line is
@@ -786,11 +796,12 @@ odin3_status odin3_elab2_scoped_name(odin3_elab2 *e2, const odin3_symbol *rec, u
  * located and counted (ODIN3_ERR_PARSE, the caller goes on with the next item). INVALID_ARG for a
  * node that is not an INSTANTIATION, or no module being emitted; NO_MEMORY.
  *
- * A source black box has one set of port widths (the default specialization's: the elaborated form
- * keeps no more), so an instance that gives a non-string parameter another value than its default
- * is the located error `width of port 'p' of black-box instance 'u' (module 'bb') cannot be
- * determined: parameter 'W' is overridden and the port has a range` (the first port with a range);
- * a port without a range, and a registered cell type (whose widths IR-7b infers), are unaffected.
+ * A black box's port widths come from its cell type (odin3_elab2_blackbox): a cell takes the exact
+ * widths of its own parameter set. A set the cell type has no widths for (a registered table that
+ * lacks the instance's values, as after a second read, or a width parameter that is not a valid
+ * width) is the located error `instance 'u' of 'bb': port 'a' has no width for its parameter
+ * values (see the port_width line above)`. A PARSE that raised no error at all is counted as an
+ * internal error (odin3_elab2_count_parse), so a read never succeeds with an instance dropped.
  */
 odin3_status odin3_elab2_instance(odin3_elab2 *e2, odin3_ast_id instantiation);
 

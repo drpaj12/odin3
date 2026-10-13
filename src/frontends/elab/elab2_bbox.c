@@ -360,7 +360,13 @@ static odin3_status gather_carrier(bb_gather *ga, odin3_ast_id node) {
         return st;
     }
     if (ports.n_ports != ga->bd->n_ports || count != ga->bd->n_params) {
-        return ODIN3_ERR_CHECK; /* a carrier has its definition's ports and parameters: a 2D bug */
+        /* a carrier has its definition's ports and parameters: a store that breaks that breaks
+         * the elaborated form (an adapter's, never stage 1's) */
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node),
+                          "black box '%s': a carrier has other ports or parameters than its "
+                          "definition (the store breaks the elaborated form)",
+                          ga->name);
+        return ODIN3_ERR_INVALID_ARG;
     }
     bb_entry *entry = gather_entry(ga, node, &ports);
     if (entry == NULL) {
@@ -547,7 +553,14 @@ odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node) {
                               .params = bd.params,
                               .n_params = bd.n_params};
     odin3_celltype_id id = {0};
-    st = st != ODIN3_OK ? st : odin3_celltype_declare_blackbox(e2->design, &def, &id);
+    if (st == ODIN3_OK) {
+        st = odin3_celltype_declare_blackbox(e2->design, &def, &id);
+        if (st == ODIN3_ERR_INVALID_ARG) { /* the IR refused it and logged why: count it here */
+            odin3_elab2_error(e2, odin3_ast_loc(e2->elab, module_node),
+                              "black box '%s' cannot be declared (see the line above)", def.name);
+            return ODIN3_ERR_PARSE;
+        }
+    }
     st = st != ODIN3_OK ? st : odin3_u64map_put(e2->bboxes, (odin3_kv){module_node.v, id.v});
-    return st == ODIN3_ERR_INVALID_ARG ? ODIN3_ERR_PARSE : st;
+    return st;
 }

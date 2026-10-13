@@ -971,10 +971,11 @@ static const char k_sweep[] =
     "endmodule\n";
 
 static bool g_saw_missing_file;
+static bool g_saw_error; /* any ERROR-level line of the run */
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)level;
     (void)user;
+    g_saw_error |= level == ODIN3_LOG_ERROR;
     g_saw_missing_file |= strstr(msg, "missing_file:") != NULL;
 }
 
@@ -990,18 +991,34 @@ static bool read_complete(void) {
     return odin3_design_module_end(rs.design) == 2 && odin3_design_top(rs.design).v != 0;
 }
 
+/* A swallowed failure is an OK read that is incomplete or that logged an error. */
+static void check_not_swallowed(odin3_status st) {
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_FALSE_MESSAGE(g_saw_error, "an OK read logged an error");
+        TEST_ASSERT_TRUE_MESSAGE(read_complete(), "an OK read is incomplete");
+    }
+}
+
+/* What a run with an injected allocation failure may leave: the status, no missing file, the
+ * IR whole, and no swallowed failure (an OK read is complete and logged no error). */
+static void check_run(odin3_status st) {
+    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    TEST_ASSERT_FALSE(g_saw_missing_file);
+    check_not_swallowed(st);
+    odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
+}
+
 /* One run of the whole read with the limit-th allocation failing. */
 static odin3_status read_failing_at(long limit) {
     fresh_quiet_design();
     g_saw_missing_file = false;
+    g_saw_error = false;
     odin3_util_set_alloc_fail_after(limit);
     odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
     odin3_util_set_alloc_fail_after(-1);
-    /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
-    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
-    TEST_ASSERT_FALSE(g_saw_missing_file);
-    odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
+    check_run(st);
     return st;
 }
 

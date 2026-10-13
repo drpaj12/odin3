@@ -18,8 +18,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* True when every reserved word is zero. */
+/* True when the reserved byte and every reserved word are zero. */
 static bool reserved_zero(const odin3_elab_options *opts) {
+    if (opts->reserved_pad != 0) {
+        return false;
+    }
     for (size_t i = 0; i < sizeof opts->reserved / sizeof opts->reserved[0]; i++) {
         if (opts->reserved[i] != 0) {
             return false;

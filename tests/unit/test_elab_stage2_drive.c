@@ -1246,6 +1246,43 @@ static void test_blackbox_mismatch(void) {
     expect_ir_ok();
 }
 
+#define BB_DEF                                                                                     \
+    "(* blackbox *) module bb #(parameter W = 4) (input [W-1:0] a, output [W-1:0] "                \
+    "o);\nendmodule\n"
+
+/* A port width that cannot be computed is a counted, located error at the instance: the read
+ * fails (review C1; it used to log one unlocated line and succeed with the instance dropped). */
+static void test_instance_width_failure_is_counted(void) {
+    read_techlib_src(
+        "module top (input clk, input we, input [9:0] addr, input [7:0] data, output [7:0] q);\n"
+        "  single_port_ram #(.ADDR_WIDTH(-3)) ram (.clk(clk), .we(we), .addr(addr), "
+        ".data(data), .out(q));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, rs.status, et_log(&rs));
+    expect_error((at_loc){2, 38}, "instance 'ram' of 'single_port_ram': port 'addr' has no width "
+                                  "for its parameter values (see the port_width line above)");
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32(1, diag_errors());
+    expect_ir_ok();
+}
+
+/* A second read of a black box whose parameter set is not in the table the first read built: the
+ * instance is a located error, not a dropped cell with status OK (review C1). */
+static void test_blackbox_unseen_set_second_read(void) {
+    static const et_src srcs[] = {{"t.v", BB_DEF "module top1 (input [7:0] x, output [7:0] y);\n"
+                                                 "  bb #(.W(8)) u (.a(x), .o(y));\nendmodule\n"},
+                                  {"second.v",
+                                   BB_DEF "module top2 (input [15:0] x, output [15:0] y);\n"
+                                          "  bb #(.W(16)) u (.a(x), .o(y));\nendmodule\n"}};
+    et_req req = {srcs, 2, "read_verilog t.v", NULL, NULL};
+    et_setup(&req, &rs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    rs.status = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("second.v"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, rs.status, et_log(&rs));
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "second.v:4:16: error: instance 'u' of 'bb': port 'a' has no width for its "
+              "parameter values (see the port_width line above)");
+    expect_ir_ok();
+}
+
 /* --- gates (Q1-Q3)
  * -------------------------------------------------------------------------------- */
 
@@ -1489,13 +1526,16 @@ static const char k_sweep[] =
     "  wand [3:0] w;\n  wire bus;\n"
     "  sub m (.a(a), .o(y), .p(bus));\n  bb k (.a(en), .o());\n"
     "  and (g, en, a[0]);\n  bufif1 (t, en, a[1]);\n"
-    "  assign w = a;\n  assign w = {a[0], a[3:1]};\n  assign z = en ? w : 4'bz;\nendmodule\n";
+    "  assign w = a;\n  assign w = {a[0], a[3:1]};\n  assign z = en ? w : 4'bz;\n"
+    "  wire [3:0] nd = a;\n  wire [3:0] c1, c2;\n  assign c1 = nd;\n  assign c2 = c1;\n"
+    "endmodule\n";
 
 static bool g_saw_missing_file;
+static bool g_saw_error; /* any ERROR-level line of the run */
 
 static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
-    (void)level;
     (void)user;
+    g_saw_error |= level == ODIN3_LOG_ERROR;
     g_saw_missing_file |= strstr(msg, "missing_file:") != NULL;
 }
 
@@ -1514,20 +1554,36 @@ static bool read_complete(void) {
            odin3_design_top(rs.design).v != 0;
 }
 
-/* One run of the whole read with the limit-th allocation failing. */
-static odin3_status read_failing_at(long limit) {
-    fresh_quiet_design();
-    g_saw_missing_file = false;
-    odin3_util_set_alloc_fail_after(limit);
-    odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
-    odin3_util_set_alloc_fail_after(-1);
+/* A swallowed failure is an OK read that is incomplete or that logged an error. */
+static void check_not_swallowed(odin3_status st) {
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_FALSE_MESSAGE(g_saw_error, "an OK read logged an error");
+        TEST_ASSERT_TRUE_MESSAGE(read_complete(), "an OK read is incomplete");
+    }
+}
+
+/* What a run with an injected allocation failure may leave: the status, no missing file, the
+ * IR whole, and no swallowed failure (an OK read is complete and logged no error). */
+static void check_run(long limit, odin3_status st) {
     /* an injected allocation failure is NO_MEMORY, never a user error and never a missing file */
     char why[64];
     TEST_ASSERT_TRUE(snprintf(why, sizeof why, "limit %ld status %d", limit, (int)st) > 0);
     TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, why);
     TEST_ASSERT_FALSE_MESSAGE(g_saw_missing_file, why);
+    check_not_swallowed(st);
     odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
+}
+
+/* One run of the whole read with the limit-th allocation failing. */
+static odin3_status read_failing_at(long limit) {
+    fresh_quiet_design();
+    g_saw_missing_file = false;
+    g_saw_error = false;
+    odin3_util_set_alloc_fail_after(limit);
+    odin3_status st = odin3_pass_run(rs.design, "read_verilog", odin3_bytes_cstr("t.v"));
+    odin3_util_set_alloc_fail_after(-1);
+    check_run(limit, st);
     return st;
 }
 
@@ -1629,6 +1685,8 @@ static void test_oom_sweep_blackbox_sets(void) {
     X(test_blackbox_override_unevaluable)                                                          \
     X(test_blackbox_reuses_registered_type)                                                        \
     X(test_blackbox_mismatch)                                                                      \
+    X(test_instance_width_failure_is_counted)                                                      \
+    X(test_blackbox_unseen_set_second_read)                                                        \
     X(test_gate_and)                                                                               \
     X(test_gate_inverting)                                                                         \
     X(test_gate_buf)                                                                               \

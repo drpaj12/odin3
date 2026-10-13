@@ -1503,13 +1503,15 @@ odin3_status odin3_ast_get_library_units_from(const odin3_ast *ast, uint32_t *in
  * (ABI v4, 2D) The options of odin3_ast_elaborate (EL-3): nolatches (Yosys -nolatches: the
  * unassigned paths of a combinational block are x), nomem2reg (never replace a memory by
  * registers except where forced). top, top_at and auto_blackbox are options of the front end that
- * writes the store (stage 1 chose the top and the black boxes); they are ignored here. reserved
- * must be zero.
+ * writes the store (stage 1 chose the top and the black boxes); they are ignored here.
+ * reserved_pad (the byte after the three flags, explicit so the layout has no hidden padding) and
+ * reserved must be zero.
  */
 typedef struct odin3_elab_options {
     uint32_t top;
     uint32_t top_at;
     bool nolatches, nomem2reg, auto_blackbox;
+    uint8_t reserved_pad;
     uint32_t reserved[4];
 } odin3_elab_options;
 
@@ -1519,19 +1521,24 @@ typedef struct odin3_elab_options {
  * binds it (the symbol table becomes the store's), makes one IR module per MODULE with its ports,
  * then every body, and on success sets the design's top to the UNIT's first MODULE and logs
  * `read_verilog: elaborated top 'T': ...`. The store must be held by the design (made with
- * odin3_design_new_ast, form ODIN3_AST_FORM_ELABORATED), sealed with odin3_ast_finish and in the
- * form the spec's EL-4 describes; it is never destroyed and, being held, stays so whatever the
- * keep level. Its provenance run is the store's (odin3_ast_get_run): the SOURCE records of the IR
- * carry that run, which must be a pass run of the design (a plugin cannot yet learn a pass-run ID,
- * so until an ABI function opens one the slang adapter supplies the run of the read it performs
- * itself). `opts` may be NULL (the defaults). Because an adapter's store is untrusted, 2A's check
- * of the elaborated form runs in every build before anything is bound. Errors in the source the
- * store came from are located diagnostics and ODIN3_ERR_PARSE: the modules made stay in the design
- * (valid, incomplete) and the top is not set, so after such a failure the design is fit only for
- * destruction. ODIN3_ERR_INVALID_ARG (logged) for a NULL design or ast, non-zero reserved words,
- * a store that is not elaborated (`odin3_ast_elaborate: the store is not elaborated`), not held by
- * the design, of an unknown run, that breaks the elaborated form or has a symbol table already (so
- * a second call on one store); ODIN3_ERR_NO_MEMORY (the IR made so far stays valid).
+ * odin3_design_new_ast, form ODIN3_AST_FORM_ELABORATED), complete (an adapter ends it with
+ * odin3_ast_finish; this call does not check that) and in the form the spec's EL-4 describes; it is
+ * never destroyed and, being held, stays so whatever the keep level. Its provenance run is the
+ * store's (odin3_ast_get_run): the SOURCE records of the IR carry that run, which must be a pass
+ * run of the design (a plugin cannot yet learn a pass-run ID, so until an ABI function opens one
+ * the slang adapter supplies the run of the read it performs itself). `opts` may be NULL (the
+ * defaults). Because an adapter's store is untrusted, 2A's check of the elaborated form runs in
+ * every build before anything is bound. Errors in the source the store came from are located
+ * diagnostics and ODIN3_ERR_PARSE: the modules made stay in the design (valid, incomplete) and the
+ * top is not set, so after such a failure the design is fit only for destruction.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL design or ast, non-zero reserved words, a store that is
+ * not elaborated (`odin3_ast_elaborate: the store is not elaborated`), not held by the design, of
+ * an unknown run, that breaks the elaborated form (also found while the modules are made, such as a
+ * black-box carrier whose ports or parameters differ from its definition's) or has a symbol table
+ * already (so a second call on one store); ODIN3_ERR_NO_MEMORY (the IR made so far stays valid);
+ * ODIN3_ERR_CHECK (logged) for an inconsistency inside the stage itself (a 2D bug, never a property
+ * of the input). A failed call leaves the store bound to its symbol table, so a second call on it,
+ * whatever the first returned, is ODIN3_ERR_INVALID_ARG.
  */
 odin3_status odin3_ast_elaborate(odin3_design *design, odin3_ast *ast,
                                  const odin3_elab_options *opts);

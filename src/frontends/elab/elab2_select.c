@@ -26,6 +26,9 @@
 
 enum { SIG_BITS = 64, SUB_BITS = 32 };
 
+/* Constant select indices are clamped to +-SEL_BAND (2^40): see sel_orient. */
+static const int64_t SEL_BAND = INT64_C(1) << 40;
+
 /* --- constants ------------------------------------------------------------------------------- */
 
 /* The bit of a sig that sits at bit position pos, 0 or 1 (a constant sig only). */
@@ -88,8 +91,11 @@ odin3_status odin3_elab2_number_i64(odin3_elab2 *e2, odin3_ast_id node, int64_t 
 /* --- the object and its range ---------------------------------------------------------------- */
 
 int64_t odin3_elab2_sel_pos(const odin3_elab2_selobj *obj, int64_t idx) {
-    int64_t pos = obj->msb >= obj->lsb ? idx - obj->lsb : (int64_t)obj->lsb - idx;
-    return pos >= 0 && pos < (int64_t)obj->width ? pos : -1;
+    int64_t pos = 0;
+    /* an index so far out that the difference does not fit is outside the object as well */
+    bool overflow = obj->msb >= obj->lsb ? __builtin_sub_overflow(idx, (int64_t)obj->lsb, &pos)
+                                         : __builtin_sub_overflow((int64_t)obj->lsb, idx, &pos);
+    return !overflow && pos >= 0 && pos < (int64_t)obj->width ? pos : -1;
 }
 
 void odin3_elab2_sel_object(const odin3_elab2 *e2, odin3_ast_id object, uint32_t width,
@@ -177,8 +183,13 @@ static odin3_status sel_plus_width(odin3_elab2 *e2, odin3_ast_id select, uint32_
 }
 
 /* [b +: w] and [b -: w] with a known base: the indices lo .. hi, oriented as the declaration. */
-static void sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base,
+static void sel_orient(const odin3_elab2_selobj *obj, bool plus, int64_t base_in,
                        odin3_elab2_selrange *range) {
+    /* A base beyond the band is clamped to its edge: it stays far outside every object (a width
+     * is at most 2^32 bits), so the select reads x with the out-of-bounds warning, and the sums
+     * below cannot overflow. */
+    int64_t base = base_in > SEL_BAND ? SEL_BAND : base_in;
+    base = base < -SEL_BAND ? -SEL_BAND : base;
     int64_t lo = plus ? base : base - ((int64_t)range->width - 1);
     int64_t hi = lo + ((int64_t)range->width - 1);
     bool descending = obj->msb >= obj->lsb;

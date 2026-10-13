@@ -91,7 +91,12 @@ static odin3_status inst_find_target(inst_run *run, bool *found) {
         return ODIN3_ERR_PARSE;
     }
     run->tg.def = odin3_celltype_get(e2->design, run->tg.type);
-    return run->tg.def != NULL ? ODIN3_OK : ODIN3_ERR_PARSE;
+    if (run->tg.def == NULL) {
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, run->instantiation),
+                          "module '%s' has no cell type (a 2D bug)", run->module_name);
+        return ODIN3_ERR_PARSE;
+    }
+    return ODIN3_OK;
 }
 
 /* --- connections ------------------------------------------------------------------------------ */
@@ -274,7 +279,14 @@ static odin3_status inst_widths(inst_run *run) {
         uint32_t width = 0;
         odin3_status st = odin3_celltype_port_width_checked(e2->design, &query, &width);
         if (st != ODIN3_OK) {
-            return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_ERR_PARSE;
+            if (st == ODIN3_ERR_NO_MEMORY) {
+                return st;
+            }
+            odin3_elab2_error(e2, odin3_ast_loc(e2->elab, run->instance),
+                              "instance '%s' of '%s': port '%s' has no width for its parameter "
+                              "values (see the port_width line above)",
+                              run->name, run->module_name, def->ports[i].name);
+            return ODIN3_ERR_PARSE;
         }
         run->ports[i].width = width;
         run->pins += width;
@@ -547,6 +559,7 @@ odin3_status odin3_elab2_instance(odin3_elab2 *e2, odin3_ast_id instantiation) {
                         .module_name = odin3_ast_name_str(e2->elab, instantiation)};
         odin3_status st = inst_one(&run);
         if (st == ODIN3_ERR_PARSE) {
+            odin3_elab2_count_parse(e2, odin3_ast_loc(e2->elab, kids.ids[i]));
             result = ODIN3_ERR_PARSE; /* counted: go on with the next instance */
         } else if (st != ODIN3_OK) {
             return st;
@@ -801,6 +814,7 @@ odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl) {
                        .kind = odin3_ast_sub(e2->elab, gate_decl)};
         odin3_status st = gate_one(&gr);
         if (st == ODIN3_ERR_PARSE) {
+            odin3_elab2_count_parse(e2, odin3_ast_loc(e2->elab, kids.ids[i]));
             result = ODIN3_ERR_PARSE;
         } else if (st != ODIN3_OK) {
             return st;
