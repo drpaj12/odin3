@@ -41,4 +41,13 @@ extern const odin3_pass_def odin3_read_verilog_pass;
  * (logged) when it cannot be written. */
 odin3_status odin3_pass_write_text(const char *path, const odin3_strbuf *text);
 
+/*
+ * The body of the `compact` pass (IR-6): every module renumbered densely (odin3_module_compact),
+ * the held ASTs' symbol tables following the wire renumbering (EL-2). Used by the `compact` pass;
+ * `abc` (3D) ends with it. `opt` never compacts (IR-6 unchanged, PHASE2 #19). Atomic per module
+ * only: NO_MEMORY leaves the modules compacted so far compacted. Invalidates every module-local ID
+ * held outside the IR.
+ */
+odin3_status odin3_design_compact(odin3_pass_ctx *ctx, odin3_design *design);
+
 #endif

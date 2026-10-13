@@ -23,11 +23,15 @@ typedef struct odin3_atomic_file {
     FILE *fp;              /* NULL when not open */
     const char *path;      /* the destination, borrowed */
     odin3_strbuf tmp_path; /* the temporary's name */
+    bool to_stdout;        /* path was "-": fp is stdout, no temporary */
 } odin3_atomic_file;
 
 /*
- * Creates the temporary and opens it for binary writing. Its permissions become those of an
- * existing regular-file destination, otherwise 0666 minus the umask (as fopen would give).
+ * The path "-" means standard output, for every writer that goes through this function: fp is
+ * stdout, nothing is created, and close flushes it without closing it or renaming anything.
+ *
+ * Otherwise creates the temporary and opens it for binary writing. Its permissions become those of
+ * an existing regular-file destination, otherwise 0666 minus the umask (as fopen would give).
  * Reading the umask sets it briefly (POSIX has no getter): a thread creating a file at that
  * moment would not see the umask, so a threaded host must not create files concurrently with an
  * open. Replacing renames over the destination: a symlinked destination becomes a regular file,

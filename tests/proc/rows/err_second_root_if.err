@@ -1,0 +1,1 @@
+err_second_root_if.v:5:3: error: 'q' is clocked by both 'clk' and 'rst'; a second edge event must be an asynchronous reset tested by the block's only top-level 'if'

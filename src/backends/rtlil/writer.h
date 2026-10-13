@@ -76,12 +76,12 @@
 odin3_status odin3_rtlil_text(const odin3_design *design, odin3_strbuf *out);
 
 /*
- * Writes odin3_rtlil_text's text to path atomically (util/file.h): a private temporary beside
- * path, renamed over it on success; on any failure (a refusal above, out of memory, I/O) only the
- * temporary is removed and an existing file at path keeps its contents. Text is streamed a module
- * at a time (and whenever more than 1 MiB is pending), so the whole text is never held. Errors
- * as odin3_rtlil_text, plus ODIN3_ERR_IO (logged "<path>: cannot open ...", "<path>: write
- * failed: ..." or "<path>: cannot rename ...").
+ * Writes odin3_rtlil_text's text to path ("-" is standard output) atomically (util/file.h): a
+ * private temporary beside path, renamed over it on success; on any failure (a refusal above, out
+ * of memory, I/O) only the temporary is removed and an existing file at path keeps its contents.
+ * Text is streamed a module at a time (and whenever more than 1 MiB is pending), so the whole text
+ * is never held. Errors as odin3_rtlil_text, plus ODIN3_ERR_IO (logged "<path>: cannot open ...",
+ * "<path>: write failed: ..." or "<path>: cannot rename ...").
  */
 odin3_status odin3_rtlil_write(const odin3_design *design, const char *path);
 

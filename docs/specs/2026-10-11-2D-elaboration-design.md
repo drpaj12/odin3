@@ -432,7 +432,7 @@ evidence, the several-enabled case, the single-driver case). (3) `elab-equiv --y
 without it. Micro `syntax/multi_assignment` and `tests/elab/accept/D3_*.v` are `elab-equiv` equivalent; the
 micro leaves `micro_expect_fail.txt`.
 
-v4.29 (2026-10-13; 2D-7b library read, agent defaults; PHASE2 #21). (1) New §3.1a: `read_verilog
+v4.29 (2026-10-13; 2D-7b library read, agent defaults; PHASE2 #20). (1) New §3.1a: `read_verilog
 --lib` keeps a read's modules as library units for later reads, each elaborated where a later design
 instantiates it and under the flags (`--nolatches`, `--nomem2reg`) of the read that supplied it; it is
 not Yosys `read_verilog -lib` (no black boxes). (2) EL-6: a `--lib` unit is exempt from the "has the name

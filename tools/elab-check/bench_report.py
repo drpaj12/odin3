@@ -10,16 +10,22 @@ calls :func:`report` after the sweep; the stand-alone form checks that a bench p
 line lacks a column of :data:`ELAB_COLUMNS`. Exit codes: 0 pass; 1 a failure; 2 usage; 77 skipped
 (no memory cap possible).
 
-A line is ``key=value`` words (:func:`parse_line`). The profile ``elab`` is §15's table; 2E's
-``bench_proc`` adds its own profile (a column list and a targets function) beside it.
+A line is ``key=value`` words (:func:`parse_line`). The profile ``elab`` is §15's table; the profile
+``proc`` is 2E's §19 table, whose targets function and report live in
+``tools/proc-check/bench_proc_report.py`` (loaded on first use) and which also takes the
+expect-fail list's paths, so ``elab-sweep --bench bench_proc --bench-report proc`` reads the same
+rows ``bench-proc-report report`` does.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import sys
 from collections.abc import Callable, Mapping, Sequence
+from pathlib import Path
+from types import ModuleType
 from typing import NamedTuple
 
 import memcap
@@ -122,14 +128,43 @@ def _terms(row: Row) -> str:
     return " ".join(f"{key}={row[key]}" for key in ESTIMATE_TERMS if key in row)
 
 
-PROFILES: dict[str, Callable[[Mapping[str, Row]], list[Target]]] = {"elab": elab_targets}
+_PROC_MODULE: list[ModuleType] = []
 
 
-def report(profile: str, rows: Mapping[str, Row]) -> tuple[list[str], bool]:
+def proc_module() -> ModuleType:
+    """2E's ``bench_proc_report`` (``tools/proc-check``), loaded once; it imports only memcap."""
+    if not _PROC_MODULE and "bench_proc_report" in sys.modules:
+        _PROC_MODULE.append(sys.modules["bench_proc_report"])  # already imported by name
+    if not _PROC_MODULE:
+        path = Path(__file__).resolve().parent.parent / "proc-check" / "bench_proc_report.py"
+        spec = importlib.util.spec_from_file_location("bench_proc_report", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {path}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["bench_proc_report"] = module
+        spec.loader.exec_module(module)
+        _PROC_MODULE.append(module)
+    return _PROC_MODULE[0]
+
+
+def proc_targets(rows: Mapping[str, Row], expected: frozenset[str] = frozenset()) -> list[Target]:
+    """2E's §19 table (profile ``proc``) over the rows; ``expected`` are the expect-fail paths."""
+    return [Target(*t) for t in proc_module().proc_targets(rows, expected)]
+
+
+PROFILES: dict[str, Callable[..., list[Target]]] = {"elab": elab_targets, "proc": proc_targets}
+
+
+def report(profile: str, rows: Mapping[str, Row],
+           expected: frozenset[str] = frozenset()) -> tuple[list[str], bool]:
     """(lines to print, whether a target was missed). A miss is followed by the estimate terms
-    of the files it names: it is investigated and reported, never relaxed."""
+    of the files it names: it is investigated and reported, never relaxed. ``expected`` (the
+    expect-fail paths) matters to profile ``proc`` only."""
     if profile not in PROFILES:
         raise ValueError(f"unknown bench profile {profile!r} (known: {', '.join(PROFILES)})")
+    if profile == "proc":
+        done: tuple[list[str], bool] = proc_module().report(profile, rows, expected)
+        return done
     targets = PROFILES[profile](rows)
     lines = ["bench targets (spec 15):"]
     lines += [f"  {t.verdict:<6} {t.name}: {t.detail}" for t in targets]

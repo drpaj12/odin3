@@ -265,6 +265,25 @@ odin3_status odin3_pw_sig_extract(odin3_proc_mctx *mctx, odin3_pw *pw, odin3_pw_
     return st;
 }
 
+odin3_status odin3_pw_pattern_open(odin3_proc_mctx *mctx, const odin3_pw *pw,
+                                   odin3_pw_sig pattern) {
+    return open_pattern(mctx, pw, pattern);
+}
+
+bool odin3_pw_pattern_meets(const odin3_proc_mctx *mctx, const odin3_pw *pw, odin3_pw_sig sig) {
+    const odin3_pw_bit *bits = odin3_pw_sig_bits(pw, sig);
+    for (uint32_t i = 0; i < sig.len; i++) {
+        if (marked(mctx, bits[i]) != 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void odin3_pw_pattern_close(odin3_proc_mctx *mctx) {
+    odin3_proc_scratch_reset(mctx);
+}
+
 /* --- predicates ---------------------------------------------------------------------------- */
 
 bool odin3_pw_sig_equal(const odin3_pw *pw, odin3_pw_sig lhs, odin3_pw_sig rhs) {

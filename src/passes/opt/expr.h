@@ -365,7 +365,7 @@ odin3_status odin3_expr_rule_fine_cmp(odin3_expr_ctx *ec);
  * polarity; the node is rebuilt once however many inputs change. Counts ODIN3_OPT_RULE_CLKINV and
  * `rewritten` per input, with one DEBUG line each. NO_MEMORY leaves the IR valid and every FF as
  * it was (the rebuild is the kit's: nothing is destroyed before it can no longer fail). */
-odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc);
+odin3_status odin3_opt_expr_ffpol(odin3_opt_ctx *oc, bool x_round);
 
 /* The DEBUG line of a rewrite (§16): "opt_expr: module 'm': <rule> on <type> '<cell>'", the cell
  * being the string name_str (0: none) or else $c<ID of node>. The caller reads both before the

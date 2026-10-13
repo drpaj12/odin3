@@ -119,6 +119,10 @@ odin3_status odin3_proc_connect(odin3_proc_mctx *mctx, odin3_pw_bit lhs, odin3_p
  * The key a process's raw (decoded) bit sorts by where Yosys sorts the names it was written with
  * (proc_dff's find_any_lvalue): odin3_proc_bit_key, except that a net a merge of this module's
  * lowering dropped (now dead, its wire bit an alias of the kept net) keeps the key it had then.
+ * It is a total order over nets (no two distinct nets tie), which the flip-flop phase's index and
+ * ff_narrow rely on: live nets differ by primary wire bit (or by net ID without a primary); a
+ * dropped net's frozen key is its primary's, and a merge makes the dropped primary an alias of the
+ * kept net while the kept net's primary is unchanged, so it never equals a live net's key.
  */
 uint64_t odin3_proc_raw_key(const odin3_proc_mctx *mctx, odin3_pw_bit bit);
 
@@ -482,6 +486,10 @@ bool odin3_proc_ldb_latch(const odin3_proc_mctx *mctx, uint32_t index, odin3_nod
 /* Calls the test hook on_expand (proc_test.h), if one is installed (proc_pass.c owns the hooks). */
 void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
 
+/* Calls the test hook on_step (proc_test.h) for step (a value of odin3_proc_step), if one is
+ * installed. */
+void odin3_proc_hook_step(const odin3_proc_mctx *mctx, int step, bool begin);
+
 /* --- step D: flip-flops (§9, PR-15; proc_ff.c) --------------------------------------------- */
 
 /*
@@ -506,8 +514,10 @@ void odin3_proc_hook_expand(odin3_net_id net, bool set_undef);
  * (logged "proc: internal: ...") for what step A or the latch step rules out: an ALWAYS sync with
  * an action, a group without an edge sync or with two, a register output on a constant net;
  * ODIN3_ERR_NO_MEMORY and E6 (ODIN3_ERR_PARSE, odin3_proc_add_cell) stop at once with valid IR;
- * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument. O(groups x sync actions x width), Yosys's
- * bound.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument. O(groups x sync actions) for the scan of the
+ * actions plus O(groups x syncs x width x log) for find_any_lvalue: the (net, sync) pairs of the
+ * action left sides are sorted once, not each sync's left side once per group (Yosys's bound is
+ * higher; the groups, their bits and the output are the same).
  */
 odin3_status odin3_proc_ffs(odin3_proc_mctx *mctx, odin3_pw *pw);
 

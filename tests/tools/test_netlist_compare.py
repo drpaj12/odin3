@@ -345,5 +345,20 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
 
+class OrderIndependenceTest(unittest.TestCase):
+    """The canonical text depends on the netlist, never on the order of its cells."""
+
+    def test_level_of_a_primary_net_does_not_depend_on_visit_order(self) -> None:
+        """proc-gen-diff seed 33 (twin avoidance off): ``q1`` is a $dff output (primary) read
+        by a $not; its level once depended on whether the $dff was visited before the $not."""
+        path = str(Path(__file__).resolve().parent / "data" / "proc_gen_seed33.blif")
+        texts = set()
+        for seed in range(20):
+            netlist = netlist_compare.load(path, True)
+            random.Random(seed).shuffle(netlist.top.cells)
+            texts.add(netlist_compare.canonicalize(netlist))
+        self.assertEqual(len(texts), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

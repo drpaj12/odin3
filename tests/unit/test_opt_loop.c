@@ -1,11 +1,13 @@
 /*
- * test_opt_loop.c — the eight opt passes' registrations, option parsing, the stubs, the sub-pass
+ * test_opt_loop.c — the eight opt passes' registrations, option parsing, the sub-pass
  * call wrapper (hook, budget, snapshots) and --opt-stats (2F spec OP-12, OP-16; plan Task 4).
  * Task 13 extends it with the loop.
  */
 #include "backends/rtlil/writer.h"
 #include "ir/check.h"
 #include "ir/design.h"
+#include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/budget.h"
@@ -14,6 +16,7 @@
 #include "passes/opt/opt_test.h"
 #include "proc_build.h"
 #include "unity.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -77,6 +80,7 @@ void tearDown(void) {
     odin3_budget_test_set_limit(0);
     (void)odin3_pass_set_opt_snapshot(NULL);
     odin3_opt_test_set_hooks(NULL);
+    odin3_opt_test_set_limits(NULL);
     pb_free(&res);
     odin3_log_set_sink(NULL, NULL);
 }
@@ -198,35 +202,10 @@ static void test_parse_unknown(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse("opt", odin3_bytes_cstr(""), NULL));
 }
 
-/* --- stubs ----------------------------------------------------------------------------------- */
+/* --- the call wrapper's arguments ------------------------------------------------------------ */
 
-/* One line per pass that is still a stub: each later task removes its own. */
-static const char *const k_stub_passes[] = {
-    "opt",
-    "opt_share",
-};
-
-static void test_stubs(void) {
-    build(DEAD_TEXT);
-    odin3_strbuf text_before;
-    odin3_strbuf_init(&text_before);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text_before));
-    for (size_t i = 0; i < sizeof k_stub_passes / sizeof k_stub_passes[0]; i++) {
-        char want[LINE_MAX_LEN];
-        fmt_str(want, sizeof want, "%s: not available yet (2F)", k_stub_passes[i]);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, run_pass(k_stub_passes[i], ""), want);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_lines(ODIN3_LOG_ERROR, want), want);
-    }
-    odin3_strbuf text_after;
-    odin3_strbuf_init(&text_after);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text_after));
-    TEST_ASSERT_EQUAL_STRING(text_before.data, text_after.data);
-    odin3_strbuf_free(&text_before);
-    odin3_strbuf_free(&text_after);
-    check_full();
-}
-
-static void test_call_stub(void) {
+/* Every sub-pass has a body: opt_share runs through the wrapper and logs its INFO line. */
+static void test_call_invalid(void) {
     build(DEAD_TEXT);
     odin3_opt_opts opts;
     memset(&opts, 0, sizeof opts);
@@ -235,9 +214,9 @@ static void test_call_stub(void) {
     odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_SHARE, &opts, &counts};
     bool changed = true;
     n_lines = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
     TEST_ASSERT_FALSE(changed);
-    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, "opt_share: not available yet (2F)"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt_share: merged 0 cells"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(NULL, &changed));
     req.sub = ODIN3_OPT_N_SUBS;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));
@@ -261,7 +240,7 @@ static void test_call_changed_and_hook(void) {
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
     odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts};
-    odin3_opt_test_hooks hooks = {on_call, NULL};
+    odin3_opt_test_hooks hooks = {on_call, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
     hook_calls = 0;
     bool changed = false;
@@ -582,12 +561,603 @@ static void test_stats_dff(void) {
     check_full();
 }
 
+/* --- the opt driver (Task 13): loop, dirty set, cap, compact, opacity, budget -------------------
+ */
+
+/* y = s ? (s ? a : b) : c: the inner mux's A port is dead, the only rewrite opt has to make. */
+#define NESTED_TEXT                                                                                \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\c\n  wire input 4 \\s\n" \
+    "  wire output 5 \\y\n  wire \\t\n"                                                            \
+    "  cell $mux \\inner\n    parameter \\WIDTH 1\n    connect \\A \\b\n    connect \\B \\a\n"     \
+    "    connect \\S \\s\n    connect \\Y \\t\n  end\n"                                            \
+    "  cell $mux \\outer\n    parameter \\WIDTH 1\n    connect \\A \\c\n    connect \\B \\t\n"     \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"
+
+/* A constant 3-stage register pipeline: one stage becomes constant per opt_dff call. */
+#define PIPELINE_TEXT "module \\m\n" PIPELINE_BODY
+#define PIPELINE_BODY                                                                              \
+    "  wire input 1 \\clk\n  wire output 2 \\q1\n  wire output 3 \\q2\n"                           \
+    "  wire output 4 \\q3\n"                                                                       \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
+    "  cell $dff \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q1\n    connect \\Q \\q2\n  end\n"                 \
+    "  cell $dff \\f3\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q2\n    connect \\Q \\q3\n  end\nend\n"
+
+enum { SEQ_LEN = 2048 };
+static char seq[SEQ_LEN];
+
+static void on_seq(void *user, const char *sub) {
+    (void)user;
+    size_t len = strlen(seq);
+    int wrote = snprintf(seq + len, sizeof seq - len, "%s%s", len == 0 ? "" : " ", sub);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof seq - len);
+}
+
+static void record_calls(void) {
+    seq[0] = '\0';
+    odin3_opt_test_hooks hooks = {on_seq, NULL, NULL};
+    odin3_opt_test_set_hooks(&hooks);
+}
+
+#define ITER_DEFAULT " opt_muxtree opt_reduce opt_merge opt_dff opt_clean opt_expr"
+
+static void test_loop_sequences_default(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge" ITER_DEFAULT ITER_DEFAULT, seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+    check_full();
+}
+
+static void test_loop_sequences_noff(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-noff"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge"
+                             " opt_muxtree opt_reduce opt_merge opt_clean opt_expr"
+                             " opt_muxtree opt_reduce opt_merge opt_clean opt_expr",
+                             seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+}
+
+static void test_loop_sequences_full(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-full"));
+    TEST_ASSERT_EQUAL_STRING(
+        "opt_expr opt_merge"
+        " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr"
+        " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr",
+        seq);
+    check_full();
+}
+
+static void test_loop_sequences_fast(void) {
+    build(NESTED_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge opt_dff opt_clean", seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: -fast: done after 1 iterations"));
+    seq[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast -noff"));
+    TEST_ASSERT_EQUAL_STRING("opt_expr opt_merge opt_clean", seq);
+    check_full();
+}
+
+/* The text of the design (write_rtlil), malloc'd. */
+static char *design_text(void) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text));
+    char *copy = malloc(text.len + 1U);
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, text.data, text.len + 1U);
+    odin3_strbuf_free(&text);
+    return copy;
+}
+
+/* The text has (present) or lacks needle. */
+static void expect_text(const char *text, const char *needle, bool present) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(present ? 1 : 0, strstr(text, needle) != NULL ? 1 : 0, needle);
+}
+
+static void expect_pipeline_constant(void) {
+    char *text = design_text();
+    expect_text(text, "cell $dff", false);
+    expect_text(text, "connect \\q1 1'0", true);
+    expect_text(text, "connect \\q2 1'0", true);
+    expect_text(text, "connect \\q3 1'0", true);
+    free(text);
+}
+
+/* Review Focus 4: one stage becomes constant per opt_dff call, so three stages take four
+ * iterations (the last one finds nothing). */
+static void test_loop_pipeline_iterations(void) {
+    build(PIPELINE_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 4 iterations"));
+    expect_pipeline_constant();
+    check_full();
+}
+
+/* Review M4(a): -fast keeps looping while opt_dff changes something (one stage per round). */
+static void test_loop_fast_pipeline(void) {
+    build(PIPELINE_TEXT);
+    record_calls();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_STRING(
+        "opt_expr opt_merge opt_dff opt_clean opt_expr opt_merge opt_dff opt_clean"
+        " opt_expr opt_merge opt_dff opt_clean opt_expr opt_merge opt_dff opt_clean",
+        seq);
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: -fast: done after 4 iterations"));
+    expect_pipeline_constant();
+    check_full();
+}
+
+/* Review M4(b): the cap warns once per module that the last iteration changed. */
+static void test_loop_cap_modules(void) {
+    build("module \\m\n" PIPELINE_BODY "module \\n\n" PIPELINE_BODY);
+    odin3_opt_limits limits = {2, ODIN3_OPT_MUXTREE_MAX_EVALS};
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'n': no fixed point after 2 iterations; stopping"));
+    check_full();
+}
+
+static void test_loop_cap(void) {
+    build(PIPELINE_TEXT);
+    odin3_opt_limits limits = {2, ODIN3_OPT_MUXTREE_MAX_EVALS};
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_prefix("opt: fixed point"));
+    check_full();
+    /* the same cap in -fast mode */
+    pb_free(&res);
+    setUp();
+    build(PIPELINE_TEXT);
+    odin3_opt_test_set_limits(&limits);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-fast"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, count_lines(ODIN3_LOG_WARN,
+                       "opt: module 'm': no fixed point after 2 iterations; stopping"));
+    check_full();
+}
+
+/* The twenty inputs of the dirty-set comparison (tests/unit/data/opt/loop): the module of one
+ * test of each of the rule families (opt_expr, opt_merge, opt_reduce, opt_muxtree, opt_dff). */
+static const char *const k_loop_cases[] = {
+    "const_and",
+    "and_bit_inverse",
+    "bitwise_and_x",
+    "bitwise_xor_x",
+    "eqneq_resize",
+    "constshift",
+    "mul_low_zeros",
+    "mux_undef",
+    "fine_group",
+    "clkinv_dff",
+    "cse_cascade",
+    "cse_pmux_pairs",
+    "reduce_inline",
+    "pmux_equal_slices",
+    "muxtree_nested_same_sel",
+    "dff_srst_merge",
+    "dff_en_then_srst",
+    "dff_feedback_patterns",
+    "dff_constbits_one_stage",
+    "share_same_type",
+};
+
+enum { N_LOOP_CASES = sizeof k_loop_cases / sizeof k_loop_cases[0] };
+
+/* The case's file, built into res, run with args, and its write_rtlil text (malloc'd). */
+static char *run_case(const char *name, const char *args) {
+    char path[PATH_LEN];
+    int len = snprintf(path, sizeof path, "%s/%s.il", ODIN3_LOOP_DATA, name);
+    TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof path);
+    char *input = slurp(path);
+    pb_free(&res);
+    n_lines = 0;
+    odin3_status built = pb_build(input, &res);
+    free(input);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, built, n_lines > 0 ? lines[0].text : name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("opt", args), name);
+    check_full();
+    return design_text();
+}
+
+/* Internal risk 4: the dirty set is exact. opt_expr's Debug build also sweeps the module in full
+ * after each incremental call and aborts when that finds more to do. */
+static void test_dirty_vs_full_rescan(void) {
+    static const char *const k_args[] = {"", "-mux_undef -mux_bool -undriven -fine", "-keepdc",
+                                         "-full"}; /* -full: opt_share in the loop (review M4) */
+    for (size_t set = 0; set < sizeof k_args / sizeof k_args[0]; set++) {
+        for (size_t i = 0; i < N_LOOP_CASES; i++) {
+            char *incremental = run_case(k_loop_cases[i], k_args[set]);
+            char full_args[128];
+            int len = snprintf(full_args, sizeof full_args, "%s --opt-full-rescan", k_args[set]);
+            TEST_ASSERT_TRUE(len > 0 && (size_t)len < sizeof full_args);
+            char *rescan = run_case(k_loop_cases[i], full_args);
+            TEST_ASSERT_EQUAL_STRING_MESSAGE(incremental, rescan, k_loop_cases[i]);
+            free(incremental);
+            free(rescan);
+        }
+    }
+}
+
+/*
+ * What the dirty set exists for: opt_merge makes the two $not cells one, and only then can
+ * opt_expr see that the $mux's two data inputs are the same net (mux_same). The $mux is in no
+ * place opt_expr's second call would look at by itself.
+ */
+#define CHAIN_TEXT                                                                                 \
+    "module \\m\n  wire input 1 \\a\n  wire input 2 \\s\n  wire output 3 \\y\n"                    \
+    "  wire \\n1\n  wire \\n2\n"                                                                   \
+    "  cell $not \\i1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n1\n  end\n"                \
+    "  cell $not \\i2\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n2\n  end\n"                \
+    "  cell $mux \\mx\n    parameter \\WIDTH 1\n    connect \\A \\n1\n    connect \\B \\n2\n"      \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\nend\n"
+
+static void test_dirty_chain(void) {
+    build(CHAIN_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    char *text = design_text();
+    TEST_ASSERT_NULL(strstr(text, "cell $mux"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "cell $not"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
+    free(text);
+    check_full();
+    pb_free(&res);
+    build(CHAIN_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-full-rescan"));
+    char *rescan = design_text();
+    TEST_ASSERT_NULL(strstr(rescan, "cell $mux"));
+    free(rescan);
+}
+
+/*
+ * Review M3: a net merge without a rebuilt survivor. opt_dff ties the Q net of a constant-D
+ * flip-flop to the constant, so the $and that reads q only sees a changed input net; the
+ * incremental opt_expr must still fold it (only odin3_kit_note_net marks the reader). With the
+ * hook disabled this aborts at the settle() cross-check in Debug.
+ */
+#define TIE_TEXT                                                                                   \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\b\n  wire output 3 \\y\n"                  \
+    "  wire \\q\n"                                                                                 \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q\n  end\n"                   \
+    "  cell $and \\g\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                    \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\q\n    connect \\B \\b\n    connect \\Y \\y\n  end\nend\n"
+
+static void test_dirty_tie(void) {
+    build(TIE_TEXT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    char *text = design_text();
+    expect_text(text, "cell $dff", false);
+    expect_text(text, "cell $and", false);
+    expect_text(text, "connect \\y 1'0", true);
+    free(text);
+    check_full();
+}
+
+/* The live nodes of the module `m`, and its node-ID end. */
+static uint32_t live_nodes(const odin3_module *module) {
+    uint32_t live = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
+        live += odin3_node_live(module, (odin3_node_id){id}) ? 1U : 0U;
+    }
+    return live;
+}
+
+/* IR-6 unchanged (PHASE2 #19): opt leaves dead nodes; the script's `compact` after it removes
+ * them. A standalone opt_expr leaves dead nodes too. */
+static void test_compact_after_opt(void) {
+    build(DEAD_TEXT);
+    odin3_module *module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_TRUE(live_nodes(module) + 1U < odin3_module_node_end(module));
+    check_full();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+    check_full();
+    pb_free(&res);
+    char path[PATH_LEN];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/const_and.il", ODIN3_LOOP_DATA) > 0);
+    char *input = slurp(path);
+    build(input);
+    free(input);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_TRUE(live_nodes(module) + 1U < odin3_module_node_end(module));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+}
+
+/* One node's handle answers: live, type and name. */
+typedef struct node_snap {
+    bool live;
+    odin3_celltype_id type;
+    uint32_t name;
+} node_snap;
+
+enum { SNAP_MAX = 256 };
+
+static uint32_t take_snaps(node_snap *snaps) {
+    const odin3_module *module = pb_module(&res, "m");
+    uint32_t end = odin3_module_node_end(module);
+    TEST_ASSERT_TRUE(end <= SNAP_MAX);
+    for (uint32_t id = 1; id < end; id++) {
+        odin3_node_id node = {id};
+        snaps[id] = (node_snap){odin3_node_live(module, node), odin3_node_type(module, node),
+                                odin3_node_name(module, node)};
+    }
+    return end;
+}
+
+/* A dead node stays dead and a node that died keeps its old type and name; the number of nodes
+ * that died. */
+static uint32_t count_died(const node_snap *before, uint32_t end_before, const node_snap *after) {
+    uint32_t died = 0;
+    for (uint32_t id = 1; id < end_before; id++) {
+        TEST_ASSERT_TRUE(before[id].live || !after[id].live); /* no node comes back to life */
+        if (after[id].live) {
+            continue;
+        }
+        died += before[id].live ? 1U : 0U;
+        TEST_ASSERT_EQUAL_UINT32(before[id].type.v, after[id].type.v);
+        TEST_ASSERT_EQUAL_UINT32(before[id].name, after[id].name);
+    }
+    return died;
+}
+
+/* Handles survive `opt -full` (IR-6 unchanged; review M3): the node store never shrinks, the
+ * handles of the nodes that died keep answering; `compact` then makes the store dense. */
+static void handles_survive(const char *text) {
+    build(text);
+    node_snap before[SNAP_MAX];
+    node_snap after[SNAP_MAX];
+    uint32_t end_before = take_snaps(before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-full"));
+    TEST_ASSERT_TRUE(take_snaps(after) >= end_before);
+    TEST_ASSERT_TRUE(count_died(before, end_before, after) > 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
+    const odin3_module *module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+    pb_free(&res);
+}
+
+static void test_handles_survive_opt(void) {
+    handles_survive(DEAD_TEXT);
+    const char *const files[] = {"const_and.il", "cse_cascade.il", "share_same_type.il"};
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
+        char path[PATH_LEN];
+        TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/%s", ODIN3_LOOP_DATA, files[i]) > 0);
+        char *text = slurp(path);
+        handles_survive(text);
+        free(text);
+    }
+}
+
+/* The BODY blob of the nth $proc of `m` (malloc'd, *len bytes): what opt must never touch. */
+static uint8_t *body_of(uint32_t nth, uint32_t *len) {
+    const odin3_module *module = pb_module(&res, "m");
+    const odin3_value *body = odin3_node_param(module, pb_proc(&res, "m", nth), ODIN3_PROC_P_BODY);
+    TEST_ASSERT_NOT_NULL(body);
+    TEST_ASSERT_TRUE(body->kind == ODIN3_VAL_PROC && body->len > 0);
+    uint8_t *copy = malloc(body->len);
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, body->bits, body->len);
+    *len = body->len;
+    return copy;
+}
+
+static void expect_body(uint32_t nth, const uint8_t *want, uint32_t want_len) {
+    uint32_t len = 0;
+    uint8_t *got = body_of(nth, &len);
+    TEST_ASSERT_EQUAL_UINT32(want_len, len);
+    TEST_ASSERT_EQUAL_MEMORY(want, got, len);
+    free(got);
+}
+
+/* A foldable $add feeding two identical processes, a dead $or beside them. */
+#define OPAQUE_TEXT                                                                                \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 7 \\c\n  wire width 2 "    \
+    "\\s\n"                                                                                        \
+    "  wire width 2 output 3 \\z1\n  wire width 2 output 4 \\z2\n  wire \\dead\n"                  \
+    "  cell $add \\add\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                  \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 2\n"            \
+    "    connect \\A 2'01\n    connect \\B 2'01\n    connect \\Y \\s\n  end\n"                     \
+    "  cell $or \\d\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                     \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\a\n    connect \\B \\c\n    connect \\Y \\dead\n  end\n"                    \
+    "  process $p1\n    sync always\n      update \\z1 \\s\n  end\n"                               \
+    "  process $p2\n    sync always\n      update \\z2 \\s\n  end\nend\n"
+
+/* opt_muxtree and opt_clean logged their skip line for the module `m` (at least once). */
+static void expect_skip_lines(void) {
+    TEST_ASSERT_GREATER_THAN_UINT32(
+        0, count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped"));
+    TEST_ASSERT_GREATER_THAN_UINT32(
+        0, count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped"));
+}
+
+/* Review Focus 5 (mode P): the cells around a $proc are optimised, the $proc is opaque. */
+static void test_opacity_mode_p(void) {
+    build(OPAQUE_TEXT);
+    uint32_t len1 = 0;
+    uint32_t len2 = 0;
+    uint8_t *body1 = body_of(0, &len1);
+    uint8_t *body2 = body_of(1, &len2);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
+    char *text = design_text();
+    expect_text(text, "cell $add", false);
+    expect_text(text, "cell $or", true);
+    free(text);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
+    expect_body(0, body1, len1);
+    expect_body(1, body2, len2);
+    expect_skip_lines();
+    free(body1);
+    free(body2);
+    check_full();
+}
+
+/* proc's E1a on a two-switch body (test_proc_pass.c's m2), with cells around it. */
+#define FAILED_PROC_TEXT                                                                           \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\a\n"                 \
+    "  wire input 4 \\b\n  wire input 5 \\d\n  wire output 6 \\q\n  wire \\t0\n"                   \
+    "  wire input 8 \\c\n  wire width 2 \\s\n  wire width 2 output 7 \\z\n  wire \\dead\n"         \
+    "  cell $add \\add\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                  \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 2\n"            \
+    "    connect \\A 2'01\n    connect \\B 2'01\n    connect \\Y \\s\n  end\n"                     \
+    "  cell $or \\d1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                    \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\a\n    connect \\B \\c\n    connect \\Y \\dead\n  end\n"                    \
+    "  attribute \\src \"t.v:9.3\"\n  process $p\n"                                                \
+    "    switch \\a\n      case 1'1\n        assign \\t0 \\d\n    end\n"                           \
+    "    switch \\b\n      case 1'1\n        assign \\t0 1'0\n    end\n"                           \
+    "    sync posedge \\clk\n      update \\q \\t0\n"                                              \
+    "    sync posedge \\rst\n      update \\q \\t0\n"                                              \
+    "    sync always\n      update \\z \\s\n  end\nend\n"
+
+/* 2E section 18.1: after proc failed on a body, opt_expr and opt -nodffe -nosdff still run. */
+static void test_opt_after_failed_proc(void) {
+    build(FAILED_PROC_TEXT);
+    uint32_t len = 0;
+    uint8_t *body = body_of(0, &len);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("proc", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_module_proc_count(pb_module(&res, "m")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", ""));
+    char *text = design_text();
+    expect_text(text, "cell $add", false);
+    free(text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
+    expect_skip_lines();
+    expect_body(0, body, len);
+    free(body);
+    check_full();
+}
+
+/* The budget hook at 4096 bytes: opt stops at its first sub-pass call, the IR valid. */
+static void test_budget_opt(void) {
+    build(DEAD_TEXT);
+    odin3_budget_test_set_limit(BUDGET_LIMIT);
+    char *before = design_text();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1,
+        count_lines(ODIN3_LOG_ERROR, "opt needs more than 4096 bytes (the design's budget is 60% "
+                                     "of physical memory)"));
+    odin3_budget_test_set_limit(0);
+    char *after = design_text();
+    TEST_ASSERT_EQUAL_STRING(before, after);
+    free(before);
+    free(after);
+    check_full();
+}
+
+/* --opt-stats on const_and's module: its one rule fired once, and no zero counter is printed. */
+static void test_opt_stats_driver(void) {
+    char path[PATH_LEN];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/const_and.il", ODIN3_LOOP_DATA) > 0);
+    char *input = slurp(path);
+    build(input);
+    free(input);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-stats"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: rule const_and 1"));
+    for (uint32_t i = 0; i < n_lines; i++) {
+        if (strncmp(lines[i].text, "opt: rule ", 10) == 0) {
+            TEST_ASSERT_NULL_MESSAGE(strstr(lines[i].text, " 0"), lines[i].text);
+        }
+    }
+}
+
+/* A module for the OOM sweep: a dead mux port, a duplicate gate, a constant pipeline. */
+#define OOM_TEXT                                                                                   \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 3 \\b\n"                   \
+    "  wire input 4 \\s\n  wire output 5 \\y\n  wire output 6 \\w\n  wire output 7 \\q1\n"         \
+    "  wire output 8 \\q2\n  wire \\t\n  wire \\n1\n  wire \\n2\n"                                 \
+    "  cell $mux \\inner\n    parameter \\WIDTH 1\n    connect \\A \\b\n    connect \\B \\a\n"     \
+    "    connect \\S \\s\n    connect \\Y \\t\n  end\n"                                            \
+    "  cell $mux \\outer\n    parameter \\WIDTH 1\n    connect \\A \\a\n    connect \\B \\t\n"     \
+    "    connect \\S \\s\n    connect \\Y \\y\n  end\n"                                            \
+    "  cell $not \\i1\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n1\n  end\n"                \
+    "  cell $not \\i2\n    parameter \\A_SIGNED 0\n    parameter \\A_WIDTH 1\n"                    \
+    "    parameter \\Y_WIDTH 1\n    connect \\A \\a\n    connect \\Y \\n2\n  end\n"                \
+    "  cell $mux \\mx\n    parameter \\WIDTH 1\n    connect \\A \\n1\n    connect \\B \\n2\n"      \
+    "    connect \\S \\b\n    connect \\Y \\w\n  end\n"                                            \
+    "  cell $dff \\f1\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D 1'0\n    connect \\Q \\q1\n  end\n"                  \
+    "  cell $dff \\f2\n    parameter \\WIDTH 1\n    parameter \\CLK_POLARITY 1\n"                  \
+    "    connect \\CLK \\clk\n    connect \\D \\q1\n    connect \\Q \\q2\n  end\nend\n"
+
+enum { OOM_LIMIT = 4000, OOM_MIN_POINTS = 20 };
+
+/* One run of `opt` with the allocation fail-th failing: true when it succeeded (the sweep's end).
+ * A failed run leaves the IR valid, and a second run without failure finishes. */
+static bool oom_once(long fail) {
+    pb_free(&res);
+    build(OOM_TEXT);
+    n_lines = 0;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = odin3_design_run_pass(res.design, "opt", "");
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    check_full();
+    if (st != ODIN3_OK) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+        check_full();
+    }
+    return st == ODIN3_OK;
+}
+
+/* Every allocation point of an `opt` run fails once, in turn. */
+static void test_opt_oom(void) {
+    long failures = 0;
+    while (failures < OOM_LIMIT && !oom_once(failures)) {
+        failures++;
+    }
+    printf("opt OOM: %ld failing allocation points\n", failures);
+    TEST_ASSERT_TRUE(failures < OOM_LIMIT);
+    TEST_ASSERT_TRUE(failures > OOM_MIN_POINTS);
+}
+
+/* Two runs, byte-identical write_rtlil; and the reverse creation order of the nodes gives the
+ * same netlist (compared as a sorted list of the cells' types, a stand-in for netlist-compare). */
+static void test_determinism(void) {
+    for (size_t i = 0; i < N_LOOP_CASES; i++) {
+        char *first = run_case(k_loop_cases[i], "");
+        char *second = run_case(k_loop_cases[i], "");
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(first, second, k_loop_cases[i]);
+        free(first);
+        free(second);
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_opts);
     RUN_TEST(test_parse_unknown);
-    RUN_TEST(test_stubs);
-    RUN_TEST(test_call_stub);
+    RUN_TEST(test_call_invalid);
     RUN_TEST(test_call_changed_and_hook);
     RUN_TEST(test_call_muxtree);
     RUN_TEST(test_snapshot);
@@ -599,5 +1169,24 @@ int main(void) {
     RUN_TEST(test_stats);
     RUN_TEST(test_stats_expr);
     RUN_TEST(test_stats_dff);
+    RUN_TEST(test_loop_sequences_default);
+    RUN_TEST(test_loop_sequences_noff);
+    RUN_TEST(test_loop_sequences_full);
+    RUN_TEST(test_loop_sequences_fast);
+    RUN_TEST(test_loop_pipeline_iterations);
+    RUN_TEST(test_loop_cap);
+    RUN_TEST(test_loop_fast_pipeline);
+    RUN_TEST(test_loop_cap_modules);
+    RUN_TEST(test_dirty_vs_full_rescan);
+    RUN_TEST(test_dirty_chain);
+    RUN_TEST(test_dirty_tie);
+    RUN_TEST(test_compact_after_opt);
+    RUN_TEST(test_handles_survive_opt);
+    RUN_TEST(test_opacity_mode_p);
+    RUN_TEST(test_opt_after_failed_proc);
+    RUN_TEST(test_budget_opt);
+    RUN_TEST(test_opt_stats_driver);
+    RUN_TEST(test_opt_oom);
+    RUN_TEST(test_determinism);
     return UNITY_END();
 }

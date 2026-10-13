@@ -220,6 +220,7 @@ typedef struct clean_state {
 
 static void note_change(clean_state *cs) {
     cs->oc->changed = true;
+    odin3_kit_note_change(cs->oc);
     cs->oc->counts->clean_changes++;
 }
 
@@ -465,6 +466,10 @@ static odin3_status sweep(clean_state *cs) {
  * counter, no change.
  */
 static odin3_status clean_init(clean_state *cs) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(cs->oc->design), odin3_bytes_cstr("init"), &key)) {
+        return ODIN3_OK; /* "init" never interned: no net has an init, ffinit_get is X for all */
+    }
     for (uint32_t id = 1; id < odin3_module_net_end(cs->m); id++) {
         odin3_net_id net = {id};
         odin3_bit init = odin3_net_live(cs->m, net) ? odin3_ffinit_get(cs->m, net) : ODIN3_BIT_X;

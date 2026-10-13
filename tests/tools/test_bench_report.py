@@ -118,6 +118,19 @@ class TargetTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             bench_report.report("nope", {})
 
+    def test_proc_profile_is_registered_and_is_2es_report(self) -> None:
+        # 2E's review: bench_proc_report's profile belongs in PROFILES, so that
+        # `elab-sweep --bench bench_proc --bench-report proc` reads the same rows.
+        self.assertIn("proc", bench_report.PROFILES)
+        lines, missed = bench_report.report("proc", {})
+        self.assertTrue(missed)  # a run with no mcml.v row never passes
+        self.assertEqual(lines[0], "bench targets (spec 19):")
+        names = [t.name for t in bench_report.proc_targets({})]
+        self.assertTrue(any("mcml.v" in n for n in names), names)
+        # the expect-fail paths reach it: a listed file is not MISSED for being absent
+        _, missed_listed = bench_report.report("proc", {}, frozenset({"mcml.v"}))
+        self.assertTrue(missed_listed)  # lenet.v and the sets are still absent
+
 
 FAKE_OK = """#!{python}
 import sys

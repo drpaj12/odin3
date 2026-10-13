@@ -642,7 +642,9 @@ odin3_status odin3_proc_budget(odin3_proc_mctx *mctx, odin3_prov_id at) {
                      (uint64_t)mctx->pending.cap * mctx->pending.elem_size +
                      odin3_proc_ldb_bytes(mctx) +
                      (mctx->dropped != NULL ? odin3_u64map_bytes(mctx->dropped) : 0);
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_BUDGET, true);
     odin3_status st = odin3_budget_check(mctx->ctx, mctx->design, extra);
+    odin3_proc_hook_step(mctx, ODIN3_PROC_STEP_BUDGET, false);
     if (st != ODIN3_ERR_PARSE) {
         return st;
     }

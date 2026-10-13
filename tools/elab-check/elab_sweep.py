@@ -2,7 +2,8 @@
 
 Usage::
 
-    elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E | --bench B [--bench-report P]]
+    elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E [--pass proc] | --proc-diff --yosys Y
+               | --bench B [--bench-report P]] [--trio auto|on|off] [--also-no-trio] [--nolatches]
                [--expect-fail F]...
                [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]... [--tops F] [--golden-root D]
                [--root R] [--xl] [--skip-over BYTES] [--partial] <dir or file>...
@@ -21,9 +22,19 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
 - ``--equiv`` (needs ``--yosys`` and ``--equiv-check``): ``elab-equiv`` on the file (§14.3).
   Its exit 3 is an ``oracle crash`` (Yosys died of a signal, e.g. 0.55 on recursive
   instantiation): counted and shown, neither a mismatch nor a 2D failure.
-- ``--bench B``: ``B --one FILE [--techlib T]``; the child's stdout line follows the file's line as
-  ``bench:``. ``--bench-report P`` then prints the targets of profile ``P`` from those lines
-  (``bench_report.py``: ``elab`` is spec §15's table) and fails the run when one is MISSED.
+- ``--bench B``: ``B --one FILE [--techlib T]`` (``bench_elab`` for 2D, ``bench_proc`` for 2E;
+  ``--techlib`` is passed on); the child's stdout line follows the file's line as ``bench:``.
+  ``--bench-report P`` then prints the targets of profile ``P`` from those lines
+  (``bench_report.py``: ``elab`` is spec §15's table, ``proc`` is 2E's spec §19) and fails the run
+  when one is MISSED.
+- ``--proc-diff`` (needs ``--yosys``; 2E Task 12): ``proc-diff`` on the file (Odin III's ``proc``
+  against Yosys 0.55's on the same RTLIL; ``--top`` as in the default mode, ``--techlib`` passed
+  on, ``--nolatches`` optional). With ``--equiv``, ``--pass proc`` makes the bridge end after
+  ``proc`` (``elab-equiv --pass proc --async2sync``). ``--trio auto`` (the default) feeds the input
+  after the pre-``proc`` passes once ``opt -nodffe -nosdff`` runs (2F-5) and passes ``--no-trio``
+  until then, with a notice; ``--trio on`` requires it, ``--trio off`` never uses it;
+  ``--also-no-trio`` runs each file a second time without it. A ``proc-diff`` exit 3 is a ``tie``
+  (netlist-compare cannot order tied cells): a failure here, listable like any other.
 
 ``--expect-fail F`` (repeatable) lists ``<relative path> <one-line reason>`` lines (blank lines
 and ``#`` comments ignored), the path relative to ``--root`` when under it, else to the directory
@@ -46,6 +57,7 @@ Exit codes: 0 pass; 1 an unexpected result; 2 usage or input error; 77 skipped.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import importlib.machinery
 import importlib.util
 import os
@@ -72,6 +84,8 @@ TAIL_LINES = 3
 SUFFIX = ".v"
 EQUIV_OK, EQUIV_DIFFER, EQUIV_ERROR, EQUIV_CRASH = 0, 1, 2, 3  # elab-equiv's exit codes
 ELAB_EQUIV = Path(__file__).resolve().parent / "elab_equiv.py"
+PROC_DIFF = Path(__file__).resolve().parents[1] / "proc-check" / "proc_diff.py"
+TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
 _XL_REASON = re.compile(r"xl\b:?\s*")
 _SIZE = re.compile(r"(\d+)([KMG]?)", re.IGNORECASE)
 _UNITS = {"": 1, "K": 1 << 10, "M": MIB, "G": GIB}
@@ -316,6 +330,11 @@ class Config:
     techlib: str | None = None
     bench_report: str | None = None
     libs: tuple[str, ...] = ()  # files read as library units first (--lib; 2D-7b)
+    proc_diff: bool = False
+    pass_proc: bool = False  # --equiv: elab-equiv --pass proc
+    no_trio: bool = False
+    also_no_trio: bool = False
+    nolatches: bool = False
 
     def cap_of(self, item: Item) -> int:
         for suffix, cap in self.caps.items():
@@ -326,7 +345,9 @@ class Config:
     def mode(self) -> str:
         if self.bench:
             return "bench"
-        return "equiv" if self.yosys else "elab"
+        if self.proc_diff:
+            return "procdiff"
+        return "equiv" if self.equiv_check else "elab"
 
 
 def run_child(argv: Sequence[str], cap: int, start: float) -> tuple[subprocess.CompletedProcess[str]
@@ -387,6 +408,53 @@ def lock_fds() -> tuple[int, ...]:
     return (memcap.LOCK_FD,)
 
 
+def proc_flags(cfg: Config) -> list[str]:
+    """The bridge's flags for ``--pass proc``: the same as 2E's proc-rows (Task 11)."""
+    if not cfg.pass_proc:
+        return []
+    return ["--pass", "proc", "--async2sync", *(["--no-trio"] if cfg.no_trio else [])]
+
+
+def proc_diff_outcome(done: subprocess.CompletedProcess[str], secs: float) -> Outcome:
+    """proc-diff's exit: 0 identical, 1 differs, 2 error, 3 a tie (netlist-compare cannot order
+    the tied cells); the whole output is kept for the expect-fail needle."""
+    text = (done.stdout or "") + (done.stderr or "")
+    code = done.returncode
+    if code == 0:
+        return Outcome("ok", secs, output=done.stdout or "")
+    if code == 1:
+        return Outcome("fail", secs, "NOT identical: " + first_error(text), text)
+    if code == 3:
+        return Outcome("fail", secs, "tie: netlist-compare cannot order the tied cells", text)
+    return Outcome("fail", secs, first_error(text) or f"exit {code}", text, hard=code < 0)
+
+
+def run_proc_diff(cfg: Config, item: Item, cap: int) -> Outcome:
+    """proc-diff on the file, once per input mode (``--also-no-trio`` adds ``--no-trio``)."""
+    start = time.monotonic()
+    assert cfg.yosys is not None
+    top = top_for(item, cfg.tops, cfg.golden_root)
+    modes = [cfg.no_trio] + ([True] if cfg.also_no_trio and not cfg.no_trio else [])
+    outputs: list[str] = []
+    for no_trio in modes:
+        argv = [sys.executable, str(PROC_DIFF), "--odin3", cfg.odin3, "--yosys", cfg.yosys,
+                "--mem-cap", str(cap), *(["--top", top] if top else []),
+                *(["--techlib", cfg.techlib] if cfg.techlib else []),
+                *(["--nolatches"] if cfg.nolatches else []), *(["--no-trio"] if no_trio else []),
+                str(item.path)]
+        try:  # proc-diff caps each of its own children
+            done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
+                                  timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
+        except subprocess.TimeoutExpired:
+            return Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s",
+                           hard=True)
+        outcome = proc_diff_outcome(done, time.monotonic() - start)
+        if outcome.kind != "ok":
+            return outcome
+        outputs.append(outcome.output)
+    return Outcome("ok", time.monotonic() - start, output="".join(outputs))
+
+
 def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     start = time.monotonic()
     assert cfg.yosys is not None and cfg.equiv_check is not None
@@ -395,7 +463,7 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
             "--equiv-check", cfg.equiv_check, "--mem-cap", str(cap), "--unmap-enables",
             *(["--top", top] if top else []), *(["--techlib", cfg.techlib] if cfg.techlib else []),
             *[arg for lib in cfg.libs for arg in ("--lib", lib)],
-            *(["--lib-nomem2reg"] if cfg.libs else []), str(item.path)]
+            *(["--lib-nomem2reg"] if cfg.libs else []), *proc_flags(cfg), str(item.path)]
     try:  # elab-equiv caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
@@ -422,6 +490,8 @@ def run_file(cfg: Config, item: Item) -> Outcome:
     mode = cfg.mode()
     if mode == "bench":
         return run_bench(cfg, item, cap)
+    if mode == "procdiff":
+        return run_proc_diff(cfg, item, cap)
     return run_equiv(cfg, item, cap) if mode == "equiv" else run_elab(cfg, item, cap)
 
 
@@ -532,7 +602,8 @@ def sweep(cfg: Config, args: argparse.Namespace, items: list[Item],
         return EXIT_SKIP
     missed = False
     if cfg.bench_report:
-        lines, missed = bench_report.report(cfg.bench_report, state.bench_rows)
+        lines, missed = bench_report.report(cfg.bench_report, state.bench_rows,
+                                            frozenset(expect))
         print("\n".join(lines))
     return EXIT_FAIL if counts["FAIL"] or counts["XPASS"] or stale or missed else EXIT_OK
 
@@ -549,7 +620,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--equiv-check", help="tools/equiv-check/equiv-check (--equiv)")
     ap.add_argument("--bench", metavar="B", help="start `B --one FILE` per file")
     ap.add_argument("--bench-report", metavar="PROFILE",
-                    help="after a --bench sweep, print the targets of this profile (elab)")
+                    help="after a --bench sweep, print the targets of this profile (elab, proc)")
+    ap.add_argument("--proc-diff", action="store_true", dest="proc_diff",
+                    help="run proc-diff (Odin III's proc against Yosys 0.55's) per file")
+    ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
+                    help="--equiv: side A stops after elaboration (default) or after proc")
+    ap.add_argument("--trio", choices=("auto", "on", "off"), default="auto",
+                    help="proc modes: the input after the pre-proc passes (auto: once opt exists)")
+    ap.add_argument("--also-no-trio", action="store_true",
+                    help="--proc-diff: run each file again without the pre-proc passes")
+    ap.add_argument("--nolatches", action="store_true",
+                    help="--proc-diff: read_verilog --nolatches")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
                     help="<relative path> <reason> lines (repeatable)")
     ap.add_argument("--jobs", type=int, default=1)
@@ -575,8 +656,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def build_config(args: argparse.Namespace) -> Config:
-    if args.equiv and args.bench:
-        raise UsageError("--equiv and --bench cannot be combined")
+    if sum([bool(args.equiv), bool(args.bench), bool(args.proc_diff)]) > 1:
+        raise UsageError("--equiv, --bench and --proc-diff cannot be combined")
     if args.bench_report and not args.bench:
         raise UsageError("--bench-report needs --bench")
     if args.bench_report and args.bench_report not in bench_report.PROFILES:
@@ -584,6 +665,10 @@ def build_config(args: argparse.Namespace) -> Config:
                          f"(known: {', '.join(bench_report.PROFILES)})")
     if args.equiv and not (args.yosys and args.equiv_check):
         raise UsageError("--equiv needs --yosys and --equiv-check")
+    if args.proc_diff and not args.yosys:
+        raise UsageError("--proc-diff needs --yosys")
+    if args.stop_pass == "proc" and not args.equiv:
+        raise UsageError("--pass proc needs --equiv")
     caps: dict[str, int] = {}
     for spec in args.cap_for:
         suffix, _, size = spec.partition("=")
@@ -591,25 +676,44 @@ def build_config(args: argparse.Namespace) -> Config:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = parse_size(size)
     cap = parse_size(args.mem_cap)
-    for tool in (args.odin3, args.bench) if not args.equiv else (args.odin3,):
+    for tool in (args.odin3, args.bench) if not (args.equiv or args.proc_diff) else (args.odin3,):
         if tool is not None and shutil.which(tool) is None:
             raise UsageError(f"{tool} is not an executable file")
     golden = args.golden_root
     if golden is None:
         golden = load_micro_top().DEFAULT_ROOT
     tops = read_tops(args.tops) if args.tops else {}
-    return Config(os.path.abspath(shutil.which(args.odin3) or args.odin3),
-                  _abs(args.yosys) if args.equiv else None,
-                  _abs(args.equiv_check) if args.equiv else None,
-                  _abs(args.bench) if args.bench else None, cap, caps, tops, golden,
-                  _abs(args.techlib) if args.techlib else None, args.bench_report,
-                  tuple(str(Path(lib).resolve()) for lib in args.lib))
+    return Config(
+        odin3=os.path.abspath(shutil.which(args.odin3) or args.odin3),
+        yosys=_abs(args.yosys) if args.equiv or args.proc_diff else None,
+        equiv_check=_abs(args.equiv_check) if args.equiv else None,
+        bench=_abs(args.bench) if args.bench else None, cap=cap, caps=caps, tops=tops,
+        golden_root=golden, techlib=_abs(args.techlib) if args.techlib else None,
+        bench_report=args.bench_report, libs=tuple(str(Path(lib).resolve()) for lib in args.lib),
+        proc_diff=bool(args.proc_diff), pass_proc=args.stop_pass == "proc",
+        no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
+        nolatches=bool(args.nolatches))
 
 
 def _abs(tool: str | None) -> str | None:
     if tool is None:
         return None
     return os.path.abspath(shutil.which(tool) or tool)
+
+
+def settle_trio(cfg: Config, choice: str) -> Config:
+    """``--trio auto`` in a proc mode: the input after the pre-proc passes once ``opt`` exists,
+    else ``--no-trio`` with a notice; ``on`` requires it. Elsewhere the config stays."""
+    if not (cfg.proc_diff or cfg.pass_proc) or choice == "off":
+        return cfg
+    done = memcap.run([cfg.odin3, "-p", TRIO_PROBE], cfg.cap, capture_output=True)
+    if done.returncode == 0:
+        return cfg
+    if choice == "on":
+        raise UsageError(f"--trio on: `{TRIO_PROBE}` does not run (exit {done.returncode})")
+    reason = ((done.stdout or "") + (done.stderr or "")).strip().splitlines()[-1:] or ["no output"]
+    print(f"{TOOL}: trio: skipped ({TRIO_PROBE} exit {done.returncode}: {reason[0]})")
+    return dataclasses.replace(cfg, no_trio=True)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -622,6 +726,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for tool in (cfg.odin3, cfg.bench):
             if tool is not None:
                 memcap.wrap([tool], cfg.cap)
+        cfg = settle_trio(cfg, args.trio)
         expect = merge_expect(args.expect_fail)
         root = args.root.resolve() if args.root is not None else None
         items = collect(args.inputs, root)

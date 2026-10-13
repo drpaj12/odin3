@@ -88,6 +88,7 @@ skip dead objects. Because churn (opt; lower → abc → read-back loops) leaves
   (so output order is unchanged) and frees dead slots;
 - it invalidates every module-local ID held outside the IR, including C ABI handles; only the
   pass manager calls it, at named pipeline points (after `opt`, after each ABC read-back);
+  `compact` runs as the pass `compact`;
 - before freeing, it appends one **tombstone** per dead node, net and wire (module, kind, cell
   type, name, prov; for a node also its parameters and the names of the nets its pins were last
   connected to, PHASE1 #14) to a design-global tombstone table, so history keeps pointing at what existed
@@ -385,6 +386,13 @@ in IR-3, IR-4, IR-6, IR-15 or check rule 4 changes.
   every definition other than the built-in `$proc` itself (identity, not shape: a copy of its
   definition is refused; 2D plan point (g), review I14). The ABI's plugin registration keeps its
   `cover` kind bound and flag mask, so a plugin can declare neither.
+- **`proc` deletes them** (2E spec §23). The `proc` pass (docs/PASSES.md) lowers every `$proc` node of
+  a module whose processes all analyse without error and deletes it with `odin3_node_delete`: the
+  count above falls to 0 for that module, and `odin3_design_has_processes` is false once every
+  module is lowered (a module with an error keeps all its `$proc` nodes). A deleted `$proc` node's
+  tombstone, as for any dead node (IR-6), keeps its parameters and so its `BODY`; `compact` frees
+  the pins and the slot but not the history. `proc --stop-after X` instead re-encodes each process
+  as a new `$proc` node (the old one is deleted; the new one takes the old one's record).
 - **The body** (`src/ir/proc.h`). Positions (`odin3_pbit`): `IN | k` is the net on `I` pin k,
   `OUT | k` the net on `O` pin k, `ANY` (`-`, matches anything) appears only in compares. Positions
   are pin positions, never net IDs, so merging, renaming and compacting nets never touch a body.

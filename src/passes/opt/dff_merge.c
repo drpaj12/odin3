@@ -399,6 +399,7 @@ static odin3_status marks_apply(merge_job *job) {
             (void)odin3_pin_connect(module, mark->pin, mark->old);
             break;
         }
+        odin3_kit_note_node(job->ds->oc, odin3_pin_node(module, mark->pin));
         job->applied++;
     }
     return st;
@@ -413,6 +414,7 @@ static odin3_status job_undo(merge_job *job) {
         const odin3_dff_xmark *mark = odin3_vec_cat(&job->plan->marks, k - 1U);
         odin3_status st = odin3_pin_disconnect(module, mark->pin);
         st = st == ODIN3_OK ? odin3_pin_connect(module, mark->pin, mark->old) : st;
+        odin3_kit_note_node(job->ds->oc, odin3_pin_node(module, mark->pin));
         first = first == ODIN3_OK ? st : first;
     }
     job->applied = 0;

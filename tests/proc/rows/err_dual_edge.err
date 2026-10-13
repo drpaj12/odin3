@@ -1,0 +1,1 @@
+err_dual_edge.v:5:3: error: 'q' is clocked by both edges of 'clk'; dual-edge registers are not supported

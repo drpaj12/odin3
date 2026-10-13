@@ -1,0 +1,6 @@
+# tests/proc/micro_bridge_expect_fail.txt: micros that proc_bridge_micro cannot check with
+# equiv-check (several clock domains, a latch clocked by an internal net, ...), in addition to
+# tests/proc/micro_expect_fail.txt. Same format: `<path> [needle] <reason>`. They stay covered by
+# proc_diff_micro (Yosys's proc on the same RTLIL). Empty until the first full proc_bridge_micro
+# run (the implementer ran only the 10 smallest micros: heavy-run, smoke); the controller lists
+# the files that exit 2 with `equiv-check failed` here, as proc_bridge_vtr_expect_fail does.

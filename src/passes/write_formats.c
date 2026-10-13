@@ -209,12 +209,13 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 }
 
 const odin3_pass_def odin3_pass_write_json = {
-    "write_json",   "write_json <file>: write the design as Yosys-schema JSON",
+    "write_json",   "write_json <file>: write the design as Yosys-schema JSON (file - is stdout)",
     write_json_run, NULL,
     false,          ODIN3_PASS_PROCESSES_REFUSE};
 const odin3_pass_def odin3_pass_write_verilog = {
     "write_verilog",
-    "write_verilog <file> [--name-style short|provenance]: write structural Verilog",
+    "write_verilog <file> [--name-style short|provenance]: write structural Verilog (file - is "
+    "stdout)",
     write_verilog_run,
     NULL,
     false,
@@ -222,7 +223,7 @@ const odin3_pass_def odin3_pass_write_verilog = {
 const odin3_pass_def odin3_pass_write_dot = {
     "write_dot",
     "write_dot <file> [--focus <path>|<file:line>|cone(<net>)] [--max-nodes N]: write Graphviz "
-    "dot",
+    "dot (file - is stdout)",
     write_dot_run,
     NULL,
     false,
@@ -230,7 +231,8 @@ const odin3_pass_def odin3_pass_write_dot = {
 /* 2D EL-48: RTLIL is the word-level view with processes, so the pass runs on them (EL-33). */
 const odin3_pass_def odin3_pass_write_rtlil = {
     "write_rtlil",
-    "write_rtlil <file>: write the design as Yosys RTLIL text (word level, processes included)",
+    "write_rtlil <file>: write the design as Yosys RTLIL text (word level, processes included); "
+    "file - is stdout",
     write_rtlil_run,
     NULL,
     false,
