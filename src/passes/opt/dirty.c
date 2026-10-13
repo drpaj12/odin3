@@ -41,7 +41,7 @@ struct odin3_opt_modstate {
     uint32_t n_dirty[N_PHASES]; /* nodes with DIRTY0 / DIRTY1 set */
     bool all;                   /* every node counts as dirty (opt_expr sweeps) */
     bool changed;               /* a kit rewrite touched the module since the iteration began */
-    bool dff_primed;            /* opt_dff has swept the module and the IR journal is on (dff_dirty.c) */
+    bool dff_primed; /* opt_dff has swept the module and the IR journal is on (dff_dirty.c) */
 };
 
 static struct {
@@ -274,7 +274,8 @@ void odin3_opt_dirty_sweep_all(odin3_opt_ctx *oc) {
     }
 }
 
-/* --- opt_dff's side ---------------------------------------------------------------------------- */
+/* --- opt_dff's side ----------------------------------------------------------------------------
+ */
 
 bool odin3_opt_dff_primed(const odin3_opt_ctx *oc) {
     return oc != NULL && oc->mod != NULL && g_sess.incremental && oc->mod->dff_primed;

@@ -37,7 +37,7 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { MARK_FF = 1U, MARK_MUX = 2U, N_MUX_NAMES = 3 };
+enum { MARK_FF = 1U, MARK_MUX = 2U, N_MUX_NAMES = 3, JOURNAL_SHIFT = 32 };
 
 typedef struct walker {
     const odin3_dff_state *ds;
@@ -57,7 +57,8 @@ static bool is_mux(const walker *wk, odin3_celltype_id type) {
     return false;
 }
 
-/* Marks node: an FF is dirty, a mux not yet followed goes on the stack, anything else is nothing. */
+/* Marks node: an FF is dirty, a mux not yet followed goes on the stack, anything else is nothing.
+ */
 static odin3_status touch_node(walker *wk, odin3_node_id node) {
     const odin3_opt_ctx *oc = wk->ds->oc;
     if (node.v == 0 || node.v >= wk->dd->n_marks || !odin3_node_live(oc->module, node)) {
@@ -116,12 +117,13 @@ static odin3_status follow_mux(walker *wk, odin3_node_id node) {
 
 /* One journal entry. */
 static odin3_status entry_walk(walker *wk, uint64_t entry) {
-    uint32_t kind = (uint32_t)(entry >> 32);
+    uint32_t kind = (uint32_t)(entry >> JOURNAL_SHIFT);
     uint32_t id = (uint32_t)entry;
     if (kind == ODIN3_JOURNAL_NODE) {
         return touch_node(wk, (odin3_node_id){id});
     }
-    if (id < wk->n_seen) { /* a net is walked once per kind (clock, reset and constant nets recur) */
+    if (id <
+        wk->n_seen) { /* a net is walked once per kind (clock, reset and constant nets recur) */
         uint8_t bit = kind == ODIN3_JOURNAL_DRIVE ? 1U : 2U;
         if ((wk->seen[id] & bit) != 0) {
             return ODIN3_OK;
@@ -192,7 +194,8 @@ odin3_status odin3_dff_dirty_begin(odin3_dff_state *ds) {
     odin3_opt_ctx *oc = ds->oc;
     odin3_dff_dirty_free(dd);
     if (!odin3_opt_dff_primed(oc)) {
-        (void)odin3_opt_dff_prime(oc); /* the first sweep is full; changes from here are journaled */
+        (void)odin3_opt_dff_prime(
+            oc); /* the first sweep is full; changes from here are journaled */
         return ODIN3_OK;
     }
     const uint64_t *entries = NULL;

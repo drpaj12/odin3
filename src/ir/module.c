@@ -182,6 +182,8 @@ odin3_wire_id odin3_module_find_wire(const odin3_module *module, uint32_t name_s
 
 /* --- the change journal -------------------------------------------------------------------- */
 
+enum { JOURNAL_FIRST = 1024, JOURNAL_KIND_SHIFT = 32 };
+
 void odin3_module_journal_begin(odin3_module *module) {
     module->journal.len = 0;
     module->journal.on = true;
@@ -211,7 +213,7 @@ void odin3_module_journal_drop(odin3_module *module, size_t n) {
 
 void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id) {
     odin3_module_journal *jr = &module->journal;
-    uint64_t entry = ((uint64_t)kind << 32) | id;
+    uint64_t entry = ((uint64_t)kind << JOURNAL_KIND_SHIFT) | id;
     if (!jr->on || jr->overflow || (jr->len > 0 && jr->ent[jr->len - 1] == entry)) {
         return;
     }
@@ -220,7 +222,7 @@ void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id) 
         return;
     }
     if (jr->len == jr->cap) {
-        size_t cap = jr->cap == 0 ? 1024U : jr->cap * 2U;
+        size_t cap = jr->cap == 0 ? JOURNAL_FIRST : jr->cap * 2U;
         uint64_t *grown = odin3_util_realloc(jr->ent, cap * sizeof *grown);
         if (grown == NULL) { /* the reader falls back to "everything changed" */
             jr->overflow = true;

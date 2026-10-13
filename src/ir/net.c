@@ -52,8 +52,8 @@ static odin3_status net_room(odin3_module *module, odin3_net_rec *net) {
 
 /* Journal (module.h): pin changed on net_id, which it drives (DRIVE) or reads (SINK). */
 static void journal_pin(odin3_module *module, odin3_net_id net_id, const odin3_pin_rec *pin) {
-    ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_NODE, pin->node.v);
-    ODIN3_JOURNAL_NOTE(module, pin->dir != ODIN3_DIR_IN ? ODIN3_JOURNAL_DRIVE : ODIN3_JOURNAL_SINK,
+    odin3_journal_note(module, ODIN3_JOURNAL_NODE, pin->node.v);
+    odin3_journal_note(module, pin->dir != ODIN3_DIR_IN ? ODIN3_JOURNAL_DRIVE : ODIN3_JOURNAL_SINK,
                        net_id.v);
 }
 
@@ -236,8 +236,8 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair) {
         attach(module, pair.keep, pin);
     }
     odin3_alias_absorb(module, pair.keep, pair.drop);
-    ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, pair.keep.v);
-    ODIN3_JOURNAL_NOTE(module, ODIN3_JOURNAL_DRIVE, pair.drop.v);
+    odin3_journal_note(module, ODIN3_JOURNAL_DRIVE, pair.keep.v);
+    odin3_journal_note(module, ODIN3_JOURNAL_DRIVE, pair.drop.v);
     drop->dead = true;
     return ODIN3_OK;
 }

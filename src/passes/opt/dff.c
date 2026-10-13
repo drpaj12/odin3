@@ -103,6 +103,27 @@ static odin3_status collect_ffs(const odin3_opt_ctx *oc, odin3_vec *list) {
 }
 
 #ifndef NDEBUG
+/* Debug: one skipped FF visited in full (the rules, or the constant bits) changes nothing. */
+static void check_one(odin3_dff_state *ds, odin3_node_id node, bool constbits) {
+    uint32_t changed = ds->n_changed;
+    uint32_t bits = ds->n_bits;
+    odin3_status st = ODIN3_OK;
+    if (constbits) {
+        st = odin3_dff_visit_constbits(ds, node);
+    } else {
+        bool usable = false;
+        st = odin3_dff_state_load(ds, node, &usable);
+        for (size_t i = 0; st == ODIN3_OK && usable && i < sizeof k_rules / sizeof k_rules[0];
+             i++) {
+            st = k_rules[i](ds);
+        }
+    }
+    assert(st != ODIN3_OK || (ds->n_changed == changed && ds->n_bits == bits && !ds->changed &&
+                              !ds->gone && !ds->counted));
+    (void)changed;
+    (void)bits;
+}
+
 /* Debug: the FFs the dirty set skipped, visited in full now, must change nothing (the rules, then
  * the constant bits). Run with the mux snapshot of the call still alive. */
 static void check_skipped(odin3_dff_state *ds, bool constbits) {
@@ -110,28 +131,10 @@ static void check_skipped(odin3_dff_state *ds, bool constbits) {
     const uint32_t ops = ds->oc->pass->op;
     for (uint32_t id = 1; id < end; id++) {
         odin3_node_id node = {id};
-        if (!odin3_node_live(ds->oc->module, node) || (ds->dirty.marks[id] & 1U) != 0 ||
-            !odin3_ff_is_ff(ds->oc, odin3_node_type(ds->oc->module, node))) {
-            continue;
+        if (odin3_node_live(ds->oc->module, node) && (ds->dirty.marks[id] & 1U) == 0 &&
+            odin3_ff_is_ff(ds->oc, odin3_node_type(ds->oc->module, node))) {
+            check_one(ds, node, constbits);
         }
-        uint32_t changed = ds->n_changed;
-        uint32_t bits = ds->n_bits;
-        odin3_status st = ODIN3_OK;
-        if (constbits) {
-            st = odin3_dff_visit_constbits(ds, node);
-        } else {
-            bool usable = false;
-            st = odin3_dff_state_load(ds, node, &usable);
-            for (size_t i = 0; st == ODIN3_OK && usable && i < sizeof k_rules / sizeof k_rules[0];
-                 i++) {
-                st = k_rules[i](ds);
-            }
-            ds->changed = ds->changed && usable;
-        }
-        assert(st != ODIN3_OK || (ds->n_changed == changed && ds->n_bits == bits && !ds->changed &&
-                                  !ds->gone && !ds->counted));
-        (void)changed;
-        (void)bits;
     }
     ds->oc->pass->op = ops;
 }

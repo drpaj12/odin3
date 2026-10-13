@@ -232,12 +232,11 @@ struct odin3_module {
 };
 
 /* Appends to the journal when it is on (module.h's odin3_module_journal_add). */
-#define ODIN3_JOURNAL_NOTE(module, kind, id)                  \
-    do {                                                      \
-        if ((module)->journal.on) {                           \
-            odin3_module_journal_add((module), (kind), (id)); \
-        }                                                     \
-    } while (0)
+static inline void odin3_journal_note(odin3_module *module, uint32_t kind, uint32_t id) {
+    if (module->journal.on) {
+        odin3_module_journal_add(module, kind, id);
+    }
+}
 
 /*
  * Records node's pin net names in the module's dead-pin table (before its pins are disconnected
