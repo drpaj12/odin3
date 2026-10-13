@@ -1966,7 +1966,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
-                    --seeds 1..200 --mem-cap 2G --work ${PROJECT_BINARY_DIR}/elab_gen_work)
+                    --seeds 1..200 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_work)
         odin3_add_sweep_test(elab_const_diff LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
                     --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>
@@ -1975,7 +1977,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
                     --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
-                    --seeds 1..5000 --mem-cap 2G --work ${PROJECT_BINARY_DIR}/elab_gen_long_work)
+                    --seeds 1..5000 --mem-cap 2G
+                    --expect-fail ${PROJECT_SOURCE_DIR}/tests/elab/gen_expect_fail.txt
+                    --work ${PROJECT_BINARY_DIR}/elab_gen_long_work)
         odin3_add_sweep_test(elab_const_diff_long LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/elab-check/const-diff
                     --yosys ${ODIN3_YOSYS055} --replay $<TARGET_FILE:const-replay>

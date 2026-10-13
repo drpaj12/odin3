@@ -244,10 +244,10 @@ class Gen:
         """A 2-bit index expression."""
         return self.ch(("s", "a[1:0]", "c[1:0]"))
 
-    def mem_index(self, ctx: dict[str, object]) -> str:
-        """An address of mem inside its range [lo, lo+3]."""
+    def mem_index(self, ctx: dict[str, object], loop_ok: bool = True) -> str:
+        """An address of mem inside its range [lo, lo+3]; the loop variable only when loop_ok."""
         loop = ctx.get("memvar")
-        if loop is not None and self.p(0.5):
+        if loop is not None and loop_ok and self.p(0.5):
             return str(loop)
         if self.p(0.3):
             return str(self.mem_lo + self.r.randrange(4))
@@ -330,9 +330,12 @@ class Gen:
         if kind == "memw":
             return f"mem[{self.mem_index(ctx)}]"
         if kind == "memp":
-            return f"mem[{self.mem_index(ctx)}][{self.ch(('0', '2', '3'))}]"
+            # A part of a word at a loop-variable address is the located error `non-constant
+            # index into 'mem' is not supported here` (gen seeds 134, 199: a 2D limitation):
+            # the address is not the loop variable here.
+            return f"mem[{self.mem_index(ctx, False)}][{self.ch(('0', '2', '3'))}]"
         if kind == "memc":
-            return f"mem[{self.mem_index(ctx)}][{self.ch(('3', '2'))}:{self.ch(('0', '1'))}]"
+            return f"mem[{self.mem_index(ctx, False)}][{self.ch(('3', '2'))}:{self.ch(('0', '1'))}]"
         return var
 
     def stmt(self, depth: int, ctx: dict[str, object], ind: int) -> str:

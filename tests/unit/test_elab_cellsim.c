@@ -129,8 +129,8 @@ typedef struct hook_run {
     odin3_value params[MAX_PARAMS];
 } hook_run;
 
-static void run_hook(const odin3_celltype_def *def, const rcase *rc, hook_run *hr, uint8_t *y_out) {
-    bool binary = def->n_ports == 3;
+/* The cell's parameter values for the case: the defaults, then the signs and widths. */
+static void set_params(const odin3_celltype_def *def, const rcase *rc, hook_run *hr) {
     TEST_ASSERT_LESS_OR_EQUAL_UINT32(MAX_PARAMS, def->n_params);
     for (uint32_t i = 0; i < def->n_params; i++) {
         hr->params[i] = def->params[i].dflt;
@@ -138,22 +138,32 @@ static void run_hook(const odin3_celltype_def *def, const rcase *rc, hook_run *h
     set_param(def, hr->params, "A_SIGNED", rc->sa);
     set_param(def, hr->params, "A_WIDTH", rc->wa);
     set_param(def, hr->params, "Y_WIDTH", rc->wy);
-    uint32_t next = 0;
-    uint32_t widths[3] = {rc->wa, rc->wb, rc->wy};
-    if (binary) {
+    if (def->n_ports == 3) {
         set_param(def, hr->params, "B_SIGNED", rc->sb);
         set_param(def, hr->params, "B_WIDTH", rc->wb);
-    } else {
-        widths[1] = rc->wy;
     }
-    for (uint32_t p = 0; p < def->n_ports; p++) {
-        hr->spans[p] = (odin3_sim_span){&hr->idx[next], widths[binary ? p : p * 2]};
-        for (uint32_t k = 0; k < hr->spans[p].width; k++) {
-            hr->idx[next] = next;
-            hr->values[next] = p == 0 ? rc->abits[k] : p == 1 && binary ? rc->bbits[k] : 0;
-            next++;
-        }
+}
+
+/* One port's pin slots and starting values (the input bits; zeros for Y). */
+static void lay_out_port(hook_run *hr, uint32_t *next, uint32_t port, const uint8_t *bits,
+                         uint32_t width) {
+    hr->spans[port] = (odin3_sim_span){&hr->idx[*next], width};
+    for (uint32_t k = 0; k < width; k++) {
+        hr->idx[*next] = *next;
+        hr->values[*next] = bits != NULL ? bits[k] : 0;
+        (*next)++;
     }
+}
+
+static void run_hook(const odin3_celltype_def *def, const rcase *rc, hook_run *hr, uint8_t *y_out) {
+    bool binary = def->n_ports == 3;
+    set_params(def, rc, hr);
+    uint32_t next = 0;
+    lay_out_port(hr, &next, 0, rc->abits, rc->wa);
+    if (binary) {
+        lay_out_port(hr, &next, 1, rc->bbits, rc->wb);
+    }
+    lay_out_port(hr, &next, def->n_ports - 1, NULL, rc->wy);
     odin3_sim_cell cell = {hr->values, hr->spans,      def->n_ports, hr->params, NULL,
                            0,          ODIN3_SIM_COMB, NULL,         NULL,       0};
     uint32_t bytes = 0;
@@ -207,11 +217,29 @@ static void test_cval_agrees_with_cell_hooks(void) {
     for (size_t i = 0; i < N_MAP; i++) {
         const odin3_celltype_def *def = def_named(k_map[i].cell);
         TEST_ASSERT_NOT_NULL_MESSAGE(def->simulate, k_map[i].cell);
-        for (uint32_t n = 0; n < CASES; n++) {
+        for (uint32_t draw = 0; draw < CASES; draw++) {
             rcase rc = draw_case();
             check_case(&k_map[i], def, &rc);
         }
     }
+}
+
+static bool in_list(const char *name, const char *const *list, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (strcmp(name, list[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool is_mapped(const char *name) {
+    for (size_t i = 0; i < N_MAP; i++) {
+        if (strcmp(name, k_map[i].cell) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* Every built-in word cell that has a hook is on the list, or deliberately left out. */
@@ -219,18 +247,12 @@ static void test_every_hooked_word_cell_is_covered_or_out_of_scope(void) {
     static const char *const k_out[] = {"$mux", "$pmux", "$shiftx", "$tribuf"};
     for (uint32_t i = 0; i < odin3_builtin_celltype_count; i++) {
         const odin3_celltype_def *def = odin3_builtin_celltypes[i];
-        if (def->gran != ODIN3_GRAN_WORD || def->simulate == NULL ||
-            (def->flags & (ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL)) != 0) {
-            continue;
+        bool sequential = (def->flags & (ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL)) != 0;
+        if (def->gran == ODIN3_GRAN_WORD && def->simulate != NULL && !sequential) {
+            TEST_ASSERT_TRUE_MESSAGE(is_mapped(def->name) ||
+                                         in_list(def->name, k_out, sizeof k_out / sizeof k_out[0]),
+                                     def->name);
         }
-        bool known = false;
-        for (size_t k = 0; k < N_MAP; k++) {
-            known = known || strcmp(def->name, k_map[k].cell) == 0;
-        }
-        for (size_t k = 0; k < sizeof k_out / sizeof k_out[0]; k++) {
-            known = known || strcmp(def->name, k_out[k]) == 0;
-        }
-        TEST_ASSERT_TRUE_MESSAGE(known, def->name);
     }
 }
 
