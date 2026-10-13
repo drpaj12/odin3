@@ -19,6 +19,7 @@
 #include "passes/opt/fold.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
+#include "passes/opt/opt_test.h"
 #include "util/arena.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -422,6 +423,10 @@ static odin3_status round_once(odin3_expr_ctx *ec, bool consume_x, bool *loop_lo
     if (!odin3_opt_dirty_pending(ec->oc, consume_x)) {
         return ODIN3_OK; /* incremental: nothing to look at (nothing changes, nothing is built) */
     }
+    const odin3_opt_test_hooks *hooks = odin3_opt_test_hooks_now();
+    if (hooks->on_expr_setup != NULL) {
+        hooks->on_expr_setup(hooks->user, true);
+    }
     odin3_status st = odin3_kit_invert_map(ec->oc);
     if (st == ODIN3_OK && !ec->oc->opts->noclkinv) {
         st = odin3_opt_expr_ffpol(ec->oc, consume_x);
@@ -430,6 +435,9 @@ static odin3_status round_once(odin3_expr_ctx *ec, bool consume_x, bool *loop_lo
     odin3_vec_init(&order, sizeof(odin3_node_id));
     bool sorted = true;
     st = st == ODIN3_OK ? odin3_kit_topo(ec->oc, &order, &sorted) : st;
+    if (hooks->on_expr_setup != NULL) {
+        hooks->on_expr_setup(hooks->user, false);
+    }
     if (st == ODIN3_OK && !sorted && !*loop_logged) {
         *loop_logged = true;
         odin3_log(ODIN3_LOG_INFO,

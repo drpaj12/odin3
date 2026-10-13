@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# rescan-compare: `opt` against `opt --opt-full-rescan` on a Verilog corpus, byte for byte
+# (2F Task 13 review M7). See rescan_compare.py.
+# Exit codes: 0 all identical, 1 a file differs, 2 error or usage, 77 skipped (no memory cap).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/rescan_compare.py" "$@"

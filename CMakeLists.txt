@@ -515,6 +515,13 @@ add_executable(bench_pp tests/bench/bench_pp.c)
 target_include_directories(bench_pp PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(bench_pp PRIVATE odin3_core odin3_flags)
 
+# 2F Task 15: bench_opt (Release; `bench_opt --one FILE`, the interface of elab-sweep --bench). Its
+# measuring core (bench_opt.c without main) is also linked into the gate test
+# test_bench_opt_columns below; bench_opt_smoke is registered by Task 19.
+add_executable(bench_opt tests/bench/bench_opt.c)
+target_include_directories(bench_opt PRIVATE ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/tests/bench)
+target_link_libraries(bench_opt PRIVATE odin3_core odin3_flags)
+
 # --- Fuzzers (ODIN3_FUZZ) ---------------------------------------------------------------
 if(ODIN3_FUZZ)
     # tests/fuzz/fuzz_pp.c: the preprocessor's crash fuzzer (2B §10.5).
@@ -618,6 +625,12 @@ if(BUILD_TESTING)
     target_sources(test_opt_loop PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_opt_loop PRIVATE
         ODIN3_LOOP_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/loop")
+    # 2F Task 15: bench_opt prints every column (its measuring core, built without main).
+    odin3_add_unit_test(test_bench_opt_columns)
+    target_sources(test_bench_opt_columns PRIVATE tests/bench/bench_opt.c tests/unit/proc_build.c)
+    target_include_directories(test_bench_opt_columns PRIVATE ${PROJECT_SOURCE_DIR}/tests/bench)
+    target_compile_definitions(test_bench_opt_columns PRIVATE BENCH_OPT_NO_MAIN
+        ODIN3_BENCH_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/opt/bench")
     # 2F Task 8: opt_merge.
     odin3_add_unit_test(test_opt_cse)
     target_sources(test_opt_cse PRIVATE tests/unit/proc_build.c)

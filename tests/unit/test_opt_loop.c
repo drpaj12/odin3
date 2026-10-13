@@ -240,7 +240,7 @@ static void test_call_changed_and_hook(void) {
     odin3_opt_counts counts;
     memset(&counts, 0, sizeof counts);
     odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_CLEAN, &opts, &counts};
-    odin3_opt_test_hooks hooks = {on_call, NULL};
+    odin3_opt_test_hooks hooks = {on_call, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
     hook_calls = 0;
     bool changed = false;
@@ -597,7 +597,7 @@ static void on_seq(void *user, const char *sub) {
 
 static void record_calls(void) {
     seq[0] = '\0';
-    odin3_opt_test_hooks hooks = {on_seq, NULL};
+    odin3_opt_test_hooks hooks = {on_seq, NULL, NULL};
     odin3_opt_test_set_hooks(&hooks);
 }
 
