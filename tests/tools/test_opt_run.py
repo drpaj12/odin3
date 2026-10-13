@@ -90,9 +90,22 @@ class RunTest(unittest.TestCase):
         self.assertIn("opt-run: FAIL: odin3 exit 1: odin3: error: d.v:1: syntax: bad", out)
 
     def test_a_killed_child_is_named(self) -> None:
-        code, out, _ = self.run_tool(child(-9, ""))
-        self.assertEqual(code, 1)
-        self.assertIn("killed by signal 9", out)
+        code, out, _ = self.run_tool(child(-11, ""))
+        self.assertEqual(code, 3)
+        self.assertIn("killed by signal 11", out)
+
+    def test_a_cap_kill_is_a_crash(self) -> None:
+        for status in (-9, 137):
+            code, out, _ = self.run_tool(child(status, ""))
+            self.assertEqual(code, 3)
+            self.assertIn("CRASH", out)
+
+    def test_a_timeout_is_a_crash(self) -> None:
+        with mock.patch.object(memcap, "run",
+                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
+            code, out, _ = helpers.run_main(opt_run.main, ["--odin3", "odin3", str(self.file)])
+        self.assertEqual(code, 3)
+        self.assertIn("timed out", out)
 
     def test_a_missing_cap_is_a_skip(self) -> None:
         with mock.patch.object(memcap, "run", side_effect=memcap.CapUnavailable("no systemd")):

@@ -15,13 +15,15 @@ and after every pass), under memcap, and requires:
 
 On success it prints ``opt-run: ok: iterations max=K opt-runs=N`` (the largest K of the two ``opt``
 runs of the script, and how many ``opt`` runs reported one). Exit codes: 0 ok; 1 a check failed;
-2 usage, or Odin III failed to start; 77 skipped (an ASan child and no systemd-run).
+2 usage, or Odin III failed to start; 3 the child crashed (a signal or
+a memcap kill) or timed out (elab-sweep marks it ``hard``: never an expected failure); 77 skipped (an ASan child and no systemd-run).
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -31,7 +33,7 @@ import memcap
 import opt_equiv
 
 TOOL = "opt-run"
-EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 77
+EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH, EXIT_SKIP = 0, 1, 2, 3, 77
 MAX_ITERATIONS = 10000  # ODIN3_OPT_MAX_ITERATIONS (test_opt_run checks it against opt.h)
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 3600.0
@@ -80,10 +82,12 @@ def execute(args: argparse.Namespace, work: Path) -> int:
     done = memcap.run([opt_equiv.exe(args.odin3), "--check", *top, "-p", script], args.mem_cap,
                       capture_output=True, cwd=work, timeout=TIMEOUT_SECONDS)
     log = (done.stdout or "") + (done.stderr or "")
+    if done.returncode < 0 or done.returncode == 137:  # 137: a cap kill seen as exit
+        print(f"{TOOL}: CRASH: odin3 killed by signal {abs(done.returncode) % 128}: "
+              f"{opt_equiv.why(log)}")
+        return EXIT_CRASH
     if done.returncode != 0:
-        how = (f"killed by signal {-done.returncode}" if done.returncode < 0
-               else f"exit {done.returncode}")
-        print(f"{TOOL}: FAIL: odin3 {how}: {opt_equiv.why(log)}")
+        print(f"{TOOL}: FAIL: odin3 exit {done.returncode}: {opt_equiv.why(log)}")
         return EXIT_FAIL
     code, line = judge(log)
     print(f"{TOOL}: {'FAIL: ' if code else ''}{line}")
@@ -97,6 +101,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="opt-run-") as tmp:
             work = Path(tmp) if made else args.work
             return execute(args, work)
+    except subprocess.TimeoutExpired:
+        print(f"{TOOL}: CRASH: odin3 timed out after {TIMEOUT_SECONDS:.0f} s")
+        return EXIT_CRASH
     except memcap.CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         return EXIT_SKIP

@@ -105,6 +105,9 @@ text = open(argv[-1]).read()
 if "BAD" in text:
     print("opt-run: FAIL: no fixed point after 3 iterations (the cap)")
     sys.exit(1)
+if "CRASH" in text:
+    print("opt-run: CRASH: odin3 killed by signal 11")
+    sys.exit(3)
 print("opt-run: ok: iterations max=" + re.search(r"IT(\\d+)", text).group(1) + " opt-runs=2")
 """
 
@@ -513,6 +516,17 @@ class OptModesTest(SweepTestCase):
         argv = next(c for c in self.tool_calls() if c[-1].endswith("a.v"))[1:]
         self.assertNotIn("--yosys", argv)
         self.assertEqual(argv[argv.index("--techlib") + 1].split("/")[-1], "L.o3lib")
+
+    def test_an_opt_run_crash_is_hard_even_with_an_expect_fail_needle(self) -> None:
+        fake = _exe(self.bin / "fake_opt_run.py", FAKE_OPT_RUN)
+        self.write("m/c.v", "CRASH IT1\n")
+        expect = self.expect("c.v [CRASH] listed\n")
+        tools = dict(elab_sweep.OPT_TOOLS, **{"opt-run": fake})
+        with mock.patch.object(elab_sweep, "OPT_TOOLS", tools):
+            code, out, _ = self.run_tool("--opt-run", "--expect-fail", str(expect),
+                                         str(self.dir / "m"))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  c.v", out)
 
     def test_opt_run_excludes_the_other_modes(self) -> None:
         self.write("m/a.v", "x\n")
