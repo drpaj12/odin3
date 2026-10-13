@@ -564,14 +564,22 @@ Count: `opt_clean: removed N unused cells, M unused nets and W unused wires`. Yo
 
 ## 11. `opt_share` (OP-11, `-full` only)
 
-A port of `opt_share.cc`: for each `$mux`/`$pmux` whose input ports are each driven entirely by
-one cell of one mergeable class (`$add`/`$sub` together; otherwise equal type; the operation's
-output used only by that mux port) and where the cells share one operand (same nets, sign and
-port semantics), the cells are replaced by one cell on the shared operand and a new mux over the
-non-shared operands (`$sub` operands of an `$add`/`$sub` mix are negated as Yosys does). Yosys
-orders candidate operands in a `std::map` keyed by SigSpec, i.e. by **wire name**; Odin III
-orders by (net ID) — deterministic, but where several merges compete the choice can differ
-(§17 #6). Count: `opt_share: merged N cells`.
+A port of `opt_share.cc`, narrowed where Yosys 0.55 changes the function (§17 #44-#48). For each
+`$mux`/`$pmux`, a data port is a candidate when one binary word cell (`$add`/`$sub` together;
+`$mul`, `$div`, `$mod`, the bitwise cells, the shifts, the comparisons, `$logic_and`, `$logic_or`
+each alone) drives all of it with its whole `Y`, and nothing else reads those nets (no other pin,
+no port, no `keep` wire; the cell has no `keep`). Candidates are visited in port order (`B`
+slices, then `A`); from the first one still open, of its two operands the one that another open
+candidate shares is taken, the one with the lower net-ID vector when both are (port `A` on a tie;
+Yosys orders candidate operands in a `std::map` keyed by SigSpec, i.e. by **wire name**; §17 #6),
+and the open candidates whose cell has the same operand on the same port and the same parameters
+(apart from the other operand's width, §17 #45) join it.
+Two or more cells become one new cell of the lowest-ID member's type on the shared operand, fed by
+a new `$mux` (or `$pmux`, with `A` = x when the old `A` is not in the group) over the other
+operands; the members are deleted and their `Y` nets merged into the new cell's, so the old mux
+reads one net on the grouped ports and a later `opt_reduce` or `opt_expr` removes it. `$sub`
+operands of an `$add`/`$sub` mix are negated by a `$neg` as Yosys does. Count: `opt_share: merged N
+cells` (N = the cells replaced; no per-rewrite DEBUG line).
 
 ## 12. The loop, the fixed point and termination (OP-12)
 
@@ -732,8 +740,13 @@ rule or `opt_dff` action counter, sorted by name: the counterpart of Yosys's `YO
 | 39 | a top-level `opt` ends with `compact` (IR-6 amendment, point (h), for Peter's review): IDs of nodes, nets and wires are renumbered densely when it returns; the sub-passes called alone leave dead objects | Yosys has no IDs to renumber | §14 ("the pass manager compacts after each top-level `opt`") names the point; doing it in the `opt` driver keeps `opt` callable from scripts, `-p` and the tests alike, and holds the dead objects of one run only until its end |
 | 40 | after its first call in an `opt` invocation, `opt_expr` applies its rules (visits) only to the nodes the kit marked (inputs connected, merged or re-driven since, plus the readers of their outputs), in the same topological order as a full sweep; `--opt-full-rescan` sweeps everything. The per-round setup (invert map, FF-polarity scan, topological sort) still costs O(N) per non-empty round. Debug builds sweep in full after every incremental call and abort if that rewrites anything | a full sweep per call (Yosys rebuilds a SigMap and rescans) | §19 performance; the result is the full sweep's (the 20 files of `dirty_vs_full_rescan`, three option sets, byte-identical `write_rtlil`) |
 | 41 | the iteration cap warns once per module that the last iteration changed (a module no kit rewrite touched in it is not named; when none was, the last module is) and returns `ODIN3_OK` | no cap | OP-12; `opt` runs design-wide, so the module in the §16 line is the changed ones |
-| 42 | `opt -full` calls `opt_share`, which is a stub until Task 14: the run stops with `opt_share: not available yet (2F)` after the first loop `opt_merge`; the sequence tests accept it | runs `opt_share` | removed with the stub in Task 14 (this row too) |
+| 42 | — (the `opt_share` stub of Task 13 is gone: `opt -full` runs it) | | |
 | 43 | `opt_clean`'s removal of unnamed nets alone does not count as a change for the `opt` loop (Yosys counts "unused wires" in `did_something`) | `opt.cc` reruns after a wire-only removal | no fold can follow a wire removal; `iterations` is lower than Yosys's in about 38% of random 25-60 cell netlists, never higher, with the same final cell count (Task 13 review M2) |
+| 44 | `opt_share` merges a port only when one cell drives all of it (its whole `Y`, bit for bit) and nothing else reads those nets | also merges cells whose `Y` is partly the port or one chunk of a concatenation (`opt_share_diff_port_widths`, `opt_share_cat`: two cells fewer merged here) | a missed merge is only an optimisation lost; the cases are in `tests/unit/data/opt/share/{diff_port_widths,cat}.expect` |
+| 45 | a group has the same parameters, except the width of the muxed operand; that may differ only for `$add $sub $mul $and $or $xor $xnor $eq $ne $lt $le $gt $ge $logic_and $logic_or` with equal `A_SIGNED` and `B_SIGNED`, and the narrower operands are extended by that flag. An `$add`/`$sub` mix only shares port `A`, with equal signed flags; the `$neg` and the new mux are at least `Y_WIDTH` wide. The shared operand is on the same port of every cell (no commutative swap). `$alu`, `$concat`, `$div`/`$mod` floor variants, `$eqx`, `$sshl` and the gates are not candidates | extends narrower operands whatever the type, swaps commutative cells, any signs | OP-13: the extension composes with the cell's own only for those types and signs (shifts, `$div` and `$mod` read the operand at a width that moves with it) |
+| 46 | merges under a `$pmux` with several selects set change what the 2-state simulator shows (it ORs the selected slices, `pmux_sim`) | the same | OP-13: with several selects set Yosys's `$pmux` is x, so the merge is a refinement under RTLIL semantics; the simulation test skips such vectors (`test_share_function_kept`). A constant x/z select is never merged; at run time an x select turns a defined bit x as in Yosys |
+| 47 | bitwise cells with signed operands of different widths: the narrower operand is extended by its sign, as the cell does | `opt_share` zero-extends it (`decode_port_signed` says bitwise cells are unsigned) | OP-13: Yosys 0.55 changes the function: `yosys -p "read_rtlil bitwise_signed_widths.il; eval -set a 15 -set b 2 -set c 0 -set s 0 -show y top; opt_share; eval -set a 15 -set b 2 -set c 0 -set s 0 -show y top"` prints `y = 4'1110`, then `4'0010`, and `equiv_opt -assert opt_share` fails (`bitwise_signed_widths.il`, `test_share_function_kept`) |
+| 48 | the group becomes a new node of the lowest-ID member's type (name and attributes copied), the members' `Y` nets are merged into its `Y`, so their wire names follow it | keeps the member of the first mux port, moves it to a fresh wire and leaves the old `Y` wires undriven | names only; a net with a `keep` wire is not merged. Which of two equal candidates leads can differ (§17 #4) |
 
 ## 18. Files, interfaces and data structures (OP-17)
 

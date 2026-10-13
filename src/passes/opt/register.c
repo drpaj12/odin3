@@ -1,7 +1,7 @@
 /*
  * register.c — the eight opt pass definitions (2F spec §3, §16, OP-12, OP-16; plan Task 4): option
- * parsing (point (c)), the sub-pass call wrapper (hook, budget, snapshots, Debug check), the stubs
- * of the sub-passes that have not landed (point (e)) and --opt-stats (point (j)).
+ * parsing (point (c)), the sub-pass call wrapper (hook, budget, snapshots, Debug check) and
+ * --opt-stats (point (j)).
  */
 #include "backends/rtlil/writer.h"
 #include "ir/check.h"
@@ -45,28 +45,6 @@ static const char *const k_pass_names[P_COUNT] = {"opt",         "opt_expr",   "
 /* The pass name of each sub-pass (they are the same words). */
 static const char *const k_sub_names[ODIN3_OPT_N_SUBS] = {
     "opt_expr", "opt_merge", "opt_muxtree", "opt_reduce", "opt_share", "opt_dff", "opt_clean"};
-
-/*
- * Point (e): the passes that are still stubs. Each later task removes its own line (opt_share:
- * 14).
- */
-static const char *const k_stubs[] = {
-    "opt_share",
-};
-
-static bool is_stub(const char *name) {
-    for (size_t i = 0; i < sizeof k_stubs / sizeof k_stubs[0]; i++) {
-        if (strcmp(k_stubs[i], name) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static odin3_status stub_status(const char *name) {
-    odin3_log(ODIN3_LOG_ERROR, "%s: not available yet (2F)", name);
-    return ODIN3_ERR_INVALID_ARG;
-}
 
 /* --- options (point (c)) --------------------------------------------------------------------- */
 
@@ -206,11 +184,12 @@ static odin3_status snapshot_write(uint32_t seq, odin3_opt_sub sub, const char *
 typedef odin3_status (*sub_run_fn)(odin3_pass_ctx *ctx, odin3_design *design,
                                    const odin3_opt_opts *opts, odin3_opt_counts *counts);
 
-/* The sub-pass bodies; NULL while a sub-pass is a stub (the odin3_opt_<sub>_run of its task). */
+/* The sub-pass bodies (the odin3_opt_<sub>_run of each task). */
 static const sub_run_fn k_sub_run[ODIN3_OPT_N_SUBS] = {
     [ODIN3_OPT_SUB_EXPR] = odin3_opt_expr_design,    [ODIN3_OPT_SUB_MERGE] = odin3_opt_merge_run,
     [ODIN3_OPT_SUB_MUXTREE] = odin3_opt_muxtree_run, [ODIN3_OPT_SUB_REDUCE] = odin3_opt_reduce_run,
-    [ODIN3_OPT_SUB_DFF] = odin3_opt_dff_run,         [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
+    [ODIN3_OPT_SUB_SHARE] = odin3_opt_share_run,     [ODIN3_OPT_SUB_DFF] = odin3_opt_dff_run,
+    [ODIN3_OPT_SUB_CLEAN] = odin3_opt_clean_run,
 };
 
 /* How much the sub-pass changed so far: the sum of its counters (a change is growth). */
@@ -307,9 +286,6 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
         hooks->on_call(hooks->user, k_sub_names[req->sub]);
     }
     const sub_run_fn run = k_sub_run[req->sub];
-    if (run == NULL) {
-        return stub_status(k_sub_names[req->sub]);
-    }
     odin3_status st = budget_gate(req);
     odin3_strbuf before;
     odin3_strbuf_init(&before);
@@ -441,9 +417,6 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
                                  void *user) {
     const pass_desc *desc = user;
     const char *name = k_pass_names[desc->pass];
-    if (is_stub(name)) {
-        return stub_status(name);
-    }
     odin3_opt_args parsed;
     odin3_status st = odin3_opt_parse_args(name, args, &parsed);
     if (st != ODIN3_OK) {

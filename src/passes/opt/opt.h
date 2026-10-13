@@ -301,8 +301,7 @@ typedef struct odin3_opt_call_req {
  * than N bytes (...)", the pass being ctx's, and gives ODIN3_ERR_PARSE), the "before" snapshot when
  * a snapshot directory is set, the sub-pass, in Debug odin3_check_design FAST, and the snapshot
  * files when the call changed anything. *changed is set to whether it did (the growth of the
- * sub-pass's counters in counts). A sub-pass that is still a stub logs "<sub>: not available yet
- * (2F)" and gives ODIN3_ERR_INVALID_ARG. ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ * sub-pass's counters in counts). ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
  */
 odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed);
 

@@ -1,5 +1,5 @@
 /*
- * test_opt_loop.c — the eight opt passes' registrations, option parsing, the stubs, the sub-pass
+ * test_opt_loop.c — the eight opt passes' registrations, option parsing, the sub-pass
  * call wrapper (hook, budget, snapshots) and --opt-stats (2F spec OP-12, OP-16; plan Task 4).
  * Task 13 extends it with the loop.
  */
@@ -202,34 +202,10 @@ static void test_parse_unknown(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, parse("opt", odin3_bytes_cstr(""), NULL));
 }
 
-/* --- stubs ----------------------------------------------------------------------------------- */
+/* --- the call wrapper's arguments ------------------------------------------------------------ */
 
-/* One line per pass that is still a stub: each later task removes its own. */
-static const char *const k_stub_passes[] = {
-    "opt_share",
-};
-
-static void test_stubs(void) {
-    build(DEAD_TEXT);
-    odin3_strbuf text_before;
-    odin3_strbuf_init(&text_before);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text_before));
-    for (size_t i = 0; i < sizeof k_stub_passes / sizeof k_stub_passes[0]; i++) {
-        char want[LINE_MAX_LEN];
-        fmt_str(want, sizeof want, "%s: not available yet (2F)", k_stub_passes[i]);
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, run_pass(k_stub_passes[i], ""), want);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, count_lines(ODIN3_LOG_ERROR, want), want);
-    }
-    odin3_strbuf text_after;
-    odin3_strbuf_init(&text_after);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_rtlil_text(res.design, &text_after));
-    TEST_ASSERT_EQUAL_STRING(text_before.data, text_after.data);
-    odin3_strbuf_free(&text_before);
-    odin3_strbuf_free(&text_after);
-    check_full();
-}
-
-static void test_call_stub(void) {
+/* Every sub-pass has a body: opt_share runs through the wrapper and logs its INFO line. */
+static void test_call_invalid(void) {
     build(DEAD_TEXT);
     odin3_opt_opts opts;
     memset(&opts, 0, sizeof opts);
@@ -238,9 +214,9 @@ static void test_call_stub(void) {
     odin3_opt_call_req req = {&res.ctx, res.design, ODIN3_OPT_SUB_SHARE, &opts, &counts};
     bool changed = true;
     n_lines = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opt_call(&req, &changed));
     TEST_ASSERT_FALSE(changed);
-    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_ERROR, "opt_share: not available yet (2F)"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt_share: merged 0 cells"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(NULL, &changed));
     req.sub = ODIN3_OPT_N_SUBS;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_opt_call(&req, &changed));
@@ -647,25 +623,15 @@ static void test_loop_sequences_noff(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: fixed point after 2 iterations"));
 }
 
-/* opt_share (Task 14) is still a stub: the sequence up to its first call, and the full one once it
- * runs. */
 static void test_loop_sequences_full(void) {
     build(NESTED_TEXT);
     record_calls();
-    odin3_status st = run_pass("opt", "-full");
-    static const char k_head[] = "opt_expr opt_merge opt_muxtree opt_reduce opt_merge opt_share";
-    TEST_ASSERT_EQUAL_INT(0, strncmp(seq, k_head, sizeof k_head - 1U));
-    if (st == ODIN3_OK) {
-        TEST_ASSERT_EQUAL_STRING(
-            "opt_expr opt_merge"
-            " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr"
-            " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr",
-            seq);
-    } else {
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
-        TEST_ASSERT_EQUAL_UINT32(1,
-                                 count_lines(ODIN3_LOG_ERROR, "opt_share: not available yet (2F)"));
-    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-full"));
+    TEST_ASSERT_EQUAL_STRING(
+        "opt_expr opt_merge"
+        " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr"
+        " opt_muxtree opt_reduce opt_merge opt_share opt_dff opt_clean opt_expr",
+        seq);
     check_full();
 }
 
@@ -1120,8 +1086,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_opts);
     RUN_TEST(test_parse_unknown);
-    RUN_TEST(test_stubs);
-    RUN_TEST(test_call_stub);
+    RUN_TEST(test_call_invalid);
     RUN_TEST(test_call_changed_and_hook);
     RUN_TEST(test_call_muxtree);
     RUN_TEST(test_snapshot);
