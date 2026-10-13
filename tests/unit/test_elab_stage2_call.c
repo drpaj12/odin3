@@ -32,6 +32,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { OOM_LIMIT = 400000, OOM_SETTLE = 32 };
@@ -369,6 +370,31 @@ static void test_nesting_depth(void) {
                     "  function [3:0] f5(input [3:0] v); f5 = f4(v); endfunction\n"
                     "  always @* y = f5(a);\nendmodule\n");
     pt_expect_error((at_loc){3, 42}, "function call nesting deeper than 4 at 'f1'");
+}
+
+/* PR 2D-6 review I6 (interim): a chain of 300 functions, each calling the next in an expression,
+ * is a located error at depth 256 (ODIN3_ELAB_MAX_INLINE_DEPTH), never a C stack overflow. */
+static void test_inline_nesting_is_capped_below_the_stack(void) {
+    enum { CHAIN = 300, SRC_MAX = 64 * 1024 };
+    char *src = malloc(SRC_MAX);
+    TEST_ASSERT_NOT_NULL(src);
+    size_t len = (size_t)snprintf(src, SRC_MAX, "module t(input [7:0] a, output reg [7:0] y);\n");
+    for (int k = CHAIN; k >= 1; k--) {
+        len += (size_t)(k == CHAIN ? snprintf(src + len, SRC_MAX - len,
+                                              "  function [7:0] f%d(input [7:0] x); f%d = x; "
+                                              "endfunction\n",
+                                              k, k)
+                                   : snprintf(src + len, SRC_MAX - len,
+                                              "  function [7:0] f%d(input [7:0] x); f%d = f%d(x)"
+                                              " + 1; endfunction\n",
+                                              k, k, k + 1));
+    }
+    snprintf(src + len, SRC_MAX - len, "  always @* y = f1(a);\nendmodule\n");
+    pt_read_failing(src);
+    free(src);
+    TEST_ASSERT_NOT_NULL_MESSAGE(
+        strstr(et_log(&pt_rs), "error: function call nesting deeper than 256 at 'f"),
+        et_log(&pt_rs));
 }
 
 static void test_while_needs_constant_arguments(void) {
@@ -866,6 +892,7 @@ static void test_call_in_edge_expression_is_error(void) {
     X(test_inlined_provenance)                                                                     \
     X(test_recursion_not_constant)                                                                 \
     X(test_nesting_depth)                                                                          \
+    X(test_inline_nesting_is_capped_below_the_stack)                                               \
     X(test_while_needs_constant_arguments)                                                         \
     X(test_argument_count)                                                                         \
     X(test_array_written_in_task_forces_registers)                                                 \

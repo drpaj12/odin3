@@ -11,8 +11,14 @@
  * actuals are generated in the caller's context first; the inputs are assigned to the formals by
  * blocking assignment, the body runs in the same builder (so `if`, `case` and loops inside work),
  * and for a task each `output`/`inout` formal is copied to its actual. A function's value is
- * `rv(result)`. Calls nest on the statement stack (the body is run above the caller's frames) and
- * the walker's stacks; recursion is rejected, the nesting depth is capped.
+ * `rv(result)`. A call as a statement (a task enable) nests on the statement stack, but a call in
+ * an expression does not: the expression walker reaches it through pg_call_hook and the body is
+ * run by a nested pg_run, so one call inside another costs C stack (pg_run -> exec_node ->
+ * assign_value -> odin3_elab2_expr -> pg_call_hook -> odin3_pg_call -> call_inline -> pg_run).
+ * That is a known deviation from the no-recursion rule (PR 2D-6 review I6; plan ledger, hoist
+ * planned for 2D-7): recursion is rejected and the nesting is capped at the lower of
+ * ODIN3_ELAB_MAX_INLINE_DEPTH (256) and ODIN3_ELAB_MAX_CALL_DEPTH, a located error, so the stack
+ * cannot overflow (about 2 KiB of C stack a level in Release, more under ASan).
  *
  * A call met outside a process builds a combinational `$proc` of its own (one ALWAYS sync) whose
  * output is the result variable's wire; a register-array word with a variable index is a case over
@@ -130,9 +136,14 @@ static odin3_status info_check(odin3_pg *pg, const call_info *info) {
                           info->name);
         return ODIN3_ERR_PARSE;
     }
-    if (pg->calls.len >= e2->limits->max_call_depth) {
-        odin3_elab2_fatal(e2, loc, "function call nesting deeper than %u at '%s'",
-                          e2->limits->max_call_depth, info->name);
+    /* an expression call is inlined by C recursion (see the header), so the depth that bounds the
+     * stack is the lower of the two caps */
+    uint32_t cap = e2->limits->max_call_depth < e2->limits->max_inline_depth
+                       ? e2->limits->max_call_depth
+                       : e2->limits->max_inline_depth;
+    if (pg->calls.len >= cap) {
+        odin3_elab2_fatal(e2, loc, "function call nesting deeper than %u at '%s'", cap,
+                          info->name);
         return ODIN3_ERR_PARSE;
     }
     return ODIN3_OK;
