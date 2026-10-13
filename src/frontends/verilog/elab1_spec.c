@@ -190,7 +190,7 @@ static odin3_status spell_values(const odin3_elab1 *e1, const odin3_elab1_params
 
 /* A new specialization's naming: its definition, results and hash; full spells the values even
  * for the top and a `(* blackbox *)` definition, whose names are the definition's (v4.7, v4.10),
- * as a black-box carrier MODULE's name does (v4.18). */
+ * as a black-box carrier MODULE's name does (v4.19). */
 typedef struct e1_namereq {
     const odin3_elab_def *def;
     const odin3_elab1_params_out *res;
@@ -323,7 +323,7 @@ static odin3_status check_caps(odin3_elab1 *e1, const odin3_elab_spec_req *req) 
 }
 
 /* A `(* blackbox *)` specialization with other than the default values also gets the name of its
- * carrier MODULE, spelled like a module's specialization (v4.18); not when the definition's name is
+ * carrier MODULE, spelled like a module's specialization (v4.19); not when the definition's name is
  * a registered cell type, which stage 2 reuses whatever the parameters (IR-7b). */
 static odin3_status carrier_name(odin3_elab1 *e1, const odin3_elab1_params_out *res,
                                  odin3_elab1_spec *rec) {

@@ -808,7 +808,7 @@ odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl);
  * EL-11: declares the black-box cell type of a `(* blackbox *)` or implicit black-box MODULE
  * (odin3_celltype_declare_blackbox, once per definition, under its base name): its ports in port
  * order, a parameter per PARAM_DECL (elab2_bbox.c). The declaration's port widths are the
- * MODULE's, the default specialization's. Spec v4.18 (Peter decision 3): the definition's other
+ * MODULE's, the default specialization's. Spec v4.19 (Peter decision 3): the definition's other
  * parameter sets arrive as carrier MODULEs (stage 1: a black-box MODULE whose `blackbox` ATTR is
  * valued with the definition's name); this call reads them all, and each port whose width differs
  * in some set gets a width expression over the parameter values (a table with one entry per set),

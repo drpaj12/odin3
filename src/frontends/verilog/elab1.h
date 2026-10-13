@@ -525,7 +525,7 @@ typedef struct odin3_elab1_port {
  */
 typedef struct odin3_elab1_bbox {
     uint32_t name;
-    uint32_t base; /* a carrier (v4.18): the definition's name; 0 for the definition's own */
+    uint32_t base; /* a carrier (v4.19): the definition's name; 0 for the definition's own */
     uint32_t spec;
     bool implicit;
     odin3_ast_id at;
@@ -601,7 +601,7 @@ odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst 
 odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec);
 
 /*
- * After every specialization (spec v4.18, Peter decision 3): each `(* blackbox *)` specialization
+ * After every specialization (spec v4.19, Peter decision 3): each `(* blackbox *)` specialization
  * with other than the default values, in queue order, written as a carrier MODULE: a ports-only
  * black-box MODULE named as a module's specialization (`bb$W=16`) whose `blackbox` ATTR holds the
  * definition's name as a STRING, with that parameter set's ports (evaluated under its values) and

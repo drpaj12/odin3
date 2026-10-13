@@ -214,9 +214,11 @@ spec §5.2. An entry declares:
   (`tristate`: output pins may legally share a net with other tristate/inout drivers);
 - ports: name, direction, scalar/vector, and a width rule — a constant, or the name of an
   integer parameter (`A_WIDTH`), or a function pointer for anything else, or (1G) a compiled
-  width expression over integer parameters (`A_WIDTH + B_WIDTH`) supplied by the tech library:
-  the IR calls its `check` hook at registration and its `eval` hook to size ports, never parses
-  it;
+  width expression over integer parameters (`A_WIDTH + B_WIDTH`) supplied by the tech library
+  or, for black boxes, by elaboration (a lookup of the cell's parameter values, any kind, in a
+  closed table of parameter sets; the width is undefined, an INVALID_ARG, outside it): the IR
+  calls its `check` hook at registration and its `eval` hook to size ports, never parses it;
+  (amended 2026-10-12, 2D black-box widths; pending Peter's approval)
 - parameters: name, kind, default. Signedness of word-level operands is a parameter
   (`A_SIGNED`, `B_SIGNED`), as in Yosys;
 - hooks, each may be NULL: `verify` (consistency beyond widths), `const_value` (IR-4),
