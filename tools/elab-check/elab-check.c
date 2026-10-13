@@ -11,6 +11,9 @@
  * --nolatches. --write writes the goldens instead (a "# hand-written" .elab is refused).
  * --dump prints the dump to stdout; --smallest-first runs the files in ascending size. Exit 0 all
  * pass, 1 any differs or fails, 2 usage or I/O.
+ *
+ * In-file directive: a line "// elab-check: --auto-blackbox" in the first 1024 bytes of a row
+ * (not on line 1) elaborates it with --auto-blackbox (undefined modules become black boxes).
  */
 #include "ast/ast.h"
 #include "ast/check.h"
@@ -64,7 +67,9 @@ typedef struct ec_result {
 
 static void usage(void) {
     (void)fprintf(stderr, "usage: elab-check [--write] [--nolatches] [--stage1] [--top T] "
-                          "[--dump] [--smallest-first] <file.v>...\n");
+                          "[--dump] [--smallest-first] <file.v>...\n"
+                          "a '// elab-check: --auto-blackbox' line in a file's head "
+                          "(after line 1) enables --auto-blackbox for it\n");
 }
 
 static bool parse_flag(const char *arg, ec_args *args) {
@@ -317,7 +322,7 @@ static int max_rc(int lhs, int rhs) {
     return lhs > rhs ? lhs : rhs;
 }
 
-/* The goldens of path against (or from) the result. */
+/* The goldens of name (the basename; the working directory is its directory) against the result. */
 static int compare_goldens(const ec_args *args, const char *path, const ec_result *res) {
     char golden[EC_PATH_BYTES];
     if (args->dump && res->dump.len > 0) {
@@ -354,7 +359,7 @@ static int check_file(const ec_args *args, const char *path) {
     odin3_pass_set_options((odin3_pass_options){.check = true, .top = args->top});
     ec_result res = {.auto_blackbox = wants_auto_blackbox(name)};
     int rc = elaborate(args, name, &res);
-    rc = rc == EC_PASS ? compare_goldens(args, path, &res) : rc;
+    rc = rc == EC_PASS ? compare_goldens(args, name, &res) : rc;
     result_free(&res);
     if (fchdir(home) != 0) {
         rc = EC_IO;

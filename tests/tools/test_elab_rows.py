@@ -173,10 +173,10 @@ ELAB_CHECK = os.environ.get("ODIN3_ELAB_CHECK")
 SOURCE = "module t (input a, output y);\n  assign y = ~a;\nendmodule\n"
 
 
-def run_check(*args: str) -> subprocess.CompletedProcess[str]:
+def run_check(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     assert ELAB_CHECK
     return subprocess.run(
-        [ELAB_CHECK, *args], capture_output=True, text=True, check=False, timeout=120
+        [ELAB_CHECK, *args], capture_output=True, text=True, check=False, timeout=120, cwd=cwd
     )
 
 
@@ -200,6 +200,25 @@ class ElabCheckTest(unittest.TestCase):
         self.assertEqual(run_check("--stage1", str(self.src)).returncode, 0)
         first = (self.dir / "Z1.elab").read_text(encoding="utf-8").split("\n", 1)[0]
         self.assertEqual(first, "# generated: elab-check --write")
+
+    def test_a_relative_path_with_a_directory_finds_the_goldens(self) -> None:
+        rel = f"{self.dir.name}/Z1_not.v"
+        parent = self.dir.parent
+        self.assertEqual(run_check("--write", rel, cwd=parent).returncode, 0)
+        proc = run_check(rel, cwd=parent)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(run_check("--stage1", rel, cwd=parent).returncode, 0)
+        self.assertTrue((self.dir / "Z1.elab").exists())
+
+    def test_the_in_file_auto_blackbox_directive(self) -> None:
+        text = "module t (inout a, inout y);\n  nosuch u (.a(a), .y(y));\nendmodule\n"
+        plain = self.dir / "Z3_bb.v"
+        plain.write_text(text, encoding="utf-8")
+        self.assertEqual(run_check("--write", str(plain)).returncode, 1)
+        marked = self.dir / "Z4_bb.v"
+        marked.write_text("// Z4: row header\n// elab-check: --auto-blackbox\n" + text, encoding="utf-8")
+        self.assertEqual(run_check("--write", str(marked)).returncode, 0)
+        self.assertEqual(run_check(str(marked)).returncode, 0)
 
     def test_a_changed_golden_fails_with_the_line(self) -> None:
         run_check("--write", str(self.src))
