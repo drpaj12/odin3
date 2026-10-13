@@ -381,6 +381,94 @@ class BlackBoxCutAbcTest(unittest.TestCase):
         self.assertIn("(abc dsec)", out)
 
 
+X_HEAD = ".model t\n.inputs a b\n.outputs o p\n"
+X_P = ".names a b p\n11 1\n.end\n"
+
+
+@needs_abc
+class XReportTest(unittest.TestCase):
+    """--x-report: outputs in the forward cone of ``unconn`` are removed from the comparison."""
+
+    def setUp(self) -> None:
+        if ABC is None:
+            self.fail(f"ODIN3_REQUIRE_ABC=1 but no usable ABC: {ABC_PROBLEM}")
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    def x_pair(self, p_b: str = X_P) -> tuple[str, str]:
+        """A: o = a & unconn (x kept as 0). B: o = a (x resolved to 1)."""
+        a = self.write("a.blif", X_HEAD + ".names unconn\n.names a unconn o\n11 1\n" + X_P)
+        b = self.write("b.blif", X_HEAD + ".names a o\n1 1\n" + p_b)
+        return a, b
+
+    def test_equivalent_outside_x_cone_exit_3(self) -> None:
+        a, b = self.x_pair()
+        self.assertEqual(check(a, b)[0], 1)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("equivalent outside x-cones (abc cec)", out)
+        self.assertIn("x-report: 1 of 2 outputs are in an x-cone", out)
+        self.assertEqual([line for line in out.splitlines() if line.startswith("x-cone:")],
+                         ["x-cone: o"])
+
+    def test_difference_outside_the_cone_is_still_not_equivalent(self) -> None:
+        a, b = self.x_pair(".names a b p\n1- 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NOT equivalent outside x-cones", out)
+        self.assertNotIn("x-cone: o", out)
+
+    def test_no_unconn_means_no_cone(self) -> None:
+        a = self.write("a.blif", X_HEAD + ".names a o\n1 1\n" + X_P)
+        b = self.write("b.blif", X_HEAD + ".names a o\n0 1\n" + X_P)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("no output is in an x-cone", out)
+
+    def test_equivalent_stays_exit_0_without_cone_lines(self) -> None:
+        a = self.write("a.blif", X_HEAD + ".names a o\n1 1\n" + X_P)
+        code, out, err = check("--x-report", a, a)
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("x-cone", out)
+
+    def test_every_output_in_a_cone_compares_nothing(self) -> None:
+        a = self.write("a.blif", ".model t\n.inputs a\n.outputs o\n.names unconn\n"
+                       ".names a unconn o\n11 1\n.end\n")
+        b = self.write("b.blif", ".model t\n.inputs a\n.outputs o\n.names a o\n1 1\n.end\n")
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("no output is left to compare", out)
+
+    def test_x_cone_passes_through_a_latch(self) -> None:
+        """unconn -> cover -> latch D: the latch's Q, and the output behind it, are removed."""
+        head = ".model t\n.inputs clk a\n.outputs q r\n"
+        tail = ".names a r\n1 1\n.end\n"
+        a = self.write("a.blif", head + ".names unconn\n.names a unconn d\n11 1\n"
+                       ".latch d q re clk 0\n" + tail)
+        b = self.write("b.blif", head + ".names a d\n1 1\n.latch d q re clk 0\n" + tail)
+        code, out, err = check("--x-report", a, b)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("(abc dsec)", out)
+        self.assertIn("x-cone: q", out)
+        self.assertNotIn("x-cone: r", out)
+
+    def test_x_in_the_other_netlist_counts_too(self) -> None:
+        a, b = self.x_pair()
+        code, out, err = check("--x-report", b, a)
+        self.assertEqual(code, 3, out + err)
+        self.assertIn("x-cone: o", out)
+
+    def test_help_documents_the_flag(self) -> None:
+        code, out, _ = check("--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--x-report", out)
+
+
 @needs_abc
 class EquivCheckAbcTest(unittest.TestCase):
     def setUp(self) -> None:

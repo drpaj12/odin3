@@ -3,11 +3,24 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
-                [--no-cut]
+                [--no-cut] [--x-report]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
 cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
-error, and black-box instances that cannot be matched one-to-one.
+error, and black-box instances that cannot be matched one-to-one; 3 only with ``--x-report``:
+not equivalent, but equivalent outside the x-cones (below).
+
+``--x-report`` (2H, 2D spec 14.6 item 4): when the two netlists are not equivalent, recompute
+with every output in an x-cone removed and print the removed outputs by name.  Parmys writes a
+surviving don't-care x as the net ``unconn`` (``.names unconn`` with no rows: constant 0).  The
+x-cone of a netlist is everything the net ``unconn`` reaches going forward, through covers and
+through latches (so a latch whose D input is in the cone puts its Q, and the outputs behind it,
+in the cone).  An output is removed when it is in the x-cone of *either* netlist; a black box's
+probed inputs are outputs like any other.  If the netlists are equivalent on the remaining
+outputs the exit code is 3 and ``x-cone: NAME`` lines list the removed ones.  If no output is
+in an x-cone, or none is left, or the remainder still differs, the verdict stays "not
+equivalent" (exit 1).  The removal is coarse: an output that depends on x for one input vector
+only is removed whole.
 
 Each netlist is flattened in Python into one model (``.subckt`` of models defined in the
 same file are inlined; the VTR ``adder`` hard block is replaced by logic; other black boxes
@@ -685,6 +698,87 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
     return report
 
 
+XCONE_NET = "unconn"  # Parmys's don't-care net: `.names unconn`, no rows (constant 0)
+EXIT_XCONE = 3
+
+
+def x_sources(flat: Flat) -> set[str]:
+    """The flat nets that are ``unconn`` (a constant cover with no inputs and no rows, named
+    ``unconn`` in its model)."""
+    return {n.output for n in flat.names
+            if not n.inputs and not n.rows and n.output.rsplit(_SEP, 1)[-1] == XCONE_NET}
+
+
+def x_cone_outputs(flat: Flat) -> set[str]:
+    """The primary outputs (original names) of ``flat`` that the x sources reach going forward,
+    through covers and latches."""
+    fanout: dict[str, list[str]] = {}
+    for names in flat.names:
+        for net in names.inputs:
+            fanout.setdefault(net, []).append(names.output)
+    for latch in flat.latches:
+        fanout.setdefault(latch.input, []).append(latch.output)
+    reached = set(x_sources(flat))
+    work = list(reached)
+    while work:
+        for nxt in fanout.get(work.pop(), []):
+            if nxt not in reached:
+                reached.add(nxt)
+                work.append(nxt)
+    return {out for out in flat.outputs if out in reached}
+
+
+def prove(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
+          args: argparse.Namespace) -> tuple[bool, str, str]:
+    """(equivalent, ABC command, ABC output) for the two flats on their current outputs."""
+    verb = "dsec" if any(f.latches for f in flats) else "cec"
+    if verb == "dsec":
+        for flat in flats:
+            if not flat.latches:
+                add_dangling_latch(flat)
+    tmp = Path(tempfile.mkdtemp(prefix="equiv-check-"))
+    try:
+        write_flat(flats[0], maps[0], tmp / "a.blif")
+        write_flat(flats[1], maps[1], tmp / "b.blif")
+        output = run_abc(abc, f"{verb} a.blif b.blif", tmp, args.timeout)
+    finally:
+        if args.keep_temp:
+            notice(f"temporary files kept in {tmp}")
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+    verdict = parse_verdict(output)
+    if verdict is None:
+        raise EquivError(f"could not find a verdict in ABC {verb} output", output)
+    return verdict, verb, output
+
+
+def x_report(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
+             args: argparse.Namespace) -> int:
+    """The ``--x-report`` rerun after a failed check: exit 3 when the netlists agree outside the
+    x-cones, else 1 (nothing in a cone, nothing left, or still different)."""
+    removed = {m[o] for f, m in zip(flats, maps, strict=True) for o in x_cone_outputs(f)}
+    if not removed:
+        print(f"{TOOL}: x-report: no output is in an x-cone ({XCONE_NET} reaches none)")
+        return 1
+    total = len(flats[0].outputs)
+    print(f"{TOOL}: x-report: {len(removed)} of {total} outputs are in an x-cone "
+          f"({XCONE_NET} reaches them in A or B)")
+    if len(removed) >= total:
+        print(f"{TOOL}: NOT equivalent outside x-cones: no output is left to compare")
+        return 1
+    for flat, ports in zip(flats, maps, strict=True):
+        flat.outputs = [o for o in flat.outputs if ports[o] not in removed]
+    verdict, verb, output = prove(flats, maps, abc, args)
+    if not verdict:
+        print(f"{TOOL}: NOT equivalent outside x-cones (abc {verb})")
+        print(output.rstrip())
+        return 1
+    print(f"{TOOL}: equivalent outside x-cones (abc {verb})")
+    for name in sorted(removed):
+        print(f"x-cone: {name}")
+    return EXIT_XCONE
+
+
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
@@ -711,27 +805,12 @@ def _check(args: argparse.Namespace) -> int:
               f"B is {domains[1]} (type, clock)")
         return 1
     abc = find_abc(args.abc)
-    verb = "dsec" if any(f.latches for f in flats) else "cec"
-    if verb == "dsec":
-        for flat in flats:
-            if not flat.latches:
-                add_dangling_latch(flat)
-    tmp = Path(tempfile.mkdtemp(prefix="equiv-check-"))
-    try:
-        write_flat(flats[0], maps[0], tmp / "a.blif")
-        write_flat(flats[1], maps[1], tmp / "b.blif")
-        output = run_abc(abc, f"{verb} a.blif b.blif", tmp, args.timeout)
-    finally:
-        if args.keep_temp:
-            notice(f"temporary files kept in {tmp}")
-        else:
-            shutil.rmtree(tmp, ignore_errors=True)
-    verdict = parse_verdict(output)
-    if verdict is None:
-        raise EquivError(f"could not find a verdict in ABC {verb} output", output)
+    verdict, verb, output = prove(flats, maps, abc, args)
     print(f"{TOOL}: {'equivalent' if verdict else 'NOT equivalent'} (abc {verb})")
     if not verdict:
         print(output.rstrip())
+        if args.x_report:
+            return x_report(flats, maps, abc, args)
     return 0 if verdict else 1
 
 
@@ -739,7 +818,8 @@ def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog=TOOL,
         description="Prove two BLIF netlists functionally equivalent with ABC cec/dsec. "
-        "Exit 0 equivalent, 1 not equivalent, 2 usage/input/ABC error.",
+        "Exit 0 equivalent, 1 not equivalent, 2 usage/input/ABC error, 3 (--x-report) "
+        "equivalent outside the x-cones.",
         epilog="Latches with init 2 (don't care) or 3 (unknown) are treated as starting at 0; "
         "use --strict-init to reject them. Each file must clock all its latches with one "
         "(edge type, primary-input clock) pair, the same in both files.",
@@ -759,6 +839,9 @@ def _parser() -> argparse.ArgumentParser:
                     "out as free outputs / compared inputs matched by instance name")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
+    ap.add_argument("--x-report", action="store_true",
+                    help="when not equivalent, rerun without the outputs in an x-cone (reached "
+                    "by `unconn`) and list them; exit 3 if equivalent outside them")
     ap.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                     help="ABC timeout in seconds (default %(default)s)")
     return ap
