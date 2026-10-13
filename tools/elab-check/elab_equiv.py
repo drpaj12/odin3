@@ -32,7 +32,8 @@ Exit codes: 0 equivalent; 1 NOT equivalent, only when ``equiv-check`` exits 1 *a
 not an executable, a child that failed or crashed (any exit but 0 from odin3 or Yosys, an exit
 other than 0/1 from ``equiv-check``, an exit 1 without its verdict line such as a Python
 traceback or a ``systemd-run`` that cannot find the program), a bad argument; 77 skipped (an ASan
-child and no ``systemd-run``: it cannot be capped). A driver that gates on "differs" must test for exit 1 only.
+child and no ``systemd-run``: it cannot be capped). A driver that gates on "differs" tests
+for exit 1 only.
 """
 
 from __future__ import annotations
