@@ -656,14 +656,18 @@ attributes changed (`odin3_net_merge`, `odin3_wire_add_alias`, `odin3_wire_delet
 and `odin3_attr_remove` on a wire); `SINK`, a net whose sink set changed. An entry equal to the
 last one is stored once. Alongside, a mutation count (`odin3_module_journal_gen`) rises on every
 mutation while the journal is on, entry or not: the above, plus a node, net or wire created or
-deleted or renamed, an attribute of any object set or removed, and `compact`. *When it is on:*
+deleted or renamed, an attribute of any object set or removed, and `compact`. A pass may append a
+`NODE` entry itself (`odin3_module_journal_add`) to have a node revisited (`opt_dff` does, for a
+flip-flop whose mux walk hit its step cap, `dff_muxes.c`); such an entry bumps the count too, so
+`opt_clean` sweeps a module with a mux loop each time (speed only). *When it is on:*
 off by default; `opt_dff` turns it on for a module during its first sweep of an `opt` invocation
 (incremental sessions only, not under `--opt-full-rescan`) and the session turns it off, and frees
-it, when `opt` ends. Off, a change costs one flag test. *Overflow rule:* the log holds at most
+it, when `opt` ends. Off, a change costs a flag test or two. `-noff` leaves the journal off, so `opt_clean` then sweeps
+in full; `--opt-full-rescan` turns off both skips. *Overflow rule:* the log holds at most
 2^21 entries (16 MB, the cap); more than that, or a failed allocation, sets an overflow flag and
 the reader must treat everything as changed (`odin3_module_journal_get` returns false); `compact`
 sets it too, as its IDs are stale. The mutation count is unaffected by overflow. *Nothing outside
-`opt` may depend on it:* it is not part of the IR's meaning, is not in the check rules, the RTLIL
+`opt` (`src/passes/opt`) may depend on it:* it is not part of the IR's meaning, is not in the check rules, the RTLIL
 view, a snapshot or any pass output, and never changes a result (a reader that ignores it computes
 the same IR, only slower). Its bytes count in `opt`'s memory budget (`src/passes/budget.[ch]`).
 IR-6 and IR-18 are unchanged.

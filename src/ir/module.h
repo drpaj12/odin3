@@ -457,7 +457,9 @@ odin3_status odin3_module_compact(odin3_module *module, odin3_compact_map *map);
  * of the connectivity appends one entry (kind << 32 | ID): ODIN3_JOURNAL_NODE, a node whose pin
  * was connected, disconnected or handed over; ODIN3_JOURNAL_DRIVE, a net whose driver set, merge
  * state or wire memberships/attributes changed; ODIN3_JOURNAL_SINK, a net whose sink set changed.
- * Equal neighbours are stored once. It is off by default and costs one test per change when off.
+ * Equal neighbours are stored once. It is off by default; off, a change costs a flag test or two
+ * (a pin connect or disconnect two, a handover four). Opt-only (src/passes/opt): nothing else may
+ * depend on it (IR-18a).
  * More than ODIN3_JOURNAL_MAX entries, or an allocation failure, sets the overflow flag
  * (odin3_module_journal_get then reports false: the reader must assume everything changed).
  * odin3_module_compact invalidates it the same way. Single-threaded, like the IR.
@@ -480,9 +482,9 @@ void odin3_module_journal_drop(odin3_module *module, size_t n);
 /*
  * The journal's mutation count: it rises on every mutation of the module while the journal is on,
  * whether or not it makes an entry (an entry equal to the last one, a journal that overflowed, a
- * node or net created or deleted, a wire made, an attribute of any object set or removed, a
- * compact). opt_clean skips its sweep when it has not moved since a sweep that changed nothing.
- * Zero when off; begin keeps it, end resets it.
+ * node, net or wire created, deleted or renamed, an attribute of any object set or removed, a
+ * compact, an entry added by hand). opt_clean skips its sweep when it has not moved since a sweep
+ * that changed nothing. Zero when off; begin keeps it, end resets it.
  */
 uint64_t odin3_module_journal_gen(const odin3_module *module);
 
@@ -492,7 +494,7 @@ bool odin3_module_journal_on(const odin3_module *module);
 /* The bytes the journal's entry array holds (opt counts them in its memory budget). */
 uint64_t odin3_module_journal_bytes(const odin3_module *module);
 
-/* Appends an entry by hand (no-op when off). */
+/* Appends an entry by hand (no-op when off); it bumps the mutation count (opt_dff uses it). */
 void odin3_module_journal_add(odin3_module *module, uint32_t kind, uint32_t id);
 
 /* Frees the map's arrays and zeroes it; NULL is a no-op. */

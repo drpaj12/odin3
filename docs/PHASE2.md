@@ -752,5 +752,7 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
     back to a full sweep with the IR valid and the output byte-identical (`test_opt_oom_fallback`);
     the journal's bytes count in `opt`'s budget, its 16 MB cap kept (`test_budget_journal`); Debug
     builds sweep the modules `opt_clean` would skip and abort if one changes anything, and visit
-    the flip-flops `opt_dff` skipped likewise. Nothing outside `opt` may depend on the journal.
-    The output is byte-identical to the full sweeps (41 designs; `rescan-compare`).
+    every flip-flop `opt_dff` skipped, each at its own position in the sweep, likewise (a skipped
+    flip-flop that the sweep itself dirtied is covered). Nothing outside `opt` may depend on the journal.
+    The output is byte-identical to the full sweeps (82 files in 41 designs; `rescan-compare`; the mcml.v `opt` time of 0.87 s is
+    `bench_opt`'s median on an idle machine, 1.0 s under load).

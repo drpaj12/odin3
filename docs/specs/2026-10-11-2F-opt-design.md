@@ -821,7 +821,8 @@ same `opt` invocation) changed nothing while the journal's mutation count is unc
 flags of all modules (including those spread from instantiated modules) are unchanged and `-purge`
 is the same; anything unclear sweeps. Overflow, an allocation failure or a module not yet swept
 is a full sweep. The journal's bytes count in the budget check and its cap is 16 MB. Debug builds
-sweep what was skipped and abort when it changes anything.
+visit every flip-flop `opt_dff` skipped, at its own position in the sweep, and sweep the modules
+`opt_clean` skipped, and abort when any of them changes anything.
 
 **Memory.** Rebuilds and FF re-emission leave a dead node per rewrite until the script's
 `compact` after `opt` (IR-6 unchanged; PHASE2 #19); mcml.v's 31 iterations re-emit constant-register pipelines each

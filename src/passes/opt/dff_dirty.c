@@ -219,6 +219,7 @@ odin3_status odin3_dff_dirty_begin(odin3_dff_state *ds) {
     walker_free(&wk);
     if (st != ODIN3_OK) {
         odin3_dff_dirty_free(dd);
+        odin3_opt_dff_note_bytes(oc, 0);
         (void)odin3_opt_dff_prime(oc);
         return ODIN3_OK; /* a failed walk (out of memory) is no reason to fail: sweep in full */
     }
