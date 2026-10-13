@@ -315,7 +315,7 @@ odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec) {
     return st == ODIN3_OK && building(e1) ? bw_module(e1, box, def->node) : st;
 }
 
-/* --- carriers: the other parameter sets of a `(* blackbox *)` definition (v4.18) ----------------
+/* --- carriers: the other parameter sets of a `(* blackbox *)` definition (v4.19) ----------------
  */
 
 /* Specialization spec's carrier MODULE: its ports under the set's values (the connection check's

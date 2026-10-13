@@ -253,7 +253,7 @@ static odin3_ast_id expect_blackbox(const char *name, uint32_t n_ports) {
     return module;
 }
 
-/* A carrier MODULE of the `(* blackbox *)` definition `pb` (spec v4.18): a black-box MODULE whose
+/* A carrier MODULE of the `(* blackbox *)` definition `pb` (spec v4.19): a black-box MODULE whose
  * `blackbox` ATTR holds the definition's name as a STRING. */
 static odin3_ast_id expect_carrier(const char *name, uint32_t n_ports) {
     odin3_ast_id module = find(ODIN3_AST_MODULE, name);
@@ -600,7 +600,7 @@ static odin3_ast_id nth_instantiation(const char *name, uint32_t n) {
 /* A parameterized `(* blackbox *)` definition keeps its name, as Yosys 0.55's module and cells
  * do (PR 2D-3 final review I2, EL-9/EL-11 v5.0): the MODULE named after it has the defaults' ports
  * and values, written even when no instance uses the defaults; each INSTANTIATION names it and
- * carries its final values; connections are checked against the instance's own widths. Spec v4.18
+ * carries its final values; connections are checked against the instance's own widths. Spec v4.19
  * (Peter decision 3): each other parameter set an instance uses is also a ports-only carrier
  * MODULE, named as a module's specialization (`pb$W=2`), whose `blackbox` ATTR holds the
  * definition's name and whose ports and values are that set's. */

@@ -996,7 +996,7 @@ static void test_blackbox_override_exact_cases(void) {
     "module top (input [15:0] x, input [7:0] kk, output [15:0] y, output [7:0] y8);\n" conns       \
     "endmodule\n"
 
-/* --- exact black-box port widths per parameter set (Peter decision 3, spec v4.18) --------------
+/* --- exact black-box port widths per parameter set (Peter decision 3, spec v4.19) --------------
  *
  * Yosys 0.55 keeps one `module \bb` (the defaults' widths) and cells `\bb` whose connections have
  * the widths of their own parameter set: `hierarchy` derives the module for the width check and
@@ -1127,6 +1127,57 @@ static void test_bbw_connection_resized(void) {
     expect_ir_ok();
 }
 
+/* Two parameterised black boxes in one source, each with a default and an overridden instance
+ * (a type per definition; widths per set, no cross-talk between the two definitions).
+ *   yosys -q -p "read_verilog t.v; hierarchy -top top; write_rtlil"  (the t.v of this test):
+ * cells \bb \u1, \bb \u2 (`parameter signed \W 16`), \cc \v1, \cc \v2 (`\V 16`) with
+ * connections of 8, 16, 5, 17 (a) and 8, 16, 8, 32 (o) bits. */
+static void test_bbw_two_definitions(void) {
+    read_clean("(* blackbox *) module bb #(parameter W = 8) (input [W-1:0] a, output [W-1:0] o);\n"
+               "endmodule\n"
+               "(* blackbox *) module cc #(parameter V = 4) (input [V:0] a, output [2*V-1:0] o);\n"
+               "endmodule\n"
+               "module top (input [16:0] x, output [15:0] y, output [31:0] z, output [7:0] y8,\n"
+               "            output [7:0] z8);\n"
+               "  bb u1 (.a(x[7:0]), .o(y8));\n  bb #(.W(16)) u2 (.a(x[15:0]), .o(y));\n"
+               "  cc v1 (.a(x[4:0]), .o(z8));\n  cc #(.V(16)) v2 (.a(x), .o(z));\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, blackbox_types());
+    expect_widths("u1", "a", 8, "o", 8);
+    expect_widths("u2", "a", 16, "o", 16);
+    expect_widths("v1", "a", 5, "o", 8);
+    expect_widths("v2", "a", 17, "o", 32);
+}
+
+/* A black box inside a parameterised parent: two specializations of the parent, each with its
+ * own black-box set (W = 8 and W = 16), one cell type.
+ *   yosys -q -p "read_verilog t.v; hierarchy -top top; write_rtlil" gives
+ * `$paramod\par\P=s32'...1000` with `cell \bb \u` (`\W 8`, a/o of 8 bits) and
+ * `$paramod\par\P=s32'...10000` with `cell \bb \u` (`\W 16`, 16 bits), one `module \bb`. */
+static void test_bbw_parameterised_parent(void) {
+    read_clean("(* blackbox *) module bb #(parameter W = 8) (input [W-1:0] a, output [W-1:0] o);\n"
+               "endmodule\n"
+               "module par #(parameter P = 8) (input [15:0] x, output [15:0] y);\n"
+               "  bb #(.W(P)) u (.a(x[P-1:0]), .o(y[P-1:0]));\nendmodule\n"
+               "module top (input [15:0] x, output [15:0] y, output [15:0] y2);\n"
+               "  par #(.P(8)) p1 (.x(x), .y(y));\n  par #(.P(16)) p2 (.x(x), .y(y2));\n"
+               "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, blackbox_types());
+    uint32_t seen = 0;
+    for (uint32_t index = 1; index < odin3_design_module_end(rs.design); index++) {
+        odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){index});
+        odin3_node_id node = odin3_module_find_node(module, id_of("u"));
+        if (node.v == 0) {
+            continue;
+        }
+        int64_t width = param_in(module, node, "W");
+        TEST_ASSERT_TRUE(width == 8 || width == 16);
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)width, odin3_node_port(module, node, 0).count);
+        TEST_ASSERT_EQUAL_UINT32((uint32_t)width, odin3_node_port(module, node, 1).count);
+        seen |= width == 8 ? 1U : 2U;
+    }
+    TEST_ASSERT_EQUAL_UINT32(3, seen);
+}
+
 /* write_rtlil carries each cell's own widths and the module of the defaults, twice the same. */
 static void test_bbw_rtlil(void) {
     static char first[TEXT_MAX];
@@ -1147,9 +1198,15 @@ static void test_bbw_rtlil(void) {
         memset(&rs, 0, sizeof rs);
     }
     TEST_ASSERT_EQUAL_STRING(first, second);
-    TEST_ASSERT_NOT_NULL(strstr(first, "cell \\bb \\u2"));
-    TEST_ASSERT_NOT_NULL(strstr(first, "connect \\o \\y\n"));
-    TEST_ASSERT_NOT_NULL(strstr(first, "connect \\o \\y8\n"));
+    static const char *const k_wanted[] = {
+        "cell \\bb \\u2", "parameter \\W 16\n",
+        /* Yosys writes `parameter signed \W 16` and a \src attribute on each; the writer does not
+         * (a backend difference, not a width one: the widths are what these checks pin). */
+        "attribute \\dynports 1\nmodule \\bb\n  parameter \\W 8\n", "wire width 8 input 1 \\a",
+        "wire width 9 output 2 \\o", "connect \\o \\y\n", "connect \\o \\y8\n"};
+    for (size_t k = 0; k < sizeof k_wanted / sizeof *k_wanted; k++) {
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(first, k_wanted[k]), k_wanted[k]);
+    }
 }
 
 /* An override that does not evaluate is reported, not read as "not overridden". */
@@ -1568,6 +1625,8 @@ static void test_oom_sweep_blackbox_sets(void) {
     X(test_bbw_instance_array)                                                                     \
     X(test_bbw_equal_values_other_width)                                                           \
     X(test_bbw_connection_resized)                                                                 \
+    X(test_bbw_two_definitions)                                                                    \
+    X(test_bbw_parameterised_parent)                                                               \
     X(test_bbw_rtlil)                                                                              \
     X(test_blackbox_override_unevaluable)                                                          \
     X(test_blackbox_reuses_registered_type)                                                        \

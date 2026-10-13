@@ -1,5 +1,5 @@
 /*
- * elab2_bbox.c — black-box cell types in stage 2 (2D Task 19 and spec v4.18, Peter decision 3;
+ * elab2_bbox.c — black-box cell types in stage 2 (2D Task 19 and spec v4.19, Peter decision 3;
  * EL-11): the cell type of a `(* blackbox *)` or implicit black-box MODULE, declared once per
  * definition under its base name (IR-7b), with the exact port widths of every parameter set an
  * instance uses.
@@ -108,12 +108,31 @@ static const bb_entry *bb_find(const bb_table *table, const odin3_value *values)
     return NULL;
 }
 
+/* Registration check: the rule's table must exist, have one value slot per parameter of the type
+ * and name an existing port, and every parameter of the type must be of a kind the table hashes
+ * and compares (INT, STRING, BITS). */
 static bool bb_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
                      odin3_width_why *why) {
-    (void)wexpr;
-    (void)def;
-    (void)why;
-    return true; /* it reads every parameter, whatever its kind */
+    const bb_rule *rule = wexpr->impl;
+    const char *bad = NULL;
+    if (rule == NULL || rule->table == NULL) {
+        bad = "no table of parameter sets";
+    } else if (rule->table->n_params != def->n_params) {
+        bad = "the table's parameters are not the type's";
+    } else if (rule->port >= def->n_ports) {
+        bad = "the rule's port is not a port of the type";
+    }
+    for (uint32_t k = 0; bad == NULL && k < def->n_params; k++) {
+        if (def->params[k].kind != ODIN3_VAL_INT && def->params[k].kind != ODIN3_VAL_STRING &&
+            def->params[k].kind != ODIN3_VAL_BITS) {
+            bad = "a parameter is of a kind the table cannot compare";
+        }
+    }
+    if (bad != NULL) {
+        (void)snprintf(why->text, sizeof why->text, "%s", bad);
+        return false;
+    }
+    return true;
 }
 
 static odin3_status bb_eval(const odin3_width_expr *wexpr, const odin3_width_args *args,
@@ -271,7 +290,7 @@ static odin3_status bbox_match(odin3_elab2 *e2, odin3_ast_id module_node, const 
  */
 
 /* The definition a MODULE is a carrier of (its `blackbox` ATTR holds the name as a STRING, spec
- * v4.18): the name's ID; false for a definition's own MODULE and for any other. */
+ * v4.19): the name's ID; false for a definition's own MODULE and for any other. */
 static bool bbox_base_of(const odin3_elab2 *e2, odin3_ast_id module_node, uint32_t *base) {
     uint32_t key = 0;
     if (!odin3_strtab_find(odin3_design_strtab(e2->design), odin3_bytes_cstr(k_blackbox), &key)) {
