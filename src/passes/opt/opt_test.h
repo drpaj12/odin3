@@ -6,6 +6,8 @@
 #ifndef ODIN3_PASSES_OPT_OPT_TEST_H
 #define ODIN3_PASSES_OPT_OPT_TEST_H
 
+#include "odin3/odin3.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -32,6 +34,9 @@ typedef struct odin3_opt_test_hooks {
     void (*on_call)(void *user, const char *sub);
     void *user;
     void (*on_expr_setup)(void *user, bool begin);
+    /* after_run: called with the sub-pass's name after its body ran, before the Debug check and
+     * the --opt-simcheck comparison (Task 17: a test injects a wrong rewrite here). */
+    void (*after_run)(void *user, const char *sub, odin3_design *design);
 } odin3_opt_test_hooks;
 
 /* Installs the hooks (copied; NULL clears them). */

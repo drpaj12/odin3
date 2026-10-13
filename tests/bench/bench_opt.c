@@ -452,7 +452,7 @@ odin3_status bench_opt_design(odin3_design *design, const char *name, char *buf,
     if (row == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    const odin3_opt_test_hooks hooks = {on_call, NULL, on_expr_setup};
+    const odin3_opt_test_hooks hooks = {on_call, NULL, on_expr_setup, NULL};
     odin3_opt_test_set_hooks(&hooks);
     odin3_log_set_sink(on_log, NULL);
     measure_size(design, &row->before);

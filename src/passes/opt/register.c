@@ -76,6 +76,7 @@ static const opt_word k_words[] = {
     {"noff", OPTS_AT(noff), ONLY(P_OPT), false},
     {"opt-stats", offsetof(odin3_opt_args, stats), ALL_PASSES, true},
     {"opt-full-rescan", offsetof(odin3_opt_args, full_rescan), ONLY(P_OPT) | ONLY(P_EXPR), true},
+    {"opt-simcheck", offsetof(odin3_opt_args, simcheck), ALL_PASSES, true},
 };
 
 static bool find_pass(const char *pass, opt_pass *out) {
@@ -243,6 +244,16 @@ static odin3_status debug_check(odin3_design *design) {
 #endif
 }
 
+/* --opt-simcheck runs in Debug builds only (spec 20.2, point (m)). */
+static bool simcheck_on(const odin3_opt_call_req *req) {
+#ifdef NDEBUG
+    (void)req;
+    return false;
+#else
+    return req->simcheck;
+#endif
+}
+
 /* The "after" files, and the "before" text that was kept for them. */
 static odin3_status snapshot_after(const odin3_opt_call_req *req, uint32_t seq,
                                    const odin3_strbuf *before) {
@@ -276,6 +287,24 @@ static bool request_valid(const odin3_opt_call_req *req, const bool *changed) {
     return ok;
 }
 
+/* The sub-pass body, the after_run test hook, the Debug check and the --opt-simcheck comparison
+ * (sim is NULL without the option). */
+static odin3_status run_checked(const odin3_opt_call_req *req, const odin3_opt_test_hooks *hooks,
+                                odin3_opt_simcheck *sim) {
+    const char *name = k_sub_names[req->sub];
+    odin3_status st = k_sub_run[req->sub](req->ctx, req->design, req->opts, req->counts);
+    if (st == ODIN3_OK && hooks->after_run != NULL) {
+        hooks->after_run(hooks->user, name, req->design);
+    }
+    if (st == ODIN3_OK) {
+        st = debug_check(req->design);
+    }
+    if (st == ODIN3_OK && sim != NULL) {
+        st = odin3_opt_simcheck_after(req->design, sim, name);
+    }
+    return st;
+}
+
 odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
     if (!request_valid(req, changed)) {
         return ODIN3_ERR_INVALID_ARG;
@@ -285,7 +314,6 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
     if (hooks->on_call != NULL) {
         hooks->on_call(hooks->user, k_sub_names[req->sub]);
     }
-    const sub_run_fn run = k_sub_run[req->sub];
     odin3_status st = budget_gate(req);
     odin3_strbuf before;
     odin3_strbuf_init(&before);
@@ -294,13 +322,15 @@ odin3_status odin3_opt_call(const odin3_opt_call_req *req, bool *changed) {
     if (snap) {
         snap = snapshot_ok(odin3_rtlil_text(req->design, &before));
     }
+    odin3_opt_simcheck *sim = NULL;
+    if (st == ODIN3_OK && simcheck_on(req)) {
+        st = odin3_opt_simcheck_before(req->design, &sim);
+    }
     const uint64_t measure = change_measure(req->counts, req->sub);
     if (st == ODIN3_OK) {
-        st = run(req->ctx, req->design, req->opts, req->counts);
+        st = run_checked(req, hooks, sim);
     }
-    if (st == ODIN3_OK) {
-        st = debug_check(req->design);
-    }
+    odin3_opt_simcheck_free(sim);
     *changed = st == ODIN3_OK && change_measure(req->counts, req->sub) > measure;
     if (*changed && snap) {
         (void)snapshot_ok(snapshot_after(req, seq, &before));
@@ -428,7 +458,7 @@ static odin3_status opt_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
         st = odin3_opt_run(ctx, design, &parsed, &counts);
     } else {
         bool changed = false;
-        odin3_opt_call_req req = {ctx, design, desc->sub, &parsed.opts, &counts};
+        odin3_opt_call_req req = {ctx, design, desc->sub, &parsed.opts, &counts, parsed.simcheck};
         st = odin3_opt_call(&req, &changed);
     }
     if (st == ODIN3_OK && parsed.stats) {

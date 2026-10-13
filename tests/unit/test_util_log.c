@@ -115,6 +115,22 @@ static void test_reentrant_sink_dropped(void) {
     TEST_ASSERT_EQUAL_STRING("again", captured);
 }
 
+static void test_mute_drops_and_nests(void) {
+    odin3_log_mute(true);
+    odin3_log_mute(true);
+    odin3_log(ODIN3_LOG_ERROR, "muted");
+    odin3_log_mute(false);
+    odin3_log(ODIN3_LOG_ERROR, "still muted");
+    TEST_ASSERT_EQUAL_INT(0, delivered);
+    TEST_ASSERT_EQUAL_UINT(0, odin3_log_count(ODIN3_LOG_ERROR)); /* dropped, not counted */
+    odin3_log_mute(false);
+    odin3_log_mute(false); /* an extra unmute is ignored */
+    odin3_log(ODIN3_LOG_ERROR, "heard");
+    TEST_ASSERT_EQUAL_INT(1, delivered);
+    TEST_ASSERT_EQUAL_STRING("heard", captured);
+    TEST_ASSERT_EQUAL_UINT(1, odin3_log_count(ODIN3_LOG_ERROR));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_default_level_info_filters_debug);
@@ -124,5 +140,6 @@ int main(void) {
     RUN_TEST(test_exact_fit_not_truncated);
     RUN_TEST(test_sink_null_restores_stderr);
     RUN_TEST(test_reentrant_sink_dropped);
+    RUN_TEST(test_mute_drops_and_nests);
     return UNITY_END();
 }

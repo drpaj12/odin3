@@ -132,6 +132,7 @@ add_library(odin3_core OBJECT
     src/passes/opt/dff_merge.c
     src/passes/opt/dff_muxes.c
     src/passes/opt/register.c
+    src/passes/opt/simcheck.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
