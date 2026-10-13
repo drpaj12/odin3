@@ -271,8 +271,11 @@ class Splice:
             self.must("the scc precondition (a Parmys rejection)",
                       [opts.yosys, "-p", precheck_script(primitives or "", files)])
         self.must("odin3 (the Odin III half)",
-                  [opts.odin3, "-p", odin3_script(None if opts.no_primitives else primitives,
-                                                  files, opts.top, opts.pre)])
+                  # --top goes to the CLI: read_verilog elaborates at once, so `hierarchy --top`
+                  # in the script comes too late for a file with several roots.
+                  [opts.odin3, "--top", opts.top, "-p",
+                   odin3_script(None if opts.no_primitives else primitives, files, opts.top,
+                                opts.pre)])
         if not (self.work / "a.il").is_file():
             raise SpliceError("odin3 (the Odin III half) wrote no a.il")
         tcl = self.work / YOSYS_TCL

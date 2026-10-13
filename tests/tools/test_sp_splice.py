@@ -50,6 +50,14 @@ FAKE_ODIN3 = """#!{python}
 import json, os, sys
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(["odin3"] + sys.argv[1:]) + "\\n")
+# Like the real CLI: read_verilog elaborates at once, so several modules need --top on the command
+# line (hierarchy --top in the script comes too late).
+words = [w.strip('"') for w in sys.argv[-1].replace(";", " ").split()]
+modules = sum(open(w).read().count("\\nmodule ") + open(w).read().startswith("module ")
+              for w in words if w.endswith(".v") and os.path.isfile(w))
+if modules > 1 and "--top" not in sys.argv[1:-2]:
+    print("odin3: error: ambiguous_top", file=sys.stderr)
+    sys.exit(2)
 if os.environ.get("FAKE_ODIN3_RC", "0") != "0":
     print("odin3: error: boom", file=sys.stderr)
     sys.exit(int(os.environ["FAKE_ODIN3_RC"]))
@@ -145,6 +153,16 @@ class SpSpliceTest(unittest.TestCase):
         self.assertIn("read_verilog --nolatches ", script)
         self.assertIn("hierarchy --top top;", script)
         self.assertNotIn("-sv", script)
+
+    def test_top_is_a_cli_option_before_p(self) -> None:
+        """Review I1: a file with several uninstantiated modules needs `odin3 --top T -p ...`."""
+        multi = self.dir / "multi.v"
+        multi.write_text("module a; endmodule\nmodule b; endmodule\n", encoding="utf-8")
+        code, _, err = self.run_tool("--no-primitives", "--primitives", "", files=[multi])
+        self.assertEqual((code, err), (0, ""))
+        odin3 = next(c for c in self.calls() if c[0] == "odin3")
+        self.assertEqual(odin3[:4], ["odin3", "--top", "top", "-p"])
+        self.assertIn("hierarchy --top top;", odin3[4])
 
     def test_top_stays_on_the_odin3_side(self) -> None:
         self.run_tool()
