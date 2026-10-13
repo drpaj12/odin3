@@ -1148,6 +1148,20 @@ proc`) and, when it has a combinational block, `<slug>.nolatches.il`. Goldens ar
 `<slug>.err`. CTests: `proc_rows` (goldens), `proc_diff_rows` (§18.3), `proc_bridge_rows`
 (§18.5, `--nolatches` mode).
 
+*Amended (2E Task 11), as landed:* 48 rows (43 lowered, 5 errors); `tools/proc-check/proc-rows`
+(`goldens`, `diff`, `bridge`) runs the three CTests and `tests/tools/test_proc_rows.py` checks the
+shape. The goldens are compared through a file, not `write_rtlil -`: odin3's `write_rtlil -` writes
+a file named `-` (it is not standard output). An `.err` file holds the located error lines
+(`F:L:C: error: …`, without the `odin3: error: ` prefix); `err_second_root_if.err` has one line,
+for `'q'`, since one error per process is reported (§5.4, Task 6; Yosys aborts there too). The
+bridge adds `elab-equiv --async2sync` (Yosys's `async2sync` before `techmap` on both sides:
+`equiv-check` reads no `.gate` flip-flop with an asynchronous reset, set or load) and runs every
+row with `--unmap-enables --async2sync --top t`. Three rows cannot be checked by the bridge, and
+`tests/proc/bridge_expect.txt` asserts that each fails in exactly that way: `self_clocked`
+(`equiv-check`: latch clocked by an internal net), `two_clocks_module` (one clock domain only) and
+`arst_rename_wire` (§20 #1). `diff_expect.txt` is empty: the 43 rows are identical to Yosys 0.55 in
+both latch modes (`--no-trio`; the trio runs once `opt` exists, 2F-5).
+
 ### 18.3 `proc-diff`: 2E against Yosys `proc` on the same RTLIL
 
 `tools/proc-check/proc-diff --odin3 O --yosys Y [--top T] [--nolatches] [--no-trio] [--with-opt]
@@ -1315,7 +1329,7 @@ of `proc_dlatch` and `proc_mux` and on `proc_arst`'s cell scan (O(1) driver look
 
 | # | 2E | Yosys 0.55 `proc` | Parmys | Why |
 |---|---|---|---|---|
-| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux, and dff (the collapse's rule values, the self-reset value; *amended, 2E-3 final review M2*) | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept. In dff: two resets whose values are one net under two names collapse into `$aldff(ALOAD = r1 \| r2)` where Yosys builds a `$dffsr`, and a reset value that is the register's own output under another name gives the self-reset `$mux` + `$dff` where Yosys builds `$aldff(AD = Q)`; both equivalent |
+| 1 | signals compared as nets (§4), with or without the pre-`proc` passes (an `opt_expr` connection is a merge) | literal `SigSpec`s in clean, rmdead, arst, mux, and dff (the collapse's rule values, the self-reset value; *amended, 2E-3 final review M2*) | same, after pre-`proc` `opt_expr`/`opt_merge` hid some resets (four micros rejected) | 2D's merged nets; a superset is accepted, equivalent where both accept. In dff: two resets whose values are one net under two names collapse into `$aldff(ALOAD = r1 \| r2)` where Yosys builds a `$dffsr`, and a reset value that is the register's own output under another name gives the self-reset `$mux` + `$dff` where Yosys builds `$aldff(AD = Q)`; both equivalent. *Row evidence (2E Task 11):* `arst_rename_wire` (`wire r2 = rst; … if (r2)`, and `wire r3 = ~rn; … if (r3)` under `negedge rn`): Yosys 0.55's own `read_verilog -sv; proc` stops with `Multiple edge sensitive events found for this signal!` (its `check_signal` follows cells, not plain wires, and `opt_expr; opt_clean` first does not help: the module still has processes), so the bridge cannot run it (`bridge_expect.txt`); 2E lowers it to the same `$adff`s as Yosys's `proc` on 2D's RTLIL (`proc-diff` identical in both latch modes), and that netlist is equivalent (`equiv-check`, `async2sync` back end) to Yosys's lowering of the wire-free source `if (rst)` / `if (~rn)`, while a changed reset value (9 to 8) is reported not equivalent: 2E is the correct side |
 | 2 | no `proc_rom` | runs it | `-norom` | the exit bar is Parmys |
 | 3 | the trailing `opt_expr -keepdc` is 2F's code, called by `proc` (absent until 2F-2 lands) | its own | same | one `opt_expr` (§24 item 5) |
 | 4 | no `proc_init` | runs it | runs it | 2D emits `init` attributes directly |

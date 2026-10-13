@@ -1,0 +1,7 @@
+# tests/proc/bridge_expect.txt: rows that elab-equiv --pass proc cannot check, and why.
+# Format: <slug>|<text the elab-equiv message must contain>|<reason>. proc_bridge_rows asserts
+# exit 2 with that text, so a row that starts to pass (or fails otherwise) is noticed.
+# These rows are still covered by proc_rows (goldens) and proc_diff_rows (Yosys's proc on the same RTLIL).
+self_clocked|is clocked by internal net a|equiv-check reads no latch clocked by an internal net
+two_clocks_module|more than one clock domain|equiv-check reads one clock domain
+arst_rename_wire|Multiple edge sensitive events found for this signal|Yosys 0.55's own read_verilog + proc rejects a reset seen through a plain wire (check_signal does not follow aliases; the 4 micros Parmys rejects, §20 #1); 2E, on 2D's merged nets, accepts it and proc-diff shows Yosys's proc identical on that RTLIL

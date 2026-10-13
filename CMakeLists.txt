@@ -1520,6 +1520,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
 
+    # 2E Task 11 (spec 18.2): the 48 construct rows. Odin III's `read_verilog; proc --noopt;
+    # write_rtlil` equals each golden (and the --nolatches one of a combinational row), the five
+    # error rows give exactly their .err lines with ODIN3_ERR_PARSE, and case_default's golden
+    # holds one $pmux of WIDTH 8. 48 tiny files: not a sweep.
+    add_test(NAME proc_rows
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/proc-rows goldens
+                --odin3 $<TARGET_FILE:odin3>)
+    set_tests_properties(proc_rows PROPERTIES
+        LABELS proc SKIP_RETURN_CODE 77 TIMEOUT 300)
+
     # Yosys 0.55 as VTR pins it (2D plan point (p)): the oracle of every 2D-2F comparison. Found
     # only in the VTR build (never PATH, which may hold another Yosys) and accepted only when
     # `yosys -V` says 0.55; otherwise no 0.55 test is registered (CI has none: they run locally
@@ -1631,6 +1641,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/verilog/mem-bridge)
         set_tests_properties(elab_mem_bridge PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # 2E Task 11 (spec 18.3, 18.5): the 43 lowering rows against Yosys 0.55. proc_diff_rows
+        # runs proc-diff per row in both latch modes (and with the pre-proc trio once `opt`
+        # exists), rerunning a failing row with --bisect; proc_bridge_rows runs elab-equiv --pass
+        # proc per row (tests/proc/bridge_expect.txt lists what equiv-check cannot read). Exit 77
+        # (skip) when an ASan child cannot be capped.
+        add_test(NAME proc_diff_rows
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/proc-rows diff
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055})
+        add_test(NAME proc_bridge_rows
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/proc-check/proc-rows bridge
+                    --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
+                    --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+        set_tests_properties(proc_diff_rows proc_bridge_rows PROPERTIES
+            LABELS proc SKIP_RETURN_CODE 77 TIMEOUT 600)
     endif()
 
     # 2C §7.5: generated modules with their own expected trees, through odin3 and Yosys
