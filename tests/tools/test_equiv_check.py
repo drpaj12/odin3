@@ -246,6 +246,20 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertIn("data: 1 in A, 2 in B", err)
         self.assertIn("out: 1 in A, 2 in B", err)
 
+    def test_width_mismatch_is_reported_before_undriven_nets(self) -> None:
+        """A narrow block leaves the wide block's upper output bits undriven on side A: the
+        cause (the widths) is reported, not the symptom (an undriven net)."""
+        head = ".model t\n.inputs clk a b c\n.outputs y z\n"
+        wide = RAM_Q.replace("out[0]=q", "out[0]=q out[1]=q1").replace(
+            "data[0]=b", "data[0]=b data[1]=b")
+        tail = BB_TAIL.replace(".end", ".names q1 z\n1 1\n.end")
+        a = self.write("a.blif", head + RAM_Q + tail)
+        b = self.write("b.blif", head + wide + tail)
+        code, _, err = check(a, b)
+        self.assertEqual(code, 2)
+        self.assertIn("port widths differ", err)
+        self.assertNotIn("undriven", err)
+
     def test_cell_type_mismatch_exit_2(self) -> None:
         a = self.write("a.blif", BB_HEAD + RAM_Q + BB_TAIL)
         b = self.write("b.blif", BB_HEAD + RAM_Q.replace("single_port_ram", "multiply")

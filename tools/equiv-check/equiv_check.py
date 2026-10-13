@@ -236,15 +236,14 @@ def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
 
 
 class _Flattener:
-    def __init__(self, netlist: blif.Netlist, strict_init: bool, allow_undriven: bool,
-                 cut: bool = True, normalize: bool = True) -> None:
+    def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
+                 normalize: bool) -> None:
         self.netlist = netlist
         self.cut = cut
         self.normalize = normalize
         self.instances: dict[str, BlackBox] = {}
         self.models = netlist.by_name()
         self.strict_init = strict_init
-        self.allow_undriven = allow_undriven
         self.counter = 0
         self.dc_inits = 0
         top = netlist.top
@@ -270,7 +269,6 @@ class _Flattener:
             frame = stack.pop()
             for cell in frame.model.cells:
                 self.add_cell(cell, frame, stack)
-        self.check_undriven()
         if self.dc_inits:
             notice(f"{self.netlist.path}: {self.dc_inits} latch(es) with init 2/3 "
                    "(don't care/unknown) treated as 0")
@@ -388,46 +386,46 @@ class _Flattener:
             self.flat.names.append(blif.Names(inputs=ins, output=carry_out, rows=list(MAJ3)))
             carry = carry_out
 
-    def check_undriven(self) -> None:
-        """Undriven nets that reach a primary output or a latch D input are an error (they
-        would silently become constants); with --allow-undriven, and for undriven nets that
-        only feed dangling logic, they are tied to 0 with a notice."""
-        flat = self.flat
-        driven = set(flat.inputs)
-        driven.update(c.output for c in flat.names)
-        driven.update(c.output for c in flat.latches)
-        used: dict[str, None] = dict.fromkeys(flat.outputs)
-        for names in flat.names:
-            used.update(dict.fromkeys(names.inputs))
-        used.update(dict.fromkeys(c.input for c in flat.latches))
-        undriven = sorted(n for n in used if n not in driven)
-        if not self.allow_undriven:
-            self._reject_observable(undriven)
-        for net in undriven:
-            flat.names.append(blif.Names(inputs=[], output=net))
-        if undriven:
-            notice(f"{flat.path}: {len(undriven)} undriven net(s) tied to 0")
 
-    def _reject_observable(self, undriven: list[str]) -> None:
-        flat = self.flat
-        fanout: dict[str, list[str]] = {}
-        for names in flat.names:
-            for net in names.inputs:
-                fanout.setdefault(net, []).append(names.output)
-        sinks = {n: "primary output" for n in flat.outputs}
-        sinks.update({c.input: f"the D input of latch {show(c.output)}" for c in flat.latches})
-        seen: set[str] = set()
-        for source in undriven:
-            work = [source]
-            while work:
-                net = work.pop()
-                if net in sinks:
-                    raise EquivError(f"{flat.path}: undriven net {show(source)} reaches "
-                                     f"{sinks[net]} {show(net)}; pass --allow-undriven to "
-                                     "tie it to 0")
-                if net not in seen:
-                    seen.add(net)
-                    work.extend(fanout.get(net, []))
+def check_undriven(flat: Flat, allow_undriven: bool) -> None:
+    """Undriven nets that reach a primary output or a latch D input are an error (they
+    would silently become constants); with --allow-undriven, and for undriven nets that
+    only feed dangling logic, they are tied to 0 with a notice."""
+    driven = set(flat.inputs)
+    driven.update(c.output for c in flat.names)
+    driven.update(c.output for c in flat.latches)
+    used: dict[str, None] = dict.fromkeys(flat.outputs)
+    for names in flat.names:
+        used.update(dict.fromkeys(names.inputs))
+    used.update(dict.fromkeys(c.input for c in flat.latches))
+    undriven = sorted(n for n in used if n not in driven)
+    if not allow_undriven:
+        _reject_observable(flat, undriven)
+    for net in undriven:
+        flat.names.append(blif.Names(inputs=[], output=net))
+    if undriven:
+        notice(f"{flat.path}: {len(undriven)} undriven net(s) tied to 0")
+
+
+def _reject_observable(flat: Flat, undriven: list[str]) -> None:
+    fanout: dict[str, list[str]] = {}
+    for names in flat.names:
+        for net in names.inputs:
+            fanout.setdefault(net, []).append(names.output)
+    sinks = {n: "primary output" for n in flat.outputs}
+    sinks.update({c.input: f"the D input of latch {show(c.output)}" for c in flat.latches})
+    seen: set[str] = set()
+    for source in undriven:
+        work = [source]
+        while work:
+            net = work.pop()
+            if net in sinks:
+                raise EquivError(f"{flat.path}: undriven net {show(source)} reaches "
+                                 f"{sinks[net]} {show(net)}; pass --allow-undriven to "
+                                 "tie it to 0")
+            if net not in seen:
+                seen.add(net)
+                work.extend(fanout.get(net, []))
 
 
 def show(net: str) -> str:
@@ -436,9 +434,15 @@ def show(net: str) -> str:
 
 
 def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
-            cut: bool = True, normalize: bool = True) -> Flat:
-    """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected."""
-    return _Flattener(netlist, strict_init, allow_undriven, cut, normalize).run()
+            cut: bool = True, normalize: bool = True, check: bool = True) -> Flat:
+    """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
+
+    ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
+    black-box mismatches between the two files are reported first."""
+    flat = _Flattener(netlist, strict_init, cut, normalize).run()
+    if check:
+        check_undriven(flat, allow_undriven)
+    return flat
 
 
 def _widths(box: BlackBox) -> dict[str, int]:
@@ -673,8 +677,10 @@ def _io_mismatch(a: tuple[set[str], set[str]], b: tuple[set[str], set[str]]) -> 
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
-                     not args.no_io_normalize) for n in nets]
+                     not args.no_io_normalize, check=False) for n in nets]
     match_blackboxes(flats)
+    for flat in flats:
+        check_undriven(flat, args.allow_undriven)
     cuts = sum(len(f.blackboxes) for f in flats)
     if cuts:
         notice(f"{cuts // 2} black-box instance(s) cut: outputs are free inputs shared by both "
