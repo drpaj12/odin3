@@ -16,7 +16,8 @@ and after every pass), under memcap, and requires:
 On success it prints ``opt-run: ok: iterations max=K opt-runs=N`` (the largest K of the two ``opt``
 runs of the script, and how many ``opt`` runs reported one). Exit codes: 0 ok; 1 a check failed;
 2 usage, or Odin III failed to start; 3 the child crashed (a signal or
-a memcap kill) or timed out (elab-sweep marks it ``hard``: never an expected failure); 77 skipped (an ASan child and no systemd-run).
+a memcap kill) or timed out (elab-sweep marks it ``hard``: never an expected failure); 77
+skipped (an ASan child and no systemd-run).
 """
 
 from __future__ import annotations

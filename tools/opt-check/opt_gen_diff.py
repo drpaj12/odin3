@@ -4,7 +4,7 @@ plan Task 18).
 Usage::
 
     opt-gen-diff --odin3 O --yosys Y --seeds A..B [--yosys-069 Y2] [--script S]...
-                 [--jobs 1] [--mem-cap C] [--work DIR]
+                 [--expect-structural FILE] [--jobs 1] [--mem-cap C] [--work DIR]
 
 For each seed N in A..B, ``verilog_gen --opt`` (``opt_profile.generate``) writes
 ``DIR/seedN/seedN.v`` (the module is always ``t``), then, for each ``S`` (default ``phase2`` and
@@ -19,10 +19,15 @@ common lowering (``opt_diff.Diff``; the step numbers are §20.3's). Every seed's
   (the same behaviour in other cells or another order: a spec 17 row, or a rule one side lacks);
   if only Yosys's result is refined by Odin III's, Odin III resolved an x that Yosys kept
   (``refines only``). Both are reported with their rule counters and counted, and neither fails a
-  seed by itself: unlike a micro there is no ``diff_expect.txt`` line for a generated file. The run
-  fails when more than ``MAX_STRUCTURAL`` of its (seed, script) pairs are structural.
-- A Yosys child that crashes or times out is an ``oracle crash``: counted and shown, never a
-  failure; an Odin III child that fails is a failure.
+  seed by itself. With ``--expect-structural FILE`` (``tests/opt/gen_structural_expect.txt``: one
+  ``SEED SCRIPT STEP | reason`` line per structural pair) a structural pair that is not listed
+  fails the run, and a listed pair that no longer differs is reported as stale. Without the file
+  (a long run over many seeds, for which no list is kept) the run fails when more than
+  ``MAX_STRUCTURAL`` (15%, about 1.25 times the 9-16% seen on seeds 1..200) of its pairs are
+  structural.
+- A Yosys child that crashes or times out is an ``oracle crash``: counted and shown, and the run
+  fails when more than ``MAX_CRASH`` (10%) of its pairs crash (so one where every Yosys child
+  crashes fails); an Odin III child that fails is a failure.
 - ``--yosys-069 Y2`` (the nightly drift job): every (seed, script) also runs against Yosys 0.69; a
   different set of differing steps is ``oracle drift``, reported and counted, never a failure.
 
@@ -52,12 +57,35 @@ GIB = 1 << 30
 DEFAULT_CAP = 2 * GIB
 TOP = "t"
 DEFAULT_SCRIPTS = ("phase2", "opt -full")
-MAX_STRUCTURAL = 0.25 # of the (seed, script) pairs
+MAX_STRUCTURAL = 0.15  # of the (seed, script) pairs, when no expected list is given
+MAX_CRASH = 0.10  # of the (seed, script) pairs: Yosys children that crashed or timed out
 _RANGE = re.compile(r"(\d+)\.\.(\d+)")
 
 
 class GenDiffError(Exception):
     """A usage or setup error (exit 2)."""
+
+
+def load_expected(path: Path) -> dict[tuple[int, str, str], str]:
+    """``(seed, script slug, step) -> reason`` from an expected-structural file."""
+    table: dict[tuple[int, str, str], str] = {}
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise GenDiffError(f"--expect-structural {path}: {exc.strerror}") from exc
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        head, bar, reason = line.partition("|")
+        parts = head.split()
+        if not bar or not reason.strip() or len(parts) < 3 or not parts[0].isdigit():
+            raise GenDiffError(f"{path}:{number}: expected `SEED SCRIPT STEP | reason`")
+        table[(int(parts[0]), slug_of(" ".join(parts[1:-1])), parts[-1])] = reason.strip()
+    return table
+
+
+def slug_of(name: str) -> str:
+    return opt_diff.script_named(name).slug
 
 
 @dataclass
@@ -153,8 +181,9 @@ def drift_against(args: argparse.Namespace, files: Sequence[str], seed_dir: Path
     return f"0.55 differs in {list(steps) or 'nothing'}, 0.69 in {list(other) or 'nothing'}"
 
 
-def report(seed: int, source: Path, pairs: Sequence[Pair]) -> bool:
-    """Prints a seed's lines; True when it failed."""
+def report(seed: int, source: Path, pairs: Sequence[Pair],
+           expected: dict[tuple[int, str, str], str] | None = None) -> bool:
+    """Prints a seed's lines; True when it failed (an unlisted structural pair is a failure)."""
     failed = False
     for pair in pairs:
         tag = f"seed {seed} [{pair.script}]"
@@ -174,6 +203,12 @@ def report(seed: int, source: Path, pairs: Sequence[Pair]) -> bool:
             print(f"{tag}: {'; '.join(notes) if notes else 'ok'}")
             if pair.structural:
                 print(f"  counters {pair.counters}")
+            if expected is not None:
+                for step in pair.structural:
+                    if (seed, pair.script, step) not in expected:
+                        print(f"{tag}: FAIL unexpected structural {step}: not in the expected "
+                              f"list; file kept: {source}")
+                        failed = True
     return failed
 
 
@@ -188,6 +223,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="phase2 or an opt spelling; repeatable (default phase2, opt -full)")
     ap.add_argument("--mem-cap", type=opt_equiv.parse_size, default=DEFAULT_CAP, metavar="SIZE",
                     help="per child (default 2G)")
+    ap.add_argument("--expect-structural", type=Path, metavar="FILE",
+                    help="the structural (seed, script, step) pairs allowed; any other fails")
     ap.add_argument("--jobs", type=int, default=1, help="1 (the only value: one tool at a time)")
     ap.add_argument("--work", type=Path, help="keep every seed's files here")
     return ap.parse_args(argv)
@@ -196,6 +233,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
     profile = load_profile()
     scripts = [opt_diff.script_named(n) for n in (args.script or list(DEFAULT_SCRIPTS))]
+    expected = load_expected(args.expect_structural) if args.expect_structural else None
+    seen: set[tuple[int, str, str]] = set()
     totals = {"failed": 0, "pairs": 0, "structural": 0, "drift": 0, "crash": 0}
     for seed in seeds:
         seed_dir = work / f"seed{seed}"
@@ -203,7 +242,8 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
         source = seed_dir / f"seed{seed}.v"
         source.write_text(profile.generate(seed).text, encoding="utf-8")
         pairs = [run_pair(args, [str(source)], seed_dir, s) for s in scripts]
-        totals["failed"] += report(seed, source, pairs)
+        totals["failed"] += report(seed, source, pairs, expected)
+        seen |= {(seed, p.script, step) for p in pairs for step in p.structural}
         totals["pairs"] += len(pairs)
         totals["structural"] += sum(bool(p.structural) for p in pairs)
         totals["drift"] += sum(bool(p.drift) for p in pairs)
@@ -211,7 +251,15 @@ def sweep(args: argparse.Namespace, seeds: range, work: Path) -> int:
     print(f"{TOOL}: {len(seeds)} seeds, {totals['pairs']} runs, {totals['failed']} seeds failed, "
           f"{totals['structural']} structural, {totals['drift']} oracle drift, "
           f"{totals['crash']} oracle crashes")
-    if totals["structural"] > MAX_STRUCTURAL * totals["pairs"]:
+    if expected is not None:
+        for key in sorted(k for k in expected if k[0] in seeds and k not in seen):
+            print(f"{TOOL}: stale: seed {key[0]} [{key[1]}] {key[2]} is listed but no longer "
+                  f"structural")
+    if totals["crash"] > MAX_CRASH * totals["pairs"]:
+        print(f"{TOOL}: FAIL: {totals['crash']} of {totals['pairs']} runs had a Yosys crash "
+              f"(the limit is {MAX_CRASH:.0%})")
+        return EXIT_FAIL
+    if expected is None and totals["structural"] > MAX_STRUCTURAL * totals["pairs"]:
         print(f"{TOOL}: FAIL: {totals['structural']} of {totals['pairs']} runs structural "
               f"(the limit is {MAX_STRUCTURAL:.0%})")
         return EXIT_FAIL
@@ -235,7 +283,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"{TOOL}: seeds {args.seeds}, files under {work}")
     try:
         return sweep(args, seeds, work)
-    except opt_equiv.ToolError as exc:
+    except (opt_equiv.ToolError, GenDiffError) as exc:
         print(f"{TOOL}: error: {exc}", file=sys.stderr)
         return EXIT_USAGE
     except memcap.CapUnavailable as exc:

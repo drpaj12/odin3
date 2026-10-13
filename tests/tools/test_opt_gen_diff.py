@@ -154,7 +154,7 @@ class GenDiffTest(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("histogram: structural; identity: structural", out)
         self.assertIn("0 seeds failed, 10 structural", out)
-        self.assertIn("runs structural (the limit is 25%)", out)
+        self.assertIn("runs structural (the limit is 15%)", out)
         self.assertTrue(all("odin.il:yosys.il" in c for k in FakeDiff.checkers for c in k.calls))
 
     def test_a_one_way_refinement_is_named(self) -> None:
@@ -162,7 +162,8 @@ class GenDiffTest(unittest.TestCase):
         FakeDiff.plan = {("yosys55", "phase2"): ("identity",)}
         code, out, _ = self.run_tool("--seeds", "1..1", "--script", "phase2",
                                      "--script", "opt -full", "--script", "opt -fast",
-                                     "--script", "opt -fast -noff")
+                                     "--script", "opt -fast -noff", "--expect-structural",
+                                     self.expect_file("1 phase2 identity | listed"))
         self.assertEqual(code, 0, out)
         self.assertIn("seed 1 [phase2]: identity: refines only", out)
 
@@ -174,12 +175,60 @@ class GenDiffTest(unittest.TestCase):
         self.assertIn("seed 1 [phase2]: oracle crash: yosys exit -11: boom", out)
         self.assertIn("seed 1 [full]: FAIL error: odin3 exit 1: bad", out)
 
+    def test_every_yosys_child_crashing_fails(self) -> None:
+        boom = opt_equiv.ToolError("yosys exit -11: boom")
+        FakeDiff.plan = {("yosys55", "phase2"): boom, ("yosys55", "full"): boom}
+        code, out, _ = self.run_tool("--seeds", "1..3")
+        self.assertEqual(code, 1, out)
+        self.assertIn("0 seeds failed", out)
+        self.assertIn("6 of 6 runs had a Yosys crash (the limit is 10%)", out)
+
+    def test_a_few_crashes_under_the_limit_pass(self) -> None:
+        FakeDiff.plan = {("yosys55", "phase2"): opt_equiv.ToolError("yosys timed out")}
+        code, out, _ = self.run_tool("--seeds", "1..1", "--script", "phase2",
+                                     *("--script", "opt -full") * 9)
+        self.assertEqual(code, 0, out)  # 10 pairs, 1 crash: exactly the 10% limit
+        self.assertIn("1 oracle crashes", out)
+        self.assertNotIn("had a Yosys crash", out)
+
+    def expect_file(self, *lines: str) -> str:
+        path = Path(self._tmp.name) / "expect.txt"
+        path.write_text("# header\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        return str(path)
+
+    def test_an_unlisted_structural_pair_fails_and_a_listed_one_passes(self) -> None:
+        FakeDiff.plan = {("yosys55", "phase2"): ("identity",)}
+        listed = self.expect_file("1 phase2 identity | cmpzero odin3 0 yosys 2")
+        code, out, _ = self.run_tool("--seeds", "1..2", "--expect-structural", listed)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("seed 1 [phase2]: FAIL", out)
+        self.assertIn("seed 2 [phase2]: FAIL unexpected structural identity", out)
+        self.assertNotIn("(the limit is", out)
+
+    def test_a_listed_pair_that_is_gone_is_stale_and_a_bad_list_is_a_usage_error(self) -> None:
+        stale = self.expect_file("1 opt -full identity | gone")
+        code, out, _ = self.run_tool("--seeds", "1..1", "--expect-structural", stale)
+        self.assertEqual(code, 0, out)
+        self.assertIn("stale: seed 1 [full] identity", out)
+        bad = self.expect_file("1 phase2 identity")
+        code, _, err = self.run_tool("--seeds", "1..1", "--expect-structural", bad)
+        self.assertEqual(code, 2)
+        self.assertIn("expected `SEED SCRIPT STEP | reason`", err)
+
+    def test_the_checked_in_list_parses(self) -> None:
+        table = opt_gen_diff.load_expected(
+            Path(__file__).resolve().parents[1] / "opt" / "gen_structural_expect.txt")
+        self.assertIn((153, "phase2", "histogram"), table)
+        self.assertIn((100, "phase2", "histogram"), table)
+
     def test_drift_is_a_difference_between_0_55_and_0_69(self) -> None:
         FakeDiff.plan = {("yosys069", "phase2"): ("identity",), ("yosys55", "full"): ("identity",),
                          ("yosys069", "full"): ("identity",)}
         code, out, _ = self.run_tool("--seeds", "1..1", "--yosys-069", "/bin/yosys069",
                                      "--script", "phase2", "--script", "opt -full",
-                                     "--script", "opt -fast", "--script", "opt -fast -noff")
+                                     "--script", "opt -fast", "--script", "opt -fast -noff",
+                                     "--expect-structural",
+                                     self.expect_file("1 opt -full identity | listed"))
         self.assertIn("seed 1 [phase2]: oracle drift: 0.55 differs in nothing, 0.69 in "
                       "['identity']", out)
         self.assertIn("seed 1 [full]: identity: structural", out)  # alike on both: no drift

@@ -1947,7 +1947,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         odin3_add_sweep_test(opt_gen_vs_yosys LABEL sweep
             COMMAND ${PROJECT_SOURCE_DIR}/tools/opt-check/opt-gen-diff
                     --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
-                    --seeds 1..200 --jobs 1 --mem-cap 3G --work ${PROJECT_BINARY_DIR}/opt_gen_work)
+                    --seeds 1..200 --jobs 1 --mem-cap 3G
+                    --expect-structural ${PROJECT_SOURCE_DIR}/tests/opt/gen_structural_expect.txt
+                    --work ${PROJECT_BINARY_DIR}/opt_gen_work)
         # The 31 VTR and 33 Koios benchmarks as one set by size, when VTR_ROOT is set at
         # configure time (also label nightly). lenet.v is listed `xl` in vtr_expect_fail.txt: the
         # 6G sweeps skip it, and the sweep-xl CTests run exactly it, alone, 8 GiB per child.

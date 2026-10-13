@@ -868,6 +868,38 @@ static const char K_IDENTWRT_MIXED[] = "module \\m\n"
                                        "  end\n"
                                        "end\n";
 
+/* Mixed-sign $add of 0 (A signed, 3 bits, reaching 7) and the fine.addsub case of #55:
+ * $sub with A unsigned, B signed 4'1010. */
+static const char K_MIXED_ADD[] = "module \\m\n"
+                                  "  wire width 3 input 1 \\a\n"
+                                  "  wire width 7 output 2 \\y\n"
+                                  "  cell $add \\c\n"
+                                  "    parameter \\A_SIGNED 1\n"
+                                  "    parameter \\B_SIGNED 0\n"
+                                  "    parameter \\A_WIDTH 3\n"
+                                  "    parameter \\B_WIDTH 3\n"
+                                  "    parameter \\Y_WIDTH 7\n"
+                                  "    connect \\A \\a\n"
+                                  "    connect \\B 3'000\n"
+                                  "    connect \\Y \\y\n"
+                                  "  end\n"
+                                  "end\n";
+
+static const char K_FINE_MIXED_SUB[] = "module \\m\n"
+                                       "  wire width 4 input 1 \\a\n"
+                                       "  wire width 4 output 2 \\y\n"
+                                       "  cell $sub \\c\n"
+                                       "    parameter \\A_SIGNED 0\n"
+                                       "    parameter \\B_SIGNED 1\n"
+                                       "    parameter \\A_WIDTH 4\n"
+                                       "    parameter \\B_WIDTH 4\n"
+                                       "    parameter \\Y_WIDTH 4\n"
+                                       "    connect \\A \\a\n"
+                                       "    connect \\B 4'1010\n"
+                                       "    connect \\Y \\y\n"
+                                       "  end\n"
+                                       "end\n";
+
 static const char K_IDENTWRT_MUL[] = "module \\m\n"
                                      "  wire width 4 input 1 \\a4\n"
                                      "  wire width 4 output 2 \\y\n"
@@ -1962,6 +1994,18 @@ static void test_identwrt_leaves_a_mixed_sign_cell(void) {
     build_run(K_IDENTWRT_MIXED);
     TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
     TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+}
+
+/* §17 #55 (M2): a mixed-sign $add of 0 is left alone too (the $or case is I1's, still open), and so
+ * is fine.addsub's $sub with a signed constant B. */
+static void test_mixed_sign_add_or_and_fine_addsub_unchanged(void) {
+    build_run(K_MIXED_ADD);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$add"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_IDENTWRT_A));
+    fx.opts.fine = true;
+    build_run(K_FINE_MIXED_SUB);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$sub"));
+    TEST_ASSERT_EQUAL_UINT32(0, rule(ODIN3_OPT_RULE_FINE_ADDSUB));
 }
 
 /* -keepdc has no consume_x round: a + 0 stays (identwrt is consume_x only) */
@@ -4203,6 +4247,7 @@ static void run_arith_tests(void) {
     RUN_TEST(test_identwrt);
     RUN_TEST(test_identwrt_needs_consume_x);
     RUN_TEST(test_identwrt_leaves_a_mixed_sign_cell);
+    RUN_TEST(test_mixed_sign_add_or_and_fine_addsub_unchanged);
     RUN_TEST(test_pow_shift_two);
     RUN_TEST(test_pow_shift_eight);
     RUN_TEST(test_pow_overflow);

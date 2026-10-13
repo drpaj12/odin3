@@ -458,7 +458,8 @@ def run_proc_diff(cfg: Config, item: Item, cap: int) -> Outcome:
 
 
 def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
-    """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, 3 (opt-run) a crash or timeout: hard."""
+    """opt-equiv, opt-diff or opt-run on the file: exit 0 passes, 1 is a difference, and 3
+    (opt-run) a crash or timeout: hard."""
     start = time.monotonic()
     assert cfg.yosys is not None or cfg.opt_tool == "opt-run"
     top = top_for(item, cfg.tops, cfg.golden_root)
