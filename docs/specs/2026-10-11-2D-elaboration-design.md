@@ -395,6 +395,21 @@ hand-checked against IEEE 1364-2005 (0 disagreements; the defparam order follows
 documented). The expected-failure list is 14 rows (110 rows equivalent); its entries carry the expected
 failure text.
 
+v4.26 (2026-10-13; 2D Task 26, agent defaults). (1) §14.4: `project-fixtures compare --with-frontend --yosys Y
+--equiv-check E` runs the bridge on every positive phase-2 Verilog case and format (odin3's `read_project;
+read_verilog --nolatches; write_rtlil`, the shared Yosys back end, `equiv-check` against `ref.blif`). A
+non-equivalent result reruns `ref.cmd` with the 0.55 given: if that disagrees with `ref.blif` the case is
+reported `oracle drift`, if Yosys dies of a signal there it is `oracle crash`, neither is a failure; else it is
+a 2D failure. (2) §14.5: `elab-sweep` (`tools/elab-check/elab-sweep`, library `elab_sweep`) is the one driver
+of `verilog_micro_elab`, `elab_equiv_micro`, the VTR sweeps and `--bench`; the micros that fail before the
+bridge are listed in `micro_expect_fail.txt` (71 entries: the 50 of 2C's list, the micros 2C parses but whose
+elaboration is rejected, none of which has a Parmys golden), the ones the bridge finds not equivalent in
+`micro_equiv_expect_fail.txt` (agent default: a separate file, since `equiv_expect_fail.txt` holds coverage-row
+names). A reason that starts with `xl` marks a file for the oversized run (skipped by the 6G sweeps, run alone
+with `--xl`). `elab-equiv` exits 3 (`oracle crash`) when Yosys dies of a signal on the source (0.55 segfaults
+on recursive instantiation, where 2D reports "recursive instantiation of 'top'") and reports a child killed by
+its cap as `out of memory (cap 4G)`. (3) `micro-top` follows nested golden groups (`keywords/assign/assign_wide`).
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog

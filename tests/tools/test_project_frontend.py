@@ -55,8 +55,15 @@ open(target, "w").write(text)
 """
 
 FAKE_EQUIV = """#!{python}
-import sys
-a, b = (open(p).read() for p in sys.argv[1:3])
+import os, sys
+args = sys.argv[1:]
+if "--timeout" in args:
+    i = args.index("--timeout")
+    del args[i:i + 2]
+if os.environ.get("FAKE_EQUIV_TIMEOUT"):
+    print("equiv-check: error: running ABC failed: timed out after 30 seconds", file=sys.stderr)
+    sys.exit(2)
+a, b = (open(p).read() for p in args[:2])
 if a == b:
     print("equiv-check: equivalent")
     sys.exit(0)
@@ -144,6 +151,24 @@ class FrontendBridgeTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("ocrash pos o3proj (bridge)", out)
         self.assertIn("1 oracle crash", out)
+
+    def test_a_comparison_past_the_abc_limit_is_skipped_not_failed(self) -> None:
+        code, out = self.compare("--equiv-timeout", "30", env={"FAKE_EQUIV_TIMEOUT": "1"})
+        self.assertEqual(code, 0, out)
+        self.assertIn("skip   pos o3proj (bridge)", out)
+        self.assertIn("equiv-check timed out after 30 s", out)
+        self.assertIn("bridge 0 ok, 0 failed, 0 oracle drift, 0 oracle crash, 1 skipped", out)
+
+    def test_a_front_end_negative_of_a_later_phase_is_skipped(self) -> None:
+        neg = self.root / "neg_cycle"
+        neg.mkdir()
+        (neg / "expected.json").write_text(json.dumps({
+            "description": "x", "features": [], "phase": 5, "formats": ["o3proj"],
+            "error": {"kind": "dependency_cycle", "at": None, "names": ["a"]}}))
+        code, out = self.compare("--case", "neg_cycle")
+        self.assertIn("skip neg_cycle o3proj (needs the phase 5 front end)", out)
+        self.assertEqual(code, 1)  # nothing else was run: the harness says so
+        self.assertIn("no case was run", out)
 
     def test_odin3_failing_on_the_project_is_a_failure(self) -> None:
         code, out = self.compare(env={"FAKE_ODIN3_RC": "1"})

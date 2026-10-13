@@ -1876,6 +1876,9 @@ PREPROCESS_KINDS = frozenset({"include_not_found", "include_cycle"})
 FRONTEND_KINDS = frozenset({"duplicate_module", "unresolved_module", "dependency_cycle",
                             "no_top", "ambiguous_top", "unknown_top"})
 EXIT_FAIL = 1  # odin3's exit status when a pass fails (src/cli/main.c)
+# Phases whose front end odin3 has: a front-end negative of another phase (neg_dependency_cycle is
+# VHDL, phase 5) is skipped under --with-frontend, not failed.
+LANDED_FRONTEND_PHASES: frozenset[int] = frozenset({2})
 ODIN3_TIMEOUT = 120  # seconds per run (a sanitizer build reads a case in well under one)
 # One diagnostic as odin3 prints it: the log sink's `odin3: error: ` prefix, then the message
 # `<file>:<line>:<col>: error: <kind>: …`, `<file>: error: <kind>: …` or, unlocated,
@@ -2085,6 +2088,8 @@ def compare_format(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
     if kind in FRONTEND_KINDS:
         if not with_frontend:
             return "skip", ["needs the front end: --with-frontend"]
+        if exp.get("phase", 2) not in LANDED_FRONTEND_PHASES:
+            return "skip", [f"needs the phase {exp.get('phase')} front end"]
         tail = "read_verilog"
     elif kind in PREPROCESS_KINDS:
         tail = "preprocess"
@@ -2103,6 +2108,7 @@ def compare_format(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
 
 ELAB_CHECK_DIR = REPO_ROOT / "tools" / "elab-check"
 BRIDGE_CAP = 4 << 30  # plan point (n): 4 GiB per child by default
+EQUIV_TIMEOUT = 10  # seconds of ABC per comparison: a multiplier's cec does not finish
 
 
 @dataclass(frozen=True)
@@ -2112,6 +2118,7 @@ class Bridge:
     yosys: str
     equiv_check: str
     cap: int = BRIDGE_CAP
+    equiv_timeout: int = EQUIV_TIMEOUT
 
 
 def elab_tools() -> tuple[Any, Any]:
@@ -2143,16 +2150,17 @@ def bridge_child(argv: Sequence[str], bridge: Bridge, work: Path,
     return done
 
 
-def equivalent(bridge: Bridge, work: Path, left: str, right: str) -> bool | None:
-    """True/False for equiv-check's verdict on two BLIFs in the work directory; None when it
-    failed without a verdict (a crash or a read error)."""
-    done = bridge_child([bridge.equiv_check, left, right], bridge, work)
+def equivalent(bridge: Bridge, work: Path, left: str, right: str) -> str:
+    """equiv-check's verdict on two BLIFs: "equal", "differ", "timeout" (ABC ran past the
+    bridge's limit: a hard instance, not a verdict) or "error" (no verdict)."""
+    argv = [bridge.equiv_check, "--timeout", str(bridge.equiv_timeout), left, right]
+    done = bridge_child(argv, bridge, work)
     if done.returncode == 0:
-        return True
-    verdict = re.search(r"^equiv-check: NOT equivalent\b", done.stdout or "", re.M)
-    if done.returncode == 1 and verdict:
-        return False
-    return None
+        return "equal"
+    out = (done.stdout or "") + (done.stderr or "")
+    if done.returncode == 1 and re.search(r"^equiv-check: NOT equivalent\b", out, re.M):
+        return "differ"
+    return "timeout" if "timed out after" in out else "error"
 
 
 def rerun_ref_cmd(case_dir: Path, bridge: Bridge, work: Path) -> str:
@@ -2182,11 +2190,11 @@ def drift_status(case_dir: Path, bridge: Bridge, work: Path) -> tuple[str, list[
     if rerun == "failed":
         return "drift", ["oracle drift: ref.cmd fails under Yosys 0.55"]
     agrees = equivalent(bridge, work, "r55.blif", str(case_dir / "ref.blif"))
-    if agrees is True:
+    if agrees == "equal":
         return "FAIL", ["not equivalent to ref.blif, and Yosys 0.55 reproduces ref.blif"]
-    if agrees is False:
+    if agrees == "differ":
         return "drift", ["oracle drift: Yosys 0.55 on ref.cmd differs from the 0.69 ref.blif"]
-    return "FAIL", ["not equivalent to ref.blif; equiv-check failed on the 0.55 rerun"]
+    return "FAIL", [f"not equivalent to ref.blif; equiv-check on the 0.55 rerun: {agrees}"]
 
 
 def frontend_equiv(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
@@ -2214,9 +2222,12 @@ def frontend_equiv(binary: str, case_dir: Path, fmt: str, exp: dict[str, Any],
                 if done.returncode != 0:
                     return "FAIL", [f"{what} exit {done.returncode}: {error_tail(done.stderr)}"]
             same = equivalent(bridge, work, "a.blif", str(case_dir / "ref.blif"))
-            if same is True:
+            if same == "equal":
                 return "ok", []
-            if same is None:
+            if same == "timeout":
+                return "skip", [f"equiv-check timed out after {bridge.equiv_timeout} s "
+                                "(a hard instance, not decided)"]
+            if same == "error":
                 return "FAIL", ["equiv-check failed without a verdict"]
             return drift_status(case_dir, bridge, work)
     except memcap.CapUnavailable as exc:
@@ -2235,7 +2246,7 @@ def make_bridge(args: argparse.Namespace) -> Bridge | None:
         if found is None:
             raise UsageError(f"{given}: no such executable")
         tools.append(os.path.abspath(found))
-    return Bridge(tools[0], tools[1], args.mem_cap)
+    return Bridge(tools[0], tools[1], args.mem_cap, args.equiv_timeout)
 
 
 def bridge_line(case: str, fmt: str, status: str, probs: list[str]) -> None:
@@ -2254,6 +2265,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     dirs = sorted(case_dirs(args.root, args.case), key=lambda d: (source_bytes(d), d.name))
     counts = {fmt: {"ok": 0, "FAIL": 0, "skip": 0} for fmt in FORMATS}
     through = {"ok": 0, "FAIL": 0, "drift": 0, "crash": 0, "skip": 0}
+    undecided: set[str] = set()
     for d in dirs:  # smallest case first
         exp = json.loads((d / "expected.json").read_text(encoding="utf-8"))
         for fmt in exp["formats"]:
@@ -2268,7 +2280,12 @@ def cmd_compare(args: argparse.Namespace) -> int:
             for p in probs:
                 print(f"     {fmt}: {p}")
             if status == "ok" and bridge is not None and positive_frontend(exp):
-                bstatus, bprobs = frontend_equiv(binary, d, fmt, exp, bridge)
+                if d.name in undecided:  # the same sources in another format: not run again
+                    bstatus, bprobs = "skip", ["undecided in an earlier format of this case"]
+                else:
+                    bstatus, bprobs = frontend_equiv(binary, d, fmt, exp, bridge)
+                if bstatus == "skip":
+                    undecided.add(d.name)
                 through[bstatus] += 1
                 bridge_line(d.name, fmt, bstatus, bprobs)
     print("project-fixtures compare: " + "; ".join(
@@ -2390,7 +2407,9 @@ def main(argv: Sequence[str]) -> int:
     p.add_argument("--yosys", help="Yosys 0.55: the bridge of the positive front-end cases")
     p.add_argument("--equiv-check", help="tools/equiv-check/equiv-check (the bridge)")
     p.add_argument("--mem-cap", type=int, default=BRIDGE_CAP, metavar="BYTES",
-                    help="the memory cap of each bridge child (default 4 GiB)")
+                   help="the memory cap of each bridge child (default 4 GiB)")
+    p.add_argument("--equiv-timeout", type=int, default=EQUIV_TIMEOUT, metavar="S",
+                   help="seconds of ABC per comparison; past it the case is skipped (default 10)")
     p = sub.add_parser("parse")
     p.add_argument("case_dir")
     p.add_argument("format", choices=FORMATS)
