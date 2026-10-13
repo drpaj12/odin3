@@ -289,7 +289,8 @@ def normalise_file(path: Path, ints: frozenset[str]) -> Path:
 # --------------------------------------------------------------------------- children
 
 
-def _load_module(name: str, path: Path) -> ModuleType | None:
+def load_module(name: str, path: Path) -> ModuleType | None:
+    """Imports the Python file at path as module name; None when it is missing or unloadable."""
     if not path.is_file():
         return None
     spec = importlib.util.spec_from_file_location(name, path)
@@ -338,7 +339,7 @@ class Runner:
 
     def run(self, argv: list[str]) -> Child:
         if self.memcap is None:
-            self.memcap = _load_module("memcap", MEMCAP_PY)
+            self.memcap = load_module("memcap", MEMCAP_PY)
             if self.memcap is None:
                 raise ProcDiffError("tools/elab-check/memcap.py is missing (2D-6)")
         try:
@@ -476,7 +477,7 @@ def _walk(paths: Sequence[str]) -> list[Item]:
 
 def collect(paths: Sequence[str]) -> list[Item]:
     """Every file, smallest first: 2D's elab_sweep.collect when importable, else os.stat."""
-    sweep = _load_module("elab_sweep", ELAB_SWEEP_PY)
+    sweep = load_module("elab_sweep", ELAB_SWEEP_PY)
     if sweep is None or not hasattr(sweep, "collect"):
         return _walk(paths)
     roots = [Path(p) for p in paths if Path(p).is_dir()]

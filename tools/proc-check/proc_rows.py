@@ -6,8 +6,7 @@ Usage::
     proc-rows diff    --odin3 O --yosys Y [--rows DIR]
     proc-rows bridge  --odin3 O --yosys Y --equiv-check E [--rows DIR]
 
-The brief's ``write_rtlil -`` is not used: odin3's ``write_rtlil -`` writes a file named ``-``
-(it is not standard output), so each run writes ``out.il`` in a temporary directory instead.
+Each lowering run writes its RTLIL to standard output (``write_rtlil -``).
 
 ``rows.txt`` lists ``<slug> comb=<0|1> err=<0|1>``; each row is ``<slug>.v`` in the rows directory
 (the default is ``tests/proc/rows`` of this checkout). Rows run smallest file first. Every command
@@ -21,8 +20,9 @@ runs with the rows directory as its working directory, so a diagnostic names ``<
   one ``$pmux`` of ``WIDTH`` 8 (2D Task 22's chunk test carried end to end, point (g)).
 - ``diff`` (CTest ``proc_diff_rows``, Yosys 0.55): ``proc-diff`` per non-error row in both latch
   modes (``--nolatches`` and the default) and in both input modes: ``--no-trio``, and the trio
-  once ``opt`` exists (``O -p "read_verilog F; opt -fast"`` runs). ``diff_expect.txt`` names the
-  expected differences. A failing row is rerun with ``--bisect`` and the result printed (18.4).
+  once ``opt`` exists (``O -p "read_verilog F; opt -nodffe -nosdff"`` runs). ``diff_expect.txt``
+  names the expected differences. A failing row is rerun with ``--bisect`` and the result is
+  printed (18.4).
 - ``bridge`` (CTest ``proc_bridge_rows``, Yosys 0.55): ``elab-equiv --pass proc --async2sync
   --unmap-enables --top t`` per non-error row, ``--no-trio`` until ``opt`` exists, expecting exit
   0. A row in ``bridge_expect.txt`` (``slug|text|reason``: what the oracle cannot check) must exit
@@ -37,11 +37,12 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+
+import proc_diff
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -68,14 +69,17 @@ class Row:
     err: bool
 
 
-def load_memcap() -> ModuleType:
-    """2D's ``memcap`` module (tools/elab-check), imported on first use."""
-    path = str(ROOT / "tools" / "elab-check")
-    if path not in sys.path:
-        sys.path.insert(0, path)
-    import memcap
+_MEMCAP: list[ModuleType] = []
 
-    return memcap
+
+def load_memcap() -> ModuleType:
+    """2D's ``memcap`` module (tools/elab-check), loaded once on first use (shared loader)."""
+    if not _MEMCAP:
+        module = proc_diff.load_module("memcap", proc_diff.MEMCAP_PY)
+        if module is None:
+            raise RowsError("tools/elab-check/memcap.py is missing (2D-6)")
+        _MEMCAP.append(module)
+    return _MEMCAP[0]
 
 
 def parse_rows(text: str) -> list[Row]:
@@ -137,7 +141,6 @@ class Context:
         self.rows_dir = rows_dir
         self.odin3, self.yosys, self.equiv = odin3, yosys, equiv
         self.failures: list[str] = []
-        self.tmp = tempfile.TemporaryDirectory(prefix="proc-rows-")
 
     def run(self, argv: Sequence[str]) -> tuple[int, str, str]:
         memcap = load_memcap()
@@ -165,30 +168,30 @@ class Context:
             return ""
 
     def trio_available(self) -> bool:
-        """True once ``opt`` exists (2F-5): ``read_verilog F; opt -fast`` runs."""
+        """True once ``opt`` exists (2F-5): ``read_verilog F; opt -nodffe -nosdff`` (the trio's
+        own flags) runs. A skipped trio is announced, so it cannot stay off unseen."""
         first = next(r for r in load_rows(self.rows_dir) if not r.err)
-        code, _, _ = self.odin3_script(f"read_verilog {first.slug}.v; opt -fast")
+        code, _, err = self.odin3_script(f"read_verilog {first.slug}.v; opt -nodffe -nosdff")
+        if code != 0:
+            reason = (err.strip().splitlines() or ["no output"])[-1]
+            print(f"{TOOL}: trio: skipped (opt -nodffe -nosdff exit {code}: {reason})")
         return code == 0
 
 
 def check_lowering(ctx: Context, row: Row, nolatches: bool) -> None:
     suffix = ".nolatches.il" if nolatches else ".il"
     flag = "--nolatches " if nolatches else ""
-    out_path = Path(ctx.tmp.name) / "out.il"
-    out_path.unlink(missing_ok=True)
-    code, _, err = ctx.odin3_script(f"read_verilog {flag}{row.slug}.v; proc --noopt; "
-                                    f"write_rtlil {out_path}")
+    code, out, err = ctx.odin3_script(f"read_verilog {flag}{row.slug}.v; proc --noopt; "
+                                      "write_rtlil -")
     name = f"{row.slug}{suffix}"
     if code != 0:
         ctx.fail(f"{name}: odin3 exited {code}: {err.strip().splitlines()[-1:]}")
-    elif not out_path.is_file() or out_path.read_text(encoding="utf-8") != ctx.read(name):
+    elif out != ctx.read(name):
         ctx.fail(f"{name}: odin3's write_rtlil differs from the golden")
 
 
 def check_error_row(ctx: Context, row: Row) -> None:
-    out_path = Path(ctx.tmp.name) / "out.il"
-    code, _, err = ctx.odin3_script(f"read_verilog {row.slug}.v; proc --noopt; "
-                                    f"write_rtlil {out_path}")
+    code, _, err = ctx.odin3_script(f"read_verilog {row.slug}.v; proc --noopt; write_rtlil -")
     if code == 0 or ERR_STATUS not in err:
         ctx.fail(f"{row.slug}: expected exit != 0 with '{ERR_STATUS}', got exit {code}")
     got, want = error_lines(err), ctx.read(f"{row.slug}.err")
@@ -295,8 +298,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except load_memcap().CapUnavailable as exc:
         print(f"{TOOL}: skipped: {exc}", file=sys.stderr)
         return EXIT_SKIP
-    finally:
-        ctx.tmp.cleanup()
     if ctx.failures:
         print(f"{TOOL}: {len(ctx.failures)} failure(s)")
         return EXIT_FAIL

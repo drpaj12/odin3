@@ -152,32 +152,28 @@ class HelperTest(unittest.TestCase):
             fake.write_text(
                 "#!/usr/bin/env python3\nimport sys\n"
                 "script = sys.argv[sys.argv.index('-p') + 1]\n"
-                "out = script.rsplit(' ', 1)[1]\n"
                 "if 'bad.v' in script:\n"
                 "    sys.stderr.write('odin3: error: bad.v:5:3: error: boom\\n'\n"
                 "                     'odin3: error: pass proc: failed: ODIN3_ERR_PARSE\\n')\n"
                 "    sys.exit(1)\n"
-                "open(out, 'w').write('module x\\n')\n", encoding="utf-8")
+                "sys.stdout.write('module x\\n')\n", encoding="utf-8")
             fake.chmod(0o755)
             (root / "ok.v").write_text("m", encoding="utf-8")
             (root / "bad.v").write_text("m", encoding="utf-8")
             (root / "ok.il").write_text("module x\n", encoding="utf-8")
             (root / "bad.err").write_text("bad.v:5:3: error: boom\n", encoding="utf-8")
             ctx = proc_rows.Context(root, str(fake))
-            try:
-                row_ok = proc_rows.Row("ok", False, False)
-                row_bad = proc_rows.Row("bad", False, True)
+            row_ok = proc_rows.Row("ok", False, False)
+            row_bad = proc_rows.Row("bad", False, True)
+            proc_rows.check_lowering(ctx, row_ok, False)
+            proc_rows.check_error_row(ctx, row_bad)
+            self.assertEqual(ctx.failures, [])
+            (root / "ok.il").write_text("module y\n", encoding="utf-8")
+            (root / "bad.err").write_text("bad.v:5:3: error: bam\n", encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
                 proc_rows.check_lowering(ctx, row_ok, False)
                 proc_rows.check_error_row(ctx, row_bad)
-                self.assertEqual(ctx.failures, [])
-                (root / "ok.il").write_text("module y\n", encoding="utf-8")
-                (root / "bad.err").write_text("bad.v:5:3: error: bam\n", encoding="utf-8")
-                with contextlib.redirect_stdout(io.StringIO()):
-                    proc_rows.check_lowering(ctx, row_ok, False)
-                    proc_rows.check_error_row(ctx, row_bad)
-                self.assertEqual(len(ctx.failures), 2)
-            finally:
-                ctx.tmp.cleanup()
+            self.assertEqual(len(ctx.failures), 2)
 
 
 if __name__ == "__main__":

@@ -154,6 +154,14 @@ writers)
     grep -qF "@" "$work/p.v" || fail "p.v has no provenance names"
     head -1 "$work/a.dot" | grep -qF "digraph" || fail "a.dot is not a digraph"
     [[ -s $work/f.dot ]] || fail "focused dot is empty"
+    # path "-" is stdout for every writer (one place: odin3_atomic_file_open), never a file named -
+    printf 'module t(input a, input b, output y);\n  assign y = a & b;\nendmodule\n' >"$work/t.v"
+    (cd "$work" && "$odin3" -p "read_verilog t.v; write_json -; write_rtlil -; write_verilog -" \
+        >"$work/stdout" 2>"$work/err") || fail "stdout writer script failed"
+    [[ ! -e $work/- ]] || fail "write_* - created a file named -"
+    grep -qF '"creator": "Odin III"' "$work/stdout" || fail "write_json - not on stdout"
+    grep -qF 'module \t' "$work/stdout" || fail "write_rtlil - not on stdout"
+    grep -qF "module t" "$work/stdout" || fail "write_verilog - not on stdout"
     expect_fail "dot: refusing to draw" -p "read_blif $fixture; write_dot $work/b.dot --max-nodes 2"
     expect_fail "--name-style expects short or provenance" \
         -p "read_blif $fixture; write_verilog $work/b.v --name-style long"
