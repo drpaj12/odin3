@@ -6,6 +6,8 @@
 #include "backends/rtlil/writer.h"
 #include "ir/check.h"
 #include "ir/design.h"
+#include "ir/module.h"
+#include "ir/proc.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/budget.h"
@@ -823,6 +825,170 @@ static void test_dirty_chain(void) {
     free(rescan);
 }
 
+/* The live nodes of the module `m`, and its node-ID end. */
+static uint32_t live_nodes(const odin3_module *module) {
+    uint32_t live = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(module); id++) {
+        live += odin3_node_live(module, (odin3_node_id){id}) ? 1U : 0U;
+    }
+    return live;
+}
+
+/* IR-6 point (h): a top-level opt ends with compact, a standalone opt_expr leaves dead nodes. */
+static void test_compact_after_opt(void) {
+    build(DEAD_TEXT);
+    odin3_module *module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+    check_full();
+    pb_free(&res);
+    char path[PATH_LEN];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/const_and.il", ODIN3_LOOP_DATA) > 0);
+    char *input = slurp(path);
+    build(input);
+    free(input);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_TRUE(live_nodes(module) + 1U < odin3_module_node_end(module));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("compact", ""));
+    module = pb_module(&res, "m");
+    TEST_ASSERT_EQUAL_UINT32(live_nodes(module) + 1U, odin3_module_node_end(module));
+}
+
+/* The BODY blob of the nth $proc of `m` (malloc'd, *len bytes): what opt must never touch. */
+static uint8_t *body_of(uint32_t nth, uint32_t *len) {
+    const odin3_module *module = pb_module(&res, "m");
+    const odin3_value *body = odin3_node_param(module, pb_proc(&res, "m", nth), ODIN3_PROC_P_BODY);
+    TEST_ASSERT_NOT_NULL(body);
+    TEST_ASSERT_TRUE(body->kind == ODIN3_VAL_PROC && body->len > 0);
+    uint8_t *copy = malloc(body->len);
+    TEST_ASSERT_NOT_NULL(copy);
+    memcpy(copy, body->bits, body->len);
+    *len = body->len;
+    return copy;
+}
+
+static void expect_body(uint32_t nth, const uint8_t *want, uint32_t want_len) {
+    uint32_t len = 0;
+    uint8_t *got = body_of(nth, &len);
+    TEST_ASSERT_EQUAL_UINT32(want_len, len);
+    TEST_ASSERT_EQUAL_MEMORY(want, got, len);
+    free(got);
+}
+
+/* A foldable $add feeding two identical processes, a dead $or beside them. */
+#define OPAQUE_TEXT                                                                                \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\a\n  wire input 7 \\c\n  wire width 2 "    \
+    "\\s\n"                                                                                        \
+    "  wire width 2 output 3 \\z1\n  wire width 2 output 4 \\z2\n  wire \\dead\n"                  \
+    "  cell $add \\add\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                  \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 2\n"            \
+    "    connect \\A 2'01\n    connect \\B 2'01\n    connect \\Y \\s\n  end\n"                     \
+    "  cell $or \\d\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                     \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\a\n    connect \\B \\c\n    connect \\Y \\dead\n  end\n"                    \
+    "  process $p1\n    sync always\n      update \\z1 \\s\n  end\n"                               \
+    "  process $p2\n    sync always\n      update \\z2 \\s\n  end\nend\n"
+
+/* Review Focus 5 (mode P): the cells around a $proc are optimised, the $proc is opaque. */
+static void test_opacity_mode_p(void) {
+    build(OPAQUE_TEXT);
+    uint32_t len1 = 0;
+    uint32_t len2 = 0;
+    uint8_t *body1 = body_of(0, &len1);
+    uint8_t *body2 = body_of(1, &len2);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
+    char *text = design_text();
+    TEST_ASSERT_NULL(strstr(text, "cell $add"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "cell $or"));
+    free(text);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_module_proc_count(pb_module(&res, "m")));
+    expect_body(0, body1, len1);
+    expect_body(1, body2, len2);
+    TEST_ASSERT_TRUE(
+        count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped") >= 1U);
+    TEST_ASSERT_TRUE(count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped") >=
+                     1U);
+    free(body1);
+    free(body2);
+    check_full();
+}
+
+/* proc's E1a on a two-switch body (test_proc_pass.c's m2), with cells around it. */
+#define FAILED_PROC_TEXT                                                                           \
+    "module \\m\n  wire input 1 \\clk\n  wire input 2 \\rst\n  wire input 3 \\a\n"                 \
+    "  wire input 4 \\b\n  wire input 5 \\d\n  wire output 6 \\q\n  wire \\t0\n"                   \
+    "  wire input 8 \\c\n  wire width 2 \\s\n  wire width 2 output 7 \\z\n  wire \\dead\n"         \
+    "  cell $add \\add\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                  \
+    "    parameter \\A_WIDTH 2\n    parameter \\B_WIDTH 2\n    parameter \\Y_WIDTH 2\n"            \
+    "    connect \\A 2'01\n    connect \\B 2'01\n    connect \\Y \\s\n  end\n"                     \
+    "  cell $or \\d1\n    parameter \\A_SIGNED 0\n    parameter \\B_SIGNED 0\n"                    \
+    "    parameter \\A_WIDTH 1\n    parameter \\B_WIDTH 1\n    parameter \\Y_WIDTH 1\n"            \
+    "    connect \\A \\a\n    connect \\B \\c\n    connect \\Y \\dead\n  end\n"                    \
+    "  attribute \\src \"t.v:9.3\"\n  process $p\n"                                                \
+    "    switch \\a\n      case 1'1\n        assign \\t0 \\d\n    end\n"                           \
+    "    switch \\b\n      case 1'1\n        assign \\t0 1'0\n    end\n"                           \
+    "    sync posedge \\clk\n      update \\q \\t0\n"                                              \
+    "    sync posedge \\rst\n      update \\q \\t0\n"                                              \
+    "    sync always\n      update \\z \\s\n  end\nend\n"
+
+/* 2E section 18.1: after proc failed on a body, opt_expr and opt -nodffe -nosdff still run. */
+static void test_opt_after_failed_proc(void) {
+    build(FAILED_PROC_TEXT);
+    uint32_t len = 0;
+    uint8_t *body = body_of(0, &len);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("proc", ""));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_module_proc_count(pb_module(&res, "m")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_expr", ""));
+    char *text = design_text();
+    TEST_ASSERT_NULL(strstr(text, "cell $add"));
+    free(text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "-nodffe -nosdff"));
+    TEST_ASSERT_TRUE(
+        count_lines(ODIN3_LOG_INFO, "opt_muxtree: module 'm' has processes; skipped") >= 1U);
+    TEST_ASSERT_TRUE(count_lines(ODIN3_LOG_INFO, "opt_clean: module 'm' has processes; skipped") >=
+                     1U);
+    expect_body(0, body, len);
+    free(body);
+    check_full();
+}
+
+/* The budget hook at 4096 bytes: opt stops at its first sub-pass call, the IR valid. */
+static void test_budget_opt(void) {
+    build(DEAD_TEXT);
+    odin3_budget_test_set_limit(BUDGET_LIMIT);
+    char *before = design_text();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_pass("opt", ""));
+    TEST_ASSERT_EQUAL_UINT32(
+        1,
+        count_lines(ODIN3_LOG_ERROR, "opt needs more than 4096 bytes (the design's budget is 60% "
+                                     "of physical memory)"));
+    odin3_budget_test_set_limit(0);
+    char *after = design_text();
+    TEST_ASSERT_EQUAL_STRING(before, after);
+    free(before);
+    free(after);
+    check_full();
+}
+
+/* --opt-stats on const_and's module: its one rule fired once, and no zero counter is printed. */
+static void test_opt_stats_driver(void) {
+    char path[PATH_LEN];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/const_and.il", ODIN3_LOOP_DATA) > 0);
+    char *input = slurp(path);
+    build(input);
+    free(input);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt", "--opt-stats"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_lines(ODIN3_LOG_INFO, "opt: rule const_and 1"));
+    for (uint32_t i = 0; i < n_lines; i++) {
+        if (strncmp(lines[i].text, "opt: rule ", 10) == 0) {
+            TEST_ASSERT_NULL_MESSAGE(strstr(lines[i].text, " 0"), lines[i].text);
+        }
+    }
+}
+
 /* Two runs, byte-identical write_rtlil; and the reverse creation order of the nodes gives the
  * same netlist (compared as a sorted list of the cells' types, a stand-in for netlist-compare). */
 static void test_determinism(void) {
@@ -860,6 +1026,11 @@ int main(void) {
     RUN_TEST(test_loop_cap);
     RUN_TEST(test_dirty_vs_full_rescan);
     RUN_TEST(test_dirty_chain);
+    RUN_TEST(test_compact_after_opt);
+    RUN_TEST(test_opacity_mode_p);
+    RUN_TEST(test_opt_after_failed_proc);
+    RUN_TEST(test_budget_opt);
+    RUN_TEST(test_opt_stats_driver);
     RUN_TEST(test_determinism);
     return UNITY_END();
 }
