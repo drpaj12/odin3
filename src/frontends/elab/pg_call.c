@@ -985,7 +985,9 @@ odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     odin3_elab2_reads reads = pg_reads(pg);
     odin3_elab2_expr_req ireq = {regs.index, {0, false, false}, NULL, &reads};
     odin3_sig idx;
+    pg_mem_ref wref = {regs.mem, NULL, req->stmt, req->blocking};
     odin3_status st = pg_check_mixed(pg, &mixed);
+    st = st != ODIN3_OK ? st : pg_mem_check_mixed(pg, &wref);
     st = st != ODIN3_OK ? st : odin3_elab2_expr(pg->e2, &ireq, &idx);
     size_t count = pg->lvs.nets.len;
     odin3_sigbit *targets =

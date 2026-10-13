@@ -743,14 +743,10 @@ static bool one_control_path(const odin3_pg *pg, uint64_t where) {
 
 /* The T9 warning, once per variable and kind of warning: `'r' is assigned with both '=' and '<='
  * (also at f.v:L:C)`, and on one control path also that simulation and synthesis may differ. */
-static odin3_status mixed_warn(odin3_pg *pg, const pg_asg *asg, uint32_t bit, odin3_ast_id first,
+static odin3_status mixed_warn(odin3_pg *pg, const pg_mixed_subject *subj, odin3_ast_id first,
                                bool same_path) {
     odin3_elab2 *e2 = pg->e2;
-    odin3_wirebit wb = ((const odin3_elab2_lvbit *)odin3_vec_cat(&asg->lv->bits, bit))->wb;
-    odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, bit);
-    uint64_t key =
-        ((wb.wire.v != 0 ? (uint64_t)wb.wire.v : ((uint64_t)1 << GROUP_SHIFT) | net.v) << 1) |
-        (same_path ? 1U : 0U);
+    uint64_t key = (subj->id << 1) | (same_path ? 1U : 0U);
     uint64_t seen = 0;
     if (odin3_u64map_get(pg->mixed_seen, key, &seen)) {
         return ODIN3_OK;
@@ -761,17 +757,14 @@ static odin3_status mixed_warn(odin3_pg *pg, const pg_asg *asg, uint32_t bit, od
     st = st != ODIN3_OK ? st : place_of(pg, first, &place);
     odin3_strbuf text;
     odin3_strbuf_init(&text);
-    const char *name = wb.wire.v != 0 ? odin3_strtab_get(odin3_design_strtab(e2->design),
-                                                         odin3_wire_name(e2->mod, wb.wire))
-                                      : "net";
     st = st != ODIN3_OK
              ? st
              : odin3_strbuf_appendf(
-                   &text, "'%s' is assigned with both '=' and '<='%s (also at %s)%s", name,
+                   &text, "'%s' is assigned with both '=' and '<='%s (also at %s)%s", subj->name,
                    same_path ? " on one control path" : "", place.data != NULL ? place.data : "?",
                    same_path ? "; simulation and synthesis may differ" : "");
     if (st == ODIN3_OK) {
-        odin3_elab2_warn_msg(e2, odin3_ast_loc(e2->elab, asg->stmt), text.data);
+        odin3_elab2_warn_msg(e2, odin3_ast_loc(e2->elab, subj->stmt), text.data);
     }
     odin3_strbuf_free(&text);
     odin3_strbuf_free(&place);
@@ -779,9 +772,9 @@ static odin3_status mixed_warn(odin3_pg *pg, const pg_asg *asg, uint32_t bit, od
 }
 
 /* The first assignment of each kind to a net, kept for the module (key: net << 1 | blocking). */
-static odin3_status mixed_record(odin3_pg *pg, const pg_asg *asg, uint64_t key) {
+static odin3_status mixed_record(odin3_pg *pg, odin3_ast_id stmt, uint64_t key) {
     uint64_t at = ((uint64_t)pg->block_no << GROUP_SHIFT) | pg->cur;
-    odin3_status st = odin3_u64map_put(pg->kinds, (odin3_kv){key, asg->stmt.v});
+    odin3_status st = odin3_u64map_put(pg->kinds, (odin3_kv){key, stmt.v});
     return st != ODIN3_OK ? st : odin3_u64map_put(pg->kind_at, (odin3_kv){key, at});
 }
 
@@ -806,10 +799,10 @@ static bool mixed_known(const odin3_pg *pg, uint64_t key, uint64_t at) {
 
 /* Records the assignment under key: the first one in the maps, a later one on a new path in the
  * list. */
-static odin3_status mixed_remember(odin3_pg *pg, const pg_asg *asg, uint64_t key) {
+odin3_status pg_mixed_remember(odin3_pg *pg, odin3_ast_id stmt, uint64_t key) {
     uint64_t unused = 0;
     if (!odin3_u64map_get(pg->kinds, key, &unused)) {
-        return mixed_record(pg, asg, key);
+        return mixed_record(pg, stmt, key);
     }
     uint64_t at = ((uint64_t)pg->block_no << GROUP_SHIFT) | pg->cur;
     if (mixed_known(pg, key, at)) {
@@ -821,7 +814,7 @@ static odin3_status mixed_remember(odin3_pg *pg, const pg_asg *asg, uint64_t key
     if (rec == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *rec = (pg_kind_rec){at, asg->stmt.v, (uint32_t)head};
+    *rec = (pg_kind_rec){at, stmt.v, (uint32_t)head};
     return odin3_u64map_put(pg->kind_head, (odin3_kv){key, (uint64_t)pg->kind_more.len});
 }
 
@@ -841,16 +834,10 @@ static bool mixed_later_pair(const odin3_pg *pg, uint64_t other_key, uint32_t *s
     return false;
 }
 
-/* The warnings for one bit against the other kind's record: the first assignment of that kind, and
- * when that one is on an exclusive path, the later ones (each warning is once per variable). */
-typedef struct mixed_bit {
-    uint32_t bit;
-    uint64_t other_key;
-} mixed_bit;
-
-static odin3_status mixed_check_bit(odin3_pg *pg, const pg_asg *asg, mixed_bit mb) {
-    uint32_t bit = mb.bit;
-    uint64_t other_key = mb.other_key;
+/* The warnings for one subject against the other kind's record: the first assignment of that
+ * kind, and when that one is on an exclusive path, the later ones (each warning is once per
+ * variable). */
+odin3_status pg_mixed_check(odin3_pg *pg, const pg_mixed_subject *subj, uint64_t other_key) {
     uint64_t other = 0;
     uint64_t where = 0;
     if (!odin3_u64map_get(pg->kinds, other_key, &other) ||
@@ -858,12 +845,25 @@ static odin3_status mixed_check_bit(odin3_pg *pg, const pg_asg *asg, mixed_bit m
         return ODIN3_OK;
     }
     bool same = one_control_path(pg, where);
-    odin3_status st = mixed_warn(pg, asg, bit, (odin3_ast_id){(uint32_t)other}, same);
+    odin3_status st = mixed_warn(pg, subj, (odin3_ast_id){(uint32_t)other}, same);
     uint32_t later = 0;
     if (st == ODIN3_OK && !same && mixed_later_pair(pg, other_key, &later)) {
-        st = mixed_warn(pg, asg, bit, (odin3_ast_id){later}, true);
+        st = mixed_warn(pg, subj, (odin3_ast_id){later}, true);
     }
     return st;
+}
+
+/* The subject of target bit `bit` of asg: its wire's name (else "net"), keyed by the wire (else
+ * the net). */
+static pg_mixed_subject mixed_net_subject(const odin3_pg *pg, const pg_asg *asg, uint32_t bit) {
+    odin3_wirebit wb = ((const odin3_elab2_lvbit *)odin3_vec_cat(&asg->lv->bits, bit))->wb;
+    odin3_net_id net = *(const odin3_net_id *)odin3_vec_cat(&asg->lv->nets, bit);
+    return (pg_mixed_subject){
+        wb.wire.v != 0 ? (uint64_t)wb.wire.v : ((uint64_t)1 << GROUP_SHIFT) | net.v,
+        wb.wire.v != 0 ? odin3_strtab_get(odin3_design_strtab(pg->e2->design),
+                                          odin3_wire_name(pg->e2->mod, wb.wire))
+                       : "net",
+        asg->stmt};
 }
 
 /* T9 (EL-41, accepted): a bit assigned with both `=` and `<=`, in one block or several, follows
@@ -877,8 +877,9 @@ odin3_status pg_check_mixed(odin3_pg *pg, const pg_asg *asg) {
         if (net.v == 0) {
             continue;
         }
-        odin3_status st = mixed_remember(pg, asg, mine_key);
-        st = st != ODIN3_OK ? st : mixed_check_bit(pg, asg, (mixed_bit){i, mine_key ^ 1U});
+        pg_mixed_subject subj = mixed_net_subject(pg, asg, i);
+        odin3_status st = pg_mixed_remember(pg, asg->stmt, mine_key);
+        st = st != ODIN3_OK ? st : pg_mixed_check(pg, &subj, mine_key ^ 1U);
         if (st != ODIN3_OK) {
             return st;
         }

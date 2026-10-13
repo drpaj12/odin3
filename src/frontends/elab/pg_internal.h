@@ -358,6 +358,30 @@ odin3_status pg_apply(odin3_pg *pg, const pg_asg *asg);
 /* T9 (EL-41) for the target bits of asg: a bit first assigned with the other of `=` and `<=`. */
 odin3_status pg_check_mixed(odin3_pg *pg, const pg_asg *asg);
 
+/* The T9 machinery for a target that is not a net: what a warning names (id: unique per variable,
+ * above every wire and net id; the name) and the statement it is located at. A record key is the
+ * variable's key with the low bit `=` (1) or `<=` (0), below 2^33 for nets and with bit 63 set for
+ * the memories' (pg_memw.c). pg_mixed_remember notes the statement under its key (once per
+ * distinct control path); pg_mixed_check warns for the other kind's record under other_key. */
+typedef struct pg_mixed_subject {
+    uint64_t id;
+    const char *name;
+    odin3_ast_id stmt;
+} pg_mixed_subject;
+odin3_status pg_mixed_remember(odin3_pg *pg, odin3_ast_id stmt, uint64_t key);
+odin3_status pg_mixed_check(odin3_pg *pg, const pg_mixed_subject *subj, uint64_t other_key);
+
+/* T9 for a write to a word of a memory (a `$mem` write port, or a variable-index word of a register
+ * array): the memory, the raw address (NULL: a variable index of registers) and the statement. A
+ * constant address is the word's own record; a variable one is every word's (pg_memw.c). */
+typedef struct pg_mem_ref {
+    uint32_t mem;
+    const odin3_sig *addr;
+    odin3_ast_id stmt;
+    bool blocking;
+} pg_mem_ref;
+odin3_status pg_mem_check_mixed(odin3_pg *pg, const pg_mem_ref *ref);
+
 /* A temporary net's group and its position in it. */
 typedef struct pg_grp {
     uint32_t group, pos;
