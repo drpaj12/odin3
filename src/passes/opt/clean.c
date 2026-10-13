@@ -472,7 +472,7 @@ static odin3_status clean_init(clean_state *cs) {
     }
     for (uint32_t id = 1; id < odin3_module_net_end(cs->m); id++) {
         odin3_net_id net = {id};
-        odin3_bit init = odin3_net_live(cs->m, net) ? odin3_ffinit_get(cs->m, net) : ODIN3_BIT_X;
+        odin3_bit init = odin3_ffinit_get_key(cs->m, net, key);
         if (init != ODIN3_BIT_0 && init != ODIN3_BIT_1) {
             continue;
         }
