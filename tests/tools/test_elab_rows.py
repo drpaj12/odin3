@@ -8,8 +8,10 @@ keeps the sweep tests out of the debug and release presets.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import re
@@ -258,7 +260,7 @@ class ElabCheckTest(unittest.TestCase):
 FAKE_BRIDGE = """#!{python}
 import sys
 name = sys.argv[-1].rsplit("/", 1)[-1]
-sys.exit({{"A1_a.v": 0, "B1_b.v": 1, "C1_c.v": 0}}.get(name, 0))
+sys.exit({{"A1_a.v": 0, "B1_b.v": 1, "C1_c.v": 0, "D1_d.v": 3}}.get(name, 0))
 """
 
 
@@ -306,6 +308,16 @@ class RunRowsEquivTest(unittest.TestCase):
         self.assertEqual(
             run_rows_equiv.read_expect(path), {"B1": ("some text", "because"), "A1": ("", "plain")}
         )
+
+    def test_an_oracle_crash_is_reported_distinctly_even_when_listed(self) -> None:
+        (self.dir / "D1_d.v").write_text("//d\n", encoding="utf-8")
+        rows = [run_rows_equiv.Row("D1", self.dir / "D1_d.v", 1)]
+        for expect in ({}, {"D1": "w"}):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = run_rows_equiv.sweep([str(self.bridge)], rows, expect, {"D1": ""})
+            self.assertEqual(code, 1)
+            self.assertIn("oracle crash (bridge exit 3)", out.getvalue())
 
     def test_a_row_with_several_clocks_is_not_run(self) -> None:
         bridge = [str(self.bridge)]
@@ -361,6 +373,22 @@ class MicroTopTest(unittest.TestCase):
             self.assertEqual(mod.main(["--golden-root", tmp, "grp/none"]), 1)
             (leaf / "leaf1.parmys.blif").write_text("# no model\n")
             self.assertEqual(mod.main(["--golden-root", tmp, "grp/leaf1"]), 1)
+
+    def test_the_last_micro_verilog_pair_in_a_path_wins(self) -> None:
+        mod = load_micro_top()
+        # a checkout that itself sits under a micro/verilog directory: the inner pair is the root
+        spec = "/w/micro/verilog/x/tests/micro/verilog/keywords/assign/deep/leaf.v"
+        self.assertEqual(mod.group_and_leaf(spec), ("keywords/assign/deep", "leaf"))
+        # a file directly in the root has no group
+        with self.assertRaises(ValueError):
+            mod.group_and_leaf("/w/tests/micro/verilog/leaf.v")
+        # outside the tree: the directory's own name
+        self.assertEqual(mod.group_and_leaf("/elsewhere/dir/leaf.v"), ("dir", "leaf"))
+        # a nested group resolves the golden path under the golden root
+        self.assertEqual(
+            mod.golden_path(Path("/g"), "/r/tests/micro/verilog/keywords/assign/assign_wire.v"),
+            Path("/g/regression/verilog/keywords/assign/assign_wire/assign_wire.parmys.blif"),
+        )
 
 
 if __name__ == "__main__":

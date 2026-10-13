@@ -7,6 +7,7 @@ import contextlib
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -32,6 +33,10 @@ with open(os.environ["FAKE_LOG"], "a") as log:
 text = open(argv[-1]).read()
 if "KILL" in text:
     os.kill(os.getpid(), signal.SIGKILL)
+if "SEGV" in text:
+    print("odin3: error: boom at line 3", file=sys.stderr)
+    sys.stderr.flush()
+    os.kill(os.getpid(), signal.SIGSEGV)
 if "BAD" in text:
     print("odin3: error: boom at line 3", file=sys.stderr)
     sys.exit(1)
@@ -226,6 +231,53 @@ class VerdictTest(SweepTestCase):
         code, out, _ = self.run_tool("--expect-fail", both, tree)
         self.assertEqual(code, 1)
         self.assertIn("XPASS good.v", out)
+
+    def test_a_needle_must_appear_in_the_output_of_a_listed_failure(self) -> None:
+        self.write("m/bad.v", "BAD\n")
+        tree = str(self.dir / "m")
+        code, out, _ = self.run_tool("--expect-fail", self.expect("bad.v [boom at line 3] why\n"),
+                                     tree)
+        self.assertEqual(code, 0, out)
+        self.assertIn("xfail bad.v", out)
+        # the wrong message: the file fails, but not as listed
+        code, out, _ = self.run_tool("--expect-fail", self.expect("bad.v [other error] why\n"),
+                                     tree)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL  bad.v", out)
+        self.assertIn("expected [other error]", out)
+        self.assertIn("1 unexpected failures", out)
+
+    def test_a_signal_a_cap_kill_or_a_timeout_is_never_an_expected_failure(self) -> None:
+        self.write("m/crash.v", "SEGV\n")
+        tree = str(self.dir / "m")
+        # even with a matching needle (the crash printed it first), or none at all
+        for line in ("crash.v [boom at line 3] why\n", "crash.v why\n"):
+            code, out, _ = self.run_tool("--expect-fail", self.expect(line), tree)
+            self.assertEqual(code, 1, out)
+            self.assertIn("FAIL  crash.v", out)
+            self.assertIn("killed by signal 11", out)
+            self.assertNotIn("xfail", out)
+        self.write("k/killed.v", "KILL\n")
+        code, out, _ = self.run_tool("--expect-fail", self.expect("killed.v [x] why\n"),
+                                     str(self.dir / "k"))
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  killed.v", out)
+        self.assertIn("out of memory", out)
+        self.write("t/slow.v", "SLOW\n")
+        argv = ["--expect-fail", self.expect("slow.v [x] why\n"), str(self.dir / "t")]
+        with mock.patch.object(memcap, "run",
+                               side_effect=subprocess.TimeoutExpired("o", 1)):
+            code, out, _ = self.run_tool(*argv)
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL  slow.v", out)
+        self.assertIn("timed out", out)
+
+    def test_the_needle_syntax_is_the_rows_list_syntax(self) -> None:
+        path = Path(self.expect("a.v [x y] why\nb.v [n] xl: big\nc.v plain\n"))
+        got = elab_sweep.read_expect(path)
+        self.assertEqual(got["a.v"], elab_sweep.Expect("why", False, "x y"))
+        self.assertEqual(got["b.v"], elab_sweep.Expect("xl: big", True, "n"))
+        self.assertEqual(got["c.v"], elab_sweep.Expect("plain", False, ""))
 
     def test_a_stale_entry_fails_unless_the_run_is_partial(self) -> None:
         self.write("m/good.v")

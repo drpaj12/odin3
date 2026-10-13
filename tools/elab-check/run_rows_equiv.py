@@ -23,6 +23,7 @@ EXIT_OK = 0
 EXIT_FAIL = 1
 EXIT_ERROR = 2
 EXIT_SKIP = 77
+BRIDGE_CRASH = 3  # elab-equiv: the oracle (Yosys) died of a signal
 ROW_LINE = re.compile(r"^([A-Z]\d+) (\S+\.v) comb=([01]) clocks=(\d+)$")
 
 
@@ -52,16 +53,28 @@ def read_expect_fail(path: Path) -> dict[str, str]:
     return {row: reason for row, (_, reason) in read_expect(path).items()}
 
 
+def parse_expect_line(line: str) -> tuple[str, str, str] | None:
+    """`<key> [needle] <reason>` as (key, needle, reason), the needle optional ("" if absent);
+    None for a blank or `#` line; ValueError for a line with no reason. Shared with elab-sweep."""
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return None
+    match = EXPECT_LINE.match(text)
+    if match is None:
+        raise ValueError(f"'{text.split(' ')[0]}' has no reason")
+    return match.group(1), match.group(2) or "", match.group(3).strip()
+
+
 def read_expect(path: Path) -> dict[str, tuple[str, str]]:
     """`<row> [needle] <reason>` lines as {row: (needle, reason)}; the needle is optional."""
     out: dict[str, tuple[str, str]] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip() or line.startswith("#"):
-            continue
-        match = EXPECT_LINE.match(line.strip())
-        if match is None:
-            raise ValueError(f"{path.name}: {line.split(' ')[0]}: no reason")
-        out[match.group(1)] = (match.group(2) or "", match.group(3).strip())
+        try:
+            parsed = parse_expect_line(line)
+        except ValueError as exc:
+            raise ValueError(f"{path.name}: {exc}") from exc
+        if parsed is not None:
+            out[parsed[0]] = (parsed[1], parsed[2])
     return out
 
 
@@ -91,6 +104,9 @@ def sweep(
             skipped += 1
         elif code == EXIT_OK and row.row in expect:
             print(f"STALE {row.row}: listed in equiv_expect_fail.txt but equivalent")
+            bad += 1
+        elif code == BRIDGE_CRASH:
+            print(f"FAIL {row.row}: oracle crash (bridge exit {BRIDGE_CRASH}), not an expectation")
             bad += 1
         elif code != EXIT_OK and row.row not in expect:
             print(f"FAIL {row.row}: bridge exit {code}")

@@ -1,7 +1,9 @@
 # The micros of tests/micro/verilog that `odin3 --elab-only` rejects, one per line:
-# `<path relative to tests/micro/verilog> <one-line reason>` (2D spec 14.5, plan Task 26).
-# elab-sweep fails the run on an unlisted failure, on a listed file that passes, and on an entry
-# that names no micro: the list must shrink, never rot. Three groups only:
+# `<path relative to tests/micro/verilog> [needle] <one-line reason>` (2D spec 14.5, plan Task 26).
+# The bracketed needle must appear in odin3's output (the same syntax as equiv_expect_fail.txt): a
+# listed file that fails differently, or dies of a signal, a memory cap or a timeout, is a failure.
+# elab-sweep fails the run on an unlisted failure, on a listed file that passes or fails with another
+# message, and on an entry that names no micro: the list must shrink, never rot. Three groups only:
 #   1. the Parmys-rejected micros (PHASE2 #4): every entry of 2C's tests/verilog/micro_expect_fail.txt
 #      (2C rejects them while parsing, so 2D does too; the reasons are copied) and the micros that
 #      2C parses but 2D's elaboration rejects, none of which has a Parmys golden either (so no
@@ -14,85 +16,85 @@
 # plus tests/elab/micro_equiv_expect_fail.txt.
 #
 # --- the micros 2C accepts and 2D's elaboration rejects (none has a Parmys golden) -----------------
-keywords/input/input_port_failure.v Parmys rejects (negative micro): 'a' is declared twice (3:11)
-keywords/output/output_port_failure.v Parmys rejects (negative micro): 'b' is declared twice (5:12)
-keywords/inout/double_assign_inout.v Parmys rejects: 'in_out1' has two drivers (6:9; EL two-driver rule, spec 17)
-syntax/instantiating_by_name_invalid.v Parmys rejects (negative micro): module 'and2' has no port 'in3' (13:20)
-syntax/instantiating_by_name_invalid_1.v Parmys rejects (negative micro): module 'and2' has no port 'in3' (13:20)
-syntax/instantiating_by_name_invalid_mix_ports.v Parmys rejects (negative micro): instance 'a1' mixes ordered and named connections (13:6)
-syntax/instantiating_by_name_valid.v Parmys rejects: 'in3' is declared as a port but is not in the port list (2:15; illegal Verilog-2005)
-keywords/while/while_loop.v Parmys rejects: 'while' is supported only in constant functions (10:5; spec 17)
-keywords/automatic/recursive_function.v Parmys rejects: recursive call of 'factorial' with non-constant arguments cannot be inlined (11:16)
-syntax/deassign.v Parmys rejects: procedural 'assign' is not supported (19:5; spec 17)
-syntax/matrix_multiplication.v Parmys rejects: non-constant index into the multi-dimensional register array 'matrixA' (120:17; spec 17)
-keywords/defparam/defparam_depth_1_failure.v Parmys rejects (negative micro): 'width' is a localparam of module 'assg' and cannot be overridden (10:11)
-keywords/defparam/defparam.v Parmys rejects: no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
-keywords/defparam/defparam_failure.v Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
-keywords/defparam/defparam_simple_failure.v Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
-keywords/defparam/defparam_string.v Parmys rejects: no golden, so no --top, and 'simple_op' and 'param' are both uninstantiated (ambiguous_top)
-keywords/macromodule/multiple_topmodules.v Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'simple_op2' are both uninstantiated (ambiguous_top)
-syntax/top_and.v Parmys rejects: module 'and_primitive' is not defined (19:2; unresolved_module)
-large/LargeRam.v Parmys rejects: module 'single_port_ram' is not defined (27:1; unresolved_module: a hard block the tree lacks)
-large/paj_boundtop_hierarchy_no_mem.v Parmys rejects: the two boundcontroller instances (224:701, 225:701) both drive 'debugcount01', a typo in the source; 2D reports two drivers (spec 17); Yosys accepts it
-keywords/.generic/wire_test.v Parmys rejects: a template with no module of its own (no_top); the keywords/*/*.vh files that include it supply the module
+keywords/input/input_port_failure.v [input_port_failure.v:3:11: error: 'a' is already declared] Parmys rejects (negative micro): 'a' is declared twice (3:11)
+keywords/output/output_port_failure.v [output_port_failure.v:5:12: error: 'b' is already declared] Parmys rejects (negative micro): 'b' is declared twice (5:12)
+keywords/inout/double_assign_inout.v [double_assign_inout.v:7:9: error: 'in_out2' has two drivers] Parmys rejects: both inouts have two drivers, 'in_out1' (6:9) and 'in_out2' (7:9); the needle names the second (EL two-driver rule, spec 17)
+syntax/instantiating_by_name_invalid.v [instantiating_by_name_invalid.v:13:20: error: module 'and2' has no port 'in3'] Parmys rejects (negative micro): module 'and2' has no port 'in3' (13:20)
+syntax/instantiating_by_name_invalid_1.v [instantiating_by_name_invalid_1.v:13:20: error: module 'and2' has no port 'in3'] Parmys rejects (negative micro): module 'and2' has no port 'in3' (13:20)
+syntax/instantiating_by_name_invalid_mix_ports.v [instantiating_by_name_invalid_mix_ports.v:13:6: error: instance 'a1' mixes ordered and named connections] Parmys rejects (negative micro): instance 'a1' mixes ordered and named connections (13:6)
+syntax/instantiating_by_name_valid.v [instantiating_by_name_valid.v:2:15: error: 'in3' is declared as a port but is not in the port list] Parmys rejects: 'in3' is declared as a port but is not in the port list (2:15; illegal Verilog-2005)
+keywords/while/while_loop.v [while_loop.v:10:5: error: 'while' is supported only in constant functions] Parmys rejects: 'while' is supported only in constant functions (10:5; spec 17)
+keywords/automatic/recursive_function.v [recursive_function.v:11:16: error: recursive call of 'factorial' cannot be inlined (its arguments are not constant)] Parmys rejects: recursive call of 'factorial' with non-constant arguments cannot be inlined (11:16)
+syntax/deassign.v [deassign.v:19:5: error: procedural 'assign' is not supported] Parmys rejects: procedural 'assign' is not supported (19:5; spec 17)
+syntax/matrix_multiplication.v [matrix_multiplication.v:120:17: error: non-constant index into the multi-dimensional register array 'matrixA' is not supported] Parmys rejects: non-constant index into the multi-dimensional register array 'matrixA' (120:17; spec 17)
+keywords/defparam/defparam_depth_1_failure.v [defparam_depth_1_failure.v:10:11: error: 'width' is a localparam of module 'assg' and cannot be overridden] Parmys rejects (negative micro): 'width' is a localparam of module 'assg' and cannot be overridden (10:11)
+keywords/defparam/defparam.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects: no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
+keywords/defparam/defparam_failure.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
+keywords/defparam/defparam_simple_failure.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'params' are both uninstantiated (ambiguous_top)
+keywords/defparam/defparam_string.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects: no golden, so no --top, and 'simple_op' and 'param' are both uninstantiated (ambiguous_top)
+keywords/macromodule/multiple_topmodules.v [ambiguous_top: no top given and several modules are not instantiated] Parmys rejects (negative micro): no golden, so no --top, and 'simple_op' and 'simple_op2' are both uninstantiated (ambiguous_top)
+syntax/top_and.v [top_and.v:19:2: error: unresolved_module: module 'and_primitive' is not defined] Parmys rejects: module 'and_primitive' is not defined (19:2; unresolved_module)
+large/LargeRam.v [LargeRam.v:27:1: error: unresolved_module: module 'single_port_ram' is not defined] Parmys rejects: module 'single_port_ram' is not defined (27:1; unresolved_module: a hard block the tree lacks)
+large/paj_boundtop_hierarchy_no_mem.v [paj_boundtop_hierarchy_no_mem.v:225:701: error: 'debugcount01' has two drivers] Parmys rejects: the two boundcontroller instances (224:701, 225:701) both drive 'debugcount01', a typo in the source; 2D reports two drivers (spec 17); Yosys accepts it
+keywords/.generic/wire_test.v [no_top: no top given and no module is defined] Parmys rejects: a template with no module of its own (no_top); the keywords/*/*.vh files that include it supply the module
 #
 # --- the 2C list: Parmys-rejected micros that 2C already rejects while parsing --------------------
 # --- intended negative micros (*_failure): Parmys rejects them too --------------------------------
-keywords/function_endfunction/function_input_failure.v Parmys rejects: `$display` as a module item (6:5) and a call `add()` with no argument (A.8.2)
-keywords/function_endfunction/time_control_failure.v Parmys rejects: `$display` as a module item (8:5); `always` inside a function
-keywords/default/multiple_defaults_failure.v Parmys rejects: `$display` as a module item with no `;` (7:1); two `default` items
-keywords/macromodule/missing_endmodule_failure.v Parmys rejects: 2C: no `endmodule` (unexpected end of file, 5:18); Parmys fails earlier, on `macromodule` itself (1: unexpected TOK_ID; Yosys has no macromodule)
-keywords/module_endmodule/missing_endmodule_failure.v Parmys rejects: no `endmodule` (2C: unexpected end of file at 5:18; Yosys reports its end of file at line 1)
-keywords/macromodule/repeated_macromodule_failure.v Parmys rejects: 2C: duplicate_module 'simple_op' (M11, 20:1); Parmys fails earlier, on `macromodule` itself (4: unexpected TOK_ID; Yosys has no macromodule)
-keywords/module_endmodule/repeated_module_failure.v Parmys rejects: duplicate_module 'simple_op' (M11; Yosys: re-definition of module)
-keywords/specparam/specparam_failure.v Parmys rejects: `specparam` outside a module (1:1)
+keywords/function_endfunction/function_input_failure.v [function_input_failure.v:6:5: error: syntax: unexpected system name] Parmys rejects: `$display` as a module item (6:5) and a call `add()` with no argument (A.8.2)
+keywords/function_endfunction/time_control_failure.v [time_control_failure.v:8:5: error: syntax: unexpected system name] Parmys rejects: `$display` as a module item (8:5); `always` inside a function
+keywords/default/multiple_defaults_failure.v [multiple_defaults_failure.v:7:1: error: syntax: unexpected system name] Parmys rejects: `$display` as a module item with no `;` (7:1); two `default` items
+keywords/macromodule/missing_endmodule_failure.v [missing_endmodule_failure.v:5:18: error: syntax: unexpected end of file] Parmys rejects: 2C: no `endmodule` (unexpected end of file, 5:18); Parmys fails earlier, on `macromodule` itself (1: unexpected TOK_ID; Yosys has no macromodule)
+keywords/module_endmodule/missing_endmodule_failure.v [missing_endmodule_failure.v:5:18: error: syntax: unexpected end of file] Parmys rejects: no `endmodule` (2C: unexpected end of file at 5:18; Yosys reports its end of file at line 1)
+keywords/macromodule/repeated_macromodule_failure.v [repeated_macromodule_failure.v:20:1: error: duplicate_module: module 'simple_op' is already defined] Parmys rejects: 2C: duplicate_module 'simple_op' (M11, 20:1); Parmys fails earlier, on `macromodule` itself (4: unexpected TOK_ID; Yosys has no macromodule)
+keywords/module_endmodule/repeated_module_failure.v [repeated_module_failure.v:20:1: error: duplicate_module: module 'simple_op' is already defined] Parmys rejects: duplicate_module 'simple_op' (M11; Yosys: re-definition of module)
+keywords/specparam/specparam_failure.v [specparam_failure.v:1:1: error: syntax: unexpected specparam] Parmys rejects: `specparam` outside a module (1:1)
 #
 # --- SystemVerilog named-argument calls f(.a(x)) (2C §7.4, §9; not Verilog-2005; Parmys rejects) --
-syntax/basic_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (20:24)
-syntax/bitwise_op_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (22:24)
-syntax/conditional_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (21:24)
-syntax/mix_expression_in_function_port.v Parmys rejects: SystemVerilog named-argument function call (20:24)
-syntax/basic_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
-syntax/bitwise_op_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
-syntax/conditional_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (12:17)
-syntax/mix_expression_in_task_port.v Parmys rejects: SystemVerilog named-argument task call (11:17)
-syntax/instantiated_by_name_function_valid.v Parmys rejects: SystemVerilog named-argument function call (21:16)
-syntax/instantiated_by_name_function_invalid.v Parmys rejects: SystemVerilog named-argument function call (21:16)
-syntax/instantiated_by_name_function_invalid_1.v Parmys rejects: SystemVerilog named-argument function call (21:16)
-syntax/instantiated_by_name_task_valid.v Parmys rejects: SystemVerilog named-argument task call (21:10)
-syntax/instantiated_by_name_task_invalid.v Parmys rejects: SystemVerilog named-argument task call (21:10)
-syntax/instantiated_by_name_task_invalid_1.v Parmys rejects: SystemVerilog named-argument task call (21:10)
+syntax/basic_expression_in_function_port.v [basic_expression_in_function_port.v:20:24: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (20:24)
+syntax/bitwise_op_expression_in_function_port.v [bitwise_op_expression_in_function_port.v:22:24: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (22:24)
+syntax/conditional_expression_in_function_port.v [conditional_expression_in_function_port.v:21:24: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (21:24)
+syntax/mix_expression_in_function_port.v [mix_expression_in_function_port.v:20:24: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (20:24)
+syntax/basic_expression_in_task_port.v [basic_expression_in_task_port.v:12:17: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/bitwise_op_expression_in_task_port.v [bitwise_op_expression_in_task_port.v:12:17: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/conditional_expression_in_task_port.v [conditional_expression_in_task_port.v:12:17: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (12:17)
+syntax/mix_expression_in_task_port.v [mix_expression_in_task_port.v:11:17: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (11:17)
+syntax/instantiated_by_name_function_valid.v [instantiated_by_name_function_valid.v:21:16: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_function_invalid.v [instantiated_by_name_function_invalid.v:21:16: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_function_invalid_1.v [instantiated_by_name_function_invalid_1.v:21:16: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument function call (21:16)
+syntax/instantiated_by_name_task_valid.v [instantiated_by_name_task_valid.v:21:10: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (21:10)
+syntax/instantiated_by_name_task_invalid.v [instantiated_by_name_task_invalid.v:21:10: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (21:10)
+syntax/instantiated_by_name_task_invalid_1.v [instantiated_by_name_task_invalid_1.v:21:10: error: syntax: unexpected '.'] Parmys rejects: SystemVerilog named-argument task call (21:10)
 #
 # --- the preprocessor micros 2B declares divergent (PHASE2 #11: formal spliced into a macro name) --
-syntax/preprocessor_define.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
-syntax/preprocessor_complex_define.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
-syntax/preprocessor_define_with_comment.v Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+syntax/preprocessor_define.v [preprocessor_define.v:29:32: error: syntax: undefined macro 'ADDITION_num'] Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+syntax/preprocessor_complex_define.v [preprocessor_complex_define.v:34:56: error: syntax: undefined macro 'ADDITION_num'] Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
+syntax/preprocessor_define_with_comment.v [preprocessor_define_with_comment.v:30:32: error: syntax: undefined macro 'ADDITION_num'] Parmys rejects: `ADDITION_num splices a formal into a macro name: undefined macro 'ADDITION_num' (PHASE2 #11)
 #
 # --- fragments that need a macro only their includer defines (read in context by it; PHASE2 #12) --
-keywords/.generic/range_any_width_binary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
-keywords/.generic/range_any_width_unary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
-keywords/.generic/replicate_any_width_binary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
-keywords/.generic/replicate_any_width_unary_test.v Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
-syntax/ifdef-else-syntax/module_a_and.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
-syntax/ifdef-else-syntax/module_a_or.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
-syntax/ifdef-else-syntax/module_b.v Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
-syntax/ifndef-else-syntax/module_a_and.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
-syntax/ifndef-else-syntax/module_a_or.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
-syntax/ifndef-else-syntax/module_b.v Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
-syntax/include-syntax/module_a.v Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
-syntax/include-syntax/module_b.v Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
-syntax/nested-ifdef-syntax/module_b.v Parmys rejects: a fragment of syntax/nested-ifdef-syntax.v, which defines `BITS before including it
+keywords/.generic/range_any_width_binary_test.v [range_any_width_binary_test.v:9:12: error: syntax: undefined macro 'WIDTH'] Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/range_any_width_unary_test.v [range_any_width_unary_test.v:9:12: error: syntax: undefined macro 'WIDTH'] Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/replicate_any_width_binary_test.v [replicate_any_width_binary_test.v:9:12: error: syntax: undefined macro 'WIDTH'] Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+keywords/.generic/replicate_any_width_unary_test.v [replicate_any_width_unary_test.v:9:12: error: syntax: undefined macro 'WIDTH'] Parmys rejects: a template; `WIDTH is defined by the keywords/*/*.vh that include it
+syntax/ifdef-else-syntax/module_a_and.v [module_a_and.v:8:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifdef-else-syntax/module_a_or.v [module_a_or.v:8:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifdef-else-syntax/module_b.v [module_b.v:8:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifdef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_a_and.v [module_a_and.v:7:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_a_or.v [module_a_or.v:8:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/ifndef-else-syntax/module_b.v [module_b.v:7:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/ifndef-else-syntax.v, which defines `BITS before including it
+syntax/include-syntax/module_a.v [module_a.v:7:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
+syntax/include-syntax/module_b.v [module_b.v:7:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/include-syntax.v, which defines `BITS before including it
+syntax/nested-ifdef-syntax/module_b.v [module_b.v:7:8: error: syntax: undefined macro 'BITS'] Parmys rejects: a fragment of syntax/nested-ifdef-syntax.v, which defines `BITS before including it
 #
 # --- illegal Verilog-2005 in a micro meant to pass (Parmys rejects these too) ---------------------
-preprocessor/nested_ifdef_alldef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
-preprocessor/nested_ifdef_middef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
-preprocessor/nested_ifdef_nonedef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
-preprocessor/nested_ifdef_outsidedef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
-preprocessor/nested_ifdef_twodef.v illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
-preprocessor/elsif_both_defined.v illegal Verilog-2005: `$display` as a module item (8:5; A.1.4 has no system task item)
-preprocessor/ifdef_undefined.v illegal Verilog-2005: `$display` as a module item (2:1; A.1.4 has no system task item)
-preprocessor/ifndef_defined.v illegal Verilog-2005: `$display` as a module item (4:5; A.1.4 has no system task item)
-preprocessor/nested_operation_define.v illegal Verilog-2005: `$display` as a module item (9:5; A.1.4 has no system task item)
-preprocessor/undef.v illegal Verilog-2005: `$display` as a module item (10:5; A.1.4 has no system task item)
-keywords/automatic/recursive_task.v illegal Verilog-2005: `task automatic integer` (a task has no return type, 9:17) closed by `endfunction`
-syntax/fir_scu_rtl_restructured_for_cmm_exp.v illegal Verilog-2005: a module instance inside an `always` block (94:11)
+preprocessor/nested_ifdef_alldef.v [nested_ifdef.vh:5:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_middef.v [nested_ifdef.vh:5:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_nonedef.v [nested_ifdef.vh:5:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_outsidedef.v [nested_ifdef.vh:5:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/nested_ifdef_twodef.v [nested_ifdef.vh:5:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (nested_ifdef.vh:5:5; A.1.4 has no system task item); its Parmys golden failed earlier, on the include path (Can't open include file `nested_ifdef.vh', an oracle working-directory artifact)
+preprocessor/elsif_both_defined.v [elsif_both_defined.v:8:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (8:5; A.1.4 has no system task item)
+preprocessor/ifdef_undefined.v [ifdef_undefined.v:2:1: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (2:1; A.1.4 has no system task item)
+preprocessor/ifndef_defined.v [ifndef_defined.v:4:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (4:5; A.1.4 has no system task item)
+preprocessor/nested_operation_define.v [nested_operation_define.v:9:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (9:5; A.1.4 has no system task item)
+preprocessor/undef.v [undef.v:10:5: error: syntax: unexpected system name] illegal Verilog-2005: `$display` as a module item (10:5; A.1.4 has no system task item)
+keywords/automatic/recursive_task.v [recursive_task.v:9:17: error: syntax: unexpected integer, expecting identifier] illegal Verilog-2005: `task automatic integer` (a task has no return type, 9:17) closed by `endfunction`
+syntax/fir_scu_rtl_restructured_for_cmm_exp.v [fir_scu_rtl_restructured_for_cmm_exp.v:94:11: error: syntax: unexpected identifier] illegal Verilog-2005: a module instance inside an `always` block (94:11)

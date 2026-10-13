@@ -58,11 +58,11 @@ from pathlib import Path
 from types import ModuleType
 
 import memcap
+from elab_equiv import GIB, MIB, format_cap
+from run_rows_equiv import parse_expect_line
 
 TOOL = "elab-sweep"
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_SKIP = 0, 1, 2, 77
-GIB, MIB = 1 << 30, 1 << 20
-DEFAULT_CAP = 4 * GIB  # plan point (n)
 TIMEOUT_S = 3600  # a file past an hour is that file's failure
 TAIL_LINES = 3
 SUFFIX = ".v"
@@ -88,6 +88,7 @@ class Item:
 class Expect:
     reason: str
     xl: bool
+    needle: str = ""  # must appear in the child's output (``<path> [needle] <reason>``)
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class Outcome:
     secs: float
     why: str = ""
     output: str = ""
+    hard: bool = False  # a signal, a memory-cap kill, a timeout or a child that cannot run
 
 
 def parse_size(text: str) -> int:
@@ -104,13 +106,6 @@ def parse_size(text: str) -> int:
     if match is None:
         raise UsageError(f"{text!r} is not a size (4G, 512M, 100K or bytes)")
     return int(match.group(1)) * _UNITS[match.group(2).upper()]
-
-
-def format_size(cap: int) -> str:
-    """A cap as the reports spell it: 4G, 512M, else bytes."""
-    if cap % GIB == 0:
-        return f"{cap // GIB}G"
-    return f"{cap // MIB}M" if cap % MIB == 0 else str(cap)
 
 
 # ---- collection (the library half) ------------------------------------------------------------
@@ -143,20 +138,20 @@ def collect(paths: Sequence[str], root: Path | None = None, suffix: str = SUFFIX
 
 
 def read_expect(path: Path) -> dict[str, Expect]:
-    """The expect-fail list: relative path -> Expect. Every entry needs a reason."""
+    """The expect-fail list: relative path -> Expect. Every entry needs a reason; the
+    ``[needle]`` between path and reason (the syntax of run-rows-equiv's list) is optional."""
     expect: dict[str, Expect] = {}
     for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
+        try:
+            parsed = parse_expect_line(raw)
+        except ValueError as exc:
+            raise UsageError(f"{path}:{number}: {exc}") from exc
+        if parsed is None:
             continue
-        parts = line.split(None, 1)
-        if len(parts) < 2 or not parts[1].strip():
-            raise UsageError(f"{path}:{number}: '{parts[0]}' has no reason")
-        if parts[0] in expect:
-            raise UsageError(f"{path}:{number}: '{parts[0]}' is listed twice")
-        reason = parts[1].strip()
-        marker = _XL_REASON.match(reason)
-        expect[parts[0]] = Expect(reason, marker is not None)
+        key, needle, reason = parsed
+        if key in expect:
+            raise UsageError(f"{path}:{number}: '{key}' is listed twice")
+        expect[key] = Expect(reason, _XL_REASON.match(reason) is not None, needle)
     return expect
 
 
@@ -256,13 +251,13 @@ def check_jobs(jobs: int, cap: int) -> None:
     limit = total * memcap.CAP_FRACTION_PERCENT // 100
     if jobs * cap > limit:
         raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_size(cap)} = {format_size(jobs * cap)} exceeds "
+            f"--jobs {jobs} x --mem-cap {format_cap(cap)} = {format_cap(jobs * cap)} exceeds "
             f"{memcap.CAP_FRACTION_PERCENT}% of MemTotal ({limit / GIB:.1f}G)")
     in_slice = slice_limit()
     if in_slice is not None and jobs * cap > in_slice:
         raise UsageError(
-            f"--jobs {jobs} x --mem-cap {format_size(cap)} exceeds the heavy slice's "
-            f"MemoryMax ({format_size(in_slice)})")
+            f"--jobs {jobs} x --mem-cap {format_cap(cap)} exceeds the heavy slice's "
+            f"MemoryMax ({format_cap(in_slice)})")
 
 
 # ---- running one file -------------------------------------------------------------------------
@@ -282,10 +277,18 @@ def child_why(done: subprocess.CompletedProcess[str], cap: int) -> str:
     code = done.returncode
     text = (done.stdout or "") + (done.stderr or "")
     if code in (-9, 137):
-        return f"out of memory (cap {format_size(cap)})"
+        return f"out of memory (cap {format_cap(cap)})"
     if code < 0:
         return f"killed by signal {-code}: {first_error(text)}"
     return f"exit {code}: {first_error(text)}"
+
+
+def child_outcome(done: subprocess.CompletedProcess[str], cap: int, secs: float) -> Outcome:
+    """The failed Outcome of a child that exited non-zero: its whole output is kept for the
+    expect-fail needle, and a signal or cap kill is ``hard`` (never an expected failure)."""
+    text = (done.stdout or "") + (done.stderr or "")
+    return Outcome("fail", secs, child_why(done, cap), text, hard=done.returncode < 0
+                   or done.returncode == 137)
 
 
 @dataclass(frozen=True)
@@ -317,9 +320,11 @@ def run_child(argv: Sequence[str], cap: int, start: float) -> tuple[subprocess.C
     try:
         return memcap.run(list(argv), cap, capture_output=True, timeout=TIMEOUT_S), None
     except subprocess.TimeoutExpired:
-        return None, Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s")
+        return None, Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s",
+                         hard=True)
     except OSError as exc:
-        return None, Outcome("fail", time.monotonic() - start, f"cannot run {argv[0]}: {exc}")
+        return None, Outcome("fail", time.monotonic() - start, f"cannot run {argv[0]}: {exc}",
+                             hard=True)
 
 
 def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
@@ -333,7 +338,7 @@ def run_elab(cfg: Config, item: Item, cap: int) -> Outcome:
     secs = time.monotonic() - start
     if done.returncode == 0:
         return Outcome("ok", secs, output=done.stdout or "")
-    return Outcome("fail", secs, child_why(done, cap))
+    return child_outcome(done, cap, secs)
 
 
 def run_bench(cfg: Config, item: Item, cap: int) -> Outcome:
@@ -346,7 +351,7 @@ def run_bench(cfg: Config, item: Item, cap: int) -> Outcome:
     secs = time.monotonic() - start
     if done.returncode == 0:
         return Outcome("ok", secs, output=(done.stdout or "").strip())
-    return Outcome("fail", secs, child_why(done, cap))
+    return child_outcome(done, cap, secs)
 
 
 def lock_fds() -> tuple[int, ...]:
@@ -370,7 +375,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
                               timeout=TIMEOUT_S, check=False, pass_fds=lock_fds())
     except subprocess.TimeoutExpired:
-        return Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s")
+        return Outcome("fail", time.monotonic() - start, f"timed out after {TIMEOUT_S} s",
+                       hard=True)
     secs = time.monotonic() - start
     text = (done.stdout or "") + (done.stderr or "")
     code = done.returncode
@@ -381,8 +387,8 @@ def run_equiv(cfg: Config, item: Item, cap: int) -> Outcome:
     if code == EXIT_SKIP:
         return Outcome("skip", secs, "cannot be capped")
     if code == EQUIV_DIFFER:
-        return Outcome("fail", secs, "NOT equivalent: " + first_error(text))
-    return Outcome("fail", secs, first_error(text) or f"exit {code}")
+        return Outcome("fail", secs, "NOT equivalent: " + first_error(text), text)
+    return Outcome("fail", secs, first_error(text) or f"exit {code}", text, hard=code < 0)
 
 
 def run_file(cfg: Config, item: Item) -> Outcome:
@@ -415,6 +421,12 @@ def verdict(item: Item, outcome: Outcome, expect: dict[str, Expect], xl: bool) -
         return "ok", f"ok    {head}"
     if listed:
         assert entry is not None
+        if outcome.hard:  # a crash, cap kill or timeout is never the listed rejection
+            return "FAIL", f"FAIL  {head}: {outcome.why} (listed, but a signal, a memory cap or " \
+                           "a timeout is never an expected failure)"
+        if entry.needle and entry.needle not in outcome.output:
+            return "FAIL", (f"FAIL  {head}: fails differently from the listing: expected "
+                            f"[{entry.needle}], got {outcome.why}")
         return "xfail", f"xfail {head}: {entry.reason}"
     return "FAIL", f"FAIL  {head}: {outcome.why}"
 
