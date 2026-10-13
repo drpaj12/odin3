@@ -139,7 +139,8 @@ class ExitCheckCase(unittest.TestCase):
         argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
                 "--sp-splice", str(self.splice), "--netlist-compare", str(self.compare),
                 "--equiv-check", str(self.equiv), "--golden-root", str(self.golden),
-                "--work", str(self.work), "--root", str(self.micros), *args,
+                "--work", str(self.work), "--root", str(self.micros),
+                *([] if "--vtr-config-template" in args else ["--no-config"]), *args,
                 *map(str, inputs if inputs is not None else [self.micros])]
         return helpers.run_main(exit_check.main, argv)
 
@@ -218,7 +219,7 @@ class ClassesTest(ExitCheckCase):
         code, out, _ = self.run_tool()
         self.assertEqual(code, 1)
         self.assertIn("error      g/multi.v", out)
-        self.assertIn("equiv-check: equiv-check: unsupported: more than one clock domain", out)
+        self.assertIn("equiv-check: unsupported: more than one clock domain", out)
 
 
 class ArgvTest(ExitCheckCase):
@@ -237,7 +238,7 @@ class ArgvTest(ExitCheckCase):
         self.assertTrue(compare[1].endswith("g/a/a.parmys.blif"))
         self.assertTrue(compare[2].endswith("out.blif"))
         equiv = self.calls("equiv-check")[0]  # only the design netlist-compare did not settle
-        self.assertEqual(equiv[1], "--x-report")
+        self.assertEqual(equiv[1:3], ["--x-report", "--match-dollar"])
         self.assertTrue(equiv[-2].endswith("g/b/b.parmys.blif"))
         self.assertEqual(len(self.calls("equiv-check")), 1)
 
@@ -257,6 +258,42 @@ class ArgvTest(ExitCheckCase):
         self.assertEqual(a[a.index("--techlib") + 1], "T.o3lib")
         self.assertEqual(a[a.index("--primitives") + 1], "P.v")
         self.assertEqual(a[a.index("--config") + 1], "C.xml")
+
+    def test_vtr_config_is_filled_per_design_as_vtr_fills_it(self) -> None:
+        self.arch.write_text(
+            "<architecture><pb_type blif_model=\".subckt single_port_ram\">"
+            "<input name=\"addr\" num_pins=\"15\"/><input name=\"data\" num_pins=\"64\"/>"
+            "</pb_type><pb_type blif_model=\".subckt dual_port_ram\">"
+            "<input name=\"addr1\" num_pins=\"14\"/></pb_type></architecture>\n",
+            encoding="utf-8")
+        template = self.dir / "template.xml"
+        template.write_text(
+            "<config><in>TTT XXX</in><arch>YYY</arch><mult size=\"MMM\" fixed=\"1\"/>"
+            "<mem depth=\"PPP\"/><add threshold=\"AAA\"/><out>ZZZ</out></config>\n",
+            encoding="utf-8")
+        src = self.micro("g", "a", "IDENT\n")
+        code, out, err = self.run_tool("--vtr-config-template", str(template))
+        self.assertEqual(code, 0, out + err)
+        call = self.calls("sp-splice")[0]
+        config = Path(call[call.index("--config") + 1])
+        self.assertEqual(config.parent, self.work / "0000-g_a.v")
+        text = config.read_text()
+        for expected in (f"Verilog {src}", "<arch>arch.xml</arch>", 'size="3" fixed="1"',
+                         'depth="15"', 'threshold="1"'):
+            self.assertIn(expected, text)
+        code, out, err = self.run_tool("--vtr-config-template", str(template),
+                                       "--min-hard-mult-size", "5", "--min-hard-adder-size", "0")
+        self.assertIn('size="5"', config.read_text())
+        self.assertIn('threshold="0"', config.read_text())
+
+    def test_no_template_is_a_usage_error(self) -> None:
+        self.micro("g", "a", "IDENT\n")
+        with mock.patch.dict(os.environ, {"VTR_ROOT": str(self.dir / "none")}):
+            code, _, err = helpers.run_main(exit_check.main, [
+                "--odin3", str(self.odin3), "--yosys", str(self.yosys), "--arch", str(self.arch),
+                str(self.micros)])
+        self.assertEqual(code, 2)
+        self.assertIn("basic_odin_config_split.xml not found", err)
 
     def test_a_cap_for_design_gets_its_cap_and_runs_alone(self) -> None:
         self.micro("g", "small", "IDENT\n")

@@ -3,7 +3,7 @@
 Usage::
 
     equiv-check A.blif B.blif [--abc PATH] [--keep-temp] [--strict-init] [--no-io-normalize]
-                [--no-cut] [--x-report]
+                [--no-cut] [--match-dollar] [--x-report]
 
 Exit 0 equivalent, 1 not equivalent (including mismatched primary I/O sets and black-box
 cut-point inputs that are wired differently), 2 usage, input, unsupported-construct or ABC
@@ -50,7 +50,12 @@ connect identically; a box's behaviour is assumed equal, never checked.  A black
 by a primary clock is fine (its outputs are free inputs), but a clocked black box's internal
 state is not modelled: only its connections are compared.  The cut is on whenever black
 boxes are present; ``--no-cut`` restores the old behaviour of rejecting them (exit 2, and
-``.gate`` is rejected as an unsupported directive).
+``.gate`` is rejected as an unsupported directive).  ``--match-dollar`` (2H) lets an instance with
+no ``.cname`` and no stable output net be named by its first output net even when it starts with
+``$``: Parmys names a hard multiplier's output ``$mul~14[0]`` and writes no ``.cname``, and both
+netlists of the exit test come out of Parmys's own counter.  The cut stays sound, because every
+matched pair must have equal input functions; a pairing that differs between the two files can
+only make the verdict a false "not equivalent" or exit 2.
 
 ABC models every latch as a flip-flop on one implicit clock, so each file must use a single
 (edge type, clock) pair -- the clock being a primary input, possibly through buffers -- and
@@ -259,10 +264,11 @@ def _gate_adder_model(cell: blif.Subckt) -> blif.Model:
 
 class _Flattener:
     def __init__(self, netlist: blif.Netlist, strict_init: bool, cut: bool,
-                 normalize: bool) -> None:
+                 normalize: bool, match_dollar: bool = False) -> None:
         self.netlist = netlist
         self.cut = cut
         self.normalize = normalize
+        self.match_dollar = match_dollar
         self.instances: dict[str, BlackBox] = {}
         self.models = netlist.by_name()
         self.strict_init = strict_init
@@ -385,10 +391,11 @@ class _Flattener:
         for attr, value in cell.attrs:
             if attr == ".cname" and value:
                 return "/".join([*frame.path[1:], norm(value)])
-        for formal, net in pins.items():
-            if is_out[formal] and _SEP not in net and not net.startswith("$"):
-                base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
-                return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
+        for dollar_ok in (False, True) if self.match_dollar else (False,):
+            for formal, net in pins.items():
+                if is_out[formal] and _SEP not in net and (dollar_ok or not net.startswith("$")):
+                    base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
+                    return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
         raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
                          f"{cell.model}: no .cname and no named output net to match it by")
 
@@ -458,12 +465,13 @@ def show(net: str) -> str:
 
 
 def flatten(netlist: blif.Netlist, strict_init: bool = False, allow_undriven: bool = False,
-            cut: bool = True, normalize: bool = True, check: bool = True) -> Flat:
+            cut: bool = True, normalize: bool = True, check: bool = True,
+            match_dollar: bool = False) -> Flat:
     """Flatten ``netlist`` into one model; black boxes are cut (``cut``) or rejected.
 
     ``check=False`` leaves the undriven-net check to the caller (``check_undriven``), so that
     black-box mismatches between the two files are reported first."""
-    flat = _Flattener(netlist, strict_init, cut, normalize).run()
+    flat = _Flattener(netlist, strict_init, cut, normalize, match_dollar).run()
     if check:
         check_undriven(flat, allow_undriven)
     return flat
@@ -782,7 +790,8 @@ def x_report(flats: Sequence[Flat], maps: Sequence[dict[str, str]], abc: str,
 def _check(args: argparse.Namespace) -> int:
     nets = [blif.parse_file(f, gates=not args.no_cut) for f in args.files]
     flats = [flatten(n, args.strict_init, args.allow_undriven, not args.no_cut,
-                     not args.no_io_normalize, check=False) for n in nets]
+                     not args.no_io_normalize, check=False, match_dollar=args.match_dollar)
+             for n in nets]
     match_blackboxes(flats)
     for flat in flats:
         check_undriven(flat, args.allow_undriven)
@@ -839,6 +848,12 @@ def _parser() -> argparse.ArgumentParser:
                     "out as free outputs / compared inputs matched by instance name")
     ap.add_argument("--no-io-normalize", action="store_true",
                     help="match primary I/O names verbatim")
+    ap.add_argument("--match-dollar", action="store_true",
+                    help="name a black box that has no .cname and no stable output net by its "
+                    "first output net even when that name starts with '$' (Parmys's own "
+                    "counter names, e.g. $mul~14): sound, since a matched pair must have equal "
+                    "input functions, but a pairing that differs between the files is a "
+                    "false 'not equivalent' (or exit 2), never a false 'equivalent'")
     ap.add_argument("--x-report", action="store_true",
                     help="when not equivalent, rerun without the outputs in an x-cone (reached "
                     "by `unconn`) and list them; exit 3 if equivalent outside them")

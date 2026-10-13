@@ -3,7 +3,8 @@
 Usage::
 
     exit-check --odin3 O --yosys Y --arch A [--sp-splice S] [--netlist-compare N]
-               [--equiv-check E] [--golden-root D] [--techlib L] [--primitives P] [--config C]
+               [--equiv-check E] [--golden-root D] [--techlib L] [--primitives P]
+               [--vtr-config-template X | --config C | --no-config]
                [--expect-fail F]... [--jobs J] [--mem-cap C] [--cap-for SUFFIX=C]...
                [--equiv-timeout S] [--work DIR] [--root R] [--limit N] [--partial]
                <dir or file>...
@@ -18,9 +19,14 @@ each design:
    ``micro-top``. A design without one (Parmys rejected it, or it was capped) is an ``error``;
 2. ``sp-splice`` (Odin III's front end through ``opt`` and ``proc``, then Yosys 0.55 with Parmys
    for the rest of VTR's script) runs with the same ``--arch`` and ``--top`` (the golden's first
-   ``.model``); it caps its own children at ``--mem-cap``;
+   ``.model``) and the same Parmys config as the goldens' run (VTR's
+   ``basic_odin_config_split.xml``, filled per design by ``write_parmys_config``: a fixed hard
+   ``multiply``, memories split to the arch's address width, min multiplier size 3, adder
+   threshold 1); it caps its own children at ``--mem-cap``;
 3. ``netlist-compare`` golden vs output: exit 0 is ``identical``;
-4. else ``equiv-check --x-report`` golden vs output: exit 0 is ``equivalent``, exit 3
+4. else ``equiv-check --x-report --match-dollar`` (Parmys writes no ``.cname`` for a hard
+   multiplier and names its outputs ``$mul~14[0]``, which the black-box matching needs) golden vs
+   output: exit 0 is ``equivalent``, exit 3
    ``equivalent outside x-cones`` (``eq-x``; the removed outputs are listed), exit 1 ``differs``,
    anything else ``error``. Each of these children runs under ``memcap.run``.
 
@@ -57,6 +63,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -84,6 +91,7 @@ VTR_MARK = ("benchmarks", "verilog")
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]+")
 # sp-splice reports a child that died of a signal or the cap as "failed (exit -9)" / "(exit 137)".
 _SIGNALLED = re.compile(r"\(exit (-\d+|137)\)")
+_PATH = re.compile(r"(?:/[^/\s:]+)+/([^/\s:]+)")
 _NOT_EQUIV = re.compile(r"^equiv-check: (NOT equivalent.*|x-report: .*)$", re.MULTILINE)
 
 
@@ -116,6 +124,9 @@ class Config:
     techlib: str | None = None
     primitives: str | None = None
     config: str | None = None
+    config_template: Path | None = None  # VTR's basic_odin_config_split.xml, filled per design
+    min_mult: int = 3
+    min_adder: int = 1
     equiv_timeout: int = 600
 
     def cap_of(self, item: elab_sweep.Item) -> int:
@@ -123,6 +134,42 @@ class Config:
             if item.rel == suffix or item.rel.endswith("/" + suffix):
                 return cap
         return self.cap
+
+
+# ---- Parmys's config -------------------------------------------------------------------------
+
+TEMPLATE_UNDER_VTR = "vtr_flow/misc/basic_odin_config_split.xml"
+
+
+def memory_addr_width(arch: Path) -> int:
+    """The largest RAM address width in the architecture (VTR's determine_memory_addr_width):
+    the ``addr`` input ports of the ``*port_ram`` primitives."""
+    width = 0
+    for elem in ET.parse(arch).getroot().iter("pb_type"):
+        if "port_ram" in (elem.get("blif_model") or ""):
+            for port in elem.findall("input"):
+                if "addr" in (port.get("name") or ""):
+                    width = max(width, int(port.get("num_pins") or 0))
+    return width
+
+
+def write_parmys_config(cfg: Config, source: Path, work: Path) -> Path:
+    """The ``-c`` file of VTR's Parmys stage (``basic_odin_config_split.xml`` with its
+    placeholders filled as ``vtr/parmys/parmys.py`` fills them): the hard multiplier is fixed at
+    the architecture's ``multiply`` (``fixed="1"``), the memories split to the architecture's
+    address width, ``-min_hard_mult_size`` 3 and ``-min_hard_adder_size`` 1 (run_vtr_flow's
+    defaults, which the goldens used)."""
+    assert cfg.config_template is not None
+    text = cfg.config_template.read_text(encoding="utf-8")
+    fills = {"YYY": Path(cfg.arch).name, "TTT": "Verilog", "ZZZ": "parmys.out.blif",
+             "PPP": str(memory_addr_width(Path(cfg.arch))), "MMM": str(cfg.min_mult),
+             "AAA": str(cfg.min_adder), "XXX": str(source)}
+    for key, value in fills.items():
+        text = text.replace(key, value)
+    work.mkdir(parents=True, exist_ok=True)
+    out = work / "parmys_config.xml"
+    out.write_text(text, encoding="utf-8")
+    return out
 
 
 # ---- goldens ----------------------------------------------------------------------------------
@@ -173,7 +220,8 @@ def clip(text: str, lines: int = LOG_LINES) -> str:
 
 
 def one_line(text: str) -> str:
-    line = " ".join(text.split())
+    """One line of at most WHY_WIDTH characters, every absolute path cut to its file name."""
+    line = _PATH.sub(r"\1", " ".join(text.split()))
     return line if len(line) <= WHY_WIDTH else line[:WHY_WIDTH - 3] + "..."
 
 
@@ -200,11 +248,12 @@ def splice_why(done: subprocess.CompletedProcess[str], cap: int) -> tuple[str, b
     return f"sp-splice: {message}", hard
 
 
-def splice_argv(cfg: Config, item: elab_sweep.Item, top: str, work: Path) -> list[str]:
+def splice_argv(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
+                config: str | None) -> list[str]:
     argv = [cfg.sp_splice, "--odin3", cfg.odin3, "--yosys", cfg.yosys, "--arch", cfg.arch,
             "--top", top, "--mem-cap", str(cfg.cap_of(item)), "--keep", str(work)]
     for flag, value in (("--techlib", cfg.techlib), ("--primitives", cfg.primitives),
-                        ("--config", cfg.config)):
+                        ("--config", config)):
         if value:
             argv += [flag, value]
     return [*argv, str(item.path)]
@@ -214,7 +263,10 @@ def run_splice(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
                log: list[str]) -> Path | Result:
     """sp-splice on the design: the output BLIF, or the Result of its failure. sp-splice caps its
     own children at the design's cap (it is one Python process and needs none itself)."""
-    argv = splice_argv(cfg, item, top, work)
+    config = cfg.config
+    if cfg.config_template is not None:
+        config = str(write_parmys_config(cfg, item.path, work))
+    argv = splice_argv(cfg, item, top, work, config)
     log.append("$ " + " ".join(argv))
     try:
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
@@ -238,7 +290,9 @@ def run_splice(cfg: Config, item: elab_sweep.Item, top: str, work: Path,
 
 def compare_failure(done: subprocess.CompletedProcess[str], cap: int, what: str) -> Result:
     """The error Result of a comparison child that exited with a code it does not define."""
-    text = (done.stdout or "") + (done.stderr or "")
+    text = "\n".join(line.removeprefix(f"{what}: ")
+                     for line in ((done.stdout or "") + (done.stderr or "")).splitlines()
+                     if not line.startswith(f"{what}: notice:"))
     hard = done.returncode < 0 or done.returncode == 137
     return Result(ERROR, why=(elab_sweep.child_why(done, cap) if hard
                               else f"{what}: " + one_line(elab_sweep.first_error(text))),
@@ -258,8 +312,8 @@ def cone_names(text: str) -> tuple[str, ...]:
 
 def run_equiv(cfg: Config, golden: Path, out: Path, cap: int, log: list[str]) -> Result:
     """``equiv-check --x-report golden out`` classified."""
-    got = run_capped([cfg.equiv_check, "--x-report", "--timeout", str(cfg.equiv_timeout),
-                      str(golden), str(out)], cap, log)
+    got = run_capped([cfg.equiv_check, "--x-report", "--match-dollar", "--timeout",
+                      str(cfg.equiv_timeout), str(golden), str(out)], cap, log)
     if isinstance(got, Result):
         return got
     text = (got.stdout or "") + (got.stderr or "")
@@ -461,7 +515,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="the Parmys golden tree of the arch (default: micro-top's)")
     ap.add_argument("--techlib", help="sp-splice --techlib (default: its own lib/vtr.o3lib)")
     ap.add_argument("--primitives", help="sp-splice --primitives (default under $VTR_ROOT)")
-    ap.add_argument("--config", help="sp-splice --config (Parmys's config file)")
+    ap.add_argument("--config", help="sp-splice --config: one Parmys config file for every design "
+                    "(instead of VTR's, filled per design)")
+    ap.add_argument("--vtr-config-template", type=Path, metavar="FILE",
+                    help="VTR's basic_odin_config_split.xml, filled per design as VTR's Parmys "
+                    "stage fills it (default: under $VTR_ROOT)")
+    ap.add_argument("--no-config", action="store_true",
+                    help="pass no Parmys config (the goldens were made with VTR's)")
+    ap.add_argument("--min-hard-mult-size", type=int, default=3,
+                    help="run_vtr_flow's -min_hard_mult_size (default 3, as the goldens)")
+    ap.add_argument("--min-hard-adder-size", type=int, default=1,
+                    help="run_vtr_flow's -min_hard_adder_size (default 1, as the goldens)")
     ap.add_argument("--expect-fail", type=Path, action="append", default=[],
                     help="<relative path> [needle] <reason> lines (repeatable)")
     ap.add_argument("--jobs", type=int, default=1)
@@ -493,6 +557,18 @@ def work_dir(arg: Path | None) -> Path:
     return arg.resolve()
 
 
+def config_template(args: argparse.Namespace) -> Path | None:
+    """VTR's Parmys config template, unless ``--config`` or ``--no-config`` replaces it."""
+    if args.no_config or args.config:
+        return None
+    root = os.environ.get("VTR_ROOT")
+    template = args.vtr_config_template or (Path(root) / TEMPLATE_UNDER_VTR if root else None)
+    if template is None or not template.is_file():
+        raise UsageError("VTR's basic_odin_config_split.xml not found: set VTR_ROOT, pass "
+                         "--vtr-config-template or --config, or --no-config")
+    return template.resolve()
+
+
 def build_config(args: argparse.Namespace) -> Config:
     caps: dict[str, int] = {}
     for spec in args.cap_for:
@@ -501,6 +577,7 @@ def build_config(args: argparse.Namespace) -> Config:
             raise UsageError(f"--cap-for {spec!r}: expected SUFFIX=CAP")
         caps[suffix] = elab_sweep.parse_size(size)
     golden = args.golden_root or elab_sweep.load_micro_top().DEFAULT_ROOT
+    template = config_template(args)
     arch = Path(args.arch)
     if not arch.is_file():
         raise UsageError(f"{args.arch}: no such architecture file")
@@ -510,7 +587,8 @@ def build_config(args: argparse.Namespace) -> Config:
         equiv_check=need_exe(args.equiv_check), golden_root=Path(golden).resolve(),
         work=work_dir(args.work), cap=elab_sweep.parse_size(args.mem_cap), caps=caps,
         techlib=args.techlib, primitives=args.primitives, config=args.config,
-        equiv_timeout=args.equiv_timeout)
+        config_template=template, min_mult=args.min_hard_mult_size,
+        min_adder=args.min_hard_adder_size, equiv_timeout=args.equiv_timeout)
 
 
 def limit_items(cfg: Config, items: list[elab_sweep.Item], limit: int | None) \

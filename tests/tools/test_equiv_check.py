@@ -314,6 +314,24 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no .cname and no named output net", err)
 
+    def test_match_dollar_names_a_box_by_its_dollar_output(self) -> None:
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$mul~7")
+                + ".names $mul~7 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check("--match-dollar", a, a)
+        self.assertEqual(code, 0 if ABC else 2, err)
+        flats = [equiv_check.flatten(blif.parse_file(a, gates=True), match_dollar=True)
+                 for _ in range(2)]
+        equiv_check.match_blackboxes(flats)
+        self.assertEqual(flats[0].blackboxes[0].key, "out=$mul[7]")
+
+    def test_match_dollar_prefers_a_stable_name(self) -> None:
+        two = (".model t\n.inputs clk a b c\n.outputs y\n"
+               ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=$x out[1]=named we=c\n"
+               ".names $x named y\n11 1\n.end\n")
+        flat = equiv_check.flatten(blif.parse_text(two, gates=True), match_dollar=True)
+        self.assertEqual(flat.blackboxes[0].key, "out[1]=named")
+
     def test_duplicate_cname_exit_2(self) -> None:
         text = (BB_HEAD + RAM_Q + ".cname ram\n" + RAM_Q.replace("q", "r") + ".cname ram\n"
                 + BB_TAIL)
