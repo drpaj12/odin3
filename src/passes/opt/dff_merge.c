@@ -404,22 +404,27 @@ static odin3_status marks_apply(merge_job *job) {
     return st;
 }
 
-/* Rolls the job back: the marks turned back, the FFs made deleted (the old node is untouched). */
-static void job_undo(merge_job *job) {
+/* Rolls the job back: the marks turned back, the FFs made deleted (the old node is untouched).
+ * Every step is tried; the first failure is returned (a delete can fail on allocation). */
+static odin3_status job_undo(merge_job *job) {
     odin3_module *module = job->ds->oc->module;
+    odin3_status first = ODIN3_OK;
     for (uint32_t k = job->applied; k > 0; k--) {
         const odin3_dff_xmark *mark = odin3_vec_cat(&job->plan->marks, k - 1U);
-        (void)odin3_pin_disconnect(module, mark->pin);
-        (void)odin3_pin_connect(module, mark->pin, mark->old);
+        odin3_status st = odin3_pin_disconnect(module, mark->pin);
+        st = st == ODIN3_OK ? odin3_pin_connect(module, mark->pin, mark->old) : st;
+        first = first == ODIN3_OK ? st : first;
     }
     job->applied = 0;
     for (size_t k = 0; k < job->made.len; k++) {
         odin3_node_id node = {((const uint32_t *)job->made.data)[k]};
         if (odin3_node_live(module, node)) {
-            (void)odin3_node_delete(module, node);
+            odin3_status st = odin3_node_delete(module, node);
+            first = first == ODIN3_OK ? st : first;
         }
     }
     odin3_vec_clear(&job->made);
+    return first;
 }
 
 /* The old node without the merged bits, re-emitted: their Q nets are handed on (keep == drop). */
@@ -446,6 +451,13 @@ static odin3_status job_retire(merge_job *job) {
     return st;
 }
 
+/* A failure before the old node went: nothing destructive happened, so the IR is as it was but for
+ * dead gates, unless the undo itself ran out of memory (a group FF still on the old Q nets): then
+ * the design is half-done and says so. */
+static odin3_status job_fail(merge_job *job, odin3_status st) {
+    return job_undo(job) == ODIN3_OK ? st : odin3_kit_half_done(job->ds->oc, st);
+}
+
 /* The groups made, the marks applied and the old node shrunk; the FFs made go on the work list. */
 static odin3_status job_run(merge_job *job) {
     odin3_dff_state *ds = job->ds;
@@ -459,8 +471,7 @@ static odin3_status job_run(merge_job *job) {
     st = st == ODIN3_OK ? marks_apply(job) : st;
     st = st == ODIN3_OK ? job_retire(job) : st;
     if (st != ODIN3_OK && odin3_node_live(ds->oc->module, ds->cell)) {
-        job_undo(job); /* nothing destructive happened: the IR is as it was but for dead gates */
-        return st;
+        return job_fail(job, st);
     }
     for (size_t k = 0; st == ODIN3_OK && k < job->made.len; k++) { /* committed: count them */
         odin3_dff_note(ds, job->is_srst ? ODIN3_OPT_DFF_ADD_SRST : ODIN3_OPT_DFF_ADD_EN, "");

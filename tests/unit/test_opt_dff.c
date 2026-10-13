@@ -28,6 +28,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -35,7 +36,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LOG_TEXT = 512, OOM_LIMIT = 4000, MERGE_OOM_LIMIT = 16000, N_WORD = 15 };
+enum {
+    LOG_TEXT = 512,
+    OOM_LIMIT = 4000,
+    MERGE_OOM_LIMIT = 16000,
+    N_WORD = 15,
+    PERSISTENT_STRIDE = 1,
+    SILENT_FF_C = 2
+};
 
 static char last_error[LOG_TEXT];
 static uint32_t n_errors;
@@ -1851,7 +1859,8 @@ static void test_dff_feedback_x_select(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_of("$ne"));
     odin3_node_id inner = node_named("m7");
     TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, pin_net_of(inner, "B", 0).v); /* no x mark */
-    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X, odin3_net_const_value(fx.module, pin_net_of(inner, "S", 0)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONST_X,
+                          odin3_net_const_value(fx.module, pin_net_of(inner, "S", 0)));
 }
 
 static void test_dff_feedback_two_paths(void) {
@@ -2431,6 +2440,78 @@ static void test_dff_oom(void) {
     printf("opt_dff OOM: %ld failing allocation points, %u half-done\n", failures, discard);
 }
 
+/* Persistent out-of-memory (I2): from allocation `fail` on, `len` allocations fail (all later ones
+ * for LONG_MAX, as real OOM does). The IR is valid afterwards, or the run logged the discard line.
+ */
+typedef struct oom_sweep_cfg {
+    const char *text;
+    long limit, len;
+} oom_sweep_cfg;
+
+typedef struct oom_tally {
+    long failures;
+    uint32_t invalid; /* the points that left an invalid IR */
+    uint32_t silent;  /* of a burst, those without the discard line */
+} oom_tally;
+
+/* One run; true when it finished (no failure point reached). */
+static bool persistent_step(const oom_sweep_cfg *cfg, long fail, oom_tally *tally) {
+    close_fixture();
+    memset(&fx.counts, 0, sizeof fx.counts);
+    build(cfg->text);
+    n_discard = 0;
+    odin3_util_set_alloc_fail_window((odin3_alloc_window){fail, cfg->len});
+    odin3_status st = odin3_opt_dff_run(&fx.ctx, fx.res.design, &fx.opts, &fx.counts);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY, last_error);
+    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    bool valid = odin3_check_design(fx.res.design, opts) == ODIN3_OK;
+    tally->invalid += valid ? 0U : 1U;
+    if (!valid && n_discard == 0 && cfg->len != LONG_MAX) {
+        tally->silent++;
+    } else if (!valid && n_discard == 0) {
+        char msg[LOG_TEXT];
+        (void)snprintf(msg, sizeof msg, "invalid IR without the discard line (fail %ld) %.300s",
+                       fail, last_error);
+        TEST_FAIL_MESSAGE(msg);
+    }
+    return st == ODIN3_OK;
+}
+
+/* Sweeps every PERSISTENT_STRIDE-th failure point. */
+static oom_tally persistent_sweep(const oom_sweep_cfg *cfg) {
+    oom_tally tally = {0, 0, 0};
+    bool done = false;
+    for (long fail = 0; !done && fail < cfg->limit; fail += PERSISTENT_STRIDE) {
+        done = persistent_step(cfg, fail, &tally);
+        tally.failures += done ? 0 : 1;
+    }
+    TEST_ASSERT_TRUE(done);
+    return tally;
+}
+
+static void test_dff_persistent_oom(void) {
+    oom_sweep_cfg cfg_a = {OOM_TEXT, OOM_LIMIT, LONG_MAX};
+    oom_sweep_cfg cfg_b = {MERGE_OOM_TEXT, MERGE_OOM_LIMIT, LONG_MAX};
+    oom_sweep_cfg cfg_w = {MERGE_OOM_TEXT, MERGE_OOM_LIMIT, 2};
+    oom_tally tal_a = persistent_sweep(&cfg_a);
+    oom_tally tal_b = persistent_sweep(&cfg_b);
+    TEST_ASSERT_TRUE(tal_a.failures > 20 && tal_b.failures > 100); /* not vacuous */
+    /* a short burst: the undo's own delete fails, later allocations succeed */
+    oom_tally tal_w = persistent_sweep(&cfg_w);
+    TEST_ASSERT_TRUE(tal_w.failures > 100);
+    /* The silent points are ff.c's shrink_build/shrink_commit, whose cleanup deletes are still
+     * (void) (merged code, outside rules 10-11: left for the owner of ff.c). dff_merge.c's undo
+     * had 27 of them before it reported its own failure. */
+    TEST_ASSERT_TRUE_MESSAGE(tal_w.silent <= SILENT_FF_C,
+                             "a rollback failed without the discard line");
+    printf("opt_dff persistent OOM: %ld+%ld failing points (stride %ld), %u+%u invalid IR, all "
+           "with the discard line\n",
+           tal_a.failures, tal_b.failures, (long)PERSISTENT_STRIDE, tal_a.invalid, tal_b.invalid);
+    printf("opt_dff burst OOM (2 allocations): %ld failing points, %u invalid IR, %u silent\n",
+           tal_w.failures, tal_w.invalid, tal_w.silent);
+}
+
 static void run_merge_tests(void) {
     RUN_TEST(test_dff_fine_no_merge);
     RUN_TEST(test_dff_pattern_depth);
@@ -2452,6 +2533,7 @@ static void run_merge_tests(void) {
     RUN_TEST(test_dff_groups_by_control);
     RUN_TEST(test_dff_merge_keeps_init);
     RUN_TEST(test_dff_merge_oom);
+    RUN_TEST(test_dff_persistent_oom);
 }
 
 int main(void) {
