@@ -1,0 +1,67 @@
+# generated: elab-check --write
+(UNIT:m8_top @M8_macromodule.v:11:1
+  (MODULE:m8_top @M8_macromodule.v:11:1
+    _
+    (LIST @M8_macromodule.v:11:15
+      (PORT_DECL.input [IN_HEADER NET=1] @M8_macromodule.v:11:16
+        _
+        (DECLARATOR:a @M8_macromodule.v:11:22
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M8_macromodule.v:11:25
+        _
+        (DECLARATOR:y1 @M8_macromodule.v:11:32
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M8_macromodule.v:11:25
+        _
+        (DECLARATOR:y2 @M8_macromodule.v:11:36
+          _)))
+    (INSTANTIATION:m8_macro @M8_macromodule.v:12:3
+      _
+      (INSTANCE:u1 @M8_macromodule.v:12:12
+        _
+        (CONNECTION:a @M8_macromodule.v:12:16
+          (IDENT:a @M8_macromodule.v:12:19))
+        (CONNECTION:y @M8_macromodule.v:12:23
+          (IDENT:y1 @M8_macromodule.v:12:26))))
+    (INSTANTIATION:m8_macro_nonansi @M8_macromodule.v:13:3
+      _
+      (INSTANCE:u2 @M8_macromodule.v:13:20
+        _
+        (CONNECTION:a @M8_macromodule.v:13:24
+          (IDENT:a @M8_macromodule.v:13:27))
+        (CONNECTION:y @M8_macromodule.v:13:31
+          (IDENT:y2 @M8_macromodule.v:13:34)))))
+  (MODULE:m8_macro @M8_macromodule.v:2:1
+    _
+    (LIST @M8_macromodule.v:2:22
+      (PORT_DECL.input [IN_HEADER NET=1] @M8_macromodule.v:2:23
+        _
+        (DECLARATOR:a @M8_macromodule.v:2:29
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M8_macromodule.v:2:32
+        _
+        (DECLARATOR:y @M8_macromodule.v:2:39
+          _)))
+    (CONT_ASSIGN @M8_macromodule.v:3:3
+      _
+      _
+      (NET_ASSIGN @M8_macromodule.v:3:10
+        (IDENT:y @M8_macromodule.v:3:10)
+        (IDENT:a @M8_macromodule.v:3:14))))
+  (MODULE:m8_macro_nonansi @M8_macromodule.v:6:1
+    _
+    (LIST @M8_macromodule.v:6:30
+      (PORT_DECL.input [IN_HEADER NET=1] @M8_macromodule.v:7:3
+        _
+        (DECLARATOR:a @M8_macromodule.v:7:9
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @M8_macromodule.v:8:3
+        _
+        (DECLARATOR:y @M8_macromodule.v:8:10
+          _)))
+    (CONT_ASSIGN @M8_macromodule.v:9:3
+      _
+      _
+      (NET_ASSIGN @M8_macromodule.v:9:10
+        (IDENT:y @M8_macromodule.v:9:10)
+        (IDENT:a @M8_macromodule.v:9:14)))))

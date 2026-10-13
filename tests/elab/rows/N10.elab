@@ -1,0 +1,44 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:n10_scalar_array @N10_scalar_arrays.v:2:1
+  (MODULE:n10_scalar_array @N10_scalar_arrays.v:2:1
+    _
+    (LIST @N10_scalar_arrays.v:2:25
+      (PORT_DECL.input [IN_HEADER NET=1] @N10_scalar_arrays.v:2:26
+        (RANGE @N10_scalar_arrays.v:2:32
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:2:33 32'sd1)
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:2:35 32'sd0))
+        (DECLARATOR:i @N10_scalar_arrays.v:2:38
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N10_scalar_arrays.v:2:41
+        _
+        (DECLARATOR:y @N10_scalar_arrays.v:2:48
+          _)))
+    (VAR_DECL.reg @N10_scalar_arrays.v:3:3
+      _
+      (DECLARATOR:a @N10_scalar_arrays.v:3:7
+        _
+        (RANGE @N10_scalar_arrays.v:3:9
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:3:10 32'sd0)
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:3:12 32'sd3))))
+    (VAR_DECL.reg @N10_scalar_arrays.v:4:3
+      _
+      (DECLARATOR:b @N10_scalar_arrays.v:4:7
+        _
+        (RANGE @N10_scalar_arrays.v:4:9
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:4:10 32'sd3)
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:4:12 32'sd0)))
+      (DECLARATOR:c @N10_scalar_arrays.v:4:16
+        _
+        (RANGE @N10_scalar_arrays.v:4:18
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:4:19 32'sd0)
+          (NUMBER.dec [SIGNED] @N10_scalar_arrays.v:4:21 32'sd1))))
+    (CONT_ASSIGN @N10_scalar_arrays.v:5:3
+      _
+      _
+      (NET_ASSIGN @N10_scalar_arrays.v:5:10
+        (IDENT:y @N10_scalar_arrays.v:5:10)
+        (SELECT.bit @N10_scalar_arrays.v:5:14
+          (IDENT:a @N10_scalar_arrays.v:5:14)
+          (IDENT:i @N10_scalar_arrays.v:5:16)
+          _)))))

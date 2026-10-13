@@ -1,0 +1,144 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:g4_gen_down @G4_loop_generate_down.v:2:1
+  (MODULE:g4_gen_down @G4_loop_generate_down.v:2:1
+    _
+    (LIST @G4_loop_generate_down.v:2:20
+      (PORT_DECL.input [IN_HEADER NET=1] @G4_loop_generate_down.v:2:21
+        (RANGE @G4_loop_generate_down.v:2:27
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:28 32'sd7)
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:30 32'sd0))
+        (DECLARATOR:a @G4_loop_generate_down.v:2:33
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G4_loop_generate_down.v:2:36
+        (RANGE @G4_loop_generate_down.v:2:43
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:44 32'sd3)
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:46 32'sd0))
+        (DECLARATOR:y @G4_loop_generate_down.v:2:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G4_loop_generate_down.v:2:52
+        (RANGE @G4_loop_generate_down.v:2:59
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:60 32'sd7)
+          (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:2:62 32'sd0))
+        (DECLARATOR:z @G4_loop_generate_down.v:2:65
+          _)))
+    (GEN_BLOCK:down @G4_loop_generate_down.v:4:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:34 32'sd3)
+      (CONT_ASSIGN @G4_loop_generate_down.v:5:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:5:12
+          (SELECT.bit @G4_loop_generate_down.v:5:12
+            (IDENT:y @G4_loop_generate_down.v:5:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:14 32'sd3)
+            _)
+          (SELECT.bit @G4_loop_generate_down.v:5:19
+            (IDENT:a @G4_loop_generate_down.v:5:19)
+            (BINARY.- @G4_loop_generate_down.v:5:21
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:21 3)
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:25 32'sd3))
+            _))))
+    (GEN_BLOCK:down @G4_loop_generate_down.v:4:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:34 32'sd2)
+      (CONT_ASSIGN @G4_loop_generate_down.v:5:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:5:12
+          (SELECT.bit @G4_loop_generate_down.v:5:12
+            (IDENT:y @G4_loop_generate_down.v:5:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:14 32'sd2)
+            _)
+          (SELECT.bit @G4_loop_generate_down.v:5:19
+            (IDENT:a @G4_loop_generate_down.v:5:19)
+            (BINARY.- @G4_loop_generate_down.v:5:21
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:21 3)
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:25 32'sd2))
+            _))))
+    (GEN_BLOCK:down @G4_loop_generate_down.v:4:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:34 32'sd1)
+      (CONT_ASSIGN @G4_loop_generate_down.v:5:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:5:12
+          (SELECT.bit @G4_loop_generate_down.v:5:12
+            (IDENT:y @G4_loop_generate_down.v:5:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:14 32'sd1)
+            _)
+          (SELECT.bit @G4_loop_generate_down.v:5:19
+            (IDENT:a @G4_loop_generate_down.v:5:19)
+            (BINARY.- @G4_loop_generate_down.v:5:21
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:21 3)
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:25 32'sd1))
+            _))))
+    (GEN_BLOCK:down @G4_loop_generate_down.v:4:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:4:34 32'sd0)
+      (CONT_ASSIGN @G4_loop_generate_down.v:5:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:5:12
+          (SELECT.bit @G4_loop_generate_down.v:5:12
+            (IDENT:y @G4_loop_generate_down.v:5:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:14 32'sd0)
+            _)
+          (SELECT.bit @G4_loop_generate_down.v:5:19
+            (IDENT:a @G4_loop_generate_down.v:5:19)
+            (BINARY.- @G4_loop_generate_down.v:5:21
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:21 3)
+              (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:5:25 32'sd0))
+            _))))
+    (GEN_BLOCK:by_two @G4_loop_generate_down.v:7:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:34 32'sd6)
+      (CONT_ASSIGN @G4_loop_generate_down.v:8:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:8:12
+          (SELECT.part_plus @G4_loop_generate_down.v:8:12
+            (IDENT:z @G4_loop_generate_down.v:8:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:14 32'sd6)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:19 32'sd2))
+          (SELECT.part_plus @G4_loop_generate_down.v:8:24
+            (IDENT:a @G4_loop_generate_down.v:8:24)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:26 32'sd6)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:31 32'sd2)))))
+    (GEN_BLOCK:by_two @G4_loop_generate_down.v:7:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:34 32'sd4)
+      (CONT_ASSIGN @G4_loop_generate_down.v:8:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:8:12
+          (SELECT.part_plus @G4_loop_generate_down.v:8:12
+            (IDENT:z @G4_loop_generate_down.v:8:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:14 32'sd4)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:19 32'sd2))
+          (SELECT.part_plus @G4_loop_generate_down.v:8:24
+            (IDENT:a @G4_loop_generate_down.v:8:24)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:26 32'sd4)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:31 32'sd2)))))
+    (GEN_BLOCK:by_two @G4_loop_generate_down.v:7:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:34 32'sd2)
+      (CONT_ASSIGN @G4_loop_generate_down.v:8:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:8:12
+          (SELECT.part_plus @G4_loop_generate_down.v:8:12
+            (IDENT:z @G4_loop_generate_down.v:8:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:14 32'sd2)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:19 32'sd2))
+          (SELECT.part_plus @G4_loop_generate_down.v:8:24
+            (IDENT:a @G4_loop_generate_down.v:8:24)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:26 32'sd2)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:31 32'sd2)))))
+    (GEN_BLOCK:by_two @G4_loop_generate_down.v:7:34
+      (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:7:34 32'sd0)
+      (CONT_ASSIGN @G4_loop_generate_down.v:8:5
+        _
+        _
+        (NET_ASSIGN @G4_loop_generate_down.v:8:12
+          (SELECT.part_plus @G4_loop_generate_down.v:8:12
+            (IDENT:z @G4_loop_generate_down.v:8:12)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:14 32'sd0)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:19 32'sd2))
+          (SELECT.part_plus @G4_loop_generate_down.v:8:24
+            (IDENT:a @G4_loop_generate_down.v:8:24)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:26 32'sd0)
+            (NUMBER.dec [SIGNED] @G4_loop_generate_down.v:8:31 32'sd2)))))))

@@ -1,0 +1,33 @@
+# generated: elab-check --write
+(UNIT:l1_comments @L1_comments.v:3:1
+  (MODULE:l1_comments @L1_comments.v:3:1
+    _
+    (LIST @L1_comments.v:3:20
+      (PORT_DECL.input [IN_HEADER NET=1] @L1_comments.v:3:21
+        _
+        (DECLARATOR:a @L1_comments.v:3:27
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @L1_comments.v:3:21
+        _
+        (DECLARATOR:b @L1_comments.v:3:30
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L1_comments.v:3:33
+        _
+        (DECLARATOR:y @L1_comments.v:3:40
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L1_comments.v:3:33
+        _
+        (DECLARATOR:z @L1_comments.v:3:43
+          _)))
+    (CONT_ASSIGN @L1_comments.v:8:3
+      _
+      _
+      (NET_ASSIGN @L1_comments.v:8:10
+        (IDENT:y @L1_comments.v:8:10)
+        (IDENT:a @L1_comments.v:8:35)))
+    (CONT_ASSIGN @L1_comments.v:9:3
+      _
+      _
+      (NET_ASSIGN @L1_comments.v:9:10
+        (IDENT:z @L1_comments.v:9:10)
+        (IDENT:b @L1_comments.v:9:14)))))

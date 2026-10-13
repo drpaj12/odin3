@@ -1,0 +1,61 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent; key fields hand-checked 2026-10-13
+(UNIT:g5_if_gen @G5_if_generate.v:2:1
+  (MODULE:g5_if_gen @G5_if_generate.v:2:1
+    (LIST @G5_if_generate.v:2:18
+      (PARAM_DECL.localparam [IN_HEADER] @G5_if_generate.v:2:20
+        _
+        (DECLARATOR:W @G5_if_generate.v:2:30
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:30 2))))
+    (LIST @G5_if_generate.v:2:37
+      (PORT_DECL.input [IN_HEADER NET=1] @G5_if_generate.v:2:38
+        (RANGE @G5_if_generate.v:2:44
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:45 32'sd3)
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:47 32'sd0))
+        (DECLARATOR:a @G5_if_generate.v:2:50
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G5_if_generate.v:2:53
+        (RANGE @G5_if_generate.v:2:60
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:61 32'sd3)
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:63 32'sd0))
+        (DECLARATOR:y1 @G5_if_generate.v:2:66
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G5_if_generate.v:2:53
+        (RANGE @G5_if_generate.v:2:60
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:61 32'sd3)
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:63 32'sd0))
+        (DECLARATOR:y2 @G5_if_generate.v:2:70
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @G5_if_generate.v:2:53
+        (RANGE @G5_if_generate.v:2:60
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:61 32'sd3)
+          (NUMBER.dec [SIGNED] @G5_if_generate.v:2:63 32'sd0))
+        (DECLARATOR:y3 @G5_if_generate.v:2:74
+          _)))
+    (GEN_BLOCK:genblk1 @G5_if_generate.v:5:12
+      _
+      (GEN_BLOCK:two @G5_if_generate.v:5:24
+        _
+        (CONT_ASSIGN @G5_if_generate.v:6:5
+          _
+          _
+          (NET_ASSIGN @G5_if_generate.v:6:12
+            (IDENT:y1 @G5_if_generate.v:6:12)
+            (UNARY.~ @G5_if_generate.v:6:17
+              (IDENT:a @G5_if_generate.v:6:18))))))
+    (GEN_BLOCK:genblk2 @G5_if_generate.v:12:7
+      _
+      (CONT_ASSIGN @G5_if_generate.v:12:7
+        _
+        _
+        (NET_ASSIGN @G5_if_generate.v:12:14
+          (IDENT:y2 @G5_if_generate.v:12:14)
+          (IDENT:a @G5_if_generate.v:12:19))))
+    (GEN_BLOCK:genblk3 @G5_if_generate.v:17:5
+      _
+      (CONT_ASSIGN @G5_if_generate.v:17:5
+        _
+        _
+        (NET_ASSIGN @G5_if_generate.v:17:12
+          (IDENT:y3 @G5_if_generate.v:17:12)
+          (IDENT:a @G5_if_generate.v:17:17))))))

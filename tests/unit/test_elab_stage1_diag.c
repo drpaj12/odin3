@@ -597,14 +597,22 @@ static void run_coverage(const cov_run *run) {
 }
 
 /* The MODULE names of the last run's parsed store, copied (the store goes with the next run). */
+static void copy_module_name(char (*names)[COVERAGE_PATH], size_t count, size_t cap,
+                             const char *name) {
+    TEST_ASSERT_TRUE_MESSAGE(count < cap, "a coverage row declares more modules than "
+                                          "COVERAGE_MODULES: raise the cap (it was silent)");
+    TEST_ASSERT_TRUE(snprintf(names[count], COVERAGE_PATH, "%s", name) > 0);
+}
+
 static size_t parsed_modules(char (*names)[COVERAGE_PATH], size_t cap) {
     size_t count = 0;
     odin3_ast_span units = odin3_ast_children(rs.parsed, odin3_ast_root(rs.parsed, 0));
-    for (uint32_t i = 0; i < units.n && count < cap; i++) {
-        if (odin3_ast_kind_of(rs.parsed, units.ids[i]) == ODIN3_AST_MODULE) {
-            TEST_ASSERT_TRUE(snprintf(names[count++], COVERAGE_PATH, "%s",
-                                      odin3_ast_name_str(rs.parsed, units.ids[i])) > 0);
+    for (uint32_t i = 0; i < units.n; i++) {
+        if (odin3_ast_kind_of(rs.parsed, units.ids[i]) != ODIN3_AST_MODULE) {
+            continue;
         }
+        copy_module_name(names, count, cap, odin3_ast_name_str(rs.parsed, units.ids[i]));
+        count++;
     }
     return count;
 }

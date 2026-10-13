@@ -1,0 +1,75 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:k6_func_call @K6_function_calls_function.v:2:1
+  (MODULE:k6_func_call @K6_function_calls_function.v:2:1
+    _
+    (LIST @K6_function_calls_function.v:2:21
+      (PORT_DECL.input [IN_HEADER NET=1] @K6_function_calls_function.v:2:22
+        (RANGE @K6_function_calls_function.v:2:28
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:29 32'sd3)
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:31 32'sd0))
+        (DECLARATOR:a @K6_function_calls_function.v:2:34
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K6_function_calls_function.v:2:22
+        (RANGE @K6_function_calls_function.v:2:28
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:29 32'sd3)
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:31 32'sd0))
+        (DECLARATOR:b @K6_function_calls_function.v:2:37
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @K6_function_calls_function.v:2:40
+        (RANGE @K6_function_calls_function.v:2:47
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:48 32'sd3)
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:2:50 32'sd0))
+        (DECLARATOR:y @K6_function_calls_function.v:2:53
+          _)))
+    (FUNCTION_DECL:inc @K6_function_calls_function.v:3:3
+      (RANGE @K6_function_calls_function.v:3:12
+        (NUMBER.dec [SIGNED] @K6_function_calls_function.v:3:13 32'sd3)
+        (NUMBER.dec [SIGNED] @K6_function_calls_function.v:3:15 32'sd0))
+      (LIST @K6_function_calls_function.v:3:23
+        (PORT_DECL.input [IN_HEADER NET=1] @K6_function_calls_function.v:3:23
+          (RANGE @K6_function_calls_function.v:3:29
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:3:30 32'sd3)
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:3:32 32'sd0))
+          (DECLARATOR:x @K6_function_calls_function.v:3:35
+            _)))
+      (LIST @K6_function_calls_function.v:3:38)
+      (BLOCKING_ASSIGN @K6_function_calls_function.v:4:5
+        (IDENT:inc @K6_function_calls_function.v:4:5)
+        _
+        (BINARY.+ @K6_function_calls_function.v:4:11
+          (IDENT:x @K6_function_calls_function.v:4:11)
+          (NUMBER.dec [SIGNED] @K6_function_calls_function.v:4:15 1))))
+    (FUNCTION_DECL:add_inc @K6_function_calls_function.v:6:3
+      (RANGE @K6_function_calls_function.v:6:12
+        (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:13 32'sd3)
+        (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:15 32'sd0))
+      (LIST @K6_function_calls_function.v:6:27
+        (PORT_DECL.input [IN_HEADER NET=1] @K6_function_calls_function.v:6:27
+          (RANGE @K6_function_calls_function.v:6:33
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:34 32'sd3)
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:36 32'sd0))
+          (DECLARATOR:x @K6_function_calls_function.v:6:39
+            _))
+        (PORT_DECL.input [IN_HEADER NET=1] @K6_function_calls_function.v:6:27
+          (RANGE @K6_function_calls_function.v:6:33
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:34 32'sd3)
+            (NUMBER.dec [SIGNED] @K6_function_calls_function.v:6:36 32'sd0))
+          (DECLARATOR:z @K6_function_calls_function.v:6:42
+            _)))
+      (LIST @K6_function_calls_function.v:6:45)
+      (BLOCKING_ASSIGN @K6_function_calls_function.v:7:5
+        (IDENT:add_inc @K6_function_calls_function.v:7:5)
+        _
+        (BINARY.+ @K6_function_calls_function.v:7:15
+          (CALL:inc @K6_function_calls_function.v:7:15
+            (IDENT:x @K6_function_calls_function.v:7:19))
+          (IDENT:z @K6_function_calls_function.v:7:24))))
+    (CONT_ASSIGN @K6_function_calls_function.v:9:3
+      _
+      _
+      (NET_ASSIGN @K6_function_calls_function.v:9:10
+        (IDENT:y @K6_function_calls_function.v:9:10)
+        (CALL:add_inc @K6_function_calls_function.v:9:14
+          (IDENT:a @K6_function_calls_function.v:9:22)
+          (IDENT:b @K6_function_calls_function.v:9:25))))))

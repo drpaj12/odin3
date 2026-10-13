@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# elab-sweep: a corpus of Verilog files through odin3's elaboration, smallest first. See elab_sweep.py.
+# Exit codes: 0 pass, 1 an unexpected result, 2 usage error, 77 skipped (no memory cap possible).
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/elab_sweep.py" "$@"

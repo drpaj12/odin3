@@ -1,0 +1,151 @@
+# generated: elab-check --write
+(UNIT:q5_gate_arrays @Q5_gate_arrays.v:2:1
+  (MODULE:q5_gate_arrays @Q5_gate_arrays.v:2:1
+    _
+    (LIST @Q5_gate_arrays.v:2:23
+      (PORT_DECL.input [IN_HEADER NET=1] @Q5_gate_arrays.v:2:24
+        (RANGE @Q5_gate_arrays.v:2:30
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:33 32'sd0))
+        (DECLARATOR:a @Q5_gate_arrays.v:2:36
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @Q5_gate_arrays.v:2:24
+        (RANGE @Q5_gate_arrays.v:2:30
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:31 32'sd3)
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:33 32'sd0))
+        (DECLARATOR:b @Q5_gate_arrays.v:2:39
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q5_gate_arrays.v:2:42
+        (RANGE @Q5_gate_arrays.v:2:49
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:50 32'sd3)
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:52 32'sd0))
+        (DECLARATOR:y @Q5_gate_arrays.v:2:55
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @Q5_gate_arrays.v:2:42
+        (RANGE @Q5_gate_arrays.v:2:49
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:50 32'sd3)
+          (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:2:52 32'sd0))
+        (DECLARATOR:z @Q5_gate_arrays.v:2:58
+          _)))
+    (GATE_DECL.and @Q5_gate_arrays.v:3:3
+      _
+      _
+      (INSTANCE:g[3] @Q5_gate_arrays.v:3:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:3:15
+          (SELECT.bit @Q5_gate_arrays.v:3:15
+            (IDENT:y @Q5_gate_arrays.v:3:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:15 32'sd3)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:18
+          (SELECT.bit @Q5_gate_arrays.v:3:18
+            (IDENT:a @Q5_gate_arrays.v:3:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:18 32'sd3)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:21
+          (SELECT.bit @Q5_gate_arrays.v:3:21
+            (IDENT:b @Q5_gate_arrays.v:3:21)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:21 32'sd3)
+            _)))
+      (INSTANCE:g[2] @Q5_gate_arrays.v:3:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:3:15
+          (SELECT.bit @Q5_gate_arrays.v:3:15
+            (IDENT:y @Q5_gate_arrays.v:3:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:15 32'sd2)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:18
+          (SELECT.bit @Q5_gate_arrays.v:3:18
+            (IDENT:a @Q5_gate_arrays.v:3:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:18 32'sd2)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:21
+          (SELECT.bit @Q5_gate_arrays.v:3:21
+            (IDENT:b @Q5_gate_arrays.v:3:21)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:21 32'sd2)
+            _)))
+      (INSTANCE:g[1] @Q5_gate_arrays.v:3:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:3:15
+          (SELECT.bit @Q5_gate_arrays.v:3:15
+            (IDENT:y @Q5_gate_arrays.v:3:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:15 32'sd1)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:18
+          (SELECT.bit @Q5_gate_arrays.v:3:18
+            (IDENT:a @Q5_gate_arrays.v:3:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:18 32'sd1)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:21
+          (SELECT.bit @Q5_gate_arrays.v:3:21
+            (IDENT:b @Q5_gate_arrays.v:3:21)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:21 32'sd1)
+            _)))
+      (INSTANCE:g[0] @Q5_gate_arrays.v:3:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:3:15
+          (SELECT.bit @Q5_gate_arrays.v:3:15
+            (IDENT:y @Q5_gate_arrays.v:3:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:15 32'sd0)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:18
+          (SELECT.bit @Q5_gate_arrays.v:3:18
+            (IDENT:a @Q5_gate_arrays.v:3:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:18 32'sd0)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:3:21
+          (SELECT.bit @Q5_gate_arrays.v:3:21
+            (IDENT:b @Q5_gate_arrays.v:3:21)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:3:21 32'sd0)
+            _))))
+    (GATE_DECL.not @Q5_gate_arrays.v:4:3
+      _
+      _
+      (INSTANCE:n[0] @Q5_gate_arrays.v:4:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:4:15
+          (SELECT.bit @Q5_gate_arrays.v:4:15
+            (IDENT:z @Q5_gate_arrays.v:4:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:15 32'sd0)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:4:18
+          (SELECT.bit @Q5_gate_arrays.v:4:18
+            (IDENT:a @Q5_gate_arrays.v:4:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:18 32'sd0)
+            _)))
+      (INSTANCE:n[1] @Q5_gate_arrays.v:4:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:4:15
+          (SELECT.bit @Q5_gate_arrays.v:4:15
+            (IDENT:z @Q5_gate_arrays.v:4:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:15 32'sd1)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:4:18
+          (SELECT.bit @Q5_gate_arrays.v:4:18
+            (IDENT:a @Q5_gate_arrays.v:4:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:18 32'sd1)
+            _)))
+      (INSTANCE:n[2] @Q5_gate_arrays.v:4:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:4:15
+          (SELECT.bit @Q5_gate_arrays.v:4:15
+            (IDENT:z @Q5_gate_arrays.v:4:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:15 32'sd2)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:4:18
+          (SELECT.bit @Q5_gate_arrays.v:4:18
+            (IDENT:a @Q5_gate_arrays.v:4:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:18 32'sd2)
+            _)))
+      (INSTANCE:n[3] @Q5_gate_arrays.v:4:7
+        _
+        (CONNECTION @Q5_gate_arrays.v:4:15
+          (SELECT.bit @Q5_gate_arrays.v:4:15
+            (IDENT:z @Q5_gate_arrays.v:4:15)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:15 32'sd3)
+            _))
+        (CONNECTION @Q5_gate_arrays.v:4:18
+          (SELECT.bit @Q5_gate_arrays.v:4:18
+            (IDENT:a @Q5_gate_arrays.v:4:18)
+            (NUMBER.dec [SIGNED] @Q5_gate_arrays.v:4:18 32'sd3)
+            _))))))

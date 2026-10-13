@@ -1,0 +1,94 @@
+# generated: elab-check --write
+(UNIT:t1_edges @T1_edge_events.v:2:1
+  (MODULE:t1_edges @T1_edge_events.v:2:1
+    _
+    (LIST @T1_edge_events.v:2:17
+      (PORT_DECL.input [IN_HEADER NET=1] @T1_edge_events.v:2:18
+        _
+        (DECLARATOR:clk @T1_edge_events.v:2:24
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T1_edge_events.v:2:18
+        _
+        (DECLARATOR:rst @T1_edge_events.v:2:29
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T1_edge_events.v:2:18
+        _
+        (DECLARATOR:rst_n @T1_edge_events.v:2:34
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @T1_edge_events.v:2:18
+        _
+        (DECLARATOR:d @T1_edge_events.v:2:41
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T1_edge_events.v:2:44
+        _
+        (DECLARATOR:q1 @T1_edge_events.v:2:55
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T1_edge_events.v:2:44
+        _
+        (DECLARATOR:q2 @T1_edge_events.v:2:59
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T1_edge_events.v:2:44
+        _
+        (DECLARATOR:q3 @T1_edge_events.v:2:63
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @T1_edge_events.v:2:44
+        _
+        (DECLARATOR:q4 @T1_edge_events.v:2:67
+          _)))
+    (ALWAYS.always @T1_edge_events.v:3:3
+      (TIMING_STMT @T1_edge_events.v:3:10
+        (EVENT_CONTROL @T1_edge_events.v:3:10
+          _
+          (EVENT_EXPR.posedge @T1_edge_events.v:3:12
+            (IDENT:clk @T1_edge_events.v:3:20)))
+        (NONBLOCKING_ASSIGN @T1_edge_events.v:4:5
+          (IDENT:q1 @T1_edge_events.v:4:5)
+          _
+          (IDENT:d @T1_edge_events.v:4:11))))
+    (ALWAYS.always @T1_edge_events.v:5:3
+      (TIMING_STMT @T1_edge_events.v:5:10
+        (EVENT_CONTROL @T1_edge_events.v:5:10
+          _
+          (EVENT_EXPR.negedge @T1_edge_events.v:5:12
+            (IDENT:clk @T1_edge_events.v:5:20)))
+        (NONBLOCKING_ASSIGN @T1_edge_events.v:6:5
+          (IDENT:q2 @T1_edge_events.v:6:5)
+          _
+          (IDENT:d @T1_edge_events.v:6:11))))
+    (ALWAYS.always @T1_edge_events.v:7:3
+      (TIMING_STMT @T1_edge_events.v:7:10
+        (EVENT_CONTROL @T1_edge_events.v:7:10
+          _
+          (EVENT_EXPR.posedge @T1_edge_events.v:7:12
+            (IDENT:clk @T1_edge_events.v:7:20))
+          (EVENT_EXPR.posedge [AFTER_OR] @T1_edge_events.v:7:27
+            (IDENT:rst @T1_edge_events.v:7:35)))
+        (IF @T1_edge_events.v:8:5
+          (IDENT:rst @T1_edge_events.v:8:9)
+          (NONBLOCKING_ASSIGN @T1_edge_events.v:9:7
+            (IDENT:q3 @T1_edge_events.v:9:7)
+            _
+            (NUMBER.bin @T1_edge_events.v:9:13 1'b0))
+          (NONBLOCKING_ASSIGN @T1_edge_events.v:11:7
+            (IDENT:q3 @T1_edge_events.v:11:7)
+            _
+            (IDENT:d @T1_edge_events.v:11:13)))))
+    (ALWAYS.always @T1_edge_events.v:12:3
+      (TIMING_STMT @T1_edge_events.v:12:10
+        (EVENT_CONTROL @T1_edge_events.v:12:10
+          _
+          (EVENT_EXPR.posedge @T1_edge_events.v:12:12
+            (IDENT:clk @T1_edge_events.v:12:20))
+          (EVENT_EXPR.negedge @T1_edge_events.v:12:25
+            (IDENT:rst_n @T1_edge_events.v:12:33)))
+        (IF @T1_edge_events.v:13:5
+          (UNARY.! @T1_edge_events.v:13:9
+            (IDENT:rst_n @T1_edge_events.v:13:10))
+          (NONBLOCKING_ASSIGN @T1_edge_events.v:14:7
+            (IDENT:q4 @T1_edge_events.v:14:7)
+            _
+            (NUMBER.bin @T1_edge_events.v:14:13 1'b0))
+          (NONBLOCKING_ASSIGN @T1_edge_events.v:16:7
+            (IDENT:q4 @T1_edge_events.v:16:7)
+            _
+            (IDENT:d @T1_edge_events.v:16:13)))))))

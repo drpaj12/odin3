@@ -1,0 +1,33 @@
+# generated: elab-check --write
+(UNIT:e19_clog2 @E19_clog2.v:2:1
+  (MODULE:e19_clog2 @E19_clog2.v:2:1
+    (LIST @E19_clog2.v:2:18
+      (PARAM_DECL.localparam [IN_HEADER] @E19_clog2.v:2:20
+        _
+        (DECLARATOR:N @E19_clog2.v:2:30
+          (NUMBER.dec [SIGNED] @E19_clog2.v:2:30 16))))
+    (LIST @E19_clog2.v:2:38
+      (PORT_DECL.output [IN_HEADER NET=1] @E19_clog2.v:2:39
+        (RANGE @E19_clog2.v:2:46
+          (NUMBER.dec [SIGNED] @E19_clog2.v:2:47 32'sd31)
+          (NUMBER.dec [SIGNED] @E19_clog2.v:2:50 32'sd0))
+        (DECLARATOR:y @E19_clog2.v:2:53
+          _)))
+    (PARAM_DECL.localparam @E19_clog2.v:3:3
+      _
+      (DECLARATOR:W @E19_clog2.v:3:14
+        (NUMBER.bin [SIGNED] @E19_clog2.v:3:14 32'sb00000000000000000000000000000100)))
+    (NET_DECL.wire @E19_clog2.v:4:3
+      _
+      (RANGE @E19_clog2.v:4:8
+        (NUMBER.dec [SIGNED] @E19_clog2.v:4:9 32'sd3)
+        (NUMBER.dec [SIGNED] @E19_clog2.v:4:21 32'sd0))
+      _
+      (DECLARATOR:c @E19_clog2.v:4:24
+        _))
+    (CONT_ASSIGN @E19_clog2.v:5:3
+      _
+      _
+      (NET_ASSIGN @E19_clog2.v:5:10
+        (IDENT:y @E19_clog2.v:5:10)
+        (NUMBER.dec [SIGNED] @E19_clog2.v:5:14 32'sd5)))))

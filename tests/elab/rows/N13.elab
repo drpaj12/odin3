@@ -1,0 +1,97 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:n13_word_bit_select @N13_word_then_bit_select.v:2:1
+  (MODULE:n13_word_bit_select @N13_word_then_bit_select.v:2:1
+    _
+    (LIST @N13_word_then_bit_select.v:2:28
+      (PORT_DECL.input [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:29
+        (RANGE @N13_word_then_bit_select.v:2:35
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:36 32'sd1)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:38 32'sd0))
+        (DECLARATOR:i @N13_word_then_bit_select.v:2:41
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:44
+        (RANGE @N13_word_then_bit_select.v:2:50
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:51 32'sd2)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:53 32'sd0))
+        (DECLARATOR:j @N13_word_then_bit_select.v:2:56
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:59
+        _
+        (DECLARATOR:y @N13_word_then_bit_select.v:2:66
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:69
+        (RANGE @N13_word_then_bit_select.v:2:76
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:77 32'sd3)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:79 32'sd0))
+        (DECLARATOR:p @N13_word_then_bit_select.v:2:82
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:69
+        (RANGE @N13_word_then_bit_select.v:2:76
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:77 32'sd3)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:79 32'sd0))
+        (DECLARATOR:q @N13_word_then_bit_select.v:2:85
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @N13_word_then_bit_select.v:2:88
+        (RANGE @N13_word_then_bit_select.v:2:95
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:96 32'sd1)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:2:98 32'sd0))
+        (DECLARATOR:r @N13_word_then_bit_select.v:2:101
+          _)))
+    (VAR_DECL.reg @N13_word_then_bit_select.v:3:3
+      (RANGE @N13_word_then_bit_select.v:3:7
+        (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:3:8 32'sd7)
+        (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:3:10 32'sd0))
+      (DECLARATOR:m @N13_word_then_bit_select.v:3:13
+        _
+        (RANGE @N13_word_then_bit_select.v:3:15
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:3:16 32'sd0)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:3:18 32'sd3))))
+    (CONT_ASSIGN @N13_word_then_bit_select.v:4:3
+      _
+      _
+      (NET_ASSIGN @N13_word_then_bit_select.v:4:10
+        (IDENT:y @N13_word_then_bit_select.v:4:10)
+        (SELECT.bit @N13_word_then_bit_select.v:4:14
+          (SELECT.bit @N13_word_then_bit_select.v:4:14
+            (IDENT:m @N13_word_then_bit_select.v:4:14)
+            (IDENT:i @N13_word_then_bit_select.v:4:16)
+            _)
+          (IDENT:j @N13_word_then_bit_select.v:4:19)
+          _)))
+    (CONT_ASSIGN @N13_word_then_bit_select.v:5:3
+      _
+      _
+      (NET_ASSIGN @N13_word_then_bit_select.v:5:10
+        (IDENT:p @N13_word_then_bit_select.v:5:10)
+        (SELECT.part @N13_word_then_bit_select.v:5:14
+          (SELECT.bit @N13_word_then_bit_select.v:5:14
+            (IDENT:m @N13_word_then_bit_select.v:5:14)
+            (IDENT:i @N13_word_then_bit_select.v:5:16)
+            _)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:5:19 32'sd3)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:5:21 32'sd0))))
+    (CONT_ASSIGN @N13_word_then_bit_select.v:6:3
+      _
+      _
+      (NET_ASSIGN @N13_word_then_bit_select.v:6:10
+        (IDENT:q @N13_word_then_bit_select.v:6:10)
+        (SELECT.part @N13_word_then_bit_select.v:6:14
+          (SELECT.bit @N13_word_then_bit_select.v:6:14
+            (IDENT:m @N13_word_then_bit_select.v:6:14)
+            (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:6:16 2)
+            _)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:6:19 32'sd7)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:6:21 32'sd4))))
+    (CONT_ASSIGN @N13_word_then_bit_select.v:7:3
+      _
+      _
+      (NET_ASSIGN @N13_word_then_bit_select.v:7:10
+        (IDENT:r @N13_word_then_bit_select.v:7:10)
+        (SELECT.part_plus @N13_word_then_bit_select.v:7:14
+          (SELECT.bit @N13_word_then_bit_select.v:7:14
+            (IDENT:m @N13_word_then_bit_select.v:7:14)
+            (IDENT:i @N13_word_then_bit_select.v:7:16)
+            _)
+          (IDENT:j @N13_word_then_bit_select.v:7:19)
+          (NUMBER.dec [SIGNED] @N13_word_then_bit_select.v:7:24 32'sd2))))))

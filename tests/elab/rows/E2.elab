@@ -1,0 +1,119 @@
+# generated: elab-check --write
+(UNIT:e2_reduction @E2_reduction.v:2:1
+  (MODULE:e2_reduction @E2_reduction.v:2:1
+    _
+    (LIST @E2_reduction.v:2:21
+      (PORT_DECL.input [IN_HEADER NET=1] @E2_reduction.v:2:22
+        (RANGE @E2_reduction.v:2:28
+          (NUMBER.dec [SIGNED] @E2_reduction.v:2:29 32'sd3)
+          (NUMBER.dec [SIGNED] @E2_reduction.v:2:31 32'sd0))
+        (DECLARATOR:a @E2_reduction.v:2:34
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @E2_reduction.v:2:37
+        (RANGE @E2_reduction.v:2:43
+          (NUMBER.dec [SIGNED] @E2_reduction.v:2:44 32'sd7)
+          (NUMBER.dec [SIGNED] @E2_reduction.v:2:46 32'sd0))
+        (DECLARATOR:w @E2_reduction.v:2:49
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y1 @E2_reduction.v:2:59
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y2 @E2_reduction.v:2:63
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y3 @E2_reduction.v:2:67
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y4 @E2_reduction.v:2:71
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y5 @E2_reduction.v:2:75
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y6 @E2_reduction.v:2:79
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y7 @E2_reduction.v:2:83
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y8 @E2_reduction.v:2:87
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @E2_reduction.v:2:52
+        _
+        (DECLARATOR:y9 @E2_reduction.v:2:91
+          _)))
+    (CONT_ASSIGN @E2_reduction.v:3:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:3:10
+        (IDENT:y1 @E2_reduction.v:3:10)
+        (UNARY.& @E2_reduction.v:3:15
+          (IDENT:a @E2_reduction.v:3:16))))
+    (CONT_ASSIGN @E2_reduction.v:4:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:4:10
+        (IDENT:y2 @E2_reduction.v:4:10)
+        (UNARY.~& @E2_reduction.v:4:15
+          (IDENT:a @E2_reduction.v:4:17))))
+    (CONT_ASSIGN @E2_reduction.v:5:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:5:10
+        (IDENT:y3 @E2_reduction.v:5:10)
+        (UNARY.| @E2_reduction.v:5:15
+          (IDENT:a @E2_reduction.v:5:16))))
+    (CONT_ASSIGN @E2_reduction.v:6:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:6:10
+        (IDENT:y4 @E2_reduction.v:6:10)
+        (UNARY.~| @E2_reduction.v:6:15
+          (IDENT:a @E2_reduction.v:6:17))))
+    (CONT_ASSIGN @E2_reduction.v:7:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:7:10
+        (IDENT:y5 @E2_reduction.v:7:10)
+        (UNARY.^ @E2_reduction.v:7:15
+          (IDENT:a @E2_reduction.v:7:16))))
+    (CONT_ASSIGN @E2_reduction.v:8:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:8:10
+        (IDENT:y6 @E2_reduction.v:8:10)
+        (UNARY.~^ @E2_reduction.v:8:15
+          (IDENT:a @E2_reduction.v:8:17))))
+    (CONT_ASSIGN @E2_reduction.v:9:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:9:10
+        (IDENT:y7 @E2_reduction.v:9:10)
+        (UNARY.~^ @E2_reduction.v:9:15
+          (IDENT:a @E2_reduction.v:9:17))))
+    (CONT_ASSIGN @E2_reduction.v:10:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:10:10
+        (IDENT:y8 @E2_reduction.v:10:10)
+        (UNARY.^ @E2_reduction.v:10:15
+          (IDENT:w @E2_reduction.v:10:16))))
+    (CONT_ASSIGN @E2_reduction.v:11:3
+      _
+      _
+      (NET_ASSIGN @E2_reduction.v:11:10
+        (IDENT:y9 @E2_reduction.v:11:10)
+        (BINARY.| @E2_reduction.v:11:15
+          (UNARY.& @E2_reduction.v:11:15
+            (IDENT:a @E2_reduction.v:11:16))
+          (UNARY.^ @E2_reduction.v:11:20
+            (IDENT:w @E2_reduction.v:11:21)))))))

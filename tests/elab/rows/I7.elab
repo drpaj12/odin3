@@ -1,0 +1,68 @@
+# generated: elab-check --write
+(UNIT:i7_black_box @I7_undefined_module.v:3:1
+  (MODULE:i7_black_box @I7_undefined_module.v:3:1
+    _
+    (LIST @I7_undefined_module.v:3:21
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:p1 @I7_undefined_module.v:3:28
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:q1 @I7_undefined_module.v:3:32
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:r @I7_undefined_module.v:3:36
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:p2 @I7_undefined_module.v:3:39
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:q2 @I7_undefined_module.v:3:43
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:3:22
+        _
+        (DECLARATOR:s @I7_undefined_module.v:3:47
+          _)))
+    (INSTANTIATION:black_box_cell @I7_undefined_module.v:4:3
+      _
+      (INSTANCE:u1 @I7_undefined_module.v:4:18
+        _
+        (CONNECTION:a @I7_undefined_module.v:4:22
+          (IDENT:p1 @I7_undefined_module.v:4:25))
+        (CONNECTION:b @I7_undefined_module.v:4:30
+          (IDENT:q1 @I7_undefined_module.v:4:33))
+        (CONNECTION:y @I7_undefined_module.v:4:38
+          (IDENT:r @I7_undefined_module.v:4:41))))
+    (INSTANTIATION:black_box_cell @I7_undefined_module.v:5:3
+      (LIST @I7_undefined_module.v:5:18
+        (CONNECTION:W @I7_undefined_module.v:5:20
+          (NUMBER.bin [SIGNED] @I7_undefined_module.v:5:20 32'sb00000000000000000000000000000100)))
+      (INSTANCE:u2 @I7_undefined_module.v:5:27
+        _
+        (CONNECTION:a @I7_undefined_module.v:5:31
+          (IDENT:p2 @I7_undefined_module.v:5:34))
+        (CONNECTION:b @I7_undefined_module.v:5:39
+          (IDENT:q2 @I7_undefined_module.v:5:42))
+        (CONNECTION:y @I7_undefined_module.v:5:47
+          (IDENT:s @I7_undefined_module.v:5:50)))))
+  (MODULE:black_box_cell @I7_undefined_module.v:4:3
+    _
+    (LIST @I7_undefined_module.v:4:3
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:4:22
+        _
+        (DECLARATOR:a @I7_undefined_module.v:4:22
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:4:30
+        _
+        (DECLARATOR:b @I7_undefined_module.v:4:30
+          _))
+      (PORT_DECL.inout [IN_HEADER NET=1] @I7_undefined_module.v:4:38
+        _
+        (DECLARATOR:y @I7_undefined_module.v:4:38
+          _)))
+    {(ATTR:blackbox @I7_undefined_module.v:4:3
+       _)}))

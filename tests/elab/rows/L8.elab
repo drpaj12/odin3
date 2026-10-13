@@ -1,0 +1,89 @@
+# generated: elab-check --write
+(UNIT:l8_spaced_numbers @L8_spaced_numbers.v:2:1
+  (MODULE:l8_spaced_numbers @L8_spaced_numbers.v:2:1
+    _
+    (LIST @L8_spaced_numbers.v:2:26
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:27
+        (RANGE @L8_spaced_numbers.v:2:34
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:35 32'sd7)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:37 32'sd0))
+        (DECLARATOR:y1 @L8_spaced_numbers.v:2:40
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:27
+        (RANGE @L8_spaced_numbers.v:2:34
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:35 32'sd7)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:37 32'sd0))
+        (DECLARATOR:y2 @L8_spaced_numbers.v:2:44
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:27
+        (RANGE @L8_spaced_numbers.v:2:34
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:35 32'sd7)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:37 32'sd0))
+        (DECLARATOR:y3 @L8_spaced_numbers.v:2:48
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:27
+        (RANGE @L8_spaced_numbers.v:2:34
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:35 32'sd7)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:37 32'sd0))
+        (DECLARATOR:y5 @L8_spaced_numbers.v:2:52
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:56
+        (RANGE @L8_spaced_numbers.v:2:63
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:64 32'sd3)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:66 32'sd0))
+        (DECLARATOR:y4 @L8_spaced_numbers.v:2:69
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:56
+        (RANGE @L8_spaced_numbers.v:2:63
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:64 32'sd3)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:66 32'sd0))
+        (DECLARATOR:y7 @L8_spaced_numbers.v:2:73
+          _))
+      (PORT_DECL.output [IN_HEADER NET=1] @L8_spaced_numbers.v:2:77
+        (RANGE @L8_spaced_numbers.v:2:84
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:85 32'sd31)
+          (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:2:88 32'sd0))
+        (DECLARATOR:y6 @L8_spaced_numbers.v:2:91
+          _)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:3:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:3:10
+        (IDENT:y1 @L8_spaced_numbers.v:3:10)
+        (NUMBER.hex @L8_spaced_numbers.v:3:15 8'hff)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:4:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:4:10
+        (IDENT:y2 @L8_spaced_numbers.v:4:10)
+        (NUMBER.hex @L8_spaced_numbers.v:4:15 8'hff)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:5:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:5:10
+        (IDENT:y3 @L8_spaced_numbers.v:5:10)
+        (NUMBER.hex @L8_spaced_numbers.v:5:15 8'hff)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:6:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:6:10
+        (IDENT:y4 @L8_spaced_numbers.v:6:10)
+        (NUMBER.bin @L8_spaced_numbers.v:6:15 4'b1010)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:7:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:7:10
+        (IDENT:y5 @L8_spaced_numbers.v:7:10)
+        (NUMBER.hex @L8_spaced_numbers.v:7:15 8'ha5)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:8:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:8:10
+        (IDENT:y6 @L8_spaced_numbers.v:8:10)
+        (NUMBER.hex @L8_spaced_numbers.v:8:15 'hff)))
+    (CONT_ASSIGN @L8_spaced_numbers.v:9:3
+      _
+      _
+      (NET_ASSIGN @L8_spaced_numbers.v:9:10
+        (IDENT:y7 @L8_spaced_numbers.v:9:10)
+        (NUMBER.dec [SIGNED] @L8_spaced_numbers.v:9:15 4'sd3)))))

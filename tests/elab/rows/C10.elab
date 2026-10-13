@@ -1,0 +1,136 @@
+# generated: elab-check --write
+(UNIT:c10_full_parallel @C10_full_parallel_case.v:2:1
+  (MODULE:c10_full_parallel @C10_full_parallel_case.v:2:1
+    _
+    (LIST @C10_full_parallel_case.v:2:26
+      (PORT_DECL.input [IN_HEADER NET=1] @C10_full_parallel_case.v:2:27
+        (RANGE @C10_full_parallel_case.v:2:33
+          (NUMBER.dec [SIGNED] @C10_full_parallel_case.v:2:34 32'sd1)
+          (NUMBER.dec [SIGNED] @C10_full_parallel_case.v:2:36 32'sd0))
+        (DECLARATOR:s @C10_full_parallel_case.v:2:39
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C10_full_parallel_case.v:2:42
+        _
+        (DECLARATOR:a @C10_full_parallel_case.v:2:48
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C10_full_parallel_case.v:2:42
+        _
+        (DECLARATOR:b @C10_full_parallel_case.v:2:51
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @C10_full_parallel_case.v:2:42
+        _
+        (DECLARATOR:c @C10_full_parallel_case.v:2:54
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C10_full_parallel_case.v:2:57
+        _
+        (DECLARATOR:w @C10_full_parallel_case.v:2:68
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C10_full_parallel_case.v:2:57
+        _
+        (DECLARATOR:x @C10_full_parallel_case.v:2:71
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C10_full_parallel_case.v:2:57
+        _
+        (DECLARATOR:y @C10_full_parallel_case.v:2:74
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @C10_full_parallel_case.v:2:57
+        _
+        (DECLARATOR:z @C10_full_parallel_case.v:2:77
+          _)))
+    (ALWAYS.always @C10_full_parallel_case.v:3:3
+      (TIMING_STMT @C10_full_parallel_case.v:3:10
+        (EVENT_CONTROL [STAR] @C10_full_parallel_case.v:3:10
+          _)
+        (CASE.case @C10_full_parallel_case.v:5:5
+          (IDENT:s @C10_full_parallel_case.v:5:11)
+          (CASE_ITEM @C10_full_parallel_case.v:6:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:6:13
+              (IDENT:w @C10_full_parallel_case.v:6:13)
+              _
+              (IDENT:a @C10_full_parallel_case.v:6:17))
+            (NUMBER.dec @C10_full_parallel_case.v:6:7 2'd0))
+          (CASE_ITEM @C10_full_parallel_case.v:7:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:7:13
+              (IDENT:w @C10_full_parallel_case.v:7:13)
+              _
+              (IDENT:b @C10_full_parallel_case.v:7:17))
+            (NUMBER.dec @C10_full_parallel_case.v:7:7 2'd1))
+          (CASE_ITEM @C10_full_parallel_case.v:8:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:8:13
+              (IDENT:w @C10_full_parallel_case.v:8:13)
+              _
+              (IDENT:c @C10_full_parallel_case.v:8:17))
+            (NUMBER.dec @C10_full_parallel_case.v:8:7 2'd2))
+          {(ATTR:full_case @C10_full_parallel_case.v:4:8
+             _)
+           (ATTR:parallel_case @C10_full_parallel_case.v:4:19
+             _)})))
+    (ALWAYS.always @C10_full_parallel_case.v:10:3
+      (TIMING_STMT @C10_full_parallel_case.v:10:10
+        (EVENT_CONTROL [STAR] @C10_full_parallel_case.v:10:10
+          _)
+        (CASE.casez @C10_full_parallel_case.v:12:5
+          (IDENT:s @C10_full_parallel_case.v:12:12)
+          (CASE_ITEM @C10_full_parallel_case.v:13:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:13:14
+              (IDENT:x @C10_full_parallel_case.v:13:14)
+              _
+              (IDENT:a @C10_full_parallel_case.v:13:18))
+            (NUMBER.bin @C10_full_parallel_case.v:13:7 2'b1?))
+          (CASE_ITEM @C10_full_parallel_case.v:14:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:14:14
+              (IDENT:x @C10_full_parallel_case.v:14:14)
+              _
+              (IDENT:b @C10_full_parallel_case.v:14:18))
+            (NUMBER.bin @C10_full_parallel_case.v:14:7 2'b01))
+          (CASE_ITEM [DEFAULT] @C10_full_parallel_case.v:15:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:15:16
+              (IDENT:x @C10_full_parallel_case.v:15:16)
+              _
+              (IDENT:c @C10_full_parallel_case.v:15:20)))
+          {(ATTR:parallel_case @C10_full_parallel_case.v:11:8
+             _)})))
+    (ALWAYS.always @C10_full_parallel_case.v:17:3
+      (TIMING_STMT @C10_full_parallel_case.v:17:10
+        (EVENT_CONTROL [STAR] @C10_full_parallel_case.v:17:10
+          _)
+        (CASE.case @C10_full_parallel_case.v:18:5
+          (IDENT:s @C10_full_parallel_case.v:18:11)
+          (CASE_ITEM @C10_full_parallel_case.v:19:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:19:13
+              (IDENT:y @C10_full_parallel_case.v:19:13)
+              _
+              (IDENT:a @C10_full_parallel_case.v:19:17))
+            (NUMBER.dec @C10_full_parallel_case.v:19:7 2'd0))
+          (CASE_ITEM @C10_full_parallel_case.v:20:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:20:13
+              (IDENT:y @C10_full_parallel_case.v:20:13)
+              _
+              (IDENT:b @C10_full_parallel_case.v:20:17))
+            (NUMBER.dec @C10_full_parallel_case.v:20:7 2'd1))
+          {(ATTR:full_case [METACOMMENT] @C10_full_parallel_case.v:18:14
+             _)
+           (ATTR:parallel_case [METACOMMENT] @C10_full_parallel_case.v:18:14
+             _)})))
+    (ALWAYS.always @C10_full_parallel_case.v:22:3
+      (TIMING_STMT @C10_full_parallel_case.v:22:10
+        (EVENT_CONTROL [STAR] @C10_full_parallel_case.v:22:10
+          _)
+        (CASE.case @C10_full_parallel_case.v:24:5
+          (IDENT:s @C10_full_parallel_case.v:24:11)
+          (CASE_ITEM @C10_full_parallel_case.v:25:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:25:13
+              (IDENT:z @C10_full_parallel_case.v:25:13)
+              _
+              (IDENT:a @C10_full_parallel_case.v:25:17))
+            (NUMBER.dec @C10_full_parallel_case.v:25:7 2'd0))
+          (CASE_ITEM @C10_full_parallel_case.v:26:7
+            (BLOCKING_ASSIGN @C10_full_parallel_case.v:26:13
+              (IDENT:z @C10_full_parallel_case.v:26:13)
+              _
+              (IDENT:b @C10_full_parallel_case.v:26:17))
+            (NUMBER.dec @C10_full_parallel_case.v:26:7 2'd3))
+          {(ATTR:full_case @C10_full_parallel_case.v:23:8
+             _)
+           (ATTR:parallel_case [METACOMMENT] @C10_full_parallel_case.v:24:14
+             _)})))))

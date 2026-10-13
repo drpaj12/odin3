@@ -1,0 +1,22 @@
+# generated: elab-check --write
+(UNIT:n4_integer @N4_integer.v:2:1
+  (MODULE:n4_integer @N4_integer.v:2:1
+    _
+    _
+    (VAR_DECL.integer @N4_integer.v:3:3
+      _
+      (DECLARATOR:i @N4_integer.v:3:11
+        _))
+    (VAR_DECL.integer @N4_integer.v:4:3
+      _
+      (DECLARATOR:j @N4_integer.v:4:11
+        _)
+      (DECLARATOR:k @N4_integer.v:4:14
+        _))
+    (VAR_DECL.integer @N4_integer.v:5:3
+      _
+      (DECLARATOR:table_a @N4_integer.v:5:11
+        _
+        (RANGE @N4_integer.v:5:19
+          (NUMBER.dec [SIGNED] @N4_integer.v:5:20 32'sd0)
+          (NUMBER.dec [SIGNED] @N4_integer.v:5:22 32'sd3))))))

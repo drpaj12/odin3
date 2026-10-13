@@ -1,0 +1,89 @@
+# hand-written
+# seeded by elab-check --write; regression lock; Yosys-equivalent
+(UNIT:k11_task_call @K11_task_calls_task.v:2:1
+  (MODULE:k11_task_call @K11_task_calls_task.v:2:1
+    _
+    (LIST @K11_task_calls_task.v:2:22
+      (PORT_DECL.input [IN_HEADER NET=1] @K11_task_calls_task.v:2:23
+        _
+        (DECLARATOR:clk @K11_task_calls_task.v:2:29
+          _))
+      (PORT_DECL.input [IN_HEADER NET=1] @K11_task_calls_task.v:2:34
+        (RANGE @K11_task_calls_task.v:2:40
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:2:41 32'sd7)
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:2:43 32'sd0))
+        (DECLARATOR:a @K11_task_calls_task.v:2:46
+          _))
+      (PORT_DECL.output [IN_HEADER DT=1] @K11_task_calls_task.v:2:49
+        (RANGE @K11_task_calls_task.v:2:60
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:2:61 32'sd7)
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:2:63 32'sd0))
+        (DECLARATOR:y @K11_task_calls_task.v:2:66
+          _)))
+    (VAR_DECL.integer @K11_task_calls_task.v:3:3
+      _
+      (DECLARATOR:i @K11_task_calls_task.v:3:11
+        _))
+    (TASK_DECL:set_bit @K11_task_calls_task.v:4:3
+      (LIST @K11_task_calls_task.v:4:17
+        (PORT_DECL.input [IN_HEADER DT=2] @K11_task_calls_task.v:4:17
+          _
+          (DECLARATOR:n @K11_task_calls_task.v:4:31
+            _))
+        (PORT_DECL.input [IN_HEADER NET=1] @K11_task_calls_task.v:4:34
+          _
+          (DECLARATOR:v @K11_task_calls_task.v:4:40
+            _)))
+      (LIST @K11_task_calls_task.v:4:43)
+      (BLOCKING_ASSIGN @K11_task_calls_task.v:5:5
+        (SELECT.bit @K11_task_calls_task.v:5:5
+          (IDENT:y @K11_task_calls_task.v:5:5)
+          (IDENT:n @K11_task_calls_task.v:5:7)
+          _)
+        _
+        (IDENT:v @K11_task_calls_task.v:5:12)))
+    (TASK_DECL:set_low @K11_task_calls_task.v:7:3
+      (LIST @K11_task_calls_task.v:7:17
+        (PORT_DECL.input [IN_HEADER NET=1] @K11_task_calls_task.v:7:17
+          _
+          (DECLARATOR:v @K11_task_calls_task.v:7:23
+            _)))
+      (LIST @K11_task_calls_task.v:7:26)
+      (SEQ_BLOCK @K11_task_calls_task.v:8:5
+        _
+        (TASK_CALL:set_bit @K11_task_calls_task.v:9:7
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:9:15 0)
+          (IDENT:v @K11_task_calls_task.v:9:18))
+        (TASK_CALL:set_bit @K11_task_calls_task.v:10:7
+          (NUMBER.dec [SIGNED] @K11_task_calls_task.v:10:15 1)
+          (IDENT:v @K11_task_calls_task.v:10:18))))
+    (ALWAYS.always @K11_task_calls_task.v:13:3
+      (TIMING_STMT @K11_task_calls_task.v:13:10
+        (EVENT_CONTROL @K11_task_calls_task.v:13:10
+          _
+          (EVENT_EXPR.posedge @K11_task_calls_task.v:13:12
+            (IDENT:clk @K11_task_calls_task.v:13:20)))
+        (SEQ_BLOCK @K11_task_calls_task.v:13:25
+          _
+          (FOR @K11_task_calls_task.v:14:5
+            (BLOCKING_ASSIGN @K11_task_calls_task.v:14:10
+              (IDENT:i @K11_task_calls_task.v:14:10)
+              _
+              (NUMBER.dec [SIGNED] @K11_task_calls_task.v:14:14 0))
+            (BINARY.< @K11_task_calls_task.v:14:17
+              (IDENT:i @K11_task_calls_task.v:14:17)
+              (NUMBER.dec [SIGNED] @K11_task_calls_task.v:14:21 8))
+            (BLOCKING_ASSIGN @K11_task_calls_task.v:14:24
+              (IDENT:i @K11_task_calls_task.v:14:24)
+              _
+              (BINARY.+ @K11_task_calls_task.v:14:28
+                (IDENT:i @K11_task_calls_task.v:14:28)
+                (NUMBER.dec [SIGNED] @K11_task_calls_task.v:14:32 1)))
+            (TASK_CALL:set_bit @K11_task_calls_task.v:15:7
+              (IDENT:i @K11_task_calls_task.v:15:15)
+              (SELECT.bit @K11_task_calls_task.v:15:18
+                (IDENT:a @K11_task_calls_task.v:15:18)
+                (IDENT:i @K11_task_calls_task.v:15:20)
+                _)))
+          (TASK_CALL:set_low @K11_task_calls_task.v:16:5
+            (NUMBER.bin @K11_task_calls_task.v:16:13 1'b0)))))))
