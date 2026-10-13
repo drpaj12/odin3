@@ -20,6 +20,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -443,6 +444,8 @@ odin3_status odin3_kit_reserve_ties(odin3_opt_ctx *oc, size_t extra) {
 }
 
 void odin3_kit_defer_tie(odin3_opt_ctx *oc, odin3_net_id keep, odin3_net_id drop) {
+    assert(oc->ties.len < oc->ties.cap &&
+           "odin3_kit_reserve_ties first: a lost tie is an undriven net");
     odin3_net_pair *slot = oc->ties.len < oc->ties.cap ? odin3_vec_push(&oc->ties) : NULL;
     if (slot != NULL) {
         *slot = (odin3_net_pair){keep, drop};
