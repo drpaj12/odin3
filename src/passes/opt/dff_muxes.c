@@ -4,7 +4,7 @@
  * when the pass begins, as Yosys's are taken once per worker), the per-bit walks down single-user
  * one-select muxes, and find_muxtree_feedback_patterns on an explicit stack (no recursion).
  *
- * - Caps (agent default, spec §17 #33): a bit's pattern search gives up, finding no pattern and
+ * - Caps (agent default, spec §17 #34): a bit's pattern search gives up, finding no pattern and
  *   marking nothing, when a path holds more than ODIN3_DFF_MAX_PATH selects or the search takes
  *   more than ODIN3_DFF_MAX_FRAMES steps; a walk down muxes stops after as many steps as the
  *   module has mux bits (a mux loop would run forever in Yosys). A bit that gives up keeps the

@@ -1870,6 +1870,60 @@ static void test_dff_merge_keeps_init(void) {
     check_full();
 }
 
+static void test_dff_fine_no_merge(void) {
+    /* no $_SDFF_ / $_DFFE_ in the registry (spec §17 #32): a fine FF keeps its mux */
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1")
+                  CELL("$_DFF_P_", "f", "", "    connect \\C \\clk\n    connect \\D \\m1\n" CQ)));
+    run_dff();
+    expect_ff("$_DFF_P_");
+    expect_pin(first_ff(), "D", wnet("m1", 0));
+}
+
+/* A chain of n muxes, each on its own select \s[i], Q at the bottom: D = y0, y_i = s_i ? d :
+ * y_{i+1}, y_n = Q. The FF holds exactly when every select is 0: one pattern of n selects. */
+static void build_chain(uint32_t n) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_strbuf_appendf(&text, "module \\m\n  wire input 1 \\clk\n  wire input 2 \\d\n"
+                                    "  wire output 3 \\q\n  wire width 100 input 4 \\s\n"));
+    for (uint32_t i = 0; i < n; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_appendf(&text, "  wire \\y%u\n", (unsigned)i));
+    }
+    for (uint32_t i = 0; i < n; i++) {
+        char lower[32];
+        (void)snprintf(lower, sizeof lower, i + 1U == n ? "\\q" : "\\y%u", (unsigned)(i + 1U));
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_strbuf_appendf(
+                          &text,
+                          "  cell $mux \\x%u\n" PW "    connect \\A %s\n    connect \\B \\d\n"
+                          "    connect \\S \\s [%u]\n    connect \\Y \\y%u\n  end\n",
+                          (unsigned)i, lower, (unsigned)i, (unsigned)i));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_strbuf_appendf(&text, "  cell $dff \\f\n" PW PCLK CCLK
+                                                      "    connect \\D \\y0\n" CQ "  end\nend\n"));
+    build(text.data);
+    odin3_strbuf_free(&text);
+}
+
+static void test_dff_pattern_depth(void) {
+    build_chain(40);
+    run_dff();
+    expect_ff("$dffe");
+    TEST_ASSERT_EQUAL_UINT32(1, count_of("$ne"));
+    odin3_node_id ne =
+        odin3_pin_node(fx.module, odin3_net_driver(fx.module, pin_net_of(first_ff(), "EN", 0)));
+    TEST_ASSERT_EQUAL_UINT32(40, odin3_node_port(fx.module, ne, port_of(ne, "A")).count);
+    /* 70 selects deep: past the cap (spec §17 #34), no pattern and no x written */
+    build_chain(70);
+    run_dff();
+    expect_ff("$dff");
+    odin3_node_id bottom = node_named("x69");
+    TEST_ASSERT_EQUAL_UINT32(wnet("q", 0).v, pin_net_of(bottom, "A", 0).v);
+}
+
 /* --- rules 10 and 11 out of memory ---------------------------------------------------------- */
 
 #define MERGE_OOM_TEXT                                                                             \
@@ -2289,6 +2343,8 @@ static void test_dff_oom(void) {
 }
 
 static void run_merge_tests(void) {
+    RUN_TEST(test_dff_fine_no_merge);
+    RUN_TEST(test_dff_pattern_depth);
     RUN_TEST(test_dff_srst_merge);
     RUN_TEST(test_dff_srst_polarity);
     RUN_TEST(test_dff_srst_two_controls);
