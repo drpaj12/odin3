@@ -807,12 +807,26 @@ odin3_status odin3_elab2_gate(odin3_elab2 *e2, odin3_ast_id gate_decl);
 /*
  * EL-11: declares the black-box cell type of a `(* blackbox *)` or implicit black-box MODULE
  * (odin3_celltype_declare_blackbox, once per definition, under its base name): its ports in port
- * order at the default specialization's widths, a parameter per PARAM_DECL (the type is never
- * parametric: odin3_elab2_instance refuses an instance whose parameters could change a width). A
- * mismatch with a registered type is the located error `black box 'x' does not match the registered
- * cell type: <why>`. Called by odin3_elab2_ports.
+ * order, a parameter per PARAM_DECL (elab2_bbox.c). The declaration's port widths are the
+ * MODULE's, the default specialization's. Spec v4.18 (Peter decision 3): the definition's other
+ * parameter sets arrive as carrier MODULEs (stage 1: a black-box MODULE whose `blackbox` ATTR is
+ * valued with the definition's name); this call reads them all, and each port whose width differs
+ * in some set gets a width expression over the parameter values (a table with one entry per set),
+ * so a cell takes its set's exact widths from its parameters. Two sets with equal values (they
+ * differ in their literals' sizes only) but different widths of a port are the located error
+ * `black box 'bb': port 'p' has different widths in parameter sets with equal values`. A carrier
+ * itself declares nothing. A mismatch with a registered type is the located error `black box 'x'
+ * does not match the registered cell type: <why>`. Called by odin3_elab2_ports.
  */
 odin3_status odin3_elab2_blackbox(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/*
+ * The value a parameter node holds, as the cell type's parameter pdef wants it: an INT (a NUMBER),
+ * BITS or STRING. ODIN3_ERR_PARSE (no diagnostic) for a value that does not fit the kind;
+ * ODIN3_ERR_NO_MEMORY. Strings are the design's, bits are in the scratch arena.
+ */
+odin3_status odin3_elab2_param_value(odin3_elab2 *e2, const odin3_param_def *pdef,
+                                     odin3_ast_id node, odin3_value *out);
 
 /* --- stage 2: memories (Task 20; EL-27, EL-39 reads) ---------------------------------------- */
 

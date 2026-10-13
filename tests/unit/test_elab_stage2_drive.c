@@ -996,53 +996,160 @@ static void test_blackbox_override_exact_cases(void) {
     "module top (input [15:0] x, input [7:0] kk, output [15:0] y, output [7:0] y8);\n" conns       \
     "endmodule\n"
 
-/* The instance with a parameter overridden is refused when a port with a range might follow it;
- * the instance without an override beside it is built. The cases are the review's (Yosys 0.55
- * derives each port from its own range, which the elaborated form no longer has). */
-/* What the refusal names: the first ranged port, the overridden parameter, the instance's place. */
-typedef struct refusal {
-    const char *port, *param;
-    at_loc at;
-} refusal;
+/* --- exact black-box port widths per parameter set (Peter decision 3, spec v4.18) --------------
+ *
+ * Yosys 0.55 keeps one `module \bb` (the defaults' widths) and cells `\bb` whose connections have
+ * the widths of their own parameter set: `hierarchy` derives the module for the width check and
+ * drops it (write_rtlil: `cell \bb \u1` with `parameter signed \W 16` and `connect \a \x` of 16
+ * bits beside `module \bb` with `wire width 8 input 1 \a`). Commands behind the expected widths:
+ *   yosys -q -p "read_verilog t.v; hierarchy -top top; write_rtlil"
+ * with the t.v of each test below.
+ */
 
-static void expect_width_refused(const char *text, refusal want) {
-    read_failing(text);
-    char msg[256];
-    TEST_ASSERT_TRUE(snprintf(msg, sizeof msg,
-                              "width of port '%s' of black-box instance 'u1' (module 'bb') cannot "
-                              "be determined: parameter '%s' is overridden and the port has a "
-                              "range",
-                              want.port, want.param) > 0);
-    expect_error(want.at, msg);
+static void slurp(const char *path, char *out, size_t cap);
+
+/* The pins of port `port` of the node: how many. */
+static uint32_t port_width(odin3_node_id node, const char *port) {
+    const odin3_celltype_def *def = def_in(top(), node);
+    for (uint32_t index = 0; index < def->n_ports; index++) {
+        if (strcmp(def->ports[index].name, port) == 0) {
+            return odin3_node_port(top(), node, index).count;
+        }
+    }
+    TEST_FAIL_MESSAGE(port);
+    return 0;
+}
+
+static void expect_widths(const char *inst, const char *port_a, uint32_t wa, const char *port_b,
+                          uint32_t wb) {
+    odin3_node_id node = instance_node(inst);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(wa, port_width(node, port_a), inst);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(wb, port_width(node, port_b), inst);
+}
+
+/* (default) an instance without an override and one with `.W(16)`, a `[W-1:0]` port. */
+static void test_bbw_range_param(void) {
+    read_clean(BB_TOP("input [W-1:0] a, output [W-1:0] o", "#(parameter W = 8)",
+                      "  bb u1 (.a(x[7:0]), .o(y8));\n  bb #(.W(16)) u2 (.a(x), .o(y));\n"));
+    TEST_ASSERT_EQUAL_UINT32(1, blackbox_types());
+    expect_widths("u1", "a", 8, "o", 8);
+    expect_widths("u2", "a", 16, "o", 16);
+    TEST_ASSERT_EQUAL_INT64(8, node_param(instance_node("u1"), "W"));
+    TEST_ASSERT_EQUAL_INT64(16, node_param(instance_node("u2"), "W"));
+    expect_pins_are(instance_node("u2"), "a", (bits_of){"x", 0}, 16);
+    expect_pins_are(instance_node("u2"), "o", (bits_of){"y", 0}, 16);
+}
+
+/* `[W:0]` and `[2*W-1:0]` follow the override; the fixed `[7:0]` port beside them stays 8 bits. */
+static void test_bbw_formulas_and_fixed_port(void) {
+    read_clean("(* blackbox *) module bb #(parameter W = 8) (input [W:0] a, output [2*W-1:0] o,\n"
+               "                                             input [7:0] k);\nendmodule\n"
+               "module top (input [16:0] x, output [31:0] y, input [7:0] k, output [15:0] y8);\n"
+               "  bb #(.W(16)) u1 (.a(x), .o(y), .k(k));\n"
+               "  bb u2 (.a(x[8:0]), .o(y8), .k(k));\nendmodule\n");
+    expect_widths("u1", "a", 17, "o", 32);
+    TEST_ASSERT_EQUAL_UINT32(8, port_width(instance_node("u1"), "k"));
+    expect_widths("u2", "a", 9, "o", 16);
+    TEST_ASSERT_EQUAL_UINT32(8, port_width(instance_node("u2"), "k"));
+}
+
+/* Two parameters with one default, only one overridden: each port follows its own parameter. */
+static void test_bbw_shared_default(void) {
+    read_clean(BB_TOP("input [WA-1:0] a, input [2*WB-1:0] b, output o",
+                      "#(parameter WA = 8, WB = 8)",
+                      "  bb #(.WB(16)) u1 (.a(x[7:0]), .b({x, x}), .o(y[0]));\n"
+                      "  bb u2 (.a(x[7:0]), .b(x), .o(y[1]));\n"));
+    expect_widths("u1", "a", 8, "b", 32);
+    expect_widths("u2", "a", 8, "b", 16);
+}
+
+/* Three instances of different widths in one module: no cross-talk between them. */
+static void test_bbw_no_cross_talk(void) {
+    read_clean(BB_TOP("input [W-1:0] a, output [W-1:0] o", "#(parameter W = 8)",
+                      "  bb #(.W(4)) u1 (.a(x[3:0]), .o(y[3:0]));\n"
+                      "  bb #(.W(16)) u2 (.a(x), .o());\n"
+                      "  bb #(.W(8)) u3 (.a(kk), .o(y8));\n"));
+    expect_widths("u1", "a", 4, "o", 4);
+    expect_widths("u2", "a", 16, "o", 16);
+    expect_widths("u3", "a", 8, "o", 8);
+}
+
+/* A string override does not touch the ranges; another parameter's override does. */
+static void test_bbw_string_override(void) {
+    read_clean("(* blackbox *) module bb #(parameter W = 8, parameter S = \"x\")\n"
+               "  (input [W-1:0] a, output [7:0] o);\nendmodule\n"
+               "module top (input [7:0] x, output [7:0] y, output [7:0] y2);\n"
+               "  bb #(.S(\"y\")) u1 (.a(x), .o(y));\n"
+               "  bb #(.W(4), .S(\"z\")) u2 (.a(x[3:0]), .o(y2));\nendmodule\n");
+    expect_widths("u1", "a", 8, "o", 8);
+    expect_widths("u2", "a", 4, "o", 8);
+}
+
+/* An instance array: the default's elements are 8 bits each (as Yosys); an overridden array
+ * slices by its own widths (Yosys slices by the default module's, spec 17 #46). */
+static void test_bbw_instance_array(void) {
+    read_clean("(* blackbox *) module bb #(parameter W = 8) (input [W-1:0] a, output [W-1:0] o);\n"
+               "endmodule\n"
+               "module top (input [31:0] x, output [31:0] y, input [31:0] x2, output [31:0] y2);\n"
+               "  bb u [3:0] (.a(x), .o(y));\n"
+               "  bb #(.W(16)) v [1:0] (.a(x2), .o(y2));\nendmodule\n");
+    expect_widths("u[0]", "a", 8, "o", 8);
+    expect_widths("u[3]", "a", 8, "o", 8);
+    expect_widths("v[0]", "a", 16, "o", 16);
+    expect_pins_are(instance_node("v[1]"), "a", (bits_of){"x2", 16}, 16);
+}
+
+/* Two parameter sets with equal values (4'd8 and 5'd8) whose port range depends on the literal's
+ * size (`~W` is as wide as W) give the port two widths: the cell's parameter cannot tell them
+ * apart, so it is a located error, not a guess. */
+static void test_bbw_equal_values_other_width(void) {
+    read_failing("(* blackbox *) module bb #(parameter W = 4'd6) (input [(~W)>>2:0] a);\n"
+                 "endmodule\n"
+                 "module top (input [7:0] x);\n"
+                 "  bb #(.W(4'd8)) u1 (.a(x[1:0]));\n  bb #(.W(5'd8)) u2 (.a(x[5:0]));\n"
+                 "endmodule\n");
+    expect_error((at_loc){1, 16}, "black box 'bb': port 'a' has different widths in parameter sets "
+                                  "with equal values");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, diag_errors(), et_log(&rs));
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_module_find_node(top(), id_of("u1")).v);
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_module_find_node(top(), id_of("u2")).v);
 }
 
-/* (a) an unrelated fixed-width port beside the parameterized ones. */
-static void test_blackbox_width_refused_unrelated_port(void) {
-    expect_width_refused(BB_TOP("input [W-1:0] a, input [7:0] k, output [W-1:0] o",
-                                "#(parameter W = 8)",
-                                "  bb #(.W(16)) u1 (.a(x), .k(kk), .o(y));\n"
-                                "  bb u2 (.a(x[7:0]), .k(kk), .o(y8));\n"),
-                         (refusal){"a", "W", {4, 16}});
+/* A connection narrower than the overridden port is extended to the port's exact width, with
+ * the resize warning (Yosys: "Resizing cell port top.u1.a from 8 bits to 16 bits."). */
+static void test_bbw_connection_resized(void) {
+    read_src(BB_TOP("input [W-1:0] a, output [W-1:0] o", "#(parameter W = 8)",
+                    "  bb #(.W(16)) u1 (.a(x[7:0]), .o(y));\n"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    expect_warning((at_loc){4, 20},
+                   "port 'a' of instance 'u1' (module 'bb') is 16 bits; the connection of 8 bits "
+                   "is extended");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, soft_warnings(), et_log(&rs));
+    expect_widths("u1", "a", 16, "o", 16);
+    expect_ir_ok();
 }
 
-/* (b) a range that is not a bare parameter. */
-static void test_blackbox_width_refused_formula(void) {
-    expect_width_refused(
-        BB_TOP("input [W:0] a, output o", "#(parameter W = 8)",
-               "  bb #(.W(16)) u1 (.a(x), .o(y[0]));\n  bb u2 (.a(x[8:0]), .o(y[1]));\n"),
-        (refusal){"a", "W", {4, 16}});
-}
-
-/* (c) two parameters with one default. */
-static void test_blackbox_width_refused_shared_default(void) {
-    expect_width_refused(BB_TOP("input [WA-1:0] a, input [2*WB-1:0] b, output o",
-                                "#(parameter WA = 8, WB = 8)",
-                                "  bb #(.WB(16)) u1 (.a(x[7:0]), .b(x), .o(y[0]));\n"
-                                "  bb u2 (.a(x[7:0]), .b(x), .o(y[1]));\n"),
-                         (refusal){"a", "WB", {4, 17}});
+/* write_rtlil carries each cell's own widths and the module of the defaults, twice the same. */
+static void test_bbw_rtlil(void) {
+    static char first[TEXT_MAX];
+    static char second[TEXT_MAX];
+    static const char text[] =
+        "(* blackbox *) module bb #(parameter W = 8) (input [W-1:0] a, output [W:0] o);\n"
+        "endmodule\n"
+        "module top (input [15:0] x, output [16:0] y, input [7:0] x8, output [8:0] y8);\n"
+        "  bb u1 (.a(x8), .o(y8));\n  bb #(.W(16)) u2 (.a(x), .o(y));\nendmodule\n";
+    for (int round = 0; round < 2; round++) {
+        read_src(text);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_pass_run(rs.design, "write_rtlil", odin3_bytes_cstr("bbw.il")));
+        slurp("bbw.il", round == 0 ? first : second, TEXT_MAX);
+        TEST_ASSERT_EQUAL_INT(0, remove("bbw.il"));
+        et_free(&rs);
+        memset(&rs, 0, sizeof rs);
+    }
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    TEST_ASSERT_NOT_NULL(strstr(first, "cell \\bb \\u2"));
+    TEST_ASSERT_NOT_NULL(strstr(first, "connect \\o \\y\n"));
+    TEST_ASSERT_NOT_NULL(strstr(first, "connect \\o \\y8\n"));
 }
 
 /* An override that does not evaluate is reported, not read as "not overridden". */
@@ -1343,8 +1450,11 @@ static void fresh_quiet_design(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_log_set_level(ODIN3_LOG_ERROR));
 }
 
+static uint32_t g_sweep_modules = 3; /* module_end of a complete read of the swept source */
+
 static bool read_complete(void) {
-    return odin3_design_module_end(rs.design) == 3 && odin3_design_top(rs.design).v != 0;
+    return odin3_design_module_end(rs.design) == g_sweep_modules &&
+           odin3_design_top(rs.design).v != 0;
 }
 
 /* One run of the whole read with the limit-th allocation failing. */
@@ -1356,8 +1466,11 @@ static odin3_status read_failing_at(long limit) {
     odin3_util_set_alloc_fail_after(-1);
     /* PARSE is only ever 2C's missing_file (an injected failure in the preprocessor reads as a
      * missing file, the open 2C item); any other PARSE is stage 2 returning a user error. */
-    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
-                     (st == ODIN3_ERR_PARSE && g_saw_missing_file));
+    char why[64];
+    TEST_ASSERT_TRUE(snprintf(why, sizeof why, "limit %ld status %d", limit, (int)st) > 0);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY ||
+                                 (st == ODIN3_ERR_PARSE && g_saw_missing_file),
+                             why);
     odin3_check_opts full = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(rs.design, full));
     return st;
@@ -1365,10 +1478,11 @@ static odin3_status read_failing_at(long limit) {
 
 /* Every allocation of the read fails in turn: NO_MEMORY, the IR check passes, no leak (ASan), until
  * the read completes OOM_SETTLE runs in a row. */
-static void test_oom_sweep(void) {
-    et_src src = {"t.v", k_sweep};
+static uint32_t oom_sweep_of(const char *text, uint32_t modules) {
+    et_src src = {"t.v", text};
     et_req req = {&src, 1, NULL, NULL, NULL};
     et_setup(&req, &rs);
+    g_sweep_modules = modules;
     uint32_t failures = 0;
     uint32_t settled = 0;
     for (long limit = 0; limit < OOM_LIMIT && settled < OOM_SETTLE; limit++) {
@@ -1376,8 +1490,30 @@ static void test_oom_sweep(void) {
         failures += st == ODIN3_ERR_NO_MEMORY ? 1U : 0U;
         settled = st == ODIN3_OK && read_complete() ? settled + 1 : 0;
     }
+    g_sweep_modules = 3;
     TEST_ASSERT_EQUAL_UINT32(OOM_SETTLE, settled);
-    TEST_ASSERT_GREATER_THAN_UINT32(300, failures);
+    return failures;
+}
+
+static void test_oom_sweep(void) {
+    TEST_ASSERT_GREATER_THAN_UINT32(300, oom_sweep_of(k_sweep, 3));
+}
+
+/* A black-box-heavy source: parameter sets (carriers, a table, width rules), an array, a string
+ * parameter and an implicit-width formula, all read under every allocation failure. */
+static const char k_bbsweep[] =
+    "(* blackbox *) module bb #(parameter W = 4, parameter S = \"x\") (input [W-1:0] a,\n"
+    "                                                       output [2*W-1:0] o, input [3:0] k);\n"
+    "endmodule\n"
+    "module top (input [7:0] x, output [15:0] y, input [3:0] k, output [7:0] z,\n"
+    "            output [3:0] w, output [31:0] y2, input [7:0] k2);\n"
+    "  bb #(.W(8)) u1 (.a(x), .o(y), .k(k));\n"
+    "  bb #(.W(2), .S(\"y\")) u2 (.a(x[1:0]), .o(w), .k(k));\n"
+    "  bb u3 (.a(k), .o(z), .k(k));\n"
+    "  bb #(.W(8)) u4 [1:0] (.a({x, x}), .o(y2), .k(k2));\nendmodule\n";
+
+static void test_oom_sweep_blackbox_sets(void) {
+    TEST_ASSERT_GREATER_THAN_UINT32(300, oom_sweep_of(k_bbsweep, 2));
 }
 
 /* Every test, in order (an X-macro keeps main short). */
@@ -1424,9 +1560,15 @@ static void test_oom_sweep(void) {
     X(test_cell_type_given_parameter)                                                              \
     X(test_blackbox_base_name)                                                                     \
     X(test_blackbox_override_exact_cases)                                                          \
-    X(test_blackbox_width_refused_unrelated_port)                                                  \
-    X(test_blackbox_width_refused_formula)                                                         \
-    X(test_blackbox_width_refused_shared_default)                                                  \
+    X(test_bbw_range_param)                                                                        \
+    X(test_bbw_formulas_and_fixed_port)                                                            \
+    X(test_bbw_shared_default)                                                                     \
+    X(test_bbw_no_cross_talk)                                                                      \
+    X(test_bbw_string_override)                                                                    \
+    X(test_bbw_instance_array)                                                                     \
+    X(test_bbw_equal_values_other_width)                                                           \
+    X(test_bbw_connection_resized)                                                                 \
+    X(test_bbw_rtlil)                                                                              \
     X(test_blackbox_override_unevaluable)                                                          \
     X(test_blackbox_reuses_registered_type)                                                        \
     X(test_blackbox_mismatch)                                                                      \
@@ -1443,7 +1585,8 @@ static void test_oom_sweep(void) {
     X(test_claim_api_refuses_wired)                                                                \
     X(test_rich_design)                                                                            \
     X(test_deterministic)                                                                          \
-    X(test_oom_sweep)
+    X(test_oom_sweep)                                                                              \
+    X(test_oom_sweep_blackbox_sets)
 
 #define RUN_ONE(name) RUN_TEST(name);
 

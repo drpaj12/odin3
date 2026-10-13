@@ -525,6 +525,7 @@ typedef struct odin3_elab1_port {
  */
 typedef struct odin3_elab1_bbox {
     uint32_t name;
+    uint32_t base; /* a carrier (v4.18): the definition's name; 0 for the definition's own */
     uint32_t spec;
     bool implicit;
     odin3_ast_id at;
@@ -598,6 +599,17 @@ odin3_status odin3_elab1_celltype_params(odin3_elab1 *e1, const odin3_elab_inst 
  * diagnostic; ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_elab1_blackbox(odin3_elab1 *e1, uint32_t spec);
+
+/*
+ * After every specialization (spec v4.18, Peter decision 3): each `(* blackbox *)` specialization
+ * with other than the default values, in queue order, written as a carrier MODULE: a ports-only
+ * black-box MODULE named as a module's specialization (`bb$W=16`) whose `blackbox` ATTR holds the
+ * definition's name as a STRING, with that parameter set's ports (evaluated under its values) and
+ * `PARAM_DECL` values. Stage 2 takes the widths of the INSTANTIATIONs naming the definition from
+ * them. Nothing after an error. ODIN3_OK; ODIN3_ERR_NO_MEMORY; ODIN3_ERR_PARSE after the
+ * elaborated-node cap's fatal error.
+ */
+odin3_status odin3_elab1_write_carriers(odin3_elab1 *e1);
 
 /*
  * After every specialization (EL-4 v4.8): each implicit black box, in first-use order, written as
@@ -717,6 +729,8 @@ typedef struct odin3_elab1_defx {
 typedef struct odin3_elab1_spec {
     uint32_t def;
     uint32_t name; /* strtab ID */
+    uint32_t
+        carrier; /* a `(* blackbox *)` set other than the defaults': its carrier MODULE's name */
     uint32_t depth;
     uint64_t hash;
     uint32_t next_same_hash; /* + 1, 0 = none */
