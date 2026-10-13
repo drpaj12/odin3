@@ -3,9 +3,13 @@ the targets, the miss report and the elab-sweep log reader."""
 
 from __future__ import annotations
 
+import contextlib
+import io
 import os
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 
 import bench_proc_report as bpr
 
@@ -34,11 +38,14 @@ class ParseTest(unittest.TestCase):
 
 
 class TargetsTest(unittest.TestCase):
-    def verdicts(self, rows: dict[str, dict[str, str]]) -> dict[str, str]:
-        return {t.name: t.verdict for t in bpr.proc_targets(rows)}
+    def verdicts(self, rows: dict[str, dict[str, str]],
+                 expected: frozenset[str] = frozenset()) -> dict[str, str]:
+        return {t.name: t.verdict for t in bpr.proc_targets(rows, expected)}
 
-    def test_empty_run_is_all_na(self) -> None:
-        self.assertEqual(set(self.verdicts({}).values()), {"n/a"})
+    def test_empty_run_is_all_missed(self) -> None:
+        self.assertEqual(set(self.verdicts({}).values()), {"MISSED"})
+        listed = frozenset({"mcml.v", "koios/lenet.v"})
+        self.assertEqual(self.verdicts({}, listed)["lenet.v proc --noopt"], "n/a")
 
     def test_mcml_limit(self) -> None:
         self.assertEqual(self.verdicts({"mcml.v": row(noopt_ms="199.9")})["mcml.v proc --noopt"],
@@ -64,15 +71,17 @@ class TargetsTest(unittest.TestCase):
                          "MISSED")
         del vtr["v0.v"]
         self.assertEqual(self.verdicts(vtr)[f"the {bpr.VTR_FILES} VTR files, total proc --noopt"],
-                         "n/a")
+                         "MISSED")
 
     def test_koios_set(self) -> None:
-        count = bpr.KOIOS_FILES - bpr.KOIOS_NO_MODULE
-        koios = {f"koios/k{i}.v": row(noopt_ms="100") for i in range(count)}
-        name = next(t.name for t in bpr.proc_targets(koios) if t.name.startswith("the 33"))
-        self.assertEqual(self.verdicts(koios)[name], "ok")
-        koios["koios/k0.v"] = row(noopt_ms="5200")
+        koios = {f"koios/k{i}.v": row(noopt_ms="100") for i in range(bpr.KOIOS_FILES - 3)}
+        listed = frozenset(f"koios/x{i}.v" for i in range(3))
+        name = next(t.name for t in bpr.proc_targets(koios, listed) if t.name.startswith("the 33"))
+        self.assertEqual(self.verdicts(koios, listed)[name], "ok")
+        # The same 30 rows with nothing listed is a short set, not a pass.
         self.assertEqual(self.verdicts(koios)[name], "MISSED")
+        koios["koios/k0.v"] = row(noopt_ms="5200")
+        self.assertEqual(self.verdicts(koios, listed)[name], "MISSED")
 
 
 class ReportTest(unittest.TestCase):
@@ -87,9 +96,34 @@ class ReportTest(unittest.TestCase):
         self.assertIn("largest byte-budget share of noopt_ms: mcml.v 10.0%", text)
 
     def test_pass_has_no_terms_for_mcml(self) -> None:
-        lines, missed = bpr.report("proc", {"mcml.v": row(noopt_ms="1")})
+        rows = {"mcml.v": row(noopt_ms="1"), "koios/lenet.v": row(noopt_ms="1")}
+        rows |= {f"v{i}.v": row(noopt_ms="1") for i in range(bpr.VTR_FILES - 1)}
+        rows |= {f"koios/k{i}.v": row(noopt_ms="1") for i in range(bpr.KOIOS_FILES - 1)}
+        lines, missed = bpr.report("proc", rows)
         self.assertFalse(missed)
         self.assertNotIn("estimate terms of mcml.v", "\n".join(lines))
+
+    def test_partial_data_fails(self) -> None:
+        _, missed = bpr.report("proc", {"mcml.v": row(noopt_ms="1")})
+        self.assertTrue(missed)  # lenet.v and both sets are absent
+
+    def test_short_row_fails(self) -> None:
+        short = row(noopt_ms="1")
+        del short["rss_kib"]
+        lines, missed = bpr.report("proc", {"mcml.v": short})
+        self.assertTrue(missed)
+        self.assertIn("missing columns: rss_kib", "\n".join(lines))
+
+    def test_main_exit_code_and_expect_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "log"
+            log.write_text("ok    mcml.v (1 B, 0.1 s)\nbench: " + " ".join(
+                f"{k}={v}" for k, v in row(noopt_ms="1").items()) + "\n", "utf-8")
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(bpr.main(["report", str(log)]), 1)
+            expect = Path(tmp) / "expect.txt"
+            expect.write_text("# c\nkoios/lenet.v [n] why\n", "utf-8")
+            self.assertEqual(bpr.expect_paths([str(expect)]), {"koios/lenet.v"})
 
     def test_unknown_profile(self) -> None:
         with self.assertRaises(ValueError):

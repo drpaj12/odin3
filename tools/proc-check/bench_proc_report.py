@@ -9,7 +9,8 @@ line each prints after the file's verdict as ``bench: <line>``. Two forms read t
 
 ``report`` prints the targets (:func:`report`); a MISSED target makes it exit 1, followed by the
 estimate terms and step times of the files it names: a miss is investigated and reported, never
-relaxed. ``smoke`` runs ``B --one FILE`` on each file under memcap and fails (exit 1) when a run
+relaxed. A file or set the run lacks, or a row short of a column, is MISSED unless ``--expect-fail
+F`` (the sweep's list) names the file, so a partial run never passes. ``smoke`` runs ``B --one FILE`` on each file under memcap and fails (exit 1) when a run
 fails or a line lacks a column of :data:`PROC_COLUMNS`. Exit codes: 0 pass; 1 a failure; 2 usage;
 77 skipped (no memory cap possible).
 
@@ -58,7 +59,6 @@ LENET_RSS_BYTES = 3 * 10**9
 VTR_FILES = 31
 VTR_MS = 500.0
 KOIOS_FILES = 33
-KOIOS_NO_MODULE = 3  # the three macro-only *_include.v files have nothing to lower
 KOIOS_MS = 8000.0
 KIB = 1024
 
@@ -96,44 +96,50 @@ def _judge(name: str, value: float, limit: float, unit: str, scale: float = 1.0)
                   f"{value / scale:.3f} {unit} (target <= {limit / scale:g} {unit})")
 
 
-def _na(name: str, why: str) -> Target:
-    return Target(name, "n/a", why)
+def _absent(name: str, why: str, expected: bool) -> Target:
+    """A design the run lacks: a miss, unless the expect-fail list names it (then n/a)."""
+    return Target(name, "n/a" if expected else "MISSED", why)
 
 
-def _one_file(rows: Mapping[str, Row], rel: str, label: str, ms: float,
-              rss: int | None) -> list[Target]:
+def _one_file(rows: Mapping[str, Row], rel: str, label: str, ms: float, rss: int | None,
+              expected: frozenset[str]) -> list[Target]:
     row = rows.get(rel)
     names = [f"{label} proc --noopt"] + ([f"{label}, through proc, peak RSS"] if rss else [])
     if row is None:
-        return [_na(name, f"{rel} is not in this run") for name in names]
+        return [_absent(name, f"{rel} is not in this run", rel in expected) for name in names]
     out = [_judge(names[0], _number(row, "noopt_ms"), ms, "s", 1000.0)]
     if rss:
         out.append(_judge(names[1], _number(row, "rss_kib") * KIB, rss, "GB", 1e9))
     return out
 
 
-def _set_target(rows: Mapping[str, Row], name: str, files: Mapping[str, Row], count: int,
-                ms: float) -> Target:
-    if len(files) != count:
-        return _na(name, f"{len(files)} of the {count} files are in this run")
+def _set_target(name: str, files: Mapping[str, Row], count: int, ms: float,
+                listed: int) -> Target:
+    """``count`` files less the ``listed`` the expect-fail list names must all be timed."""
+    need = count - listed
+    if len(files) != need:
+        return Target(name, "MISSED", f"{len(files)} of the {need} files are timed "
+                      f"({count} less {listed} expected failures)")
     return _judge(name, sum(_number(row, "noopt_ms") for row in files.values()), ms, "s", 1000.0)
 
 
-def proc_targets(rows: Mapping[str, Row]) -> list[Target]:
-    """§19's table over the rows (relative path to the line's columns)."""
+def proc_targets(rows: Mapping[str, Row],
+                 expected: frozenset[str] = frozenset()) -> list[Target]:
+    """§19's table over the rows (relative path to the line's columns). A file or set the run
+    lacks is MISSED unless ``expected`` (the expect-fail list's paths) accounts for it."""
     vtr = {rel: row for rel, row in rows.items() if "/" not in rel}
     koios = {rel: row for rel, row in rows.items() if rel.startswith("koios/")}
     return [
-        *_one_file(rows, MCML, "mcml.v", MCML_MS, None),
-        *_one_file(rows, LENET, "lenet.v", LENET_MS, LENET_RSS_BYTES),
-        _set_target(rows, f"the {VTR_FILES} VTR files, total proc --noopt", vtr, VTR_FILES, VTR_MS),
-        _set_target(rows, f"the {KOIOS_FILES} Koios files ({KOIOS_NO_MODULE} are macro-only "
-                    "includes), total proc --noopt", koios, KOIOS_FILES - KOIOS_NO_MODULE,
-                    KOIOS_MS),
+        *_one_file(rows, MCML, "mcml.v", MCML_MS, None, expected),
+        *_one_file(rows, LENET, "lenet.v", LENET_MS, LENET_RSS_BYTES, expected),
+        _set_target(f"the {VTR_FILES} VTR files, total proc --noopt", vtr, VTR_FILES, VTR_MS,
+                    sum("/" not in rel for rel in expected)),
+        _set_target(f"the {KOIOS_FILES} Koios files, total proc --noopt", koios, KOIOS_FILES,
+                    KOIOS_MS, sum(rel.startswith("koios/") for rel in expected)),
     ]
 
 
-PROFILES: dict[str, Callable[[Mapping[str, Row]], list[Target]]] = {"proc": proc_targets}
+PROFILES: dict[str, Callable[..., list[Target]]] = {"proc": proc_targets}
 
 
 def _fields(row: Row, keys: Sequence[str]) -> str:
@@ -151,12 +157,17 @@ def _worst_budget(rows: Mapping[str, Row]) -> str | None:
     return None if best is None else f"{best} {share * 100:.1f}%"
 
 
-def report(profile: str, rows: Mapping[str, Row]) -> tuple[list[str], bool]:
+def report(profile: str, rows: Mapping[str, Row],
+           expected: frozenset[str] = frozenset()) -> tuple[list[str], bool]:
     """(lines to print, whether a target was missed). The estimate terms and step times of the
     files a target names follow a miss (always for lenet.v): investigated, never relaxed."""
     if profile not in PROFILES:
         raise ValueError(f"unknown bench profile {profile!r} (known: {', '.join(PROFILES)})")
-    targets = PROFILES[profile](rows)
+    short = {rel: missing_columns(row) for rel, row in rows.items() if missing_columns(row)}
+    whole = {rel: row for rel, row in rows.items() if rel not in short}
+    targets = PROFILES[profile](whole, expected)
+    targets += [Target(f"{rel} row", "MISSED", f"missing columns: {', '.join(gone)}")
+                for rel, gone in short.items()]
     lines = ["bench targets (spec 19):"]
     lines += [f"  {t.verdict:<6} {t.name}: {t.detail}" for t in targets]
     missed = any(t.verdict == "MISSED" for t in targets)
@@ -185,6 +196,16 @@ def parse_sweep_log(text: str) -> dict[str, dict[str, str]]:
         elif line.startswith("bench: ") and rel is not None:
             rows[rel] = parse_line(line[len("bench: "):])
     return rows
+
+
+def expect_paths(files: Sequence[str]) -> frozenset[str]:
+    """The relative paths an expect-fail list names (``#`` lines and blanks skipped)."""
+    out: set[str] = set()
+    for name in files:
+        for raw in Path(name).read_text("utf-8").splitlines():
+            if raw.strip() and not raw.lstrip().startswith("#"):
+                out.add(raw.split()[0])
+    return frozenset(out)
 
 
 def smoke(bench: str, files: Sequence[str], techlib: str | None, cap: int) -> int:
@@ -230,11 +251,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     sm.add_argument("files", nargs="+")
     rp = sub.add_parser("report", help="the §19 targets from an elab-sweep --bench log")
     rp.add_argument("log", help="the sweep's output (a file, or - for stdin)")
+    rp.add_argument("--expect-fail", action="append", default=[], metavar="F",
+                    help="the sweep's expect-fail list: its files may be absent from the run")
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
     try:
         if args.command == "report":
             text = sys.stdin.read() if args.log == "-" else Path(args.log).read_text("utf-8")
-            lines, missed = report("proc", parse_sweep_log(text))
+            lines, missed = report("proc", parse_sweep_log(text),
+                                   expect_paths(args.expect_fail))
             print("\n".join(lines))
             return EXIT_FAIL if missed else EXIT_OK
         cap = _parse_size(args.mem_cap)

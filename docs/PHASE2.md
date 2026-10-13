@@ -674,10 +674,13 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       `opt_expr` had merged first. The info line reports `opt_expr: K changes`.
     - **Point (g), the chunk check:** 2D-6's process generator emits one action per chunk of each
       left side and groups case temporaries by the same chunks (2D spec v4.2), and constant `I` pins
-      follow net-ID order. Outcome: no mismatch. `proc_rows` (48 rows, including `case_default`'s
-      single 8-bit `$pmux`) and the 43 lowering rows against Yosys 0.55 are identical end to end on
-      2D's real bodies, in both latch modes, and the encode round trip is the identity on them.
-      (The 2E-3 PR description did not record the outcome; recorded here.)
+      follow net-ID order. Outcome: no mismatch found. The rows' lowering (48
+      `proc_rows`, 43 against Yosys 0.55, both latch modes) is identical to Yosys's, including
+      `case_default`'s single 8-bit `$pmux`; decode-to-encode identity was not run separately on
+      2D's real bodies (the identity tests use hand-built bodies), and plan point (g)'s third
+      bullet (every body position referenced by a span, no empty span) was not checked. (The 2E-3
+      PR description did not record the outcome; reconstructed from Task 11's evidence,
+      2026-10-13.)
     - **`opt` is still 2F-5's stub**, so the sweeps and the bench run the pre-`proc` passes
       without it: `proc-diff --trio auto` falls back to `--no-trio`, and `bench_proc` reports
       `trio=partial` (`opt_expr`, `opt_clean`). The numbers below are to be repeated with the full
@@ -708,16 +711,27 @@ Order: 2A → 2B ‖ 2C → 2D → 2E ‖ 2F, with 2H growing alongside.
       Task 13, with a unit test). The set is the 64 files as one set by size, `lenet.v` included
       (Odin III's side fits the 6G slice), through `elab-sweep --bench` (which runs `B --one F`
       only, passes no top and defaults to 4G, hence `--mem-cap 6G`); `tests/proc/
-      bench_expect_fail.txt` lists the three macro-only Koios include files, which have no module.
-      `tools/proc-check/bench-proc-report report LOG` prints §19's targets from the sweep's output
-      and exits 1 on a MISSED one, with the estimate terms and step times of the files it names.
+      bench_expect_fail.txt` lists the three macro-only Koios include files (no module), the two
+      `bwave_like.fixed.*` files (ambiguous top: `bench_proc` has no `--top` and `elab-sweep
+      --bench` passes none, a 2D follow-up) and `eltwise_layer.v` and `dnnweaver.v` (the reader
+      rejects them until 2D-7b; each XPASSes then and its line goes), so 26 Koios files are timed.
+      `tools/proc-check/bench-proc-report report --expect-fail tests/proc/bench_expect_fail.txt
+      LOG` prints §19's targets from the sweep's output and exits 1 on a MISSED one, with the
+      estimate terms and step times of the files it names. A file or set missing from the log, or a
+      row short of a column, is MISSED unless the expect file lists it: partial data never passes.
+      `noopt_ms` equals `proc --noopt` run alone to within 0.1% (mcml.v, diffeq1).
+      `proc_diff_micro_lowers --also-no-trio` runs one mode only, vacuous until 2F-5.
       The full bench, from a Release build, on an idle machine (the controller):
       `ODIN3_HEAVY_OK=1 tools/heavy-run tools/elab-check/elab-sweep --odin3 build/release/odin3
       --bench build/release/bench_proc --techlib lib/vtr.o3lib --mem-cap 6G --jobs 1 --expect-fail
       tests/proc/bench_expect_fail.txt --root $VTR_ROOT/vtr_flow/benchmarks/verilog
       $VTR_ROOT/vtr_flow/benchmarks/verilog/*.v $VTR_ROOT/vtr_flow/benchmarks/verilog/koios/*.v
-      | tee LOG` and then `tools/proc-check/bench-proc-report report LOG`.
-    - **Results (§19 targets): not yet filled; the controller records the full run here, verbatim.**
+      | tee LOG` under `set -o pipefail` (elab-sweep has no `--log`; without it the sweep's exit
+      code is lost to `tee`), and then `tools/proc-check/bench-proc-report report --expect-fail
+      tests/proc/bench_expect_fail.txt LOG` .
+    - **Results (§19 targets): NOT YET FILLED; the controller records the full run here, verbatim (the
+      sweeps' summaries and the tie count too). `lenet.v` time and RSS are unmeasured; only a
+      3G-capped smoke on seven small files exists.**
       mcml.v `proc --noopt` <= 0.2 s; lenet.v `proc --noopt` <= 5 s; lenet.v through the Phase 2
       script to `proc`, peak RSS <= 3.0 GB; the 31 VTR files <= 0.5 s in total; the 33 Koios files
       <= 8 s in total. A miss is investigated with the printed terms and reported, never relaxed.
