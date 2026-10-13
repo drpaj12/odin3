@@ -32,10 +32,18 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 enum { RM_MIN_ARGS = 2, RM_MAX_ARGS = 4, RM_HEX_BITS = 4, RM_RADIX_HEX = 16, RM_PATH = 4096 };
+
+/* The largest address (and argument) taken: 2^40 words. The cursor steps by one a word, so a file
+ * under the byte cap cannot carry it anywhere near int64's end (PR 2D-6 review I3). */
+#define RM_ADDR_MAX ((int64_t)1 << 40)
+
+/* How much of the first over-wide word the warning shows. */
+enum { RM_WORD_SHOWN = 40 };
 
 /* The call being run: where it is, the file and the memory. */
 typedef struct rm_run {
@@ -52,6 +60,9 @@ typedef struct rm_run {
     bool full;     /* the cursor has left the array: the words that follow are dropped */
     uint32_t dropped;
     int64_t first_dropped; /* the address of the first of them */
+    uint32_t wide;         /* words with non-zero digits beyond the memory's width (truncated) */
+    uint32_t wide_line;    /* the line of the first of them */
+    char wide_word[RM_WORD_SHOWN + 1U];
 } rm_run;
 
 /* `bad address '@zz' in 'f' line N`, `bad word 'g' in 'f' line N`, at the call. */
@@ -100,6 +111,11 @@ static odin3_status rm_address(rm_run *rm, odin3_ast_id arg, int64_t *out) {
     if (st == ODIN3_OK && (!is_const || !odin3_cval_to_i64(&value, out))) {
         odin3_elab2_error(e2, odin3_ast_loc(e2->elab, arg),
                           "an address argument of %s is not constant", rm->task);
+        return ODIN3_ERR_PARSE;
+    }
+    if (st == ODIN3_OK && (*out > RM_ADDR_MAX || *out < -RM_ADDR_MAX)) {
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, arg),
+                          "an address argument of %s is out of range (beyond 2^40)", rm->task);
         return ODIN3_ERR_PARSE;
     }
     return st;
@@ -222,8 +238,9 @@ static uint8_t digit_bit(int dig, uint32_t pos) {
 }
 
 /* bits[0 .. width) <- the digits of token, LSB first, extended as a sized literal is; false when
- * a character is not a digit. */
-static bool word_bits(const char *token, bool hex, uint8_t *bits, uint32_t width) {
+ * a character is not a digit. *lost is set when a bit past the width is not 0 (the word is
+ * truncated: leading zeros are fine). */
+static bool word_bits(const char *token, bool hex, uint8_t *bits, uint32_t width, bool *lost) {
     size_t len = strlen(token);
     uint32_t per = hex ? RM_HEX_BITS : 1U;
     uint32_t pos = 0;
@@ -240,6 +257,8 @@ static bool word_bits(const char *token, bool hex, uint8_t *bits, uint32_t width
             top = digit_bit(dig, sub);
             if (pos < width) {
                 bits[pos] = top;
+            } else if (top != (uint8_t)ODIN3_BIT_0) {
+                *lost = true;
             }
         }
     }
@@ -294,16 +313,32 @@ typedef struct rm_line {
     uint32_t number;
 } rm_line;
 
+/* The address of an `@hex` token: hex digits only (no sign, no `0x`, no `_`), at most 2^40. A bad
+ * or oversized one is a located error, never clamped. */
+static odin3_status rm_at_address(rm_run *rm, const rm_line *line, const char *token) {
+    int64_t address = 0;
+    bool ok = token[1] != '\0';
+    for (const char *ch = token + 1; ok && *ch != '\0'; ch++) {
+        int digit = hex_value(*ch);
+        ok = digit >= 0 && address <= (RM_ADDR_MAX - digit) / RM_RADIX_HEX;
+        address = ok ? address * RM_RADIX_HEX + digit : address;
+    }
+    if (!ok) {
+        bool shaped = token[1] != '\0';
+        for (const char *ch = token + 1; shaped && *ch != '\0'; ch++) {
+            shaped = hex_value(*ch) >= 0;
+        }
+        rm_error(rm, shaped ? "address out of range (beyond 2^40)" : "bad address", token,
+                 line->number);
+        return ODIN3_ERR_PARSE;
+    }
+    rm->cursor = address;
+    return ODIN3_OK;
+}
+
 static odin3_status rm_token(rm_run *rm, const rm_line *line, const char *token, uint8_t *scratch) {
     if (token[0] == '@') {
-        char *end = NULL;
-        long address = strtol(token + 1, &end, RM_RADIX_HEX);
-        if (token[1] == '\0' || *end != '\0') {
-            rm_error(rm, "bad address", token, line->number);
-            return ODIN3_ERR_PARSE;
-        }
-        rm->cursor = address;
-        return ODIN3_OK;
+        return rm_at_address(rm, line, token);
     }
     if (rm->full) { /* past the end of the array (Yosys stops reading here): counted, not read */
         rm->first_dropped = rm->dropped == 0 ? rm->cursor : rm->first_dropped;
@@ -312,9 +347,14 @@ static odin3_status rm_token(rm_run *rm, const rm_line *line, const char *token,
         return ODIN3_OK;
     }
     const odin3_elab_mem *mem = odin3_elab2_mem_get(rm->init->e2, rm->mem);
-    if (!word_bits(token, rm->hex, scratch, mem->width)) {
+    bool lost = false;
+    if (!word_bits(token, rm->hex, scratch, mem->width, &lost)) {
         rm_error(rm, "bad word", token, line->number);
         return ODIN3_ERR_PARSE;
+    }
+    if (lost && rm->wide++ == 0) {
+        (void)snprintf(rm->wide_word, sizeof rm->wide_word, "%s", token);
+        rm->wide_line = line->number;
     }
     odin3_status st = rm_store(rm, scratch);
     rm->cursor += rm->increment;
@@ -414,6 +454,13 @@ odin3_status odin3_elab2_readmem(const odin3_elab2 *e2, odin3_ast_id call,
                          "%" PRId64 ")",
                          rm.task, rm.file, rm.dropped, rm.dropped == 1 ? "" : "s",
                          rm.first_dropped);
+    }
+    if (st == ODIN3_OK && rm.wide > 0) {
+        odin3_elab2_warn(rm.init->e2, odin3_ast_loc(e2->elab, call),
+                         "%s of '%s' truncated %u word%s wider than the memory's %u bits (the "
+                         "first, '%s', at line %u)",
+                         rm.task, rm.file, rm.wide, rm.wide == 1 ? "" : "s",
+                         odin3_elab2_mem_get(e2, rm.mem)->width, rm.wide_word, rm.wide_line);
     }
     odin3_file_bytes_free(&bytes);
     return st;

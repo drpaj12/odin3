@@ -631,6 +631,66 @@ static void test_readmem_words_past_the_end_warn(void) {
     TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
 }
 
+/* A one-line source reading the file `data` (literal text) into an 8-bit, 4-word memory. */
+static void read_literal_file(const char *data) {
+    const et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                       "  reg [7:0] m [0:3];\n"
+                                       "  initial $readmemh(\"lit.hex\", m);\n"
+                                       "  assign q = m[ra];\nendmodule\n"},
+                           {"sub/lit.hex", data}};
+    pt_read_files(srcs, 2, "sub/t.v");
+}
+
+/* PR 2D-6 review I3: an address is hex digits only and at most 2^40: a located error otherwise,
+ * never a clamp and never signed overflow (0x7fffffffffffffff + 1 under UBSan). */
+static void test_readmem_address_forms_are_checked(void) {
+    static const char *const cases[][2] = {
+        {"@7fffffffffffffff\n11\n",
+         "sub/t.v:3:11: error: address out of range (beyond 2^40) '@7fffffffffffffff' in 'lit.hex' "
+         "line 1"},
+        {"@ffffffffffffffffff\n11\n",
+         "sub/t.v:3:11: error: address out of range (beyond 2^40) '@ffffffffffffffffff' in "
+         "'lit.hex' line 1"},
+        {"11\n@-1\n22\n", "sub/t.v:3:11: error: bad address '@-1' in 'lit.hex' line 2"},
+        {"@0x2\n11\n", "sub/t.v:3:11: error: bad address '@0x2' in 'lit.hex' line 1"},
+        {"@\n11\n", "sub/t.v:3:11: error: bad address '@' in 'lit.hex' line 1"}};
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        read_literal_file(cases[i][0]);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, pt_rs.status, cases[i][0]);
+        et_expect(&pt_rs, ODIN3_LOG_ERROR, cases[i][1]);
+        tearDown();
+        setUp();
+    }
+}
+
+/* The largest address taken, 2^40, is outside the array: its words are dropped with the warning. */
+static void test_readmem_huge_but_valid_address_drops_with_a_warning(void) {
+    read_literal_file("@ffffffffff\n11\n22\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    et_expect(&pt_rs, ODIN3_LOG_WARN,
+              "sub/t.v:3:11: warning: $readmemh of 'lit.hex' dropped 2 words outside the array "
+              "(the first at address 1099511627775)");
+}
+
+/* PR 2D-6 review I4: a word wider than the memory is truncated with one warning per call; leading
+ * zeros are no loss. */
+static void test_readmem_over_wide_word_warns(void) {
+    read_literal_file("123\n0045\n0abc\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("23 45 bc xx", words_of_init());
+    et_expect(&pt_rs, ODIN3_LOG_WARN,
+              "sub/t.v:3:11: warning: $readmemh of 'lit.hex' truncated 2 words wider than the "
+              "memory's 8 bits (the first, '123', at line 1)");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
+}
+
+static void test_readmem_zero_padded_words_do_not_warn(void) {
+    read_literal_file("0012\n000034\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("12 34 xx xx", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(0, pt_soft_warnings());
+}
+
 static void test_readmem_outside_initial(void) {
     pt_read_failing("module t(input c, input [1:0] ra, output [7:0] q);\n"
                     "  reg [7:0] m [0:3];\n"
@@ -914,6 +974,10 @@ int main(void) {
     RUN_TEST(test_readmem_errors);
     RUN_TEST(test_readmem_dropped_words_warn);
     RUN_TEST(test_readmem_words_past_the_end_warn);
+    RUN_TEST(test_readmem_address_forms_are_checked);
+    RUN_TEST(test_readmem_huge_but_valid_address_drops_with_a_warning);
+    RUN_TEST(test_readmem_over_wide_word_warns);
+    RUN_TEST(test_readmem_zero_padded_words_do_not_warn);
     RUN_TEST(test_readmem_outside_initial);
     RUN_TEST(test_readmem_size_cap);
     RUN_TEST(test_inlined_task_output_counts_as_blocking);
