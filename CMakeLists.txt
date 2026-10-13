@@ -570,6 +570,11 @@ if(ODIN3_FUZZ)
     target_include_directories(fuzz_abc_script PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(fuzz_abc_script PRIVATE odin3_core odin3_flags)
     target_link_options(fuzz_abc_script PRIVATE -fsanitize=fuzzer)
+    # tests/fuzz/fuzz_elab.c: the elaborator's crash fuzzer (2D §14.5, plan Task 28).
+    add_executable(fuzz_elab tests/fuzz/fuzz_elab.c)
+    target_include_directories(fuzz_elab PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(fuzz_elab PRIVATE odin3_core odin3_flags)
+    target_link_options(fuzz_elab PRIVATE -fsanitize=fuzzer)
 endif()
 
 # --- Tests ----------------------------------------------------------------------
@@ -1436,6 +1441,34 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                              FIXTURES_REQUIRED fuzz_verilog_seeds LABELS fuzz TIMEOUT 300)
         if(_fuzz_env)
             set_tests_properties(fuzz_verilog_seed_inputs fuzz_verilog_smoke PROPERTIES
+                                 ENVIRONMENT "${_fuzz_env}")
+        endif()
+
+        # 2D §14.5 (plan Task 28): the elaborator's seeds (`elab_fuzz_seeds.py`): every
+        # tests/elab/rows file and the micros' common/ directory, smallest first, and ten
+        # generated modules (verilog_gen.py --elab), each after a mode byte (--nolatches on).
+        # fuzz_elab_seed_inputs runs each once; fuzz_elab_smoke fuzzes 10 s (-max_len 4096, the
+        # caps lowered by the harness). One worker, 2 GB RSS; long runs are local.
+        set(_fe_seeds ${PROJECT_BINARY_DIR}/fuzz_elab_seeds)
+        set(_fe_corpus ${PROJECT_BINARY_DIR}/fuzz_elab_corpus)
+        file(MAKE_DIRECTORY ${_fe_corpus})
+        add_test(NAME fuzz_elab_seeds
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/elab-check/elab_fuzz_seeds.py
+                    ${_fe_seeds} ${PROJECT_SOURCE_DIR}/tests/elab/rows
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/common --generated 10)
+        set_tests_properties(fuzz_elab_seeds PROPERTIES FIXTURES_SETUP fuzz_elab_seeds
+                             LABELS fuzz)
+        add_test(NAME fuzz_elab_seed_inputs
+            COMMAND $<TARGET_FILE:fuzz_elab> -runs=0 -timeout=60 -rss_limit_mb=2048
+                    -print_funcs=0 ${_fe_seeds})
+        add_test(NAME fuzz_elab_smoke
+            COMMAND $<TARGET_FILE:fuzz_elab> -seed=1 -max_total_time=10 -timeout=10
+                    -rss_limit_mb=2048 -max_len=4096 -print_funcs=0 -print_final_stats=1
+                    ${_fe_corpus} ${_fe_seeds})
+        set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
+                             FIXTURES_REQUIRED fuzz_elab_seeds LABELS fuzz TIMEOUT 600)
+        if(_fuzz_env)
+            set_tests_properties(fuzz_elab_seed_inputs fuzz_elab_smoke PROPERTIES
                                  ENVIRONMENT "${_fuzz_env}")
         endif()
 
